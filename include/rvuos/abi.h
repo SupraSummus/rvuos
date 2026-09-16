@@ -33,6 +33,7 @@
 #define KERR_SLOT_IN_USE  6 /* destination slot already holds a capability */
 #define KERR_OVERLAP      7 /* region overlaps a pool or an installed region */
 #define KERR_LIMIT        8 /* a fixed kernel limit was hit, such as PMP entries */
+#define KERR_STATE        9 /* the object is not in a state that allows this */
 
 /* Capability and object types. */
 #define CAP_NONE     0
@@ -42,6 +43,7 @@
 #define CAP_PROCESS  4
 #define CAP_THREAD   5
 #define CAP_DEBUG    6 /* console output and machine halt, for bring-up */
+#define CAP_NOTIFICATION 7
 
 /*
  * Rights bits.
@@ -49,6 +51,7 @@
  * CapTable: RIGHT_W to copy into or delete from the table.
  * Pool: RIGHT_W to allocate objects.
  * Process, Thread: RIGHT_W to control the object.
+ * Notification: RIGHT_W to signal, RIGHT_R to wait.
  * Debug: any right.
  * Copying a capability can only remove rights.
  */
@@ -103,7 +106,14 @@
 /*
  * Pool (RIGHT_W): allocate a kernel object.
  * a1 = object type, a2 = destination slot,
- * a3 = type specific: number of slots for CAP_CAPTABLE.
+ * a3 = type specific:
+ *   CAP_CAPTABLE  the number of slots,
+ *   CAP_PROCESS   the slot of the CapTable capability the process will use,
+ *   CAP_THREAD    the slot of the Process capability the thread will run in,
+ *   CAP_NOTIFICATION  unused.
+ * A structural parent is not checked on every use,
+ * so an object must be allocated from the same pool as its parent;
+ * CAP_PROCESS and CAP_THREAD fail with KERR_INVALID_ARG otherwise.
  */
 #define OP_POOL_ALLOC 7
 
@@ -119,6 +129,34 @@
 #define OP_PROCESS_INSTALL 8
 /* Process (RIGHT_W): clear a region slot. a1 = region slot index. */
 #define OP_PROCESS_UNINSTALL 9
+
+/*
+ * Thread (RIGHT_W): set where a stopped thread will start.
+ * a1 = program counter, a2 = stack pointer.
+ * Fails with KERR_STATE unless the thread is stopped.
+ * The kernel does not check either value:
+ * a thread that starts nowhere useful faults, which is its creator's business.
+ */
+#define OP_THREAD_CONFIGURE 12
+/*
+ * Thread (RIGHT_W): make a stopped thread runnable.
+ * It runs once the thread that started it gives up the processor.
+ * Fails with KERR_STATE unless the thread is stopped.
+ */
+#define OP_THREAD_RESUME 13
+
+/*
+ * Notification (RIGHT_W): set bits. a1 = the bits to set, which may not be zero.
+ * Never blocks. If a thread is waiting, it takes every set bit and wakes.
+ */
+#define OP_NOTIFY_SIGNAL 14
+/*
+ * Notification (RIGHT_R): take the bits that are set.
+ * Returns a1 = the bits, which is never zero, and clears them.
+ * Blocks until some bit is set;
+ * the bits are sticky, so a signal that arrives first is not lost.
+ */
+#define OP_NOTIFY_WAIT 15
 
 /*
  * Capability slots the kernel fills in the root task's table at boot.

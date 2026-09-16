@@ -9,6 +9,9 @@ Both print one `trace:` line per call from the same kernel code,
 followed by a terminal line: `user fault` when the driver finishes
 with its breakpoint or the records unmapped it,
 `user halt with code` when a record halted the machine,
+`no runnable thread` when every thread of the driver blocked,
+`untraced thread` when the records started a thread
+whose code the host cannot follow,
 or `invariant violated`.
 The traces must match exactly.
 """
@@ -29,7 +32,13 @@ RECORD_SIZE = 16
 MAX_RECORDS = 256
 TIMEOUT = 20
 
-TERMINAL_PREFIXES = ("user fault", "user halt with code", "invariant violated")
+TERMINAL_PREFIXES = (
+    "user fault",
+    "user halt with code",
+    "no runnable thread",
+    "untraced thread",
+    "invariant violated",
+)
 
 
 def decode(raw: bytes) -> str:

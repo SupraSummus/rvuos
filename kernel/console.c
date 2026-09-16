@@ -10,6 +10,7 @@
  * Writing FINISHER_PASS exits with status 0;
  * writing (code << 16) | FINISHER_FAIL exits with that code.
  * Codes: 1 kernel panic, 3 invariant violated, 4 user fault,
+ * 5 no runnable thread, 6 a thread the host build cannot follow,
  * anything else is what the root task asked for.
  */
 #define SIFIVE_TEST_BASE 0x100000u

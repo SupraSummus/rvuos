@@ -155,9 +155,12 @@ Consequences that shape the design:
   read or write anything.
   rvuos avoids the problem rather than solving it:
   system call arguments travel in registers,
-  and the only user memory the kernel touches on a process's behalf
-  is its IPC buffer,
-  which is a region the kernel already knows.
+  no operation takes a pointer,
+  and no operation moves data between processes,
+  so the kernel never dereferences an address userspace chose.
+  The one place it writes user memory at all
+  is zeroing a range that becomes a pool,
+  and that range belongs to the kernel from that moment on.
 
 ### One address space
 
@@ -169,7 +172,7 @@ so position independence costs little,
 and the root task can place processes wherever memory is free.
 
 Code normally executes in place from flash.
-Data, stacks, and IPC buffers live in SRAM.
+Data, stacks, and shared regions live in SRAM.
 A process's regions are typically:
 a read-execute code region in flash,
 a read-write data region in SRAM,
@@ -242,9 +245,8 @@ before it has created a single pool.
 | `KernelPool` | A region handed to the kernel. All other objects are allocated from pools. |
 | `CapTable` | A process's capability table. Allocated from a pool. |
 | `Process` | A protection domain: a `CapTable`, a set of region slots, and its threads. |
-| `Thread` | An execution context inside a process: registers, priority, state, IPC buffer. |
-| `Endpoint` | A synchronous rendezvous point for IPC. |
-| `Notification` | An asynchronous word of signal bits. |
+| `Thread` | An execution context inside a process: its registers and its state. |
+| `Notification` | A word of sticky signal bits. The only way a thread can stop and be started again. |
 | `Irq` | The right to receive one hardware interrupt as a notification. |
 | `Debug` | Console output and machine halt for bring-up and tests. No object. |
 
@@ -289,7 +291,7 @@ Capabilities must not dangle after a destroy.
 Each object carries a generation counter
 and each capability records the generation it was created against,
 so a stale capability can be recognised when used.
-How destroy uses that is open decision 5:
+How destroy uses that is open decision 7:
 once the pool's memory is user RAM again,
 a user can forge a header with the right generation,
 so either destroy sweeps every table for capabilities into the pool,
@@ -301,9 +303,10 @@ A capability carries a generation and is checked on every use.
 A structural pointer, such as a process to its table
 or a thread to its process, is not checked on use,
 so a structural parent must live in the same pool as its child
-or outlive it;
-the kernel will enforce the same-pool rule at allocation
-once processes and threads can be allocated.
+or outlive it.
+The kernel enforces the same-pool rule at allocation:
+a `Process` must be allocated from the pool its `CapTable` lies in,
+and a `Thread` from the pool its `Process` lies in.
 Threads queued on an endpoint or notification
 are unlinked when either side is destroyed.
 Pool destroy is not implemented yet.
@@ -335,42 +338,115 @@ the root task carves regions out of the memory it owns,
 installs them into the child's slots with the rights it chooses,
 and starts a thread at whatever entry point and stack pointer it likes.
 
-## IPC
+### Threads
 
-Not implemented yet; roadmap step 4 in `TODO.md`.
-IPC follows seL4's synchronous rendezvous model.
+A `Thread` is an execution context inside a process:
+a register frame, a state, and the process it belongs to.
+Creating one takes a `Process` capability with the write right,
+and the new thread is allocated from that process's pool,
+as the same-pool rule requires.
 
-- A thread `call`s an endpoint and blocks until a receiver takes the message
-  and replies.
-- A thread `recv`s on an endpoint and blocks until a sender arrives.
-- The receiver gets a one-shot reply capability
-  so it can answer exactly that caller.
-- Messages consist of a small number of message registers
-  passed in `a1` through `a6`,
-  plus an optional tail in the sender's IPC buffer
-  which the kernel copies into the receiver's IPC buffer.
-- Up to a small fixed number of capabilities can travel with a message.
-  The kernel copies them into the receiver's table.
+A thread is either stopped or ready.
+`OP_THREAD_CONFIGURE` sets a stopped thread's program counter
+and stack pointer, and `OP_THREAD_RESUME` makes it ready.
+The kernel validates neither value:
+it knows no executable format and no calling convention,
+so a thread that starts nowhere useful faults,
+which is its creator's business.
 
-Large payloads do not travel through IPC.
-The sender grants a `Region` and sends the capability,
-and the receiver installs it into a slot.
+A fault stops the machine, even when another thread could run.
+Telling a thread's creator instead would need somewhere to tell it,
+and nothing in the object model is that somewhere yet;
+`TODO.md` carries the item.
 
-`Notification` objects provide the asynchronous path.
-A `signal` sets bits and never blocks.
-A `wait` blocks until any bit is set and returns and clears them all.
-Interrupts arrive as signals on the notification bound to an `Irq`.
+## Communication and synchronisation
+
+Processes exchange data through memory they both have a region for,
+and say when through notifications.
+No data passes through the kernel.
+
+A `Notification` is one word of sticky bits.
+`OP_NOTIFY_SIGNAL` sets bits and never blocks;
+`OP_NOTIFY_WAIT` takes every set bit and clears them,
+blocking until there is one.
+The bits are sticky, so a signal that arrives
+before the waiter got there is not lost.
+`RIGHT_W` may signal and `RIGHT_R` may wait,
+so a driver can be given the power to announce something
+without the power to consume the announcement.
+A signal wakes one waiter, which takes every bit;
+which one, when there are several, is not promised.
+
+**Why this and not a synchronous endpoint.**
+The `A` extension gives userspace `lr.w`/`sc.w` and the `amo*` instructions,
+which are enough for a lock or a ring buffer in shared memory.
+What atomics cannot do is stop a thread:
+on one hart a spinlock is a deadlock while nothing preempts
+and a burnt time slice once something does.
+So the one service userspace cannot build for itself
+is "stop running me until someone says otherwise",
+and a notification is that service and nothing else.
+Message registers, a reply capability good for one use,
+queues of senders and receivers, and capabilities inside messages
+are all mechanism an endpoint needs and this does not.
+Handing over a capability already has an answer:
+a `CapTable` capability with `RIGHT_W`.
+
+The cost: a round trip is four system calls rather than two,
+and the kernel no longer guarantees that one answer
+reaches the thread that asked.
+Whether to revisit that is open decision 5.
+
+**A server with many clients** waits on one notification,
+not on many, because the bits are the clients.
+Each client holds the server's notification with `RIGHT_W` only,
+owns a bit, and shares a region with the server and with nobody else.
+One wake can then carry several clients' work,
+and a burst from one client costs one wake rather than one per request.
+Thirty-two clients fill the word; past that it takes
+a second notification and a second server thread,
+or a bit meaning "read the client table"
+that clients mark with an `amo*`.
+Which client owns which bit is a convention the kernel does not enforce,
+so a client can set another's bit and cost the server
+one wasted look at a ring buffer it cannot read;
+it cannot forge data or consume another client's wake.
+Putting the bits in the capability, as seL4's badges are,
+is open decision 6.
+
+Interrupts will arrive as signals on the notification bound to an `Irq`,
+which is roadmap step 6 and needs no new mechanism.
 
 ## Scheduling
 
-Not implemented yet; roadmap step 5.
+**The kernel keeps no run queue.**
+A thread's own state says whether it may run,
+and a runnable thread is found by walking the pools,
+as `pool_overlaps` and `installed_overlaps` are.
+A queue would record a second time what the state already says,
+and its order would be a scheduling policy
+with no reason to exist before priorities and the timer do.
+The walk costs what those checks already cost,
+and it is the obvious thing to replace when `Thread` gains a priority.
+
+A thread runs until it waits on a notification;
+nothing else takes the processor away from it yet.
+When it waits, the kernel walks the pools for a runnable thread.
+If there is none, no thread can ever become runnable again,
+because only a running thread can signal
+and interrupts do not exist yet,
+so the kernel says `no runnable thread` and stops the machine.
+That becomes a `wfi` when interrupts arrive.
+
+The rest of this section is the intended end state.
+
 Fixed-priority preemptive scheduling with round-robin within a priority.
 The machine timer provides the tick.
 A thread's priority is set by whoever holds its `Thread` capability
 with the control right,
 and cannot exceed the setter's own priority.
 
-Priority inversion through IPC is handled the simple way for now:
+Priority inversion through a shared server is handled the simple way:
 no priority inheritance.
 A server that must not be blocked by low-priority clients
 runs at a higher priority than all of them.
@@ -452,6 +528,12 @@ and pools are pairwise disjoint.
 A process and its table, and a thread and its process,
 lie in the same pool.
 
+**Thread state.**
+Every thread is stopped, ready, or waiting.
+A waiting thread names a live notification and nothing else does.
+The thread the kernel is running is one it could run:
+it is a live object and it is ready.
+
 **Memory safety.**
 No sequence of system calls makes the kernel read or write
 outside its own objects,
@@ -475,10 +557,17 @@ The minimised corpus is checked in under `tests/corpus`.
 and requires the replay to catch each.
 
 **QEMU** (`make test`, `make qemu-replay`).
-`make test` boots the real kernel and checks the root task's transcript,
-which ends in a deliberate fault.
+`make test` boots the real kernel and checks the root task's transcript:
+the root task builds a second process, exchanges a word with it
+through a shared region and two notifications,
+and ends in a deliberate fault.
 `make qemu-replay` boots the replay driver once per corpus input
 with the input placed in RAM by QEMU's loader.
+The driver runs two threads that take records from one cursor,
+so a record that blocks one of them leaves the kernel
+something else to run and the blocking paths are replayed too;
+the state both builds start from is in `include/rvuos/replay.h`
+rather than written out twice.
 `OP_DEBUG_TRACE` makes the kernel print one line per call
 and run the self-check after it, reading the PMP CSRs back.
 `tests/differential.py` requires the host and QEMU transcripts
@@ -487,6 +576,18 @@ The host has no instruction fetch to fault,
 so it declares the root task dead
 when its code or data is no longer mapped with the needed rights;
 that is the one place where the host models rather than executes.
+
+The same gap bounds which threads a replay may cross.
+The host can follow a thread only if it never has to guess
+what that thread's code does,
+which holds for the driver's own threads
+and not for a thread the records configured.
+So a thread carries `THREAD_UNTRACED`
+unless its program counter was set before tracing began,
+and rather than run one while tracing,
+the kernel stops the machine with `untraced thread`.
+That is a constraint verification puts on the kernel,
+and it costs nothing outside trace mode.
 
 **Hardware.**
 QEMU's PMP may differ from a real core in granularity or Smepmp behaviour.
@@ -533,7 +634,31 @@ until the maintainer decides otherwise.
    Working default: reserve none.
    Revisit if Smepmp support is added
    to protect the kernel from its own stray pointers.
-5. **Pool destroy and stale capabilities.**
+5. **Synchronous endpoints.**
+   Working default: none.
+   Shared memory and notifications carry everything,
+   for the reasons in "Communication and synchronisation".
+   Revisit when a real server with many clients exists
+   and the four system calls per round trip,
+   or the missing guarantee that one answer reaches one asker,
+   can be measured rather than guessed.
+   An `Endpoint` object would not replace notifications:
+   interrupts need those either way.
+
+6. **Badged notification capabilities.**
+   Working default: the signalling thread names the bits,
+   so a client's identity to a server is a convention
+   between the two of them and not something the kernel enforces.
+   The alternative is seL4's: the bits a capability may set
+   live in the capability, and copying it can only narrow them,
+   exactly as rights narrow.
+   That makes a client unable to speak for another
+   and fits in the second word of an object capability, which is unused.
+   It needs a way to set the mask when a capability is copied,
+   which the copy operation has no argument left for.
+   Decide before a server with mutually distrusting clients exists.
+
+7. **Pool destroy and stale capabilities.**
    Working default: none yet, destroy does not exist.
    Options: sweep every table on destroy and clear capabilities
    into the pool, which makes generations redundant;

@@ -109,7 +109,8 @@ static void check_pools(void)
             if (obj_pool(o) != p) {
                 fail("object claims another pool", at, o->pool, p->base);
             }
-            if (o->type != CAP_CAPTABLE && o->type != CAP_PROCESS && o->type != CAP_THREAD) {
+            if (o->type != CAP_CAPTABLE && o->type != CAP_PROCESS &&
+                o->type != CAP_THREAD && o->type != CAP_NOTIFICATION) {
                 fail("object has an unexpected type", at, o->type, 0);
             }
             if (o->generation == 0) {
@@ -255,6 +256,27 @@ static void check_thread(const struct thread *t)
     if (p->pool != t->hdr.pool) {
         fail("thread and its process live in different pools", v2p(t), 0, 0);
     }
+    if (t->flags & ~(uint8_t)THREAD_UNTRACED) {
+        fail("thread has unknown flags", v2p(t), t->flags, 0);
+    }
+    switch (t->state) {
+    case THREAD_STOPPED:
+    case THREAD_READY:
+        if (t->waiting_on != 0) {
+            fail("runnable thread waits on something", v2p(t), t->waiting_on, t->state);
+        }
+        break;
+    case THREAD_WAITING: {
+        struct obj_header *n = pool_find(t->waiting_on);
+        if (n == NULL || n->type != CAP_NOTIFICATION) {
+            fail("thread waits on something that is not a notification",
+                 v2p(t), t->waiting_on, 0);
+        }
+        break;
+    }
+    default:
+        fail("thread is in an unknown state", v2p(t), t->state, 0);
+    }
 }
 
 static void check_captable(const struct captable *table)
@@ -286,7 +308,8 @@ static void check_captable(const struct captable *table)
         case CAP_POOL:
         case CAP_CAPTABLE:
         case CAP_PROCESS:
-        case CAP_THREAD: {
+        case CAP_THREAD:
+        case CAP_NOTIFICATION: {
             /* Until pool destroy exists every object capability points at a live object. */
             struct obj_header *o = pool_find(c->a);
             if (o == NULL || o->type != c->type || o->generation != c->generation) {
@@ -326,6 +349,9 @@ void selfcheck_run(void)
         struct obj_header *o = pool_find(v2p(current));
         if (o == NULL || o->type != CAP_THREAD) {
             fail("current thread is not a live object", v2p(current), 0, 0);
+        }
+        if (current->state != THREAD_READY) {
+            fail("the running thread is not runnable", v2p(current), current->state, 0);
         }
         /* The CSRs must carry exactly the current process's image. */
         uint32_t addr[PMP_MAX_ENTRIES];

@@ -23,9 +23,11 @@ fail() {
 [ "$status" -eq 4 ] || fail "expected exit status 4 (user fault), got $status"
 grep -q 'rvuos: machine mode up' "$log" || fail "kernel did not boot"
 grep -q 'hello from user mode' "$log" || fail "user mode did not run"
+grep -q 'root: message ok' "$log" || fail "the child's message did not arrive"
+grep -q 'child: reply ok' "$log" || fail "the root task's answer did not arrive"
 grep -q 'user fault' "$log" || fail "PMP fault was not caught"
 # mepc's low bits move with the code layout.
-grep -q 'mcause=0x00000005 mepc=0x8010.... mtval=0x80211000' "$log" \
+grep -q 'mcause=0x00000005 mepc=0x8010.... mtval=0x80212000' "$log" \
     || fail "fault was not a load access fault on the removed region from user code"
 grep -q ': FAILED' "$log" && fail "a step failed"
 grep -q 'PMP did not stop the read' "$log" && fail "user read kernel memory"

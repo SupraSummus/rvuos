@@ -30,6 +30,9 @@ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
     table->nslots = ROOT_CAPTABLE_SLOTS;
     proc->ctable = v2p(table);
     thread->proc = v2p(proc);
+    /* The root thread is the one the kernel drops into; it never waits. */
+    thread->state = THREAD_READY;
+    thread->flags = 0;
     thread->frame.regs[REG_SP] = USER_DATA_BASE + USER_DATA_SIZE;
     thread->frame.mepc = USER_CODE_BASE;
 
