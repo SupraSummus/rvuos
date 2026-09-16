@@ -15,10 +15,9 @@
  *
  * Every object starts with obj_header and lives inside a pool.
  * Objects are never freed individually;
- * a pool is destroyed as a whole and takes its objects with it.
- * The generation counter lets a capability detect
- * that the object it pointed to has been destroyed
- * and the memory reused.
+ * a pool is destroyed as a whole, and the destroy clears every capability
+ * that named an object in it, so nothing survives to dangle.
+ * See DESIGN.md, "Kernel pools and revocation".
  *
  * Objects link to each other by physical address, never by pointer,
  * so their layout is the same in the host build as on the target
@@ -27,8 +26,7 @@
  */
 struct obj_header {
     uint8_t type;       /* CAP_* */
-    uint8_t pad;
-    uint16_t generation;
+    uint8_t pad[3];
     paddr_t pool;
 };
 
@@ -36,13 +34,12 @@ struct obj_header {
  * A capability slot.
  * For CAP_REGION the slot is self-contained:
  * a is the base address and b the size, and there is no object.
- * For every other type a is the object's physical address
- * and generation must match the object's.
+ * For every other type a is the object's physical address.
  */
 struct cap {
     uint8_t type;
     uint8_t rights;
-    uint16_t generation;
+    uint8_t pad[2];
     uint32_t a;
     uint32_t b;
 };
@@ -68,6 +65,7 @@ struct pool {
     uint32_t size;
     uint32_t used;      /* bytes handed out, header included */
     paddr_t next;       /* global list of pools, 0 at the end */
+    uint8_t rights;     /* what the region carried; returned on destroy */
 };
 
 /* A slot with rights 0 is empty. */
@@ -143,7 +141,7 @@ struct notification {
 _Static_assert(sizeof(struct obj_header) == 8, "object layout");
 _Static_assert(sizeof(struct cap) == 12, "object layout");
 _Static_assert(sizeof(struct captable) == 12, "object layout");
-_Static_assert(sizeof(struct pool) == 24, "object layout");
+_Static_assert(sizeof(struct pool) == 28, "object layout");
 _Static_assert(sizeof(struct pmp_image) == 4 + 5 * PMP_MAX_ENTRIES, "object layout");
 _Static_assert(sizeof(struct process) == 12 + 12 * PROCESS_REGION_SLOTS + sizeof(struct pmp_image),
                "object layout");
@@ -158,10 +156,15 @@ static inline struct captable *thread_table(const struct thread *t) { return pro
 
 #define OBJ_ALIGN 8
 
-/* Correct even if a range ends at the top of the address space. */
+/* Both are correct even if a range ends at the top of the address space. */
 static inline bool ranges_overlap(uint32_t a, uint32_t asize, uint32_t b, uint32_t bsize)
 {
     return (a - b) < bsize || (b - a) < asize;
+}
+
+static inline bool range_contains(uint32_t base, uint32_t size, uint32_t at)
+{
+    return at - base < size;
 }
 
 /* RIGHT_* bits to pmpcfg permission bits. */
@@ -183,7 +186,14 @@ extern unsigned pmp_entry_count;
  * The range must be OBJ_ALIGN aligned and large enough for the descriptor.
  * The caller has already checked for overlaps.
  */
-struct pool *pool_create(paddr_t base, uint32_t size);
+struct pool *pool_create(paddr_t base, uint32_t size, uint8_t rights);
+
+/*
+ * Take a pool off the list.
+ * The caller has already cleared the capabilities into it
+ * and unblocked the threads waiting on its notifications.
+ */
+void pool_destroy(struct pool *pool);
 
 /* Allocate a zeroed object of the given type and size. NULL if exhausted. */
 void *pool_alloc(struct pool *pool, uint8_t type, size_t size);
@@ -191,12 +201,23 @@ void *pool_alloc(struct pool *pool, uint8_t type, size_t size);
 /* Byte length of an object, from its header. */
 size_t obj_size(const struct obj_header *obj);
 
-/* Walk a pool's objects. Returns NULL at the end. */
+/* Walk one pool's objects, the descriptor excluded. Returns NULL at the end. */
 struct obj_header *pool_first(struct pool *pool);
 struct obj_header *pool_next(struct pool *pool, struct obj_header *obj);
 
-/* The live object at a physical address, or NULL. Walks every pool. */
-struct obj_header *pool_find(paddr_t p);
+/*
+ * Walk every object in every pool as one sequence,
+ * pool descriptors included, since a descriptor is an object like any other.
+ * The kernel keeps no indexes, so every question it asks about objects
+ * is this walk with a filter;
+ * see DESIGN.md, "Kernel pools and revocation" and "Scheduling".
+ * An object's pool is its own header, so the walk needs no cursor.
+ */
+struct obj_header *object_first(void);
+struct obj_header *object_next(struct obj_header *obj);
+
+/* The live object at a physical address, or NULL. */
+struct obj_header *object_find(paddr_t p);
 
 /* True if [base, base + size) intersects any pool. */
 bool pool_overlaps(uint32_t base, uint32_t size);
@@ -226,7 +247,18 @@ int cap_store(struct captable *table, uint32_t slot, const struct cap *cap);
 /* Clear a slot. KERR_INVALID_CAP if out of range. */
 int cap_clear(struct captable *table, uint32_t slot);
 
-/* Build a capability to an object, with its current generation. */
+/*
+ * Clear every capability, in every table, naming an object
+ * in [base, base + size).
+ * This is what a pool destroy revokes with,
+ * and it is exact because every capability lives in a CapTable,
+ * every CapTable is an object in a pool, and every pool is on the list.
+ * Region capabilities name no object and are left alone;
+ * see DESIGN.md, open decision 7.
+ */
+void cap_revoke_range(uint32_t base, uint32_t size);
+
+/* Build a capability to an object. */
 struct cap cap_to_object(struct obj_header *obj, uint8_t rights);
 
 /* Build a region capability. */
@@ -251,6 +283,12 @@ void sched_run_next(void);
 
 /* The first thread blocked on a notification, or NULL. */
 struct thread *sched_waiter(paddr_t notification);
+
+/*
+ * Wake every thread waiting on a notification in [base, base + size)
+ * with KERR_INVALID_CAP and no bits, because the object is gone.
+ */
+void sched_unblock_range(uint32_t base, uint32_t size);
 
 /* process.c */
 

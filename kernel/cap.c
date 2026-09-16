@@ -13,13 +13,13 @@ int cap_lookup(struct captable *table, uint32_t slot, struct cap *out)
     if (c.type == CAP_NONE) {
         return KERR_INVALID_CAP;
     }
-    if (c.type != CAP_REGION && c.type != CAP_DEBUG) {
-        struct obj_header *obj = cap_object(&c);
-        if (obj->type != c.type || obj->generation != c.generation) {
-            /* The object died; drop the stale slot while we are here. */
-            table->slots[slot].type = CAP_NONE;
-            return KERR_INVALID_CAP;
-        }
+    /*
+     * A destroy clears the slots naming what it takes, so this never fires.
+     * It costs one load and stops a hole in that sweep
+     * from becoming a cast of user memory to a kernel object.
+     */
+    if (c.type != CAP_REGION && c.type != CAP_DEBUG && cap_object(&c)->type != c.type) {
+        return KERR_INVALID_CAP;
     }
     *out = c;
     return KERR_OK;
@@ -70,12 +70,30 @@ int cap_clear(struct captable *table, uint32_t slot)
     return KERR_OK;
 }
 
+void cap_revoke_range(uint32_t base, uint32_t size)
+{
+    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
+        if (o->type != CAP_CAPTABLE) {
+            continue;
+        }
+        struct captable *table = (struct captable *)o;
+        for (uint32_t i = 0; i < table->nslots; i++) {
+            struct cap *c = &table->slots[i];
+            if (c->type == CAP_NONE || c->type == CAP_REGION || c->type == CAP_DEBUG) {
+                continue;
+            }
+            if (range_contains(base, size, c->a)) {
+                c->type = CAP_NONE;
+            }
+        }
+    }
+}
+
 struct cap cap_to_object(struct obj_header *obj, uint8_t rights)
 {
     struct cap c = {
         .type = obj->type,
         .rights = rights,
-        .generation = obj->generation,
         .a = v2p(obj),
         .b = 0,
     };
@@ -87,7 +105,6 @@ struct cap cap_to_region(uint32_t base, uint32_t size, uint8_t rights)
     struct cap c = {
         .type = CAP_REGION,
         .rights = rights,
-        .generation = 0,
         .a = base,
         .b = size,
     };

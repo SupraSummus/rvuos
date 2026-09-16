@@ -41,3 +41,10 @@ mutant pmp-extra-write kernel/process.c \
     's/PMP_A_TOR | rights_to_pmp(s->rights)/PMP_A_TOR | rights_to_pmp(s->rights) | PMP_W/'
 mutant wake-keeps-waiting-on kernel/syscall.c \
     's/^    t->waiting_on = 0;$//'
+# A destroy that does not sweep leaves capabilities naming dead objects,
+# and they come back to life when the memory is rebuilt into the same type.
+mutant destroy-without-sweep kernel/cap.c \
+    's/if (o->type != CAP_CAPTABLE) {/if (o->type != CAP_CAPTABLE || 1) {/'
+# A destroy that leaves a thread blocked on a notification it took away.
+mutant destroy-keeps-waiters kernel/syscall.c \
+    's/    sched_unblock_range(base, size);//'

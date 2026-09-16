@@ -116,6 +116,17 @@
  * CAP_PROCESS and CAP_THREAD fail with KERR_INVALID_ARG otherwise.
  */
 #define OP_POOL_ALLOC 7
+/*
+ * Pool (RIGHT_W): destroy the pool, every object in it,
+ * and every capability anywhere that names one of those objects.
+ * a1 = destination slot for a Region capability to the memory,
+ * with the rights the region carried when it became a pool.
+ * The invoked slot may be the destination.
+ * Fails with KERR_STATE if the calling thread lives in the pool.
+ * Threads waiting on a notification in the pool
+ * are woken with KERR_INVALID_CAP and no bits.
+ */
+#define OP_POOL_DESTROY 16
 
 /*
  * Process (RIGHT_W): install a region into one of the process's region slots.

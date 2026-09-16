@@ -13,18 +13,34 @@ static inline uint32_t align_up(uint32_t v, uint32_t a)
     return (v + a - 1) & ~(a - 1);
 }
 
-struct pool *pool_create(paddr_t base, uint32_t size)
+struct pool *pool_create(paddr_t base, uint32_t size, uint8_t rights)
 {
     struct pool *pool = p2v(base);
     pool->hdr.type = CAP_POOL;
-    pool->hdr.generation = 1;
     pool->hdr.pool = base;
     pool->base = base;
     pool->size = size;
     pool->used = align_up(sizeof(*pool), OBJ_ALIGN);
+    pool->rights = rights;
     pool->next = pool_list ? v2p(pool_list) : 0;
     pool_list = pool;
     return pool;
+}
+
+void pool_destroy(struct pool *pool)
+{
+    /* The list is linked by physical address, so it is walked, not spliced. */
+    if (pool_list == pool) {
+        pool_list = pool_next_pool(pool);
+        return;
+    }
+    for (struct pool *p = pool_list; p != NULL; p = pool_next_pool(p)) {
+        if (pool_next_pool(p) == pool) {
+            p->next = pool->next;
+            return;
+        }
+    }
+    kpanic("pool not on the list");
 }
 
 void *pool_alloc(struct pool *pool, uint8_t type, size_t size)
@@ -37,7 +53,6 @@ void *pool_alloc(struct pool *pool, uint8_t type, size_t size)
     pool->used += len;
     /* Pool memory is zeroed on creation and never reused before destroy. */
     obj->type = type;
-    obj->generation = 1;
     obj->pool = pool->base;
     return obj;
 }
@@ -76,19 +91,27 @@ struct obj_header *pool_next(struct pool *pool, struct obj_header *obj)
     return p2v(next);
 }
 
-struct obj_header *pool_find(paddr_t p)
+struct obj_header *object_first(void)
 {
-    for (struct pool *pool = pool_list; pool != NULL; pool = pool_next_pool(pool)) {
-        if (p == pool->base) {
-            return &pool->hdr;
-        }
-        if (p < pool->base || p >= pool->base + pool->used) {
-            continue;
-        }
-        for (struct obj_header *o = pool_first(pool); o != NULL; o = pool_next(pool, o)) {
-            if (v2p(o) == p) {
-                return o;
-            }
+    return pool_list != NULL ? &pool_list->hdr : NULL;
+}
+
+struct obj_header *object_next(struct obj_header *obj)
+{
+    struct pool *pool = obj_pool(obj);
+    struct obj_header *next = pool_next(pool, obj);
+    if (next != NULL) {
+        return next;
+    }
+    struct pool *np = pool_next_pool(pool);
+    return np != NULL ? &np->hdr : NULL;
+}
+
+struct obj_header *object_find(paddr_t p)
+{
+    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
+        if (v2p(o) == p) {
+            return o;
         }
     }
     return NULL;
@@ -106,17 +129,15 @@ bool pool_overlaps(uint32_t base, uint32_t size)
 
 bool installed_overlaps(uint32_t base, uint32_t size)
 {
-    for (struct pool *p = pool_list; p != NULL; p = pool_next_pool(p)) {
-        for (struct obj_header *o = pool_first(p); o != NULL; o = pool_next(p, o)) {
-            if (o->type != CAP_PROCESS) {
-                continue;
-            }
-            struct process *proc = (struct process *)o;
-            for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
-                const struct region_slot *s = &proc->slots[i];
-                if (s->rights && ranges_overlap(base, size, s->base, s->size)) {
-                    return true;
-                }
+    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
+        if (o->type != CAP_PROCESS) {
+            continue;
+        }
+        struct process *proc = (struct process *)o;
+        for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
+            const struct region_slot *s = &proc->slots[i];
+            if (s->rights && ranges_overlap(base, size, s->base, s->size)) {
+                return true;
             }
         }
     }

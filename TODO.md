@@ -21,10 +21,12 @@ Design decisions behind these items live in `DESIGN.md`.
 6. `Irq` objects and a userspace UART driver.
    An interrupt is a signal on the notification bound to the `Irq`,
    so no new mechanism is needed.
-7. Pool destroy, after open decision 7 in `DESIGN.md`,
-   with the history-based "rights only narrow" invariant.
-   Destroying a pool must also unblock every thread
-   waiting on a notification inside it.
+7. Done: pool destroy, with the capability table sweep in `DESIGN.md`,
+   "Kernel pools and revocation".
+   Still open from that step:
+   the history-based "rights only narrow" invariant,
+   and open decision 7 in `DESIGN.md`,
+   what a destroy does to region capabilities for the range.
 8. First real board, ESP32-C6 if it passes these datasheet checks:
    PMP entry count and modes,
    how the Physical Memory Attribute unit interacts with PMP,
@@ -80,8 +82,7 @@ Design decisions behind these items live in `DESIGN.md`.
 - A thread can be started but not stopped again.
   `OP_THREAD_SUSPEND` waits for a reason to exist;
   a thread waiting on a notification cannot be taken off it today.
-- Walking every object in every pool is now written out three times,
-  in `pool_find`, `installed_overlaps` and `find_thread`,
-  and twice more inside `selfcheck.c`.
-  A flat `object_first`/`object_next` pair would collapse them;
-  a macro would not, because `break` in a nested loop means the wrong thing.
+- `object_first`/`object_next` collapsed the pool walk everywhere
+  except the tiling check in `selfcheck.c`, which verifies
+  the very link the flat walk crosses pools by.
+  Leave that one nested.
