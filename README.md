@@ -38,12 +38,20 @@ for what the tests check and why.
 ## Status
 
 The kernel boots in machine mode on QEMU `virt`
-and runs one embedded root task in user mode behind PMP.
+and runs an embedded root task in user mode behind PMP.
 The root task holds capabilities to its own objects and to free memory,
 carves regions, turns one into a kernel pool,
-allocates a capability table from it,
-and installs and removes regions in its own process,
-with the PMP image following each change.
-Processes beyond the root task, threads, IPC, and interrupts
+allocates objects from it,
+and installs and removes regions, with the PMP image following each change.
+Out of those capabilities it builds a second process,
+maps a region into both, starts a thread in it,
+and exchanges a word with it through that shared memory,
+using notifications to say when.
+
+No data passes through the kernel: the only blocking primitive
+is a notification, a word of sticky bits,
+and `DESIGN.md`, "Communication and synchronisation", says why.
+
+The timer, preemption, priorities and interrupts
 are not implemented yet;
-see the roadmap in `DESIGN.md`.
+see the roadmap in `TODO.md`.

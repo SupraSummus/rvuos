@@ -10,6 +10,9 @@
 
 _Static_assert(HOST_RAM_BASE == RAM_BASE && HOST_RAM_SIZE == RAM_SIZE,
                "host RAM must match the kernel's layout");
+_Static_assert(REPLAY_THREAD_SP > USER_DATA_BASE &&
+               REPLAY_THREAD_SP <= USER_DATA_BASE + USER_DATA_SIZE,
+               "the replay driver's second stack must lie in its data region");
 
 uint8_t *host_ram;
 jmp_buf host_halt_jmp;
@@ -124,13 +127,26 @@ struct thread *host_boot(void)
     current = root;
     process_activate(thread_process(root));
 
-    /* What the replay driver does before it turns tracing on. */
-    if (process_install(thread_process(root), INPUT_SLOT, INPUT_BASE, INPUT_SIZE, RIGHT_R) != KERR_OK) {
-        abort();
+    /*
+     * What the replay driver does before it turns tracing on,
+     * from the records both builds share; see rvuos/replay.h.
+     */
+    for (unsigned i = 0; i < REPLAY_PROLOGUE_COUNT; i++) {
+        if (host_syscall(&replay_prologue[i]) != KERR_OK) {
+            abort();
+        }
     }
     return root;
 }
 
+/*
+ * The record goes to whichever thread the kernel is running,
+ * which is what happens on the target: the driver's threads
+ * take records from one cursor.
+ * A call that blocks leaves its thread's registers alone,
+ * so the status returned here is that thread's previous one;
+ * only the setup, which never blocks, looks at it.
+ */
 uint32_t host_syscall(const struct replay_record *c)
 {
     struct trap_frame *f = &current->frame;

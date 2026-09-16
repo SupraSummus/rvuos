@@ -41,6 +41,26 @@ static inline uint32_t rv_region_info(uint32_t region_cap, uint32_t *base, uint3
     return r_a0;
 }
 
+/* OP_NOTIFY_SIGNAL: set bits, never blocking. */
+static inline uint32_t rv_signal(uint32_t ntfn_cap, uint32_t bits)
+{
+    return rv_invoke(OP_NOTIFY_SIGNAL, ntfn_cap, bits, 0, 0);
+}
+
+/* OP_NOTIFY_WAIT: block until some bit is set, then take them all. */
+static inline uint32_t rv_wait(uint32_t ntfn_cap, uint32_t *bits)
+{
+    register uint32_t r_a0 __asm__("a0") = ntfn_cap;
+    register uint32_t r_a1 __asm__("a1");
+    register uint32_t r_a7 __asm__("a7") = OP_NOTIFY_WAIT;
+    __asm__ volatile("ecall"
+                     : "+r"(r_a0), "=r"(r_a1)
+                     : "r"(r_a7)
+                     : "memory", "a2", "a3", "a4", "a5", "a6");
+    *bits = r_a1;
+    return r_a0;
+}
+
 static inline void rv_putc(uint32_t debug_cap, char c)
 {
     rv_invoke(OP_DEBUG_PUTC, debug_cap, (uint32_t)c, 0, 0);

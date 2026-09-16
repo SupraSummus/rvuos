@@ -80,8 +80,8 @@ HOST_CFLAGS := -std=c11 -O1 -g -Wall -Wextra -Werror -Wshadow \
                -DRVUOS_HOST -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -Ikernel -Ihost -Iinclude
 HOST_SAN    := -fsanitize=address,undefined -fno-sanitize-recover=all
 
-HOST_KERNEL_SRC := kernel/cap.c kernel/pool.c kernel/process.c kernel/syscall.c \
-                   kernel/boot.c kernel/selfcheck.c
+HOST_KERNEL_SRC := kernel/cap.c kernel/pool.c kernel/process.c kernel/sched.c \
+                   kernel/syscall.c kernel/boot.c kernel/selfcheck.c
 HOST_SRC        := host/shim.c
 HOST_HDR        := $(wildcard kernel/*.h host/*.h include/rvuos/*.h)
 

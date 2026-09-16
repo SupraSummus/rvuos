@@ -20,7 +20,13 @@ static void report_frame(const struct trap_frame *frame)
 
 static __attribute__((noreturn)) void handle_user_fault(struct trap_frame *frame)
 {
-    /* With one process and no scheduler there is nothing to switch to. */
+    /*
+     * Every fault stops the machine, even when another thread could run.
+     * A faulting thread has nobody to report to yet:
+     * that would be a notification the kernel signals,
+     * or a state its creator can read, and neither exists.
+     * Stopping and printing is the honest placeholder; see TODO.md.
+     */
     kputs("user fault\n");
     report_frame(frame);
     khalt(4);

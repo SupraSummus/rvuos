@@ -90,11 +90,55 @@ struct process {
     struct pmp_image pmp;
 };
 
+/*
+ * Thread states.
+ * The kernel keeps no run queue:
+ * a thread's own state says whether it may run,
+ * and the kernel finds a runnable thread by walking the pools,
+ * as the overlap checks do.
+ */
+enum {
+    THREAD_STOPPED = 0, /* created, or configured and not started */
+    THREAD_READY,       /* running, or waiting for the processor */
+    THREAD_WAITING,     /* blocked on the notification in waiting_on */
+};
+
+/*
+ * A thread whose code the host build cannot follow.
+ * The host has no instruction fetch,
+ * so a differential replay can only cross threads
+ * whose program counter was fixed before tracing began;
+ * see DESIGN.md, "Verification".
+ */
+#define THREAD_UNTRACED 0x1
+
 struct thread {
     struct obj_header hdr;
     paddr_t proc;
+    uint8_t state;
+    uint8_t flags;
+    uint16_t pad;
+    paddr_t waiting_on; /* the notification, while WAITING; 0 otherwise */
     struct trap_frame frame;
 };
+
+/*
+ * A notification is a word of sticky bits, and the only way
+ * a thread can stop running and be started again.
+ * Data does not travel through it:
+ * two processes that share a region move bytes through the region
+ * and use the notification to say when.
+ *
+ * The kernel keeps no list of waiters.
+ * A waiting thread records the notification it waits on,
+ * and a signal walks the pools to find one,
+ * as the overlap checks do.
+ */
+struct notification {
+    struct obj_header hdr;
+    uint32_t bits;
+};
+
 
 _Static_assert(sizeof(struct obj_header) == 8, "object layout");
 _Static_assert(sizeof(struct cap) == 12, "object layout");
@@ -103,7 +147,8 @@ _Static_assert(sizeof(struct pool) == 24, "object layout");
 _Static_assert(sizeof(struct pmp_image) == 4 + 5 * PMP_MAX_ENTRIES, "object layout");
 _Static_assert(sizeof(struct process) == 12 + 12 * PROCESS_REGION_SLOTS + sizeof(struct pmp_image),
                "object layout");
-_Static_assert(sizeof(struct thread) == 12 + sizeof(struct trap_frame), "object layout");
+_Static_assert(sizeof(struct thread) == 20 + sizeof(struct trap_frame), "object layout");
+_Static_assert(sizeof(struct notification) == 12, "object layout");
 
 static inline struct pool *obj_pool(const struct obj_header *o) { return p2v(o->pool); }
 static inline struct pool *pool_next_pool(const struct pool *p) { return p->next ? p2v(p->next) : NULL; }
@@ -193,8 +238,21 @@ static inline struct obj_header *cap_object(const struct cap *cap)
     return p2v(cap->a);
 }
 
-/* process.c */
+/* sched.c */
+
+/* The running thread. */
 extern struct thread *current;
+
+/*
+ * The running thread is no longer runnable.
+ * Hand the processor to a thread that is, or stop the machine.
+ */
+void sched_run_next(void);
+
+/* The first thread blocked on a notification, or NULL. */
+struct thread *sched_waiter(paddr_t notification);
+
+/* process.c */
 
 int process_install(struct process *proc, unsigned slot,
                     uint32_t base, uint32_t size, uint8_t rights);

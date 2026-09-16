@@ -7,8 +7,6 @@
 #include "object.h"
 #include "pmp.h"
 
-struct thread *current;
-
 /*
  * Rebuild the PMP image from the region slots.
  *

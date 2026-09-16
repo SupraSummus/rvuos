@@ -39,3 +39,5 @@ mutant copy-widens-rights kernel/syscall.c \
     's/src.rights &= (uint8_t)arg\[3\];/src.rights = (uint8_t)arg[3];/'
 mutant pmp-extra-write kernel/process.c \
     's/PMP_A_TOR | rights_to_pmp(s->rights)/PMP_A_TOR | rights_to_pmp(s->rights) | PMP_W/'
+mutant wake-keeps-waiting-on kernel/syscall.c \
+    's/^    t->waiting_on = 0;$//'
