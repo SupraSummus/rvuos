@@ -1,0 +1,63 @@
+#ifndef RVUOS_USER_RVUOS_H
+#define RVUOS_USER_RVUOS_H
+
+/*
+ * User-side wrappers for capability invocation.
+ * The ABI is in rvuos/abi.h.
+ */
+
+#include <stdint.h>
+
+#include "rvuos/abi.h"
+
+static inline uint32_t rv_invoke(uint32_t op, uint32_t cap,
+                                 uint32_t a1, uint32_t a2, uint32_t a3)
+{
+    register uint32_t r_a0 __asm__("a0") = cap;
+    register uint32_t r_a1 __asm__("a1") = a1;
+    register uint32_t r_a2 __asm__("a2") = a2;
+    register uint32_t r_a3 __asm__("a3") = a3;
+    register uint32_t r_a7 __asm__("a7") = op;
+    __asm__ volatile("ecall"
+                     : "+r"(r_a0), "+r"(r_a1), "+r"(r_a2), "+r"(r_a3)
+                     : "r"(r_a7)
+                     : "memory", "a4", "a5", "a6");
+    return r_a0;
+}
+
+/* OP_REGION_INFO: where a region capability points. */
+static inline uint32_t rv_region_info(uint32_t region_cap, uint32_t *base, uint32_t *size)
+{
+    register uint32_t r_a0 __asm__("a0") = region_cap;
+    register uint32_t r_a1 __asm__("a1");
+    register uint32_t r_a2 __asm__("a2");
+    register uint32_t r_a7 __asm__("a7") = OP_REGION_INFO;
+    __asm__ volatile("ecall"
+                     : "+r"(r_a0), "=r"(r_a1), "=r"(r_a2)
+                     : "r"(r_a7)
+                     : "memory", "a3", "a4", "a5", "a6");
+    *base = r_a1;
+    *size = r_a2;
+    return r_a0;
+}
+
+static inline void rv_putc(uint32_t debug_cap, char c)
+{
+    rv_invoke(OP_DEBUG_PUTC, debug_cap, (uint32_t)c, 0, 0);
+}
+
+static inline void rv_puts(uint32_t debug_cap, const char *s)
+{
+    while (*s != '\0') {
+        rv_putc(debug_cap, *s++);
+    }
+}
+
+static inline __attribute__((noreturn)) void rv_halt(uint32_t debug_cap, uint32_t code)
+{
+    rv_invoke(OP_DEBUG_HALT, debug_cap, code, 0, 0);
+    for (;;) {
+    }
+}
+
+#endif
