@@ -4,6 +4,7 @@
  * carve memory, make a pool, allocate from it,
  * build a second process out of nothing but capabilities,
  * exchange a word with it through shared memory and two notifications,
+ * destroy a pool and watch both processes lose their capabilities to it,
  * then unmap a region and fault on it.
  * Negative paths are covered by the fuzz corpus and tests/differential.py.
  */
@@ -23,6 +24,12 @@ enum {
     SLOT_CHILD_THREAD,
     SLOT_UP,   /* the child signals, the root waits */
     SLOT_DOWN, /* the root signals, the child waits */
+    SLOT_DOOMED_REGION, /* the memory of the pool that gets destroyed */
+    SLOT_DOOMED_POOL,
+    SLOT_DOOMED_NTFN,   /* a notification allocated from it */
+    SLOT_STALE,         /* a second capability to that same notification */
+    SLOT_NEW_POOL,      /* the pool built over the same memory afterwards */
+    SLOT_NEW_NTFN,
 };
 
 /*
@@ -35,6 +42,7 @@ enum {
     CHILD_SHARED,
     CHILD_UP,
     CHILD_DOWN,
+    CHILD_DOOMED, /* a notification whose pool the root task destroys */
     CHILD_TABLE_SLOTS = 8,
 };
 
@@ -48,12 +56,15 @@ enum {
 #define POOL_OFFSET  0x0000u
 #define DATA_OFFSET  0x1000u
 #define SHARED_OFFSET 0x2000u
+#define DOOMED_OFFSET 0x3000u
 #define CHUNK 0x1000u
 
 /* The protocol between the two processes. */
 #define BIT_REQUEST 0x1u
 #define BIT_REPLY   0x2u
 #define BIT_DONE    0x4u
+#define BIT_CHECK   0x8u /* look at the capability whose pool is gone */
+#define BIT_CHECKED 0x10u
 #define MAGIC 0x5eaf00du
 
 static void puts(const char *s)
@@ -96,6 +107,20 @@ static void child_main(void)
                                                         : "child: reply FAILED\n");
 
     rv_signal(CHILD_UP, BIT_DONE);
+
+    /*
+     * The root task destroys the pool the CHILD_DOOMED notification lives in
+     * while this thread is stopped here.
+     * Revocation has to reach this table, which belongs to another process
+     * and which this thread never touches.
+     */
+    rv_wait(CHILD_DOWN, &bits);
+    rv_puts(CHILD_DEBUG,
+            bits == BIT_CHECK && rv_signal(CHILD_DOOMED, BIT_REQUEST) == KERR_INVALID_CAP
+                ? "child: revoked here too\n"
+                : "child: revoked here too FAILED\n");
+    rv_signal(CHILD_UP, BIT_CHECKED);
+
     for (;;) {
         rv_wait(CHILD_DOWN, &bits);
     }
@@ -175,6 +200,54 @@ int main(void)
     expect("answer the child", rv_signal(SLOT_DOWN, BIT_REPLY));
     expect("wait for the child to finish", rv_wait(SLOT_UP, &bits));
     expect("the child is done", bits == BIT_DONE ? KERR_OK : KERR_INVALID_ARG);
+
+    /*
+     * Revocation.
+     * A capability to an object in a destroyed pool must stay dead
+     * when the same memory is rebuilt into the same kind of object.
+     * A generation counter in the object could not promise that:
+     * it dies with the memory it lives in and the rebuilt object
+     * starts counting from one.
+     * See DESIGN.md, "Kernel pools and revocation".
+     */
+    expect("carve the doomed region",
+           rv_invoke(OP_REGION_CARVE, BOOT_CAP_FREE_RAM, DOOMED_OFFSET, CHUNK,
+                     SLOT_DOOMED_REGION));
+    expect("make it a pool",
+           rv_invoke(OP_REGION_TO_POOL, SLOT_DOOMED_REGION, SLOT_DOOMED_POOL, 0, 0));
+    expect("allocate a notification in it",
+           rv_invoke(OP_POOL_ALLOC, SLOT_DOOMED_POOL, CAP_NOTIFICATION, SLOT_DOOMED_NTFN, 0));
+    expect("copy that capability aside",
+           rv_invoke(OP_CAP_COPY, BOOT_CAP_CAPTABLE, SLOT_STALE, SLOT_DOOMED_NTFN, RIGHT_ALL));
+    expect("give the child one as well",
+           rv_invoke(OP_CAP_COPY, SLOT_CHILD_TABLE, CHILD_DOOMED, SLOT_DOOMED_NTFN, RIGHT_ALL));
+    expect("the notification works while its pool lives",
+           rv_signal(SLOT_DOOMED_NTFN, BIT_REQUEST));
+
+    /* REGION_TO_POOL cleared SLOT_DOOMED_REGION, so the memory comes back there. */
+    expect("destroy the pool",
+           rv_invoke(OP_POOL_DESTROY, SLOT_DOOMED_POOL, SLOT_DOOMED_REGION, 0, 0));
+    expect("the copy is revoked",
+           rv_signal(SLOT_STALE, BIT_REQUEST) == KERR_INVALID_CAP ? KERR_OK : KERR_INVALID_ARG);
+
+    /*
+     * The new notification lands at the address the old one had,
+     * with the type the stale capability names.
+     * Nothing in that slot tells the two objects apart,
+     * so only the sweep at destroy time keeps the next line honest.
+     */
+    expect("build a pool over the same memory",
+           rv_invoke(OP_REGION_TO_POOL, SLOT_DOOMED_REGION, SLOT_NEW_POOL, 0, 0));
+    expect("allocate a notification at the same address",
+           rv_invoke(OP_POOL_ALLOC, SLOT_NEW_POOL, CAP_NOTIFICATION, SLOT_NEW_NTFN, 0));
+    expect("the stale capability did not come back",
+           rv_signal(SLOT_STALE, BIT_REQUEST) == KERR_INVALID_CAP ? KERR_OK : KERR_INVALID_ARG);
+    puts("root: revocation ok\n");
+
+    /* The sweep reached the child's table too, and the child never asked. */
+    expect("ask the child to look", rv_signal(SLOT_DOWN, BIT_CHECK));
+    expect("wait for the child's answer", rv_wait(SLOT_UP, &bits));
+    expect("the child looked", bits == BIT_CHECKED ? KERR_OK : KERR_INVALID_ARG);
 
     expect("unmap the shared region",
            rv_invoke(OP_PROCESS_UNINSTALL, BOOT_CAP_PROCESS, ROOT_SHARED_SLOT, 0, 0));

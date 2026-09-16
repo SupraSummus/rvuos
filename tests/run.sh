@@ -25,6 +25,10 @@ grep -q 'rvuos: machine mode up' "$log" || fail "kernel did not boot"
 grep -q 'hello from user mode' "$log" || fail "user mode did not run"
 grep -q 'root: message ok' "$log" || fail "the child's message did not arrive"
 grep -q 'child: reply ok' "$log" || fail "the root task's answer did not arrive"
+grep -q 'root: revocation ok' "$log" \
+    || fail "a destroyed pool did not revoke the capabilities into it"
+grep -q 'child: revoked here too' "$log" \
+    || fail "revocation did not reach the other process's table"
 grep -q 'user fault' "$log" || fail "PMP fault was not caught"
 # mepc's low bits move with the code layout.
 grep -q 'mcause=0x00000005 mepc=0x8010.... mtval=0x80212000' "$log" \

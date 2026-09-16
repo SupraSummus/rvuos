@@ -100,7 +100,12 @@ static void check_pools(void)
             }
         }
 
-        /* Objects tile the pool from the descriptor to the used mark. */
+        /*
+         * Objects tile the pool from the descriptor to the used mark.
+         * This is the one walk that does not use object_first/object_next:
+         * those cross pools by an object's own header,
+         * which is what this loop is here to check.
+         */
         paddr_t at = p->base + aligned_size(&p->hdr);
         for (struct obj_header *o = pool_first(p); o != NULL; o = pool_next(p, o)) {
             if (v2p(o) != at) {
@@ -112,9 +117,6 @@ static void check_pools(void)
             if (o->type != CAP_CAPTABLE && o->type != CAP_PROCESS &&
                 o->type != CAP_THREAD && o->type != CAP_NOTIFICATION) {
                 fail("object has an unexpected type", at, o->type, 0);
-            }
-            if (o->generation == 0) {
-                fail("object has generation zero", at, 0, 0);
             }
             at += aligned_size(o);
             if (at > p->base + p->used) {
@@ -238,7 +240,7 @@ static void check_process(const struct process *proc)
     }
     check_pmp_image(proc, proc->pmp.addr, proc->pmp.cfg, proc->pmp.count, false);
 
-    struct obj_header *t = pool_find(proc->ctable);
+    struct obj_header *t = object_find(proc->ctable);
     if (t == NULL || t->type != CAP_CAPTABLE) {
         fail("process has no live capability table", v2p(proc), proc->ctable, 0);
     }
@@ -249,7 +251,7 @@ static void check_process(const struct process *proc)
 
 static void check_thread(const struct thread *t)
 {
-    struct obj_header *p = pool_find(t->proc);
+    struct obj_header *p = object_find(t->proc);
     if (p == NULL || p->type != CAP_PROCESS) {
         fail("thread has no live process", v2p(t), t->proc, 0);
     }
@@ -267,7 +269,7 @@ static void check_thread(const struct thread *t)
         }
         break;
     case THREAD_WAITING: {
-        struct obj_header *n = pool_find(t->waiting_on);
+        struct obj_header *n = object_find(t->waiting_on);
         if (n == NULL || n->type != CAP_NOTIFICATION) {
             fail("thread waits on something that is not a notification",
                  v2p(t), t->waiting_on, 0);
@@ -311,8 +313,8 @@ static void check_captable(const struct captable *table)
         case CAP_THREAD:
         case CAP_NOTIFICATION: {
             /* Until pool destroy exists every object capability points at a live object. */
-            struct obj_header *o = pool_find(c->a);
-            if (o == NULL || o->type != c->type || o->generation != c->generation) {
+            struct obj_header *o = object_find(c->a);
+            if (o == NULL || o->type != c->type) {
                 fail("dangling object capability", v2p(table), i, c->a);
             }
             break;
@@ -327,26 +329,25 @@ void selfcheck_run(void)
 {
     check_pools();
 
-    for (struct pool *p = pool_list; p != NULL; p = pool_next_pool(p)) {
-        for (struct obj_header *o = pool_first(p); o != NULL; o = pool_next(p, o)) {
-            switch (o->type) {
-            case CAP_PROCESS:
-                check_process((struct process *)o);
-                break;
-            case CAP_THREAD:
-                check_thread((struct thread *)o);
-                break;
-            case CAP_CAPTABLE:
-                check_captable((struct captable *)o);
-                break;
-            default:
-                break;
-            }
+    /* check_pools() ran first, so the flat walk rests on checked headers. */
+    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
+        switch (o->type) {
+        case CAP_PROCESS:
+            check_process((struct process *)o);
+            break;
+        case CAP_THREAD:
+            check_thread((struct thread *)o);
+            break;
+        case CAP_CAPTABLE:
+            check_captable((struct captable *)o);
+            break;
+        default:
+            break;
         }
     }
 
     if (current != NULL) {
-        struct obj_header *o = pool_find(v2p(current));
+        struct obj_header *o = object_find(v2p(current));
         if (o == NULL || o->type != CAP_THREAD) {
             fail("current thread is not a live object", v2p(current), 0, 0);
         }

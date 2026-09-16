@@ -225,10 +225,11 @@ so that a caller can tell a programming mistake from a policy decision.
 
 #### Slot format
 
-A slot is twelve bytes: type, rights, a sixteen-bit generation,
-and two words.
-For object capabilities the first word is the object's address
-and the generation must equal the object's current generation.
+A slot is twelve bytes: type, rights, padding, and two words.
+For object capabilities the first word is the object's address.
+A slot carries nothing that has to be checked against the object,
+because a destroy clears the slots naming what it takes;
+see "Kernel pools and revocation".
 A `Region` capability has no object behind it:
 its two words are the base address and the size,
 and the rights are the memory permissions it may grant.
@@ -279,27 +280,42 @@ Objects are bump-allocated behind it, eight-byte aligned,
 never freed individually, and each records its pool.
 
 Revocation happens at pool granularity.
-Destroying a pool destroys every object inside it
-and invalidates every capability that pointed at any of them.
 This is the deliberate simplification relative to seL4:
 there is no per-object derivation tree,
 so a pool is the unit of trust.
 A process that wants to revoke one object cheaply
 allocates it from its own small pool.
 
-Capabilities must not dangle after a destroy.
-Each object carries a generation counter
-and each capability records the generation it was created against,
-so a stale capability can be recognised when used.
-How destroy uses that is open decision 7:
-once the pool's memory is user RAM again,
-a user can forge a header with the right generation,
-so either destroy sweeps every table for capabilities into the pool,
-or the memory stays quarantined until such a sweep.
+Capabilities must not dangle after a destroy,
+so a destroy clears every capability that names an object in the pool,
+by walking every capability table in every pool.
+The sweep is exact rather than best effort,
+because there is no capability the kernel cannot enumerate:
+every capability lives in a `CapTable`,
+every `CapTable` is an object in a pool,
+and every pool is on the list.
+It has the same shape as `pool_overlaps` and `installed_overlaps`
+and costs the same, once per destroy rather than once per system call.
+
+A generation counter in each object was the alternative, and it cannot work.
+The counter lives in the memory being destroyed,
+so the next pool built over that range starts its objects at one again,
+and a capability held across the destroy
+matches a fresh object of the same type at the same address;
+a user who writes the range while it is theirs
+can forge that match without waiting for the kernel to produce it.
+A single epoch in the kernel's own state would survive the destroy,
+but trades the problem for arithmetic:
+a process that owns a little memory
+can create and destroy a minimal pool in a loop
+and wrap sixteen bits in under a second.
+Slots therefore carry no generation,
+and `user/init.c` rebuilds a pool over destroyed memory
+to show that a stale capability does not come back with it.
 
 Objects reference each other in two ways,
 and destroy must cope with both.
-A capability carries a generation and is checked on every use.
+A capability names an object, and the sweep clears it.
 A structural pointer, such as a process to its table
 or a thread to its process, is not checked on use,
 so a structural parent must live in the same pool as its child
@@ -307,9 +323,21 @@ or outlive it.
 The kernel enforces the same-pool rule at allocation:
 a `Process` must be allocated from the pool its `CapTable` lies in,
 and a `Thread` from the pool its `Process` lies in.
-Threads queued on an endpoint or notification
-are unlinked when either side is destroyed.
-Pool destroy is not implemented yet.
+A thread waiting on a notification inside a destroyed pool
+is woken with `KERR_INVALID_CAP` and no bits,
+because the wait can no longer be answered.
+
+A destroy refuses with `KERR_STATE`
+when the calling thread lives in the pool.
+A thread, its process and its table share one pool by the rule above,
+so that one check is the whole of it.
+The memory is zeroed on the way out,
+because it is about to be user memory again
+and still holds other processes' capability tables.
+It comes back as a `Region` capability
+with the rights the region carried when it became a pool,
+which the pool records for that purpose,
+so a destroy cannot manufacture a right the memory never had.
 
 ### Region slots
 
@@ -517,8 +545,7 @@ For the running process the same holds for the CSRs actually written.
 Every capability in every table names either
 a region within the granted memory
 with rights no greater than the root task received for it,
-or a live kernel object of the capability's own type
-with a matching generation.
+or a live kernel object of the capability's own type.
 
 **Structural soundness.**
 Every pool's descriptor sits at its base,
@@ -658,9 +685,22 @@ until the maintainer decides otherwise.
    which the copy operation has no argument left for.
    Decide before a server with mutually distrusting clients exists.
 
-7. **Pool destroy and stale capabilities.**
-   Working default: none yet, destroy does not exist.
-   Options: sweep every table on destroy and clear capabilities
-   into the pool, which makes generations redundant;
-   or keep destroyed memory quarantined until a sweep.
-   Decide before roadmap step 7; it may remove `generation` from slots.
+7. **What a pool destroy gives back, and to whom.**
+   `REGION_TO_POOL` clears only the capability it was invoked on.
+   Copies of that region capability elsewhere survive,
+   and while the pool exists they are inert,
+   because installing one fails the overlap check against the pool.
+   After a destroy that check no longer fires and they work again,
+   so the memory returns to everyone who ever held a region capability
+   for the range,
+   rather than to whoever handed it to the kernel.
+   Working default: exactly that, because it is what the checks already do.
+   The alternative is for destroy to clear region capabilities
+   overlapping the range in the same sweep
+   that clears capabilities to the objects,
+   which leaves the memory named by nobody
+   and needs an answer to who may name it next.
+   Decide before roadmap step 7.
+   The other half of this question, what happens to capabilities
+   naming objects inside the pool, is decided
+   and lives in "Kernel pools and revocation".

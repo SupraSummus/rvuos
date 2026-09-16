@@ -98,7 +98,7 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
         }
         /* From here on the memory is the kernel's. */
         memset(p2v(base), 0, size);
-        struct pool *pool = pool_create(base, size);
+        struct pool *pool = pool_create(base, size, cap->rights);
         struct cap pc = cap_to_object(&pool->hdr, RIGHT_ALL);
         cap_clear(thread_table(t), slot);
         return cap_store(thread_table(t), arg[1], &pc);
@@ -108,11 +108,44 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
     }
 }
 
-static int op_pool(struct thread *t, const struct cap *cap,
+static int op_pool_destroy(struct thread *t, uint32_t slot, struct pool *pool,
+                           const uint32_t *arg)
+{
+    uint32_t base = pool->base;
+    uint32_t size = pool->size;
+    uint8_t rights = pool->rights;
+
+    /* A thread, its process and its table share one pool, so one check covers all three. */
+    if (t->hdr.pool == base) {
+        return KERR_STATE;
+    }
+    /* The invoked slot holds the Pool capability and the sweep will clear it. */
+    if (arg[1] != slot) {
+        int err = cap_slot_free(thread_table(t), arg[1]);
+        if (err != KERR_OK) {
+            return err;
+        }
+    }
+
+    /* Nothing below may fail: the pool is going. */
+    cap_revoke_range(base, size);
+    sched_unblock_range(base, size);
+    pool_destroy(pool);
+    /* The memory is about to be user memory again, holding other processes' tables. */
+    memset(p2v(base), 0, size);
+
+    struct cap rc = cap_to_region(base, size, rights);
+    return cap_store(thread_table(t), arg[1], &rc);
+}
+
+static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
                    uint32_t op, const uint32_t *arg)
 {
     struct pool *pool = (struct pool *)cap_object(cap);
 
+    if (op == OP_POOL_DESTROY) {
+        return op_pool_destroy(t, slot, pool, arg);
+    }
     if (op != OP_POOL_ALLOC) {
         return KERR_WRONG_TYPE;
     }
@@ -367,7 +400,7 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
         err = (cap.rights & RIGHT_W) ? op_captable(t, &cap, op, arg) : KERR_NO_RIGHTS;
         break;
     case CAP_POOL:
-        err = (cap.rights & RIGHT_W) ? op_pool(t, &cap, op, arg) : KERR_NO_RIGHTS;
+        err = (cap.rights & RIGHT_W) ? op_pool(t, slot, &cap, op, arg) : KERR_NO_RIGHTS;
         break;
     case CAP_PROCESS:
         err = (cap.rights & RIGHT_W) ? op_process(t, &cap, op, arg) : KERR_NO_RIGHTS;

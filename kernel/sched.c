@@ -20,15 +20,13 @@ struct thread *current;
  */
 static struct thread *find_thread(uint8_t state, paddr_t waiting_on)
 {
-    for (struct pool *p = pool_list; p != NULL; p = pool_next_pool(p)) {
-        for (struct obj_header *o = pool_first(p); o != NULL; o = pool_next(p, o)) {
-            if (o->type != CAP_THREAD) {
-                continue;
-            }
-            struct thread *t = (struct thread *)o;
-            if (t != current && t->state == state && t->waiting_on == waiting_on) {
-                return t;
-            }
+    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
+        if (o->type != CAP_THREAD) {
+            continue;
+        }
+        struct thread *t = (struct thread *)o;
+        if (t != current && t->state == state && t->waiting_on == waiting_on) {
+            return t;
         }
     }
     return NULL;
@@ -37,6 +35,27 @@ static struct thread *find_thread(uint8_t state, paddr_t waiting_on)
 struct thread *sched_waiter(paddr_t notification)
 {
     return find_thread(THREAD_WAITING, notification);
+}
+
+void sched_unblock_range(uint32_t base, uint32_t size)
+{
+    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
+        if (o->type != CAP_THREAD) {
+            continue;
+        }
+        struct thread *t = (struct thread *)o;
+        if (t->state != THREAD_WAITING || !range_contains(base, size, t->waiting_on)) {
+            continue;
+        }
+        /*
+         * The notification is gone, so the wait cannot be answered.
+         * The thread learns that the way every other call learns it.
+         */
+        t->frame.regs[REG_A0] = KERR_INVALID_CAP;
+        t->frame.regs[REG_A1] = 0;
+        t->waiting_on = 0;
+        t->state = THREAD_READY;
+    }
 }
 
 void sched_run_next(void)
