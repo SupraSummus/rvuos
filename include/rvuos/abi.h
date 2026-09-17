@@ -15,7 +15,7 @@
  *   a1..a3  operation arguments; a4..a6 are reserved
  * Registers on return:
  *   a0      status, one of KERR_*
- *   a1..a3  results, operation specific; unchanged unless documented
+ *   a1..a4  results, operation specific; unchanged unless documented
  * No operation takes a pointer into user memory.
  *
  * Slots that receive a new capability are always in the caller's own table.
@@ -86,12 +86,18 @@
 /* CapTable (RIGHT_W): clear a slot. a1 = slot. */
 #define OP_CAP_DELETE 4
 
-/* Region: describe it. Returns a1 = base, a2 = size, a3 = rights. */
+/*
+ * Region: describe it. Returns a1 = base, a2 = size, a3 = rights,
+ * a4 = the PMP grain in bytes, a power of two of at least 4,
+ * the same for every region on the machine.
+ * Every region's base and size are multiples of it.
+ */
 #define OP_REGION_INFO 11
 /*
  * Region: derive a smaller region with the same rights.
  * a1 = offset from the region base, a2 = size, a3 = destination slot.
- * Offset and size must be multiples of 4.
+ * Offset and size must be multiples of the PMP grain,
+ * so that the new region can be installed exactly as it is.
  */
 #define OP_REGION_CARVE 5
 /*

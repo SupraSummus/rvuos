@@ -165,10 +165,14 @@ int main(void);
 
 int main(void)
 {
-    uint32_t free_base, free_size, bits;
+    uint32_t free_base, free_size, grain, bits;
 
     puts("hello from user mode\n");
     expect("free ram info", rv_region_info(BOOT_CAP_FREE_RAM, &free_base, &free_size));
+    /* Read through a4; the offsets below are on a page and a coarser grain is another machine. */
+    expect("the layout fits the grain",
+           rv_region_grain(BOOT_CAP_FREE_RAM, &grain) == KERR_OK && CHUNK % grain == 0
+               ? KERR_OK : KERR_INVALID_ARG);
 
     expect("carve pool region",
            rv_invoke(OP_REGION_CARVE, BOOT_CAP_FREE_RAM, POOL_OFFSET, CHUNK, SLOT_POOL_REGION));

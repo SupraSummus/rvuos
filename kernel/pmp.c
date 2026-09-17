@@ -74,27 +74,59 @@ static void pmpcfg_set_byte(unsigned idx, uint8_t cfg)
     pmpcfg_write(reg, v);
 }
 
-unsigned pmp_init(void)
+static uint8_t pmpcfg_get_byte(unsigned idx)
 {
+    return (uint8_t)(pmpcfg_read(idx / 4) >> ((idx % 4) * 8));
+}
+
+unsigned pmp_entry_count;
+uint32_t pmp_grain;
+
+void pmp_init(void)
+{
+    for (unsigned reg = 0; reg < (PMP_MAX_ENTRIES + 3) / 4; reg++) {
+        pmpcfg_write(reg, 0);
+    }
+
     /*
-     * pmpaddr registers are WARL:
-     * an unimplemented entry reads back as zero after any write.
-     * Probe each one and clear it so nothing is left armed.
+     * The grain, by the specification's recipe: with the mode OFF,
+     * write all ones to pmpaddr0 and read back;
+     * the lowest set bit is G and the grain is 2^(G+2) bytes.
+     */
+    pmpaddr_write(0, 0xffffffffu);
+    uint32_t back = pmpaddr_read(0);
+    pmpaddr_write(0, 0);
+    if (back == 0) {
+        kpanic("no PMP");
+    }
+    pmp_grain = 4;
+    while ((back & 1u) == 0) {
+        back >>= 1;
+        pmp_grain <<= 1;
+    }
+
+    /*
+     * The image uses entries from zero up, so the budget ends at the first
+     * entry whose address or mode ignores a write, as RP2350's hardwired ones do.
      */
     unsigned count = 0;
     for (unsigned i = 0; i < PMP_MAX_ENTRIES; i++) {
         pmpaddr_write(i, 0xffffffffu);
-        uint32_t back = pmpaddr_read(i);
+        uint32_t ones = pmpaddr_read(i);
         pmpaddr_write(i, 0);
-        if (back == 0) {
+        uint32_t zero = pmpaddr_read(i);
+        if (ones == zero) {
+            break;
+        }
+        pmpcfg_set_byte(i, PMP_A_TOR);
+        uint8_t cfg = pmpcfg_get_byte(i);
+        pmpcfg_set_byte(i, 0);
+        if ((cfg & 0x18) != PMP_A_TOR) {
             break;
         }
         count++;
     }
-    for (unsigned reg = 0; reg < (count + 3) / 4; reg++) {
-        pmpcfg_write(reg, 0);
-    }
-    return count;
+    pmp_entry_count = count;
 }
 
 void pmp_set(unsigned idx, uint32_t addr, uint8_t cfg)
@@ -113,5 +145,5 @@ void pmp_clear(unsigned idx)
 void pmp_get(unsigned idx, uint32_t *addr, uint8_t *cfg)
 {
     *addr = pmpaddr_read(idx) << 2;
-    *cfg = (uint8_t)(pmpcfg_read(idx / 4) >> ((idx % 4) * 8));
+    *cfg = pmpcfg_get_byte(idx);
 }

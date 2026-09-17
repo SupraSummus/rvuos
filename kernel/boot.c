@@ -36,6 +36,18 @@ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
     thread->frame.regs[REG_SP] = USER_DATA_BASE + USER_DATA_SIZE;
     thread->frame.mepc = USER_CODE_BASE;
 
+    boot_granted[0] = (struct granted_range){ USER_CODE_BASE, USER_CODE_SIZE, RIGHT_R | RIGHT_X };
+    boot_granted[1] = (struct granted_range){ USER_DATA_BASE, USER_DATA_SIZE, RIGHT_R | RIGHT_W };
+    boot_granted[2] = (struct granted_range){ free_base, free_size, RIGHT_ALL };
+    boot_granted[3] = (struct granted_range){ INPUT_BASE, INPUT_SIZE, RIGHT_R };
+
+    /* The grants become region capabilities as they are, and those lie on the grain. */
+    for (unsigned i = 0; i < GRANTED_RANGES; i++) {
+        if (!grain_aligned(boot_granted[i].base, boot_granted[i].size)) {
+            kpanic("boot layout is not aligned to the PMP grain");
+        }
+    }
+
     if (process_install(proc, 0, USER_CODE_BASE, USER_CODE_SIZE, RIGHT_R | RIGHT_X) != KERR_OK ||
         process_install(proc, 1, USER_DATA_BASE, USER_DATA_SIZE, RIGHT_R | RIGHT_W) != KERR_OK) {
         kpanic("cannot install the root task's regions");
@@ -51,11 +63,6 @@ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
     table->slots[BOOT_CAP_DATA] = cap_to_region(USER_DATA_BASE, USER_DATA_SIZE, RIGHT_R | RIGHT_W);
     table->slots[BOOT_CAP_FREE_RAM] = cap_to_region(free_base, free_size, RIGHT_ALL);
     table->slots[BOOT_CAP_INPUT] = cap_to_region(INPUT_BASE, INPUT_SIZE, RIGHT_R);
-
-    boot_granted[0] = (struct granted_range){ USER_CODE_BASE, USER_CODE_SIZE, RIGHT_R | RIGHT_X };
-    boot_granted[1] = (struct granted_range){ USER_DATA_BASE, USER_DATA_SIZE, RIGHT_R | RIGHT_W };
-    boot_granted[2] = (struct granted_range){ free_base, free_size, RIGHT_ALL };
-    boot_granted[3] = (struct granted_range){ INPUT_BASE, INPUT_SIZE, RIGHT_R };
 
     return thread;
 }

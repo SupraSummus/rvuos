@@ -9,8 +9,6 @@
 #include "trap.h"
 #include "uart.h"
 
-unsigned pmp_entry_count;
-
 extern char __boot_pool_start[];
 extern char __boot_pool_end[];
 
@@ -18,9 +16,11 @@ void kmain(void)
 {
     kputs("rvuos: machine mode up\n");
 
-    pmp_entry_count = pmp_init();
+    pmp_init();
     kputs("rvuos: pmp entries ");
     kput_hex(pmp_entry_count);
+    kputs(" grain ");
+    kput_hex(pmp_grain);
     kputc('\n');
     if (pmp_entry_count < 4) {
         kpanic("need at least four PMP entries");
