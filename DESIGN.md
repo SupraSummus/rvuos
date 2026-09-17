@@ -80,8 +80,10 @@ and tracks derivations in a capability derivation tree
 so that revoking a parent destroys every child.
 That tree is most of seL4's complexity.
 rvuos keeps the "kernel never allocates" principle
-but coarsens revocation to whole memory pools,
-which removes the derivation tree entirely.
+but coarsens revocation to whole memory pools.
+The pools form a tree by who created them, one pointer per pool,
+and that replaces the derivation tree over capabilities;
+see "Kernel pools and revocation" for what it gives up.
 seL4 also assumes an MMU and page-granular mapping;
 rvuos has a handful of protection regions per process instead.
 
@@ -286,6 +288,17 @@ so a pool is the unit of trust.
 A process that wants to revoke one object cheaply
 allocates it from its own small pool.
 
+Pools form a tree.
+A pool's parent is the pool the thread that created it lives in,
+and destroying a pool destroys every pool below it.
+This is for the process that lends memory.
+Without the tree, a child that turned lent memory into a pool
+would outlive the parent's destroy of the child's pool,
+threads running and all,
+and the memory would stay inert to the parent's region capability forever,
+because a pool cannot be built over a pool.
+The boot pool is the root.
+
 Capabilities must not dangle after a destroy,
 so a destroy clears every capability that names an object in the pool,
 by walking every capability table in every pool.
@@ -328,9 +341,11 @@ is woken with `KERR_INVALID_CAP` and no bits,
 because the wait can no longer be answered.
 
 A destroy refuses with `KERR_STATE`
-when the calling thread lives in the pool.
+when the calling thread lives in the pool or in one below it.
 A thread, its process and its table share one pool by the rule above,
-so that one check is the whole of it.
+so that one check is the whole of it,
+and it is also why the boot pool can never be destroyed:
+every pool lies below it.
 The memory is zeroed on the way out,
 because it is about to be user memory again
 and still holds other processes' capability tables.
@@ -338,6 +353,38 @@ It comes back as a `Region` capability
 with the rights the region carried when it became a pool,
 which the pool records for that purpose,
 so a destroy cannot manufacture a right the memory never had.
+The pools below give their memory back to nobody in particular:
+region capabilities for it that survived the sweep
+pass the overlap check again,
+which is open decision 7's working default
+and is what puts lent memory back in the lender's hands.
+The pool list has the newest pool first and a child is newer than its parent,
+so one walk of the list meets every pool below the destroyed one before it,
+and no parent read on the way up has been zeroed yet.
+
+#### Why not a derivation tree
+
+The pool tree cannot do what seL4's can:
+revoke one region capability and everything derived from it
+while its holder goes on living.
+A parent that wants a region back from a child
+destroys the child's pool, or asks.
+
+The precise version was considered and rejected.
+Derivation links in every slot double it,
+every copy, carve, delete and pool creation maintains them,
+and a pool destroy removes whole tables of nodes
+whose parents and children live in tables that survive.
+Installed regions are derived authority too,
+so either region slots join the tree
+or a revoke uninstalls by address range,
+and two processes sharing a region could then unmap each other.
+An earlier sketch by the same author,
+`os4cm4` in the LANoT repository,
+put three such links next to the object pointer in a sixteen-byte slot
+and never got as far as maintaining them.
+One word per pool buys the property that matters:
+nothing a process creates in kernel memory outlives the process.
 
 ### Region slots
 
@@ -552,6 +599,9 @@ Every pool's descriptor sits at its base,
 its objects tile the space from the descriptor to the used mark exactly,
 each object records the pool it lies in,
 and pools are pairwise disjoint.
+Every pool but the boot pool names as its parent a live, older pool,
+so parents lead to the boot pool
+and no destroy has left a pool below it standing.
 A process and its table, and a thread and its process,
 lie in the same pool.
 
@@ -580,7 +630,7 @@ and the self-check runs after every call, under ASan and UBSan.
 Since no system call takes a pointer,
 the registers are the whole attack surface.
 The minimised corpus is checked in under `tests/corpus`.
-`make mutants` plants three bugs in the kernel one at a time
+`make mutants` plants bugs in the kernel one at a time
 and requires the replay to catch each.
 
 **QEMU** (`make test`, `make qemu-replay`).
@@ -592,8 +642,13 @@ and ends in a deliberate fault.
 with the input placed in RAM by QEMU's loader.
 The driver runs two threads that take records from one cursor,
 so a record that blocks one of them leaves the kernel
-something else to run and the blocking paths are replayed too;
-the state both builds start from is in `include/rvuos/replay.h`
+something else to run and the blocking paths are replayed too.
+The second thread has a pool, a process and a table of its own,
+so every switch between them reloads the PMP under the self-check's eye,
+and a pool it creates lies below its own,
+so a record on the first thread can destroy both at once
+and the cascade is replayed like any other path.
+The state both builds start from is in `include/rvuos/replay.h`
 rather than written out twice.
 `OP_DEBUG_TRACE` makes the kernel print one line per call
 and run the self-check after it, reading the PMP CSRs back.
@@ -694,7 +749,8 @@ until the maintainer decides otherwise.
    so the memory returns to everyone who ever held a region capability
    for the range,
    rather than to whoever handed it to the kernel.
-   Working default: exactly that, because it is what the checks already do.
+   Working default: exactly that, because it is what the checks already do,
+   and the pool tree leans on it for the memory of the pools below.
    The alternative is for destroy to clear region capabilities
    overlapping the range in the same sweep
    that clears capabilities to the objects,

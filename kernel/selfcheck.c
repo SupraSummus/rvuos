@@ -101,6 +101,26 @@ static void check_pools(void)
         }
 
         /*
+         * Pools form a tree rooted at the boot pool.
+         * A parent is named by address and not checked on use,
+         * so it must be live, and older: later on the list.
+         * Then parents lead to the last pool, which has to be the boot pool,
+         * and a destroy that spared a pool below it shows up here.
+         */
+        if ((p == boot_pool) != (p->parent == 0)) {
+            fail("only the boot pool has no parent", p->base, p->parent, 0);
+        }
+        if (p->parent != 0) {
+            struct pool *q = pool_next_pool(p);
+            while (q != NULL && v2p(q) != p->parent) {
+                q = pool_next_pool(q);
+            }
+            if (q == NULL) {
+                fail("pool's parent is not a live, older pool", p->base, p->parent, 0);
+            }
+        }
+
+        /*
          * Objects tile the pool from the descriptor to the used mark.
          * This is the one walk that does not use object_first/object_next:
          * those cross pools by an object's own header,

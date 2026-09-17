@@ -15,7 +15,7 @@ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
                                 paddr_t free_base, uint32_t free_size)
 {
     memset(p2v(boot_pool_base), 0, boot_pool_size);
-    struct pool *pool = pool_create(boot_pool_base, boot_pool_size, RIGHT_ALL);
+    struct pool *pool = pool_create(boot_pool_base, boot_pool_size, RIGHT_ALL, NULL);
     boot_pool = pool;
 
     struct captable *table = pool_alloc(

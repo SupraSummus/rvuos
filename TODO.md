@@ -22,7 +22,9 @@ Design decisions behind these items live in `DESIGN.md`.
    An interrupt is a signal on the notification bound to the `Irq`,
    so no new mechanism is needed.
 7. Done: pool destroy, with the capability table sweep in `DESIGN.md`,
-   "Kernel pools and revocation".
+   "Kernel pools and revocation",
+   and the pool tree, so that a destroy takes the pools
+   created from within the destroyed one.
    Still open from that step:
    the history-based "rights only narrow" invariant,
    and open decision 7 in `DESIGN.md`,
@@ -62,14 +64,16 @@ Design decisions behind these items live in `DESIGN.md`.
   before any board with little RAM.
 - `PROCESS_REGION_SLOTS` is fixed at 8;
   size it per process from the PMP budget when process creation exists.
-- No automated check runs across a process switch.
-  The self-check does compare the CSRs with the running process
-  after every traced call, but the only place two processes
-  take turns is the demo, which does not trace,
-  and the replay driver's two threads share one process.
-  Either trace the demo, at the price of a line per console character,
-  or give the driver's second thread its own process and table,
-  which also means copying the boot capabilities into it.
+- The replay reaches one level of the pool tree below the boot pool:
+  the driver's second thread lives there and pools it creates hang from it.
+  A thread living two levels down would be one the records configured,
+  which the host cannot follow,
+  so `KERR_STATE` for a thread destroying a pool above its own
+  is checked only by the demo in `user/init.c`.
+- The same-pool rule for a process and its table, and a thread and its process,
+  could loosen to "the same pool or one above it",
+  which the pool tree makes safe: a parent pool outlives its children.
+  A thread could then live in a pool of its own and be revoked alone.
 - A signal and a wait in one system call, the shape of seL4's `ReplyRecv`.
   Today it saves one trap per round trip and no context switch,
   because a signal does not take the processor away from the signaller.
