@@ -87,22 +87,20 @@ HOST_HDR        := $(wildcard kernel/*.h host/*.h include/rvuos/*.h)
 
 FUZZ_TIME ?= 60
 
-$(HOST_BUILD)/fuzz: $(HOST_KERNEL_SRC) $(HOST_SRC) host/fuzz.c $(HOST_HDR)
+# One harness per simulated machine:
+# the default, an eight-entry PMP budget, and a 32-byte PMP grain as RP2350 has.
+HOST_HARNESSES := $(HOST_BUILD)/fuzz $(HOST_BUILD)/fuzz-pmp8 $(HOST_BUILD)/fuzz-grain32
+$(HOST_BUILD)/fuzz-pmp8:    HOST_MACHINE := -UPMP_MAX_ENTRIES -DPMP_MAX_ENTRIES=8
+$(HOST_BUILD)/fuzz-grain32: HOST_MACHINE := -DPMP_GRAIN=32
+
+$(HOST_HARNESSES): $(HOST_KERNEL_SRC) $(HOST_SRC) host/fuzz.c $(HOST_HDR)
 	@mkdir -p $(dir $@)
-	$(HOST_CC) $(HOST_CFLAGS) $(HOST_SAN) -fsanitize=fuzzer \
+	$(HOST_CC) $(HOST_CFLAGS) $(HOST_MACHINE) $(HOST_SAN) -fsanitize=fuzzer \
 		$(HOST_KERNEL_SRC) $(HOST_SRC) host/fuzz.c -o $@
 
-# The same harness with an eight-entry PMP budget.
-$(HOST_BUILD)/fuzz-pmp8: $(HOST_KERNEL_SRC) $(HOST_SRC) host/fuzz.c $(HOST_HDR)
-	@mkdir -p $(dir $@)
-	$(HOST_CC) $(HOST_CFLAGS) -UPMP_MAX_ENTRIES -DPMP_MAX_ENTRIES=8 $(HOST_SAN) -fsanitize=fuzzer \
-		$(HOST_KERNEL_SRC) $(HOST_SRC) host/fuzz.c -o $@
-
-# Replay the checked-in corpus once, self-check after every call,
-# with the default and with an eight-entry PMP budget.
-host-test: $(HOST_BUILD)/fuzz $(HOST_BUILD)/fuzz-pmp8
-	$(HOST_BUILD)/fuzz -runs=0 tests/corpus
-	$(HOST_BUILD)/fuzz-pmp8 -runs=0 tests/corpus
+# Replay the checked-in corpus once on every harness, self-check after every call.
+host-test: $(HOST_HARNESSES)
+	for h in $^; do $$h -runs=0 tests/corpus || exit 1; done
 
 # Plant bugs in the kernel one at a time; each must fail host-test.
 mutants:

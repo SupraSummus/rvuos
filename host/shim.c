@@ -19,6 +19,14 @@ jmp_buf host_halt_jmp;
 int host_halt_code;
 bool host_verbose;
 unsigned pmp_entry_count;
+uint32_t pmp_grain;
+
+/* The simulated core's grain. QEMU has 4; the Makefile also builds with 32. */
+#ifndef PMP_GRAIN
+#define PMP_GRAIN 4
+#endif
+_Static_assert(PMP_GRAIN >= 4 && (PMP_GRAIN & (PMP_GRAIN - 1)) == 0,
+               "the PMP grain is a power of two of at least four bytes");
 
 /* The PMP CSRs as last written. */
 static uint32_t pmp_addr[PMP_MAX_ENTRIES];
@@ -68,11 +76,12 @@ void selfcheck_fail(void)
     abort();
 }
 
-unsigned pmp_init(void)
+void pmp_init(void)
 {
     memset(pmp_addr, 0, sizeof(pmp_addr));
     memset(pmp_cfg, 0, sizeof(pmp_cfg));
-    return PMP_MAX_ENTRIES;
+    pmp_entry_count = PMP_MAX_ENTRIES;
+    pmp_grain = PMP_GRAIN;
 }
 
 void pmp_set(unsigned idx, uint32_t addr, uint8_t cfg)
@@ -80,8 +89,8 @@ void pmp_set(unsigned idx, uint32_t addr, uint8_t cfg)
     if (idx >= PMP_MAX_ENTRIES) {
         kpanic("pmp_set index out of range");
     }
-    /* The CSR keeps addr >> 2, so the low two bits are lost, as on hardware. */
-    pmp_addr[idx] = addr & ~3u;
+    /* Bits below the grain are lost, as on hardware; the self-check sees the difference. */
+    pmp_addr[idx] = addr & ~(uint32_t)(PMP_GRAIN - 1);
     pmp_cfg[idx] = cfg;
 }
 
@@ -119,7 +128,7 @@ struct thread *host_boot(void)
     pool_list = NULL;
     current = NULL;
     debug_trace = false;
-    pmp_entry_count = pmp_init();
+    pmp_init();
 
     struct thread *root = boot_create_root(
         HOST_BOOT_POOL_BASE, HOST_BOOT_POOL_SIZE,

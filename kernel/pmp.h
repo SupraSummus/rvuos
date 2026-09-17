@@ -1,6 +1,7 @@
 #ifndef RVUOS_PMP_H
 #define RVUOS_PMP_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 /* pmpcfg byte fields. */
@@ -23,8 +24,27 @@
 #define PMP_MAX_ENTRIES 16
 #endif
 
-/* Probe the implemented entries. Returns how many are usable. */
-unsigned pmp_init(void);
+/* Entries the image may use: the leading run whose address and mode take a write. */
+extern unsigned pmp_entry_count;
+
+/*
+ * The grain in bytes, 2^(G+2) in the privileged specification.
+ * Hardware ignores address bits below it, so every region lies on it.
+ */
+extern uint32_t pmp_grain;
+
+/* True if a range's boundaries lie on the grain. */
+static inline bool grain_aligned(uint32_t base, uint32_t size)
+{
+    return ((base | size) & (pmp_grain - 1)) == 0;
+}
+
+/*
+ * Probe the PMP unit into the two variables above.
+ * Every PMP CSR field is WARL and may be read-only,
+ * so the only way to learn what the core has is to write and read back.
+ */
+void pmp_init(void);
 
 /*
  * Program one entry.

@@ -69,11 +69,13 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
         arg[1] = base;
         arg[2] = size;
         arg[3] = cap->rights;
+        arg[4] = pmp_grain;
         return KERR_OK;
     case OP_REGION_CARVE: {
         uint32_t off = arg[1];
         uint32_t len = arg[2];
-        if ((off | len) & 3u || len == 0 || off > size || len > size - off) {
+        /* On the grain, so that every region capability can be installed as it is. */
+        if (!grain_aligned(off, len) || len == 0 || off > size || len > size - off) {
             return KERR_INVALID_ARG;
         }
         struct cap sub = cap_to_region(base + off, len, cap->rights);
@@ -424,9 +426,9 @@ void syscall_dispatch(struct thread *t)
 {
     struct trap_frame *f = &t->frame;
     uint32_t op = f->regs[REG_A7];
-    /* a0 is the slot, a1..a3 the arguments and, on return, the results. */
-    uint32_t in[4], arg[4];
-    for (unsigned i = 0; i < 4; i++) {
+    /* a0 is the slot, a1..a3 the arguments and, on return, a1..a4 the results. */
+    uint32_t in[5], arg[5];
+    for (unsigned i = 0; i < 5; i++) {
         in[i] = arg[i] = f->regs[REG_A0 + i];
     }
 
@@ -440,7 +442,7 @@ void syscall_dispatch(struct thread *t)
     int err = dispatch(t, op, arg[0], arg);
     if (err != KERR_BLOCKED) {
         f->regs[REG_A0] = (uint32_t)err;
-        for (unsigned i = 1; i < 4; i++) {
+        for (unsigned i = 1; i < 5; i++) {
             f->regs[REG_A0 + i] = arg[i];
         }
     }

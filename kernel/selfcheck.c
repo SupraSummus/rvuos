@@ -325,6 +325,9 @@ static void check_captable(const struct captable *table)
             if (c->rights & ~granted) {
                 fail("region capability with rights beyond the grant", v2p(table), i, c->rights);
             }
+            if (!grain_aligned(c->a, c->b)) {
+                fail("region capability not on the PMP grain", v2p(table), i, c->a);
+            }
             break;
         }
         case CAP_POOL:
@@ -347,6 +350,10 @@ static void check_captable(const struct captable *table)
 
 void selfcheck_run(void)
 {
+    if (pmp_grain < 4 || (pmp_grain & (pmp_grain - 1)) != 0) {
+        fail("PMP grain is not a power of two of at least four bytes", pmp_grain, 0, 0);
+    }
+
     check_pools();
 
     /* check_pools() ran first, so the flat walk rests on checked headers. */

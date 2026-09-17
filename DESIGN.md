@@ -143,6 +143,27 @@ Consequences that shape the design:
   The kernel sorts a process's regions by base address
   so that `n` regions that touch each other cost `n + 1` entries,
   and `n` disjoint regions cost at most `2n`.
+  Not every core has TOR; see open decision 8.
+- **Every region lies on the grain.**
+  A platform rounds every PMP boundary to a grain of `2^(G+2)` bytes,
+  one value per hart, and ignores the address bits below it.
+  QEMU and the ESP32-C6 have four bytes, RP2350 has 32.
+  The kernel probes the grain at boot
+  and a `Region` capability off the grain never exists:
+  the boot layout is checked once and carving requires it,
+  so every capability can be installed exactly as it reads.
+  `OP_REGION_INFO` returns the grain, since user mode cannot read the PMP CSRs.
+- **An access must lie within one entry.**
+  The lowest-numbered entry that matches any byte of an access decides,
+  and it must match every byte or the access fails,
+  whatever either entry grants.
+  Two regions that touch share a boundary
+  that no single load, store or instruction fetch may cross;
+  the creator lays out a process so that nothing straddles one.
+- **The CSRs are WARL and may be hardwired.**
+  RP2350 fixes three entries to its ROM and peripheral ranges.
+  The probe at boot writes each entry's address and mode and reads them back,
+  and the budget is the leading run of entries that take both.
 - **Context switch cost is the PMP reload.**
   Switching processes rewrites every `pmpaddr` and `pmpcfg` in use.
   Threads within one process share regions
@@ -550,7 +571,7 @@ The image in flash contains the kernel followed by the root task.
 The kernel:
 
 1. sets up its own stack and trap vector,
-2. discovers the PMP entry count,
+2. discovers the PMP entry count and grain by writing the CSRs and reading them back,
 3. carves its own static state out of a small fixed SRAM range,
 4. constructs the root process by hand, including a `KernelPool`
    in a range the linker reserves,
@@ -590,7 +611,8 @@ For the running process the same holds for the CSRs actually written.
 
 **Authority confinement.**
 Every capability in every table names either
-a region within the granted memory
+a region within the granted memory,
+on the PMP grain,
 with rights no greater than the root task received for it,
 or a live kernel object of the capability's own type.
 
@@ -672,7 +694,10 @@ That is a constraint verification puts on the kernel,
 and it costs nothing outside trace mode.
 
 **Hardware.**
-QEMU's PMP may differ from a real core in granularity or Smepmp behaviour.
+QEMU's PMP may differ from a real core in Smepmp behaviour,
+and it has a four-byte grain, so a coarser grain is never seen there.
+The host shim models the grain instead, rounding addresses as hardware would,
+and the corpus is replayed with a four-byte and a 32-byte grain.
 The replay records are transport-agnostic
 and can be fed to a board over UART once there is one.
 
@@ -690,9 +715,11 @@ until the maintainer decides otherwise.
    `PMP_MAX_ENTRIES` caps how many the kernel uses,
    so the design can be exercised with a budget of 8 or fewer.
    Preferred candidate for real hardware is the ESP32-C6,
-   a single RV32IMAC core with user mode, PMP and about 512 KB of SRAM,
+   a single RV32IMAC core with user mode, PMP and about 512 KB of SRAM:
+   16 PMP entries, a four-byte grain, TOR and NAPOT,
+   `mtval` on every access fault,
    pending the datasheet checks listed in `TODO.md`.
-   Other candidate: RP2350 on its Hazard3 cores.
+   Other candidate: RP2350 on its Hazard3 cores, behind open decision 8.
    Cores without PMP, GD32VF103 among them, cannot run rvuos.
 
 2. **Implementation language.**
@@ -760,3 +787,17 @@ until the maintainer decides otherwise.
    The other half of this question, what happens to capabilities
    naming objects inside the pool, is decided
    and lives in "Kernel pools and revocation".
+
+8. **NAPOT for cores without TOR.**
+   RP2350 has eight dynamic PMP entries, a 32-byte grain, NAPOT only,
+   `mtval` hardwired to zero,
+   and three hardwired entries that grant every process
+   its ROM and peripherals.
+   Under NAPOT a region is a power of two aligned to its own size,
+   so a 96-byte range costs two entries,
+   and eight slots against eight entries leaves no slack.
+   Working default: TOR only, RP2350 out of scope.
+   The alternative keeps the `Region` capability as it is
+   and adds a second `rebuild_pmp` that splits each slot into NAPOT entries,
+   failing the install when the split does not fit.
+   Decide when a board without TOR is worth that second image builder.

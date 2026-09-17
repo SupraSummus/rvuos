@@ -54,3 +54,7 @@ mutant pool-forgets-parent kernel/syscall.c \
 # A destroy that spares the pools below leaves them naming a parent that is gone.
 mutant destroy-spares-children kernel/pool.c \
     's/if (!pool_under(p, pool)) {/if (p != pool) {/'
+# A carve that ignores the grain hands out a region hardware would round;
+# the corpus has such carves and the 32-byte-grain build sees them.
+mutant carve-ignores-grain kernel/syscall.c \
+    's/if (!grain_aligned(off, len) || len == 0/if ((off | len) \& 3u || len == 0/'

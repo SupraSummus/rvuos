@@ -184,7 +184,6 @@ static inline uint8_t rights_to_pmp(uint8_t rights)
 
 /* pool.c */
 extern struct pool *pool_list;
-extern unsigned pmp_entry_count;
 
 /*
  * Turn a zeroed range into a pool below parent, NULL for the boot pool.

@@ -30,11 +30,11 @@ Design decisions behind these items live in `DESIGN.md`.
    and open decision 7 in `DESIGN.md`,
    what a destroy does to region capabilities for the range.
 8. First real board, ESP32-C6 if it passes these datasheet checks:
-   PMP entry count and modes,
-   how the Physical Memory Attribute unit interacts with PMP,
+   the PMA unit, 16 entries of Espressif's own that check machine mode too,
    whether execute-in-place from flash goes through a cache
    the kernel must control,
-   how much of Espressif's second-stage bootloader must run first.
+   how much of Espressif's second-stage bootloader must run first,
+   and erratum DIG-694 on misaligned accesses across PMP regions.
 
 ## Verification
 
@@ -58,8 +58,9 @@ Design decisions behind these items live in `DESIGN.md`.
 - Before granting device ranges: `REGION_TO_POOL` zeroes the range,
   which on MMIO would write device registers from machine mode.
   Mark RAM grants poolable, or check against a RAM list.
-- Probe PMP granularity G in `pmp_init` and reject installs
-  not aligned to it; 4 bytes is assumed everywhere today.
+- `pmp_init` stops counting at the first hardwired entry.
+  A core with writable entries above a hardwired one loses them;
+  have the image skip such entries if one turns up.
 - `selfcheck.c` is always compiled in; make it a build-time option
   before any board with little RAM.
 - `PROCESS_REGION_SLOTS` is fixed at 8;
