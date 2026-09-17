@@ -98,6 +98,8 @@
  * Region (RIGHT_R and RIGHT_W): hand the memory to the kernel as a pool.
  * a1 = destination slot for the Pool capability.
  * The invoked slot is cleared.
+ * The new pool lies below the pool the calling thread lives in
+ * and is destroyed with it.
  * Fails with KERR_OVERLAP if the range overlaps an existing pool
  * or a region installed in any process.
  */
@@ -118,12 +120,17 @@
 #define OP_POOL_ALLOC 7
 /*
  * Pool (RIGHT_W): destroy the pool, every object in it,
+ * every pool created by a thread living in it, recursively,
  * and every capability anywhere that names one of those objects.
- * a1 = destination slot for a Region capability to the memory,
- * with the rights the region carried when it became a pool.
+ * a1 = destination slot for a Region capability to the memory
+ * of the invoked pool, with the rights the region carried
+ * when it became a pool.
  * The invoked slot may be the destination.
- * Fails with KERR_STATE if the calling thread lives in the pool.
- * Threads waiting on a notification in the pool
+ * The memory of the pools below comes back through no new capability:
+ * region capabilities for it that were held elsewhere work again.
+ * Fails with KERR_STATE if the calling thread lives in the pool
+ * or in one below it.
+ * Threads waiting on a notification in a destroyed pool
  * are woken with KERR_INVALID_CAP and no bits.
  */
 #define OP_POOL_DESTROY 16

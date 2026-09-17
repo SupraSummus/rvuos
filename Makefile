@@ -104,7 +104,7 @@ host-test: $(HOST_BUILD)/fuzz $(HOST_BUILD)/fuzz-pmp8
 	$(HOST_BUILD)/fuzz -runs=0 tests/corpus
 	$(HOST_BUILD)/fuzz-pmp8 -runs=0 tests/corpus
 
-# Plant three bugs in the kernel one at a time; each must fail host-test.
+# Plant bugs in the kernel one at a time; each must fail host-test.
 mutants:
 	tests/mutants.sh
 

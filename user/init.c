@@ -5,6 +5,8 @@
  * build a second process out of nothing but capabilities,
  * exchange a word with it through shared memory and two notifications,
  * destroy a pool and watch both processes lose their capabilities to it,
+ * lend the child memory it turns into a pool of its own
+ * and take it back by destroying the child's pool,
  * then unmap a region and fault on it.
  * Negative paths are covered by the fuzz corpus and tests/differential.py.
  */
@@ -30,6 +32,8 @@ enum {
     SLOT_STALE,         /* a second capability to that same notification */
     SLOT_NEW_POOL,      /* the pool built over the same memory afterwards */
     SLOT_NEW_NTFN,
+    SLOT_LENT,          /* memory lent to the child, which pools it */
+    SLOT_LENT_POOL,     /* what the root task makes of it once it is back */
 };
 
 /*
@@ -43,7 +47,10 @@ enum {
     CHILD_UP,
     CHILD_DOWN,
     CHILD_DOOMED, /* a notification whose pool the root task destroys */
-    CHILD_TABLE_SLOTS = 8,
+    CHILD_LENT,   /* memory the root task lends; the child's pool replaces it */
+    CHILD_OWN_NTFN, /* allocated from that pool */
+    CHILD_BOOT_POOL, /* the pool above the child's own; the child may not destroy it */
+    CHILD_TABLE_SLOTS = 10,
 };
 
 /* Region slots. The root task boots with code in 0 and data in 1. */
@@ -57,6 +64,7 @@ enum {
 #define DATA_OFFSET  0x1000u
 #define SHARED_OFFSET 0x2000u
 #define DOOMED_OFFSET 0x3000u
+#define LENT_OFFSET  0x4000u
 #define CHUNK 0x1000u
 
 /* The protocol between the two processes. */
@@ -65,6 +73,8 @@ enum {
 #define BIT_DONE    0x4u
 #define BIT_CHECK   0x8u /* look at the capability whose pool is gone */
 #define BIT_CHECKED 0x10u
+#define BIT_POOL    0x20u /* turn the lent memory into a pool */
+#define BIT_POOLED  0x40u
 #define MAGIC 0x5eaf00du
 
 static void puts(const char *s)
@@ -120,6 +130,31 @@ static void child_main(void)
                 ? "child: revoked here too\n"
                 : "child: revoked here too FAILED\n");
     rv_signal(CHILD_UP, BIT_CHECKED);
+
+    /*
+     * The root task lends this process memory and it becomes a pool here,
+     * below this process's own pool in the tree.
+     * The root task then destroys that pool, and this one has to go with it,
+     * or the memory would carry kernel objects nobody can reach.
+     */
+    rv_wait(CHILD_DOWN, &bits);
+    rv_puts(CHILD_DEBUG,
+            bits == BIT_POOL &&
+                    rv_invoke(OP_REGION_TO_POOL, CHILD_LENT, CHILD_LENT, 0, 0) == KERR_OK &&
+                    rv_invoke(OP_POOL_ALLOC, CHILD_LENT, CAP_NOTIFICATION, CHILD_OWN_NTFN, 0) ==
+                        KERR_OK
+                ? "child: pool made\n"
+                : "child: pool made FAILED\n");
+    /*
+     * The pool this process lives in lies below the boot pool,
+     * so destroying the boot pool would destroy this thread,
+     * and a thread cannot destroy the pool it lives in.
+     */
+    rv_puts(CHILD_DEBUG,
+            rv_invoke(OP_POOL_DESTROY, CHILD_BOOT_POOL, CHILD_BOOT_POOL, 0, 0) == KERR_STATE
+                ? "child: cannot destroy the pool above\n"
+                : "child: cannot destroy the pool above FAILED\n");
+    rv_signal(CHILD_UP, BIT_POOLED);
 
     for (;;) {
         rv_wait(CHILD_DOWN, &bits);
@@ -248,6 +283,34 @@ int main(void)
     expect("ask the child to look", rv_signal(SLOT_DOWN, BIT_CHECK));
     expect("wait for the child's answer", rv_wait(SLOT_UP, &bits));
     expect("the child looked", bits == BIT_CHECKED ? KERR_OK : KERR_INVALID_ARG);
+
+    /*
+     * Cascade.
+     * The child turns lent memory into a pool of its own,
+     * which makes the root task's capability to that memory inert.
+     * Destroying the child's pool takes the child's own pool with it,
+     * and the lent memory answers to the root task's capability again.
+     * See DESIGN.md, "Kernel pools and revocation".
+     */
+    expect("carve memory to lend",
+           rv_invoke(OP_REGION_CARVE, BOOT_CAP_FREE_RAM, LENT_OFFSET, CHUNK, SLOT_LENT));
+    expect("lend it to the child",
+           rv_invoke(OP_CAP_COPY, SLOT_CHILD_TABLE, CHILD_LENT, SLOT_LENT, RIGHT_ALL));
+    expect("give the child the boot pool",
+           rv_invoke(OP_CAP_COPY, SLOT_CHILD_TABLE, CHILD_BOOT_POOL, BOOT_CAP_POOL, RIGHT_ALL));
+    expect("ask the child to pool it", rv_signal(SLOT_DOWN, BIT_POOL));
+    expect("wait for the child's pool", rv_wait(SLOT_UP, &bits));
+    expect("the child made a pool", bits == BIT_POOLED ? KERR_OK : KERR_INVALID_ARG);
+    expect("the lent memory is inert here",
+           rv_invoke(OP_REGION_TO_POOL, SLOT_LENT, SLOT_LENT_POOL, 0, 0) == KERR_OVERLAP
+               ? KERR_OK : KERR_INVALID_ARG);
+
+    /* SLOT_POOL_REGION was cleared when the pool was made; the memory comes back there. */
+    expect("destroy the child's pool",
+           rv_invoke(OP_POOL_DESTROY, SLOT_POOL, SLOT_POOL_REGION, 0, 0));
+    expect("the lent memory is back",
+           rv_invoke(OP_REGION_TO_POOL, SLOT_LENT, SLOT_LENT_POOL, 0, 0));
+    puts("root: cascade ok\n");
 
     expect("unmap the shared region",
            rv_invoke(OP_PROCESS_UNINSTALL, BOOT_CAP_PROCESS, ROOT_SHARED_SLOT, 0, 0));

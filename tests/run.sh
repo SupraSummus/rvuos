@@ -29,6 +29,11 @@ grep -q 'root: revocation ok' "$log" \
     || fail "a destroyed pool did not revoke the capabilities into it"
 grep -q 'child: revoked here too' "$log" \
     || fail "revocation did not reach the other process's table"
+grep -q 'child: pool made' "$log" || fail "the child could not pool the lent memory"
+grep -q 'child: cannot destroy the pool above' "$log" \
+    || fail "a thread destroyed a pool its own lies below"
+grep -q 'root: cascade ok' "$log" \
+    || fail "destroying the child's pool did not take the pool the child made"
 grep -q 'user fault' "$log" || fail "PMP fault was not caught"
 # mepc's low bits move with the code layout.
 grep -q 'mcause=0x00000005 mepc=0x8010.... mtval=0x80212000' "$log" \

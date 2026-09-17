@@ -2,7 +2,7 @@
  * libFuzzer harness over the system call surface.
  *
  * The input is a sequence of replay_record, as many as the replay driver takes.
- * Each is performed on the root thread and every kernel invariant
+ * Each is performed on whichever driver thread runs and every kernel invariant
  * is checked afterwards by the kernel's own self-check.
  * Because no system call takes a pointer,
  * the registers are the entire attack surface
@@ -53,7 +53,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         struct replay_record c;
         memcpy(&c, data + off, sizeof(c));
         host_syscall(&c);
-        if (!host_root_alive()) {
+        if (!host_driver_alive()) {
             break;
         }
     }

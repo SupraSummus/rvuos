@@ -35,12 +35,12 @@ struct thread *host_boot(void);
 uint32_t host_syscall(const struct replay_record *c);
 
 /*
- * True while the root task could still run on real hardware:
- * its code is mapped read-execute and its data read-write.
+ * True while the running driver thread could still run on real hardware:
+ * its process maps the driver's code read-execute and its data read-write.
  * On QEMU the driver faults as soon as this stops holding;
  * the host has no instruction fetch to fault, so it checks instead,
  * and the harness must stop at the first false, as QEMU would.
  */
-bool host_root_alive(void);
+bool host_driver_alive(void);
 
 #endif

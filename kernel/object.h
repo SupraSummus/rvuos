@@ -58,6 +58,9 @@ struct captable {
  * except the list head.
  * Objects are bump-allocated and walked in order;
  * obj_size() recovers each object's length from its type.
+ *
+ * Pools form a tree: a pool's parent is the pool its creator lived in,
+ * and a destroy takes every pool below; see DESIGN.md, "Kernel pools and revocation".
  */
 struct pool {
     struct obj_header hdr;
@@ -65,6 +68,7 @@ struct pool {
     uint32_t size;
     uint32_t used;      /* bytes handed out, header included */
     paddr_t next;       /* global list of pools, 0 at the end */
+    paddr_t parent;     /* the pool the creating thread lived in; 0 for the boot pool */
     uint8_t rights;     /* what the region carried; returned on destroy */
 };
 
@@ -141,7 +145,7 @@ struct notification {
 _Static_assert(sizeof(struct obj_header) == 8, "object layout");
 _Static_assert(sizeof(struct cap) == 12, "object layout");
 _Static_assert(sizeof(struct captable) == 12, "object layout");
-_Static_assert(sizeof(struct pool) == 28, "object layout");
+_Static_assert(sizeof(struct pool) == 32, "object layout");
 _Static_assert(sizeof(struct pmp_image) == 4 + 5 * PMP_MAX_ENTRIES, "object layout");
 _Static_assert(sizeof(struct process) == 12 + 12 * PROCESS_REGION_SLOTS + sizeof(struct pmp_image),
                "object layout");
@@ -150,6 +154,7 @@ _Static_assert(sizeof(struct notification) == 12, "object layout");
 
 static inline struct pool *obj_pool(const struct obj_header *o) { return p2v(o->pool); }
 static inline struct pool *pool_next_pool(const struct pool *p) { return p->next ? p2v(p->next) : NULL; }
+static inline struct pool *pool_parent(const struct pool *p) { return p->parent ? p2v(p->parent) : NULL; }
 static inline struct captable *process_table(const struct process *p) { return p2v(p->ctable); }
 static inline struct process *thread_process(const struct thread *t) { return p2v(t->proc); }
 static inline struct captable *thread_table(const struct thread *t) { return process_table(thread_process(t)); }
@@ -182,16 +187,21 @@ extern struct pool *pool_list;
 extern unsigned pmp_entry_count;
 
 /*
- * Turn a zeroed range into a pool.
+ * Turn a zeroed range into a pool below parent, NULL for the boot pool.
  * The range must be OBJ_ALIGN aligned and large enough for the descriptor.
  * The caller has already checked for overlaps.
  */
-struct pool *pool_create(paddr_t base, uint32_t size, uint8_t rights);
+struct pool *pool_create(paddr_t base, uint32_t size, uint8_t rights, struct pool *parent);
+
+/* True if pool is ancestor or lies below it in the tree. */
+bool pool_under(const struct pool *pool, const struct pool *ancestor);
 
 /*
- * Take a pool off the list.
- * The caller has already cleared the capabilities into it
- * and unblocked the threads waiting on its notifications.
+ * Destroy a pool and every pool below it:
+ * clear every capability naming an object in them,
+ * wake every thread waiting on a notification in them with an error,
+ * and zero the memory.
+ * The caller has checked that the running thread does not live in any of them.
  */
 void pool_destroy(struct pool *pool);
 

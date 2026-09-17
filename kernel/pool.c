@@ -13,7 +13,7 @@ static inline uint32_t align_up(uint32_t v, uint32_t a)
     return (v + a - 1) & ~(a - 1);
 }
 
-struct pool *pool_create(paddr_t base, uint32_t size, uint8_t rights)
+struct pool *pool_create(paddr_t base, uint32_t size, uint8_t rights, struct pool *parent)
 {
     struct pool *pool = p2v(base);
     pool->hdr.type = CAP_POOL;
@@ -23,11 +23,23 @@ struct pool *pool_create(paddr_t base, uint32_t size, uint8_t rights)
     pool->used = align_up(sizeof(*pool), OBJ_ALIGN);
     pool->rights = rights;
     pool->next = pool_list ? v2p(pool_list) : 0;
+    pool->parent = parent != NULL ? v2p(parent) : 0;
     pool_list = pool;
     return pool;
 }
 
-void pool_destroy(struct pool *pool)
+bool pool_under(const struct pool *pool, const struct pool *ancestor)
+{
+    for (const struct pool *p = pool; p != NULL; p = pool_parent(p)) {
+        if (p == ancestor) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Take a pool off the list. */
+static void pool_unlink(struct pool *pool)
 {
     /* The list is linked by physical address, so it is walked, not spliced. */
     if (pool_list == pool) {
@@ -41,6 +53,27 @@ void pool_destroy(struct pool *pool)
         }
     }
     kpanic("pool not on the list");
+}
+
+void pool_destroy(struct pool *pool)
+{
+    /*
+     * The list has the newest pool first and a child is newer than its parent,
+     * so one walk takes every pool below this one before the pool itself,
+     * and a parent read on the way up is never one already zeroed.
+     */
+    for (struct pool *p = pool_list, *next; p != NULL; p = next) {
+        next = pool_next_pool(p);
+        if (!pool_under(p, pool)) {
+            continue;
+        }
+        /* Nothing below may fail: the pool is going. */
+        cap_revoke_range(p->base, p->size);
+        sched_unblock_range(p->base, p->size);
+        pool_unlink(p);
+        /* The memory is about to be user memory again, holding other processes' tables. */
+        memset(p2v(p->base), 0, p->size);
+    }
 }
 
 void *pool_alloc(struct pool *pool, uint8_t type, size_t size)

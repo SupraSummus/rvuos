@@ -46,5 +46,11 @@ mutant wake-keeps-waiting-on kernel/syscall.c \
 mutant destroy-without-sweep kernel/cap.c \
     's/if (o->type != CAP_CAPTABLE) {/if (o->type != CAP_CAPTABLE || 1) {/'
 # A destroy that leaves a thread blocked on a notification it took away.
-mutant destroy-keeps-waiters kernel/syscall.c \
-    's/    sched_unblock_range(base, size);//'
+mutant destroy-keeps-waiters kernel/pool.c \
+    's/        sched_unblock_range(p->base, p->size);//'
+# A pool that forgets who created it hangs from nothing, not from the boot pool.
+mutant pool-forgets-parent kernel/syscall.c \
+    's/pool_create(base, size, cap->rights, obj_pool(&t->hdr))/pool_create(base, size, cap->rights, NULL)/'
+# A destroy that spares the pools below leaves them naming a parent that is gone.
+mutant destroy-spares-children kernel/pool.c \
+    's/if (!pool_under(p, pool)) {/if (p != pool) {/'

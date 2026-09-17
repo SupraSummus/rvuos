@@ -175,7 +175,7 @@ static bool mapped_with(const struct process *proc, uint32_t base, uint32_t size
     return false;
 }
 
-bool host_root_alive(void)
+bool host_driver_alive(void)
 {
     const struct process *proc = thread_process(current);
     return mapped_with(proc, USER_CODE_BASE, USER_CODE_SIZE, RIGHT_R | RIGHT_X) &&

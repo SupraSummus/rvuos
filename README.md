@@ -48,6 +48,11 @@ maps a region into both, starts a thread in it,
 and exchanges a word with it through that shared memory,
 using notifications to say when.
 
+Kernel objects live in pools carved from user memory,
+and the pools form a tree by who created them:
+destroying a process's pool takes every pool it made,
+so nothing a process built in kernel memory outlives it.
+
 No data passes through the kernel: the only blocking primitive
 is a notification, a word of sticky bits,
 and `DESIGN.md`, "Communication and synchronisation", says why.
