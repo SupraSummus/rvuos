@@ -55,11 +55,8 @@ Design decisions behind these items live in `DESIGN.md`.
   More of them, each with its process and pool as the second has,
   would give the round more candidates and the pool tree more branches;
   the prologue in `include/rvuos/replay.h` and `host_boot` grow with them.
-- The fuzzer mutates bytes, but a record has fields with small ranges.
-  A custom mutator that inserts, deletes and swaps whole records
-  would reach a handoff or a tick without guessing it byte by byte.
-  Measured once: four minutes from the seeds reach a few more branches
-  with the actor field than without, so the guessing is the bottleneck.
+- The corpus predates the record mutator in `host/mutator.c`;
+  `make fuzz` and `make corpus-merge` with it should add inputs.
 - Escape-attempt suite under QEMU:
   one user program per scenario, expected outcome a specific fault.
   Execute from data, jump into the kernel, `csrr` and `mret` from user mode,
