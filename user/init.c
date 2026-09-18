@@ -4,6 +4,7 @@
  * carve memory, make a pool, allocate from it,
  * build a second process out of nothing but capabilities,
  * exchange a word with it through shared memory and two notifications,
+ * take turns with it through shared memory alone, which only the tick allows,
  * destroy a pool and watch both processes lose their capabilities to it,
  * lend the child memory it turns into a pool of its own
  * and take it back by destroying the child's pool,
@@ -77,6 +78,10 @@ enum {
 #define BIT_POOLED  0x40u
 #define MAGIC 0x5eaf00du
 
+/* Whose turn it is in the handshake that uses no notification. */
+#define TURN_CHILD 0x1u
+#define TURN_ROOT  0x2u
+
 static void puts(const char *s)
 {
     rv_puts(BOOT_CAP_DEBUG, s);
@@ -115,6 +120,11 @@ static void child_main(void)
     rv_puts(CHILD_DEBUG,
             bits == BIT_REPLY && shared[1] == MAGIC + 1 ? "child: reply ok\n"
                                                         : "child: reply FAILED\n");
+
+    /* The other half of the root task's preemption check. */
+    while (shared[2] != TURN_CHILD) {
+    }
+    shared[2] = TURN_ROOT;
 
     rv_signal(CHILD_UP, BIT_DONE);
 
@@ -226,10 +236,7 @@ int main(void)
                      RIGHT_R | RIGHT_W));
     volatile uint32_t *shared = (volatile uint32_t *)(free_base + SHARED_OFFSET);
 
-    /*
-     * The child has not run yet: it starts when this thread stops being able to.
-     * Waiting is that moment.
-     */
+    /* The child may or may not have run by now; the bits are sticky either way. */
     expect("wait for the child", rv_wait(SLOT_UP, &bits));
     expect("the child's word arrived",
            bits == BIT_REQUEST && shared[0] == MAGIC ? KERR_OK : KERR_INVALID_ARG);
@@ -237,6 +244,17 @@ int main(void)
 
     shared[1] = MAGIC + 1;
     expect("answer the child", rv_signal(SLOT_DOWN, BIT_REPLY));
+
+    /*
+     * Preemption.
+     * Each side spins on a word only the other writes and neither waits,
+     * so only the tick gets them past this.
+     */
+    shared[2] = TURN_CHILD;
+    while (shared[2] != TURN_ROOT) {
+    }
+    puts("root: preemption ok\n");
+
     expect("wait for the child to finish", rv_wait(SLOT_UP, &bits));
     expect("the child is done", bits == BIT_DONE ? KERR_OK : KERR_INVALID_ARG);
 

@@ -9,10 +9,11 @@
  * Between the swap and the second csrrw in trap_entry,
  * mscratch holds the user's sp.
  * A trap in that window would save registers through it in machine mode.
- * None can happen today: the hardware clears MIE on trap,
+ * None can happen: the hardware clears MIE on trap and the kernel
+ * never sets it again, so the timer interrupt waits for the mret,
  * the frame is RAM so the stores cannot fault,
  * and no PMP entry is locked, so PMP does not apply to machine mode.
- * Revisit when interrupts or Smepmp arrive.
+ * Revisit when Smepmp arrives.
  */
 
 #define FRAME_MEPC   128

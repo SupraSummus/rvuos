@@ -6,6 +6,7 @@
 #include "kernel.h"
 #include "object.h"
 #include "pmp.h"
+#include "timer.h"
 #include "trap.h"
 #include "uart.h"
 
@@ -34,7 +35,12 @@ void kmain(void)
     process_activate(thread_process(root));
 
     kputs("rvuos: entering user mode\n");
-    /* mret drops to the mode in MPP and keeps interrupts off. */
+    /*
+     * mret drops to the mode in MPP with MIE clear,
+     * which gates nothing in user mode: machine interrupts
+     * are always taken there, so the tick runs from the first instruction.
+     */
+    timer_init();
     csr_clear(mstatus, MSTATUS_MPP_MASK | MSTATUS_MPIE);
     trap_return(&root->frame);
 }

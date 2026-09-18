@@ -97,7 +97,7 @@ struct process {
  * The kernel keeps no run queue:
  * a thread's own state says whether it may run,
  * and the kernel finds a runnable thread by walking the pools,
- * as the overlap checks do.
+ * as the overlap checks do, continuing from the running thread.
  */
 enum {
     THREAD_STOPPED = 0, /* created, or configured and not started */
@@ -289,6 +289,13 @@ extern struct thread *current;
  * Hand the processor to a thread that is, or stop the machine.
  */
 void sched_run_next(void);
+
+/*
+ * The timer tick.
+ * Hand the processor to the next runnable thread in round-robin order,
+ * if there is one besides the running thread.
+ */
+void sched_tick(void);
 
 /* The first thread blocked on a notification, or NULL. */
 struct thread *sched_waiter(paddr_t notification);

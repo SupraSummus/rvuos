@@ -84,10 +84,18 @@ static const struct replay_record replay_prologue[] = {
     REPLAY_COPY(REPLAY_CAP_TABLE),
     REPLAY_COPY(REPLAY_CAP_PROCESS),
     { OP_THREAD_CONFIGURE, 0, REPLAY_CAP_THREAD, 0, REPLAY_THREAD_SP, 0 },
-    { OP_THREAD_RESUME, 0, REPLAY_CAP_THREAD, 0, 0, 0 },
 };
 
 #define REPLAY_PROLOGUE_COUNT \
     (sizeof(replay_prologue) / sizeof(replay_prologue[0]))
+
+/*
+ * Performed by both builds once tracing is on, as the first traced record.
+ * Tracing turns the tick's preemption off,
+ * so from then on the second thread runs only when the first one blocks,
+ * which is after the records are in place.
+ */
+static const struct replay_record replay_start =
+    { OP_THREAD_RESUME, 0, REPLAY_CAP_THREAD, 0, 0, 0 };
 
 #endif

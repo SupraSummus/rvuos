@@ -72,6 +72,9 @@
  * Debug: turn on tracing and self-checking.
  * From then on the kernel prints every system call with its status
  * and runs the invariant checker after each one.
+ * The timer tick stops preempting,
+ * because a transcript the host build must reproduce
+ * cannot contain a switch that lands between two instructions.
  * It cannot be turned off again, so a traced program cannot hide.
  */
 #define OP_DEBUG_TRACE 10
@@ -164,7 +167,9 @@
 #define OP_THREAD_CONFIGURE 12
 /*
  * Thread (RIGHT_W): make a stopped thread runnable.
- * It runs once the thread that started it gives up the processor.
+ * It runs when the thread that started it waits
+ * or when the timer tick takes the processor from it,
+ * whichever comes first.
  * Fails with KERR_STATE unless the thread is stopped.
  */
 #define OP_THREAD_RESUME 13

@@ -42,8 +42,12 @@
 #define MSTATUS_MPP_U (0u << MSTATUS_MPP_SHIFT)
 #define MSTATUS_MPP_M (3u << MSTATUS_MPP_SHIFT)
 
+/* mie and mip bits. */
+#define MIE_MTIE (1u << 7)
+
 /* mcause exception codes; interrupts have the top bit set. */
 #define MCAUSE_INTERRUPT (1u << 31)
+#define IRQ_M_TIMER 7
 #define CAUSE_INSN_MISALIGNED   0
 #define CAUSE_INSN_ACCESS       1
 #define CAUSE_ILLEGAL_INSN      2

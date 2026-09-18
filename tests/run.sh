@@ -29,6 +29,8 @@ grep -q 'the layout fits the grain: ok' "$log" || fail "the root task did not se
 grep -q 'hello from user mode' "$log" || fail "user mode did not run"
 grep -q 'root: message ok' "$log" || fail "the child's message did not arrive"
 grep -q 'child: reply ok' "$log" || fail "the root task's answer did not arrive"
+grep -q 'root: preemption ok' "$log" \
+    || fail "the tick did not take the processor from a spinning thread"
 grep -q 'root: revocation ok' "$log" \
     || fail "a destroyed pool did not revoke the capabilities into it"
 grep -q 'child: revoked here too' "$log" \
