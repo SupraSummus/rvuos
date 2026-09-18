@@ -297,6 +297,12 @@ void sched_run_next(void);
  */
 void sched_tick(void);
 
+/*
+ * The tick's decision without the tick: hand the processor to the next
+ * runnable thread in the round. OP_DEBUG_TICK performs it on request.
+ */
+void sched_preempt(void);
+
 /* The first thread blocked on a notification, or NULL. */
 struct thread *sched_waiter(paddr_t notification);
 

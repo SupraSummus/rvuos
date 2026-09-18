@@ -78,6 +78,14 @@
  * It cannot be turned off again, so a traced program cannot hide.
  */
 #define OP_DEBUG_TRACE 10
+/*
+ * Debug: what the timer tick does, on request.
+ * The processor goes to the next runnable thread in the round
+ * and the caller stays ready.
+ * Works while tracing is on, unlike the tick itself;
+ * see DESIGN.md, "Verification".
+ */
+#define OP_DEBUG_TICK 17
 
 /*
  * CapTable (RIGHT_W): copy a capability from the caller's table.
@@ -217,9 +225,15 @@ struct replay_header {
     uint32_t count;
 };
 
+/*
+ * One system call and the thread that makes it.
+ * actor 0 is whichever thread runs when the record comes up;
+ * 1..REPLAY_THREADS names a replay driver thread, see rvuos/replay.h;
+ * any other value means 0.
+ */
 struct replay_record {
     uint8_t op;
-    uint8_t pad;
+    uint8_t actor;
     uint16_t slot;
     uint32_t a1, a2, a3;
 };

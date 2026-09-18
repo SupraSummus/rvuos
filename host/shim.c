@@ -15,6 +15,8 @@ _Static_assert(REPLAY_THREAD_SP > USER_DATA_BASE &&
                "the replay driver's second stack must lie in its data region");
 
 uint8_t *host_ram;
+/* The driver's threads, by actor number; see host_event. */
+static struct thread *host_threads[REPLAY_THREADS + 1];
 jmp_buf host_halt_jmp;
 int host_halt_code;
 bool host_verbose;
@@ -145,6 +147,15 @@ struct thread *host_boot(void)
             abort();
         }
     }
+
+    struct cap second;
+    if (cap_lookup(thread_table(root), REPLAY_CAP_THREAD, &second) != KERR_OK ||
+        second.type != CAP_THREAD) {
+        abort();
+    }
+    host_threads[1] = root;
+    host_threads[2] = (struct thread *)cap_object(&second);
+    _Static_assert(REPLAY_THREADS == 2, "host_boot names the driver's threads by hand");
     return root;
 }
 
@@ -170,6 +181,39 @@ uint32_t host_syscall(const struct replay_record *c)
     f->mcause = 8;
     syscall_dispatch(current);
     return f->regs[REG_A0];
+}
+
+/* The actor number of the running thread; 0 when it is not a driver thread. */
+static unsigned host_actor(void)
+{
+    for (unsigned i = 1; i <= REPLAY_THREADS; i++) {
+        /* Compared, never followed: a destroyed thread is simply never current again. */
+        if (host_threads[i] == current) {
+            return i;
+        }
+    }
+    return 0;
+}
+
+/*
+ * The driver's passing protocol from rvuos/replay.h, run from the kernel's state:
+ * every thread the round visits ticks until the actor has the processor
+ * or the round is back where it started.
+ */
+bool host_event(const struct replay_record *c)
+{
+    struct thread *start = current;
+    while (replay_passes(c, host_actor())) {
+        host_syscall(&replay_tick);
+        if (!host_driver_alive()) {
+            return false;
+        }
+        if (current == start) {
+            break;
+        }
+    }
+    host_syscall(c);
+    return host_driver_alive();
 }
 
 static bool mapped_with(const struct process *proc, uint32_t base, uint32_t size, uint8_t rights)

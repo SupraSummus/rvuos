@@ -16,6 +16,17 @@
  * so the order of the calls follows the kernel's own choice
  * of what runs, on the target and on the host alike.
  *
+ * A record may name the thread that performs it, its actor.
+ * A thread that finds the next record is another thread's
+ * passes the processor on with OP_DEBUG_TICK
+ * and looks at the cursor when the processor comes back:
+ * moved, some thread took the record;
+ * not moved, the round visited every runnable thread and none took it,
+ * so the actor cannot run and the thread that started the round
+ * performs the record itself.
+ * host_event in host/shim.c performs the same calls from the kernel's state,
+ * so the passing is in both transcripts.
+ *
  * The second thread has a process, a table and a pool of its own,
  * so that every switch between the threads reloads the PMP
  * and a pool the second thread creates lies below its own in the tree,
@@ -25,6 +36,15 @@
  */
 
 #include "rvuos/abi.h"
+
+/* Driver threads a record may name as its actor: 1 is the root thread, 2 the second. */
+#define REPLAY_THREADS 2
+
+/* Whether thread `me` passes the record on rather than performing it. */
+static inline int replay_passes(const struct replay_record *r, unsigned me)
+{
+    return r->actor != 0 && r->actor <= REPLAY_THREADS && r->actor != me;
+}
 
 /* Region slot the input is installed in. */
 #define REPLAY_REGION_SLOT 7
@@ -97,5 +117,9 @@ static const struct replay_record replay_prologue[] = {
  */
 static const struct replay_record replay_start =
     { OP_THREAD_RESUME, 0, REPLAY_CAP_THREAD, 0, 0, 0 };
+
+/* What a thread performs to pass a record on. */
+static const struct replay_record replay_tick =
+    { OP_DEBUG_TICK, 0, BOOT_CAP_DEBUG, 0, 0, 0 };
 
 #endif

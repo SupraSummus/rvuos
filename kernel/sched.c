@@ -105,15 +105,20 @@ void sched_run_next(void)
     switch_to(next);
 }
 
+void sched_preempt(void)
+{
+    struct thread *next = runnable_after(current);
+    /* The running thread is ready, so there is always at least itself. */
+    if (next != current) {
+        switch_to(next);
+    }
+}
+
 void sched_tick(void)
 {
     /* The host build cannot reproduce where a preemption lands; see DESIGN.md, "Verification". */
     if (debug_trace) {
         return;
     }
-    struct thread *next = runnable_after(current);
-    /* The running thread is ready, so there is always at least itself. */
-    if (next != current) {
-        switch_to(next);
-    }
+    sched_preempt();
 }
