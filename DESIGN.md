@@ -670,6 +670,11 @@ libFuzzer feeds the records into the threads' registers
 and the self-check runs after every call, under ASan and UBSan.
 Since no system call takes a pointer,
 the registers are the whole attack surface.
+The mutator in `host/mutator.c` works on whole records:
+it inserts, deletes, swaps and moves them,
+sets one field to a value in its range,
+and splices two inputs on record boundaries,
+so that a handoff between the driver's threads is one mutation, not a guess per byte.
 The inputs replayed are checked in under `tests/seeds` and `tests/corpus`.
 A seed is written by hand for a scenario the kernel must handle,
 is named after that scenario, and is kept for as long as the scenario exists.

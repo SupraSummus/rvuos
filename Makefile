@@ -82,7 +82,7 @@ HOST_SAN    := -fsanitize=address,undefined -fno-sanitize-recover=all
 
 HOST_KERNEL_SRC := kernel/cap.c kernel/pool.c kernel/process.c kernel/sched.c \
                    kernel/syscall.c kernel/boot.c kernel/selfcheck.c
-HOST_SRC        := host/shim.c
+HOST_SRC        := host/shim.c host/mutator.c
 HOST_HDR        := $(wildcard kernel/*.h host/*.h include/rvuos/*.h)
 
 FUZZ_TIME ?= 60
@@ -108,10 +108,12 @@ mutants:
 
 # Fuzz for FUZZ_TIME seconds in a working copy of the seeds and the corpus.
 # Fold the interesting inputs back into the repository with `make corpus-merge`.
+# libFuzzer turns -len_control off when it finds the record mutator of host/mutator.c;
+# asked for explicitly, it stays on and keeps the inputs short and the runs per second high.
 fuzz: $(HOST_BUILD)/fuzz
 	@mkdir -p $(HOST_CORPUS)
 	cp -n tests/seeds/* tests/corpus/* $(HOST_CORPUS)/
-	$(HOST_BUILD)/fuzz -max_total_time=$(FUZZ_TIME) -max_len=2048 $(HOST_CORPUS)
+	$(HOST_BUILD)/fuzz -max_total_time=$(FUZZ_TIME) -max_len=2048 -len_control=100 $(HOST_CORPUS)
 
 # Rebuild tests/corpus from scratch out of itself and the working copy.
 # The seeds go in first and stay; each harness in turn then keeps

@@ -195,6 +195,9 @@
  */
 #define OP_NOTIFY_WAIT 15
 
+/* One above the highest operation code; the fuzzer's mutator draws below it. */
+#define OP_COUNT 18
+
 /*
  * Capability slots the kernel fills in the root task's table at boot.
  * Slot 0 is left empty so that an uninitialised index is an error.
