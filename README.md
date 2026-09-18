@@ -57,6 +57,11 @@ No data passes through the kernel: the only blocking primitive
 is a notification, a word of sticky bits,
 and `DESIGN.md`, "Communication and synchronisation", says why.
 
-The timer, preemption, priorities and interrupts
+The machine timer ticks and the kernel preempts on it,
+taking runnable threads in turn;
+that is all the scheduling policy the kernel has,
+and `DESIGN.md`, "Scheduling", says why.
+
+Device interrupts and a userspace driver
 are not implemented yet;
 see the roadmap in `TODO.md`.

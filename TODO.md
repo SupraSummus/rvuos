@@ -13,11 +13,16 @@ Design decisions behind these items live in `DESIGN.md`.
 4. Done: two processes, `Notification` objects,
    shared memory between processes, and the first scheduling decision.
    The kernel keeps no queues and a thread runs until it waits.
-5. The timer tick, priorities on `Thread`, preemptive scheduling.
-   This is where the pool walk that finds a runnable thread
-   has to become something with a policy in it,
-   and where userspace needs the `A` extension
-   for what it does in shared memory.
+5. Done: the timer tick and round-robin preemption.
+   The pool walk that finds a runnable thread
+   continues from the running one, and that is the whole policy.
+   Priorities on `Thread` were part of this step
+   and are now open decision 9 in `DESIGN.md`,
+   whose working default is that the kernel has no further policy.
+   Still open from that step:
+   the `A` extension in userspace,
+   for what two threads that can now preempt each other
+   do in shared memory.
 6. `Irq` objects and a userspace UART driver.
    An interrupt is a signal on the notification bound to the `Irq`,
    so no new mechanism is needed.
@@ -42,6 +47,8 @@ Design decisions behind these items live in `DESIGN.md`.
   That a signal wakes a thread waiting on *that* notification,
   and hands it the bits that were set,
   is checked only by the demo in `user/init.c`.
+- The tick preempts nobody while tracing is on,
+  so preemption is checked only by the demo in `user/init.c`.
 - Escape-attempt suite under QEMU:
   one user program per scenario, expected outcome a specific fault.
   Execute from data, jump into the kernel, `csrr` and `mret` from user mode,
@@ -78,14 +85,16 @@ Design decisions behind these items live in `DESIGN.md`.
 - A signal and a wait in one system call, the shape of seL4's `ReplyRecv`.
   Today it saves one trap per round trip and no context switch,
   because a signal does not take the processor away from the signaller.
-  Once step 5 makes a higher-priority thread preempt on the signal,
+  Should a woken thread ever preempt the signaller,
+  which open decision 9 in `DESIGN.md` leaves out,
   it saves switches as well; that is when to add it.
 - A user fault stops the machine, even when another thread could run.
   Give a thread's creator somewhere to hear about it:
   a notification the kernel signals is the cheapest candidate,
   since it needs no new object.
 - A thread can be started but not stopped again.
-  `OP_THREAD_SUSPEND` waits for a reason to exist;
+  `OP_THREAD_SUSPEND` waits for a reason to exist,
+  and a userspace scheduler, open decision 9 in `DESIGN.md`, would be one;
   a thread waiting on a notification cannot be taken off it today.
 - `object_first`/`object_next` collapsed the pool walk everywhere
   except the tiling check in `selfcheck.c`, which verifies

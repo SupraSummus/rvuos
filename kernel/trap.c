@@ -5,6 +5,7 @@
 #include "csr.h"
 #include "kernel.h"
 #include "object.h"
+#include "timer.h"
 #include "trap.h"
 
 static void report_frame(const struct trap_frame *frame)
@@ -41,9 +42,15 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
 
     uint32_t cause = frame->mcause;
     if (cause & MCAUSE_INTERRUPT) {
+        if (cause == (MCAUSE_INTERRUPT | IRQ_M_TIMER)) {
+            /* mepc points at the interrupted instruction, which resumes as it was. */
+            timer_ack();
+            sched_tick();
+            return &current->frame;
+        }
         kputs("unexpected interrupt\n");
         report_frame(frame);
-        kpanic("interrupts are not enabled yet");
+        kpanic("only the timer interrupt is enabled");
     }
 
     switch (cause) {

@@ -31,8 +31,8 @@ static uint32_t count;
 /*
  * The next record to perform.
  * A thread reads it and writes it back without an ecall in between,
- * and only an ecall can take the processor away,
- * so no atomic is needed. That changes when the timer arrives.
+ * and while tracing is on only an ecall can take the processor away,
+ * so no atomic is needed; see rvuos/replay.h.
  */
 static uint32_t cursor;
 
@@ -70,11 +70,6 @@ int main(void)
             rv_halt(BOOT_CAP_DEBUG, 2);
         }
     }
-    /*
-     * The second thread is runnable from here on,
-     * but it only runs once this one blocks, which takes a record,
-     * so the records and the count below are in place before it looks.
-     */
 
     uint32_t input_base, input_size;
     if (rv_region_info(BOOT_CAP_INPUT, &input_base, &input_size) != KERR_OK) {
@@ -99,6 +94,11 @@ int main(void)
     }
 
     rv_invoke(OP_DEBUG_TRACE, BOOT_CAP_DEBUG, 0, 0, 0);
+    if (rv_invoke(replay_start.op, replay_start.slot, replay_start.a1, replay_start.a2,
+                  replay_start.a3) != KERR_OK) {
+        puts("replay setup failed\n");
+        rv_halt(BOOT_CAP_DEBUG, 2);
+    }
 
     replay_loop();
     return 0;

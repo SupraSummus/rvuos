@@ -17,6 +17,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "harness.h"
@@ -44,6 +45,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     host_boot();
     selfcheck_run();
     debug_trace = true;
+    /* The driver starts its second thread traced; see rvuos/replay.h. */
+    if (host_syscall(&replay_start) != KERR_OK) {
+        abort();
+    }
 
     if (size > REPLAY_MAX_RECORDS * sizeof(struct replay_record)) {
         size = REPLAY_MAX_RECORDS * sizeof(struct replay_record);

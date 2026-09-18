@@ -185,6 +185,16 @@ Consequences that shape the design:
   is zeroing a range that becomes a pool,
   and that range belongs to the kernel from that moment on.
 
+### Timer
+
+The machine timer, `mtime` and `mtimecmp`, is the kernel's clock
+and the kernel handles it directly; nothing of it reaches userspace.
+Where the registers live and how fast they count is the board's business,
+so `kernel/timer.c` is per board, as `uart.c` is.
+On every tick the kernel sets `mtimecmp` a period ahead of `mtime`,
+not ahead of the previous compare value,
+so a long system call costs one late tick and not a burst of them.
+
 ### One address space
 
 There is a single physical address space shared by everything.
@@ -519,35 +529,38 @@ which is roadmap step 6 and needs no new mechanism.
 A thread's own state says whether it may run,
 and a runnable thread is found by walking the pools,
 as `pool_overlaps` and `installed_overlaps` are.
-A queue would record a second time what the state already says,
-and its order would be a scheduling policy
-with no reason to exist before priorities and the timer do.
-The walk costs what those checks already cost,
-and it is the obvious thing to replace when `Thread` gains a priority.
+A queue would record a second time what the state already says.
+The walk costs what those checks already cost.
 
-A thread runs until it waits on a notification;
-nothing else takes the processor away from it yet.
-When it waits, the kernel walks the pools for a runnable thread.
-If there is none, no thread can ever become runnable again,
-because only a running thread can signal
-and interrupts do not exist yet,
+**The walk is the policy: round-robin.**
+The walk continues from the running thread and wraps around,
+so runnable threads take turns in the order they were allocated,
+and the only scheduling state the kernel holds
+is which thread is running.
+
+**The machine timer provides the tick.**
+A thread runs until it waits on a notification
+or until the tick takes the processor from it,
+and either way the walk picks the next runnable thread.
+The tick has a fixed period, `TIMER_HZ` in `kernel/timer.h`,
+and one tick is one slice: a preempted thread goes to the back of the round.
+Interrupts are taken in user mode only:
+machine mode runs with `MIE` clear from the trap to the `mret`,
+so a system call is never interrupted and the kernel needs no locks.
+
+When a thread waits and nothing is runnable,
+no thread can become runnable again,
+because only a running thread can signal,
+the tick wakes nobody,
+and device interrupts do not exist yet,
 so the kernel says `no runnable thread` and stops the machine.
-That becomes a `wfi` when interrupts arrive.
+That becomes a `wfi` when device interrupts arrive.
 
-The rest of this section is the intended end state.
-
-Fixed-priority preemptive scheduling with round-robin within a priority.
-The machine timer provides the tick.
-A thread's priority is set by whoever holds its `Thread` capability
-with the control right,
-and cannot exceed the setter's own priority.
-
-Priority inversion through a shared server is handled the simple way:
-no priority inheritance.
-A server that must not be blocked by low-priority clients
-runs at a higher priority than all of them.
-Scheduling contexts in the seL4 MCS style are a possible later addition
-and the `Thread` object leaves room for one.
+**Nothing more lives in the kernel.**
+Round-robin on a tick is the least policy that makes
+a spinning thread harmless and a woken thread eventually run.
+Fixed priorities were the intended end state of this section
+and are now open decision 9.
 
 ## Interrupts
 
@@ -632,6 +645,8 @@ Every thread is stopped, ready, or waiting.
 A waiting thread names a live notification and nothing else does.
 The thread the kernel is running is one it could run:
 it is a live object and it is ready.
+A preempted thread stays ready,
+so it is one the walk finds again.
 
 **Memory safety.**
 No sequence of system calls makes the kernel read or write
@@ -692,6 +707,20 @@ and rather than run one while tracing,
 the kernel stops the machine with `untraced thread`.
 That is a constraint verification puts on the kernel,
 and it costs nothing outside trace mode.
+
+The tick is the other such constraint.
+A preemption lands between two instructions,
+and the host runs records rather than instructions,
+so it cannot say where one would land.
+While tracing is on, the tick therefore preempts nobody.
+The interrupt is still taken and acknowledged on QEMU,
+so the replay exercises the interrupt entry and return,
+but a switch happens only when a thread waits.
+The replay driver starts its second thread after turning tracing on,
+so that no tick runs it before the records it takes are in place.
+Preemption itself is checked by the demo in `user/init.c`:
+the two processes take turns through a shared word and no notification,
+which nothing but the tick can get them past.
 
 **Hardware.**
 QEMU's PMP may differ from a real core in Smepmp behaviour,
@@ -801,3 +830,19 @@ until the maintainer decides otherwise.
    and adds a second `rebuild_pmp` that splits each slot into NAPOT entries,
    failing the install when the split does not fit.
    Decide when a board without TOR is worth that second image builder.
+
+9. **Scheduling policy beyond round-robin.**
+   Working default: none in the kernel.
+   The earlier plan was fixed priorities on `Thread`,
+   set by whoever holds the capability and capped by the setter's own,
+   round-robin within a priority, no priority inheritance.
+   The alternative is a scheduler in userspace
+   that decides which threads are runnable at all.
+   It needs a way to stop a thread it started,
+   `OP_THREAD_SUSPEND` in `TODO.md`,
+   and a tick of its own, a notification the timer signals,
+   the shape every device interrupt takes in roadmap step 6.
+   What it cannot do is choose between two runnable threads
+   for less than a system call per switch.
+   Decide when a workload needs one thread to run before another
+   and taking turns measurably fails it.
