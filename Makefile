@@ -98,29 +98,43 @@ $(HOST_HARNESSES): $(HOST_KERNEL_SRC) $(HOST_SRC) host/fuzz.c $(HOST_HDR)
 	$(HOST_CC) $(HOST_CFLAGS) $(HOST_MACHINE) $(HOST_SAN) -fsanitize=fuzzer \
 		$(HOST_KERNEL_SRC) $(HOST_SRC) host/fuzz.c -o $@
 
-# Replay the checked-in corpus once on every harness, self-check after every call.
+# Replay the seeds and the corpus once on every harness, self-check after every call.
 host-test: $(HOST_HARNESSES)
-	for h in $^; do $$h -runs=0 tests/corpus || exit 1; done
+	for h in $^; do $$h -runs=0 tests/seeds tests/corpus || exit 1; done
 
 # Plant bugs in the kernel one at a time; each must fail host-test.
 mutants:
 	tests/mutants.sh
 
-# Fuzz for FUZZ_TIME seconds in a working copy of the corpus.
+# Fuzz for FUZZ_TIME seconds in a working copy of the seeds and the corpus.
 # Fold the interesting inputs back into the repository with `make corpus-merge`.
 fuzz: $(HOST_BUILD)/fuzz
 	@mkdir -p $(HOST_CORPUS)
-	cp -n tests/corpus/* $(HOST_CORPUS)/
+	cp -n tests/seeds/* tests/corpus/* $(HOST_CORPUS)/
 	$(HOST_BUILD)/fuzz -max_total_time=$(FUZZ_TIME) -max_len=2048 $(HOST_CORPUS)
 
-corpus-merge: $(HOST_BUILD)/fuzz
-	$(HOST_BUILD)/fuzz -merge=1 tests/corpus $(HOST_CORPUS)
+# Rebuild tests/corpus from scratch out of itself and the working copy.
+# The seeds go in first and stay; each harness in turn then keeps
+# the inputs that add coverage on its machine beyond what is kept so far.
+# The corpus is thus minimal for the current kernel,
+# not for every kernel it has seen.
+# Run `make mutants` afterwards: it is the check that the minimisation lost nothing.
+corpus-merge: $(HOST_HARNESSES)
+	@mkdir -p $(HOST_CORPUS)
+	rm -rf $(HOST_BUILD)/corpus-merged && mkdir -p $(HOST_BUILD)/corpus-merged
+	cp tests/seeds/* $(HOST_BUILD)/corpus-merged/
+	for h in $(HOST_HARNESSES); do \
+		$$h -merge=1 $(HOST_BUILD)/corpus-merged tests/corpus $(HOST_CORPUS) || exit 1; \
+	done
+	for s in tests/seeds/*; do rm $(HOST_BUILD)/corpus-merged/$$(basename $$s); done
+	rm -f tests/corpus/*
+	cp $(HOST_BUILD)/corpus-merged/* tests/corpus/
 
-# Replay the corpus on the real kernel under QEMU
+# Replay the seeds and the corpus on the real kernel under QEMU
 # and compare every call's status with the host build.
 qemu-replay: $(BUILD)/kernel-fuzzdrv.elf $(HOST_BUILD)/fuzz
 	tests/differential.py --qemu "$(QEMU) $(QEMUFLAGS)" \
-		--kernel $(BUILD)/kernel-fuzzdrv.elf --host $(HOST_BUILD)/fuzz tests/corpus
+		--kernel $(BUILD)/kernel-fuzzdrv.elf --host $(HOST_BUILD)/fuzz tests/seeds tests/corpus
 
 check: test host-test qemu-replay
 
