@@ -12,6 +12,7 @@
  * so that a record which blocks one of them
  * leaves the kernel something to run,
  * and the blocking paths are replayed like any other.
+ * A record that names the other thread is passed to it as described there.
  *
  * Records may do anything, including unmapping this program,
  * which then faults; the host build models that.
@@ -30,9 +31,10 @@ static uint32_t count;
 
 /*
  * The next record to perform.
- * A thread reads it and writes it back without an ecall in between,
- * and while tracing is on only an ecall can take the processor away,
- * so no atomic is needed; see rvuos/replay.h.
+ * While tracing is on only an ecall can take the processor away,
+ * and a thread makes none between reading the cursor and writing it back,
+ * except the tick that passes a record on, after which it reads again;
+ * so no atomic is needed. See rvuos/replay.h.
  */
 static uint32_t cursor;
 
@@ -41,18 +43,31 @@ static void puts(const char *s)
     rv_puts(BOOT_CAP_DEBUG, s);
 }
 
-void replay_loop(void);
+static uint32_t perform(const struct replay_record *r)
+{
+    return rv_invoke(r->op, r->slot, r->a1, r->a2, r->a3);
+}
+
+static void replay_loop(unsigned me);
+void replay_second(void);
 int main(void);
 
-void replay_loop(void)
+static void replay_loop(unsigned me)
 {
     for (;;) {
         uint32_t i = cursor;
         if (i >= count) {
             break;
         }
+        if (replay_passes(&records[i], me)) {
+            perform(&replay_tick);
+            if (cursor != i) {
+                continue;
+            }
+            /* The round came back with the record untaken: its actor cannot run. */
+        }
         cursor = i + 1;
-        rv_invoke(records[i].op, records[i].slot, records[i].a1, records[i].a2, records[i].a3);
+        perform(&records[i]);
     }
 
     __asm__ volatile("ebreak");
@@ -60,12 +75,20 @@ void replay_loop(void)
     }
 }
 
+/* The second thread's entry point; the first thread is main. */
+void replay_second(void)
+{
+    replay_loop(2);
+}
+
 int main(void)
 {
     for (unsigned i = 0; i < REPLAY_PROLOGUE_COUNT; i++) {
-        const struct replay_record *r = &replay_prologue[i];
-        uint32_t a1 = r->op == OP_THREAD_CONFIGURE ? (uint32_t)&replay_loop : r->a1;
-        if (rv_invoke(r->op, r->slot, a1, r->a2, r->a3) != KERR_OK) {
+        struct replay_record r = replay_prologue[i];
+        if (r.op == OP_THREAD_CONFIGURE) {
+            r.a1 = (uint32_t)&replay_second;
+        }
+        if (perform(&r) != KERR_OK) {
             puts("replay setup failed\n");
             rv_halt(BOOT_CAP_DEBUG, 2);
         }
@@ -87,6 +110,7 @@ int main(void)
         (const volatile struct replay_record *)(input_base + sizeof(*hdr));
     for (uint32_t i = 0; i < count; i++) {
         records[i].op = in[i].op;
+        records[i].actor = in[i].actor;
         records[i].slot = in[i].slot;
         records[i].a1 = in[i].a1;
         records[i].a2 = in[i].a2;
@@ -94,12 +118,11 @@ int main(void)
     }
 
     rv_invoke(OP_DEBUG_TRACE, BOOT_CAP_DEBUG, 0, 0, 0);
-    if (rv_invoke(replay_start.op, replay_start.slot, replay_start.a1, replay_start.a2,
-                  replay_start.a3) != KERR_OK) {
+    if (perform(&replay_start) != KERR_OK) {
         puts("replay setup failed\n");
         rv_halt(BOOT_CAP_DEBUG, 2);
     }
 
-    replay_loop();
+    replay_loop(1);
     return 0;
 }

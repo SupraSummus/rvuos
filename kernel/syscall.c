@@ -30,6 +30,10 @@ static int op_debug(uint32_t op, const uint32_t *arg)
     case OP_DEBUG_TRACE:
         debug_trace = true;
         return KERR_OK;
+    case OP_DEBUG_TICK:
+        /* The caller's status is written to its own frame, whoever runs next. */
+        sched_preempt();
+        return KERR_OK;
     default:
         return KERR_WRONG_TYPE;
     }

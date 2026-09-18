@@ -662,7 +662,11 @@ Until pool destroy exists, confinement implies it.
 **Host fuzzing** (`make host-test`, `make fuzz`).
 The kernel's logic compiles natively with a shim for the console,
 the PMP CSRs and halting, and physical addresses indexing a RAM buffer.
-libFuzzer feeds system call records into the root thread's registers
+An input is a sequence of events the kernel receives,
+not the behaviour of one process:
+each record is a system call with the thread that makes it,
+and the tick is a record too, `OP_DEBUG_TICK`.
+libFuzzer feeds the records into the threads' registers
 and the self-check runs after every call, under ASan and UBSan.
 Since no system call takes a pointer,
 the registers are the whole attack surface.
@@ -692,6 +696,10 @@ with the input placed in RAM by QEMU's loader.
 The driver runs two threads that take records from one cursor,
 so a record that blocks one of them leaves the kernel
 something else to run and the blocking paths are replayed too.
+A record that names a thread is passed to it with `OP_DEBUG_TICK`
+by the protocol in `include/rvuos/replay.h`,
+which the host runs from the kernel's state;
+the passing is system calls, so both transcripts carry it.
 The second thread has a pool, a process and a table of its own,
 so every switch between them reloads the PMP under the self-check's eye,
 and a pool it creates lies below its own,
@@ -727,7 +735,13 @@ so it cannot say where one would land.
 While tracing is on, the tick therefore preempts nobody.
 The interrupt is still taken and acknowledged on QEMU,
 so the replay exercises the interrupt entry and return,
-but a switch happens only when a thread waits.
+but a switch happens only when a thread waits
+or when a record asks for the tick's decision through `OP_DEBUG_TICK`.
+The kernel loses nothing by that:
+it runs with interrupts off, so a tick lands only in user mode,
+and every such landing is the same to it, a ready thread whose frame is saved.
+What the demo in `user/init.c` alone still checks
+is the interrupt landing between two instructions.
 The replay driver starts its second thread after turning tracing on,
 so that no tick runs it before the records it takes are in place.
 Preemption itself is checked by the demo in `user/init.c`:

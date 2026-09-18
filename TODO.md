@@ -47,8 +47,19 @@ Design decisions behind these items live in `DESIGN.md`.
   That a signal wakes a thread waiting on *that* notification,
   and hands it the bits that were set,
   is checked only by the demo in `user/init.c`.
-- The tick preempts nobody while tracing is on,
-  so preemption is checked only by the demo in `user/init.c`.
+- The tick preempts nobody while tracing is on;
+  `OP_DEBUG_TICK` replays its decision,
+  and only the interrupt landing between two instructions
+  is checked by the demo in `user/init.c` alone.
+- The replay driver has two threads, so a record's actor is one of two.
+  More of them, each with its process and pool as the second has,
+  would give the round more candidates and the pool tree more branches;
+  the prologue in `include/rvuos/replay.h` and `host_boot` grow with them.
+- The fuzzer mutates bytes, but a record has fields with small ranges.
+  A custom mutator that inserts, deletes and swaps whole records
+  would reach a handoff or a tick without guessing it byte by byte.
+  Measured once: four minutes from the seeds reach a few more branches
+  with the actor field than without, so the guessing is the bottleneck.
 - Escape-attempt suite under QEMU:
   one user program per scenario, expected outcome a specific fault.
   Execute from data, jump into the kernel, `csrr` and `mret` from user mode,

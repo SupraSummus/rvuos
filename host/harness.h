@@ -35,6 +35,13 @@ struct thread *host_boot(void);
 uint32_t host_syscall(const struct replay_record *c);
 
 /*
+ * Deliver one event: pass the record to the thread it names
+ * the way the replay driver does, then perform it.
+ * False when the driver died on the way, see host_driver_alive.
+ */
+bool host_event(const struct replay_record *c);
+
+/*
  * True while the running driver thread could still run on real hardware:
  * its process maps the driver's code read-execute and its data read-write.
  * On QEMU the driver faults as soon as this stops holding;

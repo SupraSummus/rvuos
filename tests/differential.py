@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Replay fuzz inputs on QEMU and on the host build and compare the traces.
 
-Each input is a sequence of 16-byte system call records.
-The host build performs them directly on the kernel's logic;
+Each input is a sequence of 16-byte records:
+a system call with the thread that makes it, or the tick as OP_DEBUG_TICK.
+The host build performs them directly on the kernel's logic,
+passing a record to the thread it names as the driver does;
 QEMU boots the real kernel with the replay driver as root task
 and the input placed in RAM by QEMU's generic loader.
 Both print one `trace:` line per call from the same kernel code,
