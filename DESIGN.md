@@ -666,9 +666,21 @@ libFuzzer feeds system call records into the root thread's registers
 and the self-check runs after every call, under ASan and UBSan.
 Since no system call takes a pointer,
 the registers are the whole attack surface.
-The minimised corpus is checked in under `tests/corpus`.
+The inputs replayed are checked in under `tests/seeds` and `tests/corpus`.
+A seed is written by hand for a scenario the kernel must handle,
+is named after that scenario, and is kept for as long as the scenario exists.
+The corpus is what the fuzzer found,
+and `make corpus-merge` rebuilds it from scratch each time:
+an input stays only while it adds coverage on some harness
+beyond the seeds and the inputs kept before it.
+Coverage is measured against the kernel as it is,
+so an input that was unique for an earlier kernel
+and covers nothing new today is dropped rather than kept for its history.
 `make mutants` plants bugs in the kernel one at a time
-and requires the replay to catch each.
+and requires the replay to catch each;
+it is also the check that a minimisation lost nothing,
+and an input that some mutant needs but coverage does not keep
+belongs among the seeds under a name.
 
 **QEMU** (`make test`, `make qemu-replay`).
 `make test` boots the real kernel and checks the root task's transcript:
