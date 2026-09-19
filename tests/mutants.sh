@@ -1,7 +1,7 @@
 #!/bin/sh
 # Validate the self-check by planting bugs in the kernel.
 # Each mutant is a sed expression applied to one kernel file in a scratch copy;
-# replaying the corpus there, or a short fuzz run, must report an invariant violation.
+# replaying the seeds and the corpus there must report an invariant violation.
 
 set -eu
 
@@ -19,9 +19,7 @@ mutant() {
         echo "mutant $name: sed expression did not change $file" >&2
         exit 1
     fi
-    # The corpus replay should catch it; give a short fuzz run a chance otherwise.
-    if (cd "$work/tree" && make -s host-test >"$work/log" 2>&1) &&
-       (cd "$work/tree" && make -s fuzz FUZZ_TIME=60 >"$work/log" 2>&1); then
+    if (cd "$work/tree" && make -s host-test >"$work/log" 2>&1); then
         echo "mutant $name: NOT caught" >&2
         exit 1
     fi
