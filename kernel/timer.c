@@ -51,17 +51,3 @@ void timer_init(void)
     timer_ack();
     csr_set(mie, MIE_MTIE);
 }
-
-/*
- * wfi resumes when an enabled interrupt is pending,
- * whether or not machine mode would take it,
- * and the kernel runs with MIE clear, so the tick is polled rather than taken.
- * A core may also treat wfi as a no-op, which the loop tolerates.
- */
-void timer_wait(void)
-{
-    while (!(csr_read(mip) & MIP_MTIP)) {
-        __asm__ volatile("wfi");
-    }
-    timer_ack();
-}

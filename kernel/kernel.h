@@ -1,6 +1,7 @@
 #ifndef RVUOS_KERNEL_H
 #define RVUOS_KERNEL_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -21,6 +22,17 @@
 /* The last 64 KiB of RAM hold test input placed there by the loader. */
 #define INPUT_SIZE     0x00010000u
 #define INPUT_BASE     (RAM_BASE + RAM_SIZE - INPUT_SIZE)
+
+/*
+ * True if [base, base + size) lies within RAM.
+ * Kernel objects live in RAM alone:
+ * a pool is zeroed and written by the kernel,
+ * which on a device range would drive registers from machine mode.
+ */
+static inline bool ram_contains(uint32_t base, uint32_t size)
+{
+    return base >= RAM_BASE && base - RAM_BASE < RAM_SIZE && size <= RAM_SIZE - (base - RAM_BASE);
+}
 
 /* main.c, entered from start.S. */
 __attribute__((noreturn)) void kmain(void);

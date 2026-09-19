@@ -31,7 +31,7 @@
 #define KERR_INVALID_ARG  4
 #define KERR_NO_MEMORY    5 /* pool exhausted */
 #define KERR_SLOT_IN_USE  6 /* destination slot already holds a capability */
-#define KERR_OVERLAP      7 /* region overlaps a pool or an installed region */
+#define KERR_OVERLAP      7 /* region overlaps a pool or an installed region; line already bound */
 #define KERR_LIMIT        8 /* a fixed kernel limit was hit, such as PMP entries */
 #define KERR_STATE        9 /* the object is not in a state that allows this */
 
@@ -45,6 +45,8 @@
 #define CAP_DEBUG    6 /* console output and machine halt, for bring-up */
 #define CAP_NOTIFICATION 7
 #define CAP_TIMER    8 /* signals a notification when a delay has passed */
+#define CAP_IRQ_LINE 9 /* a range of interrupt lines; no kernel object behind it */
+#define CAP_IRQ      10 /* one line bound to a notification; signals it when the line fires */
 
 /*
  * Rights bits.
@@ -54,6 +56,8 @@
  * Process, Thread: RIGHT_W to control the object.
  * Notification: RIGHT_W to signal, RIGHT_R to wait.
  * Timer: RIGHT_W to set or cancel.
+ * IrqLine: RIGHT_W to bind a line.
+ * Irq: RIGHT_W to set or mask.
  * Debug: any right.
  * Copying a capability can only remove rights.
  */
@@ -89,6 +93,17 @@
  * see DESIGN.md, "Verification".
  */
 #define OP_DEBUG_TICK 17
+/*
+ * Debug: what a device interrupt does, on request. a1 = the line.
+ * The Irq armed on the line masks it and signals its bits,
+ * exactly as the interrupt would; the controller is not consulted.
+ * Fails with KERR_STATE when nothing is armed on the line,
+ * which is when the controller would not raise it either,
+ * and with KERR_INVALID_ARG for a line the controller does not have.
+ * It is how a replay fires an interrupt, since the host build has no devices;
+ * see DESIGN.md, "Verification".
+ */
+#define OP_DEBUG_IRQ 22
 
 /*
  * CapTable (RIGHT_W): copy a capability from the caller's table.
@@ -212,8 +227,39 @@
  */
 #define OP_TIMER_SET 18
 
+/*
+ * IrqLine: derive a smaller range of lines with the same rights.
+ * a1 = offset from the first line, a2 = count, a3 = destination slot.
+ * Like OP_REGION_CARVE, this is a table operation that touches no kernel memory.
+ */
+#define OP_IRQ_CARVE 19
+/*
+ * IrqLine (RIGHT_W): bind the one line the capability names to a notification,
+ * as an Irq object.
+ * a1 = the slot of the Pool capability the Irq is allocated from, which needs RIGHT_W,
+ * a2 = the slot of the Notification capability the Irq signals, which needs RIGHT_W
+ *      and must lie in that pool,
+ * a3 = destination slot for the Irq capability.
+ * The invoked slot is cleared, and may be the destination.
+ * The capability must name exactly one line; carve first.
+ * Fails with KERR_OVERLAP if an Irq is already bound to the line;
+ * the line is free again once that Irq's pool is destroyed.
+ * The new Irq is masked: it signals nothing until OP_IRQ_SET arms it.
+ */
+#define OP_IRQ_BIND 20
+/*
+ * Irq (RIGHT_W): unmask the line and name the bits the next interrupt signals.
+ * a1 = the bits.
+ * The interrupt masks the line again as it signals,
+ * so a driver hears about a line once until it says otherwise;
+ * this call is how it says so, after it has serviced the device.
+ * Setting an armed Irq replaces its bits;
+ * a1 = 0 masks the line and takes back no signal that already happened.
+ */
+#define OP_IRQ_SET 21
+
 /* One above the highest operation code; the fuzzer's mutator draws below it. */
-#define OP_COUNT 19
+#define OP_COUNT 23
 
 /*
  * Capability slots the kernel fills in the root task's table at boot.
@@ -229,7 +275,9 @@
 #define BOOT_CAP_DATA      7 /* Region: the root task's data and stack */
 #define BOOT_CAP_FREE_RAM  8 /* Region: all RAM the kernel does not use */
 #define BOOT_CAP_INPUT     9 /* Region, read only: test input the loader placed in RAM */
-#define BOOT_CAP_COUNT     10
+#define BOOT_CAP_IRQ_LINES 10 /* IrqLine: every line of the interrupt controller, from line 1 up */
+#define BOOT_CAP_UART      11 /* Region, read and write: the console UART's registers */
+#define BOOT_CAP_COUNT     12
 
 /*
  * Replay input, as loaded into the BOOT_CAP_INPUT region:

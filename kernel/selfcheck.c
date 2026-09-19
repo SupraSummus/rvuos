@@ -14,6 +14,7 @@
  * It is freestanding so that the same file serves both.
  */
 
+#include "irq.h"
 #include "kernel.h"
 #include "object.h"
 #include "pmp.h"
@@ -136,7 +137,7 @@ static void check_pools(void)
             }
             if (o->type != CAP_CAPTABLE && o->type != CAP_PROCESS &&
                 o->type != CAP_THREAD && o->type != CAP_NOTIFICATION &&
-                o->type != CAP_TIMER) {
+                o->type != CAP_TIMER && o->type != CAP_IRQ) {
                 fail("object has an unexpected type", at, o->type, 0);
             }
             at += aligned_size(o);
@@ -317,6 +318,56 @@ static void check_timer(const struct timer *t)
     }
 }
 
+static void check_irq(const struct irq *i)
+{
+    struct obj_header *n = object_find(i->ntfn);
+    if (n == NULL || n->type != CAP_NOTIFICATION) {
+        fail("irq has no live notification", v2p(i), i->ntfn, 0);
+    }
+    if (n->pool != i->hdr.pool) {
+        fail("irq and its notification live in different pools", v2p(i), 0, 0);
+    }
+    if (i->line == 0 || i->line >= IRQ_LINES) {
+        fail("irq names a line the controller does not have", v2p(i), i->line, 0);
+    }
+}
+
+/*
+ * The controller forwards a line exactly while an Irq is armed on it,
+ * and at most one Irq is bound to any line.
+ * check_irq has vetted each object, so the bitmaps below are in range.
+ * The enable bits are read back from the controller,
+ * as the PMP CSRs are read back for the running process.
+ */
+static void check_lines(void)
+{
+    uint32_t bound[(IRQ_LINES + 31) / 32] = { 0 };
+    uint32_t armed[(IRQ_LINES + 31) / 32] = { 0 };
+
+    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
+        if (o->type != CAP_IRQ) {
+            continue;
+        }
+        const struct irq *i = (const struct irq *)o;
+        uint32_t word = i->line / 32;
+        uint32_t bit = 1u << (i->line % 32);
+        if (bound[word] & bit) {
+            fail("two irqs are bound to one line", v2p(i), i->line, 0);
+        }
+        bound[word] |= bit;
+        if (irq_armed(i)) {
+            armed[word] |= bit;
+        }
+    }
+    for (uint32_t line = 1; line < IRQ_LINES; line++) {
+        bool want = (armed[line / 32] >> (line % 32)) & 1u;
+        if (irq_enabled(line) != want) {
+            fail(want ? "armed irq's line is masked" : "controller forwards a line nothing is armed on",
+                 line, 0, 0);
+        }
+    }
+}
+
 static void check_captable(const struct captable *table)
 {
     if (table->nslots == 0 || table->nslots > CAPTABLE_MAX_SLOTS) {
@@ -346,12 +397,22 @@ static void check_captable(const struct captable *table)
             }
             break;
         }
+        case CAP_IRQ_LINE:
+            /* The root task received every line from 1 up, with RIGHT_W; nothing widens that. */
+            if (c->a == 0 || c->b == 0 || c->a >= IRQ_LINES || c->b > IRQ_LINES - c->a) {
+                fail("line capability outside the controller", v2p(table), i, c->a);
+            }
+            if (c->rights & ~RIGHT_W) {
+                fail("line capability with rights beyond the grant", v2p(table), i, c->rights);
+            }
+            break;
         case CAP_POOL:
         case CAP_CAPTABLE:
         case CAP_PROCESS:
         case CAP_THREAD:
         case CAP_NOTIFICATION:
-        case CAP_TIMER: {
+        case CAP_TIMER:
+        case CAP_IRQ: {
             /* A destroy sweeps the tables, so every object capability points at a live object. */
             struct obj_header *o = object_find(c->a);
             if (o == NULL || o->type != c->type) {
@@ -388,10 +449,14 @@ void selfcheck_run(void)
         case CAP_TIMER:
             check_timer((struct timer *)o);
             break;
+        case CAP_IRQ:
+            check_irq((struct irq *)o);
+            break;
         default:
             break;
         }
     }
+    check_lines();
 
     if (current != NULL) {
         struct obj_header *o = object_find(v2p(current));

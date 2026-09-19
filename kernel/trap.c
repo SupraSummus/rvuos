@@ -42,18 +42,28 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
 
     uint32_t cause = frame->mcause;
     if (cause & MCAUSE_INTERRUPT) {
-        if (cause == (MCAUSE_INTERRUPT | IRQ_M_TIMER)) {
-            /* mepc points at the interrupted instruction, which resumes as it was. */
+        /* mepc points at the interrupted instruction, which resumes as it was. */
+        switch (cause & ~MCAUSE_INTERRUPT) {
+        case IRQ_M_TIMER:
             timer_ack();
             /* Under tracing time moves only by record; see DESIGN.md, "Verification". */
             if (!debug_trace) {
                 sched_tick();
             }
             return &current->frame;
+        case IRQ_M_EXT:
+            /*
+             * Delivered under tracing as well: a line left claimed would storm
+             * and one masked without its Irq disarmed would break an invariant.
+             * The replay driver holds no device, so none arrives; see DESIGN.md, "Verification".
+             */
+            sched_claim_interrupts();
+            return &current->frame;
+        default:
+            kputs("unexpected interrupt\n");
+            report_frame(frame);
+            kpanic("only the timer and the external interrupt are enabled");
         }
-        kputs("unexpected interrupt\n");
-        report_frame(frame);
-        kpanic("only the timer interrupt is enabled");
     }
 
     switch (cause) {
@@ -76,6 +86,29 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
     }
 
     return &current->frame;
+}
+
+/*
+ * wfi resumes when an enabled interrupt is pending,
+ * whether or not machine mode would take it,
+ * and the kernel runs with MIE clear, so the interrupt is polled rather than taken.
+ * A core may also treat wfi as a no-op, which the loop tolerates.
+ */
+unsigned intr_wait(void)
+{
+    uint32_t ip;
+    while (((ip = csr_read(mip)) & (MIP_MTIP | MIP_MEIP)) == 0) {
+        __asm__ volatile("wfi");
+    }
+    unsigned pending = 0;
+    if (ip & MIP_MTIP) {
+        timer_ack();
+        pending |= INTR_TICK;
+    }
+    if (ip & MIP_MEIP) {
+        pending |= INTR_DEVICE;
+    }
+    return pending;
 }
 
 void kernel_trap_panic(void)

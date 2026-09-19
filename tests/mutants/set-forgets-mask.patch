@@ -1,0 +1,18 @@
+OP_IRQ_SET with zero bits disarms the Irq but leaves the line unmasked.
+The next interrupt would find nothing armed to signal;
+the controller forwards a line exactly while an Irq is armed on it.
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -470,7 +470,9 @@
+     }
+     /* Armed and unmasked are one state, here and in sched_interrupt. */
+     irq->bits = arg[1];
+-    irq_enable(irq->line, irq_armed(irq));
++    if (irq_armed(irq)) {
++        irq_enable(irq->line, true);
++    }
+     return KERR_OK;
+ }
+ 

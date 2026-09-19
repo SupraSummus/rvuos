@@ -1,0 +1,16 @@
+An interrupt that fires leaves its line unmasked.
+The controller would forward the level again at once,
+to an Irq that has disarmed and has nothing to signal;
+the controller forwards a line exactly while an Irq is armed on it.
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -111,7 +111,6 @@
+      * Masked before it signals and disarmed as it does,
+      * so the driver hears once and the level may stay high until it has looked.
+      */
+-    irq_enable(line, false);
+     uint32_t bits = irq->bits;
+     irq->bits = 0;
+     sched_signal(irq_notification(irq), bits);

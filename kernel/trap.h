@@ -57,4 +57,18 @@ __attribute__((noreturn)) void trap_return(struct trap_frame *frame);
 /* Called from start.S when the kernel itself traps. */
 __attribute__((noreturn)) void kernel_trap_panic(void);
 
+/* What intr_wait found pending. */
+#define INTR_TICK   0x1u
+#define INTR_DEVICE 0x2u
+
+/*
+ * Stall until the tick or a device interrupt is pending and say which.
+ * The tick is acknowledged here; device interrupts stay in the controller
+ * for sched_claim_interrupts to claim.
+ * This is what the kernel does when no thread can run
+ * but a Timer or an armed Irq will make one runnable; see DESIGN.md, "Scheduling".
+ * The host build has no clock and no devices and must never get here.
+ */
+unsigned intr_wait(void);
+
 #endif

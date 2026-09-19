@@ -1,0 +1,18 @@
+A line may be bound twice.
+The interrupt would reach whichever Irq the walk finds first
+and the other would stay armed on a line it never hears;
+at most one Irq is bound to any line.
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -427,9 +427,6 @@
+         if (ntfn->hdr.pool != pool->base) {
+             return KERR_INVALID_ARG;
+         }
+-        if (line_binding(first) != NULL) {
+-            return KERR_OVERLAP;
+-        }
+         /* The invoked slot is cleared below, so it may receive the Irq capability. */
+         if (arg[3] != slot) {
+             err = cap_slot_free(thread_table(t), arg[3]);

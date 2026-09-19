@@ -18,7 +18,7 @@ int cap_lookup(struct captable *table, uint32_t slot, struct cap *out)
      * It costs one load and stops a hole in that sweep
      * from becoming a cast of user memory to a kernel object.
      */
-    if (c.type != CAP_REGION && c.type != CAP_DEBUG && cap_object(&c)->type != c.type) {
+    if (cap_has_object(c.type) && cap_object(&c)->type != c.type) {
         return KERR_INVALID_CAP;
     }
     *out = c;
@@ -79,10 +79,7 @@ void cap_revoke_range(uint32_t base, uint32_t size)
         struct captable *table = (struct captable *)o;
         for (uint32_t i = 0; i < table->nslots; i++) {
             struct cap *c = &table->slots[i];
-            if (c->type == CAP_NONE || c->type == CAP_REGION || c->type == CAP_DEBUG) {
-                continue;
-            }
-            if (range_contains(base, size, c->a)) {
+            if (cap_has_object(c->type) && range_contains(base, size, c->a)) {
                 c->type = CAP_NONE;
             }
         }
@@ -107,6 +104,17 @@ struct cap cap_to_region(uint32_t base, uint32_t size, uint8_t rights)
         .rights = rights,
         .a = base,
         .b = size,
+    };
+    return c;
+}
+
+struct cap cap_to_lines(uint32_t first, uint32_t count, uint8_t rights)
+{
+    struct cap c = {
+        .type = CAP_IRQ_LINE,
+        .rights = rights,
+        .a = first,
+        .b = count,
     };
     return c;
 }
