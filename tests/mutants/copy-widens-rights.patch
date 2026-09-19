@@ -1,0 +1,18 @@
+A copy takes the rights the caller asks for
+instead of narrowing the ones the source capability holds.
+Rights only narrow through copies,
+so a table ends up with a capability wider than the one it came from.
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+index caf6e35..b27938c 100644
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -51,7 +51,7 @@ static int op_captable(struct thread *t, const struct cap *cap,
+         if (err != KERR_OK) {
+             return err;
+         }
+-        src.rights &= (uint8_t)arg[3];
++        src.rights = (uint8_t)arg[3];
+         return cap_store(table, arg[1], &src);
+     }
+     case OP_CAP_DELETE:

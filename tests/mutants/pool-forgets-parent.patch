@@ -1,0 +1,16 @@
+A pool that forgets who created it hangs from nothing, not from the boot pool.
+The pool tree is then a forest, and a destroy above it does not reach it.
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+index caf6e35..ec5e9c7 100644
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -105,7 +105,7 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
+         /* From here on the memory is the kernel's. */
+         memset(p2v(base), 0, size);
+         /* The new pool hangs below the caller's own, and dies with it. */
+-        struct pool *pool = pool_create(base, size, cap->rights, obj_pool(&t->hdr));
++        struct pool *pool = pool_create(base, size, cap->rights, NULL);
+         struct cap pc = cap_to_object(&pool->hdr, RIGHT_ALL);
+         cap_clear(thread_table(t), slot);
+         return cap_store(thread_table(t), arg[1], &pc);

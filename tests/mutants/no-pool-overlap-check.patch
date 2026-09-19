@@ -1,0 +1,17 @@
+A pool is made over memory a live pool already covers.
+Two pools then claim the same words,
+and the pool tree is no longer a partition of the memory it manages.
+
+diff --git a/kernel/process.c b/kernel/process.c
+index f398bd5..9874b11 100644
+--- a/kernel/process.c
++++ b/kernel/process.c
+@@ -87,7 +87,7 @@ int process_install(struct process *proc, unsigned slot,
+     if (proc->slots[slot].rights) {
+         return KERR_SLOT_IN_USE;
+     }
+-    if (pool_overlaps(base, size)) {
++    if (0) {
+         return KERR_OVERLAP;
+     }
+     for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {

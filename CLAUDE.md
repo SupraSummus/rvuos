@@ -29,7 +29,8 @@ When the kernel's object model changes,
 update `kernel/selfcheck.c` with it;
 it is the executable form of the properties in `DESIGN.md`.
 When a change adds or moves an invariant,
-run `make mutants` as well and plant a mutant for the new one.
+run `make mutants` as well
+and plant a mutant for the new one as a patch under `tests/mutants/`.
 
 ## Documentation of decisions
 

@@ -1,0 +1,17 @@
+Every PMP entry a segment produces carries the write bit,
+whatever the segment's rights say.
+The PMP the self-check reads back no longer matches the running process's segments.
+
+diff --git a/kernel/process.c b/kernel/process.c
+index f398bd5..cb36feb 100644
+--- a/kernel/process.c
++++ b/kernel/process.c
+@@ -51,7 +51,7 @@ static int rebuild_pmp(struct process *proc, struct pmp_image *img)
+             return KERR_LIMIT;
+         }
+         img->addr[img->count] = s->base + s->size;
+-        img->cfg[img->count] = PMP_A_TOR | rights_to_pmp(s->rights);
++        img->cfg[img->count] = PMP_A_TOR | rights_to_pmp(s->rights) | PMP_W;
+         img->count++;
+         prev_end = s->base + s->size;
+     }
