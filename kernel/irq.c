@@ -1,6 +1,6 @@
 /*
  * Interrupt controller of the QEMU virt board: the PLIC, as seen by hart 0 in machine mode.
- * A board with another controller replaces this file, as it does timer.c and uart.c.
+ * A board with another controller replaces this file, as it does timer.c and halt.c.
  */
 
 #include <stdint.h>

@@ -167,6 +167,8 @@ struct timer {
  * the line stays quiet until the driver arms the Irq again,
  * which it does once it has serviced the device.
  * One Irq per line; see DESIGN.md, "Interrupts".
+ * Line LOG_IRQ_LINE is the kernel's log, which klog.c raises and masks
+ * with no controller behind it; see DESIGN.md, "The kernel log".
  */
 struct irq {
     struct obj_header hdr;
@@ -436,7 +438,7 @@ struct granted_range {
     uint32_t size;
     uint8_t rights;
 };
-#define GRANTED_RANGES 5
+#define GRANTED_RANGES 6
 extern struct granted_range boot_granted[GRANTED_RANGES];
 extern struct pool *boot_pool;
 

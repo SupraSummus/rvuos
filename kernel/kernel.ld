@@ -17,6 +17,8 @@ USER_CODE_SIZE = 0x10000;
 
 KERNEL_STACK_SIZE = 16K;
 BOOT_POOL_SIZE    = 4K;
+/* The kernel's log ends where the user code begins; kernel.h has KLOG_BASE. */
+KLOG_REGION_SIZE  = 32 + 4K;
 
 SECTIONS
 {
@@ -62,7 +64,7 @@ SECTIONS
         __boot_pool_end = .;
     }
 
-    ASSERT(. <= USER_CODE_BASE, "kernel does not fit below the user code region")
+    ASSERT(. <= USER_CODE_BASE - KLOG_REGION_SIZE, "kernel does not fit below its log")
 
     . = USER_CODE_BASE;
     .user_code : {

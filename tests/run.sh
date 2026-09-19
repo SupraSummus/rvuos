@@ -21,6 +21,13 @@ fail() {
 }
 
 [ "$status" -eq 4 ] || fail "expected exit status 4 (user fault), got $status"
+# The kernel has no console: its log reaches the UART through the root task's logger
+# while the machine runs, and the halt writes the whole log out after it, under this line.
+# What the logger carried out therefore comes before the line, what only the halt did after.
+dump=$(grep -n 'rvuos: halting, the log follows' "$log" | head -1 | cut -d: -f1)
+[ -n "$dump" ] || fail "the halt did not write the log out"
+# The first occurrence of a line, for comparing against the dump's position.
+first() { grep -n "$1" "$log" | head -1 | cut -d: -f1; }
 grep -q 'rvuos: machine mode up' "$log" || fail "kernel did not boot"
 # QEMU implements sixteen entries with a four-byte grain; the probe must find exactly that.
 grep -q 'rvuos: pmp entries 0x00000010 grain 0x00000004' "$log" \
@@ -42,16 +49,21 @@ grep -q 'root: cascade ok' "$log" \
     || fail "destroying the child's pool did not take the pool the child made"
 grep -q 'root: timer ok' "$log" \
     || fail "the timer did not wake the only thread from its sleep"
-# Written by the driver itself, one byte per interrupt.
-grep -q 'root: uart driver ok' "$log" \
-    || fail "the userspace driver did not get its bytes out on the uart's interrupt"
-grep -q 'the masked line stays quiet: ok' "$log" \
-    || fail "a masked line signalled"
+grep -q 'the idle line stays quiet: ok' "$log" \
+    || fail "an armed line nothing raises signalled"
 grep -q 'root: irq ok' "$log" \
     || fail "destroying the irq's pool did not free its line"
+# The logger carried the kernel's banner and the root task's output to the UART itself,
+# one byte per interrupt, before the halt wrote the log out.
+# The fault comes right after the last lines, so those the halt may be first to carry;
+# the root task sleeps after the timer line, which is when the logger catches up.
+[ "$(first 'rvuos: machine mode up')" -lt "$dump" ] \
+    || fail "the logger did not carry the kernel's log out before the halt did"
+[ "$(first 'root: timer ok')" -lt "$dump" ] \
+    || fail "the logger did not carry the root task's output out before the halt did"
 grep -q 'user fault' "$log" || fail "PMP fault was not caught"
 # mepc's low bits move with the code layout.
-grep -q 'mcause=0x00000005 mepc=0x8010.... mtval=0x80212000' "$log" \
+grep -q 'mcause=0x00000005 mepc=0x8010.... mtval=0x80210000' "$log" \
     || fail "fault was not a load access fault on the removed region from user code"
 grep -q ': FAILED' "$log" && fail "a step failed"
 grep -q 'PMP did not stop the read' "$log" && fail "user read kernel memory"

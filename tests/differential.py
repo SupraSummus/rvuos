@@ -7,6 +7,9 @@ The host build performs them directly on the kernel's logic,
 passing a record to the thread it names as the driver does;
 QEMU boots the real kernel with the replay driver as root task
 and the input placed in RAM by QEMU's generic loader.
+The kernel has no console: on QEMU the replay driver carries the log
+to the UART after each record and the halt writes out what the last one left;
+on the host each byte is printed as the kernel appends it.
 Both print one `trace:` line per call from the same kernel code,
 followed by a terminal line: `user fault` when the driver finishes
 with its breakpoint or the records unmapped it,
@@ -46,7 +49,7 @@ TERMINAL_PREFIXES = (
 
 
 def decode(raw: bytes) -> str:
-    """Console output may contain arbitrary bytes from OP_DEBUG_PUTC."""
+    """The log may contain arbitrary bytes from OP_DEBUG_PUTC."""
     return raw.decode("utf-8", errors="replace")
 
 

@@ -1,0 +1,17 @@
+Arming the log's Irq ignores the level of the line.
+A reader that arms it with bytes untaken sleeps until the kernel prints again,
+though the line is high;
+an Irq armed on the log's line has nothing untaken behind it.
+
+diff --git a/kernel/klog.c b/kernel/klog.c
+index ca1e2bb..5bb66e6 100644
+--- a/kernel/klog.c
++++ b/kernel/klog.c
+@@ -71,6 +71,3 @@ void klog_set(struct irq *irq)
+ {
+-    /* The line is level: arming it while it is high is hearing it now. */
+-    if (irq_armed(irq) && klog_pending()) {
+-        klog_signal(irq);
+-    }
++    (void)irq;
+ }

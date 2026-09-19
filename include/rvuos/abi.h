@@ -42,7 +42,7 @@
 #define CAP_CAPTABLE 3
 #define CAP_PROCESS  4
 #define CAP_THREAD   5
-#define CAP_DEBUG    6 /* console output and machine halt, for bring-up */
+#define CAP_DEBUG    6 /* a byte into the kernel's log, and machine halt, for bring-up */
 #define CAP_NOTIFICATION 7
 #define CAP_TIMER    8 /* signals a notification when a delay has passed */
 #define CAP_IRQ_LINE 9 /* a range of interrupt lines; no kernel object behind it */
@@ -70,7 +70,7 @@
  * Operations, with the capability type they apply to and their arguments.
  */
 
-/* Debug: write one character. a1 = character. */
+/* Debug: append one byte to the kernel's log. a1 = the byte. See BOOT_CAP_LOG. */
 #define OP_DEBUG_PUTC 1
 /* Debug: halt the machine. a1 = exit code. Does not return. */
 #define OP_DEBUG_HALT 2
@@ -99,7 +99,8 @@
  * exactly as the interrupt would; the controller is not consulted.
  * Fails with KERR_STATE when nothing is armed on the line,
  * which is when the controller would not raise it either,
- * and with KERR_INVALID_ARG for a line the controller does not have.
+ * and with KERR_INVALID_ARG for a line the controller does not have,
+ * LOG_IRQ_LINE among them: the log's level is the log's, not a record's.
  * It is how a replay fires an interrupt, since the host build has no devices;
  * see DESIGN.md, "Verification".
  */
@@ -255,6 +256,8 @@
  * this call is how it says so, after it has serviced the device.
  * Setting an armed Irq replaces its bits;
  * a1 = 0 masks the line and takes back no signal that already happened.
+ * LOG_IRQ_LINE is level: a set that arms it while the log holds bytes
+ * the reader has not taken signals at once.
  */
 #define OP_IRQ_SET 21
 
@@ -275,9 +278,37 @@
 #define BOOT_CAP_DATA      7 /* Region: the root task's data and stack */
 #define BOOT_CAP_FREE_RAM  8 /* Region: all RAM the kernel does not use */
 #define BOOT_CAP_INPUT     9 /* Region, read only: test input the loader placed in RAM */
-#define BOOT_CAP_IRQ_LINES 10 /* IrqLine: every line of the interrupt controller, from line 1 up */
-#define BOOT_CAP_UART      11 /* Region, read and write: the console UART's registers */
-#define BOOT_CAP_COUNT     12
+#define BOOT_CAP_IRQ_LINES 10 /* IrqLine: LOG_IRQ_LINE and every line of the interrupt controller */
+#define BOOT_CAP_UART      11 /* Region, read and write: the board's UART registers */
+#define BOOT_CAP_LOG       12 /* Region, read and write: the kernel's log, see struct rvuos_log */
+#define BOOT_CAP_COUNT     13
+
+/*
+ * The kernel's log.
+ * The kernel has no console: every byte it prints, OP_DEBUG_PUTC included,
+ * goes into a ring in the kernel's memory, which BOOT_CAP_LOG maps.
+ * The region starts with this header and the ring follows at RVUOS_LOG_HEADER.
+ * The kernel writes head, a count of every byte ever written; byte n lies at n % size.
+ * The reader writes taken, the count of bytes it has read,
+ * and the kernel trusts it no further than the line below and what a halt writes out.
+ * Once head - taken exceeds size, bytes not yet taken have been overwritten
+ * and the oldest byte still kept is head - size.
+ * The kernel never waits for a reader.
+ *
+ * Interrupt line LOG_IRQ_LINE is the log's: high while head lies past taken,
+ * so a logger binds the line like a device's and waits for the log to grow;
+ * see DESIGN.md, "The kernel log".
+ */
+#define LOG_IRQ_LINE 0
+#define RVUOS_LOG_HEADER 32
+
+#ifndef __ASSEMBLER__
+struct rvuos_log {
+    uint32_t head;
+    uint32_t size;
+    uint32_t taken;
+};
+#endif
 
 /*
  * Replay input, as loaded into the BOOT_CAP_INPUT region:

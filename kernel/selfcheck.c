@@ -16,6 +16,7 @@
 
 #include "irq.h"
 #include "kernel.h"
+#include "klog.h"
 #include "object.h"
 #include "pmp.h"
 
@@ -327,17 +328,27 @@ static void check_irq(const struct irq *i)
     if (n->pool != i->hdr.pool) {
         fail("irq and its notification live in different pools", v2p(i), 0, 0);
     }
-    if (i->line == 0 || i->line >= IRQ_LINES) {
+    if (i->line >= IRQ_LINES) {
         fail("irq names a line the controller does not have", v2p(i), i->line, 0);
+    }
+    /*
+     * The log's line is high while the reader has bytes to take,
+     * and an Irq armed on a high line has been signalled, so it is not armed:
+     * the same "armed and unmasked are one state" as the controller's lines,
+     * with the log's head for the controller.
+     */
+    if (i->line == LOG_IRQ_LINE && irq_armed(i) && klog_pending()) {
+        fail("armed log irq while the log has bytes untaken", v2p(i), i->bits, 0);
     }
 }
 
 /*
  * The controller forwards a line exactly while an Irq is armed on it,
- * and at most one Irq is bound to any line.
+ * and at most one Irq is bound to any line, the log's included.
  * check_irq has vetted each object, so the bitmaps below are in range.
  * The enable bits are read back from the controller,
- * as the PMP CSRs are read back for the running process.
+ * as the PMP CSRs are read back for the running process;
+ * the log's line has no controller and check_irq reads its level instead.
  */
 static void check_lines(void)
 {
@@ -398,8 +409,8 @@ static void check_captable(const struct captable *table)
             break;
         }
         case CAP_IRQ_LINE:
-            /* The root task received every line from 1 up, with RIGHT_W; nothing widens that. */
-            if (c->a == 0 || c->b == 0 || c->a >= IRQ_LINES || c->b > IRQ_LINES - c->a) {
+            /* The root task received the log's line and the controller's, with RIGHT_W; nothing widens that. */
+            if (c->b == 0 || c->a >= IRQ_LINES || c->b > IRQ_LINES - c->a) {
                 fail("line capability outside the controller", v2p(table), i, c->a);
             }
             if (c->rights & ~RIGHT_W) {

@@ -70,8 +70,16 @@ and a wait with a timeout is the same wait with one more bit;
 Device interrupts have the same shape: an `Irq` object,
 bound to a notification, signals it when its line fires
 and masks the line until the driver arms it again.
-Interrupt lines are handed out as capabilities like memory is,
-and the root task drives the console UART's transmitter from user mode
-on its interrupt; `DESIGN.md`, "Interrupts", says how.
+Interrupt lines are handed out as capabilities like memory is;
+`DESIGN.md`, "Interrupts", says how.
+
+The kernel has no console.
+What it prints goes into a log in its own memory,
+which the root task maps like a device's registers,
+and the log has an interrupt line like a device has,
+high while the log holds bytes the reader has not taken.
+The root task's logger thread waits on that line and on the UART's,
+and carries the log out one byte per transmitter interrupt;
+`DESIGN.md`, "The kernel log", says why.
 
 No driver runs in the kernel; the roadmap in `TODO.md` says what comes next.

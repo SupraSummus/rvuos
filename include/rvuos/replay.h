@@ -46,15 +46,20 @@ static inline int replay_passes(const struct replay_record *r, unsigned me)
     return r->actor != 0 && r->actor <= REPLAY_THREADS && r->actor != me;
 }
 
-/* Region slot the input is installed in. */
+/*
+ * Region slots. The input is mapped only while the driver copies the records out,
+ * so that with the UART and the log the driver fits an eight-entry PMP.
+ */
 #define REPLAY_REGION_SLOT 7
+#define REPLAY_UART_SLOT 5
+#define REPLAY_LOG_SLOT 6
 
 /* Capability slots the setup fills, above the boot capabilities, in both tables. */
-#define REPLAY_CAP_NOTIFY  12
-#define REPLAY_CAP_THREAD  13 /* the second thread */
-#define REPLAY_CAP_POOL    14 /* the second thread's pool; first the region it is made of */
-#define REPLAY_CAP_TABLE   15 /* the second thread's table */
-#define REPLAY_CAP_PROCESS 16 /* the second thread's process */
+#define REPLAY_CAP_NOTIFY  13
+#define REPLAY_CAP_THREAD  14 /* the second thread */
+#define REPLAY_CAP_POOL    15 /* the second thread's pool; first the region it is made of */
+#define REPLAY_CAP_TABLE   16 /* the second thread's table */
+#define REPLAY_CAP_PROCESS 17 /* the second thread's process */
 
 /* The second thread's pool: the start of the free RAM, and as many slots as the root task has. */
 #define REPLAY_POOL_OFFSET 0x0000u
@@ -88,6 +93,8 @@ static const struct replay_record replay_prologue[] = {
     /* It runs the same code on the same data as the first thread; the input it never reads. */
     { OP_PROCESS_INSTALL, 0, REPLAY_CAP_PROCESS, 0, BOOT_CAP_CODE, RIGHT_R | RIGHT_X },
     { OP_PROCESS_INSTALL, 0, REPLAY_CAP_PROCESS, 1, BOOT_CAP_DATA, RIGHT_R | RIGHT_W },
+    { OP_PROCESS_INSTALL, 0, REPLAY_CAP_PROCESS, REPLAY_UART_SLOT, BOOT_CAP_UART, RIGHT_R | RIGHT_W },
+    { OP_PROCESS_INSTALL, 0, REPLAY_CAP_PROCESS, REPLAY_LOG_SLOT, BOOT_CAP_LOG, RIGHT_R | RIGHT_W },
     /* Its table mirrors the first one, the boot capabilities included. */
     REPLAY_COPY(BOOT_CAP_CAPTABLE),
     REPLAY_COPY(BOOT_CAP_PROCESS),
@@ -100,6 +107,7 @@ static const struct replay_record replay_prologue[] = {
     REPLAY_COPY(BOOT_CAP_INPUT),
     REPLAY_COPY(BOOT_CAP_IRQ_LINES),
     REPLAY_COPY(BOOT_CAP_UART),
+    REPLAY_COPY(BOOT_CAP_LOG),
     REPLAY_COPY(REPLAY_CAP_NOTIFY),
     REPLAY_COPY(REPLAY_CAP_THREAD),
     REPLAY_COPY(REPLAY_CAP_POOL),
@@ -110,6 +118,22 @@ static const struct replay_record replay_prologue[] = {
 
 #define REPLAY_PROLOGUE_COUNT \
     (sizeof(replay_prologue) / sizeof(replay_prologue[0]))
+
+/*
+ * Performed once the driver has copied the records out, still untraced.
+ * The kernel has no console, so the driver carries the log to the UART itself
+ * after every record, with no system call: it reads the ring and writes the mark
+ * in the log's header; host_event does the same to the kernel's state.
+ * The halt writes out what the last record left, see DESIGN.md, "The kernel log".
+ */
+static const struct replay_record replay_after_input[] = {
+    { OP_PROCESS_UNINSTALL, 0, BOOT_CAP_PROCESS, REPLAY_REGION_SLOT, 0, 0 },
+    { OP_PROCESS_INSTALL, 0, BOOT_CAP_PROCESS, REPLAY_UART_SLOT, BOOT_CAP_UART, RIGHT_R | RIGHT_W },
+    { OP_PROCESS_INSTALL, 0, BOOT_CAP_PROCESS, REPLAY_LOG_SLOT, BOOT_CAP_LOG, RIGHT_R | RIGHT_W },
+};
+
+#define REPLAY_AFTER_INPUT_COUNT \
+    (sizeof(replay_after_input) / sizeof(replay_after_input[0]))
 
 /*
  * Performed by both builds once tracing is on, as the first traced record.
