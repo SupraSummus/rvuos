@@ -15,7 +15,9 @@ with its breakpoint or the records unmapped it,
 `untraced thread` when the records started a thread
 whose code the host cannot follow,
 or `invariant violated`.
-The traces must match exactly.
+The traces must match exactly,
+and a trace ending in `invariant violated` fails its input
+even when both builds agree on it.
 """
 
 import argparse
@@ -98,7 +100,9 @@ def compare(name: str, qemu: list[str], kernel: str, host_bin: str, path: str):
     host = run_host(host_bin, path)
     target = run_qemu(qemu, kernel, data)
     if host == target:
-        return name, None
+        if host and host[-1].startswith("invariant violated"):
+            return name, "INVARIANT", "  both builds report: " + host[-1]
+        return name, None, None
     diff = []
     for i in range(max(len(host), len(target))):
         h = host[i] if i < len(host) else "<none>"
@@ -107,7 +111,7 @@ def compare(name: str, qemu: list[str], kernel: str, host_bin: str, path: str):
             diff.append(f"  line {i}:\n    host: {h}\n    qemu: {t}")
             if len(diff) >= 3:
                 break
-    return name, "\n".join(diff)
+    return name, "MISMATCH", "\n".join(diff)
 
 
 def main() -> int:
@@ -136,12 +140,13 @@ def main() -> int:
             for p in paths
         ]
         for fut in concurrent.futures.as_completed(futures):
-            name, diff = fut.result()
-            if diff is not None:
+            name, kind, detail = fut.result()
+            if kind is not None:
                 failures += 1
-                print(f"MISMATCH {name}\n{diff}")
+                print(f"{kind} {name}\n{detail}")
 
-    print(f"{len(paths) - failures}/{len(paths)} inputs match between host and QEMU")
+    print(f"{len(paths) - failures}/{len(paths)} inputs pass:"
+          " host and QEMU agree and no invariant is violated")
     return 1 if failures else 0
 
 

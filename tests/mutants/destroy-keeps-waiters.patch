@@ -1,0 +1,16 @@
+A destroy that leaves a thread blocked on a notification it took away.
+The thread waits on an object that is no longer live.
+
+diff --git a/kernel/pool.c b/kernel/pool.c
+index 71dce75..137ea02 100644
+--- a/kernel/pool.c
++++ b/kernel/pool.c
+@@ -69,7 +69,7 @@ void pool_destroy(struct pool *pool)
+         }
+         /* Nothing below may fail: the pool is going. */
+         cap_revoke_range(p->base, p->size);
+-        sched_unblock_range(p->base, p->size);
++
+         pool_unlink(p);
+         /* The memory is about to be user memory again, holding other processes' tables. */
+         memset(p2v(p->base), 0, p->size);

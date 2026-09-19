@@ -102,7 +102,8 @@ $(HOST_HARNESSES): $(HOST_KERNEL_SRC) $(HOST_SRC) host/fuzz.c $(HOST_HDR)
 host-test: $(HOST_HARNESSES)
 	for h in $^; do $$h -runs=0 tests/seeds tests/corpus || exit 1; done
 
-# Plant bugs in the kernel one at a time; each must fail host-test.
+# Plant the bugs of tests/mutants/ in the kernel one at a time.
+# The host replay must catch each; what the QEMU checks catch is reported.
 mutants:
 	tests/mutants.sh
 
@@ -134,7 +135,8 @@ corpus-merge: $(HOST_HARNESSES)
 	cp $(HOST_BUILD)/corpus-merged/* tests/corpus/
 
 # Replay the seeds and the corpus on the real kernel under QEMU
-# and compare every call's status with the host build.
+# and compare every call's status with the host build;
+# an invariant report on either side fails the input, matching or not.
 qemu-replay: $(BUILD)/kernel-fuzzdrv.elf $(HOST_BUILD)/fuzz
 	tests/differential.py --qemu "$(QEMU) $(QEMUFLAGS)" \
 		--kernel $(BUILD)/kernel-fuzzdrv.elf --host $(HOST_BUILD)/fuzz tests/seeds tests/corpus

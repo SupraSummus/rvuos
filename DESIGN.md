@@ -687,11 +687,18 @@ since `make qemu-replay` pays one QEMU boot per input.
 Coverage is measured against the kernel as it is,
 so an input that was unique for an earlier kernel
 and covers nothing new today is dropped rather than kept for its history.
-`make mutants` plants bugs in the kernel one at a time
-and requires the replay to catch each;
+`make mutants` plants bugs in the kernel one at a time,
+each a patch under `tests/mutants/` headed by the invariant it breaks,
+and requires the host replay to catch each with an invariant report;
 it is also the check that a minimisation lost nothing,
 and an input that some mutant needs but coverage does not keep
 belongs among the seeds under a name.
+The QEMU checks run on every mutant too and what they catch is reported,
+so that their strength is known without being required:
+`make test` runs one scenario with the self-check off
+and catches a bug only when the transcript changes;
+`make qemu-replay` catches one when the default machine's self-check reports it
+or the two traces differ.
 
 **QEMU** (`make test`, `make qemu-replay`).
 `make test` boots the real kernel and checks the root task's transcript:

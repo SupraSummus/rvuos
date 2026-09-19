@@ -1,0 +1,17 @@
+A thread woken from a notification keeps naming it.
+Only a waiting thread names a notification;
+a ready one that still does breaks the thread-state invariant.
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+index caf6e35..5c526d7 100644
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -313,7 +313,7 @@ static void wake(struct thread *t, uint32_t bits)
+ {
+     t->frame.regs[REG_A0] = KERR_OK;
+     t->frame.regs[REG_A1] = bits;
+-    t->waiting_on = 0;
++
+     t->state = THREAD_READY;
+     trace_wake_bits = bits;
+ }

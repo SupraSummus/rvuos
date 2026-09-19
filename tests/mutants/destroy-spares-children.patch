@@ -1,0 +1,16 @@
+A destroy that spares the pools below
+leaves them naming a parent that is gone.
+
+diff --git a/kernel/pool.c b/kernel/pool.c
+index 71dce75..1ad31e0 100644
+--- a/kernel/pool.c
++++ b/kernel/pool.c
+@@ -64,7 +64,7 @@ void pool_destroy(struct pool *pool)
+      */
+     for (struct pool *p = pool_list, *next; p != NULL; p = next) {
+         next = pool_next_pool(p);
+-        if (!pool_under(p, pool)) {
++        if (p != pool) {
+             continue;
+         }
+         /* Nothing below may fail: the pool is going. */
