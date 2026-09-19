@@ -680,8 +680,10 @@ A seed is written by hand for a scenario the kernel must handle,
 is named after that scenario, and is kept for as long as the scenario exists.
 The corpus is what the fuzzer found,
 and `make corpus-merge` rebuilds it from scratch each time:
-an input stays only while it adds coverage on some harness
-beyond the seeds and the inputs kept before it.
+an input stays only while it reaches an edge on some harness
+that the seeds and the inputs kept before it do not.
+How often an edge is hit guides the fuzzer but keeps no input,
+since `make qemu-replay` pays one QEMU boot per input.
 Coverage is measured against the kernel as it is,
 so an input that was unique for an earlier kernel
 and covers nothing new today is dropped rather than kept for its history.

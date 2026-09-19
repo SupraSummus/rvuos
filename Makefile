@@ -118,6 +118,7 @@ fuzz: $(HOST_BUILD)/fuzz
 # Rebuild tests/corpus from scratch out of itself and the working copy.
 # The seeds go in first and stay; each harness in turn then keeps
 # the inputs that add coverage on its machine beyond what is kept so far.
+# Coverage is the edges reached, not how often; DESIGN.md, "Verification", says why.
 # The corpus is thus minimal for the current kernel,
 # not for every kernel it has seen.
 # Run `make mutants` afterwards: it is the check that the minimisation lost nothing.
@@ -126,7 +127,7 @@ corpus-merge: $(HOST_HARNESSES)
 	rm -rf $(HOST_BUILD)/corpus-merged && mkdir -p $(HOST_BUILD)/corpus-merged
 	cp tests/seeds/* $(HOST_BUILD)/corpus-merged/
 	for h in $(HOST_HARNESSES); do \
-		$$h -merge=1 $(HOST_BUILD)/corpus-merged tests/corpus $(HOST_CORPUS) || exit 1; \
+		$$h -merge=1 -use_counters=0 $(HOST_BUILD)/corpus-merged tests/corpus $(HOST_CORPUS) || exit 1; \
 	done
 	for s in tests/seeds/*; do rm $(HOST_BUILD)/corpus-merged/$$(basename $$s); done
 	rm -f tests/corpus/*
