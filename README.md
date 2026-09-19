@@ -67,6 +67,11 @@ once a delay has passed, so a thread sleeps by waiting on it,
 and a wait with a timeout is the same wait with one more bit;
 `DESIGN.md`, "Time", says why.
 
-Device interrupts and a userspace driver
-are not implemented yet;
-see the roadmap in `TODO.md`.
+Device interrupts have the same shape: an `Irq` object,
+bound to a notification, signals it when its line fires
+and masks the line until the driver arms it again.
+Interrupt lines are handed out as capabilities like memory is,
+and the root task drives the console UART's transmitter from user mode
+on its interrupt; `DESIGN.md`, "Interrupts", says how.
+
+No driver runs in the kernel; the roadmap in `TODO.md` says what comes next.

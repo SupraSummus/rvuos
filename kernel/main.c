@@ -3,12 +3,12 @@
  */
 
 #include "csr.h"
+#include "irq.h"
 #include "kernel.h"
 #include "object.h"
 #include "pmp.h"
 #include "timer.h"
 #include "trap.h"
-#include "uart.h"
 
 extern char __boot_pool_start[];
 extern char __boot_pool_end[];
@@ -39,8 +39,10 @@ void kmain(void)
      * mret drops to the mode in MPP with MIE clear,
      * which gates nothing in user mode: machine interrupts
      * are always taken there, so the tick runs from the first instruction.
+     * Every device line starts masked and stays so until an Irq is armed on it.
      */
     timer_init();
+    irq_init();
     csr_clear(mstatus, MSTATUS_MPP_MASK | MSTATUS_MPIE);
     trap_return(&root->frame);
 }

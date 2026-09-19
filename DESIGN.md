@@ -197,6 +197,25 @@ On every tick the kernel sets `mtimecmp` a period ahead of `mtime`,
 not ahead of the previous compare value,
 so a long system call costs one late tick and not a burst of them.
 
+### Interrupt controller
+
+Device interrupts reach the core as one signal, the machine external interrupt,
+and an interrupt controller in front of it says which line it was.
+The kernel owns the controller as it owns the timer:
+it masks every line at boot,
+and a line is unmasked only while an `Irq` object is armed on it; see "Interrupts".
+The controller is the board's business, so `kernel/irq.c` is per board too.
+QEMU `virt` has a PLIC: a line is claimed by reading a register,
+which hands over the highest-priority pending line and holds it,
+and completed by writing the line back.
+The kernel masks the line between the two,
+so a level that stays high, as a device's does until it is serviced,
+does not come back before the driver asks for it.
+The kernel gives every line the same priority,
+so which of several pending lines is claimed first is not promised.
+QEMU's PLIC model does not recompute what it forwards on an enable write;
+`kernel/irq.c` says what it does about that.
+
 ### One address space
 
 There is a single physical address space shared by everything.
@@ -272,6 +291,9 @@ Carving a sub-region is therefore a pure table operation
 that touches no kernel memory,
 which is what lets the root task hand out memory
 before it has created a single pool.
+An `IrqLine` capability has the same shape for the same reason:
+its words are the first line and the count, there is no object,
+and the root task hands lines out as it hands out memory.
 
 ### Object types
 
@@ -284,7 +306,8 @@ before it has created a single pool.
 | `Thread` | An execution context inside a process: its registers and its state. |
 | `Notification` | A word of sticky signal bits. The only way a thread can stop and be started again. |
 | `Timer` | Signals a notification once a delay has passed. |
-| `Irq` | The right to receive one hardware interrupt as a notification. |
+| `IrqLine` | A range of interrupt lines. Bound one at a time into an `Irq`. |
+| `Irq` | One line bound to a notification. Signals it when the line fires. |
 | `Debug` | Console output and machine halt for bring-up and tests. No object. |
 
 Every object's size follows from its type,
@@ -369,7 +392,8 @@ so a structural parent must live in the same pool as its child
 or outlive it.
 The kernel enforces the same-pool rule at allocation:
 a `Process` must be allocated from the pool its `CapTable` lies in,
-and a `Thread` from the pool its `Process` lies in.
+a `Thread` from the pool its `Process` lies in,
+and a `Timer` or an `Irq` from the pool its `Notification` lies in.
 A thread waiting on a notification inside a destroyed pool
 is woken with `KERR_INVALID_CAP` and no bits,
 because the wait can no longer be answered.
@@ -523,8 +547,8 @@ it cannot forge data or consume another client's wake.
 Putting the bits in the capability, as seL4's badges are,
 is open decision 6.
 
-Interrupts will arrive as signals on the notification bound to an `Irq`,
-which is roadmap step 6 and needs no new mechanism.
+Interrupts arrive as signals on the notification bound to an `Irq`,
+which needed no new mechanism; see "Interrupts".
 
 ## Time
 
@@ -590,14 +614,13 @@ machine mode runs with `MIE` clear from the trap to the `mret`,
 so a system call is never interrupted and the kernel needs no locks.
 
 When a thread waits and nothing is runnable,
-only a `Timer` can make one runnable again,
-because only a running thread can signal
-and device interrupts do not exist yet.
-With a timer armed the kernel stalls in `wfi` until the tick is pending,
+only a `Timer` or an armed `Irq` can make one runnable again,
+because only a running thread can signal otherwise.
+With either armed the kernel stalls in `wfi`
+until the tick or a device interrupt is pending,
 takes it by hand since machine mode runs with `MIE` clear,
 and looks for a runnable thread again;
-with none it says `no runnable thread` and stops the machine.
-Device interrupts will join the timer as reasons to stall rather than stop.
+with neither it says `no runnable thread` and stops the machine.
 
 **Nothing more lives in the kernel.**
 Round-robin on a tick is the least policy that makes
@@ -607,19 +630,64 @@ and are now open decision 9.
 
 ## Interrupts
 
-Not implemented yet; roadmap step 6.
-The kernel owns the trap vector and the interrupt controller.
-A driver in userspace holds an `Irq` capability,
-binds it to a `Notification`,
-and waits.
-When the interrupt fires,
-the kernel masks it, signals the notification, and returns.
-The driver acknowledges through the `Irq` capability,
-which unmasks the line.
-No driver code runs in machine mode.
+**An interrupt is a signal, as a tick is.**
+The kernel owns the trap vector and the interrupt controller,
+and no driver code runs in machine mode.
+A driver holds an `IrqLine` capability naming one line,
+binds it with `OP_IRQ_BIND` to a notification in a pool of its choosing,
+which makes an `Irq` object there,
+arms the `Irq` with `OP_IRQ_SET` for the bits it wants,
+and waits on the notification.
+When the line fires, the kernel masks it, disarms the `Irq`
+and signals the bits, then returns to whatever was running;
+the driver runs when its turn comes, as a thread the timer woke does.
+Having serviced the device, the driver arms the `Irq` again,
+which is what unmasks the line.
+So the `Irq` has the `Timer`'s shape exactly:
+bound at creation to a notification in its own pool,
+armed with bits, disarmed by signalling,
+and a driver that gives the device one bit and a timer another
+has a wait with a timeout for the same two calls.
+The machine timer is the one interrupt the kernel keeps for itself,
+because the tick is its own; see "Scheduling".
 
-The machine timer is the one exception:
-the kernel handles it directly for scheduling.
+**Armed and unmasked are one state.**
+The controller forwards a line exactly while an `Irq` is armed on it,
+which the self-check reads back from the controller line by line.
+A line the kernel claims therefore always has an `Irq` to signal,
+and a device whose level stays high, as a UART's does until it is serviced,
+costs one trap and not a storm:
+the mask outlasts the claim, and only the driver lifts it.
+`OP_IRQ_SET` with no bits masks the line by hand,
+as `OP_TIMER_SET` with none cancels the timer.
+
+**Lines are authority, and the root task holds them all.**
+Interrupt lines are hardware, not kernel memory,
+so an `IrqLine` capability names no object, as a `Region` names none:
+the root task receives every line of the controller at boot,
+carves single lines out with `OP_IRQ_CARVE`, a table operation,
+and hands them to drivers the way it hands out memory.
+Binding consumes the invoked slot, as turning a region into a pool does,
+and copies of the line elsewhere are inert while the `Irq` exists,
+because a line is bound at most once and a second bind fails with `KERR_OVERLAP`.
+When the `Irq`'s pool is destroyed the kernel masks its line
+and the object is gone, so those copies work again:
+the lender of a line gets it back by destroying the borrower's pool,
+exactly as the lender of memory does, and open decision 7 applies to both.
+
+**One `Irq` per line.**
+Sharing a line between drivers is open decision 11;
+what the kernel does today is refuse the second binding.
+
+**No driver in the kernel.**
+The console UART is the first device:
+the kernel polls its transmitter for its own messages
+and the root task is granted the same registers and the same line,
+so `user/init.c` drives the transmitter from user mode on its interrupt
+while the kernel's console keeps working next to it.
+That sharing is a bring-up arrangement, not a design:
+a board with two UARTs gives one to the kernel and one to userspace,
+and a kernel without a console gives up the device altogether.
 
 ## Boot
 
@@ -631,9 +699,18 @@ The kernel:
 3. carves its own static state out of a small fixed SRAM range,
 4. constructs the root process by hand, including a `KernelPool`
    in a range the linker reserves,
-5. hands the root task capabilities to the remaining RAM
-   (later also flash, device ranges and interrupts),
-6. drops to user mode into the root task.
+5. hands the root task capabilities to the remaining RAM,
+   to the console UART's registers
+   and to every line of the interrupt controller
+   (later also flash and other device ranges),
+6. programs the tick, masks every interrupt line,
+   and drops to user mode into the root task.
+
+A device range is granted read and write, never execute,
+and can never become a pool:
+`OP_REGION_TO_POOL` refuses a range outside RAM,
+because the kernel zeroes a pool and writes objects into it,
+which on a device would drive its registers from machine mode.
 
 The slots the root task finds filled are listed in `include/rvuos/abi.h`
 as the `BOOT_CAP_*` constants.
@@ -670,6 +747,8 @@ Every capability in every table names either
 a region within the granted memory,
 on the PMP grain,
 with rights no greater than the root task received for it,
+or a range of lines the interrupt controller has,
+with no more than the right to bind,
 or a live kernel object of the capability's own type.
 
 **Structural soundness.**
@@ -698,6 +777,16 @@ An armed timer's deadline lies ahead of the tick count:
 the tick fires every timer that is due,
 and a timer that fires disarms itself.
 
+**Interrupts.**
+Every `Irq` names a live notification in its own pool
+and a line the controller has.
+At most one `Irq` is bound to any line.
+The controller forwards a line exactly while an `Irq` is armed on it,
+read back from the controller itself:
+an interrupt masks the line as it disarms the `Irq`,
+a set masks or unmasks it with the bits,
+and a destroy masks the lines of the `Irq`s it takes.
+
 **Memory safety.**
 No sequence of system calls makes the kernel read or write
 outside its own objects,
@@ -717,7 +806,10 @@ not the behaviour of one process:
 each record is a system call with the thread that makes it,
 and the tick is a record too, `OP_DEBUG_TICK`,
 which moves time by one tick and fires the timers due,
-so the host has a clock that ticks when the input says.
+so the host has a clock that ticks when the input says;
+a device interrupt is a record as well, `OP_DEBUG_IRQ`,
+which does to an armed `Irq` what the controller would,
+so the host has devices that fire when the input says.
 libFuzzer feeds the records into the threads' registers
 and the self-check runs after every call, under ASan and UBSan.
 Since no system call takes a pointer,
@@ -808,6 +900,13 @@ A traced run in which every thread waits therefore stops
 even with a timer armed, since no record is left to fire it,
 and the host build, which has no clock, agrees.
 The stall in `wfi` for an armed timer is checked by the demo in `user/init.c`.
+A device interrupt is delivered under tracing as it is otherwise,
+because a line left claimed would storm
+and one masked without its `Irq` disarmed would break an invariant;
+the replay driver holds no device and enables none,
+so none arrives during a replay, and `OP_DEBUG_IRQ` fires them by name.
+The path from the controller to the `Irq` is checked by the demo in `user/init.c`,
+which drives the console UART's transmitter on its interrupt.
 The kernel loses nothing by that:
 it runs with interrupts off, so a tick lands only in user mode,
 and every such landing is the same to it, a ready thread whose frame is saved.
@@ -938,7 +1037,7 @@ until the maintainer decides otherwise.
    It needs a way to stop a thread it started,
    `OP_THREAD_SUSPEND` in `TODO.md`,
    and a tick of its own, a notification the timer signals,
-   the shape every device interrupt takes in roadmap step 6.
+   the shape every device interrupt takes.
    What it cannot do is choose between two runnable threads
    for less than a system call per switch.
    Decide when a workload needs one thread to run before another
@@ -953,8 +1052,20 @@ until the maintainer decides otherwise.
     The cases that ask for one have other answers:
     a lock whose holder was preempted is a short spin on `lr`/`sc`
     and then a wait on a notification the unlocker signals,
-    and polling a device ends with `Irq` in roadmap step 6.
+    and polling a device ends with an `Irq`.
     A sleep bounded from above, "no longer than", was considered as the same operation;
     it would have to round the delay down and end in a spin of up to one tick.
     Revisit when a workload measures the cost of a slice burnt
     behind a preempted lock holder.
+
+11. **Sharing an interrupt line.**
+    Working default: one `Irq` per line, and a second bind fails.
+    Boards wire several devices to one line,
+    and then either one driver serves them all
+    or several `Irq`s hang on the line,
+    every one is signalled when it fires,
+    and the line stays masked until every one is armed again,
+    which is a count the kernel would keep per line.
+    The `IrqLine` capability would then be copied rather than carved,
+    and `KERR_OVERLAP` on a bind would go.
+    Decide when a board with a shared line is worth that count.

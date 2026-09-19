@@ -84,6 +84,15 @@ static inline uint32_t rv_timer_set(uint32_t timer_cap, uint32_t bits, uint32_t 
     return rv_invoke(OP_TIMER_SET, timer_cap, bits, us, 0);
 }
 
+/*
+ * OP_IRQ_SET: unmask the Irq's line and have the next interrupt signal bits.
+ * The interrupt masks the line again, so this is also the acknowledgement. bits = 0 masks.
+ */
+static inline uint32_t rv_irq_set(uint32_t irq_cap, uint32_t bits)
+{
+    return rv_invoke(OP_IRQ_SET, irq_cap, bits, 0, 0);
+}
+
 static inline void rv_putc(uint32_t debug_cap, char c)
 {
     rv_invoke(OP_DEBUG_PUTC, debug_cap, (uint32_t)c, 0, 0);

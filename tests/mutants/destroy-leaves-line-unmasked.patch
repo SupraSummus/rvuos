@@ -1,0 +1,15 @@
+A pool destroy forgets the lines of the Irqs it takes.
+The controller would go on forwarding a line to an object that is gone;
+the controller forwards a line exactly while an Irq is armed on it.
+
+diff --git a/kernel/pool.c b/kernel/pool.c
+--- a/kernel/pool.c
++++ b/kernel/pool.c
+@@ -70,7 +70,6 @@
+         /* Nothing below may fail: the pool is going. */
+         cap_revoke_range(p->base, p->size);
+         sched_unblock_range(p->base, p->size);
+-        sched_unbind_range(p->base, p->size);
+         pool_unlink(p);
+         /* The memory is about to be user memory again, holding other processes' tables. */
+         memset(p2v(p->base), 0, p->size);

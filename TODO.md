@@ -23,12 +23,14 @@ Design decisions behind these items live in `DESIGN.md`.
    the `A` extension in userspace,
    for what two threads that can now preempt each other
    do in shared memory.
-6. `Irq` objects and a userspace UART driver.
+6. Done: `Irq` objects and a userspace UART driver.
    An interrupt is a signal on the notification bound to the `Irq`,
-   so no new mechanism is needed;
-   the `Timer` object of `DESIGN.md`, "Time", is that shape already,
-   and the stall in `wfi` for an armed timer
-   is the one interrupts will use.
+   which has the `Timer`'s shape, and the stall in `wfi` covers both.
+   Lines are handed out as `IrqLine` capabilities, objectless like regions.
+   Still open from that step:
+   the driver in `user/init.c` transmits only,
+   because `make test` feeds the UART nothing to receive,
+   and open decision 11 in `DESIGN.md`, sharing a line.
 7. Done: pool destroy, with the capability table sweep in `DESIGN.md`,
    "Kernel pools and revocation",
    and the pool tree, so that a destroy takes the pools
@@ -54,6 +56,9 @@ Design decisions behind these items live in `DESIGN.md`.
   `OP_DEBUG_TICK` replays its decision,
   and only the interrupt landing between two instructions
   is checked by the demo in `user/init.c` alone.
+- `OP_DEBUG_IRQ` replays what a device interrupt does to an `Irq`;
+  the controller, the claim and the completion
+  are checked by the demo in `user/init.c` alone.
 - The replay driver has two threads, so a record's actor is one of two.
   More of them, each with its process and pool as the second has,
   would give the round more candidates and the pool tree more branches;
@@ -71,9 +76,12 @@ Design decisions behind these items live in `DESIGN.md`.
 
 ## Code
 
-- Before granting device ranges: `REGION_TO_POOL` zeroes the range,
-  which on MMIO would write device registers from machine mode.
-  Mark RAM grants poolable, or check against a RAM list.
+- The console UART serves the kernel's console and the root task at once,
+  a bring-up arrangement per `DESIGN.md`, "Interrupts".
+  The first board decides: a second UART for one of them, or no kernel console.
+- A device interrupt wakes its driver but does not run it;
+  the driver waits its turn in the round like a thread the timer woke.
+  Measure that latency on the first board; it belongs to open decision 9.
 - `pmp_init` stops counting at the first hardwired entry.
   A core with writable entries above a hardwired one loses them;
   have the image skip such entries if one turns up.

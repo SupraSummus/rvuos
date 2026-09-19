@@ -10,7 +10,7 @@
  * mscratch holds the user's sp.
  * A trap in that window would save registers through it in machine mode.
  * None can happen: the hardware clears MIE on trap and the kernel
- * never sets it again, so the timer interrupt waits for the mret,
+ * never sets it again, so interrupts wait for the mret,
  * the frame is RAM so the stores cannot fault,
  * and no PMP entry is locked, so PMP does not apply to machine mode.
  * Revisit when Smepmp arrives.

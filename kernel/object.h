@@ -158,6 +158,22 @@ struct timer {
     uint32_t deadline;
 };
 
+/*
+ * An Irq signals a notification when a hardware interrupt line fires.
+ * It has the timer's shape, because an interrupt is a signal like time is:
+ * bound at creation to a notification in its own pool,
+ * armed with the bits it will signal, and disarmed by signalling.
+ * Disarmed means masked at the controller:
+ * the line stays quiet until the driver arms the Irq again,
+ * which it does once it has serviced the device.
+ * One Irq per line; see DESIGN.md, "Interrupts".
+ */
+struct irq {
+    struct obj_header hdr;
+    paddr_t ntfn;
+    uint32_t bits;
+    uint32_t line;
+};
 
 _Static_assert(sizeof(struct obj_header) == 8, "object layout");
 _Static_assert(sizeof(struct cap) == 12, "object layout");
@@ -169,6 +185,17 @@ _Static_assert(sizeof(struct process) == 12 + 12 * PROCESS_REGION_SLOTS + sizeof
 _Static_assert(sizeof(struct thread) == 20 + sizeof(struct trap_frame), "object layout");
 _Static_assert(sizeof(struct notification) == 12, "object layout");
 _Static_assert(sizeof(struct timer) == 20, "object layout");
+_Static_assert(sizeof(struct irq) == 20, "object layout");
+
+/*
+ * True if a capability of this type names a kernel object.
+ * Regions and interrupt lines name hardware, and the debug capability nothing,
+ * so they carry no address to check or to revoke.
+ */
+static inline bool cap_has_object(uint8_t type)
+{
+    return type != CAP_NONE && type != CAP_REGION && type != CAP_IRQ_LINE && type != CAP_DEBUG;
+}
 
 static inline struct pool *obj_pool(const struct obj_header *o) { return p2v(o->pool); }
 static inline struct pool *pool_next_pool(const struct pool *p) { return p->next ? p2v(p->next) : NULL; }
@@ -177,9 +204,13 @@ static inline struct captable *process_table(const struct process *p) { return p
 static inline struct process *thread_process(const struct thread *t) { return p2v(t->proc); }
 static inline struct captable *thread_table(const struct thread *t) { return process_table(thread_process(t)); }
 static inline struct notification *timer_notification(const struct timer *t) { return p2v(t->ntfn); }
+static inline struct notification *irq_notification(const struct irq *i) { return p2v(i->ntfn); }
 
 /* True if the timer will fire; it holds the bits it will signal. */
 static inline bool timer_armed(const struct timer *t) { return t->bits != 0; }
+
+/* True if the Irq will signal; its line is unmasked exactly then. */
+static inline bool irq_armed(const struct irq *i) { return i->bits != 0; }
 
 /* True if the timer's deadline lies at or before the tick count now. */
 static inline bool timer_due(const struct timer *t, uint32_t now)
@@ -262,6 +293,9 @@ bool pool_overlaps(uint32_t base, uint32_t size);
 /* True if [base, base + size) intersects a region installed in any process. */
 bool installed_overlaps(uint32_t base, uint32_t size);
 
+/* The Irq bound to a line, or NULL; there is at most one. */
+struct irq *line_binding(uint32_t line);
+
 /* cap.c */
 
 /*
@@ -290,7 +324,7 @@ int cap_clear(struct captable *table, uint32_t slot);
  * This is what a pool destroy revokes with,
  * and it is exact because every capability lives in a CapTable,
  * every CapTable is an object in a pool, and every pool is on the list.
- * Region capabilities name no object and are left alone;
+ * Region and IrqLine capabilities name no object and are left alone;
  * see DESIGN.md, open decision 7.
  */
 void cap_revoke_range(uint32_t base, uint32_t size);
@@ -300,6 +334,9 @@ struct cap cap_to_object(struct obj_header *obj, uint8_t rights);
 
 /* Build a region capability. */
 struct cap cap_to_region(uint32_t base, uint32_t size, uint8_t rights);
+
+/* Build an interrupt line capability: count lines from first. */
+struct cap cap_to_lines(uint32_t first, uint32_t count, uint8_t rights);
 
 /* The object behind a non-region capability. */
 static inline struct obj_header *cap_object(const struct cap *cap)
@@ -342,6 +379,17 @@ void sched_run_next(void);
  */
 void sched_tick(void);
 
+/*
+ * A device interrupt on a line: the Irq armed on it masks the line,
+ * disarms and signals its bits.
+ * False, and nothing done, when no Irq is armed on the line.
+ * The interrupt calls it through sched_claim_interrupts, and OP_DEBUG_IRQ does on request.
+ */
+bool sched_interrupt(uint32_t line);
+
+/* Take every interrupt the controller holds: claim, deliver, complete. */
+void sched_claim_interrupts(void);
+
 /* The first thread blocked on a notification, or NULL. */
 struct thread *sched_waiter(paddr_t notification);
 
@@ -350,6 +398,12 @@ struct thread *sched_waiter(paddr_t notification);
  * with KERR_INVALID_CAP and no bits, because the object is gone.
  */
 void sched_unblock_range(uint32_t base, uint32_t size);
+
+/*
+ * Mask the line of every Irq in [base, base + size),
+ * because the object that would receive the interrupt is gone.
+ */
+void sched_unbind_range(uint32_t base, uint32_t size);
 
 /* process.c */
 
@@ -382,7 +436,7 @@ struct granted_range {
     uint32_t size;
     uint8_t rights;
 };
-#define GRANTED_RANGES 4
+#define GRANTED_RANGES 5
 extern struct granted_range boot_granted[GRANTED_RANGES];
 extern struct pool *boot_pool;
 

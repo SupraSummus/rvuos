@@ -111,7 +111,7 @@ static uint32_t draw_arg(struct rng *r, uint8_t *data, size_t count)
         return rnd(r);
     case 2:
     case 3:
-        return (uint32_t)below(r, 10); /* a type, a rights mask or a region slot, all up to 8, or one past */
+        return (uint32_t)below(r, 12); /* a type, a rights mask, a region slot or a line, all up to 10, or one past */
     case 4:
     case 5:
     case 6:

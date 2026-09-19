@@ -7,7 +7,8 @@
 #include <string.h>
 
 #include "harness.h"
-#include "timer.h"
+#include "irq.h"
+#include "trap.h"
 
 _Static_assert(HOST_RAM_BASE == RAM_BASE && HOST_RAM_SIZE == RAM_SIZE,
                "host RAM must match the kernel's layout");
@@ -79,10 +80,40 @@ void selfcheck_fail(void)
     abort();
 }
 
-void timer_wait(void)
+unsigned intr_wait(void)
 {
-    /* Reached only untraced with a timer armed, which the harness never sets up. */
-    kpanic("the host build has no clock to wait for");
+    /* Reached only untraced with a timer or an Irq armed, which the harness never sets up. */
+    kpanic("the host build has no clock and no devices to wait for");
+}
+
+/* The interrupt controller as far as the kernel touches it: which lines it forwards. */
+static uint32_t forwarded[(IRQ_LINES + 31) / 32];
+
+void irq_init(void)
+{
+    memset(forwarded, 0, sizeof(forwarded));
+}
+
+void irq_enable(uint32_t line, bool on)
+{
+    uint32_t bit = 1u << (line % 32);
+    forwarded[line / 32] = on ? (forwarded[line / 32] | bit) : (forwarded[line / 32] & ~bit);
+}
+
+bool irq_enabled(uint32_t line)
+{
+    return (forwarded[line / 32] >> (line % 32)) & 1u;
+}
+
+uint32_t irq_claim(void)
+{
+    /* No device ever raises a line here; OP_DEBUG_IRQ fires them by name instead. */
+    return 0;
+}
+
+void irq_complete(uint32_t line)
+{
+    (void)line;
 }
 
 void pmp_init(void)
@@ -139,6 +170,7 @@ struct thread *host_boot(void)
     sched_ticks = 0;
     debug_trace = false;
     pmp_init();
+    irq_init();
 
     struct thread *root = boot_create_root(
         HOST_BOOT_POOL_BASE, HOST_BOOT_POOL_SIZE,

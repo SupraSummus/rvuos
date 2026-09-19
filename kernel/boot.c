@@ -3,8 +3,10 @@
  * See DESIGN.md, "Boot".
  */
 
+#include "irq.h"
 #include "kernel.h"
 #include "object.h"
+#include "uart.h"
 
 #define ROOT_CAPTABLE_SLOTS 64
 
@@ -40,6 +42,8 @@ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
     boot_granted[1] = (struct granted_range){ USER_DATA_BASE, USER_DATA_SIZE, RIGHT_R | RIGHT_W };
     boot_granted[2] = (struct granted_range){ free_base, free_size, RIGHT_ALL };
     boot_granted[3] = (struct granted_range){ INPUT_BASE, INPUT_SIZE, RIGHT_R };
+    /* A device: read and write, never execute, and never a pool; see ram_contains. */
+    boot_granted[4] = (struct granted_range){ UART_BASE, UART_SIZE, RIGHT_R | RIGHT_W };
 
     /* The grants become region capabilities as they are, and those lie on the grain. */
     for (unsigned i = 0; i < GRANTED_RANGES; i++) {
@@ -63,6 +67,9 @@ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
     table->slots[BOOT_CAP_DATA] = cap_to_region(USER_DATA_BASE, USER_DATA_SIZE, RIGHT_R | RIGHT_W);
     table->slots[BOOT_CAP_FREE_RAM] = cap_to_region(free_base, free_size, RIGHT_ALL);
     table->slots[BOOT_CAP_INPUT] = cap_to_region(INPUT_BASE, INPUT_SIZE, RIGHT_R);
+    /* Line 0 means no line, so the lines start at 1. */
+    table->slots[BOOT_CAP_IRQ_LINES] = cap_to_lines(1, IRQ_LINES - 1, RIGHT_W);
+    table->slots[BOOT_CAP_UART] = cap_to_region(UART_BASE, UART_SIZE, RIGHT_R | RIGHT_W);
 
     return thread;
 }

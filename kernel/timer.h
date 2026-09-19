@@ -19,12 +19,4 @@ void timer_init(void);
 /* Acknowledge a tick by programming the next one. */
 void timer_ack(void);
 
-/*
- * Stall until the next tick is pending and acknowledge it.
- * This is what the kernel does when no thread can run
- * but a Timer will make one runnable; see DESIGN.md, "Scheduling".
- * The host build has no clock to wait for and must never get here.
- */
-void timer_wait(void);
-
 #endif
