@@ -105,6 +105,8 @@ size_t obj_size(const struct obj_header *obj)
         return sizeof(struct thread);
     case CAP_NOTIFICATION:
         return sizeof(struct notification);
+    case CAP_TIMER:
+        return sizeof(struct timer);
     default:
         kpanic("object of unknown type in pool");
     }

@@ -62,6 +62,11 @@ taking runnable threads in turn;
 that is all the scheduling policy the kernel has,
 and `DESIGN.md`, "Scheduling", says why.
 
+There is no sleep: a `Timer` object signals a notification
+once a delay has passed, so a thread sleeps by waiting on it,
+and a wait with a timeout is the same wait with one more bit;
+`DESIGN.md`, "Time", says why.
+
 Device interrupts and a userspace driver
 are not implemented yet;
 see the roadmap in `TODO.md`.

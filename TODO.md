@@ -25,7 +25,10 @@ Design decisions behind these items live in `DESIGN.md`.
    do in shared memory.
 6. `Irq` objects and a userspace UART driver.
    An interrupt is a signal on the notification bound to the `Irq`,
-   so no new mechanism is needed.
+   so no new mechanism is needed;
+   the `Timer` object of `DESIGN.md`, "Time", is that shape already,
+   and the stall in `wfi` for an armed timer
+   is the one interrupts will use.
 7. Done: pool destroy, with the capability table sweep in `DESIGN.md`,
    "Kernel pools and revocation",
    and the pool tree, so that a destroy takes the pools
@@ -98,6 +101,12 @@ Design decisions behind these items live in `DESIGN.md`.
   Give a thread's creator somewhere to hear about it:
   a notification the kernel signals is the cheapest candidate,
   since it needs no new object.
+- Userspace has no clock: `mcounteren` is left clear, so `rdtime` traps.
+  Setting its `TM` bit costs nothing and lets a periodic task
+  compute absolute deadlines without drift,
+  but the unit of `time` is the board's,
+  so a program that reads it is no longer a plain binary.
+  Decide with the first periodic driver.
 - A thread can be started but not stopped again.
   `OP_THREAD_SUSPEND` waits for a reason to exist,
   and a userspace scheduler, open decision 9 in `DESIGN.md`, would be one;

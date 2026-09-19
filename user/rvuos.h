@@ -75,6 +75,15 @@ static inline uint32_t rv_wait(uint32_t ntfn_cap, uint32_t *bits)
     return r_a0;
 }
 
+/*
+ * OP_TIMER_SET: signal bits on the timer's notification once us microseconds have passed,
+ * no earlier and at the kernel's first tick after that. bits = 0 cancels.
+ */
+static inline uint32_t rv_timer_set(uint32_t timer_cap, uint32_t bits, uint32_t us)
+{
+    return rv_invoke(OP_TIMER_SET, timer_cap, bits, us, 0);
+}
+
 static inline void rv_putc(uint32_t debug_cap, char c)
 {
     rv_invoke(OP_DEBUG_PUTC, debug_cap, (uint32_t)c, 0, 0);

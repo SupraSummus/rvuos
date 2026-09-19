@@ -1,0 +1,20 @@
+A timer may be bound to a notification in another pool.
+The link is not checked on use,
+so a destroy of the notification's pool would leave the timer
+signalling freed memory;
+a timer and its notification live in the same pool.
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+index fa9c4f9..232f750 100644
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -226,9 +226,6 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
+             return nerr;
+         }
+         struct notification *ntfn = (struct notification *)cap_object(&nc);
+-        if (ntfn->hdr.pool != pool->base) {
+-            return KERR_INVALID_ARG;
+-        }
+         struct timer *timer = pool_alloc(pool, CAP_TIMER, sizeof(*timer));
+         if (timer == NULL) {
+             return KERR_NO_MEMORY;

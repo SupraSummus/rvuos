@@ -40,6 +40,8 @@ grep -q 'child: cannot destroy the pool above' "$log" \
     || fail "a thread destroyed a pool its own lies below"
 grep -q 'root: cascade ok' "$log" \
     || fail "destroying the child's pool did not take the pool the child made"
+grep -q 'root: timer ok' "$log" \
+    || fail "the timer did not wake the only thread from its sleep"
 grep -q 'user fault' "$log" || fail "PMP fault was not caught"
 # mepc's low bits move with the code layout.
 grep -q 'mcause=0x00000005 mepc=0x8010.... mtval=0x80212000' "$log" \

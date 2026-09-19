@@ -44,6 +44,7 @@
 
 /* mie and mip bits. */
 #define MIE_MTIE (1u << 7)
+#define MIP_MTIP (1u << 7)
 
 /* mcause exception codes; interrupts have the top bit set. */
 #define MCAUSE_INTERRUPT (1u << 31)

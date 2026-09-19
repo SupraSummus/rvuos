@@ -5,6 +5,7 @@
 
 #include "kernel.h"
 #include "object.h"
+#include "timer.h"
 
 #define POOL_MIN_SIZE 64
 
@@ -32,7 +33,7 @@ static int op_debug(uint32_t op, const uint32_t *arg)
         return KERR_OK;
     case OP_DEBUG_TICK:
         /* The caller's status is written to its own frame, whoever runs next. */
-        sched_preempt();
+        sched_tick();
         return KERR_OK;
     default:
         return KERR_WRONG_TYPE;
@@ -216,6 +217,25 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
         obj = &ntfn->hdr;
         break;
     }
+    case CAP_TIMER: {
+        /* The timer signals on the creator's behalf, so the creator must be able to. */
+        struct cap nc;
+        int nerr = cap_lookup_typed(thread_table(t), arg[3], CAP_NOTIFICATION, RIGHT_W, &nc);
+        if (nerr != KERR_OK) {
+            return nerr;
+        }
+        struct notification *ntfn = (struct notification *)cap_object(&nc);
+        if (ntfn->hdr.pool != pool->base) {
+            return KERR_INVALID_ARG;
+        }
+        struct timer *timer = pool_alloc(pool, CAP_TIMER, sizeof(*timer));
+        if (timer == NULL) {
+            return KERR_NO_MEMORY;
+        }
+        timer->ntfn = v2p(ntfn);
+        obj = &timer->hdr;
+        break;
+    }
     case CAP_CAPTABLE: {
         uint32_t nslots = arg[3];
         if (nslots == 0 || nslots > CAPTABLE_MAX_SLOTS) {
@@ -299,25 +319,6 @@ static int op_thread(const struct cap *cap, uint32_t op, const uint32_t *arg)
     }
 }
 
-/*
- * A wake is traced after the line of the call that caused it.
- * A signal of no bits is refused, so zero here means nothing woke.
- */
-static uint32_t trace_wake_bits;
-
-/*
- * Hand a waiting thread the bits it waited for.
- * It resumes after its ecall with the status and the bits in place.
- */
-static void wake(struct thread *t, uint32_t bits)
-{
-    t->frame.regs[REG_A0] = KERR_OK;
-    t->frame.regs[REG_A1] = bits;
-    t->waiting_on = 0;
-    t->state = THREAD_READY;
-    trace_wake_bits = bits;
-}
-
 static int op_notification(struct thread *t, const struct cap *cap,
                            uint32_t op, uint32_t *arg)
 {
@@ -332,12 +333,7 @@ static int op_notification(struct thread *t, const struct cap *cap,
         if (arg[1] == 0) {
             return KERR_INVALID_ARG;
         }
-        ntfn->bits |= arg[1];
-        struct thread *waiter = sched_waiter(v2p(&ntfn->hdr));
-        if (waiter != NULL) {
-            wake(waiter, ntfn->bits);
-            ntfn->bits = 0;
-        }
+        sched_signal(ntfn, arg[1]);
         return KERR_OK;
     }
     case OP_NOTIFY_WAIT:
@@ -355,6 +351,32 @@ static int op_notification(struct thread *t, const struct cap *cap,
     default:
         return KERR_WRONG_TYPE;
     }
+}
+
+static int op_timer(const struct cap *cap, uint32_t op, const uint32_t *arg)
+{
+    struct timer *timer = (struct timer *)cap_object(cap);
+
+    if (op != OP_TIMER_SET) {
+        return KERR_WRONG_TYPE;
+    }
+    uint32_t bits = arg[1];
+    uint32_t us = arg[2];
+    if (bits == 0) {
+        timer->bits = 0;
+        return KERR_OK;
+    }
+    /*
+     * The call lands anywhere within the current tick,
+     * so the delay rounded up to whole ticks plus one
+     * is the first tick that surely lies past it.
+     * The count wraps and timer_due compares with a signed difference,
+     * which is exact while a delay stays far below half the count's range.
+     */
+    uint32_t ticks = us / TIMER_US_PER_TICK + (us % TIMER_US_PER_TICK != 0) + 1;
+    timer->deadline = sched_ticks + ticks;
+    timer->bits = bits;
+    return KERR_OK;
 }
 
 /*
@@ -418,6 +440,9 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
     case CAP_NOTIFICATION:
         err = op_notification(t, &cap, op, arg);
         break;
+    case CAP_TIMER:
+        err = (cap.rights & RIGHT_W) ? op_timer(&cap, op, arg) : KERR_NO_RIGHTS;
+        break;
     default:
         err = KERR_WRONG_TYPE;
         break;
@@ -442,6 +467,7 @@ void syscall_dispatch(struct thread *t)
     /* The call that turns tracing on is not itself traced. */
     bool traced = debug_trace;
 
+    /* A wake is traced after the line of the call that caused it; no bits means none. */
     trace_wake_bits = 0;
     int err = dispatch(t, op, arg[0], arg);
     if (err != KERR_BLOCKED) {

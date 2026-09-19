@@ -1,0 +1,16 @@
+A timer that fires stays armed.
+It would signal again on every later tick;
+after a tick no armed timer is due.
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+index 1783bc9..820756a 100644
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -95,7 +95,6 @@ static void tick_advance(void)
+             continue;
+         }
+         uint32_t bits = t->bits;
+-        t->bits = 0;
+         sched_signal(timer_notification(t), bits);
+     }
+ }

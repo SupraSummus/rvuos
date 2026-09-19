@@ -45,7 +45,10 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
         if (cause == (MCAUSE_INTERRUPT | IRQ_M_TIMER)) {
             /* mepc points at the interrupted instruction, which resumes as it was. */
             timer_ack();
-            sched_tick();
+            /* Under tracing time moves only by record; see DESIGN.md, "Verification". */
+            if (!debug_trace) {
+                sched_tick();
+            }
             return &current->frame;
         }
         kputs("unexpected interrupt\n");
