@@ -135,7 +135,8 @@ static void check_pools(void)
                 fail("object claims another pool", at, o->pool, p->base);
             }
             if (o->type != CAP_CAPTABLE && o->type != CAP_PROCESS &&
-                o->type != CAP_THREAD && o->type != CAP_NOTIFICATION) {
+                o->type != CAP_THREAD && o->type != CAP_NOTIFICATION &&
+                o->type != CAP_TIMER) {
                 fail("object has an unexpected type", at, o->type, 0);
             }
             at += aligned_size(o);
@@ -301,6 +302,21 @@ static void check_thread(const struct thread *t)
     }
 }
 
+static void check_timer(const struct timer *t)
+{
+    struct obj_header *n = object_find(t->ntfn);
+    if (n == NULL || n->type != CAP_NOTIFICATION) {
+        fail("timer has no live notification", v2p(t), t->ntfn, 0);
+    }
+    if (n->pool != t->hdr.pool) {
+        fail("timer and its notification live in different pools", v2p(t), 0, 0);
+    }
+    /* The tick fires every due timer, so one still armed lies ahead. */
+    if (timer_armed(t) && timer_due(t, sched_ticks)) {
+        fail("armed timer is due", v2p(t), t->deadline, sched_ticks);
+    }
+}
+
 static void check_captable(const struct captable *table)
 {
     if (table->nslots == 0 || table->nslots > CAPTABLE_MAX_SLOTS) {
@@ -334,8 +350,9 @@ static void check_captable(const struct captable *table)
         case CAP_CAPTABLE:
         case CAP_PROCESS:
         case CAP_THREAD:
-        case CAP_NOTIFICATION: {
-            /* Until pool destroy exists every object capability points at a live object. */
+        case CAP_NOTIFICATION:
+        case CAP_TIMER: {
+            /* A destroy sweeps the tables, so every object capability points at a live object. */
             struct obj_header *o = object_find(c->a);
             if (o == NULL || o->type != c->type) {
                 fail("dangling object capability", v2p(table), i, c->a);
@@ -367,6 +384,9 @@ void selfcheck_run(void)
             break;
         case CAP_CAPTABLE:
             check_captable((struct captable *)o);
+            break;
+        case CAP_TIMER:
+            check_timer((struct timer *)o);
             break;
         default:
             break;

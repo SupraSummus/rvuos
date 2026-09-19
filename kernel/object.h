@@ -141,6 +141,23 @@ struct notification {
     uint32_t bits;
 };
 
+/*
+ * A timer signals a notification when a delay has passed.
+ * It is how time reaches userspace: as a signal like any other,
+ * so one wait can cover a device and a timeout, one bit each.
+ * The notification lies in the timer's own pool and dies with it,
+ * as a process's table does; the link is not checked on use.
+ * bits is what the timer will signal, zero while it is disarmed,
+ * and deadline is the tick count it fires at;
+ * see DESIGN.md, "Time".
+ */
+struct timer {
+    struct obj_header hdr;
+    paddr_t ntfn;
+    uint32_t bits;
+    uint32_t deadline;
+};
+
 
 _Static_assert(sizeof(struct obj_header) == 8, "object layout");
 _Static_assert(sizeof(struct cap) == 12, "object layout");
@@ -151,6 +168,7 @@ _Static_assert(sizeof(struct process) == 12 + 12 * PROCESS_REGION_SLOTS + sizeof
                "object layout");
 _Static_assert(sizeof(struct thread) == 20 + sizeof(struct trap_frame), "object layout");
 _Static_assert(sizeof(struct notification) == 12, "object layout");
+_Static_assert(sizeof(struct timer) == 20, "object layout");
 
 static inline struct pool *obj_pool(const struct obj_header *o) { return p2v(o->pool); }
 static inline struct pool *pool_next_pool(const struct pool *p) { return p->next ? p2v(p->next) : NULL; }
@@ -158,6 +176,16 @@ static inline struct pool *pool_parent(const struct pool *p) { return p->parent 
 static inline struct captable *process_table(const struct process *p) { return p2v(p->ctable); }
 static inline struct process *thread_process(const struct thread *t) { return p2v(t->proc); }
 static inline struct captable *thread_table(const struct thread *t) { return process_table(thread_process(t)); }
+static inline struct notification *timer_notification(const struct timer *t) { return p2v(t->ntfn); }
+
+/* True if the timer will fire; it holds the bits it will signal. */
+static inline bool timer_armed(const struct timer *t) { return t->bits != 0; }
+
+/* True if the timer's deadline lies at or before the tick count now. */
+static inline bool timer_due(const struct timer *t, uint32_t now)
+{
+    return (int32_t)(t->deadline - now) <= 0;
+}
 
 #define OBJ_ALIGN 8
 
@@ -285,23 +313,34 @@ static inline struct obj_header *cap_object(const struct cap *cap)
 extern struct thread *current;
 
 /*
+ * Ticks so far.
+ * Only the tick and OP_DEBUG_TICK move it,
+ * and Timer deadlines are counted in it.
+ */
+extern uint32_t sched_ticks;
+
+/*
+ * Set bits on a notification and wake a thread waiting on it, if any.
+ * Never blocks; OP_NOTIFY_SIGNAL and a firing Timer are both this.
+ */
+void sched_signal(struct notification *ntfn, uint32_t bits);
+
+/* The bits the last wake handed over, zero if none; for the trace. */
+extern uint32_t trace_wake_bits;
+
+/*
  * The running thread is no longer runnable.
  * Hand the processor to a thread that is, or stop the machine.
  */
 void sched_run_next(void);
 
 /*
- * The timer tick.
- * Hand the processor to the next runnable thread in round-robin order,
+ * The timer tick: count it, fire every Timer that is due,
+ * and hand the processor to the next runnable thread in the round,
  * if there is one besides the running thread.
+ * The interrupt calls it, and OP_DEBUG_TICK does on request.
  */
 void sched_tick(void);
-
-/*
- * The tick's decision without the tick: hand the processor to the next
- * runnable thread in the round. OP_DEBUG_TICK performs it on request.
- */
-void sched_preempt(void);
 
 /* The first thread blocked on a notification, or NULL. */
 struct thread *sched_waiter(paddr_t notification);

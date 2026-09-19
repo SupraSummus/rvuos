@@ -44,6 +44,7 @@
 #define CAP_THREAD   5
 #define CAP_DEBUG    6 /* console output and machine halt, for bring-up */
 #define CAP_NOTIFICATION 7
+#define CAP_TIMER    8 /* signals a notification when a delay has passed */
 
 /*
  * Rights bits.
@@ -52,6 +53,7 @@
  * Pool: RIGHT_W to allocate objects.
  * Process, Thread: RIGHT_W to control the object.
  * Notification: RIGHT_W to signal, RIGHT_R to wait.
+ * Timer: RIGHT_W to set or cancel.
  * Debug: any right.
  * Copying a capability can only remove rights.
  */
@@ -80,7 +82,8 @@
 #define OP_DEBUG_TRACE 10
 /*
  * Debug: what the timer tick does, on request.
- * The processor goes to the next runnable thread in the round
+ * Time moves by one tick, every Timer that is due signals,
+ * the processor goes to the next runnable thread in the round
  * and the caller stays ready.
  * Works while tracing is on, unlike the tick itself;
  * see DESIGN.md, "Verification".
@@ -129,10 +132,12 @@
  *   CAP_CAPTABLE  the number of slots,
  *   CAP_PROCESS   the slot of the CapTable capability the process will use,
  *   CAP_THREAD    the slot of the Process capability the thread will run in,
- *   CAP_NOTIFICATION  unused.
+ *   CAP_NOTIFICATION  unused,
+ *   CAP_TIMER     the slot of the Notification capability the timer signals,
+ *                 which needs RIGHT_W.
  * A structural parent is not checked on every use,
  * so an object must be allocated from the same pool as its parent;
- * CAP_PROCESS and CAP_THREAD fail with KERR_INVALID_ARG otherwise.
+ * CAP_PROCESS, CAP_THREAD and CAP_TIMER fail with KERR_INVALID_ARG otherwise.
  */
 #define OP_POOL_ALLOC 7
 /*
@@ -195,8 +200,20 @@
  */
 #define OP_NOTIFY_WAIT 15
 
+/*
+ * Timer (RIGHT_W): signal the bound notification once a delay has passed.
+ * a1 = the bits to signal, a2 = the delay in microseconds.
+ * The signal comes no earlier than the delay
+ * and at the kernel's first tick after it, whatever the tick's period is;
+ * a delay of zero signals at the next tick.
+ * A longer delay than 32 bits of microseconds is several calls.
+ * Setting an armed timer replaces its delay and bits;
+ * a1 = 0 cancels it, and takes back no signal that already happened.
+ */
+#define OP_TIMER_SET 18
+
 /* One above the highest operation code; the fuzzer's mutator draws below it. */
-#define OP_COUNT 18
+#define OP_COUNT 19
 
 /*
  * Capability slots the kernel fills in the root task's table at boot.

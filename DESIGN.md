@@ -188,7 +188,9 @@ Consequences that shape the design:
 ### Timer
 
 The machine timer, `mtime` and `mtimecmp`, is the kernel's clock
-and the kernel handles it directly; nothing of it reaches userspace.
+and the kernel handles it directly.
+Userspace sees it only through `Timer` objects,
+whose deadlines are counted in ticks; see "Time".
 Where the registers live and how fast they count is the board's business,
 so `kernel/timer.c` is per board, as `uart.c` is.
 On every tick the kernel sets `mtimecmp` a period ahead of `mtime`,
@@ -281,6 +283,7 @@ before it has created a single pool.
 | `Process` | A protection domain: a `CapTable`, a set of region slots, and its threads. |
 | `Thread` | An execution context inside a process: its registers and its state. |
 | `Notification` | A word of sticky signal bits. The only way a thread can stop and be started again. |
+| `Timer` | Signals a notification once a delay has passed. |
 | `Irq` | The right to receive one hardware interrupt as a notification. |
 | `Debug` | Console output and machine halt for bring-up and tests. No object. |
 
@@ -523,6 +526,44 @@ is open decision 6.
 Interrupts will arrive as signals on the notification bound to an `Irq`,
 which is roadmap step 6 and needs no new mechanism.
 
+## Time
+
+**There is no sleep.**
+A thread that wants to stop for a while wants to stop until something happens,
+and a notification is the one way to stop;
+what is missing is only something that happens at a time.
+So time reaches userspace as one more source of signals,
+a `Timer`: bound at allocation to a notification in its own pool,
+armed with `OP_TIMER_SET` for a delay and a set of bits,
+and signalling those bits when the delay has passed.
+Sleeping is arming a timer and waiting on its notification.
+A wait with a timeout is the same two calls,
+because a notification is a word of bits:
+a driver gives the device one bit and the timer another.
+No operation takes a deadline and no thread state is a sleep,
+so "a waiting thread names a live notification" stays the whole story.
+Yield is open decision 10.
+
+**The contract is a lower bound.**
+The delay is in microseconds.
+The call lands anywhere within a tick,
+so the kernel fires at the first tick that surely lies past the delay:
+the delay rounded up to whole ticks, plus one.
+The tick's period is the board's business and not part of the ABI.
+An upper bound is not promised because the kernel could not keep one:
+the woken thread is ready, not running, and waits its turn in the round.
+A timer that fires disarms itself,
+and setting an armed timer moves its deadline rather than adding a second.
+
+**Why an object.**
+A deadline argument on `OP_NOTIFY_WAIT` would be smaller,
+but it would make time a special case of waiting
+rather than a signal like an interrupt.
+A time server in userspace, a driver holding an `Irq` for a second hardware timer,
+would cost the kernel nothing and remains the right shape for a board that has one;
+the kernel object is what makes a sleep one system call
+rather than a round trip to that server.
+
 ## Scheduling
 
 **The kernel keeps no run queue.**
@@ -549,12 +590,14 @@ machine mode runs with `MIE` clear from the trap to the `mret`,
 so a system call is never interrupted and the kernel needs no locks.
 
 When a thread waits and nothing is runnable,
-no thread can become runnable again,
-because only a running thread can signal,
-the tick wakes nobody,
-and device interrupts do not exist yet,
-so the kernel says `no runnable thread` and stops the machine.
-That becomes a `wfi` when device interrupts arrive.
+only a `Timer` can make one runnable again,
+because only a running thread can signal
+and device interrupts do not exist yet.
+With a timer armed the kernel stalls in `wfi` until the tick is pending,
+takes it by hand since machine mode runs with `MIE` clear,
+and looks for a runnable thread again;
+with none it says `no runnable thread` and stops the machine.
+Device interrupts will join the timer as reasons to stall rather than stop.
 
 **Nothing more lives in the kernel.**
 Round-robin on a tick is the least policy that makes
@@ -648,6 +691,13 @@ it is a live object and it is ready.
 A preempted thread stays ready,
 so it is one the walk finds again.
 
+**Timers.**
+Every timer names a live notification in its own pool,
+so the link, which is not checked on use, never dangles.
+An armed timer's deadline lies ahead of the tick count:
+the tick fires every timer that is due,
+and a timer that fires disarms itself.
+
 **Memory safety.**
 No sequence of system calls makes the kernel read or write
 outside its own objects,
@@ -665,7 +715,9 @@ the PMP CSRs and halting, and physical addresses indexing a RAM buffer.
 An input is a sequence of events the kernel receives,
 not the behaviour of one process:
 each record is a system call with the thread that makes it,
-and the tick is a record too, `OP_DEBUG_TICK`.
+and the tick is a record too, `OP_DEBUG_TICK`,
+which moves time by one tick and fires the timers due,
+so the host has a clock that ticks when the input says.
 libFuzzer feeds the records into the threads' registers
 and the self-check runs after every call, under ASan and UBSan.
 Since no system call takes a pointer,
@@ -746,11 +798,16 @@ The tick is the other such constraint.
 A preemption lands between two instructions,
 and the host runs records rather than instructions,
 so it cannot say where one would land.
-While tracing is on, the tick therefore preempts nobody.
+While tracing is on, the tick therefore preempts nobody
+and moves no time: timers fire only through `OP_DEBUG_TICK`.
 The interrupt is still taken and acknowledged on QEMU,
 so the replay exercises the interrupt entry and return,
 but a switch happens only when a thread waits
-or when a record asks for the tick's decision through `OP_DEBUG_TICK`.
+or when a record asks for the tick through `OP_DEBUG_TICK`.
+A traced run in which every thread waits therefore stops
+even with a timer armed, since no record is left to fire it,
+and the host build, which has no clock, agrees.
+The stall in `wfi` for an armed timer is checked by the demo in `user/init.c`.
 The kernel loses nothing by that:
 it runs with interrupts off, so a tick lands only in user mode,
 and every such landing is the same to it, a ready thread whose frame is saved.
@@ -886,3 +943,18 @@ until the maintainer decides otherwise.
    for less than a system call per switch.
    Decide when a workload needs one thread to run before another
    and taking turns measurably fails it.
+
+10. **Yield.**
+    Working default: none.
+    `OP_DEBUG_TICK` is the tick on request,
+    so a yield would be that under a name that invites spinning,
+    and a spinning thread is always runnable and keeps the machine from `wfi`,
+    while a waiting thread says what it waits for.
+    The cases that ask for one have other answers:
+    a lock whose holder was preempted is a short spin on `lr`/`sc`
+    and then a wait on a notification the unlocker signals,
+    and polling a device ends with `Irq` in roadmap step 6.
+    A sleep bounded from above, "no longer than", was considered as the same operation;
+    it would have to round the delay down and end in a spin of up to one tick.
+    Revisit when a workload measures the cost of a slice burnt
+    behind a preempted lock holder.

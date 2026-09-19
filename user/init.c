@@ -8,6 +8,7 @@
  * destroy a pool and watch both processes lose their capabilities to it,
  * lend the child memory it turns into a pool of its own
  * and take it back by destroying the child's pool,
+ * sleep on a timer while nothing else can run,
  * then unmap a region and fault on it.
  * Negative paths are covered by the fuzz corpus and tests/differential.py.
  */
@@ -35,6 +36,8 @@ enum {
     SLOT_NEW_NTFN,
     SLOT_LENT,          /* memory lent to the child, which pools it */
     SLOT_LENT_POOL,     /* what the root task makes of it once it is back */
+    SLOT_TIMER_NTFN,    /* what the timer signals */
+    SLOT_TIMER,
 };
 
 /*
@@ -76,7 +79,11 @@ enum {
 #define BIT_CHECKED 0x10u
 #define BIT_POOL    0x20u /* turn the lent memory into a pool */
 #define BIT_POOLED  0x40u
+#define BIT_TIMER   0x80u /* the timer's bit on its own notification */
 #define MAGIC 0x5eaf00du
+
+/* Ticks are a millisecond on QEMU; long enough to need a few of them. */
+#define SLEEP_US 10000u
 
 /* Whose turn it is in the handshake that uses no notification. */
 #define TURN_CHILD 0x1u
@@ -94,6 +101,25 @@ static void expect(const char *what, uint32_t status)
     if (status != KERR_OK) {
         rv_halt(BOOT_CAP_DEBUG, 1);
     }
+}
+
+/*
+ * What sleeping is on rvuos: arm a timer and wait on the notification it signals.
+ * The same notification can carry a device's bit next to the timer's,
+ * which makes a wait with a timeout the same two calls.
+ */
+static uint32_t sleep_us(uint32_t us)
+{
+    uint32_t bits;
+    uint32_t status = rv_timer_set(SLOT_TIMER, BIT_TIMER, us);
+    if (status != KERR_OK) {
+        return status;
+    }
+    status = rv_wait(SLOT_TIMER_NTFN, &bits);
+    if (status != KERR_OK) {
+        return status;
+    }
+    return bits == BIT_TIMER ? KERR_OK : KERR_INVALID_ARG;
 }
 
 /*
@@ -333,6 +359,19 @@ int main(void)
     expect("the lent memory is back",
            rv_invoke(OP_REGION_TO_POOL, SLOT_LENT, SLOT_LENT_POOL, 0, 0));
     puts("root: cascade ok\n");
+
+    /*
+     * Time.
+     * The child is gone with its pool, so while the root task sleeps
+     * nothing is runnable and the kernel has to wait for the tick rather than stop.
+     */
+    expect("allocate the timer's notification",
+           rv_invoke(OP_POOL_ALLOC, SLOT_NEW_POOL, CAP_NOTIFICATION, SLOT_TIMER_NTFN, 0));
+    expect("allocate the timer",
+           rv_invoke(OP_POOL_ALLOC, SLOT_NEW_POOL, CAP_TIMER, SLOT_TIMER, SLOT_TIMER_NTFN));
+    expect("sleep", sleep_us(SLEEP_US));
+    expect("sleep again", sleep_us(SLEEP_US));
+    puts("root: timer ok\n");
 
     expect("unmap the shared region",
            rv_invoke(OP_PROCESS_UNINSTALL, BOOT_CAP_PROCESS, ROOT_SHARED_SLOT, 0, 0));

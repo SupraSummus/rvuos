@@ -1,0 +1,18 @@
+OP_TIMER_SET forgets the tick the call landed in:
+a delay of zero arms the timer for the tick already counted.
+The tick fires every due timer,
+so an armed timer's deadline lies ahead of the count.
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+index 0688925..2e8f680 100644
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -373,7 +373,7 @@ static int op_timer(const struct cap *cap, uint32_t op, const uint32_t *arg)
+      * The count wraps and timer_due compares with a signed difference,
+      * which is exact while a delay stays far below half the count's range.
+      */
+-    uint32_t ticks = us / TIMER_US_PER_TICK + (us % TIMER_US_PER_TICK != 0) + 1;
++    uint32_t ticks = us / TIMER_US_PER_TICK + (us % TIMER_US_PER_TICK != 0);
+     timer->deadline = sched_ticks + ticks;
+     timer->bits = bits;
+     return KERR_OK;

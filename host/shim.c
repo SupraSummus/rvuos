@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "harness.h"
+#include "timer.h"
 
 _Static_assert(HOST_RAM_BASE == RAM_BASE && HOST_RAM_SIZE == RAM_SIZE,
                "host RAM must match the kernel's layout");
@@ -78,6 +79,12 @@ void selfcheck_fail(void)
     abort();
 }
 
+void timer_wait(void)
+{
+    /* Reached only untraced with a timer armed, which the harness never sets up. */
+    kpanic("the host build has no clock to wait for");
+}
+
 void pmp_init(void)
 {
     memset(pmp_addr, 0, sizeof(pmp_addr));
@@ -129,6 +136,7 @@ struct thread *host_boot(void)
      */
     pool_list = NULL;
     current = NULL;
+    sched_ticks = 0;
     debug_trace = false;
     pmp_init();
 

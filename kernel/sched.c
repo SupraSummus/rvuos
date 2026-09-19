@@ -5,8 +5,11 @@
 
 #include "kernel.h"
 #include "object.h"
+#include "timer.h"
 
 struct thread *current;
+uint32_t sched_ticks;
+uint32_t trace_wake_bits;
 
 /*
  * The kernel keeps no queues,
@@ -51,6 +54,63 @@ static struct thread *runnable_after(struct thread *from)
     }
 }
 
+/*
+ * Hand a waiting thread the bits it waited for.
+ * It resumes after its ecall with the status and the bits in place.
+ */
+static void wake(struct thread *t, uint32_t bits)
+{
+    t->frame.regs[REG_A0] = KERR_OK;
+    t->frame.regs[REG_A1] = bits;
+    t->waiting_on = 0;
+    t->state = THREAD_READY;
+    trace_wake_bits = bits;
+}
+
+void sched_signal(struct notification *ntfn, uint32_t bits)
+{
+    ntfn->bits |= bits;
+    struct thread *waiter = sched_waiter(v2p(&ntfn->hdr));
+    if (waiter != NULL) {
+        wake(waiter, ntfn->bits);
+        ntfn->bits = 0;
+    }
+}
+
+/*
+ * One tick of time: count it and fire every timer that is due.
+ * Timers are found the way waiters are, by walking the pools,
+ * and a timer that fires disarms itself,
+ * so that after the tick no armed timer is due.
+ */
+static void tick_advance(void)
+{
+    sched_ticks++;
+    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
+        if (o->type != CAP_TIMER) {
+            continue;
+        }
+        struct timer *t = (struct timer *)o;
+        if (!timer_armed(t) || !timer_due(t, sched_ticks)) {
+            continue;
+        }
+        uint32_t bits = t->bits;
+        t->bits = 0;
+        sched_signal(timer_notification(t), bits);
+    }
+}
+
+/* True if some timer will fire, so that waiting for the tick can change what is runnable. */
+static bool timer_pending(void)
+{
+    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
+        if (o->type == CAP_TIMER && timer_armed((struct timer *)o)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void sched_unblock_range(uint32_t base, uint32_t size)
 {
     for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
@@ -93,32 +153,32 @@ static void switch_to(struct thread *next)
 void sched_run_next(void)
 {
     struct thread *next = runnable_after(current);
-    if (next == NULL) {
+    while (next == NULL) {
         /*
-         * Only a running thread can make another one runnable:
-         * the tick wakes nobody and device interrupts do not exist yet,
-         * so nothing can change this. Say so and stop.
+         * Only a running thread or a firing timer can make another one runnable,
+         * and device interrupts do not exist yet.
+         * With no timer armed nothing can change this, so say so and stop.
+         * While tracing is on, time moves only through OP_DEBUG_TICK,
+         * which nobody is left to perform, so the same holds
+         * and the host build, which cannot wait for a clock, agrees.
          */
-        kputs("no runnable thread\n");
-        khalt(5);
+        if (debug_trace || !timer_pending()) {
+            kputs("no runnable thread\n");
+            khalt(5);
+        }
+        timer_wait();
+        tick_advance();
+        next = runnable_after(current);
     }
     switch_to(next);
 }
 
-void sched_preempt(void)
+void sched_tick(void)
 {
+    tick_advance();
     struct thread *next = runnable_after(current);
     /* The running thread is ready, so there is always at least itself. */
     if (next != current) {
         switch_to(next);
     }
-}
-
-void sched_tick(void)
-{
-    /* The host build cannot reproduce where a preemption lands; see DESIGN.md, "Verification". */
-    if (debug_trace) {
-        return;
-    }
-    sched_preempt();
 }
