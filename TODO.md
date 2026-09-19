@@ -31,6 +31,11 @@ Design decisions behind these items live in `DESIGN.md`.
    the driver in `user/init.c` transmits only,
    because `make test` feeds the UART nothing to receive,
    and open decision 11 in `DESIGN.md`, sharing a line.
+   Done since: the kernel has no console.
+   Its output is a log in its memory with an interrupt line of its own,
+   and the driver in `user/init.c` is a logger thread that carries it out;
+   `DESIGN.md`, "The kernel log".
+   Still open from that step: open decision 12, the log across a reset.
 7. Done: pool destroy, with the capability table sweep in `DESIGN.md`,
    "Kernel pools and revocation",
    and the pool tree, so that a destroy takes the pools
@@ -59,6 +64,16 @@ Design decisions behind these items live in `DESIGN.md`.
 - `OP_DEBUG_IRQ` replays what a device interrupt does to an `Irq`;
   the controller, the claim and the completion
   are checked by the demo in `user/init.c` alone.
+- The log's line is replayed through the trace itself,
+  `tests/seeds/log-signals-untaken` and `log-wakes-reader`;
+  a reader falling a whole ring behind, and the logger's byte-per-interrupt path,
+  are checked by the demo in `user/init.c` alone,
+  and the loss only by reading its code.
+  A record that writes garbage into the log's `taken` is beyond the fuzzer,
+  since no record writes memory; the clamp in `klog.c` is checked by reading it.
+  That the log cannot become a pool is beyond it too:
+  the replay driver maps the log, so the overlap check refuses first,
+  and a process that never mapped it exists only in `user/init.c`'s children.
 - The replay driver has two threads, so a record's actor is one of two.
   More of them, each with its process and pool as the second has,
   would give the round more candidates and the pool tree more branches;
@@ -73,12 +88,17 @@ Design decisions behind these items live in `DESIGN.md`.
   `tests/differential.py`; today the addresses live in seven places,
   the newest being the replay driver's second stack in `rvuos/replay.h`,
   which only a static assert ties to the data region it must lie in.
+- The seeds under `tests/seeds` are binary and were written by hand.
+  Moving `BOOT_CAP_LOG` in took a one-off script that knew which argument
+  of which operation is a slot; a generator in the repository,
+  one line per record with the names from `rvuos/abi.h`,
+  would make the seeds readable and the next renumbering a rebuild.
 
 ## Code
 
-- The console UART serves the kernel's console and the root task at once,
-  a bring-up arrangement per `DESIGN.md`, "Interrupts".
-  The first board decides: a second UART for one of them, or no kernel console.
+- The replay driver drains the log by polling after each record,
+  so the host models it with one store into the header per event.
+  A logger thread in the driver would make traced calls the host would have to follow.
 - A device interrupt wakes its driver but does not run it;
   the driver waits its turn in the round like a thread the timer woke.
   Measure that latency on the first board; it belongs to open decision 9.

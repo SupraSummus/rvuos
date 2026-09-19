@@ -5,11 +5,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "rvuos/abi.h"
 #include "paddr.h"
 
 /*
  * Memory layout of the QEMU virt target, shared with kernel.ld and user.ld.
- * The kernel owns [RAM_BASE, USER_CODE_BASE).
+ * The kernel owns [RAM_BASE, USER_CODE_BASE), with its log at the top of that,
+ * touching the root task's code so that the two cost one PMP boundary.
  * The root task's code and data regions follow,
  * and everything after them is handed to the root task as free RAM.
  */
@@ -22,6 +24,9 @@
 /* The last 64 KiB of RAM hold test input placed there by the loader. */
 #define INPUT_SIZE     0x00010000u
 #define INPUT_BASE     (RAM_BASE + RAM_SIZE - INPUT_SIZE)
+/* The kernel's log, see klog.h: its header and KLOG_SIZE bytes of ring. */
+#define KLOG_SIZE      0x00001000u
+#define KLOG_BASE      (USER_CODE_BASE - RVUOS_LOG_HEADER - KLOG_SIZE)
 
 /*
  * True if [base, base + size) lies within RAM.
@@ -37,7 +42,10 @@ static inline bool ram_contains(uint32_t base, uint32_t size)
 /* main.c, entered from start.S. */
 __attribute__((noreturn)) void kmain(void);
 
-/* Minimal console output; formatted printing is not worth a printf yet. */
+/*
+ * Minimal output into the kernel's log; formatted printing is not worth a printf yet.
+ * kputc is the board's, halt.c on QEMU, and klog.c builds the other two on it.
+ */
 void kputc(char c);
 void kputs(const char *s);
 void kput_hex(uint32_t v);

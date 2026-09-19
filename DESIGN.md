@@ -71,6 +71,17 @@ which is open decision 3 below.
   The design borrows from seL4 where it makes verification easier,
   because those choices also make the kernel simpler,
   but verification itself is out of scope.
+- Code loaded into the kernel at run time.
+  Machine mode is not subject to PMP,
+  so a capability to load a module would be a capability to be the kernel,
+  which no rights bits can narrow and no self-check can follow;
+  it would also hand goals 1 to 3 to whoever holds it.
+  What varies per board is chosen at link time,
+  `irq.c`, `timer.c` and `halt.c`,
+  and every line of machine-mode code stays in the repository
+  where the host build and the fuzzer can see it.
+  What varies per application runs in user mode,
+  the logger among it; see "The kernel log".
 
 ## Prior art and how rvuos differs
 
@@ -192,7 +203,7 @@ and the kernel handles it directly.
 Userspace sees it only through `Timer` objects,
 whose deadlines are counted in ticks; see "Time".
 Where the registers live and how fast they count is the board's business,
-so `kernel/timer.c` is per board, as `uart.c` is.
+so `kernel/timer.c` is per board, as `irq.c` is.
 On every tick the kernel sets `mtimecmp` a period ahead of `mtime`,
 not ahead of the previous compare value,
 so a long system call costs one late tick and not a burst of them.
@@ -213,6 +224,8 @@ so a level that stays high, as a device's does until it is serviced,
 does not come back before the driver asks for it.
 The kernel gives every line the same priority,
 so which of several pending lines is claimed first is not promised.
+The PLIC has no source 0, and the kernel gives that number to its log,
+whose line no controller raises; see "The kernel log".
 QEMU's PLIC model does not recompute what it forwards on an enable write;
 `kernel/irq.c` says what it does about that.
 
@@ -306,9 +319,9 @@ and the root task hands lines out as it hands out memory.
 | `Thread` | An execution context inside a process: its registers and its state. |
 | `Notification` | A word of sticky signal bits. The only way a thread can stop and be started again. |
 | `Timer` | Signals a notification once a delay has passed. |
-| `IrqLine` | A range of interrupt lines. Bound one at a time into an `Irq`. |
+| `IrqLine` | A range of interrupt lines, the log's among them. Bound one at a time into an `Irq`. |
 | `Irq` | One line bound to a notification. Signals it when the line fires. |
-| `Debug` | Console output and machine halt for bring-up and tests. No object. |
+| `Debug` | A byte into the kernel's log, and machine halt, for bring-up and tests. No object. |
 
 Every object's size follows from its type,
 a `CapTable` from its slot count,
@@ -680,14 +693,86 @@ Sharing a line between drivers is open decision 11;
 what the kernel does today is refuse the second binding.
 
 **No driver in the kernel.**
-The console UART is the first device:
-the kernel polls its transmitter for its own messages
-and the root task is granted the same registers and the same line,
-so `user/init.c` drives the transmitter from user mode on its interrupt
-while the kernel's console keeps working next to it.
-That sharing is a bring-up arrangement, not a design:
-a board with two UARTs gives one to the kernel and one to userspace,
-and a kernel without a console gives up the device altogether.
+The UART is the first device, and it is userspace's alone:
+the root task is granted its registers and its line at boot,
+and `user/init.c` drives the transmitter from user mode on its interrupt.
+The kernel has no console to share it with.
+What the kernel has to say goes into its log,
+and the log raises a line of its own; see "The kernel log".
+
+## The kernel log
+
+**The kernel has no console.**
+Where a kernel's messages go is the application's business:
+a UART on one board, USB or a radio on another,
+nowhere at all on a device in the field.
+Each of those is a driver, and no driver runs in the kernel.
+So the kernel writes into a ring of bytes in its own memory,
+`KLOG_SIZE` of them behind a header at `KLOG_BASE`, and stops there.
+`kputc` appends a byte and moves the head, a count of every byte ever written.
+The kernel never waits for a reader:
+one more than a ring behind loses the oldest bytes and can tell,
+because the head has run past its own count by more than the size.
+`OP_DEBUG_PUTC` appends to the same ring,
+so a program's output and the kernel's keep their order.
+
+**The reader is granted the ring, and a word in its header.**
+`BOOT_CAP_LOG` names the header and the ring,
+so the root task installs it as it installs a device's registers
+and reads the head and the bytes without a system call.
+The header also holds `taken`, the reader's count of what it has read,
+which is the one word of kernel memory user mode writes:
+the kernel reads it only to tell whether the line is high
+and how much of the ring a halt has left to write out,
+and a count past the head reads as the head.
+It is kernel memory that user mode can see,
+which the isolation properties otherwise forbid;
+it holds no object and no capability, only what the kernel chose to say,
+and `OP_REGION_TO_POOL` refuses the range, since the kernel writes there on its own.
+The ring lies at the top of the kernel's RAM, touching the root task's code,
+so that the two cost one PMP boundary rather than two.
+
+**The log is a device, and its line is line 0.**
+A reader that has taken everything wants to stop until there is more,
+and stopping is a notification, which a device reaches through an `Irq`.
+So the log has an interrupt line, `LOG_IRQ_LINE`, the number the controller does not use,
+and the root task receives it in `BOOT_CAP_IRQ_LINES` with the controller's lines,
+carves it out, binds it and arms it as it would a UART's.
+The line is level: high while the head lies past `taken`,
+so the reader acknowledges by writing the header, as it would a device's register.
+Arming the `Irq` while the line is high signals at once,
+so a byte written between the reader's last look and its arm is not missed,
+and a byte written while the `Irq` is armed signals as it lands.
+Either way the `Irq` is disarmed by signalling, as a device's is,
+and the rest of a burst wakes nobody until the reader arms again.
+Nothing else is new: binding, the pool rules, revocation by pool destroy
+and one `Irq` per line hold for line 0 as for line 10,
+and `klog.c` does for the log's line what the controller does for a device's,
+with the head for the level and no enable bit to write.
+
+**Two things the log's line is not.**
+It is not a source that can wake the machine:
+only the kernel raises it, and the kernel runs only when a thread,
+the tick or a device makes it,
+so a kernel with nothing runnable and only the log's `Irq` armed
+stops with `no runnable thread` rather than stall in `wfi`.
+And it is not a line a replay can fire by name:
+`OP_DEBUG_IRQ` refuses it, since its level is the log's and not the record's.
+A replay reaches it all the same, because the trace is bytes into the log
+and the trace of the very call that arms the `Irq` is what raises the line;
+`tests/seeds/log-wakes-reader` rests on that.
+
+**What a halt does with the log is the board's business.**
+A board that resets leaves the ring in RAM,
+where a logger after the reset can find the last words;
+what it needs to trust them is open decision 12.
+QEMU virt exits on a halt and keeps no RAM,
+so its `khalt` in `kernel/halt.c` is the post-mortem reader:
+it writes what no reader has taken to the UART under a line that says the log follows,
+so that a transcript tells what a logger carried out from what the halt salvaged.
+That is the one place the kernel touches the UART, and it is the simulator's file.
+The ring is 4 KiB, a burst's worth between two looks by a reader,
+and a reader that looks less often loses the oldest bytes and can tell.
 
 ## Boot
 
@@ -700,8 +785,9 @@ The kernel:
 4. constructs the root process by hand, including a `KernelPool`
    in a range the linker reserves,
 5. hands the root task capabilities to the remaining RAM,
-   to the console UART's registers
-   and to every line of the interrupt controller
+   to the UART's registers,
+   to the kernel's log,
+   and to every line of the interrupt controller with the log's line before them
    (later also flash and other device ranges),
 6. programs the tick, masks every interrupt line,
    and drops to user mode into the root task.
@@ -732,7 +818,8 @@ so user mode never has a mapping to memory that holds kernel objects.
 No installed region lies outside the memory
 the root task was granted at boot,
 and the granted memory does not overlap the boot pool,
-so the kernel's own memory is unreachable.
+so the kernel's own memory is unreachable,
+the log excepted: it holds no object and can never become a pool.
 
 **PMP fidelity.**
 For every process, the PMP image the kernel built
@@ -747,7 +834,7 @@ Every capability in every table names either
 a region within the granted memory,
 on the PMP grain,
 with rights no greater than the root task received for it,
-or a range of lines the interrupt controller has,
+or a range of lines the interrupt controller has, the log's among them,
 with no more than the right to bind,
 or a live kernel object of the capability's own type.
 
@@ -779,13 +866,21 @@ and a timer that fires disarms itself.
 
 **Interrupts.**
 Every `Irq` names a live notification in its own pool
-and a line the controller has.
+and a line the controller has, or the log's.
 At most one `Irq` is bound to any line.
 The controller forwards a line exactly while an `Irq` is armed on it,
 read back from the controller itself:
 an interrupt masks the line as it disarms the `Irq`,
 a set masks or unmasks it with the bits,
 and a destroy masks the lines of the `Irq`s it takes.
+
+**The log.**
+An `Irq` armed on the log's line has nothing untaken behind it:
+the head is where the reader said it had taken to.
+A set with bytes untaken signalled at once,
+and a byte that made the line rise signalled as it landed,
+so the same "armed and unmasked are one state" holds,
+with the head for the controller.
 
 **Memory safety.**
 No sequence of system calls makes the kernel read or write
@@ -799,7 +894,7 @@ Until pool destroy exists, confinement implies it.
 ## Verification
 
 **Host fuzzing** (`make host-test`, `make fuzz`).
-The kernel's logic compiles natively with a shim for the console,
+The kernel's logic compiles natively with a shim for `kputc`,
 the PMP CSRs and halting, and physical addresses indexing a RAM buffer.
 An input is a sequence of events the kernel receives,
 not the behaviour of one process:
@@ -845,10 +940,21 @@ and catches a bug only when the transcript changes;
 or the two traces differ.
 
 **QEMU** (`make test`, `make qemu-replay`).
+The kernel has no console, so a transcript reaches QEMU's UART two ways:
+through a logger in user mode while the machine runs,
+and through the halt, which writes the whole log out under a line saying so;
+see "The kernel log".
 `make test` boots the real kernel and checks the root task's transcript:
-the root task builds a second process, exchanges a word with it
+the root task starts a logger thread on the log's line and the UART's,
+builds a second process, exchanges a word with it
 through a shared region and two notifications,
-and ends in a deliberate fault.
+and ends in a deliberate fault,
+and `tests/run.sh` checks that the logger carried the transcript out
+before the halt did, by where the halt's line falls in it.
+The replay driver carries the log to the UART after every record,
+by polling and with no system call, so the transcripts stay the same on both builds,
+and the host writes the same mark into the header after every event;
+the halt writes out what the last record left.
 `make qemu-replay` boots the replay driver once per corpus input
 with the input placed in RAM by QEMU's loader.
 The driver runs two threads that take records from one cursor,
@@ -906,7 +1012,7 @@ and one masked without its `Irq` disarmed would break an invariant;
 the replay driver holds no device and enables none,
 so none arrives during a replay, and `OP_DEBUG_IRQ` fires them by name.
 The path from the controller to the `Irq` is checked by the demo in `user/init.c`,
-which drives the console UART's transmitter on its interrupt.
+whose logger drives the UART's transmitter on its interrupt.
 The kernel loses nothing by that:
 it runs with interrupts off, so a tick lands only in user mode,
 and every such landing is the same to it, a ready thread whose frame is saved.
@@ -1069,3 +1175,17 @@ until the maintainer decides otherwise.
     The `IrqLine` capability would then be copied rather than carved,
     and `KERR_OVERLAP` on a bind would go.
     Decide when a board with a shared line is worth that count.
+
+12. **The log across a reset.**
+    Working default: the kernel resets the log's header at boot
+    and leaves the ring's bytes alone,
+    so on a board whose boot does not clear RAM
+    the previous run's last words are there to be read,
+    but nothing says how many of them are valid or where they end.
+    A logger that reports a crash after a reset needs the old head,
+    which means a header the kernel does not reset,
+    a marker that tells a cold boot from a warm one,
+    and a checksum against RAM that came up as noise.
+    The kernel could also keep the old ring as it is
+    and start a fresh one behind it, at twice the memory.
+    Decide with the first board, whose reset behaviour decides what survives.

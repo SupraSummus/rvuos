@@ -14,6 +14,11 @@
  * and the blocking paths are replayed like any other.
  * A record that names the other thread is passed to it as described there.
  *
+ * The kernel has no console, so after every record the driver carries
+ * the log to the UART itself, by polling and with no system call,
+ * and marks in the log's header what it has taken;
+ * the halt writes out whatever the last record left.
+ *
  * Records may do anything, including unmapping this program,
  * which then faults; the host build models that.
  * The driver ends with a breakpoint, which the kernel reports
@@ -28,6 +33,17 @@
 
 static struct replay_record records[REPLAY_MAX_RECORDS];
 static uint32_t count;
+
+/* The 16550 of QEMU virt, its transmitter polled. */
+#define UART_THR 0
+#define UART_LSR 5
+#define UART_LSR_THRE 0x20u
+
+static volatile uint8_t *uart;
+static volatile struct rvuos_log *log_header;
+static const volatile uint8_t *log_ring;
+/* Bytes carried out so far. Only the thread that performed a record touches it, and it makes no call meanwhile. */
+static uint32_t drained;
 
 /*
  * The next record to perform.
@@ -46,6 +62,25 @@ static void puts(const char *s)
 static uint32_t perform(const struct replay_record *r)
 {
     return rv_invoke(r->op, r->slot, r->a1, r->a2, r->a3);
+}
+
+static void uart_putc(char c)
+{
+    if (c == '\n') {
+        uart_putc('\r');
+    }
+    while ((uart[UART_LSR] & UART_LSR_THRE) == 0) {
+    }
+    uart[UART_THR] = (uint8_t)c;
+}
+
+static void drain_log(void)
+{
+    uint32_t head = log_header->head;
+    for (; drained != head; drained++) {
+        uart_putc((char)log_ring[drained % log_header->size]);
+    }
+    log_header->taken = head;
 }
 
 static void replay_loop(unsigned me);
@@ -68,6 +103,7 @@ static void replay_loop(unsigned me)
         }
         cursor = i + 1;
         perform(&records[i]);
+        drain_log();
     }
 
     __asm__ volatile("ebreak");
@@ -116,6 +152,22 @@ int main(void)
         records[i].a2 = in[i].a2;
         records[i].a3 = in[i].a3;
     }
+
+    for (unsigned i = 0; i < REPLAY_AFTER_INPUT_COUNT; i++) {
+        if (perform(&replay_after_input[i]) != KERR_OK) {
+            puts("replay setup failed\n");
+            rv_halt(BOOT_CAP_DEBUG, 2);
+        }
+    }
+    uint32_t uart_base, log_base, size;
+    if (rv_region_info(BOOT_CAP_UART, &uart_base, &size) != KERR_OK ||
+        rv_region_info(BOOT_CAP_LOG, &log_base, &size) != KERR_OK) {
+        puts("cannot find the uart or the log\n");
+        rv_halt(BOOT_CAP_DEBUG, 2);
+    }
+    uart = (volatile uint8_t *)uart_base;
+    log_header = (volatile struct rvuos_log *)log_base;
+    log_ring = (const volatile uint8_t *)(log_base + RVUOS_LOG_HEADER);
 
     rv_invoke(OP_DEBUG_TRACE, BOOT_CAP_DEBUG, 0, 0, 0);
     if (perform(&replay_start) != KERR_OK) {

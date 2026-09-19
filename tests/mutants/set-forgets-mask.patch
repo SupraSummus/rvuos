@@ -3,16 +3,13 @@ The next interrupt would find nothing armed to signal;
 the controller forwards a line exactly while an Irq is armed on it.
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
+index 4e1dd1f..bb113a2 100644
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -470,7 +470,9 @@
-     }
-     /* Armed and unmasked are one state, here and in sched_interrupt. */
-     irq->bits = arg[1];
--    irq_enable(irq->line, irq_armed(irq));
-+    if (irq_armed(irq)) {
+@@ -480,4 +480,4 @@ static int op_irq(const struct cap *cap, uint32_t op, const uint32_t *arg)
+         klog_set(irq);
+-    } else {
+-        irq_enable(irq->line, irq_armed(irq));
++    } else if (irq_armed(irq)) {
 +        irq_enable(irq->line, true);
-+    }
-     return KERR_OK;
- }
- 
+     }

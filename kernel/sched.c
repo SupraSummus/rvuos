@@ -130,8 +130,10 @@ void sched_claim_interrupts(void)
 }
 
 /*
- * True if some timer or Irq will fire,
+ * True if some timer or device Irq will fire,
  * so that waiting for an interrupt can change what is runnable.
+ * The log's line is not a source: only the kernel raises it,
+ * and the kernel runs only when a thread or one of these does.
  */
 static bool source_armed(void)
 {
@@ -139,7 +141,8 @@ static bool source_armed(void)
         if (o->type == CAP_TIMER && timer_armed((struct timer *)o)) {
             return true;
         }
-        if (o->type == CAP_IRQ && irq_armed((struct irq *)o)) {
+        if (o->type == CAP_IRQ && irq_armed((struct irq *)o) &&
+            ((struct irq *)o)->line != LOG_IRQ_LINE) {
             return true;
         }
     }
@@ -170,8 +173,13 @@ void sched_unblock_range(uint32_t base, uint32_t size)
 void sched_unbind_range(uint32_t base, uint32_t size)
 {
     for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
-        if (o->type == CAP_IRQ && range_contains(base, size, v2p(o))) {
-            irq_enable(((struct irq *)o)->line, false);
+        if (o->type != CAP_IRQ || !range_contains(base, size, v2p(o))) {
+            continue;
+        }
+        /* The log's line has no controller to mask; gone is masked. */
+        uint32_t line = ((struct irq *)o)->line;
+        if (line != LOG_IRQ_LINE) {
+            irq_enable(line, false);
         }
     }
 }
@@ -201,7 +209,7 @@ void sched_run_next(void)
         /*
          * Only a running thread, a firing timer or a device interrupt
          * can make another one runnable.
-         * With no timer and no Irq armed nothing can change this, so say so and stop.
+         * With no timer and no device Irq armed nothing can change this, so say so and stop.
          * While tracing is on, time moves and lines fire only through OP_DEBUG_TICK
          * and OP_DEBUG_IRQ, which nobody is left to perform, so the same holds
          * and the host build, which has no clock and no devices, agrees.

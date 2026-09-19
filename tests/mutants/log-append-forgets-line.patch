@@ -1,0 +1,18 @@
+A byte appended to the log does not raise its line.
+A reader armed on the line, which was low, never hears of the byte;
+an Irq armed on the log's line has nothing untaken behind it.
+
+diff --git a/kernel/klog.c b/kernel/klog.c
+index 722213d..e8ea9a8 100644
+--- a/kernel/klog.c
++++ b/kernel/klog.c
+@@ -63,8 +63,3 @@ void klog_append(char c)
+     header->head++;
+-    if (quiet) {
+-        struct irq *irq = line_binding(LOG_IRQ_LINE);
+-        if (irq != NULL && irq_armed(irq)) {
+-            klog_signal(irq);
+-        }
+-    }
++    (void)quiet;
+ }

@@ -5,6 +5,7 @@
 
 #include "irq.h"
 #include "kernel.h"
+#include "klog.h"
 #include "object.h"
 #include "timer.h"
 
@@ -37,7 +38,8 @@ static int op_debug(uint32_t op, const uint32_t *arg)
         sched_tick();
         return KERR_OK;
     case OP_DEBUG_IRQ:
-        if (arg[1] == 0 || arg[1] >= IRQ_LINES) {
+        /* The log's line is not a device's: its level is the log's, and no record fires it. */
+        if (arg[1] == LOG_IRQ_LINE || arg[1] >= IRQ_LINES) {
             return KERR_INVALID_ARG;
         }
         return sched_interrupt(arg[1]) ? KERR_OK : KERR_STATE;
@@ -96,8 +98,12 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
         if ((cap->rights & (RIGHT_R | RIGHT_W)) != (RIGHT_R | RIGHT_W)) {
             return KERR_NO_RIGHTS;
         }
-        /* Kernel objects live in RAM: on a device range the zeroing below would drive registers. */
-        if ((base | size) & (OBJ_ALIGN - 1) || size < POOL_MIN_SIZE || !ram_contains(base, size)) {
+        /*
+         * Kernel objects live in RAM: on a device range the zeroing below would drive registers.
+         * The log is RAM the kernel writes on its own, so it cannot hold them either.
+         */
+        if ((base | size) & (OBJ_ALIGN - 1) || size < POOL_MIN_SIZE || !ram_contains(base, size) ||
+            ranges_overlap(base, size, KLOG_BASE, KLOG_REGION_SIZE)) {
             return KERR_INVALID_ARG;
         }
         if (pool_overlaps(base, size) || installed_overlaps(base, size)) {
@@ -470,7 +476,11 @@ static int op_irq(const struct cap *cap, uint32_t op, const uint32_t *arg)
     }
     /* Armed and unmasked are one state, here and in sched_interrupt. */
     irq->bits = arg[1];
-    irq_enable(irq->line, irq_armed(irq));
+    if (irq->line == LOG_IRQ_LINE) {
+        klog_set(irq);
+    } else {
+        irq_enable(irq->line, irq_armed(irq));
+    }
     return KERR_OK;
 }
 

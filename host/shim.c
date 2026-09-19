@@ -8,7 +8,9 @@
 
 #include "harness.h"
 #include "irq.h"
+#include "klog.h"
 #include "trap.h"
+#include "uart.h"
 
 _Static_assert(HOST_RAM_BASE == RAM_BASE && HOST_RAM_SIZE == RAM_SIZE,
                "host RAM must match the kernel's layout");
@@ -36,24 +38,15 @@ _Static_assert(PMP_GRAIN >= 4 && (PMP_GRAIN & (PMP_GRAIN - 1)) == 0,
 static uint32_t pmp_addr[PMP_MAX_ENTRIES];
 static uint8_t pmp_cfg[PMP_MAX_ENTRIES];
 
+/*
+ * The log takes every byte, as on the target, so its head and its line agree
+ * with QEMU's; the transcript is the same bytes as they come.
+ */
 void kputc(char c)
 {
+    klog_append(c);
     if (host_verbose) {
         putchar(c);
-    }
-}
-
-void kputs(const char *s)
-{
-    if (host_verbose) {
-        fputs(s, stdout);
-    }
-}
-
-void kput_hex(uint32_t v)
-{
-    if (host_verbose) {
-        printf("0x%08x", v);
     }
 }
 
@@ -171,6 +164,7 @@ struct thread *host_boot(void)
     debug_trace = false;
     pmp_init();
     irq_init();
+    klog_init();
 
     struct thread *root = boot_create_root(
         HOST_BOOT_POOL_BASE, HOST_BOOT_POOL_SIZE,
@@ -184,6 +178,11 @@ struct thread *host_boot(void)
      */
     for (unsigned i = 0; i < REPLAY_PROLOGUE_COUNT; i++) {
         if (host_syscall(&replay_prologue[i]) != KERR_OK) {
+            abort();
+        }
+    }
+    for (unsigned i = 0; i < REPLAY_AFTER_INPUT_COUNT; i++) {
+        if (host_syscall(&replay_after_input[i]) != KERR_OK) {
             abort();
         }
     }
@@ -253,7 +252,13 @@ bool host_event(const struct replay_record *c)
         }
     }
     host_syscall(c);
-    return host_driver_alive();
+    if (!host_driver_alive()) {
+        return false;
+    }
+    /* The driver drains the log to the UART after each record, which leaves this mark. */
+    volatile struct rvuos_log *log = p2v(KLOG_BASE);
+    log->taken = log->head;
+    return true;
 }
 
 static bool mapped_with(const struct process *proc, uint32_t base, uint32_t size, uint8_t rights)
@@ -272,5 +277,7 @@ bool host_driver_alive(void)
 {
     const struct process *proc = thread_process(current);
     return mapped_with(proc, USER_CODE_BASE, USER_CODE_SIZE, RIGHT_R | RIGHT_X) &&
-           mapped_with(proc, USER_DATA_BASE, USER_DATA_SIZE, RIGHT_R | RIGHT_W);
+           mapped_with(proc, USER_DATA_BASE, USER_DATA_SIZE, RIGHT_R | RIGHT_W) &&
+           mapped_with(proc, UART_BASE, UART_SIZE, RIGHT_R | RIGHT_W) &&
+           mapped_with(proc, KLOG_BASE, KLOG_REGION_SIZE, RIGHT_R | RIGHT_W);
 }

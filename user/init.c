@@ -1,6 +1,8 @@
 /*
  * Root task for the current stage.
  * It walks the capability system once end to end on real hardware paths:
+ * start a logger thread that carries the kernel's log to the UART
+ * on the log's line and the transmitter's interrupt,
  * carve memory, make a pool, allocate from it,
  * build a second process out of nothing but capabilities,
  * exchange a word with it through shared memory and two notifications,
@@ -9,7 +11,7 @@
  * lend the child memory it turns into a pool of its own
  * and take it back by destroying the child's pool,
  * sleep on a timer while nothing else can run,
- * drive the console UART's transmitter from user mode on its interrupt,
+ * bind and revoke an Irq on a line nothing drives,
  * then unmap a region and fault on it.
  * Negative paths are covered by the fuzz corpus and tests/differential.py.
  */
@@ -20,7 +22,13 @@
 
 /* Slots in the root task's own table, above the ones the kernel filled. */
 enum {
-    SLOT_POOL_REGION = BOOT_CAP_COUNT,
+    SLOT_LOG_NTFN = BOOT_CAP_COUNT, /* the logger waits here; the log's Irq and the UART's signal it */
+    SLOT_LOG_LINE,      /* the log's line, carved out of the boot grant */
+    SLOT_LOG_IRQ,       /* the line bound to SLOT_LOG_NTFN */
+    SLOT_UART_LINE,     /* the UART's line */
+    SLOT_UART_IRQ,
+    SLOT_LOGGER,        /* the logger thread */
+    SLOT_POOL_REGION,
     SLOT_CHILD_DATA,
     SLOT_SHARED,
     SLOT_POOL,
@@ -37,13 +45,13 @@ enum {
     SLOT_NEW_NTFN,
     SLOT_LENT,          /* memory lent to the child, which pools it */
     SLOT_LENT_POOL,     /* what the root task makes of it once it is back */
-    SLOT_TIMER_NTFN,    /* what the timer signals, and the UART's Irq as well */
+    SLOT_TIMER_NTFN,    /* what the timer signals, and the spare line's Irq as well */
     SLOT_TIMER,
-    SLOT_UART_LINE,     /* the console's interrupt line, carved out of the boot grant */
-    SLOT_UART_LINE_COPY, /* a second capability to it, inert while the line is bound */
-    SLOT_UART_IRQ,      /* the line bound to SLOT_TIMER_NTFN */
+    SLOT_SPARE_LINE,    /* a line nothing drives, carved out of the boot grant */
+    SLOT_SPARE_LINE_COPY, /* a second capability to it, inert while the line is bound */
+    SLOT_SPARE_IRQ,     /* the line bound to SLOT_TIMER_NTFN */
     SLOT_BOOT_NTFN,     /* a notification in the boot pool, for binding the line again */
-    SLOT_UART_IRQ_AGAIN,
+    SLOT_SPARE_IRQ_AGAIN,
 };
 
 /*
@@ -63,17 +71,22 @@ enum {
     CHILD_TABLE_SLOTS = 10,
 };
 
-/* Region slots. The root task boots with code in 0 and data in 1. */
+/*
+ * Region slots. The root task boots with code in 0 and data in 1.
+ * The log touches the code and the shared region touches the data,
+ * so the five regions cost eight PMP entries, the smallest budget the kernel accepts.
+ */
 #define ROOT_SHARED_SLOT 2
 #define ROOT_UART_SLOT 3
+#define ROOT_LOG_SLOT 4
 #define CHILD_CODE_SLOT 0
 #define CHILD_DATA_SLOT 1
 #define CHILD_SHARED_SLOT 2
 
-/* Offsets into the free RAM the root task was granted. */
-#define POOL_OFFSET  0x0000u
+/* Offsets into the free RAM the root task was granted; the shared region comes first, see above. */
+#define SHARED_OFFSET 0x0000u
 #define DATA_OFFSET  0x1000u
-#define SHARED_OFFSET 0x2000u
+#define POOL_OFFSET  0x2000u
 #define DOOMED_OFFSET 0x3000u
 #define LENT_OFFSET  0x4000u
 #define CHUNK 0x1000u
@@ -87,21 +100,28 @@ enum {
 #define BIT_POOL    0x20u /* turn the lent memory into a pool */
 #define BIT_POOLED  0x40u
 #define BIT_TIMER   0x80u /* the timer's bit on its own notification */
-#define BIT_UART    0x100u /* the UART's bit on that same notification */
+#define BIT_SPARE   0x100u /* the spare line's bit on that same notification */
 #define MAGIC 0x5eaf00du
 
+/* The logger's notification: the log's bit and the UART's. */
+#define BIT_LOG  0x1u
+#define BIT_UART 0x2u
+
 /*
- * The console UART of QEMU virt: a 16550 on line 10.
- * The registers come from BOOT_CAP_UART; the line number is the board's,
- * as the offsets into free RAM above are, and the boot grant's lines start at 1.
+ * The UART of QEMU virt: a 16550 on line 10, and a line nothing drives, the RTC's.
+ * The registers come from BOOT_CAP_UART; the line numbers are the board's,
+ * as the offsets into free RAM above are.
  */
 #define UART_IRQ 10
+#define SPARE_IRQ 11
 #define UART_THR 0 /* transmit holding register */
 #define UART_IER 1 /* interrupt enable register */
 #define UART_IIR 2 /* interrupt identification register */
+#define UART_LSR 5 /* line status register */
 #define UART_IER_THRE 0x2u /* interrupt when the transmit holding register empties */
 #define UART_IIR_ID   0xfu
 #define UART_IIR_THRE 0x2u
+#define UART_LSR_THRE 0x20u
 
 /* Ticks are a millisecond on QEMU; long enough to need a few of them. */
 #define SLEEP_US 10000u
@@ -144,43 +164,108 @@ static uint32_t sleep_us(uint32_t us)
 }
 
 /*
- * A UART driver in user mode, as far as transmitting goes.
- * The transmitter raises the line whenever it is empty, once told to,
- * so each byte waits for that interrupt:
- * arm the Irq, wait on the notification the timer shares,
- * read the identification register, which lowers the line
- * and must say it was the transmitter, and write the byte.
- * The kernel masked the line as it signalled,
- * so the level may stay high between the wake and the read without a second signal;
- * arming again is the acknowledgement.
+ * The logger: the root task's second thread, and the only thing that writes the UART.
+ * The kernel has no console; what it prints lands in its log, a ring behind BOOT_CAP_LOG
+ * whose interrupt line is high while the ring holds bytes nobody has taken;
+ * see DESIGN.md, "The kernel log".
+ * So the logger drives two devices on one notification, one bit each:
+ * the log says there is something to send and the UART says it can take a byte.
+ * Its own failure is the one thing it cannot report through the log,
+ * so that goes to the UART by polling.
  */
-static uint32_t uart_put(volatile uint8_t *uart, char c)
+static volatile uint8_t *uart;
+static volatile struct rvuos_log *log_header;
+static const volatile uint8_t *log_ring;
+
+static void uart_put_polled(char c)
 {
-    uint32_t bits;
-    uint32_t status = rv_irq_set(SLOT_UART_IRQ, BIT_UART);
-    if (status != KERR_OK) {
-        return status;
-    }
-    status = rv_wait(SLOT_TIMER_NTFN, &bits);
-    if (status != KERR_OK) {
-        return status;
-    }
-    if (bits != BIT_UART || (uart[UART_IIR] & UART_IIR_ID) != UART_IIR_THRE) {
-        return KERR_INVALID_ARG;
+    while ((uart[UART_LSR] & UART_LSR_THRE) == 0) {
     }
     uart[UART_THR] = (uint8_t)c;
-    return KERR_OK;
 }
 
-static uint32_t uart_write(volatile uint8_t *uart, const char *s)
+static __attribute__((noreturn)) void logger_fail(const char *s)
 {
     for (; *s != '\0'; s++) {
-        uint32_t status = uart_put(uart, *s);
-        if (status != KERR_OK) {
-            return status;
+        if (*s == '\n') {
+            uart_put_polled('\r');
+        }
+        uart_put_polled(*s);
+    }
+    rv_halt(BOOT_CAP_DEBUG, 1);
+}
+
+/*
+ * One byte out on the transmitter's interrupt.
+ * The transmitter raises the line whenever it is empty, once told to,
+ * so each byte waits for that interrupt:
+ * arm the Irq, wait, read the identification register, which lowers the line
+ * and must say it was the transmitter, and write the byte.
+ * The kernel masked the line as it signalled, so arming again is the acknowledgement.
+ * The log's Irq is disarmed meanwhile, so the UART's bit comes alone.
+ */
+static void uart_put(char c)
+{
+    uint32_t bits;
+    if (rv_irq_set(SLOT_UART_IRQ, BIT_UART) != KERR_OK ||
+        rv_wait(SLOT_LOG_NTFN, &bits) != KERR_OK) {
+        logger_fail("logger: cannot wait for the uart\n");
+    }
+    if (bits != BIT_UART || (uart[UART_IIR] & UART_IIR_ID) != UART_IIR_THRE) {
+        logger_fail("logger: woken for something other than the transmitter\n");
+    }
+    uart[UART_THR] = (uint8_t)c;
+}
+
+/* The log holds bare newlines; the terminal wants a carriage return before each. */
+static void uart_put_line_ending(char c)
+{
+    if (c == '\n') {
+        uart_put('\r');
+    }
+    uart_put(c);
+}
+
+static void uart_write(const char *s)
+{
+    for (; *s != '\0'; s++) {
+        uart_put_line_ending(*s);
+    }
+}
+
+static void logger_main(void)
+{
+    uint32_t taken = 0;
+
+    /* From here the transmitter raises the line whenever it is empty. */
+    uart[UART_IER] = UART_IER_THRE;
+    for (;;) {
+        /*
+         * Say what has been taken so far, arm the log's line and wait.
+         * The line is level, so bytes written before the arm wake the logger at once,
+         * and bytes written after it wake it when they come.
+         */
+        uint32_t bits;
+        log_header->taken = taken;
+        if (rv_irq_set(SLOT_LOG_IRQ, BIT_LOG) != KERR_OK ||
+            rv_wait(SLOT_LOG_NTFN, &bits) != KERR_OK) {
+            logger_fail("logger: cannot wait for the log\n");
+        }
+        if (bits != BIT_LOG) {
+            logger_fail("logger: woken for something other than the log\n");
+        }
+
+        uint32_t head = log_header->head;
+        uint32_t size = log_header->size;
+        if (head - taken > size) {
+            /* The kernel wrote round the ring past this reader; the oldest byte kept is head - size. */
+            taken = head - size;
+            uart_write("logger: lost bytes\n");
+        }
+        for (; taken != head; taken++) {
+            uart_put_line_ending((char)log_ring[taken % size]);
         }
     }
-    return KERR_OK;
 }
 
 /*
@@ -263,8 +348,46 @@ int main(void);
 int main(void)
 {
     uint32_t free_base, free_size, grain, bits;
+    uint32_t data_base, data_size, uart_base, uart_size, log_base, log_size;
 
     puts("hello from user mode\n");
+
+    /*
+     * The logger first, so that everything above and below reaches the UART
+     * while the machine runs, and not only when the halt writes the log out.
+     * Its objects come from the boot pool and its thread runs in this process,
+     * on a stack in the middle of the data region; this thread's is at the top.
+     */
+    expect("uart info", rv_region_info(BOOT_CAP_UART, &uart_base, &uart_size));
+    expect("log info", rv_region_info(BOOT_CAP_LOG, &log_base, &log_size));
+    expect("data info", rv_region_info(BOOT_CAP_DATA, &data_base, &data_size));
+    expect("map the uart's registers",
+           rv_invoke(OP_PROCESS_INSTALL, BOOT_CAP_PROCESS, ROOT_UART_SLOT, BOOT_CAP_UART,
+                     RIGHT_R | RIGHT_W));
+    expect("map the kernel's log",
+           rv_invoke(OP_PROCESS_INSTALL, BOOT_CAP_PROCESS, ROOT_LOG_SLOT, BOOT_CAP_LOG,
+                     RIGHT_R | RIGHT_W));
+    uart = (volatile uint8_t *)uart_base;
+    log_header = (volatile struct rvuos_log *)log_base;
+    log_ring = (const volatile uint8_t *)(log_base + RVUOS_LOG_HEADER);
+
+    expect("allocate the logger's notification",
+           rv_invoke(OP_POOL_ALLOC, BOOT_CAP_POOL, CAP_NOTIFICATION, SLOT_LOG_NTFN, 0));
+    expect("carve the log's line",
+           rv_invoke(OP_IRQ_CARVE, BOOT_CAP_IRQ_LINES, LOG_IRQ_LINE, 1, SLOT_LOG_LINE));
+    expect("bind the log's line",
+           rv_invoke(OP_IRQ_BIND, SLOT_LOG_LINE, BOOT_CAP_POOL, SLOT_LOG_NTFN, SLOT_LOG_IRQ));
+    expect("carve the uart's line",
+           rv_invoke(OP_IRQ_CARVE, BOOT_CAP_IRQ_LINES, UART_IRQ, 1, SLOT_UART_LINE));
+    expect("bind the uart's line",
+           rv_invoke(OP_IRQ_BIND, SLOT_UART_LINE, BOOT_CAP_POOL, SLOT_LOG_NTFN, SLOT_UART_IRQ));
+    expect("allocate the logger's thread",
+           rv_invoke(OP_POOL_ALLOC, BOOT_CAP_POOL, CAP_THREAD, SLOT_LOGGER, BOOT_CAP_PROCESS));
+    expect("configure the logger",
+           rv_invoke(OP_THREAD_CONFIGURE, SLOT_LOGGER, (uint32_t)&logger_main,
+                     data_base + data_size / 2, 0));
+    expect("start the logger", rv_invoke(OP_THREAD_RESUME, SLOT_LOGGER, 0, 0, 0));
+
     expect("free ram info", rv_region_info(BOOT_CAP_FREE_RAM, &free_base, &free_size));
     /* Read through a4; the offsets below are on a page and a coarser grain is another machine. */
     expect("the layout fits the grain",
@@ -303,7 +426,7 @@ int main(void)
                      RIGHT_R | RIGHT_W));
 
     /* Authority the child starts with, and nothing besides. */
-    expect("give the child the console",
+    expect("give the child the log",
            rv_invoke(OP_CAP_COPY, SLOT_CHILD_TABLE, CHILD_DEBUG, BOOT_CAP_DEBUG, RIGHT_ALL));
     expect("give the child the shared region",
            rv_invoke(OP_CAP_COPY, SLOT_CHILD_TABLE, CHILD_SHARED, SLOT_SHARED, RIGHT_R | RIGHT_W));
@@ -423,8 +546,10 @@ int main(void)
 
     /*
      * Time.
-     * The child is gone with its pool, so while the root task sleeps
-     * nothing is runnable and the kernel has to wait for the tick rather than stop.
+     * The child is gone with its pool and the logger waits on the log,
+     * which nothing but a running thread can feed,
+     * so while this thread sleeps nothing is runnable
+     * and the kernel has to wait for the tick rather than stop.
      */
     expect("allocate the timer's notification",
            rv_invoke(OP_POOL_ALLOC, SLOT_NEW_POOL, CAP_NOTIFICATION, SLOT_TIMER_NTFN, 0));
@@ -435,55 +560,46 @@ int main(void)
     puts("root: timer ok\n");
 
     /*
-     * Interrupts.
-     * The console UART is a device like any other to the root task:
-     * a region for its registers and a line, both from the boot grant.
-     * The Irq shares the timer's notification, one bit each,
+     * Interrupts, beyond the two lines the logger lives on.
+     * A line nothing drives shows what the logger cannot:
+     * that a line is bound once, that an armed line nothing raises stays quiet,
+     * and that the Irq dies with its pool, which frees the line.
+     * It shares the timer's notification, one bit each,
      * which is what makes a wait with a timeout the same call as a wait.
      */
-    uint32_t uart_base, uart_size;
-    expect("uart info", rv_region_info(BOOT_CAP_UART, &uart_base, &uart_size));
-    expect("map the uart's registers",
-           rv_invoke(OP_PROCESS_INSTALL, BOOT_CAP_PROCESS, ROOT_UART_SLOT, BOOT_CAP_UART,
-                     RIGHT_R | RIGHT_W));
-    expect("carve the uart's line",
-           rv_invoke(OP_IRQ_CARVE, BOOT_CAP_IRQ_LINES, UART_IRQ - 1, 1, SLOT_UART_LINE));
+    expect("carve a spare line",
+           rv_invoke(OP_IRQ_CARVE, BOOT_CAP_IRQ_LINES, SPARE_IRQ, 1, SLOT_SPARE_LINE));
     expect("carve it again",
-           rv_invoke(OP_IRQ_CARVE, BOOT_CAP_IRQ_LINES, UART_IRQ - 1, 1, SLOT_UART_LINE_COPY));
+           rv_invoke(OP_IRQ_CARVE, BOOT_CAP_IRQ_LINES, SPARE_IRQ, 1, SLOT_SPARE_LINE_COPY));
     expect("bind the line to the timer's notification",
-           rv_invoke(OP_IRQ_BIND, SLOT_UART_LINE, SLOT_NEW_POOL, SLOT_TIMER_NTFN, SLOT_UART_IRQ));
+           rv_invoke(OP_IRQ_BIND, SLOT_SPARE_LINE, SLOT_NEW_POOL, SLOT_TIMER_NTFN, SLOT_SPARE_IRQ));
     expect("the line is taken",
-           rv_invoke(OP_IRQ_BIND, SLOT_UART_LINE_COPY, SLOT_NEW_POOL, SLOT_TIMER_NTFN,
-                     SLOT_UART_IRQ_AGAIN) == KERR_OVERLAP
+           rv_invoke(OP_IRQ_BIND, SLOT_SPARE_LINE_COPY, SLOT_NEW_POOL, SLOT_TIMER_NTFN,
+                     SLOT_SPARE_IRQ_AGAIN) == KERR_OVERLAP
                ? KERR_OK : KERR_INVALID_ARG);
-
-    volatile uint8_t *uart = (volatile uint8_t *)uart_base;
-    /* From here the transmitter raises the line whenever it is empty; that is the first interrupt. */
-    uart[UART_IER] = UART_IER_THRE;
-    expect("write through the driver", uart_write(uart, "root: uart driver ok\r\n"));
-    /*
-     * The last byte has gone out, so the level is high again,
-     * but the Irq is disarmed and the kernel masked the line as it signalled:
-     * the timer's bit comes alone.
-     */
-    expect("the masked line stays quiet", sleep_us(SLEEP_US));
-    uart[UART_IER] = 0;
+    expect("arm the line", rv_irq_set(SLOT_SPARE_IRQ, BIT_SPARE));
+    /* Unmasked at the controller and never raised: the timer's bit comes alone. */
+    expect("the idle line stays quiet", sleep_us(SLEEP_US));
 
     /* The Irq dies with its pool, which masks the line and frees it for the copy. */
     expect("destroy the driver's pool",
            rv_invoke(OP_POOL_DESTROY, SLOT_NEW_POOL, SLOT_DOOMED_REGION, 0, 0));
     expect("the irq is revoked",
-           rv_irq_set(SLOT_UART_IRQ, BIT_UART) == KERR_INVALID_CAP ? KERR_OK : KERR_INVALID_ARG);
+           rv_irq_set(SLOT_SPARE_IRQ, BIT_SPARE) == KERR_INVALID_CAP ? KERR_OK : KERR_INVALID_ARG);
     expect("allocate a notification in the boot pool",
            rv_invoke(OP_POOL_ALLOC, BOOT_CAP_POOL, CAP_NOTIFICATION, SLOT_BOOT_NTFN, 0));
     expect("the line is free again",
-           rv_invoke(OP_IRQ_BIND, SLOT_UART_LINE_COPY, BOOT_CAP_POOL, SLOT_BOOT_NTFN,
-                     SLOT_UART_IRQ_AGAIN));
+           rv_invoke(OP_IRQ_BIND, SLOT_SPARE_LINE_COPY, BOOT_CAP_POOL, SLOT_BOOT_NTFN,
+                     SLOT_SPARE_IRQ_AGAIN));
     puts("root: irq ok\n");
 
     expect("unmap the shared region",
            rv_invoke(OP_PROCESS_UNINSTALL, BOOT_CAP_PROCESS, ROOT_SHARED_SLOT, 0, 0));
 
+    /*
+     * The fault report lands in the log after the logger's last look at it,
+     * so the halt writes it out; tests/run.sh reads it there.
+     */
     puts("reading the removed region, expecting a fault\n");
     uint32_t word = shared[0];
 

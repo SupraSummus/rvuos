@@ -5,6 +5,7 @@
 #include "csr.h"
 #include "irq.h"
 #include "kernel.h"
+#include "klog.h"
 #include "object.h"
 #include "pmp.h"
 #include "timer.h"
@@ -15,6 +16,8 @@ extern char __boot_pool_end[];
 
 void kmain(void)
 {
+    /* Nothing prints before the log exists to take it. */
+    klog_init();
     kputs("rvuos: machine mode up\n");
 
     pmp_init();

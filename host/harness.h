@@ -15,7 +15,11 @@
 #include "pmp.h"
 #include "rvuos/replay.h"
 
-/* Where the harness puts the boot pool; inside the kernel's part of RAM. */
+/*
+ * Where the harness puts the boot pool; inside the kernel's part of RAM.
+ * The log lies at KLOG_BASE as on the target, since the root task can install it
+ * and the PMP images of the two builds must agree.
+ */
 #define HOST_BOOT_POOL_BASE (RAM_BASE + 0x1000u)
 #define HOST_BOOT_POOL_SIZE 0x1000u
 
@@ -43,7 +47,8 @@ bool host_event(const struct replay_record *c);
 
 /*
  * True while the running driver thread could still run on real hardware:
- * its process maps the driver's code read-execute and its data read-write.
+ * its process maps the driver's code read-execute
+ * and its data, the UART and the log read-write.
  * On QEMU the driver faults as soon as this stops holding;
  * the host has no instruction fetch to fault, so it checks instead,
  * and the harness must stop at the first false, as QEMU would.

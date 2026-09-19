@@ -1,6 +1,6 @@
 /*
  * Machine timer of the QEMU virt board: the CLINT's mtime and mtimecmp.
- * A board with its timer elsewhere replaces this file, as it does uart.c.
+ * A board with its timer elsewhere replaces this file, as it does irq.c.
  */
 
 #include <stdint.h>

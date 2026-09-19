@@ -9,10 +9,14 @@
  * The kernel owns it and userspace sees lines only through Irq objects;
  * see DESIGN.md, "Interrupts".
  * Where the controller lives and how many lines it has is the board's business,
- * so kernel/irq.c is per board, as timer.c and uart.c are.
+ * so kernel/irq.c is per board, as timer.c and halt.c are.
  */
 
-/* Line identifiers lie below this; 0 means no line. QEMU virt's PLIC has 96 sources. */
+/*
+ * Line identifiers lie below this. QEMU virt's PLIC has 96 sources,
+ * and its source 0 does not exist: line 0 is the kernel's log, see klog.h,
+ * and the functions below are never called with it.
+ */
 #define IRQ_LINES 96
 
 /* Mask every line and enable the external interrupt at the core. */
