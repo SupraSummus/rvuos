@@ -1,13 +1,11 @@
 /*
- * 16550-compatible UART as found on QEMU virt at 0x10000000.
- * Output only, polled.
+ * 16550-compatible UART as found on QEMU virt.
+ * Output only, polled; the receiver and the interrupts are left to userspace.
  */
 
 #include <stdint.h>
 
 #include "uart.h"
-
-#define UART_BASE 0x10000000u
 
 #define UART_THR 0 /* transmit holding register */
 #define UART_LSR 5 /* line status register */

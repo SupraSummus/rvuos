@@ -42,6 +42,13 @@ grep -q 'root: cascade ok' "$log" \
     || fail "destroying the child's pool did not take the pool the child made"
 grep -q 'root: timer ok' "$log" \
     || fail "the timer did not wake the only thread from its sleep"
+# Written by the driver itself, one byte per interrupt.
+grep -q 'root: uart driver ok' "$log" \
+    || fail "the userspace driver did not get its bytes out on the uart's interrupt"
+grep -q 'the masked line stays quiet: ok' "$log" \
+    || fail "a masked line signalled"
+grep -q 'root: irq ok' "$log" \
+    || fail "destroying the irq's pool did not free its line"
 grep -q 'user fault' "$log" || fail "PMP fault was not caught"
 # mepc's low bits move with the code layout.
 grep -q 'mcause=0x00000005 mepc=0x8010.... mtval=0x80212000' "$log" \

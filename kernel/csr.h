@@ -45,10 +45,13 @@
 /* mie and mip bits. */
 #define MIE_MTIE (1u << 7)
 #define MIP_MTIP (1u << 7)
+#define MIE_MEIE (1u << 11)
+#define MIP_MEIP (1u << 11)
 
 /* mcause exception codes; interrupts have the top bit set. */
 #define MCAUSE_INTERRUPT (1u << 31)
 #define IRQ_M_TIMER 7
+#define IRQ_M_EXT   11
 #define CAUSE_INSN_MISALIGNED   0
 #define CAUSE_INSN_ACCESS       1
 #define CAUSE_ILLEGAL_INSN      2

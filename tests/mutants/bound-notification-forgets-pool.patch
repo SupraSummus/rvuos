@@ -1,0 +1,18 @@
+A Timer or an Irq may be bound to a notification in another pool.
+The link is not checked on use,
+so a destroy of the notification's pool would leave the object
+signalling freed memory;
+a Timer or an Irq and its notification live in the same pool.
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -138,7 +138,7 @@
+         return err;
+     }
+     *out = (struct notification *)cap_object(&nc);
+-    return (*out)->hdr.pool == pool->base ? KERR_OK : KERR_INVALID_ARG;
++    return pool->base != 0 ? KERR_OK : KERR_INVALID_ARG;
+ }
+ 
+ static int op_pool_destroy(struct thread *t, uint32_t slot, struct pool *pool,

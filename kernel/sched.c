@@ -3,9 +3,10 @@
  * See DESIGN.md, "Scheduling".
  */
 
+#include "irq.h"
 #include "kernel.h"
 #include "object.h"
-#include "timer.h"
+#include "trap.h"
 
 struct thread *current;
 uint32_t sched_ticks;
@@ -100,11 +101,45 @@ static void tick_advance(void)
     }
 }
 
-/* True if some timer will fire, so that waiting for the tick can change what is runnable. */
-static bool timer_pending(void)
+bool sched_interrupt(uint32_t line)
+{
+    struct irq *irq = line_binding(line);
+    if (irq == NULL || !irq_armed(irq)) {
+        return false;
+    }
+    /*
+     * Masked before it signals and disarmed as it does,
+     * so the driver hears once and the level may stay high until it has looked.
+     */
+    irq_enable(line, false);
+    uint32_t bits = irq->bits;
+    irq->bits = 0;
+    sched_signal(irq_notification(irq), bits);
+    return true;
+}
+
+void sched_claim_interrupts(void)
+{
+    for (uint32_t line = irq_claim(); line != 0; line = irq_claim()) {
+        /* The controller forwards a line only while an Irq is armed on it. */
+        if (!sched_interrupt(line)) {
+            kpanic("interrupt on a line nothing is armed on");
+        }
+        irq_complete(line);
+    }
+}
+
+/*
+ * True if some timer or Irq will fire,
+ * so that waiting for an interrupt can change what is runnable.
+ */
+static bool source_armed(void)
 {
     for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
         if (o->type == CAP_TIMER && timer_armed((struct timer *)o)) {
+            return true;
+        }
+        if (o->type == CAP_IRQ && irq_armed((struct irq *)o)) {
             return true;
         }
     }
@@ -132,6 +167,15 @@ void sched_unblock_range(uint32_t base, uint32_t size)
     }
 }
 
+void sched_unbind_range(uint32_t base, uint32_t size)
+{
+    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
+        if (o->type == CAP_IRQ && range_contains(base, size, v2p(o))) {
+            irq_enable(((struct irq *)o)->line, false);
+        }
+    }
+}
+
 static void switch_to(struct thread *next)
 {
     if (debug_trace && (next->flags & THREAD_UNTRACED)) {
@@ -155,19 +199,24 @@ void sched_run_next(void)
     struct thread *next = runnable_after(current);
     while (next == NULL) {
         /*
-         * Only a running thread or a firing timer can make another one runnable,
-         * and device interrupts do not exist yet.
-         * With no timer armed nothing can change this, so say so and stop.
-         * While tracing is on, time moves only through OP_DEBUG_TICK,
-         * which nobody is left to perform, so the same holds
-         * and the host build, which cannot wait for a clock, agrees.
+         * Only a running thread, a firing timer or a device interrupt
+         * can make another one runnable.
+         * With no timer and no Irq armed nothing can change this, so say so and stop.
+         * While tracing is on, time moves and lines fire only through OP_DEBUG_TICK
+         * and OP_DEBUG_IRQ, which nobody is left to perform, so the same holds
+         * and the host build, which has no clock and no devices, agrees.
          */
-        if (debug_trace || !timer_pending()) {
+        if (debug_trace || !source_armed()) {
             kputs("no runnable thread\n");
             khalt(5);
         }
-        timer_wait();
-        tick_advance();
+        unsigned pending = intr_wait();
+        if (pending & INTR_TICK) {
+            tick_advance();
+        }
+        if (pending & INTR_DEVICE) {
+            sched_claim_interrupts();
+        }
         next = runnable_after(current);
     }
     switch_to(next);

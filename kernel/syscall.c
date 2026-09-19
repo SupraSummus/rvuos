@@ -3,6 +3,7 @@
  * The ABI is documented in include/rvuos/abi.h.
  */
 
+#include "irq.h"
 #include "kernel.h"
 #include "object.h"
 #include "timer.h"
@@ -35,6 +36,11 @@ static int op_debug(uint32_t op, const uint32_t *arg)
         /* The caller's status is written to its own frame, whoever runs next. */
         sched_tick();
         return KERR_OK;
+    case OP_DEBUG_IRQ:
+        if (arg[1] == 0 || arg[1] >= IRQ_LINES) {
+            return KERR_INVALID_ARG;
+        }
+        return sched_interrupt(arg[1]) ? KERR_OK : KERR_STATE;
     default:
         return KERR_WRONG_TYPE;
     }
@@ -90,7 +96,8 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
         if ((cap->rights & (RIGHT_R | RIGHT_W)) != (RIGHT_R | RIGHT_W)) {
             return KERR_NO_RIGHTS;
         }
-        if ((base | size) & (OBJ_ALIGN - 1) || size < POOL_MIN_SIZE) {
+        /* Kernel objects live in RAM: on a device range the zeroing below would drive registers. */
+        if ((base | size) & (OBJ_ALIGN - 1) || size < POOL_MIN_SIZE || !ram_contains(base, size)) {
             return KERR_INVALID_ARG;
         }
         if (pool_overlaps(base, size) || installed_overlaps(base, size)) {
@@ -114,6 +121,24 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
     default:
         return KERR_WRONG_TYPE;
     }
+}
+
+/*
+ * The notification a Timer or an Irq is bound to, from a slot in the caller's table.
+ * The object signals on the creator's behalf, so the creator must be able to,
+ * and the link is not checked on use, so the two must lie in one pool;
+ * see DESIGN.md, "Kernel pools and revocation".
+ */
+static int bound_notification(struct thread *t, uint32_t slot, const struct pool *pool,
+                              struct notification **out)
+{
+    struct cap nc;
+    int err = cap_lookup_typed(thread_table(t), slot, CAP_NOTIFICATION, RIGHT_W, &nc);
+    if (err != KERR_OK) {
+        return err;
+    }
+    *out = (struct notification *)cap_object(&nc);
+    return (*out)->hdr.pool == pool->base ? KERR_OK : KERR_INVALID_ARG;
 }
 
 static int op_pool_destroy(struct thread *t, uint32_t slot, struct pool *pool,
@@ -218,15 +243,10 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
         break;
     }
     case CAP_TIMER: {
-        /* The timer signals on the creator's behalf, so the creator must be able to. */
-        struct cap nc;
-        int nerr = cap_lookup_typed(thread_table(t), arg[3], CAP_NOTIFICATION, RIGHT_W, &nc);
+        struct notification *ntfn;
+        int nerr = bound_notification(t, arg[3], pool, &ntfn);
         if (nerr != KERR_OK) {
             return nerr;
-        }
-        struct notification *ntfn = (struct notification *)cap_object(&nc);
-        if (ntfn->hdr.pool != pool->base) {
-            return KERR_INVALID_ARG;
         }
         struct timer *timer = pool_alloc(pool, CAP_TIMER, sizeof(*timer));
         if (timer == NULL) {
@@ -379,6 +399,81 @@ static int op_timer(const struct cap *cap, uint32_t op, const uint32_t *arg)
     return KERR_OK;
 }
 
+/* arg[1..] carry the arguments in. */
+static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
+                       uint32_t op, const uint32_t *arg)
+{
+    uint32_t first = cap->a;
+    uint32_t count = cap->b;
+
+    switch (op) {
+    case OP_IRQ_CARVE: {
+        uint32_t off = arg[1];
+        uint32_t len = arg[2];
+        if (len == 0 || off > count || len > count - off) {
+            return KERR_INVALID_ARG;
+        }
+        struct cap sub = cap_to_lines(first + off, len, cap->rights);
+        return cap_store(thread_table(t), arg[3], &sub);
+    }
+    case OP_IRQ_BIND: {
+        if (!(cap->rights & RIGHT_W)) {
+            return KERR_NO_RIGHTS;
+        }
+        /* One Irq per line, so a binding names one line. */
+        if (count != 1) {
+            return KERR_INVALID_ARG;
+        }
+        struct cap pc;
+        int err = cap_lookup_typed(thread_table(t), arg[1], CAP_POOL, RIGHT_W, &pc);
+        if (err != KERR_OK) {
+            return err;
+        }
+        struct pool *pool = (struct pool *)cap_object(&pc);
+        struct notification *ntfn;
+        err = bound_notification(t, arg[2], pool, &ntfn);
+        if (err != KERR_OK) {
+            return err;
+        }
+        if (line_binding(first) != NULL) {
+            return KERR_OVERLAP;
+        }
+        /* The invoked slot is cleared below, so it may receive the Irq capability. */
+        if (arg[3] != slot) {
+            err = cap_slot_free(thread_table(t), arg[3]);
+            if (err != KERR_OK) {
+                return err;
+            }
+        }
+        struct irq *irq = pool_alloc(pool, CAP_IRQ, sizeof(*irq));
+        if (irq == NULL) {
+            return KERR_NO_MEMORY;
+        }
+        irq->ntfn = v2p(ntfn);
+        irq->line = first;
+        /* Its bits are zero, so it is disarmed, and its line stays masked as every line does until a set. */
+        struct cap ic = cap_to_object(&irq->hdr, RIGHT_ALL);
+        cap_clear(thread_table(t), slot);
+        return cap_store(thread_table(t), arg[3], &ic);
+    }
+    default:
+        return KERR_WRONG_TYPE;
+    }
+}
+
+static int op_irq(const struct cap *cap, uint32_t op, const uint32_t *arg)
+{
+    struct irq *irq = (struct irq *)cap_object(cap);
+
+    if (op != OP_IRQ_SET) {
+        return KERR_WRONG_TYPE;
+    }
+    /* Armed and unmasked are one state, here and in sched_interrupt. */
+    irq->bits = arg[1];
+    irq_enable(irq->line, irq_armed(irq));
+    return KERR_OK;
+}
+
 /*
  * One line per traced call, in a fixed format
  * so transcripts from the host build and from QEMU can be compared.
@@ -414,7 +509,7 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
 
     /*
      * Operations that change an object need RIGHT_W on it.
-     * Regions, notifications and the debug capability
+     * Regions, interrupt lines, notifications and the debug capability
      * are checked in their handlers,
      * because which right they need depends on the operation.
      */
@@ -442,6 +537,12 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
         break;
     case CAP_TIMER:
         err = (cap.rights & RIGHT_W) ? op_timer(&cap, op, arg) : KERR_NO_RIGHTS;
+        break;
+    case CAP_IRQ_LINE:
+        err = op_irq_line(t, slot, &cap, op, arg);
+        break;
+    case CAP_IRQ:
+        err = (cap.rights & RIGHT_W) ? op_irq(&cap, op, arg) : KERR_NO_RIGHTS;
         break;
     default:
         err = KERR_WRONG_TYPE;

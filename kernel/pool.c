@@ -70,6 +70,7 @@ void pool_destroy(struct pool *pool)
         /* Nothing below may fail: the pool is going. */
         cap_revoke_range(p->base, p->size);
         sched_unblock_range(p->base, p->size);
+        sched_unbind_range(p->base, p->size);
         pool_unlink(p);
         /* The memory is about to be user memory again, holding other processes' tables. */
         memset(p2v(p->base), 0, p->size);
@@ -107,6 +108,8 @@ size_t obj_size(const struct obj_header *obj)
         return sizeof(struct notification);
     case CAP_TIMER:
         return sizeof(struct timer);
+    case CAP_IRQ:
+        return sizeof(struct irq);
     default:
         kpanic("object of unknown type in pool");
     }
@@ -177,4 +180,14 @@ bool installed_overlaps(uint32_t base, uint32_t size)
         }
     }
     return false;
+}
+
+struct irq *line_binding(uint32_t line)
+{
+    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
+        if (o->type == CAP_IRQ && ((struct irq *)o)->line == line) {
+            return (struct irq *)o;
+        }
+    }
+    return NULL;
 }
