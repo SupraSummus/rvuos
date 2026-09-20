@@ -1,0 +1,15 @@
+A node taken out of the middle of a ring without relinking its predecessor
+leaves the ring running through an empty slot.
+
+diff --git a/kernel/cap.c b/kernel/cap.c
+--- a/kernel/cap.c
++++ b/kernel/cap.c
+@@ -161,7 +161,7 @@
+         while (node(pred->next) != n) {
+             pred = node(pred->next);
+         }
+-        pred->next = replacement;
++        (void)replacement;
+     }
+ }
+ 

@@ -31,10 +31,17 @@ struct obj_header {
 };
 
 /*
- * A capability slot.
- * For CAP_REGION the slot is self-contained:
- * a is the base address and b the size, and there is no object.
+ * A capability slot, and a node of the derivation tree; see DESIGN.md, "The derivation tree".
+ * For CAP_REGION and CAP_IRQ_LINE the slot is self-contained:
+ * a is the base address or first line and b the size or count,
+ * and there is no object.
  * For every other type a is the object's physical address.
+ *
+ * child is the first slot derived from this one, by physical address, 0 if none.
+ * next is the next sibling, or at the last sibling the parent with LINK_UP set,
+ * which the four-byte alignment of slots leaves free;
+ * a root's next is LINK_UP alone, an empty slot's is 0.
+ * A process's region slots are slots of this type too, CAP_INSTALLED, and leaves of the tree.
  */
 struct cap {
     uint8_t type;
@@ -42,7 +49,14 @@ struct cap {
     uint8_t pad[2];
     uint32_t a;
     uint32_t b;
+    uint32_t child;
+    uint32_t next;
 };
+
+#define LINK_UP 0x1u
+
+/* A region installed in a process's region slot. Kernel internal: never in a table. */
+#define CAP_INSTALLED 0x80
 
 #define CAPTABLE_MAX_SLOTS 1024
 
@@ -72,13 +86,6 @@ struct pool {
     uint8_t rights;     /* what the region carried; returned on destroy */
 };
 
-/* A slot with rights 0 is empty. */
-struct region_slot {
-    uint32_t base;
-    uint32_t size;
-    uint8_t rights;
-};
-
 struct pmp_image {
     unsigned count;
     uint32_t addr[PMP_MAX_ENTRIES];
@@ -88,7 +95,7 @@ struct pmp_image {
 struct process {
     struct obj_header hdr;
     paddr_t ctable;
-    struct region_slot slots[PROCESS_REGION_SLOTS];
+    struct cap slots[PROCESS_REGION_SLOTS]; /* CAP_INSTALLED, or CAP_NONE when empty */
     struct pmp_image pmp;
 };
 
@@ -178,11 +185,11 @@ struct irq {
 };
 
 _Static_assert(sizeof(struct obj_header) == 8, "object layout");
-_Static_assert(sizeof(struct cap) == 12, "object layout");
+_Static_assert(sizeof(struct cap) == 20, "object layout");
 _Static_assert(sizeof(struct captable) == 12, "object layout");
 _Static_assert(sizeof(struct pool) == 32, "object layout");
 _Static_assert(sizeof(struct pmp_image) == 4 + 5 * PMP_MAX_ENTRIES, "object layout");
-_Static_assert(sizeof(struct process) == 12 + 12 * PROCESS_REGION_SLOTS + sizeof(struct pmp_image),
+_Static_assert(sizeof(struct process) == 12 + 20 * PROCESS_REGION_SLOTS + sizeof(struct pmp_image),
                "object layout");
 _Static_assert(sizeof(struct thread) == 20 + sizeof(struct trap_frame), "object layout");
 _Static_assert(sizeof(struct notification) == 12, "object layout");
@@ -196,7 +203,8 @@ _Static_assert(sizeof(struct irq) == 20, "object layout");
  */
 static inline bool cap_has_object(uint8_t type)
 {
-    return type != CAP_NONE && type != CAP_REGION && type != CAP_IRQ_LINE && type != CAP_DEBUG;
+    return type != CAP_NONE && type != CAP_REGION && type != CAP_IRQ_LINE && type != CAP_DEBUG &&
+           type != CAP_INSTALLED;
 }
 
 static inline struct pool *obj_pool(const struct obj_header *o) { return p2v(o->pool); }
@@ -314,20 +322,45 @@ int cap_lookup_typed(struct captable *table, uint32_t slot,
 /* KERR_OK if the slot exists and is empty, else KERR_INVALID_CAP or KERR_SLOT_IN_USE. */
 int cap_slot_free(const struct captable *table, uint32_t slot);
 
-/* Store into an empty slot; fails as cap_slot_free does. */
-int cap_store(struct captable *table, uint32_t slot, const struct cap *cap);
+/*
+ * Store into an empty slot as a child of parent, or as a root when parent is NULL;
+ * fails as cap_slot_free does.
+ * The links the caller's copy carries are ignored.
+ */
+int cap_store(struct captable *table, uint32_t slot, const struct cap *cap, struct cap *parent);
 
-/* Clear a slot. KERR_INVALID_CAP if out of range. */
-int cap_clear(struct captable *table, uint32_t slot);
+/* Store into an empty slot as a sibling of beside: derived from the same parent. */
+int cap_store_beside(struct captable *table, uint32_t slot, const struct cap *cap, struct cap *beside);
+
+/* Make an already filled node, an installed region, a child of parent, or a root when parent is NULL. */
+void cap_attach(struct cap *parent, struct cap *node);
+
+/* The node a slot was derived from, or NULL at a root. Walks the sibling ring. */
+struct cap *cap_parent(const struct cap *node);
 
 /*
- * Clear every capability, in every table, naming an object
- * in [base, base + size).
+ * Clear a slot. KERR_INVALID_CAP if out of range.
+ * What was derived from it is adopted by its parent; clearing an empty slot does nothing.
+ */
+int cap_clear(struct captable *table, uint32_t slot);
+
+/* Clear a node; what was derived from it is adopted by its parent. */
+void cap_delete(struct cap *node);
+
+/* Clear every node below one, leaving the node itself. */
+void cap_revoke_below(struct cap *node);
+
+/* Clear a node and everything below it. */
+void cap_revoke(struct cap *node);
+
+/*
+ * Clear every capability, in every table, naming an object in [base, base + size),
+ * and every node the range holds, with everything derived from either.
  * This is what a pool destroy revokes with,
- * and it is exact because every capability lives in a CapTable,
- * every CapTable is an object in a pool, and every pool is on the list.
- * Region and IrqLine capabilities name no object and are left alone;
- * see DESIGN.md, open decision 7.
+ * and it is exact because every capability lives in a CapTable or a Process,
+ * every one of those is an object in a pool, and every pool is on the list.
+ * Region and IrqLine capabilities elsewhere name no object and are left alone.
+ * The range must still be readable: it may hold links the sweep follows.
  */
 void cap_revoke_range(uint32_t base, uint32_t size);
 
@@ -409,9 +442,13 @@ void sched_unbind_range(uint32_t base, uint32_t size);
 
 /* process.c */
 
+/* Install a region into a slot, as a node below parent, or a root when parent is NULL. */
 int process_install(struct process *proc, unsigned slot,
-                    uint32_t base, uint32_t size, uint8_t rights);
+                    uint32_t base, uint32_t size, uint8_t rights, struct cap *parent);
+/* Clear a region slot, which leaves the derivation tree as cap_clear does. */
 int process_uninstall(struct process *proc, unsigned slot);
+/* Clear an installed region the tree has already let go of, and rebuild the process's PMP image. */
+void process_drop(struct cap *installed);
 
 /* Load a process's PMP image into the CSRs. */
 void process_activate(struct process *proc);

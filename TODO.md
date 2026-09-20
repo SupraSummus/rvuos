@@ -40,10 +40,12 @@ Design decisions behind these items live in `DESIGN.md`.
    "Kernel pools and revocation",
    and the pool tree, so that a destroy takes the pools
    created from within the destroyed one.
-   Still open from that step:
-   the history-based "rights only narrow" invariant,
-   and open decision 7 in `DESIGN.md`,
+   Done since: the derivation tree, `DESIGN.md`, "The derivation tree",
+   with `OP_CAP_DERIVE` and `OP_CAP_REVOKE`,
+   which decided open decision 7,
    what a destroy does to region capabilities for the range.
+   Still open from that step:
+   the history-based "rights only narrow" invariant.
 8. First real board, ESP32-C6 if it passes these datasheet checks:
    the PMA unit, 16 entries of Espressif's own that check machine mode too,
    whether execute-in-place from flash goes through a cache
@@ -88,6 +90,13 @@ Design decisions behind these items live in `DESIGN.md`.
   `tests/differential.py`; today the addresses live in seven places,
   the newest being the replay driver's second stack in `rvuos/replay.h`,
   which only a static assert ties to the data region it must lie in.
+- A pool whose every capability was revoked stays until the pool above it goes,
+  and its memory is inert to every region capability meanwhile.
+  Nothing today tells a lender that the borrower's pool is the reason
+  a revoked region cannot be pooled again;
+  `KERR_OVERLAP` is all it sees.
+  A revoke that destroys the pools whose only capabilities it took
+  would be the seL4 answer; decide when a lender that keeps its borrower alive exists.
 - The seeds under `tests/seeds` are binary and were written by hand.
   Moving `BOOT_CAP_LOG` in took a one-off script that knew which argument
   of which operation is a slot; a generator in the repository,

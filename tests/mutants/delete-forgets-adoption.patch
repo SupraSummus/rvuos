@@ -1,0 +1,15 @@
+A delete that does not hand the node's children to its parent
+leaves them linked up to an empty slot.
+
+diff --git a/kernel/cap.c b/kernel/cap.c
+--- a/kernel/cap.c
++++ b/kernel/cap.c
+@@ -132,7 +132,7 @@
+  */
+ static void unlink(struct cap *n, bool adopt)
+ {
+-    uint32_t first = adopt ? n->child : 0;
++    uint32_t first = adopt && 0 ? n->child : 0;
+ 
+     if (n->next == LINK_UP) {
+         for (uint32_t link = first; link != 0 && !(link & LINK_UP);) {

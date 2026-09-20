@@ -4,10 +4,10 @@ The thread waits on an object that is no longer live.
 diff --git a/kernel/pool.c b/kernel/pool.c
 --- a/kernel/pool.c
 +++ b/kernel/pool.c
-@@ -69,7 +69,7 @@
+@@ -79,7 +79,7 @@
+             continue;
          }
          /* Nothing below may fail: the pool is going. */
-         cap_revoke_range(p->base, p->size);
 -        sched_unblock_range(p->base, p->size);
 +
          sched_unbind_range(p->base, p->size);

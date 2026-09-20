@@ -8,6 +8,7 @@
  * exchange a word with it through shared memory and two notifications,
  * take turns with it through shared memory alone, which only the tick allows,
  * destroy a pool and watch both processes lose their capabilities to it,
+ * lease the child memory through a derived capability and take it back by revoking,
  * lend the child memory it turns into a pool of its own
  * and take it back by destroying the child's pool,
  * sleep on a timer while nothing else can run,
@@ -43,6 +44,8 @@ enum {
     SLOT_STALE,         /* a second capability to that same notification */
     SLOT_NEW_POOL,      /* the pool built over the same memory afterwards */
     SLOT_NEW_NTFN,
+    SLOT_LEASE,         /* memory leased to the child by derivation, and taken back by revoking */
+    SLOT_LEASE_COPY,    /* a copy beside it, which the revoke leaves alone */
     SLOT_LENT,          /* memory lent to the child, which pools it */
     SLOT_LENT_POOL,     /* what the root task makes of it once it is back */
     SLOT_TIMER_NTFN,    /* what the timer signals, and the spare line's Irq as well */
@@ -65,6 +68,7 @@ enum {
     CHILD_UP,
     CHILD_DOWN,
     CHILD_DOOMED, /* a notification whose pool the root task destroys */
+    CHILD_LEASE,  /* memory derived from the root task's, which revokes it */
     CHILD_LENT,   /* memory the root task lends; the child's pool replaces it */
     CHILD_OWN_NTFN, /* allocated from that pool */
     CHILD_BOOT_POOL, /* the pool above the child's own; the child may not destroy it */
@@ -82,6 +86,7 @@ enum {
 #define CHILD_CODE_SLOT 0
 #define CHILD_DATA_SLOT 1
 #define CHILD_SHARED_SLOT 2
+#define CHILD_LEASE_SLOT 3
 
 /* Offsets into the free RAM the root task was granted; the shared region comes first, see above. */
 #define SHARED_OFFSET 0x0000u
@@ -89,6 +94,7 @@ enum {
 #define POOL_OFFSET  0x2000u
 #define DOOMED_OFFSET 0x3000u
 #define LENT_OFFSET  0x4000u
+#define LEASE_OFFSET 0x5000u
 #define CHUNK 0x1000u
 
 /* The protocol between the two processes. */
@@ -99,6 +105,8 @@ enum {
 #define BIT_CHECKED 0x10u
 #define BIT_POOL    0x20u /* turn the lent memory into a pool */
 #define BIT_POOLED  0x40u
+#define BIT_LEASE   0x200u /* look at the leased memory, which is gone */
+#define BIT_LEASED  0x400u
 #define BIT_TIMER   0x80u /* the timer's bit on its own notification */
 #define BIT_SPARE   0x100u /* the spare line's bit on that same notification */
 #define MAGIC 0x5eaf00du
@@ -314,6 +322,19 @@ static void child_main(void)
     rv_signal(CHILD_UP, BIT_CHECKED);
 
     /*
+     * The root task leased this process memory by deriving a capability into this table
+     * and mapping the range here, then revoked below its own capability.
+     * Both the derived capability and the mapping have to be gone;
+     * the mapping is checked from the root task's side, since touching it here would fault.
+     */
+    rv_wait(CHILD_DOWN, &bits);
+    rv_puts(CHILD_DEBUG,
+            bits == BIT_LEASE && rv_region_info(CHILD_LEASE, &base, &size) == KERR_INVALID_CAP
+                ? "child: lease revoked here too\n"
+                : "child: lease revoked here too FAILED\n");
+    rv_signal(CHILD_UP, BIT_LEASED);
+
+    /*
      * The root task lends this process memory and it becomes a pool here,
      * below this process's own pool in the tree.
      * The root task then destroys that pool, and this one has to go with it,
@@ -515,6 +536,42 @@ int main(void)
     expect("ask the child to look", rv_signal(SLOT_DOWN, BIT_CHECK));
     expect("wait for the child's answer", rv_wait(SLOT_UP, &bits));
     expect("the child looked", bits == BIT_CHECKED ? KERR_OK : KERR_INVALID_ARG);
+
+    /*
+     * Derivation.
+     * A capability derived from another is revoked with it,
+     * wherever it went and whatever was installed from it,
+     * while a copy made beside the original stays;
+     * see DESIGN.md, "The derivation tree".
+     * Whether the child's mapping is gone shows in the overlap check:
+     * memory installed anywhere cannot become a pool.
+     */
+    expect("carve memory to lease",
+           rv_invoke(OP_REGION_CARVE, BOOT_CAP_FREE_RAM, LEASE_OFFSET, CHUNK, SLOT_LEASE));
+    expect("copy it beside itself",
+           rv_invoke(OP_CAP_COPY, BOOT_CAP_CAPTABLE, SLOT_LEASE_COPY, SLOT_LEASE, RIGHT_ALL));
+    expect("derive it into the child's table",
+           rv_invoke(OP_CAP_DERIVE, SLOT_CHILD_TABLE, CHILD_LEASE, SLOT_LEASE, RIGHT_R | RIGHT_W));
+    expect("map it in the child",
+           rv_invoke(OP_PROCESS_INSTALL, SLOT_CHILD_PROCESS, CHILD_LEASE_SLOT, SLOT_LEASE,
+                     RIGHT_R | RIGHT_W));
+    expect("the leased memory cannot be a pool while mapped",
+           rv_invoke(OP_REGION_TO_POOL, SLOT_LEASE_COPY, SLOT_LENT_POOL, 0, 0) == KERR_OVERLAP
+               ? KERR_OK : KERR_INVALID_ARG);
+    expect("revoke below the lease",
+           rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_LEASE, 0, 0));
+    uint32_t lease_base, lease_size;
+    expect("the lease itself stays", rv_region_info(SLOT_LEASE, &lease_base, &lease_size));
+    expect("the copy beside it stays", rv_region_info(SLOT_LEASE_COPY, &lease_base, &lease_size));
+    expect("the child's mapping is gone",
+           rv_invoke(OP_REGION_TO_POOL, SLOT_LEASE_COPY, SLOT_LENT_POOL, 0, 0));
+    /* The memory comes back where the copy was: below the free RAM it was carved from. */
+    expect("destroy that pool again",
+           rv_invoke(OP_POOL_DESTROY, SLOT_LENT_POOL, SLOT_LEASE_COPY, 0, 0));
+    expect("ask the child to look at the lease", rv_signal(SLOT_DOWN, BIT_LEASE));
+    expect("wait for the child's answer", rv_wait(SLOT_UP, &bits));
+    expect("the child looked at the lease", bits == BIT_LEASED ? KERR_OK : KERR_INVALID_ARG);
+    puts("root: derivation ok\n");
 
     /*
      * Cascade.

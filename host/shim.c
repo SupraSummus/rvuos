@@ -264,8 +264,9 @@ bool host_event(const struct replay_record *c)
 static bool mapped_with(const struct process *proc, uint32_t base, uint32_t size, uint8_t rights)
 {
     for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
-        const struct region_slot *s = &proc->slots[i];
-        if (s->rights && s->base <= base && size <= s->size - (base - s->base) &&
+        const struct cap *s = &proc->slots[i];
+        /* base within the slot first, or the remaining length below wraps. */
+        if (s->type != CAP_NONE && base - s->a < s->b && size <= s->b - (base - s->a) &&
             (s->rights & rights) == rights) {
             return true;
         }

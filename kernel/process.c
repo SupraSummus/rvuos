@@ -18,16 +18,16 @@
  */
 static int rebuild_pmp(struct process *proc, struct pmp_image *img)
 {
-    const struct region_slot *sorted[PROCESS_REGION_SLOTS];
+    const struct cap *sorted[PROCESS_REGION_SLOTS];
     unsigned n = 0;
 
     for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
-        const struct region_slot *s = &proc->slots[i];
-        if (s->rights == 0) {
+        const struct cap *s = &proc->slots[i];
+        if (s->type == CAP_NONE) {
             continue;
         }
         unsigned j = n;
-        while (j > 0 && sorted[j - 1]->base > s->base) {
+        while (j > 0 && sorted[j - 1]->a > s->a) {
             sorted[j] = sorted[j - 1];
             j--;
         }
@@ -38,22 +38,22 @@ static int rebuild_pmp(struct process *proc, struct pmp_image *img)
     img->count = 0;
     uint32_t prev_end = 0;
     for (unsigned i = 0; i < n; i++) {
-        const struct region_slot *s = sorted[i];
-        if (s->base != prev_end) {
+        const struct cap *s = sorted[i];
+        if (s->a != prev_end) {
             if (img->count >= pmp_entry_count) {
                 return KERR_LIMIT;
             }
-            img->addr[img->count] = s->base;
+            img->addr[img->count] = s->a;
             img->cfg[img->count] = PMP_A_OFF;
             img->count++;
         }
         if (img->count >= pmp_entry_count) {
             return KERR_LIMIT;
         }
-        img->addr[img->count] = s->base + s->size;
+        img->addr[img->count] = s->a + s->b;
         img->cfg[img->count] = PMP_A_TOR | rights_to_pmp(s->rights);
         img->count++;
-        prev_end = s->base + s->size;
+        prev_end = s->a + s->b;
     }
     return KERR_OK;
 }
@@ -78,44 +78,54 @@ static void commit(struct process *proc, const struct pmp_image *img)
 }
 
 int process_install(struct process *proc, unsigned slot,
-                    uint32_t base, uint32_t size, uint8_t rights)
+                    uint32_t base, uint32_t size, uint8_t rights, struct cap *parent)
 {
-    /* rights == 0 would read as an empty slot; TOR needs base + size to exist. */
+    /* No right would grant nothing; TOR needs base + size to exist. */
     if (slot >= PROCESS_REGION_SLOTS || size == 0 || rights == 0 || size > UINT32_MAX - base) {
         return KERR_INVALID_ARG;
     }
-    if (proc->slots[slot].rights) {
+    if (proc->slots[slot].type != CAP_NONE) {
         return KERR_SLOT_IN_USE;
     }
     if (pool_overlaps(base, size)) {
         return KERR_OVERLAP;
     }
     for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
-        const struct region_slot *s = &proc->slots[i];
-        if (s->rights && ranges_overlap(base, size, s->base, s->size)) {
+        const struct cap *s = &proc->slots[i];
+        if (s->type != CAP_NONE && ranges_overlap(base, size, s->a, s->b)) {
             return KERR_OVERLAP;
         }
     }
 
-    struct region_slot saved = proc->slots[slot];
-    proc->slots[slot] = (struct region_slot){ .base = base, .size = size, .rights = rights };
+    proc->slots[slot] = (struct cap){ .type = CAP_INSTALLED, .rights = rights, .a = base, .b = size };
 
     struct pmp_image img;
     int err = rebuild_pmp(proc, &img);
     if (err != KERR_OK) {
-        proc->slots[slot] = saved;
+        proc->slots[slot] = (struct cap){ 0 };
         return err;
     }
+    cap_attach(parent, &proc->slots[slot]);
     commit(proc, &img);
     return KERR_OK;
 }
 
-int process_uninstall(struct process *proc, unsigned slot)
+void process_drop(struct cap *installed)
 {
-    if (slot >= PROCESS_REGION_SLOTS) {
-        return KERR_INVALID_ARG;
+    /* The slot lies in its process; the walk finds which. */
+    struct process *proc = NULL;
+    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
+        if (o->type == CAP_PROCESS &&
+            range_contains(v2p(((struct process *)o)->slots), sizeof(((struct process *)o)->slots),
+                           v2p(installed))) {
+            proc = (struct process *)o;
+            break;
+        }
     }
-    proc->slots[slot].rights = 0;
+    if (proc == NULL) {
+        kpanic("installed region outside every process");
+    }
+    *installed = (struct cap){ 0 };
 
     /*
      * Removing a region never needs more entries:
@@ -127,5 +137,16 @@ int process_uninstall(struct process *proc, unsigned slot)
         kpanic("removing a region cannot need more PMP entries");
     }
     commit(proc, &img);
+}
+
+int process_uninstall(struct process *proc, unsigned slot)
+{
+    if (slot >= PROCESS_REGION_SLOTS) {
+        return KERR_INVALID_ARG;
+    }
+    /* Leaves the tree as clearing a table slot does; process_drop then rebuilds the image. */
+    if (proc->slots[slot].type != CAP_NONE) {
+        cap_delete(&proc->slots[slot]);
+    }
     return KERR_OK;
 }

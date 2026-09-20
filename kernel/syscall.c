@@ -19,6 +19,18 @@
 
 bool debug_trace;
 
+/* The slot itself, as a node of the derivation tree, once cap_lookup has vetted the index. */
+static struct cap *slot_node(struct thread *t, uint32_t slot)
+{
+    return &thread_table(t)->slots[slot];
+}
+
+/* True while a node lies in a live pool; a destroy may have taken the table it was in. */
+static bool node_live(const struct cap *n)
+{
+    return pool_overlaps(v2p(n), sizeof(*n));
+}
+
 static int op_debug(uint32_t op, const uint32_t *arg)
 {
     switch (op) {
@@ -54,17 +66,31 @@ static int op_captable(struct thread *t, const struct cap *cap,
     struct captable *table = (struct captable *)cap_object(cap);
 
     switch (op) {
-    case OP_CAP_COPY: {
+    case OP_CAP_COPY:
+    case OP_CAP_DERIVE: {
         struct cap src;
         int err = cap_lookup(thread_table(t), arg[2], &src);
         if (err != KERR_OK) {
             return err;
         }
         src.rights &= (uint8_t)arg[3];
-        return cap_store(table, arg[1], &src);
+        /* A copy stands beside its source in the tree, a derivation below it. */
+        if (op == OP_CAP_COPY) {
+            return cap_store_beside(table, arg[1], &src, slot_node(t, arg[2]));
+        }
+        return cap_store(table, arg[1], &src, slot_node(t, arg[2]));
     }
     case OP_CAP_DELETE:
         return cap_clear(table, arg[1]);
+    case OP_CAP_REVOKE: {
+        struct cap c;
+        int err = cap_lookup(table, arg[1], &c);
+        if (err != KERR_OK) {
+            return err;
+        }
+        cap_revoke_below(&table->slots[arg[1]]);
+        return KERR_OK;
+    }
     default:
         return KERR_WRONG_TYPE;
     }
@@ -92,7 +118,7 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
             return KERR_INVALID_ARG;
         }
         struct cap sub = cap_to_region(base + off, len, cap->rights);
-        return cap_store(thread_table(t), arg[3], &sub);
+        return cap_store(thread_table(t), arg[3], &sub, slot_node(t, slot));
     }
     case OP_REGION_TO_POOL: {
         if ((cap->rights & (RIGHT_R | RIGHT_W)) != (RIGHT_R | RIGHT_W)) {
@@ -121,8 +147,10 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
         /* The new pool hangs below the caller's own, and dies with it. */
         struct pool *pool = pool_create(base, size, cap->rights, obj_pool(&t->hdr));
         struct cap pc = cap_to_object(&pool->hdr, RIGHT_ALL);
-        cap_clear(thread_table(t), slot);
-        return cap_store(thread_table(t), arg[1], &pc);
+        /* The pool capability takes the region's place in the tree; the region and its derivation go. */
+        struct cap *parent = cap_parent(slot_node(t, slot));
+        cap_revoke(slot_node(t, slot));
+        return cap_store(thread_table(t), arg[1], &pc, parent);
     }
     default:
         return KERR_WRONG_TYPE;
@@ -170,11 +198,26 @@ static int op_pool_destroy(struct thread *t, uint32_t slot, struct pool *pool,
         }
     }
 
+    /*
+     * The memory goes back below the region the pool was made of:
+     * the nearest ancestor that is not a capability to this pool,
+     * since those the sweep is about to clear.
+     * That ancestor may lie in a table the destroy takes, and then the memory returns as a root.
+     */
+    struct cap *parent = cap_parent(slot_node(t, slot));
+    while (parent != NULL && parent->type == CAP_POOL && parent->a == base) {
+        parent = cap_parent(parent);
+    }
+
     pool_destroy(pool);
 
+    /* Or it was itself derived from a slot the destroy took, and went with it. */
+    if (parent != NULL && (!node_live(parent) || parent->type == CAP_NONE)) {
+        parent = NULL;
+    }
     /* The pools below gave their memory back to nobody; this one gives it to the caller. */
     struct cap rc = cap_to_region(base, size, rights);
-    return cap_store(thread_table(t), arg[1], &rc);
+    return cap_store(thread_table(t), arg[1], &rc, parent);
 }
 
 static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
@@ -280,8 +323,9 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
         return KERR_INVALID_ARG;
     }
 
+    /* A new object starts a tree of its own. */
     struct cap c = cap_to_object(obj, RIGHT_ALL);
-    return cap_store(thread_table(t), dst, &c);
+    return cap_store(thread_table(t), dst, &c, NULL);
 }
 
 static int op_process(struct thread *t, const struct cap *cap,
@@ -304,7 +348,7 @@ static int op_process(struct thread *t, const struct cap *cap,
         if ((rights & RIGHT_W) && !(rights & RIGHT_R)) {
             return KERR_INVALID_ARG;
         }
-        return process_install(proc, arg[1], region.a, region.b, rights);
+        return process_install(proc, arg[1], region.a, region.b, rights, slot_node(t, arg[2]));
     }
     case OP_PROCESS_UNINSTALL:
         return process_uninstall(proc, arg[1]);
@@ -420,7 +464,7 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
             return KERR_INVALID_ARG;
         }
         struct cap sub = cap_to_lines(first + off, len, cap->rights);
-        return cap_store(thread_table(t), arg[3], &sub);
+        return cap_store(thread_table(t), arg[3], &sub, slot_node(t, slot));
     }
     case OP_IRQ_BIND: {
         if (!(cap->rights & RIGHT_W)) {
@@ -459,8 +503,10 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
         irq->line = first;
         /* Its bits are zero, so it is disarmed, and its line stays masked as every line does until a set. */
         struct cap ic = cap_to_object(&irq->hdr, RIGHT_ALL);
-        cap_clear(thread_table(t), slot);
-        return cap_store(thread_table(t), arg[3], &ic);
+        /* The Irq capability takes the line's place in the tree; the line and its derivation go. */
+        struct cap *parent = cap_parent(slot_node(t, slot));
+        cap_revoke(slot_node(t, slot));
+        return cap_store(thread_table(t), arg[3], &ic, parent);
     }
     default:
         return KERR_WRONG_TYPE;

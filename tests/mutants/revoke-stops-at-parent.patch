@@ -1,0 +1,16 @@
+A revoke that stops at the first link up, whichever node it leads to,
+clears the leaves and leaves their parents standing,
+with child links to cleared slots and a place in a ring the root no longer heads.
+
+diff --git a/kernel/cap.c b/kernel/cap.c
+--- a/kernel/cap.c
++++ b/kernel/cap.c
+@@ -177,7 +177,7 @@
+     while (at != 0) {
+         struct cap *n = node(at);
+         if (at & LINK_UP) {
+-            if (n == root) {
++            if (n == root || 1) {
+                 break;
+             }
+             at = n->next;
