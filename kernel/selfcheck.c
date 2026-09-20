@@ -169,8 +169,8 @@ static uint8_t image_rights(const uint32_t *addr, const uint8_t *cfg, unsigned c
 static uint8_t slot_rights(const struct process *proc, uint64_t at)
 {
     for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
-        const struct region_slot *s = &proc->slots[i];
-        if (s->rights && at >= s->base && at < (uint64_t)s->base + s->size) {
+        const struct cap *s = &proc->slots[i];
+        if (s->type != CAP_NONE && at >= s->a && at < (uint64_t)s->a + s->b) {
             return rights_to_pmp(s->rights);
         }
     }
@@ -203,9 +203,9 @@ static void check_pmp_image(const struct process *proc, const uint32_t *addr,
     points[n++] = 0;
     points[n++] = 0x100000000ull;
     for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
-        if (proc->slots[i].rights) {
-            points[n++] = proc->slots[i].base;
-            points[n++] = (uint64_t)proc->slots[i].base + proc->slots[i].size;
+        if (proc->slots[i].type != CAP_NONE) {
+            points[n++] = proc->slots[i].a;
+            points[n++] = (uint64_t)proc->slots[i].a + proc->slots[i].b;
         }
     }
     for (unsigned i = 0; i < count; i++) {
@@ -234,25 +234,29 @@ static void check_pmp_image(const struct process *proc, const uint32_t *addr,
 static void check_process(const struct process *proc)
 {
     for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
-        const struct region_slot *s = &proc->slots[i];
-        if (s->rights == 0) {
+        const struct cap *s = &proc->slots[i];
+        if (s->type == CAP_NONE) {
             continue;
         }
-        uint8_t granted = granted_rights(s->base, s->size);
-        if (s->size == 0 || granted == 0) {
-            fail("process maps memory outside what was granted", v2p(proc), s->base, s->size);
+        /* A region slot holds an installed region and nothing else; the tree check reads its links. */
+        if (s->type != CAP_INSTALLED || s->rights == 0 || (s->rights & ~RIGHT_ALL)) {
+            fail("region slot holds something other than an installed region", v2p(proc), i, s->type);
+        }
+        uint8_t granted = granted_rights(s->a, s->b);
+        if (s->b == 0 || granted == 0) {
+            fail("process maps memory outside what was granted", v2p(proc), s->a, s->b);
         }
         if (s->rights & ~granted) {
-            fail("process maps memory with rights beyond the grant", v2p(proc), s->base, s->rights);
+            fail("process maps memory with rights beyond the grant", v2p(proc), s->a, s->rights);
         }
         for (struct pool *p = pool_list; p != NULL; p = pool_next_pool(p)) {
-            if (ranges_overlap(s->base, s->size, p->base, p->size)) {
-                fail("process maps a pool: isolation broken", v2p(proc), s->base, p->base);
+            if (ranges_overlap(s->a, s->b, p->base, p->size)) {
+                fail("process maps a pool: isolation broken", v2p(proc), s->a, p->base);
             }
         }
         for (unsigned j = i + 1; j < PROCESS_REGION_SLOTS; j++) {
-            const struct region_slot *t = &proc->slots[j];
-            if (t->rights && ranges_overlap(s->base, s->size, t->base, t->size)) {
+            const struct cap *t = &proc->slots[j];
+            if (t->type != CAP_NONE && ranges_overlap(s->a, s->b, t->a, t->b)) {
                 fail("process has overlapping region slots", v2p(proc), i, j);
             }
         }
@@ -437,6 +441,154 @@ static void check_captable(const struct captable *table)
     }
 }
 
+/*
+ * The derivation tree.
+ *
+ * Its nodes are the slots of every live table and the region slots of every live process,
+ * linked by physical address and never checked on use,
+ * so every link must land on a live node and the shape must be exactly a forest:
+ * the children of a node form one ring that closes through the node,
+ * and from every node the links up reach a root.
+ * A destroy that left a link into freed memory, a delete that broke a ring,
+ * or a revoke that stopped short all show up here.
+ * A node is derived from its parent: the same object with no more rights,
+ * a range within the parent's with no more rights,
+ * or an object built on the parent's range, a pool on a region, an Irq on a line.
+ */
+
+/* The node a link names, if it is a slot of a live table or a region slot of a live process. */
+static const struct cap *live_node(uint32_t link)
+{
+    paddr_t at = link & ~LINK_UP;
+    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
+        const struct cap *slots;
+        uint32_t count;
+        if (o->type == CAP_CAPTABLE) {
+            slots = ((const struct captable *)o)->slots;
+            count = ((const struct captable *)o)->nslots;
+        } else if (o->type == CAP_PROCESS) {
+            slots = ((const struct process *)o)->slots;
+            count = PROCESS_REGION_SLOTS;
+        } else {
+            continue;
+        }
+        uint32_t off = at - v2p(slots);
+        if (off < count * sizeof(*slots) && off % sizeof(*slots) == 0) {
+            return &slots[off / sizeof(*slots)];
+        }
+    }
+    return NULL;
+}
+
+/* True if [base, base + size) lies within [in, in + insize). */
+static bool range_within(uint32_t base, uint32_t size, uint32_t in, uint32_t insize)
+{
+    return base >= in && base - in <= insize - size && size <= insize;
+}
+
+static bool derived_from(const struct cap *c, const struct cap *p)
+{
+    bool narrower = !(c->rights & ~p->rights);
+    if (c->type == p->type) {
+        if (c->type == CAP_REGION || c->type == CAP_IRQ_LINE) {
+            return narrower && range_within(c->a, c->b, p->a, p->b);
+        }
+        return narrower && (c->type == CAP_DEBUG || c->a == p->a);
+    }
+    if (c->type == CAP_INSTALLED && p->type == CAP_REGION) {
+        return narrower && range_within(c->a, c->b, p->a, p->b);
+    }
+    /* Objects built on a range carry rights of their own. */
+    if (c->type == CAP_POOL && p->type == CAP_REGION) {
+        const struct pool *pool = (const struct pool *)cap_object(c);
+        return range_within(pool->base, pool->size, p->a, p->b);
+    }
+    if (c->type == CAP_IRQ && p->type == CAP_IRQ_LINE) {
+        return range_within(((const struct irq *)cap_object(c))->line, 1, p->a, p->b);
+    }
+    return false;
+}
+
+/* One node's links; bound is more than the nodes there are, so a walk that long is a cycle. */
+static void check_node(const struct cap *n, uint32_t bound)
+{
+    if (n->type == CAP_NONE) {
+        if (n->child != 0 || n->next != 0) {
+            fail("empty slot keeps links", v2p(n), n->child, n->next);
+        }
+        return;
+    }
+    if (n->next == 0 || (n->child & LINK_UP)) {
+        fail("filled slot has malformed links", v2p(n), n->child, n->next);
+    }
+    if (n->child != 0) {
+        const struct cap *c = live_node(n->child);
+        if (c == NULL || c->type == CAP_NONE) {
+            fail("child link to a slot that is not a live, filled one", v2p(n), n->child, 0);
+        }
+    }
+
+    /* Along the ring to the parent, every sibling live and filled. */
+    uint32_t link = n->next;
+    uint32_t steps = 0;
+    while (!(link & LINK_UP)) {
+        const struct cap *s = live_node(link);
+        if (s == NULL || s->type == CAP_NONE) {
+            fail("link to a slot that is not a live, filled one", v2p(n), link, 0);
+        }
+        if (++steps > bound) {
+            fail("sibling ring does not close", v2p(n), link, 0);
+        }
+        link = s->next;
+    }
+    if (link == LINK_UP) {
+        /* A root: roots have no ring, so nothing may lead here through siblings. */
+        if (steps != 0) {
+            fail("sibling ring closes on no parent", v2p(n), 0, 0);
+        }
+        return;
+    }
+    const struct cap *parent = live_node(link);
+    if (parent == NULL || parent->type == CAP_NONE) {
+        fail("link up to a slot that is not a live, filled one", v2p(n), link, 0);
+    }
+    if (!derived_from(n, parent)) {
+        fail("slot is not derived from its parent", v2p(n), v2p(parent), 0);
+    }
+    /* The parent's ring is this one: it comes round to the node. */
+    steps = 0;
+    for (link = parent->child; live_node(link) != n; link = live_node(link)->next) {
+        if ((link & LINK_UP) || live_node(link) == NULL || ++steps > bound) {
+            fail("parent's ring does not reach the slot", v2p(n), v2p(parent), link);
+        }
+    }
+}
+
+static void check_tree(void)
+{
+    uint32_t bound = 1;
+    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
+        if (o->type == CAP_CAPTABLE) {
+            bound += ((const struct captable *)o)->nslots;
+        } else if (o->type == CAP_PROCESS) {
+            bound += PROCESS_REGION_SLOTS;
+        }
+    }
+    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
+        if (o->type == CAP_CAPTABLE) {
+            const struct captable *t = (const struct captable *)o;
+            for (uint32_t i = 0; i < t->nslots; i++) {
+                check_node(&t->slots[i], bound);
+            }
+        } else if (o->type == CAP_PROCESS) {
+            const struct process *p = (const struct process *)o;
+            for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
+                check_node(&p->slots[i], bound);
+            }
+        }
+    }
+}
+
 void selfcheck_run(void)
 {
     if (pmp_grain < 4 || (pmp_grain & (pmp_grain - 1)) != 0) {
@@ -468,6 +620,8 @@ void selfcheck_run(void)
         }
     }
     check_lines();
+    /* Every node has been vetted as a capability by now; the tree check reads only links. */
+    check_tree();
 
     if (current != NULL) {
         struct obj_header *o = object_find(v2p(current));

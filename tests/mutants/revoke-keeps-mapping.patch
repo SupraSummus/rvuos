@@ -1,0 +1,15 @@
+A revoke that empties an installed region's slot without rebuilding the PMP image
+leaves the process able to reach memory no slot grants.
+
+diff --git a/kernel/cap.c b/kernel/cap.c
+--- a/kernel/cap.c
++++ b/kernel/cap.c
+@@ -116,7 +116,7 @@
+ /* Empty a node the tree no longer names. An installed region is unmapped as well. */
+ static void clear_node(struct cap *n)
+ {
+-    if (n->type == CAP_INSTALLED) {
++    if (n->type == CAP_INSTALLED && 0) {
+         process_drop(n);
+     } else {
+         *n = (struct cap){ 0 };

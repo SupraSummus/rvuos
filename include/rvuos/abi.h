@@ -111,10 +111,31 @@
  * a1 = destination slot in the invoked table,
  * a2 = source slot in the caller's table,
  * a3 = rights mask applied to the copy.
+ * The copy is a sibling of the source in the derivation tree:
+ * derived from what the source was derived from, and as good as the source.
+ * Revoking below the source does not take it; revoking below their common parent does.
  */
 #define OP_CAP_COPY 3
-/* CapTable (RIGHT_W): clear a slot. a1 = slot. */
+/*
+ * CapTable (RIGHT_W): clear a slot. a1 = slot.
+ * What was derived from the slot is not cleared: it is adopted by the slot's parent.
+ * Clearing an empty slot succeeds.
+ */
 #define OP_CAP_DELETE 4
+/*
+ * CapTable (RIGHT_W): clear everything derived from a slot, in every table and every process,
+ * and leave the slot itself. a1 = slot.
+ * A region installed from a region capability below the slot is uninstalled.
+ * Fails with KERR_INVALID_CAP for an empty slot.
+ */
+#define OP_CAP_REVOKE 23
+/*
+ * CapTable (RIGHT_W): derive a capability from one in the caller's table.
+ * The arguments are OP_CAP_COPY's.
+ * The result is a child of the source in the derivation tree,
+ * so revoking below the source takes it, and everything derived from it in turn.
+ */
+#define OP_CAP_DERIVE 24
 
 /*
  * Region: describe it. Returns a1 = base, a2 = size, a3 = rights,
@@ -128,12 +149,15 @@
  * a1 = offset from the region base, a2 = size, a3 = destination slot.
  * Offset and size must be multiples of the PMP grain,
  * so that the new region can be installed exactly as it is.
+ * The new region is a child of the invoked one in the derivation tree.
  */
 #define OP_REGION_CARVE 5
 /*
  * Region (RIGHT_R and RIGHT_W): hand the memory to the kernel as a pool.
  * a1 = destination slot for the Pool capability.
- * The invoked slot is cleared.
+ * The invoked slot is cleared with everything derived from it,
+ * and the Pool capability takes its place in the derivation tree,
+ * so whoever could revoke the region can revoke the pool capability.
  * The new pool lies below the pool the calling thread lives in
  * and is destroyed with it.
  * Fails with KERR_OVERLAP if the range overlaps an existing pool
@@ -159,10 +183,13 @@
 /*
  * Pool (RIGHT_W): destroy the pool, every object in it,
  * every pool created by a thread living in it, recursively,
- * and every capability anywhere that names one of those objects.
+ * every capability anywhere that names one of those objects,
+ * and everything derived from a capability that lay in one of those pools.
  * a1 = destination slot for a Region capability to the memory
  * of the invoked pool, with the rights the region carried
  * when it became a pool.
+ * That capability takes the pool capability's place in the derivation tree,
+ * below the region the pool was made of, if that still exists.
  * The invoked slot may be the destination.
  * The memory of the pools below comes back through no new capability:
  * region capabilities for it that were held elsewhere work again.
@@ -181,9 +208,11 @@
  * because PMP reserves that encoding.
  * Fails with KERR_OVERLAP if the range overlaps a pool
  * or another region installed in the same process.
+ * The installed region is a child of the Region capability in the derivation tree:
+ * revoking below that capability uninstalls it.
  */
 #define OP_PROCESS_INSTALL 8
-/* Process (RIGHT_W): clear a region slot. a1 = region slot index. */
+/* Process (RIGHT_W): clear a region slot. a1 = region slot index. Clearing an empty slot succeeds. */
 #define OP_PROCESS_UNINSTALL 9
 
 /*
@@ -231,7 +260,8 @@
 /*
  * IrqLine: derive a smaller range of lines with the same rights.
  * a1 = offset from the first line, a2 = count, a3 = destination slot.
- * Like OP_REGION_CARVE, this is a table operation that touches no kernel memory.
+ * Like OP_REGION_CARVE, this is a table operation that touches no kernel memory,
+ * and the new capability is a child of the invoked one.
  */
 #define OP_IRQ_CARVE 19
 /*
@@ -241,7 +271,8 @@
  * a2 = the slot of the Notification capability the Irq signals, which needs RIGHT_W
  *      and must lie in that pool,
  * a3 = destination slot for the Irq capability.
- * The invoked slot is cleared, and may be the destination.
+ * The invoked slot is cleared with everything derived from it, and may be the destination;
+ * the Irq capability takes its place in the derivation tree.
  * The capability must name exactly one line; carve first.
  * Fails with KERR_OVERLAP if an Irq is already bound to the line;
  * the line is free again once that Irq's pool is destroyed.
@@ -262,7 +293,7 @@
 #define OP_IRQ_SET 21
 
 /* One above the highest operation code; the fuzzer's mutator draws below it. */
-#define OP_COUNT 23
+#define OP_COUNT 25
 
 /*
  * Capability slots the kernel fills in the root task's table at boot.

@@ -55,25 +55,35 @@ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
         }
     }
 
-    if (process_install(proc, 0, USER_CODE_BASE, USER_CODE_SIZE, RIGHT_R | RIGHT_X) != KERR_OK ||
-        process_install(proc, 1, USER_DATA_BASE, USER_DATA_SIZE, RIGHT_R | RIGHT_W) != KERR_OK) {
-        kpanic("cannot install the root task's regions");
+    /* The boot capabilities are the roots of the derivation tree. */
+    struct cap boot[BOOT_CAP_COUNT] = {
+        [BOOT_CAP_CAPTABLE] = cap_to_object(&table->hdr, RIGHT_ALL),
+        [BOOT_CAP_PROCESS] = cap_to_object(&proc->hdr, RIGHT_ALL),
+        [BOOT_CAP_THREAD] = cap_to_object(&thread->hdr, RIGHT_ALL),
+        [BOOT_CAP_POOL] = cap_to_object(&pool->hdr, RIGHT_ALL),
+        [BOOT_CAP_DEBUG] = { .type = CAP_DEBUG, .rights = RIGHT_ALL },
+        [BOOT_CAP_CODE] = cap_to_region(USER_CODE_BASE, USER_CODE_SIZE, RIGHT_R | RIGHT_X),
+        [BOOT_CAP_DATA] = cap_to_region(USER_DATA_BASE, USER_DATA_SIZE, RIGHT_R | RIGHT_W),
+        [BOOT_CAP_FREE_RAM] = cap_to_region(free_base, free_size, RIGHT_ALL),
+        [BOOT_CAP_INPUT] = cap_to_region(INPUT_BASE, INPUT_SIZE, RIGHT_R),
+        /* Line 0 is the log's, which no controller has; the controller's lines start at 1. */
+        [BOOT_CAP_IRQ_LINES] = cap_to_lines(LOG_IRQ_LINE, IRQ_LINES, RIGHT_W),
+        [BOOT_CAP_UART] = cap_to_region(UART_BASE, UART_SIZE, RIGHT_R | RIGHT_W),
+        [BOOT_CAP_LOG] = cap_to_region(KLOG_BASE, KLOG_REGION_SIZE, RIGHT_R | RIGHT_W),
+    };
+    for (unsigned i = BOOT_CAP_NULL + 1; i < BOOT_CAP_COUNT; i++) {
+        if (cap_store(table, i, &boot[i], NULL) != KERR_OK) {
+            kpanic("cannot fill the root task's table");
+        }
     }
 
-    struct cap debug = { .type = CAP_DEBUG, .rights = RIGHT_ALL };
-    table->slots[BOOT_CAP_CAPTABLE] = cap_to_object(&table->hdr, RIGHT_ALL);
-    table->slots[BOOT_CAP_PROCESS] = cap_to_object(&proc->hdr, RIGHT_ALL);
-    table->slots[BOOT_CAP_THREAD] = cap_to_object(&thread->hdr, RIGHT_ALL);
-    table->slots[BOOT_CAP_POOL] = cap_to_object(&pool->hdr, RIGHT_ALL);
-    table->slots[BOOT_CAP_DEBUG] = debug;
-    table->slots[BOOT_CAP_CODE] = cap_to_region(USER_CODE_BASE, USER_CODE_SIZE, RIGHT_R | RIGHT_X);
-    table->slots[BOOT_CAP_DATA] = cap_to_region(USER_DATA_BASE, USER_DATA_SIZE, RIGHT_R | RIGHT_W);
-    table->slots[BOOT_CAP_FREE_RAM] = cap_to_region(free_base, free_size, RIGHT_ALL);
-    table->slots[BOOT_CAP_INPUT] = cap_to_region(INPUT_BASE, INPUT_SIZE, RIGHT_R);
-    /* Line 0 is the log's, which no controller has; the controller's lines start at 1. */
-    table->slots[BOOT_CAP_IRQ_LINES] = cap_to_lines(LOG_IRQ_LINE, IRQ_LINES, RIGHT_W);
-    table->slots[BOOT_CAP_UART] = cap_to_region(UART_BASE, UART_SIZE, RIGHT_R | RIGHT_W);
-    table->slots[BOOT_CAP_LOG] = cap_to_region(KLOG_BASE, KLOG_REGION_SIZE, RIGHT_R | RIGHT_W);
+    /* The root task's own mappings derive from its region capabilities, as every mapping does. */
+    if (process_install(proc, 0, USER_CODE_BASE, USER_CODE_SIZE, RIGHT_R | RIGHT_X,
+                        &table->slots[BOOT_CAP_CODE]) != KERR_OK ||
+        process_install(proc, 1, USER_DATA_BASE, USER_DATA_SIZE, RIGHT_R | RIGHT_W,
+                        &table->slots[BOOT_CAP_DATA]) != KERR_OK) {
+        kpanic("cannot install the root task's regions");
+    }
 
     return thread;
 }

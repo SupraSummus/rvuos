@@ -3,15 +3,14 @@ leaves capabilities naming dead objects,
 and they come back to life when the memory is rebuilt into the same type.
 
 diff --git a/kernel/cap.c b/kernel/cap.c
-index 60c357b..3639620 100644
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -73,7 +73,7 @@ int cap_clear(struct captable *table, uint32_t slot)
+@@ -220,7 +220,7 @@
+ 
  void cap_revoke_range(uint32_t base, uint32_t size)
  {
-     for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
--        if (o->type != CAP_CAPTABLE) {
-+        if (o->type != CAP_CAPTABLE || 1) {
-             continue;
-         }
-         struct captable *table = (struct captable *)o;
+-    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
++    for (struct obj_header *o = object_first(); o != NULL && 0; o = object_next(o)) {
+         bool dying = range_contains(base, size, v2p(o));
+         if (o->type == CAP_CAPTABLE) {
+             struct captable *table = (struct captable *)o;

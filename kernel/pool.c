@@ -58,6 +58,17 @@ static void pool_unlink(struct pool *pool)
 void pool_destroy(struct pool *pool)
 {
     /*
+     * The capability sweep first, over every pool that is going,
+     * while all of them still read as they were:
+     * a slot in one of them can be linked to a slot in another,
+     * and the sweep follows those links.
+     */
+    for (struct pool *p = pool_list; p != NULL; p = pool_next_pool(p)) {
+        if (pool_under(p, pool)) {
+            cap_revoke_range(p->base, p->size);
+        }
+    }
+    /*
      * The list has the newest pool first and a child is newer than its parent,
      * so one walk takes every pool below this one before the pool itself,
      * and a parent read on the way up is never one already zeroed.
@@ -68,7 +79,6 @@ void pool_destroy(struct pool *pool)
             continue;
         }
         /* Nothing below may fail: the pool is going. */
-        cap_revoke_range(p->base, p->size);
         sched_unblock_range(p->base, p->size);
         sched_unbind_range(p->base, p->size);
         pool_unlink(p);
@@ -173,8 +183,8 @@ bool installed_overlaps(uint32_t base, uint32_t size)
         }
         struct process *proc = (struct process *)o;
         for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
-            const struct region_slot *s = &proc->slots[i];
-            if (s->rights && ranges_overlap(base, size, s->base, s->size)) {
+            const struct cap *s = &proc->slots[i];
+            if (s->type != CAP_NONE && ranges_overlap(base, size, s->a, s->b)) {
                 return true;
             }
         }

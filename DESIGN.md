@@ -91,10 +91,13 @@ and tracks derivations in a capability derivation tree
 so that revoking a parent destroys every child.
 That tree is most of seL4's complexity.
 rvuos keeps the "kernel never allocates" principle
-but coarsens revocation to whole memory pools.
-The pools form a tree by who created them, one pointer per pool,
-and that replaces the derivation tree over capabilities;
-see "Kernel pools and revocation" for what it gives up.
+and keeps a derivation tree, in a cheaper shape:
+two links per slot, no bookkeeping per object,
+and a revoke that walks only what it takes;
+see "The derivation tree".
+Kernel memory comes back at pool granularity,
+and the pools form a tree of their own by who created them,
+one pointer per pool; see "Kernel pools and revocation".
 seL4 also assumes an MMU and page-granular mapping;
 rvuos has a handful of protection regions per process instead.
 
@@ -256,13 +259,15 @@ It names capabilities by index into its process's capability table,
 and the kernel validates the index, the object type, and the rights
 on every use.
 
-Capabilities can be copied to another process's table,
+Capabilities can be copied or derived into another process's table,
 optionally with reduced rights,
 by a process that holds both the source capability
 and a capability to the destination table.
-There is no derivation tree.
-A copy is as good as the original
-until the object behind it is destroyed.
+The two differ in one thing:
+what a later revoke of the source takes.
+A copy stands beside its source and is as good as it;
+a derivation stands below it and goes when the source is revoked below;
+see "The derivation tree".
 
 A process needs no capability to write its own table.
 Every operation that produces a capability
@@ -292,8 +297,10 @@ so that a caller can tell a programming mistake from a policy decision.
 
 #### Slot format
 
-A slot is twelve bytes: type, rights, padding, and two words.
-For object capabilities the first word is the object's address.
+A slot is twenty bytes: type, rights, padding, two words of content,
+and two links of the derivation tree.
+For object capabilities the first word of content is the object's address
+and the second is unused.
 A slot carries nothing that has to be checked against the object,
 because a destroy clears the slots naming what it takes;
 see "Kernel pools and revocation".
@@ -340,9 +347,12 @@ The mirror check applies when installing a region:
 a range that overlaps a pool cannot be installed.
 Both checks are linear scans over pools and processes,
 which is fine for the object counts a microcontroller can hold.
-The `Region` capability that was consumed is cleared,
-so the caller cannot install the same range later;
-copies of it elsewhere fail the overlap check.
+The `Region` capability that was consumed is revoked,
+with everything derived from it,
+and the `KernelPool` capability takes its place in the derivation tree,
+so whoever could revoke the region can revoke the pool capability.
+Copies beside the region and the regions above it survive
+and fail the overlap check while the pool exists.
 The kernel zeroes the memory before use.
 
 The pool's own descriptor is the first object in the pool's memory,
@@ -351,12 +361,13 @@ except a list head for the overlap scans.
 Objects are bump-allocated behind it, eight-byte aligned,
 never freed individually, and each records its pool.
 
-Revocation happens at pool granularity.
-This is the deliberate simplification relative to seL4:
-there is no per-object derivation tree,
-so a pool is the unit of trust.
-A process that wants to revoke one object cheaply
-allocates it from its own small pool.
+Kernel memory comes back at pool granularity.
+Objects are never freed individually,
+so a pool is the unit of trust for the memory behind objects:
+revoking the capabilities to an object leaves the object in its pool,
+unreachable, until the pool is destroyed.
+Capabilities themselves are revoked one derivation at a time;
+see "The derivation tree".
 
 Pools form a tree.
 A pool's parent is the pool the thread that created it lives in,
@@ -379,6 +390,12 @@ every `CapTable` is an object in a pool,
 and every pool is on the list.
 It has the same shape as `pool_overlaps` and `installed_overlaps`
 and costs the same, once per destroy rather than once per system call.
+The derivation tree adds a second thing the sweep takes:
+every slot the dying pools held is revoked with everything derived from it,
+so a grant dies with the table it was made through,
+and no ring in a surviving table leads into memory that is user memory again.
+Links cross pools in both directions,
+so the sweep runs over every dying pool before any of them is zeroed.
 
 A generation counter in each object was the alternative, and it cannot work.
 The counter lives in the memory being destroyed,
@@ -427,35 +444,83 @@ so a destroy cannot manufacture a right the memory never had.
 The pools below give their memory back to nobody in particular:
 region capabilities for it that survived the sweep
 pass the overlap check again,
-which is open decision 7's working default
-and is what puts lent memory back in the lender's hands.
+and the derivation tree says which those are;
+see decision 7 under "Open decisions".
 The pool list has the newest pool first and a child is newer than its parent,
 so one walk of the list meets every pool below the destroyed one before it,
 and no parent read on the way up has been zeroed yet.
 
-#### Why not a derivation tree
+### The derivation tree
 
-The pool tree cannot do what seL4's can:
-revoke one region capability and everything derived from it
-while its holder goes on living.
-A parent that wants a region back from a child
-destroys the child's pool, or asks.
+The pool tree cannot do what seL4's derivation tree can:
+take back one region from a child, and everything the child did with it,
+while the child goes on living.
+A derivation tree over slots does that,
+and rvuos keeps one in the shape that costs the least.
 
-The precise version was considered and rejected.
-Derivation links in every slot double it,
-every copy, carve, delete and pool creation maintains them,
-and a pool destroy removes whole tables of nodes
-whose parents and children live in tables that survive.
-Installed regions are derived authority too,
-so either region slots join the tree
-or a revoke uninstalls by address range,
-and two processes sharing a region could then unmap each other.
+**What is a node.**
+Every filled slot of every capability table,
+and every region installed in a process,
+which is a slot of the same layout living in the `Process`;
+see `kernel/object.h`.
+Roots are the boot capabilities and every capability to a new object,
+since an object owes nothing to the pool capability it was allocated through.
+
+**What hangs below what.**
+A carve hangs below the region or line it was carved from,
+a derivation below its source,
+and an installed region below the capability it was installed from.
+A copy stands beside its source, under the same parent,
+so a process can duplicate what it holds without making one copy the master of the other;
+beside a root it is a root.
+A conversion takes the converted slot's place:
+the pool capability of `OP_REGION_TO_POOL` and the `Irq` capability of `OP_IRQ_BIND`
+hang where the region or the line hung,
+and the consumed slot goes with everything derived from it.
+The region a destroy gives back hangs where the pool capability hung,
+or rather below the nearest ancestor that is not a capability to the pool,
+since those the destroy clears;
+when that ancestor went with the destroy, the region comes back as a root.
+
+**What the operations do to it.**
+`OP_CAP_REVOKE` clears everything below a slot and leaves the slot.
+`OP_CAP_DELETE` and `OP_PROCESS_UNINSTALL` clear one node
+and hand what was below it to its parent,
+so deleting one's own copy of a grant does not take the grant back.
+A pool destroy revokes every slot the dying pools held,
+so the derivation a process handed out dies with the process;
+see "Kernel pools and revocation".
+
+**The shape.**
+Two links per slot, first child and next,
+where the last child's next points up to the parent with the low bit set,
+which the four-byte alignment of slots leaves free.
+The children of a node are then a ring that closes through the node,
+and a subtree walks in post-order with no stack:
+down to a leaf, along the ring, up when the link says so.
+A node's parent and its predecessor are found along its ring,
+which a delete needs and a revoke does not;
+that walk costs the width of one ring, the copies made of one slot.
+seL4's pre-order list with a depth per node costs the same two words
+but adds a visible depth limit and renumbers a subtree on every delete;
+a third link to the parent buys nothing the ring does not.
+
+**What it does not do.**
+Revoking the capabilities to an object does not free the object;
+the pool does that, and a pool whose capability was revoked
+stays until the pool it lies below is destroyed.
+A root has no parent to revoke it from:
+what a process allocates it holds until the pool goes.
+A capability copied beside its source can be taken back only from their common parent,
+which is the point of copying rather than deriving.
 An earlier sketch by the same author,
 `os4cm4` in the LANoT repository,
-put three such links next to the object pointer in a sixteen-byte slot
-and never got as far as maintaining them.
-One word per pool buys the property that matters:
-nothing a process creates in kernel memory outlives the process.
+put three links next to the object pointer in a sixteen-byte slot
+and never got as far as maintaining them;
+what made this one tractable was making installed regions nodes,
+so that a revoke unmaps by derivation and never by address range,
+and letting a destroy revoke the dying slots' derivation
+instead of reparenting it across tables.
 
 ### Region slots
 
@@ -466,6 +531,9 @@ and a `Process` capability with the write right.
 The kernel recomputes and caches the PMP register image
 for the process at that point,
 not on every context switch.
+The installed region hangs below the capability it was installed from
+in the derivation tree, so revoking below that capability unmaps it,
+whichever process it was installed in.
 
 Rights on the installed slot are the intersection
 of the region capability's rights
@@ -686,7 +754,8 @@ because a line is bound at most once and a second bind fails with `KERR_OVERLAP`
 When the `Irq`'s pool is destroyed the kernel masks its line
 and the object is gone, so those copies work again:
 the lender of a line gets it back by destroying the borrower's pool,
-exactly as the lender of memory does, and open decision 7 applies to both.
+or by revoking below the line capability it derived the borrower's from,
+exactly as the lender of memory does.
 
 **One `Irq` per line.**
 Sharing a line between drivers is open decision 11;
@@ -838,6 +907,20 @@ or a range of lines the interrupt controller has, the log's among them,
 with no more than the right to bind,
 or a live kernel object of the capability's own type.
 
+**Derivation.**
+The slots of every live table and the region slots of every live process
+are the nodes of one forest.
+Every link of a filled node lands on a live, filled node;
+an empty node has no links.
+The children of a node form one ring that closes through the node,
+every node on it linked up to that node,
+and a root has no siblings.
+A node is derived from its parent:
+the same object with no more rights,
+a range within the parent's range with no more rights,
+or an object built on the parent's range,
+a pool on a region, an `Irq` on a line, an installed region on a region.
+
 **Structural soundness.**
 Every pool's descriptor sits at its base,
 its objects tile the space from the descriptor to the used mark exactly,
@@ -888,8 +971,10 @@ outside its own objects,
 nor reach any undefined behaviour.
 Any kernel panic reachable from user mode is a bug.
 
-Not on the list yet: "rights only narrow through copies".
-Until pool destroy exists, confinement implies it.
+Not on the list yet: "rights only narrow through copies" as a property of history.
+The derivation invariant carries its structural form,
+no node wider than its parent,
+and a copy beside its source is checked against their common parent, not against the source.
 
 ## Verification
 
@@ -1094,30 +1179,32 @@ until the maintainer decides otherwise.
    exactly as rights narrow.
    That makes a client unable to speak for another
    and fits in the second word of an object capability, which is unused.
-   It needs a way to set the mask when a capability is copied,
-   which the copy operation has no argument left for.
+   It needs a way to set the mask when a capability is handed out;
+   `OP_CAP_DERIVE` is the natural place, with the mask in `a4`,
+   which the dispatcher already carries.
    Decide before a server with mutually distrusting clients exists.
 
 7. **What a pool destroy gives back, and to whom.**
-   `REGION_TO_POOL` clears only the capability it was invoked on.
-   Copies of that region capability elsewhere survive,
-   and while the pool exists they are inert,
-   because installing one fails the overlap check against the pool.
-   After a destroy that check no longer fires and they work again,
-   so the memory returns to everyone who ever held a region capability
-   for the range,
-   rather than to whoever handed it to the kernel.
-   Working default: exactly that, because it is what the checks already do,
-   and the pool tree leans on it for the memory of the pools below.
-   The alternative is for destroy to clear region capabilities
-   overlapping the range in the same sweep
-   that clears capabilities to the objects,
-   which leaves the memory named by nobody
-   and needs an answer to who may name it next.
-   Decide before roadmap step 7.
-   The other half of this question, what happens to capabilities
-   naming objects inside the pool, is decided
-   and lives in "Kernel pools and revocation".
+   Decided, by the derivation tree.
+   `OP_REGION_TO_POOL` revokes the region capability it consumes
+   with everything derived from it,
+   and the pool capability takes its place.
+   Copies beside that region and the regions above it survive,
+   inert while the pool exists because installing one fails the overlap check,
+   and working again after the destroy,
+   which is when the destroyed pool's own memory comes back
+   below the same ancestor.
+   So the memory returns along the derivation it left by:
+   to the lender's own capability and the copies the lender made beside it,
+   never to a borrower's derived one.
+   A lender that wants it back from a living borrower
+   revokes below its own region capability,
+   which takes the borrower's pool capability too;
+   the pool itself then waits for the pool above it to go.
+   The working default before this, memory returning to everyone
+   who ever held a capability for the range,
+   was what the checks did on their own,
+   and the tree is what made "everyone" precise.
 
 8. **NAPOT for cores without TOR.**
    RP2350 has eight dynamic PMP entries, a 32-byte grain, NAPOT only,

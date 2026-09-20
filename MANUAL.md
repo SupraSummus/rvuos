@@ -276,13 +276,38 @@ puts it into a slot of the caller's own table,
 named by an argument, and that slot must be empty.
 A process needs no capability to receive into its own table.
 The `CapTable` capability exists for writing into a table:
-a parent fills a child's table with `OP_CAP_COPY` before starting it,
+a parent fills a child's table with `OP_CAP_COPY` or `OP_CAP_DERIVE` before starting it,
 and a process that holds a capability to its own table
-can copy within it and clear its own slots.
+can copy within it, clear its own slots, and revoke below them.
 
-There is no derivation tree.
-A copy is as good as the original until the object behind it is destroyed.
-Copying applies a rights mask, so rights only ever narrow.
+Every capability remembers what it was derived from,
+and that is what `OP_CAP_REVOKE` follows.
+The tree grows in these ways:
+
+| Operation | The new capability hangs |
+|---|---|
+| `OP_CAP_DERIVE` | below the source |
+| `OP_CAP_COPY` | beside the source, under the source's parent; a copy of a root is a root |
+| `OP_REGION_CARVE`, `OP_IRQ_CARVE` | below the invoked capability |
+| `OP_PROCESS_INSTALL` | the installed region hangs below the `Region` capability |
+| `OP_REGION_TO_POOL`, `OP_IRQ_BIND` | where the consumed capability hung |
+| `OP_POOL_DESTROY` | where the pool capability hung, below the region the pool was made of |
+| `OP_POOL_ALLOC`, boot | nowhere: a new object starts a tree of its own |
+
+`OP_CAP_REVOKE` on a slot clears everything below it, in every table and every process:
+derived capabilities, their copies, what was derived from those,
+and every region installed from any of them.
+The slot itself stays.
+Revoking a copy takes nothing from the original, and the other way round;
+to take both back, revoke below what they were both derived from.
+So derive to lend, and copy to keep a second handle to what you hold.
+
+`OP_CAP_DELETE` clears one slot and hands what hung below it to the slot's parent,
+so deleting your own copy of something you lent does not take it back.
+Destroying a pool revokes every slot in the tables that pool held:
+what a process handed out through its table dies with the process.
+
+Copying and deriving both apply a rights mask, so rights only ever narrow.
 
 Slot 0 of the root task's table is left empty on purpose,
 so that an uninitialised index fails.
@@ -371,8 +396,8 @@ Sizes a developer needs for planning, as the kernel rounds them:
 | Object | Bytes (16 PMP entries) |
 |---|---|
 | pool descriptor | 32 |
-| `CapTable` with `n` slots | 12 + 12 × n, rounded up to 8 |
-| `Process` | 192 (152 with `PMP_MAX_ENTRIES=8`) |
+| `CapTable` with `n` slots | 12 + 20 × n, rounded up to 8 |
+| `Process` | 256 (216 with `PMP_MAX_ENTRIES=8`) |
 | `Thread` | 168 |
 | `Notification` | 16 |
 | `Timer` | 24 |
@@ -414,13 +439,17 @@ The call fails with `KERR_STATE`
 when the calling thread lives in the pool or in one below it,
 so a thread cannot destroy the pool it runs from.
 The memory of the pools below comes back through no new capability;
-region capabilities for it that were held elsewhere simply work again,
+region capabilities for it that survived simply work again,
 which is how a lender gets lent memory back.
-`DESIGN.md`, open decision 7, records that this is a working default.
+Those are the lender's own capability and any copies made beside it:
+what was derived from the region went when the region became a pool.
 
-Revocation happens at pool granularity.
-A process that wants to revoke one object cheaply
-allocates it from its own small pool.
+A lender that wants memory back from a living borrower
+revokes below its own `Region` capability instead, section 5.2.
+That takes the borrower's derived capability, its mappings,
+and any pool capability the borrower made of it;
+the pool itself stays, unreachable, until the pool above it is destroyed.
+Kernel memory comes back only by destroying pools.
 
 ### 5.6 Threads
 
@@ -688,7 +717,7 @@ the `Irq` armed on it masks the line and signals its bits.
 
 ### 6.4 Operations on `CapTable`
 
-Both need `RIGHT_W` on the table.
+All need `RIGHT_W` on the table.
 
 **`OP_CAP_COPY` (3).**
 `a1` = destination slot in the invoked table,
@@ -696,12 +725,23 @@ Both need `RIGHT_W` on the table.
 `a3` = rights mask ANDed into the copy.
 The destination must be empty (`KERR_SLOT_IN_USE`).
 The source may be any type, regions and lines included.
+The copy hangs beside the source in the derivation tree, section 5.2.
+
+**`OP_CAP_DERIVE` (24).**
+The arguments and errors of `OP_CAP_COPY`.
+The new capability hangs below the source.
 
 **`OP_CAP_DELETE` (4).**
 `a1` = slot in the invoked table.
-Clears it.
+Clears it; what hung below it now hangs below the slot's parent.
 Clearing an empty slot succeeds.
 Deleting a `Region` capability does not uninstall the region anywhere.
+
+**`OP_CAP_REVOKE` (23).**
+`a1` = slot in the invoked table, which must be filled (`KERR_INVALID_CAP`).
+Clears everything below it, section 5.2, and leaves the slot.
+Regions installed from capabilities below it are uninstalled,
+and threads of those processes lose access at once.
 
 ### 6.5 Operations on `Region`
 
@@ -713,7 +753,7 @@ Returns `a1` = base, `a2` = size, `a3` = rights,
 **`OP_REGION_CARVE` (5).**
 No right needed.
 `a1` = offset from the region's base, `a2` = size, `a3` = destination slot in the caller's table.
-Produces a region with the same rights.
+Produces a region with the same rights, hanging below the invoked one.
 Offset and size must be multiples of the grain, the size non-zero,
 and the sub-range within the region (`KERR_INVALID_ARG`).
 The parent capability is unchanged.
@@ -722,7 +762,8 @@ The parent capability is unchanged.
 Needs `RIGHT_R` and `RIGHT_W`.
 `a1` = destination slot for the `KernelPool` capability,
 which may be the invoked slot.
-The invoked slot is cleared.
+The invoked slot is revoked with everything below it,
+and the `KernelPool` capability takes its place in the tree.
 The requirements of section 5.5 apply:
 alignment and minimum size, RAM only, not the log (`KERR_INVALID_ARG`),
 no overlap with a pool or an installed region (`KERR_OVERLAP`).
@@ -751,6 +792,9 @@ The new capability carries all rights.
 `a1` = destination slot for the `Region` capability to the pool's memory,
 which may be the invoked slot.
 Does everything section 5.5 lists.
+The `Region` capability hangs where the pool capability hung,
+below the region the pool was made of;
+it is a root when that region's slot went with the destroy.
 `KERR_STATE` if the calling thread lives in the pool or below it.
 
 ### 6.7 Operations on `Process`
@@ -766,11 +810,14 @@ write without read is `KERR_INVALID_ARG`;
 an occupied region slot is `KERR_SLOT_IN_USE`;
 overlap with a pool or with another region in this process is `KERR_OVERLAP`;
 too few PMP entries is `KERR_LIMIT`.
+The installed region hangs below the `Region` capability in the derivation tree,
+so `OP_CAP_REVOKE` on that capability's slot, or on any slot above it, uninstalls it.
 
 **`OP_PROCESS_UNINSTALL` (9).**
 `a1` = region slot index.
 Clears it and rebuilds the PMP image.
 Threads of the process lose access at once.
+Clearing an empty slot succeeds.
 
 ### 6.8 Operations on `Thread`
 
@@ -855,8 +902,10 @@ On the log's line, arming while bytes are untaken signals at once.
 | 20 | `OP_IRQ_BIND` | `IrqLine` |
 | 21 | `OP_IRQ_SET` | `Irq` |
 | 22 | `OP_DEBUG_IRQ` | `Debug` |
+| 23 | `OP_CAP_REVOKE` | `CapTable` |
+| 24 | `OP_CAP_DERIVE` | `CapTable` |
 
-`OP_COUNT` is 23, one above the highest code.
+`OP_COUNT` is 25, one above the highest code.
 
 ## 7. What the root task starts with
 

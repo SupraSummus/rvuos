@@ -42,6 +42,10 @@ grep -q 'root: revocation ok' "$log" \
     || fail "a destroyed pool did not revoke the capabilities into it"
 grep -q 'child: revoked here too' "$log" \
     || fail "revocation did not reach the other process's table"
+grep -q 'root: derivation ok' "$log" \
+    || fail "revoking below a region capability did not take what was derived and installed from it"
+grep -q 'child: lease revoked here too' "$log" \
+    || fail "the revoke did not reach the derived capability in the other process's table"
 grep -q 'child: pool made' "$log" || fail "the child could not pool the lent memory"
 grep -q 'child: cannot destroy the pool above' "$log" \
     || fail "a thread destroyed a pool its own lies below"
