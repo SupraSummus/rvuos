@@ -9,7 +9,9 @@ It follows the seL4 principle that the kernel never allocates memory:
 userspace hands memory to the kernel,
 and the kernel builds its objects inside that memory.
 
-See `DESIGN.md` for the architecture
+See `MANUAL.md` for what the kernel offers a program
+and the system call reference,
+`DESIGN.md` for the architecture,
 and `CLAUDE.md` for repository conventions.
 
 ## Building and running

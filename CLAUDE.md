@@ -40,3 +40,9 @@ as the code that implements the change.
 Open questions are listed explicitly in the design document
 rather than left implicit in the code.
 Work items go to `TODO.md`.
+
+`MANUAL.md` is the user-facing description of the kernel:
+what it offers a program, the system call reference,
+and what the root task starts with.
+When `include/rvuos/abi.h` or a limit a program can see changes,
+update the manual in the same commit.
