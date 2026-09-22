@@ -19,6 +19,7 @@
 
 #include <stdint.h>
 
+#include "console.h"
 #include "rvuos.h"
 
 /* Slots in the root task's own table, above the ones the kernel filled. */
@@ -116,22 +117,11 @@ enum {
 #define BIT_UART 0x2u
 
 /*
- * The UART of QEMU virt: a 16550 on line 10, and a line nothing drives, the RTC's.
- * The registers come from BOOT_CAP_UART; the line numbers are the board's,
- * as the offsets into free RAM above are.
+ * The console device behind BOOT_CAP_UART, its line CONSOLE_IRQ
+ * and a line nothing drives, SPARE_IRQ, are the board's; see console.h.
  */
-#define UART_IRQ 10
-#define SPARE_IRQ 11
-#define UART_THR 0 /* transmit holding register */
-#define UART_IER 1 /* interrupt enable register */
-#define UART_IIR 2 /* interrupt identification register */
-#define UART_LSR 5 /* line status register */
-#define UART_IER_THRE 0x2u /* interrupt when the transmit holding register empties */
-#define UART_IIR_ID   0xfu
-#define UART_IIR_THRE 0x2u
-#define UART_LSR_THRE 0x20u
 
-/* Ticks are a millisecond on QEMU; long enough to need a few of them. */
+/* Ticks are a millisecond on every board so far; long enough to need a few of them. */
 #define SLEEP_US 10000u
 
 /* Whose turn it is in the handshake that uses no notification. */
@@ -141,6 +131,14 @@ enum {
 static void puts(const char *s)
 {
     rv_puts(BOOT_CAP_DEBUG, s);
+}
+
+static void put_hex(uint32_t v)
+{
+    puts("0x");
+    for (int shift = 28; shift >= 0; shift -= 4) {
+        rv_putc(BOOT_CAP_DEBUG, "0123456789abcdef"[(v >> shift) & 0xfu]);
+    }
 }
 
 static void expect(const char *what, uint32_t status)
@@ -178,51 +176,48 @@ static uint32_t sleep_us(uint32_t us)
  * see DESIGN.md, "The kernel log".
  * So the logger drives two devices on one notification, one bit each:
  * the log says there is something to send and the UART says it can take a byte.
+ * Which device the UART is, and when a byte has to wait for it, is the board's;
+ * see console.h.
  * Its own failure is the one thing it cannot report through the log,
  * so that goes to the UART by polling.
  */
-static volatile uint8_t *uart;
 static volatile struct rvuos_log *log_header;
 static const volatile uint8_t *log_ring;
-
-static void uart_put_polled(char c)
-{
-    while ((uart[UART_LSR] & UART_LSR_THRE) == 0) {
-    }
-    uart[UART_THR] = (uint8_t)c;
-}
 
 static __attribute__((noreturn)) void logger_fail(const char *s)
 {
     for (; *s != '\0'; s++) {
         if (*s == '\n') {
-            uart_put_polled('\r');
+            console_put_polled('\r');
         }
-        uart_put_polled(*s);
+        console_put_polled(*s);
     }
+    console_flush();
     rv_halt(BOOT_CAP_DEBUG, 1);
 }
 
 /*
- * One byte out on the transmitter's interrupt.
- * The transmitter raises the line whenever it is empty, once told to,
- * so each byte waits for that interrupt:
- * arm the Irq, wait, read the identification register, which lowers the line
- * and must say it was the transmitter, and write the byte.
+ * Wait for the UART's interrupt: arm its Irq and wait on the logger's notification.
  * The kernel masked the line as it signalled, so arming again is the acknowledgement.
  * The log's Irq is disarmed meanwhile, so the UART's bit comes alone.
  */
-static void uart_put(char c)
+static void uart_wait(void)
 {
     uint32_t bits;
     if (rv_irq_set(SLOT_UART_IRQ, BIT_UART) != KERR_OK ||
         rv_wait(SLOT_LOG_NTFN, &bits) != KERR_OK) {
         logger_fail("logger: cannot wait for the uart\n");
     }
-    if (bits != BIT_UART || (uart[UART_IIR] & UART_IIR_ID) != UART_IIR_THRE) {
+    if (bits != BIT_UART) {
+        logger_fail("logger: woken for something other than the uart\n");
+    }
+}
+
+static void uart_put(char c)
+{
+    if (!console_put(c, uart_wait)) {
         logger_fail("logger: woken for something other than the transmitter\n");
     }
-    uart[UART_THR] = (uint8_t)c;
 }
 
 /* The log holds bare newlines; the terminal wants a carriage return before each. */
@@ -245,8 +240,7 @@ static void logger_main(void)
 {
     uint32_t taken = 0;
 
-    /* From here the transmitter raises the line whenever it is empty. */
-    uart[UART_IER] = UART_IER_THRE;
+    console_start();
     for (;;) {
         /*
          * Say what has been taken so far, arm the log's line and wait.
@@ -273,6 +267,7 @@ static void logger_main(void)
         for (; taken != head; taken++) {
             uart_put_line_ending((char)log_ring[taken % size]);
         }
+        console_flush();
     }
 }
 
@@ -388,7 +383,7 @@ int main(void)
     expect("map the kernel's log",
            rv_invoke(OP_PROCESS_INSTALL, BOOT_CAP_PROCESS, ROOT_LOG_SLOT, BOOT_CAP_LOG,
                      RIGHT_R | RIGHT_W));
-    uart = (volatile uint8_t *)uart_base;
+    console_init(uart_base);
     log_header = (volatile struct rvuos_log *)log_base;
     log_ring = (const volatile uint8_t *)(log_base + RVUOS_LOG_HEADER);
 
@@ -399,7 +394,7 @@ int main(void)
     expect("bind the log's line",
            rv_invoke(OP_IRQ_BIND, SLOT_LOG_LINE, BOOT_CAP_POOL, SLOT_LOG_NTFN, SLOT_LOG_IRQ));
     expect("carve the uart's line",
-           rv_invoke(OP_IRQ_CARVE, BOOT_CAP_IRQ_LINES, UART_IRQ, 1, SLOT_UART_LINE));
+           rv_invoke(OP_IRQ_CARVE, BOOT_CAP_IRQ_LINES, CONSOLE_IRQ, 1, SLOT_UART_LINE));
     expect("bind the uart's line",
            rv_invoke(OP_IRQ_BIND, SLOT_UART_LINE, BOOT_CAP_POOL, SLOT_LOG_NTFN, SLOT_UART_IRQ));
     expect("allocate the logger's thread",
@@ -657,7 +652,9 @@ int main(void)
      * The fault report lands in the log after the logger's last look at it,
      * so the halt writes it out; tests/run.sh reads it there.
      */
-    puts("reading the removed region, expecting a fault\n");
+    puts("reading the removed region at ");
+    put_hex((uint32_t)shared);
+    puts(", expecting a fault\n");
     uint32_t word = shared[0];
 
     /* Not reached when PMP works. */

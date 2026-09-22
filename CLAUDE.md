@@ -25,6 +25,10 @@ Do not reflow paragraphs to a fixed column width.
 Run `make check`.
 It boots QEMU, replays the fuzz corpus on the host build,
 and compares host and QEMU transcripts.
+When a change touches `kernel/board/esp32c6/`, `user/board/esp32c6/`,
+or anything the demo exercises, and an ESP32-C6 is connected,
+run `make BOARD=esp32c6 test` as well;
+it loads the demo into the chip's RAM and checks the same transcript.
 When the kernel's object model changes,
 update `kernel/selfcheck.c` with it;
 it is the executable form of the properties in `DESIGN.md`.

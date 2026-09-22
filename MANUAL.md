@@ -133,15 +133,23 @@ Cores with NAPOT-only PMP, RP2350's Hazard3 among them, are out of scope today;
 
 The build is `rv32imac`, `ilp32`, compiled with clang and linked with lld.
 
-### The only supported board today: QEMU `virt`, RV32
+### Boards
 
-Everything board-specific lives in three kernel files,
-`kernel/irq.c`, `kernel/timer.c` and `kernel/halt.c`,
-plus the constants in `kernel/kernel.h` and `kernel/uart.h`
-and the two linker scripts.
+Two boards are supported, chosen with `make BOARD=<board>`:
+`qemu`, QEMU `virt` for RV32, the default,
+and `esp32c6`, an Espressif ESP32-C6.
+Everything board-specific lives in `kernel/board/<board>/`,
+`board.h`, `board.c`, `irq.c`, `timer.c` and `halt.c`,
+and in `user/board/<board>/console.h`,
+which drives the device behind `BOOT_CAP_UART` for the demo and the replay driver.
+The linker scripts take their addresses from `board.h` through `kernel/layout.h`.
 Porting to a board means providing those.
+A program learns every address it needs from its region capabilities;
+only the line numbers of its devices are the board's to know.
 
-Memory map on QEMU `virt`:
+#### QEMU `virt`, RV32
+
+Memory map:
 
 | Range | Size | What |
 |---|---|---|
@@ -160,12 +168,42 @@ Interrupt lines:
 | 0 | the kernel log (no controller behind it) |
 | 1 to 95 | the PLIC's sources; the UART is line 10 |
 
-The sizes of the code, data, input and log ranges are the kernel's constants
-in `kernel/kernel.h` and the linker scripts;
-the RAM and UART addresses and the line numbers are the board's.
 The kernel's tick on this board is 1 kHz, `TIMER_HZ` in `kernel/timer.h`,
 so one tick is one millisecond.
-QEMU's PMP has a four-byte grain.
+QEMU's PMP has sixteen entries and a four-byte grain.
+
+#### ESP32-C6
+
+The chip's ROM loads the image into SRAM over its USB port and enters it;
+nothing is written to flash, and booting from flash is not supported yet.
+The same port carries the console.
+
+Memory map:
+
+| Range | Size | What |
+|---|---|---|
+| `0x6000F000` | 256 B | USB Serial/JTAG controller registers, granted to the root task |
+| `0x40800000` to `0x4081EFE0` | just under 128 KiB | kernel code, data, stack and the boot pool |
+| `0x4081EFE0` to `0x40820000` | 32 B + 4 KiB | the kernel log: header and ring |
+| `0x40820000` | 64 KiB | root task code, read and execute |
+| `0x40830000` | 64 KiB | root task data and stack, read and write |
+| `0x40840000` to `0x4087F000` | 252 KiB | free RAM, granted to the root task with all rights |
+| `0x4087F000` | 4 KiB | input region, read only; nothing fills it yet |
+
+Interrupt lines:
+
+| Line | What |
+|---|---|
+| 0 | the kernel log; the Wi-Fi MAC's source 0 cannot be bound |
+| 1 to 76 | the interrupt matrix's sources, numbered as in Espressif's `soc/interrupts.h`; the USB Serial/JTAG controller is line 48 |
+
+A device's interrupt reaches its `Irq` only while the device itself has it enabled,
+in the USB Serial/JTAG controller's case in its `INT_ENA` register.
+The tick is 1 kHz here too, measured against the chip's 16 MHz system timer at boot.
+The PMP has sixteen entries and a four-byte grain.
+The console is the controller's CDC-ACM port:
+bytes written to its FIFO leave as one USB packet when `WR_DONE` is written,
+and only while a host has the port open.
 
 ## 4. Building and running
 
@@ -173,9 +211,10 @@ Requirements: clang and lld with RISC-V support, llvm-objcopy,
 GNU make and `qemu-system-riscv32`.
 No separate cross toolchain is needed.
 The host build needs clang's sanitizer and libFuzzer runtimes.
+The ESP32-C6 needs Espressif's `esptool`, version 5, as a command and as a Python module.
 
 ```
-make             # build/kernel-init.elf and build/kernel-fuzzdrv.elf
+make             # build/qemu/kernel-init.elf and build/qemu/kernel-fuzzdrv.elf
 make run         # boot the demo root task under QEMU
 make test        # boot under QEMU and check the transcript
 make host-test   # replay the fuzz corpus on the host build with invariants on
@@ -186,6 +225,21 @@ make check       # test, host-test and qemu-replay; run before committing
 ```
 
 `PMP_MAX_ENTRIES=8 make check` runs everything with a smaller PMP budget.
+Images go under `build/<board>/`, the host build under `build/host/`;
+a smaller budget adds `-pmp<n>` to both.
+
+On the ESP32-C6, connected over USB:
+
+```
+make BOARD=esp32c6                    # build/esp32c6/kernel-init.bin
+make BOARD=esp32c6 run                # load it into RAM and print the console until the halt
+make BOARD=esp32c6 test               # the same, and check the transcript
+make BOARD=esp32c6 PORT=/dev/ttyACM1 run
+```
+
+Opening the port resets the chip,
+so `tools/esp32c6-run.py` loads the image and reads the console on one connection.
+Only the demo is built for the board; the replay driver is QEMU's for now.
 
 The kernel image embeds one user program, the root task.
 Two images are built, differing only in that program:
@@ -197,7 +251,7 @@ and `kernel-fuzzdrv.elf` carries the replay driver of `user/fuzzdrv.c`.
 The kernel has no console.
 Everything the kernel prints, and everything a program writes with `OP_DEBUG_PUTC`,
 goes into the kernel log.
-Two things carry that log to QEMU's UART:
+Two things carry that log to the board's UART:
 
 - the root task's logger thread, while the machine runs,
 - the halt, which writes out every byte no reader has taken,
@@ -214,7 +268,9 @@ rvuos: pmp entries 0x00000010 grain 0x00000004
 rvuos: entering user mode
 ```
 
-On QEMU a halt exits the emulator with a status code:
+On QEMU a halt exits the emulator with a status code.
+The ESP32-C6 parks its core instead, after the line `rvuos: halted with code <n>`,
+and `tools/esp32c6-run.py` exits with that code:
 
 | Code | Meaning |
 |---|---|
@@ -522,7 +578,7 @@ setting bits to zero cancels it.
 The contract is a **lower bound**.
 The kernel fires at the first tick that surely lies past the delay:
 the delay rounded up to whole ticks, plus one.
-On QEMU with a millisecond tick,
+With a millisecond tick, as on both boards,
 a delay of zero fires at the next tick,
 and a delay of 10 000 µs fires on the eleventh tick after the call,
 between 10 and 11 ms later.
@@ -619,7 +675,7 @@ and carries the ring out one byte per transmitter interrupt.
   Runnable threads are found by walking the pools,
   and the walk continues from the running thread,
   so threads take turns in the order they were allocated.
-- The machine timer ticks at `TIMER_HZ`, 1 kHz on QEMU.
+- The machine timer ticks at `TIMER_HZ`, 1 kHz on both boards.
   A thread runs until it waits or until a tick takes the processor from it;
   a preempted thread goes to the back of the round.
 - A system call is never interrupted:
@@ -694,7 +750,8 @@ Appends it to the kernel log.
 
 **`OP_DEBUG_HALT` (2).**
 `a1` = exit code.
-Stops the machine; on QEMU the emulator exits with that code.
+Stops the machine; on QEMU the emulator exits with that code,
+and on the ESP32-C6 the core parks after printing it.
 Does not return.
 
 **`OP_DEBUG_TRACE` (10).**
@@ -914,8 +971,8 @@ The kernel builds the root process by hand in the **boot pool**,
 4 KiB reserved by the linker,
 and drops into user mode with:
 
-- the program counter at the start of the code region, `0x80100000`,
-- the stack pointer at the top of the data region, `0x80210000`,
+- the program counter at the start of the code region, `0x80100000` on QEMU,
+- the stack pointer at the top of the data region, `0x80210000` on QEMU,
 - region slot 0: the code region, read and execute,
 - region slot 1: the data region, read and write,
 - a capability table of 64 slots, filled as below.
@@ -933,7 +990,7 @@ and drops into user mode with:
 | 8 | `BOOT_CAP_FREE_RAM` | `Region`: all RAM the kernel and the root task do not use | all |
 | 9 | `BOOT_CAP_INPUT` | `Region`: test input the loader placed in RAM | read |
 | 10 | `BOOT_CAP_IRQ_LINES` | `IrqLine`: line 0 (the log) and every controller line | write |
-| 11 | `BOOT_CAP_UART` | `Region`: the board's UART registers | read, write |
+| 11 | `BOOT_CAP_UART` | `Region`: the board's console registers, a 16550 on QEMU and the USB Serial/JTAG controller on the ESP32-C6 | read, write |
 | 12 | `BOOT_CAP_LOG` | `Region`: the kernel log's header and ring | read, write |
 
 `BOOT_CAP_COUNT` is 13; a root task puts its own slots from there upwards.
@@ -955,12 +1012,13 @@ for the one program it starts itself.
 
 ### 8.1 Toolchain and layout
 
-A user program is a flat binary linked against `user/user.ld`
+A user program is a flat binary linked against `user/user.ld.S`,
+with the board's addresses, see "Boards",
 and embedded into the kernel image by the Makefile.
 Constraints of the current linker script:
 
-- code and read-only data live in the read-execute region at `0x80100000`,
-- zero-initialised data and the stack live in the read-write region at `0x80200000`,
+- code and read-only data live in the read-execute region, at `0x80100000` on QEMU,
+- zero-initialised data and the stack live in the read-write region, at `0x80200000` on QEMU,
 - **initialised data is forbidden**: nobody would copy it into the data region,
   and the link fails if `.data` is not empty,
 - `user/start.S` zeroes `.bss`, calls `main`,
@@ -1131,13 +1189,13 @@ and `tests/mutants/` holds one planted bug per invariant.
 | minimum PMP entries to boot | 4 | `kernel/main.c` |
 | slots per `CapTable` | 1 to 1024 | `CAPTABLE_MAX_SLOTS` |
 | root task's table | 64 slots | `kernel/boot.c` |
-| boot pool | 4 KiB | `kernel/kernel.ld` |
+| boot pool | 4 KiB | `kernel/kernel.ld.S` |
 | smallest pool | 64 bytes, 8-byte aligned | `kernel/syscall.c` |
 | object alignment | 8 bytes | `OBJ_ALIGN` |
 | notification bits | 32 | the word size |
 | timer delay per call | 2^32 - 1 µs | `OP_TIMER_SET` |
 | tick | 1 ms (`TIMER_HZ` 1000) | `kernel/timer.h` |
-| interrupt lines | 96, line 0 the log's | `IRQ_LINES` |
+| interrupt lines | 96 on QEMU, 77 on the ESP32-C6, line 0 the log's | `IRQ_LINES` |
 | kernel log ring | 4 KiB | `KLOG_SIZE` |
 | replay records per input | 256 | `REPLAY_MAX_RECORDS` |
 

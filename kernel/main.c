@@ -16,6 +16,7 @@ extern char __boot_pool_end[];
 
 void kmain(void)
 {
+    board_init();
     /* Nothing prints before the log exists to take it. */
     klog_init();
     kputs("rvuos: machine mode up\n");

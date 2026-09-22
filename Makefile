@@ -1,19 +1,28 @@
-# Build for QEMU virt, RV32, machine and user mode only.
+# Build for a board, RV32, machine and user mode only.
 # clang and lld cross-compile to RISC-V without a separate toolchain.
 #
-# Two kernel images are built, differing only in the embedded root task:
-#   build/kernel-init.elf     the root task of user/init.c, used by `make test`
-#   build/kernel-fuzzdrv.elf  the replay driver of user/fuzzdrv.c,
-#                             used by `make qemu-replay`
+# BOARD selects kernel/board/<board>/ and user/board/<board>/:
+#   qemu     QEMU virt, the default and the one `make check` runs on
+#   esp32c6  an ESP32-C6, loaded into RAM through its ROM over USB
+#
+# Kernel images differ only in the embedded root task:
+#   build/<board>/kernel-init.elf     the root task of user/init.c, used by `make test`
+#   build/<board>/kernel-fuzzdrv.elf  the replay driver of user/fuzzdrv.c,
+#                                     used by `make qemu-replay`, QEMU only so far
 
 CC      := clang
 OBJCOPY := llvm-objcopy
 QEMU    := qemu-system-riscv32
+ESPTOOL := esptool
 
-BUILD := build
+BOARD ?= qemu
 
 # PMP entries the kernel may use; lower it to exercise a small budget.
+# A budget other than the default builds in a directory of its own,
+# since no object depends on the flag.
 PMP_MAX_ENTRIES ?= 16
+VARIANT := $(if $(filter-out 16,$(PMP_MAX_ENTRIES)),-pmp$(PMP_MAX_ENTRIES))
+BUILD   := build/$(BOARD)$(VARIANT)
 
 ARCHFLAGS := --target=riscv32-unknown-elf -march=rv32imac -mabi=ilp32 -mcmodel=medany
 CFLAGS    := $(ARCHFLAGS) -std=c11 -ffreestanding -fno-builtin -fno-pic -fno-common \
@@ -23,19 +32,41 @@ CFLAGS    := $(ARCHFLAGS) -std=c11 -ffreestanding -fno-builtin -fno-pic -fno-com
 ASFLAGS   := $(ARCHFLAGS) -g -Iinclude
 LDFLAGS   := $(ARCHFLAGS) -nostdlib -static -fuse-ld=lld -Wl,--gc-sections -Wl,--no-dynamic-linker
 
-KERNEL_SRC_C := $(wildcard kernel/*.c)
-KERNEL_SRC_S := $(wildcard kernel/*.S)
-KERNEL_OBJ   := $(patsubst %.c,$(BUILD)/%.o,$(KERNEL_SRC_C)) \
-                $(patsubst %.S,$(BUILD)/%.o,$(KERNEL_SRC_S))
+# The kernel sees its board's headers, and user programs their board's console.
+KERNEL_INC := -Ikernel -Ikernel/board/$(BOARD)
+USER_INC   := -Iuser/board/$(BOARD)
+$(BUILD)/kernel/%.o: CFLAGS += $(KERNEL_INC)
+$(BUILD)/user/%.o: CFLAGS += $(USER_INC)
 
-USER_PROGRAMS := init fuzzdrv
-USER_COMMON   := $(BUILD)/user/start.o
+KERNEL_SRC_C := $(wildcard kernel/*.c kernel/board/$(BOARD)/*.c)
+KERNEL_SRC_S := $(wildcard kernel/*.S kernel/board/$(BOARD)/*.S)
+KERNEL_OBJ   := $(patsubst %.c,$(BUILD)/%.o,$(KERNEL_SRC_C)) \
+                $(patsubst %.S,$(BUILD)/%.o,$(filter-out %.ld.S,$(KERNEL_SRC_S)))
+
+USER_COMMON := $(BUILD)/user/start.o
 
 QEMUFLAGS := -M virt -cpu rv32 -m 8M -nographic
 
+# What `make run` and `make test` boot.
+ifeq ($(BOARD),qemu)
+USER_PROGRAMS := init fuzzdrv
+IMAGE         := elf
+RUN_INIT      := $(QEMU) $(QEMUFLAGS) -bios $(BUILD)/kernel-init.elf
+else ifeq ($(BOARD),esp32c6)
+# The replay driver's layout is QEMU's, see rvuos/replay.h, so only the demo is built.
+USER_PROGRAMS := init
+IMAGE         := bin
+PORT          ?= /dev/ttyACM0
+# The runner imports esptool, so it runs under the Python the esptool command runs under.
+ESPTOOL_PYTHON ?= $(or $(shell sed -n '1s/^\#!//p' "$$(command -v $(ESPTOOL))" 2>/dev/null),python3)
+RUN_INIT      := $(ESPTOOL_PYTHON) tools/esp32c6-run.py --port $(PORT) $(BUILD)/kernel-init.bin
+else
+$(error unknown BOARD '$(BOARD)'; the boards are qemu and esp32c6)
+endif
+
 .PHONY: all clean run test host-test fuzz corpus-merge qemu-replay mutants check
 
-all: $(foreach p,$(USER_PROGRAMS),$(BUILD)/kernel-$(p).elf)
+all: $(foreach p,$(USER_PROGRAMS),$(BUILD)/kernel-$(p).$(IMAGE))
 
 $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
@@ -45,8 +76,14 @@ $(BUILD)/%.o: %.S
 	@mkdir -p $(dir $@)
 	$(CC) $(ASFLAGS) -c $< -o $@
 
-$(BUILD)/user-%.elf: $(BUILD)/user/%.o $(USER_COMMON) user/user.ld
-	$(CC) $(LDFLAGS) -Wl,-T,user/user.ld $< $(USER_COMMON) -o $@
+# The linker scripts take the board's layout through the preprocessor; see kernel/layout.h.
+$(BUILD)/%.ld: %.ld.S
+	@mkdir -p $(dir $@)
+	$(CC) $(ARCHFLAGS) -E -P -x assembler-with-cpp $(KERNEL_INC) -Iinclude \
+		-MMD -MP -MT $@ $< -o $@
+
+$(BUILD)/user-%.elf: $(BUILD)/user/%.o $(USER_COMMON) $(BUILD)/user/user.ld
+	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/user/user.ld $< $(USER_COMMON) -o $@
 
 $(BUILD)/user-%.bin: $(BUILD)/user-%.elf
 	$(OBJCOPY) -O binary $< $@
@@ -59,31 +96,38 @@ $(BUILD)/user_blob-%.S: $(BUILD)/user-%.bin
 $(BUILD)/user_blob-%.o: $(BUILD)/user_blob-%.S
 	$(CC) $(ASFLAGS) -c $< -o $@
 
-$(BUILD)/kernel-%.elf: $(KERNEL_OBJ) $(BUILD)/user_blob-%.o kernel/kernel.ld
-	$(CC) $(LDFLAGS) -Wl,-T,kernel/kernel.ld $(KERNEL_OBJ) $(BUILD)/user_blob-$*.o -o $@
+$(BUILD)/kernel-%.elf: $(KERNEL_OBJ) $(BUILD)/user_blob-%.o $(BUILD)/kernel/kernel.ld
+	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/kernel/kernel.ld $(KERNEL_OBJ) $(BUILD)/user_blob-$*.o -o $@
 
-run: $(BUILD)/kernel-init.elf
-	$(QEMU) $(QEMUFLAGS) -bios $<
+# The image the ESP32-C6's ROM loads: the ELF's segments behind Espressif's header.
+# The ELF stays for the debugger and llvm-objdump.
+.PRECIOUS: $(BUILD)/kernel-%.elf
+$(BUILD)/kernel-%.bin: $(BUILD)/kernel-%.elf
+	$(ESPTOOL) --chip esp32c6 elf2image -o $@ $<
+
+run: $(BUILD)/kernel-init.$(IMAGE)
+	$(RUN_INIT)
 
 # Boot the root task of user/init.c and check its transcript.
-test: $(BUILD)/kernel-init.elf
-	tests/run.sh "$(QEMU) $(QEMUFLAGS) -bios $<"
+test: $(BUILD)/kernel-init.$(IMAGE)
+	tests/run.sh "$(RUN_INIT)" $(PMP_MAX_ENTRIES)
 
 # Host build: the kernel's logic compiled natively,
 # with a hardware shim and a libFuzzer harness.
 # See DESIGN.md, "Properties" and "Verification".
 
 HOST_CC     := clang
-HOST_BUILD  := $(BUILD)/host
+HOST_BUILD  := build/host$(VARIANT)
 HOST_CORPUS := $(HOST_BUILD)/corpus
 HOST_CFLAGS := -std=c11 -O1 -g -Wall -Wextra -Werror -Wshadow \
-               -DRVUOS_HOST -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -Ikernel -Ihost -Iinclude
+               -DRVUOS_HOST -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -Ikernel -Ikernel/board/qemu \
+               -Ihost -Iinclude
 HOST_SAN    := -fsanitize=address,undefined -fno-sanitize-recover=all
 
 HOST_KERNEL_SRC := kernel/cap.c kernel/pool.c kernel/process.c kernel/sched.c \
                    kernel/syscall.c kernel/boot.c kernel/selfcheck.c kernel/klog.c
 HOST_SRC        := host/shim.c host/mutator.c
-HOST_HDR        := $(wildcard kernel/*.h host/*.h include/rvuos/*.h)
+HOST_HDR        := $(wildcard kernel/*.h kernel/board/qemu/*.h host/*.h include/rvuos/*.h)
 
 FUZZ_TIME ?= 60
 
@@ -138,6 +182,7 @@ corpus-merge: $(HOST_HARNESSES)
 # and compare every call's status with the host build;
 # an invariant report on either side fails the input, matching or not.
 qemu-replay: $(BUILD)/kernel-fuzzdrv.elf $(HOST_BUILD)/fuzz
+	@[ "$(BOARD)" = qemu ] || { echo "qemu-replay runs on BOARD=qemu"; exit 1; }
 	tests/differential.py --qemu "$(QEMU) $(QEMUFLAGS)" \
 		--kernel $(BUILD)/kernel-fuzzdrv.elf --host $(HOST_BUILD)/fuzz tests/seeds tests/corpus
 
@@ -146,4 +191,5 @@ check: test host-test qemu-replay
 clean:
 	rm -rf $(BUILD)
 
--include $(KERNEL_OBJ:.o=.d) $(patsubst %,$(BUILD)/user/%.d,$(USER_PROGRAMS))
+-include $(KERNEL_OBJ:.o=.d) $(patsubst %,$(BUILD)/user/%.d,$(USER_PROGRAMS)) \
+         $(BUILD)/kernel/kernel.d $(BUILD)/user/user.d

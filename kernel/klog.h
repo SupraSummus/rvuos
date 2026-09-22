@@ -14,8 +14,7 @@
  * See DESIGN.md, "The kernel log", and struct rvuos_log in rvuos/abi.h.
  */
 
-/* The region BOOT_CAP_LOG names: the header and the ring, at KLOG_BASE. */
-#define KLOG_REGION_SIZE (RVUOS_LOG_HEADER + KLOG_SIZE)
+/* The region BOOT_CAP_LOG names, the header and the ring, lies at KLOG_BASE; see layout.h. */
 
 struct irq;
 

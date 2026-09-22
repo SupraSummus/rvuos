@@ -4,14 +4,13 @@
  * zero-initialised data and the stack in the read-write region.
  * Initialised data is forbidden for now
  * because nobody would copy it into the data region.
+ * The Makefile runs this through the preprocessor with the board's board.h;
+ * see kernel/layout.h for the addresses.
  */
 
-ENTRY(_start)
+#include "layout.h"
 
-USER_CODE_BASE = 0x80100000;
-USER_CODE_SIZE = 0x10000;
-USER_DATA_BASE = 0x80200000;
-USER_DATA_SIZE = 0x10000;
+ENTRY(_start)
 
 SECTIONS
 {

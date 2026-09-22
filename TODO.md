@@ -46,12 +46,19 @@ Design decisions behind these items live in `DESIGN.md`.
    what a destroy does to region capabilities for the range.
    Still open from that step:
    the history-based "rights only narrow" invariant.
-8. First real board, ESP32-C6 if it passes these datasheet checks:
-   the PMA unit, 16 entries of Espressif's own that check machine mode too,
-   whether execute-in-place from flash goes through a cache
-   the kernel must control,
-   how much of Espressif's second-stage bootloader must run first,
-   and erratum DIG-694 on misaligned accesses across PMP regions.
+8. First real board, ESP32-C6.
+   Done since: the demo root task runs from RAM, loaded by the ROM over USB,
+   and passes the QEMU transcript check, `make test BOARD=esp32c6`;
+   `DESIGN.md`, "Boards".
+   The PMA unit is all zero after the ROM and so in the way of nothing.
+   Still open:
+   - boot from flash, and with it whether the ROM can load the image
+     straight from offset 0 or Espressif's second-stage bootloader must run first,
+     and whether execute-in-place goes through a cache the kernel must control;
+   - erratum DIG-694 on misaligned accesses across PMP regions;
+   - what the ROM overwrites in RAM on a reset, for open decision 12;
+   - the escape-attempt suite below, on the board as well as under QEMU,
+     since the board's PMP is what confines a process there.
 
 ## Verification
 
@@ -85,11 +92,15 @@ Design decisions behind these items live in `DESIGN.md`.
   Execute from data, jump into the kernel, `csrr` and `mret` from user mode,
   misaligned access, stack into kernel memory.
 - CBMC on `rebuild_pmp` and the overlap checks.
-- Feed the replay corpus to a board over UART once there is one.
+- Feed the replay corpus to the ESP32-C6.
+  Something has to put each input where `BOOT_CAP_INPUT` points,
+  below the ROM's buffers or over USB once the kernel runs,
+  and the replay driver's second stack has to follow the board's data region.
 - One layout header consumed by C, the linker scripts and
-  `tests/differential.py`; today the addresses live in seven places,
-  the newest being the replay driver's second stack in `rvuos/replay.h`,
-  which only a static assert ties to the data region it must lie in.
+  `tests/differential.py`.
+  C and the linker scripts share `kernel/layout.h` and the board's `board.h` now;
+  the replay driver's second stack in `rvuos/replay.h`
+  and `tests/differential.py` still carry QEMU's addresses of their own.
 - A pool whose every capability was revoked stays until the pool above it goes,
   and its memory is inert to every region capability meanwhile.
   Nothing today tells a lender that the borrower's pool is the reason

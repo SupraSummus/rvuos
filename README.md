@@ -21,7 +21,7 @@ llvm-objcopy, GNU make, and qemu-system-riscv32.
 No separate cross toolchain is needed.
 
 ```
-make            # build/kernel.elf
+make            # build/qemu/kernel-init.elf and build/qemu/kernel-fuzzdrv.elf
 make run        # boot under QEMU virt, RV32
 make test       # boot under QEMU and check the transcript
 make host-test  # replay the fuzz corpus on the host build with invariants
@@ -37,9 +37,18 @@ on Debian and Ubuntu the `libclang-rt-<version>-dev` package.
 See `DESIGN.md`, "Properties" and "Verification",
 for what the tests check and why.
 
+An ESP32-C6 connected over USB runs the same demo from RAM,
+loaded by the chip's ROM, with nothing written to flash;
+this needs Espressif's `esptool`:
+
+```
+make BOARD=esp32c6 run   # load the demo and print its console
+make BOARD=esp32c6 test  # the same, and check the transcript
+```
+
 ## Status
 
-The kernel boots in machine mode on QEMU `virt`
+The kernel boots in machine mode on QEMU `virt` and on the ESP32-C6
 and runs an embedded root task in user mode behind PMP.
 The root task holds capabilities to its own objects and to free memory,
 carves regions, turns one into a kernel pool,

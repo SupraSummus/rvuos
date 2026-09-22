@@ -7,13 +7,10 @@
  * for a post-mortem reader to find the log in,
  * so its halt is that reader: it writes what no logger has taken to the UART,
  * headed by a line that tells it apart from what a logger sent before.
- * A board that resets instead leaves the log in RAM for the next boot,
- * and its version of this file writes nothing.
  */
 
 #include "kernel.h"
 #include "klog.h"
-#include "uart.h"
 
 /*
  * QEMU virt exposes the SiFive test device at 0x100000.
@@ -50,11 +47,6 @@ static void uart_puts(const char *s)
     }
 }
 
-void kputc(char c)
-{
-    klog_append(c);
-}
-
 void khalt(int code)
 {
     uart_puts("\nrvuos: halting, the log follows\n");
@@ -70,17 +62,4 @@ void khalt(int code)
     for (;;) {
         __asm__ volatile("wfi");
     }
-}
-
-void selfcheck_fail(void)
-{
-    khalt(3);
-}
-
-void kpanic(const char *msg)
-{
-    kputs("kernel panic: ");
-    kputs(msg);
-    kputc('\n');
-    khalt(1);
 }

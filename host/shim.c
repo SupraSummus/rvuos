@@ -10,7 +10,6 @@
 #include "irq.h"
 #include "klog.h"
 #include "trap.h"
-#include "uart.h"
 
 _Static_assert(HOST_RAM_BASE == RAM_BASE && HOST_RAM_SIZE == RAM_SIZE,
                "host RAM must match the kernel's layout");

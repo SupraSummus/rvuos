@@ -51,7 +51,7 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
                 sched_tick();
             }
             return &current->frame;
-        case IRQ_M_EXT:
+        case IRQ_EXT_CAUSE:
             /*
              * Delivered under tracing as well: a line left claimed would storm
              * and one masked without its Irq disarmed would break an invariant.
@@ -96,8 +96,9 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
  */
 unsigned intr_wait(void)
 {
+    const uint32_t mip_ext = 1u << IRQ_EXT_CAUSE;
     uint32_t ip;
-    while (((ip = csr_read(mip)) & (MIP_MTIP | MIP_MEIP)) == 0) {
+    while (((ip = csr_read(mip)) & (MIP_MTIP | mip_ext)) == 0) {
         __asm__ volatile("wfi");
     }
     unsigned pending = 0;
@@ -105,7 +106,7 @@ unsigned intr_wait(void)
         timer_ack();
         pending |= INTR_TICK;
     }
-    if (ip & MIP_MEIP) {
+    if (ip & mip_ext) {
         pending |= INTR_DEVICE;
     }
     return pending;

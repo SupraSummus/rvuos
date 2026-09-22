@@ -7,7 +7,6 @@
 #include "kernel.h"
 #include "klog.h"
 #include "object.h"
-#include "uart.h"
 
 #define ROOT_CAPTABLE_SLOTS 64
 

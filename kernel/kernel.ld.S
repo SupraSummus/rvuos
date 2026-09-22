@@ -1,24 +1,20 @@
 /*
- * Kernel image layout for QEMU virt, RV32.
+ * Kernel image layout, for every board.
+ * The Makefile runs this through the preprocessor with the board's board.h;
+ * see layout.h for the addresses.
  *
- * RAM starts at 0x80000000 and QEMU enters there in machine mode.
- * The kernel owns the first megabyte.
- * The user program's code is placed at USER_CODE_BASE
- * and its data and stack region lives at USER_DATA_BASE;
- * both addresses are shared with the user linker script
- * and with the PMP setup in the kernel.
+ * The kernel starts at RAM_BASE, where the board enters in machine mode,
+ * and owns everything up to its log, which ends where the user code begins.
+ * The user program's code is placed at USER_CODE_BASE;
+ * its data and stack region lives at USER_DATA_BASE.
  */
+
+#include "layout.h"
 
 ENTRY(_start)
 
-RAM_BASE       = 0x80000000;
-USER_CODE_BASE = 0x80100000;
-USER_CODE_SIZE = 0x10000;
-
 KERNEL_STACK_SIZE = 16K;
 BOOT_POOL_SIZE    = 4K;
-/* The kernel's log ends where the user code begins; kernel.h has KLOG_BASE. */
-KLOG_REGION_SIZE  = 32 + 4K;
 
 SECTIONS
 {
@@ -64,7 +60,7 @@ SECTIONS
         __boot_pool_end = .;
     }
 
-    ASSERT(. <= USER_CODE_BASE - KLOG_REGION_SIZE, "kernel does not fit below its log")
+    ASSERT(. <= KLOG_BASE, "kernel does not fit below its log")
 
     . = USER_CODE_BASE;
     .user_code : {

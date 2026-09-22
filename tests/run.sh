@@ -1,15 +1,18 @@
 #!/bin/sh
-# Boot the kernel under QEMU and check the expected transcript.
-# Usage: tests/run.sh "<qemu command line>"
+# Boot the kernel and check the expected transcript.
+# Usage: tests/run.sh "<command that boots it>" <PMP entries the kernel may use>
+# The command is QEMU on BOARD=qemu and tools/esp32c6-run.py on BOARD=esp32c6;
+# either exits with the status the kernel halted with.
 
 set -eu
 
-qemu_cmd=$1
+boot_cmd=$1
+max_entries=$2
 log=$(mktemp)
 trap 'rm -f "$log"' EXIT
 
 set +e
-timeout 10 sh -c "$qemu_cmd" > "$log" 2>&1
+timeout 10 sh -c "$boot_cmd" > "$log" 2>&1
 status=$?
 set -e
 
@@ -29,9 +32,11 @@ dump=$(grep -n 'rvuos: halting, the log follows' "$log" | head -1 | cut -d: -f1)
 # The first occurrence of a line, for comparing against the dump's position.
 first() { grep -n "$1" "$log" | head -1 | cut -d: -f1; }
 grep -q 'rvuos: machine mode up' "$log" || fail "kernel did not boot"
-# QEMU implements sixteen entries with a four-byte grain; the probe must find exactly that.
-grep -q 'rvuos: pmp entries 0x00000010 grain 0x00000004' "$log" \
-    || fail "PMP probe did not report sixteen entries and a four-byte grain"
+# QEMU and the ESP32-C6 implement sixteen entries with a four-byte grain,
+# of which the probe must find as many as the kernel may use.
+entries=$(printf '0x%08x' $((max_entries < 16 ? max_entries : 16)))
+grep -q "rvuos: pmp entries $entries grain 0x00000004" "$log" \
+    || fail "PMP probe did not report $entries entries and a four-byte grain"
 grep -q 'the layout fits the grain: ok' "$log" || fail "the root task did not see the grain"
 grep -q 'hello from user mode' "$log" || fail "user mode did not run"
 grep -q 'root: message ok' "$log" || fail "the child's message did not arrive"
@@ -66,8 +71,10 @@ grep -q 'root: irq ok' "$log" \
 [ "$(first 'root: timer ok')" -lt "$dump" ] \
     || fail "the logger did not carry the root task's output out before the halt did"
 grep -q 'user fault' "$log" || fail "PMP fault was not caught"
-# mepc's low bits move with the code layout.
-grep -q 'mcause=0x00000005 mepc=0x8010.... mtval=0x80210000' "$log" \
+# The root task says where it reads; the fault must name that address.
+addr=$(sed -n 's/.*reading the removed region at \(0x[0-9a-f]*\),.*/\1/p' "$log" | head -1)
+[ -n "$addr" ] || fail "the root task did not say where it reads"
+grep -q "mcause=0x00000005 mepc=0x........ mtval=$addr" "$log" \
     || fail "fault was not a load access fault on the removed region from user code"
 grep -q ': FAILED' "$log" && fail "a step failed"
 grep -q 'PMP did not stop the read' "$log" && fail "user read kernel memory"

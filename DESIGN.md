@@ -77,7 +77,7 @@ which is open decision 3 below.
   which no rights bits can narrow and no self-check can follow;
   it would also hand goals 1 to 3 to whoever holds it.
   What varies per board is chosen at link time,
-  `irq.c`, `timer.c` and `halt.c`,
+  the files of `kernel/board/<board>/`,
   and every line of machine-mode code stays in the repository
   where the host build and the fuzzer can see it.
   What varies per application runs in user mode,
@@ -129,6 +129,9 @@ so the same kernel runs on cores that lack it.
 
 All traps, including interrupts, land in machine mode.
 The kernel is the only code that runs in machine mode.
+The trap vector is in vectored mode on every board,
+a table whose every entry jumps to the one entry point,
+because the ESP32-C6 has no direct mode.
 
 ### Physical Memory Protection
 
@@ -158,6 +161,9 @@ Consequences that shape the design:
   so that `n` regions that touch each other cost `n + 1` entries,
   and `n` disjoint regions cost at most `2n`.
   Not every core has TOR; see open decision 8.
+  The ESP32-C6 honours TOR and a NAPOT entry of RAM's size,
+  but faults user fetches under a NAPOT entry for the whole address space,
+  which rvuos never writes.
 - **Every region lies on the grain.**
   A platform rounds every PMP boundary to a grain of `2^(G+2)` bytes,
   one value per hart, and ignores the address bits below it.
@@ -206,10 +212,16 @@ and the kernel handles it directly.
 Userspace sees it only through `Timer` objects,
 whose deadlines are counted in ticks; see "Time".
 Where the registers live and how fast they count is the board's business,
-so `kernel/timer.c` is per board, as `irq.c` is.
+so `timer.c` is per board, as `irq.c` is.
 On every tick the kernel sets `mtimecmp` a period ahead of `mtime`,
 not ahead of the previous compare value,
 so a long system call costs one late tick and not a burst of them.
+QEMU `virt` counts at 10 MHz in a SiFive CLINT.
+The ESP32-C6 has a CLINT of Espressif's,
+whose counter and interrupt stay off until a control word starts them,
+and which counts at the CPU clock the ROM left;
+the kernel measures one tick of it against the 16 MHz system timer at boot
+rather than trust a clock it did not set.
 
 ### Interrupt controller
 
@@ -230,7 +242,20 @@ so which of several pending lines is claimed first is not promised.
 The PLIC has no source 0, and the kernel gives that number to its log,
 whose line no controller raises; see "The kernel log".
 QEMU's PLIC model does not recompute what it forwards on an enable write;
-`kernel/irq.c` says what it does about that.
+its `irq.c` says what it does about that.
+
+The ESP32-C6 has no PLIC in that sense.
+Each peripheral drives a source of the interrupt matrix,
+the matrix routes a source to one of 31 CPU interrupts or to none,
+and the core takes CPU interrupt `n` with mcause `n`.
+rvuos makes a line a source, numbered as Espressif numbers them,
+routes every unmasked line to one CPU interrupt, 2,
+and masks a line by routing it nowhere.
+A claim reads the matrix's status words, which show every source's level,
+for the lowest line that is high and routed;
+nothing is held between claim and completion,
+since masking the line already lowers the CPU interrupt.
+Source 0, the Wi-Fi MAC's, is shadowed by the log's line and cannot be bound.
 
 ### One address space
 
@@ -836,19 +861,26 @@ A board that resets leaves the ring in RAM,
 where a logger after the reset can find the last words;
 what it needs to trust them is open decision 12.
 QEMU virt exits on a halt and keeps no RAM,
-so its `khalt` in `kernel/halt.c` is the post-mortem reader:
+so its `khalt` in `kernel/board/qemu/halt.c` is the post-mortem reader:
 it writes what no reader has taken to the UART under a line that says the log follows,
 so that a transcript tells what a logger carried out from what the halt salvaged.
-That is the one place the kernel touches the UART, and it is the simulator's file.
+That is the one place the kernel touches the UART.
+The ESP32-C6 parks its core on a halt, which keeps RAM,
+and its `khalt` writes the same dump by polling to the USB Serial/JTAG console,
+then a line with the code a simulator would have exited with,
+so that the same transcript check runs on the board;
+a console no host reads is given up on rather than waited for.
 The ring is 4 KiB, a burst's worth between two looks by a reader,
 and a reader that looks less often loses the oldest bytes and can tell.
 
 ## Boot
 
-The image in flash contains the kernel followed by the root task.
+The image contains the kernel followed by the root task.
+How it reaches RAM is the board's; see "Boards".
 The kernel:
 
-1. sets up its own stack and trap vector,
+1. makes the board ready, which on the ESP32-C6 means watchdogs off,
+   and sets up its own stack and trap vector,
 2. discovers the PMP entry count and grain by writing the CSRs and reading them back,
 3. carves its own static state out of a small fixed SRAM range,
 4. constructs the root process by hand, including a `KernelPool`
@@ -874,6 +906,41 @@ Slot zero is left empty so that an uninitialised index fails.
 Everything after that is policy set by the root task.
 The kernel does not know what a driver, a file system,
 or a shell is.
+
+## Boards
+
+A board is the files of `kernel/board/<board>/` and `user/board/<board>/`,
+chosen with `make BOARD=<board>`:
+`board.h`, where RAM, the root task and the console lie,
+how many interrupt lines there are and which mcause the controller raises,
+which `kernel/layout.h` and both linker scripts read;
+`board.c`, what the board needs before anything else;
+`timer.c`, `irq.c` and `halt.c`;
+and `console.h`, the device behind `BOOT_CAP_UART` as the root task drives it.
+Nothing else in the kernel names an address.
+
+**QEMU `virt`** is the development target and the one `make check` runs.
+QEMU loads the image and enters it in machine mode.
+
+**ESP32-C6** runs the demo root task and its transcript check, `make test BOARD=esp32c6`.
+The chip's ROM loads the image's segments into SRAM over USB and enters it,
+so nothing is written to flash; `tools/esp32c6-run.py` drives that.
+Everything the image carries must lie below `0x4086ad08`,
+where the ROM keeps its buffers while it loads;
+the kernel takes all 512 KiB once it runs, laid out as `MANUAL.md` shows.
+The console is the chip's USB Serial/JTAG controller,
+a CDC-ACM port on its own USB connector.
+Before anything else the kernel turns off the four watchdogs the ROM leaves running
+and the access permission management units.
+Those silently refuse the CPU in user mode every peripheral,
+reads returning zero and writes dropped;
+ESP-IDF turns them off at startup too.
+PMP is what confines a process, so rvuos loses nothing;
+what they could still do is open decision 13.
+Measured on the chip: sixteen PMP entries, all unlocked after the ROM,
+a four-byte grain, TOR, `mtval` on access faults,
+PMA entries all zero, which leave every range its default attributes,
+and machine interrupts taken in user mode whatever `mstatus.MIE` says.
 
 ## Properties
 
@@ -1114,8 +1181,13 @@ QEMU's PMP may differ from a real core in Smepmp behaviour,
 and it has a four-byte grain, so a coarser grain is never seen there.
 The host shim models the grain instead, rounding addresses as hardware would,
 and the corpus is replayed with a four-byte and a 32-byte grain.
+On the ESP32-C6, `make test BOARD=esp32c6` boots the demo
+and checks the same transcript as under QEMU;
+that is the only check that reaches its timer, matrix and USB console.
 The replay records are transport-agnostic
-and can be fed to a board over UART once there is one.
+and can be fed to the board once something loads them there;
+the replay driver's second stack is QEMU's address, see `rvuos/replay.h`,
+so it is not built for the board yet.
 
 ## Open decisions
 
@@ -1124,17 +1196,18 @@ Each has a working default the code follows
 until the maintainer decides otherwise.
 
 1. **Target hardware.**
-   Decision: the first stage runs on a simulator only, with no hardware.
-   Development target is QEMU `virt` for RV32,
-   using only machine and user mode.
+   Decision: QEMU `virt` for RV32 stays the development target,
+   using only machine and user mode,
+   and the ESP32-C6 is the first real board; see "Boards".
    QEMU implements 16 PMP entries;
    `PMP_MAX_ENTRIES` caps how many the kernel uses,
    so the design can be exercised with a budget of 8 or fewer.
-   Preferred candidate for real hardware is the ESP32-C6,
-   a single RV32IMAC core with user mode, PMP and about 512 KB of SRAM:
-   16 PMP entries, a four-byte grain, TOR and NAPOT,
-   `mtval` on every access fault,
-   pending the datasheet checks listed in `TODO.md`.
+   The ESP32-C6 is a single RV32IMAC core with user mode, PMP and 512 KiB of SRAM,
+   and it runs the demo root task from RAM, loaded by its ROM.
+   Booting from flash is not done yet;
+   what it needs from Espressif's second-stage bootloader,
+   and whether execute-in-place goes through a cache the kernel must control,
+   are listed in `TODO.md`.
    Other candidate: RP2350 on its Hazard3 cores, behind open decision 8.
    Cores without PMP, GD32VF103 among them, cannot run rvuos.
 
@@ -1276,3 +1349,17 @@ until the maintainer decides otherwise.
     The kernel could also keep the old ring as it is
     and start a fresh one behind it, at twice the memory.
     Decide with the first board, whose reset behaviour decides what survives.
+    The ESP32-C6 parks on a halt and keeps RAM,
+    but what its ROM overwrites on the way back in is not measured yet.
+
+13. **Access permission management on the ESP32-C6.**
+    Working default: the kernel turns the APM filters off at boot,
+    because they refuse the CPU in user mode every peripheral,
+    and PMP alone confines a process; see "Boards".
+    PMP says nothing about DMA:
+    a peripheral that is a bus master reads and writes where its driver points it,
+    so a driver granted such a device can reach any RAM.
+    The APM units are what could confine a master,
+    by region and by security mode,
+    which would make them the kernel's to program when a DMA driver asks.
+    Decide when the first driver of a DMA-capable peripheral exists.

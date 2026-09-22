@@ -28,18 +28,13 @@
 
 #include <stdint.h>
 
+#include "console.h"
 #include "rvuos.h"
 #include "rvuos/replay.h"
 
 static struct replay_record records[REPLAY_MAX_RECORDS];
 static uint32_t count;
 
-/* The 16550 of QEMU virt, its transmitter polled. */
-#define UART_THR 0
-#define UART_LSR 5
-#define UART_LSR_THRE 0x20u
-
-static volatile uint8_t *uart;
 static volatile struct rvuos_log *log_header;
 static const volatile uint8_t *log_ring;
 /* Bytes carried out so far. Only the thread that performed a record touches it, and it makes no call meanwhile. */
@@ -67,11 +62,9 @@ static uint32_t perform(const struct replay_record *r)
 static void uart_putc(char c)
 {
     if (c == '\n') {
-        uart_putc('\r');
+        console_put_polled('\r');
     }
-    while ((uart[UART_LSR] & UART_LSR_THRE) == 0) {
-    }
-    uart[UART_THR] = (uint8_t)c;
+    console_put_polled(c);
 }
 
 static void drain_log(void)
@@ -80,6 +73,7 @@ static void drain_log(void)
     for (; drained != head; drained++) {
         uart_putc((char)log_ring[drained % log_header->size]);
     }
+    console_flush();
     log_header->taken = head;
 }
 
@@ -165,7 +159,7 @@ int main(void)
         puts("cannot find the uart or the log\n");
         rv_halt(BOOT_CAP_DEBUG, 2);
     }
-    uart = (volatile uint8_t *)uart_base;
+    console_init(uart_base);
     log_header = (volatile struct rvuos_log *)log_base;
     log_ring = (const volatile uint8_t *)(log_base + RVUOS_LOG_HEADER);
 

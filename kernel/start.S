@@ -23,8 +23,13 @@
     .section .text.start, "ax"
     .globl _start
 _start:
-    /* Trap vector in direct mode; the low two bits select the mode. */
-    la      t0, trap_entry
+    /*
+     * Trap vector in vectored mode; the low two bits select the mode.
+     * The ESP32-C6 has no direct mode, and QEMU has both,
+     * so every board takes the vectored table below.
+     */
+    la      t0, trap_vectors
+    ori     t0, t0, 1
     csrw    mtvec, t0
 
     /* No interrupts until the kernel asks for them. */
@@ -49,7 +54,22 @@ _start:
     wfi
     j       3b
 
+    /*
+     * An exception enters at the table's base and interrupt n at base + 4n.
+     * trap_entry reads mcause either way, so every entry jumps there.
+     * The ESP32-C6 takes only the top 24 bits of the base, hence the alignment,
+     * and 32 entries cover every interrupt either board raises.
+     */
     .section .text, "ax"
+    .balign 256
+trap_vectors:
+    .option push
+    .option norvc
+    .rept 32
+    j       trap_entry
+    .endr
+    .option pop
+
     .balign 4
     .globl trap_entry
 trap_entry:
