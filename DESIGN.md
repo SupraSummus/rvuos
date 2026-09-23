@@ -8,7 +8,7 @@ Work items are in `TODO.md`.
 ## Goals
 
 rvuos is a microkernel for RISC-V microcontrollers.
-It has three goals, in priority order.
+It has four goals, in priority order.
 
 1. **Isolation without an MMU.**
    Processes cannot read, write, or execute each other's memory,
@@ -27,6 +27,10 @@ It has three goals, in priority order.
    handed to the kernel for that purpose.
    A process that creates many kernel objects pays for them
    with its own memory.
+4. **Bounded work.**
+   A system call, a tick or an interrupt costs what constants of the machine allow,
+   however many objects anyone has created.
+   The kernel does not meet this yet; see "Bounded work".
 
 ## Programs are plain binaries
 
@@ -171,7 +175,10 @@ Consequences that shape the design:
   The kernel probes the grain at boot
   and a `Region` capability that is not a block of at least that size never exists:
   the boot layout is checked once and carving requires it,
-  so every capability can be installed exactly as it reads.
+  so every capability is exactly one PMP entry.
+  Whether it may be installed at all still depends on pools
+  that capabilities elsewhere made over the same range;
+  open decision 14 is about that.
   `OP_REGION_INFO` returns the smallest region, since user mode cannot read the PMP CSRs.
 - **An access must lie within one entry.**
   The lowest-numbered entry that matches any byte of an access decides,
@@ -322,8 +329,10 @@ so that a caller can tell a programming mistake from a policy decision.
 
 #### Slot format
 
-A slot is twenty bytes: type, rights, padding, two words of content,
+A slot is twenty bytes: type, rights, an index, padding, two words of content,
 and two links of the derivation tree.
+The index is an installed region's slot in its process,
+so that uninstalling it finds the process without a walk.
 For object capabilities the first word of content is the object's address
 and the second is unused.
 A slot carries nothing that has to be checked against the object,
@@ -371,7 +380,9 @@ that carries kernel objects.
 The mirror check applies when installing a region:
 a range that overlaps a pool cannot be installed.
 Both checks are linear scans over pools and processes,
-which is fine for the object counts a microcontroller can hold.
+which was thought fine for the object counts a microcontroller can hold.
+Goal 4 rules them out,
+and open decision 14 is what would replace them.
 The `Region` capability that was consumed is revoked,
 with everything derived from it,
 and the `KernelPool` capability takes its place in the derivation tree,
@@ -529,6 +540,10 @@ that walk costs the width of one ring, the copies made of one slot.
 seL4's pre-order list with a depth per node costs the same two words
 but adds a visible depth limit and renumbers a subtree on every delete;
 a third link to the parent buys nothing the ring does not.
+Goal 4 disagrees:
+anyone who can copy beside a slot can widen its ring,
+and with it the cost of deleting that slot;
+see "Bounded work".
 
 **What it does not do.**
 Revoking the capabilities to an object does not free the object;
@@ -615,6 +630,9 @@ so a driver can be given the power to announce something
 without the power to consume the announcement.
 A signal wakes one waiter, which takes every bit;
 which one, when there are several, is not promised.
+Today it is the one that has waited longest:
+a notification heads a queue of its waiters, threaded through them,
+so a signal finds one without a walk.
 
 **Why this and not a synchronous endpoint.**
 The `A` extension gives userspace `lr.w`/`sc.w` and the `amo*` instructions,
@@ -702,6 +720,9 @@ and a runnable thread is found by walking the pools,
 as `pool_overlaps` and `installed_overlaps` are.
 A queue would record a second time what the state already says.
 The walk costs what those checks already cost.
+Goal 4 rules the walk out,
+because its cost grows with every object any process allocates;
+see "Bounded work".
 
 **The walk is the policy: round-robin.**
 The walk continues from the running thread and wraps around,
@@ -785,6 +806,9 @@ exactly as the lender of memory does.
 **One `Irq` per line.**
 Sharing a line between drivers is open decision 11;
 what the kernel does today is refuse the second binding.
+The kernel records the bound `Irq` of each line in a table of its own,
+a word per line of the controller,
+so an interrupt finds its `Irq` without a walk.
 
 **No driver in the kernel.**
 The UART is the first device, and it is userspace's alone:
@@ -946,6 +970,63 @@ a four-byte grain, TOR, NAPOT with an entry of RAM's size, `mtval` on access fau
 PMA entries all zero, which leave every range its default attributes,
 and machine interrupts taken in user mode whatever `mstatus.MIE` says.
 
+## Bounded work
+
+**The rule.**
+The work of a system call, a tick or an interrupt
+is bounded by constants of the machine and the kernel:
+PMP entries, interrupt lines, region slots, the size of an object.
+It does not grow with how many objects, pools or capabilities exist.
+Otherwise a process with one small pool allocates thousands of minimal objects,
+and every tick and every interrupt, other processes' included,
+gets that much slower.
+
+**The exception is destruction.**
+A revoke, a pool destroy, and a delete that hands its children to its parent
+take as long as what they touch.
+That is kept to the subtree below the caller's own capability,
+never the whole machine,
+and it can be preempted:
+it stops when an interrupt is pending,
+its progress stays in the derivation tree,
+and the system call restarts, as in seL4.
+`cap_revoke_below` already walks with no stack,
+so it can stop between any two nodes.
+
+**Where the kernel falls short.**
+
+| Walk | When | Fix |
+|---|---|---|
+| `tick_advance` | every tick | a timer queue; see below |
+| `runnable_after` | every switch | a run queue threaded through `Thread` |
+| `source_armed` | every stall in `wfi` | a count of armed timers and device `Irq`s |
+| `cap_parent`, `detach` | delete, uninstall, `OP_REGION_TO_POOL` | a predecessor link per slot |
+| `pool_overlaps` | `OP_PROCESS_INSTALL` | open decision 14 |
+| `pool_overlaps`, `installed_overlaps` | `OP_REGION_TO_POOL` | open decision 14 |
+| `cap_revoke_range`, `pool_under`, `node_live` | pool destroy | open decision 14, and preemption |
+| `cap_revoke_below` | revoke | preemption |
+
+A run queue changes the round from allocation order,
+which `MANUAL.md` promises, to the order threads became ready.
+"Scheduling" argued against a queue because the walk was cheap;
+goal 4 says it is not.
+A predecessor link makes a slot twenty-four bytes instead of twenty
+and lets a node leave its ring in constant time.
+The conversions that look up a parent today
+revoke below the consumed slot and move the node, links and all,
+into the result's place.
+
+**Timers are the open part.**
+A deadline queue sorted by expiry makes the tick constant
+but moves the cost to `OP_TIMER_SET`, which walks everyone's armed timers.
+A timer wheel of fixed size still visits every timer in the bucket that comes due.
+A bound on armed timers, per pool or per machine,
+makes either constant, and is a limit a program can see.
+Or the kernel keeps one timer for itself
+and leaves the rest to a time server in userspace,
+the shape "Time" already calls right for a board with a second hardware timer.
+Decide before the timer queue is written.
+
 ## Properties
 
 These invariants must hold in every state a process can reach.
@@ -1002,10 +1083,13 @@ so parents lead to the boot pool
 and no destroy has left a pool below it standing.
 A process and its table, and a thread and its process,
 lie in the same pool.
+The line table names exactly the bound `Irq`s,
+and every installed region records its slot.
 
 **Thread state.**
 Every thread is stopped, ready, or waiting.
-A waiting thread names a live notification and nothing else does.
+A waiting thread names a live notification and nothing else does,
+and a notification's queue holds exactly the threads waiting on it.
 The thread the kernel is running is one it could run:
 it is a live object and it is ready.
 A preempted thread stays ready,
@@ -1116,6 +1200,8 @@ with the input placed in RAM by QEMU's loader.
 The driver runs two threads that take records from one cursor,
 so a record that blocks one of them leaves the kernel
 something else to run and the blocking paths are replayed too.
+A third shares the second's process and starts stopped,
+so a record can resume it when two threads should wait at once.
 A record that names a thread is passed to it with `OP_DEBUG_TICK`
 by the protocol in `include/rvuos/replay.h`,
 which the host runs from the kernel's state;
@@ -1364,3 +1450,65 @@ until the maintainer decides otherwise.
     by region and by security mode,
     which would make them the kernel's to program when a DMA driver asks.
     Decide when the first driver of a DMA-capable peripheral exists.
+
+14. **Memory authority: `Untyped` and `Frame`.**
+    Working default: one `Region` type that can be installed and can become a pool,
+    kept apart by overlap checks by address.
+    The checks scan every pool and every object, which goal 4 rules out.
+    And a `Region` capability does not say what it can do:
+    whether an install or a pool succeeds depends on pools
+    made through any capability over the same range,
+    so a peer holding a copy can make a capability inert
+    without anyone revoking it.
+    The proposal is seL4's split, in rvuos's shape.
+    - **`Untyped`** is memory that may become something else,
+      and cannot be installed.
+      `OP_UNTYPED_RETYPE` takes the next block of a given size at its watermark,
+      aligned to its size, moves the watermark past it,
+      and makes it an `Untyped`, a `Frame` or a pool, hanging below.
+      The children of an `Untyped` are therefore disjoint by construction.
+      A retype that finds no children resets the watermark first.
+    - **An `Untyped` is derived, never copied**,
+      since a copy would be a second allocator over the same memory.
+      Deriving requires no children and moves the source's watermark to its end.
+    - **`Frame`** is today's `Region` without `OP_REGION_TO_POOL`.
+      Its aliases are harmless, since no `Frame` becomes kernel memory,
+      and an install checks only the slots of its own process.
+    - **Isolation follows from the tree.**
+      A `Frame` and a pool below different children of one `Untyped` never meet,
+      and every other `Frame` is a root over memory no `Untyped` covers.
+      Memory that is to become a pool while frames of it exist
+      is first revoked back to its `Untyped`,
+      which uninstalls those frames wherever they are.
+      The self-check keeps checking isolation by address.
+    - **Capabilities to objects hang below the pool capability**
+      they were allocated through, where today they are roots,
+      and a pool capability is derived, never copied.
+      Destroying a pool is then revoking the capability the retype made,
+      plus a walk over the pool's own tables
+      to take the slots they hold out of other rings.
+      Both are the size of the pool, and the sweep over every table goes.
+      The memory returns to the `Untyped` it came from,
+      so decision 7 has nothing left to decide.
+      A borrower's pool is retyped from an `Untyped` derived from the lender's
+      and goes with a revoke below the lender's,
+      so the pool tree goes too.
+    - **Device memory, flash, the log and the root task's own regions are `Frame` roots.**
+      No `Untyped` covers them,
+      so the tests for RAM and for the log in `OP_REGION_TO_POOL` become the type.
+      `BOOT_CAP_FREE_RAM` becomes an `Untyped`.
+    - **The watermark costs no slot space:**
+      a block's base and size fit one word, encoded as `pmpaddr` encodes NAPOT.
+
+    The price is seL4's.
+    The root task retypes before it installs anything,
+    alignment at the watermark wastes memory,
+    and a block given back in the middle is not reusable
+    until every child of its `Untyped` is gone.
+    Still open:
+    a destroy when the calling thread lives in the pool,
+    which today walks up the pool tree;
+    whether deleting the capability a retype made refuses or destroys;
+    where a `Frame`'s rights come from;
+    and how a preempted revoke records where it stopped.
+    Decide before the memory model changes again.

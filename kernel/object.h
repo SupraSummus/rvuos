@@ -46,7 +46,8 @@ struct obj_header {
 struct cap {
     uint8_t type;
     uint8_t rights;
-    uint8_t pad[2];
+    uint8_t index;      /* an installed region's slot in its process; 0 elsewhere */
+    uint8_t pad;
     uint32_t a;
     uint32_t b;
     uint32_t child;
@@ -128,6 +129,8 @@ struct thread {
     uint8_t flags;
     uint16_t pad;
     paddr_t waiting_on; /* the notification, while WAITING; 0 otherwise */
+    paddr_t wait_next;  /* the notification's queue, while WAITING; 0 otherwise */
+    paddr_t wait_prev;
     struct trap_frame frame;
 };
 
@@ -138,14 +141,13 @@ struct thread {
  * two processes that share a region move bytes through the region
  * and use the notification to say when.
  *
- * The kernel keeps no list of waiters.
- * A waiting thread records the notification it waits on,
- * and a signal walks the pools to find one,
- * as the overlap checks do.
+ * Its waiters are a ring through their threads, oldest first,
+ * so a signal finds one without a walk; see DESIGN.md, "Bounded work".
  */
 struct notification {
     struct obj_header hdr;
     uint32_t bits;
+    paddr_t waiters;    /* the oldest waiting thread, 0 for none */
 };
 
 /*
@@ -191,8 +193,8 @@ _Static_assert(sizeof(struct pool) == 32, "object layout");
 _Static_assert(sizeof(struct pmp_image) == 4 + 5 * PMP_MAX_ENTRIES, "object layout");
 _Static_assert(sizeof(struct process) == 12 + 20 * PROCESS_REGION_SLOTS + sizeof(struct pmp_image),
                "object layout");
-_Static_assert(sizeof(struct thread) == 20 + sizeof(struct trap_frame), "object layout");
-_Static_assert(sizeof(struct notification) == 12, "object layout");
+_Static_assert(sizeof(struct thread) == 28 + sizeof(struct trap_frame), "object layout");
+_Static_assert(sizeof(struct notification) == 16, "object layout");
 _Static_assert(sizeof(struct timer) == 20, "object layout");
 _Static_assert(sizeof(struct irq) == 20, "object layout");
 
@@ -302,9 +304,6 @@ bool pool_overlaps(uint32_t base, uint32_t size);
 
 /* True if [base, base + size) intersects a region installed in any process. */
 bool installed_overlaps(uint32_t base, uint32_t size);
-
-/* The Irq bound to a line, or NULL; there is at most one. */
-struct irq *line_binding(uint32_t line);
 
 /* cap.c */
 
@@ -425,20 +424,23 @@ bool sched_interrupt(uint32_t line);
 /* Take every interrupt the controller holds: claim, deliver, complete. */
 void sched_claim_interrupts(void);
 
-/* The first thread blocked on a notification, or NULL. */
-struct thread *sched_waiter(paddr_t notification);
+/* Block a thread on a notification, behind the threads already waiting there. */
+void sched_wait(struct thread *t, struct notification *ntfn);
 
 /*
- * Wake every thread waiting on a notification in [base, base + size)
- * with KERR_INVALID_CAP and no bits, because the object is gone.
+ * Before a pool is zeroed, undo what its objects left in the rest of the kernel:
+ * wake every thread waiting on a notification in it
+ * with KERR_INVALID_CAP and no bits, because the object is gone,
+ * take every thread in it off the notification it waits on,
+ * and mask and unbind the line of every Irq in it.
  */
-void sched_unblock_range(uint32_t base, uint32_t size);
+void sched_forget_pool(struct pool *pool);
 
-/*
- * Mask the line of every Irq in [base, base + size),
- * because the object that would receive the interrupt is gone.
- */
-void sched_unbind_range(uint32_t base, uint32_t size);
+/* The Irq bound to each line, 0 for none; IRQ_LINES long. */
+extern paddr_t line_irq[];
+
+/* The Irq bound to a line, or NULL; there is at most one. */
+struct irq *line_binding(uint32_t line);
 
 /* process.c */
 

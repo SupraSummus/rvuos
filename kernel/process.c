@@ -69,7 +69,9 @@ int process_install(struct process *proc, unsigned slot,
         return KERR_LIMIT;
     }
 
-    proc->slots[slot] = (struct cap){ .type = CAP_INSTALLED, .rights = rights, .a = base, .b = size };
+    proc->slots[slot] = (struct cap){
+        .type = CAP_INSTALLED, .rights = rights, .index = (uint8_t)slot, .a = base, .b = size,
+    };
     cap_attach(parent, &proc->slots[slot]);
     rebuild_pmp(proc);
     return KERR_OK;
@@ -77,19 +79,9 @@ int process_install(struct process *proc, unsigned slot,
 
 void process_drop(struct cap *installed)
 {
-    /* The slot lies in its process; the walk finds which. */
-    struct process *proc = NULL;
-    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
-        if (o->type == CAP_PROCESS &&
-            range_contains(v2p(((struct process *)o)->slots), sizeof(((struct process *)o)->slots),
-                           v2p(installed))) {
-            proc = (struct process *)o;
-            break;
-        }
-    }
-    if (proc == NULL) {
-        kpanic("installed region outside every process");
-    }
+    /* The slot knows its index, and so the process it lies in. */
+    struct cap *slots = installed - installed->index;
+    struct process *proc = (struct process *)((char *)slots - offsetof(struct process, slots));
     *installed = (struct cap){ 0 };
     rebuild_pmp(proc);
 }

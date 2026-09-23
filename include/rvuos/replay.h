@@ -27,6 +27,10 @@
  * host_event in host/shim.c performs the same calls from the kernel's state,
  * so the passing is in both transcripts.
  *
+ * A third thread shares the second one's process and starts stopped,
+ * so a record resumes it when two threads should wait at once
+ * and a third is needed to wake them.
+ *
  * The second thread has a process, a table and a pool of its own,
  * so that every switch between the threads reloads the PMP
  * and a pool the second thread creates lies below its own in the tree,
@@ -37,8 +41,8 @@
 
 #include "rvuos/abi.h"
 
-/* Driver threads a record may name as its actor: 1 is the root thread, 2 the second. */
-#define REPLAY_THREADS 2
+/* Driver threads a record may name as its actor: 1 is the root thread, 2 the second, 3 the third. */
+#define REPLAY_THREADS 3
 
 /* Whether thread `me` passes the record on rather than performing it. */
 static inline int replay_passes(const struct replay_record *r, unsigned me)
@@ -60,6 +64,8 @@ static inline int replay_passes(const struct replay_record *r, unsigned me)
 #define REPLAY_CAP_POOL    15 /* the second thread's pool; first the region it is made of */
 #define REPLAY_CAP_TABLE   16 /* the second thread's table */
 #define REPLAY_CAP_PROCESS 17 /* the second thread's process */
+/* The third thread, stopped until a record resumes it: the last slot, which the corpus leaves alone. */
+#define REPLAY_CAP_THIRD   (REPLAY_TABLE_SLOTS - 1)
 
 /* The second thread's pool: the start of the free RAM, and as many slots as the root task has. */
 #define REPLAY_POOL_OFFSET 0x0000u
@@ -67,15 +73,16 @@ static inline int replay_passes(const struct replay_record *r, unsigned me)
 #define REPLAY_TABLE_SLOTS 64
 
 /*
- * The second thread's stack: the middle of the root task's data region.
- * host/shim.c checks that it lies inside that region.
+ * The second and third threads' stacks, in the root task's data region below the root's.
+ * host/shim.c checks that they lie inside that region.
  */
 #define REPLAY_THREAD_SP 0x80208000u
+#define REPLAY_THIRD_SP  0x8020c000u
 
 #define REPLAY_COPY(slot) { OP_CAP_COPY, 0, REPLAY_CAP_TABLE, slot, slot, RIGHT_ALL }
 
 /*
- * The second thread's entry point is the one value the two builds differ on:
+ * The threads' entry points are the one value the two builds differ on:
  * the driver patches OP_THREAD_CONFIGURE with the address of its record loop,
  * and the host leaves the zero, because the kernel stores
  * a thread's program counter without looking at it
@@ -90,6 +97,7 @@ static const struct replay_record replay_prologue[] = {
     { OP_POOL_ALLOC, 0, REPLAY_CAP_POOL, CAP_CAPTABLE, REPLAY_CAP_TABLE, REPLAY_TABLE_SLOTS },
     { OP_POOL_ALLOC, 0, REPLAY_CAP_POOL, CAP_PROCESS, REPLAY_CAP_PROCESS, REPLAY_CAP_TABLE },
     { OP_POOL_ALLOC, 0, REPLAY_CAP_POOL, CAP_THREAD, REPLAY_CAP_THREAD, REPLAY_CAP_PROCESS },
+    { OP_POOL_ALLOC, 0, REPLAY_CAP_POOL, CAP_THREAD, REPLAY_CAP_THIRD, REPLAY_CAP_PROCESS },
     /* It runs the same code on the same data as the first thread; the input it never reads. */
     { OP_PROCESS_INSTALL, 0, REPLAY_CAP_PROCESS, 0, BOOT_CAP_CODE, RIGHT_R | RIGHT_X },
     { OP_PROCESS_INSTALL, 0, REPLAY_CAP_PROCESS, 1, BOOT_CAP_DATA, RIGHT_R | RIGHT_W },
@@ -113,7 +121,9 @@ static const struct replay_record replay_prologue[] = {
     REPLAY_COPY(REPLAY_CAP_POOL),
     REPLAY_COPY(REPLAY_CAP_TABLE),
     REPLAY_COPY(REPLAY_CAP_PROCESS),
+    REPLAY_COPY(REPLAY_CAP_THIRD),
     { OP_THREAD_CONFIGURE, 0, REPLAY_CAP_THREAD, 0, REPLAY_THREAD_SP, 0 },
+    { OP_THREAD_CONFIGURE, 0, REPLAY_CAP_THIRD, 0, REPLAY_THIRD_SP, 0 },
 };
 
 #define REPLAY_PROLOGUE_COUNT \

@@ -3,6 +3,9 @@
 rvuos is a capability-based microkernel for RISC-V microcontrollers
 without an MMU.
 Read `DESIGN.md` before changing anything in the kernel.
+No new walk over every object, pool or table
+goes on the path of a system call, a tick or an interrupt;
+see goal 4 in `DESIGN.md`.
 
 ## Language
 

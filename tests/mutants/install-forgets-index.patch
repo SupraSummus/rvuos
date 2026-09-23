@@ -1,0 +1,12 @@
+An installed region does not record its slot.
+Uninstalling it would rebuild the PMP image of whatever lies before the process;
+an installed region knows its slot.
+
+diff --git a/kernel/process.c b/kernel/process.c
+--- a/kernel/process.c
++++ b/kernel/process.c
+@@ -72,3 +72,3 @@
+     proc->slots[slot] = (struct cap){
+-        .type = CAP_INSTALLED, .rights = rights, .index = (uint8_t)slot, .a = base, .b = size,
++        .type = CAP_INSTALLED, .rights = rights, .a = base, .b = size,
+     };

@@ -4,12 +4,7 @@ The thread waits on an object that is no longer live.
 diff --git a/kernel/pool.c b/kernel/pool.c
 --- a/kernel/pool.c
 +++ b/kernel/pool.c
-@@ -79,7 +79,7 @@
-             continue;
-         }
+@@ -81,3 +81,2 @@
          /* Nothing below may fail: the pool is going. */
--        sched_unblock_range(p->base, p->size);
-+
-         sched_unbind_range(p->base, p->size);
+-        sched_forget_pool(p);
          pool_unlink(p);
-         /* The memory is about to be user memory again, holding other processes' tables. */

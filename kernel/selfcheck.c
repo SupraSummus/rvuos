@@ -244,6 +244,9 @@ static void check_process(const struct process *proc)
         if (s->type != CAP_INSTALLED || s->rights == 0 || (s->rights & ~RIGHT_ALL)) {
             fail("region slot holds something other than an installed region", v2p(proc), i, s->type);
         }
+        if (s->index != i) {
+            fail("installed region does not know its slot", v2p(proc), i, s->index);
+        }
         uint8_t granted = granted_rights(s->a, s->b);
         if (s->b == 0 || granted == 0) {
             fail("process maps memory outside what was granted", v2p(proc), s->a, s->b);
@@ -278,6 +281,9 @@ static void check_process(const struct process *proc)
     }
 }
 
+/* Waiting threads, and threads on some notification's ring; the two counts must agree. */
+static uint32_t waiting_threads, queued_threads;
+
 static void check_thread(const struct thread *t)
 {
     struct obj_header *p = object_find(t->proc);
@@ -293,7 +299,7 @@ static void check_thread(const struct thread *t)
     switch (t->state) {
     case THREAD_STOPPED:
     case THREAD_READY:
-        if (t->waiting_on != 0) {
+        if (t->waiting_on != 0 || t->wait_next != 0 || t->wait_prev != 0) {
             fail("runnable thread waits on something", v2p(t), t->waiting_on, t->state);
         }
         break;
@@ -303,11 +309,43 @@ static void check_thread(const struct thread *t)
             fail("thread waits on something that is not a notification",
                  v2p(t), t->waiting_on, 0);
         }
+        waiting_threads++;
         break;
     }
     default:
         fail("thread is in an unknown state", v2p(t), t->state, 0);
     }
+}
+
+/*
+ * A notification's waiters are a ring of live threads waiting on it,
+ * each linked back to the one before.
+ * The back links make the walk close at the oldest or fail:
+ * no thread can be entered twice from two different predecessors.
+ */
+static void check_notification(const struct notification *n)
+{
+    if (n->waiters == 0) {
+        return;
+    }
+    paddr_t at = n->waiters;
+    do {
+        struct obj_header *o = object_find(at);
+        if (o == NULL || o->type != CAP_THREAD) {
+            fail("notification queues something that is not a thread", v2p(n), at, 0);
+        }
+        const struct thread *t = (const struct thread *)o;
+        if (t->state != THREAD_WAITING || t->waiting_on != v2p(n)) {
+            fail("notification queues a thread that does not wait on it", v2p(n), at, t->state);
+        }
+        struct obj_header *next = object_find(t->wait_next);
+        if (next == NULL || next->type != CAP_THREAD ||
+            ((const struct thread *)next)->wait_prev != at) {
+            fail("notification's queue is not linked back", v2p(n), at, t->wait_next);
+        }
+        queued_threads++;
+        at = t->wait_next;
+    } while (at != n->waiters);
 }
 
 static void check_timer(const struct timer *t)
@@ -350,7 +388,8 @@ static void check_irq(const struct irq *i)
 
 /*
  * The controller forwards a line exactly while an Irq is armed on it,
- * and at most one Irq is bound to any line, the log's included.
+ * and at most one Irq is bound to any line, the log's included,
+ * which the line table records exactly.
  * check_irq has vetted each object, so the bitmaps below are in range.
  * The enable bits are read back from the controller,
  * as the PMP CSRs are read back for the running process;
@@ -371,9 +410,17 @@ static void check_lines(void)
         if (bound[word] & bit) {
             fail("two irqs are bound to one line", v2p(i), i->line, 0);
         }
+        if (line_binding(i->line) != i) {
+            fail("irq is missing from the line table", v2p(i), i->line, 0);
+        }
         bound[word] |= bit;
         if (irq_armed(i)) {
             armed[word] |= bit;
+        }
+    }
+    for (uint32_t line = 0; line < IRQ_LINES; line++) {
+        if (line_binding(line) != NULL && !((bound[line / 32] >> (line % 32)) & 1u)) {
+            fail("line table names an irq that is gone", line, 0, 0);
         }
     }
     for (uint32_t line = 1; line < IRQ_LINES; line++) {
@@ -600,6 +647,7 @@ void selfcheck_run(void)
     check_pools();
 
     /* check_pools() ran first, so the flat walk rests on checked headers. */
+    waiting_threads = queued_threads = 0;
     for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
         switch (o->type) {
         case CAP_PROCESS:
@@ -611,6 +659,9 @@ void selfcheck_run(void)
         case CAP_CAPTABLE:
             check_captable((struct captable *)o);
             break;
+        case CAP_NOTIFICATION:
+            check_notification((struct notification *)o);
+            break;
         case CAP_TIMER:
             check_timer((struct timer *)o);
             break;
@@ -620,6 +671,10 @@ void selfcheck_run(void)
         default:
             break;
         }
+    }
+    /* Every queued thread waits on the notification it is queued on, so equal counts leave none out. */
+    if (waiting_threads != queued_threads) {
+        fail("a waiting thread is on no notification's queue", waiting_threads, queued_threads, 0);
     }
     check_lines();
     /* Every node has been vetted as a capability by now; the tree check reads only links. */

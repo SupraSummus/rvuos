@@ -1,0 +1,13 @@
+A destroy zeroes a waiting thread but leaves it on a notification that survives.
+The ring would lead into memory that is no longer a thread;
+a notification queues only live threads.
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -202,5 +202,2 @@
+             /* The thread is gone, and the ring it is on may live on in another pool. */
+-            if (((struct thread *)o)->state == THREAD_WAITING) {
+-                unwait((struct thread *)o);
+-            }
+             break;

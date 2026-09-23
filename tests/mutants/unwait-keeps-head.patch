@@ -1,0 +1,13 @@
+A woken thread that was the oldest waiter stays the head of the queue.
+The next signal would wake a thread that is no longer waiting;
+a notification queues only threads that wait on it.
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -45,5 +45,2 @@
+         ((struct thread *)p2v(t->wait_next))->wait_prev = t->wait_prev;
+-        if (ntfn->waiters == v2p(t)) {
+-            ntfn->waiters = t->wait_next;
+-        }
+     }

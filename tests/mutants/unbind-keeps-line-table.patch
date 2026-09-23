@@ -1,0 +1,11 @@
+A pool destroy masks the lines of the Irqs it takes but leaves them in the line table.
+The next interrupt or bind on the line would find memory that is no longer an Irq;
+the line table records exactly the Irqs that are bound.
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -212,3 +212,2 @@
+             }
+-            line_irq[line] = 0;
+             break;
