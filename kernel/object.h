@@ -102,10 +102,10 @@ struct process {
 
 /*
  * Thread states.
- * The kernel keeps no run queue:
- * a thread's own state says whether it may run,
- * and the kernel finds a runnable thread by walking the pools,
- * as the overlap checks do, continuing from the running thread.
+ * A ready thread other than the running one is on the run queue,
+ * and a waiting one on its notification's waiters,
+ * so the kernel finds the next thread to run without a walk;
+ * see DESIGN.md, "Scheduling".
  */
 enum {
     THREAD_STOPPED = 0, /* created, or configured and not started */
@@ -129,8 +129,9 @@ struct thread {
     uint8_t flags;
     uint16_t pad;
     paddr_t waiting_on; /* the notification, while WAITING; 0 otherwise */
-    paddr_t wait_next;  /* the notification's queue, while WAITING; 0 otherwise */
-    paddr_t wait_prev;
+    /* The notification's waiters while WAITING, the run queue while READY and not running. */
+    paddr_t queue_next;
+    paddr_t queue_prev;
     struct trap_frame frame;
 };
 
@@ -384,6 +385,16 @@ static inline struct obj_header *cap_object(const struct cap *cap)
 extern struct thread *current;
 
 /*
+ * The ready threads other than the running one, as a ring, oldest first;
+ * 0 when there are none.
+ * The oldest runs next, and a thread that becomes ready joins behind the newest.
+ */
+extern paddr_t run_queue;
+
+/* Make a stopped or woken thread ready: it joins the back of the round. */
+void sched_ready(struct thread *t);
+
+/*
  * Ticks so far.
  * Only the tick and OP_DEBUG_TICK move it,
  * and Timer deadlines are counted in it.
@@ -407,8 +418,8 @@ void sched_run_next(void);
 
 /*
  * The timer tick: count it, fire every Timer that is due,
- * and hand the processor to the next runnable thread in the round,
- * if there is one besides the running thread.
+ * and hand the processor to the thread that has waited longest for it,
+ * if there is one; the running thread goes to the back of the round.
  * The interrupt calls it, and OP_DEBUG_TICK does on request.
  */
 void sched_tick(void);
@@ -431,7 +442,7 @@ void sched_wait(struct thread *t, struct notification *ntfn);
  * Before a pool is zeroed, undo what its objects left in the rest of the kernel:
  * wake every thread waiting on a notification in it
  * with KERR_INVALID_CAP and no bits, because the object is gone,
- * take every thread in it off the notification it waits on,
+ * take every thread in it off the notification it waits on or the run queue,
  * and mask and unbind the line of every Irq in it.
  */
 void sched_forget_pool(struct pool *pool);

@@ -5,7 +5,7 @@ a ready one that still does breaks the thread-state invariant.
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -50,3 +50,2 @@
-     t->wait_next = t->wait_prev = 0;
+@@ -63,3 +63,2 @@ static void unwait(struct thread *t)
+     ring_remove(&((struct notification *)p2v(t->waiting_on))->waiters, t);
 -    t->waiting_on = 0;
  }

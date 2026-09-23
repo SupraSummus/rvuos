@@ -12,24 +12,47 @@ struct thread *current;
 uint32_t sched_ticks;
 uint32_t trace_wake_bits;
 
+paddr_t run_queue;
+
 /*
- * A notification's waiters are a ring through wait_next and wait_prev,
- * and its waiters field names the oldest, so the newest is that one's wait_prev.
+ * A thread is on at most one ring, through queue_next and queue_prev:
+ * its notification's waiters while it waits,
+ * or the run queue while it is ready and another thread runs.
+ * A ring's head names the oldest, so the newest is that one's queue_prev.
  */
-void sched_wait(struct thread *t, struct notification *ntfn)
+static void ring_push(paddr_t *head, struct thread *t)
 {
     paddr_t self = v2p(t);
-    if (ntfn->waiters == 0) {
-        t->wait_next = t->wait_prev = self;
-        ntfn->waiters = self;
+    if (*head == 0) {
+        t->queue_next = t->queue_prev = self;
+        *head = self;
     } else {
-        struct thread *oldest = p2v(ntfn->waiters);
-        struct thread *newest = p2v(oldest->wait_prev);
-        t->wait_next = ntfn->waiters;
-        t->wait_prev = oldest->wait_prev;
-        newest->wait_next = self;
-        oldest->wait_prev = self;
+        struct thread *oldest = p2v(*head);
+        struct thread *newest = p2v(oldest->queue_prev);
+        t->queue_next = *head;
+        t->queue_prev = oldest->queue_prev;
+        newest->queue_next = self;
+        oldest->queue_prev = self;
     }
+}
+
+static void ring_remove(paddr_t *head, struct thread *t)
+{
+    if (t->queue_next == v2p(t)) {
+        *head = 0;
+    } else {
+        ((struct thread *)p2v(t->queue_prev))->queue_next = t->queue_next;
+        ((struct thread *)p2v(t->queue_next))->queue_prev = t->queue_prev;
+        if (*head == v2p(t)) {
+            *head = t->queue_next;
+        }
+    }
+    t->queue_next = t->queue_prev = 0;
+}
+
+void sched_wait(struct thread *t, struct notification *ntfn)
+{
+    ring_push(&ntfn->waiters, t);
     t->waiting_on = v2p(&ntfn->hdr);
     t->state = THREAD_WAITING;
 }
@@ -37,42 +60,28 @@ void sched_wait(struct thread *t, struct notification *ntfn)
 /* Take a waiting thread off its notification's ring. */
 static void unwait(struct thread *t)
 {
-    struct notification *ntfn = p2v(t->waiting_on);
-    if (t->wait_next == v2p(t)) {
-        ntfn->waiters = 0;
-    } else {
-        ((struct thread *)p2v(t->wait_prev))->wait_next = t->wait_next;
-        ((struct thread *)p2v(t->wait_next))->wait_prev = t->wait_prev;
-        if (ntfn->waiters == v2p(t)) {
-            ntfn->waiters = t->wait_next;
-        }
-    }
-    t->wait_next = t->wait_prev = 0;
+    ring_remove(&((struct notification *)p2v(t->waiting_on))->waiters, t);
     t->waiting_on = 0;
 }
 
-/*
- * The first runnable thread after `from` in the walk, wrapping around,
- * so that `from` itself comes last.
- * This is the whole scheduling policy: round-robin in allocation order,
- * with no state beyond the position of the running thread.
- * NULL when no thread at all is runnable.
- */
-static struct thread *runnable_after(struct thread *from)
+void sched_ready(struct thread *t)
 {
-    struct obj_header *o = object_next(&from->hdr);
-    for (;;) {
-        if (o == NULL) {
-            o = object_first();
-        }
-        if (o->type == CAP_THREAD && ((struct thread *)o)->state == THREAD_READY) {
-            return (struct thread *)o;
-        }
-        if (o == &from->hdr) {
-            return NULL;
-        }
-        o = object_next(o);
+    t->state = THREAD_READY;
+    ring_push(&run_queue, t);
+}
+
+/*
+ * The oldest thread on the run queue, taken off it; NULL when it is empty.
+ * Taking from the front and joining at the back is the whole scheduling policy.
+ */
+static struct thread *run_queue_take(void)
+{
+    if (run_queue == 0) {
+        return NULL;
     }
+    struct thread *t = p2v(run_queue);
+    ring_remove(&run_queue, t);
+    return t;
 }
 
 /*
@@ -84,7 +93,7 @@ static void wake(struct thread *t, uint32_t bits)
     unwait(t);
     t->frame.regs[REG_A0] = KERR_OK;
     t->frame.regs[REG_A1] = bits;
-    t->state = THREAD_READY;
+    sched_ready(t);
     trace_wake_bits = bits;
 }
 
@@ -194,16 +203,23 @@ void sched_forget_pool(struct pool *pool)
                 unwait(t);
                 t->frame.regs[REG_A0] = KERR_INVALID_CAP;
                 t->frame.regs[REG_A1] = 0;
-                t->state = THREAD_READY;
+                sched_ready(t);
             }
             break;
         }
-        case CAP_THREAD:
-            /* The thread is gone, and the ring it is on may live on in another pool. */
-            if (((struct thread *)o)->state == THREAD_WAITING) {
-                unwait((struct thread *)o);
+        case CAP_THREAD: {
+            /*
+             * The thread is gone, and the ring it is on may live on in another pool.
+             * A ready one is not running, since the caller does not live here, so it is queued.
+             */
+            struct thread *t = (struct thread *)o;
+            if (t->state == THREAD_WAITING) {
+                unwait(t);
+            } else if (t->state == THREAD_READY) {
+                ring_remove(&run_queue, t);
             }
             break;
+        }
         case CAP_IRQ: {
             /* The object that would receive the interrupt is gone; the log's line has no controller. */
             uint32_t line = ((struct irq *)o)->line;
@@ -239,7 +255,7 @@ static void switch_to(struct thread *next)
 
 void sched_run_next(void)
 {
-    struct thread *next = runnable_after(current);
+    struct thread *next = run_queue_take();
     while (next == NULL) {
         /*
          * Only a running thread, a firing timer or a device interrupt
@@ -260,7 +276,7 @@ void sched_run_next(void)
         if (pending & INTR_DEVICE) {
             sched_claim_interrupts();
         }
-        next = runnable_after(current);
+        next = run_queue_take();
     }
     switch_to(next);
 }
@@ -268,9 +284,9 @@ void sched_run_next(void)
 void sched_tick(void)
 {
     tick_advance();
-    struct thread *next = runnable_after(current);
-    /* The running thread is ready, so there is always at least itself. */
-    if (next != current) {
-        switch_to(next);
+    /* The running thread is ready, and goes to the back of the round behind any other that is. */
+    if (run_queue != 0) {
+        ring_push(&run_queue, current);
+        switch_to(run_queue_take());
     }
 }

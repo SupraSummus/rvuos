@@ -281,8 +281,8 @@ static void check_process(const struct process *proc)
     }
 }
 
-/* Waiting threads, and threads on some notification's ring; the two counts must agree. */
-static uint32_t waiting_threads, queued_threads;
+/* Threads that belong on a queue, and threads found on one; the two counts must agree. */
+static uint32_t owed_threads, queued_threads;
 
 static void check_thread(const struct thread *t)
 {
@@ -299,8 +299,13 @@ static void check_thread(const struct thread *t)
     switch (t->state) {
     case THREAD_STOPPED:
     case THREAD_READY:
-        if (t->waiting_on != 0 || t->wait_next != 0 || t->wait_prev != 0) {
+        if (t->waiting_on != 0) {
             fail("runnable thread waits on something", v2p(t), t->waiting_on, t->state);
+        }
+        if (t->state == THREAD_READY && t != current) {
+            owed_threads++;
+        } else if (t->queue_next != 0 || t->queue_prev != 0) {
+            fail("thread on no queue is linked into one", v2p(t), t->queue_next, t->state);
         }
         break;
     case THREAD_WAITING: {
@@ -309,7 +314,7 @@ static void check_thread(const struct thread *t)
             fail("thread waits on something that is not a notification",
                  v2p(t), t->waiting_on, 0);
         }
-        waiting_threads++;
+        owed_threads++;
         break;
     }
     default:
@@ -318,34 +323,34 @@ static void check_thread(const struct thread *t)
 }
 
 /*
- * A notification's waiters are a ring of live threads waiting on it,
- * each linked back to the one before.
+ * A queue is a ring of live threads, each linked back to the one before,
+ * none of them running, and each in the state and waiting on what the queue is for.
  * The back links make the walk close at the oldest or fail:
  * no thread can be entered twice from two different predecessors.
  */
-static void check_notification(const struct notification *n)
+static void check_queue(paddr_t head, uint8_t state, paddr_t waiting_on)
 {
-    if (n->waiters == 0) {
+    if (head == 0) {
         return;
     }
-    paddr_t at = n->waiters;
+    paddr_t at = head;
     do {
         struct obj_header *o = object_find(at);
         if (o == NULL || o->type != CAP_THREAD) {
-            fail("notification queues something that is not a thread", v2p(n), at, 0);
+            fail("queue holds something that is not a thread", head, at, 0);
         }
         const struct thread *t = (const struct thread *)o;
-        if (t->state != THREAD_WAITING || t->waiting_on != v2p(n)) {
-            fail("notification queues a thread that does not wait on it", v2p(n), at, t->state);
+        if (t->state != state || t->waiting_on != waiting_on || t == current) {
+            fail("queue holds a thread it is not for", head, at, t->state);
         }
-        struct obj_header *next = object_find(t->wait_next);
+        struct obj_header *next = object_find(t->queue_next);
         if (next == NULL || next->type != CAP_THREAD ||
-            ((const struct thread *)next)->wait_prev != at) {
-            fail("notification's queue is not linked back", v2p(n), at, t->wait_next);
+            ((const struct thread *)next)->queue_prev != at) {
+            fail("queue is not linked back", head, at, t->queue_next);
         }
         queued_threads++;
-        at = t->wait_next;
-    } while (at != n->waiters);
+        at = t->queue_next;
+    } while (at != head);
 }
 
 static void check_timer(const struct timer *t)
@@ -647,7 +652,7 @@ void selfcheck_run(void)
     check_pools();
 
     /* check_pools() ran first, so the flat walk rests on checked headers. */
-    waiting_threads = queued_threads = 0;
+    owed_threads = queued_threads = 0;
     for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
         switch (o->type) {
         case CAP_PROCESS:
@@ -660,7 +665,7 @@ void selfcheck_run(void)
             check_captable((struct captable *)o);
             break;
         case CAP_NOTIFICATION:
-            check_notification((struct notification *)o);
+            check_queue(((struct notification *)o)->waiters, THREAD_WAITING, v2p(o));
             break;
         case CAP_TIMER:
             check_timer((struct timer *)o);
@@ -672,9 +677,10 @@ void selfcheck_run(void)
             break;
         }
     }
-    /* Every queued thread waits on the notification it is queued on, so equal counts leave none out. */
-    if (waiting_threads != queued_threads) {
-        fail("a waiting thread is on no notification's queue", waiting_threads, queued_threads, 0);
+    check_queue(run_queue, THREAD_READY, 0);
+    /* Every queued thread is one its queue is for, so equal counts leave none out. */
+    if (owed_threads != queued_threads) {
+        fail("a waiting or ready thread is on no queue", owed_threads, queued_threads, 0);
     }
     check_lines();
     /* Every node has been vetted as a capability by now; the tree check reads only links. */

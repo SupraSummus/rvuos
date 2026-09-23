@@ -1,0 +1,12 @@
+A resumed thread is made ready but not put on the run queue.
+It would never get the processor;
+every ready thread but the running one is on the run queue.
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -386,3 +386,3 @@ static int op_thread(const struct cap *cap, uint32_t op, const uint32_t *arg)
+         }
+-        sched_ready(target);
++        target->state = THREAD_READY;
+         return KERR_OK;

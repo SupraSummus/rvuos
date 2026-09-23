@@ -101,7 +101,7 @@ What rvuos is not:
   Data moves through shared memory; the notification says when.
 - **Preemptive round-robin scheduling.**
   A machine timer tick takes the processor from a running thread
-  and hands it to the next runnable one in allocation order.
+  and hands it to the ready thread that has waited longest.
 - **Timers as signals.**
   A `Timer` signals a notification after a delay.
   Sleeping is arming a timer and waiting.
@@ -673,13 +673,12 @@ and carries the ring out one byte per transmitter interrupt.
 
 ### 5.11 Scheduling
 
-- The kernel keeps no run queue.
-  Runnable threads are found by walking the pools,
-  and the walk continues from the running thread,
-  so threads take turns in the order they were allocated.
+- Ready threads wait for the processor in a queue.
+  A thread that becomes ready, whether resumed, woken or preempted,
+  joins the back of it,
+  so threads take turns in the order they became ready.
 - The machine timer ticks at `TIMER_HZ`, 1 kHz on both boards.
-  A thread runs until it waits or until a tick takes the processor from it;
-  a preempted thread goes to the back of the round.
+  A thread runs until it waits or until a tick takes the processor from it.
 - A system call is never interrupted:
   machine mode runs with interrupts off from the trap to the return.
 - When nothing is runnable and a `Timer` or a device `Irq` is armed,
