@@ -48,7 +48,7 @@ static inline int replay_passes(const struct replay_record *r, unsigned me)
 
 /*
  * Region slots. The input is mapped only while the driver copies the records out,
- * so that with the UART and the log the driver fits an eight-entry PMP.
+ * so the records run in a process that maps what the driver needs from then on and nothing else.
  */
 #define REPLAY_REGION_SLOT 7
 #define REPLAY_UART_SLOT 5

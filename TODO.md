@@ -52,6 +52,8 @@ Design decisions behind these items live in `DESIGN.md`.
    `DESIGN.md`, "Boards".
    The PMA unit is all zero after the ROM and so in the way of nothing.
    Still open:
+   - `make BOARD=esp32c6 test` with NAPOT regions and the block layout,
+     which halved the root task's data region there; it has run under QEMU only;
    - boot from flash, and with it whether the ROM can load the image
      straight from offset 0 or Espressif's second-stage bootloader must run first,
      and whether execute-in-place goes through a cache the kernel must control;
@@ -91,7 +93,7 @@ Design decisions behind these items live in `DESIGN.md`.
   one user program per scenario, expected outcome a specific fault.
   Execute from data, jump into the kernel, `csrr` and `mret` from user mode,
   misaligned access, stack into kernel memory.
-- CBMC on `rebuild_pmp` and the overlap checks.
+- CBMC on the overlap checks, `OP_REGION_CARVE` and the NAPOT encoding.
 - Feed the replay corpus to the ESP32-C6.
   Something has to put each input where `BOOT_CAP_INPUT` points,
   below the ROM's buffers or over USB once the kernel runs,
@@ -127,6 +129,11 @@ Design decisions behind these items live in `DESIGN.md`.
   have the image skip such entries if one turns up.
 - `selfcheck.c` is always compiled in; make it a build-time option
   before any board with little RAM.
+- The root task is granted one block of free RAM,
+  so what lies between the blocks is unused:
+  about 2.8 MiB on QEMU, where it does not matter, and 28 KiB on the ESP32-C6.
+  Grant the rest as further blocks, or lay the board out afresh,
+  when a board's RAM gets tight.
 - `PROCESS_REGION_SLOTS` is fixed at 8;
   size it per process from the PMP budget when process creation exists.
 - The replay reaches one level of the pool tree below the boot pool:

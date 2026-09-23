@@ -78,8 +78,7 @@ enum {
 
 /*
  * Region slots. The root task boots with code in 0 and data in 1.
- * The log touches the code and the shared region touches the data,
- * so the five regions cost eight PMP entries, the smallest budget the kernel accepts.
+ * Every region costs one PMP entry: the root task maps five and the child four.
  */
 #define ROOT_SHARED_SLOT 2
 #define ROOT_UART_SLOT 3
@@ -89,7 +88,7 @@ enum {
 #define CHILD_SHARED_SLOT 2
 #define CHILD_LEASE_SLOT 3
 
-/* Offsets into the free RAM the root task was granted; the shared region comes first, see above. */
+/* Offsets into the free RAM the root task was granted, each a multiple of a CHUNK-sized block. */
 #define SHARED_OFFSET 0x0000u
 #define DATA_OFFSET  0x1000u
 #define POOL_OFFSET  0x2000u
@@ -363,7 +362,7 @@ int main(void);
 
 int main(void)
 {
-    uint32_t free_base, free_size, grain, bits;
+    uint32_t free_base, free_size, min_size, bits;
     uint32_t data_base, data_size, uart_base, uart_size, log_base, log_size;
 
     puts("hello from user mode\n");
@@ -405,9 +404,12 @@ int main(void)
     expect("start the logger", rv_invoke(OP_THREAD_RESUME, SLOT_LOGGER, 0, 0, 0));
 
     expect("free ram info", rv_region_info(BOOT_CAP_FREE_RAM, &free_base, &free_size));
-    /* Read through a4; the offsets below are on a page and a coarser grain is another machine. */
-    expect("the layout fits the grain",
-           rv_region_grain(BOOT_CAP_FREE_RAM, &grain) == KERR_OK && CHUNK % grain == 0
+    /*
+     * Read through a4. Every region below is a page at an offset that is a multiple of one,
+     * which carves as long as a page is no smaller than the smallest region.
+     */
+    expect("the layout fits the smallest region",
+           rv_region_min_size(BOOT_CAP_FREE_RAM, &min_size) == KERR_OK && CHUNK % min_size == 0
                ? KERR_OK : KERR_INVALID_ARG);
 
     expect("carve pool region",

@@ -1,16 +1,17 @@
-Every PMP entry a segment produces carries the write bit,
-whatever the segment's rights say.
-The PMP the self-check reads back no longer matches the running process's segments.
+Every PMP entry a region produces carries the write bit,
+whatever the region's rights say.
+The PMP the self-check reads back no longer matches the running process's regions.
 
 diff --git a/kernel/process.c b/kernel/process.c
+index bd27e98..6bebe7a 100644
 --- a/kernel/process.c
 +++ b/kernel/process.c
-@@ -51,7 +51,7 @@
-             return KERR_LIMIT;
+@@ -32,7 +32,7 @@ static void rebuild_pmp(struct process *proc)
+         const struct cap *s = &proc->slots[i];
+         if (s->type != CAP_NONE) {
+             img->addr[img->count] = pmp_napot_addr(s->a, s->b);
+-            img->cfg[img->count] = PMP_A_NAPOT | rights_to_pmp(s->rights);
++            img->cfg[img->count] = PMP_A_NAPOT | rights_to_pmp(s->rights) | PMP_W;
+             img->count++;
          }
-         img->addr[img->count] = s->a + s->b;
--        img->cfg[img->count] = PMP_A_TOR | rights_to_pmp(s->rights);
-+        img->cfg[img->count] = PMP_A_TOR | rights_to_pmp(s->rights) | PMP_W;
-         img->count++;
-         prev_end = s->a + s->b;
      }

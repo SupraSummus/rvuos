@@ -41,8 +41,8 @@ static inline uint32_t rv_region_info(uint32_t region_cap, uint32_t *base, uint3
     return r_a0;
 }
 
-/* OP_REGION_INFO again, for the PMP grain every region is a multiple of. */
-static inline uint32_t rv_region_grain(uint32_t region_cap, uint32_t *grain_out)
+/* OP_REGION_INFO again, for the smallest region the machine protects. */
+static inline uint32_t rv_region_min_size(uint32_t region_cap, uint32_t *min_out)
 {
     register uint32_t r_a0 __asm__("a0") = region_cap;
     register uint32_t r_a4 __asm__("a4");
@@ -51,7 +51,7 @@ static inline uint32_t rv_region_grain(uint32_t region_cap, uint32_t *grain_out)
                      : "+r"(r_a0), "=r"(r_a4)
                      : "r"(r_a7)
                      : "memory", "a1", "a2", "a3", "a5", "a6");
-    *grain_out = r_a4;
+    *min_out = r_a4;
     return r_a0;
 }
 

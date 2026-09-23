@@ -121,8 +121,16 @@ void pmp_set(unsigned idx, uint32_t addr, uint8_t cfg)
     if (idx >= PMP_MAX_ENTRIES) {
         kpanic("pmp_set index out of range");
     }
-    /* Bits below the grain are lost, as on hardware; the self-check sees the difference. */
-    pmp_addr[idx] = addr & ~(uint32_t)(PMP_GRAIN - 1);
+    /*
+     * Bits below the grain read as the specification says:
+     * with G = log2(grain) - 2, bits G-1..0 read as zeros in the other modes
+     * and bits G-2..0 as ones under NAPOT; the self-check sees any difference.
+     */
+    if ((cfg & 0x18) == PMP_A_NAPOT) {
+        pmp_addr[idx] = addr | (uint32_t)(PMP_GRAIN >= 8 ? PMP_GRAIN / 8 - 1 : 0);
+    } else {
+        pmp_addr[idx] = addr & ~(uint32_t)(PMP_GRAIN / 4 - 1);
+    }
     pmp_cfg[idx] = cfg;
 }
 
@@ -167,7 +175,7 @@ struct thread *host_boot(void)
 
     struct thread *root = boot_create_root(
         HOST_BOOT_POOL_BASE, HOST_BOOT_POOL_SIZE,
-        FREE_BASE, INPUT_BASE - FREE_BASE);
+        FREE_RAM_BASE, FREE_RAM_SIZE);
     current = root;
     process_activate(thread_process(root));
 

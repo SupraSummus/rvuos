@@ -23,8 +23,6 @@
 #define HOST_BOOT_POOL_BASE (RAM_BASE + 0x1000u)
 #define HOST_BOOT_POOL_SIZE 0x1000u
 
-#define FREE_BASE (USER_DATA_BASE + USER_DATA_SIZE)
-
 /* Set when khalt() is called; the harness longjmps here. */
 extern jmp_buf host_halt_jmp;
 extern int host_halt_code;

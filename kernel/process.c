@@ -7,57 +7,6 @@
 #include "object.h"
 #include "pmp.h"
 
-/*
- * Rebuild the PMP image from the region slots.
- *
- * Regions are sorted by base address and emitted as TOR entries.
- * Each region needs an entry carrying its upper bound and rights;
- * its lower bound is the previous entry's address,
- * so an OFF entry is added only where regions do not touch.
- * Returns KERR_LIMIT if the hardware has too few entries.
- */
-static int rebuild_pmp(struct process *proc, struct pmp_image *img)
-{
-    const struct cap *sorted[PROCESS_REGION_SLOTS];
-    unsigned n = 0;
-
-    for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
-        const struct cap *s = &proc->slots[i];
-        if (s->type == CAP_NONE) {
-            continue;
-        }
-        unsigned j = n;
-        while (j > 0 && sorted[j - 1]->a > s->a) {
-            sorted[j] = sorted[j - 1];
-            j--;
-        }
-        sorted[j] = s;
-        n++;
-    }
-
-    img->count = 0;
-    uint32_t prev_end = 0;
-    for (unsigned i = 0; i < n; i++) {
-        const struct cap *s = sorted[i];
-        if (s->a != prev_end) {
-            if (img->count >= pmp_entry_count) {
-                return KERR_LIMIT;
-            }
-            img->addr[img->count] = s->a;
-            img->cfg[img->count] = PMP_A_OFF;
-            img->count++;
-        }
-        if (img->count >= pmp_entry_count) {
-            return KERR_LIMIT;
-        }
-        img->addr[img->count] = s->a + s->b;
-        img->cfg[img->count] = PMP_A_TOR | rights_to_pmp(s->rights);
-        img->count++;
-        prev_end = s->a + s->b;
-    }
-    return KERR_OK;
-}
-
 void process_activate(struct process *proc)
 {
     const struct pmp_image *img = &proc->pmp;
@@ -69,9 +18,24 @@ void process_activate(struct process *proc)
     }
 }
 
-static void commit(struct process *proc, const struct pmp_image *img)
+/*
+ * Rebuild the PMP image from the region slots, and load it if the process is running.
+ * Every region is a NAPOT block and costs one entry of its own,
+ * so the image is the filled slots in slot order;
+ * installed regions do not overlap, so which entry matches first never matters.
+ */
+static void rebuild_pmp(struct process *proc)
 {
-    proc->pmp = *img;
+    struct pmp_image *img = &proc->pmp;
+    img->count = 0;
+    for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
+        const struct cap *s = &proc->slots[i];
+        if (s->type != CAP_NONE) {
+            img->addr[img->count] = pmp_napot_addr(s->a, s->b);
+            img->cfg[img->count] = PMP_A_NAPOT | rights_to_pmp(s->rights);
+            img->count++;
+        }
+    }
     if (current != NULL && thread_process(current) == proc) {
         process_activate(proc);
     }
@@ -80,8 +44,8 @@ static void commit(struct process *proc, const struct pmp_image *img)
 int process_install(struct process *proc, unsigned slot,
                     uint32_t base, uint32_t size, uint8_t rights, struct cap *parent)
 {
-    /* No right would grant nothing; TOR needs base + size to exist. */
-    if (slot >= PROCESS_REGION_SLOTS || size == 0 || rights == 0 || size > UINT32_MAX - base) {
+    /* No right would grant nothing; a region capability is always a block. */
+    if (slot >= PROCESS_REGION_SLOTS || rights == 0 || !napot_block(base, size)) {
         return KERR_INVALID_ARG;
     }
     if (proc->slots[slot].type != CAP_NONE) {
@@ -90,23 +54,24 @@ int process_install(struct process *proc, unsigned slot,
     if (pool_overlaps(base, size)) {
         return KERR_OVERLAP;
     }
+    unsigned installed = 0;
     for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
         const struct cap *s = &proc->slots[i];
-        if (s->type != CAP_NONE && ranges_overlap(base, size, s->a, s->b)) {
-            return KERR_OVERLAP;
+        if (s->type != CAP_NONE) {
+            if (ranges_overlap(base, size, s->a, s->b)) {
+                return KERR_OVERLAP;
+            }
+            installed++;
         }
+    }
+    /* One entry per region, so the count of regions is the whole budget. */
+    if (installed >= pmp_entry_count) {
+        return KERR_LIMIT;
     }
 
     proc->slots[slot] = (struct cap){ .type = CAP_INSTALLED, .rights = rights, .a = base, .b = size };
-
-    struct pmp_image img;
-    int err = rebuild_pmp(proc, &img);
-    if (err != KERR_OK) {
-        proc->slots[slot] = (struct cap){ 0 };
-        return err;
-    }
     cap_attach(parent, &proc->slots[slot]);
-    commit(proc, &img);
+    rebuild_pmp(proc);
     return KERR_OK;
 }
 
@@ -126,17 +91,7 @@ void process_drop(struct cap *installed)
         kpanic("installed region outside every process");
     }
     *installed = (struct cap){ 0 };
-
-    /*
-     * Removing a region never needs more entries:
-     * its TOR entry goes, and its OFF entry either goes too
-     * or is now needed by the next region, which had none because they touched.
-     */
-    struct pmp_image img;
-    if (rebuild_pmp(proc, &img) != KERR_OK) {
-        kpanic("removing a region cannot need more PMP entries");
-    }
-    commit(proc, &img);
+    rebuild_pmp(proc);
 }
 
 int process_uninstall(struct process *proc, unsigned slot)

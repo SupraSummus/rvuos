@@ -7,8 +7,9 @@
  *
  * QEMU enters at RAM_BASE in machine mode.
  * The kernel owns [RAM_BASE, USER_CODE_BASE).
- * The root task's code and data regions follow,
- * and everything after them up to the input is handed to the root task as free RAM.
+ * The root task's code, data and input regions follow,
+ * and the upper half of RAM is handed to the root task as free RAM.
+ * Each is a block aligned to its own size; what lies in none of them is left unused.
  */
 #define RAM_BASE       U32(0x80000000)
 #define RAM_SIZE       U32(0x00800000)
@@ -16,7 +17,11 @@
 #define USER_CODE_SIZE U32(0x00010000)
 #define USER_DATA_BASE U32(0x80200000)
 #define USER_DATA_SIZE U32(0x00010000)
+/* Test input placed here by the loader; tests/differential.py knows the address. */
+#define INPUT_BASE     U32(0x80210000)
 #define INPUT_SIZE     U32(0x00010000)
+#define FREE_RAM_BASE  U32(0x80400000)
+#define FREE_RAM_SIZE  U32(0x00400000)
 
 /*
  * The UART: a 16550 at UART_BASE, raising PLIC source 10.

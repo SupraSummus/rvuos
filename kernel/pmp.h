@@ -33,10 +33,41 @@ extern unsigned pmp_entry_count;
  */
 extern uint32_t pmp_grain;
 
-/* True if a range's boundaries lie on the grain. */
-static inline bool grain_aligned(uint32_t base, uint32_t size)
+/*
+ * The smallest region one NAPOT entry describes:
+ * eight bytes, or the grain where that is coarser.
+ * Four-byte regions would need NA4, which rvuos does not use.
+ */
+static inline uint32_t region_min_size(void)
 {
-    return ((base | size) & (pmp_grain - 1)) == 0;
+    return pmp_grain < 8 ? 8 : pmp_grain;
+}
+
+/*
+ * True if a range is a block one NAPOT entry describes:
+ * a power of two of at least region_min_size(), aligned to its own size.
+ * Every region capability is one; see DESIGN.md, "Physical Memory Protection".
+ */
+static inline bool napot_block(uint32_t base, uint32_t size)
+{
+    return size >= region_min_size() && (size & (size - 1)) == 0 && (base & (size - 1)) == 0;
+}
+
+/* The pmpaddr value of a NAPOT entry for a block: the base, and the size as trailing ones. */
+static inline uint32_t pmp_napot_addr(uint32_t base, uint32_t size)
+{
+    return (base >> 2) | ((size >> 3) - 1);
+}
+
+/*
+ * The block a NAPOT pmpaddr value describes, 64 bits wide:
+ * an all-ones value is the whole 34-bit physical address space of RV32.
+ */
+static inline void pmp_napot_range(uint32_t addr, uint64_t *base, uint64_t *size)
+{
+    uint64_t ones = ((uint64_t)addr ^ ((uint64_t)addr + 1)) >> 1;
+    *base = ((uint64_t)addr & ~ones) << 2;
+    *size = (ones + 1) << 3;
 }
 
 /*
@@ -48,7 +79,7 @@ void pmp_init(void);
 
 /*
  * Program one entry.
- * addr is a byte address; it is shifted for the CSR here.
+ * addr is the pmpaddr value, as pmp_napot_addr encodes it.
  * cfg is the pmpcfg byte for the entry.
  */
 void pmp_set(unsigned idx, uint32_t addr, uint8_t cfg);
@@ -56,7 +87,7 @@ void pmp_set(unsigned idx, uint32_t addr, uint8_t cfg);
 /* Disable one entry. */
 void pmp_clear(unsigned idx);
 
-/* Read an entry back from the CSRs. addr is returned as a byte address. */
+/* Read an entry back from the CSRs, the pmpaddr value as it reads. */
 void pmp_get(unsigned idx, uint32_t *addr, uint8_t *cfg);
 
 #endif
