@@ -5,9 +5,10 @@ a notification queues only live threads.
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -202,5 +202,2 @@
-             /* The thread is gone, and the ring it is on may live on in another pool. */
--            if (((struct thread *)o)->state == THREAD_WAITING) {
--                unwait((struct thread *)o);
--            }
-             break;
+@@ -217,5 +217,3 @@ void sched_forget_pool(struct pool *pool)
+             struct thread *t = (struct thread *)o;
+-            if (t->state == THREAD_WAITING) {
+-                unwait(t);
+-            } else if (t->state == THREAD_READY) {
++            if (t->state == THREAD_READY) {
+                 ring_remove(&run_queue, t);

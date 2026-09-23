@@ -384,7 +384,7 @@ static int op_thread(const struct cap *cap, uint32_t op, const uint32_t *arg)
         if (target->state != THREAD_STOPPED) {
             return KERR_STATE;
         }
-        target->state = THREAD_READY;
+        sched_ready(target);
         return KERR_OK;
     default:
         return KERR_WRONG_TYPE;

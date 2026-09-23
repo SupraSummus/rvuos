@@ -1,13 +1,14 @@
-A woken thread that was the oldest waiter stays the head of the queue.
-The next signal would wake a thread that is no longer waiting;
-a notification queues only threads that wait on it.
+A thread taken off a ring while it is the oldest stays the ring's head.
+The next signal would wake a thread that is no longer waiting,
+and the next switch run one that is already running;
+a queue holds only threads in the state it is for.
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -45,5 +45,2 @@
-         ((struct thread *)p2v(t->wait_next))->wait_prev = t->wait_prev;
--        if (ntfn->waiters == v2p(t)) {
--            ntfn->waiters = t->wait_next;
+@@ -45,5 +45,2 @@ static void ring_remove(paddr_t *head, struct thread *t)
+         ((struct thread *)p2v(t->queue_next))->queue_prev = t->queue_prev;
+-        if (*head == v2p(t)) {
+-            *head = t->queue_next;
 -        }
      }

@@ -714,26 +714,26 @@ rather than a round trip to that server.
 
 ## Scheduling
 
-**The kernel keeps no run queue.**
-A thread's own state says whether it may run,
-and a runnable thread is found by walking the pools,
-as `pool_overlaps` and `installed_overlaps` are.
-A queue would record a second time what the state already says.
-The walk costs what those checks already cost.
-Goal 4 rules the walk out,
-because its cost grows with every object any process allocates;
-see "Bounded work".
+**The kernel keeps a run queue.**
+A ready thread other than the running one waits for the processor on the run queue,
+a ring through the thread's own `queue_next` and `queue_prev`.
+A waiting thread is on its notification's waiters through the same two words,
+and no thread is on both, so the queue costs no memory.
+The next thread to run is the oldest on the queue,
+found in constant time however many objects exist;
+the walk over the pools that found it before broke goal 4.
 
-**The walk is the policy: round-robin.**
-The walk continues from the running thread and wraps around,
-so runnable threads take turns in the order they were allocated,
+**The queue is the policy: round-robin.**
+A thread that becomes ready, resumed, woken or preempted,
+joins the back of the queue,
+so ready threads take turns in the order they became ready,
 and the only scheduling state the kernel holds
-is which thread is running.
+is the queue and which thread is running.
 
 **The machine timer provides the tick.**
 A thread runs until it waits on a notification
 or until the tick takes the processor from it,
-and either way the walk picks the next runnable thread.
+and either way the oldest thread on the run queue gets it.
 The tick has a fixed period, `TIMER_HZ` in `kernel/timer.h`,
 and one tick is one slice: a preempted thread goes to the back of the round.
 Interrupts are taken in user mode only:
@@ -998,7 +998,6 @@ so it can stop between any two nodes.
 | Walk | When | Fix |
 |---|---|---|
 | `tick_advance` | every tick | a timer queue; see below |
-| `runnable_after` | every switch | a run queue threaded through `Thread` |
 | `source_armed` | every stall in `wfi` | a count of armed timers and device `Irq`s |
 | `cap_parent`, `detach` | delete, uninstall, `OP_REGION_TO_POOL`, `OP_IRQ_BIND` | a predecessor link per slot |
 | `pool_overlaps` | `OP_PROCESS_INSTALL` | open decision 14 |
@@ -1006,10 +1005,6 @@ so it can stop between any two nodes.
 | `cap_revoke_range`, `pool_under`, `node_live`, `cap_parent` | pool destroy | open decision 14, and preemption |
 | `cap_revoke_below` | revoke, `OP_REGION_TO_POOL`, `OP_IRQ_BIND` | preemption |
 
-A run queue changes the round from allocation order,
-which `MANUAL.md` promises, to the order threads became ready.
-"Scheduling" argued against a queue because the walk was cheap;
-goal 4 says it is not.
 A predecessor link makes a slot twenty-four bytes instead of twenty
 and lets a node leave its ring in constant time.
 The first child's predecessor is the last child,
@@ -1097,10 +1092,12 @@ and every installed region records its slot.
 Every thread is stopped, ready, or waiting.
 A waiting thread names a live notification and nothing else does,
 and a notification's queue holds exactly the threads waiting on it.
+The run queue holds exactly the ready threads but the running one,
+and a thread on neither queue is linked into none.
 The thread the kernel is running is one it could run:
 it is a live object and it is ready.
-A preempted thread stays ready,
-so it is one the walk finds again.
+A preempted thread stays ready and joins the run queue,
+so it runs again.
 
 **Timers.**
 Every timer names a live notification in its own pool,

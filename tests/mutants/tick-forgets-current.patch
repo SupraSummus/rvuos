@@ -1,0 +1,11 @@
+The tick hands the processor on without putting the preempted thread back in the round.
+The thread would stay ready and never run again;
+every ready thread but the running one is on the run queue.
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -290,3 +290,2 @@ void sched_tick(void)
+     if (run_queue != 0) {
+-        ring_push(&run_queue, current);
+         switch_to(run_queue_take());

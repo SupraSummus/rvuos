@@ -1,0 +1,12 @@
+A destroy zeroes a ready thread but leaves it on the run queue.
+The next switch would run memory that is no longer a thread;
+the run queue holds only live threads.
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -219,4 +219,2 @@ void sched_forget_pool(struct pool *pool)
+                 unwait(t);
+-            } else if (t->state == THREAD_READY) {
+-                ring_remove(&run_queue, t);
+             }

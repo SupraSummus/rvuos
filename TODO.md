@@ -12,10 +12,10 @@ Design decisions behind these items live in `DESIGN.md`.
    installing and removing regions.
 4. Done: two processes, `Notification` objects,
    shared memory between processes, and the first scheduling decision.
-   The kernel keeps no queues and a thread runs until it waits.
+   A thread runs until it waits.
 5. Done: the timer tick and round-robin preemption.
-   The pool walk that finds a runnable thread
-   continues from the running one, and that is the whole policy.
+   Ready threads take turns in the order they became ready,
+   and that is the whole policy.
    Priorities on `Thread` were part of this step
    and are now open decision 9 in `DESIGN.md`,
    whose working default is that the kernel has no further policy.
@@ -64,9 +64,9 @@ Design decisions behind these items live in `DESIGN.md`.
 9. Bounded work, goal 4 in `DESIGN.md`,
    whose table lists every walk this removes.
    ABI changes come last.
-   Done: the line table, the installed region's slot index, and the wait queue.
-   - The run queue, and the count of armed sources.
-     No system call changes, but the round order in `MANUAL.md` does.
+   Done: the line table, the installed region's slot index, the wait queue,
+   and the run queue.
+   - The count of armed sources, for the stall in `wfi`.
    - A predecessor link per slot.
    - Revoke preempted when an interrupt is pending, and restarted;
      the conversions and a delete below a root too.
