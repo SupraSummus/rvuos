@@ -12,62 +12,54 @@
 # What test and qemu-replay catch is reported, and skipped when QEMU is not installed.
 # A mutant that does not apply or does not build is broken, not caught.
 #
-# Usage: tests/mutants.sh [name...]      logs go under build/mutants/
+# The unmutated tree is built once and must pass host-test.
+# Each mutant runs in a copy of it with the timestamps kept,
+# so make recompiles only what the patch touches.
+# The mutants run in parallel, one per processor or -j of them,
+# and each replays on one QEMU.
+#
+# Usage: tests/mutants.sh [-j jobs] [name...]      logs go under build/mutants/
 
 set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
 logs=$root/build/mutants
-mkdir -p "$logs"
 
-qemu=$(command -v qemu-system-riscv32 || true)
-[ -n "$qemu" ] || echo "qemu-system-riscv32 not found: test and qemu-replay are skipped" >&2
-
-broken=""
-missed=""
-
-# Run one make target in the scratch tree; the log goes under build/mutants/.
+# Run one make target in a mutant's tree; the log goes under build/mutants/.
 run() {
-    (cd "$work/tree" && make -s "$2" >"$logs/$1.$2.log" 2>&1)
+    (cd "$tree" && make -s "$2" REPLAY_JOBS=1 >"$logs/$1.$2.log" 2>&1)
 }
 
+# Run one mutant and leave its result, caught, missed or broken, in the work directory.
+# Each message is one write, so parallel mutants do not interleave.
 mutant() {
     name=$1
+    tree=$work/tree-$name
+    result=$work/result/$name
     patch=$root/tests/mutants/$name.patch
-    if [ ! -f "$patch" ]; then
-        echo "mutant $name: no such patch" >&2
-        exit 1
-    fi
-    rm -rf "$work/tree"
-    mkdir -p "$work/tree"
-    cp -r "$root/kernel" "$root/host" "$root/include" "$root/user" "$root/Makefile" "$root/tests" \
-        "$work/tree/"
-    if ! (cd "$work/tree" && git apply -C1 "$patch") >"$logs/$name.apply.log" 2>&1; then
-        echo "mutant $name: does not apply" >&2
-        cat "$logs/$name.apply.log" >&2
-        broken="$broken $name"
+    cp -a "$work/base" "$tree"
+    if ! (cd "$tree" && git apply -C1 "$patch") >"$logs/$name.apply.log" 2>&1; then
+        printf 'mutant %s: does not apply\n%s\n' "$name" "$(cat "$logs/$name.apply.log")" >&2
+        echo broken >"$result"
         return
     fi
     if ! run "$name" all; then
-        echo "mutant $name: does not build" >&2
-        tail -5 "$logs/$name.all.log" >&2
-        broken="$broken $name"
+        printf 'mutant %s: does not build\n%s\n' "$name" "$(tail -5 "$logs/$name.all.log")" >&2
+        echo broken >"$result"
         return
     fi
 
     if run "$name" host-test; then
         host=missed
-        missed="$missed $name"
     elif grep -q 'invariant violated' "$logs/$name.host-test.log"; then
         host=caught
     else
-        echo "mutant $name: host-test failed without an invariant report" >&2
-        tail -5 "$logs/$name.host-test.log" >&2
-        broken="$broken $name"
+        printf 'mutant %s: host-test failed without an invariant report\n%s\n' \
+            "$name" "$(tail -5 "$logs/$name.host-test.log")" >&2
+        echo broken >"$result"
         return
     fi
+    echo "$host" >"$result"
 
     if [ -n "$qemu" ]; then
         if run "$name" test; then qemu_test=missed; else qemu_test=caught; fi
@@ -78,9 +70,57 @@ mutant() {
     fi
 }
 
+# xargs calls the script back once per mutant, with the state in the environment.
+if [ "${1-}" = --mutant ]; then
+    work=$MUTANTS_WORK
+    qemu=$MUTANTS_QEMU
+    mutant "$2"
+    rm -rf "$tree"
+    exit 0
+fi
+
+jobs=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
+if [ "${1-}" = -j ]; then
+    jobs=$2
+    shift 2
+fi
+
 [ $# -gt 0 ] || set -- "$root"/tests/mutants/*.patch
+names=""
 for arg in "$@"; do
-    mutant "$(basename "$arg" .patch)"
+    name=$(basename "$arg" .patch)
+    if [ ! -f "$root/tests/mutants/$name.patch" ]; then
+        echo "mutant $name: no such patch" >&2
+        exit 1
+    fi
+    names="$names $name"
+done
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+mkdir -p "$logs" "$work/base" "$work/result"
+
+qemu=$(command -v qemu-system-riscv32 || true)
+[ -n "$qemu" ] || echo "qemu-system-riscv32 not found: test and qemu-replay are skipped" >&2
+
+cp -r "$root/kernel" "$root/host" "$root/include" "$root/user" "$root/Makefile" "$root/tests" \
+    "$work/base/"
+if ! (cd "$work/base" && make -s -j"$jobs" all host-test) >"$logs/unmutated.log" 2>&1; then
+    echo "the unmutated tree does not build or fails host-test, see build/mutants/unmutated.log" >&2
+    exit 1
+fi
+
+export MUTANTS_WORK="$work" MUTANTS_QEMU="$qemu"
+printf '%s\n' $names | xargs -P "$jobs" -I{} "$0" --mutant {}
+
+broken=""
+missed=""
+for name in $names; do
+    case $(cat "$work/result/$name" 2>/dev/null || echo broken) in
+        caught) ;;
+        missed) missed="$missed $name" ;;
+        *) broken="$broken $name" ;;
+    esac
 done
 
 status=0

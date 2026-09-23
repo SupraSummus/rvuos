@@ -28,6 +28,7 @@ make host-test  # replay the fuzz corpus on the host build with invariants
 make fuzz       # fuzz the system call surface for FUZZ_TIME seconds
 make qemu-replay # replay the corpus on QEMU and compare traces with the host
 make check      # test, host-test and qemu-replay
+make mutants    # plant the bugs of tests/mutants/ and see which checks catch them
 ```
 
 `PMP_MAX_ENTRIES=8 make check` runs everything with a smaller PMP budget.

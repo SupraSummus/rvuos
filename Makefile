@@ -126,21 +126,31 @@ HOST_SAN    := -fsanitize=address,undefined -fno-sanitize-recover=all
 
 HOST_KERNEL_SRC := kernel/cap.c kernel/pool.c kernel/process.c kernel/sched.c \
                    kernel/syscall.c kernel/boot.c kernel/selfcheck.c kernel/klog.c
-HOST_SRC        := host/shim.c host/mutator.c
-HOST_HDR        := $(wildcard kernel/*.h kernel/board/qemu/*.h host/*.h include/rvuos/*.h)
+HOST_SRC        := host/shim.c host/mutator.c host/fuzz.c
 
 FUZZ_TIME ?= 60
 
 # One harness per simulated machine:
 # the default, an eight-entry PMP budget, and a 32-byte PMP grain as RP2350 has.
+# The machine is a preprocessor flag, so each harness has its objects to itself
+# in build/host/<harness>.obj/.
 HOST_HARNESSES := $(HOST_BUILD)/fuzz $(HOST_BUILD)/fuzz-pmp8 $(HOST_BUILD)/fuzz-grain32
-$(HOST_BUILD)/fuzz-pmp8:    HOST_MACHINE := -UPMP_MAX_ENTRIES -DPMP_MAX_ENTRIES=8
-$(HOST_BUILD)/fuzz-grain32: HOST_MACHINE := -DPMP_GRAIN=32
+$(HOST_BUILD)/fuzz-pmp8.obj/%.o:    HOST_MACHINE := -UPMP_MAX_ENTRIES -DPMP_MAX_ENTRIES=8
+$(HOST_BUILD)/fuzz-grain32.obj/%.o: HOST_MACHINE := -DPMP_GRAIN=32
 
-$(HOST_HARNESSES): $(HOST_KERNEL_SRC) $(HOST_SRC) host/fuzz.c $(HOST_HDR)
-	@mkdir -p $(dir $@)
-	$(HOST_CC) $(HOST_CFLAGS) $(HOST_MACHINE) $(HOST_SAN) -fsanitize=fuzzer \
-		$(HOST_KERNEL_SRC) $(HOST_SRC) host/fuzz.c -o $@
+host_obj = $(patsubst %.c,$(1).obj/%.o,$(HOST_KERNEL_SRC) $(HOST_SRC))
+HOST_OBJ := $(foreach h,$(HOST_HARNESSES),$(call host_obj,$(h)))
+
+define host_harness
+$(1): $(call host_obj,$(1))
+	$$(HOST_CC) $$(HOST_SAN) -fsanitize=fuzzer $$^ -o $$@
+
+$(1).obj/%.o: %.c
+	@mkdir -p $$(dir $$@)
+	$$(HOST_CC) $$(HOST_CFLAGS) $$(HOST_MACHINE) $$(HOST_SAN) -fsanitize=fuzzer-no-link \
+		-MMD -MP -c $$< -o $$@
+endef
+$(foreach h,$(HOST_HARNESSES),$(eval $(call host_harness,$(h))))
 
 # Replay the seeds and the corpus once on every harness, self-check after every call.
 host-test: $(HOST_HARNESSES)
@@ -181,9 +191,10 @@ corpus-merge: $(HOST_HARNESSES)
 # Replay the seeds and the corpus on the real kernel under QEMU
 # and compare every call's status with the host build;
 # an invariant report on either side fails the input, matching or not.
+# It runs one QEMU per processor, or REPLAY_JOBS.
 qemu-replay: $(BUILD)/kernel-fuzzdrv.elf $(HOST_BUILD)/fuzz
 	@[ "$(BOARD)" = qemu ] || { echo "qemu-replay runs on BOARD=qemu"; exit 1; }
-	tests/differential.py --qemu "$(QEMU) $(QEMUFLAGS)" \
+	tests/differential.py --qemu "$(QEMU) $(QEMUFLAGS)" $(if $(REPLAY_JOBS),--jobs $(REPLAY_JOBS)) \
 		--kernel $(BUILD)/kernel-fuzzdrv.elf --host $(HOST_BUILD)/fuzz tests/seeds tests/corpus
 
 check: test host-test qemu-replay
@@ -192,4 +203,4 @@ clean:
 	rm -rf $(BUILD)
 
 -include $(KERNEL_OBJ:.o=.d) $(patsubst %,$(BUILD)/user/%.d,$(USER_PROGRAMS)) \
-         $(BUILD)/kernel/kernel.d $(BUILD)/user/user.d
+         $(BUILD)/kernel/kernel.d $(BUILD)/user/user.d $(HOST_OBJ:.o=.d)
