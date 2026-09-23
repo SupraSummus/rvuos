@@ -166,7 +166,3 @@ Design decisions behind these items live in `DESIGN.md`.
   `OP_THREAD_SUSPEND` waits for a reason to exist,
   and a userspace scheduler, open decision 9 in `DESIGN.md`, would be one;
   a thread waiting on a notification cannot be taken off it today.
-- `object_first`/`object_next` collapsed the pool walk everywhere
-  except the tiling check in `selfcheck.c`, which verifies
-  the very link the flat walk crosses pools by.
-  Leave that one nested.
