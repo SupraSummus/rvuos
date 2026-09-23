@@ -68,7 +68,8 @@ Design decisions behind these items live in `DESIGN.md`.
    - The run queue, and the count of armed sources.
      No system call changes, but the round order in `MANUAL.md` does.
    - A predecessor link per slot.
-   - Revoke preempted when an interrupt is pending, and restarted.
+   - Revoke preempted when an interrupt is pending, and restarted;
+     the conversions and a delete below a root too.
    - `Untyped` and `Frame`, open decision 14, once its open questions are decided.
    - The timer queue, once "Timers are the open part" is decided.
 

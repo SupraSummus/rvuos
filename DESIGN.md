@@ -425,7 +425,7 @@ every capability lives in a `CapTable`,
 every `CapTable` is an object in a pool,
 and every pool is on the list.
 It has the same shape as `pool_overlaps` and `installed_overlaps`
-and costs the same, once per destroy rather than once per system call.
+and costs the same, once for every pool the destroy takes.
 The derivation tree adds a second thing the sweep takes:
 every slot the dying pools held is revoked with everything derived from it,
 so a grant dies with the table it was made through,
@@ -1000,11 +1000,11 @@ so it can stop between any two nodes.
 | `tick_advance` | every tick | a timer queue; see below |
 | `runnable_after` | every switch | a run queue threaded through `Thread` |
 | `source_armed` | every stall in `wfi` | a count of armed timers and device `Irq`s |
-| `cap_parent`, `detach` | delete, uninstall, `OP_REGION_TO_POOL` | a predecessor link per slot |
+| `cap_parent`, `detach` | delete, uninstall, `OP_REGION_TO_POOL`, `OP_IRQ_BIND` | a predecessor link per slot |
 | `pool_overlaps` | `OP_PROCESS_INSTALL` | open decision 14 |
 | `pool_overlaps`, `installed_overlaps` | `OP_REGION_TO_POOL` | open decision 14 |
-| `cap_revoke_range`, `pool_under`, `node_live` | pool destroy | open decision 14, and preemption |
-| `cap_revoke_below` | revoke | preemption |
+| `cap_revoke_range`, `pool_under`, `node_live`, `cap_parent` | pool destroy | open decision 14, and preemption |
+| `cap_revoke_below` | revoke, `OP_REGION_TO_POOL`, `OP_IRQ_BIND` | preemption |
 
 A run queue changes the round from allocation order,
 which `MANUAL.md` promises, to the order threads became ready.
@@ -1012,9 +1012,16 @@ which `MANUAL.md` promises, to the order threads became ready.
 goal 4 says it is not.
 A predecessor link makes a slot twenty-four bytes instead of twenty
 and lets a node leave its ring in constant time.
+The first child's predecessor is the last child,
+so a delete splices its children into its parent's ring without walking them.
+A delete below a root still takes a step per child, each becoming a root,
+and is preempted like a revoke.
 The conversions that look up a parent today
 revoke below the consumed slot and move the node, links and all,
 into the result's place.
+That revoke is preempted too, so it has to come first:
+both conversions build their object before it today,
+and a restart would find the pool or the line taken.
 
 **Timers are the open part.**
 A deadline queue sorted by expiry makes the tick constant

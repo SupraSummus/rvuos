@@ -38,23 +38,6 @@ bool pool_under(const struct pool *pool, const struct pool *ancestor)
     return false;
 }
 
-/* Take a pool off the list. */
-static void pool_unlink(struct pool *pool)
-{
-    /* The list is linked by physical address, so it is walked, not spliced. */
-    if (pool_list == pool) {
-        pool_list = pool_next_pool(pool);
-        return;
-    }
-    for (struct pool *p = pool_list; p != NULL; p = pool_next_pool(p)) {
-        if (pool_next_pool(p) == pool) {
-            p->next = pool->next;
-            return;
-        }
-    }
-    kpanic("pool not on the list");
-}
-
 void pool_destroy(struct pool *pool)
 {
     /*
@@ -72,15 +55,21 @@ void pool_destroy(struct pool *pool)
      * The list has the newest pool first and a child is newer than its parent,
      * so one walk takes every pool below this one before the pool itself,
      * and a parent read on the way up is never one already zeroed.
+     * Keeping the last pool that stays unlinks each one that goes without a second walk.
      */
-    for (struct pool *p = pool_list, *next; p != NULL; p = next) {
+    for (struct pool *p = pool_list, *next, *kept = NULL; p != NULL; p = next) {
         next = pool_next_pool(p);
         if (!pool_under(p, pool)) {
+            kept = p;
             continue;
         }
         /* Nothing below may fail: the pool is going. */
         sched_forget_pool(p);
-        pool_unlink(p);
+        if (kept != NULL) {
+            kept->next = p->next;
+        } else {
+            pool_list = next;
+        }
         /* The memory is about to be user memory again, holding other processes' tables. */
         memset(p2v(p->base), 0, p->size);
     }

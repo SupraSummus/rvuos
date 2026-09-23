@@ -4,7 +4,7 @@ The thread waits on an object that is no longer live.
 diff --git a/kernel/pool.c b/kernel/pool.c
 --- a/kernel/pool.c
 +++ b/kernel/pool.c
-@@ -81,3 +81,2 @@
+@@ -66,3 +66,2 @@ void pool_destroy(struct pool *pool)
          /* Nothing below may fail: the pool is going. */
 -        sched_forget_pool(p);
-         pool_unlink(p);
+         if (kept != NULL) {
