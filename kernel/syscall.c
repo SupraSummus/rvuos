@@ -417,8 +417,7 @@ static int op_notification(struct thread *t, const struct cap *cap,
             ntfn->bits = 0;
             return KERR_OK;
         }
-        t->waiting_on = v2p(&ntfn->hdr);
-        t->state = THREAD_WAITING;
+        sched_wait(t, ntfn);
         return KERR_BLOCKED;
     default:
         return KERR_WRONG_TYPE;
@@ -503,6 +502,7 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
         }
         irq->ntfn = v2p(ntfn);
         irq->line = first;
+        line_irq[first] = v2p(irq);
         /* Its bits are zero, so it is disarmed, and its line stays masked as every line does until a set. */
         struct cap ic = cap_to_object(&irq->hdr, RIGHT_ALL);
         /* The Irq capability takes the line's place in the tree; the line and its derivation go. */

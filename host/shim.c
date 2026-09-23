@@ -13,9 +13,9 @@
 
 _Static_assert(HOST_RAM_BASE == RAM_BASE && HOST_RAM_SIZE == RAM_SIZE,
                "host RAM must match the kernel's layout");
-_Static_assert(REPLAY_THREAD_SP > USER_DATA_BASE &&
-               REPLAY_THREAD_SP <= USER_DATA_BASE + USER_DATA_SIZE,
-               "the replay driver's second stack must lie in its data region");
+_Static_assert(REPLAY_THREAD_SP > USER_DATA_BASE && REPLAY_THREAD_SP <= USER_DATA_BASE + USER_DATA_SIZE &&
+               REPLAY_THIRD_SP > USER_DATA_BASE && REPLAY_THIRD_SP <= USER_DATA_BASE + USER_DATA_SIZE,
+               "the replay driver's stacks must lie in its data region");
 
 uint8_t *host_ram;
 /* The driver's threads, by actor number; see host_event. */
@@ -166,6 +166,7 @@ struct thread *host_boot(void)
      * exactly as on a warm reset.
      */
     pool_list = NULL;
+    memset(line_irq, 0, IRQ_LINES * sizeof(line_irq[0]));
     current = NULL;
     sched_ticks = 0;
     debug_trace = false;
@@ -194,14 +195,16 @@ struct thread *host_boot(void)
         }
     }
 
-    struct cap second;
-    if (cap_lookup(thread_table(root), REPLAY_CAP_THREAD, &second) != KERR_OK ||
-        second.type != CAP_THREAD) {
-        abort();
-    }
+    static const uint16_t slots[] = { REPLAY_CAP_THREAD, REPLAY_CAP_THIRD };
+    _Static_assert(sizeof(slots) / sizeof(slots[0]) == REPLAY_THREADS - 1, "a slot per thread but the root");
     host_threads[1] = root;
-    host_threads[2] = (struct thread *)cap_object(&second);
-    _Static_assert(REPLAY_THREADS == 2, "host_boot names the driver's threads by hand");
+    for (unsigned i = 0; i < REPLAY_THREADS - 1; i++) {
+        struct cap c;
+        if (cap_lookup(thread_table(root), slots[i], &c) != KERR_OK || c.type != CAP_THREAD) {
+            abort();
+        }
+        host_threads[i + 2] = (struct thread *)cap_object(&c);
+    }
     return root;
 }
 

@@ -61,6 +61,16 @@ Design decisions behind these items live in `DESIGN.md`.
    - what the ROM overwrites in RAM on a reset, for open decision 12;
    - the escape-attempt suite below, on the board as well as under QEMU,
      since the board's PMP is what confines a process there.
+9. Bounded work, goal 4 in `DESIGN.md`,
+   whose table lists every walk this removes.
+   ABI changes come last.
+   Done: the line table, the installed region's slot index, and the wait queue.
+   - The run queue, and the count of armed sources.
+     No system call changes, but the round order in `MANUAL.md` does.
+   - A predecessor link per slot.
+   - Revoke preempted when an interrupt is pending, and restarted.
+   - `Untyped` and `Frame`, open decision 14, once its open questions are decided.
+   - The timer queue, once "Timers are the open part" is decided.
 
 ## Verification
 
@@ -85,9 +95,9 @@ Design decisions behind these items live in `DESIGN.md`.
   That the log cannot become a pool is beyond it too:
   the replay driver maps the log, so the overlap check refuses first,
   and a process that never mapped it exists only in `user/init.c`'s children.
-- The replay driver has two threads, so a record's actor is one of two.
+- The replay driver has three threads, and the third shares the second's process and pool.
   More of them, each with its process and pool as the second has,
-  would give the round more candidates and the pool tree more branches;
+  would give the pool tree more branches;
   the prologue in `include/rvuos/replay.h` and `host_boot` grow with them.
 - Escape-attempt suite under QEMU:
   one user program per scenario, expected outcome a specific fault.
@@ -109,7 +119,7 @@ Design decisions behind these items live in `DESIGN.md`.
   a revoked region cannot be pooled again;
   `KERR_OVERLAP` is all it sees.
   A revoke that destroys the pools whose only capabilities it took
-  would be the seL4 answer; decide when a lender that keeps its borrower alive exists.
+  would be the seL4 answer, and open decision 14 in `DESIGN.md` is that answer.
 - The seeds under `tests/seeds` are binary and were written by hand.
   Moving `BOOT_CAP_LOG` in took a one-off script that knew which argument
   of which operation is a slot; a generator in the repository,

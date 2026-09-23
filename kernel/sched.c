@@ -13,22 +13,42 @@ uint32_t sched_ticks;
 uint32_t trace_wake_bits;
 
 /*
- * The kernel keeps no queues,
- * so every question it asks about threads is answered
- * by walking every object, as the overlap checks are.
+ * A notification's waiters are a ring through wait_next and wait_prev,
+ * and its waiters field names the oldest, so the newest is that one's wait_prev.
  */
-struct thread *sched_waiter(paddr_t notification)
+void sched_wait(struct thread *t, struct notification *ntfn)
 {
-    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
-        if (o->type != CAP_THREAD) {
-            continue;
-        }
-        struct thread *t = (struct thread *)o;
-        if (t->state == THREAD_WAITING && t->waiting_on == notification) {
-            return t;
+    paddr_t self = v2p(t);
+    if (ntfn->waiters == 0) {
+        t->wait_next = t->wait_prev = self;
+        ntfn->waiters = self;
+    } else {
+        struct thread *oldest = p2v(ntfn->waiters);
+        struct thread *newest = p2v(oldest->wait_prev);
+        t->wait_next = ntfn->waiters;
+        t->wait_prev = oldest->wait_prev;
+        newest->wait_next = self;
+        oldest->wait_prev = self;
+    }
+    t->waiting_on = v2p(&ntfn->hdr);
+    t->state = THREAD_WAITING;
+}
+
+/* Take a waiting thread off its notification's ring. */
+static void unwait(struct thread *t)
+{
+    struct notification *ntfn = p2v(t->waiting_on);
+    if (t->wait_next == v2p(t)) {
+        ntfn->waiters = 0;
+    } else {
+        ((struct thread *)p2v(t->wait_prev))->wait_next = t->wait_next;
+        ((struct thread *)p2v(t->wait_next))->wait_prev = t->wait_prev;
+        if (ntfn->waiters == v2p(t)) {
+            ntfn->waiters = t->wait_next;
         }
     }
-    return NULL;
+    t->wait_next = t->wait_prev = 0;
+    t->waiting_on = 0;
 }
 
 /*
@@ -61,9 +81,9 @@ static struct thread *runnable_after(struct thread *from)
  */
 static void wake(struct thread *t, uint32_t bits)
 {
+    unwait(t);
     t->frame.regs[REG_A0] = KERR_OK;
     t->frame.regs[REG_A1] = bits;
-    t->waiting_on = 0;
     t->state = THREAD_READY;
     trace_wake_bits = bits;
 }
@@ -71,9 +91,8 @@ static void wake(struct thread *t, uint32_t bits)
 void sched_signal(struct notification *ntfn, uint32_t bits)
 {
     ntfn->bits |= bits;
-    struct thread *waiter = sched_waiter(v2p(&ntfn->hdr));
-    if (waiter != NULL) {
-        wake(waiter, ntfn->bits);
+    if (ntfn->waiters != 0) {
+        wake(p2v(ntfn->waiters), ntfn->bits);
         ntfn->bits = 0;
     }
 }
@@ -149,37 +168,53 @@ static bool source_armed(void)
     return false;
 }
 
-void sched_unblock_range(uint32_t base, uint32_t size)
+/*
+ * The Irq bound to each line, 0 for none,
+ * so that an interrupt finds its Irq without a walk; see DESIGN.md, "Bounded work".
+ */
+paddr_t line_irq[IRQ_LINES];
+
+struct irq *line_binding(uint32_t line)
 {
-    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
-        if (o->type != CAP_THREAD) {
-            continue;
-        }
-        struct thread *t = (struct thread *)o;
-        if (t->state != THREAD_WAITING || !range_contains(base, size, t->waiting_on)) {
-            continue;
-        }
-        /*
-         * The notification is gone, so the wait cannot be answered.
-         * The thread learns that the way every other call learns it.
-         */
-        t->frame.regs[REG_A0] = KERR_INVALID_CAP;
-        t->frame.regs[REG_A1] = 0;
-        t->waiting_on = 0;
-        t->state = THREAD_READY;
-    }
+    return line_irq[line] != 0 ? p2v(line_irq[line]) : NULL;
 }
 
-void sched_unbind_range(uint32_t base, uint32_t size)
+void sched_forget_pool(struct pool *pool)
 {
-    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
-        if (o->type != CAP_IRQ || !range_contains(base, size, v2p(o))) {
-            continue;
+    for (struct obj_header *o = pool_first(pool); o != NULL; o = pool_next(pool, o)) {
+        switch (o->type) {
+        case CAP_NOTIFICATION: {
+            struct notification *ntfn = (struct notification *)o;
+            /*
+             * The notification is gone, so the wait cannot be answered.
+             * The thread learns that the way every other call learns it.
+             */
+            while (ntfn->waiters != 0) {
+                struct thread *t = p2v(ntfn->waiters);
+                unwait(t);
+                t->frame.regs[REG_A0] = KERR_INVALID_CAP;
+                t->frame.regs[REG_A1] = 0;
+                t->state = THREAD_READY;
+            }
+            break;
         }
-        /* The log's line has no controller to mask; gone is masked. */
-        uint32_t line = ((struct irq *)o)->line;
-        if (line != LOG_IRQ_LINE) {
-            irq_enable(line, false);
+        case CAP_THREAD:
+            /* The thread is gone, and the ring it is on may live on in another pool. */
+            if (((struct thread *)o)->state == THREAD_WAITING) {
+                unwait((struct thread *)o);
+            }
+            break;
+        case CAP_IRQ: {
+            /* The object that would receive the interrupt is gone; the log's line has no controller. */
+            uint32_t line = ((struct irq *)o)->line;
+            if (line != LOG_IRQ_LINE) {
+                irq_enable(line, false);
+            }
+            line_irq[line] = 0;
+            break;
+        }
+        default:
+            break;
         }
     }
 }

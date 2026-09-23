@@ -456,13 +456,13 @@ Sizes a developer needs for planning, as the kernel rounds them:
 | pool descriptor | 32 |
 | `CapTable` with `n` slots | 12 + 20 × n, rounded up to 8 |
 | `Process` | 256 (216 with `PMP_MAX_ENTRIES=8`) |
-| `Thread` | 168 |
+| `Thread` | 176 |
 | `Notification` | 16 |
 | `Timer` | 24 |
 | `Irq` | 24 |
 
 A minimal child process, table of 10 slots, process, thread and two notifications,
-costs 560 bytes including the descriptor.
+costs 712 bytes including the descriptor.
 
 **The same-pool rule.**
 The kernel follows the link from a thread to its process,
@@ -1177,7 +1177,8 @@ struct replay_record { uint8_t op; uint8_t actor; uint16_t slot; uint32_t a1, a2
 ```
 
 Each record is one system call and the thread that makes it:
-`actor` 0 is whichever thread runs, 1 the driver's root thread, 2 its second thread.
+`actor` 0 is whichever thread runs, 1 the driver's root thread, 2 its second thread,
+3 a third that starts stopped until a record resumes it.
 The replay driver in `user/fuzzdrv.c` performs them in order,
 the host build in `host/` performs the same records natively under ASan and UBSan,
 and `tests/differential.py` requires the two transcripts to match line for line.

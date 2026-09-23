@@ -55,6 +55,8 @@ void klog_append(char c)
      * An armed Irq means the reader had taken everything,
      * so only the byte that makes the line rise can find one to signal;
      * the rest of a burst is one look at the head cheaper.
+     * Signalling on every byte would do no harm, but the trace lines after each call
+     * would then hide a klog_set that ignores the level from the replay.
      */
     bool quiet = !klog_pending();
     ring[header->head % KLOG_SIZE] = (uint8_t)c;

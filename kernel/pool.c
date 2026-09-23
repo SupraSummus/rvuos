@@ -79,8 +79,7 @@ void pool_destroy(struct pool *pool)
             continue;
         }
         /* Nothing below may fail: the pool is going. */
-        sched_unblock_range(p->base, p->size);
-        sched_unbind_range(p->base, p->size);
+        sched_forget_pool(p);
         pool_unlink(p);
         /* The memory is about to be user memory again, holding other processes' tables. */
         memset(p2v(p->base), 0, p->size);
@@ -192,12 +191,3 @@ bool installed_overlaps(uint32_t base, uint32_t size)
     return false;
 }
 
-struct irq *line_binding(uint32_t line)
-{
-    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
-        if (o->type == CAP_IRQ && ((struct irq *)o)->line == line) {
-            return (struct irq *)o;
-        }
-    }
-    return NULL;
-}

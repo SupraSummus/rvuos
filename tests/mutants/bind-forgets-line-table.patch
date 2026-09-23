@@ -1,0 +1,11 @@
+A bind leaves the line table empty.
+The interrupt would find no Irq to signal and the kernel would panic;
+the line table records exactly the Irqs that are bound.
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -504,3 +504,2 @@
+         irq->line = first;
+-        line_irq[first] = v2p(irq);
+         /* Its bits are zero, so it is disarmed, and its line stays masked as every line does until a set. */

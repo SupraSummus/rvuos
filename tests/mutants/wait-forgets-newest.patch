@@ -1,0 +1,12 @@
+A thread that joins a queue is not linked from the newest waiter before it.
+A signal would never reach it, and the ring would not close;
+a notification's waiters are a ring linked both ways.
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -29,3 +29,3 @@
+         t->wait_prev = oldest->wait_prev;
+-        newest->wait_next = self;
++        (void)newest;
+         oldest->wait_prev = self;

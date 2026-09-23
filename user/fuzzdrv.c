@@ -8,7 +8,7 @@
  * The kernel prints one line per call;
  * tests/differential.py compares them with the host build.
  *
- * Two threads share the record cursor, see rvuos/replay.h,
+ * Three threads share the record cursor, see rvuos/replay.h,
  * so that a record which blocks one of them
  * leaves the kernel something to run,
  * and the blocking paths are replayed like any other.
@@ -79,6 +79,7 @@ static void drain_log(void)
 
 static void replay_loop(unsigned me);
 void replay_second(void);
+void replay_third(void);
 int main(void);
 
 static void replay_loop(unsigned me)
@@ -105,10 +106,15 @@ static void replay_loop(unsigned me)
     }
 }
 
-/* The second thread's entry point; the first thread is main. */
+/* The other threads' entry points; the first thread is main. */
 void replay_second(void)
 {
     replay_loop(2);
+}
+
+void replay_third(void)
+{
+    replay_loop(3);
 }
 
 int main(void)
@@ -116,7 +122,7 @@ int main(void)
     for (unsigned i = 0; i < REPLAY_PROLOGUE_COUNT; i++) {
         struct replay_record r = replay_prologue[i];
         if (r.op == OP_THREAD_CONFIGURE) {
-            r.a1 = (uint32_t)&replay_second;
+            r.a1 = r.slot == REPLAY_CAP_THIRD ? (uint32_t)&replay_third : (uint32_t)&replay_second;
         }
         if (perform(&r) != KERR_OK) {
             puts("replay setup failed\n");
