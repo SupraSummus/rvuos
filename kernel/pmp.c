@@ -108,6 +108,7 @@ void pmp_init(void)
     /*
      * The image uses entries from zero up, so the budget ends at the first
      * entry whose address or mode ignores a write, as RP2350's hardwired ones do.
+     * NAPOT is the only mode the image uses, so it is the mode probed.
      */
     unsigned count = 0;
     for (unsigned i = 0; i < PMP_MAX_ENTRIES; i++) {
@@ -118,10 +119,10 @@ void pmp_init(void)
         if (ones == zero) {
             break;
         }
-        pmpcfg_set_byte(i, PMP_A_TOR);
+        pmpcfg_set_byte(i, PMP_A_NAPOT);
         uint8_t cfg = pmpcfg_get_byte(i);
         pmpcfg_set_byte(i, 0);
-        if ((cfg & 0x18) != PMP_A_TOR) {
+        if ((cfg & 0x18) != PMP_A_NAPOT) {
             break;
         }
         count++;
@@ -132,7 +133,7 @@ void pmp_init(void)
 void pmp_set(unsigned idx, uint32_t addr, uint8_t cfg)
 {
     /* Address first, then rights; harmless today since PMP is off in machine mode. */
-    pmpaddr_write(idx, addr >> 2);
+    pmpaddr_write(idx, addr);
     pmpcfg_set_byte(idx, cfg);
 }
 
@@ -144,6 +145,6 @@ void pmp_clear(unsigned idx)
 
 void pmp_get(unsigned idx, uint32_t *addr, uint8_t *cfg)
 {
-    *addr = pmpaddr_read(idx) << 2;
+    *addr = pmpaddr_read(idx);
     *cfg = pmpcfg_get_byte(idx);
 }

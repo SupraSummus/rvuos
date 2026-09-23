@@ -32,8 +32,8 @@ import subprocess
 import sys
 import tempfile
 
-# Must match kernel/kernel.h and include/rvuos/abi.h.
-INPUT_BASE = 0x807F0000
+# Must match kernel/board/qemu/board.h and include/rvuos/abi.h.
+INPUT_BASE = 0x80210000
 REPLAY_MAGIC = 0x5A465652
 RECORD_SIZE = 16
 MAX_RECORDS = 256

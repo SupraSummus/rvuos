@@ -152,16 +152,15 @@ static void check_pools(void)
     }
 }
 
-/* Rights PMP grants at addr under a TOR image: the lowest matching entry wins. */
+/* Rights PMP grants at addr under a NAPOT image: the lowest matching entry wins. */
 static uint8_t image_rights(const uint32_t *addr, const uint8_t *cfg, unsigned count, uint64_t at)
 {
-    uint64_t lo = 0;
     for (unsigned i = 0; i < count; i++) {
-        uint64_t hi = addr[i];
-        if ((cfg[i] & 0x18) == PMP_A_TOR && at >= lo && at < hi) {
+        uint64_t base, size;
+        pmp_napot_range(addr[i], &base, &size);
+        if ((cfg[i] & 0x18) == PMP_A_NAPOT && at >= base && at - base < size) {
             return cfg[i] & (PMP_R | PMP_W | PMP_X);
         }
-        lo = hi;
     }
     return 0;
 }
@@ -190,15 +189,15 @@ static void check_pmp_image(const struct process *proc, const uint32_t *addr,
 {
     for (unsigned i = 0; i < count; i++) {
         uint8_t mode = cfg[i] & 0x18;
-        if (mode != PMP_A_OFF && mode != PMP_A_TOR) {
-            fail("PMP entry uses a mode other than OFF and TOR", i, mode, csrs);
+        if (mode != PMP_A_OFF && mode != PMP_A_NAPOT) {
+            fail("PMP entry uses a mode other than OFF and NAPOT", i, mode, csrs);
         }
         if ((cfg[i] & PMP_W) && !(cfg[i] & PMP_R)) {
             fail("PMP entry uses the reserved encoding R=0 W=1", i, cfg[i], csrs);
         }
     }
 
-    uint64_t points[2 * PROCESS_REGION_SLOTS + PMP_MAX_ENTRIES + 2];
+    uint64_t points[2 * PROCESS_REGION_SLOTS + 2 * PMP_MAX_ENTRIES + 2];
     size_t n = 0;
     points[n++] = 0;
     points[n++] = 0x100000000ull;
@@ -209,7 +208,10 @@ static void check_pmp_image(const struct process *proc, const uint32_t *addr,
         }
     }
     for (unsigned i = 0; i < count; i++) {
-        points[n++] = addr[i];
+        uint64_t base, size;
+        pmp_napot_range(addr[i], &base, &size);
+        points[n++] = base;
+        points[n++] = base + size;
     }
     sort_u64(points, n);
 
@@ -407,8 +409,8 @@ static void check_captable(const struct captable *table)
             if (c->rights & ~granted) {
                 fail("region capability with rights beyond the grant", v2p(table), i, c->rights);
             }
-            if (!grain_aligned(c->a, c->b)) {
-                fail("region capability not on the PMP grain", v2p(table), i, c->a);
+            if (!napot_block(c->a, c->b)) {
+                fail("region capability is not a NAPOT block", v2p(table), i, c->a);
             }
             break;
         }

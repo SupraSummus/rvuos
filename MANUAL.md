@@ -75,8 +75,8 @@ What rvuos is not:
   set by the kernel and not by the board.
   A region is installed with read, write and execute rights
   and the kernel rebuilds the process's PMP image on every change.
-  How many of the slots can be filled at once
-  is bounded by the PMP entries the core has; see section 5.4.
+  A region is a naturally aligned power-of-two block and costs one PMP entry,
+  so the core's entry count bounds how many slots can be filled; see section 5.4.
 - **Capabilities with rights.**
   A capability names a kernel object, a memory range or a range of interrupt lines,
   together with rights bits.
@@ -121,15 +121,14 @@ What rvuos is not:
 The kernel needs a RISC-V core with:
 
 - machine mode and user mode (supervisor mode is not used even when present),
-- PMP with TOR addressing mode and at least four entries,
+- PMP with NAPOT addressing mode and at least four entries,
   which is the kernel's own floor: it refuses to boot with fewer,
 - the `A` extension in user mode if programs want atomics in shared memory,
 - a machine timer (`mtime` and `mtimecmp`),
 - an interrupt controller in front of the machine external interrupt.
 
 Cores without PMP cannot run rvuos.
-Cores with NAPOT-only PMP, RP2350's Hazard3 among them, are out of scope today;
-`DESIGN.md`, open decision 8, records the alternative.
+TOR is not needed; `DESIGN.md`, open decision 8, records why rvuos uses NAPOT alone.
 
 The build is `rv32imac`, `ilp32`, compiled with clang and linked with lld.
 
@@ -154,12 +153,15 @@ Memory map:
 | Range | Size | What |
 |---|---|---|
 | `0x10000000` | 256 B | 16550 UART registers, granted to the root task |
-| `0x80000000` to `0x800FEFE0` | just under 1 MiB | kernel code, data, stack and the boot pool |
-| `0x800FEFE0` to `0x80100000` | 32 B + 4 KiB | the kernel log: header and ring |
+| `0x80000000` to `0x800FF000` | just under 1 MiB | kernel code, data, stack and the boot pool |
+| `0x800FF000` | 4 KiB | the kernel log: a 32-byte header and the ring |
 | `0x80100000` | 64 KiB | root task code, read and execute |
 | `0x80200000` | 64 KiB | root task data and stack, read and write |
-| `0x80210000` to `0x807F0000` | about 5.9 MiB | free RAM, granted to the root task with all rights |
-| `0x807F0000` | 64 KiB | replay input placed by QEMU's loader, read only |
+| `0x80210000` | 64 KiB | replay input placed by QEMU's loader, read only |
+| `0x80400000` | 4 MiB | free RAM, granted to the root task with all rights |
+
+Every range granted to the root task is a block, see section 5.4,
+so what lies between the blocks is used by nothing.
 
 Interrupt lines:
 
@@ -183,12 +185,12 @@ Memory map:
 | Range | Size | What |
 |---|---|---|
 | `0x6000F000` | 256 B | USB Serial/JTAG controller registers, granted to the root task |
-| `0x40800000` to `0x4081EFE0` | just under 128 KiB | kernel code, data, stack and the boot pool |
-| `0x4081EFE0` to `0x40820000` | 32 B + 4 KiB | the kernel log: header and ring |
+| `0x40800000` to `0x4081F000` | just under 128 KiB | kernel code, data, stack and the boot pool |
+| `0x4081F000` | 4 KiB | the kernel log: a 32-byte header and the ring |
 | `0x40820000` | 64 KiB | root task code, read and execute |
-| `0x40830000` | 64 KiB | root task data and stack, read and write |
-| `0x40840000` to `0x4087F000` | 252 KiB | free RAM, granted to the root task with all rights |
-| `0x4087F000` | 4 KiB | input region, read only; nothing fills it yet |
+| `0x40830000` | 32 KiB | root task data and stack, read and write |
+| `0x40838000` | 4 KiB | input region, read only; nothing fills it yet |
+| `0x40840000` | 256 KiB | free RAM, granted to the root task with all rights |
 
 Interrupt lines:
 
@@ -392,13 +394,16 @@ before it has created a single pool.
 
 ### 5.4 Memory: regions, carving and installing
 
-The **grain** is the PMP's address resolution,
-a power of two of at least four bytes, one value per machine.
+Every region is a **block**:
+its size is a power of two and its base a multiple of its size,
+which is the range one PMP entry in NAPOT mode describes.
+The smallest block is eight bytes, or the PMP's grain if that is coarser;
 `OP_REGION_INFO` returns it in `a4`.
-Every region's base and size are multiples of the grain,
-and `OP_REGION_CARVE` refuses an offset or a size that is not.
+`OP_REGION_CARVE` hands out a block within a block.
+A range of any other size is rounded up or made of several blocks,
+one region slot each.
 Programs that lay memory out with fixed offsets
-should check the grain once and fail early if the layout does not fit.
+should check the smallest size once and fail early if the layout does not fit.
 
 Rules for installing a region into a process:
 
@@ -411,12 +416,9 @@ Rules for installing a region into a process:
 - The install takes effect at once, even for the running process.
 
 PMP budget.
-Regions are sorted by address and written as TOR entries.
-`n` regions that touch each other cost `n + 1` entries;
-`n` disjoint regions cost up to `2n`.
-When the budget runs out the install fails with `KERR_LIMIT`
-and the slot stays empty.
-Removing a region never needs more entries.
+Every installed region is one NAPOT entry, so `n` regions cost `n` entries.
+An install beyond the core's entries fails with `KERR_LIMIT`,
+which with eight region slots happens only on a core with fewer than eight.
 
 An access must lie entirely within one PMP entry.
 Two regions that touch share a boundary
@@ -425,7 +427,7 @@ so a process's creator lays it out so that nothing straddles one.
 
 Sharing costs no copy: installing the same range into two processes
 gives both access, and no byte passes through the kernel.
-What it does cost is a region slot and PMP entries in each process.
+What it does cost is a region slot and a PMP entry in each process.
 
 ### 5.5 Pools
 
@@ -636,7 +638,7 @@ Sharing a line between drivers is not supported;
 The kernel writes every byte it prints, `OP_DEBUG_PUTC` included,
 into a ring behind a header of `RVUOS_LOG_HEADER` bytes,
 and never waits for a reader.
-The ring's size is the kernel's `KLOG_SIZE`, 4 KiB today;
+The ring's size is the kernel's `KLOG_SIZE`, 4 KiB less the header today;
 the header reports it, so a reader need not assume it.
 `BOOT_CAP_LOG` names the header and the ring;
 the root task installs it like a device's registers and reads without a system call.
@@ -805,14 +807,16 @@ and threads of those processes lose access at once.
 **`OP_REGION_INFO` (11).**
 No right needed.
 Returns `a1` = base, `a2` = size, `a3` = rights,
-`a4` = the PMP grain in bytes.
+`a4` = the size of the smallest region in bytes, a power of two of at least 8.
 
 **`OP_REGION_CARVE` (5).**
 No right needed.
 `a1` = offset from the region's base, `a2` = size, `a3` = destination slot in the caller's table.
 Produces a region with the same rights, hanging below the invoked one.
-Offset and size must be multiples of the grain, the size non-zero,
-and the sub-range within the region (`KERR_INVALID_ARG`).
+The size must be a power of two no smaller than the smallest region,
+the offset a multiple of the size,
+and the sub-range within the region (`KERR_INVALID_ARG`),
+so the new region is a block.
 The parent capability is unchanged.
 
 **`OP_REGION_TO_POOL` (6).**
@@ -987,7 +991,7 @@ and drops into user mode with:
 | 5 | `BOOT_CAP_DEBUG` | `Debug` | all |
 | 6 | `BOOT_CAP_CODE` | `Region`: the root task's code | read, execute |
 | 7 | `BOOT_CAP_DATA` | `Region`: the root task's data and stack | read, write |
-| 8 | `BOOT_CAP_FREE_RAM` | `Region`: all RAM the kernel and the root task do not use | all |
+| 8 | `BOOT_CAP_FREE_RAM` | `Region`: the block of RAM the board sets aside for the root task | all |
 | 9 | `BOOT_CAP_INPUT` | `Region`: test input the loader placed in RAM | read |
 | 10 | `BOOT_CAP_IRQ_LINES` | `IrqLine`: line 0 (the log) and every controller line | write |
 | 11 | `BOOT_CAP_UART` | `Region`: the board's console registers, a 16550 on QEMU and the USB Serial/JTAG controller on the ESP32-C6 | read, write |
@@ -1031,7 +1035,7 @@ There is no libc; `user/rvuos.h` provides the system call wrappers:
 |---|---|
 | `rv_invoke(op, cap, a1, a2, a3)` | any |
 | `rv_region_info(cap, &base, &size)` | `OP_REGION_INFO` |
-| `rv_region_grain(cap, &grain)` | `OP_REGION_INFO`, reading `a4` |
+| `rv_region_min_size(cap, &min)` | `OP_REGION_INFO`, reading `a4` |
 | `rv_signal(cap, bits)` | `OP_NOTIFY_SIGNAL` |
 | `rv_wait(cap, &bits)` | `OP_NOTIFY_WAIT` |
 | `rv_timer_set(cap, bits, us)` | `OP_TIMER_SET` |
@@ -1052,7 +1056,8 @@ The steps below are what `user/init.c` does.
 
 1. **Carve memory** out of `BOOT_CAP_FREE_RAM`:
    one chunk for the child's kernel objects, one for its data and stack,
-   one to share.
+   one to share,
+   each a 4 KiB block at an offset that is a multiple of 4 KiB.
 
    ```c
    rv_invoke(OP_REGION_CARVE, BOOT_CAP_FREE_RAM, POOL_OFFSET, CHUNK, SLOT_POOL_REGION);
@@ -1196,7 +1201,8 @@ and `tests/mutants/` holds one planted bug per invariant.
 | timer delay per call | 2^32 - 1 µs | `OP_TIMER_SET` |
 | tick | 1 ms (`TIMER_HZ` 1000) | `kernel/timer.h` |
 | interrupt lines | 96 on QEMU, 77 on the ESP32-C6, line 0 the log's | `IRQ_LINES` |
-| kernel log ring | 4 KiB | `KLOG_SIZE` |
+| smallest region | 8 bytes, or the PMP grain if coarser | `region_min_size` in `kernel/pmp.h` |
+| kernel log ring | 4 KiB less a 32-byte header | `KLOG_SIZE` |
 | replay records per input | 256 | `REPLAY_MAX_RECORDS` |
 
 ## 11. What is not there yet

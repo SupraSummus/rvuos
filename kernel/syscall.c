@@ -108,13 +108,13 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
         arg[1] = base;
         arg[2] = size;
         arg[3] = cap->rights;
-        arg[4] = pmp_grain;
+        arg[4] = region_min_size();
         return KERR_OK;
     case OP_REGION_CARVE: {
         uint32_t off = arg[1];
         uint32_t len = arg[2];
-        /* On the grain, so that every region capability can be installed as it is. */
-        if (!grain_aligned(off, len) || len == 0 || off > size || len > size - off) {
+        /* A block within the region, so that every region capability is one NAPOT entry. */
+        if (off >= size || len > size - off || !napot_block(base + off, len)) {
             return KERR_INVALID_ARG;
         }
         struct cap sub = cap_to_region(base + off, len, cap->rights);
@@ -127,8 +127,10 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
         /*
          * Kernel objects live in RAM: on a device range the zeroing below would drive registers.
          * The log is RAM the kernel writes on its own, so it cannot hold them either.
+         * A region is a block aligned to its size, so one this large lies on OBJ_ALIGN.
          */
-        if ((base | size) & (OBJ_ALIGN - 1) || size < POOL_MIN_SIZE || !ram_contains(base, size) ||
+        _Static_assert(POOL_MIN_SIZE % OBJ_ALIGN == 0, "a pool-sized block lies on OBJ_ALIGN");
+        if (size < POOL_MIN_SIZE || !ram_contains(base, size) ||
             ranges_overlap(base, size, KLOG_BASE, KLOG_REGION_SIZE)) {
             return KERR_INVALID_ARG;
         }

@@ -152,27 +152,27 @@ Consequences that shape the design:
   Real microcontrollers ship with 4 to 16.
   A process therefore has a small fixed number of *region slots*,
   not a page table.
-- **TOR mode is preferred over NAPOT.**
-  NAPOT entries must be power-of-two sized and naturally aligned,
-  which wastes RAM on a device with hundreds of kilobytes in total.
-  TOR entries describe an arbitrary range
-  bounded below by the previous entry's address.
-  The kernel sorts a process's regions by base address
-  so that `n` regions that touch each other cost `n + 1` entries,
-  and `n` disjoint regions cost at most `2n`.
-  Not every core has TOR; see open decision 8.
-  The ESP32-C6 honours TOR and a NAPOT entry of RAM's size,
-  but faults user fetches under a NAPOT entry for the whole address space,
-  which rvuos never writes.
-- **Every region lies on the grain.**
+- **Every region is a NAPOT block.**
+  A region's size is a power of two and its base a multiple of its size,
+  which is what one NAPOT entry describes.
+  A region costs one entry wherever it lies,
+  so an install fits while the process has fewer regions than the core has entries,
+  and two regions are either disjoint or one contains the other.
+  The price is rounding: a range that is not a power of two
+  is rounded up or made of several blocks, one slot each.
+  Open decision 8 records why this replaced TOR.
+  The ESP32-C6 faults user fetches under a NAPOT entry for the whole address space,
+  which rvuos never writes, since no region is larger than RAM.
+- **The smallest region is eight bytes, or the grain.**
   A platform rounds every PMP boundary to a grain of `2^(G+2)` bytes,
   one value per hart, and ignores the address bits below it.
   QEMU and the ESP32-C6 have four bytes, RP2350 has 32.
+  The smallest NAPOT block is eight bytes; four would need NA4, which rvuos does not use.
   The kernel probes the grain at boot
-  and a `Region` capability off the grain never exists:
+  and a `Region` capability that is not a block of at least that size never exists:
   the boot layout is checked once and carving requires it,
   so every capability can be installed exactly as it reads.
-  `OP_REGION_INFO` returns the grain, since user mode cannot read the PMP CSRs.
+  `OP_REGION_INFO` returns the smallest region, since user mode cannot read the PMP CSRs.
 - **An access must lie within one entry.**
   The lowest-numbered entry that matches any byte of an access decides,
   and it must match every byte or the access fails,
@@ -565,7 +565,7 @@ of the region capability's rights
 and the rights requested at install time.
 Installed regions in one process may not overlap,
 because PMP resolves overlaps by entry number
-and the result would depend on sort order rather than policy.
+and the result would depend on slot order rather than policy.
 A region cannot be installed writable but not readable:
 PMP reserves the encoding R=0, W=1,
 QEMU quietly drops the write right,
@@ -823,8 +823,9 @@ It is kernel memory that user mode can see,
 which the isolation properties otherwise forbid;
 it holds no object and no capability, only what the kernel chose to say,
 and `OP_REGION_TO_POOL` refuses the range, since the kernel writes there on its own.
-The ring lies at the top of the kernel's RAM, touching the root task's code,
-so that the two cost one PMP boundary rather than two.
+The header and the ring are one 4 KiB block at the top of the kernel's RAM,
+right below the root task's code,
+so the ring holds the block less its header.
 
 **The log is a device, and its line is line 0.**
 A reader that has taken everything wants to stop until there is more,
@@ -870,7 +871,7 @@ and its `khalt` writes the same dump by polling to the USB Serial/JTAG console,
 then a line with the code a simulator would have exited with,
 so that the same transcript check runs on the board;
 a console no host reads is given up on rather than waited for.
-The ring is 4 KiB, a burst's worth between two looks by a reader,
+The ring is just under 4 KiB, a burst's worth between two looks by a reader,
 and a reader that looks less often loses the oldest bytes and can tell.
 
 ## Boot
@@ -885,7 +886,7 @@ The kernel:
 3. carves its own static state out of a small fixed SRAM range,
 4. constructs the root process by hand, including a `KernelPool`
    in a range the linker reserves,
-5. hands the root task capabilities to the remaining RAM,
+5. hands the root task capabilities to the block of RAM the board sets aside for it,
    to the UART's registers,
    to the kernel's log,
    and to every line of the interrupt controller with the log's line before them
@@ -898,6 +899,9 @@ and can never become a pool:
 `OP_REGION_TO_POOL` refuses a range outside RAM,
 because the kernel zeroes a pool and writes objects into it,
 which on a device would drive its registers from machine mode.
+
+Every range the root task is granted is a block,
+so a board lays RAM out in blocks and what lies in none of them stays unused.
 
 The slots the root task finds filled are listed in `include/rvuos/abi.h`
 as the `BOOT_CAP_*` constants.
@@ -938,7 +942,7 @@ ESP-IDF turns them off at startup too.
 PMP is what confines a process, so rvuos loses nothing;
 what they could still do is open decision 13.
 Measured on the chip: sixteen PMP entries, all unlocked after the ROM,
-a four-byte grain, TOR, `mtval` on access faults,
+a four-byte grain, TOR, NAPOT with an entry of RAM's size, `mtval` on access faults,
 PMA entries all zero, which leave every range its default attributes,
 and machine interrupts taken in user mode whatever `mstatus.MIE` says.
 
@@ -968,7 +972,7 @@ For the running process the same holds for the CSRs actually written.
 **Authority confinement.**
 Every capability in every table names either
 a region within the granted memory,
-on the PMP grain,
+a NAPOT block no smaller than the smallest region,
 with rights no greater than the root task received for it,
 or a range of lines the interrupt controller has, the log's among them,
 with no more than the right to bind,
@@ -1179,7 +1183,7 @@ which nothing but the tick can get them past.
 **Hardware.**
 QEMU's PMP may differ from a real core in Smepmp behaviour,
 and it has a four-byte grain, so a coarser grain is never seen there.
-The host shim models the grain instead, rounding addresses as hardware would,
+The host shim models the grain instead, reading back the address bits below it as hardware would,
 and the corpus is replayed with a four-byte and a 32-byte grain.
 On the ESP32-C6, `make test BOARD=esp32c6` boots the demo
 and checks the same transcript as under QEMU;
@@ -1208,7 +1212,8 @@ until the maintainer decides otherwise.
    what it needs from Espressif's second-stage bootloader,
    and whether execute-in-place goes through a cache the kernel must control,
    are listed in `TODO.md`.
-   Other candidate: RP2350 on its Hazard3 cores, behind open decision 8.
+   Other candidate: RP2350 on its Hazard3 cores,
+   whose NAPOT-only PMP open decision 8 no longer rules out.
    Cores without PMP, GD32VF103 among them, cannot run rvuos.
 
 2. **Implementation language.**
@@ -1279,19 +1284,15 @@ until the maintainer decides otherwise.
    was what the checks did on their own,
    and the tree is what made "everyone" precise.
 
-8. **NAPOT for cores without TOR.**
-   RP2350 has eight dynamic PMP entries, a 32-byte grain, NAPOT only,
-   `mtval` hardwired to zero,
-   and three hardwired entries that grant every process
-   its ROM and peripherals.
-   Under NAPOT a region is a power of two aligned to its own size,
-   so a 96-byte range costs two entries,
-   and eight slots against eight entries leaves no slack.
-   Working default: TOR only, RP2350 out of scope.
-   The alternative keeps the `Region` capability as it is
-   and adds a second `rebuild_pmp` that splits each slot into NAPOT entries,
-   failing the install when the split does not fit.
-   Decide when a board without TOR is worth that second image builder.
+8. **TOR or NAPOT.**
+   Decided: NAPOT only; see "Physical Memory Protection".
+   Before, a region was any range on the grain, written as TOR entries.
+   That saved RAM to rounding,
+   but a region cost one or two entries depending on its neighbours,
+   two ranges could overlap in part,
+   and cores without TOR, RP2350 among them, were out.
+   RP2350's PMP is no longer in the way;
+   its hardwired entries and `mtval` reading zero still are.
 
 9. **Scheduling policy beyond round-robin.**
    Working default: none in the kernel.

@@ -37,7 +37,8 @@ grep -q 'rvuos: machine mode up' "$log" || fail "kernel did not boot"
 entries=$(printf '0x%08x' $((max_entries < 16 ? max_entries : 16)))
 grep -q "rvuos: pmp entries $entries grain 0x00000004" "$log" \
     || fail "PMP probe did not report $entries entries and a four-byte grain"
-grep -q 'the layout fits the grain: ok' "$log" || fail "the root task did not see the grain"
+grep -q 'the layout fits the smallest region: ok' "$log" \
+    || fail "the root task did not see the smallest region"
 grep -q 'hello from user mode' "$log" || fail "user mode did not run"
 grep -q 'root: message ok' "$log" || fail "the child's message did not arrive"
 grep -q 'child: reply ok' "$log" || fail "the root task's answer did not arrive"

@@ -47,10 +47,10 @@ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
     /* The kernel's log; the reader writes its mark into the header. Never a pool; see OP_REGION_TO_POOL. */
     boot_granted[5] = (struct granted_range){ KLOG_BASE, KLOG_REGION_SIZE, RIGHT_R | RIGHT_W };
 
-    /* The grants become region capabilities as they are, and those lie on the grain. */
+    /* The grants become region capabilities as they are, and every one of those is a NAPOT block. */
     for (unsigned i = 0; i < GRANTED_RANGES; i++) {
-        if (!grain_aligned(boot_granted[i].base, boot_granted[i].size)) {
-            kpanic("boot layout is not aligned to the PMP grain");
+        if (!napot_block(boot_granted[i].base, boot_granted[i].size)) {
+            kpanic("boot layout is not made of NAPOT blocks");
         }
     }
 

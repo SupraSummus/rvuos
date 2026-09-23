@@ -1,0 +1,17 @@
+A carve that checks the block's size but not where it starts
+hands out a range no single NAPOT entry describes:
+a power of two at an offset that is not a multiple of it.
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+index 26e97d5..0598590 100644
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -114,7 +114,7 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
+         uint32_t off = arg[1];
+         uint32_t len = arg[2];
+         /* A block within the region, so that every region capability is one NAPOT entry. */
+-        if (off >= size || len > size - off || !napot_block(base + off, len)) {
++        if (off >= size || len > size - off || !napot_block(base, len)) {
+             return KERR_INVALID_ARG;
+         }
+         struct cap sub = cap_to_region(base + off, len, cap->rights);

@@ -139,16 +139,18 @@
 
 /*
  * Region: describe it. Returns a1 = base, a2 = size, a3 = rights,
- * a4 = the PMP grain in bytes, a power of two of at least 4,
+ * a4 = the size of the smallest region, a power of two of at least 8,
  * the same for every region on the machine.
- * Every region's base and size are multiples of it.
+ * Every region is a block: its size is a power of two of at least that,
+ * and its base is a multiple of its size.
  */
 #define OP_REGION_INFO 11
 /*
  * Region: derive a smaller region with the same rights.
  * a1 = offset from the region base, a2 = size, a3 = destination slot.
- * Offset and size must be multiples of the PMP grain,
- * so that the new region can be installed exactly as it is.
+ * The size must be a power of two no smaller than the smallest region
+ * and the offset a multiple of the size,
+ * so that the new region is a block and costs one PMP entry wherever it is installed.
  * The new region is a child of the invoked one in the derivation tree.
  */
 #define OP_REGION_CARVE 5
@@ -307,7 +309,7 @@
 #define BOOT_CAP_DEBUG     5
 #define BOOT_CAP_CODE      6 /* Region: the root task's code, read and execute */
 #define BOOT_CAP_DATA      7 /* Region: the root task's data and stack */
-#define BOOT_CAP_FREE_RAM  8 /* Region: all RAM the kernel does not use */
+#define BOOT_CAP_FREE_RAM  8 /* Region: the block of RAM the board sets aside for the root task */
 #define BOOT_CAP_INPUT     9 /* Region, read only: test input the loader placed in RAM */
 #define BOOT_CAP_IRQ_LINES 10 /* IrqLine: LOG_IRQ_LINE and every line of the interrupt controller */
 #define BOOT_CAP_UART      11 /* Region, read and write: the board's UART registers */
