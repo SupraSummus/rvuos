@@ -1,0 +1,12 @@
+The self-check sizes its breakpoints in bytes rather than entries,
+a frame eight times what it needs,
+and checking the PMP overflows the kernel's stack.
+
+diff --git a/kernel/selfcheck.c b/kernel/selfcheck.c
+--- a/kernel/selfcheck.c
++++ b/kernel/selfcheck.c
+@@ -199,3 +199,3 @@ static void check_pmp_image(const struct process *proc, const uint32_t *addr,
+ 
+-    uint64_t points[2 * PROCESS_REGION_SLOTS + 2 * PMP_MAX_ENTRIES + 2];
++    uint64_t points[sizeof(uint64_t) * (2 * PROCESS_REGION_SLOTS + 2 * PMP_MAX_ENTRIES + 2)];
+     size_t n = 0;

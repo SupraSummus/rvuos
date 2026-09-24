@@ -1051,6 +1051,37 @@ and leaves the rest to a time server in userspace,
 the shape "Time" already calls right for a board with a second hardware timer.
 Decide before the timer queue is written.
 
+## Bounded stack
+
+The kernel has one stack, `KERNEL_STACK_SIZE` in `kernel/kernel.ld.S`,
+and every entry starts it from the top:
+the reset, a trap from user mode, and a trap in the kernel, which halts.
+Interrupts stay off in the kernel, so no entry nests in another,
+and a thread's state lives in its trap frame, not on the stack.
+The deepest the stack goes is therefore the heaviest call chain from an entry,
+a constant of the image.
+
+**The rule.**
+The kernel does not recurse and has no frame of run-time size:
+no variable-length array, no `alloca`.
+A walk that would recurse walks with no stack, as `cap_revoke_below` does.
+A call through a pointer counts as a call to every function whose address is taken.
+
+**The check.**
+Every kernel link runs `tools/stack-depth.py`,
+which reads the frames from `-fstack-usage` and the calls from the disassembly,
+fails on a broken rule or a bound above `KERNEL_STACK_SIZE`,
+and prints the bound and its chain.
+The kernel is compiled with `-ffunction-sections`,
+so the linker drops dead functions,
+and a C function the tool sees no call to is a call it could not read,
+which fails the link too.
+The deepest chain runs through the self-check that `OP_DEBUG_TRACE` turns on,
+and the stack is sized just above it;
+the check, not headroom, is what keeps it from overflowing.
+Nothing guards the stack at run time:
+an overflow would silently overwrite `.bss` below it, since PMP does not bind machine mode.
+
 ## Properties
 
 These invariants must hold in every state a process can reach.
@@ -1195,7 +1226,8 @@ so an input that was unique for an earlier kernel
 and covers nothing new today is dropped rather than kept for its history.
 `make mutants` plants bugs in the kernel one at a time,
 each a patch under `tests/mutants/` headed by the invariant it breaks,
-and requires the host replay to catch each with an invariant report;
+and requires the host replay to catch each with an invariant report,
+or, for a mutant of the stack, `tools/stack-depth.py` to refuse the link;
 it is also the check that a minimisation lost nothing,
 and an input that some mutant needs but coverage does not keep
 belongs among the seeds under a name.

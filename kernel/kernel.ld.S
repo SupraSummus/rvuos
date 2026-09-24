@@ -13,7 +13,11 @@
 
 ENTRY(_start)
 
-KERNEL_STACK_SIZE = 16K;
+/*
+ * tools/stack-depth.py bounds the stack from the linked image
+ * and fails the build when the bound exceeds this; see DESIGN.md, "Bounded stack".
+ */
+KERNEL_STACK_SIZE = 1K;
 BOOT_POOL_SIZE    = 4K;
 
 SECTIONS

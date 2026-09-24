@@ -12,6 +12,7 @@
 
 CC      := clang
 OBJCOPY := llvm-objcopy
+OBJDUMP := llvm-objdump
 QEMU    := qemu-system-riscv32
 ESPTOOL := esptool
 
@@ -33,15 +34,18 @@ ASFLAGS   := $(ARCHFLAGS) -g -Iinclude
 LDFLAGS   := $(ARCHFLAGS) -nostdlib -static -fuse-ld=lld -Wl,--gc-sections -Wl,--no-dynamic-linker
 
 # The kernel sees its board's headers, and user programs their board's console.
+# The kernel leaves its frame sizes beside each object for tools/stack-depth.py
+# and puts each function in a section of its own, so the linker drops the dead ones.
 KERNEL_INC := -Ikernel -Ikernel/board/$(BOARD)
 USER_INC   := -Iuser/board/$(BOARD)
-$(BUILD)/kernel/%.o: CFLAGS += $(KERNEL_INC)
+$(BUILD)/kernel/%.o: CFLAGS += $(KERNEL_INC) -fstack-usage -ffunction-sections
 $(BUILD)/user/%.o: CFLAGS += $(USER_INC)
 
 KERNEL_SRC_C := $(wildcard kernel/*.c kernel/board/$(BOARD)/*.c)
 KERNEL_SRC_S := $(wildcard kernel/*.S kernel/board/$(BOARD)/*.S)
 KERNEL_OBJ   := $(patsubst %.c,$(BUILD)/%.o,$(KERNEL_SRC_C)) \
                 $(patsubst %.S,$(BUILD)/%.o,$(filter-out %.ld.S,$(KERNEL_SRC_S)))
+KERNEL_SU    := $(patsubst %.c,$(BUILD)/%.su,$(KERNEL_SRC_C))
 
 USER_COMMON := $(BUILD)/user/start.o
 
@@ -65,6 +69,10 @@ $(error unknown BOARD '$(BOARD)'; the boards are qemu and esp32c6)
 endif
 
 .PHONY: all clean run test host-test fuzz corpus-merge qemu-replay mutants check
+
+# Pattern rules would delete the objects they chain through,
+# so every build compiled the kernel from scratch.
+.SECONDARY:
 
 all: $(foreach p,$(USER_PROGRAMS),$(BUILD)/kernel-$(p).$(IMAGE))
 
@@ -96,8 +104,12 @@ $(BUILD)/user_blob-%.S: $(BUILD)/user-%.bin
 $(BUILD)/user_blob-%.o: $(BUILD)/user_blob-%.S
 	$(CC) $(ASFLAGS) -c $< -o $@
 
-$(BUILD)/kernel-%.elf: $(KERNEL_OBJ) $(BUILD)/user_blob-%.o $(BUILD)/kernel/kernel.ld
-	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/kernel/kernel.ld $(KERNEL_OBJ) $(BUILD)/user_blob-$*.o -o $@
+# A kernel whose stack may overflow is not an image; see DESIGN.md, "Bounded stack".
+$(BUILD)/kernel-%.elf: $(KERNEL_OBJ) $(BUILD)/user_blob-%.o $(BUILD)/kernel/kernel.ld \
+                       tools/stack-depth.py
+	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/kernel/kernel.ld $(KERNEL_OBJ) $(BUILD)/user_blob-$*.o -o $@.tmp
+	tools/stack-depth.py --objdump $(OBJDUMP) $@.tmp $(KERNEL_SU)
+	mv $@.tmp $@
 
 # The image the ESP32-C6's ROM loads: the ELF's segments behind Espressif's header.
 # The ELF stays for the debugger and llvm-objdump.
