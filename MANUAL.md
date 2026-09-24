@@ -321,6 +321,16 @@ and only then looks at the arguments;
 section 6.1 gives the exact order.
 An empty slot or an index out of range fails with `KERR_INVALID_CAP`.
 
+A process holds its table by a capability of its own,
+derived from the `CapTable` capability it was allocated with.
+The table may lie in any pool,
+and several processes may be allocated with one table, which they then share.
+Revoking below that capability, or destroying the pool the table lies in,
+takes the table from the process,
+and from then on every call its threads make fails with `KERR_INVALID_CAP`.
+The table itself stays as long as its pool does,
+and so does everything in it.
+
 Rights are three bits:
 
 | Bit | Value | Region | Other types |
@@ -348,6 +358,7 @@ The tree grows in these ways:
 | `OP_CAP_COPY` | beside the source, under the source's parent; a copy of a root is a root |
 | `OP_REGION_CARVE`, `OP_IRQ_CARVE` | below the invoked capability |
 | `OP_PROCESS_INSTALL` | the installed region hangs below the `Region` capability |
+| `OP_POOL_ALLOC` of a `Process` | the process's hold on its table hangs below the `CapTable` capability |
 | `OP_REGION_TO_POOL`, `OP_IRQ_BIND` | where the consumed capability hung |
 | `OP_POOL_DESTROY` | where the pool capability hung, below the region the pool was made of |
 | `OP_POOL_ALLOC`, boot | nowhere: a new object starts a tree of its own |
@@ -378,7 +389,7 @@ Programs are encouraged to keep the same convention.
 | `Region` | `CAP_REGION` | none: the slot holds base and size | boot, `OP_REGION_CARVE`, `OP_POOL_DESTROY` |
 | `KernelPool` | `CAP_POOL` | the pool's descriptor, at its base | `OP_REGION_TO_POOL` |
 | `CapTable` | `CAP_CAPTABLE` | a table of `n` slots | `OP_POOL_ALLOC` |
-| `Process` | `CAP_PROCESS` | region slots, a PMP image, a table pointer | `OP_POOL_ALLOC` |
+| `Process` | `CAP_PROCESS` | a capability to its table, region slots, a PMP image | `OP_POOL_ALLOC` |
 | `Thread` | `CAP_THREAD` | a register frame and a state | `OP_POOL_ALLOC` |
 | `Notification` | `CAP_NOTIFICATION` | one word of sticky bits | `OP_POOL_ALLOC` |
 | `Timer` | `CAP_TIMER` | a deadline and the bits it will signal | `OP_POOL_ALLOC` |
@@ -455,25 +466,26 @@ Sizes a developer needs for planning, as the kernel rounds them:
 |---|---|
 | pool descriptor | 32 |
 | `CapTable` with `n` slots | 12 + 20 × n, rounded up to 8 |
-| `Process` | 256 (216 with `PMP_MAX_ENTRIES=8`) |
+| `Process` | 272 (232 with `PMP_MAX_ENTRIES=8`) |
 | `Thread` | 176 |
 | `Notification` | 16 |
 | `Timer` | 24 |
 | `Irq` | 24 |
 
 A minimal child process, table of 10 slots, process, thread and two notifications,
-costs 712 bytes including the descriptor.
+costs 728 bytes including the descriptor.
 
 **The same-pool rule.**
 The kernel follows the link from a thread to its process,
-from a process to its table, and from a timer or an `Irq` to its notification,
+and from a timer or an `Irq` to its notification,
 without checking that the target still exists.
 The target must therefore never be destroyed before the object that points at it,
 and since destruction happens per pool, the two must lie in one pool:
 
-- a `Process` is allocated from the pool its `CapTable` lies in,
-- a `Thread` from the pool its `Process` lies in,
+- a `Thread` is allocated from the pool its `Process` lies in,
 - a `Timer` or an `Irq` from the pool its `Notification` lies in.
+
+A process's table is not bound by the rule, section 5.2.
 
 An allocation that breaks the rule fails with `KERR_INVALID_ARG`.
 
@@ -495,7 +507,9 @@ The boot pool is the root and can never be destroyed.
 
 The call fails with `KERR_STATE`
 when the calling thread lives in the pool or in one below it,
-so a thread cannot destroy the pool it runs from.
+or its process's table does,
+so a thread cannot destroy the pool it runs from
+nor the table the memory is to come back to.
 The memory of the pools below comes back through no new capability;
 region capabilities for it that survived simply work again,
 which is how a lender gets lent memory back.
@@ -731,7 +745,7 @@ not `KERR_INVALID_ARG`.
 | Code | Name | Meaning |
 |---|---|---|
 | 0 | `KERR_OK` | success |
-| 1 | `KERR_INVALID_CAP` | slot out of range, empty, or its object was destroyed |
+| 1 | `KERR_INVALID_CAP` | slot out of range, empty, or its object was destroyed; every call of a process whose table was taken |
 | 2 | `KERR_WRONG_TYPE` | the capability's type does not accept this operation |
 | 3 | `KERR_NO_RIGHTS` | the capability lacks a right the operation needs |
 | 4 | `KERR_INVALID_ARG` | an argument is out of range or breaks a rule stated below |
@@ -839,7 +853,7 @@ Both need `RIGHT_W` on the pool.
 | `a1` | `a3` | Rule |
 |---|---|---|
 | `CAP_CAPTABLE` | number of slots, 1 to `CAPTABLE_MAX_SLOTS` (1024) | |
-| `CAP_PROCESS` | slot of the `CapTable` capability the process will use, with `RIGHT_W` | the table must lie in this pool |
+| `CAP_PROCESS` | slot of the `CapTable` capability the process will use, with `RIGHT_W` | the table may lie in any pool; the process's hold on it hangs below that capability |
 | `CAP_THREAD` | slot of the `Process` capability the thread will run in, with `RIGHT_W` | the process must lie in this pool; the thread starts stopped |
 | `CAP_NOTIFICATION` | unused | |
 | `CAP_TIMER` | slot of the `Notification` capability the timer signals, with `RIGHT_W` | the notification must lie in this pool |
@@ -855,7 +869,7 @@ Does everything section 5.5 lists.
 The `Region` capability hangs where the pool capability hung,
 below the region the pool was made of;
 it is a root when that region's slot went with the destroy.
-`KERR_STATE` if the calling thread lives in the pool or below it.
+`KERR_STATE` if the calling thread or its process's table lives in the pool or below it.
 
 ### 6.7 Operations on `Process`
 
@@ -998,8 +1012,8 @@ and drops into user mode with:
 
 `BOOT_CAP_COUNT` is 13; a root task puts its own slots from there upwards.
 
-The root task's own table, process and thread take about 1.1 KiB of the boot pool,
-so roughly 2.9 KiB remain for objects the root task allocates from `BOOT_CAP_POOL`.
+The root task's own table, process and thread take about 1.7 KiB of the boot pool,
+so roughly 2.3 KiB remain for objects the root task allocates from `BOOT_CAP_POOL`.
 Anything larger goes into a pool the root task makes out of free RAM.
 
 Device ranges are granted read and write, never execute,

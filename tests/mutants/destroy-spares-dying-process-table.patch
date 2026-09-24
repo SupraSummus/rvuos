@@ -1,0 +1,14 @@
+A destroy clears the table slot of a process only while the process lives on.
+A dying process stays in the ring of the capability its table was made with,
+which then links into freed memory.
+
+diff --git a/kernel/cap.c b/kernel/cap.c
+--- a/kernel/cap.c
++++ b/kernel/cap.c
+@@ -244,3 +244,5 @@
+             struct process *proc = (struct process *)o;
+-            sweep_node(&proc->table, dying, base, size);
++            if (!dying) {
++                sweep_node(&proc->table, dying, base, size);
++            }
+             for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {

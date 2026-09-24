@@ -218,6 +218,18 @@ int cap_clear(struct captable *table, uint32_t slot)
     return KERR_OK;
 }
 
+/*
+ * One node of the sweep: it goes if the range holds it or the object it names.
+ * A node the range holds takes what was derived from it: a grant dies with its slot.
+ */
+static void sweep_node(struct cap *c, bool dying, uint32_t base, uint32_t size)
+{
+    if (c->type != CAP_NONE &&
+        (dying || (cap_has_object(c->type) && range_contains(base, size, c->a)))) {
+        cap_revoke(c);
+    }
+}
+
 void cap_revoke_range(uint32_t base, uint32_t size)
 {
     for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
@@ -225,21 +237,14 @@ void cap_revoke_range(uint32_t base, uint32_t size)
         if (o->type == CAP_CAPTABLE) {
             struct captable *table = (struct captable *)o;
             for (uint32_t i = 0; i < table->nslots; i++) {
-                struct cap *c = &table->slots[i];
-                if (c->type == CAP_NONE) {
-                    continue;
-                }
-                /* A node the range holds takes what was derived from it: a grant dies with its slot. */
-                if (dying || (cap_has_object(c->type) && range_contains(base, size, c->a))) {
-                    cap_revoke(c);
-                }
+                sweep_node(&table->slots[i], dying, base, size);
             }
-        } else if (o->type == CAP_PROCESS && dying) {
+        } else if (o->type == CAP_PROCESS) {
+            /* A living process loses its table with the table's pool; its regions name no object. */
             struct process *proc = (struct process *)o;
+            sweep_node(&proc->table, dying, base, size);
             for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
-                if (proc->slots[i].type != CAP_NONE) {
-                    cap_revoke(&proc->slots[i]);
-                }
+                sweep_node(&proc->slots[i], dying, base, size);
             }
         }
     }
