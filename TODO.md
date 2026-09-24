@@ -100,6 +100,14 @@ Design decisions behind these items live in `DESIGN.md`.
   More of them, each with its process and pool as the second has,
   would give the pool tree more branches;
   the prologue in `include/rvuos/replay.h` and `host_boot` grow with them.
+- No harness reaches `KERR_LIMIT` in `process_install`.
+  Since regions are NAPOT blocks, each costs one PMP entry,
+  and a process has eight region slots,
+  so a budget of eight, `fuzz-pmp8`'s, is never short:
+  the eighth install finds seven regions installed.
+  The replay driver's processes hold four regions each once set up,
+  so a harness with a budget of six would reach the limit on the third install
+  and still run the prologue.
 - Escape-attempt suite under QEMU:
   one user program per scenario, expected outcome a specific fault.
   Execute from data, jump into the kernel, `csrr` and `mret` from user mode,
