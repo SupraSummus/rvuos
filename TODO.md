@@ -161,10 +161,21 @@ Design decisions behind these items live in `DESIGN.md`.
   which the host cannot follow,
   so `KERR_STATE` for a thread destroying a pool above its own
   is checked only by the demo in `user/init.c`.
-- The same-pool rule for a process and its table, and a thread and its process,
-  could loosen to "the same pool or one above it",
-  which the pool tree makes safe: a parent pool outlives its children.
-  A thread could then live in a pool of its own and be revoked alone.
+  `KERR_STATE` for a thread destroying the pool its table lies in
+  is checked by nothing:
+  the driver's threads keep their tables in their own pools,
+  and the demo gives its child no table elsewhere.
+- The same-pool rule for a thread and its process,
+  and for a timer or an `Irq` and its notification,
+  could go the way a process's table went:
+  hold the target by a capability slot the sweep clears,
+  and give clearing it the effect it needs,
+  as clearing an installed region rebuilds the PMP image.
+  A thread whose process is taken leaves its queue and stops;
+  a timer or an `Irq` whose notification is taken disarms, and the `Irq` masks its line.
+  A thread could then live in a pool of its own and be revoked alone,
+  and no structural pointer between objects would be left.
+  Each costs sixteen bytes per object and one test on use.
 - A signal and a wait in one system call, the shape of seL4's `ReplyRecv`.
   Today it saves one trap per round trip and no context switch,
   because a signal does not take the processor away from the signaller.

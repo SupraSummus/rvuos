@@ -173,13 +173,17 @@
  * a3 = type specific:
  *   CAP_CAPTABLE  the number of slots,
  *   CAP_PROCESS   the slot of the CapTable capability the process will use,
+ *                 which needs RIGHT_W; the table may lie in any pool,
  *   CAP_THREAD    the slot of the Process capability the thread will run in,
  *   CAP_NOTIFICATION  unused,
  *   CAP_TIMER     the slot of the Notification capability the timer signals,
  *                 which needs RIGHT_W.
- * A structural parent is not checked on every use,
- * so an object must be allocated from the same pool as its parent;
- * CAP_PROCESS, CAP_THREAD and CAP_TIMER fail with KERR_INVALID_ARG otherwise.
+ * A process holds its table by a capability derived from the one named,
+ * so revoking below that capability, or destroying the table's pool,
+ * leaves the process naming nothing: every call it makes fails with KERR_INVALID_CAP.
+ * A thread's process and a timer's notification are not checked on every use,
+ * so those objects must be allocated from the same pool as their parent;
+ * CAP_THREAD and CAP_TIMER fail with KERR_INVALID_ARG otherwise.
  */
 #define OP_POOL_ALLOC 7
 /*
@@ -195,8 +199,8 @@
  * The invoked slot may be the destination.
  * The memory of the pools below comes back through no new capability:
  * region capabilities for it that were held elsewhere work again.
- * Fails with KERR_STATE if the calling thread lives in the pool
- * or in one below it.
+ * Fails with KERR_STATE if the calling thread or its process's table
+ * lives in the pool or in one below it.
  * Threads waiting on a notification in a destroyed pool
  * are woken with KERR_INVALID_CAP and no bits.
  */

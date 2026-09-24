@@ -30,7 +30,9 @@ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
     }
 
     table->nslots = ROOT_CAPTABLE_SLOTS;
-    proc->ctable = v2p(table);
+    /* A boot capability, so a root of the tree like the others. */
+    proc->table = cap_to_object(&table->hdr, RIGHT_ALL);
+    cap_attach(NULL, &proc->table);
     thread->proc = v2p(proc);
     /* The root thread is the one the kernel drops into; it never waits. */
     thread->state = THREAD_READY;

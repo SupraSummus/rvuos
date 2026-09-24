@@ -5,12 +5,8 @@ and those rings then lead into memory that is user memory again.
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -230,7 +230,7 @@
-                     continue;
-                 }
-                 /* A node the range holds takes what was derived from it: a grant dies with its slot. */
--                if (dying || (cap_has_object(c->type) && range_contains(base, size, c->a))) {
-+                if ((cap_has_object(c->type) && range_contains(base, size, c->a))) {
-                     cap_revoke(c);
-                 }
+@@ -239,3 +239,3 @@
+             for (uint32_t i = 0; i < table->nslots; i++) {
+-                sweep_node(&table->slots[i], dying, base, size);
++                sweep_node(&table->slots[i], false, base, size);
              }

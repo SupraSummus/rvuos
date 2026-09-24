@@ -41,7 +41,8 @@ struct obj_header {
  * next is the next sibling, or at the last sibling the parent with LINK_UP set,
  * which the four-byte alignment of slots leaves free;
  * a root's next is LINK_UP alone, an empty slot's is 0.
- * A process's region slots are slots of this type too, CAP_INSTALLED, and leaves of the tree.
+ * A process's region slots are slots of this type too, CAP_INSTALLED, and leaves of the tree,
+ * and so is its table slot, which holds a CAP_CAPTABLE capability.
  */
 struct cap {
     uint8_t type;
@@ -93,9 +94,15 @@ struct pmp_image {
     uint8_t cfg[PMP_MAX_ENTRIES];
 };
 
+/*
+ * A process holds its table by a capability, not a pointer:
+ * a node of the derivation tree below the capability the process was made with,
+ * which a revoke or the destroy of the table's pool clears.
+ * See DESIGN.md, "A process's table".
+ */
 struct process {
     struct obj_header hdr;
-    paddr_t ctable;
+    struct cap table;   /* CAP_CAPTABLE, or CAP_NONE once the table is taken */
     struct cap slots[PROCESS_REGION_SLOTS]; /* CAP_INSTALLED, or CAP_NONE when empty */
     struct pmp_image pmp;
 };
@@ -156,7 +163,7 @@ struct notification {
  * It is how time reaches userspace: as a signal like any other,
  * so one wait can cover a device and a timeout, one bit each.
  * The notification lies in the timer's own pool and dies with it,
- * as a process's table does; the link is not checked on use.
+ * as a thread's process does; the link is not checked on use.
  * bits is what the timer will signal, zero while it is disarmed,
  * and deadline is the tick count it fires at;
  * see DESIGN.md, "Time".
@@ -192,7 +199,7 @@ _Static_assert(sizeof(struct cap) == 20, "object layout");
 _Static_assert(sizeof(struct captable) == 12, "object layout");
 _Static_assert(sizeof(struct pool) == 32, "object layout");
 _Static_assert(sizeof(struct pmp_image) == 4 + 5 * PMP_MAX_ENTRIES, "object layout");
-_Static_assert(sizeof(struct process) == 12 + 20 * PROCESS_REGION_SLOTS + sizeof(struct pmp_image),
+_Static_assert(sizeof(struct process) == 8 + 20 * (1 + PROCESS_REGION_SLOTS) + sizeof(struct pmp_image),
                "object layout");
 _Static_assert(sizeof(struct thread) == 28 + sizeof(struct trap_frame), "object layout");
 _Static_assert(sizeof(struct notification) == 16, "object layout");
@@ -213,7 +220,15 @@ static inline bool cap_has_object(uint8_t type)
 static inline struct pool *obj_pool(const struct obj_header *o) { return p2v(o->pool); }
 static inline struct pool *pool_next_pool(const struct pool *p) { return p->next ? p2v(p->next) : NULL; }
 static inline struct pool *pool_parent(const struct pool *p) { return p->parent ? p2v(p->parent) : NULL; }
-static inline struct captable *process_table(const struct process *p) { return p2v(p->ctable); }
+/* The table a process names capabilities in, or NULL once it was taken. The type test is cap_lookup's. */
+static inline struct captable *process_table(const struct process *p)
+{
+    if (p->table.type != CAP_CAPTABLE) {
+        return NULL;
+    }
+    struct captable *t = p2v(p->table.a);
+    return t->hdr.type == CAP_CAPTABLE ? t : NULL;
+}
 static inline struct process *thread_process(const struct thread *t) { return p2v(t->proc); }
 static inline struct captable *thread_table(const struct thread *t) { return process_table(thread_process(t)); }
 static inline struct notification *timer_notification(const struct timer *t) { return p2v(t->ntfn); }

@@ -183,18 +183,19 @@ static int op_pool_destroy(struct thread *t, uint32_t slot, struct pool *pool,
     uint32_t base = pool->base;
     uint32_t size = pool->size;
     uint8_t rights = pool->rights;
-
     /*
-     * A thread, its process and its table share one pool,
-     * and the destroy takes every pool below this one,
-     * so one check on the thread's pool covers everything the caller runs on.
+     * The memory comes back to the caller's table, found here once:
+     * the sweep may take the process's hold on it, but not the table itself,
+     * because a destroy of the table's pool is refused like one of the thread's.
+     * A thread and its process share one pool, so these two checks cover all the caller uses.
      */
-    if (pool_under(obj_pool(&t->hdr), pool)) {
+    struct captable *table = thread_table(t);
+    if (pool_under(obj_pool(&t->hdr), pool) || pool_under(obj_pool(&table->hdr), pool)) {
         return KERR_STATE;
     }
     /* The invoked slot holds the Pool capability and the sweep will clear it. */
     if (arg[1] != slot) {
-        int err = cap_slot_free(thread_table(t), arg[1]);
+        int err = cap_slot_free(table, arg[1]);
         if (err != KERR_OK) {
             return err;
         }
@@ -206,7 +207,7 @@ static int op_pool_destroy(struct thread *t, uint32_t slot, struct pool *pool,
      * since those the sweep is about to clear.
      * That ancestor may lie in a table the destroy takes, and then the memory returns as a root.
      */
-    struct cap *parent = cap_parent(slot_node(t, slot));
+    struct cap *parent = cap_parent(&table->slots[slot]);
     while (parent != NULL && parent->type == CAP_POOL && parent->a == base) {
         parent = cap_parent(parent);
     }
@@ -219,7 +220,7 @@ static int op_pool_destroy(struct thread *t, uint32_t slot, struct pool *pool,
     }
     /* The pools below gave their memory back to nobody; this one gives it to the caller. */
     struct cap rc = cap_to_region(base, size, rights);
-    return cap_store(thread_table(t), arg[1], &rc, parent);
+    return cap_store(table, arg[1], &rc, parent);
 }
 
 static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
@@ -242,8 +243,9 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
     struct obj_header *obj;
     switch (arg[1]) {
     /*
-     * A structural pointer is not checked on use,
-     * so every object is allocated from the pool its parent lies in
+     * A process's table may lie in any pool, since the sweep clears the process's hold on it.
+     * The other links are structural pointers, not checked on use,
+     * so each of those objects is allocated from the pool its target lies in
      * and dies with it; see DESIGN.md, "Kernel pools and revocation".
      */
     case CAP_PROCESS: {
@@ -252,15 +254,13 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
         if (terr != KERR_OK) {
             return terr;
         }
-        struct captable *table = (struct captable *)cap_object(&tc);
-        if (table->hdr.pool != pool->base) {
-            return KERR_INVALID_ARG;
-        }
         struct process *proc = pool_alloc(pool, CAP_PROCESS, sizeof(*proc));
         if (proc == NULL) {
             return KERR_NO_MEMORY;
         }
-        proc->ctable = v2p(table);
+        /* It hangs below the capability it was made with, so a revoke above that takes it. */
+        proc->table = tc;
+        cap_attach(slot_node(t, arg[3]), &proc->table);
         obj = &proc->hdr;
         break;
     }
@@ -559,8 +559,17 @@ static void trace_call(uint32_t op, uint32_t slot, const uint32_t *arg, int stat
 
 static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
 {
+    /*
+     * A process whose table was taken names nothing.
+     * Within a call only a revoke, which then returns,
+     * or a destroy, which keeps the table it found, can take it.
+     */
+    struct captable *table = thread_table(t);
+    if (table == NULL) {
+        return KERR_INVALID_CAP;
+    }
     struct cap cap;
-    int err = cap_lookup(thread_table(t), slot, &cap);
+    int err = cap_lookup(table, slot, &cap);
     if (err != KERR_OK) {
         return err;
     }

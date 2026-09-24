@@ -356,7 +356,7 @@ and the root task hands lines out as it hands out memory.
 | `Region` | A physical address range with maximum rights. Installed into a process's PMP slots. |
 | `KernelPool` | A region handed to the kernel. All other objects are allocated from pools. |
 | `CapTable` | A process's capability table. Allocated from a pool. |
-| `Process` | A protection domain: a `CapTable`, a set of region slots, and its threads. |
+| `Process` | A protection domain: a capability to its `CapTable`, a set of region slots, and its threads. |
 | `Thread` | An execution context inside a process: its registers and its state. |
 | `Notification` | A word of sticky signal bits. The only way a thread can stop and be started again. |
 | `Timer` | Signals a notification once a delay has passed. |
@@ -452,23 +452,26 @@ to show that a stale capability does not come back with it.
 Objects reference each other in two ways,
 and destroy must cope with both.
 A capability names an object, and the sweep clears it.
-A structural pointer, such as a process to its table
-or a thread to its process, is not checked on use,
+A process holds its table this way;
+see "A process's table".
+A structural pointer, such as a thread to its process,
+is not checked on use,
 so a structural parent must live in the same pool as its child
 or outlive it.
 The kernel enforces the same-pool rule at allocation:
-a `Process` must be allocated from the pool its `CapTable` lies in,
-a `Thread` from the pool its `Process` lies in,
+a `Thread` must be allocated from the pool its `Process` lies in,
 and a `Timer` or an `Irq` from the pool its `Notification` lies in.
 A thread waiting on a notification inside a destroyed pool
 is woken with `KERR_INVALID_CAP` and no bits,
 because the wait can no longer be answered.
 
 A destroy refuses with `KERR_STATE`
-when the calling thread lives in the pool or in one below it.
-A thread, its process and its table share one pool by the rule above,
-so that one check is the whole of it,
-and it is also why the boot pool can never be destroyed:
+when the calling thread lives in the pool or in one below it,
+or its process's table does.
+A thread and its process share one pool by the rule above,
+so those two checks are the whole of it:
+the caller keeps what it runs on and the table the memory comes back to.
+The first is also why the boot pool can never be destroyed:
 every pool lies below it.
 The memory is zeroed on the way out,
 because it is about to be user memory again
@@ -496,8 +499,9 @@ and rvuos keeps one in the shape that costs the least.
 
 **What is a node.**
 Every filled slot of every capability table,
-and every region installed in a process,
-which is a slot of the same layout living in the `Process`;
+every region installed in a process,
+which is a slot of the same layout living in the `Process`,
+and every process's table slot, which lives there too;
 see `kernel/object.h`.
 Roots are the boot capabilities and every capability to a new object,
 since an object owes nothing to the pool capability it was allocated through.
@@ -505,7 +509,8 @@ since an object owes nothing to the pool capability it was allocated through.
 **What hangs below what.**
 A carve hangs below the region or line it was carved from,
 a derivation below its source,
-and an installed region below the capability it was installed from.
+an installed region below the capability it was installed from,
+and a process's table slot below the `CapTable` capability the process was made with.
 A copy stands beside its source, under the same parent,
 so a process can duplicate what it holds without making one copy the master of the other;
 beside a root it is a root.
@@ -561,6 +566,23 @@ what made this one tractable was making installed regions nodes,
 so that a revoke unmaps by derivation and never by address range,
 and letting a destroy revoke the dying slots' derivation
 instead of reparenting it across tables.
+
+### A process's table
+
+A `Process` holds its `CapTable` by a capability in a slot of its own,
+not by a pointer.
+Allocating the process fills the slot from the `CapTable` capability it names,
+below that capability in the derivation tree.
+No system call names the slot: a process's slot numbers index its table.
+
+A revoke above the slot, or the destroy of the table's pool, clears it like any other,
+so the table may lie in any pool, and several processes may share one.
+A process whose slot is empty fails every call with `KERR_INVALID_CAP`.
+Within one call only a revoke, which then returns,
+or a destroy, which keeps the table it found, can take it.
+It costs sixteen bytes per process and a test on every call;
+before, the table had to lie in the process's own pool so a pointer could not dangle.
+Open decision 15 is about what else the slot could do.
 
 ### Region slots
 
@@ -1060,9 +1082,11 @@ with rights no greater than the root task received for it,
 or a range of lines the interrupt controller has, the log's among them,
 with no more than the right to bind,
 or a live kernel object of the capability's own type.
+Every process's table slot is empty or names a live table.
 
 **Derivation.**
-The slots of every live table and the region slots of every live process
+The slots of every live table
+and the table slot and region slots of every live process
 are the nodes of one forest.
 Every link of a filled node lands on a live, filled node;
 an empty node has no links.
@@ -1083,8 +1107,7 @@ and pools are pairwise disjoint.
 Every pool but the boot pool names as its parent a live, older pool,
 so parents lead to the boot pool
 and no destroy has left a pool below it standing.
-A process and its table, and a thread and its process,
-lie in the same pool.
+A thread and its process lie in the same pool.
 The line table names exactly the bound `Irq`s,
 and every installed region records its slot.
 
@@ -1510,9 +1533,31 @@ until the maintainer decides otherwise.
     and a block given back in the middle is not reusable
     until every child of its `Untyped` is gone.
     Still open:
-    a destroy when the calling thread lives in the pool,
+    a destroy when the calling thread or its table lives in the pool,
     which today walks up the pool tree;
     whether deleting the capability a retype made refuses or destroys;
     where a `Frame`'s rights come from;
     and how a preempted revoke records where it stopped.
     Decide before the memory model changes again.
+
+15. **What a process's table slot could do.**
+    Working default: the slot is filled once, at allocation, and its rights mean nothing.
+    - **Replacing the table.**
+      An operation on a `Process` could refill the slot;
+      every thread would see the new table from its next call.
+      With flat slot numbers that does not help a full table grow:
+      moving its capabilities needs a move that relinks a node,
+      since a copy leaves behind what was derived from its source.
+    - **Nested tables.**
+      A slot number could be a path, read from the most significant bit:
+      each `CapTable` capability skips a guard, kept in its unused second word,
+      then takes the bits that index its table.
+      A table grows under a new two-slot root, the old table in the first slot
+      with a guard one bit shorter, so every old name keeps its meaning.
+      At least one bit per level bounds a lookup at 32 steps.
+      Open: whether a name that ends at a slot holding a table means the slot
+      or descends into the table; seL4 passes a depth.
+    - **Rights.**
+      A slot without `RIGHT_W` could seal the table against its own process.
+
+    Decide with the first program whose creator cannot size its table in advance.

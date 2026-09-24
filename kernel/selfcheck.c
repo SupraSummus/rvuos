@@ -272,12 +272,13 @@ static void check_process(const struct process *proc)
     }
     check_pmp_image(proc, proc->pmp.addr, proc->pmp.cfg, proc->pmp.count, false);
 
-    struct obj_header *t = object_find(proc->ctable);
-    if (t == NULL || t->type != CAP_CAPTABLE) {
-        fail("process has no live capability table", v2p(proc), proc->ctable, 0);
-    }
-    if (t->pool != proc->hdr.pool) {
-        fail("process and its table live in different pools", v2p(proc), 0, 0);
+    /* The sweep clears the table slot with the table, in whatever pool; the tree check reads its links. */
+    const struct cap *tc = &proc->table;
+    if (tc->type != CAP_NONE) {
+        struct obj_header *t = object_find(tc->a);
+        if (tc->type != CAP_CAPTABLE || t == NULL || t->type != CAP_CAPTABLE) {
+            fail("process's table slot names no live table", v2p(proc), tc->type, tc->a);
+        }
     }
 }
 
@@ -498,7 +499,8 @@ static void check_captable(const struct captable *table)
 /*
  * The derivation tree.
  *
- * Its nodes are the slots of every live table and the region slots of every live process,
+ * Its nodes are the slots of every live table
+ * and the table slot and region slots of every live process,
  * linked by physical address and never checked on use,
  * so every link must land on a live node and the shape must be exactly a forest:
  * the children of a node form one ring that closes through the node,
@@ -510,7 +512,7 @@ static void check_captable(const struct captable *table)
  * or an object built on the parent's range, a pool on a region, an Irq on a line.
  */
 
-/* The node a link names, if it is a slot of a live table or a region slot of a live process. */
+/* The node a link names, if it is a slot of a live table or of a live process. */
 static const struct cap *live_node(uint32_t link)
 {
     paddr_t at = link & ~LINK_UP;
@@ -521,7 +523,11 @@ static const struct cap *live_node(uint32_t link)
             slots = ((const struct captable *)o)->slots;
             count = ((const struct captable *)o)->nslots;
         } else if (o->type == CAP_PROCESS) {
-            slots = ((const struct process *)o)->slots;
+            const struct process *p = (const struct process *)o;
+            if (at == v2p(&p->table)) {
+                return &p->table;
+            }
+            slots = p->slots;
             count = PROCESS_REGION_SLOTS;
         } else {
             continue;
@@ -625,7 +631,7 @@ static void check_tree(void)
         if (o->type == CAP_CAPTABLE) {
             bound += ((const struct captable *)o)->nslots;
         } else if (o->type == CAP_PROCESS) {
-            bound += PROCESS_REGION_SLOTS;
+            bound += 1 + PROCESS_REGION_SLOTS;
         }
     }
     for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
@@ -636,6 +642,7 @@ static void check_tree(void)
             }
         } else if (o->type == CAP_PROCESS) {
             const struct process *p = (const struct process *)o;
+            check_node(&p->table, bound);
             for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
                 check_node(&p->slots[i], bound);
             }
