@@ -1,0 +1,15 @@
+A revoke that recurses into each child
+takes a frame per level of the derivation tree,
+and a deep enough tree overflows the kernel's stack.
+It revokes the same nodes, so only the stack check catches it.
+
+diff --git a/kernel/cap.c b/kernel/cap.c
+--- a/kernel/cap.c
++++ b/kernel/cap.c
+@@ -198,3 +198,5 @@ void cap_revoke(struct cap *n)
+ {
+-    cap_revoke_below(n);
++    while (n->child != 0) {
++        cap_revoke(node(n->child));
++    }
+     detach(n, false);
