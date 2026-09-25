@@ -65,10 +65,9 @@ Design decisions behind these items live in `DESIGN.md`.
    whose table lists every walk this removes.
    ABI changes come last.
    Done: the line table, the installed region's slot index, the wait queue,
-   and the run queue,
+   the run queue, the count of armed sources for the stall in `wfi`,
    and the check that every loop a trap runs says what bounds it,
    `tools/loop-bounds.py`; `DESIGN.md`, "Bounded work".
-   - The count of armed sources, for the stall in `wfi`.
    - A predecessor link per slot.
    - Revoke preempted when an interrupt is pending, and restarted;
      the conversions and a delete below a root too.
@@ -87,6 +86,9 @@ Design decisions behind these items live in `DESIGN.md`.
   so nothing counts the `IRQ_LINES` bound of `sched_claim_interrupts`.
 - `tools/loop-bounds.py` knows clang's jump tables by their shape;
   any other jump through a register may make up a loop, which fails the link, never passes it.
+- That the count of armed sources leaves the log's line out is checked by reading `irq_set_bits`.
+  Under tracing each call's line reaches the log before the self-check runs,
+  so an `Irq` armed on the log's line has always signalled by then.
 - The self-check sees structure, not semantics.
   That a signal wakes a thread waiting on *that* notification,
   and hands it the bits that were set,

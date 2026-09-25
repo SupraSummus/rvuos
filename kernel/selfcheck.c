@@ -354,6 +354,9 @@ static void check_queue(paddr_t head, uint8_t state, paddr_t waiting_on)
     } while (at != head);
 }
 
+/* The timers and device Irqs the walk found armed, to hold armed_sources to. */
+static uint32_t armed_seen;
+
 static void check_timer(const struct timer *t)
 {
     struct obj_header *n = object_find(t->ntfn);
@@ -367,6 +370,7 @@ static void check_timer(const struct timer *t)
     if (timer_armed(t) && timer_due(t, sched_ticks)) {
         fail("armed timer is due", v2p(t), t->deadline, sched_ticks);
     }
+    armed_seen += timer_armed(t);
 }
 
 static void check_irq(const struct irq *i)
@@ -390,6 +394,7 @@ static void check_irq(const struct irq *i)
     if (i->line == LOG_IRQ_LINE && irq_armed(i) && klog_pending()) {
         fail("armed log irq while the log has bytes untaken", v2p(i), i->bits, 0);
     }
+    armed_seen += i->line != LOG_IRQ_LINE && irq_armed(i);
 }
 
 /*
@@ -660,6 +665,7 @@ void selfcheck_run(void)
 
     /* check_pools() ran first, so the flat walk rests on checked headers. */
     owed_threads = queued_threads = 0;
+    armed_seen = 0;
     for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
         switch (o->type) {
         case CAP_PROCESS:
@@ -688,6 +694,10 @@ void selfcheck_run(void)
     /* Every queued thread is one its queue is for, so equal counts leave none out. */
     if (owed_threads != queued_threads) {
         fail("a waiting or ready thread is on no queue", owed_threads, queued_threads, 0);
+    }
+    /* The stall in wfi reads the count instead of walking for a source. */
+    if (armed_seen != armed_sources) {
+        fail("the count of armed sources is wrong", armed_seen, armed_sources, 0);
     }
     check_lines();
     /* Every node has been vetted as a capability by now; the tree check reads only links. */

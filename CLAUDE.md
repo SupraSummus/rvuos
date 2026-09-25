@@ -36,6 +36,8 @@ When a change touches `kernel/board/esp32c6/`, `user/board/esp32c6/`,
 or anything the demo exercises, and an ESP32-C6 is connected,
 run `make BOARD=esp32c6 test` as well;
 it loads the demo into the chip's RAM and checks the same transcript.
+A new kernel global needs a reset in `host_boot` too,
+since the host boots once per input in one process.
 When the kernel's object model changes,
 update `kernel/selfcheck.c` with it;
 it is the executable form of the properties in `DESIGN.md`.

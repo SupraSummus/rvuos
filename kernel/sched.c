@@ -13,6 +13,30 @@ uint32_t sched_ticks;
 uint32_t trace_wake_bits;
 
 paddr_t run_queue;
+uint32_t armed_sources;
+
+static void count_armed(bool was, bool is)
+{
+    if (is && !was) {
+        armed_sources++;
+    } else if (was && !is) {
+        armed_sources--;
+    }
+}
+
+void timer_set_bits(struct timer *t, uint32_t bits)
+{
+    count_armed(timer_armed(t), bits != 0);
+    t->bits = bits;
+}
+
+void irq_set_bits(struct irq *irq, uint32_t bits)
+{
+    if (irq->line != LOG_IRQ_LINE) {
+        count_armed(irq_armed(irq), bits != 0);
+    }
+    irq->bits = bits;
+}
 
 /*
  * A thread is on at most one ring, through queue_next and queue_prev:
@@ -125,7 +149,7 @@ static void tick_advance(void)
             continue;
         }
         uint32_t bits = t->bits;
-        t->bits = 0;
+        timer_set_bits(t, 0);
         sched_signal(timer_notification(t), bits);
     }
 }
@@ -142,7 +166,7 @@ bool sched_interrupt(uint32_t line)
      */
     irq_enable(line, false);
     uint32_t bits = irq->bits;
-    irq->bits = 0;
+    irq_set_bits(irq, 0);
     sched_signal(irq_notification(irq), bits);
     return true;
 }
@@ -158,27 +182,6 @@ void sched_claim_interrupts(void)
         }
         irq_complete(line);
     }
-}
-
-/*
- * True if some timer or device Irq will fire,
- * so that waiting for an interrupt can change what is runnable.
- * The log's line is not a source: only the kernel raises it,
- * and the kernel runs only when a thread or one of these does.
- */
-static bool source_armed(void)
-{
-    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
-        LOOP_WALK(source_armed);
-        if (o->type == CAP_TIMER && timer_armed((struct timer *)o)) {
-            return true;
-        }
-        if (o->type == CAP_IRQ && irq_armed((struct irq *)o) &&
-            ((struct irq *)o)->line != LOG_IRQ_LINE) {
-            return true;
-        }
-    }
-    return false;
 }
 
 /*
@@ -226,7 +229,12 @@ void sched_forget_pool(struct pool *pool)
             }
             break;
         }
+        case CAP_TIMER:
+            /* The timer is gone and will not fire, so it is no source. */
+            timer_set_bits((struct timer *)o, 0);
+            break;
         case CAP_IRQ: {
+            irq_set_bits((struct irq *)o, 0);
             /* The object that would receive the interrupt is gone; the log's line has no controller. */
             uint32_t line = ((struct irq *)o)->line;
             if (line != LOG_IRQ_LINE) {
@@ -268,11 +276,13 @@ void sched_run_next(void)
          * Only a running thread, a firing timer or a device interrupt
          * can make another one runnable.
          * With no timer and no device Irq armed nothing can change this, so say so and stop.
+         * The log's line is not a source: only the kernel raises it,
+         * and the kernel runs only when a thread or one of these does.
          * While tracing is on, time moves and lines fire only through OP_DEBUG_TICK
          * and OP_DEBUG_IRQ, which nobody is left to perform, so the same holds
          * and the host build, which has no clock and no devices, agrees.
          */
-        if (debug_trace || !source_armed()) {
+        if (debug_trace || armed_sources == 0) {
             kputs("no runnable thread\n");
             khalt(5);
         }
