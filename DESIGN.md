@@ -1288,23 +1288,27 @@ in a pool the caller could allocate from,
 bound to what the caller could write,
 and a pool on memory the caller held a region to, with no more rights than the region.
 A capability to a pool with the right to destroy it
-covers the memory the destroy gives back.
+covers the memory the destroy gives back,
+and a clock covers the counter's block, read only.
 This is goal 2 across a call.
 It measures a copy against all the caller held, not against its source,
 so a copy wider than its source but within another capability of the caller passes;
 the derivation invariant checks it only against the parent it shares with its source.
 
 **Memory crosses zeroed.**
-Memory that leaves the pools holds nothing but zeros,
-and so does the part of a new pool above its used mark.
+Every object in memory that leaves the pools holds nothing but zeros,
+and every object holds nothing of its memory from before the pool took it.
 No byte of an object reaches a process when its pool is destroyed,
 and no byte a process wrote becomes part of an object when its memory becomes a pool.
+The rest of a pool's memory comes back as it went in; see "Zeroing goes with the object".
 
 These two relate the state before a call to the state after it,
 so the self-check, which sees one state, cannot check them.
-`host/history.c` checks them around every call of the host build.
-Its RAM starts out holding a pattern rather than zeros,
-so memory the kernel takes without zeroing shows.
+`host/history.c` checks them around every call of the host build, the untraced prologue's too.
+It does not know what memory held before a call,
+so an object handed out unzeroed shows only by what it holds:
+the host's RAM starts out holding a pattern and keeps the objects of the input before,
+and a new table's stale slots are capabilities its maker held nothing to cover.
 
 **Exit to user mode.**
 Every `mret` enters user mode,

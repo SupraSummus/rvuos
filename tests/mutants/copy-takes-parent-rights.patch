@@ -2,16 +2,22 @@ A copy takes the rights of its source's parent instead of its source's.
 It stands beside its source, below that parent, so the tree stays well formed,
 yet a thread lent a narrowed capability widens it back to what the lender held.
 Authority only flows, so the copy is covered by nothing its caller held.
+A copy of the clock's region takes the clock's rights, which the counter's grant does not hold.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
 Report: a call made a capability no capability of its caller covers
+Report: region capability with rights beyond the grant
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -69,3 +69,4 @@ static int op_captable(struct thread *t, const struct cap *cap,
+@@ -67,7 +67,8 @@ static int op_captable(struct thread *t, const struct cap *cap,
+         if (err != KERR_OK) {
+             return err;
          }
 -        src.rights &= (uint8_t)arg[3];
 +        struct cap *up = cap_parent(slot_node(t, arg[2]));
 +        src.rights = (uint8_t)((op == OP_CAP_COPY && up != NULL ? up->rights : src.rights) & arg[3]);
          /* A copy stands beside its source in the tree, a derivation below it. */
+         if (op == OP_CAP_COPY) {
+             return cap_store_beside(table, arg[1], &src, slot_node(t, arg[2]));

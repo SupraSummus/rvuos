@@ -80,8 +80,9 @@ Design decisions behind these items live in `DESIGN.md`.
 - `fuzz-work` counts the loop annotations' claims only where the corpus reaches.
   The host's `irq_claim` never returns a line,
   so nothing counts the `IRQ_LINES` bound of `sched_claim_interrupts`.
-- That a destroy zeroes its objects is checked only by reading `pool_clear`:
-  no harness reads the memory a process gets back.
+- That an object holds nothing from before its pool took the memory
+  shows only where the garbage is a capability or makes a call fail;
+  `host/history.c` does not know what the memory held before the call.
 - `tools/loop-bounds.py` knows clang's jump tables by their shape;
   any other jump through a register may make up a loop, which fails the link, never passes it.
 - That the count of armed sources leaves the log's line out is checked by reading `irq_set_bits`.
@@ -170,6 +171,8 @@ Design decisions behind these items live in `DESIGN.md`.
   A generator in the repository, one line per record with the names from `rvuos/abi.h`,
   would make the seeds readable and the next renumbering a rebuild;
   replay slots that start a few above `BOOT_CAP_COUNT` would spare the next one.
+  A seed written before a renumbering and merged after it keeps passing and tests nothing:
+  three seeds once did, and only a mutant nothing caught showed it.
 
 ## Code
 
