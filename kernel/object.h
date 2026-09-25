@@ -295,6 +295,9 @@ bool pool_under(const struct pool *pool, const struct pool *ancestor);
  */
 void pool_destroy(struct pool *pool);
 
+/* Whether pool_alloc would find room for size bytes. */
+bool pool_fits(const struct pool *pool, size_t size);
+
 /* Allocate a zeroed object of the given type and size. NULL if exhausted. */
 void *pool_alloc(struct pool *pool, uint8_t type, size_t size);
 
@@ -358,8 +361,8 @@ void cap_attach(struct cap *parent, struct cap *node);
 struct cap *cap_parent(const struct cap *node);
 
 /*
- * Store cap into n in old's place in the tree, and clear old with everything below it:
- * what a conversion does to the slot it consumes.
+ * Store cap into n in old's place in the tree, and clear old:
+ * what a conversion does to the slot it consumes, once it has revoked below it.
  * n is an empty slot, or old itself.
  */
 void cap_replace(struct cap *n, const struct cap *cap, struct cap *old);
@@ -367,14 +370,20 @@ void cap_replace(struct cap *n, const struct cap *cap, struct cap *old);
 /*
  * Clear a slot. KERR_INVALID_CAP if out of range.
  * What was derived from it is adopted by its parent; clearing an empty slot does nothing.
+ * Preemptible as cap_delete is: KERR_PREEMPTED when it stopped.
  */
 int cap_clear(struct captable *table, uint32_t slot);
 
-/* Clear a node; what was derived from it is adopted by its parent. */
-void cap_delete(struct cap *node);
+/*
+ * Clear a node; what was derived from it is adopted by its parent,
+ * or, when the node is a root, each child becomes a root, a step per child.
+ * With preempt it may stop between two steps for a pending interrupt and return false,
+ * the tree whole and the rest of the work still in it; see DESIGN.md, "Bounded work".
+ */
+bool cap_delete(struct cap *node, bool preempt);
 
-/* Clear every node below one, leaving the node itself. */
-void cap_revoke_below(struct cap *node);
+/* Clear every node below one, leaving the node itself; preemptible as cap_delete is. */
+bool cap_revoke_below(struct cap *node, bool preempt);
 
 /* Clear a node and everything below it. */
 void cap_revoke(struct cap *node);

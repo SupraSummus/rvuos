@@ -1,6 +1,7 @@
 #ifndef RVUOS_TRAP_H
 #define RVUOS_TRAP_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 /*
@@ -70,5 +71,12 @@ __attribute__((noreturn)) void kernel_trap_panic(void);
  * The host build has no clock and no devices and must never get here.
  */
 unsigned intr_wait(void);
+
+/*
+ * Whether the tick or a device interrupt is pending, which the kernel runs with MIE clear to leave.
+ * A preemptible walk asks between two steps; see DESIGN.md, "Bounded work".
+ * The host build always answers yes.
+ */
+bool intr_pending(void);
 
 #endif

@@ -97,7 +97,7 @@ int process_uninstall(struct process *proc, unsigned slot)
     }
     /* Leaves the tree as clearing a table slot does; process_drop then rebuilds the image. */
     if (proc->slots[slot].type != CAP_NONE) {
-        cap_delete(&proc->slots[slot]);
+        cap_delete(&proc->slots[slot], false);
     }
     return KERR_OK;
 }

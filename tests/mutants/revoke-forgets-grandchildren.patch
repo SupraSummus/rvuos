@@ -1,0 +1,16 @@
+A revoke that takes the first child out of the ring without handing up its children
+leaves them linked up to an empty slot, out of the root's reach.
+
+diff --git a/kernel/cap.c b/kernel/cap.c
+index c22b037..a9656c5 100644
+--- a/kernel/cap.c
++++ b/kernel/cap.c
+@@ -189,7 +189,7 @@ bool cap_revoke_below(struct cap *root, bool preempt)
+     while (root->child != 0) {
+         LOOP_PAID(cap_revoke_below, node, "a node it clears");
+         struct cap *n = node(root->child);
+-        detach(n, true);
++        detach(n, false);
+         clear_node(n);
+         if (root->child != 0 && stop_here(preempt)) {
+             return false;

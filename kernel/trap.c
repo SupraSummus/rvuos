@@ -113,6 +113,11 @@ unsigned intr_wait(void)
     return pending;
 }
 
+bool intr_pending(void)
+{
+    return (csr_read(mip) & (MIP_MTIP | (1u << IRQ_EXT_CAUSE))) != 0;
+}
+
 void kernel_trap_panic(void)
 {
     kputs("trap from machine mode\n");

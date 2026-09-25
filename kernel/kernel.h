@@ -21,6 +21,15 @@ static inline bool ram_contains(uint32_t base, uint32_t size)
     return base >= RAM_BASE && base - RAM_BASE < RAM_SIZE && size <= RAM_SIZE - (base - RAM_BASE);
 }
 
+/*
+ * Not status codes: what a call tells syscall_dispatch instead of returning.
+ * KERR_BLOCKED: the thread waits, and its registers are left alone until something wakes it.
+ * KERR_PREEMPTED: the call stopped for a pending interrupt with its progress kept,
+ * and starts again from its ecall; see DESIGN.md, "Bounded work".
+ */
+#define KERR_BLOCKED   (-1)
+#define KERR_PREEMPTED (-2)
+
 /* main.c, entered from start.S. */
 __attribute__((noreturn)) void kmain(void);
 

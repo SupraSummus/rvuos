@@ -2,14 +2,15 @@ A delete that does not hand the node's children to its parent
 leaves them linked up to an empty slot.
 
 diff --git a/kernel/cap.c b/kernel/cap.c
+index c22b037..2e1103b 100644
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -132,7 +132,7 @@
-  */
- static void unlink(struct cap *n, bool adopt)
+@@ -158,7 +158,7 @@ static void clear_node(struct cap *n)
+ static void detach(struct cap *n, bool adopt)
  {
--    uint32_t first = adopt ? n->child : 0;
-+    uint32_t first = adopt && 0 ? n->child : 0;
- 
-     if (n->next == LINK_UP) {
-         for (uint32_t link = first; link != 0 && !(link & LINK_UP);) {
+     /* The children go right after n, so n leaves the ring as a leaf would. */
+-    if (adopt && n->child != 0) {
++    if (adopt && 0 && n->child != 0) {
+         splice_after(n, node(n->child), node(node(n->child)->prev));
+     }
+     struct cap *pred = node(n->prev);

@@ -537,15 +537,19 @@ Three links per slot, first child, next and previous,
 where the last child's next points up to the parent with the low bit set,
 which the four-byte alignment of slots leaves free,
 and the first child's previous is the last child.
-The children of a node are then a ring that closes through the node,
-and a subtree walks in post-order with no stack:
-down to a leaf, along the ring, up when the link says so.
+The children of a node are then a ring that closes through the node.
 A node leaves its ring in constant time:
 its predecessor is one link away,
 and it is the first child exactly when that predecessor links up to the parent.
 A delete puts the node's children right after it, through the first and the last,
 and then takes the node out as a leaf;
 a conversion puts its result beside the consumed slot and takes the slot out.
+A revoke is deletes of the first child, one after another,
+each handing its children up to the front of the ring,
+until the node it revokes below has none:
+a step per node, with no stack,
+the tree whole between any two steps,
+and the next step always at the node's first child.
 Only a pool destroy still walks a ring, to find a node's parent.
 seL4's pre-order list with a depth per node costs a word less,
 but adds a visible depth limit and renumbers a subtree on every delete;
@@ -1007,20 +1011,35 @@ and every tick and every interrupt, other processes' included,
 gets that much slower.
 
 **The exception is destruction.**
-A revoke, a pool destroy, and a delete that hands its children to its parent
+A revoke, a pool destroy, and a delete below a root
 take as long as what they touch.
 That is kept to the subtree below the caller's own capability,
-never the whole machine,
-and it can be preempted:
-it stops when an interrupt is pending,
-its progress stays in the derivation tree,
-and the system call restarts, as in seL4.
-`cap_revoke_below` already walks with no stack,
-so it can stop between any two nodes.
+never the whole machine.
 Such a loop is paid for:
 each step takes away something an earlier call made,
 so over a run its steps are bounded by the calls before it.
 What it costs is latency, and preemption is the answer to that.
+
+**Preemption.**
+A revoke, a delete below a root, and the revoke that begins a conversion
+take one step per capability in constant time
+and ask `intr_pending` between two steps.
+If the tick or a device interrupt is pending, the walk stops,
+`syscall_dispatch` puts the thread back on its `ecall` with its registers as they were,
+the `mret` takes the interrupt through `mtvec` as in any user code,
+and the thread makes the same call again when it next runs, as in seL4.
+The kernel only notices the interrupt; the processor takes it.
+The progress stays in the derivation tree:
+the next step is always at the first child of the slot the call names,
+so the kernel needs no record of where it stopped, no second stack and no worker,
+and the time lands in the slice of the thread that made the call.
+A walk asks only after a step, so every attempt takes something away and the restarts end.
+Whether `intr_pending` is right changes when a walk stops, never what it does.
+A restart is a new call:
+it checks everything again, and revokes what was derived in between too.
+So a conversion revokes only once every check that can fail has passed,
+`OP_IRQ_BIND`'s room in the pool among them, and builds after.
+The pool destroy and the other walks of the table below do not stop yet.
 
 **The check.**
 Every loop a trap can run says what bounds it with an annotation from `kernel/work.h`:
@@ -1042,8 +1061,13 @@ and a paid loop names its unit: a node, a link, an object or a waiter.
 The host harness `fuzz-work` counts both after every call:
 a bound per entry of its loop,
 and paid steps at most twice what the call took away of that unit, plus one;
-twice since a revoke passes a node going down and clears it going up.
+twice since a pool destroy may pass a capability to the pool on its way up to the region
+and clear it again in the sweep.
 It finds a false claim only where the corpus reaches, and a wait is not checked at all.
+The host answers every `intr_pending` with yes, the worst case,
+so each preemptible call stops after its first step, is made again,
+and the self-check runs between any two steps;
+every host harness requires a stopped call to have taken a node or a link away.
 
 **Where the kernel falls short.**
 
@@ -1053,14 +1077,11 @@ It finds a false claim only where the corpus reaches, and a wait is not checked 
 | `pool_overlaps` | `OP_PROCESS_INSTALL` | open decision 14 |
 | `pool_overlaps`, `installed_overlaps` | `OP_REGION_TO_POOL` | open decision 14 |
 | `cap_revoke_range`, `pool_destroy`, `pool_under`, `pool_overlaps`, `cap_parent` | pool destroy | open decision 14, and preemption |
-| `cap_revoke_below` | revoke, `OP_REGION_TO_POOL`, `OP_IRQ_BIND` | preemption |
 | `memset` | `OP_REGION_TO_POOL`, pool destroy | zero each object as it is allocated, and on destroy only what was |
 
-A delete below a root takes a step per child, each becoming a root,
-and is to be preempted like a revoke.
-So is the revoke below a conversion's consumed slot, which then has to come first:
-both conversions build their object before it today,
-and a restart would find the pool or the line taken.
+A pool destroy revokes what the dying pools held with `cap_revoke_below` too,
+but does not stop:
+its sweep and the pool walks keep no progress a restart could find.
 
 **Timers are the open part.**
 A deadline queue sorted by expiry makes the tick constant
@@ -1153,6 +1174,8 @@ the same object with no more rights,
 a range within the parent's range with no more rights,
 or an object built on the parent's range,
 a pool on a region, an `Irq` on a line, an installed region on a region.
+A revoke or a delete stopped for an interrupt leaves such a forest too,
+since every step of theirs does; see "Bounded work".
 
 **Structural soundness.**
 Every pool's descriptor sits at its base,
@@ -1334,6 +1357,10 @@ or when a record asks for the tick through `OP_DEBUG_TICK`.
 A traced run in which every thread waits therefore stops
 even with a timer armed, since no record is left to fire it,
 and the host build, which has no clock, agrees.
+A tick pending in a revoke stops it on QEMU as anywhere,
+but a stopped call is not traced, only the attempt that finishes,
+so where the tick lands leaves the transcript alone,
+and the host may stop every such call without a line of its own.
 The stall in `wfi` for an armed timer is checked by the demo in `user/init.c`.
 A device interrupt is delivered under tracing as it is otherwise,
 because a line left claimed would storm
@@ -1597,7 +1624,9 @@ until the maintainer decides otherwise.
     which today walks up the pool tree;
     whether deleting the capability a retype made refuses or destroys;
     where a `Frame`'s rights come from;
-    and how a preempted revoke records where it stopped.
+    and how a preempted destroy records where it stopped:
+    a revoke needs no record, since its next step is always at the first child,
+    but the walk over the pool's own tables does.
     Decide before the memory model changes again.
 
 15. **What a process's table slot could do.**

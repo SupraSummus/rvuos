@@ -18,6 +18,11 @@
  *   a1..a4  results, operation specific; unchanged unless documented
  * No operation takes a pointer into user memory.
  *
+ * A call marked "restartable" may stop for a pending interrupt with its progress kept
+ * and resume the thread at its ecall, every register unchanged,
+ * so the thread makes the same call again and it goes on from there.
+ * The call made again checks everything afresh.
+ *
  * Slots that receive a new capability are always in the caller's own table.
  * A process needs no capability to write its own table;
  * the CapTable capability exists to write another process's table.
@@ -118,7 +123,8 @@
 #define OP_CAP_COPY 3
 /*
  * CapTable (RIGHT_W): clear a slot. a1 = slot.
- * What was derived from the slot is not cleared: it is adopted by the slot's parent.
+ * What was derived from the slot is not cleared: it is adopted by the slot's parent,
+ * or, when the slot is a root, each child becomes a root, which is restartable.
  * Clearing an empty slot succeeds.
  */
 #define OP_CAP_DELETE 4
@@ -126,7 +132,7 @@
  * CapTable (RIGHT_W): clear everything derived from a slot, in every table and every process,
  * and leave the slot itself. a1 = slot.
  * A region installed from a region capability below the slot is uninstalled.
- * Fails with KERR_INVALID_CAP for an empty slot.
+ * Fails with KERR_INVALID_CAP for an empty slot. Restartable.
  */
 #define OP_CAP_REVOKE 23
 /*
@@ -164,6 +170,7 @@
  * and is destroyed with it.
  * Fails with KERR_OVERLAP if the range overlaps an existing pool
  * or a region installed in any process.
+ * Every check comes before the clearing, which is restartable.
  */
 #define OP_REGION_TO_POOL 6
 
@@ -282,6 +289,8 @@
  * The capability must name exactly one line; carve first.
  * Fails with KERR_OVERLAP if an Irq is already bound to the line;
  * the line is free again once that Irq's pool is destroyed.
+ * Fails with KERR_NO_MEMORY if the pool has no room for the Irq.
+ * Every check comes before the clearing, which is restartable.
  * The new Irq is masked: it signals nothing until OP_IRQ_SET arms it.
  */
 #define OP_IRQ_BIND 20

@@ -67,10 +67,10 @@ Design decisions behind these items live in `DESIGN.md`.
    Done: the line table, the installed region's slot index, the wait queue,
    the run queue, the count of armed sources for the stall in `wfi`,
    the check that every loop a trap runs says what bounds it,
-   `tools/loop-bounds.py`, and a predecessor link per slot;
+   `tools/loop-bounds.py`, a predecessor link per slot,
+   and revoke, delete below a root and the conversions preempted and restarted;
    `DESIGN.md`, "Bounded work".
-   - Revoke preempted when an interrupt is pending, and restarted;
-     the conversions and a delete below a root too.
+   - The pool destroy preempted too, once open decision 14 says what its walk is.
    - `Untyped` and `Frame`, open decision 14, once its open questions are decided.
    - The timer queue, once "Timers are the open part" is decided.
    - Zeroing: `OP_REGION_TO_POOL` zeroes the whole range and a destroy the whole pool.
@@ -143,6 +143,15 @@ Design decisions behind these items live in `DESIGN.md`.
   `KERR_OVERLAP` is all it sees.
   A revoke that destroys the pools whose only capabilities it took
   would be the seL4 answer, and open decision 14 in `DESIGN.md` is that answer.
+- The host stops every preemptible call after one step, and makes it again,
+  but has no second thread run in between,
+  since under tracing an interrupt switches nothing.
+  On QEMU a call stops, and the interrupt is taken on the way back, only when a tick happens to land in it.
+  A restart that finds its slots changed by another thread
+  is checked by reading `syscall.c`.
+  A call that stops without putting its thread back on the `ecall`
+  the host takes as finished, and no host check sees it;
+  `make qemu-replay` does, by the trace line the host then lacks.
 - The seeds under `tests/seeds` are binary and were written by hand.
   Moving `BOOT_CAP_LOG` in took a one-off script that knew which argument
   of which operation is a slot; a generator in the repository,
