@@ -154,7 +154,7 @@ HOST_SAN    := -fsanitize=address,undefined -fno-sanitize-recover=all
 
 HOST_KERNEL_SRC := kernel/cap.c kernel/pool.c kernel/process.c kernel/sched.c \
                    kernel/syscall.c kernel/boot.c kernel/selfcheck.c kernel/klog.c
-HOST_SRC        := host/shim.c host/mutator.c host/fuzz.c
+HOST_SRC        := host/shim.c host/history.c host/mutator.c host/fuzz.c
 
 FUZZ_TIME ?= 60
 

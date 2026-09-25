@@ -1,0 +1,16 @@
+A destroy zeroes the pool it names but not the pools below it,
+so their memory goes back to user mode still holding their objects:
+other processes' tables, and the registers their threads saved.
+Memory crosses zeroed.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: memory left the kernel with bytes not zeroed
+
+diff --git a/kernel/pool.c b/kernel/pool.c
+--- a/kernel/pool.c
++++ b/kernel/pool.c
+@@ -77,3 +77,3 @@ void pool_destroy(struct pool *pool)
+         CALL_WALK(memset);
+-        memset(p2v(p->base), 0, p->size);
++        memset(p2v(p->base), 0, p == pool ? p->size : 0);
+     }

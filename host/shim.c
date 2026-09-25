@@ -18,6 +18,8 @@ _Static_assert(REPLAY_THREAD_SP > USER_DATA_BASE && REPLAY_THREAD_SP <= USER_DAT
                "the replay driver's stacks must lie in its data region");
 
 uint8_t *host_ram;
+/* What RAM holds before anything writes it. */
+#define HOST_RAM_PATTERN 0xa5
 /* The driver's threads, by actor number; see host_event. */
 static struct thread *host_threads[REPLAY_THREADS + 1];
 jmp_buf host_halt_jmp;
@@ -160,11 +162,16 @@ void pmp_get(unsigned idx, uint32_t *addr, uint8_t *cfg)
 
 struct thread *host_boot(void)
 {
+    /*
+     * RAM holds anything at power-up; a pattern stands for it,
+     * so memory the kernel takes without zeroing shows; see host/history.c.
+     */
     if (host_ram == NULL) {
-        host_ram = calloc(HOST_RAM_SIZE, 1);
+        host_ram = malloc(HOST_RAM_SIZE);
         if (host_ram == NULL) {
             abort();
         }
+        memset(host_ram, HOST_RAM_PATTERN, HOST_RAM_SIZE);
     }
     /*
      * The kernel zeroes pool memory itself when it takes it,
@@ -245,6 +252,7 @@ uint32_t host_syscall(const struct replay_record *c)
         mepc = f->mepc;
         unsigned before[UNITS];
         host_units(before);
+        history_begin();
 #ifdef RVUOS_WORK
         work_begin();
 #endif
@@ -252,6 +260,7 @@ uint32_t host_syscall(const struct replay_record *c)
 #ifdef RVUOS_WORK
         work_end();
 #endif
+        history_end();
         /* A step of a preemptible walk takes a node or a link away, and it stops only after one. */
         unsigned after[UNITS];
         host_units(after);
@@ -311,17 +320,21 @@ static unsigned host_actor(void)
 /*
  * The driver's passing protocol from rvuos/replay.h, run from the kernel's state:
  * every thread the round visits ticks until the actor has the processor
- * or the round is back where it started.
+ * or the processor comes back to a thread that ticked, with the record untaken.
+ * That is the thread the round started from,
+ * or one whose tick failed, its table no longer holding the debug capability,
+ * and gave the processor to nobody.
  */
 bool host_event(const struct replay_record *c)
 {
     struct thread *start = current;
     while (replay_passes(c, host_actor())) {
+        struct thread *ticked = current;
         host_syscall(&replay_tick);
         if (!host_driver_alive()) {
             return false;
         }
-        if (current == start) {
+        if (current == start || current == ticked) {
             break;
         }
     }

@@ -89,6 +89,19 @@ Design decisions behind these items live in `DESIGN.md`.
 - That the count of armed sources leaves the log's line out is checked by reading `irq_set_bits`.
   Under tracing each call's line reaches the log before the self-check runs,
   so an `Irq` armed on the log's line has always signalled by then.
+- No record writes memory, so what a process leaves in memory it turns into a pool
+  is stood for only by the pattern the host's RAM starts out holding.
+- The exit to user mode is checked by nothing but runs under QEMU;
+  `start.S` is not in the host build.
+  The trap path is small enough to prove against the Sail model of RISC-V.
+- The PMP image is checked against `pmp_napot_range`, the kernel's own reading of NAPOT,
+  so a misreading the encoder and the decoder share passes the self-check.
+  A decoder written from the specification alone, or the Sail model, would catch it.
+- The host's RAM is one buffer, so ASan sees only accesses that leave it.
+  A write from one object into its neighbour, or into a pool's free space,
+  shows only if the self-check or `host/history.c` sees what it damaged.
+  Poisoning each pool's free space, with `pool_alloc` and the zeroing unpoisoning what they write,
+  would make ASan see it.
 - The self-check sees structure, not semantics.
   That a signal wakes a thread waiting on *that* notification,
   and hands it the bits that were set,

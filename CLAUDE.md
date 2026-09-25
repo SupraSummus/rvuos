@@ -41,6 +41,7 @@ since the host boots once per input in one process.
 When the kernel's object model changes,
 update `kernel/selfcheck.c` with it;
 it is the executable form of the properties in `DESIGN.md`.
+An object bound to another at creation needs a line in `host/history.c` too.
 When a change adds or moves an invariant,
 run `make mutants` as well
 and plant a mutant for the new one as a patch under `tests/mutants/`,

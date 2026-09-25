@@ -4,7 +4,7 @@ Rights only narrow through copies,
 so a table ends up with a capability wider than the one it came from.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
-Report: region capability with rights beyond the grant
+Report: a call made a capability no capability of its caller covers
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
