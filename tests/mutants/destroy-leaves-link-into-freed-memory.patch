@@ -1,19 +1,22 @@
-A destroy that revokes only the capabilities naming its objects
-leaves the slots of the dying tables in the rings of slots that survive,
-and those rings then lead into memory that is user memory again.
+A destroy that clears the capabilities to the pool and its objects
+but not the slots its tables hold
+leaves those slots in the rings of slots that survive,
+and those rings then lead into memory that is the Untyped's again.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
 Report: child link to a slot that is not a live, filled one
+Report: link to a slot that is not a live, filled one
 
-diff --git a/kernel/cap.c b/kernel/cap.c
---- a/kernel/cap.c
-+++ b/kernel/cap.c
-@@ -279,7 +279,7 @@ void cap_revoke_range(uint32_t base, uint32_t size)
-             struct captable *table = (struct captable *)o;
-             for (uint32_t i = 0; i < table->nslots; i++) {
-                 LOOP_WALK(cap_revoke_range);
--                sweep_node(&table->slots[i], dying, base, size);
-+                sweep_node(&table->slots[i], false, base, size);
-             }
-         } else if (o->type == CAP_PROCESS) {
-             /* A living process loses its table with the table's pool; its regions name no object. */
+diff --git a/kernel/pool.c b/kernel/pool.c
+--- a/kernel/pool.c
++++ b/kernel/pool.c
+@@ -55,6 +55,9 @@ static struct cap *held_node(struct obj_header *o, uint16_t *at)
+ {
+     uint32_t count;
+     struct cap *slots = obj_nodes(o, &count);
++    if (o->type == CAP_CAPTABLE) {
++        count = 0;
++    }
+     for (; *at < count; (*at)++) {
+         LOOP_BOUND(CAPTABLE_MAX_SLOTS);
+         if (slots[*at].type != CAP_NONE) {

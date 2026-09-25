@@ -1,5 +1,6 @@
 /*
- * The properties "Authority only flows" and "Memory crosses zeroed" of DESIGN.md,
+ * The properties "Authority only flows", "Memory crosses zeroed"
+ * and "The caller keeps what it runs on" of DESIGN.md,
  * which relate the state before a call to the state after it.
  * host_syscall runs history_begin before each call and history_end after it.
  *
@@ -26,13 +27,6 @@ struct node_rec {
     struct grant g;
 };
 
-/* A pool before the call; stays is set when the call leaves it standing. */
-struct pool_rec {
-    uint32_t base, size;
-    uint8_t rights;
-    bool stays;
-};
-
 /* An object, and the pool it lies in. */
 struct obj_rec {
     uint32_t at, size, pool;
@@ -45,8 +39,17 @@ typedef ARRAY(struct obj_rec) obj_array;
 
 static ARRAY(struct grant) held;
 static ARRAY(struct node_rec) nodes;
-static ARRAY(struct pool_rec) pools;
 static obj_array objects, objects_after;
+
+/* The thread that makes the call, its table, and whether a destroy had begun on either's pool. */
+static const struct thread *caller;
+static const struct captable *caller_table;
+static bool caller_dying;
+
+static bool dying_under(const struct thread *t, const struct captable *table)
+{
+    return obj_pool(&t->hdr)->dying || (table != NULL && obj_pool(&table->hdr)->dying);
+}
 
 #define PUSH(arr, x)                                                           \
     do {                                                                       \
@@ -66,10 +69,13 @@ __attribute__((noreturn)) static void violated(const char *what)
     abort();
 }
 
-/* An installed region grants what the region capability it came from did. */
+/* An installed region grants what the frame it came from did, and an Untyped its block whatever its watermark. */
 static struct grant grant_of(const struct cap *c)
 {
-    return (struct grant){ c->type == CAP_INSTALLED ? CAP_REGION : c->type, c->rights, c->a, c->b };
+    if (c->type == CAP_UNTYPED) {
+        return (struct grant){ CAP_UNTYPED, c->rights, untyped_base(c), untyped_size(c) };
+    }
+    return (struct grant){ c->type == CAP_INSTALLED ? CAP_FRAME : c->type, c->rights, c->a, c->b };
 }
 
 static bool same_grant(struct grant x, struct grant y)
@@ -77,13 +83,14 @@ static bool same_grant(struct grant x, struct grant y)
     return x.type == y.type && x.rights == y.rights && x.a == y.a && x.b == y.b;
 }
 
-/* Whether a capability the caller held grants all that g does. */
+/* Whether a capability the caller held grants all that g does; an Untyped grants the frames it makes. */
 static bool covered(struct grant g)
 {
-    bool range = g.type == CAP_REGION || g.type == CAP_IRQ_LINE;
+    bool range = g.type == CAP_FRAME || g.type == CAP_UNTYPED || g.type == CAP_IRQ_LINE;
     for (size_t i = 0; i < held.n; i++) {
         const struct grant *h = &held.v[i];
-        if (h->type == g.type && (g.rights & ~h->rights) == 0 &&
+        bool type = h->type == g.type || (g.type == CAP_FRAME && h->type == CAP_UNTYPED);
+        if (type && (g.rights & ~h->rights) == 0 &&
             (range ? g.a - h->a < h->b && g.b <= h->b - (g.a - h->a) : g.a == h->a)) {
             return true;
         }
@@ -96,11 +103,6 @@ static int cmp_at(const void *x, const void *y)
 {
     uint32_t a = *(const uint32_t *)x, b = *(const uint32_t *)y;
     return (a > b) - (a < b);
-}
-
-static struct pool_rec *pool_before(uint32_t base)
-{
-    return bsearch(&base, pools.v, pools.n, sizeof(pools.v[0]), cmp_at);
 }
 
 static bool is_object(const obj_array *a, uint32_t at)
@@ -128,18 +130,10 @@ static bool zero(uint32_t base, uint32_t size)
 static void each_node(const obj_array *a, void (*fn)(const struct cap *))
 {
     for (size_t i = 0; i < a->n; i++) {
-        struct obj_header *o = p2v(a->v[i].at);
-        if (o->type == CAP_CAPTABLE) {
-            struct captable *t = (struct captable *)o;
-            for (uint32_t j = 0; j < t->nslots; j++) {
-                fn(&t->slots[j]);
-            }
-        } else if (o->type == CAP_PROCESS) {
-            struct process *p = (struct process *)o;
-            fn(&p->table);
-            for (unsigned j = 0; j < PROCESS_REGION_SLOTS; j++) {
-                fn(&p->slots[j]);
-            }
+        uint32_t count;
+        const struct cap *held_nodes = obj_nodes(p2v(a->v[i].at), &count);
+        for (uint32_t j = 0; j < count; j++) {
+            fn(&held_nodes[j]);
         }
     }
 }
@@ -153,29 +147,22 @@ static void record_node(const struct cap *c)
 
 void history_begin(void)
 {
-    held.n = nodes.n = pools.n = 0;
-
-    for (struct pool *p = pool_list; p != NULL; p = pool_next_pool(p)) {
-        PUSH(pools, ((struct pool_rec){ p->base, p->size, p->rights, false }));
-    }
-    qsort(pools.v, pools.n, sizeof(pools.v[0]), cmp_at);
+    held.n = nodes.n = 0;
 
     const struct captable *table = current != NULL ? thread_table(current) : NULL;
+    caller = current;
+    caller_table = table;
+    caller_dying = caller != NULL && dying_under(caller, table);
     for (uint32_t i = 0; table != NULL && i < table->nslots; i++) {
         const struct cap *c = &table->slots[i];
         if (c->type == CAP_NONE) {
             continue;
         }
         PUSH(held, grant_of(c));
-        /* The right to destroy a pool holds the memory the destroy gives back. */
-        const struct pool_rec *p = c->type == CAP_POOL ? pool_before(c->a) : NULL;
-        if (p != NULL && (c->rights & RIGHT_W)) {
-            PUSH(held, ((struct grant){ CAP_REGION, p->rights, p->base, p->size }));
-        }
-        /* The clock holds the counter's block, which OP_CLOCK_REGION hands out. */
+        /* The clock holds the counter's frame, which OP_CLOCK_FRAME hands out. */
         if (c->type == CAP_CLOCK) {
             const struct granted_range *r = &boot_granted[GRANT_COUNTER];
-            PUSH(held, ((struct grant){ CAP_REGION, r->rights, r->base, r->size }));
+            PUSH(held, ((struct grant){ CAP_FRAME, r->rights, r->base, r->size }));
         }
     }
 
@@ -189,8 +176,8 @@ static void check_built(const struct obj_header *o)
 {
     if (o->type == CAP_POOL) {
         const struct pool *p = (const struct pool *)o;
-        if (!covered((struct grant){ CAP_REGION, p->rights, p->base, p->size })) {
-            violated("a call made a pool of memory its caller held no region to");
+        if (!covered((struct grant){ CAP_UNTYPED, RIGHT_R | RIGHT_W, pool_base(p), p->size })) {
+            violated("a call made a pool of memory its caller held no Untyped to");
         }
         return;
     }
@@ -231,19 +218,20 @@ static void check_node(const struct cap *c)
 
 void history_end(void)
 {
+    if (caller != NULL && !caller_dying && dying_under(caller, caller_table)) {
+        violated("a call began to destroy the pool its caller or its table lives in");
+    }
+
     record_objects(&objects_after);
     each_node(&objects_after, check_node);
 
-    for (struct pool *p = pool_list; p != NULL; p = pool_next_pool(p)) {
-        struct pool_rec *was = pool_before(p->base);
-        if (was != NULL) {
-            was->stays = true;
-        }
-    }
-    /* Only what was an object is zeroed; the rest of a pool's memory comes back as it went in. */
+    /*
+     * Every object the call took away is zeroed, whether its pool went or a destroy stopped half way;
+     * the rest of a pool's memory comes back as it went in.
+     */
     for (size_t i = 0; i < objects.n; i++) {
         const struct obj_rec *o = &objects.v[i];
-        if (!pool_before(o->pool)->stays && !zero(o->at, o->size)) {
+        if (!is_object(&objects_after, o->at) && !zero(o->at, o->size)) {
             violated("memory left the kernel with an object not zeroed");
         }
     }

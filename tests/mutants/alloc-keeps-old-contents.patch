@@ -1,11 +1,11 @@
 An object is handed out holding what its memory held before the pool took it,
 since pool_alloc no longer zeroes it.
-Boot zeroes the boot pool as it once did, so the root task starts clean,
-but a pool made later lies on RAM the host keeps from one input to the next,
-as a warm reset does, holding the objects of the input before:
+Boot zeroes the boot pool, so the root task starts clean,
+but a pool made later lies on RAM that holds a pattern on the host,
+as it holds anything at power-up:
 a table's slots, a thread's links and a process's regions start as garbage,
-and the second thread's table, made in the replay's own prologue,
-holds capabilities nothing its maker held covers.
+so the first table the replay's prologue allocates holds capabilities
+that nothing its caller held covers.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
 Report: a call made a capability no capability of its caller covers
@@ -13,23 +13,23 @@ Report: a call made a capability no capability of its caller covers
 diff --git a/kernel/boot.c b/kernel/boot.c
 --- a/kernel/boot.c
 +++ b/kernel/boot.c
-@@ -16,6 +16,7 @@ struct pool *boot_pool;
- struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
+@@ -17,6 +17,7 @@ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
                                  paddr_t free_base, uint32_t free_size)
  {
+     /* No Untyped covers the boot pool, so its own node is a root, and nothing can revoke it. */
 +    memset(p2v(boot_pool_base), 0, boot_pool_size);
-     struct pool *pool = pool_create(boot_pool_base, boot_pool_size, RIGHT_ALL, NULL);
+     struct pool *pool = pool_create(boot_pool_base, boot_pool_size, NULL);
      boot_pool = pool;
  
 diff --git a/kernel/pool.c b/kernel/pool.c
 --- a/kernel/pool.c
 +++ b/kernel/pool.c
-@@ -106,8 +106,6 @@ void *pool_alloc(struct pool *pool, uint8_t type, size_t size)
-     struct obj_header *obj = p2v(pool->base + pool->used);
-     pool->used += align_up((uint32_t)size, OBJ_ALIGN);
-     /* The memory holds what it held before the pool took it. */
--    CALL_BOUND(OBJ_MAX_SIZE);
--    memset(obj, 0, size);
+@@ -150,8 +150,6 @@ void *pool_alloc(struct pool *pool, uint8_t type, size_t size)
+     uint32_t aligned = align_up((uint32_t)size, OBJ_ALIGN);
+     pool->used += aligned;
+     /* The memory holds what it held before the pool took it; the padding is zeroed with the rest. */
+-    CALL_BOUND(OBJ_MAX_SIZE + OBJ_ALIGN);
+-    memset(obj, 0, aligned);
      obj->type = type;
-     obj->pool = pool->base;
-     return obj;
+     obj->pool = pool_base(pool);
+     obj->back = (uint16_t)((v2p(obj) - pool->last) / OBJ_ALIGN);

@@ -25,13 +25,13 @@ static inline uint32_t rv_invoke(uint32_t op, uint32_t cap,
     return r_a0;
 }
 
-/* OP_REGION_INFO: where a region capability points. */
-static inline uint32_t rv_region_info(uint32_t region_cap, uint32_t *base, uint32_t *size)
+/* OP_FRAME_INFO: where a frame points. */
+static inline uint32_t rv_frame_info(uint32_t frame_cap, uint32_t *base, uint32_t *size)
 {
-    register uint32_t r_a0 __asm__("a0") = region_cap;
+    register uint32_t r_a0 __asm__("a0") = frame_cap;
     register uint32_t r_a1 __asm__("a1");
     register uint32_t r_a2 __asm__("a2");
-    register uint32_t r_a7 __asm__("a7") = OP_REGION_INFO;
+    register uint32_t r_a7 __asm__("a7") = OP_FRAME_INFO;
     __asm__ volatile("ecall"
                      : "+r"(r_a0), "=r"(r_a1), "=r"(r_a2)
                      : "r"(r_a7)
@@ -41,17 +41,53 @@ static inline uint32_t rv_region_info(uint32_t region_cap, uint32_t *base, uint3
     return r_a0;
 }
 
-/* OP_REGION_INFO again, for the smallest region the machine protects. */
-static inline uint32_t rv_region_min_size(uint32_t region_cap, uint32_t *min_out)
+/* OP_FRAME_INFO again, for the smallest region the machine protects. */
+static inline uint32_t rv_frame_min_size(uint32_t frame_cap, uint32_t *min_out)
 {
-    register uint32_t r_a0 __asm__("a0") = region_cap;
+    register uint32_t r_a0 __asm__("a0") = frame_cap;
     register uint32_t r_a4 __asm__("a4");
-    register uint32_t r_a7 __asm__("a7") = OP_REGION_INFO;
+    register uint32_t r_a7 __asm__("a7") = OP_FRAME_INFO;
     __asm__ volatile("ecall"
                      : "+r"(r_a0), "=r"(r_a4)
                      : "r"(r_a7)
                      : "memory", "a1", "a2", "a3", "a5", "a6");
     *min_out = r_a4;
+    return r_a0;
+}
+
+/* OP_UNTYPED_INFO: where an Untyped's memory lies, and how much of it is made into something. */
+static inline uint32_t rv_untyped_info(uint32_t untyped_cap, uint32_t *base, uint32_t *size,
+                                       uint32_t *mark)
+{
+    register uint32_t r_a0 __asm__("a0") = untyped_cap;
+    register uint32_t r_a1 __asm__("a1");
+    register uint32_t r_a2 __asm__("a2");
+    register uint32_t r_a4 __asm__("a4");
+    register uint32_t r_a7 __asm__("a7") = OP_UNTYPED_INFO;
+    __asm__ volatile("ecall"
+                     : "+r"(r_a0), "=r"(r_a1), "=r"(r_a2), "=r"(r_a4)
+                     : "r"(r_a7)
+                     : "memory", "a3", "a5", "a6");
+    *base = r_a1;
+    *size = r_a2;
+    *mark = r_a4;
+    return r_a0;
+}
+
+/* OP_UNTYPED_RETYPE: make the next block of an Untyped into a frame, a pool or an Untyped. */
+static inline uint32_t rv_retype(uint32_t untyped_cap, uint32_t type, uint32_t size, uint32_t dst,
+                                 uint32_t *base)
+{
+    register uint32_t r_a0 __asm__("a0") = untyped_cap;
+    register uint32_t r_a1 __asm__("a1") = type;
+    register uint32_t r_a2 __asm__("a2") = size;
+    register uint32_t r_a3 __asm__("a3") = dst;
+    register uint32_t r_a7 __asm__("a7") = OP_UNTYPED_RETYPE;
+    __asm__ volatile("ecall"
+                     : "+r"(r_a0), "+r"(r_a1), "+r"(r_a2), "+r"(r_a3)
+                     : "r"(r_a7)
+                     : "memory", "a4", "a5", "a6");
+    *base = r_a1;
     return r_a0;
 }
 
@@ -110,7 +146,7 @@ static inline uint32_t rv_clock_info(uint32_t clock_cap, uint32_t *hz, uint32_t 
 }
 
 /*
- * The counter, from the address OP_CLOCK_INFO gave, in a region OP_CLOCK_REGION gave.
+ * The counter, from the address OP_CLOCK_INFO gave, in a frame OP_CLOCK_FRAME gave.
  * No system call: the high word, the low word, and the high word again,
  * until the high word held still across the low one.
  */

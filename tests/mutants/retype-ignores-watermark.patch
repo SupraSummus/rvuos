@@ -1,0 +1,19 @@
+A retype takes the Untyped's first block of the size whatever it made before,
+so two things it made claim the same memory,
+and a frame may be mapped over a pool.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: memory that may hold kernel objects overlaps a node not above or below it
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -211,7 +211,7 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
+          * Everything this Untyped made lies below the watermark, so the block overlaps none of it.
+          * The mark is at most the size and the size a multiple of len, so nothing wraps.
+          */
+-        uint32_t off = (untyped_mark(u) + len - 1) & ~(len - 1);
++        uint32_t off = 0;
+         if (off > size - len) {
+             return KERR_NO_MEMORY;
+         }

@@ -1,15 +1,14 @@
 A node taken out of the middle of a ring without relinking its predecessor
 leaves the ring running through an empty slot.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
-Report: empty slot keeps links
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: link to a slot that is not a live, filled one
 Report: parent's ring does not reach the slot
-Report: sibling ring does not close
 
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -167,7 +167,6 @@ static void detach(struct cap *n, bool adopt)
+@@ -157,7 +157,6 @@ static void detach(struct cap *n, bool adopt)
      if (pred->next & LINK_UP) {
          node(pred->next)->child = (n->next & LINK_UP) ? 0 : n->next;
      } else {

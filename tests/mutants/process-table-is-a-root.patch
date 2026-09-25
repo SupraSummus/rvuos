@@ -1,0 +1,19 @@
+A process holds its table by a node that is a root rather than one below the CapTable capability,
+so revoking that capability, or destroying the table's pool, does not take it;
+every capability to an object lies below its pool's own node.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: capability to an object is a root
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -313,7 +313,7 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
+         }
+         /* It hangs below the capability it was made with, so a revoke above that takes it. */
+         proc->table = tc;
+-        cap_attach(slot_node(t, arg[3]), &proc->table);
++        cap_attach(NULL, &proc->table);
+         obj = &proc->hdr;
+         break;
+     }

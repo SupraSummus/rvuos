@@ -14,7 +14,7 @@ diff --git a/kernel/sched.c b/kernel/sched.c
  {
 -    return line_irq[line] != 0 ? p2v(line_irq[line]) : NULL;
 +    for (struct pool *p = pool_list; p != NULL && line_irq[line] != 0; p = pool_next_pool(p)) {
-+        if (range_contains(p->base, p->size, line_irq[line])) {
++        if (range_contains(pool_base(p), p->size, line_irq[line])) {
 +            return p2v(line_irq[line]);
 +        }
 +    }

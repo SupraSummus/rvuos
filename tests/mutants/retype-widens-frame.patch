@@ -1,0 +1,18 @@
+A retype makes a frame with every right rather than the Untyped's,
+so a borrower lent read and write gets execute as well.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: slot is not derived from its parent
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -229,7 +229,7 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
+             c = cap_to_object(&pool->hdr, RIGHT_ALL);
+             parent = &pool->node;
+         } else if (type == CAP_FRAME) {
+-            c = cap_to_frame(at, len, cap->rights);
++            c = cap_to_frame(at, len, RIGHT_ALL);
+         } else {
+             c = cap_to_untyped(at, len, cap->rights);
+         }

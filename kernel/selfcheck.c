@@ -78,76 +78,78 @@ static void check_pools(void)
     /* The boot pool is kernel memory; nothing granted may reach it. */
     for (unsigned i = 0; i < GRANTED_RANGES; i++) {
         const struct granted_range *g = &boot_granted[i];
-        if (g->size && ranges_overlap(g->base, g->size, boot_pool->base, boot_pool->size)) {
+        if (g->size && ranges_overlap(g->base, g->size, pool_base(boot_pool), boot_pool->size)) {
             fail("granted memory overlaps the boot pool", g->base, g->size, 0);
         }
     }
 
+    paddr_t before = 0;
     for (struct pool *p = pool_list; p != NULL; p = pool_next_pool(p)) {
-        if (p->hdr.type != CAP_POOL || obj_pool(&p->hdr) != p || v2p(p) != p->base) {
-            fail("pool descriptor is malformed", v2p(p), 0, 0);
+        paddr_t base = v2p(p);
+        if (p->hdr.type != CAP_POOL || p->hdr.pool != base || p->hdr.back != 0) {
+            fail("pool descriptor is malformed", base, 0, 0);
+        }
+        if (p->prev != before) {
+            fail("pool list is not linked back", base, p->prev, before);
+        }
+        before = base;
+        /* The pool's own node; the tree check reads its links. */
+        if (p->node.type != CAP_RETYPED || p->node.a != base || p->node.b != 0 || p->node.index != 0) {
+            fail("pool's own node is malformed", base, p->node.type, p->node.a);
         }
         if (p->used < sizeof(*p) || p->used > p->size) {
-            fail("pool used mark outside the pool", p->base, p->used, p->size);
+            fail("pool used mark outside the pool", base, p->used, p->size);
         }
-        if ((p->base | p->size) & (OBJ_ALIGN - 1)) {
-            fail("pool is not aligned", p->base, p->size, 0);
+        if ((base | p->size) & (OBJ_ALIGN - 1)) {
+            fail("pool is not aligned", base, p->size, 0);
         }
-        if (p != boot_pool && granted_rights(p->base, p->size) != RIGHT_ALL) {
-            fail("pool lies outside memory granted with full rights", p->base, p->size, 0);
+        if (p->dying > 1 || (!p->dying && p->sweep != 0)) {
+            fail("pool's destroy state is malformed", base, p->dying, p->sweep);
+        }
+        if (p != boot_pool && granted_rights(base, p->size) != RIGHT_ALL) {
+            fail("pool lies outside memory granted with full rights", base, p->size, 0);
         }
         for (struct pool *q = pool_next_pool(p); q != NULL; q = pool_next_pool(q)) {
-            if (ranges_overlap(p->base, p->size, q->base, q->size)) {
-                fail("pools overlap", p->base, q->base, 0);
+            if (ranges_overlap(base, p->size, pool_base(q), q->size)) {
+                fail("pools overlap", base, pool_base(q), 0);
             }
         }
 
         /*
-         * Pools form a tree rooted at the boot pool.
-         * A parent is named by address and not checked on use,
-         * so it must be live, and older: later on the list.
-         * Then parents lead to the last pool, which has to be the boot pool,
-         * and a destroy that spared a pool below it shows up here.
-         */
-        if ((p == boot_pool) != (p->parent == 0)) {
-            fail("only the boot pool has no parent", p->base, p->parent, 0);
-        }
-        if (p->parent != 0) {
-            struct pool *q = pool_next_pool(p);
-            while (q != NULL && v2p(q) != p->parent) {
-                q = pool_next_pool(q);
-            }
-            if (q == NULL) {
-                fail("pool's parent is not a live, older pool", p->base, p->parent, 0);
-            }
-        }
-
-        /*
-         * Objects tile the pool from the descriptor to the used mark.
+         * Objects tile the pool from the descriptor to the used mark,
+         * each saying how far back the one before it lies, and the newest is the last.
          * This is the one walk that does not use object_first/object_next:
          * those cross pools by an object's own header,
          * which is what this loop is here to check.
          */
-        paddr_t at = p->base + aligned_size(&p->hdr);
+        paddr_t at = base + aligned_size(&p->hdr);
+        paddr_t prev = base;
         for (struct obj_header *o = pool_first(p); o != NULL; o = pool_next(p, o)) {
             if (v2p(o) != at) {
-                fail("object walk skipped", p->base, at, v2p(o));
+                fail("object walk skipped", base, at, v2p(o));
             }
             if (obj_pool(o) != p) {
-                fail("object claims another pool", at, o->pool, p->base);
+                fail("object claims another pool", at, o->pool, base);
+            }
+            if ((uint32_t)o->back * OBJ_ALIGN != at - prev) {
+                fail("object does not know where the one before it lies", at, o->back, prev);
             }
             if (o->type != CAP_CAPTABLE && o->type != CAP_PROCESS &&
                 o->type != CAP_THREAD && o->type != CAP_NOTIFICATION &&
                 o->type != CAP_IRQ) {
                 fail("object has an unexpected type", at, o->type, 0);
             }
+            prev = at;
             at += aligned_size(o);
-            if (at > p->base + p->used) {
-                fail("object runs past the used mark", v2p(o), at, p->base + p->used);
+            if (at > base + p->used) {
+                fail("object runs past the used mark", v2p(o), at, base + p->used);
             }
         }
-        if (at != p->base + p->used) {
-            fail("objects do not end at the used mark", p->base, at, p->base + p->used);
+        if (at != base + p->used) {
+            fail("objects do not end at the used mark", base, at, base + p->used);
+        }
+        if (p->last != prev) {
+            fail("pool's newest object is not its last", base, p->last, prev);
         }
     }
 }
@@ -255,8 +257,8 @@ static void check_process(const struct process *proc)
             fail("process maps memory with rights beyond the grant", v2p(proc), s->a, s->rights);
         }
         for (struct pool *p = pool_list; p != NULL; p = pool_next_pool(p)) {
-            if (ranges_overlap(s->a, s->b, p->base, p->size)) {
-                fail("process maps a pool: isolation broken", v2p(proc), s->a, p->base);
+            if (ranges_overlap(s->a, s->b, pool_base(p), p->size)) {
+                fail("process maps a pool: isolation broken", v2p(proc), s->a, pool_base(p));
             }
         }
         for (unsigned j = i + 1; j < PROCESS_REGION_SLOTS; j++) {
@@ -449,16 +451,31 @@ static void check_captable(const struct captable *table)
         case CAP_DEBUG:
         case CAP_CLOCK:
             break;
-        case CAP_REGION: {
+        case CAP_FRAME: {
             uint8_t granted = granted_rights(c->a, c->b);
             if (c->b == 0 || granted == 0) {
-                fail("region capability outside granted memory", v2p(table), i, c->a);
+                fail("frame outside granted memory", v2p(table), i, c->a);
             }
             if (c->rights & ~granted) {
-                fail("region capability with rights beyond the grant", v2p(table), i, c->rights);
+                fail("frame with rights beyond the grant", v2p(table), i, c->rights);
             }
             if (!napot_block(c->a, c->b)) {
-                fail("region capability is not a NAPOT block", v2p(table), i, c->a);
+                fail("frame is not a NAPOT block", v2p(table), i, c->a);
+            }
+            break;
+        }
+        case CAP_UNTYPED: {
+            /* The block word ends in a one for every block of at least eight bytes. */
+            uint32_t base = untyped_base(c), size = untyped_size(c);
+            uint8_t granted = (c->a & 1) ? granted_rights(base, size) : 0;
+            if (granted == 0 || !napot_block(base, size)) {
+                fail("untyped outside granted memory, or not a block", v2p(table), i, c->a);
+            }
+            if (c->rights & ~granted) {
+                fail("untyped with rights beyond the grant", v2p(table), i, c->rights);
+            }
+            if (c->b > size) {
+                fail("untyped's watermark lies past its end", v2p(table), i, c->b);
             }
             break;
         }
@@ -508,30 +525,26 @@ static void check_captable(const struct captable *table)
  * or the counter's block, or a region installed from it, below the clock.
  */
 
-/* The node a link names, if it is a slot of a live table or of a live process. */
+/* The node a link names, if one of a live object; only the pool the address lies in is looked at. */
 static const struct cap *live_node(uint32_t link)
 {
     paddr_t at = link & ~LINK_UP;
-    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
-        const struct cap *slots;
-        uint32_t count;
-        if (o->type == CAP_CAPTABLE) {
-            slots = ((const struct captable *)o)->slots;
-            count = ((const struct captable *)o)->nslots;
-        } else if (o->type == CAP_PROCESS) {
-            const struct process *p = (const struct process *)o;
-            if (at == v2p(&p->table)) {
-                return &p->table;
-            }
-            slots = p->slots;
-            count = PROCESS_REGION_SLOTS;
-        } else {
+    for (struct pool *p = pool_list; p != NULL; p = pool_next_pool(p)) {
+        if (!range_contains(pool_base(p), p->used, at)) {
             continue;
         }
-        uint32_t off = at - v2p(slots);
-        if (off < count * sizeof(*slots) && off % sizeof(*slots) == 0) {
-            return &slots[off / sizeof(*slots)];
+        for (struct obj_header *o = &p->hdr; o != NULL; o = pool_next(p, o)) {
+            uint32_t count;
+            const struct cap *nodes = obj_nodes(o, &count);
+            if (count == 0) {
+                continue;
+            }
+            uint32_t off = at - v2p(nodes);
+            if (off < count * sizeof(*nodes) && off % sizeof(*nodes) == 0) {
+                return &nodes[off / sizeof(*nodes)];
+            }
         }
+        return NULL;
     }
     return NULL;
 }
@@ -542,33 +555,75 @@ static bool range_within(uint32_t base, uint32_t size, uint32_t in, uint32_t ins
     return base >= in && base - in <= insize - size && size <= insize;
 }
 
+/* The memory a node stands for, if it stands for memory. */
+static bool node_range(const struct cap *n, uint32_t *base, uint32_t *size)
+{
+    switch (n->type) {
+    case CAP_FRAME:
+    case CAP_INSTALLED:
+        *base = n->a;
+        *size = n->b;
+        return true;
+    case CAP_UNTYPED:
+        *base = untyped_base(n);
+        *size = untyped_size(n);
+        return true;
+    case CAP_RETYPED:
+        *base = n->a;
+        *size = ((const struct pool *)p2v(n->a))->size;
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool is_object_type(uint8_t type)
+{
+    return type == CAP_CAPTABLE || type == CAP_PROCESS || type == CAP_THREAD ||
+           type == CAP_NOTIFICATION || type == CAP_IRQ;
+}
+
 static bool derived_from(const struct cap *c, const struct cap *p)
 {
     bool narrower = !(c->rights & ~p->rights);
+    uint32_t base, size, pbase, psize;
+    /*
+     * What an Untyped made lies below its watermark, and so does what came up to it
+     * from something it made that went; a pool's own node carries rights of its own.
+     */
+    if (p->type == CAP_UNTYPED) {
+        if (c->type != CAP_UNTYPED && c->type != CAP_FRAME && c->type != CAP_INSTALLED &&
+            c->type != CAP_RETYPED) {
+            return false;
+        }
+        node_range(c, &base, &size);
+        node_range(p, &pbase, &psize);
+        return (narrower || c->type == CAP_RETYPED) && range_within(base, size, pbase, p->b);
+    }
     if (c->type == p->type) {
-        if (c->type == CAP_REGION || c->type == CAP_IRQ_LINE) {
+        if (c->type == CAP_FRAME || c->type == CAP_IRQ_LINE) {
             return narrower && range_within(c->a, c->b, p->a, p->b);
         }
         return narrower && (c->type == CAP_DEBUG || c->type == CAP_CLOCK || c->a == p->a);
     }
     /*
-     * The clock gives out one region, the counter's block, read only,
+     * The clock gives out one frame, the counter's block, read only,
      * and adopts what was carved or installed from it when a delete or a revoke takes it.
      */
-    if ((c->type == CAP_REGION || c->type == CAP_INSTALLED) && p->type == CAP_CLOCK) {
+    if ((c->type == CAP_FRAME || c->type == CAP_INSTALLED) && p->type == CAP_CLOCK) {
         const struct granted_range *g = &boot_granted[GRANT_COUNTER];
         return !(c->rights & ~g->rights) && range_within(c->a, c->b, g->base, g->size);
     }
-    if (c->type == CAP_INSTALLED && p->type == CAP_REGION) {
+    if (c->type == CAP_INSTALLED && p->type == CAP_FRAME) {
         return narrower && range_within(c->a, c->b, p->a, p->b);
     }
-    /* Objects built on a range carry rights of their own. */
-    if (c->type == CAP_POOL && p->type == CAP_REGION) {
-        const struct pool *pool = (const struct pool *)cap_object(c);
-        return range_within(pool->base, pool->size, p->a, p->b);
-    }
-    if (c->type == CAP_IRQ && p->type == CAP_IRQ_LINE) {
-        return range_within(((const struct irq *)cap_object(c))->line, 1, p->a, p->b);
+    /* Below a pool's node lies every capability to the pool and to its objects. */
+    if (p->type == CAP_RETYPED || p->type == CAP_POOL) {
+        if (c->type == CAP_POOL) {
+            return c->a == p->a;
+        }
+        /* Objects built in a pool carry rights of their own. */
+        return is_object_type(c->type) && cap_object(c)->pool == p->a;
     }
     return false;
 }
@@ -613,6 +668,10 @@ static void check_node(const struct cap *n, uint32_t bound)
         if (n->prev != 0) {
             fail("root has a predecessor", v2p(n), n->prev, 0);
         }
+        /* Every capability to a pool or its objects lies below the pool's own node. */
+        if (n->type == CAP_POOL || is_object_type(n->type)) {
+            fail("capability to an object is a root", v2p(n), n->type, n->a);
+        }
         return;
     }
     const struct cap *parent = live_node(link);
@@ -640,27 +699,109 @@ static void check_node(const struct cap *n, uint32_t bound)
     }
 }
 
-static void check_tree(void)
+/* Every node of the forest in turn, filled or not: a table's slots, a process's, a pool's own. */
+struct node_iter {
+    struct obj_header *o;
+    uint32_t i;
+};
+
+static const struct cap *node_next(struct node_iter *it)
 {
-    uint32_t bound = 1;
-    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
-        if (o->type == CAP_CAPTABLE) {
-            bound += ((const struct captable *)o)->nslots;
-        } else if (o->type == CAP_PROCESS) {
-            bound += 1 + PROCESS_REGION_SLOTS;
+    while (it->o != NULL) {
+        uint32_t count;
+        const struct cap *nodes = obj_nodes(it->o, &count);
+        if (it->i < count) {
+            return &nodes[it->i++];
+        }
+        it->o = object_next(it->o);
+        it->i = 0;
+    }
+    return NULL;
+}
+
+/* The nodes there are, and one more; a walk up that long has gone round a cycle. */
+static uint32_t tree_bound;
+
+/* The node a node was derived from, or NULL at a root; check_node has vetted the rings. */
+static const struct cap *node_parent(const struct cap *n)
+{
+    uint32_t link = n->next;
+    while (!(link & LINK_UP)) {
+        link = live_node(link)->next;
+    }
+    return link == LINK_UP ? NULL : live_node(link);
+}
+
+static bool lies_below(const struct cap *n, const struct cap *ancestor)
+{
+    uint32_t steps = 0;
+    for (const struct cap *p = node_parent(n); p != NULL; p = node_parent(p)) {
+        if (++steps > tree_bound) {
+            fail("the links up do not reach a root", v2p(n), 0, 0);
+        }
+        if (p == ancestor) {
+            return true;
         }
     }
-    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
-        if (o->type == CAP_CAPTABLE) {
-            const struct captable *t = (const struct captable *)o;
-            for (uint32_t i = 0; i < t->nslots; i++) {
-                check_node(&t->slots[i], bound);
+    return false;
+}
+
+static void check_tree(void)
+{
+    tree_bound = 1;
+    struct node_iter it = { object_first(), 0 };
+    while (node_next(&it) != NULL) {
+        tree_bound++;
+    }
+    it = (struct node_iter){ object_first(), 0 };
+    for (const struct cap *n = node_next(&it); n != NULL; n = node_next(&it)) {
+        check_node(n, tree_bound);
+    }
+    /* A forest: from every node the links up reach a root. */
+    it = (struct node_iter){ object_first(), 0 };
+    for (const struct cap *n = node_next(&it); n != NULL; n = node_next(&it)) {
+        if (n->type != CAP_NONE) {
+            lies_below(n, NULL);
+        }
+    }
+}
+
+/*
+ * True if an Untyped will make nothing more of [base, base + size):
+ * it lies below the watermark, which stays while the Untyped has made something.
+ */
+static bool behind_mark(const struct cap *u, uint32_t base, uint32_t size)
+{
+    return u->type == CAP_UNTYPED && u->child != 0 && range_within(base, size, untyped_base(u), u->b);
+}
+
+/*
+ * Memory that may become kernel memory, an Untyped or a pool,
+ * overlaps another node standing for memory only where one lies below the other,
+ * or where an Untyped overlaps what lies behind its watermark,
+ * which a delete below a root Untyped leaves while it makes roots of its children one by one.
+ * So a frame, which never lies above or below a pool, overlaps none,
+ * and neither does anything two siblings below one Untyped stand for:
+ * the watermark kept them apart.
+ */
+static void check_nesting(void)
+{
+    struct node_iter it = { object_first(), 0 };
+    for (const struct cap *x = node_next(&it); x != NULL; x = node_next(&it)) {
+        uint32_t xbase, xsize;
+        if ((x->type != CAP_UNTYPED && x->type != CAP_RETYPED) || !node_range(x, &xbase, &xsize)) {
+            continue;
+        }
+        struct node_iter jt = { object_first(), 0 };
+        for (const struct cap *y = node_next(&jt); y != NULL; y = node_next(&jt)) {
+            uint32_t ybase, ysize;
+            if (y == x || !node_range(y, &ybase, &ysize) || !ranges_overlap(xbase, xsize, ybase, ysize)) {
+                continue;
             }
-        } else if (o->type == CAP_PROCESS) {
-            const struct process *p = (const struct process *)o;
-            check_node(&p->table, bound);
-            for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
-                check_node(&p->slots[i], bound);
+            if (!lies_below(x, y) && !lies_below(y, x) && !behind_mark(x, ybase, ysize) &&
+                !behind_mark(y, xbase, xsize)) {
+                fail("memory that may hold kernel objects overlaps a node not above or below it",
+                     v2p(x), v2p(y), ybase);
             }
         }
     }
@@ -710,6 +851,7 @@ void selfcheck_run(void)
     check_lines();
     /* Every node has been vetted as a capability by now; the tree check reads only links. */
     check_tree();
+    check_nesting();
 
     if (current != NULL) {
         struct obj_header *o = object_find(v2p(current));

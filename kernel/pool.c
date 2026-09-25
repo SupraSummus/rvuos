@@ -13,84 +13,127 @@ static inline uint32_t align_up(uint32_t v, uint32_t a)
     return (v + a - 1) & ~(a - 1);
 }
 
-struct pool *pool_create(paddr_t base, uint32_t size, uint8_t rights, struct pool *parent)
+struct pool *pool_create(paddr_t base, uint32_t size, struct cap *parent)
 {
     struct pool *pool = p2v(base);
+    CALL_BOUND(sizeof(struct pool));
+    *pool = (struct pool){ 0 };
     pool->hdr.type = CAP_POOL;
     pool->hdr.pool = base;
-    pool->base = base;
+    pool->node = (struct cap){ .type = CAP_RETYPED, .rights = RIGHT_ALL, .a = base };
+    cap_attach(parent, &pool->node);
     pool->size = size;
     pool->used = align_up(sizeof(*pool), OBJ_ALIGN);
-    pool->rights = rights;
+    pool->last = base;
+    /* The list is the self-check's and the host's, and costs a step to join and one to leave. */
     pool->next = pool_list ? v2p(pool_list) : 0;
-    pool->parent = parent != NULL ? v2p(parent) : 0;
+    if (pool_list != NULL) {
+        pool_list->prev = base;
+    }
     pool_list = pool;
     return pool;
 }
 
-bool pool_under(const struct pool *pool, const struct pool *ancestor)
+static void pool_unlink(struct pool *pool)
 {
-    for (const struct pool *p = pool; p != NULL; p = pool_parent(p)) {
-        LOOP_WALK(pool_under);
-        if (p == ancestor) {
-            return true;
-        }
+    if (pool->prev != 0) {
+        ((struct pool *)p2v(pool->prev))->next = pool->next;
+    } else {
+        pool_list = pool_next_pool(pool);
     }
-    return false;
+    if (pool->next != 0) {
+        ((struct pool *)p2v(pool->next))->prev = pool->prev;
+    }
 }
 
 /*
- * The memory is about to be user memory again, and its objects hold other processes' tables.
- * The descriptor goes last, since the walk reads it.
+ * The next node an object holds, from its slot *at on, or NULL when it holds no more:
+ * a table's slots, and a process's table slot, 0, and its region slots.
+ * *at moves to the slot found, so the scan does not look at a slot twice.
  */
-static void pool_clear(struct pool *pool)
+static struct cap *held_node(struct obj_header *o, uint16_t *at)
 {
-    for (struct obj_header *o = pool_first(pool), *next; o != NULL; o = next) {
-        LOOP_PAID(pool_clear, object, "an object of the pool that goes");
-        next = pool_next(pool, o);
-        sched_forget(o);
-        CALL_BOUND(OBJ_MAX_SIZE);
-        memset(o, 0, obj_size(o));
+    uint32_t count;
+    struct cap *slots = obj_nodes(o, &count);
+    for (; *at < count; (*at)++) {
+        LOOP_BOUND(CAPTABLE_MAX_SLOTS);
+        if (slots[*at].type != CAP_NONE) {
+            return &slots[*at];
+        }
     }
-    CALL_BOUND(sizeof(struct pool));
-    memset(pool, 0, sizeof(*pool));
+    return NULL;
 }
 
-void pool_destroy(struct pool *pool)
+_Static_assert(CAPTABLE_MAX_SLOTS <= UINT16_MAX && 1 + PROCESS_REGION_SLOTS <= CAPTABLE_MAX_SLOTS,
+               "the sweep's slot fits its field");
+
+bool pool_destroy(struct pool *pool, struct cap *keep, bool preempt)
 {
+    /* Nothing is allocated from a pool that is going, so the steps below only ever take. */
+    pool->dying = 1;
+
     /*
-     * The capability sweep first, over every pool that is going,
-     * while all of them still read as they were:
-     * a slot in one of them can be linked to a slot in another,
-     * and the sweep follows those links.
+     * Every capability to the pool and to its objects lies below the pool's node,
+     * so revoking below it leaves none, keep aside, which the caller names the pool through.
+     * Its progress is in the tree, and a new capability made meanwhile goes the same way.
      */
-    for (struct pool *p = pool_list; p != NULL; p = pool_next_pool(p)) {
-        LOOP_WALK(pool_destroy);
-        if (pool_under(p, pool)) {
-            cap_revoke_range(p->base, p->size);
+    if (keep != NULL) {
+        while (cap_revoke_step(keep)) {
+            LOOP_PAID(pool_destroy, node, "a node below the capability the destroy was made through");
+            if (cap_stop_here(preempt)) {
+                return false;
+            }
         }
     }
-    /*
-     * The list has the newest pool first and a child is newer than its parent,
-     * so one walk takes every pool below this one before the pool itself,
-     * and a parent read on the way up is never one already zeroed.
-     * Keeping the last pool that stays unlinks each one that goes without a second walk.
-     */
-    for (struct pool *p = pool_list, *next, *kept = NULL; p != NULL; p = next) {
-        LOOP_WALK(pool_destroy);
-        next = pool_next_pool(p);
-        if (!pool_under(p, pool)) {
-            kept = p;
-            continue;
+    while (cap_revoke_step_except(&pool->node, keep)) {
+        LOOP_PAID(pool_destroy, node, "a capability to the pool or to one of its objects");
+        if (cap_stop_here(preempt)) {
+            return false;
         }
-        /* Nothing below may fail: the pool is going. */
-        if (kept != NULL) {
-            kept->next = p->next;
-        } else {
-            pool_list = next;
-        }
-        pool_clear(p);
     }
+
+    /*
+     * The objects go newest first, and the used mark follows,
+     * so a stop leaves a pool with fewer objects and the next step is at its newest.
+     * A thread is newer than its process and an Irq than its notification,
+     * so no object is left pointing at one already gone.
+     * The nodes an object holds are cleared as a delete clears them:
+     * what was derived from them goes to their parents,
+     * so no ring leads into memory that is about to be the Untyped's again,
+     * and no clearing here destroys another pool.
+     */
+    while (pool->last != pool_base(pool)) {
+        LOOP_PAID(pool_destroy, object, "an object of the pool, newest first");
+        struct obj_header *o = p2v(pool->last);
+        struct cap *n;
+        while ((n = held_node(o, &pool->sweep)) != NULL) {
+            LOOP_PAID(pool_destroy, node, "a node the object holds");
+            if (!cap_delete(n, preempt) || cap_stop_here(preempt)) {
+                return false;
+            }
+        }
+        sched_forget(o);
+        /* The padding too, so that everything the pool ever handed out goes back zeroed. */
+        uint32_t size = align_up((uint32_t)obj_size(o), OBJ_ALIGN);
+        pool->last = v2p(o) - o->back * OBJ_ALIGN;
+        pool->used = v2p(o) - pool_base(pool);
+        pool->sweep = 0;
+        CALL_BOUND(OBJ_MAX_SIZE + OBJ_ALIGN);
+        memset(o, 0, size);
+        if (pool->last != pool_base(pool) && cap_stop_here(preempt)) {
+            return false;
+        }
+    }
+
+    /* Nothing below may stop: the pool is empty, and its memory goes back to the Untyped. */
+    if (keep != NULL) {
+        cap_delete(keep, false);
+    }
+    cap_delete(&pool->node, false);
+    pool_unlink(pool);
+    CALL_BOUND(sizeof(struct pool));
+    memset(pool, 0, sizeof(*pool));
+    return true;
 }
 
 bool pool_fits(const struct pool *pool, size_t size)
@@ -103,15 +146,20 @@ void *pool_alloc(struct pool *pool, uint8_t type, size_t size)
     if (size > OBJ_MAX_SIZE || !pool_fits(pool, size)) {
         return NULL;
     }
-    struct obj_header *obj = p2v(pool->base + pool->used);
-    pool->used += align_up((uint32_t)size, OBJ_ALIGN);
-    /* The memory holds what it held before the pool took it. */
-    CALL_BOUND(OBJ_MAX_SIZE);
-    memset(obj, 0, size);
+    struct obj_header *obj = p2v(pool_base(pool) + pool->used);
+    uint32_t aligned = align_up((uint32_t)size, OBJ_ALIGN);
+    pool->used += aligned;
+    /* The memory holds what it held before the pool took it; the padding is zeroed with the rest. */
+    CALL_BOUND(OBJ_MAX_SIZE + OBJ_ALIGN);
+    memset(obj, 0, aligned);
     obj->type = type;
-    obj->pool = pool->base;
+    obj->pool = pool_base(pool);
+    obj->back = (uint16_t)((v2p(obj) - pool->last) / OBJ_ALIGN);
+    pool->last = v2p(obj);
     return obj;
 }
+
+_Static_assert(((OBJ_MAX_SIZE + OBJ_ALIGN - 1) / OBJ_ALIGN) <= UINT16_MAX, "an object's back field fits");
 
 size_t obj_size(const struct obj_header *obj)
 {
@@ -143,7 +191,7 @@ struct obj_header *pool_first(struct pool *pool)
 struct obj_header *pool_next(struct pool *pool, struct obj_header *obj)
 {
     paddr_t next = v2p(obj) + align_up((uint32_t)obj_size(obj), OBJ_ALIGN);
-    if (next >= pool->base + pool->used) {
+    if (next >= pool_base(pool) + pool->used) {
         return NULL;
     }
     return p2v(next);
@@ -174,34 +222,3 @@ struct obj_header *object_find(paddr_t p)
     }
     return NULL;
 }
-
-bool pool_overlaps(uint32_t base, uint32_t size)
-{
-    for (struct pool *p = pool_list; p != NULL; p = pool_next_pool(p)) {
-        LOOP_WALK(pool_overlaps);
-        if (ranges_overlap(base, size, p->base, p->size)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool installed_overlaps(uint32_t base, uint32_t size)
-{
-    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
-        LOOP_WALK(installed_overlaps);
-        if (o->type != CAP_PROCESS) {
-            continue;
-        }
-        struct process *proc = (struct process *)o;
-        for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
-            LOOP_BOUND(PROCESS_REGION_SLOTS);
-            const struct cap *s = &proc->slots[i];
-            if (s->type != CAP_NONE && ranges_overlap(base, size, s->a, s->b)) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-

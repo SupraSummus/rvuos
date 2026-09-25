@@ -7,7 +7,7 @@ Caught-by: stack-depth
 diff --git a/kernel/selfcheck.c b/kernel/selfcheck.c
 --- a/kernel/selfcheck.c
 +++ b/kernel/selfcheck.c
-@@ -197,7 +197,7 @@ static void check_pmp_image(const struct process *proc, const uint32_t *addr,
+@@ -199,7 +199,7 @@ static void check_pmp_image(const struct process *proc, const uint32_t *addr,
          }
      }
  

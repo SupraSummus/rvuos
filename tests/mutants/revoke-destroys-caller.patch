@@ -1,0 +1,19 @@
+A revoke below an Untyped does not refuse when the calling thread lives in its memory,
+so it destroys the pool the thread runs from, the thread with it,
+and the call returns into a frame that is gone.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: a call began to destroy the pool its caller or its table lives in
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -105,7 +105,7 @@ static int op_captable(struct thread *t, const struct cap *cap,
+             return err;
+         }
+         /* Below an Untyped the pools go too, and the caller keeps what it runs on. */
+-        if (c.type == CAP_UNTYPED && holds_caller(t, untyped_base(&c), untyped_size(&c))) {
++        if (c.type == CAP_UNTYPED && holds_caller(t, untyped_base(&c), untyped_size(&c)) && 0) {
+             return KERR_STATE;
+         }
+         return cap_revoke_below(&table->slots[arg[1]], true) ? KERR_OK : KERR_PREEMPTED;

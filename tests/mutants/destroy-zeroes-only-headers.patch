@@ -1,5 +1,5 @@
 A destroy zeroes each object's header but not the rest of it,
-so the memory goes back to user mode still holding its objects:
+so the memory goes back to the Untyped still holding its objects:
 other processes' tables, and the registers their threads saved.
 Memory crosses zeroed.
 
@@ -9,8 +9,12 @@ Report: memory left the kernel with an object not zeroed
 diff --git a/kernel/pool.c b/kernel/pool.c
 --- a/kernel/pool.c
 +++ b/kernel/pool.c
-@@ -52,3 +52,3 @@ static void pool_clear(struct pool *pool)
-         CALL_BOUND(OBJ_MAX_SIZE);
--        memset(o, 0, obj_size(o));
-+        memset(o, 0, sizeof(*o));
-     }
+@@ -119,7 +119,7 @@ bool pool_destroy(struct pool *pool, struct cap *keep, bool preempt)
+         pool->used = v2p(o) - pool_base(pool);
+         pool->sweep = 0;
+         CALL_BOUND(OBJ_MAX_SIZE + OBJ_ALIGN);
+-        memset(o, 0, size);
++        memset(o, 0, size < sizeof(*o) ? size : sizeof(*o));
+         if (pool->last != pool_base(pool) && cap_stop_here(preempt)) {
+             return false;
+         }

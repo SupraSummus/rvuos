@@ -52,19 +52,19 @@ make BOARD=esp32c6 test  # the same, and check the transcript
 
 The kernel boots in machine mode on QEMU `virt` and on the ESP32-C6
 and runs an embedded root task in user mode behind PMP.
-The root task holds capabilities to its own objects and to free memory,
-carves regions, turns one into a kernel pool,
-allocates objects from it,
+The root task holds capabilities to its own objects and to untyped memory,
+makes frames and a kernel pool of it,
+allocates objects from the pool,
 and installs and removes regions, with the PMP image following each change.
 Out of those capabilities it builds a second process,
 maps a region into both, starts a thread in it,
 and exchanges a word with it through that shared memory,
 using notifications to say when.
 
-Kernel objects live in pools carved from user memory,
-and the pools form a tree by who created them:
-destroying a process's pool takes every pool it made,
-so nothing a process built in kernel memory outlives it.
+Kernel objects live in pools made of untyped memory,
+and what a process makes of memory it was lent lies below the lender's Untyped:
+revoking below it destroys every pool the process made,
+so nothing a process built in kernel memory outlives the lender's leave.
 
 No data passes through the kernel: the only blocking primitive
 is a notification, a word of sticky bits,
@@ -82,7 +82,7 @@ the machine has a fixed few of them, handed out like any other line,
 and `DESIGN.md`, "Time", says why.
 The time itself is a capability too:
 a process given the clock reads the machine's counter with loads
-through a read-only region, and one without it has no clock to read.
+through a read-only frame, and one without it has no clock to read.
 
 Device interrupts have the same shape: an `Irq` object,
 bound to a notification, signals it when its line fires

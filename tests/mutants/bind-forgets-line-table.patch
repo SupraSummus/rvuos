@@ -8,11 +8,11 @@ Report: irq is missing from the line table
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -487,7 +487,6 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
+@@ -522,7 +522,6 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
          struct irq *irq = pool_alloc(pool, CAP_IRQ, sizeof(*irq));
          irq->ntfn = v2p(ntfn);
          irq->line = first;
 -        line_irq[first] = v2p(irq);
+         /* The line goes, a leaf now, and the Irq hangs below the pool capability as any object does. */
+         cap_delete(slot_node(t, slot), false);
          /* Its bits are zero, so it is disarmed, and its line stays masked as every line does until a set. */
-         struct cap ic = cap_to_object(&irq->hdr, RIGHT_ALL);
-         /* The Irq capability takes the line's place in the tree, and the line goes. */

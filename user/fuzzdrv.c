@@ -131,7 +131,7 @@ int main(void)
     }
 
     uint32_t input_base, input_size;
-    if (rv_region_info(BOOT_CAP_INPUT, &input_base, &input_size) != KERR_OK) {
+    if (rv_frame_info(BOOT_CAP_INPUT, &input_base, &input_size) != KERR_OK) {
         puts("cannot read the input region\n");
         rv_halt(BOOT_CAP_DEBUG, 2);
     }
@@ -160,8 +160,8 @@ int main(void)
         }
     }
     uint32_t uart_base, log_base, size;
-    if (rv_region_info(BOOT_CAP_UART, &uart_base, &size) != KERR_OK ||
-        rv_region_info(BOOT_CAP_LOG, &log_base, &size) != KERR_OK) {
+    if (rv_frame_info(BOOT_CAP_UART, &uart_base, &size) != KERR_OK ||
+        rv_frame_info(BOOT_CAP_LOG, &log_base, &size) != KERR_OK) {
         puts("cannot find the uart or the log\n");
         rv_halt(BOOT_CAP_DEBUG, 2);
     }

@@ -1,17 +1,19 @@
-A destroy that drops from the list the pools that stay before the first one it takes.
-They escape every later sweep and overlap check.
+A destroy that unlinks its pool from the list
+leaves the next pool's back link naming the pool that went.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
-Report: dangling object capability
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: pool list is not linked back
 
 diff --git a/kernel/pool.c b/kernel/pool.c
 --- a/kernel/pool.c
 +++ b/kernel/pool.c
-@@ -80,7 +80,6 @@ void pool_destroy(struct pool *pool)
-         LOOP_WALK(pool_destroy);
-         next = pool_next_pool(p);
-         if (!pool_under(p, pool)) {
--            kept = p;
-             continue;
-         }
-         /* Nothing below may fail: the pool is going. */
+@@ -41,9 +41,6 @@ static void pool_unlink(struct pool *pool)
+     } else {
+         pool_list = pool_next_pool(pool);
+     }
+-    if (pool->next != 0) {
+-        ((struct pool *)p2v(pool->next))->prev = pool->prev;
+-    }
+ }
+ 
+ /*

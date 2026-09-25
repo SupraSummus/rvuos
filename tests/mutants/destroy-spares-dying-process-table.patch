@@ -1,21 +1,20 @@
-A destroy clears the table slot of a process only while the process lives on.
-A dying process stays in the ring of the capability its table was made with,
-which then links into freed memory.
+A destroy clears the region slots of a dying process but not its table slot,
+which stays in the ring of the capability its table was made with
+and then links into freed memory.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
 Report: child link to a slot that is not a live, filled one
 
-diff --git a/kernel/cap.c b/kernel/cap.c
---- a/kernel/cap.c
-+++ b/kernel/cap.c
-@@ -284,7 +284,9 @@ void cap_revoke_range(uint32_t base, uint32_t size)
-         } else if (o->type == CAP_PROCESS) {
-             /* A living process loses its table with the table's pool; its regions name no object. */
-             struct process *proc = (struct process *)o;
--            sweep_node(&proc->table, dying, base, size);
-+            if (!dying) {
-+                sweep_node(&proc->table, dying, base, size);
-+            }
-             for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
-                 LOOP_BOUND(PROCESS_REGION_SLOTS);
-                 sweep_node(&proc->slots[i], dying, base, size);
+diff --git a/kernel/pool.c b/kernel/pool.c
+--- a/kernel/pool.c
++++ b/kernel/pool.c
+@@ -55,6 +55,9 @@ static struct cap *held_node(struct obj_header *o, uint16_t *at)
+ {
+     uint32_t count;
+     struct cap *slots = obj_nodes(o, &count);
++    if (o->type == CAP_PROCESS && *at == 0) {
++        *at = 1;
++    }
+     for (; *at < count; (*at)++) {
+         LOOP_BOUND(CAPTABLE_MAX_SLOTS);
+         if (slots[*at].type != CAP_NONE) {

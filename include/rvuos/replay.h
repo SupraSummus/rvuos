@@ -36,7 +36,10 @@
  * and a pool the second thread creates lies below its own in the tree,
  * where a record on the first thread can destroy both at once.
  * The second table holds a copy of every slot the first one holds,
- * so a record means the same on whichever thread performs it.
+ * so a record means the same on whichever thread performs it,
+ * with one exception: an Untyped is derived, never copied,
+ * so the second thread's BOOT_CAP_FREE_RAM is an Untyped of its own, cut from the first one's.
+ * Revoking the first one's destroys the second thread's pool, and what it made of its own.
  */
 
 #include "rvuos/abi.h"
@@ -61,17 +64,21 @@ static inline int replay_passes(const struct replay_record *r, unsigned me)
 /* Capability slots the setup fills, above the boot capabilities, in both tables. */
 #define REPLAY_CAP_NOTIFY  15
 #define REPLAY_CAP_THREAD  16 /* the second thread */
-#define REPLAY_CAP_POOL    17 /* the second thread's pool; first the region it is made of */
+#define REPLAY_CAP_POOL    17 /* the second thread's pool */
 #define REPLAY_CAP_TABLE   18 /* the second thread's table */
 #define REPLAY_CAP_PROCESS 19 /* the second thread's process */
+#define REPLAY_CAP_SCRATCH 20 /* the second thread's Untyped on its way over; empty afterwards */
 _Static_assert(REPLAY_CAP_NOTIFY == BOOT_CAP_COUNT, "the setup's slots follow the boot capabilities");
 /* The third thread, stopped until a record resumes it: the last slot, which the corpus leaves alone. */
 #define REPLAY_CAP_THIRD   (REPLAY_TABLE_SLOTS - 1)
 
-/* The second thread's pool: the start of the free RAM, and as many slots as the root task has. */
-#define REPLAY_POOL_OFFSET 0x0000u
-#define REPLAY_POOL_SIZE   0x1000u
-#define REPLAY_TABLE_SLOTS 64
+/*
+ * The second thread's pool, the first block of the free RAM, with as many slots as the root task has,
+ * and its Untyped, the next block of its size.
+ */
+#define REPLAY_POOL_SIZE    0x1000u
+#define REPLAY_TABLE_SLOTS  64
+#define REPLAY_UNTYPED_SIZE 0x100000u
 
 /*
  * The second and third threads' stacks, in the root task's data region below the root's.
@@ -93,8 +100,7 @@ static const struct replay_record replay_prologue[] = {
     { OP_PROCESS_INSTALL, 0, BOOT_CAP_PROCESS, REPLAY_REGION_SLOT, BOOT_CAP_INPUT, RIGHT_R },
     { OP_POOL_ALLOC, 0, BOOT_CAP_POOL, CAP_NOTIFICATION, REPLAY_CAP_NOTIFY, 0 },
     /* The second thread's pool, table, process and thread. */
-    { OP_REGION_CARVE, 0, BOOT_CAP_FREE_RAM, REPLAY_POOL_OFFSET, REPLAY_POOL_SIZE, REPLAY_CAP_POOL },
-    { OP_REGION_TO_POOL, 0, REPLAY_CAP_POOL, REPLAY_CAP_POOL, 0, 0 },
+    { OP_UNTYPED_RETYPE, 0, BOOT_CAP_FREE_RAM, CAP_POOL, REPLAY_POOL_SIZE, REPLAY_CAP_POOL },
     { OP_POOL_ALLOC, 0, REPLAY_CAP_POOL, CAP_CAPTABLE, REPLAY_CAP_TABLE, REPLAY_TABLE_SLOTS },
     { OP_POOL_ALLOC, 0, REPLAY_CAP_POOL, CAP_PROCESS, REPLAY_CAP_PROCESS, REPLAY_CAP_TABLE },
     { OP_POOL_ALLOC, 0, REPLAY_CAP_POOL, CAP_THREAD, REPLAY_CAP_THREAD, REPLAY_CAP_PROCESS },
@@ -104,6 +110,10 @@ static const struct replay_record replay_prologue[] = {
     { OP_PROCESS_INSTALL, 0, REPLAY_CAP_PROCESS, 1, BOOT_CAP_DATA, RIGHT_R | RIGHT_W },
     { OP_PROCESS_INSTALL, 0, REPLAY_CAP_PROCESS, REPLAY_UART_SLOT, BOOT_CAP_UART, RIGHT_R | RIGHT_W },
     { OP_PROCESS_INSTALL, 0, REPLAY_CAP_PROCESS, REPLAY_LOG_SLOT, BOOT_CAP_LOG, RIGHT_R | RIGHT_W },
+    /* Its own Untyped, derived into its table and then below the free RAM once the scratch slot goes. */
+    { OP_UNTYPED_RETYPE, 0, BOOT_CAP_FREE_RAM, CAP_UNTYPED, REPLAY_UNTYPED_SIZE, REPLAY_CAP_SCRATCH },
+    { OP_CAP_DERIVE, 0, REPLAY_CAP_TABLE, BOOT_CAP_FREE_RAM, REPLAY_CAP_SCRATCH, RIGHT_ALL },
+    { OP_CAP_DELETE, 0, BOOT_CAP_CAPTABLE, REPLAY_CAP_SCRATCH, 0, 0 },
     /* Its table mirrors the first one, the boot capabilities included. */
     REPLAY_COPY(BOOT_CAP_CAPTABLE),
     REPLAY_COPY(BOOT_CAP_PROCESS),
@@ -112,7 +122,6 @@ static const struct replay_record replay_prologue[] = {
     REPLAY_COPY(BOOT_CAP_DEBUG),
     REPLAY_COPY(BOOT_CAP_CODE),
     REPLAY_COPY(BOOT_CAP_DATA),
-    REPLAY_COPY(BOOT_CAP_FREE_RAM),
     REPLAY_COPY(BOOT_CAP_INPUT),
     REPLAY_COPY(BOOT_CAP_IRQ_LINES),
     REPLAY_COPY(BOOT_CAP_UART),

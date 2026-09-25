@@ -29,8 +29,8 @@ It has four goals, in priority order.
    with its own memory.
 4. **Bounded work.**
    A system call, a tick or an interrupt costs what constants of the machine allow,
-   however many objects anyone has created.
-   The kernel does not meet this yet; see "Bounded work".
+   however many objects anyone has created,
+   destruction aside, which is paid for and preempted; see "Bounded work".
 
 ## Programs are plain binaries
 
@@ -173,13 +173,12 @@ Consequences that shape the design:
   QEMU and the ESP32-C6 have four bytes, RP2350 has 32.
   The smallest NAPOT block is eight bytes; four would need NA4, which rvuos does not use.
   The kernel probes the grain at boot
-  and a `Region` capability that is not a block of at least that size never exists:
-  the boot layout is checked once and carving requires it,
-  so every capability is exactly one PMP entry.
-  Whether it may be installed at all still depends on pools
-  that capabilities elsewhere made over the same range;
-  open decision 14 is about that.
-  `OP_REGION_INFO` returns the smallest region, since user mode cannot read the PMP CSRs.
+  and a `Frame` or `Untyped` that is not a block of at least that size never exists:
+  the boot layout is checked once and carving and retyping require it,
+  so every frame is exactly one PMP entry.
+  Whether it may be installed depends on nothing but the process it goes into,
+  since no frame overlaps a pool; see "Kernel pools and revocation".
+  `OP_FRAME_INFO` returns the smallest region, since user mode cannot read the PMP CSRs.
 - **An access must lie within one entry.**
   The lowest-numbered entry that matches any byte of an access decides,
   and it must match every byte or the access fails,
@@ -342,11 +341,15 @@ and the second is unused.
 A slot carries nothing that has to be checked against the object,
 because a destroy clears the slots naming what it takes;
 see "Kernel pools and revocation".
-A `Region` capability has no object behind it:
+A `Frame` has no object behind it:
 its two words are the base address and the size,
 and the rights are the memory permissions it may grant.
-Carving a sub-region is therefore a pure table operation
-that touches no kernel memory,
+An `Untyped` has none either:
+its first word is its block, base and size as NAPOT encodes them,
+its second the watermark,
+and its rights are those of the frames made of it.
+Carving a frame and retyping an Untyped into a frame or a smaller Untyped
+are therefore pure table operations that touch no kernel memory,
 which is what lets the root task hand out memory
 before it has created a single pool.
 An `IrqLine` capability has the same shape for the same reason:
@@ -359,8 +362,9 @@ there is one counter on the machine.
 
 | Object | Purpose |
 |---|---|
-| `Region` | A physical address range with maximum rights. Installed into a process's PMP slots. |
-| `KernelPool` | A region handed to the kernel. All other objects are allocated from pools. |
+| `Untyped` | Memory that may become frames, pools or smaller Untypeds. Never installed. No object. |
+| `Frame` | A physical address range with maximum rights. Installed into a process's PMP slots. No object. |
+| `KernelPool` | Memory retyped from an Untyped and handed to the kernel. All other objects are allocated from pools. |
 | `CapTable` | A process's capability table. Allocated from a pool. |
 | `Process` | A protection domain: a capability to its `CapTable`, a set of region slots, and its threads. |
 | `Thread` | An execution context inside a process: its registers and its state. |
@@ -368,7 +372,7 @@ there is one counter on the machine.
 | `IrqLine` | A range of interrupt lines: the log's and the controller's, or the timer lines. Bound one at a time into an `Irq`. |
 | `Irq` | One line bound to a notification. Signals it when the line fires. |
 | `Debug` | A byte into the kernel's log, and machine halt, for bring-up and tests. No object. |
-| `Clock` | The machine's counter: its rate, and the one region it can be read through. No object. |
+| `Clock` | The machine's counter: its rate, and the one frame it can be read through. No object. |
 
 Every object's size follows from its type,
 a `CapTable` from its slot count,
@@ -377,31 +381,56 @@ whose contents can be walked without a free list.
 
 ### Kernel pools and revocation
 
-A process turns a `Region` into a `KernelPool` by a system call.
-From that moment the range belongs to the kernel.
-The call fails if the range overlaps an existing pool
-or a region currently installed in any process,
-so user mode can never hold a mapping to memory
-that carries kernel objects.
-The mirror check applies when installing a region:
-a range that overlaps a pool cannot be installed.
-Both checks are linear scans over pools and processes,
-which was thought fine for the object counts a microcontroller can hold.
-Goal 4 rules them out,
-and open decision 14 is what would replace them.
-The `Region` capability that was consumed is revoked,
-with everything derived from it,
-and the `KernelPool` capability takes its place in the derivation tree,
-so whoever could revoke the region can revoke the pool capability.
-Copies beside the region and the regions above it survive
-and fail the overlap check while the pool exists.
-The kernel zeroes each object as it allocates it, not the whole region.
+Memory reaches the kernel through an `Untyped` capability,
+memory that may become something else and that no process can map.
+`OP_UNTYPED_RETYPE` takes the next block of a given size at the Untyped's watermark,
+aligned to its size, moves the watermark past it,
+and makes the block a `Frame`, a smaller `Untyped` or a `KernelPool`,
+which hangs below the Untyped in the derivation tree.
+What one Untyped makes therefore never overlaps,
+and a retype that finds nothing below the Untyped starts again from its base.
+From the retype on, a pool's memory belongs to the kernel.
+The kernel zeroes each object as it allocates it, not the whole block.
+
+An Untyped is derived, never copied,
+since a copy would be a second allocator over the same memory.
+Deriving one requires that nothing was made of it yet
+and moves its watermark to its end,
+so the derived one has the whole of the memory
+and the source makes nothing more until that one and what was made of it are gone.
+The watermark costs no slot space:
+an Untyped's block, base and size, is one word, encoded as `pmpaddr` encodes NAPOT,
+and the watermark is the other.
+
+A `Frame` is memory a process may map and nothing else:
+it never becomes a pool, so its copies are harmless,
+and an install looks only at the slots of its own process.
+Isolation follows from the tree rather than from a scan.
+A frame and a pool below different children of one Untyped never meet,
+because the watermark kept the children apart,
+and every frame that no Untyped covers is a root over memory no pool can lie in:
+device memory, flash, the log and the root task's own regions.
+Memory that is to become a pool while frames of it exist
+is first revoked back to its Untyped,
+which uninstalls those frames wherever they are.
+The self-check still checks isolation by address.
 
 The pool's own descriptor is the first object in the pool's memory,
-so the kernel keeps no per-pool state outside the pool
-except a list head for the overlap scans.
-Objects are bump-allocated behind it, eight-byte aligned,
-never freed individually, and each records its pool.
+and it holds the pool's own node of the derivation tree,
+the node the retype made, below the Untyped.
+The Pool capability the retype returns hangs below that node,
+and so does every capability to the pool and to its objects,
+because an object's capability hangs below the Pool capability it was allocated through;
+a copy stands beside its source and a derivation below it, so none leaves the subtree.
+The node lies in the pool, out of every process's reach,
+so a process may delete its Pool capability and the memory stays accounted for:
+the pool then lies below the Untyped, reachable through nothing,
+until a revoke below the Untyped destroys it,
+as an object whose capabilities were revoked stays in its pool.
+The kernel keeps no per-pool state outside the pool
+but a list head that only the self-check and the host harness walk.
+Objects are bump-allocated behind the descriptor, eight-byte aligned,
+and each records its pool and how far back the object before it lies.
 
 Kernel memory comes back at pool granularity.
 Objects are never freed individually,
@@ -411,33 +440,27 @@ unreachable, until the pool is destroyed.
 Capabilities themselves are revoked one derivation at a time;
 see "The derivation tree".
 
-Pools form a tree.
-A pool's parent is the pool the thread that created it lives in,
-and destroying a pool destroys every pool below it.
-This is for the process that lends memory.
-Without the tree, a child that turned lent memory into a pool
-would outlive the parent's destroy of the child's pool,
-threads running and all,
-and the memory would stay inert to the parent's region capability forever,
-because a pool cannot be built over a pool.
-The boot pool is the root.
-
-Capabilities must not dangle after a destroy,
-so a destroy clears every capability that names an object in the pool,
-by walking every capability table in every pool.
-The sweep is exact rather than best effort,
-because there is no capability the kernel cannot enumerate:
-every capability lives in a `CapTable`,
-every `CapTable` is an object in a pool,
-and every pool is on the list.
-It has the same shape as `pool_overlaps` and `installed_overlaps`
-and costs the same, once for every pool the destroy takes.
-The derivation tree adds a second thing the sweep takes:
-every slot the dying pools held is revoked with everything derived from it,
-so a grant dies with the table it was made through,
-and no ring in a surviving table leads into memory that is user memory again.
-Links cross pools in both directions,
-so the sweep runs over every dying pool before any of them is zeroed.
+A pool is destroyed by `OP_POOL_DESTROY` through a capability to it,
+or by a revoke below an Untyped it lies below, which meets its node.
+Either way the destroy is a revoke below the pool's own node
+and then a walk over the pool's own objects, and both are the size of the pool.
+The revoke takes every capability to the pool and to its objects, wherever they lie,
+and the capability the destroy was made through last, so a call made again still names the pool.
+The walk then takes the objects newest first,
+and the used mark goes back as it goes,
+so a destroy stopped half way leaves a pool with fewer objects.
+Each object gives up the nodes it holds, a table's slots and a process's,
+as `OP_CAP_DELETE` gives one up: what was derived from it goes to its parent.
+So no ring in a surviving table leads into memory that is the Untyped's again,
+and a grant made through a dying table stands where its source stood,
+for whoever holds that source's ancestors to revoke.
+A revoke there instead would take the Untypeds the table held,
+and with them pools the destroy would have to destroy in turn,
+which is recursion the kernel does not have.
+The memory goes back to the Untyped the pool was retyped from;
+it is made into something again once nothing else made of that Untyped is left.
+A block given back in the middle is not reusable until then,
+which is seL4's price and rvuos's too, along with the alignment at the watermark.
 
 A generation counter in each object was the alternative, and it cannot work.
 The counter lives in the memory being destroyed,
@@ -457,7 +480,7 @@ to show that a stale capability does not come back with it.
 
 Objects reference each other in two ways,
 and destroy must cope with both.
-A capability names an object, and the sweep clears it.
+A capability names an object, and the destroy's revoke clears it.
 A process holds its table this way;
 see "A process's table".
 A structural pointer, such as a thread to its process,
@@ -467,40 +490,39 @@ or outlive it.
 The kernel enforces the same-pool rule at allocation:
 a `Thread` must be allocated from the pool its `Process` lies in,
 and an `Irq` from the pool its `Notification` lies in.
+A child is allocated after its parent, so the destroy, newest first, takes it first:
+a thread goes before its process and an `Irq` before its notification.
 A thread waiting on a notification inside a destroyed pool
 is woken with `KERR_INVALID_CAP` and no bits,
 because the wait can no longer be answered.
+Nothing is allocated from a pool once its destroy has begun.
 
 A destroy refuses with `KERR_STATE`
-when the calling thread lives in the pool or in one below it,
-or its process's table does.
+when the calling thread lives in the pool or its process's table does,
+and a revoke below an Untyped refuses when either lies in the Untyped's memory.
+That is a test by address, which is enough
+because every pool below an Untyped lies in its memory.
 A thread and its process share one pool by the rule above,
-so those two checks are the whole of it:
-the caller keeps what it runs on and the table the memory comes back to.
-The first is also why the boot pool can never be destroyed:
-every pool lies below it.
-Its objects are zeroed on the way out,
-because the memory is about to be user memory again
+so those two tests are the whole of it:
+the caller keeps what it runs on and the table it names capabilities in.
+The boot pool is refused by name.
+It holds the root task, and no Untyped covers it,
+so its own node is a root and nothing but `OP_POOL_DESTROY` could reach it.
+The objects of a pool are zeroed on the way out,
+because the memory is about to be the Untyped's again
 and they hold other processes' capability tables.
-The rest comes back as it went in,
-so a lender clears a region before it lends it if the borrower should not read it.
-It comes back as a `Region` capability
-with the rights the region carried when it became a pool,
-which the pool records for that purpose,
-so a destroy cannot manufacture a right the memory never had.
-The pools below give their memory back to nobody in particular:
-region capabilities for it that survived the sweep
-pass the overlap check again,
-and the derivation tree says which those are;
-see decision 7 under "Open decisions".
-The pool list has the newest pool first and a child is newer than its parent,
-so one walk of the list meets every pool below the destroyed one before it,
-and no parent read on the way up has been zeroed yet.
+The rest of the pool comes back as it went in,
+so a lender clears memory before it lends it if the borrower should not read it.
+
+A borrower's pool is retyped from an Untyped derived from the lender's,
+so a revoke below the lender's destroys it, whatever the borrower made of it,
+and the lender gets the memory back without the borrower's leave.
+Pools keep no pointer to each other.
 
 ### The derivation tree
 
-The pool tree cannot do what seL4's derivation tree can:
-take back one region from a child, and everything the child did with it,
+Pools alone cannot do what seL4's derivation tree can:
+take back one frame from a child, and everything the child did with it,
 while the child goes on living.
 A derivation tree over slots does that,
 and rvuos keeps one in the shape that costs the least.
@@ -509,36 +531,37 @@ and rvuos keeps one in the shape that costs the least.
 Every filled slot of every capability table,
 every region installed in a process,
 which is a slot of the same layout living in the `Process`,
-and every process's table slot, which lives there too;
+every process's table slot, which lives there too,
+and every pool's own node, which lives in its descriptor;
 see `kernel/object.h`.
-Roots are the boot capabilities and every capability to a new object,
-since an object owes nothing to the pool capability it was allocated through.
+Roots are the boot capabilities but those to the boot pool and its objects,
+which hang below the boot pool's own node, itself a root.
+A capability to a pool or an object is never a root.
 
 **What hangs below what.**
-A carve hangs below the region or line it was carved from,
+A carve hangs below the frame or line it was carved from,
+a retype below the Untyped it was made of,
 a derivation below its source,
-an installed region below the capability it was installed from,
-the counter's region below the clock it was derived through,
+an installed region below the frame it was installed from,
+the counter's frame below the clock it was derived through,
 and a process's table slot below the `CapTable` capability the process was made with.
+A pool's own node hangs below the Untyped, and the Pool capability the retype returns below that node.
+A capability to a new object hangs below the Pool capability it was allocated through,
+and so does the `Irq` capability of `OP_IRQ_BIND`, whose line goes with everything derived from it.
 A copy stands beside its source, under the same parent,
 so a process can duplicate what it holds without making one copy the master of the other;
 beside a root it is a root.
-A conversion takes the converted slot's place:
-the pool capability of `OP_REGION_TO_POOL` and the `Irq` capability of `OP_IRQ_BIND`
-hang where the region or the line hung,
-and the consumed slot goes with everything derived from it.
-The region a destroy gives back hangs where the pool capability hung,
-or rather below the nearest ancestor that is not a capability to the pool,
-since those the destroy clears;
-when that ancestor went with the destroy, the region comes back as a root.
+So every capability to a pool or to one of its objects lies below the pool's own node,
+which is what lets a destroy find them all without a sweep.
 
 **What the operations do to it.**
 `OP_CAP_REVOKE` clears everything below a slot and leaves the slot.
 `OP_CAP_DELETE` and `OP_PROCESS_UNINSTALL` clear one node
 and hand what was below it to its parent,
 so deleting one's own copy of a grant does not take the grant back.
-A pool destroy revokes every slot the dying pools held,
-so the derivation a process handed out dies with the process;
+A revoke below an Untyped destroys the pools it meets,
+and a pool destroy revokes below the pool's own node,
+then clears every slot the pool held as a delete does;
 see "Kernel pools and revocation".
 
 **The shape.**
@@ -551,15 +574,17 @@ A node leaves its ring in constant time:
 its predecessor is one link away,
 and it is the first child exactly when that predecessor links up to the parent.
 A delete puts the node's children right after it, through the first and the last,
-and then takes the node out as a leaf;
-a conversion puts its result beside the consumed slot and takes the slot out.
+and then takes the node out as a leaf.
 A revoke is deletes of the first child, one after another,
 each handing its children up to the front of the ring,
 until the node it revokes below has none:
 a step per node, with no stack,
 the tree whole between any two steps,
 and the next step always at the node's first child.
-Only a pool destroy still walks a ring, to find a node's parent.
+A pool's own node is the one first child a revoke does not delete at once:
+it stays first while the pool is destroyed below it, a step at a time,
+and goes last.
+No operation walks a ring.
 seL4 keeps its tree as a list in pre-order, two links per slot and a word less,
 and stores no depth:
 whether the next slot lies below one is read off the two capabilities,
@@ -571,10 +596,9 @@ A parent link instead of the previous one would move for every child a delete ha
 
 **What it does not do.**
 Revoking the capabilities to an object does not free the object;
-the pool does that, and a pool whose capability was revoked
-stays until the pool it lies below is destroyed.
-A root has no parent to revoke it from:
-what a process allocates it holds until the pool goes.
+the pool does that, and a pool whose capabilities were revoked or deleted
+stays until the Untyped it lies below is revoked.
+A root has no parent to revoke it from.
 A capability copied beside its source can be taken back only from their common parent,
 which is the point of copying rather than deriving.
 An earlier sketch by the same author,
@@ -583,8 +607,7 @@ put three links next to the object pointer in a sixteen-byte slot
 and never got as far as maintaining them;
 what made this one tractable was making installed regions nodes,
 so that a revoke unmaps by derivation and never by address range,
-and letting a destroy revoke the dying slots' derivation
-instead of reparenting it across tables.
+and giving each pool a node of its own that everything about the pool lies below.
 
 ### A process's table
 
@@ -606,8 +629,8 @@ Open decision 15 is about what else the slot could do.
 ### Region slots
 
 A `Process` has a fixed array of eight region slots.
-Installing a `Region` capability into a slot
-requires the region capability
+Installing a `Frame` into a slot
+requires the frame
 and a `Process` capability with the write right.
 The kernel recomputes and caches the PMP register image
 for the process at that point,
@@ -617,8 +640,10 @@ in the derivation tree, so revoking below that capability unmaps it,
 whichever process it was installed in.
 
 Rights on the installed slot are the intersection
-of the region capability's rights
+of the frame's rights
 and the rights requested at install time.
+No frame overlaps a pool, by the derivation tree,
+so the install looks at no other process and no pool.
 Installed regions in one process may not overlap,
 because PMP resolves overlaps by entry number
 and the result would depend on slot order rather than policy.
@@ -629,7 +654,7 @@ and hardware may do anything.
 
 How a process's memory is laid out is entirely the creator's business.
 The kernel does not know what a code segment or a stack is;
-the root task carves regions out of the memory it owns,
+the root task makes frames of the memory it owns,
 installs them into the child's slots with the rights it chooses,
 and starts a thread at whatever entry point and stack pointer it likes.
 
@@ -776,10 +801,10 @@ rather than a round trip to that server.
 A timer line says that a delay has passed, not what time it is.
 The `Clock` capability gives the time:
 `OP_CLOCK_INFO` returns the counter's rate and address,
-and `OP_CLOCK_REGION` derives a read-only `Region` holding the counter, below the clock.
+and `OP_CLOCK_FRAME` derives a read-only `Frame` holding the counter, below the clock.
 A process with that region installed reads the time with loads, without a trap.
 The rate is the board's, and on the ESP32-C6 measured at boot, so a program takes it from the clock.
-The region is the smallest block holding the counter's two words;
+The frame is the smallest block holding the counter's two words;
 on a PMP grain coarser than eight bytes it also shows the timer registers beside them, read only.
 
 **Why a capability.**
@@ -870,18 +895,23 @@ and on a timer line cancels the delay.
 
 **Lines are authority, and the root task holds them all.**
 Interrupt lines are hardware, not kernel memory,
-so an `IrqLine` capability names no object, as a `Region` names none:
+so an `IrqLine` capability names no object, as a `Frame` names none:
 the root task receives every line of the controller at boot, and every timer line,
 carves single lines out with `OP_IRQ_CARVE`, a table operation,
 and hands them to drivers the way it hands out memory.
-Binding consumes the invoked slot, as turning a region into a pool does,
-and copies of the line elsewhere are inert while the `Irq` exists,
+Binding consumes the invoked slot with everything derived from it,
+and the `Irq` capability hangs below the Pool capability the `Irq` was allocated through,
+as every object's does, so the pool's destroy finds it.
+Copies of the line elsewhere are inert while the `Irq` exists,
 because a line is bound at most once and a second bind fails with `KERR_OVERLAP`.
 When the `Irq`'s pool is destroyed the kernel masks its line
 and the object is gone, so those copies work again:
 the lender of a line gets it back by destroying the borrower's pool,
-or by revoking below the line capability it derived the borrower's from,
+or by revoking below the Untyped the borrower's pool was made of,
 exactly as the lender of memory does.
+Revoking below the line capability the lender derived the borrower's from
+takes the line only while it is unbound;
+once bound, the line is the `Irq`'s until its pool goes.
 
 **One `Irq` per line.**
 Sharing a line between drivers is open decision 11;
@@ -926,7 +956,8 @@ and a count past the head reads as the head.
 It is kernel memory that user mode can see,
 which the isolation properties otherwise forbid;
 it holds no object and no capability, only what the kernel chose to say,
-and `OP_REGION_TO_POOL` refuses the range, since the kernel writes there on its own.
+and it can never become a pool, since the kernel writes there on its own:
+`BOOT_CAP_LOG` is a frame, and no Untyped covers it.
 The header and the ring are one 4 KiB block at the top of the kernel's RAM,
 right below the root task's code,
 so the ring holds the block less its header.
@@ -990,8 +1021,8 @@ The kernel:
 3. carves its own static state out of a small fixed SRAM range,
 4. constructs the root process by hand, including a `KernelPool`
    in a range the linker reserves,
-5. hands the root task capabilities to the block of RAM the board sets aside for it,
-   to the UART's registers,
+5. hands the root task an `Untyped` for the block of RAM the board sets aside for it,
+   and frames for its own code and data, the UART's registers,
    to the kernel's log,
    to the machine's counter as a `Clock`,
    and to every line of the interrupt controller with the log's line before them
@@ -1002,9 +1033,10 @@ The kernel:
 A device range is granted read and write, never execute,
 the counter read only,
 and can never become a pool:
-`OP_REGION_TO_POOL` refuses a range outside RAM,
+it is a frame, and no Untyped covers it,
 because the kernel writes objects into a pool,
 which on a device would drive its registers from machine mode.
+The one Untyped the root task starts with covers RAM and nothing else.
 
 Every range the root task is granted is a block,
 so a board lays RAM out in blocks and what lies in none of them stays unused.
@@ -1074,25 +1106,27 @@ so over a run its steps are bounded by the calls before it.
 What it costs is latency, and preemption is the answer to that.
 
 **Preemption.**
-A revoke, a delete below a root, and the revoke that begins a conversion
-take one step per capability in constant time
+A revoke, a delete below a root, a pool destroy, and the revoke that begins a bind
+take one step per capability or object in constant time
 and ask `intr_pending` between two steps.
 If the tick or a device interrupt is pending, the walk stops,
 `syscall_dispatch` puts the thread back on its `ecall` with its registers as they were,
 the `mret` takes the interrupt through `mtvec` as in any user code,
 and the thread makes the same call again when it next runs, as in seL4.
 The kernel only notices the interrupt; the processor takes it.
-The progress stays in the derivation tree:
+The progress stays in the derivation tree and in the pool:
 the next step is always at the first child of the slot the call names,
+or at the newest object of the pool being destroyed and the slot its descriptor says,
 so the kernel needs no record of where it stopped, no second stack and no worker,
 and the time lands in the slice of the thread that made the call.
+A pool's destroy goes on from where it stopped whichever call takes the next step,
+the `OP_POOL_DESTROY` that began it or a revoke below the Untyped that meets its node.
 A walk asks only after a step, so every attempt takes something away and the restarts end.
 Whether `intr_pending` is right changes when a walk stops, never what it does.
 A restart is a new call:
 it checks everything again, and revokes what was derived in between too.
-So a conversion revokes only once every check that can fail has passed,
-`OP_IRQ_BIND`'s room in the pool among them, and builds after.
-The pool destroy and the other walks of the table below do not stop yet.
+So a bind revokes only once every check that can fail has passed,
+its room in the pool among them, and builds after.
 
 **The check.**
 Every loop a trap can run says what bounds it with an annotation from `kernel/work.h`:
@@ -1114,29 +1148,26 @@ and a paid loop names its unit: a node, a link, an object or a waiter.
 The host harness `fuzz-work` counts both after every call:
 a bound per entry of its loop,
 and paid steps at most twice what the call took away of that unit, plus one;
-twice since a pool destroy may pass a capability to the pool on its way up to the region
-and clear it again in the sweep.
+twice since a delete below a root makes a root of a node, a link each,
+and a pool destroy may then clear that node as one its tables hold.
 It finds a false claim only where the corpus reaches, and a wait is not checked at all.
 The host answers every `intr_pending` with yes, the worst case,
 so each preemptible call stops after its first step, is made again,
 and the self-check runs between any two steps;
-every host harness requires a stopped call to have taken a node or a link away.
+every host harness requires a stopped call to have taken a node, a link or an object away.
 
 **Where the kernel falls short.**
+Nowhere, since `Untyped` and `Frame` replaced the overlap checks and the sweep;
+see "Kernel pools and revocation" and open decision 14.
+A walk the kernel takes on again is listed here with its fix,
+and the check requires the table to name every one and nothing else.
 
 | Walk | When | Fix |
 |---|---|---|
-| `pool_overlaps` | `OP_PROCESS_INSTALL` | open decision 14 |
-| `pool_overlaps`, `installed_overlaps` | `OP_REGION_TO_POOL` | open decision 14 |
-| `cap_revoke_range`, `pool_destroy`, `pool_under`, `pool_overlaps`, `cap_parent` | pool destroy | open decision 14, and preemption |
 
 **Zeroing goes with the object.**
 `pool_alloc` zeroes each object, at most `OBJ_MAX_SIZE`, a table of `CAPTABLE_MAX_SLOTS`,
 and a destroy zeroes each object as it forgets it, paid for by the call that made it.
-
-A pool destroy revokes what the dying pools held with `cap_revoke_below` too,
-but does not stop:
-its sweep and the pool walks keep no progress a restart could find.
 
 ## Bounded stack
 
@@ -1184,6 +1215,12 @@ the root task was granted at boot,
 and the granted memory does not overlap the boot pool,
 so the kernel's own memory is unreachable,
 the log excepted: it holds no object and can never become a pool.
+Memory that may hold kernel objects, an Untyped or a pool,
+overlaps another node standing for memory, an Untyped, a pool, a frame or an installed region,
+only where one lies below the other,
+or where the overlap lies behind an Untyped's watermark while it has made something,
+which a delete below a root Untyped leaves as it makes roots of its children one by one.
+So no frame overlaps a pool, and no Untyped makes a block over anything not below it.
 
 **PMP fidelity.**
 For every process, the PMP image the kernel built
@@ -1195,9 +1232,10 @@ For the running process the same holds for the CSRs actually written.
 
 **Authority confinement.**
 Every capability in every table names either
-a region within the granted memory,
+a frame or an Untyped within the granted memory,
 a NAPOT block no smaller than the smallest region,
-with rights no greater than the root task received for it,
+with rights no greater than the root task received for it
+and, for an Untyped, its watermark within it,
 or a range of lines the interrupt controller has, the log's among them,
 with no more than the right to bind,
 or the debug capability or the clock, which name no object,
@@ -1205,8 +1243,9 @@ or a live kernel object of the capability's own type.
 Every process's table slot is empty or names a live table.
 
 **Derivation.**
-The slots of every live table
-and the table slot and region slots of every live process
+The slots of every live table,
+the table slot and region slots of every live process
+and the own node of every pool
 are the nodes of one forest.
 Every link of a filled node lands on a live, filled node;
 an empty node has no links.
@@ -1214,24 +1253,25 @@ The children of a node form one ring that closes through the node,
 every node on it linked up to that node,
 and every node's previous link names the sibling whose next is the node,
 the last sibling for the first;
-a root has no siblings and no previous link.
+a root has no siblings and no previous link,
+and a capability to a pool or an object is never one.
 A node is derived from its parent:
 the same object with no more rights,
 a range within the parent's range with no more rights,
-or an object built on the parent's range,
-a pool on a region, an `Irq` on a line, an installed region on a region,
-or the counter's block, or a region installed from it, below a clock.
-A revoke or a delete stopped for an interrupt leaves such a forest too,
+and below an Untyped's watermark when the parent is one,
+a pool's own node on an Untyped, an installed region on a frame,
+the counter's block, or a region installed from it, below a clock,
+or a capability to a pool or an object below a capability to that pool or its own node.
+A revoke, a delete or a destroy stopped for an interrupt leaves such a forest too,
 since every step of theirs does; see "Bounded work".
 
 **Structural soundness.**
-Every pool's descriptor sits at its base,
+Every pool's descriptor sits at its base and holds the pool's own node,
 its objects tile the space from the descriptor to the used mark exactly,
-each object records the pool it lies in,
+each object records the pool it lies in and where the one before it lies,
+the newest is the one the descriptor names,
 and pools are pairwise disjoint.
-Every pool but the boot pool names as its parent a live, older pool,
-so parents lead to the boot pool
-and no destroy has left a pool below it standing.
+A pool half destroyed is a pool like any other, with fewer objects.
 A thread and its process lie in the same pool.
 The line table names exactly the bound `Irq`s,
 and every installed region records its slot.
@@ -1282,27 +1322,32 @@ Any kernel panic reachable from user mode is a bug.
 A call leaves no capability its caller could not have made.
 Every node it fills or changes is covered by a capability
 the caller's table held before the call:
-the same object, or a range within its range, with no more rights.
+the same object, or a range within its range, with no more rights,
+where an Untyped covers the frames it makes.
 Or it names an object the call built,
 in a pool the caller could allocate from,
 bound to what the caller could write,
-and a pool on memory the caller held a region to, with no more rights than the region.
-A capability to a pool with the right to destroy it
-covers the memory the destroy gives back,
-and a clock covers the counter's block, read only.
+and a pool on memory the caller held an Untyped to, with read and write,
+and a clock covers the counter's frame, read only.
 This is goal 2 across a call.
 It measures a copy against all the caller held, not against its source,
 so a copy wider than its source but within another capability of the caller passes;
 the derivation invariant checks it only against the parent it shares with its source.
 
 **Memory crosses zeroed.**
-Every object in memory that leaves the pools holds nothing but zeros,
+Every object that leaves the pools holds nothing but zeros,
+whether its pool went or a destroy stopped half way,
 and every object holds nothing of its memory from before the pool took it.
 No byte of an object reaches a process when its pool is destroyed,
 and no byte a process wrote becomes part of an object when its memory becomes a pool.
 The rest of a pool's memory comes back as it went in; see "Zeroing goes with the object".
 
-These two relate the state before a call to the state after it,
+**The caller keeps what it runs on.**
+No call begins to destroy the pool its thread or its process's table lives in.
+A destroy stopped half way leaves the pool's threads running,
+so this is what keeps a thread from making a call it cannot return from.
+
+These three relate the state before a call to the state after it,
 so the self-check, which sees one state, cannot check them.
 `host/history.c` checks them around every call of the host build, the untraced prologue's too.
 It does not know what memory held before a call,
@@ -1419,8 +1464,9 @@ which the host runs from the kernel's state;
 the passing is system calls, so both transcripts carry it.
 The second thread has a pool, a process and a table of its own,
 so every switch between them reloads the PMP under the self-check's eye,
-and a pool it creates lies below its own,
-so a record on the first thread can destroy both at once
+and an Untyped of its own derived from the first thread's,
+so a pool it makes lies below the first thread's Untyped,
+a record on the first thread can destroy both at once with a revoke,
 and the cascade is replayed like any other path.
 The state both builds start from is in `include/rvuos/replay.h`
 rather than written out twice.
@@ -1564,26 +1610,11 @@ until the maintainer decides otherwise.
    Decide before a server with mutually distrusting clients exists.
 
 7. **What a pool destroy gives back, and to whom.**
-   Decided, by the derivation tree.
-   `OP_REGION_TO_POOL` revokes the region capability it consumes
-   with everything derived from it,
-   and the pool capability takes its place.
-   Copies beside that region and the regions above it survive,
-   inert while the pool exists because installing one fails the overlap check,
-   and working again after the destroy,
-   which is when the destroyed pool's own memory comes back
-   below the same ancestor.
-   So the memory returns along the derivation it left by:
-   to the lender's own capability and the copies the lender made beside it,
-   never to a borrower's derived one.
+   Decided, by the derivation tree, and since decision 14 by the Untyped:
+   a pool's memory goes back to the Untyped it was retyped from,
+   so to the lender's, never to a borrower's.
    A lender that wants it back from a living borrower
-   revokes below its own region capability,
-   which takes the borrower's pool capability too;
-   the pool itself then waits for the pool above it to go.
-   The working default before this, memory returning to everyone
-   who ever held a capability for the range,
-   was what the checks did on their own,
-   and the tree is what made "everyone" precise.
+   revokes below its own Untyped, which destroys the borrower's pools.
 
 8. **TOR or NAPOT.**
    Decided: NAPOT only; see "Physical Memory Protection".
@@ -1669,68 +1700,26 @@ until the maintainer decides otherwise.
     Decide when the first driver of a DMA-capable peripheral exists.
 
 14. **Memory authority: `Untyped` and `Frame`.**
-    Working default: one `Region` type that can be installed and can become a pool,
-    kept apart by overlap checks by address.
-    The checks scan every pool and every object, which goal 4 rules out.
-    And a `Region` capability does not say what it can do:
-    whether an install or a pool succeeds depends on pools
-    made through any capability over the same range,
-    so a peer holding a copy can make a capability inert
-    without anyone revoking it.
-    The proposal is seL4's split, in rvuos's shape.
-    - **`Untyped`** is memory that may become something else,
-      and cannot be installed.
-      `OP_UNTYPED_RETYPE` takes the next block of a given size at its watermark,
-      aligned to its size, moves the watermark past it,
-      and makes it an `Untyped`, a `Frame` or a pool, hanging below.
-      The children of an `Untyped` are therefore disjoint by construction.
-      A retype that finds no children resets the watermark first.
-    - **An `Untyped` is derived, never copied**,
-      since a copy would be a second allocator over the same memory.
-      Deriving requires no children and moves the source's watermark to its end.
-    - **`Frame`** is today's `Region` without `OP_REGION_TO_POOL`.
-      Its aliases are harmless, since no `Frame` becomes kernel memory,
-      and an install checks only the slots of its own process.
-    - **Isolation follows from the tree.**
-      A `Frame` and a pool below different children of one `Untyped` never meet,
-      and every other `Frame` is a root over memory no `Untyped` covers.
-      Memory that is to become a pool while frames of it exist
-      is first revoked back to its `Untyped`,
-      which uninstalls those frames wherever they are.
-      The self-check keeps checking isolation by address.
-    - **Capabilities to objects hang below the pool capability**
-      they were allocated through, where today they are roots,
-      and a pool capability is derived, never copied.
-      Destroying a pool is then revoking the capability the retype made,
-      plus a walk over the pool's own tables
-      to take the slots they hold out of other rings.
-      Both are the size of the pool, and the sweep over every table goes.
-      The memory returns to the `Untyped` it came from,
-      so decision 7 has nothing left to decide.
-      A borrower's pool is retyped from an `Untyped` derived from the lender's
-      and goes with a revoke below the lender's,
-      so the pool tree goes too.
-    - **Device memory, flash, the log and the root task's own regions are `Frame` roots.**
-      No `Untyped` covers them,
-      so the tests for RAM and for the log in `OP_REGION_TO_POOL` become the type.
-      `BOOT_CAP_FREE_RAM` becomes an `Untyped`.
-    - **The watermark costs no slot space:**
-      a block's base and size fit one word, encoded as `pmpaddr` encodes NAPOT.
+    Decided: seL4's split; see "Kernel pools and revocation".
+    Before, one `Region` type could be installed and could become a pool,
+    and overlap checks over every pool and every process kept the two apart,
+    which goal 4 rules out;
+    a peer holding a copy of a region could also make it inert by pooling it.
+    The questions the proposal left are decided so:
+    - deleting the Pool capability a retype returned neither refuses nor destroys,
+      since the retype's own node lies in the pool's descriptor;
+    - a destroy, and a revoke below an Untyped, refuse when the caller or its table lives
+      in the memory they would destroy, a test by address;
+    - a frame carries the rights of the Untyped it was made of;
+    - a stopped destroy keeps its progress in the pool:
+      the objects go newest first and the used mark with them.
 
-    The price is seL4's.
-    The root task retypes before it installs anything,
+    The price is seL4's: the root task retypes before it installs anything,
     alignment at the watermark wastes memory,
-    and a block given back in the middle is not reusable
-    until every child of its `Untyped` is gone.
-    Still open:
-    a destroy when the calling thread or its table lives in the pool,
-    which today walks up the pool tree;
-    whether deleting the capability a retype made refuses or destroys;
-    where a `Frame`'s rights come from;
-    and how a preempted destroy records where it stopped:
-    a revoke needs no record, since its next step is always at the first child,
-    but the walk over the pool's own tables does.
-    Decide before the memory model changes again.
+    and a block given back in the middle waits for the rest of its Untyped.
+    Besides, a grant made through a dying table now outlives it,
+    and revoking below a line capability no longer takes an `Irq` bound from it;
+    see "Interrupts".
 
 15. **What a process's table slot could do.**
     Working default: the slot is filled once, at allocation, and its rights mean nothing.

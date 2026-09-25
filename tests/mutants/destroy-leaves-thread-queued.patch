@@ -2,8 +2,9 @@ A destroy zeroes a waiting thread but leaves it on a notification that survives.
 The ring would lead into memory that is no longer a thread;
 a notification queues only live threads.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
 Report: queue holds something that is not a thread
+Report: queue is not linked back
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c

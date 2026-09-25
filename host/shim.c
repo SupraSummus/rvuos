@@ -273,11 +273,11 @@ uint32_t host_syscall(const struct replay_record *c)
         work_end();
 #endif
         history_end();
-        /* A step of a preemptible walk takes a node or a link away, and it stops only after one. */
+        /* A step of a preemptible walk takes a node, a link or an object away, and it stops only after one. */
         unsigned after[UNITS];
         host_units(after);
         if (f->mepc == mepc && after[UNIT_NODE] >= before[UNIT_NODE] &&
-            after[UNIT_LINK] >= before[UNIT_LINK]) {
+            after[UNIT_LINK] >= before[UNIT_LINK] && after[UNIT_OBJECT] >= before[UNIT_OBJECT]) {
             fprintf(stderr, "invariant violated: a call was preempted before it took anything away\n");
             abort();
         }
@@ -300,18 +300,12 @@ void host_units(unsigned out[UNITS])
     memset(out, 0, UNITS * sizeof(out[0]));
     for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
         out[UNIT_OBJECT]++;
-        if (o->type == CAP_CAPTABLE) {
-            struct captable *t = (struct captable *)o;
-            for (uint32_t i = 0; i < t->nslots; i++) {
-                count_node(&t->slots[i], out);
-            }
-        } else if (o->type == CAP_PROCESS) {
-            struct process *p = (struct process *)o;
-            count_node(&p->table, out);
-            for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
-                count_node(&p->slots[i], out);
-            }
-        } else if (o->type == CAP_THREAD && ((struct thread *)o)->state == THREAD_WAITING) {
+        uint32_t count;
+        const struct cap *nodes = obj_nodes(o, &count);
+        for (uint32_t i = 0; i < count; i++) {
+            count_node(&nodes[i], out);
+        }
+        if (o->type == CAP_THREAD && ((struct thread *)o)->state == THREAD_WAITING) {
             out[UNIT_WAITER]++;
         }
     }

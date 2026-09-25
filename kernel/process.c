@@ -47,16 +47,17 @@ static void rebuild_pmp(struct process *proc)
 int process_install(struct process *proc, unsigned slot,
                     uint32_t base, uint32_t size, uint8_t rights, struct cap *parent)
 {
-    /* No right would grant nothing; a region capability is always a block. */
+    /* No right would grant nothing; a frame is always a block. */
     if (slot >= PROCESS_REGION_SLOTS || rights == 0 || !napot_block(base, size)) {
         return KERR_INVALID_ARG;
     }
     if (proc->slots[slot].type != CAP_NONE) {
         return KERR_SLOT_IN_USE;
     }
-    if (pool_overlaps(base, size)) {
-        return KERR_OVERLAP;
-    }
+    /*
+     * No frame overlaps a pool, by the derivation tree: what one Untyped makes never overlaps,
+     * so only the process's own regions are left to look at; see DESIGN.md, "Region slots".
+     */
     unsigned installed = 0;
     for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
         LOOP_BOUND(PROCESS_REGION_SLOTS);

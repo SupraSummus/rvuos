@@ -7,7 +7,7 @@ Report: PMP image grants rights the slots do not
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -142,7 +142,7 @@ int cap_store_beside(struct captable *table, uint32_t slot, const struct cap *ca
+@@ -132,7 +132,7 @@ int cap_store_beside(struct captable *table, uint32_t slot, const struct cap *ca
  /* Empty a node the tree no longer names. An installed region is unmapped as well. */
  static void clear_node(struct cap *n)
  {

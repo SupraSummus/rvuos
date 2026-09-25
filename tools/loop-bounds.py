@@ -53,11 +53,13 @@ def walk_rows(design: str) -> set[str]:
     text = open(design).read()
     start = text.index("**Where the kernel falls short.**")
     rows = set()
-    for line in text[start:].splitlines()[2:]:
+    table = False
+    for line in text[start:].splitlines()[1:]:
         if not line.startswith("|"):
-            if rows:
+            if table:
                 break
             continue
+        table = True
         rows.update(re.findall(r"`(\w+)`", line.split("|")[1]))
     return rows
 
