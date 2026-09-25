@@ -8,8 +8,12 @@ Report: the loop at kernel/process.c ran N times on one entry, beyond its bound 
 diff --git a/kernel/process.c b/kernel/process.c
 --- a/kernel/process.c
 +++ b/kernel/process.c
-@@ -33,3 +33,3 @@
+@@ -31,7 +31,7 @@ static void rebuild_pmp(struct process *proc)
+     struct pmp_image *img = &proc->pmp;
+     img->count = 0;
      for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
 -        LOOP_BOUND(PROCESS_REGION_SLOTS);
 +        LOOP_BOUND(4);
          const struct cap *s = &proc->slots[i];
+         if (s->type != CAP_NONE) {
+             img->addr[img->count] = pmp_napot_addr(s->a, s->b);

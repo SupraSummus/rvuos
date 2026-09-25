@@ -45,6 +45,9 @@ When a change adds or moves an invariant,
 run `make mutants` as well
 and plant a mutant for the new one as a patch under `tests/mutants/`,
 with the header lines the run prints for it.
+When a change edits code a mutant touches or stands next to,
+run `make mutants-refresh`, then `make mutants` if it moved any,
+and fix by hand only the patches it calls stale.
 
 ## Documentation of decisions
 

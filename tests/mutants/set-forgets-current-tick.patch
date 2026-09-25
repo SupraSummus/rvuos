@@ -9,8 +9,12 @@ Report: armed timer line is due
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -498,3 +498,3 @@
+@@ -497,7 +497,7 @@ static int op_irq(const struct cap *cap, uint32_t op, const uint32_t *arg)
+          * which is exact while a delay stays far below half the count's range.
+          */
          uint32_t us = arg[2];
 -        irq->deadline = sched_ticks + us / TIMER_US_PER_TICK + (us % TIMER_US_PER_TICK != 0) + 1;
 +        irq->deadline = sched_ticks + us / TIMER_US_PER_TICK + (us % TIMER_US_PER_TICK != 0);
      }
+     /* Armed and unmasked are one state, here and in sched_interrupt. */
+     irq_set_bits(irq, arg[1]);

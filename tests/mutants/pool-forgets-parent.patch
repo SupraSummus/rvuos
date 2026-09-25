@@ -5,11 +5,14 @@ Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
 Report: only the boot pool has no parent
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
-index 90f522a..e5e8c16 100644
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -152,3 +152,3 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
+@@ -150,7 +150,7 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
+          * It is not zeroed here, which would be work in its size: pool_alloc zeroes each object.
+          * The new pool hangs below the caller's own, and dies with it.
           */
 -        struct pool *pool = pool_create(base, size, cap->rights, obj_pool(&t->hdr));
 +        struct pool *pool = pool_create(base, size, cap->rights, NULL);
          struct cap pc = cap_to_object(&pool->hdr, RIGHT_ALL);
+         /* The pool capability takes the region's place in the tree, and the region goes. */
+         cap_replace(slot_node(t, arg[1]), &pc, slot_node(t, slot));

@@ -8,8 +8,12 @@ Report: installed region does not know its slot
 diff --git a/kernel/process.c b/kernel/process.c
 --- a/kernel/process.c
 +++ b/kernel/process.c
-@@ -72,3 +72,3 @@
+@@ -74,7 +74,7 @@ int process_install(struct process *proc, unsigned slot,
+     }
+ 
      proc->slots[slot] = (struct cap){
 -        .type = CAP_INSTALLED, .rights = rights, .index = (uint8_t)slot, .a = base, .b = size,
 +        .type = CAP_INSTALLED, .rights = rights, .a = base, .b = size,
      };
+     cap_attach(parent, &proc->slots[slot]);
+     rebuild_pmp(proc);

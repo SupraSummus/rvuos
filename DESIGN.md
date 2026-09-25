@@ -1309,6 +1309,12 @@ and catches a bug only when the transcript changes;
 or the two traces differ.
 QEMU's clock counts instructions, not the host's time,
 so a run takes the same path however many run beside it.
+`make mutants-refresh` carries the patches over a change in the kernel
+by the lines they change rather than by their context,
+and `make mutants` checks by the headers the ones it had to move.
+A three-way merge does not help: the kernel's history shows the mutated lines or their neighbours
+changing whenever the context alone was not enough.
+A mutant whose own lines changed is planted again by hand.
 
 **QEMU** (`make test`, `make qemu-replay`).
 The kernel has no console, so a transcript reaches QEMU's UART two ways:

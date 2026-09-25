@@ -6,7 +6,6 @@ Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
 Report: a call was preempted before it took anything away
 
 diff --git a/kernel/cap.c b/kernel/cap.c
-index c22b037..6881c90 100644
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
 @@ -188,6 +188,9 @@ bool cap_revoke_below(struct cap *root, bool preempt)

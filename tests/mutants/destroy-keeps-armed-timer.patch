@@ -8,8 +8,12 @@ Report: the count of armed sources is wrong
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -223,4 +223,2 @@
+@@ -221,8 +221,6 @@ void sched_forget(struct obj_header *o)
+         break;
+     }
      case CAP_IRQ: {
 -        /* It is gone and will not fire, so it is no source. */
 -        irq_set_bits((struct irq *)o, 0);
          /* The object that would receive the interrupt is gone; only the controller's lines have a mask. */
+         uint32_t line = ((struct irq *)o)->line;
+         if (line_on_controller(line)) {

@@ -6,15 +6,14 @@ Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
 Report: process maps a pool: isolation broken
 
 diff --git a/kernel/process.c b/kernel/process.c
-index f398bd5..9874b11 100644
 --- a/kernel/process.c
 +++ b/kernel/process.c
-@@ -87,7 +87,7 @@ int process_install(struct process *proc, unsigned slot,
-     if (proc->slots[slot].rights) {
+@@ -54,7 +54,7 @@ int process_install(struct process *proc, unsigned slot,
+     if (proc->slots[slot].type != CAP_NONE) {
          return KERR_SLOT_IN_USE;
      }
 -    if (pool_overlaps(base, size)) {
 +    if (0) {
          return KERR_OVERLAP;
      }
-     for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
+     unsigned installed = 0;

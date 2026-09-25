@@ -6,10 +6,9 @@ Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
 Report: PMP image grants rights the slots do not
 
 diff --git a/kernel/process.c b/kernel/process.c
-index bd27e98..6bebe7a 100644
 --- a/kernel/process.c
 +++ b/kernel/process.c
-@@ -32,7 +32,7 @@ static void rebuild_pmp(struct process *proc)
+@@ -35,7 +35,7 @@ static void rebuild_pmp(struct process *proc)
          const struct cap *s = &proc->slots[i];
          if (s->type != CAP_NONE) {
              img->addr[img->count] = pmp_napot_addr(s->a, s->b);

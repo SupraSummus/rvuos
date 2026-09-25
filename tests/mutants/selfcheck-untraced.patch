@@ -7,7 +7,11 @@ Caught-by: loop-bounds
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -292,2 +292,3 @@
+@@ -287,6 +287,7 @@ void sched_run_next(void)
+ 
+ void sched_tick(void)
  {
 +    selfcheck_run();
      tick_advance();
+     /* The running thread is ready, and goes to the back of the round behind any other that is. */
+     if (run_queue != 0) {

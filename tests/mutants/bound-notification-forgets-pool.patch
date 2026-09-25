@@ -10,7 +10,7 @@ Report: irq and its notification live in different pools
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -138,7 +138,7 @@
+@@ -176,7 +176,7 @@ static int bound_notification(struct thread *t, uint32_t slot, const struct pool
          return err;
      }
      *out = (struct notification *)cap_object(&nc);
