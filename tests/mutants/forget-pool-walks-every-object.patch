@@ -1,4 +1,4 @@
-A pool that goes looks for its objects past its own, among every object of the pools older than it,
+A pool that goes looks for its newest object among every object of every pool,
 still claiming each step takes one away,
 so a destroy costs what the machine holds, not what it destroys.
 It forgets and zeroes the same objects, so only the counting harness catches it.
@@ -9,15 +9,13 @@ Report: a call took N paid steps in object and took away N
 diff --git a/kernel/pool.c b/kernel/pool.c
 --- a/kernel/pool.c
 +++ b/kernel/pool.c
-@@ -47,7 +47,10 @@ static void pool_clear(struct pool *pool)
- {
-     for (struct obj_header *o = pool_first(pool), *next; o != NULL; o = next) {
-         LOOP_PAID(pool_clear, object, "an object of the pool that goes");
--        next = pool_next(pool, o);
-+        next = object_next(o);
-+        if (o->pool != pool->base) {
-+            continue;
+@@ -105,6 +105,9 @@ bool pool_destroy(struct pool *pool, struct cap *keep, bool preempt)
+     while (pool->last != pool_base(pool)) {
+         LOOP_PAID(pool_destroy, object, "an object of the pool, newest first");
+         struct obj_header *o = p2v(pool->last);
++        for (struct obj_header *w = object_first(); w != NULL && w != o; w = object_next(w)) {
++            LOOP_PAID(pool_destroy, object, "an object of the pool, newest first");
 +        }
-         sched_forget(o);
-         CALL_BOUND(OBJ_MAX_SIZE);
-         memset(o, 0, obj_size(o));
+         struct cap *n;
+         while ((n = held_node(o, &pool->sweep)) != NULL) {
+             LOOP_PAID(pool_destroy, node, "a node the object holds");

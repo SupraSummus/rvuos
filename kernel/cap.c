@@ -109,16 +109,6 @@ static void attach_beside(struct cap *beside, struct cap *n)
     splice_after(beside, n, n);
 }
 
-struct cap *cap_parent(const struct cap *n)
-{
-    uint32_t link = n->next;
-    while (!(link & LINK_UP)) {
-        LOOP_WALK(cap_parent);
-        link = node(link)->next;
-    }
-    return link == LINK_UP ? NULL : node(link);
-}
-
 int cap_store(struct captable *table, uint32_t slot, const struct cap *cap, struct cap *parent)
 {
     int err = cap_slot_free(table, slot);
@@ -171,10 +161,27 @@ static void detach(struct cap *n, bool adopt)
     }
 }
 
-/* Whether a preemptible walk that has done a step stops before its next; see intr_pending. */
-static bool stop_here(bool preempt)
+bool cap_stop_here(bool preempt)
 {
     return preempt && intr_pending();
+}
+
+bool cap_revoke_step_except(struct cap *root, const struct cap *keep)
+{
+    if (root->child == 0) {
+        return false;
+    }
+    struct cap *n = node(root->child);
+    if (n == keep) {
+        /* keep stays first, so the next step looks past it again. */
+        if (keep->next & LINK_UP) {
+            return false;
+        }
+        n = node(keep->next);
+    }
+    detach(n, true);
+    clear_node(n);
+    return true;
 }
 
 bool cap_revoke_below(struct cap *root, bool preempt)
@@ -185,26 +192,25 @@ bool cap_revoke_below(struct cap *root, bool preempt)
      * the tree is whole between any two steps,
      * and the next node to clear is always the root's first child:
      * a walk that stops keeps its progress in the tree and nowhere else.
+     * A pool's own node is the one exception: the pool goes before its node does,
+     * and the node stays first until then, so the next step is at it again.
      */
     while (root->child != 0) {
         LOOP_PAID(cap_revoke_below, node, "a node it clears");
         struct cap *n = node(root->child);
-        detach(n, true);
-        clear_node(n);
-        if (root->child != 0 && stop_here(preempt)) {
+        if (n->type == CAP_RETYPED) {
+            if (!pool_destroy(node_pool(n), NULL, preempt)) {
+                return false;
+            }
+        } else {
+            detach(n, true);
+            clear_node(n);
+        }
+        if (root->child != 0 && cap_stop_here(preempt)) {
             return false;
         }
     }
     return true;
-}
-
-void cap_revoke(struct cap *n)
-{
-    cap_revoke_below(n, false);
-    if (n->next != LINK_UP) {
-        detach(n, false);
-    }
-    clear_node(n);
 }
 
 bool cap_delete(struct cap *n, bool preempt)
@@ -221,30 +227,12 @@ bool cap_delete(struct cap *n, bool preempt)
         detach(c, false);
         c->next = LINK_UP;
         c->prev = 0;
-        if (n->child != 0 && stop_here(preempt)) {
+        if (n->child != 0 && cap_stop_here(preempt)) {
             return false;
         }
     }
     clear_node(n);
     return true;
-}
-
-void cap_replace(struct cap *n, const struct cap *cap, struct cap *old)
-{
-    /* Its caller revoked below old before it built what goes in its place. */
-    if (n == old) {
-        /* Into the consumed slot itself, which keeps its place in the ring. */
-        uint32_t next = n->next;
-        uint32_t prev = n->prev;
-        *n = *cap;
-        n->child = 0;
-        n->next = next;
-        n->prev = prev;
-        return;
-    }
-    *n = *cap;
-    attach_beside(old, n);
-    cap_delete(old, false);
 }
 
 int cap_clear(struct captable *table, uint32_t slot)
@@ -258,41 +246,6 @@ int cap_clear(struct captable *table, uint32_t slot)
     return KERR_OK;
 }
 
-/*
- * One node of the sweep: it goes if the range holds it or the object it names.
- * A node the range holds takes what was derived from it: a grant dies with its slot.
- */
-static void sweep_node(struct cap *c, bool dying, uint32_t base, uint32_t size)
-{
-    if (c->type != CAP_NONE &&
-        (dying || (cap_has_object(c->type) && range_contains(base, size, c->a)))) {
-        cap_revoke(c);
-    }
-}
-
-void cap_revoke_range(uint32_t base, uint32_t size)
-{
-    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
-        LOOP_WALK(cap_revoke_range);
-        bool dying = range_contains(base, size, v2p(o));
-        if (o->type == CAP_CAPTABLE) {
-            struct captable *table = (struct captable *)o;
-            for (uint32_t i = 0; i < table->nslots; i++) {
-                LOOP_WALK(cap_revoke_range);
-                sweep_node(&table->slots[i], dying, base, size);
-            }
-        } else if (o->type == CAP_PROCESS) {
-            /* A living process loses its table with the table's pool; its regions name no object. */
-            struct process *proc = (struct process *)o;
-            sweep_node(&proc->table, dying, base, size);
-            for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
-                LOOP_BOUND(PROCESS_REGION_SLOTS);
-                sweep_node(&proc->slots[i], dying, base, size);
-            }
-        }
-    }
-}
-
 struct cap cap_to_object(struct obj_header *obj, uint8_t rights)
 {
     struct cap c = {
@@ -304,13 +257,24 @@ struct cap cap_to_object(struct obj_header *obj, uint8_t rights)
     return c;
 }
 
-struct cap cap_to_region(uint32_t base, uint32_t size, uint8_t rights)
+struct cap cap_to_frame(uint32_t base, uint32_t size, uint8_t rights)
 {
     struct cap c = {
-        .type = CAP_REGION,
+        .type = CAP_FRAME,
         .rights = rights,
         .a = base,
         .b = size,
+    };
+    return c;
+}
+
+struct cap cap_to_untyped(uint32_t base, uint32_t size, uint8_t rights)
+{
+    struct cap c = {
+        .type = CAP_UNTYPED,
+        .rights = rights,
+        .a = untyped_block(base, size),
+        .b = 0,
     };
     return c;
 }

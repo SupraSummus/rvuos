@@ -1,13 +1,13 @@
 A delete that does not hand the node's children to its parent
 leaves them linked up to an empty slot.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
 Report: link up to a slot that is not a live, filled one
 
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -158,7 +158,7 @@ static void clear_node(struct cap *n)
+@@ -148,7 +148,7 @@ static void clear_node(struct cap *n)
  static void detach(struct cap *n, bool adopt)
  {
      /* The children go right after n, so n leaves the ring as a leaf would. */

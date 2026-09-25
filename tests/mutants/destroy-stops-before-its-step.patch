@@ -1,0 +1,19 @@
+A destroy that asks for the interrupt before it takes the next object
+can stop having taken nothing, and a call made again then stops again.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: a call was preempted before it took anything away
+
+diff --git a/kernel/pool.c b/kernel/pool.c
+--- a/kernel/pool.c
++++ b/kernel/pool.c
+@@ -104,6 +104,9 @@ bool pool_destroy(struct pool *pool, struct cap *keep, bool preempt)
+      */
+     while (pool->last != pool_base(pool)) {
+         LOOP_PAID(pool_destroy, object, "an object of the pool, newest first");
++        if (cap_stop_here(preempt)) {
++            return false;
++        }
+         struct obj_header *o = p2v(pool->last);
+         struct cap *n;
+         while ((n = held_node(o, &pool->sweep)) != NULL) {

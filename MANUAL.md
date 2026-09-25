@@ -43,7 +43,7 @@ Three goals shape everything, in priority order.
    Every system call names a capability in the caller's own table,
    and the kernel hands nothing out by a global name:
    there is no way to look up another process, thread or kernel object,
-   and a device's registers reach a process only as a region
+   and a device's registers reach a process only as a frame
    installed in one of its slots.
    A process that holds no capability to a thing cannot act on it,
    however it came to know the thing exists.
@@ -81,16 +81,15 @@ What rvuos is not:
   A capability names a kernel object, a memory range or a range of interrupt lines,
   together with rights bits.
   Copying a capability can only narrow its rights.
-- **Pools instead of a kernel heap.**
-  A process turns a region of its memory into a kernel pool
+- **Untyped memory, frames and pools instead of a kernel heap.**
+  A process makes its untyped memory into frames it can map and pools the kernel writes,
+  never both over the same bytes,
   and every kernel object it creates is allocated from a pool it holds.
-- **Revocation by pool.**
-  Destroying a pool destroys every object in it,
-  every pool created from within it,
+- **Revocation by pool and by memory.**
+  Destroying a pool destroys every object in it
   and every capability anywhere that named one of those objects.
-  Destroying the pool a process lives in therefore also takes
-  every pool its threads made out of memory they were lent,
-  and the lender's capabilities to that memory work again.
+  Revoking below an Untyped destroys every pool made of it,
+  however far it was lent on, and the memory comes back to the Untyped.
 - **Plain binaries.**
   A program depends on the register ABI
   and on what its creator hands it:
@@ -146,7 +145,7 @@ and in `user/board/<board>/console.h`,
 which drives the device behind `BOOT_CAP_UART` for the demo and the replay driver.
 The linker scripts take their addresses from `board.h` through `kernel/layout.h`.
 Porting to a board means providing those.
-A program learns every address it needs from its region capabilities;
+A program learns every address it needs from its frames and its Untyped;
 only the line numbers of its devices are the board's to know.
 
 #### QEMU `virt`, RV32
@@ -162,7 +161,7 @@ Memory map:
 | `0x80100000` | 64 KiB | root task code, read and execute |
 | `0x80200000` | 64 KiB | root task data and stack, read and write |
 | `0x80210000` | 64 KiB | replay input placed by QEMU's loader, read only |
-| `0x80400000` | 4 MiB | free RAM, granted to the root task with all rights |
+| `0x80400000` | 4 MiB | free RAM, granted to the root task as an Untyped with all rights |
 
 Every range granted to the root task is a block, see section 5.4,
 so what lies between the blocks is used by nothing.
@@ -195,7 +194,7 @@ Memory map:
 | `0x40820000` | 64 KiB | root task code, read and execute |
 | `0x40830000` | 32 KiB | root task data and stack, read and write |
 | `0x40838000` | 4 KiB | input region, read only; nothing fills it yet |
-| `0x40840000` | 256 KiB | free RAM, granted to the root task with all rights |
+| `0x40840000` | 256 KiB | free RAM, granted to the root task as an Untyped with all rights |
 
 Interrupt lines:
 
@@ -304,10 +303,12 @@ A **thread** is an execution context inside a process:
 a register frame and a state.
 Threads of one process share its regions and its capability table.
 
-A **region** is a physical address range with maximum rights.
-Installing a region into one of a process's slots
-gives that process access to the range with the rights chosen at install time.
+A **frame** is a physical address range with maximum rights,
+and a **region** is a frame installed into one of a process's slots,
+which gives that process access to the range with the rights chosen at install time.
 Regions are all a process can see of memory.
+An **Untyped** is memory that has not become anything yet:
+it cannot be installed, and it is made into frames, pools and smaller Untypeds.
 The kernel does not know what a code segment, a stack or a heap is;
 whoever builds a process decides its layout.
 
@@ -317,7 +318,8 @@ A process names everything by **slot index** into its capability table.
 A slot is empty or holds one capability:
 a type, a set of rights, and two words the kernel interprets by type.
 Userspace never sees a slot's contents,
-but it can ask a region what it covers with `OP_REGION_INFO`.
+but it can ask a frame what it covers with `OP_FRAME_INFO`,
+and an Untyped with `OP_UNTYPED_INFO`.
 
 Every system call is an invocation on the capability in one slot.
 The kernel resolves the slot,
@@ -338,7 +340,7 @@ and so does everything in it.
 
 Rights are three bits:
 
-| Bit | Value | Region | Other types |
+| Bit | Value | Frame, Untyped | Other types |
 |---|---|---|---|
 | `RIGHT_R` | 1 | read | `Notification`: wait |
 | `RIGHT_W` | 2 | write | control the object: allocate, install, configure, signal, set, copy into a table |
@@ -360,26 +362,32 @@ The tree grows in these ways:
 | Operation | The new capability hangs |
 |---|---|
 | `OP_CAP_DERIVE` | below the source |
-| `OP_CAP_COPY` | beside the source, under the source's parent; a copy of a root is a root |
-| `OP_REGION_CARVE`, `OP_IRQ_CARVE`, `OP_CLOCK_REGION` | below the invoked capability |
-| `OP_PROCESS_INSTALL` | the installed region hangs below the `Region` capability |
-| `OP_POOL_ALLOC` of a `Process` | the process's hold on its table hangs below the `CapTable` capability |
-| `OP_REGION_TO_POOL`, `OP_IRQ_BIND` | where the consumed capability hung |
-| `OP_POOL_DESTROY` | where the pool capability hung, below the region the pool was made of |
-| `OP_POOL_ALLOC`, boot | nowhere: a new object starts a tree of its own |
+| `OP_CAP_COPY` | beside the source, under the source's parent; a copy of a root is a root; an Untyped is never copied |
+| `OP_FRAME_CARVE`, `OP_IRQ_CARVE`, `OP_CLOCK_FRAME` | below the invoked capability |
+| `OP_UNTYPED_RETYPE` of a frame or an Untyped | below the invoked Untyped |
+| `OP_UNTYPED_RETYPE` of a pool | below the pool's own node, which hangs below the invoked Untyped |
+| `OP_PROCESS_INSTALL` | the installed region hangs below the frame |
+| `OP_POOL_ALLOC` | below the invoked `KernelPool` capability |
+| `OP_POOL_ALLOC` of a `Process` | and the process's hold on its table below the `CapTable` capability |
+| `OP_IRQ_BIND` | below the `KernelPool` capability; the line goes with what was derived from it |
+| boot | nowhere, but for the capabilities to the boot pool and its objects |
 
 `OP_CAP_REVOKE` on a slot clears everything below it, in every table and every process:
 derived capabilities, their copies, what was derived from those,
 and every region installed from any of them.
+Below an Untyped it destroys every pool made of it, as `OP_POOL_DESTROY` does.
 The slot itself stays.
 Revoking a copy takes nothing from the original, and the other way round;
 to take both back, revoke below what they were both derived from.
 So derive to lend, and copy to keep a second handle to what you hold.
+An Untyped can only be derived, and only while nothing was made of it:
+the derived one has the whole of it, and the source makes nothing until that one is revoked.
 
 `OP_CAP_DELETE` clears one slot and hands what hung below it to the slot's parent,
 so deleting your own copy of something you lent does not take it back.
-Destroying a pool revokes every slot in the tables that pool held:
-what a process handed out through its table dies with the process.
+Destroying a pool clears every slot in the tables that pool held the same way,
+so what a process handed out through its table outlives the process,
+below whatever the process derived it from.
 
 Copying and deriving both apply a rights mask, so rights only ever narrow.
 
@@ -391,8 +399,9 @@ Programs are encouraged to keep the same convention.
 
 | Type | Constant | Object behind it | Created by |
 |---|---|---|---|
-| `Region` | `CAP_REGION` | none: the slot holds base and size | boot, `OP_REGION_CARVE`, `OP_POOL_DESTROY` |
-| `KernelPool` | `CAP_POOL` | the pool's descriptor, at its base | `OP_REGION_TO_POOL` |
+| `Untyped` | `CAP_UNTYPED` | none: the slot holds the block and the watermark | boot, `OP_UNTYPED_RETYPE` |
+| `Frame` | `CAP_FRAME` | none: the slot holds base and size | boot, `OP_FRAME_CARVE`, `OP_UNTYPED_RETYPE` |
+| `KernelPool` | `CAP_POOL` | the pool's descriptor, at its base | `OP_UNTYPED_RETYPE` |
 | `CapTable` | `CAP_CAPTABLE` | a table of `n` slots | `OP_POOL_ALLOC` |
 | `Process` | `CAP_PROCESS` | a capability to its table, region slots, a PMP image | `OP_POOL_ALLOC` |
 | `Thread` | `CAP_THREAD` | a register frame and a state | `OP_POOL_ALLOC` |
@@ -402,33 +411,45 @@ Programs are encouraged to keep the same convention.
 | `Debug` | `CAP_DEBUG` | none | boot |
 | `Clock` | `CAP_CLOCK` | none: there is one counter | boot |
 
-`Region`, `IrqLine`, `Debug` and `Clock` capabilities have no kernel object behind them.
-Carving a region or a line range is a pure table operation
+`Untyped`, `Frame`, `IrqLine`, `Debug` and `Clock` capabilities have no kernel object behind them.
+Carving a frame or a line range, and retyping an Untyped into a frame or an Untyped,
+are pure table operations
 that touches no kernel memory,
 which is why the root task can hand out memory and lines
 before it has created a single pool.
 
-### 5.4 Memory: regions, carving and installing
+### 5.4 Memory: Untyped, frames and installing
 
-Every region is a **block**:
+Every frame and every Untyped is a **block**:
 its size is a power of two and its base a multiple of its size,
 which is the range one PMP entry in NAPOT mode describes.
 The smallest block is eight bytes, or the PMP's grain if that is coarser;
-`OP_REGION_INFO` returns it in `a4`.
-`OP_REGION_CARVE` hands out a block within a block.
+`OP_FRAME_INFO` returns it in `a4`.
 A range of any other size is rounded up or made of several blocks,
 one region slot each.
+
+`OP_UNTYPED_RETYPE` makes the next block of an Untyped into a frame, a pool or a smaller Untyped.
+The block is the first of the size requested, aligned to it,
+at or past the Untyped's **watermark**, and the watermark moves past it;
+`OP_UNTYPED_INFO` returns the watermark in `a4`,
+and the retype returns the block's base in `a1`.
+So what one Untyped makes never overlaps,
+and a frame never overlaps a pool.
+Memory made into something comes back when what was made goes:
+an Untyped of which nothing is left starts again from its base,
+but a block given back in the middle waits until everything else made of the Untyped is gone.
+To reuse one block on its own, make an Untyped of its size first and retype that.
+A frame and an Untyped carry the rights of the Untyped they were made of.
+`OP_FRAME_CARVE` hands out a block within a frame.
 Programs that lay memory out with fixed offsets
 should check the smallest size once and fail early if the layout does not fit.
 
-Rules for installing a region into a process:
+Rules for installing a frame into a process:
 
-- The rights installed must be a non-empty subset of the region's rights.
+- The rights installed must be a non-empty subset of the frame's rights.
 - Write without read is refused,
   because PMP reserves that encoding and hardware may do anything with it.
 - Regions installed in one process may not overlap each other.
-- A region may not overlap a kernel pool.
-  The mirror rule holds too: a range installed anywhere cannot become a pool.
 - The install takes effect at once, even for the running process.
 
 PMP budget.
@@ -447,20 +468,15 @@ What it does cost is a region slot and a PMP entry in each process.
 
 ### 5.5 Pools
 
-A process hands memory to the kernel with `OP_REGION_TO_POOL`.
-The range must:
-
-- carry both read and write rights,
-- have its base and size aligned to eight bytes and be at least 64 bytes,
-  the kernel's object alignment and its smallest pool,
-- lie within RAM, not on a device and not on the kernel log,
-- overlap no existing pool and no region installed in any process.
-
-The kernel places the pool's descriptor at its base,
-clears the region capability that was invoked,
+A process hands memory to the kernel with `OP_UNTYPED_RETYPE` of a `CAP_POOL`.
+The Untyped must carry both read and write rights,
+and the pool must be at least `POOL_MIN_SIZE`, 64 bytes, and a block like any other.
+The kernel places the pool's descriptor at its base
 and returns a `KernelPool` capability with all rights.
-Copies of the region capability held elsewhere survive but are inert:
-installing them fails the overlap check while the pool exists.
+The memory belongs to the kernel from then on;
+no frame covers it, since what one Untyped makes never overlaps.
+The kernel zeroes each object as it allocates it,
+so what the process left in the memory never becomes part of an object.
 
 Objects are bump-allocated from a pool, eight-byte aligned,
 and never freed individually.
@@ -468,7 +484,7 @@ Sizes a developer needs for planning, as the kernel rounds them:
 
 | Object | Bytes (16 PMP entries) |
 |---|---|
-| pool descriptor | 32 |
+| pool descriptor | 56 |
 | `CapTable` with `n` slots | 12 + 24 × n, rounded up to 8 |
 | `Process` | 312 (272 with `PMP_MAX_ENTRIES=8`) |
 | `Thread` | 176 |
@@ -476,7 +492,7 @@ Sizes a developer needs for planning, as the kernel rounds them:
 | `Irq` | 24 |
 
 A minimal child process, table of 10 slots, process, thread and two notifications,
-costs 808 bytes including the descriptor.
+costs 832 bytes including the descriptor.
 
 **The same-pool rule.**
 The kernel follows the link from a thread to its process,
@@ -492,40 +508,44 @@ A process's table is not bound by the rule, section 5.2.
 
 An allocation that breaks the rule fails with `KERR_INVALID_ARG`.
 
-**The pool tree.**
-A new pool's parent is the pool the calling thread lives in.
-The boot pool is the root and can never be destroyed.
+**Capabilities to a pool.**
+Every capability to an object hangs below the `KernelPool` capability it was allocated through,
+and every `KernelPool` capability below the pool's own node,
+which the kernel keeps in the pool and no process can name.
+So revoking below a `KernelPool` capability takes what was allocated through it,
+and deleting the last `KernelPool` capability leaves the pool standing,
+reachable through nothing, until the Untyped it was made of is revoked.
 
-**Destroying a pool** with `OP_POOL_DESTROY`:
+**Destroying a pool** with `OP_POOL_DESTROY`, or by revoking below the Untyped it was made of:
 
-- destroys every object in it and every pool below it in the tree,
+- destroys every object in it,
 - clears every capability, in every table of every process,
-  that names one of those objects,
-- wakes every thread waiting on a notification in those pools
+  that names the pool or one of its objects,
+- clears every slot of the pool's own tables as `OP_CAP_DELETE` does,
+  so what was derived from those slots goes to their parents,
+- wakes every thread waiting on a notification in the pool
   with `KERR_INVALID_CAP` and no bits,
-- masks the interrupt line of every `Irq` in those pools,
+- masks the interrupt line of every `Irq` in the pool, which frees the line,
 - zeroes the memory its objects took and leaves the rest as it was,
-  so clear a region before it becomes a pool if whoever destroys the pool should not read it,
-- returns a `Region` capability to the invoked pool's memory,
-  with the rights the region had when it became a pool.
+  so clear memory before it becomes a pool if whoever destroys the pool should not read it,
+- gives the memory back to the Untyped the pool was made of.
 
 The call fails with `KERR_STATE`
-when the calling thread lives in the pool or in one below it,
-or its process's table does,
+when the calling thread lives in the pool or its process's table does,
 so a thread cannot destroy the pool it runs from
-nor the table the memory is to come back to.
-The memory of the pools below comes back through no new capability;
-region capabilities for it that survived simply work again,
-which is how a lender gets lent memory back.
-Those are the lender's own capability and any copies made beside it:
-what was derived from the region went when the region became a pool.
+nor the table it names capabilities in.
+The boot pool holds the root task and is never destroyed.
+A revoke below an Untyped fails the same way
+when the calling thread or its table lies in the Untyped's memory.
+A destroy is restartable: it may stop for an interrupt and go on when the call is made again,
+and a pool being destroyed allocates nothing, `KERR_STATE`.
 
 A lender that wants memory back from a living borrower
-revokes below its own `Region` capability instead, section 5.2.
-That takes the borrower's derived capability, its mappings,
-and any pool capability the borrower made of it;
-the pool itself stays, unreachable, until the pool above it is destroyed.
-Kernel memory comes back only by destroying pools.
+lends it as an Untyped derived from its own
+and revokes below its own, section 5.2.
+That takes the borrower's Untyped, the frames it made and their mappings,
+and destroys every pool the borrower made of it,
+wherever the borrower passed it on.
 
 ### 5.6 Threads
 
@@ -635,14 +655,14 @@ and arms each delay as its next deadline less the time now;
 **The clock.**
 `BOOT_CAP_CLOCK` names the machine's counter, 64 bits counting up from boot.
 `OP_CLOCK_INFO` returns its rate in hertz and its address;
-`OP_CLOCK_REGION` derives a read-only `Region` holding it, which a creator installs like any region.
+`OP_CLOCK_FRAME` derives a read-only frame holding it, which a creator installs like any frame.
 Reading the counter is then a few loads and no system call:
 
 ```c
 uint32_t hz, counter;
 rv_clock_info(CLOCK, &hz, &counter);
-rv_invoke(OP_CLOCK_REGION, CLOCK, COUNTER_REGION, 0, 0);
-rv_invoke(OP_PROCESS_INSTALL, PROCESS, 5, COUNTER_REGION, RIGHT_R);
+rv_invoke(OP_CLOCK_FRAME, CLOCK, COUNTER_FRAME, 0, 0);
+rv_invoke(OP_PROCESS_INSTALL, PROCESS, 5, COUNTER_FRAME, RIGHT_R);
 
 uint64_t start = rv_counter_read(counter);
 work();
@@ -661,7 +681,7 @@ A driver holds an `IrqLine` capability naming one line.
 The root task receives every line of the controller at boot, with the log's,
 and every timer line in a second capability,
 and carves single lines out with `OP_IRQ_CARVE`,
-as it carves regions out of memory.
+as it makes frames of memory.
 
 `OP_IRQ_BIND` turns a one-line capability into an `Irq` object
 in a pool of the driver's choosing,
@@ -777,14 +797,14 @@ the capability type carries `RIGHT_W` where the type needs it for every operatio
 the type accepts the operation (`KERR_WRONG_TYPE`),
 the operation's own right and arguments.
 Operation codes are a single flat numbering across all types,
-so invoking an `Irq` operation on a `Region` is `KERR_WRONG_TYPE`,
+so invoking an `Irq` operation on a `Frame` is `KERR_WRONG_TYPE`,
 not `KERR_INVALID_ARG`.
 
-A call whose work grows with the derivation tree can be interrupted and made again:
+A call whose work grows with the derivation tree or with a pool can be interrupted and made again:
 `OP_CAP_REVOKE`, `OP_CAP_DELETE` of a root with capabilities below it,
-`OP_REGION_TO_POOL` and `OP_IRQ_BIND`.
+`OP_POOL_DESTROY` and `OP_IRQ_BIND`.
 When the tick or a device interrupt comes due while such a call works,
-the kernel stops it between two capabilities
+the kernel stops it between two capabilities or two objects
 and resumes the thread at its `ecall` with every register as it was,
 so the thread makes the same call again when it next runs,
 and the call goes on from what it had already cleared.
@@ -802,9 +822,9 @@ and may fail, with what it already revoked staying revoked.
 | 2 | `KERR_WRONG_TYPE` | the capability's type does not accept this operation |
 | 3 | `KERR_NO_RIGHTS` | the capability lacks a right the operation needs |
 | 4 | `KERR_INVALID_ARG` | an argument is out of range or breaks a rule stated below |
-| 5 | `KERR_NO_MEMORY` | the pool has no room for the object |
+| 5 | `KERR_NO_MEMORY` | the pool has no room for the object, or the Untyped none for the block |
 | 6 | `KERR_SLOT_IN_USE` | the destination slot already holds a capability |
-| 7 | `KERR_OVERLAP` | a region overlaps a pool or an installed region, or the line is already bound |
+| 7 | `KERR_OVERLAP` | a region overlaps another installed in the same process, or the line is already bound |
 | 8 | `KERR_LIMIT` | a fixed kernel limit was hit, such as the PMP entry count |
 | 9 | `KERR_STATE` | the object is not in a state that allows this |
 
@@ -849,56 +869,64 @@ All need `RIGHT_W` on the table.
 `a2` = source slot in the caller's table,
 `a3` = rights mask ANDed into the copy.
 The destination must be empty (`KERR_SLOT_IN_USE`).
-The source may be any type, regions and lines included.
+The source may be any type, frames and lines included, but an Untyped (`KERR_WRONG_TYPE`).
 The copy hangs beside the source in the derivation tree, section 5.2.
 
 **`OP_CAP_DERIVE` (24).**
 The arguments and errors of `OP_CAP_COPY`.
 The new capability hangs below the source.
+An Untyped can be derived, and only while nothing was made of it (`KERR_STATE`);
+the source's watermark moves to its end, and the derived one starts at its base.
 
 **`OP_CAP_DELETE` (4).**
 `a1` = slot in the invoked table.
 Clears it; what hung below it now hangs below the slot's parent,
 or, when the slot is a root, each becomes a root, and the call may be made again, section 6.1.
 Clearing an empty slot succeeds.
-Deleting a `Region` capability does not uninstall the region anywhere.
+Deleting a frame does not uninstall it anywhere,
+and deleting a `KernelPool` capability does not destroy the pool.
 
 **`OP_CAP_REVOKE` (23).**
 `a1` = slot in the invoked table, which must be filled (`KERR_INVALID_CAP`).
 Clears everything below it, section 5.2, and leaves the slot.
 Regions installed from capabilities below it are uninstalled,
 and threads of those processes lose access at once.
+Below an Untyped, every pool made of it is destroyed as by `OP_POOL_DESTROY`;
+`KERR_STATE` if the calling thread or its process's table lies in the Untyped's memory.
 The call may be made again, section 6.1.
 
-### 6.5 Operations on `Region`
+### 6.5 Operations on `Frame` and `Untyped`
 
-**`OP_REGION_INFO` (11).**
+**`OP_FRAME_INFO` (11).**
 No right needed.
 Returns `a1` = base, `a2` = size, `a3` = rights,
 `a4` = the size of the smallest region in bytes, a power of two of at least 8.
 
-**`OP_REGION_CARVE` (5).**
+**`OP_FRAME_CARVE` (5).**
 No right needed.
-`a1` = offset from the region's base, `a2` = size, `a3` = destination slot in the caller's table.
-Produces a region with the same rights, hanging below the invoked one.
+`a1` = offset from the frame's base, `a2` = size, `a3` = destination slot in the caller's table.
+Produces a frame with the same rights, hanging below the invoked one.
 The size must be a power of two no smaller than the smallest region,
 the offset a multiple of the size,
-and the sub-range within the region (`KERR_INVALID_ARG`),
-so the new region is a block.
+and the sub-range within the frame (`KERR_INVALID_ARG`),
+so the new frame is a block.
 The parent capability is unchanged.
 
-**`OP_REGION_TO_POOL` (6).**
-Needs `RIGHT_R` and `RIGHT_W`.
-`a1` = destination slot for the `KernelPool` capability,
-which may be the invoked slot.
-The invoked slot is revoked with everything below it,
-and the `KernelPool` capability takes its place in the tree.
-The requirements of section 5.5 apply:
-alignment and minimum size, RAM only, not the log (`KERR_INVALID_ARG`),
-no overlap with a pool or an installed region (`KERR_OVERLAP`).
-They are checked before anything is revoked,
-and the revoke may make the call again, section 6.1.
-The new pool's parent is the pool the calling thread lives in.
+**`OP_UNTYPED_INFO` (27).**
+No right needed.
+Returns `a1` = base, `a2` = size, `a3` = rights,
+`a4` = the watermark, the offset from the base the next retype looks from.
+
+**`OP_UNTYPED_RETYPE` (6).**
+`a1` = the type, `CAP_UNTYPED`, `CAP_FRAME` or `CAP_POOL`,
+`a2` = the size, a power of two no smaller than the smallest region nor larger than the Untyped,
+and for a pool no smaller than `POOL_MIN_SIZE` (`KERR_INVALID_ARG`),
+`a3` = destination slot in the caller's table.
+Returns `a1` = the base of the block, section 5.4.
+A pool needs `RIGHT_R` and `RIGHT_W` on the Untyped (`KERR_NO_RIGHTS`);
+a frame or an Untyped needs no right and carries the invoked one's.
+`KERR_NO_MEMORY` when no block of the size is left past the watermark.
+The new capability hangs below the invoked one, a pool's below the pool's own node.
 
 ### 6.6 Operations on `KernelPool`
 
@@ -915,17 +943,17 @@ Both need `RIGHT_W` on the pool.
 | `CAP_NOTIFICATION` | unused | |
 
 Any other type is `KERR_INVALID_ARG`; `Irq` objects come from `OP_IRQ_BIND`.
-The new capability carries all rights.
-`KERR_NO_MEMORY` when the pool is full.
+The new capability carries all rights and hangs below the invoked `KernelPool` capability.
+`KERR_NO_MEMORY` when the pool is full,
+`KERR_STATE` while the pool is being destroyed.
 
 **`OP_POOL_DESTROY` (16).**
-`a1` = destination slot for the `Region` capability to the pool's memory,
-which may be the invoked slot.
-Does everything section 5.5 lists.
-The `Region` capability hangs where the pool capability hung,
-below the region the pool was made of;
-it is a root when that region's slot went with the destroy.
-`KERR_STATE` if the calling thread or its process's table lives in the pool or below it.
+No arguments.
+Does everything section 5.5 lists,
+and the memory goes back to the Untyped the pool was made of.
+`KERR_STATE` if the calling thread or its process's table lives in the pool,
+and for the boot pool.
+The call may be made again, section 6.1.
 
 ### 6.7 Operations on `Process`
 
@@ -933,14 +961,14 @@ Both need `RIGHT_W` on the process.
 
 **`OP_PROCESS_INSTALL` (8).**
 `a1` = region slot index, below `PROCESS_REGION_SLOTS`,
-`a2` = slot of a `Region` capability in the caller's table,
+`a2` = slot of a frame in the caller's table,
 `a3` = rights to install.
-The rights must be a non-empty subset of the region's (`KERR_NO_RIGHTS`);
+The rights must be a non-empty subset of the frame's (`KERR_NO_RIGHTS`);
 write without read is `KERR_INVALID_ARG`;
 an occupied region slot is `KERR_SLOT_IN_USE`;
-overlap with a pool or with another region in this process is `KERR_OVERLAP`;
+overlap with another region in this process is `KERR_OVERLAP`;
 too few PMP entries is `KERR_LIMIT`.
-The installed region hangs below the `Region` capability in the derivation tree,
+The installed region hangs below the frame in the derivation tree,
 so `OP_CAP_REVOKE` on that capability's slot, or on any slot above it, uninstalls it.
 
 **`OP_PROCESS_UNINSTALL` (9).**
@@ -978,7 +1006,7 @@ if the notification's pool is destroyed while the thread waits.
 **`OP_IRQ_CARVE` (19).**
 No right needed.
 `a1` = offset from the first line, `a2` = count, `a3` = destination slot.
-A table operation like `OP_REGION_CARVE`.
+A table operation like `OP_FRAME_CARVE`.
 
 **`OP_IRQ_BIND` (20).**
 Needs `RIGHT_W`, and the capability must name exactly one line (`KERR_INVALID_ARG`).
@@ -986,9 +1014,11 @@ Needs `RIGHT_W`, and the capability must name exactly one line (`KERR_INVALID_AR
 `a2` = slot of the `Notification` capability the `Irq` signals, with `RIGHT_W`,
 which must lie in that pool,
 `a3` = destination slot for the `Irq` capability, which may be the invoked slot.
-The invoked slot is cleared with everything below it.
+The invoked slot is cleared with everything below it,
+and the `Irq` capability hangs below the `KernelPool` capability.
 `KERR_OVERLAP` if an `Irq` is already bound to the line,
 `KERR_NO_MEMORY` if the pool has no room for it,
+`KERR_STATE` while the pool is being destroyed,
 both checked before anything is revoked,
 and the revoke may make the call again, section 6.1.
 The new `Irq` is masked until `OP_IRQ_SET` arms it.
@@ -1015,11 +1045,11 @@ Returns `a1` = the counter's rate in hertz, `a2` = the address of its low word;
 the high word is at `a2 + 4`.
 The rate does not change while the machine runs.
 
-**`OP_CLOCK_REGION` (26).**
+**`OP_CLOCK_FRAME` (26).**
 `a1` = destination slot in the caller's table.
-Produces a `Region` capability, read only, to the smallest region that holds the counter,
+Produces a frame, read only, the smallest block that holds the counter,
 hanging below the invoked capability.
-On a PMP grain coarser than eight bytes the region holds the registers beside the counter too.
+On a PMP grain coarser than eight bytes the frame holds the registers beside the counter too.
 
 ### 6.13 Operation codes in numeric order
 
@@ -1029,13 +1059,13 @@ On a PMP grain coarser than eight bytes the region holds the registers beside th
 | 2 | `OP_DEBUG_HALT` | `Debug` |
 | 3 | `OP_CAP_COPY` | `CapTable` |
 | 4 | `OP_CAP_DELETE` | `CapTable` |
-| 5 | `OP_REGION_CARVE` | `Region` |
-| 6 | `OP_REGION_TO_POOL` | `Region` |
+| 5 | `OP_FRAME_CARVE` | `Frame` |
+| 6 | `OP_UNTYPED_RETYPE` | `Untyped` |
 | 7 | `OP_POOL_ALLOC` | `KernelPool` |
 | 8 | `OP_PROCESS_INSTALL` | `Process` |
 | 9 | `OP_PROCESS_UNINSTALL` | `Process` |
 | 10 | `OP_DEBUG_TRACE` | `Debug` |
-| 11 | `OP_REGION_INFO` | `Region` |
+| 11 | `OP_FRAME_INFO` | `Frame` |
 | 12 | `OP_THREAD_CONFIGURE` | `Thread` |
 | 13 | `OP_THREAD_RESUME` | `Thread` |
 | 14 | `OP_NOTIFY_SIGNAL` | `Notification` |
@@ -1049,9 +1079,10 @@ On a PMP grain coarser than eight bytes the region holds the registers beside th
 | 23 | `OP_CAP_REVOKE` | `CapTable` |
 | 24 | `OP_CAP_DERIVE` | `CapTable` |
 | 25 | `OP_CLOCK_INFO` | `Clock` |
-| 26 | `OP_CLOCK_REGION` | `Clock` |
+| 26 | `OP_CLOCK_FRAME` | `Clock` |
+| 27 | `OP_UNTYPED_INFO` | `Untyped` |
 
-`OP_COUNT` is 27, one above the highest code.
+`OP_COUNT` is 28, one above the highest code.
 
 ## 7. What the root task starts with
 
@@ -1074,13 +1105,13 @@ and drops into user mode with:
 | 3 | `BOOT_CAP_THREAD` | the root task's first thread | all |
 | 4 | `BOOT_CAP_POOL` | the boot pool | all |
 | 5 | `BOOT_CAP_DEBUG` | `Debug` | all |
-| 6 | `BOOT_CAP_CODE` | `Region`: the root task's code | read, execute |
-| 7 | `BOOT_CAP_DATA` | `Region`: the root task's data and stack | read, write |
-| 8 | `BOOT_CAP_FREE_RAM` | `Region`: the block of RAM the board sets aside for the root task | all |
-| 9 | `BOOT_CAP_INPUT` | `Region`: test input the loader placed in RAM | read |
+| 6 | `BOOT_CAP_CODE` | `Frame`: the root task's code | read, execute |
+| 7 | `BOOT_CAP_DATA` | `Frame`: the root task's data and stack | read, write |
+| 8 | `BOOT_CAP_FREE_RAM` | `Untyped`: the block of RAM the board sets aside for the root task | all |
+| 9 | `BOOT_CAP_INPUT` | `Frame`: test input the loader placed in RAM | read |
 | 10 | `BOOT_CAP_IRQ_LINES` | `IrqLine`: line 0 (the log) and every controller line | write |
-| 11 | `BOOT_CAP_UART` | `Region`: the board's console registers, a 16550 on QEMU and the USB Serial/JTAG controller on the ESP32-C6 | read, write |
-| 12 | `BOOT_CAP_LOG` | `Region`: the kernel log's header and ring | read, write |
+| 11 | `BOOT_CAP_UART` | `Frame`: the board's console registers, a 16550 on QEMU and the USB Serial/JTAG controller on the ESP32-C6 | read, write |
+| 12 | `BOOT_CAP_LOG` | `Frame`: the kernel log's header and ring | read, write |
 | 13 | `BOOT_CAP_TIMER_LINES` | `IrqLine`: every timer line, `TIMER_LINES` of them | write |
 | 14 | `BOOT_CAP_CLOCK` | `Clock`: the machine's counter | all |
 
@@ -1089,11 +1120,14 @@ and drops into user mode with:
 The root task's own table, process and thread take about 1.7 KiB of the boot pool,
 so roughly 2.3 KiB remain for objects the root task allocates from `BOOT_CAP_POOL`.
 Anything larger goes into a pool the root task makes out of free RAM.
+The capabilities to the boot pool, its table, process and thread
+hang below the boot pool's own node, not below `BOOT_CAP_POOL`,
+so revoking below `BOOT_CAP_POOL` takes only what was allocated through it.
 
-Device ranges are granted read and write, never execute,
+Device ranges are frames, granted read and write, never execute,
 the counter behind `BOOT_CAP_CLOCK` read only,
-and can never become a pool.
-The log region can be installed but never pooled either.
+and no Untyped covers them, so they can never become a pool.
+Neither can the log, which is a frame too.
 
 Which capability sits in which slot is a convention between loader and program,
 not something the kernel enforces.
@@ -1122,8 +1156,10 @@ There is no libc; `user/rvuos.h` provides the system call wrappers:
 | Wrapper | Operation |
 |---|---|
 | `rv_invoke(op, cap, a1, a2, a3)` | any |
-| `rv_region_info(cap, &base, &size)` | `OP_REGION_INFO` |
-| `rv_region_min_size(cap, &min)` | `OP_REGION_INFO`, reading `a4` |
+| `rv_frame_info(cap, &base, &size)` | `OP_FRAME_INFO` |
+| `rv_frame_min_size(cap, &min)` | `OP_FRAME_INFO`, reading `a4` |
+| `rv_untyped_info(cap, &base, &size, &mark)` | `OP_UNTYPED_INFO` |
+| `rv_retype(cap, type, size, dst, &base)` | `OP_UNTYPED_RETYPE` |
 | `rv_signal(cap, bits)` | `OP_NOTIFY_SIGNAL` |
 | `rv_wait(cap, &bits)` | `OP_NOTIFY_WAIT` |
 | `rv_timer_set(cap, bits, us)` | `OP_IRQ_SET` on a timer line, with the delay |
@@ -1142,22 +1178,21 @@ Loading a separate binary is a userspace job the root task does not do yet;
 `DESIGN.md`, open decision 3.
 The steps below are what `user/init.c` does.
 
-1. **Carve memory** out of `BOOT_CAP_FREE_RAM`:
-   one chunk for the child's kernel objects, one for its data and stack,
-   one to share,
-   each a 4 KiB block at an offset that is a multiple of 4 KiB.
+1. **Retype memory** out of `BOOT_CAP_FREE_RAM`:
+   a frame to share, a frame for the child's data and stack,
+   and a pool for its kernel objects,
+   each a 4 KiB block, which the Untyped lays one after another.
 
    ```c
-   rv_invoke(OP_REGION_CARVE, BOOT_CAP_FREE_RAM, POOL_OFFSET, CHUNK, SLOT_POOL_REGION);
-   rv_invoke(OP_REGION_CARVE, BOOT_CAP_FREE_RAM, DATA_OFFSET, CHUNK, SLOT_CHILD_DATA);
-   rv_invoke(OP_REGION_CARVE, BOOT_CAP_FREE_RAM, SHARED_OFFSET, CHUNK, SLOT_SHARED);
+   rv_retype(BOOT_CAP_FREE_RAM, CAP_FRAME, CHUNK, SLOT_SHARED, &shared_base);
+   rv_retype(BOOT_CAP_FREE_RAM, CAP_FRAME, CHUNK, SLOT_CHILD_DATA, &child_data_base);
+   rv_retype(BOOT_CAP_FREE_RAM, CAP_POOL, CHUNK, SLOT_POOL, &pool_base);
    ```
 
-2. **Make a pool** and allocate the child's objects from it,
+2. **Allocate** the child's objects from the pool,
    table first, then the process that uses it, then a thread in it.
 
    ```c
-   rv_invoke(OP_REGION_TO_POOL, SLOT_POOL_REGION, SLOT_POOL, 0, 0);
    rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_CAPTABLE, SLOT_CHILD_TABLE, CHILD_TABLE_SLOTS);
    rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_PROCESS, SLOT_CHILD_PROCESS, SLOT_CHILD_TABLE);
    rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_THREAD, SLOT_CHILD_THREAD, SLOT_CHILD_PROCESS);
@@ -1188,7 +1223,7 @@ The steps below are what `user/init.c` does.
 
    ```c
    rv_invoke(OP_THREAD_CONFIGURE, SLOT_CHILD_THREAD, (uint32_t)&child_main,
-             free_base + DATA_OFFSET + CHUNK, 0);
+             child_data_base + CHUNK, 0);
    rv_invoke(OP_THREAD_RESUME, SLOT_CHILD_THREAD, 0, 0, 0);
    ```
 
@@ -1198,18 +1233,21 @@ The steps below are what `user/init.c` does.
 7. **Tear down** by destroying the pool.
    The child's thread, process, table and notifications go with it,
    every capability to them is cleared in every table,
-   and the region capability to the memory comes back in the slot you name.
+   and the memory goes back to `BOOT_CAP_FREE_RAM`.
 
    ```c
-   rv_invoke(OP_POOL_DESTROY, SLOT_POOL, SLOT_POOL_REGION, 0, 0);
+   rv_invoke(OP_POOL_DESTROY, SLOT_POOL, 0, 0, 0);
    ```
+
+   To have that very block back for something else,
+   make the pool of an Untyped of its own size and retype that again.
 
 The child must touch no global variable, since it shares no data region with the parent:
 everything it needs is on its stack or behind a capability in its table.
 
 ### 8.3 Writing a driver
 
-A driver needs a region for the device's registers and one interrupt line.
+A driver needs a frame for the device's registers and one interrupt line.
 
 ```c
 rv_invoke(OP_PROCESS_INSTALL, BOOT_CAP_PROCESS, UART_SLOT, BOOT_CAP_UART, RIGHT_R | RIGHT_W);
@@ -1248,10 +1286,12 @@ A thread whose program counter was set while tracing was on
 cannot be run under tracing; the kernel halts with code 6 instead.
 
 **The self-check** (`kernel/selfcheck.c`) verifies, among other things:
-no installed region overlaps a pool,
+no installed region or frame overlaps a pool,
+and what one Untyped made lies below its watermark and overlaps nothing else it made,
 every process's PMP image matches its region slots,
-every capability names a live object of its own type or an in-bounds region or line range,
-pools tile their memory exactly and form a tree,
+every capability names a live object of its own type or an in-bounds frame, Untyped or line range,
+and every capability to a pool or an object lies below the pool's own node,
+pools tile their memory exactly,
 every waiting thread names a live notification,
 every `Irq` names a notification in its own pool,
 no `Irq` armed on a timer line is past its deadline,
@@ -1285,7 +1325,7 @@ and `tests/mutants/` holds one planted bug per invariant.
 | slots per `CapTable` | 1 to 1024 | `CAPTABLE_MAX_SLOTS` |
 | root task's table | 64 slots | `kernel/boot.c` |
 | boot pool | 4 KiB | `kernel/kernel.ld.S` |
-| smallest pool | 64 bytes, 8-byte aligned | `kernel/syscall.c` |
+| smallest pool | 64 bytes | `POOL_MIN_SIZE` |
 | object alignment | 8 bytes | `OBJ_ALIGN` |
 | notification bits | 32 | the word size |
 | timer lines | 16, on the whole machine | `TIMER_LINES` |

@@ -1,0 +1,19 @@
+An Untyped may be copied,
+and the copy is a second allocator over the same memory with a watermark of its own.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: memory that may hold kernel objects overlaps a node not above or below it
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -73,9 +73,6 @@ static int op_captable(struct thread *t, const struct cap *cap,
+         /* A copy stands beside its source in the tree, a derivation below it. */
+         if (op == OP_CAP_COPY) {
+             /* A copy of an Untyped would be a second allocator over the same memory. */
+-            if (src.type == CAP_UNTYPED) {
+-                return KERR_WRONG_TYPE;
+-            }
+             return cap_store_beside(table, arg[1], &src, source);
+         }
+         if (src.type != CAP_UNTYPED) {

@@ -13,8 +13,8 @@
  * a bounded loop ran no more than its bound on any one entry,
  * the steps of the loops paid for in each unit are at most twice
  * what the call took away of it, plus what a call may make of it on the way,
- * twice, since a pool destroy may pass a capability to the pool on its way up to the region
- * and clear it again in the sweep.
+ * twice, since a delete below a root makes a root of a node, a link each,
+ * and a pool destroy may then clear that node as one its tables hold.
  * What there is of each unit is counted over every object by host_units.
  */
 
@@ -30,9 +30,8 @@
 
 /*
  * What one call may make of a unit while it takes others away:
- * OP_REGION_TO_POOL makes a pool and the capability in the region's place,
- * one object and one node, as it revokes what was derived from the region,
- * and OP_POOL_DESTROY makes the region it gives back.
+ * OP_IRQ_BIND makes an Irq and its capability, one object and one node,
+ * as it revokes what was derived from the line.
  */
 #define WORK_SLACK 1
 

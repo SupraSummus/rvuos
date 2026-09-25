@@ -9,8 +9,6 @@
 #include "object.h"
 #include "timer.h"
 
-#define POOL_MIN_SIZE 64
-
 bool debug_trace;
 
 /* The slot itself, as a node of the derivation tree, once cap_lookup has vetted the index. */
@@ -19,10 +17,13 @@ static struct cap *slot_node(struct thread *t, uint32_t slot)
     return &thread_table(t)->slots[slot];
 }
 
-/* True while a node lies in a live pool; a destroy may have taken the table it was in. */
-static bool node_live(const struct cap *n)
+/*
+ * True if the calling thread or its process's table lives in [base, base + size).
+ * A pool lies within an Untyped or outside it, so its base says which.
+ */
+static bool holds_caller(struct thread *t, uint32_t base, uint32_t size)
 {
-    return pool_overlaps(v2p(n), sizeof(*n));
+    return range_contains(base, size, t->hdr.pool) || range_contains(base, size, thread_table(t)->hdr.pool);
 }
 
 static int op_debug(uint32_t op, const uint32_t *arg)
@@ -68,11 +69,32 @@ static int op_captable(struct thread *t, const struct cap *cap,
             return err;
         }
         src.rights &= (uint8_t)arg[3];
+        struct cap *source = slot_node(t, arg[2]);
         /* A copy stands beside its source in the tree, a derivation below it. */
         if (op == OP_CAP_COPY) {
-            return cap_store_beside(table, arg[1], &src, slot_node(t, arg[2]));
+            /* A copy of an Untyped would be a second allocator over the same memory. */
+            if (src.type == CAP_UNTYPED) {
+                return KERR_WRONG_TYPE;
+            }
+            return cap_store_beside(table, arg[1], &src, source);
         }
-        return cap_store(table, arg[1], &src, slot_node(t, arg[2]));
+        if (src.type != CAP_UNTYPED) {
+            return cap_store(table, arg[1], &src, source);
+        }
+        /*
+         * The derived Untyped has the whole of the memory, starting at its base,
+         * so the source makes nothing of it while that one lives:
+         * it must have made nothing yet, and its watermark moves to its end.
+         */
+        if (source->child != 0) {
+            return KERR_STATE;
+        }
+        src.b = 0;
+        err = cap_store(table, arg[1], &src, source);
+        if (err == KERR_OK) {
+            source->b = untyped_size(source);
+        }
+        return err;
     }
     case OP_CAP_DELETE:
         return cap_clear(table, arg[1]);
@@ -81,6 +103,10 @@ static int op_captable(struct thread *t, const struct cap *cap,
         int err = cap_lookup(table, arg[1], &c);
         if (err != KERR_OK) {
             return err;
+        }
+        /* Below an Untyped the pools go too, and the caller keeps what it runs on. */
+        if (c.type == CAP_UNTYPED && holds_caller(t, untyped_base(&c), untyped_size(&c))) {
+            return KERR_STATE;
         }
         return cap_revoke_below(&table->slots[arg[1]], true) ? KERR_OK : KERR_PREEMPTED;
     }
@@ -97,9 +123,9 @@ static int op_clock(struct thread *t, uint32_t slot, uint32_t op, uint32_t *arg)
         arg[1] = timer_counter_hz();
         arg[2] = COUNTER_ADDR;
         return KERR_OK;
-    case OP_CLOCK_REGION: {
+    case OP_CLOCK_FRAME: {
         const struct granted_range *g = &boot_granted[GRANT_COUNTER];
-        struct cap r = cap_to_region(g->base, g->size, g->rights);
+        struct cap r = cap_to_frame(g->base, g->size, g->rights);
         return cap_store(thread_table(t), arg[1], &r, slot_node(t, slot));
     }
     default:
@@ -108,71 +134,107 @@ static int op_clock(struct thread *t, uint32_t slot, uint32_t op, uint32_t *arg)
 }
 
 /* arg[1..] carry the arguments in and the results out. */
-static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
-                     uint32_t op, uint32_t *arg)
+static int op_frame(struct thread *t, uint32_t slot, const struct cap *cap,
+                    uint32_t op, uint32_t *arg)
 {
     uint32_t base = cap->a;
     uint32_t size = cap->b;
 
     switch (op) {
-    case OP_REGION_INFO:
+    case OP_FRAME_INFO:
         arg[1] = base;
         arg[2] = size;
         arg[3] = cap->rights;
         arg[4] = region_min_size();
         return KERR_OK;
-    case OP_REGION_CARVE: {
+    case OP_FRAME_CARVE: {
         uint32_t off = arg[1];
         uint32_t len = arg[2];
-        /* A block within the region, so that every region capability is one NAPOT entry. */
+        /* A block within the frame, so that every frame capability is one NAPOT entry. */
         if (off >= size || len > size - off || !napot_block(base + off, len)) {
             return KERR_INVALID_ARG;
         }
-        struct cap sub = cap_to_region(base + off, len, cap->rights);
+        struct cap sub = cap_to_frame(base + off, len, cap->rights);
         return cap_store(thread_table(t), arg[3], &sub, slot_node(t, slot));
     }
-    case OP_REGION_TO_POOL: {
-        if ((cap->rights & (RIGHT_R | RIGHT_W)) != (RIGHT_R | RIGHT_W)) {
-            return KERR_NO_RIGHTS;
-        }
-        /*
-         * Kernel objects live in RAM: on a device range writing them would drive registers.
-         * The log is RAM the kernel writes on its own, so it cannot hold them either.
-         * A region is a block aligned to its size, so one this large lies on OBJ_ALIGN.
-         */
-        _Static_assert(POOL_MIN_SIZE % OBJ_ALIGN == 0, "a pool-sized block lies on OBJ_ALIGN");
-        if (size < POOL_MIN_SIZE || !ram_contains(base, size) ||
-            ranges_overlap(base, size, KLOG_BASE, KLOG_REGION_SIZE)) {
+    default:
+        return KERR_WRONG_TYPE;
+    }
+}
+
+/* arg[1..] carry the arguments in and the results out. */
+static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
+                      uint32_t op, uint32_t *arg)
+{
+    uint32_t base = untyped_base(cap);
+    uint32_t size = untyped_size(cap);
+    struct cap *u = slot_node(t, slot);
+
+    switch (op) {
+    case OP_UNTYPED_INFO:
+        arg[1] = base;
+        arg[2] = size;
+        arg[3] = cap->rights;
+        arg[4] = untyped_mark(u);
+        return KERR_OK;
+    case OP_UNTYPED_RETYPE: {
+        uint32_t type = arg[1];
+        uint32_t len = arg[2];
+        if (type != CAP_UNTYPED && type != CAP_FRAME && type != CAP_POOL) {
             return KERR_INVALID_ARG;
         }
-        if (pool_overlaps(base, size) || installed_overlaps(base, size)) {
-            return KERR_OVERLAP;
+        /* A block, so that a frame is one NAPOT entry and what one Untyped makes nests. */
+        if (len > size || !napot_block(base, len)) {
+            return KERR_INVALID_ARG;
         }
-        /* The invoked slot is cleared below, so it may receive the pool capability. */
-        if (arg[1] != slot) {
-            int err = cap_slot_free(thread_table(t), arg[1]);
-            if (err != KERR_OK) {
-                return err;
+        /*
+         * Kernel objects are written into a pool, so the memory must allow both.
+         * A block this large lies on OBJ_ALIGN and holds the descriptor.
+         */
+        _Static_assert(POOL_MIN_SIZE % OBJ_ALIGN == 0 && POOL_MIN_SIZE >= sizeof(struct pool),
+                       "a pool-sized block lies on OBJ_ALIGN and holds its descriptor");
+        if (type == CAP_POOL) {
+            if ((cap->rights & (RIGHT_R | RIGHT_W)) != (RIGHT_R | RIGHT_W)) {
+                return KERR_NO_RIGHTS;
+            }
+            if (len < POOL_MIN_SIZE) {
+                return KERR_INVALID_ARG;
             }
         }
-        /*
-         * The region's derivation goes before anything is built,
-         * so a call stopped on the way finds nothing built when it is made again.
-         * Nothing below the region is installed or a pool, or the checks above would have refused.
-         */
-        if (!cap_revoke_below(slot_node(t, slot), true)) {
-            return KERR_PREEMPTED;
+        struct captable *table = thread_table(t);
+        int err = cap_slot_free(table, arg[3]);
+        if (err != KERR_OK) {
+            return err;
         }
         /*
-         * From here on the memory is the kernel's.
-         * It is not zeroed here, which would be work in its size: pool_alloc zeroes each object.
-         * The new pool hangs below the caller's own, and dies with it.
+         * The next block of the size at or past the watermark, aligned to its size.
+         * Everything this Untyped made lies below the watermark, so the block overlaps none of it.
+         * The mark is at most the size and the size a multiple of len, so nothing wraps.
          */
-        struct pool *pool = pool_create(base, size, cap->rights, obj_pool(&t->hdr));
-        struct cap pc = cap_to_object(&pool->hdr, RIGHT_ALL);
-        /* The pool capability takes the region's place in the tree, and the region goes. */
-        cap_replace(slot_node(t, arg[1]), &pc, slot_node(t, slot));
-        return KERR_OK;
+        uint32_t off = (untyped_mark(u) + len - 1) & ~(len - 1);
+        if (off > size - len) {
+            return KERR_NO_MEMORY;
+        }
+        uint32_t at = base + off;
+        u->b = off + len;
+        struct cap c;
+        struct cap *parent = u;
+        if (type == CAP_POOL) {
+            /*
+             * The pool's own node hangs below the Untyped and the capability below it,
+             * so the capability may go and the memory stays accounted for.
+             * It is not zeroed here, which would be work in its size: pool_alloc zeroes each object.
+             */
+            struct pool *pool = pool_create(at, len, u);
+            c = cap_to_object(&pool->hdr, RIGHT_ALL);
+            parent = &pool->node;
+        } else if (type == CAP_FRAME) {
+            c = cap_to_frame(at, len, cap->rights);
+        } else {
+            c = cap_to_untyped(at, len, cap->rights);
+        }
+        arg[1] = at;
+        return cap_store(table, arg[3], &c, parent);
     }
     default:
         return KERR_WRONG_TYPE;
@@ -194,54 +256,21 @@ static int bound_notification(struct thread *t, uint32_t slot, const struct pool
         return err;
     }
     *out = (struct notification *)cap_object(&nc);
-    return (*out)->hdr.pool == pool->base ? KERR_OK : KERR_INVALID_ARG;
+    return (*out)->hdr.pool == pool_base(pool) ? KERR_OK : KERR_INVALID_ARG;
 }
 
-static int op_pool_destroy(struct thread *t, uint32_t slot, struct pool *pool,
-                           const uint32_t *arg)
+static int op_pool_destroy(struct thread *t, uint32_t slot, struct pool *pool)
 {
-    uint32_t base = pool->base;
-    uint32_t size = pool->size;
-    uint8_t rights = pool->rights;
     /*
-     * The memory comes back to the caller's table, found here once:
-     * the sweep may take the process's hold on it, but not the table itself,
-     * because a destroy of the table's pool is refused like one of the thread's.
+     * The caller keeps what it runs on and the table it names capabilities in.
      * A thread and its process share one pool, so these two checks cover all the caller uses.
+     * The boot pool holds the root task.
      */
-    struct captable *table = thread_table(t);
-    if (pool_under(obj_pool(&t->hdr), pool) || pool_under(obj_pool(&table->hdr), pool)) {
+    if (pool == boot_pool || obj_pool(&t->hdr) == pool || obj_pool(&thread_table(t)->hdr) == pool) {
         return KERR_STATE;
     }
-    /* The invoked slot holds the Pool capability and the sweep will clear it. */
-    if (arg[1] != slot) {
-        int err = cap_slot_free(table, arg[1]);
-        if (err != KERR_OK) {
-            return err;
-        }
-    }
-
-    /*
-     * The memory goes back below the region the pool was made of:
-     * the nearest ancestor that is not a capability to this pool,
-     * since those the sweep is about to clear.
-     * That ancestor may lie in a table the destroy takes, and then the memory returns as a root.
-     */
-    struct cap *parent = cap_parent(&table->slots[slot]);
-    while (parent != NULL && parent->type == CAP_POOL && parent->a == base) {
-        LOOP_PAID(op_pool_destroy, node, "a capability to the pool, which the sweep clears");
-        parent = cap_parent(parent);
-    }
-
-    pool_destroy(pool);
-
-    /* Or it was itself derived from a slot the destroy took, and went with it. */
-    if (parent != NULL && (!node_live(parent) || parent->type == CAP_NONE)) {
-        parent = NULL;
-    }
-    /* The pools below gave their memory back to nobody; this one gives it to the caller. */
-    struct cap rc = cap_to_region(base, size, rights);
-    return cap_store(table, arg[1], &rc, parent);
+    /* The invoked capability goes last, so a call made again finds the pool through it. */
+    return pool_destroy(pool, slot_node(t, slot), true) ? KERR_OK : KERR_PREEMPTED;
 }
 
 static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
@@ -250,10 +279,13 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
     struct pool *pool = (struct pool *)cap_object(cap);
 
     if (op == OP_POOL_DESTROY) {
-        return op_pool_destroy(t, slot, pool, arg);
+        return op_pool_destroy(t, slot, pool);
     }
     if (op != OP_POOL_ALLOC) {
         return KERR_WRONG_TYPE;
+    }
+    if (pool->dying) {
+        return KERR_STATE;
     }
     uint32_t dst = arg[2];
     int err = cap_slot_free(thread_table(t), dst);
@@ -292,7 +324,7 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
             return perr;
         }
         struct process *proc = (struct process *)cap_object(&pc);
-        if (proc->hdr.pool != pool->base) {
+        if (proc->hdr.pool != pool_base(pool)) {
             return KERR_INVALID_ARG;
         }
         struct thread *nt = pool_alloc(pool, CAP_THREAD, sizeof(*nt));
@@ -332,9 +364,9 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
         return KERR_INVALID_ARG;
     }
 
-    /* A new object starts a tree of its own. */
+    /* A new object hangs below the capability it was allocated through, and so below the pool's node. */
     struct cap c = cap_to_object(obj, RIGHT_ALL);
-    return cap_store(thread_table(t), dst, &c, NULL);
+    return cap_store(thread_table(t), dst, &c, slot_node(t, slot));
 }
 
 static int op_process(struct thread *t, const struct cap *cap,
@@ -345,7 +377,7 @@ static int op_process(struct thread *t, const struct cap *cap,
     switch (op) {
     case OP_PROCESS_INSTALL: {
         struct cap region;
-        int err = cap_lookup_typed(thread_table(t), arg[2], CAP_REGION, 0, &region);
+        int err = cap_lookup_typed(thread_table(t), arg[2], CAP_FRAME, 0, &region);
         if (err != KERR_OK) {
             return err;
         }
@@ -462,6 +494,9 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
             return err;
         }
         struct pool *pool = (struct pool *)cap_object(&pc);
+        if (pool->dying) {
+            return KERR_STATE;
+        }
         struct notification *ntfn;
         err = bound_notification(t, arg[2], pool, &ntfn);
         if (err != KERR_OK) {
@@ -488,11 +523,11 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
         irq->ntfn = v2p(ntfn);
         irq->line = first;
         line_irq[first] = v2p(irq);
+        /* The line goes, a leaf now, and the Irq hangs below the pool capability as any object does. */
+        cap_delete(slot_node(t, slot), false);
         /* Its bits are zero, so it is disarmed, and its line stays masked as every line does until a set. */
         struct cap ic = cap_to_object(&irq->hdr, RIGHT_ALL);
-        /* The Irq capability takes the line's place in the tree, and the line goes. */
-        cap_replace(slot_node(t, arg[3]), &ic, slot_node(t, slot));
-        return KERR_OK;
+        return cap_store(thread_table(t), arg[3], &ic, slot_node(t, arg[1]));
     }
     default:
         return KERR_WRONG_TYPE;
@@ -571,7 +606,7 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
 
     /*
      * Operations that change an object need RIGHT_W on it.
-     * Regions, interrupt lines, notifications, the debug capability and the clock
+     * Frames, Untypeds, interrupt lines, notifications, the debug capability and the clock
      * are checked in their handlers,
      * because which right they need depends on the operation.
      */
@@ -579,8 +614,11 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
     case CAP_DEBUG:
         err = op_debug(op, arg);
         break;
-    case CAP_REGION:
-        err = op_region(t, slot, &cap, op, arg);
+    case CAP_FRAME:
+        err = op_frame(t, slot, &cap, op, arg);
+        break;
+    case CAP_UNTYPED:
+        err = op_untyped(t, slot, &cap, op, arg);
         break;
     case CAP_CLOCK:
         err = op_clock(t, slot, op, arg);

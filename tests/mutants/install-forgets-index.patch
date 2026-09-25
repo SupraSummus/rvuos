@@ -8,7 +8,7 @@ Report: installed region does not know its slot
 diff --git a/kernel/process.c b/kernel/process.c
 --- a/kernel/process.c
 +++ b/kernel/process.c
-@@ -74,7 +74,7 @@ int process_install(struct process *proc, unsigned slot,
+@@ -75,7 +75,7 @@ int process_install(struct process *proc, unsigned slot,
      }
  
      proc->slots[slot] = (struct cap){

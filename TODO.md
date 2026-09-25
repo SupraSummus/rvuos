@@ -40,6 +40,9 @@ Design decisions behind these items live in `DESIGN.md`.
    "Kernel pools and revocation",
    and the pool tree, so that a destroy takes the pools
    created from within the destroyed one.
+   Both went with open decision 14, `Untyped` and `Frame`:
+   a destroy is a revoke below the pool's own node and a walk over its objects,
+   and a revoke below an Untyped destroys the pools made of it.
    Done since: the derivation tree, `DESIGN.md`, "The derivation tree",
    with `OP_CAP_DERIVE` and `OP_CAP_REVOKE`,
    which decided open decision 7,
@@ -70,10 +73,22 @@ Design decisions behind these items live in `DESIGN.md`.
    the check that every loop a trap runs says what bounds it,
    `tools/loop-bounds.py`, a predecessor link per slot,
    revoke, delete below a root and the conversions preempted and restarted,
-   and the timer lines, which the tick looks at instead of every pool;
+   the timer lines, which the tick looks at instead of every pool,
+   and `Untyped` and `Frame`, open decision 14,
+   which took the last walks off every call and made the pool destroy preemptible;
    `DESIGN.md`, "Bounded work".
-   - The pool destroy preempted too, once open decision 14 says what its walk is.
-   - `Untyped` and `Frame`, open decision 14, once its open questions are decided.
+   Still open from that step:
+   - `make BOARD=esp32c6 test` with the demo rewritten for `Untyped` and `Frame`;
+     it has run under QEMU only.
+   - Whether `OP_POOL_DESTROY` should go.
+     A pool made of an Untyped of its own size is destroyed by revoking that Untyped,
+     as the demo does for the pool it rebuilds;
+     without the operation, the capability a destroy keeps for last
+     and the boot pool's refusal by name go too.
+   - Revoking below a line capability takes the line back only while it is unbound.
+     A bound line could keep its capability, marked as the binding one,
+     whose clearing unbinds the `Irq`, which its pool keeps inert until it goes;
+     `DESIGN.md`, "Interrupts".
 
 ## Verification
 
@@ -119,12 +134,11 @@ Design decisions behind these items live in `DESIGN.md`.
   and the loss only by reading its code.
   A record that writes garbage into the log's `taken` is beyond the fuzzer,
   since no record writes memory; the clamp in `klog.c` is checked by reading it.
-  That the log cannot become a pool is beyond it too:
-  the replay driver maps the log, so the overlap check refuses first,
-  and a process that never mapped it exists only in `user/init.c`'s children.
+  That the log cannot become a pool is a matter of type now:
+  `BOOT_CAP_LOG` is a frame, and no Untyped covers it.
 - The replay driver has three threads, and the third shares the second's process and pool.
-  More of them, each with its process and pool as the second has,
-  would give the pool tree more branches;
+  More of them, each with its process, pool and Untyped as the second has,
+  would give the derivation below the free RAM more branches;
   the prologue in `include/rvuos/replay.h` and `host_boot` grow with them.
 - No harness reaches `KERR_LIMIT` in `process_install`.
   Since regions are NAPOT blocks, each costs one PMP entry,
@@ -138,7 +152,7 @@ Design decisions behind these items live in `DESIGN.md`.
   one user program per scenario, expected outcome a specific fault.
   Execute from data, jump into the kernel, `csrr` and `mret` from user mode,
   misaligned access, stack into kernel memory.
-- CBMC on the overlap checks, `OP_REGION_CARVE` and the NAPOT encoding.
+- CBMC on the watermark in `OP_UNTYPED_RETYPE`, `OP_FRAME_CARVE` and the NAPOT encoding.
 - Feed the replay corpus to the ESP32-C6.
   Something has to put each input where `BOOT_CAP_INPUT` points,
   below the ROM's buffers or over USB once the kernel runs,
@@ -148,19 +162,16 @@ Design decisions behind these items live in `DESIGN.md`.
   C and the linker scripts share `kernel/layout.h` and the board's `board.h` now;
   the replay driver's second stack in `rvuos/replay.h`
   and `tests/differential.py` still carry QEMU's addresses of their own.
-- A pool whose every capability was revoked stays until the pool above it goes,
-  and its memory is inert to every region capability meanwhile.
-  Nothing today tells a lender that the borrower's pool is the reason
-  a revoked region cannot be pooled again;
-  `KERR_OVERLAP` is all it sees.
-  A revoke that destroys the pools whose only capabilities it took
-  would be the seL4 answer, and open decision 14 in `DESIGN.md` is that answer.
+- A pool whose every capability was deleted or revoked stays until the Untyped above it is revoked,
+  and nothing tells the holder of that Untyped why a retype finds no room.
 - The host stops every preemptible call after one step, and makes it again,
   but has no second thread run in between,
   since under tracing an interrupt switches nothing.
   On QEMU a call stops, and the interrupt is taken on the way back, only when a tick happens to land in it.
   A restart that finds its slots changed by another thread
-  is checked by reading `syscall.c`.
+  is checked by reading `syscall.c`,
+  and so are a destroy that another call goes on with
+  and an allocation refused because its pool is dying, by reading `pool_destroy` and `op_pool`.
   A call that stops without putting its thread back on the `ecall`
   the host takes as finished, and no host check sees it;
   `make qemu-replay` does, by the trace line the host then lacks.
@@ -194,13 +205,7 @@ Design decisions behind these items live in `DESIGN.md`.
   when a board's RAM gets tight.
 - `PROCESS_REGION_SLOTS` is fixed at 8;
   size it per process from the PMP budget when process creation exists.
-- The replay reaches one level of the pool tree below the boot pool:
-  the driver's second thread lives there and pools it creates hang from it.
-  A thread living two levels down would be one the records configured,
-  which the host cannot follow,
-  so `KERR_STATE` for a thread destroying a pool above its own
-  is checked only by the demo in `user/init.c`.
-  `KERR_STATE` for a thread destroying the pool its table lies in
+- `KERR_STATE` for a thread destroying the pool its table lies in, but not the thread,
   is checked by nothing:
   the driver's threads keep their tables in their own pools,
   and the demo gives its child no table elsewhere.

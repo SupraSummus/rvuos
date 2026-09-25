@@ -16,7 +16,8 @@ struct pool *boot_pool;
 struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
                                 paddr_t free_base, uint32_t free_size)
 {
-    struct pool *pool = pool_create(boot_pool_base, boot_pool_size, RIGHT_ALL, NULL);
+    /* No Untyped covers the boot pool, so its own node is a root, and nothing can revoke it. */
+    struct pool *pool = pool_create(boot_pool_base, boot_pool_size, NULL);
     boot_pool = pool;
 
     struct captable *table = pool_alloc(
@@ -29,9 +30,9 @@ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
     }
 
     table->nslots = ROOT_CAPTABLE_SLOTS;
-    /* A boot capability, so a root of the tree like the others. */
+    /* Below the pool's node, as every capability to an object of the pool is. */
     proc->table = cap_to_object(&table->hdr, RIGHT_ALL);
-    cap_attach(NULL, &proc->table);
+    cap_attach(&pool->node, &proc->table);
     thread->proc = v2p(proc);
     /* The root thread is the one the kernel drops into; it never waits. */
     thread->state = THREAD_READY;
@@ -45,46 +46,52 @@ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
     boot_granted[3] = (struct granted_range){ INPUT_BASE, INPUT_SIZE, RIGHT_R };
     /* A device: read and write, never execute, and never a pool; see ram_contains. */
     boot_granted[4] = (struct granted_range){ UART_BASE, UART_SIZE, RIGHT_R | RIGHT_W };
-    /* The kernel's log; the reader writes its mark into the header. Never a pool; see OP_REGION_TO_POOL. */
+    /* The kernel's log; the reader writes its mark into the header. Never a pool: a frame no Untyped covers. */
     boot_granted[5] = (struct granted_range){ KLOG_BASE, KLOG_REGION_SIZE, RIGHT_R | RIGHT_W };
-    /* The counter, read only, in the smallest block that holds its two words; see OP_CLOCK_REGION. */
+    /* The counter, read only, in the smallest block that holds its two words; see OP_CLOCK_FRAME. */
     uint32_t counter_size = region_min_size();
     boot_granted[GRANT_COUNTER] =
         (struct granted_range){ COUNTER_ADDR & ~(counter_size - 1), counter_size, RIGHT_R };
 
-    /* The grants become region capabilities as they are, and every one of those is a NAPOT block. */
+    /* The grants become frames and the Untyped as they are, and every one of those is a NAPOT block. */
     for (unsigned i = 0; i < GRANTED_RANGES; i++) {
         if (!napot_block(boot_granted[i].base, boot_granted[i].size)) {
             kpanic("boot layout is not made of NAPOT blocks");
         }
     }
 
-    /* The boot capabilities are the roots of the derivation tree. */
+    /*
+     * The boot capabilities are the roots of the derivation tree,
+     * but for those to the boot pool and its objects, which hang below the pool's node;
+     * revoking below BOOT_CAP_POOL takes what was allocated through it and not these.
+     */
     struct cap boot[BOOT_CAP_COUNT] = {
         [BOOT_CAP_CAPTABLE] = cap_to_object(&table->hdr, RIGHT_ALL),
         [BOOT_CAP_PROCESS] = cap_to_object(&proc->hdr, RIGHT_ALL),
         [BOOT_CAP_THREAD] = cap_to_object(&thread->hdr, RIGHT_ALL),
         [BOOT_CAP_POOL] = cap_to_object(&pool->hdr, RIGHT_ALL),
         [BOOT_CAP_DEBUG] = { .type = CAP_DEBUG, .rights = RIGHT_ALL },
-        [BOOT_CAP_CODE] = cap_to_region(USER_CODE_BASE, USER_CODE_SIZE, RIGHT_R | RIGHT_X),
-        [BOOT_CAP_DATA] = cap_to_region(USER_DATA_BASE, USER_DATA_SIZE, RIGHT_R | RIGHT_W),
-        [BOOT_CAP_FREE_RAM] = cap_to_region(free_base, free_size, RIGHT_ALL),
-        [BOOT_CAP_INPUT] = cap_to_region(INPUT_BASE, INPUT_SIZE, RIGHT_R),
+        [BOOT_CAP_CODE] = cap_to_frame(USER_CODE_BASE, USER_CODE_SIZE, RIGHT_R | RIGHT_X),
+        [BOOT_CAP_DATA] = cap_to_frame(USER_DATA_BASE, USER_DATA_SIZE, RIGHT_R | RIGHT_W),
+        [BOOT_CAP_FREE_RAM] = cap_to_untyped(free_base, free_size, RIGHT_ALL),
+        [BOOT_CAP_INPUT] = cap_to_frame(INPUT_BASE, INPUT_SIZE, RIGHT_R),
         /* Line 0 is the log's, which no controller has; the controller's lines start at 1. */
         [BOOT_CAP_IRQ_LINES] = cap_to_lines(LOG_IRQ_LINE, IRQ_LINES, RIGHT_W),
-        [BOOT_CAP_UART] = cap_to_region(UART_BASE, UART_SIZE, RIGHT_R | RIGHT_W),
-        [BOOT_CAP_LOG] = cap_to_region(KLOG_BASE, KLOG_REGION_SIZE, RIGHT_R | RIGHT_W),
+        [BOOT_CAP_UART] = cap_to_frame(UART_BASE, UART_SIZE, RIGHT_R | RIGHT_W),
+        [BOOT_CAP_LOG] = cap_to_frame(KLOG_BASE, KLOG_REGION_SIZE, RIGHT_R | RIGHT_W),
         /* The timer lines follow the controller's, and are granted apart so that no board's count shows. */
         [BOOT_CAP_TIMER_LINES] = cap_to_lines(IRQ_LINES, TIMER_LINES, RIGHT_W),
         [BOOT_CAP_CLOCK] = { .type = CAP_CLOCK, .rights = RIGHT_ALL },
     };
     for (unsigned i = BOOT_CAP_NULL + 1; i < BOOT_CAP_COUNT; i++) {
-        if (cap_store(table, i, &boot[i], NULL) != KERR_OK) {
+        bool pooled = i == BOOT_CAP_CAPTABLE || i == BOOT_CAP_PROCESS || i == BOOT_CAP_THREAD ||
+                      i == BOOT_CAP_POOL;
+        if (cap_store(table, i, &boot[i], pooled ? &pool->node : NULL) != KERR_OK) {
             kpanic("cannot fill the root task's table");
         }
     }
 
-    /* The root task's own mappings derive from its region capabilities, as every mapping does. */
+    /* The root task's own mappings derive from its frames, as every mapping does. */
     if (process_install(proc, 0, USER_CODE_BASE, USER_CODE_SIZE, RIGHT_R | RIGHT_X,
                         &table->slots[BOOT_CAP_CODE]) != KERR_OK ||
         process_install(proc, 1, USER_DATA_BASE, USER_DATA_SIZE, RIGHT_R | RIGHT_W,

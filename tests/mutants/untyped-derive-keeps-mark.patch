@@ -1,0 +1,18 @@
+Deriving an Untyped leaves the source's watermark where it was,
+so the source goes on making blocks in the memory the derived one has too.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: slot is not derived from its parent
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -92,7 +92,7 @@ static int op_captable(struct thread *t, const struct cap *cap,
+         src.b = 0;
+         err = cap_store(table, arg[1], &src, source);
+         if (err == KERR_OK) {
+-            source->b = untyped_size(source);
++            source->b = source->b;
+         }
+         return err;
+     }

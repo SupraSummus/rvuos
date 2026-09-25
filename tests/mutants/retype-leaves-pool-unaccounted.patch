@@ -1,0 +1,20 @@
+A pool's own node hangs from nothing rather than below the Untyped it was retyped from,
+so the Untyped does not know it made the pool:
+it starts again from its base once its other children go, over the pool,
+and a revoke below it does not destroy the pool.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: memory that may hold kernel objects overlaps a node not above or below it
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -225,7 +225,7 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
+              * so the capability may go and the memory stays accounted for.
+              * It is not zeroed here, which would be work in its size: pool_alloc zeroes each object.
+              */
+-            struct pool *pool = pool_create(at, len, u);
++            struct pool *pool = pool_create(at, len, NULL);
+             c = cap_to_object(&pool->hdr, RIGHT_ALL);
+             parent = &pool->node;
+         } else if (type == CAP_FRAME) {

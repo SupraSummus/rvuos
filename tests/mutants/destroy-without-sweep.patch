@@ -1,18 +1,23 @@
-A destroy that does not sweep the capability tables
+A destroy that does not revoke below the pool's own node
 leaves capabilities naming dead objects,
 and they come back to life when the memory is rebuilt into the same type.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
 Report: dangling object capability
 
-diff --git a/kernel/cap.c b/kernel/cap.c
---- a/kernel/cap.c
-+++ b/kernel/cap.c
-@@ -274,6 +274,7 @@ void cap_revoke_range(uint32_t base, uint32_t size)
- {
-     for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
-         LOOP_WALK(cap_revoke_range);
-+        continue;
-         bool dying = range_contains(base, size, v2p(o));
-         if (o->type == CAP_CAPTABLE) {
-             struct captable *table = (struct captable *)o;
+diff --git a/kernel/pool.c b/kernel/pool.c
+--- a/kernel/pool.c
++++ b/kernel/pool.c
+@@ -85,12 +85,6 @@ bool pool_destroy(struct pool *pool, struct cap *keep, bool preempt)
+             }
+         }
+     }
+-    while (cap_revoke_step_except(&pool->node, keep)) {
+-        LOOP_PAID(pool_destroy, node, "a capability to the pool or to one of its objects");
+-        if (cap_stop_here(preempt)) {
+-            return false;
+-        }
+-    }
+ 
+     /*
+      * The objects go newest first, and the used mark follows,

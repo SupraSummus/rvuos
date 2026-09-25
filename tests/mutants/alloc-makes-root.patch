@@ -1,0 +1,18 @@
+A new object's capability is a root, as it was before pools had nodes,
+so a destroy's revoke below the pool's node does not reach it.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: capability to an object is a root
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -366,7 +366,7 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
+ 
+     /* A new object hangs below the capability it was allocated through, and so below the pool's node. */
+     struct cap c = cap_to_object(obj, RIGHT_ALL);
+-    return cap_store(thread_table(t), dst, &c, slot_node(t, slot));
++    return cap_store(thread_table(t), dst, &c, NULL);
+ }
+ 
+ static int op_process(struct thread *t, const struct cap *cap,

@@ -1,7 +1,7 @@
-A revoke that recurses into each child
+A revoke that recurses into each node before it clears it
 takes a frame per level of the derivation tree,
 and a deep enough tree overflows the kernel's stack.
-It revokes the same nodes and says what pays for its loop,
+It clears the same nodes and says what pays for its loop,
 so only the stack check catches it.
 
 Caught-by: stack-depth
@@ -9,15 +9,11 @@ Caught-by: stack-depth
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -200,7 +200,10 @@ bool cap_revoke_below(struct cap *root, bool preempt)
- 
- void cap_revoke(struct cap *n)
- {
--    cap_revoke_below(n, false);
-+    while (n->child != 0) {
-+        LOOP_PAID(cap_revoke, node, "a child it revokes");
-+        cap_revoke(node(n->child));
-+    }
-     if (n->next != LINK_UP) {
-         detach(n, false);
-     }
+@@ -203,6 +203,7 @@ bool cap_revoke_below(struct cap *root, bool preempt)
+                 return false;
+             }
+         } else {
++            cap_revoke_below(n, false);
+             detach(n, true);
+             clear_node(n);
+         }

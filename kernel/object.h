@@ -26,15 +26,18 @@
  */
 struct obj_header {
     uint8_t type;       /* CAP_* */
-    uint8_t pad[3];
+    uint8_t pad;
+    uint16_t back;      /* how far the object before lies, in OBJ_ALIGN units; 0 for a descriptor */
     paddr_t pool;
 };
 
 /*
  * A capability slot, and a node of the derivation tree; see DESIGN.md, "The derivation tree".
- * For CAP_REGION and CAP_IRQ_LINE the slot is self-contained:
+ * For CAP_FRAME and CAP_IRQ_LINE the slot is self-contained:
  * a is the base address or first line and b the size or count,
  * and there is no object.
+ * For CAP_UNTYPED a is the block, its base and size in one word as NAPOT encodes them,
+ * see untyped_base, and b the watermark, an offset from the base; there is no object either.
  * For every other type a is the object's physical address.
  *
  * child is the first slot derived from this one, by physical address, 0 if none.
@@ -45,7 +48,8 @@ struct obj_header {
  * so that a node leaves its ring without a walk;
  * an only child's is itself, and a root's and an empty slot's is 0.
  * A process's region slots are slots of this type too, CAP_INSTALLED, and leaves of the tree,
- * and so is its table slot, which holds a CAP_CAPTABLE capability.
+ * and so is its table slot, which holds a CAP_CAPTABLE capability,
+ * and so is a pool's own node, CAP_RETYPED, in the pool's descriptor.
  */
 struct cap {
     uint8_t type;
@@ -63,6 +67,12 @@ struct cap {
 
 /* A region installed in a process's region slot. Kernel internal: never in a table. */
 #define CAP_INSTALLED 0x80
+/*
+ * A pool's own node, in its descriptor: what the retype made, below the Untyped.
+ * Every capability to the pool and to its objects lies below it.
+ * a is the pool's address, as for a capability to an object. Kernel internal: never in a table.
+ */
+#define CAP_RETYPED 0x81
 
 #define CAPTABLE_MAX_SLOTS 1024
 
@@ -75,22 +85,27 @@ struct captable {
 /*
  * A pool's descriptor is the first object in its own memory,
  * so the kernel keeps no state about pools outside them
- * except the list head.
- * Objects are bump-allocated and walked in order;
- * obj_size() recovers each object's length from its type.
- *
- * Pools form a tree: a pool's parent is the pool its creator lived in,
- * and a destroy takes every pool below; see DESIGN.md, "Kernel pools and revocation".
+ * except the list head, which only the self-check and the host walk.
+ * Objects are bump-allocated behind it;
+ * obj_size() recovers each object's length from its type, and its back field the one before,
+ * so the destroy takes them newest first and the used mark shrinks as it goes:
+ * a pool half destroyed is a pool with fewer objects.
+ * See DESIGN.md, "Kernel pools and revocation".
  */
 struct pool {
     struct obj_header hdr;
-    paddr_t base;
+    struct cap node;    /* CAP_RETYPED: below the Untyped the pool was retyped from */
     uint32_t size;
-    uint32_t used;      /* bytes handed out, header included */
-    paddr_t next;       /* global list of pools, 0 at the end */
-    paddr_t parent;     /* the pool the creating thread lived in; 0 for the boot pool */
-    uint8_t rights;     /* what the region carried; returned on destroy */
+    uint32_t used;      /* bytes handed out, descriptor included */
+    paddr_t last;       /* the newest object, the descriptor itself when there is none */
+    paddr_t next;       /* list of pools, newest first, 0 at the end */
+    paddr_t prev;       /* 0 at the head */
+    uint16_t sweep;     /* while dying: the next slot of the newest object the destroy clears */
+    uint8_t dying;      /* set by the first step of a destroy; nothing is allocated from then on */
+    uint8_t pad;
 };
+
+static inline paddr_t pool_base(const struct pool *p) { return p->hdr.pool; }
 
 struct pmp_image {
     unsigned count;
@@ -189,7 +204,7 @@ struct irq {
 _Static_assert(sizeof(struct obj_header) == 8, "object layout");
 _Static_assert(sizeof(struct cap) == 24, "object layout");
 _Static_assert(sizeof(struct captable) == 12, "object layout");
-_Static_assert(sizeof(struct pool) == 32, "object layout");
+_Static_assert(sizeof(struct pool) == 56, "object layout");
 _Static_assert(sizeof(struct pmp_image) == 4 + 5 * PMP_MAX_ENTRIES, "object layout");
 _Static_assert(sizeof(struct process) == 8 + 24 * (1 + PROCESS_REGION_SLOTS) + sizeof(struct pmp_image),
                "object layout");
@@ -199,18 +214,54 @@ _Static_assert(sizeof(struct irq) == 24, "object layout");
 
 /*
  * True if a capability of this type names a kernel object.
- * Regions, interrupt lines and the clock name hardware, and the debug capability nothing,
- * so they carry no address to check or to revoke.
+ * Frames, Untypeds, interrupt lines and the clock name hardware, and the debug capability nothing,
+ * so they carry no address to check.
  */
 static inline bool cap_has_object(uint8_t type)
 {
-    return type != CAP_NONE && type != CAP_REGION && type != CAP_IRQ_LINE && type != CAP_DEBUG &&
-           type != CAP_CLOCK && type != CAP_INSTALLED;
+    return type != CAP_NONE && type != CAP_FRAME && type != CAP_UNTYPED && type != CAP_IRQ_LINE &&
+           type != CAP_DEBUG && type != CAP_CLOCK && type != CAP_INSTALLED;
 }
 
+/*
+ * An Untyped's block in one word, as pmpaddr encodes NAPOT but in bytes:
+ * the base with the bits below half the size set.
+ * Every block is at least eight bytes, so the word always ends in a one.
+ */
+static inline uint32_t untyped_block(uint32_t base, uint32_t size) { return base | (size / 2 - 1); }
+static inline uint32_t untyped_size(const struct cap *c) { return (c->a ^ (c->a + 1)) + 1; }
+static inline uint32_t untyped_base(const struct cap *c) { return c->a & ~(untyped_size(c) - 1); }
+/* Where the next retype looks from: the base again once nothing made of it is left. */
+static inline uint32_t untyped_mark(const struct cap *c) { return c->child != 0 ? c->b : 0; }
+
 static inline struct pool *obj_pool(const struct obj_header *o) { return p2v(o->pool); }
+
+_Static_assert(offsetof(struct process, slots) == offsetof(struct process, table) + sizeof(struct cap),
+               "a process's table slot and region slots are one array of nodes");
+
+/*
+ * The nodes of the derivation tree an object holds, as one array, and how many:
+ * a table's slots, a process's table slot and region slots, a pool's own node.
+ * Other objects hold none.
+ */
+static inline struct cap *obj_nodes(struct obj_header *o, uint32_t *count)
+{
+    switch (o->type) {
+    case CAP_CAPTABLE:
+        *count = ((struct captable *)o)->nslots;
+        return ((struct captable *)o)->slots;
+    case CAP_PROCESS:
+        *count = 1 + PROCESS_REGION_SLOTS;
+        return &((struct process *)o)->table;
+    case CAP_POOL:
+        *count = 1;
+        return &((struct pool *)o)->node;
+    default:
+        *count = 0;
+        return NULL;
+    }
+}
 static inline struct pool *pool_next_pool(const struct pool *p) { return p->next ? p2v(p->next) : NULL; }
-static inline struct pool *pool_parent(const struct pool *p) { return p->parent ? p2v(p->parent) : NULL; }
 /* The table a process names capabilities in, or NULL once it was taken. The type test is cap_lookup's. */
 static inline struct captable *process_table(const struct process *p)
 {
@@ -263,23 +314,28 @@ static inline uint8_t rights_to_pmp(uint8_t rights)
 extern struct pool *pool_list;
 
 /*
- * Turn a range into a pool below parent, NULL for the boot pool.
+ * Turn a range into a pool whose node hangs below parent, NULL for a root.
  * The range must be OBJ_ALIGN aligned and large enough for the descriptor.
- * The caller has already checked for overlaps.
  */
-struct pool *pool_create(paddr_t base, uint32_t size, uint8_t rights, struct pool *parent);
+struct pool *pool_create(paddr_t base, uint32_t size, struct cap *parent);
 
-/* True if pool is ancestor or lies below it in the tree. */
-bool pool_under(const struct pool *pool, const struct pool *ancestor);
+/* The pool whose own node this is. */
+static inline struct pool *node_pool(struct cap *n)
+{
+    return (struct pool *)((char *)n - offsetof(struct pool, node));
+}
 
 /*
- * Destroy a pool and every pool below it:
- * clear every capability naming an object in them,
- * wake every thread waiting on a notification in them with an error,
- * and zero their objects.
- * The caller has checked that the running thread does not live in any of them.
+ * Destroy a pool: revoke below its node, leaving keep, a capability to the pool, for last;
+ * then take its objects newest first, clearing the nodes they hold as cap_delete does,
+ * undoing what each left in the rest of the kernel and zeroing it;
+ * then clear keep and the pool's node and zero the descriptor.
+ * keep may be NULL.
+ * With preempt it may stop between two steps for a pending interrupt and return false,
+ * the pool dying and the rest of the work kept in it; see DESIGN.md, "Bounded work".
+ * The caller has checked that the running thread and its table do not live in the pool.
  */
-void pool_destroy(struct pool *pool);
+bool pool_destroy(struct pool *pool, struct cap *keep, bool preempt);
 
 /* Whether pool_alloc would find room for size bytes. */
 bool pool_fits(const struct pool *pool, size_t size);
@@ -297,9 +353,7 @@ struct obj_header *pool_next(struct pool *pool, struct obj_header *obj);
 /*
  * Walk every object in every pool as one sequence,
  * pool descriptors included, since a descriptor is an object like any other.
- * The kernel keeps no indexes, so every question it asks about objects
- * is this walk with a filter;
- * see DESIGN.md, "Kernel pools and revocation" and "Scheduling".
+ * Only the self-check and the host harness walk it; no system call does.
  * An object's pool is its own header, so the walk needs no cursor.
  */
 struct obj_header *object_first(void);
@@ -307,12 +361,6 @@ struct obj_header *object_next(struct obj_header *obj);
 
 /* The live object at a physical address, or NULL. */
 struct obj_header *object_find(paddr_t p);
-
-/* True if [base, base + size) intersects any pool. */
-bool pool_overlaps(uint32_t base, uint32_t size);
-
-/* True if [base, base + size) intersects a region installed in any process. */
-bool installed_overlaps(uint32_t base, uint32_t size);
 
 /* cap.c */
 
@@ -343,15 +391,6 @@ int cap_store_beside(struct captable *table, uint32_t slot, const struct cap *ca
 /* Make an already filled node, an installed region, a child of parent, or a root when parent is NULL. */
 void cap_attach(struct cap *parent, struct cap *node);
 
-/* The node a slot was derived from, or NULL at a root. Walks the sibling ring. */
-struct cap *cap_parent(const struct cap *node);
-
-/*
- * Store cap into n in old's place in the tree, and clear old:
- * what a conversion does to the slot it consumes, once it has revoked below it.
- * n is an empty slot, or old itself.
- */
-void cap_replace(struct cap *n, const struct cap *cap, struct cap *old);
 
 /*
  * Clear a slot. KERR_INVALID_CAP if out of range.
@@ -368,33 +407,36 @@ int cap_clear(struct captable *table, uint32_t slot);
  */
 bool cap_delete(struct cap *node, bool preempt);
 
-/* Clear every node below one, leaving the node itself; preemptible as cap_delete is. */
+/*
+ * Clear every node below one, leaving the node itself; preemptible as cap_delete is.
+ * A pool's own node below it is a pool to destroy, which pool_destroy does.
+ */
 bool cap_revoke_below(struct cap *node, bool preempt);
 
-/* Clear a node and everything below it. */
-void cap_revoke(struct cap *node);
-
 /*
- * Clear every capability, in every table, naming an object in [base, base + size),
- * and every node the range holds, with everything derived from either.
- * This is what a pool destroy revokes with,
- * and it is exact because every capability lives in a CapTable or a Process,
- * every one of those is an object in a pool, and every pool is on the list.
- * Region and IrqLine capabilities elsewhere name no object and are left alone.
- * The range must still be readable: it may hold links the sweep follows.
+ * One step of a revoke that meets no pool's own node, below a pool or a line:
+ * clear the first node below root other than keep, whose children take its place.
+ * False when nothing but keep is left; keep may be NULL.
  */
-void cap_revoke_range(uint32_t base, uint32_t size);
+bool cap_revoke_step_except(struct cap *root, const struct cap *keep);
+static inline bool cap_revoke_step(struct cap *root) { return cap_revoke_step_except(root, NULL); }
+
+/* Whether a preemptible walk that has done a step stops before its next; see intr_pending. */
+bool cap_stop_here(bool preempt);
 
 /* Build a capability to an object. */
 struct cap cap_to_object(struct obj_header *obj, uint8_t rights);
 
-/* Build a region capability. */
-struct cap cap_to_region(uint32_t base, uint32_t size, uint8_t rights);
+/* Build a frame capability. */
+struct cap cap_to_frame(uint32_t base, uint32_t size, uint8_t rights);
+
+/* Build an Untyped capability with its watermark at its base. */
+struct cap cap_to_untyped(uint32_t base, uint32_t size, uint8_t rights);
 
 /* Build an interrupt line capability: count lines from first. */
 struct cap cap_to_lines(uint32_t first, uint32_t count, uint8_t rights);
 
-/* The object behind a non-region capability. */
+/* The object behind a capability that names one. */
 static inline struct obj_header *cap_object(const struct cap *cap)
 {
     return p2v(cap->a);
@@ -478,6 +520,8 @@ void sched_wait(struct thread *t, struct notification *ntfn);
  * with KERR_INVALID_CAP and no bits, because the object is gone,
  * a thread leaves the notification it waits on or the run queue,
  * and an Irq is disarmed and its line masked and unbound.
+ * A pool takes its objects newest first, so a thread goes before its process
+ * and an Irq before its notification.
  */
 void sched_forget(struct obj_header *o);
 
@@ -523,7 +567,7 @@ struct granted_range {
     uint8_t rights;
 };
 #define GRANTED_RANGES 7
-/* The counter's block, read only, which OP_CLOCK_REGION hands out. */
+/* The counter's block, read only, which OP_CLOCK_FRAME hands out. */
 #define GRANT_COUNTER 6
 extern struct granted_range boot_granted[GRANTED_RANGES];
 extern struct pool *boot_pool;
@@ -531,7 +575,7 @@ extern struct pool *boot_pool;
 /*
  * Build the root task.
  * The boot pool range holds the root task's kernel objects;
- * the free range becomes its BOOT_CAP_FREE_RAM region.
+ * the free range becomes its BOOT_CAP_FREE_RAM Untyped.
  */
 struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
                                 paddr_t free_base, uint32_t free_size);

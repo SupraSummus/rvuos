@@ -49,14 +49,14 @@ grep -q 'root: revocation ok' "$log" \
 grep -q 'child: revoked here too' "$log" \
     || fail "revocation did not reach the other process's table"
 grep -q 'root: derivation ok' "$log" \
-    || fail "revoking below a region capability did not take what was derived and installed from it"
+    || fail "revoking below a frame did not take what was derived and installed from it"
 grep -q 'child: lease revoked here too' "$log" \
     || fail "the revoke did not reach the derived capability in the other process's table"
 grep -q 'child: pool made' "$log" || fail "the child could not pool the lent memory"
-grep -q 'child: cannot destroy the pool above' "$log" \
-    || fail "a thread destroyed a pool its own lies below"
+grep -q 'child: cannot destroy the boot pool' "$log" \
+    || fail "a thread destroyed the pool the root task lives in"
 grep -q 'root: cascade ok' "$log" \
-    || fail "destroying the child's pool did not take the pool the child made"
+    || fail "revoking the lent memory did not destroy the pool the child made of it"
 grep -q 'root: timer ok' "$log" \
     || fail "the timer did not wake the only thread from its sleep"
 grep -q 'root: clock ok' "$log" \
