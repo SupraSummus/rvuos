@@ -2,6 +2,9 @@ A timer that fires disarms itself behind the count's back.
 The stall in wfi would go on waiting for a timer that will never fire;
 the count of armed sources is exactly the armed timers and device Irqs.
 
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: the count of armed sources is wrong
+
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c

@@ -2,6 +2,9 @@ A destroy clears the table slot of a process only while the process lives on.
 A dying process stays in the ring of the capability its table was made with,
 which then links into freed memory.
 
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: child link to a slot that is not a live, filled one
+
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c

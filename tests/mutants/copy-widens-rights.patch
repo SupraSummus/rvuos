@@ -3,6 +3,9 @@ instead of narrowing the ones the source capability holds.
 Rights only narrow through copies,
 so a table ends up with a capability wider than the one it came from.
 
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: region capability with rights beyond the grant
+
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c

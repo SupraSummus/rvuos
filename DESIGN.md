@@ -1275,19 +1275,26 @@ so an input that was unique for an earlier kernel
 and covers nothing new today is dropped rather than kept for its history.
 `make mutants` plants bugs in the kernel one at a time,
 each a patch under `tests/mutants/` headed by the invariant it breaks,
-and requires the host replay to catch each with an invariant report,
+and requires a seed on a host harness to catch each with an invariant report,
 or, for a mutant of the stack, `tools/stack-depth.py` to refuse the link,
 and for a mutant of the bounded work, `tools/loop-bounds.py`
-or the counting harness `fuzz-work`, whose report is an invariant report too;
-it is also the check that a minimisation lost nothing,
-and an input that some mutant needs but coverage does not keep
-belongs among the seeds under a name.
-The QEMU checks run on every mutant too and what they catch is reported,
-so that their strength is known without being required:
+or the counting harness `fuzz-work`, whose report is an invariant report too.
+An input that some mutant needs thus belongs among the seeds under a name,
+since the corpus keeps it only while coverage does.
+The header also lists exactly the checks that catch the mutant
+and the invariant reports the seeds give on it,
+and the run fails where the checks disagree:
+a check that stops catching a mutant shows, and so does one that starts to,
+or a seed that catches it by another invariant than the one it plants.
+The list of checks is also what shows a minimisation that lost something.
+The QEMU checks are in the list too, so that their strength is known,
+but a mutant only they catch counts as missed:
 `make test` runs one scenario with the self-check off
 and catches a bug only when the transcript changes;
 `make qemu-replay` catches one when the default machine's self-check reports it
 or the two traces differ.
+QEMU's clock counts instructions, not the host's time,
+so a run takes the same path however many run beside it.
 
 **QEMU** (`make test`, `make qemu-replay`).
 The kernel has no console, so a transcript reaches QEMU's UART two ways:

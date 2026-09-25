@@ -2,6 +2,9 @@ A timer that fires stays armed.
 It would signal again on every later tick;
 after a tick no armed timer is due.
 
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: armed timer is due
+
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c

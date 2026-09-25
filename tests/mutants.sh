@@ -7,14 +7,27 @@
 # The patch applies with one line of context, so edits near the mutated line
 # do not stale it; a change to the line itself makes the mutant broken.
 #
-# Each mutant runs against every check of `make check`.
-# host-test must catch it with an invariant report: that is the check on the corpus.
-# A mutant of the kernel's stack is caught instead when tools/stack-depth.py
-# refuses to link the kernel; no replay can see a stack that is too small.
-# A mutant of its bounded work is caught when tools/loop-bounds.py refuses:
-# a replay runs too few objects for a walk to show.
-# What test and qemu-replay catch is reported, and skipped when QEMU is not installed.
-# A mutant that does not apply or does not build is broken, not caught.
+# Below the prose, the header says what the checks do on the mutant:
+#
+#   Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+#   Report: the count of armed sources is wrong
+#
+# Caught-by is exactly the checks that catch it, in the order they run:
+# stack-depth loop-bounds fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay.
+# Report is exactly the invariant reports the seeds give on the host harnesses,
+# one per line with the numbers taken out;
+# the corpus changes with every minimisation, so its reports are left out.
+# A mutant whose header the checks disagree with fails, and the run prints what they say,
+# which is where a new mutant takes its lines from.
+#
+# stack-depth and loop-bounds catch a mutant by refusing the link;
+# a kernel they refuse still runs on the host harnesses, but not on QEMU.
+# The host harnesses catch a mutant with an invariant report, and test and qemu-replay by failing.
+# The link or a seed on a host harness must catch every mutant:
+# the corpus alone would lose it at the next minimisation, and QEMU alone is not enough.
+# Without QEMU, test and qemu-replay are left out of the header's list too.
+# A mutant that does not apply or does not build is broken, not caught,
+# and so is one that fails a host harness without an invariant report.
 #
 # The unmutated tree is built once and must pass host-test.
 # Each mutant runs in a copy of it with the timestamps kept,
@@ -28,57 +41,104 @@ set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 logs=$root/build/mutants
+harnesses="fuzz fuzz-pmp8 fuzz-grain32 fuzz-work"
 
 # Run one make target in a mutant's tree; the log goes under build/mutants/.
 run() {
-    (cd "$tree" && make -s "$2" REPLAY_JOBS=1 >"$logs/$1.$2.log" 2>&1)
+    (cd "$tree" && make -s "$1" REPLAY_JOBS=1 >"$logs/$name.$1.log" 2>&1)
 }
 
-# Run one mutant and leave its result, caught, missed or broken, in the work directory.
+# What the mutant's header lines of one name say, a line for each.
+header() {
+    sed -n "/^diff --git/q; s/^$1: *//p" "$patch"
+}
+
+broken() {
+    printf 'mutant %s: %s\n%s\n' "$name" "$1" "$2" >&2
+    echo broken >"$work/result/$name"
+}
+
+# Replay the seeds one by one on a host harness, noting their reports,
+# then the corpus at once; the harness runs in the tree, where libFuzzer leaves what failed.
+replay() {
+    bin=$tree/build/host/$1
+    hit=""
+    for seed in "$tree"/tests/seeds/*; do
+        (cd "$tree" && "$bin" --verbose "$seed") >"$out" 2>&1 && continue
+        line=$(grep -o 'invariant violated: .*' "$out" | head -1 | sed 's/^invariant violated: //;
+            s/ 0x[0-9a-f]\{8\}//g; s/:[0-9][0-9]*//g; s/\<[0-9][0-9]*\>/N/g')
+        if [ -z "$line" ]; then
+            broken "$1 fails seed ${seed##*/} without an invariant report" "$(tail -5 "$out")"
+            return 1
+        fi
+        reports="$reports$line
+"
+        hit=yes
+    done
+    if ! (cd "$tree" && "$bin" -runs=0 tests/corpus) >"$logs/$name.$1.log" 2>&1; then
+        if ! grep -q 'invariant violated' "$logs/$name.$1.log"; then
+            broken "$1 fails the corpus without an invariant report" "$(tail -5 "$logs/$name.$1.log")"
+            return 1
+        fi
+        hit=yes
+    fi
+    [ -z "$hit" ] || caught="$caught $1"
+}
+
+# Run one mutant and leave its result, caught, differs, missed or broken, in the work directory.
 # Each message is one write, so parallel mutants do not interleave.
 mutant() {
     name=$1
     tree=$work/tree-$name
-    result=$work/result/$name
     patch=$root/tests/mutants/$name.patch
+    out=$work/out-$name
     cp -a "$work/base" "$tree"
-    if ! (cd "$tree" && git apply -C1 "$patch") >"$logs/$name.apply.log" 2>&1; then
-        printf 'mutant %s: does not apply\n%s\n' "$name" "$(cat "$logs/$name.apply.log")" >&2
-        echo broken >"$result"
+    if ! (cd "$tree" && git apply -C1 "$patch") >"$out" 2>&1; then
+        broken "does not apply" "$(cat "$out")"
         return
     fi
-    if ! run "$name" all; then
+    caught=""
+    reports=""
+    linked=yes
+    if ! run all; then
+        linked=no
         for tool in stack-depth loop-bounds; do
-            if grep -q "^$tool: " "$logs/$name.all.log"; then
-                echo caught >"$result"
-                echo "mutant $name: $tool caught"
-                return
-            fi
+            if grep -q "^$tool: " "$logs/$name.all.log"; then caught="$caught $tool"; fi
         done
-        printf 'mutant %s: does not build\n%s\n' "$name" "$(tail -5 "$logs/$name.all.log")" >&2
-        echo broken >"$result"
+        if [ -z "$caught" ]; then
+            broken "does not build" "$(tail -5 "$logs/$name.all.log")"
+            return
+        fi
+    fi
+    if ! run host-harnesses; then
+        broken "host harnesses do not build" "$(tail -5 "$logs/$name.host-harnesses.log")"
         return
     fi
+    for h in $harnesses; do
+        replay "$h" || return
+    done
+    if [ -n "$qemu" ] && [ $linked = yes ]; then
+        run test || caught="$caught test"
+        run qemu-replay || caught="$caught qemu-replay"
+    fi
+    caught=${caught# }
+    reports=$(printf '%s' "$reports" | sort -u)
 
-    if run "$name" host-test; then
-        host=missed
-    elif grep -q 'invariant violated' "$logs/$name.host-test.log"; then
-        host=caught
-    else
-        printf 'mutant %s: host-test failed without an invariant report\n%s\n' \
-            "$name" "$(tail -5 "$logs/$name.host-test.log")" >&2
-        echo broken >"$result"
+    want=$(header Caught-by)
+    [ -n "$qemu" ] || want=$(echo "$want" | sed 's/ *\<test\>//; s/ *qemu-replay//; s/^ //')
+    if [ -z "$reports" ] && [ "$linked" = yes ]; then
+        result=missed
+    elif [ "$want" = "$caught" ] && [ "$(header Report | sort -u)" = "$reports" ]; then
+        echo caught >"$work/result/$name"
+        echo "mutant $name: $caught"
         return
-    fi
-    echo "$host" >"$result"
-
-    if [ -n "$qemu" ]; then
-        if run "$name" test; then qemu_test=missed; else qemu_test=caught; fi
-        if run "$name" qemu-replay; then replay=missed; else replay=caught; fi
-        echo "mutant $name: host-test $host, test $qemu_test, qemu-replay $replay"
     else
-        echo "mutant $name: host-test $host"
+        result=differs
     fi
+    echo $result >"$work/result/$name"
+    printf 'mutant %s: the header says\n%s\nand the checks say\n%s\n' "$name" \
+        "$(echo "  Caught-by: $want"; header Report | sed 's/^/  Report: /')" \
+        "$(echo "  Caught-by: $caught"; [ -z "$reports" ] || echo "$reports" | sed 's/^/  Report: /')"
 }
 
 # xargs calls the script back once per mutant, with the state in the environment.
@@ -112,7 +172,7 @@ trap 'rm -rf "$work"' EXIT
 mkdir -p "$logs" "$work/base" "$work/result"
 
 qemu=$(command -v qemu-system-riscv32 || true)
-[ -n "$qemu" ] || echo "qemu-system-riscv32 not found: test and qemu-replay are skipped" >&2
+[ -n "$qemu" ] || echo "qemu-system-riscv32 not found: test and qemu-replay are left out" >&2
 
 cp -r "$root/kernel" "$root/host" "$root/include" "$root/user" "$root/Makefile" "$root/tests" \
     "$root/tools" "$root/DESIGN.md" "$work/base/"
@@ -126,10 +186,12 @@ printf '%s\n' $names | xargs -P "$jobs" -I{} "$0" --mutant {}
 
 broken=""
 missed=""
+differs=""
 for name in $names; do
     case $(cat "$work/result/$name" 2>/dev/null || echo broken) in
         caught) ;;
         missed) missed="$missed $name" ;;
+        differs) differs="$differs $name" ;;
         *) broken="$broken $name" ;;
     esac
 done
@@ -140,7 +202,11 @@ if [ -n "$broken" ]; then
     status=1
 fi
 if [ -n "$missed" ]; then
-    echo "mutants the host replay missed:$missed" >&2
+    echo "mutants neither the link nor a seed catches:$missed" >&2
+    status=1
+fi
+if [ -n "$differs" ]; then
+    echo "mutants whose header the checks disagree with:$differs" >&2
     status=1
 fi
 exit $status

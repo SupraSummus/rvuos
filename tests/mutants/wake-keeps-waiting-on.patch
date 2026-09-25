@@ -2,6 +2,9 @@ A thread woken from a notification keeps naming it.
 Only a waiting thread names a notification;
 a ready one that still does breaks the thread-state invariant.
 
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: runnable thread waits on something
+
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c

@@ -1,6 +1,9 @@
 A pool that forgets who created it hangs from nothing, not from the boot pool.
 The pool tree is then a forest, and a destroy above it does not reach it.
 
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: only the boot pool has no parent
+
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 index caf6e35..ec5e9c7 100644
 --- a/kernel/syscall.c

@@ -2,6 +2,9 @@ OP_IRQ_SET with zero bits disarms the Irq but leaves the line unmasked.
 The next interrupt would find nothing armed to signal;
 the controller forwards a line exactly while an Irq is armed on it.
 
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: controller forwards a line nothing is armed on
+
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 index 4e1dd1f..bb113a2 100644
 --- a/kernel/syscall.c

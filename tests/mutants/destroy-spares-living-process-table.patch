@@ -2,6 +2,9 @@ A destroy clears the table slot of a process only when the process dies with it.
 A process whose table went with another pool keeps naming the freed table;
 a process's table slot is empty or names a live table.
 
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: process's table slot names no live table
+
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c

@@ -2,6 +2,9 @@ The tick hands the processor on without putting the preempted thread back in the
 The thread would stay ready and never run again;
 every ready thread but the running one is on the run queue.
 
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: a waiting or ready thread is on no queue
+
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c

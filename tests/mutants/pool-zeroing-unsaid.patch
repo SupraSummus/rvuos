@@ -3,6 +3,8 @@ and no longer says so where it calls memset,
 so the walk in the table of "Bounded work" hides behind a call.
 It zeroes the same memory, so only the loop check catches it.
 
+Caught-by: loop-bounds
+
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c

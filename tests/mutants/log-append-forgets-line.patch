@@ -2,6 +2,9 @@ A byte appended to the log does not raise its line.
 A reader armed on the line, which was low, never hears of the byte;
 an Irq armed on the log's line has nothing untaken behind it.
 
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: armed log irq while the log has bytes untaken
+
 diff --git a/kernel/klog.c b/kernel/klog.c
 index 722213d..e8ea9a8 100644
 --- a/kernel/klog.c

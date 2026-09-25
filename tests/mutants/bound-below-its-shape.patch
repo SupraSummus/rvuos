@@ -2,6 +2,9 @@ The loop that rebuilds a process's PMP image claims a bound of four,
 and its own condition runs it over all eight region slots.
 The code is the same; the link sees the claim is false from the loop's shape alone.
 
+Caught-by: loop-bounds fuzz-work
+Report: the loop at kernel/process.c ran N times on one entry, beyond its bound of N
+
 diff --git a/kernel/process.c b/kernel/process.c
 --- a/kernel/process.c
 +++ b/kernel/process.c

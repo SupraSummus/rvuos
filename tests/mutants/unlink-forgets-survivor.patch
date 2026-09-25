@@ -1,6 +1,9 @@
 A destroy that drops from the list the pools that stay before the first one it takes.
 They escape every later sweep and overlap check.
 
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: dangling object capability
+
 diff --git a/kernel/pool.c b/kernel/pool.c
 --- a/kernel/pool.c
 +++ b/kernel/pool.c

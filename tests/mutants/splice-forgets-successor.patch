@@ -2,6 +2,9 @@ A copy, or a delete's children, put after a slot
 without the successor's predecessor moving to the last of them
 leaves that link on a node whose next is no longer the successor.
 
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: predecessor's next is not the slot
+
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c

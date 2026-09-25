@@ -2,6 +2,9 @@ A resumed thread is made ready but not put on the run queue.
 It would never get the processor;
 every ready thread but the running one is on the run queue.
 
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: a waiting or ready thread is on no queue
+
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c

@@ -1,6 +1,9 @@
 A revoke that stops between taking a node out of the ring and clearing it
 leaves a filled slot no ring holds, whose links lead into the tree.
 
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: parent's ring does not reach the slot
+
 diff --git a/kernel/cap.c b/kernel/cap.c
 index c22b037..304e18c 100644
 --- a/kernel/cap.c

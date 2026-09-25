@@ -2,6 +2,9 @@ A carve that checks the block's size but not where it starts
 hands out a range no single NAPOT entry describes:
 a power of two at an offset that is not a multiple of it.
 
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: region capability is not a NAPOT block
+
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 index 26e97d5..0598590 100644
 --- a/kernel/syscall.c

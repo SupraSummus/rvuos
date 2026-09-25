@@ -2,6 +2,10 @@ A thread that joins a ring is not linked from the newest thread before it.
 A signal or a switch would never reach it, and the ring would not close;
 a queue is a ring linked both ways.
 
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: a waiting or ready thread is on no queue
+Report: queue is not linked back
+
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c

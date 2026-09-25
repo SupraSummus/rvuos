@@ -3,6 +3,9 @@ The next signal would wake a thread that is no longer waiting,
 and the next switch run one that is already running;
 a queue holds only threads in the state it is for.
 
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: queue holds a thread it is not for
+
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
