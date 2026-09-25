@@ -5,6 +5,7 @@
 
 #include "kernel.h"
 #include "object.h"
+#include "trap.h"
 
 int cap_lookup(struct captable *table, uint32_t slot, struct cap *out)
 {
@@ -149,30 +150,16 @@ static void clear_node(struct cap *n)
 }
 
 /*
- * Take a node out of its parent's ring.
+ * Take a node that has a parent out of its parent's ring.
  * With adopt, what was derived from it takes its place in the ring,
  * so its parent's ring keeps the whole of the derivation below;
- * without, the node's children are gone already.
- * Below a root there is no ring: adopted children become roots themselves.
+ * without, the node's children stay below it.
  */
 static void detach(struct cap *n, bool adopt)
 {
-    uint32_t first = adopt ? n->child : 0;
-
-    if (n->next == LINK_UP) {
-        for (uint32_t link = first; link != 0 && !(link & LINK_UP);) {
-            LOOP_PAID(detach, link, "a child below a root, which becomes a root itself");
-            struct cap *c = node(link);
-            link = c->next;
-            c->next = LINK_UP;
-            c->prev = 0;
-        }
-        return;
-    }
-
     /* The children go right after n, so n leaves the ring as a leaf would. */
-    if (first != 0) {
-        splice_after(n, node(first), node(node(first)->prev));
+    if (adopt && n->child != 0) {
+        splice_after(n, node(n->child), node(node(n->child)->prev));
     }
     struct cap *pred = node(n->prev);
     ring_next(n)->prev = n->prev;
@@ -184,53 +171,67 @@ static void detach(struct cap *n, bool adopt)
     }
 }
 
-void cap_revoke_below(struct cap *root)
+/* Whether a preemptible walk that has done a step stops before its next; see intr_pending. */
+static bool stop_here(bool preempt)
+{
+    return preempt && intr_pending();
+}
+
+bool cap_revoke_below(struct cap *root, bool preempt)
 {
     /*
-     * Post-order, with no stack: descend to a leaf, clear it, move to its next;
-     * a link up says every child of that parent is cleared,
-     * so the parent goes too, and the walk continues with the parent's next.
-     * The root's own ring closes at the root, which is where the walk stops.
+     * The first child goes and its children take its place at the front of the ring,
+     * so every step clears one node in constant time,
+     * the tree is whole between any two steps,
+     * and the next node to clear is always the root's first child:
+     * a walk that stops keeps its progress in the tree and nowhere else.
      */
-    uint32_t at = root->child;
-    while (at != 0) {
-        /* A node is passed going down and cleared going up: two steps for each it clears. */
+    while (root->child != 0) {
         LOOP_PAID(cap_revoke_below, node, "a node it clears");
-        struct cap *n = node(at);
-        if (at & LINK_UP) {
-            if (n == root) {
-                break;
-            }
-            at = n->next;
-            clear_node(n);
-            continue;
-        }
-        if (n->child != 0) {
-            at = n->child;
-            continue;
-        }
-        at = n->next;
+        struct cap *n = node(root->child);
+        detach(n, true);
         clear_node(n);
+        if (root->child != 0 && stop_here(preempt)) {
+            return false;
+        }
     }
-    root->child = 0;
+    return true;
 }
 
 void cap_revoke(struct cap *n)
 {
-    cap_revoke_below(n);
-    detach(n, false);
+    cap_revoke_below(n, false);
+    if (n->next != LINK_UP) {
+        detach(n, false);
+    }
     clear_node(n);
 }
 
-void cap_delete(struct cap *n)
+bool cap_delete(struct cap *n, bool preempt)
 {
-    detach(n, true);
+    if (n->next != LINK_UP) {
+        detach(n, true);
+        clear_node(n);
+        return true;
+    }
+    /* Below a root there is no ring to hand the children to: each becomes a root, one step at a time. */
+    while (n->child != 0) {
+        LOOP_PAID(cap_delete, link, "a child below a root, which becomes a root itself");
+        struct cap *c = node(n->child);
+        detach(c, false);
+        c->next = LINK_UP;
+        c->prev = 0;
+        if (n->child != 0 && stop_here(preempt)) {
+            return false;
+        }
+    }
     clear_node(n);
+    return true;
 }
 
 void cap_replace(struct cap *n, const struct cap *cap, struct cap *old)
 {
-    cap_revoke_below(old);
+    /* Its caller revoked below old before it built what goes in its place. */
     if (n == old) {
         /* Into the consumed slot itself, which keeps its place in the ring. */
         uint32_t next = n->next;
@@ -243,7 +244,7 @@ void cap_replace(struct cap *n, const struct cap *cap, struct cap *old)
     }
     *n = *cap;
     attach_beside(old, n);
-    cap_delete(old);
+    cap_delete(old, false);
 }
 
 int cap_clear(struct captable *table, uint32_t slot)
@@ -251,8 +252,8 @@ int cap_clear(struct captable *table, uint32_t slot)
     if (slot >= table->nslots) {
         return KERR_INVALID_CAP;
     }
-    if (table->slots[slot].type != CAP_NONE) {
-        cap_delete(&table->slots[slot]);
+    if (table->slots[slot].type != CAP_NONE && !cap_delete(&table->slots[slot], true)) {
+        return KERR_PREEMPTED;
     }
     return KERR_OK;
 }

@@ -79,14 +79,18 @@ void pool_destroy(struct pool *pool)
     }
 }
 
+bool pool_fits(const struct pool *pool, size_t size)
+{
+    return align_up((uint32_t)size, OBJ_ALIGN) <= pool->size - pool->used;
+}
+
 void *pool_alloc(struct pool *pool, uint8_t type, size_t size)
 {
-    uint32_t len = align_up((uint32_t)size, OBJ_ALIGN);
-    if (len > pool->size - pool->used) {
+    if (!pool_fits(pool, size)) {
         return NULL;
     }
     struct obj_header *obj = p2v(pool->base + pool->used);
-    pool->used += len;
+    pool->used += align_up((uint32_t)size, OBJ_ALIGN);
     /* Pool memory is zeroed on creation and never reused before destroy. */
     obj->type = type;
     obj->pool = pool->base;

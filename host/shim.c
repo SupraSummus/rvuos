@@ -78,6 +78,12 @@ unsigned intr_wait(void)
     kpanic("the host build has no clock and no devices to wait for");
 }
 
+/* The worst case: every preemptible call stops after its first step. */
+bool intr_pending(void)
+{
+    return true;
+}
+
 /* The interrupt controller as far as the kernel touches it: which lines it forwards. */
 static uint32_t forwarded[(IRQ_LINES + 31) / 32];
 
@@ -230,14 +236,64 @@ uint32_t host_syscall(const struct replay_record *c)
     f->regs[REG_A5] = 0;
     f->regs[REG_A6] = 0;
     f->mcause = 8;
+    /*
+     * A preempted call leaves the thread at its ecall, which it executes again
+     * once the interrupt is taken; on the host that takes nothing, and no other thread runs.
+     */
+    uint32_t mepc;
+    do {
+        mepc = f->mepc;
+        unsigned before[UNITS];
+        host_units(before);
 #ifdef RVUOS_WORK
-    work_begin();
+        work_begin();
 #endif
-    syscall_dispatch(current);
+        syscall_dispatch(current);
 #ifdef RVUOS_WORK
-    work_end();
+        work_end();
 #endif
+        /* A step of a preemptible walk takes a node or a link away, and it stops only after one. */
+        unsigned after[UNITS];
+        host_units(after);
+        if (f->mepc == mepc && after[UNIT_NODE] >= before[UNIT_NODE] &&
+            after[UNIT_LINK] >= before[UNIT_LINK]) {
+            fprintf(stderr, "invariant violated: a call was preempted before it took anything away\n");
+            abort();
+        }
+    } while (f->mepc == mepc);
     return f->regs[REG_A0];
+}
+
+static void count_node(const struct cap *c, unsigned out[UNITS])
+{
+    if (c->type != CAP_NONE) {
+        out[UNIT_NODE]++;
+        if (c->next != LINK_UP) {
+            out[UNIT_LINK]++;
+        }
+    }
+}
+
+void host_units(unsigned out[UNITS])
+{
+    memset(out, 0, UNITS * sizeof(out[0]));
+    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
+        out[UNIT_OBJECT]++;
+        if (o->type == CAP_CAPTABLE) {
+            struct captable *t = (struct captable *)o;
+            for (uint32_t i = 0; i < t->nslots; i++) {
+                count_node(&t->slots[i], out);
+            }
+        } else if (o->type == CAP_PROCESS) {
+            struct process *p = (struct process *)o;
+            count_node(&p->table, out);
+            for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
+                count_node(&p->slots[i], out);
+            }
+        } else if (o->type == CAP_THREAD && ((struct thread *)o)->state == THREAD_WAITING) {
+            out[UNIT_WAITER]++;
+        }
+    }
 }
 
 /* The actor number of the running thread; 0 when it is not a driver thread. */

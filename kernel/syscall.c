@@ -11,12 +11,6 @@
 
 #define POOL_MIN_SIZE 64
 
-/*
- * Not a status code: the thread blocked and is not returning yet.
- * Its registers are left alone until something wakes it.
- */
-#define KERR_BLOCKED (-1)
-
 bool debug_trace;
 
 /* The slot itself, as a node of the derivation tree, once cap_lookup has vetted the index. */
@@ -88,8 +82,7 @@ static int op_captable(struct thread *t, const struct cap *cap,
         if (err != KERR_OK) {
             return err;
         }
-        cap_revoke_below(&table->slots[arg[1]]);
-        return KERR_OK;
+        return cap_revoke_below(&table->slots[arg[1]], true) ? KERR_OK : KERR_PREEMPTED;
     }
     default:
         return KERR_WRONG_TYPE;
@@ -144,13 +137,21 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
                 return err;
             }
         }
+        /*
+         * The region's derivation goes before anything is built,
+         * so a call stopped on the way finds nothing built when it is made again.
+         * Nothing below the region is installed or a pool, or the checks above would have refused.
+         */
+        if (!cap_revoke_below(slot_node(t, slot), true)) {
+            return KERR_PREEMPTED;
+        }
         /* From here on the memory is the kernel's. */
         CALL_WALK(memset);
         memset(p2v(base), 0, size);
         /* The new pool hangs below the caller's own, and dies with it. */
         struct pool *pool = pool_create(base, size, cap->rights, obj_pool(&t->hdr));
         struct cap pc = cap_to_object(&pool->hdr, RIGHT_ALL);
-        /* The pool capability takes the region's place in the tree; the region and its derivation go. */
+        /* The pool capability takes the region's place in the tree, and the region goes. */
         cap_replace(slot_node(t, arg[1]), &pc, slot_node(t, slot));
         return KERR_OK;
     }
@@ -497,16 +498,20 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
                 return err;
             }
         }
-        struct irq *irq = pool_alloc(pool, CAP_IRQ, sizeof(*irq));
-        if (irq == NULL) {
+        /* Room is checked before the line's derivation goes, since what a revoke took stays taken. */
+        if (!pool_fits(pool, sizeof(struct irq))) {
             return KERR_NO_MEMORY;
         }
+        if (!cap_revoke_below(slot_node(t, slot), true)) {
+            return KERR_PREEMPTED;
+        }
+        struct irq *irq = pool_alloc(pool, CAP_IRQ, sizeof(*irq));
         irq->ntfn = v2p(ntfn);
         irq->line = first;
         line_irq[first] = v2p(irq);
         /* Its bits are zero, so it is disarmed, and its line stays masked as every line does until a set. */
         struct cap ic = cap_to_object(&irq->hdr, RIGHT_ALL);
-        /* The Irq capability takes the line's place in the tree; the line and its derivation go. */
+        /* The Irq capability takes the line's place in the tree, and the line goes. */
         cap_replace(slot_node(t, arg[3]), &ic, slot_node(t, slot));
         return KERR_OK;
     }
@@ -630,7 +635,7 @@ void syscall_dispatch(struct thread *t)
         in[i] = arg[i] = f->regs[REG_A0 + i];
     }
 
-    /* ecall is a 4-byte instruction; resume after it. */
+    /* ecall is a 4-byte instruction; resume after it, unless the call is preempted. */
     f->mepc += 4;
 
     /* The call that turns tracing on is not itself traced. */
@@ -639,7 +644,16 @@ void syscall_dispatch(struct thread *t)
     /* A wake is traced after the line of the call that caused it; no bits means none. */
     trace_wake_bits = 0;
     int err = dispatch(t, op, arg[0], arg);
-    if (err != KERR_BLOCKED) {
+    if (err == KERR_PREEMPTED) {
+        /*
+         * Back to the ecall, with the registers as the call found them.
+         * The mret takes the pending interrupt at once,
+         * and the thread makes the call again when it next runs.
+         * The call is traced once, when it finishes.
+         */
+        f->mepc -= 4;
+        traced = false;
+    } else if (err != KERR_BLOCKED) {
         f->regs[REG_A0] = (uint32_t)err;
         for (unsigned i = 1; i < 5; i++) {
             LOOP_BOUND(4);

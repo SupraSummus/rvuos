@@ -740,6 +740,19 @@ Operation codes are a single flat numbering across all types,
 so invoking a `Timer` operation on a `Region` is `KERR_WRONG_TYPE`,
 not `KERR_INVALID_ARG`.
 
+A call whose work grows with the derivation tree can be interrupted and made again:
+`OP_CAP_REVOKE`, `OP_CAP_DELETE` of a root with capabilities below it,
+`OP_REGION_TO_POOL` and `OP_IRQ_BIND`.
+When the tick or a device interrupt comes due while such a call works,
+the kernel stops it between two capabilities
+and resumes the thread at its `ecall` with every register as it was,
+so the thread makes the same call again when it next runs,
+and the call goes on from what it had already cleared.
+A program sees no difference but time,
+unless another thread changes the same capabilities in between:
+the call made again checks everything afresh
+and may fail, with what it already revoked staying revoked.
+
 ### 6.2 Status codes
 
 | Code | Name | Meaning |
@@ -805,7 +818,8 @@ The new capability hangs below the source.
 
 **`OP_CAP_DELETE` (4).**
 `a1` = slot in the invoked table.
-Clears it; what hung below it now hangs below the slot's parent.
+Clears it; what hung below it now hangs below the slot's parent,
+or, when the slot is a root, each becomes a root, and the call may be made again, section 6.1.
 Clearing an empty slot succeeds.
 Deleting a `Region` capability does not uninstall the region anywhere.
 
@@ -814,6 +828,7 @@ Deleting a `Region` capability does not uninstall the region anywhere.
 Clears everything below it, section 5.2, and leaves the slot.
 Regions installed from capabilities below it are uninstalled,
 and threads of those processes lose access at once.
+The call may be made again, section 6.1.
 
 ### 6.5 Operations on `Region`
 
@@ -841,6 +856,8 @@ and the `KernelPool` capability takes its place in the tree.
 The requirements of section 5.5 apply:
 alignment and minimum size, RAM only, not the log (`KERR_INVALID_ARG`),
 no overlap with a pool or an installed region (`KERR_OVERLAP`).
+They are checked before anything is revoked,
+and the revoke may make the call again, section 6.1.
 The new pool's parent is the pool the calling thread lives in.
 
 ### 6.6 Operations on `KernelPool`
@@ -938,8 +955,11 @@ Needs `RIGHT_W`, and the capability must name exactly one line (`KERR_INVALID_AR
 `a2` = slot of the `Notification` capability the `Irq` signals, with `RIGHT_W`,
 which must lie in that pool,
 `a3` = destination slot for the `Irq` capability, which may be the invoked slot.
-The invoked slot is cleared.
-`KERR_OVERLAP` if an `Irq` is already bound to the line.
+The invoked slot is cleared with everything below it.
+`KERR_OVERLAP` if an `Irq` is already bound to the line,
+`KERR_NO_MEMORY` if the pool has no room for it,
+both checked before anything is revoked,
+and the revoke may make the call again, section 6.1.
 The new `Irq` is masked until `OP_IRQ_SET` arms it.
 
 ### 6.12 Operations on `Irq`

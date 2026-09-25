@@ -11,10 +11,11 @@
  *
  * After every call the harness checks:
  * a bounded loop ran no more than its bound on any one entry,
- * and the steps of the loops paid for in each unit are at most twice
- * what the call took away of it, plus what a call may make of it on the way;
- * twice, since a revoke passes a node going down and clears it going up.
- * What there is of each unit is counted over every object, as the self-check counts.
+ * the steps of the loops paid for in each unit are at most twice
+ * what the call took away of it, plus what a call may make of it on the way,
+ * twice, since a pool destroy may pass a capability to the pool on its way up to the region
+ * and clear it again in the sweep.
+ * What there is of each unit is counted over every object by host_units.
  */
 
 #include <stdarg.h>
@@ -30,11 +31,11 @@
 /*
  * What one call may make of a unit while it takes others away:
  * OP_REGION_TO_POOL makes a pool and the capability in the region's place,
- * one object and one node, as it revokes what was derived from the region.
+ * one object and one node, as it revokes what was derived from the region,
+ * and OP_POOL_DESTROY makes the region it gives back.
  */
 #define WORK_SLACK 1
 
-enum { UNIT_NODE, UNIT_LINK, UNIT_OBJECT, UNIT_WAITER, UNITS };
 static const char *const unit_names[UNITS] = { "node", "link", "object", "waiter" };
 
 struct work_frame {
@@ -121,50 +122,17 @@ void work_step(const struct work_site *s)
     }
 }
 
-static void count_node(const struct cap *c, unsigned out[UNITS])
-{
-    if (c->type != CAP_NONE) {
-        out[UNIT_NODE]++;
-        if (c->next != LINK_UP) {
-            out[UNIT_LINK]++;
-        }
-    }
-}
-
-/* What there is of each unit, over every object of every pool. */
-static void potential(unsigned out[UNITS])
-{
-    memset(out, 0, UNITS * sizeof(out[0]));
-    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
-        out[UNIT_OBJECT]++;
-        if (o->type == CAP_CAPTABLE) {
-            struct captable *t = (struct captable *)o;
-            for (uint32_t i = 0; i < t->nslots; i++) {
-                count_node(&t->slots[i], out);
-            }
-        } else if (o->type == CAP_PROCESS) {
-            struct process *p = (struct process *)o;
-            count_node(&p->table, out);
-            for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
-                count_node(&p->slots[i], out);
-            }
-        } else if (o->type == CAP_THREAD && ((struct thread *)o)->state == THREAD_WAITING) {
-            out[UNIT_WAITER]++;
-        }
-    }
-}
-
 void work_begin(void)
 {
     depth = 0;
     memset(paid, 0, sizeof(paid));
-    potential(before);
+    host_units(before);
 }
 
 void work_end(void)
 {
     unsigned after[UNITS];
-    potential(after);
+    host_units(after);
     for (unsigned u = 0; u < UNITS; u++) {
         unsigned gone = before[u] > after[u] ? before[u] - after[u] : 0;
         if (paid[u] > 2 * (gone + WORK_SLACK)) {

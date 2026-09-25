@@ -1,0 +1,18 @@
+A revoke that asks for an interrupt before its first step
+may stop having taken nothing away,
+and the call it stops starts again from where it began, as often as an interrupt is pending.
+
+diff --git a/kernel/cap.c b/kernel/cap.c
+index c22b037..6881c90 100644
+--- a/kernel/cap.c
++++ b/kernel/cap.c
+@@ -188,6 +188,9 @@ bool cap_revoke_below(struct cap *root, bool preempt)
+      */
+     while (root->child != 0) {
+         LOOP_PAID(cap_revoke_below, node, "a node it clears");
++        if (stop_here(preempt)) {
++            return false;
++        }
+         struct cap *n = node(root->child);
+         detach(n, true);
+         clear_node(n);

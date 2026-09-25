@@ -1,0 +1,19 @@
+A revoke that stops between taking a node out of the ring and clearing it
+leaves a filled slot no ring holds, whose links lead into the tree.
+
+diff --git a/kernel/cap.c b/kernel/cap.c
+index c22b037..304e18c 100644
+--- a/kernel/cap.c
++++ b/kernel/cap.c
+@@ -190,10 +190,10 @@ bool cap_revoke_below(struct cap *root, bool preempt)
+         LOOP_PAID(cap_revoke_below, node, "a node it clears");
+         struct cap *n = node(root->child);
+         detach(n, true);
+-        clear_node(n);
+         if (root->child != 0 && stop_here(preempt)) {
+             return false;
+         }
++        clear_node(n);
+     }
+     return true;
+ }

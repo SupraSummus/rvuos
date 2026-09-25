@@ -53,6 +53,14 @@ bool host_event(const struct replay_record *c);
  */
 bool host_driver_alive(void);
 
+/*
+ * What there is of each unit a paid loop counts in, over every object of every pool:
+ * a node is a filled slot, a link a node below another,
+ * an object an object, and a waiter a thread waiting.
+ */
+enum { UNIT_NODE, UNIT_LINK, UNIT_OBJECT, UNIT_WAITER, UNITS };
+void host_units(unsigned out[UNITS]);
+
 #ifdef RVUOS_WORK
 /* Around each call in the harness fuzz-work: count its loops, then check their claims. */
 void work_begin(void);
