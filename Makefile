@@ -13,6 +13,7 @@
 CC      := clang
 OBJCOPY := llvm-objcopy
 OBJDUMP := llvm-objdump
+SYMBOLIZER := llvm-symbolizer
 QEMU    := qemu-system-riscv32
 ESPTOOL := esptool
 
@@ -36,9 +37,12 @@ LDFLAGS   := $(ARCHFLAGS) -nostdlib -static -fuse-ld=lld -Wl,--gc-sections -Wl,-
 # The kernel sees its board's headers, and user programs their board's console.
 # The kernel leaves its frame sizes beside each object for tools/stack-depth.py
 # and puts each function in a section of its own, so the linker drops the dead ones.
+# Its debug information names files from the top of the tree,
+# so tools/loop-bounds.py finds them wherever the tree was built, as in a mutant's copy.
 KERNEL_INC := -Ikernel -Ikernel/board/$(BOARD)
 USER_INC   := -Iuser/board/$(BOARD)
-$(BUILD)/kernel/%.o: CFLAGS += $(KERNEL_INC) -fstack-usage -ffunction-sections
+$(BUILD)/kernel/%.o: CFLAGS += $(KERNEL_INC) -fstack-usage -ffunction-sections \
+                               -fdebug-prefix-map=$(CURDIR)=.
 $(BUILD)/user/%.o: CFLAGS += $(USER_INC)
 
 KERNEL_SRC_C := $(wildcard kernel/*.c kernel/board/$(BOARD)/*.c)
@@ -105,10 +109,16 @@ $(BUILD)/user_blob-%.o: $(BUILD)/user_blob-%.S
 	$(CC) $(ASFLAGS) -c $< -o $@
 
 # A kernel whose stack may overflow is not an image; see DESIGN.md, "Bounded stack".
+# Nor is one with a loop whose source says nothing of its bound; see DESIGN.md, "Bounded work".
+# That check reads the source as the kernel's objects were compiled from it.
 $(BUILD)/kernel-%.elf: $(KERNEL_OBJ) $(BUILD)/user_blob-%.o $(BUILD)/kernel/kernel.ld \
-                       tools/stack-depth.py
+                       tools/kimage.py tools/ksource.py tools/stack-depth.py tools/loop-bounds.py \
+                       DESIGN.md
 	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/kernel/kernel.ld $(KERNEL_OBJ) $(BUILD)/user_blob-$*.o -o $@.tmp
 	tools/stack-depth.py --objdump $(OBJDUMP) $@.tmp $(KERNEL_SU)
+	tools/loop-bounds.py --objdump $(OBJDUMP) --symbolizer $(SYMBOLIZER) \
+		--cc $(CC) --cflags "$(CFLAGS) $(KERNEL_INC)" --sources "$(KERNEL_SRC_C)" \
+		--design DESIGN.md $@.tmp $(KERNEL_SU)
 	mv $@.tmp $@
 
 # The image the ESP32-C6's ROM loads: the ELF's segments behind Espressif's header.
@@ -146,11 +156,18 @@ FUZZ_TIME ?= 60
 # the default, an eight-entry PMP budget, and a 32-byte PMP grain as RP2350 has.
 # The machine is a preprocessor flag, so each harness has its objects to itself
 # in build/host/<harness>.obj/.
-HOST_HARNESSES := $(HOST_BUILD)/fuzz $(HOST_BUILD)/fuzz-pmp8 $(HOST_BUILD)/fuzz-grain32
+# fuzz-work is the default machine with the loop annotations counting,
+# and every kernel function opening a frame for them; see host/work.c.
+# It checks claims rather than finds inputs, so the corpus is kept without it.
+HOST_MACHINES  := $(HOST_BUILD)/fuzz $(HOST_BUILD)/fuzz-pmp8 $(HOST_BUILD)/fuzz-grain32
+HOST_HARNESSES := $(HOST_MACHINES) $(HOST_BUILD)/fuzz-work
 $(HOST_BUILD)/fuzz-pmp8.obj/%.o:    HOST_MACHINE := -UPMP_MAX_ENTRIES -DPMP_MAX_ENTRIES=8
 $(HOST_BUILD)/fuzz-grain32.obj/%.o: HOST_MACHINE := -DPMP_GRAIN=32
+$(HOST_BUILD)/fuzz-work.obj/%.o:        HOST_MACHINE := -DRVUOS_WORK
+$(HOST_BUILD)/fuzz-work.obj/kernel/%.o: HOST_MACHINE := -DRVUOS_WORK -finstrument-functions
 
-host_obj = $(patsubst %.c,$(1).obj/%.o,$(HOST_KERNEL_SRC) $(HOST_SRC))
+host_obj = $(patsubst %.c,$(1).obj/%.o,$(HOST_KERNEL_SRC) $(HOST_SRC) \
+                                       $(if $(filter %-work,$(1)),host/work.c))
 HOST_OBJ := $(foreach h,$(HOST_HARNESSES),$(call host_obj,$(h)))
 
 define host_harness
@@ -189,11 +206,11 @@ fuzz: $(HOST_BUILD)/fuzz
 # The corpus is thus minimal for the current kernel,
 # not for every kernel it has seen.
 # Run `make mutants` afterwards: it is the check that the minimisation lost nothing.
-corpus-merge: $(HOST_HARNESSES)
+corpus-merge: $(HOST_MACHINES)
 	@mkdir -p $(HOST_CORPUS)
 	rm -rf $(HOST_BUILD)/corpus-merged && mkdir -p $(HOST_BUILD)/corpus-merged
 	cp tests/seeds/* $(HOST_BUILD)/corpus-merged/
-	for h in $(HOST_HARNESSES); do \
+	for h in $(HOST_MACHINES); do \
 		$$h -merge=1 -use_counters=0 $(HOST_BUILD)/corpus-merged tests/corpus $(HOST_CORPUS) || exit 1; \
 	done
 	for s in tests/seeds/*; do rm $(HOST_BUILD)/corpus-merged/$$(basename $$s); done

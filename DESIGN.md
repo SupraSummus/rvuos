@@ -1014,6 +1014,33 @@ its progress stays in the derivation tree,
 and the system call restarts, as in seL4.
 `cap_revoke_below` already walks with no stack,
 so it can stop between any two nodes.
+Such a loop is paid for:
+each step takes away something an earlier call made,
+so over a run its steps are bounded by the calls before it.
+What it costs is latency, and preemption is the answer to that.
+
+**The check.**
+Every loop a trap can run says what bounds it with an annotation from `kernel/work.h`:
+a constant, what it pays with, a row of the table below, an argument, or a wait on the hardware.
+An annotation is a `_Static_assert`, so it changes no code the compiler makes.
+Every kernel link runs `tools/loop-bounds.py`,
+which finds the loops in the machine code, inlined and compiler-made ones too,
+matches each to its source loop through the debug information and clang's AST,
+and fails on one that says nothing.
+The table is checked both ways, so it stays the kernel's own list of walks.
+Code that leads only to a halt is left out,
+and so is the self-check, which may be called only under `if (debug_trace)`.
+
+The claims are checked too.
+A bound the loop's own shape limits, a counter below a constant, is compared with that limit at the link;
+this is the only check of board code, which the host does not run.
+Other bounds rest on an invariant, as `i < img->count` does,
+and a paid loop names its unit: a node, a link, an object or a waiter.
+The host harness `fuzz-work` counts both after every call:
+a bound per entry of its loop,
+and paid steps at most twice what the call took away of that unit, plus one;
+twice since a revoke passes a node going down and clears it going up.
+It finds a false claim only where the corpus reaches, and a wait is not checked at all.
 
 **Where the kernel falls short.**
 
@@ -1024,8 +1051,9 @@ so it can stop between any two nodes.
 | `cap_parent`, `detach` | delete, uninstall, `OP_REGION_TO_POOL`, `OP_IRQ_BIND` | a predecessor link per slot |
 | `pool_overlaps` | `OP_PROCESS_INSTALL` | open decision 14 |
 | `pool_overlaps`, `installed_overlaps` | `OP_REGION_TO_POOL` | open decision 14 |
-| `cap_revoke_range`, `pool_under`, `node_live`, `cap_parent` | pool destroy | open decision 14, and preemption |
+| `cap_revoke_range`, `pool_destroy`, `pool_under`, `pool_overlaps`, `cap_parent` | pool destroy | open decision 14, and preemption |
 | `cap_revoke_below` | revoke, `OP_REGION_TO_POOL`, `OP_IRQ_BIND` | preemption |
+| `memset` | `OP_REGION_TO_POOL`, pool destroy | zero each object as it is allocated, and on destroy only what was |
 
 A predecessor link makes a slot twenty-four bytes instead of twenty
 and lets a node leave its ring in constant time.
@@ -1227,7 +1255,9 @@ and covers nothing new today is dropped rather than kept for its history.
 `make mutants` plants bugs in the kernel one at a time,
 each a patch under `tests/mutants/` headed by the invariant it breaks,
 and requires the host replay to catch each with an invariant report,
-or, for a mutant of the stack, `tools/stack-depth.py` to refuse the link;
+or, for a mutant of the stack, `tools/stack-depth.py` to refuse the link,
+and for a mutant of the bounded work, `tools/loop-bounds.py`
+or the counting harness `fuzz-work`, whose report is an invariant report too;
 it is also the check that a minimisation lost nothing,
 and an input that some mutant needs but coverage does not keep
 belongs among the seeds under a name.

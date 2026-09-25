@@ -5,12 +5,7 @@ and they come back to life when the memory is rebuilt into the same type.
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -220,7 +220,7 @@
- 
- void cap_revoke_range(uint32_t base, uint32_t size)
- {
--    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
-+    for (struct obj_header *o = object_first(); o != NULL && 0; o = object_next(o)) {
+@@ -242,2 +242,3 @@
+         LOOP_WALK(cap_revoke_range);
++        continue;
          bool dying = range_contains(base, size, v2p(o));
-         if (o->type == CAP_CAPTABLE) {
-             struct captable *table = (struct captable *)o;

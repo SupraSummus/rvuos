@@ -145,6 +145,7 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
             }
         }
         /* From here on the memory is the kernel's. */
+        CALL_WALK(memset);
         memset(p2v(base), 0, size);
         /* The new pool hangs below the caller's own, and dies with it. */
         struct pool *pool = pool_create(base, size, cap->rights, obj_pool(&t->hdr));
@@ -209,6 +210,7 @@ static int op_pool_destroy(struct thread *t, uint32_t slot, struct pool *pool,
      */
     struct cap *parent = cap_parent(&table->slots[slot]);
     while (parent != NULL && parent->type == CAP_POOL && parent->a == base) {
+        LOOP_PAID(op_pool_destroy, node, "a capability to the pool, which the sweep clears");
         parent = cap_parent(parent);
     }
 
@@ -626,6 +628,7 @@ void syscall_dispatch(struct thread *t)
     /* a0 is the slot, a1..a3 the arguments and, on return, a1..a4 the results. */
     uint32_t in[5], arg[5];
     for (unsigned i = 0; i < 5; i++) {
+        LOOP_BOUND(5);
         in[i] = arg[i] = f->regs[REG_A0 + i];
     }
 
@@ -641,6 +644,7 @@ void syscall_dispatch(struct thread *t)
     if (err != KERR_BLOCKED) {
         f->regs[REG_A0] = (uint32_t)err;
         for (unsigned i = 1; i < 5; i++) {
+            LOOP_BOUND(4);
             f->regs[REG_A0 + i] = arg[i];
         }
     }

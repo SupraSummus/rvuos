@@ -20,6 +20,7 @@
 
 #include "csr.h"
 #include "irq.h"
+#include "work.h"
 
 #define INTMTX_BASE      0x60010000u
 #define INTMTX_MAP(src)  (INTMTX_BASE + 4u * (src))           /* the CPU interrupt, 0 for none */
@@ -69,8 +70,10 @@ bool irq_enabled(uint32_t line)
 uint32_t irq_claim(void)
 {
     for (uint32_t word = 0; word < (IRQ_LINES + 31) / 32; word++) {
+        LOOP_BOUND((IRQ_LINES + 31) / 32);
         uint32_t high = REG(INTMTX_STATUS(word));
         for (uint32_t bit = 0; high != 0 && bit < 32; bit++, high >>= 1) {
+            LOOP_BOUND(32);
             uint32_t line = 32 * word + bit;
             if ((high & 1u) && line != 0 && line < IRQ_LINES && irq_enabled(line)) {
                 return line;

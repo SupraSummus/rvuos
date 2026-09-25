@@ -6,6 +6,8 @@ Read `DESIGN.md` before changing anything in the kernel.
 No new walk over every object, pool or table
 goes on the path of a system call, a tick or an interrupt;
 see goal 4 in `DESIGN.md`.
+Every loop a trap can run says what bounds it with an annotation from `kernel/work.h`,
+and every link checks it, see "Bounded work" in `DESIGN.md`.
 The kernel does not recurse and has no frame whose size is known only at run time;
 every link checks its stack, see "Bounded stack" in `DESIGN.md`.
 

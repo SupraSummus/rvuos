@@ -88,6 +88,7 @@ struct cap *cap_parent(const struct cap *n)
 {
     uint32_t link = n->next;
     while (!(link & LINK_UP)) {
+        LOOP_WALK(cap_parent);
         link = node(link)->next;
     }
     return link == LINK_UP ? NULL : node(link);
@@ -136,6 +137,7 @@ static void detach(struct cap *n, bool adopt)
 
     if (n->next == LINK_UP) {
         for (uint32_t link = first; link != 0 && !(link & LINK_UP);) {
+            LOOP_PAID(detach, link, "a child below a root, which becomes a root itself");
             struct cap *c = node(link);
             link = c->next;
             c->next = LINK_UP;
@@ -149,6 +151,7 @@ static void detach(struct cap *n, bool adopt)
     if (first != 0) {
         struct cap *last = node(first);
         while (!(last->next & LINK_UP)) {
+            LOOP_WALK(detach);
             last = node(last->next);
         }
         last->next = n->next;
@@ -159,6 +162,7 @@ static void detach(struct cap *n, bool adopt)
     } else {
         struct cap *pred = node(parent->child);
         while (node(pred->next) != n) {
+            LOOP_WALK(detach);
             pred = node(pred->next);
         }
         pred->next = replacement;
@@ -175,6 +179,8 @@ void cap_revoke_below(struct cap *root)
      */
     uint32_t at = root->child;
     while (at != 0) {
+        /* A node is passed going down and cleared going up: two steps for each it clears. */
+        LOOP_PAID(cap_revoke_below, node, "a node it clears");
         struct cap *n = node(at);
         if (at & LINK_UP) {
             if (n == root) {
@@ -233,10 +239,12 @@ static void sweep_node(struct cap *c, bool dying, uint32_t base, uint32_t size)
 void cap_revoke_range(uint32_t base, uint32_t size)
 {
     for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
+        LOOP_WALK(cap_revoke_range);
         bool dying = range_contains(base, size, v2p(o));
         if (o->type == CAP_CAPTABLE) {
             struct captable *table = (struct captable *)o;
             for (uint32_t i = 0; i < table->nslots; i++) {
+                LOOP_WALK(cap_revoke_range);
                 sweep_node(&table->slots[i], dying, base, size);
             }
         } else if (o->type == CAP_PROCESS) {
@@ -244,6 +252,7 @@ void cap_revoke_range(uint32_t base, uint32_t size)
             struct process *proc = (struct process *)o;
             sweep_node(&proc->table, dying, base, size);
             for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
+                LOOP_BOUND(PROCESS_REGION_SLOTS);
                 sweep_node(&proc->slots[i], dying, base, size);
             }
         }

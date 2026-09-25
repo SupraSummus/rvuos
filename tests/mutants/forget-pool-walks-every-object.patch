@@ -1,0 +1,17 @@
+A pool that goes looks for its objects among every object of every pool,
+still claiming each step takes one away,
+so a destroy costs what the whole machine holds, not what it destroys.
+It forgets the same objects, so only the counting harness catches it.
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -196,4 +196,7 @@
+ {
+-    for (struct obj_header *o = pool_first(pool); o != NULL; o = pool_next(pool, o)) {
++    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
+         LOOP_PAID(sched_forget_pool, object, "an object of the pool that goes");
++        if (o->pool != pool->base) {
++            continue;
++        }
+         switch (o->type) {
