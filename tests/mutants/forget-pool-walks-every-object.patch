@@ -7,10 +7,11 @@ Caught-by: fuzz-work
 Report: a call took N paid steps in object and took away N
 
 diff --git a/kernel/pool.c b/kernel/pool.c
-index 205bbe8..1d548e9 100644
 --- a/kernel/pool.c
 +++ b/kernel/pool.c
-@@ -49,3 +49,6 @@ static void pool_clear(struct pool *pool)
+@@ -47,7 +47,10 @@ static void pool_clear(struct pool *pool)
+ {
+     for (struct obj_header *o = pool_first(pool), *next; o != NULL; o = next) {
          LOOP_PAID(pool_clear, object, "an object of the pool that goes");
 -        next = pool_next(pool, o);
 +        next = object_next(o);
@@ -18,3 +19,5 @@ index 205bbe8..1d548e9 100644
 +            continue;
 +        }
          sched_forget(o);
+         CALL_BOUND(OBJ_MAX_SIZE);
+         memset(o, 0, obj_size(o));

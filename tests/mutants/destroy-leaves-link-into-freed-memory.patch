@@ -8,8 +8,12 @@ Report: child link to a slot that is not a live, filled one
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -247,3 +247,3 @@
+@@ -279,7 +279,7 @@ void cap_revoke_range(uint32_t base, uint32_t size)
+             struct captable *table = (struct captable *)o;
+             for (uint32_t i = 0; i < table->nslots; i++) {
                  LOOP_WALK(cap_revoke_range);
 -                sweep_node(&table->slots[i], dying, base, size);
 +                sweep_node(&table->slots[i], false, base, size);
              }
+         } else if (o->type == CAP_PROCESS) {
+             /* A living process loses its table with the table's pool; its regions name no object. */

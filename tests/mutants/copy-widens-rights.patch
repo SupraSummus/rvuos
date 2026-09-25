@@ -9,7 +9,7 @@ Report: region capability with rights beyond the grant
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -73,7 +73,7 @@
+@@ -67,7 +67,7 @@ static int op_captable(struct thread *t, const struct cap *cap,
          if (err != KERR_OK) {
              return err;
          }

@@ -6,10 +6,13 @@ Each object is still zeroed as it is allocated, so only the loop check catches i
 Caught-by: loop-bounds
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
-index 90f522a..52d38be 100644
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -152,2 +152,3 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
+@@ -150,6 +150,7 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
+          * It is not zeroed here, which would be work in its size: pool_alloc zeroes each object.
+          * The new pool hangs below the caller's own, and dies with it.
           */
 +        memset(p2v(base), 0, size);
          struct pool *pool = pool_create(base, size, cap->rights, obj_pool(&t->hdr));
+         struct cap pc = cap_to_object(&pool->hdr, RIGHT_ALL);
+         /* The pool capability takes the region's place in the tree, and the region goes. */

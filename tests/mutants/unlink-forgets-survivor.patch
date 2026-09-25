@@ -7,7 +7,11 @@ Report: dangling object capability
 diff --git a/kernel/pool.c b/kernel/pool.c
 --- a/kernel/pool.c
 +++ b/kernel/pool.c
-@@ -62,3 +62,2 @@ void pool_destroy(struct pool *pool)
+@@ -80,7 +80,6 @@ void pool_destroy(struct pool *pool)
+         LOOP_WALK(pool_destroy);
+         next = pool_next_pool(p);
          if (!pool_under(p, pool)) {
 -            kept = p;
              continue;
+         }
+         /* Nothing below may fail: the pool is going. */

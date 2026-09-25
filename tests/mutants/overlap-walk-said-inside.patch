@@ -8,11 +8,17 @@ Caught-by: loop-bounds
 diff --git a/kernel/pool.c b/kernel/pool.c
 --- a/kernel/pool.c
 +++ b/kernel/pool.c
-@@ -173,3 +173,2 @@
+@@ -189,12 +189,12 @@ bool pool_overlaps(uint32_t base, uint32_t size)
+ bool installed_overlaps(uint32_t base, uint32_t size)
+ {
      for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
 -        LOOP_WALK(installed_overlaps);
          if (o->type != CAP_PROCESS) {
-@@ -179,2 +178,3 @@
+             continue;
+         }
+         struct process *proc = (struct process *)o;
          for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
 +            LOOP_WALK(installed_overlaps);
              LOOP_BOUND(PROCESS_REGION_SLOTS);
+             const struct cap *s = &proc->slots[i];
+             if (s->type != CAP_NONE && ranges_overlap(base, size, s->a, s->b)) {

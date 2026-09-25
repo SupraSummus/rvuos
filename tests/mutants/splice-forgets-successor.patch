@@ -8,7 +8,7 @@ Report: predecessor's next is not the slot
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -90,7 +90,6 @@ void cap_attach(struct cap *parent, struct cap *n)
+@@ -91,7 +91,6 @@ void cap_attach(struct cap *parent, struct cap *n)
  /* Put the siblings first to last right after beside, which has a parent, in its ring. */
  static void splice_after(struct cap *beside, struct cap *first, struct cap *last)
  {

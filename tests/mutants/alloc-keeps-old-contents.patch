@@ -10,19 +10,25 @@ Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
 Report: a fresh kernel refused prologue record N with N
 
 diff --git a/kernel/boot.c b/kernel/boot.c
-index 9caa724..9281dce 100644
 --- a/kernel/boot.c
 +++ b/kernel/boot.c
-@@ -18,2 +18,3 @@ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
+@@ -16,6 +16,7 @@ struct pool *boot_pool;
+ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
+                                 paddr_t free_base, uint32_t free_size)
  {
 +    memset(p2v(boot_pool_base), 0, boot_pool_size);
      struct pool *pool = pool_create(boot_pool_base, boot_pool_size, RIGHT_ALL, NULL);
+     boot_pool = pool;
+ 
 diff --git a/kernel/pool.c b/kernel/pool.c
-index 205bbe8..263c9df 100644
 --- a/kernel/pool.c
 +++ b/kernel/pool.c
-@@ -108,4 +108,2 @@ void *pool_alloc(struct pool *pool, uint8_t type, size_t size)
+@@ -106,8 +106,6 @@ void *pool_alloc(struct pool *pool, uint8_t type, size_t size)
+     struct obj_header *obj = p2v(pool->base + pool->used);
+     pool->used += align_up((uint32_t)size, OBJ_ALIGN);
      /* The memory holds what it held before the pool took it. */
 -    CALL_BOUND(OBJ_MAX_SIZE);
 -    memset(obj, 0, size);
      obj->type = type;
+     obj->pool = pool->base;
+     return obj;

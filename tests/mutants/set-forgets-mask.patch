@@ -8,10 +8,14 @@ Report: controller forwards a line nothing is armed on
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -504,4 +504,4 @@
+@@ -503,8 +503,8 @@ static int op_irq(const struct cap *cap, uint32_t op, const uint32_t *arg)
+     irq_set_bits(irq, arg[1]);
+     if (irq->line == LOG_IRQ_LINE) {
          klog_set(irq);
 -    } else if (line_on_controller(irq->line)) {
 -        irq_enable(irq->line, irq_armed(irq));
 +    } else if (line_on_controller(irq->line) && irq_armed(irq)) {
 +        irq_enable(irq->line, true);
      }
+     return KERR_OK;
+ }

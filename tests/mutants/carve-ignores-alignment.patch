@@ -6,10 +6,9 @@ Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
 Report: region capability is not a NAPOT block
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
-index 26e97d5..0598590 100644
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -114,7 +114,7 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
+@@ -107,7 +107,7 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
          uint32_t off = arg[1];
          uint32_t len = arg[2];
          /* A block within the region, so that every region capability is one NAPOT entry. */

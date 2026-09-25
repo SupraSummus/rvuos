@@ -8,8 +8,12 @@ Report: a waiting or ready thread is on no queue
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -386,3 +386,3 @@ static int op_thread(const struct cap *cap, uint32_t op, const uint32_t *arg)
+@@ -373,7 +373,7 @@ static int op_thread(const struct cap *cap, uint32_t op, const uint32_t *arg)
+         if (target->state != THREAD_STOPPED) {
+             return KERR_STATE;
          }
 -        sched_ready(target);
 +        target->state = THREAD_READY;
          return KERR_OK;
+     default:
+         return KERR_WRONG_TYPE;

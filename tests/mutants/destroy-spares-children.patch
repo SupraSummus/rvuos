@@ -7,8 +7,12 @@ Report: pool's parent is not a live, older pool
 diff --git a/kernel/pool.c b/kernel/pool.c
 --- a/kernel/pool.c
 +++ b/kernel/pool.c
-@@ -61,3 +61,3 @@ void pool_destroy(struct pool *pool)
+@@ -79,7 +79,7 @@ void pool_destroy(struct pool *pool)
+     for (struct pool *p = pool_list, *next, *kept = NULL; p != NULL; p = next) {
+         LOOP_WALK(pool_destroy);
          next = pool_next_pool(p);
 -        if (!pool_under(p, pool)) {
 +        if (p != pool) {
              kept = p;
+             continue;
+         }

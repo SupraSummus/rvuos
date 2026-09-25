@@ -9,9 +9,13 @@ Report: queue holds a thread it is not for
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -45,5 +45,2 @@ static void ring_remove(paddr_t *head, struct thread *t)
+@@ -61,9 +61,6 @@ static void ring_remove(paddr_t *head, struct thread *t)
+     } else {
+         ((struct thread *)p2v(t->queue_prev))->queue_next = t->queue_next;
          ((struct thread *)p2v(t->queue_next))->queue_prev = t->queue_prev;
 -        if (*head == v2p(t)) {
 -            *head = t->queue_next;
 -        }
      }
+     t->queue_next = t->queue_prev = 0;
+ }

@@ -9,8 +9,12 @@ Report: the loop at kernel/process.c ran N times on one entry, beyond its bound 
 diff --git a/kernel/process.c b/kernel/process.c
 --- a/kernel/process.c
 +++ b/kernel/process.c
-@@ -13,3 +13,3 @@
+@@ -11,7 +11,7 @@ void process_activate(struct process *proc)
+ {
+     const struct pmp_image *img = &proc->pmp;
      for (unsigned i = 0; i < img->count; i++) {
 -        LOOP_BOUND(PROCESS_REGION_SLOTS);
 +        LOOP_BOUND(4);
          pmp_set(i, img->addr[i], img->cfg[i]);
+     }
+     for (unsigned i = img->count; i < pmp_entry_count; i++) {

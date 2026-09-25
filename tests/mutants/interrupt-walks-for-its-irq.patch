@@ -8,7 +8,9 @@ Caught-by: loop-bounds
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -191,3 +191,8 @@
+@@ -185,7 +185,12 @@ paddr_t line_irq[LINES];
+ 
+ struct irq *line_binding(uint32_t line)
  {
 -    return line_irq[line] != 0 ? p2v(line_irq[line]) : NULL;
 +    for (struct pool *p = pool_list; p != NULL && line_irq[line] != 0; p = pool_next_pool(p)) {
@@ -18,3 +20,5 @@ diff --git a/kernel/sched.c b/kernel/sched.c
 +    }
 +    return NULL;
  }
+ 
+ void sched_forget(struct obj_header *o)

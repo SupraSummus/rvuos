@@ -75,7 +75,7 @@ else
 $(error unknown BOARD '$(BOARD)'; the boards are qemu and esp32c6)
 endif
 
-.PHONY: all clean run test host-harnesses host-test fuzz corpus-merge qemu-replay mutants check
+.PHONY: all clean run test host-harnesses host-test fuzz corpus-merge qemu-replay mutants mutants-refresh check
 
 # Pattern rules would delete the objects they chain through,
 # so every build compiled the kernel from scratch.
@@ -199,6 +199,10 @@ host-test: $(HOST_HARNESSES)
 # and every check must do on it what its header says.
 mutants:
 	tests/mutants.sh
+
+# Write the patches of tests/mutants/ again against the kernel as it is.
+mutants-refresh:
+	tests/mutants-refresh.py
 
 # Fuzz for FUZZ_TIME seconds in a working copy of the seeds and the corpus.
 # Fold the interesting inputs back into the repository with `make corpus-merge`.

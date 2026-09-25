@@ -9,7 +9,9 @@ Report: armed log irq while the log has bytes untaken
 diff --git a/kernel/klog.c b/kernel/klog.c
 --- a/kernel/klog.c
 +++ b/kernel/klog.c
-@@ -66,6 +66,3 @@
+@@ -64,10 +64,7 @@ void klog_append(char c)
+ 
+ void klog_set(struct irq *irq)
  {
 -    /* The line is level: arming it while it is high is hearing it now. */
 -    if (irq_armed(irq) && klog_pending()) {
@@ -17,3 +19,5 @@ diff --git a/kernel/klog.c b/kernel/klog.c
 -    }
 +    (void)irq;
  }
+ 
+ void klog_dump(void (*put)(char))

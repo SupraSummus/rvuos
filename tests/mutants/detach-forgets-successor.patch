@@ -10,8 +10,8 @@ Report: sibling ring does not close
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -175,7 +175,6 @@ static void detach(struct cap *n, bool adopt)
-         splice_after(n, node(first), node(node(first)->prev));
+@@ -162,7 +162,6 @@ static void detach(struct cap *n, bool adopt)
+         splice_after(n, node(n->child), node(node(n->child)->prev));
      }
      struct cap *pred = node(n->prev);
 -    ring_next(n)->prev = n->prev;
