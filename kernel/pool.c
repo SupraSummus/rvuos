@@ -31,6 +31,7 @@ struct pool *pool_create(paddr_t base, uint32_t size, uint8_t rights, struct poo
 bool pool_under(const struct pool *pool, const struct pool *ancestor)
 {
     for (const struct pool *p = pool; p != NULL; p = pool_parent(p)) {
+        LOOP_WALK(pool_under);
         if (p == ancestor) {
             return true;
         }
@@ -47,6 +48,7 @@ void pool_destroy(struct pool *pool)
      * and the sweep follows those links.
      */
     for (struct pool *p = pool_list; p != NULL; p = pool_next_pool(p)) {
+        LOOP_WALK(pool_destroy);
         if (pool_under(p, pool)) {
             cap_revoke_range(p->base, p->size);
         }
@@ -58,6 +60,7 @@ void pool_destroy(struct pool *pool)
      * Keeping the last pool that stays unlinks each one that goes without a second walk.
      */
     for (struct pool *p = pool_list, *next, *kept = NULL; p != NULL; p = next) {
+        LOOP_WALK(pool_destroy);
         next = pool_next_pool(p);
         if (!pool_under(p, pool)) {
             kept = p;
@@ -71,6 +74,7 @@ void pool_destroy(struct pool *pool)
             pool_list = next;
         }
         /* The memory is about to be user memory again, holding other processes' tables. */
+        CALL_WALK(memset);
         memset(p2v(p->base), 0, p->size);
     }
 }
@@ -156,6 +160,7 @@ struct obj_header *object_find(paddr_t p)
 bool pool_overlaps(uint32_t base, uint32_t size)
 {
     for (struct pool *p = pool_list; p != NULL; p = pool_next_pool(p)) {
+        LOOP_WALK(pool_overlaps);
         if (ranges_overlap(base, size, p->base, p->size)) {
             return true;
         }
@@ -166,11 +171,13 @@ bool pool_overlaps(uint32_t base, uint32_t size)
 bool installed_overlaps(uint32_t base, uint32_t size)
 {
     for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
+        LOOP_WALK(installed_overlaps);
         if (o->type != CAP_PROCESS) {
             continue;
         }
         struct process *proc = (struct process *)o;
         for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
+            LOOP_BOUND(PROCESS_REGION_SLOTS);
             const struct cap *s = &proc->slots[i];
             if (s->type != CAP_NONE && ranges_overlap(base, size, s->a, s->b)) {
                 return true;

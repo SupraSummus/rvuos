@@ -5,8 +5,8 @@ and those rings then lead into memory that is user memory again.
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -239,3 +239,3 @@
-             for (uint32_t i = 0; i < table->nslots; i++) {
+@@ -247,3 +247,3 @@
+                 LOOP_WALK(cap_revoke_range);
 -                sweep_node(&table->slots[i], dying, base, size);
 +                sweep_node(&table->slots[i], false, base, size);
              }

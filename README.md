@@ -17,7 +17,7 @@ and `CLAUDE.md` for repository conventions.
 ## Building and running
 
 Requirements: clang and lld with RISC-V support,
-llvm-objcopy, GNU make, and qemu-system-riscv32.
+llvm-objcopy, llvm-objdump and llvm-symbolizer, Python 3, GNU make, and qemu-system-riscv32.
 No separate cross toolchain is needed.
 
 ```

@@ -1,0 +1,13 @@
+The loop that loads a process's regions into the PMP claims a bound of four,
+and a process holds up to eight regions,
+so the claim is false as soon as one holds five.
+The code is the same, so only the counting harness catches it.
+
+diff --git a/kernel/process.c b/kernel/process.c
+--- a/kernel/process.c
++++ b/kernel/process.c
+@@ -13,3 +13,3 @@
+     for (unsigned i = 0; i < img->count; i++) {
+-        LOOP_BOUND(PROCESS_REGION_SLOTS);
++        LOOP_BOUND(4);
+         pmp_set(i, img->addr[i], img->cfg[i]);

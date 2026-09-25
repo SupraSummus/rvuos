@@ -11,6 +11,8 @@
 # host-test must catch it with an invariant report: that is the check on the corpus.
 # A mutant of the kernel's stack is caught instead when tools/stack-depth.py
 # refuses to link the kernel; no replay can see a stack that is too small.
+# A mutant of its bounded work is caught when tools/loop-bounds.py refuses:
+# a replay runs too few objects for a walk to show.
 # What test and qemu-replay catch is reported, and skipped when QEMU is not installed.
 # A mutant that does not apply or does not build is broken, not caught.
 #
@@ -46,11 +48,13 @@ mutant() {
         return
     fi
     if ! run "$name" all; then
-        if grep -q '^stack-depth: ' "$logs/$name.all.log"; then
-            echo caught >"$result"
-            echo "mutant $name: stack-depth caught"
-            return
-        fi
+        for tool in stack-depth loop-bounds; do
+            if grep -q "^$tool: " "$logs/$name.all.log"; then
+                echo caught >"$result"
+                echo "mutant $name: $tool caught"
+                return
+            fi
+        done
         printf 'mutant %s: does not build\n%s\n' "$name" "$(tail -5 "$logs/$name.all.log")" >&2
         echo broken >"$result"
         return
@@ -111,7 +115,7 @@ qemu=$(command -v qemu-system-riscv32 || true)
 [ -n "$qemu" ] || echo "qemu-system-riscv32 not found: test and qemu-replay are skipped" >&2
 
 cp -r "$root/kernel" "$root/host" "$root/include" "$root/user" "$root/Makefile" "$root/tests" \
-    "$root/tools" "$work/base/"
+    "$root/tools" "$root/DESIGN.md" "$work/base/"
 if ! (cd "$work/base" && make -s -j"$jobs" all host-test) >"$logs/unmutated.log" 2>&1; then
     echo "the unmutated tree does not build or fails host-test, see build/mutants/unmutated.log" >&2
     exit 1

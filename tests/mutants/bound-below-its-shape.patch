@@ -1,0 +1,12 @@
+The loop that rebuilds a process's PMP image claims a bound of four,
+and its own condition runs it over all eight region slots.
+The code is the same; the link sees the claim is false from the loop's shape alone.
+
+diff --git a/kernel/process.c b/kernel/process.c
+--- a/kernel/process.c
++++ b/kernel/process.c
+@@ -33,3 +33,3 @@
+     for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
+-        LOOP_BOUND(PROCESS_REGION_SLOTS);
++        LOOP_BOUND(4);
+         const struct cap *s = &proc->slots[i];

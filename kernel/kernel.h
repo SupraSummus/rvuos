@@ -8,6 +8,7 @@
 #include "rvuos/abi.h"
 #include "layout.h"
 #include "paddr.h"
+#include "work.h"
 
 /*
  * True if [base, base + size) lies within RAM.
@@ -33,6 +34,12 @@ void board_init(void);
 void kputc(char c);
 void kputs(const char *s);
 void kput_hex(uint32_t v);
+/* A literal's length bounds each call; the parentheses call the function around the macro. */
+#define kputs(s)             \
+    do {                     \
+        CALL_LITERAL(s);     \
+        (kputs)(s);          \
+    } while (0)
 
 /* string.c; the compiler may also emit calls to these. */
 void *memset(void *dst, int c, size_t n);

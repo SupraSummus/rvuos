@@ -1,0 +1,11 @@
+The self-check runs on every tick, traced or not,
+so the one walk the loop check takes on trust is on the tick's path.
+It checks the same, so only the loop check's guard on the cut catches it.
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -292,2 +292,3 @@
+ {
++    selfcheck_run();
+     tick_advance();

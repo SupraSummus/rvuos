@@ -229,7 +229,13 @@ uint32_t host_syscall(const struct replay_record *c)
     f->regs[REG_A5] = 0;
     f->regs[REG_A6] = 0;
     f->mcause = 8;
+#ifdef RVUOS_WORK
+    work_begin();
+#endif
     syscall_dispatch(current);
+#ifdef RVUOS_WORK
+    work_end();
+#endif
     return f->regs[REG_A0];
 }
 

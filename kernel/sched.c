@@ -116,6 +116,7 @@ static void tick_advance(void)
 {
     sched_ticks++;
     for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
+        LOOP_WALK(tick_advance);
         if (o->type != CAP_TIMER) {
             continue;
         }
@@ -149,6 +150,8 @@ bool sched_interrupt(uint32_t line)
 void sched_claim_interrupts(void)
 {
     for (uint32_t line = irq_claim(); line != 0; line = irq_claim()) {
+        /* A line is masked as it signals, so each is claimed once. */
+        LOOP_BOUND(IRQ_LINES);
         /* The controller forwards a line only while an Irq is armed on it. */
         if (!sched_interrupt(line)) {
             kpanic("interrupt on a line nothing is armed on");
@@ -166,6 +169,7 @@ void sched_claim_interrupts(void)
 static bool source_armed(void)
 {
     for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
+        LOOP_WALK(source_armed);
         if (o->type == CAP_TIMER && timer_armed((struct timer *)o)) {
             return true;
         }
@@ -191,6 +195,7 @@ struct irq *line_binding(uint32_t line)
 void sched_forget_pool(struct pool *pool)
 {
     for (struct obj_header *o = pool_first(pool); o != NULL; o = pool_next(pool, o)) {
+        LOOP_PAID(sched_forget_pool, object, "an object of the pool that goes");
         switch (o->type) {
         case CAP_NOTIFICATION: {
             struct notification *ntfn = (struct notification *)o;
@@ -199,6 +204,7 @@ void sched_forget_pool(struct pool *pool)
              * The thread learns that the way every other call learns it.
              */
             while (ntfn->waiters != 0) {
+                LOOP_PAID(sched_forget_pool, waiter, "a thread that waited, by a call of its own");
                 struct thread *t = p2v(ntfn->waiters);
                 unwait(t);
                 t->frame.regs[REG_A0] = KERR_INVALID_CAP;
@@ -257,6 +263,7 @@ void sched_run_next(void)
 {
     struct thread *next = run_queue_take();
     while (next == NULL) {
+        LOOP_WAIT("an interrupt, in intr_wait");
         /*
          * Only a running thread, a firing timer or a device interrupt
          * can make another one runnable.

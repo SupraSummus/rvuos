@@ -99,6 +99,7 @@ unsigned intr_wait(void)
     const uint32_t mip_ext = 1u << IRQ_EXT_CAUSE;
     uint32_t ip;
     while (((ip = csr_read(mip)) & (MIP_MTIP | mip_ext)) == 0) {
+        LOOP_WAIT("an interrupt to be pending");
         __asm__ volatile("wfi");
     }
     unsigned pending = 0;

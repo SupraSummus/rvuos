@@ -14,6 +14,7 @@
 
 #include "csr.h"
 #include "timer.h"
+#include "work.h"
 
 #define CLINT_BASE     0x20001800u
 #define CLINT_TIMECTL  (CLINT_BASE + 0x04u)
@@ -41,6 +42,7 @@ static uint64_t mtime_read(void)
 {
     uint32_t hi, lo;
     do {
+        LOOP_WAIT("the high half to hold still across the read");
         hi = REG(CLINT_MTIME + 4);
         lo = REG(CLINT_MTIME);
     } while (REG(CLINT_MTIME + 4) != hi);

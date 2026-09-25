@@ -11,9 +11,11 @@ void process_activate(struct process *proc)
 {
     const struct pmp_image *img = &proc->pmp;
     for (unsigned i = 0; i < img->count; i++) {
+        LOOP_BOUND(PROCESS_REGION_SLOTS);
         pmp_set(i, img->addr[i], img->cfg[i]);
     }
     for (unsigned i = img->count; i < pmp_entry_count; i++) {
+        LOOP_BOUND(PMP_MAX_ENTRIES);
         pmp_clear(i);
     }
 }
@@ -29,6 +31,7 @@ static void rebuild_pmp(struct process *proc)
     struct pmp_image *img = &proc->pmp;
     img->count = 0;
     for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
+        LOOP_BOUND(PROCESS_REGION_SLOTS);
         const struct cap *s = &proc->slots[i];
         if (s->type != CAP_NONE) {
             img->addr[img->count] = pmp_napot_addr(s->a, s->b);
@@ -56,6 +59,7 @@ int process_install(struct process *proc, unsigned slot,
     }
     unsigned installed = 0;
     for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
+        LOOP_BOUND(PROCESS_REGION_SLOTS);
         const struct cap *s = &proc->slots[i];
         if (s->type != CAP_NONE) {
             if (ranges_overlap(base, size, s->a, s->b)) {

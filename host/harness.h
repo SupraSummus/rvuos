@@ -53,4 +53,10 @@ bool host_event(const struct replay_record *c);
  */
 bool host_driver_alive(void);
 
+#ifdef RVUOS_WORK
+/* Around each call in the harness fuzz-work: count its loops, then check their claims. */
+void work_begin(void);
+void work_end(void);
+#endif
+
 #endif

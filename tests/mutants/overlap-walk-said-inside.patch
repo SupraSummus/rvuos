@@ -1,0 +1,16 @@
+The walk over every process that installed_overlaps makes
+is said inside its loop over one process's slots, not in the walk itself,
+so the outer loop, the one that grows with the machine, says nothing of its bound.
+The code is the same, so only the loop check catches it.
+
+diff --git a/kernel/pool.c b/kernel/pool.c
+--- a/kernel/pool.c
++++ b/kernel/pool.c
+@@ -173,3 +173,2 @@
+     for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
+-        LOOP_WALK(installed_overlaps);
+         if (o->type != CAP_PROCESS) {
+@@ -179,2 +178,3 @@
+         for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
++            LOOP_WALK(installed_overlaps);
+             LOOP_BOUND(PROCESS_REGION_SLOTS);

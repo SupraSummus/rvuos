@@ -1,0 +1,12 @@
+OP_REGION_TO_POOL zeroes the whole range, work in its size,
+and no longer says so where it calls memset,
+so the walk in the table of "Bounded work" hides behind a call.
+It zeroes the same memory, so only the loop check catches it.
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -147,3 +147,2 @@
+         /* From here on the memory is the kernel's. */
+-        CALL_WALK(memset);
+         memset(p2v(base), 0, size);

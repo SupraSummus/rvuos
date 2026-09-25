@@ -89,9 +89,10 @@ void klog_dump(void (*put)(char))
     }
 }
 
-void kputs(const char *s)
+void (kputs)(const char *s)
 {
     while (*s != '\0') {
+        LOOP_ARG(kputs, s);
         kputc(*s++);
     }
 }
@@ -101,6 +102,7 @@ void kput_hex(uint32_t v)
     static const char digits[] = "0123456789abcdef";
     kputs("0x");
     for (int shift = 28; shift >= 0; shift -= 4) {
+        LOOP_BOUND(8);
         kputc(digits[(v >> shift) & 0xf]);
     }
 }
