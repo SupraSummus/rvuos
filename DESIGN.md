@@ -209,7 +209,7 @@ Consequences that shape the design:
   and no operation moves data between processes,
   so the kernel never dereferences an address userspace chose.
   The one place it writes user memory at all
-  is zeroing a range that becomes a pool,
+  is a range that becomes a pool, where it writes its objects,
   and that range belongs to the kernel from that moment on.
 
 ### Timer
@@ -389,7 +389,7 @@ and the `KernelPool` capability takes its place in the derivation tree,
 so whoever could revoke the region can revoke the pool capability.
 Copies beside the region and the regions above it survive
 and fail the overlap check while the pool exists.
-The kernel zeroes the memory before use.
+The kernel zeroes each object as it allocates it, not the whole region.
 
 The pool's own descriptor is the first object in the pool's memory,
 so the kernel keeps no per-pool state outside the pool
@@ -473,9 +473,11 @@ so those two checks are the whole of it:
 the caller keeps what it runs on and the table the memory comes back to.
 The first is also why the boot pool can never be destroyed:
 every pool lies below it.
-The memory is zeroed on the way out,
-because it is about to be user memory again
-and still holds other processes' capability tables.
+Its objects are zeroed on the way out,
+because the memory is about to be user memory again
+and they hold other processes' capability tables.
+The rest comes back as it went in,
+so a lender clears a region before it lends it if the borrower should not read it.
 It comes back as a `Region` capability
 with the rights the region carried when it became a pool,
 which the pool records for that purpose,
@@ -950,7 +952,7 @@ The kernel:
 A device range is granted read and write, never execute,
 and can never become a pool:
 `OP_REGION_TO_POOL` refuses a range outside RAM,
-because the kernel zeroes a pool and writes objects into it,
+because the kernel writes objects into a pool,
 which on a device would drive its registers from machine mode.
 
 Every range the root task is granted is a block,
@@ -1077,7 +1079,10 @@ every host harness requires a stopped call to have taken a node or a link away.
 | `pool_overlaps` | `OP_PROCESS_INSTALL` | open decision 14 |
 | `pool_overlaps`, `installed_overlaps` | `OP_REGION_TO_POOL` | open decision 14 |
 | `cap_revoke_range`, `pool_destroy`, `pool_under`, `pool_overlaps`, `cap_parent` | pool destroy | open decision 14, and preemption |
-| `memset` | `OP_REGION_TO_POOL`, pool destroy | zero each object as it is allocated, and on destroy only what was |
+
+**Zeroing goes with the object.**
+`pool_alloc` zeroes each object, at most `OBJ_MAX_SIZE`, a table of `CAPTABLE_MAX_SLOTS`,
+and a destroy zeroes each object as it forgets it, paid for by the call that made it.
 
 A pool destroy revokes what the dying pools held with `cap_revoke_below` too,
 but does not stop:

@@ -66,6 +66,7 @@ Design decisions behind these items live in `DESIGN.md`.
    ABI changes come last.
    Done: the line table, the installed region's slot index, the wait queue,
    the run queue, the count of armed sources for the stall in `wfi`,
+   zeroing each object as it is allocated and on destroy only what was,
    the check that every loop a trap runs says what bounds it,
    `tools/loop-bounds.py`, a predecessor link per slot,
    and revoke, delete below a root and the conversions preempted and restarted;
@@ -73,17 +74,14 @@ Design decisions behind these items live in `DESIGN.md`.
    - The pool destroy preempted too, once open decision 14 says what its walk is.
    - `Untyped` and `Frame`, open decision 14, once its open questions are decided.
    - The timer queue, once "Timers are the open part" is decided.
-   - Zeroing: `OP_REGION_TO_POOL` zeroes the whole range and a destroy the whole pool.
-     A pool hands out memory from `used` up, so each object could be zeroed as it is allocated,
-     and a destroy could zero only below `used`.
-     `pool_alloc` then takes `CALL_ARG`, and a `CapTable`'s size is its creator's choice:
-     decide whether "the size of an object" in the rule of "Bounded work" covers it.
 
 ## Verification
 
 - `fuzz-work` counts the loop annotations' claims only where the corpus reaches.
   The host's `irq_claim` never returns a line,
   so nothing counts the `IRQ_LINES` bound of `sched_claim_interrupts`.
+- That a destroy zeroes its objects is checked only by reading `pool_clear`:
+  no harness reads the memory a process gets back.
 - `tools/loop-bounds.py` knows clang's jump tables by their shape;
   any other jump through a register may make up a loop, which fails the link, never passes it.
 - That the count of armed sources leaves the log's line out is checked by reading `irq_set_bits`.

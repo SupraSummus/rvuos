@@ -1,0 +1,28 @@
+An object is handed out holding what its memory held before the pool took it,
+since pool_alloc no longer zeroes it.
+Boot zeroes the boot pool as it once did, so the root task starts clean,
+but a pool made later lies on RAM the host keeps from one input to the next,
+as a warm reset does, holding the objects of the input before:
+a table's slots, a thread's links and a process's regions start as garbage,
+so a fresh kernel refuses the replay's own prologue.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: a fresh kernel refused prologue record N with N
+
+diff --git a/kernel/boot.c b/kernel/boot.c
+index 9caa724..9281dce 100644
+--- a/kernel/boot.c
++++ b/kernel/boot.c
+@@ -18,2 +18,3 @@ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
+ {
++    memset(p2v(boot_pool_base), 0, boot_pool_size);
+     struct pool *pool = pool_create(boot_pool_base, boot_pool_size, RIGHT_ALL, NULL);
+diff --git a/kernel/pool.c b/kernel/pool.c
+index 205bbe8..263c9df 100644
+--- a/kernel/pool.c
++++ b/kernel/pool.c
+@@ -108,4 +108,2 @@ void *pool_alloc(struct pool *pool, uint8_t type, size_t size)
+     /* The memory holds what it held before the pool took it. */
+-    CALL_BOUND(OBJ_MAX_SIZE);
+-    memset(obj, 0, size);
+     obj->type = type;

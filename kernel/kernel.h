@@ -13,7 +13,7 @@
 /*
  * True if [base, base + size) lies within RAM.
  * Kernel objects live in RAM alone:
- * a pool is zeroed and written by the kernel,
+ * the kernel writes the objects of a pool,
  * which on a device range would drive registers from machine mode.
  */
 static inline bool ram_contains(uint32_t base, uint32_t size)

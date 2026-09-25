@@ -39,6 +39,23 @@ bool pool_under(const struct pool *pool, const struct pool *ancestor)
     return false;
 }
 
+/*
+ * The memory is about to be user memory again, and its objects hold other processes' tables.
+ * The descriptor goes last, since the walk reads it.
+ */
+static void pool_clear(struct pool *pool)
+{
+    for (struct obj_header *o = pool_first(pool), *next; o != NULL; o = next) {
+        LOOP_PAID(pool_clear, object, "an object of the pool that goes");
+        next = pool_next(pool, o);
+        sched_forget(o);
+        CALL_BOUND(OBJ_MAX_SIZE);
+        memset(o, 0, obj_size(o));
+    }
+    CALL_BOUND(sizeof(struct pool));
+    memset(pool, 0, sizeof(*pool));
+}
+
 void pool_destroy(struct pool *pool)
 {
     /*
@@ -67,15 +84,12 @@ void pool_destroy(struct pool *pool)
             continue;
         }
         /* Nothing below may fail: the pool is going. */
-        sched_forget_pool(p);
         if (kept != NULL) {
             kept->next = p->next;
         } else {
             pool_list = next;
         }
-        /* The memory is about to be user memory again, holding other processes' tables. */
-        CALL_WALK(memset);
-        memset(p2v(p->base), 0, p->size);
+        pool_clear(p);
     }
 }
 
@@ -86,12 +100,14 @@ bool pool_fits(const struct pool *pool, size_t size)
 
 void *pool_alloc(struct pool *pool, uint8_t type, size_t size)
 {
-    if (!pool_fits(pool, size)) {
+    if (size > OBJ_MAX_SIZE || !pool_fits(pool, size)) {
         return NULL;
     }
     struct obj_header *obj = p2v(pool->base + pool->used);
     pool->used += align_up((uint32_t)size, OBJ_ALIGN);
-    /* Pool memory is zeroed on creation and never reused before destroy. */
+    /* The memory holds what it held before the pool took it. */
+    CALL_BOUND(OBJ_MAX_SIZE);
+    memset(obj, 0, size);
     obj->type = type;
     obj->pool = pool->base;
     return obj;

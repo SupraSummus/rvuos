@@ -195,57 +195,54 @@ struct irq *line_binding(uint32_t line)
     return line_irq[line] != 0 ? p2v(line_irq[line]) : NULL;
 }
 
-void sched_forget_pool(struct pool *pool)
+void sched_forget(struct obj_header *o)
 {
-    for (struct obj_header *o = pool_first(pool); o != NULL; o = pool_next(pool, o)) {
-        LOOP_PAID(sched_forget_pool, object, "an object of the pool that goes");
-        switch (o->type) {
-        case CAP_NOTIFICATION: {
-            struct notification *ntfn = (struct notification *)o;
-            /*
-             * The notification is gone, so the wait cannot be answered.
-             * The thread learns that the way every other call learns it.
-             */
-            while (ntfn->waiters != 0) {
-                LOOP_PAID(sched_forget_pool, waiter, "a thread that waited, by a call of its own");
-                struct thread *t = p2v(ntfn->waiters);
-                unwait(t);
-                t->frame.regs[REG_A0] = KERR_INVALID_CAP;
-                t->frame.regs[REG_A1] = 0;
-                sched_ready(t);
-            }
-            break;
+    switch (o->type) {
+    case CAP_NOTIFICATION: {
+        struct notification *ntfn = (struct notification *)o;
+        /*
+         * The notification is gone, so the wait cannot be answered.
+         * The thread learns that the way every other call learns it.
+         */
+        while (ntfn->waiters != 0) {
+            LOOP_PAID(sched_forget, waiter, "a thread that waited, by a call of its own");
+            struct thread *t = p2v(ntfn->waiters);
+            unwait(t);
+            t->frame.regs[REG_A0] = KERR_INVALID_CAP;
+            t->frame.regs[REG_A1] = 0;
+            sched_ready(t);
         }
-        case CAP_THREAD: {
-            /*
-             * The thread is gone, and the ring it is on may live on in another pool.
-             * A ready one is not running, since the caller does not live here, so it is queued.
-             */
-            struct thread *t = (struct thread *)o;
-            if (t->state == THREAD_WAITING) {
-                unwait(t);
-            } else if (t->state == THREAD_READY) {
-                ring_remove(&run_queue, t);
-            }
-            break;
+        break;
+    }
+    case CAP_THREAD: {
+        /*
+         * The thread is gone, and the ring it is on may live on in another pool.
+         * A ready one is not running, since the caller does not live here, so it is queued.
+         */
+        struct thread *t = (struct thread *)o;
+        if (t->state == THREAD_WAITING) {
+            unwait(t);
+        } else if (t->state == THREAD_READY) {
+            ring_remove(&run_queue, t);
         }
-        case CAP_TIMER:
-            /* The timer is gone and will not fire, so it is no source. */
-            timer_set_bits((struct timer *)o, 0);
-            break;
-        case CAP_IRQ: {
-            irq_set_bits((struct irq *)o, 0);
-            /* The object that would receive the interrupt is gone; the log's line has no controller. */
-            uint32_t line = ((struct irq *)o)->line;
-            if (line != LOG_IRQ_LINE) {
-                irq_enable(line, false);
-            }
-            line_irq[line] = 0;
-            break;
+        break;
+    }
+    case CAP_TIMER:
+        /* The timer is gone and will not fire, so it is no source. */
+        timer_set_bits((struct timer *)o, 0);
+        break;
+    case CAP_IRQ: {
+        irq_set_bits((struct irq *)o, 0);
+        /* The object that would receive the interrupt is gone; the log's line has no controller. */
+        uint32_t line = ((struct irq *)o)->line;
+        if (line != LOG_IRQ_LINE) {
+            irq_enable(line, false);
         }
-        default:
-            break;
-        }
+        line_irq[line] = 0;
+        break;
+    }
+    default:
+        break;
     }
 }
 
