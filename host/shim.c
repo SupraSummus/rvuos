@@ -9,6 +9,7 @@
 #include "harness.h"
 #include "irq.h"
 #include "klog.h"
+#include "timer.h"
 #include "trap.h"
 
 _Static_assert(HOST_RAM_BASE == RAM_BASE && HOST_RAM_SIZE == RAM_SIZE,
@@ -78,6 +79,12 @@ unsigned intr_wait(void)
 {
     /* Reached only untraced with an Irq armed, which the harness never sets up. */
     kpanic("the host build has no clock and no devices to wait for");
+}
+
+/* The host is QEMU's board, whose counter runs at a rate fixed in board.h. */
+uint32_t timer_counter_hz(void)
+{
+    return COUNTER_HZ;
 }
 
 /* The worst case: every preemptible call stops after its first step. */

@@ -6,16 +6,16 @@
 #include <stdint.h>
 
 #include "csr.h"
+#include "layout.h"
 #include "timer.h"
 #include "work.h"
 
 #define CLINT_BASE     0x02000000u
 #define CLINT_MTIMECMP (CLINT_BASE + 0x4000u) /* hart 0 */
 #define CLINT_MTIME    (CLINT_BASE + 0xbff8u)
+_Static_assert(CLINT_MTIME == COUNTER_ADDR, "the clock names the counter the tick is made of");
 
-/* QEMU virt runs mtime at 10 MHz. */
-#define TIMEBASE_HZ 10000000u
-#define TICK_CYCLES (TIMEBASE_HZ / TIMER_HZ)
+#define TICK_CYCLES (COUNTER_HZ / TIMER_HZ)
 
 #define REG(addr) (*(volatile uint32_t *)(addr))
 
@@ -46,6 +46,11 @@ static void mtimecmp_write(uint64_t v)
 void timer_ack(void)
 {
     mtimecmp_write(mtime_read() + TICK_CYCLES);
+}
+
+uint32_t timer_counter_hz(void)
+{
+    return COUNTER_HZ;
 }
 
 void timer_init(void)

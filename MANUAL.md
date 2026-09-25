@@ -105,6 +105,9 @@ What rvuos is not:
 - **Timers as signals.**
   A timer line is an interrupt line the tick raises once a delay has passed.
   Sleeping is arming a timer line and waiting.
+- **A clock as a capability.**
+  A process given the `Clock` reads the machine's counter with loads through a read-only region;
+  one given neither a clock nor a timer line has no clock to read.
 - **Interrupts as signals.**
   An `Irq` binds a hardware line to a notification.
   Lines are handed out as capabilities like memory is.
@@ -152,6 +155,7 @@ Memory map:
 
 | Range | Size | What |
 |---|---|---|
+| `0x0200BFF8` | 8 B | the CLINT's `mtime`, 10 MHz, read only through `BOOT_CAP_CLOCK` |
 | `0x10000000` | 256 B | 16550 UART registers, granted to the root task |
 | `0x80000000` to `0x800FF000` | just under 1 MiB | kernel code, data, stack and the boot pool |
 | `0x800FF000` | 4 KiB | the kernel log: a 32-byte header and the ring |
@@ -184,6 +188,7 @@ Memory map:
 
 | Range | Size | What |
 |---|---|---|
+| `0x20001C08` | 8 B | the CLINT's `UTIME`, a read-only copy of `mtime` at the CPU clock, through `BOOT_CAP_CLOCK` |
 | `0x6000F000` | 256 B | USB Serial/JTAG controller registers, granted to the root task |
 | `0x40800000` to `0x4081F000` | just under 128 KiB | kernel code, data, stack and the boot pool |
 | `0x4081F000` | 4 KiB | the kernel log: a 32-byte header and the ring |
@@ -356,7 +361,7 @@ The tree grows in these ways:
 |---|---|
 | `OP_CAP_DERIVE` | below the source |
 | `OP_CAP_COPY` | beside the source, under the source's parent; a copy of a root is a root |
-| `OP_REGION_CARVE`, `OP_IRQ_CARVE` | below the invoked capability |
+| `OP_REGION_CARVE`, `OP_IRQ_CARVE`, `OP_CLOCK_REGION` | below the invoked capability |
 | `OP_PROCESS_INSTALL` | the installed region hangs below the `Region` capability |
 | `OP_POOL_ALLOC` of a `Process` | the process's hold on its table hangs below the `CapTable` capability |
 | `OP_REGION_TO_POOL`, `OP_IRQ_BIND` | where the consumed capability hung |
@@ -395,8 +400,9 @@ Programs are encouraged to keep the same convention.
 | `IrqLine` | `CAP_IRQ_LINE` | none: the slot holds the first line and a count | boot, `OP_IRQ_CARVE` |
 | `Irq` | `CAP_IRQ` | one line bound to a notification, with a deadline on a timer line | `OP_IRQ_BIND` |
 | `Debug` | `CAP_DEBUG` | none | boot |
+| `Clock` | `CAP_CLOCK` | none: there is one counter | boot |
 
-`Region`, `IrqLine` and `Debug` capabilities have no kernel object behind them.
+`Region`, `IrqLine`, `Debug` and `Clock` capabilities have no kernel object behind them.
 Carving a region or a line range is a pure table operation
 that touches no kernel memory,
 which is why the root task can hand out memory and lines
@@ -621,10 +627,33 @@ A wait with a timeout is the same two calls with one more bit:
 give the device one bit on the notification and the timer line another,
 and look at which bits came back.
 
-Userspace has no clock of its own:
-the kernel leaves the counters disabled for user mode, so `rdtime` traps.
 A timer line fires once, so a periodic task arms it again each time it wakes,
-and drifts by what each wake costs; `DESIGN.md`, open decision 16.
+and drifts by what each wake costs, unless it holds the clock below
+and arms each delay as its next deadline less the time now;
+`DESIGN.md`, open decision 16.
+
+**The clock.**
+`BOOT_CAP_CLOCK` names the machine's counter, 64 bits counting up from boot.
+`OP_CLOCK_INFO` returns its rate in hertz and its address;
+`OP_CLOCK_REGION` derives a read-only `Region` holding it, which a creator installs like any region.
+Reading the counter is then a few loads and no system call:
+
+```c
+uint32_t hz, counter;
+rv_clock_info(CLOCK, &hz, &counter);
+rv_invoke(OP_CLOCK_REGION, CLOCK, COUNTER_REGION, 0, 0);
+rv_invoke(OP_PROCESS_INSTALL, PROCESS, 5, COUNTER_REGION, RIGHT_R);
+
+uint64_t start = rv_counter_read(counter);
+work();
+uint64_t ticks = rv_counter_read(counter) - start;   /* ticks / hz seconds */
+```
+
+The rate is the board's, 10 MHz on QEMU and the CPU clock on the ESP32-C6,
+so a program takes it from `OP_CLOCK_INFO`.
+The time is the machine's, not the thread's: it includes other threads' slices.
+Revoking below a `Clock` capability uninstalls every region derived through it.
+`rdtime` traps on every board.
 
 ### 5.9 Interrupts
 
@@ -977,7 +1006,22 @@ at the first tick that surely lies past it, section 5.8;
 elsewhere `a2` is unused.
 A delay longer than 32 bits of microseconds, about 71 minutes, is several calls.
 
-### 6.12 Operation codes in numeric order
+### 6.12 Operations on `Clock`
+
+The `Clock` capability needs no particular right.
+
+**`OP_CLOCK_INFO` (25).**
+Returns `a1` = the counter's rate in hertz, `a2` = the address of its low word;
+the high word is at `a2 + 4`.
+The rate does not change while the machine runs.
+
+**`OP_CLOCK_REGION` (26).**
+`a1` = destination slot in the caller's table.
+Produces a `Region` capability, read only, to the smallest region that holds the counter,
+hanging below the invoked capability.
+On a PMP grain coarser than eight bytes the region holds the registers beside the counter too.
+
+### 6.13 Operation codes in numeric order
 
 | Code | Operation | Type |
 |---|---|---|
@@ -1004,8 +1048,10 @@ A delay longer than 32 bits of microseconds, about 71 minutes, is several calls.
 | 22 | `OP_DEBUG_IRQ` | `Debug` |
 | 23 | `OP_CAP_REVOKE` | `CapTable` |
 | 24 | `OP_CAP_DERIVE` | `CapTable` |
+| 25 | `OP_CLOCK_INFO` | `Clock` |
+| 26 | `OP_CLOCK_REGION` | `Clock` |
 
-`OP_COUNT` is 25, one above the highest code.
+`OP_COUNT` is 27, one above the highest code.
 
 ## 7. What the root task starts with
 
@@ -1036,14 +1082,16 @@ and drops into user mode with:
 | 11 | `BOOT_CAP_UART` | `Region`: the board's console registers, a 16550 on QEMU and the USB Serial/JTAG controller on the ESP32-C6 | read, write |
 | 12 | `BOOT_CAP_LOG` | `Region`: the kernel log's header and ring | read, write |
 | 13 | `BOOT_CAP_TIMER_LINES` | `IrqLine`: every timer line, `TIMER_LINES` of them | write |
+| 14 | `BOOT_CAP_CLOCK` | `Clock`: the machine's counter | all |
 
-`BOOT_CAP_COUNT` is 14; a root task puts its own slots from there upwards.
+`BOOT_CAP_COUNT` is 15; a root task puts its own slots from there upwards.
 
 The root task's own table, process and thread take about 1.7 KiB of the boot pool,
 so roughly 2.3 KiB remain for objects the root task allocates from `BOOT_CAP_POOL`.
 Anything larger goes into a pool the root task makes out of free RAM.
 
 Device ranges are granted read and write, never execute,
+the counter behind `BOOT_CAP_CLOCK` read only,
 and can never become a pool.
 The log region can be installed but never pooled either.
 
@@ -1262,8 +1310,6 @@ These are documented gaps, not surprises;
 - **No priorities and no yield.**
   Round-robin on a tick is the whole policy;
   `DESIGN.md`, open decisions 9 and 10.
-- **No clock in userspace.**
-  `rdtime` traps; count timer signals instead.
 - **No badged notifications.**
   A client's identity to a server is a convention, not kernel-enforced;
   open decision 6.

@@ -13,6 +13,7 @@
 #include <stdint.h>
 
 #include "csr.h"
+#include "layout.h"
 #include "timer.h"
 #include "work.h"
 
@@ -20,6 +21,9 @@
 #define CLINT_TIMECTL  (CLINT_BASE + 0x04u)
 #define CLINT_MTIME    (CLINT_BASE + 0x08u)
 #define CLINT_MTIMECMP (CLINT_BASE + 0x10u)
+/* The copy of mtime user mode reads, 0x400 bytes up among the user timer's registers. */
+#define CLINT_UTIME    (CLINT_BASE + 0x408u)
+_Static_assert(CLINT_UTIME == COUNTER_ADDR, "the clock names the counter the tick is made of");
 #define TIMECTL_COUNTER_EN  (1u << 0)
 #define TIMECTL_TIMERINT_EN (1u << 1)
 
@@ -72,6 +76,12 @@ static uint64_t systimer_read(void)
 void timer_ack(void)
 {
     mtimecmp_write(mtime_read() + tick_cycles);
+}
+
+/* The rate is measured over one tick, so it is as exact as the loop below. */
+uint32_t timer_counter_hz(void)
+{
+    return tick_cycles * TIMER_HZ;
 }
 
 /* One tick of the system timer, counted in mtime: the tick's length, whatever the CPU clock. */

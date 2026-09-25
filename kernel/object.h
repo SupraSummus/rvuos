@@ -199,13 +199,13 @@ _Static_assert(sizeof(struct irq) == 24, "object layout");
 
 /*
  * True if a capability of this type names a kernel object.
- * Regions and interrupt lines name hardware, and the debug capability nothing,
+ * Regions, interrupt lines and the clock name hardware, and the debug capability nothing,
  * so they carry no address to check or to revoke.
  */
 static inline bool cap_has_object(uint8_t type)
 {
     return type != CAP_NONE && type != CAP_REGION && type != CAP_IRQ_LINE && type != CAP_DEBUG &&
-           type != CAP_INSTALLED;
+           type != CAP_CLOCK && type != CAP_INSTALLED;
 }
 
 static inline struct pool *obj_pool(const struct obj_header *o) { return p2v(o->pool); }
@@ -522,7 +522,9 @@ struct granted_range {
     uint32_t size;
     uint8_t rights;
 };
-#define GRANTED_RANGES 6
+#define GRANTED_RANGES 7
+/* The counter's block, read only, which OP_CLOCK_REGION hands out. */
+#define GRANT_COUNTER 6
 extern struct granted_range boot_granted[GRANTED_RANGES];
 extern struct pool *boot_pool;
 

@@ -8,7 +8,7 @@ Report: irq is missing from the line table
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -469,7 +469,6 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
+@@ -487,7 +487,6 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
          struct irq *irq = pool_alloc(pool, CAP_IRQ, sizeof(*irq));
          irq->ntfn = v2p(ntfn);
          irq->line = first;

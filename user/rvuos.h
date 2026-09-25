@@ -93,6 +93,38 @@ static inline uint32_t rv_irq_set(uint32_t irq_cap, uint32_t bits)
     return rv_invoke(OP_IRQ_SET, irq_cap, bits, 0, 0);
 }
 
+/* OP_CLOCK_INFO: the counter's rate in Hz and the address of its low word. */
+static inline uint32_t rv_clock_info(uint32_t clock_cap, uint32_t *hz, uint32_t *counter)
+{
+    register uint32_t r_a0 __asm__("a0") = clock_cap;
+    register uint32_t r_a1 __asm__("a1");
+    register uint32_t r_a2 __asm__("a2");
+    register uint32_t r_a7 __asm__("a7") = OP_CLOCK_INFO;
+    __asm__ volatile("ecall"
+                     : "+r"(r_a0), "=r"(r_a1), "=r"(r_a2)
+                     : "r"(r_a7)
+                     : "memory", "a3", "a4", "a5", "a6");
+    *hz = r_a1;
+    *counter = r_a2;
+    return r_a0;
+}
+
+/*
+ * The counter, from the address OP_CLOCK_INFO gave, in a region OP_CLOCK_REGION gave.
+ * No system call: the high word, the low word, and the high word again,
+ * until the high word held still across the low one.
+ */
+static inline uint64_t rv_counter_read(uint32_t counter)
+{
+    const volatile uint32_t *word = (const volatile uint32_t *)counter;
+    uint32_t hi, lo;
+    do {
+        hi = word[1];
+        lo = word[0];
+    } while (word[1] != hi);
+    return ((uint64_t)hi << 32) | lo;
+}
+
 static inline void rv_putc(uint32_t debug_cap, char c)
 {
     rv_invoke(OP_DEBUG_PUTC, debug_cap, (uint32_t)c, 0, 0);

@@ -8,7 +8,7 @@ Caught-by: loop-bounds
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -150,6 +150,7 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
+@@ -168,6 +168,7 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
           * It is not zeroed here, which would be work in its size: pool_alloc zeroes each object.
           * The new pool hangs below the caller's own, and dies with it.
           */

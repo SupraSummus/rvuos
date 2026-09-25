@@ -8,7 +8,7 @@ Report: region capability is not a NAPOT block
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -107,7 +107,7 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
+@@ -125,7 +125,7 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
          uint32_t off = arg[1];
          uint32_t len = arg[2];
          /* A block within the region, so that every region capability is one NAPOT entry. */

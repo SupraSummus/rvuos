@@ -38,6 +38,13 @@
 #define UART_SIZE U32(0x100)
 
 /*
+ * The counter BOOT_CAP_CLOCK names: UTIME, the CLINT's read-only copy of mtime for user mode,
+ * at the CPU clock timer_init measures; ESP32-C6 TRM, "Timer Counter and Interrupt".
+ * The core has no time CSR. Untried on the chip; see TODO.md.
+ */
+#define COUNTER_ADDR U32(0x20001c08)
+
+/*
  * Interrupt line identifiers lie below IRQ_LINES; see irq.h.
  * A line is an interrupt matrix source, numbered as in Espressif's soc/interrupts.h;
  * the chip has 77 of them.

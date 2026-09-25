@@ -230,6 +230,10 @@ and which counts at the CPU clock the ROM left;
 the kernel measures one tick of it against the 16 MHz system timer at boot
 rather than trust a clock it did not set.
 
+A process reads the counter through a read-only region at `COUNTER_ADDR`, not with `rdtime`:
+the ESP32-C6 has no `time` CSR, but its CLINT has `UTIME`, a read-only copy of `mtime` for user mode.
+On QEMU the kernel clears `mcounteren` at boot, so `rdtime` traps on every board; see "Time".
+
 ### Interrupt controller
 
 Device interrupts reach the core as one signal, the machine external interrupt,
@@ -348,6 +352,8 @@ before it has created a single pool.
 An `IrqLine` capability has the same shape for the same reason:
 its words are the first line and the count, there is no object,
 and the root task hands lines out as it hands out memory.
+A `Clock` capability, like `Debug`, has neither object nor content:
+there is one counter on the machine.
 
 ### Object types
 
@@ -362,6 +368,7 @@ and the root task hands lines out as it hands out memory.
 | `IrqLine` | A range of interrupt lines: the log's and the controller's, or the timer lines. Bound one at a time into an `Irq`. |
 | `Irq` | One line bound to a notification. Signals it when the line fires. |
 | `Debug` | A byte into the kernel's log, and machine halt, for bring-up and tests. No object. |
+| `Clock` | The machine's counter: its rate, and the one region it can be read through. No object. |
 
 Every object's size follows from its type,
 a `CapTable` from its slot count,
@@ -511,6 +518,7 @@ since an object owes nothing to the pool capability it was allocated through.
 A carve hangs below the region or line it was carved from,
 a derivation below its source,
 an installed region below the capability it was installed from,
+the counter's region below the clock it was derived through,
 and a process's table slot below the `CapTable` capability the process was made with.
 A copy stands beside its source, under the same parent,
 so a process can duplicate what it holds without making one copy the master of the other;
@@ -764,6 +772,24 @@ would cost the kernel nothing and remains the right shape for a board that has o
 the timer lines are what make a sleep one system call
 rather than a round trip to that server.
 
+**Reading the time.**
+A timer line says that a delay has passed, not what time it is.
+The `Clock` capability gives the time:
+`OP_CLOCK_INFO` returns the counter's rate and address,
+and `OP_CLOCK_REGION` derives a read-only `Region` holding the counter, below the clock.
+A process with that region installed reads the time with loads, without a trap.
+The rate is the board's, and on the ESP32-C6 measured at boot, so a program takes it from the clock.
+The region is the smallest block holding the counter's two words;
+on a PMP grain coarser than eight bytes it also shows the timer registers beside them, read only.
+
+**Why a capability.**
+The time is authority, and goal 2 allows no ambient authority:
+a process given no clock and no timer line cannot tell time passing,
+unless it builds a clock from a second thread or learns the time from someone who has one.
+Gating `rdtime` would have needed `mcounteren` switched per process, and the ESP32-C6 has neither.
+A region already carries rights, derivation and revoke, so the clock adds one type and no object.
+The rate alone tells nothing about time, so it has no capability of its own.
+
 ## Scheduling
 
 **The kernel keeps a run queue.**
@@ -967,12 +993,14 @@ The kernel:
 5. hands the root task capabilities to the block of RAM the board sets aside for it,
    to the UART's registers,
    to the kernel's log,
+   to the machine's counter as a `Clock`,
    and to every line of the interrupt controller with the log's line before them
    (later also flash and other device ranges),
 6. programs the tick, masks every interrupt line,
    and drops to user mode into the root task.
 
 A device range is granted read and write, never execute,
+the counter read only,
 and can never become a pool:
 `OP_REGION_TO_POOL` refuses a range outside RAM,
 because the kernel writes objects into a pool,
@@ -1172,6 +1200,7 @@ a NAPOT block no smaller than the smallest region,
 with rights no greater than the root task received for it,
 or a range of lines the interrupt controller has, the log's among them,
 with no more than the right to bind,
+or the debug capability or the clock, which name no object,
 or a live kernel object of the capability's own type.
 Every process's table slot is empty or names a live table.
 
@@ -1190,7 +1219,8 @@ A node is derived from its parent:
 the same object with no more rights,
 a range within the parent's range with no more rights,
 or an object built on the parent's range,
-a pool on a region, an `Irq` on a line, an installed region on a region.
+a pool on a region, an `Irq` on a line, an installed region on a region,
+or the counter's block, or a region installed from it, below a clock.
 A revoke or a delete stopped for an interrupt leaves such a forest too,
 since every step of theirs does; see "Bounded work".
 
@@ -1722,10 +1752,21 @@ until the maintainer decides otherwise.
 
 16. **Drift of a periodic timer.**
     Working default: a timer line fires once, and a periodic task arms it again when it wakes,
-    so each period counts from the set and the task drifts by the wait for the processor;
-    userspace has no clock to take the drift off.
+    so each period counts from the set and the task drifts by the wait for the processor.
+    A task that holds the clock can take the drift off itself,
+    arming each delay as its next deadline less the counter's reading, rounded to the tick.
     `OP_IRQ_SET` could take a flag that counts the delay from the last deadline instead,
     which keeps the line one-shot.
     A periodic mode is affordable too, since the tick fires at most `TIMER_LINES` lines,
     but periods fired before the thread wakes merge into one signal unseen.
     Decide with the first task that needs a steady period.
+
+17. **CPU time per thread.**
+    Working default: none; the clock gives the machine's time, which includes other threads' slices.
+    Only the kernel sees a switch, so only it can count:
+    one read of the counter per switch, added to the thread leaving, eight bytes per thread.
+    Reading a thread's time would be an operation on the clock that names a thread,
+    because a thread that can read its own time has a clock.
+    A read of the counter by system call could join it,
+    for a board whose counter no region can show, or to spare a region slot.
+    Decide with the first program that needs it.
