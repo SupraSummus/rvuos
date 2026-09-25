@@ -6,15 +6,19 @@ Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
 Report: armed log irq while the log has bytes untaken
 
 diff --git a/kernel/klog.c b/kernel/klog.c
-index 722213d..e8ea9a8 100644
 --- a/kernel/klog.c
 +++ b/kernel/klog.c
-@@ -63,8 +63,3 @@ void klog_append(char c)
+@@ -51,13 +51,3 @@
      header->head++;
 -    if (quiet) {
 -        struct irq *irq = line_binding(LOG_IRQ_LINE);
+-        /*
+-         * The line is high and an Irq is armed on it: it hears once and is disarmed,
+-         * exactly as sched_interrupt treats a device's line.
+-         * There is no controller to mask; disarmed is masked.
+-         */
 -        if (irq != NULL && irq_armed(irq)) {
--            klog_signal(irq);
+-            irq_signal(irq);
 -        }
 -    }
 +    (void)quiet;

@@ -59,11 +59,12 @@ static inline int replay_passes(const struct replay_record *r, unsigned me)
 #define REPLAY_LOG_SLOT 6
 
 /* Capability slots the setup fills, above the boot capabilities, in both tables. */
-#define REPLAY_CAP_NOTIFY  13
-#define REPLAY_CAP_THREAD  14 /* the second thread */
-#define REPLAY_CAP_POOL    15 /* the second thread's pool; first the region it is made of */
-#define REPLAY_CAP_TABLE   16 /* the second thread's table */
-#define REPLAY_CAP_PROCESS 17 /* the second thread's process */
+#define REPLAY_CAP_NOTIFY  14
+#define REPLAY_CAP_THREAD  15 /* the second thread */
+#define REPLAY_CAP_POOL    16 /* the second thread's pool; first the region it is made of */
+#define REPLAY_CAP_TABLE   17 /* the second thread's table */
+#define REPLAY_CAP_PROCESS 18 /* the second thread's process */
+_Static_assert(REPLAY_CAP_NOTIFY == BOOT_CAP_COUNT, "the setup's slots follow the boot capabilities");
 /* The third thread, stopped until a record resumes it: the last slot, which the corpus leaves alone. */
 #define REPLAY_CAP_THIRD   (REPLAY_TABLE_SLOTS - 1)
 
@@ -116,6 +117,7 @@ static const struct replay_record replay_prologue[] = {
     REPLAY_COPY(BOOT_CAP_IRQ_LINES),
     REPLAY_COPY(BOOT_CAP_UART),
     REPLAY_COPY(BOOT_CAP_LOG),
+    REPLAY_COPY(BOOT_CAP_TIMER_LINES),
     REPLAY_COPY(REPLAY_CAP_NOTIFY),
     REPLAY_COPY(REPLAY_CAP_THREAD),
     REPLAY_COPY(REPLAY_CAP_POOL),

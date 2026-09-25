@@ -69,11 +69,11 @@ Design decisions behind these items live in `DESIGN.md`.
    zeroing each object as it is allocated and on destroy only what was,
    the check that every loop a trap runs says what bounds it,
    `tools/loop-bounds.py`, a predecessor link per slot,
-   and revoke, delete below a root and the conversions preempted and restarted;
+   revoke, delete below a root and the conversions preempted and restarted,
+   and the timer lines, which the tick looks at instead of every pool;
    `DESIGN.md`, "Bounded work".
    - The pool destroy preempted too, once open decision 14 says what its walk is.
    - `Untyped` and `Frame`, open decision 14, once its open questions are decided.
-   - The timer queue, once "Timers are the open part" is decided.
 
 ## Verification
 
@@ -151,10 +151,12 @@ Design decisions behind these items live in `DESIGN.md`.
   the host takes as finished, and no host check sees it;
   `make qemu-replay` does, by the trace line the host then lacks.
 - The seeds under `tests/seeds` are binary and were written by hand.
-  Moving `BOOT_CAP_LOG` in took a one-off script that knew which argument
-  of which operation is a slot; a generator in the repository,
-  one line per record with the names from `rvuos/abi.h`,
-  would make the seeds readable and the next renumbering a rebuild.
+  Moving `BOOT_CAP_LOG` in, and `BOOT_CAP_TIMER_LINES` after it,
+  each took a one-off script that knew which argument of which operation is a slot,
+  run over the corpus too the second time.
+  A generator in the repository, one line per record with the names from `rvuos/abi.h`,
+  would make the seeds readable and the next renumbering a rebuild;
+  replay slots that start a few above `BOOT_CAP_COUNT` would spare the next one.
 
 ## Code
 
@@ -162,7 +164,7 @@ Design decisions behind these items live in `DESIGN.md`.
   so the host models it with one store into the header per event.
   A logger thread in the driver would make traced calls the host would have to follow.
 - A device interrupt wakes its driver but does not run it;
-  the driver waits its turn in the round like a thread the timer woke.
+  the driver waits its turn in the round like a thread a timer line woke.
   Measure that latency on the first board; it belongs to open decision 9.
 - `pmp_init` stops counting at the first hardwired entry.
   A core with writable entries above a hardwired one loses them;
@@ -187,13 +189,13 @@ Design decisions behind these items live in `DESIGN.md`.
   the driver's threads keep their tables in their own pools,
   and the demo gives its child no table elsewhere.
 - The same-pool rule for a thread and its process,
-  and for a timer or an `Irq` and its notification,
+  and for an `Irq` and its notification,
   could go the way a process's table went:
   hold the target by a capability slot the sweep clears,
   and give clearing it the effect it needs,
   as clearing an installed region rebuilds the PMP image.
   A thread whose process is taken leaves its queue and stops;
-  a timer or an `Irq` whose notification is taken disarms, and the `Irq` masks its line.
+  an `Irq` whose notification is taken disarms and masks its line.
   A thread could then live in a pool of its own and be revoked alone,
   and no structural pointer between objects would be left.
   Each costs sixteen bytes per object and one test on use.

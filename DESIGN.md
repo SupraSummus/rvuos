@@ -95,8 +95,8 @@ and tracks derivations in a capability derivation tree
 so that revoking a parent destroys every child.
 That tree is most of seL4's complexity.
 rvuos keeps the "kernel never allocates" principle
-and keeps a derivation tree, in a cheaper shape:
-two links per slot, no bookkeeping per object,
+and keeps a derivation tree, in a simpler shape:
+three links per slot, no bookkeeping per object,
 and a revoke that walks only what it takes;
 see "The derivation tree".
 Kernel memory comes back at pool granularity,
@@ -216,7 +216,7 @@ Consequences that shape the design:
 
 The machine timer, `mtime` and `mtimecmp`, is the kernel's clock
 and the kernel handles it directly.
-Userspace sees it only through `Timer` objects,
+Userspace sees it only through the timer lines,
 whose deadlines are counted in ticks; see "Time".
 Where the registers live and how fast they count is the board's business,
 so `timer.c` is per board, as `irq.c` is.
@@ -359,8 +359,7 @@ and the root task hands lines out as it hands out memory.
 | `Process` | A protection domain: a capability to its `CapTable`, a set of region slots, and its threads. |
 | `Thread` | An execution context inside a process: its registers and its state. |
 | `Notification` | A word of sticky signal bits. The only way a thread can stop and be started again. |
-| `Timer` | Signals a notification once a delay has passed. |
-| `IrqLine` | A range of interrupt lines, the log's among them. Bound one at a time into an `Irq`. |
+| `IrqLine` | A range of interrupt lines: the log's and the controller's, or the timer lines. Bound one at a time into an `Irq`. |
 | `Irq` | One line bound to a notification. Signals it when the line fires. |
 | `Debug` | A byte into the kernel's log, and machine halt, for bring-up and tests. No object. |
 
@@ -460,7 +459,7 @@ so a structural parent must live in the same pool as its child
 or outlive it.
 The kernel enforces the same-pool rule at allocation:
 a `Thread` must be allocated from the pool its `Process` lies in,
-and a `Timer` or an `Irq` from the pool its `Notification` lies in.
+and an `Irq` from the pool its `Notification` lies in.
 A thread waiting on a notification inside a destroyed pool
 is woken with `KERR_INVALID_CAP` and no bits,
 because the wait can no longer be answered.
@@ -553,9 +552,14 @@ a step per node, with no stack,
 the tree whole between any two steps,
 and the next step always at the node's first child.
 Only a pool destroy still walks a ring, to find a node's parent.
-seL4's pre-order list with a depth per node costs a word less,
-but adds a visible depth limit and renumbers a subtree on every delete;
-a parent link instead of the previous one would move for every child a delete hands up.
+seL4 keeps its tree as a list in pre-order, two links per slot and a word less,
+and stores no depth:
+whether the next slot lies below one is read off the two capabilities,
+their contents and a flag or two.
+rvuos cannot read it off,
+since a copy and a derivation of the same region can be the same bits;
+which one a slot is lives only in the links.
+A parent link instead of the previous one would move for every child a delete hands up.
 
 **What it does not do.**
 Revoking the capabilities to an object does not free the object;
@@ -709,14 +713,16 @@ which needed no new mechanism; see "Interrupts".
 A thread that wants to stop for a while wants to stop until something happens,
 and a notification is the one way to stop;
 what is missing is only something that happens at a time.
-So time reaches userspace as one more source of signals,
-a `Timer`: bound at allocation to a notification in its own pool,
-armed with `OP_TIMER_SET` for a delay and a set of bits,
-and signalling those bits when the delay has passed.
-Sleeping is arming a timer and waiting on its notification.
+So time reaches userspace as one more interrupt, on a timer line.
+The kernel has `TIMER_LINES` of them, numbered after the controller's,
+and the tick raises them where a device would raise its own.
+An `Irq` is bound to a timer line exactly as to a device's line, with `OP_IRQ_BIND`,
+armed with `OP_IRQ_SET` for a set of bits and a delay,
+and signals those bits when the delay has passed.
+Sleeping is arming a timer line and waiting on its notification.
 A wait with a timeout is the same two calls,
 because a notification is a word of bits:
-a driver gives the device one bit and the timer another.
+a driver gives the device one bit and the timer line another.
 No operation takes a deadline and no thread state is a sleep,
 so "a waiting thread names a live notification" stays the whole story.
 Yield is open decision 10.
@@ -729,16 +735,33 @@ the delay rounded up to whole ticks, plus one.
 The tick's period is the board's business and not part of the ABI.
 An upper bound is not promised because the kernel could not keep one:
 the woken thread is ready, not running, and waits its turn in the round.
-A timer that fires disarms itself,
-and setting an armed timer moves its deadline rather than adding a second.
+A timer line that fires disarms its `Irq`, as a device's line does,
+and setting an armed one moves its deadline rather than adding a second.
+A periodic task arms the line again each time it wakes;
+what that costs it in drift is open decision 16.
 
-**Why an object.**
+**Why a fixed number of lines.**
+The tick has to find the due timers without looking at the others.
+Timers as objects in pools would have it walk every pool, which goal 4 rules out;
+a sorted queue moves that walk to the set, and a wheel to the bucket that comes due.
+A limit per process, thread or pool bounds nothing, since anyone can make more of those.
+A limit on the whole machine does: the tick looks at the `TIMER_LINES` lines and nothing else.
+Lines make it a limit of authority rather than of who comes first:
+the root task receives them all in `BOOT_CAP_TIMER_LINES`,
+apart from the controller's so that no board's count shows,
+and hands them out and takes them back as it does memory.
+The count is a constant of the kernel, like the region slots,
+while the `Irq`s bound to the lines live in their holders' pools.
+A program that needs more timers than it holds keeps its own deadlines
+and arms one line for the nearest.
+
+**Why an interrupt.**
 A deadline argument on `OP_NOTIFY_WAIT` would be smaller,
 but it would make time a special case of waiting
 rather than a signal like an interrupt.
 A time server in userspace, a driver holding an `Irq` for a second hardware timer,
 would cost the kernel nothing and remains the right shape for a board that has one;
-the kernel object is what makes a sleep one system call
+the timer lines are what make a sleep one system call
 rather than a round trip to that server.
 
 ## Scheduling
@@ -770,9 +793,9 @@ machine mode runs with `MIE` clear from the trap to the `mret`,
 so a system call is never interrupted and the kernel needs no locks.
 
 When a thread waits and nothing is runnable,
-only a `Timer` or an armed `Irq` can make one runnable again,
+only an `Irq` armed on a timer line or a device's line can make one runnable again,
 because only a running thread can signal otherwise.
-The kernel counts the armed timers and device `Irq`s as they are armed and disarmed,
+The kernel counts those `Irq`s as they are armed and disarmed,
 so it knows without a walk.
 With either armed the kernel stalls in `wfi`
 until the tick or a device interrupt is pending,
@@ -798,14 +821,14 @@ arms the `Irq` with `OP_IRQ_SET` for the bits it wants,
 and waits on the notification.
 When the line fires, the kernel masks it, disarms the `Irq`
 and signals the bits, then returns to whatever was running;
-the driver runs when its turn comes, as a thread the timer woke does.
+the driver runs when its turn comes, as a thread a timer line woke does.
 Having serviced the device, the driver arms the `Irq` again,
 which is what unmasks the line.
-So the `Irq` has the `Timer`'s shape exactly:
+A timer line takes the same `Irq`:
 bound at creation to a notification in its own pool,
-armed with bits, disarmed by signalling,
-and a driver that gives the device one bit and a timer another
-has a wait with a timeout for the same two calls.
+armed with bits and a delay, disarmed by signalling,
+so a driver that gives the device one bit and a timer line another
+has a wait with a timeout for the same two calls; see "Time".
 The machine timer is the one interrupt the kernel keeps for itself,
 because the tick is its own; see "Scheduling".
 
@@ -817,12 +840,12 @@ and a device whose level stays high, as a UART's does until it is serviced,
 costs one trap and not a storm:
 the mask outlasts the claim, and only the driver lifts it.
 `OP_IRQ_SET` with no bits masks the line by hand,
-as `OP_TIMER_SET` with none cancels the timer.
+and on a timer line cancels the delay.
 
 **Lines are authority, and the root task holds them all.**
 Interrupt lines are hardware, not kernel memory,
 so an `IrqLine` capability names no object, as a `Region` names none:
-the root task receives every line of the controller at boot,
+the root task receives every line of the controller at boot, and every timer line,
 carves single lines out with `OP_IRQ_CARVE`, a table operation,
 and hands them to drivers the way it hands out memory.
 Binding consumes the invoked slot, as turning a region into a pool does,
@@ -838,8 +861,8 @@ exactly as the lender of memory does.
 Sharing a line between drivers is open decision 11;
 what the kernel does today is refuse the second binding.
 The kernel records the bound `Irq` of each line in a table of its own,
-a word per line of the controller,
-so an interrupt finds its `Irq` without a walk.
+a word per line of the controller and per timer line,
+so an interrupt or the tick finds its `Irq` without a walk.
 
 **No driver in the kernel.**
 The UART is the first device, and it is userspace's alone:
@@ -1075,7 +1098,6 @@ every host harness requires a stopped call to have taken a node or a link away.
 
 | Walk | When | Fix |
 |---|---|---|
-| `tick_advance` | every tick | a timer queue; see below |
 | `pool_overlaps` | `OP_PROCESS_INSTALL` | open decision 14 |
 | `pool_overlaps`, `installed_overlaps` | `OP_REGION_TO_POOL` | open decision 14 |
 | `cap_revoke_range`, `pool_destroy`, `pool_under`, `pool_overlaps`, `cap_parent` | pool destroy | open decision 14, and preemption |
@@ -1087,17 +1109,6 @@ and a destroy zeroes each object as it forgets it, paid for by the call that mad
 A pool destroy revokes what the dying pools held with `cap_revoke_below` too,
 but does not stop:
 its sweep and the pool walks keep no progress a restart could find.
-
-**Timers are the open part.**
-A deadline queue sorted by expiry makes the tick constant
-but moves the cost to `OP_TIMER_SET`, which walks everyone's armed timers.
-A timer wheel of fixed size still visits every timer in the bucket that comes due.
-A bound on armed timers, per pool or per machine,
-makes either constant, and is a limit a program can see.
-Or the kernel keeps one timer for itself
-and leaves the rest to a time server in userspace,
-the shape "Time" already calls right for a board with a second hardware timer.
-Decide before the timer queue is written.
 
 ## Bounded stack
 
@@ -1205,24 +1216,22 @@ it is a live object and it is ready.
 A preempted thread stays ready and joins the run queue,
 so it runs again.
 
-**Timers.**
-Every timer names a live notification in its own pool,
-so the link, which is not checked on use, never dangles.
-An armed timer's deadline lies ahead of the tick count:
-the tick fires every timer that is due,
-and a timer that fires disarms itself.
-
 **Interrupts.**
-Every `Irq` names a live notification in its own pool
-and a line the controller has, or the log's.
+Every `Irq` names a live notification in its own pool,
+so the link, which is not checked on use, never dangles,
+and a line there is: the log's, the controller's or a timer line.
 At most one `Irq` is bound to any line.
 The controller forwards a line exactly while an `Irq` is armed on it,
 read back from the controller itself:
 an interrupt masks the line as it disarms the `Irq`,
 a set masks or unmasks it with the bits,
 and a destroy masks the lines of the `Irq`s it takes.
-The count of armed sources is exactly the armed timers
-and the `Irq`s armed on a device's line.
+The count of armed sources is exactly the `Irq`s armed on a device's line or a timer line.
+
+**Timer lines.**
+An `Irq` armed on a timer line has its deadline ahead of the tick count:
+the tick fires every timer line that is due,
+and a line that fires disarms its `Irq`.
 
 **The log.**
 An `Irq` armed on the log's line has nothing untaken behind it:
@@ -1252,7 +1261,7 @@ An input is a sequence of events the kernel receives,
 not the behaviour of one process:
 each record is a system call with the thread that makes it,
 and the tick is a record too, `OP_DEBUG_TICK`,
-which moves time by one tick and fires the timers due,
+which moves time by one tick and fires the timer lines due,
 so the host has a clock that ticks when the input says;
 a device interrupt is a record as well, `OP_DEBUG_IRQ`,
 which does to an armed `Irq` what the controller would,
@@ -1361,19 +1370,19 @@ A preemption lands between two instructions,
 and the host runs records rather than instructions,
 so it cannot say where one would land.
 While tracing is on, the tick therefore preempts nobody
-and moves no time: timers fire only through `OP_DEBUG_TICK`.
+and moves no time: timer lines fire only through `OP_DEBUG_TICK`.
 The interrupt is still taken and acknowledged on QEMU,
 so the replay exercises the interrupt entry and return,
 but a switch happens only when a thread waits
 or when a record asks for the tick through `OP_DEBUG_TICK`.
 A traced run in which every thread waits therefore stops
-even with a timer armed, since no record is left to fire it,
+even with a timer line armed, since no record is left to fire it,
 and the host build, which has no clock, agrees.
 A tick pending in a revoke stops it on QEMU as anywhere,
 but a stopped call is not traced, only the attempt that finishes,
 so where the tick lands leaves the transcript alone,
 and the host may stop every such call without a line of its own.
-The stall in `wfi` for an armed timer is checked by the demo in `user/init.c`.
+The stall in `wfi` for an armed timer line is checked by the demo in `user/init.c`.
 A device interrupt is delivered under tracing as it is otherwise,
 because a line left claimed would storm
 and one masked without its `Irq` disarmed would break an invariant;
@@ -1515,7 +1524,7 @@ until the maintainer decides otherwise.
    that decides which threads are runnable at all.
    It needs a way to stop a thread it started,
    `OP_THREAD_SUSPEND` in `TODO.md`,
-   and a tick of its own, a notification the timer signals,
+   and a tick of its own, a timer line,
    the shape every device interrupt takes.
    What it cannot do is choose between two runnable threads
    for less than a system call per switch.
@@ -1547,6 +1556,8 @@ until the maintainer decides otherwise.
     which is a count the kernel would keep per line.
     The `IrqLine` capability would then be copied rather than carved,
     and `KERR_OVERLAP` on a bind would go.
+    Signalling every `Irq` on the line is a step each,
+    and goal 4 allows it only if their number per line has a bound.
     Decide when a board with a shared line is worth that count.
 
 12. **The log across a reset.**
@@ -1662,3 +1673,13 @@ until the maintainer decides otherwise.
       A slot without `RIGHT_W` could seal the table against its own process.
 
     Decide with the first program whose creator cannot size its table in advance.
+
+16. **Drift of a periodic timer.**
+    Working default: a timer line fires once, and a periodic task arms it again when it wakes,
+    so each period counts from the set and the task drifts by the wait for the processor;
+    userspace has no clock to take the drift off.
+    `OP_IRQ_SET` could take a flag that counts the delay from the last deadline instead,
+    which keeps the line one-shot.
+    A periodic mode is affordable too, since the tick fires at most `TIMER_LINES` lines,
+    but periods fired before the thread wakes merge into one signal unseen.
+    Decide with the first task that needs a steady period.

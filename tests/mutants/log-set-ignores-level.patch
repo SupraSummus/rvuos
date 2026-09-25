@@ -7,14 +7,13 @@ Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
 Report: armed log irq while the log has bytes untaken
 
 diff --git a/kernel/klog.c b/kernel/klog.c
-index ca1e2bb..5bb66e6 100644
 --- a/kernel/klog.c
 +++ b/kernel/klog.c
-@@ -71,6 +71,3 @@ void klog_set(struct irq *irq)
+@@ -66,6 +66,3 @@
  {
 -    /* The line is level: arming it while it is high is hearing it now. */
 -    if (irq_armed(irq) && klog_pending()) {
--        klog_signal(irq);
+-        irq_signal(irq);
 -    }
 +    (void)irq;
  }

@@ -37,18 +37,6 @@ bool klog_pending(void)
     return untaken() != 0;
 }
 
-/*
- * The line is high and an Irq is armed on it: it hears once and is disarmed,
- * exactly as sched_interrupt treats a device's line.
- * There is no controller to mask; disarmed is masked.
- */
-static void klog_signal(struct irq *irq)
-{
-    uint32_t bits = irq->bits;
-    irq_set_bits(irq, 0);
-    sched_signal(irq_notification(irq), bits);
-}
-
 void klog_append(char c)
 {
     /*
@@ -63,8 +51,13 @@ void klog_append(char c)
     header->head++;
     if (quiet) {
         struct irq *irq = line_binding(LOG_IRQ_LINE);
+        /*
+         * The line is high and an Irq is armed on it: it hears once and is disarmed,
+         * exactly as sched_interrupt treats a device's line.
+         * There is no controller to mask; disarmed is masked.
+         */
         if (irq != NULL && irq_armed(irq)) {
-            klog_signal(irq);
+            irq_signal(irq);
         }
     }
 }
@@ -73,7 +66,7 @@ void klog_set(struct irq *irq)
 {
     /* The line is level: arming it while it is high is hearing it now. */
     if (irq_armed(irq) && klog_pending()) {
-        klog_signal(irq);
+        irq_signal(irq);
     }
 }
 

@@ -6,13 +6,12 @@ Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
 Report: controller forwards a line nothing is armed on
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
-index 4e1dd1f..bb113a2 100644
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -480,4 +480,4 @@ static int op_irq(const struct cap *cap, uint32_t op, const uint32_t *arg)
+@@ -504,4 +504,4 @@
          klog_set(irq);
--    } else {
+-    } else if (line_on_controller(irq->line)) {
 -        irq_enable(irq->line, irq_armed(irq));
-+    } else if (irq_armed(irq)) {
++    } else if (line_on_controller(irq->line) && irq_armed(irq)) {
 +        irq_enable(irq->line, true);
      }

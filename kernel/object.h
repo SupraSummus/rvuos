@@ -163,39 +163,27 @@ struct notification {
 };
 
 /*
- * A timer signals a notification when a delay has passed.
- * It is how time reaches userspace: as a signal like any other,
- * so one wait can cover a device and a timeout, one bit each.
- * The notification lies in the timer's own pool and dies with it,
- * as a thread's process does; the link is not checked on use.
- * bits is what the timer will signal, zero while it is disarmed,
- * and deadline is the tick count it fires at;
- * see DESIGN.md, "Time".
- */
-struct timer {
-    struct obj_header hdr;
-    paddr_t ntfn;
-    uint32_t bits;
-    uint32_t deadline;
-};
-
-/*
- * An Irq signals a notification when a hardware interrupt line fires.
- * It has the timer's shape, because an interrupt is a signal like time is:
+ * An Irq signals a notification when its interrupt line fires:
  * bound at creation to a notification in its own pool,
  * armed with the bits it will signal, and disarmed by signalling.
- * Disarmed means masked at the controller:
+ * The notification dies with the Irq's pool, as a thread's process does;
+ * the link is not checked on use.
+ * On a line of the controller, disarmed means masked there:
  * the line stays quiet until the driver arms the Irq again,
  * which it does once it has serviced the device.
  * One Irq per line; see DESIGN.md, "Interrupts".
  * Line LOG_IRQ_LINE is the kernel's log, which klog.c raises and masks
  * with no controller behind it; see DESIGN.md, "The kernel log".
+ * The timer lines have no controller either: the tick raises one
+ * once the tick count reaches its deadline, which the set that armed it wrote,
+ * so time reaches userspace as an interrupt like any other; see DESIGN.md, "Time".
  */
 struct irq {
     struct obj_header hdr;
     paddr_t ntfn;
     uint32_t bits;
     uint32_t line;
+    uint32_t deadline;  /* on a timer line, the tick count it fires at */
 };
 
 _Static_assert(sizeof(struct obj_header) == 8, "object layout");
@@ -207,8 +195,7 @@ _Static_assert(sizeof(struct process) == 8 + 24 * (1 + PROCESS_REGION_SLOTS) + s
                "object layout");
 _Static_assert(sizeof(struct thread) == 28 + sizeof(struct trap_frame), "object layout");
 _Static_assert(sizeof(struct notification) == 16, "object layout");
-_Static_assert(sizeof(struct timer) == 20, "object layout");
-_Static_assert(sizeof(struct irq) == 20, "object layout");
+_Static_assert(sizeof(struct irq) == 24, "object layout");
 
 /*
  * True if a capability of this type names a kernel object.
@@ -235,19 +222,15 @@ static inline struct captable *process_table(const struct process *p)
 }
 static inline struct process *thread_process(const struct thread *t) { return p2v(t->proc); }
 static inline struct captable *thread_table(const struct thread *t) { return process_table(thread_process(t)); }
-static inline struct notification *timer_notification(const struct timer *t) { return p2v(t->ntfn); }
 static inline struct notification *irq_notification(const struct irq *i) { return p2v(i->ntfn); }
 
-/* True if the timer will fire; it holds the bits it will signal. */
-static inline bool timer_armed(const struct timer *t) { return t->bits != 0; }
-
-/* True if the Irq will signal; its line is unmasked exactly then. */
+/* True if the Irq will signal; a controller's line is unmasked exactly then. */
 static inline bool irq_armed(const struct irq *i) { return i->bits != 0; }
 
-/* True if the timer's deadline lies at or before the tick count now. */
-static inline bool timer_due(const struct timer *t, uint32_t now)
+/* True if an Irq on a timer line has its deadline at or before the tick count now. */
+static inline bool irq_due(const struct irq *i, uint32_t now)
 {
-    return (int32_t)(t->deadline - now) <= 0;
+    return (int32_t)(i->deadline - now) <= 0;
 }
 
 #define OBJ_ALIGN 8
@@ -430,15 +413,17 @@ extern struct thread *current;
 extern paddr_t run_queue;
 
 /*
- * How many timers and Irqs on a device's line are armed,
+ * How many Irqs are armed on a device's line or a timer line,
  * the sources that can make a thread runnable while none is; see sched_run_next.
- * Every write of a timer's or an Irq's bits goes through the two below, which keep it.
+ * Every write of an Irq's bits goes through irq_set_bits, which keeps it.
  */
 extern uint32_t armed_sources;
 
 /* Arm with bits, or disarm with zero; the deadline, or the line's mask, is the caller's. */
-void timer_set_bits(struct timer *t, uint32_t bits);
 void irq_set_bits(struct irq *irq, uint32_t bits);
+
+/* The line fired: disarm the Irq and signal its bits. The mask, if the line has one, is the caller's. */
+void irq_signal(struct irq *irq);
 
 /* Make a stopped or woken thread ready: it joins the back of the round. */
 void sched_ready(struct thread *t);
@@ -446,13 +431,13 @@ void sched_ready(struct thread *t);
 /*
  * Ticks so far.
  * Only the tick and OP_DEBUG_TICK move it,
- * and Timer deadlines are counted in it.
+ * and the deadlines of timer lines are counted in it.
  */
 extern uint32_t sched_ticks;
 
 /*
  * Set bits on a notification and wake a thread waiting on it, if any.
- * Never blocks; OP_NOTIFY_SIGNAL and a firing Timer are both this.
+ * Never blocks; OP_NOTIFY_SIGNAL and a firing Irq are both this.
  */
 void sched_signal(struct notification *ntfn, uint32_t bits);
 
@@ -466,7 +451,7 @@ extern uint32_t trace_wake_bits;
 void sched_run_next(void);
 
 /*
- * The timer tick: count it, fire every Timer that is due,
+ * The timer tick: count it, fire every timer line that is due,
  * and hand the processor to the thread that has waited longest for it,
  * if there is one; the running thread goes to the back of the round.
  * The interrupt calls it, and OP_DEBUG_TICK does on request.
@@ -492,12 +477,11 @@ void sched_wait(struct thread *t, struct notification *ntfn);
  * a notification wakes every thread waiting on it
  * with KERR_INVALID_CAP and no bits, because the object is gone,
  * a thread leaves the notification it waits on or the run queue,
- * a Timer is disarmed,
  * and an Irq is disarmed and its line masked and unbound.
  */
 void sched_forget(struct obj_header *o);
 
-/* The Irq bound to each line, 0 for none; IRQ_LINES long. */
+/* The Irq bound to each line, 0 for none; LINES long, the timer lines included. */
 extern paddr_t line_irq[];
 
 /* The Irq bound to a line, or NULL; there is at most one. */

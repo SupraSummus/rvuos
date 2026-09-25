@@ -67,7 +67,7 @@ __attribute__((noreturn)) void kernel_trap_panic(void);
  * The tick is acknowledged here; device interrupts stay in the controller
  * for sched_claim_interrupts to claim.
  * This is what the kernel does when no thread can run
- * but a Timer or an armed Irq will make one runnable; see DESIGN.md, "Scheduling".
+ * but an armed Irq, on a timer line or a device's, will make one runnable; see DESIGN.md, "Scheduling".
  * The host build has no clock and no devices and must never get here.
  */
 unsigned intr_wait(void);

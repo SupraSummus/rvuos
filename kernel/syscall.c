@@ -162,7 +162,7 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
 }
 
 /*
- * The notification a Timer or an Irq is bound to, from a slot in the caller's table.
+ * The notification an Irq is bound to, from a slot in the caller's table.
  * The object signals on the creator's behalf, so the creator must be able to,
  * and the link is not checked on use, so the two must lie in one pool;
  * see DESIGN.md, "Kernel pools and revocation".
@@ -296,20 +296,6 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
         obj = &ntfn->hdr;
         break;
     }
-    case CAP_TIMER: {
-        struct notification *ntfn;
-        int nerr = bound_notification(t, arg[3], pool, &ntfn);
-        if (nerr != KERR_OK) {
-            return nerr;
-        }
-        struct timer *timer = pool_alloc(pool, CAP_TIMER, sizeof(*timer));
-        if (timer == NULL) {
-            return KERR_NO_MEMORY;
-        }
-        timer->ntfn = v2p(ntfn);
-        obj = &timer->hdr;
-        break;
-    }
     case CAP_CAPTABLE: {
         uint32_t nslots = arg[3];
         if (nslots == 0 || nslots > CAPTABLE_MAX_SLOTS) {
@@ -427,32 +413,6 @@ static int op_notification(struct thread *t, const struct cap *cap,
     }
 }
 
-static int op_timer(const struct cap *cap, uint32_t op, const uint32_t *arg)
-{
-    struct timer *timer = (struct timer *)cap_object(cap);
-
-    if (op != OP_TIMER_SET) {
-        return KERR_WRONG_TYPE;
-    }
-    uint32_t bits = arg[1];
-    uint32_t us = arg[2];
-    if (bits == 0) {
-        timer_set_bits(timer, 0);
-        return KERR_OK;
-    }
-    /*
-     * The call lands anywhere within the current tick,
-     * so the delay rounded up to whole ticks plus one
-     * is the first tick that surely lies past it.
-     * The count wraps and timer_due compares with a signed difference,
-     * which is exact while a delay stays far below half the count's range.
-     */
-    uint32_t ticks = us / TIMER_US_PER_TICK + (us % TIMER_US_PER_TICK != 0) + 1;
-    timer->deadline = sched_ticks + ticks;
-    timer_set_bits(timer, bits);
-    return KERR_OK;
-}
-
 /* arg[1..] carry the arguments in. */
 static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
                        uint32_t op, const uint32_t *arg)
@@ -528,11 +488,22 @@ static int op_irq(const struct cap *cap, uint32_t op, const uint32_t *arg)
     if (op != OP_IRQ_SET) {
         return KERR_WRONG_TYPE;
     }
+    if (line_is_timer(irq->line) && arg[1] != 0) {
+        /*
+         * The call lands anywhere within the current tick,
+         * so the delay rounded up to whole ticks plus one
+         * is the first tick that surely lies past it.
+         * The count wraps and irq_due compares with a signed difference,
+         * which is exact while a delay stays far below half the count's range.
+         */
+        uint32_t us = arg[2];
+        irq->deadline = sched_ticks + us / TIMER_US_PER_TICK + (us % TIMER_US_PER_TICK != 0) + 1;
+    }
     /* Armed and unmasked are one state, here and in sched_interrupt. */
     irq_set_bits(irq, arg[1]);
     if (irq->line == LOG_IRQ_LINE) {
         klog_set(irq);
-    } else {
+    } else if (line_on_controller(irq->line)) {
         irq_enable(irq->line, irq_armed(irq));
     }
     return KERR_OK;
@@ -607,9 +578,6 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
         break;
     case CAP_NOTIFICATION:
         err = op_notification(t, &cap, op, arg);
-        break;
-    case CAP_TIMER:
-        err = (cap.rights & RIGHT_W) ? op_timer(&cap, op, arg) : KERR_NO_RIGHTS;
         break;
     case CAP_IRQ_LINE:
         err = op_irq_line(t, slot, &cap, op, arg);

@@ -9,7 +9,7 @@
 /* Ticks per second. */
 #define TIMER_HZ 1000
 
-/* Microseconds per tick; the unit OP_TIMER_SET takes is rounded up to whole ticks. */
+/* Microseconds per tick; the delay OP_IRQ_SET takes on a timer line is rounded up to whole ticks. */
 #define TIMER_US_PER_TICK (1000000u / TIMER_HZ)
 _Static_assert(TIMER_US_PER_TICK * TIMER_HZ == 1000000u, "the tick divides a second");
 

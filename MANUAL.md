@@ -103,8 +103,8 @@ What rvuos is not:
   A machine timer tick takes the processor from a running thread
   and hands it to the ready thread that has waited longest.
 - **Timers as signals.**
-  A `Timer` signals a notification after a delay.
-  Sleeping is arming a timer and waiting.
+  A timer line is an interrupt line the tick raises once a delay has passed.
+  Sleeping is arming a timer line and waiting.
 - **Interrupts as signals.**
   An `Irq` binds a hardware line to a notification.
   Lines are handed out as capabilities like memory is.
@@ -392,9 +392,8 @@ Programs are encouraged to keep the same convention.
 | `Process` | `CAP_PROCESS` | a capability to its table, region slots, a PMP image | `OP_POOL_ALLOC` |
 | `Thread` | `CAP_THREAD` | a register frame and a state | `OP_POOL_ALLOC` |
 | `Notification` | `CAP_NOTIFICATION` | one word of sticky bits | `OP_POOL_ALLOC` |
-| `Timer` | `CAP_TIMER` | a deadline and the bits it will signal | `OP_POOL_ALLOC` |
 | `IrqLine` | `CAP_IRQ_LINE` | none: the slot holds the first line and a count | boot, `OP_IRQ_CARVE` |
-| `Irq` | `CAP_IRQ` | one line bound to a notification | `OP_IRQ_BIND` |
+| `Irq` | `CAP_IRQ` | one line bound to a notification, with a deadline on a timer line | `OP_IRQ_BIND` |
 | `Debug` | `CAP_DEBUG` | none | boot |
 
 `Region`, `IrqLine` and `Debug` capabilities have no kernel object behind them.
@@ -468,7 +467,6 @@ Sizes a developer needs for planning, as the kernel rounds them:
 | `Process` | 312 (272 with `PMP_MAX_ENTRIES=8`) |
 | `Thread` | 176 |
 | `Notification` | 16 |
-| `Timer` | 24 |
 | `Irq` | 24 |
 
 A minimal child process, table of 10 slots, process, thread and two notifications,
@@ -476,13 +474,13 @@ costs 808 bytes including the descriptor.
 
 **The same-pool rule.**
 The kernel follows the link from a thread to its process,
-and from a timer or an `Irq` to its notification,
+and from an `Irq` to its notification,
 without checking that the target still exists.
 The target must therefore never be destroyed before the object that points at it,
 and since destruction happens per pool, the two must lie in one pool:
 
 - a `Thread` is allocated from the pool its `Process` lies in,
-- a `Timer` or an `Irq` from the pool its `Notification` lies in.
+- an `Irq` from the pool its `Notification` lies in.
 
 A process's table is not bound by the rule, section 5.2.
 
@@ -583,13 +581,21 @@ or consume another client's wake.
 ### 5.8 Time
 
 There is no sleep call and no yield.
-Time reaches userspace as one more source of signals, a `Timer`.
+Time reaches userspace as one more interrupt, on a timer line.
 
-A `Timer` is bound at allocation to a notification in the same pool.
-`OP_TIMER_SET` arms it with a set of bits and a delay in microseconds;
-when the delay has passed the timer signals those bits and disarms itself.
-Setting an armed timer moves its deadline and replaces its bits;
+The machine has `TIMER_LINES` timer lines, 16,
+and the root task receives all of them at boot in `BOOT_CAP_TIMER_LINES`,
+apart from the controller's lines.
+It carves them and hands them out as it does any other line, section 5.9,
+so who holds how many timers is its choice.
+A timer line is bound with `OP_IRQ_BIND` like a device's,
+into an `Irq` in a pool, bound to a notification in that same pool.
+`OP_IRQ_SET` arms it with a set of bits and, in `a2`, a delay in microseconds;
+when the delay has passed the line fires: the `Irq` signals those bits and disarms.
+Setting an armed timer line moves its deadline and replaces its bits;
 setting bits to zero cancels it.
+A program that needs more timers than it holds keeps its own deadlines
+and arms one line for the nearest.
 
 The contract is a **lower bound**.
 The kernel fires at the first tick that surely lies past the delay:
@@ -604,22 +610,27 @@ and waits its turn in the round.
 Sleeping:
 
 ```c
-rv_timer_set(timer, BIT_TIMER, us);
-rv_wait(ntfn, &bits);
+rv_invoke(OP_IRQ_CARVE, BOOT_CAP_TIMER_LINES, 0, 1, LINE);
+rv_invoke(OP_IRQ_BIND, LINE, POOL, NTFN, TIMER);
+
+rv_timer_set(TIMER, BIT_TIMER, us);   /* OP_IRQ_SET with the delay in a2 */
+rv_wait(NTFN, &bits);
 ```
 
 A wait with a timeout is the same two calls with one more bit:
-give the device one bit on the notification and the timer another,
+give the device one bit on the notification and the timer line another,
 and look at which bits came back.
 
 Userspace has no clock of its own:
 the kernel leaves the counters disabled for user mode, so `rdtime` traps.
-A periodic task counts timer signals.
+A timer line fires once, so a periodic task arms it again each time it wakes,
+and drifts by what each wake costs; `DESIGN.md`, open decision 16.
 
 ### 5.9 Interrupts
 
 A driver holds an `IrqLine` capability naming one line.
-The root task receives every line of the controller at boot
+The root task receives every line of the controller at boot, with the log's,
+and every timer line in a second capability,
 and carves single lines out with `OP_IRQ_CARVE`,
 as it carves regions out of memory.
 
@@ -630,7 +641,7 @@ The invoked slot is consumed.
 A line is bound at most once; a second bind fails with `KERR_OVERLAP`
 until the first `Irq`'s pool is destroyed.
 
-An `Irq` works like a `Timer`:
+An `Irq` on a device's line works like one on a timer line:
 
 - `OP_IRQ_SET` with bits **arms** it, which unmasks the line at the controller.
 - When the line fires, the kernel masks the line,
@@ -642,7 +653,7 @@ An `Irq` works like a `Timer`:
 An `Irq` is armed exactly while its line is unmasked,
 so a level that stays high costs one trap and not a storm.
 A device interrupt wakes its driver but does not run it;
-the driver waits its turn in the round like a thread the timer woke.
+the driver waits its turn in the round like a thread a timer line woke.
 
 Sharing a line between drivers is not supported;
 `DESIGN.md`, open decision 11.
@@ -695,7 +706,7 @@ and carries the ring out one byte per transmitter interrupt.
   A thread runs until it waits or until a tick takes the processor from it.
 - A system call is never interrupted:
   machine mode runs with interrupts off from the trap to the return.
-- When nothing is runnable and a `Timer` or a device `Irq` is armed,
+- When nothing is runnable and an `Irq` is armed on a timer line or a device's line,
   the kernel stalls in `wfi` until the tick or the interrupt arrives.
   When nothing is armed either, it prints `no runnable thread` and halts with code 5.
 
@@ -737,7 +748,7 @@ the capability type carries `RIGHT_W` where the type needs it for every operatio
 the type accepts the operation (`KERR_WRONG_TYPE`),
 the operation's own right and arguments.
 Operation codes are a single flat numbering across all types,
-so invoking a `Timer` operation on a `Region` is `KERR_WRONG_TYPE`,
+so invoking an `Irq` operation on a `Region` is `KERR_WRONG_TYPE`,
 not `KERR_INVALID_ARG`.
 
 A call whose work grows with the derivation tree can be interrupted and made again:
@@ -788,7 +799,7 @@ Cannot be turned off again.
 
 **`OP_DEBUG_TICK` (17).**
 Does what the timer tick does, on request:
-time moves by one tick, every due `Timer` signals,
+time moves by one tick, every due timer line fires,
 the processor goes to the next runnable thread in the round,
 and the caller stays ready.
 Works while tracing is on, unlike the tick itself.
@@ -873,7 +884,6 @@ Both need `RIGHT_W` on the pool.
 | `CAP_PROCESS` | slot of the `CapTable` capability the process will use, with `RIGHT_W` | the table may lie in any pool; the process's hold on it hangs below that capability |
 | `CAP_THREAD` | slot of the `Process` capability the thread will run in, with `RIGHT_W` | the process must lie in this pool; the thread starts stopped |
 | `CAP_NOTIFICATION` | unused | |
-| `CAP_TIMER` | slot of the `Notification` capability the timer signals, with `RIGHT_W` | the notification must lie in this pool |
 
 Any other type is `KERR_INVALID_ARG`; `Irq` objects come from `OP_IRQ_BIND`.
 The new capability carries all rights.
@@ -934,15 +944,7 @@ Blocks until some bit is set, then returns `a1` = the bits and clears them.
 Returns `KERR_INVALID_CAP` with no bits
 if the notification's pool is destroyed while the thread waits.
 
-### 6.10 Operations on `Timer`
-
-**`OP_TIMER_SET` (18).**
-Needs `RIGHT_W`.
-`a1` = bits to signal, `a2` = delay in microseconds.
-`a1` = 0 cancels; it takes back no signal that already happened.
-A delay longer than 32 bits of microseconds, about 71 minutes, is several calls.
-
-### 6.11 Operations on `IrqLine`
+### 6.10 Operations on `IrqLine`
 
 **`OP_IRQ_CARVE` (19).**
 No right needed.
@@ -961,16 +963,21 @@ The invoked slot is cleared with everything below it.
 both checked before anything is revoked,
 and the revoke may make the call again, section 6.1.
 The new `Irq` is masked until `OP_IRQ_SET` arms it.
+A timer line binds the same way as a device's.
 
-### 6.12 Operations on `Irq`
+### 6.11 Operations on `Irq`
 
 **`OP_IRQ_SET` (21).**
 Needs `RIGHT_W`.
 `a1` = bits the next interrupt signals; unmasks the line.
-`a1` = 0 masks the line.
+`a1` = 0 masks the line; it takes back no signal that already happened.
 On the log's line, arming while bytes are untaken signals at once.
+On a timer line, `a2` = the delay in microseconds, and the line fires
+at the first tick that surely lies past it, section 5.8;
+elsewhere `a2` is unused.
+A delay longer than 32 bits of microseconds, about 71 minutes, is several calls.
 
-### 6.13 Operation codes in numeric order
+### 6.12 Operation codes in numeric order
 
 | Code | Operation | Type |
 |---|---|---|
@@ -991,7 +998,6 @@ On the log's line, arming while bytes are untaken signals at once.
 | 15 | `OP_NOTIFY_WAIT` | `Notification` |
 | 16 | `OP_POOL_DESTROY` | `KernelPool` |
 | 17 | `OP_DEBUG_TICK` | `Debug` |
-| 18 | `OP_TIMER_SET` | `Timer` |
 | 19 | `OP_IRQ_CARVE` | `IrqLine` |
 | 20 | `OP_IRQ_BIND` | `IrqLine` |
 | 21 | `OP_IRQ_SET` | `Irq` |
@@ -1029,8 +1035,9 @@ and drops into user mode with:
 | 10 | `BOOT_CAP_IRQ_LINES` | `IrqLine`: line 0 (the log) and every controller line | write |
 | 11 | `BOOT_CAP_UART` | `Region`: the board's console registers, a 16550 on QEMU and the USB Serial/JTAG controller on the ESP32-C6 | read, write |
 | 12 | `BOOT_CAP_LOG` | `Region`: the kernel log's header and ring | read, write |
+| 13 | `BOOT_CAP_TIMER_LINES` | `IrqLine`: every timer line, `TIMER_LINES` of them | write |
 
-`BOOT_CAP_COUNT` is 13; a root task puts its own slots from there upwards.
+`BOOT_CAP_COUNT` is 14; a root task puts its own slots from there upwards.
 
 The root task's own table, process and thread take about 1.7 KiB of the boot pool,
 so roughly 2.3 KiB remain for objects the root task allocates from `BOOT_CAP_POOL`.
@@ -1071,7 +1078,7 @@ There is no libc; `user/rvuos.h` provides the system call wrappers:
 | `rv_region_min_size(cap, &min)` | `OP_REGION_INFO`, reading `a4` |
 | `rv_signal(cap, bits)` | `OP_NOTIFY_SIGNAL` |
 | `rv_wait(cap, &bits)` | `OP_NOTIFY_WAIT` |
-| `rv_timer_set(cap, bits, us)` | `OP_TIMER_SET` |
+| `rv_timer_set(cap, bits, us)` | `OP_IRQ_SET` on a timer line, with the delay |
 | `rv_irq_set(cap, bits)` | `OP_IRQ_SET` |
 | `rv_putc(cap, c)`, `rv_puts(cap, s)` | `OP_DEBUG_PUTC` |
 | `rv_halt(cap, code)` | `OP_DEBUG_HALT` |
@@ -1170,7 +1177,7 @@ for (;;) {
 ```
 
 Arming again after servicing is the acknowledgement.
-Give a timer a second bit on the same notification for a timeout.
+Give a timer line a second bit on the same notification for a timeout.
 
 ## 9. Debugging and testing interfaces
 
@@ -1198,7 +1205,8 @@ every process's PMP image matches its region slots,
 every capability names a live object of its own type or an in-bounds region or line range,
 pools tile their memory exactly and form a tree,
 every waiting thread names a live notification,
-every timer and `Irq` names a notification in its own pool,
+every `Irq` names a notification in its own pool,
+no `Irq` armed on a timer line is past its deadline,
 and the controller forwards exactly the lines an `Irq` is armed on.
 
 **Replay input.**
@@ -1232,7 +1240,8 @@ and `tests/mutants/` holds one planted bug per invariant.
 | smallest pool | 64 bytes, 8-byte aligned | `kernel/syscall.c` |
 | object alignment | 8 bytes | `OBJ_ALIGN` |
 | notification bits | 32 | the word size |
-| timer delay per call | 2^32 - 1 µs | `OP_TIMER_SET` |
+| timer lines | 16, on the whole machine | `TIMER_LINES` |
+| timer delay per call | 2^32 - 1 µs | `OP_IRQ_SET` |
 | tick | 1 ms (`TIMER_HZ` 1000) | `kernel/timer.h` |
 | interrupt lines | 96 on QEMU, 77 on the ESP32-C6, line 0 the log's | `IRQ_LINES` |
 | smallest region | 8 bytes, or the PMP grain if coarser | `region_min_size` in `kernel/pmp.h` |

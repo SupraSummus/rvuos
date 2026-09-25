@@ -1,12 +1,11 @@
-A Timer or an Irq may be bound to a notification in another pool.
+An Irq may be bound to a notification in another pool.
 The link is not checked on use,
 so a destroy of the notification's pool would leave the object
 signalling freed memory;
-a Timer or an Irq and its notification live in the same pool.
+an Irq and its notification live in the same pool.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
 Report: irq and its notification live in different pools
-Report: timer and its notification live in different pools
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

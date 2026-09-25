@@ -9,11 +9,7 @@ Report: controller forwards a line nothing is armed on
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -111,7 +111,6 @@
-      * Masked before it signals and disarmed as it does,
-      * so the driver hears once and the level may stay high until it has looked.
+@@ -161,3 +161,2 @@
       */
 -    irq_enable(line, false);
-     uint32_t bits = irq->bits;
-     irq->bits = 0;
-     sched_signal(irq_notification(irq), bits);
+     irq_signal(irq);

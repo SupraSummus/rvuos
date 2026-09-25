@@ -8,9 +8,9 @@ Report: controller forwards a line nothing is armed on
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -209,5 +209,2 @@
+@@ -227,5 +227,2 @@
          uint32_t line = ((struct irq *)o)->line;
--        if (line != LOG_IRQ_LINE) {
+-        if (line_on_controller(line)) {
 -            irq_enable(line, false);
 -        }
          line_irq[line] = 0;

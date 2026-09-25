@@ -70,6 +70,8 @@ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
         [BOOT_CAP_IRQ_LINES] = cap_to_lines(LOG_IRQ_LINE, IRQ_LINES, RIGHT_W),
         [BOOT_CAP_UART] = cap_to_region(UART_BASE, UART_SIZE, RIGHT_R | RIGHT_W),
         [BOOT_CAP_LOG] = cap_to_region(KLOG_BASE, KLOG_REGION_SIZE, RIGHT_R | RIGHT_W),
+        /* The timer lines follow the controller's, and are granted apart so that no board's count shows. */
+        [BOOT_CAP_TIMER_LINES] = cap_to_lines(IRQ_LINES, TIMER_LINES, RIGHT_W),
     };
     for (unsigned i = BOOT_CAP_NULL + 1; i < BOOT_CAP_COUNT; i++) {
         if (cap_store(table, i, &boot[i], NULL) != KERR_OK) {

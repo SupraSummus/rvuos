@@ -49,7 +49,6 @@
 #define CAP_THREAD   5
 #define CAP_DEBUG    6 /* a byte into the kernel's log, and machine halt, for bring-up */
 #define CAP_NOTIFICATION 7
-#define CAP_TIMER    8 /* signals a notification when a delay has passed */
 #define CAP_IRQ_LINE 9 /* a range of interrupt lines; no kernel object behind it */
 #define CAP_IRQ      10 /* one line bound to a notification; signals it when the line fires */
 
@@ -60,7 +59,6 @@
  * Pool: RIGHT_W to allocate objects.
  * Process, Thread: RIGHT_W to control the object.
  * Notification: RIGHT_W to signal, RIGHT_R to wait.
- * Timer: RIGHT_W to set or cancel.
  * IrqLine: RIGHT_W to bind a line.
  * Irq: RIGHT_W to set or mask.
  * Debug: any right.
@@ -91,7 +89,7 @@
 #define OP_DEBUG_TRACE 10
 /*
  * Debug: what the timer tick does, on request.
- * Time moves by one tick, every Timer that is due signals,
+ * Time moves by one tick, every timer line that is due signals,
  * the processor goes to the next runnable thread in the round
  * and the caller stays ready.
  * Works while tracing is on, unlike the tick itself;
@@ -105,7 +103,8 @@
  * Fails with KERR_STATE when nothing is armed on the line,
  * which is when the controller would not raise it either,
  * and with KERR_INVALID_ARG for a line the controller does not have,
- * LOG_IRQ_LINE among them: the log's level is the log's, not a record's.
+ * LOG_IRQ_LINE among them: the log's level is the log's, not a record's,
+ * and so are the timer lines, which only OP_DEBUG_TICK moves.
  * It is how a replay fires an interrupt, since the host build has no devices;
  * see DESIGN.md, "Verification".
  */
@@ -182,15 +181,14 @@
  *   CAP_PROCESS   the slot of the CapTable capability the process will use,
  *                 which needs RIGHT_W; the table may lie in any pool,
  *   CAP_THREAD    the slot of the Process capability the thread will run in,
- *   CAP_NOTIFICATION  unused,
- *   CAP_TIMER     the slot of the Notification capability the timer signals,
- *                 which needs RIGHT_W.
+ *   CAP_NOTIFICATION  unused.
  * A process holds its table by a capability derived from the one named,
  * so revoking below that capability, or destroying the table's pool,
  * leaves the process naming nothing: every call it makes fails with KERR_INVALID_CAP.
- * A thread's process and a timer's notification are not checked on every use,
- * so those objects must be allocated from the same pool as their parent;
- * CAP_THREAD and CAP_TIMER fail with KERR_INVALID_ARG otherwise.
+ * A thread's process is not checked on every use,
+ * so the thread must be allocated from the same pool as its process;
+ * CAP_THREAD fails with KERR_INVALID_ARG otherwise.
+ * An Irq is not allocated here but bound, with OP_IRQ_BIND.
  */
 #define OP_POOL_ALLOC 7
 /*
@@ -259,18 +257,6 @@
 #define OP_NOTIFY_WAIT 15
 
 /*
- * Timer (RIGHT_W): signal the bound notification once a delay has passed.
- * a1 = the bits to signal, a2 = the delay in microseconds.
- * The signal comes no earlier than the delay
- * and at the kernel's first tick after it, whatever the tick's period is;
- * a delay of zero signals at the next tick.
- * A longer delay than 32 bits of microseconds is several calls.
- * Setting an armed timer replaces its delay and bits;
- * a1 = 0 cancels it, and takes back no signal that already happened.
- */
-#define OP_TIMER_SET 18
-
-/*
  * IrqLine: derive a smaller range of lines with the same rights.
  * a1 = offset from the first line, a2 = count, a3 = destination slot.
  * Like OP_REGION_CARVE, this is a table operation that touches no kernel memory,
@@ -279,7 +265,7 @@
 #define OP_IRQ_CARVE 19
 /*
  * IrqLine (RIGHT_W): bind the one line the capability names to a notification,
- * as an Irq object.
+ * as an Irq object; a timer line binds the same way as a controller's.
  * a1 = the slot of the Pool capability the Irq is allocated from, which needs RIGHT_W,
  * a2 = the slot of the Notification capability the Irq signals, which needs RIGHT_W
  *      and must lie in that pool,
@@ -296,14 +282,18 @@
 #define OP_IRQ_BIND 20
 /*
  * Irq (RIGHT_W): unmask the line and name the bits the next interrupt signals.
- * a1 = the bits.
+ * a1 = the bits; a2 = on a timer line, the delay in microseconds, and unused elsewhere.
  * The interrupt masks the line again as it signals,
  * so a driver hears about a line once until it says otherwise;
  * this call is how it says so, after it has serviced the device.
- * Setting an armed Irq replaces its bits;
+ * Setting an armed Irq replaces its bits, and on a timer line its delay;
  * a1 = 0 masks the line and takes back no signal that already happened.
  * LOG_IRQ_LINE is level: a set that arms it while the log holds bytes
  * the reader has not taken signals at once.
+ * A timer line fires once the delay has passed, no earlier,
+ * at the kernel's first tick after it, whatever the tick's period is;
+ * a delay of zero fires at the next tick.
+ * A longer delay than 32 bits of microseconds is several calls.
  */
 #define OP_IRQ_SET 21
 
@@ -327,7 +317,8 @@
 #define BOOT_CAP_IRQ_LINES 10 /* IrqLine: LOG_IRQ_LINE and every line of the interrupt controller */
 #define BOOT_CAP_UART      11 /* Region, read and write: the board's UART registers */
 #define BOOT_CAP_LOG       12 /* Region, read and write: the kernel's log, see struct rvuos_log */
-#define BOOT_CAP_COUNT     13
+#define BOOT_CAP_TIMER_LINES 13 /* IrqLine: every timer line, TIMER_LINES of them */
+#define BOOT_CAP_COUNT     14
 
 /*
  * The kernel's log.
@@ -386,5 +377,6 @@ struct replay_record {
 
 /* Fixed limits visible to user programs. */
 #define PROCESS_REGION_SLOTS 8
+#define TIMER_LINES 16 /* on the whole machine; see BOOT_CAP_TIMER_LINES */
 
 #endif

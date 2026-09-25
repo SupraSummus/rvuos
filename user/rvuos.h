@@ -76,12 +76,12 @@ static inline uint32_t rv_wait(uint32_t ntfn_cap, uint32_t *bits)
 }
 
 /*
- * OP_TIMER_SET: signal bits on the timer's notification once us microseconds have passed,
+ * OP_IRQ_SET on a timer line: signal bits on the Irq's notification once us microseconds have passed,
  * no earlier and at the kernel's first tick after that. bits = 0 cancels.
  */
-static inline uint32_t rv_timer_set(uint32_t timer_cap, uint32_t bits, uint32_t us)
+static inline uint32_t rv_timer_set(uint32_t timer_irq_cap, uint32_t bits, uint32_t us)
 {
-    return rv_invoke(OP_TIMER_SET, timer_cap, bits, us, 0);
+    return rv_invoke(OP_IRQ_SET, timer_irq_cap, bits, us, 0);
 }
 
 /*

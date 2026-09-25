@@ -74,7 +74,7 @@ void selfcheck_fail(void)
 
 unsigned intr_wait(void)
 {
-    /* Reached only untraced with a timer or an Irq armed, which the harness never sets up. */
+    /* Reached only untraced with an Irq armed, which the harness never sets up. */
     kpanic("the host build has no clock and no devices to wait for");
 }
 
@@ -172,7 +172,7 @@ struct thread *host_boot(void)
      * exactly as on a warm reset.
      */
     pool_list = NULL;
-    memset(line_irq, 0, IRQ_LINES * sizeof(line_irq[0]));
+    memset(line_irq, 0, LINES * sizeof(line_irq[0]));
     current = NULL;
     run_queue = 0;
     armed_sources = 0;
