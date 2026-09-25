@@ -138,7 +138,7 @@ static void check_pools(void)
             }
             if (o->type != CAP_CAPTABLE && o->type != CAP_PROCESS &&
                 o->type != CAP_THREAD && o->type != CAP_NOTIFICATION &&
-                o->type != CAP_TIMER && o->type != CAP_IRQ) {
+                o->type != CAP_IRQ) {
                 fail("object has an unexpected type", at, o->type, 0);
             }
             at += aligned_size(o);
@@ -354,24 +354,8 @@ static void check_queue(paddr_t head, uint8_t state, paddr_t waiting_on)
     } while (at != head);
 }
 
-/* The timers and device Irqs the walk found armed, to hold armed_sources to. */
+/* The Irqs the walk found armed on a device's line or a timer line, to hold armed_sources to. */
 static uint32_t armed_seen;
-
-static void check_timer(const struct timer *t)
-{
-    struct obj_header *n = object_find(t->ntfn);
-    if (n == NULL || n->type != CAP_NOTIFICATION) {
-        fail("timer has no live notification", v2p(t), t->ntfn, 0);
-    }
-    if (n->pool != t->hdr.pool) {
-        fail("timer and its notification live in different pools", v2p(t), 0, 0);
-    }
-    /* The tick fires every due timer, so one still armed lies ahead. */
-    if (timer_armed(t) && timer_due(t, sched_ticks)) {
-        fail("armed timer is due", v2p(t), t->deadline, sched_ticks);
-    }
-    armed_seen += timer_armed(t);
-}
 
 static void check_irq(const struct irq *i)
 {
@@ -382,8 +366,12 @@ static void check_irq(const struct irq *i)
     if (n->pool != i->hdr.pool) {
         fail("irq and its notification live in different pools", v2p(i), 0, 0);
     }
-    if (i->line >= IRQ_LINES) {
-        fail("irq names a line the controller does not have", v2p(i), i->line, 0);
+    if (i->line >= LINES) {
+        fail("irq names a line there is not", v2p(i), i->line, 0);
+    }
+    /* The tick fires every due timer line, so one still armed lies ahead. */
+    if (line_is_timer(i->line) && irq_armed(i) && irq_due(i, sched_ticks)) {
+        fail("armed timer line is due", v2p(i), i->deadline, sched_ticks);
     }
     /*
      * The log's line is high while the reader has bytes to take,
@@ -399,17 +387,18 @@ static void check_irq(const struct irq *i)
 
 /*
  * The controller forwards a line exactly while an Irq is armed on it,
- * and at most one Irq is bound to any line, the log's included,
+ * and at most one Irq is bound to any line, the log's and the timer lines included,
  * which the line table records exactly.
  * check_irq has vetted each object, so the bitmaps below are in range.
  * The enable bits are read back from the controller,
  * as the PMP CSRs are read back for the running process;
- * the log's line has no controller and check_irq reads its level instead.
+ * the log's line and the timer lines have no controller,
+ * and check_irq reads the log's level and the timer lines' deadlines instead.
  */
 static void check_lines(void)
 {
-    uint32_t bound[(IRQ_LINES + 31) / 32] = { 0 };
-    uint32_t armed[(IRQ_LINES + 31) / 32] = { 0 };
+    uint32_t bound[(LINES + 31) / 32] = { 0 };
+    uint32_t armed[(LINES + 31) / 32] = { 0 };
 
     for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
         if (o->type != CAP_IRQ) {
@@ -429,7 +418,7 @@ static void check_lines(void)
             armed[word] |= bit;
         }
     }
-    for (uint32_t line = 0; line < IRQ_LINES; line++) {
+    for (uint32_t line = 0; line < LINES; line++) {
         if (line_binding(line) != NULL && !((bound[line / 32] >> (line % 32)) & 1u)) {
             fail("line table names an irq that is gone", line, 0, 0);
         }
@@ -473,9 +462,9 @@ static void check_captable(const struct captable *table)
             break;
         }
         case CAP_IRQ_LINE:
-            /* The root task received the log's line and the controller's, with RIGHT_W; nothing widens that. */
-            if (c->b == 0 || c->a >= IRQ_LINES || c->b > IRQ_LINES - c->a) {
-                fail("line capability outside the controller", v2p(table), i, c->a);
+            /* The root task received every line there is, with RIGHT_W; nothing widens that. */
+            if (c->b == 0 || c->a >= LINES || c->b > LINES - c->a) {
+                fail("line capability outside the lines there are", v2p(table), i, c->a);
             }
             if (c->rights & ~RIGHT_W) {
                 fail("line capability with rights beyond the grant", v2p(table), i, c->rights);
@@ -486,7 +475,6 @@ static void check_captable(const struct captable *table)
         case CAP_PROCESS:
         case CAP_THREAD:
         case CAP_NOTIFICATION:
-        case CAP_TIMER:
         case CAP_IRQ: {
             /* A destroy sweeps the tables, so every object capability points at a live object. */
             struct obj_header *o = object_find(c->a);
@@ -692,9 +680,6 @@ void selfcheck_run(void)
             break;
         case CAP_NOTIFICATION:
             check_queue(((struct notification *)o)->waiters, THREAD_WAITING, v2p(o));
-            break;
-        case CAP_TIMER:
-            check_timer((struct timer *)o);
             break;
         case CAP_IRQ:
             check_irq((struct irq *)o);

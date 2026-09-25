@@ -24,12 +24,6 @@ static void count_armed(bool was, bool is)
     }
 }
 
-void timer_set_bits(struct timer *t, uint32_t bits)
-{
-    count_armed(timer_armed(t), bits != 0);
-    t->bits = bits;
-}
-
 void irq_set_bits(struct irq *irq, uint32_t bits)
 {
     if (irq->line != LOG_IRQ_LINE) {
@@ -130,27 +124,28 @@ void sched_signal(struct notification *ntfn, uint32_t bits)
     }
 }
 
+void irq_signal(struct irq *irq)
+{
+    uint32_t bits = irq->bits;
+    irq_set_bits(irq, 0);
+    sched_signal(irq_notification(irq), bits);
+}
+
 /*
- * One tick of time: count it and fire every timer that is due.
- * Timers are found the way waiters are, by walking the pools,
- * and a timer that fires disarms itself,
- * so that after the tick no armed timer is due.
+ * One tick of time: count it and fire every timer line that is due.
+ * The timer lines are a fixed few, so the tick looks at each of them
+ * and at nothing else; see DESIGN.md, "Time".
+ * A line that fires disarms its Irq, so that after the tick no armed one is due.
  */
 static void tick_advance(void)
 {
     sched_ticks++;
-    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
-        LOOP_WALK(tick_advance);
-        if (o->type != CAP_TIMER) {
-            continue;
+    for (uint32_t i = 0; i < TIMER_LINES; i++) {
+        LOOP_BOUND(TIMER_LINES);
+        struct irq *irq = line_binding(IRQ_LINES + i);
+        if (irq != NULL && irq_armed(irq) && irq_due(irq, sched_ticks)) {
+            irq_signal(irq);
         }
-        struct timer *t = (struct timer *)o;
-        if (!timer_armed(t) || !timer_due(t, sched_ticks)) {
-            continue;
-        }
-        uint32_t bits = t->bits;
-        timer_set_bits(t, 0);
-        sched_signal(timer_notification(t), bits);
     }
 }
 
@@ -165,9 +160,7 @@ bool sched_interrupt(uint32_t line)
      * so the driver hears once and the level may stay high until it has looked.
      */
     irq_enable(line, false);
-    uint32_t bits = irq->bits;
-    irq_set_bits(irq, 0);
-    sched_signal(irq_notification(irq), bits);
+    irq_signal(irq);
     return true;
 }
 
@@ -186,9 +179,9 @@ void sched_claim_interrupts(void)
 
 /*
  * The Irq bound to each line, 0 for none,
- * so that an interrupt finds its Irq without a walk; see DESIGN.md, "Bounded work".
+ * so that an interrupt or the tick finds its Irq without a walk; see DESIGN.md, "Bounded work".
  */
-paddr_t line_irq[IRQ_LINES];
+paddr_t line_irq[LINES];
 
 struct irq *line_binding(uint32_t line)
 {
@@ -227,15 +220,12 @@ void sched_forget(struct obj_header *o)
         }
         break;
     }
-    case CAP_TIMER:
-        /* The timer is gone and will not fire, so it is no source. */
-        timer_set_bits((struct timer *)o, 0);
-        break;
     case CAP_IRQ: {
+        /* It is gone and will not fire, so it is no source. */
         irq_set_bits((struct irq *)o, 0);
-        /* The object that would receive the interrupt is gone; the log's line has no controller. */
+        /* The object that would receive the interrupt is gone; only the controller's lines have a mask. */
         uint32_t line = ((struct irq *)o)->line;
-        if (line != LOG_IRQ_LINE) {
+        if (line_on_controller(line)) {
             irq_enable(line, false);
         }
         line_irq[line] = 0;
@@ -270,9 +260,9 @@ void sched_run_next(void)
     while (next == NULL) {
         LOOP_WAIT("an interrupt, in intr_wait");
         /*
-         * Only a running thread, a firing timer or a device interrupt
+         * Only a running thread, a timer line or a device interrupt
          * can make another one runnable.
-         * With no timer and no device Irq armed nothing can change this, so say so and stop.
+         * With no Irq armed on either kind of line nothing can change this, so say so and stop.
          * The log's line is not a source: only the kernel raises it,
          * and the kernel runs only when a thread or one of these does.
          * While tracing is on, time moves and lines fire only through OP_DEBUG_TICK

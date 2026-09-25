@@ -74,10 +74,11 @@ taking runnable threads in turn;
 that is all the scheduling policy the kernel has,
 and `DESIGN.md`, "Scheduling", says why.
 
-There is no sleep: a `Timer` object signals a notification
-once a delay has passed, so a thread sleeps by waiting on it,
+There is no sleep: a timer line is an interrupt line the tick raises
+once a delay has passed, so a thread sleeps by waiting on the notification it signals,
 and a wait with a timeout is the same wait with one more bit;
-`DESIGN.md`, "Time", says why.
+the machine has a fixed few of them, handed out like any other line,
+and `DESIGN.md`, "Time", says why.
 
 Device interrupts have the same shape: an `Irq` object,
 bound to a notification, signals it when its line fires

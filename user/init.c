@@ -50,7 +50,8 @@ enum {
     SLOT_LENT,          /* memory lent to the child, which pools it */
     SLOT_LENT_POOL,     /* what the root task makes of it once it is back */
     SLOT_TIMER_NTFN,    /* what the timer signals, and the spare line's Irq as well */
-    SLOT_TIMER,
+    SLOT_TIMER_LINE,    /* a timer line, carved out of the boot grant */
+    SLOT_TIMER,         /* the timer line bound to SLOT_TIMER_NTFN */
     SLOT_SPARE_LINE,    /* a line nothing drives, carved out of the boot grant */
     SLOT_SPARE_LINE_COPY, /* a second capability to it, inert while the line is bound */
     SLOT_SPARE_IRQ,     /* the line bound to SLOT_TIMER_NTFN */
@@ -150,7 +151,7 @@ static void expect(const char *what, uint32_t status)
 }
 
 /*
- * What sleeping is on rvuos: arm a timer and wait on the notification it signals.
+ * What sleeping is on rvuos: arm a timer line and wait on the notification it signals.
  * The same notification can carry a device's bit next to the timer's,
  * which makes a wait with a timeout the same two calls.
  */
@@ -607,8 +608,10 @@ int main(void)
      */
     expect("allocate the timer's notification",
            rv_invoke(OP_POOL_ALLOC, SLOT_NEW_POOL, CAP_NOTIFICATION, SLOT_TIMER_NTFN, 0));
-    expect("allocate the timer",
-           rv_invoke(OP_POOL_ALLOC, SLOT_NEW_POOL, CAP_TIMER, SLOT_TIMER, SLOT_TIMER_NTFN));
+    expect("carve a timer line",
+           rv_invoke(OP_IRQ_CARVE, BOOT_CAP_TIMER_LINES, 0, 1, SLOT_TIMER_LINE));
+    expect("bind the timer line",
+           rv_invoke(OP_IRQ_BIND, SLOT_TIMER_LINE, SLOT_NEW_POOL, SLOT_TIMER_NTFN, SLOT_TIMER));
     expect("sleep", sleep_us(SLEEP_US));
     expect("sleep again", sleep_us(SLEEP_US));
     puts("root: timer ok\n");

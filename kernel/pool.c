@@ -128,8 +128,6 @@ size_t obj_size(const struct obj_header *obj)
         return sizeof(struct thread);
     case CAP_NOTIFICATION:
         return sizeof(struct notification);
-    case CAP_TIMER:
-        return sizeof(struct timer);
     case CAP_IRQ:
         return sizeof(struct irq);
     default:

@@ -1,6 +1,6 @@
-A timer that fires disarms itself behind the count's back.
-The stall in wfi would go on waiting for a timer that will never fire;
-the count of armed sources is exactly the armed timers and device Irqs.
+An Irq that fires disarms behind the count's back.
+The stall in wfi would go on waiting for a line that will never fire;
+the count of armed sources is exactly the Irqs armed on a device's line or a timer line.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
 Report: the count of armed sources is wrong
@@ -8,8 +8,8 @@ Report: the count of armed sources is wrong
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -156,3 +156,3 @@
-         uint32_t bits = t->bits;
--        timer_set_bits(t, 0);
-+        t->bits = 0;
-         sched_signal(timer_notification(t), bits);
+@@ -129,3 +129,3 @@
+     uint32_t bits = irq->bits;
+-    irq_set_bits(irq, 0);
++    irq->bits = 0;
+     sched_signal(irq_notification(irq), bits);

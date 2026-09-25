@@ -15,10 +15,16 @@
  */
 
 /*
- * Line identifiers lie below IRQ_LINES, which the board's board.h sets.
- * Line 0 is the kernel's log, see klog.h, whatever the controller has there,
- * and the functions below are never called with it.
+ * The controller's line identifiers lie below IRQ_LINES, which the board's board.h sets.
+ * Line 0 is the kernel's log, see klog.h, whatever the controller has there.
+ * The TIMER_LINES timer lines follow from IRQ_LINES, and the tick raises them;
+ * see DESIGN.md, "Time".
+ * The functions below are called only with a line on the controller.
  */
+#define LINES (IRQ_LINES + TIMER_LINES)
+
+static inline bool line_is_timer(uint32_t line) { return line >= IRQ_LINES; }
+static inline bool line_on_controller(uint32_t line) { return line != LOG_IRQ_LINE && line < IRQ_LINES; }
 
 /* Mask every line and enable the external interrupt at the core. */
 void irq_init(void);
