@@ -60,16 +60,40 @@ static inline struct cap *node(uint32_t link)
     return p2v(link & ~LINK_UP);
 }
 
+/* The sibling after a node that has a parent, the first one after the last. */
+static struct cap *ring_next(const struct cap *n)
+{
+    return (n->next & LINK_UP) ? node(node(n->next)->child) : node(n->next);
+}
+
 void cap_attach(struct cap *parent, struct cap *n)
 {
     n->child = 0;
     if (parent == NULL) {
         n->next = LINK_UP;
+        n->prev = 0;
         return;
     }
     /* At the front of the ring; the last child keeps the link up to the parent. */
-    n->next = parent->child != 0 ? parent->child : (v2p(parent) | LINK_UP);
+    if (parent->child == 0) {
+        n->next = v2p(parent) | LINK_UP;
+        n->prev = v2p(n);
+    } else {
+        struct cap *first = node(parent->child);
+        n->next = parent->child;
+        n->prev = first->prev;
+        first->prev = v2p(n);
+    }
     parent->child = v2p(n);
+}
+
+/* Put the siblings first to last right after beside, which has a parent, in its ring. */
+static void splice_after(struct cap *beside, struct cap *first, struct cap *last)
+{
+    ring_next(beside)->prev = v2p(last);
+    last->next = beside->next;
+    first->prev = v2p(beside);
+    beside->next = v2p(first);
 }
 
 /* Right after beside in its ring, so under the same parent. Roots have no ring: beside a root, a root. */
@@ -78,10 +102,10 @@ static void attach_beside(struct cap *beside, struct cap *n)
     n->child = 0;
     if (beside->next == LINK_UP) {
         n->next = LINK_UP;
+        n->prev = 0;
         return;
     }
-    n->next = beside->next;
-    beside->next = v2p(n);
+    splice_after(beside, n, n);
 }
 
 struct cap *cap_parent(const struct cap *n)
@@ -141,31 +165,22 @@ static void detach(struct cap *n, bool adopt)
             struct cap *c = node(link);
             link = c->next;
             c->next = LINK_UP;
+            c->prev = 0;
         }
         return;
     }
 
-    struct cap *parent = cap_parent(n);
-    /* What follows n's predecessor once n is gone: n's children, or n's successor. */
-    uint32_t replacement = n->next;
+    /* The children go right after n, so n leaves the ring as a leaf would. */
     if (first != 0) {
-        struct cap *last = node(first);
-        while (!(last->next & LINK_UP)) {
-            LOOP_WALK(detach);
-            last = node(last->next);
-        }
-        last->next = n->next;
-        replacement = first;
+        splice_after(n, node(first), node(node(first)->prev));
     }
-    if (node(parent->child) == n) {
-        parent->child = (replacement & LINK_UP) ? 0 : replacement;
+    struct cap *pred = node(n->prev);
+    ring_next(n)->prev = n->prev;
+    /* n is first exactly when its predecessor links up: it is the last child then, or n itself. */
+    if (pred->next & LINK_UP) {
+        node(pred->next)->child = (n->next & LINK_UP) ? 0 : n->next;
     } else {
-        struct cap *pred = node(parent->child);
-        while (node(pred->next) != n) {
-            LOOP_WALK(detach);
-            pred = node(pred->next);
-        }
-        pred->next = replacement;
+        pred->next = n->next;
     }
 }
 
@@ -211,6 +226,24 @@ void cap_delete(struct cap *n)
 {
     detach(n, true);
     clear_node(n);
+}
+
+void cap_replace(struct cap *n, const struct cap *cap, struct cap *old)
+{
+    cap_revoke_below(old);
+    if (n == old) {
+        /* Into the consumed slot itself, which keeps its place in the ring. */
+        uint32_t next = n->next;
+        uint32_t prev = n->prev;
+        *n = *cap;
+        n->child = 0;
+        n->next = next;
+        n->prev = prev;
+        return;
+    }
+    *n = *cap;
+    attach_beside(old, n);
+    cap_delete(old);
 }
 
 int cap_clear(struct captable *table, uint32_t slot)

@@ -41,6 +41,9 @@ struct obj_header {
  * next is the next sibling, or at the last sibling the parent with LINK_UP set,
  * which the four-byte alignment of slots leaves free;
  * a root's next is LINK_UP alone, an empty slot's is 0.
+ * prev is the previous sibling, and at the first sibling the last one,
+ * so that a node leaves its ring without a walk;
+ * an only child's is itself, and a root's and an empty slot's is 0.
  * A process's region slots are slots of this type too, CAP_INSTALLED, and leaves of the tree,
  * and so is its table slot, which holds a CAP_CAPTABLE capability.
  */
@@ -53,6 +56,7 @@ struct cap {
     uint32_t b;
     uint32_t child;
     uint32_t next;
+    uint32_t prev;
 };
 
 #define LINK_UP 0x1u
@@ -195,11 +199,11 @@ struct irq {
 };
 
 _Static_assert(sizeof(struct obj_header) == 8, "object layout");
-_Static_assert(sizeof(struct cap) == 20, "object layout");
+_Static_assert(sizeof(struct cap) == 24, "object layout");
 _Static_assert(sizeof(struct captable) == 12, "object layout");
 _Static_assert(sizeof(struct pool) == 32, "object layout");
 _Static_assert(sizeof(struct pmp_image) == 4 + 5 * PMP_MAX_ENTRIES, "object layout");
-_Static_assert(sizeof(struct process) == 8 + 20 * (1 + PROCESS_REGION_SLOTS) + sizeof(struct pmp_image),
+_Static_assert(sizeof(struct process) == 8 + 24 * (1 + PROCESS_REGION_SLOTS) + sizeof(struct pmp_image),
                "object layout");
 _Static_assert(sizeof(struct thread) == 28 + sizeof(struct trap_frame), "object layout");
 _Static_assert(sizeof(struct notification) == 16, "object layout");
@@ -352,6 +356,13 @@ void cap_attach(struct cap *parent, struct cap *node);
 
 /* The node a slot was derived from, or NULL at a root. Walks the sibling ring. */
 struct cap *cap_parent(const struct cap *node);
+
+/*
+ * Store cap into n in old's place in the tree, and clear old with everything below it:
+ * what a conversion does to the slot it consumes.
+ * n is an empty slot, or old itself.
+ */
+void cap_replace(struct cap *n, const struct cap *cap, struct cap *old);
 
 /*
  * Clear a slot. KERR_INVALID_CAP if out of range.

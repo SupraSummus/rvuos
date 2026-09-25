@@ -66,9 +66,9 @@ Design decisions behind these items live in `DESIGN.md`.
    ABI changes come last.
    Done: the line table, the installed region's slot index, the wait queue,
    the run queue, the count of armed sources for the stall in `wfi`,
-   and the check that every loop a trap runs says what bounds it,
-   `tools/loop-bounds.py`; `DESIGN.md`, "Bounded work".
-   - A predecessor link per slot.
+   the check that every loop a trap runs says what bounds it,
+   `tools/loop-bounds.py`, and a predecessor link per slot;
+   `DESIGN.md`, "Bounded work".
    - Revoke preempted when an interrupt is pending, and restarted;
      the conversions and a delete below a root too.
    - `Untyped` and `Frame`, open decision 14, once its open questions are decided.

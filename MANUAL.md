@@ -465,15 +465,15 @@ Sizes a developer needs for planning, as the kernel rounds them:
 | Object | Bytes (16 PMP entries) |
 |---|---|
 | pool descriptor | 32 |
-| `CapTable` with `n` slots | 12 + 20 × n, rounded up to 8 |
-| `Process` | 272 (232 with `PMP_MAX_ENTRIES=8`) |
+| `CapTable` with `n` slots | 12 + 24 × n, rounded up to 8 |
+| `Process` | 312 (272 with `PMP_MAX_ENTRIES=8`) |
 | `Thread` | 176 |
 | `Notification` | 16 |
 | `Timer` | 24 |
 | `Irq` | 24 |
 
 A minimal child process, table of 10 slots, process, thread and two notifications,
-costs 728 bytes including the descriptor.
+costs 808 bytes including the descriptor.
 
 **The same-pool rule.**
 The kernel follows the link from a thread to its process,

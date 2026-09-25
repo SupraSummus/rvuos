@@ -151,9 +151,8 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
         struct pool *pool = pool_create(base, size, cap->rights, obj_pool(&t->hdr));
         struct cap pc = cap_to_object(&pool->hdr, RIGHT_ALL);
         /* The pool capability takes the region's place in the tree; the region and its derivation go. */
-        struct cap *parent = cap_parent(slot_node(t, slot));
-        cap_revoke(slot_node(t, slot));
-        return cap_store(thread_table(t), arg[1], &pc, parent);
+        cap_replace(slot_node(t, arg[1]), &pc, slot_node(t, slot));
+        return KERR_OK;
     }
     default:
         return KERR_WRONG_TYPE;
@@ -508,9 +507,8 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
         /* Its bits are zero, so it is disarmed, and its line stays masked as every line does until a set. */
         struct cap ic = cap_to_object(&irq->hdr, RIGHT_ALL);
         /* The Irq capability takes the line's place in the tree; the line and its derivation go. */
-        struct cap *parent = cap_parent(slot_node(t, slot));
-        cap_revoke(slot_node(t, slot));
-        return cap_store(thread_table(t), arg[3], &ic, parent);
+        cap_replace(slot_node(t, arg[3]), &ic, slot_node(t, slot));
+        return KERR_OK;
     }
     default:
         return KERR_WRONG_TYPE;
