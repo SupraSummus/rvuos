@@ -1,0 +1,14 @@
+A pool destroy forgets the armed timers it takes.
+The stall in wfi would wait for a timer that is gone;
+the count of armed sources is exactly the armed timers and device Irqs.
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -236,6 +236,2 @@
+         }
+-        case CAP_TIMER:
+-            /* The timer is gone and will not fire, so it is no source. */
+-            timer_set_bits((struct timer *)o, 0);
+-            break;
+         case CAP_IRQ: {

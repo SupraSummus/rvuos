@@ -406,6 +406,17 @@ extern struct thread *current;
  */
 extern paddr_t run_queue;
 
+/*
+ * How many timers and Irqs on a device's line are armed,
+ * the sources that can make a thread runnable while none is; see sched_run_next.
+ * Every write of a timer's or an Irq's bits goes through the two below, which keep it.
+ */
+extern uint32_t armed_sources;
+
+/* Arm with bits, or disarm with zero; the deadline, or the line's mask, is the caller's. */
+void timer_set_bits(struct timer *t, uint32_t bits);
+void irq_set_bits(struct irq *irq, uint32_t bits);
+
 /* Make a stopped or woken thread ready: it joins the back of the round. */
 void sched_ready(struct thread *t);
 
@@ -458,7 +469,8 @@ void sched_wait(struct thread *t, struct notification *ntfn);
  * wake every thread waiting on a notification in it
  * with KERR_INVALID_CAP and no bits, because the object is gone,
  * take every thread in it off the notification it waits on or the run queue,
- * and mask and unbind the line of every Irq in it.
+ * disarm every Timer in it,
+ * and disarm, mask and unbind the line of every Irq in it.
  */
 void sched_forget_pool(struct pool *pool);
 

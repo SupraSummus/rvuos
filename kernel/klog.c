@@ -45,7 +45,7 @@ bool klog_pending(void)
 static void klog_signal(struct irq *irq)
 {
     uint32_t bits = irq->bits;
-    irq->bits = 0;
+    irq_set_bits(irq, 0);
     sched_signal(irq_notification(irq), bits);
 }
 

@@ -1,0 +1,12 @@
+A timer that fires disarms itself behind the count's back.
+The stall in wfi would go on waiting for a timer that will never fire;
+the count of armed sources is exactly the armed timers and device Irqs.
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -156,3 +156,3 @@
+         uint32_t bits = t->bits;
+-        timer_set_bits(t, 0);
++        t->bits = 0;
+         sched_signal(timer_notification(t), bits);

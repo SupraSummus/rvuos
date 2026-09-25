@@ -436,7 +436,7 @@ static int op_timer(const struct cap *cap, uint32_t op, const uint32_t *arg)
     uint32_t bits = arg[1];
     uint32_t us = arg[2];
     if (bits == 0) {
-        timer->bits = 0;
+        timer_set_bits(timer, 0);
         return KERR_OK;
     }
     /*
@@ -448,7 +448,7 @@ static int op_timer(const struct cap *cap, uint32_t op, const uint32_t *arg)
      */
     uint32_t ticks = us / TIMER_US_PER_TICK + (us % TIMER_US_PER_TICK != 0) + 1;
     timer->deadline = sched_ticks + ticks;
-    timer->bits = bits;
+    timer_set_bits(timer, bits);
     return KERR_OK;
 }
 
@@ -525,7 +525,7 @@ static int op_irq(const struct cap *cap, uint32_t op, const uint32_t *arg)
         return KERR_WRONG_TYPE;
     }
     /* Armed and unmasked are one state, here and in sched_interrupt. */
-    irq->bits = arg[1];
+    irq_set_bits(irq, arg[1]);
     if (irq->line == LOG_IRQ_LINE) {
         klog_set(irq);
     } else {

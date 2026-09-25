@@ -765,6 +765,8 @@ so a system call is never interrupted and the kernel needs no locks.
 When a thread waits and nothing is runnable,
 only a `Timer` or an armed `Irq` can make one runnable again,
 because only a running thread can signal otherwise.
+The kernel counts the armed timers and device `Irq`s as they are armed and disarmed,
+so it knows without a walk.
 With either armed the kernel stalls in `wfi`
 until the tick or a device interrupt is pending,
 takes it by hand since machine mode runs with `MIE` clear,
@@ -1047,7 +1049,6 @@ It finds a false claim only where the corpus reaches, and a wait is not checked 
 | Walk | When | Fix |
 |---|---|---|
 | `tick_advance` | every tick | a timer queue; see below |
-| `source_armed` | every stall in `wfi` | a count of armed timers and device `Irq`s |
 | `cap_parent`, `detach` | delete, uninstall, `OP_REGION_TO_POOL`, `OP_IRQ_BIND` | a predecessor link per slot |
 | `pool_overlaps` | `OP_PROCESS_INSTALL` | open decision 14 |
 | `pool_overlaps`, `installed_overlaps` | `OP_REGION_TO_POOL` | open decision 14 |
@@ -1197,6 +1198,8 @@ read back from the controller itself:
 an interrupt masks the line as it disarms the `Irq`,
 a set masks or unmasks it with the bits,
 and a destroy masks the lines of the `Irq`s it takes.
+The count of armed sources is exactly the armed timers
+and the `Irq`s armed on a device's line.
 
 **The log.**
 An `Irq` armed on the log's line has nothing untaken behind it:

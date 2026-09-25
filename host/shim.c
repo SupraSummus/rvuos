@@ -169,6 +169,7 @@ struct thread *host_boot(void)
     memset(line_irq, 0, IRQ_LINES * sizeof(line_irq[0]));
     current = NULL;
     run_queue = 0;
+    armed_sources = 0;
     sched_ticks = 0;
     debug_trace = false;
     pmp_init();
