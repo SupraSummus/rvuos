@@ -8,7 +8,7 @@ Report: controller forwards a line nothing is armed on
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -503,8 +503,8 @@ static int op_irq(const struct cap *cap, uint32_t op, const uint32_t *arg)
+@@ -521,8 +521,8 @@ static int op_irq(const struct cap *cap, uint32_t op, const uint32_t *arg)
      irq_set_bits(irq, arg[1]);
      if (irq->line == LOG_IRQ_LINE) {
          klog_set(irq);

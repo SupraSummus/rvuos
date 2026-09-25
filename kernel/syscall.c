@@ -90,6 +90,24 @@ static int op_captable(struct thread *t, const struct cap *cap,
 }
 
 /* arg[1..] carry the arguments in and the results out. */
+static int op_clock(struct thread *t, uint32_t slot, uint32_t op, uint32_t *arg)
+{
+    switch (op) {
+    case OP_CLOCK_INFO:
+        arg[1] = timer_counter_hz();
+        arg[2] = COUNTER_ADDR;
+        return KERR_OK;
+    case OP_CLOCK_REGION: {
+        const struct granted_range *g = &boot_granted[GRANT_COUNTER];
+        struct cap r = cap_to_region(g->base, g->size, g->rights);
+        return cap_store(thread_table(t), arg[1], &r, slot_node(t, slot));
+    }
+    default:
+        return KERR_WRONG_TYPE;
+    }
+}
+
+/* arg[1..] carry the arguments in and the results out. */
 static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
                      uint32_t op, uint32_t *arg)
 {
@@ -553,7 +571,7 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
 
     /*
      * Operations that change an object need RIGHT_W on it.
-     * Regions, interrupt lines, notifications and the debug capability
+     * Regions, interrupt lines, notifications, the debug capability and the clock
      * are checked in their handlers,
      * because which right they need depends on the operation.
      */
@@ -563,6 +581,9 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
         break;
     case CAP_REGION:
         err = op_region(t, slot, &cap, op, arg);
+        break;
+    case CAP_CLOCK:
+        err = op_clock(t, slot, op, arg);
         break;
     case CAP_CAPTABLE:
         err = (cap.rights & RIGHT_W) ? op_captable(t, &cap, op, arg) : KERR_NO_RIGHTS;

@@ -38,6 +38,8 @@ run `make BOARD=esp32c6 test` as well;
 it loads the demo into the chip's RAM and checks the same transcript.
 A new kernel global needs a reset in `host_boot` too,
 since the host boots once per input in one process.
+A new `BOOT_CAP_*` slot moves the replay's slots in `include/rvuos/replay.h`,
+so the seeds and the corpus have to be rewritten with it; see `TODO.md`.
 When the kernel's object model changes,
 update `kernel/selfcheck.c` with it;
 it is the executable form of the properties in `DESIGN.md`.

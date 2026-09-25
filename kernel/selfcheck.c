@@ -447,6 +447,7 @@ static void check_captable(const struct captable *table)
         }
         switch (c->type) {
         case CAP_DEBUG:
+        case CAP_CLOCK:
             break;
         case CAP_REGION: {
             uint8_t granted = granted_rights(c->a, c->b);
@@ -503,7 +504,8 @@ static void check_captable(const struct captable *table)
  * or a revoke that stopped short all show up here.
  * A node is derived from its parent: the same object with no more rights,
  * a range within the parent's with no more rights,
- * or an object built on the parent's range, a pool on a region, an Irq on a line.
+ * or an object built on the parent's range, a pool on a region, an Irq on a line,
+ * or the counter's block, or a region installed from it, below the clock.
  */
 
 /* The node a link names, if it is a slot of a live table or of a live process. */
@@ -547,7 +549,15 @@ static bool derived_from(const struct cap *c, const struct cap *p)
         if (c->type == CAP_REGION || c->type == CAP_IRQ_LINE) {
             return narrower && range_within(c->a, c->b, p->a, p->b);
         }
-        return narrower && (c->type == CAP_DEBUG || c->a == p->a);
+        return narrower && (c->type == CAP_DEBUG || c->type == CAP_CLOCK || c->a == p->a);
+    }
+    /*
+     * The clock gives out one region, the counter's block, read only,
+     * and adopts what was carved or installed from it when a delete or a revoke takes it.
+     */
+    if ((c->type == CAP_REGION || c->type == CAP_INSTALLED) && p->type == CAP_CLOCK) {
+        const struct granted_range *g = &boot_granted[GRANT_COUNTER];
+        return !(c->rights & ~g->rights) && range_within(c->a, c->b, g->base, g->size);
     }
     if (c->type == CAP_INSTALLED && p->type == CAP_REGION) {
         return narrower && range_within(c->a, c->b, p->a, p->b);

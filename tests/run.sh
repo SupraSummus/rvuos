@@ -59,6 +59,8 @@ grep -q 'root: cascade ok' "$log" \
     || fail "destroying the child's pool did not take the pool the child made"
 grep -q 'root: timer ok' "$log" \
     || fail "the timer did not wake the only thread from its sleep"
+grep -q 'root: clock ok' "$log" \
+    || fail "the clock's counter, read through its region, did not show the sleeps' length"
 grep -q 'the idle line stays quiet: ok' "$log" \
     || fail "an armed line nothing raises signalled"
 grep -q 'root: irq ok' "$log" \

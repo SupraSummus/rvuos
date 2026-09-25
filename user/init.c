@@ -11,7 +11,7 @@
  * lease the child memory through a derived capability and take it back by revoking,
  * lend the child memory it turns into a pool of its own
  * and take it back by destroying the child's pool,
- * sleep on a timer while nothing else can run,
+ * sleep on a timer while nothing else can run, and time it on the clock,
  * bind and revoke an Irq on a line nothing drives,
  * then unmap a region and fault on it.
  * Negative paths are covered by the fuzz corpus and tests/differential.py.
@@ -57,6 +57,7 @@ enum {
     SLOT_SPARE_IRQ,     /* the line bound to SLOT_TIMER_NTFN */
     SLOT_BOOT_NTFN,     /* a notification in the boot pool, for binding the line again */
     SLOT_SPARE_IRQ_AGAIN,
+    SLOT_COUNTER,       /* the clock's region, read only */
 };
 
 /*
@@ -79,11 +80,12 @@ enum {
 
 /*
  * Region slots. The root task boots with code in 0 and data in 1.
- * Every region costs one PMP entry: the root task maps five and the child four.
+ * Every region costs one PMP entry: the root task maps six and the child four.
  */
 #define ROOT_SHARED_SLOT 2
 #define ROOT_UART_SLOT 3
 #define ROOT_LOG_SLOT 4
+#define ROOT_COUNTER_SLOT 5
 #define CHILD_CODE_SLOT 0
 #define CHILD_DATA_SLOT 1
 #define CHILD_SHARED_SLOT 2
@@ -612,9 +614,26 @@ int main(void)
            rv_invoke(OP_IRQ_CARVE, BOOT_CAP_TIMER_LINES, 0, 1, SLOT_TIMER_LINE));
     expect("bind the timer line",
            rv_invoke(OP_IRQ_BIND, SLOT_TIMER_LINE, SLOT_NEW_POOL, SLOT_TIMER_NTFN, SLOT_TIMER));
+
+    /*
+     * The clock times the two sleeps.
+     * A timer line fires no earlier than its delay, so the counter must show at least both;
+     * how much more is the board's, so the transcript prints neither.
+     */
+    uint32_t hz, counter;
+    expect("clock info", rv_clock_info(BOOT_CAP_CLOCK, &hz, &counter));
+    expect("derive the counter's region",
+           rv_invoke(OP_CLOCK_REGION, BOOT_CAP_CLOCK, SLOT_COUNTER, 0, 0));
+    expect("map the counter",
+           rv_invoke(OP_PROCESS_INSTALL, BOOT_CAP_PROCESS, ROOT_COUNTER_SLOT, SLOT_COUNTER, RIGHT_R));
+    uint64_t start = rv_counter_read(counter);
     expect("sleep", sleep_us(SLEEP_US));
     expect("sleep again", sleep_us(SLEEP_US));
+    uint64_t elapsed = rv_counter_read(counter) - start;
     puts("root: timer ok\n");
+    expect("the clock saw both sleeps",
+           elapsed * 1000000u >= (uint64_t)hz * (2 * SLEEP_US) ? KERR_OK : KERR_INVALID_ARG);
+    puts("root: clock ok\n");
 
     /*
      * Interrupts, beyond the two lines the logger lives on.

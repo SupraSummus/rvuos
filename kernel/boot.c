@@ -47,6 +47,10 @@ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
     boot_granted[4] = (struct granted_range){ UART_BASE, UART_SIZE, RIGHT_R | RIGHT_W };
     /* The kernel's log; the reader writes its mark into the header. Never a pool; see OP_REGION_TO_POOL. */
     boot_granted[5] = (struct granted_range){ KLOG_BASE, KLOG_REGION_SIZE, RIGHT_R | RIGHT_W };
+    /* The counter, read only, in the smallest block that holds its two words; see OP_CLOCK_REGION. */
+    uint32_t counter_size = region_min_size();
+    boot_granted[GRANT_COUNTER] =
+        (struct granted_range){ COUNTER_ADDR & ~(counter_size - 1), counter_size, RIGHT_R };
 
     /* The grants become region capabilities as they are, and every one of those is a NAPOT block. */
     for (unsigned i = 0; i < GRANTED_RANGES; i++) {
@@ -72,6 +76,7 @@ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
         [BOOT_CAP_LOG] = cap_to_region(KLOG_BASE, KLOG_REGION_SIZE, RIGHT_R | RIGHT_W),
         /* The timer lines follow the controller's, and are granted apart so that no board's count shows. */
         [BOOT_CAP_TIMER_LINES] = cap_to_lines(IRQ_LINES, TIMER_LINES, RIGHT_W),
+        [BOOT_CAP_CLOCK] = { .type = CAP_CLOCK, .rights = RIGHT_ALL },
     };
     for (unsigned i = BOOT_CAP_NULL + 1; i < BOOT_CAP_COUNT; i++) {
         if (cap_store(table, i, &boot[i], NULL) != KERR_OK) {

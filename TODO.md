@@ -151,9 +151,9 @@ Design decisions behind these items live in `DESIGN.md`.
   the host takes as finished, and no host check sees it;
   `make qemu-replay` does, by the trace line the host then lacks.
 - The seeds under `tests/seeds` are binary and were written by hand.
-  Moving `BOOT_CAP_LOG` in, and `BOOT_CAP_TIMER_LINES` after it,
+  Moving `BOOT_CAP_LOG` in, and `BOOT_CAP_TIMER_LINES` and `BOOT_CAP_CLOCK` after it,
   each took a one-off script that knew which argument of which operation is a slot,
-  run over the corpus too the second time.
+  run over the corpus too the last two times.
   A generator in the repository, one line per record with the names from `rvuos/abi.h`,
   would make the seeds readable and the next renumbering a rebuild;
   replay slots that start a few above `BOOT_CAP_COUNT` would spare the next one.
@@ -209,12 +209,14 @@ Design decisions behind these items live in `DESIGN.md`.
   Give a thread's creator somewhere to hear about it:
   a notification the kernel signals is the cheapest candidate,
   since it needs no new object.
-- Userspace has no clock: `mcounteren` is left clear, so `rdtime` traps.
-  Setting its `TM` bit costs nothing and lets a periodic task
-  compute absolute deadlines without drift,
-  but the unit of `time` is the board's,
-  so a program that reads it is no longer a plain binary.
-  Decide with the first periodic driver.
+- The clock is untried on the ESP32-C6:
+  `make BOARD=esp32c6 test` has to print "root: clock ok", which needs user mode to read `UTIME`.
+- The ESP32-C6's counter rate is measured over one tick at boot,
+  so it is only as exact as the polling loop in `timer_init`; a longer measurement would do better.
+- The ESP32-C6 resets with `mideleg` at `0x111`, delegating interrupts 0, 4 and 8 to user mode.
+  Nothing raises them today, but the kernel should clear it at boot.
+- The ESP32-C6's GPIO CSRs, `0x803` to `0x805`, lie in the user-mode CSR range.
+  If user mode can reach them, every process drives eight pads past PMP; check on the chip.
 - A thread can be started but not stopped again.
   `OP_THREAD_SUSPEND` waits for a reason to exist,
   and a userspace scheduler, open decision 9 in `DESIGN.md`, would be one;

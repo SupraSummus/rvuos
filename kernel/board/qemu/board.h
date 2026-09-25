@@ -31,6 +31,10 @@
 #define UART_BASE U32(0x10000000)
 #define UART_SIZE U32(0x100)
 
+/* The counter BOOT_CAP_CLOCK names: the CLINT's mtime; mtimecmp is 0x7ff8 bytes below. */
+#define COUNTER_ADDR U32(0x0200bff8)
+#define COUNTER_HZ   U32(10000000)
+
 /*
  * Interrupt line identifiers lie below IRQ_LINES; see irq.h.
  * The PLIC has 96 sources, and its source 0 does not exist:

@@ -80,6 +80,9 @@ once a delay has passed, so a thread sleeps by waiting on the notification it si
 and a wait with a timeout is the same wait with one more bit;
 the machine has a fixed few of them, handed out like any other line,
 and `DESIGN.md`, "Time", says why.
+The time itself is a capability too:
+a process given the clock reads the machine's counter with loads
+through a read-only region, and one without it has no clock to read.
 
 Device interrupts have the same shape: an `Irq` object,
 bound to a notification, signals it when its line fires

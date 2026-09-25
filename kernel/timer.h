@@ -1,6 +1,8 @@
 #ifndef RVUOS_TIMER_H
 #define RVUOS_TIMER_H
 
+#include <stdint.h>
+
 /*
  * The machine timer, which provides the scheduling tick.
  * The kernel handles it directly; see DESIGN.md, "Scheduling".
@@ -18,5 +20,8 @@ void timer_init(void);
 
 /* Acknowledge a tick by programming the next one. */
 void timer_ack(void);
+
+/* The rate of the counter the tick is made of, COUNTER_ADDR, in Hz; see OP_CLOCK_INFO. */
+uint32_t timer_counter_hz(void);
 
 #endif

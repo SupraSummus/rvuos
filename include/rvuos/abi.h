@@ -51,6 +51,7 @@
 #define CAP_NOTIFICATION 7
 #define CAP_IRQ_LINE 9 /* a range of interrupt lines; no kernel object behind it */
 #define CAP_IRQ      10 /* one line bound to a notification; signals it when the line fires */
+#define CAP_CLOCK    11 /* the machine's counter: its rate, and a region to read it through */
 
 /*
  * Rights bits.
@@ -61,7 +62,7 @@
  * Notification: RIGHT_W to signal, RIGHT_R to wait.
  * IrqLine: RIGHT_W to bind a line.
  * Irq: RIGHT_W to set or mask.
- * Debug: any right.
+ * Debug, Clock: any right.
  * Copying a capability can only remove rights.
  */
 #define RIGHT_R 0x1
@@ -297,8 +298,23 @@
  */
 #define OP_IRQ_SET 21
 
+/*
+ * Clock: describe the machine's counter, 64 bits counting up from boot at a fixed rate.
+ * Returns a1 = the rate in Hz, measured at boot on the ESP32-C6,
+ * and a2 = the address of the low word; the high word follows.
+ * RV32 reads the high word, the low word and the high word again,
+ * and starts over while the high word moved.
+ */
+#define OP_CLOCK_INFO 25
+/*
+ * Clock: derive a read-only region holding the counter, a child of the clock. a1 = destination slot.
+ * Installed, it lets a process read the counter with loads.
+ * It is the smallest region holding the two words, so a coarse PMP grain shows their neighbours too.
+ */
+#define OP_CLOCK_REGION 26
+
 /* One above the highest operation code; the fuzzer's mutator draws below it. */
-#define OP_COUNT 25
+#define OP_COUNT 27
 
 /*
  * Capability slots the kernel fills in the root task's table at boot.
@@ -318,7 +334,8 @@
 #define BOOT_CAP_UART      11 /* Region, read and write: the board's UART registers */
 #define BOOT_CAP_LOG       12 /* Region, read and write: the kernel's log, see struct rvuos_log */
 #define BOOT_CAP_TIMER_LINES 13 /* IrqLine: every timer line, TIMER_LINES of them */
-#define BOOT_CAP_COUNT     14
+#define BOOT_CAP_CLOCK     14 /* Clock: the machine's counter */
+#define BOOT_CAP_COUNT     15
 
 /*
  * The kernel's log.

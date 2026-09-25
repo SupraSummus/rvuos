@@ -1,0 +1,20 @@
+The clock hands out the counter's region with the write right,
+which the root task was never granted for the counter.
+A region capability carries no right beyond what its range was granted with,
+so a process could map a device register writable that it may only read.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: region capability with rights beyond the grant
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -99,7 +99,7 @@ static int op_clock(struct thread *t, uint32_t slot, uint32_t op, uint32_t *arg)
+         return KERR_OK;
+     case OP_CLOCK_REGION: {
+         const struct granted_range *g = &boot_granted[GRANT_COUNTER];
+-        struct cap r = cap_to_region(g->base, g->size, g->rights);
++        struct cap r = cap_to_region(g->base, g->size, g->rights | RIGHT_W);
+         return cap_store(thread_table(t), arg[1], &r, slot_node(t, slot));
+     }
+     default:
