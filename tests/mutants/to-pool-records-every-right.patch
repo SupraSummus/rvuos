@@ -9,8 +9,12 @@ Report: a call made a pool of memory its caller held no region to
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -151,3 +151,3 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
-         /* The new pool hangs below the caller's own, and dies with it. */
+@@ -168,7 +168,7 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
+          * It is not zeroed here, which would be work in its size: pool_alloc zeroes each object.
+          * The new pool hangs below the caller's own, and dies with it.
+          */
 -        struct pool *pool = pool_create(base, size, cap->rights, obj_pool(&t->hdr));
 +        struct pool *pool = pool_create(base, size, RIGHT_ALL, obj_pool(&t->hdr));
          struct cap pc = cap_to_object(&pool->hdr, RIGHT_ALL);
+         /* The pool capability takes the region's place in the tree, and the region goes. */
+         cap_replace(slot_node(t, arg[1]), &pc, slot_node(t, slot));

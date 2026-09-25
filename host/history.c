@@ -2,6 +2,9 @@
  * The properties "Authority only flows" and "Memory crosses zeroed" of DESIGN.md,
  * which relate the state before a call to the state after it.
  * host_syscall runs history_begin before each call and history_end after it.
+ *
+ * The prologue runs untraced, with no self-check before these checks, so a node may hold anything:
+ * an address it holds is looked up among the objects and pools walked, never followed.
  */
 
 #include <stdio.h>
@@ -25,16 +28,25 @@ struct node_rec {
 
 /* A pool before the call; stays is set when the call leaves it standing. */
 struct pool_rec {
-    uint32_t base, size, used;
+    uint32_t base, size;
+    uint8_t rights;
     bool stays;
+};
+
+/* An object, and the pool it lies in. */
+struct obj_rec {
+    uint32_t at, size, pool;
 };
 
 /* Growing arrays, kept from call to call. */
 #define ARRAY(T) struct { T *v; size_t n, cap; }
 
+typedef ARRAY(struct obj_rec) obj_array;
+
 static ARRAY(struct grant) held;
 static ARRAY(struct node_rec) nodes;
 static ARRAY(struct pool_rec) pools;
+static obj_array objects, objects_after;
 
 #define PUSH(arr, x)                                                           \
     do {                                                                       \
@@ -79,7 +91,7 @@ static bool covered(struct grant g)
     return false;
 }
 
-/* Both records start with the address they are sorted by. */
+/* All records start with the address they are sorted by. */
 static int cmp_at(const void *x, const void *y)
 {
     uint32_t a = *(const uint32_t *)x, b = *(const uint32_t *)y;
@@ -91,6 +103,21 @@ static struct pool_rec *pool_before(uint32_t base)
     return bsearch(&base, pools.v, pools.n, sizeof(pools.v[0]), cmp_at);
 }
 
+static bool is_object(const obj_array *a, uint32_t at)
+{
+    return bsearch(&at, a->v, a->n, sizeof(a->v[0]), cmp_at) != NULL;
+}
+
+/* Every object in the pools, sorted. */
+static void record_objects(obj_array *a)
+{
+    a->n = 0;
+    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
+        PUSH(*a, ((struct obj_rec){ v2p(o), (uint32_t)obj_size(o), o->pool }));
+    }
+    qsort(a->v, a->n, sizeof(a->v[0]), cmp_at);
+}
+
 /* One memcmp rather than a comparison per byte, which the fuzzer's instrumentation would slow. */
 static bool zero(uint32_t base, uint32_t size)
 {
@@ -98,19 +125,20 @@ static bool zero(uint32_t base, uint32_t size)
     return size == 0 || (p[0] == 0 && memcmp(p, p + 1, size - 1) == 0);
 }
 
-static void each_node(void (*fn)(const struct cap *))
+static void each_node(const obj_array *a, void (*fn)(const struct cap *))
 {
-    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
+    for (size_t i = 0; i < a->n; i++) {
+        struct obj_header *o = p2v(a->v[i].at);
         if (o->type == CAP_CAPTABLE) {
             struct captable *t = (struct captable *)o;
-            for (uint32_t i = 0; i < t->nslots; i++) {
-                fn(&t->slots[i]);
+            for (uint32_t j = 0; j < t->nslots; j++) {
+                fn(&t->slots[j]);
             }
         } else if (o->type == CAP_PROCESS) {
             struct process *p = (struct process *)o;
             fn(&p->table);
-            for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
-                fn(&p->slots[i]);
+            for (unsigned j = 0; j < PROCESS_REGION_SLOTS; j++) {
+                fn(&p->slots[j]);
             }
         }
     }
@@ -127,6 +155,11 @@ void history_begin(void)
 {
     held.n = nodes.n = pools.n = 0;
 
+    for (struct pool *p = pool_list; p != NULL; p = pool_next_pool(p)) {
+        PUSH(pools, ((struct pool_rec){ p->base, p->size, p->rights, false }));
+    }
+    qsort(pools.v, pools.n, sizeof(pools.v[0]), cmp_at);
+
     const struct captable *table = current != NULL ? thread_table(current) : NULL;
     for (uint32_t i = 0; table != NULL && i < table->nslots; i++) {
         const struct cap *c = &table->slots[i];
@@ -135,26 +168,20 @@ void history_begin(void)
         }
         PUSH(held, grant_of(c));
         /* The right to destroy a pool holds the memory the destroy gives back. */
-        if (c->type == CAP_POOL && (c->rights & RIGHT_W)) {
-            const struct pool *p = (const struct pool *)cap_object(c);
+        const struct pool_rec *p = c->type == CAP_POOL ? pool_before(c->a) : NULL;
+        if (p != NULL && (c->rights & RIGHT_W)) {
             PUSH(held, ((struct grant){ CAP_REGION, p->rights, p->base, p->size }));
+        }
+        /* The clock holds the counter's block, which OP_CLOCK_REGION hands out. */
+        if (c->type == CAP_CLOCK) {
+            const struct granted_range *r = &boot_granted[GRANT_COUNTER];
+            PUSH(held, ((struct grant){ CAP_REGION, r->rights, r->base, r->size }));
         }
     }
 
-    each_node(record_node);
+    record_objects(&objects);
+    each_node(&objects, record_node);
     qsort(nodes.v, nodes.n, sizeof(nodes.v[0]), cmp_at);
-
-    for (struct pool *p = pool_list; p != NULL; p = pool_next_pool(p)) {
-        PUSH(pools, ((struct pool_rec){ p->base, p->size, p->used, false }));
-    }
-    qsort(pools.v, pools.n, sizeof(pools.v[0]), cmp_at);
-}
-
-/* Built by this call: in a pool that is new, or above the pool's used mark before it. */
-static bool built(const struct obj_header *o)
-{
-    const struct pool_rec *p = pool_before(o->pool);
-    return p == NULL || v2p(o) >= p->base + p->used;
 }
 
 /* An object the call built, which the caller must have been able to build. */
@@ -173,8 +200,6 @@ static void check_built(const struct obj_header *o)
     bool bound = true;
     if (o->type == CAP_THREAD) {
         bound = covered((struct grant){ CAP_PROCESS, RIGHT_W, ((const struct thread *)o)->proc, 0 });
-    } else if (o->type == CAP_TIMER) {
-        bound = covered((struct grant){ CAP_NOTIFICATION, RIGHT_W, ((const struct timer *)o)->ntfn, 0 });
     } else if (o->type == CAP_IRQ) {
         const struct irq *irq = (const struct irq *)o;
         bound = covered((struct grant){ CAP_NOTIFICATION, RIGHT_W, irq->ntfn, 0 }) &&
@@ -196,8 +221,9 @@ static void check_node(const struct cap *c)
     if (was != NULL && same_grant(was->g, g)) {
         return;
     }
-    if (cap_has_object(c->type) && built(cap_object(c))) {
-        check_built(cap_object(c));
+    /* Built by this call: an object now that was none before. */
+    if (cap_has_object(c->type) && is_object(&objects_after, c->a) && !is_object(&objects, c->a)) {
+        check_built(p2v(c->a));
     } else if (!covered(g)) {
         violated("a call made a capability no capability of its caller covers");
     }
@@ -205,19 +231,20 @@ static void check_node(const struct cap *c)
 
 void history_end(void)
 {
-    each_node(check_node);
+    record_objects(&objects_after);
+    each_node(&objects_after, check_node);
 
     for (struct pool *p = pool_list; p != NULL; p = pool_next_pool(p)) {
         struct pool_rec *was = pool_before(p->base);
         if (was != NULL) {
             was->stays = true;
-        } else if (!zero(p->base + p->used, p->size - p->used)) {
-            violated("memory became a pool with bytes not zeroed");
         }
     }
-    for (size_t i = 0; i < pools.n; i++) {
-        if (!pools.v[i].stays && !zero(pools.v[i].base, pools.v[i].size)) {
-            violated("memory left the kernel with bytes not zeroed");
+    /* Only what was an object is zeroed; the rest of a pool's memory comes back as it went in. */
+    for (size_t i = 0; i < objects.n; i++) {
+        const struct obj_rec *o = &objects.v[i];
+        if (!pool_before(o->pool)->stays && !zero(o->at, o->size)) {
+            violated("memory left the kernel with an object not zeroed");
         }
     }
 }

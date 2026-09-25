@@ -171,7 +171,7 @@ struct thread *host_boot(void)
 {
     /*
      * RAM holds anything at power-up; a pattern stands for it,
-     * so memory the kernel takes without zeroing shows; see host/history.c.
+     * so an object the kernel hands out without zeroing shows.
      */
     if (host_ram == NULL) {
         host_ram = malloc(HOST_RAM_SIZE);
