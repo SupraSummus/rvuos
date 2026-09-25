@@ -4,12 +4,11 @@ leaves the ring running through an empty slot.
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -161,7 +161,7 @@
-         while (node(pred->next) != n) {
-             pred = node(pred->next);
-         }
--        pred->next = replacement;
-+        (void)replacement;
+@@ -180,7 +180,6 @@ static void detach(struct cap *n, bool adopt)
+     if (pred->next & LINK_UP) {
+         node(pred->next)->child = (n->next & LINK_UP) ? 0 : n->next;
+     } else {
+-        pred->next = n->next;
      }
  }
  

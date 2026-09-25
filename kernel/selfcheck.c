@@ -509,6 +509,7 @@ static void check_captable(const struct captable *table)
  * linked by physical address and never checked on use,
  * so every link must land on a live node and the shape must be exactly a forest:
  * the children of a node form one ring that closes through the node,
+ * each predecessor link is a next link turned round,
  * and from every node the links up reach a root.
  * A destroy that left a link into freed memory, a delete that broke a ring,
  * or a revoke that stopped short all show up here.
@@ -578,7 +579,7 @@ static bool derived_from(const struct cap *c, const struct cap *p)
 static void check_node(const struct cap *n, uint32_t bound)
 {
     if (n->type == CAP_NONE) {
-        if (n->child != 0 || n->next != 0) {
+        if (n->child != 0 || n->next != 0 || n->prev != 0) {
             fail("empty slot keeps links", v2p(n), n->child, n->next);
         }
         return;
@@ -611,6 +612,9 @@ static void check_node(const struct cap *n, uint32_t bound)
         if (steps != 0) {
             fail("sibling ring closes on no parent", v2p(n), 0, 0);
         }
+        if (n->prev != 0) {
+            fail("root has a predecessor", v2p(n), n->prev, 0);
+        }
         return;
     }
     const struct cap *parent = live_node(link);
@@ -626,6 +630,15 @@ static void check_node(const struct cap *n, uint32_t bound)
         if ((link & LINK_UP) || live_node(link) == NULL || ++steps > bound) {
             fail("parent's ring does not reach the slot", v2p(n), v2p(parent), link);
         }
+    }
+    /* The predecessor is the sibling whose next is this node; the first child's is the last. */
+    const struct cap *pred = live_node(n->prev);
+    if (pred == NULL || pred->type == CAP_NONE || (n->prev & LINK_UP)) {
+        fail("predecessor link to a slot that is not a live, filled one", v2p(n), n->prev, 0);
+    }
+    bool first = parent->child == v2p(n);
+    if (first ? pred->next != (v2p(parent) | LINK_UP) : pred->next != v2p(n)) {
+        fail("predecessor's next is not the slot", v2p(n), n->prev, pred->next);
     }
 }
 

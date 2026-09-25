@@ -329,8 +329,8 @@ so that a caller can tell a programming mistake from a policy decision.
 
 #### Slot format
 
-A slot is twenty bytes: type, rights, an index, padding, two words of content,
-and two links of the derivation tree.
+A slot is twenty-four bytes: type, rights, an index, padding, two words of content,
+and three links of the derivation tree.
 The index is an installed region's slot in its process,
 so that uninstalling it finds the process without a walk.
 For object capabilities the first word of content is the object's address
@@ -533,22 +533,23 @@ so the derivation a process handed out dies with the process;
 see "Kernel pools and revocation".
 
 **The shape.**
-Two links per slot, first child and next,
+Three links per slot, first child, next and previous,
 where the last child's next points up to the parent with the low bit set,
-which the four-byte alignment of slots leaves free.
+which the four-byte alignment of slots leaves free,
+and the first child's previous is the last child.
 The children of a node are then a ring that closes through the node,
 and a subtree walks in post-order with no stack:
 down to a leaf, along the ring, up when the link says so.
-A node's parent and its predecessor are found along its ring,
-which a delete needs and a revoke does not;
-that walk costs the width of one ring, the copies made of one slot.
-seL4's pre-order list with a depth per node costs the same two words
+A node leaves its ring in constant time:
+its predecessor is one link away,
+and it is the first child exactly when that predecessor links up to the parent.
+A delete puts the node's children right after it, through the first and the last,
+and then takes the node out as a leaf;
+a conversion puts its result beside the consumed slot and takes the slot out.
+Only a pool destroy still walks a ring, to find a node's parent.
+seL4's pre-order list with a depth per node costs a word less,
 but adds a visible depth limit and renumbers a subtree on every delete;
-a third link to the parent buys nothing the ring does not.
-Goal 4 disagrees:
-anyone who can copy beside a slot can widen its ring,
-and with it the cost of deleting that slot;
-see "Bounded work".
+a parent link instead of the previous one would move for every child a delete hands up.
 
 **What it does not do.**
 Revoking the capabilities to an object does not free the object;
@@ -1049,23 +1050,15 @@ It finds a false claim only where the corpus reaches, and a wait is not checked 
 | Walk | When | Fix |
 |---|---|---|
 | `tick_advance` | every tick | a timer queue; see below |
-| `cap_parent`, `detach` | delete, uninstall, `OP_REGION_TO_POOL`, `OP_IRQ_BIND` | a predecessor link per slot |
 | `pool_overlaps` | `OP_PROCESS_INSTALL` | open decision 14 |
 | `pool_overlaps`, `installed_overlaps` | `OP_REGION_TO_POOL` | open decision 14 |
 | `cap_revoke_range`, `pool_destroy`, `pool_under`, `pool_overlaps`, `cap_parent` | pool destroy | open decision 14, and preemption |
 | `cap_revoke_below` | revoke, `OP_REGION_TO_POOL`, `OP_IRQ_BIND` | preemption |
 | `memset` | `OP_REGION_TO_POOL`, pool destroy | zero each object as it is allocated, and on destroy only what was |
 
-A predecessor link makes a slot twenty-four bytes instead of twenty
-and lets a node leave its ring in constant time.
-The first child's predecessor is the last child,
-so a delete splices its children into its parent's ring without walking them.
-A delete below a root still takes a step per child, each becoming a root,
-and is preempted like a revoke.
-The conversions that look up a parent today
-revoke below the consumed slot and move the node, links and all,
-into the result's place.
-That revoke is preempted too, so it has to come first:
+A delete below a root takes a step per child, each becoming a root,
+and is to be preempted like a revoke.
+So is the revoke below a conversion's consumed slot, which then has to come first:
 both conversions build their object before it today,
 and a restart would find the pool or the line taken.
 
@@ -1152,7 +1145,9 @@ Every link of a filled node lands on a live, filled node;
 an empty node has no links.
 The children of a node form one ring that closes through the node,
 every node on it linked up to that node,
-and a root has no siblings.
+and every node's previous link names the sibling whose next is the node,
+the last sibling for the first;
+a root has no siblings and no previous link.
 A node is derived from its parent:
 the same object with no more rights,
 a range within the parent's range with no more rights,
