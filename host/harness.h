@@ -61,6 +61,13 @@ bool host_driver_alive(void);
 enum { UNIT_NODE, UNIT_LINK, UNIT_OBJECT, UNIT_WAITER, UNITS };
 void host_units(unsigned out[UNITS]);
 
+/*
+ * Around each call: note the state before it, then check what the call changed
+ * against what its caller held; see host/history.c.
+ */
+void history_begin(void);
+void history_end(void);
+
 #ifdef RVUOS_WORK
 /* Around each call in the harness fuzz-work: count its loops, then check their claims. */
 void work_begin(void);

@@ -1143,8 +1143,9 @@ an overflow would silently overwrite `.bss` below it, since PMP does not bind ma
 
 ## Properties
 
-These invariants must hold in every state a process can reach.
-`kernel/selfcheck.c` is their executable form;
+These invariants must hold in every state a process can reach,
+or, where they say so, across every call.
+`kernel/selfcheck.c` is the executable form of those about one state;
 keep the two in step.
 
 **Isolation.**
@@ -1247,10 +1248,47 @@ outside its own objects,
 nor reach any undefined behaviour.
 Any kernel panic reachable from user mode is a bug.
 
-Not on the list yet: "rights only narrow through copies" as a property of history.
-The derivation invariant carries its structural form,
-no node wider than its parent,
-and a copy beside its source is checked against their common parent, not against the source.
+**Authority only flows.**
+A call leaves no capability its caller could not have made.
+Every node it fills or changes is covered by a capability
+the caller's table held before the call:
+the same object, or a range within its range, with no more rights.
+Or it names an object the call built,
+in a pool the caller could allocate from,
+bound to what the caller could write,
+and a pool on memory the caller held a region to, with no more rights than the region.
+A capability to a pool with the right to destroy it
+covers the memory the destroy gives back.
+This is goal 2 across a call.
+It measures a copy against all the caller held, not against its source,
+so a copy wider than its source but within another capability of the caller passes;
+the derivation invariant checks it only against the parent it shares with its source.
+
+**Memory crosses zeroed.**
+Memory that leaves the pools holds nothing but zeros,
+and so does the part of a new pool above its used mark.
+No byte of an object reaches a process when its pool is destroyed,
+and no byte a process wrote becomes part of an object when its memory becomes a pool.
+
+These two relate the state before a call to the state after it,
+so the self-check, which sees one state, cannot check them.
+`host/history.c` checks them around every call of the host build.
+Its RAM starts out holding a pattern rather than zeros,
+so memory the kernel takes without zeroing shows.
+
+**Exit to user mode.**
+Every `mret` enters user mode,
+at the running thread's saved program counter with the registers of its own frame,
+and with the PMP holding its process's image.
+The kernel writes `mstatus.MPP` once, to user mode, before the first `mret`;
+a trap from user mode sets it to user mode again,
+and a trap from machine mode halts.
+`trap_handler` refuses a frame that is not the running thread's
+and hands back the running thread's,
+and under tracing the self-check compares the PMP CSRs with the running process's image.
+The rest lives in `start.S`, which the host build does not have,
+so only the demo and the replay under QEMU run it,
+and no check says what it does wrong; see `TODO.md`.
 
 ## Verification
 
@@ -1268,6 +1306,8 @@ which does to an armed `Irq` what the controller would,
 so the host has devices that fire when the input says.
 libFuzzer feeds the records into the threads' registers
 and the self-check runs after every call, under ASan and UBSan.
+Around every call `host/history.c` compares the state before with the state after,
+for the two properties that relate them; see "Properties".
 Since no system call takes a pointer,
 the registers are the whole attack surface.
 The mutator in `host/mutator.c` works on whole records:
