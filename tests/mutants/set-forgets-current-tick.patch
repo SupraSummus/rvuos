@@ -3,6 +3,9 @@ a delay of zero arms the timer for the tick already counted.
 The tick fires every due timer,
 so an armed timer's deadline lies ahead of the count.
 
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: armed timer is due
+
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 index 0688925..2e8f680 100644
 --- a/kernel/syscall.c

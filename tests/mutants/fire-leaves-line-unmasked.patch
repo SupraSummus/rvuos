@@ -3,6 +3,9 @@ The controller would forward the level again at once,
 to an Irq that has disarmed and has nothing to signal;
 the controller forwards a line exactly while an Irq is armed on it.
 
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: controller forwards a line nothing is armed on
+
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c

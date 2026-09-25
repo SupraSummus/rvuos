@@ -2,6 +2,9 @@ An installed region does not record its slot.
 Uninstalling it would rebuild the PMP image of whatever lies before the process;
 an installed region knows its slot.
 
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: installed region does not know its slot
+
 diff --git a/kernel/process.c b/kernel/process.c
 --- a/kernel/process.c
 +++ b/kernel/process.c

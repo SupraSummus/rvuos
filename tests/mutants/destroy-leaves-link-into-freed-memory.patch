@@ -2,6 +2,9 @@ A destroy that revokes only the capabilities naming its objects
 leaves the slots of the dying tables in the rings of slots that survive,
 and those rings then lead into memory that is user memory again.
 
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: child link to a slot that is not a live, filled one
+
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c

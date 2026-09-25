@@ -3,6 +3,9 @@ and a process holds up to eight regions,
 so the claim is false as soon as one holds five.
 The code is the same, so only the counting harness catches it.
 
+Caught-by: fuzz-work
+Report: the loop at kernel/process.c ran N times on one entry, beyond its bound of N
+
 diff --git a/kernel/process.c b/kernel/process.c
 --- a/kernel/process.c
 +++ b/kernel/process.c

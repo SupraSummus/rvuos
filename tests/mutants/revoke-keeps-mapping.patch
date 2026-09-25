@@ -1,6 +1,9 @@
 A revoke that empties an installed region's slot without rebuilding the PMP image
 leaves the process able to reach memory no slot grants.
 
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: PMP image grants rights the slots do not
+
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c

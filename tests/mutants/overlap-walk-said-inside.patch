@@ -3,6 +3,8 @@ is said inside its loop over one process's slots, not in the walk itself,
 so the outer loop, the one that grows with the machine, says nothing of its bound.
 The code is the same, so only the loop check catches it.
 
+Caught-by: loop-bounds
+
 diff --git a/kernel/pool.c b/kernel/pool.c
 --- a/kernel/pool.c
 +++ b/kernel/pool.c

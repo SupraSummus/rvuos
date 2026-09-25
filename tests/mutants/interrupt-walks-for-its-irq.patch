@@ -3,6 +3,8 @@ a walk the line table was there to spare it,
 so a machine with many pools takes that long for every interrupt.
 It finds the same Irq, so only the loop check catches it.
 
+Caught-by: loop-bounds
+
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c

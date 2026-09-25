@@ -43,7 +43,8 @@ update `kernel/selfcheck.c` with it;
 it is the executable form of the properties in `DESIGN.md`.
 When a change adds or moves an invariant,
 run `make mutants` as well
-and plant a mutant for the new one as a patch under `tests/mutants/`.
+and plant a mutant for the new one as a patch under `tests/mutants/`,
+with the header lines the run prints for it.
 
 ## Documentation of decisions
 

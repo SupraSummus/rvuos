@@ -2,6 +2,8 @@ The self-check sizes its breakpoints in bytes rather than entries,
 a frame eight times what it needs,
 and checking the PMP overflows the kernel's stack.
 
+Caught-by: stack-depth
+
 diff --git a/kernel/selfcheck.c b/kernel/selfcheck.c
 --- a/kernel/selfcheck.c
 +++ b/kernel/selfcheck.c

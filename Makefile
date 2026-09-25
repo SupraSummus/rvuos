@@ -53,7 +53,10 @@ KERNEL_SU    := $(patsubst %.c,$(BUILD)/%.su,$(KERNEL_SRC_C))
 
 USER_COMMON := $(BUILD)/user/start.o
 
-QEMUFLAGS := -M virt -cpu rv32 -m 8M -nographic
+# QEMU's clock counts instructions, not the host's time,
+# so a run takes the same path however loaded the host is;
+# `make mutants` runs many at once and requires the same result from each.
+QEMUFLAGS := -M virt -cpu rv32 -m 8M -nographic -icount shift=0
 
 # What `make run` and `make test` boot.
 ifeq ($(BOARD),qemu)
@@ -72,7 +75,7 @@ else
 $(error unknown BOARD '$(BOARD)'; the boards are qemu and esp32c6)
 endif
 
-.PHONY: all clean run test host-test fuzz corpus-merge qemu-replay mutants check
+.PHONY: all clean run test host-harnesses host-test fuzz corpus-merge qemu-replay mutants check
 
 # Pattern rules would delete the objects they chain through,
 # so every build compiled the kernel from scratch.
@@ -111,14 +114,17 @@ $(BUILD)/user_blob-%.o: $(BUILD)/user_blob-%.S
 # A kernel whose stack may overflow is not an image; see DESIGN.md, "Bounded stack".
 # Nor is one with a loop whose source says nothing of its bound; see DESIGN.md, "Bounded work".
 # That check reads the source as the kernel's objects were compiled from it.
+# Both run even when the first refuses, so that one refusal does not hide the other.
 $(BUILD)/kernel-%.elf: $(KERNEL_OBJ) $(BUILD)/user_blob-%.o $(BUILD)/kernel/kernel.ld \
                        tools/kimage.py tools/ksource.py tools/stack-depth.py tools/loop-bounds.py \
                        DESIGN.md
 	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/kernel/kernel.ld $(KERNEL_OBJ) $(BUILD)/user_blob-$*.o -o $@.tmp
-	tools/stack-depth.py --objdump $(OBJDUMP) $@.tmp $(KERNEL_SU)
+	ok=yes; \
+	tools/stack-depth.py --objdump $(OBJDUMP) $@.tmp $(KERNEL_SU) || ok=no; \
 	tools/loop-bounds.py --objdump $(OBJDUMP) --symbolizer $(SYMBOLIZER) \
 		--cc $(CC) --cflags "$(CFLAGS) $(KERNEL_INC)" --sources "$(KERNEL_SRC_C)" \
-		--design DESIGN.md $@.tmp $(KERNEL_SU)
+		--design DESIGN.md $@.tmp $(KERNEL_SU) || ok=no; \
+	[ $$ok = yes ]
 	mv $@.tmp $@
 
 # The image the ESP32-C6's ROM loads: the ELF's segments behind Espressif's header.
@@ -181,12 +187,16 @@ $(1).obj/%.o: %.c
 endef
 $(foreach h,$(HOST_HARNESSES),$(eval $(call host_harness,$(h))))
 
+# Build the host harnesses without running them; tests/mutants.sh runs each on its own.
+host-harnesses: $(HOST_HARNESSES)
+
 # Replay the seeds and the corpus once on every harness, self-check after every call.
 host-test: $(HOST_HARNESSES)
 	for h in $^; do $$h -runs=0 tests/seeds tests/corpus || exit 1; done
 
 # Plant the bugs of tests/mutants/ in the kernel one at a time.
-# The host replay must catch each; what the QEMU checks catch is reported.
+# The link or the host replay must catch each,
+# and every check must do on it what its header says.
 mutants:
 	tests/mutants.sh
 

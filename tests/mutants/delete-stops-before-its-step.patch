@@ -2,6 +2,9 @@ A delete below a root that asks for an interrupt before its first step
 may stop having made no child a root,
 and the call it stops starts again from where it began, as often as an interrupt is pending.
 
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: a call was preempted before it took anything away
+
 diff --git a/kernel/cap.c b/kernel/cap.c
 index c22b037..6082c9f 100644
 --- a/kernel/cap.c

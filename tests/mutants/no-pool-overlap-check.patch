@@ -2,6 +2,9 @@ A pool is made over memory a live pool already covers.
 Two pools then claim the same words,
 and the pool tree is no longer a partition of the memory it manages.
 
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: process maps a pool: isolation broken
+
 diff --git a/kernel/process.c b/kernel/process.c
 index f398bd5..9874b11 100644
 --- a/kernel/process.c

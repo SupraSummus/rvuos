@@ -1,6 +1,9 @@
 A destroy that spares the pools below
 leaves them naming a parent that is gone.
 
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: pool's parent is not a live, older pool
+
 diff --git a/kernel/pool.c b/kernel/pool.c
 --- a/kernel/pool.c
 +++ b/kernel/pool.c
