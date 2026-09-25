@@ -252,6 +252,9 @@ static inline bool timer_due(const struct timer *t, uint32_t now)
 
 #define OBJ_ALIGN 8
 
+/* The largest object, a table of the most slots; pool_alloc refuses a larger one. */
+#define OBJ_MAX_SIZE (sizeof(struct captable) + CAPTABLE_MAX_SLOTS * sizeof(struct cap))
+
 /* Both are correct even if a range ends at the top of the address space. */
 static inline bool ranges_overlap(uint32_t a, uint32_t asize, uint32_t b, uint32_t bsize)
 {
@@ -277,7 +280,7 @@ static inline uint8_t rights_to_pmp(uint8_t rights)
 extern struct pool *pool_list;
 
 /*
- * Turn a zeroed range into a pool below parent, NULL for the boot pool.
+ * Turn a range into a pool below parent, NULL for the boot pool.
  * The range must be OBJ_ALIGN aligned and large enough for the descriptor.
  * The caller has already checked for overlaps.
  */
@@ -290,7 +293,7 @@ bool pool_under(const struct pool *pool, const struct pool *ancestor);
  * Destroy a pool and every pool below it:
  * clear every capability naming an object in them,
  * wake every thread waiting on a notification in them with an error,
- * and zero the memory.
+ * and zero their objects.
  * The caller has checked that the running thread does not live in any of them.
  */
 void pool_destroy(struct pool *pool);
@@ -298,7 +301,7 @@ void pool_destroy(struct pool *pool);
 /* Whether pool_alloc would find room for size bytes. */
 bool pool_fits(const struct pool *pool, size_t size);
 
-/* Allocate a zeroed object of the given type and size. NULL if exhausted. */
+/* Allocate a zeroed object of the given type and size. NULL if exhausted, or larger than OBJ_MAX_SIZE. */
 void *pool_alloc(struct pool *pool, uint8_t type, size_t size);
 
 /* Byte length of an object, from its header. */
@@ -485,14 +488,14 @@ void sched_claim_interrupts(void);
 void sched_wait(struct thread *t, struct notification *ntfn);
 
 /*
- * Before a pool is zeroed, undo what its objects left in the rest of the kernel:
- * wake every thread waiting on a notification in it
+ * Before an object of a pool that goes is zeroed, undo what it left in the rest of the kernel:
+ * a notification wakes every thread waiting on it
  * with KERR_INVALID_CAP and no bits, because the object is gone,
- * take every thread in it off the notification it waits on or the run queue,
- * disarm every Timer in it,
- * and disarm, mask and unbind the line of every Irq in it.
+ * a thread leaves the notification it waits on or the run queue,
+ * a Timer is disarmed,
+ * and an Irq is disarmed and its line masked and unbound.
  */
-void sched_forget_pool(struct pool *pool);
+void sched_forget(struct obj_header *o);
 
 /* The Irq bound to each line, 0 for none; IRQ_LINES long. */
 extern paddr_t line_irq[];

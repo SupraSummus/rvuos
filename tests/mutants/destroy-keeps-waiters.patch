@@ -6,9 +6,10 @@ Report: queue holds something that is not a thread
 Report: thread waits on something that is not a notification
 
 diff --git a/kernel/pool.c b/kernel/pool.c
+index 205bbe8..190f5cd 100644
 --- a/kernel/pool.c
 +++ b/kernel/pool.c
-@@ -66,3 +66,2 @@ void pool_destroy(struct pool *pool)
-         /* Nothing below may fail: the pool is going. */
--        sched_forget_pool(p);
-         if (kept != NULL) {
+@@ -50,3 +50,2 @@ static void pool_clear(struct pool *pool)
+         next = pool_next(pool, o);
+-        sched_forget(o);
+         CALL_BOUND(OBJ_MAX_SIZE);

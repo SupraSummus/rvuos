@@ -451,8 +451,7 @@ The range must:
 - lie within RAM, not on a device and not on the kernel log,
 - overlap no existing pool and no region installed in any process.
 
-The kernel zeroes the memory,
-places the pool's descriptor at its base,
+The kernel places the pool's descriptor at its base,
 clears the region capability that was invoked,
 and returns a `KernelPool` capability with all rights.
 Copies of the region capability held elsewhere survive but are inert:
@@ -501,7 +500,8 @@ The boot pool is the root and can never be destroyed.
 - wakes every thread waiting on a notification in those pools
   with `KERR_INVALID_CAP` and no bits,
 - masks the interrupt line of every `Irq` in those pools,
-- zeroes the memory,
+- zeroes the memory its objects took and leaves the rest as it was,
+  so clear a region before it becomes a pool if whoever destroys the pool should not read it,
 - returns a `Region` capability to the invoked pool's memory,
   with the rights the region had when it became a pool.
 

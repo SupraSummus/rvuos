@@ -9,6 +9,6 @@ diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
 @@ -212,3 +212,2 @@
-             }
--            line_irq[line] = 0;
-             break;
+         }
+-        line_irq[line] = 0;
+         break;

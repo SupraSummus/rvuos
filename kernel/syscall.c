@@ -118,7 +118,7 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
             return KERR_NO_RIGHTS;
         }
         /*
-         * Kernel objects live in RAM: on a device range the zeroing below would drive registers.
+         * Kernel objects live in RAM: on a device range writing them would drive registers.
          * The log is RAM the kernel writes on its own, so it cannot hold them either.
          * A region is a block aligned to its size, so one this large lies on OBJ_ALIGN.
          */
@@ -145,10 +145,11 @@ static int op_region(struct thread *t, uint32_t slot, const struct cap *cap,
         if (!cap_revoke_below(slot_node(t, slot), true)) {
             return KERR_PREEMPTED;
         }
-        /* From here on the memory is the kernel's. */
-        CALL_WALK(memset);
-        memset(p2v(base), 0, size);
-        /* The new pool hangs below the caller's own, and dies with it. */
+        /*
+         * From here on the memory is the kernel's.
+         * It is not zeroed here, which would be work in its size: pool_alloc zeroes each object.
+         * The new pool hangs below the caller's own, and dies with it.
+         */
         struct pool *pool = pool_create(base, size, cap->rights, obj_pool(&t->hdr));
         struct cap pc = cap_to_object(&pool->hdr, RIGHT_ALL);
         /* The pool capability takes the region's place in the tree, and the region goes. */

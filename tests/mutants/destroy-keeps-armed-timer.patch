@@ -9,9 +9,9 @@ diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
 @@ -236,6 +236,2 @@
-         }
--        case CAP_TIMER:
--            /* The timer is gone and will not fire, so it is no source. */
--            timer_set_bits((struct timer *)o, 0);
--            break;
-         case CAP_IRQ: {
+     }
+-    case CAP_TIMER:
+-        /* The timer is gone and will not fire, so it is no source. */
+-        timer_set_bits((struct timer *)o, 0);
+-        break;
+     case CAP_IRQ: {

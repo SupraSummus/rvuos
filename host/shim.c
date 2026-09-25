@@ -167,8 +167,8 @@ struct thread *host_boot(void)
         }
     }
     /*
-     * The kernel zeroes pool memory itself when it takes it,
-     * so RAM outside the boot pool may keep the previous run's contents,
+     * The kernel clears each object as it hands it out,
+     * so RAM may keep the previous run's contents, the boot pool's too,
      * exactly as on a warm reset.
      */
     pool_list = NULL;
@@ -193,12 +193,17 @@ struct thread *host_boot(void)
      * from the records both builds share; see rvuos/replay.h.
      */
     for (unsigned i = 0; i < REPLAY_PROLOGUE_COUNT; i++) {
-        if (host_syscall(&replay_prologue[i]) != KERR_OK) {
+        int err = (int)host_syscall(&replay_prologue[i]);
+        if (err != KERR_OK) {
+            fprintf(stderr, "invariant violated: a fresh kernel refused prologue record %u with %d\n", i, err);
             abort();
         }
     }
     for (unsigned i = 0; i < REPLAY_AFTER_INPUT_COUNT; i++) {
-        if (host_syscall(&replay_after_input[i]) != KERR_OK) {
+        int err = (int)host_syscall(&replay_after_input[i]);
+        if (err != KERR_OK) {
+            fprintf(stderr, "invariant violated: a fresh kernel refused prologue record %u with %d\n",
+                    (unsigned)(REPLAY_PROLOGUE_COUNT + i), err);
             abort();
         }
     }

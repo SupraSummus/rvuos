@@ -9,8 +9,8 @@ diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
 @@ -209,5 +209,2 @@
-             uint32_t line = ((struct irq *)o)->line;
--            if (line != LOG_IRQ_LINE) {
--                irq_enable(line, false);
--            }
-             line_irq[line] = 0;
+         uint32_t line = ((struct irq *)o)->line;
+-        if (line != LOG_IRQ_LINE) {
+-            irq_enable(line, false);
+-        }
+         line_irq[line] = 0;

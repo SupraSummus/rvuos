@@ -1,20 +1,20 @@
-A pool that goes looks for its objects among every object of every pool,
+A pool that goes looks for its objects past its own, among every object of the pools older than it,
 still claiming each step takes one away,
-so a destroy costs what the whole machine holds, not what it destroys.
-It forgets the same objects, so only the counting harness catches it.
+so a destroy costs what the machine holds, not what it destroys.
+It forgets and zeroes the same objects, so only the counting harness catches it.
 
 Caught-by: fuzz-work
 Report: a call took N paid steps in object and took away N
 
-diff --git a/kernel/sched.c b/kernel/sched.c
---- a/kernel/sched.c
-+++ b/kernel/sched.c
-@@ -196,4 +196,7 @@
- {
--    for (struct obj_header *o = pool_first(pool); o != NULL; o = pool_next(pool, o)) {
-+    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
-         LOOP_PAID(sched_forget_pool, object, "an object of the pool that goes");
+diff --git a/kernel/pool.c b/kernel/pool.c
+index 205bbe8..1d548e9 100644
+--- a/kernel/pool.c
++++ b/kernel/pool.c
+@@ -49,3 +49,6 @@ static void pool_clear(struct pool *pool)
+         LOOP_PAID(pool_clear, object, "an object of the pool that goes");
+-        next = pool_next(pool, o);
++        next = object_next(o);
 +        if (o->pool != pool->base) {
 +            continue;
 +        }
-         switch (o->type) {
+         sched_forget(o);
