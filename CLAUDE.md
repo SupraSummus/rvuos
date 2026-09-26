@@ -52,6 +52,13 @@ When a change edits code a mutant touches or stands next to,
 run `make mutants-refresh`, then `make mutants` if it moved any,
 and fix by hand only the patches it calls stale.
 
+## Environment
+
+In a cloud session, `.claude/hooks/session-start.sh` installs what `make check` needs.
+If a tool is still missing, run the hook, or install the tool and add it to the hook;
+never skip the check.
+A check that could not run is reported as not run, never as passed.
+
 ## Documentation of decisions
 
 Architectural decisions live in `DESIGN.md`.
