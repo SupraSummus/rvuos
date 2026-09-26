@@ -17,10 +17,18 @@ with its breakpoint or the records unmapped it,
 `no runnable thread` when every thread of the driver blocked,
 `untraced thread` when the records started a thread
 whose code the host cannot follow,
-or `invariant violated`.
+`invariant violated`,
+or `kernel panic`.
 The traces must match exactly,
-and a trace ending in `invariant violated` fails its input
+and a trace ending in `invariant violated` or `kernel panic` fails its input
 even when both builds agree on it.
+
+The host replays its share of the inputs in one process,
+each as if it ran alone, see host/fuzz.c;
+its reports on stderr are part of its trace,
+since host/history.c reports there what the self-check cannot see.
+An input that crashes the host ends that process and fails,
+and the rest go on in the next.
 """
 
 import argparse
@@ -38,6 +46,8 @@ REPLAY_MAGIC = 0x5A465652
 RECORD_SIZE = 16
 MAX_RECORDS = 256
 TIMEOUT = 20
+# The line the host prints after each input it replays isolated; HOST_INPUT_END in host/harness.h.
+INPUT_END = "isolated: end of input\n"
 
 TERMINAL_PREFIXES = (
     "user fault",
@@ -45,7 +55,10 @@ TERMINAL_PREFIXES = (
     "no runnable thread",
     "untraced thread",
     "invariant violated",
+    "kernel panic",
 )
+# What the host's trace ends in when the input crashed it, which no QEMU trace holds.
+HOST_DIED = "host harness died"
 
 
 def decode(raw: bytes) -> str:
@@ -71,12 +84,23 @@ def make_blob(data: bytes) -> bytes:
     return struct.pack("<II", REPLAY_MAGIC, count) + data[: count * RECORD_SIZE]
 
 
-def run_host(host_bin: str, path: str) -> list[str]:
-    proc = subprocess.run(
-        [host_bin, "--verbose", path],
-        capture_output=True, timeout=TIMEOUT, check=False,
-    )
-    return relevant_lines(decode(proc.stdout))
+def run_host(host_bin: str, paths: list[str]) -> list[list[str]]:
+    """The host's trace of each input, from as few processes as the inputs let it."""
+    traces = []
+    while len(traces) < len(paths):
+        rest = paths[len(traces):]
+        proc = subprocess.run(
+            [host_bin, "--verbose", "--isolated", *rest],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            timeout=TIMEOUT * len(rest), check=False,
+        )
+        parts = decode(proc.stdout).split(INPUT_END)
+        ended = min(len(parts) - 1, len(rest))
+        traces += [relevant_lines(part) for part in parts[:ended]]
+        # What follows the last end is the input the process died in, if one did.
+        if ended < len(rest):
+            traces.append(relevant_lines(parts[ended]) + [HOST_DIED])
+    return traces
 
 
 def run_qemu(qemu: list[str], kernel: str, data: bytes) -> list[str]:
@@ -97,14 +121,15 @@ def run_qemu(qemu: list[str], kernel: str, data: bytes) -> list[str]:
         os.unlink(blob)
 
 
-def compare(name: str, qemu: list[str], kernel: str, host_bin: str, path: str):
+def compare(name: str, qemu: list[str], kernel: str, host: list[str], path: str):
     with open(path, "rb") as f:
         data = f.read()
-    host = run_host(host_bin, path)
     target = run_qemu(qemu, kernel, data)
     if host == target:
         if host and host[-1].startswith("invariant violated"):
             return name, "INVARIANT", "  both builds report: " + host[-1]
+        if host and host[-1].startswith("kernel panic"):
+            return name, "PANIC", "  both builds report: " + host[-1]
         return name, None, None
     diff = []
     for i in range(max(len(host), len(target))):
@@ -138,9 +163,12 @@ def main() -> int:
     qemu = shlex.split(args.qemu)
     failures = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
+        share = max(1, -(-len(paths) // args.jobs))
+        shares = [paths[i:i + share] for i in range(0, len(paths), share)]
+        host = [t for ts in pool.map(lambda s: run_host(args.host, s), shares) for t in ts]
         futures = [
-            pool.submit(compare, os.path.basename(p), qemu, args.kernel, args.host, p)
-            for p in paths
+            pool.submit(compare, os.path.basename(p), qemu, args.kernel, h, p)
+            for p, h in zip(paths, host)
         ]
         for fut in concurrent.futures.as_completed(futures):
             name, kind, detail = fut.result()

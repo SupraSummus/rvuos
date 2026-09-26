@@ -506,8 +506,7 @@ def main() -> int:
                 calls += [(a, pc, c) for pc, c in blk.calls + blk.tails if c is not None]
 
         src = Source()
-        for path in shlex.split(args.sources):
-            src.read(args.cc, args.cflags, path)
+        src.read(args.cc, args.cflags, shlex.split(args.sources))
         frames_of = symbolize(args.symbolizer, args.elf,
                               [x for f in found for x in f[3]] + [pc for _, pc, _ in calls])
 

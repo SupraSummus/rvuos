@@ -8,6 +8,8 @@ so it costs no instruction and the compiler checks its condition; see kernel/wor
 The way back is llvm-symbolizer, which gives each address its inlined frames.
 """
 
+import concurrent.futures
+import functools
 import json
 import os
 import shlex
@@ -17,12 +19,15 @@ from kimage import Failure
 
 LOOPS = ("ForStmt", "WhileStmt", "DoStmt")
 
+# Every location of a dump names one of a few files, so each is resolved once.
+realpath = functools.lru_cache(maxsize=None)(os.path.realpath)
+
 
 class Pos:
     """A place in a file, by line and column; ordered, and a range test beside it."""
 
     def __init__(self, file, line, col):
-        self.file, self.line, self.col = os.path.realpath(file), line, col
+        self.file, self.line, self.col = realpath(file), line, col
 
     def key(self):
         return (self.line, self.col)
@@ -127,15 +132,20 @@ class Source:
         self.functions = {}  # file -> [(begin, end, name)]
         self.calls = {}   # (callee, place) -> Call
 
-    def read(self, cc, cflags, path):
-        cmd = [cc] + shlex.split(cflags) + ["-fsyntax-only", "-Xclang", "-ast-dump=json", path]
-        try:
-            out = subprocess.run(cmd, capture_output=True, text=True, check=True).stdout
-        except (OSError, subprocess.CalledProcessError) as e:
-            raise Failure(f"cannot dump the AST of {path}: {getattr(e, 'stderr', e)}")
-        tree = json.loads(out)
-        resolve_locations(tree)
-        self._walk(tree, None, [])
+    def read(self, cc, cflags, paths):
+        """Read the translation units in order; clang dumps them side by side."""
+        def dump(path):
+            cmd = [cc] + shlex.split(cflags) + ["-fsyntax-only", "-Xclang", "-ast-dump=json", path]
+            try:
+                return subprocess.run(cmd, capture_output=True, text=True, check=True).stdout
+            except (OSError, subprocess.CalledProcessError) as e:
+                raise Failure(f"cannot dump the AST of {path}: {getattr(e, 'stderr', e)}")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count() or 2) as pool:
+            for out in pool.map(dump, paths):
+                tree = json.loads(out)
+                resolve_locations(tree)
+                self._walk(tree, None, [])
 
     def _walk(self, tree, function, loops):
         # Iterative, with the enclosing function, loops and if conditions carried along.

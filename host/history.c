@@ -66,7 +66,7 @@ static bool dying_under(const struct thread *t, const struct captable *table)
 __attribute__((noreturn)) static void violated(const char *what)
 {
     fprintf(stderr, "invariant violated: %s\n", what);
-    abort();
+    host_violated();
 }
 
 /* An installed region grants what the frame it came from did, and an Untyped its block whatever its watermark. */

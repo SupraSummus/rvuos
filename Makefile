@@ -57,7 +57,10 @@ USER_COMMON := $(BUILD)/user/start.o
 # so a run takes the same path however loaded the host is;
 # `make mutants` runs many at once and requires the same result from each.
 # sleep=off keeps it so while the guest waits in wfi, which would otherwise pass in host time.
-QEMUFLAGS := -M virt -cpu rv32 -m 8M -nographic -icount shift=0,sleep=off
+# The machine has only the devices the kernel uses, and QEMU starts faster for it;
+# the UART and QEMU's monitor share the terminal as -nographic has them.
+QEMUFLAGS := -M virt -cpu rv32 -m 8M -nographic -nodefaults -serial mon:stdio \
+             -icount shift=0,sleep=off
 
 # What `make run` and `make test` boot.
 ifeq ($(BOARD),qemu)
@@ -116,16 +119,28 @@ $(BUILD)/user_blob-%.o: $(BUILD)/user_blob-%.S
 # Nor is one with a loop whose source says nothing of its bound; see DESIGN.md, "Bounded work".
 # That check reads the source as the kernel's objects were compiled from it.
 # Both run even when the first refuses, so that one refusal does not hide the other.
-$(BUILD)/kernel-%.elf: $(KERNEL_OBJ) $(BUILD)/user_blob-%.o $(BUILD)/kernel/kernel.ld \
-                       tools/kimage.py tools/ksource.py tools/stack-depth.py tools/loop-bounds.py \
-                       DESIGN.md
-	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/kernel/kernel.ld $(KERNEL_OBJ) $(BUILD)/user_blob-$*.o -o $@.tmp
+# They read the kernel linked alone, once for all its images,
+# since an image differs from it only in the root task in .user_code, which neither reads.
+$(BUILD)/kernel.elf: $(KERNEL_OBJ) $(BUILD)/kernel/kernel.ld \
+                     tools/kimage.py tools/ksource.py tools/stack-depth.py tools/loop-bounds.py \
+                     DESIGN.md
+	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/kernel/kernel.ld $(KERNEL_OBJ) -o $@.tmp
 	ok=yes; \
 	tools/stack-depth.py --objdump $(OBJDUMP) $@.tmp $(KERNEL_SU) || ok=no; \
 	tools/loop-bounds.py --objdump $(OBJDUMP) --symbolizer $(SYMBOLIZER) \
 		--cc $(CC) --cflags "$(CFLAGS) $(KERNEL_INC)" --sources "$(KERNEL_SRC_C)" \
 		--design DESIGN.md $@.tmp $(KERNEL_SU) || ok=no; \
 	[ $$ok = yes ]
+	mv $@.tmp $@
+
+# An image is the checked kernel with a root task,
+# and must hold that kernel byte for byte outside .user_code.
+$(BUILD)/kernel-%.elf: $(BUILD)/kernel.elf $(BUILD)/user_blob-%.o
+	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/kernel/kernel.ld $(KERNEL_OBJ) $(BUILD)/user_blob-$*.o -o $@.tmp
+	$(OBJCOPY) -O binary -R .user_code $@.tmp $@.own
+	$(OBJCOPY) -O binary -R .user_code $< $@.checked
+	cmp -s $@.own $@.checked || { echo "$@: the kernel is not the one checked" >&2; exit 1; }
+	rm $@.own $@.checked
 	mv $@.tmp $@
 
 # The image the ESP32-C6's ROM loads: the ELF's segments behind Espressif's header.

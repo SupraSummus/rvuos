@@ -1159,7 +1159,7 @@ its room in the pool among them, and builds after.
 Every loop a trap can run says what bounds it with an annotation from `kernel/work.h`:
 a constant, what it pays with, a row of the table below, an argument, or a wait on the hardware.
 An annotation is a `_Static_assert`, so it changes no code the compiler makes.
-Every kernel link runs `tools/loop-bounds.py`,
+The kernel's link runs `tools/loop-bounds.py`,
 which finds the loops in the machine code, inlined and compiler-made ones too,
 matches each to its source loop through the debug information and clang's AST,
 and fails on one that says nothing.
@@ -1213,10 +1213,13 @@ A walk that would recurse walks with no stack, as `cap_revoke_below` does.
 A call through a pointer counts as a call to every function whose address is taken.
 
 **The check.**
-Every kernel link runs `tools/stack-depth.py`,
+The kernel's link runs `tools/stack-depth.py`,
 which reads the frames from `-fstack-usage` and the calls from the disassembly,
 fails on a broken rule or a bound above `KERNEL_STACK_SIZE`,
 and prints the bound and its chain.
+Both tools read the kernel linked alone, once for all its images.
+An image adds its root task in `.user_code`, which neither tool reads,
+and its link fails unless the rest of it is the checked kernel byte for byte.
 The kernel is compiled with `-ffunction-sections`,
 so the linker drops dead functions,
 and a C function the tool sees no call to is a call it could not read,
@@ -1422,6 +1425,9 @@ sets one field to a value in its range,
 and splices two inputs on record boundaries,
 so that a handoff between the driver's threads is one mutation, not a guess per byte.
 The inputs replayed are checked in under `tests/seeds` and `tests/corpus`.
+`make mutants` and `make qemu-replay` replay them in one harness process,
+each input from RAM as at power-up and ending at its first report, as if it ran alone,
+since starting the harness costs more than most inputs do.
 A seed is written by hand for a scenario the kernel must handle,
 is named after that scenario, and is kept for as long as the scenario exists.
 The corpus is what the fuzzer found,
@@ -1500,7 +1506,11 @@ rather than written out twice.
 `OP_DEBUG_TRACE` makes the kernel print one line per call
 and run the self-check after it, reading the PMP CSRs back.
 `tests/differential.py` requires the host and QEMU transcripts
-to match line for line.
+to match line for line,
+and fails an input whose transcript ends in an invariant report or a kernel panic,
+even where the two agree.
+The host's transcript takes in what `host/history.c` reports,
+and one that crashes the host fails.
 The host has no instruction fetch to fault,
 so it declares the root task dead
 when its code or data is no longer mapped with the needed rights;
