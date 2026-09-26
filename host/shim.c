@@ -100,6 +100,9 @@ uint32_t timer_counter_hz(void)
 /* The worst case: every preemptible call stops after its first step. */
 bool intr_pending(void)
 {
+#ifdef RVUOS_WORK
+    work_ask();
+#endif
     return true;
 }
 
@@ -290,11 +293,14 @@ uint32_t host_syscall(const struct replay_record *c)
         work_end();
 #endif
         history_end();
-        /* A step of a preemptible walk takes a node, a link or an object away, and it stops only after one. */
+        /* A step of a preemptible walk takes a unit away, and it stops only after one. */
         unsigned after[UNITS];
         host_units(after);
-        if (f->mepc == mepc && after[UNIT_NODE] >= before[UNIT_NODE] &&
-            after[UNIT_LINK] >= before[UNIT_LINK] && after[UNIT_OBJECT] >= before[UNIT_OBJECT]) {
+        bool took = false;
+        for (unsigned u = 0; u < UNITS; u++) {
+            took |= after[u] < before[u];
+        }
+        if (f->mepc == mepc && !took) {
             fprintf(stderr, "invariant violated: a call was preempted before it took anything away\n");
             host_violated();
         }

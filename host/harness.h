@@ -85,6 +85,10 @@ void history_end(void);
 /* Around each call in the harness fuzz-work: count its loops, then check their claims. */
 void work_begin(void);
 void work_end(void);
+/* intr_pending was asked: a paid loop may step again. */
+void work_ask(void);
+void *work_memset(void *dst, int c, size_t n);
+void *work_memcpy(void *dst, const void *src, size_t n);
 /* Forget the frames a halt or an isolated report left open; see host_boot. */
 void work_reset(void);
 #endif

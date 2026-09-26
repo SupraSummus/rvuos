@@ -1,0 +1,20 @@
+A notification that goes wakes every thread waiting on it before it asks
+whether an interrupt is pending, and asks only once the queue is empty,
+so a destroy takes as long as there are waiters before the tick is heard.
+It wakes the same threads with the same status, so only the counting harness catches it.
+
+Caught-by: fuzz-work
+Report: the paid loop at kernel/sched.c took a second step without asking intr_pending
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -206,7 +206,7 @@ bool sched_forget(struct obj_header *o, bool preempt)
+             t->frame.regs[REG_A0] = KERR_INVALID_CAP;
+             t->frame.regs[REG_A1] = 0;
+             sched_ready(t);
+-            if (ntfn->waiters != 0 && cap_stop_here(preempt)) {
++            if (ntfn->waiters == 0 && cap_stop_here(preempt)) {
+                 return false;
+             }
+         }

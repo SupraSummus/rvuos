@@ -4,7 +4,7 @@ so a destroy costs what the machine holds, not what it destroys.
 It forgets and zeroes the same objects, so only the counting harness catches it.
 
 Caught-by: fuzz-work
-Report: a call took N paid steps in object and took away N
+Report: the paid loop at kernel/pool.c took a second step without asking intr_pending
 
 diff --git a/kernel/pool.c b/kernel/pool.c
 --- a/kernel/pool.c

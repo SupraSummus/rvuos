@@ -9,7 +9,7 @@ Report: memory left the kernel with an object not zeroed
 diff --git a/kernel/pool.c b/kernel/pool.c
 --- a/kernel/pool.c
 +++ b/kernel/pool.c
-@@ -119,7 +119,7 @@ bool pool_destroy(struct pool *pool, struct cap *keep, bool preempt)
+@@ -121,7 +121,7 @@ bool pool_destroy(struct pool *pool, struct cap *keep, bool preempt)
          pool->used = v2p(o) - pool_base(pool);
          pool->sweep = 0;
          CALL_BOUND(OBJ_MAX_SIZE + OBJ_ALIGN);

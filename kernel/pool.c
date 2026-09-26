@@ -112,7 +112,9 @@ bool pool_destroy(struct pool *pool, struct cap *keep, bool preempt)
                 return false;
             }
         }
-        sched_forget(o);
+        if (!sched_forget(o, preempt)) {
+            return false;
+        }
         /* The padding too, so that everything the pool ever handed out goes back zeroed. */
         uint32_t size = align_up((uint32_t)obj_size(o), OBJ_ALIGN);
         pool->last = v2p(o) - o->back * OBJ_ALIGN;

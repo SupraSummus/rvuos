@@ -2,9 +2,11 @@ A revoke that recurses into each node before it clears it
 takes a frame per level of the derivation tree,
 and a deep enough tree overflows the kernel's stack.
 It clears the same nodes and says what pays for its loop,
-so only the stack check catches it.
+so the stack check catches it,
+and the counting harness too, since the revoke it recurses into never asks intr_pending.
 
-Caught-by: stack-depth
+Caught-by: stack-depth fuzz-work
+Report: the paid loop at kernel/cap.c took a second step without asking intr_pending
 
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c

@@ -26,6 +26,7 @@
  *
  * In the host build's harness fuzz-work, RVUOS_WORK makes each loop annotation count too,
  * and the harness checks the claims after every call: see host/work.c.
+ * There a CALL_BOUND also holds the length of the memset or memcpy after it to its bound.
  */
 
 #define WORK_STR_(x) #x
@@ -52,8 +53,11 @@ void work_step(const struct work_site *site);
         static const struct work_site work_site_ = { kind, n, unit, WORK_SITE };   \
         work_step(&work_site_);                                                     \
     } while (0)
+void work_call(unsigned long bound, const char *site);
+#define WORK_CALL(n) ; work_call((n), WORK_SITE)
 #else
 #define WORK_STEP(kind, n, unit)
+#define WORK_CALL(n)
 #endif
 
 #define LOOP_BOUND(n) _Static_assert((n) > 0, "loop bound " #n) WORK_STEP('b', (n), "")
@@ -63,7 +67,7 @@ void work_step(const struct work_site *site);
 #define LOOP_ARG(fn, arg) _Static_assert(1, "loop arg " #fn " " #arg) WORK_STEP('o', 0, "")
 #define LOOP_WAIT(what) _Static_assert(1, "loop wait " what) WORK_STEP('o', 0, "")
 
-#define CALL_BOUND(n) _Static_assert((n) > 0, "call bound " #n)
+#define CALL_BOUND(n) _Static_assert((n) > 0, "call bound " #n) WORK_CALL(n)
 #define CALL_WALK(name) _Static_assert(1, "call walk " #name)
 #define CALL_LITERAL(s) _Static_assert(sizeof("" s) > 0, "call literal")
 #define CALL_ARG(fn, arg) _Static_assert(1, "call arg " #fn " " #arg)

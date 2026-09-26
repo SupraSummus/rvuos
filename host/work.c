@@ -16,6 +16,11 @@
  * twice, since a delete below a root makes a root of a node, a link each,
  * and a pool destroy may then clear that node as one its tables hold.
  * What there is of each unit is counted over every object by host_units.
+ *
+ * Two claims are checked as they are made.
+ * No paid loop steps twice without asking intr_pending between, a call's start counting as asked.
+ * And the kernel's memset and memcpy, work_memset and work_memcpy here,
+ * take no more than the CALL_BOUND before them says.
  */
 
 #include <stdarg.h>
@@ -27,6 +32,8 @@
 
 #define WORK_DEPTH 64
 #define WORK_OPEN 8
+/* More than the kernel has paid loops, each stepped at most once since the last question. */
+#define WORK_PAID_SITES 16
 
 /*
  * What one call may make of a unit while it takes others away:
@@ -41,12 +48,18 @@ struct work_frame {
     const struct work_site *site[WORK_OPEN];
     unsigned count[WORK_OPEN];
     unsigned open;
+    /* The CALL_BOUND said for the next memset or memcpy this frame makes; site NULL for none. */
+    unsigned long call_bound;
+    const char *call_site;
 };
 
 static struct work_frame frames[WORK_DEPTH];
 static unsigned depth;
 static unsigned paid[UNITS];
 static unsigned before[UNITS];
+/* The paid loops that stepped since intr_pending was last asked. */
+static const struct work_site *unasked[WORK_PAID_SITES];
+static unsigned unasked_count;
 
 void __cyg_profile_func_enter(void *fn, void *site) __attribute__((no_instrument_function));
 void __cyg_profile_func_exit(void *fn, void *site) __attribute__((no_instrument_function));
@@ -57,6 +70,7 @@ void __cyg_profile_func_enter(void *fn, void *site)
     (void)site;
     if (depth < WORK_DEPTH) {
         frames[depth].open = 0;
+        frames[depth].call_site = NULL;
     }
     depth++;
 }
@@ -118,12 +132,61 @@ void work_step(const struct work_site *s)
     }
     if (s->kind == 'p') {
         paid[unit_of(s->unit)]++;
+        for (unsigned k = 0; k < unasked_count; k++) {
+            if (unasked[k] == s) {
+                violated("the paid loop at %s took a second step without asking intr_pending", s->site);
+            }
+        }
+        if (unasked_count == WORK_PAID_SITES) {
+            violated("the loop at %s is one paid loop more than the harness follows", s->site);
+        }
+        unasked[unasked_count++] = s;
     }
+}
+
+void work_ask(void)
+{
+    unasked_count = 0;
+}
+
+void work_call(unsigned long bound, const char *site)
+{
+    if (depth == 0 || depth > WORK_DEPTH) {
+        violated("the call at %s is made outside the frames the harness follows", site);
+    }
+    frames[depth - 1].call_bound = bound;
+    frames[depth - 1].call_site = site;
+}
+
+/* Host code, and kernel code off every trap's path, calls with no bound said; the link checks the rest. */
+static void work_length(size_t n)
+{
+    if (depth == 0 || depth > WORK_DEPTH) {
+        return;
+    }
+    struct work_frame *f = &frames[depth - 1];
+    if (f->call_site != NULL && n > f->call_bound) {
+        violated("the call at %s passes %zu, beyond its bound of %lu", f->call_site, n, f->call_bound);
+    }
+    f->call_site = NULL;
+}
+
+void *work_memset(void *dst, int c, size_t n)
+{
+    work_length(n);
+    return memset(dst, c, n);
+}
+
+void *work_memcpy(void *dst, const void *src, size_t n)
+{
+    work_length(n);
+    return memcpy(dst, src, n);
 }
 
 void work_begin(void)
 {
     depth = 0;
+    unasked_count = 0;
     memset(paid, 0, sizeof(paid));
     host_units(before);
 }

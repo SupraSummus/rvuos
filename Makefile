@@ -179,14 +179,16 @@ FUZZ_TIME ?= 60
 # The machine is a preprocessor flag, so each harness has its objects to itself
 # in build/host/<harness>.obj/.
 # fuzz-work is the default machine with the loop annotations counting,
-# and every kernel function opening a frame for them; see host/work.c.
+# every kernel function opening a frame for them,
+# and the kernel's memset and memcpy checked against their CALL_BOUND; see host/work.c.
 # It checks claims rather than finds inputs, so the corpus is kept without it.
 HOST_MACHINES  := $(HOST_BUILD)/fuzz $(HOST_BUILD)/fuzz-pmp8 $(HOST_BUILD)/fuzz-grain32
 HOST_HARNESSES := $(HOST_MACHINES) $(HOST_BUILD)/fuzz-work
 $(HOST_BUILD)/fuzz-pmp8.obj/%.o:    HOST_MACHINE := -UPMP_MAX_ENTRIES -DPMP_MAX_ENTRIES=8
 $(HOST_BUILD)/fuzz-grain32.obj/%.o: HOST_MACHINE := -DPMP_GRAIN=32
 $(HOST_BUILD)/fuzz-work.obj/%.o:        HOST_MACHINE := -DRVUOS_WORK
-$(HOST_BUILD)/fuzz-work.obj/kernel/%.o: HOST_MACHINE := -DRVUOS_WORK -finstrument-functions
+$(HOST_BUILD)/fuzz-work.obj/kernel/%.o: HOST_MACHINE := -DRVUOS_WORK -finstrument-functions \
+                                        -Dmemset=work_memset -Dmemcpy=work_memcpy
 
 host_obj = $(patsubst %.c,$(1).obj/%.o,$(HOST_KERNEL_SRC) $(HOST_SRC) \
                                        $(if $(filter %-work,$(1)),host/work.c))

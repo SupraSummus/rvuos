@@ -1,6 +1,6 @@
 An interrupt looks for the pool of its Irq among every pool,
-a walk the line table was there to spare it,
-so a machine with many pools takes that long for every interrupt.
+and the walk says it waits on the hardware, which it never touches,
+so a machine with many pools takes that long for every interrupt and the tick.
 It finds the same Irq, so only the loop check catches it.
 
 Caught-by: loop-bounds
@@ -8,12 +8,13 @@ Caught-by: loop-bounds
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -186,7 +186,12 @@ paddr_t line_irq[LINES];
+@@ -186,7 +186,13 @@ paddr_t line_irq[LINES];
  
  struct irq *line_binding(uint32_t line)
  {
 -    return line_irq[line] != 0 ? p2v(line_irq[line]) : NULL;
 +    for (struct pool *p = pool_list; p != NULL && line_irq[line] != 0; p = pool_next_pool(p)) {
++        LOOP_WAIT("the line to be one the pool holds");
 +        if (range_contains(pool_base(p), p->size, line_irq[line])) {
 +            return p2v(line_irq[line]);
 +        }
