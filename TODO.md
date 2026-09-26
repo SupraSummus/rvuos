@@ -23,6 +23,10 @@ Design decisions behind these items live in `DESIGN.md`.
    the `A` extension in userspace,
    for what two threads that can now preempt each other
    do in shared memory.
+   Done since: shares, `DESIGN.md`, "Scheduling".
+   The run queue goes round by share and then by thread,
+   so a process that makes threads or children gets no more of the processor,
+   and a thread runs only while it is bound to a share, which a revoke takes back.
 6. Done: `Irq` objects and a userspace UART driver.
    An interrupt is a signal on the notification bound to the `Irq`,
    which has the `Timer`'s shape, and the stall in `wfi` covers both.
@@ -178,13 +182,16 @@ Design decisions behind these items live in `DESIGN.md`.
   A call that stops without putting its thread back on the `ecall`
   the host takes as finished, and no host check sees it;
   `make qemu-replay` does, by the trace line the host then lacks.
+- Once a record moves a driver thread to a share of its own,
+  passing a record round may come back before it visited every runnable thread,
+  and a record for a thread that could run is performed by another.
 - `make qemu-replay` boots QEMU once per input, about 40 ms each,
   which is now most of what a mutant costs `make mutants`.
   A driver that replays several inputs per boot would need the kernel back to its boot state in between.
 - The seeds under `tests/seeds` are binary and were written by hand.
-  Moving `BOOT_CAP_LOG` in, and `BOOT_CAP_TIMER_LINES` and `BOOT_CAP_CLOCK` after it,
+  Moving `BOOT_CAP_LOG` in, and `BOOT_CAP_TIMER_LINES`, `BOOT_CAP_CLOCK` and `BOOT_CAP_SHARES` after it,
   each took a one-off script that knew which argument of which operation is a slot,
-  run over the corpus too the last two times.
+  run over the corpus too the last three times.
   A generator in the repository, one line per record with the names from `rvuos/abi.h`,
   would make the seeds readable and the next renumbering a rebuild;
   replay slots that start a few above `BOOT_CAP_COUNT` would spare the next one.
@@ -197,8 +204,12 @@ Design decisions behind these items live in `DESIGN.md`.
   so the host models it with one store into the header per event.
   A logger thread in the driver would make traced calls the host would have to follow.
 - A device interrupt wakes its driver but does not run it;
-  the driver waits its turn in the round like a thread a timer line woke.
+  the driver waits for its share's turn like a thread a timer line woke.
   Measure that latency on the first board; it belongs to open decision 9.
+- A turn lasts to the next tick, so one that begins mid-tick gets only the rest of it.
+  A turn counted from the switch would set `mtimecmp` to the end of the turn or the nearest timer deadline,
+  which also makes the kernel tickless while one thread runs or none does.
+  It touches the timer lines' contract, the host's clock and `OP_DEBUG_TICK`; decide it on its own.
 - Both boards' `timer.c` read `mtime` and write `mtimecmp` the same way at different addresses;
   a CLINT header taking the base would hold that once, beside `timer_next`.
 - `pmp_init` stops counting at the first hardwired entry.
@@ -238,6 +249,9 @@ Design decisions behind these items live in `DESIGN.md`.
   Give a thread's creator somewhere to hear about it:
   a notification the kernel signals is the cheapest candidate,
   since it needs no new object.
+- Shares are untried on the ESP32-C6:
+  `make BOARD=esp32c6 test` has to print "root: shares ok", "root: unbind ok" and "root: rebind ok";
+  the first compares spin counts within a factor of two, which QEMU's instruction count makes deterministic.
 - The clock is untried on the ESP32-C6:
   `make BOARD=esp32c6 test` has to print "root: clock ok", which needs user mode to read `UTIME`,
   and "root: period ok", which needs the tick to keep pace with the counter there too.
@@ -247,10 +261,13 @@ Design decisions behind these items live in `DESIGN.md`.
   Nothing raises them today, but the kernel should clear it at boot.
 - The ESP32-C6's GPIO CSRs, `0x803` to `0x805`, lie in the user-mode CSR range.
   If user mode can reach them, every process drives eight pads past PMP; check on the chip.
-- A thread can be started but not stopped again.
-  `OP_THREAD_SUSPEND` waits for a reason to exist,
-  and a userspace scheduler, open decision 9 in `DESIGN.md`, would be one;
-  a thread waiting on a notification cannot be taken off it today.
+- A thread is stopped by revoking its share and started again by binding it,
+  which is what a userspace scheduler, open decision 9 in `DESIGN.md`, needs.
+  A thread waiting on a notification stays on it meanwhile, and cannot be taken off it today.
+- A thread is one share's worth whatever its process holds.
+  A share that counts as several turns in a row
+  would let one thread run faster without a thread per share;
+  decide with the first workload that wants it.
 - `object_first`/`object_next` collapsed the pool walk everywhere
   except the tiling check in `selfcheck.c`, which verifies
   the very link the flat walk crosses pools by.

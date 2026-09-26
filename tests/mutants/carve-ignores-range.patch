@@ -1,0 +1,20 @@
+A carve of lines or shares takes any range, not only one within the invoked capability.
+It would hand out lines or shares the carver does not hold, or ones there are not;
+a capability to lines or shares names ones there are, within its parent's.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: share capability outside the shares there are
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -471,9 +471,6 @@ static int carve_range(struct thread *t, uint32_t slot, const struct cap *cap, c
+ {
+     uint32_t off = arg[1];
+     uint32_t len = arg[2];
+-    if (len == 0 || off > cap->b || len > cap->b - off) {
+-        return KERR_INVALID_ARG;
+-    }
+     struct cap sub = { .type = cap->type, .rights = cap->rights, .a = cap->a + off, .b = len };
+     return cap_store(thread_table(t), arg[3], &sub, slot_node(t, slot));
+ }

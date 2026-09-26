@@ -1,0 +1,20 @@
+A thread that loses its share in a call gives the processor up at once, not at the end of its turn.
+A revoke that unbinds its caller and stops for an interrupt would switch threads in the middle of the call,
+which the host, making the call again at once, does not;
+a call stopped for an interrupt is made again before anything else runs.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: a call was preempted before it took anything away
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -771,7 +771,7 @@ void syscall_dispatch(struct thread *t)
+      * A thread that waits gives the processor up.
+      * One that lost its share finishes its turn, as a preempted call is made again before the tick switches.
+      */
+-    if (current->state != THREAD_READY) {
++    if (current->state != THREAD_READY || current->share.type != CAP_BOUND) {
+         sched_run_next();
+     }
+     if (debug_trace) {

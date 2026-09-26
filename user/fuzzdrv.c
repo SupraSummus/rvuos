@@ -94,7 +94,7 @@ static void replay_loop(unsigned me)
             if (cursor != i) {
                 continue;
             }
-            /* The round came back with the record untaken: its actor cannot run. */
+            /* The processor came back with the record untaken; see rvuos/replay.h. */
         }
         cursor = i + 1;
         perform(&records[i]);

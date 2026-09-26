@@ -208,7 +208,9 @@ struct thread *host_boot(void)
     pool_list = NULL;
     memset(line_irq, 0, LINES * sizeof(line_irq[0]));
     current = NULL;
-    run_queue = 0;
+    memset(shares, 0, sizeof(shares));
+    run_queue = NULL;
+    turn = NULL;
     armed_sources = 0;
     sched_ticks = 0;
     debug_trace = false;
@@ -219,7 +221,7 @@ struct thread *host_boot(void)
     struct thread *root = boot_create_root(
         HOST_BOOT_POOL_BASE, HOST_BOOT_POOL_SIZE,
         FREE_RAM_BASE, FREE_RAM_SIZE);
-    current = root;
+    sched_start(root);
     process_activate(thread_process(root));
 
     /*

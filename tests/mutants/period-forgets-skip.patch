@@ -10,7 +10,7 @@ Report: armed timer line is due
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -547,7 +547,7 @@ static uint32_t timer_period(struct irq *irq, uint32_t period)
+@@ -583,7 +583,7 @@ static uint32_t timer_period(struct irq *irq, uint32_t period)
      uint32_t now = sched_ticks;
      if (irq_due(irq, now)) {
          uint32_t behind = now - irq->deadline;

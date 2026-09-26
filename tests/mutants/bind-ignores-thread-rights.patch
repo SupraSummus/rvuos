@@ -1,0 +1,19 @@
+A bind moves a thread its caller holds only a narrowed capability to.
+A process given a thread to look at could stop it, or move it off the share its owner gave it;
+a call binds only a thread its caller could control.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: a call bound a thread its caller could not control to a share
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -556,7 +556,7 @@ static int op_share(struct thread *t, uint32_t slot, const struct cap *cap,
+             return KERR_NO_RIGHTS;
+         }
+         struct cap tc;
+-        int err = cap_lookup_typed(thread_table(t), arg[1], CAP_THREAD, RIGHT_W, &tc);
++        int err = cap_lookup_typed(thread_table(t), arg[1], CAP_THREAD, 0, &tc);
+         if (err != KERR_OK) {
+             return err;
+         }

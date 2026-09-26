@@ -8,7 +8,7 @@ Caught-by: loop-bounds
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -186,7 +186,12 @@ paddr_t line_irq[LINES];
+@@ -282,7 +282,12 @@ paddr_t line_irq[LINES];
  
  struct irq *line_binding(uint32_t line)
  {

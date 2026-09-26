@@ -21,9 +21,12 @@
  * passes the processor on with OP_DEBUG_TICK
  * and looks at the cursor when the processor comes back:
  * moved, some thread took the record;
- * not moved, the round visited every runnable thread and none took it,
- * so the actor cannot run and the thread that started the round
- * performs the record itself.
+ * not moved, the processor went round and none took it,
+ * so the thread that started the round performs the record itself.
+ * The setup binds every thread to the root thread's share,
+ * where going round visits every runnable thread, so the actor could not run;
+ * once a record has moved a thread to a share of its own,
+ * the round may come back before it visited them all.
  * host_event in host/shim.c performs the same calls from the kernel's state,
  * so the passing is in both transcripts.
  *
@@ -62,12 +65,12 @@ static inline int replay_passes(const struct replay_record *r, unsigned me)
 #define REPLAY_LOG_SLOT 6
 
 /* Capability slots the setup fills, above the boot capabilities, in both tables. */
-#define REPLAY_CAP_NOTIFY  15
-#define REPLAY_CAP_THREAD  16 /* the second thread */
-#define REPLAY_CAP_POOL    17 /* the second thread's pool */
-#define REPLAY_CAP_TABLE   18 /* the second thread's table */
-#define REPLAY_CAP_PROCESS 19 /* the second thread's process */
-#define REPLAY_CAP_SCRATCH 20 /* the second thread's Untyped on its way over; empty afterwards */
+#define REPLAY_CAP_NOTIFY  16
+#define REPLAY_CAP_THREAD  17 /* the second thread */
+#define REPLAY_CAP_POOL    18 /* the second thread's pool */
+#define REPLAY_CAP_TABLE   19 /* the second thread's table */
+#define REPLAY_CAP_PROCESS 20 /* the second thread's process */
+#define REPLAY_CAP_SCRATCH 21 /* the second thread's Untyped on its way over; empty afterwards */
 _Static_assert(REPLAY_CAP_NOTIFY == BOOT_CAP_COUNT, "the setup's slots follow the boot capabilities");
 /* The third thread, stopped until a record resumes it: the last slot, which the corpus leaves alone. */
 #define REPLAY_CAP_THIRD   (REPLAY_TABLE_SLOTS - 1)
@@ -128,12 +131,16 @@ static const struct replay_record replay_prologue[] = {
     REPLAY_COPY(BOOT_CAP_LOG),
     REPLAY_COPY(BOOT_CAP_TIMER_LINES),
     REPLAY_COPY(BOOT_CAP_CLOCK),
+    REPLAY_COPY(BOOT_CAP_SHARES),
     REPLAY_COPY(REPLAY_CAP_NOTIFY),
     REPLAY_COPY(REPLAY_CAP_THREAD),
     REPLAY_COPY(REPLAY_CAP_POOL),
     REPLAY_COPY(REPLAY_CAP_TABLE),
     REPLAY_COPY(REPLAY_CAP_PROCESS),
     REPLAY_COPY(REPLAY_CAP_THIRD),
+    /* Every thread runs on the root thread's share, so the three take turns as one ring. */
+    { OP_SHARE_BIND, 0, BOOT_CAP_SHARES, REPLAY_CAP_THREAD, 0, 0 },
+    { OP_SHARE_BIND, 0, BOOT_CAP_SHARES, REPLAY_CAP_THIRD, 0, 0 },
     { OP_THREAD_CONFIGURE, 0, REPLAY_CAP_THREAD, 0, REPLAY_THREAD_SP, 0 },
     { OP_THREAD_CONFIGURE, 0, REPLAY_CAP_THIRD, 0, REPLAY_THIRD_SP, 0 },
 };

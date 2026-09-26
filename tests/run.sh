@@ -63,6 +63,12 @@ grep -q 'root: clock ok' "$log" \
     || fail "the clock's counter, read through its region, did not show the sleeps' length"
 grep -q 'root: period ok' "$log" \
     || fail "a periodic timer line drifted from its period"
+grep -q 'root: shares ok' "$log" \
+    || fail "threads added on one share took more of the processor than the other share had"
+grep -q 'root: unbind ok' "$log" \
+    || fail "a thread ran after its share was revoked"
+grep -q 'root: rebind ok' "$log" \
+    || fail "a thread bound to a share again did not run, or another ran with it"
 grep -q 'the idle line stays quiet: ok' "$log" \
     || fail "an armed line nothing raises signalled"
 grep -q 'root: irq ok' "$log" \

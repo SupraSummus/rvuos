@@ -1,6 +1,6 @@
-The tick hands the processor on without putting the preempted thread back in the round.
+The tick hands the processor on without putting the preempted thread back on its share's ring.
 The thread would stay ready and never run again;
-every ready thread but the running one is on the run queue.
+every ready thread with a share but the running one is on its share's ring.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
 Report: a waiting or ready thread is on no queue
@@ -8,11 +8,11 @@ Report: a waiting or ready thread is on no queue
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -297,7 +297,6 @@ void sched_tick(uint32_t ticks)
-     tick_advance(ticks);
-     /* The running thread is ready, and goes to the back of the round behind any other that is. */
-     if (run_queue != 0) {
--        ring_push(&run_queue, current);
-         switch_to(run_queue_take());
+@@ -412,7 +412,6 @@ void sched_tick(uint32_t ticks)
+     if (was != NULL) {
+         share_settle(was);
      }
+-    enqueue(current);
+     turn = next_turn();
+     run_turn();
  }

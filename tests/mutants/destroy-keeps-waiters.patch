@@ -7,7 +7,7 @@ Report: thread waits on something that is not a notification
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -199,7 +199,7 @@ bool sched_forget(struct obj_header *o, bool preempt)
+@@ -295,7 +295,7 @@ bool sched_forget(struct obj_header *o, bool preempt)
           * The thread learns that the way every other call learns it.
           * Its progress is the queue: a stop leaves the rest waiting on a notification still whole.
           */

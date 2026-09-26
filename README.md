@@ -71,8 +71,10 @@ is a notification, a word of sticky bits,
 and `DESIGN.md`, "Communication and synchronisation", says why.
 
 The machine timer ticks and the kernel preempts on it,
-taking runnable threads in turn;
-that is all the scheduling policy the kernel has,
+taking the processor's shares in turn and the threads on each share in turn;
+a thread runs only on a share, and shares are handed out as capabilities,
+so a process that makes more threads or children gets no more of the processor.
+That is all the scheduling policy the kernel has,
 and `DESIGN.md`, "Scheduling", says why.
 
 There is no sleep: a timer line is an interrupt line the tick raises

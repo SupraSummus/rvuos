@@ -49,7 +49,9 @@ struct obj_header {
  * an only child's is itself, and a root's and an empty slot's is 0.
  * A process's region slots are slots of this type too, CAP_INSTALLED, and leaves of the tree,
  * and so is its table slot, which holds a CAP_CAPTABLE capability,
+ * and a thread's share, CAP_BOUND,
  * and so is a pool's own node, CAP_RETYPED, in the pool's descriptor.
+ * For CAP_SHARE a is the first share and b the count, as for CAP_IRQ_LINE.
  */
 struct cap {
     uint8_t type;
@@ -73,6 +75,11 @@ struct cap {
  * a is the pool's address, as for a capability to an object. Kernel internal: never in a table.
  */
 #define CAP_RETYPED 0x81
+/*
+ * A thread's share, in the thread: a is the share, and the node hangs below
+ * the Share capability the thread was bound through. Kernel internal: never in a table.
+ */
+#define CAP_BOUND 0x82
 
 #define CAPTABLE_MAX_SLOTS 1024
 
@@ -128,10 +135,11 @@ struct process {
 
 /*
  * Thread states.
- * A ready thread other than the running one is on the run queue,
+ * A ready thread other than the running one is on its share's ring, if it has a share,
  * and a waiting one on its notification's waiters,
  * so the kernel finds the next thread to run without a walk;
  * see DESIGN.md, "Scheduling".
+ * A thread without a share keeps its state and does not run.
  */
 enum {
     THREAD_STOPPED = 0, /* created, or configured and not started */
@@ -155,9 +163,10 @@ struct thread {
     uint8_t flags;
     uint16_t pad;
     paddr_t waiting_on; /* the notification, while WAITING; 0 otherwise */
-    /* The notification's waiters while WAITING, the run queue while READY and not running. */
+    /* The notification's waiters while WAITING, its share's ring while READY, bound and not running. */
     paddr_t queue_next;
     paddr_t queue_prev;
+    struct cap share;   /* CAP_BOUND, or CAP_NONE while the thread has no share */
     struct trap_frame frame;
 };
 
@@ -208,19 +217,20 @@ _Static_assert(sizeof(struct pool) == 56, "object layout");
 _Static_assert(sizeof(struct pmp_image) == 4 + 5 * PMP_MAX_ENTRIES, "object layout");
 _Static_assert(sizeof(struct process) == 8 + 24 * (1 + PROCESS_REGION_SLOTS) + sizeof(struct pmp_image),
                "object layout");
-_Static_assert(sizeof(struct thread) == 28 + sizeof(struct trap_frame), "object layout");
+_Static_assert(sizeof(struct thread) == 28 + sizeof(struct cap) + sizeof(struct trap_frame), "object layout");
 _Static_assert(sizeof(struct notification) == 16, "object layout");
 _Static_assert(sizeof(struct irq) == 24, "object layout");
 
 /*
  * True if a capability of this type names a kernel object.
- * Frames, Untypeds, interrupt lines and the clock name hardware, and the debug capability nothing,
+ * Frames, Untypeds, interrupt lines, shares and the clock name hardware, and the debug capability nothing,
  * so they carry no address to check.
  */
 static inline bool cap_has_object(uint8_t type)
 {
     return type != CAP_NONE && type != CAP_FRAME && type != CAP_UNTYPED && type != CAP_IRQ_LINE &&
-           type != CAP_DEBUG && type != CAP_CLOCK && type != CAP_INSTALLED;
+           type != CAP_DEBUG && type != CAP_CLOCK && type != CAP_INSTALLED && type != CAP_SHARE &&
+           type != CAP_BOUND;
 }
 
 /*
@@ -241,7 +251,7 @@ _Static_assert(offsetof(struct process, slots) == offsetof(struct process, table
 
 /*
  * The nodes of the derivation tree an object holds, as one array, and how many:
- * a table's slots, a process's table slot and region slots, a pool's own node.
+ * a table's slots, a process's table slot and region slots, a thread's share, a pool's own node.
  * Other objects hold none.
  */
 static inline struct cap *obj_nodes(struct obj_header *o, uint32_t *count)
@@ -253,6 +263,9 @@ static inline struct cap *obj_nodes(struct obj_header *o, uint32_t *count)
     case CAP_PROCESS:
         *count = 1 + PROCESS_REGION_SLOTS;
         return &((struct process *)o)->table;
+    case CAP_THREAD:
+        *count = 1;
+        return &((struct thread *)o)->share;
     case CAP_POOL:
         *count = 1;
         return &((struct pool *)o)->node;
@@ -272,6 +285,11 @@ static inline struct captable *process_table(const struct process *p)
     return t->hdr.type == CAP_CAPTABLE ? t : NULL;
 }
 static inline struct process *thread_process(const struct thread *t) { return p2v(t->proc); }
+/* The thread whose share this is. */
+static inline struct thread *bound_thread(struct cap *n)
+{
+    return (struct thread *)((char *)n - offsetof(struct thread, share));
+}
 static inline struct captable *thread_table(const struct thread *t) { return process_table(thread_process(t)); }
 static inline struct notification *irq_notification(const struct irq *i) { return p2v(i->ntfn); }
 
@@ -436,6 +454,9 @@ struct cap cap_to_untyped(uint32_t base, uint32_t size, uint8_t rights);
 /* Build an interrupt line capability: count lines from first. */
 struct cap cap_to_lines(uint32_t first, uint32_t count, uint8_t rights);
 
+/* Build a share capability: count shares from first. */
+struct cap cap_to_shares(uint32_t first, uint32_t count, uint8_t rights);
+
 /* The object behind a capability that names one. */
 static inline struct obj_header *cap_object(const struct cap *cap)
 {
@@ -448,11 +469,38 @@ static inline struct obj_header *cap_object(const struct cap *cap)
 extern struct thread *current;
 
 /*
- * The ready threads other than the running one, as a ring, oldest first;
- * 0 when there are none.
- * The oldest runs next, and a thread that becomes ready joins behind the newest.
+ * A share of the processor: a place in the run queue, which the threads bound to it take turns in.
+ * There are SHARES of them, a constant of the kernel, so no call makes more;
+ * see DESIGN.md, "Scheduling".
  */
-extern paddr_t run_queue;
+struct share {
+    /* Its ready threads but the running one, as a ring, oldest first; 0 for none. */
+    paddr_t threads;
+    /* The run queue, while the share has a ready thread and it is not its turn; NULL off it. */
+    struct share *next;
+    struct share *prev;
+};
+extern struct share shares[SHARES];
+
+/*
+ * The shares with a ready thread, but the one whose turn it is, as a ring, oldest first;
+ * NULL when there are none.
+ * The oldest has the next turn, and a share that gets a ready thread joins behind the newest.
+ */
+extern struct share *run_queue;
+
+/*
+ * The share whose turn it is: the running thread's, or the one it lost or was moved off during the turn;
+ * NULL while none runs.
+ */
+extern struct share *turn;
+
+/* The share a thread is bound to, or NULL. */
+static inline struct share *thread_share(const struct thread *t)
+{
+    return t->share.type == CAP_BOUND ? &shares[t->share.a] : NULL;
+}
+
 
 /*
  * How many Irqs are armed on a device's line or a timer line,
@@ -467,8 +515,20 @@ void irq_set_bits(struct irq *irq, uint32_t bits);
 /* The line fired: disarm the Irq and signal its bits. The mask, if the line has one, is the caller's. */
 void irq_signal(struct irq *irq);
 
-/* Make a stopped or woken thread ready: it joins the back of the round. */
+/* Make a stopped or woken thread ready: it joins the back of its share's ring, if it has a share. */
 void sched_ready(struct thread *t);
+
+/*
+ * Bind a thread to a share, as a node below parent; it leaves the share it had.
+ * A ready thread that is not running joins the back of the new share's ring.
+ */
+void sched_bind(struct thread *t, uint32_t share, struct cap *parent);
+
+/* Clear a thread's share the tree has already let go of: a ready thread that is not running leaves its ring. */
+void sched_unbind(struct cap *bound);
+
+/* Start running a thread with nothing else run before it; the boot's. */
+void sched_start(struct thread *t);
 
 /*
  * Ticks so far.
@@ -487,15 +547,15 @@ void sched_signal(struct notification *ntfn, uint32_t bits);
 extern uint32_t trace_wake_bits;
 
 /*
- * The running thread is no longer runnable.
- * Hand the processor to a thread that is, or stop the machine.
+ * The running thread waits.
+ * Hand the processor to the next ready thread of the same share, or of the next share, or stop the machine.
  */
 void sched_run_next(void);
 
 /*
  * The timer tick: count the ticks that passed, fire every timer line that is due,
- * and hand the processor to the thread that has waited longest for it,
- * if there is one; the running thread goes to the back of the round.
+ * and end the running share's turn: the running thread goes to the back of its share's ring,
+ * the share to the back of the run queue, and the oldest share there has the next turn.
  * The interrupt calls it, and OP_DEBUG_TICK does on request.
  */
 void sched_tick(uint32_t ticks);
@@ -518,7 +578,7 @@ void sched_wait(struct thread *t, struct notification *ntfn);
  * Before an object of a pool that goes is zeroed, undo what it left in the rest of the kernel:
  * a notification wakes every thread waiting on it
  * with KERR_INVALID_CAP and no bits, because the object is gone,
- * a thread leaves the notification it waits on or the run queue,
+ * a thread leaves the notification it waits on,
  * and an Irq is disarmed and its line masked and unbound.
  * A pool takes its objects newest first, so a thread goes before its process
  * and an Irq before its notification.

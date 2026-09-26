@@ -1,0 +1,20 @@
+A bind takes any share, not only one the invoked capability names.
+A thread would run on a share its binder does not hold, or on one there is not;
+a thread's share lies within the capability it was bound through.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: slot is not derived from its parent
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -560,9 +560,6 @@ static int op_share(struct thread *t, uint32_t slot, const struct cap *cap,
+         if (err != KERR_OK) {
+             return err;
+         }
+-        if (arg[2] >= cap->b) {
+-            return KERR_INVALID_ARG;
+-        }
+         /* The binding hangs below the invoked capability, so a revoke above it unbinds the thread. */
+         sched_bind((struct thread *)cap_object(&tc), cap->a + arg[2], slot_node(t, slot));
+         return KERR_OK;

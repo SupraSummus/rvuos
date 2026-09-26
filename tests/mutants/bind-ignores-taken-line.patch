@@ -9,7 +9,7 @@ Report: irq is missing from the line table
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -502,9 +502,6 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
+@@ -510,9 +510,6 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
          if (err != KERR_OK) {
              return err;
          }

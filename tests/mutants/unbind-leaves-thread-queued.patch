@@ -1,0 +1,24 @@
+Clearing a ready thread's share, by a revoke or by the destroy of its pool,
+forgets the share before the thread leaves its ring, so the thread stays on it.
+The next turn of the share would run a thread that has no share, or memory that is no longer a thread;
+a share's ring holds only live threads bound to it.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: queue holds a thread it is not for
+Report: thread on no queue is linked into one
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -186,10 +186,10 @@ void sched_bind(struct thread *t, uint32_t share, struct cap *parent)
+ void sched_unbind(struct cap *bound)
+ {
+     struct thread *t = bound_thread(bound);
++    *bound = (struct cap){ 0 };
+     if (t->state == THREAD_READY && t != current) {
+         dequeue(t);
+     }
+-    *bound = (struct cap){ 0 };
+ }
+ 
+ void sched_start(struct thread *t)
