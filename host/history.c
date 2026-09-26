@@ -69,11 +69,17 @@ __attribute__((noreturn)) static void violated(const char *what)
     host_violated();
 }
 
-/* An installed region grants what the frame it came from did, and an Untyped its block whatever its watermark. */
+/*
+ * An installed region grants what the frame it came from did, a thread's share its one share,
+ * and an Untyped its block whatever its watermark.
+ */
 static struct grant grant_of(const struct cap *c)
 {
     if (c->type == CAP_UNTYPED) {
         return (struct grant){ CAP_UNTYPED, c->rights, untyped_base(c), untyped_size(c) };
+    }
+    if (c->type == CAP_BOUND) {
+        return (struct grant){ CAP_SHARE, c->rights, c->a, 1 };
     }
     return (struct grant){ c->type == CAP_INSTALLED ? CAP_FRAME : c->type, c->rights, c->a, c->b };
 }
@@ -86,7 +92,7 @@ static bool same_grant(struct grant x, struct grant y)
 /* Whether a capability the caller held grants all that g does; an Untyped grants the frames it makes. */
 static bool covered(struct grant g)
 {
-    bool range = g.type == CAP_FRAME || g.type == CAP_UNTYPED || g.type == CAP_IRQ_LINE;
+    bool range = g.type == CAP_FRAME || g.type == CAP_UNTYPED || g.type == CAP_IRQ_LINE || g.type == CAP_SHARE;
     for (size_t i = 0; i < held.n; i++) {
         const struct grant *h = &held.v[i];
         bool type = h->type == g.type || (g.type == CAP_FRAME && h->type == CAP_UNTYPED);
@@ -213,6 +219,10 @@ static void check_node(const struct cap *c)
         check_built(p2v(c->a));
     } else if (!covered(g)) {
         violated("a call made a capability no capability of its caller covers");
+    }
+    /* A thread bound to a share by this call is one its caller could control. */
+    if (c->type == CAP_BOUND && !covered((struct grant){ CAP_THREAD, RIGHT_W, v2p(bound_thread((struct cap *)c)), 0 })) {
+        violated("a call bound a thread its caller could not control to a share");
     }
 }
 

@@ -34,7 +34,7 @@ void kmain(void)
     struct thread *root = boot_create_root(
         v2p(__boot_pool_start), (uint32_t)(__boot_pool_end - __boot_pool_start),
         FREE_RAM_BASE, FREE_RAM_SIZE);
-    current = root;
+    sched_start(root);
     process_activate(thread_process(root));
 
     kputs("rvuos: entering user mode\n");

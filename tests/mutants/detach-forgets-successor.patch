@@ -7,7 +7,7 @@ Report: predecessor link to a slot that is not a live, filled one
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -152,7 +152,6 @@ static void detach(struct cap *n, bool adopt)
+@@ -154,7 +154,6 @@ static void detach(struct cap *n, bool adopt)
          splice_after(n, node(n->child), node(node(n->child)->prev));
      }
      struct cap *pred = node(n->prev);

@@ -78,7 +78,8 @@ What rvuos is not:
   A region is a naturally aligned power-of-two block and costs one PMP entry,
   so the core's entry count bounds how many slots can be filled; see section 5.4.
 - **Capabilities with rights.**
-  A capability names a kernel object, a memory range or a range of interrupt lines,
+  A capability names a kernel object, a memory range, a range of interrupt lines
+  or a range of the processor's shares,
   together with rights bits.
   Copying a capability can only narrow its rights.
 - **Untyped memory, frames and pools instead of a kernel heap.**
@@ -98,9 +99,12 @@ What rvuos is not:
 - **Notifications as the only blocking primitive.**
   A notification is a word of sticky bits.
   Data moves through shared memory; the notification says when.
-- **Preemptive round-robin scheduling.**
-  A machine timer tick takes the processor from a running thread
-  and hands it to the ready thread that has waited longest.
+- **Processor time by capability.**
+  A thread runs only while it is bound to one of the machine's `SHARES` shares,
+  which are handed out as capabilities like memory is.
+  A machine timer tick ends a share's turn and hands the processor to the share that has waited longest,
+  and threads on one share take turns within it,
+  so a process that makes more threads or children gets no more of the processor.
 - **Timers as signals.**
   A timer line is an interrupt line the tick raises once a delay has passed.
   Sleeping is arming a timer line and waiting;
@@ -344,7 +348,7 @@ Rights are three bits:
 | Bit | Value | Frame, Untyped | Other types |
 |---|---|---|---|
 | `RIGHT_R` | 1 | read | `Notification`: wait |
-| `RIGHT_W` | 2 | write | control the object: allocate, install, configure, signal, set, copy into a table |
+| `RIGHT_W` | 2 | write | control the object: allocate, install, configure, signal, set, bind, copy into a table |
 | `RIGHT_X` | 4 | execute | unused |
 
 Every operation that produces a capability
@@ -364,18 +368,20 @@ The tree grows in these ways:
 |---|---|
 | `OP_CAP_DERIVE` | below the source |
 | `OP_CAP_COPY` | beside the source, under the source's parent; a copy of a root is a root; an Untyped is never copied |
-| `OP_FRAME_CARVE`, `OP_IRQ_CARVE`, `OP_CLOCK_FRAME` | below the invoked capability |
+| `OP_FRAME_CARVE`, `OP_IRQ_CARVE`, `OP_SHARE_CARVE`, `OP_CLOCK_FRAME` | below the invoked capability |
 | `OP_UNTYPED_RETYPE` of a frame or an Untyped | below the invoked Untyped |
 | `OP_UNTYPED_RETYPE` of a pool | below the pool's own node, which hangs below the invoked Untyped |
 | `OP_PROCESS_INSTALL` | the installed region hangs below the frame |
 | `OP_POOL_ALLOC` | below the invoked `KernelPool` capability |
 | `OP_POOL_ALLOC` of a `Process` | and the process's hold on its table below the `CapTable` capability |
 | `OP_IRQ_BIND` | below the `KernelPool` capability; the line goes with what was derived from it |
+| `OP_SHARE_BIND` | the thread's hold on its share hangs below the invoked `Share` capability |
 | boot | nowhere, but for the capabilities to the boot pool and its objects |
 
 `OP_CAP_REVOKE` on a slot clears everything below it, in every table and every process:
 derived capabilities, their copies, what was derived from those,
-and every region installed from any of them.
+every region installed from any of them,
+and every thread's share bound through any of them.
 Below an Untyped it destroys every pool made of it, as `OP_POOL_DESTROY` does.
 The slot itself stays.
 Revoking a copy takes nothing from the original, and the other way round;
@@ -409,14 +415,15 @@ Programs are encouraged to keep the same convention.
 | `Notification` | `CAP_NOTIFICATION` | one word of sticky bits | `OP_POOL_ALLOC` |
 | `IrqLine` | `CAP_IRQ_LINE` | none: the slot holds the first line and a count | boot, `OP_IRQ_CARVE` |
 | `Irq` | `CAP_IRQ` | one line bound to a notification, with a deadline on a timer line | `OP_IRQ_BIND` |
+| `Share` | `CAP_SHARE` | none: the slot holds the first share and a count | boot, `OP_SHARE_CARVE` |
 | `Debug` | `CAP_DEBUG` | none | boot |
 | `Clock` | `CAP_CLOCK` | none: there is one counter | boot |
 
-`Untyped`, `Frame`, `IrqLine`, `Debug` and `Clock` capabilities have no kernel object behind them.
-Carving a frame or a line range, and retyping an Untyped into a frame or an Untyped,
+`Untyped`, `Frame`, `IrqLine`, `Share`, `Debug` and `Clock` capabilities have no kernel object behind them.
+Carving a frame, a line range or a share range, and retyping an Untyped into a frame or an Untyped,
 are pure table operations
-that touches no kernel memory,
-which is why the root task can hand out memory and lines
+that touch no kernel memory,
+which is why the root task can hand out memory, lines and shares
 before it has created a single pool.
 
 ### 5.4 Memory: Untyped, frames and installing
@@ -557,14 +564,16 @@ A thread is **stopped**, **ready** or **waiting**.
   The other registers start at zero.
   The kernel validates neither value.
 - `OP_THREAD_RESUME` makes a stopped thread ready.
-  It gets the processor when its turn in the round comes,
-  which is after the running thread waits or the tick preempts it.
+  It gets the processor once it is bound to a share and its turn comes, section 5.11.
 - A thread waiting on a notification is waiting;
   a signal makes it ready again.
 
-Once a thread runs, nothing short of destroying its pool stops it,
-and no thread exits: a thread that has nothing left to do waits forever
-on a notification nobody signals.
+Apart from its state, a thread is bound to one share or to none.
+A new thread has none, and a thread without a share keeps its state and does not run:
+`OP_SHARE_BIND` puts it on one, and revoking below the capability it was bound through takes it off.
+That is how a started thread is stopped and started again.
+No thread exits: a thread that has nothing left to do waits forever
+on a notification nobody signals, or loses its share.
 A thread that faults stops the machine; see section 11.
 
 ### 5.7 Notifications
@@ -632,7 +641,7 @@ a delay of zero fires at the next tick,
 and a delay of 10 000 µs fires on the eleventh tick after the call,
 between 10 and 11 ms later.
 No upper bound is promised, because the woken thread is ready, not running,
-and waits its turn in the round.
+and waits for its share's turn and then its own.
 
 Sleeping:
 
@@ -719,7 +728,7 @@ An `Irq` on a device's line works like one on a timer line:
 An `Irq` is armed exactly while its line is unmasked,
 so a level that stays high costs one trap and not a storm.
 A device interrupt wakes its driver but does not run it;
-the driver waits its turn in the round like a thread a timer line woke.
+the driver waits for its turn like a thread a timer line woke.
 
 Sharing a line between drivers is not supported;
 `DESIGN.md`, open decision 11.
@@ -764,12 +773,26 @@ and carries the ring out one byte per transmitter interrupt.
 
 ### 5.11 Scheduling
 
-- Ready threads wait for the processor in a queue.
-  A thread that becomes ready, whether resumed, woken or preempted,
-  joins the back of it,
-  so threads take turns in the order they became ready.
+- The processor is divided into `SHARES` shares, 32 on the whole machine.
+  The root task receives them all in `BOOT_CAP_SHARES`, its own thread bound to the first,
+  and hands them out with `OP_SHARE_CARVE` and `OP_CAP_DERIVE` as it hands out memory.
+- A thread runs only while it is bound to a share, with `OP_SHARE_BIND`.
+  Any number of threads may be bound to one share.
+- Shares that have a ready thread wait for the processor in a queue,
+  and each share's ready threads wait in a queue of their own.
+  A thread that becomes ready, whether resumed, woken, bound or preempted,
+  joins the back of its share's queue,
+  and a share that gets a ready thread joins the back of the queue of shares.
 - The machine timer ticks at `TIMER_HZ`, 1 kHz on both boards.
-  A thread runs until it waits or until a tick takes the processor from it.
+  A tick ends the running share's turn:
+  its thread goes to the back of the share's queue, the share to the back of the queue of shares,
+  and the oldest thread of the share that has waited longest runs.
+  A thread that waits hands the rest of the turn to the next ready thread on its own share,
+  or, if there is none, to the next share.
+- So shares with work take equal turns,
+  and a process that holds k of the n shares with work gets about k in every n ticks,
+  however many threads it runs on them.
+  A thread added to a share takes turns from the threads on that share and from nobody else.
 - A system call is never interrupted:
   machine mode runs with interrupts off from the trap to the return.
 - When nothing is runnable and an `Irq` is armed on a timer line or a device's line,
@@ -778,7 +801,7 @@ and carries the ring out one byte per transmitter interrupt.
 
 There are no priorities and no yield.
 A spinning thread cannot starve the others, because the tick preempts it,
-but it burns its slice every round and keeps the machine out of `wfi`;
+but it burns its share's turns and keeps the machine out of `wfi`;
 a thread that waits costs nothing until it is signalled.
 
 ## 6. System call reference
@@ -866,7 +889,7 @@ Cannot be turned off again.
 **`OP_DEBUG_TICK` (17).**
 Does what the timer tick does, on request:
 time moves by one tick, every due timer line fires,
-the processor goes to the next runnable thread in the round,
+the running share's turn ends as section 5.11 says,
 and the caller stays ready.
 Works while tracing is on, unlike the tick itself.
 
@@ -1004,6 +1027,7 @@ Neither is checked.
 
 **`OP_THREAD_RESUME` (13).**
 Makes the thread ready.
+It runs once it is bound to a share.
 
 ### 6.9 Operations on `Notification`
 
@@ -1073,7 +1097,27 @@ Produces a frame, read only, the smallest block that holds the counter,
 hanging below the invoked capability.
 On a PMP grain coarser than eight bytes the frame holds the registers beside the counter too.
 
-### 6.13 Operation codes in numeric order
+### 6.13 Operations on `Share`
+
+**`OP_SHARE_CARVE` (28).**
+No right needed.
+`a1` = offset from the first share, `a2` = count, `a3` = destination slot.
+A table operation like `OP_IRQ_CARVE`.
+
+**`OP_SHARE_BIND` (29).**
+Needs `RIGHT_W`.
+`a1` = slot of the `Thread` capability, with `RIGHT_W`,
+`a2` = which of the capability's shares, as an offset from its first
+(`KERR_INVALID_ARG` past the last).
+The thread leaves the share it was on, whoever bound it there,
+and a ready thread joins the back of the new share's queue.
+Its hold on the share hangs below the invoked capability,
+so revoking below that capability unbinds it, section 5.11;
+it keeps its state and does not run until it is bound again.
+A thread unbound or moved while it runs, the caller itself for one, finishes the turn it had:
+only a wait or the tick takes the processor from it.
+
+### 6.14 Operation codes in numeric order
 
 | Code | Operation | Type |
 |---|---|---|
@@ -1103,8 +1147,10 @@ On a PMP grain coarser than eight bytes the frame holds the registers beside the
 | 25 | `OP_CLOCK_INFO` | `Clock` |
 | 26 | `OP_CLOCK_FRAME` | `Clock` |
 | 27 | `OP_UNTYPED_INFO` | `Untyped` |
+| 28 | `OP_SHARE_CARVE` | `Share` |
+| 29 | `OP_SHARE_BIND` | `Share` |
 
-`OP_COUNT` is 28, one above the highest code.
+`OP_COUNT` is 30, one above the highest code.
 
 ## 7. What the root task starts with
 
@@ -1136,11 +1182,12 @@ and drops into user mode with:
 | 12 | `BOOT_CAP_LOG` | `Frame`: the kernel log's header and ring | read, write |
 | 13 | `BOOT_CAP_TIMER_LINES` | `IrqLine`: every timer line, `TIMER_LINES` of them | write |
 | 14 | `BOOT_CAP_CLOCK` | `Clock`: the machine's counter | all |
+| 15 | `BOOT_CAP_SHARES` | `Share`: every share, `SHARES` of them; the root task's thread is bound to the first | write |
 
-`BOOT_CAP_COUNT` is 15; a root task puts its own slots from there upwards.
+`BOOT_CAP_COUNT` is 16; a root task puts its own slots from there upwards.
 
-The root task's own table, process and thread take about 1.7 KiB of the boot pool,
-so roughly 2.3 KiB remain for objects the root task allocates from `BOOT_CAP_POOL`.
+The root task's own table, process and thread take about 2.1 KiB of the boot pool,
+so roughly 1.9 KiB remain for objects the root task allocates from `BOOT_CAP_POOL`.
 Anything larger goes into a pool the root task makes out of free RAM.
 The capabilities to the boot pool, its table, process and thread
 hang below the boot pool's own node, not below `BOOT_CAP_POOL`,
@@ -1241,14 +1288,21 @@ The steps below are what `user/init.c` does.
    rv_invoke(OP_CAP_COPY, SLOT_CHILD_TABLE, CHILD_DOWN,   SLOT_DOWN,      RIGHT_R);
    ```
 
-5. **Configure and start** the thread.
+5. **Configure, bind and start** the thread.
    The stack grows down from the top of the child's data chunk.
+   The thread runs on a share of its own, carved out of the boot grant,
+   so the child takes turns with the whole root task rather than with each of its threads;
+   binding it to `BOOT_CAP_SHARES` at offset 0 would put it on the root task's share instead.
 
    ```c
    rv_invoke(OP_THREAD_CONFIGURE, SLOT_CHILD_THREAD, (uint32_t)&child_main,
              child_data_base + CHUNK, 0);
+   rv_invoke(OP_SHARE_CARVE, BOOT_CAP_SHARES, 1, 1, SLOT_CHILD_SHARE);
+   rv_invoke(OP_SHARE_BIND, SLOT_CHILD_SHARE, SLOT_CHILD_THREAD, 0, 0);
    rv_invoke(OP_THREAD_RESUME, SLOT_CHILD_THREAD, 0, 0, 0);
    ```
+
+   Revoking below `SLOT_CHILD_SHARE` stops the child's thread; binding it again starts it.
 
 6. **Talk** through the shared region and the two notifications.
    The child writes a word, signals `SLOT_UP`; the parent waits, answers, signals `SLOT_DOWN`.
@@ -1316,6 +1370,8 @@ every capability names a live object of its own type or an in-bounds frame, Unty
 and every capability to a pool or an object lies below the pool's own node,
 pools tile their memory exactly,
 every waiting thread names a live notification,
+every ready thread with a share but the running one is on its share's queue,
+and the queue of shares holds exactly the shares with a ready thread but the running one,
 every `Irq` names a notification in its own pool,
 no `Irq` armed on a timer line is past its deadline,
 and the controller forwards exactly the lines an `Irq` is armed on.
@@ -1352,6 +1408,7 @@ and `tests/mutants/` holds one planted bug per invariant.
 | object alignment | 8 bytes | `OBJ_ALIGN` |
 | notification bits | 32 | the word size |
 | timer lines | 16, on the whole machine | `TIMER_LINES` |
+| shares of the processor | 32, on the whole machine | `SHARES` |
 | timer delay or period per call | 2^32 - 1 µs | `OP_IRQ_SET` |
 | tick | 1 ms (`TIMER_HZ` 1000) | `kernel/timer.h` |
 | interrupt lines | 96 on QEMU, 77 on the ESP32-C6, line 0 the log's | `IRQ_LINES` |
@@ -1368,10 +1425,9 @@ These are documented gaps, not surprises;
   A user fault has nobody to report to,
   so the kernel prints the frame and halts with code 4,
   even when another thread could run.
-- **No thread suspend.**
-  A started thread can only be stopped by destroying its pool.
 - **No priorities and no yield.**
-  Round-robin on a tick is the whole policy;
+  Round-robin on a tick, by share and then by thread, is the whole policy,
+  and a share promises a proportion of the processor, not a latency;
   `DESIGN.md`, open decisions 9 and 10.
 - **No badged notifications.**
   A client's identity to a server is a convention, not kernel-enforced;

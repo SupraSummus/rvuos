@@ -356,6 +356,7 @@ before it has created a single pool.
 An `IrqLine` capability has the same shape for the same reason:
 its words are the first line and the count, there is no object,
 and the root task hands lines out as it hands out memory.
+A `Share` capability is the same again, with shares for lines.
 A `Clock` capability, like `Debug`, has neither object nor content:
 there is one counter on the machine.
 
@@ -372,6 +373,7 @@ there is one counter on the machine.
 | `Notification` | A word of sticky signal bits. The only way a thread can stop and be started again. |
 | `IrqLine` | A range of interrupt lines: the log's and the controller's, or the timer lines. Bound one at a time into an `Irq`. |
 | `Irq` | One line bound to a notification. Signals it when the line fires. |
+| `Share` | A range of the processor's shares. A thread runs only while bound to one. No object. |
 | `Debug` | A byte into the kernel's log, and machine halt, for bring-up and tests. No object. |
 | `Clock` | The machine's counter: its rate, and the one frame it can be read through. No object. |
 
@@ -670,6 +672,8 @@ as the same-pool rule requires.
 A thread is either stopped or ready.
 `OP_THREAD_CONFIGURE` sets a stopped thread's program counter
 and stack pointer, and `OP_THREAD_RESUME` makes it ready.
+It runs only while it is bound to a share, which is apart from its state;
+see "Scheduling".
 The kernel validates neither value:
 it knows no executable format and no calling convention,
 so a thread that starts nowhere useful faults,
@@ -768,7 +772,7 @@ so the kernel fires at the first tick that surely lies past the delay:
 the delay rounded up to whole ticks, plus one.
 The tick's period is the board's business and not part of the ABI.
 An upper bound is not promised because the kernel could not keep one:
-the woken thread is ready, not running, and waits its turn in the round.
+the woken thread is ready, not running, and waits for its share's turn and then its own.
 A timer line that fires disarms its `Irq`, as a device's line does,
 and setting an armed one moves its deadline rather than adding a second.
 
@@ -844,28 +848,86 @@ The rate alone tells nothing about time, so it has no capability of its own.
 
 ## Scheduling
 
-**The kernel keeps a run queue.**
-A ready thread other than the running one waits for the processor on the run queue,
-a ring through the thread's own `queue_next` and `queue_prev`.
-A waiting thread is on its notification's waiters through the same two words,
-and no thread is on both, so the queue costs no memory.
-The next thread to run is the oldest on the queue,
-found in constant time however many objects exist;
-the walk over the pools that found it before broke goal 4.
+**The processor is authority, as memory is.**
+When the run queue was a ring of threads, a process got a turn per ready thread,
+and a thread costs only a few hundred bytes of a pool,
+so a process that made many threads, or many children, took that many turns from everyone else.
+Memory and lines are conserved as they are passed on, and so now is the processor.
 
-**The queue is the policy: round-robin.**
-A thread that becomes ready, resumed, woken or preempted,
-joins the back of the queue,
-so ready threads take turns in the order they became ready,
+**A thread runs on a share.**
+There are `SHARES` shares on the machine, a constant of the kernel as the timer lines are,
+and the root task receives them all in `BOOT_CAP_SHARES`, its thread bound to the first.
+A `Share` capability names a range of them and no object, as an `IrqLine` does;
+`OP_SHARE_CARVE` takes a smaller range out of one, a table operation,
+and the root task hands shares out and takes them back as it does memory and lines.
+`OP_SHARE_BIND` puts a thread on one of the shares a capability names,
+off the one it was on, whoever put it there.
+The binding is a node of the derivation tree held in the thread,
+below the capability it was bound through,
+so a revoke above that capability unbinds the thread wherever the capability went,
+as it unmaps a region installed from a frame.
+A thread without a share keeps its state and does not run:
+a ready one waits for a share, and a waiting one waits as before and, once woken, for a share.
+That is the stop a scheduler in userspace lacked, open decision 9:
+it lends a share to the thread it wants to run and takes it back.
+A thread that loses its share while it runs, or is moved to another, finishes the turn it had,
+so only a wait or the tick takes the processor from a running thread,
+and a call stopped for an interrupt is made again before anything else runs.
+
+**The queue is the policy: round-robin, by share and then by thread.**
+The run queue is a ring of the shares that have a ready thread, oldest first,
+and each share holds a ring of its ready threads, oldest first,
+through the thread's own `queue_next` and `queue_prev`.
+A waiting thread is on its notification's waiters through the same two words,
+and no thread is on both, so the rings cost no memory beyond a few words per share.
+A share's turn runs its oldest ready thread.
+When that thread waits, the next ready thread of the same share has the rest of the turn,
+and the tick ends it:
+the share goes to the back of the run queue if it has a thread ready,
+the running thread to the back of its share's ring,
+and the oldest share on the queue has the next turn.
+A share that gets a ready thread, resumed, woken or bound, joins the back of the run queue,
+and a thread joins the back of its share's ring.
+The next thread is the oldest of the oldest share,
+found in constant time however many objects exist,
 and the only scheduling state the kernel holds
-is the queue and which thread is running.
+is the two kinds of ring, whose turn it is, and which thread is running.
+With every thread on one share this is the round-robin over threads it replaced,
+which is how the replay driver runs; see "Verification".
+
+**What it promises.**
+Shares with a ready thread take equal turns,
+so a holder of k of the n shares that have work gets k turns in every n,
+however many threads or children it runs on them.
+A thread a process adds takes turns from its siblings on the same share and from nobody else,
+and a child gets processor time only through a share its creator lends it
+or as turns on a share of its creator's.
+A share is whole turns: a holder weights itself by holding more of them,
+and a single thread gets one share's worth however many its process holds.
+A share with no ready thread takes no turn, so an idle holder costs the others nothing
+and the processor goes round the busy ones only.
+
+**Why a fixed number of shares.**
+A share made of memory, an object in a pool, would buy time with memory again.
+A limit per process or per thread bounds nothing, since anyone can make more of those.
+A limit on the whole machine does, and the capability makes the split the root task's decision,
+as the split of memory and lines is.
+Each share costs the kernel three words.
+
+**Why not budgets.**
+seL4's scheduling contexts carry a budget and a period the kernel refills,
+which bounds latency where turns only promise a proportion,
+at the price of a time kept per context and a refill in every period.
+A budget could come later as a property of a share; see open decision 9.
 
 **The machine timer provides the tick.**
 A thread runs until it waits on a notification
-or until the tick takes the processor from it,
-and either way the oldest thread on the run queue gets it.
+or until the tick takes the processor from it.
 The tick has a fixed period, `TIMER_HZ` in `kernel/timer.h`,
-and one tick is one slice: a preempted thread goes to the back of the round.
+and one tick is one turn: a preempted thread goes to the back of its share's ring,
+and its share to the back of the run queue.
+A turn that begins when a thread waits mid-tick lasts only to the next tick;
+`TODO.md` carries a turn counted from the switch.
 Interrupts are taken in user mode only:
 machine mode runs with `MIE` clear from the trap to the `mret`,
 so a system call is never interrupted and the kernel needs no locks.
@@ -883,7 +945,8 @@ with neither it says `no runnable thread` and stops the machine.
 
 **Nothing more lives in the kernel.**
 Round-robin on a tick is the least policy that makes
-a spinning thread harmless and a woken thread eventually run.
+a spinning thread harmless and a woken thread eventually run,
+and going round by share first is the least that makes a thread cost nobody but its own share.
 Fixed priorities were the intended end state of this section
 and are now open decision 9.
 
@@ -1054,6 +1117,7 @@ The kernel:
    to the machine's counter as a `Clock`,
    and to every line of the interrupt controller with the log's line before them
    (later also flash and other device ranges),
+   and every share of the processor, with its own thread bound to the first,
 6. programs the tick, masks every interrupt line,
    and drops to user mode into the root task.
 
@@ -1274,13 +1338,15 @@ with rights no greater than the root task received for it
 and, for an Untyped, its watermark within it,
 or a range of lines the interrupt controller has, the log's among them,
 with no more than the right to bind,
+or a range of the shares there are, with no more than the right to bind,
 or the debug capability or the clock, which name no object,
 or a live kernel object of the capability's own type.
 Every process's table slot is empty or names a live table.
 
 **Derivation.**
 The slots of every live table,
-the table slot and region slots of every live process
+the table slot and region slots of every live process,
+the share of every live thread
 and the own node of every pool
 are the nodes of one forest.
 Every link of a filled node lands on a live, filled node;
@@ -1296,6 +1362,7 @@ the same object with no more rights,
 a range within the parent's range with no more rights,
 and below an Untyped's watermark when the parent is one,
 a pool's own node on an Untyped, an installed region on a frame,
+a thread's share on a capability to shares that holds it,
 the counter's block, or a region installed from it, below a clock,
 or a capability to a pool or an object below a capability to that pool or its own node.
 A revoke, a delete or a destroy stopped for an interrupt leaves such a forest too,
@@ -1313,15 +1380,19 @@ The line table names exactly the bound `Irq`s,
 and every installed region records its slot.
 
 **Thread state.**
-Every thread is stopped, ready, or waiting.
+Every thread is stopped, ready, or waiting,
+and has one share or none, a leaf of the derivation tree.
 A waiting thread names a live notification and nothing else does,
 and a notification's queue holds exactly the threads waiting on it.
-The run queue holds exactly the ready threads but the running one,
-and a thread on neither queue is linked into none.
+A share's ring holds exactly the ready threads bound to it but the running one,
+and a thread on no ring is linked into none.
+The run queue holds exactly the shares with a ready thread but the one whose turn it is,
+and while a thread runs it is some share's turn.
 The thread the kernel is running is one it could run:
-it is a live object and it is ready.
-A preempted thread stays ready and joins the run queue,
-so it runs again.
+it is a live object and it is ready,
+and it has a share unless it lost it during its turn, which it finishes.
+A preempted thread stays ready and joins its share's ring,
+so it runs again while it keeps its share.
 
 **Interrupts.**
 Every `Irq` names a live notification in its own pool,
@@ -1359,7 +1430,9 @@ A call leaves no capability its caller could not have made.
 Every node it fills or changes is covered by a capability
 the caller's table held before the call:
 the same object, or a range within its range, with no more rights,
-where an Untyped covers the frames it makes.
+where an Untyped covers the frames it makes,
+and a thread's share is covered as a range of one share,
+bound only to a thread the caller held a capability to with the right to control it.
 Or it names an object the call built,
 in a pool the caller could allocate from,
 bound to what the caller could write,
@@ -1497,6 +1570,9 @@ so a record that blocks one of them leaves the kernel
 something else to run and the blocking paths are replayed too.
 A third shares the second's process and starts stopped,
 so a record can resume it when two threads should wait at once.
+All three run on the root thread's share, so they take turns as one ring
+and passing a record round visits every runnable thread,
+until a record binds one of them to another share.
 A record that names a thread is passed to it with `OP_DEBUG_TICK`
 by the protocol in `include/rvuos/replay.h`,
 which the host runs from the kernel's state;
@@ -1670,19 +1746,20 @@ until the maintainer decides otherwise.
    RP2350's PMP is no longer in the way;
    its hardwired entries and `mtval` reading zero still are.
 
-9. **Scheduling policy beyond round-robin.**
-   Working default: none in the kernel.
+9. **Scheduling policy beyond round-robin by share.**
+   Working default: none in the kernel;
+   shares split the processor in proportion, see "Scheduling", and promise no latency.
    The earlier plan was fixed priorities on `Thread`,
    set by whoever holds the capability and capped by the setter's own,
-   round-robin within a priority, no priority inheritance.
+   round-robin within a priority, no priority inheritance;
+   on shares they would be a property of a share rather than of a thread.
    The alternative is a scheduler in userspace
    that decides which threads are runnable at all.
-   It needs a way to stop a thread it started,
-   `OP_THREAD_SUSPEND` in `TODO.md`,
-   and a tick of its own, a timer line,
-   the shape every device interrupt takes.
+   It stops a thread by taking back the share it lent it and starts it by binding it again,
+   and has a tick of its own in a timer line, the shape every device interrupt takes.
    What it cannot do is choose between two runnable threads
    for less than a system call per switch.
+   A budget per share, as seL4's scheduling contexts have, would bound latency.
    Decide when a workload needs one thread to run before another
    and taking turns measurably fails it.
 

@@ -299,13 +299,22 @@ static void check_thread(const struct thread *t)
     if (t->flags & ~(uint8_t)THREAD_UNTRACED) {
         fail("thread has unknown flags", v2p(t), t->flags, 0);
     }
+    /* A thread's share is a leaf of the tree, which the tree check reads the links of. */
+    const struct cap *b = &t->share;
+    if (b->type != CAP_NONE &&
+        (b->type != CAP_BOUND || b->rights != RIGHT_W || b->a >= SHARES || b->b != 0 || b->index != 0)) {
+        fail("thread's share is malformed", v2p(t), b->type, b->a);
+    }
+    if (b->type != CAP_NONE && b->child != 0) {
+        fail("something is derived from a thread's share", v2p(t), b->child, 0);
+    }
     switch (t->state) {
     case THREAD_STOPPED:
     case THREAD_READY:
         if (t->waiting_on != 0) {
             fail("runnable thread waits on something", v2p(t), t->waiting_on, t->state);
         }
-        if (t->state == THREAD_READY && t != current) {
+        if (t->state == THREAD_READY && t != current && b->type == CAP_BOUND) {
             owed_threads++;
         } else if (t->queue_next != 0 || t->queue_prev != 0) {
             fail("thread on no queue is linked into one", v2p(t), t->queue_next, t->state);
@@ -327,11 +336,12 @@ static void check_thread(const struct thread *t)
 
 /*
  * A queue is a ring of live threads, each linked back to the one before,
- * none of them running, and each in the state and waiting on what the queue is for.
+ * none of them running, and each in the state and waiting on what the queue is for,
+ * and on a share's ring bound to that share.
  * The back links make the walk close at the oldest or fail:
  * no thread can be entered twice from two different predecessors.
  */
-static void check_queue(paddr_t head, uint8_t state, paddr_t waiting_on)
+static void check_queue(paddr_t head, uint8_t state, paddr_t waiting_on, const struct share *share)
 {
     if (head == 0) {
         return;
@@ -343,7 +353,8 @@ static void check_queue(paddr_t head, uint8_t state, paddr_t waiting_on)
             fail("queue holds something that is not a thread", head, at, 0);
         }
         const struct thread *t = (const struct thread *)o;
-        if (t->state != state || t->waiting_on != waiting_on || t == current) {
+        if (t->state != state || t->waiting_on != waiting_on || t == current ||
+            (share != NULL && thread_share(t) != share)) {
             fail("queue holds a thread it is not for", head, at, t->state);
         }
         struct obj_header *next = object_find(t->queue_next);
@@ -354,6 +365,56 @@ static void check_queue(paddr_t head, uint8_t state, paddr_t waiting_on)
         queued_threads++;
         at = t->queue_next;
     } while (at != head);
+}
+
+/* True if p points at one of the shares. */
+static bool is_share(const struct share *p)
+{
+    for (unsigned i = 0; i < SHARES; i++) {
+        if (p == &shares[i]) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/*
+ * Every share's ring holds its ready threads but the running one, which check_queue reads,
+ * and the run queue is a ring of exactly the shares with a ready thread but the one whose turn it is.
+ * Something runs, so it is some share's turn.
+ */
+static void check_shares(void)
+{
+    if (current != NULL && (turn == NULL || !is_share(turn))) {
+        fail("it is no share's turn", 0, 0, 0);
+    }
+    uint32_t owed = 0, queued = 0;
+    for (unsigned i = 0; i < SHARES; i++) {
+        const struct share *s = &shares[i];
+        check_queue(s->threads, THREAD_READY, 0, s);
+        bool on = s->next != NULL || s->prev != NULL;
+        if (on != (s->threads != 0 && s != turn)) {
+            fail(on ? "run queue holds a share it is not for" : "a share with a ready thread is not on the run queue",
+                 i, s->threads, 0);
+        }
+        owed += on;
+    }
+    const struct share *at = run_queue;
+    while (at != NULL) {
+        if (!is_share(at) || !is_share(at->next) || at->next->prev != at) {
+            fail("run queue is not linked back", (uint32_t)(at - shares), 0, 0);
+        }
+        if (++queued > SHARES) {
+            fail("run queue does not close", queued, 0, 0);
+        }
+        at = at->next;
+        if (at == run_queue) {
+            break;
+        }
+    }
+    if (owed != queued) {
+        fail("run queue does not hold every share it is for", owed, queued, 0);
+    }
 }
 
 /* The Irqs the walk found armed on a device's line or a timer line, to hold armed_sources to. */
@@ -488,6 +549,15 @@ static void check_captable(const struct captable *table)
                 fail("line capability with rights beyond the grant", v2p(table), i, c->rights);
             }
             break;
+        case CAP_SHARE:
+            /* The root task received every share there is, with RIGHT_W; nothing widens that. */
+            if (c->b == 0 || c->a >= SHARES || c->b > SHARES - c->a) {
+                fail("share capability outside the shares there are", v2p(table), i, c->a);
+            }
+            if (c->rights & ~RIGHT_W) {
+                fail("share capability with rights beyond the grant", v2p(table), i, c->rights);
+            }
+            break;
         case CAP_POOL:
         case CAP_CAPTABLE:
         case CAP_PROCESS:
@@ -510,8 +580,9 @@ static void check_captable(const struct captable *table)
 /*
  * The derivation tree.
  *
- * Its nodes are the slots of every live table
- * and the table slot and region slots of every live process,
+ * Its nodes are the slots of every live table,
+ * the table slot and region slots of every live process
+ * and the share of every live thread,
  * linked by physical address and never checked on use,
  * so every link must land on a live node and the shape must be exactly a forest:
  * the children of a node form one ring that closes through the node,
@@ -522,6 +593,7 @@ static void check_captable(const struct captable *table)
  * A node is derived from its parent: the same object with no more rights,
  * a range within the parent's with no more rights,
  * or an object built on the parent's range, a pool on a region, an Irq on a line,
+ * a thread's share on the shares it was bound through,
  * or the counter's block, or a region installed from it, below the clock.
  */
 
@@ -601,7 +673,7 @@ static bool derived_from(const struct cap *c, const struct cap *p)
         return (narrower || c->type == CAP_RETYPED) && range_within(base, size, pbase, p->b);
     }
     if (c->type == p->type) {
-        if (c->type == CAP_FRAME || c->type == CAP_IRQ_LINE) {
+        if (c->type == CAP_FRAME || c->type == CAP_IRQ_LINE || c->type == CAP_SHARE) {
             return narrower && range_within(c->a, c->b, p->a, p->b);
         }
         return narrower && (c->type == CAP_DEBUG || c->type == CAP_CLOCK || c->a == p->a);
@@ -616,6 +688,10 @@ static bool derived_from(const struct cap *c, const struct cap *p)
     }
     if (c->type == CAP_INSTALLED && p->type == CAP_FRAME) {
         return narrower && range_within(c->a, c->b, p->a, p->b);
+    }
+    /* A thread's share is one of the shares it was bound through. */
+    if (c->type == CAP_BOUND && p->type == CAP_SHARE) {
+        return narrower && c->a - p->a < p->b;
     }
     /* Below a pool's node lies every capability to the pool and to its objects. */
     if (p->type == CAP_RETYPED || p->type == CAP_POOL) {
@@ -830,7 +906,7 @@ void selfcheck_run(void)
             check_captable((struct captable *)o);
             break;
         case CAP_NOTIFICATION:
-            check_queue(((struct notification *)o)->waiters, THREAD_WAITING, v2p(o));
+            check_queue(((struct notification *)o)->waiters, THREAD_WAITING, v2p(o), NULL);
             break;
         case CAP_IRQ:
             check_irq((struct irq *)o);
@@ -839,7 +915,7 @@ void selfcheck_run(void)
             break;
         }
     }
-    check_queue(run_queue, THREAD_READY, 0);
+    check_shares();
     /* Every queued thread is one its queue is for, so equal counts leave none out. */
     if (owed_threads != queued_threads) {
         fail("a waiting or ready thread is on no queue", owed_threads, queued_threads, 0);
@@ -858,6 +934,7 @@ void selfcheck_run(void)
         if (o == NULL || o->type != CAP_THREAD) {
             fail("current thread is not a live object", v2p(current), 0, 0);
         }
+        /* It may have lost its share during its turn, which it finishes. */
         if (current->state != THREAD_READY) {
             fail("the running thread is not runnable", v2p(current), current->state, 0);
         }

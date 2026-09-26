@@ -1,0 +1,21 @@
+The tick ends a share's turn without putting the share back on the run queue.
+A share with another ready thread would leave it behind for good;
+every share with a ready thread but the one whose turn it is waits on the run queue.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: a share with a ready thread is not on the run queue
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -409,9 +409,7 @@ void sched_tick(uint32_t ticks)
+      */
+     struct share *was = turn;
+     turn = NULL;
+-    if (was != NULL) {
+-        share_settle(was);
+-    }
++    (void)was;
+     enqueue(current);
+     turn = next_turn();
+     run_turn();

@@ -1,0 +1,20 @@
+A ready thread bound to a share is not put on the share's ring.
+It would never get the processor;
+every ready thread with a share but the running one is on its share's ring.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: a waiting or ready thread is on no queue
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -178,9 +178,6 @@ void sched_bind(struct thread *t, uint32_t share, struct cap *parent)
+     }
+     t->share = (struct cap){ .type = CAP_BOUND, .rights = RIGHT_W, .a = share };
+     cap_attach(parent, &t->share);
+-    if (t->state == THREAD_READY && t != current) {
+-        enqueue(t);
+-    }
+ }
+ 
+ void sched_unbind(struct cap *bound)

@@ -13,6 +13,8 @@
  * and take it back by revoking, which destroys that pool,
  * sleep on a timer while nothing else can run, and time it on the clock,
  * keep a period on the timer without drifting,
+ * split the processor between two shares however many threads one of them runs,
+ * stop threads by revoking their share and start one again by binding it,
  * bind and revoke an Irq on a line nothing drives,
  * then unmap a region and fault on it.
  * Negative paths are covered by the fuzz corpus and tests/differential.py.
@@ -58,6 +60,9 @@ enum {
     SLOT_BOOT_NTFN,     /* a notification in the boot pool, for binding the line again */
     SLOT_SPARE_IRQ_AGAIN,
     SLOT_COUNTER,       /* the clock's frame, read only */
+    SLOT_CHILD_SHARE,   /* the share the child runs on, carved out of the boot grant */
+    SLOT_SPIN_SHARE,    /* the root task's own share again, for the spinners to be bound through */
+    SLOT_SPINNER,       /* the spinners' threads, SPINNERS of them */
 };
 
 /*
@@ -105,6 +110,7 @@ enum {
 #define BIT_POOLED  0x40u
 #define BIT_LEASE   0x200u /* look at the leased memory, which is gone */
 #define BIT_LEASED  0x400u
+#define BIT_SPIN    0x800u /* spin on the shared word, and never wait again */
 #define BIT_TIMER   0x80u /* the timer's bit on its own notification */
 #define BIT_SPARE   0x100u /* the spare line's bit on that same notification */
 #define MAGIC 0x5eaf00du
@@ -128,6 +134,18 @@ enum {
 /* Whose turn it is in the handshake that uses no notification. */
 #define TURN_CHILD 0x1u
 #define TURN_ROOT  0x2u
+
+/* The shared words: the child's message, the root task's answer, the turn, and the child's count as it spins. */
+#define SHARED_MESSAGE 0
+#define SHARED_ANSWER  1
+#define SHARED_TURN    2
+#define SHARED_SPINS   3
+
+/* Threads the root task adds on its own share, each counting as it spins. */
+#define SPINNERS 3u
+#define SPINNER_STACK 0x100u
+#define SPIN_US 20000u
+static volatile uint32_t spins[SPINNERS];
 
 static void puts(const char *s)
 {
@@ -299,18 +317,18 @@ static void child_main(void)
     }
 
     volatile uint32_t *shared = (volatile uint32_t *)base;
-    shared[0] = MAGIC;
+    shared[SHARED_MESSAGE] = MAGIC;
     rv_signal(CHILD_UP, BIT_REQUEST);
 
     rv_wait(CHILD_DOWN, &bits);
     rv_puts(CHILD_DEBUG,
-            bits == BIT_REPLY && shared[1] == MAGIC + 1 ? "child: reply ok\n"
-                                                        : "child: reply FAILED\n");
+            bits == BIT_REPLY && shared[SHARED_ANSWER] == MAGIC + 1 ? "child: reply ok\n"
+                                                                    : "child: reply FAILED\n");
 
     /* The other half of the root task's preemption check. */
-    while (shared[2] != TURN_CHILD) {
+    while (shared[SHARED_TURN] != TURN_CHILD) {
     }
-    shared[2] = TURN_ROOT;
+    shared[SHARED_TURN] = TURN_ROOT;
 
     rv_signal(CHILD_UP, BIT_DONE);
 
@@ -361,9 +379,49 @@ static void child_main(void)
                 : "child: cannot destroy the boot pool FAILED\n");
     rv_signal(CHILD_UP, BIT_POOLED);
 
-    for (;;) {
+    /*
+     * The other half of the root task's check of shares: spin and count, alone on this share,
+     * until the root task takes the share back, which stops this thread for good.
+     */
+    do {
         rv_wait(CHILD_DOWN, &bits);
+    } while (bits != BIT_SPIN);
+    for (;;) {
+        shared[SHARED_SPINS]++;
     }
+}
+
+/* The spinners, on the root task's share: each counts in a word of its own and never waits. */
+static void spin0(void)
+{
+    for (;;) {
+        spins[0]++;
+    }
+}
+
+static void spin1(void)
+{
+    for (;;) {
+        spins[1]++;
+    }
+}
+
+static void spin2(void)
+{
+    for (;;) {
+        spins[2]++;
+    }
+}
+
+static void (*const spinner_main[SPINNERS])(void) = { spin0, spin1, spin2 };
+
+static uint32_t spun(void)
+{
+    uint32_t sum = 0;
+    for (uint32_t i = 0; i < SPINNERS; i++) {
+        sum += spins[i];
+    }
+    return sum;
 }
 
 int main(void);
@@ -410,6 +468,9 @@ int main(void)
     expect("configure the logger",
            rv_invoke(OP_THREAD_CONFIGURE, SLOT_LOGGER, (uint32_t)&logger_main,
                      data_base + data_size / 2, 0));
+    /* A thread runs only on a share; the logger takes turns with this thread on its share. */
+    expect("put the logger on this thread's share",
+           rv_invoke(OP_SHARE_BIND, BOOT_CAP_SHARES, SLOT_LOGGER, 0, 0));
     expect("start the logger", rv_invoke(OP_THREAD_RESUME, SLOT_LOGGER, 0, 0, 0));
 
     expect("free ram info", rv_untyped_info(BOOT_CAP_FREE_RAM, &free_base, &free_size, &free_mark));
@@ -469,6 +530,11 @@ int main(void)
     expect("configure the child's thread",
            rv_invoke(OP_THREAD_CONFIGURE, SLOT_CHILD_THREAD, (uint32_t)&child_main,
                      child_data_base + CHUNK, 0));
+    /* The child runs on a share of its own, the second, so it takes turns with this whole process. */
+    expect("carve the child a share",
+           rv_invoke(OP_SHARE_CARVE, BOOT_CAP_SHARES, 1, 1, SLOT_CHILD_SHARE));
+    expect("put the child on it",
+           rv_invoke(OP_SHARE_BIND, SLOT_CHILD_SHARE, SLOT_CHILD_THREAD, 0, 0));
     expect("start the child",
            rv_invoke(OP_THREAD_RESUME, SLOT_CHILD_THREAD, 0, 0, 0));
 
@@ -480,10 +546,10 @@ int main(void)
     /* The child may or may not have run by now; the bits are sticky either way. */
     expect("wait for the child", rv_wait(SLOT_UP, &bits));
     expect("the child's word arrived",
-           bits == BIT_REQUEST && shared[0] == MAGIC ? KERR_OK : KERR_INVALID_ARG);
+           bits == BIT_REQUEST && shared[SHARED_MESSAGE] == MAGIC ? KERR_OK : KERR_INVALID_ARG);
     puts("root: message ok\n");
 
-    shared[1] = MAGIC + 1;
+    shared[SHARED_ANSWER] = MAGIC + 1;
     expect("answer the child", rv_signal(SLOT_DOWN, BIT_REPLY));
 
     /*
@@ -491,8 +557,8 @@ int main(void)
      * Each side spins on a word only the other writes and neither waits,
      * so only the tick gets them past this.
      */
-    shared[2] = TURN_CHILD;
-    while (shared[2] != TURN_ROOT) {
+    shared[SHARED_TURN] = TURN_CHILD;
+    while (shared[SHARED_TURN] != TURN_ROOT) {
     }
     puts("root: preemption ok\n");
 
@@ -615,12 +681,9 @@ int main(void)
     expect("it is the same memory", lent_again == lent_base ? KERR_OK : KERR_INVALID_ARG);
     puts("root: cascade ok\n");
 
-    /* The child is done, and goes with its pool. */
-    expect("destroy the child's pool", rv_invoke(OP_POOL_DESTROY, SLOT_POOL, 0, 0, 0));
-
     /*
      * Time.
-     * The child is gone with its pool and the logger waits on the log,
+     * The child waits for the root task and the logger waits on the log,
      * which nothing but a running thread can feed,
      * so while this thread sleeps nothing is runnable
      * and the kernel has to wait for the tick rather than stop.
@@ -672,6 +735,62 @@ int main(void)
                    && elapsed < (uint64_t)hz * ((PERIODS + 1) * PERIOD_US)
                ? KERR_OK : KERR_INVALID_ARG);
     puts("root: period ok\n");
+
+    /*
+     * Shares; see DESIGN.md, "Scheduling".
+     * Three spinners join this thread and the logger on the first share, and the child spins alone on the second.
+     * While this thread sleeps the shares split the time, so the child counts about as far as the three together,
+     * where turns by thread would give it a third as far.
+     * The spinners are bound through a capability of their own, so revoking it stops them alone.
+     */
+    expect("carve this thread's share again",
+           rv_invoke(OP_SHARE_CARVE, BOOT_CAP_SHARES, 0, 1, SLOT_SPIN_SHARE));
+    for (uint32_t i = 0; i < SPINNERS; i++) {
+        expect("allocate a spinner",
+               rv_invoke(OP_POOL_ALLOC, BOOT_CAP_POOL, CAP_THREAD, SLOT_SPINNER + i, BOOT_CAP_PROCESS));
+        expect("configure it",
+               rv_invoke(OP_THREAD_CONFIGURE, SLOT_SPINNER + i, (uint32_t)spinner_main[i],
+                         data_base + data_size / 4 - i * SPINNER_STACK, 0));
+        expect("put it on this thread's share",
+               rv_invoke(OP_SHARE_BIND, SLOT_SPIN_SHARE, SLOT_SPINNER + i, 0, 0));
+        expect("start it", rv_invoke(OP_THREAD_RESUME, SLOT_SPINNER + i, 0, 0, 0));
+    }
+    expect("ask the child to spin", rv_signal(SLOT_DOWN, BIT_SPIN));
+    expect("let them spin", sleep_us(SPIN_US));
+    /* Stopped before they are counted, since the tick would give them more turns meanwhile. */
+    expect("take the spinners' share back",
+           rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_SPIN_SHARE, 0, 0));
+    expect("take the child's share back",
+           rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_CHILD_SHARE, 0, 0));
+    uint32_t child_spun = shared[SHARED_SPINS], root_spun = spun();
+    for (uint32_t i = 0; i < SPINNERS; i++) {
+        expect("every spinner had a turn", spins[i] != 0 ? KERR_OK : KERR_INVALID_ARG);
+    }
+    expect("the two shares split the time",
+           2 * child_spun > root_spun && 2 * root_spun > child_spun ? KERR_OK : KERR_INVALID_ARG);
+    puts("root: shares ok\n");
+
+    /* A thread without a share keeps its state and does not run, whoever else does. */
+    expect("sleep while they have no share", sleep_us(SLEEP_US));
+    expect("no thread without a share ran",
+           shared[SHARED_SPINS] == child_spun && spun() == root_spun ? KERR_OK : KERR_INVALID_ARG);
+    puts("root: unbind ok\n");
+
+    /* Bound again, a thread goes on where it stopped: the first spinner, on the child's share. */
+    uint32_t first_spun = spins[0];
+    expect("put a spinner on the child's share",
+           rv_invoke(OP_SHARE_BIND, SLOT_CHILD_SHARE, SLOT_SPINNER, 0, 0));
+    expect("sleep while it spins", sleep_us(SLEEP_US));
+    expect("take the share back again",
+           rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_CHILD_SHARE, 0, 0));
+    expect("it spun, and only it",
+           spins[0] > first_spun && spun() - spins[0] == root_spun - first_spun &&
+                   shared[SHARED_SPINS] == child_spun
+               ? KERR_OK : KERR_INVALID_ARG);
+    puts("root: rebind ok\n");
+
+    /* The child is done, and goes with its pool. */
+    expect("destroy the child's pool", rv_invoke(OP_POOL_DESTROY, SLOT_POOL, 0, 0, 0));
 
     /*
      * Interrupts, beyond the two lines the logger lives on.

@@ -53,6 +53,7 @@
 #define CAP_IRQ_LINE 9 /* a range of interrupt lines; no kernel object behind it */
 #define CAP_IRQ      10 /* one line bound to a notification; signals it when the line fires */
 #define CAP_CLOCK    11 /* the machine's counter: its rate, and a frame to read it through */
+#define CAP_SHARE    12 /* a range of the processor's shares; no kernel object behind it */
 
 /*
  * Rights bits.
@@ -64,6 +65,7 @@
  * Notification: RIGHT_W to signal, RIGHT_R to wait.
  * IrqLine: RIGHT_W to bind a line.
  * Irq: RIGHT_W to set or mask.
+ * Share: RIGHT_W to bind a thread.
  * Debug, Clock: any right.
  * Copying a capability can only remove rights.
  */
@@ -93,7 +95,8 @@
 /*
  * Debug: what the timer tick does, on request.
  * Time moves by one tick, every timer line that is due signals,
- * the processor goes to the next runnable thread in the round
+ * the running share's turn ends: the caller goes to the back of its share's ring,
+ * the share to the back of the run queue, and the oldest share has the next turn,
  * and the caller stays ready.
  * Works while tracing is on, unlike the tick itself;
  * see DESIGN.md, "Verification".
@@ -254,10 +257,9 @@
  */
 #define OP_THREAD_CONFIGURE 12
 /*
- * Thread (RIGHT_W): make a stopped thread runnable.
- * It runs when the thread that started it waits
- * or when the timer tick takes the processor from it,
- * whichever comes first.
+ * Thread (RIGHT_W): make a stopped thread ready.
+ * It runs once it is bound to a share, see OP_SHARE_BIND,
+ * when that share's turn comes and the threads before it on the share have had theirs.
  * Fails with KERR_STATE unless the thread is stopped.
  */
 #define OP_THREAD_RESUME 13
@@ -339,8 +341,30 @@
  */
 #define OP_CLOCK_FRAME 26
 
+/*
+ * Share: derive a smaller range of shares with the same rights.
+ * a1 = offset from the first share, a2 = count, a3 = destination slot.
+ * Like OP_IRQ_CARVE, this is a table operation that touches no kernel memory,
+ * and the new capability is a child of the invoked one.
+ */
+#define OP_SHARE_CARVE 28
+/*
+ * Share (RIGHT_W): run a thread on one of the capability's shares.
+ * a1 = the slot of the Thread capability, which needs RIGHT_W,
+ * a2 = the share's offset from the first one the capability names.
+ * A thread runs only while it is bound to a share,
+ * and ready threads take turns first by share, then within each share;
+ * see DESIGN.md, "Scheduling".
+ * The thread leaves the share it was bound to, if any, whatever capability it was bound through.
+ * The binding is a child of the invoked capability in the derivation tree,
+ * so revoking below that capability unbinds the thread:
+ * it keeps its state, ready, waiting or stopped, and does not run until it is bound again.
+ * A thread unbound or moved while it runs, the caller itself among them, finishes the turn it had.
+ */
+#define OP_SHARE_BIND 29
+
 /* One above the highest operation code; the fuzzer's mutator draws below it. */
-#define OP_COUNT 28
+#define OP_COUNT 30
 
 /*
  * Capability slots the kernel fills in the root task's table at boot.
@@ -361,7 +385,8 @@
 #define BOOT_CAP_LOG       12 /* Frame, read and write: the kernel's log, see struct rvuos_log */
 #define BOOT_CAP_TIMER_LINES 13 /* IrqLine: every timer line, TIMER_LINES of them */
 #define BOOT_CAP_CLOCK     14 /* Clock: the machine's counter */
-#define BOOT_CAP_COUNT     15
+#define BOOT_CAP_SHARES    15 /* Share: every share, SHARES of them; the root thread is bound to the first */
+#define BOOT_CAP_COUNT     16
 
 /*
  * The kernel's log.
@@ -422,5 +447,6 @@ struct replay_record {
 #define PROCESS_REGION_SLOTS 8
 #define POOL_MIN_SIZE 64 /* the smallest pool OP_UNTYPED_RETYPE makes */
 #define TIMER_LINES 16 /* on the whole machine; see BOOT_CAP_TIMER_LINES */
+#define SHARES 32 /* of the processor, on the whole machine; see BOOT_CAP_SHARES */
 
 #endif

@@ -12,7 +12,9 @@ struct thread *current;
 uint32_t sched_ticks;
 uint32_t trace_wake_bits;
 
-paddr_t run_queue;
+struct share shares[SHARES];
+struct share *run_queue;
+struct share *turn;
 uint32_t armed_sources;
 
 static void count_armed(bool was, bool is)
@@ -35,7 +37,7 @@ void irq_set_bits(struct irq *irq, uint32_t bits)
 /*
  * A thread is on at most one ring, through queue_next and queue_prev:
  * its notification's waiters while it waits,
- * or the run queue while it is ready and another thread runs.
+ * or its share's while it is ready, bound, and another thread runs.
  * A ring's head names the oldest, so the newest is that one's queue_prev.
  */
 static void ring_push(paddr_t *head, struct thread *t)
@@ -82,24 +84,118 @@ static void unwait(struct thread *t)
     t->waiting_on = 0;
 }
 
+/*
+ * The run queue is a ring of shares as a share's ring is one of threads, oldest first,
+ * and a share is on it exactly while it has a ready thread and it is not its turn.
+ * Taking from the front and joining at the back, of both, is the whole scheduling policy.
+ */
+static void share_push(struct share *s)
+{
+    if (run_queue == NULL) {
+        s->next = s->prev = s;
+        run_queue = s;
+    } else {
+        s->next = run_queue;
+        s->prev = run_queue->prev;
+        run_queue->prev->next = s;
+        run_queue->prev = s;
+    }
+}
+
+static void share_remove(struct share *s)
+{
+    if (s->next == s) {
+        run_queue = NULL;
+    } else {
+        s->prev->next = s->next;
+        s->next->prev = s->prev;
+        if (run_queue == s) {
+            run_queue = s->next;
+        }
+    }
+    s->next = s->prev = NULL;
+}
+
+/* Put a share on the run queue or take it off, whichever its threads and the turn now say. */
+static void share_settle(struct share *s)
+{
+    bool owed = s->threads != 0 && s != turn;
+    if (owed && s->next == NULL) {
+        share_push(s);
+    } else if (!owed && s->next != NULL) {
+        share_remove(s);
+    }
+}
+
+/* A ready thread that is not running joins the back of its share's ring; one without a share waits for one. */
+static void enqueue(struct thread *t)
+{
+    struct share *s = thread_share(t);
+    if (s != NULL) {
+        ring_push(&s->threads, t);
+        share_settle(s);
+    }
+}
+
+/* A ready thread that is not running leaves its share's ring. */
+static void dequeue(struct thread *t)
+{
+    struct share *s = thread_share(t);
+    if (s != NULL) {
+        ring_remove(&s->threads, t);
+        share_settle(s);
+    }
+}
+
+/* The oldest ready thread of a share that has one, taken off its ring. */
+static struct thread *share_take(struct share *s)
+{
+    struct thread *t = p2v(s->threads);
+    ring_remove(&s->threads, t);
+    return t;
+}
+
+/* The oldest share on the run queue, taken off it: its turn begins. NULL when the queue is empty. */
+static struct share *next_turn(void)
+{
+    struct share *s = run_queue;
+    if (s != NULL) {
+        share_remove(s);
+    }
+    return s;
+}
+
 void sched_ready(struct thread *t)
 {
     t->state = THREAD_READY;
-    ring_push(&run_queue, t);
+    enqueue(t);
 }
 
-/*
- * The oldest thread on the run queue, taken off it; NULL when it is empty.
- * Taking from the front and joining at the back is the whole scheduling policy.
- */
-static struct thread *run_queue_take(void)
+void sched_bind(struct thread *t, uint32_t share, struct cap *parent)
 {
-    if (run_queue == 0) {
-        return NULL;
+    if (t->share.type != CAP_NONE) {
+        cap_delete(&t->share, false);
     }
-    struct thread *t = p2v(run_queue);
-    ring_remove(&run_queue, t);
-    return t;
+    t->share = (struct cap){ .type = CAP_BOUND, .rights = RIGHT_W, .a = share };
+    cap_attach(parent, &t->share);
+    if (t->state == THREAD_READY && t != current) {
+        enqueue(t);
+    }
+}
+
+void sched_unbind(struct cap *bound)
+{
+    struct thread *t = bound_thread(bound);
+    if (t->state == THREAD_READY && t != current) {
+        dequeue(t);
+    }
+    *bound = (struct cap){ 0 };
+}
+
+void sched_start(struct thread *t)
+{
+    current = t;
+    turn = thread_share(t);
 }
 
 /*
@@ -214,14 +310,12 @@ bool sched_forget(struct obj_header *o, bool preempt)
     }
     case CAP_THREAD: {
         /*
-         * The thread is gone, and the ring it is on may live on in another pool.
-         * A ready one is not running, since the caller does not live here, so it is queued.
+         * The thread is gone, and the notification it waits on may live on in another pool.
+         * Its share went as a node it holds, and with it its place on the share's ring.
          */
         struct thread *t = (struct thread *)o;
         if (t->state == THREAD_WAITING) {
             unwait(t);
-        } else if (t->state == THREAD_READY) {
-            ring_remove(&run_queue, t);
         }
         break;
     }
@@ -260,10 +354,13 @@ static void switch_to(struct thread *next)
     current = next;
 }
 
-void sched_run_next(void)
+/*
+ * Hand the processor to the oldest ready thread of the share whose turn it is,
+ * waiting for a share to have one while it is nobody's turn.
+ */
+static void run_turn(void)
 {
-    struct thread *next = run_queue_take();
-    while (next == NULL) {
+    while (turn == NULL) {
         LOOP_WAIT("an interrupt, in intr_wait");
         /*
          * Only a running thread, a timer line or a device interrupt
@@ -287,17 +384,35 @@ void sched_run_next(void)
         if (device) {
             sched_claim_interrupts();
         }
-        next = run_queue_take();
+        turn = next_turn();
     }
-    switch_to(next);
+    switch_to(share_take(turn));
+}
+
+void sched_run_next(void)
+{
+    /* The share whose turn it is keeps it while it has another thread ready. */
+    if (turn == NULL || turn->threads == 0) {
+        turn = next_turn();
+    }
+    run_turn();
 }
 
 void sched_tick(uint32_t ticks)
 {
     tick_advance(ticks);
-    /* The running thread is ready, and goes to the back of the round behind any other that is. */
-    if (run_queue != 0) {
-        ring_push(&run_queue, current);
-        switch_to(run_queue_take());
+    /*
+     * The turn ends: the share whose turn it was goes to the back of the run queue
+     * if it has a thread ready, and the running thread to the back of its share's ring,
+     * which puts its share behind that one if it was moved to another.
+     * One that lost its share during its turn goes nowhere, and without it the queue may be empty.
+     */
+    struct share *was = turn;
+    turn = NULL;
+    if (was != NULL) {
+        share_settle(was);
     }
+    enqueue(current);
+    turn = next_turn();
+    run_turn();
 }

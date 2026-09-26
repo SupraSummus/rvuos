@@ -1,0 +1,20 @@
+A bind needs no right on the share.
+A capability narrowed to name shares without the right to use them would bind all the same;
+a thread's share has no more rights than the capability it was bound through.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: slot is not derived from its parent
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -552,9 +552,6 @@ static int op_share(struct thread *t, uint32_t slot, const struct cap *cap,
+     case OP_SHARE_CARVE:
+         return carve_range(t, slot, cap, arg);
+     case OP_SHARE_BIND: {
+-        if (!(cap->rights & RIGHT_W)) {
+-            return KERR_NO_RIGHTS;
+-        }
+         struct cap tc;
+         int err = cap_lookup_typed(thread_table(t), arg[1], CAP_THREAD, RIGHT_W, &tc);
+         if (err != KERR_OK) {

@@ -7,7 +7,7 @@ Report: link up to a slot that is not a live, filled one
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -216,7 +216,7 @@ bool cap_revoke_below(struct cap *root, bool preempt)
+@@ -218,7 +218,7 @@ bool cap_revoke_below(struct cap *root, bool preempt)
  bool cap_delete(struct cap *n, bool preempt)
  {
      if (n->next != LINK_UP) {

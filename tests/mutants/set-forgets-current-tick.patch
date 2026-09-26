@@ -10,7 +10,7 @@ Report: armed timer line is due
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -580,7 +580,7 @@ static int op_irq(const struct cap *cap, uint32_t op, uint32_t *arg)
+@@ -616,7 +616,7 @@ static int op_irq(const struct cap *cap, uint32_t op, uint32_t *arg)
               * The count wraps and irq_due compares with a signed difference,
               * which is exact while a delay stays far below half the count's range.
               */

@@ -8,7 +8,7 @@ Report: armed timer line is due
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -145,7 +145,7 @@ static void tick_advance(uint32_t ticks)
+@@ -241,7 +241,7 @@ static void tick_advance(uint32_t ticks)
          LOOP_BOUND(TIMER_LINES);
          struct irq *irq = line_binding(IRQ_LINES + i);
          if (irq != NULL && irq_armed(irq) && irq_due(irq, sched_ticks)) {

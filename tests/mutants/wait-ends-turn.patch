@@ -1,0 +1,21 @@
+A thread that waits ends its share's turn even though another thread of the share is ready.
+The share would drop off the run queue with that thread on its ring and never have a turn again;
+every share with a ready thread but the one whose turn it is waits on the run queue.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: a share with a ready thread is not on the run queue
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -392,9 +392,7 @@ static void run_turn(void)
+ void sched_run_next(void)
+ {
+     /* The share whose turn it is keeps it while it has another thread ready. */
+-    if (turn == NULL || turn->threads == 0) {
+-        turn = next_turn();
+-    }
++    turn = next_turn();
+     run_turn();
+ }
+ 

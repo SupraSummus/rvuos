@@ -7,7 +7,7 @@ Report: link up to a slot that is not a live, filled one
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -148,7 +148,7 @@ static void clear_node(struct cap *n)
+@@ -150,7 +150,7 @@ static void clear_node(struct cap *n)
  static void detach(struct cap *n, bool adopt)
  {
      /* The children go right after n, so n leaves the ring as a leaf would. */

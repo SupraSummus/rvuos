@@ -34,8 +34,6 @@ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
     proc->table = cap_to_object(&table->hdr, RIGHT_ALL);
     cap_attach(&pool->node, &proc->table);
     thread->proc = v2p(proc);
-    /* The root thread is the one the kernel drops into; it never waits. */
-    thread->state = THREAD_READY;
     thread->flags = 0;
     thread->frame.regs[REG_SP] = USER_DATA_BASE + USER_DATA_SIZE;
     thread->frame.mepc = USER_CODE_BASE;
@@ -82,6 +80,7 @@ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
         /* The timer lines follow the controller's, and are granted apart so that no board's count shows. */
         [BOOT_CAP_TIMER_LINES] = cap_to_lines(IRQ_LINES, TIMER_LINES, RIGHT_W),
         [BOOT_CAP_CLOCK] = { .type = CAP_CLOCK, .rights = RIGHT_ALL },
+        [BOOT_CAP_SHARES] = cap_to_shares(0, SHARES, RIGHT_W),
     };
     for (unsigned i = BOOT_CAP_NULL + 1; i < BOOT_CAP_COUNT; i++) {
         bool pooled = i == BOOT_CAP_CAPTABLE || i == BOOT_CAP_PROCESS || i == BOOT_CAP_THREAD ||
@@ -90,6 +89,13 @@ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
             kpanic("cannot fill the root task's table");
         }
     }
+
+    /*
+     * The root thread runs on the first share, bound through the capability to them all.
+     * It is the one the kernel drops into, so it is ready and on no ring: bound while stopped.
+     */
+    sched_bind(thread, 0, &table->slots[BOOT_CAP_SHARES]);
+    thread->state = THREAD_READY;
 
     /* The root task's own mappings derive from its frames, as every mapping does. */
     if (process_install(proc, 0, USER_CODE_BASE, USER_CODE_SIZE, RIGHT_R | RIGHT_X,

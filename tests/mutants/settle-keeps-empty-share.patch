@@ -1,0 +1,19 @@
+A share whose last ready thread waits stays on the run queue.
+Its next turn would find no thread to run;
+the run queue holds only shares with a ready thread.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: run queue holds a share it is not for
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -122,8 +122,6 @@ static void share_settle(struct share *s)
+     bool owed = s->threads != 0 && s != turn;
+     if (owed && s->next == NULL) {
+         share_push(s);
+-    } else if (!owed && s->next != NULL) {
+-        share_remove(s);
+     }
+ }
+ 

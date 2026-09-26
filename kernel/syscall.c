@@ -463,6 +463,21 @@ static int op_notification(struct thread *t, const struct cap *cap,
     }
 }
 
+/*
+ * A smaller range of the lines or shares a capability names, with its rights, below it:
+ * a1 = offset from the first, a2 = count, a3 = destination slot.
+ */
+static int carve_range(struct thread *t, uint32_t slot, const struct cap *cap, const uint32_t *arg)
+{
+    uint32_t off = arg[1];
+    uint32_t len = arg[2];
+    if (len == 0 || off > cap->b || len > cap->b - off) {
+        return KERR_INVALID_ARG;
+    }
+    struct cap sub = { .type = cap->type, .rights = cap->rights, .a = cap->a + off, .b = len };
+    return cap_store(thread_table(t), arg[3], &sub, slot_node(t, slot));
+}
+
 /* arg[1..] carry the arguments in. */
 static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
                        uint32_t op, const uint32_t *arg)
@@ -471,15 +486,8 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
     uint32_t count = cap->b;
 
     switch (op) {
-    case OP_IRQ_CARVE: {
-        uint32_t off = arg[1];
-        uint32_t len = arg[2];
-        if (len == 0 || off > count || len > count - off) {
-            return KERR_INVALID_ARG;
-        }
-        struct cap sub = cap_to_lines(first + off, len, cap->rights);
-        return cap_store(thread_table(t), arg[3], &sub, slot_node(t, slot));
-    }
+    case OP_IRQ_CARVE:
+        return carve_range(t, slot, cap, arg);
     case OP_IRQ_BIND: {
         if (!(cap->rights & RIGHT_W)) {
             return KERR_NO_RIGHTS;
@@ -530,6 +538,34 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
         /* Its bits are zero, so it is disarmed, and its line stays masked as every line does until a set. */
         struct cap ic = cap_to_object(&irq->hdr, RIGHT_ALL);
         return cap_store(thread_table(t), arg[3], &ic, slot_node(t, arg[1]));
+    }
+    default:
+        return KERR_WRONG_TYPE;
+    }
+}
+
+/* arg[1..] carry the arguments in. */
+static int op_share(struct thread *t, uint32_t slot, const struct cap *cap,
+                    uint32_t op, const uint32_t *arg)
+{
+    switch (op) {
+    case OP_SHARE_CARVE:
+        return carve_range(t, slot, cap, arg);
+    case OP_SHARE_BIND: {
+        if (!(cap->rights & RIGHT_W)) {
+            return KERR_NO_RIGHTS;
+        }
+        struct cap tc;
+        int err = cap_lookup_typed(thread_table(t), arg[1], CAP_THREAD, RIGHT_W, &tc);
+        if (err != KERR_OK) {
+            return err;
+        }
+        if (arg[2] >= cap->b) {
+            return KERR_INVALID_ARG;
+        }
+        /* The binding hangs below the invoked capability, so a revoke above it unbinds the thread. */
+        sched_bind((struct thread *)cap_object(&tc), cap->a + arg[2], slot_node(t, slot));
+        return KERR_OK;
     }
     default:
         return KERR_WRONG_TYPE;
@@ -637,7 +673,7 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
 
     /*
      * Operations that change an object need RIGHT_W on it.
-     * Frames, Untypeds, interrupt lines, notifications, the debug capability and the clock
+     * Frames, Untypeds, interrupt lines, shares, notifications, the debug capability and the clock
      * are checked in their handlers,
      * because which right they need depends on the operation.
      */
@@ -674,6 +710,9 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
         break;
     case CAP_IRQ:
         err = (cap.rights & RIGHT_W) ? op_irq(&cap, op, arg) : KERR_NO_RIGHTS;
+        break;
+    case CAP_SHARE:
+        err = op_share(t, slot, &cap, op, arg);
         break;
     default:
         err = KERR_WRONG_TYPE;
@@ -728,6 +767,10 @@ void syscall_dispatch(struct thread *t)
             kputc('\n');
         }
     }
+    /*
+     * A thread that waits gives the processor up.
+     * One that lost its share finishes its turn, as a preempted call is made again before the tick switches.
+     */
     if (current->state != THREAD_READY) {
         sched_run_next();
     }
