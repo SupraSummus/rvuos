@@ -94,7 +94,10 @@ Design decisions behind these items live in `DESIGN.md`.
 
 - `fuzz-work` counts the loop annotations' claims only where the corpus reaches.
   The host's `irq_claim` never returns a line,
-  so nothing counts the `IRQ_LINES` bound of `sched_claim_interrupts`.
+  so nothing counts the claims on the way from an interrupt through `sched_claim_interrupts`,
+  its `IRQ_LINES` bound among them.
+- `CALL_ARG` and `CALL_WALK` have no user, and `fuzz-work` does not check them;
+  drop them, or check them when one is needed.
 - That an object holds nothing from before its pool took the memory
   shows only where the garbage is a capability or makes a call fail;
   `host/history.c` does not know what the memory held before the call.

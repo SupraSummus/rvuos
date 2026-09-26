@@ -1134,7 +1134,7 @@ What it costs is latency, and preemption is the answer to that.
 
 **Preemption.**
 A revoke, a delete below a root, a pool destroy, and the revoke that begins a bind
-take one step per capability or object in constant time
+take one step per capability, object or waiter in constant time
 and ask `intr_pending` between two steps.
 If the tick or a device interrupt is pending, the walk stops,
 `syscall_dispatch` puts the thread back on its `ecall` with its registers as they were,
@@ -1144,6 +1144,7 @@ The kernel only notices the interrupt; the processor takes it.
 The progress stays in the derivation tree and in the pool:
 the next step is always at the first child of the slot the call names,
 or at the newest object of the pool being destroyed and the slot its descriptor says,
+or, for a notification of it, at the first thread still waiting on it,
 so the kernel needs no record of where it stopped, no second stack and no worker,
 and the time lands in the slice of the thread that made the call.
 A pool's destroy goes on from where it stopped whichever call takes the next step,
@@ -1170,6 +1171,8 @@ and so is the self-check, which may be called only under `if (debug_trace)`.
 The claims are checked too.
 A bound the loop's own shape limits, a counter below a constant, is compared with that limit at the link;
 this is the only check of board code, which the host does not run.
+A wait must wait on every way round, which the link checks too:
+a `wfi`, a load from a fixed address outside RAM, or a call to a function holding a `wfi`.
 Other bounds rest on an invariant, as `i < img->count` does,
 and a paid loop names its unit: a node, a link, an object or a waiter.
 The host harness `fuzz-work` counts both after every call:
@@ -1177,11 +1180,14 @@ a bound per entry of its loop,
 and paid steps at most twice what the call took away of that unit, plus one;
 twice since a delete below a root makes a root of a node, a link each,
 and a pool destroy may then clear that node as one its tables hold.
-It finds a false claim only where the corpus reaches, and a wait is not checked at all.
+It also fails a paid loop that takes two steps without asking `intr_pending` between them,
+so a walk that is paid for is a walk that is preempted,
+and a `memset` or `memcpy` longer than the `CALL_BOUND` before it.
+It finds a false claim only where the corpus reaches.
 The host answers every `intr_pending` with yes, the worst case,
 so each preemptible call stops after its first step, is made again,
 and the self-check runs between any two steps;
-every host harness requires a stopped call to have taken a node, a link or an object away.
+every host harness requires a stopped call to have taken a node, a link, an object or a waiter away.
 
 **Where the kernel falls short.**
 Nowhere, since `Untyped` and `Frame` replaced the overlap checks and the sweep;

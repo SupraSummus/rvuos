@@ -8,7 +8,7 @@ Report: queue holds something that is not a thread
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -216,8 +216,6 @@ void sched_forget(struct obj_header *o)
+@@ -220,8 +220,6 @@ bool sched_forget(struct obj_header *o, bool preempt)
          struct thread *t = (struct thread *)o;
          if (t->state == THREAD_WAITING) {
              unwait(t);

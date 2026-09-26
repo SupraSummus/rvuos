@@ -1,0 +1,20 @@
+A retype zeroes the whole of a new pool again, work in its size,
+and says where it calls memset that the length is at most the smallest pool's,
+so the claim is false for every pool above the smallest.
+Each object is still zeroed as it is allocated, so only the counting harness catches it.
+
+Caught-by: fuzz-work
+Report: the call at kernel/syscall.c passes N, beyond its bound of N
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -225,6 +225,8 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
+              * so the capability may go and the memory stays accounted for.
+              * It is not zeroed here, which would be work in its size: pool_alloc zeroes each object.
+              */
++            CALL_BOUND(POOL_MIN_SIZE);
++            memset(p2v(at), 0, len);
+             struct pool *pool = pool_create(at, len, u);
+             c = cap_to_object(&pool->hdr, RIGHT_ALL);
+             parent = &pool->node;

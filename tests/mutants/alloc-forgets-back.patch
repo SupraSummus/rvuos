@@ -8,7 +8,7 @@ Report: object does not know where the one before it lies
 diff --git a/kernel/pool.c b/kernel/pool.c
 --- a/kernel/pool.c
 +++ b/kernel/pool.c
-@@ -154,7 +154,6 @@ void *pool_alloc(struct pool *pool, uint8_t type, size_t size)
+@@ -156,7 +156,6 @@ void *pool_alloc(struct pool *pool, uint8_t type, size_t size)
      memset(obj, 0, aligned);
      obj->type = type;
      obj->pool = pool_base(pool);

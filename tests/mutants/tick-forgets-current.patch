@@ -8,7 +8,7 @@ Report: a waiting or ready thread is on no queue
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -292,7 +292,6 @@ void sched_tick(uint32_t ticks)
+@@ -297,7 +297,6 @@ void sched_tick(uint32_t ticks)
      tick_advance(ticks);
      /* The running thread is ready, and goes to the back of the round behind any other that is. */
      if (run_queue != 0) {

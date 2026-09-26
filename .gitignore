@@ -1,2 +1,4 @@
 build/
+# What a harness that fails leaves where it ran.
+crash-*
 tools/__pycache__/

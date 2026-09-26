@@ -522,8 +522,10 @@ void sched_wait(struct thread *t, struct notification *ntfn);
  * and an Irq is disarmed and its line masked and unbound.
  * A pool takes its objects newest first, so a thread goes before its process
  * and an Irq before its notification.
+ * The waiters wake one step at a time, and with preempt the walk may stop between two:
+ * false then, and the next call goes on with the ones still waiting.
  */
-void sched_forget(struct obj_header *o);
+bool sched_forget(struct obj_header *o, bool preempt);
 
 /* The Irq bound to each line, 0 for none; LINES long, the timer lines included. */
 extern paddr_t line_irq[];

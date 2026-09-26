@@ -7,7 +7,7 @@ Caught-by: loop-bounds
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -289,6 +289,7 @@ void sched_run_next(void)
+@@ -294,6 +294,7 @@ void sched_run_next(void)
  
  void sched_tick(uint32_t ticks)
  {

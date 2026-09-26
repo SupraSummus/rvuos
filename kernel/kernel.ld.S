@@ -20,6 +20,10 @@ ENTRY(_start)
 KERNEL_STACK_SIZE = 1K;
 BOOT_POOL_SIZE    = 4K;
 
+/* For tools/loop-bounds.py: a load from a fixed address outside RAM waits on a device. */
+__ram_start = RAM_BASE;
+__ram_end   = RAM_BASE + RAM_SIZE;
+
 SECTIONS
 {
     . = RAM_BASE;

@@ -24,7 +24,7 @@ diff --git a/kernel/boot.c b/kernel/boot.c
 diff --git a/kernel/pool.c b/kernel/pool.c
 --- a/kernel/pool.c
 +++ b/kernel/pool.c
-@@ -150,8 +150,6 @@ void *pool_alloc(struct pool *pool, uint8_t type, size_t size)
+@@ -152,8 +152,6 @@ void *pool_alloc(struct pool *pool, uint8_t type, size_t size)
      uint32_t aligned = align_up((uint32_t)size, OBJ_ALIGN);
      pool->used += aligned;
      /* The memory holds what it held before the pool took it; the padding is zeroed with the rest. */

@@ -21,6 +21,8 @@ A loop bounded by an argument puts the question to each call, made or inlined,
 which must follow a call annotation.
 A bound that the loop's own shape limits must not be below that limit.
 A walk must be a row of the table in "Bounded work", and every row walked or paid for.
+A loop that says it waits must wait on every way round:
+a wfi, a load from a fixed address outside RAM, or a call to a function holding a wfi.
 The self-check is not checked, and every call to it must stand in an if on debug_trace.
 
 Usage: loop-bounds.py [--objdump tool] [--symbolizer tool] --cc cc --cflags flags
@@ -35,7 +37,7 @@ import struct
 import subprocess
 import sys
 
-from kimage import Failure, NO_DEST, SHF_ALLOC, TARGET, data_words, imm, load, text_end
+from kimage import BASED, Failure, NO_DEST, SHF_ALLOC, TARGET, data_words, imm, load, text_end
 from ksource import Source, counted, symbolize
 
 ENTRIES = {"trap_vectors"}
@@ -46,6 +48,7 @@ CUTS = {"selfcheck_run": "debug_trace"}
 PAID_UNITS = {"node", "link", "object", "waiter"}
 
 BRANCH = re.compile(r"^b(eq|ne|lt|ge|ltu|geu|eqz|nez|lez|gez|ltz|gtz|gt|le|gtu|leu)$")
+LOAD = re.compile(r"^(c\.)?l[bhw]u?$")
 
 
 def walk_rows(design: str) -> set[str]:
@@ -214,6 +217,51 @@ def may_return(functions, ends, pointers):
                 returns.add(a)
                 changed = True
     return returns
+
+
+def fixed(insns, i, reg):
+    """The value an lui, alone or with an addi, or an auipc with its addi, left in reg before insns[i]:
+    the nearest write to reg above it, in the order of the addresses."""
+    for j in range(i - 1, -1, -1):
+        _, mnem, ops = insns[j]
+        if writes(mnem, ops) == reg:
+            return (imm(args_of(ops)[1]) << 12) & 0xFFFFFFFF if mnem == "lui" else defined(insns, i, reg)
+    return None
+
+
+def waiting_blocks(blocks, insns, ram, waits, moving):
+    """The blocks that wait: they hold a wfi or a load from a fixed address outside ram,
+    other than a load in moving, whose base the loop writes, or they call a function of waits."""
+    def waits_here(i):
+        pc, mnem, ops = insns[i]
+        if mnem == "wfi":
+            return True
+        m = BASED.fullmatch(args_of(ops)[-1]) if LOAD.match(mnem) and ops else None
+        if not m or pc in moving:
+            return False
+        base = fixed(insns, i, m.group(2))
+        return base is not None and not ram[0] <= (base + imm(m.group(1))) & 0xFFFFFFFF < ram[1]
+
+    index = {pc: i for i, (pc, _, _) in enumerate(insns)}
+    return {b for b, blk in blocks.items()
+            if any(c in waits for _, c in blk.calls + blk.tails)
+            or any(waits_here(i) for i in range(index[blk.start], index.get(blk.end, len(insns))))}
+
+
+def comes_round(blocks, header, body, marked):
+    """Whether a way round the loop from its header back to it passes no block of marked."""
+    if header in marked:
+        return False
+    seen, work = set(), [s for s in blocks[header].succ if s in body]
+    while work:
+        b = work.pop()
+        if b == header:
+            return True
+        if b in seen or b in marked:
+            continue
+        seen.add(b)
+        work += [s for s in blocks[b].succ if s in body]
+    return False
 
 
 def blocks_of(fn_addr, fn_end, insns, pointers, returns, image, sections):
@@ -475,7 +523,10 @@ def main() -> int:
     args = ap.parse_args()
 
     try:
-        image, sections, _, _, functions, graph, pointed = load(args.objdump, args.elf, args.su)
+        image, sections, symbols, _, functions, graph, pointed = load(args.objdump, args.elf, args.su)
+        if "__ram_start" not in symbols or "__ram_end" not in symbols:
+            raise Failure("the image names no __ram_start and __ram_end, which the check of a wait needs")
+        ram = (symbols["__ram_start"], symbols["__ram_end"])
         by_name = {fn.name: a for a, fn in graph.items()}
         starts = [f[0] for f in functions]
         ends = dict(zip(starts, starts[1:] + [text_end(sections)]))
@@ -576,6 +627,21 @@ def main() -> int:
                 if most > n.value:
                     check.problems.append(f"{loop} may run {most} times, and {n} says {n.value}")
                 proven.add(id(n))
+
+        # A wait waits on every way round.
+        waits = {a for a, _, insns in functions if any(m == "wfi" for _, m, _ in insns)}
+        for (a, h, body), loop in matched.items():
+            if not any(n.kind == "wait" for n in loop.notes):
+                continue
+            blocks = blocks_by_fn[a]
+            inside = [(pc, m, o) for pc, m, o in insns_of[a]
+                      if any(blocks[b].start <= pc < blocks[b].end for b in body)]
+            written = {writes(m, o) for _, m, o in inside}
+            moving = {pc for pc, m, o in inside
+                      if LOAD.match(m) and (x := BASED.search(o)) and x.group(2) in written}
+            if comes_round(blocks, h, body, waiting_blocks(blocks, insns_of[a], ram, waits, moving)):
+                check.problems.append(f"{graph[a].name} has a loop at {h:#x}, {loop}, which says it waits, "
+                                      "and a way round it does not")
 
         rows = walk_rows(args.design)
         walks = {n.name for n in src.notes if n.kind == "walk"}

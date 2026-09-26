@@ -189,7 +189,7 @@ struct irq *line_binding(uint32_t line)
     return line_irq[line] != 0 ? p2v(line_irq[line]) : NULL;
 }
 
-void sched_forget(struct obj_header *o)
+bool sched_forget(struct obj_header *o, bool preempt)
 {
     switch (o->type) {
     case CAP_NOTIFICATION: {
@@ -197,6 +197,7 @@ void sched_forget(struct obj_header *o)
         /*
          * The notification is gone, so the wait cannot be answered.
          * The thread learns that the way every other call learns it.
+         * Its progress is the queue: a stop leaves the rest waiting on a notification still whole.
          */
         while (ntfn->waiters != 0) {
             LOOP_PAID(sched_forget, waiter, "a thread that waited, by a call of its own");
@@ -205,6 +206,9 @@ void sched_forget(struct obj_header *o)
             t->frame.regs[REG_A0] = KERR_INVALID_CAP;
             t->frame.regs[REG_A1] = 0;
             sched_ready(t);
+            if (ntfn->waiters != 0 && cap_stop_here(preempt)) {
+                return false;
+            }
         }
         break;
     }
@@ -235,6 +239,7 @@ void sched_forget(struct obj_header *o)
     default:
         break;
     }
+    return true;
 }
 
 static void switch_to(struct thread *next)
