@@ -69,13 +69,14 @@ static uint64_t systimer_read(void)
     return ((uint64_t)REG(SYSTIMER_UNIT0_HI) << 32) | REG(SYSTIMER_UNIT0_LO);
 }
 
-/*
- * The next tick is a period from now rather than from the last tick,
- * so a long system call costs the slice after it one tick, not a burst of them.
- */
-void timer_ack(void)
+/* The compare value last programmed. */
+static uint64_t next_tick;
+
+uint32_t timer_ack(void)
 {
-    mtimecmp_write(mtime_read() + tick_cycles);
+    uint32_t passed = timer_next(&next_tick, mtime_read(), tick_cycles);
+    mtimecmp_write(next_tick);
+    return passed;
 }
 
 /* The rate is measured over one tick, so it is as exact as the loop below. */
@@ -96,6 +97,7 @@ void timer_init(void)
     }
     tick_cycles = (uint32_t)(mtime_read() - mtime_start);
 
-    timer_ack();
+    next_tick = mtime_read() + tick_cycles;
+    mtimecmp_write(next_tick);
     csr_set(mie, MIE_MTIE);
 }

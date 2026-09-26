@@ -103,7 +103,8 @@ What rvuos is not:
   and hands it to the ready thread that has waited longest.
 - **Timers as signals.**
   A timer line is an interrupt line the tick raises once a delay has passed.
-  Sleeping is arming a timer line and waiting.
+  Sleeping is arming a timer line and waiting;
+  a period counts from the last deadline, so a periodic task does not drift.
 - **A clock as a capability.**
   A process given the `Clock` reads the machine's counter with loads through a read-only region;
   one given neither a clock nor a timer line has no clock to read.
@@ -647,10 +648,26 @@ A wait with a timeout is the same two calls with one more bit:
 give the device one bit on the notification and the timer line another,
 and look at which bits came back.
 
-A timer line fires once, so a periodic task arms it again each time it wakes,
-and drifts by what each wake costs, unless it holds the clock below
-and arms each delay as its next deadline less the time now;
-`DESIGN.md`, open decision 16.
+A timer line fires once, so a periodic task arms it again each time it wakes.
+With `IRQ_SET_PERIOD` in `a3` the delay is a period counted from the line's last deadline,
+or from its bind, not from the call, so the task keeps its period whatever each wake costs:
+the line fires at the first tick after the call
+that lies a whole number of periods from that deadline.
+The call returns in `a1` how many such ticks had already passed,
+the periods a task that woke late has skipped;
+it can do their work at once, count them as overruns, or ignore them.
+Setting it again before the line fired leaves the deadline where it was.
+The period is rounded up to whole ticks and may not be zero.
+Ticks keep pace with the clock's counter, so periods do too.
+
+```c
+uint32_t skipped;
+for (;;) {
+    rv_timer_period(TIMER, BIT_TIMER, 5000, &skipped);   /* every 5 ms */
+    rv_wait(NTFN, &bits);
+    /* one period's work, or skipped + 1 of them */
+}
+```
 
 **The clock.**
 `BOOT_CAP_CLOCK` names the machine's counter, 64 bits counting up from boot.
@@ -1035,6 +1052,11 @@ On a timer line, `a2` = the delay in microseconds, and the line fires
 at the first tick that surely lies past it, section 5.8;
 elsewhere `a2` is unused.
 A delay longer than 32 bits of microseconds, about 71 minutes, is several calls.
+On a timer line, `a3` = 0 or `IRQ_SET_PERIOD`, and unused elsewhere.
+With `IRQ_SET_PERIOD`, `a2` is a period counted from the line's last deadline, section 5.8,
+and the call returns `a1` = the periods skipped.
+`KERR_INVALID_ARG` for any other bit of `a3`, or a period of zero.
+With `a1` = 0, `a2` and `a3` are ignored.
 
 ### 6.12 Operations on `Clock`
 
@@ -1163,6 +1185,7 @@ There is no libc; `user/rvuos.h` provides the system call wrappers:
 | `rv_signal(cap, bits)` | `OP_NOTIFY_SIGNAL` |
 | `rv_wait(cap, &bits)` | `OP_NOTIFY_WAIT` |
 | `rv_timer_set(cap, bits, us)` | `OP_IRQ_SET` on a timer line, with the delay |
+| `rv_timer_period(cap, bits, us, &skipped)` | `OP_IRQ_SET` on a timer line, with `IRQ_SET_PERIOD` |
 | `rv_irq_set(cap, bits)` | `OP_IRQ_SET` |
 | `rv_putc(cap, c)`, `rv_puts(cap, s)` | `OP_DEBUG_PUTC` |
 | `rv_halt(cap, code)` | `OP_DEBUG_HALT` |
@@ -1329,7 +1352,7 @@ and `tests/mutants/` holds one planted bug per invariant.
 | object alignment | 8 bytes | `OBJ_ALIGN` |
 | notification bits | 32 | the word size |
 | timer lines | 16, on the whole machine | `TIMER_LINES` |
-| timer delay per call | 2^32 - 1 µs | `OP_IRQ_SET` |
+| timer delay or period per call | 2^32 - 1 µs | `OP_IRQ_SET` |
 | tick | 1 ms (`TIMER_HZ` 1000) | `kernel/timer.h` |
 | interrupt lines | 96 on QEMU, 77 on the ESP32-C6, line 0 the log's | `IRQ_LINES` |
 | smallest region | 8 bytes, or the PMP grain if coarser | `region_min_size` in `kernel/pmp.h` |

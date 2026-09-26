@@ -44,13 +44,14 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
     if (cause & MCAUSE_INTERRUPT) {
         /* mepc points at the interrupted instruction, which resumes as it was. */
         switch (cause & ~MCAUSE_INTERRUPT) {
-        case IRQ_M_TIMER:
-            timer_ack();
+        case IRQ_M_TIMER: {
+            uint32_t ticks = timer_ack();
             /* Under tracing time moves only by record; see DESIGN.md, "Verification". */
             if (!debug_trace) {
-                sched_tick();
+                sched_tick(ticks);
             }
             return &current->frame;
+        }
         case IRQ_EXT_CAUSE:
             /*
              * Delivered under tracing as well: a line left claimed would storm
@@ -94,7 +95,7 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
  * and the kernel runs with MIE clear, so the interrupt is polled rather than taken.
  * A core may also treat wfi as a no-op, which the loop tolerates.
  */
-unsigned intr_wait(void)
+bool intr_wait(uint32_t *ticks)
 {
     const uint32_t mip_ext = 1u << IRQ_EXT_CAUSE;
     uint32_t ip;
@@ -102,15 +103,8 @@ unsigned intr_wait(void)
         LOOP_WAIT("an interrupt to be pending");
         __asm__ volatile("wfi");
     }
-    unsigned pending = 0;
-    if (ip & MIP_MTIP) {
-        timer_ack();
-        pending |= INTR_TICK;
-    }
-    if (ip & mip_ext) {
-        pending |= INTR_DEVICE;
-    }
-    return pending;
+    *ticks = (ip & MIP_MTIP) ? timer_ack() : 0;
+    return (ip & mip_ext) != 0;
 }
 
 bool intr_pending(void)

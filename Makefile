@@ -56,7 +56,8 @@ USER_COMMON := $(BUILD)/user/start.o
 # QEMU's clock counts instructions, not the host's time,
 # so a run takes the same path however loaded the host is;
 # `make mutants` runs many at once and requires the same result from each.
-QEMUFLAGS := -M virt -cpu rv32 -m 8M -nographic -icount shift=0
+# sleep=off keeps it so while the guest waits in wfi, which would otherwise pass in host time.
+QEMUFLAGS := -M virt -cpu rv32 -m 8M -nographic -icount shift=0,sleep=off
 
 # What `make run` and `make test` boot.
 ifeq ($(BOARD),qemu)

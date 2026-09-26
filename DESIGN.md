@@ -219,9 +219,10 @@ Userspace sees it only through the timer lines,
 whose deadlines are counted in ticks; see "Time".
 Where the registers live and how fast they count is the board's business,
 so `timer.c` is per board, as `irq.c` is.
-On every tick the kernel sets `mtimecmp` a period ahead of `mtime`,
-not ahead of the previous compare value,
-so a long system call costs one late tick and not a burst of them.
+On every tick the kernel moves `mtimecmp` on by whole periods to the first that lies ahead of `mtime`
+and counts each period as a tick,
+so the tick count keeps pace with the counter however late the interrupt is taken,
+and a long system call costs one late tick and not a burst of them.
 QEMU `virt` counts at 10 MHz in a SiFive CLINT.
 The ESP32-C6 has a CLINT of Espressif's,
 whose counter and interrupt stay off until a control word starts them,
@@ -770,8 +771,34 @@ An upper bound is not promised because the kernel could not keep one:
 the woken thread is ready, not running, and waits its turn in the round.
 A timer line that fires disarms its `Irq`, as a device's line does,
 and setting an armed one moves its deadline rather than adding a second.
-A periodic task arms the line again each time it wakes;
-what that costs it in drift is open decision 16.
+
+**A period counts from the deadline.**
+A periodic task arms the line again each time it wakes,
+and a delay counted from the wake would put every wake's lateness into the period.
+`OP_IRQ_SET` with `IRQ_SET_PERIOD` counts from the line's last deadline instead,
+or from its bind if it never fired:
+the line fires at the first tick after the call
+that lies a whole number of periods from that deadline,
+and the call returns how many such ticks had already passed.
+The cases a task needs follow from that one rule.
+Set on each wake, the line keeps its period without drift.
+A task that woke late skips the periods it missed and learns how many,
+so it can do their work at once, note the overrun, or ignore it.
+Set again before it fired, the line keeps its deadline.
+The deadline is never more than a period away, however stale the last one.
+The period is rounded up to whole ticks, as a delay is.
+
+**Why not a periodic line.**
+A line the kernel arms again on its own would save a task one call per period,
+but periods fired before the thread wakes would merge into one bit,
+and a task that wanted one wake would race the next to disarm the line.
+It would also be the one line that does not mask itself as it signals.
+
+**Why not an absolute deadline.**
+A deadline in the clock's counts would be the simplest rule to state,
+but every task that sleeps would need the clock as well as the line,
+and under tracing, where time moves only by record,
+the host's tick count would have to start where QEMU's does.
 
 **Why a fixed number of lines.**
 The tick has to find the due timers without looking at the others.
@@ -1508,7 +1535,8 @@ A tick pending in a revoke stops it on QEMU as anywhere,
 but a stopped call is not traced, only the attempt that finishes,
 so where the tick lands leaves the transcript alone,
 and the host may stop every such call without a line of its own.
-The stall in `wfi` for an armed timer line is checked by the demo in `user/init.c`.
+The stall in `wfi` for an armed timer line is checked by the demo in `user/init.c`,
+and so are periods that keep pace with the clock.
 A device interrupt is delivered under tracing as it is otherwise,
 because a line left claimed would storm
 and one masked without its `Irq` disarmed would break an invariant;
@@ -1744,15 +1772,10 @@ until the maintainer decides otherwise.
     Decide with the first program whose creator cannot size its table in advance.
 
 16. **Drift of a periodic timer.**
-    Working default: a timer line fires once, and a periodic task arms it again when it wakes,
-    so each period counts from the set and the task drifts by the wait for the processor.
-    A task that holds the clock can take the drift off itself,
-    arming each delay as its next deadline less the counter's reading, rounded to the tick.
-    `OP_IRQ_SET` could take a flag that counts the delay from the last deadline instead,
-    which keeps the line one-shot.
-    A periodic mode is affordable too, since the tick fires at most `TIMER_LINES` lines,
-    but periods fired before the thread wakes merge into one signal unseen.
-    Decide with the first task that needs a steady period.
+    Decided: `IRQ_SET_PERIOD` counts a timer line's next deadline from its last one,
+    and the tick keeps pace with the counter; see "Time".
+    Before, a periodic task drifted by each wake's lateness,
+    and each tick was set a period after its handling, a few percent slow under QEMU.
 
 17. **CPU time per thread.**
     Working default: none; the clock gives the machine's time, which includes other threads' slices.

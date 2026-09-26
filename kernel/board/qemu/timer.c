@@ -39,13 +39,14 @@ static void mtimecmp_write(uint64_t v)
     REG(CLINT_MTIMECMP) = (uint32_t)v;
 }
 
-/*
- * The next tick is a period from now rather than from the last tick,
- * so a long system call costs the slice after it one tick, not a burst of them.
- */
-void timer_ack(void)
+/* The compare value last programmed. */
+static uint64_t next_tick;
+
+uint32_t timer_ack(void)
 {
-    mtimecmp_write(mtime_read() + TICK_CYCLES);
+    uint32_t passed = timer_next(&next_tick, mtime_read(), TICK_CYCLES);
+    mtimecmp_write(next_tick);
+    return passed;
 }
 
 uint32_t timer_counter_hz(void)
@@ -55,6 +56,7 @@ uint32_t timer_counter_hz(void)
 
 void timer_init(void)
 {
-    timer_ack();
+    next_tick = mtime_read() + TICK_CYCLES;
+    mtimecmp_write(next_tick);
     csr_set(mie, MIE_MTIE);
 }

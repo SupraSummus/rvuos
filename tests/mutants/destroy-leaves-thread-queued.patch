@@ -9,7 +9,7 @@ Report: queue is not linked back
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -213,9 +213,7 @@ void sched_forget(struct obj_header *o)
+@@ -214,9 +214,7 @@ void sched_forget(struct obj_header *o)
           * A ready one is not running, since the caller does not live here, so it is queued.
           */
          struct thread *t = (struct thread *)o;

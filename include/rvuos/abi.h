@@ -301,7 +301,8 @@
 #define OP_IRQ_BIND 20
 /*
  * Irq (RIGHT_W): unmask the line and name the bits the next interrupt signals.
- * a1 = the bits; a2 = on a timer line, the delay in microseconds, and unused elsewhere.
+ * a1 = the bits; a2 = on a timer line, the delay in microseconds, and unused elsewhere;
+ * a3 = on a timer line, 0 or IRQ_SET_PERIOD, and unused elsewhere.
  * The interrupt masks the line again as it signals,
  * so a driver hears about a line once until it says otherwise;
  * this call is how it says so, after it has serviced the device.
@@ -313,8 +314,15 @@
  * at the kernel's first tick after it, whatever the tick's period is;
  * a delay of zero fires at the next tick.
  * A longer delay than 32 bits of microseconds is several calls.
+ * With IRQ_SET_PERIOD the delay is a period, rounded up to whole ticks and not zero,
+ * counted from the line's last deadline, or its bind, rather than from the call:
+ * the line fires at the first tick after the call
+ * that lies a whole number of periods from that deadline.
+ * Returns a1 = the periods skipped, those that had passed by the call.
+ * Any other a3, or a zero period, fails with KERR_INVALID_ARG; a1 = 0 ignores a2 and a3.
  */
 #define OP_IRQ_SET 21
+#define IRQ_SET_PERIOD 0x1
 
 /*
  * Clock: describe the machine's counter, 64 bits counting up from boot at a fixed rate.
