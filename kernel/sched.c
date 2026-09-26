@@ -246,6 +246,24 @@ static void tick_advance(uint32_t ticks)
     }
 }
 
+/*
+ * The ticks from the count to the nearest deadline of an armed timer line, UINT32_MAX with none armed.
+ * After the tick no armed line is due, so it is at least one.
+ * Only the stall asks, and it looks at the TIMER_LINES lines as the tick does.
+ */
+static uint32_t ticks_to_deadline(void)
+{
+    uint32_t nearest = UINT32_MAX;
+    for (uint32_t i = 0; i < TIMER_LINES; i++) {
+        LOOP_BOUND(TIMER_LINES);
+        struct irq *irq = line_binding(IRQ_LINES + i);
+        if (irq != NULL && irq_armed(irq) && irq->deadline - sched_ticks < nearest) {
+            nearest = irq->deadline - sched_ticks;
+        }
+    }
+    return nearest;
+}
+
 bool sched_interrupt(uint32_t line)
 {
     struct irq *irq = line_binding(line);
@@ -376,8 +394,9 @@ static void run_turn(void)
             kputs("no runnable thread\n");
             khalt(5);
         }
+        /* No thread runs, so no turn needs ending: the stall takes no tick before the nearest deadline. */
         uint32_t ticks;
-        bool device = intr_wait(&ticks);
+        bool device = intr_wait(ticks_to_deadline(), &ticks);
         if (ticks != 0) {
             tick_advance(ticks);
         }

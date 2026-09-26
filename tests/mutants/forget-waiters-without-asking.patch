@@ -9,7 +9,7 @@ Report: the paid loop at kernel/sched.c took a second step without asking intr_p
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -302,7 +302,7 @@ bool sched_forget(struct obj_header *o, bool preempt)
+@@ -320,7 +320,7 @@ bool sched_forget(struct obj_header *o, bool preempt)
              t->frame.regs[REG_A0] = KERR_INVALID_CAP;
              t->frame.regs[REG_A1] = 0;
              sched_ready(t);

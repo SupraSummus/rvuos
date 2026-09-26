@@ -84,8 +84,9 @@ void selfcheck_fail(void)
     host_violated();
 }
 
-bool intr_wait(uint32_t *ticks)
+bool intr_wait(uint32_t wake, uint32_t *ticks)
 {
+    (void)wake;
     (void)ticks;
     /* Reached only untraced with an Irq armed, which the harness never sets up. */
     kpanic("the host build has no clock and no devices to wait for");

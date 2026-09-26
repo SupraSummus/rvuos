@@ -94,16 +94,19 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
  * whether or not machine mode would take it,
  * and the kernel runs with MIE clear, so the interrupt is polled rather than taken.
  * A core may also treat wfi as a no-op, which the loop tolerates.
+ * The timer is deferred to the tick asked for and put back on the next one however the stall ends,
+ * so a thread never runs with it deferred.
  */
-bool intr_wait(uint32_t *ticks)
+bool intr_wait(uint32_t wake, uint32_t *ticks)
 {
     const uint32_t mip_ext = 1u << IRQ_EXT_CAUSE;
+    timer_defer(wake);
     uint32_t ip;
     while (((ip = csr_read(mip)) & (MIP_MTIP | mip_ext)) == 0) {
         LOOP_WAIT("an interrupt to be pending");
         __asm__ volatile("wfi");
     }
-    *ticks = (ip & MIP_MTIP) ? timer_ack() : 0;
+    *ticks = timer_ack();
     return (ip & mip_ext) != 0;
 }
 

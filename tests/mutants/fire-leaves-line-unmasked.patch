@@ -9,7 +9,7 @@ Report: controller forwards a line nothing is armed on
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -256,7 +256,6 @@ bool sched_interrupt(uint32_t line)
+@@ -274,7 +274,6 @@ bool sched_interrupt(uint32_t line)
       * Masked before it signals and disarmed as it does,
       * so the driver hears once and the level may stay high until it has looked.
       */

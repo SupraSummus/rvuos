@@ -208,10 +208,10 @@ Design decisions behind these items live in `DESIGN.md`.
   Measure that latency on the first board; it belongs to open decision 9.
 - A turn lasts to the next tick, so one that begins mid-tick gets only the rest of it.
   A turn counted from the switch would set `mtimecmp` to the end of the turn or the nearest timer deadline,
-  which also makes the kernel tickless while one thread runs or none does.
+  which also makes the kernel tickless while one thread runs, as the stall already is while none does.
   It touches the timer lines' contract, the host's clock and `OP_DEBUG_TICK`; decide it on its own.
-- Both boards' `timer.c` read `mtime` and write `mtimecmp` the same way at different addresses;
-  a CLINT header taking the base would hold that once, beside `timer_next`.
+- Both boards' `timer.c` read `mtime`, write `mtimecmp`, ack and defer the same way at different addresses;
+  a CLINT file taking the base and the period would hold that once, beside `timer_next`.
 - `pmp_init` stops counting at the first hardwired entry.
   A core with writable entries above a hardwired one loses them;
   have the image skip such entries if one turns up.
@@ -249,6 +249,9 @@ Design decisions behind these items live in `DESIGN.md`.
   Give a thread's creator somewhere to hear about it:
   a notification the kernel signals is the cheapest candidate,
   since it needs no new object.
+- The stall's deferred tick is untried on the ESP32-C6:
+  `make BOARD=esp32c6 test` has to print "root: timer ok" and "root: period ok" as it did,
+  which needs its CLINT to drop the timer's level when `mtimecmp` moves past `mtime`.
 - Shares are untried on the ESP32-C6:
   `make BOARD=esp32c6 test` has to print "root: shares ok", "root: unbind ok" and "root: rebind ok";
   the first compares spin counts within a factor of two, which QEMU's instruction count makes deterministic.

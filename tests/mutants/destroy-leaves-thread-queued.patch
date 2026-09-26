@@ -9,7 +9,7 @@ Report: queue is not linked back
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -314,9 +314,7 @@ bool sched_forget(struct obj_header *o, bool preempt)
+@@ -332,9 +332,7 @@ bool sched_forget(struct obj_header *o, bool preempt)
           * Its share went as a node it holds, and with it its place on the share's ring.
           */
          struct thread *t = (struct thread *)o;

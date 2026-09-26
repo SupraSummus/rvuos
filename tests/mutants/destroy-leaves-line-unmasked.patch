@@ -8,7 +8,7 @@ Report: controller forwards a line nothing is armed on
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -324,9 +324,6 @@ bool sched_forget(struct obj_header *o, bool preempt)
+@@ -342,9 +342,6 @@ bool sched_forget(struct obj_header *o, bool preempt)
          irq_set_bits((struct irq *)o, 0);
          /* The object that would receive the interrupt is gone; only the controller's lines have a mask. */
          uint32_t line = ((struct irq *)o)->line;

@@ -39,7 +39,7 @@ static void mtimecmp_write(uint64_t v)
     REG(CLINT_MTIMECMP) = (uint32_t)v;
 }
 
-/* The compare value last programmed. */
+/* The next tick's compare value, which mtimecmp holds unless the stall deferred it. */
 static uint64_t next_tick;
 
 uint32_t timer_ack(void)
@@ -47,6 +47,11 @@ uint32_t timer_ack(void)
     uint32_t passed = timer_next(&next_tick, mtime_read(), TICK_CYCLES);
     mtimecmp_write(next_tick);
     return passed;
+}
+
+void timer_defer(uint32_t ticks)
+{
+    mtimecmp_write(timer_deferred(next_tick, ticks, TICK_CYCLES));
 }
 
 uint32_t timer_counter_hz(void)
