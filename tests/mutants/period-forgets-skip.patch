@@ -1,0 +1,21 @@
+OP_IRQ_SET with IRQ_SET_PERIOD on a line that fired more than a period ago
+counts one period from its deadline and no further,
+so a thread that woke late arms a deadline the tick has already passed.
+The tick fires every due timer line,
+so an Irq armed on one has its deadline ahead of the count.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: armed timer line is due
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -547,7 +547,7 @@ static uint32_t timer_period(struct irq *irq, uint32_t period)
+     uint32_t now = sched_ticks;
+     if (irq_due(irq, now)) {
+         uint32_t behind = now - irq->deadline;
+-        irq->deadline = now + period - behind % period;
++        irq->deadline += period;
+         return behind / period;
+     }
+     irq->deadline = now + (irq->deadline - now - 1) % period + 1;

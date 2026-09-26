@@ -121,6 +121,27 @@ static inline uint32_t rv_timer_set(uint32_t timer_irq_cap, uint32_t bits, uint3
 }
 
 /*
+ * OP_IRQ_SET on a timer line with IRQ_SET_PERIOD: signal bits a whole number of periods
+ * after the line's last deadline, at the first such tick still ahead.
+ * *skipped receives the periods that had passed by the call.
+ */
+static inline uint32_t rv_timer_period(uint32_t timer_irq_cap, uint32_t bits, uint32_t us,
+                                       uint32_t *skipped)
+{
+    register uint32_t r_a0 __asm__("a0") = timer_irq_cap;
+    register uint32_t r_a1 __asm__("a1") = bits;
+    register uint32_t r_a2 __asm__("a2") = us;
+    register uint32_t r_a3 __asm__("a3") = IRQ_SET_PERIOD;
+    register uint32_t r_a7 __asm__("a7") = OP_IRQ_SET;
+    __asm__ volatile("ecall"
+                     : "+r"(r_a0), "+r"(r_a1)
+                     : "r"(r_a2), "r"(r_a3), "r"(r_a7)
+                     : "memory", "a4", "a5", "a6");
+    *skipped = r_a1;
+    return r_a0;
+}
+
+/*
  * OP_IRQ_SET: unmask the Irq's line and have the next interrupt signal bits.
  * The interrupt masks the line again, so this is also the acknowledgement. bits = 0 masks.
  */

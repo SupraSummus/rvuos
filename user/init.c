@@ -12,6 +12,7 @@
  * lend the child untyped memory it turns into a pool of its own
  * and take it back by revoking, which destroys that pool,
  * sleep on a timer while nothing else can run, and time it on the clock,
+ * keep a period on the timer without drifting,
  * bind and revoke an Irq on a line nothing drives,
  * then unmap a region and fault on it.
  * Negative paths are covered by the fuzz corpus and tests/differential.py.
@@ -120,6 +121,10 @@ enum {
 /* Ticks are a millisecond on every board so far; long enough to need a few of them. */
 #define SLEEP_US 10000u
 
+/* A period, kept long enough that arming each from the wake would fall a period behind. */
+#define PERIOD_US 5000u
+#define PERIODS 20u
+
 /* Whose turn it is in the handshake that uses no notification. */
 #define TURN_CHILD 0x1u
 #define TURN_ROOT  0x2u
@@ -146,6 +151,17 @@ static void expect(const char *what, uint32_t status)
     }
 }
 
+/* The timer's bit, and it alone, on its notification. */
+static uint32_t timer_wait(void)
+{
+    uint32_t bits;
+    uint32_t status = rv_wait(SLOT_TIMER_NTFN, &bits);
+    if (status != KERR_OK) {
+        return status;
+    }
+    return bits == BIT_TIMER ? KERR_OK : KERR_INVALID_ARG;
+}
+
 /*
  * What sleeping is on rvuos: arm a timer line and wait on the notification it signals.
  * The same notification can carry a device's bit next to the timer's,
@@ -153,16 +169,15 @@ static void expect(const char *what, uint32_t status)
  */
 static uint32_t sleep_us(uint32_t us)
 {
-    uint32_t bits;
     uint32_t status = rv_timer_set(SLOT_TIMER, BIT_TIMER, us);
-    if (status != KERR_OK) {
-        return status;
-    }
-    status = rv_wait(SLOT_TIMER_NTFN, &bits);
-    if (status != KERR_OK) {
-        return status;
-    }
-    return bits == BIT_TIMER ? KERR_OK : KERR_INVALID_ARG;
+    return status == KERR_OK ? timer_wait() : status;
+}
+
+static uint32_t period_wait(uint32_t us)
+{
+    uint32_t skipped;
+    uint32_t status = rv_timer_period(SLOT_TIMER, BIT_TIMER, us, &skipped);
+    return status == KERR_OK ? timer_wait() : status;
 }
 
 /*
@@ -636,6 +651,27 @@ int main(void)
     expect("the clock saw both sleeps",
            elapsed * 1000000u >= (uint64_t)hz * (2 * SLEEP_US) ? KERR_OK : KERR_INVALID_ARG);
     puts("root: clock ok\n");
+
+    /*
+     * A period counts from the deadline before, not from the wake,
+     * and the tick keeps pace with the counter,
+     * so after the first wake sets the phase, PERIODS more take PERIODS periods on the clock,
+     * give or take a wake's lateness.
+     * A loop of sleeps would take a tick more per period.
+     */
+    expect("set the phase", period_wait(PERIOD_US));
+    start = rv_counter_read(counter);
+    uint32_t status = KERR_OK;
+    for (uint32_t i = 0; i < PERIODS && status == KERR_OK; i++) {
+        status = period_wait(PERIOD_US);
+    }
+    expect("wait the periods", status);
+    elapsed = (rv_counter_read(counter) - start) * 1000000u;
+    expect("the periods kept their pace",
+           elapsed >= (uint64_t)hz * ((PERIODS - 1) * PERIOD_US)
+                   && elapsed < (uint64_t)hz * ((PERIODS + 1) * PERIOD_US)
+               ? KERR_OK : KERR_INVALID_ARG);
+    puts("root: period ok\n");
 
     /*
      * Interrupts, beyond the two lines the logger lives on.

@@ -8,7 +8,7 @@ Report: the count of armed sources is wrong
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -221,8 +221,6 @@ void sched_forget(struct obj_header *o)
+@@ -222,8 +222,6 @@ void sched_forget(struct obj_header *o)
          break;
      }
      case CAP_IRQ: {

@@ -493,12 +493,12 @@ extern uint32_t trace_wake_bits;
 void sched_run_next(void);
 
 /*
- * The timer tick: count it, fire every timer line that is due,
+ * The timer tick: count the ticks that passed, fire every timer line that is due,
  * and hand the processor to the thread that has waited longest for it,
  * if there is one; the running thread goes to the back of the round.
  * The interrupt calls it, and OP_DEBUG_TICK does on request.
  */
-void sched_tick(void);
+void sched_tick(uint32_t ticks);
 
 /*
  * A device interrupt on a line: the Irq armed on it masks the line,

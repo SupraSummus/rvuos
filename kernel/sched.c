@@ -132,14 +132,15 @@ void irq_signal(struct irq *irq)
 }
 
 /*
- * One tick of time: count it and fire every timer line that is due.
+ * Ticks of time, one or the few a late interrupt covers:
+ * count them and fire every timer line that is due.
  * The timer lines are a fixed few, so the tick looks at each of them
  * and at nothing else; see DESIGN.md, "Time".
  * A line that fires disarms its Irq, so that after the tick no armed one is due.
  */
-static void tick_advance(void)
+static void tick_advance(uint32_t ticks)
 {
-    sched_ticks++;
+    sched_ticks += ticks;
     for (uint32_t i = 0; i < TIMER_LINES; i++) {
         LOOP_BOUND(TIMER_LINES);
         struct irq *irq = line_binding(IRQ_LINES + i);
@@ -273,11 +274,12 @@ void sched_run_next(void)
             kputs("no runnable thread\n");
             khalt(5);
         }
-        unsigned pending = intr_wait();
-        if (pending & INTR_TICK) {
-            tick_advance();
+        uint32_t ticks;
+        bool device = intr_wait(&ticks);
+        if (ticks != 0) {
+            tick_advance(ticks);
         }
-        if (pending & INTR_DEVICE) {
+        if (device) {
             sched_claim_interrupts();
         }
         next = run_queue_take();
@@ -285,9 +287,9 @@ void sched_run_next(void)
     switch_to(next);
 }
 
-void sched_tick(void)
+void sched_tick(uint32_t ticks)
 {
-    tick_advance();
+    tick_advance(ticks);
     /* The running thread is ready, and goes to the back of the round behind any other that is. */
     if (run_queue != 0) {
         ring_push(&run_queue, current);

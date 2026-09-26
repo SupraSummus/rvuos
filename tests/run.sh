@@ -61,6 +61,8 @@ grep -q 'root: timer ok' "$log" \
     || fail "the timer did not wake the only thread from its sleep"
 grep -q 'root: clock ok' "$log" \
     || fail "the clock's counter, read through its region, did not show the sleeps' length"
+grep -q 'root: period ok' "$log" \
+    || fail "a periodic timer line drifted from its period"
 grep -q 'the idle line stays quiet: ok' "$log" \
     || fail "an armed line nothing raises signalled"
 grep -q 'root: irq ok' "$log" \

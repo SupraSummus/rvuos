@@ -193,6 +193,8 @@ Design decisions behind these items live in `DESIGN.md`.
 - A device interrupt wakes its driver but does not run it;
   the driver waits its turn in the round like a thread a timer line woke.
   Measure that latency on the first board; it belongs to open decision 9.
+- Both boards' `timer.c` read `mtime` and write `mtimecmp` the same way at different addresses;
+  a CLINT header taking the base would hold that once, beside `timer_next`.
 - `pmp_init` stops counting at the first hardwired entry.
   A core with writable entries above a hardwired one loses them;
   have the image skip such entries if one turns up.
@@ -231,7 +233,8 @@ Design decisions behind these items live in `DESIGN.md`.
   a notification the kernel signals is the cheapest candidate,
   since it needs no new object.
 - The clock is untried on the ESP32-C6:
-  `make BOARD=esp32c6 test` has to print "root: clock ok", which needs user mode to read `UTIME`.
+  `make BOARD=esp32c6 test` has to print "root: clock ok", which needs user mode to read `UTIME`,
+  and "root: period ok", which needs the tick to keep pace with the counter there too.
 - The ESP32-C6's counter rate is measured over one tick at boot,
   so it is only as exact as the polling loop in `timer_init`; a longer measurement would do better.
 - The ESP32-C6 resets with `mideleg` at `0x111`, delegating interrupts 0, 4 and 8 to user mode.

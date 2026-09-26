@@ -42,7 +42,7 @@ static int op_debug(uint32_t op, const uint32_t *arg)
         return KERR_OK;
     case OP_DEBUG_TICK:
         /* The caller's status is written to its own frame, whoever runs next. */
-        sched_tick();
+        sched_tick(1);
         return KERR_OK;
     case OP_DEBUG_IRQ:
         /* The log's line is not a device's: its level is the log's, and no record fires it. */
@@ -522,6 +522,8 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
         struct irq *irq = pool_alloc(pool, CAP_IRQ, sizeof(*irq));
         irq->ntfn = v2p(ntfn);
         irq->line = first;
+        /* A period counts from the last deadline, and a line that never fired from its bind. */
+        irq->deadline = sched_ticks;
         line_irq[first] = v2p(irq);
         /* The line goes, a leaf now, and the Irq hangs below the pool capability as any object does. */
         cap_delete(slot_node(t, slot), false);
@@ -534,26 +536,55 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
     }
 }
 
-static int op_irq(const struct cap *cap, uint32_t op, const uint32_t *arg)
+/*
+ * A period on a timer line: the deadline moves to the first tick after the count
+ * a whole number of periods from the deadline before; returns the periods skipped.
+ * A deadline more than half the count's range old passes for one ahead,
+ * and the new one is within a period all the same. See DESIGN.md, "Time".
+ */
+static uint32_t timer_period(struct irq *irq, uint32_t period)
+{
+    uint32_t now = sched_ticks;
+    if (irq_due(irq, now)) {
+        uint32_t behind = now - irq->deadline;
+        irq->deadline = now + period - behind % period;
+        return behind / period;
+    }
+    irq->deadline = now + (irq->deadline - now - 1) % period + 1;
+    return 0;
+}
+
+/* arg[1..] carry the arguments in and the results out. */
+static int op_irq(const struct cap *cap, uint32_t op, uint32_t *arg)
 {
     struct irq *irq = (struct irq *)cap_object(cap);
+    uint32_t bits = arg[1];
 
     if (op != OP_IRQ_SET) {
         return KERR_WRONG_TYPE;
     }
-    if (line_is_timer(irq->line) && arg[1] != 0) {
-        /*
-         * The call lands anywhere within the current tick,
-         * so the delay rounded up to whole ticks plus one
-         * is the first tick that surely lies past it.
-         * The count wraps and irq_due compares with a signed difference,
-         * which is exact while a delay stays far below half the count's range.
-         */
+    if (line_is_timer(irq->line) && bits != 0) {
         uint32_t us = arg[2];
-        irq->deadline = sched_ticks + us / TIMER_US_PER_TICK + (us % TIMER_US_PER_TICK != 0) + 1;
+        uint32_t ticks = us / TIMER_US_PER_TICK + (us % TIMER_US_PER_TICK != 0);
+        bool period = arg[3] == IRQ_SET_PERIOD;
+        if (arg[3] > IRQ_SET_PERIOD || (period && ticks == 0)) {
+            return KERR_INVALID_ARG;
+        }
+        if (period) {
+            arg[1] = timer_period(irq, ticks);
+        } else {
+            /*
+             * The call lands anywhere within the current tick,
+             * so the delay rounded up to whole ticks plus one
+             * is the first tick that surely lies past it.
+             * The count wraps and irq_due compares with a signed difference,
+             * which is exact while a delay stays far below half the count's range.
+             */
+            irq->deadline = sched_ticks + ticks + 1;
+        }
     }
     /* Armed and unmasked are one state, here and in sched_interrupt. */
-    irq_set_bits(irq, arg[1]);
+    irq_set_bits(irq, bits);
     if (irq->line == LOG_IRQ_LINE) {
         klog_set(irq);
     } else if (line_on_controller(irq->line)) {

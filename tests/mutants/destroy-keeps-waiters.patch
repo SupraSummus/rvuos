@@ -7,7 +7,7 @@ Report: thread waits on something that is not a notification
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -197,7 +197,7 @@ void sched_forget(struct obj_header *o)
+@@ -198,7 +198,7 @@ void sched_forget(struct obj_header *o)
           * The notification is gone, so the wait cannot be answered.
           * The thread learns that the way every other call learns it.
           */
