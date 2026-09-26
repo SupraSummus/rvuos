@@ -23,12 +23,25 @@
 #define HOST_BOOT_POOL_BASE (RAM_BASE + 0x1000u)
 #define HOST_BOOT_POOL_SIZE 0x1000u
 
-/* Set when khalt() is called; the harness longjmps here. */
+/* khalt() longjmps here, and so does host_violated() when isolated. */
 extern jmp_buf host_halt_jmp;
 extern int host_halt_code;
 
 /* Print kernel console output. */
 extern bool host_verbose;
+
+/*
+ * Replay each input as if it ran alone; see host/fuzz.c.
+ * After each the harness prints HOST_INPUT_END on a line of its own.
+ */
+extern bool host_isolated;
+#define HOST_INPUT_END "isolated: end of input"
+
+/*
+ * End the input after an invariant report:
+ * the run too, as libFuzzer needs to see a failure, unless isolated.
+ */
+__attribute__((noreturn)) void host_violated(void);
 
 /* Reset the machine and boot the root task as the replay driver sees it. */
 struct thread *host_boot(void);
@@ -72,6 +85,8 @@ void history_end(void);
 /* Around each call in the harness fuzz-work: count its loops, then check their claims. */
 void work_begin(void);
 void work_end(void);
+/* Forget the frames a halt or an isolated report left open; see host_boot. */
+void work_reset(void);
 #endif
 
 #endif

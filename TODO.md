@@ -175,6 +175,9 @@ Design decisions behind these items live in `DESIGN.md`.
   A call that stops without putting its thread back on the `ecall`
   the host takes as finished, and no host check sees it;
   `make qemu-replay` does, by the trace line the host then lacks.
+- `make qemu-replay` boots QEMU once per input, about 40 ms each,
+  which is now most of what a mutant costs `make mutants`.
+  A driver that replays several inputs per boot would need the kernel back to its boot state in between.
 - The seeds under `tests/seeds` are binary and were written by hand.
   Moving `BOOT_CAP_LOG` in, and `BOOT_CAP_TIMER_LINES` and `BOOT_CAP_CLOCK` after it,
   each took a one-off script that knew which argument of which operation is a slot,

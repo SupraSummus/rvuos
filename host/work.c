@@ -78,7 +78,7 @@ __attribute__((noreturn, format(printf, 1, 2))) static void violated(const char 
     vfprintf(stderr, fmt, ap);
     fprintf(stderr, "\n");
     va_end(ap);
-    abort();
+    host_violated();
 }
 
 static unsigned unit_of(const char *name)
@@ -126,6 +126,11 @@ void work_begin(void)
     depth = 0;
     memset(paid, 0, sizeof(paid));
     host_units(before);
+}
+
+void work_reset(void)
+{
+    depth = 0;
 }
 
 void work_end(void)

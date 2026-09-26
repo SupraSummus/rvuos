@@ -26,6 +26,7 @@ static struct thread *host_threads[REPLAY_THREADS + 1];
 jmp_buf host_halt_jmp;
 int host_halt_code;
 bool host_verbose;
+bool host_isolated;
 unsigned pmp_entry_count;
 uint32_t pmp_grain;
 
@@ -65,14 +66,22 @@ void kpanic(const char *msg)
     abort();
 }
 
+void host_violated(void)
+{
+    /* The report may have gone to stdout; make sure it is seen. */
+    fflush(stdout);
+    if (host_isolated) {
+        longjmp(host_halt_jmp, 1);
+    }
+    abort();
+}
+
 void selfcheck_fail(void)
 {
-    /* The report went to stdout when verbose; make sure it is seen. */
     if (!host_verbose) {
         fprintf(stderr, "invariant violated; rerun with --verbose for the report\n");
     }
-    fflush(stdout);
-    abort();
+    host_violated();
 }
 
 bool intr_wait(uint32_t *ticks)
@@ -170,21 +179,28 @@ void pmp_get(unsigned idx, uint32_t *addr, uint8_t *cfg)
 
 struct thread *host_boot(void)
 {
+#ifdef RVUOS_WORK
+    /* The boot runs kernel code before the first call's work_begin. */
+    work_reset();
+#endif
     /*
      * RAM holds anything at power-up; a pattern stands for it,
      * so an object the kernel hands out without zeroing shows.
      */
+    bool power_up = host_ram == NULL || host_isolated;
     if (host_ram == NULL) {
         host_ram = malloc(HOST_RAM_SIZE);
         if (host_ram == NULL) {
             abort();
         }
+    }
+    if (power_up) {
         memset(host_ram, HOST_RAM_PATTERN, HOST_RAM_SIZE);
     }
     /*
      * The kernel clears each object as it hands it out,
      * so RAM may keep the previous run's contents, the boot pool's too,
-     * exactly as on a warm reset.
+     * exactly as on a warm reset; an isolated input starts from power-up instead.
      */
     pool_list = NULL;
     memset(line_irq, 0, LINES * sizeof(line_irq[0]));
@@ -211,7 +227,7 @@ struct thread *host_boot(void)
         int err = (int)host_syscall(&replay_prologue[i]);
         if (err != KERR_OK) {
             fprintf(stderr, "invariant violated: a fresh kernel refused prologue record %u with %d\n", i, err);
-            abort();
+            host_violated();
         }
     }
     for (unsigned i = 0; i < REPLAY_AFTER_INPUT_COUNT; i++) {
@@ -219,7 +235,7 @@ struct thread *host_boot(void)
         if (err != KERR_OK) {
             fprintf(stderr, "invariant violated: a fresh kernel refused prologue record %u with %d\n",
                     (unsigned)(REPLAY_PROLOGUE_COUNT + i), err);
-            abort();
+            host_violated();
         }
     }
 
@@ -280,7 +296,7 @@ uint32_t host_syscall(const struct replay_record *c)
         if (f->mepc == mepc && after[UNIT_NODE] >= before[UNIT_NODE] &&
             after[UNIT_LINK] >= before[UNIT_LINK] && after[UNIT_OBJECT] >= before[UNIT_OBJECT]) {
             fprintf(stderr, "invariant violated: a call was preempted before it took anything away\n");
-            abort();
+            host_violated();
         }
     } while (f->mepc == mepc);
     return f->regs[REG_A0];

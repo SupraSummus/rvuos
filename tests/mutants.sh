@@ -44,6 +44,8 @@ set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 logs=$root/build/mutants
 harnesses="fuzz fuzz-pmp8 fuzz-grain32 fuzz-work"
+# The line a harness prints after each input it replays isolated; HOST_INPUT_END in host/harness.h.
+input_end="isolated: end of input"
 
 # Run one make target in a mutant's tree; the log goes under build/mutants/.
 run() {
@@ -60,23 +62,42 @@ broken() {
     echo broken >"$work/result/$name"
 }
 
-# Replay the seeds one by one on a host harness, noting their reports,
+# Replay the seeds on a host harness, noting their reports,
 # then the corpus at once; the harness runs in the tree, where libFuzzer leaves what failed.
+# The seeds run in one process, each as if alone, see host/fuzz.c;
+# the output is cut where each ends, and a crash leaves its seed without an end.
 replay() {
     bin=$tree/build/host/$1
     hit=""
+    if (cd "$tree" && "$bin" --verbose --isolated tests/seeds/*) >"$out" 2>&1; then
+        status=0
+    else
+        status=$?
+    fi
+    rm -f "$out".*
+    awk -v out="$out." -v end="$input_end" '
+        { print > (out n) }
+        substr($0, length($0) - length(end) + 1) == end { close(out n); n++ }
+    ' n=0 "$out"
+    n=0
     for seed in "$tree"/tests/seeds/*; do
-        (cd "$tree" && "$bin" --verbose "$seed") >"$out" 2>&1 && continue
-        line=$(grep -o 'invariant violated: .*' "$out" | head -1 | sed 's/^invariant violated: //;
+        part=$out.$n
+        n=$((n + 1))
+        line=$(grep -o 'invariant violated: .*' "$part" 2>/dev/null | head -1 | sed 's/^invariant violated: //;
             s/ 0x[0-9a-f]\{8\}//g; s/:[0-9][0-9]*//g; s/\<[0-9][0-9]*\>/N/g')
         if [ -z "$line" ]; then
-            broken "$1 fails seed ${seed##*/} without an invariant report" "$(tail -5 "$out")"
+            grep -q "$input_end\$" "$part" 2>/dev/null && continue
+            broken "$1 fails seed ${seed##*/} without an invariant report" "$(tail -5 "$part" 2>/dev/null)"
             return 1
         fi
         reports="$reports$line
 "
         hit=yes
     done
+    if [ "$status" -ne 0 ]; then
+        broken "$1 fails after the seeds without an invariant report" "$(tail -5 "$out")"
+        return 1
+    fi
     if ! (cd "$tree" && "$bin" -runs=0 tests/corpus) >"$logs/$name.$1.log" 2>&1; then
         if ! grep -q 'invariant violated' "$logs/$name.$1.log"; then
             broken "$1 fails the corpus without an invariant report" "$(tail -5 "$logs/$name.$1.log")"
