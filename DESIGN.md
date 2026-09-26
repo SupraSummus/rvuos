@@ -938,10 +938,21 @@ because only a running thread can signal otherwise.
 The kernel counts those `Irq`s as they are armed and disarmed,
 so it knows without a walk.
 With either armed the kernel stalls in `wfi`
-until the tick or a device interrupt is pending,
+until the nearest deadline of an armed timer line or a device interrupt is pending,
 takes it by hand since machine mode runs with `MIE` clear,
 and looks for a runnable thread again;
 with neither it says `no runnable thread` and stops the machine.
+
+**The stall skips the ticks between.**
+While nothing runs no turn needs ending,
+so the stall defers `mtimecmp` to the tick the nearest armed timer line comes due at,
+found by looking at the `TIMER_LINES` lines as the tick does.
+Whatever ends the stall is counted as a late tick is,
+so the tick count and every deadline come out as if each tick had been taken,
+and `mtimecmp` is back on the next tick before a thread runs.
+A deferral reaches at most 2^31 counts, several seconds on either board,
+so that `timer_next` does not take it for a debugger's stop;
+a longer stall wakes there and defers again.
 
 **Nothing more lives in the kernel.**
 Round-robin on a tick is the least policy that makes
@@ -1628,7 +1639,9 @@ but a stopped call is not traced, only the attempt that finishes,
 so where the tick lands leaves the transcript alone,
 and the host may stop every such call without a line of its own.
 The stall in `wfi` for an armed timer line is checked by the demo in `user/init.c`,
-and so are periods that keep pace with the clock.
+and so are periods that keep pace with the clock,
+bounded on both sides, which a stall that miscounted the ticks it skipped would break;
+the host never stalls, so nothing else checks the deferral.
 A device interrupt is delivered under tracing as it is otherwise,
 because a line left claimed would storm
 and one masked without its `Irq` disarmed would break an invariant;
@@ -1760,8 +1773,15 @@ until the maintainer decides otherwise.
    What it cannot do is choose between two runnable threads
    for less than a system call per switch.
    A budget per share, as seL4's scheduling contexts have, would bound latency.
-   Decide when a workload needs one thread to run before another
-   and taking turns measurably fails it.
+   It would also cap a process's time, which shares cannot:
+   an idle share's turns go to whoever is busy, so a process alone on 1 of 32 shares gets all of it,
+   and a cap for saving energy would need the other 31 kept busy.
+   One shape keeps the tick's work constant:
+   a budget per share over one frame for the whole machine,
+   refilled by an epoch count rather than a walk,
+   with the time left over going only to shares whose capability carries a right to it.
+   Decide when a workload needs one thread to run before another,
+   and taking turns measurably fails it, or needs a cap on its time.
 
 10. **Yield.**
     Working default: none.

@@ -796,7 +796,8 @@ and carries the ring out one byte per transmitter interrupt.
 - A system call is never interrupted:
   machine mode runs with interrupts off from the trap to the return.
 - When nothing is runnable and an `Irq` is armed on a timer line or a device's line,
-  the kernel stalls in `wfi` until the tick or the interrupt arrives.
+  the kernel stalls in `wfi` until the nearest timer line's deadline or the interrupt arrives,
+  and takes no tick in between.
   When nothing is armed either, it prints `no runnable thread` and halts with code 5.
 
 There are no priorities and no yield.

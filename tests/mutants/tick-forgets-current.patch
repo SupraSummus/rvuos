@@ -8,7 +8,7 @@ Report: a waiting or ready thread is on no queue
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -412,7 +412,6 @@ void sched_tick(uint32_t ticks)
+@@ -431,7 +431,6 @@ void sched_tick(uint32_t ticks)
      if (was != NULL) {
          share_settle(was);
      }

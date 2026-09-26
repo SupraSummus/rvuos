@@ -8,7 +8,7 @@ Report: line table names an irq that is gone
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -327,7 +327,6 @@ bool sched_forget(struct obj_header *o, bool preempt)
+@@ -345,7 +345,6 @@ bool sched_forget(struct obj_header *o, bool preempt)
          if (line_on_controller(line)) {
              irq_enable(line, false);
          }
