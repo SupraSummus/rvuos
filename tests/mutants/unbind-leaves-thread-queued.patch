@@ -10,7 +10,7 @@ Report: thread on no queue is linked into one
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -186,10 +186,10 @@ void sched_bind(struct thread *t, uint32_t share, struct cap *parent)
+@@ -219,10 +219,10 @@ void sched_bind(struct thread *t, uint32_t share, struct cap *parent)
  void sched_unbind(struct cap *bound)
  {
      struct thread *t = bound_thread(bound);
@@ -21,4 +21,4 @@ diff --git a/kernel/sched.c b/kernel/sched.c
 -    *bound = (struct cap){ 0 };
  }
  
- void sched_start(struct thread *t)
+ void sched_share_changed(struct share *s)

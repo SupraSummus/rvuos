@@ -1,0 +1,18 @@
+A new window leaves every share charged with what it spent in the last.
+A share that spent its budget never has it again;
+no share was charged more ticks than the window has had.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: share was charged more ticks than the window has had
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -239,7 +239,6 @@ void sched_window_start(void)
+     window_ticks = window_idle = 0;
+     for (uint32_t i = 0; i < SHARES; i++) {
+         LOOP_BOUND(SHARES);
+-        shares[i].used = 0;
+         share_settle(&shares[i]);
+     }
+ }

@@ -469,25 +469,45 @@ static inline struct obj_header *cap_object(const struct cap *cap)
 extern struct thread *current;
 
 /*
- * A share of the processor: a place in the run queue, which the threads bound to it take turns in.
+ * A share of the processor: an account of time, which the threads bound to it take turns in
+ * and spend together.
  * There are SHARES of them, a constant of the kernel, so no call makes more;
  * see DESIGN.md, "Scheduling".
  */
 struct share {
     /* Its ready threads but the running one, as a ring, oldest first; 0 for none. */
     paddr_t threads;
-    /* The run queue, while the share has a ready thread and it is not its turn; NULL off it. */
+    /* The queue it waits on, while it has a ready thread and it is not its turn; NULL off every queue. */
+    struct share **queue;
     struct share *next;
     struct share *prev;
+    /* Its part of every window, in BUDGET_WHOLE parts of the processor. */
+    uint32_t budget;
+    /* The ticks the window charged it with so far. */
+    uint32_t used;
+    uint32_t flags;     /* SHARE_SPARE or none */
 };
 extern struct share shares[SHARES];
 
 /*
- * The shares with a ready thread, but the one whose turn it is, as a ring, oldest first;
- * NULL when there are none.
- * The oldest has the next turn, and a share that gets a ready thread joins behind the newest.
+ * The shares with a ready thread but the one whose turn it is wait on three queues,
+ * each a ring, oldest first, NULL when empty:
+ * the run queue those with budget left in the window,
+ * the spare queue those without it that may run on spare time,
+ * and the spent queue the rest, which wait for the next window.
+ * The oldest on the run queue has the next turn, or when it is empty the oldest on the spare queue,
+ * and a share that gets a ready thread joins behind the newest of its queue.
  */
 extern struct share *run_queue;
+extern struct share *spare_queue;
+extern struct share *spent_queue;
+
+/*
+ * The ticks of the window so far, fewer than WINDOW_TICKS,
+ * and those of them no share was charged with, because none ran.
+ */
+extern uint32_t window_ticks;
+extern uint32_t window_idle;
 
 /*
  * The share whose turn it is: the running thread's, or the one it lost or was moved off during the turn;
@@ -527,6 +547,15 @@ void sched_bind(struct thread *t, uint32_t share, struct cap *parent);
 /* Clear a thread's share the tree has already let go of: a ready thread that is not running leaves its ring. */
 void sched_unbind(struct cap *bound);
 
+/* A share's budget or flags changed: it moves to the queue they now put it on. */
+void sched_share_changed(struct share *s);
+
+/*
+ * Begin a window: every share has its whole budget again and goes to the queue that puts it on.
+ * The tick that ends a window calls it, and OP_DEBUG_TRACE does.
+ */
+void sched_window_start(void);
+
 /* Start running a thread with nothing else run before it; the boot's. */
 void sched_start(struct thread *t);
 
@@ -553,9 +582,10 @@ extern uint32_t trace_wake_bits;
 void sched_run_next(void);
 
 /*
- * The timer tick: count the ticks that passed, fire every timer line that is due,
+ * The timer tick: charge the ticks that passed to the share whose turn it is, count them,
+ * fire every timer line that is due, begin a window when this one is over,
  * and end the running share's turn: the running thread goes to the back of its share's ring,
- * the share to the back of the run queue, and the oldest share there has the next turn.
+ * the share to the back of the queue its budget puts it on, and the next share has its turn.
  * The interrupt calls it, and OP_DEBUG_TICK does on request.
  */
 void sched_tick(uint32_t ticks);

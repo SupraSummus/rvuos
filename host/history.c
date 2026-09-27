@@ -46,6 +46,9 @@ static const struct thread *caller;
 static const struct captable *caller_table;
 static bool caller_dying;
 
+/* Every share's budget and flags before the call. */
+static uint32_t budget_before[SHARES], flags_before[SHARES];
+
 static bool dying_under(const struct thread *t, const struct captable *table)
 {
     return obj_pool(&t->hdr)->dying || (table != NULL && obj_pool(&table->hdr)->dying);
@@ -175,6 +178,11 @@ void history_begin(void)
     record_objects(&objects);
     each_node(&objects, record_node);
     qsort(nodes.v, nodes.n, sizeof(nodes.v[0]), cmp_at);
+
+    for (unsigned i = 0; i < SHARES; i++) {
+        budget_before[i] = shares[i].budget;
+        flags_before[i] = shares[i].flags;
+    }
 }
 
 /* An object the call built, which the caller must have been able to build. */
@@ -234,6 +242,16 @@ void history_end(void)
 
     record_objects(&objects_after);
     each_node(&objects_after, check_node);
+
+    /* A share's budget moves only through a capability to it that may move it, and its flags likewise. */
+    for (unsigned i = 0; i < SHARES; i++) {
+        if (shares[i].budget != budget_before[i] && !covered((struct grant){ CAP_SHARE, RIGHT_W, i, 1 })) {
+            violated("a call moved budget to or from a share its caller could not move it on");
+        }
+        if (shares[i].flags != flags_before[i] && !covered((struct grant){ CAP_SHARE, RIGHT_X, i, 1 })) {
+            violated("a call set the flags of a share its caller could not set them on");
+        }
+    }
 
     /*
      * Every object the call took away is zeroed, whether its pool went or a destroy stopped half way;

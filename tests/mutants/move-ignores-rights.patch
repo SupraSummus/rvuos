@@ -1,0 +1,20 @@
+A move needs no right on the shares.
+A capability narrowed to read shares would move their budget all the same;
+a share's budget moves only through a capability to it with RIGHT_W.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: a call moved budget to or from a share its caller could not move it on
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -563,9 +563,6 @@ static int op_share(struct thread *t, uint32_t slot, const struct cap *cap,
+         return KERR_OK;
+     }
+     case OP_SHARE_MOVE: {
+-        if (!(cap->rights & RIGHT_W)) {
+-            return KERR_NO_RIGHTS;
+-        }
+         if (arg[1] >= cap->b || arg[2] >= cap->b) {
+             return KERR_INVALID_ARG;
+         }

@@ -80,7 +80,7 @@ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
         /* The timer lines follow the controller's, and are granted apart so that no board's count shows. */
         [BOOT_CAP_TIMER_LINES] = cap_to_lines(IRQ_LINES, TIMER_LINES, RIGHT_W),
         [BOOT_CAP_CLOCK] = { .type = CAP_CLOCK, .rights = RIGHT_ALL },
-        [BOOT_CAP_SHARES] = cap_to_shares(0, SHARES, RIGHT_W),
+        [BOOT_CAP_SHARES] = cap_to_shares(0, SHARES, RIGHT_W | RIGHT_X),
     };
     for (unsigned i = BOOT_CAP_NULL + 1; i < BOOT_CAP_COUNT; i++) {
         bool pooled = i == BOOT_CAP_CAPTABLE || i == BOOT_CAP_PROCESS || i == BOOT_CAP_THREAD ||
@@ -89,6 +89,15 @@ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
             kpanic("cannot fill the root task's table");
         }
     }
+
+    /*
+     * The root task holds the whole processor on the first share, and every share may run on spare time,
+     * so one given no budget runs whenever the root task's share does not want the processor.
+     */
+    for (unsigned i = 0; i < SHARES; i++) {
+        shares[i].flags = SHARE_SPARE;
+    }
+    shares[0].budget = BUDGET_WHOLE;
 
     /*
      * The root thread runs on the first share, bound through the capability to them all.

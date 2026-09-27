@@ -19,6 +19,7 @@
 #include "klog.h"
 #include "object.h"
 #include "pmp.h"
+#include "timer.h"
 
 static __attribute__((noreturn)) void fail(const char *msg, uint32_t a, uint32_t b, uint32_t c)
 {
@@ -378,42 +379,110 @@ static bool is_share(const struct share *p)
     return false;
 }
 
+/* The three queues a share with a ready thread waits on, in the order the index below gives them. */
+enum { QUEUE_RUN, QUEUE_SPARE, QUEUE_SPENT, QUEUES };
+static struct share **const share_queues[QUEUES] = { &run_queue, &spare_queue, &spent_queue };
+
+/* Which queue a share is on by its own link, QUEUES for none, or something that is no queue. */
+static unsigned queue_index(const struct share *s)
+{
+    for (unsigned q = 0; q < QUEUES; q++) {
+        if (s->queue == share_queues[q]) {
+            return q;
+        }
+    }
+    if (s->queue != NULL) {
+        fail("share names a queue there is not", (uint32_t)(s - shares), 0, 0);
+    }
+    return QUEUES;
+}
+
 /*
- * Every share's ring holds its ready threads but the running one, which check_queue reads,
- * and the run queue is a ring of exactly the shares with a ready thread but the one whose turn it is.
+ * A queue is a ring of shares, each linked back to the one before and naming the queue,
+ * and it holds as many as want to be on it.
+ */
+static void check_share_queue(unsigned q, uint32_t owed)
+{
+    uint32_t queued = 0;
+    const struct share *head = *share_queues[q];
+    const struct share *at = head;
+    while (at != NULL) {
+        if (!is_share(at) || !is_share(at->next) || at->next->prev != at || at->queue != share_queues[q]) {
+            fail("share queue is not linked back", q, (uint32_t)(at - shares), 0);
+        }
+        if (++queued > SHARES) {
+            fail("share queue does not close", q, queued, 0);
+        }
+        at = at->next;
+        if (at == head) {
+            break;
+        }
+    }
+    if (owed != queued) {
+        fail("share queue does not hold every share it is for", q, owed, queued);
+    }
+}
+
+/*
+ * Every share's ring holds its ready threads but the running one, which check_queue reads.
+ * A share with a ready thread but the one whose turn it is waits on one queue:
+ * the run queue while fewer ticks were charged to it in the window than its budget rounds up to,
+ * else the spare queue with SHARE_SPARE, else the spent queue;
+ * any other share waits on none.
  * Something runs, so it is some share's turn.
+ * The budgets add up to the whole processor, and each tick of the window was charged once,
+ * to the share whose turn it was or, while none ran, to nobody.
  */
 static void check_shares(void)
 {
     if (current != NULL && (turn == NULL || !is_share(turn))) {
         fail("it is no share's turn", 0, 0, 0);
     }
-    uint32_t owed = 0, queued = 0;
+    if (window_ticks >= WINDOW_TICKS) {
+        fail("the window went on past its end", window_ticks, 0, 0);
+    }
+    uint32_t owed[QUEUES] = { 0 };
+    uint32_t budget = 0, charged = window_idle;
     for (unsigned i = 0; i < SHARES; i++) {
         const struct share *s = &shares[i];
         check_queue(s->threads, THREAD_READY, 0, s);
-        bool on = s->next != NULL || s->prev != NULL;
-        if (on != (s->threads != 0 && s != turn)) {
-            fail(on ? "run queue holds a share it is not for" : "a share with a ready thread is not on the run queue",
-                 i, s->threads, 0);
+        if (s->budget > BUDGET_WHOLE || (s->flags & ~(uint32_t)SHARE_SPARE) != 0) {
+            fail("share has a budget or flags it cannot have", i, s->budget, s->flags);
         }
-        owed += on;
+        if (s->used > window_ticks) {
+            fail("share was charged more ticks than the window has had", i, s->used, window_ticks);
+        }
+        budget += s->budget;
+        charged += s->used;
+        unsigned want = QUEUES;
+        if (s->threads != 0 && s != turn) {
+            uint32_t worth = (s->budget * WINDOW_TICKS + BUDGET_WHOLE - 1) / BUDGET_WHOLE;
+            want = s->used < worth ? QUEUE_RUN : (s->flags & SHARE_SPARE) ? QUEUE_SPARE : QUEUE_SPENT;
+        }
+        unsigned on = queue_index(s);
+        if (on != want) {
+            fail(want == QUEUES ? "a queue holds a share it is not for"
+                 : on == QUEUES ? "a share with a ready thread waits on no queue"
+                                : "a share waits on another queue than its budget says",
+                 i, on, want);
+        }
+        if (on == QUEUES && (s->next != NULL || s->prev != NULL)) {
+            fail("share on no queue is linked into one", i, 0, 0);
+        }
+        if (on != QUEUES) {
+            owed[on]++;
+        }
     }
-    const struct share *at = run_queue;
-    while (at != NULL) {
-        if (!is_share(at) || !is_share(at->next) || at->next->prev != at) {
-            fail("run queue is not linked back", (uint32_t)(at - shares), 0, 0);
-        }
-        if (++queued > SHARES) {
-            fail("run queue does not close", queued, 0, 0);
-        }
-        at = at->next;
-        if (at == run_queue) {
-            break;
-        }
+    _Static_assert((uint64_t)BUDGET_WHOLE * SHARES <= UINT32_MAX &&
+                   (uint64_t)BUDGET_WHOLE * WINDOW_TICKS <= UINT32_MAX, "the sums above do not wrap");
+    if (budget != BUDGET_WHOLE) {
+        fail("the budgets of the shares do not add up to the whole processor", budget, 0, 0);
     }
-    if (owed != queued) {
-        fail("run queue does not hold every share it is for", owed, queued, 0);
+    if (charged != window_ticks) {
+        fail("the window's ticks were not each charged once", charged, window_ticks, 0);
+    }
+    for (unsigned q = 0; q < QUEUES; q++) {
+        check_share_queue(q, owed[q]);
     }
 }
 
@@ -550,11 +619,11 @@ static void check_captable(const struct captable *table)
             }
             break;
         case CAP_SHARE:
-            /* The root task received every share there is, with RIGHT_W; nothing widens that. */
+            /* The root task received every share there is, with RIGHT_W and RIGHT_X; nothing widens that. */
             if (c->b == 0 || c->a >= SHARES || c->b > SHARES - c->a) {
                 fail("share capability outside the shares there are", v2p(table), i, c->a);
             }
-            if (c->rights & ~RIGHT_W) {
+            if (c->rights & ~(RIGHT_W | RIGHT_X)) {
                 fail("share capability with rights beyond the grant", v2p(table), i, c->rights);
             }
             break;

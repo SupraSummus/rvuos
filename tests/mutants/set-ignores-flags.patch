@@ -1,0 +1,18 @@
+A set takes any bits as a share's flags.
+A share has no flag but SHARE_SPARE.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: share has a budget or flags it cannot have
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -585,7 +585,7 @@ static int op_share(struct thread *t, uint32_t slot, const struct cap *cap,
+         if (!(cap->rights & RIGHT_X)) {
+             return KERR_NO_RIGHTS;
+         }
+-        if (arg[1] >= cap->b || (arg[2] & ~(uint32_t)SHARE_SPARE) != 0) {
++        if (arg[1] >= cap->b) {
+             return KERR_INVALID_ARG;
+         }
+         struct share *s = &shares[cap->a + arg[1]];

@@ -15,6 +15,7 @@
  * keep a period on the timer without drifting,
  * split the processor between two shares however many threads one of them runs,
  * stop threads by revoking their share and start one again by binding it,
+ * hold a share to its budget and let it run on spare time,
  * bind and revoke an Irq on a line nothing drives,
  * then unmap a region and fault on it.
  * Negative paths are covered by the fuzz corpus and tests/differential.py.
@@ -140,6 +141,9 @@ enum {
 #define SHARED_ANSWER  1
 #define SHARED_TURN    2
 #define SHARED_SPINS   3
+
+/* The kernel's window, over which a share's budget counts: a hundred ticks on every board so far. */
+#define WINDOW_US 100000u
 
 /* Threads the root task adds on its own share, each counting as it spins. */
 #define SPINNERS 3u
@@ -530,9 +534,15 @@ int main(void)
     expect("configure the child's thread",
            rv_invoke(OP_THREAD_CONFIGURE, SLOT_CHILD_THREAD, (uint32_t)&child_main,
                      child_data_base + CHUNK, 0));
-    /* The child runs on a share of its own, the second, so it takes turns with this whole process. */
+    /*
+     * The child runs on a share of its own, the second, so it takes turns with this whole process.
+     * The first share holds the whole budget, and a share with budget left goes before one without,
+     * so the child's share gets half of it: while both want the processor, they take turns.
+     */
     expect("carve the child a share",
            rv_invoke(OP_SHARE_CARVE, BOOT_CAP_SHARES, 1, 1, SLOT_CHILD_SHARE));
+    expect("give it half the processor",
+           rv_invoke(OP_SHARE_MOVE, BOOT_CAP_SHARES, 0, 1, BUDGET_WHOLE / 2));
     expect("put the child on it",
            rv_invoke(OP_SHARE_BIND, SLOT_CHILD_SHARE, SLOT_CHILD_THREAD, 0, 0));
     expect("start the child",
@@ -788,6 +798,35 @@ int main(void)
                    shared[SHARED_SPINS] == child_spun
                ? KERR_OK : KERR_INVALID_ARG);
     puts("root: rebind ok\n");
+
+    /*
+     * Budgets; see DESIGN.md, "Scheduling".
+     * With an eighth and no spare time the spinner runs 13 to 39 of the 201 ticks of two windows,
+     * an eighth of each and of the two it straddles, while the processor idles the rest;
+     * with spare time it runs all of half a window, since nothing else wants the processor.
+     */
+    uint32_t budget, flags;
+    expect("keep an eighth of the processor on the child's share",
+           rv_invoke(OP_SHARE_MOVE, BOOT_CAP_SHARES, 1, 0, BUDGET_WHOLE / 2 - BUDGET_WHOLE / 8));
+    expect("take its spare time away", rv_invoke(OP_SHARE_SET, BOOT_CAP_SHARES, 1, 0, 0));
+    expect("it has an eighth and no spare time",
+           rv_share_info(BOOT_CAP_SHARES, 1, &budget, &flags) == KERR_OK &&
+                   budget == BUDGET_WHOLE / 8 && flags == 0
+               ? KERR_OK : KERR_INVALID_ARG);
+    first_spun = spins[0];
+    expect("put the spinner on it once more",
+           rv_invoke(OP_SHARE_BIND, SLOT_CHILD_SHARE, SLOT_SPINNER, 0, 0));
+    expect("sleep for two windows", sleep_us(2 * WINDOW_US));
+    uint32_t capped = spins[0] - first_spun;
+    expect("give it spare time", rv_invoke(OP_SHARE_SET, BOOT_CAP_SHARES, 1, SHARE_SPARE, 0));
+    first_spun = spins[0];
+    expect("sleep for half a window", sleep_us(WINDOW_US / 2));
+    uint32_t spare = spins[0] - first_spun;
+    expect("take the share back for good",
+           rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_CHILD_SHARE, 0, 0));
+    expect("it spun an eighth of the windows and all of the spare time",
+           8 * capped > spare && capped < spare ? KERR_OK : KERR_INVALID_ARG);
+    puts("root: budget ok\n");
 
     /* The child is done, and goes with its pool. */
     expect("destroy the child's pool", rv_invoke(OP_POOL_DESTROY, SLOT_POOL, 0, 0, 0));

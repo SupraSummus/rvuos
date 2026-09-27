@@ -65,7 +65,7 @@
  * Notification: RIGHT_W to signal, RIGHT_R to wait.
  * IrqLine: RIGHT_W to bind a line.
  * Irq: RIGHT_W to set or mask.
- * Share: RIGHT_W to bind a thread.
+ * Share: RIGHT_W to bind a thread and to move budget, RIGHT_X to set flags.
  * Debug, Clock: any right.
  * Copying a capability can only remove rights.
  */
@@ -89,14 +89,17 @@
  * The timer tick stops preempting,
  * because a transcript the host build must reproduce
  * cannot contain a switch that lands between two instructions.
+ * A window of the shares' budgets begins, see OP_SHARE_MOVE,
+ * so that the host build counts windows from the same tick.
  * It cannot be turned off again, so a traced program cannot hide.
  */
 #define OP_DEBUG_TRACE 10
 /*
  * Debug: what the timer tick does, on request.
- * Time moves by one tick, every timer line that is due signals,
- * the running share's turn ends: the caller goes to the back of its share's ring,
- * the share to the back of the run queue, and the oldest share has the next turn,
+ * Time moves by one tick, charged to the share whose turn it is,
+ * every timer line that is due signals, a window ends if this was its last tick,
+ * and the running share's turn ends: the caller goes to the back of its share's ring,
+ * the share to the back of the queue its budget puts it on, and the next share has its turn,
  * and the caller stays ready.
  * Works while tracing is on, unlike the tick itself;
  * see DESIGN.md, "Verification".
@@ -362,9 +365,40 @@
  * A thread unbound or moved while it runs, the caller itself among them, finishes the turn it had.
  */
 #define OP_SHARE_BIND 29
+/*
+ * Share: describe one of the capability's shares. a1 = its offset from the first one.
+ * Returns a1 = its budget and a2 = its flags.
+ * How much of the window it has used is not told: that would be a clock.
+ */
+#define OP_SHARE_INFO 30
+/*
+ * Share (RIGHT_W): move budget from one of the capability's shares to another.
+ * a1 = the source's offset from the first share, a2 = the destination's,
+ * a3 = how much, at most what the source holds.
+ * A budget is a share's part of every window, counted in BUDGET_WHOLE parts of the processor;
+ * the budgets of all the shares add up to BUDGET_WHOLE, and a move keeps them so.
+ * A share with budget left in the window takes its turns before a share without,
+ * and one without SHARE_SPARE takes none until the next window;
+ * see DESIGN.md, "Scheduling".
+ * A share keeps its budget and its flags through a revoke of its capabilities,
+ * as a frame keeps its bytes, so whoever lends it again sets them first.
+ */
+#define OP_SHARE_MOVE 31
+/*
+ * Share (RIGHT_X): set the flags of one of the capability's shares.
+ * a1 = its offset from the first share, a2 = the flags, SHARE_SPARE or none;
+ * any other bit fails with KERR_INVALID_ARG.
+ * A share without SHARE_SPARE runs on its budget alone:
+ * at most its part of every window, however idle the processor is otherwise.
+ */
+#define OP_SHARE_SET 32
+/* The share runs on spare time too: time no share with budget left in the window wants. */
+#define SHARE_SPARE 0x1
+/* The whole processor, as a budget; see OP_SHARE_MOVE. */
+#define BUDGET_WHOLE 0x10000u
 
 /* One above the highest operation code; the fuzzer's mutator draws below it. */
-#define OP_COUNT 30
+#define OP_COUNT 33
 
 /*
  * Capability slots the kernel fills in the root task's table at boot.
@@ -385,7 +419,7 @@
 #define BOOT_CAP_LOG       12 /* Frame, read and write: the kernel's log, see struct rvuos_log */
 #define BOOT_CAP_TIMER_LINES 13 /* IrqLine: every timer line, TIMER_LINES of them */
 #define BOOT_CAP_CLOCK     14 /* Clock: the machine's counter */
-#define BOOT_CAP_SHARES    15 /* Share: every share, SHARES of them; the root thread is bound to the first */
+#define BOOT_CAP_SHARES    15 /* Share: every share, with SHARE_SPARE; the first holds the whole budget and the root thread */
 #define BOOT_CAP_COUNT     16
 
 /*

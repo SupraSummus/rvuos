@@ -182,6 +182,23 @@ static inline uint64_t rv_counter_read(uint32_t counter)
     return ((uint64_t)hi << 32) | lo;
 }
 
+/* OP_SHARE_INFO: the budget and the flags of one of a capability's shares. */
+static inline uint32_t rv_share_info(uint32_t share_cap, uint32_t offset, uint32_t *budget,
+                                     uint32_t *flags)
+{
+    register uint32_t r_a0 __asm__("a0") = share_cap;
+    register uint32_t r_a1 __asm__("a1") = offset;
+    register uint32_t r_a2 __asm__("a2");
+    register uint32_t r_a7 __asm__("a7") = OP_SHARE_INFO;
+    __asm__ volatile("ecall"
+                     : "+r"(r_a0), "+r"(r_a1), "=r"(r_a2)
+                     : "r"(r_a7)
+                     : "memory", "a3", "a4", "a5", "a6");
+    *budget = r_a1;
+    *flags = r_a2;
+    return r_a0;
+}
+
 static inline void rv_putc(uint32_t debug_cap, char c)
 {
     rv_invoke(OP_DEBUG_PUTC, debug_cap, (uint32_t)c, 0, 0);

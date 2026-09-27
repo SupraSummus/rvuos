@@ -1,0 +1,19 @@
+A move gives budget to a share past the capability's range.
+A holder of one share could hand its budget to any other;
+a share's budget moves only through a capability to it.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: a call moved budget to or from a share its caller could not move it on
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -566,7 +566,7 @@ static int op_share(struct thread *t, uint32_t slot, const struct cap *cap,
+         if (!(cap->rights & RIGHT_W)) {
+             return KERR_NO_RIGHTS;
+         }
+-        if (arg[1] >= cap->b || arg[2] >= cap->b) {
++        if (arg[1] >= cap->b) {
+             return KERR_INVALID_ARG;
+         }
+         struct share *from = &shares[cap->a + arg[1]];

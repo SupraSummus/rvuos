@@ -7,11 +7,11 @@ Caught-by: loop-bounds
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -419,6 +419,7 @@ void sched_run_next(void)
+@@ -484,6 +484,7 @@ void sched_run_next(void)
  
  void sched_tick(uint32_t ticks)
  {
 +    selfcheck_run();
      tick_advance(ticks);
      /*
-      * The turn ends: the share whose turn it was goes to the back of the run queue
+      * The turn ends: the share whose turn it was goes to the back of the queue its budget puts it on

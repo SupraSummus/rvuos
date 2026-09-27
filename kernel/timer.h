@@ -15,6 +15,13 @@
 #define TIMER_US_PER_TICK (1000000u / TIMER_HZ)
 _Static_assert(TIMER_US_PER_TICK * TIMER_HZ == 1000000u, "the tick divides a second");
 
+/*
+ * Ticks in a window, a tenth of a second:
+ * a share's budget is its part of every window, and each window starts every budget afresh.
+ * See DESIGN.md, "Scheduling".
+ */
+#define WINDOW_TICKS (TIMER_HZ / 10)
+
 /* Program the first tick and enable the machine timer interrupt. */
 void timer_init(void);
 
