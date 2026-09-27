@@ -4,7 +4,11 @@
 Each hunk is found by the lines it changes, not by its context:
 the context is dropped from the outside in until exactly one place matches,
 and failing that, the indentation too, with the added lines moving along.
+git apply searches the whole file and uses line numbers only to break a tie,
+so a hunk whose text and function line stay the same keeps its old numbers,
+unless its lines with one line of context, as tests/mutants.sh applies them, match in several places.
 A patch is then
+  fresh      when at most such numbers would change, and it is left as it is,
   refreshed  when its context matched, so only line numbers and context change,
   moved      when it did not, so run tests/mutants.sh on it and read its diff,
   stale      when its lines match nowhere or in several places; plant it again by hand.
@@ -27,14 +31,14 @@ class Stale(Exception):
 
 
 def parse(text):
-    """A patch as its header and a list of (path, hunks), a hunk being (start, body)."""
+    """A patch as its header and a list of (path, hunks), a hunk being (start, body, head)."""
     at = text.find("diff --git ")
     header, files, hunks = text[:at], [], None
     for line in text[at:].split("\n"):
         if line.startswith("diff --git "):
             hunks = []
         elif line.startswith("@@"):
-            hunks.append((int(re.match(r"@@ -(\d+)", line).group(1)) - 1, []))
+            hunks.append((int(re.match(r"@@ -(\d+)", line).group(1)) - 1, [], line))
         elif hunks:
             if line[:1] in (" ", "-", "+"):
                 hunks[-1][1].append(line)
@@ -100,7 +104,7 @@ def locate(lines, start, body):
 def carry(lines, hunks):
     """The lines with every hunk's change made where it is found, and whether any hunk moved."""
     edits, moved = [], False
-    for start, body in hunks:
+    for start, body, _ in hunks:
         at, shift, lost = locate(lines, start, body)
         _, old, new, _ = split(body)
         if any(indent(l) + shift < 0 for l in new if l.strip()):
@@ -130,6 +134,25 @@ def diff(path, old, new):
     return re.sub(r"^index .*\n", "", out, count=1, flags=re.M)
 
 
+def found_once(lines, body):
+    """Whether the hunk's lines with one line of context match in one place only."""
+    before, old, _, after = split(body)
+    want = before[-1:] + old + after[:1]
+    return sum(lines[at:at + len(want)] == want for at in range(len(lines) - len(want) + 1)) == 1
+
+
+def keep(hunks, text, lines):
+    """The diff of one file with the old head back on every hunk that only moved,
+    where its numbers break no tie."""
+    old = {tuple(body): head for _, body, head in hunks}
+    _, [(_, new)] = parse(text)
+    for _, body, head in new:
+        was = old.get(tuple(body))
+        if was and was.partition(" @@")[2] == head.partition(" @@")[2] and found_once(lines, body):
+            text = text.replace(head, was, 1)
+    return text
+
+
 def refresh(patch):
     """Write the patch again, and say whether it was fresh, refreshed or moved."""
     with open(patch) as f:
@@ -143,7 +166,7 @@ def refresh(patch):
         except FileNotFoundError:
             raise Stale(f"{path} is gone")
         new, lost = carry(lines, hunks)
-        body += diff(path, lines, new)
+        body += keep(hunks, diff(path, lines, new), lines)
         moved |= lost
     if header + body == text:
         return "fresh"

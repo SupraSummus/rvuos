@@ -7,7 +7,8 @@
 # The patch applies with one line of context, so edits near the mutated line
 # do not stale it; a change to the line itself makes the mutant broken.
 # `make mutants-refresh` writes the patches again against the kernel as it is,
-# carrying a mutant over a change of its lines' indentation too.
+# carrying a mutant over a change of its lines' indentation too,
+# and leaves the line numbers of a hunk that only moved as they were.
 #
 # Below the prose, the header says what the checks do on the mutant:
 #
