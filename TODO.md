@@ -197,6 +197,12 @@ Design decisions behind these items live in `DESIGN.md`.
   replay slots that start a few above `BOOT_CAP_COUNT` would spare the next one.
   A seed written before a renumbering and merged after it keeps passing and tests nothing:
   three seeds once did, and only a mutant nothing caught showed it.
+- `make mutants` plants with `git apply -C1`,
+  which, when the context has changed and one line of it matches in several places,
+  silently takes the place nearest the patch's line numbers,
+  and a refresh leaves those numbers old wherever they broke no tie.
+  A refresh calls such a patch stale;
+  planting through the refresh's `carry` would make the two agree.
 
 ## Code
 

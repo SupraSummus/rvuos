@@ -1554,6 +1554,11 @@ so a run takes the same path however many run beside it.
 `make mutants-refresh` carries the patches over a change in the kernel
 by the lines they change rather than by their context,
 and `make mutants` checks by the headers the ones it had to move.
+`git apply` uses line numbers only to break a tie,
+and `make mutants` lets it drop the context to one line,
+so a hunk that only moved keeps its old numbers
+unless its lines with one line of context match in several places.
+A refresh thus rewrites only the patches whose text changed.
 A three-way merge does not help: the kernel's history shows the mutated lines or their neighbours
 changing whenever the context alone was not enough.
 A mutant whose own lines changed is planted again by hand.
