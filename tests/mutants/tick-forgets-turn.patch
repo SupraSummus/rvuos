@@ -3,7 +3,7 @@ A share with another ready thread would leave it behind for good;
 every share with a ready thread but the one whose turn it is waits on the run queue.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
-Report: a share with a ready thread is not on the run queue
+Report: a share with a ready thread waits on no queue
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c

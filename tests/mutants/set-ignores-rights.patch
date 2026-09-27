@@ -1,0 +1,20 @@
+Setting a share's flags needs no right.
+A share lent without RIGHT_X to hold it to its budget could give itself spare time;
+a share's flags change only through a capability to it with RIGHT_X.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: a call set the flags of a share its caller could not set them on
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -582,9 +582,6 @@ static int op_share(struct thread *t, uint32_t slot, const struct cap *cap,
+         return KERR_OK;
+     }
+     case OP_SHARE_SET: {
+-        if (!(cap->rights & RIGHT_X)) {
+-            return KERR_NO_RIGHTS;
+-        }
+         if (arg[1] >= cap->b || (arg[2] & ~(uint32_t)SHARE_SPARE) != 0) {
+             return KERR_INVALID_ARG;
+         }

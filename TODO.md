@@ -27,6 +27,8 @@ Design decisions behind these items live in `DESIGN.md`.
    The run queue goes round by share and then by thread,
    so a process that makes threads or children gets no more of the processor,
    and a thread runs only while it is bound to a share, which a revoke takes back.
+   Each share holds a budget, its part of every window,
+   and one without spare time gets no more however idle the processor is.
 6. Done: `Irq` objects and a userspace UART driver.
    An interrupt is a signal on the notification bound to the `Irq`,
    which has the `Timer`'s shape, and the stall in `wfi` covers both.
@@ -258,6 +260,9 @@ Design decisions behind these items live in `DESIGN.md`.
 - The stall's deferred tick is untried on the ESP32-C6:
   `make BOARD=esp32c6 test` has to print "root: timer ok" and "root: period ok" as it did,
   which needs its CLINT to drop the timer's level when `mtimecmp` moves past `mtime`.
+- Budgets are untried on the ESP32-C6:
+  `make BOARD=esp32c6 test` has to print "root: budget ok",
+  which needs the stall for a window's end to wake there as it does for a timer line.
 - Shares are untried on the ESP32-C6:
   `make BOARD=esp32c6 test` has to print "root: shares ok", "root: unbind ok" and "root: rebind ok";
   the first compares spin counts within a factor of two, which QEMU's instruction count makes deterministic.
@@ -273,10 +278,29 @@ Design decisions behind these items live in `DESIGN.md`.
 - A thread is stopped by revoking its share and started again by binding it,
   which is what a userspace scheduler, open decision 9 in `DESIGN.md`, needs.
   A thread waiting on a notification stays on it meanwhile, and cannot be taken off it today.
-- A thread is one share's worth whatever its process holds.
+- A thread is one share's worth whatever its process holds:
+  shares with budget left take equal turns,
+  so a share with more budget gets its larger part only by running on
+  after the others have spent theirs, late in the window.
   A share that counts as several turns in a row
-  would let one thread run faster without a thread per share;
-  decide with the first workload that wants it.
+  would spread that over the window without a thread per share.
+  Holding more shares also still buys more turns while they have budget,
+  so shares and budgets both weight a process, which may be one knob too many;
+  decide both with the first workload that wants them.
+- The tick charges a whole tick to the share whose turn it is when it comes,
+  so a thread that always waits just before the tick is never charged.
+  The fix keeps the ABI: charge the counter's counts at each change of turn,
+  and at a turn's start set `mtimecmp` to the nearer of the next tick and the budget's end;
+  `timer_ack` already returns no ticks for such an interrupt, and `sched_tick(0)` ends the turn.
+  Turns still end on the tick grid, so the timer lines and `OP_DEBUG_TICK` stay as they are.
+  Under tracing, and on the host, the clock is the tick count times a tick's counts,
+  so a traced run charges by the tick as now and the transcripts still agree;
+  the charge at a switch and the early `mtimecmp` are then checked only by the demo.
+  Compare `used << 16` with `budget * window_counts` to keep 64-bit division out of the kernel.
+- The window is a constant, a tenth of a second.
+  A longer one lets a share held to its budget sleep longer at a stretch, which saves energy,
+  and a shorter one makes it wait less for its next window;
+  decide when a board's sleep states make the difference measurable.
 - `object_first`/`object_next` collapsed the pool walk everywhere
   except the tiling check in `selfcheck.c`, which verifies
   the very link the flat walk crosses pools by.

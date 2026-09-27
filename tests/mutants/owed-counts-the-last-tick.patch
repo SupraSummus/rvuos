@@ -1,0 +1,19 @@
+A share that has used its budget exactly still has budget left.
+It runs a tick more in every window than its budget allows;
+a share has budget left while fewer ticks were charged to it than its part of the window.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: a share waits on another queue than its budget says
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -128,7 +128,7 @@ static void share_remove(struct share *s)
+ /* Whether a share has budget left: fewer ticks charged in the window than its part of the window. */
+ static bool share_owed(const struct share *s)
+ {
+-    return (uint64_t)s->used * BUDGET_WHOLE < (uint64_t)s->budget * WINDOW_TICKS;
++    return (uint64_t)s->used * BUDGET_WHOLE <= (uint64_t)s->budget * WINDOW_TICKS;
+ }
+ 
+ /* The queue a share waits on, as its threads, the turn, its budget and its flags now say; NULL for none. */

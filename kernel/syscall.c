@@ -39,6 +39,8 @@ static int op_debug(uint32_t op, const uint32_t *arg)
         khalt((int)arg[1]);
     case OP_DEBUG_TRACE:
         debug_trace = true;
+        /* The host counts windows from its first traced call, where the target has run a while. */
+        sched_window_start();
         return KERR_OK;
     case OP_DEBUG_TICK:
         /* The caller's status is written to its own frame, whoever runs next. */
@@ -544,13 +546,53 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
     }
 }
 
-/* arg[1..] carry the arguments in. */
+/* arg[1..] carry the arguments in and the results out. */
 static int op_share(struct thread *t, uint32_t slot, const struct cap *cap,
-                    uint32_t op, const uint32_t *arg)
+                    uint32_t op, uint32_t *arg)
 {
     switch (op) {
     case OP_SHARE_CARVE:
         return carve_range(t, slot, cap, arg);
+    case OP_SHARE_INFO: {
+        if (arg[1] >= cap->b) {
+            return KERR_INVALID_ARG;
+        }
+        const struct share *s = &shares[cap->a + arg[1]];
+        arg[1] = s->budget;
+        arg[2] = s->flags;
+        return KERR_OK;
+    }
+    case OP_SHARE_MOVE: {
+        if (!(cap->rights & RIGHT_W)) {
+            return KERR_NO_RIGHTS;
+        }
+        if (arg[1] >= cap->b || arg[2] >= cap->b) {
+            return KERR_INVALID_ARG;
+        }
+        struct share *from = &shares[cap->a + arg[1]];
+        struct share *to = &shares[cap->a + arg[2]];
+        if (arg[3] > from->budget) {
+            return KERR_INVALID_ARG;
+        }
+        /* What one share gives the other takes, so the budgets still add up to the whole. */
+        from->budget -= arg[3];
+        to->budget += arg[3];
+        sched_share_changed(from);
+        sched_share_changed(to);
+        return KERR_OK;
+    }
+    case OP_SHARE_SET: {
+        if (!(cap->rights & RIGHT_X)) {
+            return KERR_NO_RIGHTS;
+        }
+        if (arg[1] >= cap->b || (arg[2] & ~(uint32_t)SHARE_SPARE) != 0) {
+            return KERR_INVALID_ARG;
+        }
+        struct share *s = &shares[cap->a + arg[1]];
+        s->flags = arg[2];
+        sched_share_changed(s);
+        return KERR_OK;
+    }
     case OP_SHARE_BIND: {
         if (!(cap->rights & RIGHT_W)) {
             return KERR_NO_RIGHTS;

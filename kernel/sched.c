@@ -6,6 +6,7 @@
 #include "irq.h"
 #include "kernel.h"
 #include "object.h"
+#include "timer.h"
 #include "trap.h"
 
 struct thread *current;
@@ -14,7 +15,11 @@ uint32_t trace_wake_bits;
 
 struct share shares[SHARES];
 struct share *run_queue;
+struct share *spare_queue;
+struct share *spent_queue;
 struct share *turn;
+uint32_t window_ticks;
+uint32_t window_idle;
 uint32_t armed_sources;
 
 static void count_armed(bool was, bool is)
@@ -85,45 +90,70 @@ static void unwait(struct thread *t)
 }
 
 /*
- * The run queue is a ring of shares as a share's ring is one of threads, oldest first,
- * and a share is on it exactly while it has a ready thread and it is not its turn.
- * Taking from the front and joining at the back, of both, is the whole scheduling policy.
+ * A queue is a ring of shares as a share's ring is one of threads, oldest first,
+ * and a share is on one exactly while it has a ready thread and it is not its turn:
+ * the run queue while it has budget left, else the spare queue or the spent queue by its flags.
+ * Taking from the front and joining at the back, of each, is the whole scheduling policy.
  */
-static void share_push(struct share *s)
+static void share_push(struct share **queue, struct share *s)
 {
-    if (run_queue == NULL) {
+    if (*queue == NULL) {
         s->next = s->prev = s;
-        run_queue = s;
+        *queue = s;
     } else {
-        s->next = run_queue;
-        s->prev = run_queue->prev;
-        run_queue->prev->next = s;
-        run_queue->prev = s;
+        s->next = *queue;
+        s->prev = (*queue)->prev;
+        (*queue)->prev->next = s;
+        (*queue)->prev = s;
     }
+    s->queue = queue;
 }
 
 static void share_remove(struct share *s)
 {
+    struct share **queue = s->queue;
     if (s->next == s) {
-        run_queue = NULL;
+        *queue = NULL;
     } else {
         s->prev->next = s->next;
         s->next->prev = s->prev;
-        if (run_queue == s) {
-            run_queue = s->next;
+        if (*queue == s) {
+            *queue = s->next;
         }
     }
     s->next = s->prev = NULL;
+    s->queue = NULL;
 }
 
-/* Put a share on the run queue or take it off, whichever its threads and the turn now say. */
+/* Whether a share has budget left: fewer ticks charged in the window than its part of the window. */
+static bool share_owed(const struct share *s)
+{
+    return (uint64_t)s->used * BUDGET_WHOLE < (uint64_t)s->budget * WINDOW_TICKS;
+}
+
+/* The queue a share waits on, as its threads, the turn, its budget and its flags now say; NULL for none. */
+static struct share **share_queue(const struct share *s)
+{
+    if (s->threads == 0 || s == turn) {
+        return NULL;
+    }
+    if (share_owed(s)) {
+        return &run_queue;
+    }
+    return (s->flags & SHARE_SPARE) ? &spare_queue : &spent_queue;
+}
+
+/* Move a share to the queue it now waits on, or take it off the one it was on. */
 static void share_settle(struct share *s)
 {
-    bool owed = s->threads != 0 && s != turn;
-    if (owed && s->next == NULL) {
-        share_push(s);
-    } else if (!owed && s->next != NULL) {
-        share_remove(s);
+    struct share **queue = share_queue(s);
+    if (queue != s->queue) {
+        if (s->queue != NULL) {
+            share_remove(s);
+        }
+        if (queue != NULL) {
+            share_push(queue, s);
+        }
     }
 }
 
@@ -155,10 +185,13 @@ static struct thread *share_take(struct share *s)
     return t;
 }
 
-/* The oldest share on the run queue, taken off it: its turn begins. NULL when the queue is empty. */
+/*
+ * The oldest share with budget left, or with none left the oldest that may run on spare time,
+ * taken off its queue: its turn begins. NULL when neither queue has one.
+ */
 static struct share *next_turn(void)
 {
-    struct share *s = run_queue;
+    struct share *s = run_queue != NULL ? run_queue : spare_queue;
     if (s != NULL) {
         share_remove(s);
     }
@@ -190,6 +223,25 @@ void sched_unbind(struct cap *bound)
         dequeue(t);
     }
     *bound = (struct cap){ 0 };
+}
+
+void sched_share_changed(struct share *s)
+{
+    share_settle(s);
+}
+
+/*
+ * The shares are a fixed few, so a new window looks at each of them and at nothing else,
+ * as the tick does at the timer lines; see DESIGN.md, "Bounded work".
+ */
+void sched_window_start(void)
+{
+    window_ticks = window_idle = 0;
+    for (uint32_t i = 0; i < SHARES; i++) {
+        LOOP_BOUND(SHARES);
+        shares[i].used = 0;
+        share_settle(&shares[i]);
+    }
 }
 
 void sched_start(struct thread *t)
@@ -229,13 +281,21 @@ void irq_signal(struct irq *irq)
 
 /*
  * Ticks of time, one or the few a late interrupt covers:
- * count them and fire every timer line that is due.
+ * charge them to the share whose turn it is, or to nobody while none runs,
+ * count them, fire every timer line that is due, and begin a window once this one is over.
  * The timer lines are a fixed few, so the tick looks at each of them
  * and at nothing else; see DESIGN.md, "Time".
  * A line that fires disarms its Irq, so that after the tick no armed one is due.
+ * A late interrupt that runs past the window's end begins the next window where it lands.
  */
 static void tick_advance(uint32_t ticks)
 {
+    if (turn != NULL) {
+        turn->used += ticks;
+    } else {
+        window_idle += ticks;
+    }
+    window_ticks += ticks;
     sched_ticks += ticks;
     for (uint32_t i = 0; i < TIMER_LINES; i++) {
         LOOP_BOUND(TIMER_LINES);
@@ -244,16 +304,20 @@ static void tick_advance(uint32_t ticks)
             irq_signal(irq);
         }
     }
+    if (window_ticks >= WINDOW_TICKS) {
+        sched_window_start();
+    }
 }
 
 /*
- * The ticks from the count to the nearest deadline of an armed timer line, UINT32_MAX with none armed.
- * After the tick no armed line is due, so it is at least one.
+ * The ticks from the count to the nearest deadline of an armed timer line,
+ * or to the window's end while a share waits for it, UINT32_MAX with neither.
+ * After the tick no armed line is due and the window is not over, so it is at least one.
  * Only the stall asks, and it looks at the TIMER_LINES lines as the tick does.
  */
 static uint32_t ticks_to_deadline(void)
 {
-    uint32_t nearest = UINT32_MAX;
+    uint32_t nearest = spent_queue != NULL ? WINDOW_TICKS - window_ticks : UINT32_MAX;
     for (uint32_t i = 0; i < TIMER_LINES; i++) {
         LOOP_BOUND(TIMER_LINES);
         struct irq *irq = line_binding(IRQ_LINES + i);
@@ -381,16 +445,17 @@ static void run_turn(void)
     while (turn == NULL) {
         LOOP_WAIT("an interrupt, in intr_wait");
         /*
-         * Only a running thread, a timer line or a device interrupt
-         * can make another one runnable.
-         * With no Irq armed on either kind of line nothing can change this, so say so and stop.
+         * Only a running thread, a timer line, a device interrupt or the window's end
+         * can make another one runnable, the last for a share that spent its budget.
+         * With no Irq armed on either kind of line and no such share nothing can change this,
+         * so say so and stop.
          * The log's line is not a source: only the kernel raises it,
          * and the kernel runs only when a thread or one of these does.
          * While tracing is on, time moves and lines fire only through OP_DEBUG_TICK
          * and OP_DEBUG_IRQ, which nobody is left to perform, so the same holds
          * and the host build, which has no clock and no devices, agrees.
          */
-        if (debug_trace || armed_sources == 0) {
+        if (debug_trace || (armed_sources == 0 && spent_queue == NULL)) {
             kputs("no runnable thread\n");
             khalt(5);
         }
@@ -421,10 +486,10 @@ void sched_tick(uint32_t ticks)
 {
     tick_advance(ticks);
     /*
-     * The turn ends: the share whose turn it was goes to the back of the run queue
+     * The turn ends: the share whose turn it was goes to the back of the queue its budget puts it on
      * if it has a thread ready, and the running thread to the back of its share's ring,
      * which puts its share behind that one if it was moved to another.
-     * One that lost its share during its turn goes nowhere, and without it the queue may be empty.
+     * One that lost its share during its turn goes nowhere, and without it the queues may be empty.
      */
     struct share *was = turn;
     turn = NULL;

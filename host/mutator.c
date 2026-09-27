@@ -123,7 +123,7 @@ static uint32_t draw_arg(struct rng *r, uint8_t *data, size_t count)
     case 9:
         return (uint32_t)below(r, 17) * (REPLAY_POOL_SIZE / 16); /* up to a pool the size of the setup's */
     case 10:
-        return 1u << below(r, 32); /* notification bits */
+        return 1u << below(r, 32); /* notification bits, or a budget, BUDGET_WHOLE among them */
     default:
         return count ? other_value(r, data, count) : rnd(r);
     }

@@ -69,6 +69,8 @@ grep -q 'root: unbind ok' "$log" \
     || fail "a thread ran after its share was revoked"
 grep -q 'root: rebind ok' "$log" \
     || fail "a thread bound to a share again did not run, or another ran with it"
+grep -q 'root: budget ok' "$log" \
+    || fail "a share without spare time ran past its budget, or one with it did not run on spare time"
 grep -q 'the idle line stays quiet: ok' "$log" \
     || fail "an armed line nothing raises signalled"
 grep -q 'root: irq ok' "$log" \

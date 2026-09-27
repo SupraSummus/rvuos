@@ -211,7 +211,11 @@ struct thread *host_boot(void)
     current = NULL;
     memset(shares, 0, sizeof(shares));
     run_queue = NULL;
+    spare_queue = NULL;
+    spent_queue = NULL;
     turn = NULL;
+    window_ticks = 0;
+    window_idle = 0;
     armed_sources = 0;
     sched_ticks = 0;
     debug_trace = false;

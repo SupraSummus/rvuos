@@ -8,9 +8,9 @@ Report: slot is not derived from its parent
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -552,9 +552,6 @@ static int op_share(struct thread *t, uint32_t slot, const struct cap *cap,
-     case OP_SHARE_CARVE:
-         return carve_range(t, slot, cap, arg);
+@@ -594,9 +594,6 @@ static int op_share(struct thread *t, uint32_t slot, const struct cap *cap,
+         return KERR_OK;
+     }
      case OP_SHARE_BIND: {
 -        if (!(cap->rights & RIGHT_W)) {
 -            return KERR_NO_RIGHTS;
