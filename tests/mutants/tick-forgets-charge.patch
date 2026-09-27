@@ -1,21 +1,19 @@
-The tick charges nobody for the turn it ends.
-A share never spends its budget, however long it runs;
-each tick of the window was charged once, to the share whose turn it was.
+The tick charges the share whose turn it is for none of the ticks that passed.
+A share never spends its account, however long it runs;
+every tick of a turn with time is charged to its share.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
-Report: the window's ticks were not each charged once
+Report: a tick did not cost the share whose turn it was a tick less its budget
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -290,9 +290,7 @@ void irq_signal(struct irq *irq)
-  */
- static void tick_advance(uint32_t ticks)
+@@ -442,7 +442,7 @@ static void tick_advance(uint32_t ticks)
  {
--    if (turn != NULL) {
--        turn->used += ticks;
--    } else {
-+    if (turn == NULL) {
-         window_idle += ticks;
+     wake_stale = true;
+     if (turn != NULL) {
+-        share_spend(turn, ticks);
++        share_spend(turn, 0);
      }
-     window_ticks += ticks;
+     sched_ticks += ticks;
+     uint32_t nearest = sched_ticks + NEAREST_NONE;

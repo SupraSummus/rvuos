@@ -1,0 +1,18 @@
+A drained share joins a queue without bringing the release forward.
+The kernel would look for it too late, and the share wait past the tick its account filled;
+a drained share that waits fills no earlier than the release.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: a drained share's account fills before the release
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -208,7 +208,6 @@ static void share_settle(struct share *s)
+     }
+     if (s->drained && s->queue != NULL && s->budget != 0 &&
+         tick_before(sched_ticks + share_fill(s, s->balance), nearest_release)) {
+-        nearest_release = sched_ticks + share_fill(s, s->balance);
+     }
+ }
+ 

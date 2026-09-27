@@ -89,17 +89,17 @@
  * The timer tick stops preempting,
  * because a transcript the host build must reproduce
  * cannot contain a switch that lands between two instructions.
- * A window of the shares' budgets begins, see OP_SHARE_MOVE,
- * so that the host build counts windows from the same tick.
+ * Every share's account is filled, see OP_SHARE_MOVE,
+ * so that the host build starts from the same accounts.
  * It cannot be turned off again, so a traced program cannot hide.
  */
 #define OP_DEBUG_TRACE 10
 /*
  * Debug: what the timer tick does, on request.
  * Time moves by one tick, charged to the share whose turn it is,
- * every timer line that is due signals, a window ends if this was its last tick,
+ * every timer line that is due signals, a drained share whose account filled has time again,
  * and the running share's turn ends: the caller goes to the back of its share's ring,
- * the share to the back of the queue its budget puts it on, and the next share has its turn,
+ * the share to the back of the queue its account puts it on, and the next share has its turn,
  * and the caller stays ready.
  * Works while tracing is on, unlike the tick itself;
  * see DESIGN.md, "Verification".
@@ -368,19 +368,22 @@
 /*
  * Share: describe one of the capability's shares. a1 = its offset from the first one.
  * Returns a1 = its budget and a2 = its flags.
- * How much of the window it has used is not told: that would be a clock.
+ * How much its account holds is not told: that would be a clock.
  */
 #define OP_SHARE_INFO 30
 /*
  * Share (RIGHT_W): move budget from one of the capability's shares to another.
  * a1 = the source's offset from the first share, a2 = the destination's,
  * a3 = how much, at most what the source holds.
- * A budget is a share's part of every window, counted in BUDGET_WHOLE parts of the processor;
- * the budgets of all the shares add up to BUDGET_WHOLE, and a move keeps them so.
- * A share with budget left in the window takes its turns before a share without,
- * and one without SHARE_SPARE takes none until the next window;
+ * A budget is a share's part of the processor, counted in BUDGET_WHOLE parts of it:
+ * what the share's account gains every tick, up to a tenth of a second's worth.
+ * The budgets of all the shares add up to BUDGET_WHOLE, and a move keeps them so;
+ * it moves as much of the source's account with the budget as that budget would hold when full.
+ * A share with time in its account takes its turns before a share without,
+ * and a share that spends its account below a tick has no time until it is full again,
+ * and while it has none, without SHARE_SPARE, takes no turn at all;
  * see DESIGN.md, "Scheduling".
- * A share keeps its budget and its flags through a revoke of its capabilities,
+ * A share keeps its budget, its account and its flags through a revoke of its capabilities,
  * as a frame keeps its bytes, so whoever lends it again sets them first.
  */
 #define OP_SHARE_MOVE 31
@@ -388,11 +391,11 @@
  * Share (RIGHT_X): set the flags of one of the capability's shares.
  * a1 = its offset from the first share, a2 = the flags, SHARE_SPARE or none;
  * any other bit fails with KERR_INVALID_ARG.
- * A share without SHARE_SPARE runs on its budget alone:
- * at most its part of every window, however idle the processor is otherwise.
+ * A share without SHARE_SPARE runs on its account alone:
+ * at most its part of the processor and a full account, however idle the processor is otherwise.
  */
 #define OP_SHARE_SET 32
-/* The share runs on spare time too: time no share with budget left in the window wants. */
+/* The share runs on spare time too, which costs its account nothing: time no share with time in its account wants. */
 #define SHARE_SPARE 0x1
 /* The whole processor, as a budget; see OP_SHARE_MOVE. */
 #define BUDGET_WHOLE 0x10000u

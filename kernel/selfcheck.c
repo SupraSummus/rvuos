@@ -423,47 +423,78 @@ static void check_share_queue(unsigned q, uint32_t owed)
     }
 }
 
+/* The most a share's account may hold: its budget's part of ACCOUNT_TICKS ticks, in whole ticks. */
+static uint32_t cap_of(const struct share *s)
+{
+    uint32_t ticks = (s->budget * ACCOUNT_TICKS + TICK_PARTS - 1) / TICK_PARTS;
+    return ticks * TICK_PARTS;
+}
+
+/*
+ * A share's account at the count, its stamp's balance and its budget for every tick since, held to the cap,
+ * and whether it is drained then: a drained share with a budget has time again once full.
+ */
+static uint32_t account_now(const struct share *s, bool *drained)
+{
+    uint64_t balance = s->balance + (uint64_t)(sched_ticks - s->stamp) * s->budget;
+    if (balance > cap_of(s)) {
+        balance = cap_of(s);
+    }
+    *drained = s->drained && (s->budget == 0 || balance != cap_of(s));
+    return (uint32_t)balance;
+}
+
 /*
  * Every share's ring holds its ready threads but the running one, which check_queue reads.
+ * Every account holds at most its cap and is stamped no later than the count,
+ * a share with time has at least a tick in its account, and one with no budget has no time;
+ * the share whose turn it is has its account up to the count while it has time.
  * A share with a ready thread but the one whose turn it is waits on one queue:
- * the run queue while fewer ticks were charged to it in the window than its budget rounds up to,
- * else the spare queue with SHARE_SPARE, else the spent queue;
+ * the run queue while it has time, else the spare queue with SHARE_SPARE, else the spent queue;
  * any other share waits on none.
- * Something runs, so it is some share's turn.
- * The budgets add up to the whole processor, and each tick of the window was charged once,
- * to the share whose turn it was or, while none ran, to nobody.
+ * A drained share that waits has an account not full yet, so the release has given time to every one due,
+ * and it fills no earlier than the release, which lies ahead of the count.
+ * Something runs, so it is some share's turn, and the budgets add up to the whole processor.
  */
 static void check_shares(void)
 {
     if (current != NULL && (turn == NULL || !is_share(turn))) {
         fail("it is no share's turn", 0, 0, 0);
     }
-    if (window_ticks >= WINDOW_TICKS) {
-        fail("the window went on past its end", window_ticks, 0, 0);
+    if ((int32_t)(nearest_release - sched_ticks) <= 0) {
+        fail("the release is for a tick already past", nearest_release, sched_ticks, 0);
     }
     uint32_t owed[QUEUES] = { 0 };
-    uint32_t budget = 0, charged = window_idle;
+    uint32_t budget = 0;
     for (unsigned i = 0; i < SHARES; i++) {
         const struct share *s = &shares[i];
         check_queue(s->threads, THREAD_READY, 0, s);
         if (s->budget > BUDGET_WHOLE || (s->flags & ~(uint32_t)SHARE_SPARE) != 0) {
             fail("share has a budget or flags it cannot have", i, s->budget, s->flags);
         }
-        if (s->used > window_ticks) {
-            fail("share was charged more ticks than the window has had", i, s->used, window_ticks);
+        if (s->balance > cap_of(s)) {
+            fail("share's account holds more than its cap", i, s->balance, cap_of(s));
+        }
+        if ((int32_t)(sched_ticks - s->stamp) < 0) {
+            fail("share's account is stamped ahead of the count", i, s->stamp, sched_ticks);
+        }
+        if (!s->drained && (s->balance < TICK_PARTS || s->budget == 0)) {
+            fail("share has time without a tick in its account", i, s->balance, s->budget);
+        }
+        /* Every tick of a turn with time is charged to its share as it passes, and nothing else moves its stamp. */
+        if (s == turn && !s->drained && s->stamp != sched_ticks) {
+            fail("the ticks of a turn were not charged to its share", i, s->stamp, sched_ticks);
         }
         budget += s->budget;
-        charged += s->used;
         unsigned want = QUEUES;
         if (s->threads != 0 && s != turn) {
-            uint32_t worth = (s->budget * WINDOW_TICKS + BUDGET_WHOLE - 1) / BUDGET_WHOLE;
-            want = s->used < worth ? QUEUE_RUN : (s->flags & SHARE_SPARE) ? QUEUE_SPARE : QUEUE_SPENT;
+            want = !s->drained ? QUEUE_RUN : (s->flags & SHARE_SPARE) ? QUEUE_SPARE : QUEUE_SPENT;
         }
         unsigned on = queue_index(s);
         if (on != want) {
             fail(want == QUEUES ? "a queue holds a share it is not for"
                  : on == QUEUES ? "a share with a ready thread waits on no queue"
-                                : "a share waits on another queue than its budget says",
+                                : "a share waits on another queue than its account says",
                  i, on, want);
         }
         if (on == QUEUES && (s->next != NULL || s->prev != NULL)) {
@@ -472,17 +503,80 @@ static void check_shares(void)
         if (on != QUEUES) {
             owed[on]++;
         }
+        if (s->drained && on != QUEUES && s->budget != 0) {
+            bool drained;
+            account_now(s, &drained);
+            if (!drained) {
+                fail("a drained share waits with its account full", i, s->balance, s->stamp);
+            }
+            uint32_t missing = cap_of(s) - s->balance;
+            uint32_t full = s->stamp + missing / s->budget + (missing % s->budget != 0);
+            if ((int32_t)(full - nearest_release) < 0) {
+                fail("a drained share's account fills before the release", i, full, nearest_release);
+            }
+        }
     }
     _Static_assert((uint64_t)BUDGET_WHOLE * SHARES <= UINT32_MAX &&
-                   (uint64_t)BUDGET_WHOLE * WINDOW_TICKS <= UINT32_MAX, "the sums above do not wrap");
+                   (uint64_t)BUDGET_WHOLE * ACCOUNT_TICKS + TICK_PARTS <= UINT32_MAX,
+                   "the sums above do not wrap");
     if (budget != BUDGET_WHOLE) {
         fail("the budgets of the shares do not add up to the whole processor", budget, 0, 0);
     }
-    if (charged != window_ticks) {
-        fail("the window's ticks were not each charged once", charged, window_ticks, 0);
-    }
     for (unsigned q = 0; q < QUEUES; q++) {
         check_share_queue(q, owed[q]);
+    }
+}
+
+/*
+ * The timer interrupts only at a tick that could change what runs, and a trap counts the others.
+ * The nearest deadline it wakes for lies ahead of the count, and check_irq holds every armed timer line to it.
+ * While a thread runs, every tick the timer lets pass would hand the processor back to that thread:
+ * it is on the share whose turn it is, which has no other thread ready and would have the next turn again,
+ * with time and no share on the run queue, or drained with spare time and no share on either queue;
+ * and none of them is the release, the nearest deadline, or the tick at which that share's account
+ * leaves it less than a tick, or fills while it is drained.
+ * The tick the timer was last set for is one of those, a later one only after a change that marked it stale.
+ * check_shares has made sure that it is some share's turn.
+ */
+static void check_wake(void)
+{
+    if ((int32_t)(nearest_deadline - sched_ticks) <= 0) {
+        fail("the timer wakes for a deadline already past", nearest_deadline, sched_ticks, 0);
+    }
+    if (current == NULL) {
+        return;
+    }
+    uint32_t wake = sched_wake_ticks();
+    /* Unless a change since marked it stale, the tick the timer was set for still comes no later. */
+    int32_t set = (int32_t)(wake_tick - sched_ticks);
+    if (!wake_stale && (set < 1 || set > (int32_t)wake)) {
+        fail("the timer is set past a tick an unmarked change brought forward", wake_tick, sched_ticks, wake);
+    }
+    if (wake <= 1) {
+        if (wake == 0) {
+            fail("the timer wakes for a tick already counted", 0, 0, 0);
+        }
+        return;
+    }
+    const struct share *s = turn;
+    bool drained;
+    uint32_t balance = account_now(s, &drained);
+    if (thread_share(current) != s || s->threads != 0 || run_queue != NULL ||
+        (drained && !((s->flags & SHARE_SPARE) && spare_queue == NULL))) {
+        fail("the timer lets a tick pass that ends the turn", wake, (uint32_t)(s - shares), 0);
+    }
+    /* On the tick before the timer's the account still has a tick in it, or while drained is not full yet. */
+    if (!drained && (uint64_t)(wake - 1) * (TICK_PARTS - s->budget) > balance - TICK_PARTS) {
+        fail("the timer lets the tick pass that drains the turn's account", wake, balance, s->budget);
+    }
+    if (drained && s->budget != 0 && balance + (uint64_t)(wake - 1) * s->budget >= cap_of(s)) {
+        fail("the timer lets the tick pass that fills the turn's account", wake, balance, s->budget);
+    }
+    if (wake > nearest_release - sched_ticks) {
+        fail("the timer lets the release pass", wake, nearest_release, sched_ticks);
+    }
+    if (wake > nearest_deadline - sched_ticks) {
+        fail("the timer lets the nearest deadline pass", wake, nearest_deadline, sched_ticks);
     }
 }
 
@@ -504,6 +598,10 @@ static void check_irq(const struct irq *i)
     /* The tick fires every due timer line, so one still armed lies ahead. */
     if (line_is_timer(i->line) && irq_armed(i) && irq_due(i, sched_ticks)) {
         fail("armed timer line is due", v2p(i), i->deadline, sched_ticks);
+    }
+    /* The timer wakes for the nearest deadline, which no armed timer line's comes before. */
+    if (line_is_timer(i->line) && irq_armed(i) && (int32_t)(i->deadline - nearest_deadline) < 0) {
+        fail("armed timer line comes due before the timer wakes for it", v2p(i), i->deadline, nearest_deadline);
     }
     /*
      * The log's line is high while the reader has bytes to take,
@@ -985,6 +1083,7 @@ void selfcheck_run(void)
         }
     }
     check_shares();
+    check_wake();
     /* Every queued thread is one its queue is for, so equal counts leave none out. */
     if (owed_threads != queued_threads) {
         fail("a waiting or ready thread is on no queue", owed_threads, queued_threads, 0);

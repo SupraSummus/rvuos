@@ -214,9 +214,11 @@ struct thread *host_boot(void)
     spare_queue = NULL;
     spent_queue = NULL;
     turn = NULL;
-    window_ticks = 0;
-    window_idle = 0;
     armed_sources = 0;
+    nearest_deadline = NEAREST_NONE;
+    nearest_release = NEAREST_NONE;
+    wake_stale = false;
+    turn_due = false;
     sched_ticks = 0;
     debug_trace = false;
     pmp_init();
@@ -296,6 +298,8 @@ uint32_t host_syscall(const struct replay_record *c)
         work_begin();
 #endif
         syscall_dispatch(current);
+        /* What the trap does on its way back, which the self-check of the next call holds. */
+        sched_wake();
 #ifdef RVUOS_WORK
         work_end();
 #endif

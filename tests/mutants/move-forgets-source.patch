@@ -1,18 +1,18 @@
-A move gives the destination its budget and leaves the source's as it was.
-Every move then makes processor time out of nothing;
+A move adds budget to the destination and takes none from the source.
+The processor would be promised more than once over;
 the budgets of the shares add up to the whole processor.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
 Report: the budgets of the shares do not add up to the whole processor
 
-diff --git a/kernel/syscall.c b/kernel/syscall.c
---- a/kernel/syscall.c
-+++ b/kernel/syscall.c
-@@ -575,7 +575,6 @@ static int op_share(struct thread *t, uint32_t slot, const struct cap *cap,
-             return KERR_INVALID_ARG;
-         }
-         /* What one share gives the other takes, so the budgets still add up to the whole. */
--        from->budget -= arg[3];
-         to->budget += arg[3];
-         sched_share_changed(from);
-         sched_share_changed(to);
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -342,7 +342,6 @@ void sched_share_move(struct share *from, struct share *to, uint32_t budget)
+     if (moved > from->balance) {
+         moved = from->balance;
+     }
+-    from->budget -= budget;
+     from->balance -= moved;
+     to->budget += budget;
+     to->balance += moved;

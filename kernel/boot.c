@@ -91,13 +91,15 @@ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
     }
 
     /*
-     * The root task holds the whole processor on the first share, and every share may run on spare time,
+     * The root task holds the whole processor on the first share, with a full account,
+     * and every share may run on spare time,
      * so one given no budget runs whenever the root task's share does not want the processor.
      */
     for (unsigned i = 0; i < SHARES; i++) {
         shares[i].flags = SHARE_SPARE;
     }
     shares[0].budget = BUDGET_WHOLE;
+    sched_accounts_fill();
 
     /*
      * The root thread runs on the first share, bound through the capability to them all.

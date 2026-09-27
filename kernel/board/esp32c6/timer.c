@@ -69,19 +69,24 @@ static uint64_t systimer_read(void)
     return ((uint64_t)REG(SYSTIMER_UNIT0_HI) << 32) | REG(SYSTIMER_UNIT0_LO);
 }
 
-/* The next tick's compare value, which mtimecmp holds unless the stall deferred it. */
+/* The compare value of the tick after the last counted one. */
 static uint64_t next_tick;
 
-uint32_t timer_ack(void)
+/* What mtimecmp holds, so that setting it for the tick it holds writes nothing. */
+static uint64_t compare;
+
+uint32_t timer_count(void)
 {
-    uint32_t passed = timer_next(&next_tick, mtime_read(), tick_cycles);
-    mtimecmp_write(next_tick);
-    return passed;
+    return timer_next(&next_tick, mtime_read(), tick_cycles);
 }
 
-void timer_defer(uint32_t ticks)
+void timer_set(uint32_t ticks)
 {
-    mtimecmp_write(timer_deferred(next_tick, ticks, tick_cycles));
+    uint64_t at = timer_deferred(next_tick, ticks, tick_cycles);
+    if (at != compare) {
+        compare = at;
+        mtimecmp_write(at);
+    }
 }
 
 /* The rate is measured over one tick, so it is as exact as the loop below. */
@@ -103,6 +108,7 @@ void timer_init(void)
     tick_cycles = (uint32_t)(mtime_read() - mtime_start);
 
     next_tick = mtime_read() + tick_cycles;
-    mtimecmp_write(next_tick);
+    compare = next_tick;
+    mtimecmp_write(compare);
     csr_set(mie, MIE_MTIE);
 }

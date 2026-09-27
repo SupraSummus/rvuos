@@ -1,0 +1,20 @@
+The timer lets the release pass while a thread runs alone.
+A drained share whose account filled would wait for a deadline or the running share's own account;
+the release is not a tick the timer lets pass.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: the timer lets the release pass
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -478,9 +478,6 @@ uint32_t sched_wake_ticks(void)
+         return 1;
+     }
+     uint32_t wake = nearest_deadline - sched_ticks;
+-    if (tick_before(nearest_release, nearest_deadline)) {
+-        wake = nearest_release - sched_ticks;
+-    }
+     if (turn == NULL) {
+         return wake;
+     }
