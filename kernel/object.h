@@ -481,20 +481,30 @@ struct share {
     struct share **queue;
     struct share *next;
     struct share *prev;
-    /* Its part of every window, in BUDGET_WHOLE parts of the processor. */
+    /* Its part of the processor, in BUDGET_WHOLE parts: what its account gains every tick. */
     uint32_t budget;
-    /* The ticks the window charged it with so far. */
-    uint32_t used;
+    /*
+     * Its account at the tick stamp, in TICK_PARTS parts of a tick,
+     * at most its budget's part of ACCOUNT_TICKS ticks, rounded up to whole ticks.
+     * It is brought up to the count only when the kernel looks at it.
+     */
+    uint32_t balance;
+    uint32_t stamp;
+    /* It spent its account below a tick and has no time until the account is full again. */
+    bool drained;
     uint32_t flags;     /* SHARE_SPARE or none */
 };
 extern struct share shares[SHARES];
 
+/* A tick in the parts an account counts: a budget is what an account gains in a tick, and a tick costs this. */
+#define TICK_PARTS BUDGET_WHOLE
+
 /*
  * The shares with a ready thread but the one whose turn it is wait on three queues,
  * each a ring, oldest first, NULL when empty:
- * the run queue those with budget left in the window,
- * the spare queue those without it that may run on spare time,
- * and the spent queue the rest, which wait for the next window.
+ * the run queue those with time in their account,
+ * the spare queue those drained that may run on spare time,
+ * and the spent queue the rest, which wait for their account to fill.
  * The oldest on the run queue has the next turn, or when it is empty the oldest on the spare queue,
  * and a share that gets a ready thread joins behind the newest of its queue.
  */
@@ -503,11 +513,12 @@ extern struct share *spare_queue;
 extern struct share *spent_queue;
 
 /*
- * The ticks of the window so far, fewer than WINDOW_TICKS,
- * and those of them no share was charged with, because none ran.
+ * The tick the kernel next looks at the drained shares that wait, to give those whose account is full time again:
+ * the nearest tick one of them fills, or NEAREST_NONE ticks ahead of the count with none.
+ * A share brings it forward as it waits drained, and the look makes it exact again,
+ * so it may lie before the nearest such tick but never after one, and always ahead of the count.
  */
-extern uint32_t window_ticks;
-extern uint32_t window_idle;
+extern uint32_t nearest_release;
 
 /*
  * The share whose turn it is: the running thread's, or the one it lost or was moved off during the turn;
@@ -528,6 +539,25 @@ static inline struct share *thread_share(const struct thread *t)
  * Every write of an Irq's bits goes through irq_set_bits, which keeps it.
  */
 extern uint32_t armed_sources;
+
+/*
+ * The tick the timer has to interrupt at for the timer lines: the nearest deadline of one armed,
+ * or NEAREST_NONE ticks ahead of the count with none, as far as a signed difference reaches.
+ * An arm brings it forward, and a tick, which looks at every line, makes it exact again,
+ * so it may lie before the nearest deadline but never after one, and always ahead of the count.
+ */
+#define NEAREST_NONE 0x7fffffffu
+extern uint32_t nearest_deadline;
+
+/*
+ * The tick the timer is set for, whether a change since may call for another,
+ * and whether a trap's count has reached it, which ends the turn as that trap returns.
+ * Settling a share, binding or unbinding a thread, a switch, a tick, an arm and the stall mark it stale.
+ * The marks of a switch and a bind only let the timer be set further sooner, so no check misses them.
+ */
+extern uint32_t wake_tick;
+extern bool wake_stale;
+extern bool turn_due;
 
 /* Arm with bits, or disarm with zero; the deadline, or the line's mask, is the caller's. */
 void irq_set_bits(struct irq *irq, uint32_t bits);
@@ -551,17 +581,24 @@ void sched_unbind(struct cap *bound);
 void sched_share_changed(struct share *s);
 
 /*
- * Begin a window: every share has its whole budget again and goes to the queue that puts it on.
- * The tick that ends a window calls it, and OP_DEBUG_TRACE does.
+ * Fill every share's account, and put each on the queue that puts it on;
+ * a share with no budget has none and stays drained.
+ * The boot calls it once the budgets are set, and OP_DEBUG_TRACE does.
  */
-void sched_window_start(void);
+void sched_accounts_fill(void);
+
+/*
+ * Move budget from one share to another, and with it as much of the first's account as that budget holds when full,
+ * or all the account has; both go to the queue they now wait on.
+ */
+void sched_share_move(struct share *from, struct share *to, uint32_t budget);
 
 /* Start running a thread with nothing else run before it; the boot's. */
 void sched_start(struct thread *t);
 
 /*
  * Ticks so far.
- * Only the tick and OP_DEBUG_TICK move it,
+ * Only a trap's count of the ticks, the stall's and OP_DEBUG_TICK move it,
  * and the deadlines of timer lines are counted in it.
  */
 extern uint32_t sched_ticks;
@@ -583,12 +620,35 @@ void sched_run_next(void);
 
 /*
  * The timer tick: charge the ticks that passed to the share whose turn it is, count them,
- * fire every timer line that is due, begin a window when this one is over,
+ * fire every timer line that is due, give time again to the drained shares whose account is full,
  * and end the running share's turn: the running thread goes to the back of its share's ring,
- * the share to the back of the queue its budget puts it on, and the next share has its turn.
- * The interrupt calls it, and OP_DEBUG_TICK does on request.
+ * the share to the back of the queue its account puts it on, and the next share has its turn.
+ * OP_DEBUG_TICK calls it; the interrupt does the same through sched_count and sched_wake.
  */
 void sched_tick(uint32_t ticks);
+
+/*
+ * The ticks a trap found passed since the last counted one, which the timer did not interrupt for:
+ * charge and count them as sched_tick does, and note whether they reached wake_tick.
+ * Every trap calls it on entry, untraced, so the count is current before anything reads it.
+ */
+void sched_count(uint32_t ticks);
+
+/*
+ * The trap is over: end the turn if its count reached wake_tick, untraced,
+ * and if wake_tick is stale return the ticks from the count to the next the timer has to interrupt at,
+ * one being the next, which becomes wake_tick; zero if the timer is right as it is.
+ * Every trap calls it on its way back, and the host after every call, so that the self-check can hold it.
+ */
+uint32_t sched_wake(void);
+
+/*
+ * The ticks from the count to the first that could change what runs, at least one:
+ * the next while a thread other than the running one could have the next turn,
+ * else the nearest of the deadline, the release and the tick the running share's account drains or fills.
+ * See DESIGN.md, "Scheduling".
+ */
+uint32_t sched_wake_ticks(void);
 
 /*
  * A device interrupt on a line: the Irq armed on it masks the line,

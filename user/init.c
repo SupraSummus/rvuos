@@ -16,6 +16,7 @@
  * split the processor between two shares however many threads one of them runs,
  * stop threads by revoking their share and start one again by binding it,
  * hold a share to its budget and let it run on spare time,
+ * spin through the ticks while nothing else can run,
  * bind and revoke an Irq on a line nothing drives,
  * then unmap a region and fault on it.
  * Negative paths are covered by the fuzz corpus and tests/differential.py.
@@ -142,8 +143,8 @@ enum {
 #define SHARED_TURN    2
 #define SHARED_SPINS   3
 
-/* The kernel's window, over which a share's budget counts: a hundred ticks on every board so far. */
-#define WINDOW_US 100000u
+/* The most of its budget a share's account holds: a hundred ticks' worth on every board so far. */
+#define ACCOUNT_US 100000u
 
 /* Threads the root task adds on its own share, each counting as it spins. */
 #define SPINNERS 3u
@@ -428,6 +429,37 @@ static uint32_t spun(void)
     return sum;
 }
 
+/*
+ * Read the counter's low word until it has moved on by counts,
+ * and count the gaps between two reads longer than gap; *reads receives how many reads it took.
+ */
+static uint32_t spin_reads(uint32_t counter, uint32_t counts, uint32_t gap, uint32_t *reads)
+{
+    const volatile uint32_t *low = (const volatile uint32_t *)counter;
+    uint32_t start = *low, last = start, now, gaps = 0, n = 0;
+    do {
+        now = *low;
+        gaps += now - last > gap;
+        last = now;
+        n++;
+    } while (now - start < counts);
+    *reads = n;
+    return gaps;
+}
+
+/*
+ * Spin for ms milliseconds and count the traps that came meanwhile:
+ * the gaps between two reads of the counter longer than eight reads take on average, plus a step of the counter.
+ * A trap costs far more than a read on every board, while the counter's rate against the processor is the board's,
+ * so the average comes from a first spin a tenth as long, which a trap would barely move.
+ */
+static uint32_t spin_traps(uint32_t counter, uint32_t hz, uint32_t ms)
+{
+    uint32_t counts = hz / 1000u * ms, reads;
+    spin_reads(counter, counts / 10u, UINT32_MAX, &reads);
+    return spin_reads(counter, counts, 8u * (counts / 10u) / reads + 2u, &reads);
+}
+
 int main(void);
 
 int main(void)
@@ -536,8 +568,9 @@ int main(void)
                      child_data_base + CHUNK, 0));
     /*
      * The child runs on a share of its own, the second, so it takes turns with this whole process.
-     * The first share holds the whole budget, and a share with budget left goes before one without,
-     * so the child's share gets half of it: while both want the processor, they take turns.
+     * The first share holds the whole budget, and a share with time goes before one without,
+     * so the child's share gets half of it, and half the first share's account with it:
+     * while both want the processor, they take turns.
      */
     expect("carve the child a share",
            rv_invoke(OP_SHARE_CARVE, BOOT_CAP_SHARES, 1, 1, SLOT_CHILD_SHARE));
@@ -801,9 +834,10 @@ int main(void)
 
     /*
      * Budgets; see DESIGN.md, "Scheduling".
-     * With an eighth and no spare time the spinner runs 13 to 39 of the 201 ticks of two windows,
-     * an eighth of each and of the two it straddles, while the processor idles the rest;
-     * with spare time it runs all of half a window, since nothing else wants the processor.
+     * With an eighth and no spare time the spinner runs at most what the share's account holds,
+     * 13 ticks, and an eighth of the 201 ticks of the sleep, while the processor idles the rest:
+     * 20 on QEMU, since it spends what the move left the account, waits for it to fill, and spends it again.
+     * With spare time it runs all of the next 51, since nothing else wants the processor.
      */
     uint32_t budget, flags;
     expect("keep an eighth of the processor on the child's share",
@@ -816,17 +850,32 @@ int main(void)
     first_spun = spins[0];
     expect("put the spinner on it once more",
            rv_invoke(OP_SHARE_BIND, SLOT_CHILD_SHARE, SLOT_SPINNER, 0, 0));
-    expect("sleep for two windows", sleep_us(2 * WINDOW_US));
+    expect("sleep for two accounts' worth", sleep_us(2 * ACCOUNT_US));
     uint32_t capped = spins[0] - first_spun;
     expect("give it spare time", rv_invoke(OP_SHARE_SET, BOOT_CAP_SHARES, 1, SHARE_SPARE, 0));
     first_spun = spins[0];
-    expect("sleep for half a window", sleep_us(WINDOW_US / 2));
+    expect("sleep for half an account's worth", sleep_us(ACCOUNT_US / 2));
     uint32_t spare = spins[0] - first_spun;
     expect("take the share back for good",
            rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_CHILD_SHARE, 0, 0));
-    expect("it spun an eighth of the windows and all of the spare time",
+    expect("it spun its account and an eighth, and all of the spare time",
            8 * capped > spare && capped < spare ? KERR_OK : KERR_INVALID_ARG);
     puts("root: budget ok\n");
+
+    /*
+     * The tick; see DESIGN.md, "Scheduling".
+     * The timer interrupts only at a tick that could change what runs,
+     * so a thread that spins while every other thread waits runs without a trap
+     * until its account runs low, far past the spin here,
+     * where a tick at every millisecond would end its turn only to hand it back.
+     * It sleeps first so that the logger carries everything out and waits, and prints nothing as it spins.
+     */
+    status = sleep_us(SLEEP_US);
+    uint32_t traps = spin_traps(counter, hz, SPIN_US / 1000u);
+    expect("let the logger finish", status);
+    expect("the only thread to run spun through the ticks",
+           4 * traps < SPIN_US / 1000u ? KERR_OK : KERR_INVALID_ARG);
+    puts("root: tickless ok\n");
 
     /* The child is done, and goes with its pool. */
     expect("destroy the child's pool", rv_invoke(OP_POOL_DESTROY, SLOT_POOL, 0, 0, 0));

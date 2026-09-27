@@ -1,0 +1,18 @@
+A share begins its turn with its account where it last looked at it.
+The ticks it waited would be counted as ticks of its turn, gained and spent at once;
+the share whose turn it is has its account up to the count while it has time.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: the ticks of a turn were not charged to its share
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -293,7 +293,6 @@ static struct share *next_turn(void)
+     struct share *s = run_queue != NULL ? run_queue : spare_queue;
+     if (s != NULL) {
+         share_remove(s);
+-        share_refill(s);
+     }
+     return s;
+ }

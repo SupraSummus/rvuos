@@ -39,8 +39,8 @@ static int op_debug(uint32_t op, const uint32_t *arg)
         khalt((int)arg[1]);
     case OP_DEBUG_TRACE:
         debug_trace = true;
-        /* The host counts windows from its first traced call, where the target has run a while. */
-        sched_window_start();
+        /* The host boots with full accounts, and the target has run a while before its first traced call. */
+        sched_accounts_fill();
         return KERR_OK;
     case OP_DEBUG_TICK:
         /* The caller's status is written to its own frame, whoever runs next. */
@@ -574,11 +574,7 @@ static int op_share(struct thread *t, uint32_t slot, const struct cap *cap,
         if (arg[3] > from->budget) {
             return KERR_INVALID_ARG;
         }
-        /* What one share gives the other takes, so the budgets still add up to the whole. */
-        from->budget -= arg[3];
-        to->budget += arg[3];
-        sched_share_changed(from);
-        sched_share_changed(to);
+        sched_share_move(from, to, arg[3]);
         return KERR_OK;
     }
     case OP_SHARE_SET: {

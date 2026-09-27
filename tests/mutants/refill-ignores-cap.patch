@@ -1,0 +1,20 @@
+An account gains its budget every tick without a limit.
+A share idle for long would come back with a burst that keeps every other share waiting;
+no account holds more than its cap.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: share's account holds more than its cap
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -154,9 +154,6 @@ static uint32_t share_balance(const struct share *s, bool *drained)
+ {
+     uint32_t cap = share_cap(s);
+     uint64_t balance = s->balance + (uint64_t)(sched_ticks - s->stamp) * s->budget;
+-    if (balance > cap) {
+-        balance = cap;
+-    }
+     *drained = balance < TICK_PARTS || (s->drained && balance < cap);
+     return (uint32_t)balance;
+ }

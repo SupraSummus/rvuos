@@ -64,7 +64,7 @@ static void replay(const uint8_t *data, size_t size)
     selfcheck_run();
     /* What OP_DEBUG_TRACE does, which the driver calls here. */
     debug_trace = true;
-    sched_window_start();
+    sched_accounts_fill();
     /* The driver starts its second thread traced; see rvuos/replay.h. */
     if (host_syscall(&replay_start) != KERR_OK) {
         abort();

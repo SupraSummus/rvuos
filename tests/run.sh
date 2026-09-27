@@ -71,6 +71,8 @@ grep -q 'root: rebind ok' "$log" \
     || fail "a thread bound to a share again did not run, or another ran with it"
 grep -q 'root: budget ok' "$log" \
     || fail "a share without spare time ran past its budget, or one with it did not run on spare time"
+grep -q 'root: tickless ok' "$log" \
+    || fail "the timer interrupted the only thread to run at ticks that changed nothing"
 grep -q 'the idle line stays quiet: ok' "$log" \
     || fail "an armed line nothing raises signalled"
 grep -q 'root: irq ok' "$log" \

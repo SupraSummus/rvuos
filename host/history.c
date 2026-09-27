@@ -1,6 +1,6 @@
 /*
- * The properties "Authority only flows", "Memory crosses zeroed"
- * and "The caller keeps what it runs on" of DESIGN.md,
+ * The properties "Authority only flows", "Memory crosses zeroed",
+ * "The caller keeps what it runs on" and "A tick charges" of DESIGN.md,
  * which relate the state before a call to the state after it.
  * host_syscall runs history_begin before each call and history_end after it.
  *
@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "harness.h"
+#include "timer.h"
 
 /* What a capability grants, as the covering rule compares it: a range, an object, or the debug capability. */
 struct grant {
@@ -48,6 +49,19 @@ static bool caller_dying;
 
 /* Every share's budget and flags before the call. */
 static uint32_t budget_before[SHARES], flags_before[SHARES];
+
+/* The count before the call, and the share whose turn it was with its account if it had time, else NULL. */
+static uint32_t ticks_before;
+static const struct share *charged;
+static uint32_t charged_balance;
+
+/* A share's account at the count, as its stamp and its budget make it, held to the cap. */
+static uint32_t account_at_count(const struct share *s)
+{
+    uint32_t cap = (s->budget * ACCOUNT_TICKS + TICK_PARTS - 1) / TICK_PARTS * TICK_PARTS;
+    uint64_t balance = s->balance + (uint64_t)(sched_ticks - s->stamp) * s->budget;
+    return balance > cap ? cap : (uint32_t)balance;
+}
 
 static bool dying_under(const struct thread *t, const struct captable *table)
 {
@@ -183,6 +197,9 @@ void history_begin(void)
         budget_before[i] = shares[i].budget;
         flags_before[i] = shares[i].flags;
     }
+    ticks_before = sched_ticks;
+    charged = turn != NULL && !turn->drained ? turn : NULL;
+    charged_balance = charged != NULL ? account_at_count(charged) : 0;
 }
 
 /* An object the call built, which the caller must have been able to build. */
@@ -242,6 +259,16 @@ void history_end(void)
 
     record_objects(&objects_after);
     each_node(&objects_after, check_node);
+
+    /*
+     * A tick costs the share whose turn it is, while it has time, a whole tick,
+     * and gains it its budget, as every tick does; only OP_DEBUG_TICK moves time here.
+     */
+    if (charged != NULL && sched_ticks == ticks_before + 1 &&
+        charged->budget == budget_before[charged - shares] &&
+        account_at_count(charged) != charged_balance - (TICK_PARTS - charged->budget)) {
+        violated("a tick did not cost the share whose turn it was a tick less its budget");
+    }
 
     /* A share's budget moves only through a capability to it that may move it, and its flags likewise. */
     for (unsigned i = 0; i < SHARES; i++) {

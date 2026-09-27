@@ -1,0 +1,18 @@
+A timer line armed for a deadline nearer than any other leaves the timer where it was.
+The timer would interrupt after the deadline and the thread sleep past it;
+the nearest deadline the timer wakes for comes no later than any armed timer line's.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: armed timer line comes due before the timer wakes for it
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -47,7 +47,6 @@ void irq_set_bits(struct irq *irq, uint32_t bits)
+     }
+     /* A timer line armed for a nearer deadline brings the timer's next interrupt forward to it. */
+     if (line_is_timer(irq->line) && bits != 0 && tick_before(irq->deadline, nearest_deadline)) {
+-        nearest_deadline = irq->deadline;
+         wake_stale = true;
+     }
+     irq->bits = bits;

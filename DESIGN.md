@@ -219,10 +219,11 @@ Userspace sees it only through the timer lines,
 whose deadlines are counted in ticks; see "Time".
 Where the registers live and how fast they count is the board's business,
 so `timer.c` is per board, as `irq.c` is.
-On every tick the kernel moves `mtimecmp` on by whole periods to the first that lies ahead of `mtime`
-and counts each period as a tick,
-so the tick count keeps pace with the counter however late the interrupt is taken,
+The kernel counts ticks on the counter rather than on interrupts:
+every trap counts the whole periods `mtime` has passed since the last tick it counted,
+so the tick count keeps pace with the counter however late or seldom the interrupt is taken,
 and a long system call costs one late tick and not a burst of them.
+`mtimecmp` is set only for the first tick that could change what runs; see "Scheduling".
 QEMU `virt` counts at 10 MHz in a SiFive CLINT.
 The ESP32-C6 has a CLINT of Espressif's,
 whose counter and interrupt stay off until a control word starts them,
@@ -773,7 +774,7 @@ the delay rounded up to whole ticks, plus one.
 The tick's period is the board's business and not part of the ABI.
 An upper bound is not promised because the kernel could not keep one:
 the woken thread is ready, not running, and waits for its share's turn and then its own,
-and for the next window if its share spent its budget and has no spare time.
+and for its share's account to fill if the share spent it and has no spare time.
 A timer line that fires disarms its `Irq`, as a device's line does,
 and setting an armed one moves its deadline rather than adding a second.
 
@@ -876,29 +877,41 @@ A thread that loses its share while it runs, or is moved to another, finishes th
 so only a wait or the tick takes the processor from a running thread,
 and a call stopped for an interrupt is made again before anything else runs.
 
-**A share has a budget.**
+**A share has a budget and an account.**
 The processor is `BUDGET_WHOLE` parts, and each share holds some of them, its budget:
-its part of every window, `WINDOW_TICKS` ticks, a tenth of a second.
-The root task receives the whole on its first share,
+its part of the processor, which its account gains every tick.
+The account counts in parts of a tick, `TICK_PARTS` of them, as many as the whole budget,
+so a budget is what an account gains in a tick, and a tick of a share's turn costs it a whole one.
+It holds at most its budget's part of `ACCOUNT_TICKS` ticks, a tenth of a second, rounded up to whole ticks,
+so a full account gains nothing more, and a share that idled comes back with a tenth of a second's worth at most.
+The root task receives the whole on its first share, with a full account,
 and `OP_SHARE_MOVE` moves budget from one share of a capability to another,
 so the budgets always add up to the whole.
+A move takes with the budget as much of the source's account as that budget holds when full,
+or all the account has,
+so a share lent budget can run at once, and what the budget saved is spent once.
 A move needs `RIGHT_W`, the right to bind,
 and stays within the capability's range:
 a holder redistributes what its shares hold, and more reaches them only from a wider capability,
 the root task's covering them all.
-The budget is the share's, not the capability's,
-so every copy of a capability and every thread bound to the share spend one budget,
-and it stays with the share through a revoke, as a frame's bytes do.
-`OP_SHARE_INFO` tells a share's budget, and not how much of it is spent, which would be a clock.
+The budget and the account are the share's, not the capability's,
+so every copy of a capability and every thread bound to the share spend one account,
+and they stay with the share through a revoke, as a frame's bytes do.
+`OP_SHARE_INFO` tells a share's budget, and not what its account holds, which would be a clock.
 
-**Spare time.**
-Time no share with budget left wants is spare,
-and a share whose budget is spent runs on it only with `SHARE_SPARE`.
+**A share has time while its account holds a tick.**
+A tick of a turn is never more than the account holds:
+the tick that leaves it less than a tick drains the share,
+which then has no time until its account is full again,
+at most a tenth of a second of its budget later.
+Time no share with time wants is spare,
+and a drained share runs on it only with `SHARE_SPARE`,
+which costs its account nothing, while the account fills as any share's does.
 `OP_SHARE_SET` sets it and needs `RIGHT_X`,
 which the root task keeps from a share it lends to be held to its budget.
-Every share has it at boot, so a share with no budget runs whenever no share with budget left wants to,
+Every share has it at boot, so a share with no budget runs whenever no share with time wants to,
 and the processor is shared as before the budgets.
-A share without it runs at most its budget, however idle the processor is otherwise,
+A share without it runs at most its budget and a full account, however idle the processor is otherwise,
 and the processor waits in `wfi` for the rest:
 that is a cap on a process's time, which the turns alone could not give,
 since an idle share's turns went to whoever was busy.
@@ -910,13 +923,13 @@ A waiting thread is on its notification's waiters through the same two words,
 and no thread is on both, so the rings cost no memory beyond a few words per share.
 A share with a ready thread whose turn it is not waits on one of three queues,
 each a ring of shares, oldest first:
-the run queue while it has budget left,
-the spare queue once it has none, if it has `SHARE_SPARE`,
+the run queue while it has time,
+the spare queue once drained, if it has `SHARE_SPARE`,
 and the spent queue otherwise.
 A share's turn runs its oldest ready thread.
 When that thread waits, the next ready thread of the same share has the rest of the turn,
 and the tick ends it:
-the share goes to the back of the queue its budget and flags now put it on, if it has a thread ready,
+the share goes to the back of the queue its account and flags now put it on, if it has a thread ready,
 the running thread to the back of its share's ring,
 and the oldest share on the run queue has the next turn,
 or with the run queue empty the oldest on the spare queue.
@@ -926,53 +939,60 @@ a move or a set moves the share to the queue that now fits it.
 The next thread is the oldest of the oldest share,
 found in constant time however many objects exist,
 and the only scheduling state the kernel holds
-is the rings, each share's budget, flags and ticks spent, the window's count,
-whose turn it is, and which thread is running.
+is the rings, each share's budget, flags, account and the tick it was last counted to,
+the nearest release, whose turn it is, and which thread is running.
 With every thread on the first share this is the round-robin over threads the shares replaced,
 which is how the replay driver runs; see "Verification".
 
 **The tick charges.**
-A tick is charged to the share whose turn it is, a whole tick,
-and while none runs, to nobody.
-A share has budget left while the ticks charged to it in the window
-are fewer than its budget's part of the window, rounded up to whole ticks.
-The tick that ends a window starts the next:
-every share has its whole budget again and goes to the queue that now fits it.
-A late interrupt that runs past the window's end begins the next window where it lands.
+A tick is charged to the share whose turn it is, a whole tick, while it has time,
+and to nobody while it is drained or none runs,
+whether the timer interrupted for it or a later trap counted it.
+Every account gains its budget every tick, up to its cap,
+but only the one whose turn it is is counted at each tick:
+the others keep the tick they were last counted to,
+and are brought up to the count when the kernel looks at them, as they join a queue or take a turn.
+A drained share that waits has time again once its account is full,
+and the tick finds it without looking at every share every tick:
+the kernel keeps the release, the nearest tick at which such a share fills,
+which a drained share brings forward as it joins a queue,
+and only at the release looks at the `SHARES` shares, as the tick looks at the timer lines,
+gives time to those whose account is full, and takes the next release from the rest.
 A thread that waits mid-tick hands the rest of the tick to the next,
 and the share whose turn it is at the tick pays for all of it,
 so a thread that always waits just before the tick is never charged:
 the budget holds a thread that runs, not one that times its waits against the clock.
 Charging the counts each turn ran, read at each switch,
-and ending a turn where its budget ends would close that;
-`TODO.md` carries it, with open decision 17.
+and ending a turn where its account runs out would close that;
+`TODO.md` carries it, with open decisions 17 and 18.
 
 **What it promises.**
-Shares with budget left and a ready thread take equal turns,
+Shares with time and a ready thread take equal turns,
 and then shares on spare time do,
 so a holder of k of the n shares that want the processor gets k turns in every n,
 however many threads or children it runs on them,
-until a share's budget is spent.
-The budgets add up to the whole, so a share that wants the processor all window
-gets its budget's part of it, to within a tick for each share that shares the window;
+until a share's account is spent.
+No share runs on its account more than its budget's part of a stretch of ticks and a full account,
+and the budgets add up to the whole, so a share that wants the processor all along
+gets its budget's part of it, give or take a tenth of a second's worth of the accounts;
 a share without `SHARE_SPARE` gets no more.
 A thread a process adds takes turns from its siblings on the same share and from nobody else,
 and a child gets processor time only through a share its creator lends it
 or as turns on a share of its creator's.
 A single thread gets one share's worth however many shares its process holds,
-but a share with more budget has budget left for longer than others.
+but a share with more budget spends its account more slowly than others.
 A share with no ready thread takes no turn and spends nothing, so an idle holder costs the others nothing
 and the processor goes round the busy ones only.
 No latency is promised:
-a share that spent its budget waits for the window to end,
-and within the window a woken thread waits for its share's turn and then its own.
+a share that spent its account waits for it to fill,
+and a woken thread waits for its share's turn and then its own.
 
 **Why a fixed number of shares.**
 A share made of memory, an object in a pool, would buy time with memory again.
 A limit per process or per thread bounds nothing, since anyone can make more of those.
 A limit on the whole machine does, and the capability makes the split the root task's decision,
 as the split of memory and lines is.
-Each share costs the kernel seven words.
+Each share costs the kernel nine words.
 
 **Why the budget is the share's.**
 A capability is copied, derived and held by many,
@@ -983,19 +1003,22 @@ What every holder and every thread spends from has to be one place, and a share 
 A holder can split what it holds only across the shares it holds,
 so a process that means to hand a budget on is lent a range of shares.
 
-**Why one window for the machine.**
+**Why an account per share.**
+The budgets were first a part of every window of a tenth of a second,
+which ended for every share at one tick and gave each its whole budget back.
+That held a share to its budget only within windows it did not choose:
+a share could spend its budget at the end of one window and again at the start of the next,
+and one that idled lost what it did not spend.
 seL4's scheduling contexts carry a budget and a period each, refilled per context,
-which bounds a context's latency where one window bounds only its proportion,
-at the price of a queue of refills sorted by time.
-One window ends for every share at one tick,
-and starting the next looks at the `SHARES` shares, as the tick looks at the timer lines,
-once a window.
-A count of windows each share compared with its own would spare that look,
-but a share spent on spare time has to move back to the run queue when its window ends,
-and finding it would be the same look.
-The price is the latency above,
-and for a share held to its budget the spending comes early in the window and the idle time after,
-which is what saves energy on a core whose sleep costs something to enter.
+which bounds a context's latency, at the price of a queue of refills sorted by time.
+An account refilled at its budget's rate needs no such queue:
+the refill is arithmetic on the tick the account was last counted to, done when the kernel looks at it,
+and the only look over the shares is at a release, as the window's end was.
+The cap bounds what an idle share brings back,
+and filling the account before a drained share has time again
+keeps the spending of a share held to its budget in one stretch and the idle time in another,
+as the window did, which is what saves energy on a core whose sleep costs something to enter.
+Open decision 18 keeps that choice and the others the account made.
 
 **The machine timer provides the tick.**
 A thread runs until it waits on a notification
@@ -1012,33 +1035,44 @@ so a system call is never interrupted and the kernel needs no locks.
 When a thread waits and nothing is runnable,
 only an `Irq` armed on a timer line or a device's line can make one runnable again,
 because only a running thread can signal otherwise,
-or the window's end, when a share on the spent queue has a thread ready.
+or the release, when a share on the spent queue has a thread ready.
 The kernel counts those `Irq`s as they are armed and disarmed,
 so it knows without a walk, and the spent queue it looks at.
 With any of them the kernel stalls in `wfi`
-until the nearest deadline of an armed timer line, the window's end if a share waits for it,
+until the nearest deadline of an armed timer line, the release,
 or a device interrupt is pending,
 takes it by hand since machine mode runs with `MIE` clear,
 and looks for a runnable thread again;
 with none it says `no runnable thread` and stops the machine.
 
-**The stall skips the ticks between.**
-While nothing runs no turn needs ending,
-so the stall defers `mtimecmp` to the tick the nearest armed timer line comes due at,
-or the window ends at if that is nearer and a share waits for it,
-found by looking at the `TIMER_LINES` lines as the tick does.
-Whatever ends the stall is counted as a late tick is,
-so the tick count and every deadline come out as if each tick had been taken,
-and `mtimecmp` is back on the next tick before a thread runs.
+**The timer interrupts only for a tick that could change what runs.**
+A tick that ends a turn only to hand the processor back to the same thread moves the counts and nothing else.
+So while another thread could have the next turn, `mtimecmp` is set for the next tick,
+and otherwise for the nearest of the deadline of an armed timer line, the release,
+and the tick the running share's account drains or, while drained, fills.
+In the stall it is the nearer of the deadline and the release.
 A deferral reaches at most 2^31 counts, several seconds on either board,
 so that `timer_next` does not take it for a debugger's stop;
-a longer stall wakes there and defers again.
+a longer one wakes there and is set again.
+
+**Every trap counts the ticks the timer let pass.**
+On entry, before anything reads the count or an account, a trap charges and counts them as the tick would have,
+and a trap whose count reaches the tick the timer was set for ends the turn as it returns.
+It reads the counter only while the timer is set past the next tick or its interrupt is pending.
+Whatever could call for another tick happens in a trap and marks the timer's tick stale:
+settling a share, binding or unbinding a thread, a switch, a tick, an arm, the stall.
+A trap sets the timer again only then, and choosing the tick costs no walk,
+since an arm brings the nearest deadline forward and the tick's look at the timer lines makes it exact.
+The counts, the charges, the deadlines and the turns come out as if every tick had been taken, a late tick aside,
+while a thread alone on the processor is not interrupted every tick.
+The price is a few loads on every trap: on QEMU a tenth of the cheapest system call,
+a sixth while the counter is read.
 
 **Nothing more lives in the kernel.**
 Round-robin on a tick is the least policy that makes
 a spinning thread harmless and a woken thread eventually run,
 going round by share first is the least that makes a thread cost nobody but its own share,
-and a budget over one window is the least that caps a share's time without keeping the others busy.
+and an account per share is the least that caps a share's time without keeping the others busy.
 Fixed priorities were the intended end state of this section
 and are now open decision 9.
 
@@ -1480,7 +1514,7 @@ A share's ring holds exactly the ready threads bound to it but the running one,
 and a thread on no ring is linked into none.
 A share with a ready thread but the one whose turn it is waits on exactly one queue,
 the one its budget and flags say:
-the run queue while fewer ticks were charged to it in the window than its budget's part, rounded up,
+the run queue while it has time,
 else the spare queue with `SHARE_SPARE` and the spent queue without;
 every other share waits on none, and a share on no queue is linked into none.
 While a thread runs it is some share's turn.
@@ -1493,9 +1527,12 @@ so it runs again while it keeps its share.
 **Budgets.**
 The budgets of the shares add up to the whole processor, `BUDGET_WHOLE`,
 and no share has a flag but `SHARE_SPARE`.
-The window has had fewer than `WINDOW_TICKS` ticks,
-and each was charged once: to the share whose turn it was, or, while none ran, to nobody.
-So no share was charged more ticks than the window has had.
+Every account holds at most its cap, and was last counted no later than the count;
+a share with time has at least a tick in its account, and a share with no budget has no time.
+The share whose turn it is has its account counted up to the count while it has time,
+since every tick of its turn is charged to it as it passes.
+A drained share that waits has an account not full yet,
+which fills no earlier than the release, and the release lies ahead of the count.
 
 **Interrupts.**
 Every `Irq` names a live notification in its own pool,
@@ -1513,6 +1550,18 @@ The count of armed sources is exactly the `Irq`s armed on a device's line or a t
 An `Irq` armed on a timer line has its deadline ahead of the tick count:
 the tick fires every timer line that is due,
 and a line that fires disarms its `Irq`.
+The nearest deadline the timer is set for lies ahead of the count
+and no later than the deadline of any `Irq` armed on a timer line.
+
+**The timer.**
+While a thread runs, every tick the timer lets pass would hand the processor back to it:
+the thread is on the share whose turn it is, which has no other thread ready
+and would have the next turn again, with time and no share on the run queue,
+or drained, with `SHARE_SPARE` and no share on either queue,
+and none of those ticks is the release, the nearest deadline,
+or the tick at which the share's account leaves it less than a tick, or fills while it is drained.
+The tick the timer was last set for lies ahead of the count and no later than that first tick,
+unless a change since marked it stale.
 
 **The log.**
 An `Irq` armed on the log's line has nothing untaken behind it:
@@ -1561,7 +1610,11 @@ No call begins to destroy the pool its thread or its process's table lives in.
 A destroy stopped half way leaves the pool's threads running,
 so this is what keeps a thread from making a call it cannot return from.
 
-These three relate the state before a call to the state after it,
+**A tick charges.**
+A tick costs the share whose turn it is, while it has time,
+a whole tick less the budget every account gains in it.
+
+These four relate the state before a call to the state after it,
 so the self-check, which sees one state, cannot check them.
 `host/history.c` checks them around every call of the host build, the untraced prologue's too.
 It does not know what memory held before a call,
@@ -1600,7 +1653,7 @@ so the host has devices that fire when the input says.
 libFuzzer feeds the records into the threads' registers
 and the self-check runs after every call, under ASan and UBSan.
 Around every call `host/history.c` compares the state before with the state after,
-for the two properties that relate them; see "Properties".
+for the properties that relate them; see "Properties".
 Since no system call takes a pointer,
 the registers are the whole attack surface.
 The mutator in `host/mutator.c` works on whole records:
@@ -1726,15 +1779,15 @@ and the host runs records rather than instructions,
 so it cannot say where one would land.
 While tracing is on, the tick therefore preempts nobody
 and moves no time: timer lines fire only through `OP_DEBUG_TICK`,
-and so do windows end and shares get charged.
-`OP_DEBUG_TRACE` begins a window,
-so the host, which boots into a fresh one, counts windows from the same tick as QEMU,
+and so do shares get charged and accounts fill.
+`OP_DEBUG_TRACE` fills every account,
+so the host, which boots with them full, starts from the same accounts as QEMU,
 where the driver ran untraced for a while before and a tick may have come.
 The interrupt is still taken and acknowledged on QEMU,
 so the replay exercises the interrupt entry and return,
 but a switch happens only when a thread waits
 or when a record asks for the tick through `OP_DEBUG_TICK`.
-A traced run in which every thread waits, or waits for a window's end, therefore stops
+A traced run in which every thread waits, or waits for an account to fill, therefore stops
 even with a timer line armed, since no record is left to fire it,
 and the host build, which has no clock, agrees.
 A tick pending in a revoke stops it on QEMU as anywhere,
@@ -1745,9 +1798,18 @@ The stall in `wfi` for an armed timer line is checked by the demo in `user/init.
 and so are periods that keep pace with the clock,
 bounded on both sides, which a stall that miscounted the ticks it skipped would break;
 the host never stalls, so nothing else checks the deferral.
-The demo also holds a spinning thread to an eighth of every window with nothing else to run,
-so the kernel stalls for the window's end, and then lets it run on spare time;
-the host replays the budgets being spent and refilled, but never that stall.
+The ticks the timer lets pass while a thread runs are checked by the demo as well,
+by a thread that spins alone and counts the gaps a trap leaves between two reads of the counter.
+The host sets no timer and counts no ticks at a trap,
+but the self-check holds the tick the kernel would set the timer for to "The timer" in "Properties",
+so a tick let pass that ends the turn, drains an account or fires a line shows on the host too;
+and the host does after every call what a trap does on its way back,
+so a change that brings that tick forward without marking it stale shows there as well.
+Under tracing no trap counts ticks, and the timer is left on every tick,
+which the traced interrupt only moves on.
+The demo also holds a spinning thread to an eighth of the processor with nothing else to run,
+so the kernel stalls for its account to fill, and then lets it run on spare time;
+the host replays accounts being spent and filled, but never that stall.
 A device interrupt is delivered under tracing as it is otherwise,
 because a line left claimed would storm
 and one masked without its `Irq` disarmed would break an invariant;
@@ -1866,10 +1928,10 @@ until the maintainer decides otherwise.
    its hardwired entries and `mtval` reading zero still are.
 
 9. **Scheduling policy beyond budgets.**
-   Decided in part: a budget per share over one window, and spare time only by `RIGHT_X`;
-   see "Scheduling".
+   Decided in part: a budget per share and an account it fills, and spare time only by `RIGHT_X`;
+   see "Scheduling" and open decision 18.
    Working default for the rest: no priorities;
-   a share promises a proportion of every window and no latency.
+   a share promises its part of the processor, give or take its account, and no latency.
    The earlier plan was fixed priorities on `Thread`,
    set by whoever holds the capability and capped by the setter's own,
    round-robin within a priority, no priority inheritance;
@@ -1883,7 +1945,7 @@ until the maintainer decides otherwise.
    A period per share, as seL4's scheduling contexts have, would bound latency as well,
    at the price of a queue of refills sorted by time.
    Decide when a workload needs one thread to run before another,
-   and taking turns within a window measurably fails it.
+   and taking turns measurably fails it.
 
 10. **Yield.**
     Working default: none.
@@ -2001,3 +2063,17 @@ until the maintainer decides otherwise.
     A read of the counter by system call could join it,
     for a board whose counter no region can show, or to spare a region slot.
     Decide with the first program that needs it.
+
+18. **What a share's account counts, and when it has time.**
+    Working default: whole ticks, time again only once full, and spare time free.
+    The account counts in parts of a tick but a turn ends on the tick grid,
+    so the host, whose clock is the ticks the records move, decides as QEMU does.
+    Time again only once full keeps a capped share's idle time in one stretch:
+    held to an eighth, a share runs its 13 ticks and idles about a hundred,
+    where time again at one tick would wake an otherwise idle core a hundred times a second.
+    Spare time costs nothing, so an account never goes below zero.
+    The alternatives are an account in the counter's counts, charged at each switch,
+    with turns that end mid-tick, which `TODO.md` carries;
+    a lower threshold, per share, that trades idle stretches for latency;
+    and spare time charged as a debt.
+    Decide when a board's sleep states, or a workload's latency, make the difference measurable.

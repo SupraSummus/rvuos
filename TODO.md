@@ -27,7 +27,7 @@ Design decisions behind these items live in `DESIGN.md`.
    The run queue goes round by share and then by thread,
    so a process that makes threads or children gets no more of the processor,
    and a thread runs only while it is bound to a share, which a revoke takes back.
-   Each share holds a budget, its part of every window,
+   Each share holds a budget, its part of the processor, and an account it fills at that rate,
    and one without spare time gets no more however idle the processor is.
 6. Done: `Irq` objects and a userspace UART driver.
    An interrupt is a signal on the notification bound to the `Irq`,
@@ -133,6 +133,8 @@ Design decisions behind these items live in `DESIGN.md`.
   `OP_DEBUG_TICK` replays its decision,
   and only the interrupt landing between two instructions
   is checked by the demo in `user/init.c` alone.
+  So are the ticks each trap counts on entry and the turn a count that reaches the timer's tick ends:
+  the host counts no ticks at a trap, and the self-check sees only which tick the kernel would set the timer for.
 - `OP_DEBUG_IRQ` replays what a device interrupt does to an `Irq`;
   the controller, the claim and the completion
   are checked by the demo in `user/init.c` alone.
@@ -214,11 +216,13 @@ Design decisions behind these items live in `DESIGN.md`.
 - A device interrupt wakes its driver but does not run it;
   the driver waits for its share's turn like a thread a timer line woke.
   Measure that latency on the first board; it belongs to open decision 9.
-- A turn lasts to the next tick, so one that begins mid-tick gets only the rest of it.
-  A turn counted from the switch would set `mtimecmp` to the end of the turn or the nearest timer deadline,
-  which also makes the kernel tickless while one thread runs, as the stall already is while none does.
-  It touches the timer lines' contract, the host's clock and `OP_DEBUG_TICK`; decide it on its own.
-- Both boards' `timer.c` read `mtime`, write `mtimecmp`, ack and defer the same way at different addresses;
+- A turn is one tick while another thread could run, so the timer skips ticks only for a thread alone,
+  and a turn that begins mid-tick gets only the rest of one.
+  A turn of a few ticks, or of what the share's account holds, would skip them while threads compete too,
+  and give turns the length the scheduler chooses: `sched_wake_ticks` would return the turn's end instead of one.
+  It changes what `OP_DEBUG_TICK` means to the replay, which passes records with it,
+  and what the demo's "root: shares ok" measures; decide it with open decision 9.
+- Both boards' `timer.c` read `mtime`, write `mtimecmp`, count and set the timer the same way at different addresses;
   a CLINT file taking the base and the period would hold that once, beside `timer_next`.
 - `pmp_init` stops counting at the first hardwired entry.
   A core with writable entries above a hardwired one loses them;
@@ -257,12 +261,13 @@ Design decisions behind these items live in `DESIGN.md`.
   Give a thread's creator somewhere to hear about it:
   a notification the kernel signals is the cheapest candidate,
   since it needs no new object.
-- The stall's deferred tick is untried on the ESP32-C6:
+- The timer's deferral, in the stall and while a thread runs, is untried on the ESP32-C6:
   `make BOARD=esp32c6 test` has to print "root: timer ok" and "root: period ok" as it did,
-  which needs its CLINT to drop the timer's level when `mtimecmp` moves past `mtime`.
+  which needs its CLINT to drop the timer's level when `mtimecmp` moves past `mtime`,
+  and "root: tickless ok", which needs a trap to take more than eight reads of `UTIME` there.
 - Budgets are untried on the ESP32-C6:
   `make BOARD=esp32c6 test` has to print "root: budget ok",
-  which needs the stall for a window's end to wake there as it does for a timer line.
+  which needs the stall for an account to fill to wake there as it does for a timer line.
 - Shares are untried on the ESP32-C6:
   `make BOARD=esp32c6 test` has to print "root: shares ok", "root: unbind ok" and "root: rebind ok";
   the first compares spin counts within a factor of two, which QEMU's instruction count makes deterministic.
@@ -279,27 +284,34 @@ Design decisions behind these items live in `DESIGN.md`.
   which is what a userspace scheduler, open decision 9 in `DESIGN.md`, needs.
   A thread waiting on a notification stays on it meanwhile, and cannot be taken off it today.
 - A thread is one share's worth whatever its process holds:
-  shares with budget left take equal turns,
+  shares with time take equal turns,
   so a share with more budget gets its larger part only by running on
-  after the others have spent theirs, late in the window.
+  after the others have spent their accounts.
   A share that counts as several turns in a row
-  would spread that over the window without a thread per share.
-  Holding more shares also still buys more turns while they have budget,
+  would spread that over time without a thread per share.
+  Holding more shares also still buys more turns while they have time,
   so shares and budgets both weight a process, which may be one knob too many;
   decide both with the first workload that wants them.
 - The tick charges a whole tick to the share whose turn it is when it comes,
-  so a thread that always waits just before the tick is never charged.
-  The fix keeps the ABI: charge the counter's counts at each change of turn,
-  and at a turn's start set `mtimecmp` to the nearer of the next tick and the budget's end;
-  `timer_ack` already returns no ticks for such an interrupt, and `sched_tick(0)` ends the turn.
-  Turns still end on the tick grid, so the timer lines and `OP_DEBUG_TICK` stay as they are.
+  so a thread that always waits just before the tick is never charged,
+  and a turn ends on the tick grid, so it may run up to a tick past what its account held.
+  The fix keeps the ABI: count the account in the counter's counts, charged at each change of turn,
+  and let the tick the account drains be one `sched_wake_ticks` chooses, in counts;
+  `timer_count` already returns no ticks for such an interrupt,
+  and the trap would end the turn as one does whose count reaches the tick the timer was set for.
+  The timer lines and `OP_DEBUG_TICK` stay on the tick grid.
   Under tracing, and on the host, the clock is the tick count times a tick's counts,
   so a traced run charges by the tick as now and the transcripts still agree;
   the charge at a switch and the early `mtimecmp` are then checked only by the demo.
-  Compare `used << 16` with `budget * window_counts` to keep 64-bit division out of the kernel.
-- The window is a constant, a tenth of a second.
-  A longer one lets a share held to its budget sleep longer at a stretch, which saves energy,
-  and a shorter one makes it wait less for its next window;
+  Open decision 18 in `DESIGN.md`.
+- A trap reads the counter on entry whenever the timer is set past the next tick,
+  which QEMU counts at a sixth of the cheapest system call.
+  Counting only where the count or an account is read, the timer lines' calls and a switch among them,
+  would spare it, at the price of a rule every such place has to keep.
+- An account holds at most a tenth of a second's worth of its budget.
+  More lets a share held to its budget sleep longer at a stretch, which saves energy,
+  and lets an idle share bring back a longer burst;
+  less makes a drained share wait less for its account to fill;
   decide when a board's sleep states make the difference measurable.
 - `object_first`/`object_next` collapsed the pool walk everywhere
   except the tiling check in `selfcheck.c`, which verifies

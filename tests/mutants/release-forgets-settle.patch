@@ -1,0 +1,18 @@
+The release looks at every drained share that waits and leaves each where it was.
+A share whose account filled would wait on the spare or spent queue for good;
+a drained share that waits has an account not full yet.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: a drained share waits with its account full
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -379,7 +379,6 @@ static void release(void)
+     for (uint32_t i = 0; i < SHARES; i++) {
+         LOOP_BOUND(SHARES);
+         if (shares[i].drained && shares[i].queue != NULL) {
+-            share_settle(&shares[i]);
+         }
+     }
+ }
