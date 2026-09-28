@@ -43,9 +43,12 @@
  * where a record on the first thread can destroy both at once.
  * The second table holds a copy of every slot the first one holds,
  * so a record means the same on whichever thread performs it,
- * with two exceptions, since an Untyped is derived, never copied:
- * the second thread's BOOT_CAP_FREE_RAM is an Untyped of its own, cut from the first one's,
- * and its BOOT_CAP_ROOT_RAM is empty, since the first one's has made all it can.
+ * with exceptions, since an Untyped is derived, never copied.
+ * Each thread's REPLAY_CAP_RAM is memory of its own, free when the records begin:
+ * the first thread's is the lower half of the free RAM,
+ * and the second thread's is derived from the top quarter, the quarter below being its pool.
+ * The halves between go, so all three hang right below the free RAM,
+ * and the second table's BOOT_CAP_FREE_RAM and BOOT_CAP_ROOT_RAM are empty.
  * Revoking the first one's free RAM destroys the second thread's pool, and what it made of its own.
  * The first thread lives in the boot pool, of which the second holds a copy,
  * so a record on the second thread can destroy the first, as a successor can its root task.
@@ -76,18 +79,17 @@ static inline int replay_passes(const struct replay_record *r, unsigned me)
 #define REPLAY_CAP_POOL    19 /* the second thread's pool */
 #define REPLAY_CAP_TABLE   20 /* the second thread's table */
 #define REPLAY_CAP_PROCESS 21 /* the second thread's process */
-#define REPLAY_CAP_SCRATCH 22 /* the second thread's Untyped on its way over; empty afterwards */
+#define REPLAY_CAP_RAM     22 /* the thread's own memory, an Untyped */
+/* The halves the second thread's pool and memory are cut from, empty afterwards. */
+#define REPLAY_CAP_HALF     23 /* the upper half of the free RAM */
+#define REPLAY_CAP_POOL_RAM 24 /* its lower half, the second thread's pool */
+#define REPLAY_CAP_LENT     25 /* its upper half, which the second thread's memory is derived from */
 _Static_assert(REPLAY_CAP_NOTIFY == BOOT_CAP_COUNT, "the setup's slots follow the boot capabilities");
 /* The third thread, stopped until a record resumes it: the last slot, which the corpus leaves alone. */
 #define REPLAY_CAP_THIRD   (REPLAY_TABLE_SLOTS - 1)
 
-/*
- * The second thread's pool, the first block of the free RAM, with as many slots as the root task has,
- * and its Untyped, the next block of its size.
- */
-#define REPLAY_POOL_SIZE    0x1000u
-#define REPLAY_TABLE_SLOTS  ROOT_TABLE_SLOTS
-#define REPLAY_UNTYPED_SIZE 0x100000u
+/* The second thread's table has as many slots as the root task's. */
+#define REPLAY_TABLE_SLOTS ROOT_TABLE_SLOTS
 
 /*
  * The second and third threads' stacks, in the root task's data region below the root's.
@@ -108,8 +110,11 @@ _Static_assert(REPLAY_CAP_NOTIFY == BOOT_CAP_COUNT, "the setup's slots follow th
 static const struct replay_record replay_prologue[] = {
     { OP_PROCESS_INSTALL, 0, BOOT_CAP_PROCESS, REPLAY_REGION_SLOT, BOOT_CAP_INPUT, RIGHT_R },
     { OP_POOL_ALLOC, 0, BOOT_CAP_POOL, CAP_NOTIFICATION, REPLAY_CAP_NOTIFY, 0 },
+    /* The free RAM in halves, and the upper in halves again. */
+    { OP_UNTYPED_SPLIT, 0, BOOT_CAP_FREE_RAM, REPLAY_CAP_RAM, REPLAY_CAP_HALF, 0 },
+    { OP_UNTYPED_SPLIT, 0, REPLAY_CAP_HALF, REPLAY_CAP_POOL_RAM, REPLAY_CAP_LENT, 0 },
     /* The second thread's pool, table, process and thread, and the third thread in the first one's pool. */
-    { OP_UNTYPED_RETYPE, 0, BOOT_CAP_FREE_RAM, CAP_POOL, REPLAY_POOL_SIZE, REPLAY_CAP_POOL },
+    { OP_UNTYPED_RETYPE, 0, REPLAY_CAP_POOL_RAM, CAP_POOL, REPLAY_CAP_POOL, 0 },
     { OP_POOL_ALLOC, 0, REPLAY_CAP_POOL, CAP_CAPTABLE, REPLAY_CAP_TABLE, REPLAY_TABLE_SLOTS },
     { OP_POOL_ALLOC, 0, REPLAY_CAP_POOL, CAP_PROCESS, REPLAY_CAP_PROCESS, REPLAY_CAP_TABLE },
     { OP_POOL_ALLOC, 0, REPLAY_CAP_POOL, CAP_THREAD, REPLAY_CAP_THREAD, REPLAY_CAP_PROCESS },
@@ -119,10 +124,14 @@ static const struct replay_record replay_prologue[] = {
     { OP_PROCESS_INSTALL, 0, REPLAY_CAP_PROCESS, 1, BOOT_CAP_DATA, RIGHT_R | RIGHT_W },
     { OP_PROCESS_INSTALL, 0, REPLAY_CAP_PROCESS, REPLAY_UART_SLOT, BOOT_CAP_UART, RIGHT_R | RIGHT_W },
     { OP_PROCESS_INSTALL, 0, REPLAY_CAP_PROCESS, REPLAY_LOG_SLOT, BOOT_CAP_LOG, RIGHT_R | RIGHT_W },
-    /* Its own Untyped, derived into its table and then below the free RAM once the scratch slot goes. */
-    { OP_UNTYPED_RETYPE, 0, BOOT_CAP_FREE_RAM, CAP_UNTYPED, REPLAY_UNTYPED_SIZE, REPLAY_CAP_SCRATCH },
-    { OP_CAP_DERIVE, 0, REPLAY_CAP_TABLE, BOOT_CAP_FREE_RAM, REPLAY_CAP_SCRATCH, RIGHT_ALL },
-    { OP_CAP_DELETE, 0, BOOT_CAP_CAPTABLE, REPLAY_CAP_SCRATCH, 0, 0 },
+    /*
+     * Its own memory, derived into its table;
+     * then the halves between go, and what they made hangs below the free RAM.
+     */
+    { OP_CAP_DERIVE, 0, REPLAY_CAP_TABLE, REPLAY_CAP_RAM, REPLAY_CAP_LENT, RIGHT_ALL },
+    { OP_CAP_DELETE, 0, BOOT_CAP_CAPTABLE, REPLAY_CAP_HALF, 0, 0 },
+    { OP_CAP_DELETE, 0, BOOT_CAP_CAPTABLE, REPLAY_CAP_POOL_RAM, 0, 0 },
+    { OP_CAP_DELETE, 0, BOOT_CAP_CAPTABLE, REPLAY_CAP_LENT, 0, 0 },
     /* Its table mirrors the first one, the boot capabilities included. */
     REPLAY_COPY(BOOT_CAP_CAPTABLE),
     REPLAY_COPY(BOOT_CAP_PROCESS),

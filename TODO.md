@@ -84,11 +84,12 @@ Design decisions behind these items live in `DESIGN.md`.
    which took the last walks off every call and made the pool destroy preemptible;
    `DESIGN.md`, "Bounded work".
    Still open from that step:
-   - `make BOARD=esp32c6 test` with the demo rewritten for `Untyped` and `Frame`;
+   - `make BOARD=esp32c6 test` with the demo rewritten for `Untyped` and `Frame`,
+     and again for the halves that replaced the watermark, open decision 20 in `DESIGN.md`;
      it has run under QEMU only.
    - Whether `OP_POOL_DESTROY` should go.
-     A pool made of an Untyped of its own size is destroyed by revoking that Untyped,
-     as the demo does for the pool it rebuilds;
+     A pool is the whole of the Untyped it was made of, so revoking that Untyped destroys it,
+     which the demo could do for the pool it rebuilds;
      without the operation, the capability a destroy keeps for last would go too.
      The boot pool's refusal by name went with `BOOT_CAP_ROOT_RAM`,
      so the root task is destroyed as any process is, by its pool or by the memory under it.
@@ -164,7 +165,7 @@ Design decisions behind these items live in `DESIGN.md`.
   one user program per scenario, expected outcome a specific fault.
   Execute from data, jump into the kernel, `csrr` and `mret` from user mode,
   misaligned access, stack into kernel memory.
-- CBMC on the watermark in `OP_UNTYPED_RETYPE`, `OP_FRAME_CARVE` and the NAPOT encoding.
+- CBMC on the halves `OP_UNTYPED_SPLIT` makes, `OP_FRAME_CARVE` and the NAPOT encoding.
 - Feed the replay corpus to the ESP32-C6.
   Something has to put each input where `BOOT_CAP_INPUT` points,
   below the ROM's buffers or over USB once the kernel runs,
@@ -175,7 +176,8 @@ Design decisions behind these items live in `DESIGN.md`.
   the replay driver's second stack in `rvuos/replay.h`
   and `tests/differential.py` still carry QEMU's addresses of their own.
 - A pool whose every capability was deleted or revoked stays until the Untyped above it is revoked,
-  and nothing tells the holder of that Untyped why a retype finds no room.
+  and nothing tells the holder of that Untyped what is left below it:
+  `OP_UNTYPED_INFO` says only that something is.
 - The host stops every preemptible call after one step, and makes it again,
   but has no second thread run in between,
   since under tracing an interrupt switches nothing.
@@ -196,9 +198,11 @@ Design decisions behind these items live in `DESIGN.md`.
 - The seeds under `tests/seeds` are binary and were written by hand.
   Moving `BOOT_CAP_LOG` in, and `BOOT_CAP_TIMER_LINES`, `BOOT_CAP_CLOCK`, `BOOT_CAP_SHARES`, now `BOOT_CAP_TIME`,
   and `BOOT_CAP_ROOT_RAM` after it,
+  and `REPLAY_CAP_RAM` into slot 22 for the halves that replaced the watermark,
   each took a one-off script that knew which argument of which operation is a slot,
-  run over the corpus too the last four times;
-  the last was checked by replaying every input on the kernels before and after and comparing the statuses.
+  run over the corpus too the last five times,
+  and checked by replaying every seed on the kernels before and after and comparing the statuses.
+  The last also changed a retype's arguments, so the seeds that made memory were written anew.
   A generator in the repository, one line per record with the names from `rvuos/abi.h`,
   would make the seeds readable and the next renumbering a rebuild;
   replay slots that start a few above `BOOT_CAP_COUNT` would spare the next one.
@@ -235,6 +239,8 @@ Design decisions behind these items live in `DESIGN.md`.
 - The root task is granted one block of free RAM,
   so what lies between the blocks is unused:
   about 2.8 MiB on QEMU, where it does not matter, and 28 KiB on the ESP32-C6.
+  So is the root task's own memory past the boot pool, 60 KiB on QEMU and 24 KiB on the ESP32-C6,
+  until the root task is gone; open decision 20 in `DESIGN.md`.
   Grant the rest as further blocks, or lay the board out afresh,
   when a board's RAM gets tight.
 - `PROCESS_REGION_SLOTS` is fixed at 8;

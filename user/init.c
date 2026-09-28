@@ -3,7 +3,7 @@
  * It walks the capability system once end to end on real hardware paths:
  * start a logger thread that carries the kernel's log to the UART
  * on the log's line and the transmitter's interrupt,
- * make frames and a pool of untyped memory, allocate from the pool,
+ * halve untyped memory into frames and a pool, allocate from the pool,
  * build a second process out of nothing but capabilities,
  * exchange a word with it through shared memory and two notifications,
  * take turns with it through shared memory alone, which only the tick allows,
@@ -72,6 +72,9 @@ enum {
     SLOT_SUCC_TABLE,
     SLOT_SUCC_PROCESS,
     SLOT_SUCC_THREAD,
+    SLOT_REST,          /* what is left of the free RAM, which the next block is taken from */
+    SLOT_SPLIT,         /* its upper half, on its way to SLOT_REST */
+    SLOT_BLOCK,         /* its lower half, on its way to becoming a frame or a pool */
     SLOT_SPINNER,       /* the spinners' threads, SPINNERS of them */
 };
 
@@ -107,7 +110,7 @@ enum {
 #define CHILD_SHARED_SLOT 2
 #define CHILD_LEASE_SLOT 3
 
-/* The size of every block the root task makes of its free RAM, one after another from its base. */
+/* The least block the root task takes, see take: the successor's pool holds a table as large as its own. */
 #define CHUNK 0x1000u
 
 /* The protocol between the two processes. */
@@ -187,6 +190,40 @@ static void expect(const char *what, uint32_t status)
     if (status != KERR_OK) {
         rv_halt(BOOT_CAP_DEBUG, 1);
     }
+}
+
+/*
+ * The root task keeps no allocator.
+ * It takes each block it needs off what is left of its free RAM:
+ * the lower half, while the upper half is what is left from then on,
+ * so the blocks halve one after another, and the last one is all that is left.
+ * The Untyped it split goes each time, and what it made hangs right below the free RAM,
+ * which holds on to every block.
+ */
+static uint32_t rest = BOOT_CAP_FREE_RAM;
+
+/* The next block as an Untyped in slot: where it lies and how large it is, at least a page. */
+static void take_untyped(uint32_t slot, uint32_t *base, uint32_t *size)
+{
+    uint32_t made;
+    expect("halve what is left of the free ram", rv_split(rest, slot, SLOT_SPLIT));
+    if (rest == SLOT_REST) {
+        expect("let the halved one go", rv_invoke(OP_CAP_DELETE, BOOT_CAP_CAPTABLE, SLOT_REST, 0, 0));
+    }
+    expect("keep the upper half",
+           rv_invoke(OP_CAP_MOVE, BOOT_CAP_CAPTABLE, SLOT_REST, SLOT_SPLIT, 0));
+    rest = SLOT_REST;
+    expect("the block holds a page",
+           rv_untyped_info(slot, base, size, &made) == KERR_OK && *size >= CHUNK
+               ? KERR_OK : KERR_INVALID_ARG);
+}
+
+/* The next block made into a frame or a pool in slot. */
+static void take(uint32_t type, uint32_t slot, uint32_t *base, uint32_t *size)
+{
+    take_untyped(SLOT_BLOCK, base, size);
+    expect("make the block", rv_retype(SLOT_BLOCK, type, slot, base));
+    expect("let its Untyped go", rv_invoke(OP_CAP_DELETE, BOOT_CAP_CAPTABLE, SLOT_BLOCK, 0, 0));
 }
 
 /* The timer's bit, and it alone, on its notification. */
@@ -387,7 +424,7 @@ static void child_main(void)
     rv_wait(CHILD_DOWN, &bits);
     rv_puts(CHILD_DEBUG,
             bits == BIT_POOL &&
-                    rv_retype(CHILD_LENT, CAP_POOL, CHUNK, CHILD_LENT_POOL, &base) == KERR_OK &&
+                    rv_retype(CHILD_LENT, CAP_POOL, CHILD_LENT_POOL, &base) == KERR_OK &&
                     rv_invoke(OP_POOL_ALLOC, CHILD_LENT_POOL, CAP_NOTIFICATION, CHILD_OWN_NTFN, 0) ==
                         KERR_OK
                 ? "child: pool made\n"
@@ -536,8 +573,8 @@ static __attribute__((noreturn)) void hand_over(uint32_t sp)
            rv_invoke(OP_CAP_DERIVE, BOOT_CAP_CAPTABLE, SLOT_FREEZE_TIME, BOOT_CAP_TIME, RIGHT_W));
     expect("stop the logger", rv_invoke(OP_TIME_BIND, SLOT_FREEZE_TIME, SLOT_LOGGER, 0, 0));
 
-    expect("make the successor's pool",
-           rv_retype(BOOT_CAP_FREE_RAM, CAP_POOL, CHUNK, SLOT_SUCC_POOL, &base));
+    expect("make the successor's pool of what is left of the free ram",
+           rv_retype(rest, CAP_POOL, SLOT_SUCC_POOL, &base));
     expect("allocate the successor's table",
            rv_invoke(OP_POOL_ALLOC, SLOT_SUCC_POOL, CAP_CAPTABLE, SLOT_SUCC_TABLE, ROOT_TABLE_SLOTS));
     expect("allocate the successor's process",
@@ -572,8 +609,9 @@ int main(void);
 
 int main(void)
 {
-    uint32_t free_base, free_size, free_mark, min_size, bits;
+    uint32_t free_base, free_size, free_made, min_size, bits;
     uint32_t shared_base, child_data_base, pool_base, doomed_base, new_pool_base, lease_base;
+    uint32_t shared_size, child_data_size, pool_size, doomed_size, lease_size;
     uint32_t data_base, data_size, uart_base, uart_size, log_base, log_size;
 
     puts("hello from user mode\n");
@@ -623,26 +661,24 @@ int main(void)
            rv_invoke(OP_TIME_BIND, BOOT_CAP_TIME, SLOT_LOGGER, ROOT_UNITS, LOGGER_UNITS));
     expect("start the logger", rv_invoke(OP_THREAD_RESUME, SLOT_LOGGER, 0, 0, 0));
 
-    expect("free ram info", rv_untyped_info(BOOT_CAP_FREE_RAM, &free_base, &free_size, &free_mark));
-    expect("nothing is made of the free ram yet", free_mark == 0 ? KERR_OK : KERR_INVALID_ARG);
-    /*
-     * Read through a4. Every block below is a page, one after another,
-     * which retypes as long as a page is no smaller than the smallest region.
-     */
+    expect("free ram info", rv_untyped_info(BOOT_CAP_FREE_RAM, &free_base, &free_size, &free_made));
+    expect("nothing is made of the free ram yet", free_made == 0 ? KERR_OK : KERR_INVALID_ARG);
+    /* Read through a4. Every block below holds a page, which is a block no smaller than the smallest region. */
     expect("the layout fits the smallest region",
            rv_frame_min_size(BOOT_CAP_DATA, &min_size) == KERR_OK && CHUNK % min_size == 0
                ? KERR_OK : KERR_INVALID_ARG);
 
-    /* Each block lands right after the one before, at the free RAM's watermark. */
-    expect("make the shared frame",
-           rv_retype(BOOT_CAP_FREE_RAM, CAP_FRAME, CHUNK, SLOT_SHARED, &shared_base));
-    expect("make the child's data frame",
-           rv_retype(BOOT_CAP_FREE_RAM, CAP_FRAME, CHUNK, SLOT_CHILD_DATA, &child_data_base));
-    expect("make a pool",
-           rv_retype(BOOT_CAP_FREE_RAM, CAP_POOL, CHUNK, SLOT_POOL, &pool_base));
-    expect("the blocks follow one another",
-           shared_base == free_base && child_data_base == free_base + CHUNK &&
-                   pool_base == free_base + 2 * CHUNK
+    take(CAP_FRAME, SLOT_SHARED, &shared_base, &shared_size);
+    take(CAP_FRAME, SLOT_CHILD_DATA, &child_data_base, &child_data_size);
+    take(CAP_POOL, SLOT_POOL, &pool_base, &pool_size);
+    expect("the blocks halve one after another",
+           shared_base == free_base && shared_size == free_size / 2 &&
+                   child_data_base == free_base + free_size / 2 && child_data_size == free_size / 4 &&
+                   pool_base == child_data_base + child_data_size && pool_size == free_size / 8
+               ? KERR_OK : KERR_INVALID_ARG);
+    uint32_t none;
+    expect("they hang below the free ram, which makes nothing more",
+           rv_retype(BOOT_CAP_FREE_RAM, CAP_FRAME, SLOT_BLOCK, &none) == KERR_NO_MEMORY
                ? KERR_OK : KERR_INVALID_ARG);
 
     expect("allocate the child's table",
@@ -679,7 +715,7 @@ int main(void)
 
     expect("configure the child's thread",
            rv_invoke(OP_THREAD_CONFIGURE, SLOT_CHILD_THREAD, (uint32_t)&child_main,
-                     child_data_base + CHUNK, 0));
+                     child_data_base + child_data_size, 0));
     /*
      * The child earns the other half of the processor, carved out of the boot grant
      * so that revoking below it stops the child alone.
@@ -727,14 +763,13 @@ int main(void)
      * A generation counter in the object could not promise that:
      * it dies with the memory it lives in and the rebuilt object
      * starts counting from one.
-     * The pool is made of an Untyped of its own size,
-     * which makes the same block again once the pool is gone.
+     * The pool is made of an Untyped of its own,
+     * which is free again once the pool is gone and makes the same block again.
      * See DESIGN.md, "Kernel pools and revocation".
      */
-    expect("make untyped memory for the doomed pool",
-           rv_retype(BOOT_CAP_FREE_RAM, CAP_UNTYPED, CHUNK, SLOT_DOOMED_MEMORY, &doomed_base));
+    take_untyped(SLOT_DOOMED_MEMORY, &doomed_base, &doomed_size);
     expect("make it a pool",
-           rv_retype(SLOT_DOOMED_MEMORY, CAP_POOL, CHUNK, SLOT_DOOMED_POOL, &doomed_base));
+           rv_retype(SLOT_DOOMED_MEMORY, CAP_POOL, SLOT_DOOMED_POOL, &doomed_base));
     expect("allocate a notification in it",
            rv_invoke(OP_POOL_ALLOC, SLOT_DOOMED_POOL, CAP_NOTIFICATION, SLOT_DOOMED_NTFN, 0));
     expect("copy that capability aside",
@@ -757,7 +792,7 @@ int main(void)
      * so only the sweep at destroy time keeps the next line honest.
      */
     expect("build a pool over the same memory",
-           rv_retype(SLOT_DOOMED_MEMORY, CAP_POOL, CHUNK, SLOT_NEW_POOL, &new_pool_base));
+           rv_retype(SLOT_DOOMED_MEMORY, CAP_POOL, SLOT_NEW_POOL, &new_pool_base));
     expect("it is the same memory", new_pool_base == doomed_base ? KERR_OK : KERR_INVALID_ARG);
     expect("allocate a notification at the same address",
            rv_invoke(OP_POOL_ALLOC, SLOT_NEW_POOL, CAP_NOTIFICATION, SLOT_NEW_NTFN, 0));
@@ -779,8 +814,7 @@ int main(void)
      * Whether the child's mapping is gone shows in the child's region slot,
      * which takes a region again once it is empty.
      */
-    expect("make a frame to lease",
-           rv_retype(BOOT_CAP_FREE_RAM, CAP_FRAME, CHUNK, SLOT_LEASE, &lease_base));
+    take(CAP_FRAME, SLOT_LEASE, &lease_base, &lease_size);
     expect("copy it beside itself",
            rv_invoke(OP_CAP_COPY, BOOT_CAP_CAPTABLE, SLOT_LEASE_COPY, SLOT_LEASE, RIGHT_ALL));
     expect("derive it into the child's table",
@@ -794,7 +828,6 @@ int main(void)
                ? KERR_OK : KERR_INVALID_ARG);
     expect("revoke below the lease",
            rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_LEASE, 0, 0));
-    uint32_t lease_size;
     expect("the lease itself stays", rv_frame_info(SLOT_LEASE, &lease_base, &lease_size));
     expect("the copy beside it stays", rv_frame_info(SLOT_LEASE_COPY, &lease_base, &lease_size));
     expect("the child's mapping is gone",
@@ -812,12 +845,11 @@ int main(void)
      * The child turns lent untyped memory into a pool of its own,
      * and the root task's Untyped makes nothing while the lent one lives.
      * Revoking below it destroys the child's pool,
-     * and the memory answers to the root task's Untyped again.
+     * and the root task's Untyped is free again, the whole of it.
      * See DESIGN.md, "Kernel pools and revocation".
      */
-    uint32_t lent_base;
-    expect("make untyped memory to lend",
-           rv_retype(BOOT_CAP_FREE_RAM, CAP_UNTYPED, CHUNK, SLOT_LENT, &lent_base));
+    uint32_t lent_base, lent_size;
+    take_untyped(SLOT_LENT, &lent_base, &lent_size);
     expect("lend it to the child",
            rv_invoke(OP_CAP_DERIVE, SLOT_CHILD_TABLE, CHILD_LENT, SLOT_LENT, RIGHT_ALL));
     expect("give the child its own pool",
@@ -827,12 +859,12 @@ int main(void)
     expect("the child made a pool", bits == BIT_POOLED ? KERR_OK : KERR_INVALID_ARG);
     uint32_t lent_again;
     expect("the lent memory is inert here",
-           rv_retype(SLOT_LENT, CAP_POOL, CHUNK, SLOT_LENT_POOL, &lent_again) == KERR_NO_MEMORY
+           rv_retype(SLOT_LENT, CAP_POOL, SLOT_LENT_POOL, &lent_again) == KERR_NO_MEMORY
                ? KERR_OK : KERR_INVALID_ARG);
     expect("revoke below the lent memory",
            rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_LENT, 0, 0));
     expect("the lent memory is back",
-           rv_retype(SLOT_LENT, CAP_POOL, CHUNK, SLOT_LENT_POOL, &lent_again));
+           rv_retype(SLOT_LENT, CAP_POOL, SLOT_LENT_POOL, &lent_again));
     expect("it is the same memory", lent_again == lent_base ? KERR_OK : KERR_INVALID_ARG);
     puts("root: cascade ok\n");
 

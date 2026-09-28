@@ -1,0 +1,19 @@
+A split makes two halves of an Untyped though something made of it is left,
+so the new halves lie over what it made before.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: memory that may hold kernel objects overlaps a node not above or below it
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -243,9 +243,6 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
+         if (err != KERR_OK) {
+             return err;
+         }
+-        if (!untyped_free(u)) {
+-            return KERR_NO_MEMORY;
+-        }
+         /* Both slots are free, so neither store fails and the split is whole or not at all. */
+         struct cap lower = cap_to_untyped(base, half, cap->rights);
+         struct cap upper = cap_to_untyped(base + half, half, cap->rights);

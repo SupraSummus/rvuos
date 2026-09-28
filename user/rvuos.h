@@ -55,9 +55,9 @@ static inline uint32_t rv_frame_min_size(uint32_t frame_cap, uint32_t *min_out)
     return r_a0;
 }
 
-/* OP_UNTYPED_INFO: where an Untyped's memory lies, and how much of it is made into something. */
+/* OP_UNTYPED_INFO: where an Untyped's memory lies, and whether something made of it is left. */
 static inline uint32_t rv_untyped_info(uint32_t untyped_cap, uint32_t *base, uint32_t *size,
-                                       uint32_t *mark)
+                                       uint32_t *made)
 {
     register uint32_t r_a0 __asm__("a0") = untyped_cap;
     register uint32_t r_a1 __asm__("a1");
@@ -70,25 +70,29 @@ static inline uint32_t rv_untyped_info(uint32_t untyped_cap, uint32_t *base, uin
                      : "memory", "a3", "a5", "a6");
     *base = r_a1;
     *size = r_a2;
-    *mark = r_a4;
+    *made = r_a4;
     return r_a0;
 }
 
-/* OP_UNTYPED_RETYPE: make the next block of an Untyped into a frame, a pool or an Untyped. */
-static inline uint32_t rv_retype(uint32_t untyped_cap, uint32_t type, uint32_t size, uint32_t dst,
-                                 uint32_t *base)
+/* OP_UNTYPED_RETYPE: make the whole of an Untyped into a frame or a pool. */
+static inline uint32_t rv_retype(uint32_t untyped_cap, uint32_t type, uint32_t dst, uint32_t *base)
 {
     register uint32_t r_a0 __asm__("a0") = untyped_cap;
     register uint32_t r_a1 __asm__("a1") = type;
-    register uint32_t r_a2 __asm__("a2") = size;
-    register uint32_t r_a3 __asm__("a3") = dst;
+    register uint32_t r_a2 __asm__("a2") = dst;
     register uint32_t r_a7 __asm__("a7") = OP_UNTYPED_RETYPE;
     __asm__ volatile("ecall"
-                     : "+r"(r_a0), "+r"(r_a1), "+r"(r_a2), "+r"(r_a3)
+                     : "+r"(r_a0), "+r"(r_a1), "+r"(r_a2)
                      : "r"(r_a7)
-                     : "memory", "a4", "a5", "a6");
+                     : "memory", "a3", "a4", "a5", "a6");
     *base = r_a1;
     return r_a0;
+}
+
+/* OP_UNTYPED_SPLIT: split an Untyped into its lower and upper halves. */
+static inline uint32_t rv_split(uint32_t untyped_cap, uint32_t lower, uint32_t upper)
+{
+    return rv_invoke(OP_UNTYPED_SPLIT, untyped_cap, lower, upper, 0);
 }
 
 /* OP_NOTIFY_SIGNAL: set bits, never blocking. */

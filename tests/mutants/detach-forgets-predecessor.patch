@@ -2,10 +2,7 @@ A node taken out of the middle of a ring without relinking its predecessor
 leaves the ring running through an empty slot.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
-Report: link to a slot that is not a live, filled one
 Report: parent's ring does not reach the slot
-Report: sibling ring does not close
-Report: slot is not derived from its parent
 
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c

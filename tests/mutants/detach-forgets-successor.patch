@@ -2,7 +2,7 @@ A node taken out of a ring without relinking its successor's predecessor
 leaves that link on an empty slot.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
-Report: predecessor link to a slot that is not a live, filled one
+Report: parent's ring does not reach the slot
 
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c

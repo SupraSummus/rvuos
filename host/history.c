@@ -101,7 +101,7 @@ __attribute__((noreturn)) static void violated(const char *what)
 
 /*
  * An installed region grants what the frame it came from did, a thread's units those units,
- * a thread's process what a capability to it does, and an Untyped its block whatever its watermark.
+ * a thread's process what a capability to it does, and an Untyped its block whatever it made.
  */
 static struct grant grant_of(const struct cap *c)
 {

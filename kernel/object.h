@@ -37,7 +37,7 @@ struct obj_header {
  * a is the base address or first line and b the size or count,
  * and there is no object.
  * For CAP_UNTYPED a is the block, its base and size in one word as NAPOT encodes them,
- * see untyped_base, and b the watermark, an offset from the base; there is no object either.
+ * see untyped_base, and b is 0; there is no object either, and whether it is free the tree says.
  * For every other type a is the object's physical address.
  *
  * child is the first slot derived from this one, by physical address, 0 if none.
@@ -257,8 +257,8 @@ static inline bool cap_has_object(uint8_t type)
 static inline uint32_t untyped_block(uint32_t base, uint32_t size) { return base | (size / 2 - 1); }
 static inline uint32_t untyped_size(const struct cap *c) { return (c->a ^ (c->a + 1)) + 1; }
 static inline uint32_t untyped_base(const struct cap *c) { return c->a & ~(untyped_size(c) - 1); }
-/* Where the next retype looks from: the base again once nothing made of it is left. */
-static inline uint32_t untyped_mark(const struct cap *c) { return c->child != 0 ? c->b : 0; }
+/* Whether an Untyped makes something: only while nothing made of it is left below it. */
+static inline bool untyped_free(const struct cap *c) { return c->child == 0; }
 
 static inline struct pool *obj_pool(const struct obj_header *o) { return p2v(o->pool); }
 
@@ -488,7 +488,7 @@ struct cap cap_to_object(struct obj_header *obj, uint8_t rights);
 /* Build a frame capability. */
 struct cap cap_to_frame(uint32_t base, uint32_t size, uint8_t rights);
 
-/* Build an Untyped capability with its watermark at its base. */
+/* Build an Untyped capability, over the whole of a block. */
 struct cap cap_to_untyped(uint32_t base, uint32_t size, uint8_t rights);
 
 /* Build an interrupt line capability: count lines from first. */

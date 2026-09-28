@@ -1,0 +1,20 @@
+A retype makes the whole of an Untyped into a frame or a pool though something made of it is left,
+so two things it made claim the same memory,
+and a frame may be mapped over a pool.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: memory that may hold kernel objects overlaps a node not above or below it
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -210,9 +210,6 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
+             return err;
+         }
+         /* The whole of the memory, which nothing else lies in while nothing made of it is left. */
+-        if (!untyped_free(u)) {
+-            return KERR_NO_MEMORY;
+-        }
+         struct cap c;
+         struct cap *parent = u;
+         if (type == CAP_POOL) {

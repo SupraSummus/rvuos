@@ -82,23 +82,14 @@ static int op_captable(struct thread *t, const struct cap *cap,
             }
             return cap_store_beside(table, arg[1], &src, source);
         }
-        if (src.type != CAP_UNTYPED) {
-            return cap_store(table, arg[1], &src, source);
-        }
         /*
-         * The derived Untyped has the whole of the memory, starting at its base,
-         * so the source makes nothing of it while that one lives:
-         * it must have made nothing yet, and its watermark moves to its end.
+         * A derived Untyped is the whole of the memory, which only a free one has to give,
+         * and the source makes nothing more while it lives, as for anything else it made.
          */
-        if (source->child != 0) {
-            return KERR_STATE;
+        if (src.type == CAP_UNTYPED && !untyped_free(source)) {
+            return KERR_NO_MEMORY;
         }
-        src.b = 0;
-        err = cap_store(table, arg[1], &src, source);
-        if (err == KERR_OK) {
-            source->b = untyped_size(source);
-        }
-        return err;
+        return cap_store(table, arg[1], &src, source);
     }
     case OP_CAP_MOVE: {
         /* The node goes where the source stood, so the same revokes reach it and it reaches the same nodes. */
@@ -186,22 +177,18 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
     uint32_t base = untyped_base(cap);
     uint32_t size = untyped_size(cap);
     struct cap *u = slot_node(t, slot);
+    struct captable *table = thread_table(t);
 
     switch (op) {
     case OP_UNTYPED_INFO:
         arg[1] = base;
         arg[2] = size;
         arg[3] = cap->rights;
-        arg[4] = untyped_mark(u);
+        arg[4] = !untyped_free(u);
         return KERR_OK;
     case OP_UNTYPED_RETYPE: {
         uint32_t type = arg[1];
-        uint32_t len = arg[2];
-        if (type != CAP_UNTYPED && type != CAP_FRAME && type != CAP_POOL) {
-            return KERR_INVALID_ARG;
-        }
-        /* A block, so that a frame is one NAPOT entry and what one Untyped makes nests. */
-        if (len > size || !napot_block(base, len)) {
+        if (type != CAP_FRAME && type != CAP_POOL) {
             return KERR_INVALID_ARG;
         }
         /*
@@ -214,26 +201,18 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
             if ((cap->rights & (RIGHT_R | RIGHT_W)) != (RIGHT_R | RIGHT_W)) {
                 return KERR_NO_RIGHTS;
             }
-            if (len < POOL_MIN_SIZE) {
+            if (size < POOL_MIN_SIZE) {
                 return KERR_INVALID_ARG;
             }
         }
-        struct captable *table = thread_table(t);
-        int err = cap_slot_free(table, arg[3]);
+        int err = cap_slot_free(table, arg[2]);
         if (err != KERR_OK) {
             return err;
         }
-        /*
-         * The next block of the size at or past the watermark, aligned to its size.
-         * Everything this Untyped made lies below the watermark, so the block overlaps none of it.
-         * The mark is at most the size and the size a multiple of len, so nothing wraps.
-         */
-        uint32_t off = (untyped_mark(u) + len - 1) & ~(len - 1);
-        if (off > size - len) {
+        /* The whole of the memory, which nothing else lies in while nothing made of it is left. */
+        if (!untyped_free(u)) {
             return KERR_NO_MEMORY;
         }
-        uint32_t at = base + off;
-        u->b = off + len;
         struct cap c;
         struct cap *parent = u;
         if (type == CAP_POOL) {
@@ -242,16 +221,36 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
              * so the capability may go and the memory stays accounted for.
              * It is not zeroed here, which would be work in its size: pool_alloc zeroes each object.
              */
-            struct pool *pool = pool_create(at, len, u);
+            struct pool *pool = pool_create(base, size, u);
             c = cap_to_object(&pool->hdr, RIGHT_ALL);
             parent = &pool->node;
-        } else if (type == CAP_FRAME) {
-            c = cap_to_frame(at, len, cap->rights);
         } else {
-            c = cap_to_untyped(at, len, cap->rights);
+            c = cap_to_frame(base, size, cap->rights);
         }
-        arg[1] = at;
-        return cap_store(table, arg[3], &c, parent);
+        arg[1] = base;
+        return cap_store(table, arg[2], &c, parent);
+    }
+    case OP_UNTYPED_SPLIT: {
+        /* Each half is a block, so that a frame made of it is one NAPOT entry. */
+        uint32_t half = size / 2;
+        if (!napot_block(base, half) || arg[1] == arg[2]) {
+            return KERR_INVALID_ARG;
+        }
+        int err = cap_slot_free(table, arg[1]);
+        if (err == KERR_OK) {
+            err = cap_slot_free(table, arg[2]);
+        }
+        if (err != KERR_OK) {
+            return err;
+        }
+        if (!untyped_free(u)) {
+            return KERR_NO_MEMORY;
+        }
+        /* Both slots are free, so neither store fails and the split is whole or not at all. */
+        struct cap lower = cap_to_untyped(base, half, cap->rights);
+        struct cap upper = cap_to_untyped(base + half, half, cap->rights);
+        cap_store(table, arg[1], &lower, u);
+        return cap_store(table, arg[2], &upper, u);
     }
     default:
         return KERR_WRONG_TYPE;
