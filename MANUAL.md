@@ -1569,8 +1569,8 @@ These are documented gaps, not surprises;
 - **No synchronous endpoints.**
   Shared memory and notifications carry everything; open decision 5.
 - **One `Irq` per line**; open decision 11.
-- **One board**, QEMU `virt`.
-  ESP32-C6 is the candidate for real hardware.
+- **No boot from flash.**
+  The ESP32-C6 runs from RAM, loaded by its ROM over USB.
 - **No loader.**
   The image embeds one program, linked at fixed addresses;
   a second process runs code from the same region.

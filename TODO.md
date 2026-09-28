@@ -1,102 +1,48 @@
 # TODO
 
-Roadmap first, then smaller items.
-Each roadmap step ends in something that runs under QEMU and has a test.
-Design decisions behind these items live in `DESIGN.md`.
+Open work only; an item leaves this file in the commit that finishes it.
 
-## Roadmap
+## ESP32-C6
 
-1. Done: boot in machine mode, trap vector, UART output.
-2. Done: one user-mode process behind PMP, a system call, a caught fault.
-3. Done: pools, capability tables, object allocation from user memory,
-   installing and removing regions.
-4. Done: two processes, `Notification` objects,
-   shared memory between processes, and the first scheduling decision.
-   A thread runs until it waits.
-5. Done: the timer tick and round-robin preemption.
-   Ready threads take turns in the order they became ready,
-   and that is the whole policy.
-   Priorities on `Thread` were part of this step
-   and are now open decision 9 in `DESIGN.md`,
-   whose working default is that the kernel has no further policy.
-   Still open from that step:
-   the `A` extension in userspace,
-   for what two threads that can now preempt each other
-   do in shared memory.
-   Done since: units of time, `DESIGN.md`, "Scheduling", which replaced the shares.
-   A thread runs on the units it is bound to, each earned by one thread at a time,
-   which a revoke takes back, or on spare time if its capability allows,
-   so a process that makes threads or children gets no more of the processor than its units.
-   Each thread has an account its units fill,
-   and one without spare time gets no more however idle the processor is.
-6. Done: `Irq` objects and a userspace UART driver.
-   An interrupt is a signal on the notification bound to the `Irq`,
-   which has the `Timer`'s shape, and the stall in `wfi` covers both.
-   Lines are handed out as `IrqLine` capabilities, objectless like regions.
-   Still open from that step:
-   the driver in `user/init.c` transmits only,
-   because `make test` feeds the UART nothing to receive,
-   and open decision 11 in `DESIGN.md`, sharing a line.
-   Done since: the kernel has no console.
-   Its output is a log in its memory with an interrupt line of its own,
-   and the driver in `user/init.c` is a logger thread that carries it out;
-   `DESIGN.md`, "The kernel log".
-   Still open from that step: open decision 12, the log across a reset.
-7. Done: pool destroy, with the capability table sweep in `DESIGN.md`,
-   "Kernel pools and revocation",
-   and the pool tree, so that a destroy takes the pools
-   created from within the destroyed one.
-   Both went with open decision 14, `Untyped` and `Frame`:
-   a destroy is a revoke below the pool's own node and a walk over its objects,
-   and a revoke below an Untyped destroys the pools made of it.
-   Done since: the derivation tree, `DESIGN.md`, "The derivation tree",
-   with `OP_CAP_DERIVE` and `OP_CAP_REVOKE`,
-   which decided open decision 7,
-   what a destroy does to region capabilities for the range.
-   Still open from that step:
-   the history-based "rights only narrow" invariant.
-8. First real board, ESP32-C6.
-   Done since: the demo root task runs from RAM, loaded by the ROM over USB,
-   and passes the QEMU transcript check, `make test BOARD=esp32c6`;
-   `DESIGN.md`, "Boards".
-   The PMA unit is all zero after the ROM and so in the way of nothing.
-   Still open:
-   - `make BOARD=esp32c6 test` with NAPOT regions and the block layout,
-     which halved the root task's data region there; it has run under QEMU only;
-   - boot from flash, and with it whether the ROM can load the image
-     straight from offset 0 or Espressif's second-stage bootloader must run first,
-     and whether execute-in-place goes through a cache the kernel must control;
-   - erratum DIG-694 on misaligned accesses across PMP regions;
-   - what the ROM overwrites in RAM on a reset, for open decision 12;
-   - the escape-attempt suite below, on the board as well as under QEMU,
-     since the board's PMP is what confines a process there.
-9. Bounded work, goal 4 in `DESIGN.md`,
-   whose table lists every walk this removes.
-   ABI changes come last.
-   Done: the line table, the installed region's slot index, the wait queue,
-   the run queue, the count of armed sources for the stall in `wfi`,
-   zeroing each object as it is allocated and on destroy only what was,
-   the check that every loop a trap runs says what bounds it,
-   `tools/loop-bounds.py`, a predecessor link per slot,
-   revoke, delete below a root and the conversions preempted and restarted,
-   the timer lines, which the tick looks at instead of every pool,
-   and `Untyped` and `Frame`, open decision 14,
-   which took the last walks off every call and made the pool destroy preemptible;
-   `DESIGN.md`, "Bounded work".
-   Still open from that step:
-   - `make BOARD=esp32c6 test` with the demo rewritten for `Untyped` and `Frame`,
-     and again for the halves that replaced the watermark, open decision 20 in `DESIGN.md`;
-     it has run under QEMU only.
-   - Whether `OP_POOL_DESTROY` should go.
-     A pool is the whole of the Untyped it was made of, so revoking that Untyped destroys it,
-     which the demo could do for the pool it rebuilds;
-     without the operation, the capability a destroy keeps for last would go too.
-     The boot pool's refusal by name went with `BOOT_CAP_ROOT_RAM`,
-     so the root task is destroyed as any process is, by its pool or by the memory under it.
-   - Revoking below a line capability takes the line back only while it is unbound.
-     A bound line could keep its capability, marked as the binding one,
-     whose clearing unbinds the `Irq`, which its pool keeps inert until it goes;
-     `DESIGN.md`, "Interrupts".
+`make BOARD=esp32c6 test` has not run on the chip since regions became NAPOT blocks,
+so everything since has run under QEMU only and has yet to pass on the chip:
+
+- NAPOT regions and the block layout, which halved the root task's data region there.
+- `Untyped` and `Frame`, open decision 14,
+  and the halves that replaced the watermark, open decision 20.
+- The timer's deferral, in the stall and while a thread runs:
+  "root: timer ok" and "root: period ok"
+  need its CLINT to drop the timer's level when `mtimecmp` moves past `mtime`,
+  and "root: tickless ok" needs a trap to take more than eight reads of `UTIME` there.
+- Units of time: "root: units ok", "root: unbind ok", "root: rebind ok" and "root: spare ok".
+  The first and the last compare spin counts within a factor of two, which QEMU's instruction count makes deterministic,
+  and the last needs the stall for an account to reach a tick to wake there as it does for a timer line.
+- The clock: "root: clock ok" needs user mode to read `UTIME`,
+  and "root: period ok" needs the tick to keep pace with the counter there too.
+- The handover: "root: handover ok"
+  needs the boot pool at `BOOT_POOL_BASE`, past the input, in RAM the ROM leaves alone,
+  and the successor's stack three quarters up the data region, above the logger's.
+
+Beyond the demo:
+
+- Boot from flash, and with it whether the ROM can load the image
+  straight from offset 0 or Espressif's second-stage bootloader must run first,
+  and whether execute-in-place goes through a cache the kernel must control.
+- Erratum DIG-694 on misaligned accesses across PMP regions.
+- What the ROM overwrites in RAM on a reset, for open decision 12.
+- The chip resets with `mideleg` at `0x111`, delegating interrupts 0, 4 and 8 to user mode.
+  Nothing raises them today, but the kernel should clear it at boot.
+- The GPIO CSRs, `0x803` to `0x805`, lie in the user-mode CSR range.
+  If user mode can reach them, every process drives eight pads past PMP; check on the chip.
+- The counter rate is measured over one tick at boot,
+  so it is only as exact as the polling loop in `timer_init`; a longer measurement would do better.
+- A device interrupt wakes its driver but does not run it;
+  the driver waits for its turn like a thread a timer line woke.
+  Measure that latency on the board; it belongs to open decision 9.
+- Feed the replay corpus to the board.
+  Something has to put each input where `BOOT_CAP_INPUT` points,
+  below the ROM's buffers or over USB once the kernel runs,
+  and the replay driver's second stack has to follow the board's data region.
 
 ## Verification
 
@@ -108,14 +54,14 @@ Design decisions behind these items live in `DESIGN.md`.
   drop them, or check them when one is needed.
 - That an object holds nothing from before its pool took the memory
   shows only where the garbage is a capability or makes a call fail;
-  `host/history.c` does not know what the memory held before the call.
+  `host/history.c` does not know what the memory held before the call,
+  and no record writes memory, so what a process leaves in memory it turns into a pool
+  is stood for only by the pattern the host's RAM starts out holding.
 - `tools/loop-bounds.py` knows clang's jump tables by their shape;
   any other jump through a register may make up a loop, which fails the link, never passes it.
 - That the count of armed sources leaves the log's line out is checked by reading `irq_set_bits`.
   Under tracing each call's line reaches the log before the self-check runs,
   so an `Irq` armed on the log's line has always signalled by then.
-- No record writes memory, so what a process leaves in memory it turns into a pool
-  is stood for only by the pattern the host's RAM starts out holding.
 - The exit to user mode is checked by nothing but runs under QEMU;
   `start.S` is not in the host build.
   The trap path is small enough to prove against the Sail model of RISC-V.
@@ -131,15 +77,6 @@ Design decisions behind these items live in `DESIGN.md`.
   That a signal wakes a thread waiting on *that* notification,
   and hands it the bits that were set,
   is checked only by the demo in `user/init.c`.
-- The tick preempts nobody while tracing is on;
-  `OP_DEBUG_TICK` replays its decision,
-  and only the interrupt landing between two instructions
-  is checked by the demo in `user/init.c` alone.
-  So are the ticks each trap counts on entry and the turn a count that reaches the timer's tick ends:
-  the host counts no ticks at a trap, and the self-check sees only which tick the kernel would set the timer for.
-- `OP_DEBUG_IRQ` replays what a device interrupt does to an `Irq`;
-  the controller, the claim and the completion
-  are checked by the demo in `user/init.c` alone.
 - The log's line is replayed through the trace itself,
   `tests/seeds/log-signals-untaken` and `log-wakes-reader`;
   a reader falling a whole ring behind, and the logger's byte-per-interrupt path,
@@ -147,8 +84,10 @@ Design decisions behind these items live in `DESIGN.md`.
   and the loss only by reading its code.
   A record that writes garbage into the log's `taken` is beyond the fuzzer,
   since no record writes memory; the clamp in `klog.c` is checked by reading it.
-  That the log cannot become a pool is a matter of type now:
-  `BOOT_CAP_LOG` is a frame, and no Untyped covers it.
+- `KERR_STATE` for a thread destroying the pool its table or its process lies in, but not the thread,
+  is checked only for the two together:
+  the driver's third thread lies apart from its process, but the process's table lies with it,
+  and the demo gives its child nothing elsewhere.
 - The replay driver has three threads, and the third shares the second's process and lies in the first's pool.
   More of them, each with its process, pool and Untyped as the second has,
   would give the derivation below the free RAM more branches;
@@ -161,23 +100,17 @@ Design decisions behind these items live in `DESIGN.md`.
   The replay driver's processes hold four regions each once set up,
   so a harness with a budget of six would reach the limit on the third install
   and still run the prologue.
-- Escape-attempt suite under QEMU:
+- Escape-attempt suite, under QEMU and on the ESP32-C6,
+  whose PMP is what confines a process there:
   one user program per scenario, expected outcome a specific fault.
   Execute from data, jump into the kernel, `csrr` and `mret` from user mode,
   misaligned access, stack into kernel memory.
 - CBMC on the halves `OP_UNTYPED_SPLIT` makes, `OP_FRAME_CARVE` and the NAPOT encoding.
-- Feed the replay corpus to the ESP32-C6.
-  Something has to put each input where `BOOT_CAP_INPUT` points,
-  below the ROM's buffers or over USB once the kernel runs,
-  and the replay driver's second stack has to follow the board's data region.
 - One layout header consumed by C, the linker scripts and
   `tests/differential.py`.
   C and the linker scripts share `kernel/layout.h` and the board's `board.h` now;
   the replay driver's second stack in `rvuos/replay.h`
   and `tests/differential.py` still carry QEMU's addresses of their own.
-- A pool whose every capability was deleted or revoked stays until the Untyped above it is revoked,
-  and nothing tells the holder of that Untyped what is left below it:
-  `OP_UNTYPED_INFO` says only that something is.
 - The host stops every preemptible call after one step, and makes it again,
   but has no second thread run in between,
   since under tracing an interrupt switches nothing.
@@ -196,13 +129,11 @@ Design decisions behind these items live in `DESIGN.md`.
   which is now most of what a mutant costs `make mutants`.
   A driver that replays several inputs per boot would need the kernel back to its boot state in between.
 - The seeds under `tests/seeds` are binary and were written by hand.
-  Moving `BOOT_CAP_LOG` in, and `BOOT_CAP_TIMER_LINES`, `BOOT_CAP_CLOCK`, `BOOT_CAP_SHARES`, now `BOOT_CAP_TIME`,
-  and `BOOT_CAP_ROOT_RAM` after it,
-  and `REPLAY_CAP_RAM` into slot 22 for the halves that replaced the watermark,
-  each took a one-off script that knew which argument of which operation is a slot,
-  run over the corpus too the last five times,
-  and checked by replaying every seed on the kernels before and after and comparing the statuses.
-  The last also changed a retype's arguments, so the seeds that made memory were written anew.
+  Renumbering a `BOOT_CAP_*` or `REPLAY_CAP_*` slot takes a one-off script
+  that knows which argument of which operation is a slot,
+  run over the seeds and the corpus,
+  and checked by replaying every seed on the kernels before and after and comparing the statuses;
+  an operation whose arguments change leaves the seeds that use it to be written anew.
   A generator in the repository, one line per record with the names from `rvuos/abi.h`,
   would make the seeds readable and the next renumbering a rebuild;
   replay slots that start a few above `BOOT_CAP_COUNT` would spare the next one.
@@ -220,15 +151,42 @@ Design decisions behind these items live in `DESIGN.md`.
 - The replay driver drains the log by polling after each record,
   so the host models it with one store into the header per event.
   A logger thread in the driver would make traced calls the host would have to follow.
-- A device interrupt wakes its driver but does not run it;
-  the driver waits for its turn like a thread a timer line woke.
-  Measure that latency on the first board; it belongs to open decision 9.
-- A turn is one tick while another thread could run, so the timer skips ticks only for a thread alone,
-  and a turn that begins mid-tick gets only the rest of one.
-  A turn of a few ticks, or of what the thread's account holds, would skip them while threads compete too,
-  and give turns the length the scheduler chooses: `sched_wake_ticks` would return the turn's end instead of one.
-  It changes what `OP_DEBUG_TICK` means to the replay, which passes records with it,
-  and what the demo's "root: units ok" measures; decide it with open decision 9.
+- The UART driver in `user/init.c` transmits only,
+  because `make test` feeds the UART nothing to receive.
+- The trap path runs no `sc` to break the running thread's reservation,
+  which the unprivileged specification asks for on a preemptive switch:
+  a thread preempted between its `lr` and its `sc` may succeed
+  though another thread stored to the word in between.
+  Nothing in userspace uses the `A` extension yet, so nothing shows it.
+- Whether `OP_POOL_DESTROY` should go.
+  A pool is the whole of the Untyped it was made of, so revoking that Untyped destroys it,
+  which the demo could do for the pool it rebuilds;
+  without the operation, the capability a destroy keeps for last would go too.
+  The root task is destroyed as any process is, by its pool or by the memory under it.
+- Revoking below a line capability takes the line back only while it is unbound.
+  A bound line could keep its capability, marked as the binding one,
+  whose clearing unbinds the `Irq`, which its pool keeps inert until it goes;
+  `DESIGN.md`, "Interrupts".
+- The same-pool rule for an `Irq` and its notification
+  could go the way a thread's process went:
+  hold the notification by a capability slot the sweep clears,
+  and give clearing it the effect it needs:
+  an `Irq` whose notification is taken disarms and masks its line.
+  No structural pointer between objects would then be left.
+  It costs twenty bytes per `Irq` and one test on use.
+- A pool whose every capability was deleted or revoked stays until the Untyped above it is revoked,
+  and nothing tells the holder of that Untyped what is left below it:
+  `OP_UNTYPED_INFO` says only that something is.
+- A signal and a wait in one system call, the shape of seL4's `ReplyRecv`.
+  Today it saves one trap per round trip and no context switch,
+  because a signal does not take the processor away from the signaller.
+  Should a woken thread ever preempt the signaller,
+  which open decision 9 in `DESIGN.md` leaves out,
+  it saves switches as well; that is when to add it.
+- A user fault stops the machine, even when another thread could run.
+  Give a thread's creator somewhere to hear about it:
+  a notification the kernel signals is the cheapest candidate,
+  since it needs no new object.
 - Both boards' `timer.c` read `mtime`, write `mtimecmp`, count and set the timer the same way at different addresses;
   a CLINT file taking the base and the period would hold that once, beside `timer_next`.
 - `pmp_init` stops counting at the first hardwired entry.
@@ -243,61 +201,22 @@ Design decisions behind these items live in `DESIGN.md`.
   until the root task is gone; open decision 20 in `DESIGN.md`.
   Grant the rest as further blocks, or lay the board out afresh,
   when a board's RAM gets tight.
-- `PROCESS_REGION_SLOTS` is fixed at 8;
-  size it per process from the PMP budget when process creation exists.
-- `KERR_STATE` for a thread destroying the pool its table or its process lies in, but not the thread,
-  is checked only for the two together:
-  the driver's third thread lies apart from its process, but the process's table lies with it,
-  and the demo gives its child nothing elsewhere.
-- The same-pool rule for an `Irq` and its notification
-  could go the way a thread's process went:
-  hold the notification by a capability slot the sweep clears,
-  and give clearing it the effect it needs:
-  an `Irq` whose notification is taken disarms and masks its line.
-  No structural pointer between objects would then be left.
-  It costs twenty bytes per `Irq` and one test on use.
-- A signal and a wait in one system call, the shape of seL4's `ReplyRecv`.
-  Today it saves one trap per round trip and no context switch,
-  because a signal does not take the processor away from the signaller.
-  Should a woken thread ever preempt the signaller,
-  which open decision 9 in `DESIGN.md` leaves out,
-  it saves switches as well; that is when to add it.
-- A user fault stops the machine, even when another thread could run.
-  Give a thread's creator somewhere to hear about it:
-  a notification the kernel signals is the cheapest candidate,
-  since it needs no new object.
-- The timer's deferral, in the stall and while a thread runs, is untried on the ESP32-C6:
-  `make BOARD=esp32c6 test` has to print "root: timer ok" and "root: period ok" as it did,
-  which needs its CLINT to drop the timer's level when `mtimecmp` moves past `mtime`,
-  and "root: tickless ok", which needs a trap to take more than eight reads of `UTIME` there.
-- Units of time are untried on the ESP32-C6:
-  `make BOARD=esp32c6 test` has to print "root: units ok", "root: unbind ok", "root: rebind ok" and "root: spare ok".
-  The first and the last compare spin counts within a factor of two, which QEMU's instruction count makes deterministic,
-  and the last needs the stall for an account to reach a tick to wake there as it does for a timer line.
-- The clock is untried on the ESP32-C6:
-  `make BOARD=esp32c6 test` has to print "root: clock ok", which needs user mode to read `UTIME`,
-  and "root: period ok", which needs the tick to keep pace with the counter there too.
-- The handover is untried on the ESP32-C6:
-  `make BOARD=esp32c6 test` has to print "root: handover ok",
-  which needs the boot pool at `BOOT_POOL_BASE`, past the input, in RAM the ROM leaves alone,
-  and the successor's stack three quarters up the data region, above the logger's.
-- The ESP32-C6's counter rate is measured over one tick at boot,
-  so it is only as exact as the polling loop in `timer_init`; a longer measurement would do better.
-- The ESP32-C6 resets with `mideleg` at `0x111`, delegating interrupts 0, 4 and 8 to user mode.
-  Nothing raises them today, but the kernel should clear it at boot.
-- The ESP32-C6's GPIO CSRs, `0x803` to `0x805`, lie in the user-mode CSR range.
-  If user mode can reach them, every process drives eight pads past PMP; check on the chip.
-- A thread is stopped by revoking its units and started again by binding it,
-  which is what a userspace scheduler, open decision 9 in `DESIGN.md`, needs.
-  A thread waiting on a notification stays on it meanwhile, and cannot be taken off it today.
+- `PROCESS_REGION_SLOTS` is fixed at 8, whatever the PMP budget;
+  size it per process from the budget.
+
+## Scheduling
+
+- A turn is one tick while another thread could run, so the timer skips ticks only for a thread alone,
+  and a turn that begins mid-tick gets only the rest of one.
+  A turn of a few ticks, or of what the thread's account holds, would skip them while threads compete too,
+  and give turns the length the scheduler chooses: `sched_wake_ticks` would return the turn's end instead of one.
+  It changes what `OP_DEBUG_TICK` means to the replay, which passes records with it,
+  and what the demo's "root: units ok" measures; decide it with open decision 9.
 - Threads with time take equal turns,
   so a thread with more units gets its larger part only by running on
   after the others have spent their accounts.
   A turn of as many ticks as the thread's units weigh would spread that over time;
   decide with the first workload that wants it, and with the turn counted from the switch below.
-- Threads cannot spend one account together, and spare time goes round by thread,
-  so a group of threads shares a part of the processor only by splitting units, a sixty-fourth at least each.
-  An account several threads are bound to would bring the share back; decide with the first workload that wants one.
 - The tick charges a whole tick to the thread whose turn it is when it comes,
   so a thread that always waits just before the tick is never charged,
   and a turn ends on the tick grid, so it may run up to a tick past what its account held.
@@ -314,11 +233,13 @@ Design decisions behind these items live in `DESIGN.md`.
   which QEMU counts at a sixth of the cheapest system call.
   Counting only where the count or an account is read, the timer lines' calls and a switch among them,
   would spare it, at the price of a rule every such place has to keep.
+- Threads cannot spend one account together, and spare time goes round by thread,
+  so a group of threads shares a part of the processor only by splitting units, a sixty-fourth at least each.
+  An account several threads are bound to would bring the share back; decide with the first workload that wants one.
 - An account holds at most a tenth of a second's worth of its units.
   More lets an idle thread bring back a longer burst, which the others then wait out;
   less holds a thread nearer its units over short stretches;
   decide when a workload measures the difference.
-- `object_first`/`object_next` collapsed the pool walk everywhere
-  except the tiling check in `selfcheck.c`, which verifies
-  the very link the flat walk crosses pools by.
-  Leave that one nested.
+- A thread is stopped by revoking its units and started again by binding it,
+  which is what a userspace scheduler, open decision 9 in `DESIGN.md`, needs.
+  A thread waiting on a notification stays on it meanwhile, and cannot be taken off it today.
