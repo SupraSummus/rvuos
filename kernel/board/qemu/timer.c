@@ -1,73 +1,13 @@
-/*
- * Machine timer of the QEMU virt board: the CLINT's mtime and mtimecmp.
- * A board with its timer elsewhere replaces this file, as it does irq.c.
- */
+/* Machine timer of the QEMU virt board: a SiFive CLINT, which counts from reset at COUNTER_HZ. */
 
-#include <stdint.h>
-
-#include "csr.h"
+#include "clint.h"
 #include "layout.h"
 #include "timer.h"
-#include "work.h"
 
-#define CLINT_BASE     0x02000000u
-#define CLINT_MTIMECMP (CLINT_BASE + 0x4000u) /* hart 0 */
-#define CLINT_MTIME    (CLINT_BASE + 0xbff8u)
-_Static_assert(CLINT_MTIME == COUNTER_ADDR, "the clock names the counter the tick is made of");
-
-#define TICK_CYCLES (COUNTER_HZ / TIMER_HZ)
-
-#define REG(addr) (*(volatile uint32_t *)(addr))
-
-/* Both are 64 bits wide and this is RV32, so each is two words. */
-static uint64_t mtime_read(void)
-{
-    uint32_t hi, lo;
-    do {
-        LOOP_WAIT("the high half to hold still across the read");
-        hi = REG(CLINT_MTIME + 4);
-        lo = REG(CLINT_MTIME);
-    } while (REG(CLINT_MTIME + 4) != hi);
-    return ((uint64_t)hi << 32) | lo;
-}
-
-static void mtimecmp_write(uint64_t v)
-{
-    /* Push the compare value out of reach while the halves are apart. */
-    REG(CLINT_MTIMECMP) = 0xffffffffu;
-    REG(CLINT_MTIMECMP + 4) = (uint32_t)(v >> 32);
-    REG(CLINT_MTIMECMP) = (uint32_t)v;
-}
-
-/* The compare value of the tick after the last counted one. */
-static uint64_t next_tick;
-
-/* What mtimecmp holds, so that setting it for the tick it holds writes nothing. */
-static uint64_t compare;
-
-uint32_t timer_count(void)
-{
-    return timer_next(&next_tick, mtime_read(), TICK_CYCLES);
-}
-
-void timer_set(uint32_t ticks)
-{
-    uint64_t at = timer_deferred(next_tick, ticks, TICK_CYCLES);
-    if (at != compare) {
-        compare = at;
-        mtimecmp_write(at);
-    }
-}
-
-uint32_t timer_counter_hz(void)
-{
-    return COUNTER_HZ;
-}
+/* A tick is a whole number of counts, so timer_counter_hz returns COUNTER_HZ. */
+_Static_assert(COUNTER_HZ % TIMER_HZ == 0, "the tick divides the counter's second");
 
 void timer_init(void)
 {
-    next_tick = mtime_read() + TICK_CYCLES;
-    compare = next_tick;
-    mtimecmp_write(compare);
-    csr_set(mie, MIE_MTIE);
+    clint_start(COUNTER_HZ / TIMER_HZ);
 }
