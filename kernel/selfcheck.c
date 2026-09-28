@@ -647,9 +647,6 @@ static void check_captable(const struct captable *table)
             if (c->rights & ~granted) {
                 fail("untyped with rights beyond the grant", v2p(table), i, c->rights);
             }
-            if (c->b > size) {
-                fail("untyped's watermark lies past its end", v2p(table), i, c->b);
-            }
             break;
         }
         case CAP_IRQ_LINE:
@@ -773,7 +770,7 @@ static bool derived_from(const struct cap *c, const struct cap *p)
     bool narrower = !(c->rights & ~p->rights);
     uint32_t base, size, pbase, psize;
     /*
-     * What an Untyped made lies below its watermark, and so does what came up to it
+     * What an Untyped made lies within it, and so does what came up to it
      * from something it made that went; a pool's own node carries rights of its own.
      */
     if (p->type == CAP_UNTYPED) {
@@ -783,7 +780,7 @@ static bool derived_from(const struct cap *c, const struct cap *p)
         }
         node_range(c, &base, &size);
         node_range(p, &pbase, &psize);
-        return (narrower || c->type == CAP_RETYPED) && range_within(base, size, pbase, p->b);
+        return (narrower || c->type == CAP_RETYPED) && range_within(base, size, pbase, psize);
     }
     if (c->type == p->type) {
         if (c->type == CAP_FRAME || c->type == CAP_IRQ_LINE || c->type == CAP_TIME) {
@@ -960,22 +957,24 @@ static void check_tree(void)
 }
 
 /*
- * True if an Untyped will make nothing more of [base, base + size):
- * it lies below the watermark, which stays while the Untyped has made something.
+ * True if an Untyped is a root with something made of it below it.
+ * A delete below a root makes roots of its children one by one,
+ * which lie in its memory until it goes with the last of them;
+ * it makes nothing meanwhile, so nothing it could make meets them.
  */
-static bool behind_mark(const struct cap *u, uint32_t base, uint32_t size)
+static bool made_root(const struct cap *u)
 {
-    return u->type == CAP_UNTYPED && u->child != 0 && range_within(base, size, untyped_base(u), u->b);
+    return u->type == CAP_UNTYPED && !untyped_free(u) && u->next == LINK_UP;
 }
 
 /*
  * Memory that may become kernel memory, an Untyped or a pool,
  * overlaps another node standing for memory only where one lies below the other,
- * or where an Untyped overlaps what lies behind its watermark,
- * which a delete below a root Untyped leaves while it makes roots of its children one by one.
+ * or where one of them is a root Untyped that made something,
+ * which a delete below it leaves while it makes roots of its children one by one.
  * So a frame, which never lies above or below a pool, overlaps none,
  * and neither does anything two siblings below one Untyped stand for:
- * the watermark kept them apart.
+ * an Untyped makes one thing of the whole of its memory, or two halves, and nothing while they are there.
  */
 static void check_nesting(void)
 {
@@ -991,8 +990,7 @@ static void check_nesting(void)
             if (y == x || !node_range(y, &ybase, &ysize) || !ranges_overlap(xbase, xsize, ybase, ysize)) {
                 continue;
             }
-            if (!lies_below(x, y) && !lies_below(y, x) && !behind_mark(x, ybase, ysize) &&
-                !behind_mark(y, xbase, xsize)) {
+            if (!lies_below(x, y) && !lies_below(y, x) && !made_root(x) && !made_root(y)) {
                 fail("memory that may hold kernel objects overlaps a node not above or below it",
                      v2p(x), v2p(y), ybase);
             }

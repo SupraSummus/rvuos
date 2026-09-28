@@ -12,7 +12,8 @@ struct granted_range boot_granted[GRANTED_RANGES];
 
 /*
  * The root task's code, data and input and the boot pool are made of its memory, BOOT_CAP_ROOT_RAM,
- * so the boot leaves what a loader making a process of an Untyped would, and nothing more.
+ * and hang right below it, as they would once a loader had split that memory down to them
+ * and deleted the halves between; the boot leaves nothing more.
  */
 struct thread *boot_create_root(void)
 {
@@ -52,12 +53,11 @@ struct thread *boot_create_root(void)
     }
 
     /*
-     * The root task's memory has made all it holds, so its watermark is at its end,
+     * The root task's memory makes nothing while what it holds lies below it,
      * and the boot pool hangs below it as a retype would have put it;
      * nothing is below the pool's node yet, so attaching it loses nothing.
      */
     struct cap ram = cap_to_untyped(ROOT_RAM_BASE, ROOT_RAM_SIZE, RIGHT_ALL);
-    ram.b = ROOT_RAM_SIZE;
     if (cap_store(table, BOOT_CAP_ROOT_RAM, &ram, NULL) != KERR_OK) {
         kpanic("cannot fill the root task's table");
     }

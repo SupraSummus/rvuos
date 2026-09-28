@@ -1,0 +1,21 @@
+A split leaves its halves roots rather than below the Untyped it split,
+so the Untyped is free at once and makes a pool over them,
+and a revoke below it takes nothing back.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: memory that may hold kernel objects overlaps a node not above or below it
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -249,8 +249,8 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
+         /* Both slots are free, so neither store fails and the split is whole or not at all. */
+         struct cap lower = cap_to_untyped(base, half, cap->rights);
+         struct cap upper = cap_to_untyped(base + half, half, cap->rights);
+-        cap_store(table, arg[1], &lower, u);
+-        return cap_store(table, arg[2], &upper, u);
++        cap_store(table, arg[1], &lower, NULL);
++        return cap_store(table, arg[2], &upper, NULL);
+     }
+     default:
+         return KERR_WRONG_TYPE;

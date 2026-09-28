@@ -352,9 +352,9 @@ its two words are the base address and the size,
 and the rights are the memory permissions it may grant.
 An `Untyped` has none either:
 its first word is its block, base and size as NAPOT encodes them,
-its second the watermark,
+its second is unused, since whether it is free the derivation tree says,
 and its rights are those of the frames made of it.
-Carving a frame and retyping an Untyped into a frame or a smaller Untyped
+Carving a frame, retyping an Untyped into a frame and splitting one into halves
 are therefore pure table operations that touch no kernel memory,
 which is what lets the root task hand out memory
 before it has created a single pool.
@@ -369,7 +369,7 @@ there is one counter on the machine.
 
 | Object | Purpose |
 |---|---|
-| `Untyped` | Memory that may become frames, pools or smaller Untypeds. Never installed. No object. |
+| `Untyped` | Memory that may become a frame, a pool or two halves. Never installed. No object. |
 | `Frame` | A physical address range with maximum rights. Installed into a process's PMP slots. No object. |
 | `KernelPool` | Memory retyped from an Untyped and handed to the kernel. All other objects are allocated from pools. |
 | `CapTable` | A process's capability table. Allocated from a pool. |
@@ -391,31 +391,41 @@ whose contents can be walked without a free list.
 
 Memory reaches the kernel through an `Untyped` capability,
 memory that may become something else and that no process can map.
-`OP_UNTYPED_RETYPE` takes the next block of a given size at the Untyped's watermark,
-aligned to its size, moves the watermark past it,
-and makes the block a `Frame`, a smaller `Untyped` or a `KernelPool`,
-which hangs below the Untyped in the derivation tree.
+An Untyped is free or made, and the derivation tree says which:
+while nothing lies below it, it makes one thing of the whole of its memory,
+and while something does, it makes nothing.
+`OP_UNTYPED_SPLIT` makes it two `Untyped`s, its lower and its upper half,
+and `OP_UNTYPED_RETYPE` a `Frame` or a `KernelPool` of all of it,
+each below it in the derivation tree.
 What one Untyped makes therefore never overlaps,
-and a retype that finds nothing below the Untyped starts again from its base.
+and it is free again, the whole of it, once nothing it made is left.
 From the retype on, a pool's memory belongs to the kernel.
 The kernel zeroes each object as it allocates it, not the whole block.
 
+Where a block lies is the program's to choose, by which half it takes,
+and the kernel keeps nothing an allocator would: no cursor, no free list.
+A program that wants small blocks out of a large one halves it down
+and holds the halves it does not use yet, which are its free memory.
+A half deleted goes as any capability does, what was made of it to its parent,
+so a program may let the halves between go and keep only what it made,
+and the parent is free again once all of that is gone.
+The root task starts with its own memory laid out so; see "Boot".
+
 An Untyped is derived, never copied,
 since a copy would be a second allocator over the same memory.
-Deriving one requires that nothing was made of it yet
-and moves its watermark to its end,
-so the derived one has the whole of the memory
-and the source makes nothing more until that one and what was made of it are gone.
-The watermark costs no slot space:
-an Untyped's block, base and size, is one word, encoded as `pmpaddr` encodes NAPOT,
-and the watermark is the other.
+A derived Untyped is the whole of its source,
+so only a free one derives,
+and the source makes nothing while the derived one lives, as for anything else it made.
+That is how memory is lent:
+the lender keeps its Untyped,
+and a revoke below it takes back whatever the borrower made of the memory and leaves it free.
 
 A `Frame` is memory a process may map and nothing else:
 it never becomes a pool, so its copies are harmless,
 and an install looks only at the slots of its own process.
 Isolation follows from the tree rather than from a scan.
 A frame and a pool below different children of one Untyped never meet,
-because the watermark kept the children apart,
+because an Untyped makes a child only of memory nothing else it made lies in,
 and every frame that no Untyped covers is a root over memory no pool can lie in:
 device memory, flash and the log.
 The root task's own regions are frames of the Untyped the root task lives in; see "Boot".
@@ -466,10 +476,8 @@ for whoever holds that source's ancestors to revoke.
 A revoke there instead would take the Untypeds the table held,
 and with them pools the destroy would have to destroy in turn,
 which is recursion the kernel does not have.
-The memory goes back to the Untyped the pool was retyped from;
-it is made into something again once nothing else made of that Untyped is left.
-A block given back in the middle is not reusable until then,
-which is seL4's price and rvuos's too, along with the alignment at the watermark.
+The memory goes back to the Untyped the pool hangs below,
+which is free again once nothing else it made is left.
 
 A generation counter in each object was the alternative, and it cannot work.
 The counter lives in the memory being destroyed,
@@ -550,7 +558,7 @@ A capability to a pool or an object is never a root, and neither is a thread's p
 
 **What hangs below what.**
 A carve hangs below the frame or line it was carved from,
-a retype below the Untyped it was made of,
+a retype and a split below the Untyped they were made of,
 a derivation below its source,
 an installed region below the frame it was installed from,
 the counter's frame below the clock it was derived through,
@@ -1234,8 +1242,10 @@ or a shell is.
 
 After boot the kernel names the root task nowhere.
 The root task lives in memory it holds: `BOOT_CAP_ROOT_RAM` is an Untyped
-with its code, data and input and the boot pool below it and its watermark at its end,
-what a loader making a process of an Untyped leaves.
+with its code, data and input and the boot pool right below it,
+what a loader leaves that halved an Untyped down to them and let the halves between go.
+So it makes nothing while they are there,
+and the rest of its memory, past the boot pool, is its holder's again once they are gone.
 It cannot revoke below that memory or destroy the boot pool, since it lives there,
 as no process can what it runs on.
 Before, the boot pool lay in a range the linker reserved, below no Untyped,
@@ -1445,8 +1455,8 @@ the log excepted: it holds no object and can never become a pool.
 Memory that may hold kernel objects, an Untyped or a pool,
 overlaps another node standing for memory, an Untyped, a pool, a frame or an installed region,
 only where one lies below the other,
-or where the overlap lies behind an Untyped's watermark while it has made something,
-which a delete below a root Untyped leaves as it makes roots of its children one by one.
+or where one of the two is a root Untyped that made something,
+which a delete below it leaves as it makes roots of its children one by one.
 So no frame overlaps a pool, and no Untyped makes a block over anything not below it.
 
 **PMP fidelity.**
@@ -1462,7 +1472,6 @@ Every capability in every table names either
 a frame or an Untyped within the granted memory,
 a NAPOT block no smaller than the smallest region,
 with rights no greater than the root task received for it
-and, for an Untyped, its watermark within it,
 or a range of lines the interrupt controller has, the log's among them,
 with no more than the right to bind,
 or a range of the units of time there are, with no more than the rights to bind and to run on spare time,
@@ -1488,7 +1497,6 @@ and a capability to a pool or an object is never one, nor a thread's process.
 A node is derived from its parent:
 the same object with no more rights,
 a range within the parent's range with no more rights,
-and below an Untyped's watermark when the parent is one,
 a pool's own node on an Untyped, an installed region on a frame,
 a thread's units on a capability to units that holds them, the first of them even for none,
 a thread's process on a capability to that process, to its pool, or on its pool's own node,
@@ -1756,8 +1764,8 @@ which the host runs from the kernel's state;
 the passing is system calls, so both transcripts carry it.
 The second thread has a pool, a process and a table of its own,
 so every switch between them reloads the PMP under the self-check's eye,
-and an Untyped of its own derived from the first thread's,
-so a pool it makes lies below the first thread's Untyped,
+and memory of its own, an Untyped derived from a quarter of the free RAM, as the first thread has half of it,
+so a pool it makes lies below the free RAM the first thread holds,
 a record on the first thread can destroy both at once with a revoke,
 and the cascade is replayed like any other path.
 The state both builds start from is in `include/rvuos/replay.h`
@@ -2034,9 +2042,8 @@ until the maintainer decides otherwise.
     - a stopped destroy keeps its progress in the pool:
       the objects go newest first and the used mark with them.
 
-    The price is seL4's: the root task retypes before it installs anything,
-    alignment at the watermark wastes memory,
-    and a block given back in the middle waits for the rest of its Untyped.
+    The price is seL4's: the root task retypes before it installs anything.
+    The watermark a retype took each block past, which seL4 has too, went for halves; see decision 20.
     Besides, a grant made through a dying table now outlives it,
     and revoking below a line capability no longer takes an `Irq` bound from it;
     see "Interrupts".
@@ -2104,3 +2111,17 @@ until the maintainer decides otherwise.
     A lender that means to lend allocation alone lends a pool made for the borrower.
     The alternative is a right of its own for the destroy, `RIGHT_X` being free on a pool.
     Decide when a server hands out allocation in a pool it lives in.
+
+20. **Halves instead of a watermark.**
+    Decided: an Untyped makes one thing of the whole of its memory, a frame, a pool, its two halves
+    or a derived Untyped, and nothing while any of those is left;
+    see "Kernel pools and revocation".
+    Before, a retype took the next block of a given size past a watermark,
+    so the kernel chose where each block lay, alignment left gaps,
+    and a block given back waited for everything else its Untyped had made.
+    Now the program chooses by the half it takes, and a block given back is free again at once.
+    The price is the program's: its free memory is capabilities, one a block, in a table of fixed size,
+    and a small block out of a large one is a split per halving.
+    Still open: no operation joins two free halves whose parent was deleted;
+    they join only when their grandparent is free again.
+    Decide when a program's free list wants it.

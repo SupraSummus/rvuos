@@ -34,7 +34,7 @@
 #define KERR_WRONG_TYPE   2 /* capability does not accept this operation */
 #define KERR_NO_RIGHTS    3 /* capability lacks a right the operation needs */
 #define KERR_INVALID_ARG  4
-#define KERR_NO_MEMORY    5 /* pool exhausted, or no block of the size left in an Untyped */
+#define KERR_NO_MEMORY    5 /* pool exhausted, or an Untyped with something made of it */
 #define KERR_SLOT_IN_USE  6 /* destination slot already holds a capability */
 #define KERR_OVERLAP      7 /* region overlaps one installed in the same process; line already bound */
 #define KERR_LIMIT        8 /* a fixed kernel limit was hit, such as PMP entries */
@@ -49,7 +49,7 @@
 #define CAP_THREAD   5
 #define CAP_DEBUG    6 /* a byte into the kernel's log, and machine halt, for bring-up */
 #define CAP_NOTIFICATION 7
-#define CAP_UNTYPED  8 /* memory that may become frames, pools or smaller Untypeds; never mapped */
+#define CAP_UNTYPED  8 /* memory that may become a frame, a pool or two halves; never mapped */
 #define CAP_IRQ_LINE 9 /* a range of interrupt lines; no kernel object behind it */
 #define CAP_IRQ      10 /* one line bound to a notification; signals it when the line fires */
 #define CAP_CLOCK    11 /* the machine's counter: its rate, and a frame to read it through */
@@ -156,8 +156,8 @@
  * The arguments are OP_CAP_COPY's.
  * The result is a child of the source in the derivation tree,
  * so revoking below the source takes it, and everything derived from it in turn.
- * An Untyped can be derived only while nothing was made of it, else KERR_STATE,
- * and deriving uses the whole of it up: the source makes nothing more
+ * An Untyped can be derived only while nothing is made of it, else KERR_NO_MEMORY,
+ * and the derived one is the whole of it: the source makes nothing more
  * until the derived one and what was made of it are gone.
  */
 #define OP_CAP_DERIVE 24
@@ -170,7 +170,7 @@
  * and a revoke that would have taken the source takes it.
  * The source slot is left empty. The rights stay as they were,
  * since what was derived from the source may hold all of them.
- * An Untyped moves too, with its watermark: a move makes no second allocator.
+ * An Untyped moves too, with what was made of it: a move makes no second allocator.
  */
 #define OP_CAP_MOVE 18
 
@@ -193,27 +193,36 @@
 #define OP_FRAME_CARVE 5
 
 /*
+ * An Untyped is either free or made: while nothing lies below it in the derivation tree
+ * it makes one thing of the whole of its memory, a frame, a pool, two halves or a derived Untyped,
+ * and while something does it makes nothing, KERR_NO_MEMORY,
+ * so the things one Untyped made never overlap.
+ * It is free again, the whole of it, once nothing made of it is left,
+ * which a revoke below it brings about at once.
+ * Where each block lies is the program's to choose, by which half it takes.
+ */
+
+/*
  * Untyped: describe it. Returns a1 = base, a2 = size, a3 = rights,
- * a4 = the watermark: the offset the next OP_UNTYPED_RETYPE looks from.
+ * a4 = 1 while something made of it is left, 0 while it is free.
  */
 #define OP_UNTYPED_INFO 27
 /*
- * Untyped: make the next block of its memory into something, as a child of the invoked one.
- * a1 = the type: CAP_UNTYPED, CAP_FRAME, or CAP_POOL,
- * a2 = the size, a power of two no smaller than the smallest region,
- *      and for a pool no smaller than POOL_MIN_SIZE,
- * a3 = destination slot.
- * Returns a1 = the base of the block.
- * The block is the first one of the size, aligned to it, at or past the watermark,
- * and the watermark moves past it, so what one Untyped makes never overlaps;
- * an Untyped that nothing made of it is left of starts again from its base.
- * Fails with KERR_NO_MEMORY when the block does not fit.
- * A frame and an Untyped carry the invoked one's rights.
- * A pool needs RIGHT_R and RIGHT_W, lies below the pool's own node in the tree,
- * and the returned Pool capability below that node;
- * revoking below the Untyped destroys the pool.
+ * Untyped: make the whole of its memory into one thing, below the invoked one in the tree.
+ * a1 = the type: CAP_FRAME or CAP_POOL, a2 = destination slot.
+ * Returns a1 = the base of the memory.
+ * A frame carries the invoked one's rights.
+ * A pool needs RIGHT_R and RIGHT_W and an Untyped no smaller than POOL_MIN_SIZE;
+ * it lies below the pool's own node in the tree, and the returned Pool capability below that node,
+ * so revoking below the Untyped destroys the pool.
  */
 #define OP_UNTYPED_RETYPE 6
+/*
+ * Untyped: split its memory into two halves, each an Untyped with the invoked one's rights,
+ * below it in the tree. a1 = slot for the lower half, a2 = slot for the upper half, two slots.
+ * A half is no smaller than the smallest region, else KERR_INVALID_ARG.
+ */
+#define OP_UNTYPED_SPLIT 30
 
 /*
  * Pool (RIGHT_W): allocate a kernel object.
@@ -384,7 +393,7 @@
 #define OP_TIME_BIND 29
 
 /* One above the highest operation code; the fuzzer's mutator draws below it. */
-#define OP_COUNT 30
+#define OP_COUNT 31
 
 /*
  * Capability slots the kernel fills in the root task's table at boot.
@@ -472,7 +481,7 @@ struct replay_record {
 /* Fixed limits visible to user programs. */
 #define PROCESS_REGION_SLOTS 8
 #define ROOT_TABLE_SLOTS 64 /* slots in the root task's table */
-#define POOL_MIN_SIZE 64 /* the smallest pool OP_UNTYPED_RETYPE makes */
+#define POOL_MIN_SIZE 64 /* the smallest Untyped OP_UNTYPED_RETYPE makes a pool of */
 #define TIMER_LINES 16 /* on the whole machine; see BOOT_CAP_TIMER_LINES */
 #define TIME_UNITS 64 /* of the processor, on the whole machine; see BOOT_CAP_TIME */
 

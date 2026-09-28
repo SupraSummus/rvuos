@@ -323,7 +323,7 @@ and a **region** is a frame installed into one of a process's slots,
 which gives that process access to the range with the rights chosen at install time.
 Regions are all a process can see of memory.
 An **Untyped** is memory that has not become anything yet:
-it cannot be installed, and it is made into frames, pools and smaller Untypeds.
+it cannot be installed, and it is made into a frame, a pool or its two halves.
 The kernel does not know what a code segment, a stack or a heap is;
 whoever builds a process decides its layout.
 
@@ -380,7 +380,7 @@ The tree grows in these ways:
 | `OP_CAP_COPY` | beside the source, under the source's parent; a copy of a root is a root; an Untyped is never copied |
 | `OP_CAP_MOVE` | where the source hung, which it leaves empty, with what hung below the source below it |
 | `OP_FRAME_CARVE`, `OP_IRQ_CARVE`, `OP_TIME_CARVE`, `OP_CLOCK_FRAME` | below the invoked capability |
-| `OP_UNTYPED_RETYPE` of a frame or an Untyped | below the invoked Untyped |
+| `OP_UNTYPED_RETYPE` of a frame, `OP_UNTYPED_SPLIT` | below the invoked Untyped |
 | `OP_UNTYPED_RETYPE` of a pool | below the pool's own node, which hangs below the invoked Untyped |
 | `OP_PROCESS_INSTALL` | the installed region hangs below the frame |
 | `OP_POOL_ALLOC` | below the invoked `KernelPool` capability |
@@ -403,7 +403,7 @@ So derive to lend, and copy to keep a second handle to what you hold.
 A copy cannot take back what was derived from its source, since that hangs below the source and not below the copy;
 to hand over a capability together with that power, move it.
 An Untyped can only be derived, and only while nothing was made of it:
-the derived one has the whole of it, and the source makes nothing until that one is revoked.
+the derived one is the whole of it, and the source makes nothing until that one is gone.
 
 `OP_CAP_DELETE` clears one slot and hands what hung below it to the slot's parent,
 so deleting your own copy of something you lent does not take it back.
@@ -422,7 +422,7 @@ Programs are encouraged to keep the same convention.
 
 | Type | Constant | Object behind it | Created by |
 |---|---|---|---|
-| `Untyped` | `CAP_UNTYPED` | none: the slot holds the block and the watermark | boot, `OP_UNTYPED_RETYPE` |
+| `Untyped` | `CAP_UNTYPED` | none: the slot holds the block | boot, `OP_UNTYPED_SPLIT` |
 | `Frame` | `CAP_FRAME` | none: the slot holds base and size | boot, `OP_FRAME_CARVE`, `OP_UNTYPED_RETYPE` |
 | `KernelPool` | `CAP_POOL` | the pool's descriptor, at its base | `OP_UNTYPED_RETYPE` |
 | `CapTable` | `CAP_CAPTABLE` | a table of `n` slots | `OP_POOL_ALLOC` |
@@ -436,7 +436,7 @@ Programs are encouraged to keep the same convention.
 | `Clock` | `CAP_CLOCK` | none: there is one counter | boot |
 
 `Untyped`, `Frame`, `IrqLine`, `Time`, `Debug` and `Clock` capabilities have no kernel object behind them.
-Carving a frame, a line range or a range of units, and retyping an Untyped into a frame or an Untyped,
+Carving a frame, a line range or a range of units, retyping an Untyped into a frame and splitting one,
 are pure table operations
 that touch no kernel memory,
 which is why the root task can hand out memory, lines and time
@@ -452,17 +452,24 @@ The smallest block is eight bytes, or the PMP's grain if that is coarser;
 A range of any other size is rounded up or made of several blocks,
 one region slot each.
 
-`OP_UNTYPED_RETYPE` makes the next block of an Untyped into a frame, a pool or a smaller Untyped.
-The block is the first of the size requested, aligned to it,
-at or past the Untyped's **watermark**, and the watermark moves past it;
-`OP_UNTYPED_INFO` returns the watermark in `a4`,
-and the retype returns the block's base in `a1`.
-So what one Untyped makes never overlaps,
+An Untyped is **free** while nothing made of it is left, and **made** while something is;
+`OP_UNTYPED_INFO` says which in `a4`.
+A free Untyped makes one thing of the whole of its memory:
+`OP_UNTYPED_SPLIT` its lower and its upper half, two Untypeds,
+`OP_UNTYPED_RETYPE` a frame or a pool,
+and `OP_CAP_DERIVE` an Untyped of all of it, for lending, section 6.4.
+A made one makes nothing (`KERR_NO_MEMORY`),
+so what one Untyped makes never overlaps,
 and a frame never overlaps a pool.
-Memory made into something comes back when what was made goes:
-an Untyped of which nothing is left starts again from its base,
-but a block given back in the middle waits until everything else made of the Untyped is gone.
-To reuse one block on its own, make an Untyped of its size first and retype that.
+Once what it made is gone, whether deleted, destroyed or revoked, it is free again, the whole of it.
+
+Where a block lies is the program's to choose, by the half it takes;
+the kernel keeps no allocator.
+To get a small block out of a large Untyped, halve it down,
+and keep the halves not used yet: they are the program's free memory.
+A half the program does not want to keep a slot for may be deleted;
+what was made of it then hangs below its parent,
+which is free again once all of that is gone.
 A frame and an Untyped carry the rights of the Untyped they were made of.
 `OP_FRAME_CARVE` hands out a block within a frame.
 Programs that lay memory out with fixed offsets
@@ -492,9 +499,10 @@ What it does cost is a region slot and a PMP entry in each process.
 
 ### 5.5 Pools
 
-A process hands memory to the kernel with `OP_UNTYPED_RETYPE` of a `CAP_POOL`.
+A process hands memory to the kernel with `OP_UNTYPED_RETYPE` of a `CAP_POOL`,
+which makes the whole of the Untyped a pool.
 The Untyped must carry both read and write rights,
-and the pool must be at least `POOL_MIN_SIZE`, 64 bytes, and a block like any other.
+and be at least `POOL_MIN_SIZE`, 64 bytes.
 The kernel places the pool's descriptor at its base
 and returns a `KernelPool` capability with all rights.
 The memory belongs to the kernel from then on;
@@ -567,9 +575,10 @@ and a pool being destroyed allocates nothing, `KERR_STATE`.
 A lender that wants memory back from a living borrower
 lends it as an Untyped derived from its own
 and revokes below its own, section 5.2.
-That takes the borrower's Untyped, the frames it made and their mappings,
+That takes the borrower's Untyped, the halves, the frames it made and their mappings,
 and destroys every pool the borrower made of it,
-wherever the borrower passed it on.
+wherever the borrower passed it on and whatever it deleted in between,
+and leaves the lender's Untyped free, the whole of it.
 
 ### 5.6 Threads
 
@@ -934,7 +943,7 @@ and may fail, with what it already revoked staying revoked.
 | 2 | `KERR_WRONG_TYPE` | the capability's type does not accept this operation |
 | 3 | `KERR_NO_RIGHTS` | the capability lacks a right the operation needs |
 | 4 | `KERR_INVALID_ARG` | an argument is out of range or breaks a rule stated below |
-| 5 | `KERR_NO_MEMORY` | the pool has no room for the object, or the Untyped none for the block |
+| 5 | `KERR_NO_MEMORY` | the pool has no room for the object, or the Untyped has made something already |
 | 6 | `KERR_SLOT_IN_USE` | the destination slot already holds a capability |
 | 7 | `KERR_OVERLAP` | a region overlaps another installed in the same process, or the line is already bound |
 | 8 | `KERR_LIMIT` | a fixed kernel limit was hit, such as the PMP entry count |
@@ -989,8 +998,10 @@ The copy hangs beside the source in the derivation tree, section 5.2.
 **`OP_CAP_DERIVE` (24).**
 The arguments and errors of `OP_CAP_COPY`.
 The new capability hangs below the source.
-An Untyped can be derived, and only while nothing was made of it (`KERR_STATE`);
-the source's watermark moves to its end, and the derived one starts at its base.
+An Untyped can be derived, and only while it is free (`KERR_NO_MEMORY`), section 5.4:
+the derived one is the whole of it, and the source makes nothing while that one is left.
+So memory is lent: the lender keeps the source,
+and a revoke below it takes back whatever the borrower made of the derived one.
 
 **`OP_CAP_MOVE` (18).**
 `a1` = destination slot in the invoked table,
@@ -1001,7 +1012,7 @@ It keeps its place in the derivation tree, section 5.2:
 it hangs below what the source hung below, and what hung below the source hangs below it,
 so a revoke through it takes what one through the source would have,
 and a revoke that would have taken the source takes it.
-Any type moves, an Untyped with its watermark,
+Any type moves, an Untyped with what was made of it,
 and so does the `CapTable` capability the call is made through.
 
 **`OP_CAP_DELETE` (4).**
@@ -1044,18 +1055,24 @@ The parent capability is unchanged.
 **`OP_UNTYPED_INFO` (27).**
 No right needed.
 Returns `a1` = base, `a2` = size, `a3` = rights,
-`a4` = the watermark, the offset from the base the next retype looks from.
+`a4` = 1 while something made of it is left, 0 while it is free, section 5.4.
 
 **`OP_UNTYPED_RETYPE` (6).**
-`a1` = the type, `CAP_UNTYPED`, `CAP_FRAME` or `CAP_POOL`,
-`a2` = the size, a power of two no smaller than the smallest region nor larger than the Untyped,
-and for a pool no smaller than `POOL_MIN_SIZE` (`KERR_INVALID_ARG`),
-`a3` = destination slot in the caller's table.
-Returns `a1` = the base of the block, section 5.4.
-A pool needs `RIGHT_R` and `RIGHT_W` on the Untyped (`KERR_NO_RIGHTS`);
-a frame or an Untyped needs no right and carries the invoked one's.
-`KERR_NO_MEMORY` when no block of the size is left past the watermark.
+`a1` = the type, `CAP_FRAME` or `CAP_POOL` (`KERR_INVALID_ARG`),
+`a2` = destination slot in the caller's table.
+Makes the whole of the Untyped into it, and returns `a1` = its base.
+A pool needs `RIGHT_R` and `RIGHT_W` on the Untyped (`KERR_NO_RIGHTS`)
+and an Untyped no smaller than `POOL_MIN_SIZE` (`KERR_INVALID_ARG`);
+a frame needs no right and carries the invoked one's.
+`KERR_NO_MEMORY` while something made of the Untyped is left.
 The new capability hangs below the invoked one, a pool's below the pool's own node.
+
+**`OP_UNTYPED_SPLIT` (30).**
+No right needed.
+`a1` = destination slot for the lower half, `a2` = for the upper half, two slots in the caller's table.
+Makes the two halves of the Untyped, each an Untyped with the invoked one's rights, hanging below it.
+A half must be no smaller than the smallest region, and the two slots must differ (`KERR_INVALID_ARG`).
+`KERR_NO_MEMORY` while something made of the Untyped is left.
 
 ### 6.6 Operations on `KernelPool`
 
@@ -1243,8 +1260,9 @@ only a wait, the tick, or a revoke that takes its own process, section 6.4, take
 | 27 | `OP_UNTYPED_INFO` | `Untyped` |
 | 28 | `OP_TIME_CARVE` | `Time` |
 | 29 | `OP_TIME_BIND` | `Time` |
+| 30 | `OP_UNTYPED_SPLIT` | `Untyped` |
 
-`OP_COUNT` is 30, one above the highest code.
+`OP_COUNT` is 31, one above the highest code.
 
 ## 7. What the root task starts with
 
@@ -1289,8 +1307,8 @@ hang below the boot pool's own node, not below `BOOT_CAP_POOL`,
 so revoking below `BOOT_CAP_POOL` takes only what was allocated through it.
 
 `BOOT_CAP_ROOT_RAM` is an Untyped over the root task's own memory,
-with its code, data and input frames and the boot pool's own node below it
-and its watermark at its end, so it makes nothing until those are gone.
+with its code, data and input frames and the boot pool's own node right below it,
+so it makes nothing until those are gone, and the rest of it, past the boot pool, waits for them.
 The root task cannot revoke below it, since it lives there, and nothing else sets it apart:
 a process holding its capabilities can do all it could.
 So the root task can hand its place over:
@@ -1332,8 +1350,9 @@ There is no libc; `user/rvuos.h` provides the system call wrappers:
 | `rv_invoke(op, cap, a1, a2, a3)` | any |
 | `rv_frame_info(cap, &base, &size)` | `OP_FRAME_INFO` |
 | `rv_frame_min_size(cap, &min)` | `OP_FRAME_INFO`, reading `a4` |
-| `rv_untyped_info(cap, &base, &size, &mark)` | `OP_UNTYPED_INFO` |
-| `rv_retype(cap, type, size, dst, &base)` | `OP_UNTYPED_RETYPE` |
+| `rv_untyped_info(cap, &base, &size, &made)` | `OP_UNTYPED_INFO` |
+| `rv_retype(cap, type, dst, &base)` | `OP_UNTYPED_RETYPE` |
+| `rv_split(cap, lower, upper)` | `OP_UNTYPED_SPLIT` |
 | `rv_signal(cap, bits)` | `OP_NOTIFY_SIGNAL` |
 | `rv_wait(cap, &bits)` | `OP_NOTIFY_WAIT` |
 | `rv_timer_set(cap, bits, us)` | `OP_IRQ_SET` on a timer line, with the delay |
@@ -1353,15 +1372,19 @@ Loading a separate binary is a userspace job the root task does not do yet;
 `DESIGN.md`, open decision 3.
 The steps below are what `user/init.c` does.
 
-1. **Retype memory** out of `BOOT_CAP_FREE_RAM`:
+1. **Take memory** out of `BOOT_CAP_FREE_RAM`:
    a frame to share, a frame for the child's data and stack,
-   and a pool for its kernel objects,
-   each a 4 KiB block, which the Untyped lays one after another.
+   and a pool for its kernel objects.
+   The demo keeps no allocator: `take` splits what is left of the free RAM,
+   makes the lower half into the block and keeps the upper as what is left,
+   so its blocks halve one after another, section 5.4.
+   It deletes the Untypeds in between, so every block hangs right below the free RAM
+   and three working slots do for all of them.
 
    ```c
-   rv_retype(BOOT_CAP_FREE_RAM, CAP_FRAME, CHUNK, SLOT_SHARED, &shared_base);
-   rv_retype(BOOT_CAP_FREE_RAM, CAP_FRAME, CHUNK, SLOT_CHILD_DATA, &child_data_base);
-   rv_retype(BOOT_CAP_FREE_RAM, CAP_POOL, CHUNK, SLOT_POOL, &pool_base);
+   take(CAP_FRAME, SLOT_SHARED, &shared_base, &shared_size);
+   take(CAP_FRAME, SLOT_CHILD_DATA, &child_data_base, &child_data_size);
+   take(CAP_POOL, SLOT_POOL, &pool_base, &pool_size);
    ```
 
 2. **Allocate** the child's objects from the pool,
@@ -1394,7 +1417,7 @@ The steps below are what `user/init.c` does.
    ```
 
 5. **Configure, bind and start** the thread.
-   The stack grows down from the top of the child's data chunk.
+   The stack grows down from the top of the child's data frame.
    The thread earns half the processor, units carved out of the boot grant.
    The root task's thread earns every unit at boot, so it keeps the first half and leaves the rest;
    binding the child through `BOOT_CAP_TIME` with no units would give it spare time alone,
@@ -1402,7 +1425,7 @@ The steps below are what `user/init.c` does.
 
    ```c
    rv_invoke(OP_THREAD_CONFIGURE, SLOT_CHILD_THREAD, (uint32_t)&child_main,
-             child_data_base + CHUNK, 0);
+             child_data_base + child_data_size, 0);
    rv_invoke(OP_TIME_BIND, BOOT_CAP_TIME, BOOT_CAP_THREAD, 0, TIME_UNITS / 2);
    rv_invoke(OP_TIME_CARVE, BOOT_CAP_TIME, TIME_UNITS / 2, TIME_UNITS / 2, SLOT_CHILD_TIME);
    rv_invoke(OP_TIME_BIND, SLOT_CHILD_TIME, SLOT_CHILD_THREAD, 0, TIME_UNITS / 2);
@@ -1417,14 +1440,16 @@ The steps below are what `user/init.c` does.
 7. **Tear down** by destroying the pool.
    The child's thread, process, table and notifications go with it,
    every capability to them is cleared in every table,
-   and the memory goes back to `BOOT_CAP_FREE_RAM`.
+   and the memory goes back to the Untyped the pool hangs below, here `BOOT_CAP_FREE_RAM`,
+   which is free again once everything else made of it is gone.
 
    ```c
    rv_invoke(OP_POOL_DESTROY, SLOT_POOL, 0, 0, 0);
    ```
 
-   To have that very block back for something else,
-   make the pool of an Untyped of its own size and retype that again.
+   To have that very block back for something else on its own,
+   keep the Untyped the pool was made of rather than deleting it, and retype that again;
+   the demo does so for the pool it rebuilds.
 
 The child must touch no global variable, since it shares no data region with the parent:
 everything it needs is on its stack or behind a capability in its table.
@@ -1471,7 +1496,7 @@ cannot be run under tracing; the kernel halts with code 6 instead.
 
 **The self-check** (`kernel/selfcheck.c`) verifies, among other things:
 no installed region or frame overlaps a pool,
-and what one Untyped made lies below its watermark and overlaps nothing else it made,
+and what one Untyped made lies within it and overlaps nothing else it made,
 every process's PMP image matches its region slots,
 every capability names a live object of its own type or an in-bounds frame, Untyped or line range,
 and every capability to a pool or an object lies below the pool's own node,
