@@ -129,6 +129,14 @@ trap_return:
     csrw    mscratch, a0
     mv      sp, a0
 
+    /*
+     * Break any reservation before user mode runs, as the unprivileged specification asks:
+     * an mret may keep it and this hart's own stores do not break it,
+     * so a thread preempted between its lr.w and its sc.w would overwrite what another stored.
+     * The sc.w names the frame's word for x0, which nothing reads.
+     */
+    sc.w    zero, zero, (sp)
+
     lw      t0, FRAME_MEPC(sp)
     csrw    mepc, t0
 

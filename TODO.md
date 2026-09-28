@@ -62,6 +62,8 @@ Beyond the demo:
   so an `Irq` armed on the log's line has always signalled by then.
 - The exit to user mode is checked by nothing but runs under QEMU;
   `start.S` is not in the host build.
+  QEMU breaks a reservation on every trap by itself,
+  so nothing there would show the `sc.w` in `trap_return` missing.
   The trap path is small enough to prove against the Sail model of RISC-V.
 - The PMP image is checked against `pmp_napot_range`, the kernel's own reading of NAPOT,
   so a misreading the encoder and the decoder share passes the self-check.
@@ -151,11 +153,6 @@ Beyond the demo:
   A logger thread in the driver would make traced calls the host would have to follow.
 - The UART driver in `user/init.c` transmits only,
   because `make test` feeds the UART nothing to receive.
-- The trap path runs no `sc` to break the running thread's reservation,
-  which the unprivileged specification asks for on a preemptive switch:
-  a thread preempted between its `lr` and its `sc` may succeed
-  though another thread stored to the word in between.
-  Nothing in userspace uses the `A` extension yet, so nothing shows it.
 - Whether `OP_POOL_DESTROY` should go.
   A pool is the whole of the Untyped it was made of, so revoking that Untyped destroys it,
   which the demo could do for the pool it rebuilds;

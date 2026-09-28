@@ -762,6 +762,13 @@ and the kernel no longer guarantees that one answer
 reaches the thread that asked.
 Whether to revisit that is open decision 5.
 
+**A trap breaks the reservation.**
+An `mret` may keep a reservation, and stores from the same hart do not break it,
+so a thread preempted between its `lr.w` and its `sc.w` could overwrite another thread's store.
+`trap_return` therefore makes an `sc.w` of its own on every return,
+as the unprivileged specification asks,
+and a thread's `sc.w` fails whenever a trap came between it and its `lr.w`.
+
 **A server with many clients** waits on one notification,
 not on many, because the bits are the clients.
 Each client holds the server's notification with `RIGHT_W` only,
@@ -1648,7 +1655,8 @@ and a new table's stale slots are capabilities its maker held nothing to cover.
 **Exit to user mode.**
 Every `mret` enters user mode,
 at the running thread's saved program counter with the registers of its own frame,
-and with the PMP holding its process's image.
+with the PMP holding its process's image,
+and with no reservation, which `trap_return` breaks.
 The kernel writes `mstatus.MPP` once, to user mode, before the first `mret`;
 a trap from user mode sets it to user mode again,
 and a trap from machine mode halts.
