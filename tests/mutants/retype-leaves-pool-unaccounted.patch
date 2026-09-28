@@ -3,7 +3,7 @@ so the Untyped does not know it made the pool:
 it starts again from its base once its other children go, over the pool,
 and a revoke below it does not destroy the pool.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
 Report: memory that may hold kernel objects overlaps a node not above or below it
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c

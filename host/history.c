@@ -1,11 +1,13 @@
 /*
  * The properties "Authority only flows", "Memory crosses zeroed",
- * "The caller keeps what it runs on" and "A tick charges" of DESIGN.md,
+ * "The caller keeps what it runs on", "A tick charges" and "A move keeps a node's place" of DESIGN.md,
  * which relate the state before a call to the state after it.
  * host_syscall runs history_begin before each call and history_end after it.
  *
  * The prologue runs untraced, with no self-check before these checks, so a node may hold anything:
  * an address it holds is looked up among the objects and pools walked, never followed.
+ * Only a traced call follows links, since the self-check vetted the tree after the call before
+ * and, in syscall_dispatch, after this one.
  */
 
 #include <stdio.h>
@@ -37,6 +39,7 @@ struct obj_rec {
 #define ARRAY(T) struct { T *v; size_t n, cap; }
 
 typedef ARRAY(struct obj_rec) obj_array;
+typedef ARRAY(uint32_t) addr_array;
 
 static ARRAY(struct grant) held;
 static ARRAY(struct node_rec) nodes;
@@ -47,6 +50,16 @@ static const struct thread *caller;
 static const struct process *caller_process;
 static const struct captable *caller_table;
 static bool caller_dying;
+
+/*
+ * A traced OP_CAP_MOVE that names a filled source and a destination slot:
+ * the two slots, what the source held, the node it hung below, 0 for none,
+ * and the nodes that hung below it, in their order.
+ */
+static struct cap *move_from, *move_to;
+static struct cap move_was;
+static uint32_t move_parent;
+static addr_array move_children, children_after;
 
 /* The count before the call, and the thread whose turn it was, NULL for none, with its units and its account. */
 static uint32_t ticks_before;
@@ -171,6 +184,74 @@ static void record_node(const struct cap *c)
     }
 }
 
+/* The node a filled node hangs below, 0 for a root; the last sibling links up to it. */
+static uint32_t parent_of(const struct cap *c)
+{
+    while (!(c->next & LINK_UP)) {
+        c = p2v(c->next);
+    }
+    return c->next & ~LINK_UP;
+}
+
+/* The nodes below a node, first to last. */
+static void children_of(const struct cap *c, addr_array *out)
+{
+    out->n = 0;
+    for (uint32_t at = c->child; at != 0;) {
+        const struct cap *n = p2v(at);
+        PUSH(*out, at);
+        at = (n->next & LINK_UP) ? 0 : n->next;
+    }
+}
+
+/* Note a move's source and destination, as the kernel will resolve them. */
+static void record_move(const struct captable *table)
+{
+    move_from = move_to = NULL;
+    if (!debug_trace || caller == NULL || table == NULL || caller->frame.regs[REG_A7] != OP_CAP_MOVE) {
+        return;
+    }
+    const struct trap_frame *f = &caller->frame;
+    struct cap tc;
+    if (cap_lookup((struct captable *)table, f->regs[REG_A0], &tc) != KERR_OK || tc.type != CAP_CAPTABLE) {
+        return;
+    }
+    struct captable *dst = (struct captable *)cap_object(&tc);
+    uint32_t to = f->regs[REG_A1], from = f->regs[REG_A2];
+    if (to >= dst->nslots || from >= table->nslots || table->slots[from].type == CAP_NONE) {
+        return;
+    }
+    move_from = (struct cap *)&table->slots[from];
+    move_to = &dst->slots[to];
+    move_was = *move_from;
+    move_parent = parent_of(move_from);
+    children_of(move_from, &move_children);
+}
+
+/* A move that succeeded left its source empty and put the same node where the source stood. */
+static void check_move(void)
+{
+    if (move_from == NULL || caller->frame.regs[REG_A0] != KERR_OK) {
+        return;
+    }
+    if (move_from->type != CAP_NONE) {
+        violated("a move left its source filled");
+    }
+    if (move_to->type != move_was.type || move_to->rights != move_was.rights ||
+        move_to->a != move_was.a || move_to->b != move_was.b) {
+        violated("a move changed the capability it moved");
+    }
+    if (parent_of(move_to) != move_parent) {
+        violated("a move did not keep the parent of the node it moved");
+    }
+    children_of(move_to, &children_after);
+    if (children_after.n != move_children.n ||
+        (move_children.n != 0 &&
+         memcmp(children_after.v, move_children.v, move_children.n * sizeof(move_children.v[0])) != 0)) {
+        violated("a move did not keep what was derived from the node it moved");
+    }
+}
+
 void history_begin(void)
 {
     held.n = nodes.n = 0;
@@ -196,6 +277,7 @@ void history_begin(void)
     record_objects(&objects);
     each_node(&objects, record_node);
     qsort(nodes.v, nodes.n, sizeof(nodes.v[0]), cmp_at);
+    record_move(table);
 
     ticks_before = sched_ticks;
     charged = turn;
@@ -260,6 +342,7 @@ void history_end(void)
 
     record_objects(&objects_after);
     each_node(&objects_after, check_node);
+    check_move();
 
     /*
      * A tick costs the thread whose turn it is a whole tick while it holds one,

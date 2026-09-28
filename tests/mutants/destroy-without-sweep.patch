@@ -2,7 +2,7 @@ A destroy that does not revoke below the pool's own node
 leaves capabilities naming dead objects,
 and they come back to life when the memory is rebuilt into the same type.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
 Report: dangling object capability
 
 diff --git a/kernel/pool.c b/kernel/pool.c

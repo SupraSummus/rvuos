@@ -15,14 +15,6 @@
 #include "pmp.h"
 #include "rvuos/replay.h"
 
-/*
- * Where the harness puts the boot pool; inside the kernel's part of RAM.
- * The log lies at KLOG_BASE as on the target, since the root task can install it
- * and the PMP images of the two builds must agree.
- */
-#define HOST_BOOT_POOL_BASE (RAM_BASE + 0x1000u)
-#define HOST_BOOT_POOL_SIZE 0x1000u
-
 /* khalt() longjmps here, and so does host_violated() when isolated. */
 extern jmp_buf host_halt_jmp;
 extern int host_halt_code;

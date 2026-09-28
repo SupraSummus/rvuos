@@ -4,7 +4,8 @@
 /*
  * Physical address translation for the host build.
  * Physical RAM is a buffer allocated by the harness;
- * an address outside it is a kernel bug and aborts on the spot.
+ * an address outside it is a kernel bug, which breaks "Memory safety" in DESIGN.md,
+ * and host/shim.c reports it on the spot as any invariant.
  */
 
 #include <stdint.h>
@@ -15,10 +16,12 @@
 
 extern uint8_t *host_ram;
 
+__attribute__((noreturn)) void host_outside_ram(uint32_t p);
+
 static inline void *p2v(uint32_t p)
 {
     if (p < HOST_RAM_BASE || p - HOST_RAM_BASE >= HOST_RAM_SIZE) {
-        abort();
+        host_outside_ram(p);
     }
     return host_ram + (p - HOST_RAM_BASE);
 }

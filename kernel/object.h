@@ -441,6 +441,13 @@ int cap_store_beside(struct captable *table, uint32_t slot, const struct cap *ca
 /* Make an already filled node, an installed region, a child of parent, or a root when parent is NULL. */
 void cap_attach(struct cap *parent, struct cap *node);
 
+/*
+ * Move a filled table slot into an empty one, from and to distinct:
+ * the new node has the parent, the siblings and the children the old one had,
+ * and the old one is left empty. Constant time.
+ */
+void cap_move(struct cap *from, struct cap *to);
+
 
 /*
  * Clear a slot. KERR_INVALID_CAP if out of range.
@@ -736,18 +743,16 @@ struct granted_range {
     uint32_t size;
     uint8_t rights;
 };
-#define GRANTED_RANGES 7
+#define GRANTED_RANGES 5
 /* The counter's block, read only, which OP_CLOCK_FRAME hands out. */
-#define GRANT_COUNTER 6
+#define GRANT_COUNTER 4
 extern struct granted_range boot_granted[GRANTED_RANGES];
-extern struct pool *boot_pool;
 
 /*
- * Build the root task.
- * The boot pool range holds the root task's kernel objects;
- * the free range becomes its BOOT_CAP_FREE_RAM Untyped.
+ * Build the root task where the board's layout says:
+ * its objects in the boot pool, which with its regions is made of its BOOT_CAP_ROOT_RAM,
+ * and the free RAM its BOOT_CAP_FREE_RAM Untyped.
  */
-struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
-                                paddr_t free_base, uint32_t free_size);
+struct thread *boot_create_root(void);
 
 #endif

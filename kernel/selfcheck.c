@@ -76,11 +76,11 @@ static uint32_t aligned_size(const struct obj_header *o)
 
 static void check_pools(void)
 {
-    /* The boot pool is kernel memory; nothing granted may reach it. */
+    /* The kernel's memory lies below its log, and nothing granted may reach it. */
     for (unsigned i = 0; i < GRANTED_RANGES; i++) {
         const struct granted_range *g = &boot_granted[i];
-        if (g->size && ranges_overlap(g->base, g->size, pool_base(boot_pool), boot_pool->size)) {
-            fail("granted memory overlaps the boot pool", g->base, g->size, 0);
+        if (g->size && ranges_overlap(g->base, g->size, RAM_BASE, KLOG_BASE - RAM_BASE)) {
+            fail("granted memory overlaps the kernel's", g->base, g->size, 0);
         }
     }
 
@@ -107,7 +107,7 @@ static void check_pools(void)
         if (p->dying > 1 || (!p->dying && p->sweep != 0)) {
             fail("pool's destroy state is malformed", base, p->dying, p->sweep);
         }
-        if (p != boot_pool && granted_rights(base, p->size) != RIGHT_ALL) {
+        if (granted_rights(base, p->size) != RIGHT_ALL) {
             fail("pool lies outside memory granted with full rights", base, p->size, 0);
         }
         for (struct pool *q = pool_next_pool(p); q != NULL; q = pool_next_pool(q)) {

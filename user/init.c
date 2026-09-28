@@ -18,6 +18,8 @@
  * hold a thread to its units and let it run on spare time,
  * spin through the ticks while nothing else can run,
  * bind and revoke an Irq on a line nothing drives,
+ * hand everything it holds to a successor in a process of its own,
+ * which destroys the pool the root task lived in, and the root task with it,
  * then unmap a region and fault on it.
  * Negative paths are covered by the fuzz corpus and tests/differential.py.
  */
@@ -64,6 +66,12 @@ enum {
     SLOT_COUNTER,       /* the clock's frame, read only */
     SLOT_HALF_TIME,     /* the second half of the processor's units, the child's and then the spinners' */
     SLOT_CAPPED_TIME,   /* the same units without spare time, derived from those */
+    SLOT_FREEZE_TIME,   /* every unit without spare time, to stop a thread for good */
+    SLOT_EXIT_NTFN,     /* what the root task waits on once it has handed everything over */
+    SLOT_SUCC_POOL,     /* the successor's pool, table, process and thread */
+    SLOT_SUCC_TABLE,
+    SLOT_SUCC_PROCESS,
+    SLOT_SUCC_THREAD,
     SLOT_SPINNER,       /* the spinners' threads, SPINNERS of them */
 };
 
@@ -81,7 +89,7 @@ enum {
     CHILD_LEASE,  /* memory derived from the root task's, which revokes it */
     CHILD_LENT,   /* untyped memory the root task lends, derived from its own */
     CHILD_OWN_NTFN, /* allocated from the pool the child makes of it */
-    CHILD_BOOT_POOL, /* the pool the root task lives in; the child may not destroy it */
+    CHILD_OWN_POOL, /* the pool the child lives in, which it may not destroy */
     CHILD_LENT_POOL, /* the pool the child makes of the lent memory */
     CHILD_TABLE_SLOTS = 11,
 };
@@ -152,6 +160,7 @@ _Static_assert(ROOT_UNITS + LOGGER_UNITS == HALF_UNITS, "the child's half follow
 
 /* Threads the root task adds on the child's half once the child is done, each counting as it spins. */
 #define SPINNERS 3u
+_Static_assert(SLOT_SPINNER + SPINNERS <= ROOT_TABLE_SLOTS, "the root task's slots fit its table");
 #define SPINNER_STACK 0x100u
 #define SPIN_US 20000u
 #define UNITS_US 40000u
@@ -383,11 +392,11 @@ static void child_main(void)
                         KERR_OK
                 ? "child: pool made\n"
                 : "child: pool made FAILED\n");
-    /* The boot pool holds the root task, so no thread destroys it. */
+    /* A thread keeps what it runs on: this one cannot destroy the pool it lives in. */
     rv_puts(CHILD_DEBUG,
-            rv_invoke(OP_POOL_DESTROY, CHILD_BOOT_POOL, 0, 0, 0) == KERR_STATE
-                ? "child: cannot destroy the boot pool\n"
-                : "child: cannot destroy the boot pool FAILED\n");
+            rv_invoke(OP_POOL_DESTROY, CHILD_OWN_POOL, 0, 0, 0) == KERR_STATE
+                ? "child: cannot destroy its own pool\n"
+                : "child: cannot destroy its own pool FAILED\n");
     rv_signal(CHILD_UP, BIT_POOLED);
 
     /* Nothing more is asked of it: it waits until its pool goes, and it with it. */
@@ -458,6 +467,105 @@ static uint32_t spin_traps(uint32_t counter, uint32_t hz, uint32_t ms)
     uint32_t counts = hz / 1000u * ms, reads;
     spin_reads(counter, counts / 10u, UINT32_MAX, &reads);
     return spin_reads(counter, counts, 8u * (counts / 10u) / reads + 2u, &reads);
+}
+
+/*
+ * The successor, in a process and a table of its own,
+ * into which the root task moved every capability it held, each to the same slot,
+ * so every slot means here what it meant there; see DESIGN.md, "The root task is its capabilities".
+ */
+static __attribute__((noreturn)) void successor_main(void)
+{
+    uint32_t base, size;
+
+    puts("successor: started\n");
+    expect("stop the root task's thread for good",
+           rv_invoke(OP_TIME_BIND, SLOT_FREEZE_TIME, BOOT_CAP_THREAD, 0, 0));
+    /* The successor lives in a pool of its own, so nothing keeps it from destroying the boot pool. */
+    expect("destroy the boot pool, and the root task with it",
+           rv_invoke(OP_POOL_DESTROY, BOOT_CAP_POOL, 0, 0, 0));
+    expect("the root task's thread is gone",
+           rv_invoke(OP_THREAD_RESUME, BOOT_CAP_THREAD, 0, 0, 0) == KERR_INVALID_CAP
+               ? KERR_OK : KERR_INVALID_ARG);
+    /* The units the root task and the logger earned came free with them. */
+    expect("earn the whole processor",
+           rv_invoke(OP_TIME_BIND, BOOT_CAP_TIME, SLOT_SUCC_THREAD, 0, TIME_UNITS));
+    /* The destroy emptied the root task's own slots; the successor's objects take them. */
+    expect("take the root task's table slot",
+           rv_invoke(OP_CAP_COPY, SLOT_SUCC_TABLE, BOOT_CAP_CAPTABLE, SLOT_SUCC_TABLE, RIGHT_ALL));
+    expect("take the root task's process slot",
+           rv_invoke(OP_CAP_COPY, SLOT_SUCC_TABLE, BOOT_CAP_PROCESS, SLOT_SUCC_PROCESS, RIGHT_ALL));
+    expect("take the root task's thread slot",
+           rv_invoke(OP_CAP_COPY, SLOT_SUCC_TABLE, BOOT_CAP_THREAD, SLOT_SUCC_THREAD, RIGHT_ALL));
+    puts("root: handover ok\n");
+
+    expect("shared region info", rv_frame_info(SLOT_SHARED, &base, &size));
+    expect("map the shared region",
+           rv_invoke(OP_PROCESS_INSTALL, BOOT_CAP_PROCESS, ROOT_SHARED_SLOT, SLOT_SHARED,
+                     RIGHT_R | RIGHT_W));
+    expect("unmap the shared region",
+           rv_invoke(OP_PROCESS_UNINSTALL, BOOT_CAP_PROCESS, ROOT_SHARED_SLOT, 0, 0));
+
+    /*
+     * The fault report lands in the log after the logger's last look at it,
+     * so the halt writes it out; tests/run.sh reads it there.
+     */
+    puts("reading the removed region at ");
+    put_hex(base);
+    puts(", expecting a fault\n");
+    uint32_t word = *(volatile uint32_t *)base;
+
+    /* Not reached when PMP works. */
+    puts("PMP did not stop the read\n");
+    (void)word;
+    rv_halt(BOOT_CAP_DEBUG, 2);
+}
+
+/*
+ * Hand the root task's place to a successor, which runs the same code on the same data, on a stack at sp,
+ * and wait for good on a notification kept back.
+ * The logger names its capabilities in this table, so it stops first,
+ * and the halt writes out what it leaves in the log.
+ */
+static __attribute__((noreturn)) void hand_over(uint32_t sp)
+{
+    uint32_t base, bits;
+
+    puts("root: handing over\n");
+    expect("derive every unit without spare time",
+           rv_invoke(OP_CAP_DERIVE, BOOT_CAP_CAPTABLE, SLOT_FREEZE_TIME, BOOT_CAP_TIME, RIGHT_W));
+    expect("stop the logger", rv_invoke(OP_TIME_BIND, SLOT_FREEZE_TIME, SLOT_LOGGER, 0, 0));
+
+    expect("make the successor's pool",
+           rv_retype(BOOT_CAP_FREE_RAM, CAP_POOL, CHUNK, SLOT_SUCC_POOL, &base));
+    expect("allocate the successor's table",
+           rv_invoke(OP_POOL_ALLOC, SLOT_SUCC_POOL, CAP_CAPTABLE, SLOT_SUCC_TABLE, ROOT_TABLE_SLOTS));
+    expect("allocate the successor's process",
+           rv_invoke(OP_POOL_ALLOC, SLOT_SUCC_POOL, CAP_PROCESS, SLOT_SUCC_PROCESS, SLOT_SUCC_TABLE));
+    expect("allocate the successor's thread",
+           rv_invoke(OP_POOL_ALLOC, SLOT_SUCC_POOL, CAP_THREAD, SLOT_SUCC_THREAD, SLOT_SUCC_PROCESS));
+    expect("map the successor's code",
+           rv_invoke(OP_PROCESS_INSTALL, SLOT_SUCC_PROCESS, 0, BOOT_CAP_CODE, RIGHT_R | RIGHT_X));
+    expect("map the successor's data",
+           rv_invoke(OP_PROCESS_INSTALL, SLOT_SUCC_PROCESS, 1, BOOT_CAP_DATA, RIGHT_R | RIGHT_W));
+    expect("configure the successor",
+           rv_invoke(OP_THREAD_CONFIGURE, SLOT_SUCC_THREAD, (uint32_t)&successor_main, sp, 0));
+    /* On spare time, so it runs once this thread waits. */
+    expect("bind the successor", rv_invoke(OP_TIME_BIND, BOOT_CAP_TIME, SLOT_SUCC_THREAD, 0, 0));
+    expect("start the successor", rv_invoke(OP_THREAD_RESUME, SLOT_SUCC_THREAD, 0, 0, 0));
+    expect("allocate what to wait on",
+           rv_invoke(OP_POOL_ALLOC, BOOT_CAP_POOL, CAP_NOTIFICATION, SLOT_EXIT_NTFN, 0));
+
+    /* From here on this thread holds no debug capability and says nothing; the empty slots fail. */
+    for (uint32_t slot = BOOT_CAP_NULL + 1; slot < ROOT_TABLE_SLOTS; slot++) {
+        if (slot != SLOT_SUCC_TABLE && slot != SLOT_EXIT_NTFN) {
+            rv_invoke(OP_CAP_MOVE, SLOT_SUCC_TABLE, slot, slot, 0);
+        }
+    }
+    rv_invoke(OP_CAP_MOVE, SLOT_SUCC_TABLE, SLOT_SUCC_TABLE, SLOT_SUCC_TABLE, 0);
+    for (;;) {
+        rv_wait(SLOT_EXIT_NTFN, &bits);
+    }
 }
 
 int main(void);
@@ -712,8 +820,8 @@ int main(void)
            rv_retype(BOOT_CAP_FREE_RAM, CAP_UNTYPED, CHUNK, SLOT_LENT, &lent_base));
     expect("lend it to the child",
            rv_invoke(OP_CAP_DERIVE, SLOT_CHILD_TABLE, CHILD_LENT, SLOT_LENT, RIGHT_ALL));
-    expect("give the child the boot pool",
-           rv_invoke(OP_CAP_COPY, SLOT_CHILD_TABLE, CHILD_BOOT_POOL, BOOT_CAP_POOL, RIGHT_ALL));
+    expect("give the child its own pool",
+           rv_invoke(OP_CAP_COPY, SLOT_CHILD_TABLE, CHILD_OWN_POOL, SLOT_POOL, RIGHT_ALL));
     expect("ask the child to pool it", rv_signal(SLOT_DOWN, BIT_POOL));
     expect("wait for the child's pool", rv_wait(SLOT_UP, &bits));
     expect("the child made a pool", bits == BIT_POOLED ? KERR_OK : KERR_INVALID_ARG);
@@ -911,20 +1019,5 @@ int main(void)
                      SLOT_SPARE_IRQ_AGAIN));
     puts("root: irq ok\n");
 
-    expect("unmap the shared region",
-           rv_invoke(OP_PROCESS_UNINSTALL, BOOT_CAP_PROCESS, ROOT_SHARED_SLOT, 0, 0));
-
-    /*
-     * The fault report lands in the log after the logger's last look at it,
-     * so the halt writes it out; tests/run.sh reads it there.
-     */
-    puts("reading the removed region at ");
-    put_hex((uint32_t)shared);
-    puts(", expecting a fault\n");
-    uint32_t word = shared[0];
-
-    /* Not reached when PMP works. */
-    puts("PMP did not stop the read\n");
-    (void)word;
-    rv_halt(BOOT_CAP_DEBUG, 2);
+    hand_over(data_base + 3 * (data_size / 4));
 }

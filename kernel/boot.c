@@ -8,54 +8,43 @@
 #include "klog.h"
 #include "object.h"
 
-#define ROOT_CAPTABLE_SLOTS 64
-
 struct granted_range boot_granted[GRANTED_RANGES];
-struct pool *boot_pool;
 
-struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
-                                paddr_t free_base, uint32_t free_size)
+/*
+ * The root task's code, data and input and the boot pool are made of its memory, BOOT_CAP_ROOT_RAM,
+ * so the boot leaves what a loader making a process of an Untyped would, and nothing more.
+ */
+struct thread *boot_create_root(void)
 {
-    /* No Untyped covers the boot pool, so its own node is a root, and nothing can revoke it. */
-    struct pool *pool = pool_create(boot_pool_base, boot_pool_size, NULL);
-    boot_pool = pool;
+    /* Its own node is a root until the Untyped it lies below is in the table. */
+    struct pool *pool = pool_create(BOOT_POOL_BASE, BOOT_POOL_SIZE, NULL);
 
     struct captable *table = pool_alloc(
         pool, CAP_CAPTABLE,
-        sizeof(*table) + ROOT_CAPTABLE_SLOTS * sizeof(struct cap));
+        sizeof(*table) + ROOT_TABLE_SLOTS * sizeof(struct cap));
     struct process *proc = pool_alloc(pool, CAP_PROCESS, sizeof(*proc));
     struct thread *thread = pool_alloc(pool, CAP_THREAD, sizeof(*thread));
     if (table == NULL || proc == NULL || thread == NULL) {
         kpanic("boot pool too small for the root task");
     }
 
-    table->nslots = ROOT_CAPTABLE_SLOTS;
-    /*
-     * Below the pool's node, as every capability to an object of the pool is,
-     * so that only a destroy of the boot pool, which is refused, takes the root task's table or process.
-     */
-    proc->table = cap_to_object(&table->hdr, RIGHT_ALL);
-    cap_attach(&pool->node, &proc->table);
-    thread->proc = (struct cap){ .type = CAP_HOSTED, .rights = RIGHT_ALL, .a = v2p(proc) };
-    cap_attach(&pool->node, &thread->proc);
+    table->nslots = ROOT_TABLE_SLOTS;
     thread->flags = 0;
     thread->frame.regs[REG_SP] = USER_DATA_BASE + USER_DATA_SIZE;
     thread->frame.mepc = USER_CODE_BASE;
 
-    boot_granted[0] = (struct granted_range){ USER_CODE_BASE, USER_CODE_SIZE, RIGHT_R | RIGHT_X };
-    boot_granted[1] = (struct granted_range){ USER_DATA_BASE, USER_DATA_SIZE, RIGHT_R | RIGHT_W };
-    boot_granted[2] = (struct granted_range){ free_base, free_size, RIGHT_ALL };
-    boot_granted[3] = (struct granted_range){ INPUT_BASE, INPUT_SIZE, RIGHT_R };
+    boot_granted[0] = (struct granted_range){ ROOT_RAM_BASE, ROOT_RAM_SIZE, RIGHT_ALL };
+    boot_granted[1] = (struct granted_range){ FREE_RAM_BASE, FREE_RAM_SIZE, RIGHT_ALL };
     /* A device: read and write, never execute, and never a pool; see ram_contains. */
-    boot_granted[4] = (struct granted_range){ UART_BASE, UART_SIZE, RIGHT_R | RIGHT_W };
+    boot_granted[2] = (struct granted_range){ UART_BASE, UART_SIZE, RIGHT_R | RIGHT_W };
     /* The kernel's log; the reader writes its mark into the header. Never a pool: a frame no Untyped covers. */
-    boot_granted[5] = (struct granted_range){ KLOG_BASE, KLOG_REGION_SIZE, RIGHT_R | RIGHT_W };
+    boot_granted[3] = (struct granted_range){ KLOG_BASE, KLOG_REGION_SIZE, RIGHT_R | RIGHT_W };
     /* The counter, read only, in the smallest block that holds its two words; see OP_CLOCK_FRAME. */
     uint32_t counter_size = region_min_size();
     boot_granted[GRANT_COUNTER] =
         (struct granted_range){ COUNTER_ADDR & ~(counter_size - 1), counter_size, RIGHT_R };
 
-    /* The grants become frames and the Untyped as they are, and every one of those is a NAPOT block. */
+    /* The grants become frames and the Untypeds as they are, and every one of those is a NAPOT block. */
     for (unsigned i = 0; i < GRANTED_RANGES; i++) {
         if (!napot_block(boot_granted[i].base, boot_granted[i].size)) {
             kpanic("boot layout is not made of NAPOT blocks");
@@ -63,8 +52,31 @@ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
     }
 
     /*
+     * The root task's memory has made all it holds, so its watermark is at its end,
+     * and the boot pool hangs below it as a retype would have put it;
+     * nothing is below the pool's node yet, so attaching it loses nothing.
+     */
+    struct cap ram = cap_to_untyped(ROOT_RAM_BASE, ROOT_RAM_SIZE, RIGHT_ALL);
+    ram.b = ROOT_RAM_SIZE;
+    if (cap_store(table, BOOT_CAP_ROOT_RAM, &ram, NULL) != KERR_OK) {
+        kpanic("cannot fill the root task's table");
+    }
+    struct cap *root_ram = &table->slots[BOOT_CAP_ROOT_RAM];
+    cap_attach(root_ram, &pool->node);
+
+    /*
+     * Below the pool's node, as every capability to an object of the pool is,
+     * so that only a destroy of the boot pool takes the root task's table or process.
+     */
+    proc->table = cap_to_object(&table->hdr, RIGHT_ALL);
+    cap_attach(&pool->node, &proc->table);
+    thread->proc = (struct cap){ .type = CAP_HOSTED, .rights = RIGHT_ALL, .a = v2p(proc) };
+    cap_attach(&pool->node, &thread->proc);
+
+    /*
      * The boot capabilities are the roots of the derivation tree,
-     * but for those to the boot pool and its objects, which hang below the pool's node;
+     * but for the frames made of the root task's memory, which hang below it,
+     * and those to the boot pool and its objects, which hang below the pool's node;
      * revoking below BOOT_CAP_POOL takes what was allocated through it and not these.
      */
     struct cap boot[BOOT_CAP_COUNT] = {
@@ -75,7 +87,7 @@ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
         [BOOT_CAP_DEBUG] = { .type = CAP_DEBUG, .rights = RIGHT_ALL },
         [BOOT_CAP_CODE] = cap_to_frame(USER_CODE_BASE, USER_CODE_SIZE, RIGHT_R | RIGHT_X),
         [BOOT_CAP_DATA] = cap_to_frame(USER_DATA_BASE, USER_DATA_SIZE, RIGHT_R | RIGHT_W),
-        [BOOT_CAP_FREE_RAM] = cap_to_untyped(free_base, free_size, RIGHT_ALL),
+        [BOOT_CAP_FREE_RAM] = cap_to_untyped(FREE_RAM_BASE, FREE_RAM_SIZE, RIGHT_ALL),
         [BOOT_CAP_INPUT] = cap_to_frame(INPUT_BASE, INPUT_SIZE, RIGHT_R),
         /* Line 0 is the log's, which no controller has; the controller's lines start at 1. */
         [BOOT_CAP_IRQ_LINES] = cap_to_lines(LOG_IRQ_LINE, IRQ_LINES, RIGHT_W),
@@ -87,9 +99,16 @@ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
         [BOOT_CAP_TIME] = cap_to_time(0, TIME_UNITS, RIGHT_W | RIGHT_X),
     };
     for (unsigned i = BOOT_CAP_NULL + 1; i < BOOT_CAP_COUNT; i++) {
+        if (i == BOOT_CAP_ROOT_RAM) {
+            continue;
+        }
         bool pooled = i == BOOT_CAP_CAPTABLE || i == BOOT_CAP_PROCESS || i == BOOT_CAP_THREAD ||
                       i == BOOT_CAP_POOL;
-        if (cap_store(table, i, &boot[i], pooled ? &pool->node : NULL) != KERR_OK) {
+        bool own = i == BOOT_CAP_CODE || i == BOOT_CAP_DATA || i == BOOT_CAP_INPUT;
+        if (own && !napot_block(boot[i].a, boot[i].b)) {
+            kpanic("boot layout is not made of NAPOT blocks");
+        }
+        if (cap_store(table, i, &boot[i], pooled ? &pool->node : own ? root_ram : NULL) != KERR_OK) {
             kpanic("cannot fill the root task's table");
         }
     }

@@ -18,7 +18,6 @@ ENTRY(_start)
  * and fails the build when the bound exceeds this; see DESIGN.md, "Bounded stack".
  */
 KERNEL_STACK_SIZE = 1K;
-BOOT_POOL_SIZE    = 4K;
 
 /* For tools/loop-bounds.py: a load from a fixed address outside RAM waits on a device. */
 __ram_start = RAM_BASE;
@@ -58,14 +57,6 @@ SECTIONS
         __kernel_stack_bottom = .;
         . += KERNEL_STACK_SIZE;
         __kernel_stack_top = .;
-    }
-
-    /* Memory for the root task's kernel objects; see boot.c. */
-    .bootpool (NOLOAD) : {
-        . = ALIGN(16);
-        __boot_pool_start = .;
-        . += BOOT_POOL_SIZE;
-        __boot_pool_end = .;
     }
 
     ASSERT(. <= KLOG_BASE, "kernel does not fit below its log")

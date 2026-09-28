@@ -7,19 +7,23 @@
  *
  * QEMU enters at RAM_BASE in machine mode.
  * The kernel owns [RAM_BASE, USER_CODE_BASE).
- * The root task's code, data and input regions follow,
+ * The root task's memory follows, one block holding its code, data and input regions
+ * and the boot pool its kernel objects live in,
  * and the upper half of RAM is handed to the root task as free RAM.
  * Each is a block aligned to its own size; what lies in none of them is left unused.
  */
 #define RAM_BASE       U32(0x80000000)
 #define RAM_SIZE       U32(0x00800000)
+#define ROOT_RAM_BASE  U32(0x80100000)
+#define ROOT_RAM_SIZE  U32(0x00040000)
 #define USER_CODE_BASE U32(0x80100000)
 #define USER_CODE_SIZE U32(0x00010000)
-#define USER_DATA_BASE U32(0x80200000)
+#define USER_DATA_BASE U32(0x80110000)
 #define USER_DATA_SIZE U32(0x00010000)
 /* Test input placed here by the loader; tests/differential.py knows the address. */
-#define INPUT_BASE     U32(0x80210000)
+#define INPUT_BASE     U32(0x80120000)
 #define INPUT_SIZE     U32(0x00010000)
+#define BOOT_POOL_BASE U32(0x80130000)
 #define FREE_RAM_BASE  U32(0x80400000)
 #define FREE_RAM_SIZE  U32(0x00400000)
 

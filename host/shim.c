@@ -66,6 +66,12 @@ void kpanic(const char *msg)
     abort();
 }
 
+void host_outside_ram(uint32_t p)
+{
+    fprintf(stderr, "invariant violated: the kernel reached outside RAM 0x%08x\n", (unsigned)p);
+    host_violated();
+}
+
 void host_violated(void)
 {
     /* The report may have gone to stdout; make sure it is seen. */
@@ -225,9 +231,8 @@ struct thread *host_boot(void)
     irq_init();
     klog_init();
 
-    struct thread *root = boot_create_root(
-        HOST_BOOT_POOL_BASE, HOST_BOOT_POOL_SIZE,
-        FREE_RAM_BASE, FREE_RAM_SIZE);
+    /* The layout is the target's, the log and the boot pool included, so the PMP images of the two builds agree. */
+    struct thread *root = boot_create_root();
     sched_start(root);
     process_activate(thread_process(root));
 

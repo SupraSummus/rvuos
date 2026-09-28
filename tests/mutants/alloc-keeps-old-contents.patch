@@ -13,14 +13,14 @@ Report: a call made a capability no capability of its caller covers
 diff --git a/kernel/boot.c b/kernel/boot.c
 --- a/kernel/boot.c
 +++ b/kernel/boot.c
-@@ -17,6 +17,7 @@ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
-                                 paddr_t free_base, uint32_t free_size)
+@@ -17,6 +17,7 @@ struct granted_range boot_granted[GRANTED_RANGES];
+ struct thread *boot_create_root(void)
  {
-     /* No Untyped covers the boot pool, so its own node is a root, and nothing can revoke it. */
-+    memset(p2v(boot_pool_base), 0, boot_pool_size);
-     struct pool *pool = pool_create(boot_pool_base, boot_pool_size, NULL);
-     boot_pool = pool;
+     /* Its own node is a root until the Untyped it lies below is in the table. */
++    memset(p2v(BOOT_POOL_BASE), 0, BOOT_POOL_SIZE);
+     struct pool *pool = pool_create(BOOT_POOL_BASE, BOOT_POOL_SIZE, NULL);
  
+     struct captable *table = pool_alloc(
 diff --git a/kernel/pool.c b/kernel/pool.c
 --- a/kernel/pool.c
 +++ b/kernel/pool.c

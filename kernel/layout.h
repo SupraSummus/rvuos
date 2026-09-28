@@ -21,6 +21,18 @@
 #include "board.h"
 #include "rvuos/abi.h"
 
+/* The boot pool, where the kernel builds the root task's objects. */
+#define BOOT_POOL_SIZE U32(0x00001000)
+
+#ifndef __ASSEMBLER__
+/* The root task's memory holds its code, data and input regions and the boot pool, in that order. */
+_Static_assert(ROOT_RAM_BASE <= USER_CODE_BASE && USER_CODE_BASE + USER_CODE_SIZE <= USER_DATA_BASE &&
+                   USER_DATA_BASE + USER_DATA_SIZE <= INPUT_BASE && INPUT_BASE + INPUT_SIZE <= BOOT_POOL_BASE &&
+                   BOOT_POOL_BASE % BOOT_POOL_SIZE == 0 &&
+                   BOOT_POOL_BASE + BOOT_POOL_SIZE <= ROOT_RAM_BASE + ROOT_RAM_SIZE,
+               "the root task's regions and the boot pool lie apart in its memory");
+#endif
+
 /*
  * The kernel's log, see klog.h: its header and a ring of KLOG_SIZE bytes,
  * one block at the top of the kernel's memory, right below the root task's code.

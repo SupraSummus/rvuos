@@ -296,15 +296,19 @@ It names capabilities by index into its process's capability table,
 and the kernel validates the index, the object type, and the rights
 on every use.
 
-Capabilities can be copied or derived into another process's table,
-optionally with reduced rights,
+Capabilities can be copied, derived or moved into another process's table
 by a process that holds both the source capability
-and a capability to the destination table.
-The two differ in one thing:
+and a capability to the destination table,
+the first two optionally with reduced rights.
+Copy and derive differ in one thing:
 what a later revoke of the source takes.
 A copy stands beside its source and is as good as it;
 a derivation stands below it and goes when the source is revoked below;
 see "The derivation tree".
+A move leaves no source behind:
+the capability goes to the destination with its place in the tree,
+so it takes back what the source could,
+which a copy, standing beside the source, cannot.
 
 A process needs no capability to write its own table.
 Every operation that produces a capability
@@ -413,7 +417,8 @@ Isolation follows from the tree rather than from a scan.
 A frame and a pool below different children of one Untyped never meet,
 because the watermark kept the children apart,
 and every frame that no Untyped covers is a root over memory no pool can lie in:
-device memory, flash, the log and the root task's own regions.
+device memory, flash and the log.
+The root task's own regions are frames of the Untyped the root task lives in; see "Boot".
 Memory that is to become a pool while frames of it exist
 is first revoked back to its Untyped,
 which uninstalls those frames wherever they are.
@@ -507,9 +512,9 @@ That is a test by address, which is enough
 because every pool below an Untyped lies in its memory.
 The three may lie in different pools, and those tests are the whole of it:
 the caller keeps what it runs on and the table it names capabilities in.
-The boot pool is refused by name.
-It holds the root task, and no Untyped covers it,
-so its own node is a root and nothing but `OP_POOL_DESTROY` could reach it.
+The boot pool, which holds the root task, is a pool like any other:
+the root task cannot destroy it, since it lives there,
+and a thread that does not can, as a successor does; see "The root task is its capabilities".
 The objects of a pool are zeroed on the way out,
 because the memory is about to be the Untyped's again
 and they hold other processes' capability tables.
@@ -537,8 +542,9 @@ every process's table slot, which lives there too,
 every thread's process and units, which live in the `Thread`,
 and every pool's own node, which lives in its descriptor;
 see `kernel/object.h`.
-Roots are the boot capabilities but those to the boot pool and its objects,
-which hang below the boot pool's own node, itself a root,
+Roots are the boot capabilities but those made of the root task's memory,
+its frames and the boot pool's own node, which hang below `BOOT_CAP_ROOT_RAM`,
+and those to the boot pool and its objects, which hang below that node,
 as the root task's table slot and its thread's process do.
 A capability to a pool or an object is never a root, and neither is a thread's process.
 
@@ -556,6 +562,7 @@ and so does the `Irq` capability of `OP_IRQ_BIND`, whose line goes with everythi
 A copy stands beside its source, under the same parent,
 so a process can duplicate what it holds without making one copy the master of the other;
 beside a root it is a root.
+A move puts the node where its source stood, and the source's children below it.
 So every capability to a pool or to one of its objects lies below the pool's own node,
 which is what lets a destroy find them all without a sweep.
 
@@ -564,6 +571,7 @@ which is what lets a destroy find them all without a sweep.
 `OP_CAP_DELETE` and `OP_PROCESS_UNINSTALL` clear one node
 and hand what was below it to its parent,
 so deleting one's own copy of a grant does not take the grant back.
+`OP_CAP_MOVE` puts a slot's node in another slot and changes nothing else.
 A revoke below an Untyped destroys the pools it meets,
 and a pool destroy revokes below the pool's own node,
 then clears every slot the pool held as a delete does;
@@ -578,6 +586,10 @@ The children of a node are then a ring that closes through the node.
 A node leaves its ring in constant time:
 its predecessor is one link away,
 and it is the first child exactly when that predecessor links up to the parent.
+Three links at most name a node from outside it:
+its predecessor's next, or its parent's first child when it is first,
+its successor's previous, and the link up from its last child.
+So a move copies the node and rewrites those three, in constant time.
 A delete puts the node's children right after it, through the first and the last,
 and then takes the node out as a leaf.
 A revoke is deletes of the first child, one after another,
@@ -1186,9 +1198,11 @@ The kernel:
 2. discovers the PMP entry count and grain by writing the CSRs and reading them back,
 3. carves its own static state out of a small fixed SRAM range,
 4. constructs the root process by hand, including a `KernelPool`
-   in a range the linker reserves,
-5. hands the root task an `Untyped` for the block of RAM the board sets aside for it,
-   and frames for its own code and data, the UART's registers,
+   in a block of the root task's own memory,
+5. hands the root task an `Untyped` for that memory, `BOOT_CAP_ROOT_RAM`,
+   with its code, data and input frames and the boot pool below it,
+   an `Untyped` for the block of RAM the board sets aside for it,
+   frames for the UART's registers,
    to the kernel's log,
    to the machine's counter as a `Clock`,
    and to every line of the interrupt controller with the log's line before them
@@ -1203,7 +1217,7 @@ and can never become a pool:
 it is a frame, and no Untyped covers it,
 because the kernel writes objects into a pool,
 which on a device would drive its registers from machine mode.
-The one Untyped the root task starts with covers RAM and nothing else.
+The two Untypeds the root task starts with cover RAM and nothing else.
 
 Every range the root task is granted is a block,
 so a board lays RAM out in blocks and what lies in none of them stays unused.
@@ -1215,6 +1229,39 @@ Slot zero is left empty so that an uninitialised index fails.
 Everything after that is policy set by the root task.
 The kernel does not know what a driver, a file system,
 or a shell is.
+
+### The root task is its capabilities
+
+After boot the kernel names the root task nowhere.
+The root task lives in memory it holds: `BOOT_CAP_ROOT_RAM` is an Untyped
+with its code, data and input and the boot pool below it and its watermark at its end,
+what a loader making a process of an Untyped leaves.
+It cannot revoke below that memory or destroy the boot pool, since it lives there,
+as no process can what it runs on.
+Before, the boot pool lay in a range the linker reserved, below no Untyped,
+and its destroy was refused by name.
+Everything else the root task does it does through its table,
+so a process holding the same capabilities in the same places of the derivation tree can do all it could.
+
+That lets the root task hand its place over and end, as a bootloader chains to the next stage.
+`user/init.c` does it at the end of the demo:
+
+1. The root task builds a successor out of free RAM, as it builds any process.
+2. It moves every capability it holds into the successor's table with `OP_CAP_MOVE`, each to the same slot,
+   the capability it moves them through last, and waits on a notification it kept.
+   A copy would not do: what the root task lent hangs below its own capabilities,
+   and an Untyped is never copied.
+3. The successor stops the root task's thread for good,
+   binding it to no units through a capability without `RIGHT_X`,
+   and destroys the boot pool, which takes the root task's thread, process and table
+   and everything else allocated there.
+4. It copies its own table, process and thread into the slots the destroy emptied,
+   so a program written as a root task runs on as one.
+
+The successor in the demo runs the root task's code, so it keeps those frames;
+one whose code lies elsewhere revokes below `BOOT_CAP_ROOT_RAM` instead,
+which unmaps them wherever they are and gives it the whole block back.
+Anyone holding a capability to the boot pool can end the root task this way; see open decision 19.
 
 ## Boards
 
@@ -1392,7 +1439,7 @@ No region installed in any process overlaps a pool,
 so user mode never has a mapping to memory that holds kernel objects.
 No installed region lies outside the memory
 the root task was granted at boot,
-and the granted memory does not overlap the boot pool,
+and the granted memory does not overlap the kernel's, which lies below its log,
 so the kernel's own memory is unreachable,
 the log excepted: it holds no object and can never become a pool.
 Memory that may hold kernel objects, an Untyped or a pool,
@@ -1568,9 +1615,19 @@ so this is what keeps a thread from making a call it cannot return from.
 A tick costs the thread whose turn it is a whole tick while its account holds one,
 and earns it its units, as every tick does.
 
-These four relate the state before a call to the state after it,
+**A move keeps a node's place.**
+A move that succeeds leaves its source empty
+and its destination holding the same capability,
+below the same parent, or a root where the source was one,
+and above the same children, in their order.
+The tree's shape alone does not say so:
+a copy beside the source and a delete of it leave a whole tree too.
+
+These five relate the state before a call to the state after it,
 so the self-check, which sees one state, cannot check them.
-`host/history.c` checks them around every call of the host build, the untraced prologue's too.
+`host/history.c` checks them around every call of the host build, the untraced prologue's too,
+but a move's place only around a traced call,
+since it follows the tree's links and only the self-check vets them.
 It does not know what memory held before a call,
 so an object handed out unzeroed shows only by what it holds:
 the host's RAM starts out holding a pattern and keeps the objects of the input before,
@@ -1594,7 +1651,8 @@ and no check says what it does wrong; see `TODO.md`.
 
 **Host fuzzing** (`make host-test`, `make fuzz`).
 The kernel's logic compiles natively with a shim for `kputc`,
-the PMP CSRs and halting, and physical addresses indexing a RAM buffer.
+the PMP CSRs and halting, and physical addresses indexing a RAM buffer;
+an address outside it breaks "Memory safety" and is reported as any invariant is.
 An input is a sequence of events the kernel receives,
 not the behaviour of one process:
 each record is a system call with the thread that makes it,
@@ -1673,7 +1731,8 @@ see "The kernel log".
 the root task starts a logger thread on the log's line and the UART's,
 builds a second process, exchanges a word with it
 through a shared region and two notifications,
-and ends in a deliberate fault,
+hands its place over to a successor, which destroys the pool the root task lived in,
+and ends in a deliberate fault the successor makes,
 and `tests/run.sh` checks that the logger carried the transcript out
 before the halt did, by where the halt's line falls in it.
 The replay driver carries the log to the UART after every record,
@@ -1987,9 +2046,10 @@ until the maintainer decides otherwise.
     - **Replacing the table.**
       An operation on a `Process` could refill the slot;
       every thread would see the new table from its next call.
-      With flat slot numbers that does not help a full table grow:
-      moving its capabilities needs a move that relinks a node,
-      since a copy leaves behind what was derived from its source.
+      With flat slot numbers a full table then grows by a table's worth of calls:
+      a larger table, every capability moved over with `OP_CAP_MOVE`,
+      which a copy could not do, since it leaves behind what was derived from its source,
+      and the slot refilled.
     - **Nested tables.**
       A slot number could be a path, read from the most significant bit:
       each `CapTable` capability skips a guard, kept in its unused second word,
@@ -2036,3 +2096,11 @@ until the maintainer decides otherwise.
     a higher threshold, per thread, that trades latency for idle stretches;
     and spare time charged as a debt.
     Decide when a board's sleep states, or a workload's latency, make the difference measurable.
+
+19. **A right to destroy a pool.**
+    Working default: `RIGHT_W` on a pool both allocates from it and destroys it,
+    so lending a pool lends the power to destroy it and every process living in it,
+    the root task in the boot pool among them.
+    A lender that means to lend allocation alone lends a pool made for the borrower.
+    The alternative is a right of its own for the destroy, `RIGHT_X` being free on a pool.
+    Decide when a server hands out allocation in a pool it lives in.

@@ -1,0 +1,18 @@
+The boot pool's own node stays a root rather than hanging below the root task's memory,
+so an Untyped covers a pool that does not lie below it,
+and revoking below that Untyped would not reach the root task's objects.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: memory that may hold kernel objects overlaps a node not above or below it
+
+diff --git a/kernel/boot.c b/kernel/boot.c
+--- a/kernel/boot.c
++++ b/kernel/boot.c
+@@ -62,7 +62,6 @@ struct thread *boot_create_root(void)
+         kpanic("cannot fill the root task's table");
+     }
+     struct cap *root_ram = &table->slots[BOOT_CAP_ROOT_RAM];
+-    cap_attach(root_ram, &pool->node);
+ 
+     /*
+      * Below the pool's node, as every capability to an object of the pool is,
