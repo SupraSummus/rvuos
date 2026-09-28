@@ -498,19 +498,12 @@ Slots therefore carry no generation,
 and `user/init.c` rebuilds a pool over destroyed memory
 to show that a stale capability does not come back with it.
 
-Objects reference each other in two ways,
-and destroy must cope with both.
-A capability names an object, and the destroy's revoke clears it.
-A process holds its table this way, and a thread its process;
-see "A process's table" and "Threads".
-A structural pointer, as an `Irq`'s to its notification,
-is not checked on use,
-so a structural parent must live in the same pool as its child
-or outlive it.
-The kernel enforces the same-pool rule at allocation:
-an `Irq` is bound in the pool its `Notification` lies in.
-A child is allocated after its parent, so the destroy, newest first, takes it first:
-an `Irq` goes before its notification.
+Objects reference each other by capability,
+and the destroy's revoke clears every capability to what it takes.
+A process holds its table this way, a thread its process, and an `Irq` its notification,
+so each may lie in any pool and outlive what it names:
+clearing the capability stops the thread, disarms the `Irq`, and leaves the process naming nothing;
+see "A process's table", "Threads" and "Interrupts".
 A thread waiting on a notification inside a destroyed pool
 is woken with `KERR_INVALID_CAP` and no bits,
 because the wait can no longer be answered.
@@ -551,13 +544,15 @@ every region installed in a process,
 which is a slot of the same layout living in the `Process`,
 every process's table slot, which lives there too,
 every thread's process and units, which live in the `Thread`,
+every `Irq`'s notification, which lives in the `Irq`,
 and every pool's own node, which lives in its descriptor;
 see `kernel/object.h`.
 Roots are the boot capabilities but those made of the root task's memory,
 its frames and the boot pool's own node, which hang below `BOOT_CAP_ROOT_RAM`,
 and those to the boot pool and its objects, which hang below that node,
 as the root task's table slot and its thread's process do.
-A capability to a pool or an object is never a root, and neither is a thread's process.
+A capability to a pool or an object is never a root,
+and neither is a thread's process or an `Irq`'s notification.
 
 **What hangs below what.**
 A carve hangs below the frame or line it was carved from,
@@ -566,7 +561,8 @@ a derivation below its source,
 an installed region below the frame it was installed from,
 the counter's frame below the clock it was derived through,
 a process's table slot below the `CapTable` capability the process was made with,
-and a thread's process below the `Process` capability the thread was made with.
+a thread's process below the `Process` capability the thread was made with,
+and an `Irq`'s notification below the `Notification` capability the `Irq` was bound with.
 A pool's own node hangs below the Untyped, and the Pool capability the retype returns below that node.
 A capability to a new object hangs below the Pool capability it was allocated through,
 and so does the `Irq` capability of `OP_IRQ_BIND`, whose line goes with everything derived from it.
@@ -1072,7 +1068,7 @@ the driver runs when its turn comes, as a thread a timer line woke does.
 Having serviced the device, the driver arms the `Irq` again,
 which is what unmasks the line.
 A timer line takes the same `Irq`:
-bound at creation to a notification in its own pool,
+bound at creation to a notification,
 armed with bits and a delay, disarmed by signalling,
 so a driver that gives the device one bit and a timer line another
 has a wait with a timeout for the same two calls; see "Time".
@@ -1108,6 +1104,15 @@ exactly as the lender of memory does.
 Revoking below the line capability the lender derived the borrower's from
 takes the line only while it is unbound;
 once bound, the line is the `Irq`'s until its pool goes.
+
+**An `Irq` holds its notification as a thread holds its process,**
+by a capability in a slot of its own, below the `Notification` capability it was bound with.
+A revoke above the slot, or the destroy of the notification's pool, clears it,
+which disarms the `Irq` and masks its line.
+`OP_IRQ_SET` refuses an `Irq` without a notification,
+so it stays disarmed, its line bound, until its own pool goes.
+It costs twenty-four bytes per `Irq` and a test on every set;
+before, an `Irq` had to lie in its notification's pool so a pointer could not dangle.
 
 **One `Irq` per line.**
 Sharing a line between drivers is open decision 11;
@@ -1489,12 +1494,14 @@ or a range of the units of time there are, with no more than the rights to bind 
 or the debug capability or the clock, which name no object,
 or a live kernel object of the capability's own type.
 Every process's table slot is empty or names a live table,
-and every thread's process slot is empty or names a live process.
+every thread's process slot is empty or names a live process,
+and every `Irq`'s notification slot is empty or names a live notification.
 
 **Derivation.**
 The slots of every live table,
 the table slot and region slots of every live process,
-the process and units of every live thread
+the process and units of every live thread,
+the notification of every live `Irq`
 and the own node of every pool
 are the nodes of one forest.
 Every link of a filled node lands on a live, filled node;
@@ -1504,13 +1511,14 @@ every node on it linked up to that node,
 and every node's previous link names the sibling whose next is the node,
 the last sibling for the first;
 a root has no siblings and no previous link,
-and a capability to a pool or an object is never one, nor a thread's process.
+and a capability to a pool or an object is never one, nor a thread's process or an `Irq`'s notification.
 A node is derived from its parent:
 the same object with no more rights,
 a range within the parent's range with no more rights,
 a pool's own node on an Untyped, an installed region on a frame,
 a thread's units on a capability to units that holds them, the first of them even for none,
-a thread's process on a capability to that process, to its pool, or on its pool's own node,
+a thread's process or an `Irq`'s notification on a capability to that object,
+to its pool, or on its pool's own node,
 the counter's block, or a region installed from it, below a clock,
 or a capability to a pool or an object below a capability to that pool or its own node.
 A revoke, a delete or a destroy stopped for an interrupt leaves such a forest too,
@@ -1556,9 +1564,10 @@ A thread with units that waits without time reaches a tick no earlier than the r
 and the release lies ahead of the count.
 
 **Interrupts.**
-Every `Irq` names a live notification in its own pool,
-so the link, which is not checked on use, never dangles,
-and a line there is: the log's, the controller's or a timer line.
+Every `Irq` names a line there is: the log's, the controller's or a timer line.
+Its notification is a leaf of the derivation tree,
+bound through a capability with the right to signal,
+and an `Irq` without one is disarmed.
 At most one `Irq` is bound to any line.
 The controller forwards a line exactly while an `Irq` is armed on it,
 read back from the controller itself:

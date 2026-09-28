@@ -160,7 +160,8 @@ int cap_store_beside(struct captable *table, uint32_t slot, const struct cap *ca
 
 /*
  * Empty a node the tree no longer names.
- * An installed region is unmapped as well, a thread's units unbound, and a thread whose process goes stopped.
+ * An installed region is unmapped as well, a thread's units unbound, a thread whose process goes stopped,
+ * and an Irq whose notification goes disarmed.
  */
 static void clear_node(struct cap *n)
 {
@@ -170,6 +171,8 @@ static void clear_node(struct cap *n)
         sched_unbind(n);
     } else if (n->type == CAP_HOSTED) {
         sched_unhost(n);
+    } else if (n->type == CAP_SIGNALLED) {
+        irq_drop(n);
     } else {
         *n = (struct cap){ 0 };
     }

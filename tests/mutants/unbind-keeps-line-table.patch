@@ -1,4 +1,4 @@
-A pool destroy masks the lines of the Irqs it takes but leaves them in the line table.
+A pool destroy takes its Irqs but leaves them in the line table.
 The next interrupt or bind on the line would find memory that is no longer an Irq;
 the line table records exactly the Irqs that are bound.
 
@@ -8,11 +8,11 @@ Report: line table names an irq that is gone
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -345,7 +345,6 @@ bool sched_forget(struct obj_header *o, bool preempt)
-         if (line_on_controller(line)) {
-             irq_enable(line, false);
-         }
--        line_irq[line] = 0;
-         break;
+@@ -509,7 +509,6 @@ bool sched_forget(struct obj_header *o, bool preempt)
      }
+     case CAP_IRQ:
+         /* It was disarmed and its line masked as its notification was cleared; the line is free again. */
+-        line_irq[((struct irq *)o)->line] = 0;
+         break;
      default:
+         break;

@@ -1,0 +1,19 @@
+Taking an armed Irq's notification leaves it armed,
+so its line would fire into a notification that is gone,
+and a destroy of its pool would leave the count of armed sources counting it;
+an Irq without a notification is disarmed.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: irq without a notification is armed
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -365,7 +365,6 @@ void irq_signal(struct irq *irq)
+ void irq_drop(struct cap *signalled)
+ {
+     struct irq *irq = signalled_irq(signalled);
+-    irq_set_bits(irq, 0);
+     /* Only the controller's lines have a mask. */
+     if (line_on_controller(irq->line)) {
+         irq_enable(irq->line, false);

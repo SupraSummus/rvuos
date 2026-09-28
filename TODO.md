@@ -57,6 +57,8 @@ Beyond the demo:
   is stood for only by the pattern the host's RAM starts out holding.
 - `tools/loop-bounds.py` knows clang's jump tables by their shape;
   any other jump through a register may make up a loop, which fails the link, never passes it.
+  A table whose base clang keeps on the stack is one,
+  so the link refuses the mutant `forget-pool-walks-every-object`, which the counting harness alone should catch.
 - That the count of armed sources leaves the log's line out is checked by reading `irq_set_bits`.
   Under tracing each call's line reaches the log before the self-check runs,
   so an `Irq` armed on the log's line has always signalled by then.
@@ -159,16 +161,8 @@ Beyond the demo:
   without the operation, the capability a destroy keeps for last would go too.
   The root task is destroyed as any process is, by its pool or by the memory under it.
 - Revoking below a line capability takes the line back only while it is unbound.
-  A bound line could keep its capability, marked as the binding one,
-  whose clearing unbinds the `Irq`, which its pool keeps inert until it goes;
-  `DESIGN.md`, "Interrupts".
-- The same-pool rule for an `Irq` and its notification
-  could go the way a thread's process went:
-  hold the notification by a capability slot the sweep clears,
-  and give clearing it the effect it needs:
-  an `Irq` whose notification is taken disarms and masks its line.
-  No structural pointer between objects would then be left.
-  It costs twenty bytes per `Irq` and one test on use.
+  The `Irq` could hold its line as it holds its notification, by a node below the line capability,
+  whose clearing disarms the `Irq` and frees the line; `DESIGN.md`, "Interrupts".
 - A pool whose every capability was deleted or revoked stays until the Untyped above it is revoked,
   and nothing tells the holder of that Untyped what is left below it:
   `OP_UNTYPED_INFO` says only that something is.

@@ -101,7 +101,8 @@ __attribute__((noreturn)) static void violated(const char *what)
 
 /*
  * An installed region grants what the frame it came from did, a thread's units those units,
- * a thread's process what a capability to it does, and an Untyped its block whatever it made.
+ * a thread's process and an Irq's notification what a capability to it does,
+ * and an Untyped its block whatever it made.
  */
 static struct grant grant_of(const struct cap *c)
 {
@@ -113,6 +114,9 @@ static struct grant grant_of(const struct cap *c)
     }
     if (c->type == CAP_HOSTED) {
         return (struct grant){ CAP_PROCESS, c->rights, c->a, 0 };
+    }
+    if (c->type == CAP_SIGNALLED) {
+        return (struct grant){ CAP_NOTIFICATION, c->rights, c->a, 0 };
     }
     return (struct grant){ c->type == CAP_INSTALLED ? CAP_FRAME : c->type, c->rights, c->a, c->b };
 }
@@ -310,7 +314,7 @@ static void check_built(const struct obj_header *o)
         bound = covered((struct grant){ CAP_PROCESS, RIGHT_W, ((const struct thread *)o)->proc.a, 0 });
     } else if (o->type == CAP_IRQ) {
         const struct irq *irq = (const struct irq *)o;
-        bound = covered((struct grant){ CAP_NOTIFICATION, RIGHT_W, irq->ntfn, 0 }) &&
+        bound = covered((struct grant){ CAP_NOTIFICATION, RIGHT_W, irq->ntfn.a, 0 }) &&
                 covered((struct grant){ CAP_IRQ_LINE, RIGHT_W, irq->line, 1 });
     }
     if (!bound) {
