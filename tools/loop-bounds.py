@@ -83,7 +83,8 @@ TERMINATORS = ("ret", "mret", "j", "jr")
 
 def defined(insns, i, reg):
     """The value an li, or an lui or auipc with its addi, left in reg before insns[i]:
-    the nearest such write above it, with nothing else writing reg in between."""
+    the nearest such write above it, with nothing else writing reg in between.
+    The addi may take the upper half from another register, as clang does when it hoists a table's base."""
     for j in range(i - 1, -1, -1):
         pc, mnem, ops = insns[j]
         args = [x.strip() for x in ops.split(",")]
@@ -91,10 +92,10 @@ def defined(insns, i, reg):
             continue
         if mnem == "li":
             return imm(args[1])
-        if mnem == "addi" and args[1] == reg and j > 0:
+        if mnem == "addi" and j > 0:
             ppc, pm, pops = insns[j - 1]
             pargs = [x.strip() for x in pops.split(",")]
-            if pm in ("lui", "auipc") and pargs[0] == reg:
+            if pm in ("lui", "auipc") and pargs[0] == args[1]:
                 high = (imm(pargs[1]) << 12) & 0xFFFFFFFF
                 if pm == "auipc":
                     high = (ppc + high) & 0xFFFFFFFF

@@ -50,6 +50,7 @@ struct obj_header {
  * A process's region slots are slots of this type too, CAP_INSTALLED, and leaves of the tree,
  * and so is its table slot, which holds a CAP_CAPTABLE capability,
  * and a thread's process, CAP_HOSTED, and its units, CAP_BOUND,
+ * and an Irq's notification, CAP_SIGNALLED,
  * and so is a pool's own node, CAP_RETYPED, in the pool's descriptor.
  * For CAP_TIME a is the first unit and b the count, as for CAP_IRQ_LINE.
  */
@@ -86,6 +87,11 @@ struct cap {
  * the Process capability the thread was made with. Kernel internal: never in a table.
  */
 #define CAP_HOSTED 0x83
+/*
+ * An Irq's notification, in the Irq: a is the notification, and the node hangs below
+ * the Notification capability the Irq was bound with. Kernel internal: never in a table.
+ */
+#define CAP_SIGNALLED 0x84
 
 #define CAPTABLE_MAX_SLOTS 1024
 
@@ -204,10 +210,10 @@ struct notification {
 
 /*
  * An Irq signals a notification when its interrupt line fires:
- * bound at creation to a notification in its own pool,
+ * bound at creation to a notification in any pool,
  * armed with the bits it will signal, and disarmed by signalling.
- * The notification dies with the Irq's pool;
- * the link is not checked on use.
+ * It holds the notification as a thread holds its process, so the two may lie in different pools,
+ * and one whose notification is taken is disarmed and stays so, its line masked and still bound.
  * On a line of the controller, disarmed means masked there:
  * the line stays quiet until the driver arms the Irq again,
  * which it does once it has serviced the device.
@@ -220,7 +226,7 @@ struct notification {
  */
 struct irq {
     struct obj_header hdr;
-    paddr_t ntfn;
+    struct cap ntfn;    /* CAP_SIGNALLED, or CAP_NONE once the notification is taken */
     uint32_t bits;
     uint32_t line;
     uint32_t deadline;  /* on a timer line, the tick count it fires at */
@@ -235,7 +241,7 @@ _Static_assert(sizeof(struct process) == 8 + 24 * (1 + PROCESS_REGION_SLOTS) + s
                "object layout");
 _Static_assert(sizeof(struct thread) == 32 + 2 * sizeof(struct cap) + sizeof(struct trap_frame), "object layout");
 _Static_assert(sizeof(struct notification) == 16, "object layout");
-_Static_assert(sizeof(struct irq) == 24, "object layout");
+_Static_assert(sizeof(struct irq) == 20 + sizeof(struct cap), "object layout");
 
 /*
  * True if a capability of this type names a kernel object.
@@ -269,7 +275,8 @@ _Static_assert(offsetof(struct thread, time) == offsetof(struct thread, proc) + 
 
 /*
  * The nodes of the derivation tree an object holds, as one array, and how many:
- * a table's slots, a process's table slot and region slots, a thread's process and units, a pool's own node.
+ * a table's slots, a process's table slot and region slots, a thread's process and units,
+ * an Irq's notification, a pool's own node.
  * Other objects hold none.
  */
 static inline struct cap *obj_nodes(struct obj_header *o, uint32_t *count)
@@ -284,6 +291,9 @@ static inline struct cap *obj_nodes(struct obj_header *o, uint32_t *count)
     case CAP_THREAD:
         *count = 2;
         return &((struct thread *)o)->proc;
+    case CAP_IRQ:
+        *count = 1;
+        return &((struct irq *)o)->ntfn;
     case CAP_POOL:
         *count = 1;
         return &((struct pool *)o)->node;
@@ -323,7 +333,16 @@ static inline struct captable *thread_table(const struct thread *t)
     const struct process *p = thread_process(t);
     return p != NULL ? process_table(p) : NULL;
 }
-static inline struct notification *irq_notification(const struct irq *i) { return p2v(i->ntfn); }
+/* The notification an Irq signals, or NULL once it was taken. */
+static inline struct notification *irq_notification(const struct irq *i)
+{
+    return i->ntfn.type == CAP_SIGNALLED ? p2v(i->ntfn.a) : NULL;
+}
+/* The Irq whose notification this is. */
+static inline struct irq *signalled_irq(struct cap *n)
+{
+    return (struct irq *)((char *)n - offsetof(struct irq, ntfn));
+}
 
 /* True if the Irq will signal; a controller's line is unmasked exactly then. */
 static inline bool irq_armed(const struct irq *i) { return i->bits != 0; }
@@ -588,6 +607,12 @@ void irq_set_bits(struct irq *irq, uint32_t bits);
 /* The line fired: disarm the Irq and signal its bits. The mask, if the line has one, is the caller's. */
 void irq_signal(struct irq *irq);
 
+/*
+ * Clear an Irq's notification the tree has already let go of:
+ * the Irq is disarmed and its line masked, and it stays so, bound to the line, until its pool goes.
+ */
+void irq_drop(struct cap *signalled);
+
 /* Make a stopped or woken thread ready: it joins the back of the queue its account puts it on, if it may run. */
 void sched_ready(struct thread *t);
 
@@ -694,9 +719,9 @@ void sched_wait(struct thread *t, struct notification *ntfn);
  * Before an object of a pool that goes is zeroed, undo what it left in the rest of the kernel:
  * a notification wakes every thread waiting on it
  * with KERR_INVALID_CAP and no bits, because the object is gone,
- * and an Irq is disarmed and its line masked and unbound.
- * A thread has nothing left to undo: it stopped as the nodes it holds were cleared.
- * A pool takes its objects newest first, so an Irq goes before its notification.
+ * and an Irq leaves its line, which is free again.
+ * The nodes an object holds were cleared first:
+ * a thread stopped as they were, and an Irq was disarmed and its line masked.
  * The waiters wake one step at a time, and with preempt the walk may stop between two:
  * false then, and the next call goes on with the ones still waiting.
  */

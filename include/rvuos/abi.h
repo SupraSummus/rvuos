@@ -142,6 +142,7 @@
  * and leave the slot itself. a1 = slot.
  * A region installed from a frame below the slot is uninstalled,
  * a thread made through a Process capability below it stops, as it has no process any more,
+ * an Irq bound through a Notification capability below it is disarmed, as it has nothing to signal,
  * and a pool retyped from an Untyped below it is destroyed, as OP_POOL_DESTROY destroys one.
  * A revoke that takes the calling thread's process or its process's table ends there with KERR_OK,
  * and what it did not reach stays for another call to revoke.
@@ -256,7 +257,8 @@
  * lives in the pool.
  * Threads waiting on a notification in a destroyed pool
  * are woken with KERR_INVALID_CAP and no bits,
- * and threads, in whatever pool, whose process was in it stop.
+ * threads, in whatever pool, whose process was in it stop,
+ * and Irqs, in whatever pool, whose notification was in it are disarmed.
  * Restartable.
  */
 #define OP_POOL_DESTROY 16
@@ -317,10 +319,13 @@
  * as an Irq object; a timer line binds the same way as a controller's.
  * a1 = the slot of the Pool capability the Irq is allocated from, which needs RIGHT_W,
  * a2 = the slot of the Notification capability the Irq signals, which needs RIGHT_W
- *      and must lie in that pool,
+ *      and may lie in any pool,
  * a3 = destination slot for the Irq capability.
  * The invoked slot is cleared with everything derived from it, and may be the destination;
  * the Irq capability is a child of the Pool capability, as an allocated object's is.
+ * The Irq holds its notification by a capability derived from the one named,
+ * so revoking below that capability, or destroying the notification's pool,
+ * disarms the Irq and masks its line for good: see OP_IRQ_SET.
  * The capability must name exactly one line; carve first.
  * Fails with KERR_OVERLAP if an Irq is already bound to the line;
  * the line is free again once that Irq's pool is destroyed.
@@ -350,6 +355,8 @@
  * that lies a whole number of periods from that deadline.
  * Returns a1 = the periods skipped, those that had passed by the call.
  * Any other a3, or a zero period, fails with KERR_INVALID_ARG; a1 = 0 ignores a2 and a3.
+ * Fails with KERR_STATE once the Irq's notification was taken, see OP_IRQ_BIND:
+ * it has nothing to signal, and its line stays bound until the Irq's pool is destroyed.
  */
 #define OP_IRQ_SET 21
 #define IRQ_SET_PERIOD 0x1

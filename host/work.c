@@ -37,8 +37,8 @@
 
 /*
  * What one call may make of a unit while it takes others away:
- * OP_IRQ_BIND makes an Irq and its capability, one object and one node,
- * as it revokes what was derived from the line.
+ * OP_IRQ_BIND makes an Irq, its capability and its hold on its notification,
+ * one object and a node more than the line it deletes, as it revokes what was derived from the line.
  */
 #define WORK_SLACK 1
 

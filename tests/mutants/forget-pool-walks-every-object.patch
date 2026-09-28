@@ -1,9 +1,11 @@
 A pool that goes looks for its newest object among every object of every pool,
 still claiming each step takes one away,
 so a destroy costs what the machine holds, not what it destroys.
-It forgets and zeroes the same objects, so only the counting harness catches it.
+It forgets and zeroes the same objects, so only the counting harness catches it by what the walk claims.
+The link refuses it too, but only because the walk leaves clang short of registers,
+so that it keeps a jump table's base on the stack, where tools/loop-bounds.py does not follow it.
 
-Caught-by: fuzz-work
+Caught-by: loop-bounds fuzz-work
 Report: the paid loop at kernel/pool.c took a second step without asking intr_pending
 
 diff --git a/kernel/pool.c b/kernel/pool.c

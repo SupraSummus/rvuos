@@ -530,12 +530,23 @@ static uint32_t armed_seen;
 
 static void check_irq(const struct irq *i)
 {
-    struct obj_header *n = object_find(i->ntfn);
-    if (n == NULL || n->type != CAP_NOTIFICATION) {
-        fail("irq has no live notification", v2p(i), i->ntfn, 0);
-    }
-    if (n->pool != i->hdr.pool) {
-        fail("irq and its notification live in different pools", v2p(i), 0, 0);
+    /*
+     * The sweep clears an Irq's notification with the notification, in whatever pool,
+     * and an Irq without one is disarmed; the tree check reads the node's links.
+     * It was bound through a capability with the right to signal, whose rights it carries.
+     */
+    const struct cap *s = &i->ntfn;
+    if (s->type != CAP_NONE) {
+        struct obj_header *n = object_find(s->a);
+        if (s->type != CAP_SIGNALLED || n == NULL || n->type != CAP_NOTIFICATION || (s->rights & RIGHT_W) == 0 ||
+            s->b != 0 || s->index != 0) {
+            fail("irq's notification slot names no live notification", v2p(i), s->type, s->a);
+        }
+        if (s->child != 0) {
+            fail("something is derived from an irq's notification", v2p(i), s->child, 0);
+        }
+    } else if (irq_armed(i)) {
+        fail("irq without a notification is armed", v2p(i), i->bits, 0);
     }
     if (i->line >= LINES) {
         fail("irq names a line there is not", v2p(i), i->line, 0);
@@ -690,8 +701,9 @@ static void check_captable(const struct captable *table)
  * The derivation tree.
  *
  * Its nodes are the slots of every live table,
- * the table slot and region slots of every live process
- * and the process and units of every live thread,
+ * the table slot and region slots of every live process,
+ * the process and units of every live thread
+ * and the notification of every live Irq,
  * linked by physical address and never checked on use,
  * so every link must land on a live node and the shape must be exactly a forest:
  * the children of a node form one ring that closes through the node,
@@ -702,7 +714,8 @@ static void check_captable(const struct captable *table)
  * A node is derived from its parent: the same object with no more rights,
  * a range within the parent's with no more rights,
  * or an object built on the parent's range, a pool on a region, an Irq on a line,
- * a thread's process on a capability to it, a thread's units on the units it was bound through,
+ * a thread's process or an Irq's notification on a capability to it,
+ * a thread's units on the units it was bound through,
  * or the counter's block, or a region installed from it, below the clock.
  */
 
@@ -758,11 +771,14 @@ static bool node_range(const struct cap *n, uint32_t *base, uint32_t *size)
     }
 }
 
-/* A node naming an object built in a pool: a capability to one, or a thread's hold on its process. */
+/*
+ * A node naming an object built in a pool:
+ * a capability to one, a thread's hold on its process, or an Irq's on its notification.
+ */
 static bool is_object_type(uint8_t type)
 {
     return type == CAP_CAPTABLE || type == CAP_PROCESS || type == CAP_THREAD ||
-           type == CAP_NOTIFICATION || type == CAP_IRQ || type == CAP_HOSTED;
+           type == CAP_NOTIFICATION || type == CAP_IRQ || type == CAP_HOSTED || type == CAP_SIGNALLED;
 }
 
 static bool derived_from(const struct cap *c, const struct cap *p)
@@ -803,8 +819,9 @@ static bool derived_from(const struct cap *c, const struct cap *p)
     if (c->type == CAP_BOUND && p->type == CAP_TIME) {
         return narrower && c->a - p->a < p->b && c->b <= p->b - (c->a - p->a);
     }
-    /* A thread's process is the process it was made with. */
-    if (c->type == CAP_HOSTED && p->type == CAP_PROCESS) {
+    /* A thread's process is the process it was made with, and an Irq's notification the one it was bound to. */
+    if ((c->type == CAP_HOSTED && p->type == CAP_PROCESS) ||
+        (c->type == CAP_SIGNALLED && p->type == CAP_NOTIFICATION)) {
         return narrower && c->a == p->a;
     }
     /* Below a pool's node lies every capability to the pool and to its objects. */

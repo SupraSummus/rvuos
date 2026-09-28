@@ -257,24 +257,6 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
     }
 }
 
-/*
- * The notification an Irq is bound to, from a slot in the caller's table.
- * The object signals on the creator's behalf, so the creator must be able to,
- * and the link is not checked on use, so the two must lie in one pool;
- * see DESIGN.md, "Kernel pools and revocation".
- */
-static int bound_notification(struct thread *t, uint32_t slot, const struct pool *pool,
-                              struct notification **out)
-{
-    struct cap nc;
-    int err = cap_lookup_typed(thread_table(t), slot, CAP_NOTIFICATION, RIGHT_W, &nc);
-    if (err != KERR_OK) {
-        return err;
-    }
-    *out = (struct notification *)cap_object(&nc);
-    return (*out)->hdr.pool == pool_base(pool) ? KERR_OK : KERR_INVALID_ARG;
-}
-
 static int op_pool_destroy(struct thread *t, uint32_t slot, struct pool *pool)
 {
     /* The caller keeps what it runs on, the root task in the boot pool as anyone. */
@@ -309,10 +291,7 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
     switch (arg[1]) {
     /*
      * A process's table and a thread's process may lie in any pool,
-     * since the sweep clears the hold on them.
-     * An Irq's notification is a structural pointer, not checked on use,
-     * so the Irq is bound in the pool its notification lies in
-     * and dies with it; see DESIGN.md, "Kernel pools and revocation".
+     * since the sweep clears the hold on them; see DESIGN.md, "Kernel pools and revocation".
      */
     case CAP_PROCESS: {
         struct cap tc;
@@ -517,8 +496,9 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
         if (pool->dying) {
             return KERR_STATE;
         }
-        struct notification *ntfn;
-        err = bound_notification(t, arg[2], pool, &ntfn);
+        /* The Irq signals on its creator's behalf, so the creator must be able to. */
+        struct cap nc;
+        err = cap_lookup_typed(thread_table(t), arg[2], CAP_NOTIFICATION, RIGHT_W, &nc);
         if (err != KERR_OK) {
             return err;
         }
@@ -540,7 +520,9 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
             return KERR_PREEMPTED;
         }
         struct irq *irq = pool_alloc(pool, CAP_IRQ, sizeof(*irq));
-        irq->ntfn = v2p(ntfn);
+        /* It hangs below the capability it was bound with, so a revoke above that disarms the Irq. */
+        irq->ntfn = (struct cap){ .type = CAP_SIGNALLED, .rights = nc.rights, .a = nc.a };
+        cap_attach(slot_node(t, arg[2]), &irq->ntfn);
         irq->line = first;
         /* A period counts from the last deadline, and a line that never fired from its bind. */
         irq->deadline = sched_ticks;
@@ -622,6 +604,10 @@ static int op_irq(const struct cap *cap, uint32_t op, uint32_t *arg)
 
     if (op != OP_IRQ_SET) {
         return KERR_WRONG_TYPE;
+    }
+    /* An Irq whose notification was taken has nothing to signal. */
+    if (irq_notification(irq) == NULL) {
+        return KERR_STATE;
     }
     if (line_is_timer(irq->line) && bits != 0) {
         uint32_t us = arg[2];

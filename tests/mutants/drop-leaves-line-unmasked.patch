@@ -1,0 +1,21 @@
+Taking an Irq's notification disarms it but leaves its line unmasked,
+so the controller would go on forwarding a line nothing is armed on,
+and the destroy of the Irq's pool, which takes the notification first, does the same;
+the controller forwards a line exactly while an Irq is armed on it.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: controller forwards a line nothing is armed on
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -367,9 +367,6 @@ void irq_drop(struct cap *signalled)
+     struct irq *irq = signalled_irq(signalled);
+     irq_set_bits(irq, 0);
+     /* Only the controller's lines have a mask. */
+-    if (line_on_controller(irq->line)) {
+-        irq_enable(irq->line, false);
+-    }
+     *signalled = (struct cap){ 0 };
+ }
+ 

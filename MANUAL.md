@@ -387,6 +387,7 @@ The tree grows in these ways:
 | `OP_POOL_ALLOC` of a `Process` | and the process's hold on its table below the `CapTable` capability |
 | `OP_POOL_ALLOC` of a `Thread` | and the thread's hold on its process below the `Process` capability |
 | `OP_IRQ_BIND` | below the `KernelPool` capability; the line goes with what was derived from it |
+| `OP_IRQ_BIND` | and the `Irq`'s hold on its notification below the `Notification` capability |
 | `OP_TIME_BIND` | the thread's hold on its units hangs below the invoked `Time` capability |
 | boot | nowhere, but for the root task's frames and the boot pool's own node, below `BOOT_CAP_ROOT_RAM`, and the capabilities to the boot pool and its objects, below that node |
 
@@ -394,7 +395,8 @@ The tree grows in these ways:
 derived capabilities, their copies, what was derived from those,
 every region installed from any of them,
 and every thread's units bound through any of them;
-a thread made through any of them loses its process and stops, section 5.6.
+a thread made through any of them loses its process and stops, section 5.6,
+and an `Irq` bound through any of them loses its notification and is disarmed, section 5.9.
 Below an Untyped it destroys every pool made of it, as `OP_POOL_DESTROY` does.
 The slot itself stays.
 Revoking a copy takes nothing from the original, and the other way round;
@@ -521,20 +523,14 @@ Sizes a developer needs for planning, as the kernel rounds them:
 | `Process` | 312 (272 with `PMP_MAX_ENTRIES=8`) |
 | `Thread` | 224 |
 | `Notification` | 16 |
-| `Irq` | 24 |
+| `Irq` | 48 |
 
 A minimal child process, table of 10 slots, process, thread and two notifications,
 costs 880 bytes including the descriptor.
 
-**The same-pool rule.**
-The kernel follows the link from an `Irq` to its notification
-without checking that the notification still exists.
-It must therefore never be destroyed before the `Irq`,
-and since destruction happens per pool, the two must lie in one pool:
-an `Irq` is bound in the pool its `Notification` lies in,
-and `OP_IRQ_BIND` fails with `KERR_INVALID_ARG` otherwise.
-
-A process's table and a thread's process are not bound by the rule, sections 5.2 and 5.6:
+**Objects in different pools.**
+A process's table, a thread's process and an `Irq`'s notification may each lie in any pool,
+sections 5.2, 5.6 and 5.9:
 each is held by a capability that a destroy of its pool clears.
 
 **Capabilities to a pool.**
@@ -555,6 +551,8 @@ reachable through nothing, until the Untyped it was made of is revoked.
 - wakes every thread waiting on a notification in the pool
   with `KERR_INVALID_CAP` and no bits,
 - stops every thread, in whatever pool, that ran in a process in the pool,
+- disarms every `Irq`, in whatever pool, bound to a notification in the pool,
+  and masks its line, which stays bound,
 - masks the interrupt line of every `Irq` in the pool, which frees the line,
 - zeroes the memory its objects took and leaves the rest as it was,
   so clear memory before it becomes a pool if whoever destroys the pool should not read it,
@@ -660,7 +658,7 @@ apart from the controller's lines.
 It carves them and hands them out as it does any other line, section 5.9,
 so who holds how many timers is its choice.
 A timer line is bound with `OP_IRQ_BIND` like a device's,
-into an `Irq` in a pool, bound to a notification in that same pool.
+into an `Irq` in a pool, bound to a notification in any pool.
 `OP_IRQ_SET` arms it with a set of bits and, in `a2`, a delay in microseconds;
 when the delay has passed the line fires: the `Irq` signals those bits and disarms.
 Setting an armed timer line moves its deadline and replaces its bits;
@@ -747,10 +745,17 @@ as it makes frames of memory.
 
 `OP_IRQ_BIND` turns a one-line capability into an `Irq` object
 in a pool of the driver's choosing,
-bound to a notification in that same pool.
+bound to a notification in any pool.
 The invoked slot is consumed.
 A line is bound at most once; a second bind fails with `KERR_OVERLAP`
 until the first `Irq`'s pool is destroyed.
+
+An `Irq` holds its notification by a capability
+derived from the `Notification` capability it was bound with,
+as a thread holds its process, section 5.6.
+Revoking below that capability, or destroying the pool the notification lies in,
+takes the notification from the `Irq`, which is disarmed and its line masked for good:
+`OP_IRQ_SET` refuses it with `KERR_STATE`, and the line stays bound until the `Irq`'s own pool goes.
 
 An `Irq` on a device's line works like one on a timer line:
 
@@ -1032,7 +1037,8 @@ and deleting a `KernelPool` capability does not destroy the pool.
 Clears everything below it, section 5.2, and leaves the slot.
 Regions installed from capabilities below it are uninstalled,
 and threads of those processes lose access at once;
-threads made through a `Process` capability below it stop, section 5.6.
+threads made through a `Process` capability below it stop, section 5.6,
+and `Irq`s bound through a `Notification` capability below it are disarmed, section 5.9.
 A revoke that takes the caller's own process, or its process's table, ends there,
 returns `KERR_OK`, and leaves the rest below the slot for another call to revoke.
 Below an Untyped, every pool made of it is destroyed as by `OP_POOL_DESTROY`;
@@ -1163,7 +1169,7 @@ A table operation like `OP_FRAME_CARVE`.
 Needs `RIGHT_W`, and the capability must name exactly one line (`KERR_INVALID_ARG`).
 `a1` = slot of the `KernelPool` capability to allocate the `Irq` from, with `RIGHT_W`,
 `a2` = slot of the `Notification` capability the `Irq` signals, with `RIGHT_W`,
-which must lie in that pool,
+which may lie in any pool, and the `Irq`'s hold on it hangs below that capability, section 5.9,
 `a3` = destination slot for the `Irq` capability, which may be the invoked slot.
 The invoked slot is cleared with everything below it,
 and the `Irq` capability hangs below the `KernelPool` capability.
@@ -1191,6 +1197,7 @@ With `IRQ_SET_PERIOD`, `a2` is a period counted from the line's last deadline, s
 and the call returns `a1` = the periods skipped.
 `KERR_INVALID_ARG` for any other bit of `a3`, or a period of zero.
 With `a1` = 0, `a2` and `a3` are ignored.
+`KERR_STATE` once the `Irq`'s notification was taken, section 5.9: it has nothing to signal.
 
 ### 6.12 Operations on `Clock`
 
@@ -1508,7 +1515,7 @@ pools tile their memory exactly,
 every waiting thread names a live notification,
 every ready thread but the running one that may run is on the queue its account says,
 and each unit of time is earned by the thread bound to it and by no other,
-every `Irq` names a notification in its own pool,
+every `Irq` names a live notification, or none and is disarmed,
 no `Irq` armed on a timer line is past its deadline,
 and the controller forwards exactly the lines an `Irq` is armed on.
 

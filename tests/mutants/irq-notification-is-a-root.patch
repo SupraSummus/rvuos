@@ -1,0 +1,20 @@
+An Irq's hold on its notification is made a root rather than below the capability it was bound with,
+so no revoke above that capability takes it, and the destroy of the notification's pool
+leaves the Irq signalling memory that is no longer a notification;
+an Irq's notification is never a root.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: capability to an object is a root
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -526,7 +526,7 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
+         struct irq *irq = pool_alloc(pool, CAP_IRQ, sizeof(*irq));
+         /* It hangs below the capability it was bound with, so a revoke above that disarms the Irq. */
+         irq->ntfn = (struct cap){ .type = CAP_SIGNALLED, .rights = nc.rights, .a = nc.a };
+-        cap_attach(slot_node(t, arg[2]), &irq->ntfn);
++        cap_attach(NULL, &irq->ntfn);
+         irq->line = first;
+         /* A period counts from the last deadline, and a line that never fired from its bind. */
+         irq->deadline = sched_ticks;

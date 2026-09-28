@@ -354,11 +354,23 @@ void sched_signal(struct notification *ntfn, uint32_t bits)
     }
 }
 
+/* Only an armed Irq signals, and an Irq without a notification is never armed. */
 void irq_signal(struct irq *irq)
 {
     uint32_t bits = irq->bits;
     irq_set_bits(irq, 0);
     sched_signal(irq_notification(irq), bits);
+}
+
+void irq_drop(struct cap *signalled)
+{
+    struct irq *irq = signalled_irq(signalled);
+    irq_set_bits(irq, 0);
+    /* Only the controller's lines have a mask. */
+    if (line_on_controller(irq->line)) {
+        irq_enable(irq->line, false);
+    }
+    *signalled = (struct cap){ 0 };
 }
 
 /*
@@ -492,17 +504,10 @@ bool sched_forget(struct obj_header *o, bool preempt)
         }
         break;
     }
-    case CAP_IRQ: {
-        /* It is gone and will not fire, so it is no source. */
-        irq_set_bits((struct irq *)o, 0);
-        /* The object that would receive the interrupt is gone; only the controller's lines have a mask. */
-        uint32_t line = ((struct irq *)o)->line;
-        if (line_on_controller(line)) {
-            irq_enable(line, false);
-        }
-        line_irq[line] = 0;
+    case CAP_IRQ:
+        /* It was disarmed and its line masked as its notification was cleared; the line is free again. */
+        line_irq[((struct irq *)o)->line] = 0;
         break;
-    }
     default:
         break;
     }
