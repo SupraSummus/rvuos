@@ -129,13 +129,18 @@ int cap_store_beside(struct captable *table, uint32_t slot, const struct cap *ca
     return err;
 }
 
-/* Empty a node the tree no longer names. An installed region is unmapped as well, and a thread's units unbound. */
+/*
+ * Empty a node the tree no longer names.
+ * An installed region is unmapped as well, a thread's units unbound, and a thread whose process goes stopped.
+ */
 static void clear_node(struct cap *n)
 {
     if (n->type == CAP_INSTALLED) {
         process_drop(n);
     } else if (n->type == CAP_BOUND) {
         sched_unbind(n);
+    } else if (n->type == CAP_HOSTED) {
+        sched_unhost(n);
     } else {
         *n = (struct cap){ 0 };
     }
@@ -207,6 +212,13 @@ bool cap_revoke_below(struct cap *root, bool preempt)
         } else {
             detach(n, true);
             clear_node(n);
+        }
+        /*
+         * A revoke that took its caller's table, or the process it runs in, ends there:
+         * the caller could not make the call again, so an interrupt must not decide how far it got.
+         */
+        if (thread_table(current) == NULL) {
+            return true;
         }
         if (root->child != 0 && cap_stop_here(preempt)) {
             return false;

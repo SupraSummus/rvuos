@@ -7,7 +7,7 @@ Report: parent's ring does not reach the slot
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -206,6 +206,9 @@ bool cap_revoke_below(struct cap *root, bool preempt)
+@@ -211,6 +211,9 @@ bool cap_revoke_below(struct cap *root, bool preempt)
              }
          } else {
              detach(n, true);
@@ -16,4 +16,4 @@ diff --git a/kernel/cap.c b/kernel/cap.c
 +            }
              clear_node(n);
          }
-         if (root->child != 0 && cap_stop_here(preempt)) {
+         /*

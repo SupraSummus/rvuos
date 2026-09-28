@@ -18,12 +18,14 @@ static struct cap *slot_node(struct thread *t, uint32_t slot)
 }
 
 /*
- * True if the calling thread or its process's table lives in [base, base + size).
- * A pool lies within an Untyped or outside it, so its base says which.
+ * True if the calling thread, its process or the process's table lives in [base, base + size),
+ * the memory of a pool or an Untyped: the caller keeps what it runs on and the table it names capabilities in.
+ * A pool lies within an Untyped or outside it, and pools do not overlap, so its base says which.
  */
 static bool holds_caller(struct thread *t, uint32_t base, uint32_t size)
 {
-    return range_contains(base, size, t->hdr.pool) || range_contains(base, size, thread_table(t)->hdr.pool);
+    return range_contains(base, size, t->hdr.pool) || range_contains(base, size, thread_process(t)->hdr.pool) ||
+           range_contains(base, size, thread_table(t)->hdr.pool);
 }
 
 static int op_debug(uint32_t op, const uint32_t *arg)
@@ -263,12 +265,8 @@ static int bound_notification(struct thread *t, uint32_t slot, const struct pool
 
 static int op_pool_destroy(struct thread *t, uint32_t slot, struct pool *pool)
 {
-    /*
-     * The caller keeps what it runs on and the table it names capabilities in.
-     * A thread and its process share one pool, so these two checks cover all the caller uses.
-     * The boot pool holds the root task.
-     */
-    if (pool == boot_pool || obj_pool(&t->hdr) == pool || obj_pool(&thread_table(t)->hdr) == pool) {
+    /* The boot pool holds the root task. */
+    if (pool == boot_pool || holds_caller(t, pool_base(pool), pool->size)) {
         return KERR_STATE;
     }
     /* The invoked capability goes last, so a call made again finds the pool through it. */
@@ -298,9 +296,10 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
     struct obj_header *obj;
     switch (arg[1]) {
     /*
-     * A process's table may lie in any pool, since the sweep clears the process's hold on it.
-     * The other links are structural pointers, not checked on use,
-     * so each of those objects is allocated from the pool its target lies in
+     * A process's table and a thread's process may lie in any pool,
+     * since the sweep clears the hold on them.
+     * An Irq's notification is a structural pointer, not checked on use,
+     * so the Irq is bound in the pool its notification lies in
      * and dies with it; see DESIGN.md, "Kernel pools and revocation".
      */
     case CAP_PROCESS: {
@@ -325,15 +324,13 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
         if (perr != KERR_OK) {
             return perr;
         }
-        struct process *proc = (struct process *)cap_object(&pc);
-        if (proc->hdr.pool != pool_base(pool)) {
-            return KERR_INVALID_ARG;
-        }
         struct thread *nt = pool_alloc(pool, CAP_THREAD, sizeof(*nt));
         if (nt == NULL) {
             return KERR_NO_MEMORY;
         }
-        nt->proc = v2p(proc);
+        /* It hangs below the capability it was made with, so a revoke above that stops the thread. */
+        nt->proc = (struct cap){ .type = CAP_HOSTED, .rights = pc.rights, .a = pc.a };
+        cap_attach(slot_node(t, arg[3]), &nt->proc);
         nt->state = THREAD_STOPPED;
         /* Until it is configured while tracing is off, the host cannot follow it. */
         nt->flags = THREAD_UNTRACED;
@@ -422,7 +419,8 @@ static int op_thread(const struct cap *cap, uint32_t op, const uint32_t *arg)
         }
         return KERR_OK;
     case OP_THREAD_RESUME:
-        if (target->state != THREAD_STOPPED) {
+        /* A thread whose process was taken has nothing to run in. */
+        if (target->state != THREAD_STOPPED || thread_process(target) == NULL) {
             return KERR_STATE;
         }
         sched_ready(target);
@@ -671,9 +669,9 @@ static void trace_call(uint32_t op, uint32_t slot, const uint32_t *arg, int stat
 static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
 {
     /*
-     * A process whose table was taken names nothing.
-     * Within a call only a revoke, which then returns,
-     * or a destroy, which keeps the table it found, can take it.
+     * A thread whose process, or its process's table, was taken names nothing.
+     * Within a call only a revoke, which then returns, can take either,
+     * or a destroy, which keeps the table it found.
      */
     struct captable *table = thread_table(t);
     if (table == NULL) {
@@ -782,7 +780,7 @@ void syscall_dispatch(struct thread *t)
         }
     }
     /*
-     * A thread that waits gives the processor up.
+     * A thread that waits gives the processor up, and so does one whose process the call took.
      * One that lost its units finishes its turn, as a preempted call is made again before the tick switches.
      */
     if (current->state != THREAD_READY) {

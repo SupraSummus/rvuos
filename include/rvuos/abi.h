@@ -141,10 +141,13 @@
  * CapTable (RIGHT_W): clear everything derived from a slot, in every table and every process,
  * and leave the slot itself. a1 = slot.
  * A region installed from a frame below the slot is uninstalled,
+ * a thread made through a Process capability below it stops, as it has no process any more,
  * and a pool retyped from an Untyped below it is destroyed, as OP_POOL_DESTROY destroys one.
+ * A revoke that takes the calling thread's process or its process's table ends there with KERR_OK,
+ * and what it did not reach stays for another call to revoke.
  * Fails with KERR_INVALID_CAP for an empty slot,
  * and with KERR_STATE when the slot is an Untyped whose memory holds
- * the calling thread or its process's table.
+ * the calling thread, its process or the process's table.
  * Restartable.
  */
 #define OP_CAP_REVOKE 23
@@ -215,9 +218,9 @@
  * A process holds its table by a capability derived from the one named,
  * so revoking below that capability, or destroying the table's pool,
  * leaves the process naming nothing: every call it makes fails with KERR_INVALID_CAP.
- * A thread's process is not checked on every use,
- * so the thread must be allocated from the same pool as its process;
- * CAP_THREAD fails with KERR_INVALID_ARG otherwise.
+ * A thread holds its process the same way, and the process may lie in any pool;
+ * revoking below that capability, or destroying the process's pool,
+ * stops the thread for good: see OP_THREAD_RESUME.
  * An Irq is not allocated here but bound, with OP_IRQ_BIND.
  */
 #define OP_POOL_ALLOC 7
@@ -228,10 +231,11 @@
  * what was derived from them goes to their parents.
  * The memory goes back to the Untyped the pool was retyped from,
  * which makes something of it again once nothing else made of it is left.
- * Fails with KERR_STATE if the calling thread or its process's table
+ * Fails with KERR_STATE if the calling thread, its process or the process's table
  * lives in the pool, and for the boot pool, which holds the root task.
  * Threads waiting on a notification in a destroyed pool
- * are woken with KERR_INVALID_CAP and no bits.
+ * are woken with KERR_INVALID_CAP and no bits,
+ * and threads, in whatever pool, whose process was in it stop.
  * Restartable.
  */
 #define OP_POOL_DESTROY 16
@@ -262,7 +266,8 @@
  * Thread (RIGHT_W): make a stopped thread ready.
  * It runs once it is bound to units of time, see OP_TIME_BIND,
  * when its turn comes.
- * Fails with KERR_STATE unless the thread is stopped.
+ * Fails with KERR_STATE unless the thread is stopped,
+ * and once its process was taken, see OP_POOL_ALLOC: it has nothing to run in.
  */
 #define OP_THREAD_RESUME 13
 

@@ -1,0 +1,19 @@
+A thread whose process was taken may be resumed,
+and would run with no process to run in;
+a thread without a process is stopped.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: thread without a process is not stopped
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -423,7 +423,7 @@ static int op_thread(const struct cap *cap, uint32_t op, const uint32_t *arg)
+         return KERR_OK;
+     case OP_THREAD_RESUME:
+         /* A thread whose process was taken has nothing to run in. */
+-        if (target->state != THREAD_STOPPED || thread_process(target) == NULL) {
++        if (target->state != THREAD_STOPPED) {
+             return KERR_STATE;
+         }
+         sched_ready(target);

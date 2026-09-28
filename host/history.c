@@ -42,8 +42,9 @@ static ARRAY(struct grant) held;
 static ARRAY(struct node_rec) nodes;
 static obj_array objects, objects_after;
 
-/* The thread that makes the call, its table, and whether a destroy had begun on either's pool. */
+/* The thread that makes the call, its process and table, and whether a destroy had begun on one's pool. */
 static const struct thread *caller;
+static const struct process *caller_process;
 static const struct captable *caller_table;
 static bool caller_dying;
 
@@ -61,9 +62,10 @@ static uint32_t account_at_count(const struct thread *t)
     return balance > cap ? cap : (uint32_t)balance;
 }
 
-static bool dying_under(const struct thread *t, const struct captable *table)
+static bool dying_under(const struct thread *t, const struct process *proc, const struct captable *table)
 {
-    return obj_pool(&t->hdr)->dying || (table != NULL && obj_pool(&table->hdr)->dying);
+    return obj_pool(&t->hdr)->dying || (proc != NULL && obj_pool(&proc->hdr)->dying) ||
+           (table != NULL && obj_pool(&table->hdr)->dying);
 }
 
 #define PUSH(arr, x)                                                           \
@@ -86,7 +88,7 @@ __attribute__((noreturn)) static void violated(const char *what)
 
 /*
  * An installed region grants what the frame it came from did, a thread's units those units,
- * and an Untyped its block whatever its watermark.
+ * a thread's process what a capability to it does, and an Untyped its block whatever its watermark.
  */
 static struct grant grant_of(const struct cap *c)
 {
@@ -95,6 +97,9 @@ static struct grant grant_of(const struct cap *c)
     }
     if (c->type == CAP_BOUND) {
         return (struct grant){ CAP_TIME, c->rights, c->a, c->b };
+    }
+    if (c->type == CAP_HOSTED) {
+        return (struct grant){ CAP_PROCESS, c->rights, c->a, 0 };
     }
     return (struct grant){ c->type == CAP_INSTALLED ? CAP_FRAME : c->type, c->rights, c->a, c->b };
 }
@@ -172,8 +177,9 @@ void history_begin(void)
 
     const struct captable *table = current != NULL ? thread_table(current) : NULL;
     caller = current;
+    caller_process = current != NULL ? thread_process(current) : NULL;
     caller_table = table;
-    caller_dying = caller != NULL && dying_under(caller, table);
+    caller_dying = caller != NULL && dying_under(caller, caller_process, table);
     for (uint32_t i = 0; table != NULL && i < table->nslots; i++) {
         const struct cap *c = &table->slots[i];
         if (c->type == CAP_NONE) {
@@ -212,7 +218,7 @@ static void check_built(const struct obj_header *o)
     }
     bool bound = true;
     if (o->type == CAP_THREAD) {
-        bound = covered((struct grant){ CAP_PROCESS, RIGHT_W, ((const struct thread *)o)->proc, 0 });
+        bound = covered((struct grant){ CAP_PROCESS, RIGHT_W, ((const struct thread *)o)->proc.a, 0 });
     } else if (o->type == CAP_IRQ) {
         const struct irq *irq = (const struct irq *)o;
         bound = covered((struct grant){ CAP_NOTIFICATION, RIGHT_W, irq->ntfn, 0 }) &&
@@ -248,8 +254,8 @@ static void check_node(const struct cap *c)
 
 void history_end(void)
 {
-    if (caller != NULL && !caller_dying && dying_under(caller, caller_table)) {
-        violated("a call began to destroy the pool its caller or its table lives in");
+    if (caller != NULL && !caller_dying && dying_under(caller, caller_process, caller_table)) {
+        violated("a call began to destroy the pool its caller, its process or its table lives in");
     }
 
     record_objects(&objects_after);

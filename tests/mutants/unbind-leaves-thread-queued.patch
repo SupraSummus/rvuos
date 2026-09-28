@@ -9,7 +9,7 @@ Report: thread's account holds more than its cap
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -271,7 +271,7 @@ void sched_unbind(struct cap *bound)
+@@ -266,7 +266,7 @@ void sched_unbind(struct cap *bound)
      }
      *bound = (struct cap){ 0 };
      /* A thread without units holds nothing, so settling empties its account as it takes the thread off its queue. */
@@ -17,4 +17,4 @@ diff --git a/kernel/sched.c b/kernel/sched.c
 +    (void)t;
  }
  
- /* The thread that earns a unit first of those it earns, else NULL, so that a look at each unit meets it once. */
+ /* Settling takes a stopped thread off its queue; syscall_dispatch hands the processor on from a running one. */

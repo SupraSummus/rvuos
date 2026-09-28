@@ -30,10 +30,14 @@ struct thread *boot_create_root(paddr_t boot_pool_base, uint32_t boot_pool_size,
     }
 
     table->nslots = ROOT_CAPTABLE_SLOTS;
-    /* Below the pool's node, as every capability to an object of the pool is. */
+    /*
+     * Below the pool's node, as every capability to an object of the pool is,
+     * so that only a destroy of the boot pool, which is refused, takes the root task's table or process.
+     */
     proc->table = cap_to_object(&table->hdr, RIGHT_ALL);
     cap_attach(&pool->node, &proc->table);
-    thread->proc = v2p(proc);
+    thread->proc = (struct cap){ .type = CAP_HOSTED, .rights = RIGHT_ALL, .a = v2p(proc) };
+    cap_attach(&pool->node, &thread->proc);
     thread->flags = 0;
     thread->frame.regs[REG_SP] = USER_DATA_BASE + USER_DATA_SIZE;
     thread->frame.mepc = USER_CODE_BASE;

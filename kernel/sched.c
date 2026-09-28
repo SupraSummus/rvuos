@@ -269,6 +269,18 @@ void sched_unbind(struct cap *bound)
     thread_settle(t);
 }
 
+/* Settling takes a stopped thread off its queue; syscall_dispatch hands the processor on from a running one. */
+void sched_unhost(struct cap *hosted)
+{
+    struct thread *t = hosted_thread(hosted);
+    if (t->state == THREAD_WAITING) {
+        unwait(t);
+    }
+    t->state = THREAD_STOPPED;
+    *hosted = (struct cap){ 0 };
+    thread_settle(t);
+}
+
 /* The thread that earns a unit first of those it earns, else NULL, so that a look at each unit meets it once. */
 static struct thread *unit_first(uint32_t unit)
 {
@@ -480,17 +492,6 @@ bool sched_forget(struct obj_header *o, bool preempt)
         }
         break;
     }
-    case CAP_THREAD: {
-        /*
-         * The thread is gone, and the notification it waits on may live on in another pool.
-         * Its units went as a node it holds, and with them its place on its queue.
-         */
-        struct thread *t = (struct thread *)o;
-        if (t->state == THREAD_WAITING) {
-            unwait(t);
-        }
-        break;
-    }
     case CAP_IRQ: {
         /* It is gone and will not fire, so it is no source. */
         irq_set_bits((struct irq *)o, 0);
@@ -520,6 +521,7 @@ static void switch_to(struct thread *next)
         kputs("untraced thread\n");
         khalt(6);
     }
+    /* The thread leaving may have lost its process during its call; the one coming has one, since it is ready. */
     if (thread_process(next) != thread_process(current)) {
         process_activate(thread_process(next));
     }

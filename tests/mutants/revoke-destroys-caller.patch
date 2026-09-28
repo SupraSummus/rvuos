@@ -3,7 +3,7 @@ so it destroys the pool the thread runs from, the thread with it,
 and the call returns into a frame that is gone.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
-Report: a call began to destroy the pool its caller or its table lives in
+Report: a call began to destroy the pool its caller, its process or its table lives in
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

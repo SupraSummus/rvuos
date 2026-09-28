@@ -49,7 +49,7 @@ struct obj_header {
  * an only child's is itself, and a root's and an empty slot's is 0.
  * A process's region slots are slots of this type too, CAP_INSTALLED, and leaves of the tree,
  * and so is its table slot, which holds a CAP_CAPTABLE capability,
- * and a thread's units, CAP_BOUND,
+ * and a thread's process, CAP_HOSTED, and its units, CAP_BOUND,
  * and so is a pool's own node, CAP_RETYPED, in the pool's descriptor.
  * For CAP_TIME a is the first unit and b the count, as for CAP_IRQ_LINE.
  */
@@ -81,6 +81,11 @@ struct cap {
  * below which the node hangs. Kernel internal: never in a table.
  */
 #define CAP_BOUND 0x82
+/*
+ * A thread's process, in the thread: a is the process, and the node hangs below
+ * the Process capability the thread was made with. Kernel internal: never in a table.
+ */
+#define CAP_HOSTED 0x83
 
 #define CAPTABLE_MAX_SLOTS 1024
 
@@ -141,6 +146,7 @@ struct process {
  * so the kernel finds the next thread to run without a walk;
  * see DESIGN.md, "Scheduling".
  * A thread bound to no units keeps its state and does not run.
+ * A thread without a process is stopped, and stays so.
  */
 enum {
     THREAD_STOPPED = 0, /* created, or configured and not started */
@@ -157,9 +163,9 @@ enum {
  */
 #define THREAD_UNTRACED 0x1
 
+/* A thread holds its process as a process holds its table, so the two may lie in different pools. */
 struct thread {
     struct obj_header hdr;
-    paddr_t proc;
     uint8_t state;
     uint8_t flags;
     uint8_t queue;      /* the scheduler's queue it waits on, one of QUEUE_*, while READY and not running */
@@ -168,6 +174,7 @@ struct thread {
     /* The notification's waiters while WAITING, the scheduler's queue while it waits on one. */
     paddr_t queue_next;
     paddr_t queue_prev;
+    struct cap proc;    /* CAP_HOSTED, or CAP_NONE once the process is taken */
     struct cap time;    /* CAP_BOUND, or CAP_NONE while the thread is bound to no units */
     /*
      * Its account at the tick stamp, in TICK_PARTS parts of a tick,
@@ -199,7 +206,7 @@ struct notification {
  * An Irq signals a notification when its interrupt line fires:
  * bound at creation to a notification in its own pool,
  * armed with the bits it will signal, and disarmed by signalling.
- * The notification dies with the Irq's pool, as a thread's process does;
+ * The notification dies with the Irq's pool;
  * the link is not checked on use.
  * On a line of the controller, disarmed means masked there:
  * the line stays quiet until the driver arms the Irq again,
@@ -226,7 +233,7 @@ _Static_assert(sizeof(struct pool) == 56, "object layout");
 _Static_assert(sizeof(struct pmp_image) == 4 + 5 * PMP_MAX_ENTRIES, "object layout");
 _Static_assert(sizeof(struct process) == 8 + 24 * (1 + PROCESS_REGION_SLOTS) + sizeof(struct pmp_image),
                "object layout");
-_Static_assert(sizeof(struct thread) == 36 + sizeof(struct cap) + sizeof(struct trap_frame), "object layout");
+_Static_assert(sizeof(struct thread) == 32 + 2 * sizeof(struct cap) + sizeof(struct trap_frame), "object layout");
 _Static_assert(sizeof(struct notification) == 16, "object layout");
 _Static_assert(sizeof(struct irq) == 24, "object layout");
 
@@ -257,10 +264,12 @@ static inline struct pool *obj_pool(const struct obj_header *o) { return p2v(o->
 
 _Static_assert(offsetof(struct process, slots) == offsetof(struct process, table) + sizeof(struct cap),
                "a process's table slot and region slots are one array of nodes");
+_Static_assert(offsetof(struct thread, time) == offsetof(struct thread, proc) + sizeof(struct cap),
+               "a thread's process and units are one array of nodes");
 
 /*
  * The nodes of the derivation tree an object holds, as one array, and how many:
- * a table's slots, a process's table slot and region slots, a thread's units, a pool's own node.
+ * a table's slots, a process's table slot and region slots, a thread's process and units, a pool's own node.
  * Other objects hold none.
  */
 static inline struct cap *obj_nodes(struct obj_header *o, uint32_t *count)
@@ -273,8 +282,8 @@ static inline struct cap *obj_nodes(struct obj_header *o, uint32_t *count)
         *count = 1 + PROCESS_REGION_SLOTS;
         return &((struct process *)o)->table;
     case CAP_THREAD:
-        *count = 1;
-        return &((struct thread *)o)->time;
+        *count = 2;
+        return &((struct thread *)o)->proc;
     case CAP_POOL:
         *count = 1;
         return &((struct pool *)o)->node;
@@ -293,13 +302,27 @@ static inline struct captable *process_table(const struct process *p)
     struct captable *t = p2v(p->table.a);
     return t->hdr.type == CAP_CAPTABLE ? t : NULL;
 }
-static inline struct process *thread_process(const struct thread *t) { return p2v(t->proc); }
+/* The process a thread runs in, or NULL once it was taken. */
+static inline struct process *thread_process(const struct thread *t)
+{
+    return t->proc.type == CAP_HOSTED ? p2v(t->proc.a) : NULL;
+}
+/* The thread whose process this is. */
+static inline struct thread *hosted_thread(struct cap *n)
+{
+    return (struct thread *)((char *)n - offsetof(struct thread, proc));
+}
 /* The thread whose units these are. */
 static inline struct thread *bound_thread(struct cap *n)
 {
     return (struct thread *)((char *)n - offsetof(struct thread, time));
 }
-static inline struct captable *thread_table(const struct thread *t) { return process_table(thread_process(t)); }
+/* The table a thread names capabilities in, or NULL once its process or the process's table was taken. */
+static inline struct captable *thread_table(const struct thread *t)
+{
+    const struct process *p = thread_process(t);
+    return p != NULL ? process_table(p) : NULL;
+}
 static inline struct notification *irq_notification(const struct irq *i) { return p2v(i->ntfn); }
 
 /* True if the Irq will signal; a controller's line is unmasked exactly then. */
@@ -437,6 +460,7 @@ bool cap_delete(struct cap *node, bool preempt);
 /*
  * Clear every node below one, leaving the node itself; preemptible as cap_delete is.
  * A pool's own node below it is a pool to destroy, which pool_destroy does.
+ * It ends early, and true, once it took the running thread's table or process.
  */
 bool cap_revoke_below(struct cap *node, bool preempt);
 
@@ -575,6 +599,13 @@ void sched_bind(struct thread *t, uint32_t first, uint32_t count, uint8_t rights
 void sched_unbind(struct cap *bound);
 
 /*
+ * Clear a thread's process the tree has already let go of: the thread stops,
+ * leaving its queue or its notification's waiters,
+ * and the running one gives the processor up as its call returns.
+ */
+void sched_unhost(struct cap *hosted);
+
+/*
  * Fill the account of every thread with units, and put each on the queue that puts it on.
  * The boot calls it once the root thread is bound, and OP_DEBUG_TRACE does.
  */
@@ -656,10 +687,9 @@ void sched_wait(struct thread *t, struct notification *ntfn);
  * Before an object of a pool that goes is zeroed, undo what it left in the rest of the kernel:
  * a notification wakes every thread waiting on it
  * with KERR_INVALID_CAP and no bits, because the object is gone,
- * a thread leaves the notification it waits on,
  * and an Irq is disarmed and its line masked and unbound.
- * A pool takes its objects newest first, so a thread goes before its process
- * and an Irq before its notification.
+ * A thread has nothing left to undo: it stopped as the nodes it holds were cleared.
+ * A pool takes its objects newest first, so an Irq goes before its notification.
  * The waiters wake one step at a time, and with preempt the walk may stop between two:
  * false then, and the next call goes on with the ones still waiting.
  */

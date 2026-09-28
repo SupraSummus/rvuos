@@ -320,12 +320,21 @@ static uint8_t queue_owed(const struct thread *t)
 
 static void check_thread(const struct thread *t)
 {
-    struct obj_header *p = object_find(t->proc);
-    if (p == NULL || p->type != CAP_PROCESS) {
-        fail("thread has no live process", v2p(t), t->proc, 0);
-    }
-    if (p->pool != t->hdr.pool) {
-        fail("thread and its process live in different pools", v2p(t), 0, 0);
+    /*
+     * The sweep clears a thread's process with the process, in whatever pool,
+     * and a thread without one is stopped; the tree check reads the node's links.
+     */
+    const struct cap *h = &t->proc;
+    if (h->type != CAP_NONE) {
+        struct obj_header *p = object_find(h->a);
+        if (h->type != CAP_HOSTED || p == NULL || p->type != CAP_PROCESS || h->b != 0 || h->index != 0) {
+            fail("thread's process slot names no live process", v2p(t), h->type, h->a);
+        }
+        if (h->child != 0) {
+            fail("something is derived from a thread's process", v2p(t), h->child, 0);
+        }
+    } else if (t->state != THREAD_STOPPED) {
+        fail("thread without a process is not stopped", v2p(t), t->state, 0);
     }
     if (t->flags & ~(uint8_t)THREAD_UNTRACED) {
         fail("thread has unknown flags", v2p(t), t->flags, 0);
@@ -685,7 +694,7 @@ static void check_captable(const struct captable *table)
  *
  * Its nodes are the slots of every live table,
  * the table slot and region slots of every live process
- * and the units of every live thread,
+ * and the process and units of every live thread,
  * linked by physical address and never checked on use,
  * so every link must land on a live node and the shape must be exactly a forest:
  * the children of a node form one ring that closes through the node,
@@ -696,7 +705,7 @@ static void check_captable(const struct captable *table)
  * A node is derived from its parent: the same object with no more rights,
  * a range within the parent's with no more rights,
  * or an object built on the parent's range, a pool on a region, an Irq on a line,
- * a thread's units on the units it was bound through,
+ * a thread's process on a capability to it, a thread's units on the units it was bound through,
  * or the counter's block, or a region installed from it, below the clock.
  */
 
@@ -752,10 +761,11 @@ static bool node_range(const struct cap *n, uint32_t *base, uint32_t *size)
     }
 }
 
+/* A node naming an object built in a pool: a capability to one, or a thread's hold on its process. */
 static bool is_object_type(uint8_t type)
 {
     return type == CAP_CAPTABLE || type == CAP_PROCESS || type == CAP_THREAD ||
-           type == CAP_NOTIFICATION || type == CAP_IRQ;
+           type == CAP_NOTIFICATION || type == CAP_IRQ || type == CAP_HOSTED;
 }
 
 static bool derived_from(const struct cap *c, const struct cap *p)
@@ -795,6 +805,10 @@ static bool derived_from(const struct cap *c, const struct cap *p)
     /* A thread's units lie among those it was bound through, and the first of them does even for none. */
     if (c->type == CAP_BOUND && p->type == CAP_TIME) {
         return narrower && c->a - p->a < p->b && c->b <= p->b - (c->a - p->a);
+    }
+    /* A thread's process is the process it was made with. */
+    if (c->type == CAP_HOSTED && p->type == CAP_PROCESS) {
+        return narrower && c->a == p->a;
     }
     /* Below a pool's node lies every capability to the pool and to its objects. */
     if (p->type == CAP_RETYPED || p->type == CAP_POOL) {

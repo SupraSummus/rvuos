@@ -1,0 +1,22 @@
+Taking a waiting thread's process stops it but leaves it on the notification's waiters,
+so a signal would wake a thread that has no process to run in,
+and a destroy of the thread's pool would leave the ring leading into memory that is no longer a thread;
+a notification queues only the threads waiting on it.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: queue holds a thread it is not for
+Report: runnable thread waits on something
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -273,9 +273,6 @@ void sched_unbind(struct cap *bound)
+ void sched_unhost(struct cap *hosted)
+ {
+     struct thread *t = hosted_thread(hosted);
+-    if (t->state == THREAD_WAITING) {
+-        unwait(t);
+-    }
+     t->state = THREAD_STOPPED;
+     *hosted = (struct cap){ 0 };
+     thread_settle(t);
