@@ -71,7 +71,9 @@ When a decision changes, edit the design document in the same commit
 as the code that implements the change.
 Open questions are listed explicitly in the design document
 rather than left implicit in the code.
-Work items go to `TODO.md`.
+Work items go to `TODO.md`,
+and leave it in the commit that finishes them;
+it holds no record of what was done.
 
 `MANUAL.md` is the user-facing description of the kernel:
 what it offers a program, the system call reference,

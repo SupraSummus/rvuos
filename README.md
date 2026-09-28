@@ -102,4 +102,4 @@ The root task's logger thread waits on that line and on the UART's,
 and carries the log out one byte per transmitter interrupt;
 `DESIGN.md`, "The kernel log", says why.
 
-No driver runs in the kernel; the roadmap in `TODO.md` says what comes next.
+No driver runs in the kernel; `TODO.md` says what comes next.
