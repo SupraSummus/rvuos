@@ -41,7 +41,7 @@ import sys
 import tempfile
 
 # Must match kernel/board/qemu/board.h and include/rvuos/abi.h.
-INPUT_BASE = 0x80210000
+INPUT_BASE = 0x80120000
 REPLAY_MAGIC = 0x5A465652
 RECORD_SIZE = 16
 MAX_RECORDS = 256

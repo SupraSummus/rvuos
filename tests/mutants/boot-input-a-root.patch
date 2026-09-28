@@ -1,0 +1,20 @@
+The root task's input frame is left a root, as every frame of its memory was
+before that memory was an Untyped,
+so memory that may become a pool again carries a frame that does not lie below it,
+and revoking below it would leave the input mapped.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: memory that may hold kernel objects overlaps a node not above or below it
+
+diff --git a/kernel/boot.c b/kernel/boot.c
+--- a/kernel/boot.c
++++ b/kernel/boot.c
+@@ -100,7 +100,7 @@ struct thread *boot_create_root(void)
+         }
+         bool pooled = i == BOOT_CAP_CAPTABLE || i == BOOT_CAP_PROCESS || i == BOOT_CAP_THREAD ||
+                       i == BOOT_CAP_POOL;
+-        bool own = i == BOOT_CAP_CODE || i == BOOT_CAP_DATA || i == BOOT_CAP_INPUT;
++        bool own = i == BOOT_CAP_CODE || i == BOOT_CAP_DATA;
+         if (own && !napot_block(boot[i].a, boot[i].b)) {
+             kpanic("boot layout is not made of NAPOT blocks");
+         }

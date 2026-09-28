@@ -53,8 +53,8 @@ grep -q 'root: derivation ok' "$log" \
 grep -q 'child: lease revoked here too' "$log" \
     || fail "the revoke did not reach the derived capability in the other process's table"
 grep -q 'child: pool made' "$log" || fail "the child could not pool the lent memory"
-grep -q 'child: cannot destroy the boot pool' "$log" \
-    || fail "a thread destroyed the pool the root task lives in"
+grep -q 'child: cannot destroy its own pool' "$log" \
+    || fail "a thread destroyed the pool it lives in"
 grep -q 'root: cascade ok' "$log" \
     || fail "revoking the lent memory did not destroy the pool the child made of it"
 grep -q 'root: timer ok' "$log" \
@@ -77,6 +77,8 @@ grep -q 'the idle line stays quiet: ok' "$log" \
     || fail "an armed line nothing raises signalled"
 grep -q 'root: irq ok' "$log" \
     || fail "destroying the irq's pool did not free its line"
+grep -q 'root: handover ok' "$log" \
+    || fail "a successor given everything the root task held could not destroy the root task and take its place"
 # The logger carried the kernel's banner and the root task's output to the UART itself,
 # one byte per interrupt, before the halt wrote the log out.
 # The fault comes right after the last lines, so those the halt may be first to carry;

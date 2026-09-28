@@ -109,6 +109,35 @@ static void attach_beside(struct cap *beside, struct cap *n)
     splice_after(beside, n, n);
 }
 
+void cap_move(struct cap *from, struct cap *to)
+{
+    /*
+     * Three links at most name a node from outside it:
+     * its predecessor's next, or its parent's child when it is first,
+     * the previous link of the sibling after it, the first one when it is last,
+     * and the link up from its last child.
+     * An only child is its own predecessor and successor, and a root is in no ring.
+     */
+    *to = *from;
+    if (from->next != LINK_UP) {
+        struct cap *pred = node(from->prev);
+        if (pred == from) {
+            to->prev = v2p(to);
+        } else {
+            ring_next(from)->prev = v2p(to);
+        }
+        if (pred->next & LINK_UP) {
+            node(pred->next)->child = v2p(to);
+        } else {
+            pred->next = v2p(to);
+        }
+    }
+    if (from->child != 0) {
+        node(node(from->child)->prev)->next = v2p(to) | LINK_UP;
+    }
+    *from = (struct cap){ 0 };
+}
+
 int cap_store(struct captable *table, uint32_t slot, const struct cap *cap, struct cap *parent)
 {
     int err = cap_slot_free(table, slot);

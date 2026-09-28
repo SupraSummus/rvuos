@@ -43,9 +43,12 @@
  * where a record on the first thread can destroy both at once.
  * The second table holds a copy of every slot the first one holds,
  * so a record means the same on whichever thread performs it,
- * with one exception: an Untyped is derived, never copied,
- * so the second thread's BOOT_CAP_FREE_RAM is an Untyped of its own, cut from the first one's.
- * Revoking the first one's destroys the second thread's pool, and what it made of its own.
+ * with two exceptions, since an Untyped is derived, never copied:
+ * the second thread's BOOT_CAP_FREE_RAM is an Untyped of its own, cut from the first one's,
+ * and its BOOT_CAP_ROOT_RAM is empty, since the first one's has made all it can.
+ * Revoking the first one's free RAM destroys the second thread's pool, and what it made of its own.
+ * The first thread lives in the boot pool, of which the second holds a copy,
+ * so a record on the second thread can destroy the first, as a successor can its root task.
  */
 
 #include "rvuos/abi.h"
@@ -68,12 +71,12 @@ static inline int replay_passes(const struct replay_record *r, unsigned me)
 #define REPLAY_LOG_SLOT 6
 
 /* Capability slots the setup fills, above the boot capabilities, in both tables. */
-#define REPLAY_CAP_NOTIFY  16
-#define REPLAY_CAP_THREAD  17 /* the second thread */
-#define REPLAY_CAP_POOL    18 /* the second thread's pool */
-#define REPLAY_CAP_TABLE   19 /* the second thread's table */
-#define REPLAY_CAP_PROCESS 20 /* the second thread's process */
-#define REPLAY_CAP_SCRATCH 21 /* the second thread's Untyped on its way over; empty afterwards */
+#define REPLAY_CAP_NOTIFY  17
+#define REPLAY_CAP_THREAD  18 /* the second thread */
+#define REPLAY_CAP_POOL    19 /* the second thread's pool */
+#define REPLAY_CAP_TABLE   20 /* the second thread's table */
+#define REPLAY_CAP_PROCESS 21 /* the second thread's process */
+#define REPLAY_CAP_SCRATCH 22 /* the second thread's Untyped on its way over; empty afterwards */
 _Static_assert(REPLAY_CAP_NOTIFY == BOOT_CAP_COUNT, "the setup's slots follow the boot capabilities");
 /* The third thread, stopped until a record resumes it: the last slot, which the corpus leaves alone. */
 #define REPLAY_CAP_THIRD   (REPLAY_TABLE_SLOTS - 1)
@@ -83,15 +86,15 @@ _Static_assert(REPLAY_CAP_NOTIFY == BOOT_CAP_COUNT, "the setup's slots follow th
  * and its Untyped, the next block of its size.
  */
 #define REPLAY_POOL_SIZE    0x1000u
-#define REPLAY_TABLE_SLOTS  64
+#define REPLAY_TABLE_SLOTS  ROOT_TABLE_SLOTS
 #define REPLAY_UNTYPED_SIZE 0x100000u
 
 /*
  * The second and third threads' stacks, in the root task's data region below the root's.
  * host/shim.c checks that they lie inside that region.
  */
-#define REPLAY_THREAD_SP 0x80208000u
-#define REPLAY_THIRD_SP  0x8020c000u
+#define REPLAY_THREAD_SP 0x80118000u
+#define REPLAY_THIRD_SP  0x8011c000u
 
 #define REPLAY_COPY(slot) { OP_CAP_COPY, 0, REPLAY_CAP_TABLE, slot, slot, RIGHT_ALL }
 

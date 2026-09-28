@@ -11,9 +11,6 @@
 #include "timer.h"
 #include "trap.h"
 
-extern char __boot_pool_start[];
-extern char __boot_pool_end[];
-
 void kmain(void)
 {
     board_init();
@@ -31,9 +28,7 @@ void kmain(void)
         kpanic("need at least four PMP entries");
     }
 
-    struct thread *root = boot_create_root(
-        v2p(__boot_pool_start), (uint32_t)(__boot_pool_end - __boot_pool_start),
-        FREE_RAM_BASE, FREE_RAM_SIZE);
+    struct thread *root = boot_create_root();
     sched_start(root);
     process_activate(thread_process(root));
 

@@ -91,6 +91,11 @@ What rvuos is not:
   and every capability anywhere that named one of those objects.
   Revoking below an Untyped destroys every pool made of it,
   however far it was lent on, and the memory comes back to the Untyped.
+- **A root task like any other process.**
+  The root task starts with the capabilities to the whole machine and nothing else:
+  it lives in memory it holds an Untyped to, and the kernel names it nowhere after boot.
+  So it can move everything it holds to a successor, which destroys it and takes its place,
+  as a bootloader chains to the next stage; see section 7.
 - **Plain binaries.**
   A program depends on the register ABI
   and on what its creator hands it:
@@ -162,11 +167,13 @@ Memory map:
 |---|---|---|
 | `0x0200BFF8` | 8 B | the CLINT's `mtime`, 10 MHz, read only through `BOOT_CAP_CLOCK` |
 | `0x10000000` | 256 B | 16550 UART registers, granted to the root task |
-| `0x80000000` to `0x800FF000` | just under 1 MiB | kernel code, data, stack and the boot pool |
+| `0x80000000` to `0x800FF000` | just under 1 MiB | kernel code, data and stack |
 | `0x800FF000` | 4 KiB | the kernel log: a 32-byte header and the ring |
+| `0x80100000` | 256 KiB | the root task's memory, granted to it as an Untyped with all rights, which has made the four ranges below and makes nothing more |
 | `0x80100000` | 64 KiB | root task code, read and execute |
-| `0x80200000` | 64 KiB | root task data and stack, read and write |
-| `0x80210000` | 64 KiB | replay input placed by QEMU's loader, read only |
+| `0x80110000` | 64 KiB | root task data and stack, read and write |
+| `0x80120000` | 64 KiB | replay input placed by QEMU's loader, read only |
+| `0x80130000` | 4 KiB | the boot pool |
 | `0x80400000` | 4 MiB | free RAM, granted to the root task as an Untyped with all rights |
 
 Every range granted to the root task is a block, see section 5.4,
@@ -195,11 +202,13 @@ Memory map:
 |---|---|---|
 | `0x20001C08` | 8 B | the CLINT's `UTIME`, a read-only copy of `mtime` at the CPU clock, through `BOOT_CAP_CLOCK` |
 | `0x6000F000` | 256 B | USB Serial/JTAG controller registers, granted to the root task |
-| `0x40800000` to `0x4081F000` | just under 128 KiB | kernel code, data, stack and the boot pool |
+| `0x40800000` to `0x4081F000` | just under 128 KiB | kernel code, data and stack |
 | `0x4081F000` | 4 KiB | the kernel log: a 32-byte header and the ring |
+| `0x40820000` | 128 KiB | the root task's memory, granted to it as an Untyped with all rights, which has made the four ranges below and makes nothing more |
 | `0x40820000` | 64 KiB | root task code, read and execute |
 | `0x40830000` | 32 KiB | root task data and stack, read and write |
 | `0x40838000` | 4 KiB | input region, read only; nothing fills it yet |
+| `0x40839000` | 4 KiB | the boot pool |
 | `0x40840000` | 256 KiB | free RAM, granted to the root task as an Untyped with all rights |
 
 Interrupt lines:
@@ -349,7 +358,7 @@ Rights are three bits:
 | Bit | Value | Frame, Untyped | Other types |
 |---|---|---|---|
 | `RIGHT_R` | 1 | read | `Notification`: wait |
-| `RIGHT_W` | 2 | write | control the object: allocate, install, configure, signal, set, bind, copy into a table |
+| `RIGHT_W` | 2 | write | control the object: allocate, install, configure, signal, set, bind, copy or move into a table |
 | `RIGHT_X` | 4 | execute | `Time`: the threads bound through it run on spare time |
 
 Every operation that produces a capability
@@ -357,9 +366,9 @@ puts it into a slot of the caller's own table,
 named by an argument, and that slot must be empty.
 A process needs no capability to receive into its own table.
 The `CapTable` capability exists for writing into a table:
-a parent fills a child's table with `OP_CAP_COPY` or `OP_CAP_DERIVE` before starting it,
+a parent fills a child's table with `OP_CAP_COPY`, `OP_CAP_DERIVE` or `OP_CAP_MOVE` before starting it,
 and a process that holds a capability to its own table
-can copy within it, clear its own slots, and revoke below them.
+can copy and move within it, clear its own slots, and revoke below them.
 
 Every capability remembers what it was derived from,
 and that is what `OP_CAP_REVOKE` follows.
@@ -369,6 +378,7 @@ The tree grows in these ways:
 |---|---|
 | `OP_CAP_DERIVE` | below the source |
 | `OP_CAP_COPY` | beside the source, under the source's parent; a copy of a root is a root; an Untyped is never copied |
+| `OP_CAP_MOVE` | where the source hung, which it leaves empty, with what hung below the source below it |
 | `OP_FRAME_CARVE`, `OP_IRQ_CARVE`, `OP_TIME_CARVE`, `OP_CLOCK_FRAME` | below the invoked capability |
 | `OP_UNTYPED_RETYPE` of a frame or an Untyped | below the invoked Untyped |
 | `OP_UNTYPED_RETYPE` of a pool | below the pool's own node, which hangs below the invoked Untyped |
@@ -378,7 +388,7 @@ The tree grows in these ways:
 | `OP_POOL_ALLOC` of a `Thread` | and the thread's hold on its process below the `Process` capability |
 | `OP_IRQ_BIND` | below the `KernelPool` capability; the line goes with what was derived from it |
 | `OP_TIME_BIND` | the thread's hold on its units hangs below the invoked `Time` capability |
-| boot | nowhere, but for the capabilities to the boot pool and its objects |
+| boot | nowhere, but for the root task's frames and the boot pool's own node, below `BOOT_CAP_ROOT_RAM`, and the capabilities to the boot pool and its objects, below that node |
 
 `OP_CAP_REVOKE` on a slot clears everything below it, in every table and every process:
 derived capabilities, their copies, what was derived from those,
@@ -390,6 +400,8 @@ The slot itself stays.
 Revoking a copy takes nothing from the original, and the other way round;
 to take both back, revoke below what they were both derived from.
 So derive to lend, and copy to keep a second handle to what you hold.
+A copy cannot take back what was derived from its source, since that hangs below the source and not below the copy;
+to hand over a capability together with that power, move it.
 An Untyped can only be derived, and only while nothing was made of it:
 the derived one has the whole of it, and the source makes nothing until that one is revoked.
 
@@ -400,6 +412,7 @@ so what a process handed out through its table outlives the process,
 below whatever the process derived it from.
 
 Copying and deriving both apply a rights mask, so rights only ever narrow.
+A move keeps the rights as they were, since what hangs below may hold all of them.
 
 Slot 0 of the root task's table is left empty on purpose,
 so that an uninitialised index fails.
@@ -543,7 +556,9 @@ The call fails with `KERR_STATE`
 when the calling thread, its process or the process's table lives in the pool,
 so a thread cannot destroy what it runs on
 nor the table it names capabilities in.
-The boot pool holds the root task and is never destroyed.
+The boot pool holds the root task, which therefore cannot destroy it,
+but any other thread holding a `KernelPool` capability to it can, and the root task goes with it;
+lend a pool made for the borrower rather than the one you live in.
 A revoke below an Untyped fails the same way
 when the calling thread, its process or its table lies in the Untyped's memory.
 A destroy is restartable: it may stop for an interrupt and go on when the call is made again,
@@ -977,6 +992,18 @@ The new capability hangs below the source.
 An Untyped can be derived, and only while nothing was made of it (`KERR_STATE`);
 the source's watermark moves to its end, and the derived one starts at its base.
 
+**`OP_CAP_MOVE` (18).**
+`a1` = destination slot in the invoked table,
+`a2` = source slot in the caller's table, which must be filled (`KERR_INVALID_CAP`).
+The destination must be empty (`KERR_SLOT_IN_USE`), so a slot does not move onto itself.
+The capability goes to the destination with its rights, and the source is left empty.
+It keeps its place in the derivation tree, section 5.2:
+it hangs below what the source hung below, and what hung below the source hangs below it,
+so a revoke through it takes what one through the source would have,
+and a revoke that would have taken the source takes it.
+Any type moves, an Untyped with its watermark,
+and so does the `CapTable` capability the call is made through.
+
 **`OP_CAP_DELETE` (4).**
 `a1` = slot in the invoked table.
 Clears it; what hung below it now hangs below the slot's parent,
@@ -1053,8 +1080,7 @@ The new capability carries all rights and hangs below the invoked `KernelPool` c
 No arguments.
 Does everything section 5.5 lists,
 and the memory goes back to the Untyped the pool was made of.
-`KERR_STATE` if the calling thread, its process or the process's table lives in the pool,
-and for the boot pool.
+`KERR_STATE` if the calling thread, its process or the process's table lives in the pool.
 The call may be made again, section 6.1.
 
 ### 6.7 Operations on `Process`
@@ -1205,6 +1231,7 @@ only a wait, the tick, or a revoke that takes its own process, section 6.4, take
 | 15 | `OP_NOTIFY_WAIT` | `Notification` |
 | 16 | `OP_POOL_DESTROY` | `KernelPool` |
 | 17 | `OP_DEBUG_TICK` | `Debug` |
+| 18 | `OP_CAP_MOVE` | `CapTable` |
 | 19 | `OP_IRQ_CARVE` | `IrqLine` |
 | 20 | `OP_IRQ_BIND` | `IrqLine` |
 | 21 | `OP_IRQ_SET` | `Irq` |
@@ -1223,14 +1250,14 @@ only a wait, the tick, or a revoke that takes its own process, section 6.4, take
 
 The image in RAM contains the kernel followed by the root task.
 The kernel builds the root process by hand in the **boot pool**,
-4 KiB reserved by the linker,
+4 KiB of the root task's own memory,
 and drops into user mode with:
 
 - the program counter at the start of the code region, `0x80100000` on QEMU,
-- the stack pointer at the top of the data region, `0x80210000` on QEMU,
+- the stack pointer at the top of the data region, `0x80120000` on QEMU,
 - region slot 0: the code region, read and execute,
 - region slot 1: the data region, read and write,
-- a capability table of 64 slots, filled as below.
+- a capability table of `ROOT_TABLE_SLOTS`, 64, filled as below.
 
 | Slot | Constant | Capability | Rights |
 |---|---|---|---|
@@ -1250,8 +1277,9 @@ and drops into user mode with:
 | 13 | `BOOT_CAP_TIMER_LINES` | `IrqLine`: every timer line, `TIMER_LINES` of them | write |
 | 14 | `BOOT_CAP_CLOCK` | `Clock`: the machine's counter | all |
 | 15 | `BOOT_CAP_TIME` | `Time`: every unit of time, `TIME_UNITS` of them, all earned by the root task's thread | write, execute |
+| 16 | `BOOT_CAP_ROOT_RAM` | `Untyped`: the root task's own memory, its code, data and input frames and the boot pool, all made already | all |
 
-`BOOT_CAP_COUNT` is 16; a root task puts its own slots from there upwards.
+`BOOT_CAP_COUNT` is 17; a root task puts its own slots from there upwards.
 
 The root task's own table, process and thread take about 2.1 KiB of the boot pool,
 so roughly 1.9 KiB remain for objects the root task allocates from `BOOT_CAP_POOL`.
@@ -1259,6 +1287,16 @@ Anything larger goes into a pool the root task makes out of free RAM.
 The capabilities to the boot pool, its table, process and thread
 hang below the boot pool's own node, not below `BOOT_CAP_POOL`,
 so revoking below `BOOT_CAP_POOL` takes only what was allocated through it.
+
+`BOOT_CAP_ROOT_RAM` is an Untyped over the root task's own memory,
+with its code, data and input frames and the boot pool's own node below it
+and its watermark at its end, so it makes nothing until those are gone.
+The root task cannot revoke below it, since it lives there, and nothing else sets it apart:
+a process holding its capabilities can do all it could.
+So the root task can hand its place over:
+it moves every capability into a successor's table with `OP_CAP_MOVE`, each to the same slot, and waits,
+and the successor stops the root task's thread and destroys the boot pool, and the root task with it.
+`user/init.c` ends its demo this way; `DESIGN.md`, "The root task is its capabilities", gives the steps.
 
 Device ranges are frames, granted read and write, never execute,
 the counter behind `BOOT_CAP_CLOCK` read only,
@@ -1280,7 +1318,7 @@ and embedded into the kernel image by the Makefile.
 Constraints of the current linker script:
 
 - code and read-only data live in the read-execute region, at `0x80100000` on QEMU,
-- zero-initialised data and the stack live in the read-write region, at `0x80200000` on QEMU,
+- zero-initialised data and the stack live in the read-write region, at `0x80110000` on QEMU,
 - **initialised data is forbidden**: nobody would copy it into the data region,
   and the link fails if `.data` is not empty,
 - `user/start.S` zeroes `.bss`, calls `main`,
@@ -1472,8 +1510,8 @@ and `tests/mutants/` holds one planted bug per invariant.
 | PMP entries the kernel uses | 16, or `PMP_MAX_ENTRIES` | Makefile |
 | minimum PMP entries to boot | 4 | `kernel/main.c` |
 | slots per `CapTable` | 1 to 1024 | `CAPTABLE_MAX_SLOTS` |
-| root task's table | 64 slots | `kernel/boot.c` |
-| boot pool | 4 KiB | `kernel/kernel.ld.S` |
+| root task's table | 64 slots | `ROOT_TABLE_SLOTS` |
+| boot pool | 4 KiB | `BOOT_POOL_SIZE` in `kernel/layout.h` |
 | smallest pool | 64 bytes | `POOL_MIN_SIZE` |
 | object alignment | 8 bytes | `OBJ_ALIGN` |
 | notification bits | 32 | the word size |

@@ -1,11 +1,14 @@
 A destroy that clears the capabilities to the pool and its objects
 but not the slots its tables hold
 leaves those slots in the rings of slots that survive,
-and those rings then lead into memory that is the Untyped's again.
+and those rings then lead into memory that is the Untyped's again,
+or, where a pool's own node hangs below an Untyped one of its tables holds, as the boot pool's does,
+lead the destroy's last step out of RAM.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
 Report: child link to a slot that is not a live, filled one
-Report: link to a slot that is not a live, filled one
+Report: parent's ring does not reach the slot
+Report: the kernel reached outside RAM
 
 diff --git a/kernel/pool.c b/kernel/pool.c
 --- a/kernel/pool.c

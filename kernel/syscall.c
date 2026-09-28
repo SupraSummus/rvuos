@@ -100,6 +100,19 @@ static int op_captable(struct thread *t, const struct cap *cap,
         }
         return err;
     }
+    case OP_CAP_MOVE: {
+        /* The node goes where the source stood, so the same revokes reach it and it reaches the same nodes. */
+        struct cap src;
+        int err = cap_lookup(thread_table(t), arg[2], &src);
+        if (err != KERR_OK) {
+            return err;
+        }
+        err = cap_slot_free(table, arg[1]);
+        if (err == KERR_OK) {
+            cap_move(slot_node(t, arg[2]), &table->slots[arg[1]]);
+        }
+        return err;
+    }
     case OP_CAP_DELETE:
         return cap_clear(table, arg[1]);
     case OP_CAP_REVOKE: {
@@ -265,8 +278,8 @@ static int bound_notification(struct thread *t, uint32_t slot, const struct pool
 
 static int op_pool_destroy(struct thread *t, uint32_t slot, struct pool *pool)
 {
-    /* The boot pool holds the root task. */
-    if (pool == boot_pool || holds_caller(t, pool_base(pool), pool->size)) {
+    /* The caller keeps what it runs on, the root task in the boot pool as anyone. */
+    if (holds_caller(t, pool_base(pool), pool->size)) {
         return KERR_STATE;
     }
     /* The invoked capability goes last, so a call made again finds the pool through it. */

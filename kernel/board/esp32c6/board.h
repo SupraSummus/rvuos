@@ -12,12 +12,15 @@
  * so everything the image carries must lie below that;
  * the kernel takes the whole of RAM once it runs.
  * The kernel owns [RAM_BASE, USER_CODE_BASE).
- * The root task's code, data and input regions follow,
+ * The root task's memory follows, one block holding its code, data and input regions
+ * and the boot pool its kernel objects live in,
  * and the upper half of RAM is handed to the root task as free RAM.
  * Each is a block aligned to its own size; what lies in none of them is left unused.
  */
 #define RAM_BASE       U32(0x40800000)
 #define RAM_SIZE       U32(0x00080000)
+#define ROOT_RAM_BASE  U32(0x40820000)
+#define ROOT_RAM_SIZE  U32(0x00020000)
 #define USER_CODE_BASE U32(0x40820000)
 #define USER_CODE_SIZE U32(0x00010000)
 #define USER_DATA_BASE U32(0x40830000)
@@ -25,6 +28,7 @@
 /* Nothing loads replay input here yet; the region keeps the root task's grants the same. */
 #define INPUT_BASE     U32(0x40838000)
 #define INPUT_SIZE     U32(0x00001000)
+#define BOOT_POOL_BASE U32(0x40839000)
 #define FREE_RAM_BASE  U32(0x40840000)
 #define FREE_RAM_SIZE  U32(0x00040000)
 

@@ -89,8 +89,9 @@ Design decisions behind these items live in `DESIGN.md`.
    - Whether `OP_POOL_DESTROY` should go.
      A pool made of an Untyped of its own size is destroyed by revoking that Untyped,
      as the demo does for the pool it rebuilds;
-     without the operation, the capability a destroy keeps for last
-     and the boot pool's refusal by name go too.
+     without the operation, the capability a destroy keeps for last would go too.
+     The boot pool's refusal by name went with `BOOT_CAP_ROOT_RAM`,
+     so the root task is destroyed as any process is, by its pool or by the memory under it.
    - Revoking below a line capability takes the line back only while it is unbound.
      A bound line could keep its capability, marked as the binding one,
      whose clearing unbinds the `Irq`, which its pool keeps inert until it goes;
@@ -193,9 +194,11 @@ Design decisions behind these items live in `DESIGN.md`.
   which is now most of what a mutant costs `make mutants`.
   A driver that replays several inputs per boot would need the kernel back to its boot state in between.
 - The seeds under `tests/seeds` are binary and were written by hand.
-  Moving `BOOT_CAP_LOG` in, and `BOOT_CAP_TIMER_LINES`, `BOOT_CAP_CLOCK` and `BOOT_CAP_SHARES`, now `BOOT_CAP_TIME`, after it,
+  Moving `BOOT_CAP_LOG` in, and `BOOT_CAP_TIMER_LINES`, `BOOT_CAP_CLOCK`, `BOOT_CAP_SHARES`, now `BOOT_CAP_TIME`,
+  and `BOOT_CAP_ROOT_RAM` after it,
   each took a one-off script that knew which argument of which operation is a slot,
-  run over the corpus too the last three times.
+  run over the corpus too the last four times;
+  the last was checked by replaying every input on the kernels before and after and comparing the statuses.
   A generator in the repository, one line per record with the names from `rvuos/abi.h`,
   would make the seeds readable and the next renumbering a rebuild;
   replay slots that start a few above `BOOT_CAP_COUNT` would spare the next one.
@@ -268,6 +271,10 @@ Design decisions behind these items live in `DESIGN.md`.
 - The clock is untried on the ESP32-C6:
   `make BOARD=esp32c6 test` has to print "root: clock ok", which needs user mode to read `UTIME`,
   and "root: period ok", which needs the tick to keep pace with the counter there too.
+- The handover is untried on the ESP32-C6:
+  `make BOARD=esp32c6 test` has to print "root: handover ok",
+  which needs the boot pool at `BOOT_POOL_BASE`, past the input, in RAM the ROM leaves alone,
+  and the successor's stack three quarters up the data region, above the logger's.
 - The ESP32-C6's counter rate is measured over one tick at boot,
   so it is only as exact as the polling loop in `timer_init`; a longer measurement would do better.
 - The ESP32-C6 resets with `mideleg` at `0x111`, delegating interrupts 0, 4 and 8 to user mode.

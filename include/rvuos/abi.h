@@ -161,6 +161,18 @@
  * until the derived one and what was made of it are gone.
  */
 #define OP_CAP_DERIVE 24
+/*
+ * CapTable (RIGHT_W): move a capability from the caller's table.
+ * a1 = destination slot in the invoked table, a2 = source slot in the caller's table.
+ * The destination takes the source's place in the derivation tree:
+ * the parent, the siblings and what was derived from it are the source's,
+ * so a revoke through it takes what one through the source would have,
+ * and a revoke that would have taken the source takes it.
+ * The source slot is left empty. The rights stay as they were,
+ * since what was derived from the source may hold all of them.
+ * An Untyped moves too, with its watermark: a move makes no second allocator.
+ */
+#define OP_CAP_MOVE 18
 
 /*
  * Frame: describe it. Returns a1 = base, a2 = size, a3 = rights,
@@ -232,7 +244,7 @@
  * The memory goes back to the Untyped the pool was retyped from,
  * which makes something of it again once nothing else made of it is left.
  * Fails with KERR_STATE if the calling thread, its process or the process's table
- * lives in the pool, and for the boot pool, which holds the root task.
+ * lives in the pool.
  * Threads waiting on a notification in a destroyed pool
  * are woken with KERR_INVALID_CAP and no bits,
  * and threads, in whatever pool, whose process was in it stop.
@@ -394,7 +406,13 @@
 #define BOOT_CAP_TIMER_LINES 13 /* IrqLine: every timer line, TIMER_LINES of them */
 #define BOOT_CAP_CLOCK     14 /* Clock: the machine's counter */
 #define BOOT_CAP_TIME      15 /* Time: every unit, with RIGHT_W and RIGHT_X; the root thread earns them all */
-#define BOOT_CAP_COUNT     16
+/*
+ * Untyped: the block of RAM the root task lives in, which holds its code, data and input
+ * and the boot pool; all of it is made already, so it makes nothing
+ * until those are gone, and the root task, which runs on it, cannot revoke below it.
+ */
+#define BOOT_CAP_ROOT_RAM  16
+#define BOOT_CAP_COUNT     17
 
 /*
  * The kernel's log.
@@ -453,6 +471,7 @@ struct replay_record {
 
 /* Fixed limits visible to user programs. */
 #define PROCESS_REGION_SLOTS 8
+#define ROOT_TABLE_SLOTS 64 /* slots in the root task's table */
 #define POOL_MIN_SIZE 64 /* the smallest pool OP_UNTYPED_RETYPE makes */
 #define TIMER_LINES 16 /* on the whole machine; see BOOT_CAP_TIMER_LINES */
 #define TIME_UNITS 64 /* of the processor, on the whole machine; see BOOT_CAP_TIME */
