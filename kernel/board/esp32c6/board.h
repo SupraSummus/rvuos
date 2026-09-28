@@ -42,6 +42,13 @@
 #define UART_SIZE U32(0x100)
 
 /*
+ * The machine timer, the mtime and mtimecmp of Espressif's CLINT at 0x20001800; see clint.h.
+ * timer.c starts it with a control word beside them.
+ */
+#define CLINT_MTIME    U32(0x20001808)
+#define CLINT_MTIMECMP U32(0x20001810)
+
+/*
  * The counter BOOT_CAP_CLOCK names: UTIME, the CLINT's read-only copy of mtime for user mode,
  * at the CPU clock timer_init measures; ESP32-C6 TRM, "Timer Counter and Interrupt".
  * The core has no time CSR. Untried on the chip; see TODO.md.

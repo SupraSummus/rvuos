@@ -217,8 +217,11 @@ The machine timer, `mtime` and `mtimecmp`, is the kernel's clock
 and the kernel handles it directly.
 Userspace sees it only through the timer lines,
 whose deadlines are counted in ticks; see "Time".
-Where the registers live and how fast they count is the board's business,
-so `timer.c` is per board, as `irq.c` is.
+Where the registers live, what starts the counter and how fast it counts are the board's business:
+`board.h` names the two registers,
+and `timer.c`, per board as `irq.c` is, starts the counter and says how many counts make a tick.
+The rest is the same on every board and lives once in `kernel/clint.c`:
+reading `mtime`, setting `mtimecmp` and counting the ticks.
 The kernel counts ticks on the counter rather than on interrupts:
 every trap counts the whole periods `mtime` has passed since the last tick it counted,
 so the tick count keeps pace with the counter however late or seldom the interrupt is taken,
@@ -1277,11 +1280,12 @@ Anyone holding a capability to the boot pool can end the root task this way; see
 
 A board is the files of `kernel/board/<board>/` and `user/board/<board>/`,
 chosen with `make BOARD=<board>`:
-`board.h`, where RAM, the root task and the console lie,
+`board.h`, where RAM, the root task, the console and the timer's registers lie,
 how many interrupt lines there are and which mcause the controller raises,
 which `kernel/layout.h` and both linker scripts read;
 `board.c`, what the board needs before anything else;
-`timer.c`, `irq.c` and `halt.c`;
+`timer.c`, which starts the timer `kernel/clint.c` drives;
+`irq.c` and `halt.c`;
 and `console.h`, the device behind `BOOT_CAP_UART` as the root task drives it.
 Nothing else in the kernel names an address.
 

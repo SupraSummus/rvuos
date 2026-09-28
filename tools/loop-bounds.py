@@ -490,23 +490,14 @@ class Checker:
         self.parametric = set()  # functions the image holds out of line, bounded by an argument
         self.used = []  # the annotations that bound something
 
-    def discharge(self, frames, i, what):
-        """The call at frames[i] must say what bounds it, or pass the question outward."""
-        f = frames[i]
+    def discharge(self, f, what):
+        """The call at frame f must say what bounds it."""
         note = self.src.call_note(f.pos)
         if note is None:
             self.problems.append(f"{f.function} at {f.pos} calls {what} "
                                  "with nothing to say what bounds it")
             return
         self.used.append(note)
-        if note.kind != "arg":
-            return
-        if note.name != f.function:
-            self.problems.append(f"{note} names {note.name}, but stands in {f.function}")
-        elif i > 0:
-            self.discharge(frames, i - 1, f.function)
-        else:
-            self.parametric.add(f.function)
 
 
 def main() -> int:
@@ -589,19 +580,16 @@ def main() -> int:
                 if note.name != loop.function:
                     check.problems.append(f"{note} names {note.name}, but stands in {loop.function}")
                 elif index > 0:
-                    check.discharge(frames, index - 1, loop.function)
+                    check.discharge(frames[index - 1], loop.function)
                 else:
                     check.parametric.add(loop.function)
 
-        # Calls to a function bounded by an argument, until no new such function turns up.
-        done = set()
-        while check.parametric - done:
-            name = sorted(check.parametric - done)[0]
-            done.add(name)
+        # Calls to a function bounded by an argument, which the image holds out of line.
+        for name in sorted(check.parametric):
             target = by_name.get(name)
             for a, pc, callee in calls:
                 if callee == target and frames_of.get(pc) and frames_of[pc][-1].pos:
-                    check.discharge(frames_of[pc], len(frames_of[pc]) - 1, name)
+                    check.discharge(frames_of[pc][-1], name)
                 elif callee == target:
                     check.problems.append(f"{graph[a].name} at {pc:#x} calls {name}, "
                                           "and the call has no line")

@@ -19,10 +19,8 @@
  * LOOP_WAIT(what)       waits on the hardware for what, doing no work of its own.
  *
  * A CALL_ annotation stands just before the statement that calls such a function:
- * CALL_BOUND(n) and CALL_WALK(name) as for a loop,
- * CALL_LITERAL(s) when the bound is the length of s, which must be a string literal,
- * and CALL_ARG(fn, arg) when it is the argument arg of fn, the caller,
- * which passes the question on to fn's callers.
+ * CALL_BOUND(n) as for a loop,
+ * and CALL_LITERAL(s) when the bound is the length of s, which must be a string literal.
  *
  * In the host build's harness fuzz-work, RVUOS_WORK makes each loop annotation count too,
  * and the harness checks the claims after every call: see host/work.c.
@@ -68,8 +66,6 @@ void work_call(unsigned long bound, const char *site);
 #define LOOP_WAIT(what) _Static_assert(1, "loop wait " what) WORK_STEP('o', 0, "")
 
 #define CALL_BOUND(n) _Static_assert((n) > 0, "call bound " #n) WORK_CALL(n)
-#define CALL_WALK(name) _Static_assert(1, "call walk " #name)
 #define CALL_LITERAL(s) _Static_assert(sizeof("" s) > 0, "call literal")
-#define CALL_ARG(fn, arg) _Static_assert(1, "call arg " #fn " " #arg)
 
 #endif

@@ -50,8 +50,6 @@ Beyond the demo:
   The host's `irq_claim` never returns a line,
   so nothing counts the claims on the way from an interrupt through `sched_claim_interrupts`,
   its `IRQ_LINES` bound among them.
-- `CALL_ARG` and `CALL_WALK` have no user, and `fuzz-work` does not check them;
-  drop them, or check them when one is needed.
 - That an object holds nothing from before its pool took the memory
   shows only where the garbage is a capability or makes a call fail;
   `host/history.c` does not know what the memory held before the call,
@@ -187,8 +185,6 @@ Beyond the demo:
   Give a thread's creator somewhere to hear about it:
   a notification the kernel signals is the cheapest candidate,
   since it needs no new object.
-- Both boards' `timer.c` read `mtime`, write `mtimecmp`, count and set the timer the same way at different addresses;
-  a CLINT file taking the base and the period would hold that once, beside `timer_next`.
 - `pmp_init` stops counting at the first hardwired entry.
   A core with writable entries above a hardwired one loses them;
   have the image skip such entries if one turns up.
