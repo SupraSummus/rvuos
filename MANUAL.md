@@ -637,6 +637,10 @@ and a notification is exactly that.
 A round trip is therefore four system calls:
 signal, wait on one side; wait, signal on the other.
 
+A trap breaks the thread's reservation,
+so an `sc.w` fails whenever a system call, the tick or an interrupt came between it and its `lr.w`;
+a loop around the pair tries again, and never succeeds with a system call inside it.
+
 **A server with many clients** waits on one notification;
 each client holds it with `RIGHT_W` only, owns a bit,
 and shares a region with the server.

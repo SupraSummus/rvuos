@@ -12,7 +12,7 @@
  * so the trap entry can save registers without a free register.
  * The layout is shared with start.S,
  * which fills it on entry and drains it on return.
- * regs[0] holds x0 and is never written back.
+ * regs[0] holds x0, is never written back, and is where trap_return's sc.w points.
  * regs[2] is the trapped stack pointer.
  */
 struct trap_frame {
