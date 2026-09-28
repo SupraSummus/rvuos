@@ -79,7 +79,7 @@ What rvuos is not:
   so the core's entry count bounds how many slots can be filled; see section 5.4.
 - **Capabilities with rights.**
   A capability names a kernel object, a memory range, a range of interrupt lines
-  or a range of the processor's shares,
+  or a range of the processor's units of time,
   together with rights bits.
   Copying a capability can only narrow its rights.
 - **Untyped memory, frames and pools instead of a kernel heap.**
@@ -100,14 +100,12 @@ What rvuos is not:
   A notification is a word of sticky bits.
   Data moves through shared memory; the notification says when.
 - **Processor time by capability.**
-  A thread runs only while it is bound to one of the machine's `SHARES` shares,
-  which are handed out as capabilities like memory is.
-  A machine timer tick ends a share's turn and hands the processor to the share that has waited longest,
-  and threads on one share take turns within it,
-  so a process that makes more threads or children gets no more of the processor.
-  Each share holds a budget, its part of every tenth of a second,
-  and the budgets add up to the whole processor;
-  a share held to its budget gets no more, however idle the processor is otherwise.
+  The processor is `TIME_UNITS` units of time, handed out as capabilities like memory is,
+  and a thread runs on the units it is bound to, each earned by one thread at a time,
+  or on spare time, which nobody earned, if its capability allows.
+  Its account fills at its units' rate and a machine timer tick of its turn costs it a tick,
+  so a process that makes more threads or children gets no more of the processor than its units,
+  and a thread held to its units gets no more, however idle the processor is otherwise.
 - **Timers as signals.**
   A timer line is an interrupt line the tick raises once a delay has passed.
   Sleeping is arming a timer line and waiting;
@@ -351,8 +349,8 @@ Rights are three bits:
 | Bit | Value | Frame, Untyped | Other types |
 |---|---|---|---|
 | `RIGHT_R` | 1 | read | `Notification`: wait |
-| `RIGHT_W` | 2 | write | control the object: allocate, install, configure, signal, set, bind, move budget, copy into a table |
-| `RIGHT_X` | 4 | execute | `Share`: set flags |
+| `RIGHT_W` | 2 | write | control the object: allocate, install, configure, signal, set, bind, copy into a table |
+| `RIGHT_X` | 4 | execute | `Time`: the threads bound through it run on spare time |
 
 Every operation that produces a capability
 puts it into a slot of the caller's own table,
@@ -371,20 +369,20 @@ The tree grows in these ways:
 |---|---|
 | `OP_CAP_DERIVE` | below the source |
 | `OP_CAP_COPY` | beside the source, under the source's parent; a copy of a root is a root; an Untyped is never copied |
-| `OP_FRAME_CARVE`, `OP_IRQ_CARVE`, `OP_SHARE_CARVE`, `OP_CLOCK_FRAME` | below the invoked capability |
+| `OP_FRAME_CARVE`, `OP_IRQ_CARVE`, `OP_TIME_CARVE`, `OP_CLOCK_FRAME` | below the invoked capability |
 | `OP_UNTYPED_RETYPE` of a frame or an Untyped | below the invoked Untyped |
 | `OP_UNTYPED_RETYPE` of a pool | below the pool's own node, which hangs below the invoked Untyped |
 | `OP_PROCESS_INSTALL` | the installed region hangs below the frame |
 | `OP_POOL_ALLOC` | below the invoked `KernelPool` capability |
 | `OP_POOL_ALLOC` of a `Process` | and the process's hold on its table below the `CapTable` capability |
 | `OP_IRQ_BIND` | below the `KernelPool` capability; the line goes with what was derived from it |
-| `OP_SHARE_BIND` | the thread's hold on its share hangs below the invoked `Share` capability |
+| `OP_TIME_BIND` | the thread's hold on its units hangs below the invoked `Time` capability |
 | boot | nowhere, but for the capabilities to the boot pool and its objects |
 
 `OP_CAP_REVOKE` on a slot clears everything below it, in every table and every process:
 derived capabilities, their copies, what was derived from those,
 every region installed from any of them,
-and every thread's share bound through any of them.
+and every thread's units bound through any of them.
 Below an Untyped it destroys every pool made of it, as `OP_POOL_DESTROY` does.
 The slot itself stays.
 Revoking a copy takes nothing from the original, and the other way round;
@@ -418,15 +416,15 @@ Programs are encouraged to keep the same convention.
 | `Notification` | `CAP_NOTIFICATION` | one word of sticky bits | `OP_POOL_ALLOC` |
 | `IrqLine` | `CAP_IRQ_LINE` | none: the slot holds the first line and a count | boot, `OP_IRQ_CARVE` |
 | `Irq` | `CAP_IRQ` | one line bound to a notification, with a deadline on a timer line | `OP_IRQ_BIND` |
-| `Share` | `CAP_SHARE` | none: the slot holds the first share and a count | boot, `OP_SHARE_CARVE` |
+| `Time` | `CAP_TIME` | none: the slot holds the first unit and a count | boot, `OP_TIME_CARVE` |
 | `Debug` | `CAP_DEBUG` | none | boot |
 | `Clock` | `CAP_CLOCK` | none: there is one counter | boot |
 
-`Untyped`, `Frame`, `IrqLine`, `Share`, `Debug` and `Clock` capabilities have no kernel object behind them.
-Carving a frame, a line range or a share range, and retyping an Untyped into a frame or an Untyped,
+`Untyped`, `Frame`, `IrqLine`, `Time`, `Debug` and `Clock` capabilities have no kernel object behind them.
+Carving a frame, a line range or a range of units, and retyping an Untyped into a frame or an Untyped,
 are pure table operations
 that touch no kernel memory,
-which is why the root task can hand out memory, lines and shares
+which is why the root task can hand out memory, lines and time
 before it has created a single pool.
 
 ### 5.4 Memory: Untyped, frames and installing
@@ -567,16 +565,16 @@ A thread is **stopped**, **ready** or **waiting**.
   The other registers start at zero.
   The kernel validates neither value.
 - `OP_THREAD_RESUME` makes a stopped thread ready.
-  It gets the processor once it is bound to a share and its turn comes, section 5.11.
+  It gets the processor once it is bound to units, or to spare time, and its turn comes, section 5.11.
 - A thread waiting on a notification is waiting;
   a signal makes it ready again.
 
-Apart from its state, a thread is bound to one share or to none.
-A new thread has none, and a thread without a share keeps its state and does not run:
-`OP_SHARE_BIND` puts it on one, and revoking below the capability it was bound through takes it off.
+Apart from its state, a thread is bound to units of time or it is not.
+A new thread is not, and a thread that is not keeps its state and does not run:
+`OP_TIME_BIND` binds it, and revoking below the capability it was bound through unbinds it.
 That is how a started thread is stopped and started again.
 No thread exits: a thread that has nothing left to do waits forever
-on a notification nobody signals, or loses its share.
+on a notification nobody signals, or loses its units.
 A thread that faults stops the machine; see section 11.
 
 ### 5.7 Notifications
@@ -644,8 +642,8 @@ a delay of zero fires at the next tick,
 and a delay of 10 000 µs fires on the eleventh tick after the call,
 between 10 and 11 ms later.
 No upper bound is promised, because the woken thread is ready, not running,
-and waits for its share's turn and then its own,
-and for its share's account to fill if the share has spent it and has no spare time, section 5.11.
+and waits for its turn,
+and for its account to reach a tick if it has spent it and has no spare time, section 5.11.
 
 Sleeping:
 
@@ -777,85 +775,85 @@ and carries the ring out one byte per transmitter interrupt.
 
 ### 5.11 Scheduling
 
-- The processor is divided into `SHARES` shares, 32 on the whole machine.
-  The root task receives them all in `BOOT_CAP_SHARES`, its own thread bound to the first,
-  and hands them out with `OP_SHARE_CARVE` and `OP_CAP_DERIVE` as it hands out memory.
-- A thread runs only while it is bound to a share, with `OP_SHARE_BIND`.
-  Any number of threads may be bound to one share.
-- Each share holds a **budget**: its part of the processor,
-  counted in `BUDGET_WHOLE` (65 536) parts of it.
-  The budgets of all the shares add up to `BUDGET_WHOLE`.
-  At boot the first share holds all of it and the others none.
-  `OP_SHARE_MOVE` moves budget between two shares of one capability,
-  and `OP_SHARE_INFO` tells a share's budget and flags.
-- Each share has an **account** of time, which gains the share's budget's part of a tick every tick
-  and holds at most its budget's part of 100 ticks, a tenth of a second, rounded up to whole ticks.
-  Each tick of the share's turn costs the account a whole tick.
-  A share has **time** while its account holds at least a tick;
-  the tick that leaves it less drains the share, which has no time again until its account is full.
-  A move of budget takes with it as much of the source's account as that budget holds when full,
-  so a share lent budget can run at once.
-  Every thread on a share, bound through any capability to it, spends the one account.
-- A drained share runs on **spare time** only if it has `SHARE_SPARE`:
-  time no share with time wants, which costs the account nothing.
-  Every share has it at boot; `OP_SHARE_SET`, which needs `RIGHT_X`, takes it away or gives it back.
-  A share without it runs on its account alone, at most its budget's part of the processor and a full account,
+- The processor is divided into `TIME_UNITS` units of time, 64 on the whole machine, each a sixty-fourth of it.
+  The root task receives them all in `BOOT_CAP_TIME`, its own thread earning every one,
+  and hands them out with `OP_TIME_CARVE` and `OP_CAP_DERIVE` as it hands out memory.
+- `OP_TIME_BIND` binds a thread to some of a capability's units, or to none of them,
+  and the thread **earns** them.
+  A unit is earned by one thread at a time:
+  a bind that names a unit another thread earns fails with `KERR_OVERLAP`,
+  so copies of a `Time` capability may be held by many, and each unit still goes to one thread.
+  The time of the units nobody earns is spare.
+- A thread bound through a capability with `RIGHT_X` also runs on **spare time**:
+  turns no thread with time wants, which cost its account nothing.
+  The boot grant has `RIGHT_X`.
+  A thread bound through a capability without it runs on its account alone,
+  at most its units' part of the processor and a full account,
   and the processor sleeps in `wfi` for the rest if nothing else wants it.
-- Shares that have a ready thread wait for the processor in queues,
-  and each share's ready threads wait in a queue of their own.
-  A share with time waits on the run queue;
-  a drained one waits on the spare queue if it has `SHARE_SPARE`, and for its account to fill if not.
+  A thread bound to no units runs on spare time alone, or not at all without `RIGHT_X`.
+- Each thread has an **account** of time,
+  which gains a sixty-fourth of a tick for each unit the thread earns every tick
+  and holds at most 100 ticks' worth of them, a tenth of a second.
+  Each tick of the thread's turn costs the account a whole tick.
+  A thread has **time** while its account holds at least a tick.
+  A new thread's account is empty, and the root task's thread's starts full.
+  Bound to other units, a thread keeps what its account held, up to what the new units hold;
+  unbound, it loses it.
+- Ready threads wait for the processor in three queues.
+  A thread with time waits on the run queue;
+  one without time waits on the spare queue if it may run on spare time,
+  and for its account to reach a tick if not.
   A thread that becomes ready, whether resumed, woken, bound or preempted,
-  joins the back of its share's queue,
-  and a share that gets a ready thread joins the back of its queue of shares.
+  joins the back of its queue.
 - The machine timer ticks at `TIMER_HZ`, 1 kHz on both boards.
-  A tick is charged to the running share's account while it has time, and ends its turn:
-  its thread goes to the back of the share's queue, the share to the back of its queue of shares,
-  and the oldest thread of the share that has waited longest on the run queue runs,
-  or, if the run queue is empty, of the one that has waited longest on the spare queue.
-  A thread that waits hands the rest of the turn to the next ready thread on its own share,
-  or, if there is none, to the next share.
+  A tick is charged to the running thread's account while it holds a tick, and ends its turn:
+  the thread goes to the back of its queue,
+  and the thread that has waited longest on the run queue runs,
+  or, if the run queue is empty, the one that has waited longest on the spare queue.
+  A thread that waits hands the rest of the tick to the next.
   A tick that would hand the processor back to the thread that had it takes no interrupt:
   the kernel counts and charges it at its next trap all the same,
   so a thread alone on the processor is interrupted only at a timer line's deadline,
-  where its account drains or fills, or where another share's account fills.
-- So shares with work and time take equal turns,
-  and a process that holds k of the n shares with work gets about k in every n ticks,
-  however many threads it runs on them, until a share has spent its account.
-  A share with work all along gets its budget's part of the processor,
+  where another thread's account reaches a tick,
+  or where its own account drains, if it may not go on on spare time.
+- So threads with work and time take equal turns, and then threads on spare time do.
+  A thread with work all along gets its units' part of the processor,
   give or take a tenth of a second's worth of the accounts.
-  A thread added to a share takes turns from the threads on that share and from nobody else.
+  A thread with time waits for its turn at most `TIME_UNITS` ticks, since only a thread with units has time.
+  A thread a process adds earns only units split off the process's own, or runs on spare time:
+  it takes nothing another thread earns.
+  Spare time goes round by thread, so more threads there get more of it.
 - A system call is never interrupted:
   machine mode runs with interrupts off from the trap to the return.
 - When nothing is runnable and an `Irq` is armed on a timer line or a device's line,
-  or a share waits for its account to fill,
-  the kernel stalls in `wfi` until the nearest timer line's deadline, the account that fills or the interrupt arrives,
+  or a thread waits for its account to reach a tick,
+  the kernel stalls in `wfi` until the nearest timer line's deadline, the account that reaches a tick or the interrupt arrives,
   and takes no tick in between.
   When there is none of these, it prints `no runnable thread` and halts with code 5.
 
 There are no priorities and no yield.
 A spinning thread cannot starve the others, because the tick preempts it,
-but it burns its share's turns and budget, and keeps the machine out of `wfi`
-unless its share is held to its budget;
+but it burns its turns and its account, and keeps the machine out of `wfi`
+unless it is held to its units;
 a thread that waits costs nothing until it is signalled.
 
 The tick charges whoever runs when it comes a whole tick,
 so a thread that always waits just before the tick is never charged for the time it ran;
-a budget holds a program that runs, not one that times its waits against the clock.
+an account holds a program that runs, not one that times its waits against the clock.
 
-A share keeps its budget and flags when a revoke takes its capabilities and its threads,
-as a frame keeps its bytes,
-so the root task sets both before it lends a share again.
-To hold a process to a tenth of the processor, the root task carves it a share,
-moves a tenth onto it, and takes `SHARE_SPARE` away,
-then lends the share without `RIGHT_X`:
+To hold a process to about a tenth of the processor, the root task gives it six units without `RIGHT_X`.
+Its own thread earns every unit at boot, so it leaves the six first,
+then carves them and lends them without spare time:
 
 ```c
-rv_invoke(OP_SHARE_CARVE, BOOT_CAP_SHARES, 2, 1, SHARE);
-rv_invoke(OP_SHARE_MOVE, BOOT_CAP_SHARES, 0, 2, BUDGET_WHOLE / 10);
-rv_invoke(OP_SHARE_SET, BOOT_CAP_SHARES, 2, 0, 0);
-rv_invoke(OP_CAP_DERIVE, CHILD_TABLE, CHILD_SHARE, SHARE, RIGHT_W);
+rv_invoke(OP_TIME_BIND, BOOT_CAP_TIME, BOOT_CAP_THREAD, 0, 58);
+rv_invoke(OP_TIME_CARVE, BOOT_CAP_TIME, 58, 6, TIME);
+rv_invoke(OP_CAP_DERIVE, CHILD_TABLE, CHILD_TIME, TIME, RIGHT_W);
 ```
+
+The child binds its threads through `CHILD_TIME` with `OP_TIME_BIND`;
+`TIME` itself keeps `RIGHT_X`, so a bind through it would give spare time too.
+Revoking below `TIME` takes the child's units back, and its threads stop.
 
 ## 6. System call reference
 
@@ -937,14 +935,14 @@ Does not return.
 
 **`OP_DEBUG_TRACE` (10).**
 Turns tracing and self-checking on; see section 9.
-Every share's account is filled, section 5.11.
+Every thread's account is filled, section 5.11.
 Cannot be turned off again.
 
 **`OP_DEBUG_TICK` (17).**
 Does what the timer tick does, on request:
-time moves by one tick, charged to the running share, every due timer line fires,
-every drained share whose account filled has time again,
-the running share's turn ends as section 5.11 says,
+time moves by one tick, charged to the caller while it has time, every due timer line fires,
+every thread whose account reached a tick has time again,
+the caller's turn ends as section 5.11 says,
 and the caller stays ready.
 Works while tracing is on, unlike the tick itself.
 
@@ -1082,7 +1080,7 @@ Neither is checked.
 
 **`OP_THREAD_RESUME` (13).**
 Makes the thread ready.
-It runs once it is bound to a share.
+It runs once it is bound to units, or to spare time.
 
 ### 6.9 Operations on `Notification`
 
@@ -1152,53 +1150,29 @@ Produces a frame, read only, the smallest block that holds the counter,
 hanging below the invoked capability.
 On a PMP grain coarser than eight bytes the frame holds the registers beside the counter too.
 
-### 6.13 Operations on `Share`
+### 6.13 Operations on `Time`
 
-**`OP_SHARE_CARVE` (28).**
+**`OP_TIME_CARVE` (28).**
 No right needed.
-`a1` = offset from the first share, `a2` = count, `a3` = destination slot.
+`a1` = offset from the first unit, `a2` = count, `a3` = destination slot.
 A table operation like `OP_IRQ_CARVE`.
 
-**`OP_SHARE_BIND` (29).**
+**`OP_TIME_BIND` (29).**
 Needs `RIGHT_W`.
 `a1` = slot of the `Thread` capability, with `RIGHT_W`,
-`a2` = which of the capability's shares, as an offset from its first
-(`KERR_INVALID_ARG` past the last).
-The thread leaves the share it was on, whoever bound it there,
-and a ready thread joins the back of the new share's queue.
-Its hold on the share hangs below the invoked capability,
-so revoking below that capability unbinds it, section 5.11;
-it keeps its state and does not run until it is bound again.
+`a2` = the first unit, as an offset from the capability's first
+(`KERR_INVALID_ARG` past the last, even for none),
+`a3` = how many units (`KERR_INVALID_ARG` past the last), zero for none.
+Fails with `KERR_OVERLAP` if another thread earns one of the units.
+The thread leaves the units it earned, whoever bound it to them,
+and earns these; with `RIGHT_X` on the invoked capability it runs on spare time too.
+Its account keeps what it held, up to what the new units hold at most,
+and a ready thread joins the back of the queue its account puts it on, section 5.11.
+Its hold on the units hangs below the invoked capability,
+so revoking below that capability unbinds it:
+it keeps its state and does not run until it is bound again, and its account is emptied.
 A thread unbound or moved while it runs, the caller itself for one, finishes the turn it had:
 only a wait or the tick takes the processor from it.
-
-**`OP_SHARE_INFO` (30).**
-No right needed.
-`a1` = which of the capability's shares, as an offset from its first
-(`KERR_INVALID_ARG` past the last).
-Returns `a1` = its budget, in `BUDGET_WHOLE` parts of the processor, and `a2` = its flags.
-What the share's account holds is not told, since that would be a clock.
-
-**`OP_SHARE_MOVE` (31).**
-Needs `RIGHT_W`.
-`a1` = the share to take budget from and `a2` = the share to give it to,
-both as offsets from the capability's first (`KERR_INVALID_ARG` past the last),
-`a3` = how much (`KERR_INVALID_ARG` if the first holds less).
-The budgets of all the shares still add up to `BUDGET_WHOLE`.
-As much of the first share's account goes with the budget as the budget moved holds when full,
-`a3` times 100 parts of a tick, or all the account has,
-and each account is held to what its new budget holds.
-A share left with less than a tick in its account is drained,
-and one whose account the move filled has time, section 5.11;
-the running share finishes its turn either way.
-
-**`OP_SHARE_SET` (32).**
-Needs `RIGHT_X`.
-`a1` = which of the capability's shares, as an offset from its first
-(`KERR_INVALID_ARG` past the last),
-`a2` = its flags, `SHARE_SPARE` or 0 (`KERR_INVALID_ARG` for any other bit).
-With `SHARE_SPARE` the share runs on spare time while it is drained;
-without it the share waits for its account to fill.
 
 ### 6.14 Operation codes in numeric order
 
@@ -1230,11 +1204,8 @@ without it the share waits for its account to fill.
 | 25 | `OP_CLOCK_INFO` | `Clock` |
 | 26 | `OP_CLOCK_FRAME` | `Clock` |
 | 27 | `OP_UNTYPED_INFO` | `Untyped` |
-| 28 | `OP_SHARE_CARVE` | `Share` |
-| 29 | `OP_SHARE_BIND` | `Share` |
-| 30 | `OP_SHARE_INFO` | `Share` |
-| 31 | `OP_SHARE_MOVE` | `Share` |
-| 32 | `OP_SHARE_SET` | `Share` |
+| 28 | `OP_TIME_CARVE` | `Time` |
+| 29 | `OP_TIME_BIND` | `Time` |
 
 `OP_COUNT` is 30, one above the highest code.
 
@@ -1268,7 +1239,7 @@ and drops into user mode with:
 | 12 | `BOOT_CAP_LOG` | `Frame`: the kernel log's header and ring | read, write |
 | 13 | `BOOT_CAP_TIMER_LINES` | `IrqLine`: every timer line, `TIMER_LINES` of them | write |
 | 14 | `BOOT_CAP_CLOCK` | `Clock`: the machine's counter | all |
-| 15 | `BOOT_CAP_SHARES` | `Share`: every share, `SHARES` of them, each with `SHARE_SPARE`; the first holds the whole budget and the root task's thread | write, execute |
+| 15 | `BOOT_CAP_TIME` | `Time`: every unit of time, `TIME_UNITS` of them, all earned by the root task's thread | write, execute |
 
 `BOOT_CAP_COUNT` is 16; a root task puts its own slots from there upwards.
 
@@ -1376,22 +1347,21 @@ The steps below are what `user/init.c` does.
 
 5. **Configure, bind and start** the thread.
    The stack grows down from the top of the child's data chunk.
-   The thread runs on a share of its own, carved out of the boot grant,
-   so the child takes turns with the whole root task rather than with each of its threads;
-   binding it to `BOOT_CAP_SHARES` at offset 0 would put it on the root task's share instead.
-   The root task's share holds the whole budget, so the child's gets half of it:
-   a share with no budget runs only when the root task's does not want the processor.
+   The thread earns half the processor, units carved out of the boot grant.
+   The root task's thread earns every unit at boot, so it keeps the first half and leaves the rest;
+   binding the child through `BOOT_CAP_TIME` with no units would give it spare time alone,
+   which it gets only while the root task does not want the processor.
 
    ```c
    rv_invoke(OP_THREAD_CONFIGURE, SLOT_CHILD_THREAD, (uint32_t)&child_main,
              child_data_base + CHUNK, 0);
-   rv_invoke(OP_SHARE_CARVE, BOOT_CAP_SHARES, 1, 1, SLOT_CHILD_SHARE);
-   rv_invoke(OP_SHARE_MOVE, BOOT_CAP_SHARES, 0, 1, BUDGET_WHOLE / 2);
-   rv_invoke(OP_SHARE_BIND, SLOT_CHILD_SHARE, SLOT_CHILD_THREAD, 0, 0);
+   rv_invoke(OP_TIME_BIND, BOOT_CAP_TIME, BOOT_CAP_THREAD, 0, TIME_UNITS / 2);
+   rv_invoke(OP_TIME_CARVE, BOOT_CAP_TIME, TIME_UNITS / 2, TIME_UNITS / 2, SLOT_CHILD_TIME);
+   rv_invoke(OP_TIME_BIND, SLOT_CHILD_TIME, SLOT_CHILD_THREAD, 0, TIME_UNITS / 2);
    rv_invoke(OP_THREAD_RESUME, SLOT_CHILD_THREAD, 0, 0, 0);
    ```
 
-   Revoking below `SLOT_CHILD_SHARE` stops the child's thread; binding it again starts it.
+   Revoking below `SLOT_CHILD_TIME` stops the child's thread; binding it again starts it.
 
 6. **Talk** through the shared region and the two notifications.
    The child writes a word, signals `SLOT_UP`; the parent waits, answers, signals `SLOT_DOWN`.
@@ -1459,8 +1429,8 @@ every capability names a live object of its own type or an in-bounds frame, Unty
 and every capability to a pool or an object lies below the pool's own node,
 pools tile their memory exactly,
 every waiting thread names a live notification,
-every ready thread with a share but the running one is on its share's queue,
-and the queue of shares holds exactly the shares with a ready thread but the running one,
+every ready thread but the running one that may run is on the queue its account says,
+and each unit of time is earned by the thread bound to it and by no other,
 every `Irq` names a notification in its own pool,
 no `Irq` armed on a timer line is past its deadline,
 and the controller forwards exactly the lines an `Irq` is armed on.
@@ -1497,9 +1467,8 @@ and `tests/mutants/` holds one planted bug per invariant.
 | object alignment | 8 bytes | `OBJ_ALIGN` |
 | notification bits | 32 | the word size |
 | timer lines | 16, on the whole machine | `TIMER_LINES` |
-| shares of the processor | 32, on the whole machine | `SHARES` |
-| the whole processor, as a budget | 65 536 | `BUDGET_WHOLE` |
-| most of its budget an account holds | 100 ticks' worth, 100 ms (`ACCOUNT_TICKS`), in whole ticks | `kernel/timer.h` |
+| units of the processor's time | 64, on the whole machine | `TIME_UNITS` |
+| most of its units an account holds | 100 ticks' worth, 100 ms (`ACCOUNT_TICKS`) | `kernel/timer.h` |
 | timer delay or period per call | 2^32 - 1 µs | `OP_IRQ_SET` |
 | tick | 1 ms (`TIMER_HZ` 1000) | `kernel/timer.h` |
 | interrupt lines | 96 on QEMU, 77 on the ESP32-C6, line 0 the log's | `IRQ_LINES` |
@@ -1517,8 +1486,8 @@ These are documented gaps, not surprises;
   so the kernel prints the frame and halts with code 4,
   even when another thread could run.
 - **No priorities and no yield.**
-  Round-robin on a tick, by share and then by thread, within each share's account,
-  is the whole policy, and a share promises its part of the processor, not a latency;
+  Round-robin on a tick, threads with time before threads on spare time,
+  is the whole policy, and units promise their part of the processor and a turn within 64 ticks, no more;
   `DESIGN.md`, open decisions 9 and 10.
 - **No badged notifications.**
   A client's identity to a server is a convention, not kernel-enforced;

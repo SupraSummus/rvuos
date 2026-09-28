@@ -1,0 +1,19 @@
+Clearing a thread's units leaves them naming the thread.
+Nobody could bind them again, and the release would look at a thread gone from memory;
+each unit names the thread that earns it, or none.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: a unit names a thread that does not earn it
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -267,7 +267,7 @@ void sched_unbind(struct cap *bound)
+     struct thread *t = bound_thread(bound);
+     for (uint32_t i = 0; i < bound->b; i++) {
+         LOOP_BOUND(TIME_UNITS);
+-        unit_thread[bound->a + i] = 0;
++        (void)0;
+     }
+     *bound = (struct cap){ 0 };
+     /* A thread without units holds nothing, so settling empties its account as it takes the thread off its queue. */

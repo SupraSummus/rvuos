@@ -13,9 +13,9 @@
  * and take it back by revoking, which destroys that pool,
  * sleep on a timer while nothing else can run, and time it on the clock,
  * keep a period on the timer without drifting,
- * split the processor between two shares however many threads one of them runs,
- * stop threads by revoking their share and start one again by binding it,
- * hold a share to its budget and let it run on spare time,
+ * give a thread units of the processor that threads on spare time cannot take from it,
+ * stop threads by revoking their units and start one again by binding it,
+ * hold a thread to its units and let it run on spare time,
  * spin through the ticks while nothing else can run,
  * bind and revoke an Irq on a line nothing drives,
  * then unmap a region and fault on it.
@@ -62,8 +62,8 @@ enum {
     SLOT_BOOT_NTFN,     /* a notification in the boot pool, for binding the line again */
     SLOT_SPARE_IRQ_AGAIN,
     SLOT_COUNTER,       /* the clock's frame, read only */
-    SLOT_CHILD_SHARE,   /* the share the child runs on, carved out of the boot grant */
-    SLOT_SPIN_SHARE,    /* the root task's own share again, for the spinners to be bound through */
+    SLOT_HALF_TIME,     /* the second half of the processor's units, the child's and then the spinners' */
+    SLOT_CAPPED_TIME,   /* the same units without spare time, derived from those */
     SLOT_SPINNER,       /* the spinners' threads, SPINNERS of them */
 };
 
@@ -112,7 +112,6 @@ enum {
 #define BIT_POOLED  0x40u
 #define BIT_LEASE   0x200u /* look at the leased memory, which is gone */
 #define BIT_LEASED  0x400u
-#define BIT_SPIN    0x800u /* spin on the shared word, and never wait again */
 #define BIT_TIMER   0x80u /* the timer's bit on its own notification */
 #define BIT_SPARE   0x100u /* the spare line's bit on that same notification */
 #define MAGIC 0x5eaf00du
@@ -137,19 +136,26 @@ enum {
 #define TURN_CHILD 0x1u
 #define TURN_ROOT  0x2u
 
-/* The shared words: the child's message, the root task's answer, the turn, and the child's count as it spins. */
+/* The shared words: the child's message, the root task's answer, and the turn. */
 #define SHARED_MESSAGE 0
 #define SHARED_ANSWER  1
 #define SHARED_TURN    2
-#define SHARED_SPINS   3
 
-/* The most of its budget a share's account holds: a hundred ticks' worth on every board so far. */
-#define ACCOUNT_US 100000u
+/*
+ * How the root task splits the processor's units: it keeps the first ROOT_UNITS,
+ * the logger earns the next LOGGER_UNITS, and the child the half after them.
+ */
+#define ROOT_UNITS   28u
+#define LOGGER_UNITS 4u
+#define HALF_UNITS   (TIME_UNITS / 2)
+_Static_assert(ROOT_UNITS + LOGGER_UNITS == HALF_UNITS, "the child's half follows the logger's units");
 
-/* Threads the root task adds on its own share, each counting as it spins. */
+/* Threads the root task adds on the child's half once the child is done, each counting as it spins. */
 #define SPINNERS 3u
 #define SPINNER_STACK 0x100u
 #define SPIN_US 20000u
+#define UNITS_US 40000u
+#define CAPPED_US 80000u
 static volatile uint32_t spins[SPINNERS];
 
 static void puts(const char *s)
@@ -384,19 +390,13 @@ static void child_main(void)
                 : "child: cannot destroy the boot pool FAILED\n");
     rv_signal(CHILD_UP, BIT_POOLED);
 
-    /*
-     * The other half of the root task's check of shares: spin and count, alone on this share,
-     * until the root task takes the share back, which stops this thread for good.
-     */
-    do {
-        rv_wait(CHILD_DOWN, &bits);
-    } while (bits != BIT_SPIN);
+    /* Nothing more is asked of it: it waits until its pool goes, and it with it. */
     for (;;) {
-        shared[SHARED_SPINS]++;
+        rv_wait(CHILD_DOWN, &bits);
     }
 }
 
-/* The spinners, on the root task's share: each counts in a word of its own and never waits. */
+/* The spinners: each counts in a word of its own and never waits. */
 static void spin0(void)
 {
     for (;;) {
@@ -504,9 +504,15 @@ int main(void)
     expect("configure the logger",
            rv_invoke(OP_THREAD_CONFIGURE, SLOT_LOGGER, (uint32_t)&logger_main,
                      data_base + data_size / 2, 0));
-    /* A thread runs only on a share; the logger takes turns with this thread on its share. */
-    expect("put the logger on this thread's share",
-           rv_invoke(OP_SHARE_BIND, BOOT_CAP_SHARES, SLOT_LOGGER, 0, 0));
+    /*
+     * A thread runs only on units of the processor, and this one earns them all.
+     * It keeps some and gives the logger a few, so that the logger has time of its own while others spin;
+     * both are bound through the boot grant, and so run on spare time too.
+     */
+    expect("keep part of the processor",
+           rv_invoke(OP_TIME_BIND, BOOT_CAP_TIME, BOOT_CAP_THREAD, 0, ROOT_UNITS));
+    expect("give the logger units of its own",
+           rv_invoke(OP_TIME_BIND, BOOT_CAP_TIME, SLOT_LOGGER, ROOT_UNITS, LOGGER_UNITS));
     expect("start the logger", rv_invoke(OP_THREAD_RESUME, SLOT_LOGGER, 0, 0, 0));
 
     expect("free ram info", rv_untyped_info(BOOT_CAP_FREE_RAM, &free_base, &free_size, &free_mark));
@@ -567,17 +573,15 @@ int main(void)
            rv_invoke(OP_THREAD_CONFIGURE, SLOT_CHILD_THREAD, (uint32_t)&child_main,
                      child_data_base + CHUNK, 0));
     /*
-     * The child runs on a share of its own, the second, so it takes turns with this whole process.
-     * The first share holds the whole budget, and a share with time goes before one without,
-     * so the child's share gets half of it, and half the first share's account with it:
+     * The child earns the other half of the processor, carved out of the boot grant
+     * so that revoking below it stops the child alone.
+     * Its account starts empty and fills in two ticks, and then this thread and the child both have time:
      * while both want the processor, they take turns.
      */
-    expect("carve the child a share",
-           rv_invoke(OP_SHARE_CARVE, BOOT_CAP_SHARES, 1, 1, SLOT_CHILD_SHARE));
-    expect("give it half the processor",
-           rv_invoke(OP_SHARE_MOVE, BOOT_CAP_SHARES, 0, 1, BUDGET_WHOLE / 2));
-    expect("put the child on it",
-           rv_invoke(OP_SHARE_BIND, SLOT_CHILD_SHARE, SLOT_CHILD_THREAD, 0, 0));
+    expect("carve the child half the processor",
+           rv_invoke(OP_TIME_CARVE, BOOT_CAP_TIME, HALF_UNITS, HALF_UNITS, SLOT_HALF_TIME));
+    expect("bind the child to it",
+           rv_invoke(OP_TIME_BIND, SLOT_HALF_TIME, SLOT_CHILD_THREAD, 0, HALF_UNITS));
     expect("start the child",
            rv_invoke(OP_THREAD_RESUME, SLOT_CHILD_THREAD, 0, 0, 0));
 
@@ -780,93 +784,86 @@ int main(void)
     puts("root: period ok\n");
 
     /*
-     * Shares; see DESIGN.md, "Scheduling".
-     * Three spinners join this thread and the logger on the first share, and the child spins alone on the second.
-     * While this thread sleeps the shares split the time, so the child counts about as far as the three together,
-     * where turns by thread would give it a third as far.
-     * The spinners are bound through a capability of their own, so revoking it stops them alone.
+     * Units; see DESIGN.md, "Scheduling".
+     * The child is done, and its half goes to three spinners: the first earns a quarter of the processor
+     * without spare time, and the other two earn nothing and run on spare time alone.
+     * While this thread sleeps, the first runs about one tick in four, however many threads run on the rest,
+     * and no more, so the other two spin about three times as far together.
+     * The derived capability lies below the half, so revoking below the half stops all three.
      */
-    expect("carve this thread's share again",
-           rv_invoke(OP_SHARE_CARVE, BOOT_CAP_SHARES, 0, 1, SLOT_SPIN_SHARE));
+    expect("take the child's half back",
+           rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_HALF_TIME, 0, 0));
+    expect("derive the half without spare time",
+           rv_invoke(OP_CAP_DERIVE, BOOT_CAP_CAPTABLE, SLOT_CAPPED_TIME, SLOT_HALF_TIME, RIGHT_W));
     for (uint32_t i = 0; i < SPINNERS; i++) {
         expect("allocate a spinner",
                rv_invoke(OP_POOL_ALLOC, BOOT_CAP_POOL, CAP_THREAD, SLOT_SPINNER + i, BOOT_CAP_PROCESS));
         expect("configure it",
                rv_invoke(OP_THREAD_CONFIGURE, SLOT_SPINNER + i, (uint32_t)spinner_main[i],
                          data_base + data_size / 4 - i * SPINNER_STACK, 0));
-        expect("put it on this thread's share",
-               rv_invoke(OP_SHARE_BIND, SLOT_SPIN_SHARE, SLOT_SPINNER + i, 0, 0));
+        expect("bind it",
+               i == 0 ? rv_invoke(OP_TIME_BIND, SLOT_CAPPED_TIME, SLOT_SPINNER, 0, TIME_UNITS / 4)
+                      : rv_invoke(OP_TIME_BIND, SLOT_HALF_TIME, SLOT_SPINNER + i, 0, 0));
         expect("start it", rv_invoke(OP_THREAD_RESUME, SLOT_SPINNER + i, 0, 0, 0));
     }
-    expect("ask the child to spin", rv_signal(SLOT_DOWN, BIT_SPIN));
-    expect("let them spin", sleep_us(SPIN_US));
+    expect("let them spin", sleep_us(UNITS_US));
     /* Stopped before they are counted, since the tick would give them more turns meanwhile. */
-    expect("take the spinners' share back",
-           rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_SPIN_SHARE, 0, 0));
-    expect("take the child's share back",
-           rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_CHILD_SHARE, 0, 0));
-    uint32_t child_spun = shared[SHARED_SPINS], root_spun = spun();
+    expect("take the spinners' units back",
+           rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_HALF_TIME, 0, 0));
+    uint32_t root_spun = spun(), earned = spins[0], others = spins[1] + spins[2];
     for (uint32_t i = 0; i < SPINNERS; i++) {
         expect("every spinner had a turn", spins[i] != 0 ? KERR_OK : KERR_INVALID_ARG);
     }
-    expect("the two shares split the time",
-           2 * child_spun > root_spun && 2 * root_spun > child_spun ? KERR_OK : KERR_INVALID_ARG);
-    puts("root: shares ok\n");
+    expect("the quarter ran a quarter of the time",
+           2 * others > 3 * earned && others < 6 * earned ? KERR_OK : KERR_INVALID_ARG);
+    puts("root: units ok\n");
 
-    /* A thread without a share keeps its state and does not run, whoever else does. */
-    expect("sleep while they have no share", sleep_us(SLEEP_US));
-    expect("no thread without a share ran",
-           shared[SHARED_SPINS] == child_spun && spun() == root_spun ? KERR_OK : KERR_INVALID_ARG);
+    /* A thread bound to no units keeps its state and does not run, whoever else does. */
+    expect("sleep while they have no units", sleep_us(SLEEP_US));
+    expect("no thread without units ran", spun() == root_spun ? KERR_OK : KERR_INVALID_ARG);
     puts("root: unbind ok\n");
 
-    /* Bound again, a thread goes on where it stopped: the first spinner, on the child's share. */
+    /* Bound again, a thread goes on where it stopped: the first spinner, on spare time alone. */
     uint32_t first_spun = spins[0];
-    expect("put a spinner on the child's share",
-           rv_invoke(OP_SHARE_BIND, SLOT_CHILD_SHARE, SLOT_SPINNER, 0, 0));
+    expect("bind a spinner again",
+           rv_invoke(OP_TIME_BIND, SLOT_HALF_TIME, SLOT_SPINNER, 0, 0));
     expect("sleep while it spins", sleep_us(SLEEP_US));
-    expect("take the share back again",
-           rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_CHILD_SHARE, 0, 0));
+    expect("take its units back again",
+           rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_HALF_TIME, 0, 0));
     expect("it spun, and only it",
-           spins[0] > first_spun && spun() - spins[0] == root_spun - first_spun &&
-                   shared[SHARED_SPINS] == child_spun
-               ? KERR_OK : KERR_INVALID_ARG);
+           spins[0] > first_spun && spun() - spins[0] == root_spun - first_spun ? KERR_OK : KERR_INVALID_ARG);
     puts("root: rebind ok\n");
 
     /*
-     * Budgets; see DESIGN.md, "Scheduling".
-     * With an eighth and no spare time the spinner runs at most what the share's account holds,
-     * 13 ticks, and an eighth of the 201 ticks of the sleep, while the processor idles the rest:
-     * 20 on QEMU, since it spends what the move left the account, waits for it to fill, and spends it again.
-     * With spare time it runs all of the next 51, since nothing else wants the processor.
+     * Spare time; see DESIGN.md, "Scheduling".
+     * Without spare time a thread runs no more than its units earn, however idle the processor is otherwise.
+     * With an eighth and an account that starts empty, the spinner runs about 10 of the 81 ticks of the sleep,
+     * one in eight, and the processor idles the rest;
+     * with spare time it runs all of the next 41, since nothing else wants the processor.
      */
-    uint32_t budget, flags;
-    expect("keep an eighth of the processor on the child's share",
-           rv_invoke(OP_SHARE_MOVE, BOOT_CAP_SHARES, 1, 0, BUDGET_WHOLE / 2 - BUDGET_WHOLE / 8));
-    expect("take its spare time away", rv_invoke(OP_SHARE_SET, BOOT_CAP_SHARES, 1, 0, 0));
-    expect("it has an eighth and no spare time",
-           rv_share_info(BOOT_CAP_SHARES, 1, &budget, &flags) == KERR_OK &&
-                   budget == BUDGET_WHOLE / 8 && flags == 0
-               ? KERR_OK : KERR_INVALID_ARG);
+    expect("derive the half without spare time again",
+           rv_invoke(OP_CAP_DERIVE, BOOT_CAP_CAPTABLE, SLOT_CAPPED_TIME, SLOT_HALF_TIME, RIGHT_W));
     first_spun = spins[0];
-    expect("put the spinner on it once more",
-           rv_invoke(OP_SHARE_BIND, SLOT_CHILD_SHARE, SLOT_SPINNER, 0, 0));
-    expect("sleep for two accounts' worth", sleep_us(2 * ACCOUNT_US));
+    expect("bind the spinner to an eighth without spare time",
+           rv_invoke(OP_TIME_BIND, SLOT_CAPPED_TIME, SLOT_SPINNER, 0, TIME_UNITS / 8));
+    expect("sleep while it earns its time", sleep_us(CAPPED_US));
     uint32_t capped = spins[0] - first_spun;
-    expect("give it spare time", rv_invoke(OP_SHARE_SET, BOOT_CAP_SHARES, 1, SHARE_SPARE, 0));
+    expect("give it spare time",
+           rv_invoke(OP_TIME_BIND, SLOT_HALF_TIME, SLOT_SPINNER, 0, TIME_UNITS / 8));
     first_spun = spins[0];
-    expect("sleep for half an account's worth", sleep_us(ACCOUNT_US / 2));
+    expect("sleep while it runs on spare time", sleep_us(CAPPED_US / 2));
     uint32_t spare = spins[0] - first_spun;
-    expect("take the share back for good",
-           rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_CHILD_SHARE, 0, 0));
-    expect("it spun its account and an eighth, and all of the spare time",
-           8 * capped > spare && capped < spare ? KERR_OK : KERR_INVALID_ARG);
-    puts("root: budget ok\n");
+    expect("take its units back for good",
+           rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_HALF_TIME, 0, 0));
+    expect("it ran an eighth of the time, and all of the spare time",
+           2 * capped < spare && 8 * capped > spare ? KERR_OK : KERR_INVALID_ARG);
+    puts("root: spare ok\n");
 
     /*
      * The tick; see DESIGN.md, "Scheduling".
      * The timer interrupts only at a tick that could change what runs,
-     * so a thread that spins while every other thread waits runs without a trap
-     * until its account runs low, far past the spin here,
+     * so a thread that spins while every other thread waits runs without a trap,
+     * since it may go on with spare time whatever its account holds,
      * where a tick at every millisecond would end its turn only to hand it back.
      * It sleeps first so that the logger carries everything out and waits, and prints nothing as it spins.
      */

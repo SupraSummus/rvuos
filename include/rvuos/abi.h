@@ -53,7 +53,7 @@
 #define CAP_IRQ_LINE 9 /* a range of interrupt lines; no kernel object behind it */
 #define CAP_IRQ      10 /* one line bound to a notification; signals it when the line fires */
 #define CAP_CLOCK    11 /* the machine's counter: its rate, and a frame to read it through */
-#define CAP_SHARE    12 /* a range of the processor's shares; no kernel object behind it */
+#define CAP_TIME     12 /* a range of the processor's units of time; no kernel object behind it */
 
 /*
  * Rights bits.
@@ -65,7 +65,7 @@
  * Notification: RIGHT_W to signal, RIGHT_R to wait.
  * IrqLine: RIGHT_W to bind a line.
  * Irq: RIGHT_W to set or mask.
- * Share: RIGHT_W to bind a thread and to move budget, RIGHT_X to set flags.
+ * Time: RIGHT_W to bind a thread, RIGHT_X to let the threads bound through it run on spare time.
  * Debug, Clock: any right.
  * Copying a capability can only remove rights.
  */
@@ -89,18 +89,17 @@
  * The timer tick stops preempting,
  * because a transcript the host build must reproduce
  * cannot contain a switch that lands between two instructions.
- * Every share's account is filled, see OP_SHARE_MOVE,
+ * Every thread's account is filled, see OP_TIME_BIND,
  * so that the host build starts from the same accounts.
  * It cannot be turned off again, so a traced program cannot hide.
  */
 #define OP_DEBUG_TRACE 10
 /*
  * Debug: what the timer tick does, on request.
- * Time moves by one tick, charged to the share whose turn it is,
- * every timer line that is due signals, a drained share whose account filled has time again,
- * and the running share's turn ends: the caller goes to the back of its share's ring,
- * the share to the back of the queue its account puts it on, and the next share has its turn,
- * and the caller stays ready.
+ * Time moves by one tick, charged to the caller while it has time,
+ * every timer line that is due signals, a thread whose account reached a tick has time again,
+ * and the caller's turn ends: it goes to the back of the queue its account puts it on,
+ * the next thread has its turn, and the caller stays ready.
  * Works while tracing is on, unlike the tick itself;
  * see DESIGN.md, "Verification".
  */
@@ -261,8 +260,8 @@
 #define OP_THREAD_CONFIGURE 12
 /*
  * Thread (RIGHT_W): make a stopped thread ready.
- * It runs once it is bound to a share, see OP_SHARE_BIND,
- * when that share's turn comes and the threads before it on the share have had theirs.
+ * It runs once it is bound to units of time, see OP_TIME_BIND,
+ * when its turn comes.
  * Fails with KERR_STATE unless the thread is stopped.
  */
 #define OP_THREAD_RESUME 13
@@ -345,63 +344,30 @@
 #define OP_CLOCK_FRAME 26
 
 /*
- * Share: derive a smaller range of shares with the same rights.
- * a1 = offset from the first share, a2 = count, a3 = destination slot.
+ * Time: derive a smaller range of units with the same rights.
+ * a1 = offset from the first unit, a2 = count, a3 = destination slot.
  * Like OP_IRQ_CARVE, this is a table operation that touches no kernel memory,
  * and the new capability is a child of the invoked one.
  */
-#define OP_SHARE_CARVE 28
+#define OP_TIME_CARVE 28
 /*
- * Share (RIGHT_W): run a thread on one of the capability's shares.
+ * Time (RIGHT_W): bind a thread to units of the capability, which it then earns.
  * a1 = the slot of the Thread capability, which needs RIGHT_W,
- * a2 = the share's offset from the first one the capability names.
- * A thread runs only while it is bound to a share,
- * and ready threads take turns first by share, then within each share;
- * see DESIGN.md, "Scheduling".
- * The thread leaves the share it was bound to, if any, whatever capability it was bound through.
- * The binding is a child of the invoked capability in the derivation tree,
- * so revoking below that capability unbinds the thread:
- * it keeps its state, ready, waiting or stopped, and does not run until it is bound again.
+ * a2 = the offset of the first unit, which must lie within the capability even for none,
+ * a3 = how many units, zero for none.
+ * Each unit earns the thread's account a part of a tick every tick, and a turn costs it a tick;
+ * with RIGHT_X on the capability the thread also runs on spare time, for free.
+ * See DESIGN.md, "Scheduling".
+ * Fails with KERR_OVERLAP if another thread earns one of the units.
+ * The thread leaves the units it earned before, and keeps what its account held, up to what the new units hold.
+ * The binding is a child of the invoked capability, so revoking below that capability unbinds the thread:
+ * it keeps its state and its account is emptied, and it does not run until it is bound again.
  * A thread unbound or moved while it runs, the caller itself among them, finishes the turn it had.
  */
-#define OP_SHARE_BIND 29
-/*
- * Share: describe one of the capability's shares. a1 = its offset from the first one.
- * Returns a1 = its budget and a2 = its flags.
- * How much its account holds is not told: that would be a clock.
- */
-#define OP_SHARE_INFO 30
-/*
- * Share (RIGHT_W): move budget from one of the capability's shares to another.
- * a1 = the source's offset from the first share, a2 = the destination's,
- * a3 = how much, at most what the source holds.
- * A budget is a share's part of the processor, counted in BUDGET_WHOLE parts of it:
- * what the share's account gains every tick, up to a tenth of a second's worth.
- * The budgets of all the shares add up to BUDGET_WHOLE, and a move keeps them so;
- * it moves as much of the source's account with the budget as that budget would hold when full.
- * A share with time in its account takes its turns before a share without,
- * and a share that spends its account below a tick has no time until it is full again,
- * and while it has none, without SHARE_SPARE, takes no turn at all;
- * see DESIGN.md, "Scheduling".
- * A share keeps its budget, its account and its flags through a revoke of its capabilities,
- * as a frame keeps its bytes, so whoever lends it again sets them first.
- */
-#define OP_SHARE_MOVE 31
-/*
- * Share (RIGHT_X): set the flags of one of the capability's shares.
- * a1 = its offset from the first share, a2 = the flags, SHARE_SPARE or none;
- * any other bit fails with KERR_INVALID_ARG.
- * A share without SHARE_SPARE runs on its account alone:
- * at most its part of the processor and a full account, however idle the processor is otherwise.
- */
-#define OP_SHARE_SET 32
-/* The share runs on spare time too, which costs its account nothing: time no share with time in its account wants. */
-#define SHARE_SPARE 0x1
-/* The whole processor, as a budget; see OP_SHARE_MOVE. */
-#define BUDGET_WHOLE 0x10000u
+#define OP_TIME_BIND 29
 
 /* One above the highest operation code; the fuzzer's mutator draws below it. */
-#define OP_COUNT 33
+#define OP_COUNT 30
 
 /*
  * Capability slots the kernel fills in the root task's table at boot.
@@ -422,7 +388,7 @@
 #define BOOT_CAP_LOG       12 /* Frame, read and write: the kernel's log, see struct rvuos_log */
 #define BOOT_CAP_TIMER_LINES 13 /* IrqLine: every timer line, TIMER_LINES of them */
 #define BOOT_CAP_CLOCK     14 /* Clock: the machine's counter */
-#define BOOT_CAP_SHARES    15 /* Share: every share, with SHARE_SPARE; the first holds the whole budget and the root thread */
+#define BOOT_CAP_TIME      15 /* Time: every unit, with RIGHT_W and RIGHT_X; the root thread earns them all */
 #define BOOT_CAP_COUNT     16
 
 /*
@@ -484,6 +450,6 @@ struct replay_record {
 #define PROCESS_REGION_SLOTS 8
 #define POOL_MIN_SIZE 64 /* the smallest pool OP_UNTYPED_RETYPE makes */
 #define TIMER_LINES 16 /* on the whole machine; see BOOT_CAP_TIMER_LINES */
-#define SHARES 32 /* of the processor, on the whole machine; see BOOT_CAP_SHARES */
+#define TIME_UNITS 64 /* of the processor, on the whole machine; see BOOT_CAP_TIME */
 
 #endif

@@ -1,8 +1,9 @@
-The tick looks at the drained shares only once the count is past the release.
-A share whose account filled would wait a tick longer on the spent queue;
+The tick looks at the units only once the count is past the release.
+A thread whose account reached a tick would wait a tick longer on the spent queue;
 the release lies ahead of the count.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: a thread waits on another queue than its account says
 Report: the release is for a tick already past
 
 diff --git a/kernel/sched.c b/kernel/sched.c

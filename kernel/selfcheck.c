@@ -288,6 +288,36 @@ static void check_process(const struct process *proc)
 /* Threads that belong on a queue, and threads found on one; the two counts must agree. */
 static uint32_t owed_threads, queued_threads;
 
+/* The units the threads the walk met are bound to. */
+static uint32_t units_seen;
+
+/* A thread's account at the count, its stamp's balance and a part for each unit every tick since, held to the cap. */
+static uint32_t account_now(const struct thread *t)
+{
+    uint64_t balance = t->balance + (uint64_t)(sched_ticks - t->stamp) * thread_units(t);
+    uint32_t cap = thread_units(t) * ACCOUNT_TICKS;
+    return balance > cap ? cap : (uint32_t)balance;
+}
+
+/*
+ * The queue a thread belongs on: none unless it is ready, bound, and it is not its turn;
+ * the run queue with a tick in its account, else the spare queue with spare time,
+ * else the spent queue with units, and none without.
+ */
+static uint8_t queue_owed(const struct thread *t)
+{
+    if (t->state != THREAD_READY || t == turn || t->time.type != CAP_BOUND) {
+        return QUEUE_NONE;
+    }
+    if (account_now(t) >= TICK_PARTS) {
+        return QUEUE_RUN;
+    }
+    if (thread_spare(t)) {
+        return QUEUE_SPARE;
+    }
+    return thread_units(t) != 0 ? QUEUE_SPENT : QUEUE_NONE;
+}
+
 static void check_thread(const struct thread *t)
 {
     struct obj_header *p = object_find(t->proc);
@@ -300,14 +330,47 @@ static void check_thread(const struct thread *t)
     if (t->flags & ~(uint8_t)THREAD_UNTRACED) {
         fail("thread has unknown flags", v2p(t), t->flags, 0);
     }
-    /* A thread's share is a leaf of the tree, which the tree check reads the links of. */
-    const struct cap *b = &t->share;
+    /*
+     * A thread's units are a leaf of the tree, which the tree check reads the links of, and it alone earns them.
+     * They were bound through a capability with the right to bind, whose rights they carry.
+     */
+    const struct cap *b = &t->time;
     if (b->type != CAP_NONE &&
-        (b->type != CAP_BOUND || b->rights != RIGHT_W || b->a >= SHARES || b->b != 0 || b->index != 0)) {
-        fail("thread's share is malformed", v2p(t), b->type, b->a);
+        (b->type != CAP_BOUND || (b->rights & RIGHT_W) == 0 || (b->rights & ~(RIGHT_W | RIGHT_X)) != 0 ||
+         b->a >= TIME_UNITS ||
+         b->b > TIME_UNITS - b->a || b->index != 0)) {
+        fail("thread's units are malformed", v2p(t), b->type, b->a);
     }
     if (b->type != CAP_NONE && b->child != 0) {
-        fail("something is derived from a thread's share", v2p(t), b->child, 0);
+        fail("something is derived from a thread's units", v2p(t), b->child, 0);
+    }
+    for (uint32_t i = 0; b->type != CAP_NONE && i < b->b; i++) {
+        if (unit_thread[b->a + i] != v2p(t)) {
+            fail("a unit a thread is bound to names another", v2p(t), b->a + i, unit_thread[b->a + i]);
+        }
+    }
+    units_seen += thread_units(t);
+    /* Every account holds at most its cap, and so nothing without units, and was last counted no later than the count. */
+    if (t->balance > thread_units(t) * ACCOUNT_TICKS) {
+        fail("thread's account holds more than its cap", v2p(t), t->balance, thread_units(t));
+    }
+    if ((int32_t)(sched_ticks - t->stamp) < 0) {
+        fail("thread's account is stamped ahead of the count", v2p(t), t->stamp, sched_ticks);
+    }
+    uint8_t owed = queue_owed(t);
+    if (t->queue != owed) {
+        fail(owed == QUEUE_NONE ? "a thread names a queue it is not for"
+             : t->queue == QUEUE_NONE ? "a ready thread that may run waits on no queue"
+                                      : "a thread waits on another queue than its account says",
+             v2p(t), t->queue, owed);
+    }
+    /* One with units that waits without time reaches a tick no earlier than the release, which gives it time then. */
+    if ((owed == QUEUE_SPARE || owed == QUEUE_SPENT) && thread_units(t) != 0) {
+        uint32_t missing = TICK_PARTS - account_now(t);
+        uint32_t at = sched_ticks + (missing + thread_units(t) - 1) / thread_units(t);
+        if ((int32_t)(at - nearest_release) < 0) {
+            fail("a thread's account reaches a tick before the release", v2p(t), at, nearest_release);
+        }
     }
     switch (t->state) {
     case THREAD_STOPPED:
@@ -315,7 +378,7 @@ static void check_thread(const struct thread *t)
         if (t->waiting_on != 0) {
             fail("runnable thread waits on something", v2p(t), t->waiting_on, t->state);
         }
-        if (t->state == THREAD_READY && t != current && b->type == CAP_BOUND) {
+        if (owed != QUEUE_NONE) {
             owed_threads++;
         } else if (t->queue_next != 0 || t->queue_prev != 0) {
             fail("thread on no queue is linked into one", v2p(t), t->queue_next, t->state);
@@ -337,12 +400,12 @@ static void check_thread(const struct thread *t)
 
 /*
  * A queue is a ring of live threads, each linked back to the one before,
- * none of them running, and each in the state and waiting on what the queue is for,
- * and on a share's ring bound to that share.
+ * none of them running, and each in the state and waiting on what the queue is for:
+ * a notification's waiters, or one of the scheduler's queues, which the thread names.
  * The back links make the walk close at the oldest or fail:
  * no thread can be entered twice from two different predecessors.
  */
-static void check_queue(paddr_t head, uint8_t state, paddr_t waiting_on, const struct share *share)
+static void check_queue(paddr_t head, uint8_t state, paddr_t waiting_on, uint8_t queue)
 {
     if (head == 0) {
         return;
@@ -354,8 +417,7 @@ static void check_queue(paddr_t head, uint8_t state, paddr_t waiting_on, const s
             fail("queue holds something that is not a thread", head, at, 0);
         }
         const struct thread *t = (const struct thread *)o;
-        if (t->state != state || t->waiting_on != waiting_on || t == current ||
-            (share != NULL && thread_share(t) != share)) {
+        if (t->state != state || t->waiting_on != waiting_on || t == current || t->queue != queue) {
             fail("queue holds a thread it is not for", head, at, t->state);
         }
         struct obj_header *next = object_find(t->queue_next);
@@ -368,175 +430,52 @@ static void check_queue(paddr_t head, uint8_t state, paddr_t waiting_on, const s
     } while (at != head);
 }
 
-/* True if p points at one of the shares. */
-static bool is_share(const struct share *p)
-{
-    for (unsigned i = 0; i < SHARES; i++) {
-        if (p == &shares[i]) {
-            return true;
-        }
-    }
-    return false;
-}
-
-/* The three queues a share with a ready thread waits on, in the order the index below gives them. */
-enum { QUEUE_RUN, QUEUE_SPARE, QUEUE_SPENT, QUEUES };
-static struct share **const share_queues[QUEUES] = { &run_queue, &spare_queue, &spent_queue };
-
-/* Which queue a share is on by its own link, QUEUES for none, or something that is no queue. */
-static unsigned queue_index(const struct share *s)
-{
-    for (unsigned q = 0; q < QUEUES; q++) {
-        if (s->queue == share_queues[q]) {
-            return q;
-        }
-    }
-    if (s->queue != NULL) {
-        fail("share names a queue there is not", (uint32_t)(s - shares), 0, 0);
-    }
-    return QUEUES;
-}
-
 /*
- * A queue is a ring of shares, each linked back to the one before and naming the queue,
- * and it holds as many as want to be on it.
+ * Each unit names the live thread that earns it, or none, and check_thread has held every thread's units to the table,
+ * so as many units named as units bound leaves no unit naming a thread that does not earn it.
+ * The scheduler's queues hold the threads that name them, and check_thread counted those owed a place on one.
+ * Something runs, so it is the running thread's turn, and its account is counted up to the count;
+ * the release lies ahead of the count.
  */
-static void check_share_queue(unsigned q, uint32_t owed)
+static void check_scheduler(void)
 {
-    uint32_t queued = 0;
-    const struct share *head = *share_queues[q];
-    const struct share *at = head;
-    while (at != NULL) {
-        if (!is_share(at) || !is_share(at->next) || at->next->prev != at || at->queue != share_queues[q]) {
-            fail("share queue is not linked back", q, (uint32_t)(at - shares), 0);
-        }
-        if (++queued > SHARES) {
-            fail("share queue does not close", q, queued, 0);
-        }
-        at = at->next;
-        if (at == head) {
-            break;
-        }
+    if (current != NULL && turn != current) {
+        fail("it is not the running thread's turn", v2p(current), 0, 0);
     }
-    if (owed != queued) {
-        fail("share queue does not hold every share it is for", q, owed, queued);
-    }
-}
-
-/* The most a share's account may hold: its budget's part of ACCOUNT_TICKS ticks, in whole ticks. */
-static uint32_t cap_of(const struct share *s)
-{
-    uint32_t ticks = (s->budget * ACCOUNT_TICKS + TICK_PARTS - 1) / TICK_PARTS;
-    return ticks * TICK_PARTS;
-}
-
-/*
- * A share's account at the count, its stamp's balance and its budget for every tick since, held to the cap,
- * and whether it is drained then: a drained share with a budget has time again once full.
- */
-static uint32_t account_now(const struct share *s, bool *drained)
-{
-    uint64_t balance = s->balance + (uint64_t)(sched_ticks - s->stamp) * s->budget;
-    if (balance > cap_of(s)) {
-        balance = cap_of(s);
-    }
-    *drained = s->drained && (s->budget == 0 || balance != cap_of(s));
-    return (uint32_t)balance;
-}
-
-/*
- * Every share's ring holds its ready threads but the running one, which check_queue reads.
- * Every account holds at most its cap and is stamped no later than the count,
- * a share with time has at least a tick in its account, and one with no budget has no time;
- * the share whose turn it is has its account up to the count while it has time.
- * A share with a ready thread but the one whose turn it is waits on one queue:
- * the run queue while it has time, else the spare queue with SHARE_SPARE, else the spent queue;
- * any other share waits on none.
- * A drained share that waits has an account not full yet, so the release has given time to every one due,
- * and it fills no earlier than the release, which lies ahead of the count.
- * Something runs, so it is some share's turn, and the budgets add up to the whole processor.
- */
-static void check_shares(void)
-{
-    if (current != NULL && (turn == NULL || !is_share(turn))) {
-        fail("it is no share's turn", 0, 0, 0);
+    if (turn != NULL && turn->stamp != sched_ticks) {
+        fail("the ticks of a turn were not charged to its thread", v2p(turn), turn->stamp, sched_ticks);
     }
     if ((int32_t)(nearest_release - sched_ticks) <= 0) {
         fail("the release is for a tick already past", nearest_release, sched_ticks, 0);
     }
-    uint32_t owed[QUEUES] = { 0 };
-    uint32_t budget = 0;
-    for (unsigned i = 0; i < SHARES; i++) {
-        const struct share *s = &shares[i];
-        check_queue(s->threads, THREAD_READY, 0, s);
-        if (s->budget > BUDGET_WHOLE || (s->flags & ~(uint32_t)SHARE_SPARE) != 0) {
-            fail("share has a budget or flags it cannot have", i, s->budget, s->flags);
+    uint32_t named = 0;
+    for (uint32_t i = 0; i < TIME_UNITS; i++) {
+        if (unit_thread[i] == 0) {
+            continue;
         }
-        if (s->balance > cap_of(s)) {
-            fail("share's account holds more than its cap", i, s->balance, cap_of(s));
+        struct obj_header *o = object_find(unit_thread[i]);
+        if (o == NULL || o->type != CAP_THREAD) {
+            fail("a unit names something that is not a live thread", i, unit_thread[i], 0);
         }
-        if ((int32_t)(sched_ticks - s->stamp) < 0) {
-            fail("share's account is stamped ahead of the count", i, s->stamp, sched_ticks);
-        }
-        if (!s->drained && (s->balance < TICK_PARTS || s->budget == 0)) {
-            fail("share has time without a tick in its account", i, s->balance, s->budget);
-        }
-        /* Every tick of a turn with time is charged to its share as it passes, and nothing else moves its stamp. */
-        if (s == turn && !s->drained && s->stamp != sched_ticks) {
-            fail("the ticks of a turn were not charged to its share", i, s->stamp, sched_ticks);
-        }
-        budget += s->budget;
-        unsigned want = QUEUES;
-        if (s->threads != 0 && s != turn) {
-            want = !s->drained ? QUEUE_RUN : (s->flags & SHARE_SPARE) ? QUEUE_SPARE : QUEUE_SPENT;
-        }
-        unsigned on = queue_index(s);
-        if (on != want) {
-            fail(want == QUEUES ? "a queue holds a share it is not for"
-                 : on == QUEUES ? "a share with a ready thread waits on no queue"
-                                : "a share waits on another queue than its account says",
-                 i, on, want);
-        }
-        if (on == QUEUES && (s->next != NULL || s->prev != NULL)) {
-            fail("share on no queue is linked into one", i, 0, 0);
-        }
-        if (on != QUEUES) {
-            owed[on]++;
-        }
-        if (s->drained && on != QUEUES && s->budget != 0) {
-            bool drained;
-            account_now(s, &drained);
-            if (!drained) {
-                fail("a drained share waits with its account full", i, s->balance, s->stamp);
-            }
-            uint32_t missing = cap_of(s) - s->balance;
-            uint32_t full = s->stamp + missing / s->budget + (missing % s->budget != 0);
-            if ((int32_t)(full - nearest_release) < 0) {
-                fail("a drained share's account fills before the release", i, full, nearest_release);
-            }
-        }
+        named++;
     }
-    _Static_assert((uint64_t)BUDGET_WHOLE * SHARES <= UINT32_MAX &&
-                   (uint64_t)BUDGET_WHOLE * ACCOUNT_TICKS + TICK_PARTS <= UINT32_MAX,
-                   "the sums above do not wrap");
-    if (budget != BUDGET_WHOLE) {
-        fail("the budgets of the shares do not add up to the whole processor", budget, 0, 0);
+    if (named != units_seen) {
+        fail("a unit names a thread that does not earn it", named, units_seen, 0);
     }
-    for (unsigned q = 0; q < QUEUES; q++) {
-        check_share_queue(q, owed[q]);
-    }
+    check_queue(run_queue, THREAD_READY, 0, QUEUE_RUN);
+    check_queue(spare_queue, THREAD_READY, 0, QUEUE_SPARE);
+    check_queue(spent_queue, THREAD_READY, 0, QUEUE_SPENT);
 }
 
 /*
  * The timer interrupts only at a tick that could change what runs, and a trap counts the others.
  * The nearest deadline it wakes for lies ahead of the count, and check_irq holds every armed timer line to it.
  * While a thread runs, every tick the timer lets pass would hand the processor back to that thread:
- * it is on the share whose turn it is, which has no other thread ready and would have the next turn again,
- * with time and no share on the run queue, or drained with spare time and no share on either queue;
- * and none of them is the release, the nearest deadline, or the tick at which that share's account
- * leaves it less than a tick, or fills while it is drained.
+ * nobody is on the run queue, and it has time, or may run on spare time with nobody on the spare queue;
+ * and none of them is the release, the nearest deadline,
+ * or, while it could not go on alone on spare time, the tick that leaves its account less than a tick.
  * The tick the timer was last set for is one of those, a later one only after a change that marked it stale.
- * check_shares has made sure that it is some share's turn.
+ * check_scheduler has made sure that it is the running thread's turn.
  */
 static void check_wake(void)
 {
@@ -558,19 +497,16 @@ static void check_wake(void)
         }
         return;
     }
-    const struct share *s = turn;
-    bool drained;
-    uint32_t balance = account_now(s, &drained);
-    if (thread_share(current) != s || s->threads != 0 || run_queue != NULL ||
-        (drained && !((s->flags & SHARE_SPARE) && spare_queue == NULL))) {
-        fail("the timer lets a tick pass that ends the turn", wake, (uint32_t)(s - shares), 0);
+    const struct thread *t = turn;
+    uint32_t balance = account_now(t);
+    bool time = balance >= TICK_PARTS;
+    bool alone = thread_spare(t) && spare_queue == 0;
+    if (run_queue != 0 || (!time && !alone)) {
+        fail("the timer lets a tick pass that ends the turn", wake, v2p(t), balance);
     }
-    /* On the tick before the timer's the account still has a tick in it, or while drained is not full yet. */
-    if (!drained && (uint64_t)(wake - 1) * (TICK_PARTS - s->budget) > balance - TICK_PARTS) {
-        fail("the timer lets the tick pass that drains the turn's account", wake, balance, s->budget);
-    }
-    if (drained && s->budget != 0 && balance + (uint64_t)(wake - 1) * s->budget >= cap_of(s)) {
-        fail("the timer lets the tick pass that fills the turn's account", wake, balance, s->budget);
+    /* On the tick before the timer's the account still has a tick in it, unless it may go on alone on spare time. */
+    if (time && !alone && (uint64_t)(wake - 1) * (TICK_PARTS - thread_units(t)) > balance - TICK_PARTS) {
+        fail("the timer lets the tick pass that drains the turn's account", wake, balance, thread_units(t));
     }
     if (wake > nearest_release - sched_ticks) {
         fail("the timer lets the release pass", wake, nearest_release, sched_ticks);
@@ -716,13 +652,13 @@ static void check_captable(const struct captable *table)
                 fail("line capability with rights beyond the grant", v2p(table), i, c->rights);
             }
             break;
-        case CAP_SHARE:
-            /* The root task received every share there is, with RIGHT_W and RIGHT_X; nothing widens that. */
-            if (c->b == 0 || c->a >= SHARES || c->b > SHARES - c->a) {
-                fail("share capability outside the shares there are", v2p(table), i, c->a);
+        case CAP_TIME:
+            /* The root task received every unit there is, with RIGHT_W and RIGHT_X; nothing widens that. */
+            if (c->b == 0 || c->a >= TIME_UNITS || c->b > TIME_UNITS - c->a) {
+                fail("time capability outside the units there are", v2p(table), i, c->a);
             }
             if (c->rights & ~(RIGHT_W | RIGHT_X)) {
-                fail("share capability with rights beyond the grant", v2p(table), i, c->rights);
+                fail("time capability with rights beyond the grant", v2p(table), i, c->rights);
             }
             break;
         case CAP_POOL:
@@ -749,7 +685,7 @@ static void check_captable(const struct captable *table)
  *
  * Its nodes are the slots of every live table,
  * the table slot and region slots of every live process
- * and the share of every live thread,
+ * and the units of every live thread,
  * linked by physical address and never checked on use,
  * so every link must land on a live node and the shape must be exactly a forest:
  * the children of a node form one ring that closes through the node,
@@ -760,7 +696,7 @@ static void check_captable(const struct captable *table)
  * A node is derived from its parent: the same object with no more rights,
  * a range within the parent's with no more rights,
  * or an object built on the parent's range, a pool on a region, an Irq on a line,
- * a thread's share on the shares it was bound through,
+ * a thread's units on the units it was bound through,
  * or the counter's block, or a region installed from it, below the clock.
  */
 
@@ -840,7 +776,7 @@ static bool derived_from(const struct cap *c, const struct cap *p)
         return (narrower || c->type == CAP_RETYPED) && range_within(base, size, pbase, p->b);
     }
     if (c->type == p->type) {
-        if (c->type == CAP_FRAME || c->type == CAP_IRQ_LINE || c->type == CAP_SHARE) {
+        if (c->type == CAP_FRAME || c->type == CAP_IRQ_LINE || c->type == CAP_TIME) {
             return narrower && range_within(c->a, c->b, p->a, p->b);
         }
         return narrower && (c->type == CAP_DEBUG || c->type == CAP_CLOCK || c->a == p->a);
@@ -856,9 +792,9 @@ static bool derived_from(const struct cap *c, const struct cap *p)
     if (c->type == CAP_INSTALLED && p->type == CAP_FRAME) {
         return narrower && range_within(c->a, c->b, p->a, p->b);
     }
-    /* A thread's share is one of the shares it was bound through. */
-    if (c->type == CAP_BOUND && p->type == CAP_SHARE) {
-        return narrower && c->a - p->a < p->b;
+    /* A thread's units lie among those it was bound through, and the first of them does even for none. */
+    if (c->type == CAP_BOUND && p->type == CAP_TIME) {
+        return narrower && c->a - p->a < p->b && c->b <= p->b - (c->a - p->a);
     }
     /* Below a pool's node lies every capability to the pool and to its objects. */
     if (p->type == CAP_RETYPED || p->type == CAP_POOL) {
@@ -1060,6 +996,7 @@ void selfcheck_run(void)
 
     /* check_pools() ran first, so the flat walk rests on checked headers. */
     owed_threads = queued_threads = 0;
+    units_seen = 0;
     armed_seen = 0;
     for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
         switch (o->type) {
@@ -1073,7 +1010,7 @@ void selfcheck_run(void)
             check_captable((struct captable *)o);
             break;
         case CAP_NOTIFICATION:
-            check_queue(((struct notification *)o)->waiters, THREAD_WAITING, v2p(o), NULL);
+            check_queue(((struct notification *)o)->waiters, THREAD_WAITING, v2p(o), QUEUE_NONE);
             break;
         case CAP_IRQ:
             check_irq((struct irq *)o);
@@ -1082,7 +1019,7 @@ void selfcheck_run(void)
             break;
         }
     }
-    check_shares();
+    check_scheduler();
     check_wake();
     /* Every queued thread is one its queue is for, so equal counts leave none out. */
     if (owed_threads != queued_threads) {
@@ -1102,7 +1039,7 @@ void selfcheck_run(void)
         if (o == NULL || o->type != CAP_THREAD) {
             fail("current thread is not a live object", v2p(current), 0, 0);
         }
-        /* It may have lost its share during its turn, which it finishes. */
+        /* It may have lost its units during its turn, which it finishes. */
         if (current->state != THREAD_READY) {
             fail("the running thread is not runnable", v2p(current), current->state, 0);
         }

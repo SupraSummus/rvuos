@@ -1,20 +1,19 @@
-A ready thread bound to a share is not put on the share's ring.
-It would never get the processor;
-every ready thread with a share but the running one is on its share's ring.
+A thread bound to units is not settled: it joins no queue, and its account is not held to what the new units hold.
+A ready thread would never get the processor, and one moved to fewer units would keep what it saved under more;
+every ready thread but the running one that may run waits on the queue its account and binding say,
+and no account holds more than its cap.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
-Report: a waiting or ready thread is on no queue
+Report: thread's account holds more than its cap
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -178,9 +178,6 @@ void sched_bind(struct thread *t, uint32_t share, struct cap *parent)
+@@ -259,7 +259,6 @@ void sched_bind(struct thread *t, uint32_t first, uint32_t count, uint8_t rights
      }
-     t->share = (struct cap){ .type = CAP_BOUND, .rights = RIGHT_W, .a = share };
-     cap_attach(parent, &t->share);
--    if (t->state == THREAD_READY && t != current) {
--        enqueue(t);
--    }
+     /* What the account held stays, and settling holds it to what the new units hold at most. */
+     t->balance = kept;
+-    thread_settle(t);
  }
  
  void sched_unbind(struct cap *bound)

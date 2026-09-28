@@ -1,0 +1,19 @@
+A bind gives the thread spare time whatever the invoked capability's rights.
+A thread lent units without RIGHT_X to hold it to them would run on spare time all the same;
+a binding carries no more rights than the capability it was made through.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: slot is not derived from its parent
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -578,7 +578,7 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
+             }
+         }
+         /* The binding hangs below the invoked capability, so a revoke above it unbinds the thread. */
+-        sched_bind(target, first, count, cap->rights, slot_node(t, slot));
++        sched_bind(target, first, count, RIGHT_W | RIGHT_X, slot_node(t, slot));
+         return KERR_OK;
+     }
+     default:

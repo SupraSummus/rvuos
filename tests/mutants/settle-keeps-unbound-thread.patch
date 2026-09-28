@@ -1,0 +1,19 @@
+A thread that may no longer run stays on the queue it waited on.
+A thread unbound while it waited would still take turns;
+a thread names a queue only while its account and binding put it on one.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: a thread names a queue it is not for
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -205,7 +205,7 @@ static void thread_settle(struct thread *t)
+     wake_stale = true;
+     account_refill(t);
+     uint8_t queue = thread_queue(t, t->balance);
+-    if (queue != t->queue) {
++    if (queue != QUEUE_NONE && queue != t->queue) {
+         if (t->queue != QUEUE_NONE) {
+             ring_remove(queue_head(t->queue), t);
+         }

@@ -129,7 +129,7 @@ int cap_store_beside(struct captable *table, uint32_t slot, const struct cap *ca
     return err;
 }
 
-/* Empty a node the tree no longer names. An installed region is unmapped as well, and a thread's share unbound. */
+/* Empty a node the tree no longer names. An installed region is unmapped as well, and a thread's units unbound. */
 static void clear_node(struct cap *n)
 {
     if (n->type == CAP_INSTALLED) {
@@ -292,10 +292,10 @@ struct cap cap_to_lines(uint32_t first, uint32_t count, uint8_t rights)
     return c;
 }
 
-struct cap cap_to_shares(uint32_t first, uint32_t count, uint8_t rights)
+struct cap cap_to_time(uint32_t first, uint32_t count, uint8_t rights)
 {
     struct cap c = {
-        .type = CAP_SHARE,
+        .type = CAP_TIME,
         .rights = rights,
         .a = first,
         .b = count,

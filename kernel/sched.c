@@ -13,11 +13,11 @@ struct thread *current;
 uint32_t sched_ticks;
 uint32_t trace_wake_bits;
 
-struct share shares[SHARES];
-struct share *run_queue;
-struct share *spare_queue;
-struct share *spent_queue;
-struct share *turn;
+paddr_t unit_thread[TIME_UNITS];
+paddr_t run_queue;
+paddr_t spare_queue;
+paddr_t spent_queue;
+struct thread *turn;
 uint32_t armed_sources;
 uint32_t nearest_deadline = NEAREST_NONE;
 uint32_t nearest_release = NEAREST_NONE;
@@ -56,7 +56,7 @@ void irq_set_bits(struct irq *irq, uint32_t bits)
 /*
  * A thread is on at most one ring, through queue_next and queue_prev:
  * its notification's waiters while it waits,
- * or its share's while it is ready, bound, and another thread runs.
+ * or one of the scheduler's queues while it is ready, may run, and another thread runs.
  * A ring's head names the oldest, so the newest is that one's queue_prev.
  */
 static void ring_push(paddr_t *head, struct thread *t)
@@ -104,285 +104,218 @@ static void unwait(struct thread *t)
 }
 
 /*
- * A queue is a ring of shares as a share's ring is one of threads, oldest first,
- * and a share is on one exactly while it has a ready thread and it is not its turn:
- * the run queue while it has time, else the spare queue or the spent queue by its flags.
+ * A ready thread that may run and whose turn it is not waits on one of three queues,
+ * the run queue while it has a tick in its account, else the spare queue or the spent queue by its binding.
  * Taking from the front and joining at the back, of each, is the whole scheduling policy.
  */
-static void share_push(struct share **queue, struct share *s)
+static paddr_t *queue_head(uint8_t queue)
 {
-    if (*queue == NULL) {
-        s->next = s->prev = s;
-        *queue = s;
-    } else {
-        s->next = *queue;
-        s->prev = (*queue)->prev;
-        (*queue)->prev->next = s;
-        (*queue)->prev = s;
-    }
-    s->queue = queue;
+    return queue == QUEUE_RUN ? &run_queue : queue == QUEUE_SPARE ? &spare_queue : &spent_queue;
 }
 
-static void share_remove(struct share *s)
+/* The most a thread's account holds: a tenth of a second's worth of its units, none without. */
+static uint32_t account_cap(const struct thread *t)
 {
-    struct share **queue = s->queue;
-    if (s->next == s) {
-        *queue = NULL;
-    } else {
-        s->prev->next = s->next;
-        s->next->prev = s->prev;
-        if (*queue == s) {
-            *queue = s->next;
-        }
-    }
-    s->next = s->prev = NULL;
-    s->queue = NULL;
+    _Static_assert((uint64_t)TIME_UNITS * ACCOUNT_TICKS <= UINT32_MAX, "the cap does not wrap");
+    _Static_assert(ACCOUNT_TICKS >= TICK_PARTS + 1, "one unit's cap holds account_after's stretch");
+    return thread_units(t) * ACCOUNT_TICKS;
 }
 
-/* The most a share's account holds: its budget's part of ACCOUNT_TICKS ticks, rounded up to whole ticks. */
-static uint32_t share_cap(const struct share *s)
+/* A thread's account at the count: it gains a part for each unit every tick since its stamp, up to its cap. */
+static uint32_t account_now(const struct thread *t)
 {
-    _Static_assert((uint64_t)BUDGET_WHOLE * ACCOUNT_TICKS + TICK_PARTS <= UINT32_MAX, "the cap does not wrap");
-    return (s->budget * ACCOUNT_TICKS + TICK_PARTS - 1) / TICK_PARTS * TICK_PARTS;
+    uint64_t balance = t->balance + (uint64_t)(sched_ticks - t->stamp) * thread_units(t);
+    uint32_t cap = account_cap(t);
+    return balance > cap ? cap : (uint32_t)balance;
+}
+
+/* Bring a thread's account up to the count. */
+static void account_refill(struct thread *t)
+{
+    t->balance = account_now(t);
+    t->stamp = sched_ticks;
+}
+
+/* Whether an account holds a turn's worth, a tick: then the thread has time, and takes turns with those that have. */
+static bool has_time(uint32_t balance)
+{
+    return balance >= TICK_PARTS;
+}
+
+/* The ticks an account at balance, below a tick, takes to reach one, for a thread with units. */
+static uint32_t account_fill(const struct thread *t, uint32_t balance)
+{
+    uint32_t units = thread_units(t);
+    return (TICK_PARTS - balance + units - 1) / units;
 }
 
 /*
- * A share's account at the count: it gains its budget every tick since its stamp, up to its cap.
- * *drained says whether it has no time then: less than a tick, or drained before and not full again.
+ * The ticks from the count to the one that drains an account with time, the first to leave it less than a tick,
+ * for the thread whose turn it is; NEAREST_NONE for none, with the whole processor.
  */
-static uint32_t share_balance(const struct share *s, bool *drained)
+static uint32_t account_drain(const struct thread *t, uint32_t balance)
 {
-    uint32_t cap = share_cap(s);
-    uint64_t balance = s->balance + (uint64_t)(sched_ticks - s->stamp) * s->budget;
-    if (balance > cap) {
-        balance = cap;
-    }
-    *drained = balance < TICK_PARTS || (s->drained && balance < cap);
-    return (uint32_t)balance;
-}
-
-/* Bring a share's account up to the count. */
-static void share_refill(struct share *s)
-{
-    bool drained;
-    s->balance = share_balance(s, &drained);
-    s->drained = drained;
-    s->stamp = sched_ticks;
-}
-
-/* The ticks an account at balance takes to fill, for a share with a budget. */
-static uint32_t share_fill(const struct share *s, uint32_t balance)
-{
-    return (share_cap(s) - balance + s->budget - 1) / s->budget;
-}
-
-/* The queue a share waits on, as its threads, the turn, its account and its flags now say; NULL for none. */
-static struct share **share_queue(const struct share *s)
-{
-    if (s->threads == 0 || s == turn) {
-        return NULL;
-    }
-    if (!s->drained) {
-        return &run_queue;
-    }
-    return (s->flags & SHARE_SPARE) ? &spare_queue : &spent_queue;
+    uint32_t loss = TICK_PARTS - thread_units(t);
+    return loss != 0 ? (balance - TICK_PARTS) / loss + 1 : NEAREST_NONE;
 }
 
 /*
- * Bring a share's account up to the count and move the share to the queue it now waits on,
+ * A thread's account after ticks of its turn, as if each tick had been taken on its own:
+ * a tick that starts with a tick in the account costs TICK_PARTS - units, and any other earns units.
+ * Either way the balance moves by units modulo TICK_PARTS.
+ * It falls while it holds a tick, and once below one it stays in [units, TICK_PARTS + units),
+ * a stretch TICK_PARTS wide, so the one value there in the right residue is where it ends.
+ * The cap never cuts in: that stretch lies within the cap of a thread with units.
+ */
+static uint32_t account_after(uint32_t balance, uint32_t units, uint32_t ticks)
+{
+    uint64_t spent = (uint64_t)ticks * (TICK_PARTS - units);
+    uint32_t earned = (uint32_t)((balance + (uint64_t)(ticks % TICK_PARTS) * units) % TICK_PARTS);
+    uint32_t hover = earned >= units ? earned : earned + TICK_PARTS;
+    return spent < balance && balance - spent > hover ? (uint32_t)(balance - spent) : hover;
+}
+
+/* The queue a thread waits on, as its state, the turn, its account at balance and its binding now say. */
+static uint8_t thread_queue(const struct thread *t, uint32_t balance)
+{
+    if (t->state != THREAD_READY || t == turn || t->time.type != CAP_BOUND) {
+        return QUEUE_NONE;
+    }
+    if (has_time(balance)) {
+        return QUEUE_RUN;
+    }
+    if (thread_spare(t)) {
+        return QUEUE_SPARE;
+    }
+    return thread_units(t) != 0 ? QUEUE_SPENT : QUEUE_NONE;
+}
+
+/*
+ * Bring a thread's account up to the count and move the thread to the queue it now waits on,
  * or take it off the one it was on.
- * A drained share that waits brings the release forward to the tick its account is full.
+ * A thread with units that waits without time brings the release forward to the tick its account reaches a tick.
  */
-static void share_settle(struct share *s)
+static void thread_settle(struct thread *t)
 {
     wake_stale = true;
-    share_refill(s);
-    struct share **queue = share_queue(s);
-    if (queue != s->queue) {
-        if (s->queue != NULL) {
-            share_remove(s);
+    account_refill(t);
+    uint8_t queue = thread_queue(t, t->balance);
+    if (queue != t->queue) {
+        if (t->queue != QUEUE_NONE) {
+            ring_remove(queue_head(t->queue), t);
         }
-        if (queue != NULL) {
-            share_push(queue, s);
+        if (queue != QUEUE_NONE) {
+            ring_push(queue_head(queue), t);
         }
+        t->queue = queue;
     }
-    if (s->drained && s->queue != NULL && s->budget != 0 &&
-        tick_before(sched_ticks + share_fill(s, s->balance), nearest_release)) {
-        nearest_release = sched_ticks + share_fill(s, s->balance);
+    if ((queue == QUEUE_SPARE || queue == QUEUE_SPENT) && thread_units(t) != 0 &&
+        tick_before(sched_ticks + account_fill(t, t->balance), nearest_release)) {
+        nearest_release = sched_ticks + account_fill(t, t->balance);
     }
 }
 
 /*
- * Charge ticks of its turn to a share: while it has time each costs it a tick and gains it its budget,
- * and the tick that leaves it less than a tick drains it.
- * The ticks after that are spare time, which costs nothing, and gain it its budget from the stamp as any share's do.
- */
-static void share_spend(struct share *s, uint32_t ticks)
-{
-    share_refill(s);
-    if (s->drained) {
-        return;
-    }
-    uint32_t loss = TICK_PARTS - s->budget;
-    uint32_t spent = ticks;
-    if (loss != 0 && spent > (s->balance - TICK_PARTS) / loss) {
-        spent = (s->balance - TICK_PARTS) / loss + 1;
-        s->drained = true;
-    }
-    s->balance -= spent * loss;
-    s->stamp += spent;
-}
-
-/*
- * The ticks from the count to the one at which the account of the share whose turn it is changes what it may do,
- * brought up to the count: the tick that drains it while it has time, or the tick it fills while drained;
- * NEAREST_NONE for neither, with the whole processor or no budget.
- */
-static uint32_t share_change(const struct share *s, uint32_t balance, bool drained)
-{
-    if (!drained) {
-        uint32_t loss = TICK_PARTS - s->budget;
-        return loss != 0 ? (balance - TICK_PARTS) / loss + 1 : NEAREST_NONE;
-    }
-    return s->budget != 0 ? share_fill(s, balance) : NEAREST_NONE;
-}
-
-/* A ready thread that is not running joins the back of its share's ring; one without a share waits for one. */
-static void enqueue(struct thread *t)
-{
-    struct share *s = thread_share(t);
-    if (s != NULL) {
-        ring_push(&s->threads, t);
-        share_settle(s);
-    }
-}
-
-/* A ready thread that is not running leaves its share's ring. */
-static void dequeue(struct thread *t)
-{
-    struct share *s = thread_share(t);
-    if (s != NULL) {
-        ring_remove(&s->threads, t);
-        share_settle(s);
-    }
-}
-
-/* The oldest ready thread of a share that has one, taken off its ring. */
-static struct thread *share_take(struct share *s)
-{
-    struct thread *t = p2v(s->threads);
-    ring_remove(&s->threads, t);
-    return t;
-}
-
-/*
- * The oldest share with time, or with none the oldest that may run on spare time,
+ * The oldest thread with time, or with none the oldest that may run on spare time,
  * taken off its queue with its account brought up to the count: its turn begins,
- * and every tick of it is charged to the share from here. NULL when neither queue has one.
+ * and every tick of it is charged to it from here. NULL when neither queue has one.
  */
-static struct share *next_turn(void)
+static struct thread *next_turn(void)
 {
-    struct share *s = run_queue != NULL ? run_queue : spare_queue;
-    if (s != NULL) {
-        share_remove(s);
-        share_refill(s);
+    paddr_t *head = run_queue != 0 ? &run_queue : &spare_queue;
+    if (*head == 0) {
+        return NULL;
     }
-    return s;
+    struct thread *t = p2v(*head);
+    ring_remove(head, t);
+    t->queue = QUEUE_NONE;
+    account_refill(t);
+    return t;
 }
 
 void sched_ready(struct thread *t)
 {
     t->state = THREAD_READY;
-    enqueue(t);
+    thread_settle(t);
 }
 
-void sched_bind(struct thread *t, uint32_t share, struct cap *parent)
+void sched_bind(struct thread *t, uint32_t first, uint32_t count, uint8_t rights, struct cap *parent)
 {
-    wake_stale = true;
-    if (t->share.type != CAP_NONE) {
-        cap_delete(&t->share, false);
+    account_refill(t);
+    uint32_t kept = t->balance;
+    if (t->time.type != CAP_NONE) {
+        cap_delete(&t->time, false);
     }
-    t->share = (struct cap){ .type = CAP_BOUND, .rights = RIGHT_W, .a = share };
-    cap_attach(parent, &t->share);
-    if (t->state == THREAD_READY && t != current) {
-        enqueue(t);
+    t->time = (struct cap){ .type = CAP_BOUND, .rights = rights, .a = first, .b = count };
+    cap_attach(parent, &t->time);
+    for (uint32_t i = 0; i < count; i++) {
+        LOOP_BOUND(TIME_UNITS);
+        unit_thread[first + i] = v2p(t);
     }
+    /* What the account held stays, and settling holds it to what the new units hold at most. */
+    t->balance = kept;
+    thread_settle(t);
 }
 
 void sched_unbind(struct cap *bound)
 {
-    wake_stale = true;
     struct thread *t = bound_thread(bound);
-    if (t->state == THREAD_READY && t != current) {
-        dequeue(t);
+    for (uint32_t i = 0; i < bound->b; i++) {
+        LOOP_BOUND(TIME_UNITS);
+        unit_thread[bound->a + i] = 0;
     }
     *bound = (struct cap){ 0 };
+    /* A thread without units holds nothing, so settling empties its account as it takes the thread off its queue. */
+    thread_settle(t);
 }
 
-void sched_share_changed(struct share *s)
+/* The thread that earns a unit first of those it earns, else NULL, so that a look at each unit meets it once. */
+static struct thread *unit_first(uint32_t unit)
 {
-    share_settle(s);
+    struct thread *t = unit_thread[unit] != 0 ? p2v(unit_thread[unit]) : NULL;
+    return t != NULL && t->time.a == unit ? t : NULL;
 }
 
 /*
- * The account moves with the budget it was saved at, so a share lent budget can run at once,
- * and what one share gives the other takes, so the budgets still add up to the whole.
- * Settling holds each account to its new cap.
- */
-void sched_share_move(struct share *from, struct share *to, uint32_t budget)
-{
-    share_refill(from);
-    share_refill(to);
-    uint32_t moved = budget * ACCOUNT_TICKS;
-    if (moved > from->balance) {
-        moved = from->balance;
-    }
-    from->budget -= budget;
-    from->balance -= moved;
-    to->budget += budget;
-    to->balance += moved;
-    share_settle(from);
-    share_settle(to);
-}
-
-/*
- * The shares are a fixed few, so filling them looks at each of them and at nothing else,
- * as the tick does at the timer lines; see DESIGN.md, "Bounded work".
+ * A thread with units earns them, so a look at each unit finds every one,
+ * and the units are a fixed few, as the timer lines are; see DESIGN.md, "Bounded work".
+ * A thread with none has an empty account already.
  */
 void sched_accounts_fill(void)
 {
     nearest_release = sched_ticks + NEAREST_NONE;
-    for (uint32_t i = 0; i < SHARES; i++) {
-        LOOP_BOUND(SHARES);
-        struct share *s = &shares[i];
-        s->balance = share_cap(s);
-        s->stamp = sched_ticks;
-        s->drained = false;
-        share_settle(s);
+    for (uint32_t i = 0; i < TIME_UNITS; i++) {
+        LOOP_BOUND(TIME_UNITS);
+        struct thread *t = unit_first(i);
+        if (t != NULL) {
+            t->balance = account_cap(t);
+            t->stamp = sched_ticks;
+            thread_settle(t);
+        }
     }
 }
 
 /*
- * Look at every drained share that waits: one whose account is full has time again and joins the run queue,
- * and the others bring the release forward to the tick theirs fills.
- * The shares are a fixed few, so it looks at each of them, as the tick looks at the timer lines,
- * and only at the tick nearest_release said an account would be full.
+ * Look at every thread with units that waits without time: one whose account reached a tick joins the run queue,
+ * and the others bring the release forward to the tick theirs does.
+ * It looks at each unit, a fixed few, as the tick looks at the timer lines,
+ * and only at the tick nearest_release said an account would reach a tick.
  */
 static void release(void)
 {
     nearest_release = sched_ticks + NEAREST_NONE;
-    for (uint32_t i = 0; i < SHARES; i++) {
-        LOOP_BOUND(SHARES);
-        if (shares[i].drained && shares[i].queue != NULL) {
-            share_settle(&shares[i]);
+    for (uint32_t i = 0; i < TIME_UNITS; i++) {
+        LOOP_BOUND(TIME_UNITS);
+        struct thread *t = unit_first(i);
+        if (t != NULL && (t->queue == QUEUE_SPARE || t->queue == QUEUE_SPENT)) {
+            thread_settle(t);
         }
     }
 }
 
 void sched_start(struct thread *t)
 {
-    current = t;
-    turn = thread_share(t);
+    current = turn = t;
     /* The boot sets the timer for the first tick. */
     wake_tick = sched_ticks + 1;
 }
@@ -418,9 +351,9 @@ void irq_signal(struct irq *irq)
 
 /*
  * Ticks of time, one or the few a trap counts at once:
- * charge them to the share whose turn it is, or to nobody while none runs,
+ * charge them to the thread whose turn it is, or to nobody while none runs,
  * count them, fire every timer line that is due,
- * and give time again to the drained shares whose account is full.
+ * and give time again to the threads whose account reached a tick.
  * The timer lines are a fixed few, so the tick looks at each of them
  * and at nothing else; see DESIGN.md, "Time".
  * A line that fires disarms its Irq, so that after the tick no armed one is due,
@@ -430,7 +363,9 @@ static void tick_advance(uint32_t ticks)
 {
     wake_stale = true;
     if (turn != NULL) {
-        share_spend(turn, ticks);
+        account_refill(turn);
+        turn->balance = account_after(turn->balance, thread_units(turn), ticks);
+        turn->stamp += ticks;
     }
     sched_ticks += ticks;
     uint32_t nearest = sched_ticks + NEAREST_NONE;
@@ -453,16 +388,14 @@ static void tick_advance(uint32_t ticks)
 }
 
 /*
- * The next tick hands the processor back to the running thread
- * when it is on the share whose turn it is, which has no other thread ready
- * and would have the next turn again: with time and nobody on the run queue,
- * or drained, with SHARE_SPARE and nobody on either queue.
+ * The next tick hands the processor back to the thread whose turn it is
+ * when it would have the next turn again: nobody is on the run queue,
+ * and it has time, or may run on spare time with nobody on the spare queue.
+ * Its account changes what runs only at the tick that drains it,
+ * and only while it has no spare time to go on with, or shares that with others.
  */
 uint32_t sched_wake_ticks(void)
 {
-    if (turn != NULL && (thread_share(current) != turn || turn->threads != 0 || run_queue != NULL)) {
-        return 1;
-    }
     uint32_t wake = nearest_deadline - sched_ticks;
     if (tick_before(nearest_release, nearest_deadline)) {
         wake = nearest_release - sched_ticks;
@@ -470,13 +403,19 @@ uint32_t sched_wake_ticks(void)
     if (turn == NULL) {
         return wake;
     }
-    bool drained;
-    uint32_t balance = share_balance(turn, &drained);
-    if (drained && (!(turn->flags & SHARE_SPARE) || spare_queue != NULL)) {
+    if (run_queue != 0) {
         return 1;
     }
-    uint32_t change = share_change(turn, balance, drained);
-    return change < wake ? change : wake;
+    uint32_t balance = account_now(turn);
+    bool alone = thread_spare(turn) && spare_queue == 0;
+    if (!has_time(balance)) {
+        return alone ? wake : 1;
+    }
+    if (alone) {
+        return wake;
+    }
+    uint32_t drain = account_drain(turn, balance);
+    return drain < wake ? drain : wake;
 }
 
 bool sched_interrupt(uint32_t line)
@@ -544,7 +483,7 @@ bool sched_forget(struct obj_header *o, bool preempt)
     case CAP_THREAD: {
         /*
          * The thread is gone, and the notification it waits on may live on in another pool.
-         * Its share went as a node it holds, and with it its place on the share's ring.
+         * Its units went as a node it holds, and with them its place on its queue.
          */
         struct thread *t = (struct thread *)o;
         if (t->state == THREAD_WAITING) {
@@ -588,18 +527,15 @@ static void switch_to(struct thread *next)
     wake_stale = true;
 }
 
-/*
- * Hand the processor to the oldest ready thread of the share whose turn it is,
- * waiting for a share to have one while it is nobody's turn.
- */
+/* Hand the processor to the thread whose turn it is, waiting for one to become ready while it is nobody's turn. */
 static void run_turn(void)
 {
     while (turn == NULL) {
         LOOP_WAIT("an interrupt, in intr_wait");
         /*
-         * Only a running thread, a timer line, a device interrupt or an account that fills
-         * can make another one runnable, the last for a share that spent its time.
-         * With no Irq armed on either kind of line and no such share nothing can change this,
+         * Only a running thread, a timer line, a device interrupt or an account that reaches a tick
+         * can make another one runnable, the last for a thread that spent its time.
+         * With no Irq armed on either kind of line and no such thread nothing can change this,
          * so say so and stop.
          * The log's line is not a source: only the kernel raises it,
          * and the kernel runs only when a thread or one of these does.
@@ -607,7 +543,7 @@ static void run_turn(void)
          * and OP_DEBUG_IRQ, which nobody is left to perform, so the same holds
          * and the host build, which has no clock and no devices, agrees.
          */
-        if (debug_trace || (armed_sources == 0 && spent_queue == NULL)) {
+        if (debug_trace || (armed_sources == 0 && spent_queue == 0)) {
             kputs("no runnable thread\n");
             khalt(5);
         }
@@ -627,32 +563,27 @@ static void run_turn(void)
         }
         turn = next_turn();
     }
-    switch_to(share_take(turn));
+    switch_to(turn);
 }
 
 void sched_run_next(void)
 {
-    /* The share whose turn it is keeps it while it has another thread ready. */
-    if (turn == NULL || turn->threads == 0) {
-        turn = next_turn();
-    }
+    turn = next_turn();
     run_turn();
 }
 
 /*
- * The turn ends: the share whose turn it was goes to the back of the queue its budget puts it on
- * if it has a thread ready, and the running thread to the back of its share's ring,
- * which puts its share behind that one if it was moved to another.
- * One that lost its share during its turn goes nowhere, and without it the queues may be empty.
+ * The turn ends: the thread whose turn it was goes to the back of the queue its account puts it on,
+ * if it may run, and the next thread has its turn.
+ * One that lost its units during its turn goes nowhere, and without it the queues may be empty.
  */
 static void turn_end(void)
 {
-    struct share *was = turn;
+    struct thread *was = turn;
     turn = NULL;
     if (was != NULL) {
-        share_settle(was);
+        thread_settle(was);
     }
-    enqueue(current);
     turn = next_turn();
     run_turn();
 }

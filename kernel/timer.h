@@ -16,8 +16,8 @@
 _Static_assert(TIMER_US_PER_TICK * TIMER_HZ == 1000000u, "the tick divides a second");
 
 /*
- * The ticks of its budget a share's account holds at most, a tenth of a second's:
- * an account gains its share's budget every tick and holds that many ticks of it, rounded up to whole ticks.
+ * The ticks of its units a thread's account holds at most, a tenth of a second's:
+ * an account gains a part of a tick for each unit every tick and holds that many ticks of them.
  * See DESIGN.md, "Scheduling".
  */
 #define ACCOUNT_TICKS (TIMER_HZ / 10)

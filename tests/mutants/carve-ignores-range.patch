@@ -1,9 +1,9 @@
-A carve of lines or shares takes any range, not only one within the invoked capability.
-It would hand out lines or shares the carver does not hold, or ones there are not;
-a capability to lines or shares names ones there are, within its parent's.
+A carve of lines or units takes any range, not only one within the invoked capability.
+It would hand out lines or units the carver does not hold, or ones there are not;
+a capability to lines or units names ones there are, within its parent's.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
-Report: share capability outside the shares there are
+Report: time capability outside the units there are
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
