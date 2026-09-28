@@ -71,9 +71,10 @@ is a notification, a word of sticky bits,
 and `DESIGN.md`, "Communication and synchronisation", says why.
 
 The machine timer ticks and the kernel preempts on it,
-taking the processor's shares in turn and the threads on each share in turn;
-a thread runs only on a share, and shares are handed out as capabilities,
-so a process that makes more threads or children gets no more of the processor.
+taking the threads with time in turn and then those on spare time;
+the processor is a fixed number of units of time, handed out as capabilities,
+and a thread earns the units it is bound to, each earned by one thread at a time,
+so a process that makes more threads or children gets no more of the processor than its units.
 That is all the scheduling policy the kernel has,
 and `DESIGN.md`, "Scheduling", says why.
 

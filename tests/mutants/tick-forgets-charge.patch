@@ -1,19 +1,19 @@
-The tick charges the share whose turn it is for none of the ticks that passed.
-A share never spends its account, however long it runs;
-every tick of a turn with time is charged to its share.
+The tick charges the thread whose turn it is as if it earned the whole processor, so it spends nothing.
+A thread never spends its account, however long it runs;
+every tick of a turn with time costs the thread a tick less its units.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
-Report: a tick did not cost the share whose turn it was a tick less its budget
+Report: a tick did not cost the thread whose turn it was a tick less its units
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -442,7 +442,7 @@ static void tick_advance(uint32_t ticks)
- {
+@@ -369,7 +369,7 @@ static void tick_advance(uint32_t ticks)
      wake_stale = true;
      if (turn != NULL) {
--        share_spend(turn, ticks);
-+        share_spend(turn, 0);
+         account_refill(turn);
+-        turn->balance = account_after(turn->balance, thread_units(turn), ticks);
++        turn->balance = account_after(turn->balance, TICK_PARTS, ticks);
+         turn->stamp += ticks;
      }
      sched_ticks += ticks;
-     uint32_t nearest = sched_ticks + NEAREST_NONE;

@@ -63,14 +63,14 @@ grep -q 'root: clock ok' "$log" \
     || fail "the clock's counter, read through its region, did not show the sleeps' length"
 grep -q 'root: period ok' "$log" \
     || fail "a periodic timer line drifted from its period"
-grep -q 'root: shares ok' "$log" \
-    || fail "threads added on one share took more of the processor than the other share had"
+grep -q 'root: units ok' "$log" \
+    || fail "threads on spare time took the time a thread earned, or it ran past its units"
 grep -q 'root: unbind ok' "$log" \
-    || fail "a thread ran after its share was revoked"
+    || fail "a thread ran after its units were revoked"
 grep -q 'root: rebind ok' "$log" \
-    || fail "a thread bound to a share again did not run, or another ran with it"
-grep -q 'root: budget ok' "$log" \
-    || fail "a share without spare time ran past its budget, or one with it did not run on spare time"
+    || fail "a thread bound to units again did not run, or another ran with it"
+grep -q 'root: spare ok' "$log" \
+    || fail "a thread without spare time ran past its units, or one with it did not run on spare time"
 grep -q 'root: tickless ok' "$log" \
     || fail "the timer interrupted the only thread to run at ticks that changed nothing"
 grep -q 'the idle line stays quiet: ok' "$log" \

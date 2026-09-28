@@ -466,7 +466,7 @@ static int op_notification(struct thread *t, const struct cap *cap,
 }
 
 /*
- * A smaller range of the lines or shares a capability names, with its rights, below it:
+ * A smaller range of the lines or units a capability names, with its rights, below it:
  * a1 = offset from the first, a2 = count, a3 = destination slot.
  */
 static int carve_range(struct thread *t, uint32_t slot, const struct cap *cap, const uint32_t *arg)
@@ -546,50 +546,14 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
     }
 }
 
-/* arg[1..] carry the arguments in and the results out. */
-static int op_share(struct thread *t, uint32_t slot, const struct cap *cap,
-                    uint32_t op, uint32_t *arg)
+/* arg[1..] carry the arguments in. */
+static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
+                   uint32_t op, const uint32_t *arg)
 {
     switch (op) {
-    case OP_SHARE_CARVE:
+    case OP_TIME_CARVE:
         return carve_range(t, slot, cap, arg);
-    case OP_SHARE_INFO: {
-        if (arg[1] >= cap->b) {
-            return KERR_INVALID_ARG;
-        }
-        const struct share *s = &shares[cap->a + arg[1]];
-        arg[1] = s->budget;
-        arg[2] = s->flags;
-        return KERR_OK;
-    }
-    case OP_SHARE_MOVE: {
-        if (!(cap->rights & RIGHT_W)) {
-            return KERR_NO_RIGHTS;
-        }
-        if (arg[1] >= cap->b || arg[2] >= cap->b) {
-            return KERR_INVALID_ARG;
-        }
-        struct share *from = &shares[cap->a + arg[1]];
-        struct share *to = &shares[cap->a + arg[2]];
-        if (arg[3] > from->budget) {
-            return KERR_INVALID_ARG;
-        }
-        sched_share_move(from, to, arg[3]);
-        return KERR_OK;
-    }
-    case OP_SHARE_SET: {
-        if (!(cap->rights & RIGHT_X)) {
-            return KERR_NO_RIGHTS;
-        }
-        if (arg[1] >= cap->b || (arg[2] & ~(uint32_t)SHARE_SPARE) != 0) {
-            return KERR_INVALID_ARG;
-        }
-        struct share *s = &shares[cap->a + arg[1]];
-        s->flags = arg[2];
-        sched_share_changed(s);
-        return KERR_OK;
-    }
-    case OP_SHARE_BIND: {
+    case OP_TIME_BIND: {
         if (!(cap->rights & RIGHT_W)) {
             return KERR_NO_RIGHTS;
         }
@@ -598,11 +562,23 @@ static int op_share(struct thread *t, uint32_t slot, const struct cap *cap,
         if (err != KERR_OK) {
             return err;
         }
-        if (arg[2] >= cap->b) {
+        /* The first unit lies within the capability even for none, so that the binding lies below it. */
+        uint32_t off = arg[2];
+        uint32_t count = arg[3];
+        if (off >= cap->b || count > cap->b - off) {
             return KERR_INVALID_ARG;
         }
+        /* A unit is earned by one thread at a time; the thread's own it leaves as it binds. */
+        struct thread *target = (struct thread *)cap_object(&tc);
+        uint32_t first = cap->a + off;
+        for (uint32_t i = 0; i < count; i++) {
+            LOOP_BOUND(TIME_UNITS);
+            if (unit_thread[first + i] != 0 && unit_thread[first + i] != v2p(target)) {
+                return KERR_OVERLAP;
+            }
+        }
         /* The binding hangs below the invoked capability, so a revoke above it unbinds the thread. */
-        sched_bind((struct thread *)cap_object(&tc), cap->a + arg[2], slot_node(t, slot));
+        sched_bind(target, first, count, cap->rights, slot_node(t, slot));
         return KERR_OK;
     }
     default:
@@ -711,7 +687,7 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
 
     /*
      * Operations that change an object need RIGHT_W on it.
-     * Frames, Untypeds, interrupt lines, shares, notifications, the debug capability and the clock
+     * Frames, Untypeds, interrupt lines, units of time, notifications, the debug capability and the clock
      * are checked in their handlers,
      * because which right they need depends on the operation.
      */
@@ -749,8 +725,8 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
     case CAP_IRQ:
         err = (cap.rights & RIGHT_W) ? op_irq(&cap, op, arg) : KERR_NO_RIGHTS;
         break;
-    case CAP_SHARE:
-        err = op_share(t, slot, &cap, op, arg);
+    case CAP_TIME:
+        err = op_time(t, slot, &cap, op, arg);
         break;
     default:
         err = KERR_WRONG_TYPE;
@@ -807,7 +783,7 @@ void syscall_dispatch(struct thread *t)
     }
     /*
      * A thread that waits gives the processor up.
-     * One that lost its share finishes its turn, as a preempted call is made again before the tick switches.
+     * One that lost its units finishes its turn, as a preempted call is made again before the tick switches.
      */
     if (current->state != THREAD_READY) {
         sched_run_next();

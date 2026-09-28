@@ -111,7 +111,7 @@ static uint32_t draw_arg(struct rng *r, uint8_t *data, size_t count)
         return rnd(r);
     case 2:
     case 3:
-        return (uint32_t)below(r, 14); /* a type, a rights mask, a region slot, a line or a share, all up to 12, or one past */
+        return (uint32_t)below(r, 14); /* a type, a rights mask, a region slot, a line or a unit, all up to 12, or one past */
     case 4:
     case 5:
     case 6:
@@ -123,7 +123,7 @@ static uint32_t draw_arg(struct rng *r, uint8_t *data, size_t count)
     case 9:
         return (uint32_t)below(r, 17) * (REPLAY_POOL_SIZE / 16); /* up to a pool the size of the setup's */
     case 10:
-        return 1u << below(r, 32); /* notification bits, or a budget, BUDGET_WHOLE among them */
+        return 1u << below(r, 32); /* notification bits, or a count of units, TIME_UNITS among them */
     default:
         return count ? other_value(r, data, count) : rnd(r);
     }

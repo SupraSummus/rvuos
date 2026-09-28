@@ -209,10 +209,10 @@ struct thread *host_boot(void)
     pool_list = NULL;
     memset(line_irq, 0, LINES * sizeof(line_irq[0]));
     current = NULL;
-    memset(shares, 0, sizeof(shares));
-    run_queue = NULL;
-    spare_queue = NULL;
-    spent_queue = NULL;
+    memset(unit_thread, 0, sizeof(unit_thread));
+    run_queue = 0;
+    spare_queue = 0;
+    spent_queue = 0;
     turn = NULL;
     armed_sources = 0;
     nearest_deadline = NEAREST_NONE;

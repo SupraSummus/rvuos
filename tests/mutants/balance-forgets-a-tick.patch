@@ -1,19 +1,19 @@
-A share has time with less than a tick in its account, so long as it was not drained before.
-A share given no budget, or left with less than a tick by a move, would take turns on the run queue it cannot pay for;
-a share with time has at least a tick in its account.
+A thread has time with less than a tick in its account.
+It would take turns on the run queue it cannot pay for, before the threads on spare time;
+a thread has time exactly while its account holds a tick.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
-Report: share has time without a tick in its account
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: the timer lets a tick pass that ends the turn
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -157,7 +157,7 @@ static uint32_t share_balance(const struct share *s, bool *drained)
-     if (balance > cap) {
-         balance = cap;
-     }
--    *drained = balance < TICK_PARTS || (s->drained && balance < cap);
-+    *drained = s->drained && balance < cap;
-     return (uint32_t)balance;
+@@ -142,7 +142,7 @@ static void account_refill(struct thread *t)
+ /* Whether an account holds a turn's worth, a tick: then the thread has time, and takes turns with those that have. */
+ static bool has_time(uint32_t balance)
+ {
+-    return balance >= TICK_PARTS;
++    return balance != 0;
  }
  
+ /* The ticks an account at balance, below a tick, takes to reach one, for a thread with units. */

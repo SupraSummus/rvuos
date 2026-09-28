@@ -51,6 +51,10 @@ with the header lines the run prints for it.
 When a change edits code a mutant touches or stands next to,
 run `make mutants-refresh`, then `make mutants` if it moved any,
 and fix by hand only the patches it calls stale.
+The full run takes minutes, so while working run only the mutants a change touches,
+`tests/mutants.sh -j 4 name...`;
+a change to the seeds, the corpus or the checks moves every mutant's reports,
+so it needs one full run before it is committed.
 
 ## Environment
 

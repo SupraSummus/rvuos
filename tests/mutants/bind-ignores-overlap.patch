@@ -1,0 +1,20 @@
+A bind takes units another thread earns.
+The two threads would both earn them, and the processor would be promised more than once over;
+a unit is earned by the one thread it names, and every unit a thread is bound to names it.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: a unit a thread is bound to names another
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -573,9 +573,6 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
+         uint32_t first = cap->a + off;
+         for (uint32_t i = 0; i < count; i++) {
+             LOOP_BOUND(TIME_UNITS);
+-            if (unit_thread[first + i] != 0 && unit_thread[first + i] != v2p(target)) {
+-                return KERR_OVERLAP;
+-            }
+         }
+         /* The binding hangs below the invoked capability, so a revoke above it unbinds the thread. */
+         sched_bind(target, first, count, cap->rights, slot_node(t, slot));

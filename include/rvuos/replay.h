@@ -23,9 +23,10 @@
  * moved, some thread took the record;
  * not moved, the processor went round and none took it,
  * so the thread that started the round performs the record itself.
- * The setup binds every thread to the root thread's share,
- * where going round visits every runnable thread, so the actor could not run;
- * once a record has moved a thread to a share of its own,
+ * The setup binds every thread, the root thread too, to no units and spare time,
+ * where they take turns as one queue and going round visits every runnable thread,
+ * so the actor could not run;
+ * once a record has bound a thread to units, and so to time the others do not have,
  * the round may come back before it visited them all.
  * host_event in host/shim.c performs the same calls from the kernel's state,
  * so the passing is in both transcripts.
@@ -131,16 +132,20 @@ static const struct replay_record replay_prologue[] = {
     REPLAY_COPY(BOOT_CAP_LOG),
     REPLAY_COPY(BOOT_CAP_TIMER_LINES),
     REPLAY_COPY(BOOT_CAP_CLOCK),
-    REPLAY_COPY(BOOT_CAP_SHARES),
+    REPLAY_COPY(BOOT_CAP_TIME),
     REPLAY_COPY(REPLAY_CAP_NOTIFY),
     REPLAY_COPY(REPLAY_CAP_THREAD),
     REPLAY_COPY(REPLAY_CAP_POOL),
     REPLAY_COPY(REPLAY_CAP_TABLE),
     REPLAY_COPY(REPLAY_CAP_PROCESS),
     REPLAY_COPY(REPLAY_CAP_THIRD),
-    /* Every thread runs on the root thread's share, so the three take turns as one ring. */
-    { OP_SHARE_BIND, 0, BOOT_CAP_SHARES, REPLAY_CAP_THREAD, 0, 0 },
-    { OP_SHARE_BIND, 0, BOOT_CAP_SHARES, REPLAY_CAP_THIRD, 0, 0 },
+    /*
+     * Every thread earns no unit and runs on spare time, so the three take turns as one queue
+     * and every unit is left for the records to bind.
+     */
+    { OP_TIME_BIND, 0, BOOT_CAP_TIME, BOOT_CAP_THREAD, 0, 0 },
+    { OP_TIME_BIND, 0, BOOT_CAP_TIME, REPLAY_CAP_THREAD, 0, 0 },
+    { OP_TIME_BIND, 0, BOOT_CAP_TIME, REPLAY_CAP_THIRD, 0, 0 },
     { OP_THREAD_CONFIGURE, 0, REPLAY_CAP_THREAD, 0, REPLAY_THREAD_SP, 0 },
     { OP_THREAD_CONFIGURE, 0, REPLAY_CAP_THIRD, 0, REPLAY_THIRD_SP, 0 },
 };

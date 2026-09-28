@@ -47,19 +47,17 @@ static const struct thread *caller;
 static const struct captable *caller_table;
 static bool caller_dying;
 
-/* Every share's budget and flags before the call. */
-static uint32_t budget_before[SHARES], flags_before[SHARES];
-
-/* The count before the call, and the share whose turn it was with its account if it had time, else NULL. */
+/* The count before the call, and the thread whose turn it was, NULL for none, with its units and its account. */
 static uint32_t ticks_before;
-static const struct share *charged;
+static const struct thread *charged;
+static struct cap charged_units;
 static uint32_t charged_balance;
 
-/* A share's account at the count, as its stamp and its budget make it, held to the cap. */
-static uint32_t account_at_count(const struct share *s)
+/* A thread's account at the count, as its stamp and its units make it, held to the cap. */
+static uint32_t account_at_count(const struct thread *t)
 {
-    uint32_t cap = (s->budget * ACCOUNT_TICKS + TICK_PARTS - 1) / TICK_PARTS * TICK_PARTS;
-    uint64_t balance = s->balance + (uint64_t)(sched_ticks - s->stamp) * s->budget;
+    uint32_t cap = thread_units(t) * ACCOUNT_TICKS;
+    uint64_t balance = t->balance + (uint64_t)(sched_ticks - t->stamp) * thread_units(t);
     return balance > cap ? cap : (uint32_t)balance;
 }
 
@@ -87,7 +85,7 @@ __attribute__((noreturn)) static void violated(const char *what)
 }
 
 /*
- * An installed region grants what the frame it came from did, a thread's share its one share,
+ * An installed region grants what the frame it came from did, a thread's units those units,
  * and an Untyped its block whatever its watermark.
  */
 static struct grant grant_of(const struct cap *c)
@@ -96,7 +94,7 @@ static struct grant grant_of(const struct cap *c)
         return (struct grant){ CAP_UNTYPED, c->rights, untyped_base(c), untyped_size(c) };
     }
     if (c->type == CAP_BOUND) {
-        return (struct grant){ CAP_SHARE, c->rights, c->a, 1 };
+        return (struct grant){ CAP_TIME, c->rights, c->a, c->b };
     }
     return (struct grant){ c->type == CAP_INSTALLED ? CAP_FRAME : c->type, c->rights, c->a, c->b };
 }
@@ -109,7 +107,7 @@ static bool same_grant(struct grant x, struct grant y)
 /* Whether a capability the caller held grants all that g does; an Untyped grants the frames it makes. */
 static bool covered(struct grant g)
 {
-    bool range = g.type == CAP_FRAME || g.type == CAP_UNTYPED || g.type == CAP_IRQ_LINE || g.type == CAP_SHARE;
+    bool range = g.type == CAP_FRAME || g.type == CAP_UNTYPED || g.type == CAP_IRQ_LINE || g.type == CAP_TIME;
     for (size_t i = 0; i < held.n; i++) {
         const struct grant *h = &held.v[i];
         bool type = h->type == g.type || (g.type == CAP_FRAME && h->type == CAP_UNTYPED);
@@ -193,12 +191,9 @@ void history_begin(void)
     each_node(&objects, record_node);
     qsort(nodes.v, nodes.n, sizeof(nodes.v[0]), cmp_at);
 
-    for (unsigned i = 0; i < SHARES; i++) {
-        budget_before[i] = shares[i].budget;
-        flags_before[i] = shares[i].flags;
-    }
     ticks_before = sched_ticks;
-    charged = turn != NULL && !turn->drained ? turn : NULL;
+    charged = turn;
+    charged_units = charged != NULL ? charged->time : (struct cap){ 0 };
     charged_balance = charged != NULL ? account_at_count(charged) : 0;
 }
 
@@ -245,9 +240,9 @@ static void check_node(const struct cap *c)
     } else if (!covered(g)) {
         violated("a call made a capability no capability of its caller covers");
     }
-    /* A thread bound to a share by this call is one its caller could control. */
+    /* A thread bound to units by this call is one its caller could control. */
     if (c->type == CAP_BOUND && !covered((struct grant){ CAP_THREAD, RIGHT_W, v2p(bound_thread((struct cap *)c)), 0 })) {
-        violated("a call bound a thread its caller could not control to a share");
+        violated("a call bound a thread its caller could not control to units");
     }
 }
 
@@ -261,22 +256,14 @@ void history_end(void)
     each_node(&objects_after, check_node);
 
     /*
-     * A tick costs the share whose turn it is, while it has time, a whole tick,
-     * and gains it its budget, as every tick does; only OP_DEBUG_TICK moves time here.
+     * A tick costs the thread whose turn it is a whole tick while it holds one,
+     * and earns it its units, as every tick does; only OP_DEBUG_TICK moves time here.
      */
-    if (charged != NULL && sched_ticks == ticks_before + 1 &&
-        charged->budget == budget_before[charged - shares] &&
-        account_at_count(charged) != charged_balance - (TICK_PARTS - charged->budget)) {
-        violated("a tick did not cost the share whose turn it was a tick less its budget");
-    }
-
-    /* A share's budget moves only through a capability to it that may move it, and its flags likewise. */
-    for (unsigned i = 0; i < SHARES; i++) {
-        if (shares[i].budget != budget_before[i] && !covered((struct grant){ CAP_SHARE, RIGHT_W, i, 1 })) {
-            violated("a call moved budget to or from a share its caller could not move it on");
-        }
-        if (shares[i].flags != flags_before[i] && !covered((struct grant){ CAP_SHARE, RIGHT_X, i, 1 })) {
-            violated("a call set the flags of a share its caller could not set them on");
+    if (charged != NULL && sched_ticks == ticks_before + 1 && same_grant(grant_of(&charged->time), grant_of(&charged_units))) {
+        uint32_t units = thread_units(charged);
+        uint32_t want = charged_balance >= TICK_PARTS ? charged_balance - (TICK_PARTS - units) : charged_balance + units;
+        if (account_at_count(charged) != want) {
+            violated("a tick did not cost the thread whose turn it was a tick less its units");
         }
     }
 
