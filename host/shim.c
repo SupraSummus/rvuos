@@ -274,6 +274,7 @@ struct thread *host_boot(void)
  */
 uint32_t host_syscall(const struct replay_record *c)
 {
+    const struct thread *caller = current;
     struct trap_frame *f = &current->frame;
     f->regs[REG_A7] = c->op;
     f->regs[REG_A0] = c->slot;
@@ -313,6 +314,11 @@ uint32_t host_syscall(const struct replay_record *c)
         }
         if (f->mepc == mepc && !took) {
             fprintf(stderr, "invariant violated: a call was preempted before it took anything away\n");
+            host_violated();
+        }
+        /* The thread makes a stopped call again, so it runs on and can still name what it invoked. */
+        if (f->mepc == mepc && (current != caller || thread_table(caller) == NULL)) {
+            fprintf(stderr, "invariant violated: a call stopped where its caller cannot make it again\n");
             host_violated();
         }
     } while (f->mepc == mepc);
@@ -404,7 +410,7 @@ static bool mapped_with(const struct process *proc, uint32_t base, uint32_t size
 bool host_driver_alive(void)
 {
     const struct process *proc = thread_process(current);
-    return mapped_with(proc, USER_CODE_BASE, USER_CODE_SIZE, RIGHT_R | RIGHT_X) &&
+    return proc != NULL && mapped_with(proc, USER_CODE_BASE, USER_CODE_SIZE, RIGHT_R | RIGHT_X) &&
            mapped_with(proc, USER_DATA_BASE, USER_DATA_SIZE, RIGHT_R | RIGHT_W) &&
            mapped_with(proc, UART_BASE, UART_SIZE, RIGHT_R | RIGHT_W) &&
            mapped_with(proc, KLOG_BASE, KLOG_REGION_SIZE, RIGHT_R | RIGHT_W);

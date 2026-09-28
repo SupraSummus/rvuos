@@ -8,7 +8,7 @@ Report: the release is for a tick already past
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -308,7 +308,6 @@ void sched_accounts_fill(void)
+@@ -315,7 +315,6 @@ void sched_accounts_fill(void)
   */
  static void release(void)
  {

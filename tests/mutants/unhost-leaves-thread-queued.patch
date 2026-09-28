@@ -1,0 +1,18 @@
+Taking a ready thread's process stops it but leaves it on its queue,
+so the next turn would run a thread that has no process to run in;
+a queue holds only ready threads.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: a thread names a queue it is not for
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -278,7 +278,6 @@ void sched_unhost(struct cap *hosted)
+     }
+     t->state = THREAD_STOPPED;
+     *hosted = (struct cap){ 0 };
+-    thread_settle(t);
+ }
+ 
+ /* The thread that earns a unit first of those it earns, else NULL, so that a look at each unit meets it once. */

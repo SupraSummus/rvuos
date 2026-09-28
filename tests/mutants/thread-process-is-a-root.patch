@@ -1,0 +1,20 @@
+A thread holds its process by a node that is a root rather than one below the Process capability,
+so revoking that capability, or destroying the process's pool, does not stop the thread,
+which would go on in a process that is gone;
+a thread's process lies below its pool's own node.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: capability to an object is a root
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -333,7 +333,7 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
+         }
+         /* It hangs below the capability it was made with, so a revoke above that stops the thread. */
+         nt->proc = (struct cap){ .type = CAP_HOSTED, .rights = pc.rights, .a = pc.a };
+-        cap_attach(slot_node(t, arg[3]), &nt->proc);
++        cap_attach(NULL, &nt->proc);
+         nt->state = THREAD_STOPPED;
+         /* Until it is configured while tracing is off, the host cannot follow it. */
+         nt->flags = THREAD_UNTRACED;

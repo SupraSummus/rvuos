@@ -48,7 +48,8 @@ static void pool_unlink(struct pool *pool)
 
 /*
  * The next node an object holds, from its slot *at on, or NULL when it holds no more:
- * a table's slots, and a process's table slot, 0, and its region slots.
+ * a table's slots, a process's table slot, 0, and its region slots,
+ * and a thread's process, 0, and its units.
  * *at moves to the slot found, so the scan does not look at a slot twice.
  */
 static struct cap *held_node(struct obj_header *o, uint16_t *at)
@@ -95,8 +96,8 @@ bool pool_destroy(struct pool *pool, struct cap *keep, bool preempt)
     /*
      * The objects go newest first, and the used mark follows,
      * so a stop leaves a pool with fewer objects and the next step is at its newest.
-     * A thread is newer than its process and an Irq than its notification,
-     * so no object is left pointing at one already gone.
+     * An Irq is newer than its notification, so no object is left pointing at one already gone;
+     * a thread holds its process by a node, which the revoke above cleared if the process is here.
      * The nodes an object holds are cleared as a delete clears them:
      * what was derived from them goes to their parents,
      * so no ring leads into memory that is about to be the Untyped's again,

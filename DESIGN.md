@@ -485,29 +485,27 @@ to show that a stale capability does not come back with it.
 Objects reference each other in two ways,
 and destroy must cope with both.
 A capability names an object, and the destroy's revoke clears it.
-A process holds its table this way;
-see "A process's table".
-A structural pointer, such as a thread to its process,
+A process holds its table this way, and a thread its process;
+see "A process's table" and "Threads".
+A structural pointer, as an `Irq`'s to its notification,
 is not checked on use,
 so a structural parent must live in the same pool as its child
 or outlive it.
 The kernel enforces the same-pool rule at allocation:
-a `Thread` must be allocated from the pool its `Process` lies in,
-and an `Irq` from the pool its `Notification` lies in.
+an `Irq` is bound in the pool its `Notification` lies in.
 A child is allocated after its parent, so the destroy, newest first, takes it first:
-a thread goes before its process and an `Irq` before its notification.
+an `Irq` goes before its notification.
 A thread waiting on a notification inside a destroyed pool
 is woken with `KERR_INVALID_CAP` and no bits,
 because the wait can no longer be answered.
 Nothing is allocated from a pool once its destroy has begun.
 
 A destroy refuses with `KERR_STATE`
-when the calling thread lives in the pool or its process's table does,
-and a revoke below an Untyped refuses when either lies in the Untyped's memory.
+when the calling thread lives in the pool, or its process or the process's table does,
+and a revoke below an Untyped refuses when any of them lies in the Untyped's memory.
 That is a test by address, which is enough
 because every pool below an Untyped lies in its memory.
-A thread and its process share one pool by the rule above,
-so those two tests are the whole of it:
+The three may lie in different pools, and those tests are the whole of it:
 the caller keeps what it runs on and the table it names capabilities in.
 The boot pool is refused by name.
 It holds the root task, and no Untyped covers it,
@@ -536,11 +534,13 @@ Every filled slot of every capability table,
 every region installed in a process,
 which is a slot of the same layout living in the `Process`,
 every process's table slot, which lives there too,
+every thread's process and units, which live in the `Thread`,
 and every pool's own node, which lives in its descriptor;
 see `kernel/object.h`.
 Roots are the boot capabilities but those to the boot pool and its objects,
-which hang below the boot pool's own node, itself a root.
-A capability to a pool or an object is never a root.
+which hang below the boot pool's own node, itself a root,
+as the root task's table slot and its thread's process do.
+A capability to a pool or an object is never a root, and neither is a thread's process.
 
 **What hangs below what.**
 A carve hangs below the frame or line it was carved from,
@@ -548,7 +548,8 @@ a retype below the Untyped it was made of,
 a derivation below its source,
 an installed region below the frame it was installed from,
 the counter's frame below the clock it was derived through,
-and a process's table slot below the `CapTable` capability the process was made with.
+a process's table slot below the `CapTable` capability the process was made with,
+and a thread's process below the `Process` capability the thread was made with.
 A pool's own node hangs below the Untyped, and the Pool capability the retype returns below that node.
 A capability to a new object hangs below the Pool capability it was allocated through,
 and so does the `Irq` capability of `OP_IRQ_BIND`, whose line goes with everything derived from it.
@@ -624,8 +625,8 @@ No system call names the slot: a process's slot numbers index its table.
 A revoke above the slot, or the destroy of the table's pool, clears it like any other,
 so the table may lie in any pool, and several processes may share one.
 A process whose slot is empty fails every call with `KERR_INVALID_CAP`.
-Within one call only a revoke, which then returns,
-or a destroy, which keeps the table it found, can take it.
+Within one call only a revoke can take it, which then returns, see "Bounded work",
+or a destroy, which keeps the table it found.
 It costs sixteen bytes per process and a test on every call;
 before, the table had to lie in the process's own pool so a pointer could not dangle.
 Open decision 15 is about what else the slot could do.
@@ -667,8 +668,20 @@ and starts a thread at whatever entry point and stack pointer it likes.
 A `Thread` is an execution context inside a process:
 a register frame, a state, and the process it belongs to.
 Creating one takes a `Process` capability with the write right,
-and the new thread is allocated from that process's pool,
-as the same-pool rule requires.
+and the new thread may be allocated from any pool.
+
+A thread holds its process as a process holds its table,
+by a capability in a slot of its own, below the capability it was made with.
+A revoke above the slot, or the destroy of the process's pool, clears it,
+and clearing it stops the thread, as clearing an installed region unmaps it:
+a ready thread leaves its queue, a waiting one its notification's waiters,
+and the running one gives the processor up as its call returns.
+`OP_THREAD_RESUME` refuses a thread without a process,
+so it stays stopped until its own pool goes.
+The running thread can lose its process only to a revoke it makes itself;
+see "Bounded work".
+It costs twenty bytes per thread and a test on every call and every switch;
+before, a thread had to lie in its process's pool so a pointer could not dangle.
 
 A thread is either stopped or ready.
 `OP_THREAD_CONFIGURE` sets a stopped thread's program counter
@@ -871,7 +884,7 @@ so revoking above that capability unbinds the thread, as it unmaps a region inst
 A thread with no units and no spare time keeps its state and does not run:
 that is how a scheduler in userspace stops and starts a thread, open decision 9.
 A thread that loses its units while it runs finishes the turn it had,
-so only a wait or the tick takes the processor from a running thread,
+so only a wait, the tick, or a revoke that takes its own process takes the processor from a running thread,
 and a call stopped for an interrupt is made again before anything else runs.
 
 **A thread has an account.**
@@ -1280,6 +1293,9 @@ A walk asks only after a step, so every attempt takes something away and the res
 Whether `intr_pending` is right changes when a walk stops, never what it does.
 A restart is a new call:
 it checks everything again, and revokes what was derived in between too.
+A revoke that takes its caller's table, or the caller's process, ends at that step:
+nothing can make the call again,
+so where an interrupt landed would otherwise decide how far it got.
 So a bind revokes only once every check that can fail has passed,
 its room in the pool among them, and builds after.
 
@@ -1314,7 +1330,8 @@ It finds a false claim only where the corpus reaches.
 The host answers every `intr_pending` with yes, the worst case,
 so each preemptible call stops after its first step, is made again,
 and the self-check runs between any two steps;
-every host harness requires a stopped call to have taken a node, a link, an object or a waiter away.
+every host harness requires a stopped call to have taken a node, a link, an object or a waiter away,
+and to leave its caller running and holding its table, so that it can make the call again.
 
 **Where the kernel falls short.**
 Nowhere, since `Untyped` and `Frame` replaced the overlap checks and the sweep;
@@ -1404,12 +1421,13 @@ with no more than the right to bind,
 or a range of the units of time there are, with no more than the rights to bind and to run on spare time,
 or the debug capability or the clock, which name no object,
 or a live kernel object of the capability's own type.
-Every process's table slot is empty or names a live table.
+Every process's table slot is empty or names a live table,
+and every thread's process slot is empty or names a live process.
 
 **Derivation.**
 The slots of every live table,
 the table slot and region slots of every live process,
-the units of every live thread
+the process and units of every live thread
 and the own node of every pool
 are the nodes of one forest.
 Every link of a filled node lands on a live, filled node;
@@ -1419,13 +1437,14 @@ every node on it linked up to that node,
 and every node's previous link names the sibling whose next is the node,
 the last sibling for the first;
 a root has no siblings and no previous link,
-and a capability to a pool or an object is never one.
+and a capability to a pool or an object is never one, nor a thread's process.
 A node is derived from its parent:
 the same object with no more rights,
 a range within the parent's range with no more rights,
 and below an Untyped's watermark when the parent is one,
 a pool's own node on an Untyped, an installed region on a frame,
 a thread's units on a capability to units that holds them, the first of them even for none,
+a thread's process on a capability to that process, to its pool, or on its pool's own node,
 the counter's block, or a region installed from it, below a clock,
 or a capability to a pool or an object below a capability to that pool or its own node.
 A revoke, a delete or a destroy stopped for an interrupt leaves such a forest too,
@@ -1438,7 +1457,6 @@ each object records the pool it lies in and where the one before it lies,
 the newest is the one the descriptor names,
 and pools are pairwise disjoint.
 A pool half destroyed is a pool like any other, with fewer objects.
-A thread and its process lie in the same pool.
 The line table names exactly the bound `Irq`s,
 and every installed region records its slot.
 
@@ -1446,6 +1464,7 @@ and every installed region records its slot.
 Every thread is stopped, ready, or waiting,
 and has one binding to units or none, a leaf of the derivation tree
 made through a capability with the right to bind.
+A thread's process is a leaf too, and a thread without one is stopped.
 A waiting thread names a live notification and nothing else does,
 and a notification's queue holds exactly the threads waiting on it.
 A ready thread but the running one that may run waits on exactly one of the scheduler's queues and names it:
@@ -1541,7 +1560,7 @@ and no byte a process wrote becomes part of an object when its memory becomes a 
 The rest of a pool's memory comes back as it went in; see "Zeroing goes with the object".
 
 **The caller keeps what it runs on.**
-No call begins to destroy the pool its thread or its process's table lives in.
+No call begins to destroy the pool its thread, its process or its process's table lives in.
 A destroy stopped half way leaves the pool's threads running,
 so this is what keeps a thread from making a call it cannot return from.
 
@@ -1666,8 +1685,9 @@ with the input placed in RAM by QEMU's loader.
 The driver runs two threads that take records from one cursor,
 so a record that blocks one of them leaves the kernel
 something else to run and the blocking paths are replayed too.
-A third shares the second's process and starts stopped,
-so a record can resume it when two threads should wait at once.
+A third shares the second's process, lives in the first's pool, and starts stopped,
+so a record can resume it when two threads should wait at once,
+and a destroy of the second's pool leaves it stopped without a process.
 All three earn no units and run on spare time, so they take turns as one queue
 and passing a record round visits every runnable thread,
 until a record binds one of them to units, and so to time the others do not have.

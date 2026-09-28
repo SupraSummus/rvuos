@@ -375,6 +375,7 @@ The tree grows in these ways:
 | `OP_PROCESS_INSTALL` | the installed region hangs below the frame |
 | `OP_POOL_ALLOC` | below the invoked `KernelPool` capability |
 | `OP_POOL_ALLOC` of a `Process` | and the process's hold on its table below the `CapTable` capability |
+| `OP_POOL_ALLOC` of a `Thread` | and the thread's hold on its process below the `Process` capability |
 | `OP_IRQ_BIND` | below the `KernelPool` capability; the line goes with what was derived from it |
 | `OP_TIME_BIND` | the thread's hold on its units hangs below the invoked `Time` capability |
 | boot | nowhere, but for the capabilities to the boot pool and its objects |
@@ -382,7 +383,8 @@ The tree grows in these ways:
 `OP_CAP_REVOKE` on a slot clears everything below it, in every table and every process:
 derived capabilities, their copies, what was derived from those,
 every region installed from any of them,
-and every thread's units bound through any of them.
+and every thread's units bound through any of them;
+a thread made through any of them loses its process and stops, section 5.6.
 Below an Untyped it destroys every pool made of it, as `OP_POOL_DESTROY` does.
 The slot itself stays.
 Revoking a copy takes nothing from the original, and the other way round;
@@ -496,26 +498,23 @@ Sizes a developer needs for planning, as the kernel rounds them:
 | pool descriptor | 56 |
 | `CapTable` with `n` slots | 12 + 24 × n, rounded up to 8 |
 | `Process` | 312 (272 with `PMP_MAX_ENTRIES=8`) |
-| `Thread` | 176 |
+| `Thread` | 224 |
 | `Notification` | 16 |
 | `Irq` | 24 |
 
 A minimal child process, table of 10 slots, process, thread and two notifications,
-costs 832 bytes including the descriptor.
+costs 880 bytes including the descriptor.
 
 **The same-pool rule.**
-The kernel follows the link from a thread to its process,
-and from an `Irq` to its notification,
-without checking that the target still exists.
-The target must therefore never be destroyed before the object that points at it,
+The kernel follows the link from an `Irq` to its notification
+without checking that the notification still exists.
+It must therefore never be destroyed before the `Irq`,
 and since destruction happens per pool, the two must lie in one pool:
+an `Irq` is bound in the pool its `Notification` lies in,
+and `OP_IRQ_BIND` fails with `KERR_INVALID_ARG` otherwise.
 
-- a `Thread` is allocated from the pool its `Process` lies in,
-- an `Irq` from the pool its `Notification` lies in.
-
-A process's table is not bound by the rule, section 5.2.
-
-An allocation that breaks the rule fails with `KERR_INVALID_ARG`.
+A process's table and a thread's process are not bound by the rule, sections 5.2 and 5.6:
+each is held by a capability that a destroy of its pool clears.
 
 **Capabilities to a pool.**
 Every capability to an object hangs below the `KernelPool` capability it was allocated through,
@@ -534,18 +533,19 @@ reachable through nothing, until the Untyped it was made of is revoked.
   so what was derived from those slots goes to their parents,
 - wakes every thread waiting on a notification in the pool
   with `KERR_INVALID_CAP` and no bits,
+- stops every thread, in whatever pool, that ran in a process in the pool,
 - masks the interrupt line of every `Irq` in the pool, which frees the line,
 - zeroes the memory its objects took and leaves the rest as it was,
   so clear memory before it becomes a pool if whoever destroys the pool should not read it,
 - gives the memory back to the Untyped the pool was made of.
 
 The call fails with `KERR_STATE`
-when the calling thread lives in the pool or its process's table does,
-so a thread cannot destroy the pool it runs from
+when the calling thread, its process or the process's table lives in the pool,
+so a thread cannot destroy what it runs on
 nor the table it names capabilities in.
 The boot pool holds the root task and is never destroyed.
 A revoke below an Untyped fails the same way
-when the calling thread or its table lies in the Untyped's memory.
+when the calling thread, its process or its table lies in the Untyped's memory.
 A destroy is restartable: it may stop for an interrupt and go on when the call is made again,
 and a pool being destroyed allocates nothing, `KERR_STATE`.
 
@@ -569,12 +569,18 @@ A thread is **stopped**, **ready** or **waiting**.
 - A thread waiting on a notification is waiting;
   a signal makes it ready again.
 
+A thread holds its process by a capability derived from the `Process` capability it was allocated with,
+as a process holds its table, section 5.2, so the thread may lie in any pool.
+Revoking below that capability, or destroying the pool the process lies in,
+takes the process from the thread, and the thread stops for good:
+`OP_THREAD_RESUME` refuses it with `KERR_STATE`.
+
 Apart from its state, a thread is bound to units of time or it is not.
 A new thread is not, and a thread that is not keeps its state and does not run:
 `OP_TIME_BIND` binds it, and revoking below the capability it was bound through unbinds it.
 That is how a started thread is stopped and started again.
 No thread exits: a thread that has nothing left to do waits forever
-on a notification nobody signals, or loses its units.
+on a notification nobody signals, or loses its units or its process.
 A thread that faults stops the machine; see section 11.
 
 ### 5.7 Notifications
@@ -983,9 +989,12 @@ and deleting a `KernelPool` capability does not destroy the pool.
 `a1` = slot in the invoked table, which must be filled (`KERR_INVALID_CAP`).
 Clears everything below it, section 5.2, and leaves the slot.
 Regions installed from capabilities below it are uninstalled,
-and threads of those processes lose access at once.
+and threads of those processes lose access at once;
+threads made through a `Process` capability below it stop, section 5.6.
+A revoke that takes the caller's own process, or its process's table, ends there,
+returns `KERR_OK`, and leaves the rest below the slot for another call to revoke.
 Below an Untyped, every pool made of it is destroyed as by `OP_POOL_DESTROY`;
-`KERR_STATE` if the calling thread or its process's table lies in the Untyped's memory.
+`KERR_STATE` if the calling thread, its process or the process's table lies in the Untyped's memory.
 The call may be made again, section 6.1.
 
 ### 6.5 Operations on `Frame` and `Untyped`
@@ -1032,7 +1041,7 @@ Both need `RIGHT_W` on the pool.
 |---|---|---|
 | `CAP_CAPTABLE` | number of slots, 1 to `CAPTABLE_MAX_SLOTS` (1024) | |
 | `CAP_PROCESS` | slot of the `CapTable` capability the process will use, with `RIGHT_W` | the table may lie in any pool; the process's hold on it hangs below that capability |
-| `CAP_THREAD` | slot of the `Process` capability the thread will run in, with `RIGHT_W` | the process must lie in this pool; the thread starts stopped |
+| `CAP_THREAD` | slot of the `Process` capability the thread will run in, with `RIGHT_W` | the process may lie in any pool; the thread's hold on it hangs below that capability; the thread starts stopped |
 | `CAP_NOTIFICATION` | unused | |
 
 Any other type is `KERR_INVALID_ARG`; `Irq` objects come from `OP_IRQ_BIND`.
@@ -1044,7 +1053,7 @@ The new capability carries all rights and hangs below the invoked `KernelPool` c
 No arguments.
 Does everything section 5.5 lists,
 and the memory goes back to the Untyped the pool was made of.
-`KERR_STATE` if the calling thread or its process's table lives in the pool,
+`KERR_STATE` if the calling thread, its process or the process's table lives in the pool,
 and for the boot pool.
 The call may be made again, section 6.1.
 
@@ -1081,6 +1090,7 @@ Neither is checked.
 **`OP_THREAD_RESUME` (13).**
 Makes the thread ready.
 It runs once it is bound to units, or to spare time.
+`KERR_STATE` too once the thread's process was taken, section 5.6.
 
 ### 6.9 Operations on `Notification`
 
@@ -1172,7 +1182,7 @@ Its hold on the units hangs below the invoked capability,
 so revoking below that capability unbinds it:
 it keeps its state and does not run until it is bound again, and its account is emptied.
 A thread unbound or moved while it runs, the caller itself for one, finishes the turn it had:
-only a wait or the tick takes the processor from it.
+only a wait, the tick, or a revoke that takes its own process, section 6.4, takes the processor from it.
 
 ### 6.14 Operation codes in numeric order
 
@@ -1445,7 +1455,8 @@ struct replay_record { uint8_t op; uint8_t actor; uint16_t slot; uint32_t a1, a2
 
 Each record is one system call and the thread that makes it:
 `actor` 0 is whichever thread runs, 1 the driver's root thread, 2 its second thread,
-3 a third that starts stopped until a record resumes it.
+3 a third that starts stopped until a record resumes it,
+and lies in the root thread's pool while it runs in the second's process.
 The replay driver in `user/fuzzdrv.c` performs them in order,
 the host build in `host/` performs the same records natively under ASan and UBSan,
 and `tests/differential.py` requires the two transcripts to match line for line.

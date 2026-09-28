@@ -34,6 +34,8 @@
  * A third thread shares the second one's process and starts stopped,
  * so a record resumes it when two threads should wait at once
  * and a third is needed to wake them.
+ * It lives in the first thread's pool, not its process's,
+ * so a destroy of the second thread's pool leaves it stopped without a process.
  *
  * The second thread has a process, a table and a pool of its own,
  * so that every switch between the threads reloads the PMP
@@ -103,12 +105,12 @@ _Static_assert(REPLAY_CAP_NOTIFY == BOOT_CAP_COUNT, "the setup's slots follow th
 static const struct replay_record replay_prologue[] = {
     { OP_PROCESS_INSTALL, 0, BOOT_CAP_PROCESS, REPLAY_REGION_SLOT, BOOT_CAP_INPUT, RIGHT_R },
     { OP_POOL_ALLOC, 0, BOOT_CAP_POOL, CAP_NOTIFICATION, REPLAY_CAP_NOTIFY, 0 },
-    /* The second thread's pool, table, process and thread. */
+    /* The second thread's pool, table, process and thread, and the third thread in the first one's pool. */
     { OP_UNTYPED_RETYPE, 0, BOOT_CAP_FREE_RAM, CAP_POOL, REPLAY_POOL_SIZE, REPLAY_CAP_POOL },
     { OP_POOL_ALLOC, 0, REPLAY_CAP_POOL, CAP_CAPTABLE, REPLAY_CAP_TABLE, REPLAY_TABLE_SLOTS },
     { OP_POOL_ALLOC, 0, REPLAY_CAP_POOL, CAP_PROCESS, REPLAY_CAP_PROCESS, REPLAY_CAP_TABLE },
     { OP_POOL_ALLOC, 0, REPLAY_CAP_POOL, CAP_THREAD, REPLAY_CAP_THREAD, REPLAY_CAP_PROCESS },
-    { OP_POOL_ALLOC, 0, REPLAY_CAP_POOL, CAP_THREAD, REPLAY_CAP_THIRD, REPLAY_CAP_PROCESS },
+    { OP_POOL_ALLOC, 0, BOOT_CAP_POOL, CAP_THREAD, REPLAY_CAP_THIRD, REPLAY_CAP_PROCESS },
     /* It runs the same code on the same data as the first thread; the input it never reads. */
     { OP_PROCESS_INSTALL, 0, REPLAY_CAP_PROCESS, 0, BOOT_CAP_CODE, RIGHT_R | RIGHT_X },
     { OP_PROCESS_INSTALL, 0, REPLAY_CAP_PROCESS, 1, BOOT_CAP_DATA, RIGHT_R | RIGHT_W },

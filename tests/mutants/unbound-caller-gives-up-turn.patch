@@ -4,13 +4,13 @@ which the host, making the call again at once, does not;
 a call stopped for an interrupt is made again before anything else runs.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
-Report: a call was preempted before it took anything away
+Report: a call stopped where its caller cannot make it again
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -785,7 +785,7 @@ void syscall_dispatch(struct thread *t)
-      * A thread that waits gives the processor up.
+@@ -783,7 +783,7 @@ void syscall_dispatch(struct thread *t)
+      * A thread that waits gives the processor up, and so does one whose process the call took.
       * One that lost its units finishes its turn, as a preempted call is made again before the tick switches.
       */
 -    if (current->state != THREAD_READY) {

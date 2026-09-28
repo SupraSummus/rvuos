@@ -147,7 +147,7 @@ Design decisions behind these items live in `DESIGN.md`.
   since no record writes memory; the clamp in `klog.c` is checked by reading it.
   That the log cannot become a pool is a matter of type now:
   `BOOT_CAP_LOG` is a frame, and no Untyped covers it.
-- The replay driver has three threads, and the third shares the second's process and pool.
+- The replay driver has three threads, and the third shares the second's process and lies in the first's pool.
   More of them, each with its process, pool and Untyped as the second has,
   would give the derivation below the free RAM more branches;
   the prologue in `include/rvuos/replay.h` and `host_boot` grow with them.
@@ -236,21 +236,17 @@ Design decisions behind these items live in `DESIGN.md`.
   when a board's RAM gets tight.
 - `PROCESS_REGION_SLOTS` is fixed at 8;
   size it per process from the PMP budget when process creation exists.
-- `KERR_STATE` for a thread destroying the pool its table lies in, but not the thread,
-  is checked by nothing:
-  the driver's threads keep their tables in their own pools,
-  and the demo gives its child no table elsewhere.
-- The same-pool rule for a thread and its process,
-  and for an `Irq` and its notification,
-  could go the way a process's table went:
-  hold the target by a capability slot the sweep clears,
-  and give clearing it the effect it needs,
-  as clearing an installed region rebuilds the PMP image.
-  A thread whose process is taken leaves its queue and stops;
+- `KERR_STATE` for a thread destroying the pool its table or its process lies in, but not the thread,
+  is checked only for the two together:
+  the driver's third thread lies apart from its process, but the process's table lies with it,
+  and the demo gives its child nothing elsewhere.
+- The same-pool rule for an `Irq` and its notification
+  could go the way a thread's process went:
+  hold the notification by a capability slot the sweep clears,
+  and give clearing it the effect it needs:
   an `Irq` whose notification is taken disarms and masks its line.
-  A thread could then live in a pool of its own and be revoked alone,
-  and no structural pointer between objects would be left.
-  Each costs sixteen bytes per object and one test on use.
+  No structural pointer between objects would then be left.
+  It costs twenty bytes per `Irq` and one test on use.
 - A signal and a wait in one system call, the shape of seL4's `ReplyRecv`.
   Today it saves one trap per round trip and no context switch,
   because a signal does not take the processor away from the signaller.
