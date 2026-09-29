@@ -18,6 +18,7 @@ paddr_t run_queue;
 paddr_t spare_queue;
 paddr_t spent_queue;
 struct thread *turn;
+uint32_t turn_from;
 uint32_t armed_sources;
 uint32_t nearest_deadline = NEAREST_NONE;
 uint32_t nearest_release = NEAREST_NONE;
@@ -113,18 +114,10 @@ static paddr_t *queue_head(uint8_t queue)
     return queue == QUEUE_RUN ? &run_queue : queue == QUEUE_SPARE ? &spare_queue : &spent_queue;
 }
 
-/* The most a thread's account holds: a tenth of a second's worth of its units, none without. */
-static uint32_t account_cap(const struct thread *t)
-{
-    _Static_assert((uint64_t)TIME_UNITS * ACCOUNT_TICKS <= UINT32_MAX, "the cap does not wrap");
-    _Static_assert(ACCOUNT_TICKS >= TICK_PARTS + 1, "one unit's cap holds account_after's stretch");
-    return thread_units(t) * ACCOUNT_TICKS;
-}
-
-/* A thread's account at the count: it gains a part for each unit every tick since its stamp, up to its cap. */
+/* A thread's account at the count: it gains its tick's parts every tick since its stamp, up to its cap. */
 static uint32_t account_now(const struct thread *t)
 {
-    uint64_t balance = t->balance + (uint64_t)(sched_ticks - t->stamp) * thread_units(t);
+    uint64_t balance = t->balance + (uint64_t)(sched_ticks - t->stamp) * tick_gain(t);
     uint32_t cap = account_cap(t);
     return balance > cap ? cap : (uint32_t)balance;
 }
@@ -139,40 +132,64 @@ static void account_refill(struct thread *t)
 /* Whether an account holds a turn's worth, a tick: then the thread has time, and takes turns with those that have. */
 static bool has_time(uint32_t balance)
 {
-    return balance >= TICK_PARTS;
+    return balance >= tick_parts();
 }
 
 /* The ticks an account at balance, below a tick, takes to reach one, for a thread with units. */
 static uint32_t account_fill(const struct thread *t, uint32_t balance)
 {
-    uint32_t units = thread_units(t);
-    return (TICK_PARTS - balance + units - 1) / units;
+    uint32_t gain = tick_gain(t);
+    return (tick_parts() - balance + gain - 1) / gain;
 }
 
 /*
- * The ticks from the count to the one that drains an account with time, the first to leave it less than a tick,
- * for the thread whose turn it is; NEAREST_NONE for none, with the whole processor.
- */
-static uint32_t account_drain(const struct thread *t, uint32_t balance)
-{
-    uint32_t loss = TICK_PARTS - thread_units(t);
-    return loss != 0 ? (balance - TICK_PARTS) / loss + 1 : NEAREST_NONE;
-}
-
-/*
- * A thread's account after ticks of its turn, as if each tick had been taken on its own:
- * a tick that starts with a tick in the account costs TICK_PARTS - units, and any other earns units.
- * Either way the balance moves by units modulo TICK_PARTS.
- * It falls while it holds a tick, and once below one it stays in [units, TICK_PARTS + units),
- * a stretch TICK_PARTS wide, so the one value there in the right residue is where it ends.
+ * A thread's account after whole ticks of its turn, at least one, as if each tick had been taken on its own:
+ * a tick that starts with a tick in the account costs a tick less the tick's gain, and any other earns the gain.
+ * Either way the balance moves by the gain modulo a tick.
+ * It falls while it holds a tick, and once below one it stays in [gain, tick + gain),
+ * a stretch a tick wide, so the one value there in the right residue is where it ends.
  * The cap never cuts in: that stretch lies within the cap of a thread with units.
  */
 static uint32_t account_after(uint32_t balance, uint32_t units, uint32_t ticks)
 {
-    uint64_t spent = (uint64_t)ticks * (TICK_PARTS - units);
-    uint32_t earned = (uint32_t)((balance + (uint64_t)(ticks % TICK_PARTS) * units) % TICK_PARTS);
-    uint32_t hover = earned >= units ? earned : earned + TICK_PARTS;
+    _Static_assert(ACCOUNT_TICKS >= COUNT_PARTS + 1, "one unit's cap holds the stretch");
+    uint32_t counts = timer_tick_counts(), tick = tick_parts(), gain = units * counts;
+    uint64_t spent = (uint64_t)ticks * (tick - gain);
+    uint32_t earned = (balance % tick + ((ticks % COUNT_PARTS) * units % COUNT_PARTS) * counts) % tick;
+    uint32_t hover = earned >= gain ? earned : earned + tick;
     return spent < balance && balance - spent > hover ? (uint32_t)(balance - spent) : hover;
+}
+
+/*
+ * What the thread whose turn it is owes for its turn up to offset counts into the tick:
+ * a count's parts for each count from turn_from, if it had time as the turn began, and nothing on spare time.
+ * A turn with time began with a tick in the account and owes at most the rest of the tick, so the account covers it.
+ */
+static uint32_t turn_owes(uint32_t offset)
+{
+    return offset > turn_from && has_time(turn->balance) ? COUNT_PARTS * (offset - turn_from) : 0;
+}
+
+/* The account of the thread whose turn it is at the next tick: it pays for the rest of this one and earns the gain. */
+static uint32_t turn_next(void)
+{
+    uint32_t next = turn->balance - turn_owes(timer_tick_counts()) + tick_gain(turn);
+    return next < account_cap(turn) ? next : account_cap(turn);
+}
+
+/*
+ * The ticks from the count to the one that drains the account of the thread whose turn it is, which has time:
+ * the first to leave it less than a tick; NEAREST_NONE for none, with the whole processor.
+ * After the next tick every tick costs the account a tick less the gain.
+ */
+static uint32_t turn_drain(void)
+{
+    uint32_t next = turn_next();
+    if (!has_time(next)) {
+        return 1;
+    }
+    uint32_t loss = tick_parts() - tick_gain(turn);
+    return loss != 0 ? (next - tick_parts()) / loss + 2 : NEAREST_NONE;
 }
 
 /* The queue a thread waits on, as its state, the turn, its account at balance and its binding now say. */
@@ -215,13 +232,30 @@ static void thread_settle(struct thread *t)
     }
 }
 
+/* How far into the tick the counter is; nowhere under tracing, where the clock is the tick count alone. */
+static uint32_t clock_offset(void)
+{
+    return debug_trace ? 0 : timer_offset();
+}
+
+/* The turn ends where the counter is: charge its thread, if any, and return how far into the tick that is. */
+static uint32_t turn_close(void)
+{
+    uint32_t offset = clock_offset();
+    if (turn != NULL) {
+        turn->balance -= turn_owes(offset);
+    }
+    return offset;
+}
+
 /*
  * The oldest thread with time, or with none the oldest that may run on spare time,
- * taken off its queue with its account brought up to the count: its turn begins,
- * and every tick of it is charged to it from here. NULL when neither queue has one.
+ * taken off its queue with its account brought up to the count: its turn begins offset counts into the tick,
+ * and every count of it is charged to it from there. NULL when neither queue has one.
  */
-static struct thread *next_turn(void)
+static struct thread *next_turn(uint32_t offset)
 {
+    turn_from = offset;
     paddr_t *head = run_queue != 0 ? &run_queue : &spare_queue;
     if (*head == 0) {
         return NULL;
@@ -295,6 +329,8 @@ static struct thread *unit_first(uint32_t unit)
  */
 void sched_accounts_fill(void)
 {
+    /* The fill clears what the turn owed, too. */
+    turn_from = clock_offset();
     nearest_release = sched_ticks + NEAREST_NONE;
     for (uint32_t i = 0; i < TIME_UNITS; i++) {
         LOOP_BOUND(TIME_UNITS);
@@ -328,6 +364,7 @@ static void release(void)
 void sched_start(struct thread *t)
 {
     current = turn = t;
+    turn_from = clock_offset();
     /* The boot sets the timer for the first tick. */
     wake_tick = sched_ticks + 1;
 }
@@ -375,7 +412,7 @@ void irq_drop(struct cap *signalled)
 
 /*
  * Ticks of time, one or the few a trap counts at once:
- * charge them to the thread whose turn it is, or to nobody while none runs,
+ * charge them to the thread whose turn it is, the first from turn_from on, or to nobody while none runs,
  * count them, fire every timer line that is due,
  * and give time again to the threads whose account reached a tick.
  * The timer lines are a fixed few, so the tick looks at each of them
@@ -388,9 +425,13 @@ static void tick_advance(uint32_t ticks)
     wake_stale = true;
     if (turn != NULL) {
         account_refill(turn);
-        turn->balance = account_after(turn->balance, thread_units(turn), ticks);
+        turn->balance = turn_next();
+        if (ticks > 1) {
+            turn->balance = account_after(turn->balance, thread_units(turn), ticks - 1);
+        }
         turn->stamp += ticks;
     }
+    turn_from = 0;
     sched_ticks += ticks;
     uint32_t nearest = sched_ticks + NEAREST_NONE;
     for (uint32_t i = 0; i < TIMER_LINES; i++) {
@@ -438,7 +479,7 @@ uint32_t sched_wake_ticks(void)
     if (alone) {
         return wake;
     }
-    uint32_t drain = account_drain(turn, balance);
+    uint32_t drain = turn_drain();
     return drain < wake ? drain : wake;
 }
 
@@ -568,30 +609,31 @@ static void run_turn(void)
         if (device) {
             sched_claim_interrupts();
         }
-        turn = next_turn();
+        turn = next_turn(turn_close());
     }
     switch_to(turn);
 }
 
 void sched_run_next(void)
 {
-    turn = next_turn();
+    turn = next_turn(turn_close());
     run_turn();
 }
 
 /*
- * The turn ends: the thread whose turn it was goes to the back of the queue its account puts it on,
- * if it may run, and the next thread has its turn.
+ * The turn ends: the thread whose turn it was is charged for it
+ * and goes to the back of the queue its account puts it on, if it may run, and the next thread has its turn.
  * One that lost its units during its turn goes nowhere, and without it the queues may be empty.
  */
 static void turn_end(void)
 {
+    uint32_t offset = turn_close();
     struct thread *was = turn;
     turn = NULL;
     if (was != NULL) {
         thread_settle(was);
     }
-    turn = next_turn();
+    turn = next_turn(offset);
     run_turn();
 }
 

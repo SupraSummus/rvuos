@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "rvuos/abi.h"
+
 /*
  * The machine timer, which provides the scheduling tick.
  * The kernel handles it directly; see DESIGN.md, "Scheduling".
@@ -17,10 +19,17 @@ _Static_assert(TIMER_US_PER_TICK * TIMER_HZ == 1000000u, "the tick divides a sec
 
 /*
  * The ticks of its units a thread's account holds at most, a tenth of a second's:
- * an account gains a part of a tick for each unit every tick and holds that many ticks of them.
+ * an account gains a tick's counts of parts for each unit every tick and holds that many ticks of them.
  * See DESIGN.md, "Scheduling".
  */
 #define ACCOUNT_TICKS (TIMER_HZ / 10)
+
+/*
+ * The most counts a tick may take, so that an account fits a word:
+ * it holds ACCOUNT_TICKS ticks of every unit there is, and a tick's gain on top before the cap cuts it back,
+ * in parts of a count, TIME_UNITS of them to a count; see COUNT_PARTS.
+ */
+#define TICK_COUNTS_MAX (0xffffffffu / (TIME_UNITS * (ACCOUNT_TICKS + 1)))
 
 /* Program the first tick and enable the machine timer interrupt. */
 void timer_init(void);
@@ -42,5 +51,15 @@ void timer_set(uint32_t ticks);
 
 /* The rate of the counter the tick is made of, COUNTER_ADDR, in Hz; see OP_CLOCK_INFO. */
 uint32_t timer_counter_hz(void);
+
+/* The counter's counts per tick, at most TICK_COUNTS_MAX. */
+uint32_t timer_tick_counts(void);
+
+/*
+ * How far the counter is past the last counted tick, in counts, at most a tick's:
+ * a tick that passed and is not counted yet counts as the end of the one before.
+ * The scheduler charges a turn by it; see DESIGN.md, "Scheduling".
+ */
+uint32_t timer_offset(void);
 
 #endif

@@ -69,6 +69,8 @@ grep -q 'root: rebind ok' "$log" \
     || fail "a thread bound to units again did not run, or another ran with it"
 grep -q 'root: spare ok' "$log" \
     || fail "a thread without spare time ran past its units, or one with it did not run on spare time"
+grep -q 'root: charge ok' "$log" \
+    || fail "a thread that sleeps across every tick ran past its units"
 grep -q 'root: tickless ok' "$log" \
     || fail "the timer interrupted the only thread to run at ticks that changed nothing"
 grep -q 'the idle line stays quiet: ok' "$log" \

@@ -8,10 +8,10 @@ Report: thread's account holds more than its cap
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -128,8 +128,7 @@ static uint32_t account_cap(const struct thread *t)
+@@ -118,8 +118,7 @@ static paddr_t *queue_head(uint8_t queue)
  static uint32_t account_now(const struct thread *t)
  {
-     uint64_t balance = t->balance + (uint64_t)(sched_ticks - t->stamp) * thread_units(t);
+     uint64_t balance = t->balance + (uint64_t)(sched_ticks - t->stamp) * tick_gain(t);
 -    uint32_t cap = account_cap(t);
 -    return balance > cap ? cap : (uint32_t)balance;
 +    return (uint32_t)balance;

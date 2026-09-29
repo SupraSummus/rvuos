@@ -15,7 +15,6 @@
 #include <string.h>
 
 #include "harness.h"
-#include "timer.h"
 
 /* What a capability grants, as the covering rule compares it: a range, an object, or the debug capability. */
 struct grant {
@@ -61,8 +60,9 @@ static struct cap move_was;
 static uint32_t move_parent;
 static addr_array move_children, children_after;
 
-/* The count before the call, and the thread whose turn it was, NULL for none, with its units and its account. */
+/* The count before the call, whether it was traced, and the thread whose turn it was, NULL for none, with its units and its account. */
 static uint32_t ticks_before;
+static bool traced_before;
 static const struct thread *charged;
 static struct cap charged_units;
 static uint32_t charged_balance;
@@ -70,9 +70,8 @@ static uint32_t charged_balance;
 /* A thread's account at the count, as its stamp and its units make it, held to the cap. */
 static uint32_t account_at_count(const struct thread *t)
 {
-    uint32_t cap = thread_units(t) * ACCOUNT_TICKS;
-    uint64_t balance = t->balance + (uint64_t)(sched_ticks - t->stamp) * thread_units(t);
-    return balance > cap ? cap : (uint32_t)balance;
+    uint64_t balance = t->balance + (uint64_t)(sched_ticks - t->stamp) * tick_gain(t);
+    return balance > account_cap(t) ? account_cap(t) : (uint32_t)balance;
 }
 
 static bool dying_under(const struct thread *t, const struct process *proc, const struct captable *table)
@@ -291,6 +290,7 @@ void history_begin(void)
     record_move(table);
 
     ticks_before = sched_ticks;
+    traced_before = debug_trace;
     charged = turn;
     charged_units = charged != NULL ? charged->time : (struct cap){ 0 };
     charged_balance = charged != NULL ? account_at_count(charged) : 0;
@@ -356,14 +356,19 @@ void history_end(void)
     check_move();
 
     /*
-     * A tick costs the thread whose turn it is a whole tick while it holds one,
-     * and earns it its units, as every tick does; only OP_DEBUG_TICK moves time here.
+     * Only OP_DEBUG_TICK moves time here, and only under tracing, where the clock is the tick count:
+     * a tick costs the thread whose turn it is a whole tick while it holds one, and earns it its units, as every tick does,
+     * and a call that moves no time costs it nothing.
      */
-    if (charged != NULL && sched_ticks == ticks_before + 1 && same_grant(grant_of(&charged->time), grant_of(&charged_units))) {
-        uint32_t units = thread_units(charged);
-        uint32_t want = charged_balance >= TICK_PARTS ? charged_balance - (TICK_PARTS - units) : charged_balance + units;
+    if (charged != NULL && traced_before && sched_ticks - ticks_before <= 1 &&
+        same_grant(grant_of(&charged->time), grant_of(&charged_units))) {
+        uint32_t gain = tick_gain(charged);
+        uint32_t want = sched_ticks == ticks_before ? charged_balance
+                        : charged_balance >= tick_parts() ? charged_balance - tick_parts() + gain
+                                                          : charged_balance + gain;
         if (account_at_count(charged) != want) {
-            violated("a tick did not cost the thread whose turn it was a tick less its units");
+            violated(sched_ticks == ticks_before ? "a traced call that moved no time charged the thread whose turn it was"
+                                                 : "a tick did not cost the thread whose turn it was a tick less its units");
         }
     }
 

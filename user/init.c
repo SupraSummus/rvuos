@@ -16,6 +16,7 @@
  * give a thread units of the processor that threads on spare time cannot take from it,
  * stop threads by revoking their units and start one again by binding it,
  * hold a thread to its units and let it run on spare time,
+ * charge a thread that sleeps across every tick for the time it ran,
  * spin through the ticks while nothing else can run,
  * bind and revoke an Irq on a line nothing drives,
  * hand everything it holds to a successor in a process of its own,
@@ -75,6 +76,10 @@ enum {
     SLOT_SPLIT,         /* its upper half, on its way to SLOT_REST */
     SLOT_BLOCK,         /* its lower half, on its way to becoming a frame or a pool */
     SLOT_SPINNER,       /* the spinners' threads, SPINNERS of them */
+    /* The dodger's slots are ones the revocation emptied, and the notification it left unused. */
+    SLOT_DODGER = SLOT_STALE,             /* the dodger's thread */
+    SLOT_DODGER_TIMER = SLOT_DOOMED_NTFN, /* its timer line, bound in place to SLOT_DODGER_NTFN */
+    SLOT_DODGER_NTFN = SLOT_NEW_NTFN,     /* what its timer signals */
 };
 
 /*
@@ -167,6 +172,11 @@ _Static_assert(SLOT_SPINNER + SPINNERS <= ROOT_TABLE_SLOTS, "the root task's slo
 #define UNITS_US 40000u
 #define CAPPED_US 80000u
 static volatile uint32_t spins[SPINNERS];
+
+/* A thread that spins through most of each tick and sleeps across its end, counting its rounds. */
+#define DODGE_US 80000u
+static uint32_t dodge_counter, dodge_counts;
+static volatile uint32_t dodges;
 
 static void puts(const char *s)
 {
@@ -462,6 +472,27 @@ static void spin2(void)
 }
 
 static void (*const spinner_main[SPINNERS])(void) = { spin0, spin1, spin2 };
+
+/*
+ * The dodger: it sleeps until the next tick, spins for dodge_counts of the counter, and counts a round.
+ * A timer line set for no delay fires at the next tick, so the dodger is never running when a tick comes.
+ */
+static void dodger_main(void)
+{
+    const volatile uint32_t *low = (const volatile uint32_t *)dodge_counter;
+    for (;;) {
+        uint32_t bits;
+        if (rv_timer_set(SLOT_DODGER_TIMER, BIT_TIMER, 0) != KERR_OK ||
+            rv_wait(SLOT_DODGER_NTFN, &bits) != KERR_OK || bits != BIT_TIMER) {
+            puts("dodger: cannot sleep\n");
+            rv_halt(BOOT_CAP_DEBUG, 1);
+        }
+        uint32_t start = *low;
+        while (*low - start < dodge_counts) {
+        }
+        dodges++;
+    }
+}
 
 static uint32_t spun(void)
 {
@@ -1002,6 +1033,38 @@ int main(void)
     expect("it ran an eighth of the time, and all of the spare time",
            2 * capped < spare && 8 * capped > spare ? KERR_OK : KERR_INVALID_ARG);
     puts("root: spare ok\n");
+
+    /*
+     * Charging; see DESIGN.md, "Scheduling".
+     * A turn costs the counts it ran, so a thread cannot dodge the charge by sleeping across every tick.
+     * The dodger earns an eighth without spare time and spins nine tenths of each tick it runs:
+     * it runs about ten rounds in the 81 ticks of the sleep, where a charge of whoever the tick found running let it run some seventy.
+     */
+    dodge_counter = counter;
+    /* Nine tenths of a millisecond, a tick on every board so far. */
+    dodge_counts = hz / 1000u * 9u / 10u;
+    expect("carve a second timer line",
+           rv_invoke(OP_IRQ_CARVE, BOOT_CAP_TIMER_LINES, 1, 1, SLOT_DODGER_TIMER));
+    expect("bind it for the dodger",
+           rv_invoke(OP_IRQ_BIND, SLOT_DODGER_TIMER, SLOT_NEW_POOL, SLOT_DODGER_NTFN, SLOT_DODGER_TIMER));
+    expect("allocate the dodger",
+           rv_invoke(OP_POOL_ALLOC, BOOT_CAP_POOL, CAP_THREAD, SLOT_DODGER, BOOT_CAP_PROCESS));
+    expect("configure it",
+           rv_invoke(OP_THREAD_CONFIGURE, SLOT_DODGER, (uint32_t)&dodger_main,
+                     data_base + data_size / 4 - SPINNERS * SPINNER_STACK, 0));
+    expect("derive the half without spare time once more",
+           rv_invoke(OP_CAP_DERIVE, BOOT_CAP_CAPTABLE, SLOT_CAPPED_TIME, SLOT_HALF_TIME, RIGHT_W));
+    expect("bind the dodger to an eighth without spare time",
+           rv_invoke(OP_TIME_BIND, SLOT_CAPPED_TIME, SLOT_DODGER, 0, TIME_UNITS / 8));
+    expect("start it", rv_invoke(OP_THREAD_RESUME, SLOT_DODGER, 0, 0, 0));
+    expect("sleep while it dodges the ticks", sleep_us(DODGE_US));
+    /* Stopped before its rounds are counted, and its timer line cancelled, so that nothing wakes it again. */
+    expect("take its units back",
+           rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_HALF_TIME, 0, 0));
+    expect("cancel its timer", rv_timer_set(SLOT_DODGER_TIMER, 0, 0));
+    expect("it paid for the time it ran, though no tick found it running",
+           dodges != 0 && 4 * dodges < DODGE_US / 1000u ? KERR_OK : KERR_INVALID_ARG);
+    puts("root: charge ok\n");
 
     /*
      * The tick; see DESIGN.md, "Scheduling".

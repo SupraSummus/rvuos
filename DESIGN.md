@@ -227,6 +227,7 @@ every trap counts the whole periods `mtime` has passed since the last tick it co
 so the tick count keeps pace with the counter however late or seldom the interrupt is taken,
 and a long system call costs one late tick and not a burst of them.
 `mtimecmp` is set only for the first tick that could change what runs; see "Scheduling".
+The counter also says how far into the tick a change of turn falls, which is what a turn is charged by.
 QEMU `virt` counts at 10 MHz in a SiFive CLINT.
 The ESP32-C6 has a CLINT of Espressif's,
 whose counter and interrupt stay off until a control word starts them,
@@ -919,17 +920,21 @@ so only a wait, the tick, or a revoke that takes its own process takes the proce
 and a call stopped for an interrupt is made again before anything else runs.
 
 **A thread has an account.**
-Every tick a thread's account gains a part of a tick for each unit it earns,
-`TICK_PARTS` parts to a tick, so a thread that earns the whole processor gains a tick every tick.
-It holds at most `ACCOUNT_TICKS` parts per unit, a tenth of a second's worth,
+An account counts in parts of a count of the counter, `COUNT_PARTS` of them to a count.
+Every tick a thread's account gains a tick's counts of parts for each unit it earns,
+so a thread that earns the whole processor gains a tick every tick.
+It holds at most `ACCOUNT_TICKS` ticks' worth per unit, a tenth of a second's,
 so a thread that idled comes back with that much at most.
+The ESP32-C6 measures the counter's rate at boot, so the timer starts before the root thread's account is filled.
 A new thread's account is empty, and the root thread's starts full.
 A thread bound to other units keeps what its account held, up to what the new units hold,
 and an unbound one loses it, so no bind puts time into an account.
 `OP_DEBUG_TRACE` fills every account; no call tells what one holds, which would be a clock.
 
 **A thread has time while its account holds a tick.**
-A turn is a tick, and a tick of its turn costs the thread a tick, while it earns its units as in any tick.
+A turn lasts at most to the next tick, and every count of a turn the thread began with time costs it `COUNT_PARTS`,
+while it earns its units as in any tick.
+A turn with time began with a tick in the account, so it never costs the account more than it holds.
 A thread with less than a tick has no time until its account reaches a tick again.
 Spare time is the turns no thread with time wants.
 A thread bound through a capability with `RIGHT_X` runs on it, for free, while its account fills as usual.
@@ -949,13 +954,16 @@ the thread goes to the back of the queue its account and binding now put it on.
 A thread that becomes ready, resumed, woken or bound, joins the back of its queue.
 Finding the next thread takes constant time however many objects exist,
 and the scheduler's state is the three queues, each thread's account and the tick it was counted to,
-the thread that earns each unit, the release, and the running thread.
+the thread that earns each unit, the release, the running thread, and how far into the tick its turn is charged.
 With every thread on spare time alone this is the plain round-robin over threads,
 which is how the replay driver runs; see "Verification".
 
-**The tick charges.**
-A tick is charged to the running thread while its account holds a tick,
+**A turn is charged by the counter.**
+A change of turn reads how far into the tick the counter is
+and charges the thread leaving for the counts since its turn began or since the tick, whichever is later;
+a tick charges the thread whose turn it is for the rest of the tick and earns it its units,
 whether the timer interrupted for it or a later trap counted it.
+Whether a turn is paid is decided as it begins and at each tick, and holds until the next.
 Only the running thread's account is counted at each tick;
 the others are brought up to the count when the kernel looks at them.
 A thread with units that waits without time has time again once its account reaches a tick,
@@ -964,10 +972,8 @@ Only at the release does it look at the `TIME_UNITS` units, as the tick looks at
 every thread with units earns one of them, so the look finds them all.
 A trap that counts several ticks at once charges them as if each had been taken, in constant time;
 `account_after` in `kernel/sched.c` says how.
-A thread that waits mid-tick hands the rest of the tick to the next,
-and the thread running at the tick pays for all of it,
-so a thread that always waits just before the tick is never charged.
-Charging the counts each turn ran would close that; `TODO.md` carries it, with open decisions 17 and 18.
+So a thread that waits just before every tick pays for its time all the same,
+and one whose turn begins late in a tick pays only for the rest of it.
 
 **What it promises.**
 Threads with time take equal turns, and then threads on spare time do.
@@ -1031,6 +1037,8 @@ So while another thread could have the next turn, `mtimecmp` is set for the next
 and otherwise for the nearest of the deadline of an armed timer line, the release,
 and the tick the running thread's account drains, unless it may go on alone on spare time,
 where its account changes nothing that runs.
+The account drains only at a tick, since a turn with time never outruns it before the next tick,
+so the timer stays on the tick grid.
 In the stall it is the nearer of the deadline and the release.
 A deferral reaches at most 2^31 counts, several seconds on either board,
 so that `timer_next` does not take it for a debugger's stop;
@@ -1039,7 +1047,8 @@ a longer one wakes there and is set again.
 **Every trap counts the ticks the timer let pass.**
 On entry, before anything reads the count or an account, a trap charges and counts them as the tick would have,
 and a trap whose count reaches the tick the timer was set for ends the turn as it returns.
-It reads the counter only while the timer is set past the next tick or its interrupt is pending.
+It reads the counter only while the timer is set past the next tick or its interrupt is pending;
+a change of turn reads it besides, to charge the turn.
 Whatever could call for another tick happens in a trap and marks the timer's tick stale:
 settling a thread, binding or unbinding one, a switch, a tick, an arm, the stall.
 A trap sets the timer again only then, and choosing the tick costs no walk,
@@ -1567,11 +1576,12 @@ so it runs again while it keeps its units or its spare time.
 
 **Units and accounts.**
 Each of the `TIME_UNITS` units names the one thread bound to it, or none.
-Every account holds at most `ACCOUNT_TICKS` parts for each unit, and so nothing without units,
+Every account holds at most `ACCOUNT_TICKS` ticks' gain for each unit, and so nothing without units,
 and was last counted no later than the count;
 a thread has time exactly while its account holds a tick.
 The thread whose turn it is has its account counted up to the count,
-since every tick of its turn is charged to it as it passes.
+since every tick of its turn is charged to it as it passes,
+and under tracing, where the clock is the tick count, it owes nothing from before the tick.
 A thread with units that waits without time reaches a tick no earlier than the release,
 and the release lies ahead of the count.
 
@@ -1652,8 +1662,10 @@ A destroy stopped half way leaves the pool's threads running,
 so this is what keeps a thread from making a call it cannot return from.
 
 **A tick charges.**
-A tick costs the thread whose turn it is a whole tick while its account holds one,
-and earns it its units, as every tick does.
+Under tracing, where the clock is the tick count,
+a tick costs the thread whose turn it is a whole tick while its account holds one,
+and earns it its units, as every tick does;
+a call that moves no time costs it nothing.
 
 **A move keeps a node's place.**
 A move that succeeds leaves its source empty
@@ -1865,6 +1877,13 @@ and so do accounts get charged and fill.
 `OP_DEBUG_TRACE` fills every account,
 so the host, which boots with them full, starts from the same accounts as QEMU,
 where the driver ran untraced for a while before and a tick may have come.
+The clock that charges a turn is then the tick count alone, on both builds:
+a turn with time pays a tick at each `OP_DEBUG_TICK` and nothing at a wait.
+The fill clears what the running thread owed from within the tick,
+and the host stands its counter half way into the tick while untraced, so that there is something to clear.
+The charge at a change of turn is checked by the demo in `user/init.c`,
+by a thread held to an eighth that sleeps across every tick;
+see `TODO.md` for what nothing checks.
 The interrupt is still taken and acknowledged on QEMU,
 so the replay exercises the interrupt entry and return,
 but a switch happens only when a thread waits
@@ -2139,8 +2158,9 @@ until the maintainer decides otherwise.
 
 17. **CPU time per thread.**
     Working default: none; the clock gives the machine's time, which includes other threads' slices.
-    Only the kernel sees a switch, so only it can count:
-    one read of the counter per switch, added to the thread leaving, eight bytes per thread.
+    Only the kernel sees a switch, so only it can count,
+    and it reads the counter at every change of turn already, to charge the turn;
+    what is left is adding it to the thread leaving, eight bytes per thread.
     Reading a thread's time would be an operation on the clock that names a thread,
     because a thread that can read its own time has a clock.
     A read of the counter by system call could join it,
@@ -2148,9 +2168,10 @@ until the maintainer decides otherwise.
     Decide with the first program that needs it.
 
 18. **What a thread's account counts, and when it has time.**
-    Working default: whole ticks, time again at a tick, and spare time free.
-    The account counts in parts of a tick but a turn ends on the tick grid,
-    so the host, whose clock is the ticks the records move, decides as QEMU does.
+    Working default: the counts a turn ran, time again at a tick, and spare time free.
+    The account counts in parts of a count, charged at each change of turn and at each tick,
+    but a turn ends on the tick grid, which it never outruns, since it began with a tick in the account;
+    under tracing the clock is the tick count, so the host, whose clock is the ticks the records move, decides as QEMU does.
     Time again at a tick, a turn's worth, bounds how long a thread with units waits for its account:
     held to an eighth, a thread runs a tick in every eight.
     The shares had time again only once their account was full,
@@ -2158,8 +2179,9 @@ until the maintainer decides otherwise.
     13 ticks of running and about a hundred idle at an eighth,
     where a tick in every eight wakes an otherwise idle core 125 times a second.
     Spare time costs nothing, so an account never goes below zero.
-    The alternatives are an account in the counter's counts, charged at each switch,
-    with turns that end mid-tick, which `TODO.md` carries;
+    Before, a tick cost whoever it found running a whole tick, so a thread that waited just before every tick paid nothing.
+    The alternatives are time while the account holds anything, with turns that end mid-tick where it drains,
+    which would wake the core several times a tick for a thread held to its units;
     a higher threshold, per thread, that trades latency for idle stretches;
     and spare time charged as a debt.
     Decide when a board's sleep states, or a workload's latency, make the difference measurable.
