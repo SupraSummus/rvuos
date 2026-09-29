@@ -1673,6 +1673,13 @@ and no check says what it does wrong; see `TODO.md`.
 The kernel's logic compiles natively with a shim for `kputc`,
 the PMP CSRs and halting, and physical addresses indexing a RAM buffer;
 an address outside it breaks "Memory safety" and is reported as any invariant is.
+So does an access inside it to anything but an object or the log:
+the host poisons the rest of RAM for ASan, and the pools move the poison as objects come and go.
+ASan thus sees the kernel reach a pool's free space, a destroyed pool, memory no pool was made of,
+or the slot past a table's last, which begins in the table's padding,
+but not one object reach into the next, right behind it as on the target; see `TODO.md`.
+Where each input runs as if alone, ASan goes on after the report, so that the inputs after it still run,
+and the input ends as the call returns.
 An input is a sequence of events the kernel receives,
 not the behaviour of one process:
 each record is a system call with the thread that makes it,

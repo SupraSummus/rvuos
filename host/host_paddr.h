@@ -8,6 +8,7 @@
  * and host/shim.c reports it on the spot as any invariant.
  */
 
+#include <sanitizer/asan_interface.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -33,6 +34,21 @@ static inline uint32_t v2p(const void *v)
         abort();
     }
     return HOST_RAM_BASE + (uint32_t)(b - host_ram);
+}
+
+/*
+ * ASan's poison lies on the RAM the kernel may not touch: all of it but its objects and its log.
+ * host_boot poisons all but the log, the pools move the poison as objects come and go,
+ * and host/shim.c reports the kernel reaching poison as it reports any invariant.
+ */
+static inline void ram_unpoison(const void *v, uint32_t size)
+{
+    ASAN_UNPOISON_MEMORY_REGION(v, size);
+}
+
+static inline void ram_poison(const void *v, uint32_t size)
+{
+    ASAN_POISON_MEMORY_REGION(v, size);
 }
 
 #endif

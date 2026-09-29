@@ -1,9 +1,12 @@
 A retype zeroes the whole of a new pool again, work in its size,
 and does not say so where it calls memset,
 so a walk the table of "Bounded work" does not list hides behind a call.
-Each object is still zeroed as it is allocated, so only the loop check catches it.
+Each object is still zeroed as it is allocated, so no call returns anything else,
+and what catches it is the loop check, and ASan on the host,
+since the memory is poisoned until objects lie in it.
 
-Caught-by: loop-bounds
+Caught-by: loop-bounds fuzz fuzz-pmp8 fuzz-grain32 fuzz-work
+Report: the kernel reached RAM outside its objects
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

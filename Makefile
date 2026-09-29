@@ -166,7 +166,9 @@ HOST_CORPUS := $(HOST_BUILD)/corpus
 HOST_CFLAGS := -std=c11 -O1 -g -Wall -Wextra -Werror -Wshadow \
                -DRVUOS_HOST -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -Ikernel -Ikernel/board/qemu \
                -Ihost -Iinclude
-HOST_SAN    := -fsanitize=address,undefined -fno-sanitize-recover=all
+# ASan alone may go on after a report, so that an input run as if alone ends alone;
+# see host_asan_report in host/shim.c.
+HOST_SAN    := -fsanitize=address,undefined -fno-sanitize-recover=all -fsanitize-recover=address
 
 HOST_KERNEL_SRC := kernel/cap.c kernel/pool.c kernel/process.c kernel/sched.c \
                    kernel/syscall.c kernel/boot.c kernel/selfcheck.c kernel/klog.c

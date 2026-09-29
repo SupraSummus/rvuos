@@ -1,6 +1,6 @@
 An object is handed out holding what its memory held before the pool took it,
 since pool_alloc no longer zeroes it.
-Boot zeroes the boot pool, so the root task starts clean,
+Boot zeroes the boot pool, lifting the host's poison while it does, so the root task starts clean,
 but a pool made later lies on RAM that holds a pattern on the host,
 as it holds anything at power-up:
 a table's slots, a thread's links and a process's regions start as garbage,
@@ -13,23 +13,25 @@ Report: a call made a capability no capability of its caller covers
 diff --git a/kernel/boot.c b/kernel/boot.c
 --- a/kernel/boot.c
 +++ b/kernel/boot.c
-@@ -17,6 +17,7 @@ struct granted_range boot_granted[GRANTED_RANGES];
+@@ -17,6 +17,9 @@ struct granted_range boot_granted[GRANTED_RANGES];
  struct thread *boot_create_root(void)
  {
      /* Its own node is a root until the Untyped it lies below is in the table. */
++    ram_unpoison(p2v(BOOT_POOL_BASE), BOOT_POOL_SIZE);
 +    memset(p2v(BOOT_POOL_BASE), 0, BOOT_POOL_SIZE);
++    ram_poison(p2v(BOOT_POOL_BASE), BOOT_POOL_SIZE);
      struct pool *pool = pool_create(BOOT_POOL_BASE, BOOT_POOL_SIZE, NULL);
  
      struct captable *table = pool_alloc(
 diff --git a/kernel/pool.c b/kernel/pool.c
 --- a/kernel/pool.c
 +++ b/kernel/pool.c
-@@ -152,8 +152,6 @@ void *pool_alloc(struct pool *pool, uint8_t type, size_t size)
-     uint32_t aligned = align_up((uint32_t)size, OBJ_ALIGN);
+@@ -159,8 +159,6 @@ void *pool_alloc(struct pool *pool, uint8_t type, size_t size)
      pool->used += aligned;
      /* The memory holds what it held before the pool took it; the padding is zeroed with the rest. */
+     ram_unpoison(obj, aligned);
 -    CALL_BOUND(OBJ_MAX_SIZE + OBJ_ALIGN);
 -    memset(obj, 0, aligned);
+     /* The kernel touches the object and never its padding. */
+     ram_poison((uint8_t *)obj + size, aligned - (uint32_t)size);
      obj->type = type;
-     obj->pool = pool_base(pool);
-     obj->back = (uint16_t)((v2p(obj) - pool->last) / OBJ_ALIGN);

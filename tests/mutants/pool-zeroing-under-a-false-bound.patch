@@ -1,10 +1,13 @@
 A retype zeroes the whole of a new pool again, work in its size,
 and says where it calls memset that the length is at most the smallest pool's,
 so the claim is false for every pool above the smallest.
-Each object is still zeroed as it is allocated, so only the counting harness catches it.
+Each object is still zeroed as it is allocated, so no call returns anything else,
+and what catches it is the counting harness, which holds the length to the bound before the memset runs,
+and ASan on the other harnesses, since the memory is poisoned until objects lie in it.
 
-Caught-by: fuzz-work
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
 Report: the call at kernel/syscall.c passes N, beyond its bound of N
+Report: the kernel reached RAM outside its objects
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

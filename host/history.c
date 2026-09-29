@@ -159,11 +159,18 @@ static void record_objects(obj_array *a)
     qsort(a->v, a->n, sizeof(a->v[0]), cmp_at);
 }
 
-/* One memcmp rather than a comparison per byte, which the fuzzer's instrumentation would slow. */
-static bool zero(uint32_t base, uint32_t size)
+/*
+ * Objects that left the kernel are poisoned, so ASan must not see this read;
+ * nor must the fuzzer's instrumentation, which would slow a loop per byte.
+ */
+__attribute__((no_sanitize("address", "coverage"))) static bool zero(uint32_t base, uint32_t size)
 {
     const uint8_t *p = p2v(base);
-    return size == 0 || (p[0] == 0 && memcmp(p, p + 1, size - 1) == 0);
+    uint8_t any = 0;
+    for (uint32_t i = 0; i < size; i++) {
+        any |= p[i];
+    }
+    return any == 0;
 }
 
 static void each_node(const obj_array *a, void (*fn)(const struct cap *))
