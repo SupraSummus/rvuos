@@ -188,14 +188,6 @@ static void puts(const char *s)
     rv_puts(BOOT_CAP_DEBUG, s);
 }
 
-static void put_hex(uint32_t v)
-{
-    puts("0x");
-    for (int shift = 28; shift >= 0; shift -= 4) {
-        rv_putc(BOOT_CAP_DEBUG, "0123456789abcdef"[(v >> shift) & 0xfu]);
-    }
-}
-
 static void expect(const char *what, uint32_t status)
 {
     puts(what);
@@ -630,7 +622,7 @@ static __attribute__((noreturn)) void successor_main(void)
      * so the halt writes it out; tests/run.sh reads it there.
      */
     puts("reading the removed region at ");
-    put_hex(base);
+    rv_put_hex(BOOT_CAP_DEBUG, base);
     puts(", expecting a fault\n");
     expect("start the prober", rv_invoke(OP_THREAD_RESUME, SLOT_PROBER, 0, 0, 0));
     expect("hear its fault", fault_wait());

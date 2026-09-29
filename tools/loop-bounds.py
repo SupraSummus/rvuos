@@ -19,7 +19,8 @@ A loop that matches no source loop, or matches the one a loop around it matches,
 
 A loop bounded by an argument puts the question to each call, made or inlined,
 which must follow a call annotation.
-A bound that the loop's own shape limits must not be below that limit.
+A bound that the loop's own shape limits must not be below that limit,
+even in a loop the compiler unrolled.
 A walk must be a row of the table in "Bounded work", and every row walked or paid for.
 A loop that says it waits must wait on every way round:
 a wfi, a load from a fixed address outside RAM, or a call to a function holding a wfi.
@@ -84,7 +85,8 @@ TERMINATORS = ("ret", "mret", "j", "jr")
 def defined(insns, i, reg):
     """The value an li, or an lui or auipc with its addi, left in reg before insns[i]:
     the nearest such write above it, with nothing else writing reg in between.
-    The addi may take the upper half from another register, as clang does when it hoists a table's base."""
+    The addi may take the upper half from another register, as clang does when it hoists a table's base,
+    and other instructions may stand between the two, as when it hoists two tables' bases together."""
     for j in range(i - 1, -1, -1):
         pc, mnem, ops = insns[j]
         args = [x.strip() for x in ops.split(",")]
@@ -92,11 +94,11 @@ def defined(insns, i, reg):
             continue
         if mnem == "li":
             return imm(args[1])
-        if mnem == "addi" and j > 0:
-            ppc, pm, pops = insns[j - 1]
-            pargs = [x.strip() for x in pops.split(",")]
-            if pm in ("lui", "auipc") and pargs[0] == args[1]:
-                high = (imm(pargs[1]) << 12) & 0xFFFFFFFF
+        if mnem == "addi":
+            k = find_back(insns, j, lambda m, a: m in ("lui", "auipc") and a[0] == args[1], {args[1]})
+            if k is not None:
+                ppc, pm, pops = insns[k]
+                high = (imm(args_of(pops)[1]) << 12) & 0xFFFFFFFF
                 if pm == "auipc":
                     high = (ppc + high) & 0xFFFFFFFF
                 return (high + imm(args[2])) & 0xFFFFFFFF
@@ -607,15 +609,17 @@ def main() -> int:
 
         # A bound the loop's shape limits is proven, or false; any other rests on an invariant,
         # which the harness fuzz-work counts.
+        # The shape is the source's, so every bound is compared, not only those of loops the image keeps.
         proven = set()
-        for _, _, loop in bound:
-            most = counted(loop)
-            for n in loop.notes:
-                if n.kind != "bound" or most is None or n.value is None:
-                    continue
-                if most > n.value:
-                    check.problems.append(f"{loop} may run {most} times, and {n} says {n.value}")
-                proven.add(id(n))
+        for n in src.notes:
+            if n.kind != "bound" or n.call or n.loop is None or n.value is None:
+                continue
+            most = counted(n.loop)
+            if most is None:
+                continue
+            if most > n.value:
+                check.problems.append(f"{n.loop} may run {most} times, and {n} says {n.value}")
+            proven.add(id(n))
 
         # A wait waits on every way round.
         waits = {a for a, _, insns in functions if any(m == "wfi" for _, m, _ in insns)}

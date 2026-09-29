@@ -198,6 +198,14 @@ static inline void rv_puts(uint32_t debug_cap, const char *s)
     }
 }
 
+static inline void rv_put_hex(uint32_t debug_cap, uint32_t v)
+{
+    rv_puts(debug_cap, "0x");
+    for (int shift = 28; shift >= 0; shift -= 4) {
+        rv_putc(debug_cap, "0123456789abcdef"[(v >> shift) & 0xfu]);
+    }
+}
+
 static inline __attribute__((noreturn)) void rv_halt(uint32_t debug_cap, uint32_t code)
 {
     rv_invoke(OP_DEBUG_HALT, debug_cap, code, 0, 0);

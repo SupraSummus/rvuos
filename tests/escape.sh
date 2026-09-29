@@ -30,23 +30,18 @@ fail() {
     exit 1
 }
 
-# What the scenario says as it reaches the offending instruction,
-# the line it prints only if the hardware let the escape through,
-# and the fault the hardware must raise instead.
+# Each scenario says where its escape is as it reaches it, "... at 0x..., expecting a fault";
+# the fault the hardware raises must name that address,
+# and the line the scenario prints only if the escape went through must not appear.
+addr=$(sed -n 's/.*escape: .* at \(0x[0-9a-f]*\), expecting a fault.*/\1/p' "$log" | head -1)
 case "$scenario" in
 escape-execute-data)
-    reached="executing from the data region at"
     breached="escape: executed from data"
-    # The scenario says where it jumps; the fetch must fault there.
-    addr=$(sed -n 's/.*data region at \(0x[0-9a-f]*\),.*/\1/p' "$log" | head -1)
-    [ -n "$addr" ] || fail "the scenario did not say where it jumps"
     fault="mcause=0x00000001 mepc=$addr mtval=$addr"
     ;;
 escape-csrr)
-    reached="reading mstatus from user mode"
     breached="escape: read a machine csr"
-    # An illegal instruction faults in the code region, whatever mtval holds.
-    fault="mcause=0x00000002 mepc=0x8010"
+    fault="mcause=0x00000002 mepc=$addr" # whatever mtval holds
     ;;
 *)
     fail "unknown scenario"
@@ -56,7 +51,7 @@ esac
 grep -q 'rvuos: machine mode up' "$log" || fail "kernel did not boot"
 grep -q 'rvuos: halting, the log follows' "$log" || fail "the halt did not write the log out"
 grep -q ': FAILED' "$log" && fail "a setup step failed before the escape"
-grep -q "$reached" "$log" || fail "the scenario did not reach the escape"
+[ -n "$addr" ] || fail "the scenario did not reach the escape"
 grep -q "$breached" "$log" && fail "the hardware did not stop the escape"
 grep -q 'user fault' "$log" || fail "the escape did not fault"
 grep -q "$fault" "$log" || fail "the fault was not the expected $fault"

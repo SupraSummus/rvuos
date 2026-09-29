@@ -1452,6 +1452,7 @@ and so is the self-check, which may be called only under `if (debug_trace)`.
 The claims are checked too.
 A bound the loop's own shape limits, a counter below a constant, is compared with that limit at the link;
 this is the only check of board code, which the host does not run.
+The shape is read from the source, so a loop the compiler unrolled is held to its bound too.
 A wait must wait on every way round, which the link checks too:
 a `wfi`, a load from a fixed address outside RAM, or a call to a function holding a `wfi`.
 Other bounds rest on an invariant, as `i < img->count` does,

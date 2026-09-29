@@ -12,7 +12,8 @@ log=$(mktemp)
 trap 'rm -f "$log"' EXIT
 
 set +e
-timeout 10 sh -c "$boot_cmd" > "$log" 2>&1
+# The demo takes a few seconds; the rest is for a loaded machine, as under `make mutants`.
+timeout 30 sh -c "$boot_cmd" > "$log" 2>&1
 status=$?
 set -e
 

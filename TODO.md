@@ -4,32 +4,6 @@ Open work only; an item leaves this file in the commit that finishes it.
 
 ## ESP32-C6
 
-`make BOARD=esp32c6 test` has not run on the chip since regions became NAPOT blocks,
-so everything since has run under QEMU only and has yet to pass on the chip:
-
-- NAPOT regions and the block layout, which halved the root task's data region there.
-- `Untyped` and `Frame`, open decision 14,
-  and the halves that replaced the watermark, open decision 20.
-- The timer's deferral, in the stall and while a thread runs:
-  "root: timer ok" and "root: period ok"
-  need its CLINT to drop the timer's level when `mtimecmp` moves past `mtime`,
-  and "root: tickless ok" needs a trap to take more than eight reads of `UTIME` there.
-- Units of time: "root: units ok", "root: unbind ok", "root: rebind ok", "root: spare ok" and "root: charge ok".
-  The first and the fourth compare spin counts within a factor of two, which QEMU's instruction count makes deterministic,
-  and the fourth needs the stall for an account to reach a tick to wake there as it does for a timer line.
-  The last needs a change of turn to read the counter there, and the dodger to sleep across the tick,
-  which it does only if waking it takes less than a tenth of a tick.
-- The clock: "root: clock ok" needs user mode to read `UTIME`,
-  and "root: period ok" needs the tick to keep pace with the counter there too.
-- The handover: "root: handover ok"
-  needs the boot pool at `BOOT_POOL_BASE`, past the input, in RAM the ROM leaves alone,
-  and the successor's stack three quarters up the data region, above the logger's.
-- Faults: "root: fault ok", with the prober on the logger's old stack, half way up the data region,
-  the demo's end in a halt with code 0,
-  and the escape suite's in `no runnable thread`, code 5, after its fault.
-
-Beyond the demo:
-
 - Boot from flash, and with it whether the ROM can load the image
   straight from offset 0 or Espressif's second-stage bootloader must run first,
   and whether execute-in-place goes through a cache the kernel must control.
@@ -63,6 +37,9 @@ Beyond the demo:
 - `tools/loop-bounds.py` knows clang's jump tables by their shape;
   any other jump through a register may make up a loop, which fails the link, never passes it,
   as a table whose base clang keeps on the stack does.
+- The link checks read what clang makes, and a cloud session's clang is not the local one, 22:
+  a tree that linked in the cloud once failed `loop-bounds` locally.
+  Pin one clang in `.claude/hooks/session-start.sh`, or run the checks under both.
 - That the count of armed sources leaves the log's line out is checked by reading `irq_set_bits`.
   Under tracing each call's line reaches the log before the self-check runs,
   so an `Irq` armed on the log's line has always signalled by then.
@@ -118,9 +95,6 @@ Beyond the demo:
   A misaligned access belongs here too,
   but QEMU's `virt` may emulate one rather than fault,
   so decide what it must show before adding it, and mind the ESP32-C6's erratum DIG-694.
-  Run the suite on the ESP32-C6 as well, whose PMP is what confines a process there;
-  the scenarios use only the code, data and debug capabilities every board grants,
-  but none has run on the chip yet.
   Since a fault stops only its thread, one root task could run every scenario in a thread of its own
   and hear each fault through its watch, one boot for the suite;
   it would read the cause from the log, or through an operation open decision 21 leaves out.

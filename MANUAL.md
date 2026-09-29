@@ -1406,7 +1406,7 @@ There is no libc; `user/rvuos.h` provides the system call wrappers:
 | `rv_timer_set(cap, bits, us)` | `OP_IRQ_SET` on a timer line, with the delay |
 | `rv_timer_period(cap, bits, us, &skipped)` | `OP_IRQ_SET` on a timer line, with `IRQ_SET_PERIOD` |
 | `rv_irq_set(cap, bits)` | `OP_IRQ_SET` |
-| `rv_putc(cap, c)`, `rv_puts(cap, s)` | `OP_DEBUG_PUTC` |
+| `rv_putc(cap, c)`, `rv_puts(cap, s)`, `rv_put_hex(cap, v)` | `OP_DEBUG_PUTC` |
 | `rv_halt(cap, code)` | `OP_DEBUG_HALT` |
 
 To replace the demo, edit `user/init.c` or add a program to `USER_PROGRAMS` in the Makefile;
