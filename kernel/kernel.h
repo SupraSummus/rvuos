@@ -37,6 +37,12 @@ __attribute__((noreturn)) void kmain(void);
 void board_init(void);
 
 /*
+ * The board's board.c: set back the CSRs user mode can write, so that nothing passes through them
+ * from one process to the next; at boot, and whenever the processor goes to another process's thread.
+ */
+void board_user_csrs_reset(void);
+
+/*
  * Minimal output into the kernel's log; formatted printing is not worth a printf yet.
  * kputc, in panic.c, appends to the log, and klog.c builds the other two on it.
  */

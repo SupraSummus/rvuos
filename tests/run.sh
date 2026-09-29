@@ -81,6 +81,8 @@ grep -q 'root: irq ok' "$log" \
     || fail "destroying the irq's pool did not free its line"
 grep -q 'the root task cannot destroy its own pool: ok' "$log" \
     || fail "a thread destroyed the pool it lives in"
+grep -q 'successor: the user-mode csrs set back: ok' "$log" \
+    || fail "the user-mode CSRs the root task marked reached the successor's process"
 grep -q 'root: handover ok' "$log" \
     || fail "a successor given everything the root task held could not destroy the root task and take its place"
 grep -q 'root: fault ok' "$log" \

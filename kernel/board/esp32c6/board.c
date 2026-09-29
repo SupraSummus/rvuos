@@ -69,3 +69,21 @@ void board_init(void)
     REG(LP_WDT_SWD_CONFIG) |= LP_WDT_SWD_DISABLE;
     REG(LP_WDT_SWD_WPROTECT) = 0;
 }
+
+/*
+ * The CSRs user mode writes, measured on the chip; see DESIGN.md, "Boards".
+ * By number, since the assembler names none of them.
+ */
+void board_user_csrs_reset(void)
+{
+    csr_clear(mstatus, 0x11); /* UIE and UPIE, which user mode writes as ustatus */
+    csr_write(0x004, 0);      /* uie */
+    csr_write(0x005, 1);      /* utvec, whose mode bit stays set */
+    csr_write(0x041, 0);      /* uepc */
+    csr_write(0x042, 0);      /* ucause */
+    csr_write(0x7e1, 0);      /* mpcmr: the performance counter stops, */
+    csr_write(0x7e2, 0);      /* mpccr: at zero, */
+    csr_write(0x7e0, 0);      /* mpcer: counting nothing */
+    csr_write(0x803, 0);      /* cpu_gpio_oen */
+    csr_write(0x805, 0);      /* cpu_gpio_out */
+}

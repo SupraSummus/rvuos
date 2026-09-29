@@ -12,3 +12,8 @@ void board_init(void)
 {
     csr_write(mcounteren, 0);
 }
+
+/* The counters are the only user-mode CSRs rvuos knows of on QEMU, and they stay shut. */
+void board_user_csrs_reset(void)
+{
+}

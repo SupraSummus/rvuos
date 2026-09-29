@@ -934,6 +934,8 @@ on a PMP grain coarser than eight bytes it also shows the timer registers beside
 The time is authority, and goal 2 allows no ambient authority:
 a process given no clock and no timer line cannot tell time passing,
 unless it builds a clock from a second thread or learns the time from someone who has one.
+On the ESP32-C6 it can time its own turn on the core's performance counter,
+which the kernel stops at zero whenever another process's thread runs; see open decision 22.
 Gating `rdtime` would have needed `mcounteren` switched per process, and the ESP32-C6 has neither.
 A region already carries rights, derivation and revoke, so the clock adds one type and no object.
 The rate alone tells nothing about time, so it has no capability of its own.
@@ -1355,10 +1357,11 @@ chosen with `make BOARD=<board>`:
 `board.h`, where RAM, the root task, the console and the timer's registers lie,
 how many interrupt lines there are and which mcause the controller raises,
 which `kernel/layout.h` and both linker scripts read;
-`board.c`, what the board needs before anything else;
+`board.c`, what the board needs before anything else and the CSRs it sets back for each process;
 `timer.c`, which starts the timer `kernel/clint.c` drives;
 `irq.c` and `halt.c`;
-and `console.h`, the device behind `BOOT_CAP_UART` as the root task drives it.
+`console.h`, the device behind `BOOT_CAP_UART` as the root task drives it;
+and `csrs.h`, the user-mode CSRs the demo checks the kernel sets back.
 Nothing else in the kernel names an address.
 
 **QEMU `virt`** is the development target and the one `make check` runs.
@@ -1383,6 +1386,15 @@ The core has user-mode traps, the N extension,
 and the ROM leaves `mideleg` at `0x111`,
 which delegates the user software, timer and external interrupts to a handler in user mode;
 the kernel clears it, so every trap is its own.
+User mode can also write CSRs, and nothing shuts it out of them:
+the N extension's `ustatus`, `uie`, `utvec`, `uepc` and `ucause`,
+the performance counter through `0x800` to `0x802`, user mode's names for `mpcer`, `mpcmr` and `mpccr`,
+which the TRM leaves out,
+and the dedicated GPIO at `0x803` and `0x805`.
+The ROM leaves the counter counting cycles.
+The kernel sets them all back at boot and whenever another process's thread runs,
+so nothing passes through them from one process to the next; see open decision 22.
+`uscratch` faults in user mode, whatever the TRM says, and `uip` takes no write with nothing delegated.
 Measured on the chip: sixteen PMP entries, all unlocked after the ROM,
 a four-byte grain, TOR, NAPOT with an entry of RAM's size, `mtval` on access faults,
 PMA entries all zero, which leave every range its default attributes,
@@ -1997,7 +2009,8 @@ The host shim models the grain instead, reading back the address bits below it a
 and the corpus is replayed with a four-byte and a 32-byte grain.
 On the ESP32-C6, `make test BOARD=esp32c6` boots the demo
 and checks the same transcript as under QEMU;
-that is the only check that reaches its timer, matrix and USB console.
+that is the only check that reaches its timer, matrix and USB console,
+and the user-mode CSRs the kernel sets back.
 The replay records are transport-agnostic
 and can be fed to the board once something loads them there;
 the replay driver's second stack is QEMU's address, see `rvuos/replay.h`,
@@ -2279,3 +2292,14 @@ until the maintainer decides otherwise.
     An operation on a stopped `Thread` returning `mcause`, `mepc` and `mtval`, which its frame keeps already,
     would serve both, if it can tell a thread that faulted from one that never ran.
     Decide with the first watcher that needs the cause.
+
+22. **User-mode CSRs nothing shuts.**
+    Working default: on the ESP32-C6 the kernel sets them back at every change of process; see "Boards".
+    So a program cannot keep the counter or the dedicated GPIO across another process's turn;
+    saving and restoring them with the process would, at some forty bytes a process.
+    The counter counts the kernel's cycles too,
+    so a process that starts it still sees how long the kernel took over an interrupt while no other process ran.
+    The dedicated GPIO reaches a pad only through the GPIO matrix,
+    and a pad routed to it is every process's whatever the kernel sets back;
+    no process holds the matrix today, so the first GPIO driver decides who may route one.
+    Decide with the first program that wants the counter or the dedicated GPIO kept.

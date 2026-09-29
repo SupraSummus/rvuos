@@ -9,8 +9,9 @@ Open work only; an item leaves this file in the commit that finishes it.
   and whether execute-in-place goes through a cache the kernel must control.
 - Erratum DIG-694 on misaligned accesses across PMP regions.
 - What the ROM overwrites in RAM on a reset, for open decision 12.
-- The GPIO CSRs, `0x803` to `0x805`, lie in the user-mode CSR range.
-  If user mode can reach them, every process drives eight pads past PMP; check on the chip.
+- Try user mode on the rest of the user-level CSR space, here and on QEMU;
+  only the CSRs the TRM lists and `0x800` to `0x802` were tried.
+  `utval`, `0x043`, reads zero from user mode but was not written, so the kernel does not set it back.
 - The counter rate is measured over one tick at boot,
   so it is only as exact as the polling loop in `timer_init`; a longer measurement would do better.
 - A device interrupt wakes its driver but does not run it;

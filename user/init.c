@@ -20,7 +20,8 @@
  * spin through the ticks while nothing else can run,
  * bind and revoke an Irq on a line nothing drives,
  * hand everything it holds to a successor in a process of its own,
- * which destroys the pool the root task lived in, and the root task with it,
+ * which finds the user-mode CSRs the root task marked set back,
+ * destroys the pool the root task lived in, and the root task with it,
  * then unmap a region, have a thread fault on it and hear of it through the thread's watch,
  * map the region again and resume the thread, whose load goes through then, and halt.
  * Negative paths are covered by the fuzz corpus and tests/differential.py.
@@ -29,6 +30,7 @@
 #include <stdint.h>
 
 #include "console.h"
+#include "csrs.h"
 #include "rvuos.h"
 
 /* Slots in the root task's own table, above the ones the kernel filled. */
@@ -569,6 +571,7 @@ static __attribute__((noreturn)) void successor_main(void)
     uint32_t base, size, data_base, data_size;
 
     puts("successor: started\n");
+    expect("successor: the user-mode csrs set back", csrs_are_reset() ? KERR_OK : KERR_INVALID_ARG);
     expect("stop the root task's thread for good",
            rv_invoke(OP_TIME_BIND, SLOT_FREEZE_TIME, BOOT_CAP_THREAD, 0, 0));
     /*
@@ -676,6 +679,7 @@ static __attribute__((noreturn)) void hand_over(uint32_t sp)
     expect("start the successor", rv_invoke(OP_THREAD_RESUME, SLOT_SUCC_THREAD, 0, 0, 0));
     expect("allocate what to wait on",
            rv_invoke(OP_POOL_ALLOC, BOOT_CAP_POOL, CAP_NOTIFICATION, SLOT_EXIT_NTFN, 0));
+    expect("mark the user-mode csrs", csrs_mark() ? KERR_OK : KERR_INVALID_ARG);
 
     /* From here on this thread holds no debug capability and says nothing; the empty slots fail. */
     for (uint32_t slot = BOOT_CAP_NULL + 1; slot < ROOT_TABLE_SLOTS; slot++) {

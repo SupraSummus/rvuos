@@ -570,6 +570,7 @@ static void switch_to(struct thread *next)
     /* The thread leaving may have lost its process during its call; the one coming has one, since it is ready. */
     if (thread_process(next) != thread_process(current)) {
         process_activate(thread_process(next));
+        board_user_csrs_reset();
     }
     current = next;
     wake_stale = true;

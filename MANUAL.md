@@ -230,6 +230,13 @@ The console is the controller's CDC-ACM port:
 bytes written to its FIFO leave as one USB packet when `WR_DONE` is written,
 and only while a host has the port open.
 
+User mode can write some of the core's CSRs:
+`ustatus`, `uie`, `utvec`, `uepc`, `ucause`,
+the performance counter at `0x800` to `0x802` and the dedicated GPIO at `0x803` and `0x805`.
+Whenever another process has run, a program finds them set back: `utvec` at 1, the rest at zero, the counter stopped.
+No interrupt is delegated to user mode,
+and the dedicated GPIO reaches no pad, since no process is granted the GPIO matrix.
+
 ## 4. Building and running
 
 Requirements: clang and lld with RISC-V support, llvm-objcopy,
@@ -762,6 +769,7 @@ so a program takes it from `OP_CLOCK_INFO`.
 The time is the machine's, not the thread's: it includes other threads' slices.
 Revoking below a `Clock` capability uninstalls every region derived through it.
 `rdtime` traps on every board.
+The ESP32-C6's performance counter is no clock: the kernel stops it at zero whenever another process runs.
 
 ### 5.9 Interrupts
 

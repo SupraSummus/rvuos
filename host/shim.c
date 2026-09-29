@@ -199,6 +199,10 @@ void irq_complete(uint32_t line)
     (void)line;
 }
 
+void board_user_csrs_reset(void)
+{
+}
+
 void pmp_init(void)
 {
     memset(pmp_addr, 0, sizeof(pmp_addr));
