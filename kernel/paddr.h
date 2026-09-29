@@ -27,6 +27,22 @@ static inline paddr_t v2p(const void *v)
 {
     return (paddr_t)v;
 }
+
+/*
+ * The host build poisons the RAM the kernel may not touch, see host_paddr.h;
+ * the target has nothing to mark.
+ */
+static inline void ram_unpoison(const void *v, uint32_t size)
+{
+    (void)v;
+    (void)size;
+}
+
+static inline void ram_poison(const void *v, uint32_t size)
+{
+    (void)v;
+    (void)size;
+}
 #endif
 
 #endif

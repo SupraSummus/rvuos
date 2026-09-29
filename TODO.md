@@ -68,11 +68,11 @@ Beyond the demo:
 - The PMP image is checked against `pmp_napot_range`, the kernel's own reading of NAPOT,
   so a misreading the encoder and the decoder share passes the self-check.
   A decoder written from the specification alone, or the Sail model, would catch it.
-- The host's RAM is one buffer, so ASan sees only accesses that leave it.
-  A write from one object into its neighbour, or into a pool's free space,
-  shows only if the self-check or `host/history.c` sees what it damaged.
-  Poisoning each pool's free space, with `pool_alloc` and the zeroing unpoisoning what they write,
-  would make ASan see it.
+- ASan sees the kernel reach RAM outside its objects, but not one object reach into the next,
+  which lies right behind it as on the target.
+  Such a write shows only if the self-check or `host/history.c` sees what it damaged.
+  A red zone between objects in the host build alone would show it,
+  but would change which allocations fit, and with them the transcripts the host and QEMU compare.
 - The self-check sees structure, not semantics.
   That a signal wakes a thread waiting on *that* notification,
   and hands it the bits that were set,

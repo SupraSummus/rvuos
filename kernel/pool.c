@@ -16,6 +16,7 @@ static inline uint32_t align_up(uint32_t v, uint32_t a)
 struct pool *pool_create(paddr_t base, uint32_t size, struct cap *parent)
 {
     struct pool *pool = p2v(base);
+    ram_unpoison(pool, sizeof(*pool));
     CALL_BOUND(sizeof(struct pool));
     *pool = (struct pool){ 0 };
     pool->hdr.type = CAP_POOL;
@@ -121,8 +122,11 @@ bool pool_destroy(struct pool *pool, struct cap *keep, bool preempt)
         pool->last = v2p(o) - o->back * OBJ_ALIGN;
         pool->used = v2p(o) - pool_base(pool);
         pool->sweep = 0;
+        /* Its padding was poisoned all along. */
+        ram_unpoison(o, size);
         CALL_BOUND(OBJ_MAX_SIZE + OBJ_ALIGN);
         memset(o, 0, size);
+        ram_poison(o, size);
         if (pool->last != pool_base(pool) && cap_stop_here(preempt)) {
             return false;
         }
@@ -136,6 +140,7 @@ bool pool_destroy(struct pool *pool, struct cap *keep, bool preempt)
     pool_unlink(pool);
     CALL_BOUND(sizeof(struct pool));
     memset(pool, 0, sizeof(*pool));
+    ram_poison(pool, sizeof(*pool));
     return true;
 }
 
@@ -153,8 +158,11 @@ void *pool_alloc(struct pool *pool, uint8_t type, size_t size)
     uint32_t aligned = align_up((uint32_t)size, OBJ_ALIGN);
     pool->used += aligned;
     /* The memory holds what it held before the pool took it; the padding is zeroed with the rest. */
+    ram_unpoison(obj, aligned);
     CALL_BOUND(OBJ_MAX_SIZE + OBJ_ALIGN);
     memset(obj, 0, aligned);
+    /* The kernel touches the object and never its padding. */
+    ram_poison((uint8_t *)obj + size, aligned - (uint32_t)size);
     obj->type = type;
     obj->pool = pool_base(pool);
     obj->back = (uint16_t)((v2p(obj) - pool->last) / OBJ_ALIGN);

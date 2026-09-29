@@ -9,12 +9,12 @@ Report: memory left the kernel with an object not zeroed
 diff --git a/kernel/pool.c b/kernel/pool.c
 --- a/kernel/pool.c
 +++ b/kernel/pool.c
-@@ -121,7 +121,7 @@ bool pool_destroy(struct pool *pool, struct cap *keep, bool preempt)
-         pool->used = v2p(o) - pool_base(pool);
-         pool->sweep = 0;
+@@ -125,7 +125,7 @@ bool pool_destroy(struct pool *pool, struct cap *keep, bool preempt)
+         /* Its padding was poisoned all along. */
+         ram_unpoison(o, size);
          CALL_BOUND(OBJ_MAX_SIZE + OBJ_ALIGN);
 -        memset(o, 0, size);
 +        memset(o, 0, size < sizeof(*o) ? size : sizeof(*o));
+         ram_poison(o, size);
          if (pool->last != pool_base(pool) && cap_stop_here(preempt)) {
              return false;
-         }

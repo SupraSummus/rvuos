@@ -72,6 +72,39 @@ void host_outside_ram(uint32_t p)
     host_violated();
 }
 
+/* ASan goes on after a report, see host_asan_report, and reports each, not only the first from a place. */
+const char *__asan_default_options(void);
+const char *__asan_default_options(void)
+{
+    return "halt_on_error=0:suppress_equal_pcs=0";
+}
+
+/* The kernel reached poisoned RAM in an isolated input; see host_asan_report. */
+static bool poison_reached;
+
+/*
+ * ASan found an access to poison, see ram_poison, and makes it once this returns.
+ * In RAM that is the kernel reaching outside its objects, which ends the run as any invariant does.
+ * An isolated input cannot longjmp out of ASan, so its call goes on, with no poison left to report again,
+ * and the input ends as the call returns; see host_syscall.
+ * Anywhere else it is the harness's own bug.
+ */
+static void host_asan_report(const char *report)
+{
+    (void)report;
+    const uint8_t *at = __asan_get_report_address();
+    if (host_ram == NULL || at < host_ram || at >= host_ram + HOST_RAM_SIZE) {
+        abort();
+    }
+    fprintf(stderr, "invariant violated: the kernel reached RAM outside its objects 0x%08x\n",
+            (unsigned)(HOST_RAM_BASE + (uint32_t)(at - host_ram)));
+    if (!host_isolated) {
+        host_violated();
+    }
+    ram_unpoison(host_ram, HOST_RAM_SIZE);
+    poison_reached = true;
+}
+
 void host_violated(void)
 {
     /* The report may have gone to stdout; make sure it is seen. */
@@ -203,10 +236,16 @@ struct thread *host_boot(void)
         if (host_ram == NULL) {
             abort();
         }
+        __asan_set_error_report_callback(host_asan_report);
     }
     if (power_up) {
+        ram_unpoison(host_ram, HOST_RAM_SIZE);
         memset(host_ram, HOST_RAM_PATTERN, HOST_RAM_SIZE);
     }
+    /* The kernel holds no object yet, and may touch its log alone; see ram_poison. */
+    ram_poison(host_ram, HOST_RAM_SIZE);
+    ram_unpoison(p2v(KLOG_BASE), KLOG_REGION_SIZE);
+    poison_reached = false;
     /*
      * The kernel clears each object as it hands it out,
      * so RAM may keep the previous run's contents, the boot pool's too,
@@ -306,6 +345,10 @@ uint32_t host_syscall(const struct replay_record *c)
         syscall_dispatch(current);
         /* What the trap does on its way back, which the self-check of the next call holds. */
         sched_wake();
+        /* The report was made as the kernel reached poisoned RAM; see host_asan_report. */
+        if (poison_reached) {
+            host_violated();
+        }
 #ifdef RVUOS_WORK
         work_end();
 #endif

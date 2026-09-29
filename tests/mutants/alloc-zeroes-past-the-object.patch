@@ -1,0 +1,21 @@
+pool_alloc zeroes a granule past the object it hands out.
+That is the pool's free space, which nothing reads before an object is zeroed over it,
+or, for the object that fills its pool, the memory past the pool,
+which a process may have installed.
+Memory safety.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: the kernel reached RAM outside its objects
+
+diff --git a/kernel/pool.c b/kernel/pool.c
+--- a/kernel/pool.c
++++ b/kernel/pool.c
+@@ -160,7 +160,7 @@ void *pool_alloc(struct pool *pool, uint8_t type, size_t size)
+     /* The memory holds what it held before the pool took it; the padding is zeroed with the rest. */
+     ram_unpoison(obj, aligned);
+     CALL_BOUND(OBJ_MAX_SIZE + OBJ_ALIGN);
+-    memset(obj, 0, aligned);
++    memset(obj, 0, aligned + OBJ_ALIGN);
+     /* The kernel touches the object and never its padding. */
+     ram_poison((uint8_t *)obj + size, aligned - (uint32_t)size);
+     obj->type = type;
