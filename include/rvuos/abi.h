@@ -273,17 +273,33 @@
  * a1 = program counter, a2 = stack pointer.
  * Fails with KERR_STATE unless the thread is stopped.
  * The kernel does not check either value:
- * a thread that starts nowhere useful faults, which is its creator's business.
+ * a thread that starts nowhere useful faults, which is its creator's business; see OP_THREAD_WATCH.
  */
 #define OP_THREAD_CONFIGURE 12
 /*
  * Thread (RIGHT_W): make a stopped thread ready.
  * It runs once it is bound to units of time, see OP_TIME_BIND,
  * when its turn comes.
+ * A thread that faulted goes on at the instruction that faulted, which runs again.
  * Fails with KERR_STATE unless the thread is stopped,
  * and once its process was taken, see OP_POOL_ALLOC: it has nothing to run in.
  */
 #define OP_THREAD_RESUME 13
+/*
+ * Thread (RIGHT_W): name what the thread's faults signal, its watch.
+ * a1 = the slot of a Notification capability, which needs RIGHT_W and may lie in any pool,
+ * a2 = the bits a fault signals there; a2 = 0 clears the watch and ignores a1.
+ * A fault, an access fault, an illegal instruction, a misaligned access or a breakpoint,
+ * stops the thread at the instruction that faulted, with its registers as they were,
+ * and signals the bits as OP_NOTIFY_SIGNAL would; nothing else stops, the machine goes on.
+ * A thread without a watch stops all the same, and nobody hears.
+ * The kernel's log says what the fault was.
+ * It replaces the watch before and stays, so a thread that faults again signals again.
+ * The thread holds the notification by a capability derived from the one named,
+ * so revoking below that capability, or destroying the notification's pool, clears the watch.
+ * See DESIGN.md, "Faults".
+ */
+#define OP_THREAD_WATCH 31
 
 /*
  * Notification (RIGHT_W): set bits. a1 = the bits to set, which may not be zero.
@@ -391,7 +407,7 @@
 #define OP_TIME_BIND 29
 
 /* One above the highest operation code; the fuzzer's mutator draws below it. */
-#define OP_COUNT 31
+#define OP_COUNT 32
 
 /*
  * Capability slots the kernel fills in the root task's table at boot.

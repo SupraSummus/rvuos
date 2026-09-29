@@ -21,9 +21,10 @@
  *
  * Records may do anything, including unmapping this program,
  * which then faults; the host build models that.
- * The driver ends with a breakpoint, which the kernel reports
- * as a user fault, so a finished run and a dead one
- * end the transcript with the same line on both sides.
+ * A fault stops the thread that makes it and no other, see DESIGN.md, "Faults",
+ * so the next thread goes on with the records, and a thread resumed where it faulted goes on too.
+ * The driver ends with a breakpoint, a fault as well, which every thread makes that finds the records done,
+ * and the kernel stops once none is left to run.
  */
 
 #include <stdint.h>

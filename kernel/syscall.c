@@ -1,5 +1,5 @@
 /*
- * Capability invocation.
+ * Capability invocation, and the fault, the other way a thread's code enters the kernel.
  * The ABI is documented in include/rvuos/abi.h.
  */
 
@@ -382,7 +382,7 @@ static int op_process(struct thread *t, const struct cap *cap,
     }
 }
 
-static int op_thread(const struct cap *cap, uint32_t op, const uint32_t *arg)
+static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, const uint32_t *arg)
 {
     struct thread *target = (struct thread *)cap_object(cap);
 
@@ -410,6 +410,27 @@ static int op_thread(const struct cap *cap, uint32_t op, const uint32_t *arg)
         }
         sched_ready(target);
         return KERR_OK;
+    case OP_THREAD_WATCH: {
+        /* The watch signals on its setter's behalf, so the setter must be able to. */
+        uint32_t bits = arg[2];
+        struct cap nc;
+        if (bits != 0) {
+            int err = cap_lookup_typed(thread_table(t), arg[1], CAP_NOTIFICATION, RIGHT_W, &nc);
+            if (err != KERR_OK) {
+                return err;
+            }
+        }
+        /* The watch is a leaf, so it leaves the tree in a step. */
+        if (target->watch.type != CAP_NONE) {
+            cap_delete(&target->watch, false);
+        }
+        if (bits != 0) {
+            /* It hangs below the capability it was set with, so a revoke above that clears it. */
+            target->watch = (struct cap){ .type = CAP_WATCHED, .rights = nc.rights, .a = nc.a, .b = bits };
+            cap_attach(slot_node(t, arg[1]), &target->watch);
+        }
+        return KERR_OK;
+    }
     default:
         return KERR_WRONG_TYPE;
     }
@@ -633,6 +654,16 @@ static int op_irq(const struct cap *cap, uint32_t op, uint32_t *arg)
     return KERR_OK;
 }
 
+/* The line of a wake, after the line of the call or the fault that caused it; none if nothing woke. */
+static void trace_wake(void)
+{
+    if (trace_wake_bits != 0) {
+        kputs("trace: wake ");
+        kput_hex(trace_wake_bits);
+        kputc('\n');
+    }
+}
+
 /*
  * One line per traced call, in a fixed format
  * so transcripts from the host build and from QEMU can be compared.
@@ -703,7 +734,7 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
         err = (cap.rights & RIGHT_W) ? op_process(t, &cap, op, arg) : KERR_NO_RIGHTS;
         break;
     case CAP_THREAD:
-        err = (cap.rights & RIGHT_W) ? op_thread(&cap, op, arg) : KERR_NO_RIGHTS;
+        err = (cap.rights & RIGHT_W) ? op_thread(t, &cap, op, arg) : KERR_NO_RIGHTS;
         break;
     case CAP_NOTIFICATION:
         err = op_notification(t, &cap, op, arg);
@@ -764,11 +795,7 @@ void syscall_dispatch(struct thread *t)
 
     if (traced) {
         trace_call(op, in[0], in, err);
-        if (trace_wake_bits != 0) {
-            kputs("trace: wake ");
-            kput_hex(trace_wake_bits);
-            kputc('\n');
-        }
+        trace_wake();
     }
     /*
      * A thread that waits gives the processor up, and so does one whose process the call took.
@@ -777,6 +804,41 @@ void syscall_dispatch(struct thread *t)
     if (current->state != THREAD_READY) {
         sched_run_next();
     }
+    if (debug_trace) {
+        selfcheck_run();
+    }
+}
+
+void report_frame(const struct trap_frame *frame)
+{
+    kputs("  mcause=");
+    kput_hex(frame->mcause);
+    kputs(" mepc=");
+    kput_hex(frame->mepc);
+    kputs(" mtval=");
+    kput_hex(frame->mtval);
+    kputc('\n');
+}
+
+/*
+ * The thread stops with mepc at the instruction that faulted, so a resume runs it again,
+ * and nothing else changes; see DESIGN.md, "Faults".
+ * The report goes to the log traced or not, and a wake is traced after it, as after a call's line.
+ */
+void fault_dispatch(struct thread *t)
+{
+    kputs("user fault\n");
+    report_frame(&t->frame);
+    t->state = THREAD_STOPPED;
+    trace_wake_bits = 0;
+    struct notification *watch = thread_watch(t);
+    if (watch != NULL) {
+        sched_signal(watch, t->watch.b);
+    }
+    if (debug_trace) {
+        trace_wake();
+    }
+    sched_run_next();
     if (debug_trace) {
         selfcheck_run();
     }

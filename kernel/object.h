@@ -50,7 +50,7 @@ struct obj_header {
  * an only child's is itself, and a root's and an empty slot's is 0.
  * A process's region slots are slots of this type too, CAP_INSTALLED, and leaves of the tree,
  * and so is its table slot, which holds a CAP_CAPTABLE capability,
- * and a thread's process, CAP_HOSTED, and its units, CAP_BOUND,
+ * and a thread's process, CAP_HOSTED, its units, CAP_BOUND, and its watch, CAP_WATCHED,
  * and an Irq's notification, CAP_SIGNALLED,
  * and so is a pool's own node, CAP_RETYPED, in the pool's descriptor.
  * For CAP_TIME a is the first unit and b the count, as for CAP_IRQ_LINE.
@@ -93,6 +93,11 @@ struct cap {
  * the Notification capability the Irq was bound with. Kernel internal: never in a table.
  */
 #define CAP_SIGNALLED 0x84
+/*
+ * A thread's watch, in the thread: a is the notification its faults signal and b the bits, never none,
+ * and the node hangs below the Notification capability the watch was set with. Kernel internal: never in a table.
+ */
+#define CAP_WATCHED 0x85
 
 #define CAPTABLE_MAX_SLOTS 1024
 
@@ -154,9 +159,10 @@ struct process {
  * see DESIGN.md, "Scheduling".
  * A thread bound to no units keeps its state and does not run.
  * A thread without a process is stopped, and stays so.
+ * A thread that faults stops, and its watch hears it; see DESIGN.md, "Faults".
  */
 enum {
-    THREAD_STOPPED = 0, /* created, or configured and not started */
+    THREAD_STOPPED = 0, /* created, configured and not started, or stopped where it faulted */
     THREAD_READY,       /* running, or waiting for the processor */
     THREAD_WAITING,     /* blocked on the notification in waiting_on */
 };
@@ -183,6 +189,7 @@ struct thread {
     paddr_t queue_prev;
     struct cap proc;    /* CAP_HOSTED, or CAP_NONE once the process is taken */
     struct cap time;    /* CAP_BOUND, or CAP_NONE while the thread is bound to no units */
+    struct cap watch;   /* CAP_WATCHED, or CAP_NONE while nothing hears the thread's faults */
     /*
      * Its account at the tick stamp, in COUNT_PARTS parts of a count,
      * at most ACCOUNT_TICKS ticks' counts of parts for each unit it earns, and so none while it earns none.
@@ -241,7 +248,7 @@ _Static_assert(sizeof(struct pool) == 56, "object layout");
 _Static_assert(sizeof(struct pmp_image) == 4 + 5 * PMP_MAX_ENTRIES, "object layout");
 _Static_assert(sizeof(struct process) == 8 + 24 * (1 + PROCESS_REGION_SLOTS) + sizeof(struct pmp_image),
                "object layout");
-_Static_assert(sizeof(struct thread) == 32 + 2 * sizeof(struct cap) + sizeof(struct trap_frame), "object layout");
+_Static_assert(sizeof(struct thread) == 32 + 3 * sizeof(struct cap) + sizeof(struct trap_frame), "object layout");
 _Static_assert(sizeof(struct notification) == 16, "object layout");
 _Static_assert(sizeof(struct irq) == 20 + sizeof(struct cap), "object layout");
 
@@ -272,12 +279,13 @@ static inline struct pool *obj_pool(const struct obj_header *o) { return p2v(o->
 
 _Static_assert(offsetof(struct process, slots) == offsetof(struct process, table) + sizeof(struct cap),
                "a process's table slot and region slots are one array of nodes");
-_Static_assert(offsetof(struct thread, time) == offsetof(struct thread, proc) + sizeof(struct cap),
-               "a thread's process and units are one array of nodes");
+_Static_assert(offsetof(struct thread, time) == offsetof(struct thread, proc) + sizeof(struct cap) &&
+                   offsetof(struct thread, watch) == offsetof(struct thread, time) + sizeof(struct cap),
+               "a thread's process, units and watch are one array of nodes");
 
 /*
  * The nodes of the derivation tree an object holds, as one array, and how many:
- * a table's slots, a process's table slot and region slots, a thread's process and units,
+ * a table's slots, a process's table slot and region slots, a thread's process, units and watch,
  * an Irq's notification, a pool's own node.
  * Other objects hold none.
  */
@@ -291,7 +299,7 @@ static inline struct cap *obj_nodes(struct obj_header *o, uint32_t *count)
         *count = 1 + PROCESS_REGION_SLOTS;
         return &((struct process *)o)->table;
     case CAP_THREAD:
-        *count = 2;
+        *count = 3;
         return &((struct thread *)o)->proc;
     case CAP_IRQ:
         *count = 1;
@@ -334,6 +342,16 @@ static inline struct captable *thread_table(const struct thread *t)
 {
     const struct process *p = thread_process(t);
     return p != NULL ? process_table(p) : NULL;
+}
+/* The notification a thread's faults signal, or NULL while it has no watch. */
+static inline struct notification *thread_watch(const struct thread *t)
+{
+    return t->watch.type == CAP_WATCHED ? p2v(t->watch.a) : NULL;
+}
+/* The thread whose watch this is. */
+static inline struct thread *watched_thread(struct cap *n)
+{
+    return (struct thread *)((char *)n - offsetof(struct thread, watch));
 }
 /* The notification an Irq signals, or NULL once it was taken. */
 static inline struct notification *irq_notification(const struct irq *i)
@@ -783,6 +801,11 @@ void process_activate(struct process *proc);
 
 /* syscall.c */
 void syscall_dispatch(struct thread *t);
+/*
+ * The running thread faulted: say so in the log, stop it where it faulted, signal its watch if it has one,
+ * and hand the processor on; see DESIGN.md, "Faults".
+ */
+void fault_dispatch(struct thread *t);
 
 /* selfcheck.c */
 

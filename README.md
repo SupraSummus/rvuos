@@ -70,6 +70,11 @@ No data passes through the kernel: the only blocking primitive
 is a notification, a word of sticky bits,
 and `DESIGN.md`, "Communication and synchronisation", says why.
 
+A thread that faults stops where it faulted, and nothing else does:
+the machine goes on, and a notification its creator chose hears of it,
+so a supervisor can resume the thread, start it afresh or let it go;
+`DESIGN.md`, "Faults", says why that is a signal and not a message.
+
 The machine timer ticks and the kernel preempts on it,
 taking the threads with time in turn and then those on spare time;
 the processor is a fixed number of units of time, handed out as capabilities,

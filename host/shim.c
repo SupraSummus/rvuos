@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "csr.h"
 #include "harness.h"
 #include "irq.h"
 #include "klog.h"
@@ -23,6 +24,13 @@ uint8_t *host_ram;
 #define HOST_RAM_PATTERN 0xa5
 /* The driver's threads, by actor number; see host_event. */
 static struct thread *host_threads[REPLAY_THREADS + 1];
+/*
+ * Which of them drain the log before their next call, by actor number:
+ * a thread that performed a record drains next, when it runs again if the record blocked it,
+ * while one that passed a record on, or has not begun, looks at the cursor first.
+ * A fault leaves a thread where it was, and so does a resume after one.
+ */
+static bool host_drains[REPLAY_THREADS + 1];
 jmp_buf host_halt_jmp;
 int host_halt_code;
 bool host_verbose;
@@ -313,6 +321,7 @@ struct thread *host_boot(void)
 
     static const uint16_t slots[] = { REPLAY_CAP_THREAD, REPLAY_CAP_THIRD };
     _Static_assert(sizeof(slots) / sizeof(slots[0]) == REPLAY_THREADS - 1, "a slot per thread but the root");
+    memset(host_drains, 0, sizeof(host_drains));
     host_threads[1] = root;
     for (unsigned i = 0; i < REPLAY_THREADS - 1; i++) {
         struct cap c;
@@ -322,6 +331,32 @@ struct thread *host_boot(void)
         host_threads[i + 2] = (struct thread *)cap_object(&c);
     }
     return root;
+}
+
+/*
+ * A trap of the running thread, a call or a fault, between the checks every trap gets,
+ * and what the trap does on its way back, which the self-check of the next call holds.
+ */
+static void host_trap(bool call)
+{
+    history_begin(call);
+#ifdef RVUOS_WORK
+    work_begin();
+#endif
+    if (call) {
+        syscall_dispatch(current);
+    } else {
+        fault_dispatch(current);
+    }
+    sched_wake();
+    /* The report was made as the kernel reached poisoned RAM; see host_asan_report. */
+    if (poison_reached) {
+        host_violated();
+    }
+#ifdef RVUOS_WORK
+    work_end();
+#endif
+    history_end();
 }
 
 /*
@@ -354,21 +389,7 @@ uint32_t host_syscall(const struct replay_record *c)
         mepc = f->mepc;
         unsigned before[UNITS];
         host_units(before);
-        history_begin();
-#ifdef RVUOS_WORK
-        work_begin();
-#endif
-        syscall_dispatch(current);
-        /* What the trap does on its way back, which the self-check of the next call holds. */
-        sched_wake();
-        /* The report was made as the kernel reached poisoned RAM; see host_asan_report. */
-        if (poison_reached) {
-            host_violated();
-        }
-#ifdef RVUOS_WORK
-        work_end();
-#endif
-        history_end();
+        host_trap(true);
         /* A step of a preemptible walk takes a unit away, and it stops only after one. */
         unsigned after[UNITS];
         host_units(after);
@@ -419,7 +440,7 @@ void host_units(unsigned out[UNITS])
     }
 }
 
-/* The actor number of the running thread; 0 when it is not a driver thread. */
+/* The actor number of the running thread; 0 when it is not a driver thread, which never runs traced. */
 static unsigned host_actor(void)
 {
     for (unsigned i = 1; i <= REPLAY_THREADS; i++) {
@@ -429,37 +450,6 @@ static unsigned host_actor(void)
         }
     }
     return 0;
-}
-
-/*
- * The driver's passing protocol from rvuos/replay.h, run from the kernel's state:
- * every thread the round visits ticks until the actor has the processor
- * or the processor comes back to a thread that ticked, with the record untaken.
- * That is the thread the round started from,
- * or one whose tick failed, its table no longer holding the debug capability,
- * and gave the processor to nobody.
- */
-bool host_event(const struct replay_record *c)
-{
-    struct thread *start = current;
-    while (replay_passes(c, host_actor())) {
-        struct thread *ticked = current;
-        host_syscall(&replay_tick);
-        if (!host_driver_alive()) {
-            return false;
-        }
-        if (current == start || current == ticked) {
-            break;
-        }
-    }
-    host_syscall(c);
-    if (!host_driver_alive()) {
-        return false;
-    }
-    /* The driver drains the log to the UART after each record, which leaves this mark. */
-    volatile struct rvuos_log *log = p2v(KLOG_BASE);
-    log->taken = log->head;
-    return true;
 }
 
 static bool mapped_with(const struct process *proc, uint32_t base, uint32_t size, uint8_t rights)
@@ -475,11 +465,92 @@ static bool mapped_with(const struct process *proc, uint32_t base, uint32_t size
     return false;
 }
 
-bool host_driver_alive(void)
+/* Whether the running thread's process maps the driver's code and data, and to drain the log, the UART and the log. */
+static bool driver_mapped(bool drain)
 {
     const struct process *proc = thread_process(current);
     return proc != NULL && mapped_with(proc, USER_CODE_BASE, USER_CODE_SIZE, RIGHT_R | RIGHT_X) &&
            mapped_with(proc, USER_DATA_BASE, USER_DATA_SIZE, RIGHT_R | RIGHT_W) &&
-           mapped_with(proc, UART_BASE, UART_SIZE, RIGHT_R | RIGHT_W) &&
-           mapped_with(proc, KLOG_BASE, KLOG_REGION_SIZE, RIGHT_R | RIGHT_W);
+           (!drain || (mapped_with(proc, UART_BASE, UART_SIZE, RIGHT_R | RIGHT_W) &&
+                       mapped_with(proc, KLOG_BASE, KLOG_REGION_SIZE, RIGHT_R | RIGHT_W)));
+}
+
+bool host_driver_alive(void)
+{
+    return driver_mapped(host_drains[host_actor()]);
+}
+
+/*
+ * The running thread faults as the trap would have it.
+ * mepc stays the host's own count, since the host knows no address of the driver's code;
+ * the report prints it, and nothing compares it.
+ */
+void host_fault(uint32_t cause)
+{
+    struct trap_frame *f = &current->frame;
+    f->mcause = cause;
+    f->mtval = cause == CAUSE_BREAKPOINT ? 0 : f->mepc;
+    host_trap(false);
+}
+
+/*
+ * The running driver thread goes on as the driver's code does, up to its next call:
+ * one that cannot faults, see host_driver_alive,
+ * and the kernel hands the processor on, maybe to another such thread;
+ * one that drains the log leaves the mark the drain leaves in its header.
+ * A thread faults once, since nothing but a record starts it again,
+ * so after a fault each the kernel has found a thread that runs, or halted.
+ */
+static void host_run_on(void)
+{
+    for (unsigned i = 0; i < REPLAY_THREADS && !host_driver_alive(); i++) {
+        host_fault(CAUSE_INSN_ACCESS);
+    }
+    if (!host_driver_alive()) {
+        fprintf(stderr, "invariant violated: a thread ran again after every driver thread faulted\n");
+        host_violated();
+    }
+    if (host_drains[host_actor()]) {
+        volatile struct rvuos_log *log = p2v(KLOG_BASE);
+        log->taken = log->head;
+        host_drains[host_actor()] = false;
+    }
+}
+
+/*
+ * The driver's passing protocol from rvuos/replay.h, run from the kernel's state:
+ * every thread the round visits ticks until the actor has the processor
+ * or the processor comes back to a thread that ticked, with the record untaken.
+ * That is the thread the round started from,
+ * or one whose tick failed, its table no longer holding the debug capability,
+ * and gave the processor to nobody.
+ * A thread the processor comes to that could not run faults, and the round goes on from the next.
+ */
+void host_event(const struct replay_record *c)
+{
+    struct thread *start = current;
+    while (replay_passes(c, host_actor())) {
+        struct thread *ticked = current;
+        host_syscall(&replay_tick);
+        host_run_on();
+        if (current == start || current == ticked) {
+            break;
+        }
+    }
+    /* The driver drains the log to the UART after each record it performs; see host_run_on. */
+    unsigned actor = host_actor();
+    host_syscall(c);
+    host_drains[actor] = true;
+    host_run_on();
+}
+
+void host_end(void)
+{
+    /* Each thread that runs faults, at its breakpoint or before it, and the kernel halts after the last. */
+    for (unsigned i = 0; i < REPLAY_THREADS; i++) {
+        host_run_on();
+        host_fault(CAUSE_BREAKPOINT);
+    }
+    fprintf(stderr, "invariant violated: a thread ran again after every driver thread faulted\n");
+    host_violated();
 }

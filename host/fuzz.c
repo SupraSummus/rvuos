@@ -77,12 +77,9 @@ static void replay(const uint8_t *data, size_t size)
          off += sizeof(struct replay_record)) {
         struct replay_record c;
         memcpy(&c, data + off, sizeof(c));
-        if (!host_event(&c)) {
-            break;
-        }
+        host_event(&c);
     }
-    /* The replay driver ends with ebreak; a dead process faults at once. */
-    kputs("user fault\n");
+    host_end();
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)

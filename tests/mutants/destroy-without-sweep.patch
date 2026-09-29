@@ -5,6 +5,7 @@ so in between they name dead objects.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
 Report: dangling object capability
+Report: thread's watch names no live notification
 
 diff --git a/kernel/pool.c b/kernel/pool.c
 --- a/kernel/pool.c

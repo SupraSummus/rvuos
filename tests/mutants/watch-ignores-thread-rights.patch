@@ -1,0 +1,18 @@
+A watch is set through a thread capability without the right to control the thread,
+so whoever may only name a thread decides who hears its faults.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: a call set the watch of a thread its caller could not control
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -734,7 +734,7 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
+         err = (cap.rights & RIGHT_W) ? op_process(t, &cap, op, arg) : KERR_NO_RIGHTS;
+         break;
+     case CAP_THREAD:
+-        err = (cap.rights & RIGHT_W) ? op_thread(t, &cap, op, arg) : KERR_NO_RIGHTS;
++        err = (cap.rights & RIGHT_W) || op == OP_THREAD_WATCH ? op_thread(t, &cap, op, arg) : KERR_NO_RIGHTS;
+         break;
+     case CAP_NOTIFICATION:
+         err = op_notification(t, &cap, op, arg);

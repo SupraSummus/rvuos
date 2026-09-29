@@ -2,7 +2,8 @@
  * The properties "Authority only flows", "Memory crosses zeroed",
  * "The caller keeps what it runs on", "A tick charges" and "A move keeps a node's place" of DESIGN.md,
  * which relate the state before a call to the state after it.
- * host_syscall runs history_begin before each call and history_end after it.
+ * host_syscall runs history_begin before each call and history_end after it,
+ * and host_fault does around a fault, which must change no more than a call that moves no time.
  *
  * The prologue runs untraced, with no self-check before these checks, so a node may hold anything:
  * an address it holds is looked up among the objects and pools walked, never followed.
@@ -101,6 +102,7 @@ __attribute__((noreturn)) static void violated(const char *what)
 /*
  * An installed region grants what the frame it came from did, a thread's units those units,
  * a thread's process and an Irq's notification what a capability to it does,
+ * a thread's watch that too, with its bits, which no capability limits but a changed watch is set anew,
  * and an Untyped its block whatever it made.
  */
 static struct grant grant_of(const struct cap *c)
@@ -116,6 +118,9 @@ static struct grant grant_of(const struct cap *c)
     }
     if (c->type == CAP_SIGNALLED) {
         return (struct grant){ CAP_NOTIFICATION, c->rights, c->a, 0 };
+    }
+    if (c->type == CAP_WATCHED) {
+        return (struct grant){ CAP_NOTIFICATION, c->rights, c->a, c->b };
     }
     return (struct grant){ c->type == CAP_INSTALLED ? CAP_FRAME : c->type, c->rights, c->a, c->b };
 }
@@ -214,11 +219,11 @@ static void children_of(const struct cap *c, addr_array *out)
     }
 }
 
-/* Note a move's source and destination, as the kernel will resolve them. */
-static void record_move(const struct captable *table)
+/* Note a move's source and destination, as the kernel will resolve them; a fault is no move, whatever a7 holds. */
+static void record_move(const struct captable *table, bool call)
 {
     move_from = move_to = NULL;
-    if (!debug_trace || caller == NULL || table == NULL || caller->frame.regs[REG_A7] != OP_CAP_MOVE) {
+    if (!call || !debug_trace || caller == NULL || table == NULL || caller->frame.regs[REG_A7] != OP_CAP_MOVE) {
         return;
     }
     const struct trap_frame *f = &caller->frame;
@@ -262,7 +267,7 @@ static void check_move(void)
     }
 }
 
-void history_begin(void)
+void history_begin(bool call)
 {
     held.n = nodes.n = 0;
 
@@ -287,7 +292,7 @@ void history_begin(void)
     record_objects(&objects);
     each_node(&objects, record_node);
     qsort(nodes.v, nodes.n, sizeof(nodes.v[0]), cmp_at);
-    record_move(table);
+    record_move(table, call);
 
     ticks_before = sched_ticks;
     traced_before = debug_trace;
@@ -339,9 +344,13 @@ static void check_node(const struct cap *c)
     } else if (!covered(g)) {
         violated("a call made a capability no capability of its caller covers");
     }
-    /* A thread bound to units by this call is one its caller could control. */
+    /* A thread bound to units, or watched, by this call is one its caller could control. */
     if (c->type == CAP_BOUND && !covered((struct grant){ CAP_THREAD, RIGHT_W, v2p(bound_thread((struct cap *)c)), 0 })) {
         violated("a call bound a thread its caller could not control to units");
+    }
+    if (c->type == CAP_WATCHED &&
+        !covered((struct grant){ CAP_THREAD, RIGHT_W, v2p(watched_thread((struct cap *)c)), 0 })) {
+        violated("a call set the watch of a thread its caller could not control");
     }
 }
 

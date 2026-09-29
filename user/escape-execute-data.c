@@ -9,7 +9,8 @@
  * Were the fetch allowed the word would return and the program would say so, which fails the run;
  * see tests/escape.sh.
  *
- * One escape per program, since a fault halts the machine; see DESIGN.md, "Verification".
+ * One escape per program: the fault stops the only thread, and the machine with nothing left to run;
+ * see DESIGN.md, "Verification".
  */
 
 #include <stdint.h>

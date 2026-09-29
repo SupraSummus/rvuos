@@ -8,12 +8,12 @@ Report: a ready thread that may run waits on no queue
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -426,7 +426,7 @@ static int op_thread(const struct cap *cap, uint32_t op, const uint32_t *arg)
+@@ -408,7 +408,7 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, const
          if (target->state != THREAD_STOPPED || thread_process(target) == NULL) {
              return KERR_STATE;
          }
 -        sched_ready(target);
 +        target->state = THREAD_READY;
          return KERR_OK;
-     default:
-         return KERR_WRONG_TYPE;
+     case OP_THREAD_WATCH: {
+         /* The watch signals on its setter's behalf, so the setter must be able to. */

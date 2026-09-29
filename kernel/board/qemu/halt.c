@@ -16,9 +16,9 @@
  * QEMU virt exposes the SiFive test device at 0x100000.
  * Writing FINISHER_PASS exits with status 0;
  * writing (code << 16) | FINISHER_FAIL exits with that code.
- * Codes: 1 kernel panic, 3 invariant violated, 4 user fault,
+ * Codes: 1 kernel panic, 3 invariant violated,
  * 5 no runnable thread, 6 a thread the host build cannot follow,
- * anything else is what the root task asked for.
+ * anything else is what the root task asked for; a user fault stops its thread and not the machine.
  */
 #define SIFIVE_TEST_BASE 0x100000u
 #define FINISHER_FAIL 0x3333u

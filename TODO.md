@@ -24,6 +24,9 @@ so everything since has run under QEMU only and has yet to pass on the chip:
 - The handover: "root: handover ok"
   needs the boot pool at `BOOT_POOL_BASE`, past the input, in RAM the ROM leaves alone,
   and the successor's stack three quarters up the data region, above the logger's.
+- Faults: "root: fault ok", with the prober on the logger's old stack, half way up the data region,
+  the demo's end in a halt with code 0,
+  and the escape suite's in `no runnable thread`, code 5, after its fault.
 
 Beyond the demo:
 
@@ -79,7 +82,9 @@ Beyond the demo:
 - The self-check sees structure, not semantics.
   That a signal wakes a thread waiting on *that* notification,
   and hands it the bits that were set,
-  is checked only by the demo in `user/init.c`.
+  is checked only by the demo in `user/init.c`,
+  and so is that a fault signals the watch of the thread that faulted and stops it where it faulted;
+  the host and QEMU run the same kernel code, so their transcripts agree on a fault that signals nothing.
 - The log's line is replayed through the trace itself,
   `tests/seeds/log-signals-untaken` and `log-wakes-reader`;
   a reader falling a whole ring behind, and the logger's byte-per-interrupt path,
@@ -116,12 +121,25 @@ Beyond the demo:
   Run the suite on the ESP32-C6 as well, whose PMP is what confines a process there;
   the scenarios use only the code, data and debug capabilities every board grants,
   but none has run on the chip yet.
+  Since a fault stops only its thread, one root task could run every scenario in a thread of its own
+  and hear each fault through its watch, one boot for the suite;
+  it would read the cause from the log, or through an operation open decision 21 leaves out.
 - CBMC on the halves `OP_UNTYPED_SPLIT` makes, `OP_FRAME_CARVE` and the NAPOT encoding.
 - One layout header consumed by C, the linker scripts and
   `tests/differential.py`.
   C and the linker scripts share `kernel/layout.h` and the board's `board.h` now;
   the replay driver's second stack in `rvuos/replay.h`
   and `tests/differential.py` still carry QEMU's addresses of their own.
+- A preemptible call that takes its caller's own code or data mapping,
+  a revoke below the frame or the Untyped they came from,
+  and that stops for a tick on QEMU leaves its thread to fault on the `ecall` it would make again,
+  while the host, which makes a stopped call again at once, finishes it and traces one line more.
+  The corpus has no such input; the fuzzer made one within minutes,
+  which `make qemu-replay` fails by that line.
+- A second `OP_DEBUG_TRACE` fills every account again,
+  which `host/history.c` takes for a traced call that moved no time and charged the thread whose turn it was;
+  the fuzzer finds it within minutes.
+  Either the fill belongs to the call that turns tracing on, or the check leaves the call out.
 - The host stops every preemptible call after one step, and makes it again,
   but has no second thread run in between,
   since under tracing an interrupt switches nothing.
@@ -181,10 +199,6 @@ Beyond the demo:
   Should a woken thread ever preempt the signaller,
   which open decision 9 in `DESIGN.md` leaves out,
   it saves switches as well; that is when to add it.
-- A user fault stops the machine, even when another thread could run.
-  Give a thread's creator somewhere to hear about it:
-  a notification the kernel signals is the cheapest candidate,
-  since it needs no new object.
 - `pmp_init` stops counting at the first hardwired entry.
   A core with writable entries above a hardwired one loses them;
   have the image skip such entries if one turns up.

@@ -358,6 +358,21 @@ static void check_thread(const struct thread *t)
             fail("a unit a thread is bound to names another", v2p(t), b->a + i, unit_thread[b->a + i]);
         }
     }
+    /*
+     * The sweep clears a thread's watch with its notification, in whatever pool; the tree check reads the node's links.
+     * It was set through a capability with the right to signal, whose rights it carries, and it signals some bit.
+     */
+    const struct cap *w = &t->watch;
+    if (w->type != CAP_NONE) {
+        struct obj_header *n = object_find(w->a);
+        if (w->type != CAP_WATCHED || n == NULL || n->type != CAP_NOTIFICATION || (w->rights & RIGHT_W) == 0 ||
+            w->b == 0 || w->index != 0) {
+            fail("thread's watch names no live notification", v2p(t), w->type, w->a);
+        }
+        if (w->child != 0) {
+            fail("something is derived from a thread's watch", v2p(t), w->child, 0);
+        }
+    }
     units_seen += thread_units(t);
     /* Every account holds at most its cap, and so nothing without units, and was last counted no later than the count. */
     if (t->balance > account_cap(t)) {
@@ -714,7 +729,7 @@ static void check_captable(const struct captable *table)
  *
  * Its nodes are the slots of every live table,
  * the table slot and region slots of every live process,
- * the process and units of every live thread
+ * the process, units and watch of every live thread
  * and the notification of every live Irq,
  * linked by physical address and never checked on use,
  * so every link must land on a live node and the shape must be exactly a forest:
@@ -726,7 +741,7 @@ static void check_captable(const struct captable *table)
  * A node is derived from its parent: the same object with no more rights,
  * a range within the parent's with no more rights,
  * or an object built on the parent's range, a pool on a region, an Irq on a line,
- * a thread's process or an Irq's notification on a capability to it,
+ * a thread's process, a thread's watch or an Irq's notification on a capability to it,
  * a thread's units on the units it was bound through,
  * or the counter's block, or a region installed from it, below the clock.
  */
@@ -785,12 +800,13 @@ static bool node_range(const struct cap *n, uint32_t *base, uint32_t *size)
 
 /*
  * A node naming an object built in a pool:
- * a capability to one, a thread's hold on its process, or an Irq's on its notification.
+ * a capability to one, a thread's hold on its process or on its watch, or an Irq's on its notification.
  */
 static bool is_object_type(uint8_t type)
 {
     return type == CAP_CAPTABLE || type == CAP_PROCESS || type == CAP_THREAD ||
-           type == CAP_NOTIFICATION || type == CAP_IRQ || type == CAP_HOSTED || type == CAP_SIGNALLED;
+           type == CAP_NOTIFICATION || type == CAP_IRQ || type == CAP_HOSTED || type == CAP_SIGNALLED ||
+           type == CAP_WATCHED;
 }
 
 static bool derived_from(const struct cap *c, const struct cap *p)
@@ -831,9 +847,12 @@ static bool derived_from(const struct cap *c, const struct cap *p)
     if (c->type == CAP_BOUND && p->type == CAP_TIME) {
         return narrower && c->a - p->a < p->b && c->b <= p->b - (c->a - p->a);
     }
-    /* A thread's process is the process it was made with, and an Irq's notification the one it was bound to. */
+    /*
+     * A thread's process is the process it was made with, its watch the notification it was set with,
+     * and an Irq's notification the one it was bound to.
+     */
     if ((c->type == CAP_HOSTED && p->type == CAP_PROCESS) ||
-        (c->type == CAP_SIGNALLED && p->type == CAP_NOTIFICATION)) {
+        ((c->type == CAP_WATCHED || c->type == CAP_SIGNALLED) && p->type == CAP_NOTIFICATION)) {
         return narrower && c->a == p->a;
     }
     /* Below a pool's node lies every capability to the pool and to its objects. */
