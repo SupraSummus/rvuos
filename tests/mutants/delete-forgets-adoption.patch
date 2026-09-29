@@ -2,7 +2,7 @@ A delete that does not hand the node's children to its parent
 leaves them linked up to an empty slot.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
-Report: the kernel reached outside RAM
+Report: link up to a slot that is not a live, filled one
 
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c

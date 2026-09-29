@@ -205,25 +205,18 @@ bool cap_stop_here(bool preempt)
     return preempt && intr_pending();
 }
 
-bool cap_revoke_step_except(struct cap *root, const struct cap *keep)
+bool cap_revoke_step(struct cap *root)
 {
     if (root->child == 0) {
         return false;
     }
     struct cap *n = node(root->child);
-    if (n == keep) {
-        /* keep stays first, so the next step looks past it again. */
-        if (keep->next & LINK_UP) {
-            return false;
-        }
-        n = node(keep->next);
-    }
     detach(n, true);
     clear_node(n);
     return true;
 }
 
-bool cap_revoke_below(struct cap *root, bool preempt)
+bool cap_revoke_below(struct cap *root, const struct cap *through, bool preempt)
 {
     /*
      * The first child goes and its children take its place at the front of the ring,
@@ -238,7 +231,7 @@ bool cap_revoke_below(struct cap *root, bool preempt)
         LOOP_PAID(cap_revoke_below, node, "a node it clears");
         struct cap *n = node(root->child);
         if (n->type == CAP_RETYPED) {
-            if (!pool_destroy(node_pool(n), NULL, preempt)) {
+            if (!pool_destroy(node_pool(n), preempt)) {
                 return false;
             }
         } else {
@@ -246,10 +239,11 @@ bool cap_revoke_below(struct cap *root, bool preempt)
             clear_node(n);
         }
         /*
-         * A revoke that took its caller's table, or the process it runs in, ends there:
+         * A revoke that took its caller's table, the process it runs in,
+         * or the capability it was made through ends there:
          * the caller could not make the call again, so an interrupt must not decide how far it got.
          */
-        if (thread_table(current) == NULL) {
+        if (thread_table(current) == NULL || through->type == CAP_NONE) {
             return true;
         }
         if (root->child != 0 && cap_stop_here(preempt)) {

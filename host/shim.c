@@ -364,8 +364,12 @@ uint32_t host_syscall(const struct replay_record *c)
             fprintf(stderr, "invariant violated: a call was preempted before it took anything away\n");
             host_violated();
         }
-        /* The thread makes a stopped call again, so it runs on and can still name what it invoked. */
-        if (f->mepc == mepc && (current != caller || thread_table(caller) == NULL)) {
+        /*
+         * The thread makes a stopped call again, so it runs on and can still name what it invoked:
+         * the slot resolved as the call began, and nothing refills a slot within a call.
+         */
+        if (f->mepc == mepc && (current != caller || thread_table(caller) == NULL ||
+                                thread_table(caller)->slots[c->slot].type == CAP_NONE)) {
             fprintf(stderr, "invariant violated: a call stopped where its caller cannot make it again\n");
             host_violated();
         }

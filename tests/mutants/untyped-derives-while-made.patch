@@ -7,7 +7,7 @@ Report: memory that may hold kernel objects overlaps a node not above or below i
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -86,9 +86,6 @@ static int op_captable(struct thread *t, const struct cap *cap,
+@@ -86,9 +86,6 @@ static int op_captable(struct thread *t, uint32_t slot, const struct cap *cap,
           * A derived Untyped is the whole of the memory, which only a free one has to give,
           * and the source makes nothing more while it lives, as for anything else it made.
           */

@@ -2,12 +2,12 @@ A revoke that takes the first child out of the ring without handing up its child
 leaves them linked up to an empty slot, out of the root's reach.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
-Report: the kernel reached outside RAM
+Report: link up to a slot that is not a live, filled one
 
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -218,7 +218,7 @@ bool cap_revoke_below(struct cap *root, bool preempt)
+@@ -260,7 +260,7 @@ bool cap_revoke_below(struct cap *root, const struct cap *through, bool preempt)
  bool cap_delete(struct cap *n, bool preempt)
  {
      if (n->next != LINK_UP) {

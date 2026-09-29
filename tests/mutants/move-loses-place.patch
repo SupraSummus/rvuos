@@ -1,0 +1,22 @@
+move-hands-children-up for anything but an Untyped:
+the tree stays whole and only the moved node's place is lost, which the self-check cannot see.
+The replay's prologue moves two made Untypeds, so that mutant shows only the overlap it makes of them.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: a move did not keep what was derived from the node it moved
+
+diff --git a/kernel/cap.c b/kernel/cap.c
+--- a/kernel/cap.c
++++ b/kernel/cap.c
+@@ -119,6 +119,11 @@ void cap_move(struct cap *from, struct cap *to)
+      * An only child is its own predecessor and successor, and a root is in no ring.
+      */
+     *to = *from;
++    if (from->type != CAP_UNTYPED) {
++        attach_beside(from, to);
++        cap_delete(from, false);
++        return;
++    }
+     if (from->next != LINK_UP) {
+         struct cap *pred = node(from->prev);
+         if (pred == from) {

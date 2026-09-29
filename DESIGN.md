@@ -462,12 +462,13 @@ unreachable, until the pool is destroyed.
 Capabilities themselves are revoked one derivation at a time;
 see "The derivation tree".
 
-A pool is destroyed by `OP_POOL_DESTROY` through a capability to it,
-or by a revoke below an Untyped it lies below, which meets its node.
-Either way the destroy is a revoke below the pool's own node
+A pool is destroyed by a revoke below an Untyped it lies below, which meets its node;
+no operation on a pool destroys it, so a Pool capability only allocates; see open decision 19.
+A pool is the whole of the Untyped it was made of, so a revoke below that Untyped destroys it alone,
+and a program that gives pools back one by one keeps their Untypeds.
+The destroy is a revoke below the pool's own node
 and then a walk over the pool's own objects, and both are the size of the pool.
-The revoke takes every capability to the pool and to its objects, wherever they lie,
-and the capability the destroy was made through last, so a call made again still names the pool.
+The revoke takes every capability to the pool and to its objects, wherever they lie.
 The walk then takes the objects newest first,
 and the used mark goes back as it goes,
 so a destroy stopped half way leaves a pool with fewer objects.
@@ -509,16 +510,20 @@ is woken with `KERR_INVALID_CAP` and no bits,
 because the wait can no longer be answered.
 Nothing is allocated from a pool once its destroy has begun.
 
-A destroy refuses with `KERR_STATE`
-when the calling thread lives in the pool, or its process or the process's table does,
-and a revoke below an Untyped refuses when any of them lies in the Untyped's memory.
+A revoke below an Untyped refuses with `KERR_STATE`
+when the calling thread, its process or the process's table lies in the Untyped's memory.
 That is a test by address, which is enough
 because every pool below an Untyped lies in its memory.
 The three may lie in different pools, and those tests are the whole of it:
 the caller keeps what it runs on and the table it names capabilities in.
-The boot pool, which holds the root task, is a pool like any other:
+The revoke refuses too when the table it names the Untyped in lies in that memory:
+the capability the call is made through, a capability to that table,
+would go half way through the destroy of the table's pool,
+where the call could neither be made again nor end.
+The boot pool, which holds the root task, is a pool like any other, made of `BOOT_CAP_POOL_RAM`:
 the root task cannot destroy it, since it lives there,
-and a thread that does not can, as a successor does; see "The root task is its capabilities".
+and a thread that holds that block and does not can, as a successor does;
+see "The root task is its capabilities".
 The objects of a pool are zeroed on the way out,
 because the memory is about to be the Untyped's again
 and they hold other processes' capability tables.
@@ -548,7 +553,8 @@ every `Irq`'s notification, which lives in the `Irq`,
 and every pool's own node, which lives in its descriptor;
 see `kernel/object.h`.
 Roots are the boot capabilities but those made of the root task's memory,
-its frames and the boot pool's own node, which hang below `BOOT_CAP_ROOT_RAM`,
+its frames and the boot pool's block, which hang below `BOOT_CAP_ROOT_RAM`,
+the boot pool's own node, which hangs below that block,
 and those to the boot pool and its objects, which hang below that node,
 as the root task's table slot and its thread's process do.
 A capability to a pool or an object is never a root,
@@ -644,8 +650,7 @@ No system call names the slot: a process's slot numbers index its table.
 A revoke above the slot, or the destroy of the table's pool, clears it like any other,
 so the table may lie in any pool, and several processes may share one.
 A process whose slot is empty fails every call with `KERR_INVALID_CAP`.
-Within one call only a revoke can take it, which then returns, see "Bounded work",
-or a destroy, which keeps the table it found.
+Within one call only a revoke can take it, which then returns; see "Bounded work".
 It costs sixteen bytes per process and a test on every call;
 before, the table had to lie in the process's own pool so a pointer could not dangle.
 Open decision 15 is about what else the slot could do.
@@ -1098,8 +1103,7 @@ Copies of the line elsewhere are inert while the `Irq` exists,
 because a line is bound at most once and a second bind fails with `KERR_OVERLAP`.
 When the `Irq`'s pool is destroyed the kernel masks its line
 and the object is gone, so those copies work again:
-the lender of a line gets it back by destroying the borrower's pool,
-or by revoking below the Untyped the borrower's pool was made of,
+the lender of a line gets it back by revoking below the Untyped the borrower's pool was made of,
 exactly as the lender of memory does.
 Revoking below the line capability the lender derived the borrower's from
 takes the line only while it is unbound;
@@ -1257,11 +1261,12 @@ or a shell is.
 
 After boot the kernel names the root task nowhere.
 The root task lives in memory it holds: `BOOT_CAP_ROOT_RAM` is an Untyped
-with its code, data and input and the boot pool right below it,
-what a loader leaves that halved an Untyped down to them and let the halves between go.
+with its code, data and input and the boot pool's block, `BOOT_CAP_POOL_RAM`, right below it,
+what a loader leaves that halved an Untyped down to them, let the halves between go
+and kept the block it made the pool of, so that the pool can go alone.
 So it makes nothing while they are there,
 and the rest of its memory, past the boot pool, is its holder's again once they are gone.
-It cannot revoke below that memory or destroy the boot pool, since it lives there,
+It cannot revoke below that memory or below the boot pool's, since it lives there,
 as no process can what it runs on.
 Before, the boot pool lay in a range the linker reserved, below no Untyped,
 and its destroy was refused by name.
@@ -1278,15 +1283,16 @@ That lets the root task hand its place over and end, as a bootloader chains to t
    and an Untyped is never copied.
 3. The successor stops the root task's thread for good,
    binding it to no units through a capability without `RIGHT_X`,
-   and destroys the boot pool, which takes the root task's thread, process and table
-   and everything else allocated there.
+   and revokes below `BOOT_CAP_POOL_RAM`, which destroys the boot pool,
+   the root task's thread, process and table and everything else allocated there.
 4. It copies its own table, process and thread into the slots the destroy emptied,
    so a program written as a root task runs on as one.
 
 The successor in the demo runs the root task's code, so it keeps those frames;
 one whose code lies elsewhere revokes below `BOOT_CAP_ROOT_RAM` instead,
 which unmaps them wherever they are and gives it the whole block back.
-Anyone holding a capability to the boot pool can end the root task this way; see open decision 19.
+Only a holder of `BOOT_CAP_POOL_RAM` or `BOOT_CAP_ROOT_RAM` can destroy the root task:
+a capability to the boot pool allocates from it and nothing more; see open decision 19.
 
 ## Boards
 
@@ -1360,15 +1366,20 @@ or at the newest object of the pool being destroyed and the slot its descriptor 
 or, for a notification of it, at the first thread still waiting on it,
 so the kernel needs no record of where it stopped, no second stack and no worker,
 and the time lands in the slice of the thread that made the call.
-A pool's destroy goes on from where it stopped whichever call takes the next step,
-the `OP_POOL_DESTROY` that began it or a revoke below the Untyped that meets its node.
+A pool's destroy goes on from where it stopped whichever revoke takes the next step,
+below the Untyped that began it or below one above that.
 A walk asks only after a step, so every attempt takes something away and the restarts end.
 Whether `intr_pending` is right changes when a walk stops, never what it does.
 A restart is a new call:
 it checks everything again, and revokes what was derived in between too.
-A revoke that takes its caller's table, or the caller's process, ends at that step:
+A revoke that takes its caller's table, the caller's process,
+or the capability the call was made through ends at that step:
 nothing can make the call again,
 so where an interrupt landed would otherwise decide how far it got.
+A pool the revoke destroys takes none of them,
+since a revoke below an Untyped refuses when the caller's process or table,
+or the table the call names, lies in the Untyped's memory;
+see "Kernel pools and revocation".
 So a bind revokes only once every check that can fail has passed,
 its room in the pool among them, and builds after.
 
@@ -1404,7 +1415,8 @@ The host answers every `intr_pending` with yes, the worst case,
 so each preemptible call stops after its first step, is made again,
 and the self-check runs between any two steps;
 every host harness requires a stopped call to have taken a node, a link, an object or a waiter away,
-and to leave its caller running and holding its table, so that it can make the call again.
+and to leave its caller running, holding its table and the capability it made the call through,
+so that it can make the call again.
 
 **Where the kernel falls short.**
 Nowhere, since `Untyped` and `Frame` replaced the overlap checks and the sweep;
@@ -1796,6 +1808,10 @@ and memory of its own, an Untyped derived from a quarter of the free RAM, as the
 so a pool it makes lies below the free RAM the first thread holds,
 a record on the first thread can destroy both at once with a revoke,
 and the cascade is replayed like any other path.
+Each table holds the block the other thread's pool was made of,
+so a record on the first thread destroys the second thread's pool,
+one on the second destroys the boot pool and the first thread with it,
+and either is refused its own.
 The state both builds start from is in `include/rvuos/replay.h`
 rather than written out twice.
 `OP_DEBUG_TRACE` makes the kernel print one line per call
@@ -2064,8 +2080,8 @@ until the maintainer decides otherwise.
     The questions the proposal left are decided so:
     - deleting the Pool capability a retype returned neither refuses nor destroys,
       since the retype's own node lies in the pool's descriptor;
-    - a destroy, and a revoke below an Untyped, refuse when the caller or its table lives
-      in the memory they would destroy, a test by address;
+    - a revoke below an Untyped refuses when the caller or its table lives
+      in the memory it would destroy, a test by address;
     - a frame carries the rights of the Untyped it was made of;
     - a stopped destroy keeps its progress in the pool:
       the objects go newest first and the used mark with them.
@@ -2133,12 +2149,13 @@ until the maintainer decides otherwise.
     Decide when a board's sleep states, or a workload's latency, make the difference measurable.
 
 19. **A right to destroy a pool.**
-    Working default: `RIGHT_W` on a pool both allocates from it and destroys it,
-    so lending a pool lends the power to destroy it and every process living in it,
-    the root task in the boot pool among them.
-    A lender that means to lend allocation alone lends a pool made for the borrower.
-    The alternative is a right of its own for the destroy, `RIGHT_X` being free on a pool.
-    Decide when a server hands out allocation in a pool it lives in.
+    Decided: there is none; the holder of a pool's Untyped destroys it, and a Pool capability only allocates.
+    So lending a pool lends allocation, and lending an Untyped lends the power to destroy what is made of it.
+    Before, `OP_POOL_DESTROY` destroyed a pool through a Pool capability,
+    so a borrower could destroy every process living in the pool, the root task in the boot pool among them.
+    Since decision 20 a pool is the whole of its Untyped, so the operation did what that revoke does.
+    The price is a slot per pool for a program that gives pools back one by one,
+    and the boot pool's block as a boot capability of its own, `BOOT_CAP_POOL_RAM`.
 
 20. **Halves instead of a watermark.**
     Decided: an Untyped makes one thing of the whole of its memory, a frame, a pool, its two halves

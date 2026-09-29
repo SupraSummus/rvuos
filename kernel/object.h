@@ -395,16 +395,16 @@ static inline struct pool *node_pool(struct cap *n)
 }
 
 /*
- * Destroy a pool: revoke below its node, leaving keep, a capability to the pool, for last;
+ * Destroy a pool, as a revoke below an Untyped does when it meets the pool's node:
+ * revoke below that node,
  * then take its objects newest first, clearing the nodes they hold as cap_delete does,
  * undoing what each left in the rest of the kernel and zeroing it;
- * then clear keep and the pool's node and zero the descriptor.
- * keep may be NULL.
+ * then clear the pool's node and zero the descriptor.
  * With preempt it may stop between two steps for a pending interrupt and return false,
  * the pool dying and the rest of the work kept in it; see DESIGN.md, "Bounded work".
  * The caller has checked that the running thread and its table do not live in the pool.
  */
-bool pool_destroy(struct pool *pool, struct cap *keep, bool preempt);
+bool pool_destroy(struct pool *pool, bool preempt);
 
 /* Whether pool_alloc would find room for size bytes. */
 bool pool_fits(const struct pool *pool, size_t size);
@@ -486,17 +486,18 @@ bool cap_delete(struct cap *node, bool preempt);
 /*
  * Clear every node below one, leaving the node itself; preemptible as cap_delete is.
  * A pool's own node below it is a pool to destroy, which pool_destroy does.
- * It ends early, and true, once it took the running thread's table or process.
+ * It ends early, and true, once it took the running thread's table or process,
+ * or through, the slot the call was made through.
+ * The caller has checked that no pool it destroys takes any of the three.
  */
-bool cap_revoke_below(struct cap *node, bool preempt);
+bool cap_revoke_below(struct cap *node, const struct cap *through, bool preempt);
 
 /*
- * One step of a revoke that meets no pool's own node, below a pool or a line:
- * clear the first node below root other than keep, whose children take its place.
- * False when nothing but keep is left; keep may be NULL.
+ * One step of a revoke below a pool's own node, where no other pool's node lies:
+ * clear the first node below root, whose children take its place.
+ * False when nothing is left.
  */
-bool cap_revoke_step_except(struct cap *root, const struct cap *keep);
-static inline bool cap_revoke_step(struct cap *root) { return cap_revoke_step_except(root, NULL); }
+bool cap_revoke_step(struct cap *root);
 
 /* Whether a preemptible walk that has done a step stops before its next; see intr_pending. */
 bool cap_stop_here(bool preempt);

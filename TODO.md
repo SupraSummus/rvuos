@@ -56,9 +56,8 @@ Beyond the demo:
   and no record writes memory, so what a process leaves in memory it turns into a pool
   is stood for only by the pattern the host's RAM starts out holding.
 - `tools/loop-bounds.py` knows clang's jump tables by their shape;
-  any other jump through a register may make up a loop, which fails the link, never passes it.
-  A table whose base clang keeps on the stack is one,
-  so the link refuses the mutant `forget-pool-walks-every-object`, which the counting harness alone should catch.
+  any other jump through a register may make up a loop, which fails the link, never passes it,
+  as a table whose base clang keeps on the stack does.
 - That the count of armed sources leaves the log's line out is checked by reading `irq_set_bits`.
   Under tracing each call's line reaches the log before the self-check runs,
   so an `Irq` armed on the log's line has always signalled by then.
@@ -89,7 +88,7 @@ Beyond the demo:
 - `KERR_STATE` for a thread destroying the pool its table or its process lies in, but not the thread,
   is checked only for the two together:
   the driver's third thread lies apart from its process, but the process's table lies with it,
-  and the demo gives its child nothing elsewhere.
+  and the demo's root task lives with both.
 - The replay driver has three threads, and the third shares the second's process and lies in the first's pool.
   More of them, each with its process, pool and Untyped as the second has,
   would give the derivation below the free RAM more branches;
@@ -155,11 +154,6 @@ Beyond the demo:
   A logger thread in the driver would make traced calls the host would have to follow.
 - The UART driver in `user/init.c` transmits only,
   because `make test` feeds the UART nothing to receive.
-- Whether `OP_POOL_DESTROY` should go.
-  A pool is the whole of the Untyped it was made of, so revoking that Untyped destroys it,
-  which the demo could do for the pool it rebuilds;
-  without the operation, the capability a destroy keeps for last would go too.
-  The root task is destroyed as any process is, by its pool or by the memory under it.
 - Revoking below a line capability takes the line back only while it is unbound.
   The `Irq` could hold its line as it holds its notification, by a node below the line capability,
   whose clearing disarms the `Irq` and frees the line; `DESIGN.md`, "Interrupts".

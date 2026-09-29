@@ -9,7 +9,7 @@ Report: a call made a capability no capability of its caller covers
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -68,7 +68,7 @@ static int op_captable(struct thread *t, const struct cap *cap,
+@@ -72,7 +72,7 @@ static int op_captable(struct thread *t, uint32_t slot, const struct cap *cap,
          if (err != KERR_OK) {
              return err;
          }

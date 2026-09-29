@@ -32,20 +32,19 @@
 /* Slots in the root task's own table, above the ones the kernel filled. */
 enum {
     SLOT_LOG_NTFN = BOOT_CAP_COUNT, /* the logger waits here; the log's Irq and the UART's signal it */
-    SLOT_LOG_LINE,      /* the log's line, carved out of the boot grant */
-    SLOT_LOG_IRQ,       /* the line bound to SLOT_LOG_NTFN */
-    SLOT_UART_LINE,     /* the UART's line */
-    SLOT_UART_IRQ,
+    SLOT_LOG_IRQ,       /* the log's line, carved out of the boot grant and bound in place to SLOT_LOG_NTFN */
+    SLOT_UART_IRQ,      /* the UART's line, the same way */
     SLOT_LOGGER,        /* the logger thread */
     SLOT_CHILD_DATA,
     SLOT_SHARED,
+    SLOT_POOL_MEMORY,   /* the Untyped the child's pool is made of, below which it is destroyed */
     SLOT_POOL,
     SLOT_CHILD_TABLE,
     SLOT_CHILD_PROCESS,
     SLOT_CHILD_THREAD,
     SLOT_UP,   /* the child signals, the root waits */
     SLOT_DOWN, /* the root signals, the child waits */
-    SLOT_DOOMED_MEMORY, /* an Untyped of the size of the pool that gets destroyed */
+    SLOT_DOOMED_MEMORY, /* the Untyped of the pool that gets destroyed, and of the one built after it */
     SLOT_DOOMED_POOL,
     SLOT_DOOMED_NTFN,   /* a notification allocated from it */
     SLOT_STALE,         /* a second capability to that same notification */
@@ -92,9 +91,8 @@ enum {
     CHILD_LEASE,  /* memory derived from the root task's, which revokes it */
     CHILD_LENT,   /* untyped memory the root task lends, derived from its own */
     CHILD_OWN_NTFN, /* allocated from the pool the child makes of it */
-    CHILD_OWN_POOL, /* the pool the child lives in, which it may not destroy */
     CHILD_LENT_POOL, /* the pool the child makes of the lent memory */
-    CHILD_TABLE_SLOTS = 11,
+    CHILD_TABLE_SLOTS = 10,
 };
 
 /*
@@ -218,11 +216,15 @@ static void take_untyped(uint32_t slot, uint32_t *base, uint32_t *size)
                ? KERR_OK : KERR_INVALID_ARG);
 }
 
-/* The next block made into a frame or a pool in slot. */
-static void take(uint32_t type, uint32_t slot, uint32_t *base, uint32_t *size)
+/*
+ * The next block made into a frame in slot.
+ * A frame is taken back by revoking below it, so its Untyped may go;
+ * a pool goes only with its Untyped, so main takes the child's pool's with take_untyped and keeps it.
+ */
+static void take_frame(uint32_t slot, uint32_t *base, uint32_t *size)
 {
     take_untyped(SLOT_BLOCK, base, size);
-    expect("make the block", rv_retype(SLOT_BLOCK, type, slot, base));
+    expect("make the block", rv_retype(SLOT_BLOCK, CAP_FRAME, slot, base));
     expect("let its Untyped go", rv_invoke(OP_CAP_DELETE, BOOT_CAP_CAPTABLE, SLOT_BLOCK, 0, 0));
 }
 
@@ -429,11 +431,6 @@ static void child_main(void)
                         KERR_OK
                 ? "child: pool made\n"
                 : "child: pool made FAILED\n");
-    /* A thread keeps what it runs on: this one cannot destroy the pool it lives in. */
-    rv_puts(CHILD_DEBUG,
-            rv_invoke(OP_POOL_DESTROY, CHILD_OWN_POOL, 0, 0, 0) == KERR_STATE
-                ? "child: cannot destroy its own pool\n"
-                : "child: cannot destroy its own pool FAILED\n");
     rv_signal(CHILD_UP, BIT_POOLED);
 
     /* Nothing more is asked of it: it waits until its pool goes, and it with it. */
@@ -518,9 +515,12 @@ static __attribute__((noreturn)) void successor_main(void)
     puts("successor: started\n");
     expect("stop the root task's thread for good",
            rv_invoke(OP_TIME_BIND, SLOT_FREEZE_TIME, BOOT_CAP_THREAD, 0, 0));
-    /* The successor lives in a pool of its own, so nothing keeps it from destroying the boot pool. */
+    /*
+     * The successor lives in a pool of its own, so nothing keeps it from destroying the boot pool,
+     * by a revoke below the block it was made of, which leaves the code both run where it is.
+     */
     expect("destroy the boot pool, and the root task with it",
-           rv_invoke(OP_POOL_DESTROY, BOOT_CAP_POOL, 0, 0, 0));
+           rv_invoke(OP_CAP_REVOKE, SLOT_SUCC_TABLE, BOOT_CAP_POOL_RAM, 0, 0));
     expect("the root task's thread is gone",
            rv_invoke(OP_THREAD_RESUME, BOOT_CAP_THREAD, 0, 0, 0) == KERR_INVALID_CAP
                ? KERR_OK : KERR_INVALID_ARG);
@@ -569,6 +569,10 @@ static __attribute__((noreturn)) void hand_over(uint32_t sp)
     uint32_t base, bits;
 
     puts("root: handing over\n");
+    /* A thread keeps what it runs on: the root task cannot destroy the pool it lives in. */
+    expect("the root task cannot destroy its own pool",
+           rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, BOOT_CAP_POOL_RAM, 0, 0) == KERR_STATE
+               ? KERR_OK : KERR_INVALID_ARG);
     expect("derive every unit without spare time",
            rv_invoke(OP_CAP_DERIVE, BOOT_CAP_CAPTABLE, SLOT_FREEZE_TIME, BOOT_CAP_TIME, RIGHT_W));
     expect("stop the logger", rv_invoke(OP_TIME_BIND, SLOT_FREEZE_TIME, SLOT_LOGGER, 0, 0));
@@ -637,14 +641,15 @@ int main(void)
 
     expect("allocate the logger's notification",
            rv_invoke(OP_POOL_ALLOC, BOOT_CAP_POOL, CAP_NOTIFICATION, SLOT_LOG_NTFN, 0));
+    /* A bind takes the line's slot, so the Irq may go where the line was. */
     expect("carve the log's line",
-           rv_invoke(OP_IRQ_CARVE, BOOT_CAP_IRQ_LINES, LOG_IRQ_LINE, 1, SLOT_LOG_LINE));
+           rv_invoke(OP_IRQ_CARVE, BOOT_CAP_IRQ_LINES, LOG_IRQ_LINE, 1, SLOT_LOG_IRQ));
     expect("bind the log's line",
-           rv_invoke(OP_IRQ_BIND, SLOT_LOG_LINE, BOOT_CAP_POOL, SLOT_LOG_NTFN, SLOT_LOG_IRQ));
+           rv_invoke(OP_IRQ_BIND, SLOT_LOG_IRQ, BOOT_CAP_POOL, SLOT_LOG_NTFN, SLOT_LOG_IRQ));
     expect("carve the uart's line",
-           rv_invoke(OP_IRQ_CARVE, BOOT_CAP_IRQ_LINES, CONSOLE_IRQ, 1, SLOT_UART_LINE));
+           rv_invoke(OP_IRQ_CARVE, BOOT_CAP_IRQ_LINES, CONSOLE_IRQ, 1, SLOT_UART_IRQ));
     expect("bind the uart's line",
-           rv_invoke(OP_IRQ_BIND, SLOT_UART_LINE, BOOT_CAP_POOL, SLOT_LOG_NTFN, SLOT_UART_IRQ));
+           rv_invoke(OP_IRQ_BIND, SLOT_UART_IRQ, BOOT_CAP_POOL, SLOT_LOG_NTFN, SLOT_UART_IRQ));
     expect("allocate the logger's thread",
            rv_invoke(OP_POOL_ALLOC, BOOT_CAP_POOL, CAP_THREAD, SLOT_LOGGER, BOOT_CAP_PROCESS));
     expect("configure the logger",
@@ -668,9 +673,10 @@ int main(void)
            rv_frame_min_size(BOOT_CAP_DATA, &min_size) == KERR_OK && CHUNK % min_size == 0
                ? KERR_OK : KERR_INVALID_ARG);
 
-    take(CAP_FRAME, SLOT_SHARED, &shared_base, &shared_size);
-    take(CAP_FRAME, SLOT_CHILD_DATA, &child_data_base, &child_data_size);
-    take(CAP_POOL, SLOT_POOL, &pool_base, &pool_size);
+    take_frame(SLOT_SHARED, &shared_base, &shared_size);
+    take_frame(SLOT_CHILD_DATA, &child_data_base, &child_data_size);
+    take_untyped(SLOT_POOL_MEMORY, &pool_base, &pool_size);
+    expect("make the child's pool", rv_retype(SLOT_POOL_MEMORY, CAP_POOL, SLOT_POOL, &pool_base));
     expect("the blocks halve one after another",
            shared_base == free_base && shared_size == free_size / 2 &&
                    child_data_base == free_base + free_size / 2 && child_data_size == free_size / 4 &&
@@ -779,9 +785,9 @@ int main(void)
     expect("the notification works while its pool lives",
            rv_signal(SLOT_DOOMED_NTFN, BIT_REQUEST));
 
-    /* The memory goes back to the Untyped the pool was made of. */
+    /* A revoke below the Untyped the pool was made of destroys it, and the memory is free again. */
     expect("destroy the pool",
-           rv_invoke(OP_POOL_DESTROY, SLOT_DOOMED_POOL, 0, 0, 0));
+           rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_DOOMED_MEMORY, 0, 0));
     expect("the copy is revoked",
            rv_signal(SLOT_STALE, BIT_REQUEST) == KERR_INVALID_CAP ? KERR_OK : KERR_INVALID_ARG);
 
@@ -814,7 +820,7 @@ int main(void)
      * Whether the child's mapping is gone shows in the child's region slot,
      * which takes a region again once it is empty.
      */
-    take(CAP_FRAME, SLOT_LEASE, &lease_base, &lease_size);
+    take_frame(SLOT_LEASE, &lease_base, &lease_size);
     expect("copy it beside itself",
            rv_invoke(OP_CAP_COPY, BOOT_CAP_CAPTABLE, SLOT_LEASE_COPY, SLOT_LEASE, RIGHT_ALL));
     expect("derive it into the child's table",
@@ -852,8 +858,6 @@ int main(void)
     take_untyped(SLOT_LENT, &lent_base, &lent_size);
     expect("lend it to the child",
            rv_invoke(OP_CAP_DERIVE, SLOT_CHILD_TABLE, CHILD_LENT, SLOT_LENT, RIGHT_ALL));
-    expect("give the child its own pool",
-           rv_invoke(OP_CAP_COPY, SLOT_CHILD_TABLE, CHILD_OWN_POOL, SLOT_POOL, RIGHT_ALL));
     expect("ask the child to pool it", rv_signal(SLOT_DOWN, BIT_POOL));
     expect("wait for the child's pool", rv_wait(SLOT_UP, &bits));
     expect("the child made a pool", bits == BIT_POOLED ? KERR_OK : KERR_INVALID_ARG);
@@ -1015,7 +1019,8 @@ int main(void)
     puts("root: tickless ok\n");
 
     /* The child is done, and goes with its pool. */
-    expect("destroy the child's pool", rv_invoke(OP_POOL_DESTROY, SLOT_POOL, 0, 0, 0));
+    expect("destroy the child's pool",
+           rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_POOL_MEMORY, 0, 0));
 
     /*
      * Interrupts, beyond the two lines the logger lives on.
@@ -1041,7 +1046,7 @@ int main(void)
 
     /* The Irq dies with its pool, which masks the line and frees it for the copy. */
     expect("destroy the driver's pool",
-           rv_invoke(OP_POOL_DESTROY, SLOT_NEW_POOL, 0, 0, 0));
+           rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_DOOMED_MEMORY, 0, 0));
     expect("the irq is revoked",
            rv_irq_set(SLOT_SPARE_IRQ, BIT_SPARE) == KERR_INVALID_CAP ? KERR_OK : KERR_INVALID_ARG);
     expect("allocate a notification in the boot pool",

@@ -143,12 +143,20 @@
  * A region installed from a frame below the slot is uninstalled,
  * a thread made through a Process capability below it stops, as it has no process any more,
  * an Irq bound through a Notification capability below it is disarmed, as it has nothing to signal,
- * and a pool retyped from an Untyped below it is destroyed, as OP_POOL_DESTROY destroys one.
- * A revoke that takes the calling thread's process or its process's table ends there with KERR_OK,
+ * and a pool retyped from an Untyped below it is destroyed,
+ * with every object in it and every capability anywhere that names the pool or one of those objects.
+ * The slots of the pool's tables are cleared as OP_CAP_DELETE clears one:
+ * what was derived from them goes to their parents.
+ * Threads waiting on a notification in a destroyed pool
+ * are woken with KERR_INVALID_CAP and no bits,
+ * threads, in whatever pool, whose process was in it stop,
+ * and Irqs, in whatever pool, whose notification was in it are disarmed.
+ * A revoke that takes the calling thread's process, its process's table,
+ * or the capability it is made through ends there with KERR_OK,
  * and what it did not reach stays for another call to revoke.
  * Fails with KERR_INVALID_CAP for an empty slot,
  * and with KERR_STATE when the slot is an Untyped whose memory holds
- * the calling thread, its process or the process's table.
+ * the calling thread, its process, the process's table or the invoked table.
  * Restartable.
  */
 #define OP_CAP_REVOKE 23
@@ -246,23 +254,6 @@
  * An Irq is not allocated here but bound, with OP_IRQ_BIND.
  */
 #define OP_POOL_ALLOC 7
-/*
- * Pool (RIGHT_W): destroy the pool, every object in it,
- * and every capability anywhere that names one of those objects.
- * The slots of the pool's tables are cleared as OP_CAP_DELETE clears one:
- * what was derived from them goes to their parents.
- * The memory goes back to the Untyped the pool was retyped from,
- * which makes something of it again once nothing else made of it is left.
- * Fails with KERR_STATE if the calling thread, its process or the process's table
- * lives in the pool.
- * Threads waiting on a notification in a destroyed pool
- * are woken with KERR_INVALID_CAP and no bits,
- * threads, in whatever pool, whose process was in it stop,
- * and Irqs, in whatever pool, whose notification was in it are disarmed.
- * Restartable.
- */
-#define OP_POOL_DESTROY 16
-
 /*
  * Process (RIGHT_W): install a region into one of the process's region slots.
  * a1 = region slot index, a2 = Frame capability slot in the caller's table,
@@ -424,11 +415,17 @@
 #define BOOT_CAP_TIME      15 /* Time: every unit, with RIGHT_W and RIGHT_X; the root thread earns them all */
 /*
  * Untyped: the block of RAM the root task lives in, which holds its code, data and input
- * and the boot pool; all of it is made already, so it makes nothing
+ * and the boot pool's block; all of it is made already, so it makes nothing
  * until those are gone, and the root task, which runs on it, cannot revoke below it.
  */
 #define BOOT_CAP_ROOT_RAM  16
-#define BOOT_CAP_COUNT     17
+/*
+ * Untyped: the block the boot pool was made of, below BOOT_CAP_ROOT_RAM.
+ * Revoking below it destroys the boot pool, and the root task's table, process and thread with it,
+ * which the root task, living there, cannot do.
+ */
+#define BOOT_CAP_POOL_RAM  17
+#define BOOT_CAP_COUNT     18
 
 /*
  * The kernel's log.

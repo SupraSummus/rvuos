@@ -69,25 +69,17 @@ static struct cap *held_node(struct obj_header *o, uint16_t *at)
 _Static_assert(CAPTABLE_MAX_SLOTS <= UINT16_MAX && 1 + PROCESS_REGION_SLOTS <= CAPTABLE_MAX_SLOTS,
                "the sweep's slot fits its field");
 
-bool pool_destroy(struct pool *pool, struct cap *keep, bool preempt)
+bool pool_destroy(struct pool *pool, bool preempt)
 {
     /* Nothing is allocated from a pool that is going, so the steps below only ever take. */
     pool->dying = 1;
 
     /*
      * Every capability to the pool and to its objects lies below the pool's node,
-     * so revoking below it leaves none, keep aside, which the caller names the pool through.
+     * so revoking below it leaves none.
      * Its progress is in the tree, and a new capability made meanwhile goes the same way.
      */
-    if (keep != NULL) {
-        while (cap_revoke_step(keep)) {
-            LOOP_PAID(pool_destroy, node, "a node below the capability the destroy was made through");
-            if (cap_stop_here(preempt)) {
-                return false;
-            }
-        }
-    }
-    while (cap_revoke_step_except(&pool->node, keep)) {
+    while (cap_revoke_step(&pool->node)) {
         LOOP_PAID(pool_destroy, node, "a capability to the pool or to one of its objects");
         if (cap_stop_here(preempt)) {
             return false;
@@ -134,9 +126,6 @@ bool pool_destroy(struct pool *pool, struct cap *keep, bool preempt)
     }
 
     /* Nothing below may stop: the pool is empty, and its memory goes back to the Untyped. */
-    if (keep != NULL) {
-        cap_delete(keep, false);
-    }
     cap_delete(&pool->node, false);
     pool_unlink(pool);
     CALL_BOUND(sizeof(struct pool));

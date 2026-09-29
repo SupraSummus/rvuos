@@ -1,7 +1,7 @@
-The boot pool's own node stays a root rather than hanging below its block,
-so an Untyped covers a pool that does not lie below it,
-and revoking below that Untyped would not reach the root task's objects:
-the demo's successor cannot end the root task.
+The boot pool hangs beside its block rather than below it,
+so BOOT_CAP_POOL_RAM makes a frame or a pool over the root task's objects,
+and revoking below it, as a successor does to end the root task, destroys nothing.
+Memory that may hold kernel objects overlaps another node only where one lies below the other.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
 Report: memory that may hold kernel objects overlaps a node not above or below it
@@ -9,11 +9,12 @@ Report: memory that may hold kernel objects overlaps a node not above or below i
 diff --git a/kernel/boot.c b/kernel/boot.c
 --- a/kernel/boot.c
 +++ b/kernel/boot.c
-@@ -70,7 +70,6 @@ struct thread *boot_create_root(void)
+@@ -70,7 +70,7 @@ struct thread *boot_create_root(void)
          cap_store(table, BOOT_CAP_POOL_RAM, &pool_ram, root_ram) != KERR_OK) {
          kpanic("cannot fill the root task's table");
      }
 -    cap_attach(&table->slots[BOOT_CAP_POOL_RAM], &pool->node);
++    cap_attach(root_ram, &pool->node);
  
      /*
       * Below the pool's node, as every capability to an object of the pool is,

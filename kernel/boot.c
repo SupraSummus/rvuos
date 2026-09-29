@@ -11,9 +11,12 @@
 struct granted_range boot_granted[GRANTED_RANGES];
 
 /*
- * The root task's code, data and input and the boot pool are made of its memory, BOOT_CAP_ROOT_RAM,
- * and hang right below it, as they would once a loader had split that memory down to them
+ * The root task's code, data and input and the boot pool's block, BOOT_CAP_POOL_RAM,
+ * are made of its memory, BOOT_CAP_ROOT_RAM, and hang right below it,
+ * as they would once a loader had split that memory down to them
  * and deleted the halves between; the boot leaves nothing more.
+ * The boot pool hangs below its block as a retype would have put it,
+ * so a revoke there destroys the root task and leaves its code where it is.
  */
 struct thread *boot_create_root(void)
 {
@@ -53,16 +56,20 @@ struct thread *boot_create_root(void)
     }
 
     /*
-     * The root task's memory makes nothing while what it holds lies below it,
-     * and the boot pool hangs below it as a retype would have put it;
+     * The root task's memory makes nothing while what it holds lies below it;
      * nothing is below the pool's node yet, so attaching it loses nothing.
      */
+    if (!napot_block(BOOT_POOL_BASE, BOOT_POOL_SIZE)) {
+        kpanic("boot layout is not made of NAPOT blocks");
+    }
     struct cap ram = cap_to_untyped(ROOT_RAM_BASE, ROOT_RAM_SIZE, RIGHT_ALL);
-    if (cap_store(table, BOOT_CAP_ROOT_RAM, &ram, NULL) != KERR_OK) {
+    struct cap pool_ram = cap_to_untyped(BOOT_POOL_BASE, BOOT_POOL_SIZE, RIGHT_ALL);
+    struct cap *root_ram = &table->slots[BOOT_CAP_ROOT_RAM];
+    if (cap_store(table, BOOT_CAP_ROOT_RAM, &ram, NULL) != KERR_OK ||
+        cap_store(table, BOOT_CAP_POOL_RAM, &pool_ram, root_ram) != KERR_OK) {
         kpanic("cannot fill the root task's table");
     }
-    struct cap *root_ram = &table->slots[BOOT_CAP_ROOT_RAM];
-    cap_attach(root_ram, &pool->node);
+    cap_attach(&table->slots[BOOT_CAP_POOL_RAM], &pool->node);
 
     /*
      * Below the pool's node, as every capability to an object of the pool is,
@@ -75,7 +82,7 @@ struct thread *boot_create_root(void)
 
     /*
      * The boot capabilities are the roots of the derivation tree,
-     * but for the frames made of the root task's memory, which hang below it,
+     * but for the frames and the block made of the root task's memory, which hang below it,
      * and those to the boot pool and its objects, which hang below the pool's node;
      * revoking below BOOT_CAP_POOL takes what was allocated through it and not these.
      */
@@ -99,7 +106,7 @@ struct thread *boot_create_root(void)
         [BOOT_CAP_TIME] = cap_to_time(0, TIME_UNITS, RIGHT_W | RIGHT_X),
     };
     for (unsigned i = BOOT_CAP_NULL + 1; i < BOOT_CAP_COUNT; i++) {
-        if (i == BOOT_CAP_ROOT_RAM) {
+        if (i == BOOT_CAP_ROOT_RAM || i == BOOT_CAP_POOL_RAM) {
             continue;
         }
         bool pooled = i == BOOT_CAP_CAPTABLE || i == BOOT_CAP_PROCESS || i == BOOT_CAP_THREAD ||

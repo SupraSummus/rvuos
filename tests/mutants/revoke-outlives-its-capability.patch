@@ -1,7 +1,6 @@
-A revoke that takes its caller's process or table goes on, and stops for an interrupt as any other does,
-but the caller cannot make the call again,
-so where the interrupt lands decides how far the revoke gets, and the host and QEMU part ways;
-a stopped call leaves its caller running and holding its table.
+A revoke that took the capability it was made through goes on,
+so made again after a stop it fails, where a revoke never stopped went on to the end.
+A call that stops leaves its caller the capability it was made through.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
 Report: a call stopped where its caller cannot make it again
@@ -14,7 +13,7 @@ diff --git a/kernel/cap.c b/kernel/cap.c
           * the caller could not make the call again, so an interrupt must not decide how far it got.
           */
 -        if (thread_table(current) == NULL || through->type == CAP_NONE) {
-+        if ((thread_table(current) == NULL && 0) || through->type == CAP_NONE) {
++        if (thread_table(current) == NULL || through == NULL) {
              return true;
          }
          if (root->child != 0 && cap_stop_here(preempt)) {

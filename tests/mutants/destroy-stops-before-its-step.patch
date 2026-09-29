@@ -7,7 +7,7 @@ Report: a call was preempted before it took anything away
 diff --git a/kernel/pool.c b/kernel/pool.c
 --- a/kernel/pool.c
 +++ b/kernel/pool.c
-@@ -104,6 +104,9 @@ bool pool_destroy(struct pool *pool, struct cap *keep, bool preempt)
+@@ -97,6 +97,9 @@ bool pool_destroy(struct pool *pool, bool preempt)
       */
      while (pool->last != pool_base(pool)) {
          LOOP_PAID(pool_destroy, object, "an object of the pool, newest first");
