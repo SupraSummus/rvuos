@@ -1783,6 +1783,22 @@ hands its place over to a successor, which destroys the pool the root task lived
 and ends in a deliberate fault the successor makes,
 and `tests/run.sh` checks that the logger carried the transcript out
 before the halt did, by where the halt's line falls in it.
+
+`make escape` boots the escape-attempt suite,
+one root task per scenario, each attempting a single breach of its confinement.
+A fault stops the machine, so a scenario tests one thing and halts on it;
+`tests/escape.sh` checks that the fault is the one expected
+and that the scenario did not reach the line it prints only when the escape works.
+So far it executes an instruction from the no-execute data region,
+which faults on the fetch with mcause 1,
+and reads a machine-mode CSR from user mode,
+which is an illegal instruction, mcause 2;
+`TODO.md` lists the scenarios still to add.
+The fuzzer's whole attack surface is a system call's registers,
+so this suite is what runs real instructions on the real core
+to check that PMP and the privilege boundary confine a process;
+it runs on the target alone, like `make test`, never on the host.
+
 The replay driver carries the log to the UART after every record,
 by polling and with no system call, so the transcripts stay the same on both builds,
 and the host writes the same mark into the header after every event;
