@@ -267,6 +267,16 @@ static void check_process(const struct process *proc)
             if (t->type != CAP_NONE && ranges_overlap(s->a, s->b, t->a, t->b)) {
                 fail("process has overlapping region slots", v2p(proc), i, j);
             }
+#if PMP_SPLIT_STORE_AS_READ
+            /* See PMP_SPLIT_STORE_AS_READ in board.h. */
+            if (t->type != CAP_NONE) {
+                const struct cap *lower = s->a < t->a ? s : t, *upper = s->a < t->a ? t : s;
+                if ((uint64_t)lower->a + lower->b == upper->a && (lower->rights & RIGHT_W) &&
+                    (upper->rights & RIGHT_R) && !(upper->rights & RIGHT_W)) {
+                    fail("process may write right below a region it may only read", v2p(proc), i, j);
+                }
+            }
+#endif
         }
     }
 

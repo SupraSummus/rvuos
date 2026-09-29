@@ -7,7 +7,6 @@ Open work only; an item leaves this file in the commit that finishes it.
 - Boot from flash, and with it whether the ROM can load the image
   straight from offset 0 or Espressif's second-stage bootloader must run first,
   and whether execute-in-place goes through a cache the kernel must control.
-- Erratum DIG-694 on misaligned accesses across PMP regions.
 - What the ROM overwrites in RAM on a reset, for open decision 12.
 - Try user mode on the rest of the user-level CSR space, here and on QEMU;
   only the CSRs the TRM lists and `0x800` to `0x802` were tried.
@@ -88,15 +87,20 @@ Open work only; an item leaves this file in the commit that finishes it.
   `make escape` runs one root task per scenario, each expected to fault a specific way;
   see `user/escape-*.c` and `tests/escape.sh`.
   It has execute-from-data, an instruction access fault,
-  and a machine-CSR read from user mode, an illegal instruction, so far.
+  a machine-CSR read from user mode, an illegal instruction,
+  a misaligned load past the data region, a load access fault,
+  and a misaligned store from a region the program may write into one it may only read,
+  a store access fault, so far.
   Still to add: jump into the kernel and `mret` from user mode,
   and a stack into kernel memory, a store access fault.
-  A misaligned access belongs here too,
-  but QEMU's `virt` may emulate one rather than fault,
-  so decide what it must show before adding it, and mind the ESP32-C6's erratum DIG-694.
   Since a fault stops only its thread, one root task could run every scenario in a thread of its own
   and hear each fault through its watch, one boot for the suite;
   it would read the cause from the log, or through an operation open decision 21 leaves out.
+- The ESP32-C6's install rule, `PMP_SPLIT_STORE_AS_READ`, is checked only by `escape-misaligned-store` on the board.
+  The host shares QEMU's layout, where the log touches the code and the data the input,
+  so no harness can have the flag, no mutant reaches the rule,
+  and its self-check runs only under tracing, which nothing does on the board yet.
+  A host machine with the flag needs a layout that keeps those apart.
 - CBMC on the halves `OP_UNTYPED_SPLIT` makes, `OP_FRAME_CARVE` and the NAPOT encoding.
 - One layout header consumed by C, the linker scripts and
   `tests/differential.py`.
@@ -180,7 +184,7 @@ Open work only; an item leaves this file in the commit that finishes it.
 - The root task is granted one block of free RAM,
   so what lies between the blocks is unused:
   about 2.8 MiB on QEMU, where it does not matter, and 28 KiB on the ESP32-C6.
-  So is the root task's own memory past the boot pool, 60 KiB on QEMU and 24 KiB on the ESP32-C6,
+  So is the root task's own memory past the boot pool, 60 KiB on QEMU and 20 KiB on the ESP32-C6,
   until the root task is gone; open decision 20 in `DESIGN.md`.
   Grant the rest as further blocks, or lay the board out afresh,
   when a board's RAM gets tight.

@@ -27,6 +27,9 @@
 #define FREE_RAM_BASE  U32(0x80400000)
 #define FREE_RAM_SIZE  U32(0x00400000)
 
+/* A misaligned store is checked for writing throughout; see the ESP32-C6's board.h. */
+#define PMP_SPLIT_STORE_AS_READ 0
+
 /*
  * The UART: a 16550 at UART_BASE, raising PLIC source 10.
  * It is the root task's, granted as BOOT_CAP_UART with its line;

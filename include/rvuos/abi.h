@@ -36,7 +36,7 @@
 #define KERR_INVALID_ARG  4
 #define KERR_NO_MEMORY    5 /* pool exhausted, or an Untyped with something made of it */
 #define KERR_SLOT_IN_USE  6 /* destination slot already holds a capability */
-#define KERR_OVERLAP      7 /* region overlaps one installed in the same process; line already bound */
+#define KERR_OVERLAP      7 /* region overlaps or, on the ESP32-C6, touches one installed in the same process; line already bound */
 #define KERR_LIMIT        8 /* a fixed kernel limit was hit, such as PMP entries */
 #define KERR_STATE        9 /* the object is not in a state that allows this */
 
@@ -260,7 +260,8 @@
  * a3 = rights to install, a subset of the frame's rights.
  * RIGHT_W without RIGHT_R is rejected with KERR_INVALID_ARG,
  * because PMP reserves that encoding.
- * Fails with KERR_OVERLAP if the range overlaps another region installed in the same process.
+ * Fails with KERR_OVERLAP if the range overlaps another region installed in the same process,
+ * or, on the ESP32-C6, a writable one would end where a readable but not writable one begins.
  * The installed region is a child of the Frame capability in the derivation tree:
  * revoking below that capability uninstalls it.
  */

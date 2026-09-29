@@ -43,6 +43,14 @@ escape-csrr)
     breached="escape: read a machine csr"
     fault="mcause=0x00000002 mepc=$addr" # whatever mtval holds
     ;;
+escape-misaligned-load)
+    breached="escape: read past the data region"
+    fault="mcause=0x00000005 mepc=$addr" # mtval is the board's
+    ;;
+escape-misaligned-store)
+    breached="escape: stored past the lower half"
+    fault="mcause=0x00000007 mepc=$addr" # mtval is the board's
+    ;;
 *)
     fail "unknown scenario"
     ;;

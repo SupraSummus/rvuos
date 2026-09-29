@@ -44,6 +44,15 @@ static void rebuild_pmp(struct process *proc)
     }
 }
 
+#if PMP_SPLIT_STORE_AS_READ
+/* Whether a misaligned store from the end of the lower region writes into the upper; see board.h. */
+static bool store_reaches(uint32_t base, uint32_t size, uint8_t rights, uint32_t above, uint8_t above_rights)
+{
+    return (rights & RIGHT_W) && (above_rights & (RIGHT_R | RIGHT_W)) == RIGHT_R &&
+           (uint64_t)base + size == above;
+}
+#endif
+
 int process_install(struct process *proc, unsigned slot,
                     uint32_t base, uint32_t size, uint8_t rights, struct cap *parent)
 {
@@ -66,6 +75,12 @@ int process_install(struct process *proc, unsigned slot,
             if (ranges_overlap(base, size, s->a, s->b)) {
                 return KERR_OVERLAP;
             }
+#if PMP_SPLIT_STORE_AS_READ
+            if (store_reaches(base, size, rights, s->a, s->rights) ||
+                store_reaches(s->a, s->b, s->rights, base, rights)) {
+                return KERR_OVERLAP;
+            }
+#endif
             installed++;
         }
     }

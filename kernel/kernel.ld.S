@@ -4,7 +4,7 @@
  * see layout.h for the addresses.
  *
  * The kernel starts at RAM_BASE, where the board enters in machine mode,
- * and owns everything up to its log, which ends where the user code begins.
+ * and owns everything up to its log, which ends where the user code begins or a block below.
  * The user program's code is placed at USER_CODE_BASE;
  * its data and stack region lives at USER_DATA_BASE.
  */

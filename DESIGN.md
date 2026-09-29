@@ -186,6 +186,10 @@ Consequences that shape the design:
   Two regions that touch share a boundary
   that no single load, store or instruction fetch may cross;
   the creator lays out a process so that nothing straddles one.
+  A core may split a misaligned access and check each part on its own, though, and both boards do,
+  so a misaligned load across two readable regions may go through,
+  and a store that faults may leave its first part written.
+  The ESP32-C6 checks the second part for the wrong kind of access; see "Boards".
 - **The CSRs are WARL and may be hardwired.**
   RP2350 fixes three entries to its ROM and peripheral ranges.
   The probe at boot writes each entry's address and mode and reads them back,
@@ -683,6 +687,11 @@ A region cannot be installed writable but not readable:
 PMP reserves the encoding R=0, W=1,
 QEMU quietly drops the write right,
 and hardware may do anything.
+On the ESP32-C6, `PMP_SPLIT_STORE_AS_READ` in its `board.h`,
+a region the process may write may not end where one it may read but not write begins,
+whichever is installed second, since a misaligned store would write the upper one; see "Boards".
+The overlap check walks the regions already, so the rule costs nothing more.
+It is the board's, as its layout is; QEMU and the host build have neither.
 
 How a process's memory is laid out is entirely the creator's business.
 The kernel does not know what a code segment or a stack is;
@@ -1356,6 +1365,7 @@ A board is the files of `kernel/board/<board>/` and `user/board/<board>/`,
 chosen with `make BOARD=<board>`:
 `board.h`, where RAM, the root task, the console and the timer's registers lie,
 how many interrupt lines there are and which mcause the controller raises,
+and whether the core checks a misaligned store's second word for reading, `PMP_SPLIT_STORE_AS_READ`,
 which `kernel/layout.h` and both linker scripts read;
 `board.c`, what the board needs before anything else and the CSRs it sets back for each process;
 `timer.c`, which starts the timer `kernel/clint.c` drives;
@@ -1399,6 +1409,18 @@ Measured on the chip: sixteen PMP entries, all unlocked after the ROM,
 a four-byte grain, TOR, NAPOT with an entry of RAM's size, `mtval` on access faults,
 PMA entries all zero, which leave every range its default attributes,
 and machine interrupts taken in user mode whatever `mstatus.MIE` says.
+
+A misaligned access that crosses a word is split in two,
+and the second word is checked for writing if a store comes next and for reading otherwise.
+So a load followed at once by a store faults wherever the two regions differ in rights,
+and faults again when resumed: Espressif's erratum DIG-694, which lists nothing more.
+And a store followed by anything else writes up to three bytes of a region above it
+that the process may read but not write, and raises nothing.
+Fetches, AMOs, and parts that land where the process may not read fault as they should;
+a fault on the second word reports the access's address plus four in `mtval`.
+So the install keeps such regions apart, see "Region slots",
+and the layout leaves a block between the log and the code and one between the data and the input.
+A program compiled for strict alignment meets neither half.
 
 ## Bounded work
 
@@ -1565,6 +1587,8 @@ from address to access rights:
 no byte is accessible with a right its slot does not grant,
 and every byte in a slot is accessible with the slot's rights.
 For the running process the same holds for the CSRs actually written.
+On the ESP32-C6 no process has a region it may write ending where one it may only read begins;
+see "Region slots".
 
 **Authority confinement.**
 Every capability in every table names either
@@ -1871,8 +1895,10 @@ so the machine stops with nothing left to run, and a scenario tests one thing;
 and that the scenario did not reach the line it prints only when the escape works.
 So far it executes an instruction from the no-execute data region,
 which faults on the fetch with mcause 1,
-and reads a machine-mode CSR from user mode,
-which is an illegal instruction, mcause 2;
+reads a machine-mode CSR from user mode,
+which is an illegal instruction, mcause 2,
+loads a misaligned word across the end of the data region, mcause 5,
+and stores one from a region it may write into one it may only read, mcause 7;
 `TODO.md` lists the scenarios still to add.
 The fuzzer's whole attack surface is a system call's registers,
 so this suite is what runs real instructions on the real core
@@ -2166,7 +2192,8 @@ until the maintainer decides otherwise.
     and start a fresh one behind it, at twice the memory.
     Decide with the first board, whose reset behaviour decides what survives.
     The ESP32-C6 parks on a halt and keeps RAM,
-    but what its ROM overwrites on the way back in is not measured yet.
+    but what its ROM overwrites on the way back in is not measured yet;
+    bytes one run wrote at `0x40838000` were still there after the reset and the next load.
 
 13. **Access permission management on the ESP32-C6.**
     Working default: the kernel turns the APM filters off at boot,

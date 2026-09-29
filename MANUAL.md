@@ -206,13 +206,15 @@ Memory map:
 |---|---|---|
 | `0x20001C08` | 8 B | the CLINT's `UTIME`, a read-only copy of `mtime` at the CPU clock, through `BOOT_CAP_CLOCK` |
 | `0x6000F000` | 256 B | USB Serial/JTAG controller registers, granted to the root task |
-| `0x40800000` to `0x4081F000` | just under 128 KiB | kernel code, data and stack |
-| `0x4081F000` | 4 KiB | the kernel log: a 32-byte header and the ring |
+| `0x40800000` to `0x4081E000` | 120 KiB | kernel code, data and stack |
+| `0x4081E000` | 4 KiB | the kernel log: a 32-byte header and the ring |
+| `0x4081F000` | 4 KiB | unused, so that the log does not touch the code |
 | `0x40820000` | 128 KiB | the root task's memory, granted to it as an Untyped with all rights, which has made the four ranges below and makes nothing more |
 | `0x40820000` | 64 KiB | root task code, read and execute |
 | `0x40830000` | 32 KiB | root task data and stack, read and write |
-| `0x40838000` | 4 KiB | input region, read only; nothing fills it yet |
-| `0x40839000` | 4 KiB | the boot pool |
+| `0x40838000` | 4 KiB | unused, so that the data does not touch the input |
+| `0x40839000` | 4 KiB | input region, read only; nothing fills it yet |
+| `0x4083A000` | 4 KiB | the boot pool |
 | `0x40840000` | 256 KiB | free RAM, granted to the root task as an Untyped with all rights |
 
 Interrupt lines:
@@ -226,6 +228,11 @@ A device's interrupt reaches its `Irq` only while the device itself has it enabl
 in the USB Serial/JTAG controller's case in its `INT_ENA` register.
 The tick is 1 kHz here too, measured against the chip's 16 MHz system timer at boot.
 The PMP has sixteen entries and a four-byte grain.
+Keep memory accesses aligned, as clang does unless told otherwise.
+A misaligned load followed at once by a store into a region with other rights faults,
+and faults again when resumed (Espressif's erratum DIG-694); a `nop` between them avoids it.
+A misaligned store would write past a writable region into a read-only one right above it,
+which is why `OP_PROCESS_INSTALL` does not let the two touch.
 The console is the controller's CDC-ACM port:
 bytes written to its FIFO leave as one USB packet when `WR_DONE` is written,
 and only while a host has the port open.
@@ -991,7 +998,7 @@ and may fail, with what it already revoked staying revoked.
 | 4 | `KERR_INVALID_ARG` | an argument is out of range or breaks a rule stated below |
 | 5 | `KERR_NO_MEMORY` | the pool has no room for the object, or the Untyped has made something already |
 | 6 | `KERR_SLOT_IN_USE` | the destination slot already holds a capability |
-| 7 | `KERR_OVERLAP` | a region overlaps another installed in the same process, or the line is already bound |
+| 7 | `KERR_OVERLAP` | a region overlaps another installed in the same process, or on the ESP32-C6 touches one as `OP_PROCESS_INSTALL` says, or the line is already bound |
 | 8 | `KERR_LIMIT` | a fixed kernel limit was hit, such as the PMP entry count |
 | 9 | `KERR_STATE` | the object is not in a state that allows this |
 
@@ -1154,7 +1161,8 @@ Both need `RIGHT_W` on the process.
 The rights must be a non-empty subset of the frame's (`KERR_NO_RIGHTS`);
 write without read is `KERR_INVALID_ARG`;
 an occupied region slot is `KERR_SLOT_IN_USE`;
-overlap with another region in this process is `KERR_OVERLAP`;
+overlap with another region in this process is `KERR_OVERLAP`,
+and so, on the ESP32-C6, is a writable region ending where a readable but not writable one begins;
 too few PMP entries is `KERR_LIMIT`.
 The installed region hangs below the frame in the derivation tree,
 so `OP_CAP_REVOKE` on that capability's slot, or on any slot above it, uninstalls it.

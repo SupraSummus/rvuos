@@ -11,11 +11,12 @@
  * While it loads, the ROM keeps its own buffers, stack and data from 0x4086ad08 up,
  * so everything the image carries must lie below that;
  * the kernel takes the whole of RAM once it runs.
- * The kernel owns [RAM_BASE, USER_CODE_BASE).
+ * The kernel owns [RAM_BASE, USER_CODE_BASE), but for the block below the root task's code.
  * The root task's memory follows, one block holding its code, data and input regions
  * and the boot pool its kernel objects live in,
  * and the upper half of RAM is handed to the root task as free RAM.
- * Each is a block aligned to its own size; what lies in none of them is left unused.
+ * Each is a block aligned to its own size; what lies in none of them is left unused,
+ * such as the blocks that keep the log off the code and the data off the input.
  */
 #define RAM_BASE       U32(0x40800000)
 #define RAM_SIZE       U32(0x00080000)
@@ -26,11 +27,18 @@
 #define USER_DATA_BASE U32(0x40830000)
 #define USER_DATA_SIZE U32(0x00008000)
 /* Nothing loads replay input here yet; the region keeps the root task's grants the same. */
-#define INPUT_BASE     U32(0x40838000)
+#define INPUT_BASE     U32(0x40839000)
 #define INPUT_SIZE     U32(0x00001000)
-#define BOOT_POOL_BASE U32(0x40839000)
+#define BOOT_POOL_BASE U32(0x4083A000)
 #define FREE_RAM_BASE  U32(0x40840000)
 #define FREE_RAM_SIZE  U32(0x00040000)
+
+/*
+ * A misaligned store checks its second word for reading unless a store follows it,
+ * so it writes into a read-only region that begins where a writable one ends.
+ * The install keeps such regions apart; see DESIGN.md, "Boards".
+ */
+#define PMP_SPLIT_STORE_AS_READ 1
 
 /*
  * The console: the USB Serial/JTAG controller,

@@ -83,9 +83,9 @@ $(error unknown BOARD '$(BOARD)'; the boards are qemu and esp32c6)
 endif
 
 # The escape-attempt suite: one root task per scenario, built for whichever board.
-# Each program uses only the code, data and debug capabilities every board grants,
+# Each program uses only boot capabilities every board grants,
 # so the same scenarios run on QEMU and on the ESP32-C6.
-ESCAPE_PROGRAMS := escape-execute-data escape-csrr
+ESCAPE_PROGRAMS := escape-execute-data escape-csrr escape-misaligned-load escape-misaligned-store
 
 .PHONY: all clean run test escape host-harnesses host-test fuzz corpus-merge qemu-replay mutants mutants-refresh check
 
