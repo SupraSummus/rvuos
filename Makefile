@@ -67,6 +67,8 @@ ifeq ($(BOARD),qemu)
 USER_PROGRAMS := init fuzzdrv
 IMAGE         := elf
 RUN_INIT      := $(QEMU) $(QEMUFLAGS) -bios $(BUILD)/kernel-init.elf
+# The escape suite boots one image at a time; the runner appends it to this prefix.
+ESCAPE_PREFIX := $(QEMU) $(QEMUFLAGS) -bios
 else ifeq ($(BOARD),esp32c6)
 # The replay driver's layout is QEMU's, see rvuos/replay.h, so only the demo is built.
 USER_PROGRAMS := init
@@ -75,11 +77,17 @@ PORT          ?= /dev/ttyACM0
 # The runner imports esptool, so it runs under the Python the esptool command runs under.
 ESPTOOL_PYTHON ?= $(or $(shell sed -n '1s/^\#!//p' "$$(command -v $(ESPTOOL))" 2>/dev/null),python3)
 RUN_INIT      := $(ESPTOOL_PYTHON) tools/esp32c6-run.py --port $(PORT) $(BUILD)/kernel-init.bin
+ESCAPE_PREFIX := $(ESPTOOL_PYTHON) tools/esp32c6-run.py --port $(PORT)
 else
 $(error unknown BOARD '$(BOARD)'; the boards are qemu and esp32c6)
 endif
 
-.PHONY: all clean run test host-harnesses host-test fuzz corpus-merge qemu-replay mutants mutants-refresh check
+# The escape-attempt suite: one root task per scenario, built for whichever board.
+# Each program uses only the code, data and debug capabilities every board grants,
+# so the same scenarios run on QEMU and on the ESP32-C6.
+ESCAPE_PROGRAMS := escape-execute-data escape-csrr
+
+.PHONY: all clean run test escape host-harnesses host-test fuzz corpus-merge qemu-replay mutants mutants-refresh check
 
 # Pattern rules would delete the objects they chain through,
 # so every build compiled the kernel from scratch.
@@ -155,6 +163,14 @@ run: $(BUILD)/kernel-init.$(IMAGE)
 # Boot the root task of user/init.c and check its transcript.
 test: $(BUILD)/kernel-init.$(IMAGE)
 	tests/run.sh "$(RUN_INIT)" $(PMP_MAX_ENTRIES)
+
+# The escape-attempt suite: boot each scenario and check the hardware faults it
+# as its runner expects. PMP and privilege confine a process, so this runs on the
+# target like `make test`, never on the host. See DESIGN.md, "Verification", and TODO.md.
+escape: $(foreach p,$(ESCAPE_PROGRAMS),$(BUILD)/kernel-$(p).$(IMAGE))
+	for p in $(ESCAPE_PROGRAMS); do \
+		tests/escape.sh "$(ESCAPE_PREFIX) $(BUILD)/kernel-$$p.$(IMAGE)" $$p || exit 1; \
+	done
 
 # Host build: the kernel's logic compiled natively,
 # with a hardware shim and a libFuzzer harness.
@@ -260,7 +276,7 @@ qemu-replay: $(BUILD)/kernel-fuzzdrv.elf $(HOST_BUILD)/fuzz
 	tests/differential.py --qemu "$(QEMU) $(QEMUFLAGS)" $(if $(REPLAY_JOBS),--jobs $(REPLAY_JOBS)) \
 		--kernel $(BUILD)/kernel-fuzzdrv.elf --host $(HOST_BUILD)/fuzz tests/seeds tests/corpus
 
-check: test host-test qemu-replay
+check: test escape host-test qemu-replay
 
 clean:
 	rm -rf $(BUILD)

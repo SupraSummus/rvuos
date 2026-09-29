@@ -101,11 +101,19 @@ Beyond the demo:
   The replay driver's processes hold four regions each once set up,
   so a harness with a budget of six would reach the limit on the third install
   and still run the prologue.
-- Escape-attempt suite, under QEMU and on the ESP32-C6,
-  whose PMP is what confines a process there:
-  one user program per scenario, expected outcome a specific fault.
-  Execute from data, jump into the kernel, `csrr` and `mret` from user mode,
-  misaligned access, stack into kernel memory.
+- Escape-attempt suite: more scenarios.
+  `make escape` runs one root task per scenario, each expected to fault a specific way;
+  see `user/escape-*.c` and `tests/escape.sh`.
+  It has execute-from-data, an instruction access fault,
+  and a machine-CSR read from user mode, an illegal instruction, so far.
+  Still to add: jump into the kernel and `mret` from user mode,
+  and a stack into kernel memory, a store access fault.
+  A misaligned access belongs here too,
+  but QEMU's `virt` may emulate one rather than fault,
+  so decide what it must show before adding it, and mind the ESP32-C6's erratum DIG-694.
+  Run the suite on the ESP32-C6 as well, whose PMP is what confines a process there;
+  the scenarios use only the code, data and debug capabilities every board grants,
+  but none has run on the chip yet.
 - CBMC on the halves `OP_UNTYPED_SPLIT` makes, `OP_FRAME_CARVE` and the NAPOT encoding.
 - One layout header consumed by C, the linker scripts and
   `tests/differential.py`.
