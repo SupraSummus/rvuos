@@ -1379,6 +1379,10 @@ reads returning zero and writes dropped;
 ESP-IDF turns them off at startup too.
 PMP is what confines a process, so rvuos loses nothing;
 what they could still do is open decision 13.
+The core has user-mode traps, the N extension,
+and the ROM leaves `mideleg` at `0x111`,
+which delegates the user software, timer and external interrupts to a handler in user mode;
+the kernel clears it, so every trap is its own.
 Measured on the chip: sixteen PMP entries, all unlocked after the ROM,
 a four-byte grain, TOR, NAPOT with an entry of RAM's size, `mtval` on access faults,
 PMA entries all zero, which leave every range its default attributes,

@@ -9,8 +9,6 @@ Open work only; an item leaves this file in the commit that finishes it.
   and whether execute-in-place goes through a cache the kernel must control.
 - Erratum DIG-694 on misaligned accesses across PMP regions.
 - What the ROM overwrites in RAM on a reset, for open decision 12.
-- The chip resets with `mideleg` at `0x111`, delegating interrupts 0, 4 and 8 to user mode.
-  Nothing raises them today, but the kernel should clear it at boot.
 - The GPIO CSRs, `0x803` to `0x805`, lie in the user-mode CSR range.
   If user mode can reach them, every process drives eight pads past PMP; check on the chip.
 - The counter rate is measured over one tick at boot,

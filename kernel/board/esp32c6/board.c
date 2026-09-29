@@ -11,11 +11,17 @@
  * its peripheral reads return zero and its writes are dropped, with no fault to show for it.
  * PMP is what confines a process on rvuos, so the filters go off as well,
  * as ESP-IDF's startup turns them off; see DESIGN.md, "Boards".
+ *
+ * The core has user-mode traps, the N extension,
+ * and resets with mideleg at 0x111, delegating the user software, timer and external interrupts,
+ * 0, 4 and 8, to a handler in user mode that no process set up and the kernel does not switch.
+ * Every trap is the kernel's, so nothing is delegated.
  * Register addresses are those of Espressif's ESP-IDF, soc/esp32c6.
  */
 
 #include <stdint.h>
 
+#include "csr.h"
 #include "kernel.h"
 
 #define REG(addr) (*(volatile uint32_t *)(addr))
@@ -42,6 +48,8 @@
 
 void board_init(void)
 {
+    csr_write(mideleg, 0);
+
     REG(HP_APM_FUNC_CTRL) = 0;
     REG(LP_APM0_FUNC_CTRL) = 0;
     REG(LP_APM_FUNC_CTRL) = 0;
