@@ -33,7 +33,7 @@ int main(void)
     __asm__ volatile(".globl csrr_at\ncsrr_at:\n\tcsrr %0, mstatus" : "=r"(v));
 
     /* Not reached when user mode may not touch a machine CSR. */
-    puts("escape: read a machine csr\n");
+    puts("escape: breached, read a machine csr\n");
     (void)v;
     rv_halt(BOOT_CAP_DEBUG, 2);
     return 0;

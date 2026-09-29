@@ -83,19 +83,15 @@ Open work only; an item leaves this file in the commit that finishes it.
   The replay driver's processes hold four regions each once set up,
   so a harness with a budget of six would reach the limit on the third install
   and still run the prologue.
-- Escape-attempt suite: more scenarios.
+- Escape-attempt suite: one boot for the suite.
   `make escape` runs one root task per scenario, each expected to fault a specific way;
   see `user/escape-*.c` and `tests/escape.sh`.
-  It has execute-from-data, an instruction access fault,
-  a machine-CSR read from user mode, an illegal instruction,
-  a misaligned load past the data region, a load access fault,
-  and a misaligned store from a region the program may write into one it may only read,
-  a store access fault, so far.
-  Still to add: jump into the kernel and `mret` from user mode,
-  and a stack into kernel memory, a store access fault.
   Since a fault stops only its thread, one root task could run every scenario in a thread of its own
   and hear each fault through its watch, one boot for the suite;
   it would read the cause from the log, or through an operation open decision 21 leaves out.
+- Escape-attempt suite: a store to a device the kernel keeps, such as the timer's `mtimecmp`.
+  On the ESP32-C6 the kernel turns the access permission management units off,
+  so PMP alone keeps user mode off the peripherals, and no scenario reaches one.
 - The ESP32-C6's install rule, `PMP_SPLIT_STORE_AS_READ`, is checked only by `escape-misaligned-store` on the board.
   The host shares QEMU's layout, where the log touches the code and the data the input,
   so no harness can have the flag, no mutant reaches the rule,

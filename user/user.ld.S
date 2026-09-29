@@ -12,6 +12,9 @@
 
 ENTRY(_start)
 
+/* For the escape suite, see user/escape-*.c: where the kernel starts, which no program may reach. */
+__kernel_start = RAM_BASE;
+
 SECTIONS
 {
     . = USER_CODE_BASE;

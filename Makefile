@@ -85,7 +85,8 @@ endif
 # The escape-attempt suite: one root task per scenario, built for whichever board.
 # Each program uses only boot capabilities every board grants,
 # so the same scenarios run on QEMU and on the ESP32-C6.
-ESCAPE_PROGRAMS := escape-execute-data escape-csrr escape-misaligned-load escape-misaligned-store
+ESCAPE_PROGRAMS := escape-execute-data escape-jump-kernel escape-csrr escape-mret \
+                   escape-misaligned-load escape-misaligned-store escape-store-kernel
 
 .PHONY: all clean run test escape host-harnesses host-test fuzz corpus-merge qemu-replay mutants mutants-refresh check
 

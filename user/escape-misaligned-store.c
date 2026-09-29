@@ -86,7 +86,7 @@ int main(void)
     __asm__ volatile(".globl store_at\nstore_at:\n\tsw %0, 0(%1)\n\tnop" : : "r"(0x5a5a5a5au), "r"(addr) : "memory");
 
     /* Not reached when the part in the upper half faults. */
-    puts("escape: stored past the lower half\n");
+    puts("escape: breached, stored past the lower half\n");
     rv_halt(BOOT_CAP_DEBUG, 2);
     return 0;
 }

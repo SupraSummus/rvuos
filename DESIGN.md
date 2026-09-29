@@ -1893,13 +1893,12 @@ A fault stops the thread that makes it, and a scenario's root task has one,
 so the machine stops with nothing left to run, and a scenario tests one thing;
 `tests/escape.sh` checks that the fault is the one expected
 and that the scenario did not reach the line it prints only when the escape works.
-So far it executes an instruction from the no-execute data region,
-which faults on the fetch with mcause 1,
-reads a machine-mode CSR from user mode,
-which is an illegal instruction, mcause 2,
+It executes from the no-execute data region and jumps into the kernel, mcause 1,
+reads a machine-mode CSR from user mode and runs `mret` there, mcause 2,
 loads a misaligned word across the end of the data region, mcause 5,
-and stores one from a region it may write into one it may only read, mcause 7;
-`TODO.md` lists the scenarios still to add.
+stores one from a region it may write into one it may only read, mcause 7,
+and stores into the kernel, mcause 7 too.
+The user linker script says where the kernel starts, for these scenarios alone.
 The fuzzer's whole attack surface is a system call's registers,
 so this suite is what runs real instructions on the real core
 to check that PMP and the privilege boundary confine a process;

@@ -30,39 +30,28 @@ fail() {
     exit 1
 }
 
-# Each scenario says where its escape is as it reaches it, "... at 0x..., expecting a fault";
-# the fault the hardware raises must name that address,
-# and the line the scenario prints only if the escape went through must not appear.
+# Each scenario says where its escape is as it reaches it, "... at 0x..., expecting a fault",
+# and one that reaches memory names that address just before, "... 0x... at 0x...":
+# the fault must name the first in mepc, and the second in mtval where the case asks.
+# A scenario prints "escape: breached ..." only if the escape went through.
 addr=$(sed -n 's/.*escape: .* at \(0x[0-9a-f]*\), expecting a fault.*/\1/p' "$log" | head -1)
+target=$(sed -n 's/.*escape: .* \(0x[0-9a-f]*\) at 0x[0-9a-f]*, expecting a fault.*/\1/p' "$log" | head -1)
 case "$scenario" in
-escape-execute-data)
-    breached="escape: executed from data"
-    fault="mcause=0x00000001 mepc=$addr mtval=$addr"
-    ;;
-escape-csrr)
-    breached="escape: read a machine csr"
-    fault="mcause=0x00000002 mepc=$addr" # whatever mtval holds
-    ;;
-escape-misaligned-load)
-    breached="escape: read past the data region"
-    fault="mcause=0x00000005 mepc=$addr" # mtval is the board's
-    ;;
-escape-misaligned-store)
-    breached="escape: stored past the lower half"
-    fault="mcause=0x00000007 mepc=$addr" # mtval is the board's
-    ;;
-*)
-    fail "unknown scenario"
-    ;;
+escape-execute-data | escape-jump-kernel) fault="mcause=0x00000001 mepc=$addr mtval=$addr" ;;
+escape-csrr | escape-mret) fault="mcause=0x00000002 mepc=$addr" ;; # whatever mtval holds
+escape-misaligned-load) fault="mcause=0x00000005 mepc=$addr" ;; # mtval is the board's
+escape-misaligned-store) fault="mcause=0x00000007 mepc=$addr" ;; # mtval is the board's
+escape-store-kernel) fault="mcause=0x00000007 mepc=$addr mtval=$target" ;;
+*) fail "unknown scenario" ;;
 esac
 
 grep -q 'rvuos: machine mode up' "$log" || fail "kernel did not boot"
 grep -q 'rvuos: halting, the log follows' "$log" || fail "the halt did not write the log out"
 grep -q ': FAILED' "$log" && fail "a setup step failed before the escape"
 [ -n "$addr" ] || fail "the scenario did not reach the escape"
-grep -q "$breached" "$log" && fail "the hardware did not stop the escape"
+grep -q 'escape: breached' "$log" && fail "the hardware did not stop the escape"
 grep -q 'user fault' "$log" || fail "the escape did not fault"
-grep -q "$fault" "$log" || fail "the fault was not the expected $fault"
+grep -Eq "$fault([[:space:]]|\$)" "$log" || fail "the fault was not the expected $fault"
 grep -q 'no runnable thread' "$log" || fail "the machine did not stop for want of a thread after the fault"
 [ "$status" -eq 5 ] || fail "expected exit status 5 (no runnable thread after the fault), got $status"
 

@@ -43,7 +43,7 @@ int main(void)
     enter();
 
     /* Not reached when PMP marks the data region no-execute. */
-    puts("escape: executed from data\n");
+    puts("escape: breached, executed from data\n");
     rv_halt(BOOT_CAP_DEBUG, 2);
     return 0;
 }

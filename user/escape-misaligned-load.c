@@ -44,7 +44,7 @@ int main(void)
     __asm__ volatile(".globl load_at\nload_at:\n\tlw %0, 0(%1)" : "=r"(v) : "r"(addr) : "memory");
 
     /* Not reached when PMP stops the part past the region. */
-    puts("escape: read past the data region ");
+    puts("escape: breached, read past the data region ");
     rv_put_hex(BOOT_CAP_DEBUG, v);
     puts("\n");
     rv_halt(BOOT_CAP_DEBUG, 2);
