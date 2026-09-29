@@ -28,6 +28,12 @@ void kmain(void)
         kpanic("need at least four PMP entries");
     }
 
+    /*
+     * An account counts in the counter's counts, which the ESP32-C6 measures here,
+     * so the timer starts before the root thread's account is filled.
+     * Machine mode runs with MIE clear, so its first tick waits for the mret.
+     */
+    timer_init();
     struct thread *root = boot_create_root();
     sched_start(root);
     process_activate(thread_process(root));
@@ -39,7 +45,6 @@ void kmain(void)
      * are always taken there, so the tick runs from the first instruction.
      * Every device line starts masked and stays so until an Irq is armed on it.
      */
-    timer_init();
     irq_init();
     csr_clear(mstatus, MSTATUS_MPP_MASK | MSTATUS_MPIE);
     trap_return(&root->frame);

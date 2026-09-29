@@ -8,7 +8,7 @@ Report: the ticks of a turn were not charged to its thread
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -234,7 +234,6 @@ static struct thread *next_turn(void)
+@@ -289,7 +289,6 @@ static struct thread *next_turn(uint32_t offset)
      struct thread *t = p2v(*head);
      ring_remove(head, t);
      t->queue = QUEUE_NONE;

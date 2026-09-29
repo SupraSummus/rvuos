@@ -14,9 +14,11 @@ so everything since has run under QEMU only and has yet to pass on the chip:
   "root: timer ok" and "root: period ok"
   need its CLINT to drop the timer's level when `mtimecmp` moves past `mtime`,
   and "root: tickless ok" needs a trap to take more than eight reads of `UTIME` there.
-- Units of time: "root: units ok", "root: unbind ok", "root: rebind ok" and "root: spare ok".
-  The first and the last compare spin counts within a factor of two, which QEMU's instruction count makes deterministic,
-  and the last needs the stall for an account to reach a tick to wake there as it does for a timer line.
+- Units of time: "root: units ok", "root: unbind ok", "root: rebind ok", "root: spare ok" and "root: charge ok".
+  The first and the fourth compare spin counts within a factor of two, which QEMU's instruction count makes deterministic,
+  and the fourth needs the stall for an account to reach a tick to wake there as it does for a timer line.
+  The last needs a change of turn to read the counter there, and the dodger to sleep across the tick,
+  which it does only if waking it takes less than a tenth of a tick.
 - The clock: "root: clock ok" needs user mode to read `UTIME`,
   and "root: period ok" needs the tick to keep pace with the counter there too.
 - The handover: "root: handover ok"
@@ -131,6 +133,11 @@ Beyond the demo:
   A call that stops without putting its thread back on the `ecall`
   the host takes as finished, and no host check sees it;
   `make qemu-replay` does, by the trace line the host then lacks.
+- The host moves time a tick at a time, and under tracing every turn begins at a tick,
+  so what a turn begun within a tick pays at the tick, `turn_next`,
+  and the ticks a trap counts at once, `account_after`, run only in the demo, whose bounds are loose.
+  A demo thread held to its units that always takes over half way into the tick
+  would run its units' part only if it paid for no more than that half.
 - Once a record binds a driver thread to units, and so to time the others do not have,
   passing a record round may come back before it visited every runnable thread,
   and a record for a thread that could run is performed by another.
@@ -206,22 +213,11 @@ Beyond the demo:
   after the others have spent their accounts.
   A turn of as many ticks as the thread's units weigh would spread that over time;
   decide with the first workload that wants it, and with the turn counted from the switch below.
-- The tick charges a whole tick to the thread whose turn it is when it comes,
-  so a thread that always waits just before the tick is never charged,
-  and a turn ends on the tick grid, so it may run up to a tick past what its account held.
-  The fix keeps the ABI: count the account in the counter's counts, charged at each change of turn,
-  and let the tick the account drains be one `sched_wake_ticks` chooses, in counts;
-  `timer_count` already returns no ticks for such an interrupt,
-  and the trap would end the turn as one does whose count reaches the tick the timer was set for.
-  The timer lines and `OP_DEBUG_TICK` stay on the tick grid.
-  Under tracing, and on the host, the clock is the tick count times a tick's counts,
-  so a traced run charges by the tick as now and the transcripts still agree;
-  the charge at a switch and the early `mtimecmp` are then checked only by the demo.
-  Open decision 18 in `DESIGN.md`.
 - A trap reads the counter on entry whenever the timer is set past the next tick,
   which QEMU counts at a sixth of the cheapest system call.
-  Counting only where the count or an account is read, the timer lines' calls and a switch among them,
-  would spare it, at the price of a rule every such place has to keep.
+  Counting only where the count or an account is read, the timer lines' calls and a change of turn among them,
+  which reads the counter already to charge the turn, would spare it,
+  at the price of a rule every such place has to keep.
 - Threads cannot spend one account together, and spare time goes round by thread,
   so a group of threads shares a part of the processor only by splitting units, a sixty-fourth at least each.
   An account several threads are bound to would bring the share back; decide with the first workload that wants one.

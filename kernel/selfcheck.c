@@ -291,11 +291,11 @@ static uint32_t owed_threads, queued_threads;
 /* The units the threads the walk met are bound to. */
 static uint32_t units_seen;
 
-/* A thread's account at the count, its stamp's balance and a part for each unit every tick since, held to the cap. */
+/* A thread's account at the count, its stamp's balance and its tick's gain every tick since, held to the cap. */
 static uint32_t account_now(const struct thread *t)
 {
-    uint64_t balance = t->balance + (uint64_t)(sched_ticks - t->stamp) * thread_units(t);
-    uint32_t cap = thread_units(t) * ACCOUNT_TICKS;
+    uint64_t balance = t->balance + (uint64_t)(sched_ticks - t->stamp) * tick_gain(t);
+    uint32_t cap = account_cap(t);
     return balance > cap ? cap : (uint32_t)balance;
 }
 
@@ -309,7 +309,7 @@ static uint8_t queue_owed(const struct thread *t)
     if (t->state != THREAD_READY || t == turn || t->time.type != CAP_BOUND) {
         return QUEUE_NONE;
     }
-    if (account_now(t) >= TICK_PARTS) {
+    if (account_now(t) >= tick_parts()) {
         return QUEUE_RUN;
     }
     if (thread_spare(t)) {
@@ -360,7 +360,7 @@ static void check_thread(const struct thread *t)
     }
     units_seen += thread_units(t);
     /* Every account holds at most its cap, and so nothing without units, and was last counted no later than the count. */
-    if (t->balance > thread_units(t) * ACCOUNT_TICKS) {
+    if (t->balance > account_cap(t)) {
         fail("thread's account holds more than its cap", v2p(t), t->balance, thread_units(t));
     }
     if ((int32_t)(sched_ticks - t->stamp) < 0) {
@@ -375,8 +375,8 @@ static void check_thread(const struct thread *t)
     }
     /* One with units that waits without time reaches a tick no earlier than the release, which gives it time then. */
     if ((owed == QUEUE_SPARE || owed == QUEUE_SPENT) && thread_units(t) != 0) {
-        uint32_t missing = TICK_PARTS - account_now(t);
-        uint32_t at = sched_ticks + (missing + thread_units(t) - 1) / thread_units(t);
+        uint32_t missing = tick_parts() - account_now(t);
+        uint32_t at = sched_ticks + (missing + tick_gain(t) - 1) / tick_gain(t);
         if ((int32_t)(at - nearest_release) < 0) {
             fail("a thread's account reaches a tick before the release", v2p(t), at, nearest_release);
         }
@@ -444,7 +444,8 @@ static void check_queue(paddr_t head, uint8_t state, paddr_t waiting_on, uint8_t
  * so as many units named as units bound leaves no unit naming a thread that does not earn it.
  * The scheduler's queues hold the threads that name them, and check_thread counted those owed a place on one.
  * Something runs, so it is the running thread's turn, and its account is counted up to the count;
- * the release lies ahead of the count.
+ * under tracing the clock is the tick count alone, so the turn owes nothing from before the tick.
+ * The release lies ahead of the count.
  */
 static void check_scheduler(void)
 {
@@ -453,6 +454,9 @@ static void check_scheduler(void)
     }
     if (turn != NULL && turn->stamp != sched_ticks) {
         fail("the ticks of a turn were not charged to its thread", v2p(turn), turn->stamp, sched_ticks);
+    }
+    if (debug_trace && turn_from != 0) {
+        fail("a traced turn is charged from within a tick", turn_from, 0, 0);
     }
     if ((int32_t)(nearest_release - sched_ticks) <= 0) {
         fail("the release is for a tick already past", nearest_release, sched_ticks, 0);
@@ -508,14 +512,22 @@ static void check_wake(void)
     }
     const struct thread *t = turn;
     uint32_t balance = account_now(t);
-    bool time = balance >= TICK_PARTS;
+    bool time = balance >= tick_parts();
     bool alone = thread_spare(t) && spare_queue == 0;
     if (run_queue != 0 || (!time && !alone)) {
         fail("the timer lets a tick pass that ends the turn", wake, v2p(t), balance);
     }
-    /* On the tick before the timer's the account still has a tick in it, unless it may go on alone on spare time. */
-    if (time && !alone && (uint64_t)(wake - 1) * (TICK_PARTS - thread_units(t)) > balance - TICK_PARTS) {
-        fail("the timer lets the tick pass that drains the turn's account", wake, balance, thread_units(t));
+    /*
+     * On the tick before the timer's the account still has a tick in it, unless it may go on alone on spare time:
+     * the next tick it pays for the rest of this one, from turn_from, and gains its units, up to its cap,
+     * and every tick after costs it a tick less the gain.
+     */
+    if (time && !alone) {
+        uint32_t next = balance - COUNT_PARTS * (timer_tick_counts() - turn_from) + tick_gain(t);
+        next = next < account_cap(t) ? next : account_cap(t);
+        if (next < tick_parts() || (uint64_t)(wake - 2) * (tick_parts() - tick_gain(t)) > next - tick_parts()) {
+            fail("the timer lets the tick pass that drains the turn's account", wake, balance, thread_units(t));
+        }
     }
     if (wake > nearest_release - sched_ticks) {
         fail("the timer lets the release pass", wake, nearest_release, sched_ticks);

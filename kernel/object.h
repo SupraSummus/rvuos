@@ -8,6 +8,7 @@
 #include "rvuos/abi.h"
 #include "paddr.h"
 #include "pmp.h"
+#include "timer.h"
 #include "trap.h"
 
 /*
@@ -183,9 +184,10 @@ struct thread {
     struct cap proc;    /* CAP_HOSTED, or CAP_NONE once the process is taken */
     struct cap time;    /* CAP_BOUND, or CAP_NONE while the thread is bound to no units */
     /*
-     * Its account at the tick stamp, in TICK_PARTS parts of a tick,
-     * at most ACCOUNT_TICKS parts for each unit it earns, and so none while it earns none.
-     * It is brought up to the count only when the kernel looks at it.
+     * Its account at the tick stamp, in COUNT_PARTS parts of a count,
+     * at most ACCOUNT_TICKS ticks' counts of parts for each unit it earns, and so none while it earns none.
+     * It is brought up to the count only when the kernel looks at it,
+     * and the charges of a turn in the tick it was counted to are taken off it as that turn ends.
      */
     uint32_t balance;
     uint32_t stamp;
@@ -528,8 +530,12 @@ static inline struct obj_header *cap_object(const struct cap *cap)
 /* The running thread. */
 extern struct thread *current;
 
-/* A tick in the parts an account counts: a unit earns one every tick, and a tick of a turn costs this many. */
-#define TICK_PARTS TIME_UNITS
+/*
+ * A count of the counter in the parts an account counts:
+ * a unit earns one every count, a tick's counts of them every tick,
+ * and a count of a turn on the thread's time costs this many.
+ */
+#define COUNT_PARTS TIME_UNITS
 
 /*
  * The thread that earns each unit of time, 0 for none.
@@ -548,6 +554,26 @@ static inline uint32_t thread_units(const struct thread *t)
 static inline bool thread_spare(const struct thread *t)
 {
     return t->time.type == CAP_BOUND && (t->time.rights & RIGHT_X) != 0;
+}
+
+/* A tick in parts: what a tick of a turn with time costs, and what an account holds while its thread has time. */
+static inline uint32_t tick_parts(void)
+{
+    return COUNT_PARTS * timer_tick_counts();
+}
+
+/* The parts a thread's account gains every tick, a tick's counts for each unit it earns. */
+static inline uint32_t tick_gain(const struct thread *t)
+{
+    return thread_units(t) * timer_tick_counts();
+}
+
+/* The most a thread's account holds: a tenth of a second's worth of its units, none without. */
+static inline uint32_t account_cap(const struct thread *t)
+{
+    _Static_assert((uint64_t)TIME_UNITS * (ACCOUNT_TICKS + 1) * TICK_COUNTS_MAX <= UINT32_MAX,
+                   "the cap and a tick's gain besides fit a word");
+    return tick_gain(t) * ACCOUNT_TICKS;
 }
 
 /*
@@ -575,6 +601,13 @@ extern uint32_t nearest_release;
 
 /* The thread whose turn it is, the running one; NULL while none runs. */
 extern struct thread *turn;
+
+/*
+ * How far into the tick the turn has been charged, in counts, at most a tick's:
+ * the turn's thread owes the counts from here to where the counter is.
+ * Under tracing the clock is the tick count alone, so it is always zero.
+ */
+extern uint32_t turn_from;
 
 /*
  * How many Irqs are armed on a device's line or a timer line,
@@ -665,15 +698,16 @@ extern uint32_t trace_wake_bits;
 
 /*
  * The running thread waits.
- * Hand the processor to the next ready thread, or wait for one, or stop the machine.
+ * Charge it for the counts its turn ran,
+ * and hand the processor to the next ready thread, or wait for one, or stop the machine.
  */
 void sched_run_next(void);
 
 /*
  * The timer tick: charge the ticks that passed to the thread whose turn it is, count them,
  * fire every timer line that is due, give time again to the threads whose account reached a tick,
- * and end the running thread's turn: it goes to the back of the queue its account puts it on,
- * and the next thread has its turn.
+ * and end the running thread's turn: it is charged for the counts it ran past the tick,
+ * goes to the back of the queue its account puts it on, and the next thread has its turn.
  * OP_DEBUG_TICK calls it; the interrupt does the same through sched_count and sched_wake.
  */
 void sched_tick(uint32_t ticks);

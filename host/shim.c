@@ -137,6 +137,21 @@ uint32_t timer_counter_hz(void)
     return COUNTER_HZ;
 }
 
+uint32_t timer_tick_counts(void)
+{
+    return COUNTER_HZ / TIMER_HZ;
+}
+
+/*
+ * The host's clock is the tick count, and the scheduler asks where the counter is only untraced.
+ * Half way into the tick stands for wherever QEMU's is when the replay driver turns tracing on,
+ * so that OP_DEBUG_TRACE has an offset to clear.
+ */
+uint32_t timer_offset(void)
+{
+    return timer_tick_counts() / 2;
+}
+
 /* The worst case: every preemptible call stops after its first step. */
 bool intr_pending(void)
 {
@@ -259,6 +274,7 @@ struct thread *host_boot(void)
     spare_queue = 0;
     spent_queue = 0;
     turn = NULL;
+    turn_from = 0;
     armed_sources = 0;
     nearest_deadline = NEAREST_NONE;
     nearest_release = NEAREST_NONE;

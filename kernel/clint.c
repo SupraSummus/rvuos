@@ -4,6 +4,7 @@
 
 #include "clint.h"
 #include "csr.h"
+#include "kernel.h"
 #include "layout.h"
 #include "timer.h"
 #include "work.h"
@@ -46,6 +47,10 @@ void clint_hold(void)
 
 void clint_start(uint32_t period)
 {
+    /* The ESP32-C6 measures its tick, and a counter this fast would overflow the accounts. */
+    if (period > TICK_COUNTS_MAX) {
+        kpanic("the counter is too fast for the accounts to count a tick of it");
+    }
     tick_counts = period;
     next_tick = clint_mtime() + period;
     compare = next_tick;
@@ -107,4 +112,16 @@ void timer_set(uint32_t ticks)
 uint32_t timer_counter_hz(void)
 {
     return tick_counts * TIMER_HZ;
+}
+
+uint32_t timer_tick_counts(void)
+{
+    return tick_counts;
+}
+
+/* next_tick lies a period past the last counted tick, which the counter has reached. */
+uint32_t timer_offset(void)
+{
+    uint64_t past = clint_mtime() - (next_tick - tick_counts);
+    return past < tick_counts ? (uint32_t)past : tick_counts;
 }

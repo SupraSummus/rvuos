@@ -109,7 +109,7 @@ What rvuos is not:
   The processor is `TIME_UNITS` units of time, handed out as capabilities like memory is,
   and a thread runs on the units it is bound to, each earned by one thread at a time,
   or on spare time, which nobody earned, if its capability allows.
-  Its account fills at its units' rate and a machine timer tick of its turn costs it a tick,
+  Its account fills at its units' rate and its turns cost it the time they ran, on the machine's counter,
   so a process that makes more threads or children gets no more of the processor than its units,
   and a thread held to its units gets no more, however idle the processor is otherwise.
 - **Timers as signals.**
@@ -837,7 +837,9 @@ and carries the ring out one byte per transmitter interrupt.
 - Each thread has an **account** of time,
   which gains a sixty-fourth of a tick for each unit the thread earns every tick
   and holds at most 100 ticks' worth of them, a tenth of a second.
-  Each tick of the thread's turn costs the account a whole tick.
+  A turn the thread began with time costs the account the time it ran, counted on the machine's counter,
+  whether the tick ends it or the thread waits;
+  a turn on spare time costs nothing.
   A thread has **time** while its account holds at least a tick.
   A new thread's account is empty, and the root task's thread's starts full.
   Bound to other units, a thread keeps what its account held, up to what the new units hold;
@@ -849,11 +851,11 @@ and carries the ring out one byte per transmitter interrupt.
   A thread that becomes ready, whether resumed, woken, bound or preempted,
   joins the back of its queue.
 - The machine timer ticks at `TIMER_HZ`, 1 kHz on both boards.
-  A tick is charged to the running thread's account while it holds a tick, and ends its turn:
+  A tick ends the running thread's turn:
   the thread goes to the back of its queue,
   and the thread that has waited longest on the run queue runs,
   or, if the run queue is empty, the one that has waited longest on the spare queue.
-  A thread that waits hands the rest of the tick to the next.
+  A thread that waits hands the rest of the tick to the next, which pays for no more than it runs of it.
   A tick that would hand the processor back to the thread that had it takes no interrupt:
   the kernel counts and charges it at its next trap all the same,
   so a thread alone on the processor is interrupted only at a timer line's deadline,
@@ -880,9 +882,8 @@ but it burns its turns and its account, and keeps the machine out of `wfi`
 unless it is held to its units;
 a thread that waits costs nothing until it is signalled.
 
-The tick charges whoever runs when it comes a whole tick,
-so a thread that always waits just before the tick is never charged for the time it ran;
-an account holds a program that runs, not one that times its waits against the clock.
+A turn is charged by the counter, not by the tick that ends it,
+so a thread that waits just before every tick pays for the time it ran all the same.
 
 To hold a process to about a tenth of the processor, the root task gives it six units without `RIGHT_X`.
 Its own thread earns every unit at boot, so it leaves the six first,
@@ -983,7 +984,7 @@ Cannot be turned off again.
 
 **`OP_DEBUG_TICK` (17).**
 Does what the timer tick does, on request:
-time moves by one tick, charged to the caller while it has time, every due timer line fires,
+time moves by one tick, charged to the caller if it had time as its turn began, every due timer line fires,
 every thread whose account reached a tick has time again,
 the caller's turn ends as section 5.11 says,
 and the caller stays ready.
@@ -1503,6 +1504,8 @@ and halts with code 3 on the first violation.
 While tracing is on the tick preempts nobody and moves no time;
 only `OP_DEBUG_TICK` does,
 so that the host build can reproduce the transcript.
+The clock that charges turns is then the tick count alone:
+a turn with time pays a whole tick at each `OP_DEBUG_TICK` and nothing at a wait.
 A thread whose program counter was set while tracing was on
 cannot be run under tracing; the kernel halts with code 6 instead.
 

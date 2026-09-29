@@ -1,0 +1,20 @@
+A turn that ends pays for the rest of the tick, not for the counts it ran.
+A thread that waits often would pay for time others ran, and run far less than its units;
+a turn costs the counts it ran, so under tracing a call that moves no time costs nothing.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: a tick did not cost the thread whose turn it was a tick less its units
+Report: a traced call that moved no time charged the thread whose turn it was
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -243,7 +243,7 @@ static uint32_t turn_close(void)
+ {
+     uint32_t offset = clock_offset();
+     if (turn != NULL) {
+-        turn->balance -= turn_owes(offset);
++        turn->balance -= turn_owes(timer_tick_counts());
+     }
+     return offset;
+ }
