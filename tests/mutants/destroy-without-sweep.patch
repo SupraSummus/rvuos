@@ -1,18 +1,19 @@
 A destroy that does not revoke below the pool's own node
-leaves capabilities naming dead objects,
-and they come back to life when the memory is rebuilt into the same type.
+takes the objects while capabilities still name them.
+The revoke that met the node clears those only once the pool is gone and they came up to it with the node,
+so in between they name dead objects.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
 Report: dangling object capability
 
 diff --git a/kernel/pool.c b/kernel/pool.c
 --- a/kernel/pool.c
 +++ b/kernel/pool.c
-@@ -85,12 +85,6 @@ bool pool_destroy(struct pool *pool, struct cap *keep, bool preempt)
-             }
-         }
-     }
--    while (cap_revoke_step_except(&pool->node, keep)) {
+@@ -78,12 +78,6 @@ bool pool_destroy(struct pool *pool, bool preempt)
+      * so revoking below it leaves none.
+      * Its progress is in the tree, and a new capability made meanwhile goes the same way.
+      */
+-    while (cap_revoke_step(&pool->node)) {
 -        LOOP_PAID(pool_destroy, node, "a capability to the pool or to one of its objects");
 -        if (cap_stop_here(preempt)) {
 -            return false;

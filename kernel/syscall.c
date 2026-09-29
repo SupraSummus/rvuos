@@ -18,14 +18,16 @@ static struct cap *slot_node(struct thread *t, uint32_t slot)
 }
 
 /*
- * True if the calling thread, its process or the process's table lives in [base, base + size),
- * the memory of a pool or an Untyped: the caller keeps what it runs on and the table it names capabilities in.
- * A pool lies within an Untyped or outside it, and pools do not overlap, so its base says which.
+ * True if [base, base + size), the memory of an Untyped, holds what a revoke below it must leave:
+ * the calling thread, its process and the process's table, which it runs on and names capabilities in,
+ * and the table the Untyped is named in, since the capability to it that the call is made through
+ * would go half way through the destroy of that table's pool.
+ * A pool lies within an Untyped or outside it, so its base says which.
  */
-static bool holds_caller(struct thread *t, uint32_t base, uint32_t size)
+static bool holds_caller(struct thread *t, const struct captable *named, uint32_t base, uint32_t size)
 {
     return range_contains(base, size, t->hdr.pool) || range_contains(base, size, thread_process(t)->hdr.pool) ||
-           range_contains(base, size, thread_table(t)->hdr.pool);
+           range_contains(base, size, thread_table(t)->hdr.pool) || range_contains(base, size, named->hdr.pool);
 }
 
 static int op_debug(uint32_t op, const uint32_t *arg)
@@ -59,7 +61,7 @@ static int op_debug(uint32_t op, const uint32_t *arg)
     }
 }
 
-static int op_captable(struct thread *t, const struct cap *cap,
+static int op_captable(struct thread *t, uint32_t slot, const struct cap *cap,
                        uint32_t op, const uint32_t *arg)
 {
     struct captable *table = (struct captable *)cap_object(cap);
@@ -112,11 +114,11 @@ static int op_captable(struct thread *t, const struct cap *cap,
         if (err != KERR_OK) {
             return err;
         }
-        /* Below an Untyped the pools go too, and the caller keeps what it runs on. */
-        if (c.type == CAP_UNTYPED && holds_caller(t, untyped_base(&c), untyped_size(&c))) {
+        /* Below an Untyped the pools go too. */
+        if (c.type == CAP_UNTYPED && holds_caller(t, table, untyped_base(&c), untyped_size(&c))) {
             return KERR_STATE;
         }
-        return cap_revoke_below(&table->slots[arg[1]], true) ? KERR_OK : KERR_PREEMPTED;
+        return cap_revoke_below(&table->slots[arg[1]], slot_node(t, slot), true) ? KERR_OK : KERR_PREEMPTED;
     }
     default:
         return KERR_WRONG_TYPE;
@@ -257,24 +259,16 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
     }
 }
 
-static int op_pool_destroy(struct thread *t, uint32_t slot, struct pool *pool)
-{
-    /* The caller keeps what it runs on, the root task in the boot pool as anyone. */
-    if (holds_caller(t, pool_base(pool), pool->size)) {
-        return KERR_STATE;
-    }
-    /* The invoked capability goes last, so a call made again finds the pool through it. */
-    return pool_destroy(pool, slot_node(t, slot), true) ? KERR_OK : KERR_PREEMPTED;
-}
-
+/*
+ * A pool only allocates.
+ * It is destroyed by a revoke below the Untyped it was made of, whose holder owns the memory;
+ * see DESIGN.md, "Kernel pools and revocation".
+ */
 static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
                    uint32_t op, const uint32_t *arg)
 {
     struct pool *pool = (struct pool *)cap_object(cap);
 
-    if (op == OP_POOL_DESTROY) {
-        return op_pool_destroy(t, slot, pool);
-    }
     if (op != OP_POOL_ALLOC) {
         return KERR_WRONG_TYPE;
     }
@@ -516,7 +510,7 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
         if (!pool_fits(pool, sizeof(struct irq))) {
             return KERR_NO_MEMORY;
         }
-        if (!cap_revoke_below(slot_node(t, slot), true)) {
+        if (!cap_revoke_below(slot_node(t, slot), slot_node(t, slot), true)) {
             return KERR_PREEMPTED;
         }
         struct irq *irq = pool_alloc(pool, CAP_IRQ, sizeof(*irq));
@@ -668,8 +662,7 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
 {
     /*
      * A thread whose process, or its process's table, was taken names nothing.
-     * Within a call only a revoke, which then returns, can take either,
-     * or a destroy, which keeps the table it found.
+     * Within a call only a revoke, which then returns, can take either.
      */
     struct captable *table = thread_table(t);
     if (table == NULL) {
@@ -701,7 +694,7 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
         err = op_clock(t, slot, op, arg);
         break;
     case CAP_CAPTABLE:
-        err = (cap.rights & RIGHT_W) ? op_captable(t, &cap, op, arg) : KERR_NO_RIGHTS;
+        err = (cap.rights & RIGHT_W) ? op_captable(t, slot, &cap, op, arg) : KERR_NO_RIGHTS;
         break;
     case CAP_POOL:
         err = (cap.rights & RIGHT_W) ? op_pool(t, slot, &cap, op, arg) : KERR_NO_RIGHTS;

@@ -50,8 +50,11 @@
  * The halves between go, so all three hang right below the free RAM,
  * and the second table's BOOT_CAP_FREE_RAM and BOOT_CAP_ROOT_RAM are empty.
  * Revoking the first one's free RAM destroys the second thread's pool, and what it made of its own.
- * The first thread lives in the boot pool, of which the second holds a copy,
- * so a record on the second thread can destroy the first, as a successor can its root task.
+ * Each table's BOOT_CAP_POOL_RAM holds the block the other thread's pool was made of:
+ * a thread cannot destroy the pool it lives in, and neither could a revoke through a table in it,
+ * so the first thread destroys the second's pool by revoking below its own slot,
+ * and the second destroys the boot pool, and the first thread with it, through REPLAY_CAP_TABLE,
+ * as a successor does its root task.
  */
 
 #include "rvuos/abi.h"
@@ -74,16 +77,16 @@ static inline int replay_passes(const struct replay_record *r, unsigned me)
 #define REPLAY_LOG_SLOT 6
 
 /* Capability slots the setup fills, above the boot capabilities, in both tables. */
-#define REPLAY_CAP_NOTIFY  17
-#define REPLAY_CAP_THREAD  18 /* the second thread */
-#define REPLAY_CAP_POOL    19 /* the second thread's pool */
-#define REPLAY_CAP_TABLE   20 /* the second thread's table */
-#define REPLAY_CAP_PROCESS 21 /* the second thread's process */
-#define REPLAY_CAP_RAM     22 /* the thread's own memory, an Untyped */
+#define REPLAY_CAP_NOTIFY  18
+#define REPLAY_CAP_THREAD  19 /* the second thread */
+#define REPLAY_CAP_POOL    20 /* the second thread's pool */
+#define REPLAY_CAP_TABLE   21 /* the second thread's table */
+#define REPLAY_CAP_PROCESS 22 /* the second thread's process */
+#define REPLAY_CAP_RAM     23 /* the thread's own memory, an Untyped */
 /* The halves the second thread's pool and memory are cut from, empty afterwards. */
-#define REPLAY_CAP_HALF     23 /* the upper half of the free RAM */
-#define REPLAY_CAP_POOL_RAM 24 /* its lower half, the second thread's pool */
-#define REPLAY_CAP_LENT     25 /* its upper half, which the second thread's memory is derived from */
+#define REPLAY_CAP_HALF     24 /* the upper half of the free RAM */
+#define REPLAY_CAP_POOL_RAM 25 /* its lower half, the second thread's pool, which goes to the first table */
+#define REPLAY_CAP_LENT     26 /* its upper half, which the second thread's memory is derived from */
 _Static_assert(REPLAY_CAP_NOTIFY == BOOT_CAP_COUNT, "the setup's slots follow the boot capabilities");
 /* The third thread, stopped until a record resumes it: the last slot, which the corpus leaves alone. */
 #define REPLAY_CAP_THIRD   (REPLAY_TABLE_SLOTS - 1)
@@ -127,11 +130,13 @@ static const struct replay_record replay_prologue[] = {
     /*
      * Its own memory, derived into its table;
      * then the halves between go, and what they made hangs below the free RAM.
+     * Each table takes the block of the other thread's pool.
      */
     { OP_CAP_DERIVE, 0, REPLAY_CAP_TABLE, REPLAY_CAP_RAM, REPLAY_CAP_LENT, RIGHT_ALL },
     { OP_CAP_DELETE, 0, BOOT_CAP_CAPTABLE, REPLAY_CAP_HALF, 0, 0 },
-    { OP_CAP_DELETE, 0, BOOT_CAP_CAPTABLE, REPLAY_CAP_POOL_RAM, 0, 0 },
     { OP_CAP_DELETE, 0, BOOT_CAP_CAPTABLE, REPLAY_CAP_LENT, 0, 0 },
+    { OP_CAP_MOVE, 0, REPLAY_CAP_TABLE, BOOT_CAP_POOL_RAM, BOOT_CAP_POOL_RAM, 0 },
+    { OP_CAP_MOVE, 0, BOOT_CAP_CAPTABLE, BOOT_CAP_POOL_RAM, REPLAY_CAP_POOL_RAM, 0 },
     /* Its table mirrors the first one, the boot capabilities included. */
     REPLAY_COPY(BOOT_CAP_CAPTABLE),
     REPLAY_COPY(BOOT_CAP_PROCESS),

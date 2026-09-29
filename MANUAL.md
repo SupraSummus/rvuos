@@ -86,11 +86,12 @@ What rvuos is not:
   A process makes its untyped memory into frames it can map and pools the kernel writes,
   never both over the same bytes,
   and every kernel object it creates is allocated from a pool it holds.
-- **Revocation by pool and by memory.**
-  Destroying a pool destroys every object in it
-  and every capability anywhere that named one of those objects.
+- **Revocation by memory.**
   Revoking below an Untyped destroys every pool made of it,
-  however far it was lent on, and the memory comes back to the Untyped.
+  however far it was lent on:
+  every object in it and every capability anywhere that named one of those objects,
+  and the memory comes back to the Untyped.
+  A pool capability allocates and nothing more.
 - **A root task like any other process.**
   The root task starts with the capabilities to the whole machine and nothing else:
   it lives in memory it holds an Untyped to, and the kernel names it nowhere after boot.
@@ -389,7 +390,7 @@ The tree grows in these ways:
 | `OP_IRQ_BIND` | below the `KernelPool` capability; the line goes with what was derived from it |
 | `OP_IRQ_BIND` | and the `Irq`'s hold on its notification below the `Notification` capability |
 | `OP_TIME_BIND` | the thread's hold on its units hangs below the invoked `Time` capability |
-| boot | nowhere, but for the root task's frames and the boot pool's own node, below `BOOT_CAP_ROOT_RAM`, and the capabilities to the boot pool and its objects, below that node |
+| boot | nowhere, but for the root task's frames and the boot pool's block, below `BOOT_CAP_ROOT_RAM`, the boot pool's own node, below that block, and the capabilities to the boot pool and its objects, below that node |
 
 `OP_CAP_REVOKE` on a slot clears everything below it, in every table and every process:
 derived capabilities, their copies, what was derived from those,
@@ -397,7 +398,7 @@ every region installed from any of them,
 and every thread's units bound through any of them;
 a thread made through any of them loses its process and stops, section 5.6,
 and an `Irq` bound through any of them loses its notification and is disarmed, section 5.9.
-Below an Untyped it destroys every pool made of it, as `OP_POOL_DESTROY` does.
+Below an Untyped it destroys every pool made of it, section 5.5.
 The slot itself stays.
 Revoking a copy takes nothing from the original, and the other way round;
 to take both back, revoke below what they were both derived from.
@@ -541,7 +542,10 @@ So revoking below a `KernelPool` capability takes what was allocated through it,
 and deleting the last `KernelPool` capability leaves the pool standing,
 reachable through nothing, until the Untyped it was made of is revoked.
 
-**Destroying a pool** with `OP_POOL_DESTROY`, or by revoking below the Untyped it was made of:
+**Destroying a pool** is revoking below the Untyped it was made of, or below one above that;
+no operation on the pool does it, so a `KernelPool` capability only allocates.
+A pool is the whole of its Untyped, so keep the Untyped of a pool you mean to give back on its own.
+The destroy:
 
 - destroys every object in it,
 - clears every capability, in every table of every process,
@@ -558,15 +562,15 @@ reachable through nothing, until the Untyped it was made of is revoked.
   so clear memory before it becomes a pool if whoever destroys the pool should not read it,
 - gives the memory back to the Untyped the pool was made of.
 
-The call fails with `KERR_STATE`
-when the calling thread, its process or the process's table lives in the pool,
+The revoke fails with `KERR_STATE`
+when the calling thread, its process or the process's table lies in the Untyped's memory,
 so a thread cannot destroy what it runs on
-nor the table it names capabilities in.
+nor the table it names capabilities in,
+and when the table it names the Untyped in does,
+since the capability the call is made through would go half way through the destroy of that table's pool.
 The boot pool holds the root task, which therefore cannot destroy it,
-but any other thread holding a `KernelPool` capability to it can, and the root task goes with it;
-lend a pool made for the borrower rather than the one you live in.
-A revoke below an Untyped fails the same way
-when the calling thread, its process or its table lies in the Untyped's memory.
+but any other thread holding `BOOT_CAP_POOL_RAM`, the block the boot pool was made of, can,
+and the root task goes with it, section 7.
 A destroy is restartable: it may stop for an interrupt and go on when the call is made again,
 and a pool being destroyed allocates nothing, `KERR_STATE`.
 
@@ -932,7 +936,7 @@ not `KERR_INVALID_ARG`.
 
 A call whose work grows with the derivation tree or with a pool can be interrupted and made again:
 `OP_CAP_REVOKE`, `OP_CAP_DELETE` of a root with capabilities below it,
-`OP_POOL_DESTROY` and `OP_IRQ_BIND`.
+and `OP_IRQ_BIND`.
 When the tick or a device interrupt comes due while such a call works,
 the kernel stops it between two capabilities or two objects
 and resumes the thread at its `ecall` with every register as it was,
@@ -1039,10 +1043,12 @@ Regions installed from capabilities below it are uninstalled,
 and threads of those processes lose access at once;
 threads made through a `Process` capability below it stop, section 5.6,
 and `Irq`s bound through a `Notification` capability below it are disarmed, section 5.9.
-A revoke that takes the caller's own process, or its process's table, ends there,
+A revoke that takes the caller's own process, its process's table,
+or the capability the call is made through ends there,
 returns `KERR_OK`, and leaves the rest below the slot for another call to revoke.
-Below an Untyped, every pool made of it is destroyed as by `OP_POOL_DESTROY`;
-`KERR_STATE` if the calling thread, its process or the process's table lies in the Untyped's memory.
+Below an Untyped, every pool made of it is destroyed, section 5.5;
+`KERR_STATE` if the calling thread, its process, the process's table or the invoked table
+lies in the Untyped's memory.
 The call may be made again, section 6.1.
 
 ### 6.5 Operations on `Frame` and `Untyped`
@@ -1086,7 +1092,8 @@ A half must be no smaller than the smallest region, and the two slots must diffe
 
 ### 6.6 Operations on `KernelPool`
 
-Both need `RIGHT_W` on the pool.
+A pool has one operation, which needs `RIGHT_W` on it;
+it is destroyed by revoking below its Untyped, section 5.5.
 
 **`OP_POOL_ALLOC` (7).**
 `a1` = object type, `a2` = destination slot, `a3` = type-specific:
@@ -1102,13 +1109,6 @@ Any other type is `KERR_INVALID_ARG`; `Irq` objects come from `OP_IRQ_BIND`.
 The new capability carries all rights and hangs below the invoked `KernelPool` capability.
 `KERR_NO_MEMORY` when the pool is full,
 `KERR_STATE` while the pool is being destroyed.
-
-**`OP_POOL_DESTROY` (16).**
-No arguments.
-Does everything section 5.5 lists,
-and the memory goes back to the Untyped the pool was made of.
-`KERR_STATE` if the calling thread, its process or the process's table lives in the pool.
-The call may be made again, section 6.1.
 
 ### 6.7 Operations on `Process`
 
@@ -1257,7 +1257,6 @@ only a wait, the tick, or a revoke that takes its own process, section 6.4, take
 | 13 | `OP_THREAD_RESUME` | `Thread` |
 | 14 | `OP_NOTIFY_SIGNAL` | `Notification` |
 | 15 | `OP_NOTIFY_WAIT` | `Notification` |
-| 16 | `OP_POOL_DESTROY` | `KernelPool` |
 | 17 | `OP_DEBUG_TICK` | `Debug` |
 | 18 | `OP_CAP_MOVE` | `CapTable` |
 | 19 | `OP_IRQ_CARVE` | `IrqLine` |
@@ -1273,7 +1272,7 @@ only a wait, the tick, or a revoke that takes its own process, section 6.4, take
 | 29 | `OP_TIME_BIND` | `Time` |
 | 30 | `OP_UNTYPED_SPLIT` | `Untyped` |
 
-`OP_COUNT` is 31, one above the highest code.
+`OP_COUNT` is 31, one above the highest code; 16 is unused.
 
 ## 7. What the root task starts with
 
@@ -1306,9 +1305,10 @@ and drops into user mode with:
 | 13 | `BOOT_CAP_TIMER_LINES` | `IrqLine`: every timer line, `TIMER_LINES` of them | write |
 | 14 | `BOOT_CAP_CLOCK` | `Clock`: the machine's counter | all |
 | 15 | `BOOT_CAP_TIME` | `Time`: every unit of time, `TIME_UNITS` of them, all earned by the root task's thread | write, execute |
-| 16 | `BOOT_CAP_ROOT_RAM` | `Untyped`: the root task's own memory, its code, data and input frames and the boot pool, all made already | all |
+| 16 | `BOOT_CAP_ROOT_RAM` | `Untyped`: the root task's own memory, its code, data and input frames and the boot pool's block, all made already | all |
+| 17 | `BOOT_CAP_POOL_RAM` | `Untyped`: the boot pool's block, below `BOOT_CAP_ROOT_RAM`, made into the boot pool | all |
 
-`BOOT_CAP_COUNT` is 17; a root task puts its own slots from there upwards.
+`BOOT_CAP_COUNT` is 18; a root task puts its own slots from there upwards.
 
 The root task's own table, process and thread take about 2.1 KiB of the boot pool,
 so roughly 1.9 KiB remain for objects the root task allocates from `BOOT_CAP_POOL`.
@@ -1318,13 +1318,16 @@ hang below the boot pool's own node, not below `BOOT_CAP_POOL`,
 so revoking below `BOOT_CAP_POOL` takes only what was allocated through it.
 
 `BOOT_CAP_ROOT_RAM` is an Untyped over the root task's own memory,
-with its code, data and input frames and the boot pool's own node right below it,
+with its code, data and input frames and the boot pool's block, `BOOT_CAP_POOL_RAM`, right below it,
 so it makes nothing until those are gone, and the rest of it, past the boot pool, waits for them.
-The root task cannot revoke below it, since it lives there, and nothing else sets it apart:
+The boot pool's own node hangs below `BOOT_CAP_POOL_RAM`, as a retype would have put it,
+so revoking below that block destroys the boot pool and leaves the root task's code where it is.
+The root task cannot revoke below either, since it lives there, and nothing else sets it apart:
 a process holding its capabilities can do all it could.
 So the root task can hand its place over:
 it moves every capability into a successor's table with `OP_CAP_MOVE`, each to the same slot, and waits,
-and the successor stops the root task's thread and destroys the boot pool, and the root task with it.
+and the successor stops the root task's thread and revokes below `BOOT_CAP_POOL_RAM`,
+which destroys the boot pool, and the root task with it.
 `user/init.c` ends its demo this way; `DESIGN.md`, "The root task is its capabilities", gives the steps.
 
 Device ranges are frames, granted read and write, never execute,
@@ -1386,16 +1389,19 @@ The steps below are what `user/init.c` does.
 1. **Take memory** out of `BOOT_CAP_FREE_RAM`:
    a frame to share, a frame for the child's data and stack,
    and a pool for its kernel objects.
-   The demo keeps no allocator: `take` splits what is left of the free RAM,
-   makes the lower half into the block and keeps the upper as what is left,
+   The demo keeps no allocator: `take_untyped` splits what is left of the free RAM,
+   keeps the lower half as the block and the upper as what is left,
    so its blocks halve one after another, section 5.4.
    It deletes the Untypeds in between, so every block hangs right below the free RAM
    and three working slots do for all of them.
+   `take_frame` makes the block a frame and deletes its Untyped, since revoking below a frame takes it back;
+   the pool's Untyped stays, since revoking below it is what destroys the pool.
 
    ```c
-   take(CAP_FRAME, SLOT_SHARED, &shared_base, &shared_size);
-   take(CAP_FRAME, SLOT_CHILD_DATA, &child_data_base, &child_data_size);
-   take(CAP_POOL, SLOT_POOL, &pool_base, &pool_size);
+   take_frame(SLOT_SHARED, &shared_base, &shared_size);
+   take_frame(SLOT_CHILD_DATA, &child_data_base, &child_data_size);
+   take_untyped(SLOT_POOL_MEMORY, &pool_base, &pool_size);
+   rv_retype(SLOT_POOL_MEMORY, CAP_POOL, SLOT_POOL, &pool_base);
    ```
 
 2. **Allocate** the child's objects from the pool,
@@ -1448,19 +1454,14 @@ The steps below are what `user/init.c` does.
 6. **Talk** through the shared region and the two notifications.
    The child writes a word, signals `SLOT_UP`; the parent waits, answers, signals `SLOT_DOWN`.
 
-7. **Tear down** by destroying the pool.
+7. **Tear down** by revoking below the pool's Untyped, which destroys the pool.
    The child's thread, process, table and notifications go with it,
    every capability to them is cleared in every table,
-   and the memory goes back to the Untyped the pool hangs below, here `BOOT_CAP_FREE_RAM`,
-   which is free again once everything else made of it is gone.
+   and the Untyped is free again, to be retyped into something else.
 
    ```c
-   rv_invoke(OP_POOL_DESTROY, SLOT_POOL, 0, 0, 0);
+   rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_POOL_MEMORY, 0, 0);
    ```
-
-   To have that very block back for something else on its own,
-   keep the Untyped the pool was made of rather than deleting it, and retype that again;
-   the demo does so for the pool it rebuilds.
 
 The child must touch no global variable, since it shares no data region with the parent:
 everything it needs is on its stack or behind a capability in its table.

@@ -7,11 +7,12 @@ Report: capability to an object is a root
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -366,7 +366,7 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
+@@ -375,7 +375,8 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
  
      /* A new object hangs below the capability it was allocated through, and so below the pool's node. */
      struct cap c = cap_to_object(obj, RIGHT_ALL);
 -    return cap_store(thread_table(t), dst, &c, slot_node(t, slot));
++    (void)slot;
 +    return cap_store(thread_table(t), dst, &c, NULL);
  }
  

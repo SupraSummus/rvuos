@@ -10,7 +10,7 @@ Report: frame with rights beyond the grant
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -68,8 +68,14 @@ static int op_captable(struct thread *t, const struct cap *cap,
+@@ -72,8 +72,14 @@ static int op_captable(struct thread *t, uint32_t slot, const struct cap *cap,
          if (err != KERR_OK) {
              return err;
          }

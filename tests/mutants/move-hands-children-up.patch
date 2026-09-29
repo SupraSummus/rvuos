@@ -3,11 +3,11 @@ so what was derived from the source goes to the source's parent, or becomes a ro
 and a revoke through the moved capability no longer takes it.
 The tree stays whole and the move grants nothing new; only its place is lost,
 but for an Untyped: the pools made of it go to its parent, and the moved one overlaps them.
+The replay's prologue moves two made Untypeds, so the overlap shows before any record runs;
+move-loses-place is the mutant the move check is held to.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
-Report: a move did not keep what was derived from the node it moved
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
 Report: memory that may hold kernel objects overlaps a node not above or below it
-Report: the paid loop at kernel/cap.c took a second step without asking intr_pending
 
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c

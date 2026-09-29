@@ -1,0 +1,22 @@
+A revoke below an Untyped does not refuse when the table it names the Untyped in lies in its memory,
+so the destroy of that table's pool takes the capability the call is made through half way,
+and a stop leaves a call its caller cannot make again.
+A call that stops leaves its caller the capability it was made through.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: a call stopped where its caller cannot make it again
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -26,8 +26,9 @@ static struct cap *slot_node(struct thread *t, uint32_t slot)
+  */
+ static bool holds_caller(struct thread *t, const struct captable *named, uint32_t base, uint32_t size)
+ {
++    (void)named;
+     return range_contains(base, size, t->hdr.pool) || range_contains(base, size, thread_process(t)->hdr.pool) ||
+-           range_contains(base, size, thread_table(t)->hdr.pool) || range_contains(base, size, named->hdr.pool);
++           range_contains(base, size, thread_table(t)->hdr.pool);
+ }
+ 
+ static int op_debug(uint32_t op, const uint32_t *arg)

@@ -1,17 +1,15 @@
 A pool that goes looks for its newest object among every object of every pool,
 still claiming each step takes one away,
 so a destroy costs what the machine holds, not what it destroys.
-It forgets and zeroes the same objects, so only the counting harness catches it by what the walk claims.
-The link refuses it too, but only because the walk leaves clang short of registers,
-so that it keeps a jump table's base on the stack, where tools/loop-bounds.py does not follow it.
+It forgets and zeroes the same objects, so only the counting harness catches it.
 
-Caught-by: loop-bounds fuzz-work
+Caught-by: fuzz-work
 Report: the paid loop at kernel/pool.c took a second step without asking intr_pending
 
 diff --git a/kernel/pool.c b/kernel/pool.c
 --- a/kernel/pool.c
 +++ b/kernel/pool.c
-@@ -105,6 +105,9 @@ bool pool_destroy(struct pool *pool, struct cap *keep, bool preempt)
+@@ -98,6 +98,9 @@ bool pool_destroy(struct pool *pool, bool preempt)
      while (pool->last != pool_base(pool)) {
          LOOP_PAID(pool_destroy, object, "an object of the pool, newest first");
          struct obj_header *o = p2v(pool->last);
