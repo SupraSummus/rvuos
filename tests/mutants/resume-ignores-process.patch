@@ -8,7 +8,7 @@ Report: thread without a process is not stopped
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -423,7 +423,7 @@ static int op_thread(const struct cap *cap, uint32_t op, const uint32_t *arg)
+@@ -405,7 +405,7 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, const
          return KERR_OK;
      case OP_THREAD_RESUME:
          /* A thread whose process was taken has nothing to run in. */

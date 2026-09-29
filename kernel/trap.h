@@ -55,6 +55,9 @@ struct trap_frame *trap_handler(struct trap_frame *frame);
  */
 __attribute__((noreturn)) void trap_return(struct trap_frame *frame);
 
+/* The frame's mcause, mepc and mtval, as a line of the log; in syscall.c, which the host build has too. */
+void report_frame(const struct trap_frame *frame);
+
 /* Called from start.S when the kernel itself traps. */
 __attribute__((noreturn)) void kernel_trap_panic(void);
 

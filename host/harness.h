@@ -44,17 +44,29 @@ uint32_t host_syscall(const struct replay_record *c);
 /*
  * Deliver one event: pass the record to the thread it names
  * the way the replay driver does, then perform it.
- * False when the driver died on the way, see host_driver_alive.
+ * A driver thread the processor comes to that could not run faults, see host_driver_alive,
+ * and the next goes on with the records.
  */
-bool host_event(const struct replay_record *c);
+void host_event(const struct replay_record *c);
+
+/* The running thread faults with this mcause, as the trap would have it. */
+void host_fault(uint32_t cause);
 
 /*
- * True while the running driver thread could still run on real hardware:
- * its process maps the driver's code read-execute
- * and its data, the UART and the log read-write.
+ * The records are done: the driver's last instruction is a breakpoint,
+ * which every driver thread that runs from here on makes, one that could not run faulting before it,
+ * until the kernel has nothing left to run and halts. Does not return.
+ */
+__attribute__((noreturn)) void host_end(void);
+
+/*
+ * True while the running driver thread could run on real hardware up to its next call:
+ * its process maps the driver's code read-execute and its data read-write,
+ * and the UART and the log read-write if it drains the log first,
+ * as it does after each record it performs.
  * On QEMU the driver faults as soon as this stops holding;
  * the host has no instruction fetch to fault, so it checks instead,
- * and the harness must stop at the first false, as QEMU would.
+ * and makes the thread fault at the first false, as QEMU would.
  */
 bool host_driver_alive(void);
 
@@ -67,10 +79,10 @@ enum { UNIT_NODE, UNIT_LINK, UNIT_OBJECT, UNIT_WAITER, UNITS };
 void host_units(unsigned out[UNITS]);
 
 /*
- * Around each call: note the state before it, then check what the call changed
- * against what its caller held; see host/history.c.
+ * Around each call, or fault: note the state before it, then check what it changed
+ * against what the thread that made it held; see host/history.c.
  */
-void history_begin(void);
+void history_begin(bool call);
 void history_end(void);
 
 #ifdef RVUOS_WORK

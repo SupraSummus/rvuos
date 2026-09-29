@@ -23,7 +23,8 @@ fail() {
     exit 1
 }
 
-[ "$status" -eq 4 ] || fail "expected exit status 4 (user fault), got $status"
+# The demo ends in a halt with code 0, after a fault that stopped one thread and not the machine.
+[ "$status" -eq 0 ] || fail "expected exit status 0 (the demo's own halt), got $status"
 # The kernel has no console: its log reaches the UART through the root task's logger
 # while the machine runs, and the halt writes the whole log out after it, under this line.
 # What the logger carried out therefore comes before the line, what only the halt did after.
@@ -81,6 +82,8 @@ grep -q 'the root task cannot destroy its own pool: ok' "$log" \
     || fail "a thread destroyed the pool it lives in"
 grep -q 'root: handover ok' "$log" \
     || fail "a successor given everything the root task held could not destroy the root task and take its place"
+grep -q 'root: fault ok' "$log" \
+    || fail "a fault stopped more than its thread, its watch did not hear it, or a resume did not run the load again"
 # The logger carried the kernel's banner and the root task's output to the UART itself,
 # one byte per interrupt, before the halt wrote the log out.
 # The fault comes right after the last lines, so those the halt may be first to carry;
@@ -90,12 +93,11 @@ grep -q 'root: handover ok' "$log" \
 [ "$(first 'root: timer ok')" -lt "$dump" ] \
     || fail "the logger did not carry the root task's output out before the halt did"
 grep -q 'user fault' "$log" || fail "PMP fault was not caught"
-# The root task says where it reads; the fault must name that address.
+# The successor says where its prober reads; the fault must name that address.
 addr=$(sed -n 's/.*reading the removed region at \(0x[0-9a-f]*\),.*/\1/p' "$log" | head -1)
-[ -n "$addr" ] || fail "the root task did not say where it reads"
+[ -n "$addr" ] || fail "the successor did not say where its prober reads"
 grep -q "mcause=0x00000005 mepc=0x........ mtval=$addr" "$log" \
     || fail "fault was not a load access fault on the removed region from user code"
 grep -q ': FAILED' "$log" && fail "a step failed"
-grep -q 'PMP did not stop the read' "$log" && fail "user read kernel memory"
 
 echo "PASS"

@@ -105,6 +105,9 @@ What rvuos is not:
 - **Notifications as the only blocking primitive.**
   A notification is a word of sticky bits.
   Data moves through shared memory; the notification says when.
+- **A fault stops a thread, not the machine.**
+  A thread that faults stops where it faulted, and a notification its creator chose hears it;
+  resumed, it runs the faulting instruction again.
 - **Processor time by capability.**
   The processor is `TIME_UNITS` units of time, handed out as capabilities like memory is,
   and a thread runs on the units it is bound to, each earned by one thread at a time,
@@ -299,14 +302,14 @@ and `tools/esp32c6-run.py` exits with that code:
 | 0 | `OP_DEBUG_HALT` with code 0 |
 | 1 | kernel panic |
 | 3 | the self-check found an invariant violated |
-| 4 | a user fault: access fault, illegal instruction, misaligned access, breakpoint |
 | 5 | no runnable thread and nothing armed that could make one |
 | 6 | tracing is on and a thread the host build cannot follow was about to run |
 | other | what the root task passed to `OP_DEBUG_HALT` |
 
-A user fault prints `user fault` followed by `mcause`, `mepc` and `mtval`.
-Any fault stops the whole machine, even when another thread could run;
-see section 11.
+A user fault, an access fault, an illegal instruction, a misaligned access or a breakpoint,
+prints `user fault` followed by `mcause`, `mepc` and `mtval`,
+and stops the thread that made it and nothing else, section 5.6;
+a program whose only thread faults therefore ends in `no runnable thread`, code 5.
 
 ## 5. The programming model
 
@@ -594,6 +597,7 @@ A thread is **stopped**, **ready** or **waiting**.
   It gets the processor once it is bound to units, or to spare time, and its turn comes, section 5.11.
 - A thread waiting on a notification is waiting;
   a signal makes it ready again.
+- A thread that faults is stopped where it faulted; see **Faults** below.
 
 A thread holds its process by a capability derived from the `Process` capability it was allocated with,
 as a process holds its table, section 5.2, so the thread may lie in any pool.
@@ -606,8 +610,28 @@ A new thread is not, and a thread that is not keeps its state and does not run:
 `OP_TIME_BIND` binds it, and revoking below the capability it was bound through unbinds it.
 That is how a started thread is stopped and started again.
 No thread exits: a thread that has nothing left to do waits forever
-on a notification nobody signals, or loses its units or its process.
-A thread that faults stops the machine; see section 11.
+on a notification nobody signals, or loses its units or its process,
+or stops itself with a breakpoint, which is a fault its watch hears, below.
+
+**Faults.**
+A thread that faults, by an access fault, an illegal instruction, a misaligned access or a breakpoint,
+is stopped where it faulted, with its registers as they were and its program counter at the instruction,
+and the processor goes to the next thread; the machine goes on.
+Nothing else changes: the process, the thread's units and the process's other threads are as they were.
+The kernel writes `user fault` and the cause into its log, section 4.
+`OP_THREAD_WATCH` gives a thread a **watch**, a notification and bits that its faults signal,
+so whoever waits there hears of the fault as of any other signal;
+one wait can carry a fault's bit next to a device's or a timer's,
+and a watcher of many threads gives each a bit.
+The thread holds the notification by a capability derived from the one named, as it holds its process,
+so revoking below that capability, or destroying the notification's pool, clears the watch.
+A thread without a watch stops at a fault all the same, and nobody hears.
+What happens next is the watcher's to decide, with the operations there are:
+`OP_THREAD_RESUME` runs the faulting instruction again, after installing the region it reached for, say;
+`OP_THREAD_CONFIGURE` first starts it afresh;
+taking its process ends it, and taking its units, which a stopped thread still earns, frees them.
+The bits say which thread faulted, and only the log says why;
+`DESIGN.md`, open decision 21.
 
 ### 5.7 Notifications
 
@@ -1135,7 +1159,7 @@ Clearing an empty slot succeeds.
 
 ### 6.8 Operations on `Thread`
 
-Both need `RIGHT_W` on the thread and a stopped thread (`KERR_STATE`).
+All need `RIGHT_W` on the thread, and the first two a stopped thread (`KERR_STATE`).
 
 **`OP_THREAD_CONFIGURE` (12).**
 `a1` = program counter, `a2` = stack pointer.
@@ -1144,7 +1168,15 @@ Neither is checked.
 **`OP_THREAD_RESUME` (13).**
 Makes the thread ready.
 It runs once it is bound to units, or to spare time.
+A thread that faulted runs the faulting instruction again.
 `KERR_STATE` too once the thread's process was taken, section 5.6.
+
+**`OP_THREAD_WATCH` (31).**
+`a1` = slot of a `Notification` capability, which needs `RIGHT_W`, and may lie in any pool;
+`a2` = the bits the thread's faults signal there.
+Replaces the watch the thread had.
+`a2` = 0 clears the watch and ignores `a1`.
+See section 5.6.
 
 ### 6.9 Operations on `Notification`
 
@@ -1237,7 +1269,7 @@ Its hold on the units hangs below the invoked capability,
 so revoking below that capability unbinds it:
 it keeps its state and does not run until it is bound again, and its account is emptied.
 A thread unbound or moved while it runs, the caller itself for one, finishes the turn it had:
-only a wait, the tick, or a revoke that takes its own process, section 6.4, takes the processor from it.
+only a wait, the tick, a fault, section 5.6, or a revoke that takes its own process, section 6.4, takes the processor from it.
 
 ### 6.14 Operation codes in numeric order
 
@@ -1272,8 +1304,9 @@ only a wait, the tick, or a revoke that takes its own process, section 6.4, take
 | 28 | `OP_TIME_CARVE` | `Time` |
 | 29 | `OP_TIME_BIND` | `Time` |
 | 30 | `OP_UNTYPED_SPLIT` | `Untyped` |
+| 31 | `OP_THREAD_WATCH` | `Thread` |
 
-`OP_COUNT` is 31, one above the highest code; 16 is unused.
+`OP_COUNT` is 32, one above the highest code; 16 is unused.
 
 ## 7. What the root task starts with
 
@@ -1451,6 +1484,7 @@ The steps below are what `user/init.c` does.
    ```
 
    Revoking below `SLOT_CHILD_TIME` stops the child's thread; binding it again starts it.
+   The demo gives the child no watch; section 5.6 says how a parent hears its child fault.
 
 6. **Talk** through the shared region and the two notifications.
    The child writes a word, signals `SLOT_UP`; the parent waits, answers, signals `SLOT_DOWN`.
@@ -1497,7 +1531,8 @@ trace: op=0x00000007 slot=0x00000004 a1=0x00000007 a2=0x0000000d a3=0x00000000 -
 ```
 
 with `blocked` in place of a status when the call blocked,
-and `trace: wake <bits>` after a call that woke a waiter.
+and `trace: wake <bits>` after a call that woke a waiter,
+or after the `user fault` of a thread whose watch woke one.
 After every traced call the kernel runs the self-check,
 the executable form of the properties in `DESIGN.md`,
 and halts with code 3 on the first violation.
@@ -1520,6 +1555,7 @@ every waiting thread names a live notification,
 every ready thread but the running one that may run is on the queue its account says,
 and each unit of time is earned by the thread bound to it and by no other,
 every `Irq` names a live notification, or none and is disarmed,
+every thread's watch names a live notification, through a capability that could signal it,
 no `Irq` armed on a timer line is past its deadline,
 and the controller forwards exactly the lines an `Irq` is armed on.
 
@@ -1538,6 +1574,9 @@ and lies in the root thread's pool while it runs in the second's process.
 The replay driver in `user/fuzzdrv.c` performs them in order,
 the host build in `host/` performs the same records natively under ASan and UBSan,
 and `tests/differential.py` requires the two transcripts to match line for line.
+A driver thread the records unmapped faults, and the next goes on with the records;
+every driver thread ends in a breakpoint, a fault too, once the records are done,
+so a transcript ends in `no runnable thread` unless something stopped it first.
 Hand-written scenarios live in `tests/seeds`,
 what the fuzzer found in `tests/corpus`,
 and `tests/mutants/` holds one planted bug per invariant.
@@ -1570,10 +1609,10 @@ and `tests/mutants/` holds one planted bug per invariant.
 These are documented gaps, not surprises;
 `TODO.md` carries the items and `DESIGN.md` the open decisions.
 
-- **A fault stops the machine.**
-  A user fault has nobody to report to,
-  so the kernel prints the frame and halts with code 4,
-  even when another thread could run.
+- **A fault says which thread, not why.**
+  A watch's bits name the thread that faulted,
+  and the cause, `mepc` and `mtval` reach only the kernel's log;
+  `DESIGN.md`, open decision 21.
 - **No priorities and no yield.**
   Round-robin on a tick, threads with time before threads on spare time,
   is the whole policy, and units promise their part of the processor and a turn within 64 ticks, no more;

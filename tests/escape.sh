@@ -6,8 +6,9 @@
 #
 # Each scenario is a root task that attempts one escape and, were it not stopped,
 # says so and halts with status 2; see user/escape-*.c.
-# The kernel halts on a user fault with status 4 and writes the log out,
-# so the fault report lands in the transcript; see kernel/trap.c and halt.c.
+# A fault stops the thread that makes it and the kernel reports it in its log;
+# the root task's thread is the only one, so the kernel then halts with status 5,
+# no runnable thread, and writes the log out, fault report and all; see DESIGN.md, "Faults".
 # PMP is what confines a process, so this runs on the target, like `make test`.
 
 set -eu
@@ -59,6 +60,7 @@ grep -q "$reached" "$log" || fail "the scenario did not reach the escape"
 grep -q "$breached" "$log" && fail "the hardware did not stop the escape"
 grep -q 'user fault' "$log" || fail "the escape did not fault"
 grep -q "$fault" "$log" || fail "the fault was not the expected $fault"
-[ "$status" -eq 4 ] || fail "expected exit status 4 (user fault), got $status"
+grep -q 'no runnable thread' "$log" || fail "the machine did not stop for want of a thread after the fault"
+[ "$status" -eq 5 ] || fail "expected exit status 5 (no runnable thread after the fault), got $status"
 
 echo "PASS ($scenario)"

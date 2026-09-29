@@ -378,7 +378,7 @@ there is one counter on the machine.
 | `KernelPool` | Memory retyped from an Untyped and handed to the kernel. All other objects are allocated from pools. |
 | `CapTable` | A process's capability table. Allocated from a pool. |
 | `Process` | A protection domain: a capability to its `CapTable`, a set of region slots, and its threads. |
-| `Thread` | An execution context inside a process: its registers and its state. |
+| `Thread` | An execution context inside a process: its registers, its state, and what its faults signal. |
 | `Notification` | A word of sticky signal bits. The only way a thread can stop and be started again. |
 | `IrqLine` | A range of interrupt lines: the log's and the controller's, or the timer lines. Bound one at a time into an `Irq`. |
 | `Irq` | One line bound to a notification. Signals it when the line fires. |
@@ -502,10 +502,11 @@ to show that a stale capability does not come back with it.
 
 Objects reference each other by capability,
 and the destroy's revoke clears every capability to what it takes.
-A process holds its table this way, a thread its process, and an `Irq` its notification,
+A process holds its table this way, a thread its process and its watch, and an `Irq` its notification,
 so each may lie in any pool and outlive what it names:
-clearing the capability stops the thread, disarms the `Irq`, and leaves the process naming nothing;
-see "A process's table", "Threads" and "Interrupts".
+clearing the capability stops the thread or leaves its faults unheard, disarms the `Irq`,
+and leaves the process naming nothing;
+see "A process's table", "Threads", "Faults" and "Interrupts".
 A thread waiting on a notification inside a destroyed pool
 is woken with `KERR_INVALID_CAP` and no bits,
 because the wait can no longer be answered.
@@ -549,7 +550,7 @@ Every filled slot of every capability table,
 every region installed in a process,
 which is a slot of the same layout living in the `Process`,
 every process's table slot, which lives there too,
-every thread's process and units, which live in the `Thread`,
+every thread's process, units and watch, which live in the `Thread`,
 every `Irq`'s notification, which lives in the `Irq`,
 and every pool's own node, which lives in its descriptor;
 see `kernel/object.h`.
@@ -559,7 +560,7 @@ the boot pool's own node, which hangs below that block,
 and those to the boot pool and its objects, which hang below that node,
 as the root task's table slot and its thread's process do.
 A capability to a pool or an object is never a root,
-and neither is a thread's process or an `Irq`'s notification.
+and neither is a thread's process or watch or an `Irq`'s notification.
 
 **What hangs below what.**
 A carve hangs below the frame or line it was carved from,
@@ -569,6 +570,7 @@ an installed region below the frame it was installed from,
 the counter's frame below the clock it was derived through,
 a process's table slot below the `CapTable` capability the process was made with,
 a thread's process below the `Process` capability the thread was made with,
+a thread's watch below the `Notification` capability it was set with,
 and an `Irq`'s notification below the `Notification` capability the `Irq` was bound with.
 A pool's own node hangs below the Untyped, and the Pool capability the retype returns below that node.
 A capability to a new object hangs below the Pool capability it was allocated through,
@@ -716,12 +718,55 @@ see "Scheduling".
 The kernel validates neither value:
 it knows no executable format and no calling convention,
 so a thread that starts nowhere useful faults,
-which is its creator's business.
+which is its creator's business: the thread stops, and its watch hears it; see "Faults".
 
-A fault stops the machine, even when another thread could run.
-Telling a thread's creator instead would need somewhere to tell it,
-and nothing in the object model is that somewhere yet;
-`TODO.md` carries the item.
+### Faults
+
+**A fault is the thread's alone.**
+An access fault, an illegal instruction, a misaligned access or a breakpoint in user mode
+stops the thread that made it and nothing else:
+its process, its other threads and the units it earns stay as they were,
+and the processor goes to the next thread, as when a thread waits.
+The thread stops where it faulted, `mepc` at the instruction and every register as the fault found it,
+which is a state `OP_THREAD_CONFIGURE` and `OP_THREAD_RESUME` already take:
+a resume runs the instruction again, and a configure before it starts the thread afresh.
+Before, a fault stopped the machine whatever else could run,
+so one thread that jumped nowhere took every process with it.
+
+**A thread's watch hears it.**
+Whoever holds the thread with `RIGHT_W` names what its faults signal with `OP_THREAD_WATCH`:
+a notification, and the bits.
+The thread holds the notification as it holds its process,
+by a capability in a slot of its own, below the `Notification` capability the watch was set with,
+which needs `RIGHT_W`, since the kernel signals on the setter's behalf, as it does for an `Irq`.
+A fault signals the bits there as `OP_NOTIFY_SIGNAL` would,
+so a watcher waits for a fault as for anything else.
+A watcher of many threads gives each a bit, as a server gives each client one.
+The watch stays until it is cleared or replaced, so a thread that faults again signals again.
+A revoke above the slot, or the destroy of the notification's pool, clears it,
+and a thread without a watch stops at a fault all the same, and nobody hears.
+The node is out of the thread's reach:
+a watch named by a slot of the thread's own table would need no node,
+but the thread could then signal a fault it never made, or delete its watch.
+It costs twenty-four bytes per thread, one node more for a destroy to look at, and a signal per fault.
+
+**What the watcher does is policy.**
+The kernel stops the thread, signals its watch and does no more, since every answer is an operation already:
+resume it once what it reached for is mapped, which maps a region on demand;
+configure it to start again; take its process, which ends it, or its units, which a stopped thread still earns;
+revoke below the Untyped it was made of; or leave it stopped.
+A breakpoint is a fault like any other, so a thread that is done can stop with one and its watcher hears it:
+that is as near as rvuos comes to an exit, and it needs nothing more.
+
+**The log says what the fault was.**
+The kernel writes `user fault` and the frame's `mcause`, `mepc` and `mtval` into its log,
+while the bits say only which thread; no call returns the cause, open decision 21.
+A thread that faults again and again fills the log only while its watcher resumes it every time.
+
+**Why a signal, and not a message.**
+seL4 sends a fault as a message through an endpoint and restarts the thread by the reply.
+rvuos has no endpoints, open decision 5, and a fault needs none:
+the stopped state, the operations that start a thread again, and the signal are all there already.
 
 ## Communication and synchronisation
 
@@ -916,7 +961,7 @@ so revoking above that capability unbinds the thread, as it unmaps a region inst
 A thread with no units and no spare time keeps its state and does not run:
 that is how a scheduler in userspace stops and starts a thread, open decision 9.
 A thread that loses its units while it runs finishes the turn it had,
-so only a wait, the tick, or a revoke that takes its own process takes the processor from a running thread,
+so only a wait, the tick, a fault, or a revoke that takes its own process takes the processor from a running thread,
 and a call stopped for an interrupt is made again before anything else runs.
 
 **A thread has an account.**
@@ -1008,7 +1053,7 @@ A share had time again only once its account was full, which kept a capped share
 a thread has time again at a tick, which bounds how long it waits; open decision 18.
 
 **The machine timer provides the tick.**
-A thread runs until it waits on a notification
+A thread runs until it waits on a notification, until it faults,
 or until the tick takes the processor from it.
 The tick has a fixed period, `TIMER_HZ` in `kernel/timer.h`,
 and one tick is one turn: a preempted thread goes to the back of its queue.
@@ -1516,12 +1561,13 @@ or the debug capability or the clock, which name no object,
 or a live kernel object of the capability's own type.
 Every process's table slot is empty or names a live table,
 every thread's process slot is empty or names a live process,
+every thread's watch is empty or names a live notification,
 and every `Irq`'s notification slot is empty or names a live notification.
 
 **Derivation.**
 The slots of every live table,
 the table slot and region slots of every live process,
-the process and units of every live thread,
+the process, units and watch of every live thread,
 the notification of every live `Irq`
 and the own node of every pool
 are the nodes of one forest.
@@ -1532,13 +1578,13 @@ every node on it linked up to that node,
 and every node's previous link names the sibling whose next is the node,
 the last sibling for the first;
 a root has no siblings and no previous link,
-and a capability to a pool or an object is never one, nor a thread's process or an `Irq`'s notification.
+and a capability to a pool or an object is never one, nor a thread's process or watch or an `Irq`'s notification.
 A node is derived from its parent:
 the same object with no more rights,
 a range within the parent's range with no more rights,
 a pool's own node on an Untyped, an installed region on a frame,
 a thread's units on a capability to units that holds them, the first of them even for none,
-a thread's process or an `Irq`'s notification on a capability to that object,
+a thread's process or watch or an `Irq`'s notification on a capability to that object,
 to its pool, or on its pool's own node,
 the counter's block, or a region installed from it, below a clock,
 or a capability to a pool or an object below a capability to that pool or its own node.
@@ -1560,6 +1606,7 @@ Every thread is stopped, ready, or waiting,
 and has one binding to units or none, a leaf of the derivation tree
 made through a capability with the right to bind.
 A thread's process is a leaf too, and a thread without one is stopped.
+So is a thread's watch, set through a capability with the right to signal, and it signals some bit.
 A waiting thread names a live notification and nothing else does,
 and a notification's queue holds exactly the threads waiting on it.
 A ready thread but the running one that may run waits on exactly one of the scheduler's queues and names it:
@@ -1635,7 +1682,8 @@ the caller's table held before the call:
 the same object, or a range within its range, with no more rights,
 where an Untyped covers the frames it makes,
 and a thread's units are covered as a range of units, with the rights it was bound with,
-bound only to a thread the caller held a capability to with the right to control it.
+and its watch as a capability to its notification, with the rights it was set with,
+each only on a thread the caller held a capability to with the right to control it.
 Or it names an object the call built,
 in a pool the caller could allocate from,
 bound to what the caller could write,
@@ -1678,6 +1726,7 @@ a copy beside the source and a delete of it leave a whole tree too.
 These five relate the state before a call to the state after it,
 so the self-check, which sees one state, cannot check them.
 `host/history.c` checks them around every call of the host build, the untraced prologue's too,
+and around every fault, which must change no more than a call that moves no time,
 but a move's place only around a traced call,
 since it follows the tree's links and only the self-check vets them.
 It does not know what memory held before a call,
@@ -1792,13 +1841,15 @@ the root task starts a logger thread on the log's line and the UART's,
 builds a second process, exchanges a word with it
 through a shared region and two notifications,
 hands its place over to a successor, which destroys the pool the root task lived in,
-and ends in a deliberate fault the successor makes,
-and `tests/run.sh` checks that the logger carried the transcript out
+has a thread of its own fault on a region it took away and hears it through the thread's watch,
+maps the region again and resumes the thread, whose load goes through then, and halts;
+`tests/run.sh` checks that the logger carried the transcript out
 before the halt did, by where the halt's line falls in it.
 
 `make escape` boots the escape-attempt suite,
 one root task per scenario, each attempting a single breach of its confinement.
-A fault stops the machine, so a scenario tests one thing and halts on it;
+A fault stops the thread that makes it, and a scenario's root task has one,
+so the machine stops with nothing left to run, and a scenario tests one thing;
 `tests/escape.sh` checks that the fault is the one expected
 and that the scenario did not reach the line it prints only when the escape works.
 So far it executes an instruction from the no-execute data region,
@@ -1851,9 +1902,14 @@ even where the two agree.
 The host's transcript takes in what `host/history.c` reports,
 and one that crashes the host fails.
 The host has no instruction fetch to fault,
-so it declares the root task dead
-when its code or data is no longer mapped with the needed rights;
+so it makes a driver thread fault as soon as it runs
+without its code or its data mapped with the needed rights,
+or without the UART or the log when it drains the log, as it does after each record it performs,
+and every driver thread that runs once the records are done fault on the breakpoint the driver ends with;
 that is the one place where the host models rather than executes.
+A fault stops its thread alone, so on both builds the next thread goes on with the records,
+and one resumed where it faulted goes on too;
+the transcripts compare the line of each fault, but not its frame, whose addresses the host does not know.
 
 The same gap bounds which threads a replay may cross.
 The host can follow a thread only if it never has to guess
@@ -2208,3 +2264,13 @@ until the maintainer decides otherwise.
     Still open: no operation joins two free halves whose parent was deleted;
     they join only when their grandparent is free again.
     Decide when a program's free list wants it.
+
+21. **What a fault tells.**
+    Working default: the watch's bits say which thread faulted, and the kernel's log says why, to whoever reads it;
+    no call returns the cause; see "Faults".
+    A watcher that restarts or ends the thread needs no more.
+    One that maps regions on demand knows what it withheld but not which address was reached for,
+    and one that emulates an instruction the core lacks needs `mepc` to find it and to step past it.
+    An operation on a stopped `Thread` returning `mcause`, `mepc` and `mtval`, which its frame keeps already,
+    would serve both, if it can tell a thread that faulted from one that never ran.
+    Decide with the first watcher that needs the cause.

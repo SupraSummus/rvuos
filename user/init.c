@@ -21,7 +21,8 @@
  * bind and revoke an Irq on a line nothing drives,
  * hand everything it holds to a successor in a process of its own,
  * which destroys the pool the root task lived in, and the root task with it,
- * then unmap a region and fault on it.
+ * then unmap a region, have a thread fault on it and hear of it through the thread's watch,
+ * map the region again and resume the thread, whose load goes through then, and halt.
  * Negative paths are covered by the fuzz corpus and tests/differential.py.
  */
 
@@ -80,6 +81,9 @@ enum {
     SLOT_DODGER = SLOT_STALE,             /* the dodger's thread */
     SLOT_DODGER_TIMER = SLOT_DOOMED_NTFN, /* its timer line, bound in place to SLOT_DODGER_NTFN */
     SLOT_DODGER_NTFN = SLOT_NEW_NTFN,     /* what its timer signals */
+    /* The prober's are ones the destroy of the boot pool emptied in the successor's table. */
+    SLOT_PROBER = SLOT_LOGGER,            /* the successor's thread that faults */
+    SLOT_PROBE_NTFN = SLOT_LOG_NTFN,      /* what its faults signal, its watch */
 };
 
 /*
@@ -128,6 +132,7 @@ enum {
 #define BIT_LEASED  0x400u
 #define BIT_TIMER   0x80u /* the timer's bit on its own notification */
 #define BIT_SPARE   0x100u /* the spare line's bit on that same notification */
+#define BIT_FAULT   0x800u /* the prober's faults, on the notification that watches it */
 #define MAGIC 0x5eaf00du
 
 /* The logger's notification: the log's bit and the UART's. */
@@ -535,13 +540,41 @@ static uint32_t spin_traps(uint32_t counter, uint32_t hz, uint32_t ms)
 }
 
 /*
+ * The prober: a thread of the successor's, in its process, that loads the word at probe_at.
+ * The region is not installed the first time, so the load faults,
+ * which stops the prober alone, at the load, and signals its watch.
+ * Resumed once the region is back, it makes the same load again, which goes through,
+ * and its breakpoint after that is a fault its watch hears too.
+ */
+static volatile uint32_t probe_at, probed;
+
+static __attribute__((noreturn)) void prober_main(void)
+{
+    probed = *(volatile uint32_t *)probe_at;
+    for (;;) {
+        __asm__ volatile("ebreak");
+    }
+}
+
+/* What woke the successor on the prober's watch, and whether it was the prober's fault. */
+static uint32_t fault_wait(void)
+{
+    uint32_t bits;
+    uint32_t status = rv_wait(SLOT_PROBE_NTFN, &bits);
+    if (status != KERR_OK) {
+        return status;
+    }
+    return bits == BIT_FAULT ? KERR_OK : KERR_INVALID_ARG;
+}
+
+/*
  * The successor, in a process and a table of its own,
  * into which the root task moved every capability it held, each to the same slot,
  * so every slot means here what it meant there; see DESIGN.md, "The root task is its capabilities".
  */
 static __attribute__((noreturn)) void successor_main(void)
 {
-    uint32_t base, size;
+    uint32_t base, size, data_base, data_size;
 
     puts("successor: started\n");
     expect("stop the root task's thread for good",
@@ -575,18 +608,42 @@ static __attribute__((noreturn)) void successor_main(void)
            rv_invoke(OP_PROCESS_UNINSTALL, BOOT_CAP_PROCESS, ROOT_SHARED_SLOT, 0, 0));
 
     /*
+     * Faults; see DESIGN.md, "Faults".
+     * A fault stops the thread that makes it and signals its watch, and the machine goes on.
+     * The prober runs in this process on spare time, on the logger's old stack,
+     * and its watch is a notification this thread waits on.
+     */
+    expect("data info", rv_frame_info(BOOT_CAP_DATA, &data_base, &data_size));
+    expect("allocate the prober's watch",
+           rv_invoke(OP_POOL_ALLOC, SLOT_SUCC_POOL, CAP_NOTIFICATION, SLOT_PROBE_NTFN, 0));
+    expect("allocate the prober",
+           rv_invoke(OP_POOL_ALLOC, SLOT_SUCC_POOL, CAP_THREAD, SLOT_PROBER, BOOT_CAP_PROCESS));
+    expect("configure it",
+           rv_invoke(OP_THREAD_CONFIGURE, SLOT_PROBER, (uint32_t)&prober_main, data_base + data_size / 2, 0));
+    expect("watch it", rv_invoke(OP_THREAD_WATCH, SLOT_PROBER, SLOT_PROBE_NTFN, BIT_FAULT, 0));
+    expect("bind it to spare time", rv_invoke(OP_TIME_BIND, BOOT_CAP_TIME, SLOT_PROBER, 0, 0));
+    probe_at = base;
+    probed = 0;
+
+    /*
      * The fault report lands in the log after the logger's last look at it,
      * so the halt writes it out; tests/run.sh reads it there.
      */
     puts("reading the removed region at ");
     put_hex(base);
     puts(", expecting a fault\n");
-    uint32_t word = *(volatile uint32_t *)base;
-
-    /* Not reached when PMP works. */
-    puts("PMP did not stop the read\n");
-    (void)word;
-    rv_halt(BOOT_CAP_DEBUG, 2);
+    expect("start the prober", rv_invoke(OP_THREAD_RESUME, SLOT_PROBER, 0, 0, 0));
+    expect("hear its fault", fault_wait());
+    expect("PMP stopped the load", probed == 0 ? KERR_OK : KERR_INVALID_ARG);
+    expect("map the region again",
+           rv_invoke(OP_PROCESS_INSTALL, BOOT_CAP_PROCESS, ROOT_SHARED_SLOT, SLOT_SHARED,
+                     RIGHT_R | RIGHT_W));
+    /* Only a stopped thread resumes, so this is also what shows the fault stopped it. */
+    expect("resume the prober where it faulted", rv_invoke(OP_THREAD_RESUME, SLOT_PROBER, 0, 0, 0));
+    expect("hear its breakpoint", fault_wait());
+    expect("the same load went through", probed == MAGIC ? KERR_OK : KERR_INVALID_ARG);
+    puts("root: fault ok\n");
+    rv_halt(BOOT_CAP_DEBUG, 0);
 }
 
 /*

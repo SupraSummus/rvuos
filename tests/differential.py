@@ -11,10 +11,13 @@ The kernel has no console: on QEMU the replay driver carries the log
 to the UART after each record and the halt writes out what the last one left;
 on the host each byte is printed as the kernel appends it.
 Both print one `trace:` line per call from the same kernel code,
-followed by a terminal line: `user fault` when the driver finishes
-with its breakpoint or the records unmapped it,
+and a `user fault` line for each fault of a driver thread,
+which stops that thread alone: when the records unmapped it,
+and when it finds the records done, since the driver ends with a breakpoint.
+The fault's frame is left out, since the host knows no address of the driver's code.
+A terminal line follows:
+`no runnable thread` when every thread of the driver has faulted or blocked,
 `user halt with code` when a record halted the machine,
-`no runnable thread` when every thread of the driver blocked,
 `untraced thread` when the records started a thread
 whose code the host cannot follow,
 `invariant violated`,
@@ -49,8 +52,9 @@ TIMEOUT = 20
 # The line the host prints after each input it replays isolated; HOST_INPUT_END in host/harness.h.
 INPUT_END = "isolated: end of input\n"
 
+# Lines kept wherever they come, and lines that end the trace.
+EVENT_PREFIXES = ("trace:", "user fault")
 TERMINAL_PREFIXES = (
-    "user fault",
     "user halt with code",
     "no runnable thread",
     "untraced thread",
@@ -67,11 +71,11 @@ def decode(raw: bytes) -> str:
 
 
 def relevant_lines(output: str) -> list[str]:
-    """Keep trace lines and the first terminal line, drop everything else."""
+    """Keep trace and fault lines and the first terminal line, drop everything else."""
     lines = []
     for line in output.splitlines():
         line = line.strip()
-        if line.startswith("trace:"):
+        if line.startswith(EVENT_PREFIXES):
             lines.append(line)
         elif line.startswith(TERMINAL_PREFIXES):
             lines.append(line)

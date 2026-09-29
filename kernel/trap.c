@@ -8,31 +8,6 @@
 #include "timer.h"
 #include "trap.h"
 
-static void report_frame(const struct trap_frame *frame)
-{
-    kputs("  mcause=");
-    kput_hex(frame->mcause);
-    kputs(" mepc=");
-    kput_hex(frame->mepc);
-    kputs(" mtval=");
-    kput_hex(frame->mtval);
-    kputc('\n');
-}
-
-static __attribute__((noreturn)) void handle_user_fault(struct trap_frame *frame)
-{
-    /*
-     * Every fault stops the machine, even when another thread could run.
-     * A faulting thread has nobody to report to yet:
-     * that would be a notification the kernel signals,
-     * or a state its creator can read, and neither exists.
-     * Stopping and printing is the honest placeholder; see TODO.md.
-     */
-    kputs("user fault\n");
-    report_frame(frame);
-    khalt(4);
-}
-
 struct trap_frame *trap_handler(struct trap_frame *frame)
 {
     struct thread *t = current;
@@ -89,7 +64,9 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
         case CAUSE_LOAD_MISALIGNED:
         case CAUSE_STORE_MISALIGNED:
         case CAUSE_BREAKPOINT:
-            handle_user_fault(frame);
+            /* The thread's alone: it stops, its watch hears, and the machine goes on. */
+            fault_dispatch(t);
+            break;
         default:
             kputs("unhandled trap\n");
             report_frame(frame);
