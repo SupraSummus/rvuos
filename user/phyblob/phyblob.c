@@ -1,10 +1,8 @@
 /*
  * The harness the PHY tracer runs: what ESP-IDF does on the ESP32-C6 from esp_phy_enable
  * up to and including register_chipv7_phy, with a full calibration, and nothing else.
- * It runs in a process that maps no device, so each register access below,
- * the ones this file makes and the ones libphy.a and the ROM make, faults,
- * and user/phytrace.c carries it out and prints it; see phytrace.h.
- * The accesses this file makes stand for ESP-IDF's code, which is open, and not for the library.
+ * Every register access, this file's and those of libphy.a and the ROM, faults to the tracer; see phytrace.h.
+ * This file's accesses stand for ESP-IDF's open code, not for the library.
  */
 
 #include <stdbool.h>
@@ -28,7 +26,6 @@ typedef struct {
 /* libphy.a. */
 int register_chipv7_phy(const esp_phy_init_data_t *init_data, esp_phy_calibration_data_t *cal_data, int mode);
 void phy_bbpll_en_usb(bool enable);
-char *get_phy_version_str(void);
 
 /* ESP-IDF's default init data, generated from its phy_init_data.c by tools/phy-init-data.py. */
 extern const esp_phy_init_data_t phy_init_data;
@@ -131,8 +128,7 @@ void phyblob_main(void)
     int ret = register_chipv7_phy(&phy_init_data, &cal_data, PHY_RF_CAL_FULL);
 
     mark("done");
-    request(PHYBLOB_PRINTF, (uint32_t)"register_chipv7_phy returned %d, phy_version %s\n", (uint32_t)ret,
-            (uint32_t)get_phy_version_str());
+    request(PHYBLOB_PRINTF, (uint32_t)"register_chipv7_phy returned %d\n", (uint32_t)ret, 0);
     request(PHYBLOB_DUMP, (uint32_t)&cal_data, sizeof(cal_data), 0);
 }
 
