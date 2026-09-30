@@ -47,12 +47,14 @@ Open work only; an item leaves this file in the commit that finishes it.
   since libFuzzer grows the limit by bytes and a record is sixteen;
   `-len_control=20` reached more edges in a short run.
   Measure it with `make mutants-fuzz MUTANTS_FUZZ=-e` before `make fuzz` takes it.
-- The corpus holds no input with `OP_DEBUG_PREEMPT` or a load or store record,
-  and `make mutants-fuzz` finds neither `alloc-in-dying-pool` nor `bind-in-dying-pool`,
-  from the corpus or from nothing, in 5000 runs:
+- The corpus holds no input with a load or store record:
+  the fuzzer makes them, but none reaches an edge of the kernel the other inputs do not.
+- `make mutants-fuzz` finds neither `alloc-in-dying-pool` nor `bind-in-dying-pool`,
+  from the corpus or from nothing, in 5000 runs,
+  and fifteen minutes of `make fuzz` with `-fork=4`, about 186 000 runs, made no input that catches either:
   a stop armed at the right place, a pool dying and an allocation from another thread
   are three records the mutator must line up.
-  Fuzz longer with the typed mutator and rebuild the corpus, `make corpus-merge`.
+  A mutation that inserts the three together is untried.
 - `fuzz-work` counts the loop annotations' claims only where the corpus reaches.
   The host's `irq_claim` never returns a line,
   so nothing counts the claims on the way from an interrupt through `sched_claim_interrupts`,
