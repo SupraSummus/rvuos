@@ -36,7 +36,7 @@
 # Each mutant runs in a copy of it with the timestamps kept,
 # so make recompiles only what the patch touches.
 # The mutants run in parallel, one per processor or -j of them,
-# and each replays on one QEMU.
+# and each replays on one QEMU up to the first input that fails.
 #
 # Usage: tests/mutants.sh [-j jobs] [name...]      logs go under build/mutants/
 
@@ -50,7 +50,7 @@ input_end="isolated: end of input"
 
 # Run one make target in a mutant's tree; the log goes under build/mutants/.
 run() {
-    (cd "$tree" && make -s "$1" REPLAY_JOBS=1 >"$logs/$name.$1.log" 2>&1)
+    (cd "$tree" && make -s "$1" REPLAY_JOBS=1 REPLAY_FAIL_FAST=1 >"$logs/$name.$1.log" 2>&1)
 }
 
 # What the mutant's header lines of one name say, a line for each.

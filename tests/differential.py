@@ -152,6 +152,8 @@ def main() -> int:
     ap.add_argument("--kernel", required=True, help="kernel image with the replay driver")
     ap.add_argument("--host", required=True, help="host fuzz binary")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 2)
+    ap.add_argument("--fail-fast", action="store_true",
+                    help="stop at the first input that fails")
     ap.add_argument("inputs", nargs="+", help="input files or directories")
     args = ap.parse_args()
 
@@ -179,6 +181,12 @@ def main() -> int:
             if kind is not None:
                 failures += 1
                 print(f"{kind} {name}\n{detail}")
+                if args.fail_fast:
+                    # The inputs not yet begun are dropped; those under way finish unseen.
+                    for f in futures:
+                        f.cancel()
+                    print("stopped at the first input that fails")
+                    return 1
 
     print(f"{len(paths) - failures}/{len(paths)} inputs pass:"
           " host and QEMU agree and no invariant is violated")

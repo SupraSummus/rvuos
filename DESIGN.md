@@ -2024,7 +2024,8 @@ but a mutant only they catch counts as missed:
 `make test` runs one scenario with the self-check off
 and catches a bug only when the transcript changes;
 `make qemu-replay` catches one when the default machine's self-check reports it
-or the two traces differ.
+or the two traces differ,
+and since the list says only whether it does, `make mutants` stops it at the first input that fails.
 QEMU's clock counts instructions, not the host's time,
 so a run takes the same path however many run beside it.
 `make mutants-refresh` carries the patches over a change in the kernel

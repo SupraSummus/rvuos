@@ -187,9 +187,6 @@ Open work only; an item leaves this file in the commit that finishes it.
 - Once a record binds a driver thread to units, and so to time the others do not have,
   passing a record round may come back before it visited every runnable thread,
   and a record for a thread that could run is performed by another.
-- `make qemu-replay` boots QEMU once per input, about 40 ms each,
-  which is now most of what a mutant costs `make mutants`.
-  A driver that replays several inputs per boot would need the kernel back to its boot state in between.
 - The seeds under `tests/seeds` are binary and were written by hand.
   Renumbering a `BOOT_CAP_*` or `REPLAY_CAP_*` slot takes a one-off script
   that knows which argument of which operation is a slot,
