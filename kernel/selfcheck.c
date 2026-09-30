@@ -74,6 +74,47 @@ static uint32_t aligned_size(const struct obj_header *o)
     return ((uint32_t)obj_size(o) + OBJ_ALIGN - 1) & ~(uint32_t)(OBJ_ALIGN - 1);
 }
 
+/* The walks of object.h, here so that the host fuzzer's coverage leaves them out with the self-check. */
+struct obj_header *pool_first(struct pool *pool)
+{
+    return pool_next(pool, &pool->hdr);
+}
+
+struct obj_header *pool_next(struct pool *pool, struct obj_header *obj)
+{
+    paddr_t next = v2p(obj) + aligned_size(obj);
+    if (next >= pool_base(pool) + pool->used) {
+        return NULL;
+    }
+    return p2v(next);
+}
+
+struct obj_header *object_first(void)
+{
+    return pool_list != NULL ? &pool_list->hdr : NULL;
+}
+
+struct obj_header *object_next(struct obj_header *obj)
+{
+    struct pool *pool = obj_pool(obj);
+    struct obj_header *next = pool_next(pool, obj);
+    if (next != NULL) {
+        return next;
+    }
+    struct pool *np = pool_next_pool(pool);
+    return np != NULL ? &np->hdr : NULL;
+}
+
+struct obj_header *object_find(paddr_t p)
+{
+    for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
+        if (v2p(o) == p) {
+            return o;
+        }
+    }
+    return NULL;
+}
+
 static void check_pools(void)
 {
     /* The kernel's memory lies below its log, and nothing granted may reach it. */
@@ -931,10 +972,12 @@ static void check_node(const struct cap *n, uint32_t bound)
     }
     /* The parent's ring is this one: it comes round to the node. */
     steps = 0;
-    for (link = parent->child; live_node(link) != n; link = live_node(link)->next) {
-        if ((link & LINK_UP) || live_node(link) == NULL || ++steps > bound) {
+    link = parent->child;
+    for (const struct cap *s = live_node(link); s != n; s = live_node(link)) {
+        if ((link & LINK_UP) || s == NULL || ++steps > bound) {
             fail("parent's ring does not reach the slot", v2p(n), v2p(parent), link);
         }
+        link = s->next;
     }
     /* The predecessor is the sibling whose next is this node; the first child's is the last. */
     const struct cap *pred = live_node(n->prev);
@@ -950,19 +993,29 @@ static void check_node(const struct cap *n, uint32_t bound)
 /* Every node of the forest in turn, filled or not: a table's slots, a process's, a pool's own. */
 struct node_iter {
     struct obj_header *o;
-    uint32_t i;
+    const struct cap *nodes;
+    uint32_t count, i;
 };
+
+/* The walk at the first node of o, or at the end for NULL. */
+static void node_enter(struct node_iter *it, struct obj_header *o)
+{
+    it->o = o;
+    it->nodes = NULL;
+    it->count = 0;
+    it->i = 0;
+    if (o != NULL) {
+        it->nodes = obj_nodes(o, &it->count);
+    }
+}
 
 static const struct cap *node_next(struct node_iter *it)
 {
     while (it->o != NULL) {
-        uint32_t count;
-        const struct cap *nodes = obj_nodes(it->o, &count);
-        if (it->i < count) {
-            return &nodes[it->i++];
+        if (it->i < it->count) {
+            return &it->nodes[it->i++];
         }
-        it->o = object_next(it->o);
-        it->i = 0;
+        node_enter(it, object_next(it->o));
     }
     return NULL;
 }
@@ -997,16 +1050,17 @@ static bool lies_below(const struct cap *n, const struct cap *ancestor)
 static void check_tree(void)
 {
     tree_bound = 1;
-    struct node_iter it = { object_first(), 0 };
+    struct node_iter it;
+    node_enter(&it, object_first());
     while (node_next(&it) != NULL) {
         tree_bound++;
     }
-    it = (struct node_iter){ object_first(), 0 };
+    node_enter(&it, object_first());
     for (const struct cap *n = node_next(&it); n != NULL; n = node_next(&it)) {
         check_node(n, tree_bound);
     }
     /* A forest: from every node the links up reach a root. */
-    it = (struct node_iter){ object_first(), 0 };
+    node_enter(&it, object_first());
     for (const struct cap *n = node_next(&it); n != NULL; n = node_next(&it)) {
         if (n->type != CAP_NONE) {
             lies_below(n, NULL);
@@ -1036,13 +1090,14 @@ static bool made_root(const struct cap *u)
  */
 static void check_nesting(void)
 {
-    struct node_iter it = { object_first(), 0 };
+    struct node_iter it, jt;
+    node_enter(&it, object_first());
     for (const struct cap *x = node_next(&it); x != NULL; x = node_next(&it)) {
         uint32_t xbase, xsize;
         if ((x->type != CAP_UNTYPED && x->type != CAP_RETYPED) || !node_range(x, &xbase, &xsize)) {
             continue;
         }
-        struct node_iter jt = { object_first(), 0 };
+        node_enter(&jt, object_first());
         for (const struct cap *y = node_next(&jt); y != NULL; y = node_next(&jt)) {
             uint32_t ybase, ysize;
             if (y == x || !node_range(y, &ybase, &ysize) || !ranges_overlap(xbase, xsize, ybase, ysize)) {

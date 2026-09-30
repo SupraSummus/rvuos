@@ -207,7 +207,10 @@ HOST_SRC        := host/shim.c host/history.c host/mutator.c host/fuzz.c
 # What the fuzzer's coverage leaves out: the self-check and the harness only look at what the kernel did,
 # and their walks over every object after every call would reward an input for the objects it leaves
 # and spend most of a run in comparisons traced for the fuzzer.
+# They are most of what a run costs, and not the code under test,
+# so they go without the frames ASan keeps apart to find a use after return, which the kernel keeps.
 HOST_UNCOVERED  := kernel/selfcheck.c host/%
+HOST_UNCOVERED_FLAGS := -fsanitize-address-use-after-return=never
 
 FUZZ_TIME ?= 60
 
@@ -238,7 +241,7 @@ $(1): $(call host_obj,$(1))
 $(1).obj/%.o: %.c
 	@mkdir -p $$(dir $$@)
 	$$(HOST_CC) $$(HOST_CFLAGS) $$(HOST_MACHINE) $$(HOST_SAN) \
-		$$(if $$(filter $$(HOST_UNCOVERED),$$<),,-fsanitize=fuzzer-no-link) -MMD -MP -c $$< -o $$@
+		$$(if $$(filter $$(HOST_UNCOVERED),$$<),$$(HOST_UNCOVERED_FLAGS),-fsanitize=fuzzer-no-link) -MMD -MP -c $$< -o $$@
 endef
 $(foreach h,$(HOST_HARNESSES),$(eval $(call host_harness,$(h))))
 
@@ -271,11 +274,20 @@ mutants-fuzz:
 # The kernel's edges are nearly all reached, so the values its comparisons meet guide the search too:
 # a pool run out at the one allocation that fails is a size compared, not an edge.
 # `make mutants-fuzz` measures with the same flags.
+# FUZZ_JOBS processes fuzz at once, one per processor unless set, taking up what the others add to the working copy.
+# Each writes build/host/fuzz-<n>.log, the run prints how each ended,
+# and a failure leaves its input at the top of the tree.
+# libFuzzer's fork mode made a third fewer runs in a minute: each job it starts replays part of the corpus first.
 FUZZ_FLAGS := -max_len=2048 -len_control=100 -use_value_profile=1
+FUZZ_JOBS  ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
 fuzz: $(HOST_BUILD)/fuzz
 	@mkdir -p $(HOST_CORPUS)
 	cp -n tests/seeds/* tests/corpus/* $(HOST_CORPUS)/
-	$(HOST_BUILD)/fuzz -max_total_time=$(FUZZ_TIME) $(FUZZ_FLAGS) $(HOST_CORPUS)
+	rm -f $(HOST_BUILD)/fuzz-*.log
+	cd $(HOST_BUILD) && ./fuzz -max_total_time=$(FUZZ_TIME) -jobs=$(FUZZ_JOBS) -workers=$(FUZZ_JOBS) \
+		-artifact_prefix=$(CURDIR)/ $(FUZZ_FLAGS) $(CURDIR)/$(HOST_CORPUS); \
+	status=$$?; grep -H -E 'DONE|invariant violated|kernel panic|runtime error|ERROR|Test unit written' fuzz-*.log; \
+	exit $$status
 
 # Rebuild tests/corpus from scratch out of itself and the working copy.
 # The seeds go in first and stay; each harness in turn then keeps
