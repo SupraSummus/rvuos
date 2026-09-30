@@ -151,9 +151,10 @@ The build is `rv32imac`, `ilp32`, compiled with clang and linked with lld.
 
 ### Boards
 
-Two boards are supported, chosen with `make BOARD=<board>`:
+Three boards are supported, chosen with `make BOARD=<board>`:
 `qemu`, QEMU `virt` for RV32, the default,
-and `esp32c6`, an Espressif ESP32-C6.
+`esp32c6`, an Espressif ESP32-C6,
+and `rp2350`, a Raspberry Pi RP2350 on its RISC-V cores, as on a Pico 2.
 Everything board-specific lives in `kernel/board/<board>/`,
 `board.h`, `board.c`, `irq.c`, `timer.c` and `halt.c`,
 and in `user/board/<board>/console.h`,
@@ -244,6 +245,46 @@ Whenever another process has run, a program finds them set back: `utvec` at 1, t
 No interrupt is delegated to user mode,
 and the dedicated GPIO reaches no pad, since no process is granted the GPIO matrix.
 
+#### RP2350
+
+The bootrom's BOOTSEL mode loads the image into SRAM over USB and reboots into it on the RISC-V cores;
+nothing is written to flash.
+The chip has no serial port on USB while the kernel runs,
+so the console is a block of RAM, and the halt sends it to the host over a USB serial port it makes then.
+
+Memory map:
+
+| Range | Size | What |
+|---|---|---|
+| `0x400B0028` | 8 B | TIMER0's `TIMERAWL`, 1 MHz, read only through `BOOT_CAP_CLOCK`; the word above it is not the high half |
+| `0x20000000` to `0x2001F000` | 124 KiB | kernel code, data and stack |
+| `0x2001F000` | 4 KiB | the kernel log: a 32-byte header and the ring |
+| `0x20020000` | 128 KiB | the root task's memory, granted to it as an Untyped with all rights, which has made the four ranges below and makes nothing more |
+| `0x20020000` | 64 KiB | root task code, read and execute |
+| `0x20030000` | 32 KiB | root task data and stack, read and write |
+| `0x20038000` | 4 KiB | input region, read only; nothing fills it yet |
+| `0x20039000` | 4 KiB | the boot pool |
+| `0x20040000` | 256 KiB | free RAM, granted to the root task as an Untyped with all rights |
+| `0x20080000` | 8 KiB | the console, SRAM8 and SRAM9, granted to the root task |
+
+Interrupt lines:
+
+| Line | What |
+|---|---|
+| 0 | the kernel log; TIMER0's IRQ 0 cannot be bound |
+| 1 to 51 | the system IRQs, numbered as in the datasheet; nothing raises the console's line, 46 |
+
+The console's first word counts every byte written, and the bytes follow from offset 16;
+what does not fit is counted and dropped.
+The tick is 1 kHz, on the microseconds of the RISC-V platform timer.
+The PMP has eight entries and a 32-byte grain, so no region is smaller than 32 bytes.
+A fault reports `mtval` as zero, and a misaligned access raises a misaligned exception.
+User mode reaches a peripheral only where the chip's ACCESSCTRL lets it in,
+and then every process does, whatever frames it holds: TIMER0, for the clock, is the one opened.
+The counter's high half lies below it, so `rv_counter_read` gets a constant high word
+and wraps after 71 minutes.
+A watchdog reboots the chip into BOOTSEL about seventeen seconds after boot, so no run lasts longer.
+
 ## 4. Building and running
 
 Requirements: clang and lld with RISC-V support, llvm-objcopy,
@@ -251,6 +292,8 @@ GNU make and `qemu-system-riscv32`.
 No separate cross toolchain is needed.
 The host build needs clang's sanitizer and libFuzzer runtimes.
 The ESP32-C6 needs Espressif's `esptool`, version 5, as a command and as a Python module.
+RP2350 needs Python's `pyusb` and write access to the chip's USB devices,
+which a udev rule such as `SUBSYSTEM=="usb", ATTRS{idVendor}=="2e8a", TAG+="uaccess"` gives.
 
 ```
 make             # build/qemu/kernel-init.elf and build/qemu/kernel-fuzzdrv.elf
@@ -280,6 +323,17 @@ Opening the port resets the chip,
 so `tools/esp32c6-run.py` loads the image and reads the console on one connection.
 Only the demo is built for the board; the replay driver is QEMU's for now.
 
+On RP2350, in BOOTSEL mode, as it is when plugged in with BOOTSEL held and again after each run:
+
+```
+make BOARD=rp2350                    # build/rp2350/kernel-init.elf
+make BOARD=rp2350 run                # load it into RAM and print the transcript the halt writes
+make BOARD=rp2350 test escape        # check the transcripts
+```
+
+`tools/rp2350-run.py` loads the image through the bootrom's PICOBOOT interface,
+waits for the halt's serial port and reads it; closing it reboots the chip into BOOTSEL.
+
 The kernel image embeds one user program, the root task.
 Two images are built, differing only in that program:
 `kernel-init.elf` carries the demo of `user/init.c`
@@ -298,6 +352,7 @@ Two things carry that log to the board's UART:
 
 So a line that appears before that marker was carried out from user mode,
 and a line after it was salvaged by the halt.
+On RP2350 both reach the host at the halt, the logger's from its console, in the same order.
 
 The kernel prints three lines at boot:
 
@@ -309,7 +364,8 @@ rvuos: entering user mode
 
 On QEMU a halt exits the emulator with a status code.
 The ESP32-C6 parks its core instead, after the line `rvuos: halted with code <n>`,
-and `tools/esp32c6-run.py` exits with that code:
+and RP2350 reboots into BOOTSEL once the host has read that line;
+the board's runner exits with the code:
 
 | Code | Meaning |
 |---|---|
@@ -771,7 +827,7 @@ work();
 uint64_t ticks = rv_counter_read(counter) - start;   /* ticks / hz seconds */
 ```
 
-The rate is the board's, 10 MHz on QEMU and the CPU clock on the ESP32-C6,
+The rate is the board's, 10 MHz on QEMU, the CPU clock on the ESP32-C6 and 1 MHz on RP2350,
 so a program takes it from `OP_CLOCK_INFO`.
 The time is the machine's, not the thread's: it includes other threads' slices.
 Revoking below a `Clock` capability uninstalls every region derived through it.
@@ -1013,7 +1069,8 @@ Appends it to the kernel log.
 **`OP_DEBUG_HALT` (2).**
 `a1` = exit code.
 Stops the machine; on QEMU the emulator exits with that code,
-and on the ESP32-C6 the core parks after printing it.
+on the ESP32-C6 the core parks after printing it,
+and RP2350 prints it and reboots into BOOTSEL.
 Does not return.
 
 **`OP_DEBUG_TRACE` (10).**
@@ -1350,7 +1407,7 @@ and drops into user mode with:
 | 8 | `BOOT_CAP_FREE_RAM` | `Untyped`: the block of RAM the board sets aside for the root task | all |
 | 9 | `BOOT_CAP_INPUT` | `Frame`: test input the loader placed in RAM | read |
 | 10 | `BOOT_CAP_IRQ_LINES` | `IrqLine`: line 0 (the log) and every controller line | write |
-| 11 | `BOOT_CAP_UART` | `Frame`: the board's console registers, a 16550 on QEMU and the USB Serial/JTAG controller on the ESP32-C6 | read, write |
+| 11 | `BOOT_CAP_UART` | `Frame`: the board's console registers, a 16550 on QEMU, the USB Serial/JTAG controller on the ESP32-C6, a block of RAM on RP2350 | read, write |
 | 12 | `BOOT_CAP_LOG` | `Frame`: the kernel log's header and ring | read, write |
 | 13 | `BOOT_CAP_TIMER_LINES` | `IrqLine`: every timer line, `TIMER_LINES` of them | write |
 | 14 | `BOOT_CAP_CLOCK` | `Clock`: the machine's counter | all |
@@ -1615,7 +1672,7 @@ and `tests/mutants/` holds one planted bug per invariant.
 | most of its units an account holds | 100 ticks' worth, 100 ms (`ACCOUNT_TICKS`) | `kernel/timer.h` |
 | timer delay or period per call | 2^32 - 1 µs | `OP_IRQ_SET` |
 | tick | 1 ms (`TIMER_HZ` 1000) | `kernel/timer.h` |
-| interrupt lines | 96 on QEMU, 77 on the ESP32-C6, line 0 the log's | `IRQ_LINES` |
+| interrupt lines | 96 on QEMU, 77 on the ESP32-C6, 52 on RP2350, line 0 the log's | `IRQ_LINES` |
 | smallest region | 8 bytes, or the PMP grain if coarser | `region_min_size` in `kernel/pmp.h` |
 | kernel log ring | 4 KiB less a 32-byte header | `KLOG_SIZE` |
 | replay records per input | 256 | `REPLAY_MAX_RECORDS` |
@@ -1640,7 +1697,7 @@ These are documented gaps, not surprises;
   Shared memory and notifications carry everything; open decision 5.
 - **One `Irq` per line**; open decision 11.
 - **No boot from flash.**
-  The ESP32-C6 runs from RAM, loaded by its ROM over USB.
+  The ESP32-C6 and RP2350 run from RAM, loaded by their ROMs over USB.
 - **No loader.**
   The image embeds one program, linked at fixed addresses;
   a second process runs code from the same region.

@@ -136,6 +136,9 @@ The kernel is the only code that runs in machine mode.
 The trap vector is in vectored mode on every board,
 a table whose every entry jumps to the one entry point,
 because the ESP32-C6 has no direct mode.
+User mode runs with `mstatus.MIE` set, from the `MPIE` the kernel sets before its first `mret`:
+the specification takes machine interrupts in user mode whatever `MIE` holds,
+but RP2350's Hazard3 takes none there while it is clear, erratum RP2350-E7.
 
 ### Physical Memory Protection
 
@@ -172,7 +175,8 @@ Consequences that shape the design:
   one value per hart, and ignores the address bits below it.
   QEMU and the ESP32-C6 have four bytes, RP2350 has 32.
   The smallest NAPOT block is eight bytes; four would need NA4, which rvuos does not use.
-  The kernel probes the grain at boot
+  The kernel probes the grain at boot, taking none finer than the board's `PMP_GRAIN_MIN`,
+  since RP2350's address registers do not show theirs and the probe finds four bytes there,
   and a `Frame` or `Untyped` that is not a block of at least that size never exists:
   the boot layout is checked once and carving and retyping require it,
   so every frame is exactly one PMP entry.
@@ -191,9 +195,12 @@ Consequences that shape the design:
   and a store that faults may leave its first part written.
   The ESP32-C6 checks the second part for the wrong kind of access; see "Boards".
 - **The CSRs are WARL and may be hardwired.**
-  RP2350 fixes three entries to its ROM and peripheral ranges.
-  The probe at boot writes each entry's address and mode and reads them back,
-  and the budget is the leading run of entries that take both.
+  RP2350 fixes entries 8 to 10 to its ROM, peripheral and SIO ranges, with every right for user mode:
+  their configuration is read only, though their address seems to take a write.
+  The probe at boot writes each entry's mode, with no rights, and then its address, and reads them back,
+  and the budget is the leading run of entries that take both, eight on RP2350.
+  RP2350 also transposes R and X in every configuration field, erratum RP2350-E6,
+  which `pmp.c` swaps on the way to the CSRs and back.
 - **Context switch cost is the PMP reload.**
   Switching processes rewrites every `pmpaddr` and `pmpcfg` in use.
   Threads within one process share regions
@@ -238,10 +245,14 @@ whose counter and interrupt stay off until a control word starts them,
 and which counts at the CPU clock the ROM left;
 the kernel measures one tick of it against the 16 MHz system timer at boot
 rather than trust a clock it did not set.
+RP2350's is the RISC-V platform timer in the Secure bank of SIO,
+counting the microseconds a tick generator divides from the crystal.
 
 A process reads the counter through a read-only region at `COUNTER_ADDR`, not with `rdtime`:
 the ESP32-C6 has no `time` CSR, but its CLINT has `UTIME`, a read-only copy of `mtime` for user mode.
 On QEMU the kernel clears `mcounteren` at boot, so `rdtime` traps on every board; see "Time".
+User mode does not reach RP2350's SIO timer, so there the counter is TIMER0's, counting the same microseconds;
+TIMER0 keeps its high half below its low one, so the word above the counter is not its high half; see `TODO.md`.
 
 ### Interrupt controller
 
@@ -276,6 +287,14 @@ for the lowest line that is high and routed;
 nothing is held between claim and completion,
 since masking the line already lowers the CPU interrupt.
 Source 0, the Wi-Fi MAC's, is shadowed by the log's line and cannot be bound.
+
+RP2350's Hazard3 keeps its controller in CSRs of its own, the Xh3irq extension:
+arrays of one bit per system IRQ that enable it, show it pending and force it,
+each reached through a 16-bit window.
+rvuos makes a line an IRQ, gives every IRQ the same priority,
+and a claim takes the lowest line both pending and enabled;
+as on the ESP32-C6, nothing is held between claim and completion.
+IRQ 0, TIMER0's, is shadowed by the log's line.
 
 ### One address space
 
@@ -1276,6 +1295,11 @@ and its `khalt` writes the same dump by polling to the USB Serial/JTAG console,
 then a line with the code a simulator would have exited with,
 so that the same transcript check runs on the board;
 a console no host reads is given up on rather than waited for.
+RP2350 has no serial port on USB, and its bootrom wipes RAM on entering BOOTSEL,
+so there the logger's console is a block of RAM,
+and the halt makes a USB CDC-ACM port of the chip's controller, `kernel/board/rp2350/cdc.c`,
+writes the block and then the dump to it, and reboots into BOOTSEL once the host has read them.
+It is the one USB stack in the kernel, and it runs only once the kernel has stopped.
 The ring is just under 4 KiB, a burst's worth between two looks by a reader,
 and a reader that looks less often loses the oldest bytes and can tell.
 
@@ -1285,7 +1309,8 @@ The image contains the kernel followed by the root task.
 How it reaches RAM is the board's; see "Boards".
 The kernel:
 
-1. makes the board ready, which on the ESP32-C6 means watchdogs off,
+1. makes the board ready, which on the ESP32-C6 means watchdogs off
+   and on RP2350 its clocks set and a watchdog armed,
    and sets up its own stack and trap vector,
 2. discovers the PMP entry count and grain by writing the CSRs and reading them back,
 3. carves its own static state out of a small fixed SRAM range,
@@ -1365,8 +1390,10 @@ A board is the files of `kernel/board/<board>/` and `user/board/<board>/`,
 chosen with `make BOARD=<board>`:
 `board.h`, where RAM, the root task, the console and the timer's registers lie,
 how many interrupt lines there are and which mcause the controller raises,
-and whether the core checks a misaligned store's second word for reading, `PMP_SPLIT_STORE_AS_READ`,
-which `kernel/layout.h` and both linker scripts read;
+whether the core checks a misaligned store's second word for reading, `PMP_SPLIT_STORE_AS_READ`,
+which `kernel/layout.h` and both linker scripts read,
+whether it transposes R and X in `pmpcfg`, `PMP_CFG_RX_TRANSPOSED`,
+and the finest grain it may have, `PMP_GRAIN_MIN`;
 `board.c`, what the board needs before anything else and the CSRs it sets back for each process;
 `timer.c`, which starts the timer `kernel/clint.c` drives;
 `irq.c` and `halt.c`;
@@ -1421,6 +1448,21 @@ a fault on the second word reports the access's address plus four in `mtval`.
 So the install keeps such regions apart, see "Region slots",
 and the layout leaves a block between the log and the code and one between the data and the input.
 A program compiled for strict alignment meets neither half.
+
+**RP2350** runs the demo root task and the escape suite on its Hazard3 cores, `make BOARD=rp2350 test escape`.
+The bootrom's BOOTSEL mode takes the image's segments into SRAM over USB and reboots into them,
+finding the image by the block `image.S` puts at `RAM_BASE`;
+`tools/rp2350-run.py` drives that, and reads the transcript the halt writes.
+Only core 0 runs; core 1 waits in the bootrom.
+A watchdog armed at boot and never fed reboots the chip into BOOTSEL after about seventeen seconds,
+so a run that hangs comes back without a hand on the board, and no run lasts longer.
+Measured on an A2 chip: eight PMP entries before three hardwired ones,
+a 32-byte grain the probe does not see, `mtval` always zero,
+and misaligned accesses that raise misaligned exceptions rather than split.
+User mode reaches a peripheral only where ACCESSCTRL lets it in, which at reset it does for few;
+the hardwired PMP entries leave every peripheral and the Non-secure bank of SIO to user mode,
+so a peripheral ACCESSCTRL opens is open to every process, frame or no frame.
+TIMER0 is opened, for the clock; see `TODO.md`.
 
 ## Bounded work
 
@@ -1897,7 +1939,10 @@ It executes from the no-execute data region and jumps into the kernel, mcause 1,
 reads a machine-mode CSR from user mode and runs `mret` there, mcause 2,
 loads a misaligned word across the end of the data region, mcause 5,
 stores one from a region it may write into one it may only read, mcause 7,
-and stores into the kernel, mcause 7 too.
+stores into the kernel, mcause 7 too,
+and loads the word just past a frame of the smallest region's size, mcause 5,
+which a kernel that took the grain for finer than it is lets through.
+A core that raises misaligned exceptions instead, as RP2350's does, reports 4 and 6 for the misaligned two.
 The user linker script says where the kernel starts, for these scenarios alone.
 The fuzzer's whole attack surface is a system call's registers,
 so this suite is what runs real instructions on the real core
@@ -2050,7 +2095,7 @@ until the maintainer decides otherwise.
 1. **Target hardware.**
    Decision: QEMU `virt` for RV32 stays the development target,
    using only machine and user mode,
-   and the ESP32-C6 is the first real board; see "Boards".
+   the ESP32-C6 is the first real board and RP2350 the second; see "Boards".
    QEMU implements 16 PMP entries;
    `PMP_MAX_ENTRIES` caps how many the kernel uses,
    so the design can be exercised with a budget of 8 or fewer.
@@ -2060,8 +2105,7 @@ until the maintainer decides otherwise.
    what it needs from Espressif's second-stage bootloader,
    and whether execute-in-place goes through a cache the kernel must control,
    are listed in `TODO.md`.
-   Other candidate: RP2350 on its Hazard3 cores,
-   whose NAPOT-only PMP open decision 8 no longer rules out.
+   RP2350 runs from RAM too, loaded by its bootrom.
    Cores without PMP, GD32VF103 among them, cannot run rvuos.
 
 2. **Implementation language.**
@@ -2124,8 +2168,9 @@ until the maintainer decides otherwise.
    but a region cost one or two entries depending on its neighbours,
    two ranges could overlap in part,
    and cores without TOR, RP2350 among them, were out.
-   RP2350's PMP is no longer in the way;
-   its hardwired entries and `mtval` reading zero still are.
+   RP2350's PMP is no longer in the way,
+   but its hardwired entries leave every peripheral to user mode,
+   and its `mtval` reads zero; see "Boards".
 
 9. **Scheduling policy beyond units.**
    Decided in part: units of time earned by one thread each, an account per thread they fill,

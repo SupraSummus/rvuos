@@ -8,6 +8,7 @@
 
 #include "csr.h"
 #include "kernel.h"
+#include "layout.h"
 #include "pmp.h"
 
 _Static_assert(PMP_MAX_ENTRIES >= 1 && PMP_MAX_ENTRIES <= 16,
@@ -79,6 +80,22 @@ static uint8_t pmpcfg_get_byte(unsigned idx)
     return (uint8_t)(pmpcfg_read(idx / 4) >> ((idx % 4) * 8));
 }
 
+/*
+ * A pmpcfg byte as the board's CSRs lay it out, and back, since the swap undoes itself.
+ * RP2350 transposes R and X, erratum RP2350-E6; see PMP_CFG_RX_TRANSPOSED in board.h.
+ * Everything else in the kernel reads and writes the bytes as the specification has them.
+ */
+static uint8_t pmpcfg_board(uint8_t cfg)
+{
+#if PMP_CFG_RX_TRANSPOSED
+    uint8_t r = cfg & PMP_R ? PMP_X : 0;
+    uint8_t x = cfg & PMP_X ? PMP_R : 0;
+    return (uint8_t)((cfg & ~(PMP_R | PMP_X)) | r | x);
+#else
+    return cfg;
+#endif
+}
+
 unsigned pmp_entry_count;
 uint32_t pmp_grain;
 
@@ -104,25 +121,31 @@ void pmp_init(void)
         back >>= 1;
         pmp_grain <<= 1;
     }
+    /* RP2350's core hides its grain from the recipe; see PMP_GRAIN_MIN in board.h. */
+    if (pmp_grain < PMP_GRAIN_MIN) {
+        pmp_grain = PMP_GRAIN_MIN;
+    }
 
     /*
      * The image uses entries from zero up, so the budget ends at the first
-     * entry whose address or mode ignores a write, as RP2350's hardwired ones do.
-     * NAPOT is the only mode the image uses, so it is the mode probed.
+     * entry whose mode, rights or address ignores a write.
+     * NAPOT is the only mode the image uses, so it is the mode probed, with no rights.
+     * The configuration goes first, since RP2350's hardwired entries hold theirs read only
+     * but seem to take a write of their address; see DESIGN.md, "Physical Memory Protection".
      */
     unsigned count = 0;
     for (unsigned i = 0; i < PMP_MAX_ENTRIES; i++) {
+        pmpcfg_set_byte(i, PMP_A_NAPOT);
+        uint8_t cfg = pmpcfg_get_byte(i);
+        pmpcfg_set_byte(i, 0);
+        if (cfg != PMP_A_NAPOT) {
+            break;
+        }
         pmpaddr_write(i, 0xffffffffu);
         uint32_t ones = pmpaddr_read(i);
         pmpaddr_write(i, 0);
         uint32_t zero = pmpaddr_read(i);
         if (ones == zero) {
-            break;
-        }
-        pmpcfg_set_byte(i, PMP_A_NAPOT);
-        uint8_t cfg = pmpcfg_get_byte(i);
-        pmpcfg_set_byte(i, 0);
-        if ((cfg & 0x18) != PMP_A_NAPOT) {
             break;
         }
         count++;
@@ -134,7 +157,7 @@ void pmp_set(unsigned idx, uint32_t addr, uint8_t cfg)
 {
     /* Address first, then rights; harmless today since PMP is off in machine mode. */
     pmpaddr_write(idx, addr);
-    pmpcfg_set_byte(idx, cfg);
+    pmpcfg_set_byte(idx, pmpcfg_board(cfg));
 }
 
 void pmp_clear(unsigned idx)
@@ -146,5 +169,5 @@ void pmp_clear(unsigned idx)
 void pmp_get(unsigned idx, uint32_t *addr, uint8_t *cfg)
 {
     *addr = pmpaddr_read(idx);
-    *cfg = pmpcfg_get_byte(idx);
+    *cfg = pmpcfg_board(pmpcfg_get_byte(idx));
 }

@@ -6,7 +6,8 @@
  * and the word at the lower's last two bytes is stored to.
  * The ESP32-C6 would write the upper's two bytes, see DESIGN.md, "Boards",
  * so there the kernel refuses the pair; the program tries both orders and requires the same answer.
- * Either way the store must fault, mcause=7, naming its own address in mepc.
+ * Either way the store must fault, mcause=7, naming its own address in mepc,
+ * or raise a misaligned exception, mcause=6, on a core that does not split it.
  * Were the store allowed the program would say so, which fails the run; see tests/escape.sh.
  *
  * One escape per program: the fault stops the only thread, and the machine with nothing left to run;

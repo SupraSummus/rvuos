@@ -37,6 +37,9 @@ or anything the demo or the escape suite exercises, and an ESP32-C6 is connected
 run `make BOARD=esp32c6 test escape` as well;
 it loads the demo into the chip's RAM and checks the same transcript,
 then boots each escape scenario, the only check of the board's install rule.
+The same goes for `kernel/board/rp2350/` and `user/board/rp2350/`
+with an RP2350 connected in BOOTSEL mode, `make BOARD=rp2350 test escape`,
+the only check of its PMP quirks.
 A new kernel global needs a reset in `host_boot` too,
 since the host boots once per input in one process.
 A new `BOOT_CAP_*` or `REPLAY_CAP_*` slot, or an operation whose arguments change,

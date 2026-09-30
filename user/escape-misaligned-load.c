@@ -5,7 +5,7 @@
  * into memory the root task holds no region over.
  * A core may split a misaligned load and check each part on its own,
  * but the part past the region must fault, mcause=5, naming the load's own address in mepc;
- * mtval is the board's.
+ * mtval is the board's, and a core that does not split it raises a misaligned exception, mcause=4.
  * Were the load allowed the program would say what it read, which fails the run; see tests/escape.sh.
  *
  * One escape per program: the fault stops the only thread, and the machine with nothing left to run;

@@ -41,12 +41,15 @@ void kmain(void)
 
     kputs("rvuos: entering user mode\n");
     /*
-     * mret drops to the mode in MPP with MIE clear,
-     * which gates nothing in user mode: machine interrupts
-     * are always taken there, so the tick runs from the first instruction.
+     * mret drops to the mode in MPP with MIE set from MPIE, which is set:
+     * machine interrupts are taken in user mode whatever MIE holds,
+     * but for RP2350's Hazard3, which takes none there while it is clear, erratum RP2350-E7.
+     * A trap from user mode saves MIE into MPIE, so every later mret sets it again.
+     * So the tick runs from the first instruction.
      * Every device line starts masked and stays so until an Irq is armed on it.
      */
     irq_init();
-    csr_clear(mstatus, MSTATUS_MPP_MASK | MSTATUS_MPIE);
+    csr_clear(mstatus, MSTATUS_MPP_MASK);
+    csr_set(mstatus, MSTATUS_MPIE);
     trap_return(&root->frame);
 }

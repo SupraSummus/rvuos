@@ -1,13 +1,18 @@
 #!/bin/sh
 # Boot the kernel and check the expected transcript.
 # Usage: tests/run.sh "<command that boots it>" <PMP entries the kernel may use>
-# The command is QEMU on BOARD=qemu and tools/esp32c6-run.py on BOARD=esp32c6;
-# either exits with the status the kernel halted with.
+# The command is QEMU on BOARD=qemu and the board's runner in tools/ on the others;
+# each exits with the status the kernel halted with.
+# A board whose core differs sets BOARD_FACTS in the Makefile: the PMP entries and grain the probe finds,
+# BOARD_MTVAL=zero where mtval reads zero, and BOARD_MISALIGNED=trap for tests/escape.sh.
 
 set -eu
 
 boot_cmd=$1
 max_entries=$2
+board_entries=${BOARD_PMP_ENTRIES:-16}
+board_grain=${BOARD_PMP_GRAIN:-4}
+board_mtval=${BOARD_MTVAL:-address}
 log=$(mktemp)
 trap 'rm -f "$log"' EXIT
 
@@ -34,11 +39,11 @@ dump=$(grep -n 'rvuos: halting, the log follows' "$log" | head -1 | cut -d: -f1)
 # The first occurrence of a line, for comparing against the dump's position.
 first() { grep -n "$1" "$log" | head -1 | cut -d: -f1; }
 grep -q 'rvuos: machine mode up' "$log" || fail "kernel did not boot"
-# QEMU and the ESP32-C6 implement sixteen entries with a four-byte grain,
-# of which the probe must find as many as the kernel may use.
-entries=$(printf '0x%08x' $((max_entries < 16 ? max_entries : 16)))
-grep -q "rvuos: pmp entries $entries grain 0x00000004" "$log" \
-    || fail "PMP probe did not report $entries entries and a four-byte grain"
+# The probe must find as many of the core's entries as the kernel may use.
+entries=$(printf '0x%08x' $((max_entries < board_entries ? max_entries : board_entries)))
+grain=$(printf '0x%08x' "$board_grain")
+grep -q "rvuos: pmp entries $entries grain $grain" "$log" \
+    || fail "PMP probe did not report $entries entries and a grain of $grain"
 grep -q 'the layout fits the smallest region: ok' "$log" \
     || fail "the root task did not see the smallest region"
 grep -q 'hello from user mode' "$log" || fail "user mode did not run"
@@ -99,6 +104,7 @@ grep -q 'user fault' "$log" || fail "PMP fault was not caught"
 # The successor says where its prober reads; the fault must name that address.
 addr=$(sed -n 's/.*reading the removed region at \(0x[0-9a-f]*\),.*/\1/p' "$log" | head -1)
 [ -n "$addr" ] || fail "the successor did not say where its prober reads"
+[ "$board_mtval" = address ] || addr=0x00000000
 grep -q "mcause=0x00000005 mepc=0x........ mtval=$addr" "$log" \
     || fail "fault was not a load access fault on the removed region from user code"
 grep -q ': FAILED' "$log" && fail "a step failed"

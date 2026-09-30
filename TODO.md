@@ -21,6 +21,22 @@ Open work only; an item leaves this file in the commit that finishes it.
   below the ROM's buffers or over USB once the kernel runs,
   and the replay driver's second stack has to follow the board's data region.
 
+## RP2350
+
+- The clock's counter is TIMER0's `TIMERAWL`, whose high half, `TIMERAWH`, lies the word below,
+  so `rv_counter_read` takes `DBGPAUSE` for the high word and the counter wraps after 71 minutes.
+  `OP_CLOCK_INFO` could return where the high half lies, which changes the ABI.
+- The hardwired PMP entries leave every peripheral to user mode, so ACCESSCTRL alone keeps a process off a device,
+  for every process at once; TIMER0 is open to all of them.
+  A last entry that denies the whole address space would put devices behind frames again, at one entry's cost;
+  the device store under "Verification", aimed at TIMER0, would show the difference.
+- `mtval` reads zero, so a fault report names no address.
+- The logger drives no device here: its console is RAM, which only the halt carries out.
+  A root task with a driver for the USB controller would let the log out while the machine runs.
+- Find out whether writing a hardwired entry's address moves its region.
+  The probe used to write them, and some runs hung then; it no longer does.
+- Boot from flash, feed the replay corpus to the board, and start core 1, which waits in the bootrom.
+
 ## Verification
 
 - `fuzz-work` counts the loop annotations' claims only where the corpus reaches.

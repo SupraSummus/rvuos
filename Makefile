@@ -4,6 +4,7 @@
 # BOARD selects kernel/board/<board>/ and user/board/<board>/:
 #   qemu     QEMU virt, the default and the one `make check` runs on
 #   esp32c6  an ESP32-C6, loaded into RAM through its ROM over USB
+#   rp2350   an RP2350 on its Hazard3 cores, loaded into RAM through its bootrom over USB
 #
 # Kernel images differ only in the embedded root task:
 #   build/<board>/kernel-init.elf     the root task of user/init.c, used by `make test`
@@ -78,15 +79,27 @@ PORT          ?= /dev/ttyACM0
 ESPTOOL_PYTHON ?= $(or $(shell sed -n '1s/^\#!//p' "$$(command -v $(ESPTOOL))" 2>/dev/null),python3)
 RUN_INIT      := $(ESPTOOL_PYTHON) tools/esp32c6-run.py --port $(PORT) $(BUILD)/kernel-init.bin
 ESCAPE_PREFIX := $(ESPTOOL_PYTHON) tools/esp32c6-run.py --port $(PORT)
+else ifeq ($(BOARD),rp2350)
+# The replay driver's layout is QEMU's, so only the demo is built, as for the ESP32-C6.
+# The runner loads the ELF's segments itself; it needs pyusb.
+USER_PROGRAMS := init
+IMAGE         := elf
+RP2350_PYTHON ?= python3
+RUN_INIT      := $(RP2350_PYTHON) tools/rp2350-run.py $(BUILD)/kernel-init.elf
+ESCAPE_PREFIX := $(RP2350_PYTHON) tools/rp2350-run.py
+# Where the core's transcripts differ from QEMU's and the ESP32-C6's, see tests/run.sh:
+# eight PMP entries, a 32-byte grain, mtval always zero, and misaligned accesses that trap.
+BOARD_FACTS   := BOARD_PMP_ENTRIES=8 BOARD_PMP_GRAIN=32 BOARD_MTVAL=zero BOARD_MISALIGNED=trap
 else
-$(error unknown BOARD '$(BOARD)'; the boards are qemu and esp32c6)
+$(error unknown BOARD '$(BOARD)'; the boards are qemu, esp32c6 and rp2350)
 endif
 
 # The escape-attempt suite: one root task per scenario, built for whichever board.
 # Each program uses only boot capabilities every board grants,
-# so the same scenarios run on QEMU and on the ESP32-C6.
+# so the same scenarios run on every board.
 ESCAPE_PROGRAMS := escape-execute-data escape-jump-kernel escape-csrr escape-mret \
-                   escape-misaligned-load escape-misaligned-store escape-store-kernel
+                   escape-misaligned-load escape-misaligned-store escape-store-kernel \
+                   escape-past-region
 
 .PHONY: all clean run test escape host-harnesses host-test fuzz corpus-merge qemu-replay mutants mutants-refresh check
 
@@ -163,14 +176,14 @@ run: $(BUILD)/kernel-init.$(IMAGE)
 
 # Boot the root task of user/init.c and check its transcript.
 test: $(BUILD)/kernel-init.$(IMAGE)
-	tests/run.sh "$(RUN_INIT)" $(PMP_MAX_ENTRIES)
+	$(BOARD_FACTS) tests/run.sh "$(RUN_INIT)" $(PMP_MAX_ENTRIES)
 
 # The escape-attempt suite: boot each scenario and check the hardware faults it
 # as its runner expects. PMP and privilege confine a process, so this runs on the
 # target like `make test`, never on the host. See DESIGN.md, "Verification", and TODO.md.
 escape: $(foreach p,$(ESCAPE_PROGRAMS),$(BUILD)/kernel-$(p).$(IMAGE))
 	for p in $(ESCAPE_PROGRAMS); do \
-		tests/escape.sh "$(ESCAPE_PREFIX) $(BUILD)/kernel-$$p.$(IMAGE)" $$p || exit 1; \
+		$(BOARD_FACTS) tests/escape.sh "$(ESCAPE_PREFIX) $(BUILD)/kernel-$$p.$(IMAGE)" $$p || exit 1; \
 	done
 
 # Host build: the kernel's logic compiled natively,

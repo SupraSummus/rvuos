@@ -1,0 +1,220 @@
+#!/usr/bin/env python3
+"""Boot an rvuos image on an RP2350 from RAM and print what it writes.
+
+The chip must be in its BOOTSEL mode, as it is when plugged in with BOOTSEL held,
+after the last image this ran has halted and been read,
+or seventeen seconds after one that hung, when its watchdog reboots it there.
+The bootrom's PICOBOOT interface takes the ELF's segments into SRAM over USB
+and reboots into them on the RISC-V cores, so nothing is written to flash.
+The kernel has no serial port while it runs; its halt makes one of the chip's USB controller,
+and writes out the root task's console and the kernel's log;
+see kernel/board/rp2350/halt.c.
+The halt ends with "rvuos: halted with code <n>",
+and this exits with that code, as QEMU exits with the kernel's.
+Closing the port then reboots the chip into BOOTSEL for the next image.
+
+Usage: tools/rp2350-run.py [--timeout seconds] image.elf
+"""
+
+import argparse
+import glob
+import os
+import re
+import select
+import struct
+import sys
+import termios
+import time
+import tty
+
+try:
+    import usb.core
+    import usb.util
+except ImportError:
+    sys.exit("tools/rp2350-run.py needs pyusb: pacman -S python-pyusb, or pip install pyusb")
+
+BOOTSEL = (0x2E8A, 0x000F)
+# The halt's serial port; see kernel/board/rp2350/cdc.c.
+HALT_PORT = (0x1209, 0x0001)
+
+# Where the bootrom looks for the image's block when it reboots into RAM, and how far;
+# see kernel/board/rp2350/board.h and image.S.
+RAM_BASE = 0x20000000
+RAM_SEARCH = 0x80000
+
+PICOBOOT_MAGIC = 0x431FD10B
+PC_EXCLUSIVE_ACCESS = 0x01
+PC_WRITE = 0x05
+PC_REBOOT2 = 0x0A
+PC_INTERFACE_RESET = 0x41
+EXCLUSIVE = 1
+REBOOT2_RAM_IMAGE = 0x3
+REBOOT2_TO_RISCV = 0x20
+
+HALTED = re.compile(rb"rvuos: halted with code 0x([0-9a-f]{8})")
+
+
+def say(*words):
+    print("rp2350-run:", *words, file=sys.stderr, flush=True)
+
+
+def elf_segments(path):
+    """The loadable segments of a 32-bit little-endian ELF, as (address, bytes)."""
+    data = open(path, "rb").read()
+    if data[:4] != b"\x7fELF" or data[4] != 1 or data[5] != 1:
+        sys.exit(f"{path} is not a 32-bit little-endian ELF")
+    phoff, = struct.unpack_from("<I", data, 28)
+    phentsize, phnum = struct.unpack_from("<HH", data, 42)
+    segments = []
+    for i in range(phnum):
+        p_type, p_offset, _, p_paddr, p_filesz, _, _, _ = struct.unpack_from("<8I", data, phoff + i * phentsize)
+        if p_type == 1 and p_filesz > 0:
+            segments.append((p_paddr, data[p_offset:p_offset + p_filesz]))
+    return segments
+
+
+def usb_device(ids):
+    return usb.core.find(idVendor=ids[0], idProduct=ids[1])
+
+
+def halt_port():
+    """The tty of the halt's serial port, or None while there is none."""
+    for dev in glob.glob("/sys/bus/usb/devices/*"):
+        try:
+            vid = int(open(f"{dev}/idVendor").read(), 16)
+            pid = int(open(f"{dev}/idProduct").read(), 16)
+        except OSError:
+            continue
+        if (vid, pid) == HALT_PORT:
+            ttys = glob.glob(f"{dev}/{os.path.basename(dev)}:1.0/tty/tty*")
+            if ttys:
+                return "/dev/" + os.path.basename(ttys[0])
+    return None
+
+
+def wait_for(find, timeout):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        found = find()
+        if found is not None:
+            return found
+        time.sleep(0.05)
+    return None
+
+
+def open_port(path):
+    """The halt's port, raw, opened: which raises DTR and so starts the halt writing."""
+    for _ in range(40):
+        try:
+            fd = os.open(path, os.O_RDWR | os.O_NOCTTY)
+            break
+        except OSError:
+            time.sleep(0.05)
+    else:
+        sys.exit(f"cannot open {path}")
+    tty.setraw(fd)
+    attrs = termios.tcgetattr(fd)
+    attrs[2] |= termios.HUPCL | termios.CLOCAL  # closing drops DTR, which reboots the chip
+    termios.tcsetattr(fd, termios.TCSANOW, attrs)
+    return fd
+
+
+def to_bootsel():
+    """The chip in BOOTSEL, rebooting it there if an image before has halted and waits for a reader."""
+    dev = usb_device(BOOTSEL)
+    if dev is not None:
+        return dev
+    port = halt_port()
+    if port is not None:
+        say(f"an earlier halt waits on {port}; letting it go")
+        os.close(open_port(port))
+    dev = wait_for(lambda: usb_device(BOOTSEL), 5.0)
+    if dev is None:
+        sys.exit("no RP2350 in BOOTSEL mode: hold BOOTSEL while plugging it in")
+    return dev
+
+
+class Picoboot:
+    def __init__(self, dev):
+        self.dev = dev
+        cfg = dev.get_active_configuration()
+        self.intf = usb.util.find_descriptor(cfg, bInterfaceClass=0xFF)
+        if self.intf is None:
+            sys.exit("the chip's BOOTSEL mode shows no PICOBOOT interface")
+        try:
+            usb.util.claim_interface(dev, self.intf)
+        except usb.core.USBError as e:
+            sys.exit(f"cannot claim PICOBOOT ({e}); the device needs a udev rule giving you access, see MANUAL.md")
+        eps = self.intf.endpoints()
+        self.out = next(e for e in eps if usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_OUT)
+        self.inp = next(e for e in eps if usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_IN)
+        self.token = 1
+        dev.ctrl_transfer(0x41, PC_INTERFACE_RESET, 0, self.intf.bInterfaceNumber, None)
+
+    def command(self, cmd, args=b"", data=b""):
+        packet = struct.pack("<IIBBHI", PICOBOOT_MAGIC, self.token, cmd, len(args), 0, len(data))
+        packet += args.ljust(16, b"\0")
+        self.token += 1
+        self.out.write(packet)
+        if data:
+            self.out.write(data, timeout=10000)
+        self.inp.read(64, timeout=10000)  # the empty packet that says the command is done
+
+    def write(self, addr, data):
+        self.command(PC_WRITE, struct.pack("<II", addr, len(data)), data)
+
+    def reboot_ram(self, base, size):
+        args = struct.pack("<IIII", REBOOT2_RAM_IMAGE | REBOOT2_TO_RISCV, 10, base, size)
+        self.command(PC_REBOOT2, args)
+
+
+def load(path):
+    boot = Picoboot(to_bootsel())
+    boot.command(PC_EXCLUSIVE_ACCESS, bytes([EXCLUSIVE]))
+    for addr, data in elf_segments(path):
+        say(f"writing {len(data)} bytes at {addr:#010x}")
+        boot.write(addr, data)
+    boot.reboot_ram(RAM_BASE, RAM_SEARCH)
+    usb.util.dispose_resources(boot.dev)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--timeout", type=float, default=None,
+                        help="give up after this many seconds; by default wait for the halt")
+    parser.add_argument("image")
+    args = parser.parse_args()
+
+    deadline = None if args.timeout is None else time.monotonic() + args.timeout
+    load(args.image)
+    say("booted; waiting for the halt's serial port")
+    port = wait_for(halt_port, 1e9 if deadline is None else deadline - time.monotonic())
+    if port is None:
+        sys.exit("timed out before the kernel halted")
+    fd = open_port(port)
+    pending = b""
+    while deadline is None or time.monotonic() < deadline:
+        ready, _, _ = select.select([fd], [], [], 0.05)
+        if not ready:
+            continue
+        try:
+            chunk = os.read(fd, 4096)
+        except OSError:
+            break
+        if not chunk:
+            break
+        pending += chunk
+        while b"\n" in pending:
+            line, pending = pending.split(b"\n", 1)
+            sys.stdout.write(line.rstrip(b"\r").decode(errors="replace") + "\n")
+            sys.stdout.flush()
+            halted = HALTED.search(line)
+            if halted:
+                os.close(fd)
+                sys.exit(int(halted.group(1), 16))
+    sys.stdout.write(pending.decode(errors="replace"))
+    sys.exit("the port closed, or the time ran out, before the kernel halted")
+
+
+if __name__ == "__main__":
+    main()

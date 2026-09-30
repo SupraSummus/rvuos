@@ -40,6 +40,12 @@
  */
 #define PMP_SPLIT_STORE_AS_READ 1
 
+/* Every pmpcfg field lies as the privileged specification lays it out; see RP2350's board.h. */
+#define PMP_CFG_RX_TRANSPOSED 0
+
+/* The probe finds the grain, so the board adds nothing to it; see RP2350's board.h. */
+#define PMP_GRAIN_MIN U32(4)
+
 /*
  * The console: the USB Serial/JTAG controller,
  * which the host sees as a CDC-ACM serial port on the chip's own USB connector.

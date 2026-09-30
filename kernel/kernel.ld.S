@@ -27,6 +27,11 @@ SECTIONS
 {
     . = RAM_BASE;
 
+    /* What a board's boot ROM looks for at the start of an image; RP2350's, and nothing elsewhere. */
+    .board_header : {
+        KEEP(*(.board_header))
+    }
+
     .text : {
         KEEP(*(.text.start))
         *(.text .text.*)

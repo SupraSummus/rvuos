@@ -30,6 +30,12 @@
 /* A misaligned store is checked for writing throughout; see the ESP32-C6's board.h. */
 #define PMP_SPLIT_STORE_AS_READ 0
 
+/* Every pmpcfg field lies as the privileged specification lays it out; see RP2350's board.h. */
+#define PMP_CFG_RX_TRANSPOSED 0
+
+/* The probe finds the grain, so the board adds nothing to it; see RP2350's board.h. */
+#define PMP_GRAIN_MIN U32(4)
+
 /*
  * The UART: a 16550 at UART_BASE, raising PLIC source 10.
  * It is the root task's, granted as BOOT_CAP_UART with its line;
