@@ -16,7 +16,8 @@ board_grain=${BOARD_PMP_GRAIN:-4}
 board_mtval=${BOARD_MTVAL:-address}
 board_arch=${BOARD_ARCH:-riscv}
 log=$(mktemp)
-trap 'rm -f "$log"' EXIT
+text=$(mktemp)
+trap 'rm -f "$log" "$text"' EXIT
 
 set +e
 # The demo takes a few seconds; the rest is for a loaded machine, as under `make mutants`.
@@ -40,60 +41,69 @@ dump=$(grep -n 'rvuos: halting, the log follows' "$log" | head -1 | cut -d: -f1)
 [ -n "$dump" ] || fail "the halt did not write the log out"
 # The first occurrence of a line, for comparing against the dump's position.
 first() { grep -n "$1" "$log" | head -1 | cut -d: -f1; }
-grep -q 'rvuos: .* mode up' "$log" || fail "kernel did not boot"
+# The logger stops wherever its last turn ended, which may be within a line,
+# and the halt's line then lies between the line's two halves;
+# what was written is read with that line taken out and the halves joined again.
+awk -v at="$dump" '
+NR == at - 1 { sub(/\r$/, ""); partial = $0; next }
+NR == at { next }
+NR == at + 1 { print partial $0; next }
+{ print }
+' "$log" > "$text"
+grep -q 'rvuos: .* mode up' "$text" || fail "kernel did not boot"
 # The probe must find as many of the core's entries as the kernel may use.
 entries=$(printf '0x%08x' $((max_entries < board_entries ? max_entries : board_entries)))
 grain=$(printf '0x%08x' "$board_grain")
 if [ "$board_arch" = arm ]; then regions="mpu regions"; else regions="pmp entries"; fi
-grep -q "rvuos: $regions $entries grain $grain" "$log" \
+grep -q "rvuos: $regions $entries grain $grain" "$text" \
     || fail "the protection unit's probe did not report $entries entries and a grain of $grain"
-grep -q 'the layout fits the smallest region: ok' "$log" \
+grep -q 'the layout fits the smallest region: ok' "$text" \
     || fail "the root task did not see the smallest region"
-grep -q 'hello from user mode' "$log" || fail "user mode did not run"
-grep -q 'root: message ok' "$log" || fail "the child's message did not arrive"
-grep -q 'child: reply ok' "$log" || fail "the root task's answer did not arrive"
-grep -q 'root: preemption ok' "$log" \
+grep -q 'hello from user mode' "$text" || fail "user mode did not run"
+grep -q 'root: message ok' "$text" || fail "the child's message did not arrive"
+grep -q 'child: reply ok' "$text" || fail "the root task's answer did not arrive"
+grep -q 'root: preemption ok' "$text" \
     || fail "the tick did not take the processor from a spinning thread"
-grep -q 'root: revocation ok' "$log" \
+grep -q 'root: revocation ok' "$text" \
     || fail "a destroyed pool did not revoke the capabilities into it"
-grep -q 'child: revoked here too' "$log" \
+grep -q 'child: revoked here too' "$text" \
     || fail "revocation did not reach the other process's table"
-grep -q 'root: derivation ok' "$log" \
+grep -q 'root: derivation ok' "$text" \
     || fail "revoking below a frame did not take what was derived and installed from it"
-grep -q 'child: lease revoked here too' "$log" \
+grep -q 'child: lease revoked here too' "$text" \
     || fail "the revoke did not reach the derived capability in the other process's table"
-grep -q 'child: pool made' "$log" || fail "the child could not pool the lent memory"
-grep -q 'root: cascade ok' "$log" \
+grep -q 'child: pool made' "$text" || fail "the child could not pool the lent memory"
+grep -q 'root: cascade ok' "$text" \
     || fail "revoking the lent memory did not destroy the pool the child made of it"
-grep -q 'root: timer ok' "$log" \
+grep -q 'root: timer ok' "$text" \
     || fail "the timer did not wake the only thread from its sleep"
-grep -q 'root: clock ok' "$log" \
+grep -q 'root: clock ok' "$text" \
     || fail "the clock's counter, read through its region, did not show the sleeps' length"
-grep -q 'root: period ok' "$log" \
+grep -q 'root: period ok' "$text" \
     || fail "a periodic timer line drifted from its period"
-grep -q 'root: units ok' "$log" \
+grep -q 'root: units ok' "$text" \
     || fail "threads on spare time took the time a thread earned, or it ran past its units"
-grep -q 'root: unbind ok' "$log" \
+grep -q 'root: unbind ok' "$text" \
     || fail "a thread ran after its units were revoked"
-grep -q 'root: rebind ok' "$log" \
+grep -q 'root: rebind ok' "$text" \
     || fail "a thread bound to units again did not run, or another ran with it"
-grep -q 'root: spare ok' "$log" \
+grep -q 'root: spare ok' "$text" \
     || fail "a thread without spare time ran past its units, or one with it did not run on spare time"
-grep -q 'root: charge ok' "$log" \
+grep -q 'root: charge ok' "$text" \
     || fail "a thread that sleeps across every tick ran past its units"
-grep -q 'root: tickless ok' "$log" \
+grep -q 'root: tickless ok' "$text" \
     || fail "the timer interrupted the only thread to run at ticks that changed nothing"
-grep -q 'the idle line stays quiet: ok' "$log" \
+grep -q 'the idle line stays quiet: ok' "$text" \
     || fail "an armed line nothing raises signalled"
-grep -q 'root: irq ok' "$log" \
+grep -q 'root: irq ok' "$text" \
     || fail "destroying the irq's pool did not free its line"
-grep -q 'the root task cannot destroy its own pool: ok' "$log" \
+grep -q 'the root task cannot destroy its own pool: ok' "$text" \
     || fail "a thread destroyed the pool it lives in"
-grep -q 'successor: the user-mode csrs set back: ok' "$log" \
+grep -q 'successor: the user-mode csrs set back: ok' "$text" \
     || fail "the user-mode CSRs the root task marked reached the successor's process"
-grep -q 'root: handover ok' "$log" \
+grep -q 'root: handover ok' "$text" \
     || fail "a successor given everything the root task held could not destroy the root task and take its place"
-grep -q 'root: fault ok' "$log" \
+grep -q 'root: fault ok' "$text" \
     || fail "a fault stopped more than its thread, its watch did not hear it, a resume did not run the load again, or its registers did not move it on"
 # The logger carried the kernel's banner and the root task's output to the UART itself,
 # one byte per interrupt, before the halt wrote the log out.
@@ -103,22 +113,22 @@ grep -q 'root: fault ok' "$log" \
     || fail "the logger did not carry the kernel's log out before the halt did"
 [ "$(first 'root: timer ok')" -lt "$dump" ] \
     || fail "the logger did not carry the root task's output out before the halt did"
-grep -q 'user fault' "$log" || fail "PMP fault was not caught"
+grep -q 'user fault' "$text" || fail "PMP fault was not caught"
 # The successor says where its prober reads; the fault must name that address.
-addr=$(sed -n 's/.*reading the removed region at \(0x[0-9a-f]*\),.*/\1/p' "$log" | head -1)
+addr=$(sed -n 's/.*reading the removed region at \(0x[0-9a-f]*\),.*/\1/p' "$text" | head -1)
 [ -n "$addr" ] || fail "the successor did not say where its prober reads"
 [ "$board_mtval" = address ] || addr=0x00000000
 # RISC-V says a load access fault; ARMv7-M a MemManage, a data access violation with its address valid.
 if [ "$board_arch" = arm ]; then load_fault="exception=0x00000004 cfsr=0x00000082 pc=0x........ addr=$addr"
 else load_fault="mcause=0x00000005 mepc=0x........ mtval=$addr"; fi
-grep -q "$load_fault" "$log" \
+grep -q "$load_fault" "$text" \
     || fail "fault was not a load access fault on the removed region from user code"
 # OP_THREAD_FAULT told the successor what the kernel reported, the pc with its Thumb bit on ARM.
-at=$(grep -o "$load_fault" "$log" | head -1 | sed 's/.*pc=\(0x[0-9a-f]\{8\}\).*/\1/')
+at=$(grep -o "$load_fault" "$text" | head -1 | sed 's/.*pc=\(0x[0-9a-f]\{8\}\).*/\1/')
 if [ "$board_arch" = arm ]; then told="cause=0x00000004 pc=$(printf '0x%08x' $((at | 1))) addr=$addr status=0x00000082"
 else told="cause=0x00000005 pc=$at addr=$addr status=0x00000000"; fi
-grep -q "the prober's fault: $told" "$log" \
+grep -q "the prober's fault: $told" "$text" \
     || fail "OP_THREAD_FAULT did not tell the load access fault the kernel reported"
-grep -q ': FAILED' "$log" && fail "a step failed"
+grep -q ': FAILED' "$text" && fail "a step failed"
 
 echo "PASS"

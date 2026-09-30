@@ -4,7 +4,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* What trap.c needs of systick.c and nvic.c, the timer and the controller every Cortex-M has, and what start.S calls. */
+/*
+ * What trap.c needs of systick.c and nvic.c, the timer and the controller every Cortex-M has,
+ * and of mpu.c, and what start.S calls.
+ */
 
 /*
  * Whether the counter has reached the compare: the timer interrupt is due,
@@ -20,6 +23,10 @@ extern uint32_t nvic_entered;
 
 /* Whether a line is pending and enabled, which the kernel, running at every line's priority, does not take. */
 bool nvic_pending(void);
+
+/* The MPU off as the kernel runs, from the start of a trap, and on as a thread runs, from the end of frame_give. */
+void mpu_kernel(void);
+void mpu_thread(void);
 
 /* trap.c: the core set up before kmain, and the hardware frame written as a trap returns, where psp is to point. */
 void arch_init(void);

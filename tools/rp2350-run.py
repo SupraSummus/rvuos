@@ -6,7 +6,8 @@ after the last image this ran has halted and been read,
 or seventeen seconds after one that hung, when its watchdog reboots it there.
 The bootrom's PICOBOOT interface takes the ELF's segments into SRAM over USB,
 which this reads back and checks every command's status,
-and reboots into them on the RISC-V cores, so nothing is written to flash.
+and reboots into them, on the RISC-V cores or the Arm ones as the ELF's machine says,
+so nothing is written to flash.
 The kernel has no serial port while it runs; its halt makes one of the chip's USB controller,
 and writes out the root task's console and the kernel's log;
 see kernel/board/rp2350/halt.c.
@@ -49,13 +50,18 @@ PC_READ = 0x84
 PC_WRITE = 0x05
 PC_REBOOT2 = 0x0A
 PC_GET_INFO = 0x8B
-PC_INTERFACE_RESET = 0x41
-PC_COMMAND_STATUS = 0x42
 GET_INFO_SYS = 1
 SYS_INFO_CPU_INFO = 0x4
+PC_INTERFACE_RESET = 0x41
+PC_COMMAND_STATUS = 0x42
 EXCLUSIVE = 1
 REBOOT2_RAM_IMAGE = 0x3
+REBOOT2_TO_ARM = 0x10
 REBOOT2_TO_RISCV = 0x20
+# The cores to reboot into, by the ELF's e_machine.
+EM_ARM = 40
+EM_RISCV = 243
+REBOOT2_CORES = {EM_ARM: REBOOT2_TO_ARM, EM_RISCV: REBOOT2_TO_RISCV}
 
 HALTED = re.compile(rb"rvuos: halted with code 0x([0-9a-f]{8})")
 
@@ -64,11 +70,14 @@ def say(*words):
     print("rp2350-run:", *words, file=sys.stderr, flush=True)
 
 
-def elf_segments(path):
-    """The loadable segments of a 32-bit little-endian ELF, as (address, bytes)."""
+def elf_image(path):
+    """The machine of a 32-bit little-endian ELF, and its loadable segments as (address, bytes)."""
     data = open(path, "rb").read()
     if data[:4] != b"\x7fELF" or data[4] != 1 or data[5] != 1:
         sys.exit(f"{path} is not a 32-bit little-endian ELF")
+    machine, = struct.unpack_from("<H", data, 18)
+    if machine not in REBOOT2_CORES:
+        sys.exit(f"{path} is for machine {machine}, which RP2350 has no cores for")
     phoff, = struct.unpack_from("<I", data, 28)
     phentsize, phnum = struct.unpack_from("<HH", data, 42)
     segments = []
@@ -76,7 +85,7 @@ def elf_segments(path):
         p_type, p_offset, _, p_paddr, p_filesz, _, _, _ = struct.unpack_from("<8I", data, phoff + i * phentsize)
         if p_type == 1 and p_filesz > 0:
             segments.append((p_paddr, data[p_offset:p_offset + p_filesz]))
-    return segments
+    return machine, segments
 
 
 def usb_device(ids):
@@ -190,16 +199,16 @@ class Picoboot:
         info = self.command(PC_GET_INFO, struct.pack("<BBHIII", GET_INFO_SYS, 0, 0, SYS_INFO_CPU_INFO, 0, 0), read=16)
         return "riscv" if struct.unpack_from("<II", info)[1] else "arm"
 
-    def reboot_ram(self, base, size):
-        args = struct.pack("<IIII", REBOOT2_RAM_IMAGE | REBOOT2_TO_RISCV, 10, base, size)
+    def reboot_ram(self, machine, base, size):
+        args = struct.pack("<IIII", REBOOT2_RAM_IMAGE | REBOOT2_CORES[machine], 10, base, size)
         self.command(PC_REBOOT2, args, check=False)  # the chip is gone before a status could be asked for
 
 
 def load(path):
     boot = Picoboot(to_bootsel())
     boot.command(PC_EXCLUSIVE_ACCESS, bytes([EXCLUSIVE]))
+    machine, segments = elf_image(path)
     say(f"the bootrom runs on the {boot.cores()} cores")
-    segments = elf_segments(path)
     for addr, data in segments:
         say(f"writing {len(data)} bytes at {addr:#010x}")
         boot.write(addr, data)
@@ -209,7 +218,7 @@ def load(path):
             bad = next(i for i in range(len(data)) if i >= len(got) or got[i] != data[i])
             sys.exit(f"the {len(data)} bytes at {addr:#010x} read back {len(got)} bytes, differing from {addr + bad:#010x}; "
                      "not rebooting into them")
-    boot.reboot_ram(RAM_BASE, RAM_SEARCH)
+    boot.reboot_ram(machine, RAM_BASE, RAM_SEARCH)
     usb.util.dispose_resources(boot.dev)
 
 

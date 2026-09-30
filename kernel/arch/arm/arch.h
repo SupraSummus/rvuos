@@ -6,10 +6,21 @@
 #endif
 
 /*
- * What the rest of the kernel knows of ARMv7-M: a thread's registers as a trap leaves them,
+ * What the rest of the kernel knows of ARMv7-M and ARMv8-M: a thread's registers as a trap leaves them,
  * and which of them carry a call.
  * Each architecture has an arch.h of its own in kernel/arch/<arch>/; see DESIGN.md, "Architectures".
  */
+
+/*
+ * Whether the core is ARMv8-M's Mainline, as RP2350's Cortex-M33 is, and not ARMv7-M:
+ * its MPU is PMSAv8 rather than PMSAv7, and it has a Secure state, which the kernel and every thread keep.
+ * The rest of the kernel sees the two alike.
+ */
+#ifdef __ARM_ARCH_8M_MAIN__
+#define ARMV8M 1
+#else
+#define ARMV8M 0
+#endif
 
 /*
  * Register state saved on every trap.
@@ -37,7 +48,7 @@ struct trap_frame {
     uint32_t cfsr;      /* the configurable fault status the trap left, and cleared */
     uint32_t addr;      /* the address MMFAR or BFAR names when valid, else zero */
     uint32_t psp;       /* where the hardware frame lies: on entry what the core used, on exit what trap.c chose */
-    uint32_t pad;
+    uint32_t sfsr;      /* ARMv8-M's: the secure fault status a SecureFault left, and cleared; else zero */
 };
 
 _Static_assert(sizeof(struct trap_frame) == TRAP_FRAME_SIZE, "trap frame layout must match start.S");

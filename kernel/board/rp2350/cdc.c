@@ -80,7 +80,8 @@
 #define PACKET 64u
 
 /*
- * How long after DTR rises the port starts sending, in microseconds of mtime.
+ * How long after DTR rises the port starts sending, in microseconds of TIMER0's counter,
+ * COUNTER_ADDR, which counts on either kind of core, where mtime counts on Hazard3's alone.
  * Opening the port raises DTR, and until the reader has made its tty raw,
  * the host echoes what comes back and turns CR into LF.
  */
@@ -144,7 +145,7 @@ enum ep0_stage {
 static struct {
     bool configured;
     bool dtr;
-    uint32_t dtr_at;      /* mtime's low word when DTR last rose */
+    uint32_t dtr_at;      /* the counter's low word when DTR last rose */
     uint8_t address;      /* taken once SET_ADDRESS has had its status stage */
     bool address_pending;
     enum ep0_stage stage;
@@ -307,7 +308,7 @@ static void setup(void)
         break;
     case SET_CONTROL_LINE_STATE:
         if ((value & 1u) != 0 && !cdc.dtr) {
-            cdc.dtr_at = REG(CLINT_MTIME);
+            cdc.dtr_at = REG(COUNTER_ADDR);
         }
         cdc.dtr = (value & 1u) != 0;
         status_in();
@@ -428,7 +429,7 @@ void cdc_start(void)
 /* Wait for the host to hold the port open, long enough to have made it raw, and to have taken the last packet. */
 static void cdc_wait_ready(void)
 {
-    while (!cdc.configured || !cdc.dtr || REG(CLINT_MTIME) - cdc.dtr_at < DTR_SETTLE_US || cdc.ep1_busy) {
+    while (!cdc.configured || !cdc.dtr || REG(COUNTER_ADDR) - cdc.dtr_at < DTR_SETTLE_US || cdc.ep1_busy) {
         cdc_poll();
     }
 }

@@ -8,7 +8,7 @@ Work items are in `TODO.md`.
 ## Goals
 
 rvuos is a microkernel for RISC-V microcontrollers,
-and for ARMv7-M ones with an MPU through the same programming model; see "Architectures".
+and for ARMv7-M and ARMv8-M ones with an MPU through the same programming model; see "Architectures".
 It has four goals, in priority order.
 
 1. **Isolation without an MMU.**
@@ -126,7 +126,7 @@ not by held capability.
 ## Hardware model
 
 This section is RISC-V's, where rvuos began;
-"Architectures" says what ARMv7-M has in each place instead.
+"Architectures" says what ARM has in each place instead.
 
 ### Privilege modes
 
@@ -803,7 +803,7 @@ from the frame, which keeps them while the thread stays stopped where it faulted
 A new thread's frame is zero, which is a cause too, so a flag, `THREAD_FAULTED`, tells a fault from none.
 `OP_THREAD_READ_REG` and `OP_THREAD_WRITE_REG` reach any general register of a stopped thread and its program counter,
 so a watcher can emulate the instruction the thread faulted at, write the program counter past it, and resume it;
-what ARMv7-M keeps from such a watcher is open decision 23.
+what ARM keeps from such a watcher is open decision 23.
 A thread that faults again and again fills the log only while its watcher resumes it every time.
 
 **Why a signal, and not a message.**
@@ -1477,13 +1477,17 @@ so the high word a program reads is zero and the counter wraps every 171 seconds
 the kernel counts the wraps for its own tick, see `kernel/board/mps2-an385/timer.c`.
 Measured under QEMU 8.2: eight MPU regions and a bkpt taken as a HardFault, DebugMonitor or not.
 
-**RP2350** runs the demo root task and the escape suite on its Hazard3 cores, `make BOARD=rp2350 test escape`.
+**RP2350** runs the demo root task and the escape suite on its Hazard3 cores, `make BOARD=rp2350 test escape`,
+and the demo on its Cortex-M33 cores, `make BOARD=rp2350 ARCH=arm test`.
+It is one board with two architectures:
+`ARCH` picks the cores, and the files that differ by them lie in `kernel/board/rp2350/<arch>/`.
 The bootrom's BOOTSEL mode takes the image's segments into SRAM over USB and reboots into them,
-finding the image by the block `image.S` puts at `RAM_BASE`;
+on the cores the ELF is for, finding the image by the block `image.S` puts at `RAM_BASE`;
 `tools/rp2350-run.py` drives that, and reads the transcript the halt writes.
 Only core 0 runs; core 1 waits in the bootrom.
 A watchdog armed at boot and never fed reboots the chip into BOOTSEL after about seventeen seconds,
 so a run that hangs comes back without a hand on the board, and no run lasts longer.
+The halt times its port on TIMER0, which counts on either kind of core.
 Measured on an A2 chip: eight PMP entries before three hardwired ones,
 a 32-byte grain the probe does not see, `mtval` always zero,
 and misaligned accesses that raise misaligned exceptions rather than split.
@@ -1492,17 +1496,31 @@ the hardwired PMP entries leave every peripheral and the Non-secure bank of SIO 
 so a peripheral ACCESSCTRL opens is open to every process, frame or no frame.
 TIMER0 is opened, for the clock; see `TODO.md`.
 
-The bootrom leaves the ROSC four times faster than at reset, at a random frequency,
+On the Cortex-M33 the bootrom enters the image's vector table in the Secure state,
+which the kernel and every thread keep, see "Architectures",
+and ACCESSCTRL's reset value already lets Secure unprivileged code into TIMER0.
+The MPU confines a thread's reach to peripherals as to RAM, so there a peripheral is a process's only through a frame.
+The clock's counter is the kernel's counter too, and the compare is SysTick at 150 MHz, clk_sys.
+Measured there: eight Secure MPU regions,
+a SysTick becoming pending that wakes `wfe` with `SEVONPEND`,
+and a MemManage's fault address register that reads its own address, `0xe000ed34`, once the status is cleared,
+so the kernel reads the address first.
+The bootrom leaves a stack limit set and its redundancy coprocessor on; the kernel resets both first.
+
+On either kind of core the bootrom leaves the ROSC four times faster than at reset, at a random frequency,
 behind a divider of four on `clk_ref`, and the kernel switches `clk_ref` to the crystal before dropping the divider;
 dropping it first ran `clk_ref` and `clk_sys` that fast for a moment,
-which hung the chip on about one boot in five,
-so that no watchdog brought it back, the one that counts `clk_ref`'s ticks among them.
+which hung Hazard3 on about one boot in five, and the Cortex-M33 in none of about ten,
+so that no watchdog brought the chip back, the one that counts `clk_ref`'s ticks among them.
 The crystal gets six milliseconds to start, as the pico-sdk gives it.
 
 ## Architectures
 
 An architecture is the files of `kernel/arch/<arch>/` and `user/arch/<arch>/`,
-chosen by the board: `riscv` for QEMU virt, the ESP32-C6 and RP2350's Hazard3, `arm` for mps2-an385.
+chosen by the board: `riscv` for QEMU virt, the ESP32-C6 and RP2350's Hazard3,
+`arm` for mps2-an385's Cortex-M3, ARMv7-M, and RP2350's Cortex-M33, ARMv8-M's Mainline.
+`arm` is both, and `ARMV8M` in its `arch.h` says which the compiler builds for;
+the MPU and the Security state are where they differ.
 The kernel's objects, its capabilities and every operation are the same on both,
 and so is `user/init.c`, which runs the same demo to the same transcript.
 What differs is what a trap is, which registers carry a call, how a region is written to the hardware,
@@ -1513,27 +1531,40 @@ its `frame.c` starts a thread, reports a fault and reads and writes a stopped th
 and `user/arch/<arch>/call.h` is the call as `rvuos.h` makes it.
 A program written against `rvuos.h` is the same source on both, never the same binary.
 
-**Why ARMv7-M's MPU takes the model as it is.**
+**Why the MPU takes the model as it is.**
 A PMSAv7 region is a power of two of at least 32 bytes, aligned to its size, which is a NAPOT block,
 so every frame is one region as it is one PMP entry, and the image in `struct pmp_image` keeps PMP's encoding:
 `kernel/arch/arm/mpu.c` implements `pmp.h`, entry i as region i, and reads a region back as the entry that made it,
 so the self-check of the image and of what the hardware holds is the same code on both.
 Had regions stayed TOR, open decision 8, ARMv7-M could not have held them.
-PMSAv8, ARMv8-M's, takes a base and a limit on 32 bytes, so it holds every block as one region too.
-The kernel runs privileged with the default memory map behind the regions, `PRIVDEFENA`,
-as machine mode runs outside PMP;
-a region takes its memory type from where it lies, normal memory in RAM and a device elsewhere, so a frame carries none.
+PMSAv8, ARMv8-M's, takes a base and a limit on 32 bytes, so it holds every block as one region too,
+and `mpu.c` reads a base and limit back as the block that made them.
+The kernel runs with the MPU off, as machine mode runs outside PMP:
+`mpu_kernel` turns it off as a trap begins and `mpu_thread` on as `frame_give` ends,
+with the default memory map behind the regions, `PRIVDEFENA`, for the kernel's last instructions before the thread.
+PMSAv8's regions bind privileged code too, and none lets the kernel write where the thread only reads, as into the log,
+so on ARMv8-M the kernel could not run with them on.
+PMSAv8 also faults an access two regions match, which no process has, since its regions may not overlap.
+A region takes its memory type from where it lies, normal memory in RAM and a device elsewhere, so a frame carries none;
+a device is nGnRnE on PMSAv8.
 The MPU fetches only what it lets the thread read, so a region may not be execute only there,
 `EXECUTE_NEEDS_READ` in `arch.h`, as no region anywhere may be write only.
 The smallest region is 32 bytes, `PMP_GRAIN_MIN`, which `OP_FRAME_INFO` returns as on RP2350.
 
 **Modes and traps.**
 The kernel runs in handler mode and a thread in thread mode, unprivileged, on the process stack.
+On ARMv8-M both stay in the Secure state the boot ROM entered in:
+the kernel turns the attribution unit off with nothing Non-secure, shuts every coprocessor to both states,
+the floating-point unit among them, so a thread keeps no state beyond its registers,
+and takes a SecureFault as a thread's fault as it takes a MemManage.
+`MSPLIM` bounds the kernel's stack there, and `PSPLIM` nothing.
 Every exception and line has one priority, so none preempts another and the kernel runs as it does in machine mode,
 with interrupts held off;
 only a fault of the kernel's own nests, as a HardFault, and halts.
 An interrupt taken while the kernel runs would have to preempt it, so `wfi` would not wake there:
 `intr_wait` waits in `wfe`, with `SEVONPEND` making a line becoming pending an event, and polls otherwise.
+The architecture makes any exception becoming pending an event, SysTick too, as the Cortex-M33 has it;
+QEMU 11 wakes `wfe` for a line alone, so the ARM demo waits there for ever; see `TODO.md`.
 The kernel leaves thread mode the first time through PendSV,
 which kmain pends and lets in with interrupts, and which nothing pends after.
 A call is `svc`, two bytes, with the operation in `r12`, since Thumb code keeps `r7` as its frame pointer;
@@ -1570,12 +1601,14 @@ The NVIC is the controller: the line a trap enters on is active and no longer pe
 and a line is unmasked with its stale pending state dropped, since the NVIC latches a level masked or not.
 
 **What checks it.**
-Both link checks read Thumb-2, `tools/kthumb.py`, and the ARM kernel links only as the RISC-V one does.
+Both link checks read Thumb-2, `tools/kthumb.py`, and the ARM kernel links only as the RISC-V one does,
+for ARMv7-M and for ARMv8-M alike.
 A fault of the kernel's own nests, and the core pushes its 32-byte frame on the kernel's stack first,
 which `tools/stack-depth.py` does not count; `kernel_trap` takes the stack back at once and halts.
 The host build compiles the kernel with RISC-V's frame, as QEMU virt has it,
 so the fuzzer and `make qemu-replay` see the portable kernel and not `kernel/arch/arm/`,
-which only the link checks and the demo under QEMU exercise, and the escape suite does not run there yet;
+which only the link checks, the demo under QEMU and the demo on RP2350's Cortex-M33 exercise,
+PMSAv8 the last alone, and the escape suite does not run there yet;
 `TODO.md` says what that leaves unchecked.
 
 ## Bounded work
@@ -1712,8 +1745,8 @@ which fails the link too.
 The deepest chain runs through the self-check that `OP_DEBUG_TRACE` turns on,
 and the stack is sized just above it;
 the check, not headroom, is what keeps it from overflowing.
-Nothing guards the stack at run time:
-an overflow would silently overwrite `.bss` below it, since PMP does not bind machine mode.
+Nothing guards the stack at run time but on ARMv8-M, whose `MSPLIM` faults a push below it, a kernel fault that halts;
+elsewhere an overflow would silently overwrite `.bss` below it, since PMP does not bind machine mode.
 
 ## Properties
 
@@ -2537,7 +2570,8 @@ until the maintainer decides otherwise.
     Decide with the first program that wants the counter or the dedicated GPIO kept.
 
 23. **A second architecture.**
-    Decided: ARMv7-M, with the kernel's objects, operations and demo unchanged; see "Architectures".
+    Decided: ARMv7-M, with the kernel's objects, operations and demo unchanged, and ARMv8-M's Mainline after it;
+    see "Architectures".
     The model needs every region to be a block, which PMP's NAPOT, PMSAv7 and PMSAv8 each take as one entry.
     Open:
     - **Execute only.** ARM refuses a region that may execute but not read, which RISC-V grants;
@@ -2552,5 +2586,6 @@ until the maintainer decides otherwise.
       A register for the flags, and a pc write that advances the IT state, would.
     - **The floating point unit.** The Cortex-M3 has none; a core with one stacks its registers lazily,
       and a process switch then owes them a save the kernel does not make.
+      RP2350's Cortex-M33 has one, which the kernel shuts, so a floating-point instruction faults its thread.
     - **The name.** rvuos says RISC-V, which the kernel no longer is alone.
     Decide each with the first board or program that needs it.

@@ -1,4 +1,4 @@
-/* What the rest of the kernel does to a thread's registers on ARMv7-M: start it, report it, read and write it. */
+/* What the rest of the kernel does to a thread's registers on ARMv7-M and ARMv8-M: start it, report it, read and write it. */
 
 #include "kernel.h"
 #include "scs.h"
@@ -26,6 +26,10 @@ void report_frame(const struct trap_frame *frame)
     kput_hex(frame->pc);
     kputs(" addr=");
     kput_hex(frame->addr);
+    if (frame->exception == EXC_SECUREFAULT) {
+        kputs(" sfsr=");
+        kput_hex(frame->sfsr);
+    }
     kputc('\n');
 }
 

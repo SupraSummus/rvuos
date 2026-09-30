@@ -26,11 +26,12 @@ Open work only; an item leaves this file in the commit that finishes it.
 - The clock's counter is TIMER0's `TIMERAWL`, whose high half, `TIMERAWH`, lies the word below,
   so `rv_counter_read` takes `DBGPAUSE` for the high word and the counter wraps after 71 minutes.
   `OP_CLOCK_INFO` could return where the high half lies, which changes the ABI.
-- The hardwired PMP entries leave every peripheral to user mode, so ACCESSCTRL alone keeps a process off a device,
+- Hazard3's hardwired PMP entries leave every peripheral to user mode, so ACCESSCTRL alone keeps a process off a device,
   for every process at once; TIMER0 is open to all of them.
+  The Cortex-M33's MPU keeps a process off every peripheral it holds no frame for.
   A last entry that denies the whole address space would put devices behind frames again, at one entry's cost;
   the device store under "Verification", aimed at TIMER0, would show the difference.
-- `mtval` reads zero, so a fault report names no address.
+- Hazard3's `mtval` reads zero, so a fault report names no address there.
 - The logger drives no device here: its console is RAM, which only the halt carries out.
   A root task with a driver for the USB controller would let the log out while the machine runs.
 - Find out whether writing a hardwired entry's address moves its region.
@@ -44,12 +45,18 @@ Open work only; an item leaves this file in the commit that finishes it.
 
 ## ARM
 
-- The escape suite is RISC-V's: `make escape` builds nothing for `mps2-an385`,
+- The escape suite is RISC-V's: `make escape` builds nothing for `mps2-an385` or RP2350's Cortex-M33,
   so the MPU is checked by the demo alone, which never faults on a stack:
-  nothing runs the paths where the core's stacking or unstacking of a thread's frame faults.
-- RP2350 on its Cortex-M33 cores, one chip for both architectures:
-  `mpu.c` for PMSAv8's base and limit, the security state the bootrom leaves,
-  and the board's files shared with the Hazard3 side.
+  nothing runs the paths where the core's stacking or unstacking of a thread's frame faults,
+  and nothing has tried a misaligned store across two regions on the Cortex-M33.
+- QEMU 11 makes a pending exception a `wfe` wakeup only for the NVIC's lines, not for SysTick,
+  since its `SEVONPEND` looks at external interrupts alone, where the architecture says any exception;
+  so `make arm-test` waits in `intr_wait` for ever there, from the first sleep of the demo.
+  QEMU 10.2 treats `wfe` as a hint and passes, and the Cortex-M33 wakes as the architecture says.
+  Report it to QEMU, or make the compare a board timer on an NVIC line where one is free.
+- The Cortex-M33 has no `DISDEFWBUF`, so a bus fault on a thread's store may come imprecise,
+  after the kernel has changed threads, and stop the thread that runs next;
+  a device region is nGnRnE there, and whether that makes the fault precise is unmeasured.
 - A host harness with ARM's frame, so the fuzzer reaches `frame.c` and the call registers;
   the host build knows RISC-V's alone.
 - The demo's console never waits on UART0's line under QEMU, whose transmitter sends at once,
@@ -246,7 +253,8 @@ Open work only; an item leaves this file in the commit that finishes it.
   size it per process from the budget.
 - `pmp.h` names the protection unit's interface after PMP, and `kernel/arch/arm/mpu.c` implements it too;
   the image keeps PMP's encoding on both, but `pmp_set` and `pmp_entry_count` read as RISC-V's.
-  Rename it with the next change to the image in `process.c`, where mutants stand.
+  Rename it with the next change to the image in `process.c`, where mutants stand,
+  and `kernel/arch/arm/armv7m.h` with it, which serves ARMv8-M too.
 
 ## Scheduling
 

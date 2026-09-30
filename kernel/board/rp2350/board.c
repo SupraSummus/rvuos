@@ -6,22 +6,26 @@
  * and clk_usb at 48 MHz from PLL_USB for the halt, see halt.c;
  * the USB controller needs clk_sys above clk_usb, erratum RP2350-E12.
  * The tick generators divide clk_ref into microseconds
- * for mtime, for TIMER0's counter behind BOOT_CAP_CLOCK, and for the watchdog,
+ * for Hazard3's mtime, for TIMER0's counter behind BOOT_CAP_CLOCK, and for the watchdog,
  * which is armed at once; see bootsel.h.
  * Register addresses are those of the pico-sdk's hardware_regs for RP2350.
  *
  * User mode reaches a peripheral only where ACCESSCTRL lets it in, and at reset it lets it into few.
- * TIMER0 is opened for the clock, and since the hardwired PMP entries
- * leave every peripheral to user mode, it is open to every process; see DESIGN.md, "Boards".
- * The counters are shut to user mode, as on QEMU, so rdtime and rdcycle trap.
+ * TIMER0 is opened for the clock.
+ * On Hazard3 the hardwired PMP entries leave every peripheral to user mode,
+ * so it is open to every process; see DESIGN.md, "Boards".
+ * On the Cortex-M33 a thread reaches only what its regions hold, a peripheral as well as RAM.
+ * Hazard3's counters are shut to user mode, as on QEMU, so rdtime and rdcycle trap.
  */
 
 #include <stdint.h>
 
 #include "bootsel.h"
-#include "csr.h"
 #include "kernel.h"
 #include "layout.h"
+#ifdef __riscv
+#include "csr.h"
+#endif
 
 #define REG(addr) (*(volatile uint32_t *)(addr))
 /* The atomic aliases every peripheral register has. */
@@ -81,8 +85,20 @@
 
 #define ACCESSCTRL_TIMER0   0x40060098u
 #define ACCESSCTRL_PASSWORD 0xacce0000u
+#define ACCESSCTRL_SU       (1u << 2)
 #define ACCESSCTRL_NSP      (1u << 1)
 #define ACCESSCTRL_NSU      (1u << 0)
+
+/*
+ * The bits of ACCESSCTRL that let user mode in:
+ * Hazard3's user mode reaches the bus as Non-secure,
+ * and the Cortex-M33's unprivileged thread mode as Secure, the state the kernel keeps it in.
+ */
+#ifdef __riscv
+#define ACCESSCTRL_USER (ACCESSCTRL_NSP | ACCESSCTRL_NSU)
+#else
+#define ACCESSCTRL_USER ACCESSCTRL_SU
+#endif
 
 static void unreset(uint32_t blocks)
 {
@@ -149,24 +165,32 @@ static void clocks_init(void)
 
     tick_start(TICKS_TIMER0);
     tick_start(TICKS_WATCHDOG);
+#ifdef __riscv
     tick_start(TICKS_RISCV);
+#endif
 }
 
 void board_init(void)
 {
+#ifdef __riscv
     csr_write(mcounteren, 0);
+#endif
     clocks_init();
     bootsel_arm(WATCHDOG_LONGEST);
 
     unreset(RESET_TIMER0);
     uint32_t timer0 = REG(ACCESSCTRL_TIMER0) & 0xffu;
-    REG(ACCESSCTRL_TIMER0) = ACCESSCTRL_PASSWORD | timer0 | ACCESSCTRL_NSP | ACCESSCTRL_NSU;
+    REG(ACCESSCTRL_TIMER0) = ACCESSCTRL_PASSWORD | timer0 | ACCESSCTRL_USER;
 
     /* The console starts empty, whatever the last image left in it; see halt.c. */
     REG(UART_BASE) = 0;
 }
 
-/* Hazard3 has no CSR user mode writes, and the counters stay shut. */
+/*
+ * Hazard3 has no CSR user mode writes, and the counters stay shut.
+ * The Cortex-M33's thread mode keeps no state beyond the registers a trap saves,
+ * since the kernel shuts every coprocessor to it, the floating-point unit among them; see kernel/arch/arm/trap.c.
+ */
 void board_user_csrs_reset(void)
 {
 }

@@ -2,7 +2,7 @@
 #define RVUOS_USER_CALL_H
 
 /*
- * How a program on ARMv7-M calls the kernel, for rvuos.h:
+ * How a program on ARMv7-M or ARMv8-M calls the kernel, for rvuos.h:
  * the registers a call travels in, r0 to r6 as a0 to a6 and r12 as a7, see rvuos/abi.h,
  * and the instruction that makes it.
  * The operation goes in r12 rather than r7, which Thumb code keeps as its frame pointer,

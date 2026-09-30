@@ -2,8 +2,10 @@
 #define RVUOS_BOARD_H
 
 /*
- * RP2350 on its Hazard3 cores: where RAM and the root task lie, and which devices it has.
+ * RP2350, on its Hazard3 cores or with ARCH=arm on its Cortex-M33 ones:
+ * where RAM and the root task lie, and which devices it has.
  * Included through layout.h, which the linker scripts read as well.
+ * What only one kind of core reads is said so; the rest is the chip's, and the same for both.
  *
  * The 512 KiB of striped SRAM, SRAM0 to SRAM7, answer at one address for code and data.
  * The bootrom's BOOTSEL mode takes the image's segments into it over USB,
@@ -29,19 +31,23 @@
 #define FREE_RAM_BASE  U32(0x20040000)
 #define FREE_RAM_SIZE  U32(0x00040000)
 
-/* Hazard3 does not split a misaligned access: it raises a misaligned exception instead. */
+/*
+ * Hazard3 does not split a misaligned access: it raises a misaligned exception instead.
+ * The Cortex-M33 takes the flag off as mps2-an385's core does; nothing has checked a misaligned store on it yet.
+ */
 #define PMP_SPLIT_STORE_AS_READ 0
 
 /*
- * The R and X bits of every pmpcfg field are transposed, erratum RP2350-E6;
+ * Hazard3's: the R and X bits of every pmpcfg field are transposed, erratum RP2350-E6;
  * pmp.c swaps them on the way to the CSRs and back.
  */
 #define PMP_CFG_RX_TRANSPOSED 1
 
 /*
- * The PMP decodes no block smaller than 32 bytes, but its address registers do not show it,
+ * Hazard3's PMP decodes no block smaller than 32 bytes, but its address registers do not show it,
  * so the probe finds a grain of four; pmp.c takes the grain as no finer than this.
  * user/escape-past-region.c reads past an 8-byte frame without it.
+ * The Cortex-M33's MPU has no region smaller either; see kernel/arch/arm/mpu.c.
  */
 #define PMP_GRAIN_MIN U32(32)
 
@@ -57,8 +63,8 @@
 #define UART_SIZE U32(0x2000)
 
 /*
- * The machine timer: the RISC-V platform timer in SIO, mtime and core 0's mtimecmp,
- * counting the ticks of the tick generator timer.c starts; see clint.h.
+ * Hazard3's machine timer: the RISC-V platform timer in SIO, mtime and core 0's mtimecmp,
+ * counting the ticks of the tick generator riscv/timer.c starts; see clint.h.
  * It lies only in the Secure bank of SIO, which user mode does not reach.
  */
 #define CLINT_MTIME    U32(0xd00001b0)
@@ -70,18 +76,26 @@
  * TIMER0 keeps the high half below the low one, at TIMERAWH,
  * so the word above TIMERAWL, which rv_counter_read takes for the high half, is DBGPAUSE;
  * see TODO.md.
+ * On the Cortex-M33 it is the kernel's counter too, see arm/timer.c.
  */
 #define COUNTER_ADDR U32(0x400b0028)
 #define COUNTER_HZ   U32(1000000)
 
 /*
+ * The Cortex-M33's: SysTick runs on the processor's clock, clk_sys, 150 MHz from the crystal the counter's
+ * microseconds come from too, so 150 of its counts make one of the counter's; see kernel/arch/arm/systick.c.
+ */
+#define SYSTICK_PER_COUNT 150
+
+/*
  * Interrupt line identifiers lie below IRQ_LINES; see irq.h.
- * A line is a system IRQ, numbered as in the datasheet's table of them; the chip has 52.
+ * A line is a system IRQ, numbered as in the datasheet's table of them; the chip has 52,
+ * each the same line of Hazard3's controller and of the Cortex-M33's NVIC.
  * Line 0 is the kernel's log, see klog.h, so TIMER0_IRQ_0 is out of reach.
  */
 #define IRQ_LINES 52
 
-/* The mcause, and the mie and mip bit, of the core's interrupt from its controller. */
+/* Hazard3's: the mcause, and the mie and mip bit, of the core's interrupt from its controller. */
 #define IRQ_EXT_CAUSE 11
 
 #endif

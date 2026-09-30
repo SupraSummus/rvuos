@@ -1,7 +1,10 @@
 #ifndef RVUOS_USER_CSRS_H
 #define RVUOS_USER_CSRS_H
 
-/* Hazard3 has no CSR user mode writes that rvuos knows of; see kernel/board/rp2350/board.c. */
+/*
+ * Hazard3 has no CSR user mode writes that rvuos knows of,
+ * and the Cortex-M33's thread mode none beyond its registers; see kernel/board/rp2350/board.c.
+ */
 
 #include <stdbool.h>
 

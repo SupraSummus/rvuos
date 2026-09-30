@@ -1,12 +1,12 @@
 # rvuos
 
 A capability-based microkernel for RISC-V microcontrollers,
-and for ARMv7-M ones with an MPU through the same programming model.
+and for ARMv7-M and ARMv8-M ones with an MPU through the same programming model.
 
 The kernel isolates processes using RISC-V Physical Memory Protection
 instead of a memory management unit,
 so it runs on cores that have only machine mode and user mode.
-On ARMv7-M the MPU does the same, since its regions are the same blocks PMP's NAPOT entries describe;
+On ARM the MPU does the same, since its regions hold the same blocks PMP's NAPOT entries describe;
 see `DESIGN.md`, "Architectures".
 It follows the seL4 principle that the kernel never allocates memory:
 userspace hands memory to the kernel,
@@ -54,9 +54,10 @@ make BOARD=esp32c6 test  # the same, and check the transcript
 
 ## Status
 
-The kernel boots in machine mode on QEMU `virt`, the ESP32-C6 and RP2350
+The kernel boots in machine mode on QEMU `virt`, the ESP32-C6 and RP2350's Hazard3 cores
 and runs an embedded root task in user mode behind PMP,
-and in handler mode on QEMU's Cortex-M3, where the same root task runs unprivileged behind the MPU.
+and in handler mode on QEMU's Cortex-M3 and RP2350's Cortex-M33,
+where the same root task runs unprivileged behind the MPU.
 The root task holds capabilities to its own objects and to untyped memory,
 makes frames and a kernel pool of it,
 allocates objects from the pool,

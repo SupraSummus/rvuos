@@ -4,11 +4,13 @@
 # BOARD selects kernel/board/<board>/ and user/board/<board>/:
 #   qemu     QEMU virt, RV32, the default, and with mps2-an385 what `make check` runs on
 #   esp32c6  an ESP32-C6, loaded into RAM through its ROM over USB
-#   rp2350   an RP2350 on its Hazard3 cores, loaded into RAM through its bootrom over USB
+#   rp2350   an RP2350, loaded into RAM through its bootrom over USB,
+#            on its Hazard3 cores, or with ARCH=arm on its Cortex-M33 ones
 #   mps2-an385  QEMU's MPS2 with the AN385 image, a Cortex-M3; `make arm-test` runs its demo
 # and the board selects its architecture, ARCH, kernel/arch/<arch>/ and user/arch/<arch>/:
 #   riscv    RV32IMAC, machine and user mode, PMP
-#   arm      ARMv7-M, handler and unprivileged thread mode, a PMSAv7 MPU
+#   arm      ARMv7-M or ARMv8-M, handler and unprivileged thread mode, a PMSAv7 or PMSAv8 MPU
+# RP2350 has both, and ARCH picks the cores; its files that differ by them lie in kernel/board/rp2350/<arch>/.
 #
 # Kernel images differ only in the embedded root task:
 #   build/<board>/kernel-init.elf     the root task of user/init.c, used by `make test`
@@ -29,10 +31,22 @@ BOARD ?= qemu
 # since no object depends on the flag.
 PMP_MAX_ENTRIES ?= 16
 VARIANT := $(if $(filter-out 16,$(PMP_MAX_ENTRIES)),-pmp$(PMP_MAX_ENTRIES))
-BUILD   := build/$(BOARD)$(VARIANT)
 
-ARCH := $(if $(filter mps2-an385,$(BOARD)),arm,riscv)
-ifeq ($(ARCH),arm)
+# The board's architecture, which only RP2350 lets the command line change;
+# the other one builds in a directory of its own, as a budget does.
+BOARD_ARCH_DEFAULT := $(if $(filter mps2-an385,$(BOARD)),arm,riscv)
+ARCH := $(BOARD_ARCH_DEFAULT)
+ifneq ($(ARCH),$(BOARD_ARCH_DEFAULT))
+ifneq ($(BOARD)$(ARCH),rp2350arm)
+$(error BOARD=$(BOARD) has no ARCH=$(ARCH); only rp2350 takes ARCH=arm)
+endif
+endif
+BUILD := build/$(BOARD)$(if $(filter-out $(BOARD_ARCH_DEFAULT),$(ARCH)),-$(ARCH))$(VARIANT)
+
+# The Cortex-M33 without its DSP and floating-point extensions, which the kernel neither uses nor saves.
+ifeq ($(BOARD)$(ARCH),rp2350arm)
+ARCHFLAGS := --target=thumbv8m.main-none-eabi -mcpu=cortex-m33+nodsp+nofp -mfloat-abi=soft
+else ifeq ($(ARCH),arm)
 ARCHFLAGS := --target=thumbv7m-none-eabi -mcpu=cortex-m3 -mfloat-abi=soft
 else
 ARCHFLAGS := --target=riscv32-unknown-elf -march=rv32imac -mabi=ilp32 -mcmodel=medany
@@ -57,7 +71,8 @@ $(BUILD)/kernel/%.o: CFLAGS += $(KERNEL_INC) -fstack-usage -ffunction-sections \
 $(BUILD)/kernel/%.o: ASFLAGS += $(KERNEL_INC)
 $(BUILD)/user/%.o: CFLAGS += $(USER_INC)
 
-KERNEL_SRC_C := $(wildcard kernel/*.c kernel/arch/$(ARCH)/*.c kernel/board/$(BOARD)/*.c)
+KERNEL_SRC_C := $(wildcard kernel/*.c kernel/arch/$(ARCH)/*.c kernel/board/$(BOARD)/*.c \
+                          kernel/board/$(BOARD)/$(ARCH)/*.c)
 KERNEL_SRC_S := $(wildcard kernel/*.S kernel/arch/$(ARCH)/*.S kernel/board/$(BOARD)/*.S)
 KERNEL_OBJ   := $(patsubst %.c,$(BUILD)/%.o,$(KERNEL_SRC_C)) \
                 $(patsubst %.S,$(BUILD)/%.o,$(filter-out %.ld.S,$(KERNEL_SRC_S)))
@@ -93,15 +108,21 @@ RUN_INIT      := $(ESPTOOL_PYTHON) tools/esp32c6-run.py --port $(PORT) $(BUILD)/
 ESCAPE_PREFIX := $(ESPTOOL_PYTHON) tools/esp32c6-run.py --port $(PORT)
 else ifeq ($(BOARD),rp2350)
 # The replay driver's layout is QEMU's, so only the demo is built, as for the ESP32-C6.
-# The runner loads the ELF's segments itself; it needs pyusb.
+# The runner loads the ELF's segments itself, and reboots into the cores the ELF is for; it needs pyusb.
 USER_PROGRAMS := init
 IMAGE         := elf
 RP2350_PYTHON ?= python3
 RUN_INIT      := $(RP2350_PYTHON) tools/rp2350-run.py $(BUILD)/kernel-init.elf
 ESCAPE_PREFIX := $(RP2350_PYTHON) tools/rp2350-run.py
-# Where the core's transcripts differ from QEMU's and the ESP32-C6's, see tests/run.sh:
+ifeq ($(ARCH),arm)
+# Where the Cortex-M33's transcripts differ from QEMU virt's, see tests/run.sh:
+# an MPU of eight regions, none smaller than 32 bytes, and ARM's report of a fault.
+BOARD_FACTS   := BOARD_PMP_ENTRIES=8 BOARD_PMP_GRAIN=32 BOARD_ARCH=arm
+else
+# Where Hazard3's transcripts differ from QEMU's and the ESP32-C6's, see tests/run.sh:
 # eight PMP entries, a 32-byte grain, mtval always zero, and misaligned accesses that trap.
 BOARD_FACTS   := BOARD_PMP_ENTRIES=8 BOARD_PMP_GRAIN=32 BOARD_MTVAL=zero BOARD_MISALIGNED=trap
+endif
 else ifeq ($(BOARD),mps2-an385)
 # The replay driver's layout is QEMU virt's, so only the demo is built, as for the chips.
 # QEMU exits through semihosting, which only the kernel reaches; see kernel/board/mps2-an385/halt.c.

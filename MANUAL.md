@@ -24,13 +24,13 @@ Contents:
 
 rvuos is a capability-based microkernel
 for RISC-V microcontrollers that have no memory management unit,
-and for ARMv7-M ones with an MPU.
+and for ARMv7-M and ARMv8-M ones with an MPU.
 It isolates processes with Physical Memory Protection (PMP)
 instead of address translation,
 so it needs no supervisor mode
 and runs on cores that have only machine mode and user mode.
 The kernel runs in machine mode and every program runs in user mode.
-On ARMv7-M the MPU does what PMP does, the kernel runs in handler mode
+On ARM the MPU does what PMP does, the kernel runs in handler mode
 and every program in unprivileged thread mode;
 the objects, the operations and the programs written against `user/rvuos.h` are the same on both,
 and where this manual says PMP, machine mode or `ecall`, ARM has its own in their place.
@@ -154,22 +154,26 @@ TOR is not needed; `DESIGN.md`, open decision 8, records why rvuos uses NAPOT al
 
 The build is `rv32imac`, `ilp32`, compiled with clang and linked with lld.
 
-On ARM the kernel needs an ARMv7-M core with:
+On ARM the kernel needs an ARMv7-M or ARMv8-M Mainline core with:
 
-- an MPU of PMSAv7 with at least four regions,
+- an MPU with at least four regions, PMSAv7 on ARMv7-M or PMSAv8 on ARMv8-M,
 - SysTick and the NVIC, which every such core has,
 - a counter of the board's that a process can read as memory, for `BOOT_CAP_CLOCK`.
 
-The build is `thumbv7m-none-eabi` for the Cortex-M3, with no floating point.
+On ARMv8-M the kernel and every program run in the Secure state,
+and no program reaches a coprocessor or the floating-point unit, whose instructions fault.
+The build is `thumbv7m-none-eabi` for the Cortex-M3
+and `thumbv8m.main-none-eabi` for the Cortex-M33, with no floating point and no DSP extension.
 
 ### Boards
 
 Four boards are supported, chosen with `make BOARD=<board>`:
 `qemu`, QEMU `virt` for RV32, the default,
 `esp32c6`, an Espressif ESP32-C6,
-`rp2350`, a Raspberry Pi RP2350 on its RISC-V cores, as on a Pico 2,
+`rp2350`, a Raspberry Pi RP2350 on its RISC-V cores, or with `ARCH=arm` on its Cortex-M33 ones, as on a Pico 2,
 and `mps2-an385`, QEMU's model of ARM's MPS2 board with a Cortex-M3.
-A board picks its architecture, whose files lie in `kernel/arch/<arch>/` and `user/arch/<arch>/`.
+A board picks its architecture, whose files lie in `kernel/arch/<arch>/` and `user/arch/<arch>/`;
+RP2350 has both, and keeps the files that differ between them in `kernel/board/rp2350/<arch>/`.
 Everything board-specific lives in `kernel/board/<board>/`,
 `board.h`, `board.c`, `irq.c`, `timer.c` and `halt.c`,
 with no `irq.c` on ARM, whose controller is the architecture's,
@@ -263,8 +267,10 @@ and the dedicated GPIO reaches no pad, since no process is granted the GPIO matr
 
 #### RP2350
 
-The bootrom's BOOTSEL mode loads the image into SRAM over USB and reboots into it on the RISC-V cores;
+The bootrom's BOOTSEL mode loads the image into SRAM over USB and reboots into it,
+on the RISC-V cores or on the Arm ones, whichever the image is for;
 nothing is written to flash.
+The two have the same layout, lines and console; what differs is said below.
 The chip has no serial port on USB while the kernel runs,
 so the console is a block of RAM, and the halt sends it to the host over a USB serial port it makes then.
 
@@ -292,14 +298,19 @@ Interrupt lines:
 
 The console's first word counts every byte written, and the bytes follow from offset 16;
 what does not fit is counted and dropped.
-The tick is 1 kHz, on the microseconds of the RISC-V platform timer.
+The counter's high half lies below it, so `rv_counter_read` gets a constant high word
+and wraps after 71 minutes.
+A watchdog reboots the chip into BOOTSEL about seventeen seconds after boot, so no run lasts longer.
+
+On the RISC-V cores the tick is 1 kHz, on the microseconds of the RISC-V platform timer.
 The PMP has eight entries and a 32-byte grain, so no region is smaller than 32 bytes.
 A fault reports `mtval` as zero, and a misaligned access raises a misaligned exception.
 User mode reaches a peripheral only where the chip's ACCESSCTRL lets it in,
 and then every process does, whatever frames it holds: TIMER0, for the clock, is the one opened.
-The counter's high half lies below it, so `rv_counter_read` gets a constant high word
-and wraps after 71 minutes.
-A watchdog reboots the chip into BOOTSEL about seventeen seconds after boot, so no run lasts longer.
+
+On the Cortex-M33 the tick is 1 kHz too, on TIMER0's counter, the one `BOOT_CAP_CLOCK` names.
+The MPU has eight regions, none smaller than 32 bytes, and a fault is reported as on `mps2-an385`.
+A program reaches a peripheral only through a frame, as it reaches RAM.
 
 #### mps2-an385
 
@@ -337,7 +348,8 @@ A fault is reported as `exception`, `cfsr`, `pc` and `addr`, section 4.
 ## 4. Building and running
 
 Requirements: clang and lld with RISC-V and ARM support, llvm-objcopy,
-GNU make, `qemu-system-riscv32` and `qemu-system-arm`.
+GNU make, `qemu-system-riscv32` and `qemu-system-arm`,
+the latter no newer than 10.2, since QEMU 11 never wakes the ARM demo from its first sleep; see `TODO.md`.
 No separate cross toolchain is needed.
 The host build needs clang's sanitizer and libFuzzer runtimes.
 The ESP32-C6 needs Espressif's `esptool`, version 5, as a command and as a Python module.
@@ -378,6 +390,7 @@ On RP2350, in BOOTSEL mode, as it is when plugged in with BOOTSEL held and again
 make BOARD=rp2350                    # build/rp2350/kernel-init.elf
 make BOARD=rp2350 run                # load it into RAM and print the transcript the halt writes
 make BOARD=rp2350 test escape        # check the transcripts
+make BOARD=rp2350 ARCH=arm test      # the same demo on the Cortex-M33, from build/rp2350-arm/
 ```
 
 `tools/rp2350-run.py` loads the image through the bootrom's PICOBOOT interface,
@@ -1340,22 +1353,23 @@ See section 5.6.
 What stopped a thread that faulted:
 `a1` = the cause, `a2` = the program counter, `a3` = the address, `a4` = the status.
 
-| | RISC-V | ARMv7-M |
+| | RISC-V | ARM |
 |---|---|---|
 | `a1`, the cause | `mcause` | the exception number |
 | `a2`, the program counter | `mepc` | the pc, with bit 0 set for Thumb |
-| `a3`, the address | `mtval`: on an access fault the address reached for, on RP2350 always zero | `MMFAR` or `BFAR` while `CFSR` says it is valid, else zero |
+| `a3`, the address | `mtval`: on an access fault the address reached for, on RP2350 always zero | `MMFAR` or `BFAR` while `CFSR` says it is valid, `SFAR` for a SecureFault, else zero |
 | `a4`, the status | zero | `CFSR` |
 
 The program counter is where a resume goes on, as `OP_THREAD_READ_REG` reads it.
-On QEMU's Cortex-M3 a `bkpt` arrives as a HardFault, exception 3, with a status of zero.
+On QEMU's Cortex-M3 a `bkpt` arrives as a HardFault, exception 3, with a status of zero,
+and on RP2350's Cortex-M33 as a DebugMonitor exception, 12.
 A status with `MSTKERR` or `STKERR` says the core could not stack the thread's registers,
 so `r0` to `r3`, `r12`, `lr`, the pc and `xpsr` hold what its last trap left.
 `KERR_STATE` unless the thread is stopped where it faulted:
 a resume or a configure since, or no fault at all, leaves nothing to tell.
 
 **`OP_THREAD_READ_REG` (34).**
-`a1` = the register: `x0` to `x31` on RISC-V, where `x0` reads zero, `r0` to `r14` on ARMv7-M,
+`a1` = the register: `x0` to `x31` on RISC-V, where `x0` reads zero, `r0` to `r14` on ARM,
 or `THREAD_REG_PC` (32) for the program counter, which on ARM carries bit 0 for Thumb, as `OP_THREAD_CONFIGURE` takes it.
 Returns `a1` = its value.
 `KERR_INVALID_ARG` for a number that names no register.
@@ -1585,7 +1599,8 @@ Constraints of the current linker script:
   and halts with code 1 through `BOOT_CAP_DEBUG` if `main` returns.
 
 Compile flags are `-march=rv32imac -mabi=ilp32 -mcmodel=medany -ffreestanding -nostdlib`,
-or `--target=thumbv7m-none-eabi -mcpu=cortex-m3 -mfloat-abi=soft -ffreestanding -nostdlib` on ARM.
+or `--target=thumbv7m-none-eabi -mcpu=cortex-m3 -mfloat-abi=soft -ffreestanding -nostdlib` on ARMv7-M,
+with `--target=thumbv8m.main-none-eabi -mcpu=cortex-m33+nodsp+nofp` in place of the first two on ARMv8-M.
 There is no libc; `user/rvuos.h` provides the system call wrappers:
 
 | Wrapper | Operation |
@@ -1808,7 +1823,7 @@ and `tests/mutants/` holds one planted bug per invariant.
 These are documented gaps, not surprises;
 `TODO.md` carries the items and `DESIGN.md` the open decisions.
 
-- **A watcher on ARMv7-M cannot set the flags**, nor step a thread past an instruction inside an IT block;
+- **A watcher on ARM cannot set the flags**, nor step a thread past an instruction inside an IT block;
   `DESIGN.md`, open decision 23.
 - **No priorities and no yield.**
   Round-robin on a tick, threads with time before threads on spare time,
@@ -1820,7 +1835,7 @@ These are documented gaps, not surprises;
 - **No synchronous endpoints.**
   Shared memory and notifications carry everything; open decision 5.
 - **One `Irq` per line**; open decision 11.
-- **ARM under QEMU alone**, with no escape suite and no replay yet; `TODO.md`.
+- **ARM with no escape suite and no replay yet**, under QEMU and on RP2350's Cortex-M33; `TODO.md`.
 - **No boot from flash.**
   The ESP32-C6 and RP2350 run from RAM, loaded by their ROMs over USB.
 - **No loader.**

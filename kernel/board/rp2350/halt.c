@@ -14,10 +14,12 @@
 
 #include "bootsel.h"
 #include "cdc.h"
-#include "csr.h"
 #include "kernel.h"
 #include "klog.h"
 #include "layout.h"
+#ifdef __riscv
+#include "csr.h"
+#endif
 
 #define REG(addr) (*(volatile uint32_t *)(addr))
 
@@ -39,8 +41,13 @@ static void put_hex(uint32_t v)
 
 void khalt(int code)
 {
-    /* Nothing may interrupt the halt: every interrupt off, and machine mode leaves MIE clear. */
+    /*
+     * Nothing may interrupt the halt: on Hazard3 every interrupt off, and machine mode leaves MIE clear.
+     * The Cortex-M33 already holds every exception off while the kernel runs.
+     */
+#ifdef __riscv
     csr_write(mie, 0);
+#endif
     /* The host has the watchdog's whole count to take the log; one that never comes is not waited for. */
     bootsel_arm(WATCHDOG_LONGEST);
 

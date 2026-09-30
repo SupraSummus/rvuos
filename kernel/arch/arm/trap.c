@@ -1,5 +1,5 @@
 /*
- * Trap dispatch on ARMv7-M, and the thread's half of its frame that the core keeps on its stack.
+ * Trap dispatch on ARMv7-M and ARMv8-M, and the thread's half of its frame that the core keeps on its stack.
  * See DESIGN.md, "Architectures".
  */
 
@@ -35,13 +35,25 @@ extern char __kernel_stack_bottom[];
 #define CFSR_STACKING (CFSR_MSTKERR | CFSR_STKERR)
 #define CFSR_UNSTACKING (CFSR_MUNSTKERR | CFSR_UNSTKERR)
 
-/* The core as the kernel wants it, before anything else runs; start.S calls this before kmain. */
+/*
+ * The core as the kernel wants it, before anything else runs; start.S calls this before kmain.
+ * ARMv8-M has no DISDEFWBUF, and its boot ROM may leave state of its own, RP2350's does:
+ * every coprocessor is shut to everyone, so no thread reaches one, nor the floating-point unit,
+ * and the attribution unit is off with nothing Non-secure, so all memory is Secure, as the kernel and every thread are.
+ */
 void arch_init(void)
 {
     extern char trap_vectors[];
     SCS_REG(VTOR) = (uint32_t)trap_vectors;
     SCS_REG(CCR) |= CCR_STKALIGN;
+#if ARMV8M
+    SCS_REG(CPACR) = 0;
+    SCS_REG(NSACR) = 0;
+    SCS_REG(SAU_CTRL) = 0;
+    __asm__ volatile("dsb\n\tisb" : : : "memory");
+#else
     SCS_REG(ACTLR) |= ACTLR_DISDEFWBUF;
+#endif
     SCS_REG(SCR) |= SCR_SEVONPEND;
     SCS_REG(DEMCR) |= DEMCR_MON_EN;
     /* Every exception at the same priority, zero, as irq_init puts every line: none preempts another. */
@@ -49,6 +61,9 @@ void arch_init(void)
     SCS_REG(SHPR2) = 0;
     SCS_REG(SHPR3) = 0;
     SCS_REG(SHCSR) |= SHCSR_MEMFAULTENA | SHCSR_BUSFAULTENA | SHCSR_USGFAULTENA;
+#if ARMV8M
+    SCS_REG(SHCSR) |= SHCSR_SECUREFAULTENA;
+#endif
 }
 
 /*
@@ -61,10 +76,23 @@ void arch_init(void)
  */
 static void frame_take(struct trap_frame *f)
 {
+    /* The address before the status is cleared: MMFAR and BFAR may be one register, which the clear leaves unknown. */
     uint32_t cfsr = SCS_REG(CFSR);
-    SCS_REG(CFSR) = cfsr;
     f->cfsr = cfsr;
     f->addr = (cfsr & CFSR_MMARVALID) ? SCS_REG(MMFAR) : (cfsr & CFSR_BFARVALID) ? SCS_REG(BFAR) : 0;
+    SCS_REG(CFSR) = cfsr;
+    f->sfsr = 0;
+#if ARMV8M
+    /* A SecureFault's status lies apart from the others', and its address with it. */
+    if (f->exception == EXC_SECUREFAULT) {
+        uint32_t sfsr = SCS_REG(SFSR);
+        f->sfsr = sfsr;
+        if (sfsr & SFSR_SFARVALID) {
+            f->addr = SCS_REG(SFAR);
+        }
+        SCS_REG(SFSR) = sfsr;
+    }
+#endif
 
     if (cfsr & CFSR_STACKING) {
         /*
@@ -124,6 +152,7 @@ static bool stack_takes(const struct thread *t, uint32_t at)
  * so a sp that points anywhere else costs the thread a fault and nothing more:
  * psp goes to the guard instead, the unstacking faults, and trap_handler stops the thread.
  * An sp off eight bytes sets xpsr bit 9, as the core does, so the unstacking gives it back.
+ * The MPU is on for the thread from here, whichever way, see mpu_thread.
  */
 uint32_t frame_give(struct trap_frame *f)
 {
@@ -132,25 +161,27 @@ uint32_t frame_give(struct trap_frame *f)
     }
     uint32_t sp = f->regs[REG_SP] & ~3u;
     uint32_t at = (sp - HW_FRAME) & ~7u;
-    if (!stack_takes(current, at)) {
-        f->psp = STACK_GUARD;
-        return STACK_GUARD;
+    if (stack_takes(current, at)) {
+        volatile uint32_t *hw = (volatile uint32_t *)at;
+        for (unsigned i = 0; i < 4; i++) {
+            LOOP_BOUND(4);
+            hw[i] = f->regs[i];
+        }
+        hw[4] = f->regs[REG_R12];
+        hw[5] = f->regs[REG_LR];
+        hw[6] = f->pc;
+        hw[7] = (f->xpsr & ~XPSR_ALIGNED) | (at + HW_FRAME != sp ? XPSR_ALIGNED : 0u);
+    } else {
+        at = STACK_GUARD;
     }
-    volatile uint32_t *hw = (volatile uint32_t *)at;
-    for (unsigned i = 0; i < 4; i++) {
-        LOOP_BOUND(4);
-        hw[i] = f->regs[i];
-    }
-    hw[4] = f->regs[REG_R12];
-    hw[5] = f->regs[REG_LR];
-    hw[6] = f->pc;
-    hw[7] = (f->xpsr & ~XPSR_ALIGNED) | (at + HW_FRAME != sp ? XPSR_ALIGNED : 0u);
     f->psp = at;
+    mpu_thread();
     return at;
 }
 
 struct trap_frame *trap_handler(struct trap_frame *frame)
 {
+    mpu_kernel();
     struct thread *t = current;
     if (frame != &t->frame) {
         kpanic("trap frame is not the current thread's");
@@ -186,6 +217,9 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
         case EXC_MEMMANAGE:
         case EXC_BUSFAULT:
         case EXC_USAGEFAULT:
+#if ARMV8M
+        case EXC_SECUREFAULT:
+#endif
         case EXC_DEBUGMON:
             /* The thread's alone: it stops, its watch hears, and the machine goes on. */
             fault_dispatch(t);

@@ -1,5 +1,5 @@
 /*
- * Handler-mode entry and trap glue for ARMv7-M.
+ * Handler-mode entry and trap glue for ARMv7-M and ARMv8-M.
  *
  * Every exception the kernel takes runs at one priority, so none preempts another
  * and the kernel runs as RISC-V's machine mode does, with interrupts held off;
@@ -41,7 +41,12 @@ trap_vectors:
     .word   trap_entry           /* MemManage */
     .word   trap_entry           /* BusFault */
     .word   trap_entry           /* UsageFault */
-    .word   0, 0, 0, 0
+#if ARMV8M
+    .word   trap_entry           /* SecureFault */
+#else
+    .word   0
+#endif
+    .word   0, 0, 0
     .word   trap_entry           /* SVCall */
     .word   trap_entry           /* DebugMonitor */
     .word   0
@@ -61,6 +66,16 @@ _start:
     cpsid   i
     ldr     r0, =__kernel_stack_top
     mov     sp, r0
+#if ARMV8M
+    /*
+     * The stack limits, which a boot ROM may leave set, RP2350's does:
+     * a push below the kernel's stack faults, as a kernel fault that halts, and a thread's sp has no limit.
+     */
+    ldr     r0, =__kernel_stack_bottom
+    msr     msplim, r0
+    movs    r0, #0
+    msr     psplim, r0
+#endif
 
     /* Clear .bss so C code sees zeroed statics. */
     ldr     r0, =__bss_start

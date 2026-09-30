@@ -5,7 +5,8 @@
 
 /*
  * The System Control Space of ARMv7-M, at the same addresses on every Cortex-M:
- * the system control block, the NVIC, SysTick and the MPU.
+ * the system control block, the NVIC, SysTick and the MPU,
+ * and what ARMv8-M adds to it, which arch.h's ARMV8M says a core has.
  * Only privileged code reaches it, whatever the MPU says,
  * so no process can be granted any of it.
  */
@@ -13,7 +14,7 @@
 #define SCS_REG(addr) (*(volatile uint32_t *)(addr))
 
 #define ACTLR 0xe000e008u
-#define ACTLR_DISDEFWBUF (1u << 1) /* every bus fault precise, so it is the running thread's */
+#define ACTLR_DISDEFWBUF (1u << 1) /* every bus fault precise, so it is the running thread's; ARMv7-M's */
 
 #define SYST_CSR 0xe000e010u
 #define SYST_RVR 0xe000e014u
@@ -48,6 +49,7 @@
 #define SHCSR_MEMFAULTENA  (1u << 16)
 #define SHCSR_BUSFAULTENA  (1u << 17)
 #define SHCSR_USGFAULTENA  (1u << 18)
+#define SHCSR_SECUREFAULTENA (1u << 19) /* ARMv8-M's */
 #define CFSR  0xe000ed28u
 #define CFSR_MUNSTKERR (1u << 3)
 #define CFSR_MSTKERR   (1u << 4)
@@ -58,6 +60,8 @@
 #define HFSR  0xe000ed2cu
 #define MMFAR 0xe000ed34u
 #define BFAR  0xe000ed38u
+#define CPACR 0xe000ed88u /* two bits per coprocessor: who may use it */
+#define NSACR 0xe000ed8cu /* ARMv8-M's: which coprocessors the Non-secure state may use */
 #define DEMCR 0xe000edfcu
 #define DEMCR_MON_EN (1u << 16) /* a bkpt is a DebugMonitor exception, not a HardFault */
 
@@ -65,9 +69,17 @@
 #define MPU_CTRL 0xe000ed94u
 #define MPU_RNR  0xe000ed98u
 #define MPU_RBAR 0xe000ed9cu
-#define MPU_RASR 0xe000eda0u
+#define MPU_RASR 0xe000eda0u  /* PMSAv7's size and attributes */
+#define MPU_RLAR 0xe000eda0u  /* PMSAv8's limit and attributes, where PMSAv7 has RASR */
+#define MPU_MAIR0 0xe000edc0u /* PMSAv8's memory attributes, a byte for each index a region names */
 #define MPU_CTRL_ENABLE     (1u << 0)
 #define MPU_CTRL_PRIVDEFENA (1u << 2) /* the kernel sees the default map wherever no region lies */
+
+/* ARMv8-M's Security Extension: the attribution unit, and what a SecureFault left. */
+#define SAU_CTRL 0xe000edd0u
+#define SFSR     0xe000ede4u
+#define SFAR     0xe000ede8u
+#define SFSR_SFARVALID (1u << 6)
 
 /* Exception numbers, as IPSR holds them; line n of the NVIC is 16 + n. */
 #define EXC_NMI        2
@@ -75,6 +87,7 @@
 #define EXC_MEMMANAGE  4
 #define EXC_BUSFAULT   5
 #define EXC_USAGEFAULT 6
+#define EXC_SECUREFAULT 7 /* ARMv8-M's, with the Security Extension */
 #define EXC_SVCALL     11
 #define EXC_DEBUGMON   12
 #define EXC_PENDSV     14
