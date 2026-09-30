@@ -15,28 +15,14 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
         kpanic("trap frame is not the current thread's");
     }
 
-    /*
-     * The timer interrupts only at a tick that could change what runs,
-     * so the ticks it let pass are counted first, before anything reads the count or an account.
-     * While it is set for the next tick, a tick has passed only if its interrupt is pending,
-     * so the counter is read only then or while it is set further.
-     * Under tracing time moves only by record; see DESIGN.md, "Verification".
-     */
-    bool traced = debug_trace;
-    if (!traced && ((csr_read(mip) & MIP_MTIP) != 0 || wake_tick - sched_ticks > 1)) {
-        sched_count(timer_count());
-    }
+    bool traced = timer_trap_enter((csr_read(mip) & MIP_MTIP) != 0);
 
     uint32_t cause = frame->mcause;
     if (cause & MCAUSE_INTERRUPT) {
         /* mepc points at the interrupted instruction, which resumes as it was. */
         switch (cause & ~MCAUSE_INTERRUPT) {
         case IRQ_M_TIMER:
-            /* Counted above, and the turn ends below; under tracing it is only moved on. */
-            if (debug_trace) {
-                timer_count();
-                timer_set(1);
-            }
+            timer_trap_tick();
             break;
         case IRQ_EXT_CAUSE:
             /*
@@ -74,21 +60,7 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
         }
     }
 
-    /*
-     * A trap whose count reached the tick the timer was set for ends the turn,
-     * and the timer is set for the first tick that could change what runs next,
-     * unless nothing that could has changed.
-     * The trap that turns tracing on leaves it on the next tick, as the traced interrupt does.
-     */
-    if (turn_due || wake_stale) {
-        uint32_t wake = sched_wake();
-        if (!debug_trace && wake != 0) {
-            timer_set(wake);
-        }
-    }
-    if (debug_trace && !traced) {
-        timer_set(1);
-    }
+    timer_trap_leave(traced);
     return &current->frame;
 }
 
@@ -116,6 +88,20 @@ bool intr_wait(uint32_t wake, uint32_t *ticks)
 bool intr_pending(void)
 {
     return (csr_read(mip) & (MIP_MTIP | (1u << IRQ_EXT_CAUSE))) != 0;
+}
+
+/*
+ * mret drops to the mode in MPP with MIE set from MPIE, which is set:
+ * machine interrupts are taken in user mode whatever MIE holds,
+ * but for RP2350's Hazard3, which takes none there while it is clear, erratum RP2350-E7.
+ * A trap from user mode saves MIE into MPIE, so every later mret sets it again.
+ * So the tick runs from the first instruction.
+ */
+void trap_start(struct trap_frame *frame)
+{
+    csr_clear(mstatus, MSTATUS_MPP_MASK);
+    csr_set(mstatus, MSTATUS_MPIE);
+    trap_return(frame);
 }
 
 void kernel_trap_panic(void)

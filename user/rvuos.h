@@ -8,34 +8,35 @@
 
 #include <stdint.h>
 
+#include "call.h"
 #include "rvuos/abi.h"
 
 static inline uint32_t rv_invoke(uint32_t op, uint32_t cap,
                                  uint32_t a1, uint32_t a2, uint32_t a3)
 {
-    register uint32_t r_a0 __asm__("a0") = cap;
-    register uint32_t r_a1 __asm__("a1") = a1;
-    register uint32_t r_a2 __asm__("a2") = a2;
-    register uint32_t r_a3 __asm__("a3") = a3;
-    register uint32_t r_a7 __asm__("a7") = op;
-    __asm__ volatile("ecall"
+    register uint32_t r_a0 __asm__(RV_A0) = cap;
+    register uint32_t r_a1 __asm__(RV_A1) = a1;
+    register uint32_t r_a2 __asm__(RV_A2) = a2;
+    register uint32_t r_a3 __asm__(RV_A3) = a3;
+    register uint32_t r_a7 __asm__(RV_A7) = op;
+    __asm__ volatile(RV_CALL
                      : "+r"(r_a0), "+r"(r_a1), "+r"(r_a2), "+r"(r_a3)
                      : "r"(r_a7)
-                     : "memory", "a4", "a5", "a6");
+                     : "memory", RV_A4, RV_A5, RV_A6);
     return r_a0;
 }
 
 /* OP_FRAME_INFO: where a frame points. */
 static inline uint32_t rv_frame_info(uint32_t frame_cap, uint32_t *base, uint32_t *size)
 {
-    register uint32_t r_a0 __asm__("a0") = frame_cap;
-    register uint32_t r_a1 __asm__("a1");
-    register uint32_t r_a2 __asm__("a2");
-    register uint32_t r_a7 __asm__("a7") = OP_FRAME_INFO;
-    __asm__ volatile("ecall"
+    register uint32_t r_a0 __asm__(RV_A0) = frame_cap;
+    register uint32_t r_a1 __asm__(RV_A1);
+    register uint32_t r_a2 __asm__(RV_A2);
+    register uint32_t r_a7 __asm__(RV_A7) = OP_FRAME_INFO;
+    __asm__ volatile(RV_CALL
                      : "+r"(r_a0), "=r"(r_a1), "=r"(r_a2)
                      : "r"(r_a7)
-                     : "memory", "a3", "a4", "a5", "a6");
+                     : "memory", RV_A3, RV_A4, RV_A5, RV_A6);
     *base = r_a1;
     *size = r_a2;
     return r_a0;
@@ -44,13 +45,13 @@ static inline uint32_t rv_frame_info(uint32_t frame_cap, uint32_t *base, uint32_
 /* OP_FRAME_INFO again, for the smallest region the machine protects. */
 static inline uint32_t rv_frame_min_size(uint32_t frame_cap, uint32_t *min_out)
 {
-    register uint32_t r_a0 __asm__("a0") = frame_cap;
-    register uint32_t r_a4 __asm__("a4");
-    register uint32_t r_a7 __asm__("a7") = OP_FRAME_INFO;
-    __asm__ volatile("ecall"
+    register uint32_t r_a0 __asm__(RV_A0) = frame_cap;
+    register uint32_t r_a4 __asm__(RV_A4);
+    register uint32_t r_a7 __asm__(RV_A7) = OP_FRAME_INFO;
+    __asm__ volatile(RV_CALL
                      : "+r"(r_a0), "=r"(r_a4)
                      : "r"(r_a7)
-                     : "memory", "a1", "a2", "a3", "a5", "a6");
+                     : "memory", RV_A1, RV_A2, RV_A3, RV_A5, RV_A6);
     *min_out = r_a4;
     return r_a0;
 }
@@ -59,15 +60,15 @@ static inline uint32_t rv_frame_min_size(uint32_t frame_cap, uint32_t *min_out)
 static inline uint32_t rv_untyped_info(uint32_t untyped_cap, uint32_t *base, uint32_t *size,
                                        uint32_t *made)
 {
-    register uint32_t r_a0 __asm__("a0") = untyped_cap;
-    register uint32_t r_a1 __asm__("a1");
-    register uint32_t r_a2 __asm__("a2");
-    register uint32_t r_a4 __asm__("a4");
-    register uint32_t r_a7 __asm__("a7") = OP_UNTYPED_INFO;
-    __asm__ volatile("ecall"
+    register uint32_t r_a0 __asm__(RV_A0) = untyped_cap;
+    register uint32_t r_a1 __asm__(RV_A1);
+    register uint32_t r_a2 __asm__(RV_A2);
+    register uint32_t r_a4 __asm__(RV_A4);
+    register uint32_t r_a7 __asm__(RV_A7) = OP_UNTYPED_INFO;
+    __asm__ volatile(RV_CALL
                      : "+r"(r_a0), "=r"(r_a1), "=r"(r_a2), "=r"(r_a4)
                      : "r"(r_a7)
-                     : "memory", "a3", "a5", "a6");
+                     : "memory", RV_A3, RV_A5, RV_A6);
     *base = r_a1;
     *size = r_a2;
     *made = r_a4;
@@ -77,14 +78,14 @@ static inline uint32_t rv_untyped_info(uint32_t untyped_cap, uint32_t *base, uin
 /* OP_UNTYPED_RETYPE: make the whole of an Untyped into a frame or a pool. */
 static inline uint32_t rv_retype(uint32_t untyped_cap, uint32_t type, uint32_t dst, uint32_t *base)
 {
-    register uint32_t r_a0 __asm__("a0") = untyped_cap;
-    register uint32_t r_a1 __asm__("a1") = type;
-    register uint32_t r_a2 __asm__("a2") = dst;
-    register uint32_t r_a7 __asm__("a7") = OP_UNTYPED_RETYPE;
-    __asm__ volatile("ecall"
+    register uint32_t r_a0 __asm__(RV_A0) = untyped_cap;
+    register uint32_t r_a1 __asm__(RV_A1) = type;
+    register uint32_t r_a2 __asm__(RV_A2) = dst;
+    register uint32_t r_a7 __asm__(RV_A7) = OP_UNTYPED_RETYPE;
+    __asm__ volatile(RV_CALL
                      : "+r"(r_a0), "+r"(r_a1), "+r"(r_a2)
                      : "r"(r_a7)
-                     : "memory", "a3", "a4", "a5", "a6");
+                     : "memory", RV_A3, RV_A4, RV_A5, RV_A6);
     *base = r_a1;
     return r_a0;
 }
@@ -104,13 +105,13 @@ static inline uint32_t rv_signal(uint32_t ntfn_cap, uint32_t bits)
 /* OP_NOTIFY_WAIT: block until some bit is set, then take them all. */
 static inline uint32_t rv_wait(uint32_t ntfn_cap, uint32_t *bits)
 {
-    register uint32_t r_a0 __asm__("a0") = ntfn_cap;
-    register uint32_t r_a1 __asm__("a1");
-    register uint32_t r_a7 __asm__("a7") = OP_NOTIFY_WAIT;
-    __asm__ volatile("ecall"
+    register uint32_t r_a0 __asm__(RV_A0) = ntfn_cap;
+    register uint32_t r_a1 __asm__(RV_A1);
+    register uint32_t r_a7 __asm__(RV_A7) = OP_NOTIFY_WAIT;
+    __asm__ volatile(RV_CALL
                      : "+r"(r_a0), "=r"(r_a1)
                      : "r"(r_a7)
-                     : "memory", "a2", "a3", "a4", "a5", "a6");
+                     : "memory", RV_A2, RV_A3, RV_A4, RV_A5, RV_A6);
     *bits = r_a1;
     return r_a0;
 }
@@ -132,15 +133,15 @@ static inline uint32_t rv_timer_set(uint32_t timer_irq_cap, uint32_t bits, uint3
 static inline uint32_t rv_timer_period(uint32_t timer_irq_cap, uint32_t bits, uint32_t us,
                                        uint32_t *skipped)
 {
-    register uint32_t r_a0 __asm__("a0") = timer_irq_cap;
-    register uint32_t r_a1 __asm__("a1") = bits;
-    register uint32_t r_a2 __asm__("a2") = us;
-    register uint32_t r_a3 __asm__("a3") = IRQ_SET_PERIOD;
-    register uint32_t r_a7 __asm__("a7") = OP_IRQ_SET;
-    __asm__ volatile("ecall"
+    register uint32_t r_a0 __asm__(RV_A0) = timer_irq_cap;
+    register uint32_t r_a1 __asm__(RV_A1) = bits;
+    register uint32_t r_a2 __asm__(RV_A2) = us;
+    register uint32_t r_a3 __asm__(RV_A3) = IRQ_SET_PERIOD;
+    register uint32_t r_a7 __asm__(RV_A7) = OP_IRQ_SET;
+    __asm__ volatile(RV_CALL
                      : "+r"(r_a0), "+r"(r_a1)
                      : "r"(r_a2), "r"(r_a3), "r"(r_a7)
-                     : "memory", "a4", "a5", "a6");
+                     : "memory", RV_A4, RV_A5, RV_A6);
     *skipped = r_a1;
     return r_a0;
 }
@@ -157,14 +158,14 @@ static inline uint32_t rv_irq_set(uint32_t irq_cap, uint32_t bits)
 /* OP_CLOCK_INFO: the counter's rate in Hz and the address of its low word. */
 static inline uint32_t rv_clock_info(uint32_t clock_cap, uint32_t *hz, uint32_t *counter)
 {
-    register uint32_t r_a0 __asm__("a0") = clock_cap;
-    register uint32_t r_a1 __asm__("a1");
-    register uint32_t r_a2 __asm__("a2");
-    register uint32_t r_a7 __asm__("a7") = OP_CLOCK_INFO;
-    __asm__ volatile("ecall"
+    register uint32_t r_a0 __asm__(RV_A0) = clock_cap;
+    register uint32_t r_a1 __asm__(RV_A1);
+    register uint32_t r_a2 __asm__(RV_A2);
+    register uint32_t r_a7 __asm__(RV_A7) = OP_CLOCK_INFO;
+    __asm__ volatile(RV_CALL
                      : "+r"(r_a0), "=r"(r_a1), "=r"(r_a2)
                      : "r"(r_a7)
-                     : "memory", "a3", "a4", "a5", "a6");
+                     : "memory", RV_A3, RV_A4, RV_A5, RV_A6);
     *hz = r_a1;
     *counter = r_a2;
     return r_a0;

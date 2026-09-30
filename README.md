@@ -1,10 +1,13 @@
 # rvuos
 
-A capability-based microkernel for RISC-V microcontrollers.
+A capability-based microkernel for RISC-V microcontrollers,
+and for ARMv7-M ones with an MPU through the same programming model.
 
 The kernel isolates processes using RISC-V Physical Memory Protection
 instead of a memory management unit,
 so it runs on cores that have only machine mode and user mode.
+On ARMv7-M the MPU does the same, since its regions are the same blocks PMP's NAPOT entries describe;
+see `DESIGN.md`, "Architectures".
 It follows the seL4 principle that the kernel never allocates memory:
 userspace hands memory to the kernel,
 and the kernel builds its objects inside that memory.
@@ -16,8 +19,8 @@ and `CLAUDE.md` for repository conventions.
 
 ## Building and running
 
-Requirements: clang and lld with RISC-V support,
-llvm-objcopy, llvm-objdump and llvm-symbolizer, Python 3, GNU make, and qemu-system-riscv32.
+Requirements: clang and lld with RISC-V and ARM support,
+llvm-objcopy, llvm-objdump and llvm-symbolizer, Python 3, GNU make, qemu-system-riscv32 and qemu-system-arm.
 No separate cross toolchain is needed.
 
 ```
@@ -27,7 +30,8 @@ make test       # boot under QEMU and check the transcript
 make host-test  # replay the fuzz corpus on the host build with invariants
 make fuzz       # fuzz the system call surface for FUZZ_TIME seconds in FUZZ_JOBS processes
 make qemu-replay # replay the corpus on QEMU and compare traces with the host
-make check      # test, host-test and qemu-replay
+make arm-test   # boot the same demo on a Cortex-M3 under QEMU, BOARD=mps2-an385, and check it
+make check      # test, escape, host-test, qemu-replay and arm-test
 make mutants    # plant the bugs of tests/mutants/ and see which checks catch them
 make mutants-refresh # carry the patches of tests/mutants/ over to the kernel as it is
 ```
@@ -50,8 +54,9 @@ make BOARD=esp32c6 test  # the same, and check the transcript
 
 ## Status
 
-The kernel boots in machine mode on QEMU `virt` and on the ESP32-C6
-and runs an embedded root task in user mode behind PMP.
+The kernel boots in machine mode on QEMU `virt`, the ESP32-C6 and RP2350
+and runs an embedded root task in user mode behind PMP,
+and in handler mode on QEMU's Cortex-M3, where the same root task runs unprivileged behind the MPU.
 The root task holds capabilities to its own objects and to untyped memory,
 makes frames and a kernel pool of it,
 allocates objects from the pool,

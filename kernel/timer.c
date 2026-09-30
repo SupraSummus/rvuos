@@ -1,61 +1,36 @@
-/* timer.h on the CLINT of clint.h. */
+/*
+ * The tick of timer.h, on the counter and compare of the architecture or the board;
+ * see DESIGN.md, "Timer".
+ */
 
 #include <stdint.h>
 
-#include "clint.h"
-#include "csr.h"
 #include "kernel.h"
 #include "layout.h"
+#include "object.h"
 #include "timer.h"
 #include "work.h"
 
-#define REG(addr) (*(volatile uint32_t *)(addr))
-
-/* mtime's counts per tick, the period clint_start takes. */
+/* The counter's counts per tick, the period timer_start takes. */
 static uint32_t tick_counts;
 
 /* The compare value of the tick after the last counted one. */
 static uint64_t next_tick;
 
-/* What mtimecmp holds, so that setting it for the tick it holds writes nothing. */
+/* What the compare holds, so that setting it for the tick it holds writes nothing. */
 static uint64_t compare;
 
-/* Both are 64 bits wide and this is RV32, so each is two words. */
-uint64_t clint_mtime(void)
-{
-    uint32_t hi, lo;
-    do {
-        LOOP_WAIT("the high half to hold still across the read");
-        hi = REG(CLINT_MTIME + 4);
-        lo = REG(CLINT_MTIME);
-    } while (REG(CLINT_MTIME + 4) != hi);
-    return ((uint64_t)hi << 32) | lo;
-}
-
-static void mtimecmp_write(uint64_t v)
-{
-    /* Push the compare value out of reach while the halves are apart. */
-    REG(CLINT_MTIMECMP) = 0xffffffffu;
-    REG(CLINT_MTIMECMP + 4) = (uint32_t)(v >> 32);
-    REG(CLINT_MTIMECMP) = (uint32_t)v;
-}
-
-void clint_hold(void)
-{
-    mtimecmp_write(~0ull);
-}
-
-void clint_start(uint32_t period)
+void timer_start(uint32_t period)
 {
     /* The ESP32-C6 measures its tick, and a counter this fast would overflow the accounts. */
     if (period > TICK_COUNTS_MAX) {
         kpanic("the counter is too fast for the accounts to count a tick of it");
     }
     tick_counts = period;
-    next_tick = clint_mtime() + period;
+    next_tick = counter_read() + period;
     compare = next_tick;
-    mtimecmp_write(compare);
-    csr_set(mie, MIE_MTIE);
+    counter_compare(compare);
+    counter_compare_enable();
 }
 
 /*
@@ -97,7 +72,7 @@ static uint64_t timer_deferred(uint64_t next, uint32_t ticks, uint32_t period)
 
 uint32_t timer_count(void)
 {
-    return timer_next(&next_tick, clint_mtime(), tick_counts);
+    return timer_next(&next_tick, counter_read(), tick_counts);
 }
 
 void timer_set(uint32_t ticks)
@@ -105,7 +80,7 @@ void timer_set(uint32_t ticks)
     uint64_t at = timer_deferred(next_tick, ticks, tick_counts);
     if (at != compare) {
         compare = at;
-        mtimecmp_write(at);
+        counter_compare(at);
     }
 }
 
@@ -122,6 +97,50 @@ uint32_t timer_tick_counts(void)
 /* next_tick lies a period past the last counted tick, which the counter has reached. */
 uint32_t timer_offset(void)
 {
-    uint64_t past = clint_mtime() - (next_tick - tick_counts);
+    uint64_t past = counter_read() - (next_tick - tick_counts);
     return past < tick_counts ? (uint32_t)past : tick_counts;
+}
+
+/*
+ * The timer interrupts only at a tick that could change what runs,
+ * so the ticks it let pass are counted first, before anything reads the count or an account.
+ * While it is set for the next tick, a tick has passed only if its interrupt is pending,
+ * so the counter is read only then or while it is set further.
+ * Under tracing time moves only by record; see DESIGN.md, "Verification".
+ */
+bool timer_trap_enter(bool pending)
+{
+    bool traced = debug_trace;
+    if (!traced && (pending || wake_tick - sched_ticks > 1)) {
+        sched_count(timer_count());
+    }
+    return traced;
+}
+
+/* Counted as the trap began, and the turn ends as it leaves; under tracing it is only moved on. */
+void timer_trap_tick(void)
+{
+    if (debug_trace) {
+        timer_count();
+        timer_set(1);
+    }
+}
+
+/*
+ * A trap whose count reached the tick the timer was set for ends the turn,
+ * and the timer is set for the first tick that could change what runs next,
+ * unless nothing that could has changed.
+ * The trap that turns tracing on leaves it on the next tick, as the traced interrupt does.
+ */
+void timer_trap_leave(bool traced)
+{
+    if (turn_due || wake_stale) {
+        uint32_t wake = sched_wake();
+        if (!debug_trace && wake != 0) {
+            timer_set(wake);
+        }
+    }
+    if (debug_trace && !traced) {
+        timer_set(1);
+    }
 }

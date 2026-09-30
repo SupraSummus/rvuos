@@ -23,12 +23,17 @@ Contents:
 ## 1. What rvuos is
 
 rvuos is a capability-based microkernel
-for RISC-V microcontrollers that have no memory management unit.
+for RISC-V microcontrollers that have no memory management unit,
+and for ARMv7-M ones with an MPU.
 It isolates processes with Physical Memory Protection (PMP)
 instead of address translation,
 so it needs no supervisor mode
 and runs on cores that have only machine mode and user mode.
 The kernel runs in machine mode and every program runs in user mode.
+On ARMv7-M the MPU does what PMP does, the kernel runs in handler mode
+and every program in unprivileged thread mode;
+the objects, the operations and the programs written against `user/rvuos.h` are the same on both,
+and where this manual says PMP, machine mode or `ecall`, ARM has its own in their place.
 
 Three goals shape everything, in priority order.
 
@@ -149,14 +154,25 @@ TOR is not needed; `DESIGN.md`, open decision 8, records why rvuos uses NAPOT al
 
 The build is `rv32imac`, `ilp32`, compiled with clang and linked with lld.
 
+On ARM the kernel needs an ARMv7-M core with:
+
+- an MPU of PMSAv7 with at least four regions,
+- SysTick and the NVIC, which every such core has,
+- a counter of the board's that a process can read as memory, for `BOOT_CAP_CLOCK`.
+
+The build is `thumbv7m-none-eabi` for the Cortex-M3, with no floating point.
+
 ### Boards
 
-Three boards are supported, chosen with `make BOARD=<board>`:
+Four boards are supported, chosen with `make BOARD=<board>`:
 `qemu`, QEMU `virt` for RV32, the default,
 `esp32c6`, an Espressif ESP32-C6,
-and `rp2350`, a Raspberry Pi RP2350 on its RISC-V cores, as on a Pico 2.
+`rp2350`, a Raspberry Pi RP2350 on its RISC-V cores, as on a Pico 2,
+and `mps2-an385`, QEMU's model of ARM's MPS2 board with a Cortex-M3.
+A board picks its architecture, whose files lie in `kernel/arch/<arch>/` and `user/arch/<arch>/`.
 Everything board-specific lives in `kernel/board/<board>/`,
 `board.h`, `board.c`, `irq.c`, `timer.c` and `halt.c`,
+with no `irq.c` on ARM, whose controller is the architecture's,
 and in `user/board/<board>/console.h`,
 which drives the device behind `BOOT_CAP_UART` for the demo and the replay driver.
 The linker scripts take their addresses from `board.h` through `kernel/layout.h`.
@@ -285,10 +301,43 @@ The counter's high half lies below it, so `rv_counter_read` gets a constant high
 and wraps after 71 minutes.
 A watchdog reboots the chip into BOOTSEL about seventeen seconds after boot, so no run lasts longer.
 
+#### mps2-an385
+
+QEMU loads the image into SSRAM1 and resets the Cortex-M3, which finds the kernel's vector table at 0;
+the halt leaves QEMU through semihosting.
+
+Memory map:
+
+| Range | Size | What |
+|---|---|---|
+| `0x40028018` | 8 B | the FPGA's `COUNTER`, 25 MHz, read only through `BOOT_CAP_CLOCK`; the word above it is the prescaler, zero |
+| `0x40004000` | 4 KiB | UART0 of the CMSDK, granted to the root task |
+| `0x00000000` to `0x000FF000` | just under 1 MiB | kernel code, data and stack, the vector table first |
+| `0x000FF000` | 4 KiB | the kernel log: a 32-byte header and the ring |
+| `0x00100000` | 256 KiB | the root task's memory, granted to it as an Untyped with all rights, which has made the four ranges below and makes nothing more |
+| `0x00100000` | 64 KiB | root task code, read and execute |
+| `0x00110000` | 64 KiB | root task data and stack, read and write |
+| `0x00120000` | 64 KiB | input region, read only; nothing fills it yet |
+| `0x00130000` | 4 KiB | the boot pool |
+| `0x00200000` | 2 MiB | free RAM, granted to the root task as an Untyped with all rights |
+
+Interrupt lines:
+
+| Line | What |
+|---|---|
+| 0 | the kernel log; UART0's receiver cannot be bound |
+| 1 to 31 | the NVIC's lines; UART0's transmitter is line 1 |
+
+The tick is 1 kHz, on the FPGA's counter, with SysTick for the compare.
+The MPU has eight regions, none smaller than 32 bytes.
+The counter is 32 bits wide, so `rv_counter_read` gets a zero high word and the counter wraps every 171 seconds.
+UART0's transmitter holds one byte and raises its line as that byte leaves, latched until the driver clears it.
+A fault is reported as `exception`, `cfsr`, `pc` and `addr`, section 4.
+
 ## 4. Building and running
 
-Requirements: clang and lld with RISC-V support, llvm-objcopy,
-GNU make and `qemu-system-riscv32`.
+Requirements: clang and lld with RISC-V and ARM support, llvm-objcopy,
+GNU make, `qemu-system-riscv32` and `qemu-system-arm`.
 No separate cross toolchain is needed.
 The host build needs clang's sanitizer and libFuzzer runtimes.
 The ESP32-C6 needs Espressif's `esptool`, version 5, as a command and as a Python module.
@@ -303,7 +352,7 @@ make host-test   # replay the fuzz corpus on the host build with invariants on
 make fuzz        # fuzz the system call surface for FUZZ_TIME seconds in FUZZ_JOBS processes
 make qemu-replay # replay the corpus on QEMU and compare with the host
 make mutants     # plant each bug under tests/mutants/ and require the checks to catch it
-make check       # test, host-test and qemu-replay; run before committing
+make check       # test, escape, host-test, qemu-replay and the ARM test; run before committing
 ```
 
 `PMP_MAX_ENTRIES=8 make check` runs everything with a smaller PMP budget.
@@ -333,6 +382,16 @@ make BOARD=rp2350 test escape        # check the transcripts
 
 `tools/rp2350-run.py` loads the image through the bootrom's PICOBOOT interface,
 waits for the halt's serial port and reads it; closing it reboots the chip into BOOTSEL.
+
+On ARM, under QEMU:
+
+```
+make BOARD=mps2-an385                # build/mps2-an385/kernel-init.elf
+make BOARD=mps2-an385 run            # boot the demo root task
+make BOARD=mps2-an385 test           # the same, and check the transcript
+```
+
+Only the demo is built; the replay driver's layout is QEMU virt's, and the escape suite is RISC-V's so far.
 
 The kernel image embeds one user program, the root task.
 Two images are built, differing only in that program:
@@ -378,6 +437,8 @@ the board's runner exits with the code:
 
 A user fault, an access fault, an illegal instruction, a misaligned access or a breakpoint,
 prints `user fault` followed by `mcause`, `mepc` and `mtval`,
+on ARM by the exception number, the configurable fault status `cfsr`, the `pc`,
+and the address `MMFAR` or `BFAR` names, zero where neither is valid,
 and stops the thread that made it and nothing else, section 5.6;
 a program whose only thread faults therefore ends in `no runnable thread`, code 5.
 
@@ -556,6 +617,7 @@ Rules for installing a frame into a process:
 - The rights installed must be a non-empty subset of the frame's rights.
 - Write without read is refused,
   because PMP reserves that encoding and hardware may do anything with it.
+- On ARM execute without read is refused too, since the MPU fetches only what a thread may read.
 - Regions installed in one process may not overlap each other.
 - The install takes effect at once, even for the running process.
 
@@ -725,7 +787,8 @@ without the power to consume the announcement.
 No data passes through the kernel.
 Two processes exchange bytes through a region installed in both
 and use notifications to say when.
-The build targets `rv32imac`, so the `A` extension is there in user mode
+The build targets `rv32imac`, so the `A` extension is there in user mode,
+as `ldrex` and `strex` are on ARMv7-M,
 and a lock or a ring buffer in shared memory is userspace's to build;
 what userspace cannot build is "stop me until someone says otherwise",
 and a notification is exactly that.
@@ -1011,10 +1074,16 @@ Every system call is an `ecall` with:
 | `a4` | reserved | a result where documented, otherwise unchanged |
 | `a5`, `a6` | reserved | unchanged |
 
+On ARM a call is `svc #0`, with `r0` to `r6` for `a0` to `a6` and `r12` for `a7`,
+which leaves `r7` to Thumb code as its frame pointer;
+the core saves `r0` to `r3`, `r12`, `lr`, `pc` and `xpsr` on the thread's stack as it traps,
+so a thread's `sp` must leave 32 bytes below it that the thread may write,
+or the thread faults, and one whose stacking faulted loses those registers.
+
 No operation takes a pointer into user memory,
 and no operation moves data between processes.
 
-The C wrapper in `user/rvuos.h`:
+The C wrapper in `user/rvuos.h`, the same on both, with the registers from `user/arch/<arch>/call.h`:
 
 ```c
 uint32_t rv_invoke(uint32_t op, uint32_t cap, uint32_t a1, uint32_t a2, uint32_t a3);
@@ -1035,7 +1104,7 @@ A call whose work grows with the derivation tree or with a pool can be interrupt
 and `OP_IRQ_BIND`.
 When the tick or a device interrupt comes due while such a call works,
 the kernel stops it between two capabilities or two objects
-and resumes the thread at its `ecall` with every register as it was,
+and resumes the thread at its `ecall`, or its `svc`, with every register as it was,
 so the thread makes the same call again when it next runs,
 and the call goes on from what it had already cleared.
 A program sees no difference but time,
@@ -1228,7 +1297,7 @@ Both need `RIGHT_W` on the process.
 `a2` = slot of a frame in the caller's table,
 `a3` = rights to install.
 The rights must be a non-empty subset of the frame's (`KERR_NO_RIGHTS`);
-write without read is `KERR_INVALID_ARG`;
+write without read is `KERR_INVALID_ARG`, and so on ARM is execute without read;
 an occupied region slot is `KERR_SLOT_IN_USE`;
 overlap with another region in this process is `KERR_OVERLAP`,
 and so, on the ESP32-C6, is a writable region ending where a readable but not writable one begins;
@@ -1249,6 +1318,8 @@ All need `RIGHT_W` on the thread, and the first two a stopped thread (`KERR_STAT
 **`OP_THREAD_CONFIGURE` (12).**
 `a1` = program counter, `a2` = stack pointer.
 Neither is checked.
+On ARM the program counter is taken as a branch takes it, with bit 0 set for Thumb as a function pointer has it;
+one without bit 0 starts the thread in a fault.
 
 **`OP_THREAD_RESUME` (13).**
 Makes the thread ready.
@@ -1473,10 +1544,11 @@ Constraints of the current linker script:
 - zero-initialised data and the stack live in the read-write region, at `0x80110000` on QEMU,
 - **initialised data is forbidden**: nobody would copy it into the data region,
   and the link fails if `.data` is not empty,
-- `user/start.S` zeroes `.bss`, calls `main`,
+- `user/arch/<arch>/start.S` zeroes `.bss`, calls `main`,
   and halts with code 1 through `BOOT_CAP_DEBUG` if `main` returns.
 
-Compile flags are `-march=rv32imac -mabi=ilp32 -mcmodel=medany -ffreestanding -nostdlib`.
+Compile flags are `-march=rv32imac -mabi=ilp32 -mcmodel=medany -ffreestanding -nostdlib`,
+or `--target=thumbv7m-none-eabi -mcpu=cortex-m3 -mfloat-abi=soft -ffreestanding -nostdlib` on ARM.
 There is no libc; `user/rvuos.h` provides the system call wrappers:
 
 | Wrapper | Operation |
@@ -1688,8 +1760,8 @@ and `tests/mutants/` holds one planted bug per invariant.
 | most of its units an account holds | 100 ticks' worth, 100 ms (`ACCOUNT_TICKS`) | `kernel/timer.h` |
 | timer delay or period per call | 2^32 - 1 µs | `OP_IRQ_SET` |
 | tick | 1 ms (`TIMER_HZ` 1000) | `kernel/timer.h` |
-| interrupt lines | 96 on QEMU, 77 on the ESP32-C6, 52 on RP2350, line 0 the log's | `IRQ_LINES` |
-| smallest region | 8 bytes, or the PMP grain if coarser | `region_min_size` in `kernel/pmp.h` |
+| interrupt lines | 96 on QEMU, 77 on the ESP32-C6, 52 on RP2350, 32 on mps2-an385, line 0 the log's | `IRQ_LINES` |
+| smallest region | 8 bytes, or the PMP grain if coarser, 32 bytes on ARM | `region_min_size` in `kernel/pmp.h` |
 | kernel log ring | 4 KiB less a 32-byte header | `KLOG_SIZE` |
 | replay records per input | 256 | `REPLAY_MAX_RECORDS` |
 
@@ -1712,6 +1784,7 @@ These are documented gaps, not surprises;
 - **No synchronous endpoints.**
   Shared memory and notifications carry everything; open decision 5.
 - **One `Irq` per line**; open decision 11.
+- **ARM under QEMU alone**, with no escape suite and no replay yet; `TODO.md`.
 - **No boot from flash.**
   The ESP32-C6 and RP2350 run from RAM, loaded by their ROMs over USB.
 - **No loader.**

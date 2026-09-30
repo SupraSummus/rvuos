@@ -1,10 +1,14 @@
-# Build for a board, RV32, machine and user mode only.
-# clang and lld cross-compile to RISC-V without a separate toolchain.
+# Build for a board, with the kernel in the core's most privileged mode and programs in its least.
+# clang and lld cross-compile without a separate toolchain.
 #
 # BOARD selects kernel/board/<board>/ and user/board/<board>/:
-#   qemu     QEMU virt, the default and the one `make check` runs on
+#   qemu     QEMU virt, RV32, the default, and with mps2-an385 what `make check` runs on
 #   esp32c6  an ESP32-C6, loaded into RAM through its ROM over USB
 #   rp2350   an RP2350 on its Hazard3 cores, loaded into RAM through its bootrom over USB
+#   mps2-an385  QEMU's MPS2 with the AN385 image, a Cortex-M3; `make arm-test` runs its demo
+# and the board selects its architecture, ARCH, kernel/arch/<arch>/ and user/arch/<arch>/:
+#   riscv    RV32IMAC, machine and user mode, PMP
+#   arm      ARMv7-M, handler and unprivileged thread mode, a PMSAv7 MPU
 #
 # Kernel images differ only in the embedded root task:
 #   build/<board>/kernel-init.elf     the root task of user/init.c, used by `make test`
@@ -27,7 +31,12 @@ PMP_MAX_ENTRIES ?= 16
 VARIANT := $(if $(filter-out 16,$(PMP_MAX_ENTRIES)),-pmp$(PMP_MAX_ENTRIES))
 BUILD   := build/$(BOARD)$(VARIANT)
 
+ARCH := $(if $(filter mps2-an385,$(BOARD)),arm,riscv)
+ifeq ($(ARCH),arm)
+ARCHFLAGS := --target=thumbv7m-none-eabi -mcpu=cortex-m3 -mfloat-abi=soft
+else
 ARCHFLAGS := --target=riscv32-unknown-elf -march=rv32imac -mabi=ilp32 -mcmodel=medany
+endif
 CFLAGS    := $(ARCHFLAGS) -std=c11 -ffreestanding -fno-builtin -fno-pic -fno-common \
              -nostdlib -O2 -g -Wall -Wextra -Werror -Wundef -Wshadow \
              -Wstrict-prototypes -Wmissing-prototypes -Iinclude \
@@ -35,24 +44,26 @@ CFLAGS    := $(ARCHFLAGS) -std=c11 -ffreestanding -fno-builtin -fno-pic -fno-com
 ASFLAGS   := $(ARCHFLAGS) -g -Iinclude
 LDFLAGS   := $(ARCHFLAGS) -nostdlib -static -fuse-ld=lld -Wl,--gc-sections -Wl,--no-dynamic-linker
 
-# The kernel sees its board's headers, and user programs their board's console.
+# The kernel sees its architecture's and its board's headers,
+# and user programs their architecture's call and their board's console.
 # The kernel leaves its frame sizes beside each object for tools/stack-depth.py
 # and puts each function in a section of its own, so the linker drops the dead ones.
 # Its debug information names files from the top of the tree,
 # so tools/loop-bounds.py finds them wherever the tree was built, as in a mutant's copy.
-KERNEL_INC := -Ikernel -Ikernel/board/$(BOARD)
-USER_INC   := -Iuser/board/$(BOARD)
+KERNEL_INC := -Ikernel -Ikernel/arch/$(ARCH) -Ikernel/board/$(BOARD)
+USER_INC   := -Iuser/arch/$(ARCH) -Iuser/board/$(BOARD)
 $(BUILD)/kernel/%.o: CFLAGS += $(KERNEL_INC) -fstack-usage -ffunction-sections \
                                -fdebug-prefix-map=$(CURDIR)=.
+$(BUILD)/kernel/%.o: ASFLAGS += $(KERNEL_INC)
 $(BUILD)/user/%.o: CFLAGS += $(USER_INC)
 
-KERNEL_SRC_C := $(wildcard kernel/*.c kernel/board/$(BOARD)/*.c)
-KERNEL_SRC_S := $(wildcard kernel/*.S kernel/board/$(BOARD)/*.S)
+KERNEL_SRC_C := $(wildcard kernel/*.c kernel/arch/$(ARCH)/*.c kernel/board/$(BOARD)/*.c)
+KERNEL_SRC_S := $(wildcard kernel/*.S kernel/arch/$(ARCH)/*.S kernel/board/$(BOARD)/*.S)
 KERNEL_OBJ   := $(patsubst %.c,$(BUILD)/%.o,$(KERNEL_SRC_C)) \
                 $(patsubst %.S,$(BUILD)/%.o,$(filter-out %.ld.S,$(KERNEL_SRC_S)))
 KERNEL_SU    := $(patsubst %.c,$(BUILD)/%.su,$(KERNEL_SRC_C))
 
-USER_COMMON := $(BUILD)/user/start.o
+USER_COMMON := $(BUILD)/user/arch/$(ARCH)/start.o
 
 # QEMU's clock counts instructions, not the host's time,
 # so a run takes the same path however loaded the host is;
@@ -90,19 +101,35 @@ ESCAPE_PREFIX := $(RP2350_PYTHON) tools/rp2350-run.py
 # Where the core's transcripts differ from QEMU's and the ESP32-C6's, see tests/run.sh:
 # eight PMP entries, a 32-byte grain, mtval always zero, and misaligned accesses that trap.
 BOARD_FACTS   := BOARD_PMP_ENTRIES=8 BOARD_PMP_GRAIN=32 BOARD_MTVAL=zero BOARD_MISALIGNED=trap
+else ifeq ($(BOARD),mps2-an385)
+# The replay driver's layout is QEMU virt's, so only the demo is built, as for the chips.
+# QEMU exits through semihosting, which only the kernel reaches; see kernel/board/mps2-an385/halt.c.
+USER_PROGRAMS := init
+IMAGE         := elf
+QEMU_ARM      := qemu-system-arm
+QEMUFLAGS_ARM := -M mps2-an385 -cpu cortex-m3 -nographic -nodefaults -nic none -serial mon:stdio \
+                 -semihosting-config enable=on,target=native -icount shift=0,sleep=off
+RUN_INIT      := $(QEMU_ARM) $(QEMUFLAGS_ARM) -kernel $(BUILD)/kernel-init.elf
+# Where the core's transcripts differ from QEMU virt's, see tests/run.sh:
+# an MPU of eight regions, none smaller than 32 bytes, and ARMv7-M's report of a fault.
+BOARD_FACTS   := BOARD_PMP_ENTRIES=8 BOARD_PMP_GRAIN=32 BOARD_ARCH=arm
 else
-$(error unknown BOARD '$(BOARD)'; the boards are qemu, esp32c6 and rp2350)
+$(error unknown BOARD '$(BOARD)'; the boards are qemu, esp32c6, rp2350 and mps2-an385)
 endif
 
 # The escape-attempt suite: one root task per scenario, built for whichever board.
 # Each program uses only boot capabilities every board grants,
-# so the same scenarios run on every board.
+# so the same scenarios run on every board; they are RISC-V's, see TODO.md.
+ifeq ($(ARCH),riscv)
 ESCAPE_PROGRAMS := escape-execute-data escape-jump-kernel escape-csrr escape-mret \
                    escape-misaligned-load escape-misaligned-store escape-store-kernel \
                    escape-past-region
+else
+ESCAPE_PROGRAMS :=
+endif
 
 .PHONY: all clean run test escape host-harnesses host-test fuzz corpus-merge qemu-replay mutants mutants-refresh \
-        mutants-fuzz check
+        mutants-fuzz arm-test check
 
 # Pattern rules would delete the objects they chain through,
 # so every build compiled the kernel from scratch.
@@ -132,8 +159,9 @@ $(BUILD)/user-%.bin: $(BUILD)/user-%.elf
 
 # Wrap the flat user image in an object file
 # so the kernel linker script can place it at the user code address.
+# The section type is written with %, which both architectures take; ARM reads @ as a comment.
 $(BUILD)/user_blob-%.S: $(BUILD)/user-%.bin
-	printf '.section .user_code,"a",@progbits\n.incbin "%s"\n' $< > $@
+	printf '.section .user_code,"a",%%progbits\n.incbin "%s"\n' $< > $@
 
 $(BUILD)/user_blob-%.o: $(BUILD)/user_blob-%.S
 	$(CC) $(ASFLAGS) -c $< -o $@
@@ -195,14 +223,15 @@ HOST_CC     := clang
 HOST_BUILD  := build/host$(VARIANT)
 HOST_CORPUS := $(HOST_BUILD)/corpus
 HOST_CFLAGS := -std=c11 -O1 -g -Wall -Wextra -Werror -Wshadow \
-               -DRVUOS_HOST -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -Ikernel -Ikernel/board/qemu \
-               -Ihost -Iinclude
+               -DRVUOS_HOST -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -Ikernel -Ikernel/arch/riscv \
+               -Ikernel/board/qemu -Ihost -Iinclude
 # ASan alone may go on after a report, so that an input run as if alone ends alone;
 # see host_asan_report in host/shim.c.
 HOST_SAN    := -fsanitize=address,undefined -fno-sanitize-recover=all -fsanitize-recover=address
 
 HOST_KERNEL_SRC := kernel/cap.c kernel/pool.c kernel/process.c kernel/sched.c \
-                   kernel/syscall.c kernel/boot.c kernel/selfcheck.c kernel/klog.c
+                   kernel/syscall.c kernel/boot.c kernel/selfcheck.c kernel/klog.c \
+                   kernel/arch/riscv/frame.c
 HOST_SRC        := host/shim.c host/history.c host/mutator.c host/fuzz.c
 # What the fuzzer's coverage leaves out: the self-check and the harness only look at what the kernel did,
 # and their walks over every object after every call would reward an input for the objects it leaves
@@ -316,7 +345,11 @@ qemu-replay: $(BUILD)/kernel-fuzzdrv.elf $(HOST_BUILD)/fuzz
 	tests/differential.py --qemu "$(QEMU) $(QEMUFLAGS)" $(if $(REPLAY_JOBS),--jobs $(REPLAY_JOBS)) \
 		--kernel $(BUILD)/kernel-fuzzdrv.elf --host $(HOST_BUILD)/fuzz tests/seeds tests/corpus
 
-check: test escape host-test qemu-replay
+# The same demo on ARM, under QEMU; see DESIGN.md, "Architectures".
+arm-test:
+	$(MAKE) BOARD=mps2-an385 test
+
+check: test escape host-test qemu-replay arm-test
 
 clean:
 	rm -rf $(BUILD)

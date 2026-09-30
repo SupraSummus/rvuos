@@ -546,7 +546,7 @@ static __attribute__((noreturn)) void prober_main(void)
 {
     probed = *(volatile uint32_t *)probe_at;
     for (;;) {
-        __asm__ volatile("ebreak");
+        rv_breakpoint();
     }
 }
 
@@ -629,7 +629,7 @@ static __attribute__((noreturn)) void successor_main(void)
     puts(", expecting a fault\n");
     expect("start the prober", rv_invoke(OP_THREAD_RESUME, SLOT_PROBER, 0, 0, 0));
     expect("hear its fault", fault_wait());
-    expect("PMP stopped the load", probed == 0 ? KERR_OK : KERR_INVALID_ARG);
+    expect("the protection unit stopped the load", probed == 0 ? KERR_OK : KERR_INVALID_ARG);
     expect("map the region again",
            rv_invoke(OP_PROCESS_INSTALL, BOOT_CAP_PROCESS, ROOT_SHARED_SLOT, SLOT_SHARED,
                      RIGHT_R | RIGHT_W));

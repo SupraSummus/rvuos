@@ -16,6 +16,7 @@
  * Registers on return:
  *   a0      status, one of KERR_*
  *   a1..a4  results, operation specific; unchanged unless documented
+ * On ARMv7-M the call is svc, r0..r6 stand for a0..a6 and r12 for a7.
  * No operation takes a pointer into user memory.
  *
  * A call marked "restartable" may stop for a pending interrupt with its progress kept
@@ -269,7 +270,8 @@
  * a1 = region slot index, a2 = Frame capability slot in the caller's table,
  * a3 = rights to install, a subset of the frame's rights.
  * RIGHT_W without RIGHT_R is rejected with KERR_INVALID_ARG,
- * because PMP reserves that encoding.
+ * because PMP reserves that encoding,
+ * and so on ARM is RIGHT_X without RIGHT_R, since the MPU fetches only what it lets a thread read.
  * Fails with KERR_OVERLAP if the range overlaps another region installed in the same process,
  * or, on the ESP32-C6, a writable one would end where a readable but not writable one begins.
  * The installed region is a child of the Frame capability in the derivation tree:
@@ -282,6 +284,7 @@
 /*
  * Thread (RIGHT_W): set where a stopped thread will start.
  * a1 = program counter, a2 = stack pointer.
+ * On ARM the program counter carries bit 0 for Thumb, as a function pointer does.
  * Fails with KERR_STATE unless the thread is stopped.
  * The kernel does not check either value:
  * a thread that starts nowhere useful faults, which is its creator's business; see OP_THREAD_WATCH.

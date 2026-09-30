@@ -72,7 +72,8 @@ SECTIONS
     }
     ASSERT(. <= USER_CODE_BASE + USER_CODE_SIZE, "user code does not fit its region")
 
+    /* Nothing unwinds, and ARM's compiler marks every function as not unwinding all the same. */
     /DISCARD/ : {
-        *(.eh_frame .eh_frame_hdr .comment .note.GNU-stack)
+        *(.eh_frame .eh_frame_hdr .comment .note.GNU-stack .ARM.exidx* .ARM.extab*)
     }
 }

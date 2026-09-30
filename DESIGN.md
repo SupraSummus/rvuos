@@ -7,7 +7,8 @@ Work items are in `TODO.md`.
 
 ## Goals
 
-rvuos is a microkernel for RISC-V microcontrollers.
+rvuos is a microkernel for RISC-V microcontrollers,
+and for ARMv7-M ones with an MPU through the same programming model; see "Architectures".
 It has four goals, in priority order.
 
 1. **Isolation without an MMU.**
@@ -41,7 +42,7 @@ regions installed in its slots,
 and capabilities placed in its table.
 The kernel knows no executable format, no header, no runtime library.
 A binary built with any toolchain against `include/rvuos/abi.h`,
-or with no header at all and the right `ecall` sequences,
+or with no header at all and the right `ecall` or `svc` sequences,
 is a valid task.
 
 This is a deliberate contrast with TockOS,
@@ -123,6 +124,9 @@ processes talk to kernel drivers by driver number,
 not by held capability.
 
 ## Hardware model
+
+This section is RISC-V's, where rvuos began;
+"Architectures" says what ARMv7-M has in each place instead.
 
 ### Privilege modes
 
@@ -231,8 +235,9 @@ whose deadlines are counted in ticks; see "Time".
 Where the registers live, what starts the counter and how fast it counts are the board's business:
 `board.h` names the two registers,
 and `timer.c`, per board as `irq.c` is, starts the counter and says how many counts make a tick.
-The rest is the same on every board and lives once in `kernel/clint.c`:
-reading `mtime`, setting `mtimecmp` and counting the ticks.
+The tick is the same on every board and lives once in `kernel/timer.c`,
+on a counter and a compare below it,
+which `kernel/arch/riscv/clint.c` makes of `mtime` and `mtimecmp` on every RISC-V board.
 The kernel counts ticks on the counter rather than on interrupts:
 every trap counts the whole periods `mtime` has passed since the last tick it counted,
 so the tick count keeps pace with the counter however late or seldom the interrupt is taken,
@@ -355,6 +360,9 @@ and is summarised here.
 | `a7` | operation code | unchanged |
 | `a0` | slot of the invoked capability | status, zero on success |
 | `a1` to `a6` | arguments | results |
+
+On ARMv7-M `r0` to `r6` stand for `a0` to `a6`, `r12` for `a7`, and `svc` makes the call;
+see "Architectures".
 
 Operation codes are a single flat numbering across all types.
 The kernel resolves the slot, checks that the type accepts the operation
@@ -788,6 +796,7 @@ that is as near as rvuos comes to an exit, and it needs nothing more.
 
 **The log says what the fault was.**
 The kernel writes `user fault` and the frame's `mcause`, `mepc` and `mtval` into its log,
+on ARMv7-M the exception, the fault status, the pc and the fault address,
 while the bits say only which thread; no call returns the cause, open decision 21.
 A thread that faults again and again fills the log only while its watcher resumes it every time.
 
@@ -1396,8 +1405,8 @@ which `kernel/layout.h` and both linker scripts read,
 whether it transposes R and X in `pmpcfg`, `PMP_CFG_RX_TRANSPOSED`,
 and the finest grain it may have, `PMP_GRAIN_MIN`;
 `board.c`, what the board needs before anything else and the CSRs it sets back for each process;
-`timer.c`, which starts the timer `kernel/clint.c` drives;
-`irq.c` and `halt.c`;
+`timer.c`, which starts the timer, and on ARM has the counter the tick compares with;
+`irq.c`, but on ARM, where the NVIC is the architecture's, and `halt.c`;
 `console.h`, the device behind `BOOT_CAP_UART` as the root task drives it;
 and `csrs.h`, the user-mode CSRs the demo checks the kernel sets back.
 Nothing else in the kernel names an address.
@@ -1450,6 +1459,18 @@ So the install keeps such regions apart, see "Region slots",
 and the layout leaves a block between the log and the code and one between the data and the input.
 A program compiled for strict alignment meets neither half.
 
+**mps2-an385** is QEMU's model of ARM's MPS2 board with the AN385 image, a Cortex-M3, and ARM's development target:
+`make BOARD=mps2-an385 test` runs the demo root task of `user/init.c` there, the same program as on RISC-V,
+and `make check` runs it too.
+QEMU loads the image into SSRAM1, where the core's reset finds the vector table,
+and the halt leaves QEMU through semihosting, which only privileged code reaches.
+The layout is QEMU virt's, moved to SSRAM1 at 0;
+the console is UART0 of the CMSDK, whose transmitter latches its interrupt as each byte leaves.
+The clock's counter is the FPGA's `COUNTER`, 32 bits at 25 MHz with the prescaler above it,
+so the high word a program reads is zero and the counter wraps every 171 seconds;
+the kernel counts the wraps for its own tick, see `kernel/board/mps2-an385/timer.c`.
+Measured under QEMU 8.2: eight MPU regions and a bkpt taken as a HardFault, DebugMonitor or not.
+
 **RP2350** runs the demo root task and the escape suite on its Hazard3 cores, `make BOARD=rp2350 test escape`.
 The bootrom's BOOTSEL mode takes the image's segments into SRAM over USB and reboots into them,
 finding the image by the block `image.S` puts at `RAM_BASE`;
@@ -1464,6 +1485,85 @@ User mode reaches a peripheral only where ACCESSCTRL lets it in, which at reset 
 the hardwired PMP entries leave every peripheral and the Non-secure bank of SIO to user mode,
 so a peripheral ACCESSCTRL opens is open to every process, frame or no frame.
 TIMER0 is opened, for the clock; see `TODO.md`.
+
+## Architectures
+
+An architecture is the files of `kernel/arch/<arch>/` and `user/arch/<arch>/`,
+chosen by the board: `riscv` for QEMU virt, the ESP32-C6 and RP2350's Hazard3, `arm` for mps2-an385.
+The kernel's objects, its capabilities and every operation are the same on both,
+and so is `user/init.c`, which runs the same demo to the same transcript.
+What differs is what a trap is, which registers carry a call, how a region is written to the hardware,
+and which counter and compare the tick is made of;
+`arch.h` says the first two to the rest of the kernel,
+the architecture's `start.S` and `trap.c` take the trap,
+its `frame.c` starts a thread and reports a fault,
+and `user/arch/<arch>/call.h` is the call as `rvuos.h` makes it.
+A program written against `rvuos.h` is the same source on both, never the same binary.
+
+**Why ARMv7-M's MPU takes the model as it is.**
+A PMSAv7 region is a power of two of at least 32 bytes, aligned to its size, which is a NAPOT block,
+so every frame is one region as it is one PMP entry, and the image in `struct pmp_image` keeps PMP's encoding:
+`kernel/arch/arm/mpu.c` implements `pmp.h`, entry i as region i, and reads a region back as the entry that made it,
+so the self-check of the image and of what the hardware holds is the same code on both.
+Had regions stayed TOR, open decision 8, ARMv7-M could not have held them.
+PMSAv8, ARMv8-M's, takes a base and a limit on 32 bytes, so it holds every block as one region too.
+The kernel runs privileged with the default memory map behind the regions, `PRIVDEFENA`,
+as machine mode runs outside PMP;
+a region takes its memory type from where it lies, normal memory in RAM and a device elsewhere, so a frame carries none.
+The MPU fetches only what it lets the thread read, so a region may not be execute only there,
+`EXECUTE_NEEDS_READ` in `arch.h`, as no region anywhere may be write only.
+The smallest region is 32 bytes, `PMP_GRAIN_MIN`, which `OP_FRAME_INFO` returns as on RP2350.
+
+**Modes and traps.**
+The kernel runs in handler mode and a thread in thread mode, unprivileged, on the process stack.
+Every exception and line has one priority, so none preempts another and the kernel runs as it does in machine mode,
+with interrupts held off;
+only a fault of the kernel's own nests, as a HardFault, and halts.
+An interrupt taken while the kernel runs would have to preempt it, so `wfi` would not wake there:
+`intr_wait` waits in `wfe`, with `SEVONPEND` making a line becoming pending an event, and polls otherwise.
+The kernel leaves thread mode the first time through PendSV,
+which kmain pends and lets in with interrupts, and which nothing pends after.
+A call is `svc`, two bytes, with the operation in `r12`, since Thumb code keeps `r7` as its frame pointer;
+`trap.c` moves the pc back onto the `svc`, so the rest of the kernel sees a call as on RISC-V,
+resumes past it and restarts at it.
+A thread's pc is taken as a branch takes it, bit 0 for Thumb, so a function pointer is a valid entry,
+and the root task starts at `ENTRY_PC(USER_CODE_BASE)`.
+
+**The frame on the thread's stack.**
+The core saves r0 to r3, r12, lr, pc and xpsr itself, on the thread's own stack, with the thread's rights,
+and restores them from there on the way back; that half of the frame lies in user memory.
+The rule that the kernel never dereferences an address userspace chose, "Physical Memory Protection",
+holds as follows.
+The kernel reads the hardware frame only right after the core wrote it,
+so it reads memory the thread could write and nothing else;
+after a stacking fault the core wrote nothing, and the thread loses those eight registers,
+which keep what its last trap left, and a call whose stacking faulted is dropped, not taken for the next thread.
+The kernel writes the frame back only where the thread's process holds a region it may read and write, in RAM,
+a walk of the eight region slots;
+a device is left out, since the kernel's store is privileged and a device may let it do what it keeps from the thread.
+Where the frame cannot go, psp points at the kernel's own stack instead,
+the core's unstacking faults there with the thread's rights,
+and the thread stops with its frame as it was, as any fault stops it.
+So a sp that points anywhere costs its thread a fault and nothing more,
+and a thread's sp must always leave 32 bytes below it in memory it may write, as a thread's stack does.
+
+**The tick and the controller.**
+SysTick, which every Cortex-M has, is the compare: a 24-bit down-counter,
+set for what is left before the compare and set again each time it fires until the counter reaches it,
+`kernel/arch/arm/systick.c`;
+the counter is the board's, since SysTick's own count lies in the System Control Space, which user mode never reaches,
+and a process reads the clock through a frame.
+The NVIC is the controller: the line a trap enters on is active and no longer pending, so `irq_claim` hands it out first,
+and a line is unmasked with its stale pending state dropped, since the NVIC latches a level masked or not.
+
+**What checks it.**
+Both link checks read Thumb-2, `tools/kthumb.py`, and the ARM kernel links only as the RISC-V one does.
+A fault of the kernel's own nests, and the core pushes its 32-byte frame on the kernel's stack first,
+which `tools/stack-depth.py` does not count; `kernel_trap` takes the stack back at once and halts.
+The host build compiles the kernel with RISC-V's frame, as QEMU virt has it,
+so the fuzzer and `make qemu-replay` see the portable kernel and not `kernel/arch/arm/`,
+which only the link checks and the demo under QEMU exercise, and the escape suite does not run there yet;
+`TODO.md` says what that leaves unchecked.
 
 ## Bounded work
 
@@ -1492,7 +1592,7 @@ take one step per capability, object or waiter in constant time
 and ask `intr_pending` between two steps.
 If the tick or a device interrupt is pending, the walk stops,
 `syscall_dispatch` puts the thread back on its `ecall` with its registers as they were,
-the `mret` takes the interrupt through `mtvec` as in any user code,
+the `mret` takes the interrupt through `mtvec` as in any user code, as the exception return does on ARM,
 and the thread makes the same call again when it next runs, as in seL4.
 The kernel only notices the interrupt; the processor takes it.
 The progress stays in the derivation tree and in the pool:
@@ -1535,7 +1635,8 @@ A bound the loop's own shape limits, a counter below a constant, is compared wit
 this is the only check of board code, which the host does not run.
 The shape is read from the source, so a loop the compiler unrolled is held to its bound too.
 A wait must wait on every way round, which the link checks too:
-a `wfi`, a load from a fixed address outside RAM, or a call to a function holding a `wfi`.
+a `wfi`, a load from a fixed address outside RAM, or a call to a function holding a `wfi`,
+and on ARM a `wfe` counts as a `wfi` does.
 Other bounds rest on an invariant, as `i < img->count` does,
 and a paid loop names its unit: a node, a link, an object or a waiter.
 The host harness `fuzz-work` counts both after every call:
@@ -2151,10 +2252,11 @@ until the maintainer decides otherwise.
    are listed in `TODO.md`.
    RP2350 runs from RAM too, loaded by its bootrom.
    Cores without PMP, GD32VF103 among them, cannot run rvuos.
+   QEMU's mps2-an385, a Cortex-M3, is the development target of ARMv7-M; see open decision 23.
 
 2. **Implementation language.**
    Working default: C, compiled with clang for `riscv32-unknown-elf`,
-   `-march=rv32imac -mabi=ilp32`, linked with lld,
+   `-march=rv32imac -mabi=ilp32`, or for `thumbv7m-none-eabi` on ARM, linked with lld,
    with a thin assembly entry and no libc.
    Rust was considered and rejected for now:
    the kernel is small, mostly CSR and fixed-layout work
@@ -2418,3 +2520,17 @@ until the maintainer decides otherwise.
     and a pad routed to it is every process's whatever the kernel sets back;
     no process holds the matrix today, so the first GPIO driver decides who may route one.
     Decide with the first program that wants the counter or the dedicated GPIO kept.
+
+23. **A second architecture.**
+    Decided: ARMv7-M, with the kernel's objects, operations and demo unchanged; see "Architectures".
+    The model needs every region to be a block, which PMP's NAPOT, PMSAv7 and PMSAv8 each take as one entry.
+    Open:
+    - **Execute only.** ARM refuses a region that may execute but not read, which RISC-V grants;
+      refusing it on both would make the ABI one, and change what the seeds and the corpus mean.
+    - **The registers a stacking fault loses.** A thread whose sp points where it may not write
+      loses r0 to r3, r12, lr, pc and xpsr as it traps, so its watcher can start it afresh but not resume it.
+      A kernel that kept the last frame it gave could resume it where its last trap left it.
+    - **The floating point unit.** The Cortex-M3 has none; a core with one stacks its registers lazily,
+      and a process switch then owes them a save the kernel does not make.
+    - **The name.** rvuos says RISC-V, which the kernel no longer is alone.
+    Decide each with the first board or program that needs it.

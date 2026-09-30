@@ -1,12 +1,13 @@
 #ifndef RVUOS_TIMER_H
 #define RVUOS_TIMER_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "rvuos/abi.h"
 
 /*
- * The machine timer, which provides the scheduling tick.
+ * The timer, which provides the scheduling tick.
  * The kernel handles it directly; see DESIGN.md, "Scheduling".
  */
 
@@ -31,8 +32,25 @@ _Static_assert(TIMER_US_PER_TICK * TIMER_HZ == 1000000u, "the tick divides a sec
  */
 #define TICK_COUNTS_MAX (0xffffffffu / (TIME_UNITS * (ACCOUNT_TICKS + 1)))
 
-/* Program the first tick and enable the machine timer interrupt. */
+/* The board's timer.c: start the counter and program the first tick, through timer_start. */
 void timer_init(void);
+
+/*
+ * Tick every period counts of the counter, the first a period from now,
+ * and enable the timer interrupt; timer_counter_hz is period times TIMER_HZ from then on.
+ * In kernel/timer.c, on the three functions below.
+ */
+void timer_start(uint32_t period);
+
+/*
+ * The hardware below the tick, the architecture's or the board's:
+ * the machine's counter, 64 bits counting up from boot,
+ * and a compare on it, whose interrupt is pending while the counter has reached it.
+ * kernel/arch/riscv/clint.c has them on a CLINT.
+ */
+uint64_t counter_read(void);
+void counter_compare(uint64_t at);
+void counter_compare_enable(void);
 
 /*
  * Count the ticks that passed since the last counted one:
@@ -48,6 +66,15 @@ uint32_t timer_count(void);
  * and counts the others whenever it next traps; see DESIGN.md, "Scheduling".
  */
 void timer_set(uint32_t ticks);
+
+/*
+ * What every trap does with the tick, around what it came for, on either architecture:
+ * enter counts the ticks that passed, pending saying whether the timer's interrupt is, and returns
+ * whether tracing was on; tick is the timer's own interrupt; leave sets the timer for what runs next.
+ */
+bool timer_trap_enter(bool pending);
+void timer_trap_tick(void);
+void timer_trap_leave(bool traced);
 
 /* The rate of the counter the tick is made of, COUNTER_ADDR, in Hz; see OP_CLOCK_INFO. */
 uint32_t timer_counter_hz(void);

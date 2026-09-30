@@ -24,5 +24,5 @@ void timer_init(void)
 {
     clint_hold();
     *(volatile uint32_t *)SIO_MTIME_CTRL = MTIME_EN;
-    clint_start(COUNTER_HZ / TIMER_HZ);
+    timer_start(COUNTER_HZ / TIMER_HZ);
 }

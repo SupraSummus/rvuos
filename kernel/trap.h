@@ -5,41 +5,11 @@
 #include <stdint.h>
 
 /*
- * Register state saved on every trap.
- *
- * The frame lives inside the thread object.
- * While user mode runs, mscratch points at the current thread's frame
- * so the trap entry can save registers without a free register.
- * The layout is shared with start.S,
- * which fills it on entry and drains it on return.
- * regs[0] holds x0, is never written back, and is where trap_return's sc.w points.
- * regs[2] is the trapped stack pointer.
+ * Traps, as the rest of the kernel sees them on every architecture.
+ * The frame's layout and the registers a call travels in are the architecture's,
+ * in its arch.h, and so is trap.c, which dispatches a trap.
  */
-struct trap_frame {
-    uint32_t regs[32];
-    uint32_t mepc;
-    uint32_t mcause;
-    uint32_t mtval;
-    uint32_t pad;
-};
-
-#define TRAP_FRAME_SIZE 144
-
-_Static_assert(sizeof(struct trap_frame) == TRAP_FRAME_SIZE,
-               "trap frame layout must match start.S");
-
-/* Register numbers as indices into trap_frame.regs. */
-enum {
-    REG_SP = 2,
-    REG_A0 = 10,
-    REG_A1 = 11,
-    REG_A2 = 12,
-    REG_A3 = 13,
-    REG_A4 = 14,
-    REG_A5 = 15,
-    REG_A6 = 16,
-    REG_A7 = 17,
-};
+#include "arch.h"
 
 /*
  * Called from start.S with the frame the trap was saved into,
@@ -50,12 +20,22 @@ enum {
 struct trap_frame *trap_handler(struct trap_frame *frame);
 
 /*
- * Restore a frame and mret into it.
+ * Restore a frame and return to user mode into it.
  * Never returns.
  */
 __attribute__((noreturn)) void trap_return(struct trap_frame *frame);
 
-/* The frame's mcause, mepc and mtval, as a line of the log; in syscall.c, which the host build has too. */
+/* Leave the kernel for user mode the first time, into frame, with interrupts taken from then on. */
+__attribute__((noreturn)) void trap_start(struct trap_frame *frame);
+
+/*
+ * Where a stopped thread starts: pc and sp, as OP_THREAD_CONFIGURE takes them and the boot gives the root task;
+ * the other registers stay as they were.
+ * In the architecture's frame.c, which the host build has too.
+ */
+void frame_start(struct trap_frame *frame, uint32_t pc, uint32_t sp);
+
+/* What the frame says of the trap that made it, as a line of the log; in frame.c too. */
 void report_frame(const struct trap_frame *frame);
 
 /* Called from start.S when the kernel itself traps. */
@@ -74,7 +54,7 @@ __attribute__((noreturn)) void kernel_trap_panic(void);
 bool intr_wait(uint32_t wake, uint32_t *ticks);
 
 /*
- * Whether the tick or a device interrupt is pending, which the kernel runs with MIE clear to leave.
+ * Whether the tick or a device interrupt is pending, which the kernel runs with interrupts held off to leave.
  * A preemptible walk asks between two steps; see DESIGN.md, "Bounded work".
  * The host build always answers yes.
  */

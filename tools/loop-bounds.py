@@ -38,9 +38,12 @@ import struct
 import subprocess
 import sys
 
-from kimage import BASED, Failure, NO_DEST, SHF_ALLOC, TARGET, data_words, imm, load, text_end
+import kthumb
+from kimage import BASED, Block, Failure, NO_DEST, SHF_ALLOC, TARGET, arch, data_words, imm, load, text_end
 from ksource import Source, counted, symbolize
 
+# Where a trap enters: RISC-V's vectors are code that jumps to trap_entry,
+# ARMv7-M's a table of addresses, whose entries past the stack and the reset are, see entries.
 ENTRIES = {"trap_vectors"}
 # The self-check walks every object by design and runs only while OP_DEBUG_TRACE is on:
 # each cut, and the variable every call to it must be guarded by.
@@ -66,17 +69,6 @@ def walk_rows(design: str) -> set[str]:
         table = True
         rows.update(re.findall(r"`(\w+)`", line.split("|")[1]))
     return rows
-
-
-class Block:
-    def __init__(self, start):
-        self.start = start
-        self.end = start
-        self.succ = set()
-        self.calls = []  # (pc, callee)
-        self.leaves = False  # returns to the caller, itself or by a tail call
-        self.tails = []  # (pc, function) of the jumps to functions that return for it
-        self.indirect = False  # calls or jumps through a register to another function
 
 
 TERMINATORS = ("ret", "mret", "j", "jr")
@@ -421,13 +413,30 @@ def loops_of(blocks, entry):
     return sorted(loops, key=lambda hl: -len(hl[1]))
 
 
-def reached(graph, by_name, blocks_by_fn, pointed):
+def entries(image, sections, symbols, by_name):
+    """The functions a trap enters at.
+    On ARMv7-M the vector table names them: every word past the first two, the stack and the reset,
+    which is where the kernel starts and no trap goes."""
+    if arch(image) != "arm":
+        return [by_name[n] for n in ENTRIES]
+    base = symbols["trap_vectors"]
+    out = []
+    for i in range(2, 16 + (1 << 9)):
+        word = kthumb.literal(image, sections, base + 4 * i)
+        if word is None or (word != 0 and word & ~1 not in by_name.values()):
+            break
+        if word:
+            out.append(word & ~1)
+    return sorted(set(out))
+
+
+def reached(graph, by_name, blocks_by_fn, pointed, starts):
     """The functions a trap reaches without passing through a cut or a halting block.
 
     The calls are read from the blocks, so a jr through a function's own jump table
     is a jump inside it, and a call through a register reaches every function in pointed.
     """
-    todo = [by_name[n] for n in ENTRIES]
+    todo = list(starts)
     seen = set(todo)
     while todo:
         a = todo.pop()
@@ -518,6 +527,7 @@ def main() -> int:
 
     try:
         image, sections, symbols, _, functions, graph, pointed = load(args.objdump, args.elf, args.su)
+        thumb = arch(image) == "arm"
         if "__ram_start" not in symbols or "__ram_end" not in symbols:
             raise Failure("the image names no __ram_start and __ram_end, which the check of a wait needs")
         ram = (symbols["__ram_start"], symbols["__ram_end"])
@@ -527,13 +537,15 @@ def main() -> int:
         pointers = {}
         for w in data_words(image, sections):
             i = bisect.bisect_right(starts, w) - 1
-            if i >= 0 and w < ends[starts[i]]:
+            if i >= 0 and w < ends[starts[i]] and not (thumb and w & 1):
                 pointers.setdefault(starts[i], set()).add(w)
-        returns = may_return(functions, ends, pointers)
+        returns = (kthumb.may_return if thumb else may_return)(functions, ends, pointers)
         insns_of = {a: insns for a, _, insns in functions}
-        blocks_by_fn = {a: blocks_of(a, ends[a], insns, pointers, returns, image, sections)
+        blocks_by_fn = {a: (kthumb.blocks_of if thumb else blocks_of)(a, ends[a], insns, pointers, returns,
+                                                                       image, sections)
                         for a, _, insns in functions if insns}
-        checked = sorted(reached(graph, by_name, blocks_by_fn, pointed) & blocks_by_fn.keys())
+        starting = entries(image, sections, symbols, by_name)
+        checked = sorted(reached(graph, by_name, blocks_by_fn, pointed, starting) & blocks_by_fn.keys())
 
         # The loops of the image, with their instructions, and every call a trap may make.
         found = []  # (function, header, set of block starts, [instruction addresses])
@@ -541,11 +553,12 @@ def main() -> int:
         for a in checked:
             blocks = blocks_by_fn[a]
             stops = halting(blocks)
+            exits = kthumb.predicated_exits(insns_of[a]) if thumb else set()
             for h, body in loops_of(blocks, a):
                 if h in stops:
                     continue
                 addrs = [pc for pc, _, _ in insns_of[a]
-                         if any(blocks[b].start <= pc < blocks[b].end for b in body)]
+                         if any(blocks[b].start <= pc < blocks[b].end for b in body) and pc not in exits]
                 found.append((a, h, body, addrs))
             for b, blk in blocks.items():
                 calls += [(a, pc, c) for pc, c in blk.calls + blk.tails if c is not None]
@@ -622,17 +635,23 @@ def main() -> int:
             proven.add(id(n))
 
         # A wait waits on every way round.
-        waits = {a for a, _, insns in functions if any(m == "wfi" for _, m, _ in insns)}
+        wait_insns = kthumb.WAITS if thumb else ("wfi",)
+        waits = {a for a, _, insns in functions if any(kthumb.bare(m) in wait_insns for _, m, _ in insns)}
         for (a, h, body), loop in matched.items():
             if not any(n.kind == "wait" for n in loop.notes):
                 continue
             blocks = blocks_by_fn[a]
             inside = [(pc, m, o) for pc, m, o in insns_of[a]
                       if any(blocks[b].start <= pc < blocks[b].end for b in body)]
-            written = {writes(m, o) for _, m, o in inside}
-            moving = {pc for pc, m, o in inside
-                      if LOAD.match(m) and (x := BASED.search(o)) and x.group(2) in written}
-            if comes_round(blocks, h, body, waiting_blocks(blocks, insns_of[a], ram, waits, moving)):
+            if thumb:
+                moving = kthumb.moving_loads(inside)
+                waiting = kthumb.waiting_blocks(blocks, insns_of[a], ram, waits, moving, image, sections)
+            else:
+                written = {writes(m, o) for _, m, o in inside}
+                moving = {pc for pc, m, o in inside
+                          if LOAD.match(m) and (x := BASED.search(o)) and x.group(2) in written}
+                waiting = waiting_blocks(blocks, insns_of[a], ram, waits, moving)
+            if comes_round(blocks, h, body, waiting):
                 check.problems.append(f"{graph[a].name} has a loop at {h:#x}, {loop}, which says it waits, "
                                       "and a way round it does not")
 

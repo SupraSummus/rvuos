@@ -1,6 +1,6 @@
 #!/bin/bash
 # Install what `make check` needs in a Claude Code cloud session:
-# QEMU for RISC-V, and clang's fuzzer and sanitizer runtimes for the host build.
+# QEMU for RISC-V and for ARM, and clang's fuzzer and sanitizer runtimes for the host build.
 # It installs only what is missing, so a cached container starts at once.
 set -euo pipefail
 
@@ -10,6 +10,7 @@ fi
 
 packages=()
 command -v qemu-system-riscv32 >/dev/null || packages+=(qemu-system-misc)
+command -v qemu-system-arm >/dev/null || packages+=(qemu-system-arm)
 [ -e "$(clang --print-runtime-dir)/libclang_rt.fuzzer-$(uname -m).a" ] \
   || packages+=("libclang-rt-$(clang -dumpversion | cut -d. -f1)-dev")
 
