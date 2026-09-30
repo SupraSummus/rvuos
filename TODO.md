@@ -62,16 +62,16 @@ what is left:
 - The chip's watchdogs stay off, so a kernel that stops altogether, and cannot halt, stays stopped here,
   where RP2350's resets the chip a second after the kernel's watchdog's deadline;
   `board_watchdog` could start the RTC watchdog the same way.
-- The PHY tracer.
-  `user/phyblob/` is the harness: what ESP-IDF does up to `register_chipv7_phy`, around Espressif's `libphy.a`,
-  laid out as `user/phytrace.h` says.
-  Still to come: the root task that watches it and carries out its device accesses, `user/phytrace.c`;
-  rules that fetch esp-phy-lib and ESP-IDF's ROM linker scripts at pinned commits,
-  generate the init data from ESP-IDF's `phy_init_data.c` and link the harness;
-  and a way for `tools/esp32c6-run.py` to load the harness beside the kernel.
-  The harness has not been built in the tree;
-  a sketch of it linked outside it against esp-phy-lib `20f1db05` and ESP-IDF `4d59230d`,
-  needing of the harness only `phy_printf`, `rtc_clk_xtal_freq_get` and `memcpy`.
+- The PHY tracer around the harness in `user/phyblob/`, laid out as `user/phytrace.h` says.
+  Still to come: the root task that watches the harness and carries out its device accesses;
+  rules that fetch esp-phy-lib and ESP-IDF at pinned commits,
+  generate `phy_init_data` from ESP-IDF's `phy_init_data.c` and link the harness;
+  and `tools/esp32c6-run.py` loading the harness beside the kernel.
+  Linked by hand against esp-phy-lib `20f1db05` and ESP-IDF `4d59230d`'s
+  `esp32c6.rom.ld`, `.rom.phy.ld`, `.rom.libgcc.ld` and `.rom.libc.ld`, it fits its block with 32 KiB of stack.
+- The tracer carries out the harness's accesses through frames over the modem, the PHY and eFuse,
+  which the boot grants only once `DEVICE_RANGE_LIST` in the ESP32-C6's `board.h` lists them;
+  it lists none yet.
 - Feed the replay corpus to the board.
   Something has to put each input where `BOOT_CAP_INPUT` points,
   below the ROM's buffers or over USB once the kernel runs,
