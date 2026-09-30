@@ -371,7 +371,7 @@ void sched_start(struct thread *t)
 
 /*
  * Hand a waiting thread the bits it waited for.
- * It resumes after its ecall with the status and the bits in place.
+ * It resumes after its call instruction with the status and the bits in place.
  */
 static void wake(struct thread *t, uint32_t bits)
 {

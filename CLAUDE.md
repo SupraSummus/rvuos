@@ -1,7 +1,7 @@
 # rvuos: repository conventions
 
 rvuos is a capability-based microkernel for RISC-V microcontrollers
-without an MMU.
+without an MMU, and for ARMv7-M ones with an MPU; see "Architectures" in `DESIGN.md`.
 Read `DESIGN.md` before changing anything in the kernel.
 No new walk over every object, pool or table
 goes on the path of a system call, a tick or an interrupt;

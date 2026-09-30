@@ -37,6 +37,22 @@ Open work only; an item leaves this file in the commit that finishes it.
   The probe used to write them, and some runs hung then; it no longer does.
 - Boot from flash, feed the replay corpus to the board, and start core 1, which waits in the bootrom.
 
+## ARM
+
+- The escape suite is RISC-V's: `make escape` builds nothing for `mps2-an385`,
+  so the MPU is checked by the demo alone, which never faults on a stack:
+  nothing runs the paths where the core's stacking or unstacking of a thread's frame faults.
+- RP2350 on its Cortex-M33 cores, one chip for both architectures:
+  `mpu.c` for PMSAv8's base and limit, the security state the bootrom leaves,
+  and the board's files shared with the Hazard3 side.
+- A host harness with ARM's frame, so the fuzzer reaches `frame.c` and the call registers;
+  the host build knows RISC-V's alone.
+- The demo's console never waits on UART0's line under QEMU, whose transmitter sends at once,
+  so nothing runs `irq_enable` unmasking a line of the NVIC with its level still high.
+- The clock's counter on `mps2-an385` is 32 bits wide and the word above it is the prescaler,
+  so `rv_counter_read` sees zero for the high word, as RP2350's does.
+- The halt of `mps2-an385` leaves QEMU through semihosting, which on a board without a debugger is a fault in the kernel.
+
 ## Verification
 
 - Feedback on the state beyond the kernel's edges, libFuzzer's extra counters
@@ -226,6 +242,9 @@ Open work only; an item leaves this file in the commit that finishes it.
   when a board's RAM gets tight.
 - `PROCESS_REGION_SLOTS` is fixed at 8, whatever the PMP budget;
   size it per process from the budget.
+- `pmp.h` names the protection unit's interface after PMP, and `kernel/arch/arm/mpu.c` implements it too;
+  the image keeps PMP's encoding on both, but `pmp_set` and `pmp_entry_count` read as RISC-V's.
+  Rename it with the next change to the image in `process.c`, where mutants stand.
 
 ## Scheduling
 

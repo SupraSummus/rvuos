@@ -4,7 +4,8 @@
 # The command is QEMU on BOARD=qemu and the board's runner in tools/ on the others;
 # each exits with the status the kernel halted with.
 # A board whose core differs sets BOARD_FACTS in the Makefile: the PMP entries and grain the probe finds,
-# BOARD_MTVAL=zero where mtval reads zero, and BOARD_MISALIGNED=trap for tests/escape.sh.
+# BOARD_MTVAL=zero where mtval reads zero, BOARD_MISALIGNED=trap for tests/escape.sh,
+# and BOARD_ARCH=arm where the fault is reported as ARMv7-M has it.
 
 set -eu
 
@@ -13,6 +14,7 @@ max_entries=$2
 board_entries=${BOARD_PMP_ENTRIES:-16}
 board_grain=${BOARD_PMP_GRAIN:-4}
 board_mtval=${BOARD_MTVAL:-address}
+board_arch=${BOARD_ARCH:-riscv}
 log=$(mktemp)
 trap 'rm -f "$log"' EXIT
 
@@ -38,12 +40,13 @@ dump=$(grep -n 'rvuos: halting, the log follows' "$log" | head -1 | cut -d: -f1)
 [ -n "$dump" ] || fail "the halt did not write the log out"
 # The first occurrence of a line, for comparing against the dump's position.
 first() { grep -n "$1" "$log" | head -1 | cut -d: -f1; }
-grep -q 'rvuos: machine mode up' "$log" || fail "kernel did not boot"
+grep -q 'rvuos: .* mode up' "$log" || fail "kernel did not boot"
 # The probe must find as many of the core's entries as the kernel may use.
 entries=$(printf '0x%08x' $((max_entries < board_entries ? max_entries : board_entries)))
 grain=$(printf '0x%08x' "$board_grain")
-grep -q "rvuos: pmp entries $entries grain $grain" "$log" \
-    || fail "PMP probe did not report $entries entries and a grain of $grain"
+if [ "$board_arch" = arm ]; then regions="mpu regions"; else regions="pmp entries"; fi
+grep -q "rvuos: $regions $entries grain $grain" "$log" \
+    || fail "the protection unit's probe did not report $entries entries and a grain of $grain"
 grep -q 'the layout fits the smallest region: ok' "$log" \
     || fail "the root task did not see the smallest region"
 grep -q 'hello from user mode' "$log" || fail "user mode did not run"
@@ -96,7 +99,7 @@ grep -q 'root: fault ok' "$log" \
 # one byte per interrupt, before the halt wrote the log out.
 # The fault comes right after the last lines, so those the halt may be first to carry;
 # the root task sleeps after the timer line, which is when the logger catches up.
-[ "$(first 'rvuos: machine mode up')" -lt "$dump" ] \
+[ "$(first 'rvuos: .* mode up')" -lt "$dump" ] \
     || fail "the logger did not carry the kernel's log out before the halt did"
 [ "$(first 'root: timer ok')" -lt "$dump" ] \
     || fail "the logger did not carry the root task's output out before the halt did"
@@ -105,7 +108,10 @@ grep -q 'user fault' "$log" || fail "PMP fault was not caught"
 addr=$(sed -n 's/.*reading the removed region at \(0x[0-9a-f]*\),.*/\1/p' "$log" | head -1)
 [ -n "$addr" ] || fail "the successor did not say where its prober reads"
 [ "$board_mtval" = address ] || addr=0x00000000
-grep -q "mcause=0x00000005 mepc=0x........ mtval=$addr" "$log" \
+# RISC-V says a load access fault; ARMv7-M a MemManage, a data access violation with its address valid.
+if [ "$board_arch" = arm ]; then load_fault="exception=0x00000004 cfsr=0x00000082 pc=0x........ addr=$addr"
+else load_fault="mcause=0x00000005 mepc=0x........ mtval=$addr"; fi
+grep -q "$load_fault" "$log" \
     || fail "fault was not a load access fault on the removed region from user code"
 grep -q ': FAILED' "$log" && fail "a step failed"
 

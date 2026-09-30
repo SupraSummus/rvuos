@@ -48,7 +48,8 @@ SECTIONS
     }
     ASSERT(. <= USER_DATA_BASE + USER_DATA_SIZE, "user data does not fit its region")
 
+    /* Nothing unwinds, and ARM's compiler marks every function as not unwinding all the same. */
     /DISCARD/ : {
-        *(.eh_frame .eh_frame_hdr .comment .note.GNU-stack)
+        *(.eh_frame .eh_frame_hdr .comment .note.GNU-stack .ARM.exidx* .ARM.extab*)
     }
 }

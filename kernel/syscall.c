@@ -381,6 +381,10 @@ static int op_process(struct thread *t, const struct cap *cap,
         if ((rights & RIGHT_W) && !(rights & RIGHT_R)) {
             return KERR_INVALID_ARG;
         }
+        /* An MPU fetches only what it lets the thread read; see EXECUTE_NEEDS_READ in arch.h. */
+        if (EXECUTE_NEEDS_READ && (rights & RIGHT_X) && !(rights & RIGHT_R)) {
+            return KERR_INVALID_ARG;
+        }
         return process_install(proc, arg[1], region.a, region.b, rights, slot_node(t, arg[2]));
     }
     case OP_PROCESS_UNINSTALL:
@@ -399,8 +403,7 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, const
         if (target->state != THREAD_STOPPED) {
             return KERR_STATE;
         }
-        target->frame.mepc = arg[1];
-        target->frame.regs[REG_SP] = arg[2];
+        frame_start(&target->frame, arg[1], arg[2]);
         /*
          * The host build follows a thread only if its code was fixed
          * before tracing began; see DESIGN.md, "Verification".
@@ -775,8 +778,8 @@ void syscall_dispatch(struct thread *t)
         in[i] = arg[i] = f->regs[REG_A0 + i];
     }
 
-    /* ecall is a 4-byte instruction; resume after it, unless the call is preempted. */
-    f->mepc += 4;
+    /* Resume after the call instruction, unless the call is preempted. */
+    f->pc += CALL_SIZE;
 
     /* The call that turns tracing on is not itself traced. */
     bool traced = debug_trace;
@@ -786,12 +789,12 @@ void syscall_dispatch(struct thread *t)
     int err = dispatch(t, op, arg[0], arg);
     if (err == KERR_PREEMPTED) {
         /*
-         * Back to the ecall, with the registers as the call found them.
-         * The mret takes the pending interrupt at once,
+         * Back to the call instruction, with the registers as the call found them.
+         * The return to user mode takes the pending interrupt at once,
          * and the thread makes the call again when it next runs.
          * The call is traced once, when it finishes.
          */
-        f->mepc -= 4;
+        f->pc -= CALL_SIZE;
         traced = false;
     } else if (err != KERR_BLOCKED) {
         f->regs[REG_A0] = (uint32_t)err;
@@ -807,7 +810,7 @@ void syscall_dispatch(struct thread *t)
     }
     /*
      * The stop OP_DEBUG_PREEMPT armed is where the tick lands, as OP_DEBUG_TICK does it:
-     * the caller stays at its ecall, ready, and the next thread has its turn.
+     * the caller stays at its call instruction, ready, and the next thread has its turn.
      * Whatever the call's attempt woke is left untraced, as a stopped attempt's always is.
      */
     if (preempt_stopped) {
@@ -833,19 +836,8 @@ void syscall_dispatch(struct thread *t)
     }
 }
 
-void report_frame(const struct trap_frame *frame)
-{
-    kputs("  mcause=");
-    kput_hex(frame->mcause);
-    kputs(" mepc=");
-    kput_hex(frame->mepc);
-    kputs(" mtval=");
-    kput_hex(frame->mtval);
-    kputc('\n');
-}
-
 /*
- * The thread stops with mepc at the instruction that faulted, so a resume runs it again,
+ * The thread stops with its pc at the instruction that faulted, so a resume runs it again,
  * and nothing else changes; see DESIGN.md, "Faults".
  * The report goes to the log traced or not, and a wake is traced after it, as after a call's line.
  */

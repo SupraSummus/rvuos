@@ -116,7 +116,7 @@ static void replay_loop(unsigned me)
         drain_log();
     }
 
-    __asm__ volatile("ebreak");
+    rv_breakpoint();
     for (;;) {
     }
 }

@@ -425,7 +425,7 @@ static void host_call(bool record)
     uint32_t op = f->regs[REG_A7], slot = f->regs[REG_A0];
     bool stopped;
     do {
-        uint32_t mepc = f->mepc, ticks = sched_ticks;
+        uint32_t pc = f->pc, ticks = sched_ticks;
         unsigned before[UNITS];
         host_units(before);
         host_trap(true);
@@ -436,7 +436,7 @@ static void host_call(bool record)
         for (unsigned u = 0; u < UNITS; u++) {
             took |= after[u] < before[u];
         }
-        stopped = f->mepc == mepc;
+        stopped = f->pc == pc;
         /* Under tracing only OP_DEBUG_TICK moves time, and the tick an armed stop lands. */
         bool armed = debug_trace && sched_ticks != ticks && op != OP_DEBUG_TICK;
         if (stopped && !took) {
@@ -559,14 +559,14 @@ bool host_driver_alive(void)
 
 /*
  * The running thread faults as the trap would have it.
- * mepc stays the host's own count, since the host knows no address of the driver's code;
+ * The pc stays the host's own count, since the host knows no address of the driver's code;
  * the report prints it, and nothing compares it.
  */
 void host_fault(uint32_t cause)
 {
     struct trap_frame *f = &current->frame;
     f->mcause = cause;
-    f->mtval = cause == CAUSE_BREAKPOINT ? 0 : f->mepc;
+    f->mtval = cause == CAUSE_BREAKPOINT ? 0 : f->pc;
     host_trap(false);
 }
 

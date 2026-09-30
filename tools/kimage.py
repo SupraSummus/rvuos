@@ -3,6 +3,8 @@
 tools/stack-depth.py and tools/loop-bounds.py share this:
 the ELF's sections and symbols, the disassembly, and the call graph,
 in which a call through a register reaches every C function whose address is taken.
+The instructions read here are RISC-V's; tools/kthumb.py reads ARMv7-M's Thumb-2,
+and arch says which of the two an image holds.
 """
 
 import bisect
@@ -17,8 +19,15 @@ SHF_ALLOC = 0x2
 SHF_EXECINSTR = 0x4
 SHT_PROGBITS = 1
 SHT_SYMTAB = 2
+STT_FUNC = 2
+
+EM_ARM = 40
+EM_RISCV = 243
 
 LINE = re.compile(r"^\s*([0-9a-f]+):\s+(\S+)\s*(.*)$")
+# A Thumb instruction's line: the address, then the mnemonic and operands after tabs,
+# where data in the code, a literal or a table, has its bytes before the tab and a directive after it.
+LINE_ARM = re.compile(r"^\s*([0-9a-f]+):\s*\t(\S+)\s*(.*)$")
 HEADER = re.compile(r"^([0-9a-f]+) <(.+)>:$")
 TARGET = re.compile(r"0x([0-9a-f]+) <[^>]+>")
 BASED = re.compile(r"(-?0x[0-9a-f]+|-?\d+)\((\w+)\)")
@@ -30,6 +39,16 @@ NO_DEST = re.compile(r"^(s[bhw]|c\.s[bhw]|b\w*|j|jr|ret|csrw|csrs|csrc|fence\S*|
 
 class Failure(Exception):
     pass
+
+
+def arch(image: bytes) -> str:
+    """The instruction set the image holds: "riscv" or "arm"."""
+    machine, = struct.unpack_from("<H", image, 0x12)
+    if machine == EM_RISCV:
+        return "riscv"
+    if machine == EM_ARM:
+        return "arm"
+    raise Failure(f"the image is for machine {machine}, which no tool here reads")
 
 
 def elf_sections(image: bytes):
@@ -62,14 +81,33 @@ def elf_symbols(image: bytes, sections) -> dict[str, int]:
     return symbols
 
 
+def elf_sizes(image: bytes, sections) -> dict[int, int]:
+    """The size of every function symbol, by its address, bit 0 of a Thumb address taken off."""
+    sizes = {}
+    for _, kind, _, _, off, size, _, entsize in sections:
+        if kind != SHT_SYMTAB:
+            continue
+        for i in range(size // entsize):
+            _, value, length, info = struct.unpack_from("<IIIB", image, off + i * entsize)
+            if info & 0xF == STT_FUNC and length:
+                sizes[value & ~1] = max(sizes.get(value & ~1, 0), length)
+    return sizes
+
+
 def data_words(image: bytes, sections):
-    """Every aligned word of the kernel's own data."""
+    """Every aligned word of the kernel's own data.
+    On ARM the code holds data too, the literals a function loads, and a code address carries bit 0,
+    so there every word of the code counts as well, and each word with bit 0 taken off beside it."""
+    thumb = arch(image) == "arm"
     for name, kind, flags, addr, off, size, _, _ in sections:
-        if (kind == SHT_PROGBITS and flags & SHF_ALLOC and not flags & SHF_EXECINSTR
+        if (kind == SHT_PROGBITS and flags & SHF_ALLOC and (thumb or not flags & SHF_EXECINSTR)
                 and name not in FOREIGN_SECTIONS):
             start = (-addr) % 4
             for i in range(start, size - 3, 4):
-                yield struct.unpack_from("<I", image, off + i)[0]
+                word = struct.unpack_from("<I", image, off + i)[0]
+                yield word
+                if thumb and word & 1:
+                    yield word & ~1
 
 
 def text_end(sections) -> int:
@@ -93,24 +131,40 @@ def read_frames(paths: list[str]) -> dict[str, int]:
     return frames
 
 
-def disassemble(objdump: str, elf: str):
-    """Every function as (address, name, [(address, mnemonic, operands)])."""
+def disassemble(objdump: str, elf: str, thumb: bool = False):
+    """Every function as (address, name, [(address, mnemonic, operands)]).
+    In Thumb code the data between instructions, literals and tables, is left out,
+    and so is the vector table, which the disassembler shows as bytes."""
     out = subprocess.run([objdump, "-d", "--no-show-raw-insn", elf],
                          capture_output=True, text=True, check=True).stdout
     functions = []
+    line_re = LINE_ARM if thumb else LINE
     for line in out.splitlines():
         m = HEADER.match(line)
         if m:
             functions.append((int(m.group(1), 16), m.group(2), []))
             continue
-        m = LINE.match(line)
-        if m and functions:
+        m = line_re.match(line)
+        if m and functions and not (thumb and m.group(2).startswith(".")):
             functions[-1][2].append((int(m.group(1), 16), m.group(2), m.group(3)))
     return functions
 
 
 def imm(text: str) -> int:
     return int(text, 0)
+
+
+class Block:
+    """A basic block of a function, for tools/loop-bounds.py."""
+
+    def __init__(self, start):
+        self.start = start
+        self.end = start
+        self.succ = set()
+        self.calls = []  # (pc, callee)
+        self.leaves = False  # returns to the caller, itself or by a tail call
+        self.tails = []  # (pc, function) of the jumps to functions that return for it
+        self.indirect = False  # calls or jumps through a register to another function
 
 
 class Function:
@@ -123,7 +177,7 @@ class Function:
         self.indirect_jump = False
 
 
-def analyse(functions, end, frames):
+def analyse(functions, end, frames, image, sections):
     """Frames, edges and taken addresses, from the disassembly."""
     starts = [f[0] for f in functions]
     by_addr = {}
@@ -135,6 +189,9 @@ def analyse(functions, end, frames):
 
     for addr, name, _ in functions:
         by_addr[addr] = Function(addr, name)
+    if arch(image) == "arm":
+        import kthumb  # which builds on this module, so it comes in only here
+        return by_addr, kthumb.analyse(functions, end, frames, image, sections, owner, by_addr)
     for addr, name, insns in functions:
         fn = by_addr[addr]
         measured = 0
@@ -191,8 +248,14 @@ def load(objdump: str, elf: str, su: list[str]):
     sections = elf_sections(image)
     symbols = elf_symbols(image, sections)
     frames = read_frames(su)
-    functions = disassemble(objdump, elf)
-    graph, taken = analyse(functions, text_end(sections), frames)
+    thumb = arch(image) == "arm"
+    functions = disassemble(objdump, elf, thumb)
+    if thumb:
+        # The linker pads between functions with bytes that read as a branch; a function is its symbol's size.
+        sizes = elf_sizes(image, sections)
+        functions = [(a, n, [i for i in insns if a not in sizes or i[0] < a + sizes[a]])
+                     for a, n, insns in functions]
+    graph, taken = analyse(functions, text_end(sections), frames, image, sections)
 
     taken.update(data_words(image, sections))
     pointed = sorted(a for a in taken & graph.keys() if graph[a].name in frames)

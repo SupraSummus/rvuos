@@ -55,8 +55,8 @@ void timer_init(void)
     REG(CLINT_TIMECTL) = TIMECTL_COUNTER_EN | TIMECTL_TIMERINT_EN;
 
     uint64_t start = systimer_read();
-    uint64_t mtime_start = clint_mtime();
+    uint64_t mtime_start = counter_read();
     while (systimer_read() - start < SYSTIMER_HZ / TIMER_HZ) {
     }
-    clint_start((uint32_t)(clint_mtime() - mtime_start));
+    timer_start((uint32_t)(counter_read() - mtime_start));
 }

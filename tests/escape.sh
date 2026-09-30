@@ -56,7 +56,7 @@ escape-past-region) fault="mcause=0x00000005 mepc=$addr mtval=$target_mtval" ;;
 *) fail "unknown scenario" ;;
 esac
 
-grep -q 'rvuos: machine mode up' "$log" || fail "kernel did not boot"
+grep -q 'rvuos: .* mode up' "$log" || fail "kernel did not boot"
 grep -q 'rvuos: halting, the log follows' "$log" || fail "the halt did not write the log out"
 grep -q ': FAILED' "$log" && fail "a setup step failed before the escape"
 [ -n "$addr" ] || fail "the scenario did not reach the escape"
