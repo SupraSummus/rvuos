@@ -45,7 +45,8 @@ uint32_t host_syscall(const struct replay_record *c);
  * Deliver one event: pass the record to the thread it names
  * the way the replay driver does, then perform it.
  * A driver thread the processor comes to that could not run faults, see host_driver_alive,
- * and the next goes on with the records.
+ * and the next goes on with the records;
+ * one that stands at a record it has yet to make, see host_run_on, makes it first.
  */
 void host_event(const struct replay_record *c);
 

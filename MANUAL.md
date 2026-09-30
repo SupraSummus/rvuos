@@ -1076,7 +1076,8 @@ Does not return.
 **`OP_DEBUG_TRACE` (10).**
 Turns tracing and self-checking on; see section 9.
 Every thread's account is filled, section 5.11.
-Cannot be turned off again.
+Cannot be turned off again,
+and once tracing is on the call changes nothing.
 
 **`OP_DEBUG_TICK` (17).**
 Does what the timer tick does, on request:
@@ -1092,6 +1093,17 @@ Does what a device interrupt on that line does:
 the `Irq` armed on it masks the line and signals its bits.
 `KERR_STATE` when nothing is armed on the line;
 `KERR_INVALID_ARG` for a line the controller does not have, line 0 included.
+
+**`OP_DEBUG_PREEMPT` (32).**
+`a1` = n.
+The n-th place from now at which a restartable call could stop between two steps, it stops,
+whether or not an interrupt is pending, and `OP_DEBUG_TICK` is done there:
+time moves by one tick, and the caller's turn ends with the caller ready at its `ecall`,
+so another thread may run before the caller makes its call again.
+Every such place counts, in whichever thread's call;
+a call that finishes first leaves the rest of n to the next one.
+Zero disarms it, and a second call counts n anew.
+Works while tracing is on, when the tick stops no call.
 
 ### 6.4 Operations on `CapTable`
 
@@ -1378,8 +1390,9 @@ only a wait, the tick, a fault, section 5.6, or a revoke that takes its own proc
 | 29 | `OP_TIME_BIND` | `Time` |
 | 30 | `OP_UNTYPED_SPLIT` | `Untyped` |
 | 31 | `OP_THREAD_WATCH` | `Thread` |
+| 32 | `OP_DEBUG_PREEMPT` | `Debug` |
 
-`OP_COUNT` is 32, one above the highest code; 16 is unused.
+`OP_COUNT` is 33, one above the highest code; 16 is unused.
 
 ## 7. What the root task starts with
 
@@ -1606,6 +1619,9 @@ trace: op=0x00000007 slot=0x00000004 a1=0x00000007 a2=0x0000000d a3=0x00000000 -
 with `blocked` in place of a status when the call blocked,
 and `trace: wake <bits>` after a call that woke a waiter,
 or after the `user fault` of a thread whose watch woke one.
+A call stopped where `OP_DEBUG_PREEMPT` armed prints `trace: preempt` instead of its line,
+followed by what the tick woke,
+and its line comes once the call is made again and finishes.
 After every traced call the kernel runs the self-check,
 the executable form of the properties in `DESIGN.md`,
 and halts with code 3 on the first violation.

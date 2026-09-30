@@ -39,6 +39,20 @@ Open work only; an item leaves this file in the commit that finishes it.
 
 ## Verification
 
+- Feedback on the state beyond the kernel's edges, libFuzzer's extra counters
+  over the objects of each type, the threads waiting and stopped, the pools dying and the `Irq`s armed,
+  found no more mutants than edges alone in 5000 runs each, and was left out;
+  a finer picture, such as the derivation tree's depth, is untried.
+- From nothing, `-len_control=100` keeps the inputs to one record for tens of thousands of runs,
+  since libFuzzer grows the limit by bytes and a record is sixteen;
+  `-len_control=20` reached more edges in a short run.
+  Measure it with `make mutants-fuzz MUTANTS_FUZZ=-e` before `make fuzz` takes it.
+- The corpus holds no input with `OP_DEBUG_PREEMPT` or a load or store record,
+  and `make mutants-fuzz` finds neither `alloc-in-dying-pool` nor `bind-in-dying-pool`,
+  from the corpus or from nothing, in 5000 runs:
+  a stop armed at the right place, a pool dying and an allocation from another thread
+  are three records the mutator must line up.
+  Fuzz longer with the typed mutator and rebuild the corpus, `make corpus-merge`.
 - `fuzz-work` counts the loop annotations' claims only where the corpus reaches.
   The host's `irq_claim` never returns a line,
   so nothing counts the claims on the way from an interrupt through `sched_claim_interrupts`,
@@ -46,8 +60,9 @@ Open work only; an item leaves this file in the commit that finishes it.
 - That an object holds nothing from before its pool took the memory
   shows only where the garbage is a capability or makes a call fail;
   `host/history.c` does not know what the memory held before the call,
-  and no record writes memory, so what a process leaves in memory it turns into a pool
-  is stood for only by the pattern the host's RAM starts out holding.
+  so what a process leaves in memory it turns into a pool
+  is checked where a store record wrote it, as in `tests/seeds/dirty-frame-becomes-pool`,
+  and elsewhere by the pattern the host's RAM starts out holding.
 - `tools/loop-bounds.py` knows clang's jump tables by their shape;
   any other jump through a register may make up a loop, which fails the link, never passes it,
   as a table whose base clang keeps on the stack does.
@@ -82,7 +97,8 @@ Open work only; an item leaves this file in the commit that finishes it.
   are checked by the demo in `user/init.c` alone,
   and the loss only by reading its code.
   A record that writes garbage into the log's `taken` is beyond the fuzzer,
-  since no record writes memory; the clamp in `klog.c` is checked by reading it.
+  since a store record leaves the log alone, which the driver carries out on QEMU;
+  the clamp in `klog.c` is checked by reading it.
 - `KERR_STATE` for a thread destroying the pool its table or its process lies in, but not the thread,
   is checked only for the two together:
   the driver's third thread lies apart from its process, but the process's table lies with it,
@@ -125,20 +141,8 @@ Open work only; an item leaves this file in the commit that finishes it.
   while the host, which makes a stopped call again at once, finishes it and traces one line more.
   The corpus has no such input; the fuzzer made one within minutes,
   which `make qemu-replay` fails by that line.
-- A second `OP_DEBUG_TRACE` fills every account again,
-  which `host/history.c` takes for a traced call that moved no time and charged the thread whose turn it was;
-  the fuzzer finds it within minutes.
-  Either the fill belongs to the call that turns tracing on, or the check leaves the call out.
-- The host stops every preemptible call after one step, and makes it again,
-  but has no second thread run in between,
-  since under tracing an interrupt switches nothing.
-  On QEMU a call stops, and the interrupt is taken on the way back, only when a tick happens to land in it.
-  A restart that finds its slots changed by another thread
-  is checked by reading `syscall.c`,
-  and so are a destroy that another call goes on with
-  and an allocation refused because its pool is dying, by reading `pool_destroy` and `op_pool`.
-  A call that stops without putting its thread back on the `ecall`
-  the host takes as finished, and no host check sees it;
+- A call that stops without putting its thread back on the `ecall`
+  the host takes as finished, and no host check sees it unless `OP_DEBUG_PREEMPT` armed the stop;
   `make qemu-replay` does, by the trace line the host then lacks.
 - The host moves time a tick at a time, and under tracing every turn begins at a tick,
   so what a turn begun within a tick pays at the tick, `turn_next`,
@@ -157,7 +161,8 @@ Open work only; an item leaves this file in the commit that finishes it.
   run over the seeds and the corpus,
   and checked by replaying every seed on the kernels before and after and comparing the statuses;
   an operation whose arguments change leaves the seeds that use it to be written anew.
-  A generator in the repository, one line per record with the names from `rvuos/abi.h`,
+  `build/host/fuzz --print` shows a seed a record per line, by the names of `host/ops.h`;
+  a generator in the repository reading such lines back
   would make the seeds readable and the next renumbering a rebuild;
   replay slots that start a few above `BOOT_CAP_COUNT` would spare the next one.
   A seed written before a renumbering and merged after it keeps passing and tests nothing:

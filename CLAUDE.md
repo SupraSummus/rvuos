@@ -60,6 +60,9 @@ The full run takes minutes, so while working run only the mutants a change touch
 `tests/mutants.sh -j 4 name...`;
 a change to the seeds, the corpus or the checks moves every mutant's reports,
 so it needs one full run before it is committed.
+A change to `host/mutator.c` or to the flags `make fuzz` runs with
+is measured with `make mutants-fuzz`, from the corpus and from nothing, before and after,
+and the commit says what it found.
 
 ## Environment
 

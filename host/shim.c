@@ -18,6 +18,10 @@ _Static_assert(HOST_RAM_BASE == RAM_BASE && HOST_RAM_SIZE == RAM_SIZE,
 _Static_assert(REPLAY_THREAD_SP > USER_DATA_BASE && REPLAY_THREAD_SP <= USER_DATA_BASE + USER_DATA_SIZE &&
                REPLAY_THIRD_SP > USER_DATA_BASE && REPLAY_THIRD_SP <= USER_DATA_BASE + USER_DATA_SIZE,
                "the replay driver's stacks must lie in its data region");
+_Static_assert(REPLAY_OWN_BASE == KLOG_BASE && KLOG_BASE + KLOG_REGION_SIZE == USER_CODE_BASE &&
+               USER_CODE_BASE + USER_CODE_SIZE == USER_DATA_BASE && REPLAY_OWN_END == USER_DATA_BASE + USER_DATA_SIZE &&
+               REPLAY_UART_BASE == UART_BASE && REPLAY_UART_END == UART_BASE + UART_SIZE,
+               "an access record leaves alone the log, the driver's code and data, and the UART");
 
 uint8_t *host_ram;
 /* What RAM holds before anything writes it. */
@@ -31,6 +35,15 @@ static struct thread *host_threads[REPLAY_THREADS + 1];
  * A fault leaves a thread where it was, and so does a resume after one.
  */
 static bool host_drains[REPLAY_THREADS + 1];
+/*
+ * Which of them stand at the instruction of a record they have yet to make, by actor number:
+ * the ecall of a call, whose registers are loaded, or a load or a store, see rvuos/replay.h.
+ * A thread stands there from when it takes the record, and again after a stop OP_DEBUG_PREEMPT armed
+ * or a fault on the access, until host_run_on finds it running.
+ */
+enum { HOST_ON, HOST_AT_CALL, HOST_AT_ACCESS };
+static uint8_t host_at[REPLAY_THREADS + 1];
+static struct replay_record host_access_at[REPLAY_THREADS + 1];
 jmp_buf host_halt_jmp;
 int host_halt_code;
 bool host_verbose;
@@ -49,6 +62,11 @@ _Static_assert(PMP_GRAIN >= 4 && (PMP_GRAIN & (PMP_GRAIN - 1)) == 0,
 static uint32_t pmp_addr[PMP_MAX_ENTRIES];
 static uint8_t pmp_cfg[PMP_MAX_ENTRIES];
 
+/* The last line the kernel printed, ended or not, which selfcheck_fail reports when the transcript is not printed. */
+static char host_line[160];
+static size_t host_line_len;
+static bool host_line_ended;
+
 /*
  * The log takes every byte, as on the target, so its head and its line agree
  * with QEMU's; the transcript is the same bytes as they come.
@@ -58,6 +76,15 @@ void kputc(char c)
     klog_append(c);
     if (host_verbose) {
         putchar(c);
+    }
+    if (host_line_ended) {
+        host_line_len = 0;
+        host_line_ended = false;
+    }
+    if (c == '\n') {
+        host_line_ended = true;
+    } else if (host_line_len < sizeof(host_line)) {
+        host_line[host_line_len++] = c;
     }
 }
 
@@ -123,10 +150,11 @@ void host_violated(void)
     abort();
 }
 
+/* The report is the last line the kernel printed; see fail in kernel/selfcheck.c. */
 void selfcheck_fail(void)
 {
     if (!host_verbose) {
-        fprintf(stderr, "invariant violated; rerun with --verbose for the report\n");
+        fprintf(stderr, "%.*s\n", (int)host_line_len, host_line);
     }
     host_violated();
 }
@@ -294,6 +322,8 @@ struct thread *host_boot(void)
     turn_due = false;
     sched_ticks = 0;
     debug_trace = false;
+    preempt_countdown = 0;
+    preempt_stopped = false;
     pmp_init();
     irq_init();
     klog_init();
@@ -326,6 +356,7 @@ struct thread *host_boot(void)
     static const uint16_t slots[] = { REPLAY_CAP_THREAD, REPLAY_CAP_THIRD };
     _Static_assert(sizeof(slots) / sizeof(slots[0]) == REPLAY_THREADS - 1, "a slot per thread but the root");
     memset(host_drains, 0, sizeof(host_drains));
+    memset(host_at, 0, sizeof(host_at));
     host_threads[1] = root;
     for (unsigned i = 0; i < REPLAY_THREADS - 1; i++) {
         struct cap c;
@@ -363,34 +394,38 @@ static void host_trap(bool call)
     history_end();
 }
 
-/*
- * The record goes to whichever thread the kernel is running,
- * which is what happens on the target: the driver's threads
- * take records from one cursor.
- * A call that blocks leaves its thread's registers alone,
- * so the status returned here is that thread's previous one;
- * only the setup, which never blocks, looks at it.
- */
-uint32_t host_syscall(const struct replay_record *c)
+/* The actor number of a thread; 0 when it is not a driver thread, which never runs traced. */
+static unsigned host_actor_of(const struct thread *t)
 {
-    const struct thread *caller = current;
-    struct trap_frame *f = &current->frame;
-    f->regs[REG_A7] = c->op;
-    f->regs[REG_A0] = c->slot;
-    f->regs[REG_A1] = c->a1;
-    f->regs[REG_A2] = c->a2;
-    f->regs[REG_A3] = c->a3;
-    f->regs[REG_A4] = 0;
-    f->regs[REG_A5] = 0;
-    f->regs[REG_A6] = 0;
-    f->mcause = 8;
-    /*
-     * A preempted call leaves the thread at its ecall, which it executes again
-     * once the interrupt is taken; on the host that takes nothing, and no other thread runs.
-     */
-    uint32_t mepc;
+    for (unsigned i = 1; i <= REPLAY_THREADS; i++) {
+        /* Compared, never followed: a destroyed thread is simply never current again. */
+        if (host_threads[i] == t) {
+            return i;
+        }
+    }
+    return 0;
+}
+
+static unsigned host_actor(void)
+{
+    return host_actor_of(current);
+}
+
+/*
+ * The running thread makes the call its registers hold, a record's when `record`,
+ * after which the thread drains the log.
+ * The host stops every restartable call after each step, and the thread makes it again at once,
+ * as it would once the interrupt is taken;
+ * after a stop OP_DEBUG_PREEMPT armed it stands at its ecall, since another thread may run first.
+ */
+static void host_call(bool record)
+{
+    struct thread *caller = current;
+    struct trap_frame *f = &caller->frame;
+    uint32_t op = f->regs[REG_A7], slot = f->regs[REG_A0];
+    bool stopped;
     do {
-        mepc = f->mepc;
+        uint32_t mepc = f->mepc, ticks = sched_ticks;
         unsigned before[UNITS];
         host_units(before);
         host_trap(true);
@@ -401,21 +436,65 @@ uint32_t host_syscall(const struct replay_record *c)
         for (unsigned u = 0; u < UNITS; u++) {
             took |= after[u] < before[u];
         }
-        if (f->mepc == mepc && !took) {
+        stopped = f->mepc == mepc;
+        /* Under tracing only OP_DEBUG_TICK moves time, and the tick an armed stop lands. */
+        bool armed = debug_trace && sched_ticks != ticks && op != OP_DEBUG_TICK;
+        if (stopped && !took) {
             fprintf(stderr, "invariant violated: a call was preempted before it took anything away\n");
+            host_violated();
+        }
+        if (armed && !stopped) {
+            fprintf(stderr, "invariant violated: a call went on past the stop of an armed tick\n");
             host_violated();
         }
         /*
          * The thread makes a stopped call again, so it runs on and can still name what it invoked:
          * the slot resolved as the call began, and nothing refills a slot within a call.
+         * Only an armed stop hands the processor on.
          */
-        if (f->mepc == mepc && (current != caller || thread_table(caller) == NULL ||
-                                thread_table(caller)->slots[c->slot].type == CAP_NONE)) {
+        if (stopped && ((current != caller && !armed) || thread_table(caller) == NULL ||
+                        thread_table(caller)->slots[slot].type == CAP_NONE)) {
             fprintf(stderr, "invariant violated: a call stopped where its caller cannot make it again\n");
             host_violated();
         }
-    } while (f->mepc == mepc);
-    return f->regs[REG_A0];
+        if (armed) {
+            host_at[host_actor_of(caller)] = HOST_AT_CALL;
+            return;
+        }
+    } while (stopped);
+    if (record) {
+        host_drains[host_actor_of(caller)] = true;
+    }
+}
+
+static void host_load(const struct replay_record *c)
+{
+    struct trap_frame *f = &current->frame;
+    f->regs[REG_A7] = c->op;
+    f->regs[REG_A0] = c->slot;
+    f->regs[REG_A1] = c->a1;
+    f->regs[REG_A2] = c->a2;
+    f->regs[REG_A3] = c->a3;
+    f->regs[REG_A4] = 0;
+    f->regs[REG_A5] = 0;
+    f->regs[REG_A6] = 0;
+    f->mcause = 8;
+}
+
+/*
+ * The record goes to whichever thread the kernel is running,
+ * which is what happens on the target: the driver's threads
+ * take records from one cursor.
+ * A call that blocks leaves its thread's registers alone,
+ * so the status returned here is that thread's previous one;
+ * only the setup, which never blocks, looks at it.
+ */
+uint32_t host_syscall(const struct replay_record *c)
+{
+    struct thread *caller = current;
+    host_load(c);
+    host_call(false);
+    return caller->frame.regs[REG_A0];
 }
 
 static void count_node(const struct cap *c, unsigned out[UNITS])
@@ -444,18 +523,6 @@ void host_units(unsigned out[UNITS])
     }
 }
 
-/* The actor number of the running thread; 0 when it is not a driver thread, which never runs traced. */
-static unsigned host_actor(void)
-{
-    for (unsigned i = 1; i <= REPLAY_THREADS; i++) {
-        /* Compared, never followed: a destroyed thread is simply never current again. */
-        if (host_threads[i] == current) {
-            return i;
-        }
-    }
-    return 0;
-}
-
 static bool mapped_with(const struct process *proc, uint32_t base, uint32_t size, uint8_t rights)
 {
     for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
@@ -469,12 +536,18 @@ static bool mapped_with(const struct process *proc, uint32_t base, uint32_t size
     return false;
 }
 
+/* Whether the running thread's process maps the driver's code, which is all an ecall made again needs. */
+static bool code_mapped(void)
+{
+    const struct process *proc = thread_process(current);
+    return proc != NULL && mapped_with(proc, USER_CODE_BASE, USER_CODE_SIZE, RIGHT_R | RIGHT_X);
+}
+
 /* Whether the running thread's process maps the driver's code and data, and to drain the log, the UART and the log. */
 static bool driver_mapped(bool drain)
 {
     const struct process *proc = thread_process(current);
-    return proc != NULL && mapped_with(proc, USER_CODE_BASE, USER_CODE_SIZE, RIGHT_R | RIGHT_X) &&
-           mapped_with(proc, USER_DATA_BASE, USER_DATA_SIZE, RIGHT_R | RIGHT_W) &&
+    return code_mapped() && mapped_with(proc, USER_DATA_BASE, USER_DATA_SIZE, RIGHT_R | RIGHT_W) &&
            (!drain || (mapped_with(proc, UART_BASE, UART_SIZE, RIGHT_R | RIGHT_W) &&
                        mapped_with(proc, KLOG_BASE, KLOG_REGION_SIZE, RIGHT_R | RIGHT_W)));
 }
@@ -497,22 +570,67 @@ void host_fault(uint32_t cause)
     host_trap(false);
 }
 
+/* A word RAM holds wherever an object may lie, so ASan must not see the store. */
+__attribute__((no_sanitize("address"))) static void host_store(uint32_t at, uint32_t word)
+{
+    *(uint32_t *)p2v(at) = word;
+}
+
 /*
- * The running driver thread goes on as the driver's code does, up to its next call:
- * one that cannot faults, see host_driver_alive,
- * and the kernel hands the processor on, maybe to another such thread;
+ * The running driver thread makes a load or a store record, see rvuos/replay.h,
+ * if its process maps the word with the right; else it is left the cause of its fault.
+ * Only a word of RAM holds what is stored; a device's is the host's to leave out.
+ */
+static bool host_access(const struct replay_record *c, uint32_t *cause)
+{
+    uint32_t at = c->a1 & ~3u;
+    bool store = c->op == REPLAY_OP_STORE;
+    if (!replay_leaves_alone(at)) {
+        if (!mapped_with(thread_process(current), at, 4, store ? RIGHT_W : RIGHT_R)) {
+            *cause = store ? CAUSE_STORE_ACCESS : CAUSE_LOAD_ACCESS;
+            return false;
+        }
+        if (store && at - HOST_RAM_BASE < HOST_RAM_SIZE) {
+            host_store(at, c->a2);
+        }
+    }
+    host_drains[host_actor()] = true;
+    return true;
+}
+
+/*
+ * The running driver thread goes on as the driver's code does, up to its next look at the cursor:
+ * one that stands at a record makes it, one that cannot run on faults, see host_driver_alive,
+ * and the kernel hands the processor on, maybe to another such thread.
+ * Nothing but a record resumes a thread, so each faults once;
  * one that drains the log leaves the mark the drain leaves in its header.
- * A thread faults once, since nothing but a record starts it again,
- * so after a fault each the kernel has found a thread that runs, or halted.
  */
 static void host_run_on(void)
 {
-    for (unsigned i = 0; i < REPLAY_THREADS && !host_driver_alive(); i++) {
-        host_fault(CAUSE_INSN_ACCESS);
-    }
-    if (!host_driver_alive()) {
-        fprintf(stderr, "invariant violated: a thread ran again after every driver thread faulted\n");
-        host_violated();
+    unsigned faults = 0;
+    for (;;) {
+        unsigned actor = host_actor();
+        uint8_t at = host_at[actor];
+        uint32_t cause = CAUSE_INSN_ACCESS;
+        /* A thread at its record's instruction needs only the code it fetches it from. */
+        bool runs = at == HOST_ON ? host_driver_alive() : code_mapped();
+        if (runs && at == HOST_ON) {
+            break;
+        }
+        if (runs && at == HOST_AT_CALL) {
+            host_at[actor] = HOST_ON;
+            host_call(true);
+            continue;
+        }
+        if (runs && host_access(&host_access_at[actor], &cause)) {
+            host_at[actor] = HOST_ON;
+            continue;
+        }
+        if (faults++ == REPLAY_THREADS) {
+            fprintf(stderr, "invariant violated: a thread ran again after every driver thread faulted\n");
+            host_violated();
+        }
+        host_fault(cause);
     }
     if (host_drains[host_actor()]) {
         volatile struct rvuos_log *log = p2v(KLOG_BASE);
@@ -541,10 +659,15 @@ void host_event(const struct replay_record *c)
             break;
         }
     }
-    /* The driver drains the log to the UART after each record it performs; see host_run_on. */
+    /* The thread takes the record; host_run_on makes it, and it drains the log after. */
     unsigned actor = host_actor();
-    host_syscall(c);
-    host_drains[actor] = true;
+    if (replay_accesses(c)) {
+        host_at[actor] = HOST_AT_ACCESS;
+        host_access_at[actor] = *c;
+    } else {
+        host_load(c);
+        host_at[actor] = HOST_AT_CALL;
+    }
     host_run_on();
 }
 

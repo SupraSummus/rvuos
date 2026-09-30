@@ -1,0 +1,19 @@
+An Irq is bound in a pool whose destroy has begun,
+so a thread binding between the destroy's steps keeps it from ending.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: a call built an object in a pool being destroyed
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -516,9 +516,6 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
+             return err;
+         }
+         struct pool *pool = (struct pool *)cap_object(&pc);
+-        if (pool->dying) {
+-            return KERR_STATE;
+-        }
+         /* The Irq signals on its creator's behalf, so the creator must be able to. */
+         struct cap nc;
+         err = cap_lookup_typed(thread_table(t), arg[2], CAP_NOTIFICATION, RIGHT_W, &nc);

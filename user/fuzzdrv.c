@@ -21,6 +21,8 @@
  *
  * Records may do anything, including unmapping this program,
  * which then faults; the host build models that.
+ * A record may also be a load or a store the driver makes itself, see rvuos/replay.h,
+ * which faults where the process may not make it; the host decides that from the process's regions.
  * A fault stops the thread that makes it and no other, see DESIGN.md, "Faults",
  * so the next thread goes on with the records, and a thread resumed where it faulted goes on too.
  * The driver ends with a breakpoint, a fault as well, which every thread makes that finds the records done,
@@ -55,9 +57,21 @@ static void puts(const char *s)
     rv_puts(BOOT_CAP_DEBUG, s);
 }
 
+/* A system call, or an access the driver makes itself, which faults where the process may not make it. */
 static uint32_t perform(const struct replay_record *r)
 {
-    return rv_invoke(r->op, r->slot, r->a1, r->a2, r->a3);
+    if (!replay_accesses(r)) {
+        return rv_invoke(r->op, r->slot, r->a1, r->a2, r->a3);
+    }
+    volatile uint32_t *at = (volatile uint32_t *)(r->a1 & ~3u);
+    if (!replay_leaves_alone((uint32_t)at)) {
+        if (r->op == REPLAY_OP_STORE) {
+            *at = r->a2;
+        } else {
+            (void)*at;
+        }
+    }
+    return KERR_OK;
 }
 
 static void uart_putc(char c)
