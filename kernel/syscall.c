@@ -42,9 +42,14 @@ static int op_debug(uint32_t op, const uint32_t *arg)
         kputc('\n');
         khalt((int)arg[1]);
     case OP_DEBUG_TRACE:
-        debug_trace = true;
-        /* The host boots with full accounts, and the target has run a while before its first traced call. */
-        sched_accounts_fill();
+        /*
+         * The host boots with full accounts, and the target has run a while before its first traced call.
+         * Once tracing is on the call changes nothing, or it would fill an account at will.
+         */
+        if (!debug_trace) {
+            debug_trace = true;
+            sched_accounts_fill();
+        }
         return KERR_OK;
     case OP_DEBUG_TICK:
         /* The caller's status is written to its own frame, whoever runs next. */
@@ -56,6 +61,9 @@ static int op_debug(uint32_t op, const uint32_t *arg)
             return KERR_INVALID_ARG;
         }
         return sched_interrupt(arg[1]) ? KERR_OK : KERR_STATE;
+    case OP_DEBUG_PREEMPT:
+        preempt_countdown = arg[1];
+        return KERR_OK;
     default:
         return KERR_WRONG_TYPE;
     }
@@ -796,6 +804,22 @@ void syscall_dispatch(struct thread *t)
     if (traced) {
         trace_call(op, in[0], in, err);
         trace_wake();
+    }
+    /*
+     * The stop OP_DEBUG_PREEMPT armed is where the tick lands, as OP_DEBUG_TICK does it:
+     * the caller stays at its ecall, ready, and the next thread has its turn.
+     * Whatever the call's attempt woke is left untraced, as a stopped attempt's always is.
+     */
+    if (preempt_stopped) {
+        preempt_stopped = false;
+        if (debug_trace) {
+            kputs("trace: preempt\n");
+        }
+        trace_wake_bits = 0;
+        sched_tick(1);
+        if (debug_trace) {
+            trace_wake();
+        }
     }
     /*
      * A thread that waits gives the processor up, and so does one whose process the call took.

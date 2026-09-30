@@ -519,8 +519,15 @@ bool cap_revoke_below(struct cap *node, const struct cap *through, bool preempt)
  */
 bool cap_revoke_step(struct cap *root);
 
-/* Whether a preemptible walk that has done a step stops before its next; see intr_pending. */
+/* Whether a preemptible walk that has done a step stops before its next; see intr_pending and OP_DEBUG_PREEMPT. */
 bool cap_stop_here(bool preempt);
+
+/*
+ * OP_DEBUG_PREEMPT's count of the places a walk may stop before the one it stops at, 0 when disarmed,
+ * and whether a walk stopped there, which the call's dispatch turns into a tick.
+ */
+extern uint32_t preempt_countdown;
+extern bool preempt_stopped;
 
 /* Build a capability to an object. */
 struct cap cap_to_object(struct obj_header *obj, uint8_t rights);

@@ -1,9 +1,9 @@
 /*
- * The properties "Authority only flows", "Memory crosses zeroed",
- * "The caller keeps what it runs on", "A tick charges" and "A move keeps a node's place" of DESIGN.md,
+ * The properties "Authority only flows", "Memory crosses zeroed", "The caller keeps what it runs on",
+ * "A dying pool only gives back", "A tick charges" and "A move keeps a node's place" of DESIGN.md,
  * which relate the state before a call to the state after it.
- * host_syscall runs history_begin before each call and history_end after it,
- * and host_fault does around a fault, which must change no more than a call that moves no time.
+ * host_trap runs history_begin before each call and history_end after it,
+ * and around a fault, which must change no more than a call that moves no time.
  *
  * The prologue runs untraced, with no self-check before these checks, so a node may hold anything:
  * an address it holds is looked up among the objects and pools walked, never followed.
@@ -167,11 +167,8 @@ static void record_objects(obj_array *a)
     qsort(a->v, a->n, sizeof(a->v[0]), cmp_at);
 }
 
-/*
- * Objects that left the kernel are poisoned, so ASan must not see this read;
- * nor must the fuzzer's instrumentation, which would slow a loop per byte.
- */
-__attribute__((no_sanitize("address", "coverage"))) static bool zero(uint32_t base, uint32_t size)
+/* Objects that left the kernel are poisoned, so ASan must not see this read. */
+__attribute__((no_sanitize("address"))) static bool zero(uint32_t base, uint32_t size)
 {
     const uint8_t *p = p2v(base);
     uint8_t any = 0;
@@ -313,6 +310,9 @@ static void check_built(const struct obj_header *o)
     }
     if (!covered((struct grant){ CAP_POOL, RIGHT_W, o->pool, 0 })) {
         violated("a call built an object in a pool its caller could not allocate from");
+    }
+    if (obj_pool(o)->dying) {
+        violated("a call built an object in a pool being destroyed");
     }
     bool bound = true;
     if (o->type == CAP_THREAD) {

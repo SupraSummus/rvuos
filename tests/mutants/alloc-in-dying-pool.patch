@@ -1,0 +1,19 @@
+An allocation goes ahead in a pool whose destroy has begun,
+so a thread allocating between the destroy's steps keeps it from ending.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: a call built an object in a pool being destroyed
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -280,9 +280,6 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
+     if (op != OP_POOL_ALLOC) {
+         return KERR_WRONG_TYPE;
+     }
+-    if (pool->dying) {
+-        return KERR_STATE;
+-    }
+     uint32_t dst = arg[2];
+     int err = cap_slot_free(thread_table(t), dst);
+     if (err != KERR_OK) {

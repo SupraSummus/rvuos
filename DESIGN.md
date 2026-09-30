@@ -1004,7 +1004,8 @@ The ESP32-C6 measures the counter's rate at boot, so the timer starts before the
 A new thread's account is empty, and the root thread's starts full.
 A thread bound to other units keeps what its account held, up to what the new units hold,
 and an unbound one loses it, so no bind puts time into an account.
-`OP_DEBUG_TRACE` fills every account; no call tells what one holds, which would be a clock.
+`OP_DEBUG_TRACE` fills every account as tracing begins, and a second one fills none;
+no call tells what one holds, which would be a clock.
 
 **A thread has time while its account holds a tick.**
 A turn lasts at most to the next tick, and every count of a turn the thread began with time costs it `COUNT_PARTS`,
@@ -1792,6 +1793,11 @@ No call begins to destroy the pool its thread, its process or its process's tabl
 A destroy stopped half way leaves the pool's threads running,
 so this is what keeps a thread from making a call it cannot return from.
 
+**A dying pool only gives back.**
+No call builds an object in a pool whose destroy has begun,
+so every step of the destroy takes something away and the destroy ends,
+whatever other threads do between its steps.
+
 **A tick charges.**
 Under tracing, where the clock is the tick count,
 a tick costs the thread whose turn it is a whole tick while its account holds one,
@@ -1859,12 +1865,26 @@ and the self-check runs after every call, under ASan and UBSan.
 Around every call `host/history.c` compares the state before with the state after,
 for the properties that relate them; see "Properties".
 Since no system call takes a pointer,
-the registers are the whole attack surface.
+the registers are the whole attack surface of a call;
+a record may also load or store a word itself, as a process's own code would, see below.
 The mutator in `host/mutator.c` works on whole records:
 it inserts, deletes, swaps and moves them,
 sets one field to a value in its range,
 and splices two inputs on record boundaries,
 so that a handoff between the driver's threads is one mutation, not a guess per byte.
+Most records it draws are typed, by a table in `host/ops.h` of what each operation's arguments are
+and a guess of what each slot holds, which follows the records from the prologue:
+a record invokes a capability of the type its operation wants, takes its sources from slots of their types,
+and may use what an earlier record made or come again with fresh slots,
+so a chain of splits down to a small pool is a mutation or two.
+A wrong entry in the table draws worse arguments and hides nothing,
+and the untyped draws stay, for the refusals the types leave out.
+The coverage that guides it is the kernel's alone:
+the self-check and the harness walk every object after every call,
+so their edges would reward an input for the objects it leaves rather than for what the kernel did,
+and the comparisons they traced for the fuzzer took most of a run.
+Nearly every edge of the kernel is reached,
+so `make fuzz` lets the values its comparisons meet guide the search as well.
 The inputs replayed are checked in under `tests/seeds` and `tests/corpus`.
 `make mutants` and `make qemu-replay` replay them in one harness process,
 each input from RAM as at power-up and ending at its first report, as if it ran alone,
@@ -1913,6 +1933,10 @@ A refresh thus rewrites only the patches whose text changed.
 A three-way merge does not help: the kernel's history shows the mutated lines or their neighbours
 changing whenever the context alone was not enough.
 A mutant whose own lines changed is planted again by hand.
+A seed that catches a mutant says the checks are strong enough, not that the fuzzer would have found it.
+`make mutants-fuzz` measures that: it fuzzes each mutant from the corpus alone, or from nothing,
+for a budget of runs with libFuzzer's seed fixed, and prints the runs to the first report,
+so two versions of the mutator compare by the numbers; `make check` leaves it out.
 
 **QEMU** (`make test`, `make qemu-replay`).
 The kernel has no console, so a transcript reaches QEMU's UART two ways:
@@ -1992,10 +2016,18 @@ The host has no instruction fetch to fault,
 so it makes a driver thread fault as soon as it runs
 without its code or its data mapped with the needed rights,
 or without the UART or the log when it drains the log, as it does after each record it performs,
-and every driver thread that runs once the records are done fault on the breakpoint the driver ends with;
-that is the one place where the host models rather than executes.
+and every driver thread that runs once the records are done fault on the breakpoint the driver ends with.
+A record may also be a word the driver loads or stores itself, `REPLAY_OP_LOAD` and `REPLAY_OP_STORE`:
+QEMU's PMP decides whether the access goes through,
+and the host decides it from the process's regions, and faults the thread where they do not grant it,
+so where the image and the slots disagree on an access a record makes, a fault shows on one side only,
+whatever the kernel's own reading of the image says.
+A store is how a process leaves in memory what it writes before the memory becomes a pool.
+The log, the driver's code and data and the UART are left alone,
+since a write there would change what the driver does on QEMU, which the host cannot follow.
+These are the places where the host models rather than executes.
 A fault stops its thread alone, so on both builds the next thread goes on with the records,
-and one resumed where it faulted goes on too;
+and one resumed where it faulted goes on too, making the access again;
 the transcripts compare the line of each fault, but not its frame, whose addresses the host does not know.
 
 The same gap bounds which threads a replay may cross.
@@ -2064,6 +2096,14 @@ whose logger drives the UART's transmitter on its interrupt.
 The kernel loses nothing by that:
 it runs with interrupts off, so a tick lands only in user mode,
 and every such landing is the same to it, a ready thread whose frame is saved.
+A tick landing within a restartable call is a record too, `OP_DEBUG_PREEMPT`:
+it arms a stop at the n-th place from now at which a call could stop between two steps,
+counted whether an interrupt is pending or not, so both builds stop at the same place,
+and does there what `OP_DEBUG_TICK` does, so another thread may run while the call is half done.
+The host stops every restartable call after each step and makes it again at once,
+which checks every restart alone;
+a thread an armed stop left stands at its `ecall` until the processor comes back to it,
+and faults on the `ecall` if its process no longer maps the driver's code.
 What the demo in `user/init.c` alone still checks
 is the interrupt landing between two instructions.
 The replay driver starts its second thread after turning tracing on,

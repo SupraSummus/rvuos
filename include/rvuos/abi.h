@@ -91,7 +91,8 @@
  * cannot contain a switch that lands between two instructions.
  * Every thread's account is filled, see OP_TIME_BIND,
  * so that the host build starts from the same accounts.
- * It cannot be turned off again, so a traced program cannot hide.
+ * It cannot be turned off again, so a traced program cannot hide,
+ * and once it is on the call changes nothing.
  */
 #define OP_DEBUG_TRACE 10
 /*
@@ -117,6 +118,15 @@
  * see DESIGN.md, "Verification".
  */
 #define OP_DEBUG_IRQ 22
+/*
+ * Debug: a tick landing within a restartable call, on request. a1 = n.
+ * The n-th place from now at which any restartable call could stop between two steps, it stops,
+ * interrupt pending or not, and does what OP_DEBUG_TICK does,
+ * so another thread may run before the caller makes its call again. Zero disarms it.
+ * It is how a replay has a thread run while another's call is half done,
+ * since under tracing the tick stops no call; see DESIGN.md, "Verification".
+ */
+#define OP_DEBUG_PREEMPT 32
 
 /*
  * CapTable (RIGHT_W): copy a capability from the caller's table.
@@ -408,7 +418,7 @@
 #define OP_TIME_BIND 29
 
 /* One above the highest operation code; the fuzzer's mutator draws below it. */
-#define OP_COUNT 32
+#define OP_COUNT 33
 
 /*
  * Capability slots the kernel fills in the root task's table at boot.
@@ -486,7 +496,8 @@ struct replay_header {
 };
 
 /*
- * One system call and the thread that makes it.
+ * One system call and the thread that makes it,
+ * or a load or a store the replay driver makes itself, see rvuos/replay.h.
  * actor 0 is whichever thread runs when the record comes up;
  * 1..REPLAY_THREADS names a replay driver thread, see rvuos/replay.h;
  * any other value means 0.

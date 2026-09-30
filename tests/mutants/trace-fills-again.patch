@@ -1,0 +1,22 @@
+A second OP_DEBUG_TRACE fills every account again,
+so a thread with the debug capability tops up its own account at will.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Report: a traced call that moved no time charged the thread whose turn it was
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -46,10 +46,8 @@ static int op_debug(uint32_t op, const uint32_t *arg)
+          * The host boots with full accounts, and the target has run a while before its first traced call.
+          * Once tracing is on the call changes nothing, or it would fill an account at will.
+          */
+-        if (!debug_trace) {
+-            debug_trace = true;
+-            sched_accounts_fill();
+-        }
++        debug_trace = true;
++        sched_accounts_fill();
+         return KERR_OK;
+     case OP_DEBUG_TICK:
+         /* The caller's status is written to its own frame, whoever runs next. */

@@ -200,9 +200,21 @@ static void detach(struct cap *n, bool adopt)
     }
 }
 
+uint32_t preempt_countdown;
+bool preempt_stopped;
+
 bool cap_stop_here(bool preempt)
 {
-    return preempt && intr_pending();
+    if (!preempt) {
+        return false;
+    }
+    /* Every place counts, pending or not, so the host, where one always is, stops where QEMU does. */
+    bool pending = intr_pending();
+    if (preempt_countdown != 0 && --preempt_countdown == 0) {
+        preempt_stopped = true;
+        return true;
+    }
+    return pending;
 }
 
 bool cap_revoke_step(struct cap *root)

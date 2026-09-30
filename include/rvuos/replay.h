@@ -69,6 +69,38 @@ static inline int replay_passes(const struct replay_record *r, unsigned me)
 }
 
 /*
+ * Records the driver performs itself, with no system call:
+ * a word loaded from or stored to a1, rounded down to a word, a2 the word stored.
+ * A thread its process does not let make the access faults on it, as any user code would,
+ * and makes it again when it next runs, once a record resumed it.
+ * So a replay has a process write memory before it becomes a pool,
+ * and QEMU's PMP decide an access the host decides from the process's regions.
+ */
+#define REPLAY_OP_LOAD  0xf0
+#define REPLAY_OP_STORE 0xf1
+
+static inline int replay_accesses(const struct replay_record *r)
+{
+    return r->op == REPLAY_OP_LOAD || r->op == REPLAY_OP_STORE;
+}
+
+/*
+ * Memory such a record leaves alone, since neither build could follow a write there:
+ * the log, which the driver carries out, the driver's code and data, which lie right above it,
+ * and the UART. QEMU's addresses, as the stacks below are; host/shim.c checks them against the layout.
+ */
+#define REPLAY_OWN_BASE  0x800ff000u
+#define REPLAY_OWN_END   0x80120000u
+#define REPLAY_UART_BASE 0x10000000u
+#define REPLAY_UART_END  0x10000100u
+
+static inline int replay_leaves_alone(uint32_t at)
+{
+    return at - REPLAY_OWN_BASE < REPLAY_OWN_END - REPLAY_OWN_BASE ||
+           at - REPLAY_UART_BASE < REPLAY_UART_END - REPLAY_UART_BASE;
+}
+
+/*
  * Region slots. The input is mapped only while the driver copies the records out,
  * so the records run in a process that maps what the driver needs from then on and nothing else.
  */

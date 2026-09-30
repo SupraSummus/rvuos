@@ -101,7 +101,8 @@ ESCAPE_PROGRAMS := escape-execute-data escape-jump-kernel escape-csrr escape-mre
                    escape-misaligned-load escape-misaligned-store escape-store-kernel \
                    escape-past-region
 
-.PHONY: all clean run test escape host-harnesses host-test fuzz corpus-merge qemu-replay mutants mutants-refresh check
+.PHONY: all clean run test escape host-harnesses host-test fuzz corpus-merge qemu-replay mutants mutants-refresh \
+        mutants-fuzz check
 
 # Pattern rules would delete the objects they chain through,
 # so every build compiled the kernel from scratch.
@@ -203,6 +204,10 @@ HOST_SAN    := -fsanitize=address,undefined -fno-sanitize-recover=all -fsanitize
 HOST_KERNEL_SRC := kernel/cap.c kernel/pool.c kernel/process.c kernel/sched.c \
                    kernel/syscall.c kernel/boot.c kernel/selfcheck.c kernel/klog.c
 HOST_SRC        := host/shim.c host/history.c host/mutator.c host/fuzz.c
+# What the fuzzer's coverage leaves out: the self-check and the harness only look at what the kernel did,
+# and their walks over every object after every call would reward an input for the objects it leaves
+# and spend most of a run in comparisons traced for the fuzzer.
+HOST_UNCOVERED  := kernel/selfcheck.c host/%
 
 FUZZ_TIME ?= 60
 
@@ -232,8 +237,8 @@ $(1): $(call host_obj,$(1))
 
 $(1).obj/%.o: %.c
 	@mkdir -p $$(dir $$@)
-	$$(HOST_CC) $$(HOST_CFLAGS) $$(HOST_MACHINE) $$(HOST_SAN) -fsanitize=fuzzer-no-link \
-		-MMD -MP -c $$< -o $$@
+	$$(HOST_CC) $$(HOST_CFLAGS) $$(HOST_MACHINE) $$(HOST_SAN) \
+		$$(if $$(filter $$(HOST_UNCOVERED),$$<),,-fsanitize=fuzzer-no-link) -MMD -MP -c $$< -o $$@
 endef
 $(foreach h,$(HOST_HARNESSES),$(eval $(call host_harness,$(h))))
 
@@ -254,14 +259,23 @@ mutants:
 mutants-refresh:
 	tests/mutants-refresh.py
 
+# Fuzz each mutant from the corpus, the seeds left out, and print the runs to its first report.
+# A measurement of the fuzzer, not a check; MUTANTS_FUZZ takes the options of tests/mutants-fuzz.sh.
+mutants-fuzz:
+	FUZZ_FLAGS="$(FUZZ_FLAGS)" tests/mutants-fuzz.sh $(MUTANTS_FUZZ)
+
 # Fuzz for FUZZ_TIME seconds in a working copy of the seeds and the corpus.
 # Fold the interesting inputs back into the repository with `make corpus-merge`.
 # libFuzzer turns -len_control off when it finds the record mutator of host/mutator.c;
 # asked for explicitly, it stays on and keeps the inputs short and the runs per second high.
+# The kernel's edges are nearly all reached, so the values its comparisons meet guide the search too:
+# a pool run out at the one allocation that fails is a size compared, not an edge.
+# `make mutants-fuzz` measures with the same flags.
+FUZZ_FLAGS := -max_len=2048 -len_control=100 -use_value_profile=1
 fuzz: $(HOST_BUILD)/fuzz
 	@mkdir -p $(HOST_CORPUS)
 	cp -n tests/seeds/* tests/corpus/* $(HOST_CORPUS)/
-	$(HOST_BUILD)/fuzz -max_total_time=$(FUZZ_TIME) -max_len=2048 -len_control=100 $(HOST_CORPUS)
+	$(HOST_BUILD)/fuzz -max_total_time=$(FUZZ_TIME) $(FUZZ_FLAGS) $(HOST_CORPUS)
 
 # Rebuild tests/corpus from scratch out of itself and the working copy.
 # The seeds go in first and stay; each harness in turn then keeps
