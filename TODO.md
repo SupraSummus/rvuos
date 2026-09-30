@@ -47,13 +47,19 @@ Open work only; an item leaves this file in the commit that finishes it.
   since libFuzzer grows the limit by bytes and a record is sixteen;
   `-len_control=20` reached more edges in a short run.
   Measure it with `make mutants-fuzz MUTANTS_FUZZ=-e` before `make fuzz` takes it.
-- The corpus holds no input with a load or store record:
-  the fuzzer makes them, but none reaches an edge of the kernel the other inputs do not.
+- No load or store record reaches an edge of the kernel the other records do not.
+  Four inputs of the corpus carry one, but are kept for their other records:
+  with the loads taken out, the corpus reaches the same edges on all three machines.
 - `make mutants-fuzz` finds neither `alloc-in-dying-pool` nor `bind-in-dying-pool`,
-  from the corpus or from nothing, in 5000 runs,
-  and fifteen minutes of `make fuzz` with `-fork=4`, about 186 000 runs, made no input that catches either:
+  from the corpus or from nothing, in 5000 runs:
   a stop armed at the right place, a pool dying and an allocation from another thread
   are three records the mutator must line up.
+  A longer run lines them up now and then.
+  Fifteen minutes of `make fuzz` with `-fork=4`, about 186 000 runs, made no input that catches either;
+  on eight processes, fifteen with `-fork=8` and fifteen more with `-jobs=8` from where it stopped,
+  about 131 000 and 413 000 runs, made 22 that catch `alloc-in-dying-pool` and 38 `bind-in-dying-pool`,
+  all with `OP_DEBUG_PREEMPT`.
+  None reaches an edge the others do not, so the corpus keeps none of them.
   A mutation that inserts the three together is untried.
 - The self-check is most of what a fuzzing run costs, and grows with the square of what the machine holds:
   `check_node` walks each node's ring up to its parent and the parent's ring back to it,
