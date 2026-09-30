@@ -2,12 +2,11 @@
 #define RVUOS_USER_PHYTRACE_H
 
 /*
- * What the PHY tracer, user/phytrace.c, and the harness it traces, user/phyblob/, agree on.
- * ESP32-C6 only.
+ * What the PHY tracer and the harness it traces, user/phyblob/, agree on; ESP32-C6 only.
+ * The tracer and the rules that build and load the harness are still to come; see TODO.md.
  *
- * The harness is Espressif's PHY library, libphy.a, linked with a few lines of glue
- * at a fixed place in the free RAM, where tools/esp32c6-run.py loads it beside the kernel.
- * It runs in a process of its own that maps its own memory, the ROM and the ROM's RAM, and no device,
+ * The harness is Espressif's PHY library, libphy.a, with a few lines of glue, at a fixed place in the free RAM.
+ * It runs in a process that maps its own memory, the ROM and the ROM's RAM, and no device,
  * so every register access it makes faults and the tracer, its thread's watcher, carries it out.
  * It asks the tracer for anything else with an ebreak and the request in t0,
  * which no argument register carries, so a printf's arguments stay where the ABI put them.
