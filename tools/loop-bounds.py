@@ -26,8 +26,11 @@ A loop that says it waits must wait on every way round:
 a wfi, a load from a fixed address outside RAM, or a call to a function holding a wfi.
 The self-check is not checked, and every call to it must stand in an if on debug_trace.
 
-Usage: loop-bounds.py [--objdump tool] [--symbolizer tool] --cc cc --cflags flags
-                      --sources "file.c..." --design DESIGN.md kernel.elf file.su...
+tools/ksource.py has read the source beforehand, a translation unit at a time,
+into the files --sources names.
+
+Usage: loop-bounds.py [--objdump tool] [--symbolizer tool]
+                      --sources "file.src.json..." --design DESIGN.md kernel.elf file.su...
 """
 
 import argparse
@@ -516,9 +519,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--objdump", default="llvm-objdump")
     ap.add_argument("--symbolizer", default="llvm-symbolizer")
-    ap.add_argument("--cc", default="clang")
-    ap.add_argument("--cflags", default="")
-    ap.add_argument("--sources", required=True)
+    ap.add_argument("--sources", required=True, help="what tools/ksource.py read of each unit")
     ap.add_argument("--design", required=True)
     ap.add_argument("-v", "--verbose", action="store_true")
     ap.add_argument("elf")
@@ -564,7 +565,7 @@ def main() -> int:
                 calls += [(a, pc, c) for pc, c in blk.calls + blk.tails if c is not None]
 
         src = Source()
-        src.read(args.cc, args.cflags, shlex.split(args.sources))
+        src.load(shlex.split(args.sources))
         frames_of = symbolize(args.symbolizer, args.elf,
                               [x for f in found for x in f[3]] + [pc for _, pc, _ in calls])
 

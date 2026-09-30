@@ -62,6 +62,7 @@ KERNEL_SRC_S := $(wildcard kernel/*.S kernel/arch/$(ARCH)/*.S kernel/board/$(BOA
 KERNEL_OBJ   := $(patsubst %.c,$(BUILD)/%.o,$(KERNEL_SRC_C)) \
                 $(patsubst %.S,$(BUILD)/%.o,$(filter-out %.ld.S,$(KERNEL_SRC_S)))
 KERNEL_SU    := $(patsubst %.c,$(BUILD)/%.su,$(KERNEL_SRC_C))
+KERNEL_READ  := $(patsubst %.c,$(BUILD)/%.src.json,$(KERNEL_SRC_C))
 
 USER_COMMON := $(BUILD)/user/arch/$(ARCH)/start.o
 
@@ -166,21 +167,27 @@ $(BUILD)/user_blob-%.S: $(BUILD)/user-%.bin
 $(BUILD)/user_blob-%.o: $(BUILD)/user_blob-%.S
 	$(CC) $(ASFLAGS) -c $< -o $@
 
+# What tools/loop-bounds.py reads of a kernel source lies beside the object,
+# so that a link reads again only the sources that changed;
+# the object stands for the source and the headers it was compiled from.
+$(BUILD)/kernel/%.src.json: $(BUILD)/kernel/%.o tools/ksource.py
+	tools/ksource.py --cc $(CC) --cflags "$(CFLAGS) $(KERNEL_INC)" kernel/$*.c > $@.tmp
+	mv $@.tmp $@
+
 # A kernel whose stack may overflow is not an image; see DESIGN.md, "Bounded stack".
 # Nor is one with a loop whose source says nothing of its bound; see DESIGN.md, "Bounded work".
 # That check reads the source as the kernel's objects were compiled from it.
 # Both run even when the first refuses, so that one refusal does not hide the other.
 # They read the kernel linked alone, once for all its images,
 # since an image differs from it only in the root task in .user_code, which neither reads.
-$(BUILD)/kernel.elf: $(KERNEL_OBJ) $(BUILD)/kernel/kernel.ld \
-                     tools/kimage.py tools/ksource.py tools/stack-depth.py tools/loop-bounds.py \
-                     DESIGN.md
+$(BUILD)/kernel.elf: $(KERNEL_OBJ) $(KERNEL_READ) $(BUILD)/kernel/kernel.ld \
+                     tools/kimage.py tools/kthumb.py tools/ksource.py tools/stack-depth.py \
+                     tools/loop-bounds.py DESIGN.md
 	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/kernel/kernel.ld $(KERNEL_OBJ) -o $@.tmp
 	ok=yes; \
 	tools/stack-depth.py --objdump $(OBJDUMP) $@.tmp $(KERNEL_SU) || ok=no; \
 	tools/loop-bounds.py --objdump $(OBJDUMP) --symbolizer $(SYMBOLIZER) \
-		--cc $(CC) --cflags "$(CFLAGS) $(KERNEL_INC)" --sources "$(KERNEL_SRC_C)" \
-		--design DESIGN.md $@.tmp $(KERNEL_SU) || ok=no; \
+		--sources "$(KERNEL_READ)" --design DESIGN.md $@.tmp $(KERNEL_SU) || ok=no; \
 	[ $$ok = yes ]
 	mv $@.tmp $@
 
@@ -340,9 +347,11 @@ corpus-merge: $(HOST_MACHINES)
 # and compare every call's status with the host build;
 # an invariant report on either side fails the input, matching or not.
 # It runs one QEMU per processor, or REPLAY_JOBS.
+# REPLAY_FAIL_FAST=1 stops it at the first input that fails, as `make mutants` has it.
 qemu-replay: $(BUILD)/kernel-fuzzdrv.elf $(HOST_BUILD)/fuzz
 	@[ "$(BOARD)" = qemu ] || { echo "qemu-replay runs on BOARD=qemu"; exit 1; }
 	tests/differential.py --qemu "$(QEMU) $(QEMUFLAGS)" $(if $(REPLAY_JOBS),--jobs $(REPLAY_JOBS)) \
+		$(if $(REPLAY_FAIL_FAST),--fail-fast) \
 		--kernel $(BUILD)/kernel-fuzzdrv.elf --host $(HOST_BUILD)/fuzz tests/seeds tests/corpus
 
 # The same demo on ARM, under QEMU; see DESIGN.md, "Architectures".

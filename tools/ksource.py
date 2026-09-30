@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """The kernel's source as tools/loop-bounds.py reads it, and the way back from the image to it.
 
 The loops and the annotations come from clang's AST, dumped as JSON,
@@ -6,14 +7,21 @@ including those that macros and headers bring in.
 An annotation is a _Static_assert whose message starts with "loop " or "call ",
 so it costs no instruction and the compiler checks its condition; see kernel/work.h.
 The way back is llvm-symbolizer, which gives each address its inlined frames.
+
+Run as a program, it reads one translation unit and writes what it found as JSON,
+which the build keeps beside the unit's object;
+tools/loop-bounds.py loads those in order, so a link reads again only the units that changed.
+
+Usage: ksource.py [--cc cc] [--cflags flags] file.c > file.src.json
 """
 
-import concurrent.futures
+import argparse
 import functools
 import json
 import os
 import shlex
 import subprocess
+import sys
 
 from kimage import Failure
 
@@ -69,6 +77,7 @@ class Note:
     """
 
     def __init__(self, text, pos, function, loop, target, value):
+        self.text = text
         words = text.split(" ")
         self.call = words[0] == "call"
         self.kind = words[1]
@@ -81,6 +90,15 @@ class Note:
 
     def __repr__(self):
         return f"{'call' if self.call else 'loop'} {self.kind} {self.claim} at {self.pos}"
+
+
+def save_pos(pos):
+    """A place as JSON, its file as short() names it, so a copy of the tree loads it too."""
+    return None if pos is None else [short(pos.file), pos.line, pos.col]
+
+
+def load_pos(saved):
+    return None if saved is None else Pos(*saved)
 
 
 def resolve_locations(tree):
@@ -132,20 +150,63 @@ class Source:
         self.functions = {}  # file -> [(begin, end, name)]
         self.calls = {}   # (callee, place) -> Call
 
-    def read(self, cc, cflags, paths):
-        """Read the translation units in order; clang dumps them side by side."""
-        def dump(path):
-            cmd = [cc] + shlex.split(cflags) + ["-fsyntax-only", "-Xclang", "-ast-dump=json", path]
-            try:
-                return subprocess.run(cmd, capture_output=True, text=True, check=True).stdout
-            except (OSError, subprocess.CalledProcessError) as e:
-                raise Failure(f"cannot dump the AST of {path}: {getattr(e, 'stderr', e)}")
+    def read(self, cc, cflags, path):
+        """Read one translation unit."""
+        cmd = [cc] + shlex.split(cflags) + ["-fsyntax-only", "-Xclang", "-ast-dump=json", path]
+        try:
+            out = subprocess.run(cmd, capture_output=True, text=True, check=True).stdout
+        except (OSError, subprocess.CalledProcessError) as e:
+            raise Failure(f"cannot dump the AST of {path}: {getattr(e, 'stderr', e)}")
+        tree = json.loads(out)
+        resolve_locations(tree)
+        self._walk(tree, None, [])
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count() or 2) as pool:
-            for out in pool.map(dump, paths):
-                tree = json.loads(out)
-                resolve_locations(tree)
-                self._walk(tree, None, [])
+    def save(self, f):
+        """Write what was read as JSON; a note names its loop by the loop's place in the list."""
+        loops = list(self.loops.values())
+        index = {id(l): i for i, l in enumerate(loops)}
+        unit = {
+            "loops": [{"begin": save_pos(l.begin), "end": save_pos(l.end), "function": l.function,
+                       "node": l.node} for l in loops],
+            "notes": [{"text": n.text, "pos": save_pos(n.pos), "function": n.function,
+                       "loop": None if n.loop is None else index[id(n.loop)],
+                       "target": None if n.target is None else [save_pos(p) for p in n.target],
+                       "value": n.value} for n in self.notes],
+            "functions": [[save_pos(b), save_pos(e), name]
+                          for fs in self.functions.values() for b, e, name in fs],
+            "calls": [{"callee": c.callee, "pos": save_pos(c.pos), "function": c.function,
+                       "guards": sorted(c.guards, key=str)} for c in self.calls.values()],
+        }
+        # A loop's node keeps the places resolve_locations left in it, which are no JSON;
+        # counted() reads none of them, so they are dropped.
+        f.write(json.dumps(unit, default=lambda o: None))
+
+    def load(self, paths):
+        """Take in the units save() wrote, in order, as if read one after another:
+        a loop or a call a header brings in again stays as first found,
+        and a note found again is left out."""
+        for path in paths:
+            try:
+                with open(path) as f:
+                    unit = json.load(f)
+            except (OSError, ValueError) as e:
+                raise Failure(f"cannot load {path}: {e}")
+            loops = []
+            for l in unit["loops"]:
+                begin, end = load_pos(l["begin"]), load_pos(l["end"])
+                k = (begin.file, begin.line, begin.col)
+                loops.append(self.loops.setdefault(k, Loop(begin, end, l["function"], l["node"])))
+            for n in unit["notes"]:
+                loop = None if n["loop"] is None else loops[n["loop"]]
+                target = None if n["target"] is None else tuple(load_pos(p) for p in n["target"])
+                self._add(Note(n["text"], load_pos(n["pos"]), n["function"], loop, target, n["value"]))
+            for b, e, name in unit["functions"]:
+                b = load_pos(b)
+                self.functions.setdefault(b.file, []).append((b, load_pos(e), name))
+            for c in unit["calls"]:
+                pos = load_pos(c["pos"])
+                self.calls.setdefault((c["callee"], repr(pos)),
+                                      Call(c["callee"], pos, c["function"], frozenset(c["guards"])))
 
     def _walk(self, tree, function, loops):
         # Iterative, with the enclosing function, loops and if conditions carried along.
@@ -200,16 +261,18 @@ class Source:
             if b and e:
                 target = (b, e)
         loop = loops[-1] if loops else None
-        if (repr(pos), text) in self.seen:
-            return
-        self.seen.add((repr(pos), text))
         # A bound's _Static_assert is (n) > 0.
         cond = strip(decl["inner"][0]) if decl.get("inner") else None
         bound = value(cond["inner"][0]) if cond and cond.get("opcode") == ">" else None
-        note = Note(text, pos, function, loop, target, bound)
+        self._add(Note(text, pos, function, loop, target, bound))
+
+    def _add(self, note):
+        if (repr(note.pos), note.text) in self.seen:
+            return
+        self.seen.add((repr(note.pos), note.text))
         self.notes.append(note)
-        if loop is not None and not note.call:
-            loop.notes.append(note)
+        if note.loop is not None and not note.call:
+            note.loop.notes.append(note)
 
     def enclosing(self, pos):
         """The loops around pos, outermost first."""
@@ -389,3 +452,22 @@ def symbolize(symbolizer, elf, addrs):
         result[a] = frames
     return result
 
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Read one translation unit of the kernel for tools/loop-bounds.py.")
+    ap.add_argument("--cc", default="clang")
+    ap.add_argument("--cflags", default="")
+    ap.add_argument("source")
+    args = ap.parse_args()
+    src = Source()
+    try:
+        src.read(args.cc, args.cflags, args.source)
+    except Failure as e:
+        print(f"ksource: {e}", file=sys.stderr)
+        return 1
+    src.save(sys.stdout)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
