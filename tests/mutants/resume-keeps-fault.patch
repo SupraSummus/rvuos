@@ -1,0 +1,18 @@
+A resume leaves the thread marked as stopped where it faulted.
+A watcher would then read a fault the thread is no longer stopped at,
+and emulate an instruction the thread has already run past.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Report: thread runs with a fault to tell
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -422,7 +422,6 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
+         if (target->state != THREAD_STOPPED || thread_process(target) == NULL) {
+             return KERR_STATE;
+         }
+-        target->flags &= (uint8_t)~THREAD_FAULTED;
+         sched_ready(target);
+         return KERR_OK;
+     case OP_THREAD_FAULT:

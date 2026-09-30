@@ -85,6 +85,8 @@
 #define EXC_RETURN_THREAD_PSP 0xfffffffdu
 
 #define XPSR_T (1u << 24)
+/* N, Z, C, V and Q, which a branch keeps; the IT state it leaves lies in bits 26:25 and 15:10. */
+#define XPSR_APSR (0x1fu << 27)
 #define XPSR_ALIGNED (1u << 9)
 
 #endif

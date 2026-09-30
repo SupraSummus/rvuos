@@ -38,6 +38,20 @@ void frame_start(struct trap_frame *frame, uint32_t pc, uint32_t sp);
 /* What the frame says of the trap that made it, as a line of the log; in frame.c too. */
 void report_frame(const struct trap_frame *frame);
 
+/*
+ * What OP_THREAD_FAULT returns of the frame a fault left, into out[0] to out[3]:
+ * the cause, the program counter, the address and the status, as rvuos/abi.h says them; in frame.c too.
+ */
+void frame_fault(const struct trap_frame *frame, uint32_t *out);
+
+/*
+ * A register of a stopped thread's frame, numbered as OP_THREAD_READ_REG numbers it, THREAD_REG_PC among them:
+ * read into *value, or written with value as OP_THREAD_WRITE_REG takes it.
+ * Each is false, and leaves *value and the frame alone, for a number that names no register; in frame.c too.
+ */
+bool frame_read(const struct trap_frame *frame, uint32_t reg, uint32_t *value);
+bool frame_write(struct trap_frame *frame, uint32_t reg, uint32_t value);
+
 /* Called from start.S when the kernel itself traps. */
 __attribute__((noreturn)) void kernel_trap_panic(void);
 

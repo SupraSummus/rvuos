@@ -27,7 +27,7 @@ enum arg_kind {
     ARG_ALLOC,        /* what an allocation's type wants: a count of slots, a table's slot, a process's slot */
     ARG_RIGHTS,
     ARG_REGION,       /* a region slot of the process */
-    ARG_OFFSET,       /* into a frame, or a range of lines or of units */
+    ARG_OFFSET,       /* into a frame, a range of lines or of units, or a thread's registers */
     ARG_SIZE,         /* a frame's, a power of two */
     ARG_COUNT,        /* of lines or units */
     ARG_BITS,
@@ -100,11 +100,14 @@ static const struct op_info op_table[OP_COUNT] = {
     OP(OP_UNTYPED_SPLIT, CAP_UNTYPED, CAP_UNTYPED, ARG_DST, ARG_DST, ARG_NONE),
     OP(OP_THREAD_WATCH, CAP_THREAD, 0, ARG_NOTIFICATION, ARG_BITS, ARG_NONE),
     OP(OP_DEBUG_PREEMPT, CAP_DEBUG, 0, ARG_STEPS, ARG_NONE, ARG_NONE),
+    OP(OP_THREAD_FAULT, CAP_THREAD, 0, ARG_NONE, ARG_NONE, ARG_NONE),
+    OP(OP_THREAD_READ_REG, CAP_THREAD, 0, ARG_OFFSET, ARG_NONE, ARG_NONE),
+    OP(OP_THREAD_WRITE_REG, CAP_THREAD, 0, ARG_OFFSET, ARG_WORD, ARG_NONE),
 };
 
 #undef OP
 
-_Static_assert(OP_COUNT == 33 && OP_DEBUG_PREEMPT == OP_COUNT - 1, "a new operation needs an entry in op_table");
+_Static_assert(OP_COUNT == 36 && OP_THREAD_WRITE_REG == OP_COUNT - 1, "a new operation needs an entry in op_table");
 
 /* The loads and stores the driver makes itself, which invoke no capability. */
 static const struct op_info op_access[2] = {

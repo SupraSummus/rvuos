@@ -794,10 +794,16 @@ revoke below the Untyped it was made of; or leave it stopped.
 A breakpoint is a fault like any other, so a thread that is done can stop with one and its watcher hears it:
 that is as near as rvuos comes to an exit, and it needs nothing more.
 
-**The log says what the fault was.**
+**The watcher can ask what the fault was, and move the thread on.**
 The kernel writes `user fault` and the frame's `mcause`, `mepc` and `mtval` into its log,
 on ARMv7-M the exception, the fault status, the pc and the fault address,
-while the bits say only which thread; no call returns the cause, open decision 21.
+while the bits say only which thread.
+`OP_THREAD_FAULT` returns the same to whoever holds the thread with `RIGHT_W`,
+from the frame, which keeps them while the thread stays stopped where it faulted.
+A new thread's frame is zero, which is a cause too, so a flag, `THREAD_FAULTED`, tells a fault from none.
+`OP_THREAD_READ_REG` and `OP_THREAD_WRITE_REG` reach any general register of a stopped thread and its program counter,
+so a watcher can emulate the instruction the thread faulted at, write the program counter past it, and resume it;
+what ARMv7-M keeps from such a watcher is open decision 23.
 A thread that faults again and again fills the log only while its watcher resumes it every time.
 
 **Why a signal, and not a message.**
@@ -1496,7 +1502,7 @@ What differs is what a trap is, which registers carry a call, how a region is wr
 and which counter and compare the tick is made of;
 `arch.h` says the first two to the rest of the kernel,
 the architecture's `start.S` and `trap.c` take the trap,
-its `frame.c` starts a thread and reports a fault,
+its `frame.c` starts a thread, reports a fault and reads and writes a stopped thread's registers,
 and `user/arch/<arch>/call.h` is the call as `rvuos.h` makes it.
 A program written against `rvuos.h` is the same source on both, never the same binary.
 
@@ -1792,6 +1798,7 @@ and has one binding to units or none, a leaf of the derivation tree
 made through a capability with the right to bind.
 A thread's process is a leaf too, and a thread without one is stopped.
 So is a thread's watch, set through a capability with the right to signal, and it signals some bit.
+A thread with a fault to tell is stopped, where it faulted.
 A waiting thread names a live notification and nothing else does,
 and a notification's queue holds exactly the threads waiting on it.
 A ready thread but the running one that may run waits on exactly one of the scheduler's queues and names it:
@@ -2142,7 +2149,8 @@ what that thread's code does,
 which holds for the driver's own threads
 and not for a thread the records configured.
 So a thread carries `THREAD_UNTRACED`
-unless its program counter was set before tracing began,
+unless its program counter was set before tracing began
+and no register of it was written with `OP_THREAD_WRITE_REG` since,
 and rather than run one while tracing,
 the kernel stops the machine with `untraced thread`.
 That is a constraint verification puts on the kernel,
@@ -2502,14 +2510,13 @@ until the maintainer decides otherwise.
     Decide when a program's free list wants it.
 
 21. **What a fault tells.**
-    Working default: the watch's bits say which thread faulted, and the kernel's log says why, to whoever reads it;
-    no call returns the cause; see "Faults".
-    A watcher that restarts or ends the thread needs no more.
-    One that maps regions on demand knows what it withheld but not which address was reached for,
-    and one that emulates an instruction the core lacks needs `mepc` to find it and to step past it.
-    An operation on a stopped `Thread` returning `mcause`, `mepc` and `mtval`, which its frame keeps already,
-    would serve both, if it can tell a thread that faulted from one that never ran.
-    Decide with the first watcher that needs the cause.
+    Decided: `OP_THREAD_FAULT` returns what the log says,
+    and `OP_THREAD_READ_REG` and `OP_THREAD_WRITE_REG` reach a stopped thread's registers; see "Faults".
+    Before, only the log said why, which serves a watcher that restarts or ends the thread,
+    but not one that maps regions on demand, which needs the address,
+    nor one that emulates an instruction, which needs the program counter.
+    They came from a tracer, not in the tree, that runs Espressif's Wi-Fi PHY library in a process that maps no device
+    and carries out each register access it faults at.
 
 22. **User-mode CSRs nothing shuts.**
     Working default: on the ESP32-C6 the kernel sets them back at every change of process; see "Boards".
@@ -2529,8 +2536,13 @@ until the maintainer decides otherwise.
     - **Execute only.** ARM refuses a region that may execute but not read, which RISC-V grants;
       refusing it on both would make the ABI one, and change what the seeds and the corpus mean.
     - **The registers a stacking fault loses.** A thread whose sp points where it may not write
-      loses r0 to r3, r12, lr, pc and xpsr as it traps, so its watcher can start it afresh but not resume it.
+      loses r0 to r3, r12, lr, pc and xpsr as it traps, so its watcher can start it afresh but not resume it;
+      the status `OP_THREAD_FAULT` returns says so, and `OP_THREAD_READ_REG` reads what the last trap left there.
       A kernel that kept the last frame it gave could resume it where its last trap left it.
+    - **What a watcher cannot set.** `OP_THREAD_WRITE_REG` reaches the general registers and the pc, not the flags,
+      and a pc written leaves an IT block as a branch does,
+      so a watcher cannot emulate an instruction that sets the flags, nor step a thread past one inside an IT block.
+      A register for the flags, and a pc write that advances the IT state, would.
     - **The floating point unit.** The Cortex-M3 has none; a core with one stacks its registers lazily,
       and a process switch then owes them a save the kernel does not make.
     - **The name.** rvuos says RISC-V, which the kernel no longer is alone.

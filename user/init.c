@@ -23,7 +23,9 @@
  * which finds the user-mode CSRs the root task marked set back,
  * destroys the pool the root task lived in, and the root task with it,
  * then unmap a region, have a thread fault on it and hear of it through the thread's watch,
- * map the region again and resume the thread, whose load goes through then, and halt.
+ * ask the kernel what the fault was,
+ * map the region again and resume the thread, whose load goes through then,
+ * move the thread on by setting its registers, and halt.
  * Negative paths are covered by the fuzz corpus and tests/differential.py.
  */
 
@@ -539,12 +541,22 @@ static uint32_t spin_traps(uint32_t counter, uint32_t hz, uint32_t ms)
  * which stops the prober alone, at the load, and signals its watch.
  * Resumed once the region is back, it makes the same load again, which goes through,
  * and its breakpoint after that is a fault its watch hears too.
+ * Its watcher then sets its argument and program counter to run prober_again,
+ * as one that emulates an instruction steps a thread past it.
  */
 static volatile uint32_t probe_at, probed;
 
 static __attribute__((noreturn)) void prober_main(void)
 {
     probed = *(volatile uint32_t *)probe_at;
+    for (;;) {
+        rv_breakpoint();
+    }
+}
+
+static __attribute__((noreturn)) void prober_again(uint32_t word)
+{
+    probed = word;
     for (;;) {
         rv_breakpoint();
     }
@@ -562,13 +574,36 @@ static uint32_t fault_wait(void)
 }
 
 /*
+ * What OP_THREAD_FAULT says of the prober's fault, into *pc and the log,
+ * where tests/run.sh holds it to the kernel's own report of the fault, with each architecture's and board's causes.
+ */
+static uint32_t fault_tell(uint32_t *pc)
+{
+    uint32_t cause, addr, status;
+    uint32_t err = rv_thread_fault(SLOT_PROBER, &cause, pc, &addr, &status);
+    if (err != KERR_OK) {
+        return err;
+    }
+    puts("the prober's fault: cause=");
+    rv_put_hex(BOOT_CAP_DEBUG, cause);
+    puts(" pc=");
+    rv_put_hex(BOOT_CAP_DEBUG, *pc);
+    puts(" addr=");
+    rv_put_hex(BOOT_CAP_DEBUG, addr);
+    puts(" status=");
+    rv_put_hex(BOOT_CAP_DEBUG, status);
+    puts("\n");
+    return KERR_OK;
+}
+
+/*
  * The successor, in a process and a table of its own,
  * into which the root task moved every capability it held, each to the same slot,
  * so every slot means here what it meant there; see DESIGN.md, "The root task is its capabilities".
  */
 static __attribute__((noreturn)) void successor_main(void)
 {
-    uint32_t base, size, data_base, data_size;
+    uint32_t base, size, data_base, data_size, pc, at_load, reg, ignored;
 
     puts("successor: started\n");
     expect("successor: the user-mode csrs set back", csrs_are_reset() ? KERR_OK : KERR_INVALID_ARG);
@@ -617,6 +652,10 @@ static __attribute__((noreturn)) void successor_main(void)
            rv_invoke(OP_THREAD_CONFIGURE, SLOT_PROBER, (uint32_t)&prober_main, data_base + data_size / 2, 0));
     expect("watch it", rv_invoke(OP_THREAD_WATCH, SLOT_PROBER, SLOT_PROBE_NTFN, BIT_FAULT, 0));
     expect("bind it to spare time", rv_invoke(OP_TIME_BIND, BOOT_CAP_TIME, SLOT_PROBER, 0, 0));
+    /* A new thread's frame is zero, which a cause would be too. */
+    expect("a thread that never ran has no fault to tell",
+           rv_thread_fault(SLOT_PROBER, &ignored, &ignored, &ignored, &ignored) == KERR_STATE
+               ? KERR_OK : KERR_INVALID_ARG);
     probe_at = base;
     probed = 0;
 
@@ -630,13 +669,31 @@ static __attribute__((noreturn)) void successor_main(void)
     expect("start the prober", rv_invoke(OP_THREAD_RESUME, SLOT_PROBER, 0, 0, 0));
     expect("hear its fault", fault_wait());
     expect("the protection unit stopped the load", probed == 0 ? KERR_OK : KERR_INVALID_ARG);
+    expect("ask what the fault was", fault_tell(&at_load));
+    expect("it stopped where the fault says",
+           rv_thread_read_reg(SLOT_PROBER, THREAD_REG_PC, &reg) == KERR_OK && reg == at_load
+               ? KERR_OK : KERR_INVALID_ARG);
     expect("map the region again",
            rv_invoke(OP_PROCESS_INSTALL, BOOT_CAP_PROCESS, ROOT_SHARED_SLOT, SLOT_SHARED,
                      RIGHT_R | RIGHT_W));
     /* Only a stopped thread resumes, so this is also what shows the fault stopped it. */
     expect("resume the prober where it faulted", rv_invoke(OP_THREAD_RESUME, SLOT_PROBER, 0, 0, 0));
+    /* It runs on spare time, so not before this thread waits. */
+    expect("a resume leaves nothing to tell",
+           rv_thread_fault(SLOT_PROBER, &ignored, &ignored, &ignored, &ignored) == KERR_STATE
+               ? KERR_OK : KERR_INVALID_ARG);
     expect("hear its breakpoint", fault_wait());
     expect("the same load went through", probed == MAGIC ? KERR_OK : KERR_INVALID_ARG);
+    expect("the breakpoint is a fault of its own",
+           rv_thread_fault(SLOT_PROBER, &ignored, &pc, &ignored, &ignored) == KERR_OK && pc != at_load
+               ? KERR_OK : KERR_INVALID_ARG);
+    expect("set the prober's argument",
+           rv_invoke(OP_THREAD_WRITE_REG, SLOT_PROBER, RV_REG_A0, MAGIC + 2, 0));
+    expect("set its program counter",
+           rv_invoke(OP_THREAD_WRITE_REG, SLOT_PROBER, THREAD_REG_PC, (uint32_t)&prober_again, 0));
+    expect("resume it there", rv_invoke(OP_THREAD_RESUME, SLOT_PROBER, 0, 0, 0));
+    expect("hear its breakpoint there", fault_wait());
+    expect("it ran from there on what it was given", probed == MAGIC + 2 ? KERR_OK : KERR_INVALID_ARG);
     puts("root: fault ok\n");
     rv_halt(BOOT_CAP_DEBUG, 0);
 }

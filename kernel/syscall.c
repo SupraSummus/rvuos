@@ -394,7 +394,8 @@ static int op_process(struct thread *t, const struct cap *cap,
     }
 }
 
-static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, const uint32_t *arg)
+/* arg[1..] carry the arguments in and the results out. */
+static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint32_t *arg)
 {
     struct thread *target = (struct thread *)cap_object(cap);
 
@@ -413,13 +414,41 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, const
         } else {
             target->flags &= (uint8_t)~THREAD_UNTRACED;
         }
+        /* It starts afresh, so what stopped it before is nothing to tell. */
+        target->flags &= (uint8_t)~THREAD_FAULTED;
         return KERR_OK;
     case OP_THREAD_RESUME:
         /* A thread whose process was taken has nothing to run in. */
         if (target->state != THREAD_STOPPED || thread_process(target) == NULL) {
             return KERR_STATE;
         }
+        target->flags &= (uint8_t)~THREAD_FAULTED;
         sched_ready(target);
+        return KERR_OK;
+    case OP_THREAD_FAULT:
+        /* The frame keeps what the trap saved, and only a fault leaves the thread stopped with it. */
+        if (!(target->flags & THREAD_FAULTED)) {
+            return KERR_STATE;
+        }
+        frame_fault(&target->frame, &arg[1]);
+        return KERR_OK;
+    case OP_THREAD_READ_REG:
+        /* A stopped thread's frame is still until it runs; any other's is the scheduler's or the call's. */
+        if (target->state != THREAD_STOPPED) {
+            return KERR_STATE;
+        }
+        return frame_read(&target->frame, arg[1], &arg[1]) ? KERR_OK : KERR_INVALID_ARG;
+    case OP_THREAD_WRITE_REG:
+        if (target->state != THREAD_STOPPED) {
+            return KERR_STATE;
+        }
+        if (!frame_write(&target->frame, arg[1], arg[2])) {
+            return KERR_INVALID_ARG;
+        }
+        /* The host build sets no register but through a call, so under tracing it follows the thread no more. */
+        if (debug_trace) {
+            target->flags |= THREAD_UNTRACED;
+        }
         return KERR_OK;
     case OP_THREAD_WATCH: {
         /* The watch signals on its setter's behalf, so the setter must be able to. */
@@ -846,6 +875,7 @@ void fault_dispatch(struct thread *t)
     kputs("user fault\n");
     report_frame(&t->frame);
     t->state = THREAD_STOPPED;
+    t->flags |= THREAD_FAULTED;
     trace_wake_bits = 0;
     struct notification *watch = thread_watch(t);
     if (watch != NULL) {

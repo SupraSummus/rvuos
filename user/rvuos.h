@@ -96,6 +96,41 @@ static inline uint32_t rv_split(uint32_t untyped_cap, uint32_t lower, uint32_t u
     return rv_invoke(OP_UNTYPED_SPLIT, untyped_cap, lower, upper, 0);
 }
 
+/* OP_THREAD_FAULT: the cause, program counter, address and status of the fault a thread is stopped at. */
+static inline uint32_t rv_thread_fault(uint32_t thread_cap, uint32_t *cause, uint32_t *pc, uint32_t *addr,
+                                       uint32_t *status)
+{
+    register uint32_t r_a0 __asm__(RV_A0) = thread_cap;
+    register uint32_t r_a1 __asm__(RV_A1);
+    register uint32_t r_a2 __asm__(RV_A2);
+    register uint32_t r_a3 __asm__(RV_A3);
+    register uint32_t r_a4 __asm__(RV_A4);
+    register uint32_t r_a7 __asm__(RV_A7) = OP_THREAD_FAULT;
+    __asm__ volatile(RV_CALL
+                     : "+r"(r_a0), "=r"(r_a1), "=r"(r_a2), "=r"(r_a3), "=r"(r_a4)
+                     : "r"(r_a7)
+                     : "memory", RV_A5, RV_A6);
+    *cause = r_a1;
+    *pc = r_a2;
+    *addr = r_a3;
+    *status = r_a4;
+    return r_a0;
+}
+
+/* OP_THREAD_READ_REG: one register of a stopped thread, or its program counter, THREAD_REG_PC. */
+static inline uint32_t rv_thread_read_reg(uint32_t thread_cap, uint32_t reg, uint32_t *value)
+{
+    register uint32_t r_a0 __asm__(RV_A0) = thread_cap;
+    register uint32_t r_a1 __asm__(RV_A1) = reg;
+    register uint32_t r_a7 __asm__(RV_A7) = OP_THREAD_READ_REG;
+    __asm__ volatile(RV_CALL
+                     : "+r"(r_a0), "+r"(r_a1)
+                     : "r"(r_a7)
+                     : "memory", RV_A2, RV_A3, RV_A4, RV_A5, RV_A6);
+    *value = r_a1;
+    return r_a0;
+}
+
 /* OP_NOTIFY_SIGNAL: set bits, never blocking. */
 static inline uint32_t rv_signal(uint32_t ntfn_cap, uint32_t bits)
 {

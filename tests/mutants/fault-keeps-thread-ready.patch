@@ -2,16 +2,16 @@ A fault hands the processor on but leaves the thread that made it ready,
 so it is on no queue while another thread runs, and would run on at the instruction that faulted.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
-Report: a ready thread that may run waits on no queue
+Report: thread runs with a fault to tell
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -829,7 +829,6 @@ void fault_dispatch(struct thread *t)
+@@ -874,7 +874,6 @@ void fault_dispatch(struct thread *t)
  {
      kputs("user fault\n");
      report_frame(&t->frame);
 -    t->state = THREAD_STOPPED;
+     t->flags |= THREAD_FAULTED;
      trace_wake_bits = 0;
      struct notification *watch = thread_watch(t);
-     if (watch != NULL) {

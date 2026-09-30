@@ -89,6 +89,9 @@ def defined(insns, i, reg):
             continue
         if mnem == "li":
             return imm(args[1])
+        # llvm-objdump prints an addi of zero as mv, which it is where a relocation's low half came out zero.
+        if mnem == "mv":
+            mnem, args = "addi", args + ["0"]
         if mnem == "addi":
             k = find_back(insns, j, lambda m, a: m in ("lui", "auipc") and a[0] == args[1], {args[1]})
             if k is not None:

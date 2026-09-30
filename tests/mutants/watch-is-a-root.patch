@@ -7,7 +7,7 @@ Report: capability to an object is a root
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -427,7 +427,7 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, const
+@@ -467,7 +467,7 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
          if (bits != 0) {
              /* It hangs below the capability it was set with, so a revoke above that clears it. */
              target->watch = (struct cap){ .type = CAP_WATCHED, .rights = nc.rights, .a = nc.a, .b = bits };

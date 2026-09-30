@@ -387,8 +387,12 @@ static void check_thread(const struct thread *t)
     } else if (t->state != THREAD_STOPPED) {
         fail("thread without a process is not stopped", v2p(t), t->state, 0);
     }
-    if (t->flags & ~(uint8_t)THREAD_UNTRACED) {
+    if (t->flags & ~(uint8_t)(THREAD_UNTRACED | THREAD_FAULTED)) {
         fail("thread has unknown flags", v2p(t), t->flags, 0);
+    }
+    /* What stopped a thread at a fault is told only while it stays stopped there; see OP_THREAD_FAULT. */
+    if ((t->flags & THREAD_FAULTED) && t->state != THREAD_STOPPED) {
+        fail("thread runs with a fault to tell", v2p(t), t->state, 0);
     }
     /*
      * A thread's units are a leaf of the tree, which the tree check reads the links of, and it alone earns them.

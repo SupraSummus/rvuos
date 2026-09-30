@@ -762,8 +762,9 @@ What happens next is the watcher's to decide, with the operations there are:
 `OP_THREAD_RESUME` runs the faulting instruction again, after installing the region it reached for, say;
 `OP_THREAD_CONFIGURE` first starts it afresh;
 taking its process ends it, and taking its units, which a stopped thread still earns, frees them.
-The bits say which thread faulted, and only the log says why;
-`DESIGN.md`, open decision 21.
+The bits say which thread faulted, and `OP_THREAD_FAULT` says why while it stays stopped there.
+A watcher that emulates the instruction writes the thread's registers with `OP_THREAD_WRITE_REG`,
+the program counter past the instruction among them, and resumes it; section 6.8.
 
 ### 5.7 Notifications
 
@@ -1313,7 +1314,8 @@ Clearing an empty slot succeeds.
 
 ### 6.8 Operations on `Thread`
 
-All need `RIGHT_W` on the thread, and the first two a stopped thread (`KERR_STATE`).
+All need `RIGHT_W` on the thread,
+and `OP_THREAD_CONFIGURE`, `OP_THREAD_RESUME`, `OP_THREAD_READ_REG` and `OP_THREAD_WRITE_REG` a stopped thread (`KERR_STATE`).
 
 **`OP_THREAD_CONFIGURE` (12).**
 `a1` = program counter, `a2` = stack pointer.
@@ -1324,7 +1326,7 @@ one without bit 0 starts the thread in a fault.
 **`OP_THREAD_RESUME` (13).**
 Makes the thread ready.
 It runs once it is bound to units, or to spare time.
-A thread that faulted runs the faulting instruction again.
+A thread that faulted runs the faulting instruction again, unless `OP_THREAD_WRITE_REG` moved its program counter.
 `KERR_STATE` too once the thread's process was taken, section 5.6.
 
 **`OP_THREAD_WATCH` (31).**
@@ -1333,6 +1335,38 @@ A thread that faulted runs the faulting instruction again.
 Replaces the watch the thread had.
 `a2` = 0 clears the watch and ignores `a1`.
 See section 5.6.
+
+**`OP_THREAD_FAULT` (33).**
+What stopped a thread that faulted:
+`a1` = the cause, `a2` = the program counter, `a3` = the address, `a4` = the status.
+
+| | RISC-V | ARMv7-M |
+|---|---|---|
+| `a1`, the cause | `mcause` | the exception number |
+| `a2`, the program counter | `mepc` | the pc, with bit 0 set for Thumb |
+| `a3`, the address | `mtval`: on an access fault the address reached for, on RP2350 always zero | `MMFAR` or `BFAR` while `CFSR` says it is valid, else zero |
+| `a4`, the status | zero | `CFSR` |
+
+The program counter is where a resume goes on, as `OP_THREAD_READ_REG` reads it.
+On QEMU's Cortex-M3 a `bkpt` arrives as a HardFault, exception 3, with a status of zero.
+A status with `MSTKERR` or `STKERR` says the core could not stack the thread's registers,
+so `r0` to `r3`, `r12`, `lr`, the pc and `xpsr` hold what its last trap left.
+`KERR_STATE` unless the thread is stopped where it faulted:
+a resume or a configure since, or no fault at all, leaves nothing to tell.
+
+**`OP_THREAD_READ_REG` (34).**
+`a1` = the register: `x0` to `x31` on RISC-V, where `x0` reads zero, `r0` to `r14` on ARMv7-M,
+or `THREAD_REG_PC` (32) for the program counter, which on ARM carries bit 0 for Thumb, as `OP_THREAD_CONFIGURE` takes it.
+Returns `a1` = its value.
+`KERR_INVALID_ARG` for a number that names no register.
+
+**`OP_THREAD_WRITE_REG` (35).**
+`a1` = the register, as for `OP_THREAD_READ_REG`; a write to `x0` changes nothing.
+`a2` = the value.
+A pc written is taken as `OP_THREAD_CONFIGURE` takes it, and on ARM leaves an IT block, keeping the flags.
+The thread stays stopped where it faulted, and `OP_THREAD_FAULT` tells of it until the resume.
+While tracing, the thread can no longer run, as after `OP_THREAD_CONFIGURE`; section 9.
+`KERR_INVALID_ARG` for a number that names no register.
 
 ### 6.9 Operations on `Notification`
 
@@ -1462,8 +1496,11 @@ only a wait, the tick, a fault, section 5.6, or a revoke that takes its own proc
 | 30 | `OP_UNTYPED_SPLIT` | `Untyped` |
 | 31 | `OP_THREAD_WATCH` | `Thread` |
 | 32 | `OP_DEBUG_PREEMPT` | `Debug` |
+| 33 | `OP_THREAD_FAULT` | `Thread` |
+| 34 | `OP_THREAD_READ_REG` | `Thread` |
+| 35 | `OP_THREAD_WRITE_REG` | `Thread` |
 
-`OP_COUNT` is 33, one above the highest code; 16 is unused.
+`OP_COUNT` is 36, one above the highest code; 16 is unused.
 
 ## 7. What the root task starts with
 
@@ -1702,7 +1739,8 @@ only `OP_DEBUG_TICK` does,
 so that the host build can reproduce the transcript.
 The clock that charges turns is then the tick count alone:
 a turn with time pays a whole tick at each `OP_DEBUG_TICK` and nothing at a wait.
-A thread whose program counter was set while tracing was on
+A thread whose program counter was set while tracing was on,
+or any of whose registers `OP_THREAD_WRITE_REG` wrote then,
 cannot be run under tracing; the kernel halts with code 6 instead.
 
 **The self-check** (`kernel/selfcheck.c`) verifies, among other things:
@@ -1770,10 +1808,8 @@ and `tests/mutants/` holds one planted bug per invariant.
 These are documented gaps, not surprises;
 `TODO.md` carries the items and `DESIGN.md` the open decisions.
 
-- **A fault says which thread, not why.**
-  A watch's bits name the thread that faulted,
-  and the cause, `mepc` and `mtval` reach only the kernel's log;
-  `DESIGN.md`, open decision 21.
+- **A watcher on ARMv7-M cannot set the flags**, nor step a thread past an instruction inside an IT block;
+  `DESIGN.md`, open decision 23.
 - **No priorities and no yield.**
   Round-robin on a tick, threads with time before threads on spare time,
   is the whole policy, and units promise their part of the processor and a turn within 64 ticks, no more;
