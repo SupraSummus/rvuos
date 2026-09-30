@@ -300,7 +300,7 @@ make             # build/qemu/kernel-init.elf and build/qemu/kernel-fuzzdrv.elf
 make run         # boot the demo root task under QEMU
 make test        # boot under QEMU and check the transcript
 make host-test   # replay the fuzz corpus on the host build with invariants on
-make fuzz        # fuzz the system call surface for FUZZ_TIME seconds
+make fuzz        # fuzz the system call surface for FUZZ_TIME seconds in FUZZ_JOBS processes
 make qemu-replay # replay the corpus on QEMU and compare with the host
 make mutants     # plant each bug under tests/mutants/ and require the checks to catch it
 make check       # test, host-test and qemu-replay; run before committing

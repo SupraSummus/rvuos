@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "rvuos/abi.h"
+#include "kernel.h"
 #include "paddr.h"
 #include "pmp.h"
 #include "timer.h"
@@ -432,24 +433,28 @@ bool pool_fits(const struct pool *pool, size_t size);
 /* Allocate a zeroed object of the given type and size. NULL if exhausted, or larger than OBJ_MAX_SIZE. */
 void *pool_alloc(struct pool *pool, uint8_t type, size_t size);
 
-/* Byte length of an object, from its header. */
-size_t obj_size(const struct obj_header *obj);
-
-/* Walk one pool's objects, the descriptor excluded. Returns NULL at the end. */
-struct obj_header *pool_first(struct pool *pool);
-struct obj_header *pool_next(struct pool *pool, struct obj_header *obj);
-
-/*
- * Walk every object in every pool as one sequence,
- * pool descriptors included, since a descriptor is an object like any other.
- * Only the self-check and the host harness walk it; no system call does.
- * An object's pool is its own header, so the walk needs no cursor.
- */
-struct obj_header *object_first(void);
-struct obj_header *object_next(struct obj_header *obj);
-
-/* The live object at a physical address, or NULL. */
-struct obj_header *object_find(paddr_t p);
+/* Byte length of an object, from its header; inline, so the self-check's walks have a copy of their own. */
+static inline size_t obj_size(const struct obj_header *obj)
+{
+    switch (obj->type) {
+    case CAP_POOL:
+        return sizeof(struct pool);
+    case CAP_CAPTABLE: {
+        const struct captable *t = (const struct captable *)obj;
+        return sizeof(*t) + t->nslots * sizeof(struct cap);
+    }
+    case CAP_PROCESS:
+        return sizeof(struct process);
+    case CAP_THREAD:
+        return sizeof(struct thread);
+    case CAP_NOTIFICATION:
+        return sizeof(struct notification);
+    case CAP_IRQ:
+        return sizeof(struct irq);
+    default:
+        kpanic("object of unknown type in pool");
+    }
+}
 
 /* cap.c */
 
@@ -821,6 +826,22 @@ void selfcheck_run(void);
 
 /* Set by OP_DEBUG_TRACE: print each system call and run the self-check after it. */
 extern bool debug_trace;
+
+/* Walk one pool's objects, the descriptor excluded. Returns NULL at the end. */
+struct obj_header *pool_first(struct pool *pool);
+struct obj_header *pool_next(struct pool *pool, struct obj_header *obj);
+
+/*
+ * Walk every object in every pool as one sequence,
+ * pool descriptors included, since a descriptor is an object like any other.
+ * Only the self-check and the host harness walk it; no system call does.
+ * An object's pool is its own header, so the walk needs no cursor.
+ */
+struct obj_header *object_first(void);
+struct obj_header *object_next(struct obj_header *obj);
+
+/* The live object at a physical address, or NULL. */
+struct obj_header *object_find(paddr_t p);
 
 /* boot.c */
 

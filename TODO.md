@@ -55,6 +55,17 @@ Open work only; an item leaves this file in the commit that finishes it.
   a stop armed at the right place, a pool dying and an allocation from another thread
   are three records the mutator must line up.
   A mutation that inserts the three together is untried.
+- The self-check is most of what a fuzzing run costs, and grows with the square of what the machine holds:
+  `check_node` walks each node's ring up to its parent and the parent's ring back to it,
+  and `check_nesting` walks every node for every Untyped and every pool.
+  Walking each ring once from its parent, and holding the rings' lengths to the nodes that are not roots,
+  would make the tree check linear,
+  but a broken ring would give other reports, and the mutants' headers would change with them.
+- An input of one record costs about a fifth of what the average input does:
+  every input boots the kernel and makes the 48 calls of the prologue in `rvuos/replay.h`,
+  each checked by `host/history.c`.
+  A snapshot of the state after the prologue would spare that,
+  if it held every global `host_boot` resets and the ASan poison over RAM.
 - `fuzz-work` counts the loop annotations' claims only where the corpus reaches.
   The host's `irq_claim` never returns a line,
   so nothing counts the claims on the way from an interrupt through `sched_claim_interrupts`,

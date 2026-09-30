@@ -1883,8 +1883,12 @@ The coverage that guides it is the kernel's alone:
 the self-check and the harness walk every object after every call,
 so their edges would reward an input for the objects it leaves rather than for what the kernel did,
 and the comparisons they traced for the fuzzer took most of a run.
+So the walks over every object, which no system call takes, lie in `kernel/selfcheck.c`,
+and what of the kernel's they call on every object, `obj_size` and `obj_nodes`, is inline,
+so each has a copy of its own outside the coverage.
 Nearly every edge of the kernel is reached,
 so `make fuzz` lets the values its comparisons meet guide the search as well.
+It fuzzes in a process per processor, each taking up what the others add to one working copy of the corpus.
 The inputs replayed are checked in under `tests/seeds` and `tests/corpus`.
 `make mutants` and `make qemu-replay` replay them in one harness process,
 each input from RAM as at power-up and ending at its first report, as if it ran alone,
