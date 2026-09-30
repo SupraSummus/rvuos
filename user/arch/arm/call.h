@@ -20,6 +20,9 @@
 #define RV_A7 "r12"
 #define RV_CALL "svc #0"
 
+/* a0, the first argument of a function, as OP_THREAD_READ_REG and OP_THREAD_WRITE_REG number it: r0. */
+#define RV_REG_A0 0
+
 /* A breakpoint, which faults: the thread stops there and its watch hears it. */
 #define rv_breakpoint() __asm__ volatile("bkpt #0")
 

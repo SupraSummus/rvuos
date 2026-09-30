@@ -176,6 +176,12 @@ enum {
  * see DESIGN.md, "Verification".
  */
 #define THREAD_UNTRACED 0x1
+/*
+ * A thread stopped where it faulted, whose frame holds what the fault left, until a resume or a configure;
+ * see OP_THREAD_FAULT.
+ * A new thread's frame is zero, which is a cause too, so only this tells the two apart.
+ */
+#define THREAD_FAULTED 0x2
 
 /* A thread holds its process as a process holds its table, so the two may lie in different pools. */
 struct thread {

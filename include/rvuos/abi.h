@@ -294,7 +294,8 @@
  * Thread (RIGHT_W): make a stopped thread ready.
  * It runs once it is bound to units of time, see OP_TIME_BIND,
  * when its turn comes.
- * A thread that faulted goes on at the instruction that faulted, which runs again.
+ * A thread that faulted goes on at the instruction that faulted, which runs again,
+ * unless OP_THREAD_WRITE_REG moved its program counter.
  * Fails with KERR_STATE unless the thread is stopped,
  * and once its process was taken, see OP_POOL_ALLOC: it has nothing to run in.
  */
@@ -307,13 +308,44 @@
  * stops the thread at the instruction that faulted, with its registers as they were,
  * and signals the bits as OP_NOTIFY_SIGNAL would; nothing else stops, the machine goes on.
  * A thread without a watch stops all the same, and nobody hears.
- * The kernel's log says what the fault was.
+ * The kernel's log says what the fault was, and so does OP_THREAD_FAULT.
  * It replaces the watch before and stays, so a thread that faults again signals again.
  * The thread holds the notification by a capability derived from the one named,
  * so revoking below that capability, or destroying the notification's pool, clears the watch.
  * See DESIGN.md, "Faults".
  */
 #define OP_THREAD_WATCH 31
+/*
+ * Thread (RIGHT_W): what stopped a thread that faulted.
+ * Returns a1 = the cause, a2 = the program counter, a3 = the address, a4 = the status:
+ * on RISC-V mcause, mepc, mtval and zero,
+ * on ARMv7-M the exception number, the pc, the address MMFAR or BFAR named, else zero, and CFSR.
+ * The program counter is where a resume goes on, as OP_THREAD_READ_REG reads it.
+ * Fails with KERR_STATE unless the thread is stopped where it faulted:
+ * a resume or a configure since, or no fault at all, leaves nothing to tell.
+ * See DESIGN.md, "Faults".
+ */
+#define OP_THREAD_FAULT 33
+/*
+ * Thread (RIGHT_W): read one register of a stopped thread.
+ * a1 = the register: x0 to x31 on RISC-V, where x0 reads zero, r0 to r14 on ARMv7-M,
+ * or THREAD_REG_PC for the program counter, which on ARM carries bit 0 for Thumb, as OP_THREAD_CONFIGURE takes it.
+ * Returns a1 = its value.
+ * Fails with KERR_STATE unless the thread is stopped,
+ * and with KERR_INVALID_ARG for a number that names no register.
+ */
+#define OP_THREAD_READ_REG 34
+/*
+ * Thread (RIGHT_W): write one register of a stopped thread.
+ * a1 = the register, as for OP_THREAD_READ_REG; a write to x0 changes nothing. a2 = the value.
+ * A pc written is taken as OP_THREAD_CONFIGURE takes it, and on ARM leaves an IT block, keeping the flags.
+ * A watcher emulates the instruction a thread faulted at by writing what it would have done, the pc past it among that,
+ * and resuming the thread, which OP_THREAD_FAULT tells of until then.
+ * Under tracing the thread cannot run any more, as after OP_THREAD_CONFIGURE; see DESIGN.md, "Verification".
+ * Fails as OP_THREAD_READ_REG does.
+ */
+#define OP_THREAD_WRITE_REG 35
+#define THREAD_REG_PC 32
 
 /*
  * Notification (RIGHT_W): set bits. a1 = the bits to set, which may not be zero.
@@ -421,7 +453,7 @@
 #define OP_TIME_BIND 29
 
 /* One above the highest operation code; the fuzzer's mutator draws below it. */
-#define OP_COUNT 33
+#define OP_COUNT 36
 
 /*
  * Capability slots the kernel fills in the root task's table at boot.

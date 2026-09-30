@@ -94,7 +94,7 @@ grep -q 'successor: the user-mode csrs set back: ok' "$log" \
 grep -q 'root: handover ok' "$log" \
     || fail "a successor given everything the root task held could not destroy the root task and take its place"
 grep -q 'root: fault ok' "$log" \
-    || fail "a fault stopped more than its thread, its watch did not hear it, or a resume did not run the load again"
+    || fail "a fault stopped more than its thread, its watch did not hear it, a resume did not run the load again, or its registers did not move it on"
 # The logger carried the kernel's banner and the root task's output to the UART itself,
 # one byte per interrupt, before the halt wrote the log out.
 # The fault comes right after the last lines, so those the halt may be first to carry;
@@ -113,6 +113,12 @@ if [ "$board_arch" = arm ]; then load_fault="exception=0x00000004 cfsr=0x0000008
 else load_fault="mcause=0x00000005 mepc=0x........ mtval=$addr"; fi
 grep -q "$load_fault" "$log" \
     || fail "fault was not a load access fault on the removed region from user code"
+# OP_THREAD_FAULT told the successor what the kernel reported, the pc with its Thumb bit on ARM.
+at=$(grep -o "$load_fault" "$log" | head -1 | sed 's/.*pc=\(0x[0-9a-f]\{8\}\).*/\1/')
+if [ "$board_arch" = arm ]; then told="cause=0x00000004 pc=$(printf '0x%08x' $((at | 1))) addr=$addr status=0x00000082"
+else told="cause=0x00000005 pc=$at addr=$addr status=0x00000000"; fi
+grep -q "the prober's fault: $told" "$log" \
+    || fail "OP_THREAD_FAULT did not tell the load access fault the kernel reported"
 grep -q ': FAILED' "$log" && fail "a step failed"
 
 echo "PASS"

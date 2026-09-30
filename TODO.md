@@ -155,7 +155,7 @@ Open work only; an item leaves this file in the commit that finishes it.
   see `user/escape-*.c` and `tests/escape.sh`.
   Since a fault stops only its thread, one root task could run every scenario in a thread of its own
   and hear each fault through its watch, one boot for the suite;
-  it would read the cause from the log, or through an operation open decision 21 leaves out.
+  it would read the cause through `OP_THREAD_FAULT`.
 - Escape-attempt suite: a store to a device the kernel keeps, such as the timer's `mtimecmp`.
   On the ESP32-C6 the kernel turns the access permission management units off,
   so PMP alone keeps user mode off the peripherals, and no scenario reaches one.
