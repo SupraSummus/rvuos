@@ -40,8 +40,11 @@
 #define XOSC_ENABLE   (0xfabu << 12)
 #define XOSC_1_15MHZ  0xaa0u
 #define XOSC_STABLE   (1u << 31)
-/* About a millisecond of the crystal, in units of 256 of its cycles. */
-#define XOSC_DELAY    47u
+/*
+ * Six milliseconds of the crystal, in units of 256 of its cycles, as the pico-sdk waits for slow-starting ones:
+ * STABLE says only that the count ran out.
+ */
+#define XOSC_DELAY    (6u * 47u)
 
 #define PLL_SYS_BASE  0x40050000u
 #define PLL_USB_BASE  0x40058000u
@@ -110,7 +113,7 @@ static void tick_start(uint32_t gen)
 
 static void clocks_init(void)
 {
-    /* A watchdog reboot leaves the crystal running, and its range is not changed under it. */
+    /* The crystal may be running already, and its range is not changed under it. */
     if ((REG(XOSC_STATUS) & XOSC_STABLE) == 0) {
         REG(XOSC_CTRL) = XOSC_1_15MHZ;
         REG(XOSC_STARTUP) = XOSC_DELAY;
@@ -119,14 +122,19 @@ static void clocks_init(void)
         }
     }
 
-    /* clk_sys leaves its auxiliary mux for clk_ref while the PLL under it changes. */
+    /*
+     * clk_sys leaves its auxiliary mux for clk_ref while the PLL under it changes.
+     * clk_ref leaves the ROSC before its divider drops to one:
+     * the bootrom runs the ROSC four times faster and at a random frequency, with a divider of four behind it,
+     * and dropping the divider first ran clk_ref and clk_sys that fast for a moment, which now and then hung the chip.
+     */
     REG(CLK_SYS_CTRL) = 0;
     while (REG(CLK_SYS_SELECTED) != 1u) {
     }
-    REG(CLK_REF_DIV) = CLK_DIV_ONE;
     REG(CLK_REF_CTRL) = CLK_REF_SRC_XOSC;
     while (REG(CLK_REF_SELECTED) != 1u << CLK_REF_SRC_XOSC) {
     }
+    REG(CLK_REF_DIV) = CLK_DIV_ONE;
 
     unreset(RESET_PLL_SYS | RESET_PLL_USB);
     pll_start(PLL_SYS_BASE, 125, 5, 2); /* 1500 MHz / 10 = 150 MHz */

@@ -4,7 +4,8 @@
 The chip must be in its BOOTSEL mode, as it is when plugged in with BOOTSEL held,
 after the last image this ran has halted and been read,
 or seventeen seconds after one that hung, when its watchdog reboots it there.
-The bootrom's PICOBOOT interface takes the ELF's segments into SRAM over USB
+The bootrom's PICOBOOT interface takes the ELF's segments into SRAM over USB,
+which this reads back and checks every command's status,
 and reboots into them on the RISC-V cores, so nothing is written to flash.
 The kernel has no serial port while it runs; its halt makes one of the chip's USB controller,
 and writes out the root task's console and the kernel's log;
@@ -44,9 +45,14 @@ RAM_SEARCH = 0x80000
 
 PICOBOOT_MAGIC = 0x431FD10B
 PC_EXCLUSIVE_ACCESS = 0x01
+PC_READ = 0x84
 PC_WRITE = 0x05
 PC_REBOOT2 = 0x0A
+PC_GET_INFO = 0x8B
 PC_INTERFACE_RESET = 0x41
+PC_COMMAND_STATUS = 0x42
+GET_INFO_SYS = 1
+SYS_INFO_CPU_INFO = 0x4
 EXCLUSIVE = 1
 REBOOT2_RAM_IMAGE = 0x3
 REBOOT2_TO_RISCV = 0x20
@@ -151,29 +157,58 @@ class Picoboot:
         self.token = 1
         dev.ctrl_transfer(0x41, PC_INTERFACE_RESET, 0, self.intf.bInterfaceNumber, None)
 
-    def command(self, cmd, args=b"", data=b""):
-        packet = struct.pack("<IIBBHI", PICOBOOT_MAGIC, self.token, cmd, len(args), 0, len(data))
+    def command(self, cmd, args=b"", data=b"", read=0, check=True):
+        """Send a command with data out or read data in, and fail unless the bootrom says it succeeded."""
+        packet = struct.pack("<IIBBHI", PICOBOOT_MAGIC, self.token, cmd, len(args), 0, len(data) or read)
         packet += args.ljust(16, b"\0")
-        self.token += 1
         self.out.write(packet)
-        if data:
-            self.out.write(data, timeout=10000)
-        self.inp.read(64, timeout=10000)  # the empty packet that says the command is done
+        if read:
+            got = bytes(self.inp.read(read, timeout=10000))
+            self.out.write(b"")  # the empty packet that acknowledges data in
+        else:
+            got = b""
+            if data:
+                self.out.write(data, timeout=10000)
+            self.inp.read(64, timeout=10000)  # the empty packet that says the command is done
+        if not check:
+            return got
+        status = bytes(self.dev.ctrl_transfer(0xC1, PC_COMMAND_STATUS, 0, self.intf.bInterfaceNumber, 16))
+        token, code = struct.unpack_from("<II", status)
+        if token != self.token or code != 0:
+            sys.exit(f"PICOBOOT command {cmd:#04x} failed: status {code}, token {token} of {self.token}")
+        self.token += 1
+        return got
 
     def write(self, addr, data):
         self.command(PC_WRITE, struct.pack("<II", addr, len(data)), data)
 
+    def read(self, addr, size):
+        return self.command(PC_READ, struct.pack("<II", addr, size), read=size)
+
+    def cores(self):
+        """The cores the bootrom runs on now: arm or riscv."""
+        info = self.command(PC_GET_INFO, struct.pack("<BBHIII", GET_INFO_SYS, 0, 0, SYS_INFO_CPU_INFO, 0, 0), read=16)
+        return "riscv" if struct.unpack_from("<II", info)[1] else "arm"
+
     def reboot_ram(self, base, size):
         args = struct.pack("<IIII", REBOOT2_RAM_IMAGE | REBOOT2_TO_RISCV, 10, base, size)
-        self.command(PC_REBOOT2, args)
+        self.command(PC_REBOOT2, args, check=False)  # the chip is gone before a status could be asked for
 
 
 def load(path):
     boot = Picoboot(to_bootsel())
     boot.command(PC_EXCLUSIVE_ACCESS, bytes([EXCLUSIVE]))
-    for addr, data in elf_segments(path):
+    say(f"the bootrom runs on the {boot.cores()} cores")
+    segments = elf_segments(path)
+    for addr, data in segments:
         say(f"writing {len(data)} bytes at {addr:#010x}")
         boot.write(addr, data)
+    for addr, data in segments:
+        got = boot.read(addr, len(data))
+        if got != data:
+            bad = next(i for i in range(len(data)) if i >= len(got) or got[i] != data[i])
+            sys.exit(f"the {len(data)} bytes at {addr:#010x} read back {len(got)} bytes, differing from {addr + bad:#010x}; "
+                     "not rebooting into them")
     boot.reboot_ram(RAM_BASE, RAM_SEARCH)
     usb.util.dispose_resources(boot.dev)
 

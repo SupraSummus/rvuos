@@ -1492,6 +1492,13 @@ the hardwired PMP entries leave every peripheral and the Non-secure bank of SIO 
 so a peripheral ACCESSCTRL opens is open to every process, frame or no frame.
 TIMER0 is opened, for the clock; see `TODO.md`.
 
+The bootrom leaves the ROSC four times faster than at reset, at a random frequency,
+behind a divider of four on `clk_ref`, and the kernel switches `clk_ref` to the crystal before dropping the divider;
+dropping it first ran `clk_ref` and `clk_sys` that fast for a moment,
+which hung the chip on about one boot in five,
+so that no watchdog brought it back, the one that counts `clk_ref`'s ticks among them.
+The crystal gets six milliseconds to start, as the pico-sdk gives it.
+
 ## Architectures
 
 An architecture is the files of `kernel/arch/<arch>/` and `user/arch/<arch>/`,

@@ -34,7 +34,12 @@ Open work only; an item leaves this file in the commit that finishes it.
 - The logger drives no device here: its console is RAM, which only the halt carries out.
   A root task with a driver for the USB controller would let the log out while the machine runs.
 - Find out whether writing a hardwired entry's address moves its region.
-  The probe used to write them, and some runs hung then; it no longer does.
+  The probe used to write them, and some runs hung then,
+  likely from the clock switch `clocks_init` made in the wrong order until it was fixed.
+- The watchdog armed at boot resets CLOCKS without SYSCFG's `AUXCTRL` set,
+  which the datasheet asks for when POWMAN runs from `clk_ref`, so a hang it rescues may corrupt POWMAN;
+  the halt's reboot sets it, as the bootrom's does.
+  Setting it at boot keeps POWMAN's watchdog-reset input asserted for the whole run, which is untried.
 - Boot from flash, feed the replay corpus to the board, and start core 1, which waits in the bootrom.
 
 ## ARM
