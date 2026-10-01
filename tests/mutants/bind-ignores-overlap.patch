@@ -2,7 +2,7 @@ A bind takes units another thread earns.
 The two threads would both earn them, and the processor would be promised more than once over;
 a unit is earned by the one thread it names, and every unit a thread is bound to names it.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
 Report: a unit a thread is bound to names another
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c

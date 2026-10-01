@@ -1,0 +1,21 @@
+The fence goes into the entry past the last the image may use,
+the first the core hardwires on RP2350, which takes no write,
+so the hardwired entries grant user mode every right over the peripherals
+to a process that holds no frame for them.
+
+Caught-by: fuzz-rp2350
+Report: PMP CSRs grant rights the slots do not
+
+diff --git a/kernel/process.c b/kernel/process.c
+--- a/kernel/process.c
++++ b/kernel/process.c
+@@ -17,8 +17,8 @@
+ void process_fence(void)
+ {
+     if (pmp_entry_end > pmp_entry_count) {
+-        pmp_entry_count--;
+         pmp_set(pmp_entry_count, PMP_NAPOT_ALL, PMP_A_NAPOT);
++        pmp_entry_count--;
+     }
+ }
+ 

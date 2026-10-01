@@ -1,7 +1,7 @@
 A destroy that leaves a thread blocked on a notification it took away.
 The thread waits on an object that is no longer live.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
 Report: thread waits on something that is not a notification
 
 diff --git a/kernel/sched.c b/kernel/sched.c

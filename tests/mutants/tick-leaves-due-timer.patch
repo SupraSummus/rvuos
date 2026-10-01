@@ -2,7 +2,7 @@ A timer line that fires stays armed.
 It would signal again on every later tick;
 after a tick no Irq armed on a timer line is due.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
 Report: armed timer line is due
 
 diff --git a/kernel/sched.c b/kernel/sched.c

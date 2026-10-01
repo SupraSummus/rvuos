@@ -7,7 +7,7 @@ a table's slots, a thread's links and a process's regions start as garbage,
 so the first table the replay's prologue allocates holds capabilities
 that nothing its caller held covers.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
 Report: a call made a capability no capability of its caller covers
 
 diff --git a/kernel/boot.c b/kernel/boot.c

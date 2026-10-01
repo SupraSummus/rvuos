@@ -2,7 +2,7 @@ A bind needs no right on the units.
 A capability narrowed to name units without the right to use them would bind all the same;
 a thread's units were bound through a capability with the right to bind.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
 Report: thread's units are malformed
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c

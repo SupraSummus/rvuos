@@ -2,7 +2,7 @@ A thread begins its turn with its account where the kernel last looked at it.
 The ticks it waited would be counted as ticks of its turn, earned and spent at once;
 the thread whose turn it is has its account up to the count.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
 Report: the ticks of a turn were not charged to its thread
 
 diff --git a/kernel/sched.c b/kernel/sched.c

@@ -18,6 +18,7 @@ void kmain(void)
     kputs("rvuos: " ARCH_KERNEL_MODE " up\n");
 
     pmp_init();
+    process_fence();
     kputs("rvuos: " ARCH_REGIONS " ");
     kput_hex(pmp_entry_count);
     kputs(" grain ");

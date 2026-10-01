@@ -2,7 +2,7 @@ A carve of lines or units takes any range, not only one within the invoked capab
 It would hand out lines or units the carver does not hold, or ones there are not;
 a capability to lines or units names ones there are, within its parent's.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
 Report: time capability outside the units there are
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c

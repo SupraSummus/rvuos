@@ -2,7 +2,7 @@ The fill that turns tracing on leaves the turn owing from where it was in the ti
 Under tracing the clock is the tick count, so QEMU would charge the first traced tick less than the host;
 a traced turn is charged from the tick.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
 Report: a traced turn is charged from within a tick
 
 diff --git a/kernel/sched.c b/kernel/sched.c

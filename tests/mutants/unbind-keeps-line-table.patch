@@ -2,7 +2,7 @@ A pool destroy takes its Irqs but leaves them in the line table.
 The next interrupt or bind on the line would find memory that is no longer an Irq;
 the line table records exactly the Irqs that are bound.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work test qemu-replay
 Report: line table names an irq that is gone
 
 diff --git a/kernel/sched.c b/kernel/sched.c

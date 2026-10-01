@@ -12,11 +12,11 @@
 #
 # Below the prose, the header says what the checks do on the mutant:
 #
-#   Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+#   Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
 #   Report: the count of armed sources is wrong
 #
 # Caught-by is exactly the checks that catch it, in the order they run:
-# stack-depth loop-bounds fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay.
+# stack-depth loop-bounds fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work test qemu-replay.
 # Report is exactly the invariant reports the seeds give on the host harnesses,
 # one per line with the numbers taken out;
 # the corpus changes with every minimisation, so its reports are left out.
@@ -44,7 +44,7 @@ set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 logs=$root/build/mutants
-harnesses="fuzz fuzz-pmp8 fuzz-grain32 fuzz-work"
+harnesses="fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work"
 # The line a harness prints after each input it replays isolated; HOST_INPUT_END in host/harness.h.
 input_end="isolated: end of input"
 

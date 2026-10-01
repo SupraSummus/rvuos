@@ -3,7 +3,7 @@ so an Untyped covers a pool that does not lie below it,
 and revoking below that Untyped would not reach the root task's objects:
 the demo's successor cannot end the root task.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work test qemu-replay
 Report: memory that may hold kernel objects overlaps a node not above or below it
 
 diff --git a/kernel/boot.c b/kernel/boot.c

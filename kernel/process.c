@@ -7,6 +7,21 @@
 #include "object.h"
 #include "pmp.h"
 
+/*
+ * The lowest entry that matches an access decides,
+ * so where entries the core hardwires grant user mode a right, as RP2350's do,
+ * the last entry the image could use becomes the fence, the whole address space with no right,
+ * and a device is a process's only through a frame.
+ * It is written once; process_activate stops below it.
+ */
+void process_fence(void)
+{
+    if (pmp_entry_end > pmp_entry_count) {
+        pmp_entry_count--;
+        pmp_set(pmp_entry_count, PMP_NAPOT_ALL, PMP_A_NAPOT);
+    }
+}
+
 void process_activate(struct process *proc)
 {
     const struct pmp_image *img = &proc->pmp;

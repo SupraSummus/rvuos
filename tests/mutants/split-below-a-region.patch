@@ -1,7 +1,7 @@
 A split makes halves of any size,
 so an Untyped smaller than the smallest region makes a frame no PMP entry describes.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
 Report: untyped outside granted memory, or not a block
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c

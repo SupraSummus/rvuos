@@ -3,7 +3,7 @@ A ready thread would never get the processor, and one moved to fewer units would
 every ready thread but the running one that may run waits on the queue its account and binding say,
 and no account holds more than its cap.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work test qemu-replay
 Report: thread's account holds more than its cap
 
 diff --git a/kernel/sched.c b/kernel/sched.c

@@ -1,7 +1,7 @@
 A retype makes a frame with every right rather than the Untyped's,
 so a borrower lent read and write gets execute as well.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
 Report: slot is not derived from its parent
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c

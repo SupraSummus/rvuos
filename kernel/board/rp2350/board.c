@@ -12,9 +12,9 @@
  *
  * User mode reaches a peripheral only where ACCESSCTRL lets it in, and at reset it lets it into few.
  * TIMER0 is opened for the clock.
- * On Hazard3 the hardwired PMP entries leave every peripheral to user mode,
- * so it is open to every process; see DESIGN.md, "Boards".
- * On the Cortex-M33 a thread reaches only what its regions hold, a peripheral as well as RAM.
+ * A process reaches it only through a frame besides, on either kind of core:
+ * on Hazard3 the fence shuts the hardwired PMP entries that would leave every peripheral to user mode,
+ * see process_fence, and on the Cortex-M33 a thread reaches only what its regions hold.
  * Hazard3's counters are shut to user mode, as on QEMU, so rdtime and rdcycle trap.
  */
 

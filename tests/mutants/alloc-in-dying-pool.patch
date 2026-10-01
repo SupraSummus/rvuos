@@ -1,7 +1,7 @@
 An allocation goes ahead in a pool whose destroy has begun,
 so a thread allocating between the destroy's steps keeps it from ending.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
 Report: a call built an object in a pool being destroyed
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c

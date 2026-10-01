@@ -1172,12 +1172,12 @@ void selfcheck_run(void)
         if (current->state != THREAD_READY) {
             fail("the running thread is not runnable", v2p(current), current->state, 0);
         }
-        /* The CSRs must carry exactly the current process's image. */
+        /* The CSRs, hardwired entries included, must grant exactly what the current process's slots do. */
         uint32_t addr[PMP_MAX_ENTRIES];
         uint8_t cfg[PMP_MAX_ENTRIES];
-        for (unsigned i = 0; i < pmp_entry_count; i++) {
+        for (unsigned i = 0; i < pmp_entry_end; i++) {
             pmp_get(i, &addr[i], &cfg[i]);
         }
-        check_pmp_image(thread_process(current), addr, cfg, pmp_entry_count, true);
+        check_pmp_image(thread_process(current), addr, cfg, pmp_entry_end, true);
     }
 }

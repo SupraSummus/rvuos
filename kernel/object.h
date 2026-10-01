@@ -814,6 +814,8 @@ int process_uninstall(struct process *proc, unsigned slot);
 /* Clear an installed region the tree has already let go of, and rebuild the process's PMP image. */
 void process_drop(struct cap *installed);
 
+/* Fence off, once at boot, the PMP entries the core hardwires open to user mode. */
+void process_fence(void);
 /* Load a process's PMP image into the CSRs. */
 void process_activate(struct process *proc);
 

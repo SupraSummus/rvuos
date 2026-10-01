@@ -21,6 +21,7 @@
 _Static_assert(PMP_GRAIN_MIN >= 32, "no MPU region is smaller than 32 bytes");
 
 unsigned pmp_entry_count;
+unsigned pmp_entry_end;
 uint32_t pmp_grain;
 
 #if !ARMV8M
@@ -177,6 +178,8 @@ void pmp_init(void)
         pmp_clear(i);
     }
     pmp_entry_count = regions < PMP_MAX_ENTRIES ? regions : PMP_MAX_ENTRIES;
+    /* The default memory map lets unprivileged code in nowhere, so nothing past the regions grants a thread a right. */
+    pmp_entry_end = pmp_entry_count;
     /* The MPU has no finer grain to probe for; its smallest region is the board's minimum. */
     pmp_grain = PMP_GRAIN_MIN;
 #if ARMV8M

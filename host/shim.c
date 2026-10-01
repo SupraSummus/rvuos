@@ -49,16 +49,32 @@ int host_halt_code;
 bool host_verbose;
 bool host_isolated;
 unsigned pmp_entry_count;
+unsigned pmp_entry_end;
 uint32_t pmp_grain;
 
-/* The simulated core's grain. QEMU has 4; the Makefile also builds with 32. */
+/* The simulated core's grain. QEMU has 4; the Makefile also builds RP2350's Hazard3, with 32. */
 #ifndef PMP_GRAIN
 #define PMP_GRAIN 4
 #endif
 _Static_assert(PMP_GRAIN >= 4 && (PMP_GRAIN & (PMP_GRAIN - 1)) == 0,
                "the PMP grain is a power of two of at least four bytes");
 
-/* The PMP CSRs as last written. */
+/*
+ * PMP_HARDWIRED builds RP2350's Hazard3: eight entries that take a write,
+ * then three that take none, NAPOT with every right over the boot ROM, the peripherals and SIO,
+ * as its pmpaddr8 to pmpaddr10 read.
+ */
+#ifdef PMP_HARDWIRED
+#define PMP_WRITABLE 8
+static const uint32_t pmp_hardwired_addr[] = { 0x01ffffff, 0x13ffffff, 0x35ffffff };
+#define PMP_HARDWIRED_COUNT (sizeof(pmp_hardwired_addr) / sizeof(pmp_hardwired_addr[0]))
+_Static_assert(PMP_WRITABLE + PMP_HARDWIRED_COUNT <= PMP_MAX_ENTRIES, "the hardwired entries lie within the CSRs");
+#else
+#define PMP_WRITABLE PMP_MAX_ENTRIES
+#define PMP_HARDWIRED_COUNT 0
+#endif
+
+/* The PMP CSRs as last written, the hardwired entries as the core holds them. */
 static uint32_t pmp_addr[PMP_MAX_ENTRIES];
 static uint8_t pmp_cfg[PMP_MAX_ENTRIES];
 
@@ -235,7 +251,14 @@ void pmp_init(void)
 {
     memset(pmp_addr, 0, sizeof(pmp_addr));
     memset(pmp_cfg, 0, sizeof(pmp_cfg));
-    pmp_entry_count = PMP_MAX_ENTRIES;
+#ifdef PMP_HARDWIRED
+    for (unsigned i = 0; i < PMP_HARDWIRED_COUNT; i++) {
+        pmp_addr[PMP_WRITABLE + i] = pmp_hardwired_addr[i];
+        pmp_cfg[PMP_WRITABLE + i] = PMP_A_NAPOT | PMP_R | PMP_W | PMP_X;
+    }
+#endif
+    pmp_entry_count = PMP_WRITABLE;
+    pmp_entry_end = PMP_WRITABLE + PMP_HARDWIRED_COUNT;
     pmp_grain = PMP_GRAIN;
 }
 
@@ -243,6 +266,9 @@ void pmp_set(unsigned idx, uint32_t addr, uint8_t cfg)
 {
     if (idx >= PMP_MAX_ENTRIES) {
         kpanic("pmp_set index out of range");
+    }
+    if (idx >= PMP_WRITABLE) {
+        return;
     }
     /*
      * Bits below the grain read as the specification says:
@@ -261,6 +287,9 @@ void pmp_clear(unsigned idx)
 {
     if (idx >= PMP_MAX_ENTRIES) {
         kpanic("pmp_clear index out of range");
+    }
+    if (idx >= PMP_WRITABLE) {
+        return;
     }
     pmp_addr[idx] = 0;
     pmp_cfg[idx] = 0;
@@ -325,6 +354,7 @@ struct thread *host_boot(void)
     preempt_countdown = 0;
     preempt_stopped = false;
     pmp_init();
+    process_fence();
     irq_init();
     klog_init();
 

@@ -3,7 +3,7 @@ so the memory goes back to the Untyped still holding its objects:
 other processes' tables, and the registers their threads saved.
 Memory crosses zeroed.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
 Report: memory left the kernel with an object not zeroed
 
 diff --git a/kernel/pool.c b/kernel/pool.c

@@ -3,7 +3,7 @@ but the caller cannot make the call again,
 so where the interrupt lands decides how far the revoke gets, and the host and QEMU part ways;
 a stopped call leaves its caller running and holding its table.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
 Report: a call stopped where its caller cannot make it again
 
 diff --git a/kernel/cap.c b/kernel/cap.c

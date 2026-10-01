@@ -2,7 +2,7 @@ Settling a thread leaves the timer where it was.
 A thread alone on the processor that loses its units would run on to a tick set for it alone;
 the timer is set past a tick only while no change since has brought that tick forward.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
 Report: the timer is set past a tick an unmarked change brought forward
 
 diff --git a/kernel/sched.c b/kernel/sched.c

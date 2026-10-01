@@ -303,10 +303,11 @@ and wraps after 71 minutes.
 A watchdog reboots the chip into BOOTSEL about seventeen seconds after boot, so no run lasts longer.
 
 On the RISC-V cores the tick is 1 kHz, on the microseconds of the RISC-V platform timer.
-The PMP has eight entries and a 32-byte grain, so no region is smaller than 32 bytes.
+The PMP holds seven regions, none smaller than 32 bytes:
+the core has eight entries, and the kernel spends one shutting the three it hardwires open to user mode.
 A fault reports `mtval` as zero, and a misaligned access raises a misaligned exception.
-User mode reaches a peripheral only where the chip's ACCESSCTRL lets it in,
-and then every process does, whatever frames it holds: TIMER0, for the clock, is the one opened.
+A program reaches a peripheral only through a frame, as it reaches RAM,
+and only where the chip's ACCESSCTRL lets user mode in too: TIMER0, for the clock, is the one opened.
 
 On the Cortex-M33 the tick is 1 kHz too, on TIMER0's counter, the one `BOOT_CAP_CLOCK` names.
 The MPU has eight regions, none smaller than 32 bytes, and a fault is reported as on `mps2-an385`.
@@ -637,7 +638,8 @@ Rules for installing a frame into a process:
 PMP budget.
 Every installed region is one NAPOT entry, so `n` regions cost `n` entries.
 An install beyond the core's entries fails with `KERR_LIMIT`,
-which with eight region slots happens only on a core with fewer than eight.
+which with eight region slots happens only on a core with fewer entries for regions,
+such as RP2350's Hazard3, with seven.
 
 An access must lie entirely within one PMP entry.
 Two regions that touch share a boundary

@@ -7,7 +7,7 @@ and the counting harness too, since the revoke it recurses into never asks intr_
 Where a pool below a node holds the node itself, the recursion destroys it first,
 and the node the revoke then clears is memory the pool gave back.
 
-Caught-by: stack-depth fuzz fuzz-pmp8 fuzz-grain32 fuzz-work
+Caught-by: stack-depth fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work
 Report: the kernel reached RAM outside its objects
 Report: the paid loop at kernel/cap.c took a second step without asking intr_pending
 

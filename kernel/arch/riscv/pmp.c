@@ -97,6 +97,7 @@ static uint8_t pmpcfg_board(uint8_t cfg)
 }
 
 unsigned pmp_entry_count;
+unsigned pmp_entry_end;
 uint32_t pmp_grain;
 
 void pmp_init(void)
@@ -151,6 +152,15 @@ void pmp_init(void)
         count++;
     }
     pmp_entry_count = count;
+
+    /* Every entry was turned off above, so one past the run still on is hardwired, as RP2350's three are. */
+    pmp_entry_end = count;
+    for (unsigned i = count; i < PMP_MAX_ENTRIES; i++) {
+        uint8_t cfg = pmpcfg_get_byte(i);
+        if ((cfg & 0x18) != PMP_A_OFF && (cfg & (PMP_R | PMP_W | PMP_X)) != 0) {
+            pmp_entry_end = i + 1;
+        }
+    }
 }
 
 void pmp_set(unsigned idx, uint32_t addr, uint8_t cfg)

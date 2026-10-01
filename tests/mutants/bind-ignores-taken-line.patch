@@ -3,7 +3,7 @@ The interrupt would reach whichever Irq the walk finds first
 and the other would stay armed on a line it never hears;
 at most one Irq is bound to any line.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work test qemu-replay
 Report: irq is missing from the line table
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c

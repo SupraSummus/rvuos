@@ -2,7 +2,7 @@ A bind leaves the line table empty.
 The interrupt would find no Irq to signal and the kernel would panic;
 the line table records exactly the Irqs that are bound.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work test qemu-replay
 Report: irq is missing from the line table
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c

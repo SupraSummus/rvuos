@@ -173,7 +173,7 @@ Consequences that shape the design:
   is rounded up or made of several blocks, one slot each.
   Open decision 8 records why this replaced TOR.
   The ESP32-C6 faults user fetches under a NAPOT entry for the whole address space,
-  which rvuos never writes, since no region is larger than RAM.
+  which rvuos writes only as RP2350's fence, below, since no region is larger than RAM.
 - **The smallest region is eight bytes, or the grain.**
   A platform rounds every PMP boundary to a grain of `2^(G+2)` bytes,
   one value per hart, and ignores the address bits below it.
@@ -199,12 +199,21 @@ Consequences that shape the design:
   and a store that faults may leave its first part written.
   The ESP32-C6 checks the second part for the wrong kind of access; see "Boards".
 - **The CSRs are WARL and may be hardwired.**
-  RP2350 fixes entries 8 to 10 to its ROM, peripheral and SIO ranges, with every right for user mode:
+  RP2350 fixes entries 8 to 10 to its ROM, peripheral and SIO ranges, with every right for user mode,
+  in the silicon, not by its bootrom:
   their configuration is read only, though their address seems to take a write.
   The probe at boot writes each entry's mode, with no rights, and then its address, and reads them back,
-  and the budget is the leading run of entries that take both, eight on RP2350.
+  and the budget is the leading run of entries that take both, eight on RP2350, less the fence where there is one.
   RP2350 also transposes R and X in every configuration field, erratum RP2350-E6,
   which `pmp.c` swaps on the way to the CSRs and back.
+- **What the core hardwires past the run is fenced off.**
+  The lowest-numbered entry that matches decides,
+  so where an entry past the run is still on after the probe and grants a right, as RP2350's three do,
+  the last entry of the run becomes the fence: NAPOT over the whole address space, with no right.
+  An access no region holds faults there before any hardwired entry sees it,
+  so a device is a process's only through a frame, and the budget is seven on RP2350.
+  `process_fence` writes it once at boot, and loading an image stops below it, so a switch costs nothing more.
+  The datasheet suggests the same; ACCESSCTRL, the other way it names, shuts a peripheral to every process at once.
 - **Context switch cost is the PMP reload.**
   Switching processes rewrites every `pmpaddr` and `pmpcfg` in use.
   Threads within one process share regions
@@ -1329,6 +1338,7 @@ The kernel:
    and on RP2350 its clocks set and a watchdog armed,
    and sets up its own stack and trap vector,
 2. discovers the PMP entry count and grain by writing the CSRs and reading them back,
+   and fences off the entries the core hardwires open to user mode, if it has any,
 3. carves its own static state out of a small fixed SRAM range,
 4. constructs the root process by hand, including a `KernelPool`
    in a block of the root task's own memory,
@@ -1491,10 +1501,11 @@ The halt times its port on TIMER0, which counts on either kind of core.
 Measured on an A2 chip: eight PMP entries before three hardwired ones,
 a 32-byte grain the probe does not see, `mtval` always zero,
 and misaligned accesses that raise misaligned exceptions rather than split.
-User mode reaches a peripheral only where ACCESSCTRL lets it in, which at reset it does for few;
-the hardwired PMP entries leave every peripheral and the Non-secure bank of SIO to user mode,
-so a peripheral ACCESSCTRL opens is open to every process, frame or no frame.
-TIMER0 is opened, for the clock; see `TODO.md`.
+The hardwired PMP entries leave every peripheral and the Non-secure bank of SIO to user mode,
+so the kernel fences them off, see "Physical Memory Protection",
+and a process reaches a peripheral only through a frame,
+and only where ACCESSCTRL lets user mode in too, which at reset it does for few.
+TIMER0 is opened, for the clock; `escape-store-clock` stores to it through no frame, and faults.
 
 On the Cortex-M33 the bootrom enters the image's vector table in the Secure state,
 which the kernel and every thread keep, see "Architectures",
@@ -1776,7 +1787,8 @@ and the region slots describe the same function
 from address to access rights:
 no byte is accessible with a right its slot does not grant,
 and every byte in a slot is accessible with the slot's rights.
-For the running process the same holds for the CSRs actually written.
+For the running process the same holds for the CSRs as the core holds them,
+the fence and the entries the core hardwires included.
 On the ESP32-C6 no process has a region it may write ending where one it may only read begins;
 see "Region slots".
 
@@ -2117,6 +2129,7 @@ reads a machine-mode CSR from user mode and runs `mret` there, mcause 2,
 loads a misaligned word across the end of the data region, mcause 5,
 stores one from a region it may write into one it may only read, mcause 7,
 stores into the kernel, mcause 7 too,
+stores to the clock's counter, a device, through no frame, mcause 7 as well,
 and loads the word just past a frame of the smallest region's size, mcause 5,
 which a kernel that took the grain for finer than it is lets through.
 A core that raises misaligned exceptions instead, as RP2350's does, reports 4 and 6 for the misaligned two.
@@ -2271,6 +2284,8 @@ QEMU's PMP may differ from a real core in Smepmp behaviour,
 and it has a four-byte grain, so a coarser grain is never seen there.
 The host shim models the grain instead, reading back the address bits below it as hardware would,
 and the corpus is replayed with a four-byte and a 32-byte grain.
+That harness, `fuzz-rp2350`, also holds RP2350's three hardwired entries past eight,
+so the self-check sees them open wherever the fence is missing.
 On the ESP32-C6, `make test BOARD=esp32c6` boots the demo
 and checks the same transcript as under QEMU;
 that is the only check that reaches its timer, matrix and USB console,
@@ -2321,7 +2336,9 @@ until the maintainer decides otherwise.
 4. **Kernel PMP entries.**
    The kernel does not lock entries and runs in machine mode,
    so it needs no PMP entries for itself.
-   Working default: reserve none.
+   Working default: reserve none for the kernel,
+   and one for the fence on a core whose hardwired entries grant user mode a right, as RP2350's do;
+   see "Physical Memory Protection".
    Revisit if Smepmp support is added
    to protect the kernel from its own stray pointers.
 5. **Synchronous endpoints.**
@@ -2364,7 +2381,7 @@ until the maintainer decides otherwise.
    two ranges could overlap in part,
    and cores without TOR, RP2350 among them, were out.
    RP2350's PMP is no longer in the way,
-   but its hardwired entries leave every peripheral to user mode,
+   its hardwired entries cost the fence, one entry,
    and its `mtval` reads zero; see "Boards".
 
 9. **Scheduling policy beyond units.**

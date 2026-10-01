@@ -24,8 +24,20 @@
 #define PMP_MAX_ENTRIES 16
 #endif
 
-/* Entries the image may use: the leading run whose address and mode take a write. */
+/*
+ * Entries the image may use: the leading run whose address and mode take a write,
+ * less the fence where there is one; see process_fence.
+ */
 extern unsigned pmp_entry_count;
+
+/*
+ * One past the last entry that may grant user mode a right:
+ * past those the core hardwires beyond the run, as RP2350's Hazard3 does three, and the run's end elsewhere.
+ */
+extern unsigned pmp_entry_end;
+
+/* The pmpaddr value of a NAPOT entry for the whole 32-bit address space, which the fence is. */
+#define PMP_NAPOT_ALL 0x1fffffffu
 
 /*
  * The grain in bytes, 2^(G+2) in the privileged specification.

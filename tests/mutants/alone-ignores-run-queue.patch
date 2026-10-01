@@ -2,7 +2,7 @@ The running thread counts as alone while another thread waits on the run queue.
 The timer would let the ticks pass that end the turn, and the other thread would wait until the account ran low;
 every tick the timer lets pass hands the processor back to the running thread.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
 Report: the timer lets a tick pass that ends the turn
 
 diff --git a/kernel/sched.c b/kernel/sched.c

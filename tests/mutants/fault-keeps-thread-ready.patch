@@ -1,7 +1,7 @@
 A fault hands the processor on but leaves the thread that made it ready,
 so it is on no queue while another thread runs, and would run on at the instruction that faulted.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work test qemu-replay
 Report: thread runs with a fault to tell
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c

@@ -1,0 +1,18 @@
+Loading a process's image clears every entry past it up to the end of those that grant user mode a right,
+the fence among them, which leaves the core's hardwired entries open to the process.
+
+Caught-by: fuzz-rp2350
+Report: PMP CSRs grant rights the slots do not
+
+diff --git a/kernel/process.c b/kernel/process.c
+--- a/kernel/process.c
++++ b/kernel/process.c
+@@ -29,7 +29,7 @@ void process_activate(struct process *proc)
+         LOOP_BOUND(PROCESS_REGION_SLOTS);
+         pmp_set(i, img->addr[i], img->cfg[i]);
+     }
+-    for (unsigned i = img->count; i < pmp_entry_count; i++) {
++    for (unsigned i = img->count; i < pmp_entry_end; i++) {
+         LOOP_BOUND(PMP_MAX_ENTRIES);
+         pmp_clear(i);
+     }

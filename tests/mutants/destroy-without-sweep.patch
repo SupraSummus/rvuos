@@ -3,7 +3,7 @@ takes the objects while capabilities still name them.
 The revoke that met the node clears those only once the pool is gone and they came up to it with the node,
 so in between they name dead objects.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
 Report: dangling object capability
 Report: thread's watch names no live notification
 

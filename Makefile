@@ -120,8 +120,9 @@ ifeq ($(ARCH),arm)
 BOARD_FACTS   := BOARD_PMP_ENTRIES=8 BOARD_PMP_GRAIN=32 BOARD_ARCH=arm
 else
 # Where Hazard3's transcripts differ from QEMU's and the ESP32-C6's, see tests/run.sh:
-# eight PMP entries, a 32-byte grain, mtval always zero, and misaligned accesses that trap.
-BOARD_FACTS   := BOARD_PMP_ENTRIES=8 BOARD_PMP_GRAIN=32 BOARD_MTVAL=zero BOARD_MISALIGNED=trap
+# seven PMP entries for regions, the eighth the fence, a 32-byte grain, mtval always zero,
+# and misaligned accesses that trap.
+BOARD_FACTS   := BOARD_PMP_ENTRIES=7 BOARD_PMP_GRAIN=32 BOARD_MTVAL=zero BOARD_MISALIGNED=trap
 endif
 else ifeq ($(BOARD),mps2-an385)
 # The replay driver's layout is QEMU virt's, so only the demo is built, as for the chips.
@@ -145,7 +146,7 @@ endif
 ifeq ($(ARCH),riscv)
 ESCAPE_PROGRAMS := escape-execute-data escape-jump-kernel escape-csrr escape-mret \
                    escape-misaligned-load escape-misaligned-store escape-store-kernel \
-                   escape-past-region
+                   escape-store-clock escape-past-region
 else
 ESCAPE_PROGRAMS :=
 endif
@@ -272,17 +273,18 @@ HOST_UNCOVERED_FLAGS := -fsanitize-address-use-after-return=never
 FUZZ_TIME ?= 60
 
 # One harness per simulated machine:
-# the default, an eight-entry PMP budget, and a 32-byte PMP grain as RP2350 has.
+# the default, an eight-entry PMP budget, and RP2350's Hazard3,
+# a 32-byte PMP grain and eight entries before the three it hardwires, which the fence shuts.
 # The machine is a preprocessor flag, so each harness has its objects to itself
 # in build/host/<harness>.obj/.
 # fuzz-work is the default machine with the loop annotations counting,
 # every kernel function opening a frame for them,
 # and the kernel's memset and memcpy checked against their CALL_BOUND; see host/work.c.
 # It checks claims rather than finds inputs, so the corpus is kept without it.
-HOST_MACHINES  := $(HOST_BUILD)/fuzz $(HOST_BUILD)/fuzz-pmp8 $(HOST_BUILD)/fuzz-grain32
+HOST_MACHINES  := $(HOST_BUILD)/fuzz $(HOST_BUILD)/fuzz-pmp8 $(HOST_BUILD)/fuzz-rp2350
 HOST_HARNESSES := $(HOST_MACHINES) $(HOST_BUILD)/fuzz-work
 $(HOST_BUILD)/fuzz-pmp8.obj/%.o:    HOST_MACHINE := -UPMP_MAX_ENTRIES -DPMP_MAX_ENTRIES=8
-$(HOST_BUILD)/fuzz-grain32.obj/%.o: HOST_MACHINE := -DPMP_GRAIN=32
+$(HOST_BUILD)/fuzz-rp2350.obj/%.o:  HOST_MACHINE := -DPMP_GRAIN=32 -DPMP_HARDWIRED
 $(HOST_BUILD)/fuzz-work.obj/%.o:        HOST_MACHINE := -DRVUOS_WORK
 $(HOST_BUILD)/fuzz-work.obj/kernel/%.o: HOST_MACHINE := -DRVUOS_WORK -finstrument-functions \
                                         -Dmemset=work_memset -Dmemcpy=work_memcpy

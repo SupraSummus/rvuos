@@ -2,7 +2,7 @@ The timer lets the release pass while a thread runs alone.
 A thread whose account reached a tick would wait for a deadline or the running thread's own account;
 the release is not a tick the timer lets pass.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work test qemu-replay
 Report: the timer lets the release pass
 
 diff --git a/kernel/sched.c b/kernel/sched.c

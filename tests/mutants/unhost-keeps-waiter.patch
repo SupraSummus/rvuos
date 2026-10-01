@@ -3,7 +3,7 @@ so a signal would wake a thread that has no process to run in,
 and a destroy of the thread's pool would leave the ring leading into memory that is no longer a thread;
 a notification queues only the threads waiting on it.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
 Report: queue holds a thread it is not for
 Report: runnable thread waits on something
 

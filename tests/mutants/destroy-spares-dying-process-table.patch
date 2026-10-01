@@ -2,7 +2,7 @@ A destroy clears the region slots of a dying process but not its table slot,
 which stays in the ring of the capability its table was made with
 and then links into freed memory.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
 Report: child link to a slot that is not a live, filled one
 
 diff --git a/kernel/pool.c b/kernel/pool.c

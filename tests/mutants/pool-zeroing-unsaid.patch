@@ -5,7 +5,7 @@ Each object is still zeroed as it is allocated, so no call returns anything else
 and what catches it is the loop check, and ASan on the host,
 since the memory is poisoned until objects lie in it.
 
-Caught-by: loop-bounds fuzz fuzz-pmp8 fuzz-grain32 fuzz-work
+Caught-by: loop-bounds fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work
 Report: the kernel reached RAM outside its objects
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c

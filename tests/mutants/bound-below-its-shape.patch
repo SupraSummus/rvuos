@@ -8,7 +8,7 @@ Report: the loop at kernel/process.c ran N times on one entry, beyond its bound 
 diff --git a/kernel/process.c b/kernel/process.c
 --- a/kernel/process.c
 +++ b/kernel/process.c
-@@ -31,7 +31,7 @@ static void rebuild_pmp(struct process *proc)
+@@ -46,7 +46,7 @@ static void rebuild_pmp(struct process *proc)
      struct pmp_image *img = &proc->pmp;
      img->count = 0;
      for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {

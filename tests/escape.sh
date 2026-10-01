@@ -51,7 +51,7 @@ escape-execute-data | escape-jump-kernel) fault="mcause=0x00000001 mepc=$addr mt
 escape-csrr | escape-mret) fault="mcause=0x00000002 mepc=$addr" ;; # whatever mtval holds
 escape-misaligned-load) fault="mcause=$load_cause mepc=$addr" ;; # mtval is the board's
 escape-misaligned-store) fault="mcause=$store_cause mepc=$addr" ;; # mtval is the board's
-escape-store-kernel) fault="mcause=0x00000007 mepc=$addr mtval=$target_mtval" ;;
+escape-store-kernel | escape-store-clock) fault="mcause=0x00000007 mepc=$addr mtval=$target_mtval" ;;
 escape-past-region) fault="mcause=0x00000005 mepc=$addr mtval=$target_mtval" ;;
 *) fail "unknown scenario" ;;
 esac

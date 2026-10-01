@@ -1,7 +1,7 @@
 A second OP_DEBUG_TRACE fills every account again,
 so a thread with the debug capability tops up its own account at will.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
 Report: a traced call that moved no time charged the thread whose turn it was
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c

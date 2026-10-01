@@ -16,6 +16,8 @@ Open work only; an item leaves this file in the commit that finishes it.
 - A device interrupt wakes its driver but does not run it;
   the driver waits for its turn like a thread a timer line woke.
   Measure that latency on the board; it belongs to open decision 9.
+- Run `escape-store-clock` on the chip, which was not connected when it was written;
+  the store goes to the CLINT's `UTIME`, which no PMP entry grants.
 - Feed the replay corpus to the board.
   Something has to put each input where `BOOT_CAP_INPUT` points,
   below the ROM's buffers or over USB once the kernel runs,
@@ -26,17 +28,13 @@ Open work only; an item leaves this file in the commit that finishes it.
 - The clock's counter is TIMER0's `TIMERAWL`, whose high half, `TIMERAWH`, lies the word below,
   so `rv_counter_read` takes `DBGPAUSE` for the high word and the counter wraps after 71 minutes.
   `OP_CLOCK_INFO` could return where the high half lies, which changes the ABI.
-- Hazard3's hardwired PMP entries leave every peripheral to user mode, so ACCESSCTRL alone keeps a process off a device,
-  for every process at once; TIMER0 is open to all of them.
-  The Cortex-M33's MPU keeps a process off every peripheral it holds no frame for.
-  A last entry that denies the whole address space would put devices behind frames again, at one entry's cost;
-  the device store under "Verification", aimed at TIMER0, would show the difference.
 - Hazard3's `mtval` reads zero, so a fault report names no address there.
+- Hazard3 reads a NAPOT address's bits below the grain as zeros, the fence's as `0x1ffffffc`,
+  though it matches the region written; the specification reads them as ones.
+  So the self-check's reading of the CSRs, which runs only under tracing and never on the board yet,
+  would take every region there for eight bytes; `pmp_get` could set those bits, as it swaps R and X.
 - The logger drives no device here: its console is RAM, which only the halt carries out.
   A root task with a driver for the USB controller would let the log out while the machine runs.
-- Find out whether writing a hardwired entry's address moves its region.
-  The probe used to write them, and some runs hung then,
-  likely from the clock switch `clocks_init` made in the wrong order until it was fixed.
 - The watchdog armed at boot resets CLOCKS without SYSCFG's `AUXCTRL` set,
   which the datasheet asks for when POWMAN runs from `clk_ref`, so a hang it rescues may corrupt POWMAN;
   the halt's reboot sets it, as the bootrom's does.
@@ -159,6 +157,7 @@ Open work only; an item leaves this file in the commit that finishes it.
   and a process has eight region slots,
   so a budget of eight, `fuzz-pmp8`'s, is never short:
   the eighth install finds seven regions installed.
+  `fuzz-rp2350`'s seven are short for an eighth region, which no seed and no input of the corpus installs.
   The replay driver's processes hold four regions each once set up,
   so a harness with a budget of six would reach the limit on the third install
   and still run the prologue.
@@ -168,9 +167,6 @@ Open work only; an item leaves this file in the commit that finishes it.
   Since a fault stops only its thread, one root task could run every scenario in a thread of its own
   and hear each fault through its watch, one boot for the suite;
   it would read the cause through `OP_THREAD_FAULT`.
-- Escape-attempt suite: a store to a device the kernel keeps, such as the timer's `mtimecmp`.
-  On the ESP32-C6 the kernel turns the access permission management units off,
-  so PMP alone keeps user mode off the peripherals, and no scenario reaches one.
 - The ESP32-C6's install rule, `PMP_SPLIT_STORE_AS_READ`, is checked only by `escape-misaligned-store` on the board.
   The host shares QEMU's layout, where the log touches the code and the data the input,
   so no harness can have the flag, no mutant reaches the rule,

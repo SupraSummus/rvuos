@@ -2,7 +2,7 @@ A timer line armed for a deadline nearer than any other leaves the timer where i
 The timer would interrupt after the deadline and the thread sleep past it;
 the nearest deadline the timer wakes for comes no later than any armed timer line's.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work test qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work test qemu-replay
 Report: armed timer line comes due before the timer wakes for it
 
 diff --git a/kernel/sched.c b/kernel/sched.c

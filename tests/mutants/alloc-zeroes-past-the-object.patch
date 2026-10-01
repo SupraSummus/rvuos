@@ -4,7 +4,7 @@ or, for the object that fills its pool, the memory past the pool,
 which a process may have installed.
 Memory safety.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-grain32 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
 Report: the kernel reached RAM outside its objects
 
 diff --git a/kernel/pool.c b/kernel/pool.c
