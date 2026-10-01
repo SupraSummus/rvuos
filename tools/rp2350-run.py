@@ -159,7 +159,7 @@ class Picoboot:
         try:
             usb.util.claim_interface(dev, self.intf)
         except usb.core.USBError as e:
-            sys.exit(f"cannot claim PICOBOOT ({e}); the device needs a udev rule giving you access, see MANUAL.md")
+            sys.exit(f"cannot claim PICOBOOT ({e}); the device needs a udev rule giving you access, see manual/targets.md")
         eps = self.intf.endpoints()
         self.out = next(e for e in eps if usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_OUT)
         self.inp = next(e for e in eps if usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_IN)

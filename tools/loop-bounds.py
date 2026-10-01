@@ -30,7 +30,7 @@ tools/ksource.py has read the source beforehand, a translation unit at a time,
 into the files --sources names.
 
 Usage: loop-bounds.py [--objdump tool] [--symbolizer tool]
-                      --sources "file.src.json..." --design DESIGN.md kernel.elf file.su...
+                      --sources "file.src.json..." --design design/bounds.md kernel.elf file.su...
 """
 
 import argparse

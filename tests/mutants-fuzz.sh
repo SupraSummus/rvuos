@@ -110,7 +110,7 @@ trap 'rm -rf "$work"' EXIT
 mkdir -p "$logs" "$work/base" "$work/result"
 
 cp -r "$root/kernel" "$root/host" "$root/include" "$root/user" "$root/Makefile" "$root/tests" \
-    "$root/tools" "$root/DESIGN.md" "$work/base/"
+    "$root/tools" "$root/design" "$work/base/"
 if ! (cd "$work/base" && make -s build/host/fuzz) >"$logs/unmutated.fuzz.log" 2>&1; then
     echo "the unmutated host harness does not build, see build/mutants/unmutated.fuzz.log" >&2
     exit 1
