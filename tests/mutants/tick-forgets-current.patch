@@ -8,14 +8,14 @@ Report: a ready thread that may run waits on no queue
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -630,9 +630,7 @@ static void turn_end(void)
+@@ -637,9 +637,7 @@ static void turn_end(void)
      uint32_t offset = turn_close();
-     struct thread *was = turn;
-     turn = NULL;
+     struct thread *was = core->turn;
+     core->turn = NULL;
 -    if (was != NULL) {
 -        thread_settle(was);
 -    }
 +    (void)was;
-     turn = next_turn(offset);
+     core->turn = next_turn(offset);
      run_turn();
  }

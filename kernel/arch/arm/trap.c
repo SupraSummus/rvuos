@@ -156,6 +156,7 @@ static bool stack_takes(const struct thread *t, uint32_t at)
  */
 uint32_t frame_give(struct trap_frame *f)
 {
+    const struct thread *current = core_self()->current;
     if (f != &current->frame) {
         kpanic("trap frame is not the current thread's");
     }
@@ -182,7 +183,7 @@ uint32_t frame_give(struct trap_frame *f)
 struct trap_frame *trap_handler(struct trap_frame *frame)
 {
     mpu_kernel();
-    struct thread *t = current;
+    struct thread *t = core_self()->current;
     if (frame != &t->frame) {
         kpanic("trap frame is not the current thread's");
     }
@@ -237,7 +238,7 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
     }
 
     timer_trap_leave(traced);
-    return &current->frame;
+    return &core_self()->current->frame;
 }
 
 /*

@@ -8,13 +8,13 @@ Report: the timer lets a tick pass that ends the turn
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -412,9 +412,6 @@ uint32_t sched_wake_ticks(void)
+@@ -471,9 +471,6 @@ uint32_t sched_wake_ticks(void)
      if (turn == NULL) {
          return wake;
      }
--    if (run_queue != 0) {
+-    if (core->run_queue != 0) {
 -        return 1;
 -    }
      uint32_t balance = account_now(turn);
-     bool alone = thread_spare(turn) && spare_queue == 0;
+     bool alone = thread_spare(turn) && core->spare_queue == 0;
      if (!has_time(balance)) {

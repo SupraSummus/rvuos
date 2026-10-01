@@ -201,7 +201,6 @@ static void detach(struct cap *n, bool adopt)
 }
 
 uint32_t preempt_countdown;
-bool preempt_stopped;
 
 bool cap_stop_here(bool preempt)
 {
@@ -211,7 +210,7 @@ bool cap_stop_here(bool preempt)
     /* Every place counts, pending or not, so the host, where one always is, stops where QEMU does. */
     bool pending = intr_pending();
     if (preempt_countdown != 0 && --preempt_countdown == 0) {
-        preempt_stopped = true;
+        core_self()->preempt_stopped = true;
         return true;
     }
     return pending;
@@ -255,7 +254,7 @@ bool cap_revoke_below(struct cap *root, const struct cap *through, bool preempt)
          * or the capability it was made through ends there:
          * the caller could not make the call again, so an interrupt must not decide how far it got.
          */
-        if (thread_table(current) == NULL || through->type == CAP_NONE) {
+        if (thread_table(core_self()->current) == NULL || through->type == CAP_NONE) {
             return true;
         }
         if (root->child != 0 && cap_stop_here(preempt)) {

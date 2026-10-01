@@ -7,11 +7,11 @@ Report: thread runs with a fault to tell
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -874,7 +874,6 @@ void fault_dispatch(struct thread *t)
+@@ -876,7 +876,6 @@ void fault_dispatch(struct thread *t)
  {
      kputs("user fault\n");
      report_frame(&t->frame);
 -    t->state = THREAD_STOPPED;
      t->flags |= THREAD_FAULTED;
-     trace_wake_bits = 0;
+     core_self()->trace_wake_bits = 0;
      struct notification *watch = thread_watch(t);

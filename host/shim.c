@@ -337,22 +337,13 @@ struct thread *host_boot(void)
      */
     pool_list = NULL;
     memset(line_irq, 0, LINES * sizeof(line_irq[0]));
-    current = NULL;
+    core0 = (struct core){ .nearest_release = NEAREST_NONE };
     memset(unit_thread, 0, sizeof(unit_thread));
-    run_queue = 0;
-    spare_queue = 0;
-    spent_queue = 0;
-    turn = NULL;
-    turn_from = 0;
     armed_sources = 0;
     nearest_deadline = NEAREST_NONE;
-    nearest_release = NEAREST_NONE;
-    wake_stale = false;
-    turn_due = false;
     sched_ticks = 0;
     debug_trace = false;
     preempt_countdown = 0;
-    preempt_stopped = false;
     pmp_init();
     process_fence();
     irq_init();
@@ -409,9 +400,9 @@ static void host_trap(bool call)
     work_begin();
 #endif
     if (call) {
-        syscall_dispatch(current);
+        syscall_dispatch(core_self()->current);
     } else {
-        fault_dispatch(current);
+        fault_dispatch(core_self()->current);
     }
     sched_wake();
     /* The report was made as the kernel reached poisoned RAM; see host_asan_report. */
@@ -438,7 +429,7 @@ static unsigned host_actor_of(const struct thread *t)
 
 static unsigned host_actor(void)
 {
-    return host_actor_of(current);
+    return host_actor_of(core_self()->current);
 }
 
 /*
@@ -450,7 +441,7 @@ static unsigned host_actor(void)
  */
 static void host_call(bool record)
 {
-    struct thread *caller = current;
+    struct thread *caller = core_self()->current;
     struct trap_frame *f = &caller->frame;
     uint32_t op = f->regs[REG_A7], slot = f->regs[REG_A0];
     bool stopped;
@@ -482,7 +473,7 @@ static void host_call(bool record)
          * the slot resolved as the call began, and nothing refills a slot within a call.
          * Only an armed stop hands the processor on.
          */
-        if (stopped && ((current != caller && !armed) || thread_table(caller) == NULL ||
+        if (stopped && ((core_self()->current != caller && !armed) || thread_table(caller) == NULL ||
                         thread_table(caller)->slots[slot].type == CAP_NONE)) {
             fprintf(stderr, "invariant violated: a call stopped where its caller cannot make it again\n");
             host_violated();
@@ -499,7 +490,7 @@ static void host_call(bool record)
 
 static void host_load(const struct replay_record *c)
 {
-    struct trap_frame *f = &current->frame;
+    struct trap_frame *f = &core_self()->current->frame;
     f->regs[REG_A7] = c->op;
     f->regs[REG_A0] = c->slot;
     f->regs[REG_A1] = c->a1;
@@ -521,7 +512,7 @@ static void host_load(const struct replay_record *c)
  */
 uint32_t host_syscall(const struct replay_record *c)
 {
-    struct thread *caller = current;
+    struct thread *caller = core_self()->current;
     host_load(c);
     host_call(false);
     return caller->frame.regs[REG_A0];
@@ -569,14 +560,14 @@ static bool mapped_with(const struct process *proc, uint32_t base, uint32_t size
 /* Whether the running thread's process maps the driver's code, which is all an ecall made again needs. */
 static bool code_mapped(void)
 {
-    const struct process *proc = thread_process(current);
+    const struct process *proc = thread_process(core_self()->current);
     return proc != NULL && mapped_with(proc, USER_CODE_BASE, USER_CODE_SIZE, RIGHT_R | RIGHT_X);
 }
 
 /* Whether the running thread's process maps the driver's code and data, and to drain the log, the UART and the log. */
 static bool driver_mapped(bool drain)
 {
-    const struct process *proc = thread_process(current);
+    const struct process *proc = thread_process(core_self()->current);
     return code_mapped() && mapped_with(proc, USER_DATA_BASE, USER_DATA_SIZE, RIGHT_R | RIGHT_W) &&
            (!drain || (mapped_with(proc, UART_BASE, UART_SIZE, RIGHT_R | RIGHT_W) &&
                        mapped_with(proc, KLOG_BASE, KLOG_REGION_SIZE, RIGHT_R | RIGHT_W)));
@@ -594,7 +585,7 @@ bool host_driver_alive(void)
  */
 void host_fault(uint32_t cause)
 {
-    struct trap_frame *f = &current->frame;
+    struct trap_frame *f = &core_self()->current->frame;
     f->mcause = cause;
     f->mtval = cause == CAUSE_BREAKPOINT ? 0 : f->pc;
     host_trap(false);
@@ -616,7 +607,7 @@ static bool host_access(const struct replay_record *c, uint32_t *cause)
     uint32_t at = c->a1 & ~3u;
     bool store = c->op == REPLAY_OP_STORE;
     if (!replay_leaves_alone(at)) {
-        if (!mapped_with(thread_process(current), at, 4, store ? RIGHT_W : RIGHT_R)) {
+        if (!mapped_with(thread_process(core_self()->current), at, 4, store ? RIGHT_W : RIGHT_R)) {
             *cause = store ? CAUSE_STORE_ACCESS : CAUSE_LOAD_ACCESS;
             return false;
         }
@@ -680,12 +671,12 @@ static void host_run_on(void)
  */
 void host_event(const struct replay_record *c)
 {
-    struct thread *start = current;
+    struct thread *start = core_self()->current;
     while (replay_passes(c, host_actor())) {
-        struct thread *ticked = current;
+        struct thread *ticked = core_self()->current;
         host_syscall(&replay_tick);
         host_run_on();
-        if (current == start || current == ticked) {
+        if (core_self()->current == start || core_self()->current == ticked) {
             break;
         }
     }

@@ -8,11 +8,11 @@ Report: a thread's account reaches a tick before the release
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -216,7 +216,7 @@ static void thread_settle(struct thread *t)
+@@ -223,7 +223,7 @@ static void thread_settle(struct thread *t)
      }
      if ((queue == QUEUE_SPARE || queue == QUEUE_SPENT) && thread_units(t) != 0 &&
-         tick_before(sched_ticks + account_fill(t, t->balance), nearest_release)) {
--        nearest_release = sched_ticks + account_fill(t, t->balance);
+         tick_before(sched_ticks + account_fill(t, t->balance), core->nearest_release)) {
+-        core->nearest_release = sched_ticks + account_fill(t, t->balance);
 +        (void)0;
      }
  }

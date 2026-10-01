@@ -111,7 +111,7 @@ uint32_t timer_offset(void)
 bool timer_trap_enter(bool pending)
 {
     bool traced = debug_trace;
-    if (!traced && (pending || wake_tick - sched_ticks > 1)) {
+    if (!traced && (pending || core_self()->wake_tick - sched_ticks > 1)) {
         sched_count(timer_count());
     }
     return traced;
@@ -134,7 +134,8 @@ void timer_trap_tick(void)
  */
 void timer_trap_leave(bool traced)
 {
-    if (turn_due || wake_stale) {
+    const struct core *core = core_self();
+    if (core->turn_due || core->wake_stale) {
         uint32_t wake = sched_wake();
         if (!debug_trace && wake != 0) {
             timer_set(wake);

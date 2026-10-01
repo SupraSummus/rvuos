@@ -113,7 +113,7 @@ which is open decision 3 below.
 - Binary compatibility with seL4, L4, or F9.
 - Multicore, in the first iteration.
   The design must not preclude it,
-  but nothing is built for it yet.
+  so what a second core would need of its own is gathered in `struct core`; see open decision 24.
 - Formal verification.
   The design borrows from seL4 where it makes verification easier,
   because those choices also make the kernel simpler,

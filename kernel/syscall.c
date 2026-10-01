@@ -697,9 +697,10 @@ static int op_irq(const struct cap *cap, uint32_t op, uint32_t *arg)
 /* The line of a wake, after the line of the call or the fault that caused it; none if nothing woke. */
 static void trace_wake(void)
 {
-    if (trace_wake_bits != 0) {
+    uint32_t bits = core_self()->trace_wake_bits;
+    if (bits != 0) {
         kputs("trace: wake ");
-        kput_hex(trace_wake_bits);
+        kput_hex(bits);
         kputc('\n');
     }
 }
@@ -813,8 +814,9 @@ void syscall_dispatch(struct thread *t)
     /* The call that turns tracing on is not itself traced. */
     bool traced = debug_trace;
 
+    struct core *core = core_self();
     /* A wake is traced after the line of the call that caused it; no bits means none. */
-    trace_wake_bits = 0;
+    core->trace_wake_bits = 0;
     int err = dispatch(t, op, arg[0], arg);
     if (err == KERR_PREEMPTED) {
         /*
@@ -842,12 +844,12 @@ void syscall_dispatch(struct thread *t)
      * the caller stays at its call instruction, ready, and the next thread has its turn.
      * Whatever the call's attempt woke is left untraced, as a stopped attempt's always is.
      */
-    if (preempt_stopped) {
-        preempt_stopped = false;
+    if (core->preempt_stopped) {
+        core->preempt_stopped = false;
         if (debug_trace) {
             kputs("trace: preempt\n");
         }
-        trace_wake_bits = 0;
+        core->trace_wake_bits = 0;
         sched_tick(1);
         if (debug_trace) {
             trace_wake();
@@ -857,7 +859,7 @@ void syscall_dispatch(struct thread *t)
      * A thread that waits gives the processor up, and so does one whose process the call took.
      * One that lost its units finishes its turn, as a preempted call is made again before the tick switches.
      */
-    if (current->state != THREAD_READY) {
+    if (core->current->state != THREAD_READY) {
         sched_run_next();
     }
     if (debug_trace) {
@@ -876,7 +878,7 @@ void fault_dispatch(struct thread *t)
     report_frame(&t->frame);
     t->state = THREAD_STOPPED;
     t->flags |= THREAD_FAULTED;
-    trace_wake_bits = 0;
+    core_self()->trace_wake_bits = 0;
     struct notification *watch = thread_watch(t);
     if (watch != NULL) {
         sched_signal(watch, t->watch.b);

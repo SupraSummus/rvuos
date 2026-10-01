@@ -8,11 +8,11 @@ Report: the timer is set past a tick an unmarked change brought forward
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -202,7 +202,6 @@ static uint8_t thread_queue(const struct thread *t, uint32_t balance)
-  */
+@@ -209,7 +209,6 @@ static uint8_t thread_queue(const struct thread *t, uint32_t balance)
  static void thread_settle(struct thread *t)
  {
--    wake_stale = true;
+     struct core *core = core_self();
+-    core->wake_stale = true;
      account_refill(t);
      uint8_t queue = thread_queue(t, t->balance);
      if (queue != t->queue) {

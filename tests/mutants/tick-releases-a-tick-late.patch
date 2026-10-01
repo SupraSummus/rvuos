@@ -9,12 +9,12 @@ Report: the release is for a tick already past
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -459,7 +459,7 @@ static void tick_advance(uint32_t ticks)
+@@ -448,7 +448,7 @@ static void tick_advance(uint32_t ticks)
          }
      }
      nearest_deadline = nearest;
--    if (!tick_before(sched_ticks, nearest_release)) {
-+    if (tick_before(nearest_release, sched_ticks)) {
+-    if (!tick_before(sched_ticks, core->nearest_release)) {
++    if (tick_before(core->nearest_release, sched_ticks)) {
          release();
      }
  }

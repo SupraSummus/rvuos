@@ -9,12 +9,12 @@ Report: a call stopped where its caller cannot make it again
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -247,7 +247,7 @@ bool cap_revoke_below(struct cap *root, const struct cap *through, bool preempt)
+@@ -254,7 +254,7 @@ bool cap_revoke_below(struct cap *root, const struct cap *through, bool preempt)
           * or the capability it was made through ends there:
           * the caller could not make the call again, so an interrupt must not decide how far it got.
           */
--        if (thread_table(current) == NULL || through->type == CAP_NONE) {
-+        if ((thread_table(current) == NULL && 0) || through->type == CAP_NONE) {
+-        if (thread_table(core_self()->current) == NULL || through->type == CAP_NONE) {
++        if ((thread_table(core_self()->current) == NULL && 0) || through->type == CAP_NONE) {
              return true;
          }
          if (root->child != 0 && cap_stop_here(preempt)) {
