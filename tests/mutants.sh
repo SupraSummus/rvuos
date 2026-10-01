@@ -199,7 +199,7 @@ qemu=$(command -v qemu-system-riscv32 || true)
 [ -n "$qemu" ] || echo "qemu-system-riscv32 not found: test and qemu-replay are left out" >&2
 
 cp -r "$root/kernel" "$root/host" "$root/include" "$root/user" "$root/Makefile" "$root/tests" \
-    "$root/tools" "$root/DESIGN.md" "$work/base/"
+    "$root/tools" "$root/design" "$work/base/"
 if ! (cd "$work/base" && make -s -j"$jobs" all host-test) >"$logs/unmutated.log" 2>&1; then
     echo "the unmutated tree does not build or fails host-test, see build/mutants/unmutated.log" >&2
     exit 1

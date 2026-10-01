@@ -152,7 +152,7 @@ ESCAPE_PROGRAMS :=
 endif
 
 .PHONY: all clean run test escape host-harnesses host-test fuzz corpus-merge qemu-replay mutants mutants-refresh \
-        mutants-fuzz arm-test check
+        mutants-fuzz arm-test contents check
 
 # Pattern rules would delete the objects they chain through,
 # so every build compiled the kernel from scratch.
@@ -204,12 +204,12 @@ $(BUILD)/kernel/%.src.json: $(BUILD)/kernel/%.o tools/ksource.py
 # since an image differs from it only in the root task in .user_code, which neither reads.
 $(BUILD)/kernel.elf: $(KERNEL_OBJ) $(KERNEL_READ) $(BUILD)/kernel/kernel.ld \
                      tools/kimage.py tools/kthumb.py tools/ksource.py tools/stack-depth.py \
-                     tools/loop-bounds.py DESIGN.md
+                     tools/loop-bounds.py design/bounds.md
 	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/kernel/kernel.ld $(KERNEL_OBJ) -o $@.tmp
 	ok=yes; \
 	tools/stack-depth.py --objdump $(OBJDUMP) $@.tmp $(KERNEL_SU) || ok=no; \
 	tools/loop-bounds.py --objdump $(OBJDUMP) --symbolizer $(SYMBOLIZER) \
-		--sources "$(KERNEL_READ)" --design DESIGN.md $@.tmp $(KERNEL_SU) || ok=no; \
+		--sources "$(KERNEL_READ)" --design design/bounds.md $@.tmp $(KERNEL_SU) || ok=no; \
 	[ $$ok = yes ]
 	mv $@.tmp $@
 
@@ -381,7 +381,12 @@ qemu-replay: $(BUILD)/kernel-fuzzdrv.elf $(HOST_BUILD)/fuzz
 arm-test:
 	$(MAKE) BOARD=mps2-an385 test
 
-check: test escape host-test qemu-replay arm-test
+# The contents of MANUAL.md and DESIGN.md list every section,
+# since a section cited by its number or title is found through them.
+contents:
+	tools/contents.py MANUAL.md DESIGN.md
+
+check: contents test escape host-test qemu-replay arm-test
 
 clean:
 	rm -rf $(BUILD)

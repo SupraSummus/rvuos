@@ -2,7 +2,8 @@
 
 rvuos is a capability-based microkernel for RISC-V microcontrollers
 without an MMU, and for ARMv7-M and ARMv8-M ones with an MPU; see "Architectures" in `DESIGN.md`.
-Read `DESIGN.md` before changing anything in the kernel.
+Read `DESIGN.md` before changing anything in the kernel,
+and the chapters in `design/` the change touches.
 No new walk over every object, pool or table
 goes on the path of a system call, a tick or an interrupt;
 see goal 4 in `DESIGN.md`.
@@ -75,7 +76,7 @@ A check that could not run is reported as not run, never as passed.
 
 ## Documentation of decisions
 
-Architectural decisions live in `DESIGN.md`.
+Architectural decisions live in `DESIGN.md` and its chapters in `design/`.
 When a decision changes, edit the design document in the same commit
 as the code that implements the change.
 Open questions are listed explicitly in the design document
@@ -84,7 +85,7 @@ Work items go to `TODO.md`,
 and leave it in the commit that finishes them;
 it holds no record of what was done.
 
-`MANUAL.md` is the user-facing description of the kernel:
+`MANUAL.md` and its chapters in `manual/` are the user-facing description of the kernel:
 what it offers a program, the system call reference,
 and what the root task starts with.
 When `include/rvuos/abi.h` or a limit a program can see changes,
