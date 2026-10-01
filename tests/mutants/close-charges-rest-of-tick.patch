@@ -9,9 +9,9 @@ Report: a traced call that moved no time charged the thread whose turn it was
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -243,7 +243,7 @@ static uint32_t turn_close(void)
- {
+@@ -239,7 +239,7 @@ static uint32_t turn_close(void)
      uint32_t offset = clock_offset();
+     struct thread *turn = core_self()->turn;
      if (turn != NULL) {
 -        turn->balance -= turn_owes(offset);
 +        turn->balance -= turn_owes(timer_tick_counts());

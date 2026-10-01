@@ -8,11 +8,11 @@ Report: the release is for a tick already past
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -315,7 +315,6 @@ void sched_accounts_fill(void)
+@@ -349,7 +349,6 @@ void sched_accounts_fill(void)
   */
  static void release(void)
  {
--    nearest_release = sched_ticks + NEAREST_NONE;
+-    core_self()->nearest_release = sched_ticks + NEAREST_NONE;
      for (uint32_t i = 0; i < TIME_UNITS; i++) {
          LOOP_BOUND(TIME_UNITS);
          struct thread *t = unit_first(i);

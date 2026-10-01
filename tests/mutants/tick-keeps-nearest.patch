@@ -8,11 +8,11 @@ Report: the timer wakes for a deadline already past
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -448,7 +448,6 @@ static void tick_advance(uint32_t ticks)
+@@ -447,7 +447,6 @@ static void tick_advance(uint32_t ticks)
              nearest = irq->deadline;
          }
      }
 -    nearest_deadline = nearest;
-     if (!tick_before(sched_ticks, nearest_release)) {
+     if (!tick_before(sched_ticks, core->nearest_release)) {
          release();
      }

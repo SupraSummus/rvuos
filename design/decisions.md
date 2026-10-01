@@ -313,3 +313,20 @@ until the maintainer decides otherwise.
       RP2350's Cortex-M33 has one, which the kernel shuts, so a floating-point instruction faults its thread.
     - **The name.** rvuos says RISC-V, which the kernel no longer is alone.
     Decide each with the first board or program that needs it.
+
+24. **More than one core.**
+    Working default: one; RP2350's second core waits in its bootrom.
+    What a second core would need of its own is in `struct core`,
+    the queues among it, since a thread would run on the core its units lie on and move only by a bind.
+    Open:
+    - **Exclusion.** One lock around the kernel, as seL4's multicore build has,
+      keeps every trap one step on one state, which the self-check and the replay rely on.
+      A walk that stops for an interrupt would stop for a core waiting on the lock too,
+      so the wait is at most a step of each other core.
+    - **A region taken from a process another core runs** stays in that core's CSRs until it traps,
+      so that core must trap before the memory can become a pool,
+      and so must one whose thread loses its process or its pool.
+    - **Wakes and lines.** A wake for a core sleeping in `wfi` needs an interrupt to it,
+      and which core takes a device's line is open.
+    - **The units.** `TIME_UNITS` per core or for the whole machine; either changes the ABI.
+    Decide with the first board that runs a second core.

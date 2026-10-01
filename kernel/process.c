@@ -54,6 +54,7 @@ static void rebuild_pmp(struct process *proc)
             img->count++;
         }
     }
+    const struct thread *current = core_self()->current;
     if (current != NULL && thread_process(current) == proc) {
         process_activate(proc);
     }

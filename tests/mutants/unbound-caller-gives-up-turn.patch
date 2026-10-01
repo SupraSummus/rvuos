@@ -9,12 +9,12 @@ Report: a call stopped where its caller cannot make it again
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -783,7 +783,7 @@ void syscall_dispatch(struct thread *t)
+@@ -859,7 +859,7 @@ void syscall_dispatch(struct thread *t)
       * A thread that waits gives the processor up, and so does one whose process the call took.
       * One that lost its units finishes its turn, as a preempted call is made again before the tick switches.
       */
--    if (current->state != THREAD_READY) {
-+    if (current->state != THREAD_READY || current->time.type != CAP_BOUND) {
+-    if (core->current->state != THREAD_READY) {
++    if (core->current->state != THREAD_READY || core->current->time.type != CAP_BOUND) {
          sched_run_next();
      }
      if (debug_trace) {

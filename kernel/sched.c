@@ -9,22 +9,12 @@
 #include "timer.h"
 #include "trap.h"
 
-struct thread *current;
+struct core core0 = { .nearest_release = NEAREST_NONE };
 uint32_t sched_ticks;
-uint32_t trace_wake_bits;
 
 paddr_t unit_thread[TIME_UNITS];
-paddr_t run_queue;
-paddr_t spare_queue;
-paddr_t spent_queue;
-struct thread *turn;
-uint32_t turn_from;
 uint32_t armed_sources;
 uint32_t nearest_deadline = NEAREST_NONE;
-uint32_t nearest_release = NEAREST_NONE;
-uint32_t wake_tick;
-bool wake_stale;
-bool turn_due;
 
 static void count_armed(bool was, bool is)
 {
@@ -49,7 +39,7 @@ void irq_set_bits(struct irq *irq, uint32_t bits)
     /* A timer line armed for a nearer deadline brings the timer's next interrupt forward to it. */
     if (line_is_timer(irq->line) && bits != 0 && tick_before(irq->deadline, nearest_deadline)) {
         nearest_deadline = irq->deadline;
-        wake_stale = true;
+        core_self()->wake_stale = true;
     }
     irq->bits = bits;
 }
@@ -111,7 +101,8 @@ static void unwait(struct thread *t)
  */
 static paddr_t *queue_head(uint8_t queue)
 {
-    return queue == QUEUE_RUN ? &run_queue : queue == QUEUE_SPARE ? &spare_queue : &spent_queue;
+    struct core *core = core_self();
+    return queue == QUEUE_RUN ? &core->run_queue : queue == QUEUE_SPARE ? &core->spare_queue : &core->spent_queue;
 }
 
 /* A thread's account at the count: it gains its tick's parts every tick since its stamp, up to its cap. */
@@ -167,12 +158,15 @@ static uint32_t account_after(uint32_t balance, uint32_t units, uint32_t ticks)
  */
 static uint32_t turn_owes(uint32_t offset)
 {
-    return offset > turn_from && has_time(turn->balance) ? COUNT_PARTS * (offset - turn_from) : 0;
+    const struct core *core = core_self();
+    uint32_t from = core->turn_from;
+    return offset > from && has_time(core->turn->balance) ? COUNT_PARTS * (offset - from) : 0;
 }
 
 /* The account of the thread whose turn it is at the next tick: it pays for the rest of this one and earns the gain. */
 static uint32_t turn_next(void)
 {
+    struct thread *turn = core_self()->turn;
     uint32_t next = turn->balance - turn_owes(timer_tick_counts()) + tick_gain(turn);
     return next < account_cap(turn) ? next : account_cap(turn);
 }
@@ -188,14 +182,14 @@ static uint32_t turn_drain(void)
     if (!has_time(next)) {
         return 1;
     }
-    uint32_t loss = tick_parts() - tick_gain(turn);
+    uint32_t loss = tick_parts() - tick_gain(core_self()->turn);
     return loss != 0 ? (next - tick_parts()) / loss + 2 : NEAREST_NONE;
 }
 
 /* The queue a thread waits on, as its state, the turn, its account at balance and its binding now say. */
 static uint8_t thread_queue(const struct thread *t, uint32_t balance)
 {
-    if (t->state != THREAD_READY || t == turn || t->time.type != CAP_BOUND) {
+    if (t->state != THREAD_READY || t == core_self()->turn || t->time.type != CAP_BOUND) {
         return QUEUE_NONE;
     }
     if (has_time(balance)) {
@@ -214,7 +208,8 @@ static uint8_t thread_queue(const struct thread *t, uint32_t balance)
  */
 static void thread_settle(struct thread *t)
 {
-    wake_stale = true;
+    struct core *core = core_self();
+    core->wake_stale = true;
     account_refill(t);
     uint8_t queue = thread_queue(t, t->balance);
     if (queue != t->queue) {
@@ -227,8 +222,8 @@ static void thread_settle(struct thread *t)
         t->queue = queue;
     }
     if ((queue == QUEUE_SPARE || queue == QUEUE_SPENT) && thread_units(t) != 0 &&
-        tick_before(sched_ticks + account_fill(t, t->balance), nearest_release)) {
-        nearest_release = sched_ticks + account_fill(t, t->balance);
+        tick_before(sched_ticks + account_fill(t, t->balance), core->nearest_release)) {
+        core->nearest_release = sched_ticks + account_fill(t, t->balance);
     }
 }
 
@@ -242,6 +237,7 @@ static uint32_t clock_offset(void)
 static uint32_t turn_close(void)
 {
     uint32_t offset = clock_offset();
+    struct thread *turn = core_self()->turn;
     if (turn != NULL) {
         turn->balance -= turn_owes(offset);
     }
@@ -255,8 +251,9 @@ static uint32_t turn_close(void)
  */
 static struct thread *next_turn(uint32_t offset)
 {
-    turn_from = offset;
-    paddr_t *head = run_queue != 0 ? &run_queue : &spare_queue;
+    struct core *core = core_self();
+    core->turn_from = offset;
+    paddr_t *head = core->run_queue != 0 ? &core->run_queue : &core->spare_queue;
     if (*head == 0) {
         return NULL;
     }
@@ -329,9 +326,10 @@ static struct thread *unit_first(uint32_t unit)
  */
 void sched_accounts_fill(void)
 {
+    struct core *core = core_self();
     /* The fill clears what the turn owed, too. */
-    turn_from = clock_offset();
-    nearest_release = sched_ticks + NEAREST_NONE;
+    core->turn_from = clock_offset();
+    core->nearest_release = sched_ticks + NEAREST_NONE;
     for (uint32_t i = 0; i < TIME_UNITS; i++) {
         LOOP_BOUND(TIME_UNITS);
         struct thread *t = unit_first(i);
@@ -351,7 +349,7 @@ void sched_accounts_fill(void)
  */
 static void release(void)
 {
-    nearest_release = sched_ticks + NEAREST_NONE;
+    core_self()->nearest_release = sched_ticks + NEAREST_NONE;
     for (uint32_t i = 0; i < TIME_UNITS; i++) {
         LOOP_BOUND(TIME_UNITS);
         struct thread *t = unit_first(i);
@@ -363,10 +361,11 @@ static void release(void)
 
 void sched_start(struct thread *t)
 {
-    current = turn = t;
-    turn_from = clock_offset();
+    struct core *core = core_self();
+    core->current = core->turn = t;
+    core->turn_from = clock_offset();
     /* The boot sets the timer for the first tick. */
-    wake_tick = sched_ticks + 1;
+    core->wake_tick = sched_ticks + 1;
 }
 
 /*
@@ -379,7 +378,7 @@ static void wake(struct thread *t, uint32_t bits)
     t->frame.regs[REG_A0] = KERR_OK;
     t->frame.regs[REG_A1] = bits;
     sched_ready(t);
-    trace_wake_bits = bits;
+    core_self()->trace_wake_bits = bits;
 }
 
 void sched_signal(struct notification *ntfn, uint32_t bits)
@@ -422,7 +421,9 @@ void irq_drop(struct cap *signalled)
  */
 static void tick_advance(uint32_t ticks)
 {
-    wake_stale = true;
+    struct core *core = core_self();
+    struct thread *turn = core->turn;
+    core->wake_stale = true;
     if (turn != NULL) {
         account_refill(turn);
         turn->balance = turn_next();
@@ -431,7 +432,7 @@ static void tick_advance(uint32_t ticks)
         }
         turn->stamp += ticks;
     }
-    turn_from = 0;
+    core->turn_from = 0;
     sched_ticks += ticks;
     uint32_t nearest = sched_ticks + NEAREST_NONE;
     for (uint32_t i = 0; i < TIMER_LINES; i++) {
@@ -447,7 +448,7 @@ static void tick_advance(uint32_t ticks)
         }
     }
     nearest_deadline = nearest;
-    if (!tick_before(sched_ticks, nearest_release)) {
+    if (!tick_before(sched_ticks, core->nearest_release)) {
         release();
     }
 }
@@ -461,18 +462,20 @@ static void tick_advance(uint32_t ticks)
  */
 uint32_t sched_wake_ticks(void)
 {
+    struct core *core = core_self();
+    struct thread *turn = core->turn;
     uint32_t wake = nearest_deadline - sched_ticks;
-    if (tick_before(nearest_release, nearest_deadline)) {
-        wake = nearest_release - sched_ticks;
+    if (tick_before(core->nearest_release, nearest_deadline)) {
+        wake = core->nearest_release - sched_ticks;
     }
     if (turn == NULL) {
         return wake;
     }
-    if (run_queue != 0) {
+    if (core->run_queue != 0) {
         return 1;
     }
     uint32_t balance = account_now(turn);
-    bool alone = thread_spare(turn) && spare_queue == 0;
+    bool alone = thread_spare(turn) && core->spare_queue == 0;
     if (!has_time(balance)) {
         return alone ? wake : 1;
     }
@@ -567,19 +570,21 @@ static void switch_to(struct thread *next)
         kputs("untraced thread\n");
         khalt(6);
     }
+    struct core *core = core_self();
     /* The thread leaving may have lost its process during its call; the one coming has one, since it is ready. */
-    if (thread_process(next) != thread_process(current)) {
+    if (thread_process(next) != thread_process(core->current)) {
         process_activate(thread_process(next));
         board_user_csrs_reset();
     }
-    current = next;
-    wake_stale = true;
+    core->current = next;
+    core->wake_stale = true;
 }
 
 /* Hand the processor to the thread whose turn it is, waiting for one to become ready while it is nobody's turn. */
 static void run_turn(void)
 {
-    while (turn == NULL) {
+    struct core *core = core_self();
+    while (core->turn == NULL) {
         LOOP_WAIT("an interrupt, in intr_wait");
         /*
          * Only a running thread, a timer line, a device interrupt or an account that reaches a tick
@@ -592,7 +597,7 @@ static void run_turn(void)
          * and OP_DEBUG_IRQ, which nobody is left to perform, so the same holds
          * and the host build, which has no clock and no devices, agrees.
          */
-        if (debug_trace || (armed_sources == 0 && spent_queue == 0)) {
+        if (debug_trace || (armed_sources == 0 && core->spent_queue == 0)) {
             kputs("no runnable thread\n");
             khalt(5);
         }
@@ -601,8 +606,8 @@ static void run_turn(void)
          * and an end of a turn the trap's count found due is moot, since the turn is over.
          */
         uint32_t ticks;
-        turn_due = false;
-        wake_stale = true;
+        core->turn_due = false;
+        core->wake_stale = true;
         bool device = intr_wait(sched_wake_ticks(), &ticks);
         if (ticks != 0) {
             tick_advance(ticks);
@@ -610,14 +615,14 @@ static void run_turn(void)
         if (device) {
             sched_claim_interrupts();
         }
-        turn = next_turn(turn_close());
+        core->turn = next_turn(turn_close());
     }
-    switch_to(turn);
+    switch_to(core->turn);
 }
 
 void sched_run_next(void)
 {
-    turn = next_turn(turn_close());
+    core_self()->turn = next_turn(turn_close());
     run_turn();
 }
 
@@ -628,13 +633,14 @@ void sched_run_next(void)
  */
 static void turn_end(void)
 {
+    struct core *core = core_self();
     uint32_t offset = turn_close();
-    struct thread *was = turn;
-    turn = NULL;
+    struct thread *was = core->turn;
+    core->turn = NULL;
     if (was != NULL) {
         thread_settle(was);
     }
-    turn = next_turn(offset);
+    core->turn = next_turn(offset);
     run_turn();
 }
 
@@ -646,26 +652,28 @@ void sched_tick(uint32_t ticks)
 
 void sched_count(uint32_t ticks)
 {
+    struct core *core = core_self();
     if (ticks != 0) {
         tick_advance(ticks);
-        turn_due |= !tick_before(sched_ticks, wake_tick);
+        core->turn_due |= !tick_before(sched_ticks, core->wake_tick);
     }
 }
 
 uint32_t sched_wake(void)
 {
+    struct core *core = core_self();
     /* Under tracing only a record ends a turn, so a count before tracing began ends none. */
-    if (turn_due) {
-        turn_due = false;
+    if (core->turn_due) {
+        core->turn_due = false;
         if (!debug_trace) {
             turn_end();
         }
     }
-    if (!wake_stale) {
+    if (!core->wake_stale) {
         return 0;
     }
-    wake_stale = false;
+    core->wake_stale = false;
     uint32_t ticks = sched_wake_ticks();
-    wake_tick = sched_ticks + ticks;
+    core->wake_tick = sched_ticks + ticks;
     return ticks;
 }

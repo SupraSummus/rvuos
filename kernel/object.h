@@ -534,11 +534,10 @@ bool cap_revoke_step(struct cap *root);
 bool cap_stop_here(bool preempt);
 
 /*
- * OP_DEBUG_PREEMPT's count of the places a walk may stop before the one it stops at, 0 when disarmed,
- * and whether a walk stopped there, which the call's dispatch turns into a tick.
+ * OP_DEBUG_PREEMPT's count of the places a walk may stop before the one it stops at, 0 when disarmed;
+ * the walk that stops there marks its core's preempt_stopped.
  */
 extern uint32_t preempt_countdown;
-extern bool preempt_stopped;
 
 /* Build a capability to an object. */
 struct cap cap_to_object(struct obj_header *obj, uint8_t rights);
@@ -562,9 +561,6 @@ static inline struct obj_header *cap_object(const struct cap *cap)
 }
 
 /* sched.c */
-
-/* The running thread. */
-extern struct thread *current;
 
 /*
  * A count of the counter in the parts an account counts:
@@ -623,27 +619,6 @@ static inline uint32_t account_cap(const struct thread *t)
  * A thread keeps the index of the one it waits on, QUEUE_NONE for none.
  */
 enum { QUEUE_NONE, QUEUE_RUN, QUEUE_SPARE, QUEUE_SPENT, QUEUES };
-extern paddr_t run_queue;
-extern paddr_t spare_queue;
-extern paddr_t spent_queue;
-
-/*
- * The tick the kernel next looks at the threads with units that wait without time, to give those with a tick time again:
- * the nearest tick one of their accounts reaches a tick, or NEAREST_NONE ticks ahead of the count with none.
- * A thread brings it forward as it waits without time, and the look makes it exact again,
- * so it may lie before the nearest such tick but never after one, and always ahead of the count.
- */
-extern uint32_t nearest_release;
-
-/* The thread whose turn it is, the running one; NULL while none runs. */
-extern struct thread *turn;
-
-/*
- * How far into the tick the turn has been charged, in counts, at most a tick's:
- * the turn's thread owes the counts from here to where the counter is.
- * Under tracing the clock is the tick count alone, so it is always zero.
- */
-extern uint32_t turn_from;
 
 /*
  * How many Irqs are armed on a device's line or a timer line,
@@ -662,14 +637,63 @@ extern uint32_t armed_sources;
 extern uint32_t nearest_deadline;
 
 /*
- * The tick the timer is set for, whether a change since may call for another,
- * and whether a trap's count has reached it, which ends the turn as that trap returns.
- * Settling a thread, binding or unbinding one, a switch, a tick, an arm and the stall mark it stale.
- * The marks of a switch and a bind only let the timer be set further sooner, so no check misses them.
+ * What a second core would need of its own:
+ * its thread, its turn, its queues, its release, its timer, and the call it is in.
+ * The units, the tick count and the lines are the machine's.
+ * The kernel runs on one core; see open decision 24 in DESIGN.md.
  */
-extern uint32_t wake_tick;
-extern bool wake_stale;
-extern bool turn_due;
+struct core {
+    /* The running thread. */
+    struct thread *current;
+
+    /* The thread whose turn it is, the running one; NULL while none runs. */
+    struct thread *turn;
+
+    /*
+     * How far into the tick the turn has been charged, in counts, at most a tick's:
+     * the turn's thread owes the counts from here to where the counter is.
+     * Under tracing the clock is the tick count alone, so it is always zero.
+     */
+    uint32_t turn_from;
+
+    /* The heads of the three queues; see QUEUE_RUN. */
+    paddr_t run_queue;
+    paddr_t spare_queue;
+    paddr_t spent_queue;
+
+    /*
+     * The tick the kernel next looks at the threads with units that wait without time,
+     * to give those with a tick time again:
+     * the nearest tick one of their accounts reaches a tick, or NEAREST_NONE ticks ahead of the count with none.
+     * A thread brings it forward as it waits without time, and the look makes it exact again,
+     * so it may lie before the nearest such tick but never after one, and always ahead of the count.
+     */
+    uint32_t nearest_release;
+
+    /*
+     * The tick the timer is set for, whether a change since may call for another,
+     * and whether a trap's count has reached it, which ends the turn as that trap returns.
+     * Settling a thread, binding or unbinding one, a switch, a tick, an arm and the stall mark it stale.
+     * The marks of a switch and a bind only let the timer be set further sooner, so no check misses them.
+     */
+    uint32_t wake_tick;
+    bool wake_stale;
+    bool turn_due;
+
+    /* Whether a walk stopped where OP_DEBUG_PREEMPT armed it, which the call's dispatch turns into a tick. */
+    bool preempt_stopped;
+
+    /* The bits the last wake handed over, zero if none; for the trace. */
+    uint32_t trace_wake_bits;
+};
+
+extern struct core core0;
+
+/* The core this trap runs on. */
+static inline struct core *core_self(void)
+{
+    return &core0;
+}
 
 /* Arm with bits, or disarm with zero; the deadline, or the line's mask, is the caller's. */
 void irq_set_bits(struct irq *irq, uint32_t bits);
@@ -728,9 +752,6 @@ extern uint32_t sched_ticks;
  * Never blocks; OP_NOTIFY_SIGNAL and a firing Irq are both this.
  */
 void sched_signal(struct notification *ntfn, uint32_t bits);
-
-/* The bits the last wake handed over, zero if none; for the trace. */
-extern uint32_t trace_wake_bits;
 
 /*
  * The running thread waits.

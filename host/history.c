@@ -268,6 +268,7 @@ void history_begin(bool call)
 {
     held.n = nodes.n = 0;
 
+    const struct thread *current = core_self()->current;
     const struct captable *table = current != NULL ? thread_table(current) : NULL;
     caller = current;
     caller_process = current != NULL ? thread_process(current) : NULL;
@@ -293,7 +294,7 @@ void history_begin(bool call)
 
     ticks_before = sched_ticks;
     traced_before = debug_trace;
-    charged = turn;
+    charged = core_self()->turn;
     charged_units = charged != NULL ? charged->time : (struct cap){ 0 };
     charged_balance = charged != NULL ? account_at_count(charged) : 0;
 }
