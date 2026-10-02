@@ -318,6 +318,12 @@ An interrupt taken while the kernel runs would have to preempt it, so `wfi` woul
 `intr_wait` waits in `wfe`, with `SEVONPEND` making a line becoming pending an event, and polls otherwise.
 The architecture makes any exception becoming pending an event, SysTick too, as the Cortex-M33 has it;
 QEMU 11 wakes `wfe` for a line alone, so the ARM demo waits there for ever; see `TODO.md`.
+Only becoming pending is an event: a SysTick left pending makes none when its next reload runs out.
+A deadline further than one reload reaches, 112 ms at RP2350's 150 MHz,
+woke the wait at the first reload and never again, and RP2350's Cortex-M33 slept through a driver's 250 ms;
+so the wait sets SysTick for what is left whenever it finds it pending short of the deadline,
+and the demo sleeps 130 ms once with nothing else to run, which hangs the wait without that on RP2350,
+and on mps2-an521 when the sleep is longer than its 0.84 s.
 The kernel leaves thread mode the first time through PendSV,
 which kmain pends and lets in with interrupts, as another core does as it starts, and which nothing pends after.
 A call is `svc`, two bytes, with the operation in `r12`, since Thumb code keeps `r7` as its frame pointer;

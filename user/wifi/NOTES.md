@@ -46,6 +46,18 @@ and the driver's window region went with them, cleanly.
 The root task watches each child, and `OP_THREAD_FAULT` gives the cause, the pc and the address;
 none came in this work, and `tools/no-globals.py` turns the likeliest, a global in a child, into a link error.
 
+## What it found in the kernel
+
+A program that sleeps a quarter of a second and drives devices the demo never touches found three things the checks had not:
+
+- On ARM an idle kernel slept for good through any deadline further than one reload of SysTick reaches,
+  112 ms on RP2350's Cortex-M33: SysTick left pending makes no second event for `wfe`.
+  The driver's 250 ms wait for the chip to power up hung the machine; `kernel/arch/arm/trap.c` sets SysTick again,
+  and the demo now sleeps past a reload.
+- Listing the ADC among the devices hung every boot, since a device whose clock is off never leaves reset.
+- The ARM link's stack check took two Thumb halfwords for `core_idle`'s address and saw a recursion;
+  it now reads literals only where the assembler marked data.
+
 ## Where it hurt
 
 ### IPC: the plumbing, not the model

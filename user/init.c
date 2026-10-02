@@ -166,6 +166,14 @@ enum {
 /* Ticks are a millisecond on every board so far; long enough to need a few of them. */
 #define SLEEP_US 10000u
 
+/*
+ * A sleep longer than one reload of ARM's SysTick reaches at RP2350's 150 MHz, 112 ms,
+ * so that an idle kernel there sets it again on its way to the deadline.
+ * QEMU's boards run SysTick slower, mps2-an521's reaching 0.84 s,
+ * and an idle second costs QEMU about a minute there, so they do not reach the second reload.
+ */
+#define LONG_SLEEP_US 130000u
+
 /* A period, kept long enough that arming each from the wake would fall a period behind. */
 #define PERIOD_US 5000u
 #define PERIODS 20u
@@ -1309,6 +1317,8 @@ int main(void)
     expect("the clock saw both sleeps",
            elapsed * 1000000u >= (uint64_t)hz * (2 * SLEEP_US) ? KERR_OK : KERR_INVALID_ARG);
     puts("root: clock ok\n");
+    expect("sleep past a reload of the compare", sleep_us(LONG_SLEEP_US));
+    puts("root: long sleep ok\n");
 
     /*
      * A period counts from the deadline before, not from the wake,

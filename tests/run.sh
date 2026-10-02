@@ -83,6 +83,8 @@ grep -q 'root: timer ok' "$text" \
     || fail "the timer did not wake the only thread from its sleep"
 grep -q 'root: clock ok' "$text" \
     || fail "the clock's counter, read through its region, did not show the sleeps' length"
+grep -q 'root: long sleep ok' "$text" \
+    || fail "a sleep longer than one reload of the compare never woke the idle kernel"
 grep -q 'root: period ok' "$text" \
     || fail "a periodic timer line drifted from its period"
 grep -q 'root: units ok' "$text" \

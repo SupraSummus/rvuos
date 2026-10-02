@@ -282,6 +282,13 @@ bool intr_wait(uint32_t wake, uint32_t *ticks)
     bool device;
     while (!(device = nvic_pending()) && !counter_due() && !nvic_ipi_pending()) {
         LOOP_WAIT("an interrupt to be pending");
+        /*
+         * A reload of SysTick ran out short of a compare further than one reload reaches: set it for what is left.
+         * Left pending, it would stay so through its next reload, which then makes no event, and wfe would not wake.
+         */
+        if (SCS_REG(ICSR) & ICSR_PENDSTSET) {
+            counter_tick();
+        }
         __asm__ volatile("wfe");
     }
     core_stall_end();
