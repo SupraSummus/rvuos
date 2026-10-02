@@ -72,6 +72,13 @@
 #define IPI_LINE     6
 
 /*
+ * What OP_DEBUG_FRAME hands out: nothing.
+ * The board's devices are the kernel's or granted at boot.
+ */
+#define DEBUG_RANGES 0
+#define DEBUG_RANGE_LIST
+
+/*
  * Interrupt line identifiers lie below IRQ_LINES; see irq.h.
  * The NVIC has 124 lines here, the SSE-200's 32 and the board's 92 after them;
  * the kernel takes the first 48, which hold every UART's, so its vector table stays 256 bytes.

@@ -70,6 +70,13 @@
 #define COUNTER_ADDR U32(0x20001c08)
 
 /*
+ * What OP_DEBUG_FRAME hands out: nothing.
+ * The board lists no hardware yet.
+ */
+#define DEBUG_RANGES 0
+#define DEBUG_RANGE_LIST
+
+/*
  * Interrupt line identifiers lie below IRQ_LINES; see irq.h.
  * A line is an interrupt matrix source, numbered as in Espressif's soc/interrupts.h;
  * the chip has 77 of them.

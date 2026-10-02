@@ -57,6 +57,13 @@
 #define COUNTER_HZ   U32(10000000)
 
 /*
+ * What OP_DEBUG_FRAME hands out: nothing.
+ * QEMU's devices are the kernel's or granted at boot, and the host build, which shares this board, has no hardware.
+ */
+#define DEBUG_RANGES 0
+#define DEBUG_RANGE_LIST
+
+/*
  * Interrupt line identifiers lie below IRQ_LINES; see irq.h.
  * The PLIC has 96 sources, and its source 0 does not exist:
  * line 0 is the kernel's log, see klog.h.

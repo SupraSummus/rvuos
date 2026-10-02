@@ -19,4 +19,4 @@ diff --git a/kernel/syscall.c b/kernel/syscall.c
 +           range_contains(base, size, thread_table(t)->hdr.pool);
  }
  
- static int op_debug(uint32_t op, const uint32_t *arg)
+ static int op_debug(struct thread *t, uint32_t slot, uint32_t op, const uint32_t *arg)

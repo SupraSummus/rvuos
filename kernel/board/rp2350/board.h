@@ -103,6 +103,23 @@
 #define SYSTICK_PER_COUNT 150
 
 /*
+ * What OP_DEBUG_FRAME hands out: devices a driver in user mode needs, none of them a bus master,
+ * each 16 KiB, its registers and their atomic aliases, read and write.
+ * IO_BANK0 and PADS_BANK0, the pins' functions and pads, and the three PIO blocks.
+ * board.c takes them out of reset and opens them to user mode in ACCESSCTRL,
+ * and on Hazard3 opens every pin to Non-secure access, which is how user mode reaches the bus there.
+ * The DMA, which reaches all of memory, and the devices the kernel keeps lie in none.
+ * A device whose clock the kernel does not start, as the ADC's, never leaves reset, so it is not listed.
+ */
+#define DEBUG_RANGES 5
+#define DEBUG_RANGE_LIST                                        \
+    { U32(0x40028000), U32(0x00004000), RIGHT_R | RIGHT_W },    \
+    { U32(0x40038000), U32(0x00004000), RIGHT_R | RIGHT_W },    \
+    { U32(0x50200000), U32(0x00004000), RIGHT_R | RIGHT_W },    \
+    { U32(0x50300000), U32(0x00004000), RIGHT_R | RIGHT_W },    \
+    { U32(0x50400000), U32(0x00004000), RIGHT_R | RIGHT_W },
+
+/*
  * Interrupt line identifiers lie below IRQ_LINES; see irq.h.
  * A line is a system IRQ, numbered as in the datasheet's table of them; the chip has 52,
  * each the same line of Hazard3's controller and of the Cortex-M33's NVIC, and each reaches both cores.

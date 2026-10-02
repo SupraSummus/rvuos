@@ -94,16 +94,53 @@ def elf_sizes(image: bytes, sections) -> dict[int, int]:
     return sizes
 
 
+def literal_ranges(image: bytes, sections) -> list[tuple[int, int]]:
+    """Where ARM code holds data, as (start, end):
+    from each $d mapping symbol to the next mapping symbol of its section, or the section's end.
+    The ARM ELF ABI has the assembler mark every switch between instructions and data in code,
+    the literals clang places after a function and a .word in assembly alike."""
+    marks = {}
+    for _, kind, _, _, off, size, link, entsize in sections:
+        if kind != SHT_SYMTAB:
+            continue
+        strtab = sections[link][4]
+        for i in range(size // entsize):
+            name_off, value, _, _, _, shndx = struct.unpack_from("<IIIBBH", image, off + i * entsize)
+            end = image.index(b"\0", strtab + name_off)
+            name = image[strtab + name_off:end].decode()
+            kind_of = name[:2]
+            if kind_of in ("$d", "$t", "$a") and (len(name) == 2 or name[2] == "."):
+                marks.setdefault(shndx, []).append((value, kind_of))
+    ranges = []
+    for shndx, found in marks.items():
+        found.sort()
+        section_end = sections[shndx][3] + sections[shndx][5]
+        for i, (at, kind_of) in enumerate(found):
+            if kind_of == "$d":
+                ranges.append((at, found[i + 1][0] if i + 1 < len(found) else section_end))
+    return sorted(ranges)
+
+
+def in_ranges(ranges, start, end) -> bool:
+    """Whether [start, end) lies within one of the sorted, disjoint ranges."""
+    i = bisect.bisect_right(ranges, (start, 0xFFFFFFFF)) - 1
+    return i >= 0 and ranges[i][0] <= start and end <= ranges[i][1]
+
+
 def data_words(image: bytes, sections):
     """Every aligned word of the kernel's own data.
     On ARM the code holds data too, the literals a function loads, and a code address carries bit 0,
-    so there every word of the code counts as well, and each word with bit 0 taken off beside it."""
+    so there every word of the code's literals counts as well, and each word with bit 0 taken off beside it;
+    an instruction is not one, though two halfwords of Thumb may read as a function's address."""
     thumb = arch(image) == "arm"
+    literals = literal_ranges(image, sections) if thumb else []
     for name, kind, flags, addr, off, size, _, _ in sections:
         if (kind == SHT_PROGBITS and flags & SHF_ALLOC and (thumb or not flags & SHF_EXECINSTR)
                 and name not in FOREIGN_SECTIONS):
             start = (-addr) % 4
             for i in range(start, size - 3, 4):
+                if flags & SHF_EXECINSTR and not in_ranges(literals, addr + i, addr + i + 4):
+                    continue
                 word = struct.unpack_from("<I", image, off + i)[0]
                 yield word
                 if thumb and word & 1:

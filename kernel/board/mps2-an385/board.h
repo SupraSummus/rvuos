@@ -57,6 +57,13 @@
 #define SYSTICK_PER_COUNT 1
 
 /*
+ * What OP_DEBUG_FRAME hands out: nothing.
+ * The board's devices are the kernel's or granted at boot.
+ */
+#define DEBUG_RANGES 0
+#define DEBUG_RANGE_LIST
+
+/*
  * Interrupt line identifiers lie below IRQ_LINES; see irq.h.
  * The NVIC has 32 lines here, and line 0, UART0's receiver, is shadowed by the kernel's log, see klog.h.
  */

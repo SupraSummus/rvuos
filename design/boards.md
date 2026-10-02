@@ -103,6 +103,19 @@ and the finest grain it may have, `PMP_GRAIN_MIN`;
 and `csrs.h`, the user-mode CSRs the demo checks the kernel sets back.
 Nothing else in the kernel names an address.
 
+**Debug frames.**
+A board lists, in `DEBUG_RANGE_LIST`, hardware that no boot capability grants,
+and `OP_DEBUG_FRAME` makes a frame of a block within one of its ranges, below the `Debug` capability,
+with that range's rights.
+The kernel keeps the ranges after the boot's grants, so they are checked as those are.
+RP2350 lists the pins' functions and pads and the three PIO blocks, which the Wi-Fi system of `user/wifi/` drives;
+QEMU lists none, since its devices are the kernel's or granted at boot, and the host build has no hardware;
+nor do the other boards yet.
+A device may be a bus master, so a `Debug` capability that makes frames reaches whatever the board lists:
+it is the machine's, and a driver is given the frame, not the capability.
+The boot table has no slot for devices, and one would move every slot the seeds and the corpus name,
+so frames come through the capability the root task holds anyway; `DESIGN.md`, open decision 25.
+
 **QEMU `virt`** is the development target and the one `make check` runs.
 QEMU loads the image and enters it in machine mode.
 `make CORES=2` builds the kernel for two harts, which QEMU starts with `-smp 2`;
@@ -222,6 +235,11 @@ so the kernel fences them off, see "Physical Memory Protection",
 and a process reaches a peripheral only through a frame,
 and only where ACCESSCTRL lets user mode in too, which at reset it does for few.
 TIMER0 is opened, for the clock; `escape-store-clock` stores to it through no frame, and faults.
+So are the devices of `DEBUG_RANGE_LIST`, which the boot also takes out of reset,
+and on Hazard3, whose user mode is Non-secure on the bus, every pin is opened to Non-secure access,
+without which IO_BANK0 and PADS_BANK0 show user mode none.
+A device whose clock the kernel leaves off never leaves reset, and the boot waited for the ADC's for ever,
+so the ADC is not listed.
 
 On the Cortex-M33 the bootrom enters the image's vector table in the Secure state,
 which the kernel and every thread keep, see "Architectures",

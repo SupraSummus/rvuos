@@ -128,6 +128,17 @@
  * since under tracing the tick stops no call; see DESIGN.md, "Verification".
  */
 #define OP_DEBUG_PREEMPT 32
+/*
+ * Debug: a frame over hardware the board lists, such as a device's registers no boot capability grants.
+ * a1 = base, a2 = size, a3 = destination slot.
+ * The range must be a block, as for OP_FRAME_CARVE, within one of the board's ranges,
+ * else KERR_INVALID_ARG; it gets that range's rights, and hangs below the invoked capability.
+ * QEMU's board lists none.
+ * A device may be a bus master, so a Debug capability that makes frames reaches whatever the board lists:
+ * it is the machine's, and a program that does not own the machine is not given it.
+ * See DESIGN.md, "Boards".
+ */
+#define OP_DEBUG_FRAME 36
 
 /*
  * CapTable (RIGHT_W): copy a capability from the caller's table.
@@ -455,7 +466,7 @@
 #define OP_TIME_BIND 29
 
 /* One above the highest operation code; the fuzzer's mutator draws below it. */
-#define OP_COUNT 36
+#define OP_COUNT 37
 
 /*
  * Capability slots the kernel fills in the root task's table at boot.

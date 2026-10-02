@@ -46,6 +46,11 @@ struct thread *boot_create_root(void)
     uint32_t counter_size = region_min_size();
     boot_granted[GRANT_COUNTER] =
         (struct granted_range){ COUNTER_ADDR & ~(counter_size - 1), counter_size, RIGHT_R };
+    /* What the board lists for OP_DEBUG_FRAME, which no boot capability holds; the array is never empty. */
+    static const struct granted_range debug_ranges[DEBUG_RANGES + 1] = { DEBUG_RANGE_LIST };
+    for (unsigned i = GRANT_DEBUG; i < GRANTED_RANGES; i++) {
+        boot_granted[i] = debug_ranges[i - GRANT_DEBUG];
+    }
 
     /* The grants become frames and the Untypeds as they are, and every one of those is a NAPOT block. */
     for (unsigned i = 0; i < GRANTED_RANGES; i++) {

@@ -163,6 +163,19 @@ Interrupt lines:
 | 1 to 51 | the system IRQs, numbered as in the datasheet; nothing raises the console's line, 46 |
 | 26 | SIO's doorbell; on the Cortex-M33 with `CORES=2` the kernel's, for its cores, and an `Irq` cannot be bound to it |
 
+`OP_DEBUG_FRAME` makes frames within these ranges, which no boot capability grants;
+the kernel takes each device out of reset at boot and opens it to user mode in ACCESSCTRL,
+and on the RISC-V cores opens every pin to Non-secure access, which is how user mode reaches the bus there:
+
+| Range | Size | What | Rights |
+|---|---|---|---|
+| `0x40028000` | 16 KiB | IO_BANK0, the pins' functions, overrides and interrupts | read, write |
+| `0x40038000` | 16 KiB | PADS_BANK0, the pins' pads | read, write |
+| `0x50200000`, `0x50300000`, `0x50400000` | 16 KiB each | PIO0, PIO1 and PIO2 | read, write |
+
+Each is a device's registers and their atomic aliases, and none is a bus master.
+The ADC is not listed: its clock is not running, and it never leaves reset without one.
+
 The console's first word counts every byte written, and the bytes follow from offset 16;
 what does not fit is counted and dropped.
 The counter's high half lies below it, so `rv_counter_read` gets a constant high word

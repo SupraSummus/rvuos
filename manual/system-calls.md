@@ -119,6 +119,16 @@ a call that finishes first leaves the rest of n to the next one.
 Zero disarms it, and a second call counts n anew.
 Works while tracing is on, when the tick stops no call.
 
+**`OP_DEBUG_FRAME` (36).**
+`a1` = base, `a2` = size, `a3` = destination slot in the caller's table.
+Makes a frame over hardware the board lists, such as a device's registers, which no boot capability grants;
+section 3 says what each board lists, and QEMU's lists nothing.
+The range must be a block, as for `OP_FRAME_CARVE`, within one of the board's ranges (`KERR_INVALID_ARG`),
+and gets that range's rights.
+The new frame hangs below the invoked capability.
+A device may be a bus master, so a `Debug` capability reaches whatever its board lists:
+give it only to a program that owns the machine, and give a driver the frame, not the capability.
+
 ### 6.4 Operations on `CapTable`
 
 All need `RIGHT_W` on the table.
@@ -447,8 +457,9 @@ only a wait, the tick, a fault, section 5.6, or a revoke that takes its own proc
 | 33 | `OP_THREAD_FAULT` | `Thread` |
 | 34 | `OP_THREAD_READ_REG` | `Thread` |
 | 35 | `OP_THREAD_WRITE_REG` | `Thread` |
+| 36 | `OP_DEBUG_FRAME` | `Debug` |
 
-`OP_COUNT` is 36, one above the highest code; 16 is unused.
+`OP_COUNT` is 37, one above the highest code; 16 is unused.
 
 ## 7. What the root task starts with
 

@@ -39,9 +39,16 @@
 
 #define RESETS_RESET      0x40020000u
 #define RESETS_RESET_DONE 0x40020008u
+#define RESET_IO_BANK0    (1u << 6)
+#define RESET_PADS_BANK0  (1u << 9)
+#define RESET_PIO0        (1u << 11)
+#define RESET_PIO1        (1u << 12)
+#define RESET_PIO2        (1u << 13)
 #define RESET_PLL_SYS     (1u << 14)
 #define RESET_PLL_USB     (1u << 15)
 #define RESET_TIMER0      (1u << 23)
+/* The devices of board.h's DEBUG_RANGE_LIST. */
+#define RESET_DEBUG_RANGES (RESET_IO_BANK0 | RESET_PADS_BANK0 | RESET_PIO0 | RESET_PIO1 | RESET_PIO2)
 
 #define XOSC_CTRL     0x40048000u
 #define XOSC_STATUS   0x40048004u
@@ -88,6 +95,13 @@
 #define TICKS_ENABLE      1u
 #define TICKS_PER_US      12u /* of clk_ref, the crystal's */
 
+#define ACCESSCTRL_GPIO_NSMASK0 0x4006000cu
+#define ACCESSCTRL_GPIO_NSMASK1 0x40060010u
+#define ACCESSCTRL_PIO0     0x4006004cu
+#define ACCESSCTRL_PIO1     0x40060050u
+#define ACCESSCTRL_PIO2     0x40060054u
+#define ACCESSCTRL_IO_BANK0 0x40060068u
+#define ACCESSCTRL_PADS_BANK0 0x40060070u
 #define ACCESSCTRL_TIMER0   0x40060098u
 #define ACCESSCTRL_PASSWORD 0xacce0000u
 #define ACCESSCTRL_SU       (1u << 2)
@@ -104,6 +118,13 @@
 #else
 #define ACCESSCTRL_USER ACCESSCTRL_SU
 #endif
+
+/* Lets user mode into a device, keeping who else may reach it. */
+static void open_to_user(uint32_t reg)
+{
+    uint32_t was = REG(reg) & 0xffu;
+    REG(reg) = ACCESSCTRL_PASSWORD | was | ACCESSCTRL_USER;
+}
 
 static void unreset(uint32_t blocks)
 {
@@ -184,8 +205,23 @@ void board_init(void)
     bootsel_arm(WATCHDOG_LONGEST);
 
     unreset(RESET_TIMER0);
-    uint32_t timer0 = REG(ACCESSCTRL_TIMER0) & 0xffu;
-    REG(ACCESSCTRL_TIMER0) = ACCESSCTRL_PASSWORD | timer0 | ACCESSCTRL_USER;
+    open_to_user(ACCESSCTRL_TIMER0);
+
+    /*
+     * The devices OP_DEBUG_FRAME hands out, see board.h, out of reset and open to user mode.
+     * Hazard3's user mode is Non-secure on the bus, and IO_BANK0 and PADS_BANK0 show it only the pins
+     * the masks let it reach, which are all of them; the kernel drives none.
+     */
+    unreset(RESET_DEBUG_RANGES);
+    open_to_user(ACCESSCTRL_IO_BANK0);
+    open_to_user(ACCESSCTRL_PADS_BANK0);
+    open_to_user(ACCESSCTRL_PIO0);
+    open_to_user(ACCESSCTRL_PIO1);
+    open_to_user(ACCESSCTRL_PIO2);
+#ifdef __riscv
+    REG(ACCESSCTRL_GPIO_NSMASK0) = 0xffffffffu;
+    REG(ACCESSCTRL_GPIO_NSMASK1) = 0x0000ffffu;
+#endif
 
     /* The console starts empty, whatever the last image left in it; see halt.c. */
     REG(UART_BASE) = 0;

@@ -126,6 +126,9 @@ The kernel does not recurse and has no frame of run-time size:
 no variable-length array, no `alloca`.
 A walk that would recurse walks with no stack, as `cap_revoke_below` does.
 A call through a pointer counts as a call to every function whose address is taken.
+An address is taken where the code forms it from constants or the kernel's data holds it;
+on ARM the literals among the code count too, the words the assembler marks as data with `$d`,
+but not the instructions, two halfwords of which once read as `core_idle`'s address.
 
 **The check.**
 The kernel's link runs `tools/stack-depth.py`,

@@ -1030,9 +1030,11 @@ struct granted_range {
     uint32_t size;
     uint8_t rights;
 };
-#define GRANTED_RANGES 5
 /* The counter's block, read only, which OP_CLOCK_FRAME hands out. */
 #define GRANT_COUNTER 4
+/* The board's DEBUG_RANGES follow, which only OP_DEBUG_FRAME hands out. */
+#define GRANT_DEBUG 5
+#define GRANTED_RANGES (GRANT_DEBUG + DEBUG_RANGES)
 extern struct granted_range boot_granted[GRANTED_RANGES];
 
 /*
