@@ -542,6 +542,7 @@ so of the orders the cores' traps may come in it takes one.
 A core that a call waits for in `core_shoot` traps at once, its registers saved,
 while one only told of a change goes on in user mode until then,
 so the self-check sees a core left running what the call took from it.
+Such a core drops what its trap was for through the kernel's own `core_trapped`, as the target's trap does.
 Each core has its own PMP CSRs there, and the host checks after every round of interrupts
 that no core idles while a thread waits for a turn on it.
 The seeds named `cores-` bind a driver thread to the second core's units and take things from it there;
@@ -549,9 +550,13 @@ the other seeds and the corpus run on the first core alone, as on one.
 `make smp-test` boots the demo on two harts of QEMU `virt`,
 the only check of the lock, the software interrupt, the idle and the start of the second hart,
 and of a shootdown that waits on real hardware rather than the host's.
+`make arm-test` boots it on mps2-an521's two Cortex-M33s last, the only check of all that on ARM,
+of its ticket taken with an exclusive pair, its waits in `wfe` and the line the kernel keeps for its cores;
+`make mutants` runs neither ARM's demos nor this one, as it runs no ARM at all.
 QEMU runs the harts in turns too, so a hart that waits for the lock spins out its turn while the holder waits for its own,
 which the demo allows for and nothing measures;
-no check yet makes a core wait for the lock while another walks, or replays the corpus on two harts against the host.
+an ARM core waits in `wfe` instead, which QEMU 8.2 takes for a turn handed to the other core.
+No check yet makes a core wait for the lock while another walks, or replays the corpus on two harts against the host.
 
 **Hardware.**
 QEMU's PMP may differ from a real core in Smepmp behaviour,

@@ -166,25 +166,40 @@ static void mpu_sync(void)
     __asm__ volatile("dsb\n\tisb" : : : "memory");
 }
 
-/* Every region cleared, and the MPU off until the first thread runs; see mpu_thread. */
-void pmp_init(void)
+/* The MPU's regions, every one cleared, and the MPU off until the first thread runs; see mpu_thread. */
+static unsigned mpu_reset(void)
 {
     mpu_kernel();
     unsigned regions = (SCS_REG(MPU_TYPE) >> 8) & 0xffu;
+    for (unsigned i = 0; i < regions; i++) {
+        LOOP_BOUND(256);
+        pmp_clear(i);
+    }
+#if ARMV8M
+    SCS_REG(MPU_MAIR0) = MAIR0_VALUE;
+#endif
+    return regions;
+}
+
+void pmp_init(void)
+{
+    unsigned regions = mpu_reset();
     if (regions == 0) {
         kpanic("no MPU");
-    }
-    for (unsigned i = 0; i < regions; i++) {
-        pmp_clear(i);
     }
     pmp_entry_count = regions < PMP_MAX_ENTRIES ? regions : PMP_MAX_ENTRIES;
     /* The default memory map lets unprivileged code in nowhere, so nothing past the regions grants a thread a right. */
     pmp_entry_end = pmp_entry_count;
     /* The MPU has no finer grain to probe for; its smallest region is the board's minimum. */
     pmp_grain = PMP_GRAIN_MIN;
-#if ARMV8M
-    SCS_REG(MPU_MAIR0) = MAIR0_VALUE;
-#endif
+}
+
+/* Another core's MPU, which has as many regions as the first's; the switch to its first thread loads them. */
+void mpu_core_init(void)
+{
+    if (mpu_reset() < pmp_entry_count) {
+        kpanic("a core has fewer MPU regions than the first");
+    }
 }
 
 /* The kernel writes the regions only while the MPU is off, and mpu_thread's barrier makes them take. */

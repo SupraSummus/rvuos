@@ -30,8 +30,9 @@ make test       # boot under QEMU and check the transcript
 make host-test  # replay the fuzz corpus on the host build with invariants
 make fuzz       # fuzz the system call surface for FUZZ_TIME seconds in FUZZ_JOBS processes
 make qemu-replay # replay the corpus on QEMU and compare traces with the host
-make arm-test   # boot the same demo on a Cortex-M3 under QEMU, BOARD=mps2-an385, and check it
-make check      # test, escape, host-test, qemu-replay and arm-test
+make arm-test   # boot the same demo under QEMU on a Cortex-M3, mps2-an385, and on one and two Cortex-M33s, mps2-an521
+make smp-test   # boot the demo on two harts of QEMU virt
+make check      # test, escape, host-test, qemu-replay, arm-test and smp-test
 make mutants    # plant the bugs of tests/mutants/ and see which checks catch them
 make mutants-refresh # carry the patches of tests/mutants/ over to the kernel as it is
 ```
@@ -56,7 +57,7 @@ make BOARD=esp32c6 test  # the same, and check the transcript
 
 The kernel boots in machine mode on QEMU `virt`, the ESP32-C6 and RP2350's Hazard3 cores
 and runs an embedded root task in user mode behind PMP,
-and in handler mode on QEMU's Cortex-M3 and RP2350's Cortex-M33,
+and in handler mode on QEMU's Cortex-M3 and Cortex-M33 and RP2350's Cortex-M33,
 where the same root task runs unprivileged behind the MPU.
 The root task holds capabilities to its own objects and to untyped memory,
 makes frames and a kernel pool of it,

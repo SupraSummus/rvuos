@@ -7,6 +7,7 @@
 
 #include "csr.h"
 #include "kernel.h"
+#include "object.h"
 
 void board_init(void)
 {
@@ -17,3 +18,14 @@ void board_init(void)
 void board_user_csrs_reset(void)
 {
 }
+
+#if CORES > 1
+/* Every hart enters at the reset vector with the first, and the others wait in start.S for their software interrupt. */
+void board_cores_start(void)
+{
+    for (uint32_t c = 1; c < CORES; c++) {
+        LOOP_BOUND(CORES);
+        ipi_send(c);
+    }
+}
+#endif

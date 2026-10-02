@@ -58,7 +58,7 @@ its room in the pool among them, and builds after.
 **The check.**
 Every loop a trap can run says what bounds it with an annotation from `kernel/work.h`:
 a constant, what it pays with, a row of the table below, an argument, a wait on the hardware,
-or a wait on another core, for the kernel's lock or for a trap to begin there; see "Cores".
+or a wait on another core, for the kernel's lock, a ticket of it, or a trap to begin there; see "Cores".
 An annotation is a `_Static_assert`, so it changes no code the compiler makes.
 The kernel's link runs `tools/loop-bounds.py`,
 which finds the loops in the machine code, inlined and compiler-made ones too,
@@ -76,9 +76,10 @@ A wait must wait on every way round, which the link checks too:
 a `wfi`, a load from a fixed address outside RAM, or a call to a function holding a `wfi`,
 and on ARM a `wfe` counts as a `wfi` does.
 A wait on another core must read with an acquire on every way round,
-a `fence` after a load or an `lr` or `amo`, or a `dmb` on ARM,
+a `fence` after a load or an `lr` or `amo`, or on ARM a `dmb` or one of ARMv8-M's loads with acquire, `lda` or `ldaex`,
 which is how it reads what the other core writes;
-what bounds it is the other core: a lock held a step of a walk at most, a trap that user mode takes at once.
+what bounds it is the other core: a lock held a step of a walk at most, a trap that user mode takes at once,
+or on ARM a ticket of the lock another core takes between an exclusive load and store, once a trap at most.
 Other bounds rest on an invariant, as `i < img->count` does,
 and a paid loop names its unit: a node, a link, an object or a waiter.
 The host harness `fuzz-work` counts both after every call:

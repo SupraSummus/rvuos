@@ -105,9 +105,11 @@ def in_it(insns, j):
 
 
 def predicated_exits(insns):
-    """The instructions of every IT block that ends in a return, the it among them.
+    """The instructions of every IT block that ends in a return, the it among them,
+    and an unconditional branch right after one.
     Where RISC-V branches out of a loop to its function's return,
-    Thumb may predicate the return inside the loop's block, and these come from after the loop;
+    Thumb may predicate the return inside the loop's block, and these come from after the loop,
+    the branch that goes round again from where the return lies;
     tools/loop-bounds.py leaves them out when it matches a loop to the source."""
     out = set()
     for k, (pc, mnem, _) in enumerate(insns):
@@ -116,6 +118,8 @@ def predicated_exits(insns):
         last = k + len(mnem) - 1
         if last < len(insns) and classify(insns[last][1], insns[last][2])[0] == "return":
             out.update(insns[j][0] for j in range(k, last + 1))
+            if last + 1 < len(insns) and bare(insns[last + 1][1]) == "b":
+                out.add(insns[last + 1][0])
     return out
 
 

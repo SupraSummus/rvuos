@@ -2,11 +2,12 @@
 # clang and lld cross-compile without a separate toolchain.
 #
 # BOARD selects kernel/board/<board>/ and user/board/<board>/:
-#   qemu     QEMU virt, RV32, the default, and with mps2-an385 what `make check` runs on
+#   qemu     QEMU virt, RV32, the default, and with the two MPS2 boards what `make check` runs on
 #   esp32c6  an ESP32-C6, loaded into RAM through its ROM over USB
 #   rp2350   an RP2350, loaded into RAM through its bootrom over USB,
 #            on its Hazard3 cores, or with ARCH=arm on its Cortex-M33 ones
 #   mps2-an385  QEMU's MPS2 with the AN385 image, a Cortex-M3; `make arm-test` runs its demo
+#   mps2-an521  QEMU's MPS2 with the AN521 image, two Cortex-M33s; `make arm-test` runs its demo too, on both
 # and the board selects its architecture, ARCH, kernel/arch/<arch>/ and user/arch/<arch>/:
 #   riscv    RV32IMAC, machine and user mode, PMP
 #   arm      ARMv7-M or ARMv8-M, handler and unprivileged thread mode, a PMSAv7 or PMSAv8 MPU
@@ -33,19 +34,20 @@ PMP_MAX_ENTRIES ?= 16
 PMP_VARIANT := $(if $(filter-out 16,$(PMP_MAX_ENTRIES)),-pmp$(PMP_MAX_ENTRIES))
 
 # The cores the kernel runs on; see DESIGN.md, "Cores".
-# Only QEMU virt starts more than one, with as many harts, and builds them in a directory of their own.
+# QEMU virt starts as many harts, and mps2-an521 its second Cortex-M33 for CORES=2;
+# either builds them in a directory of its own.
 # The host harnesses keep to their own count of cores, so CORES leaves them alone.
 CORES ?= 1
 ifneq ($(CORES),1)
-ifneq ($(BOARD),qemu)
-$(error BOARD=$(BOARD) runs one core; only qemu takes CORES=$(CORES))
+ifeq ($(filter qemu mps2-an521,$(BOARD)),)
+$(error BOARD=$(BOARD) runs one core; only qemu and mps2-an521 take CORES=$(CORES))
 endif
 endif
 VARIANT := $(PMP_VARIANT)$(if $(filter-out 1,$(CORES)),-smp$(CORES))
 
 # The board's architecture, which only RP2350 lets the command line change;
 # the other one builds in a directory of its own, as a budget does.
-BOARD_ARCH_DEFAULT := $(if $(filter mps2-an385,$(BOARD)),arm,riscv)
+BOARD_ARCH_DEFAULT := $(if $(filter mps2-an385 mps2-an521,$(BOARD)),arm,riscv)
 ARCH := $(BOARD_ARCH_DEFAULT)
 ifneq ($(ARCH),$(BOARD_ARCH_DEFAULT))
 ifneq ($(BOARD)$(ARCH),rp2350arm)
@@ -55,7 +57,7 @@ endif
 BUILD := build/$(BOARD)$(if $(filter-out $(BOARD_ARCH_DEFAULT),$(ARCH)),-$(ARCH))$(VARIANT)
 
 # The Cortex-M33 without its DSP and floating-point extensions, which the kernel neither uses nor saves.
-ifeq ($(BOARD)$(ARCH),rp2350arm)
+ifneq ($(filter rp2350arm mps2-an521arm,$(BOARD)$(ARCH)),)
 ARCHFLAGS := --target=thumbv8m.main-none-eabi -mcpu=cortex-m33+nodsp+nofp -mfloat-abi=soft
 else ifeq ($(ARCH),arm)
 ARCHFLAGS := --target=thumbv7m-none-eabi -mcpu=cortex-m3 -mfloat-abi=soft
@@ -69,21 +71,26 @@ CFLAGS    := $(ARCHFLAGS) -std=c11 -ffreestanding -fno-builtin -fno-pic -fno-com
 ASFLAGS   := $(ARCHFLAGS) -g -Iinclude -DCORES=$(CORES)
 LDFLAGS   := $(ARCHFLAGS) -nostdlib -static -fuse-ld=lld -Wl,--gc-sections -Wl,--no-dynamic-linker
 
+# A board's files are those of kernel/board/<board>/ and user/board/<board>/,
+# and of its family's directory beside them where boards share files: the two MPS2 boards share mps2/.
+BOARD_FAMILY := $(if $(filter mps2-%,$(BOARD)),mps2)
+FAMILY_DIRS  = $(if $(BOARD_FAMILY),$(1)/board/$(BOARD_FAMILY))
+
 # The kernel sees its architecture's and its board's headers,
 # and user programs their architecture's call and their board's console.
 # The kernel leaves its frame sizes beside each object for tools/stack-depth.py
 # and puts each function in a section of its own, so the linker drops the dead ones.
 # Its debug information names files from the top of the tree,
 # so tools/loop-bounds.py finds them wherever the tree was built, as in a mutant's copy.
-KERNEL_INC := -Ikernel -Ikernel/arch/$(ARCH) -Ikernel/board/$(BOARD)
-USER_INC   := -Iuser/arch/$(ARCH) -Iuser/board/$(BOARD)
+KERNEL_INC := -Ikernel -Ikernel/arch/$(ARCH) -Ikernel/board/$(BOARD) $(addprefix -I,$(call FAMILY_DIRS,kernel))
+USER_INC   := -Iuser/arch/$(ARCH) -Iuser/board/$(BOARD) $(addprefix -I,$(call FAMILY_DIRS,user))
 $(BUILD)/kernel/%.o: CFLAGS += $(KERNEL_INC) -fstack-usage -ffunction-sections \
                                -fdebug-prefix-map=$(CURDIR)=.
 $(BUILD)/kernel/%.o: ASFLAGS += $(KERNEL_INC)
 $(BUILD)/user/%.o: CFLAGS += $(USER_INC)
 
 KERNEL_SRC_C := $(wildcard kernel/*.c kernel/arch/$(ARCH)/*.c kernel/board/$(BOARD)/*.c \
-                          kernel/board/$(BOARD)/$(ARCH)/*.c)
+                          kernel/board/$(BOARD)/$(ARCH)/*.c $(addsuffix /*.c,$(call FAMILY_DIRS,kernel)))
 KERNEL_SRC_S := $(wildcard kernel/*.S kernel/arch/$(ARCH)/*.S kernel/board/$(BOARD)/*.S)
 KERNEL_OBJ   := $(patsubst %.c,$(BUILD)/%.o,$(KERNEL_SRC_C)) \
                 $(patsubst %.S,$(BUILD)/%.o,$(filter-out %.ld.S,$(KERNEL_SRC_S)))
@@ -138,7 +145,7 @@ BOARD_FACTS   := BOARD_PMP_ENTRIES=7 BOARD_PMP_GRAIN=32 BOARD_MTVAL=zero BOARD_M
 endif
 else ifeq ($(BOARD),mps2-an385)
 # The replay driver's layout is QEMU virt's, so only the demo is built, as for the chips.
-# QEMU exits through semihosting, which only the kernel reaches; see kernel/board/mps2-an385/halt.c.
+# QEMU exits through semihosting, which only the kernel reaches; see kernel/board/mps2/halt.c.
 USER_PROGRAMS := init
 IMAGE         := elf
 QEMU_ARM      := qemu-system-arm
@@ -148,8 +155,19 @@ RUN_INIT      := $(QEMU_ARM) $(QEMUFLAGS_ARM) -kernel $(BUILD)/kernel-init.elf
 # Where the core's transcripts differ from QEMU virt's, see tests/run.sh:
 # an MPU of eight regions, none smaller than 32 bytes, and ARMv7-M's report of a fault.
 BOARD_FACTS   := BOARD_PMP_ENTRIES=8 BOARD_PMP_GRAIN=32 BOARD_ARCH=arm
+else ifeq ($(BOARD),mps2-an521)
+# As for mps2-an385: the demo alone, leaving QEMU through semihosting.
+# The board always has its two cores; CORES says whether the kernel starts the second.
+USER_PROGRAMS := init
+IMAGE         := elf
+QEMU_ARM      := qemu-system-arm
+QEMUFLAGS_ARM := -M mps2-an521 -nographic -nodefaults -nic none -serial mon:stdio \
+                 -semihosting-config enable=on,target=native -icount shift=0,sleep=off
+RUN_INIT      := $(QEMU_ARM) $(QEMUFLAGS_ARM) -kernel $(BUILD)/kernel-init.elf
+# The Cortex-M33's, as RP2350's: eight Secure MPU regions, none smaller than 32 bytes, and ARM's report of a fault.
+BOARD_FACTS   := BOARD_PMP_ENTRIES=8 BOARD_PMP_GRAIN=32 BOARD_ARCH=arm
 else
-$(error unknown BOARD '$(BOARD)'; the boards are qemu, esp32c6, rp2350 and mps2-an385)
+$(error unknown BOARD '$(BOARD)'; the boards are qemu, esp32c6, rp2350, mps2-an385 and mps2-an521)
 endif
 
 # The escape-attempt suite: one root task per scenario, built for whichever board.
@@ -391,9 +409,13 @@ qemu-replay: $(BUILD)/kernel-fuzzdrv.elf $(HOST_BUILD)/fuzz
 		$(if $(REPLAY_FAIL_FAST),--fail-fast) \
 		--kernel $(BUILD)/kernel-fuzzdrv.elf --host $(HOST_BUILD)/fuzz tests/seeds tests/corpus
 
-# The same demo on ARM, under QEMU; see DESIGN.md, "Architectures".
+# The same demo on ARM, under QEMU, on ARMv7-M and on ARMv8-M, and on mps2-an521's two cores;
+# see DESIGN.md, "Architectures" and "Cores".
+# tests/mutants.sh leaves it out, as it leaves ARM out, which the host build does not compile.
 arm-test:
 	$(MAKE) BOARD=mps2-an385 test
+	$(MAKE) BOARD=mps2-an521 test
+	$(MAKE) BOARD=mps2-an521 CORES=2 test
 
 # The same demo on two harts of QEMU virt, which goes on to the second core; see DESIGN.md, "Cores".
 smp-test:

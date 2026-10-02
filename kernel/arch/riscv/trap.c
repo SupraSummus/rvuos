@@ -15,21 +15,15 @@ uint32_t core_id(void)
 
 /*
  * A trap from user mode, with the thread's registers in its frame.
- * Another core may have stopped or destroyed the thread while the trap waited for the kernel's lock;
- * then what the thread trapped for is no longer its to do, and is dropped,
- * the frame left as it was saved, and the core hands the processor on as for a thread that waits.
+ * The interrupt it entered on is taken first, whatever became of the thread;
+ * another core may have stopped or destroyed it while the trap waited for the kernel's lock,
+ * and then nothing else is, see core_trapped.
  * Returns the frame to resume, or NULL for nobody's turn, which start.S idles for.
  */
 struct trap_frame *trap_handler(struct trap_frame *frame)
 {
     core_enter();
     struct core *core = core_self();
-    struct thread *t = core->current;
-    bool taken = t == NULL || t->state != THREAD_READY;
-    if (!taken && frame != &t->frame) {
-        kpanic("trap frame is not the current thread's");
-    }
-
     bool traced = timer_trap_enter((csr_read(mip) & MIP_MTIP) != 0);
 
     uint32_t cause = csr_read(mcause);
@@ -55,12 +49,18 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
 #endif
         default:
             kputs("unexpected interrupt\n");
-            if (!taken) {
+            if (core->current != NULL && frame == &core->current->frame) {
                 report_frame(frame);
             }
             kpanic("only the timer, the software and the external interrupt are enabled");
         }
-    } else if (!taken) {
+    }
+
+    struct thread *t = core_trapped();
+    if (t != NULL && frame != &t->frame) {
+        kpanic("trap frame is not the current thread's");
+    }
+    if (t != NULL && !(cause & MCAUSE_INTERRUPT)) {
         switch (cause) {
         case CAUSE_ECALL_U:
             syscall_dispatch(t);
@@ -81,9 +81,6 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
             report_frame(frame);
             kpanic("unhandled trap cause");
         }
-    }
-    if (taken) {
-        sched_run_next();
     }
 
     timer_trap_leave(traced);

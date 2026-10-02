@@ -25,7 +25,8 @@ A walk must be a row of the table in "Bounded work", and every row walked or pai
 A loop that says it waits must wait on every way round:
 a wfi, a load from a fixed address outside RAM, or a call to a function holding a wfi.
 A loop that says it waits on another core must read with an acquire on every way round:
-a fence after a load, as an atomic load with acquire compiles to, or an lr or an amo; a dmb on ARM.
+a fence after a load, as an atomic load with acquire compiles to, or an lr or an amo;
+on ARM a dmb, or one of ARMv8-M's loads with acquire, lda and ldaex among them.
 The self-check is not checked, and every call to it must stand in an if on debug_trace.
 
 tools/ksource.py has read the source beforehand, a translation unit at a time,
@@ -252,7 +253,7 @@ def waiting_blocks(blocks, insns, ram, waits, moving):
 
 
 # What makes a read an acquire, after the load or as one, by architecture.
-ACQUIRES = {"riscv": re.compile(r"^(fence|lr\.w(\.\w+)?|amo\w+\.w(\.\w+)?)$"), "arm": re.compile(r"^dmb")}
+ACQUIRES = {"riscv": re.compile(r"^(fence|lr\.w(\.\w+)?|amo\w+\.w(\.\w+)?)$"), "arm": re.compile(r"^(dmb|lda\w*)$")}
 
 
 def acquiring_blocks(blocks, insns, thumb):

@@ -292,7 +292,7 @@ What stopped a thread that faulted:
 | `a4`, the status | zero | `CFSR` |
 
 The program counter is where a resume goes on, as `OP_THREAD_READ_REG` reads it.
-On QEMU's Cortex-M3 a `bkpt` arrives as a HardFault, exception 3, with a status of zero,
+Under QEMU, on the Cortex-M3 and the Cortex-M33 alike, a `bkpt` arrives as a HardFault, exception 3, with a status of zero,
 and on RP2350's Cortex-M33 as a DebugMonitor exception, 12.
 A status with `MSTKERR` or `STKERR` says the core could not stack the thread's registers,
 so `r0` to `r3`, `r12`, `lr`, the pc and `xpsr` hold what its last trap left.
@@ -342,6 +342,7 @@ which may lie in any pool, and the `Irq`'s hold on it hangs below that capabilit
 The invoked slot is cleared with everything below it,
 and the `Irq` capability hangs below the `KernelPool` capability.
 `KERR_OVERLAP` if an `Irq` is already bound to the line,
+or the line is the one the kernel keeps for its cores, section 5.9,
 `KERR_NO_MEMORY` if the pool has no room for it,
 `KERR_STATE` while the pool is being destroyed,
 both checked before anything is revoked,

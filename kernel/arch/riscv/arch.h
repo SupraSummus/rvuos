@@ -59,4 +59,19 @@ enum {
 #define ARCH_KERNEL_MODE "machine mode"
 #define ARCH_REGIONS "pmp entries"
 
+/* The next ticket of the kernel's lock, see core.c: an atomic add, one amoadd. */
+static inline uint32_t arch_ticket_take(uint32_t *next)
+{
+    return __atomic_fetch_add(next, 1, __ATOMIC_RELAXED);
+}
+
+/* A hart that waits on another in core.c spins, and one that stores what it waits for wakes it by the store alone. */
+static inline void arch_core_wait(void)
+{
+}
+
+static inline void arch_core_wake(void)
+{
+}
+
 #endif

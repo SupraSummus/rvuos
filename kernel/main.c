@@ -50,13 +50,10 @@ void kmain(void)
 #if CORES > 1
     /*
      * This core takes the others' interrupts from now on, which wake it and make it trap.
-     * The others wait in start.S for their software interrupt, then idle until a thread is bound to their units.
+     * The others start now, as the board starts them, then idle until a thread is bound to their units.
      */
     ipi_enable();
-    for (uint32_t c = 1; c < CORES; c++) {
-        LOOP_BOUND(CORES);
-        ipi_send(c);
-    }
+    board_cores_start();
 #endif
     trap_start(&root->frame);
 }

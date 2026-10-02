@@ -1,7 +1,7 @@
 #ifndef RVUOS_USER_CSRS_H
 #define RVUOS_USER_CSRS_H
 
-/* User mode on this board writes no core state beyond its registers; see kernel/board/mps2-an385/board.c. */
+/* User mode on the MPS2 boards writes no core state beyond its registers; see their board.c. */
 
 #include <stdbool.h>
 

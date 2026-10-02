@@ -26,6 +26,20 @@
 static inline bool line_is_timer(uint32_t line) { return line >= IRQ_LINES; }
 static inline bool line_on_controller(uint32_t line) { return line != LOG_IRQ_LINE && line < IRQ_LINES; }
 
+/*
+ * The line the cores interrupt each other on, where each core's controller is its own and the board names one,
+ * IPI_LINE in board.h: the kernel's, forwarded on every core whatever is armed, so no Irq is bound to it.
+ */
+static inline bool line_is_cores(uint32_t line)
+{
+#if CORES > 1 && defined(IPI_LINE)
+    return line == IPI_LINE;
+#else
+    (void)line;
+    return false;
+#endif
+}
+
 /* Mask every line and enable the external interrupt at the core. */
 void irq_init(void);
 

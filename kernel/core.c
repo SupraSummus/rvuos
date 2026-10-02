@@ -19,7 +19,7 @@ struct kernel_lock kernel_lock;
 
 static void core_lock(void)
 {
-    uint32_t ticket = __atomic_fetch_add(&kernel_lock.next, 1, __ATOMIC_RELAXED);
+    uint32_t ticket = arch_ticket_take(&kernel_lock.next);
 #ifdef RVUOS_HOST
     /* The host runs one core at a time, so a lock it finds taken would never be given up. */
     if (__atomic_load_n(&kernel_lock.owner, __ATOMIC_RELAXED) != ticket) {
@@ -28,12 +28,14 @@ static void core_lock(void)
 #endif
     while (__atomic_load_n(&kernel_lock.owner, __ATOMIC_ACQUIRE) != ticket) {
         LOOP_CORE("the cores that asked first, each of which holds the lock for a step of a walk at most");
+        arch_core_wait();
     }
 }
 
 static void core_unlock(void)
 {
     __atomic_store_n(&kernel_lock.owner, kernel_lock.owner + 1, __ATOMIC_RELEASE);
+    arch_core_wake();
 }
 
 /* The cores owed an interrupt, taken under the lock, to interrupt once it is given up. */
@@ -67,6 +69,7 @@ void core_enter(void)
     struct core *core = core_self();
     /* The registers are in the frame, so a core waiting for them to be may go on. */
     __atomic_store_n(&core->in_user, false, __ATOMIC_RELEASE);
+    arch_core_wake();
     core_lock();
     /*
      * Regions another core took from the process are loaded again before the trap reads anything,
@@ -115,6 +118,7 @@ void core_shoot(struct core *c)
     ipi_send((uint32_t)(c - cores));
     while (__atomic_load_n(&c->in_user, __ATOMIC_ACQUIRE)) {
         LOOP_CORE("the core to trap, which user mode does at once, and save its thread's registers");
+        arch_core_wait();
 #ifdef RVUOS_HOST
         /* The host runs one core at a time, so the core this one waits for traps here. */
         host_core_traps((uint32_t)(c - cores));
@@ -167,6 +171,27 @@ void core_thread_gone(const struct thread *t)
             c->turn = NULL;
         }
     }
+}
+
+struct thread *core_trapped(void)
+{
+    struct thread *t = core_self()->current;
+    if (t != NULL && t->state == THREAD_READY) {
+        return t;
+    }
+    sched_run_next();
+    return NULL;
+}
+
+void core_interrupt_later(struct core *c)
+{
+#if CORES > 1
+    if (c != core_self()) {
+        c->interrupt_owed = true;
+    }
+#else
+    (void)c;
+#endif
 }
 
 void core_notify(struct core *c)

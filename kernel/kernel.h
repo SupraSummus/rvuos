@@ -50,6 +50,12 @@ __attribute__((noreturn)) void kmain(void);
 void board_init(void);
 
 /*
+ * The board's, with more than one core: start the others at the end of the boot,
+ * which go on in the architecture's core_start; see DESIGN.md, "Cores".
+ */
+void board_cores_start(void);
+
+/*
  * The board's board.c: set back the CSRs user mode can write, so that nothing passes through them
  * from one process to the next; at boot, and whenever the processor goes to another process's thread.
  */

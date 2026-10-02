@@ -557,7 +557,8 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
         if (err != KERR_OK) {
             return err;
         }
-        if (line_binding(first) != NULL) {
+        /* The cores' line is bound already, to the kernel. */
+        if (line_binding(first) != NULL || line_is_cores(first)) {
             return KERR_OVERLAP;
         }
         /* The invoked slot is cleared below, so it may receive the Irq capability. */

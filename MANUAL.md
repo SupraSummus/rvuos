@@ -16,6 +16,7 @@ Contents:
       - [ESP32-C6](manual/targets.md#esp32-c6)
       - [RP2350](manual/targets.md#rp2350)
       - [mps2-an385](manual/targets.md#mps2-an385)
+      - [mps2-an521](manual/targets.md#mps2-an521)
 4. [Building and running](manual/targets.md#4-building-and-running)
     - [Reading the transcript](manual/targets.md#reading-the-transcript)
 5. [The programming model](manual/programming-model.md#5-the-programming-model)
@@ -105,7 +106,8 @@ What rvuos is not:
   and the kernel's own output goes into a log ring that a user program drains.
 - It loads no code into the kernel at run time.
   Everything that runs in machine mode is in this repository.
-- It is single-core for now.
+- It runs on two cores only under QEMU so far, two harts of `virt` or mps2-an521's two Cortex-M33s;
+  every board on silicon runs one, section 5.11.
 - It is not binary compatible with seL4, L4 or F9,
   though it borrows from seL4's object model.
 
