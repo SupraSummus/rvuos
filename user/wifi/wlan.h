@@ -57,6 +57,9 @@ struct wlan {
     uint32_t buf[1 + WLAN_PACKET_MAX / 4];
 };
 
+/* Sends an Ethernet frame; -1 without credit or room, when the caller tries again later. */
+int wlan_send(struct wlan *w, const uint8_t *frame, uint32_t len);
+
 /* Reads every packet the firmware has waiting and hands each on; how many there were. */
 uint32_t wlan_poll(struct wlan *w);
 

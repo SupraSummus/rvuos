@@ -245,6 +245,25 @@ int32_t wlan_ioctl(struct wlan *w, uint32_t kind, uint32_t cmd, const void *data
     return w->answer_status;
 }
 
+int wlan_send(struct wlan *w, const uint8_t *frame, uint32_t len)
+{
+    uint32_t total = SDPCM_HEADER + DATA_PADDING + BDC_HEADER + len;
+    if (total > WLAN_PACKET_MAX || !has_credit(w)) {
+        return -1;
+    }
+    uint8_t *p = BYTES(w);
+    memset(p, 0, SDPCM_HEADER + DATA_PADDING + BDC_HEADER);
+    put16(p, (uint16_t)total);
+    put16(p + 2, (uint16_t)~total);
+    p[4] = w->seq++;
+    p[5] = CHANNEL_DATA;
+    p[7] = SDPCM_HEADER + DATA_PADDING;
+    p[SDPCM_HEADER + DATA_PADDING] = 2u << 4; /* BDC version 2 */
+    memcpy(p + SDPCM_HEADER + DATA_PADDING + BDC_HEADER, frame, len);
+    cyw43_wlan_write(w->chip, w->buf, (total + 3u) & ~3u);
+    return 0;
+}
+
 int32_t wlan_set_u32(struct wlan *w, uint32_t cmd, uint32_t value)
 {
     uint8_t v[4];

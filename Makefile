@@ -297,7 +297,17 @@ $(BUILD)/user-wifi.elf: $(WIFI_ROOT_OBJ) $(WIFI_CHILD_OBJ) $(USER_COMMON) $(BUIL
 $(WIFI_BLOB): tools/cyw43-blob.py
 	tools/cyw43-blob.py --cache build/cyw43 --out $@
 
-.PHONY: wifi
+# The IP stack of user/wifi/net.c on the host, under the sanitizers, against frames a network would send.
+WIFI_TEST := build/host/wifi/net-test
+$(WIFI_TEST): user/wifi/test/net-test.c user/wifi/net.c user/wifi/net.h user/wifi/lib.h
+	@mkdir -p $(dir $@)
+	$(HOST_CC) -std=c11 -O1 -g -Wall -Wextra -Werror -Wshadow $(HOST_SAN) -Iuser/wifi \
+		user/wifi/test/net-test.c user/wifi/net.c -o $@
+
+.PHONY: wifi wifi-test
+wifi-test: $(WIFI_TEST)
+	$(WIFI_TEST)
+
 wifi: $(BUILD)/kernel-wifi.elf $(WIFI_BLOB)
 ifneq ($(BOARD),rp2350)
 	$(error the Wi-Fi system runs on a Pico 2 W: make BOARD=rp2350 wifi)
@@ -457,7 +467,7 @@ smp-test:
 contents:
 	tools/contents.py MANUAL.md DESIGN.md
 
-check: contents test escape host-test qemu-replay arm-test smp-test
+check: contents test escape host-test wifi-test qemu-replay arm-test smp-test
 
 clean:
 	rm -rf $(BUILD)

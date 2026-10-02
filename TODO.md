@@ -6,17 +6,18 @@ Open work only; an item leaves this file in the commit that finishes it.
 
 `user/wifi/`, on a Pico 2 W: the driver brings the CYW43439's firmware up, scans,
 and runs an access point a laptop's scan sees; `WIFI_CONFIG` in the Makefile says how to ask for which.
+The network process sends through the link and the driver to the air.
 
 - Joining a network, `mode=sta`, is written after embassy's driver and has not run:
   no network the board hears was given to it.
-- The data path: Ethernet frames between the driver and a network stack in a process of its own,
-  through rings in shared frames, and the stack's clients beside it.
+  So nothing has come in through the link yet, nor has DHCP, a ping or a datagram run but against `make wifi-test`.
+- UDP services live in the network process; a client in a process of its own needs a socket's rings
+  between it and the network process, and the network process a bit and a frame for each client.
 - The driver polls the chip every millisecond.
   The chip raises the data line, GPIO24, when it has a packet and chip select is high,
   which IO_BANK0 can turn into IO_IRQ_BANK0_NS, an `Irq` the driver would wait on instead.
-- The blob's frames stay lent after the upload; the root task could revoke them and use the 228 KiB again,
-  at the price of a driver that can no longer reset the chip.
-  The firmware in flash would keep both; writing flash is the maintainer's to decide.
+- The root task takes the blob's frames back once the chip runs, so the driver can no longer reset the chip;
+  the firmware in flash would let it, and writing flash is the maintainer's to decide.
 - A run ends at the halt, at the latest when the watchdog reboots the chip after seventeen seconds,
   and the console reaches the host only then; a system that runs for good needs both changed.
 - The bus runs at 25 MHz; embassy runs it at 37.5 MHz with the faster of its programs, and DMA would free the core meanwhile.

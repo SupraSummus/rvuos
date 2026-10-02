@@ -10,6 +10,22 @@ void *memcpy(void *dst, const void *src, size_t n)
     return dst;
 }
 
+void *memmove(void *dst, const void *src, size_t n)
+{
+    uint8_t *d = dst;
+    const uint8_t *s = src;
+    if (d < s) {
+        while (n--) {
+            *d++ = *s++;
+        }
+    } else {
+        while (n--) {
+            d[n] = s[n];
+        }
+    }
+    return dst;
+}
+
 void *memset(void *dst, int c, size_t n)
 {
     uint8_t *d = dst;
@@ -64,4 +80,26 @@ void print_dec(const struct out *o, uint32_t v)
         v /= 10;
     } while (v);
     print(o, &buf[i]);
+}
+
+int plog_put(struct plog *l, char c)
+{
+    uint32_t head = l->head;
+    l->bytes[head % PLOG_SIZE] = c;
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+    l->head = head + 1u;
+    return c == '\n';
+}
+
+uint32_t plog_take(const struct plog *l, uint32_t taken, void (*put)(char))
+{
+    uint32_t head = l->head;
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    if (head - taken > PLOG_SIZE) {
+        taken = head - PLOG_SIZE;
+    }
+    for (; taken != head; taken++) {
+        put(l->bytes[taken % PLOG_SIZE]);
+    }
+    return taken;
 }

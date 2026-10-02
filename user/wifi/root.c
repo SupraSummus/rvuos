@@ -1,9 +1,12 @@
 /*
  * The root task of the Wi-Fi system on a Pico 2 W; see wifi.h.
  *
- * It finds the firmware blob the loader left at the start of free RAM,
- * lends it to the driver as frames, builds the driver's process with exactly what wifi.h lists,
- * and copies the kernel's log and the driver's text to the console until the driver reports or faults.
+ * It finds the firmware blob the loader left at the start of free RAM, lends it to the driver as frames,
+ * and builds the driver's process with exactly what wifi.h lists.
+ * Once the driver says the chip runs, it takes the blob's memory back,
+ * builds the network process and the link between the two, and hands the driver the link.
+ * Meanwhile it copies the kernel's log and its children's to the console,
+ * until the run's time is up, a child fails or faults, or a scan alone was asked for.
  * Then it halts, which carries the console to the host.
  *
  * Memory comes out of BOOT_CAP_FREE_RAM by halving: a block is taken from the free one that holds it,
@@ -12,6 +15,7 @@
 
 #include "console.h"
 #include "lib.h"
+#include "ring.h"
 #include "rvuos.h"
 #include "wifi.h"
 
@@ -21,12 +25,12 @@ enum {
     ROOT_REGION_DATA,
     ROOT_REGION_CONSOLE,
     ROOT_REGION_LOG,
-    ROOT_REGION_PEEK,   /* a frame looked at for a moment: the blob's header, the pads */
-    ROOT_REGION_SHARED, /* the page shared with the driver */
+    ROOT_REGION_PEEK,   /* a frame looked at for a moment: the blob's header, the pads, the input, the link */
+    ROOT_REGION_PAGES,  /* a child's page, one region each */
 };
 
-/* How long the run lasts before the root task gives up; the watchdog reboots the chip at about 17 s. */
-#define RUN_US 13000000u
+/* How long the run lasts before the root task halts; the watchdog reboots the chip at about 17 s. */
+#define RUN_US 14000000u
 
 /* The devices the driver needs, through OP_DEBUG_FRAME; see the board's DEBUG_RANGE_LIST. */
 #define PIO0_BASE       0x50200000u
@@ -39,17 +43,21 @@ enum {
 #define PAD(n)       (4u + 4u * (n))
 #define PAD_SLEWFAST (1u << 0)
 #define PAD_SCHMITT  (1u << 1)
-#define PAD_PDE      (1u << 2)
 #define PAD_DRIVE_4MA  (1u << 4)
 #define PAD_DRIVE_12MA (3u << 4)
 #define PAD_IE       (1u << 6)
 
-#define DRV_DATA_SIZE   0x4000u
-#define DRV_POOL_SIZE   0x1000u
-#define DRV_SHARED_SIZE 0x1000u
+#define PAGE_SIZE 0x1000u
+#define POOL_SIZE 0x1000u
+
+/* Who gets which of the first core's units: the root task the first, mostly waiting, the driver the most. */
+#define ROOT_UNITS   16u
+#define DRV_UNITS    32u
+#define NET_UNITS    16u
 
 /* The root task's own slots, from BOOT_CAP_COUNT up; counted from zero, since a program has no initialised data. */
 static uint32_t slots_used;
+static uint32_t inbox;
 
 static void kput(void *to, char c)
 {
@@ -59,12 +67,25 @@ static void kput(void *to, char c)
 
 static const struct out kout = { kput, 0 };
 
-/* The kernel's log and the driver's ring, and how far each has been copied to the console. */
+/* A child of the root task, as child_new builds it; see wifi.h for what every child starts with. */
+struct child {
+    uint32_t index;
+    uint32_t pool, table, process, thread, inbox, timer; /* the root task's slots */
+    uint32_t data_base, data_size, page_frame;
+    struct child_page *page;
+    uint32_t log_taken, told;
+};
+static struct child children[CHILDREN];
+
+/* The kernel's log, and how far it has been copied to the console. */
 static volatile struct rvuos_log *log_header;
 static const volatile uint8_t *log_ring;
 static uint32_t log_taken;
-static struct drv_shared *shared;
-static uint32_t drv_taken;
+
+static void console_byte(char c)
+{
+    console_put_polled(c);
+}
 
 static void drain(void)
 {
@@ -77,14 +98,9 @@ static void drain(void)
         console_put_polled((char)log_ring[log_taken % size]);
     }
     log_header->taken = log_taken;
-    if (shared != 0) {
-        uint32_t dhead = shared->log_head;
-        __atomic_thread_fence(__ATOMIC_ACQUIRE);
-        if (dhead - drv_taken > DRV_LOG_SIZE) {
-            drv_taken = dhead - DRV_LOG_SIZE;
-        }
-        for (; drv_taken != dhead; drv_taken++) {
-            console_put_polled(shared->log[drv_taken % DRV_LOG_SIZE]);
+    for (uint32_t i = 0; i < CHILDREN; i++) {
+        if (children[i].page != 0) {
+            children[i].log_taken = plog_take(&children[i].page->log, children[i].log_taken, console_byte);
         }
     }
 }
@@ -107,12 +123,30 @@ static void must(const char *what, uint32_t status)
     }
 }
 
+/*
+ * The table has 64 slots, ROOT_TABLE_SLOTS, and halving memory takes two at each step,
+ * so slots come back: those a call consumed or a revoke emptied, and those deleted.
+ */
+static uint32_t spare_slots[24], spare_count;
+
 static uint32_t new_slot(void)
 {
+    if (spare_count > 0) {
+        return spare_slots[--spare_count];
+    }
     if (BOOT_CAP_COUNT + slots_used >= 64u) {
         must("a free slot", KERR_LIMIT);
     }
     return BOOT_CAP_COUNT + slots_used++;
+}
+
+/* A slot back, deleting what it holds; what hung below it goes to its parent. */
+static void give_slot(uint32_t slot)
+{
+    must("delete a slot", rv_invoke(OP_CAP_DELETE, BOOT_CAP_CAPTABLE, slot, 0, 0));
+    if (spare_count < sizeof(spare_slots) / sizeof(spare_slots[0])) {
+        spare_slots[spare_count++] = slot;
+    }
 }
 
 /* Free memory: Untypeds, each a block, none overlapping. */
@@ -140,6 +174,10 @@ static uint32_t take_at(uint32_t base, uint32_t size)
             while (b.size > size) {
                 uint32_t lower = new_slot(), upper = new_slot();
                 must("split free memory", rv_split(b.slot, lower, upper));
+                /* The halves hang below what was split; with it deleted they hang a step higher, and its slot is free. */
+                if (b.slot != BOOT_CAP_FREE_RAM) {
+                    give_slot(b.slot);
+                }
                 uint32_t half = b.size / 2;
                 struct block lo = { lower, b.base, half }, hi = { upper, b.base + half, half };
                 if (base < hi.base) {
@@ -187,16 +225,92 @@ static uint32_t device(uint32_t base, uint32_t size)
     return frame;
 }
 
+static void peek(uint32_t frame, uint32_t rights)
+{
+    must("install a frame to look at", rv_invoke(OP_PROCESS_INSTALL, BOOT_CAP_PROCESS, ROOT_REGION_PEEK, frame, rights));
+}
+
+static void unpeek(void)
+{
+    must("uninstall the frame looked at", rv_invoke(OP_PROCESS_UNINSTALL, BOOT_CAP_PROCESS, ROOT_REGION_PEEK, 0, 0));
+}
+
+/*
+ * A child: its data, its page, a pool for its objects, its table, process, thread and inbox, and a timer line,
+ * with the regions and slots every child starts with; the page is the root task's to fill before child_start.
+ */
+static void child_new(struct child *c, uint32_t index, uint32_t table_slots, uint32_t data_size)
+{
+    uint32_t page_base, pool_base, line = new_slot();
+    c->index = index;
+    c->data_size = data_size;
+    uint32_t data = frame_of(take(data_size, &c->data_base));
+    c->page_frame = frame_of(take(PAGE_SIZE, &page_base));
+    c->pool = new_slot();
+    must("a child's pool", rv_retype(take(POOL_SIZE, &pool_base), CAP_POOL, c->pool, &pool_base));
+    c->table = new_slot();
+    c->process = new_slot();
+    c->thread = new_slot();
+    c->inbox = new_slot();
+    c->timer = new_slot();
+    must("a child's table", rv_invoke(OP_POOL_ALLOC, c->pool, CAP_CAPTABLE, c->table, table_slots));
+    must("a child's process", rv_invoke(OP_POOL_ALLOC, c->pool, CAP_PROCESS, c->process, c->table));
+    must("a child's thread", rv_invoke(OP_POOL_ALLOC, c->pool, CAP_THREAD, c->thread, c->process));
+    must("a child's inbox", rv_invoke(OP_POOL_ALLOC, c->pool, CAP_NOTIFICATION, c->inbox, 0));
+    must("a child's timer line", rv_invoke(OP_IRQ_CARVE, BOOT_CAP_TIMER_LINES, 1u + index, 1, line));
+    must("bind a child's timer", rv_invoke(OP_IRQ_BIND, line, c->pool, c->inbox, c->timer));
+    give_slot(line); /* the bind consumed it */
+
+    must("install a child's code", rv_invoke(OP_PROCESS_INSTALL, c->process, CHILD_REGION_CODE, BOOT_CAP_CODE, RIGHT_R | RIGHT_X));
+    must("install a child's data", rv_invoke(OP_PROCESS_INSTALL, c->process, CHILD_REGION_DATA, data, RIGHT_R | RIGHT_W));
+    must("install a child's page", rv_invoke(OP_PROCESS_INSTALL, c->process, CHILD_REGION_PAGE, c->page_frame, RIGHT_R | RIGHT_W));
+    must("give a child its inbox", rv_invoke(OP_CAP_COPY, c->table, CHILD_INBOX, c->inbox, RIGHT_R));
+    must("give a child the root's inbox", rv_invoke(OP_CAP_COPY, c->table, CHILD_ROOT, inbox, RIGHT_W));
+    must("give a child its timer", rv_invoke(OP_CAP_COPY, c->table, CHILD_TIMER, c->timer, RIGHT_W));
+    must("give a child its process", rv_invoke(OP_CAP_COPY, c->table, CHILD_SELF, c->process, RIGHT_W));
+
+    must("install a child's page here", rv_invoke(OP_PROCESS_INSTALL, BOOT_CAP_PROCESS, ROOT_REGION_PAGES + index,
+                                                  c->page_frame, RIGHT_R | RIGHT_W));
+    memset((void *)page_base, 0, PAGE_SIZE);
+    c->page = (struct child_page *)page_base;
+    c->page->data_base = c->data_base;
+    c->page->data_size = data_size;
+    c->page->state = CHILD_STARTING;
+}
+
+static void child_give(struct child *c, uint32_t child_slot, uint32_t root_slot, uint32_t rights)
+{
+    must("give a child a capability", rv_invoke(OP_CAP_COPY, c->table, child_slot, root_slot, rights));
+}
+
+static void child_map(struct child *c, uint32_t region, uint32_t frame, uint32_t rights)
+{
+    must("install a frame in a child", rv_invoke(OP_PROCESS_INSTALL, c->process, region, frame, rights));
+}
+
+/* Starts a child at entry, with a0 at its page, its stack at the top of its data, on units of the first core. */
+static void child_start(struct child *c, void (*entry)(void *), uint32_t first_unit, uint32_t units)
+{
+    uint32_t time = new_slot();
+    must("carve a child's time", rv_invoke(OP_TIME_CARVE, BOOT_CAP_TIME, first_unit, units, time));
+    must("watch a child", rv_invoke(OP_THREAD_WATCH, c->thread, inbox, ROOT_BIT_FAULT(c->index), 0));
+    must("configure a child", rv_invoke(OP_THREAD_CONFIGURE, c->thread, (uint32_t)entry, c->data_base + c->data_size, 0));
+    must("hand a child its page", rv_invoke(OP_THREAD_WRITE_REG, c->thread, RV_REG_A0, (uint32_t)c->page, 0));
+    must("bind a child", rv_invoke(OP_TIME_BIND, time, c->thread, 0, units));
+    must("start a child", rv_invoke(OP_THREAD_RESUME, c->thread, 0, 0, 0));
+}
+
 /* The pads of the Wi-Fi chip's pins: inputs enabled, isolation off, the bus's two lines fast and strong. */
 static void pads_set(void)
 {
     uint32_t pads = device(PADS_BANK0_BASE, PADS_BANK0_SIZE);
-    must("install the pads", rv_invoke(OP_PROCESS_INSTALL, BOOT_CAP_PROCESS, ROOT_REGION_PEEK, pads, RIGHT_R | RIGHT_W));
+    peek(pads, RIGHT_R | RIGHT_W);
     REG32(PADS_BANK0_BASE + PAD(23)) = PAD_IE | PAD_DRIVE_4MA | PAD_SCHMITT;
     REG32(PADS_BANK0_BASE + PAD(25)) = PAD_IE | PAD_DRIVE_4MA | PAD_SCHMITT;
     REG32(PADS_BANK0_BASE + PAD(24)) = PAD_IE | PAD_DRIVE_12MA | PAD_SCHMITT | PAD_SLEWFAST;
     REG32(PADS_BANK0_BASE + PAD(29)) = PAD_IE | PAD_DRIVE_12MA | PAD_SLEWFAST;
-    must("uninstall the pads", rv_invoke(OP_PROCESS_UNINSTALL, BOOT_CAP_PROCESS, ROOT_REGION_PEEK, 0, 0));
+    unpeek();
+    give_slot(pads);
 }
 
 /*
@@ -208,10 +322,12 @@ static struct blob_header blob_header(uint32_t free_base)
     uint32_t all = frame_of(BOOT_CAP_FREE_RAM), head = new_slot(), min;
     must("the smallest region", rv_frame_min_size(all, &min));
     must("carve the blob's header", rv_invoke(OP_FRAME_CARVE, all, 0, 64u < min ? min : 64u, head));
-    must("install the blob's header", rv_invoke(OP_PROCESS_INSTALL, BOOT_CAP_PROCESS, ROOT_REGION_PEEK, head, RIGHT_R));
+    peek(head, RIGHT_R);
     struct blob_header h = *(const struct blob_header *)free_base;
-    must("uninstall the blob's header", rv_invoke(OP_PROCESS_UNINSTALL, BOOT_CAP_PROCESS, ROOT_REGION_PEEK, 0, 0));
+    unpeek();
     must("give the free RAM back", rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, BOOT_CAP_FREE_RAM, 0, 0));
+    give_slot(head);
+    give_slot(all);
     return h;
 }
 
@@ -235,16 +351,16 @@ static void config_value(const char *conf, uint32_t len, const char *key, char *
 /*
  * What the driver is to do, from the text the loader may have left in the input region:
  * lines of mode=scan|sta|ap, ssid=, pass= and channel=. With none, it scans.
- * The passphrase lives in the shared page and the driver's memory, never in an image.
+ * The passphrase lives in the driver's page and memory, never in an image.
  */
-static void configure(struct drv_shared *s)
+static void configure(struct drv_page *s)
 {
     uint32_t base, size;
     char value[16];
     s->mode = MODE_SCAN;
     s->channel = 1;
     must("input", rv_frame_info(BOOT_CAP_INPUT, &base, &size));
-    must("install the input", rv_invoke(OP_PROCESS_INSTALL, BOOT_CAP_PROCESS, ROOT_REGION_PEEK, BOOT_CAP_INPUT, RIGHT_R));
+    peek(BOOT_CAP_INPUT, RIGHT_R);
     const char *conf = (const char *)base;
     value[0] = '\0';
     config_value(conf, size, "mode", value, sizeof(value));
@@ -261,14 +377,163 @@ static void configure(struct drv_shared *s)
         c = c * 10u + (uint32_t)(value[i] - '0');
         s->channel = c;
     }
-    must("uninstall the input", rv_invoke(OP_PROCESS_UNINSTALL, BOOT_CAP_PROCESS, ROOT_REGION_PEEK, 0, 0));
+    unpeek();
     if (s->mode != MODE_SCAN && s->ssid[0] == '\0') {
         print(&kout, "root: the configuration names no ssid; scanning only\n");
         s->mode = MODE_SCAN;
     }
 }
 
-void driver_main(struct drv_shared *s);
+void driver_main(struct drv_page *s);
+void net_main(struct net_page *s);
+
+/* The blob's frames, and the Untypeds they were made of, which revoking gives back. */
+static uint32_t blob_untyped[DRV_SLOTS - DRV_FIRMWARE], blob_base[DRV_SLOTS - DRV_FIRMWARE];
+static uint32_t blob_size[DRV_SLOTS - DRV_FIRMWARE], blob_frame[DRV_SLOTS - DRV_FIRMWARE], blob_frames;
+
+/* Lends the driver the blob, and starts it. */
+static void driver_build(uint32_t free_base)
+{
+    struct child *c = &children[CHILD_DRIVER];
+    child_new(c, CHILD_DRIVER, DRV_SLOTS, 0x4000u);
+    struct drv_page *p = (struct drv_page *)c->page;
+    child_map(c, DRV_REGION_PIO, device(PIO0_BASE, PIO0_SIZE), RIGHT_R | RIGHT_W);
+    child_map(c, DRV_REGION_PINS, device(IO_BANK0_HIGH, IO_BANK0_HIGH_SIZE), RIGHT_R | RIGHT_W);
+    pads_set();
+    for (uint32_t i = 0; i < blob_frames; i++) {
+        blob_frame[i] = frame_of(blob_untyped[i]);
+        child_give(c, DRV_FIRMWARE + i, blob_frame[i], RIGHT_R);
+        p->blob_frame_size[i] = blob_size[i];
+    }
+    p->pio_base = PIO0_BASE;
+    p->pins_base = IO_BANK0_HIGH;
+    p->blob_base = free_base;
+    p->blob_frames = blob_frames;
+    configure(p);
+    static const char *const modes[] = { "scan", "station", "access point" };
+    print(&kout, "root: mode ");
+    print(&kout, modes[p->mode]);
+    print(&kout, "\n");
+    child_start(c, (void (*)(void *))driver_main, ROOT_UNITS, DRV_UNITS);
+}
+
+/*
+ * Once the chip runs: the blob's memory back, the network process, and the link between it and the driver,
+ * which the driver learns of from its page and a signal, since it runs already.
+ */
+static void net_build(void)
+{
+    struct child *d = &children[CHILD_DRIVER], *c = &children[CHILD_NET];
+    for (uint32_t i = 0; i < blob_frames; i++) {
+        must("take the blob back", rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, blob_untyped[i], 0, 0));
+        free_add((struct block){ blob_untyped[i], blob_base[i], blob_size[i] });
+        give_slot(blob_frame[i]); /* the revoke emptied it */
+    }
+
+    child_new(c, CHILD_NET, NET_SLOTS, 0x2000u);
+    uint32_t link_base;
+    uint32_t link = frame_of(take(LINK_SIZE, &link_base));
+    peek(link, RIGHT_R | RIGHT_W);
+    ring_init(LINK_RX(link_base), LINK_SIZE / 2u, LINK_SLOT);
+    ring_init(LINK_TX(link_base), LINK_SIZE / 2u, LINK_SLOT);
+    unpeek();
+    child_map(c, NET_REGION_LINK, link, RIGHT_R | RIGHT_W);
+    child_map(d, DRV_REGION_LINK, link, RIGHT_R | RIGHT_W);
+    child_give(c, NET_DRIVER, d->inbox, RIGHT_W);
+    child_give(d, DRV_NET, c->inbox, RIGHT_W);
+
+    struct net_page *np = (struct net_page *)c->page;
+    np->link_base = link_base;
+    memcpy(np->mac, ((struct drv_page *)d->page)->mac, 6);
+    child_start(c, (void (*)(void *))net_main, ROOT_UNITS + DRV_UNITS, NET_UNITS);
+
+    ((struct drv_page *)d->page)->link_base = link_base;
+    must("tell the driver", rv_signal(d->inbox, CHILD_BIT_ROOT));
+}
+
+static void print_ip(uint32_t ip)
+{
+    const uint8_t *b = (const uint8_t *)&ip;
+    for (uint32_t i = 0; i < 4; i++) {
+        print_dec(&kout, b[i]);
+        print(&kout, i < 3 ? "." : "");
+    }
+}
+
+/* What a child's new state says, on the console; 1 if the run is to end. */
+static int child_told(struct child *c, uint32_t state)
+{
+    if (state == CHILD_FAILED) {
+        print(&kout, c->index == CHILD_DRIVER ? "root: the driver failed at step " : "root: the network failed at step ");
+        print_dec(&kout, c->page->step);
+        print(&kout, ", read ");
+        print_hex(&kout, c->page->detail);
+        print(&kout, "\n");
+        halt(1);
+    }
+    if (c->index == CHILD_DRIVER) {
+        struct drv_page *p = (struct drv_page *)c->page;
+        /* The driver may be past DRV_UP before the root task looks, so any state of a running driver will do. */
+        if (state >= DRV_UP && children[CHILD_NET].page == 0) {
+            net_build();
+        }
+        if (state == DRV_SCANNED) {
+            print(&kout, "root: ");
+            print_dec(&kout, p->net_count);
+            print(&kout, " networks heard\n");
+            for (uint32_t i = 0; i < p->net_count; i++) {
+                const struct drv_net *n = &p->nets[i];
+                print(&kout, "  ch ");
+                print_dec(&kout, n->channel);
+                print(&kout, n->rssi < 0 ? "  rssi -" : "  rssi ");
+                print_dec(&kout, (uint32_t)(n->rssi < 0 ? -n->rssi : n->rssi));
+                print(&kout, "  ");
+                print(&kout, n->ssid);
+                print(&kout, "\n");
+            }
+            return p->mode == MODE_SCAN;
+        } else if (state == DRV_JOINED) {
+            print(&kout, "root: joined ");
+            print(&kout, p->ssid);
+            print(&kout, "\n");
+        } else if (state == DRV_AP) {
+            print(&kout, "root: access point ");
+            print(&kout, p->ssid);
+            print(&kout, " on channel ");
+            print_dec(&kout, p->channel);
+            print(&kout, "\n");
+        }
+    } else if (state == NET_BOUND) {
+        struct net_page *p = (struct net_page *)c->page;
+        print(&kout, "root: the system answers at ");
+        print_ip(p->ip);
+        print(&kout, ": ping it, or send a datagram to UDP port 7777 for its status\n");
+    }
+    return 0;
+}
+
+static void summary(void)
+{
+    const struct drv_page *d = (const struct drv_page *)children[CHILD_DRIVER].page;
+    const struct net_page *n = (const struct net_page *)children[CHILD_NET].page;
+    print(&kout, "root: driver frames in ");
+    print_dec(&kout, d->rx_frames);
+    print(&kout, ", out ");
+    print_dec(&kout, d->tx_frames);
+    print(&kout, ", dropped ");
+    print_dec(&kout, d->rx_dropped);
+    if (n != 0) {
+        print(&kout, "; network frames in ");
+        print_dec(&kout, n->rx_frames);
+        print(&kout, ", out ");
+        print_dec(&kout, n->tx_frames);
+        print(&kout, ", pings ");
+        print_dec(&kout, n->pings);
+        print(&kout, ", datagrams ");
+        print_dec(&kout, n->datagrams);
+    }
+    print(&kout, "\n");
+}
 
 int main(void)
 {
@@ -283,12 +548,16 @@ int main(void)
     log_header = (volatile struct rvuos_log *)base;
     log_ring = (const volatile uint8_t *)(base + RVUOS_LOG_HEADER);
 
-    uint32_t inbox = new_slot(), line = new_slot(), log_irq = new_slot(), tline = new_slot(), timer = new_slot();
+    uint32_t line = new_slot(), log_irq = new_slot(), tline = new_slot(), timer = new_slot();
+    inbox = new_slot();
     must("the root's inbox", rv_invoke(OP_POOL_ALLOC, BOOT_CAP_POOL, CAP_NOTIFICATION, inbox, 0));
     must("the log's line", rv_invoke(OP_IRQ_CARVE, BOOT_CAP_IRQ_LINES, LOG_IRQ_LINE, 1, line));
     must("bind the log", rv_invoke(OP_IRQ_BIND, line, BOOT_CAP_POOL, inbox, log_irq));
     must("a timer line", rv_invoke(OP_IRQ_CARVE, BOOT_CAP_TIMER_LINES, 0, 1, tline));
     must("bind the timer", rv_invoke(OP_IRQ_BIND, tline, BOOT_CAP_POOL, inbox, timer));
+    give_slot(line);
+    give_slot(tline);
+    must("keep the root's units", rv_invoke(OP_TIME_BIND, BOOT_CAP_TIME, BOOT_CAP_THREAD, 0, ROOT_UNITS));
     print(&kout, "root: wifi system\n");
 
     /* The blob, and frames that cover it, largest first from its start. */
@@ -302,16 +571,14 @@ int main(void)
         halt(2);
     }
     free_add((struct block){ BOOT_CAP_FREE_RAM, base, size });
-
-    uint32_t page = 0x1000u;
-    uint32_t covered = (h.size + page - 1) & ~(page - 1);
-    uint32_t blob_frame[DRV_SLOTS - DRV_FIRMWARE], blob_size[DRV_SLOTS - DRV_FIRMWARE], blob_frames = 0;
+    uint32_t covered = (h.size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
     for (uint32_t at = free_base, block = size / 2; at < free_base + covered; block /= 2) {
-        if (at + block <= free_base + covered || block == page) {
+        if (at + block <= free_base + covered || block == PAGE_SIZE) {
             if (blob_frames == DRV_SLOTS - DRV_FIRMWARE) {
                 must("frames enough for the blob", KERR_LIMIT);
             }
-            blob_frame[blob_frames] = frame_of(take_at(at, block));
+            blob_untyped[blob_frames] = take_at(at, block);
+            blob_base[blob_frames] = at;
             blob_size[blob_frames++] = block;
             at += block;
         }
@@ -322,129 +589,43 @@ int main(void)
     print_dec(&kout, blob_frames);
     print(&kout, " frames\n");
 
-    /* The driver's memory, devices and objects. */
-    uint32_t data_base, shared_base, pool_base;
-    uint32_t data = frame_of(take(DRV_DATA_SIZE, &data_base));
-    uint32_t shared_frame = frame_of(take(DRV_SHARED_SIZE, &shared_base));
-    uint32_t pool = new_slot();
-    must("the driver's pool", rv_retype(take(DRV_POOL_SIZE, &pool_base), CAP_POOL, pool, &pool_base));
-    uint32_t pio = device(PIO0_BASE, PIO0_SIZE);
-    uint32_t pins = device(IO_BANK0_HIGH, IO_BANK0_HIGH_SIZE);
-    pads_set();
-
-    uint32_t table = new_slot(), process = new_slot(), thread = new_slot(), drv_inbox = new_slot();
-    uint32_t drv_line = new_slot(), drv_timer = new_slot(), drv_time = new_slot();
-    must("the driver's table", rv_invoke(OP_POOL_ALLOC, pool, CAP_CAPTABLE, table, DRV_SLOTS));
-    must("the driver's process", rv_invoke(OP_POOL_ALLOC, pool, CAP_PROCESS, process, table));
-    must("the driver's thread", rv_invoke(OP_POOL_ALLOC, pool, CAP_THREAD, thread, process));
-    must("the driver's inbox", rv_invoke(OP_POOL_ALLOC, pool, CAP_NOTIFICATION, drv_inbox, 0));
-    must("the driver's timer line", rv_invoke(OP_IRQ_CARVE, BOOT_CAP_TIMER_LINES, 1, 1, drv_line));
-    must("bind the driver's timer", rv_invoke(OP_IRQ_BIND, drv_line, pool, drv_inbox, drv_timer));
-
-    must("install the driver's code", rv_invoke(OP_PROCESS_INSTALL, process, DRV_REGION_CODE, BOOT_CAP_CODE, RIGHT_R | RIGHT_X));
-    must("install the driver's data", rv_invoke(OP_PROCESS_INSTALL, process, DRV_REGION_DATA, data, RIGHT_R | RIGHT_W));
-    must("install PIO0", rv_invoke(OP_PROCESS_INSTALL, process, DRV_REGION_PIO, pio, RIGHT_R | RIGHT_W));
-    must("install the pins", rv_invoke(OP_PROCESS_INSTALL, process, DRV_REGION_PINS, pins, RIGHT_R | RIGHT_W));
-    must("install the shared page", rv_invoke(OP_PROCESS_INSTALL, process, DRV_REGION_SHARED, shared_frame, RIGHT_R | RIGHT_W));
-
-    must("copy the driver's process", rv_invoke(OP_CAP_COPY, table, DRV_SELF, process, RIGHT_W));
-    must("copy the driver's inbox", rv_invoke(OP_CAP_COPY, table, DRV_INBOX, drv_inbox, RIGHT_R));
-    must("copy the root's inbox", rv_invoke(OP_CAP_COPY, table, DRV_ROOT, inbox, RIGHT_W));
-    must("copy the driver's timer", rv_invoke(OP_CAP_COPY, table, DRV_TIMER, drv_timer, RIGHT_W));
-    for (uint32_t i = 0; i < blob_frames; i++) {
-        must("lend the blob", rv_invoke(OP_CAP_COPY, table, DRV_FIRMWARE + i, blob_frame[i], RIGHT_R));
-    }
-
-    /* The shared page: what the driver must know before it starts. */
-    must("install the shared page", rv_invoke(OP_PROCESS_INSTALL, BOOT_CAP_PROCESS, ROOT_REGION_SHARED, shared_frame, RIGHT_R | RIGHT_W));
-    shared = (struct drv_shared *)shared_base;
-    memset(shared, 0, sizeof(*shared));
-    shared->data_base = data_base;
-    shared->data_size = DRV_DATA_SIZE;
-    shared->pio_base = PIO0_BASE;
-    shared->pins_base = IO_BANK0_HIGH;
-    shared->blob_base = free_base;
-    shared->blob_frames = blob_frames;
-    for (uint32_t i = 0; i < blob_frames; i++) {
-        shared->blob_frame_size[i] = blob_size[i];
-    }
-    shared->state = DRV_STARTING;
-    configure(shared);
-    static const char *const modes[] = { "scan", "station", "access point" };
-    print(&kout, "root: mode ");
-    print(&kout, modes[shared->mode]);
-    print(&kout, "\n");
-
-    /* Half the first core for the driver, and spare time; its faults to the root's inbox. */
-    must("keep half the core", rv_invoke(OP_TIME_BIND, BOOT_CAP_TIME, BOOT_CAP_THREAD, 0, TIME_UNITS / 2));
-    must("carve the driver's time", rv_invoke(OP_TIME_CARVE, BOOT_CAP_TIME, TIME_UNITS / 2, TIME_UNITS / 2, drv_time));
-    must("watch the driver", rv_invoke(OP_THREAD_WATCH, thread, inbox, ROOT_BIT_FAULT, 0));
-    must("configure the driver", rv_invoke(OP_THREAD_CONFIGURE, thread, (uint32_t)&driver_main, data_base + DRV_DATA_SIZE, 0));
-    must("hand the driver its page", rv_invoke(OP_THREAD_WRITE_REG, thread, RV_REG_A0, shared_base, 0));
-    must("bind the driver", rv_invoke(OP_TIME_BIND, drv_time, thread, 0, TIME_UNITS / 2));
-    must("start the driver", rv_invoke(OP_THREAD_RESUME, thread, 0, 0, 0));
+    driver_build(free_base);
 
     must("arm the run's end", rv_timer_set(timer, ROOT_BIT_TIMER, RUN_US));
-    uint32_t told = DRV_STARTING;
     for (;;) {
         uint32_t bits = 0;
         must("arm the log", rv_irq_set(log_irq, ROOT_BIT_LOG));
         must("wait", rv_wait(inbox, &bits));
         drain();
-        if (bits & ROOT_BIT_FAULT) {
-            uint32_t cause, pc, addr, status;
-            rv_thread_fault(thread, &cause, &pc, &addr, &status);
-            print(&kout, "root: the driver faulted, cause ");
-            print_hex(&kout, cause);
-            print(&kout, " at ");
-            print_hex(&kout, pc);
-            print(&kout, " address ");
-            print_hex(&kout, addr);
-            print(&kout, "\n");
-            halt(3);
-        }
-        uint32_t state = shared->state;
-        if (state != told && state == DRV_SCANNED) {
-            print(&kout, "root: ");
-            print_dec(&kout, shared->net_count);
-            print(&kout, " networks heard\n");
-            for (uint32_t i = 0; i < shared->net_count; i++) {
-                const struct drv_net *n = &shared->nets[i];
-                print(&kout, "  ch ");
-                print_dec(&kout, n->channel);
-                print(&kout, n->rssi < 0 ? "  rssi -" : "  rssi ");
-                print_dec(&kout, (uint32_t)(n->rssi < 0 ? -n->rssi : n->rssi));
-                print(&kout, "  ");
-                print(&kout, n->ssid);
+        for (uint32_t i = 0; i < CHILDREN; i++) {
+            struct child *c = &children[i];
+            if (c->page == 0) {
+                continue;
+            }
+            if (bits & ROOT_BIT_FAULT(i)) {
+                uint32_t cause, pc, addr, status;
+                rv_thread_fault(c->thread, &cause, &pc, &addr, &status);
+                print(&kout, i == CHILD_DRIVER ? "root: the driver faulted, cause " : "root: the network faulted, cause ");
+                print_hex(&kout, cause);
+                print(&kout, " at ");
+                print_hex(&kout, pc);
+                print(&kout, " address ");
+                print_hex(&kout, addr);
                 print(&kout, "\n");
+                halt(3);
             }
-            if (shared->mode == MODE_SCAN) {
-                halt(0);
+            uint32_t state = c->page->state;
+            if (state != c->told) {
+                c->told = state;
+                if (child_told(c, state)) {
+                    halt(0);
+                }
             }
-        }
-        if (state != told && state == DRV_JOINED) {
-            print(&kout, "root: joined ");
-            print(&kout, shared->ssid);
-            print(&kout, "\n");
-        }
-        if (state != told && state == DRV_AP) {
-            print(&kout, "root: access point ");
-            print(&kout, shared->ssid);
-            print(&kout, " on channel ");
-            print_dec(&kout, shared->channel);
-            print(&kout, "\n");
-        }
-        told = state;
-        if (shared->state == DRV_FAILED) {
-            print(&kout, "root: the driver failed at step ");
-            print_dec(&kout, shared->step);
-            print(&kout, ", read ");
-            print_hex(&kout, shared->detail);
-            print(&kout, "\n");
-            halt(1);
         }
         if (bits & ROOT_BIT_TIMER) {
             /* A link or an access point that lasted the run is what was asked for. */
+            uint32_t state = children[CHILD_DRIVER].page->state;
+            summary();
             if (state == DRV_JOINED || state == DRV_AP) {
                 print(&kout, "root: the run is over\n");
                 halt(0);

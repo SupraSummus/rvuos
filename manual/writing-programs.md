@@ -154,8 +154,12 @@ Give a timer line a second bit on the same notification for a timeout.
 
 ### 8.4 A program of several processes: the Wi-Fi system
 
-`user/wifi/` is a program of several files and two processes on a Pico 2 W:
-a root task that builds the system and a driver for the CYW43439, its Wi-Fi chip; `wifi.h` says what they share.
+`user/wifi/` is a program of several files and three processes on a Pico 2 W:
+a root task that builds the system, a driver for the CYW43439, its Wi-Fi chip, and a network process with an IP stack;
+`wifi.h` says what they share.
+Every child starts with the same first slots, regions and bits, and a page it shares with the root task, whose address is its `a0`.
+The driver and the network process trade Ethernet frames through two rings in a frame both have installed, the link, `ring.h`,
+and a notification bit each way says a ring that was empty has a frame, or one that was full has room.
 `make BOARD=rp2350 wifi` builds and runs it, section 4.
 The driver's process holds no `Debug` capability, which would let it halt the machine:
 it prints into a ring in the page it shares with the root task, and the root task copies the ring to the console.
