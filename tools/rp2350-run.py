@@ -15,7 +15,10 @@ The halt ends with "rvuos: halted with code <n>",
 and this exits with that code, as QEMU exits with the kernel's.
 Closing the port then reboots the chip into BOOTSEL for the next image.
 
-Usage: tools/rp2350-run.py [--timeout seconds] image.elf
+Data beside the image, such as the Wi-Fi system's firmware blob, goes with --ram address:file,
+into SRAM alone and never into flash, checked as the segments are.
+
+Usage: tools/rp2350-run.py [--timeout seconds] [--ram address:file]... image.elf
 """
 
 import argparse
@@ -43,6 +46,8 @@ HALT_PORT = (0x1209, 0x0001)
 # see kernel/board/rp2350/board.h and image.S.
 RAM_BASE = 0x20000000
 RAM_SEARCH = 0x80000
+# All of SRAM, SRAM8 and SRAM9 with it, where --ram may write.
+SRAM_END = 0x20082000
 
 PICOBOOT_MAGIC = 0x431FD10B
 PC_EXCLUSIVE_ACCESS = 0x01
@@ -204,10 +209,25 @@ class Picoboot:
         self.command(PC_REBOOT2, args, check=False)  # the chip is gone before a status could be asked for
 
 
-def load(path):
+def ram_file(spec):
+    """An --ram argument: the address and the bytes, which must lie in SRAM."""
+    addr, _, path = spec.partition(":")
+    addr = int(addr, 0)
+    data = open(path, "rb").read()
+    if not (RAM_BASE <= addr and addr + len(data) <= SRAM_END):
+        sys.exit(f"--ram {spec}: {len(data)} bytes at {addr:#010x} do not lie in SRAM")
+    return addr, data
+
+
+def load(path, extra=()):
     boot = Picoboot(to_bootsel())
     boot.command(PC_EXCLUSIVE_ACCESS, bytes([EXCLUSIVE]))
     machine, segments = elf_image(path)
+    for addr, data in extra:
+        for seg_addr, seg in segments:
+            if addr < seg_addr + len(seg) and seg_addr < addr + len(data):
+                sys.exit(f"--ram data at {addr:#010x} overlaps the image's segment at {seg_addr:#010x}")
+    segments = segments + list(extra)
     say(f"the bootrom runs on the {boot.cores()} cores")
     for addr, data in segments:
         say(f"writing {len(data)} bytes at {addr:#010x}")
@@ -226,11 +246,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--timeout", type=float, default=None,
                         help="give up after this many seconds; by default wait for the halt")
+    parser.add_argument("--ram", action="append", default=[], metavar="ADDRESS:FILE",
+                        help="also write a file's bytes into SRAM at an address")
     parser.add_argument("image")
     args = parser.parse_args()
 
     deadline = None if args.timeout is None else time.monotonic() + args.timeout
-    load(args.image)
+    load(args.image, [ram_file(spec) for spec in args.ram])
     say("booted; waiting for the halt's serial port")
     port = wait_for(halt_port, 1e9 if deadline is None else deadline - time.monotonic())
     if port is None:

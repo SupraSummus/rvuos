@@ -325,7 +325,13 @@ make BOARD=rp2350 test escape                  # check the transcripts
 make BOARD=rp2350 ARCH=arm test escape         # the same on the Cortex-M33, from build/rp2350-arm/
 make BOARD=rp2350 CORES=2 test escape          # the same on both Hazard3 cores, which goes on to the second
 make BOARD=rp2350 ARCH=arm CORES=2 test escape # and on both Cortex-M33s
+make BOARD=rp2350 wifi                         # the Wi-Fi system of user/wifi/, on a Pico 2 W
 ```
+
+`make BOARD=rp2350 wifi` also builds `build/cyw43/blob.bin`:
+`tools/cyw43-blob.py` fetches the CYW43439's firmware, CLM and NVRAM from one commit of embassy,
+under Infineon's Permissive Binary License, checks each against its SHA-256 and packs them,
+and `tools/rp2350-run.py --ram` places the blob at the start of free RAM beside the image; nothing is written to flash.
 
 `tools/rp2350-run.py` loads the image through the bootrom's PICOBOOT interface,
 waits for the halt's serial port and reads it; closing it reboots the chip into BOOTSEL.

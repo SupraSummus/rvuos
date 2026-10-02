@@ -41,6 +41,7 @@ There is no libc; `user/rvuos.h` provides the system call wrappers:
 
 To replace the demo, edit `user/init.c` or add a program to `USER_PROGRAMS` in the Makefile;
 each program becomes its own kernel image.
+A program of several files, as `user/wifi/`, has a rule of its own in the Makefile, section 8.4.
 
 ### 8.2 Building a second process
 
@@ -150,6 +151,23 @@ for (;;) {
 
 Arming again after servicing is the acknowledgement.
 Give a timer line a second bit on the same notification for a timeout.
+
+### 8.4 A program of several processes: the Wi-Fi system
+
+`user/wifi/` is a program of several files and two processes on a Pico 2 W:
+a root task that builds the system and a driver for the CYW43439, its Wi-Fi chip; `wifi.h` says what they share.
+`make BOARD=rp2350 wifi` builds and runs it, section 4.
+The driver's process holds no `Debug` capability, which would let it halt the machine:
+it prints into a ring in the page it shares with the root task, and the root task copies the ring to the console.
+It reaches the chip through frames over PIO0's registers and over the control registers of four pins,
+which the root task makes with `OP_DEBUG_FRAME`, section 6.3,
+and it installs the frames that hold the chip's firmware one at a time in a region of its own, since there are more of them than regions.
+Every process runs code from the one image, so a process other than the root task keeps no global:
+its state lies at the base of its data frame, whose address it is started with in `a0`, written with `OP_THREAD_WRITE_REG`,
+and the link runs `tools/no-globals.py` on its objects, which fails on any data or bss section.
+What the system does, scan, join a network or run an access point, comes from a file the loader places in the root task's input region,
+`make BOARD=rp2350 wifi WIFI_CONFIG=file`, with lines `mode=scan|sta|ap`, `ssid=`, `pass=` and `channel=`;
+so a passphrase lies in no image and in no file of the tree.
 
 ## 9. Debugging and testing interfaces
 

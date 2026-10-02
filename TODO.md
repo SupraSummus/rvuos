@@ -2,6 +2,25 @@
 
 Open work only; an item leaves this file in the commit that finishes it.
 
+## Wi-Fi system
+
+`user/wifi/`, on a Pico 2 W: the driver brings the CYW43439's firmware up, scans,
+and runs an access point a laptop's scan sees; `WIFI_CONFIG` in the Makefile says how to ask for which.
+
+- Joining a network, `mode=sta`, is written after embassy's driver and has not run:
+  no network the board hears was given to it.
+- The data path: Ethernet frames between the driver and a network stack in a process of its own,
+  through rings in shared frames, and the stack's clients beside it.
+- The driver polls the chip every millisecond.
+  The chip raises the data line, GPIO24, when it has a packet and chip select is high,
+  which IO_BANK0 can turn into IO_IRQ_BANK0_NS, an `Irq` the driver would wait on instead.
+- The blob's frames stay lent after the upload; the root task could revoke them and use the 228 KiB again,
+  at the price of a driver that can no longer reset the chip.
+  The firmware in flash would keep both; writing flash is the maintainer's to decide.
+- A run ends at the halt, at the latest when the watchdog reboots the chip after seventeen seconds,
+  and the console reaches the host only then; a system that runs for good needs both changed.
+- The bus runs at 25 MHz; embassy runs it at 37.5 MHz with the faster of its programs, and DMA would free the core meanwhile.
+
 ## ESP32-C6
 
 - Boot from flash, and with it whether the ROM can load the image

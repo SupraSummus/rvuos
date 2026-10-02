@@ -277,6 +277,34 @@ escape: $(foreach p,$(ESCAPE_PROGRAMS),$(BUILD)/kernel-$(p).$(IMAGE))
 		$(BOARD_FACTS) tests/escape.sh "$(ESCAPE_PREFIX) $(BUILD)/kernel-$$p.$(IMAGE)" $$p || exit 1; \
 	done
 
+# The Wi-Fi system on a Pico 2 W, see user/wifi/wifi.h: a program of several files,
+# whose processes other than the root task may keep no global, which the link checks,
+# and the CYW43439's firmware beside it, which tools/cyw43-blob.py fetches and packs, never into the tree.
+# The loader places the blob at the start of free RAM, FREE_RAM_BASE in kernel/board/rp2350/board.h.
+WIFI_ROOT_OBJ  := $(BUILD)/user/wifi/root.o
+WIFI_CHILD_OBJ := $(patsubst %.c,$(BUILD)/%.o,$(filter-out user/wifi/root.c,$(wildcard user/wifi/*.c)))
+WIFI_BLOB      := build/cyw43/blob.bin
+WIFI_BLOB_AT   := 0x20040000
+# What the root task is to do, lines of mode=scan|sta|ap, ssid=, pass= and channel=, from a file outside the tree,
+# placed in its input region, INPUT_BASE in board.h; with none it scans.
+WIFI_CONFIG    ?=
+WIFI_INPUT_AT  := 0x20038000
+$(BUILD)/user/wifi/%.o: CFLAGS += -Iuser
+$(BUILD)/user-wifi.elf: $(WIFI_ROOT_OBJ) $(WIFI_CHILD_OBJ) $(USER_COMMON) $(BUILD)/user/user.ld tools/no-globals.py
+	tools/no-globals.py $(WIFI_CHILD_OBJ)
+	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/user/user.ld $(WIFI_ROOT_OBJ) $(WIFI_CHILD_OBJ) $(USER_COMMON) -o $@
+
+$(WIFI_BLOB): tools/cyw43-blob.py
+	tools/cyw43-blob.py --cache build/cyw43 --out $@
+
+.PHONY: wifi
+wifi: $(BUILD)/kernel-wifi.elf $(WIFI_BLOB)
+ifneq ($(BOARD),rp2350)
+	$(error the Wi-Fi system runs on a Pico 2 W: make BOARD=rp2350 wifi)
+endif
+	$(RP2350_PYTHON) tools/rp2350-run.py --ram $(WIFI_BLOB_AT):$(WIFI_BLOB) \
+		$(if $(WIFI_CONFIG),--ram $(WIFI_INPUT_AT):$(WIFI_CONFIG)) $(BUILD)/kernel-wifi.elf
+
 # Host build: the kernel's logic compiled natively,
 # with a hardware shim and a libFuzzer harness.
 # See DESIGN.md, "Properties" and "Verification".

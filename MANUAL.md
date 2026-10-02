@@ -51,6 +51,7 @@ Contents:
     - [8.1 Toolchain and layout](manual/writing-programs.md#81-toolchain-and-layout)
     - [8.2 Building a second process](manual/writing-programs.md#82-building-a-second-process)
     - [8.3 Writing a driver](manual/writing-programs.md#83-writing-a-driver)
+    - [8.4 A program of several processes: the Wi-Fi system](manual/writing-programs.md#84-a-program-of-several-processes-the-wi-fi-system)
 9. [Debugging and testing interfaces](manual/writing-programs.md#9-debugging-and-testing-interfaces)
 10. [Limits](manual/limits.md#10-limits)
 11. [What is not there yet](manual/limits.md#11-what-is-not-there-yet)
