@@ -22,6 +22,19 @@ The network process sends through the link and the driver to the air.
   and the console reaches the host only then; a system that runs for good needs both changed.
 - The bus runs at 25 MHz; embassy runs it at 37.5 MHz with the faster of its programs, and DMA would free the core meanwhile.
 
+## Programs
+
+`user/wifi/NOTES.md` says what writing a program of several processes was like; what it asks for:
+
+- A library for programs beside `user/rvuos.h`: a process builder, a slot allocator that takes slots back,
+  an allocator over Untypeds, a channel of rings and bits, a log ring a child writes and its parent copies,
+  and wrappers for every operation; `user/wifi/` has the first versions of most of them.
+- A thread starts with no argument, so a creator writes `a0` with `OP_THREAD_WRITE_REG`,
+  which makes the thread one tracing cannot run; `OP_THREAD_CONFIGURE` could take it.
+- No program may have initialised data; `start.S` could copy `.data` from the code region.
+- A child that only prints needs `Debug`, which halts the machine and makes frames over devices,
+  or a log of its parent's; a capability that only prints would do.
+
 ## ESP32-C6
 
 - Boot from flash, and with it whether the ROM can load the image
