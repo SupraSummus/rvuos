@@ -17,8 +17,8 @@ static uint32_t tick_counts;
 /* The compare value of the tick after the last counted one. */
 static uint64_t next_tick;
 
-/* What the compare holds, so that setting it for the tick it holds writes nothing. */
-static uint64_t compare;
+/* What each core's compare holds, so that setting it for the tick it holds writes nothing. */
+static uint64_t compare[CORES];
 
 void timer_start(uint32_t period)
 {
@@ -28,8 +28,16 @@ void timer_start(uint32_t period)
     }
     tick_counts = period;
     next_tick = counter_read() + period;
-    compare = next_tick;
-    counter_compare(compare);
+    compare[0] = next_tick;
+    counter_compare(compare[0]);
+    counter_compare_enable();
+}
+
+/* Another core's compare, which waits until the core first sets it, on the grid the first core's started. */
+void timer_core_start(void)
+{
+    compare[core_index()] = ~0ull;
+    counter_compare(~0ull);
     counter_compare_enable();
 }
 
@@ -78,8 +86,9 @@ uint32_t timer_count(void)
 void timer_set(uint32_t ticks)
 {
     uint64_t at = timer_deferred(next_tick, ticks, tick_counts);
-    if (at != compare) {
-        compare = at;
+    uint64_t *held = &compare[core_index()];
+    if (at != *held) {
+        *held = at;
         counter_compare(at);
     }
 }
@@ -103,17 +112,18 @@ uint32_t timer_offset(void)
 
 /*
  * The timer interrupts only at a tick that could change what runs,
- * so the ticks it let pass are counted first, before anything reads the count or an account.
+ * so the ticks it let pass are counted first, before anything reads the count or an account,
+ * and with them those other cores counted since this one last did.
  * While it is set for the next tick, a tick has passed only if its interrupt is pending,
- * so the counter is read only then or while it is set further.
+ * so the counter is read only then or while it is set further:
+ * every core's compare lies on the one grid, so no other core counted a tick this one's did not reach.
  * Under tracing time moves only by record; see DESIGN.md, "Verification".
  */
 bool timer_trap_enter(bool pending)
 {
     bool traced = debug_trace;
-    if (!traced && (pending || core_self()->wake_tick - sched_ticks > 1)) {
-        sched_count(timer_count());
-    }
+    const struct core *core = core_self();
+    sched_count(!traced && (pending || core->wake_tick - core->ticks > 1) ? timer_count() : 0);
     return traced;
 }
 

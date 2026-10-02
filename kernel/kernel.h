@@ -22,6 +22,19 @@ static inline bool ram_contains(uint32_t base, uint32_t size)
 }
 
 /*
+ * The cores the kernel runs on, CORES of them, numbered from 0, the one that boots; see DESIGN.md, "Cores".
+ * core_id says which one this is: the hart's mhartid on RISC-V, in the architecture's trap.c, or the host's.
+ * With one core it is never asked.
+ */
+_Static_assert(CORES >= 1 && CORES <= 255, "a thread names its core in a byte");
+uint32_t core_id(void);
+
+static inline uint32_t core_index(void)
+{
+    return CORES > 1 ? core_id() : 0;
+}
+
+/*
  * Not status codes: what a call tells syscall_dispatch instead of returning.
  * KERR_BLOCKED: the thread waits, and its registers are left alone until something wakes it.
  * KERR_PREEMPTED: the call stopped for a pending interrupt with its progress kept,

@@ -29,6 +29,15 @@ __attribute__((noreturn)) void trap_return(struct trap_frame *frame);
 __attribute__((noreturn)) void trap_start(struct trap_frame *frame);
 
 /*
+ * The core has nobody's turn, as a trap ends or as the core starts: idle until a thread has one, and return into it.
+ * In the architecture's trap.c, on sched_idle.
+ */
+__attribute__((noreturn)) void core_idle(void);
+
+/* A core other than the first starts, once the first booted the kernel; in the architecture's trap.c, called from start.S. */
+__attribute__((noreturn)) void core_start(void);
+
+/*
  * Where a stopped thread starts: pc and sp, as OP_THREAD_CONFIGURE takes them and the boot gives the root task;
  * the other registers stay as they were.
  * In the architecture's frame.c, which the host build has too.
@@ -62,13 +71,15 @@ __attribute__((noreturn)) void kernel_trap_panic(void);
  * device interrupts stay in the controller for sched_claim_interrupts to claim,
  * and the result says whether one is there.
  * This is what the kernel does when no thread can run
- * but an armed Irq, on a timer line or a device's, will make one runnable; see DESIGN.md, "Scheduling".
- * The host build has no clock and no devices and must never get here.
+ * but an armed Irq, on a timer line or a device's, will make one runnable, or another core will; see DESIGN.md, "Scheduling".
+ * The core gives the kernel's lock up while it waits, and wakes for another core's interrupt too, which is taken back here.
+ * The host build has no clock and no devices and gets here only with more than one core, at once.
  */
 bool intr_wait(uint32_t wake, uint32_t *ticks);
 
 /*
- * Whether the tick or a device interrupt is pending, which the kernel runs with interrupts held off to leave.
+ * Whether the tick or a device interrupt is pending, which the kernel runs with interrupts held off to leave,
+ * or another core waits for the kernel's lock.
  * A preemptible walk asks between two steps; see DESIGN.md, "Bounded work".
  * The host build always answers yes.
  */

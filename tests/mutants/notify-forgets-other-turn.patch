@@ -1,0 +1,18 @@
+A change to the thread whose turn another core has, as a bind to units of another core, does not tell that core,
+whose timer stays deferred for a turn that should end at the next tick.
+
+Caught-by: fuzz-smp2 smp-test
+Report: the timer is set past a tick an unmarked change brought forward
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -256,7 +256,7 @@ static void thread_settle(struct thread *t)
+     if (sooner) {
+         core->nearest_release = sched_ticks + account_fill(t, t->balance);
+     }
+-    if (joined || sooner || is_turn(t)) {
++    if (joined || sooner) {
+         core_notify(core);
+     }
+ }

@@ -2,17 +2,17 @@ The release leaves the tick it was for as the next one.
 Every later tick would look at every unit, and the timer wake at every tick for it;
 the release lies ahead of the count.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work test qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test smp-test qemu-replay
 Report: the release is for a tick already past
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -349,7 +349,6 @@ void sched_accounts_fill(void)
-  */
- static void release(void)
+@@ -391,7 +391,6 @@ void sched_accounts_fill(void)
+ static void release(uint32_t c)
  {
--    core_self()->nearest_release = sched_ticks + NEAREST_NONE;
+     uint32_t first = c * TIME_UNITS;
+-    cores[c].nearest_release = sched_ticks + NEAREST_NONE;
      for (uint32_t i = 0; i < TIME_UNITS; i++) {
          LOOP_BOUND(TIME_UNITS);
-         struct thread *t = unit_first(i);
+         struct thread *t = unit_first(first + i);

@@ -16,9 +16,27 @@
  * Revisit when Smepmp arrives.
  */
 
+#include "layout.h"
+
 #define FRAME_MEPC   128
 #define FRAME_MCAUSE 132
 #define FRAME_MTVAL  136
+
+/* mie's and mip's bit of the software interrupt, which another hart raises; MIE_MSIE in csr.h. */
+#define MIP_MSIP 8
+
+/*
+ * Each hart's kernel stack lies below the one of the hart before, the first hart's at the top:
+ * reg becomes its top, through tmp. With one core it is the top.
+ */
+.macro core_stack reg, tmp
+    la      \reg, __kernel_stack_top
+#if CORES > 1
+    csrr    \tmp, mhartid
+    slli    \tmp, \tmp, KERNEL_STACK_SHIFT
+    sub     \reg, \reg, \tmp
+#endif
+.endm
 
     .section .text.start, "ax"
     .globl _start
@@ -35,6 +53,12 @@ _start:
     /* No interrupts until the kernel asks for them. */
     csrw    mie, zero
     csrci   mstatus, 0x8
+
+#if CORES > 1
+    /* Every hart enters here; the first boots the kernel, and the others wait for it. */
+    csrr    t0, mhartid
+    bnez    t0, other_hart
+#endif
 
     la      sp, __kernel_stack_top
     csrw    mscratch, zero
@@ -53,6 +77,32 @@ _start:
 3:
     wfi
     j       3b
+
+#if CORES > 1
+    /*
+     * A hart the kernel runs on takes its stack and waits until the first hart, the kernel booted,
+     * raises its software interrupt, which mie lets wake wfi while MIE keeps it from being taken.
+     * A hart past CORES waits for ever.
+     */
+other_hart:
+    li      t1, CORES
+    bgeu    t0, t1, 6f
+    core_stack sp, t1
+    csrw    mscratch, zero
+    li      t1, MIP_MSIP
+    csrw    mie, t1
+4:
+    csrr    t2, mip
+    and     t2, t2, t1
+    bnez    t2, 5f
+    wfi
+    j       4b
+5:
+    call    core_start
+6:
+    wfi
+    j       6b
+#endif
 
     /*
      * An exception enters at the table's base and interrupt n at base + 4n.
@@ -120,9 +170,15 @@ trap_entry:
     sw      t0, FRAME_MTVAL(sp)
 
     mv      a0, sp
-    la      sp, __kernel_stack_top
+    core_stack sp, t0
     call    trap_handler
-    /* Fall through into trap_return with the frame to resume in a0. */
+    beqz    a0, 1f
+    /* Into trap_return with the frame to resume in a0. */
+    j       trap_return
+1:
+    /* Nobody's turn: the core idles, from an empty stack, and core_idle returns into a thread itself. */
+    core_stack sp, t0
+    call    core_idle
 
     .globl trap_return
 trap_return:
@@ -175,5 +231,5 @@ trap_return:
 
 kernel_trap:
     /* A trap while the kernel runs is a kernel bug; report and halt. */
-    la      sp, __kernel_stack_top
+    core_stack sp, t0
     call    kernel_trap_panic

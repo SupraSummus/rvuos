@@ -24,6 +24,7 @@ until the maintainer decides otherwise.
    RP2350 runs from RAM too, loaded by its bootrom.
    Cores without PMP, GD32VF103 among them, cannot run rvuos.
    QEMU's mps2-an385, a Cortex-M3, is the development target of ARMv7-M; see open decision 23.
+   QEMU `virt` runs two harts too, `make CORES=2`; see open decision 24.
 
 2. **Implementation language.**
    Working default: C, compiled with clang for `riscv32-unknown-elf`,
@@ -315,18 +316,28 @@ until the maintainer decides otherwise.
     Decide each with the first board or program that needs it.
 
 24. **More than one core.**
-    Working default: one; RP2350's second core waits in its bootrom.
-    What a second core would need of its own is in `struct core`,
-    the queues among it, since a thread would run on the core its units lie on and move only by a bind.
+    Decided: one lock around the kernel, a thread on the core its units are of, and units numbered core by core;
+    see "Cores".
+    QEMU `virt` runs two harts with `make CORES=2`, which `make smp-test` boots and `fuzz-smp2` models;
+    every other board runs one, and RP2350's second core waits in its bootrom.
+    Before, the default was one core, with what a second would need gathered in `struct core`.
+    The questions it left are decided so:
+    - **Exclusion.** A ticket lock, taken as a trap begins and given up as it returns, and while a core stalls;
+      a walk stops for a core waiting on it as for an interrupt, so the wait is at most a step of each other core.
+    - **A region taken from a process another core runs**, and a thread stopped or destroyed while another core runs it:
+      the call interrupts that core and waits until its trap has begun, and the core loads its regions again
+      as it takes the lock, or hands its taken thread's turn on.
+    - **Wakes.** A core that changes what another runs marks the other's timer stale,
+      and interrupts it when it idles or runs on with its timer set past the next tick.
+    - **The units.** `TIME_UNITS` of each core, so that which core a thread runs on is held as its units are;
+      a program learns how many cores there are by the units it can carve.
+
     Open:
-    - **Exclusion.** One lock around the kernel, as seL4's multicore build has,
-      keeps every trap one step on one state, which the self-check and the replay rely on.
-      A walk that stops for an interrupt would stop for a core waiting on the lock too,
-      so the wait is at most a step of each other core.
-    - **A region taken from a process another core runs** stays in that core's CSRs until it traps,
-      so that core must trap before the memory can become a pool,
-      and so must one whose thread loses its process or its pool.
-    - **Wakes and lines.** A wake for a core sleeping in `wfi` needs an interrupt to it,
-      and which core takes a device's line is open.
-    - **The units.** `TIME_UNITS` per core or for the whole machine; either changes the ABI.
-    Decide with the first board that runs a second core.
+    - **Device lines.** The controller forwards every line to the first core,
+      so a driver on another costs an interrupt between the cores for each of its interrupts.
+      A line could go to the core its `Irq`'s waiter runs on, which the bind or the arm would choose.
+    - **Spare time across cores.** A thread on spare time runs on its own core alone, however idle another is;
+      a queue of spare time for the whole machine would let any idle core take it, at the price of a thread moving with every turn.
+    - **Several cores on a board.** RP2350 has two of each kind, ARM's QEMU `mps2-an521` two Cortex-M33s;
+      what each needs is in `TODO.md`.
+    Decide each with the first board or workload that needs it.

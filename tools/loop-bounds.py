@@ -24,6 +24,8 @@ even in a loop the compiler unrolled.
 A walk must be a row of the table in "Bounded work", and every row walked or paid for.
 A loop that says it waits must wait on every way round:
 a wfi, a load from a fixed address outside RAM, or a call to a function holding a wfi.
+A loop that says it waits on another core must read with an acquire on every way round:
+a fence after a load, as an atomic load with acquire compiles to, or an lr or an amo; a dmb on ARM.
 The self-check is not checked, and every call to it must stand in an if on debug_trace.
 
 tools/ksource.py has read the source beforehand, a translation unit at a time,
@@ -247,6 +249,19 @@ def waiting_blocks(blocks, insns, ram, waits, moving):
     return {b for b, blk in blocks.items()
             if any(c in waits for _, c in blk.calls + blk.tails)
             or any(waits_here(i) for i in range(index[blk.start], index.get(blk.end, len(insns))))}
+
+
+# What makes a read an acquire, after the load or as one, by architecture.
+ACQUIRES = {"riscv": re.compile(r"^(fence|lr\.w(\.\w+)?|amo\w+\.w(\.\w+)?)$"), "arm": re.compile(r"^dmb")}
+
+
+def acquiring_blocks(blocks, insns, thumb):
+    """The blocks that hold an acquire, by ACQUIRES."""
+    acquire = ACQUIRES["arm" if thumb else "riscv"]
+    index = {pc: i for i, (pc, _, _) in enumerate(insns)}
+    return {b for b, blk in blocks.items()
+            if any(acquire.match(kthumb.bare(insns[i][1]) if thumb else insns[i][1])
+                   for i in range(index[blk.start], index.get(blk.end, len(insns))))}
 
 
 def comes_round(blocks, header, body, marked):
@@ -658,6 +673,15 @@ def main() -> int:
             if comes_round(blocks, h, body, waiting):
                 check.problems.append(f"{graph[a].name} has a loop at {h:#x}, {loop}, which says it waits, "
                                       "and a way round it does not")
+
+        # A wait on another core reads what that core writes, with an acquire, on every way round.
+        for (a, h, body), loop in matched.items():
+            if not any(n.kind == "core" for n in loop.notes):
+                continue
+            blocks = blocks_by_fn[a]
+            if comes_round(blocks, h, body, acquiring_blocks(blocks, insns_of[a], thumb)):
+                check.problems.append(f"{graph[a].name} has a loop at {h:#x}, {loop}, which says it waits on another core, "
+                                      "and a way round it reads nothing with an acquire")
 
         rows = walk_rows(args.design)
         walks = {n.name for n in src.notes if n.kind == "walk"}

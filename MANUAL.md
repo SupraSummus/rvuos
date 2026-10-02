@@ -150,9 +150,10 @@ What rvuos is not:
   A thread that faults stops where it faulted, and a notification its creator chose hears it;
   resumed, it runs the faulting instruction again.
 - **Processor time by capability.**
-  The processor is `TIME_UNITS` units of time, handed out as capabilities like memory is,
+  Each core is `TIME_UNITS` units of time, handed out as capabilities like memory is,
   and a thread runs on the units it is bound to, each earned by one thread at a time,
-  or on spare time, which nobody earned, if its capability allows.
+  or on spare time, which nobody earned, if its capability allows,
+  on the core those units are of.
   Its account fills at its units' rate and its turns cost it the time they ran, on the machine's counter,
   so a process that makes more threads or children gets no more of the processor than its units,
   and a thread held to its units gets no more, however idle the processor is otherwise.

@@ -228,13 +228,16 @@ make test        # boot under QEMU and check the transcript
 make host-test   # replay the fuzz corpus on the host build with invariants on
 make fuzz        # fuzz the system call surface for FUZZ_TIME seconds in FUZZ_JOBS processes
 make qemu-replay # replay the corpus on QEMU and compare with the host
+make smp-test    # boot the demo on two harts of QEMU and check its transcript, the second core's tests among it
 make mutants     # plant each bug under tests/mutants/ and require the checks to catch it
-make check       # test, escape, host-test, qemu-replay and the ARM test; run before committing
+make check       # test, escape, host-test, qemu-replay, the ARM test and smp-test; run before committing
 ```
 
 `PMP_MAX_ENTRIES=8 make check` runs everything with a smaller PMP budget.
 Images go under `build/<board>/`, the host build under `build/host/`;
 a smaller budget adds `-pmp<n>` to both.
+`make CORES=2` builds the kernel for two harts of QEMU `virt`, under `build/qemu-smp2/`,
+and `make CORES=2 run` boots it with `-smp 2`; no other board takes `CORES`.
 
 On the ESP32-C6, connected over USB:
 

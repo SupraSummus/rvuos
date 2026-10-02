@@ -3,7 +3,7 @@ which the root task was never granted for the counter.
 A frame carries no right beyond what its range was granted with,
 so a process could map a device register writable that it may only read.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: frame with rights beyond the grant
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c

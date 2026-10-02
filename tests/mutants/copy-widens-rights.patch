@@ -3,7 +3,7 @@ instead of narrowing the ones the source capability holds.
 Rights only narrow through copies,
 so a table ends up with a capability wider than the one it came from.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a call made a capability no capability of its caller covers
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c

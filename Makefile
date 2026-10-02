@@ -30,7 +30,18 @@ BOARD ?= qemu
 # A budget other than the default builds in a directory of its own,
 # since no object depends on the flag.
 PMP_MAX_ENTRIES ?= 16
-VARIANT := $(if $(filter-out 16,$(PMP_MAX_ENTRIES)),-pmp$(PMP_MAX_ENTRIES))
+PMP_VARIANT := $(if $(filter-out 16,$(PMP_MAX_ENTRIES)),-pmp$(PMP_MAX_ENTRIES))
+
+# The cores the kernel runs on; see DESIGN.md, "Cores".
+# Only QEMU virt starts more than one, with as many harts, and builds them in a directory of their own.
+# The host harnesses keep to their own count of cores, so CORES leaves them alone.
+CORES ?= 1
+ifneq ($(CORES),1)
+ifneq ($(BOARD),qemu)
+$(error BOARD=$(BOARD) runs one core; only qemu takes CORES=$(CORES))
+endif
+endif
+VARIANT := $(PMP_VARIANT)$(if $(filter-out 1,$(CORES)),-smp$(CORES))
 
 # The board's architecture, which only RP2350 lets the command line change;
 # the other one builds in a directory of its own, as a budget does.
@@ -54,8 +65,8 @@ endif
 CFLAGS    := $(ARCHFLAGS) -std=c11 -ffreestanding -fno-builtin -fno-pic -fno-common \
              -nostdlib -O2 -g -Wall -Wextra -Werror -Wundef -Wshadow \
              -Wstrict-prototypes -Wmissing-prototypes -Iinclude \
-             -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES)
-ASFLAGS   := $(ARCHFLAGS) -g -Iinclude
+             -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -DCORES=$(CORES)
+ASFLAGS   := $(ARCHFLAGS) -g -Iinclude -DCORES=$(CORES)
 LDFLAGS   := $(ARCHFLAGS) -nostdlib -static -fuse-ld=lld -Wl,--gc-sections -Wl,--no-dynamic-linker
 
 # The kernel sees its architecture's and its board's headers,
@@ -87,7 +98,8 @@ USER_COMMON := $(BUILD)/user/arch/$(ARCH)/start.o
 # sleep=off keeps it so while the guest waits in wfi, which would otherwise pass in host time.
 # The machine has only the devices the kernel uses, and QEMU starts faster for it;
 # the UART and QEMU's monitor share the terminal as -nographic has them.
-QEMUFLAGS := -M virt -cpu rv32 -m 8M -nographic -nodefaults -serial mon:stdio \
+# With more than one hart, icount runs them in turns on one host thread, so the run is still the same each time.
+QEMUFLAGS := -M virt -cpu rv32 -smp $(CORES) -m 8M -nographic -nodefaults -serial mon:stdio \
              -icount shift=0,sleep=off
 
 # What `make run` and `make test` boot.
@@ -152,7 +164,7 @@ ESCAPE_PROGRAMS :=
 endif
 
 .PHONY: all clean run test escape host-harnesses host-test fuzz corpus-merge qemu-replay mutants mutants-refresh \
-        mutants-fuzz arm-test contents check
+        mutants-fuzz arm-test smp-test contents check
 
 # Pattern rules would delete the objects they chain through,
 # so every build compiled the kernel from scratch.
@@ -171,7 +183,7 @@ $(BUILD)/%.o: %.S
 # The linker scripts take the board's layout through the preprocessor; see kernel/layout.h.
 $(BUILD)/%.ld: %.ld.S
 	@mkdir -p $(dir $@)
-	$(CC) $(ARCHFLAGS) -E -P -x assembler-with-cpp $(KERNEL_INC) -Iinclude \
+	$(CC) $(ARCHFLAGS) -E -P -x assembler-with-cpp $(KERNEL_INC) -Iinclude -DCORES=$(CORES) \
 		-MMD -MP -MT $@ $< -o $@
 
 $(BUILD)/user-%.elf: $(BUILD)/user/%.o $(USER_COMMON) $(BUILD)/user/user.ld
@@ -234,7 +246,7 @@ run: $(BUILD)/kernel-init.$(IMAGE)
 
 # Boot the root task of user/init.c and check its transcript.
 test: $(BUILD)/kernel-init.$(IMAGE)
-	$(BOARD_FACTS) tests/run.sh "$(RUN_INIT)" $(PMP_MAX_ENTRIES)
+	$(BOARD_FACTS) BOARD_CORES=$(CORES) tests/run.sh "$(RUN_INIT)" $(PMP_MAX_ENTRIES)
 
 # The escape-attempt suite: boot each scenario and check the hardware faults it
 # as its runner expects. PMP and privilege confine a process, so this runs on the
@@ -249,16 +261,16 @@ escape: $(foreach p,$(ESCAPE_PROGRAMS),$(BUILD)/kernel-$(p).$(IMAGE))
 # See DESIGN.md, "Properties" and "Verification".
 
 HOST_CC     := clang
-HOST_BUILD  := build/host$(VARIANT)
+HOST_BUILD  := build/host$(PMP_VARIANT)
 HOST_CORPUS := $(HOST_BUILD)/corpus
 HOST_CFLAGS := -std=c11 -O1 -g -Wall -Wextra -Werror -Wshadow \
-               -DRVUOS_HOST -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -Ikernel -Ikernel/arch/riscv \
+               -DRVUOS_HOST -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -DCORES=1 -Ikernel -Ikernel/arch/riscv \
                -Ikernel/board/qemu -Ihost -Iinclude
 # ASan alone may go on after a report, so that an input run as if alone ends alone;
 # see host_asan_report in host/shim.c.
 HOST_SAN    := -fsanitize=address,undefined -fno-sanitize-recover=all -fsanitize-recover=address
 
-HOST_KERNEL_SRC := kernel/cap.c kernel/pool.c kernel/process.c kernel/sched.c \
+HOST_KERNEL_SRC := kernel/cap.c kernel/core.c kernel/pool.c kernel/process.c kernel/sched.c \
                    kernel/syscall.c kernel/boot.c kernel/selfcheck.c kernel/klog.c \
                    kernel/arch/riscv/frame.c
 HOST_SRC        := host/shim.c host/history.c host/mutator.c host/fuzz.c
@@ -273,18 +285,20 @@ HOST_UNCOVERED_FLAGS := -fsanitize-address-use-after-return=never
 FUZZ_TIME ?= 60
 
 # One harness per simulated machine:
-# the default, an eight-entry PMP budget, and RP2350's Hazard3,
-# a 32-byte PMP grain and eight entries before the three it hardwires, which the fence shuts.
+# the default, an eight-entry PMP budget, RP2350's Hazard3,
+# a 32-byte PMP grain and eight entries before the three it hardwires, which the fence shuts,
+# and two cores, whose traps the host takes one after the other; see host_interrupts in host/shim.c.
 # The machine is a preprocessor flag, so each harness has its objects to itself
 # in build/host/<harness>.obj/.
 # fuzz-work is the default machine with the loop annotations counting,
 # every kernel function opening a frame for them,
 # and the kernel's memset and memcpy checked against their CALL_BOUND; see host/work.c.
 # It checks claims rather than finds inputs, so the corpus is kept without it.
-HOST_MACHINES  := $(HOST_BUILD)/fuzz $(HOST_BUILD)/fuzz-pmp8 $(HOST_BUILD)/fuzz-rp2350
+HOST_MACHINES  := $(HOST_BUILD)/fuzz $(HOST_BUILD)/fuzz-pmp8 $(HOST_BUILD)/fuzz-rp2350 $(HOST_BUILD)/fuzz-smp2
 HOST_HARNESSES := $(HOST_MACHINES) $(HOST_BUILD)/fuzz-work
 $(HOST_BUILD)/fuzz-pmp8.obj/%.o:    HOST_MACHINE := -UPMP_MAX_ENTRIES -DPMP_MAX_ENTRIES=8
 $(HOST_BUILD)/fuzz-rp2350.obj/%.o:  HOST_MACHINE := -DPMP_GRAIN=32 -DPMP_HARDWIRED
+$(HOST_BUILD)/fuzz-smp2.obj/%.o:    HOST_MACHINE := -UCORES -DCORES=2
 $(HOST_BUILD)/fuzz-work.obj/%.o:        HOST_MACHINE := -DRVUOS_WORK
 $(HOST_BUILD)/fuzz-work.obj/kernel/%.o: HOST_MACHINE := -DRVUOS_WORK -finstrument-functions \
                                         -Dmemset=work_memset -Dmemcpy=work_memcpy
@@ -381,12 +395,16 @@ qemu-replay: $(BUILD)/kernel-fuzzdrv.elf $(HOST_BUILD)/fuzz
 arm-test:
 	$(MAKE) BOARD=mps2-an385 test
 
+# The same demo on two harts of QEMU virt, which goes on to the second core; see DESIGN.md, "Cores".
+smp-test:
+	$(MAKE) CORES=2 test
+
 # The contents of MANUAL.md and DESIGN.md list every section,
 # since a section cited by its number or title is found through them.
 contents:
 	tools/contents.py MANUAL.md DESIGN.md
 
-check: contents test escape host-test qemu-replay arm-test
+check: contents test escape host-test qemu-replay arm-test smp-test
 
 clean:
 	rm -rf $(BUILD)

@@ -3,7 +3,7 @@ so the destroy of that table's pool takes the capability the call is made throug
 and a stop leaves a call its caller cannot make again.
 A call that stops leaves its caller the capability it was made through.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a call stopped where its caller cannot make it again
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c

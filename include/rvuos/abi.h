@@ -443,6 +443,8 @@
  * a3 = how many units, zero for none.
  * Each unit earns the thread's account a part of a tick every tick, and a turn costs it a tick;
  * with RIGHT_X on the capability the thread also runs on spare time, for free.
+ * The thread runs on the core its units are of, which for none is the first unit's;
+ * the units must all be of one core, or the call fails with KERR_INVALID_ARG.
  * See DESIGN.md, "Scheduling".
  * Fails with KERR_OVERLAP if another thread earns one of the units.
  * The thread leaves the units it earned before, and keeps what its account held, up to what the new units hold.
@@ -474,7 +476,7 @@
 #define BOOT_CAP_LOG       12 /* Frame, read and write: the kernel's log, see struct rvuos_log */
 #define BOOT_CAP_TIMER_LINES 13 /* IrqLine: every timer line, TIMER_LINES of them */
 #define BOOT_CAP_CLOCK     14 /* Clock: the machine's counter */
-#define BOOT_CAP_TIME      15 /* Time: every unit, with RIGHT_W and RIGHT_X; the root thread earns them all */
+#define BOOT_CAP_TIME      15 /* Time: every unit of every core, with RIGHT_W and RIGHT_X; the root thread earns the first core's */
 /*
  * Untyped: the block of RAM the root task lives in, which holds its code, data and input
  * and the boot pool's block; all of it is made already, so it makes nothing
@@ -550,6 +552,6 @@ struct replay_record {
 #define ROOT_TABLE_SLOTS 64 /* slots in the root task's table */
 #define POOL_MIN_SIZE 64 /* the smallest Untyped OP_UNTYPED_RETYPE makes a pool of */
 #define TIMER_LINES 16 /* on the whole machine; see BOOT_CAP_TIMER_LINES */
-#define TIME_UNITS 64 /* of the processor, on the whole machine; see BOOT_CAP_TIME */
+#define TIME_UNITS 64 /* of each core, numbered core by core; see BOOT_CAP_TIME */
 
 #endif

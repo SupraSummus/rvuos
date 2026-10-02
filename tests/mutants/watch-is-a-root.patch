@@ -1,7 +1,7 @@
 A thread's watch is a root of the derivation tree rather than a node below the capability it was set with,
 so no revoke above it clears it, and the destroy of the notification's pool leaves it naming freed memory.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: capability to an object is a root
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c

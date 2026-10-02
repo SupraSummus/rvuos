@@ -342,10 +342,25 @@ static uint32_t owed_threads, queued_threads;
 /* The units the threads the walk met are bound to. */
 static uint32_t units_seen;
 
+/* Whether it is the thread's turn, which it has only on the core it names. */
+static bool is_turn(const struct thread *t)
+{
+    return t->core < CORES && cores[t->core].turn == t;
+}
+
+/*
+ * The count a thread's account is counted to: the count its core charged its turn to while it has one there,
+ * which lags the machine's while that core has not trapped since another counted, and the machine's otherwise.
+ */
+static uint32_t count_of(const struct thread *t)
+{
+    return is_turn(t) ? cores[t->core].ticks : sched_ticks;
+}
+
 /* A thread's account at the count, its stamp's balance and its tick's gain every tick since, held to the cap. */
 static uint32_t account_now(const struct thread *t)
 {
-    uint64_t balance = t->balance + (uint64_t)(sched_ticks - t->stamp) * tick_gain(t);
+    uint64_t balance = t->balance + (uint64_t)(count_of(t) - t->stamp) * tick_gain(t);
     uint32_t cap = account_cap(t);
     return balance > cap ? cap : (uint32_t)balance;
 }
@@ -357,7 +372,7 @@ static uint32_t account_now(const struct thread *t)
  */
 static uint8_t queue_owed(const struct thread *t)
 {
-    if (t->state != THREAD_READY || t == core_self()->turn || t->time.type != CAP_BOUND) {
+    if (t->state != THREAD_READY || is_turn(t) || t->time.type != CAP_BOUND) {
         return QUEUE_NONE;
     }
     if (account_now(t) >= tick_parts()) {
@@ -401,9 +416,22 @@ static void check_thread(const struct thread *t)
     const struct cap *b = &t->time;
     if (b->type != CAP_NONE &&
         (b->type != CAP_BOUND || (b->rights & RIGHT_W) == 0 || (b->rights & ~(RIGHT_W | RIGHT_X)) != 0 ||
-         b->a >= TIME_UNITS ||
-         b->b > TIME_UNITS - b->a || b->index != 0)) {
+         b->a >= MACHINE_UNITS ||
+         b->b > MACHINE_UNITS - b->a || b->index != 0)) {
         fail("thread's units are malformed", v2p(t), b->type, b->a);
+    }
+    /*
+     * A thread runs on one core, the one its units are of, and names it as it joins a queue there;
+     * one bound elsewhere during its turn finishes the turn where it had it, and names that core till it settles again.
+     */
+    if (b->type != CAP_NONE && b->b != 0 && unit_core(b->a) != unit_core(b->a + b->b - 1)) {
+        fail("thread's units are of two cores", v2p(t), b->a, b->b);
+    }
+    if (t->core >= CORES) {
+        fail("thread names a core there is not", v2p(t), t->core, 0);
+    }
+    if (b->type != CAP_NONE && t->queue != QUEUE_NONE && t->core != unit_core(b->a)) {
+        fail("thread waits on another core than its units are of", v2p(t), t->core, b->a);
     }
     if (b->type != CAP_NONE && b->child != 0) {
         fail("something is derived from a thread's units", v2p(t), b->child, 0);
@@ -433,8 +461,8 @@ static void check_thread(const struct thread *t)
     if (t->balance > account_cap(t)) {
         fail("thread's account holds more than its cap", v2p(t), t->balance, thread_units(t));
     }
-    if ((int32_t)(sched_ticks - t->stamp) < 0) {
-        fail("thread's account is stamped ahead of the count", v2p(t), t->stamp, sched_ticks);
+    if ((int32_t)(count_of(t) - t->stamp) < 0) {
+        fail("thread's account is stamped ahead of the count", v2p(t), t->stamp, count_of(t));
     }
     uint8_t owed = queue_owed(t);
     if (t->queue != owed) {
@@ -447,7 +475,7 @@ static void check_thread(const struct thread *t)
     if ((owed == QUEUE_SPARE || owed == QUEUE_SPENT) && thread_units(t) != 0) {
         uint32_t missing = tick_parts() - account_now(t);
         uint32_t at = sched_ticks + (missing + tick_gain(t) - 1) / tick_gain(t);
-        uint32_t release = core_self()->nearest_release;
+        uint32_t release = cores[t->core].nearest_release;
         if ((int32_t)(at - release) < 0) {
             fail("a thread's account reaches a tick before the release", v2p(t), at, release);
         }
@@ -481,11 +509,11 @@ static void check_thread(const struct thread *t)
 /*
  * A queue is a ring of live threads, each linked back to the one before,
  * none of them running, and each in the state and waiting on what the queue is for:
- * a notification's waiters, or one of the scheduler's queues, which the thread names.
+ * a notification's waiters, or one of the scheduler's queues, which the thread names with its core.
  * The back links make the walk close at the oldest or fail:
  * no thread can be entered twice from two different predecessors.
  */
-static void check_queue(paddr_t head, uint8_t state, paddr_t waiting_on, uint8_t queue)
+static void check_queue(paddr_t head, uint8_t state, paddr_t waiting_on, uint8_t queue, uint32_t core)
 {
     if (head == 0) {
         return;
@@ -497,8 +525,11 @@ static void check_queue(paddr_t head, uint8_t state, paddr_t waiting_on, uint8_t
             fail("queue holds something that is not a thread", head, at, 0);
         }
         const struct thread *t = (const struct thread *)o;
-        if (t->state != state || t->waiting_on != waiting_on || t == core_self()->current || t->queue != queue) {
+        if (t->state != state || t->waiting_on != waiting_on || is_turn(t) || t->queue != queue) {
             fail("queue holds a thread it is not for", head, at, t->state);
+        }
+        if (queue != QUEUE_NONE && t->core != core) {
+            fail("a core's queue holds a thread of another core", head, at, t->core);
         }
         struct obj_header *next = object_find(t->queue_next);
         if (next == NULL || next->type != CAP_THREAD ||
@@ -511,30 +542,81 @@ static void check_queue(paddr_t head, uint8_t state, paddr_t waiting_on, uint8_t
 }
 
 /*
+ * Whether nothing could ever run again, which the kernel stops the machine for rather than let a core idle:
+ * no core has a turn or a thread on its run or spare queue, nor untraced on its spent queue,
+ * and no Irq is armed on a line, or tracing is on, where nobody is left to tick.
+ */
+static bool nothing_runs(void)
+{
+    for (uint32_t i = 0; i < CORES; i++) {
+        const struct core *c = &cores[i];
+        if (c->turn != NULL || c->run_queue != 0 || c->spare_queue != 0 || (!debug_trace && c->spent_queue != 0)) {
+            return false;
+        }
+    }
+    return debug_trace || armed_sources == 0;
+}
+
+/*
+ * A core is told nothing more of a thread than other cores told it,
+ * so it runs user mode only for a ready thread whose regions it holds.
+ */
+static void check_core(uint32_t i)
+{
+    const struct core *c = &cores[i];
+    const struct thread *current = c->current;
+    if (current != NULL) {
+        struct obj_header *o = object_find(v2p(current));
+        if (o == NULL || o->type != CAP_THREAD) {
+            fail("a core's thread is not a live object", i, v2p(current), 0);
+        }
+    }
+    /* A core whose turn it is runs the thread; one that has no turn idles, and may yet hold the last it ran. */
+    if (c->turn != NULL && (c->turn != current || current->core != i)) {
+        fail("it is not the running thread's turn", i, v2p(c->turn), v2p(current));
+    }
+    if (c->turn == NULL && nothing_runs()) {
+        fail("a core idles where nothing can run again", i, 0, 0);
+    }
+    /* The core counts up to the machine's count as its traps begin, and charges its turn to the tick it counted. */
+    if ((int32_t)(sched_ticks - c->ticks) < 0 || (c == core_self() && c->ticks != sched_ticks)) {
+        fail("a core counted other ticks than the machine", i, c->ticks, sched_ticks);
+    }
+    if (c->turn != NULL && c->turn->stamp != c->ticks) {
+        fail("the ticks of a turn were not charged to its thread", v2p(c->turn), c->turn->stamp, c->ticks);
+    }
+    if (debug_trace && c->turn_from != 0) {
+        fail("a traced turn is charged from within a tick", i, c->turn_from, 0);
+    }
+    if ((int32_t)(c->nearest_release - sched_ticks) <= 0) {
+        fail("the release is for a tick already past", c->nearest_release, sched_ticks, i);
+    }
+    if (c->in_user && (c->turn == NULL || current->state != THREAD_READY)) {
+        fail("a core runs user mode for a thread that may not run", i, current != NULL ? v2p(current) : 0, 0);
+    }
+    if (c->in_user && c->pmp_stale) {
+        fail("a core runs user mode with regions its process no longer has", i, v2p(current), 0);
+    }
+    check_queue(c->run_queue, THREAD_READY, 0, QUEUE_RUN, i);
+    check_queue(c->spare_queue, THREAD_READY, 0, QUEUE_SPARE, i);
+    check_queue(c->spent_queue, THREAD_READY, 0, QUEUE_SPENT, i);
+}
+
+/*
  * Each unit names the live thread that earns it, or none, and check_thread has held every thread's units to the table,
  * so as many units named as units bound leaves no unit naming a thread that does not earn it.
- * The scheduler's queues hold the threads that name them, and check_thread counted those owed a place on one.
- * Something runs, so it is the running thread's turn, and its account is counted up to the count;
+ * Each core's queues hold the threads that name them and it, and check_thread counted those owed a place on one.
+ * A core whose turn it is runs the thread, and its account is counted up to the core's count;
  * under tracing the clock is the tick count alone, so the turn owes nothing from before the tick.
  * The release lies ahead of the count.
  */
 static void check_scheduler(void)
 {
-    const struct core *core = core_self();
-    if (core->current != NULL && core->turn != core->current) {
-        fail("it is not the running thread's turn", v2p(core->current), 0, 0);
-    }
-    if (core->turn != NULL && core->turn->stamp != sched_ticks) {
-        fail("the ticks of a turn were not charged to its thread", v2p(core->turn), core->turn->stamp, sched_ticks);
-    }
-    if (debug_trace && core->turn_from != 0) {
-        fail("a traced turn is charged from within a tick", core->turn_from, 0, 0);
-    }
-    if ((int32_t)(core->nearest_release - sched_ticks) <= 0) {
-        fail("the release is for a tick already past", core->nearest_release, sched_ticks, 0);
+    for (uint32_t i = 0; i < CORES; i++) {
+        check_core(i);
     }
     uint32_t named = 0;
-    for (uint32_t i = 0; i < TIME_UNITS; i++) {
+    for (uint32_t i = 0; i < MACHINE_UNITS; i++) {
         if (unit_thread[i] == 0) {
             continue;
         }
@@ -547,9 +629,6 @@ static void check_scheduler(void)
     if (named != units_seen) {
         fail("a unit names a thread that does not earn it", named, units_seen, 0);
     }
-    check_queue(core->run_queue, THREAD_READY, 0, QUEUE_RUN);
-    check_queue(core->spare_queue, THREAD_READY, 0, QUEUE_SPARE);
-    check_queue(core->spent_queue, THREAD_READY, 0, QUEUE_SPENT);
 }
 
 /*
@@ -561,6 +640,7 @@ static void check_scheduler(void)
  * or, while it could not go on alone on spare time, the tick that leaves its account less than a tick.
  * The tick the timer was last set for is one of those, a later one only after a change that marked it stale.
  * check_scheduler has made sure that it is the running thread's turn.
+ * Only this core's timer is checked: another sets its own as its trap ends, told by whoever changed what it runs.
  */
 static void check_wake(void)
 {
@@ -568,7 +648,7 @@ static void check_wake(void)
     if ((int32_t)(nearest_deadline - sched_ticks) <= 0) {
         fail("the timer wakes for a deadline already past", nearest_deadline, sched_ticks, 0);
     }
-    if (core->current == NULL) {
+    if (core->turn == NULL) {
         return;
     }
     uint32_t wake = sched_wake_ticks();
@@ -589,6 +669,10 @@ static void check_wake(void)
     bool alone = thread_spare(t) && core->spare_queue == 0;
     if (core->run_queue != 0 || (!time && !alone)) {
         fail("the timer lets a tick pass that ends the turn", wake, v2p(t), balance);
+    }
+    /* A thread bound to another core's units during its turn here goes there at the next tick. */
+    if (t->time.type == CAP_BOUND && unit_core(t->time.a) != core_index()) {
+        fail("the timer lets the tick pass that moves the turn's thread to its core", wake, v2p(t), t->time.a);
     }
     /*
      * On the tick before the timer's the account still has a tick in it, unless it may go on alone on spare time:
@@ -756,7 +840,7 @@ static void check_captable(const struct captable *table)
             break;
         case CAP_TIME:
             /* The root task received every unit there is, with RIGHT_W and RIGHT_X; nothing widens that. */
-            if (c->b == 0 || c->a >= TIME_UNITS || c->b > TIME_UNITS - c->a) {
+            if (c->b == 0 || c->a >= MACHINE_UNITS || c->b > MACHINE_UNITS - c->a) {
                 fail("time capability outside the units there are", v2p(table), i, c->a);
             }
             if (c->rights & ~(RIGHT_W | RIGHT_X)) {
@@ -1142,7 +1226,7 @@ void selfcheck_run(void)
             check_captable((struct captable *)o);
             break;
         case CAP_NOTIFICATION:
-            check_queue(((struct notification *)o)->waiters, THREAD_WAITING, v2p(o), QUEUE_NONE);
+            check_queue(((struct notification *)o)->waiters, THREAD_WAITING, v2p(o), QUEUE_NONE, CORES);
             break;
         case CAP_IRQ:
             check_irq((struct irq *)o);
@@ -1166,15 +1250,15 @@ void selfcheck_run(void)
     check_tree();
     check_nesting();
 
-    const struct thread *current = core_self()->current;
-    if (current != NULL) {
-        struct obj_header *o = object_find(v2p(current));
-        if (o == NULL || o->type != CAP_THREAD) {
-            fail("current thread is not a live object", v2p(current), 0, 0);
-        }
+    const struct core *core = core_self();
+    const struct thread *current = core->current;
+    if (core->turn != NULL) {
         /* It may have lost its units during its turn, which it finishes. */
         if (current->state != THREAD_READY) {
             fail("the running thread is not runnable", v2p(current), current->state, 0);
+        }
+        if (core->pmp_stale) {
+            fail("the core's regions wait to be loaded again", v2p(current), 0, 0);
         }
         /* The CSRs, hardwired entries included, must grant exactly what the current process's slots do. */
         uint32_t addr[PMP_MAX_ENTRIES];

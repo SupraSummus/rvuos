@@ -428,6 +428,7 @@ and the running one gives the processor up as its call returns.
 so it stays stopped until its own pool goes.
 The running thread can lose its process only to a revoke it makes itself;
 see "Bounded work".
+A thread another core runs can lose it to any call, which makes that core trap first; see "Cores".
 It costs twenty bytes per thread and a test on every call and every switch;
 before, a thread had to lie in its process's pool so a pointer could not dangle.
 
@@ -523,6 +524,7 @@ which are enough for a lock or a ring buffer in shared memory.
 What atomics cannot do is stop a thread:
 on one hart a spinlock is a deadlock while nothing preempts
 and a burnt time slice once something does.
+Between threads on two cores a short spin is sound, but a holder the tick preempted still costs the spinner its turn.
 So the one service userspace cannot build for itself
 is "stop running me until someone says otherwise",
 and a notification is that service and nothing else.

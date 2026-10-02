@@ -17,6 +17,8 @@
  * LOOP_ARG(fn, arg)     bounded by the argument arg of fn, the function it stands in,
  *                       so every call to fn says what bounds it, with a CALL_ annotation.
  * LOOP_WAIT(what)       waits on the hardware for what, doing no work of its own.
+ * LOOP_CORE(what)       waits on another core for what, which that core does without the lock in bounded time;
+ *                       every way round reads with an acquire what the other core writes.
  *
  * A CALL_ annotation stands just before the statement that calls such a function:
  * CALL_BOUND(n) as for a loop,
@@ -64,6 +66,7 @@ void work_call(unsigned long bound, const char *site);
 #define LOOP_WALK(name) _Static_assert(1, "loop walk " #name) WORK_STEP('o', 0, "")
 #define LOOP_ARG(fn, arg) _Static_assert(1, "loop arg " #fn " " #arg) WORK_STEP('o', 0, "")
 #define LOOP_WAIT(what) _Static_assert(1, "loop wait " what) WORK_STEP('o', 0, "")
+#define LOOP_CORE(what) _Static_assert(1, "loop core " what) WORK_STEP('o', 0, "")
 
 #define CALL_BOUND(n) _Static_assert((n) > 0, "call bound " #n) WORK_CALL(n)
 #define CALL_LITERAL(s) _Static_assert(sizeof("" s) > 0, "call literal")

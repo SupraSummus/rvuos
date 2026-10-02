@@ -1,7 +1,7 @@
 A destroy that asks for the interrupt before it takes the next object
 can stop having taken nothing, and a call made again then stops again.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a call was preempted before it took anything away
 
 diff --git a/kernel/pool.c b/kernel/pool.c

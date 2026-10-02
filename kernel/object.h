@@ -189,7 +189,7 @@ struct thread {
     uint8_t state;
     uint8_t flags;
     uint8_t queue;      /* the scheduler's queue it waits on, one of QUEUE_*, while READY and not running */
-    uint8_t pad;
+    uint8_t core;       /* the core it runs and waits on, that of its units; see thread_settle */
     paddr_t waiting_on; /* the notification, while WAITING; 0 otherwise */
     /* The notification's waiters while WAITING, the scheduler's queue while it waits on one. */
     paddr_t queue_next;
@@ -570,11 +570,22 @@ static inline struct obj_header *cap_object(const struct cap *cap)
 #define COUNT_PARTS TIME_UNITS
 
 /*
+ * Every core's units, TIME_UNITS of each, numbered core by core:
+ * unit u is a part of core u / TIME_UNITS, and a thread runs on the core its units lie on.
+ */
+#define MACHINE_UNITS (CORES * TIME_UNITS)
+
+static inline uint32_t unit_core(uint32_t unit)
+{
+    return unit / TIME_UNITS;
+}
+
+/*
  * The thread that earns each unit of time, 0 for none.
  * The units are a fixed few, as the timer lines are, so the kernel finds every thread with units
  * by looking at each of them and at nothing else; see DESIGN.md, "Scheduling".
  */
-extern paddr_t unit_thread[TIME_UNITS];
+extern paddr_t unit_thread[MACHINE_UNITS];
 
 /* The units a thread earns, none while it is bound to none. */
 static inline uint32_t thread_units(const struct thread *t)
@@ -637,17 +648,27 @@ extern uint32_t armed_sources;
 extern uint32_t nearest_deadline;
 
 /*
- * What a second core would need of its own:
- * its thread, its turn, its queues, its release, its timer, and the call it is in.
+ * What each core has of its own:
+ * its thread, its turn, its queues, its release, its timer, the call it is in, and what it tells the others.
  * The units, the tick count and the lines are the machine's.
- * The kernel runs on one core; see open decision 24 in DESIGN.md.
+ * Every core's is the others' to read and change under the kernel's lock, in_user aside; see DESIGN.md, "Cores".
  */
 struct core {
-    /* The running thread. */
+    /*
+     * The running thread, or the last one to run while none does;
+     * NULL before the core first runs one and once another core destroyed it.
+     */
     struct thread *current;
 
-    /* The thread whose turn it is, the running one; NULL while none runs. */
+    /* The thread whose turn it is, the running one; NULL while none runs, and the core idles. */
     struct thread *turn;
+
+    /*
+     * The machine's tick the core has counted to, and charged its turn to:
+     * a trap on the core counts up to the machine's count as it begins,
+     * so it lags while the core runs on without trapping, and another core counted the ticks since.
+     */
+    uint32_t ticks;
 
     /*
      * How far into the tick the turn has been charged, in counts, at most a tick's:
@@ -685,15 +706,101 @@ struct core {
 
     /* The bits the last wake handed over, zero if none; for the trace. */
     uint32_t trace_wake_bits;
+
+    /*
+     * Whether the core runs user mode, which it tells the others without the lock:
+     * cleared as a trap begins, once the thread's registers are in its frame,
+     * and set under the lock as the core leaves for user mode; see core_shoot.
+     */
+    bool in_user;
+
+    /* Whether the protection unit holds regions the running thread's process no longer has, to load again before it runs. */
+    bool pmp_stale;
+
+    /* Whether a core told this one of a change it must trap for, which it interrupts as it gives the lock up. */
+    bool interrupt_owed;
 };
 
-extern struct core core0;
+extern struct core cores[CORES];
+
+#if CORES > 1
+/* The kernel's lock, a ticket lock: the ticket the next core to ask for it takes, and the one that holds it. */
+struct kernel_lock {
+    uint32_t next;
+    uint32_t owner;
+};
+extern struct kernel_lock kernel_lock;
+#endif
 
 /* The core this trap runs on. */
 static inline struct core *core_self(void)
 {
-    return &core0;
+    return &cores[core_index()];
 }
+
+/* Whether another core waits for the kernel's lock; see core.c. */
+static inline bool core_lock_waited(void)
+{
+#if CORES > 1
+    return __atomic_load_n(&kernel_lock.next, __ATOMIC_RELAXED) != kernel_lock.owner + 1;
+#else
+    return false;
+#endif
+}
+
+/* core.c */
+
+/*
+ * The first and the last thing the kernel does on a core, on every way in from user mode and out to it:
+ * enter tells the others the core runs the kernel, its thread's registers saved, takes the kernel's lock,
+ * and loads the regions again if another core took some from the process;
+ * leave tells the others the core runs user mode, gives the lock up,
+ * and then interrupts the cores told of a change meanwhile, see core_notify. With one core neither does anything.
+ * A core that idles and wakes takes the lock as its stall ends, and switch_to loads the regions.
+ */
+void core_enter(void);
+void core_leave(void);
+
+/* The stall gives the lock up while the core waits for an interrupt, and takes it again after. */
+void core_stall_begin(void);
+void core_stall_end(void);
+
+/*
+ * Make another core trap, if it runs user mode, and wait until its thread's registers are in its frame,
+ * so that the thread reaches nothing more until the core has the lock again.
+ */
+void core_shoot(struct core *c);
+
+/*
+ * What another core runs lost something it may reach, before the call goes on:
+ * a region of the process, after which the core loads the regions again before its thread runs on,
+ * or the thread its process, after which its frame is the one a watcher reads.
+ */
+void core_regions_changed(const struct process *proc);
+void core_thread_stopped(const struct thread *t);
+
+/* The thread is destroyed: no core runs it any more, nor has a turn for it. */
+void core_thread_gone(const struct thread *t);
+
+/*
+ * A thread became ready on a core, or brought its release forward:
+ * the core sets its timer again, and is interrupted for it unless it does so within a tick,
+ * once this core gives the lock up, so that it does not wait for the lock as it wakes.
+ */
+void core_notify(struct core *c);
+
+/*
+ * The board's, only with more than one core: let the other cores interrupt this one, in user mode and in wfi,
+ * interrupt another core, and take this core's interrupt back.
+ */
+void ipi_enable(void);
+void ipi_send(uint32_t core);
+void ipi_clear(void);
+
+#ifdef RVUOS_HOST
+/* The core core_shoot waits for traps, its registers saved, and waits for the lock; see host/shim.c. */
+void host_core_traps(uint32_t core);
+#endif
 
 /* Arm with bits, or disarm with zero; the deadline, or the line's mask, is the caller's. */
 void irq_set_bits(struct irq *irq, uint32_t bits);
@@ -741,9 +848,10 @@ void sched_accounts_fill(void);
 void sched_start(struct thread *t);
 
 /*
- * Ticks so far.
+ * Ticks so far, on the whole machine.
  * Only a trap's count of the ticks, the stall's and OP_DEBUG_TICK move it,
  * and the deadlines of timer lines are counted in it.
+ * Each core counts up to it as its traps begin; see struct core.
  */
 extern uint32_t sched_ticks;
 
@@ -756,9 +864,22 @@ void sched_signal(struct notification *ntfn, uint32_t bits);
 /*
  * The running thread waits.
  * Charge it for the counts its turn ran,
- * and hand the processor to the next ready thread, or wait for one, or stop the machine.
+ * and hand the processor to the next ready thread, or leave the core to idle once the trap is over,
+ * or stop the machine.
  */
 void sched_run_next(void);
+
+/*
+ * The core has no thread to run: wait for an interrupt until one has its turn, then hand the processor to it,
+ * or stop the machine once nothing can ever run again.
+ * The architecture's core_idle calls it as a trap ends with nobody's turn, and as a core starts.
+ * Each wait is the two halves below, which the host calls for a core of several on their own:
+ * sleep stops the machine if nothing can ever run again, else returns the ticks to the one to wait for;
+ * wake takes what the wait counted and the interrupts it found, and gives a thread its turn, if one may have it.
+ */
+void sched_idle(void);
+uint32_t sched_idle_sleep(void);
+bool sched_idle_wake(uint32_t ticks, bool device);
 
 /*
  * The timer tick: charge the ticks that passed to the thread whose turn it is, count them,
@@ -771,8 +892,9 @@ void sched_tick(uint32_t ticks);
 
 /*
  * The ticks a trap found passed since the last counted one, which the timer did not interrupt for:
- * charge and count them as sched_tick does, and note whether they reached wake_tick.
- * Every trap calls it on entry, untraced, so the count is current before anything reads it.
+ * charge and count them as sched_tick does, with those other cores counted since this one last did,
+ * and note whether they reached wake_tick.
+ * Every trap calls it on entry, with none under tracing, so the count is current before anything reads it.
  */
 void sched_count(uint32_t ticks);
 
@@ -837,6 +959,8 @@ void process_drop(struct cap *installed);
 
 /* Fence off, once at boot, the PMP entries the core hardwires open to user mode. */
 void process_fence(void);
+/* Fence the same entries off on a core other than the first, as it starts; the cores are alike. */
+void process_fence_core(void);
 /* Load a process's PMP image into the CSRs. */
 void process_activate(struct process *proc);
 

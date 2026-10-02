@@ -2,19 +2,18 @@ The running thread counts as alone while another thread waits on the run queue.
 The timer would let the ticks pass that end the turn, and the other thread would wait until the account ran low;
 every tick the timer lets pass hands the processor back to the running thread.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work smp-test qemu-replay
 Report: the timer lets a tick pass that ends the turn
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -471,9 +471,6 @@ uint32_t sched_wake_ticks(void)
-     if (turn == NULL) {
+@@ -521,7 +521,7 @@ uint32_t sched_wake_ticks(void)
          return wake;
      }
--    if (core->run_queue != 0) {
--        return 1;
--    }
+     /* A thread bound to another core's units during its turn here goes there as the next tick ends the turn. */
+-    if (core->run_queue != 0 || (turn->time.type == CAP_BOUND && unit_core(turn->time.a) != core_index())) {
++    if (turn->time.type == CAP_BOUND && unit_core(turn->time.a) != core_index()) {
+         return 1;
+     }
      uint32_t balance = account_now(turn);
-     bool alone = thread_spare(turn) && core->spare_queue == 0;
-     if (!has_time(balance)) {

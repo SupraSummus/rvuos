@@ -1,0 +1,19 @@
+The core that counts a tick gives time again only to the threads of its own core,
+so a thread of another that waits for its account sits on the spent queue past the tick it has time again,
+until its own core happens to count a tick; the release of every core lies ahead of the count.
+
+Caught-by: fuzz-smp2
+Report: a thread waits on another queue than its account says
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -496,7 +496,7 @@ static void tick_advance(uint32_t ticks)
+     nearest_deadline = nearest;
+     for (uint32_t c = 0; c < CORES; c++) {
+         LOOP_BOUND(CORES);
+-        if (!tick_before(sched_ticks, cores[c].nearest_release)) {
++        if (c == core_index() && !tick_before(sched_ticks, cores[c].nearest_release)) {
+             release(c);
+         }
+     }

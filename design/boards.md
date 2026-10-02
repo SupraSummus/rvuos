@@ -26,6 +26,7 @@ The kernel:
    (later also flash and other device ranges),
    and every unit of the processor's time, with its own thread earning them all,
 6. programs the tick, masks every interrupt line,
+   starts the other cores, which idle until a thread is bound to their units, see "Cores",
    and drops to user mode into the root task.
 
 A device range is granted read and write, never execute,
@@ -103,6 +104,14 @@ Nothing else in the kernel names an address.
 
 **QEMU `virt`** is the development target and the one `make check` runs.
 QEMU loads the image and enters it in machine mode.
+`make CORES=2` builds the kernel for two harts, which QEMU starts with `-smp 2`;
+`make smp-test` runs the demo on them, which goes on to the second core.
+Under `-icount` QEMU runs the harts in turns, one until the next deadline of any timer or until it waits,
+and another hart's software interrupt does not cut that turn short,
+so the demo sets a timer before it spins for what another core does.
+A hart that spins for the kernel's lock spins out its turn too, with no timer near up to 50 ms, half of QEMU's own 100 ms kick,
+so a trap on one hart may wait that long for the other,
+and the demo checks only that the second core answers before a timer, not how soon.
 
 **ESP32-C6** runs the demo root task and its transcript check, `make test BOARD=esp32c6`.
 The chip's ROM loads the image's segments into SRAM over USB and enters it,

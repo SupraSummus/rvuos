@@ -4,11 +4,16 @@
 
 #include "clint.h"
 #include "csr.h"
+#include "kernel.h"
 #include "layout.h"
+#include "object.h"
 #include "timer.h"
 #include "work.h"
 
 #define REG(addr) (*(volatile uint32_t *)(addr))
+
+/* Each hart's mtimecmp is two words, one after the other's, from hart 0's at CLINT_MTIMECMP. */
+#define MTIMECMP (CLINT_MTIMECMP + 8 * core_index())
 
 /* Both are 64 bits wide and this is RV32, so each is two words. */
 uint64_t counter_read(void)
@@ -25,9 +30,9 @@ uint64_t counter_read(void)
 void counter_compare(uint64_t v)
 {
     /* Push the compare value out of reach while the halves are apart. */
-    REG(CLINT_MTIMECMP) = 0xffffffffu;
-    REG(CLINT_MTIMECMP + 4) = (uint32_t)(v >> 32);
-    REG(CLINT_MTIMECMP) = (uint32_t)v;
+    REG(MTIMECMP) = 0xffffffffu;
+    REG(MTIMECMP + 4) = (uint32_t)(v >> 32);
+    REG(MTIMECMP) = (uint32_t)v;
 }
 
 void counter_compare_enable(void)
@@ -39,3 +44,21 @@ void clint_hold(void)
 {
     counter_compare(~0ull);
 }
+
+#if CORES > 1
+/* A hart's software interrupt is the low bit of its word at CLINT_MSIP, one word a hart. */
+void ipi_enable(void)
+{
+    csr_set(mie, MIE_MSIE);
+}
+
+void ipi_send(uint32_t core)
+{
+    REG(CLINT_MSIP + 4 * core) = 1;
+}
+
+void ipi_clear(void)
+{
+    REG(CLINT_MSIP + 4 * core_index()) = 0;
+}
+#endif

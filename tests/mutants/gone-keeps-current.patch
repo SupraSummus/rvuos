@@ -1,0 +1,21 @@
+A destroyed thread stays the running thread of the core that last ran it,
+whose next switch reads the thread's process through memory the thread no longer holds;
+a core's thread is a live object.
+
+Caught-by: fuzz-smp2
+Report: a core's thread is not a live object
+
+diff --git a/kernel/core.c b/kernel/core.c
+--- a/kernel/core.c
++++ b/kernel/core.c
+@@ -160,9 +160,7 @@ void core_thread_gone(const struct thread *t)
+     for (uint32_t i = 0; i < CORES; i++) {
+         LOOP_BOUND(CORES);
+         struct core *c = &cores[i];
+-        if (c->current == t) {
+-            c->current = NULL;
+-        }
++        (void)t;
+         if (c->turn == t) {
+             c->turn = NULL;
+         }

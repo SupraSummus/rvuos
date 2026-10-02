@@ -177,13 +177,22 @@ uint32_t frame_give(struct trap_frame *f)
     }
     f->psp = at;
     mpu_thread();
+    /* The thread's stack is written, so the core leaves the kernel here, on every way out. */
+    core_leave();
     return at;
 }
 
+/*
+ * A trap from a thread, with r4 to r11 in its frame and the rest on its stack.
+ * Returns the frame to resume, or NULL for nobody's turn, which start.S idles for.
+ * The kernel runs on one core on ARM, so no other takes the thread while the trap waits for the lock.
+ */
 struct trap_frame *trap_handler(struct trap_frame *frame)
 {
+    core_enter();
     mpu_kernel();
-    struct thread *t = core_self()->current;
+    struct core *core = core_self();
+    struct thread *t = core->current;
     if (frame != &t->frame) {
         kpanic("trap frame is not the current thread's");
     }
@@ -238,7 +247,18 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
     }
 
     timer_trap_leave(traced);
-    return &core_self()->current->frame;
+    return core->turn != NULL ? &core->current->frame : NULL;
+}
+
+/*
+ * A core with no thread to run, from start.S as a trap ends with nobody's turn:
+ * it idles until a thread has its turn, then returns into it as a trap does, through frame_give.
+ */
+void core_idle(void)
+{
+    sched_idle();
+    timer_trap_leave(debug_trace);
+    trap_return(&core_self()->current->frame);
 }
 
 /*
@@ -251,18 +271,20 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
 bool intr_wait(uint32_t wake, uint32_t *ticks)
 {
     timer_set(wake);
+    core_stall_begin();
     bool device;
     while (!(device = nvic_pending()) && !counter_due()) {
         LOOP_WAIT("an interrupt to be pending");
         __asm__ volatile("wfe");
     }
+    core_stall_end();
     *ticks = timer_count();
     return device;
 }
 
 bool intr_pending(void)
 {
-    return nvic_pending() || counter_due();
+    return nvic_pending() || counter_due() || core_lock_waited();
 }
 
 /*

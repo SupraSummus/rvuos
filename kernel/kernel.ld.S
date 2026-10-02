@@ -13,12 +13,6 @@
 
 ENTRY(_start)
 
-/*
- * tools/stack-depth.py bounds the stack from the linked image
- * and fails the build when the bound exceeds this; see DESIGN.md, "Bounded stack".
- */
-KERNEL_STACK_SIZE = 1K;
-
 /* For tools/loop-bounds.py: a load from a fixed address outside RAM waits on a device. */
 __ram_start = RAM_BASE;
 __ram_end   = RAM_BASE + RAM_SIZE;
@@ -57,12 +51,14 @@ SECTIONS
         __bss_end = .;
     }
 
+    /* A stack for each core, KERNEL_STACK_SIZE of layout.h, the first core's at the top and the next below it. */
     .stack (NOLOAD) : {
         . = ALIGN(16);
-        __kernel_stack_bottom = .;
-        . += KERNEL_STACK_SIZE;
+        . += KERNEL_STACK_SIZE * CORES;
         __kernel_stack_top = .;
     }
+    /* The first core's stack ends here, and tools/stack-depth.py holds every core's to the size of this one. */
+    __kernel_stack_bottom = __kernel_stack_top - KERNEL_STACK_SIZE;
 
     ASSERT(. <= KLOG_BASE, "kernel does not fit below its log")
 

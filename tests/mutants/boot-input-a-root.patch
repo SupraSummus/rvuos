@@ -3,7 +3,7 @@ before that memory was an Untyped,
 so memory that may become a pool again carries a frame that does not lie below it,
 and revoking below it would leave the input mapped.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: memory that may hold kernel objects overlaps a node not above or below it
 
 diff --git a/kernel/boot.c b/kernel/boot.c

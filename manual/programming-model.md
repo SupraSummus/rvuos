@@ -538,9 +538,16 @@ and carries the ring out one byte per transmitter interrupt.
 
 ### 5.11 Scheduling
 
-- The processor is divided into `TIME_UNITS` units of time, 64 on the whole machine, each a sixty-fourth of it.
-  The root task receives them all in `BOOT_CAP_TIME`, its own thread earning every one,
+- Each core is divided into `TIME_UNITS` units of time, 64, each a sixty-fourth of it.
+  The units of every core are numbered one core after the other:
+  the first core's are 0 to 63, the second's 64 to 127, and so on.
+  The root task receives them all in `BOOT_CAP_TIME`, its own thread earning every one of the first core's,
   and hands them out with `OP_TIME_CARVE` and `OP_CAP_DERIVE` as it hands out memory.
+  A program learns how many cores there are by the units it can carve out of `BOOT_CAP_TIME`:
+  a carve of 64 units at 64 succeeds only with a second core.
+- A thread runs on the core its units are of, and on no other.
+  A bind's units must all be of one core; a bind to none puts the thread on spare time on the core of the first unit named.
+  A thread bound to another core's units while it runs finishes its turn where it runs and moves at the next tick.
 - `OP_TIME_BIND` binds a thread to some of a capability's units, or to none of them,
   and the thread **earns** them.
   A unit is earned by one thread at a time:
@@ -551,8 +558,8 @@ and carries the ring out one byte per transmitter interrupt.
   turns no thread with time wants, which cost its account nothing.
   The boot grant has `RIGHT_X`.
   A thread bound through a capability without it runs on its account alone,
-  at most its units' part of the processor and a full account,
-  and the processor sleeps in `wfi` for the rest if nothing else wants it.
+  at most its units' part of its core and a full account,
+  and the core sleeps in `wfi` for the rest if nothing else wants it.
   A thread bound to no units runs on spare time alone, or not at all without `RIGHT_X`.
 - Each thread has an **account** of time,
   which gains a sixty-fourth of a tick for each unit the thread earns every tick
@@ -564,7 +571,7 @@ and carries the ring out one byte per transmitter interrupt.
   A new thread's account is empty, and the root task's thread's starts full.
   Bound to other units, a thread keeps what its account held, up to what the new units hold;
   unbound, it loses it.
-- Ready threads wait for the processor in three queues.
+- Ready threads wait for the processor in three queues, which each core has.
   A thread with time waits on the run queue;
   one without time waits on the spare queue if it may run on spare time,
   and for its account to reach a tick if not.
@@ -584,17 +591,19 @@ and carries the ring out one byte per transmitter interrupt.
 - So threads with work and time take equal turns, and then threads on spare time do.
   A thread with work all along gets its units' part of the processor,
   give or take a tenth of a second's worth of the accounts.
-  A thread with time waits for its turn at most `TIME_UNITS` ticks, since only a thread with units has time.
+  A thread with time waits for its turn at most `TIME_UNITS` ticks, since only a thread with units of its core has time there.
   A thread a process adds earns only units split off the process's own, or runs on spare time:
   it takes nothing another thread earns.
   Spare time goes round by thread, so more threads there get more of it.
 - A system call is never interrupted:
   machine mode runs with interrupts off from the trap to the return.
+  On several cores one call runs at a time, whichever core makes it, and another core's call waits for it.
 - When nothing is runnable and an `Irq` is armed on a timer line or a device's line,
   or a thread waits for its account to reach a tick,
   the kernel stalls in `wfi` until the nearest timer line's deadline, the account that reaches a tick or the interrupt arrives,
   and takes no tick in between.
-  When there is none of these, it prints `no runnable thread` and halts with code 5.
+  On several cores a core with nothing to run waits so while another runs, which wakes it when it gives it a thread.
+  When no core runs a thread and there is none of these, it prints `no runnable thread` and halts with code 5.
 
 There are no priorities and no yield.
 A spinning thread cannot starve the others, because the tick preempts it,

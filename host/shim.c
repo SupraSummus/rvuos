@@ -74,9 +74,54 @@ _Static_assert(PMP_WRITABLE + PMP_HARDWIRED_COUNT <= PMP_MAX_ENTRIES, "the hardw
 #define PMP_HARDWIRED_COUNT 0
 #endif
 
-/* The PMP CSRs as last written, the hardwired entries as the core holds them. */
-static uint32_t pmp_addr[PMP_MAX_ENTRIES];
-static uint8_t pmp_cfg[PMP_MAX_ENTRIES];
+/* Each core's PMP CSRs as last written, the hardwired entries as the core holds them. */
+static uint32_t pmp_addrs[CORES][PMP_MAX_ENTRIES];
+static uint8_t pmp_cfgs[CORES][PMP_MAX_ENTRIES];
+#define pmp_addr (pmp_addrs[core_index()])
+#define pmp_cfg (pmp_cfgs[core_index()])
+
+#if CORES > 1
+/*
+ * The core the kernel runs on: the one a record goes to, see host_pick_core,
+ * or the one an interrupt went to, whose trap the host takes once the trap that raised it is over.
+ * Of the ways the cores' traps can follow each other on the target, that is one:
+ * the core traps as the interrupt comes, its registers saved, and waits for the lock the trap holds.
+ */
+static uint32_t host_core;
+static bool host_ipi[CORES];
+
+uint32_t core_id(void)
+{
+    return host_core;
+}
+
+/*
+ * The core traps once the trap that interrupts it gives the lock up, see host_interrupts,
+ * unless that trap waits for it in core_shoot, where it traps at once.
+ */
+void ipi_enable(void)
+{
+}
+
+void ipi_send(uint32_t core)
+{
+    host_ipi[core] = true;
+}
+
+void host_core_traps(uint32_t core)
+{
+    if (!host_ipi[core]) {
+        fprintf(stderr, "invariant violated: a core waits for another it did not interrupt\n");
+        host_violated();
+    }
+    __atomic_store_n(&cores[core].in_user, false, __ATOMIC_RELEASE);
+}
+
+void ipi_clear(void)
+{
+    host_ipi[host_core] = false;
+}
+#endif
 
 /* The last line the kernel printed, ended or not, which selfcheck_fail reports when the transcript is not printed. */
 static char host_line[160];
@@ -179,7 +224,7 @@ bool intr_wait(uint32_t wake, uint32_t *ticks)
 {
     (void)wake;
     (void)ticks;
-    /* Reached only untraced with an Irq armed, which the harness never sets up. */
+    /* Reached only untraced with an Irq armed, which the harness never sets up; a core of several idles with sched_idle_sleep. */
     kpanic("the host build has no clock and no devices to wait for");
 }
 
@@ -249,12 +294,14 @@ void board_user_csrs_reset(void)
 
 void pmp_init(void)
 {
-    memset(pmp_addr, 0, sizeof(pmp_addr));
-    memset(pmp_cfg, 0, sizeof(pmp_cfg));
+    memset(pmp_addrs, 0, sizeof(pmp_addrs));
+    memset(pmp_cfgs, 0, sizeof(pmp_cfgs));
 #ifdef PMP_HARDWIRED
-    for (unsigned i = 0; i < PMP_HARDWIRED_COUNT; i++) {
-        pmp_addr[PMP_WRITABLE + i] = pmp_hardwired_addr[i];
-        pmp_cfg[PMP_WRITABLE + i] = PMP_A_NAPOT | PMP_R | PMP_W | PMP_X;
+    for (unsigned c = 0; c < CORES; c++) {
+        for (unsigned i = 0; i < PMP_HARDWIRED_COUNT; i++) {
+            pmp_addrs[c][PMP_WRITABLE + i] = pmp_hardwired_addr[i];
+            pmp_cfgs[c][PMP_WRITABLE + i] = PMP_A_NAPOT | PMP_R | PMP_W | PMP_X;
+        }
     }
 #endif
     pmp_entry_count = PMP_WRITABLE;
@@ -337,7 +384,14 @@ struct thread *host_boot(void)
      */
     pool_list = NULL;
     memset(line_irq, 0, LINES * sizeof(line_irq[0]));
-    core0 = (struct core){ .nearest_release = NEAREST_NONE };
+    for (unsigned c = 0; c < CORES; c++) {
+        cores[c] = (struct core){ .nearest_release = NEAREST_NONE };
+    }
+#if CORES > 1
+    kernel_lock = (struct kernel_lock){ 0 };
+    host_core = 0;
+    memset(host_ipi, 0, sizeof(host_ipi));
+#endif
     memset(unit_thread, 0, sizeof(unit_thread));
     armed_sources = 0;
     nearest_deadline = NEAREST_NONE;
@@ -353,6 +407,15 @@ struct thread *host_boot(void)
     struct thread *root = boot_create_root();
     sched_start(root);
     process_activate(thread_process(root));
+#if CORES > 1
+    /* The root task runs in user mode, and the other cores start, see core_start, and idle in their stall. */
+    cores[0].in_user = true;
+    for (host_core = 1; host_core < CORES; host_core++) {
+        process_fence_core();
+        sched_idle_sleep();
+    }
+    host_core = 0;
+#endif
 
     /*
      * What the replay driver does before it turns tracing on,
@@ -389,12 +452,32 @@ struct thread *host_boot(void)
     return root;
 }
 
+static void host_interrupts(void);
+
+/*
+ * The core goes back to user mode, or with nobody's turn to its stall, see sched_idle, which gives the lock up,
+ * unless nothing can ever run again.
+ */
+static void host_leave(void)
+{
+    if (core_self()->turn != NULL) {
+        core_leave();
+    } else {
+        sched_idle_sleep();
+        core_stall_begin();
+    }
+}
+
 /*
  * A trap of the running thread, a call or a fault, between the checks every trap gets,
- * and what the trap does on its way back, which the self-check of the next call holds.
+ * and what the trap does on its way back, which the self-check of the next call holds;
+ * then the traps of the cores it interrupted.
  */
 static void host_trap(bool call)
 {
+    /* What another core counted since this one last trapped, as timer_trap_enter counts it before the call. */
+    core_enter();
+    sched_count(0);
     history_begin(call);
 #ifdef RVUOS_WORK
     work_begin();
@@ -405,6 +488,7 @@ static void host_trap(bool call)
         fault_dispatch(core_self()->current);
     }
     sched_wake();
+    host_leave();
     /* The report was made as the kernel reached poisoned RAM; see host_asan_report. */
     if (poison_reached) {
         host_violated();
@@ -413,6 +497,68 @@ static void host_trap(bool call)
     work_end();
 #endif
     history_end();
+    host_interrupts();
+}
+
+/*
+ * Every core another core's trap interrupted traps in turn, as the target's trap_handler and sched_idle have it:
+ * one that idles wakes in its stall and looks for a turn,
+ * and one that runs a thread hands the processor on if another core stopped or destroyed the thread.
+ * Either may interrupt others again, and the host takes their traps too, until none is left.
+ * Under tracing the self-check holds what each left.
+ */
+static void host_interrupts(void)
+{
+#if CORES > 1
+    uint32_t back = host_core;
+    for (unsigned rounds = 0;; rounds++) {
+        unsigned c = 0;
+        while (c < CORES && !host_ipi[c]) {
+            c++;
+        }
+        if (c == CORES) {
+            break;
+        }
+        if (rounds == 4 * CORES * (REPLAY_THREADS + 1)) {
+            fprintf(stderr, "invariant violated: the cores interrupt each other for ever\n");
+            host_violated();
+        }
+        host_core = c;
+        struct core *core = core_self();
+        if (core->turn == NULL) {
+            core_stall_end();
+            ipi_clear();
+            if (sched_idle_wake(0, false)) {
+                sched_wake();
+            }
+        } else {
+            core_enter();
+            sched_count(0);
+            const struct thread *t = core->current;
+            bool taken = t == NULL || t->state != THREAD_READY;
+            ipi_clear();
+            if (taken) {
+                sched_run_next();
+            }
+            sched_wake();
+        }
+        if (debug_trace) {
+            selfcheck_run();
+        }
+        host_leave();
+        if (poison_reached) {
+            host_violated();
+        }
+    }
+    /* A core idles only with no thread waiting for a turn there, or its interrupt would have woken it. */
+    for (uint32_t c = 0; c < CORES; c++) {
+        if (cores[c].turn == NULL && (cores[c].run_queue != 0 || cores[c].spare_queue != 0)) {
+            fprintf(stderr, "invariant violated: a thread waits for a turn on a core that idles\n");
+            host_violated();
+        }
+    }
+    host_core = back;
+#endif
 }
 
 /* The actor number of a thread; 0 when it is not a driver thread, which never runs traced. */
@@ -630,6 +776,10 @@ static void host_run_on(void)
 {
     unsigned faults = 0;
     for (;;) {
+        /* A core of several that has nobody's turn idles, the last thread it ran stopped or waiting. */
+        if (core_self()->turn == NULL) {
+            return;
+        }
         unsigned actor = host_actor();
         uint8_t at = host_at[actor];
         uint32_t cause = CAUSE_INSN_ACCESS;
@@ -660,6 +810,100 @@ static void host_run_on(void)
     }
 }
 
+#if CORES > 1
+/* Whether a thread waits on a queue of the core, which holds only live threads, for its turn there. */
+static bool host_queued(const struct core *core, const struct thread *t)
+{
+    const paddr_t heads[] = { core->run_queue, core->spare_queue, core->spent_queue };
+    for (unsigned q = 0; q < sizeof(heads) / sizeof(heads[0]); q++) {
+        paddr_t at = heads[q];
+        while (at != 0) {
+            const struct thread *w = p2v(at);
+            if (w == t) {
+                return true;
+            }
+            at = w->queue_next == heads[q] ? 0 : w->queue_next;
+        }
+    }
+    return false;
+}
+
+/*
+ * A trap on one core may have handed another a driver thread that stands at a record, or one that cannot run:
+ * each such core's thread runs on as host_run_on has it, until every core's stands at the cursor or the core idles.
+ */
+static void host_settle_cores(void)
+{
+    for (unsigned rounds = 0;; rounds++) {
+        uint32_t c = 0;
+        for (; c < CORES; c++) {
+            if (cores[c].turn == NULL) {
+                continue;
+            }
+            host_core = c;
+            if (host_at[host_actor()] != HOST_ON || !host_driver_alive()) {
+                break;
+            }
+        }
+        if (c == CORES) {
+            return;
+        }
+        if (rounds == CORES * (REPLAY_THREADS + 1)) {
+            fprintf(stderr, "invariant violated: the cores hand driver threads to each other for ever\n");
+            host_violated();
+        }
+        host_run_on();
+    }
+}
+
+/* The first core whose turn it is, from the one the host runs on; CORES for none. */
+static uint32_t host_core_with_turn(void)
+{
+    for (uint32_t i = 0; i < CORES; i++) {
+        uint32_t c = (host_core + i) % CORES;
+        if (cores[c].turn != NULL) {
+            return c;
+        }
+    }
+    return CORES;
+}
+#else
+static void host_settle_cores(void)
+{
+}
+#endif
+
+/*
+ * The core a record goes to with more than one, as the driver's threads on each look at the cursor:
+ * the core whose turn its actor has, or else the one it waits on for its turn, where the passing goes round;
+ * a record for any thread, or for one that can have no turn, goes where the last went,
+ * or to the next core whose turn it is if that one idles.
+ * Some core has a turn, since the kernel stops the machine when none can have one again.
+ * Its driver thread, or one that stands at a record there, then runs on; see host_run_on.
+ */
+static void host_pick_core(const struct replay_record *c)
+{
+#if CORES > 1
+    /* Compared, never followed, unless the thread lies on a queue: a destroyed thread is simply never current again. */
+    const struct thread *actor = c->actor >= 1 && c->actor <= REPLAY_THREADS ? host_threads[c->actor] : NULL;
+    for (uint32_t i = 0; actor != NULL && i < CORES; i++) {
+        if (cores[i].turn == actor || host_queued(&cores[i], actor)) {
+            host_core = i;
+            return;
+        }
+    }
+    if (cores[host_core].turn == NULL) {
+        host_core = host_core_with_turn();
+    }
+    if (host_core == CORES) {
+        fprintf(stderr, "invariant violated: no core runs a thread, and the kernel went on\n");
+        host_violated();
+    }
+#else
+    (void)c;
+#endif
+}
+
 /*
  * The driver's passing protocol from rvuos/replay.h, run from the kernel's state:
  * every thread the round visits ticks until the actor has the processor
@@ -668,9 +912,11 @@ static void host_run_on(void)
  * or one whose tick failed, its table no longer holding the debug capability,
  * and gave the processor to nobody.
  * A thread the processor comes to that could not run faults, and the round goes on from the next.
+ * With more than one core the round goes on the core of host_pick_core.
  */
 void host_event(const struct replay_record *c)
 {
+    host_pick_core(c);
     struct thread *start = core_self()->current;
     while (replay_passes(c, host_actor())) {
         struct thread *ticked = core_self()->current;
@@ -690,12 +936,23 @@ void host_event(const struct replay_record *c)
         host_at[actor] = HOST_AT_CALL;
     }
     host_run_on();
+    host_settle_cores();
 }
 
 void host_end(void)
 {
-    /* Each thread that runs faults, at its breakpoint or before it, and the kernel halts after the last. */
+    /*
+     * Each thread that runs faults, at its breakpoint or before it, on whichever core runs it,
+     * and the kernel halts after the last.
+     */
     for (unsigned i = 0; i < REPLAY_THREADS; i++) {
+#if CORES > 1
+        host_core = host_core_with_turn();
+        if (host_core == CORES) {
+            fprintf(stderr, "invariant violated: no core runs a thread, and the kernel went on\n");
+            host_violated();
+        }
+#endif
         host_run_on();
         host_fault(CAUSE_BREAKPOINT);
     }

@@ -43,6 +43,8 @@
 #define MSTATUS_MPP_M (3u << MSTATUS_MPP_SHIFT)
 
 /* mie and mip bits. */
+#define MIE_MSIE (1u << 3)
+#define MIP_MSIP (1u << 3)
 #define MIE_MTIE (1u << 7)
 #define MIP_MTIP (1u << 7)
 #define MIE_MEIE (1u << 11)
@@ -52,6 +54,7 @@
  * The external interrupt's code is the board's, IRQ_EXT_CAUSE in its board.h.
  */
 #define MCAUSE_INTERRUPT (1u << 31)
+#define IRQ_M_SOFT 3
 #define IRQ_M_TIMER 7
 #define CAUSE_INSN_MISALIGNED   0
 #define CAUSE_INSN_ACCESS       1

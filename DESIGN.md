@@ -35,6 +35,7 @@ Contents:
 - [Communication and synchronisation](design/objects.md#communication-and-synchronisation)
 - [Time](design/time.md#time)
 - [Scheduling](design/time.md#scheduling)
+- [Cores](design/cores.md#cores)
 - [Interrupts](design/io.md#interrupts)
 - [The kernel log](design/io.md#the-kernel-log)
 - [Boot](design/boards.md#boot)
@@ -51,6 +52,7 @@ Contents:
 
 rvuos is a microkernel for RISC-V microcontrollers,
 and for ARMv7-M and ARMv8-M ones with an MPU through the same programming model; see "Architectures".
+It runs on one core or on several, one lock around it; see "Cores".
 It has four goals, in priority order.
 
 1. **Isolation without an MMU.**
@@ -74,6 +76,7 @@ It has four goals, in priority order.
    A system call, a tick or an interrupt costs what constants of the machine allow,
    however many objects anyone has created,
    destruction aside, which is paid for and preempted; see "Bounded work".
+   On several cores the wait for the kernel's lock is bounded the same way, by a step of each other core.
 
 ## Programs are plain binaries
 
@@ -111,9 +114,6 @@ which is open decision 3 below.
 - POSIX compatibility.
   There is no `fork`, no file descriptors, no signals.
 - Binary compatibility with seL4, L4, or F9.
-- Multicore, in the first iteration.
-  The design must not preclude it,
-  so what a second core would need of its own is gathered in `struct core`; see open decision 24.
 - Formal verification.
   The design borrows from seL4 where it makes verification easier,
   because those choices also make the kernel simpler,

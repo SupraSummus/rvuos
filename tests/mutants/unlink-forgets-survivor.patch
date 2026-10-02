@@ -1,7 +1,7 @@
 A destroy that unlinks its pool from the list
 leaves the next pool's back link naming the pool that went.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: pool list is not linked back
 
 diff --git a/kernel/pool.c b/kernel/pool.c

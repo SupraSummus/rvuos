@@ -5,7 +5,7 @@ Each object is still zeroed as it is allocated, so no call returns anything else
 and what catches it is the counting harness, which holds the length to the bound before the memset runs,
 and ASan on the other harnesses, since the memory is poisoned until objects lie in it.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: the call at kernel/syscall.c passes N, beyond its bound of N
 Report: the kernel reached RAM outside its objects
 

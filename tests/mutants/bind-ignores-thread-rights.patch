@@ -2,7 +2,7 @@ A bind moves a thread its caller holds only a narrowed capability to.
 A process given a thread to look at could stop it, or move it off the units its owner gave it;
 a call binds only a thread its caller could control.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a call bound a thread its caller could not control to units
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c

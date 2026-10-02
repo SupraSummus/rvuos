@@ -2,7 +2,7 @@ Every PMP entry a region produces carries the write bit,
 whatever the region's rights say.
 The PMP the self-check reads back no longer matches the running process's regions.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: PMP image grants rights the slots do not
 
 diff --git a/kernel/process.c b/kernel/process.c

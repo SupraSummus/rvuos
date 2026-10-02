@@ -615,9 +615,13 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
         if (off >= cap->b || count > cap->b - off) {
             return KERR_INVALID_ARG;
         }
+        /* A thread runs on one core, so the units it earns are of one. */
+        uint32_t first = cap->a + off;
+        if (count != 0 && unit_core(first) != unit_core(first + count - 1)) {
+            return KERR_INVALID_ARG;
+        }
         /* A unit is earned by one thread at a time; the thread's own it leaves as it binds. */
         struct thread *target = (struct thread *)cap_object(&tc);
-        uint32_t first = cap->a + off;
         for (uint32_t i = 0; i < count; i++) {
             LOOP_BOUND(TIME_UNITS);
             if (unit_thread[first + i] != 0 && unit_thread[first + i] != v2p(target)) {

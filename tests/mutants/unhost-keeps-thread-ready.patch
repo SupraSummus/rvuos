@@ -2,17 +2,17 @@ Taking a thread's process takes it off its queue but leaves it in the state it h
 so a woken or resumed one runs in a process that is gone;
 a thread without a process is stopped.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: thread without a process is not stopped
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -276,7 +276,6 @@ void sched_unhost(struct cap *hosted)
+@@ -344,7 +344,6 @@ void sched_unhost(struct cap *hosted)
      if (t->state == THREAD_WAITING) {
          unwait(t);
      }
 -    t->state = THREAD_STOPPED;
+     core_thread_stopped(t);
      *hosted = (struct cap){ 0 };
      thread_settle(t);
- }

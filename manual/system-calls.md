@@ -395,6 +395,8 @@ Needs `RIGHT_W`.
 `a2` = the first unit, as an offset from the capability's first
 (`KERR_INVALID_ARG` past the last, even for none),
 `a3` = how many units (`KERR_INVALID_ARG` past the last), zero for none.
+The units must all be of one core, `KERR_INVALID_ARG` otherwise,
+and the thread runs on that core, or with none on the first unit's; section 5.11.
 Fails with `KERR_OVERLAP` if another thread earns one of the units.
 The thread leaves the units it earned, whoever bound it to them,
 and earns these; with `RIGHT_X` on the invoked capability it runs on spare time too.
@@ -477,7 +479,7 @@ and drops into user mode with:
 | 12 | `BOOT_CAP_LOG` | `Frame`: the kernel log's header and ring | read, write |
 | 13 | `BOOT_CAP_TIMER_LINES` | `IrqLine`: every timer line, `TIMER_LINES` of them | write |
 | 14 | `BOOT_CAP_CLOCK` | `Clock`: the machine's counter | all |
-| 15 | `BOOT_CAP_TIME` | `Time`: every unit of time, `TIME_UNITS` of them, all earned by the root task's thread | write, execute |
+| 15 | `BOOT_CAP_TIME` | `Time`: every unit of time, `TIME_UNITS` of each core, the first core's all earned by the root task's thread | write, execute |
 | 16 | `BOOT_CAP_ROOT_RAM` | `Untyped`: the root task's own memory, its code, data and input frames and the boot pool's block, all made already | all |
 | 17 | `BOOT_CAP_POOL_RAM` | `Untyped`: the boot pool's block, below `BOOT_CAP_ROOT_RAM`, made into the boot pool | all |
 

@@ -2,7 +2,7 @@ move-hands-children-up for anything but an Untyped:
 the tree stays whole and only the moved node's place is lost, which the self-check cannot see.
 The replay's prologue moves two made Untypeds, so that mutant shows only the overlap it makes of them.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a move did not keep what was derived from the node it moved
 
 diff --git a/kernel/cap.c b/kernel/cap.c

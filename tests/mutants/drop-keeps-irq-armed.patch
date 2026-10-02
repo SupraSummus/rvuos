@@ -3,7 +3,7 @@ so its line would fire into a notification that is gone,
 and a destroy of its pool would leave the count of armed sources counting it;
 an Irq without a notification is disarmed.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: irq without a notification is armed
 
 diff --git a/kernel/sched.c b/kernel/sched.c

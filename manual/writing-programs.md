@@ -99,8 +99,8 @@ The steps below are what `user/init.c` does.
 
 5. **Configure, bind and start** the thread.
    The stack grows down from the top of the child's data frame.
-   The thread earns half the processor, units carved out of the boot grant.
-   The root task's thread earns every unit at boot, so it keeps the first half and leaves the rest;
+   The thread earns half the first core, units carved out of the boot grant.
+   The root task's thread earns every unit of the first core at boot, so it keeps the first half and leaves the rest;
    binding the child through `BOOT_CAP_TIME` with no units would give it spare time alone,
    which it gets only while the root task does not want the processor.
 

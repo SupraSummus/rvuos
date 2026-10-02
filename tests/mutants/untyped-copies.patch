@@ -1,7 +1,7 @@
 An Untyped may be copied,
 and the copy is a second allocator over the same memory, free while the first has made something.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: memory that may hold kernel objects overlaps a node not above or below it
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c

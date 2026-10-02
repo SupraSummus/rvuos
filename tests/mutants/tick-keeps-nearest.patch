@@ -2,17 +2,17 @@ The tick fires the due timer lines but leaves the nearest deadline where it was.
 Once that line fired the timer would wake for a deadline already past, every tick;
 the nearest deadline lies ahead of the count.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work test qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test smp-test qemu-replay
 Report: the timer wakes for a deadline already past
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -447,7 +447,6 @@ static void tick_advance(uint32_t ticks)
+@@ -493,7 +493,6 @@ static void tick_advance(uint32_t ticks)
              nearest = irq->deadline;
          }
      }
 -    nearest_deadline = nearest;
-     if (!tick_before(sched_ticks, core->nearest_release)) {
-         release();
-     }
+     for (uint32_t c = 0; c < CORES; c++) {
+         LOOP_BOUND(CORES);
+         if (!tick_before(sched_ticks, cores[c].nearest_release)) {
