@@ -148,14 +148,14 @@ The count of armed sources is exactly the `Irq`s armed on a device's line or a t
 An `Irq` armed on a timer line has its deadline ahead of the tick count:
 the tick fires every timer line that is due,
 and a line that fires disarms its `Irq`.
-The nearest deadline the timer is set for lies ahead of the count
-and no later than the deadline of any `Irq` armed on a timer line.
+Each core's nearest deadline lies ahead of the count
+and no later than the deadline of any `Irq` armed on a timer line from that core.
 
 **The timer.**
 While a thread runs, every tick the timer lets pass would hand the processor back to it:
 nobody is on the run queue, and it has time,
 or may run on spare time with nobody on the spare queue,
-and none of those ticks is the release, the nearest deadline,
+and none of those ticks is the release, the core's nearest deadline,
 or, unless it may go on alone on spare time, the tick at which its account leaves it less than a tick.
 The tick the timer was last set for lies ahead of the count and no later than that first tick,
 unless a change since marked it stale.
@@ -545,7 +545,8 @@ so the self-check sees a core left running what the call took from it.
 Such a core drops what its trap was for through the kernel's own `core_trapped`, as the target's trap does.
 Each core has its own PMP CSRs there, and the host checks after every round of interrupts
 that no core idles while a thread waits for a turn on it.
-The seeds named `cores-` bind a driver thread to the second core's units and take things from it there;
+The seeds named `cores-` bind a driver thread to the second core's units and take things from it there,
+or arm a timer line there that a tick the first core counts fires;
 the other seeds and the corpus run on the first core alone, as on one.
 `make smp-test` boots the demo on two harts of QEMU `virt`,
 the only check of the lock, the software interrupt, the idle and the start of the second hart,

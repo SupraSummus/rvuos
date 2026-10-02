@@ -1,5 +1,5 @@
 /*
- * Kernel entry after start.S.
+ * Kernel entry after start.S: the boot, and the idle a core enters as a trap ends with nobody's turn.
  */
 
 #include "irq.h"
@@ -56,4 +56,16 @@ void kmain(void)
     board_cores_start();
 #endif
     trap_start(&root->frame);
+}
+
+/*
+ * A core with no thread to run, from start.S as a trap ends with nobody's turn, or as the core starts:
+ * it idles with the kernel's lock, given up only while it waits, until a thread has its turn,
+ * then leaves for it as a trap does, through trap_return.
+ */
+void core_idle(void)
+{
+    sched_idle();
+    timer_trap_leave(debug_trace);
+    trap_return(&core_self()->current->frame);
 }

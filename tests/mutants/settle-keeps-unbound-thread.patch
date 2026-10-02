@@ -8,7 +8,7 @@ Report: a thread names a queue it is not for
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -242,7 +242,7 @@ static void thread_settle(struct thread
+@@ -243,7 +243,7 @@ static void thread_settle(struct thread *t)
      struct core *core = &cores[t->core];
      uint8_t queue = thread_queue(t, t->balance);
      bool joined = queue != QUEUE_NONE && (queue != t->queue || core != was);

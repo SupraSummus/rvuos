@@ -1,0 +1,18 @@
+An arm leaves the Irq naming the core that armed it before, or the first,
+so once a tick looks at the lines that core's timer wakes for the deadline and the arming core's does not;
+a timer line wakes the core that armed it.
+
+Caught-by: fuzz-smp2
+Report: armed timer line comes due before the timer wakes for it
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -43,7 +43,6 @@ void irq_set_bits(struct irq *irq, uint32_t bits)
+      */
+     if (line_is_timer(irq->line) && bits != 0) {
+         struct core *core = core_self();
+-        irq->core = (uint8_t)core_index();
+         if (tick_before(irq->deadline, core->nearest_deadline)) {
+             core->nearest_deadline = irq->deadline;
+             core->wake_stale = true;

@@ -269,17 +269,6 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
 }
 
 /*
- * A core with no thread to run, from start.S as a trap ends with nobody's turn:
- * it idles until a thread has its turn, then returns into it as a trap does, through frame_give.
- */
-void core_idle(void)
-{
-    sched_idle();
-    timer_trap_leave(debug_trace);
-    trap_return(&core_self()->current->frame);
-}
-
-/*
  * Every exception has the priority the kernel runs at, so none is taken while it runs, and wfi would not wake:
  * wfe does, since SEVONPEND makes a line becoming pending an event, taken or not.
  * A core may also treat wfe as a no-op, which the loop tolerates.

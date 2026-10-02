@@ -1,18 +1,19 @@
-The tick fires the due timer lines but leaves each core's nearest deadline where it was.
-Once that line fired the timer would wake for a deadline already past, every tick;
+The tick puts its own core's nearest deadline right and leaves the other cores' as they were,
+so a core whose line another core's tick fired wakes for a deadline already past, every tick;
 each core's nearest deadline lies ahead of the count.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test smp-test qemu-replay
+Caught-by: fuzz-smp2
 Report: the timer wakes for a deadline already past
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -484,7 +484,6 @@ static void tick_advance(uint32_t ticks)
+@@ -484,7 +484,7 @@ static void tick_advance(uint32_t ticks)
      sched_ticks += ticks;
      for (uint32_t c = 0; c < CORES; c++) {
          LOOP_BOUND(CORES);
 -        cores[c].nearest_deadline = sched_ticks + NEAREST_NONE;
++        core->nearest_deadline = sched_ticks + NEAREST_NONE;
      }
      for (uint32_t i = 0; i < TIMER_LINES; i++) {
          LOOP_BOUND(TIMER_LINES);

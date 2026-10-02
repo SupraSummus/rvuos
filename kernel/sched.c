@@ -9,12 +9,13 @@
 #include "timer.h"
 #include "trap.h"
 
-struct core cores[CORES] = { [0 ... CORES - 1] = { .nearest_release = NEAREST_NONE } };
+struct core cores[CORES] = {
+    [0 ... CORES - 1] = { .nearest_release = NEAREST_NONE, .nearest_deadline = NEAREST_NONE },
+};
 uint32_t sched_ticks;
 
 paddr_t unit_thread[MACHINE_UNITS];
 uint32_t armed_sources;
-uint32_t nearest_deadline = NEAREST_NONE;
 
 static void count_armed(bool was, bool is)
 {
@@ -37,15 +38,15 @@ void irq_set_bits(struct irq *irq, uint32_t bits)
         count_armed(irq_armed(irq), bits != 0);
     }
     /*
-     * A timer line armed for a nearer deadline brings the timer's next interrupt forward to it.
-     * Every core wakes for the nearest deadline, so this one sets its timer for it as the trap ends,
-     * and each of the others, which need not, does so once it traps.
+     * A timer line wakes the core that armed it, and only that one,
+     * so an arm for a deadline nearer than this core's brings its timer's next interrupt forward to it.
      */
-    if (line_is_timer(irq->line) && bits != 0 && tick_before(irq->deadline, nearest_deadline)) {
-        nearest_deadline = irq->deadline;
-        for (uint32_t c = 0; c < CORES; c++) {
-            LOOP_BOUND(CORES);
-            cores[c].wake_stale = true;
+    if (line_is_timer(irq->line) && bits != 0) {
+        struct core *core = core_self();
+        irq->core = (uint8_t)core_index();
+        if (tick_before(irq->deadline, core->nearest_deadline)) {
+            core->nearest_deadline = irq->deadline;
+            core->wake_stale = true;
         }
     }
     irq->bits = bits;
@@ -459,7 +460,8 @@ void irq_drop(struct cap *signalled)
  * The timer lines are a fixed few, so the tick looks at each of them
  * and at nothing else; see DESIGN.md, "Time".
  * A line that fires disarms its Irq, so that after the tick no armed one is due,
- * and the nearest deadline of those still armed is exact again.
+ * and each core's nearest deadline of those still armed on it is exact again,
+ * which only puts it later, so no other core is told.
  */
 static void tick_advance(uint32_t ticks)
 {
@@ -480,20 +482,23 @@ static void tick_advance(uint32_t ticks)
         core->ticks += owed;
     }
     sched_ticks += ticks;
-    uint32_t nearest = sched_ticks + NEAREST_NONE;
+    for (uint32_t c = 0; c < CORES; c++) {
+        LOOP_BOUND(CORES);
+        cores[c].nearest_deadline = sched_ticks + NEAREST_NONE;
+    }
     for (uint32_t i = 0; i < TIMER_LINES; i++) {
         LOOP_BOUND(TIMER_LINES);
         struct irq *irq = line_binding(IRQ_LINES + i);
         if (irq == NULL || !irq_armed(irq)) {
             continue;
         }
+        struct core *armed = &cores[irq->core];
         if (irq_due(irq, sched_ticks)) {
             irq_signal(irq);
-        } else if (tick_before(irq->deadline, nearest)) {
-            nearest = irq->deadline;
+        } else if (tick_before(irq->deadline, armed->nearest_deadline)) {
+            armed->nearest_deadline = irq->deadline;
         }
     }
-    nearest_deadline = nearest;
     for (uint32_t c = 0; c < CORES; c++) {
         LOOP_BOUND(CORES);
         if (!tick_before(sched_ticks, cores[c].nearest_release)) {
@@ -513,8 +518,8 @@ uint32_t sched_wake_ticks(void)
 {
     struct core *core = core_self();
     struct thread *turn = core->turn;
-    uint32_t wake = nearest_deadline - sched_ticks;
-    if (tick_before(core->nearest_release, nearest_deadline)) {
+    uint32_t wake = core->nearest_deadline - sched_ticks;
+    if (tick_before(core->nearest_release, core->nearest_deadline)) {
         wake = core->nearest_release - sched_ticks;
     }
     if (turn == NULL) {

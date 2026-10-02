@@ -591,6 +591,9 @@ static void check_core(uint32_t i)
     if ((int32_t)(c->nearest_release - sched_ticks) <= 0) {
         fail("the release is for a tick already past", c->nearest_release, sched_ticks, i);
     }
+    if ((int32_t)(c->nearest_deadline - sched_ticks) <= 0) {
+        fail("the timer wakes for a deadline already past", c->nearest_deadline, sched_ticks, i);
+    }
     if (c->in_user && (c->turn == NULL || current->state != THREAD_READY)) {
         fail("a core runs user mode for a thread that may not run", i, current != NULL ? v2p(current) : 0, 0);
     }
@@ -608,7 +611,7 @@ static void check_core(uint32_t i)
  * Each core's queues hold the threads that name them and it, and check_thread counted those owed a place on one.
  * A core whose turn it is runs the thread, and its account is counted up to the core's count;
  * under tracing the clock is the tick count alone, so the turn owes nothing from before the tick.
- * The release lies ahead of the count.
+ * The release and the nearest deadline lie ahead of the count.
  */
 static void check_scheduler(void)
 {
@@ -633,7 +636,8 @@ static void check_scheduler(void)
 
 /*
  * The timer interrupts only at a tick that could change what runs, and a trap counts the others.
- * The nearest deadline it wakes for lies ahead of the count, and check_irq holds every armed timer line to it.
+ * The nearest deadline it wakes for is its core's, which check_core holds ahead of the count
+ * and check_irq to every timer line armed there.
  * While a thread runs, every tick the timer lets pass would hand the processor back to that thread:
  * nobody is on the run queue, and it has time, or may run on spare time with nobody on the spare queue;
  * and none of them is the release, the nearest deadline,
@@ -645,9 +649,6 @@ static void check_scheduler(void)
 static void check_wake(void)
 {
     const struct core *core = core_self();
-    if ((int32_t)(nearest_deadline - sched_ticks) <= 0) {
-        fail("the timer wakes for a deadline already past", nearest_deadline, sched_ticks, 0);
-    }
     if (core->turn == NULL) {
         return;
     }
@@ -689,8 +690,8 @@ static void check_wake(void)
     if (wake > core->nearest_release - sched_ticks) {
         fail("the timer lets the release pass", wake, core->nearest_release, sched_ticks);
     }
-    if (wake > nearest_deadline - sched_ticks) {
-        fail("the timer lets the nearest deadline pass", wake, nearest_deadline, sched_ticks);
+    if (wake > core->nearest_deadline - sched_ticks) {
+        fail("the timer lets the nearest deadline pass", wake, core->nearest_deadline, sched_ticks);
     }
 }
 
@@ -727,9 +728,15 @@ static void check_irq(const struct irq *i)
     if (line_is_timer(i->line) && irq_armed(i) && irq_due(i, sched_ticks)) {
         fail("armed timer line is due", v2p(i), i->deadline, sched_ticks);
     }
-    /* The timer wakes for the nearest deadline, which no armed timer line's comes before. */
-    if (line_is_timer(i->line) && irq_armed(i) && (int32_t)(i->deadline - nearest_deadline) < 0) {
-        fail("armed timer line comes due before the timer wakes for it", v2p(i), i->deadline, nearest_deadline);
+    /* The core that armed it wakes for the nearest deadline armed there, which this one's comes no earlier than. */
+    if (line_is_timer(i->line) && irq_armed(i)) {
+        if (i->core >= CORES) {
+            fail("armed timer line names a core there is not", v2p(i), i->core, 0);
+        }
+        uint32_t nearest = cores[i->core].nearest_deadline;
+        if ((int32_t)(i->deadline - nearest) < 0) {
+            fail("armed timer line comes due before the timer wakes for it", v2p(i), i->deadline, nearest);
+        }
     }
     /*
      * The log's line is high while the reader has bytes to take,

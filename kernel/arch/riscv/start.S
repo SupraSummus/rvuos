@@ -182,6 +182,12 @@ trap_entry:
 
     .globl trap_return
 trap_return:
+#if CORES > 1
+    /* The core runs user mode from here, which it tells the others as it gives the kernel's lock up. */
+    mv      s0, a0
+    call    core_leave
+    mv      a0, s0
+#endif
     csrw    mscratch, a0
     mv      sp, a0
 

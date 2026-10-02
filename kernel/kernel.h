@@ -26,7 +26,7 @@ static inline bool ram_contains(uint32_t base, uint32_t size)
  * core_id says which one this is: the hart's mhartid on RISC-V, in the architecture's trap.c, or the host's.
  * With one core it is never asked.
  */
-_Static_assert(CORES >= 1 && CORES <= 255, "a thread names its core in a byte");
+_Static_assert(CORES >= 1 && CORES <= 255, "a thread and a timer line name a core in a byte");
 uint32_t core_id(void);
 
 static inline uint32_t core_index(void)

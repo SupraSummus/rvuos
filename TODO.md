@@ -280,6 +280,12 @@ Open work only; an item leaves this file in the commit that finishes it.
 
 ## Scheduling
 
+- A thread whose account holds little more than a tick loses its time when its turn ends a few counts past a tick,
+  as a trap that counts the tick late ends it, and spends the rest of that tick on spare time, or waiting without it.
+  One that earns its whole core keeps its account where it is while it runs,
+  so one bound with an empty account stays there; the demo's successor sleeps first.
+  Time judged against what the rest of the tick costs, as `turn_owes` charges it, rather than a whole tick,
+  would keep its turn, and change nothing under tracing, where every turn begins at a tick.
 - A turn is one tick while another thread could run, so the timer skips ticks only for a thread alone,
   and a turn that begins mid-tick gets only the rest of one.
   A turn of a few ticks, or of what the thread's account holds, would skip them while threads compete too,

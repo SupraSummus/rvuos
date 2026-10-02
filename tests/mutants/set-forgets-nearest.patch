@@ -1,6 +1,6 @@
-A timer line armed for a deadline nearer than any other leaves the timer where it was.
+A timer line armed for a deadline nearer than any other of its core's leaves the core's timer where it was.
 The timer would interrupt after the deadline and the thread sleep past it;
-the nearest deadline the timer wakes for comes no later than any armed timer line's.
+the nearest deadline a core's timer wakes for comes no later than that of any timer line armed there.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test smp-test qemu-replay
 Report: armed timer line comes due before the timer wakes for it
@@ -8,11 +8,11 @@ Report: armed timer line comes due before the timer wakes for it
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -42,7 +42,6 @@ void irq_set_bits(struct irq *irq, uint32_t bits)
-      * and each of the others, which need not, does so once it traps.
-      */
-     if (line_is_timer(irq->line) && bits != 0 && tick_before(irq->deadline, nearest_deadline)) {
--        nearest_deadline = irq->deadline;
-         for (uint32_t c = 0; c < CORES; c++) {
-             LOOP_BOUND(CORES);
-             cores[c].wake_stale = true;
+@@ -45,7 +45,6 @@ void irq_set_bits(struct irq *irq, uint32_t bits)
+         struct core *core = core_self();
+         irq->core = (uint8_t)core_index();
+         if (tick_before(irq->deadline, core->nearest_deadline)) {
+-            core->nearest_deadline = irq->deadline;
+             core->wake_stale = true;
+         }
+     }

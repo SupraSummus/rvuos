@@ -244,7 +244,9 @@ struct irq {
     struct obj_header hdr;
     struct cap ntfn;    /* CAP_SIGNALLED, or CAP_NONE once the notification is taken */
     uint32_t bits;
-    uint32_t line;
+    uint16_t line;
+    uint8_t core;       /* on a timer line, the core that armed it, whose timer wakes for it */
+    uint8_t pad;
     uint32_t deadline;  /* on a timer line, the tick count it fires at */
 };
 
@@ -639,17 +641,14 @@ enum { QUEUE_NONE, QUEUE_RUN, QUEUE_SPARE, QUEUE_SPENT, QUEUES };
 extern uint32_t armed_sources;
 
 /*
- * The tick the timer has to interrupt at for the timer lines: the nearest deadline of one armed,
- * or NEAREST_NONE ticks ahead of the count with none, as far as a signed difference reaches.
- * An arm brings it forward, and a tick, which looks at every line, makes it exact again,
- * so it may lie before the nearest deadline but never after one, and always ahead of the count.
+ * How far ahead of the count a core's nearest deadline or release lies while it has none,
+ * as far as a signed difference reaches.
  */
 #define NEAREST_NONE 0x7fffffffu
-extern uint32_t nearest_deadline;
 
 /*
- * What each core has of its own:
- * its thread, its turn, its queues, its release, its timer, the call it is in, and what it tells the others.
+ * What each core has of its own: its thread, its turn, its queues, its release, its nearest deadline, its timer,
+ * the call it is in, and what it tells the others.
  * The units, the tick count and the lines are the machine's.
  * Every core's is the others' to read and change under the kernel's lock, in_user aside; see DESIGN.md, "Cores".
  */
@@ -690,6 +689,14 @@ struct core {
      * so it may lie before the nearest such tick but never after one, and always ahead of the count.
      */
     uint32_t nearest_release;
+
+    /*
+     * The tick the core's timer has to interrupt at for the timer lines armed on it, see struct irq:
+     * the nearest deadline of one, or NEAREST_NONE ticks ahead of the count with none.
+     * An arm brings it forward, and a tick, which looks at every line, makes every core's exact again,
+     * so it may lie before the nearest such deadline but never after one, and always ahead of the count.
+     */
+    uint32_t nearest_deadline;
 
     /*
      * The tick the timer is set for, whether a change since may call for another,
@@ -756,6 +763,8 @@ static inline bool core_lock_waited(void)
  * and loads the regions again if another core took some from the process;
  * leave tells the others the core runs user mode, gives the lock up,
  * and then interrupts the cores told of a change meanwhile, see core_notify. With one core neither does anything.
+ * Every way out passes trap_return, which leaves once the frame it returns into is whole:
+ * start.S does on RISC-V, and frame_give on ARM, which first writes half of the frame to the thread's stack.
  * A core that idles and wakes takes the lock as its stall ends, and switch_to loads the regions.
  */
 void core_enter(void);

@@ -385,7 +385,7 @@ struct thread *host_boot(void)
     pool_list = NULL;
     memset(line_irq, 0, LINES * sizeof(line_irq[0]));
     for (unsigned c = 0; c < CORES; c++) {
-        cores[c] = (struct core){ .nearest_release = NEAREST_NONE };
+        cores[c] = (struct core){ .nearest_release = NEAREST_NONE, .nearest_deadline = NEAREST_NONE };
     }
 #if CORES > 1
     kernel_lock = (struct kernel_lock){ 0 };
@@ -394,7 +394,6 @@ struct thread *host_boot(void)
 #endif
     memset(unit_thread, 0, sizeof(unit_thread));
     armed_sources = 0;
-    nearest_deadline = NEAREST_NONE;
     sched_ticks = 0;
     debug_trace = false;
     preempt_countdown = 0;
