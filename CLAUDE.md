@@ -75,6 +75,8 @@ In a cloud session, `.claude/hooks/session-start.sh` installs what `make check` 
 If a tool is still missing, run the hook, or install the tool and add it to the hook;
 never skip the check.
 A check that could not run is reported as not run, never as passed.
+To see what the harts did under QEMU, `-d int -D file` logs every trap and leaves icount's timing as it was;
+lldb, unlike the session's gdb, debugs the kernel through QEMU's `-gdb`, though a stop may change the harts' turns.
 
 ## Documentation of decisions
 

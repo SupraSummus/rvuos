@@ -20,7 +20,8 @@
 struct trap_frame *trap_handler(struct trap_frame *frame);
 
 /*
- * Restore a frame and return to user mode into it.
+ * Every way out of the kernel: tell the other cores this one runs user mode, see core_leave,
+ * then restore a frame and return to user mode into it.
  * Never returns.
  */
 __attribute__((noreturn)) void trap_return(struct trap_frame *frame);
@@ -30,7 +31,7 @@ __attribute__((noreturn)) void trap_start(struct trap_frame *frame);
 
 /*
  * The core has nobody's turn, as a trap ends or as the core starts: idle until a thread has one, and return into it.
- * In the architecture's trap.c, on sched_idle.
+ * In main.c, on sched_idle, for every architecture.
  */
 __attribute__((noreturn)) void core_idle(void);
 

@@ -22,6 +22,7 @@
  * The functions below are called only with a line on the controller.
  */
 #define LINES (IRQ_LINES + TIMER_LINES)
+_Static_assert(LINES <= UINT16_MAX, "an Irq names its line in two bytes");
 
 static inline bool line_is_timer(uint32_t line) { return line >= IRQ_LINES; }
 static inline bool line_on_controller(uint32_t line) { return line != LOG_IRQ_LINE && line < IRQ_LINES; }

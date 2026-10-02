@@ -8,12 +8,12 @@ Report: armed timer line is due
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -326,7 +326,7 @@ static void tick_advance(uint32_t ticks)
-             continue;
+@@ -494,7 +494,7 @@ static void tick_advance(uint32_t ticks)
          }
+         struct core *armed = &cores[irq->core];
          if (irq_due(irq, sched_ticks)) {
 -            irq_signal(irq);
 +            sched_signal(irq_notification(irq), irq->bits);
-         } else if (tick_before(irq->deadline, nearest)) {
-             nearest = irq->deadline;
+         } else if (tick_before(irq->deadline, armed->nearest_deadline)) {
+             armed->nearest_deadline = irq->deadline;
          }

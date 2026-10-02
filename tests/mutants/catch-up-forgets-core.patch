@@ -8,11 +8,11 @@ Report: thread's account is stamped ahead of the count
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -477,7 +477,6 @@ static void tick_advance(uint32_t ticks)
+@@ -479,7 +479,6 @@ static void tick_advance(uint32_t ticks)
              turn->stamp += owed;
          }
          core->turn_from = 0;
 -        core->ticks += owed;
      }
      sched_ticks += ticks;
-     uint32_t nearest = sched_ticks + NEAREST_NONE;
+     for (uint32_t c = 0; c < CORES; c++) {

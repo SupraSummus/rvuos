@@ -84,26 +84,7 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
     }
 
     timer_trap_leave(traced);
-    if (core->turn == NULL) {
-        return NULL;
-    }
-    struct trap_frame *next = &core->current->frame;
-    core_leave();
-    return next;
-}
-
-/*
- * A core with no thread to run, from start.S as a trap ends with nobody's turn, or as the core starts:
- * it idles with the kernel's lock, given up only while it waits, until a thread has its turn,
- * then leaves for it as a trap does.
- */
-void core_idle(void)
-{
-    sched_idle();
-    timer_trap_leave(debug_trace);
-    struct trap_frame *next = &core_self()->current->frame;
-    core_leave();
-    trap_return(next);
+    return core->turn != NULL ? &core->current->frame : NULL;
 }
 
 /*
@@ -153,7 +134,6 @@ void trap_start(struct trap_frame *frame)
 {
     csr_clear(mstatus, MSTATUS_MPP_MASK);
     csr_set(mstatus, MSTATUS_MPIE);
-    core_leave();
     trap_return(frame);
 }
 

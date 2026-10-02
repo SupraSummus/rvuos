@@ -8,7 +8,7 @@ The kernel runs on `CORES` cores, a constant of the build:
 one on every board but QEMU `virt`, which `make CORES=2` builds for two harts,
 and mps2-an521, which `make BOARD=mps2-an521 CORES=2` builds for its two Cortex-M33s.
 What a core has of its own is `struct core` in `kernel/object.h`:
-its thread, its turn, its three queues, its release, its timer, the call it is in,
+its thread, its turn, its three queues, its release, its nearest deadline, its timer, the call it is in,
 and what it tells the others.
 The objects, the derivation tree, the units, the tick count, the timer lines and the device lines are the machine's.
 With one core there is no lock, and no other core to interrupt or wait for.
@@ -18,6 +18,8 @@ A trap takes the kernel's lock as it begins, once the thread's registers are in 
 and gives it up as it returns to user mode,
 so the kernel's state changes one trap at a time, on whichever core,
 as in seL4's multicore build.
+Every way out of the kernel, a trap's, the idle's and the first, goes through `trap_return` on either architecture,
+which gives the lock up, `core_leave`, once the frame it returns into is whole.
 Each trap is still one step on one state,
 which the self-check, `host/history.c` and the replay rely on.
 It is a ticket lock, so the cores take it in the order they asked for it,
@@ -57,9 +59,16 @@ which lags while the core runs on without trapping, and which only the core's ow
 Whichever core counts a tick fires the timer lines that are due,
 and looks at the release of every core whose release it reached, a fixed few units each,
 so every core's queues agree with the accounts, whichever core counted.
-Every core's timer wakes for the nearest deadline,
-so the core that armed it takes the tick, and another may wake for one the first took,
-a trap that counts nothing.
+
+**A timer line wakes the core that armed it.**
+The arm notes in the `Irq` which core made it,
+and each core keeps the nearest deadline of the lines armed on it, as it keeps its release,
+so an idle core with no line of its own sleeps through the others'.
+The arm's core learns of the deadline without an interrupt between the cores,
+which the timer lines kept on one core, as the device lines are, would cost at every arm from another.
+Whichever core counts a tick puts every core's nearest deadline right again,
+which only moves it later, so no core is told;
+the core that armed a line another core fired first may then wake for it, a trap that counts nothing.
 
 **A core tells another by interrupting it.**
 A core that puts a thread on another core's queue, brings another core's release forward,

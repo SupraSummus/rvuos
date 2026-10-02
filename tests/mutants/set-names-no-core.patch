@@ -1,0 +1,20 @@
+An arm notes the core after the one that armed it, which past the last core is none,
+and the tick then looks for that core's nearest deadline beyond the cores there are;
+a timer line names a core there is.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test smp-test qemu-replay
+Report: armed timer line comes due before the timer wakes for it
+Report: armed timer line names a core there is not
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -43,7 +43,7 @@ void irq_set_bits(struct irq *irq, uint32_t bits)
+      */
+     if (line_is_timer(irq->line) && bits != 0) {
+         struct core *core = core_self();
+-        irq->core = (uint8_t)core_index();
++        irq->core = (uint8_t)(core_index() + 1);
+         if (tick_before(irq->deadline, core->nearest_deadline)) {
+             core->nearest_deadline = irq->deadline;
+             core->wake_stale = true;

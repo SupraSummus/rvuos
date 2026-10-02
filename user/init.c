@@ -196,6 +196,12 @@ _Static_assert(SLOT_SPINNER + SPINNERS <= ROOT_TABLE_SLOTS, "the root task's slo
 #define CAPPED_US 80000u
 static volatile uint32_t spins[SPINNERS];
 
+/*
+ * How long a thread sleeps for its account to fill before it counts on having time ahead of spare time:
+ * ten ticks' worth with the whole processor, over four with the root task's part.
+ */
+#define FILL_US 10000u
+
 /* A thread that spins through most of each tick and sleeps across its end, counting its rounds. */
 #define DODGE_US 80000u
 static uint32_t dodge_counter, dodge_counts;
@@ -552,19 +558,20 @@ static void lost_main(void)
  * The timer is set for the next tick first, and its bit taken after,
  * so that a machine that runs its cores in turns, as QEMU does, turns to the other core by then:
  * QEMU runs one core until the next deadline of any timer, or until it waits.
+ * The counter is read before the word, so a word that has not moved had not by then either,
+ * however long a trap or the other core's turn came between the two.
  */
 static int moved_while_spinning(const volatile uint32_t *word, uint32_t was, uint32_t counter, uint32_t counts)
 {
     const volatile uint32_t *low = (const volatile uint32_t *)counter;
     expect("set the timer for the next tick", rv_timer_set(SLOT_TIMER, BIT_TIMER, 0));
     uint32_t start = *low;
-    int moved = 1;
-    while (*word == was) {
-        if (*low - start >= counts) {
-            moved = 0;
-            break;
-        }
-    }
+    uint32_t passed;
+    int moved;
+    do {
+        passed = *low - start;
+        moved = *word != was;
+    } while (!moved && passed < counts);
     expect("take the timer's bit", timer_wait());
     return moved;
 }
@@ -695,6 +702,8 @@ static __attribute__((noreturn)) void successor_main(void)
     /* The units the root task and the logger earned came free with them. */
     expect("earn the whole processor",
            rv_invoke(OP_TIME_BIND, BOOT_CAP_TIME, SLOT_SUCC_THREAD, 0, TIME_UNITS));
+    /* Its account starts empty, and earning the whole core stays near a tick while it runs; see TODO.md. */
+    expect("let its account fill", sleep_us(FILL_US));
     /* The destroy emptied the root task's own slots; the successor's objects take them. */
     expect("take the root task's table slot",
            rv_invoke(OP_CAP_COPY, SLOT_SUCC_TABLE, BOOT_CAP_CAPTABLE, SLOT_SUCC_TABLE, RIGHT_ALL));
@@ -752,7 +761,7 @@ static __attribute__((noreturn)) void successor_main(void)
                      RIGHT_R | RIGHT_W));
     /* Only a stopped thread resumes, so this is also what shows the fault stopped it. */
     expect("resume the prober where it faulted", rv_invoke(OP_THREAD_RESUME, SLOT_PROBER, 0, 0, 0));
-    /* It runs on spare time, so not before this thread waits. */
+    /* It runs on spare time, so not before this thread, which has time, waits. */
     expect("a resume leaves nothing to tell",
            rv_thread_fault(SLOT_PROBER, &ignored, &ignored, &ignored, &ignored) == KERR_STATE
                ? KERR_OK : KERR_INVALID_ARG);
@@ -805,8 +814,12 @@ static __attribute__((noreturn)) void hand_over(uint32_t sp)
            rv_invoke(OP_PROCESS_INSTALL, SLOT_SUCC_PROCESS, 1, BOOT_CAP_DATA, RIGHT_R | RIGHT_W));
     expect("configure the successor",
            rv_invoke(OP_THREAD_CONFIGURE, SLOT_SUCC_THREAD, (uint32_t)&successor_main, sp, 0));
-    /* On spare time, so it runs once this thread waits. */
+    /*
+     * On spare time, so it runs once this thread waits, as long as this thread has time until then;
+     * spinning drained its account, so it sleeps for it to fill first.
+     */
     expect("bind the successor", rv_invoke(OP_TIME_BIND, BOOT_CAP_TIME, SLOT_SUCC_THREAD, 0, 0));
+    expect("let this thread's account fill", sleep_us(FILL_US));
     expect("start the successor", rv_invoke(OP_THREAD_RESUME, SLOT_SUCC_THREAD, 0, 0, 0));
     expect("allocate what to wait on",
            rv_invoke(OP_POOL_ALLOC, BOOT_CAP_POOL, CAP_NOTIFICATION, SLOT_EXIT_NTFN, 0));
@@ -845,15 +858,6 @@ static void second_core(uint32_t data_base, uint32_t data_size, uint32_t shared_
     uint32_t base, bits, status, was, cause, pc, addr, fault_status;
     uint32_t counts = hz / 1000u * (SPIN_US / 1000u);
     uint32_t stack = data_base + data_size / 4;
-
-    /* The timer went with the driver's pool, so it comes back in a pool of the child's memory, with the threads below. */
-    expect("make a pool of the child's memory again", rv_retype(SLOT_POOL_MEMORY, CAP_POOL, SLOT_POOL, &base));
-    expect("allocate the timer's notification again",
-           rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_NOTIFICATION, SLOT_TIMER_NTFN, 0));
-    expect("carve the timer line again, which its bind took",
-           rv_invoke(OP_IRQ_CARVE, BOOT_CAP_TIMER_LINES, 0, 1, SLOT_TIMER_LINE));
-    expect("bind it to the notification",
-           rv_invoke(OP_IRQ_BIND, SLOT_TIMER_LINE, SLOT_POOL, SLOT_TIMER_NTFN, SLOT_TIMER));
 
 #ifdef CORES_IRQ
     /* Where each core's controller is its own, the line the cores interrupt each other on is the kernel's. */
@@ -899,8 +903,8 @@ static void second_core(uint32_t data_base, uint32_t data_size, uint32_t shared_
     /*
      * The ponger runs on spare time on the second core and waits for each ping,
      * so that core idles in between, and a signal from this one has to wake it.
-     * An idle core's timer is set for the nearest deadline, this thread's timer here,
-     * so a ping that did not interrupt it would be answered as the timer fires, not before.
+     * An idle core's timer wakes only for the timer lines armed there, and this thread's is armed here,
+     * so a ping that did not interrupt it would not be answered before the timer fires.
      * How much sooner is not checked:
      * under icount QEMU runs the harts in turns on one host thread,
      * and a hart that waits for the kernel's lock keeps it for the rest of its slice, tens of milliseconds.
@@ -1472,6 +1476,18 @@ int main(void)
            rv_invoke(OP_IRQ_BIND, SLOT_SPARE_LINE_COPY, BOOT_CAP_POOL, SLOT_BOOT_NTFN,
                      SLOT_SPARE_IRQ_AGAIN));
     puts("root: irq ok\n");
+
+    /*
+     * The timer went with the driver's pool, so it comes back in a pool of the child's memory,
+     * with the second core's threads below, for the sleeps that follow and the successor's.
+     */
+    expect("make a pool of the child's memory again", rv_retype(SLOT_POOL_MEMORY, CAP_POOL, SLOT_POOL, &pool_base));
+    expect("allocate the timer's notification again",
+           rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_NOTIFICATION, SLOT_TIMER_NTFN, 0));
+    expect("carve the timer line again, which its bind took",
+           rv_invoke(OP_IRQ_CARVE, BOOT_CAP_TIMER_LINES, 0, 1, SLOT_TIMER_LINE));
+    expect("bind it to the notification",
+           rv_invoke(OP_IRQ_BIND, SLOT_TIMER_LINE, SLOT_POOL, SLOT_TIMER_NTFN, SLOT_TIMER));
 
     uint32_t cores = count_cores();
     puts("root: cores ");

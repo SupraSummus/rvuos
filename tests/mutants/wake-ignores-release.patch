@@ -8,11 +8,11 @@ Report: the timer lets the release pass
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -465,9 +465,6 @@ uint32_t sched_wake_ticks(void)
+@@ -519,9 +519,6 @@ uint32_t sched_wake_ticks(void)
      struct core *core = core_self();
      struct thread *turn = core->turn;
-     uint32_t wake = nearest_deadline - sched_ticks;
--    if (tick_before(core->nearest_release, nearest_deadline)) {
+     uint32_t wake = core->nearest_deadline - sched_ticks;
+-    if (tick_before(core->nearest_release, core->nearest_deadline)) {
 -        wake = core->nearest_release - sched_ticks;
 -    }
      if (turn == NULL) {

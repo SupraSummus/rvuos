@@ -242,7 +242,7 @@ or the release, when a thread on the spent queue waits for its account.
 The kernel counts those `Irq`s as they are armed and disarmed,
 so it knows without a walk, and the spent queue it looks at.
 With any of them the core idles once the trap is over, `sched_idle`, and stalls in `wfi`
-until the nearest deadline of an armed timer line, the release,
+until the nearest deadline of a timer line armed on the core, the release,
 or a device interrupt is pending,
 takes it by hand since machine mode runs with `MIE` clear,
 and looks for a runnable thread again;
@@ -253,7 +253,7 @@ so the machine stops only once no core runs a thread or has one waiting; see "Co
 **The timer interrupts only for a tick that could change what runs.**
 A tick that ends a turn only to hand the processor back to the same thread moves the counts and nothing else.
 So while another thread could have the next turn, `mtimecmp` is set for the next tick,
-and otherwise for the nearest of the deadline of an armed timer line, the release,
+and otherwise for the nearest of the deadline of a timer line armed on the core, the release,
 and the tick the running thread's account drains, unless it may go on alone on spare time,
 where its account changes nothing that runs.
 The account drains only at a tick, since a turn with time never outruns it before the next tick,
@@ -272,7 +272,7 @@ a change of turn reads it besides, to charge the turn.
 Whatever could call for another tick happens in a trap and marks the timer's tick stale:
 settling a thread, binding or unbinding one, a switch, a tick, an arm, the stall.
 A trap sets the timer again only then, and choosing the tick costs no walk,
-since an arm brings the nearest deadline forward and the tick's look at the timer lines makes it exact.
+since an arm brings its core's nearest deadline forward and the tick's look at the timer lines makes it exact.
 The counts, the charges, the deadlines and the turns come out as if every tick had been taken, a late tick aside,
 while a thread alone on the processor is not interrupted every tick.
 The price is a few loads on every trap: on QEMU a tenth of the cheapest system call,
