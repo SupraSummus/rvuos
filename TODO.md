@@ -93,11 +93,7 @@ Open work only; an item leaves this file in the commit that finishes it.
   and the self-check never runs on two harts, since the demo does not trace.
   The demo's shootdown reaches the reload of the regions as the lock is taken only when the trap there ends no turn,
   which QEMU's turns decide; `fuzz-smp2` always reaches it.
-- Which mutants `smp-test` catches hangs on QEMU's turns between the harts,
-  so a change to the instructions the kernel runs there, the boot's among them, moves mutants' headers with no bug in it;
-  the host's load alone once moved `set-ignores-notification`, which its own run did not repeat.
-  A link or a host harness catches every mutant already,
-  so `make mutants` could leave `smp-test` out, or count only the demo's checks that do not hang on timing.
+  Nothing measures what the demo's two-core checks catch, since `make mutants` leaves `smp-test` out.
 - No load or store record reaches an edge of the kernel the other records do not.
   Four inputs of the corpus carry one, but are kept for their other records:
   with the loads taken out, the corpus reaches the same edges on all three machines.

@@ -2,7 +2,7 @@ A split leaves its halves roots rather than below the Untyped it split,
 so the Untyped is free at once and makes a pool over them,
 and a revoke below it takes nothing back.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test smp-test qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: memory that may hold kernel objects overlaps a node not above or below it
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c

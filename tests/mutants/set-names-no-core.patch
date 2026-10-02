@@ -2,7 +2,7 @@ An arm notes the core after the one that armed it, which past the last core is n
 and the tick then looks for that core's nearest deadline beyond the cores there are;
 a timer line names a core there is.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test smp-test qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: armed timer line comes due before the timer wakes for it
 Report: armed timer line names a core there is not
 

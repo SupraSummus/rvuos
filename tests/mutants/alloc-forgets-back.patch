@@ -2,7 +2,7 @@ An object does not record where the one before it lies,
 so a destroy, which takes the objects newest first,
 goes from the newest straight back to the descriptor and leaves the rest standing.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test smp-test qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: object does not know where the one before it lies
 
 diff --git a/kernel/pool.c b/kernel/pool.c

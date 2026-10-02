@@ -2,7 +2,7 @@ A bind counts the units from the first there is, not from the first the invoked 
 A thread would earn units its binder does not hold;
 a thread's units lie within the capability it was bound through.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test smp-test qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: slot is not derived from its parent
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
