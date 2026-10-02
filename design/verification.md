@@ -341,7 +341,9 @@ and catches a bug only when the transcript changes;
 or the two traces differ,
 and since the list says only whether it does, `make mutants` stops it at the first input that fails.
 QEMU's clock counts instructions, not the host's time,
-so a run takes the same path however many run beside it.
+so a run takes the same path however many run beside it, on two harts too.
+What `make smp-test` catches hangs on the harts' turns, though,
+which any change to what they run moves, so it is not in the list.
 `make mutants-refresh` carries the patches over a change in the kernel
 by the lines they change rather than by their context,
 and `make mutants` checks by the headers the ones it had to move.
@@ -553,7 +555,7 @@ the only check of the lock, the software interrupt, the idle and the start of th
 and of a shootdown that waits on real hardware rather than the host's.
 `make arm-test` boots it on mps2-an521's two Cortex-M33s last, the only check of all that on ARM,
 of its ticket taken with an exclusive pair, its waits in `wfe` and the line the kernel keeps for its cores;
-`make mutants` runs neither ARM's demos nor this one, as it runs no ARM at all.
+`make mutants` runs none of these demos: it runs no ARM, and what `make smp-test` catches moves with the harts' turns.
 QEMU runs the harts in turns too, so a hart that waits for the lock spins out its turn while the holder waits for its own,
 which the demo allows for and nothing measures;
 an ARM core waits in `wfe` instead, which QEMU 8.2 takes for a turn handed to the other core.

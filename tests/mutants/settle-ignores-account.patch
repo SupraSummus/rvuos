@@ -2,7 +2,7 @@ A thread without time waits on the run queue all the same.
 It takes turns before the threads on spare time, and one held to its units is not;
 a ready thread waits on the queue its account and binding say.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test smp-test qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: a thread waits on another queue than its account says
 
 diff --git a/kernel/sched.c b/kernel/sched.c

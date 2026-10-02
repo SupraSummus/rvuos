@@ -4,7 +4,7 @@ The tick fires every due timer line,
 so an Irq armed on one has its deadline ahead of the count.
 The demo times its sleeps on the clock, which now keeps pace with the tick, and finds them short.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test smp-test qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: armed timer line is due
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c

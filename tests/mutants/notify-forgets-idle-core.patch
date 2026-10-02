@@ -1,7 +1,7 @@
 A thread that becomes ready on a core that idles does not wake it:
 the core sleeps on with a thread waiting for its turn there, until something else wakes it.
 
-Caught-by: fuzz-smp2 smp-test
+Caught-by: fuzz-smp2
 Report: a thread waits for a turn on a core that idles
 
 diff --git a/kernel/core.c b/kernel/core.c

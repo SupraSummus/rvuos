@@ -2,7 +2,7 @@ Clearing a thread's units leaves them naming the thread.
 Nobody could bind them again, and the release would look at a thread gone from memory;
 each unit names the thread that earns it, or none.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test smp-test qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: a unit names a thread that does not earn it
 
 diff --git a/kernel/sched.c b/kernel/sched.c

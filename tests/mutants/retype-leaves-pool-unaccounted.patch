@@ -2,7 +2,7 @@ A pool's own node hangs from nothing rather than below the Untyped it was retype
 so the Untyped does not know it made the pool and is free at once:
 it makes a frame over the pool, and a revoke below it does not destroy the pool.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test smp-test qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: memory that may hold kernel objects overlaps a node not above or below it
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c

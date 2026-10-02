@@ -1,7 +1,7 @@
 A thread that becomes ready joins a queue of the core that settles it rather than of the core it runs on,
 so a signal from another core puts the thread where its units are not; each core's queues hold its own threads.
 
-Caught-by: fuzz-smp2 smp-test
+Caught-by: fuzz-smp2
 Report: a core's queue holds a thread of another core
 
 diff --git a/kernel/sched.c b/kernel/sched.c
