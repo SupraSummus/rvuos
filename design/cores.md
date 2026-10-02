@@ -6,7 +6,8 @@ Part of the design document; [`DESIGN.md`](../DESIGN.md) lists every section and
 
 The kernel runs on `CORES` cores, a constant of the build:
 one on every board but QEMU `virt`, which `make CORES=2` builds for two harts,
-and mps2-an521, which `make BOARD=mps2-an521 CORES=2` builds for its two Cortex-M33s.
+mps2-an521, which `make BOARD=mps2-an521 CORES=2` builds for its two Cortex-M33s,
+and RP2350, which `make BOARD=rp2350 CORES=2` builds for both cores of either kind.
 What a core has of its own is `struct core` in `kernel/object.h`:
 its thread, its turn, its three queues, its release, its nearest deadline, its timer, the call it is in,
 and what it tells the others.
@@ -25,8 +26,15 @@ which the self-check, `host/history.c` and the replay rely on.
 It is a ticket lock, so the cores take it in the order they asked for it,
 and a core waits at most as long as each core ahead of it holds the lock.
 RISC-V takes a ticket with one `amoadd`; ARM has no atomic add,
-so it takes one with an exclusive load and store, `arch_ticket_take` in its `arch.h`,
+so it takes one with an exclusive load and store, `arch_ticket_take` in its `kernel/arch/arm/mpu.c`,
 which goes round again when another core took a ticket between the two, once a trap at most.
+ARM's pair reaches the other cores only on memory the MPU marks Shareable,
+and the kernel runs with the MPU off, on the default memory map, which marks no RAM Shareable, as RP2350 showed; see "Boards".
+The take therefore borrows region 0 for the 32 bytes of the ticket, Shareable and the kernel's alone,
+turns the MPU on for the pair, and gives the region back, which spends none of a process's regions.
+A process's regions of RAM are Shareable too, so a thread's pair reaches the other cores,
+which the demo checks by adding to one word from both.
+QEMU's pair reaches every core whatever the memory, so only silicon tells either missing.
 That is bounded by goal 4 but for the walks,
 and a walk asks between two steps whether another core waits, as it asks whether an interrupt is pending,
 so it stops for the waiting core as for an interrupt and is made again after; see "Bounded work".
@@ -74,8 +82,9 @@ the core that armed a line another core fired first may then wake for it, a trap
 A core that puts a thread on another core's queue, brings another core's release forward,
 or changes the thread whose turn another core has,
 marks that core's timer stale, and the other core sets its timer again before it leaves the kernel.
-It interrupts the other core for it, with the software interrupt of QEMU `virt`'s CLINT,
-or on mps2-an521 through MHU0, the SSE-200's message handling unit, on a line of each core's NVIC,
+It interrupts the other core for it, with the software interrupt of QEMU `virt`'s CLINT or of RP2350's SIO on Hazard3,
+or on the Cortex-M33 on a line of each core's NVIC,
+through MHU0 on mps2-an521, the SSE-200's message handling unit, and through SIO's doorbells on RP2350,
 when that core idles, or runs user mode with its timer set past the next tick;
 one whose timer comes within a tick, or that runs the kernel, finds the mark itself.
 The interrupt is sent once the lock is given up, `interrupt_owed` in `struct core` until then,
@@ -115,10 +124,11 @@ The controller forwards every line to the first core alone, which claims them, a
 as any signal does, by the interrupt above when the driver's core needs one.
 Which core takes a line is open decision 24.
 QEMU `virt`'s PLIC takes the first hart's enables from any hart,
-but each ARM core has an NVIC that only it reaches.
+but each ARM core has an NVIC that only it reaches, and each of RP2350's Hazard3 cores the CSRs of its controller.
 So a call on another core that arms or disarms a line records it in a word of lines the first core is to enable,
-and interrupts the first, which makes its NVIC agree as it next takes the lock, `nvic_sync`,
+and interrupts the first, which makes its controller agree as it next takes the lock, `irq_sync` in `kernel/irq.h`,
 and passes over a line it entered on that no `Irq` is armed on any more.
+Each other core masks every line of its own controller as it starts, `irq_core_init`.
 The line the cores interrupt each other on, `IPI_LINE` in the board's `board.h`, is the kernel's on every core,
 and `OP_IRQ_BIND` answers `KERR_OVERLAP` for it, as for a line an `Irq` holds.
 
@@ -133,12 +143,19 @@ A hart past `CORES` waits for ever.
 mps2-an521's second core waits in the SSE-200's `CPUWAIT` until the first lets it go,
 then enters the kernel's vector table at its reset vector, takes its stack, and enters handler mode through PendSV,
 as the first leaves the boot for the root task;
-there it sets up its own MPU, NVIC and SysTick, and idles.
+there it sets up its own MPU, before it takes a ticket through it, then its NVIC and SysTick, and idles.
+RP2350's second core waits in the bootrom until the first launches it through SIO's FIFOs,
+handing it the kernel's vector table, its stack and `_start` a word at a time as the datasheet's handshake has it;
+from `_start` it goes on as QEMU's harts do on Hazard3, waiting for its software interrupt,
+and as mps2-an521's second core on the Cortex-M33.
+Each other core sets up what the board has of its own as it starts, `board_core_init`, Hazard3's counters shut among it,
+since `board_init` reaches the first core's alone.
 On ARM a core knows which it is from a register of the board's, `CORE_ID_ADDR`, as RISC-V reads `mhartid`,
 and `start.S` finds by it the core's stack and the frame it saves a trap into.
 
 **What it costs.**
 A trap takes and gives the lock, two atomic operations, and stores `in_user` twice;
-on ARM it reads which core it is from the board's register a few times too.
+on ARM it reads which core it is from the board's register a few times too,
+and the ticket's borrowed region costs about a dozen accesses to the system control space.
 A core that changes what another runs pays an interrupt to it,
 and a call that takes what another core runs waits for that core's trap to begin.

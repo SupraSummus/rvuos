@@ -34,13 +34,13 @@ PMP_MAX_ENTRIES ?= 16
 PMP_VARIANT := $(if $(filter-out 16,$(PMP_MAX_ENTRIES)),-pmp$(PMP_MAX_ENTRIES))
 
 # The cores the kernel runs on; see DESIGN.md, "Cores".
-# QEMU virt starts as many harts, and mps2-an521 its second Cortex-M33 for CORES=2;
+# QEMU virt starts as many harts, and mps2-an521 and RP2350 their second core for CORES=2;
 # either builds them in a directory of its own.
 # The host harnesses keep to their own count of cores, so CORES leaves them alone.
 CORES ?= 1
 ifneq ($(CORES),1)
-ifeq ($(filter qemu mps2-an521,$(BOARD)),)
-$(error BOARD=$(BOARD) runs one core; only qemu and mps2-an521 take CORES=$(CORES))
+ifeq ($(filter qemu mps2-an521 rp2350,$(BOARD)),)
+$(error BOARD=$(BOARD) runs one core; only qemu, mps2-an521 and rp2350 take CORES=$(CORES))
 endif
 endif
 VARIANT := $(PMP_VARIANT)$(if $(filter-out 1,$(CORES)),-smp$(CORES))

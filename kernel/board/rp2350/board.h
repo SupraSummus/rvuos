@@ -63,12 +63,27 @@
 #define UART_SIZE U32(0x2000)
 
 /*
- * Hazard3's machine timer: the RISC-V platform timer in SIO, mtime and core 0's mtimecmp,
+ * Hazard3's machine timer: the RISC-V platform timer in SIO, mtime and mtimecmp,
  * counting the ticks of the tick generator riscv/timer.c starts; see clint.h.
+ * mtime is both cores', and mtimecmp each core's own, at the one address, which raises that core's timer interrupt.
  * It lies only in the Secure bank of SIO, which user mode does not reach.
  */
 #define CLINT_MTIME    U32(0xd00001b0)
 #define CLINT_MTIMECMP U32(0xd00001b8)
+#define CLINT_MTIMECMP_LOCAL
+
+/*
+ * The cores, for a kernel built for both, see board.c:
+ * SIO, the block of registers each core reaches on a bus of its own, and whose FIFOs start the second core.
+ * On the Cortex-M33 its CPUID reads each core's own number, as Hazard3 reads mhartid,
+ * and its doorbells interrupt the other core, on SIO_IRQ_BELL, which each core's NVIC has of its own.
+ * Hazard3's cores interrupt each other through their software interrupts instead, SIO's RISCV_SOFTIRQ, on no line.
+ */
+#define SIO_BASE U32(0xd0000000)
+#ifndef __riscv
+#define CORE_ID_ADDR SIO_BASE
+#define IPI_LINE     26
+#endif
 
 /*
  * The counter BOOT_CAP_CLOCK names: TIMER0's TIMERAWL, which counts the same microseconds as mtime,
@@ -90,8 +105,9 @@
 /*
  * Interrupt line identifiers lie below IRQ_LINES; see irq.h.
  * A line is a system IRQ, numbered as in the datasheet's table of them; the chip has 52,
- * each the same line of Hazard3's controller and of the Cortex-M33's NVIC.
- * Line 0 is the kernel's log, see klog.h, so TIMER0_IRQ_0 is out of reach.
+ * each the same line of Hazard3's controller and of the Cortex-M33's NVIC, and each reaches both cores.
+ * Line 0 is the kernel's log, see klog.h, so TIMER0_IRQ_0 is out of reach,
+ * and on the Cortex-M33 with both cores line 26, SIO_IRQ_BELL, is the kernel's, for the cores to interrupt each other.
  */
 #define IRQ_LINES 52
 

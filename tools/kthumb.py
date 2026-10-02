@@ -223,13 +223,34 @@ def formed(insns, image, sections):
     """Every address the function forms from constants, for the call graph's taken addresses:
     a movw, alone and with each movt of its register after it, an adr and a literal load,
     as RISC-V forms one with lui or auipc, conditional ones as well, each with bit 0 taken off.
+    A movt right after a movw of its register completes that movw alone,
+    where neither is conditional, nothing branches to the movt and the function jumps through no register,
+    since every way to the movt then runs through the movw, as clang lays a constant out;
+    so a movw of a mask the register held earlier does not pair with it.
     A mov or mvn of an immediate forms a small number, as li does, however often it equals a function's address."""
     out = set()
     lows = {}
+    landings = set()
+    jumps_through = False
+    for i, (pc, mnem, ops) in enumerate(insns):
+        kind, _ = classify(mnem, ops)
+        if kind in ("jump", "branch") and (t := target(ops)) is not None:
+            landings.add(t)
+        elif kind == "table":
+            landings.update(table(insns, i, image, sections))
+        elif kind == "ijump":
+            jumps_through = True
     for i, (pc, mnem, ops) in enumerate(insns):
         m, args = base_of(insns, i), args_of(ops)
         if m == "movt" and len(args) == 2 and args[1].startswith("#"):
-            out.update(((imm(args[1][1:]) << 16) | low) & 0xFFFFFFFF for low in lows.get(args[0], ()))
+            high = imm(args[1][1:]) << 16
+            before = args_of(insns[i - 1][2]) if i > 0 else []
+            if (i > 0 and not jumps_through and pc not in landings and not in_it(insns, i) and not in_it(insns, i - 1)
+                    and base_of(insns, i - 1) == "movw" and len(before) == 2 and before[0] == args[0]
+                    and before[1].startswith("#")):
+                out.add((high | imm(before[1][1:])) & 0xFFFFFFFF)
+            else:
+                out.update((high | low) & 0xFFFFFFFF for low in lows.get(args[0], ()))
         elif m in ("movw", "adr", "ldr") and (v := made(pc, m, args, image, sections)) is not None:
             out.add(v)
             if m == "movw":

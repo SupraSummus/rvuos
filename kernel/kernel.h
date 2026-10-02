@@ -56,6 +56,12 @@ void board_init(void);
 void board_cores_start(void);
 
 /*
+ * The board's board.c, with more than one core: what board_init does for the first core
+ * and each other core needs of its own, from core_start, its CSRs among it.
+ */
+void board_core_init(void);
+
+/*
  * The board's board.c: set back the CSRs user mode can write, so that nothing passes through them
  * from one process to the next; at boot, and whenever the processor goes to another process's thread.
  */

@@ -8,6 +8,8 @@
  * the ones past the end are counted and dropped.
  * Nothing raises a line for it, so its line and the spare one are two IRQs no device drives,
  * SPAREIRQ_IRQ_0 and SPAREIRQ_IRQ_1, which only software can force.
+ * On the Cortex-M33 SIO's doorbell line, 26, is the kernel's once it runs on both cores;
+ * Hazard3's cores interrupt each other on no line.
  * Each board's console.h offers the same functions, for user/init.c and user/fuzzdrv.c.
  */
 
@@ -16,6 +18,9 @@
 
 #define CONSOLE_IRQ 46
 #define SPARE_IRQ   47
+#ifndef __riscv
+#define CORES_IRQ   26
+#endif
 
 /* The block's size, UART_SIZE in the kernel's board.h, less the header. */
 #define CONSOLE_ROOM (0x2000u - 16u)

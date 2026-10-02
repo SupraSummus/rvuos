@@ -161,6 +161,7 @@ Interrupt lines:
 |---|---|
 | 0 | the kernel log; TIMER0's IRQ 0 cannot be bound |
 | 1 to 51 | the system IRQs, numbered as in the datasheet; nothing raises the console's line, 46 |
+| 26 | SIO's doorbell; on the Cortex-M33 with `CORES=2` the kernel's, for its cores, and an `Irq` cannot be bound to it |
 
 The console's first word counts every byte written, and the bytes follow from offset 16;
 what does not fit is counted and dropped.
@@ -178,6 +179,10 @@ and only where the chip's ACCESSCTRL lets user mode in too: TIMER0, for the cloc
 On the Cortex-M33 the tick is 1 kHz too, on TIMER0's counter, the one `BOOT_CAP_CLOCK` names.
 The MPU has eight regions, none smaller than 32 bytes, and a fault is reported as on `mps2-an385`.
 A program reaches a peripheral only through a frame, as it reaches RAM.
+
+With `CORES=2` the kernel starts the second core at the end of the boot, on either kind of core,
+and a process has the same regions on both, where an atomic operation on RAM reaches the other core;
+every device line reaches both cores' controllers, of which only the first core's enables any.
 
 #### mps2-an385
 
@@ -281,7 +286,8 @@ Images go under `build/<board>/`, the host build under `build/host/`;
 a smaller budget adds `-pmp<n>` to both.
 `make CORES=2` builds the kernel for two harts of QEMU `virt`, under `build/qemu-smp2/`,
 and `make CORES=2 run` boots it with `-smp 2`;
-`make BOARD=mps2-an521 CORES=2` builds it for that board's two cores, under `build/mps2-an521-smp2/`.
+`make BOARD=mps2-an521 CORES=2` builds it for that board's two cores, under `build/mps2-an521-smp2/`,
+and `make BOARD=rp2350 CORES=2` for RP2350's, under `build/rp2350-smp2/`, or `build/rp2350-arm-smp2/` with `ARCH=arm`.
 No other board takes `CORES`.
 
 On the ESP32-C6, connected over USB:
@@ -304,6 +310,8 @@ make BOARD=rp2350                    # build/rp2350/kernel-init.elf
 make BOARD=rp2350 run                # load it into RAM and print the transcript the halt writes
 make BOARD=rp2350 test escape        # check the transcripts
 make BOARD=rp2350 ARCH=arm test      # the same demo on the Cortex-M33, from build/rp2350-arm/
+make BOARD=rp2350 CORES=2 test escape          # the same on both Hazard3 cores, which goes on to the second
+make BOARD=rp2350 ARCH=arm CORES=2 test        # and on both Cortex-M33s
 ```
 
 `tools/rp2350-run.py` loads the image through the bootrom's PICOBOOT interface,

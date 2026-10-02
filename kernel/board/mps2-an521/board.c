@@ -65,6 +65,11 @@ _Static_assert(CORES == 2, "the SSE-200 has two cores");
 #define IPI_WORD (4u * (IPI_LINE / 32))
 #define IPI_BIT  (1u << (IPI_LINE % 32))
 
+/* The gates board_init opened are both cores', so the second needs nothing of its own. */
+void board_core_init(void)
+{
+}
+
 void board_cores_start(void)
 {
     extern char trap_vectors[];

@@ -20,6 +20,12 @@ void board_user_csrs_reset(void)
 }
 
 #if CORES > 1
+/* The counters of each hart are its own, and shut on every one. */
+void board_core_init(void)
+{
+    csr_write(mcounteren, 0);
+}
+
 /* Every hart enters at the reset vector with the first, and the others wait in start.S for their software interrupt. */
 void board_cores_start(void)
 {

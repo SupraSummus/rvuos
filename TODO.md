@@ -35,19 +35,15 @@ Open work only; an item leaves this file in the commit that finishes it.
   would take every region there for eight bytes; `pmp_get` could set those bits, as it swaps R and X.
 - The logger drives no device here: its console is RAM, which only the halt carries out.
   A root task with a driver for the USB controller would let the log out while the machine runs.
+  The demo on two cores fills about 7.7 KiB of its 8, so a few more lines overflow it, which `tests/run.sh` fails.
 - The watchdog armed at boot resets CLOCKS without SYSCFG's `AUXCTRL` set,
   which the datasheet asks for when POWMAN runs from `clk_ref`, so a hang it rescues may corrupt POWMAN;
   the halt's reboot sets it, as the bootrom's does.
   Setting it at boot keeps POWMAN's watchdog-reset input asserted for the whole run, which is untried.
 - Boot from flash, and feed the replay corpus to the board.
-- Run the kernel on both cores: start core 1 out of the bootrom through the SIO FIFO's launch handshake,
-  in `board_cores_start`, raise its software interrupt through SIO's `RISCV_SOFTIRQ` on Hazard3,
-  or a doorbell on the Cortex-M33, give it its own `MTIMECMP` or SysTick, and let the board set `CORES`;
-  the kernel's lock is made of the atomics both kinds of core have, not of SIO's spinlocks.
-  On the Cortex-M33 the kernel runs on two cores already, mps2-an521's,
-  so the board names SIO's `CPUID` as `CORE_ID_ADDR` and the doorbell's line as `IPI_LINE`.
-  Hazard3's controller is its core's own CSRs, as an NVIC is,
-  so its `irq.c` would leave a change made on core 1 for core 0 to make, as `kernel/arch/arm/nvic.c` does.
+- The escape suite runs on the first core alone, with `CORES=2` too,
+  so nothing tries the second Hazard3's fence over the hardwired PMP entries or its shut counters;
+  a scenario bound to the second core's units would.
 
 ## ARM
 
@@ -69,9 +65,11 @@ Open work only; an item leaves this file in the commit that finishes it.
   so nothing runs `irq_enable` unmasking a line of the NVIC with its level still high.
 - The clock's counter on the MPS2 boards is 32 bits wide and the word above it is the prescaler,
   so `rv_counter_read` sees zero for the high word, as RP2350's does.
+- `kernel/board/mps2/timer.c` keeps the counter's wraps with an exclusive pair on memory the MPU leaves Non-shareable,
+  which reaches the other core under QEMU alone; on an MPS2 board it would need the region `arch_ticket_take` borrows.
 - The halt of the MPS2 boards leaves QEMU through semihosting, which on a board without a debugger is a fault in the kernel.
-- Nothing arms or disarms a device line from mps2-an521's second core,
-  so the first core catching its NVIC up with a change made on the other, `nvic_sync`,
+- Nothing arms or disarms a device line from a second core, mps2-an521's or RP2350's of either kind,
+  so the first core catching its controller up with a change made on the other, `irq_sync`,
   and a claim that passes over a line no `Irq` is armed on any more, run in no check;
   the bind's refusal of the cores' line runs in the demo alone, since the host's board has no such line.
   A logger on the second core, whose UART's line the first core takes, would run the first of them.
@@ -87,8 +85,9 @@ Open work only; an item leaves this file in the commit that finishes it.
   `-len_control=20` reached more edges in a short run.
   Measure it with `make mutants-fuzz MUTANTS_FUZZ=-e` before `make fuzz` takes it.
 - Two cores are checked by `fuzz-smp2`, which takes the cores' traps one after another, and by the demo,
-  which on mps2-an521 is the only check of ARM's lock, its ticket taken with an exclusive pair, its waits in `wfe`,
-  MHU0 and the start of the second core.
+  which on mps2-an521 and RP2350's Cortex-M33 is the only check of ARM's lock, its waits in `wfe`
+  and the start of the second core;
+  only RP2350's runs, outside `make check`, would show the ticket's borrowed region missing.
   Nothing makes a core wait for the lock while another walks, so a walk stopping for a waiting core runs only in the host's yes to everything;
   nothing replays the corpus on two harts against the host, which needs the replay driver to order its threads' records across cores;
   and the self-check never runs on two harts, since the demo does not trace.
@@ -259,6 +258,9 @@ Open work only; an item leaves this file in the commit that finishes it.
   Should a woken thread ever preempt the signaller,
   which open decision 9 in `DESIGN.md` leaves out,
   it saves switches as well; that is when to add it.
+- `kernel/arch/arm/nvic.c` and RP2350's `riscv/irq.c` each keep the lines the first core is to enable
+  and catch the first core's controller up in `irq_sync`;
+  one copy over a controller's enable and its read-back would serve both, and the next controller of each core's own.
 - `pmp_init` stops counting at the first hardwired entry.
   A core with writable entries above a hardwired one loses them;
   have the image skip such entries if one turns up.

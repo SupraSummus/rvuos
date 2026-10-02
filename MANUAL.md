@@ -106,8 +106,8 @@ What rvuos is not:
   and the kernel's own output goes into a log ring that a user program drains.
 - It loads no code into the kernel at run time.
   Everything that runs in machine mode is in this repository.
-- It runs on two cores only under QEMU so far, two harts of `virt` or mps2-an521's two Cortex-M33s;
-  every board on silicon runs one, section 5.11.
+- It runs on two cores under QEMU, two harts of `virt` or mps2-an521's two Cortex-M33s,
+  and on RP2350's two cores of either kind; every other board runs one, section 5.11.
 - It is not binary compatible with seL4, L4 or F9,
   though it borrows from seL4's object model.
 

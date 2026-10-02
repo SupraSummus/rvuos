@@ -196,13 +196,19 @@ and `wfe` handing the processor to the other core rather than waiting,
 so a core that idles or waits on the other loops, and a demo of a few seconds takes a few more of the host's.
 
 **RP2350** runs the demo root task and the escape suite on its Hazard3 cores, `make BOARD=rp2350 test escape`,
-and the demo on its Cortex-M33 cores, `make BOARD=rp2350 ARCH=arm test`.
+and the demo on its Cortex-M33 cores, `make BOARD=rp2350 ARCH=arm test`, on one core, or on both with `CORES=2`.
 It is one board with two architectures:
 `ARCH` picks the cores, and the files that differ by them lie in `kernel/board/rp2350/<arch>/`.
 The bootrom's BOOTSEL mode takes the image's segments into SRAM over USB and reboots into them,
 on the cores the ELF is for, finding the image by the block `image.S` puts at `RAM_BASE`;
 `tools/rp2350-run.py` drives that, and reads the transcript the halt writes.
-Only core 0 runs; core 1 waits in the bootrom.
+Core 1 waits in the bootrom until a kernel built for both cores launches it through SIO's FIFOs, see "Cores".
+Each core reaches SIO on a bus of its own, and sees its own copy of some of it at the same address:
+on Hazard3 its `mtimecmp`, `CLINT_MTIMECMP_LOCAL` in `board.h`, which raises that core's timer interrupt,
+and on the Cortex-M33 its number in `CPUID`.
+Hazard3's cores raise each other's software interrupt through SIO's `RISCV_SOFTIRQ`, on no line,
+and the Cortex-M33s ring each other's doorbell in SIO, on line 26, `SIO_IRQ_BELL`, which the kernel then keeps.
+Each core has its own interrupt controller, Hazard3's CSRs or the NVIC.
 A watchdog armed at boot and never fed reboots the chip into BOOTSEL after about seventeen seconds,
 so a run that hangs comes back without a hand on the board, and no run lasts longer.
 The halt times its port on TIMER0, which counts on either kind of core.
@@ -224,7 +230,12 @@ Measured there: eight Secure MPU regions,
 a SysTick becoming pending that wakes `wfe` with `SEVONPEND`,
 and a MemManage's fault address register that reads its own address, `0xe000ed34`, once the status is cleared,
 so the kernel reads the address first.
-The bootrom leaves a stack limit set and its redundancy coprocessor on; the kernel resets both first.
+The bootrom leaves a stack limit set and its redundancy coprocessor on; the kernel resets both first, on either core.
+The exclusive pair reaches the other core only on memory the MPU marks Shareable:
+with the MPU off, two cores taking a million tickets each came to a million and some,
+and the demo on both cores hung in two runs of ten, until the ticket borrowed a region, see "Cores";
+the demo's own adds from both cores lost some too, until a process's RAM was marked Shareable.
+Hazard3's `amoadd` came to two million.
 
 On either kind of core the bootrom leaves the ROSC four times faster than at reset, at a random frequency,
 behind a divider of four on `clk_ref`, and the kernel switches `clk_ref` to the crystal before dropping the divider;
@@ -327,6 +338,6 @@ which `tools/stack-depth.py` does not count; `kernel_trap` takes the stack back 
 The host build compiles the kernel with RISC-V's frame, as QEMU virt has it,
 so the fuzzer and `make qemu-replay` see the portable kernel and not `kernel/arch/arm/`,
 which only the link checks, the demo under QEMU and the demo on RP2350's Cortex-M33 exercise,
-PMSAv8 mps2-an521's under QEMU and RP2350's, the second core mps2-an521's alone,
+PMSAv8 mps2-an521's under QEMU and RP2350's, and the second core of each,
 and the escape suite does not run there yet;
 `TODO.md` says what that leaves unchecked.

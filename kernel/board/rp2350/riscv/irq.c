@@ -12,12 +12,20 @@
  * A claim finds the lowest line that is pending and enabled;
  * nothing is held between a claim and a completion,
  * since masking the line already lowers the machine external interrupt.
+ *
+ * Each core has these CSRs of its own, and every IRQ reaches both, but the device lines are the first core's;
+ * see DESIGN.md, "Cores".
+ * So a call on the second core that arms or disarms a line changes the lines the first is to enable, irq_wanted,
+ * and interrupts it, and the first makes its meiea agree as it next takes the lock, as an NVIC does; see irq_sync.
+ * meipa shows each level as it is, so nothing pending is left to drop.
  */
 
 #include <stdint.h>
 
 #include "csr.h"
 #include "irq.h"
+#include "kernel.h"
+#include "object.h"
 #include "work.h"
 
 #define WINDOWS ((IRQ_LINES + 15) / 16)
@@ -45,7 +53,14 @@
 #define ARRAY_SET(csr, value)   __asm__ volatile("csrs " CSR_NAME(csr) ", %0" : : "r"(value))
 #define ARRAY_CLEAR(csr, value) __asm__ volatile("csrc " CSR_NAME(csr) ", %0" : : "r"(value))
 
-void irq_enable(uint32_t line, bool on)
+#if CORES > 1
+/* The device lines the first core's meiea is to enable, a window's at a time, and whether it may not yet. */
+static uint32_t irq_wanted[WINDOWS];
+static bool irq_stale;
+#endif
+
+/* This core's meiea forwards a line, or stops it. */
+static void meiea_enable(uint32_t line, bool on)
 {
     if (on) {
         ARRAY_SET(MEIEA, BIT(line) | WINDOW(line));
@@ -54,18 +69,65 @@ void irq_enable(uint32_t line, bool on)
     }
 }
 
-/* Mask every line, drop anything forced before, and take the machine external interrupt. */
-void irq_init(void)
+void irq_enable(uint32_t line, bool on)
+{
+#if CORES > 1
+    if (on) {
+        irq_wanted[WINDOW(line)] |= 1u << (line % 16);
+    } else {
+        irq_wanted[WINDOW(line)] &= ~(1u << (line % 16));
+    }
+    if (core_index() != 0) {
+        irq_stale = true;
+        core_interrupt_later(&cores[0]);
+        return;
+    }
+#endif
+    meiea_enable(line, on);
+}
+
+/* Mask every line of this core and drop anything forced before; the external interrupt stays as it was. */
+void irq_core_init(void)
 {
     for (uint32_t window = 0; window < WINDOWS; window++) {
+        LOOP_BOUND(WINDOWS);
         ARRAY_CLEAR(MEIEA, 0xffff0000u | window);
         ARRAY_CLEAR(MEIFA, 0xffff0000u | window);
     }
+}
+
+/* And on the first core, take the machine external interrupt. */
+void irq_init(void)
+{
+    irq_core_init();
     csr_set(mie, MIE_MEIE);
 }
 
+void irq_sync(void)
+{
+#if CORES > 1
+    if (!irq_stale || core_index() != 0) {
+        return;
+    }
+    irq_stale = false;
+    for (uint32_t window = 0; window < WINDOWS; window++) {
+        LOOP_BOUND(WINDOWS);
+        uint32_t have = ARRAY_READ(MEIEA, window);
+        uint32_t want = irq_wanted[window];
+        ARRAY_CLEAR(MEIEA, (have & ~want) << 16 | window);
+        ARRAY_SET(MEIEA, (want & ~have) << 16 | window);
+    }
+#endif
+}
+
+/* As the first core's meiea holds it, or will once that core has the lock; the second cannot read the first's. */
 bool irq_enabled(uint32_t line)
 {
+#if CORES > 1
+    if (core_index() != 0) {
+        return (irq_wanted[WINDOW(line)] >> (line % 16) & 1u) != 0;
+    }
+#endif
     return (ARRAY_READ(MEIEA, WINDOW(line)) >> (line % 16) & 1u) != 0;
 }
 

@@ -12,8 +12,15 @@
 
 #define REG(addr) (*(volatile uint32_t *)(addr))
 
-/* Each hart's mtimecmp is two words, one after the other's, from hart 0's at CLINT_MTIMECMP. */
+/*
+ * Each hart's mtimecmp is two words, one after the other's, from hart 0's at CLINT_MTIMECMP,
+ * unless the board says each hart sees its own there, CLINT_MTIMECMP_LOCAL, as RP2350's SIO has it.
+ */
+#ifdef CLINT_MTIMECMP_LOCAL
+#define MTIMECMP CLINT_MTIMECMP
+#else
 #define MTIMECMP (CLINT_MTIMECMP + 8 * core_index())
+#endif
 
 /* Both are 64 bits wide and this is RV32, so each is two words. */
 uint64_t counter_read(void)
@@ -45,8 +52,11 @@ void clint_hold(void)
     counter_compare(~0ull);
 }
 
-#if CORES > 1
-/* A hart's software interrupt is the low bit of its word at CLINT_MSIP, one word a hart. */
+/*
+ * A hart's software interrupt is the low bit of its word at CLINT_MSIP, one word a hart,
+ * where the board's CLINT has them; RP2350's lie in SIO, and its board.c raises them.
+ */
+#if CORES > 1 && defined(CLINT_MSIP)
 void ipi_enable(void)
 {
     csr_set(mie, MIE_MSIE);

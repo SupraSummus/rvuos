@@ -95,18 +95,12 @@ enum {
 #define ARCH_REGIONS "mpu regions"
 
 /*
- * The next ticket of the kernel's lock, see core.c.
+ * The next ticket of the kernel's lock, see core.c; mpu.c takes it.
  * ARM has no atomic add, only an exclusive load and store, and the store fails if another core wrote the word between,
  * as it does taking its own ticket, or for a reason of the core's own, so the take goes round again then.
+ * The pair reaches the other cores only on memory the MPU marks Shareable, which the default memory map leaves no RAM.
  */
-static inline uint32_t arch_ticket_take(uint32_t *next)
-{
-    uint32_t ticket = __atomic_load_n(next, __ATOMIC_RELAXED);
-    while (!__atomic_compare_exchange_n(next, &ticket, ticket + 1, true, __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE)) {
-        LOOP_CORE("the exclusive store, which another core's ticket fails, taken once a trap at most");
-    }
-    return ticket;
-}
+uint32_t arch_ticket_take(uint32_t *next);
 
 /*
  * A core that waits on another in core.c waits in wfe, as ARM's spin waits do,

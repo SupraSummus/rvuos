@@ -25,7 +25,7 @@ until the maintainer decides otherwise.
    Cores without PMP, GD32VF103 among them, cannot run rvuos.
    QEMU's mps2-an385, a Cortex-M3, is the development target of ARMv7-M,
    and its mps2-an521, two Cortex-M33s, that of ARMv8-M; see open decision 23.
-   QEMU `virt` runs two harts too, `make CORES=2`; see open decision 24.
+   QEMU `virt` runs two harts too, `make CORES=2`, and RP2350 both cores of either kind; see open decision 24.
 
 2. **Implementation language.**
    Working default: C, compiled with clang for `riscv32-unknown-elf`,
@@ -320,12 +320,14 @@ until the maintainer decides otherwise.
     Decided: one lock around the kernel, a thread on the core its units are of, and units numbered core by core;
     see "Cores".
     QEMU `virt` runs two harts with `make CORES=2`, which `make smp-test` boots and `fuzz-smp2` models,
-    and mps2-an521 its two Cortex-M33s with `make BOARD=mps2-an521 CORES=2`, which `make arm-test` boots;
-    every other board runs one, and RP2350's second core waits in its bootrom.
+    mps2-an521 its two Cortex-M33s with `make BOARD=mps2-an521 CORES=2`, which `make arm-test` boots,
+    and RP2350 both cores of either kind with `make BOARD=rp2350 CORES=2`, which only the board's own runs boot;
+    every other board runs one.
     Before, the default was one core, with what a second would need gathered in `struct core`.
     The questions it left are decided so:
     - **Exclusion.** A ticket lock, taken as a trap begins and given up as it returns, and while a core stalls;
       a walk stops for a core waiting on it as for an interrupt, so the wait is at most a step of each other core.
+      On ARM the ticket's exclusive pair needs memory marked Shareable, which a region borrowed for the take gives it.
     - **A region taken from a process another core runs**, and a thread stopped or destroyed while another core runs it:
       the call interrupts that core and waits until its trap has begun, and the core loads its regions again
       as it takes the lock, or hands its taken thread's turn on.
@@ -333,7 +335,7 @@ until the maintainer decides otherwise.
       and interrupts it when it idles or runs on with its timer set past the next tick.
     - **The units.** `TIME_UNITS` of each core, so that which core a thread runs on is held as its units are;
       a program learns how many cores there are by the units it can carve.
-    - **A controller of each core's own**, as ARM's NVIC is: the first core's alone enables a device line,
+    - **A controller of each core's own**, as ARM's NVIC and RP2350's Hazard3's are: the first core's alone enables a device line,
       and a call on another that arms or disarms one leaves the change for the first to make as it next takes the lock,
       interrupting it for that; the line the cores interrupt each other on is the kernel's, and no `Irq` binds it.
 
@@ -343,5 +345,4 @@ until the maintainer decides otherwise.
       A line could go to the core its `Irq`'s waiter runs on, which the bind or the arm would choose.
     - **Spare time across cores.** A thread on spare time runs on its own core alone, however idle another is;
       a queue of spare time for the whole machine would let any idle core take it, at the price of a thread moving with every turn.
-    - **Several cores on a board.** RP2350 has two of each kind, and runs one; what it needs is in `TODO.md`.
     Decide each with the first board or workload that needs it.

@@ -20,11 +20,16 @@
 
 #include <stdint.h>
 
+#include "arch.h"
 #include "bootsel.h"
 #include "kernel.h"
 #include "layout.h"
+#include "object.h"
+#include "timer.h"
 #ifdef __riscv
 #include "csr.h"
+#else
+#include "scs.h"
 #endif
 
 #define REG(addr) (*(volatile uint32_t *)(addr))
@@ -194,3 +199,165 @@ void board_init(void)
 void board_user_csrs_reset(void)
 {
 }
+
+/*
+ * The cores; see DESIGN.md, "Cores".
+ * The second waits in the bootrom from reset until the first launches it through SIO's FIFOs,
+ * each core writing the other's and reading its own:
+ * it takes 0, 0, 1, its vector table, its stack and its entry a word at a time, answering each with the word it took,
+ * and a word out of turn makes it answer and start again from the first, which a 0 always is.
+ * So the first empties what it has to read before each 0, and begins again on a wrong answer,
+ * as the datasheet's "Launching code on processor core 1" has it.
+ * On Hazard3 the vector table is the value for mtvec.
+ * The second core then enters the kernel at _start, which tells it from the first by its number, see start.S.
+ */
+#if CORES > 1
+_Static_assert(CORES == 2, "RP2350 has two cores");
+
+#define SIO_FIFO_ST (SIO_BASE + 0x50u)
+#define SIO_FIFO_WR (SIO_BASE + 0x54u)
+#define SIO_FIFO_RD (SIO_BASE + 0x58u)
+#define FIFO_VLD    (1u << 0) /* a word from the other core to read */
+#define FIFO_RDY    (1u << 1) /* room for a word to it */
+#define FIFO_DRAIN  8u        /* words read before a 0; one left over only begins the launch again */
+
+/* How long the second core has for each word, in the counter's microseconds, and how many words the launch may take. */
+#define LAUNCH_WORD_US  10000u
+#define LAUNCH_WORDS    6u
+#define LAUNCH_ATTEMPTS (4u * LAUNCH_WORDS)
+
+_Static_assert(COUNTER_HZ == 1000000u, "the launch counts microseconds");
+
+/* The event the bootrom's second core may wait for, as the pico-sdk's launch sends it: sev, or Hazard3's h3.unblock. */
+static void core1_wake(void)
+{
+#ifdef __riscv
+    __asm__ volatile("slt x0, x0, x1" : : : "memory"); /* h3.unblock */
+#else
+    __asm__ volatile("dsb\n\tsev" : : : "memory");
+#endif
+}
+
+/* Whether the FIFOs' status shows what within the time the second core has for a word. */
+static bool fifo_shows(uint32_t what)
+{
+    uint64_t until = counter_read() + LAUNCH_WORD_US;
+    while ((REG(SIO_FIFO_ST) & what) == 0) {
+        LOOP_WAIT("the second core to take or answer a word, or its time for it to pass");
+        if (counter_read() >= until) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void board_cores_start(void)
+{
+    extern char trap_vectors[];
+    extern char __kernel_stack_top[];
+    extern void _start(void);
+    const uint32_t launch[LAUNCH_WORDS] = {
+        0,
+        0,
+        1,
+#ifdef __riscv
+        (uint32_t)trap_vectors | 1u, /* vectored, as start.S sets it again */
+#else
+        (uint32_t)trap_vectors,
+#endif
+        (uint32_t)__kernel_stack_top - KERNEL_STACK_SIZE,
+        ENTRY_PC((uint32_t)&_start),
+    };
+    uint32_t taken = 0;
+    for (uint32_t attempt = 0; attempt < LAUNCH_ATTEMPTS && taken < LAUNCH_WORDS; attempt++) {
+        LOOP_BOUND(LAUNCH_ATTEMPTS);
+        uint32_t word = launch[taken];
+        if (word == 0) {
+            for (uint32_t i = 0; i < FIFO_DRAIN && (REG(SIO_FIFO_ST) & FIFO_VLD) != 0; i++) {
+                LOOP_BOUND(FIFO_DRAIN);
+                (void)REG(SIO_FIFO_RD);
+            }
+            core1_wake();
+        }
+        if (!fifo_shows(FIFO_RDY)) {
+            break;
+        }
+        REG(SIO_FIFO_WR) = word;
+        core1_wake();
+        if (!fifo_shows(FIFO_VLD)) {
+            break;
+        }
+        taken = REG(SIO_FIFO_RD) == word ? taken + 1 : 0;
+    }
+    if (taken < LAUNCH_WORDS) {
+        kpanic("the second core did not take its launch");
+    }
+#ifdef __riscv
+    /* start.S has Hazard3's second core wait for its software interrupt, as QEMU virt's harts do. */
+    ipi_send(1);
+#endif
+}
+
+/* What board_init does on the first core that the second needs of its own: Hazard3's counters are shut there too. */
+void board_core_init(void)
+{
+#ifdef __riscv
+    csr_write(mcounteren, 0);
+#endif
+}
+
+#ifdef __riscv
+/*
+ * Hazard3's software interrupt, mip's MSIP, is a flag of SIO's for each core,
+ * which RISCV_SOFTIRQ sets by bit c and clears by bit 8 + c, for core c, from either core.
+ */
+#define SIO_RISCV_SOFTIRQ (SIO_BASE + 0x1a0u)
+#define SOFTIRQ_SET(c)    (1u << (c))
+#define SOFTIRQ_CLR(c)    (1u << (8u + (c)))
+
+void ipi_enable(void)
+{
+    csr_set(mie, MIE_MSIE);
+}
+
+void ipi_send(uint32_t core)
+{
+    REG(SIO_RISCV_SOFTIRQ) = SOFTIRQ_SET(core);
+}
+
+void ipi_clear(void)
+{
+    REG(SIO_RISCV_SOFTIRQ) = SOFTIRQ_CLR(core_index());
+}
+#else
+/*
+ * The Cortex-M33's doorbells: a bit written to DOORBELL_OUT_SET sets that bit of the other core's DOORBELL_IN,
+ * which raises SIO_IRQ_BELL there, IPI_LINE, while any bit of it is set, and DOORBELL_IN_CLR clears them.
+ * The line is level, and the NVIC latches it, so a core takes its interrupt back
+ * by clearing its doorbell, then the pending state the level left, as mps2-an521's board.c does.
+ */
+#define SIO_DOORBELL_OUT_SET (SIO_BASE + 0x180u)
+#define SIO_DOORBELL_IN_CLR  (SIO_BASE + 0x18cu)
+
+#define IPI_WORD (4u * (IPI_LINE / 32))
+#define IPI_BIT  (1u << (IPI_LINE % 32))
+
+void ipi_enable(void)
+{
+    SCS_REG(NVIC_ISER + IPI_WORD) = IPI_BIT;
+}
+
+/* The doorbell rings on the other core, which is the one of two cores a core ever interrupts. */
+void ipi_send(uint32_t core)
+{
+    (void)core;
+    REG(SIO_DOORBELL_OUT_SET) = 1u;
+}
+
+void ipi_clear(void)
+{
+    REG(SIO_DOORBELL_IN_CLR) = 1u;
+    SCS_REG(NVIC_ICPR + IPI_WORD) = IPI_BIT;
+}
+#endif
+#endif

@@ -3,6 +3,7 @@
  */
 
 #include "csr.h"
+#include "irq.h"
 #include "kernel.h"
 #include "object.h"
 #include "timer.h"
@@ -23,6 +24,9 @@ uint32_t core_id(void)
 struct trap_frame *trap_handler(struct trap_frame *frame)
 {
     core_enter();
+#if CORES > 1
+    irq_sync();
+#endif
     struct core *core = core_self();
     bool traced = timer_trap_enter((csr_read(mip) & MIP_MTIP) != 0);
 
@@ -109,6 +113,7 @@ bool intr_wait(uint32_t wake, uint32_t *ticks)
     }
     core_stall_end();
 #if CORES > 1
+    irq_sync();
     if (ip & MIP_MSIP) {
         ipi_clear();
     }
@@ -140,7 +145,8 @@ void trap_start(struct trap_frame *frame)
 #if CORES > 1
 /*
  * A hart other than the first, from start.S, once the first booted the kernel and raised the hart's software interrupt:
- * it takes the interrupt back, starts its timer and fences off what the first fenced off,
+ * it takes the interrupt back, sets up what the board has of its own and masks the lines of its controller,
+ * starts its timer and fences off what the first fenced off,
  * then idles until it has a thread, and leaves for it as trap_start does.
  * Its software interrupt stays enabled, for the other cores to wake it and make it trap.
  */
@@ -148,6 +154,8 @@ void core_start(void)
 {
     core_enter();
     ipi_clear();
+    board_core_init();
+    irq_core_init();
     timer_core_start();
     process_fence_core();
     ipi_enable();

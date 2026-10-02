@@ -16,7 +16,7 @@
  * Each core has an NVIC of its own, which only that core reaches, and the device lines are the first core's;
  * see DESIGN.md, "Cores".
  * So a call on another core that arms or disarms a line changes the lines the first core is to enable, nvic_wanted,
- * and interrupts it; the first core makes its NVIC agree as it next takes the lock, see nvic_sync.
+ * and interrupts it; the first core makes its NVIC agree as it next takes the lock, see irq_sync.
  * Until then it may enter on a line no Irq is armed on any more, which irq_claim then passes over.
  * IPI_LINE, the line the cores interrupt each other on where the board has one, is the kernel's on every core,
  * and no device's.
@@ -103,7 +103,7 @@ void irq_enable(uint32_t line, bool on)
     nvic_enable(line, on);
 }
 
-void nvic_sync(void)
+void irq_sync(void)
 {
 #if CORES > 1
     if (!nvic_stale || core_index() != 0) {

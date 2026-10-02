@@ -204,7 +204,7 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
     mpu_kernel();
     frame_take(frame);
     core_enter();
-    nvic_sync();
+    irq_sync();
     struct core *core = core_self();
     bool lost = (frame->cfsr & CFSR_STACKING) != 0;
 
@@ -285,7 +285,7 @@ bool intr_wait(uint32_t wake, uint32_t *ticks)
         __asm__ volatile("wfe");
     }
     core_stall_end();
-    nvic_sync();
+    irq_sync();
 #if CORES > 1
     if (nvic_ipi_pending()) {
         ipi_clear();
@@ -317,14 +317,16 @@ void trap_start(struct trap_frame *frame)
 #if CORES > 1
 /*
  * A core other than the first, from boot_entry in start.S, once the board started it at the end of the boot:
- * it sets up its own MPU, NVIC and SysTick as the first did,
+ * it sets up its own MPU as the first did, before it takes a ticket of the lock through it, see arch_ticket_take,
+ * then what the board has of its own, and its own NVIC and SysTick,
  * then idles until it has a thread, and leaves for it as a trap does.
  * Its line for the other cores' interrupts stays enabled, for them to wake it and make it trap.
  */
 void core_start(void)
 {
-    core_enter();
     mpu_core_init();
+    core_enter();
+    board_core_init();
     irq_core_init();
     timer_core_start();
     ipi_clear();

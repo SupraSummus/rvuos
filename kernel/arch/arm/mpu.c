@@ -8,7 +8,8 @@
  * The kernel runs with the MPU off, as machine mode runs outside PMP,
  * and turns it on as it returns into a thread, with the default memory map behind the regions, PRIVDEFENA;
  * PMSAv8's regions bind privileged code too, and none lets the kernel write where the thread only reads.
- * A region takes its memory type from where it lies: normal memory in RAM, a device elsewhere.
+ * A region takes its memory type from where it lies: normal memory in RAM, a device elsewhere,
+ * and on PMSAv8 RAM is Shareable, so a thread's exclusive pair reaches the other cores.
  */
 
 #include "arch.h"
@@ -97,6 +98,7 @@ void pmp_get(unsigned idx, uint32_t *addr, uint8_t *cfg)
 #define RBAR_XN (1u << 0)
 #define RBAR_AP_SHIFT 1
 #define RBAR_AP_MASK (3u << RBAR_AP_SHIFT)
+#define RBAR_SH_INNER (3u << 3) /* Shareable, which an exclusive pair needs to reach the other cores */
 #define RLAR_ENABLE (1u << 0)
 #define RLAR_ATTR_SHIFT 1
 
@@ -125,7 +127,11 @@ void pmp_set(unsigned idx, uint32_t addr, uint8_t cfg)
     if (!(cfg & PMP_X)) {
         rbar |= RBAR_XN;
     }
-    uint32_t attr = ram_contains((uint32_t)base, (uint32_t)size) ? ATTR_NORMAL : ATTR_DEVICE;
+    uint32_t attr = ATTR_DEVICE;
+    if (ram_contains((uint32_t)base, (uint32_t)size)) {
+        attr = ATTR_NORMAL;
+        rbar |= RBAR_SH_INNER;
+    }
     SCS_REG(MPU_RNR) = idx;
     SCS_REG(MPU_RBAR) = rbar;
     SCS_REG(MPU_RLAR) = (uint32_t)(base + size - 32u) | attr << RLAR_ATTR_SHIFT | RLAR_ENABLE;
@@ -221,3 +227,44 @@ void mpu_thread(void)
     SCS_REG(MPU_CTRL) = MPU_CTRL_ENABLE | MPU_CTRL_PRIVDEFENA;
     mpu_sync();
 }
+
+#if CORES > 1
+#if !ARMV8M
+#error "more than one core takes the lock's ticket through PMSAv8's regions"
+#endif
+/*
+ * The exclusive pair reaches the other cores only on memory the MPU marks Shareable, and the default map marks no RAM so;
+ * see DESIGN.md, "Cores".
+ * So the take borrows region 0 for the 32 bytes the word lies in, Shareable and the kernel's,
+ * turns the MPU on for the pair, then off, and gives the region back; the take reaches nothing the other regions hold.
+ * Before pmp_init the regions are a boot ROM's and no other core runs, so the boot's first ticket is taken without.
+ */
+#define LOCK_REGION 0u
+
+uint32_t arch_ticket_take(uint32_t *next)
+{
+    bool borrow = pmp_entry_count != 0;
+    uint32_t rbar = 0, rlar = 0;
+    if (borrow) {
+        uint32_t at = (uint32_t)next & ~31u;
+        SCS_REG(MPU_RNR) = LOCK_REGION;
+        rbar = SCS_REG(MPU_RBAR);
+        rlar = SCS_REG(MPU_RLAR);
+        SCS_REG(MPU_RBAR) = at | RBAR_SH_INNER | AP_KERNEL << RBAR_AP_SHIFT | RBAR_XN;
+        SCS_REG(MPU_RLAR) = at | ATTR_NORMAL << RLAR_ATTR_SHIFT | RLAR_ENABLE;
+        SCS_REG(MPU_CTRL) = MPU_CTRL_ENABLE | MPU_CTRL_PRIVDEFENA;
+        mpu_sync();
+    }
+    uint32_t ticket = __atomic_load_n(next, __ATOMIC_RELAXED);
+    while (!__atomic_compare_exchange_n(next, &ticket, ticket + 1, true, __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE)) {
+        LOOP_CORE("the exclusive store, which another core's ticket fails, taken once a trap at most");
+    }
+    if (borrow) {
+        mpu_kernel();
+        SCS_REG(MPU_RNR) = LOCK_REGION;
+        SCS_REG(MPU_RBAR) = rbar;
+        SCS_REG(MPU_RLAR) = rlar;
+    }
+    return ticket;
+}
+#endif

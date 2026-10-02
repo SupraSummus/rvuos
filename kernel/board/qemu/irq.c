@@ -61,3 +61,17 @@ void irq_complete(uint32_t line)
 {
     REG(PLIC_CLAIM) = line;
 }
+
+#if CORES > 1
+/*
+ * Every hart reaches context 0, the first's, from which the first claims every line,
+ * so a line one hart arms is forwarded at once, and another hart's own contexts forward nothing from reset.
+ */
+void irq_core_init(void)
+{
+}
+
+void irq_sync(void)
+{
+}
+#endif

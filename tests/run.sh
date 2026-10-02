@@ -36,6 +36,8 @@ fail() {
 
 # The demo ends in a halt with code 0, after a fault that stopped one thread and not the machine.
 [ "$status" -eq 0 ] || fail "expected exit status 0 (the demo's own halt), got $status"
+# RP2350's console is RAM of a fixed size, and its halt says how much did not fit, which would pass for a missing line.
+grep -q 'rvuos: the console lost' "$log" && fail "the console overflowed, and the lines past its end are lost"
 # The kernel has no console: its log reaches the UART through the root task's logger
 # while the machine runs, and the halt writes the whole log out after it, under this line.
 # What the logger carried out therefore comes before the line, what only the halt did after.
@@ -134,13 +136,16 @@ grep -q 'user fault' "$text" || fail "PMP fault was not caught"
 addr=$(sed -n 's/.*reading the removed region at \(0x[0-9a-f]*\),.*/\1/p' "$text" | head -1)
 [ -n "$addr" ] || fail "the successor did not say where its prober reads"
 [ "$board_mtval" = address ] || addr=0x00000000
+# The prober's fault is the first after the successor says so;
+# on two cores a reader faulted before it, which where mtval reads zero looks the same.
+prober=$(sed -n '/reading the removed region at/,$p' "$text")
 # RISC-V says a load access fault; ARMv7-M a MemManage, a data access violation with its address valid.
 if [ "$board_arch" = arm ]; then load_fault="exception=0x00000004 cfsr=0x00000082 pc=0x........ addr=$addr"
 else load_fault="mcause=0x00000005 mepc=0x........ mtval=$addr"; fi
-grep -q "$load_fault" "$text" \
+printf '%s\n' "$prober" | grep -q "$load_fault" \
     || fail "fault was not a load access fault on the removed region from user code"
 # OP_THREAD_FAULT told the successor what the kernel reported, the pc with its Thumb bit on ARM.
-at=$(grep -o "$load_fault" "$text" | head -1 | sed 's/.*pc=\(0x[0-9a-f]\{8\}\).*/\1/')
+at=$(printf '%s\n' "$prober" | grep -o "$load_fault" | head -1 | sed 's/.*pc=\(0x[0-9a-f]\{8\}\).*/\1/')
 if [ "$board_arch" = arm ]; then told="cause=0x00000004 pc=$(printf '0x%08x' $((at | 1))) addr=$addr status=0x00000082"
 else told="cause=0x00000005 pc=$at addr=$addr status=0x00000000"; fi
 grep -q "the prober's fault: $told" "$text" \

@@ -112,6 +112,7 @@ other_hart:
      */
     .section .text, "ax"
     .balign 256
+    .globl trap_vectors
 trap_vectors:
     .option push
     .option norvc

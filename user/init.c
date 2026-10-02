@@ -30,6 +30,7 @@
  * runs a thread on the second core beside itself, moves one from there to an eighth of this core,
  * wakes a thread that waits on the second core while that core idles,
  * takes a region from under a thread that reads it there, which faults at once,
+ * adds to one word from both cores without losing an add,
  * and destroys a thread while it runs there, after which the core runs another.
  * Negative paths are covered by the fuzz corpus and tests/differential.py.
  */
@@ -209,13 +210,15 @@ static volatile uint32_t dodges;
 
 /*
  * The second core's threads: the ponger answers PINGS pings, each within WAKE_US,
- * the reader reads the word at read_at, and the lost thread counts until it is destroyed.
+ * the reader reads the word at read_at, and the lost thread counts until it is destroyed,
+ * having first added ADDS to added an atomic add at a time, as this thread does beside it.
  * Their stacks lie below the dodger's.
  */
 #define PINGS 8u
 #define WAKE_US 500000u
+#define ADDS 20000u
 #define CORE_STACK(i) (SPINNERS + 1u + (i))
-static volatile uint32_t pongs, read_count, read_at, lost_spins;
+static volatile uint32_t pongs, read_count, read_at, lost_spins, added;
 
 static void puts(const char *s)
 {
@@ -546,8 +549,16 @@ static void reader_main(void)
     }
 }
 
+static void add_atomically(void)
+{
+    for (uint32_t i = 0; i < ADDS; i++) {
+        __atomic_fetch_add(&added, 1u, __ATOMIC_RELAXED);
+    }
+}
+
 static void lost_main(void)
 {
+    add_atomically();
     for (;;) {
         lost_spins++;
     }
@@ -970,6 +981,8 @@ static void second_core(uint32_t data_base, uint32_t data_size, uint32_t shared_
     /*
      * A thread destroyed while it runs on the second core: that core traps before the thread's memory goes,
      * so the thread counts no more, and the core runs the next thread it is given.
+     * Before it counts, it adds to one word as this thread does, and no add of either core may be lost:
+     * on the Cortex-M33 an exclusive pair reaches the other core only where the MPU marks the memory Shareable.
      */
     expect("take the second core's units back",
            rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_CORE_TIME, 0, 0));
@@ -981,8 +994,10 @@ static void second_core(uint32_t data_base, uint32_t data_size, uint32_t shared_
     expect("bind it to the whole of the second core",
            rv_invoke(OP_TIME_BIND, SLOT_CORE_TIME, SLOT_LOST, 0, TIME_UNITS));
     expect("start it", rv_invoke(OP_THREAD_RESUME, SLOT_LOST, 0, 0, 0));
+    add_atomically();
     expect("it counts while this thread spins",
            moved_while_spinning(&lost_spins, 0, counter, counts) ? KERR_OK : KERR_INVALID_ARG);
+    expect("no add of either core was lost", added == 2 * ADDS ? KERR_OK : KERR_INVALID_ARG);
     expect("destroy its pool while it runs",
            rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_DOOMED_MEMORY, 0, 0));
     expect("it is gone",

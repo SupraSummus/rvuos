@@ -44,6 +44,15 @@ static inline bool line_is_cores(uint32_t line)
 /* Mask every line and enable the external interrupt at the core. */
 void irq_init(void);
 
+/*
+ * With more than one core only the first core's controller forwards device lines; see DESIGN.md, "Cores".
+ * irq_core_init masks every line of another core's own controller as that core starts.
+ * irq_sync, on the first core as it takes the lock, makes the arms and disarms the other cores left to it;
+ * elsewhere, and where every core reaches the first's controller, it does nothing.
+ */
+void irq_core_init(void);
+void irq_sync(void);
+
 /* Have the controller forward a line to the core, or stop it. */
 void irq_enable(uint32_t line, bool on);
 
