@@ -390,10 +390,14 @@ stores to the clock's counter, a device, through no frame, mcause 7 as well,
 and loads the word just past a frame of the smallest region's size, mcause 5,
 which a kernel that took the grain for finer than it is lets through.
 A core that raises misaligned exceptions instead, as RP2350's does, reports 4 and 6 for the misaligned two.
+On ARM the same scenarios make their attempts in Thumb, `user/arch/<arch>/escape.h`, and the MPU's refusal is a MemManage.
+In place of the CSR and `mret` ARM loads from the System Control Space, a BusFault,
+and two scenarios try the frame the core keeps on the thread's stack, one it cannot stack and one it cannot unstack;
+see "Architectures".
 The user linker script says where the kernel starts, for these scenarios alone.
 The fuzzer's whole attack surface is a system call's registers,
 so this suite is what runs real instructions on the real core
-to check that PMP and the privilege boundary confine a process;
+to check that PMP or the MPU and the privilege boundary confine a process;
 it runs on the target alone, like `make test`, never on the host.
 
 The replay driver carries the log to the UART after every record,

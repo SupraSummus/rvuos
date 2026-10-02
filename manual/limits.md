@@ -46,7 +46,7 @@ These are documented gaps, not surprises;
 - **Two cores at most**, on QEMU `virt`, mps2-an521 and RP2350;
   the first core takes every device interrupt, and a thread on spare time runs on its own core alone;
   `DESIGN.md`, open decision 24.
-- **ARM with no escape suite and no replay yet**, under QEMU and on RP2350's Cortex-M33; `TODO.md`.
+- **ARM with no replay yet**, under QEMU and on RP2350's Cortex-M33; `TODO.md`.
 - **No boot from flash.**
   The ESP32-C6 and RP2350 run from RAM, loaded by their ROMs over USB.
 - **No loader.**

@@ -6,6 +6,7 @@
  * A core may split a misaligned load and check each part on its own,
  * but the part past the region must fault, mcause=5, naming the load's own address in mepc;
  * mtval is the board's, and a core that does not split it raises a misaligned exception, mcause=4.
+ * On ARM the MPU faults it, a MemManage, DACCVIOL, naming it in pc, and the address MMFAR holds is the core's.
  * Were the load allowed the program would say what it read, which fails the run; see tests/escape.sh.
  *
  * One escape per program: the fault stops the only thread, and the machine with nothing left to run;
@@ -14,9 +15,10 @@
 
 #include <stdint.h>
 
+#include "escape.h"
 #include "rvuos.h"
 
-/* The load below, labelled in the statement that makes it, so the label cannot drift from it. */
+/* The load below; see escape.h. */
 extern const char load_at[];
 
 static void puts(const char *s)
@@ -41,7 +43,7 @@ int main(void)
     puts(", expecting a fault\n");
 
     uint32_t v;
-    __asm__ volatile(".globl load_at\nload_at:\n\tlw %0, 0(%1)" : "=r"(v) : "r"(addr) : "memory");
+    ESCAPE_LOAD("load_at", v, addr);
 
     /* Not reached when PMP stops the part past the region. */
     puts("escape: breached, read past the data region ");

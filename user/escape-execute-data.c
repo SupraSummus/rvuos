@@ -5,7 +5,8 @@
  * see kernel/boot.c.
  * This program jumps into a word in the data region:
  * PMP must fault the instruction fetch before a byte of it runs,
- * an instruction access fault, mcause=1, naming the word's address in mepc and mtval.
+ * an instruction access fault, mcause=1, naming the word's address in mepc and mtval;
+ * on ARM the MPU must, with a MemManage, IACCVIOL, naming it in pc.
  * Were the fetch allowed the word would return and the program would say so, which fails the run;
  * see tests/escape.sh.
  *
@@ -15,6 +16,7 @@
 
 #include <stdint.h>
 
+#include "escape.h"
 #include "rvuos.h"
 
 /* A word in .bss, which lies in the read-write data region. */
@@ -28,19 +30,15 @@ static void puts(const char *s)
 int main(void);
 int main(void)
 {
-    /*
-     * `jalr x0, 0(ra)`, a return:
-     * were the fetch allowed the call would return here and the escape would have worked.
-     */
-    code_word = 0x00008067u;
+    /* A return: were the fetch allowed the call would return here and the escape would have worked. */
+    code_word = ESCAPE_RETURN_WORD;
 
     uint32_t at = (uint32_t)(uintptr_t)&code_word;
     puts("escape: executing from the data region at ");
     rv_put_hex(BOOT_CAP_DEBUG, at);
     puts(", expecting a fault\n");
 
-    void (*enter)(void) = (void (*)(void))(uintptr_t)at;
-    enter();
+    ESCAPE_CODE(at)();
 
     /* Not reached when PMP marks the data region no-execute. */
     puts("escape: breached, executed from data\n");

@@ -41,7 +41,7 @@ then boots each escape scenario, the only check of the board's install rule.
 The same goes for `kernel/board/rp2350/` and `user/board/rp2350/`
 with an RP2350 connected in BOOTSEL mode, `make BOARD=rp2350 test escape`,
 the only check of its PMP quirks,
-and `make BOARD=rp2350 ARCH=arm test`, the only run of PMSAv8 and of the Cortex-M33 on silicon,
+and `make BOARD=rp2350 ARCH=arm test escape`, the only run of PMSAv8 and of the Cortex-M33 on silicon,
 which a change to `kernel/arch/arm/` needs too.
 Both again with `CORES=2` are the only runs of two cores on silicon,
 which a change to how the cores lock, start or interrupt each other needs too.

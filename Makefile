@@ -152,6 +152,7 @@ QEMU_ARM      := qemu-system-arm
 QEMUFLAGS_ARM := -M mps2-an385 -cpu cortex-m3 -nographic -nodefaults -nic none -serial mon:stdio \
                  -semihosting-config enable=on,target=native -icount shift=0,sleep=off
 RUN_INIT      := $(QEMU_ARM) $(QEMUFLAGS_ARM) -kernel $(BUILD)/kernel-init.elf
+ESCAPE_PREFIX := $(QEMU_ARM) $(QEMUFLAGS_ARM) -kernel
 # Where the core's transcripts differ from QEMU virt's, see tests/run.sh:
 # an MPU of eight regions, none smaller than 32 bytes, and ARMv7-M's report of a fault.
 BOARD_FACTS   := BOARD_PMP_ENTRIES=8 BOARD_PMP_GRAIN=32 BOARD_ARCH=arm
@@ -164,6 +165,7 @@ QEMU_ARM      := qemu-system-arm
 QEMUFLAGS_ARM := -M mps2-an521 -nographic -nodefaults -nic none -serial mon:stdio \
                  -semihosting-config enable=on,target=native -icount shift=0,sleep=off
 RUN_INIT      := $(QEMU_ARM) $(QEMUFLAGS_ARM) -kernel $(BUILD)/kernel-init.elf
+ESCAPE_PREFIX := $(QEMU_ARM) $(QEMUFLAGS_ARM) -kernel
 # The Cortex-M33's, as RP2350's: eight Secure MPU regions, none smaller than 32 bytes, and ARM's report of a fault.
 BOARD_FACTS   := BOARD_PMP_ENTRIES=8 BOARD_PMP_GRAIN=32 BOARD_ARCH=arm
 else
@@ -172,13 +174,14 @@ endif
 
 # The escape-attempt suite: one root task per scenario, built for whichever board.
 # Each program uses only boot capabilities every board grants,
-# so the same scenarios run on every board; they are RISC-V's, see TODO.md.
+# so the same scenarios run on every board, in the instructions of its architecture, user/arch/<arch>/escape.h;
+# those that try what one architecture alone has, a privileged register or the core's own stacking, are its alone.
+ESCAPE_PROGRAMS := escape-execute-data escape-jump-kernel escape-misaligned-load escape-misaligned-store \
+                   escape-store-kernel escape-store-clock escape-past-region
 ifeq ($(ARCH),riscv)
-ESCAPE_PROGRAMS := escape-execute-data escape-jump-kernel escape-csrr escape-mret \
-                   escape-misaligned-load escape-misaligned-store escape-store-kernel \
-                   escape-store-clock escape-past-region
+ESCAPE_PROGRAMS += escape-csrr escape-mret
 else
-ESCAPE_PROGRAMS :=
+ESCAPE_PROGRAMS += escape-load-scs escape-stack-call escape-unstack
 endif
 
 .PHONY: all clean run test escape host-harnesses host-test fuzz corpus-merge qemu-replay mutants mutants-refresh \
@@ -409,12 +412,12 @@ qemu-replay: $(BUILD)/kernel-fuzzdrv.elf $(HOST_BUILD)/fuzz
 		$(if $(REPLAY_FAIL_FAST),--fail-fast) \
 		--kernel $(BUILD)/kernel-fuzzdrv.elf --host $(HOST_BUILD)/fuzz tests/seeds tests/corpus
 
-# The same demo on ARM, under QEMU, on ARMv7-M and on ARMv8-M, and on mps2-an521's two cores;
-# see DESIGN.md, "Architectures" and "Cores".
+# The same demo on ARM, under QEMU, on ARMv7-M and on ARMv8-M, and on mps2-an521's two cores,
+# and the escape suite on each version's one core; see DESIGN.md, "Architectures" and "Cores".
 # tests/mutants.sh leaves it out, as it leaves ARM out, which the host build does not compile.
 arm-test:
-	$(MAKE) BOARD=mps2-an385 test
-	$(MAKE) BOARD=mps2-an521 test
+	$(MAKE) BOARD=mps2-an385 test escape
+	$(MAKE) BOARD=mps2-an521 test escape
 	$(MAKE) BOARD=mps2-an521 CORES=2 test
 
 # The same demo on two harts of QEMU virt, which goes on to the second core; see DESIGN.md, "Cores".

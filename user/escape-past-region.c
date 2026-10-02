@@ -5,7 +5,8 @@
  * so a kernel that took the grain for finer than it is would make frames that open more than they hold.
  * This program carves a frame of the smallest region's size, see OP_FRAME_INFO, out of the free RAM,
  * installs it read and write, and loads the word right after it, where the root task holds no region:
- * PMP must fault the load, mcause=5, naming its own address in mepc and the word's in mtval.
+ * PMP must fault the load, mcause=5, naming its own address in mepc and the word's in mtval;
+ * on ARM the MPU must, with a MemManage, DACCVIOL, naming them in pc and MMFAR.
  * Were the load allowed the program would say what it read, which fails the run; see tests/escape.sh.
  *
  * One escape per program: the fault stops the only thread, and the machine with nothing left to run;
@@ -14,9 +15,10 @@
 
 #include <stdint.h>
 
+#include "escape.h"
 #include "rvuos.h"
 
-/* The load below, labelled in the statement that makes it, so the label cannot drift from it. */
+/* The load below; see escape.h. */
 extern const char load_at[];
 
 enum {
@@ -65,7 +67,7 @@ int main(void)
     puts(", expecting a fault\n");
 
     uint32_t v;
-    __asm__ volatile(".globl load_at\nload_at:\n\tlw %0, 0(%1)" : "=r"(v) : "r"(addr) : "memory");
+    ESCAPE_LOAD("load_at", v, addr);
 
     /* Not reached when PMP ends the region where the kernel says it ends. */
     puts("escape: breached, read past the smallest region ");

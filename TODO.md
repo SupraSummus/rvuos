@@ -41,16 +41,19 @@ Open work only; an item leaves this file in the commit that finishes it.
   the halt's reboot sets it, as the bootrom's does.
   Setting it at boot keeps POWMAN's watchdog-reset input asserted for the whole run, which is untried.
 - Boot from flash, and feed the replay corpus to the board.
-- The escape suite runs on the first core alone, with `CORES=2` too,
-  so nothing tries the second Hazard3's fence over the hardwired PMP entries or its shut counters;
+- The escape suite runs on the first core alone, with `CORES=2` too, on either kind of core,
+  so nothing tries the second Hazard3's fence over the hardwired PMP entries or its shut counters,
+  nor the second Cortex-M33's MPU;
   a scenario bound to the second core's units would.
 
 ## ARM
 
-- The escape suite is RISC-V's: `make escape` builds nothing for the MPS2 boards or RP2350's Cortex-M33,
-  so the MPU is checked by the demo alone, which never faults on a stack:
-  nothing runs the paths where the core's stacking or unstacking of a thread's frame faults,
-  and nothing has tried a misaligned store across two regions on the Cortex-M33.
+- The escape suite's two scenarios of the frame on the thread's stack have one thread each, which leaves two holes.
+  `stack_takes` saying yes to anything passes `escape-unstack`,
+  since unstacking from memory the thread lost faults as it does from the guard;
+  a second thread that makes the first's stack read only while it waits would show it.
+  And `frame_take` leaving the dropped call pending passes `escape-stack-call`, since no thread runs next to take it.
+  The one-boot suite under "Verification" would have the second thread.
 - QEMU 11 makes a pending exception a `wfe` wakeup only for the NVIC's lines, not for SysTick,
   since its `SEVONPEND` looks at external interrupts alone, where the architecture says any exception;
   so `make arm-test` waits in `intr_wait` for ever there, from the first sleep of the demo.

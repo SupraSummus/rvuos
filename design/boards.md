@@ -161,7 +161,8 @@ A program compiled for strict alignment meets neither half.
 
 **mps2-an385** is QEMU's model of ARM's MPS2 board with the AN385 image, a Cortex-M3, and ARM's development target:
 `make BOARD=mps2-an385 test` runs the demo root task of `user/init.c` there, the same program as on RISC-V,
-and `make check` runs it too.
+`make BOARD=mps2-an385 escape` the escape suite in ARM's instructions,
+and `make check` runs both.
 QEMU loads the image into SSRAM1, where the core's reset finds the vector table,
 and the halt leaves QEMU through semihosting, which only privileged code reaches.
 The layout is QEMU virt's, moved to SSRAM1 at 0;
@@ -174,6 +175,7 @@ Measured under QEMU 8.2: eight MPU regions and a bkpt taken as a HardFault, Debu
 **mps2-an521** is QEMU's model of the same board with the AN521 image,
 an SSE-200 with two Cortex-M33s, and ARM's development target of ARMv8-M:
 `make arm-test` runs the demo there after mps2-an385's, on one core and then on two, `CORES=2`,
+and the escape suite on one,
 the only check of PMSAv8 and of the Cortex-M33 short of RP2350.
 The two boards share their UART, counter and halt, in `kernel/board/mps2/` and `user/board/mps2/`.
 QEMU loads the image into SSRAM1 and resets the first core, which finds the vector table at INITSVTOR0's reset value,
@@ -196,7 +198,7 @@ and `wfe` handing the processor to the other core rather than waiting,
 so a core that idles or waits on the other loops, and a demo of a few seconds takes a few more of the host's.
 
 **RP2350** runs the demo root task and the escape suite on its Hazard3 cores, `make BOARD=rp2350 test escape`,
-and the demo on its Cortex-M33 cores, `make BOARD=rp2350 ARCH=arm test`, on one core, or on both with `CORES=2`.
+and on its Cortex-M33 cores, `make BOARD=rp2350 ARCH=arm test escape`, on one core, or on both with `CORES=2`.
 It is one board with two architectures:
 `ARCH` picks the cores, and the files that differ by them lie in `kernel/board/rp2350/<arch>/`.
 The bootrom's BOOTSEL mode takes the image's segments into SRAM over USB and reboots into them,
@@ -230,6 +232,9 @@ Measured there: eight Secure MPU regions,
 a SysTick becoming pending that wakes `wfe` with `SEVONPEND`,
 and a MemManage's fault address register that reads its own address, `0xe000ed34`, once the status is cleared,
 so the kernel reads the address first.
+The escape suite measured more, as QEMU's model has it too:
+a misaligned access across a region's end faults with the address of the first byte past it, not the access's own,
+and a call whose frame the core cannot stack is taken as the MemManage, not as the call.
 The bootrom leaves a stack limit set and its redundancy coprocessor on; the kernel resets both first, on either core.
 The exclusive pair reaches the other core only on memory the MPU marks Shareable:
 with the MPU off, two cores taking a million tickets each came to a million and some,
@@ -337,7 +342,8 @@ A fault of the kernel's own nests, and the core pushes its 32-byte frame on the 
 which `tools/stack-depth.py` does not count; `kernel_trap` takes the stack back at once and halts.
 The host build compiles the kernel with RISC-V's frame, as QEMU virt has it,
 so the fuzzer and `make qemu-replay` see the portable kernel and not `kernel/arch/arm/`,
-which only the link checks, the demo under QEMU and the demo on RP2350's Cortex-M33 exercise,
-PMSAv8 mps2-an521's under QEMU and RP2350's, and the second core of each,
-and the escape suite does not run there yet;
+which only the link checks, the demo and the escape suite exercise, under QEMU and on RP2350's Cortex-M33,
+PMSAv8 mps2-an521's under QEMU and RP2350's, and the demo the second core of each.
+Beside RISC-V's scenarios the suite tries the frame on the thread's stack,
+a call the core cannot stack and one it cannot unstack;
 `TODO.md` says what that leaves unchecked.

@@ -3,7 +3,7 @@
  *
  * No region of the root task's reaches the kernel, see user/user.ld.S,
  * so a call to where the kernel starts must fault on the fetch, an instruction access fault, mcause=1,
- * naming the address in mepc and mtval.
+ * naming the address in mepc and mtval, and on ARM a MemManage, IACCVIOL, naming it in pc.
  * Were the fetch allowed, the kernel's first instructions would run in user mode
  * and the fault would be another; see tests/escape.sh.
  *
@@ -13,6 +13,7 @@
 
 #include <stdint.h>
 
+#include "escape.h"
 #include "rvuos.h"
 
 /* Where the kernel starts; see user/user.ld.S. */
@@ -31,8 +32,7 @@ int main(void)
     rv_put_hex(BOOT_CAP_DEBUG, at);
     puts(", expecting a fault\n");
 
-    void (*enter)(void) = (void (*)(void))(uintptr_t)at;
-    enter();
+    ESCAPE_CODE(at)();
 
     /* Not reached when PMP keeps user mode out of the kernel. */
     puts("escape: breached, returned from the kernel\n");

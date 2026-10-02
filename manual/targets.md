@@ -306,12 +306,12 @@ Only the demo is built for the board; the replay driver is QEMU's for now.
 On RP2350, in BOOTSEL mode, as it is when plugged in with BOOTSEL held and again after each run:
 
 ```
-make BOARD=rp2350                    # build/rp2350/kernel-init.elf
-make BOARD=rp2350 run                # load it into RAM and print the transcript the halt writes
-make BOARD=rp2350 test escape        # check the transcripts
-make BOARD=rp2350 ARCH=arm test      # the same demo on the Cortex-M33, from build/rp2350-arm/
+make BOARD=rp2350                              # build/rp2350/kernel-init.elf
+make BOARD=rp2350 run                          # load it into RAM and print the transcript the halt writes
+make BOARD=rp2350 test escape                  # check the transcripts
+make BOARD=rp2350 ARCH=arm test escape         # the same on the Cortex-M33, from build/rp2350-arm/
 make BOARD=rp2350 CORES=2 test escape          # the same on both Hazard3 cores, which goes on to the second
-make BOARD=rp2350 ARCH=arm CORES=2 test        # and on both Cortex-M33s
+make BOARD=rp2350 ARCH=arm CORES=2 test escape # and on both Cortex-M33s
 ```
 
 `tools/rp2350-run.py` loads the image through the bootrom's PICOBOOT interface,
@@ -322,12 +322,12 @@ On ARM, under QEMU:
 ```
 make BOARD=mps2-an385                # build/mps2-an385/kernel-init.elf
 make BOARD=mps2-an385 run            # boot the demo root task
-make BOARD=mps2-an385 test           # the same, and check the transcript
-make BOARD=mps2-an521 test           # the same demo on QEMU's Cortex-M33, from build/mps2-an521/
+make BOARD=mps2-an385 test escape    # the same, and check the transcripts
+make BOARD=mps2-an521 test escape    # the same on QEMU's Cortex-M33, from build/mps2-an521/
 make BOARD=mps2-an521 CORES=2 test   # the same on its two Cortex-M33s, which goes on to the second core
 ```
 
-Only the demo is built; the replay driver's layout is QEMU virt's, and the escape suite is RISC-V's so far.
+Only the demo and the escape suite are built; the replay driver's layout is QEMU virt's.
 
 The kernel image embeds one user program, the root task.
 Two images are built, differing only in that program:

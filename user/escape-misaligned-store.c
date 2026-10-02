@@ -7,7 +7,8 @@
  * The ESP32-C6 would write the upper's two bytes, see DESIGN.md, "Boards",
  * so there the kernel refuses the pair; the program tries both orders and requires the same answer.
  * Either way the store must fault, mcause=7, naming its own address in mepc,
- * or raise a misaligned exception, mcause=6, on a core that does not split it.
+ * or raise a misaligned exception, mcause=6, on a core that does not split it;
+ * on ARM the MPU faults it, a MemManage, DACCVIOL, naming it in pc.
  * Were the store allowed the program would say so, which fails the run; see tests/escape.sh.
  *
  * One escape per program: the fault stops the only thread, and the machine with nothing left to run;
@@ -16,9 +17,10 @@
 
 #include <stdint.h>
 
+#include "escape.h"
 #include "rvuos.h"
 
-/* The store below, labelled in the statement that makes it, so the label cannot drift from it. */
+/* The store below; see escape.h. */
 extern const char store_at[];
 
 enum {
@@ -83,8 +85,7 @@ int main(void)
     rv_put_hex(BOOT_CAP_DEBUG, (uint32_t)(uintptr_t)store_at);
     puts(", expecting a fault\n");
 
-    /* Not followed at once by a store, which would have the ESP32-C6 check the second word for writing. */
-    __asm__ volatile(".globl store_at\nstore_at:\n\tsw %0, 0(%1)\n\tnop" : : "r"(0x5a5a5a5au), "r"(addr) : "memory");
+    ESCAPE_STORE("store_at", 0x5a5a5a5au, addr);
 
     /* Not reached when the part in the upper half faults. */
     puts("escape: breached, stored past the lower half\n");
