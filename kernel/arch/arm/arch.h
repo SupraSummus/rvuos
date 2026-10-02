@@ -2,7 +2,10 @@
 #define RVUOS_ARCH_H
 
 #ifndef __ASSEMBLER__
+#include <stdbool.h>
 #include <stdint.h>
+
+#include "work.h"
 #endif
 
 /*
@@ -90,6 +93,36 @@ enum {
 /* What the boot banner calls the kernel's mode and the entries of the protection unit. */
 #define ARCH_KERNEL_MODE "handler mode"
 #define ARCH_REGIONS "mpu regions"
+
+/*
+ * The next ticket of the kernel's lock, see core.c.
+ * ARM has no atomic add, only an exclusive load and store, and the store fails if another core wrote the word between,
+ * as it does taking its own ticket, or for a reason of the core's own, so the take goes round again then.
+ */
+static inline uint32_t arch_ticket_take(uint32_t *next)
+{
+    uint32_t ticket = __atomic_load_n(next, __ATOMIC_RELAXED);
+    while (!__atomic_compare_exchange_n(next, &ticket, ticket + 1, true, __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE)) {
+        LOOP_CORE("the exclusive store, which another core's ticket fails, taken once a trap at most");
+    }
+    return ticket;
+}
+
+/*
+ * A core that waits on another in core.c waits in wfe, as ARM's spin waits do,
+ * and the other signals with sev once it has stored what the first waits for, the dsb making the store seen first.
+ * An event that came before the wfe ends it at once, so none is lost between the load and the wait.
+ * QEMU 8.2 takes wfe for a turn handed to the other core.
+ */
+static inline void arch_core_wait(void)
+{
+    __asm__ volatile("wfe" : : : "memory");
+}
+
+static inline void arch_core_wake(void)
+{
+    __asm__ volatile("dsb\n\tsev" : : : "memory");
+}
 #endif
 
 #endif

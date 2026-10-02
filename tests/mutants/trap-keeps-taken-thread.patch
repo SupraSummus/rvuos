@@ -1,0 +1,18 @@
+A trap whose thread another core stopped while the trap waited for the lock goes on as the thread's,
+so the core keeps the turn of a thread that is not ready, and would make the call it trapped for.
+
+Caught-by: fuzz-smp2
+Report: the running thread is not runnable
+
+diff --git a/kernel/core.c b/kernel/core.c
+--- a/kernel/core.c
++++ b/kernel/core.c
+@@ -172,7 +172,7 @@ void core_thread_gone(const struct thread *t)
+ struct thread *core_trapped(void)
+ {
+     struct thread *t = core_self()->current;
+-    if (t != NULL && t->state == THREAD_READY) {
++    if (t != NULL) {
+         return t;
+     }
+     sched_run_next();

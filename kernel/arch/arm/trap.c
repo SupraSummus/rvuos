@@ -11,14 +11,22 @@
 #include "timer.h"
 #include "trap.h"
 
-/* The running thread's frame, which start.S saves into; set as each trap returns. */
-struct trap_frame *trap_current;
+/* Each core's running thread's frame, which start.S saves into; set as each trap returns. */
+struct trap_frame *trap_current[CORES];
 
 /* The root thread's frame, for boot_entry in start.S; see trap_start. */
 struct trap_frame *trap_boot_frame;
 
-/* Where a trap of the kernel's own came from, lr, sp and psp, as start.S notes them for kernel_trap_panic. */
-uint32_t kernel_trap_state[3];
+/* Where a trap of the kernel's own came from on each core, lr, sp and psp, as start.S notes them for kernel_trap_panic. */
+uint32_t kernel_trap_state[CORES][3];
+
+#if CORES > 1
+/* The board's register that reads each core's own number, as RISC-V's mhartid does. */
+uint32_t core_id(void)
+{
+    return *(volatile const uint32_t *)CORE_ID_ADDR;
+}
+#endif
 
 /*
  * Where frame_give points psp when the thread's stack cannot take the hardware frame:
@@ -184,26 +192,34 @@ uint32_t frame_give(struct trap_frame *f)
 
 /*
  * A trap from a thread, with r4 to r11 in its frame and the rest on its stack.
+ * The frame is whole before the trap tells the other cores it runs the kernel, see core_enter,
+ * since a core that takes the thread waits for that, and then may free its stack or read its frame.
+ * The interrupt the trap entered on is taken first, whatever became of the thread;
+ * another core may have stopped or destroyed it while the trap waited for the kernel's lock,
+ * and then nothing else is, see core_trapped.
  * Returns the frame to resume, or NULL for nobody's turn, which start.S idles for.
- * The kernel runs on one core on ARM, so no other takes the thread while the trap waits for the lock.
  */
 struct trap_frame *trap_handler(struct trap_frame *frame)
 {
-    core_enter();
     mpu_kernel();
-    struct core *core = core_self();
-    struct thread *t = core->current;
-    if (frame != &t->frame) {
-        kpanic("trap frame is not the current thread's");
-    }
     frame_take(frame);
+    core_enter();
+    nvic_sync();
+    struct core *core = core_self();
     bool lost = (frame->cfsr & CFSR_STACKING) != 0;
 
     /* SysTick's own pending bit is dropped as it is taken, so the counter says whether the tick is due. */
     bool traced = timer_trap_enter(counter_due());
 
     uint32_t exception = frame->exception;
-    if (exception >= EXC_IRQ0) {
+    bool interrupt = exception >= EXC_IRQ0 || exception == EXC_SYSTICK;
+    if (exception == EXC_SYSTICK) {
+        counter_tick();
+        timer_trap_tick();
+    } else if (interrupt && line_is_cores(exception - EXC_IRQ0)) {
+        /* Another core asked this one to trap: to stop its thread, load its regions or set its timer again. */
+        ipi_clear();
+    } else if (interrupt) {
         /*
          * The line the exception entered on is active now, not pending, so irq_claim is told of it.
          * Delivered under tracing as well: a line masked without its Irq disarmed would break an invariant.
@@ -211,12 +227,14 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
          */
         nvic_entered = exception - EXC_IRQ0;
         sched_claim_interrupts();
-    } else {
+    }
+
+    struct thread *t = core_trapped();
+    if (t != NULL && frame != &t->frame) {
+        kpanic("trap frame is not the current thread's");
+    }
+    if (t != NULL && !interrupt) {
         switch (exception) {
-        case EXC_SYSTICK:
-            counter_tick();
-            timer_trap_tick();
-            break;
         case EXC_SVCALL:
             /* A call whose stacking faulted left no registers to make it with; see below. */
             if (!lost) {
@@ -242,7 +260,7 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
         }
     }
     /* A trap that lost the thread's frame is the thread's fault, whatever it entered on. */
-    if (lost) {
+    if (t != NULL && lost) {
         fault_dispatch(t);
     }
 
@@ -273,11 +291,17 @@ bool intr_wait(uint32_t wake, uint32_t *ticks)
     timer_set(wake);
     core_stall_begin();
     bool device;
-    while (!(device = nvic_pending()) && !counter_due()) {
+    while (!(device = nvic_pending()) && !counter_due() && !nvic_ipi_pending()) {
         LOOP_WAIT("an interrupt to be pending");
         __asm__ volatile("wfe");
     }
     core_stall_end();
+    nvic_sync();
+#if CORES > 1
+    if (nvic_ipi_pending()) {
+        ipi_clear();
+    }
+#endif
     *ticks = timer_count();
     return device;
 }
@@ -301,15 +325,35 @@ void trap_start(struct trap_frame *frame)
     kpanic("PendSV did not leave for user mode");
 }
 
+#if CORES > 1
+/*
+ * A core other than the first, from boot_entry in start.S, once the board started it at the end of the boot:
+ * it sets up its own MPU, NVIC and SysTick as the first did,
+ * then idles until it has a thread, and leaves for it as a trap does.
+ * Its line for the other cores' interrupts stays enabled, for them to wake it and make it trap.
+ */
+void core_start(void)
+{
+    core_enter();
+    mpu_core_init();
+    irq_core_init();
+    timer_core_start();
+    ipi_clear();
+    ipi_enable();
+    core_idle();
+}
+#endif
+
 void kernel_trap_panic(void)
 {
     uint32_t ipsr;
+    const uint32_t *state = kernel_trap_state[core_index()];
     __asm__ volatile("mrs %0, ipsr" : "=r"(ipsr));
     kputs("trap from the kernel\n");
     kputs("  exception=");
     kput_hex(ipsr & 0x1ffu);
     kputs(" lr=");
-    kput_hex(kernel_trap_state[0]);
+    kput_hex(state[0]);
     kputs(" cfsr=");
     kput_hex(SCS_REG(CFSR));
     kputs(" hfsr=");
@@ -319,9 +363,9 @@ void kernel_trap_panic(void)
     kputs(" bfar=");
     kput_hex(SCS_REG(BFAR));
     /* A trap from handler mode or from kmain left its frame on the main stack, and its pc in it. */
-    if ((kernel_trap_state[0] & 0x4u) == 0) {
+    if ((state[0] & 0x4u) == 0) {
         kputs(" pc=");
-        kput_hex(((const uint32_t *)kernel_trap_state[1])[6]);
+        kput_hex(((const uint32_t *)state[1])[6]);
     }
     kputc('\n');
     kpanic("kernel fault");

@@ -473,6 +473,9 @@ bound to a notification in any pool.
 The invoked slot is consumed.
 A line is bound at most once; a second bind fails with `KERR_OVERLAP`
 until the first `Irq`'s pool is destroyed.
+Where each core has a controller of its own and the kernel runs on several,
+the line they interrupt each other on is bound to the kernel for good, and binding it fails so too:
+line 6 on mps2-an521 with both cores.
 
 An `Irq` holds its notification by a capability
 derived from the `Notification` capability it was bound with,
@@ -492,6 +495,10 @@ An `Irq` on a device's line works like one on a timer line:
 
 An `Irq` is armed exactly while its line is unmasked,
 so a level that stays high costs one trap and not a storm.
+The first core takes every device interrupt, whichever core its driver runs on;
+where each core has a controller of its own, as on mps2-an521,
+an arm or a disarm made on another core reaches the first core's as that core next enters the kernel,
+which the call interrupts it for, so the line may come that much later, and a disarmed one never signals.
 A device interrupt wakes its driver but does not run it;
 the driver waits for its turn like a thread a timer line woke.
 

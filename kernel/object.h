@@ -783,11 +783,25 @@ void core_thread_stopped(const struct thread *t);
 void core_thread_gone(const struct thread *t);
 
 /*
+ * The thread a trap from user mode is for, once the trap has the lock and has counted its ticks:
+ * the core's running thread, or NULL if another core stopped or destroyed it while the trap waited for the lock,
+ * when what it trapped for is dropped and the core hands the processor on; see DESIGN.md, "Cores".
+ * Another core stops a thread only by taking its process, which it never gets back, so its state tells.
+ */
+struct thread *core_trapped(void);
+
+/*
  * A thread became ready on a core, or brought its release forward:
  * the core sets its timer again, and is interrupted for it unless it does so within a tick,
  * once this core gives the lock up, so that it does not wait for the lock as it wakes.
  */
 void core_notify(struct core *c);
+
+/*
+ * Interrupt another core once this one gives the lock up, whatever it runs,
+ * for a change it finds as it takes the lock: a line its controller is to forward, or no longer, see nvic.c.
+ */
+void core_interrupt_later(struct core *c);
 
 /*
  * The board's, only with more than one core: let the other cores interrupt this one, in user mode and in wfi,

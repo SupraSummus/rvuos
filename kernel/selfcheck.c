@@ -720,6 +720,9 @@ static void check_irq(const struct irq *i)
     if (i->line >= LINES) {
         fail("irq names a line there is not", v2p(i), i->line, 0);
     }
+    if (line_is_cores(i->line)) {
+        fail("irq is bound to the cores' line", v2p(i), i->line, 0);
+    }
     /* The tick fires every due timer line, so one still armed lies ahead. */
     if (line_is_timer(i->line) && irq_armed(i) && irq_due(i, sched_ticks)) {
         fail("armed timer line is due", v2p(i), i->deadline, sched_ticks);
@@ -780,6 +783,10 @@ static void check_lines(void)
     }
     for (uint32_t line = 1; line < IRQ_LINES; line++) {
         bool want = (armed[line / 32] >> (line % 32)) & 1u;
+        /* The cores' line is forwarded whatever is armed, and check_irq holds every Irq off it. */
+        if (line_is_cores(line)) {
+            continue;
+        }
         if (irq_enabled(line) != want) {
             fail(want ? "armed irq's line is masked" : "controller forwards a line nothing is armed on",
                  line, 0, 0);

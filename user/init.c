@@ -159,6 +159,7 @@ enum {
 /*
  * The console device behind BOOT_CAP_UART, its line CONSOLE_IRQ
  * and a line nothing drives, SPARE_IRQ, are the board's; see console.h.
+ * So is CORES_IRQ, where a board names it, the line its kernel keeps for its cores once it runs on several.
  */
 
 /* Ticks are a millisecond on every board so far; long enough to need a few of them. */
@@ -853,6 +854,16 @@ static void second_core(uint32_t data_base, uint32_t data_size, uint32_t shared_
            rv_invoke(OP_IRQ_CARVE, BOOT_CAP_TIMER_LINES, 0, 1, SLOT_TIMER_LINE));
     expect("bind it to the notification",
            rv_invoke(OP_IRQ_BIND, SLOT_TIMER_LINE, SLOT_POOL, SLOT_TIMER_NTFN, SLOT_TIMER));
+
+#ifdef CORES_IRQ
+    /* Where each core's controller is its own, the line the cores interrupt each other on is the kernel's. */
+    expect("carve the cores' line",
+           rv_invoke(OP_IRQ_CARVE, BOOT_CAP_IRQ_LINES, CORES_IRQ, 1, SLOT_SPARE_LINE));
+    expect("the cores' line is the kernel's",
+           rv_invoke(OP_IRQ_BIND, SLOT_SPARE_LINE, SLOT_POOL, SLOT_TIMER_NTFN, SLOT_SPARE_IRQ) == KERR_OVERLAP
+               ? KERR_OK : KERR_INVALID_ARG);
+    expect("let it go", rv_invoke(OP_CAP_DELETE, BOOT_CAP_CAPTABLE, SLOT_SPARE_LINE, 0, 0));
+#endif
 
     /* The spinner earns the whole second core and nothing of this one, so it spins there while this thread does too. */
     expect("carve the second core's units",

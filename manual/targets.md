@@ -31,18 +31,20 @@ and `thumbv8m.main-none-eabi` for the Cortex-M33, with no floating point and no 
 
 ### Boards
 
-Four boards are supported, chosen with `make BOARD=<board>`:
+Five boards are supported, chosen with `make BOARD=<board>`:
 `qemu`, QEMU `virt` for RV32, the default,
 `esp32c6`, an Espressif ESP32-C6,
 `rp2350`, a Raspberry Pi RP2350 on its RISC-V cores, or with `ARCH=arm` on its Cortex-M33 ones, as on a Pico 2,
-and `mps2-an385`, QEMU's model of ARM's MPS2 board with a Cortex-M3.
+`mps2-an385`, QEMU's model of ARM's MPS2 board with a Cortex-M3,
+and `mps2-an521`, QEMU's model of the same board with the AN521 image, two Cortex-M33s.
 A board picks its architecture, whose files lie in `kernel/arch/<arch>/` and `user/arch/<arch>/`;
 RP2350 has both, and keeps the files that differ between them in `kernel/board/rp2350/<arch>/`.
 Everything board-specific lives in `kernel/board/<board>/`,
 `board.h`, `board.c`, `irq.c`, `timer.c` and `halt.c`,
 with no `irq.c` on ARM, whose controller is the architecture's,
 and in `user/board/<board>/console.h`,
-which drives the device behind `BOOT_CAP_UART` for the demo and the replay driver.
+which drives the device behind `BOOT_CAP_UART` for the demo and the replay driver;
+boards of one family share what they have alike in a directory beside theirs, as the MPS2 boards share `mps2/`.
 The linker scripts take their addresses from `board.h` through `kernel/layout.h`.
 Porting to a board means providing those.
 A program learns every address it needs from its frames and its Untyped;
@@ -210,6 +212,46 @@ The counter is 32 bits wide, so `rv_counter_read` gets a zero high word and the 
 UART0's transmitter holds one byte and raises its line as that byte leaves, latched until the driver clears it.
 A fault is reported as `exception`, `cfsr`, `pc` and `addr`, section 4.
 
+#### mps2-an521
+
+QEMU loads the image into SSRAM1 and resets the first Cortex-M33,
+which finds the kernel's vector table at `0x10000000`, SSRAM1's Secure alias;
+the second waits until a kernel built for both starts it, and the halt leaves QEMU through semihosting.
+The kernel and every program run Secure, so every address is a Secure alias, with bit 28 set.
+
+Memory map:
+
+| Range | Size | What |
+|---|---|---|
+| `0x50302018` | 8 B | the FPGA's `COUNTER`, 20 MHz, read only through `BOOT_CAP_CLOCK`; the word above it is the prescaler, zero |
+| `0x50200000` | 4 KiB | UART0 of the CMSDK, granted to the root task |
+| `0x10000000` to `0x100FF000` | just under 1 MiB | kernel code, data and stack, the vector table first |
+| `0x100FF000` | 4 KiB | the kernel log: a 32-byte header and the ring |
+| `0x10100000` | 256 KiB | the root task's memory, granted to it as an Untyped with all rights, which has made the four ranges below and makes nothing more |
+| `0x10100000` | 64 KiB | root task code, read and execute |
+| `0x10110000` | 64 KiB | root task data and stack, read and write |
+| `0x10120000` | 64 KiB | input region, read only; nothing fills it yet |
+| `0x10130000` | 4 KiB | the boot pool |
+| `0x10200000` | 2 MiB | free RAM, granted to the root task as an Untyped with all rights |
+
+Interrupt lines:
+
+| Line | What |
+|---|---|
+| 0 | the kernel log; the Non-secure watchdog's reset cannot be bound |
+| 1 to 47 | the NVIC's first lines, the SSE-200's 31 and the board's first 16; UART0's combined line, its transmitter's among it, is 42 |
+| 6 | MHU0's; with `CORES=2` the kernel's, for its cores, and an `Irq` cannot be bound to it |
+
+The tick is 1 kHz, on the FPGA's counter, with SysTick for the compare.
+The MPU has eight regions, none smaller than 32 bytes.
+The counter is 32 bits wide, so `rv_counter_read` gets a zero high word and the counter wraps every 214 seconds.
+The SSE-200 refuses user mode every device unless its Secure Privilege Control block lets it through,
+which the kernel does for UART0 and the counter alone;
+a program reaches either only through a frame, as it reaches RAM.
+UART0 is mps2-an385's, and a fault is reported as there.
+With `CORES=2` the kernel starts the second core at the end of the boot,
+and every device line reaches both NVICs, of which only the first core's enables any.
+
 ## 4. Building and running
 
 Requirements: clang and lld with RISC-V and ARM support, llvm-objcopy,
@@ -230,14 +272,17 @@ make fuzz        # fuzz the system call surface for FUZZ_TIME seconds in FUZZ_JO
 make qemu-replay # replay the corpus on QEMU and compare with the host
 make smp-test    # boot the demo on two harts of QEMU and check its transcript, the second core's tests among it
 make mutants     # plant each bug under tests/mutants/ and require the checks to catch it
-make check       # test, escape, host-test, qemu-replay, the ARM test and smp-test; run before committing
+make arm-test    # boot the demo on mps2-an385 and mps2-an521, there on one core and on two, and check its transcript
+make check       # test, escape, host-test, qemu-replay, arm-test and smp-test; run before committing
 ```
 
 `PMP_MAX_ENTRIES=8 make check` runs everything with a smaller PMP budget.
 Images go under `build/<board>/`, the host build under `build/host/`;
 a smaller budget adds `-pmp<n>` to both.
 `make CORES=2` builds the kernel for two harts of QEMU `virt`, under `build/qemu-smp2/`,
-and `make CORES=2 run` boots it with `-smp 2`; no other board takes `CORES`.
+and `make CORES=2 run` boots it with `-smp 2`;
+`make BOARD=mps2-an521 CORES=2` builds it for that board's two cores, under `build/mps2-an521-smp2/`.
+No other board takes `CORES`.
 
 On the ESP32-C6, connected over USB:
 
@@ -270,6 +315,8 @@ On ARM, under QEMU:
 make BOARD=mps2-an385                # build/mps2-an385/kernel-init.elf
 make BOARD=mps2-an385 run            # boot the demo root task
 make BOARD=mps2-an385 test           # the same, and check the transcript
+make BOARD=mps2-an521 test           # the same demo on QEMU's Cortex-M33, from build/mps2-an521/
+make BOARD=mps2-an521 CORES=2 test   # the same on its two Cortex-M33s, which goes on to the second core
 ```
 
 Only the demo is built; the replay driver's layout is QEMU virt's, and the escape suite is RISC-V's so far.

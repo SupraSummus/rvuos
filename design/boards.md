@@ -88,6 +88,7 @@ a capability to the boot pool allocates from it and nothing more; see open decis
 ## Boards
 
 A board is the files of `kernel/board/<board>/` and `user/board/<board>/`,
+and of a directory beside them that boards of one family share, as the MPS2 boards share `mps2/`,
 chosen with `make BOARD=<board>`:
 `board.h`, where RAM, the root task, the console and the timer's registers lie,
 how many interrupt lines there are and which mcause the controller raises,
@@ -167,8 +168,32 @@ The layout is QEMU virt's, moved to SSRAM1 at 0;
 the console is UART0 of the CMSDK, whose transmitter latches its interrupt as each byte leaves.
 The clock's counter is the FPGA's `COUNTER`, 32 bits at 25 MHz with the prescaler above it,
 so the high word a program reads is zero and the counter wraps every 171 seconds;
-the kernel counts the wraps for its own tick, see `kernel/board/mps2-an385/timer.c`.
+the kernel counts the wraps for its own tick, see `kernel/board/mps2/timer.c`.
 Measured under QEMU 8.2: eight MPU regions and a bkpt taken as a HardFault, DebugMonitor or not.
+
+**mps2-an521** is QEMU's model of the same board with the AN521 image,
+an SSE-200 with two Cortex-M33s, and ARM's development target of ARMv8-M:
+`make arm-test` runs the demo there after mps2-an385's, on one core and then on two, `CORES=2`,
+the only check of PMSAv8 and of the Cortex-M33 short of RP2350.
+The two boards share their UART, counter and halt, in `kernel/board/mps2/` and `user/board/mps2/`.
+QEMU loads the image into SSRAM1 and resets the first core, which finds the vector table at INITSVTOR0's reset value,
+SSRAM1's Secure alias at `0x10000000`.
+The kernel and every thread run Secure, so the board names every address by its Secure alias.
+The layout is mps2-an385's, moved there; UART0 raises its combined line, 42, and the counter counts at 20 MHz.
+The SSE-200 puts every device behind a peripheral protection controller,
+which refuses unprivileged accesses, reading zero and dropping writes,
+unless the Secure Privilege Control block lets them through;
+`board.c` lets user mode through to UART0 and the counter, the devices the root task is granted,
+and the MPU confines a thread to its frames there as everywhere.
+The NVIC has 124 lines, of which the kernel takes the first 48, every UART's among them,
+so that its vector table stays 256 bytes.
+The second core waits in CPUWAIT until `board_cores_start` writes the kernel's vector table to INITSVTOR1 and lets it go,
+each core reads its number in CPU_IDENTITY,
+and MHU0 interrupts one from the other on line 6 of its NVIC; see "Cores".
+Measured under QEMU 8.2: eight Secure MPU regions on each core, a bkpt taken as a HardFault as on mps2-an385,
+SysTick counting the system clock as the counter does,
+and `wfe` handing the processor to the other core rather than waiting,
+so a core that idles or waits on the other loops, and a demo of a few seconds takes a few more of the host's.
 
 **RP2350** runs the demo root task and the escape suite on its Hazard3 cores, `make BOARD=rp2350 test escape`,
 and the demo on its Cortex-M33 cores, `make BOARD=rp2350 ARCH=arm test`.
@@ -212,7 +237,7 @@ The crystal gets six milliseconds to start, as the pico-sdk gives it.
 
 An architecture is the files of `kernel/arch/<arch>/` and `user/arch/<arch>/`,
 chosen by the board: `riscv` for QEMU virt, the ESP32-C6 and RP2350's Hazard3,
-`arm` for mps2-an385's Cortex-M3, ARMv7-M, and RP2350's Cortex-M33, ARMv8-M's Mainline.
+`arm` for mps2-an385's Cortex-M3, ARMv7-M, and mps2-an521's and RP2350's Cortex-M33, ARMv8-M's Mainline.
 `arm` is both, and `ARMV8M` in its `arch.h` says which the compiler builds for;
 the MPU and the Security state are where they differ.
 The kernel's objects, its capabilities and every operation are the same on both,
@@ -260,7 +285,7 @@ An interrupt taken while the kernel runs would have to preempt it, so `wfi` woul
 The architecture makes any exception becoming pending an event, SysTick too, as the Cortex-M33 has it;
 QEMU 11 wakes `wfe` for a line alone, so the ARM demo waits there for ever; see `TODO.md`.
 The kernel leaves thread mode the first time through PendSV,
-which kmain pends and lets in with interrupts, and which nothing pends after.
+which kmain pends and lets in with interrupts, as another core does as it starts, and which nothing pends after.
 A call is `svc`, two bytes, with the operation in `r12`, since Thumb code keeps `r7` as its frame pointer;
 `trap.c` moves the pc back onto the `svc`, so the rest of the kernel sees a call as on RISC-V,
 resumes past it and restarts at it.
@@ -302,5 +327,6 @@ which `tools/stack-depth.py` does not count; `kernel_trap` takes the stack back 
 The host build compiles the kernel with RISC-V's frame, as QEMU virt has it,
 so the fuzzer and `make qemu-replay` see the portable kernel and not `kernel/arch/arm/`,
 which only the link checks, the demo under QEMU and the demo on RP2350's Cortex-M33 exercise,
-PMSAv8 the last alone, and the escape suite does not run there yet;
+PMSAv8 mps2-an521's under QEMU and RP2350's, the second core mps2-an521's alone,
+and the escape suite does not run there yet;
 `TODO.md` says what that leaves unchecked.

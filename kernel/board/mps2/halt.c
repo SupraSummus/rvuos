@@ -1,11 +1,11 @@
 /*
- * How mps2-an385 halts under QEMU, and what it does with the kernel's log then.
+ * How the MPS2 boards halt under QEMU, and what they do with the kernel's log then.
  *
  * The kernel has no console: kputc appends to the log
  * and a logger in user mode carries it out; see DESIGN.md, "The kernel log".
- * This board is a simulator, which exits on a halt and keeps no RAM
+ * The boards are a simulator, which exits on a halt and keeps no RAM
  * for a post-mortem reader to find the log in,
- * so its halt is that reader: it writes what no logger has taken to the UART,
+ * so their halt is that reader: it writes what no logger has taken to the UART,
  * headed by a line that tells it apart from what a logger sent before.
  */
 

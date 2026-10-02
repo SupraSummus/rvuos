@@ -503,7 +503,8 @@ static void host_trap(bool call)
 /*
  * Every core another core's trap interrupted traps in turn, as the target's trap_handler and sched_idle have it:
  * one that idles wakes in its stall and looks for a turn,
- * and one that runs a thread hands the processor on if another core stopped or destroyed the thread.
+ * and one that runs a thread hands the processor on if another core stopped or destroyed the thread,
+ * through the kernel's own core_trapped, as trap_handler does.
  * Either may interrupt others again, and the host takes their traps too, until none is left.
  * Under tracing the self-check holds what each left.
  */
@@ -534,12 +535,8 @@ static void host_interrupts(void)
         } else {
             core_enter();
             sched_count(0);
-            const struct thread *t = core->current;
-            bool taken = t == NULL || t->state != THREAD_READY;
             ipi_clear();
-            if (taken) {
-                sched_run_next();
-            }
+            core_trapped();
             sched_wake();
         }
         if (debug_trace) {

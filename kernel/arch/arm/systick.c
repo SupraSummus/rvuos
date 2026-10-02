@@ -12,6 +12,7 @@
 #include <stdint.h>
 
 #include "armv7m.h"
+#include "kernel.h"
 #include "layout.h"
 #include "scs.h"
 #include "timer.h"
@@ -19,11 +20,13 @@
 _Static_assert(SYSTICK_PER_COUNT >= 1 && SYST_MAX / SYSTICK_PER_COUNT >= COUNTER_HZ / TIMER_HZ,
                "one reload of SysTick lasts at least a tick of the counter");
 
-static uint64_t compare_at = ~0ull;
+/* Each core's compare, which its own SysTick serves; every core sets its own before it reads it. */
+static uint64_t compare[CORES];
 
 /* SysTick set for the counts before the compare, at most a reload's, or pending if none are left. */
 static void systick_arm(void)
 {
+    uint64_t compare_at = compare[core_index()];
     uint64_t now = counter_read();
     SCS_REG(ICSR) = ICSR_PENDSTCLR;
     uint32_t reload = SYST_MAX;
@@ -43,7 +46,7 @@ static void systick_arm(void)
 
 void counter_compare(uint64_t at)
 {
-    compare_at = at;
+    compare[core_index()] = at;
     systick_arm();
 }
 
@@ -54,7 +57,7 @@ void counter_compare_enable(void)
 
 bool counter_due(void)
 {
-    return counter_read() >= compare_at;
+    return counter_read() >= compare[core_index()];
 }
 
 void counter_tick(void)

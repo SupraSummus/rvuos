@@ -21,8 +21,22 @@ void counter_tick(void);
 /* The line whose exception the trap entered on, which the NVIC no longer shows pending; zero for none. */
 extern uint32_t nvic_entered;
 
-/* Whether a line is pending and enabled, which the kernel, running at every line's priority, does not take. */
+/*
+ * Whether a device line is pending and enabled, which the kernel, running at every line's priority, does not take,
+ * and whether the line the other cores interrupt this one on is pending.
+ */
 bool nvic_pending(void);
+bool nvic_ipi_pending(void);
+
+/*
+ * On the first core, enable and mask the lines another core's calls changed since the core last had the lock;
+ * see nvic.c. Elsewhere, and with one core, nothing.
+ */
+void nvic_sync(void);
+
+/* A core's own NVIC and MPU, as irq_init and pmp_init leave the first core's; for core_start. */
+void irq_core_init(void);
+void mpu_core_init(void);
 
 /* The MPU off as the kernel runs, from the start of a trap, and on as a thread runs, from the end of frame_give. */
 void mpu_kernel(void);

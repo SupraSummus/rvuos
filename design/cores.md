@@ -5,7 +5,8 @@ Part of the design document; [`DESIGN.md`](../DESIGN.md) lists every section and
 ## Cores
 
 The kernel runs on `CORES` cores, a constant of the build:
-one on every board but QEMU `virt`, which `make CORES=2` builds for two harts.
+one on every board but QEMU `virt`, which `make CORES=2` builds for two harts,
+and mps2-an521, which `make BOARD=mps2-an521 CORES=2` builds for its two Cortex-M33s.
 What a core has of its own is `struct core` in `kernel/object.h`:
 its thread, its turn, its three queues, its release, its timer, the call it is in,
 and what it tells the others.
@@ -21,11 +22,16 @@ Each trap is still one step on one state,
 which the self-check, `host/history.c` and the replay rely on.
 It is a ticket lock, so the cores take it in the order they asked for it,
 and a core waits at most as long as each core ahead of it holds the lock.
+RISC-V takes a ticket with one `amoadd`; ARM has no atomic add,
+so it takes one with an exclusive load and store, `arch_ticket_take` in its `arch.h`,
+which goes round again when another core took a ticket between the two, once a trap at most.
 That is bounded by goal 4 but for the walks,
 and a walk asks between two steps whether another core waits, as it asks whether an interrupt is pending,
 so it stops for the waiting core as for an interrupt and is made again after; see "Bounded work".
 A core waits for the lock at most a step of each other core.
 A core that stalls gives the lock up while it waits for an interrupt.
+On ARM a core that waits on another, for the lock or for a trap to begin, waits in `wfe` until the other signals with `sev`,
+as ARM's spin waits do; a hart spins.
 Finer locks would leave the self-check nothing to hold between two steps, and on a microcontroller's two cores buy little.
 
 **A thread runs on the core its units are of.**
@@ -60,6 +66,7 @@ A core that puts a thread on another core's queue, brings another core's release
 or changes the thread whose turn another core has,
 marks that core's timer stale, and the other core sets its timer again before it leaves the kernel.
 It interrupts the other core for it, with the software interrupt of QEMU `virt`'s CLINT,
+or on mps2-an521 through MHU0, the SSE-200's message handling unit, on a line of each core's NVIC,
 when that core idles, or runs user mode with its timer set past the next tick;
 one whose timer comes within a tick, or that runs the kernel, finds the mark itself.
 The interrupt is sent once the lock is given up, `interrupt_owed` in `struct core` until then,
@@ -81,6 +88,9 @@ and as it takes the lock loads its regions again, or finds its thread taken and 
 A trap whose thread another core stopped or destroyed while the trap waited for the lock is dropped:
 a call is not made and its pc stays at it, and a fault is not reported,
 since a thread that runs again makes the call, or faults, again.
+`core_trapped` says whether it is, and hands the processor on if so, for every architecture's trap and for the host's.
+On ARM half the frame lies on the thread's stack until the trap copies it in,
+so the trap does that before it clears `in_user`, and a frame a watcher reads, or one that is dropped, is whole.
 A thread that only loses its units runs on as it does on one core, to the end of its turn.
 
 **A core with nothing to run idles, outside any trap.**
@@ -95,16 +105,31 @@ a core with nothing to do while another runs waits for an interrupt.
 The controller forwards every line to the first core alone, which claims them, and the signal reaches a driver on any core
 as any signal does, by the interrupt above when the driver's core needs one.
 Which core takes a line is open decision 24.
+QEMU `virt`'s PLIC takes the first hart's enables from any hart,
+but each ARM core has an NVIC that only it reaches.
+So a call on another core that arms or disarms a line records it in a word of lines the first core is to enable,
+and interrupts the first, which makes its NVIC agree as it next takes the lock, `nvic_sync`,
+and passes over a line it entered on that no `Irq` is armed on any more.
+The line the cores interrupt each other on, `IPI_LINE` in the board's `board.h`, is the kernel's on every core,
+and `OP_IRQ_BIND` answers `KERR_OVERLAP` for it, as for a line an `Irq` holds.
 
 **How the cores start.**
-Every hart of QEMU `virt` enters at the reset vector.
-The first boots the kernel with the lock held.
-The others take their stacks, each `KERNEL_STACK_SIZE` below the one before,
-and wait in `wfi` until the first raises their software interrupt at the end of the boot;
+The first core boots the kernel with the lock held, and at the end of the boot the board starts the others,
+`board_cores_start`, which go on in the architecture's `core_start`.
+Every hart of QEMU `virt` enters at the reset vector;
+the others take their stacks, each `KERNEL_STACK_SIZE` below the one before,
+and wait in `wfi` until the first raises their software interrupt;
 then they start their timers, fence their protection units as the first did, and idle.
 A hart past `CORES` waits for ever.
+mps2-an521's second core waits in the SSE-200's `CPUWAIT` until the first lets it go,
+then enters the kernel's vector table at its reset vector, takes its stack, and enters handler mode through PendSV,
+as the first leaves the boot for the root task;
+there it sets up its own MPU, NVIC and SysTick, and idles.
+On ARM a core knows which it is from a register of the board's, `CORE_ID_ADDR`, as RISC-V reads `mhartid`,
+and `start.S` finds by it the core's stack and the frame it saves a trap into.
 
 **What it costs.**
-A trap takes and gives the lock, two atomic operations, and stores `in_user` twice.
+A trap takes and gives the lock, two atomic operations, and stores `in_user` twice;
+on ARM it reads which core it is from the board's register a few times too.
 A core that changes what another runs pays an interrupt to it,
 and a call that takes what another core runs waits for that core's trap to begin.
