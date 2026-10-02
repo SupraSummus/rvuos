@@ -114,7 +114,14 @@ trap_entry:
     ldr     r1, =__kernel_stack_top
     mov     sp, r1
     bl      trap_handler
-    /* Fall through into trap_return with the frame to resume in r0. */
+    cbz     r0, 1f
+    /* Into trap_return with the frame to resume in r0. */
+    b       trap_return
+1:
+    /* Nobody's turn: the core idles, from an empty stack, and core_idle returns into a thread itself. */
+    ldr     r1, =__kernel_stack_top
+    mov     sp, r1
+    bl      core_idle
 
     .globl trap_return
     .type trap_return, %function

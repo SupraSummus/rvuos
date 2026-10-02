@@ -22,6 +22,13 @@ void process_fence(void)
     }
 }
 
+void process_fence_core(void)
+{
+    if (pmp_entry_end > pmp_entry_count) {
+        pmp_set(pmp_entry_count, PMP_NAPOT_ALL, PMP_A_NAPOT);
+    }
+}
+
 void process_activate(struct process *proc)
 {
     const struct pmp_image *img = &proc->pmp;
@@ -58,6 +65,7 @@ static void rebuild_pmp(struct process *proc)
     if (current != NULL && thread_process(current) == proc) {
         process_activate(proc);
     }
+    core_regions_changed(proc);
 }
 
 #if PMP_SPLIT_STORE_AS_READ

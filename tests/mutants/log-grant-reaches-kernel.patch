@@ -1,7 +1,7 @@
 The log's grant is twice its size and reaches down into the kernel below it,
 so the root task is granted kernel memory it could ask frames of.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: granted memory overlaps the kernel's
 
 diff --git a/kernel/boot.c b/kernel/boot.c

@@ -97,6 +97,10 @@ Consequences that shape the design:
   Switching processes rewrites every `pmpaddr` and `pmpcfg` in use.
   Threads within one process share regions
   and switching between them touches no PMP state.
+- **Each hart has its own.**
+  The CSRs are a hart's, so only that hart can change what its user mode reaches,
+  and a region taken from a process another hart runs stays there until that hart traps; see "Cores".
+  The kernel takes the harts as alike: the first probes the entries and the grain, and each fences what the first did.
 - **Sharing is free.**
   Granting a region to another process installs the same physical range
   into one of that process's slots.
@@ -132,7 +136,9 @@ so the tick count keeps pace with the counter however late or seldom the interru
 and a long system call costs one late tick and not a burst of them.
 `mtimecmp` is set only for the first tick that could change what runs; see "Scheduling".
 The counter also says how far into the tick a change of turn falls, which is what a turn is charged by.
-QEMU `virt` counts at 10 MHz in a SiFive CLINT.
+QEMU `virt` counts at 10 MHz in a SiFive CLINT,
+which has an `mtimecmp` for each hart, one after the other, and a word for each hart's software interrupt,
+which one hart raises to make another trap or wake; see "Cores".
 The ESP32-C6 has a CLINT of Espressif's,
 whose counter and interrupt stay off until a control word starts them,
 and which counts at the CPU clock the ROM left;
@@ -163,6 +169,7 @@ so a level that stays high, as a device's does until it is serviced,
 does not come back before the driver asks for it.
 The kernel gives every line the same priority,
 so which of several pending lines is claimed first is not promised.
+It enables lines in the first hart's machine-mode context alone, and only the first hart takes the external interrupt.
 The PLIC has no source 0, and the kernel gives that number to its log,
 whose line no controller raises; see "The kernel log".
 QEMU's PLIC model does not recompute what it forwards on an enable write;

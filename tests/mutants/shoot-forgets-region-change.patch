@@ -1,0 +1,18 @@
+A region taken from a process another core runs is marked to be loaded again, but that core is not made to trap.
+Its protection unit keeps the region while its thread runs on, so the memory could become a pool the thread still reaches;
+a core runs user mode only with the regions its thread's process has.
+
+Caught-by: fuzz-smp2 smp-test
+Report: a core runs user mode with regions its process no longer has
+
+diff --git a/kernel/core.c b/kernel/core.c
+--- a/kernel/core.c
++++ b/kernel/core.c
+@@ -133,7 +133,6 @@ void core_regions_changed(const struct process *proc)
+         struct core *c = &cores[i];
+         if (c != core_self() && c->current != NULL && thread_process(c->current) == proc) {
+             c->pmp_stale = true;
+-            core_shoot(c);
+         }
+     }
+ #else

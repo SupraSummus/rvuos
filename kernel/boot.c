@@ -102,7 +102,7 @@ struct thread *boot_create_root(void)
         /* The timer lines follow the controller's, and are granted apart so that no board's count shows. */
         [BOOT_CAP_TIMER_LINES] = cap_to_lines(IRQ_LINES, TIMER_LINES, RIGHT_W),
         [BOOT_CAP_CLOCK] = { .type = CAP_CLOCK, .rights = RIGHT_ALL },
-        [BOOT_CAP_TIME] = cap_to_time(0, TIME_UNITS, RIGHT_W | RIGHT_X),
+        [BOOT_CAP_TIME] = cap_to_time(0, MACHINE_UNITS, RIGHT_W | RIGHT_X),
     };
     for (unsigned i = BOOT_CAP_NULL + 1; i < BOOT_CAP_COUNT; i++) {
         if (i == BOOT_CAP_ROOT_RAM || i == BOOT_CAP_POOL_RAM) {
@@ -120,7 +120,7 @@ struct thread *boot_create_root(void)
     }
 
     /*
-     * The root thread earns the whole processor, bound through the capability to every unit,
+     * The root thread earns the whole of the first core, bound through the capability to every unit of it,
      * which lets it run on spare time too, and starts with a full account.
      * It is the one the kernel drops into, so it is ready and on no queue: bound and filled while stopped.
      */

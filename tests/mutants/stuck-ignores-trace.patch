@@ -1,0 +1,19 @@
+Under tracing a core with nothing to run idles while a timer line is armed,
+though only a record moves time there and nobody is left to make one;
+a core idles only while something can still run.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a core idles where nothing can run again
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -662,7 +662,7 @@ static bool machine_stuck(void)
+             return false;
+         }
+     }
+-    return debug_trace || armed_sources == 0;
++    return armed_sources == 0;
+ }
+ 
+ /*

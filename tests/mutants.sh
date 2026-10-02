@@ -12,11 +12,11 @@
 #
 # Below the prose, the header says what the checks do on the mutant:
 #
-#   Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
+#   Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 #   Report: the count of armed sources is wrong
 #
 # Caught-by is exactly the checks that catch it, in the order they run:
-# stack-depth loop-bounds fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work test qemu-replay.
+# stack-depth loop-bounds fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test smp-test qemu-replay.
 # Report is exactly the invariant reports the seeds give on the host harnesses,
 # one per line with the numbers taken out;
 # the corpus changes with every minimisation, so its reports are left out.
@@ -25,14 +25,14 @@
 #
 # stack-depth and loop-bounds catch a mutant by refusing the link;
 # a kernel they refuse still runs on the host harnesses, but not on QEMU.
-# The host harnesses catch a mutant with an invariant report, and test and qemu-replay by failing.
+# The host harnesses catch a mutant with an invariant report, and test, smp-test and qemu-replay by failing.
 # The link or a seed on a host harness must catch every mutant:
 # the corpus alone would lose it at the next minimisation, and QEMU alone is not enough.
-# Without QEMU, test and qemu-replay are left out of the header's list too.
+# Without QEMU, test, smp-test and qemu-replay are left out of the header's list too.
 # A mutant that does not apply or does not build is broken, not caught,
 # and so is one that fails a host harness without an invariant report.
 #
-# The unmutated tree is built once and must pass host-test.
+# The unmutated tree is built once, for one core and for two, and must pass host-test.
 # Each mutant runs in a copy of it with the timestamps kept,
 # so make recompiles only what the patch touches.
 # The mutants run in parallel, one per processor or -j of them,
@@ -44,7 +44,7 @@ set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 logs=$root/build/mutants
-harnesses="fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work"
+harnesses="fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work"
 # The line a harness prints after each input it replays isolated; HOST_INPUT_END in host/harness.h.
 input_end="isolated: end of input"
 
@@ -143,13 +143,14 @@ mutant() {
     done
     if [ -n "$qemu" ] && [ $linked = yes ]; then
         run test || caught="$caught test"
+        run smp-test || caught="$caught smp-test"
         run qemu-replay || caught="$caught qemu-replay"
     fi
     caught=${caught# }
     reports=$(printf '%s' "$reports" | sort -u)
 
     want=$(header Caught-by)
-    [ -n "$qemu" ] || want=$(echo "$want" | sed 's/ *\<test\>//; s/ *qemu-replay//; s/^ //')
+    [ -n "$qemu" ] || want=$(echo "$want" | sed 's/ *\<smp-test\>//; s/ *\<test\>//; s/ *qemu-replay//; s/^ //')
     if [ -z "$reports" ] && [ "$linked" = yes ]; then
         result=missed
     elif [ "$want" = "$caught" ] && [ "$(header Report | sort -u)" = "$reports" ]; then
@@ -200,7 +201,7 @@ qemu=$(command -v qemu-system-riscv32 || true)
 
 cp -r "$root/kernel" "$root/host" "$root/include" "$root/user" "$root/Makefile" "$root/tests" \
     "$root/tools" "$root/design" "$work/base/"
-if ! (cd "$work/base" && make -s -j"$jobs" all host-test) >"$logs/unmutated.log" 2>&1; then
+if ! (cd "$work/base" && make -s -j"$jobs" all host-test && make -s -j"$jobs" CORES=2 all) >"$logs/unmutated.log" 2>&1; then
     echo "the unmutated tree does not build or fails host-test, see build/mutants/unmutated.log" >&2
     exit 1
 fi

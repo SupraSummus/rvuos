@@ -1,0 +1,18 @@
+A thread that becomes ready joins a queue of the core that settles it rather than of the core it runs on,
+so a signal from another core puts the thread where its units are not; each core's queues hold its own threads.
+
+Caught-by: fuzz-smp2 smp-test
+Report: a core's queue holds a thread of another core
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -247,7 +247,7 @@ static void thread_settle(struct thread *t)
+             ring_remove(queue_head(was, t->queue), t);
+         }
+         if (queue != QUEUE_NONE) {
+-            ring_push(queue_head(core, queue), t);
++            ring_push(queue_head(core_self(), queue), t);
+         }
+         t->queue = queue;
+     }

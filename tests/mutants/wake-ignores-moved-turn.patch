@@ -1,0 +1,18 @@
+The timer lets a turn run on whose thread was bound to another core's units during it,
+so a thread alone with spare time stays on the core it left for as long as the timer is deferred.
+
+Caught-by: fuzz-smp2
+Report: the timer lets the tick pass that moves the turn's thread to its core
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -521,7 +521,7 @@ uint32_t sched_wake_ticks(void)
+         return wake;
+     }
+     /* A thread bound to another core's units during its turn here goes there as the next tick ends the turn. */
+-    if (core->run_queue != 0 || (turn->time.type == CAP_BOUND && unit_core(turn->time.a) != core_index())) {
++    if (core->run_queue != 0) {
+         return 1;
+     }
+     uint32_t balance = account_now(turn);

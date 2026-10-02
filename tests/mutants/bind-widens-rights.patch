@@ -2,7 +2,7 @@ A bind gives the thread spare time whatever the invoked capability's rights.
 A thread lent units without RIGHT_X to hold it to them would run on spare time all the same;
 a binding carries no more rights than the capability it was made through.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work test qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test smp-test qemu-replay
 Report: slot is not derived from its parent
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c

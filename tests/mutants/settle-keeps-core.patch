@@ -1,0 +1,20 @@
+A thread bound to another core's units keeps the core it ran on, and waits on that core's queues,
+where it takes the time of a core it earns nothing of; a queued thread waits on the core its units are of.
+
+Caught-by: fuzz-smp2 smp-test
+Report: thread waits on another core than its units are of
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -236,9 +236,7 @@ static void thread_settle(struct thread *t)
+     core_self()->wake_stale = true;
+     account_refill(t);
+     struct core *was = &cores[t->core];
+-    if (t->time.type == CAP_BOUND && !is_turn(t)) {
+-        t->core = (uint8_t)unit_core(t->time.a);
+-    }
++    (void)unit_core;
+     struct core *core = &cores[t->core];
+     uint8_t queue = thread_queue(t, t->balance);
+     bool joined = queue != QUEUE_NONE && (queue != t->queue || core != was);

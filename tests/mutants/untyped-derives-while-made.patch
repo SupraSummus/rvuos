@@ -1,7 +1,7 @@
 Deriving an Untyped does not ask whether something made of it is left,
 so the derived one, the whole of the memory, lies over what the source made before.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: memory that may hold kernel objects overlaps a node not above or below it
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c

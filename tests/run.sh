@@ -6,6 +6,7 @@
 # A board whose core differs sets BOARD_FACTS in the Makefile: the PMP entries and grain the probe finds,
 # BOARD_MTVAL=zero where mtval reads zero, BOARD_MISALIGNED=trap for tests/escape.sh,
 # and BOARD_ARCH=arm where the fault is reported as ARMv7-M has it.
+# BOARD_CORES is how many cores the kernel runs on, whose demo goes on to the second.
 
 set -eu
 
@@ -15,13 +16,14 @@ board_entries=${BOARD_PMP_ENTRIES:-16}
 board_grain=${BOARD_PMP_GRAIN:-4}
 board_mtval=${BOARD_MTVAL:-address}
 board_arch=${BOARD_ARCH:-riscv}
+board_cores=${BOARD_CORES:-1}
 log=$(mktemp)
 text=$(mktemp)
 trap 'rm -f "$log" "$text"' EXIT
 
 set +e
-# The demo takes a few seconds; the rest is for a loaded machine, as under `make mutants`.
-timeout 30 sh -c "$boot_cmd" > "$log" 2>&1
+# The demo takes a few seconds, twice that on two harts; the rest is for a loaded machine, as under `make mutants`.
+timeout 60 sh -c "$boot_cmd" > "$log" 2>&1
 status=$?
 set -e
 
@@ -97,6 +99,20 @@ grep -q 'the idle line stays quiet: ok' "$text" \
     || fail "an armed line nothing raises signalled"
 grep -q 'root: irq ok' "$text" \
     || fail "destroying the irq's pool did not free its line"
+grep -q "root: cores $(printf '0x%08x' "$board_cores")" "$text" \
+    || fail "the root task did not find the $board_cores cores in the units it was granted"
+if [ "$board_cores" -gt 1 ]; then
+    grep -q 'root: second core ok' "$text" \
+        || fail "a thread bound to the second core's units did not run beside the root task"
+    grep -q 'root: move ok' "$text" \
+        || fail "a thread moved from the second core to an eighth of the first ran more than that there, or not at all"
+    grep -q 'root: wake across cores ok' "$text" \
+        || fail "a signal did not wake a thread that waited on the idle second core"
+    grep -q 'root: shootdown ok' "$text" \
+        || fail "a thread on the second core went on reading a region taken from its process"
+    grep -q 'root: taken from its core ok' "$text" \
+        || fail "a thread destroyed while it ran on the second core ran on, or the core ran nothing after it"
+fi
 grep -q 'the root task cannot destroy its own pool: ok' "$text" \
     || fail "a thread destroyed the pool it lives in"
 grep -q 'successor: the user-mode csrs set back: ok' "$text" \

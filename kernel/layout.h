@@ -21,6 +21,14 @@
 #include "board.h"
 #include "rvuos/abi.h"
 
+/*
+ * The kernel's stack, one of this size for each core, below the one of the core before;
+ * tools/stack-depth.py bounds the stack from the linked image
+ * and fails the build when the bound exceeds it; see DESIGN.md, "Bounded stack".
+ */
+#define KERNEL_STACK_SHIFT 10
+#define KERNEL_STACK_SIZE  (1 << KERNEL_STACK_SHIFT)
+
 /* The boot pool, where the kernel builds the root task's objects. */
 #define BOOT_POOL_SIZE U32(0x00001000)
 

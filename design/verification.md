@@ -31,7 +31,8 @@ from address to access rights:
 no byte is accessible with a right its slot does not grant,
 and every byte in a slot is accessible with the slot's rights.
 For the running process the same holds for the CSRs as the core holds them,
-the fence and the entries the core hardwires included.
+the fence and the entries the core hardwires included,
+on the core the check runs on; another core's the next property holds.
 On the ESP32-C6 no process has a region it may write ending where one it may only read begins;
 see "Region slots".
 
@@ -96,12 +97,13 @@ So is a thread's watch, set through a capability with the right to signal, and i
 A thread with a fault to tell is stopped, where it faulted.
 A waiting thread names a live notification and nothing else does,
 and a notification's queue holds exactly the threads waiting on it.
-A ready thread but the running one that may run waits on exactly one of the scheduler's queues and names it:
+A ready thread but the running ones that may run waits on exactly one of the scheduler's queues and names it:
 the run queue while it has time, else the spare queue with spare time,
 else the spent queue if it has units;
 every other thread names none and is linked into none,
 and the queues hold exactly the threads that name them.
-While a thread runs it is its turn.
+The queues a thread waits on are those of the core it names, the core its units are of.
+While a thread runs it is its core's turn, and a core whose turn it is runs that thread.
 The thread the kernel is running is one it could run:
 it is a live object and it is ready,
 though it may have lost its units during its turn, which it finishes.
@@ -109,15 +111,25 @@ A preempted thread stays ready and joins its queue,
 so it runs again while it keeps its units or its spare time.
 
 **Units and accounts.**
-Each of the `TIME_UNITS` units names the one thread bound to it, or none.
+Each of every core's `TIME_UNITS` units names the one thread bound to it, or none,
+and a thread's units are all of one core.
 Every account holds at most `ACCOUNT_TICKS` ticks' gain for each unit, and so nothing without units,
 and was last counted no later than the count;
 a thread has time exactly while its account holds a tick.
-The thread whose turn it is has its account counted up to the count,
+The thread whose turn it is has its account counted up to the count its core reached,
 since every tick of its turn is charged to it as it passes,
 and under tracing, where the clock is the tick count, it owes nothing from before the tick.
-A thread with units that waits without time reaches a tick no earlier than the release,
-and the release lies ahead of the count.
+A core counts no tick the machine did not, and the one a call runs on has counted every one.
+A thread with units that waits without time reaches a tick no earlier than its core's release,
+and every core's release lies ahead of the count.
+
+**Cores.**
+A core's thread is a live thread or none, and a core whose turn it is runs it.
+A core idles only while some core runs a thread or holds one waiting for a turn,
+or something armed could make one runnable.
+A core runs user mode only for a ready thread, and only with the regions its process has:
+a call that takes either from it waits for the core to trap first.
+The core a call runs on holds the regions of its thread's process, none waiting to be loaded again.
 
 **Interrupts.**
 Every `Irq` names a line there is: the log's, the controller's or a timer line.
@@ -521,6 +533,25 @@ so that no tick runs it before the records it takes are in place.
 Preemption itself is checked by the demo in `user/init.c`:
 the two processes take turns through a shared word and no notification,
 which nothing but the tick can get them past.
+
+**Cores.**
+The harness `fuzz-smp2` builds the kernel for two cores and runs them in turns, one trap at a time, as the lock has them:
+a record goes to the core whose turn its actor has, or the one it waits on for a turn,
+and a core another one interrupted takes its trap once the trap that interrupted it is over,
+so of the orders the cores' traps may come in it takes one.
+A core that a call waits for in `core_shoot` traps at once, its registers saved,
+while one only told of a change goes on in user mode until then,
+so the self-check sees a core left running what the call took from it.
+Each core has its own PMP CSRs there, and the host checks after every round of interrupts
+that no core idles while a thread waits for a turn on it.
+The seeds named `cores-` bind a driver thread to the second core's units and take things from it there;
+the other seeds and the corpus run on the first core alone, as on one.
+`make smp-test` boots the demo on two harts of QEMU `virt`,
+the only check of the lock, the software interrupt, the idle and the start of the second hart,
+and of a shootdown that waits on real hardware rather than the host's.
+QEMU runs the harts in turns too, so a hart that waits for the lock spins out its turn while the holder waits for its own,
+which the demo allows for and nothing measures;
+no check yet makes a core wait for the lock while another walks, or replays the corpus on two harts against the host.
 
 **Hardware.**
 QEMU's PMP may differ from a real core in Smepmp behaviour,

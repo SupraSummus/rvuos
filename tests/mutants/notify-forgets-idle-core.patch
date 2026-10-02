@@ -1,0 +1,18 @@
+A thread that becomes ready on a core that idles does not wake it:
+the core sleeps on with a thread waiting for its turn there, until something else wakes it.
+
+Caught-by: fuzz-smp2 smp-test
+Report: a thread waits for a turn on a core that idles
+
+diff --git a/kernel/core.c b/kernel/core.c
+--- a/kernel/core.c
++++ b/kernel/core.c
+@@ -178,7 +178,7 @@ void core_notify(struct core *c)
+      * an idle one waits for an interrupt, and so does one that runs on with its timer set further.
+      */
+     if (c != core_self() &&
+-        (c->turn == NULL || (__atomic_load_n(&c->in_user, __ATOMIC_ACQUIRE) && c->wake_tick - c->ticks > 1))) {
++        (__atomic_load_n(&c->in_user, __ATOMIC_ACQUIRE) && c->wake_tick - c->ticks > 1)) {
+         c->interrupt_owed = true;
+     }
+ #else

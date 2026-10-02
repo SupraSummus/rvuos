@@ -39,7 +39,11 @@ Open work only; an item leaves this file in the commit that finishes it.
   which the datasheet asks for when POWMAN runs from `clk_ref`, so a hang it rescues may corrupt POWMAN;
   the halt's reboot sets it, as the bootrom's does.
   Setting it at boot keeps POWMAN's watchdog-reset input asserted for the whole run, which is untried.
-- Boot from flash, feed the replay corpus to the board, and start core 1, which waits in the bootrom.
+- Boot from flash, and feed the replay corpus to the board.
+- Run the kernel on both cores: start core 1 out of the bootrom through the SIO FIFO's launch handshake,
+  raise its software interrupt through SIO's `RISCV_SOFTIRQ` on Hazard3, or a doorbell on the Cortex-M33,
+  give it its own `MTIMECMP` or SysTick, and let the board set `CORES`;
+  the kernel's lock is made of the atomics both kinds of core have, not of SIO's spinlocks.
 
 ## ARM
 
@@ -62,6 +66,9 @@ Open work only; an item leaves this file in the commit that finishes it.
 - The clock's counter on `mps2-an385` is 32 bits wide and the word above it is the prescaler,
   so `rv_counter_read` sees zero for the high word, as RP2350's does.
 - The halt of `mps2-an385` leaves QEMU through semihosting, which on a board without a debugger is a fault in the kernel.
+- Two cores on ARM: QEMU's `mps2-an521` has two Cortex-M33s, a board to develop it on.
+  It wants `core_id`, a software interrupt between the cores, the board's start of the second core and a stack for it;
+  the ARM side of the trap takes and gives the lock already, and `tools/loop-bounds.py` reads a `dmb` as an acquire.
 
 ## Verification
 
@@ -73,6 +80,15 @@ Open work only; an item leaves this file in the commit that finishes it.
   since libFuzzer grows the limit by bytes and a record is sixteen;
   `-len_control=20` reached more edges in a short run.
   Measure it with `make mutants-fuzz MUTANTS_FUZZ=-e` before `make fuzz` takes it.
+- Two cores are checked by `fuzz-smp2`, which takes the cores' traps one after another, and by the demo.
+  Nothing makes a core wait for the lock while another walks, so a walk stopping for a waiting core runs only in the host's yes to everything;
+  nothing replays the corpus on two harts against the host, which needs the replay driver to order its threads' records across cores;
+  and the self-check never runs on two harts, since the demo does not trace.
+  The demo's shootdown reaches the reload of the regions as the lock is taken only when the trap there ends no turn,
+  which under QEMU's turns its timing decides, so it does not catch `enter-keeps-stale-regions`; `fuzz-smp2` does.
+- `kernel/arch/riscv/trap.c` drops what a trap was for when another core took its thread while it waited for the lock;
+  the host has its own copy of that in `host_interrupts`, so no mutant reaches the kernel's, and the demo rarely does.
+  A function of the kernel's that both call, saying whether the trap is dropped and handing the processor on, would close it.
 - No load or store record reaches an edge of the kernel the other records do not.
   Four inputs of the corpus carry one, but are kept for their other records:
   with the loads taken out, the corpus reaches the same edges on all three machines.

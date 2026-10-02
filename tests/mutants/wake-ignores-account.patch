@@ -2,7 +2,7 @@ The timer lets the tick pass at which the running thread's account drains.
 A thread without spare time alone on the processor would run on past the tick that leaves it less than a tick;
 the tick the turn's account drains is not one the timer lets pass, unless the thread may go on alone on spare time.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work test qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test smp-test qemu-replay
 Report: the timer lets the tick pass that drains the turn's account
 
 diff --git a/kernel/sched.c b/kernel/sched.c

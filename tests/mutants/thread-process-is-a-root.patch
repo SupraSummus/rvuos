@@ -3,7 +3,7 @@ so revoking that capability, or destroying the process's pool, does not stop the
 which would go on in a process that is gone;
 a thread's process lies below its pool's own node.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: capability to an object is a root
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c

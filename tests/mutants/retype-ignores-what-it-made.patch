@@ -2,7 +2,7 @@ A retype makes the whole of an Untyped into a frame or a pool though something m
 so two things it made claim the same memory,
 and a frame may be mapped over a pool.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work test qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test smp-test qemu-replay
 Report: memory that may hold kernel objects overlaps a node not above or below it
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c

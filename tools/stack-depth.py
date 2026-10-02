@@ -78,7 +78,7 @@ def main() -> int:
         worst, route = heaviest(graph, entries)
         if worst > size:
             raise Failure(f"the kernel may take {worst} bytes of stack, "
-                          f"and KERNEL_STACK_SIZE in kernel/kernel.ld.S gives {size}: {route}")
+                          f"and KERNEL_STACK_SIZE in kernel/layout.h gives {size}: {route}")
         print(f"kernel stack: at most {worst} of {size} bytes, through {route}")
         return 0
     except Failure as e:

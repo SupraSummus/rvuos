@@ -16,7 +16,8 @@ Chapters 10 and 11 of the user manual; [`MANUAL.md`](../MANUAL.md) has its conte
 | object alignment | 8 bytes | `OBJ_ALIGN` |
 | notification bits | 32 | the word size |
 | timer lines | 16, on the whole machine | `TIMER_LINES` |
-| units of the processor's time | 64, on the whole machine | `TIME_UNITS` |
+| units of time | 64 of each core | `TIME_UNITS` |
+| cores | 1, or 2 on QEMU `virt` with `CORES=2` | Makefile |
 | most of its units an account holds | 100 ticks' worth, 100 ms (`ACCOUNT_TICKS`) | `kernel/timer.h` |
 | timer delay or period per call | 2^32 - 1 µs | `OP_IRQ_SET` |
 | tick | 1 ms (`TIMER_HZ` 1000) | `kernel/timer.h` |
@@ -42,6 +43,10 @@ These are documented gaps, not surprises;
 - **No synchronous endpoints.**
   Shared memory and notifications carry everything; open decision 5.
 - **One `Irq` per line**; open decision 11.
+- **Two cores only on QEMU `virt`.**
+  RP2350's second core waits in its bootrom and ARM runs one core;
+  the first core takes every device interrupt, and a thread on spare time runs on its own core alone;
+  `DESIGN.md`, open decision 24.
 - **ARM with no escape suite and no replay yet**, under QEMU and on RP2350's Cortex-M33; `TODO.md`.
 - **No boot from flash.**
   The ESP32-C6 and RP2350 run from RAM, loaded by their ROMs over USB.

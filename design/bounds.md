@@ -27,7 +27,7 @@ What it costs is latency, and preemption is the answer to that.
 A revoke, a delete below a root, a pool destroy, and the revoke that begins a bind
 take one step per capability, object or waiter in constant time
 and ask `intr_pending` between two steps.
-If the tick or a device interrupt is pending, the walk stops,
+If the tick or a device interrupt is pending, or another core waits for the kernel's lock, the walk stops,
 `syscall_dispatch` puts the thread back on its `ecall` with its registers as they were,
 the `mret` takes the interrupt through `mtvec` as in any user code, as the exception return does on ARM,
 and the thread makes the same call again when it next runs, as in seL4.
@@ -57,7 +57,8 @@ its room in the pool among them, and builds after.
 
 **The check.**
 Every loop a trap can run says what bounds it with an annotation from `kernel/work.h`:
-a constant, what it pays with, a row of the table below, an argument, or a wait on the hardware.
+a constant, what it pays with, a row of the table below, an argument, a wait on the hardware,
+or a wait on another core, for the kernel's lock or for a trap to begin there; see "Cores".
 An annotation is a `_Static_assert`, so it changes no code the compiler makes.
 The kernel's link runs `tools/loop-bounds.py`,
 which finds the loops in the machine code, inlined and compiler-made ones too,
@@ -74,6 +75,10 @@ The shape is read from the source, so a loop the compiler unrolled is held to it
 A wait must wait on every way round, which the link checks too:
 a `wfi`, a load from a fixed address outside RAM, or a call to a function holding a `wfi`,
 and on ARM a `wfe` counts as a `wfi` does.
+A wait on another core must read with an acquire on every way round,
+a `fence` after a load or an `lr` or `amo`, or a `dmb` on ARM,
+which is how it reads what the other core writes;
+what bounds it is the other core: a lock held a step of a walk at most, a trap that user mode takes at once.
 Other bounds rest on an invariant, as `i < img->count` does,
 and a paid loop names its unit: a node, a link, an object or a waiter.
 The host harness `fuzz-work` counts both after every call:
@@ -107,9 +112,9 @@ and a destroy zeroes each object as it forgets it, paid for by the call that mad
 
 ## Bounded stack
 
-The kernel has one stack, `KERNEL_STACK_SIZE` in `kernel/kernel.ld.S`,
-and every entry starts it from the top:
-the reset, a trap from user mode, and a trap in the kernel, which halts.
+The kernel has one stack for each core, `KERNEL_STACK_SIZE` in `kernel/layout.h`, each below the one of the core before,
+and every entry starts its core's from the top:
+the reset, a core that starts, a trap from user mode, the idle a trap ends in, and a trap in the kernel, which halts.
 Interrupts stay off in the kernel, so no entry nests in another,
 and a thread's state lives in its trap frame, not on the stack.
 The deepest the stack goes is therefore the heaviest call chain from an entry,

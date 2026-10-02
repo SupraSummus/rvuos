@@ -8,16 +8,31 @@
 #include "timer.h"
 #include "trap.h"
 
+uint32_t core_id(void)
+{
+    return csr_read(mhartid);
+}
+
+/*
+ * A trap from user mode, with the thread's registers in its frame.
+ * Another core may have stopped or destroyed the thread while the trap waited for the kernel's lock;
+ * then what the thread trapped for is no longer its to do, and is dropped,
+ * the frame left as it was saved, and the core hands the processor on as for a thread that waits.
+ * Returns the frame to resume, or NULL for nobody's turn, which start.S idles for.
+ */
 struct trap_frame *trap_handler(struct trap_frame *frame)
 {
-    struct thread *t = core_self()->current;
-    if (frame != &t->frame) {
+    core_enter();
+    struct core *core = core_self();
+    struct thread *t = core->current;
+    bool taken = t == NULL || t->state != THREAD_READY;
+    if (!taken && frame != &t->frame) {
         kpanic("trap frame is not the current thread's");
     }
 
     bool traced = timer_trap_enter((csr_read(mip) & MIP_MTIP) != 0);
 
-    uint32_t cause = frame->mcause;
+    uint32_t cause = csr_read(mcause);
     if (cause & MCAUSE_INTERRUPT) {
         /* mepc points at the interrupted instruction, which resumes as it was. */
         switch (cause & ~MCAUSE_INTERRUPT) {
@@ -32,12 +47,20 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
              */
             sched_claim_interrupts();
             break;
+#if CORES > 1
+        case IRQ_M_SOFT:
+            /* Another core asked this one to trap: to stop its thread, load its regions or set its timer again. */
+            ipi_clear();
+            break;
+#endif
         default:
             kputs("unexpected interrupt\n");
-            report_frame(frame);
-            kpanic("only the timer and the external interrupt are enabled");
+            if (!taken) {
+                report_frame(frame);
+            }
+            kpanic("only the timer, the software and the external interrupt are enabled");
         }
-    } else {
+    } else if (!taken) {
         switch (cause) {
         case CAUSE_ECALL_U:
             syscall_dispatch(t);
@@ -59,9 +82,31 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
             kpanic("unhandled trap cause");
         }
     }
+    if (taken) {
+        sched_run_next();
+    }
 
     timer_trap_leave(traced);
-    return &core_self()->current->frame;
+    if (core->turn == NULL) {
+        return NULL;
+    }
+    struct trap_frame *next = &core->current->frame;
+    core_leave();
+    return next;
+}
+
+/*
+ * A core with no thread to run, from start.S as a trap ends with nobody's turn, or as the core starts:
+ * it idles with the kernel's lock, given up only while it waits, until a thread has its turn,
+ * then leaves for it as a trap does.
+ */
+void core_idle(void)
+{
+    sched_idle();
+    timer_trap_leave(debug_trace);
+    struct trap_frame *next = &core_self()->current->frame;
+    core_leave();
+    trap_return(next);
 }
 
 /*
@@ -75,19 +120,29 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
 bool intr_wait(uint32_t wake, uint32_t *ticks)
 {
     const uint32_t mip_ext = 1u << IRQ_EXT_CAUSE;
+    /* Another core wakes this one with its software interrupt, which only a core of several enables. */
+    const uint32_t mip_wake = MIP_MTIP | mip_ext | (CORES > 1 ? MIP_MSIP : 0);
     timer_set(wake);
+    core_stall_begin();
     uint32_t ip;
-    while (((ip = csr_read(mip)) & (MIP_MTIP | mip_ext)) == 0) {
+    while (((ip = csr_read(mip)) & mip_wake) == 0) {
         LOOP_WAIT("an interrupt to be pending");
         __asm__ volatile("wfi");
     }
+    core_stall_end();
+#if CORES > 1
+    if (ip & MIP_MSIP) {
+        ipi_clear();
+    }
+#endif
     *ticks = timer_count();
     return (ip & mip_ext) != 0;
 }
 
+/* Another core waiting for the lock stops a walk as an interrupt does; see core_lock_waited. */
 bool intr_pending(void)
 {
-    return (csr_read(mip) & (MIP_MTIP | (1u << IRQ_EXT_CAUSE))) != 0;
+    return (csr_read(mip) & (MIP_MTIP | (1u << IRQ_EXT_CAUSE))) != 0 || core_lock_waited();
 }
 
 /*
@@ -101,8 +156,29 @@ void trap_start(struct trap_frame *frame)
 {
     csr_clear(mstatus, MSTATUS_MPP_MASK);
     csr_set(mstatus, MSTATUS_MPIE);
+    core_leave();
     trap_return(frame);
 }
+
+#if CORES > 1
+/*
+ * A hart other than the first, from start.S, once the first booted the kernel and raised the hart's software interrupt:
+ * it takes the interrupt back, starts its timer and fences off what the first fenced off,
+ * then idles until it has a thread, and leaves for it as trap_start does.
+ * Its software interrupt stays enabled, for the other cores to wake it and make it trap.
+ */
+void core_start(void)
+{
+    core_enter();
+    ipi_clear();
+    timer_core_start();
+    process_fence_core();
+    ipi_enable();
+    csr_clear(mstatus, MSTATUS_MPP_MASK);
+    csr_set(mstatus, MSTATUS_MPIE);
+    core_idle();
+}
+#endif
 
 void kernel_trap_panic(void)
 {

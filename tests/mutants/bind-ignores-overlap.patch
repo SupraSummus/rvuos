@@ -2,14 +2,14 @@ A bind takes units another thread earns.
 The two threads would both earn them, and the processor would be promised more than once over;
 a unit is earned by the one thread it names, and every unit a thread is bound to names it.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a unit a thread is bound to names another
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -573,9 +573,6 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
-         uint32_t first = cap->a + off;
+@@ -624,9 +624,6 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
+         struct thread *target = (struct thread *)cap_object(&tc);
          for (uint32_t i = 0; i < count; i++) {
              LOOP_BOUND(TIME_UNITS);
 -            if (unit_thread[first + i] != 0 && unit_thread[first + i] != v2p(target)) {

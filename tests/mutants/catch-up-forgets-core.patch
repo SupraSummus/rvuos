@@ -1,0 +1,18 @@
+A core charges its turn for the ticks it counts but does not note them,
+so it charges the same ticks again as its next trap counts up to the machine's count;
+a core counts the machine's ticks once each.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: thread's account is stamped ahead of the count
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -477,7 +477,6 @@ static void tick_advance(uint32_t ticks)
+             turn->stamp += owed;
+         }
+         core->turn_from = 0;
+-        core->ticks += owed;
+     }
+     sched_ticks += ticks;
+     uint32_t nearest = sched_ticks + NEAREST_NONE;

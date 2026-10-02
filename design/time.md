@@ -115,8 +115,10 @@ So the processor is a fixed number of units, handed out as capabilities as memor
 and each unit is earned by one thread at a time.
 
 **A thread earns units of time.**
-The processor is `TIME_UNITS` units, a constant of the kernel as the timer lines are,
-and the root task receives them all in `BOOT_CAP_TIME`, its thread earning every one.
+Each core is `TIME_UNITS` units, a constant of the kernel as the timer lines are,
+numbered core by core across the machine,
+and the root task receives them all in `BOOT_CAP_TIME`, its thread earning every one of the first core's.
+A thread runs on the core its units are of, and only there; see "Cores".
 A `Time` capability names a range of units and no object, as an `IrqLine` names lines,
 and `OP_TIME_CARVE` takes a smaller range out of one.
 `OP_TIME_BIND` binds a thread to some of a capability's units, or to none,
@@ -154,7 +156,7 @@ Spare time is the turns no thread with time wants.
 A thread bound through a capability with `RIGHT_X` runs on it, for free, while its account fills as usual.
 The boot grant has `RIGHT_X`, so a thread bound through it to no units runs whenever the threads with time let it.
 A thread without `RIGHT_X` runs at most its units' part and a full account,
-and the processor sleeps in `wfi` for the rest: that is how the root task caps a thread's time.
+and its core sleeps in `wfi` for the rest: that is how the root task caps a thread's time.
 
 **The queues are the policy: round-robin, time before spare time.**
 A ready thread that may run, and whose turn it is not, waits on one of three queues,
@@ -181,8 +183,8 @@ Whether a turn is paid is decided as it begins and at each tick, and holds until
 Only the running thread's account is counted at each tick;
 the others are brought up to the count when the kernel looks at them.
 A thread with units that waits without time has time again once its account reaches a tick,
-and the kernel keeps the release, the nearest tick at which that happens for any such thread.
-Only at the release does it look at the `TIME_UNITS` units, as the tick looks at the timer lines;
+and the kernel keeps each core's release, the nearest tick at which that happens for any such thread of the core.
+Only at the release does it look at the core's `TIME_UNITS` units, as the tick looks at the timer lines;
 every thread with units earns one of them, so the look finds them all.
 A trap that counts several ticks at once charges them as if each had been taken, in constant time;
 `account_after` in `kernel/sched.c` says how.
@@ -198,7 +200,7 @@ so it takes nothing another thread earns, and a child gets time only through uni
 Spare time goes round by thread, so more threads there get more of it:
 it is the time nobody earned, and a thread that needs a part of the processor is given units.
 A thread with time waits for its turn at most `TIME_UNITS` ticks,
-since only threads with units have time and each takes a tick.
+since only threads with units of its core have time there and each takes a tick.
 No other latency is promised.
 A thread with no ready work spends nothing, so an idle holder of units costs the others nothing.
 
@@ -230,7 +232,8 @@ A turn that begins when a thread waits mid-tick lasts only to the next tick;
 `TODO.md` carries a turn counted from the switch.
 Interrupts are taken in user mode only:
 machine mode runs with `MIE` clear from the trap to the `mret`,
-so a system call is never interrupted and the kernel needs no locks.
+so a system call is never interrupted, and on one core the kernel needs no locks;
+several cores share one, see "Cores".
 
 When a thread waits and nothing is runnable,
 only an `Irq` armed on a timer line or a device's line can make one runnable again,
@@ -238,12 +241,14 @@ because only a running thread can signal otherwise,
 or the release, when a thread on the spent queue waits for its account.
 The kernel counts those `Irq`s as they are armed and disarmed,
 so it knows without a walk, and the spent queue it looks at.
-With any of them the kernel stalls in `wfi`
+With any of them the core idles once the trap is over, `sched_idle`, and stalls in `wfi`
 until the nearest deadline of an armed timer line, the release,
 or a device interrupt is pending,
 takes it by hand since machine mode runs with `MIE` clear,
 and looks for a runnable thread again;
 with none it says `no runnable thread` and stops the machine.
+On several cores another core running a thread can make one runnable too, and interrupts the core for it,
+so the machine stops only once no core runs a thread or has one waiting; see "Cores".
 
 **The timer interrupts only for a tick that could change what runs.**
 A tick that ends a turn only to hand the processor back to the same thread moves the counts and nothing else.
@@ -260,6 +265,7 @@ a longer one wakes there and is set again.
 
 **Every trap counts the ticks the timer let pass.**
 On entry, before anything reads the count or an account, a trap charges and counts them as the tick would have,
+those other cores counted since among them,
 and a trap whose count reaches the tick the timer was set for ends the turn as it returns.
 It reads the counter only while the timer is set past the next tick or its interrupt is pending;
 a change of turn reads it besides, to charge the turn.

@@ -2,16 +2,16 @@ The release looks at every thread with units that waits without time and leaves 
 A thread whose account reached a tick would wait on the spare or spent queue for good;
 a thread with units that waits without time reaches a tick no earlier than the release.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work test qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test smp-test qemu-replay
 Report: a thread waits on another queue than its account says
 Report: a thread's account reaches a tick before the release
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -317,7 +317,7 @@ static void release(void)
+@@ -396,7 +396,7 @@ static void release(uint32_t c)
          LOOP_BOUND(TIME_UNITS);
-         struct thread *t = unit_first(i);
+         struct thread *t = unit_first(first + i);
          if (t != NULL && (t->queue == QUEUE_SPARE || t->queue == QUEUE_SPENT)) {
 -            thread_settle(t);
 +            (void)t;

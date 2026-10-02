@@ -42,6 +42,9 @@ void timer_init(void);
  */
 void timer_start(uint32_t period);
 
+/* A core other than the first starts its compare, on the grid timer_start began, waiting until it is set. */
+void timer_core_start(void);
+
 /*
  * The hardware below the tick, the architecture's or the board's:
  * the machine's counter, 64 bits counting up from boot,

@@ -1,0 +1,18 @@
+A core that traps after another core took regions from its thread's process does not load them again as it takes the lock,
+so the trap runs, and the self-check reads the protection unit, with regions the process no longer has.
+
+Caught-by: fuzz-smp2
+Report: the core's regions wait to be loaded again
+
+diff --git a/kernel/core.c b/kernel/core.c
+--- a/kernel/core.c
++++ b/kernel/core.c
+@@ -47,7 +47,7 @@ void core_enter(void)
+      * unless the thread lost its process too, or went, and the next switch loads another process's.
+      */
+     const struct thread *t = core->current;
+-    if (core->pmp_stale && t != NULL && thread_process(t) != NULL) {
++    if (false && t != NULL && thread_process(t) != NULL) {
+         core->pmp_stale = false;
+         process_activate(thread_process(t));
+     }

@@ -44,9 +44,13 @@
 #define UART_BASE U32(0x10000000)
 #define UART_SIZE U32(0x100)
 
-/* The machine timer, a SiFive CLINT's mtime and hart 0's mtimecmp; see clint.h. */
+/*
+ * The machine timer, a SiFive CLINT's mtime and hart 0's mtimecmp, with every other hart's after it,
+ * and hart 0's software interrupt, the one another hart raises, likewise; see clint.h.
+ */
 #define CLINT_MTIME    U32(0x0200bff8)
 #define CLINT_MTIMECMP U32(0x02004000)
+#define CLINT_MSIP     U32(0x02000000)
 
 /* The counter BOOT_CAP_CLOCK names: the CLINT's mtime. */
 #define COUNTER_ADDR CLINT_MTIME

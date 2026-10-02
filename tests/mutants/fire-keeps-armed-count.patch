@@ -2,7 +2,7 @@ An Irq that fires disarms behind the count's back.
 The stall in wfi would go on waiting for a line that will never fire;
 the count of armed sources is exactly the Irqs armed on a device's line or a timer line.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: the count of armed sources is wrong
 
 diff --git a/kernel/sched.c b/kernel/sched.c
