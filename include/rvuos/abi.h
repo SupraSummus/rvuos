@@ -48,7 +48,7 @@
 #define CAP_CAPTABLE 3
 #define CAP_PROCESS  4
 #define CAP_THREAD   5
-#define CAP_DEBUG    6 /* a byte into the kernel's log, and machine halt, for bring-up */
+#define CAP_DEBUG    6 /* writing into the kernel's log, and halting and driving the machine, for tests */
 #define CAP_NOTIFICATION 7
 #define CAP_UNTYPED  8 /* memory that may become a frame, a pool or two halves; never mapped */
 #define CAP_IRQ_LINE 9 /* a range of interrupt lines; no kernel object behind it */
@@ -69,7 +69,10 @@
  * IrqLine: RIGHT_W to bind a line.
  * Irq: RIGHT_W to set or mask.
  * Time: RIGHT_W to bind a thread, RIGHT_X to let the threads bound through it run on spare time.
- * Debug, Clock: any right.
+ * Debug: RIGHT_W to write into the kernel's log,
+ *   RIGHT_X to halt the machine or drive it as a test does: trace, tick, interrupt, preempt;
+ *   a child that only prints holds it with RIGHT_W alone.
+ * Clock: any right.
  * Copying a capability can only remove rights.
  */
 #define RIGHT_R 0x1
@@ -81,12 +84,17 @@
  * Operations, with the capability type they apply to and their arguments.
  */
 
-/* Debug: append one byte to the kernel's log. a1 = the byte. See BOOT_CAP_LOG. */
-#define OP_DEBUG_PUTC 1
-/* Debug: halt the machine. a1 = exit code. Does not return. */
+/*
+ * Debug (RIGHT_W): write into the kernel's log, see BOOT_CAP_LOG.
+ * a1, a2, a3 = up to DEBUG_WRITE_BYTES bytes, the lowest byte of a1 first,
+ * which end at the first zero byte: the log is text.
+ */
+#define OP_DEBUG_WRITE 1
+#define DEBUG_WRITE_BYTES 12
+/* Debug (RIGHT_X): halt the machine. a1 = exit code. Does not return. */
 #define OP_DEBUG_HALT 2
 /*
- * Debug: turn on tracing and self-checking.
+ * Debug (RIGHT_X): turn on tracing and self-checking.
  * From then on the kernel prints every system call with its status
  * and runs the invariant checker after each one.
  * The timer tick stops preempting,
@@ -99,7 +107,7 @@
  */
 #define OP_DEBUG_TRACE 10
 /*
- * Debug: what the timer tick does, on request.
+ * Debug (RIGHT_X): what the timer tick does, on request.
  * Time moves by one tick, charged to the caller while it has time,
  * every timer line that is due signals, a thread whose account reached a tick has time again,
  * and the caller's turn ends: it goes to the back of the queue its account puts it on,
@@ -109,7 +117,7 @@
  */
 #define OP_DEBUG_TICK 17
 /*
- * Debug: what a device interrupt does, on request. a1 = the line.
+ * Debug (RIGHT_X): what a device interrupt does, on request. a1 = the line.
  * The Irq armed on the line masks it and signals its bits,
  * exactly as the interrupt would; the controller is not consulted.
  * Fails with KERR_STATE when nothing is armed on the line,
@@ -122,7 +130,7 @@
  */
 #define OP_DEBUG_IRQ 22
 /*
- * Debug: a tick landing within a restartable call, on request. a1 = n.
+ * Debug (RIGHT_X): a tick landing within a restartable call, on request. a1 = n.
  * The n-th place from now at which any restartable call could stop between two steps, it stops,
  * interrupt pending or not, and does what OP_DEBUG_TICK does,
  * so another thread may run before the caller makes its call again. Zero disarms it.
@@ -522,7 +530,7 @@
 
 /*
  * The kernel's log.
- * The kernel has no console: every byte it prints, OP_DEBUG_PUTC included,
+ * The kernel has no console: every byte it prints, OP_DEBUG_WRITE's included,
  * goes into a ring in the kernel's memory, which BOOT_CAP_LOG maps.
  * The region starts with this header and the ring follows at RVUOS_LOG_HEADER.
  * The kernel writes head, a count of every byte ever written; byte n lies at n % size.

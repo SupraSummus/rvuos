@@ -59,7 +59,8 @@ and `user/lib/` what a program of several processes needs beside them, section 8
 | `rv_clock_frame(cap, dst)` | `OP_CLOCK_FRAME` |
 | `rv_time_carve(time, offset, count, dst)` | `OP_TIME_CARVE` |
 | `rv_time_bind(time, thread, offset, count)` | `OP_TIME_BIND` |
-| `rv_putc(cap, c)`, `rv_puts(cap, s)`, `rv_put_hex(cap, v)` | `OP_DEBUG_PUTC` |
+| `rv_debug_write(cap, s, n)` | `OP_DEBUG_WRITE`, 12 bytes at most |
+| `rv_write(cap, s, n)`, `rv_putc(cap, c)`, `rv_puts(cap, s)`, `rv_put_hex(cap, v)` | `OP_DEBUG_WRITE`, a call per 12 bytes |
 | `rv_halt(cap, code)` | `OP_DEBUG_HALT` |
 | `rv_debug_trace(cap)`, `rv_debug_tick(cap)` | `OP_DEBUG_TRACE`, `OP_DEBUG_TICK` |
 | `rv_debug_irq(cap, line)`, `rv_debug_preempt(cap, n)` | `OP_DEBUG_IRQ`, `OP_DEBUG_PREEMPT` |
@@ -192,7 +193,7 @@ Each header says how its calls are used.
 | `lib/self.h` | what a process hands out of its own: slots, regions, bits of its inbox, timers, units of time, and memory halved out of Untypeds |
 | `lib/child.h` | a child built, started, heard and taken down by its parent, and the child's own calls: its log, its state, its sleep |
 | `lib/chan.h` | a channel between two children: a frame of two rings of packets, and a bit each way |
-| `lib/ring.h`, `lib/log.h` | the rings a channel is made of, a child's log, and the kernel's log as the root task reads it |
+| `lib/ring.h`, `lib/log.h` | the rings a channel is made of, and the kernel's log: written through `Debug`, and read as the root task reads it |
 | `lib/say.h`, `lib/libc.h` | text with values, and the memory functions the compiler calls |
 
 **Nothing in it keeps a global**,
@@ -204,13 +205,16 @@ A child keeps its state on its stack, in its main's frame, which never returns.
 **A child** starts at its entry with `a0` at its page,
 which lies at the base of its data, one frame, with its stack at the top;
 its parent has the data installed too, and writes the rest of the page before the start.
-Its table starts with `CHILD_INBOX`, `CHILD_PARENT`, `CHILD_TIMER` and `CHILD_SELF`,
+Its table starts with `CHILD_INBOX`, `CHILD_PARENT`, `CHILD_TIMER`, `CHILD_SELF` and `CHILD_LOG`,
 its process with code and data in the first two regions, and its inbox with `CHILD_BIT_TIMER` and `CHILD_BIT_PARENT`.
 Past those the parent hands out the child's slots, regions and bits, and writes which into the page,
 so the type of a child's page is all the two agree on.
-A child holds no `Debug`: it writes its log and its state into the page,
+A child writes its state into the page,
 and signals its parent through `CHILD_PARENT`, its parent's inbox carved to the child's own bit, section 5.7,
 so the parent knows who signalled and the child names every bit, `NOTIFY_ALL_BITS`, not knowing which.
+Its text goes into the kernel's log through `CHILD_LOG`, a `Debug` capability with `RIGHT_W` alone, section 6.3,
+in order with the kernel's lines, among them its own faults, and it cannot halt the machine.
+`say` in `lib/say.h` formats it, and `log_out` in `lib/log.h` writes it a call per 12 bytes.
 It costs its parent six slots, and `child_free` takes back everything that was made for it.
 
 **A channel** is connected by the parent into two children, running or not,

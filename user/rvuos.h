@@ -339,24 +339,45 @@ static inline uint64_t rv_counter_read(uint32_t counter)
     return ((uint64_t)hi << 32) | lo;
 }
 
+/* OP_DEBUG_WRITE: the first n bytes of s, DEBUG_WRITE_BYTES at most, into the kernel's log; a zero byte ends them. */
+static inline uint32_t rv_debug_write(uint32_t debug_cap, const char *s, uint32_t n)
+{
+    uint32_t w[3] = { 0, 0, 0 };
+    for (uint32_t i = 0; i < n && i < DEBUG_WRITE_BYTES; i++) {
+        w[i / 4] |= (uint32_t)(uint8_t)s[i] << (8 * (i % 4));
+    }
+    return rv_invoke(OP_DEBUG_WRITE, debug_cap, w[0], w[1], w[2]);
+}
+
+/* n bytes of text into the kernel's log, DEBUG_WRITE_BYTES a call. */
+static inline void rv_write(uint32_t debug_cap, const char *s, uint32_t n)
+{
+    for (uint32_t at = 0; at < n; at += DEBUG_WRITE_BYTES) {
+        rv_debug_write(debug_cap, s + at, n - at);
+    }
+}
+
 static inline void rv_putc(uint32_t debug_cap, char c)
 {
-    rv_invoke(OP_DEBUG_PUTC, debug_cap, (uint32_t)c, 0, 0);
+    rv_debug_write(debug_cap, &c, 1);
 }
 
 static inline void rv_puts(uint32_t debug_cap, const char *s)
 {
-    while (*s != '\0') {
-        rv_putc(debug_cap, *s++);
+    uint32_t n = 0;
+    while (s[n] != '\0') {
+        n++;
     }
+    rv_write(debug_cap, s, n);
 }
 
 static inline void rv_put_hex(uint32_t debug_cap, uint32_t v)
 {
-    rv_puts(debug_cap, "0x");
-    for (int shift = 28; shift >= 0; shift -= 4) {
-        rv_putc(debug_cap, "0123456789abcdef"[(v >> shift) & 0xfu]);
+    char text[10] = { '0', 'x' };
+    for (int i = 0; i < 8; i++) {
+        text[2 + i] = "0123456789abcdef"[(v >> (28 - 4 * i)) & 0xfu];
     }
+    rv_write(debug_cap, text, sizeof(text));
 }
 
 static inline __attribute__((noreturn)) void rv_halt(uint32_t debug_cap, uint32_t code)

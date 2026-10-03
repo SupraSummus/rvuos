@@ -53,8 +53,8 @@ Rights are three bits:
 | Bit | Value | Frame, Untyped | Other types |
 |---|---|---|---|
 | `RIGHT_R` | 1 | read | `Notification`: wait |
-| `RIGHT_W` | 2 | write | control the object: allocate, install, configure, signal, set, bind, copy or move into a table |
-| `RIGHT_X` | 4 | execute | `Time`: the threads bound through it run on spare time |
+| `RIGHT_W` | 2 | write | control the object: allocate, install, configure, signal, set, bind, copy or move into a table; `Debug`: write into the log |
+| `RIGHT_X` | 4 | execute | `Time`: the threads bound through it run on spare time; `Debug`: halt and drive the machine |
 
 Every operation that produces a capability
 puts it into a slot of the caller's own table,
@@ -520,7 +520,7 @@ Sharing a line between drivers is not supported;
 
 ### 5.10 The kernel log
 
-The kernel writes every byte it prints, `OP_DEBUG_PUTC` included,
+The kernel writes every byte it prints, `OP_DEBUG_WRITE`'s included,
 into a ring behind a header of `RVUOS_LOG_HEADER` bytes,
 and never waits for a reader.
 The ring's size is the kernel's `KLOG_SIZE`, 4 KiB less the header today;

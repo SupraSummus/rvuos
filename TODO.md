@@ -27,8 +27,6 @@ and a laptop's ping and datagrams to UDP ports 7 and 7777 are answered;
 what is left:
 
 - No program may have initialised data; `start.S` could copy `.data` from the code region.
-- A child prints into a ring its parent copies, `lib/log.h`, which reaches the console only while the parent runs;
-  a capability that only prints would let a child reach the kernel's log itself, without `Debug`, which halts the machine.
 - The library's blocks never join again: the parent of a split is deleted to keep its slot,
   so free memory ends as blocks that each hold a slot,
   19 of the root task's 43 slots on QEMU once `user/libtest/` has given everything back.

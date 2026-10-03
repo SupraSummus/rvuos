@@ -66,6 +66,7 @@ grep -q 'the layout fits the smallest region: ok' "$text" \
 grep -q 'hello from user mode' "$text" || fail "user mode did not run"
 grep -q 'root: message ok' "$text" || fail "the child's message did not arrive"
 grep -q 'child: reply ok' "$text" || fail "the root task's answer did not arrive"
+grep -q 'child: may not halt ok' "$text" || fail "a child given the log to write could halt the machine"
 grep -q 'root: preemption ok' "$text" \
     || fail "the tick did not take the processor from a spinning thread"
 grep -q 'root: revocation ok' "$text" \

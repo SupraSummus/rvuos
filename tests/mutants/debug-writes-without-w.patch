@@ -1,0 +1,19 @@
+A Debug capability without RIGHT_W writes into the kernel's log;
+a call goes through only a capability with the rights its operation needs.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a call went through a capability without the rights its operation needs
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -50,9 +50,6 @@ static void debug_write(const uint32_t *arg)
+ static int op_debug(const struct cap *cap, uint32_t op, const uint32_t *arg)
+ {
+     if (op == OP_DEBUG_WRITE) {
+-        if (!(cap->rights & RIGHT_W)) {
+-            return KERR_NO_RIGHTS;
+-        }
+         debug_write(arg);
+         return KERR_OK;
+     }

@@ -34,22 +34,12 @@ static void console_byte(char c)
     console_put_polled(c);
 }
 
-static void kput(void *to, char c)
-{
-    (void)to;
-    rv_putc(BOOT_CAP_DEBUG, c);
-}
+static const struct out out = { log_write, (void *)BOOT_CAP_DEBUG };
 
-static const struct out out = { kput, 0 };
-
+/* The kernel's log to the console: the kernel's lines, the root task's and its children's, in their order. */
 static void drain(void)
 {
     kernel_log_take(&klog, console_byte);
-    for (uint32_t i = 0; i < sizeof(children) / sizeof(children[0]); i++) {
-        if (children[i]->page != 0) {
-            children[i]->log_taken = logring_take(&children[i]->page->log, children[i]->log_taken, console_byte);
-        }
-    }
 }
 
 static __attribute__((noreturn)) void halt(uint32_t code)
@@ -91,7 +81,7 @@ static void step(void)
         if (c->page == 0) {
             continue;
         }
-        if (child_poll(c, console_byte, &state) && state == CHILD_FAILED) {
+        if (child_poll(c, &state) && state == CHILD_FAILED) {
             say(&out, "libtest: FAIL: %s failed at step %u, detail %u\n", c->name, c->page->step, c->page->detail);
             halt(1);
         }

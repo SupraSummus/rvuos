@@ -100,7 +100,7 @@ there is one counter on the machine.
 | `IrqLine` | A range of interrupt lines: the log's and the controller's, or the timer lines. Bound one at a time into an `Irq`. |
 | `Irq` | One line bound to a notification. Signals it when the line fires. |
 | `Time` | A range of the processor's units of time. A thread runs only while bound to some, or to none with spare time. No object. |
-| `Debug` | A byte into the kernel's log, and machine halt, for bring-up and tests. No object. |
+| `Debug` | Writing into the kernel's log with `RIGHT_W`; halting and driving the machine, for tests, with `RIGHT_X`. No object. |
 | `Clock` | The machine's counter: its rate, and the one frame it can be read through. No object. |
 
 Every object's size follows from its type,

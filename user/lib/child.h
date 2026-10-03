@@ -8,7 +8,8 @@
  * Its memory is one frame, its data, with its page at the base and its stack at the top,
  * and it starts at its entry with a0 at its page.
  * The parent has the data installed too, so the page is what the two share:
- * the parent writes into it what it gave the child, and the child its state and its log, needing no Debug.
+ * the parent writes into it what it gave the child, and the child its state.
+ * The child writes its text into the kernel's log, through CHILD_LOG, which may write and not halt the machine.
  * Whatever signals another's inbox holds it carved to the one bit that is its own,
  * so the bits a wait returns say who signalled, and a signaller names every bit, not knowing which.
  * Past the first slots, regions and bits below, the parent hands the child's out and says in the page which,
@@ -18,7 +19,6 @@
 #include <stdint.h>
 
 #include "lib/log.h"
-#include "lib/say.h"
 #include "lib/self.h"
 
 /* The first slots of every child's table. */
@@ -28,6 +28,7 @@ enum {
     CHILD_PARENT, /* its parent's notification, RIGHT_W, carved to the child's bit there */
     CHILD_TIMER,  /* an Irq on a timer line of its own, which signals CHILD_INBOX */
     CHILD_SELF,   /* its own process, RIGHT_W, for regions of its own */
+    CHILD_LOG,    /* the kernel's log, Debug with RIGHT_W alone: it writes, and cannot halt the machine */
     CHILD_FIRST,  /* the slots the parent hands out begin here */
 };
 
@@ -53,7 +54,6 @@ struct child_page {
     volatile uint32_t state;
     volatile uint32_t step;    /* where it got to, for a failure */
     volatile uint32_t detail;  /* a value that step read, for a failure */
-    struct logring log;
 };
 
 /* --- The parent's side. --- */
@@ -72,12 +72,12 @@ struct child {
     struct block data, pool;
     struct child_page *page;                /* at the base of its data, where the parent sees it too */
     uint32_t region;                        /* the parent's region its data is installed in */
-    uint32_t bit_page, bit_fault;           /* its bits on the parent's inbox: a new state or a line of its log, and a fault */
+    uint32_t bit_page, bit_fault;           /* its bits on the parent's inbox: a new state, and a fault */
     uint32_t unit, units;                   /* the units of time it earns */
     /* What of the child's is handed out, a bit each or a count. */
     uint32_t table_slots, slots_given, regions, bits;
-    /* How far the parent has read its log, and the last state it saw. */
-    uint32_t log_taken, told;
+    /* The last state the parent saw. */
+    uint32_t told;
 };
 
 /*
@@ -104,8 +104,8 @@ uint32_t child_bit(struct self *s, struct child *c, uint32_t *bit);
 uint32_t child_start(struct self *s, struct child *c, void (*entry)(struct child_page *), uint32_t units);
 /* Tells a running child the parent wrote into its page. */
 uint32_t child_tell(const struct child *c);
-/* Hands put what the child wrote to its log since the last call; 1 if its state changed since, *state the new one. */
-int child_poll(struct child *c, void (*put)(char), uint32_t *state);
+/* 1 if the child's state changed since the last call, *state the new one. */
+int child_poll(struct child *c, uint32_t *state);
 /*
  * Takes the child down: its pool, and with it its objects, timer line and units, and every capability to them;
  * its data, wherever it was installed; and the parent's slots, region and bits it used.
@@ -115,11 +115,10 @@ uint32_t child_free(struct self *s, struct child *c);
 
 /* --- The child's side. --- */
 
-/* A byte of the child's log; the end of a line tells the parent. */
-void child_put(void *page, char c);
-static inline struct out child_out(struct child_page *p)
+/* The child's text, into the kernel's log. */
+static inline struct out child_out(void)
 {
-    return (struct out){ child_put, p };
+    return log_out(CHILD_LOG);
 }
 /* A new state into the page, and the parent told. */
 void child_report(struct child_page *p, uint32_t state);

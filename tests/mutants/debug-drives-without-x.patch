@@ -1,0 +1,19 @@
+A Debug capability with RIGHT_W alone halts the machine, traces it, ticks it, fires its interrupts or preempts a call,
+so a child given the log only to write could stop every other process;
+a call goes through only a capability with the rights its operation needs.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
+Report: a call went through a capability without the rights its operation needs
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -58,7 +58,7 @@ static int op_debug(const struct cap *cap, uint32_t op, const uint32_t *arg)
+     }
+     bool drives = op == OP_DEBUG_HALT || op == OP_DEBUG_TRACE || op == OP_DEBUG_TICK || op == OP_DEBUG_IRQ ||
+                   op == OP_DEBUG_PREEMPT;
+-    if (drives && !(cap->rights & RIGHT_X)) {
++    if (drives && !(cap->rights & (RIGHT_X | RIGHT_W))) {
+         return KERR_NO_RIGHTS;
+     }
+     switch (op) {

@@ -14,7 +14,7 @@
 /* What an argument register holds. */
 enum arg_kind {
     ARG_NONE,
-    ARG_WORD,         /* any word: a byte to log, a halt code, a program counter, a word to store */
+    ARG_WORD,         /* any word: bytes to log, a halt code, a program counter, a word to store */
     ARG_DST,          /* an empty slot of the caller's table, which receives what the operation makes */
     ARG_DST_INVOKED,  /* an empty slot of the invoked table, which receives a copy of a2 */
     ARG_SLOT_INVOKED, /* a filled slot of the invoked table */
@@ -69,7 +69,7 @@ struct op_info {
 #define OP(op, cap, makes, a1, a2, a3) [op] = { #op, cap, makes, { a1, a2, a3 } }
 
 static const struct op_info op_table[OP_COUNT] = {
-    OP(OP_DEBUG_PUTC, CAP_DEBUG, 0, ARG_WORD, ARG_NONE, ARG_NONE),
+    OP(OP_DEBUG_WRITE, CAP_DEBUG, 0, ARG_WORD, ARG_WORD, ARG_WORD),
     OP(OP_DEBUG_HALT, CAP_DEBUG, 0, ARG_WORD, ARG_NONE, ARG_NONE),
     OP(OP_CAP_COPY, CAP_CAPTABLE, 0, ARG_DST_INVOKED, ARG_ANY, ARG_RIGHTS),
     OP(OP_CAP_DELETE, CAP_CAPTABLE, 0, ARG_SLOT_INVOKED, ARG_NONE, ARG_NONE),

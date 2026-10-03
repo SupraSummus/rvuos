@@ -258,9 +258,16 @@ static uint8_t rights_needed(uint32_t op)
     case OP_IRQ_BIND:
     case OP_IRQ_SET:
     case OP_TIME_BIND:
+    case OP_DEBUG_WRITE:
         return RIGHT_W;
     case OP_NOTIFY_WAIT:
         return RIGHT_R;
+    case OP_DEBUG_HALT:
+    case OP_DEBUG_TRACE:
+    case OP_DEBUG_TICK:
+    case OP_DEBUG_IRQ:
+    case OP_DEBUG_PREEMPT:
+        return RIGHT_X;
     default:
         return 0;
     }

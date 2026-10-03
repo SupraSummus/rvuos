@@ -249,7 +249,7 @@ __attribute__((noreturn)) void driver_main(struct child_page *page)
     d->page = s;
     d->window = NO_FRAME;
     d->chip.sleep = drv_sleep;
-    d->out = child_out(page);
+    d->out = child_out();
     d->wlan.chip = &d->chip;
     d->wlan.on_event = on_event;
     d->wlan.on_data = on_data;

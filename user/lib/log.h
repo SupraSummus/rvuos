@@ -2,30 +2,26 @@
 #define RVUOS_LIB_LOG_H
 
 /*
- * Logs: a ring of text a process writes for another to copy out, and the kernel's, which the boot grants the root task.
+ * The kernel's log, from both sides: text a process writes into it through a Debug capability,
+ * and the reader's view, which the boot grants the root task.
  */
 
 #include <stdint.h>
 
+#include "lib/say.h"
 #include "rvuos.h"
 
 struct self;
 
 /*
- * A ring of text in memory a writer shares with a reader, as a child's page holds its log, see child.h:
- * head counts every byte the writer put, and byte n lies at bytes[n % LOGRING_SIZE].
- * The reader keeps its own count, and finds itself overtaken when head runs more than LOGRING_SIZE ahead.
+ * Text into the kernel's log through the Debug capability in slot debug, which needs RIGHT_W alone,
+ * in order with the kernel's own lines and every other writer's, DEBUG_WRITE_BYTES a call.
  */
-#define LOGRING_SIZE 1536u
-struct logring {
-    volatile uint32_t head;
-    char bytes[LOGRING_SIZE];
-};
-
-/* Puts a byte; 1 at the end of a line, when the reader is to be told. */
-int logring_put(struct logring *l, char c);
-/* Hands the reader every byte past taken, and returns the new count. */
-uint32_t logring_take(const struct logring *l, uint32_t taken, void (*put)(char));
+void log_write(void *debug, const char *s, uint32_t n);
+static inline struct out log_out(uint32_t debug)
+{
+    return (struct out){ log_write, (void *)(uintptr_t)debug };
+}
 
 /*
  * The kernel's log, see struct rvuos_log, as its reader sees it:

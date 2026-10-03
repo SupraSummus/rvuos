@@ -55,6 +55,7 @@ static uint32_t build(struct self *s, struct child *c, uint32_t table_slots, uin
     PASS(bit_new(s, &c->bit_fault));
     PASS(give_bits(s, c->table, CHILD_PARENT, s->inbox, c->bit_page));
     TRY(s, "give a child its process", rv_cap_copy(c->table, CHILD_SELF, c->process, RIGHT_W));
+    TRY(s, "give a child the log, to write", rv_cap_copy(c->table, CHILD_LOG, s->debug, RIGHT_W));
 
     PASS(region_install(s, c->data.made, RIGHT_R | RIGHT_W, &c->region));
     c->page = (struct child_page *)(uintptr_t)c->data.base;
@@ -152,9 +153,8 @@ uint32_t child_tell(const struct child *c)
     return rv_signal(c->inbox, CHILD_BIT_PARENT);
 }
 
-int child_poll(struct child *c, void (*put)(char), uint32_t *state)
+int child_poll(struct child *c, uint32_t *state)
 {
-    c->log_taken = logring_take(&c->page->log, c->log_taken, put);
     *state = c->page->state;
     __atomic_thread_fence(__ATOMIC_ACQUIRE);
     if (*state == c->told) {
@@ -209,14 +209,6 @@ uint32_t child_free(struct self *s, struct child *c)
         s->what = f.what;
     }
     return f.status;
-}
-
-void child_put(void *page, char c)
-{
-    struct child_page *p = page;
-    if (logring_put(&p->log, c)) {
-        rv_signal(CHILD_PARENT, NOTIFY_ALL_BITS);
-    }
 }
 
 void child_report(struct child_page *p, uint32_t state)

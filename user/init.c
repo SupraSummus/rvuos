@@ -422,9 +422,14 @@ static void child_main(void)
     uint32_t base, size, bits;
 
     rv_puts(CHILD_DEBUG, "child: started\n");
+    /* Its log writes and does no more: the machine is not the child's to stop. */
+    rv_puts(CHILD_DEBUG, rv_invoke(OP_DEBUG_HALT, CHILD_DEBUG, 3, 0, 0) == KERR_NO_RIGHTS ? "child: may not halt ok\n"
+                                                                                       : "child: may not halt FAILED\n");
     if (rv_frame_info(CHILD_SHARED, &base, &size) != KERR_OK) {
-        rv_puts(CHILD_DEBUG, "child: no shared region\n");
-        rv_halt(CHILD_DEBUG, 3);
+        rv_puts(CHILD_DEBUG, "child: no shared region FAILED\n");
+        for (;;) {
+            rv_wait(CHILD_DOWN, &bits);
+        }
     }
 
     volatile uint32_t *shared = (volatile uint32_t *)base;
@@ -1106,8 +1111,8 @@ int main(void)
                      RIGHT_R | RIGHT_W));
 
     /* Authority the child starts with, and nothing besides. */
-    expect("give the child the log",
-           rv_invoke(OP_CAP_COPY, SLOT_CHILD_TABLE, CHILD_DEBUG, BOOT_CAP_DEBUG, RIGHT_ALL));
+    expect("give the child the log, to write",
+           rv_invoke(OP_CAP_COPY, SLOT_CHILD_TABLE, CHILD_DEBUG, BOOT_CAP_DEBUG, RIGHT_W));
     expect("give the child the shared region",
            rv_invoke(OP_CAP_COPY, SLOT_CHILD_TABLE, CHILD_SHARED, SLOT_SHARED, RIGHT_R | RIGHT_W));
     expect("give the child a way to signal",

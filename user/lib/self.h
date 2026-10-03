@@ -43,6 +43,7 @@ struct self {
     uint32_t code;        /* the frame of the code its children run */
     uint32_t timer_lines; /* the timer lines it may hand out */
     uint32_t time;        /* the first core's units of time it may hand out */
+    uint32_t debug;       /* the kernel's log, RIGHT_W at least, which its children are given with RIGHT_W alone */
     /* What is in use, a bit each. */
     uint32_t slot_first, slot_end; /* the slots it hands out, from first up to end */
     uint32_t slots[SELF_SLOTS / 32];

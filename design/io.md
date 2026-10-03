@@ -92,8 +92,19 @@ So the kernel writes into a ring of bytes in its own memory,
 The kernel never waits for a reader:
 one more than a ring behind loses the oldest bytes and can tell,
 because the head has run past its own count by more than the size.
-`OP_DEBUG_PUTC` appends to the same ring,
+`OP_DEBUG_WRITE` appends up to twelve bytes to the same ring,
 so a program's output and the kernel's keep their order.
+
+**Writing is a right of its own.**
+A `Debug` capability writes into the log with `RIGHT_W`,
+and halts, traces, ticks, interrupts or preempts the machine with `RIGHT_X`,
+so a child given it with `RIGHT_W` alone prints, its lines among the kernel's and its own faults' reports,
+and can stop nothing.
+Before, one capability did all of it, so a child printed into a ring its parent copied out,
+and reached the log only while its parent ran.
+The bytes travel in the call's registers, as everything does, twelve a call, so a line is a few calls;
+a writer that floods the ring costs the reader the oldest bytes, the kernel's among them,
+which is the price of a log every writer shares, and the reason a parent gives it on purpose.
 
 **The reader is granted the ring, and a word in its header.**
 `BOOT_CAP_LOG` names the header and the ring,

@@ -47,11 +47,11 @@ struct line {
     uint32_t len;
 };
 
-static void line_put(void *to, char c)
+static void line_write(void *to, const char *s, uint32_t n)
 {
     struct line *l = to;
-    if (l->len < sizeof(l->buf)) {
-        l->buf[l->len++] = c;
+    for (uint32_t i = 0; i < n && l->len < sizeof(l->buf); i++) {
+        l->buf[l->len++] = s[i];
     }
 }
 
@@ -62,7 +62,7 @@ static void on_status(struct net *n, uint32_t from_ip, uint16_t from_port, const
     struct netp *p = (struct netp *)n;
     struct line l = { .len = 0 };
     p->page->datagrams++;
-    say(&(const struct out){ line_put, &l }, "rvuos on a Pico 2 W: up %u s, frames in %u, out %u, pings %u, datagrams %u\n",
+    say(&(const struct out){ line_write, &l }, "rvuos on a Pico 2 W: up %u s, frames in %u, out %u, pings %u, datagrams %u\n",
         p->now / 1000u, n->rx_frames, n->tx_frames, n->pings, p->page->datagrams);
     net_udp_send(n, from_ip, from_port, NET_PORT_STATUS, (const uint8_t *)l.buf, l.len);
 }
@@ -73,7 +73,7 @@ __attribute__((noreturn)) void net_main(struct child_page *c)
     struct netp np, *p = &np;
     memset(p, 0, sizeof(*p));
     p->page = page;
-    p->out = child_out(c);
+    p->out = child_out();
     net_init(&p->net, page->mac, np_send, p);
     net_udp_bind(&p->net, NET_PORT_ECHO, on_echo);
     net_udp_bind(&p->net, NET_PORT_STATUS, on_status);

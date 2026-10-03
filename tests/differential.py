@@ -66,7 +66,7 @@ HOST_DIED = "host harness died"
 
 
 def decode(raw: bytes) -> str:
-    """The log may contain arbitrary bytes from OP_DEBUG_PUTC."""
+    """The log may contain arbitrary bytes from OP_DEBUG_WRITE."""
     return raw.decode("utf-8", errors="replace")
 
 

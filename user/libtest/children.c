@@ -55,7 +55,7 @@ static void receive(struct child_page *page, const struct chan_end *e)
 void peer_main(struct child_page *page)
 {
     struct peer_page *p = (struct peer_page *)page;
-    struct out out = child_out(page);
+    struct out out = child_out();
     child_report(page, CHILD_RUNNING);
     if (p->sends_first) {
         send(&p->link);
@@ -71,7 +71,7 @@ void peer_main(struct child_page *page)
 void fault_main(struct child_page *page)
 {
     struct fault_page *p = (struct fault_page *)page;
-    struct out out = child_out(page);
+    struct out out = child_out();
     say(&out, "fault: a store to %x\n", p->address);
     child_report(page, CHILD_RUNNING);
     *(volatile uint32_t *)(uintptr_t)p->address = 1;

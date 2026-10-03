@@ -74,11 +74,16 @@ and may fail, with what it already revoked staying revoked.
 
 ### 6.3 Operations on `Debug`
 
-The `Debug` capability needs no particular right.
+`OP_DEBUG_WRITE` needs `RIGHT_W`,
+and every other operation `RIGHT_X`, since it halts or drives the machine;
+a `Debug` capability with `RIGHT_W` alone writes into the log and can do nothing else,
+which is how a child is given somewhere to print.
 
-**`OP_DEBUG_PUTC` (1).**
-`a1` = the byte.
-Appends it to the kernel log.
+**`OP_DEBUG_WRITE` (1).**
+`a1`, `a2`, `a3` = up to `DEBUG_WRITE_BYTES`, 12, bytes, the lowest byte of `a1` first,
+which end at the first zero byte.
+Appends them to the kernel log, section 5.10.
+`rv_write` in `user/rvuos.h` writes a longer text a call per 12 bytes.
 
 **`OP_DEBUG_HALT` (2).**
 `a1` = exit code.
@@ -428,7 +433,7 @@ only a wait, the tick, a fault, section 5.6, or a revoke that takes its own proc
 
 | Code | Operation | Type |
 |---|---|---|
-| 1 | `OP_DEBUG_PUTC` | `Debug` |
+| 1 | `OP_DEBUG_WRITE` | `Debug` |
 | 2 | `OP_DEBUG_HALT` | `Debug` |
 | 3 | `OP_CAP_COPY` | `CapTable` |
 | 4 | `OP_CAP_DELETE` | `CapTable` |

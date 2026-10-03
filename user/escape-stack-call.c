@@ -43,12 +43,14 @@ int main(void)
     rv_put_hex(BOOT_CAP_DEBUG, (uint32_t)(uintptr_t)last_at);
     puts(", expecting a fault");
 
-    /* The line's end, OP_DEBUG_PUTC, and the same call again from the kernel's memory; nothing goes on after it. */
+    /* The line's end, OP_DEBUG_WRITE, and the same call again from the kernel's memory; nothing goes on after it. */
     register uint32_t r_a0 __asm__(RV_A0) = BOOT_CAP_DEBUG;
     register uint32_t r_a1 __asm__(RV_A1) = '\n';
-    register uint32_t r_a7 __asm__(RV_A7) = OP_DEBUG_PUTC;
-    __asm__ volatile(RV_CALL "\n.globl last_at\nlast_at:\n\tmov sp, %3\n\t" RV_CALL "\n\tudf #0"
-                     : "+r"(r_a0), "+r"(r_a1)
+    register uint32_t r_a2 __asm__(RV_A2) = 0;
+    register uint32_t r_a3 __asm__(RV_A3) = 0;
+    register uint32_t r_a7 __asm__(RV_A7) = OP_DEBUG_WRITE;
+    __asm__ volatile(RV_CALL "\n.globl last_at\nlast_at:\n\tmov sp, %5\n\t" RV_CALL "\n\tudf #0"
+                     : "+r"(r_a0), "+r"(r_a1), "+r"(r_a2), "+r"(r_a3)
                      : "r"(r_a7), "r"(sp)
                      : "memory");
     return 0;

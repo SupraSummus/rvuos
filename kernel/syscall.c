@@ -30,12 +30,38 @@ static bool holds_caller(struct thread *t, const struct captable *named, uint32_
            range_contains(base, size, thread_table(t)->hdr.pool) || range_contains(base, size, named->hdr.pool);
 }
 
-static int op_debug(uint32_t op, const uint32_t *arg)
+/* The bytes of a1 to a3 into the log, the lowest of a1 first, up to the first zero. */
+static void debug_write(const uint32_t *arg)
 {
-    switch (op) {
-    case OP_DEBUG_PUTC:
-        kputc((char)arg[1]);
+    for (unsigned i = 0; i < DEBUG_WRITE_BYTES; i++) {
+        LOOP_BOUND(DEBUG_WRITE_BYTES);
+        char c = (char)(arg[1 + i / 4] >> (8 * (i % 4)));
+        if (c == '\0') {
+            return;
+        }
+        kputc(c);
+    }
+}
+
+/*
+ * Writing into the log takes RIGHT_W, and halting or driving the machine RIGHT_X,
+ * so a child that only prints cannot stop the machine.
+ */
+static int op_debug(const struct cap *cap, uint32_t op, const uint32_t *arg)
+{
+    if (op == OP_DEBUG_WRITE) {
+        if (!(cap->rights & RIGHT_W)) {
+            return KERR_NO_RIGHTS;
+        }
+        debug_write(arg);
         return KERR_OK;
+    }
+    bool drives = op == OP_DEBUG_HALT || op == OP_DEBUG_TRACE || op == OP_DEBUG_TICK || op == OP_DEBUG_IRQ ||
+                  op == OP_DEBUG_PREEMPT;
+    if (drives && !(cap->rights & RIGHT_X)) {
+        return KERR_NO_RIGHTS;
+    }
+    switch (op) {
     case OP_DEBUG_HALT:
         kputs("user halt with code ");
         kput_hex(arg[1]);
@@ -782,7 +808,7 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
      */
     switch (cap.type) {
     case CAP_DEBUG:
-        err = op_debug(op, arg);
+        err = op_debug(&cap, op, arg);
         break;
     case CAP_FRAME:
         err = op_frame(t, slot, &cap, op, arg);

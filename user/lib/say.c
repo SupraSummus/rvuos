@@ -2,14 +2,41 @@
 
 #include <stdarg.h>
 
-static void put_hex(const struct out *o, uint32_t v, int digits)
+#include "rvuos/abi.h"
+
+_Static_assert(SAY_PIECE % DEBUG_WRITE_BYTES == 0, "a piece is whole writes into the kernel's log");
+
+/* What say has formatted and not yet handed on. */
+struct pending {
+    const struct out *o;
+    uint32_t n;
+    char buf[SAY_PIECE];
+};
+
+static void flush(struct pending *p)
 {
-    for (int shift = 4 * (digits - 1); shift >= 0; shift -= 4) {
-        o->put(o->to, "0123456789abcdef"[(v >> shift) & 0xfu]);
+    if (p->n != 0) {
+        p->o->write(p->o->to, p->buf, p->n);
+        p->n = 0;
     }
 }
 
-static void put_dec(const struct out *o, uint32_t v)
+static void put(struct pending *p, char c)
+{
+    p->buf[p->n++] = c;
+    if (p->n == sizeof(p->buf)) {
+        flush(p);
+    }
+}
+
+static void put_hex(struct pending *o, uint32_t v, int digits)
+{
+    for (int shift = 4 * (digits - 1); shift >= 0; shift -= 4) {
+        put(o, "0123456789abcdef"[(v >> shift) & 0xfu]);
+    }
+}
+
+static void put_dec(struct pending *o, uint32_t v)
 {
     char buf[10];
     int i = 0;
@@ -18,23 +45,27 @@ static void put_dec(const struct out *o, uint32_t v)
         v /= 10;
     } while (v);
     while (i) {
-        o->put(o->to, buf[--i]);
+        put(o, buf[--i]);
     }
 }
 
-void say(const struct out *o, const char *fmt, ...)
+void say(const struct out *out, const char *fmt, ...)
 {
+    struct pending pending;
+    struct pending *o = &pending;
+    o->o = out;
+    o->n = 0;
     va_list ap;
     va_start(ap, fmt);
     for (; *fmt; fmt++) {
         if (*fmt != '%' || fmt[1] == '\0') {
-            o->put(o->to, *fmt);
+            put(o, *fmt);
             continue;
         }
         switch (*++fmt) {
         case 's':
             for (const char *s = va_arg(ap, const char *); *s; s++) {
-                o->put(o->to, *s);
+                put(o, *s);
             }
             break;
         case 'u':
@@ -43,14 +74,14 @@ void say(const struct out *o, const char *fmt, ...)
         case 'd': {
             int32_t v = va_arg(ap, int32_t);
             if (v < 0) {
-                o->put(o->to, '-');
+                put(o, '-');
             }
             put_dec(o, v < 0 ? 0u - (uint32_t)v : (uint32_t)v);
             break;
         }
         case 'x':
-            o->put(o->to, '0');
-            o->put(o->to, 'x');
+            put(o, '0');
+            put(o, 'x');
             put_hex(o, va_arg(ap, uint32_t), 8);
             break;
         case 'M': {
@@ -58,7 +89,7 @@ void say(const struct out *o, const char *fmt, ...)
             for (int i = 0; i < 6; i++) {
                 put_hex(o, mac[i], 2);
                 if (i < 5) {
-                    o->put(o->to, ':');
+                    put(o, ':');
                 }
             }
             break;
@@ -69,14 +100,15 @@ void say(const struct out *o, const char *fmt, ...)
             for (int i = 0; i < 4; i++) {
                 put_dec(o, b[i]);
                 if (i < 3) {
-                    o->put(o->to, '.');
+                    put(o, '.');
                 }
             }
             break;
         }
         default:
-            o->put(o->to, *fmt);
+            put(o, *fmt);
         }
     }
     va_end(ap);
+    flush(o);
 }

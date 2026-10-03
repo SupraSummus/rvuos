@@ -2,26 +2,9 @@
 
 #include "lib/self.h"
 
-int logring_put(struct logring *l, char c)
+void log_write(void *debug, const char *s, uint32_t n)
 {
-    uint32_t head = l->head;
-    l->bytes[head % LOGRING_SIZE] = c;
-    __atomic_thread_fence(__ATOMIC_RELEASE);
-    l->head = head + 1u;
-    return c == '\n';
-}
-
-uint32_t logring_take(const struct logring *l, uint32_t taken, void (*put)(char))
-{
-    uint32_t head = l->head;
-    __atomic_thread_fence(__ATOMIC_ACQUIRE);
-    if (head - taken > LOGRING_SIZE) {
-        taken = head - LOGRING_SIZE;
-    }
-    for (; taken != head; taken++) {
-        put(l->bytes[taken % LOGRING_SIZE]);
-    }
-    return taken;
+    rv_write((uint32_t)(uintptr_t)debug, s, n);
 }
 
 uint32_t kernel_log_open(struct self *s, struct kernel_log *k)

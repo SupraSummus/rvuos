@@ -366,7 +366,7 @@ and `kernel-wifi.elf` the Wi-Fi system of `user/wifi/`.
 ### Reading the transcript
 
 The kernel has no console.
-Everything the kernel prints, and everything a program writes with `OP_DEBUG_PUTC`,
+Everything the kernel prints, and everything a program writes with `OP_DEBUG_WRITE`,
 goes into the kernel log.
 Two things carry that log to the board's UART:
 
