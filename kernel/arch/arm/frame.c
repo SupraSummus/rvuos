@@ -9,11 +9,16 @@
  * as a function pointer carries it, and a pc without it starts the thread in a fault, as a bx to it would.
  * The rest of xpsr starts clear, out of any IT block.
  */
-void frame_start(struct trap_frame *frame, uint32_t pc, uint32_t sp)
+void frame_start(struct trap_frame *frame, uint32_t pc, uint32_t sp, uint32_t arg)
 {
+    for (unsigned i = 0; i < 15; i++) {
+        LOOP_BOUND(15);
+        frame->regs[i] = 0;
+    }
     frame->pc = pc & ~1u;
     frame->xpsr = (pc & 1u) ? XPSR_T : 0u;
     frame->regs[REG_SP] = sp;
+    frame->regs[REG_A0] = arg;
 }
 
 void report_frame(const struct trap_frame *frame)

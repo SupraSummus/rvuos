@@ -39,11 +39,12 @@ __attribute__((noreturn)) void core_idle(void);
 __attribute__((noreturn)) void core_start(void);
 
 /*
- * Where a stopped thread starts: pc and sp, as OP_THREAD_CONFIGURE takes them and the boot gives the root task;
- * the other registers stay as they were.
+ * Where a stopped thread starts and with what: pc, sp and its argument in a0,
+ * as OP_THREAD_CONFIGURE takes them and the boot gives the root task;
+ * every other register starts at zero, whatever the thread's last run left.
  * In the architecture's frame.c, which the host build has too.
  */
-void frame_start(struct trap_frame *frame, uint32_t pc, uint32_t sp);
+void frame_start(struct trap_frame *frame, uint32_t pc, uint32_t sp, uint32_t arg);
 
 /* What the frame says of the trap that made it, as a line of the log; in frame.c too. */
 void report_frame(const struct trap_frame *frame);

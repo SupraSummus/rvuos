@@ -92,12 +92,11 @@ static void drain_log(void)
     log_header->taken = head;
 }
 
-static void replay_loop(unsigned me);
-void replay_second(void);
-void replay_third(void);
+void replay_loop(uint32_t me);
 int main(void);
 
-static void replay_loop(unsigned me)
+/* Every thread's entry, the first's from main: me is its actor number, which OP_THREAD_CONFIGURE hands the others. */
+void replay_loop(uint32_t me)
 {
     for (;;) {
         uint32_t i = cursor;
@@ -121,23 +120,12 @@ static void replay_loop(unsigned me)
     }
 }
 
-/* The other threads' entry points; the first thread is main. */
-void replay_second(void)
-{
-    replay_loop(2);
-}
-
-void replay_third(void)
-{
-    replay_loop(3);
-}
-
 int main(void)
 {
     for (unsigned i = 0; i < REPLAY_PROLOGUE_COUNT; i++) {
         struct replay_record r = replay_prologue[i];
         if (r.op == OP_THREAD_CONFIGURE) {
-            r.a1 = r.slot == REPLAY_CAP_THIRD ? (uint32_t)&replay_third : (uint32_t)&replay_second;
+            r.a1 = (uint32_t)&replay_loop;
         }
         if (perform(&r) != KERR_OK) {
             puts("replay setup failed\n");

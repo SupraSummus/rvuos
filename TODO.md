@@ -26,8 +26,6 @@ and a laptop's ping and datagrams to UDP ports 7 and 7777 are answered;
 `user/wifi/NOTES.md` says what writing a program of several processes was like, and `user/lib/` is what came of it;
 what is left:
 
-- A thread starts with no argument, so `child_start` in `user/lib/child.c` writes `a0` with `OP_THREAD_WRITE_REG`,
-  a debugger's operation; `OP_THREAD_CONFIGURE` could take it.
 - No program may have initialised data; `start.S` could copy `.data` from the code region.
 - A child prints into a ring its parent copies, `lib/log.h`, which reaches the console only while the parent runs;
   a capability that only prints would let a child reach the kernel's log itself, without `Debug`, which halts the machine.

@@ -82,7 +82,7 @@ It has four goals, in priority order.
 
 A program's only dependency on rvuos is the register ABI
 and the initial state its creator hands it:
-a program counter, a stack pointer,
+a program counter, a stack pointer, a word in its first argument register,
 regions installed in its slots,
 and capabilities placed in its table.
 The kernel knows no executable format, no header, no runtime library.

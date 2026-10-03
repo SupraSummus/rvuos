@@ -41,7 +41,7 @@ and `user/lib/` what a program of several processes needs beside them, section 8
 | `rv_pool_alloc(pool, type, dst, arg)` | `OP_POOL_ALLOC` |
 | `rv_process_install(process, region, frame, rights)` | `OP_PROCESS_INSTALL` |
 | `rv_process_uninstall(process, region)` | `OP_PROCESS_UNINSTALL` |
-| `rv_thread_configure(thread, pc, sp)` | `OP_THREAD_CONFIGURE` |
+| `rv_thread_configure(thread, pc, sp, arg)` | `OP_THREAD_CONFIGURE` |
 | `rv_thread_resume(thread)` | `OP_THREAD_RESUME` |
 | `rv_thread_watch(thread, ntfn, bits)` | `OP_THREAD_WATCH` |
 | `rv_thread_fault(thread, &cause, &pc, &addr, &status)` | `OP_THREAD_FAULT` |
@@ -124,7 +124,8 @@ the library of section 8.4 takes them in one, and hands out the slots, regions a
    ```
 
 5. **Configure, bind and start** the thread.
-   The stack grows down from the top of the child's data frame.
+   The stack grows down from the top of the child's data frame,
+   and the last argument, zero here, is what `child_main` finds as its first.
    The thread earns half the first core, units carved out of the boot grant.
    The root task's thread earns every unit of the first core at boot, so it keeps the first half and leaves the rest;
    binding the child through `BOOT_CAP_TIME` with no units would give it spare time alone,
@@ -214,7 +215,6 @@ Each end keeps where its rings lie and their shape in its page, which the other 
 so a peer can spoil a packet but not steer the other's writes outside the ring.
 
 **What it does not do yet**, with the reasons in `TODO.md`:
-a child gets `a0` through `OP_THREAD_WRITE_REG`, a debugger's operation;
 children run on the first core;
 a channel is connected once;
 and halved memory is never joined again, so each free block holds a slot.

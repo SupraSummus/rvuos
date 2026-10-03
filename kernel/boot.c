@@ -34,7 +34,7 @@ struct thread *boot_create_root(void)
 
     table->nslots = ROOT_TABLE_SLOTS;
     thread->flags = 0;
-    frame_start(&thread->frame, ENTRY_PC(USER_CODE_BASE), USER_DATA_BASE + USER_DATA_SIZE);
+    frame_start(&thread->frame, ENTRY_PC(USER_CODE_BASE), USER_DATA_BASE + USER_DATA_SIZE, 0);
 
     boot_granted[0] = (struct granted_range){ ROOT_RAM_BASE, ROOT_RAM_SIZE, RIGHT_ALL };
     boot_granted[1] = (struct granted_range){ FREE_RAM_BASE, FREE_RAM_SIZE, RIGHT_ALL };

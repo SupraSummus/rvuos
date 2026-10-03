@@ -491,29 +491,13 @@ static void child_main(void)
     }
 }
 
-/* The spinners: each counts in a word of its own and never waits. */
-static void spin0(void)
+/* The spinners: each counts in the word its argument names and never waits. */
+static void spinner_main(uint32_t i)
 {
     for (;;) {
-        spins[0]++;
+        spins[i]++;
     }
 }
-
-static void spin1(void)
-{
-    for (;;) {
-        spins[1]++;
-    }
-}
-
-static void spin2(void)
-{
-    for (;;) {
-        spins[2]++;
-    }
-}
-
-static void (*const spinner_main[SPINNERS])(void) = { spin0, spin1, spin2 };
 
 /*
  * The dodger: it sleeps until the next tick, spins for dodge_counts of the counter, and counts a round.
@@ -1357,8 +1341,8 @@ int main(void)
         expect("allocate a spinner",
                rv_invoke(OP_POOL_ALLOC, BOOT_CAP_POOL, CAP_THREAD, SLOT_SPINNER + i, BOOT_CAP_PROCESS));
         expect("configure it",
-               rv_invoke(OP_THREAD_CONFIGURE, SLOT_SPINNER + i, (uint32_t)spinner_main[i],
-                         data_base + data_size / 4 - i * SPINNER_STACK, 0));
+               rv_invoke(OP_THREAD_CONFIGURE, SLOT_SPINNER + i, (uint32_t)&spinner_main,
+                         data_base + data_size / 4 - i * SPINNER_STACK, i));
         expect("bind it",
                i == 0 ? rv_invoke(OP_TIME_BIND, SLOT_CAPPED_TIME, SLOT_SPINNER, 0, TIME_UNITS / 4)
                       : rv_invoke(OP_TIME_BIND, SLOT_HALF_TIME, SLOT_SPINNER + i, 0, 0));

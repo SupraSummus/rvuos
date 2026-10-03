@@ -283,9 +283,10 @@ and leaves the lender's Untyped free, the whole of it.
 A thread is **stopped**, **ready** or **waiting**.
 
 - A new thread is stopped.
-- `OP_THREAD_CONFIGURE` sets a stopped thread's program counter and stack pointer.
+- `OP_THREAD_CONFIGURE` sets a stopped thread's program counter, its stack pointer,
+  and its argument, which it finds in `a0`, `r0` on ARM, as a function finds its first.
   The other registers start at zero.
-  The kernel validates neither value.
+  The kernel validates none of them.
 - `OP_THREAD_RESUME` makes a stopped thread ready.
   It gets the processor once it is bound to units, or to spare time, and its turn comes, section 5.11.
 - A thread waiting on a notification is waiting;

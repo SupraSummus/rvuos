@@ -138,6 +138,7 @@ _Static_assert(REPLAY_CAP_NOTIFY == BOOT_CAP_COUNT, "the setup's slots follow th
 /*
  * The threads' entry points are the one value the two builds differ on:
  * the driver patches OP_THREAD_CONFIGURE with the address of its record loop,
+ * which takes the thread's actor number for its argument,
  * and the host leaves the zero, because the kernel stores
  * a thread's program counter without looking at it
  * and the host never fetches an instruction.
@@ -197,8 +198,8 @@ static const struct replay_record replay_prologue[] = {
     { OP_TIME_BIND, 0, BOOT_CAP_TIME, BOOT_CAP_THREAD, 0, 0 },
     { OP_TIME_BIND, 0, BOOT_CAP_TIME, REPLAY_CAP_THREAD, 0, 0 },
     { OP_TIME_BIND, 0, BOOT_CAP_TIME, REPLAY_CAP_THIRD, 0, 0 },
-    { OP_THREAD_CONFIGURE, 0, REPLAY_CAP_THREAD, 0, REPLAY_THREAD_SP, 0 },
-    { OP_THREAD_CONFIGURE, 0, REPLAY_CAP_THIRD, 0, REPLAY_THIRD_SP, 0 },
+    { OP_THREAD_CONFIGURE, 0, REPLAY_CAP_THREAD, 0, REPLAY_THREAD_SP, 2 },
+    { OP_THREAD_CONFIGURE, 0, REPLAY_CAP_THIRD, 0, REPLAY_THIRD_SP, 3 },
 };
 
 #define REPLAY_PROLOGUE_COUNT \

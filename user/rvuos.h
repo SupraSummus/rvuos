@@ -83,10 +83,10 @@ static inline uint32_t rv_process_uninstall(uint32_t process_cap, uint32_t regio
     return rv_invoke(OP_PROCESS_UNINSTALL, process_cap, region, 0, 0);
 }
 
-/* OP_THREAD_CONFIGURE: where a stopped thread starts. */
-static inline uint32_t rv_thread_configure(uint32_t thread_cap, uint32_t pc, uint32_t sp)
+/* OP_THREAD_CONFIGURE: where a stopped thread starts, and the argument its entry is called with. */
+static inline uint32_t rv_thread_configure(uint32_t thread_cap, uint32_t pc, uint32_t sp, uint32_t arg)
 {
-    return rv_invoke(OP_THREAD_CONFIGURE, thread_cap, pc, sp, 0);
+    return rv_invoke(OP_THREAD_CONFIGURE, thread_cap, pc, sp, arg);
 }
 
 /* OP_THREAD_RESUME: make a stopped thread ready. */

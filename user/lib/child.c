@@ -107,9 +107,8 @@ uint32_t child_start(struct self *s, struct child *c, void (*entry)(struct child
     uint32_t time;
     TRY(s, "watch a child", rv_thread_watch(c->thread, s->inbox, c->bit_fault));
     TRY(s, "configure a child",
-        rv_thread_configure(c->thread, (uint32_t)(uintptr_t)entry, c->data.base + c->data.size));
-    /* A thread starts with nothing in a0, so its argument is written as a debugger would. */
-    TRY(s, "hand a child its page", rv_thread_write_reg(c->thread, RV_REG_A0, (uint32_t)(uintptr_t)c->page));
+        rv_thread_configure(c->thread, (uint32_t)(uintptr_t)entry, c->data.base + c->data.size,
+                            (uint32_t)(uintptr_t)c->page));
     /* Its units, carved for the bind alone: the binding stays with the thread once the slot is deleted. */
     PASS(units_take(s, units, &c->unit));
     c->units = units;

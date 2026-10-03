@@ -433,12 +433,13 @@ It costs twenty bytes per thread and a test on every call and every switch;
 before, a thread had to lie in its process's pool so a pointer could not dangle.
 
 A thread is either stopped or ready.
-`OP_THREAD_CONFIGURE` sets a stopped thread's program counter
-and stack pointer, and `OP_THREAD_RESUME` makes it ready.
+`OP_THREAD_CONFIGURE` sets a stopped thread's program counter, stack pointer
+and argument, the first register of a call, and zeroes the rest,
+and `OP_THREAD_RESUME` makes it ready.
 It runs only while it is bound to units of time, which is apart from its state;
 see "Scheduling".
-The kernel validates neither value:
-it knows no executable format and no calling convention,
+The kernel validates none of the three:
+it knows no executable format and no calling convention beyond where a function finds its first argument,
 so a thread that starts nowhere useful faults,
 which is its creator's business: the thread stops, and its watch hears it; see "Faults".
 

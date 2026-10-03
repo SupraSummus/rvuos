@@ -282,8 +282,10 @@
 #define OP_PROCESS_UNINSTALL 9
 
 /*
- * Thread (RIGHT_W): set where a stopped thread will start.
- * a1 = program counter, a2 = stack pointer.
+ * Thread (RIGHT_W): set where a stopped thread will start, and its argument.
+ * a1 = program counter, a2 = stack pointer, a3 = the argument, which the thread finds in a0, r0 on ARM,
+ * the first argument of a function.
+ * Every other register starts at zero, whatever the thread's last run left.
  * On ARM the program counter carries bit 0 for Thumb, as a function pointer does.
  * Fails with KERR_STATE unless the thread is stopped.
  * The kernel does not check either value:

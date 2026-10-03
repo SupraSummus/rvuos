@@ -6,10 +6,15 @@
 #include "kernel.h"
 #include "trap.h"
 
-void frame_start(struct trap_frame *frame, uint32_t pc, uint32_t sp)
+void frame_start(struct trap_frame *frame, uint32_t pc, uint32_t sp, uint32_t arg)
 {
+    for (unsigned i = 0; i < 32; i++) {
+        LOOP_BOUND(32);
+        frame->regs[i] = 0;
+    }
     frame->pc = pc;
     frame->regs[REG_SP] = sp;
+    frame->regs[REG_A0] = arg;
 }
 
 void report_frame(const struct trap_frame *frame)

@@ -262,8 +262,10 @@ All need `RIGHT_W` on the thread,
 and `OP_THREAD_CONFIGURE`, `OP_THREAD_RESUME`, `OP_THREAD_READ_REG` and `OP_THREAD_WRITE_REG` a stopped thread (`KERR_STATE`).
 
 **`OP_THREAD_CONFIGURE` (12).**
-`a1` = program counter, `a2` = stack pointer.
-Neither is checked.
+`a1` = program counter, `a2` = stack pointer, `a3` = the thread's argument,
+which it finds in `a0`, `r0` on ARM, as a function finds its first.
+Every other register starts at zero, whatever the thread's last run left.
+None is checked.
 On ARM the program counter is taken as a branch takes it, with bit 0 set for Thumb as a function pointer has it;
 one without bit 0 starts the thread in a fault.
 

@@ -404,7 +404,7 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
         if (target->state != THREAD_STOPPED) {
             return KERR_STATE;
         }
-        frame_start(&target->frame, arg[1], arg[2]);
+        frame_start(&target->frame, arg[1], arg[2], arg[3]);
         /*
          * The host build follows a thread only if its code was fixed
          * before tracing began; see DESIGN.md, "Verification".
