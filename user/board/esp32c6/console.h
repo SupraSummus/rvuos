@@ -3,9 +3,9 @@
 
 /*
  * The console of the ESP32-C6: the USB Serial/JTAG controller behind BOOT_CAP_UART,
- * a CDC-ACM serial port on the chip's own USB, on line 48,
- * and a line nothing drives, FROM_CPU_INTR3, which only software raises.
- * Line numbers are interrupt matrix sources; see kernel/board/esp32c6/irq.c.
+ * a CDC-ACM serial port on the chip's own USB, on line 49,
+ * and a line nothing drives, FROM_CPU_INTR3's, which only software raises.
+ * A line is an interrupt matrix source plus one; see kernel/board/esp32c6/irq.c.
  * Each board's console.h offers the same functions, for user/init.c and user/fuzzdrv.c.
  *
  * Bytes go into a 64-byte FIFO, the IN endpoint,
@@ -17,8 +17,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define CONSOLE_IRQ 48
-#define SPARE_IRQ   25
+#define CONSOLE_IRQ 49
+#define SPARE_IRQ   26
 
 #define USJ_EP1      0 /* the IN FIFO, one byte per write */
 #define USJ_EP1_CONF 1

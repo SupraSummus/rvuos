@@ -70,11 +70,10 @@ what is left:
   `phymap` sees only constant addresses, so a register reached through a table or a loop shows first in a trace.
   The board's eight frames and the tracer's own regions exceed a process's eight region slots,
   so the tracer maps a device's frame when the harness first reaches it.
-- Wi-Fi on the ESP32-C6 through Espressif's closed libraries, as the Wi-Fi system's driver.
-  Their code alone, before the linker drops any, is about 550 KB: `libnet80211.a` 310, `libpp.a` 185, `libphy.a` 45,
-  and nothing runs from flash yet, so the first question is what of it fits in 512 KiB of SRAM.
-  The MAC is a bus master, which no board lists (open decision 13),
-  and its interrupt is source 0, the line the kernel's log takes.
+- Wi-Fi on the ESP32-C6 through Espressif's closed libraries, as the Wi-Fi system's driver, run from the window onto flash:
+  linked, the libraries keep about 360 KB of code and constants and 21 KB of data, more than the SRAM leaves.
+  Still to come: the driver, its adapter for the libraries' OS functions, the WPA2 supplicant,
+  and the MAC's frame, a bus master no board lists (open decision 13), which HP_APM is to confine to the driver's memory.
 - Feed the replay corpus to the board.
   Something has to put each input where `BOOT_CAP_INPUT` points,
   below the ROM's buffers or over USB once the kernel runs,

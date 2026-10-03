@@ -7,8 +7,9 @@
  * and the core takes CPU interrupt n with mcause n,
  * as long as its bit in mie is set too.
  * rvuos routes every unmasked source to the one CPU interrupt IRQ_EXT_CAUSE
- * and masks a source by routing it nowhere,
- * so a line is a source and unmasking it is one write.
+ * and masks a source by routing it nowhere, so unmasking a line is one write.
+ * A line is a source plus one, so that line 0 stays the kernel's log
+ * and source 0, the Wi-Fi MAC's, is line 1.
  * A claim finds a source whose level is high and which is routed there;
  * the matrix shows every source's level whether or not it is routed.
  * Nothing is held between a claim and a completion:
@@ -34,6 +35,9 @@
 
 #define REG(addr) (*(volatile uint32_t *)(addr))
 
+#define SOURCES     (IRQ_LINES - 1)
+#define SOURCE(line) ((line) - 1u)
+
 #define CPU_INT     IRQ_EXT_CAUSE
 #define CPU_INT_BIT (1u << CPU_INT)
 
@@ -42,7 +46,7 @@
 
 void irq_enable(uint32_t line, bool on)
 {
-    REG(INTMTX_MAP(line)) = on ? CPU_INT : 0;
+    REG(INTMTX_MAP(SOURCE(line))) = on ? CPU_INT : 0;
 }
 
 /*
@@ -51,8 +55,8 @@ void irq_enable(uint32_t line, bool on)
  */
 void irq_init(void)
 {
-    for (uint32_t line = 0; line < IRQ_LINES; line++) {
-        REG(INTMTX_MAP(line)) = 0;
+    for (uint32_t source = 0; source < SOURCES; source++) {
+        REG(INTMTX_MAP(source)) = 0;
     }
     REG(PLIC_MX_TYPE) &= ~CPU_INT_BIT;
     REG(PLIC_MX_PRI(CPU_INT)) = CPU_INT_PRIORITY;
@@ -63,19 +67,19 @@ void irq_init(void)
 
 bool irq_enabled(uint32_t line)
 {
-    return REG(INTMTX_MAP(line)) == CPU_INT;
+    return REG(INTMTX_MAP(SOURCE(line))) == CPU_INT;
 }
 
 /* The lowest-numbered line that is high and unmasked; which of several comes first is not promised. */
 uint32_t irq_claim(void)
 {
-    for (uint32_t word = 0; word < (IRQ_LINES + 31) / 32; word++) {
-        LOOP_BOUND((IRQ_LINES + 31) / 32);
+    for (uint32_t word = 0; word < (SOURCES + 31) / 32; word++) {
+        LOOP_BOUND((SOURCES + 31) / 32);
         uint32_t high = REG(INTMTX_STATUS(word));
         for (uint32_t bit = 0; high != 0 && bit < 32; bit++, high >>= 1) {
             LOOP_BOUND(32);
-            uint32_t line = 32 * word + bit;
-            if ((high & 1u) && line != 0 && line < IRQ_LINES && irq_enabled(line)) {
+            uint32_t line = 32 * word + bit + 1;
+            if ((high & 1u) && line < IRQ_LINES && irq_enabled(line)) {
                 return line;
             }
         }

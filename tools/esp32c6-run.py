@@ -3,6 +3,8 @@
 
 The chip's ROM loads the image's segments into RAM over USB and jumps to it,
 so nothing is written to flash.
+The flash is attached before the jump, as a bootloader leaves it,
+so that the kernel's window onto it reads; see kernel/board/esp32c6/board.h.
 Opening the USB Serial/JTAG port resets the chip,
 so the image is loaded and its output read on one connection.
 The kernel's halt ends with "rvuos: halted with code <n>",
@@ -56,6 +58,7 @@ def load(port, path, extra=()):
             esp.mem_begin(size, blocks, esp.ESP_RAM_BLOCK, addr)
             for i in range(blocks):
                 esp.mem_block(data[i * esp.ESP_RAM_BLOCK:(i + 1) * esp.ESP_RAM_BLOCK], i)
+        esp.flash_spi_attach(0)
         esp.mem_finish(image.entrypoint)
     return esp._port
 

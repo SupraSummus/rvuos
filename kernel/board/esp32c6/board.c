@@ -16,6 +16,9 @@
  * and its and the temperature sensor's clocks off, as measured on the chip.
  * No program reaches PCR, so the kernel turns the clocks on and lets the registers out of reset.
  *
+ * The window onto flash, see board.h, is the MMU's only valid entries, the window's 64 KiB pages in order,
+ * which the kernel sets, with the cache emptied of what the pages held before, then lets the cache's buses through.
+ *
  * The core has user-mode traps, the N extension,
  * and resets with mideleg at 0x111, delegating the user software, timer and external interrupts,
  * 0, 4 and 8, to a handler in user mode that no process set up and the kernel does not switch.
@@ -58,6 +61,38 @@
 #define PCR_TSENS_CLK_CONF    0x60096088u
 #define PCR_TSENS_CLK_EN      (1u << 22)
 
+/* The MMU, which maps 64 KiB pages of flash through the cache from 0x42000000, one entry each, and the cache. */
+#define MMU_ITEM_CONTENT     0x6000237Cu
+#define MMU_ITEM_INDEX       0x60002380u
+#define MMU_ENTRIES          256u
+#define MMU_PAGE             0x10000u
+#define MMU_VALID            (1u << 9)
+#define EXTMEM_L1_CACHE_CTRL (0x600C8000u + 0x04u)
+#define EXTMEM_SHUT_BUSES    0x3u /* IBUS and DBUS */
+#define EXTMEM_SYNC_CTRL     (0x600C8000u + 0x98u)
+#define EXTMEM_SYNC_ADDR     (0x600C8000u + 0xa0u)
+#define EXTMEM_SYNC_SIZE     (0x600C8000u + 0xa4u)
+#define EXTMEM_INVALIDATE    (1u << 0)
+#define EXTMEM_SYNC_DONE     (1u << 4)
+
+_Static_assert(FLASH_WINDOW_BASE % (MMU_PAGE * MMU_ENTRIES) == 0, "the window starts the MMU's address space");
+_Static_assert(FLASH_WINDOW_FLASH % MMU_PAGE == 0 && FLASH_WINDOW_SIZE % MMU_PAGE == 0, "the window is whole pages");
+
+static void flash_window_map(void)
+{
+    for (uint32_t i = 0; i < MMU_ENTRIES; i++) {
+        REG(MMU_ITEM_INDEX) = i;
+        REG(MMU_ITEM_CONTENT) = i < FLASH_WINDOW_SIZE / MMU_PAGE ? MMU_VALID | (FLASH_WINDOW_FLASH / MMU_PAGE + i) : 0;
+    }
+    /* A size of zero empties the whole cache. */
+    REG(EXTMEM_SYNC_ADDR) = 0;
+    REG(EXTMEM_SYNC_SIZE) &= 0xff000000u;
+    REG(EXTMEM_SYNC_CTRL) |= EXTMEM_INVALIDATE;
+    while (!(REG(EXTMEM_SYNC_CTRL) & EXTMEM_SYNC_DONE)) {
+    }
+    REG(EXTMEM_L1_CACHE_CTRL) &= ~EXTMEM_SHUT_BUSES;
+}
+
 void board_init(void)
 {
     csr_write(mideleg, 0);
@@ -83,6 +118,8 @@ void board_init(void)
 
     REG(PCR_SARADC_CONF) = PCR_SARADC_CLK_EN | PCR_SARADC_REG_CLK_EN;
     REG(PCR_TSENS_CLK_CONF) |= PCR_TSENS_CLK_EN;
+
+    flash_window_map();
 }
 
 /*

@@ -94,6 +94,7 @@ Memory map:
 |---|---|---|
 | `0x20001C08` | 8 B | the CLINT's `UTIME`, a read-only copy of `mtime` at the CPU clock, through `BOOT_CAP_CLOCK` |
 | `0x6000F000` | 256 B | USB Serial/JTAG controller registers, granted to the root task |
+| `0x42000000` | 1 MiB | the window onto flash, from `0x210000` in it, through the cache; see below |
 | `0x40800000` to `0x4081E000` | 120 KiB | kernel code, data and stack |
 | `0x4081E000` | 4 KiB | the kernel log: a 32-byte header and the ring |
 | `0x4081F000` | 4 KiB | unused, so that the log does not touch the code |
@@ -109,11 +110,11 @@ Interrupt lines:
 
 | Line | What |
 |---|---|
-| 0 | the kernel log; the Wi-Fi MAC's source 0 cannot be bound |
-| 1 to 76 | the interrupt matrix's sources, numbered as in Espressif's `soc/interrupts.h`; the USB Serial/JTAG controller is line 48 |
+| 0 | the kernel log |
+| 1 to 77 | the interrupt matrix's sources, numbered as in Espressif's `soc/interrupts.h`, plus one: the Wi-Fi MAC's source 0 is line 1, and the USB Serial/JTAG controller's is line 49 |
 
 The root task is granted a frame over each of these devices, from `BOOT_CAP_DEVICES` up,
-so `BOOT_CAP_COUNT` is 26 here and the root task's table has 72 slots.
+so `BOOT_CAP_COUNT` is 27 here and the root task's table has 73 slots.
 They are the SAR ADC and the blocks of the modem a PHY driver drives,
 as `make BOARD=esp32c6 phymap` finds them in ESP-IDF's PHY library and the ROM's,
 and the eFuse's registers:
@@ -127,11 +128,14 @@ and the eFuse's registers:
 | 23 | `BOOT_CAP_MODEM_SYSCON` | `0x600A9800` | 1 KiB | MODEM_SYSCON, the modem's clocks and resets | read, write |
 | 24 | `BOOT_CAP_MODEM_LPCON` | `0x600AF000` | 4 KiB | MODEM_LPCON, the modem's LP clocks, and the analog I2C master from `0x600AF800` | read, write |
 | 25 | `BOOT_CAP_EFUSE` | `0x600B0800` | 1 KiB | the eFuse's registers, the factory MAC address among them | read |
+| 26 | `BOOT_CAP_FLASH` | `0x42000000` | 1 MiB | the window onto flash, for a program larger than the SRAM | read, execute |
 
 None is a bus master: the modem's two MACs, Wi-Fi's from `0x600A4000` and 802.15.4's at `0x600A3000`, are not listed,
 nor are PCR, PMU and the LP domain.
 The kernel takes the SAR ADC out of the reset the ROM leaves it in and turns its clocks on.
 The modem's clocks are off, in MODEM_SYSCON and MODEM_LPCON, for a driver to turn on.
+The window onto flash shows 1 MiB of the flash from `0x210000`, which the usual partition table gives to a file system;
+`esptool write-flash 0x210000 <image>` puts a program there, and nothing else in rvuos writes the flash.
 
 A device's interrupt reaches its `Irq` only while the device itself has it enabled,
 in the USB Serial/JTAG controller's case in its `INT_ENA` register.

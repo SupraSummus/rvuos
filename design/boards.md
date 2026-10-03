@@ -21,7 +21,7 @@ The kernel:
    an `Untyped` for the block of RAM the board sets aside for it,
    frames for the UART's registers,
    to the kernel's log
-   and to each device the board lists (later also to flash),
+   and to each device the board lists, on the ESP32-C6 a window onto flash among them,
    the machine's counter as a `Clock`,
    every line of the interrupt controller with the log's line before them,
    and every unit of the processor's time, with its own thread earning them all,
@@ -30,6 +30,7 @@ The kernel:
    and drops to user mode into the root task.
 
 A device range is granted read and write, or read alone where a write could do harm, never execute,
+but for the ESP32-C6's window onto flash, read and execute;
 the counter read only,
 and can never become a pool:
 it is a frame, and no Untyped covers it,
@@ -117,7 +118,8 @@ and the two must agree.
 RP2350 lists the pins' functions and pads and the three PIO blocks, which the Wi-Fi system of `user/wifi/` drives;
 the ESP32-C6 lists the SAR ADC and the blocks of its modem a PHY driver drives,
 which `tools/phymap.py` finds in ESP-IDF's PHY library and the ROM's,
-and the eFuse's registers, read only, so that no program burns a fuse;
+the eFuse's registers, read only, so that no program burns a fuse,
+and a window onto flash, read and execute, for a program larger than its SRAM;
 QEMU lists none, since its devices are the kernel's or the console, and the host build has no hardware;
 nor do the MPS2 boards yet.
 So on QEMU `BOOT_CAP_COUNT` is 18, the number the seeds and the corpus are written for.
@@ -147,6 +149,9 @@ The console is the chip's USB Serial/JTAG controller,
 a CDC-ACM port on its own USB connector.
 The ROM leaves the SAR ADC's registers in reset, where every write is dropped, and its clocks off;
 the kernel takes it out and starts them, since `board.h` lists it.
+The kernel maps 1 MiB of the flash through the cache's MMU at `0x42000000`, a window `board.h` places,
+which `tools/esp32c6-run.py` attaches before the jump, as a bootloader does;
+the Wi-Fi system's driver, too large for the SRAM, is to run from it.
 Before anything else the kernel turns off the four watchdogs the ROM leaves running,
 which stay off however the kernel's own watchdog is fed,
 and the access permission management units.

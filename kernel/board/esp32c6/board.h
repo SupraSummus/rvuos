@@ -76,6 +76,17 @@
 #define COUNTER_ADDR U32(0x20001c08)
 
 /*
+ * The window onto flash: FLASH_WINDOW_SIZE bytes of it from FLASH_WINDOW_FLASH,
+ * which board.c maps through the cache at FLASH_WINDOW_BASE,
+ * for a program too large for SRAM, such as the Wi-Fi system's driver, to run from.
+ * The flash must be attached when the kernel starts, as tools/esp32c6-run.py leaves it.
+ * The window lies in the 1.9 MiB the boards' usual partition table gives to a file system, unused here.
+ */
+#define FLASH_WINDOW_BASE  U32(0x42000000)
+#define FLASH_WINDOW_SIZE  U32(0x00100000)
+#define FLASH_WINDOW_FLASH U32(0x00210000)
+
+/*
  * The devices the boot grants as frames from BOOT_CAP_DEVICES up, in this order;
  * user/board/esp32c6/devices.h names their slots.
  * They are what a PHY driver drives, as tools/phymap.py finds in ESP-IDF's PHY library and the ROM:
@@ -86,8 +97,9 @@
  * as do the modem's pages no code names, where the Bluetooth controller may be,
  * but for the last KiB of the front end's frame.
  * PCR, PMU and the LP domain stay the kernel's: they reach the whole chip's clocks, power and resets.
+ * The window onto flash comes last, read and execute.
  */
-#define BOOT_DEVICES 8
+#define BOOT_DEVICES 9
 #define DEVICE_RANGE_LIST                                       \
     { U32(0x6000E000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
     { U32(0x600A0000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
@@ -96,15 +108,16 @@
     { U32(0x600A8000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
     { U32(0x600A9800), U32(0x00000400), RIGHT_R | RIGHT_W },    \
     { U32(0x600AF000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
-    { U32(0x600B0800), U32(0x00000400), RIGHT_R },
+    { U32(0x600B0800), U32(0x00000400), RIGHT_R },             \
+    { FLASH_WINDOW_BASE, FLASH_WINDOW_SIZE, RIGHT_R | RIGHT_X },
 
 /*
  * Interrupt line identifiers lie below IRQ_LINES; see irq.h.
- * A line is an interrupt matrix source, numbered as in Espressif's soc/interrupts.h;
- * the chip has 77 of them.
- * Line 0 is the kernel's log, see klog.h, so source 0, the Wi-Fi MAC's, is out of reach.
+ * A line is an interrupt matrix source, numbered as in Espressif's soc/interrupts.h, plus one;
+ * the chip has 77 sources.
+ * Line 0 is the kernel's log, see klog.h, so source 0, the Wi-Fi MAC's, is line 1.
  */
-#define IRQ_LINES 77
+#define IRQ_LINES 78
 
 /*
  * The CPU interrupt every source is routed to while it is unmasked,
