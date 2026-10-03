@@ -5,7 +5,7 @@
 
 #include "net.h"
 
-#include "lib.h"
+#include "lib/libc.h"
 
 #define ETH_HEADER  14u
 #define IP_HEADER   20u

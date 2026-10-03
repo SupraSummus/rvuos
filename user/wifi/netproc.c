@@ -1,19 +1,16 @@
 /*
- * The network process: the IP stack of net.c between the link's rings and the UDP services; see wifi.h.
+ * The network process: the IP stack of net.c between the link and the UDP services; see wifi.h.
  *
- * It starts with a0 at the page it shares with the root task, keeps its state at the base of its data frame,
- * and waits on one notification for everything: frames from the driver, room in the ring to it,
+ * It starts with a0 at the page it shares with the root task, keeps its state on its stack,
+ * and waits on one notification for everything: the link, which says it has frames from the driver or room for more,
  * its timer, which ticks every 100 ms for DHCP's retries, and the root task.
  * It asks for an address by DHCP once started, and answers on two UDP ports:
  * the echo, and a line that says what the system has done.
  */
 
-#include <stddef.h>
-
-#include "lib.h"
+#include "lib/libc.h"
+#include "lib/say.h"
 #include "net.h"
-#include "ring.h"
-#include "rvuos.h"
 #include "wifi.h"
 
 #define TICK_US 100000u
@@ -26,28 +23,15 @@ struct netp {
     uint32_t tx_full;
 };
 
-static void np_put(void *to, char c)
-{
-    if (plog_put(&((struct netp *)to)->page->c.log, c)) {
-        rv_signal(CHILD_ROOT, ROOT_BIT_PAGE(CHILD_NET));
-    }
-}
-
-/* A frame into the ring to the driver, which hears of it if the ring was empty; dropped if the ring is full. */
+/* A frame to the driver; dropped if the link is full. */
 static void np_send(struct net *n, const uint8_t *frame, uint32_t len)
 {
     struct netp *p = (struct netp *)n;
-    struct ring *tx = LINK_TX(p->page->link_base);
-    uint8_t *slot = ring_put_begin(tx);
-    if (slot == 0 || len > LINK_SLOT) {
+    if (chan_send(&p->page->link, frame, len) != 0) {
         p->tx_full++;
         return;
     }
-    memcpy(slot, frame, len);
     p->page->tx_frames++;
-    if (ring_put_end(tx, len)) {
-        rv_signal(NET_DRIVER, DRV_BIT_TX);
-    }
 }
 
 static void on_echo(struct net *n, uint32_t from_ip, uint16_t from_port, const uint8_t *data, uint32_t len)
@@ -83,30 +67,23 @@ static void on_status(struct net *n, uint32_t from_ip, uint16_t from_port, const
     net_udp_send(n, from_ip, from_port, NET_PORT_STATUS, (const uint8_t *)l.buf, l.len);
 }
 
-static void report(struct netp *p, uint32_t state)
+__attribute__((noreturn)) void net_main(struct child_page *c)
 {
-    p->page->c.state = state;
-    rv_signal(CHILD_ROOT, ROOT_BIT_PAGE(CHILD_NET));
-}
-
-void net_main(struct net_page *page);
-__attribute__((noreturn)) void net_main(struct net_page *page)
-{
-    struct netp *p = (struct netp *)page->c.data_base;
+    struct net_page *page = (struct net_page *)c;
+    struct netp np, *p = &np;
     memset(p, 0, sizeof(*p));
     p->page = page;
-    p->out = (struct out){ np_put, p };
+    p->out = child_out(c);
     net_init(&p->net, page->mac, np_send, p);
     net_udp_bind(&p->net, NET_PORT_ECHO, on_echo);
     net_udp_bind(&p->net, NET_PORT_STATUS, on_status);
 
     say(&p->out, "net: up\n");
-    report(p, NET_WAITING);
+    child_report(c, NET_WAITING);
     uint32_t skipped;
     rv_timer_period(CHILD_TIMER, CHILD_BIT_TIMER, TICK_US, &skipped);
     net_dhcp_start(&p->net);
 
-    struct ring *rx = LINK_RX(page->link_base);
     uint32_t bound = 0;
     for (;;) {
         uint32_t bits = 0;
@@ -120,12 +97,10 @@ __attribute__((noreturn)) void net_main(struct net_page *page)
         }
         uint32_t len;
         const uint8_t *frame;
-        while ((frame = ring_get_begin(rx, &len)) != 0) {
+        while ((frame = chan_get_begin(&page->link, &len)) != 0) {
             net_input(&p->net, frame, len);
             page->rx_frames++;
-            if (ring_get_end(rx)) {
-                rv_signal(NET_DRIVER, DRV_BIT_RXSPACE);
-            }
+            chan_get_end(&page->link);
         }
         page->pings = p->net.pings;
         if (!bound && p->net.dhcp_state == DHCP_BOUND) {
@@ -134,10 +109,10 @@ __attribute__((noreturn)) void net_main(struct net_page *page)
             page->mask = p->net.mask;
             page->gateway = p->net.gateway;
             say(&p->out, "net: address %I, gateway %I\n", p->net.ip, p->net.gateway);
-            report(p, NET_BOUND);
+            child_report(c, NET_BOUND);
         } else if (bound && p->net.dhcp_state != DHCP_BOUND) {
             bound = 0;
-            report(p, NET_WAITING);
+            child_report(c, NET_WAITING);
         }
     }
 }

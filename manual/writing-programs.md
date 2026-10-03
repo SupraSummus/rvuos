@@ -21,27 +21,51 @@ Constraints of the current linker script:
 Compile flags are `-march=rv32imac -mabi=ilp32 -mcmodel=medany -ffreestanding -nostdlib`,
 or `--target=thumbv7m-none-eabi -mcpu=cortex-m3 -mfloat-abi=soft -ffreestanding -nostdlib` on ARMv7-M,
 with `--target=thumbv8m.main-none-eabi -mcpu=cortex-m33+nodsp+nofp` in place of the first two on ARMv8-M.
-There is no libc; `user/rvuos.h` provides the system call wrappers:
+There is no libc; `user/rvuos.h` has a wrapper for every operation,
+and `user/lib/` what a program of several processes needs beside them, section 8.4:
 
 | Wrapper | Operation |
 |---|---|
 | `rv_invoke(op, cap, a1, a2, a3)` | any |
+| `rv_cap_copy(table, dst, src, rights)` | `OP_CAP_COPY` |
+| `rv_cap_derive(table, dst, src, rights)` | `OP_CAP_DERIVE` |
+| `rv_cap_move(table, dst, src)` | `OP_CAP_MOVE` |
+| `rv_cap_delete(table, slot)` | `OP_CAP_DELETE` |
+| `rv_cap_revoke(table, slot)` | `OP_CAP_REVOKE` |
 | `rv_frame_info(cap, &base, &size)` | `OP_FRAME_INFO` |
 | `rv_frame_min_size(cap, &min)` | `OP_FRAME_INFO`, reading `a4` |
+| `rv_frame_carve(cap, offset, size, dst)` | `OP_FRAME_CARVE` |
 | `rv_untyped_info(cap, &base, &size, &made)` | `OP_UNTYPED_INFO` |
 | `rv_retype(cap, type, dst, &base)` | `OP_UNTYPED_RETYPE` |
 | `rv_split(cap, lower, upper)` | `OP_UNTYPED_SPLIT` |
+| `rv_pool_alloc(pool, type, dst, arg)` | `OP_POOL_ALLOC` |
+| `rv_process_install(process, region, frame, rights)` | `OP_PROCESS_INSTALL` |
+| `rv_process_uninstall(process, region)` | `OP_PROCESS_UNINSTALL` |
+| `rv_thread_configure(thread, pc, sp)` | `OP_THREAD_CONFIGURE` |
+| `rv_thread_resume(thread)` | `OP_THREAD_RESUME` |
+| `rv_thread_watch(thread, ntfn, bits)` | `OP_THREAD_WATCH` |
+| `rv_thread_fault(thread, &cause, &pc, &addr, &status)` | `OP_THREAD_FAULT` |
+| `rv_thread_read_reg(thread, reg, &value)` | `OP_THREAD_READ_REG` |
+| `rv_thread_write_reg(thread, reg, value)` | `OP_THREAD_WRITE_REG` |
 | `rv_signal(cap, bits)` | `OP_NOTIFY_SIGNAL` |
 | `rv_wait(cap, &bits)` | `OP_NOTIFY_WAIT` |
+| `rv_irq_carve(lines, offset, count, dst)` | `OP_IRQ_CARVE` |
+| `rv_irq_bind(line, pool, ntfn, dst)` | `OP_IRQ_BIND` |
+| `rv_irq_set(cap, bits)` | `OP_IRQ_SET` |
 | `rv_timer_set(cap, bits, us)` | `OP_IRQ_SET` on a timer line, with the delay |
 | `rv_timer_period(cap, bits, us, &skipped)` | `OP_IRQ_SET` on a timer line, with `IRQ_SET_PERIOD` |
-| `rv_irq_set(cap, bits)` | `OP_IRQ_SET` |
+| `rv_clock_info(cap, &hz, &counter)` | `OP_CLOCK_INFO` |
+| `rv_clock_frame(cap, dst)` | `OP_CLOCK_FRAME` |
+| `rv_time_carve(time, offset, count, dst)` | `OP_TIME_CARVE` |
+| `rv_time_bind(time, thread, offset, count)` | `OP_TIME_BIND` |
 | `rv_putc(cap, c)`, `rv_puts(cap, s)`, `rv_put_hex(cap, v)` | `OP_DEBUG_PUTC` |
 | `rv_halt(cap, code)` | `OP_DEBUG_HALT` |
+| `rv_debug_trace(cap)`, `rv_debug_tick(cap)` | `OP_DEBUG_TRACE`, `OP_DEBUG_TICK` |
+| `rv_debug_irq(cap, line)`, `rv_debug_preempt(cap, n)` | `OP_DEBUG_IRQ`, `OP_DEBUG_PREEMPT` |
 
 To replace the demo, edit `user/init.c` or add a program to `USER_PROGRAMS` in the Makefile;
 each program becomes its own kernel image.
-A program of several files, as `user/wifi/`, has a rule of its own in the Makefile, section 8.4.
+A program of several processes lies in a directory of its own, section 8.4.
 
 ### 8.2 Building a second process
 
@@ -49,7 +73,8 @@ Today one program is embedded, and a second process runs code
 from the same code region with its own data and stack.
 Loading a separate binary is a userspace job the root task does not do yet;
 `DESIGN.md`, open decision 3.
-The steps below are what `user/init.c` does.
+The steps below are what `user/init.c` does, call by call;
+the library of section 8.4 takes them in one, and hands out the slots, regions and bits they name.
 
 1. **Take memory** out of `BOOT_CAP_FREE_RAM`:
    a frame to share, a frame for the child's data and stack,
@@ -152,26 +177,70 @@ for (;;) {
 Arming again after servicing is the acknowledgement.
 Give a timer line a second bit on the same notification for a timeout.
 
-### 8.4 A program of several processes: the Wi-Fi system
+### 8.4 The library for programs
 
-`user/wifi/` is a program of several files and three processes on a Pico 2 W:
+`user/lib/` is what a program of several processes needs beside the system calls,
+taken out of what the Wi-Fi system, section 8.5, first wrote for itself.
+It is a convention between a parent and the children it builds, not the kernel's,
+so a program may take part of it or none; `DESIGN.md`, "Programs are plain binaries".
+Each header says how its calls are used.
+
+| Header | What it gives |
+|---|---|
+| `lib/self.h` | what a process hands out of its own: slots, regions, bits of its inbox, timers, units of time, and memory halved out of Untypeds |
+| `lib/child.h` | a child built, started, heard and taken down by its parent, and the child's own calls: its log, its state, its sleep |
+| `lib/chan.h` | a channel between two children: a frame of two rings of packets, and a bit each way |
+| `lib/ring.h`, `lib/log.h` | the rings a channel is made of, a child's log, and the kernel's log as the root task reads it |
+| `lib/say.h`, `lib/libc.h` | text with values, and the memory functions the compiler calls |
+
+**Nothing in it keeps a global**,
+since every process runs the one image's code but only the root task with its data;
+each call works on the struct it is handed,
+and the link checks the library's objects and the children's with `tools/no-globals.py`.
+A child keeps its state on its stack, in its main's frame, which never returns.
+
+**A child** starts at its entry with `a0` at its page,
+which lies at the base of its data, one frame, with its stack at the top;
+its parent has the data installed too, and writes the rest of the page before the start.
+Its table starts with `CHILD_INBOX`, `CHILD_PARENT`, `CHILD_TIMER` and `CHILD_SELF`,
+its process with code and data in the first two regions, and its inbox with `CHILD_BIT_TIMER` and `CHILD_BIT_PARENT`.
+Past those the parent hands out the child's slots, regions and bits, and writes which into the page,
+so the type of a child's page is all the two agree on.
+A child holds no `Debug`: it writes its log and its state into the page, and signals its parent with its own bit.
+It costs its parent six slots, and `child_free` takes back everything that was made for it.
+
+**A channel** is connected by the parent into two children, running or not.
+Each end keeps where its rings lie and their shape in its page, which the other child cannot write,
+so a peer can spoil a packet but not steer the other's writes outside the ring.
+
+**What it does not do yet**, with the reasons in `TODO.md`:
+a child gets `a0` through `OP_THREAD_WRITE_REG`, a debugger's operation;
+children run on the first core;
+a channel is connected once;
+and halved memory is never joined again, so each free block holds a slot.
+
+`make lib-test` boots `user/libtest/` on any board.
+Its root task reads bytes back out of free memory, has two children send each other packets through rings that fill,
+and builds, hears fault and takes down a child twice,
+checking that everything handed out comes back and that the second child left the same behind as the first.
+
+### 8.5 A program of several processes: the Wi-Fi system
+
+`user/wifi/` is a program of several files and three processes on a Pico 2 W, built on the library:
 a root task that builds the system, a driver for the CYW43439, its Wi-Fi chip, and a network process with an IP stack;
-`wifi.h` says what they share.
-Every child starts with the same first slots, regions and bits, and a page it shares with the root task, whose address is its `a0`.
-The driver and the network process trade Ethernet frames through two rings in a frame both have installed, the link, `ring.h`,
-and a notification bit each way says a ring that was empty has a frame, or one that was full has room.
+`wifi.h` says what they share, which is the types of their pages.
+The driver and the network process trade Ethernet frames through a channel, the link.
 `make BOARD=rp2350 wifi` builds and runs it, section 4.
-The driver's process holds no `Debug` capability, which would let it halt the machine:
-it prints into a ring in the page it shares with the root task, and the root task copies the ring to the console.
-It reaches the chip through frames over PIO0's registers and over the control registers of four pins,
+The driver reaches the chip through frames over PIO0's registers and over the control registers of four pins,
 which the root task carves from the frames it is granted over PIO0 and IO_BANK0, section 3,
-and it installs the frames that hold the chip's firmware one at a time in a region of its own, since there are more of them than regions.
-Every process runs code from the one image, so a process other than the root task keeps no global:
-its state lies at the base of its data frame, whose address it is started with in `a0`, written with `OP_THREAD_WRITE_REG`,
-and the link runs `tools/no-globals.py` on its objects, which fails on any data or bss section.
+and it installs the frames that hold the chip's firmware one at a time in a region the root task left it,
+since there are more of them than regions.
 What the system does, scan, join a network or run an access point, comes from a file the loader places in the root task's input region,
 `make BOARD=rp2350 wifi WIFI_CONFIG=file`, with lines `mode=scan|sta|ap`, `ssid=`, `pass=` and `channel=`;
 so a passphrase lies in no image and in no file of the tree.
+A program of several processes lies in a directory of its own, `user/<program>/`, its root task in `root.c`,
+and the Makefile's `PROGRAMS` links each with the library.
+`user/wifi/NOTES.md` says what writing it was like, before the library and after.
 
 ## 9. Debugging and testing interfaces
 

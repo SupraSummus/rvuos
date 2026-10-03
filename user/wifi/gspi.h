@@ -12,6 +12,9 @@
 
 #include <stdint.h>
 
+/* A device register, at its address, which a frame over the device maps at. */
+#define REG32(addr) (*(volatile uint32_t *)(addr))
+
 #define GSPI_PIN_ON   23u
 #define GSPI_PIN_DATA 24u
 #define GSPI_PIN_CS   25u

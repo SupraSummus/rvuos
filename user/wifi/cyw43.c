@@ -12,7 +12,7 @@
 
 #include "cyw43.h"
 
-#include "lib.h"
+#include "lib/libc.h"
 
 #define FUNC_BUS       0u
 #define FUNC_BACKPLANE 1u

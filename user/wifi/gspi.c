@@ -20,8 +20,6 @@
 
 #include "gspi.h"
 
-#include "lib.h"
-
 #define PIO_CTRL              0x000u
 #define PIO_FSTAT             0x004u
 #define PIO_TXF0              0x010u

@@ -28,6 +28,115 @@ static inline uint32_t rv_invoke(uint32_t op, uint32_t cap,
     return r_a0;
 }
 
+/* OP_CAP_COPY: a copy of the caller's src in slot dst of the table, with rights at most. */
+static inline uint32_t rv_cap_copy(uint32_t table_cap, uint32_t dst, uint32_t src, uint32_t rights)
+{
+    return rv_invoke(OP_CAP_COPY, table_cap, dst, src, rights);
+}
+
+/* OP_CAP_DERIVE: as OP_CAP_COPY, but a child of src, which revoking below src takes. */
+static inline uint32_t rv_cap_derive(uint32_t table_cap, uint32_t dst, uint32_t src, uint32_t rights)
+{
+    return rv_invoke(OP_CAP_DERIVE, table_cap, dst, src, rights);
+}
+
+/* OP_CAP_MOVE: the caller's src into slot dst of the table, in src's place in the derivation tree. */
+static inline uint32_t rv_cap_move(uint32_t table_cap, uint32_t dst, uint32_t src)
+{
+    return rv_invoke(OP_CAP_MOVE, table_cap, dst, src, 0);
+}
+
+/* OP_CAP_DELETE: clear a slot of the table; what was derived from it goes to its parent. */
+static inline uint32_t rv_cap_delete(uint32_t table_cap, uint32_t slot)
+{
+    return rv_invoke(OP_CAP_DELETE, table_cap, slot, 0, 0);
+}
+
+/* OP_CAP_REVOKE: clear everything derived from a slot of the table, everywhere, and leave the slot. */
+static inline uint32_t rv_cap_revoke(uint32_t table_cap, uint32_t slot)
+{
+    return rv_invoke(OP_CAP_REVOKE, table_cap, slot, 0, 0);
+}
+
+/* OP_FRAME_CARVE: a smaller frame, a block of size at offset, in slot dst. */
+static inline uint32_t rv_frame_carve(uint32_t frame_cap, uint32_t offset, uint32_t size, uint32_t dst)
+{
+    return rv_invoke(OP_FRAME_CARVE, frame_cap, offset, size, dst);
+}
+
+/* OP_POOL_ALLOC: an object of type in slot dst; arg is the type's, see rvuos/abi.h. */
+static inline uint32_t rv_pool_alloc(uint32_t pool_cap, uint32_t type, uint32_t dst, uint32_t arg)
+{
+    return rv_invoke(OP_POOL_ALLOC, pool_cap, type, dst, arg);
+}
+
+/* OP_PROCESS_INSTALL: a frame in a region slot of the process, with rights at most the frame's. */
+static inline uint32_t rv_process_install(uint32_t process_cap, uint32_t region, uint32_t frame_cap,
+                                          uint32_t rights)
+{
+    return rv_invoke(OP_PROCESS_INSTALL, process_cap, region, frame_cap, rights);
+}
+
+/* OP_PROCESS_UNINSTALL: clear a region slot of the process. */
+static inline uint32_t rv_process_uninstall(uint32_t process_cap, uint32_t region)
+{
+    return rv_invoke(OP_PROCESS_UNINSTALL, process_cap, region, 0, 0);
+}
+
+/* OP_THREAD_CONFIGURE: where a stopped thread starts. */
+static inline uint32_t rv_thread_configure(uint32_t thread_cap, uint32_t pc, uint32_t sp)
+{
+    return rv_invoke(OP_THREAD_CONFIGURE, thread_cap, pc, sp, 0);
+}
+
+/* OP_THREAD_RESUME: make a stopped thread ready. */
+static inline uint32_t rv_thread_resume(uint32_t thread_cap)
+{
+    return rv_invoke(OP_THREAD_RESUME, thread_cap, 0, 0, 0);
+}
+
+/* OP_THREAD_WATCH: the bits the thread's faults signal on a notification; bits = 0 clears the watch. */
+static inline uint32_t rv_thread_watch(uint32_t thread_cap, uint32_t ntfn_cap, uint32_t bits)
+{
+    return rv_invoke(OP_THREAD_WATCH, thread_cap, ntfn_cap, bits, 0);
+}
+
+/* OP_THREAD_WRITE_REG: one register of a stopped thread, or its program counter, THREAD_REG_PC. */
+static inline uint32_t rv_thread_write_reg(uint32_t thread_cap, uint32_t reg, uint32_t value)
+{
+    return rv_invoke(OP_THREAD_WRITE_REG, thread_cap, reg, value, 0);
+}
+
+/* OP_IRQ_CARVE: a smaller range of lines, count from offset, in slot dst. */
+static inline uint32_t rv_irq_carve(uint32_t lines_cap, uint32_t offset, uint32_t count, uint32_t dst)
+{
+    return rv_invoke(OP_IRQ_CARVE, lines_cap, offset, count, dst);
+}
+
+/* OP_IRQ_BIND: the one line of line_cap bound to a notification, as an Irq from the pool in slot dst. */
+static inline uint32_t rv_irq_bind(uint32_t line_cap, uint32_t pool_cap, uint32_t ntfn_cap, uint32_t dst)
+{
+    return rv_invoke(OP_IRQ_BIND, line_cap, pool_cap, ntfn_cap, dst);
+}
+
+/* OP_CLOCK_FRAME: a read-only frame over the counter, in slot dst. */
+static inline uint32_t rv_clock_frame(uint32_t clock_cap, uint32_t dst)
+{
+    return rv_invoke(OP_CLOCK_FRAME, clock_cap, dst, 0, 0);
+}
+
+/* OP_TIME_CARVE: a smaller range of units, count from offset, in slot dst. */
+static inline uint32_t rv_time_carve(uint32_t time_cap, uint32_t offset, uint32_t count, uint32_t dst)
+{
+    return rv_invoke(OP_TIME_CARVE, time_cap, offset, count, dst);
+}
+
+/* OP_TIME_BIND: a thread bound to count units of the capability from offset, which it then earns. */
+static inline uint32_t rv_time_bind(uint32_t time_cap, uint32_t thread_cap, uint32_t offset, uint32_t count)
+{
+    return rv_invoke(OP_TIME_BIND, time_cap, thread_cap, offset, count);
+}
+
 /* OP_FRAME_INFO: where a frame points. */
 static inline uint32_t rv_frame_info(uint32_t frame_cap, uint32_t *base, uint32_t *size)
 {
@@ -249,6 +358,27 @@ static inline __attribute__((noreturn)) void rv_halt(uint32_t debug_cap, uint32_
     rv_invoke(OP_DEBUG_HALT, debug_cap, code, 0, 0);
     for (;;) {
     }
+}
+
+/* OP_DEBUG_TRACE, OP_DEBUG_TICK, OP_DEBUG_IRQ and OP_DEBUG_PREEMPT, for tests; see rvuos/abi.h. */
+static inline uint32_t rv_debug_trace(uint32_t debug_cap)
+{
+    return rv_invoke(OP_DEBUG_TRACE, debug_cap, 0, 0, 0);
+}
+
+static inline uint32_t rv_debug_tick(uint32_t debug_cap)
+{
+    return rv_invoke(OP_DEBUG_TICK, debug_cap, 0, 0, 0);
+}
+
+static inline uint32_t rv_debug_irq(uint32_t debug_cap, uint32_t line)
+{
+    return rv_invoke(OP_DEBUG_IRQ, debug_cap, line, 0, 0);
+}
+
+static inline uint32_t rv_debug_preempt(uint32_t debug_cap, uint32_t n)
+{
+    return rv_invoke(OP_DEBUG_PREEMPT, debug_cap, n, 0, 0);
 }
 
 #endif

@@ -9,6 +9,8 @@ On the board it joins a WPA2 network, takes an address by DHCP and answers a lap
 and datagrams on UDP ports 7 and 7777.
 These notes say what that took, what helped and what hurt,
 so that the next decisions about the kernel and a library for programs can start from a program and not from a guess.
+They were written before `user/lib/`, which came of them;
+the last section says what the library changed.
 
 ## What it took
 
@@ -148,3 +150,32 @@ In the kernel, by what they would save:
 5. **Badges**, open decision 6, once a server has clients that do not trust each other.
 6. **A run that lasts**: a watchdog the root task feeds through a frame, or the kernel through its tick,
    and a console that reaches the host while the system runs, which with the network up could be the network.
+
+## After the library
+
+`user/lib/` is the library the list above asked for, taken out of this program, see `MANUAL.md`, section 8.4,
+and the system was written again on it; it joins the same network and answers the same ping on both kinds of core.
+
+- **The root task** is 342 lines and 7.0 KiB of code, from 586 and 9.6 KiB.
+  A child is `child_new` and `child_start`, and the link `chan_new` and `chan_connect`.
+- **`wifi.h`** is 114 lines, from 188, and names no slot, region or bit:
+  the library hands each child's out and the root task writes which into the child's page,
+  so the pages' types are all the processes agree on.
+- **Slots.** A child costs the root task six slots, from twelve:
+  what is needed only to build it, its pool, its data's frame, its timer's `Irq` and its units, is deleted once used,
+  which the derivation tree allows, since what hung below a deleted capability goes to its parent.
+  A station's run ends with 26 of the 46 unused, and nothing gives a slot back by hand.
+  What the library cannot help is the free memory: halves never join again, so each free block holds a slot.
+- **Regions.** A child's page lies at the base of its data, so the page costs no region of its own:
+  the network process holds three, the driver six of seven, with the link no longer in the window's place,
+  and the root task six, a seventh for a moment.
+- **The link is safer.** The rings' shape and place lie in each end, in a page the other process cannot write;
+  the rings of `ring.h` kept theirs in the frame both write, so either side could have steered the other's writes past the ring.
+- **Timer lines** come from the kernel's answer, `KERR_OVERLAP` for one bound already, so nothing keeps them.
+- **The state of a child** is on its stack, in its main's frame, which never returns,
+  rather than at a base address it is told; `offsetof` remains only for the callbacks of the chip's layer.
+
+What a library cannot fix is as it was: who signalled, asking and answering, and connecting at run time.
+In the kernel, the list above stands, the devices excepted, which the boot grants now:
+a thread's argument, initialised data, a capability that only prints, badges, and a run that lasts.
+`make lib-test` checks the library on every board, and `make check` under QEMU on both architectures.

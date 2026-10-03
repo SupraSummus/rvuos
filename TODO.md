@@ -10,8 +10,8 @@ and a laptop's ping and datagrams to UDP ports 7 and 7777 are answered;
 `WIFI_CONFIG` in the Makefile says how to ask for which.
 
 - Only WPA2 with AES and open networks join; WPA3 needs the SAE passphrase the driver does not set.
-- UDP services live in the network process; a client in a process of its own needs a socket's rings
-  between it and the network process, and the network process a bit and a frame for each client.
+- UDP services live in the network process; a client in a process of its own needs a channel to it, `lib/chan.h`,
+  a protocol over the channel for its sockets, and a region and a bit of the network process's, which the region budget bounds.
 - The driver polls the chip every millisecond.
   The chip raises the data line, GPIO24, when it has a packet and chip select is high,
   which IO_BANK0 can turn into IO_IRQ_BANK0_NS, an `Irq` the driver would wait on instead.
@@ -23,16 +23,24 @@ and a laptop's ping and datagrams to UDP ports 7 and 7777 are answered;
 
 ## Programs
 
-`user/wifi/NOTES.md` says what writing a program of several processes was like; what it asks for:
+`user/wifi/NOTES.md` says what writing a program of several processes was like, and `user/lib/` is what came of it;
+what is left:
 
-- A library for programs beside `user/rvuos.h`: a process builder, a slot allocator that takes slots back,
-  an allocator over Untypeds, a channel of rings and bits, a log ring a child writes and its parent copies,
-  and wrappers for every operation; `user/wifi/` has the first versions of most of them.
-- A thread starts with no argument, so a creator writes `a0` with `OP_THREAD_WRITE_REG`,
-  which makes the thread one tracing cannot run; `OP_THREAD_CONFIGURE` could take it.
+- A thread starts with no argument, so `child_start` in `user/lib/child.c` writes `a0` with `OP_THREAD_WRITE_REG`,
+  a debugger's operation; `OP_THREAD_CONFIGURE` could take it.
 - No program may have initialised data; `start.S` could copy `.data` from the code region.
-- A child that only prints needs `Debug`, which halts the machine,
-  or a log of its parent's; a capability that only prints would do.
+- A child prints into a ring its parent copies, `lib/log.h`, which reaches the console only while the parent runs;
+  a capability that only prints would let a child reach the kernel's log itself, without `Debug`, which halts the machine.
+- The library's blocks never join again: the parent of a split is deleted to keep its slot,
+  so free memory ends as blocks that each hold a slot,
+  19 of the root task's 43 slots on QEMU once `user/libtest/` has given everything back.
+  Keeping a split's parent while a half is taken would let two free halves join again,
+  at a slot per split for as long as they are apart.
+- `struct self` hands out the first core's units alone, so children run on the first core.
+- A channel is connected once: a child taken down leaves the other end naming nothing,
+  and the child built in its place needs a channel of its own, which the other end has to learn of.
+- A child's stack grows down onto its page, and nothing stops it there;
+  a guard would cost a region, the scarcest thing a process has.
 
 ## ESP32-C6
 

@@ -77,13 +77,14 @@ BOARD_FAMILY := $(if $(filter mps2-%,$(BOARD)),mps2)
 FAMILY_DIRS  = $(if $(BOARD_FAMILY),$(1)/board/$(BOARD_FAMILY))
 
 # The kernel sees its architecture's and its board's headers,
-# and user programs their architecture's call and their board's console.
+# and user programs their architecture's call and their board's console,
+# and user/ itself, whence rvuos.h and the library's headers, lib/*.h.
 # The kernel leaves its frame sizes beside each object for tools/stack-depth.py
 # and puts each function in a section of its own, so the linker drops the dead ones.
 # Its debug information names files from the top of the tree,
 # so tools/loop-bounds.py finds them wherever the tree was built, as in a mutant's copy.
 KERNEL_INC := -Ikernel -Ikernel/arch/$(ARCH) -Ikernel/board/$(BOARD) $(addprefix -I,$(call FAMILY_DIRS,kernel))
-USER_INC   := -Iuser/arch/$(ARCH) -Iuser/board/$(BOARD) $(addprefix -I,$(call FAMILY_DIRS,user))
+USER_INC   := -Iuser -Iuser/arch/$(ARCH) -Iuser/board/$(BOARD) $(addprefix -I,$(call FAMILY_DIRS,user))
 $(BUILD)/kernel/%.o: CFLAGS += $(KERNEL_INC) -fstack-usage -ffunction-sections \
                                -fdebug-prefix-map=$(CURDIR)=.
 $(BUILD)/kernel/%.o: ASFLAGS += $(KERNEL_INC)
@@ -114,8 +115,8 @@ ifeq ($(BOARD),qemu)
 USER_PROGRAMS := init fuzzdrv
 IMAGE         := elf
 RUN_INIT      := $(QEMU) $(QEMUFLAGS) -bios $(BUILD)/kernel-init.elf
-# The escape suite boots one image at a time; the runner appends it to this prefix.
-ESCAPE_PREFIX := $(QEMU) $(QEMUFLAGS) -bios
+# The escape suite and the library's test boot one image at a time; the runner appends it to this prefix.
+BOOT_PREFIX   := $(QEMU) $(QEMUFLAGS) -bios
 else ifeq ($(BOARD),esp32c6)
 # The replay driver's layout is QEMU's, see rvuos/replay.h, so only the demo is built.
 USER_PROGRAMS := init
@@ -124,7 +125,7 @@ PORT          ?= /dev/ttyACM0
 # The runner imports esptool, so it runs under the Python the esptool command runs under.
 ESPTOOL_PYTHON ?= $(or $(shell sed -n '1s/^\#!//p' "$$(command -v $(ESPTOOL))" 2>/dev/null),python3)
 RUN_INIT      := $(ESPTOOL_PYTHON) tools/esp32c6-run.py --port $(PORT) $(BUILD)/kernel-init.bin
-ESCAPE_PREFIX := $(ESPTOOL_PYTHON) tools/esp32c6-run.py --port $(PORT)
+BOOT_PREFIX   := $(ESPTOOL_PYTHON) tools/esp32c6-run.py --port $(PORT)
 else ifeq ($(BOARD),rp2350)
 # The replay driver's layout is QEMU's, so only the demo is built, as for the ESP32-C6.
 # The runner loads the ELF's segments itself, and reboots into the cores the ELF is for; it needs pyusb.
@@ -132,7 +133,7 @@ USER_PROGRAMS := init
 IMAGE         := elf
 RP2350_PYTHON ?= python3
 RUN_INIT      := $(RP2350_PYTHON) tools/rp2350-run.py $(BUILD)/kernel-init.elf
-ESCAPE_PREFIX := $(RP2350_PYTHON) tools/rp2350-run.py
+BOOT_PREFIX   := $(RP2350_PYTHON) tools/rp2350-run.py
 ifeq ($(ARCH),arm)
 # Where the Cortex-M33's transcripts differ from QEMU virt's, see tests/run.sh:
 # an MPU of eight regions, none smaller than 32 bytes, and ARM's report of a fault.
@@ -152,7 +153,7 @@ QEMU_ARM      := qemu-system-arm
 QEMUFLAGS_ARM := -M mps2-an385 -cpu cortex-m3 -nographic -nodefaults -nic none -serial mon:stdio \
                  -semihosting-config enable=on,target=native -icount shift=0,sleep=off
 RUN_INIT      := $(QEMU_ARM) $(QEMUFLAGS_ARM) -kernel $(BUILD)/kernel-init.elf
-ESCAPE_PREFIX := $(QEMU_ARM) $(QEMUFLAGS_ARM) -kernel
+BOOT_PREFIX   := $(QEMU_ARM) $(QEMUFLAGS_ARM) -kernel
 # Where the core's transcripts differ from QEMU virt's, see tests/run.sh:
 # an MPU of eight regions, none smaller than 32 bytes, and ARMv7-M's report of a fault.
 BOARD_FACTS   := BOARD_PMP_ENTRIES=8 BOARD_PMP_GRAIN=32 BOARD_ARCH=arm
@@ -165,7 +166,7 @@ QEMU_ARM      := qemu-system-arm
 QEMUFLAGS_ARM := -M mps2-an521 -nographic -nodefaults -nic none -serial mon:stdio \
                  -semihosting-config enable=on,target=native -icount shift=0,sleep=off
 RUN_INIT      := $(QEMU_ARM) $(QEMUFLAGS_ARM) -kernel $(BUILD)/kernel-init.elf
-ESCAPE_PREFIX := $(QEMU_ARM) $(QEMUFLAGS_ARM) -kernel
+BOOT_PREFIX   := $(QEMU_ARM) $(QEMUFLAGS_ARM) -kernel
 # The Cortex-M33's, as RP2350's: eight Secure MPU regions, none smaller than 32 bytes, and ARM's report of a fault.
 BOARD_FACTS   := BOARD_PMP_ENTRIES=8 BOARD_PMP_GRAIN=32 BOARD_ARCH=arm
 else
@@ -184,7 +185,7 @@ else
 ESCAPE_PROGRAMS += escape-load-scs escape-stack-call escape-unstack
 endif
 
-.PHONY: all clean run test escape host-harnesses host-test fuzz corpus-merge qemu-replay mutants mutants-refresh \
+.PHONY: all clean run test escape lib-test host-harnesses host-test fuzz corpus-merge qemu-replay mutants mutants-refresh \
         mutants-fuzz arm-test smp-test contents check
 
 # Pattern rules would delete the objects they chain through,
@@ -274,34 +275,51 @@ test: $(BUILD)/kernel-init.$(IMAGE)
 # target like `make test`, never on the host. See DESIGN.md, "Verification", and TODO.md.
 escape: $(foreach p,$(ESCAPE_PROGRAMS),$(BUILD)/kernel-$(p).$(IMAGE))
 	for p in $(ESCAPE_PROGRAMS); do \
-		$(BOARD_FACTS) tests/escape.sh "$(ESCAPE_PREFIX) $(BUILD)/kernel-$$p.$(IMAGE)" $$p || exit 1; \
+		$(BOARD_FACTS) tests/escape.sh "$(BOOT_PREFIX) $(BUILD)/kernel-$$p.$(IMAGE)" $$p || exit 1; \
 	done
 
-# The Wi-Fi system on a Pico 2 W, see user/wifi/wifi.h: a program of several files,
-# whose processes other than the root task may keep no global, which the link checks,
+# Programs of several processes, see MANUAL.md, sections 8.4 and 8.5:
+# user/<program>/root.c is the root task, the rest of user/<program>/ its children's code,
+# and user/lib/, the library for programs, what they all may call.
+# Every process runs code from the one image but only the root task with its data,
+# so no other object may keep a global, which the link checks, the library's among them.
+LIB_OBJ       := $(patsubst %.c,$(BUILD)/%.o,$(wildcard user/lib/*.c))
+PROGRAMS      := wifi libtest
+program_root   = $(BUILD)/user/$(1)/root.o
+program_others = $(patsubst %.c,$(BUILD)/%.o,$(filter-out user/$(1)/root.c,$(wildcard user/$(1)/*.c)))
+define program
+$(BUILD)/user-$(1).elf: $(call program_root,$(1)) $(call program_others,$(1)) $(LIB_OBJ) $(USER_COMMON) \
+                        $(BUILD)/user/user.ld tools/no-globals.py
+	tools/no-globals.py $(call program_others,$(1)) $(LIB_OBJ)
+	$$(CC) $$(LDFLAGS) -Wl,-T,$(BUILD)/user/user.ld $(call program_root,$(1)) $(call program_others,$(1)) \
+		$(LIB_OBJ) $(USER_COMMON) -o $$@
+endef
+$(foreach p,$(PROGRAMS),$(eval $(call program,$(p))))
+
+# The library's own test, user/libtest/: a root task builds children with it, has two send each other packets,
+# takes down one that faults, twice, and then the rest, and checks everything it handed out came back.
+# It runs on every board, and `make check` runs it under QEMU on both architectures.
+lib-test: $(BUILD)/kernel-libtest.$(IMAGE)
+	tests/libtest.sh "$(BOOT_PREFIX) $<"
+
+# The Wi-Fi system on a Pico 2 W, see user/wifi/wifi.h,
 # and the CYW43439's firmware beside it, which tools/cyw43-blob.py fetches and packs, never into the tree.
 # The loader places the blob at the start of free RAM, FREE_RAM_BASE in kernel/board/rp2350/board.h.
-WIFI_ROOT_OBJ  := $(BUILD)/user/wifi/root.o
-WIFI_CHILD_OBJ := $(patsubst %.c,$(BUILD)/%.o,$(filter-out user/wifi/root.c,$(wildcard user/wifi/*.c)))
 WIFI_BLOB      := build/cyw43/blob.bin
 WIFI_BLOB_AT   := 0x20040000
 # What the root task is to do, lines of mode=scan|sta|ap, ssid=, pass= and channel=, from a file outside the tree,
 # placed in its input region, INPUT_BASE in board.h; with none it scans.
 WIFI_CONFIG    ?=
 WIFI_INPUT_AT  := 0x20038000
-$(BUILD)/user/wifi/%.o: CFLAGS += -Iuser
-$(BUILD)/user-wifi.elf: $(WIFI_ROOT_OBJ) $(WIFI_CHILD_OBJ) $(USER_COMMON) $(BUILD)/user/user.ld tools/no-globals.py
-	tools/no-globals.py $(WIFI_CHILD_OBJ)
-	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/user/user.ld $(WIFI_ROOT_OBJ) $(WIFI_CHILD_OBJ) $(USER_COMMON) -o $@
 
 $(WIFI_BLOB): tools/cyw43-blob.py
 	tools/cyw43-blob.py --cache build/cyw43 --out $@
 
 # The IP stack of user/wifi/net.c on the host, under the sanitizers, against frames a network would send.
 WIFI_TEST := build/host/wifi/net-test
-$(WIFI_TEST): user/wifi/test/net-test.c user/wifi/net.c user/wifi/net.h user/wifi/lib.h
+$(WIFI_TEST): user/wifi/test/net-test.c user/wifi/net.c user/wifi/net.h user/lib/libc.h
 	@mkdir -p $(dir $@)
-	$(HOST_CC) -std=c11 -O1 -g -Wall -Wextra -Werror -Wshadow $(HOST_SAN) -Iuser/wifi \
+	$(HOST_CC) -std=c11 -O1 -g -Wall -Wextra -Werror -Wshadow $(HOST_SAN) -Iuser -Iuser/wifi \
 		user/wifi/test/net-test.c user/wifi/net.c -o $@
 
 .PHONY: wifi wifi-test
@@ -451,11 +469,11 @@ qemu-replay: $(BUILD)/kernel-fuzzdrv.elf $(HOST_BUILD)/fuzz
 		--kernel $(BUILD)/kernel-fuzzdrv.elf --host $(HOST_BUILD)/fuzz tests/seeds tests/corpus
 
 # The same demo on ARM, under QEMU, on ARMv7-M and on ARMv8-M, and on mps2-an521's two cores,
-# and the escape suite on each version's one core; see DESIGN.md, "Architectures" and "Cores".
+# and the escape suite and the library's test on each version's one core; see DESIGN.md, "Architectures" and "Cores".
 # tests/mutants.sh leaves it out, as it leaves ARM out, which the host build does not compile.
 arm-test:
-	$(MAKE) BOARD=mps2-an385 test escape
-	$(MAKE) BOARD=mps2-an521 test escape
+	$(MAKE) BOARD=mps2-an385 test escape lib-test
+	$(MAKE) BOARD=mps2-an521 test escape lib-test
 	$(MAKE) BOARD=mps2-an521 CORES=2 test
 
 # The same demo on two harts of QEMU virt, which goes on to the second core; see DESIGN.md, "Cores".
@@ -467,11 +485,12 @@ smp-test:
 contents:
 	tools/contents.py MANUAL.md DESIGN.md
 
-check: contents test escape host-test wifi-test qemu-replay arm-test smp-test
+check: contents test escape lib-test host-test wifi-test qemu-replay arm-test smp-test
 
 clean:
 	rm -rf $(BUILD)
 
 -include $(KERNEL_OBJ:.o=.d) $(patsubst %,$(BUILD)/user/%.d,$(USER_PROGRAMS) $(ESCAPE_PROGRAMS)) \
-         $(WIFI_ROOT_OBJ:.o=.d) $(WIFI_CHILD_OBJ:.o=.d) \
+         $(foreach p,$(PROGRAMS),$(patsubst %.o,%.d,$(call program_root,$(p)) $(call program_others,$(p)))) \
+         $(LIB_OBJ:.o=.d) \
          $(BUILD)/kernel/kernel.d $(BUILD)/user/user.d $(HOST_OBJ:.o=.d)

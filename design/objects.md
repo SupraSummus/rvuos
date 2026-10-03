@@ -563,5 +563,10 @@ it cannot forge data or consume another client's wake.
 Putting the bits in the capability, as seL4's badges are,
 is open decision 6.
 
+`user/lib/chan.h` is that ring buffer between two children, with a bit each way.
+Each end keeps where its rings lie and their shape in memory the other end cannot write,
+since a ring's own header, shared, would let a peer steer the other's writes outside the ring;
+all a peer can spoil is a packet.
+
 Interrupts arrive as signals on the notification bound to an `Irq`,
 which needed no new mechanism; see "Interrupts".

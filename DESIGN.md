@@ -107,6 +107,12 @@ It follows that a program dropped onto a board must either be
 position independent or be linked for the address the loader chooses,
 which is open decision 3 below.
 
+`user/lib/`, the library for programs, is one such convention, for the children a parent builds:
+the slots, regions and bits every child starts with,
+and a page at the base of its data where its parent writes what else it gave it and where;
+see `MANUAL.md`, section 8.4.
+It is a program's choice like any other, and the kernel knows nothing of it.
+
 ## Non-goals
 
 - Virtual memory, paging, or address translation.

@@ -2,30 +2,27 @@
  * The driver of the CYW43439, a process of its own; see wifi.h for what it holds.
  *
  * It starts with a0 at the page it shares with the root task, which says where everything else lies,
- * keeps its state at the base of its data frame and its stack at the top,
- * and touches no global, since the globals are the root task's.
+ * and keeps its state on its stack, since the globals are the root task's.
  * The firmware blob is lent as frames that together are larger than the regions left,
  * so the driver installs them one at a time in a region of its own, its window, and uploads what each holds.
- * Once the chip runs, the root task takes the blob back and puts the link in the window's place,
- * and the driver moves frames between the chip and the link's rings for as long as the system runs.
+ * Once the chip runs, the root task takes the blob back and connects the link,
+ * and the driver moves frames between the chip and the link for as long as the system runs.
  */
 
 #include <stddef.h>
 
 #include "cyw43.h"
-#include "lib.h"
-#include "ring.h"
-#include "rvuos.h"
+#include "lib/libc.h"
+#include "lib/say.h"
 #include "wifi.h"
 #include "wlan.h"
 
 #define NO_FRAME 0xffffffffu
 
 struct drv {
-    struct cyw43 chip; /* first, so that the chip's sleep finds the driver */
+    struct cyw43 chip;
     struct drv_page *page;
     struct out out;
-    uint32_t link;     /* the link's base once the root task gave it, else 0 */
     uint32_t window;   /* the blob frame installed in the window, or NO_FRAME */
     int scan_done;
     uint32_t results;
@@ -73,42 +70,22 @@ static void on_event(struct wlan *w, const struct wlan_event *e)
     }
 }
 
-/* A frame from the chip into the ring to the network process, which hears of it if the ring was empty. */
+/* A frame from the chip to the network process; dropped while the link is down or full. */
 static void on_data(struct wlan *w, const uint8_t *frame, uint32_t len)
 {
-    struct drv *d = drv_of(w);
-    struct drv_page *p = d->page;
-    uint8_t *slot = d->link ? ring_put_begin(LINK_RX(d->link)) : 0;
-    if (slot == 0 || len > LINK_SLOT) {
+    struct drv_page *p = drv_of(w)->page;
+    if (chan_send(&p->link, frame, len) != 0) {
         p->rx_dropped++;
         return;
     }
-    memcpy(slot, frame, len);
     p->rx_frames++;
-    if (ring_put_end(LINK_RX(d->link), len)) {
-        rv_signal(DRV_NET, NET_BIT_RX);
-    }
 }
 
-/* Waits for the timer; other bits need no keeping, since what they announce lies in the page and the rings. */
+/* Waits for the timer; other bits need no keeping, since what they announce lies in the page and the link. */
 static void drv_sleep(struct cyw43 *chip, uint32_t us)
 {
     (void)chip;
-    uint32_t bits = 0;
-    rv_timer_set(CHILD_TIMER, CHILD_BIT_TIMER, us);
-    while (!(bits & CHILD_BIT_TIMER)) {
-        if (rv_wait(CHILD_INBOX, &bits) != KERR_OK) {
-            rv_breakpoint();
-        }
-    }
-}
-
-/* A byte of text into the page's log, and a line to the root task. */
-static void drv_put(void *to, char c)
-{
-    if (plog_put(&((struct drv *)to)->page->c.log, c)) {
-        rv_signal(CHILD_ROOT, ROOT_BIT_PAGE(CHILD_DRIVER));
-    }
+    child_sleep(us);
 }
 
 /* The address of the blob's byte at off, with the frame holding it installed, and how many follow in that frame. */
@@ -117,19 +94,19 @@ static const uint8_t *blob_at(struct drv *d, uint32_t off, uint32_t *left)
     const struct drv_page *s = d->page;
     uint32_t start = 0;
     for (uint32_t i = 0; i < s->blob_frames; i++) {
-        uint32_t size = s->blob_frame_size[i];
+        uint32_t size = s->blob_size[i];
         if (off < start + size) {
             if (d->window != i) {
                 if (d->window != NO_FRAME) {
-                    rv_invoke(OP_PROCESS_UNINSTALL, CHILD_SELF, DRV_REGION_WINDOW, 0, 0);
+                    rv_process_uninstall(CHILD_SELF, s->window);
                 }
-                if (rv_invoke(OP_PROCESS_INSTALL, CHILD_SELF, DRV_REGION_WINDOW, DRV_FIRMWARE + i, RIGHT_R) != KERR_OK) {
+                if (rv_process_install(CHILD_SELF, s->window, s->blob_slot[i], RIGHT_R) != KERR_OK) {
                     rv_breakpoint();
                 }
                 d->window = i;
             }
             *left = start + size - off;
-            return (const uint8_t *)(s->blob_base + off);
+            return (const uint8_t *)(uintptr_t)(s->blob_base + off);
         }
         start += size;
     }
@@ -161,40 +138,38 @@ static int upload(struct drv *d, uint32_t off, uint32_t len, uint32_t ram, int c
     return 0;
 }
 
+/* A state, with where the chip got to for a failure. */
 static void report(struct drv *d, uint32_t state)
 {
-    struct drv_page *p = d->page;
-    p->c.step = d->chip.step;
-    p->c.detail = d->chip.detail;
-    p->c.state = state;
-    rv_signal(CHILD_ROOT, ROOT_BIT_PAGE(CHILD_DRIVER));
+    d->page->c.step = d->chip.step;
+    d->page->c.detail = d->chip.detail;
+    child_report(&d->page->c, state);
 }
 
 /*
  * For as long as the system runs: what the firmware sends, events and frames, and the frames the network process
- * put into the ring to the chip, each sent as the firmware's credit allows.
+ * put into the link, each sent as the firmware's credit allows.
  * The chip is polled every millisecond, and a frame to send wakes the driver at once.
  */
 static __attribute__((noreturn)) void serve(struct drv *d)
 {
     struct drv_page *p = d->page;
+    int linked = 0;
     for (;;) {
-        if (d->link == 0 && p->link_base != 0) {
-            d->link = p->link_base;
+        if (!linked && chan_ready(&p->link)) {
+            linked = 1;
             say(&d->out, "drv: the link is up\n");
         }
         uint32_t moved = wlan_poll(&d->wlan);
         uint32_t len;
         const uint8_t *frame;
-        while (d->link && (frame = ring_get_begin(LINK_TX(d->link), &len)) != 0) {
+        while ((frame = chan_get_begin(&p->link, &len)) != 0) {
             if (wlan_send(&d->wlan, frame, len) != 0) {
                 break;
             }
             p->tx_frames++;
             moved++;
-            if (ring_get_end(LINK_TX(d->link))) {
-                rv_signal(DRV_NET, NET_BIT_TXSPACE);
-            }
+            chan_get_end(&p->link);
         }
         if (moved == 0) {
             uint32_t bits = 0;
@@ -206,11 +181,9 @@ static __attribute__((noreturn)) void serve(struct drv *d)
 
 static __attribute__((noreturn)) void stop(struct drv *d, uint32_t state)
 {
-    report(d, state);
-    for (;;) {
-        uint32_t bits;
-        rv_wait(CHILD_INBOX, &bits);
-    }
+    d->page->c.step = d->chip.step;
+    d->page->c.detail = d->chip.detail;
+    child_stop(&d->page->c, state);
 }
 
 static __attribute__((noreturn)) void fail(struct drv *d, uint32_t step, uint32_t detail)
@@ -268,15 +241,15 @@ static void boot(struct drv *d)
     say(&d->out, "drv: up, mac %M\n", s->mac);
 }
 
-void driver_main(struct drv_page *s);
-__attribute__((noreturn)) void driver_main(struct drv_page *s)
+__attribute__((noreturn)) void driver_main(struct child_page *page)
 {
-    struct drv *d = (struct drv *)s->c.data_base;
+    struct drv_page *s = (struct drv_page *)page;
+    struct drv drv, *d = &drv;
     memset(d, 0, sizeof(*d));
     d->page = s;
     d->window = NO_FRAME;
     d->chip.sleep = drv_sleep;
-    d->out = (struct out){ drv_put, d };
+    d->out = child_out(page);
     d->wlan.chip = &d->chip;
     d->wlan.on_event = on_event;
     d->wlan.on_data = on_data;

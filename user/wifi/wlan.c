@@ -4,7 +4,7 @@
 
 #include "wlan.h"
 
-#include "lib.h"
+#include "lib/libc.h"
 
 #define SDPCM_HEADER 12u
 #define CDC_HEADER   16u
