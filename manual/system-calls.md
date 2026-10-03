@@ -518,10 +518,10 @@ and drops into user mode with:
 | 15 | `BOOT_CAP_TIME` | `Time`: every unit of time, `TIME_UNITS` of each core, the first core's all earned by the root task's thread | write, execute |
 | 16 | `BOOT_CAP_ROOT_RAM` | `Untyped`: the root task's own memory, its code, data and input frames and the boot pool's block, all made already | all |
 | 17 | `BOOT_CAP_POOL_RAM` | `Untyped`: the boot pool's block, below `BOOT_CAP_ROOT_RAM`, made into the boot pool | all |
-| 18 on | `BOOT_CAP_DEVICES` | `Frame`s: one over each device the board lists, in its order, none on QEMU; section 3 | each the board's, read and write on RP2350 |
+| 18 on | `BOOT_CAP_DEVICES` | `Frame`s: one over each device the board lists, in its order, none on QEMU; section 3 | each the board's: read and write, but read only for the ESP32-C6's eFuse |
 
 `BOOT_CAP_COUNT` is 18 plus `BOOT_DEVICES`, the count in the board's `devices.h`, which `rvuos.h` includes:
-18 on QEMU, the ESP32-C6 and the MPS2 boards, and 23 on RP2350.
+18 on QEMU and the MPS2 boards, 23 on RP2350 and 26 on the ESP32-C6.
 A root task puts its own slots from there upwards.
 
 The root task's own table, process and thread take about 2.1 KiB of the boot pool,
@@ -544,7 +544,7 @@ and the successor stops the root task's thread and revokes below `BOOT_CAP_POOL_
 which destroys the boot pool, and the root task with it.
 `user/init.c` ends its demo this way; `DESIGN.md`, "The root task is its capabilities", gives the steps.
 
-Device ranges are frames, granted read and write, never execute,
+Device ranges are frames, granted read and write, or read alone where the board says so, never execute,
 the counter behind `BOOT_CAP_CLOCK` read only,
 and no Untyped covers them, so they can never become a pool.
 Neither can the log, which is a frame too.

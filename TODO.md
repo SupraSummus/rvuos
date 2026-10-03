@@ -65,14 +65,16 @@ what is left:
 - The PHY tracer: the root task that watches the harness of `user/phyblob/` and carries out its device accesses,
   laid out as `user/phytrace.h` says, and a rule that boots it with the harness beside it;
   `make BOARD=esp32c6 phyblob` builds the harness, and nothing has run it.
-- The tracer needs frames over what the harness reaches, which `DEVICE_RANGE_LIST` in the ESP32-C6's `board.h` must list;
-  it lists none.
-  Read from its code, `libphy.a` reaches the modem's blocks from `0x600a0000` to `0x600affff`,
-  APB_SARADC, eFuse, PCR, PMU and LP_AON; the ROM's PHY functions were not read.
-  Two kinds of these no board lists yet:
-  the Wi-Fi MAC, a bus master, which `mac_tx_chan_offset_new` writes at `0x600a4400`;
-  and PCR, PMU and LP_AON, which reach the clocks, power and resets of the whole chip, the kernel's devices among them.
-  Whether the tracer may log and feign their accesses instead is open.
+- The tracer has to log and feign the eight registers no frame covers, which `make BOARD=esp32c6 phymap` lists,
+  in PCR, PMU, the LP domain and the Wi-Fi MAC; what their reads should answer is open.
+  `phymap` sees only constant addresses, so a register reached through a table or a loop shows first in a trace.
+  The board's eight frames and the tracer's own regions exceed a process's eight region slots,
+  so the tracer maps a device's frame when the harness first reaches it.
+- Wi-Fi on the ESP32-C6 through Espressif's closed libraries, as the Wi-Fi system's driver.
+  Their code alone, before the linker drops any, is about 550 KB: `libnet80211.a` 310, `libpp.a` 185, `libphy.a` 45,
+  and nothing runs from flash yet, so the first question is what of it fits in 512 KiB of SRAM.
+  The MAC is a bus master, which no board lists (open decision 13),
+  and its interrupt is source 0, the line the kernel's log takes.
 - Feed the replay corpus to the board.
   Something has to put each input where `BOOT_CAP_INPUT` points,
   below the ROM's buffers or over USB once the kernel runs,

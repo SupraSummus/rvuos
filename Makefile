@@ -378,6 +378,23 @@ phyblob:
 	$(error the PHY harness runs on an ESP32-C6: make BOARD=esp32c6 phyblob)
 endif
 
+# The device registers the harness reaches, through libphy.a and the ROM's PHY functions,
+# against the frames the board lists; see tools/phymap.py, which also takes --i2c and --functions.
+# It reads the ROM's ELF, from Espressif's esp-rom-elfs, again never into the tree.
+PHYBLOB_ROM_ELF := $(PHYBLOB_CACHE)/esp32c6_rev0_rom.elf
+
+$(PHYBLOB_ROM_ELF): tools/phyblob-fetch.py
+	tools/phyblob-fetch.py --rom-elf $@
+
+.PHONY: phymap
+ifeq ($(BOARD),esp32c6)
+phymap: $(BUILD)/phyblob.elf $(PHYBLOB_ROM_ELF)
+	tools/phymap.py --objdump $(OBJDUMP) $(BUILD)/phyblob.elf $(PHYBLOB_ROM_ELF) kernel/board/esp32c6/board.h
+else
+phymap:
+	$(error the PHY harness runs on an ESP32-C6: make BOARD=esp32c6 phymap)
+endif
+
 # Host build: the kernel's logic compiled natively,
 # with a hardware shim and a libFuzzer harness.
 # See DESIGN.md, "Properties" and "Verification".

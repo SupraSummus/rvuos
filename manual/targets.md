@@ -112,6 +112,27 @@ Interrupt lines:
 | 0 | the kernel log; the Wi-Fi MAC's source 0 cannot be bound |
 | 1 to 76 | the interrupt matrix's sources, numbered as in Espressif's `soc/interrupts.h`; the USB Serial/JTAG controller is line 48 |
 
+The root task is granted a frame over each of these devices, from `BOOT_CAP_DEVICES` up,
+so `BOOT_CAP_COUNT` is 26 here and the root task's table has 72 slots.
+They are the SAR ADC and the blocks of the modem a PHY driver drives,
+as `make BOARD=esp32c6 phymap` finds them in ESP-IDF's PHY library and the ROM's,
+and the eFuse's registers:
+
+| Slot | Constant | Range | Size | What | Rights |
+|---|---|---|---|---|---|
+| 18 | `BOOT_CAP_SARADC` | `0x6000E000` | 4 KiB | APB_SARADC, the SAR ADC and the temperature sensor | read, write |
+| 19 | `BOOT_CAP_FE` | `0x600A0000` | 4 KiB | the modem's RF front end | read, write |
+| 20 | `BOOT_CAP_BT_BB` | `0x600A2000` | 4 KiB | the Bluetooth baseband | read, write |
+| 21, 22 | `BOOT_CAP_WIFI_BB0`, `BOOT_CAP_WIFI_BB1` | `0x600A7000`, `0x600A8000` | 4 KiB each | the Wi-Fi baseband | read, write |
+| 23 | `BOOT_CAP_MODEM_SYSCON` | `0x600A9800` | 1 KiB | MODEM_SYSCON, the modem's clocks and resets | read, write |
+| 24 | `BOOT_CAP_MODEM_LPCON` | `0x600AF000` | 4 KiB | MODEM_LPCON, the modem's LP clocks, and the analog I2C master from `0x600AF800` | read, write |
+| 25 | `BOOT_CAP_EFUSE` | `0x600B0800` | 1 KiB | the eFuse's registers, the factory MAC address among them | read |
+
+None is a bus master: the modem's two MACs, Wi-Fi's from `0x600A4000` and 802.15.4's at `0x600A3000`, are not listed,
+nor are PCR, PMU and the LP domain.
+The kernel takes the SAR ADC out of the reset the ROM leaves it in and turns its clocks on.
+The modem's clocks are off, in MODEM_SYSCON and MODEM_LPCON, for a driver to turn on.
+
 A device's interrupt reaches its `Irq` only while the device itself has it enabled,
 in the USB Serial/JTAG controller's case in its `INT_ENA` register.
 The tick is 1 kHz here too, measured against the chip's 16 MHz system timer at boot.

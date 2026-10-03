@@ -50,7 +50,8 @@ so a change to the library with a board connected runs `make BOARD=<board> lib-t
 Of the Wi-Fi system it runs only what makes no system call, the IP stack and the clients' sockets, on the host;
 a change to `user/wifi/` with a Pico 2 W connected runs `make BOARD=rp2350 wifi` too,
 and `WIFI_CONFIG` names a network to join from a file outside the tree, never in it.
-`make check` builds no PHY harness either, so a change to `user/phyblob/` or `user/phytrace.h` runs `make BOARD=esp32c6 phyblob`.
+`make check` builds no PHY harness either, so a change to `user/phyblob/`, `user/phytrace.h` or the ESP32-C6's device ranges
+runs `make BOARD=esp32c6 phymap`, which builds the harness and lists what it reaches that no frame covers.
 A new kernel global needs a reset in `host_boot` too,
 since the host boots once per input in one process.
 A new `BOOT_CAP_*` or `REPLAY_CAP_*` slot, a device QEMU's board lists, or an operation whose arguments change,

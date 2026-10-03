@@ -29,7 +29,7 @@ The kernel:
    starts the other cores, which idle until a thread is bound to their units, see "Cores",
    and drops to user mode into the root task.
 
-A device range is granted read and write, never execute,
+A device range is granted read and write, or read alone where a write could do harm, never execute,
 the counter read only,
 and can never become a pool:
 it is a frame, and no Untyped covers it,
@@ -115,8 +115,11 @@ The kernel keeps the ranges after the boot's other grants, so what is made of th
 A program's `devices.h` says how many there are and names their slots, in the order of the kernel's `board.h`,
 and the two must agree.
 RP2350 lists the pins' functions and pads and the three PIO blocks, which the Wi-Fi system of `user/wifi/` drives;
+the ESP32-C6 lists the SAR ADC and the blocks of its modem a PHY driver drives,
+which `tools/phymap.py` finds in ESP-IDF's PHY library and the ROM's,
+and the eFuse's registers, read only, so that no program burns a fuse;
 QEMU lists none, since its devices are the kernel's or the console, and the host build has no hardware;
-nor do the other boards yet.
+nor do the MPS2 boards yet.
 So on QEMU `BOOT_CAP_COUNT` is 18, the number the seeds and the corpus are written for.
 A device that is a bus master reaches whatever its driver points it at, so a board lists none:
 its frame would be the machine's; open decision 13.
@@ -142,6 +145,8 @@ where the ROM keeps its buffers while it loads;
 the kernel takes all 512 KiB once it runs, laid out as `manual/targets.md` shows.
 The console is the chip's USB Serial/JTAG controller,
 a CDC-ACM port on its own USB connector.
+The ROM leaves the SAR ADC's registers in reset, where every write is dropped, and its clocks off;
+the kernel takes it out and starts them, since `board.h` lists it.
 Before anything else the kernel turns off the four watchdogs the ROM leaves running,
 which stay off however the kernel's own watchdog is fed,
 and the access permission management units.

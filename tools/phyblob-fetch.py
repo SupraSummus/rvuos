@@ -7,14 +7,21 @@ into a cache outside the tree, and checked against their SHA-256.
 The init data is written as a C file of its 128 bytes,
 with ESP-IDF's default maximum TX power put into the entries that take it.
 
+With --rom-elf it writes the ESP32-C6's ROM as an ELF with its symbols, which tools/phymap.py reads.
+Espressif publishes it only in a release of every chip's ROM, about 4.9 MB,
+which is checked and unpacked in memory, so only the chip's 490 KB are kept.
+
 Usage: tools/phyblob-fetch.py --cache DIR --init-data FILE
+       tools/phyblob-fetch.py --rom-elf FILE
 """
 
 import argparse
 import hashlib
+import io
 import os
 import re
 import sys
+import tarfile
 import urllib.request
 
 IDF_COMMIT = "4d59230ddff16327812782151ef0afef202dc6d7"
@@ -30,6 +37,11 @@ FILES = {
     ROM_LD + "esp32c6.rom.libc.ld": "3c1e96e7c6796f9554cd92f8c13914c318712ea2dc91489b34e40c1dc4b91493",
     ESP_PHY + "phy_init_data.c": "16561a1b508f9ebbf9684b37d3d75dbbcfe4eb64ab5653efc9dfcbaa38bb9aa3",
 }
+
+ROM_ELFS = "https://github.com/espressif/esp-rom-elfs/releases/download/20260528/esp-rom-elfs-20260528.tar.gz"
+ROM_ELFS_SHA256 = "caa463d3cbef2430a5a35847c1d9f2f152403b17a802050927ff60c8da54fe46"
+ROM_ELF = "esp32c6_rev0_rom.elf"
+ROM_ELF_SHA256 = "788e1d38724aeb8fd974fa10c4a7b089c02627d35342ce84b9e0b12b239f3551"
 
 # CONFIG_ESP_PHY_MAX_WIFI_TX_POWER's default in ESP-IDF's components/esp_phy/Kconfig, in dBm.
 MAX_TX_POWER = 20
@@ -49,6 +61,23 @@ def fetch(cache, url, digest):
     if hashlib.sha256(data).hexdigest() != digest:
         sys.exit(f"phyblob-fetch: {path} is not the file expected; remove it to fetch it again")
     return data
+
+
+def rom_elf(path):
+    if not os.path.exists(path):
+        print(f"phyblob-fetch: fetching {ROM_ELFS}", file=sys.stderr)
+        with urllib.request.urlopen(ROM_ELFS, timeout=60) as r:
+            release = r.read()
+        if hashlib.sha256(release).hexdigest() != ROM_ELFS_SHA256:
+            sys.exit(f"phyblob-fetch: {ROM_ELFS} is not the release expected")
+        with tarfile.open(fileobj=io.BytesIO(release)) as tar:
+            data = tar.extractfile(ROM_ELF).read()
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(path + ".tmp", "wb") as f:
+            f.write(data)
+        os.replace(path + ".tmp", path)
+    if hashlib.sha256(open(path, "rb").read()).hexdigest() != ROM_ELF_SHA256:
+        sys.exit(f"phyblob-fetch: {path} is not the ROM expected; remove it to fetch it again")
 
 
 def entry(text):
@@ -72,21 +101,30 @@ def init_data(source):
     return values
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--cache", required=True)
-    ap.add_argument("--init-data", required=True)
-    args = ap.parse_args()
-
-    fetched = {url: fetch(args.cache, url, digest) for url, digest in FILES.items()}
+def write_init_data(cache, path):
+    fetched = {url: fetch(cache, url, digest) for url, digest in FILES.items()}
     values = init_data(fetched[ESP_PHY + "phy_init_data.c"].decode())
     rows = ",\n".join("    " + ", ".join(f"0x{v:02x}" for v in values[i:i + 8]) for i in range(0, 128, 8))
-    with open(args.init_data + ".tmp", "w") as f:
+    with open(path + ".tmp", "w") as f:
         f.write(f"/* Written by tools/phyblob-fetch.py from ESP-IDF {IDF_COMMIT[:8]}'s phy_init_data.c "
                 f"with a maximum TX power of {MAX_TX_POWER} dBm. */\n\n"
                 "#include <stdint.h>\n\n"
                 f"const struct {{\n    uint8_t params[128];\n}} phy_init_data = {{{{\n{rows}\n}}}};\n")
-    os.replace(args.init_data + ".tmp", args.init_data)
+    os.replace(path + ".tmp", path)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--cache")
+    ap.add_argument("--init-data")
+    ap.add_argument("--rom-elf")
+    args = ap.parse_args()
+    if args.init_data and not args.cache or not (args.init_data or args.rom_elf):
+        ap.error("--init-data with --cache, or --rom-elf")
+    if args.rom_elf:
+        rom_elf(args.rom_elf)
+    if args.init_data:
+        write_init_data(args.cache, args.init_data)
 
 
 if __name__ == "__main__":

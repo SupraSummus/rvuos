@@ -9,7 +9,7 @@ Report: memory that may hold kernel objects overlaps a node not above or below i
 diff --git a/kernel/boot.c b/kernel/boot.c
 --- a/kernel/boot.c
 +++ b/kernel/boot.c
-@@ -100,7 +100,7 @@ struct thread *boot_create_root(void)
+@@ -115,7 +115,7 @@ struct thread *boot_create_root(void)
          }
          bool pooled = i == BOOT_CAP_CAPTABLE || i == BOOT_CAP_PROCESS || i == BOOT_CAP_THREAD ||
                        i == BOOT_CAP_POOL;

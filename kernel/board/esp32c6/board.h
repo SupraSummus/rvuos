@@ -75,9 +75,28 @@
  */
 #define COUNTER_ADDR U32(0x20001c08)
 
-/* The devices the boot grants as frames from BOOT_CAP_DEVICES up: none yet. */
-#define BOOT_DEVICES 0
-#define DEVICE_RANGE_LIST
+/*
+ * The devices the boot grants as frames from BOOT_CAP_DEVICES up, in this order;
+ * user/board/esp32c6/devices.h names their slots.
+ * They are what a PHY driver drives, as tools/phymap.py finds in ESP-IDF's PHY library and the ROM:
+ * the SAR ADC with the temperature sensor, which board.c takes out of reset,
+ * the modem's front end, Bluetooth and Wi-Fi basebands, clock controls and analog I2C master,
+ * and the eFuse, read only so that no program burns a fuse.
+ * No bus master is listed: the Wi-Fi MAC from 0x600A4000 and the 802.15.4 MAC at 0x600A3000 lie outside,
+ * as do the modem's pages no code names, where the Bluetooth controller may be,
+ * but for the last KiB of the front end's frame.
+ * PCR, PMU and the LP domain stay the kernel's: they reach the whole chip's clocks, power and resets.
+ */
+#define BOOT_DEVICES 8
+#define DEVICE_RANGE_LIST                                       \
+    { U32(0x6000E000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
+    { U32(0x600A0000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
+    { U32(0x600A2000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
+    { U32(0x600A7000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
+    { U32(0x600A8000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
+    { U32(0x600A9800), U32(0x00000400), RIGHT_R | RIGHT_W },    \
+    { U32(0x600AF000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
+    { U32(0x600B0800), U32(0x00000400), RIGHT_R },
 
 /*
  * Interrupt line identifiers lie below IRQ_LINES; see irq.h.

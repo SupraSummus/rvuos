@@ -90,7 +90,7 @@ struct thread *boot_create_root(void)
      * and those to the boot pool and its objects, which hang below the pool's node;
      * revoking below BOOT_CAP_POOL takes what was allocated through it and not these.
      */
-    struct cap boot[BOOT_CAP_COUNT] = {
+    struct cap boot[BOOT_CAP_DEVICES] = {
         [BOOT_CAP_CAPTABLE] = cap_to_object(&table->hdr, RIGHT_ALL),
         [BOOT_CAP_PROCESS] = cap_to_object(&proc->hdr, RIGHT_ALL),
         [BOOT_CAP_THREAD] = cap_to_object(&thread->hdr, RIGHT_ALL),
@@ -109,11 +109,7 @@ struct thread *boot_create_root(void)
         [BOOT_CAP_CLOCK] = { .type = CAP_CLOCK, .rights = RIGHT_ALL },
         [BOOT_CAP_TIME] = cap_to_time(0, MACHINE_UNITS, RIGHT_W | RIGHT_X),
     };
-    for (unsigned i = BOOT_CAP_DEVICES; i < BOOT_CAP_COUNT; i++) {
-        const struct granted_range *g = &boot_granted[GRANT_DEVICES + i - BOOT_CAP_DEVICES];
-        boot[i] = cap_to_frame(g->base, g->size, g->rights);
-    }
-    for (unsigned i = BOOT_CAP_NULL + 1; i < BOOT_CAP_COUNT; i++) {
+    for (unsigned i = BOOT_CAP_NULL + 1; i < BOOT_CAP_DEVICES; i++) {
         if (i == BOOT_CAP_ROOT_RAM || i == BOOT_CAP_POOL_RAM) {
             continue;
         }
@@ -124,6 +120,14 @@ struct thread *boot_create_root(void)
             kpanic("boot layout is not made of NAPOT blocks");
         }
         if (cap_store(table, i, &boot[i], pooled ? &pool->node : own ? root_ram : NULL) != KERR_OK) {
+            kpanic("cannot fill the root task's table");
+        }
+    }
+    /* The board's devices, each made as it is stored, so that the stack does not grow with their count. */
+    for (unsigned i = BOOT_CAP_DEVICES; i < BOOT_CAP_COUNT; i++) {
+        const struct granted_range *g = &boot_granted[GRANT_DEVICES + i - BOOT_CAP_DEVICES];
+        struct cap frame = cap_to_frame(g->base, g->size, g->rights);
+        if (cap_store(table, i, &frame, NULL) != KERR_OK) {
             kpanic("cannot fill the root task's table");
         }
     }

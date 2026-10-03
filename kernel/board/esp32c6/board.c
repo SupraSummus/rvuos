@@ -12,6 +12,10 @@
  * PMP is what confines a process on rvuos, so the filters go off as well,
  * as ESP-IDF's startup turns them off; see DESIGN.md, "Boards".
  *
+ * The ROM hands over the SAR ADC, a device board.h lists, with its registers held in reset, where writes are dropped,
+ * and its and the temperature sensor's clocks off, as measured on the chip.
+ * No program reaches PCR, so the kernel turns the clocks on and lets the registers out of reset.
+ *
  * The core has user-mode traps, the N extension,
  * and resets with mideleg at 0x111, delegating the user software, timer and external interrupts,
  * 0, 4 and 8, to a handler in user mode that no process set up and the kernel does not switch.
@@ -47,6 +51,13 @@
 #define LP_APM0_FUNC_CTRL    0x600998C4u
 #define LP_APM_FUNC_CTRL     0x600B38C4u
 
+/* The SAR ADC's clocks and resets, and the temperature sensor's clock, in PCR. */
+#define PCR_SARADC_CONF       0x60096080u
+#define PCR_SARADC_CLK_EN     (1u << 0)
+#define PCR_SARADC_REG_CLK_EN (1u << 2) /* its registers' clock; bit 3 holds them in reset */
+#define PCR_TSENS_CLK_CONF    0x60096088u
+#define PCR_TSENS_CLK_EN      (1u << 22)
+
 void board_init(void)
 {
     csr_write(mideleg, 0);
@@ -69,6 +80,9 @@ void board_init(void)
     REG(LP_WDT_SWD_WPROTECT) = WDT_KEY;
     REG(LP_WDT_SWD_CONFIG) |= LP_WDT_SWD_DISABLE;
     REG(LP_WDT_SWD_WPROTECT) = 0;
+
+    REG(PCR_SARADC_CONF) = PCR_SARADC_CLK_EN | PCR_SARADC_REG_CLK_EN;
+    REG(PCR_TSENS_CLK_CONF) |= PCR_TSENS_CLK_EN;
 }
 
 /*
