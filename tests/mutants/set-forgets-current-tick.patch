@@ -1,5 +1,5 @@
-OP_IRQ_SET on a timer line forgets the tick the call landed in:
-a delay of zero arms the line for the tick already counted.
+A delay forgets the tick the call landed in:
+a delay of zero arms a timer line for the tick already counted, and every deadline comes a tick early.
 The tick fires every due timer line,
 so an Irq armed on one has its deadline ahead of the count.
 The demo times its sleeps on the clock, which now keeps pace with the tick, and finds them short.
@@ -10,12 +10,12 @@ Report: armed timer line is due
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -616,7 +616,7 @@ static int op_irq(const struct cap *cap, uint32_t op, uint32_t *arg)
-              * The count wraps and irq_due compares with a signed difference,
-              * which is exact while a delay stays far below half the count's range.
-              */
--            irq->deadline = sched_ticks + ticks + 1;
-+            irq->deadline = sched_ticks + ticks;
-         }
-     }
-     /* Armed and unmasked are one state, here and in sched_interrupt. */
+@@ -164,7 +164,7 @@ static uint32_t delay_ticks(uint32_t us)
+  */
+ static uint32_t delay_deadline(uint32_t ticks)
+ {
+-    return sched_ticks + ticks + 1;
++    return sched_ticks + ticks;
+ }
+ 
+ /*

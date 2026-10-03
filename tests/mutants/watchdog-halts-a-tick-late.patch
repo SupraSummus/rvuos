@@ -1,0 +1,18 @@
+The tick halts the machine only once the count has passed the watchdog's deadline, a tick after it reached it;
+the tick that reaches the deadline halts the machine.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: the machine runs past the watchdog's deadline
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -511,7 +511,7 @@ static void tick_advance(uint32_t ticks)
+         }
+     }
+     if (watchdog.armed) {
+-        if (!tick_before(sched_ticks, watchdog.deadline)) {
++        if (tick_before(watchdog.deadline, sched_ticks)) {
+             kputs("watchdog: not fed in time\n");
+             khalt(7);
+         }

@@ -89,12 +89,21 @@ rather than a round trip to that server.
 **Reading the time.**
 A timer line says that a delay has passed, not what time it is.
 The `Clock` capability gives the time:
-`OP_CLOCK_INFO` returns the counter's rate and address,
-and `OP_CLOCK_FRAME` derives a read-only `Frame` holding the counter, below the clock.
-A process with that region installed reads the time with loads, without a trap.
+`OP_CLOCK_READ` returns the counter's counts since boot, 64 bits on every board, and its rate.
+The kernel counts a 32-bit counter's wraps for its tick anyway, so the MPS2 boards' time is whole too,
+and under tracing the time is the tick count's, as every clock is there; see "Verification".
 The rate is the board's, and on the ESP32-C6 measured at boot, so a program takes it from the clock.
-The frame is the smallest block holding the counter's two words;
-on a PMP grain coarser than eight bytes it also shows the timer registers beside them, read only.
+
+**And the counter's frame, for a reader that cannot trap.**
+A call is a trap, which a program that measures what the kernel does to it cannot afford:
+a thread spinning to see whether the tick or another core takes the processor would trap at every read.
+So `OP_CLOCK_FRAME` derives a read-only `Frame` over the counter's low 32 bits, below the clock,
+and a process with that region installed reads them with a load.
+They wrap, and the rest of the counter lies where the board has it, the word below on RP2350 and nowhere on the MPS2 boards,
+so the frame gives differences and the call the time.
+The frame is the smallest block holding the word;
+on a PMP grain coarser than eight bytes it also shows the timer registers beside it, read only.
+A board whose counter cannot be shown so, or whose neighbours a read would change, would refuse the frame; none does yet.
 
 **Why a capability.**
 The time is authority, and goal 2 allows no ambient authority:
@@ -103,8 +112,8 @@ unless it builds a clock from a second thread or learns the time from someone wh
 On the ESP32-C6 it can time its own turn on the core's performance counter,
 which the kernel stops at zero whenever another process's thread runs; see open decision 22.
 Gating `rdtime` would have needed `mcounteren` switched per process, and the ESP32-C6 has neither.
-A region already carries rights, derivation and revoke, so the clock adds one type and no object.
-The rate alone tells nothing about time, so it has no capability of its own.
+`RIGHT_R` on the clock reads the time, and `RIGHT_W` feeds the watchdog; see "The watchdog".
+Neither needs an object, so the clock adds one type and no object.
 
 ## Scheduling
 
@@ -242,18 +251,18 @@ or the release, when a thread on the spent queue waits for its account.
 The kernel counts those `Irq`s as they are armed and disarmed,
 so it knows without a walk, and the spent queue it looks at.
 With any of them the core idles once the trap is over, `sched_idle`, and stalls in `wfi`
-until the nearest deadline of a timer line armed on the core, the release,
+until the nearest deadline of a timer line armed on the core or of the watchdog it fed, the release,
 or a device interrupt is pending,
 takes it by hand since machine mode runs with `MIE` clear,
 and looks for a runnable thread again;
-with none it says `no runnable thread` and stops the machine.
+with none it says `no runnable thread` and stops the machine, watchdog or not.
 On several cores another core running a thread can make one runnable too, and interrupts the core for it,
 so the machine stops only once no core runs a thread or has one waiting; see "Cores".
 
 **The timer interrupts only for a tick that could change what runs.**
 A tick that ends a turn only to hand the processor back to the same thread moves the counts and nothing else.
 So while another thread could have the next turn, `mtimecmp` is set for the next tick,
-and otherwise for the nearest of the deadline of a timer line armed on the core, the release,
+and otherwise for the nearest of the deadline of a timer line armed on the core or of the watchdog it fed, the release,
 and the tick the running thread's account drains, unless it may go on alone on spare time,
 where its account changes nothing that runs.
 The account drains only at a tick, since a turn with time never outruns it before the next tick,
@@ -285,3 +294,47 @@ units each earned by one thread are the least that make a thread cost nobody but
 and an account per thread is the least that caps its time without keeping the others busy.
 Fixed priorities were the intended end state of this section
 and are now open decision 9.
+
+## The watchdog
+
+**It halts a machine that stopped working.**
+A system whose threads all wait for what never comes runs on and does nothing.
+The watchdog halts the machine unless someone says, often enough, that all is well.
+It halts rather than resets, so the log is written out where the board has a way to,
+and what follows is the board's: BOOTSEL on RP2350.
+
+**One watchdog, fed through the clock.**
+`OP_CLOCK_WATCHDOG` on a clock with `RIGHT_W` arms the machine's one watchdog, or moves its deadline, nearer or further:
+the machine halts with code 7 unless the call comes again within the delay it names, at most `WATCHDOG_US_MAX`, ten seconds.
+The deadline is the one a timer line would have, the first tick that surely lies past the delay,
+and the tick looks at it as at the timer lines, so it costs no walk.
+The core that fed it last wakes for it, as the core that armed a timer line does,
+so a machine whose threads all wait halts on time.
+Nothing disarms it, since a watchdog that can be stopped is one a broken system may have stopped.
+The bound keeps a deadline far inside the tick count's half range, by which deadlines compare,
+and below what a board's own watchdog can count.
+
+**Whether all is well is the holder's to judge.**
+The kernel learns only that the holder fed it.
+A root task that feeds it from its loop says that it runs, not that its children do;
+one that feeds only once each child has said it is well, by a word in its page or an answer on its channel, says more.
+A child given `RIGHT_W` can keep the machine running whatever the root task does, or halt it by never feeding.
+A watchdog for each process would be a timer line:
+what a parent does about a child that hangs, take it down and build it again, is not a halt.
+
+**A board's own watchdog is the kernel's.**
+A frame over one would be the machine's, as a bus master's would:
+RP2350's watchdog keeps, beside its count, the registers that tell the bootrom what to run after the reset,
+which its holder could point at code of its own, run in machine mode.
+So no board lists a watchdog among its devices, and the kernel keeps the board's for when the kernel itself stops:
+each feed sets RP2350's to reset the chip a second after the kernel's deadline, which only a kernel that cannot halt reaches.
+Until the first feed it counts as the boot set it, so a run that never feeds still ends within seventeen seconds.
+The ESP32-C6's stay off, and QEMU's boards start none; see "Boards".
+
+**Why on the clock.**
+The watchdog is a deadline in the machine's time, so a right on the clock names it,
+with no new type and no boot slot, which would have renumbered the seeds and the corpus.
+The rights keep the two apart: a copy with `RIGHT_W` alone feeds the watchdog and cannot read the time,
+and one with `RIGHT_R` alone reads the time and cannot feed it.
+Whether the kernel should keep a watchdog at all is open decision 26.
+

@@ -53,7 +53,7 @@
 #define CAP_UNTYPED  8 /* memory that may become a frame, a pool or two halves; never mapped */
 #define CAP_IRQ_LINE 9 /* a range of interrupt lines; no kernel object behind it */
 #define CAP_IRQ      10 /* one line bound to a notification; signals it when the line fires */
-#define CAP_CLOCK    11 /* the machine's counter: its rate, and a frame to read it through */
+#define CAP_CLOCK    11 /* the machine's time, the counter's frame, and its watchdog */
 #define CAP_TIME     12 /* a range of the processor's units of time; no kernel object behind it */
 
 /*
@@ -72,7 +72,8 @@
  * Debug: RIGHT_W to write into the kernel's log,
  *   RIGHT_X to halt the machine or drive it as a test does: trace, tick, interrupt, preempt;
  *   a child that only prints holds it with RIGHT_W alone.
- * Clock: any right.
+ * Clock: RIGHT_R to read the time, and the counter through a frame,
+ *   RIGHT_W to hold the machine to the watchdog, which halts it unless fed.
  * Copying a capability can only remove rights.
  */
 #define RIGHT_R 0x1
@@ -443,19 +444,32 @@
 #define IRQ_SET_PERIOD 0x1
 
 /*
- * Clock: describe the machine's counter, 64 bits counting up from boot at a fixed rate.
- * Returns a1 = the rate in Hz, measured at boot on the ESP32-C6,
- * and a2 = the address of the low word; the high word follows.
- * RV32 reads the high word, the low word and the high word again,
- * and starts over while the high word moved.
+ * Clock (RIGHT_R): read the machine's time, 64 bits counting up from boot at a fixed rate.
+ * Returns a1 = the low word, a2 = the high word, a3 = the rate in Hz, measured at boot on the ESP32-C6,
+ * and a4 = the address of the counter's low 32 bits, which OP_CLOCK_FRAME shows.
+ * Under tracing the time is the tick count's; see DESIGN.md, "Verification".
  */
-#define OP_CLOCK_INFO 25
+#define OP_CLOCK_READ 25
 /*
- * Clock: derive a read-only frame holding the counter, a child of the clock. a1 = destination slot.
- * Installed, it lets a process read the counter with loads.
- * It is the smallest block holding the two words, so a coarse PMP grain shows their neighbours too.
+ * Clock (RIGHT_R): derive a read-only frame holding the counter's low 32 bits, a child of the clock.
+ * a1 = destination slot.
+ * Installed, it lets a process read them with a load and no call.
+ * They wrap, after 71 minutes at a megahertz, so a program takes differences of them;
+ * the whole time is OP_CLOCK_READ's, since where the rest of the counter lies, if anywhere, is the board's.
+ * It is the smallest block holding the word, so a coarse PMP grain shows its neighbours too.
  */
 #define OP_CLOCK_FRAME 26
+/*
+ * Clock (RIGHT_W): the watchdog. a1 = microseconds, more than zero and at most WATCHDOG_US_MAX,
+ * else KERR_INVALID_ARG.
+ * The machine halts with code 7 unless the watchdog is fed again within a1 microseconds:
+ * at the first tick that surely lies past them, as a timer line fires; see OP_IRQ_SET.
+ * The first call arms it, and nothing disarms it; each call sets the time anew, nearer or further.
+ * There is one watchdog on the machine, which every capability with RIGHT_W to the clock feeds.
+ * See DESIGN.md, "The watchdog".
+ */
+#define OP_CLOCK_WATCHDOG 37
+#define WATCHDOG_US_MAX 10000000u /* ten seconds */
 
 /*
  * Time: derive a smaller range of units with the same rights.
@@ -483,7 +497,7 @@
 #define OP_TIME_BIND 29
 
 /* One above the highest operation code; the fuzzer's mutator draws below it. */
-#define OP_COUNT 37
+#define OP_COUNT 38
 
 /*
  * Capability slots the kernel fills in the root task's table at boot.

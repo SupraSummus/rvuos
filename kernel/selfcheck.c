@@ -606,6 +606,32 @@ static void check_core(uint32_t i)
 }
 
 /*
+ * An armed watchdog lies ahead of the count, since the tick that reaches it halts the machine,
+ * and no further than the longest delay a feed sets;
+ * the core that fed it wakes for it, as for a timer line it armed.
+ */
+static void check_watchdog(void)
+{
+    if (!watchdog.armed) {
+        return;
+    }
+    uint32_t ahead = watchdog.deadline - sched_ticks;
+    if ((int32_t)ahead <= 0) {
+        fail("the machine runs past the watchdog's deadline", watchdog.deadline, sched_ticks, 0);
+    }
+    if (ahead > WATCHDOG_US_MAX / TIMER_US_PER_TICK + 1) {
+        fail("the watchdog is set further than the longest delay", watchdog.deadline, sched_ticks, 0);
+    }
+    if (watchdog.core >= CORES) {
+        fail("the watchdog names a core there is not", watchdog.core, 0, 0);
+    }
+    uint32_t nearest = cores[watchdog.core].nearest_deadline;
+    if ((int32_t)(watchdog.deadline - nearest) < 0) {
+        fail("the watchdog comes due before the timer wakes for it", watchdog.deadline, nearest, watchdog.core);
+    }
+}
+
+/*
  * Each unit names the live thread that earns it, or none, and check_thread has held every thread's units to the table,
  * so as many units named as units bound leaves no unit naming a thread that does not earn it.
  * Each core's queues hold the threads that name them and it, and check_thread counted those owed a place on one.
@@ -615,6 +641,8 @@ static void check_core(uint32_t i)
  */
 static void check_scheduler(void)
 {
+    /* Before the cores, so that a watchdog past its deadline is reported as itself and not as its core's deadline. */
+    check_watchdog();
     for (uint32_t i = 0; i < CORES; i++) {
         check_core(i);
     }
@@ -1000,12 +1028,12 @@ static bool derived_from(const struct cap *c, const struct cap *p)
                (c->type != CAP_NOTIFICATION || !(c->b & ~p->b));
     }
     /*
-     * The clock gives out one frame, the counter's block, read only,
+     * A clock that reads gives out one frame, the counter's block, read only,
      * and adopts what was carved or installed from it when a delete or a revoke takes it.
      */
     if ((c->type == CAP_FRAME || c->type == CAP_INSTALLED) && p->type == CAP_CLOCK) {
         const struct granted_range *g = &boot_granted[GRANT_COUNTER];
-        return !(c->rights & ~g->rights) && range_within(c->a, c->b, g->base, g->size);
+        return (p->rights & RIGHT_R) && !(c->rights & ~g->rights) && range_within(c->a, c->b, g->base, g->size);
     }
     if (c->type == CAP_INSTALLED && p->type == CAP_FRAME) {
         return narrower && range_within(c->a, c->b, p->a, p->b);

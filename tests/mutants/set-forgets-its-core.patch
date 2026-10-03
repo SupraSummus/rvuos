@@ -8,11 +8,11 @@ Report: armed timer line comes due before the timer wakes for it
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -43,7 +43,6 @@ void irq_set_bits(struct irq *irq, uint32_t bits)
-      */
+@@ -50,7 +50,6 @@ void irq_set_bits(struct irq *irq, uint32_t bits)
+     }
+     /* A timer line wakes the core that armed it, and only that one. */
      if (line_is_timer(irq->line) && bits != 0) {
-         struct core *core = core_self();
 -        irq->core = (uint8_t)core_index();
-         if (tick_before(irq->deadline, core->nearest_deadline)) {
-             core->nearest_deadline = irq->deadline;
-             core->wake_stale = true;
+         wake_for(irq->deadline);
+     }
+     irq->bits = bits;

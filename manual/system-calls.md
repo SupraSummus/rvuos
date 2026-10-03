@@ -390,18 +390,30 @@ With `a1` = 0, `a2` and `a3` are ignored.
 
 ### 6.12 Operations on `Clock`
 
-The `Clock` capability needs no particular right.
+Reading the time needs `RIGHT_R`, and feeding the watchdog `RIGHT_W` (`KERR_NO_RIGHTS`).
 
-**`OP_CLOCK_INFO` (25).**
-Returns `a1` = the counter's rate in hertz, `a2` = the address of its low word;
-the high word is at `a2 + 4`.
-The rate does not change while the machine runs.
+**`OP_CLOCK_READ` (25).**
+Returns the time, the counter's counts since boot, in `a1` (low word) and `a2` (high word),
+`a3` = the counter's rate in hertz, which does not change while the machine runs,
+and `a4` = the address of the counter's low 32 bits, which `OP_CLOCK_FRAME` shows.
+The time is 64 bits on every board, whatever the width of the board's counter.
+Under tracing it is the counts of the ticks so far, section 9.
 
 **`OP_CLOCK_FRAME` (26).**
 `a1` = destination slot in the caller's table.
-Produces a frame, read only, the smallest block that holds the counter,
+Produces a frame, read only, the smallest block that holds the counter's low 32 bits,
 hanging below the invoked capability.
-On a PMP grain coarser than eight bytes the frame holds the registers beside the counter too.
+Installed, it lets a thread read them with a load and no call;
+they wrap, after 71 minutes at a megahertz, so a program takes differences of them.
+On a PMP grain coarser than eight bytes the frame holds the registers beside them too.
+
+**`OP_CLOCK_WATCHDOG` (37).**
+`a1` = microseconds, more than zero and at most `WATCHDOG_US_MAX`, ten seconds (`KERR_INVALID_ARG`).
+Arms the machine's watchdog, or moves its deadline, nearer or further:
+the machine halts with code 7 unless the call comes again within `a1` microseconds,
+at the first tick that surely lies past them, as a timer line fires, section 5.8.
+Nothing disarms it, and every capability to the clock with `RIGHT_W` feeds the same one.
+Until it is first armed nothing halts the machine for want of feeding, RP2350's own watchdog aside, section 3.
 
 ### 6.13 Operations on `Time`
 
@@ -456,7 +468,7 @@ only a wait, the tick, a fault, section 5.6, or a revoke that takes its own proc
 | 22 | `OP_DEBUG_IRQ` | `Debug` |
 | 23 | `OP_CAP_REVOKE` | `CapTable` |
 | 24 | `OP_CAP_DERIVE` | `CapTable` |
-| 25 | `OP_CLOCK_INFO` | `Clock` |
+| 25 | `OP_CLOCK_READ` | `Clock` |
 | 26 | `OP_CLOCK_FRAME` | `Clock` |
 | 27 | `OP_UNTYPED_INFO` | `Untyped` |
 | 28 | `OP_TIME_CARVE` | `Time` |
@@ -468,6 +480,7 @@ only a wait, the tick, a fault, section 5.6, or a revoke that takes its own proc
 | 34 | `OP_THREAD_READ_REG` | `Thread` |
 | 35 | `OP_THREAD_WRITE_REG` | `Thread` |
 | 36 | `OP_NOTIFY_CARVE` | `Notification` |
+| 37 | `OP_CLOCK_WATCHDOG` | `Clock` |
 
 `OP_COUNT` is 37, one above the highest code; 16 is unused.
 
@@ -501,7 +514,7 @@ and drops into user mode with:
 | 11 | `BOOT_CAP_UART` | `Frame`: the board's console registers, a 16550 on QEMU, the USB Serial/JTAG controller on the ESP32-C6, a block of RAM on RP2350 | read, write |
 | 12 | `BOOT_CAP_LOG` | `Frame`: the kernel log's header and ring | read, write |
 | 13 | `BOOT_CAP_TIMER_LINES` | `IrqLine`: every timer line, `TIMER_LINES` of them | write |
-| 14 | `BOOT_CAP_CLOCK` | `Clock`: the machine's counter | all |
+| 14 | `BOOT_CAP_CLOCK` | `Clock`: the machine's time and its watchdog | all |
 | 15 | `BOOT_CAP_TIME` | `Time`: every unit of time, `TIME_UNITS` of each core, the first core's all earned by the root task's thread | write, execute |
 | 16 | `BOOT_CAP_ROOT_RAM` | `Untyped`: the root task's own memory, its code, data and input frames and the boot pool's block, all made already | all |
 | 17 | `BOOT_CAP_POOL_RAM` | `Untyped`: the boot pool's block, below `BOOT_CAP_ROOT_RAM`, made into the boot pool | all |

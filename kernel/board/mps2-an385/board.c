@@ -16,3 +16,9 @@ void board_init(void)
 void board_user_csrs_reset(void)
 {
 }
+
+/* The kernel starts none of the board's watchdogs; see board_init. */
+void board_watchdog(uint32_t us)
+{
+    (void)us;
+}

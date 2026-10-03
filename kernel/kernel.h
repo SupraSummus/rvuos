@@ -62,6 +62,13 @@ void board_cores_start(void);
 void board_core_init(void);
 
 /*
+ * The board's board.c: the watchdog was fed, and halts the machine if us microseconds pass without another feed.
+ * A board with a watchdog of its own sets it to reset the chip a while after that,
+ * so that a kernel that stopped altogether, and cannot halt, is reset all the same; see DESIGN.md, "The watchdog".
+ */
+void board_watchdog(uint32_t us);
+
+/*
  * The board's board.c: set back the CSRs user mode can write, so that nothing passes through them
  * from one process to the next; at boot, and whenever the processor goes to another process's thread.
  */

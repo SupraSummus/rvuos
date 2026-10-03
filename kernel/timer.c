@@ -103,6 +103,11 @@ uint32_t timer_tick_counts(void)
     return tick_counts;
 }
 
+uint64_t timer_now(void)
+{
+    return debug_trace ? (uint64_t)sched_ticks * tick_counts : counter_read();
+}
+
 /* next_tick lies a period past the last counted tick, which the counter has reached. */
 uint32_t timer_offset(void)
 {

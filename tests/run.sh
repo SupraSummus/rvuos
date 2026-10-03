@@ -34,8 +34,9 @@ fail() {
     exit 1
 }
 
-# The demo ends in a halt with code 0, after a fault that stopped one thread and not the machine.
-[ "$status" -eq 0 ] || fail "expected exit status 0 (the demo's own halt), got $status"
+# The demo ends when the watchdog it stopped feeding halts the machine, with code 7,
+# after a fault that stopped one thread and not the machine.
+[ "$status" -eq 7 ] || fail "expected exit status 7 (the watchdog's halt), got $status"
 # RP2350's console is RAM of a fixed size, and its halt says how much did not fit, which would pass for a missing line.
 grep -q 'rvuos: the console lost' "$log" && fail "the console overflowed, and the lines past its end are lost"
 # The kernel has no console: its log reaches the UART through the root task's logger
@@ -126,6 +127,10 @@ grep -q 'root: handover ok' "$text" \
     || fail "a successor given everything the root task held could not destroy the root task and take its place"
 grep -q 'root: fault ok' "$text" \
     || fail "a fault stopped more than its thread, its watch did not hear it, a resume did not run the load again, or its registers did not move it on"
+grep -q 'root: watchdog fed ok' "$text" \
+    || fail "the watchdog halted the machine although it was fed in time"
+grep -q 'watchdog: not fed in time' "$text" \
+    || fail "the watchdog did not halt the machine once it was not fed"
 # The logger carried the kernel's banner and the root task's output to the UART itself,
 # one byte per interrupt, before the halt wrote the log out.
 # The fault comes right after the last lines, so those the halt may be first to carry;

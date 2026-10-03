@@ -87,3 +87,9 @@ void board_user_csrs_reset(void)
     csr_write(0x803, 0);      /* cpu_gpio_oen */
     csr_write(0x805, 0);      /* cpu_gpio_out */
 }
+
+/* The chip's watchdogs stay off, as board_init leaves them, so a kernel that stopped altogether stays stopped. */
+void board_watchdog(uint32_t us)
+{
+    (void)us;
+}

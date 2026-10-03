@@ -55,8 +55,10 @@ and `user/lib/` what a program of several processes needs beside them, section 8
 | `rv_irq_set(cap, bits)` | `OP_IRQ_SET` |
 | `rv_timer_set(cap, bits, us)` | `OP_IRQ_SET` on a timer line, with the delay |
 | `rv_timer_period(cap, bits, us, &skipped)` | `OP_IRQ_SET` on a timer line, with `IRQ_SET_PERIOD` |
-| `rv_clock_info(cap, &hz, &counter)` | `OP_CLOCK_INFO` |
+| `rv_clock_read(cap, &now, &hz, &counter)` | `OP_CLOCK_READ` |
 | `rv_clock_frame(cap, dst)` | `OP_CLOCK_FRAME` |
+| `rv_counter_low(counter)` | no call: a load from the counter's frame |
+| `rv_clock_watchdog(cap, us)` | `OP_CLOCK_WATCHDOG` |
 | `rv_time_carve(time, offset, count, dst)` | `OP_TIME_CARVE` |
 | `rv_time_bind(time, thread, offset, count)` | `OP_TIME_BIND` |
 | `rv_debug_write(cap, s, n)` | `OP_DEBUG_WRITE`, 12 bytes at most |

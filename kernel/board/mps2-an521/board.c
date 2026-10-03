@@ -43,6 +43,12 @@ void board_user_csrs_reset(void)
 {
 }
 
+/* The kernel starts none of the board's watchdogs; see board_init. */
+void board_watchdog(uint32_t us)
+{
+    (void)us;
+}
+
 /*
  * The cores; see DESIGN.md, "Cores".
  * The second core waits in CPUWAIT from reset until the first lets it go,

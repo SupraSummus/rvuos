@@ -1,0 +1,18 @@
+A feed takes any delay, past WATCHDOG_US_MAX too;
+the watchdog lies no further ahead than the longest delay a feed may name.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: the watchdog is set further than the longest delay
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -192,7 +192,7 @@ static int op_clock(struct thread *t, uint32_t slot, const struct cap *cap, uint
+     }
+     case OP_CLOCK_WATCHDOG: {
+         uint32_t us = arg[1];
+-        if (us == 0 || us > WATCHDOG_US_MAX) {
++        if (us == 0) {
+             return KERR_INVALID_ARG;
+         }
+         sched_watchdog(delay_deadline(delay_ticks(us)));

@@ -19,8 +19,10 @@ and its clients, in processes of their own, answer on UDP ports 7, the echo, and
   which IO_BANK0 can turn into IO_IRQ_BANK0_NS, an `Irq` the driver would wait on instead.
 - The root task takes the blob's frames back once the chip runs, so the driver can no longer reset the chip;
   the firmware in flash would let it, and writing flash is the maintainer's to decide.
-- A run ends at the halt, at the latest when the watchdog reboots the chip after seventeen seconds,
-  and the console reaches the host only then; a system that runs for good needs both changed.
+- A run ends at the halt, and the console reaches the host only then.
+  The root task could feed the watchdog, `OP_CLOCK_WATCHDOG`, and run past the seventeen seconds the chip's own allows,
+  once each child tells it that it is well, but such a run says nothing until it ends;
+  a system that runs for good needs its log carried out while it runs, by the network.
 - `make BOARD=rp2350 wifi` checks the clients only as far as the clock's SNTP;
   the echo and its restart need datagrams from the host while the run lasts, sent by hand so far,
   since the address DHCP gave reaches the host only with the console at the halt.
@@ -60,6 +62,9 @@ what is left:
 - A device interrupt wakes its driver but does not run it;
   the driver waits for its turn like a thread a timer line woke.
   Measure that latency on the board; it belongs to open decision 9.
+- The chip's watchdogs stay off, so a kernel that stops altogether, and cannot halt, stays stopped here,
+  where RP2350's resets the chip a second after the kernel's watchdog's deadline;
+  `board_watchdog` could start the RTC watchdog the same way.
 - Run `escape-store-clock` on the chip, which was not connected when it was written;
   the store goes to the CLINT's `UTIME`, which no PMP entry grants.
 - Feed the replay corpus to the board.
@@ -69,9 +74,6 @@ what is left:
 
 ## RP2350
 
-- The clock's counter is TIMER0's `TIMERAWL`, whose high half, `TIMERAWH`, lies the word below,
-  so `rv_counter_read` takes `DBGPAUSE` for the high word and the counter wraps after 71 minutes.
-  `OP_CLOCK_INFO` could return where the high half lies, which changes the ABI.
 - Hazard3's `mtval` reads zero, so a fault report names no address there.
 - Hazard3 reads a NAPOT address's bits below the grain as zeros, the fence's as `0x1ffffffc`,
   though it matches the region written; the specification reads them as ones.
@@ -110,8 +112,6 @@ what is left:
   the host build knows RISC-V's alone.
 - The demo's console never waits on UART0's line under QEMU, whose transmitter sends at once,
   so nothing runs `irq_enable` unmasking a line of the NVIC with its level still high.
-- The clock's counter on the MPS2 boards is 32 bits wide and the word above it is the prescaler,
-  so `rv_counter_read` sees zero for the high word, as RP2350's does.
 - `kernel/board/mps2/timer.c` keeps the counter's wraps with an exclusive pair on memory the MPU leaves Non-shareable,
   which reaches the other core under QEMU alone; on an MPS2 board it would need the region `arch_ticket_take` borrows.
 - The halt of the MPS2 boards leaves QEMU through semihosting, which on a board without a debugger is a fault in the kernel.

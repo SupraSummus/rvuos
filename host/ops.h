@@ -92,7 +92,7 @@ static const struct op_info op_table[OP_COUNT] = {
     OP(OP_DEBUG_IRQ, CAP_DEBUG, 0, ARG_LINE, ARG_NONE, ARG_NONE),
     OP(OP_CAP_REVOKE, CAP_CAPTABLE, 0, ARG_SLOT_INVOKED, ARG_NONE, ARG_NONE),
     OP(OP_CAP_DERIVE, CAP_CAPTABLE, 0, ARG_DST_INVOKED, ARG_ANY, ARG_RIGHTS),
-    OP(OP_CLOCK_INFO, CAP_CLOCK, 0, ARG_NONE, ARG_NONE, ARG_NONE),
+    OP(OP_CLOCK_READ, CAP_CLOCK, 0, ARG_NONE, ARG_NONE, ARG_NONE),
     OP(OP_CLOCK_FRAME, CAP_CLOCK, CAP_FRAME, ARG_DST, ARG_NONE, ARG_NONE),
     OP(OP_UNTYPED_INFO, CAP_UNTYPED, 0, ARG_NONE, ARG_NONE, ARG_NONE),
     OP(OP_TIME_CARVE, CAP_TIME, CAP_TIME, ARG_OFFSET, ARG_COUNT, ARG_DST),
@@ -104,11 +104,12 @@ static const struct op_info op_table[OP_COUNT] = {
     OP(OP_THREAD_READ_REG, CAP_THREAD, 0, ARG_OFFSET, ARG_NONE, ARG_NONE),
     OP(OP_THREAD_WRITE_REG, CAP_THREAD, 0, ARG_OFFSET, ARG_WORD, ARG_NONE),
     OP(OP_NOTIFY_CARVE, CAP_NOTIFICATION, CAP_NOTIFICATION, ARG_BITS, ARG_DST, ARG_NONE),
+    OP(OP_CLOCK_WATCHDOG, CAP_CLOCK, 0, ARG_DELAY, ARG_NONE, ARG_NONE),
 };
 
 #undef OP
 
-_Static_assert(OP_COUNT == 37 && OP_NOTIFY_CARVE == OP_COUNT - 1, "a new operation needs an entry in op_table");
+_Static_assert(OP_COUNT == 38 && OP_CLOCK_WATCHDOG == OP_COUNT - 1, "a new operation needs an entry in op_table");
 
 /* The loads and stores the driver makes itself, which invoke no capability. */
 static const struct op_info op_access[2] = {

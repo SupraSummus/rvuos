@@ -1,0 +1,18 @@
+A clock with any right reads the time and gives out the counter's frame, RIGHT_W alone among them;
+a call goes through only a capability with the rights its operation needs.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a call went through a capability without the rights its operation needs
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -173,7 +173,7 @@ static uint32_t delay_deadline(uint32_t ticks)
+  */
+ static int op_clock(struct thread *t, uint32_t slot, const struct cap *cap, uint32_t op, uint32_t *arg)
+ {
+-    if (!(cap->rights & (op == OP_CLOCK_WATCHDOG ? RIGHT_W : RIGHT_R))) {
++    if (!(cap->rights & (op == OP_CLOCK_WATCHDOG ? RIGHT_W : RIGHT_ALL))) {
+         return KERR_NO_RIGHTS;
+     }
+     switch (op) {

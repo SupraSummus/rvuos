@@ -271,3 +271,14 @@ carving for regions, the notification's bits for who signalled, and a fault that
 The four system calls of a round trip and the answer with no kernel to carry it to its asker, open decision 5,
 cost nothing a laptop can see; a server whose round trips were its time would be the next measure.
 
+
+## The clock and the watchdog
+
+No process of this system read the clock: a frame over the counter costs a region, and regions ran out first,
+so the clock client counts its own timer's milliseconds.
+`OP_CLOCK_READ` now tells the time in a call, 64 bits on every board, and the frame stays for a thread that cannot afford one.
+A run that lasts wanted a watchdog the root task feeds, and a frame over RP2350's would have handed it the registers
+that tell the bootrom what to run after the reset, in machine mode;
+so the watchdog is the kernel's, fed through the clock with `RIGHT_W`, and it halts, which writes the log out, rather than resets.
+The root task does not feed it yet: a run longer than seventeen seconds says nothing until it ends,
+which waits for the log to leave by the network.

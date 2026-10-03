@@ -7,7 +7,7 @@
  * the USB controller needs clk_sys above clk_usb, erratum RP2350-E12.
  * The tick generators divide clk_ref into microseconds
  * for Hazard3's mtime, for TIMER0's counter behind BOOT_CAP_CLOCK, and for the watchdog,
- * which is armed at once; see bootsel.h.
+ * which is armed at once, and fed only with the kernel's; see bootsel.h and board_watchdog.
  * Register addresses are those of the pico-sdk's hardware_regs for RP2350.
  *
  * User mode reaches a peripheral only where ACCESSCTRL lets it in, and at reset it lets it into few.
@@ -225,6 +225,18 @@ void board_init(void)
 
     /* The console starts empty, whatever the last image left in it; see halt.c. */
     REG(UART_BASE) = 0;
+}
+
+/*
+ * The chip's watchdog reboots into BOOTSEL a second after the kernel's watchdog halts the machine,
+ * so only a kernel that stopped altogether, and cannot halt, meets it.
+ */
+#define WATCHDOG_MARGIN_US 1000000u
+_Static_assert(WATCHDOG_US_MAX + WATCHDOG_MARGIN_US <= WATCHDOG_LONGEST, "the chip's watchdog counts as far");
+
+void board_watchdog(uint32_t us)
+{
+    bootsel_feed(us + WATCHDOG_MARGIN_US);
 }
 
 /*

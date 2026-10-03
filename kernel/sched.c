@@ -13,6 +13,7 @@ struct core cores[CORES] = {
     [0 ... CORES - 1] = { .nearest_release = NEAREST_NONE, .nearest_deadline = NEAREST_NONE },
 };
 uint32_t sched_ticks;
+struct watchdog watchdog;
 
 paddr_t unit_thread[MACHINE_UNITS];
 uint32_t armed_sources;
@@ -32,24 +33,34 @@ static bool tick_before(uint32_t a, uint32_t b)
     return (int32_t)(a - b) < 0;
 }
 
+/* This core's timer wakes for a deadline: one nearer than its nearest brings its next interrupt forward to it. */
+static void wake_for(uint32_t deadline)
+{
+    struct core *core = core_self();
+    if (tick_before(deadline, core->nearest_deadline)) {
+        core->nearest_deadline = deadline;
+        core->wake_stale = true;
+    }
+}
+
 void irq_set_bits(struct irq *irq, uint32_t bits)
 {
     if (irq->line != LOG_IRQ_LINE) {
         count_armed(irq_armed(irq), bits != 0);
     }
-    /*
-     * A timer line wakes the core that armed it, and only that one,
-     * so an arm for a deadline nearer than this core's brings its timer's next interrupt forward to it.
-     */
+    /* A timer line wakes the core that armed it, and only that one. */
     if (line_is_timer(irq->line) && bits != 0) {
-        struct core *core = core_self();
         irq->core = (uint8_t)core_index();
-        if (tick_before(irq->deadline, core->nearest_deadline)) {
-            core->nearest_deadline = irq->deadline;
-            core->wake_stale = true;
-        }
+        wake_for(irq->deadline);
     }
     irq->bits = bits;
+}
+
+/* The watchdog wakes the core that fed it last, as a timer line does the core that armed it. */
+void sched_watchdog(uint32_t deadline)
+{
+    watchdog = (struct watchdog){ .armed = true, .core = (uint8_t)core_index(), .deadline = deadline };
+    wake_for(deadline);
 }
 
 /*
@@ -455,12 +466,12 @@ void irq_drop(struct cap *signalled)
 /*
  * Ticks of time, none, one or the few a trap counts at once, and the ticks other cores counted since this one last did:
  * charge them to the thread whose turn it is, the first from turn_from on, or to nobody while none runs,
- * count them, fire every timer line that is due,
+ * count them, fire every timer line that is due, halt the machine if the watchdog is,
  * and give time again to the threads of every core whose account reached a tick.
- * The timer lines are a fixed few, so the tick looks at each of them
+ * The timer lines are a fixed few, so the tick looks at each of them and at the watchdog
  * and at nothing else; see DESIGN.md, "Time".
  * A line that fires disarms its Irq, so that after the tick no armed one is due,
- * and each core's nearest deadline of those still armed on it is exact again,
+ * and each core's nearest deadline of those still armed on it, and of the watchdog it fed, is exact again,
  * which only puts it later, so no other core is told.
  */
 static void tick_advance(uint32_t ticks)
@@ -497,6 +508,16 @@ static void tick_advance(uint32_t ticks)
             irq_signal(irq);
         } else if (tick_before(irq->deadline, armed->nearest_deadline)) {
             armed->nearest_deadline = irq->deadline;
+        }
+    }
+    if (watchdog.armed) {
+        if (!tick_before(sched_ticks, watchdog.deadline)) {
+            kputs("watchdog: not fed in time\n");
+            khalt(7);
+        }
+        struct core *fed = &cores[watchdog.core];
+        if (tick_before(watchdog.deadline, fed->nearest_deadline)) {
+            fed->nearest_deadline = watchdog.deadline;
         }
     }
     for (uint32_t c = 0; c < CORES; c++) {

@@ -74,7 +74,7 @@ a pool's own node on an Untyped, an installed region on a frame,
 a thread's units on a capability to units that holds them, the first of them even for none,
 a thread's process or watch or an `Irq`'s notification on a capability to that object,
 the watch and the `Irq` with no more bits to signal, or on that object's pool or its pool's own node,
-the counter's block, or a region installed from it, below a clock,
+the counter's block, or a region installed from it, below a clock with the right to read,
 or a capability to a pool or an object below a capability to that pool or its own node.
 A revoke, a delete or a destroy stopped for an interrupt leaves such a forest too,
 since every step of theirs does; see "Bounded work".
@@ -153,6 +153,11 @@ and a line that fires disarms its `Irq`.
 Each core's nearest deadline lies ahead of the count
 and no later than the deadline of any `Irq` armed on a timer line from that core.
 
+**The watchdog.**
+An armed watchdog has its deadline ahead of the tick count, since the tick that reaches it halts the machine,
+and no further ahead than the longest delay a feed may name.
+The core that fed it last has its nearest deadline no later than the watchdog's.
+
 **The timer.**
 While a thread runs, every tick the timer lets pass would hand the processor back to it:
 nobody is on the run queue, and it has time,
@@ -189,7 +194,7 @@ Or it names an object the call built,
 in a pool the caller could allocate from,
 bound to what the caller could write,
 and a pool on memory the caller held an Untyped to, with read and write,
-and a clock covers the counter's frame, read only.
+and a clock with the right to read covers the counter's frame, read only.
 So a thread earns units only through a capability to them with `RIGHT_W`,
 and runs on spare time only through one with `RIGHT_X` besides.
 This is goal 2 across a call.
@@ -484,12 +489,13 @@ and the host runs records rather than instructions,
 so it cannot say where one would land.
 While tracing is on, the tick therefore preempts nobody
 and moves no time: timer lines fire only through `OP_DEBUG_TICK`,
-and so do accounts get charged and fill.
+and so do accounts get charged and fill, and the watchdog halt.
 `OP_DEBUG_TRACE` fills every account,
 so the host, which boots with them full, starts from the same accounts as QEMU,
 where the driver ran untraced for a while before and a tick may have come.
 The clock that charges a turn is then the tick count alone, on both builds:
 a turn with time pays a tick at each `OP_DEBUG_TICK` and nothing at a wait.
+`OP_CLOCK_READ` tells the same clock, the counts of the ticks so far, which the host, with no counter, tells too.
 The fill clears what the running thread owed from within the tick,
 and the host stands its counter half way into the tick while untraced, so that there is something to clear.
 The charge at a change of turn is checked by the demo in `user/init.c`,
@@ -510,6 +516,8 @@ The stall in `wfi` for an armed timer line is checked by the demo in `user/init.
 and so are periods that keep pace with the clock,
 bounded on both sides, which a stall that miscounted the ticks it skipped would break;
 the host never stalls, so nothing else checks the deferral.
+The demo ends in the watchdog's halt, untraced, on every board, after feeding it across sleeps longer than it waits;
+that the stall wakes for the watchdog on time rests on the core's nearest deadline, which only the self-check holds.
 The ticks the timer lets pass while a thread runs are checked by the demo as well,
 by a thread that spins alone and counts the gaps a trap leaves between two reads of the counter.
 The host sets no timer and counts no ticks at a trap,

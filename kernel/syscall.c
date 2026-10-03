@@ -150,18 +150,54 @@ static int op_captable(struct thread *t, uint32_t slot, const struct cap *cap,
     }
 }
 
-/* arg[1..] carry the arguments in and the results out. */
-static int op_clock(struct thread *t, uint32_t slot, uint32_t op, uint32_t *arg)
+/* A delay in whole ticks, rounded up. */
+static uint32_t delay_ticks(uint32_t us)
 {
+    return us / TIMER_US_PER_TICK + (us % TIMER_US_PER_TICK != 0);
+}
+
+/*
+ * The deadline of a delay of whole ticks, a timer line's or the watchdog's:
+ * the call lands anywhere within the current tick, so the delay plus one is the first tick that surely lies past it.
+ * The count wraps and deadlines compare with a signed difference,
+ * which is exact while a delay stays far below half the count's range.
+ */
+static uint32_t delay_deadline(uint32_t ticks)
+{
+    return sched_ticks + ticks + 1;
+}
+
+/*
+ * Reading the time and the counter's frame takes RIGHT_R, and the watchdog, which halts the machine, RIGHT_W.
+ * arg[1..] carry the arguments in and the results out.
+ */
+static int op_clock(struct thread *t, uint32_t slot, const struct cap *cap, uint32_t op, uint32_t *arg)
+{
+    if (!(cap->rights & (op == OP_CLOCK_WATCHDOG ? RIGHT_W : RIGHT_R))) {
+        return KERR_NO_RIGHTS;
+    }
     switch (op) {
-    case OP_CLOCK_INFO:
-        arg[1] = timer_counter_hz();
-        arg[2] = COUNTER_ADDR;
+    case OP_CLOCK_READ: {
+        uint64_t now = timer_now();
+        arg[1] = (uint32_t)now;
+        arg[2] = (uint32_t)(now >> 32);
+        arg[3] = timer_counter_hz();
+        arg[4] = COUNTER_ADDR;
         return KERR_OK;
+    }
     case OP_CLOCK_FRAME: {
         const struct granted_range *g = &boot_granted[GRANT_COUNTER];
         struct cap r = cap_to_frame(g->base, g->size, g->rights);
         return cap_store(thread_table(t), arg[1], &r, slot_node(t, slot));
+    }
+    case OP_CLOCK_WATCHDOG: {
+        uint32_t us = arg[1];
+        if (us == 0 || us > WATCHDOG_US_MAX) {
+            return KERR_INVALID_ARG;
+        }
+        sched_watchdog(delay_deadline(delay_ticks(us)));
+        board_watchdog(us);
+        return KERR_OK;
     }
     default:
         return KERR_WRONG_TYPE;
@@ -710,8 +746,7 @@ static int op_irq(const struct cap *cap, uint32_t op, uint32_t *arg)
         return KERR_NO_RIGHTS;
     }
     if (line_is_timer(irq->line) && bits != 0) {
-        uint32_t us = arg[2];
-        uint32_t ticks = us / TIMER_US_PER_TICK + (us % TIMER_US_PER_TICK != 0);
+        uint32_t ticks = delay_ticks(arg[2]);
         bool period = arg[3] == IRQ_SET_PERIOD;
         if (arg[3] > IRQ_SET_PERIOD || (period && ticks == 0)) {
             return KERR_INVALID_ARG;
@@ -719,14 +754,7 @@ static int op_irq(const struct cap *cap, uint32_t op, uint32_t *arg)
         if (period) {
             arg[1] = timer_period(irq, ticks);
         } else {
-            /*
-             * The call lands anywhere within the current tick,
-             * so the delay rounded up to whole ticks plus one
-             * is the first tick that surely lies past it.
-             * The count wraps and irq_due compares with a signed difference,
-             * which is exact while a delay stays far below half the count's range.
-             */
-            irq->deadline = sched_ticks + ticks + 1;
+            irq->deadline = delay_deadline(ticks);
         }
     }
     /* Armed and unmasked are one state, here and in sched_interrupt. */
@@ -808,7 +836,7 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
         err = op_untyped(t, slot, &cap, op, arg);
         break;
     case CAP_CLOCK:
-        err = op_clock(t, slot, op, arg);
+        err = op_clock(t, slot, &cap, op, arg);
         break;
     case CAP_CAPTABLE:
         err = (cap.rights & RIGHT_W) ? op_captable(t, slot, &cap, op, arg) : KERR_NO_RIGHTS;

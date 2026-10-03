@@ -88,9 +88,8 @@
 /*
  * The counter BOOT_CAP_CLOCK names: TIMER0's TIMERAWL, which counts the same microseconds as mtime,
  * and which user mode reaches once board.c opens TIMER0 to it.
- * TIMER0 keeps the high half below the low one, at TIMERAWH,
- * so the word above TIMERAWL, which rv_counter_read takes for the high half, is DBGPAUSE;
- * see TODO.md.
+ * TIMER0 keeps the high half below the low one, at TIMERAWH, where OP_CLOCK_FRAME's reader need not look:
+ * the frame gives the low half, and OP_CLOCK_READ the whole time.
  * On the Cortex-M33 it is the kernel's counter too, see arm/timer.c.
  */
 #define COUNTER_ADDR U32(0x400b0028)

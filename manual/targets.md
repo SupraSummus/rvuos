@@ -180,9 +180,8 @@ The ADC is not listed: its clock is not running, and it never leaves reset witho
 
 The console's first word counts every byte written, and the bytes follow from offset 16;
 what does not fit is counted and dropped.
-The counter's high half lies below it, so `rv_counter_read` gets a constant high word
-and wraps after 71 minutes.
-A watchdog reboots the chip into BOOTSEL about seventeen seconds after boot, so no run lasts longer.
+A watchdog reboots the chip into BOOTSEL about seventeen seconds after boot,
+unless the kernel's watchdog is fed, section 5.8: each feed sets the chip's to a second past the kernel's deadline.
 
 On the RISC-V cores the tick is 1 kHz, on the microseconds of the RISC-V platform timer.
 The PMP holds seven regions, none smaller than 32 bytes:
@@ -228,7 +227,7 @@ Interrupt lines:
 
 The tick is 1 kHz, on the FPGA's counter, with SysTick for the compare.
 The MPU has eight regions, none smaller than 32 bytes.
-The counter is 32 bits wide, so `rv_counter_read` gets a zero high word and the counter wraps every 171 seconds.
+The counter is 32 bits wide and wraps every 171 seconds; `OP_CLOCK_READ` counts the wraps.
 UART0's transmitter holds one byte and raises its line as that byte leaves, latched until the driver clears it.
 A fault is reported as `exception`, `cfsr`, `pc` and `addr`, section 4.
 
@@ -264,7 +263,7 @@ Interrupt lines:
 
 The tick is 1 kHz, on the FPGA's counter, with SysTick for the compare.
 The MPU has eight regions, none smaller than 32 bytes.
-The counter is 32 bits wide, so `rv_counter_read` gets a zero high word and the counter wraps every 214 seconds.
+The counter is 32 bits wide and wraps every 214 seconds; `OP_CLOCK_READ` counts the wraps.
 The SSE-200 refuses user mode every device unless its Secure Privilege Control block lets it through,
 which the kernel does for UART0 and the counter alone;
 a program reaches either only through a frame, as it reaches RAM.
@@ -398,6 +397,7 @@ the board's runner exits with the code:
 | 3 | the self-check found an invariant violated |
 | 5 | no runnable thread and nothing armed that could make one |
 | 6 | tracing is on and a thread the host build cannot follow was about to run |
+| 7 | the watchdog was not fed in time, after the line `watchdog: not fed in time`, section 5.8 |
 | other | what the root task passed to `OP_DEBUG_HALT` |
 
 A user fault, an access fault, an illegal instruction, a misaligned access or a breakpoint,

@@ -237,7 +237,7 @@ static void children_of(const struct cap *c, addr_array *out)
  * The rights an operation needs of the capability it is invoked on, as rvuos/abi.h gives them;
  * one invoked on a capability of another type fails before its rights matter.
  */
-_Static_assert(OP_COUNT == 37, "a new operation needs its rights in rights_needed");
+_Static_assert(OP_COUNT == 38, "a new operation needs its rights in rights_needed");
 static uint8_t rights_needed(uint32_t op)
 {
     switch (op) {
@@ -260,8 +260,11 @@ static uint8_t rights_needed(uint32_t op)
     case OP_IRQ_SET:
     case OP_TIME_BIND:
     case OP_DEBUG_WRITE:
+    case OP_CLOCK_WATCHDOG:
         return RIGHT_W;
     case OP_NOTIFY_WAIT:
+    case OP_CLOCK_READ:
+    case OP_CLOCK_FRAME:
         return RIGHT_R;
     case OP_DEBUG_HALT:
     case OP_DEBUG_TRACE:
@@ -384,8 +387,8 @@ void history_begin(bool call)
             continue;
         }
         PUSH(held, grant_of(c));
-        /* The clock holds the counter's frame, which OP_CLOCK_FRAME hands out. */
-        if (c->type == CAP_CLOCK) {
+        /* A clock that reads holds the counter's frame, which OP_CLOCK_FRAME hands out. */
+        if (c->type == CAP_CLOCK && (c->rights & RIGHT_R)) {
             const struct granted_range *r = &boot_granted[GRANT_COUNTER];
             PUSH(held, ((struct grant){ CAP_FRAME, r->rights, r->base, r->size }));
         }

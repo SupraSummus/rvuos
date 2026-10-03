@@ -451,28 +451,56 @@ for (;;) {
 ```
 
 **The clock.**
-`BOOT_CAP_CLOCK` names the machine's counter, 64 bits counting up from boot.
-`OP_CLOCK_INFO` returns its rate in hertz and its address;
-`OP_CLOCK_FRAME` derives a read-only frame holding it, which a creator installs like any frame.
-Reading the counter is then a few loads and no system call:
+`BOOT_CAP_CLOCK` names the machine's time, 64 bits of the counter's counts since boot.
+With `RIGHT_R`, `OP_CLOCK_READ` returns the time and the counter's rate in hertz:
 
 ```c
+uint64_t start, end;
 uint32_t hz, counter;
-rv_clock_info(CLOCK, &hz, &counter);
+rv_clock_read(CLOCK, &start, &hz, &counter);
+work();
+rv_clock_read(CLOCK, &end, &hz, &counter);   /* (end - start) / hz seconds */
+```
+
+A thread that cannot afford a call for each read, one that measures what the kernel does to it,
+reads the counter's low 32 bits with a load instead,
+through a read-only frame `OP_CLOCK_FRAME` derives, installed like any frame at the address the read returned.
+They wrap, after 71 minutes at a megahertz, so it takes differences of them:
+
+```c
 rv_invoke(OP_CLOCK_FRAME, CLOCK, COUNTER_FRAME, 0, 0);
 rv_invoke(OP_PROCESS_INSTALL, PROCESS, 5, COUNTER_FRAME, RIGHT_R);
 
-uint64_t start = rv_counter_read(counter);
-work();
-uint64_t ticks = rv_counter_read(counter) - start;   /* ticks / hz seconds */
+uint32_t at = rv_counter_low(counter);
+spin();
+uint32_t counts = rv_counter_low(counter) - at;
 ```
 
 The rate is the board's, 10 MHz on QEMU, the CPU clock on the ESP32-C6 and 1 MHz on RP2350,
-so a program takes it from `OP_CLOCK_INFO`.
+so a program takes it from `OP_CLOCK_READ`.
 The time is the machine's, not the thread's: it includes other threads' slices.
 Revoking below a `Clock` capability uninstalls every region derived through it.
 `rdtime` traps on every board.
 The ESP32-C6's performance counter is no clock: the kernel stops it at zero whenever another process runs.
+
+**The watchdog.**
+With `RIGHT_W`, `OP_CLOCK_WATCHDOG` arms the machine's watchdog, or feeds it:
+the machine halts with code 7 unless the call comes again within the microseconds it names, ten seconds at most.
+Nothing disarms it, and there is one for the machine, which every clock with `RIGHT_W` feeds.
+What it watches is the feeder's to decide: a root task that feeds it only once each child has said it is well
+halts a machine whose children hang, where one that feeds it from its own loop halts only a machine where the root task hangs.
+
+```c
+rv_clock_watchdog(CLOCK, 2000000);            /* arm: two seconds */
+rv_timer_period(TIMER, BIT_FEED, 500000, &skipped);
+for (;;) {
+    rv_wait(NTFN, &bits);
+    if ((bits & BIT_FEED) && children_well()) {
+        rv_clock_watchdog(CLOCK, 2000000);
+    }
+    /* ... */
+}
+```
 
 ### 5.9 Interrupts
 
@@ -625,7 +653,8 @@ and carries the ring out one byte per transmitter interrupt.
   the kernel stalls in `wfi` until the nearest timer line's deadline, the account that reaches a tick or the interrupt arrives,
   and takes no tick in between.
   On several cores a core with nothing to run waits so while another runs, which wakes it when it gives it a thread.
-  When no core runs a thread and there is none of these, it prints `no runnable thread` and halts with code 5.
+  When no core runs a thread and there is none of these, it prints `no runnable thread` and halts with code 5,
+  watchdog or not.
 
 There are no priorities and no yield.
 A spinning thread cannot starve the others, because the tick preempts it,

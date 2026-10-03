@@ -35,6 +35,7 @@ Contents:
 - [Communication and synchronisation](design/objects.md#communication-and-synchronisation)
 - [Time](design/time.md#time)
 - [Scheduling](design/time.md#scheduling)
+- [The watchdog](design/time.md#the-watchdog)
 - [Cores](design/cores.md#cores)
 - [Interrupts](design/io.md#interrupts)
 - [The kernel log](design/io.md#the-kernel-log)

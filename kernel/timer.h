@@ -79,8 +79,15 @@ bool timer_trap_enter(bool pending);
 void timer_trap_tick(void);
 void timer_trap_leave(bool traced);
 
-/* The rate of the counter the tick is made of, COUNTER_ADDR, in Hz; see OP_CLOCK_INFO. */
+/* The rate of the counter the tick is made of, COUNTER_ADDR, in Hz; see OP_CLOCK_READ. */
 uint32_t timer_counter_hz(void);
+
+/*
+ * The machine's time, in counts of the counter from boot, which OP_CLOCK_READ tells:
+ * the counter's, or under tracing, where time moves only by record, the counts of the ticks so far,
+ * which the host build, with no counter, tells as well.
+ */
+uint64_t timer_now(void);
 
 /* The counter's counts per tick, at most TICK_COUNTS_MAX. */
 uint32_t timer_tick_counts(void);

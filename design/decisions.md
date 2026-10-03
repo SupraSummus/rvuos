@@ -363,3 +363,13 @@ until the maintainer decides otherwise.
     but QEMU lists no devices, so theirs stays the same anyway.
     Rights on `Debug` that split its frames from its halt would have left one capability reaching every listed device,
     where a frame per device lends each on its own.
+26. **The watchdog in the kernel.**
+    Working default: the kernel keeps a deadline on its own tick, which `OP_CLOCK_WATCHDOG` feeds, and halts at it;
+    see "The watchdog".
+    A watchdog is a device, every other of which is a driver's, and userspace could do the same:
+    a supervisor with a timer line halts the machine through `Debug` when nobody fed it in time,
+    and a driver feeds the board's own watchdog through a frame, which catches a kernel that stops, since no process runs then.
+    RP2350's would be listed as its first 32 bytes, which hold the count and stop short of the boot vector.
+    That costs the supervisor `RIGHT_X` on `Debug`, which drives the machine as a test does,
+    the boot's BOOTSEL watchdog shared with a driver, and a halt that waits for the supervisor's turn.
+    Decide with the first system meant to run unattended.

@@ -120,6 +120,8 @@ nor do the other boards yet.
 So on QEMU `BOOT_CAP_COUNT` is 18, the number the seeds and the corpus are written for.
 A device that is a bus master reaches whatever its driver points it at, so a board lists none:
 its frame would be the machine's; open decision 13.
+Nor does it list the devices the kernel drives itself, the timer under the tick and the watchdog:
+a program reaches those through the clock's operations, which every board can answer; see "The watchdog".
 
 **QEMU `virt`** is the development target and the one `make check` runs.
 QEMU loads the image and enters it in machine mode.
@@ -140,7 +142,8 @@ where the ROM keeps its buffers while it loads;
 the kernel takes all 512 KiB once it runs, laid out as `manual/targets.md` shows.
 The console is the chip's USB Serial/JTAG controller,
 a CDC-ACM port on its own USB connector.
-Before anything else the kernel turns off the four watchdogs the ROM leaves running
+Before anything else the kernel turns off the four watchdogs the ROM leaves running,
+which stay off however the kernel's own watchdog is fed,
 and the access permission management units.
 Those silently refuse the CPU in user mode every peripheral,
 reads returning zero and writes dropped;
@@ -186,8 +189,8 @@ and the halt leaves QEMU through semihosting, which only privileged code reaches
 The layout is QEMU virt's, moved to SSRAM1 at 0;
 the console is UART0 of the CMSDK, whose transmitter latches its interrupt as each byte leaves.
 The clock's counter is the FPGA's `COUNTER`, 32 bits at 25 MHz with the prescaler above it,
-so the high word a program reads is zero and the counter wraps every 171 seconds;
-the kernel counts the wraps for its own tick, see `kernel/board/mps2/timer.c`.
+so it wraps every 171 seconds;
+the kernel counts the wraps for its tick and for `OP_CLOCK_READ`, see `kernel/board/mps2/timer.c`.
 Measured under QEMU 8.2: eight MPU regions and a bkpt taken as a HardFault, DebugMonitor or not.
 
 **mps2-an521** is QEMU's model of the same board with the AN521 image,
@@ -229,8 +232,10 @@ and on the Cortex-M33 its number in `CPUID`.
 Hazard3's cores raise each other's software interrupt through SIO's `RISCV_SOFTIRQ`, on no line,
 and the Cortex-M33s ring each other's doorbell in SIO, on line 26, `SIO_IRQ_BELL`, which the kernel then keeps.
 Each core has its own interrupt controller, Hazard3's CSRs or the NVIC.
-A watchdog armed at boot and never fed reboots the chip into BOOTSEL after about seventeen seconds,
-so a run that hangs comes back without a hand on the board, and no run lasts longer.
+A watchdog armed at boot reboots the chip into BOOTSEL after about seventeen seconds,
+so a run that hangs comes back without a hand on the board;
+each feed of the kernel's watchdog sets it to a second past that one's deadline, and nothing else feeds it,
+so only a run that feeds the kernel's watchdog lasts longer.
 The halt times its port on TIMER0, which counts on either kind of core.
 Measured on an A2 chip: eight PMP entries before three hardwired ones,
 a 32-byte grain the probe does not see, `mtval` always zero,
@@ -360,7 +365,7 @@ SysTick, which every Cortex-M has, is the compare: a 24-bit down-counter,
 set for what is left before the compare and set again each time it fires until the counter reaches it,
 `kernel/arch/arm/systick.c`;
 the counter is the board's, since SysTick's own count lies in the System Control Space, which user mode never reaches,
-and a process reads the clock through a frame.
+and a process reads the clock through its call or the counter's frame.
 The NVIC is the controller: the line a trap enters on is active and no longer pending, so `irq_claim` hands it out first,
 and a line is unmasked with its stale pending state dropped, since the NVIC latches a level masked or not.
 

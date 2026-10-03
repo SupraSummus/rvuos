@@ -1,7 +1,7 @@
 /*
  * Escape attempt: a store to a device, the clock's counter, through no frame.
  *
- * OP_CLOCK_INFO tells the root task where the counter lies, but it installs no frame for it,
+ * OP_CLOCK_READ tells the root task where the counter lies, but it installs no frame for it,
  * so the store must fault, a store access fault, mcause=7,
  * naming the store's own address in mepc and the counter's in mtval,
  * and on ARM a MemManage, DACCVIOL, naming them in pc and MMFAR.
@@ -40,8 +40,9 @@ static void expect(const char *what, uint32_t status)
 int main(void);
 int main(void)
 {
+    uint64_t now;
     uint32_t hz, addr;
-    expect("clock info", rv_clock_info(BOOT_CAP_CLOCK, &hz, &addr));
+    expect("clock read", rv_clock_read(BOOT_CAP_CLOCK, &now, &hz, &addr));
     puts("escape: storing to the clock's counter, with no frame for it, to ");
     rv_put_hex(BOOT_CAP_DEBUG, addr);
     puts(" at ");

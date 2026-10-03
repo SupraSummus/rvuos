@@ -695,8 +695,9 @@ struct core {
     uint32_t nearest_release;
 
     /*
-     * The tick the core's timer has to interrupt at for the timer lines armed on it, see struct irq:
-     * the nearest deadline of one, or NEAREST_NONE ticks ahead of the count with none.
+     * The tick the core's timer has to interrupt at for the timer lines armed on it, see struct irq,
+     * and for the watchdog if it fed it last:
+     * the nearest deadline of these, or NEAREST_NONE ticks ahead of the count with none.
      * An arm brings it forward, and a tick, which looks at every line, makes every core's exact again,
      * so it may lie before the nearest such deadline but never after one, and always ahead of the count.
      */
@@ -881,6 +882,22 @@ void sched_start(struct thread *t);
  * Each core counts up to it as its traps begin; see struct core.
  */
 extern uint32_t sched_ticks;
+
+/*
+ * The machine's watchdog, which OP_CLOCK_WATCHDOG arms and feeds:
+ * once armed, the tick count reaching its deadline halts the machine.
+ * The core that fed it last wakes for its deadline, as for a timer line it armed; see struct core.
+ * See DESIGN.md, "The watchdog".
+ */
+struct watchdog {
+    bool armed;
+    uint8_t core;
+    uint32_t deadline;
+};
+extern struct watchdog watchdog;
+
+/* Arm the watchdog, or move its deadline, to a tick ahead of the count, and have this core wake for it. */
+void sched_watchdog(uint32_t deadline);
 
 /*
  * Set bits on a notification and wake a thread waiting on it, if any.

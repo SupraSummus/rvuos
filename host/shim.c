@@ -239,6 +239,17 @@ uint32_t timer_tick_counts(void)
     return COUNTER_HZ / TIMER_HZ;
 }
 
+uint64_t timer_now(void)
+{
+    return (uint64_t)sched_ticks * timer_tick_counts();
+}
+
+/* QEMU's board has no watchdog of its own. */
+void board_watchdog(uint32_t us)
+{
+    (void)us;
+}
+
 /*
  * The host's clock is the tick count, and the scheduler asks where the counter is only untraced.
  * Half way into the tick stands for wherever QEMU's is when the replay driver turns tracing on,
@@ -395,6 +406,7 @@ struct thread *host_boot(void)
     memset(unit_thread, 0, sizeof(unit_thread));
     armed_sources = 0;
     sched_ticks = 0;
+    watchdog = (struct watchdog){ 0 };
     debug_trace = false;
     preempt_countdown = 0;
     pmp_init();

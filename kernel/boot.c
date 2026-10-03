@@ -42,7 +42,7 @@ struct thread *boot_create_root(void)
     boot_granted[2] = (struct granted_range){ UART_BASE, UART_SIZE, RIGHT_R | RIGHT_W };
     /* The kernel's log; the reader writes its mark into the header. Never a pool: a frame no Untyped covers. */
     boot_granted[3] = (struct granted_range){ KLOG_BASE, KLOG_REGION_SIZE, RIGHT_R | RIGHT_W };
-    /* The counter, read only, in the smallest block that holds its two words; see OP_CLOCK_FRAME. */
+    /* The counter's low word, read only, in the smallest block that holds it; see OP_CLOCK_FRAME. */
     uint32_t counter_size = region_min_size();
     boot_granted[GRANT_COUNTER] =
         (struct granted_range){ COUNTER_ADDR & ~(counter_size - 1), counter_size, RIGHT_R };

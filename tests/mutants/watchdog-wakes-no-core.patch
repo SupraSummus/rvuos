@@ -1,0 +1,18 @@
+A feed sets the watchdog's deadline and leaves the core's timer as it was,
+so a core that idles sleeps past the deadline it was fed for;
+the core that fed the watchdog wakes for its deadline.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: the watchdog comes due before the timer wakes for it
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -60,7 +60,6 @@ void irq_set_bits(struct irq *irq, uint32_t bits)
+ void sched_watchdog(uint32_t deadline)
+ {
+     watchdog = (struct watchdog){ .armed = true, .core = (uint8_t)core_index(), .deadline = deadline };
+-    wake_for(deadline);
+ }
+ 
+ /*

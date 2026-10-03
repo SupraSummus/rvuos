@@ -7,12 +7,12 @@ Report: granted memory overlaps the kernel's
 diff --git a/kernel/boot.c b/kernel/boot.c
 --- a/kernel/boot.c
 +++ b/kernel/boot.c
-@@ -61,7 +61,7 @@ struct thread *boot_create_root(void)
+@@ -41,7 +41,7 @@ struct thread *boot_create_root(void)
      /* A device: read and write, never execute, and never a pool; see ram_contains. */
      boot_granted[2] = (struct granted_range){ UART_BASE, UART_SIZE, RIGHT_R | RIGHT_W };
      /* The kernel's log; the reader writes its mark into the header. Never a pool: a frame no Untyped covers. */
 -    boot_granted[3] = (struct granted_range){ KLOG_BASE, KLOG_REGION_SIZE, RIGHT_R | RIGHT_W };
 +    boot_granted[3] = (struct granted_range){ KLOG_BASE - KLOG_REGION_SIZE, 2 * KLOG_REGION_SIZE, RIGHT_R | RIGHT_W };
-     /* The counter, read only, in the smallest block that holds its two words; see OP_CLOCK_FRAME. */
+     /* The counter's low word, read only, in the smallest block that holds it; see OP_CLOCK_FRAME. */
      uint32_t counter_size = region_min_size();
      boot_granted[GRANT_COUNTER] =

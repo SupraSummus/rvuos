@@ -8,8 +8,9 @@
  * a magic entry point and, in place of the stack pointer, a type, BOOTSEL's being 2;
  * the datasheet, "Watchdog boot vector".
  *
- * board.c arms it at boot with the longest count there is, about seventeen seconds, and nothing feeds it,
- * so every run on this board ends by then, and one that hangs comes back ready for the next image.
+ * board.c arms it at boot with the longest count there is, about seventeen seconds,
+ * and only the kernel's watchdog feeds it, see board_watchdog,
+ * so a run that never feeds that ends by then, and one that hangs comes back ready for the next image.
  * PSM_WDSEL has that reset everything but the oscillators, as the pico-sdk has it,
  * which keeps the scratch registers.
  * The halt arms it again for the host to read the log in, and reboots when it has as the bootrom's own reboot does:
@@ -56,6 +57,12 @@ static inline void bootsel_arm(uint32_t us)
     BOOTSEL_REG(PSM_WDSEL_SET) = PSM_WDSEL_ALL & ~(PSM_WDSEL_ROSC | PSM_WDSEL_XOSC);
     BOOTSEL_REG(WATCHDOG_LOAD) = us;
     BOOTSEL_REG(WATCHDOG_CTRL) = WATCHDOG_ENABLE;
+}
+
+/* Count again from us microseconds, at most WATCHDOG_LONGEST, to the reboot bootsel_arm armed. */
+static inline void bootsel_feed(uint32_t us)
+{
+    BOOTSEL_REG(WATCHDOG_LOAD) = us;
 }
 
 static inline __attribute__((noreturn)) void bootsel_now(void)

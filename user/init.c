@@ -11,7 +11,7 @@
  * lease the child a frame through a derived capability and take it back by revoking,
  * lend the child untyped memory it turns into a pool of its own
  * and take it back by revoking, which destroys that pool,
- * sleep on a timer while nothing else can run, and time it on the clock,
+ * sleep on a timer while nothing else can run, and time it on the clock, through a call and through its frame,
  * keep a period on the timer without drifting,
  * give a thread units of the processor that threads on spare time cannot take from it,
  * stop threads by revoking their units and start one again by binding it,
@@ -25,7 +25,8 @@
  * then unmap a region, have a thread fault on it and hear of it through the thread's watch,
  * ask the kernel what the fault was,
  * map the region again and resume the thread, whose load goes through then,
- * move the thread on by setting its registers, and halt.
+ * move the thread on by setting its registers,
+ * and feed the watchdog across sleeps longer than it waits, then stop, which halts the machine.
  * Before it hands over, it counts the cores, and on a machine of several
  * runs a thread on the second core beside itself, moves one from there to an eighth of this core,
  * wakes a thread that waits on the second core while that core idles,
@@ -173,6 +174,10 @@ enum {
  * and an idle second costs QEMU about a minute there, so they do not reach the second reload.
  */
 #define LONG_SLEEP_US 130000u
+
+/* What the watchdog waits for, which a sleep of half as long and a feed after each keeps from halting. */
+#define WATCHDOG_US 20000u
+#define WATCHDOG_FEEDS 3u
 
 /* A period, kept long enough that arming each from the wake would fall a period behind. */
 #define PERIOD_US 5000u
@@ -789,6 +794,21 @@ static __attribute__((noreturn)) void successor_main(void)
     expect("hear its breakpoint there", fault_wait());
     expect("it ran from there on what it was given", probed == MAGIC + 2 ? KERR_OK : KERR_INVALID_ARG);
     puts("root: fault ok\n");
+
+    /*
+     * The watchdog; see DESIGN.md, "The watchdog".
+     * Fed after every sleep, it lets the machine run longer than it waits,
+     * and once it is not, it halts the machine before this thread wakes from a sleep twice as long;
+     * tests/run.sh holds the run's exit status to the watchdog's code.
+     */
+    expect("arm the watchdog", rv_clock_watchdog(BOOT_CAP_CLOCK, WATCHDOG_US));
+    for (uint32_t i = 0; i < WATCHDOG_FEEDS; i++) {
+        expect("sleep half as long", sleep_us(WATCHDOG_US / 2));
+        expect("feed the watchdog", rv_clock_watchdog(BOOT_CAP_CLOCK, WATCHDOG_US));
+    }
+    puts("root: watchdog fed ok\n");
+    expect("sleep past the watchdog", sleep_us(2 * WATCHDOG_US));
+    puts("root: the watchdog let the machine run\n");
     rv_halt(BOOT_CAP_DEBUG, 0);
 }
 
@@ -1294,23 +1314,27 @@ int main(void)
            rv_invoke(OP_IRQ_BIND, SLOT_TIMER_LINE, SLOT_NEW_POOL, SLOT_TIMER_NTFN, SLOT_TIMER));
 
     /*
-     * The clock times the two sleeps.
-     * A timer line fires no earlier than its delay, so the counter must show at least both;
+     * The clock times the two sleeps, through a call and through the counter's frame.
+     * A timer line fires no earlier than its delay, so either must show at least both;
      * how much more is the board's, so the transcript prints neither.
      */
+    uint64_t called, called_after;
     uint32_t hz, counter;
-    expect("clock info", rv_clock_info(BOOT_CAP_CLOCK, &hz, &counter));
+    expect("read the clock", rv_clock_read(BOOT_CAP_CLOCK, &called, &hz, &counter));
     expect("derive the counter's frame",
            rv_invoke(OP_CLOCK_FRAME, BOOT_CAP_CLOCK, SLOT_COUNTER, 0, 0));
     expect("map the counter",
            rv_invoke(OP_PROCESS_INSTALL, BOOT_CAP_PROCESS, ROOT_COUNTER_SLOT, SLOT_COUNTER, RIGHT_R));
-    uint64_t start = rv_counter_read(counter);
+    uint32_t start = rv_counter_low(counter);
     expect("sleep", sleep_us(SLEEP_US));
     expect("sleep again", sleep_us(SLEEP_US));
-    uint64_t elapsed = rv_counter_read(counter) - start;
+    uint64_t elapsed = (uint32_t)(rv_counter_low(counter) - start);
+    expect("read the clock again", rv_clock_read(BOOT_CAP_CLOCK, &called_after, &hz, &counter));
     puts("root: timer ok\n");
     expect("the clock saw both sleeps",
-           elapsed * 1000000u >= (uint64_t)hz * (2 * SLEEP_US) ? KERR_OK : KERR_INVALID_ARG);
+           elapsed * 1000000u >= (uint64_t)hz * (2 * SLEEP_US)
+                   && (called_after - called) * 1000000u >= (uint64_t)hz * (2 * SLEEP_US)
+               ? KERR_OK : KERR_INVALID_ARG);
     puts("root: clock ok\n");
     expect("sleep past a reload of the compare", sleep_us(LONG_SLEEP_US));
     puts("root: long sleep ok\n");
@@ -1323,13 +1347,13 @@ int main(void)
      * A loop of sleeps would take a tick more per period.
      */
     expect("set the phase", period_wait(PERIOD_US));
-    start = rv_counter_read(counter);
+    start = rv_counter_low(counter);
     uint32_t status = KERR_OK;
     for (uint32_t i = 0; i < PERIODS && status == KERR_OK; i++) {
         status = period_wait(PERIOD_US);
     }
     expect("wait the periods", status);
-    elapsed = (rv_counter_read(counter) - start) * 1000000u;
+    elapsed = (uint64_t)(uint32_t)(rv_counter_low(counter) - start) * 1000000u;
     expect("the periods kept their pace",
            elapsed >= (uint64_t)hz * ((PERIODS - 1) * PERIOD_US)
                    && elapsed < (uint64_t)hz * ((PERIODS + 1) * PERIOD_US)

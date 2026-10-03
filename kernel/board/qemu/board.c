@@ -1,7 +1,7 @@
 /*
  * What QEMU virt needs before the kernel starts:
  * the counters shut to user mode, so rdtime traps as on the ESP32-C6, which has none;
- * the clock reaches a process as a region instead.
+ * the clock reaches a process through its capability instead.
  * A board with watchdogs or clocks to set replaces this file, as it does timer.c.
  */
 
@@ -17,6 +17,12 @@ void board_init(void)
 /* The counters are the only user-mode CSRs rvuos knows of on QEMU, and they stay shut. */
 void board_user_csrs_reset(void)
 {
+}
+
+/* The machine has no watchdog of its own. */
+void board_watchdog(uint32_t us)
+{
+    (void)us;
 }
 
 #if CORES > 1
