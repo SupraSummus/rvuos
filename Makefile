@@ -200,7 +200,7 @@ $(BUILD)/%.o: %.c
 
 $(BUILD)/%.o: %.S
 	@mkdir -p $(dir $@)
-	$(CC) $(ASFLAGS) -c $< -o $@
+	$(CC) $(ASFLAGS) -MMD -MP -c $< -o $@
 
 # The linker scripts take the board's layout through the preprocessor; see kernel/layout.h.
 $(BUILD)/%.ld: %.ld.S
@@ -503,4 +503,4 @@ clean:
 -include $(KERNEL_OBJ:.o=.d) $(patsubst %,$(BUILD)/user/%.d,$(USER_PROGRAMS) $(ESCAPE_PROGRAMS)) \
          $(foreach p,$(PROGRAMS),$(patsubst %.o,%.d,$(call program_root,$(p)) $(call program_others,$(p)))) \
          $(LIB_OBJ:.o=.d) \
-         $(BUILD)/kernel/kernel.d $(BUILD)/user/user.d $(HOST_OBJ:.o=.d)
+         $(USER_COMMON:.o=.d) $(BUILD)/kernel/kernel.d $(BUILD)/user/user.d $(HOST_OBJ:.o=.d)
