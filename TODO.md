@@ -62,8 +62,6 @@ what is left:
 - The chip's watchdogs stay off, so a kernel that stops altogether, and cannot halt, stays stopped here,
   where RP2350's resets the chip a second after the kernel's watchdog's deadline;
   `board_watchdog` could start the RTC watchdog the same way.
-- Run `escape-store-clock` on the chip, which was not connected when it was written;
-  the store goes to the CLINT's `UTIME`, which no PMP entry grants.
 - Feed the replay corpus to the board.
   Something has to put each input where `BOOT_CAP_INPUT` points,
   below the ROM's buffers or over USB once the kernel runs,
