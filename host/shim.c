@@ -884,8 +884,8 @@ static void host_settle_cores(void)
 /*
  * The core a record goes to with more than one, as the driver's threads on each look at the cursor:
  * the core whose turn its actor has, or else the one it waits on for its turn, where the passing goes round;
- * a record for any thread, or for one that can have no turn, goes where the last went,
- * or to the next core whose turn it is if that one idles.
+ * a record for any thread, for one that can have no turn, or for one that waits on a core that idles,
+ * goes where the last went, or to the next core whose turn it is if that one idles.
  * Some core has a turn, since the kernel stops the machine when none can have one again.
  * Its driver thread, or one that stands at a record there, then runs on; see host_run_on.
  */
@@ -895,7 +895,7 @@ static void host_pick_core(const struct replay_record *c)
     /* Compared, never followed, unless the thread lies on a queue: a destroyed thread is simply never current again. */
     const struct thread *actor = c->actor >= 1 && c->actor <= REPLAY_THREADS ? host_threads[c->actor] : NULL;
     for (uint32_t i = 0; actor != NULL && i < CORES; i++) {
-        if (cores[i].turn == actor || host_queued(&cores[i], actor)) {
+        if (cores[i].turn == actor || (cores[i].turn != NULL && host_queued(&cores[i], actor))) {
             host_core = i;
             return;
         }

@@ -435,16 +435,18 @@ mutants-fuzz:
 # a pool run out at the one allocation that fails is a size compared, not an edge.
 # `make mutants-fuzz` measures with the same flags.
 # FUZZ_JOBS processes fuzz at once, one per processor unless set, taking up what the others add to the working copy.
+# FUZZ_HARNESS is the machine whose coverage guides them; fuzz-smp2 reaches what only a second core does.
 # Each writes build/host/fuzz-<n>.log, the run prints how each ended,
 # and a failure leaves its input at the top of the tree.
 # libFuzzer's fork mode made a third fewer runs in a minute: each job it starts replays part of the corpus first.
 FUZZ_FLAGS := -max_len=2048 -len_control=100 -use_value_profile=1
 FUZZ_JOBS  ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
-fuzz: $(HOST_BUILD)/fuzz
+FUZZ_HARNESS ?= fuzz
+fuzz: $(HOST_BUILD)/$(FUZZ_HARNESS)
 	@mkdir -p $(HOST_CORPUS)
 	cp -n tests/seeds/* tests/corpus/* $(HOST_CORPUS)/
 	rm -f $(HOST_BUILD)/fuzz-*.log
-	cd $(HOST_BUILD) && ./fuzz -max_total_time=$(FUZZ_TIME) -jobs=$(FUZZ_JOBS) -workers=$(FUZZ_JOBS) \
+	cd $(HOST_BUILD) && ./$(FUZZ_HARNESS) -max_total_time=$(FUZZ_TIME) -jobs=$(FUZZ_JOBS) -workers=$(FUZZ_JOBS) \
 		-artifact_prefix=$(CURDIR)/ $(FUZZ_FLAGS) $(CURDIR)/$(HOST_CORPUS); \
 	status=$$?; grep -H -E 'DONE|invariant violated|kernel panic|runtime error|ERROR|Test unit written' fuzz-*.log; \
 	exit $$status
@@ -456,13 +458,17 @@ fuzz: $(HOST_BUILD)/fuzz
 # The corpus is thus minimal for the current kernel,
 # not for every kernel it has seen.
 # Run `make mutants` afterwards: it is the check that the minimisation lost nothing.
+# libFuzzer's merge passes over an input that fails a harness and goes on,
+# so the rule stops after it if one did, leaving the input in build/host/merge-* and tests/corpus as it was.
 corpus-merge: $(HOST_MACHINES)
 	@mkdir -p $(HOST_CORPUS)
-	rm -rf $(HOST_BUILD)/corpus-merged && mkdir -p $(HOST_BUILD)/corpus-merged
+	rm -rf $(HOST_BUILD)/corpus-merged $(HOST_BUILD)/merge-* && mkdir -p $(HOST_BUILD)/corpus-merged
 	cp tests/seeds/* $(HOST_BUILD)/corpus-merged/
 	for h in $(HOST_MACHINES); do \
-		$$h -merge=1 -use_counters=0 $(HOST_BUILD)/corpus-merged tests/corpus $(HOST_CORPUS) || exit 1; \
+		$$h -merge=1 -use_counters=0 -artifact_prefix=$(HOST_BUILD)/merge- \
+			$(HOST_BUILD)/corpus-merged tests/corpus $(HOST_CORPUS) || exit 1; \
 	done
+	@! ls $(HOST_BUILD)/merge-* 2>/dev/null || { echo "these inputs fail a harness" >&2; exit 1; }
 	for s in tests/seeds/*; do rm $(HOST_BUILD)/corpus-merged/$$(basename $$s); done
 	rm -f tests/corpus/*
 	cp $(HOST_BUILD)/corpus-merged/* tests/corpus/
