@@ -103,6 +103,11 @@ uint32_t child_slot(struct self *s, struct child *c, uint32_t *at);
 uint32_t child_put_bits(struct self *s, struct child *c, uint32_t at, uint32_t ntfn, uint32_t bits);
 /* A frame installed in the child's next free region, which *region says. */
 uint32_t child_map(struct self *s, struct child *c, uint32_t frame, uint32_t rights, uint32_t *region);
+/*
+ * A region the parent handed out uninstalled and free again, the child reaching nothing through it from then on:
+ * child_unmap from one child and child_map into another hands memory over.
+ */
+uint32_t child_unmap(struct self *s, struct child *c, uint32_t region);
 /* A region of the child's for the child to install frames into itself, through CHILD_SELF. */
 uint32_t child_region(struct self *s, struct child *c, uint32_t *region);
 /* A bit of the child's inbox, for something to signal it with. */

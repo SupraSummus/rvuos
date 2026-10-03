@@ -8,6 +8,8 @@
  * checks a child that answers its checks and one that spins, which it finds and takes down;
  * builds a server with a hub in room for children's data, and clients on its ends,
  * and takes one down and connects another in its place, twice;
+ * has children add to a count they share under a lock, sleeping now and then while they hold it;
+ * hands a buffer between two children, and hears the last fault on it once it is taken;
  * then takes the rest down.
  * It ends with "libtest: ok" and halt code 0, which tests/libtest.sh checks, or with what failed and another code.
  */
@@ -30,9 +32,11 @@ static struct self self, after;
 static struct kernel_log klog;
 static uint32_t log_bit, deadline_bit, pause_bit, pause_timer;
 
-static struct child a, b, faulty, answering, spinning, server, clients[HUB_CLIENTS];
-static struct child *const children[] = { &a, &b, &faulty, &answering, &spinning, &server, &clients[0], &clients[1] };
-static uint32_t faulted; /* the bits of the faults the root task heard */
+static struct child a, b, faulty, answering, spinning, server, clients[HUB_CLIENTS], lockers[LOCKERS], passers[2];
+static struct child *const children[] = { &a, &b, &faulty, &answering, &spinning, &server, &clients[0], &clients[1],
+                                          &lockers[0], &lockers[1], &lockers[2], &passers[0], &passers[1] };
+static struct child *may_fault; /* the one child whose fault is asked for */
+static uint32_t faulted;        /* the bits of the faults the root task heard */
 
 static void console_byte(char c)
 {
@@ -90,7 +94,7 @@ static uint32_t step(void)
             say(&out, "libtest: FAIL: %s failed at step %u, detail %u\n", c->name, c->page->step, c->page->detail);
             halt(1);
         }
-        if ((bits & c->bit_fault) && c != &faulty) {
+        if ((bits & c->bit_fault) && c != may_fault) {
             say(&out, "libtest: FAIL: %s faulted\n", c->name);
             halt(1);
         }
@@ -253,6 +257,105 @@ static void hub_round(void)
     check(same(tally(), unroomed), "the hub, its server and clients and the room gave back what they were given");
 }
 
+/*
+ * Lockers in room for children's data, the count carved from it,
+ * and the lock's notification from the root task's pool, where it stays, as every object does until its pool goes.
+ */
+static void lock_round(void)
+{
+    struct tally unroomed = tally();
+    struct block shared;
+    uint32_t note, waited = 0;
+    must("room for children's data", self_room(&self, ROOM_SIZE));
+    must("memory the lockers share", room_take(&self, SELF_ROOM_UNIT, &shared));
+    struct locked *l = (struct locked *)(uintptr_t)shared.base;
+    must("a slot for the lock's notification", slot_new(&self, &note));
+    must("the lock's notification", rv_pool_alloc(self.pool, CAP_NOTIFICATION, note, 0));
+    struct lock lock = { (uint32_t)(uintptr_t)&l->word, note };
+    lock_init(&lock);
+    l->count = 0;
+    for (uint32_t i = 0; i < LOCKERS; i++) {
+        uint32_t region;
+        must("build a locker", child_new(&self, &lockers[i], "locker", CHILD_TABLE, CHILD_DATA));
+        struct locker_page *p = (struct locker_page *)lockers[i].page;
+        must("give a locker the shared memory",
+             child_map(&self, &lockers[i], shared.made, RIGHT_R | RIGHT_W, &region));
+        must("give a locker the lock's notification",
+             child_give(&self, &lockers[i], note, RIGHT_R | RIGHT_W, &p->lock.note));
+        p->lock.word = lock.word;
+        p->count = (uint32_t)(uintptr_t)&l->count;
+    }
+    for (uint32_t i = 0; i < LOCKERS; i++) {
+        must("start a locker", child_start(&self, &lockers[i], locker_main, CHILD_UNITS));
+    }
+    for (uint32_t i = 0; i < LOCKERS; i++) {
+        while (lockers[i].told != LOCKER_DONE) {
+            step();
+        }
+        waited += ((struct locker_page *)lockers[i].page)->waited;
+    }
+    check(l->count == LOCKERS * LOCK_ROUNDS, "no locker's round was lost to another holding the lock too");
+    check(waited > 0, "a locker found the lock held, so the takes that wait were tried");
+    check(lock_try(&lock), "the lock is free once every locker is done");
+    lock_give(&lock);
+    say(&out, "libtest: %u lockers, %u rounds each under a lock, found held %u times: ok\n", LOCKERS, LOCK_ROUNDS, waited);
+    for (uint32_t i = 0; i < LOCKERS; i++) {
+        must("take a locker down", child_free(&self, &lockers[i]));
+    }
+    must("the shared memory back", slot_free(&self, shared.made));
+    room_give(&self, &shared);
+    must("the lock's notification back", slot_free(&self, note));
+    must("give the room back", self_room_free(&self));
+    check(same(tally(), unroomed), "the lockers, their lock and the room gave back what they were given");
+}
+
+/* Two passers in room for children's data, and the buffer carved from it, which the root task sees through the room. */
+static void pass_round(void)
+{
+    struct tally unroomed = tally();
+    struct block buffer;
+    uint32_t region = 0;
+    must("room for children's data", self_room(&self, ROOM_SIZE));
+    must("a buffer", room_take(&self, SELF_ROOM_UNIT, &buffer));
+    for (uint32_t i = 0; i < 2; i++) {
+        must("build a passer", child_new(&self, &passers[i], "passer", CHILD_TABLE, CHILD_DATA));
+        ((struct passer_page *)passers[i].page)->buffer = buffer.base;
+        must("start a passer", child_start(&self, &passers[i], passer_main, CHILD_UNITS));
+    }
+    for (uint32_t n = 0; n < PASSES; n++) {
+        struct child *to = &passers[n % 2u];
+        if (n > 0) {
+            must("take the buffer from a passer", child_unmap(&self, &passers[(n + 1u) % 2u], region));
+        }
+        must("give the buffer to a passer", child_map(&self, to, buffer.made, RIGHT_R | RIGHT_W, &region));
+        ((struct passer_page *)to->page)->pass = n;
+        must("tell a passer it holds the buffer", child_tell(to));
+        while (to->told != PASSER_HELD + n) {
+            step();
+        }
+    }
+    struct child *last = &passers[(PASSES - 1u) % 2u];
+    must("take the buffer from the last passer", child_unmap(&self, last, region));
+    ((struct passer_page *)last->page)->pass = PASS_GONE;
+    may_fault = last;
+    faulted = 0;
+    must("tell the last passer it holds the buffer no longer", child_tell(last));
+    while (!(faulted & last->bit_fault) && last->told != PASSER_BREACHED) {
+        step();
+    }
+    may_fault = 0;
+    check(last->told != PASSER_BREACHED, "a store to a buffer taken from a passer faulted");
+    check(*(volatile uint32_t *)(uintptr_t)buffer.base == PASSES - 1u, "the buffer holds what its last pass wrote");
+    say(&out, "libtest: a buffer handed between two children %u times, and taken from the last: ok\n", PASSES);
+    for (uint32_t i = 0; i < 2; i++) {
+        must("take a passer down", child_free(&self, &passers[i]));
+    }
+    must("the buffer back", slot_free(&self, buffer.made));
+    room_give(&self, &buffer);
+    must("give the room back", self_room_free(&self));
+    check(same(tally(), unroomed), "the passers, their buffer and the room gave back what they were given");
+}
+
 int main(void)
 {
     uint32_t base, size, region, deadline;
@@ -298,6 +401,7 @@ int main(void)
     must("the root's data", rv_frame_info(BOOT_CAP_DATA, &root_data, &root_size));
     for (uint32_t round = 0; round < 2; round++) {
         must("build the faulting child", child_new(&self, &faulty, "fault", CHILD_TABLE, CHILD_DATA));
+        may_fault = &faulty;
         struct fault_page *pf = (struct fault_page *)faulty.page;
         check(pf->address == 0, "a child's data starts zeroed, whatever its block held");
         pf->address = root_data;
@@ -324,6 +428,8 @@ int main(void)
     must("free the channel", chan_free(&self, &link));
     check_round();
     hub_round();
+    lock_round();
+    pass_round();
     check(same(tally(), start), "everything handed out came back");
     say(&out, "libtest: down, %u bytes free and %u slots unused\n", mem_unused(&self), slots_unused(&self));
     say(&out, "libtest: ok\n");

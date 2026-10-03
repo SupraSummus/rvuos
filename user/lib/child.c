@@ -134,6 +134,17 @@ uint32_t child_map(struct self *s, struct child *c, uint32_t frame, uint32_t rig
     return status;
 }
 
+uint32_t child_unmap(struct self *s, struct child *c, uint32_t region)
+{
+    if (region <= CHILD_REGION_DATA || region >= PROCESS_REGION_SLOTS || !(c->regions & (1u << region))) {
+        s->what = "a region of a child's the parent handed out";
+        return KERR_INVALID_ARG;
+    }
+    TRY(s, "uninstall a frame from a child", rv_process_uninstall(c->process, region));
+    c->regions &= ~(1u << region);
+    return KERR_OK;
+}
+
 uint32_t child_region(struct self *s, struct child *c, uint32_t *region)
 {
     return take_lowest(s, &c->regions, PROCESS_REGION_SLOTS, region, "a free region of a child's");

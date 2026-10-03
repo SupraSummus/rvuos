@@ -14,6 +14,8 @@ _Static_assert(CORES <= 32, "the cores owed an interrupt fit a word");
  * A ticket lock, so that the cores take it in the order they asked for it,
  * and a core waits for it at most as long as each core ahead holds it:
  * one step of a walk at most, since a walk stops for a core waiting as for an interrupt.
+ * It is taken with an acquire and given up with a release, which programs rely on too:
+ * a wait that returns a signal's bits sees what the signaller stored before it; MANUAL.md, section 5.7.
  */
 struct kernel_lock kernel_lock;
 

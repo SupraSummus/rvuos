@@ -8,6 +8,7 @@
 
 #include "lib/chan.h"
 #include "lib/child.h"
+#include "lib/lock.h"
 
 /* Each peer sends PACKETS packets of 1 to PACKET_MAX bytes, through rings of a few slots. */
 #define PACKETS    40u
@@ -66,6 +67,47 @@ struct client_page {
     uint32_t seed; /* what its packets' bytes start from */
 };
 
+/*
+ * Holders of a lock, each adding one to a count they share LOCK_ROUNDS times:
+ * it reads the count under the lock and writes it back one more, every other round sleeping between the two,
+ * so that the others find the lock held, and a count two held at once would come out short.
+ */
+#define LOCKERS       3u
+#define LOCK_ROUNDS   20u
+#define LOCK_SLEEP_US 1000u
+enum {
+    LOCKER_DONE = CHILD_RUNNING + 1,
+};
+#define LOCKER_STEP_TAKE 1u /* a take failed; detail is the round */
+struct locked {
+    uint32_t word;
+    volatile uint32_t count;
+};
+struct locker_page {
+    struct child_page c;
+    struct lock lock;         /* which no other locker can write */
+    uint32_t count;           /* the address of the count */
+    volatile uint32_t waited; /* the rounds it found the lock held */
+};
+
+/*
+ * A buffer of one word handed between two children PASSES times, taken from the one before it is given to the other.
+ * Each, told it holds it, checks that the word is the last pass and writes its own, with no fence, MANUAL.md section 5.7;
+ * the last, told it holds it no longer, stores to it anyway, which must stop it and nothing else.
+ */
+#define PASSES    3u
+#define PASS_GONE 0xffffffffu
+enum {
+    PASSER_BREACHED = CHILD_RUNNING + 1, /* stored to the buffer it no longer holds */
+    PASSER_HELD,                         /* PASSER_HELD + n: wrote the buffer for pass n */
+};
+#define PASSER_STEP_BUFFER 1u /* the word was not the last pass; detail is what it was */
+struct passer_page {
+    struct child_page c;
+    uint32_t buffer;        /* its address */
+    volatile uint32_t pass; /* the root task's, before each tell: the pass it holds the buffer for, or PASS_GONE */
+};
+
 void peer_main(struct child_page *page);
 void fault_main(struct child_page *page);
 /* A child that answers each check its parent asks, and one that spins and answers none. */
@@ -73,5 +115,7 @@ void answer_main(struct child_page *page);
 void spin_main(struct child_page *page);
 void server_main(struct child_page *page);
 void client_main(struct child_page *page);
+void locker_main(struct child_page *page);
+void passer_main(struct child_page *page);
 
 #endif

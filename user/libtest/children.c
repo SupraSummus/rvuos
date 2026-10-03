@@ -15,6 +15,17 @@ static void wait_any(void)
     }
 }
 
+/* Waits until its parent tells it something. */
+static void wait_parent(void)
+{
+    uint32_t bits = 0;
+    while (!(bits & CHILD_BIT_PARENT)) {
+        if (rv_wait(CHILD_INBOX, &bits) != KERR_OK) {
+            rv_breakpoint();
+        }
+    }
+}
+
 /* Waits whenever the ring is full, which only the other's take from it can end. */
 static void send(const struct chan_end *e)
 {
@@ -156,4 +167,47 @@ void client_main(struct child_page *page)
     }
     chan_send(&p->link, "left", 4);
     child_stop(page, CLIENT_DONE);
+}
+
+void locker_main(struct child_page *page)
+{
+    struct locker_page *p = (struct locker_page *)page;
+    volatile uint32_t *count = (volatile uint32_t *)(uintptr_t)p->count;
+    child_report(page, CHILD_RUNNING);
+    for (uint32_t n = 0; n < LOCK_ROUNDS; n++) {
+        if (!lock_try(&p->lock)) {
+            p->waited++;
+            if (lock_take(&p->lock) != KERR_OK) {
+                child_fail(page, LOCKER_STEP_TAKE, n);
+            }
+        }
+        uint32_t was = *count;
+        if (n % 2u == 0) {
+            child_sleep(LOCK_SLEEP_US);
+        }
+        *count = was + 1u;
+        lock_give(&p->lock);
+    }
+    child_stop(page, LOCKER_DONE);
+}
+
+/* The root task tells it once for each pass it reported, so it reads after the wait that took the tell's bit. */
+void passer_main(struct child_page *page)
+{
+    struct passer_page *p = (struct passer_page *)page;
+    volatile uint32_t *buffer = (volatile uint32_t *)(uintptr_t)p->buffer;
+    child_report(page, CHILD_RUNNING);
+    for (;;) {
+        wait_parent();
+        uint32_t pass = p->pass;
+        if (pass == PASS_GONE) {
+            *buffer = PASS_GONE;
+            child_stop(page, PASSER_BREACHED);
+        }
+        if (pass > 0 && *buffer != pass - 1u) {
+            child_fail(page, PASSER_STEP_BUFFER, *buffer);
+        }
+        *buffer = pass;
+        child_report(page, PASSER_HELD + pass);
+    }
 }

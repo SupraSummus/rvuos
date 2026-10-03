@@ -127,8 +127,8 @@ until the maintainer decides otherwise.
     and a spinning thread is always runnable and keeps the machine from `wfi`,
     while a waiting thread says what it waits for.
     The cases that ask for one have other answers:
-    a lock whose holder was preempted is a short spin on `lr`/`sc`
-    and then a wait on a notification the unlocker signals,
+    a lock whose holder was preempted is a wait on a notification the unlocker signals, as in `user/lib/lock.h`,
+    after a short spin on `lr`/`sc` only where the holder may run on another core,
     and polling a device ends with an `Irq`.
     A sleep bounded from above, "no longer than", was considered as the same operation;
     it would have to round the delay down and end in a spin of up to one tick.
