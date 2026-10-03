@@ -77,3 +77,65 @@ void fault_main(struct child_page *page)
     *(volatile uint32_t *)(uintptr_t)p->address = 1;
     child_stop(page, FAULT_BREACHED);
 }
+
+/* Each packet back on the channel it came on; a client's end the root task closed is let go of, and nothing kept of it. */
+void server_main(struct child_page *page)
+{
+    struct server_page *p = (struct server_page *)page;
+    child_report(page, CHILD_RUNNING);
+    for (;;) {
+        for (uint32_t i = 0; i < HUB_CLIENTS; i++) {
+            struct chan_end *e = &p->ends[i];
+            uint32_t gen, len;
+            const uint8_t *in;
+            if (chan_changed(e, &gen)) {
+                p->let_go += !(gen & 1u);
+                chan_seen(e, gen);
+            }
+            while ((in = chan_get_begin(e, &len)) != 0) {
+                chan_send(e, in, len);
+                chan_get_end(e);
+            }
+        }
+        wait_any();
+    }
+}
+
+/*
+ * A packet at a time, and each back before the next;
+ * then one more, whose echo it leaves in the ring, which the next client on its end must not see.
+ */
+void client_main(struct child_page *page)
+{
+    struct client_page *p = (struct client_page *)page;
+    child_report(page, CHILD_RUNNING);
+    while (!chan_ready(&p->link)) {
+        wait_any();
+    }
+    for (uint32_t n = 0; n < PACKETS; n++) {
+        uint8_t *slot;
+        uint32_t len;
+        const uint8_t *in;
+        while ((slot = chan_put_begin(&p->link)) == 0) {
+            wait_any();
+        }
+        for (uint32_t i = 0; i < packet_len(n); i++) {
+            slot[i] = packet_byte(n + p->seed, i);
+        }
+        chan_put_end(&p->link, packet_len(n));
+        while ((in = chan_get_begin(&p->link, &len)) == 0) {
+            wait_any();
+        }
+        if (len != packet_len(n)) {
+            child_fail(page, PEER_STEP_LENGTH, n);
+        }
+        for (uint32_t i = 0; i < len; i++) {
+            if (in[i] != packet_byte(n + p->seed, i)) {
+                child_fail(page, PEER_STEP_BYTES, n);
+            }
+        }
+        chan_get_end(&p->link);
+    }
+    chan_send(&p->link, "left", 4);
+    child_stop(page, CLIENT_DONE);
+}

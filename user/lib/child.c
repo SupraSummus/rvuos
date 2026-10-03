@@ -27,7 +27,8 @@ static uint32_t build(struct self *s, struct child *c, uint32_t table_slots, uin
     c->regions = (1u << CHILD_REGION_CODE) | (1u << CHILD_REGION_DATA);
     c->bits = CHILD_BIT_TIMER | CHILD_BIT_PARENT;
 
-    PASS(mem_frame(s, data_size, &c->data));
+    c->in_room = s->room.made != 0;
+    PASS(c->in_room ? room_take(s, data_size, &c->data) : mem_frame(s, data_size, &c->data));
     PASS(mem_take(s, CHILD_POOL_SIZE, &c->pool));
     PASS(mem_make(s, &c->pool, CAP_POOL));
     uint32_t pool = c->pool.made;
@@ -57,7 +58,11 @@ static uint32_t build(struct self *s, struct child *c, uint32_t table_slots, uin
     TRY(s, "give a child its process", rv_cap_copy(c->table, CHILD_SELF, c->process, RIGHT_W));
     TRY(s, "give a child the log, to write", rv_cap_copy(c->table, CHILD_LOG, s->debug, RIGHT_W));
 
-    PASS(region_install(s, c->data.made, RIGHT_R | RIGHT_W, &c->region));
+    if (c->in_room) {
+        c->region = s->room_region;
+    } else {
+        PASS(region_install(s, c->data.made, RIGHT_R | RIGHT_W, &c->region));
+    }
     c->page = (struct child_page *)(uintptr_t)c->data.base;
     PASS(slot_free(s, c->data.made));
     c->data.made = 0;
@@ -101,6 +106,21 @@ uint32_t child_give_bits(struct self *s, struct child *c, uint32_t ntfn, uint32_
     PASS(give_bits(s, c->table, c->slots_given, ntfn, bits));
     *at = c->slots_given++;
     return KERR_OK;
+}
+
+uint32_t child_slot(struct self *s, struct child *c, uint32_t *at)
+{
+    if (c->slots_given == c->table_slots) {
+        s->what = "a free slot in a child's table";
+        return KERR_LIMIT;
+    }
+    *at = c->slots_given++;
+    return KERR_OK;
+}
+
+uint32_t child_put_bits(struct self *s, struct child *c, uint32_t at, uint32_t ntfn, uint32_t bits)
+{
+    return give_bits(s, c->table, at, ntfn, bits);
 }
 
 uint32_t child_map(struct self *s, struct child *c, uint32_t frame, uint32_t rights, uint32_t *region)
@@ -195,12 +215,20 @@ uint32_t child_free(struct self *s, struct child *c)
             note(s, &f, 0, slot_free(s, slots[i]));
         }
     }
-    /* Its data: the revoke uninstalls it from the parent's region too, which is marked free here. */
-    if (c->page != 0) {
+    /*
+     * Its data: the revoke uninstalls it from the parent's region too, which is marked free here;
+     * or, carved from the room, it went from the child with its process, and the room's region stays.
+     */
+    if (c->page != 0 && !c->in_room) {
         s->regions &= ~(1u << c->region);
     }
     if (c->data.untyped != 0) {
         note(s, &f, 0, mem_give(s, &c->data));
+    } else if (c->in_room && c->data.size != 0) {
+        if (c->data.made != 0) {
+            note(s, &f, 0, slot_free(s, c->data.made));
+        }
+        room_give(s, &c->data);
     }
     bit_free(s, c->bit_page);
     bit_free(s, c->bit_fault);

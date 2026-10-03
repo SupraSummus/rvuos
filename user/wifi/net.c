@@ -204,23 +204,46 @@ static int udp_out(struct net *n, uint32_t to, uint16_t to_port, uint16_t from_p
 
 int net_udp_send(struct net *n, uint32_t to, uint16_t to_port, uint16_t from_port, const uint8_t *data, uint32_t len)
 {
-    if (len > NET_FRAME_MAX - ETH_HEADER - IP_HEADER - UDP_HEADER) {
+    if (len > NET_UDP_MAX) {
         return -1;
     }
     memmove(n->out + ETH_HEADER + IP_HEADER + UDP_HEADER, data, len);
     return udp_out(n, to, to_port, from_port, len);
 }
 
-int net_udp_bind(struct net *n, uint16_t port, net_udp_fn fn)
+static struct net_udp *udp_find(const struct net *n, uint16_t port)
 {
     for (uint32_t i = 0; i < NET_UDP_PORTS; i++) {
-        if (n->udp[i].port == 0) {
-            n->udp[i].port = port;
-            n->udp[i].fn = fn;
-            return 0;
+        if (n->udp[i].port == port) {
+            return (struct net_udp *)&n->udp[i];
         }
     }
-    return -1;
+    return 0;
+}
+
+int net_udp_bound(const struct net *n, uint16_t port)
+{
+    return port == DHCP_CLIENT || (port != 0 && udp_find(n, port) != 0);
+}
+
+int net_udp_bind(struct net *n, uint16_t port, net_udp_fn fn, void *arg)
+{
+    struct net_udp *u = udp_find(n, 0);
+    if (port == 0 || u == 0 || net_udp_bound(n, port)) {
+        return -1;
+    }
+    u->port = port;
+    u->fn = fn;
+    u->arg = arg;
+    return 0;
+}
+
+void net_udp_unbind(struct net *n, uint16_t port)
+{
+    struct net_udp *u = port != 0 ? udp_find(n, port) : 0;
+    if (u != 0) {
+        memset(u, 0, sizeof(*u));
+    }
 }
 
 /* DHCP: a discover, or a request for the offer taken, broadcast from 0.0.0.0. */
@@ -367,11 +390,10 @@ static void udp_input(struct net *n, uint32_t from, uint32_t to, const uint8_t *
         dhcp_input(n, u + UDP_HEADER, len - UDP_HEADER);
         return;
     }
-    for (uint32_t i = 0; i < NET_UDP_PORTS; i++) {
-        if (n->udp[i].port == port && n->udp[i].fn) {
-            n->udp[i].fn(n, from, be16(u), u + UDP_HEADER, len - UDP_HEADER);
-            return;
-        }
+    const struct net_udp *b = port != 0 ? udp_find(n, port) : 0;
+    if (b != 0) {
+        const struct net_datagram d = { from, be16(u), port, u + UDP_HEADER, len - UDP_HEADER };
+        b->fn(n, b->arg, &d);
     }
 }
 

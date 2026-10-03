@@ -11,6 +11,8 @@
  * Where the ring lies and its shape are kept apart from it, by each side in memory of its own,
  * so that neither can make the other read or write past the ring by changing them;
  * what the other side writes into the ring can cost a packet, never memory outside it.
+ * It can make the ring seem to hold as many packets as it likes, though, by moving the counters,
+ * so a reader that does not trust the writer takes a bounded number at a time.
  *
  * The ring says when to wake the other side, and the caller signals its notification:
  * a put into an empty ring, which the reader may be waiting on,

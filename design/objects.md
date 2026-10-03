@@ -576,6 +576,15 @@ each end holding the other's notification carved to its own bit.
 Each end keeps where its rings lie and their shape in memory the other end cannot write,
 since a ring's own header, shared, would let a peer steer the other's writes outside the ring;
 all a peer can spoil is a packet.
+It can still make a ring seem as full as it likes, so a server takes a ring's worth from each client for each wake.
+
+A region for each client would bound a server's clients by its regions, seven at most on RP2350's Hazard3,
+less the server's code, data and devices.
+So `user/lib/chan.h` has a hub too: one frame of a channel for each client, which the server installs once,
+of which each client is given its own channel, carved.
+A parent watching many children meets the same bound through their pages, and answers it the same way,
+with room for its children's data, `self_room` in `user/lib/self.h`, which it installs once and carves each child's data from.
+The Wi-Fi system's network process serves its clients through a hub, see `user/wifi/NOTES.md`.
 
 Interrupts arrive as signals on the notification bound to an `Irq`,
 which needed no new mechanism; see "Interrupts".

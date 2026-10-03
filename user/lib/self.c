@@ -157,6 +157,69 @@ uint32_t timer_new(struct self *s, uint32_t *irq)
     return timer_bind(s, s->pool, s->inbox, irq);
 }
 
+uint32_t self_room(struct self *s, uint32_t size)
+{
+    if (size < SELF_ROOM_UNIT || size / SELF_ROOM_UNIT > 32u || (size & (size - 1u)) != 0) {
+        s->what = "room of a power of two of units, 32 at most";
+        return KERR_INVALID_ARG;
+    }
+    PASS(mem_frame(s, size, &s->room));
+    PASS(region_install(s, s->room.made, RIGHT_R | RIGHT_W, &s->room_region));
+    s->room_used = 0;
+    return KERR_OK;
+}
+
+uint32_t self_room_free(struct self *s)
+{
+    if (s->room_used != 0) {
+        s->what = "a room no child's data is in";
+        return KERR_STATE;
+    }
+    PASS(region_free(s, s->room_region));
+    PASS(mem_give(s, &s->room));
+    s->room_region = 0;
+    return KERR_OK;
+}
+
+/* A word's first n bits, n from 1 to 32. */
+static uint32_t low_bits(uint32_t n)
+{
+    return n == 32u ? 0xffffffffu : (1u << n) - 1u;
+}
+
+uint32_t room_take(struct self *s, uint32_t size, struct block *b)
+{
+    uint32_t units = s->room.size / SELF_ROOM_UNIT, n = size / SELF_ROOM_UNIT;
+    if (s->room.made == 0 || n == 0 || n * SELF_ROOM_UNIT != size || (n & (n - 1u)) != 0) {
+        s->what = "room of a power of two of units";
+        return KERR_INVALID_ARG;
+    }
+    for (uint32_t i = 0; i + n <= units; i += n) {
+        if ((s->room_used >> i) & low_bits(n)) {
+            continue;
+        }
+        uint32_t frame;
+        PASS(slot_new(s, &frame));
+        uint32_t status = rv_frame_carve(s->room.made, i * SELF_ROOM_UNIT, size, frame);
+        if (status != KERR_OK) {
+            s->what = "carve the room";
+            slot_back(s, frame);
+            return status;
+        }
+        s->room_used |= low_bits(n) << i;
+        *b = (struct block){ 0, frame, s->room.base + i * SELF_ROOM_UNIT, size };
+        return KERR_OK;
+    }
+    s->what = "free room for a child's data";
+    return KERR_LIMIT;
+}
+
+void room_give(struct self *s, const struct block *b)
+{
+    uint32_t i = (b->base - s->room.base) / SELF_ROOM_UNIT;
+    s->room_used &= ~(low_bits(b->size / SELF_ROOM_UNIT) << i);
+}
+
 uint32_t units_take(struct self *s, uint32_t count, uint32_t *first)
 {
     for (uint32_t at = 0; count > 0 && at + count <= TIME_UNITS; at++) {

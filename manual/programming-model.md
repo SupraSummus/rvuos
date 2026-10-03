@@ -376,12 +376,14 @@ so an `sc.w` fails whenever a system call, the tick or an interrupt came between
 a loop around the pair tries again, and never succeeds with a system call inside it.
 
 **A server with many clients** waits on one notification;
-each client holds it with `RIGHT_W` only, owns a bit,
+each client holds it with `RIGHT_W` only, carved to a bit of its own,
 and shares a region with the server.
-One wake can carry several clients' work.
-Which client owns which bit is a convention the kernel does not enforce,
-so a client can waste the server a look but cannot forge data
-or consume another client's wake.
+One wake can carry several clients' work,
+and the bits it returns say whose, since a client cannot set another's bit;
+it cannot forge another's data or consume another's wake either.
+The server need not spend a region on each client:
+the clients' regions may all be carved from one frame the server installs once,
+as the hub of `lib/chan.h` does, section 8.4.
 
 ### 5.8 Time
 

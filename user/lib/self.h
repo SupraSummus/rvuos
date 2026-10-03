@@ -33,6 +33,7 @@ struct block {
 
 #define SELF_SLOTS  128u /* the most slots of a table it keeps account of */
 #define SELF_BLOCKS 24u  /* the most free blocks it keeps */
+#define SELF_ROOM_UNIT 0x1000u /* what room for children's data is handed out in, see self_room */
 
 struct self {
     /* Its capabilities, in its own table. */
@@ -53,6 +54,9 @@ struct self {
     /* Free memory: Untypeds, each of a block, none overlapping. */
     struct block free[SELF_BLOCKS];
     uint32_t free_count;
+    /* Room for children's data, if it was asked for: a frame, the region it is installed in, and a bit for each unit in use. */
+    struct block room;
+    uint32_t room_region, room_used;
     const char *what;
 };
 
@@ -109,6 +113,20 @@ void bit_free(struct self *s, uint32_t bit);
 uint32_t timer_bind(struct self *s, uint32_t pool, uint32_t ntfn, uint32_t *irq);
 /* An Irq on a timer line of its own, which signals its inbox with the bits it is set with. */
 uint32_t timer_new(struct self *s, uint32_t *irq);
+
+/*
+ * Room for children's data: a frame of size bytes, a power of two of at most 32 units, installed in a region of its own,
+ * which child_new carves each child's data from once it is there,
+ * rather than taking a block for each child that the parent would install in a region each.
+ * So a parent spends one region on all its children's pages, which it sees through it.
+ */
+uint32_t self_room(struct self *s, uint32_t size);
+/* The room back, its region and its block, once no child's data is in it. */
+uint32_t self_room_free(struct self *s);
+/* Size bytes of the room, a power of two of whole units at a multiple of their size, as a frame carved into a new slot. */
+uint32_t room_take(struct self *s, uint32_t size, struct block *b);
+/* The room's bytes back, once nothing is installed from them any more. */
+void room_give(struct self *s, const struct block *b);
 
 /* Units of the first core in a row, and back. */
 uint32_t units_take(struct self *s, uint32_t count, uint32_t *first);

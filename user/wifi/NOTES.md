@@ -10,7 +10,8 @@ and datagrams on UDP ports 7 and 7777.
 These notes say what that took, what helped and what hurt,
 so that the next decisions about the kernel and a library for programs can start from a program and not from a guess.
 They were written before `user/lib/`, which came of them;
-the last section says what the library changed.
+the sections at the end say what the library and the kernel's changes did,
+and what moving the network's services into clients in processes of their own found.
 
 ## What it took
 
@@ -200,3 +201,73 @@ What is left of the list is a run that lasts:
 a watchdog someone feeds and a console that reaches the host while the system runs, decisions about the board more than the kernel.
 Of what a library cannot fix, asking and answering and connecting at run time remain,
 which a server with clients in processes of their own, a socket over a channel to the network process, would measure.
+
+## Clients in processes of their own
+
+The network process kept the IP stack and its own status port,
+and its services moved out into clients, each a process of its own:
+the echo, which answers on UDP port 7 as the network process did,
+and the clock, new, which asks the network for the time and tells it on port 13.
+Each has a channel from the network process, through which it uses datagram sockets, `sock.h`:
+it binds ports, sends from them and receives what is sent to them, and asks for the network's addresses.
+That took about 600 lines:
+`sock.c`, the server's side, and `sntp.c`, the clock's messages, which make no system call, so `make wifi-test` tries every lie on them;
+`echo.c` and `clock.c`; and about 50 more lines in the network process and 100 in the root task, which builds the clients again.
+The library gained a hub, room for children's data, and the calls of an end that is connected again.
+Nothing in the kernel changed.
+
+**The parent's regions ran out first.**
+A child's page lies in its data, which the parent had installed in a region for each child:
+code, data, console, log and three children's pages fill the seven regions Hazard3 gives a process on RP2350,
+and the fourth child, the clock, failed to connect.
+`self_room` now gives a parent one frame for all its children's data, installed once, of which each child's is carved.
+The driver still has a region of its own, since the firmware fills the free memory the room comes from until the chip runs.
+
+**The server's regions would have run out next.**
+A channel installed for each client costs the server a region each:
+with its code, data and link the network process would serve four clients.
+A hub is one frame of a channel for each client, which the server installs once, and each client is given its own, carved.
+Both fixes are the same move: carving is how the system names less, and one region over many carves costs one entry.
+
+**Connecting at run time is a handshake of three.**
+The parent closes a client's end, the server lets go of it and says so, and only then may the parent connect another client:
+before, the new client's rings could be emptied under the server, or its port refused as still held by the client that died.
+The server's word is a count, `gen`, that the parent moves at each connection and close and the server echoes back, `seen`,
+so neither a close nor a connection the server slept through is lost.
+
+**A peer can make a ring look full.**
+The rings keep memory safe from a lying peer, not time:
+moving the counters makes a ring seem to hold billions of packets, and taking until it is empty never ends.
+The network process takes a ring's worth from each channel for each wake,
+and wakes itself for what it left, through its own inbox carved to a bit of its own,
+a slot and a bit, since there is no wait that does not block.
+
+**Asking and answering is a state machine, and a channel for each asker keeps it small.**
+The clock asks four questions in a row, the network's addresses, a port, the server's address and the time,
+each asked again every second until it is answered.
+Answers come back in the order of the questions, each client on its own channel,
+so no question needs a tag, and the guarantee that an answer reaches its asker is the channel's.
+A client of two threads asking at once would need one or the other back, a tag or a channel each.
+
+**What a client costs.**
+A datagram handed to a client and its answer handed back, four system calls and two switches,
+take about 50 microseconds on average and 37 at least on Hazard3, 46 and 40 on the Cortex-M33, both at 150 MHz,
+by the counter read in the network process around the echo, code that was not kept.
+A laptop's echo of 32 bytes took 4.0 to 5.5 ms at the median through the echo's process, from run to run on either kind of core,
+as it took 4.05 and 5.24 when the network process answered itself: the radio's jitter is a hundred times the hop.
+Each client costs the root task six slots and one for its channel, and the network process a slot and a bit;
+a run ends with 12 of the root task's 46 slots unused, from 26.
+
+**A client's fault costs the client.**
+A datagram that reads `fault` makes the echo store where it has no region.
+The root task closes its channel, takes it down, waits for the network process to let go, and builds it again;
+the laptop has its echo back 5 to 7 ms later, and the root task ends the run with the bytes and slots it had before.
+Every check that keeps the clients apart is the server's own code:
+it reads a request's header once, since the client may rewrite it meanwhile,
+holds each request to the length the ring says, and each client to the ports it holds.
+
+So the kernel had what clients that do not trust each other need:
+carving for regions, the notification's bits for who signalled, and a fault that stops one process.
+The four system calls of a round trip and the answer with no kernel to carry it to its asker, open decision 5,
+cost nothing a laptop can see; a server whose round trips were its time would be the next measure.
+

@@ -58,6 +58,12 @@ until the maintainer decides otherwise.
    and the four system calls per round trip,
    or the missing guarantee that one answer reaches one asker,
    can be measured rather than guessed.
+   The Wi-Fi system's network process is the first such server, with two clients in processes of their own:
+   a round trip through a client costs it 37 to 52 microseconds on RP2350 at 150 MHz,
+   against 4 to 7 milliseconds for the radio's,
+   and a channel for each client, from a hub, answers each asker on its own channel,
+   so neither cost has shown yet; see `user/wifi/NOTES.md`.
+   A client of several threads asking at once, or a server whose round trips are its time, would show them.
    An `Endpoint` object would not replace notifications:
    interrupts need those either way.
 

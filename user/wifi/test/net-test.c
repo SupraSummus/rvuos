@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "../net.h"
+#include "frames.h"
 
 static uint8_t sent[8][NET_FRAME_MAX];
 static uint32_t sent_len[8], sent_count;
@@ -33,86 +34,19 @@ static void capture(struct net *n, const uint8_t *frame, uint32_t len)
 }
 
 static uint32_t got_from_ip, got_len;
-static uint16_t got_from_port;
+static uint16_t got_from_port, got_port;
 static uint8_t got[64];
+static void *got_arg;
 
-static void on_udp(struct net *n, uint32_t from_ip, uint16_t from_port, const uint8_t *data, uint32_t len)
+static void on_udp(struct net *n, void *arg, const struct net_datagram *d)
 {
     (void)n;
-    got_from_ip = from_ip;
-    got_from_port = from_port;
-    got_len = len < sizeof(got) ? len : sizeof(got);
-    memcpy(got, data, got_len);
-}
-
-static uint16_t be16(const uint8_t *p)
-{
-    return (uint16_t)((p[0] << 8) | p[1]);
-}
-
-static void put_be16(uint8_t *p, uint32_t v)
-{
-    p[0] = (uint8_t)(v >> 8);
-    p[1] = (uint8_t)v;
-}
-
-/* The Internet checksum over len bytes, starting from sum; zero over bytes that hold their own checksum. */
-static uint16_t checksum(const uint8_t *p, uint32_t len, uint32_t sum)
-{
-    for (; len > 1; len -= 2, p += 2) {
-        sum += be16(p);
-    }
-    if (len) {
-        sum += (uint32_t)p[0] << 8;
-    }
-    while (sum >> 16) {
-        sum = (sum & 0xffff) + (sum >> 16);
-    }
-    return (uint16_t)~sum;
-}
-
-/* UDP's pseudo header, summed, for checksum's start. */
-static uint32_t pseudo_sum(uint32_t from, uint32_t to, uint32_t udp_len)
-{
-    const uint8_t *f = (const uint8_t *)&from, *t = (const uint8_t *)&to;
-    return be16(f) + be16(f + 2) + be16(t) + be16(t + 2) + 17u + udp_len;
-}
-
-static const uint8_t pico[6] = { 0x2c, 0xcf, 0x67, 0x01, 0x02, 0x03 };
-static const uint8_t router[6] = { 0x02, 0x00, 0x00, 0xaa, 0xbb, 0xcc };
-
-/* An Ethernet frame with an IPv4 header around a payload already at f + 34; returns its length. */
-static uint32_t ip_frame(uint8_t *f, const uint8_t *to_mac, uint32_t from, uint32_t to, uint32_t proto, uint32_t len)
-{
-    memcpy(f, to_mac, 6);
-    memcpy(f + 6, router, 6);
-    put_be16(f + 12, 0x0800);
-    uint8_t *ip = f + 14;
-    ip[0] = 0x45;
-    ip[1] = 0;
-    put_be16(ip + 2, 20 + len);
-    put_be16(ip + 4, 1);
-    put_be16(ip + 6, 0);
-    ip[8] = 64;
-    ip[9] = (uint8_t)proto;
-    put_be16(ip + 10, 0);
-    memcpy(ip + 12, &from, 4);
-    memcpy(ip + 16, &to, 4);
-    put_be16(ip + 10, checksum(ip, 20, 0));
-    return 14 + 20 + len;
-}
-
-static uint32_t udp_frame(uint8_t *f, const uint8_t *to_mac, uint32_t from, uint32_t to, uint16_t sport, uint16_t dport,
-                          const uint8_t *data, uint32_t len)
-{
-    uint8_t *u = f + 34;
-    put_be16(u, sport);
-    put_be16(u + 2, dport);
-    put_be16(u + 4, 8 + len);
-    put_be16(u + 6, 0);
-    memcpy(u + 8, data, len);
-    put_be16(u + 6, checksum(u, 8 + len, pseudo_sum(from, to, 8 + len)));
-    return ip_frame(f, to_mac, from, to, 17, 8 + len);
+    got_arg = arg;
+    got_from_ip = d->from_ip;
+    got_from_port = d->from_port;
+    got_port = d->port;
+    got_len = d->len < sizeof(got) ? d->len : sizeof(got);
+    memcpy(got, d->data, got_len);
 }
 
 /* A DHCP answer of a type, from the router, offering .50. */
@@ -204,14 +138,23 @@ int main(void)
     CHECK(checksum(sent[0] + 14, 20, 0) == 0 && memcmp(sent[0] + 14 + 16, &peer, 4) == 0);
     CHECK(memcmp(sent[0] + 42, "rvuos ping", 10) == 0);
 
-    /* UDP to a bound port reaches it; an answer goes back with its checksum right. */
-    CHECK(net_udp_bind(&n, 7, on_udp) == 0);
+    /* UDP to a bound port reaches it, with what it was bound with; an answer goes back with its checksum right. */
+    CHECK(net_udp_bind(&n, 7, on_udp, &n) == 0);
+    CHECK(net_udp_bind(&n, 7, on_udp, 0) == -1 && net_udp_bind(&n, 68, on_udp, 0) == -1);
+    CHECK(net_udp_bind(&n, 0, on_udp, 0) == -1 && net_udp_bound(&n, 7) && net_udp_bound(&n, 68));
     sent_count = 0;
     net_input(&n, f, udp_frame(f, pico, peer, me, 40000, 7, (const uint8_t *)"hello", 5));
     CHECK(got_len == 5 && memcmp(got, "hello", 5) == 0 && got_from_ip == peer && got_from_port == 40000);
+    CHECK(got_port == 7 && got_arg == &n);
     CHECK(net_udp_send(&n, peer, 40000, 7, (const uint8_t *)"hello back", 10) == 0);
     CHECK(sent_count == 1 && be16(sent[0] + 34) == 7 && be16(sent[0] + 36) == 40000);
     CHECK(checksum(sent[0] + 34, 18, pseudo_sum(me, peer, 18)) == 0);
+
+    /* Unbound, the port takes nothing, and may be bound again. */
+    net_udp_unbind(&n, 7);
+    got_len = 0;
+    net_input(&n, f, udp_frame(f, pico, peer, me, 40000, 7, (const uint8_t *)"hello", 5));
+    CHECK(got_len == 0 && !net_udp_bound(&n, 7) && net_udp_bind(&n, 7, on_udp, &n) == 0);
 
     /* A corrupted datagram is dropped; one off the link goes to the gateway, whose address is known now. */
     got_len = 0;

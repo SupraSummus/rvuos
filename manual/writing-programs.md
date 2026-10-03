@@ -190,9 +190,9 @@ Each header says how its calls are used.
 
 | Header | What it gives |
 |---|---|
-| `lib/self.h` | what a process hands out of its own: slots, regions, bits of its inbox, timers, units of time, and memory halved out of Untypeds |
+| `lib/self.h` | what a process hands out of its own: slots, regions, bits of its inbox, timers, units of time, memory halved out of Untypeds, and room for its children's data |
 | `lib/child.h` | a child built, started, heard and taken down by its parent, and the child's own calls: its log, its state, its sleep |
-| `lib/chan.h` | a channel between two children: a frame of two rings of packets, and a bit each way |
+| `lib/chan.h` | a channel between two children: a frame of two rings of packets, and a bit each way; and a hub, a server's channels to many clients |
 | `lib/ring.h`, `lib/log.h` | the rings a channel is made of, and the kernel's log: written through `Debug`, and read as the root task reads it |
 | `lib/say.h`, `lib/libc.h` | text with values, and the memory functions the compiler calls |
 
@@ -216,28 +216,54 @@ Its text goes into the kernel's log through `CHILD_LOG`, a `Debug` capability wi
 in order with the kernel's lines, among them its own faults, and it cannot halt the machine.
 `say` in `lib/say.h` formats it, and `log_out` in `lib/log.h` writes it a call per 12 bytes.
 It costs its parent six slots, and `child_free` takes back everything that was made for it.
+Its data is a block of its own, which its parent installs in a region of its own,
+or, once the parent has asked for room for its children's data with `self_room`, carved from that room,
+which the parent installs once: a parent then spends one region on all its children's pages, not one each.
 
 **A channel** is connected by the parent into two children, running or not,
 each holding the other's inbox carved to the other's bit for the channel.
 Each end keeps where its rings lie and their shape in its page, which the other child cannot write,
 so a peer can spoil a packet but not steer the other's writes outside the ring.
+It can make a ring seem as full as it likes, though,
+so an end that serves a peer it does not trust takes a ring's worth of packets for each wake rather than until the ring is empty.
+
+**A hub** is a server's side of channels to many clients:
+one frame of a channel for each, which the server installs once, in one region,
+and of which each client is given its own channel, carved, and sees no other's.
+The parent connects a client to an end of the hub with `chan_hub_connect`, both running or not,
+and closes the end with `chan_hub_close` when it takes the client down,
+which takes the channel from the client and the client's inbox from the server, and tells the server.
+The server, told, sees with `chan_changed` that an end was closed or connected,
+forgets what it kept for the end's last client, and says so with `chan_seen`;
+only then is the end idle, `chan_hub_idle`, and may another client be connected to it,
+whose rings start empty.
 
 **What it does not do yet**, with the reasons in `TODO.md`:
 children run on the first core;
-a channel is connected once;
+a channel between two peers is connected once, as only a hub's ends are connected again;
 and halved memory is never joined again, so each free block holds a slot.
 
 `make lib-test` boots `user/libtest/` on any board.
 Its root task reads bytes back out of free memory, has two children send each other packets through rings that fill,
-and builds, hears fault and takes down a child twice,
+and builds, hears fault and takes down a child twice;
+then, in room for children's data, it builds a server with a hub and a client on each end,
+and takes one client down and connects another in its place twice,
 checking that everything handed out comes back and that the second child left the same behind as the first.
 
 ### 8.5 A program of several processes: the Wi-Fi system
 
-`user/wifi/` is a program of several files and three processes on a Pico 2 W, built on the library:
-a root task that builds the system, a driver for the CYW43439, its Wi-Fi chip, and a network process with an IP stack;
+`user/wifi/` is a program of several files and five processes on a Pico 2 W, built on the library:
+a root task that builds the system, a driver for the CYW43439, its Wi-Fi chip, a network process with an IP stack,
+and two clients of the network process, the echo and the clock;
 `wifi.h` says what they share, which is the types of their pages.
 The driver and the network process trade Ethernet frames through a channel, the link.
+Each client has a channel from the network process's hub, through which it uses datagram sockets, `sock.h`:
+it binds ports, its own until it closes them or is gone, sends from them and receives what is sent to them.
+The echo sends back every datagram to UDP port 7;
+the clock asks the network's DNS server for a server of pool.ntp.org, asks that server for the time by SNTP,
+and tells the time to any datagram to UDP port 13.
+A datagram that reads `fault` makes the echo store where it has no region, as a broken client would:
+the root task takes it down and builds it again, and the network process gives its port back meanwhile.
 `make BOARD=rp2350 wifi` builds and runs it, section 4.
 The driver reaches the chip through frames over PIO0's registers and over the control registers of four pins,
 which the root task carves from the frames it is granted over PIO0 and IO_BANK0, section 3,

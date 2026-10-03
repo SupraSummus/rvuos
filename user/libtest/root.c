@@ -5,6 +5,8 @@
  * It reads bytes left in free memory, as a loader leaves a program's files there;
  * connects two peers with a channel whose rings hold a few packets, and has each send the other more than that;
  * builds a child that stores where it has no region, hears it fault and takes it down, twice;
+ * builds a server with a hub in room for children's data, and clients on its ends,
+ * and takes one down and connects another in its place, twice;
  * then takes the rest down.
  * It ends with "libtest: ok" and halt code 0, which tests/libtest.sh checks, or with what failed and another code.
  */
@@ -20,13 +22,14 @@
 #define CHILD_TABLE 16u
 #define CHILD_DATA  0x2000u
 #define RUN_US      10000000u /* the test's deadline */
+#define ROOM_SIZE   0x8000u   /* the server's data and its clients' */
 
 static struct self self, after;
 static struct kernel_log klog;
 static uint32_t log_bit, deadline_bit;
 
-static struct child a, b, faulty;
-static struct child *const children[] = { &a, &b, &faulty };
+static struct child a, b, faulty, server, clients[HUB_CLIENTS];
+static struct child *const children[] = { &a, &b, &faulty, &server, &clients[0], &clients[1] };
 static uint32_t faulted; /* the bits of the faults the root task heard */
 
 static void console_byte(char c)
@@ -99,12 +102,16 @@ static void step(void)
  * The slots of free blocks are left out, since halving memory adds blocks that are never joined again.
  */
 struct tally {
-    uint32_t bytes, slots, regions, bits, units[TIME_UNITS / 32];
+    uint32_t bytes, slots, regions, bits, room, units[TIME_UNITS / 32];
 };
 
 static struct tally tally(void)
 {
-    struct tally t = { mem_unused(&self), self.slot_end - self.slot_first - slots_unused(&self), self.regions, self.bits,
+    struct tally t = { mem_unused(&self),
+                       self.slot_end - self.slot_first - slots_unused(&self),
+                       self.regions,
+                       self.bits,
+                       self.room_used,
                        { 0 } };
     for (uint32_t i = 0; i < self.free_count; i++) {
         t.slots -= self.free[i].untyped >= self.slot_first && self.free[i].untyped < self.slot_end;
@@ -156,6 +163,64 @@ static void read_back(void)
         check(got[i] == packet_byte(3, i), "free memory reads back what was written before it was given back");
     }
     say(&out, "libtest: free memory read: ok\n");
+}
+
+/* A client on end i of the hub, built, connected and started; seed makes its packets its own. */
+static void client_go(struct chan_hub *hub, uint32_t i, uint32_t seed)
+{
+    must("build a client", child_new(&self, &clients[i], "client", CHILD_TABLE, CHILD_DATA));
+    struct client_page *p = (struct client_page *)clients[i].page;
+    p->seed = seed;
+    must("connect a client", chan_hub_connect(&self, hub, i, &clients[i], &p->link));
+    must("start a client", child_start(&self, &clients[i], client_main, CHILD_UNITS));
+}
+
+/*
+ * A server with a hub, in room for children's data, and a client on each end at once;
+ * then the first end's client taken down and another connected in its place once the server let go of it,
+ * twice, the second leaving the root task as the first did; then all of it back, the room too.
+ */
+static void hub_round(void)
+{
+    struct tally unroomed = tally(), down = unroomed;
+    struct chan_hub hub;
+    must("room for children's data", self_room(&self, ROOM_SIZE));
+    must("build the server", child_new(&self, &server, "server", CHILD_TABLE, CHILD_DATA));
+    check(server.in_room, "a child built once there is room is built in it");
+    struct server_page *ps = (struct server_page *)server.page;
+    must("a hub", chan_hub_new(&self, &hub, &server, ps->ends, HUB_CLIENTS, HUB_CHAN_SIZE, PACKET_MAX));
+    must("start the server", child_start(&self, &server, server_main, CHILD_UNITS));
+    client_go(&hub, 0, 0);
+    client_go(&hub, 1, 1);
+    while (clients[0].told != CLIENT_DONE || clients[1].told != CLIENT_DONE) {
+        step();
+    }
+    say(&out, "libtest: two clients of a hub, %u packets each and back: ok\n", PACKETS);
+    for (uint32_t round = 0; round < 2; round++) {
+        must("close a client's channel", chan_hub_close(&self, &hub, 0));
+        must("take a client down", child_free(&self, &clients[0]));
+        while (!chan_hub_idle(&hub, 0)) {
+            step();
+        }
+        check(round == 0 || (same(tally(), down) && as_at(&after)),
+              "a client connected again leaves the root task as the last did once taken down");
+        down = tally();
+        after = self;
+        client_go(&hub, 0, 2u + round);
+        while (clients[0].told != CLIENT_DONE) {
+            step();
+        }
+    }
+    check(ps->let_go == 2, "the server let go of each client the root task closed");
+    say(&out, "libtest: a client of a hub taken down and another connected in its place, twice: ok\n");
+    for (uint32_t i = 0; i < HUB_CLIENTS; i++) {
+        must("close a client's channel", chan_hub_close(&self, &hub, i));
+        must("take a client down", child_free(&self, &clients[i]));
+    }
+    must("take the server down", child_free(&self, &server));
+    must("free the hub", chan_hub_free(&self, &hub));
+    must("give the room back", self_room_free(&self));
+    check(same(tally(), unroomed), "the hub, its server and clients and the room gave back what they were given");
 }
 
 int main(void)
@@ -225,6 +290,7 @@ int main(void)
     must("take a peer down", child_free(&self, &a));
     must("take a peer down", child_free(&self, &b));
     must("free the channel", chan_free(&self, &link));
+    hub_round();
     check(same(tally(), start), "everything handed out came back");
     say(&out, "libtest: down, %u bytes free and %u slots unused\n", mem_unused(&self), slots_unused(&self));
     say(&out, "libtest: ok\n");

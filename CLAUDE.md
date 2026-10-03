@@ -47,7 +47,7 @@ Both again with `CORES=2` are the only runs of two cores on silicon,
 which a change to how the cores lock, start or interrupt each other needs too.
 `make check` runs the test of `user/lib/` under QEMU alone,
 so a change to the library with a board connected runs `make BOARD=<board> lib-test` there too, on each kind of core.
-Of the Wi-Fi system it runs only the IP stack, on the host;
+Of the Wi-Fi system it runs only what makes no system call, the IP stack and the clients' sockets, on the host;
 a change to `user/wifi/` with a Pico 2 W connected runs `make BOARD=rp2350 wifi` too,
 and `WIFI_CONFIG` names a network to join from a file outside the tree, never in it.
 A new kernel global needs a reset in `host_boot` too,

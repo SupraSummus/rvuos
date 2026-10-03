@@ -46,7 +46,29 @@ struct fault_page {
     uint32_t address;
 };
 
+/*
+ * A hub: a server that sends each packet back on the channel it came on, and clients that each send it PACKETS,
+ * one at a time, and check what comes back.
+ */
+#define HUB_CLIENTS   2u
+#define HUB_CHAN_SIZE 0x400u
+enum {
+    CLIENT_DONE = CHILD_RUNNING + 1, /* had every packet back as it sent it */
+};
+struct server_page {
+    struct child_page c;
+    struct chan_end ends[HUB_CLIENTS];
+    volatile uint32_t let_go; /* how many times it let go of a client */
+};
+struct client_page {
+    struct child_page c;
+    struct chan_end link;
+    uint32_t seed; /* what its packets' bytes start from */
+};
+
 void peer_main(struct child_page *page);
 void fault_main(struct child_page *page);
+void server_main(struct child_page *page);
+void client_main(struct child_page *page);
 
 #endif

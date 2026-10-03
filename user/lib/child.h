@@ -7,7 +7,9 @@
  * A child runs its parent's code but keeps no global: its state lies on its stack or in its page.
  * Its memory is one frame, its data, with its page at the base and its stack at the top,
  * and it starts at its entry with a0 at its page.
- * The parent has the data installed too, so the page is what the two share:
+ * The data is a block of its own, or carved from the parent's room for its children's data, see self_room.
+ * The parent has the data installed too, in a region for each child or in its room for all,
+ * so the page is what the two share:
  * the parent writes into it what it gave the child, and the child its state.
  * The child writes its text into the kernel's log, through CHILD_LOG, which may write and not halt the machine.
  * Whatever signals another's inbox holds it carved to the one bit that is its own,
@@ -71,7 +73,8 @@ struct child {
     uint32_t table, process, thread, inbox; /* the parent's slots of its objects */
     struct block data, pool;
     struct child_page *page;                /* at the base of its data, where the parent sees it too */
-    uint32_t region;                        /* the parent's region its data is installed in */
+    uint32_t region;                        /* the parent's region its data is installed in, its room's if in_room */
+    int in_room;                            /* its data is carved from the parent's room, not a block of its own */
     uint32_t bit_page, bit_fault;           /* its bits on the parent's inbox: a new state, and a fault */
     uint32_t unit, units;                   /* the units of time it earns */
     /* What of the child's is handed out, a bit each or a count. */
@@ -83,7 +86,8 @@ struct child {
 /*
  * A child of table_slots slots and data_size bytes of data, not started:
  * its objects from a pool of its own, its first slots and regions filled,
- * and its data zeroed and installed in a region of the parent's too, for the parent to fill the page.
+ * and its data zeroed and installed in a region of the parent's too, or carved from the parent's room,
+ * for the parent to fill the page.
  * A failure takes back what was made.
  */
 uint32_t child_new(struct self *s, struct child *c, const char *name, uint32_t table_slots, uint32_t data_size);
@@ -91,6 +95,10 @@ uint32_t child_new(struct self *s, struct child *c, const char *name, uint32_t t
 uint32_t child_give(struct self *s, struct child *c, uint32_t slot, uint32_t rights, uint32_t *at);
 /* A notification of the parent's, to signal with RIGHT_W alone and only bits, in the child's next free slot. */
 uint32_t child_give_bits(struct self *s, struct child *c, uint32_t ntfn, uint32_t bits, uint32_t *at);
+/* The child's next free slot, left empty, for the parent to fill later, as child_put_bits does. */
+uint32_t child_slot(struct self *s, struct child *c, uint32_t *at);
+/* As child_give_bits, into the child's slot at, which holds nothing. */
+uint32_t child_put_bits(struct self *s, struct child *c, uint32_t at, uint32_t ntfn, uint32_t bits);
 /* A frame installed in the child's next free region, which *region says. */
 uint32_t child_map(struct self *s, struct child *c, uint32_t frame, uint32_t rights, uint32_t *region);
 /* A region of the child's for the child to install frames into itself, through CHILD_SELF. */

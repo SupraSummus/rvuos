@@ -11,13 +11,21 @@
 #include <stdint.h>
 
 #define NET_FRAME_MAX 1514u
+#define NET_UDP_MAX   1472u /* the most bytes of a datagram, in one frame */
 #define NET_ARP_ENTRIES 8u
-#define NET_UDP_PORTS 4u
+#define NET_UDP_PORTS 8u
 
 struct net;
 typedef void (*net_send_fn)(struct net *n, const uint8_t *frame, uint32_t len);
-/* A datagram for a bound port: who sent it, and its bytes. */
-typedef void (*net_udp_fn)(struct net *n, uint32_t from_ip, uint16_t from_port, const uint8_t *data, uint32_t len);
+
+/* A datagram for a bound port: who sent it, to which of the ports, and its bytes. */
+struct net_datagram {
+    uint32_t from_ip;
+    uint16_t from_port, port;
+    const uint8_t *data;
+    uint32_t len;
+};
+typedef void (*net_udp_fn)(struct net *n, void *arg, const struct net_datagram *d);
 
 enum net_dhcp_state {
     DHCP_OFF,
@@ -35,6 +43,7 @@ struct net_arp {
 struct net_udp {
     uint16_t port; /* in host order, 0 for a free entry */
     net_udp_fn fn;
+    void *arg;     /* what fn is handed with each datagram */
 };
 
 struct net {
@@ -59,7 +68,11 @@ void net_tick(struct net *n, uint32_t now);
 /* Starts DHCP: a discover now, again every two seconds until bound. */
 void net_dhcp_start(struct net *n);
 
-int net_udp_bind(struct net *n, uint16_t port, net_udp_fn fn);
+/* Datagrams to port, which is not 0 and not bound yet, go to fn with arg: 0, or -1 if not. */
+int net_udp_bind(struct net *n, uint16_t port, net_udp_fn fn, void *arg);
+void net_udp_unbind(struct net *n, uint16_t port);
+/* Whether port is bound, or DHCP's, which the stack holds itself. */
+int net_udp_bound(const struct net *n, uint16_t port);
 /* Sends a datagram; 0 if it went, -1 if the next hop's address is not known yet, an ARP request gone instead. */
 int net_udp_send(struct net *n, uint32_t to_ip, uint16_t to_port, uint16_t from_port, const uint8_t *data, uint32_t len);
 
