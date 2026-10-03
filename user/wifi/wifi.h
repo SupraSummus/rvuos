@@ -11,8 +11,11 @@
  * The network process runs the IP stack, and trades Ethernet frames with the driver through a channel, the link,
  * see lib/chan.h.
  * Its clients are processes of their own, each with a channel to it from a hub, through which they use sockets, sock.h:
- * the echo, which answers on UDP port 7, and the clock, which asks the network for the time and tells it on port 13.
- * A client that faults is taken down and built again, and the network process lets go of its ports meanwhile.
+ * the echo, which answers on UDP port 7, the clock, which asks the network for the time and tells it on port 13,
+ * and the logger, which carries the kernel's log to a host on port 7070 while the system runs.
+ * The root task asks every child each second whether its loop still comes round, lib/child.h, and feeds the watchdog;
+ * a client that faults or does not answer is taken down and built again,
+ * and the network process lets go of its ports meanwhile.
  * Every process runs code from the one image, so a process other than the root task touches no global:
  * what it keeps lies on its stack or in its page, see lib/child.h.
  *
@@ -124,7 +127,10 @@ struct client_page {
     struct chan_end net;
 };
 
-/* The echo: datagrams to port 7 sent back as they came; one that reads "fault" makes it store where it may not. */
+/*
+ * The echo: datagrams to port 7 sent back as they came;
+ * one that reads "fault" makes it store where it may not, and one that reads "hang" makes it spin.
+ */
 #define ECHO_PORT 7u
 enum echo_state {
     ECHO_SERVING = CHILD_RUNNING + 1, /* holds its port */
@@ -146,10 +152,30 @@ struct clock_page {
     volatile uint32_t seconds; /* the time it learned, since 1970 */
 };
 
+/*
+ * The logger: the kernel's log to a host, on UDP port 7070, for as long as the host keeps asking.
+ * A host asks with four bytes, the offset in the log of the first byte it lacks, big-endian,
+ * which may come by broadcast;
+ * each datagram it is sent starts with the offset of its first byte, the same way, and the bytes follow.
+ * The host says how far it has them with the same four bytes, as each datagram comes and every second besides,
+ * and a byte leaves the log only once the host has it, so the halt writes out every byte no host had.
+ * Offsets count the kernel's bytes from the boot, so a gap in them is bytes the log lost before any host had them.
+ */
+#define LOGGER_PORT 7070u
+enum logger_state {
+    LOGGER_SERVING = CHILD_RUNNING + 1, /* holds its port */
+};
+struct logger_page {
+    struct client_page c;
+    uint32_t log_base;         /* the kernel's log, struct rvuos_log, installed in a region of the logger's */
+    volatile uint32_t carried; /* from the logger: the bytes hosts have said they have */
+};
+
 void driver_main(struct child_page *page);
 void net_main(struct child_page *page);
 void echo_main(struct child_page *page);
 void clock_main(struct child_page *page);
+void logger_main(struct child_page *page);
 
 /* A client's request into its channel: 0, or -1 if the ring is full or the channel not connected; see sock_ask. */
 static inline int client_ask(const struct chan_end *e, uint32_t op, uint16_t port, uint32_t ip, uint16_t peer_port,

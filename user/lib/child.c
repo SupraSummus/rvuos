@@ -184,6 +184,14 @@ int child_poll(struct child *c, uint32_t *state)
     return 1;
 }
 
+int child_check(struct child *c)
+{
+    int answered = c->page->answered == c->page->asked;
+    c->page->asked++;
+    child_tell(c);
+    return answered;
+}
+
 /* The first failure of steps that all run whatever came before, and its step. */
 struct first {
     uint32_t status;

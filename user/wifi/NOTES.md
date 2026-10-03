@@ -11,7 +11,8 @@ These notes say what that took, what helped and what hurt,
 so that the next decisions about the kernel and a library for programs can start from a program and not from a guess.
 They were written before `user/lib/`, which came of them;
 the sections at the end say what the library and the kernel's changes did,
-and what moving the network's services into clients in processes of their own found.
+what moving the network's services into clients in processes of their own found,
+and what a run that lasts took.
 
 ## What it took
 
@@ -282,3 +283,53 @@ that tell the bootrom what to run after the reset, in machine mode;
 so the watchdog is the kernel's, fed through the clock with `RIGHT_W`, and it halts, which writes the log out, rather than resets.
 The root task does not feed it yet: a run longer than seventeen seconds says nothing until it ends,
 which waits for the log to leave by the network.
+
+## A run that lasts
+
+The system now runs as long as its configuration says, `run=0` for good, and tells what it does while it runs:
+a third client, the logger, carries the kernel's log to a host over the network,
+and the root task asks each child every second whether its loop still comes round, then feeds the watchdog.
+`make BOARD=rp2350 wifi` follows the log through `tools/wifi-run.py`,
+which learns the system's address from it and checks the clients from the host,
+the echo built again after a fault and after a hang among them, which were tried by hand before.
+That took 200 lines for the logger, 40 more in the root task, 20 in the library and a line in each other child's loop,
+and 280 lines of Python; nothing in the kernel changed.
+
+**The log's reader word was the transport's.**
+The halt writes out what lies past the log's `taken`, so the logger moves it only as far as the host says it has the bytes:
+what went over the network and what the halt writes out neither overlap nor leave a gap.
+Nobody reads the log until the logger runs, and the ring held the boot's kilobyte with room to spare,
+so a host sees the log from the boot.
+The root task no longer copies the log to its console, which freed the regions of both: it holds four of its seven.
+
+**A host finds the system by asking everyone.**
+Only the log could tell the host the address DHCP gave, and the host cannot ask for the log without it,
+so it asks by broadcast, and the answer comes from the address.
+
+**A check is a word each way in the page.**
+`child_check` counts the parent's questions and tells the child, which wakes it if it waits,
+and `child_answer` copies the count back each time round the child's loop,
+so a child that spins, or waits for what never comes, has not answered by the next check.
+Every loop had to say so; the driver's lie all through the chip's code, and its sleep answers for all of them.
+A wait in the library that answered by itself would have been one place,
+but the driver's loop under load seldom waits, and would have gone unanswered.
+The root task takes a client that did not answer down and builds it again, as after a fault,
+and halts for the driver or the network process;
+the echo set spinning by `hang` answers again 1.4 to 1.9 s later.
+
+**The watchdog is left the root task's own loop.**
+The root task feeds it after each check, so it halts the machine, with the log written out,
+only if the root task's loop or the kernel's tick stops; the children's hangs the root task handles itself.
+That is what open decision 26 needed to see: the kernel's watchdog watches what a userspace supervisor could not watch itself.
+
+**Units ran out before slots or regions.**
+The first core's 64 units were all held when the logger came, so each client now earns 4, not 6;
+the echo's round trip stayed at about 4 ms on Hazard3.
+
+**Half an hour on the home network.**
+A run of 27 minutes on Hazard3, ended by unplugging the board, answered a host that asked every five seconds
+for the status and ten echoes of 64 bytes:
+3,250 echoes came back and none was lost, 4.0 ms at the median and 26 ms at worst,
+and at the end the clock's time still agreed with the laptop's to the minute.
+Nothing was restarted but what the checks at its start set out to restart.
+

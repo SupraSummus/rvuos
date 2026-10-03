@@ -193,7 +193,7 @@ Each header says how its calls are used.
 | Header | What it gives |
 |---|---|
 | `lib/self.h` | what a process hands out of its own: slots, regions, bits of its inbox, timers, units of time, memory halved out of Untypeds, and room for its children's data |
-| `lib/child.h` | a child built, started, heard and taken down by its parent, and the child's own calls: its log, its state, its sleep |
+| `lib/child.h` | a child built, started, heard, checked and taken down by its parent, and the child's own calls: its log, its state, its answer, its sleep |
 | `lib/chan.h` | a channel between two children: a frame of two rings of packets, and a bit each way; and a hub, a server's channels to many clients |
 | `lib/ring.h`, `lib/log.h` | the rings a channel is made of, and the kernel's log: written through `Debug`, and read as the root task reads it |
 | `lib/say.h`, `lib/libc.h` | text with values, and the memory functions the compiler calls |
@@ -214,6 +214,10 @@ so the type of a child's page is all the two agree on.
 A child writes its state into the page,
 and signals its parent through `CHILD_PARENT`, its parent's inbox carved to the child's own bit, section 5.7,
 so the parent knows who signalled and the child names every bit, `NOTIFY_ALL_BITS`, not knowing which.
+A parent that checks every so often, `child_check`, asks through the page whether the child's loop still comes round,
+and the child answers each time round it, `child_answer`;
+a check finds a child that did not answer the last, one that spins or waits for what never comes,
+and what to do about it, take it down and build it again or halt, is the parent's.
 Its text goes into the kernel's log through `CHILD_LOG`, a `Debug` capability with `RIGHT_W` alone, section 6.3,
 in order with the kernel's lines, among them its own faults, and it cannot halt the machine.
 `say` in `lib/say.h` formats it, and `log_out` in `lib/log.h` writes it a call per 12 bytes.
@@ -248,15 +252,16 @@ and halved memory is never joined again, so each free block holds a slot.
 `make lib-test` boots `user/libtest/` on any board.
 Its root task reads bytes back out of free memory, has two children send each other packets through rings that fill,
 and builds, hears fault and takes down a child twice;
+it checks a child that answers and one that spins, and finds the second;
 then, in room for children's data, it builds a server with a hub and a client on each end,
 and takes one client down and connects another in its place twice,
 checking that everything handed out comes back and that the second child left the same behind as the first.
 
 ### 8.5 A program of several processes: the Wi-Fi system
 
-`user/wifi/` is a program of several files and five processes on a Pico 2 W, built on the library:
+`user/wifi/` is a program of several files and six processes on a Pico 2 W, built on the library:
 a root task that builds the system, a driver for the CYW43439, its Wi-Fi chip, a network process with an IP stack,
-and two clients of the network process, the echo and the clock;
+and three clients of the network process, the echo, the clock and the logger;
 `wifi.h` says what they share, which is the types of their pages.
 The driver and the network process trade Ethernet frames through a channel, the link.
 Each client has a channel from the network process's hub, through which it uses datagram sockets, `sock.h`:
@@ -264,15 +269,19 @@ it binds ports, its own until it closes them or is gone, sends from them and rec
 The echo sends back every datagram to UDP port 7;
 the clock asks the network's DNS server for a server of pool.ntp.org, asks that server for the time by SNTP,
 and tells the time to any datagram to UDP port 13.
-A datagram that reads `fault` makes the echo store where it has no region, as a broken client would:
-the root task takes it down and builds it again, and the network process gives its port back meanwhile.
-`make BOARD=rp2350 wifi` builds and runs it, section 4.
+The logger carries the kernel's log to a host that asks on UDP port 7070, section 5.10.
+A datagram that reads `fault` makes the echo store where it has no region, as a broken client would,
+and one that reads `hang` makes it spin:
+the root task, which checks every child each second, takes it down and builds it again,
+and the network process gives its port back meanwhile.
+After each check the root task feeds the watchdog, section 5.8.
+`make BOARD=rp2350 wifi` builds and runs it, follows its log and checks it from the host, section 4.
 The driver reaches the chip through frames over PIO0's registers and over the control registers of four pins,
 which the root task carves from the frames it is granted over PIO0 and IO_BANK0, section 3,
 and it installs the frames that hold the chip's firmware one at a time in a region the root task left it,
 since there are more of them than regions.
 What the system does, scan, join a network or run an access point, comes from a file the loader places in the root task's input region,
-`make BOARD=rp2350 wifi WIFI_CONFIG=file`, with lines `mode=scan|sta|ap`, `ssid=`, `pass=` and `channel=`;
+`make BOARD=rp2350 wifi WIFI_CONFIG=file`, with lines `mode=scan|sta|ap`, `ssid=`, `pass=`, `channel=` and `run=`;
 so a passphrase lies in no image and in no file of the tree.
 A program of several processes lies in a directory of its own, `user/<program>/`, its root task in `root.c`,
 and the Makefile's `PROGRAMS` links each with the library.

@@ -54,8 +54,10 @@ enum {
 /* What every child's page starts with; a program's page type begins with it. */
 struct child_page {
     volatile uint32_t state;
-    volatile uint32_t step;    /* where it got to, for a failure */
-    volatile uint32_t detail;  /* a value that step read, for a failure */
+    volatile uint32_t step;     /* where it got to, for a failure */
+    volatile uint32_t detail;   /* a value that step read, for a failure */
+    volatile uint32_t asked;    /* the parent's: how many times it asked whether the child runs, see child_check */
+    volatile uint32_t answered; /* the child's: the last of those it answered, see child_answer */
 };
 
 /* --- The parent's side. --- */
@@ -115,6 +117,11 @@ uint32_t child_tell(const struct child *c);
 /* 1 if the child's state changed since the last call, *state the new one. */
 int child_poll(struct child *c, uint32_t *state);
 /*
+ * Whether the child answered the last check, or was never asked; then asks again, and tells it.
+ * Checked every so often, a child that spins or waits for what never comes misses one.
+ */
+int child_check(struct child *c);
+/*
  * Takes the child down: its pool, and with it its objects, timer line and units, and every capability to them;
  * its data, wherever it was installed; and the parent's slots, region and bits it used.
  * What the parent gave it stays the parent's.
@@ -130,6 +137,11 @@ static inline struct out child_out(void)
 }
 /* A new state into the page, and the parent told. */
 void child_report(struct child_page *p, uint32_t state);
+/* Answers the parent's last check; called each time round the child's loop. */
+static inline void child_answer(struct child_page *p)
+{
+    p->answered = p->asked;
+}
 /* Reports state and waits for good; the parent decides what comes next. */
 __attribute__((noreturn)) void child_stop(struct child_page *p, uint32_t state);
 /* Reports CHILD_FAILED, with where and what. */

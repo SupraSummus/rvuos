@@ -141,6 +141,7 @@ __attribute__((noreturn)) void net_main(struct child_page *c)
         if (rv_wait(CHILD_INBOX, &bits) != KERR_OK) {
             rv_breakpoint();
         }
+        child_answer(c);
         if (bits & CHILD_BIT_TIMER) {
             rv_timer_period(CHILD_TIMER, CHILD_BIT_TIMER, TICK_US, &skipped);
             p->now += (skipped + 1u) * (TICK_US / 1000u);
@@ -162,7 +163,7 @@ __attribute__((noreturn)) void net_main(struct child_page *c)
             page->ip = p->net.ip;
             page->mask = p->net.mask;
             page->gateway = p->net.gateway;
-            say(&p->out, "net: address %I, gateway %I\n", p->net.ip, p->net.gateway);
+            say(&p->out, "net: address %I, gateway %I, lease %u s\n", p->net.ip, p->net.gateway, p->net.lease);
             child_report(c, NET_BOUND);
         } else if (bound && p->net.dhcp_state != DHCP_BOUND) {
             bound = 0;

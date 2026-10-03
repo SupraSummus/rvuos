@@ -305,10 +305,11 @@ lib-test: $(BUILD)/kernel-libtest.$(IMAGE)
 # The Wi-Fi system on a Pico 2 W, see user/wifi/wifi.h,
 # and the CYW43439's firmware beside it, which tools/cyw43-blob.py fetches and packs, never into the tree.
 # The loader places the blob at the start of free RAM, FREE_RAM_BASE in kernel/board/rp2350/board.h.
+# tools/wifi-run.py follows the system's log over the network while it runs, and checks it from the host.
 WIFI_BLOB      := build/cyw43/blob.bin
 WIFI_BLOB_AT   := 0x20040000
-# What the root task is to do, lines of mode=scan|sta|ap, ssid=, pass= and channel=, from a file outside the tree,
-# placed in its input region, INPUT_BASE in board.h; with none it scans.
+# What the root task is to do, lines of mode=scan|sta|ap, ssid=, pass=, channel= and run=, seconds or 0 for good,
+# from a file outside the tree, placed in its input region, INPUT_BASE in board.h; with none it scans.
 WIFI_CONFIG    ?=
 WIFI_INPUT_AT  := 0x20038000
 
@@ -319,7 +320,7 @@ $(WIFI_BLOB): tools/cyw43-blob.py
 # and the network process's side of its clients' sockets, sock.c, with the clock's DNS and SNTP messages, sntp.c.
 WIFI_TEST := build/host/wifi/net-test
 SOCK_TEST := build/host/wifi/sock-test
-WIFI_TEST_DEPS := user/wifi/test/frames.h user/wifi/net.c user/wifi/net.h user/lib/libc.h
+WIFI_TEST_DEPS := user/wifi/test/frames.h user/wifi/net.c user/wifi/net.h user/wifi/bytes.h user/lib/libc.h
 $(WIFI_TEST): user/wifi/test/net-test.c $(WIFI_TEST_DEPS)
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=c11 -O1 -g -Wall -Wextra -Werror -Wshadow $(HOST_SAN) -Iuser -Iuser/wifi \
@@ -339,7 +340,7 @@ wifi: $(BUILD)/kernel-wifi.elf $(WIFI_BLOB)
 ifneq ($(BOARD),rp2350)
 	$(error the Wi-Fi system runs on a Pico 2 W: make BOARD=rp2350 wifi)
 endif
-	$(RP2350_PYTHON) tools/rp2350-run.py --ram $(WIFI_BLOB_AT):$(WIFI_BLOB) \
+	tools/wifi-run.py -- $(RP2350_PYTHON) tools/rp2350-run.py --ram $(WIFI_BLOB_AT):$(WIFI_BLOB) \
 		$(if $(WIFI_CONFIG),--ram $(WIFI_INPUT_AT):$(WIFI_CONFIG)) $(BUILD)/kernel-wifi.elf
 
 # Host build: the kernel's logic compiled natively,

@@ -4,6 +4,7 @@
 
 #include "sntp.h"
 
+#include "bytes.h"
 #include "lib/libc.h"
 
 #define DNS_HEADER    12u
@@ -14,28 +15,6 @@
 #define NTP_UNIX      2208988800u /* seconds from 1900 to 1970, which NTP counts from */
 #define NTP_ORIGIN    24u
 #define NTP_TRANSMIT  40u
-
-static uint32_t be16(const uint8_t *p)
-{
-    return (uint32_t)p[0] << 8 | p[1];
-}
-
-static uint32_t be32(const uint8_t *p)
-{
-    return be16(p) << 16 | be16(p + 2);
-}
-
-static void put_be16(uint8_t *p, uint32_t v)
-{
-    p[0] = (uint8_t)(v >> 8);
-    p[1] = (uint8_t)v;
-}
-
-static void put_be32(uint8_t *p, uint32_t v)
-{
-    put_be16(p, v >> 16);
-    put_be16(p + 2, v);
-}
 
 uint32_t dns_query(uint8_t *out, uint16_t id, const char *name)
 {

@@ -152,6 +152,7 @@ __attribute__((noreturn)) void clock_main(struct child_page *page)
         if (rv_wait(CHILD_INBOX, &bits) != KERR_OK) {
             rv_breakpoint();
         }
+        child_answer(page);
         if (bits & CHILD_BIT_TIMER) {
             rv_timer_period(CHILD_TIMER, CHILD_BIT_TIMER, TICK_US, &skipped);
             k->now += (skipped + 1u) * (TICK_US / 1000u);

@@ -81,11 +81,15 @@ static void on_data(struct wlan *w, const uint8_t *frame, uint32_t len)
     p->rx_frames++;
 }
 
-/* Waits for the timer; other bits need no keeping, since what they announce lies in the page and the link. */
+/*
+ * Waits for the timer; other bits need no keeping, since what they announce lies in the page and the link.
+ * Each wait answers the root task's check, since the driver waits only as its loops come round.
+ */
 static void drv_sleep(struct cyw43 *chip, uint32_t us)
 {
-    (void)chip;
+    struct drv *d = (struct drv *)((uint8_t *)chip - offsetof(struct drv, chip));
     child_sleep(us);
+    child_answer(&d->page->c);
 }
 
 /* The address of the blob's byte at off, with the frame holding it installed, and how many follow in that frame. */
@@ -156,6 +160,7 @@ static __attribute__((noreturn)) void serve(struct drv *d)
     struct drv_page *p = d->page;
     int linked = 0;
     for (;;) {
+        child_answer(&p->c);
         if (!linked && chan_ready(&p->link)) {
             linked = 1;
             say(&d->out, "drv: the link is up\n");

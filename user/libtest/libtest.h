@@ -68,6 +68,9 @@ struct client_page {
 
 void peer_main(struct child_page *page);
 void fault_main(struct child_page *page);
+/* A child that answers each check its parent asks, and one that spins and answers none. */
+void answer_main(struct child_page *page);
+void spin_main(struct child_page *page);
 void server_main(struct child_page *page);
 void client_main(struct child_page *page);
 

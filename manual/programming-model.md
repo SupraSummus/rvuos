@@ -585,6 +585,8 @@ The line cannot be fired by `OP_DEBUG_IRQ` either.
 `user/init.c` shows the reader:
 a logger thread that waits on one notification with the log's bit and the UART's,
 and carries the ring out one byte per transmitter interrupt.
+`user/wifi/logger.c` is a reader the root task gave the frame to, which carries the ring over the network
+and moves `taken` only as far as its host says it has the bytes, so a halt writes out what no host had.
 
 ### 5.11 Scheduling
 

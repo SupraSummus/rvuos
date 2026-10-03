@@ -5,6 +5,7 @@
  * It reads bytes left in free memory, as a loader leaves a program's files there;
  * connects two peers with a channel whose rings hold a few packets, and has each send the other more than that;
  * builds a child that stores where it has no region, hears it fault and takes it down, twice;
+ * checks a child that answers its checks and one that spins, which it finds and takes down;
  * builds a server with a hub in room for children's data, and clients on its ends,
  * and takes one down and connects another in its place, twice;
  * then takes the rest down.
@@ -22,14 +23,15 @@
 #define CHILD_TABLE 16u
 #define CHILD_DATA  0x2000u
 #define RUN_US      10000000u /* the test's deadline */
+#define PAUSE_US    100000u   /* between two checks */
 #define ROOM_SIZE   0x8000u   /* the server's data and its clients' */
 
 static struct self self, after;
 static struct kernel_log klog;
-static uint32_t log_bit, deadline_bit;
+static uint32_t log_bit, deadline_bit, pause_bit, pause_timer;
 
-static struct child a, b, faulty, server, clients[HUB_CLIENTS];
-static struct child *const children[] = { &a, &b, &faulty, &server, &clients[0], &clients[1] };
+static struct child a, b, faulty, answering, spinning, server, clients[HUB_CLIENTS];
+static struct child *const children[] = { &a, &b, &faulty, &answering, &spinning, &server, &clients[0], &clients[1] };
 static uint32_t faulted; /* the bits of the faults the root task heard */
 
 static void console_byte(char c)
@@ -72,7 +74,7 @@ static void check(int ok, const char *what)
 }
 
 /* One wait, and what it brought: the logs copied, a child's failure or an unasked fault reported, the deadline. */
-static void step(void)
+static uint32_t step(void)
 {
     uint32_t bits = 0;
     must("arm the log", kernel_log_arm(&klog, log_bit));
@@ -95,6 +97,7 @@ static void step(void)
         faulted |= bits & c->bit_fault;
     }
     check(!(bits & deadline_bit), "done before the deadline");
+    return bits;
 }
 
 /*
@@ -163,6 +166,33 @@ static void read_back(void)
         check(got[i] == packet_byte(3, i), "free memory reads back what was written before it was given back");
     }
     say(&out, "libtest: free memory read: ok\n");
+}
+
+/*
+ * A child that answers its parent's checks and one that spins, each checked twice with a pause between:
+ * the first check finds both well, since neither was asked before, and the second finds the one that spins.
+ * Taken down, the one that spins leaves nothing behind, its units among what comes back.
+ */
+static void check_round(void)
+{
+    struct tally before = tally();
+    must("build a child that answers", child_new(&self, &answering, "answering", CHILD_TABLE, CHILD_DATA));
+    must("build a child that spins", child_new(&self, &spinning, "spinning", CHILD_TABLE, CHILD_DATA));
+    must("start a child that answers", child_start(&self, &answering, answer_main, CHILD_UNITS));
+    must("start a child that spins", child_start(&self, &spinning, spin_main, CHILD_UNITS));
+    while (answering.told != CHILD_RUNNING || spinning.told != CHILD_RUNNING) {
+        step();
+    }
+    check(child_check(&answering) && child_check(&spinning), "a child never asked counts as having answered");
+    must("arm a pause", rv_timer_set(pause_timer, pause_bit, PAUSE_US));
+    while (!(step() & pause_bit)) {
+    }
+    check(child_check(&answering), "a child whose loop comes round answers the check its parent asked meanwhile");
+    check(!child_check(&spinning), "a child that spins answers no check");
+    must("take a child down", child_free(&self, &answering));
+    must("take a child that spins down", child_free(&self, &spinning));
+    check(same(tally(), before), "a child that spins, taken down, gives back what it was given");
+    say(&out, "libtest: a child that answers its checks, and one that spins found by them: ok\n");
 }
 
 /* A client on end i of the hub, built, connected and started; seed makes its packets its own. */
@@ -235,6 +265,8 @@ int main(void)
     must("a bit for the deadline", bit_new(&self, &deadline_bit));
     must("a timer", timer_new(&self, &deadline));
     must("arm the deadline", rv_timer_set(deadline, deadline_bit, RUN_US));
+    must("a bit for a pause", bit_new(&self, &pause_bit));
+    must("a timer for a pause", timer_new(&self, &pause_timer));
     struct tally start = tally();
     say(&out, "libtest: up, %u bytes free and %u slots unused\n", start.bytes, slots_unused(&self));
 
@@ -290,6 +322,7 @@ int main(void)
     must("take a peer down", child_free(&self, &a));
     must("take a peer down", child_free(&self, &b));
     must("free the channel", chan_free(&self, &link));
+    check_round();
     hub_round();
     check(same(tally(), start), "everything handed out came back");
     say(&out, "libtest: down, %u bytes free and %u slots unused\n", mem_unused(&self), slots_unused(&self));

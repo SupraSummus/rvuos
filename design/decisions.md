@@ -373,3 +373,7 @@ until the maintainer decides otherwise.
     That costs the supervisor `RIGHT_X` on `Debug`, which drives the machine as a test does,
     the boot's BOOTSEL watchdog shared with a driver, and a halt that waits for the supervisor's turn.
     Decide with the first system meant to run unattended.
+    The Wi-Fi system, with `run=0`, is the first:
+    its root task checks every child each second and deals with one that did not answer itself,
+    so the watchdog it then feeds watches only the root task and the kernel.
+    Under the alternative the root task would be the supervisor already, and feed the chip's watchdog through a frame.

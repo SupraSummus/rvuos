@@ -5,6 +5,7 @@
 
 #include "net.h"
 
+#include "bytes.h"
 #include "lib/libc.h"
 
 #define ETH_HEADER  14u
@@ -21,17 +22,6 @@
 #define BROADCAST 0xffffffffu
 
 static const uint8_t broadcast_mac[6] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
-
-static uint16_t be16(const uint8_t *p)
-{
-    return (uint16_t)((p[0] << 8) | p[1]);
-}
-
-static void put_be16(uint8_t *p, uint32_t v)
-{
-    p[0] = (uint8_t)(v >> 8);
-    p[1] = (uint8_t)v;
-}
 
 static uint32_t get_ip(const uint8_t *p)
 {

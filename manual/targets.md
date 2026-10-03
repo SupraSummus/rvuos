@@ -337,6 +337,10 @@ make BOARD=rp2350 wifi                         # the Wi-Fi system of user/wifi/,
 `tools/cyw43-blob.py` fetches the CYW43439's firmware, CLM and NVRAM from one commit of embassy,
 under Infineon's Permissive Binary License, checks each against its SHA-256 and packs them,
 and `tools/rp2350-run.py --ram` places the blob at the start of free RAM beside the image; nothing is written to flash.
+`tools/wifi-run.py` runs the loader, prints the system's log as it comes over the network,
+and once the clients answer, checks them from the host: the status port, the echo, the clock,
+the echo built again after a fault and after a hang, and ping.
+The run lasts half a minute, or the seconds of the configuration's `run=`, `run=0` for good.
 
 `tools/rp2350-run.py` loads the image through the bootrom's PICOBOOT interface,
 waits for the halt's serial port and reads it; closing it reboots the chip into BOOTSEL.

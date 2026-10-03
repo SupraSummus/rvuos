@@ -6,26 +6,22 @@ Open work only; an item leaves this file in the commit that finishes it.
 
 `user/wifi/`, on a Pico 2 W: the driver brings the CYW43439's firmware up, scans,
 runs an access point a laptop's scan sees, or joins a WPA2 network, where DHCP gives the network process an address
-and a laptop's ping and datagrams to UDP port 7777 are answered,
-and its clients, in processes of their own, answer on UDP ports 7, the echo, and 13, the clock, which asked the network for the time;
-`WIFI_CONFIG` in the Makefile says how to ask for which.
+and a laptop's ping and datagrams to UDP port 7777 are answered;
+its clients, in processes of their own, answer on UDP ports 7, the echo, and 13, the clock,
+and the logger carries the kernel's log to a host on port 7070 while the run lasts.
+`WIFI_CONFIG` in the Makefile says what to do and for how long, and `tools/wifi-run.py` follows the log and checks the clients.
 
 - Only WPA2 with AES and open networks join; WPA3 needs the SAE passphrase the driver does not set.
-- The root task holds six of the seven regions Hazard3 gives a process on RP2350, and a seventh for a moment:
-  the driver's data lies in a region of its own, since the blob fills the memory the room for the children's data comes from
-  until the chip runs; room made before the blob is loaded, below it, would take the driver too.
+- At half its lease the network process lets its address go and asks for one anew, as if it had none,
+  so a run for good is unreachable for a moment every twelve hours with the router here, whose lease is a day.
+  A renewal, a request to the server that gave the lease, would keep the address meanwhile.
+- In access point mode nobody gives the network process an address, so no client is built, the logger among them,
+  and the log reaches the host only at the halt, as much of it as the ring still holds.
 - The driver polls the chip every millisecond.
   The chip raises the data line, GPIO24, when it has a packet and chip select is high,
   which IO_BANK0 can turn into IO_IRQ_BANK0_NS, an `Irq` the driver would wait on instead.
 - The root task takes the blob's frames back once the chip runs, so the driver can no longer reset the chip;
   the firmware in flash would let it, and writing flash is the maintainer's to decide.
-- A run ends at the halt, and the console reaches the host only then.
-  The root task could feed the watchdog, `OP_CLOCK_WATCHDOG`, and run past the seventeen seconds the chip's own allows,
-  once each child tells it that it is well, but such a run says nothing until it ends;
-  a system that runs for good needs its log carried out while it runs, by the network.
-- `make BOARD=rp2350 wifi` checks the clients only as far as the clock's SNTP;
-  the echo and its restart need datagrams from the host while the run lasts, sent by hand so far,
-  since the address DHCP gave reaches the host only with the console at the halt.
 - The bus runs at 25 MHz; embassy runs it at 37.5 MHz with the faster of its programs, and DMA would free the core meanwhile.
 
 ## Programs
@@ -35,10 +31,11 @@ what is left:
 
 - The library's blocks never join again: the parent of a split is deleted to keep its slot,
   so free memory ends as blocks that each hold a slot,
-  20 of the root task's 43 slots on QEMU once `user/libtest/` has given everything back.
+  20 of the root task's 42 slots on QEMU once `user/libtest/` has given everything back.
   Keeping a split's parent while a half is taken would let two free halves join again,
   at a slot per split for as long as they are apart.
-- `struct self` hands out the first core's units alone, so children run on the first core.
+- `struct self` hands out the first core's units alone, so children run on the first core,
+  and the Wi-Fi system holds all 64 of them: a fourth client would take some of another's.
 - A channel between two peers is connected once: a child taken down leaves the other end naming nothing,
   and the child built in its place needs a channel of its own, which the other end has to learn of.
   A hub's ends are connected again, with the server's word that it let go of the last client;

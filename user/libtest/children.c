@@ -78,6 +78,24 @@ void fault_main(struct child_page *page)
     child_stop(page, FAULT_BREACHED);
 }
 
+/* Answers each check as its parent asks it, and does nothing else. */
+void answer_main(struct child_page *page)
+{
+    child_report(page, CHILD_RUNNING);
+    for (;;) {
+        child_answer(page);
+        wait_any();
+    }
+}
+
+/* Comes round no loop, so it answers no check, and its parent must find it so. */
+void spin_main(struct child_page *page)
+{
+    child_report(page, CHILD_RUNNING);
+    for (;;) {
+    }
+}
+
 /* Each packet back on the channel it came on; a client's end the root task closed is let go of, and nothing kept of it. */
 void server_main(struct child_page *page)
 {

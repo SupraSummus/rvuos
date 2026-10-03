@@ -4,6 +4,7 @@
 
 #include "wlan.h"
 
+#include "bytes.h"
 #include "lib/libc.h"
 
 #define SDPCM_HEADER 12u
@@ -59,16 +60,6 @@ static uint16_t le16(const uint8_t *p)
 static uint32_t le32(const uint8_t *p)
 {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
-}
-
-static uint16_t be16(const uint8_t *p)
-{
-    return (uint16_t)((p[0] << 8) | p[1]);
-}
-
-static uint32_t be32(const uint8_t *p)
-{
-    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | (uint32_t)p[3];
 }
 
 static void put16(uint8_t *p, uint16_t v)
