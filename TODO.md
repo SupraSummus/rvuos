@@ -136,18 +136,16 @@ what is left:
   The demo's shootdown reaches the reload of the regions as the lock is taken only when the trap there ends no turn,
   which QEMU's turns decide; `fuzz-smp2` always reaches it.
   Nothing measures what the demo's two-core checks catch, since `make mutants` leaves `smp-test` out.
-- No load or store record reaches an edge of the kernel the other records do not.
-  Four inputs of the corpus carry one, but are kept for their other records:
-  with the loads taken out, the corpus reaches the same edges on all three machines.
+- What the PMP or the host decides of a load or store record is no edge of the kernel,
+  so the corpus keeps such a record only where the fault it makes leads somewhere new,
+  and nothing keeps one for the decision itself.
 - `make mutants-fuzz` finds neither `alloc-in-dying-pool` nor `bind-in-dying-pool`,
   from the corpus or from nothing, in 5000 runs:
   a stop armed at the right place, a pool dying and an allocation from another thread
   are three records the mutator must line up.
-  A longer run lines them up now and then.
-  Fifteen minutes of `make fuzz` with `-fork=4`, about 186 000 runs, made no input that catches either;
-  on eight processes, fifteen with `-fork=8` and fifteen more with `-jobs=8` from where it stopped,
-  about 131 000 and 413 000 runs, made 22 that catch `alloc-in-dying-pool` and 38 `bind-in-dying-pool`,
-  all with `OP_DEBUG_PREEMPT`.
+  A longer run lines them up now and then:
+  about 664 000 runs of `make fuzz` made 28 inputs that catch `alloc-in-dying-pool` and 8 `bind-in-dying-pool`,
+  all with `OP_DEBUG_PREEMPT`, where 186 000 made none.
   None reaches an edge the others do not, so the corpus keeps none of them.
   A mutation that inserts the three together is untried.
 - The self-check is most of what a fuzzing run costs, and grows with the square of what the machine holds:
