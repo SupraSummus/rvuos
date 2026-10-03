@@ -25,6 +25,8 @@ Each trap is still one step on one state,
 which the self-check, `host/history.c` and the replay rely on.
 It is a ticket lock, so the cores take it in the order they asked for it,
 and a core waits at most as long as each core ahead of it holds the lock.
+It is taken with an acquire and given up with a release, so each trap sees what the traps before it stored,
+which a program relies on too; see "Communication and synchronisation".
 RISC-V takes a ticket with one `amoadd`; ARM has no atomic add,
 so it takes one with an exclusive load and store, `arch_ticket_take` in its `kernel/arch/arm/mpu.c`,
 which goes round again when another core took a ticket between the two, once a trap at most.

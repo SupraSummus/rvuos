@@ -193,8 +193,9 @@ Each header says how its calls are used.
 | Header | What it gives |
 |---|---|
 | `lib/self.h` | what a process hands out of its own: slots, regions, bits of its inbox, timers, units of time, memory halved out of Untypeds, and room for its children's data |
-| `lib/child.h` | a child built, started, heard, checked and taken down by its parent, and the child's own calls: its log, its state, its answer, its sleep |
+| `lib/child.h` | a child built, started, heard, checked and taken down by its parent, frames mapped into it and taken back, and the child's own calls: its log, its state, its answer, its sleep |
 | `lib/chan.h` | a channel between two children: a frame of two rings of packets, and a bit each way; and a hub, a server's channels to many clients |
+| `lib/lock.h` | a lock over memory several children share: a word taken with an atomic operation, and a notification to wait on while it is held |
 | `lib/ring.h`, `lib/log.h` | the rings a channel is made of, and the kernel's log: written through `Debug`, and read as the root task reads it |
 | `lib/say.h`, `lib/libc.h` | text with values, and the memory functions the compiler calls |
 
@@ -244,6 +245,16 @@ forgets what it kept for the end's last client, and says so with `chan_seen`;
 only then is the end idle, `chan_hub_idle`, and may another client be connected to it,
 whose rings start empty.
 
+**A lock** over memory children share is a word in that memory and a notification each holds with `RIGHT_R` and `RIGHT_W`,
+both from their parent, which writes the word's address and the notification's slot into each page.
+It makes no system call while nobody waits.
+None can make another write past the word, but any can keep the lock or break it: it is for children that trust each other.
+
+**Memory handed from one child to another**, with the kernel's word that the first no longer reaches it,
+is `child_unmap` from the one and `child_map` into the other, by their parent.
+The first faults if it touches the memory again,
+and the second, told after the first told its parent it was done, reads what it wrote with no fence, section 5.7.
+
 **What it does not do yet**, with the reasons in `TODO.md`:
 children run on the first core;
 a channel between two peers is connected once, as only a hub's ends are connected again;
@@ -254,7 +265,9 @@ Its root task reads bytes back out of free memory, has two children send each ot
 and builds, hears fault and takes down a child twice;
 it checks a child that answers and one that spins, and finds the second;
 then, in room for children's data, it builds a server with a hub and a client on each end,
-and takes one client down and connects another in its place twice,
+and takes one client down and connects another in its place twice;
+has three children add to a count they share under a lock, each sleeping now and then while it holds it;
+and hands a buffer between two children and back, then takes it from the last, which must fault when it stores to it;
 checking that everything handed out comes back and that the second child left the same behind as the first.
 
 ### 8.5 A program of several processes: the Wi-Fi system

@@ -182,6 +182,9 @@ what is left:
 - That the count of armed sources leaves the log's line out is checked by reading `irq_set_bits`.
   Under tracing each call's line reaches the log before the self-check runs,
   so an `Irq` armed on the log's line has always signalled by then.
+- That a signal orders memory for the wait that takes its bits, `MANUAL.md` section 5.7, is checked by nothing:
+  QEMU under icount runs the harts one at a time, and the library's children all run on the first core.
+  Only a writer and a reader on RP2350's two cores could show the kernel's lock missing its acquire or release.
 - The exit to user mode is checked by nothing but runs under QEMU;
   `start.S` is not in the host build.
   QEMU breaks a reservation on every trap by itself,

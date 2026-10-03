@@ -149,7 +149,8 @@ What rvuos is not:
   There is no executable format, no header and no runtime library.
 - **Notifications as the only blocking primitive.**
   A notification is a word of sticky bits.
-  Data moves through shared memory; the notification says when.
+  Data moves through shared memory; the notification says when,
+  and orders it: what a signaller stored, the thread whose wait returns its bits sees.
 - **A fault stops a thread, not the machine.**
   A thread that faults stops where it faulted, and a notification its creator chose hears it;
   resumed, it runs the faulting instruction again.

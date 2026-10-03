@@ -364,7 +364,8 @@ Two processes exchange bytes through a region installed in both
 and use notifications to say when.
 The build targets `rv32imac`, so the `A` extension is there in user mode,
 as `ldrex` and `strex` are on ARMv7-M,
-and a lock or a ring buffer in shared memory is userspace's to build;
+and a lock or a ring buffer in shared memory is userspace's to build,
+as `lib/lock.h` and `lib/ring.h` do, section 8.4;
 what userspace cannot build is "stop me until someone says otherwise",
 and a notification is exactly that.
 
@@ -374,6 +375,14 @@ signal, wait on one side; wait, signal on the other.
 A trap breaks the thread's reservation,
 so an `sc.w` fails whenever a system call, the tick or an interrupt came between it and its `lr.w`;
 a loop around the pair tries again, and never succeeds with a system call inside it.
+
+**A signal orders memory.**
+What a thread stored before `OP_NOTIFY_SIGNAL`,
+a thread sees once `OP_NOTIFY_WAIT` returns it that signal's bits, on any core:
+the signal is a release, and the wait an acquire.
+So a buffer written and then signalled needs no fence,
+as long as its reader reads it after such a wait and not because memory said it was ready;
+memory read with no call between, as a ring's counters are, still needs one on each side.
 
 **A server with many clients** waits on one notification;
 each client holds it with `RIGHT_W` only, carved to a bit of its own,

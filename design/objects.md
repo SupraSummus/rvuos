@@ -556,6 +556,23 @@ so a thread preempted between its `lr.w` and its `sc.w` could overwrite another 
 as the unprivileged specification asks,
 and a thread's `sc.w` fails whenever a trap came between it and its `lr.w`.
 
+**A signal orders memory for the wait that takes its bits.**
+What a thread stored before a signal, a thread sees once a wait returns it that signal's bits, on any core:
+a signal is a release, and such a wait an acquire.
+It costs nothing: one core is one hart, which sees its own stores in order,
+and with several the signal gives the kernel's lock up after setting the bits,
+and the waiter's core takes it before the wait returns; see "Cores".
+So memory handed over by a notification needs no fence,
+and a kernel that ever signals without the lock still owes the release and the acquire.
+
+**Why no lock in the kernel.**
+The sticky bits do what a futex's comparison does:
+a give that lands between a taker's look at the word and its wait leaves a bit, and the wait returns at once,
+so a lock in shared memory, `user/lib/lock.h`, needs no call that compares a word in user memory.
+A lock object would not keep a holder from the memory either, which only the regions do,
+and it would need an owner, a rule for a holder that faults and one for priorities, open decision 9.
+A notification alone is a lock too, a bit signalled once that takers wait for and givers signal, at two calls a hold.
+
 **A server with many clients** waits on one notification,
 not on many, because the bits are the clients.
 Each client holds the server's notification with `RIGHT_W` only, carved to its own bit,
@@ -585,6 +602,13 @@ of which each client is given its own channel, carved.
 A parent watching many children meets the same bound through their pages, and answers it the same way,
 with room for its children's data, `self_room` in `user/lib/self.h`, which it installs once and carves each child's data from.
 The Wi-Fi system's network process serves its clients through a hub, see `user/wifi/NOTES.md`.
+
+**Handing memory over**, with the kernel's word that the giver no longer reaches it,
+is an uninstall from the one and an install into the other by a third process that holds the frame,
+`child_unmap` and `child_map` in `user/lib/child.h`;
+the uninstall returns once the giver's threads have lost the region, on another core too; see "Cores".
+Moving the frame's capability would not do, since what was installed from it stays installed wherever it goes.
+So there is no object for a buffer passed from hand to hand: it would save one call of the six a handover takes.
 
 Interrupts arrive as signals on the notification bound to an `Irq`,
 which needed no new mechanism; see "Interrupts".
