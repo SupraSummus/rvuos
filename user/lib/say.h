@@ -18,10 +18,8 @@ struct out {
  * The conversions a system needs:
  * %s a string, %u and %d decimal, %x hexadecimal with 0x,
  * %M the six bytes of a hardware address, %I an IPv4 address in network order.
- * The text goes out in pieces of SAY_PIECE bytes, the last when the call ends,
- * so a line of the kernel's log costs a call per DEBUG_WRITE_BYTES of it and no more.
+ * The text goes out in a few pieces, the last as the call ends.
  */
 void say(const struct out *o, const char *fmt, ...);
-#define SAY_PIECE 48u
 
 #endif

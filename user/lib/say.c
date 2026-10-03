@@ -4,13 +4,11 @@
 
 #include "rvuos/abi.h"
 
-_Static_assert(SAY_PIECE % DEBUG_WRITE_BYTES == 0, "a piece is whole writes into the kernel's log");
-
-/* What say has formatted and not yet handed on. */
+/* What say has formatted and not yet handed on: whole writes into the kernel's log, so a line costs no more calls. */
 struct pending {
     const struct out *o;
     uint32_t n;
-    char buf[SAY_PIECE];
+    char buf[4 * DEBUG_WRITE_BYTES];
 };
 
 static void flush(struct pending *p)

@@ -104,7 +104,7 @@ Before, one capability did all of it, so a child printed into a ring its parent 
 and reached the log only while its parent ran.
 The bytes travel in the call's registers, as everything does, twelve a call, so a line is a few calls;
 a writer that floods the ring costs the reader the oldest bytes, the kernel's among them,
-which is the price of a log every writer shares, and the reason a parent gives it on purpose.
+the price of one log every writer shares.
 
 **The reader is granted the ring, and a word in its header.**
 `BOOT_CAP_LOG` names the header and the ring,

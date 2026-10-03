@@ -8,12 +8,12 @@ Report: a call went through a capability without the rights its operation needs
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -58,7 +58,7 @@ static int op_debug(const struct cap *cap, uint32_t op, const uint32_t *arg)
-     }
-     bool drives = op == OP_DEBUG_HALT || op == OP_DEBUG_TRACE || op == OP_DEBUG_TICK || op == OP_DEBUG_IRQ ||
-                   op == OP_DEBUG_PREEMPT;
--    if (drives && !(cap->rights & RIGHT_X)) {
-+    if (drives && !(cap->rights & (RIGHT_X | RIGHT_W))) {
+@@ -46,7 +46,7 @@ static void debug_write(const uint32_t *arg)
+ /* Writing into the log takes RIGHT_W, and the rest, which halts or drives the machine, RIGHT_X. */
+ static int op_debug(const struct cap *cap, uint32_t op, const uint32_t *arg)
+ {
+-    if (!(cap->rights & (op == OP_DEBUG_WRITE ? RIGHT_W : RIGHT_X))) {
++    if (!(cap->rights & (op == OP_DEBUG_WRITE ? RIGHT_W : RIGHT_X | RIGHT_W))) {
          return KERR_NO_RIGHTS;
      }
      switch (op) {

@@ -380,9 +380,7 @@
  * Fails with KERR_INVALID_ARG when none is kept.
  * Like OP_FRAME_CARVE, this is a table operation that touches no kernel memory,
  * and the new capability is a child of the invoked one.
- * A server gives each client a capability that signals the client's bit alone:
- * the bits a wait returns then say who signalled, whatever a client names,
- * and a client signals all it may by naming every bit, without being told which.
+ * A client given its own bit this way cannot signal another's; see DESIGN.md, "Communication and synchronisation".
  */
 #define OP_NOTIFY_CARVE 36
 /* Every bit: what a new Notification capability may signal, and what a signal names to set all its capability may. */

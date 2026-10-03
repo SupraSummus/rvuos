@@ -41,7 +41,7 @@ SECTIONS
         . = ALIGN(4);
         __data_end = .;
     }
-    ASSERT(__data_load + SIZEOF(.data) <= USER_CODE_BASE + USER_CODE_SIZE, "user code does not fit its region")
+    ASSERT(__data_load + SIZEOF(.data) <= USER_CODE_BASE + USER_CODE_SIZE, "user code and data do not fit the code region")
 
     .bss (NOLOAD) : {
         __bss_start = .;

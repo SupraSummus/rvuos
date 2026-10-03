@@ -43,25 +43,16 @@ static void debug_write(const uint32_t *arg)
     }
 }
 
-/*
- * Writing into the log takes RIGHT_W, and halting or driving the machine RIGHT_X,
- * so a child that only prints cannot stop the machine.
- */
+/* Writing into the log takes RIGHT_W, and the rest, which halts or drives the machine, RIGHT_X. */
 static int op_debug(const struct cap *cap, uint32_t op, const uint32_t *arg)
 {
-    if (op == OP_DEBUG_WRITE) {
-        if (!(cap->rights & RIGHT_W)) {
-            return KERR_NO_RIGHTS;
-        }
-        debug_write(arg);
-        return KERR_OK;
-    }
-    bool drives = op == OP_DEBUG_HALT || op == OP_DEBUG_TRACE || op == OP_DEBUG_TICK || op == OP_DEBUG_IRQ ||
-                  op == OP_DEBUG_PREEMPT;
-    if (drives && !(cap->rights & RIGHT_X)) {
+    if (!(cap->rights & (op == OP_DEBUG_WRITE ? RIGHT_W : RIGHT_X))) {
         return KERR_NO_RIGHTS;
     }
     switch (op) {
+    case OP_DEBUG_WRITE:
+        debug_write(arg);
+        return KERR_OK;
     case OP_DEBUG_HALT:
         kputs("user halt with code ");
         kput_hex(arg[1]);

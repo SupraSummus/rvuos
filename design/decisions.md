@@ -65,7 +65,8 @@ until the maintainer decides otherwise.
    Decided: a `Notification` capability carries the bits it may signal, in the second word of its slot,
    and `OP_NOTIFY_CARVE` makes one that may signal fewer, below it, as a frame is carved;
    see "Communication and synchronisation".
-   A signal sets only the bits it names that its capability may, and an `Irq` or a watch only those of the capability it was bound or set with,
+   A signal sets only the bits it names that its capability may,
+   and an `Irq` or a watch only those of the capability it was bound or set with,
    so a client given its own bit cannot speak for another, whatever it names.
    Before, the signalling thread named the bits, and a client's identity to a server was a convention between the two.
    The bits are a mask rather than seL4's badge, which the signal sets whatever it names:

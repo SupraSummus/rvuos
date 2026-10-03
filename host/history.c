@@ -237,6 +237,7 @@ static void children_of(const struct cap *c, addr_array *out)
  * The rights an operation needs of the capability it is invoked on, as rvuos/abi.h gives them;
  * one invoked on a capability of another type fails before its rights matter.
  */
+_Static_assert(OP_COUNT == 37, "a new operation needs its rights in rights_needed");
 static uint8_t rights_needed(uint32_t op)
 {
     switch (op) {
