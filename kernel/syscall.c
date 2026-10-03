@@ -451,13 +451,17 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
         }
         return KERR_OK;
     case OP_THREAD_WATCH: {
-        /* The watch signals on its setter's behalf, so the setter must be able to. */
+        /* The watch signals on its setter's behalf, so the setter must be able to, and only the bits it may. */
         uint32_t bits = arg[2];
         struct cap nc;
         if (bits != 0) {
             int err = cap_lookup_typed(thread_table(t), arg[1], CAP_NOTIFICATION, RIGHT_W, &nc);
             if (err != KERR_OK) {
                 return err;
+            }
+            bits &= nc.b;
+            if (bits == 0) {
+                return KERR_NO_RIGHTS;
             }
         }
         /* The watch is a leaf, so it leaves the tree in a step. */
@@ -476,7 +480,7 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
     }
 }
 
-static int op_notification(struct thread *t, const struct cap *cap,
+static int op_notification(struct thread *t, uint32_t slot, const struct cap *cap,
                            uint32_t op, uint32_t *arg)
 {
     struct notification *ntfn = (struct notification *)cap_object(cap);
@@ -490,8 +494,22 @@ static int op_notification(struct thread *t, const struct cap *cap,
         if (arg[1] == 0) {
             return KERR_INVALID_ARG;
         }
-        sched_signal(ntfn, arg[1]);
+        /* The capability says which bits it may signal, so a wait's bits say who signalled. */
+        uint32_t bits = arg[1] & cap->b;
+        if (bits == 0) {
+            return KERR_NO_RIGHTS;
+        }
+        sched_signal(ntfn, bits);
         return KERR_OK;
+    }
+    case OP_NOTIFY_CARVE: {
+        /* Fewer bits, as a carve of a frame is less memory: a table operation, below the invoked capability. */
+        struct cap sub = *cap;
+        sub.b &= arg[1];
+        if (sub.b == 0) {
+            return KERR_INVALID_ARG;
+        }
+        return cap_store(thread_table(t), arg[2], &sub, slot_node(t, slot));
     }
     case OP_NOTIFY_WAIT:
         if (!(cap->rights & RIGHT_R)) {
@@ -577,7 +595,7 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
         }
         struct irq *irq = pool_alloc(pool, CAP_IRQ, sizeof(*irq));
         /* It hangs below the capability it was bound with, so a revoke above that disarms the Irq. */
-        irq->ntfn = (struct cap){ .type = CAP_SIGNALLED, .rights = nc.rights, .a = nc.a };
+        irq->ntfn = (struct cap){ .type = CAP_SIGNALLED, .rights = nc.rights, .a = nc.a, .b = nc.b };
         cap_attach(slot_node(t, arg[2]), &irq->ntfn);
         irq->line = first;
         /* A period counts from the last deadline, and a line that never fired from its bind. */
@@ -668,6 +686,11 @@ static int op_irq(const struct cap *cap, uint32_t op, uint32_t *arg)
     /* An Irq whose notification was taken has nothing to signal. */
     if (irq_notification(irq) == NULL) {
         return KERR_STATE;
+    }
+    /* It signals on its binder's behalf, so only the bits the capability it was bound with may. */
+    bits &= irq->ntfn.b;
+    if (bits == 0 && arg[1] != 0) {
+        return KERR_NO_RIGHTS;
     }
     if (line_is_timer(irq->line) && bits != 0) {
         uint32_t us = arg[2];
@@ -783,7 +806,7 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
         err = (cap.rights & RIGHT_W) ? op_thread(t, &cap, op, arg) : KERR_NO_RIGHTS;
         break;
     case CAP_NOTIFICATION:
-        err = op_notification(t, &cap, op, arg);
+        err = op_notification(t, slot, &cap, op, arg);
         break;
     case CAP_IRQ_LINE:
         err = op_irq_line(t, slot, &cap, op, arg);

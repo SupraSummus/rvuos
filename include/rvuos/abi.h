@@ -64,6 +64,8 @@
  * Pool: RIGHT_W to allocate objects.
  * Process, Thread: RIGHT_W to control the object.
  * Notification: RIGHT_W to signal, RIGHT_R to wait.
+ *   Besides its rights a Notification capability carries the bits it may signal,
+ *   every bit for a new one and fewer once carved, see OP_NOTIFY_CARVE; copying keeps them.
  * IrqLine: RIGHT_W to bind a line.
  * Irq: RIGHT_W to set or mask.
  * Time: RIGHT_W to bind a thread, RIGHT_X to let the threads bound through it run on spare time.
@@ -305,7 +307,8 @@
 /*
  * Thread (RIGHT_W): name what the thread's faults signal, its watch.
  * a1 = the slot of a Notification capability, which needs RIGHT_W and may lie in any pool,
- * a2 = the bits a fault signals there; a2 = 0 clears the watch and ignores a1.
+ * a2 = the bits a fault signals there, of which only those the capability may signal are kept,
+ * and a2 with none of them fails with KERR_NO_RIGHTS; a2 = 0 clears the watch and ignores a1.
  * A fault, an access fault, an illegal instruction, a misaligned access or a breakpoint,
  * stops the thread at the instruction that faulted, with its registers as they were,
  * and signals the bits as OP_NOTIFY_SIGNAL would; nothing else stops, the machine goes on.
@@ -351,6 +354,8 @@
 
 /*
  * Notification (RIGHT_W): set bits. a1 = the bits to set, which may not be zero.
+ * Of those, only the bits the capability may signal are set, see OP_NOTIFY_CARVE,
+ * and a1 with none of them fails with KERR_NO_RIGHTS.
  * Never blocks. If a thread is waiting, it takes every set bit and wakes.
  */
 #define OP_NOTIFY_SIGNAL 14
@@ -361,6 +366,19 @@
  * the bits are sticky, so a signal that arrives first is not lost.
  */
 #define OP_NOTIFY_WAIT 15
+/*
+ * Notification: derive a capability that may signal fewer bits, with the same rights.
+ * a1 = the bits, of which those the invoked capability may signal are kept, a2 = destination slot.
+ * Fails with KERR_INVALID_ARG when none is kept.
+ * Like OP_FRAME_CARVE, this is a table operation that touches no kernel memory,
+ * and the new capability is a child of the invoked one.
+ * A server gives each client a capability that signals the client's bit alone:
+ * the bits a wait returns then say who signalled, whatever a client names,
+ * and a client signals all it may by naming every bit, without being told which.
+ */
+#define OP_NOTIFY_CARVE 36
+/* Every bit: what a new Notification capability may signal, and what a signal names to set all its capability may. */
+#define NOTIFY_ALL_BITS 0xffffffffu
 
 /*
  * IrqLine: derive a smaller range of lines with the same rights.
@@ -374,7 +392,7 @@
  * as an Irq object; a timer line binds the same way as a controller's.
  * a1 = the slot of the Pool capability the Irq is allocated from, which needs RIGHT_W,
  * a2 = the slot of the Notification capability the Irq signals, which needs RIGHT_W
- *      and may lie in any pool,
+ *      and may lie in any pool; the Irq signals only the bits that capability may,
  * a3 = destination slot for the Irq capability.
  * The invoked slot is cleared with everything derived from it, and may be the destination;
  * the Irq capability is a child of the Pool capability, as an allocated object's is.
@@ -391,7 +409,9 @@
 #define OP_IRQ_BIND 20
 /*
  * Irq (RIGHT_W): unmask the line and name the bits the next interrupt signals.
- * a1 = the bits; a2 = on a timer line, the delay in microseconds, and unused elsewhere;
+ * a1 = the bits, of which only those the Irq may signal are kept, see OP_IRQ_BIND,
+ * and a1 with none of them fails with KERR_NO_RIGHTS;
+ * a2 = on a timer line, the delay in microseconds, and unused elsewhere;
  * a3 = on a timer line, 0 or IRQ_SET_PERIOD, and unused elsewhere.
  * The interrupt masks the line again as it signals,
  * so a driver hears about a line once until it says otherwise;
@@ -457,7 +477,7 @@
 #define OP_TIME_BIND 29
 
 /* One above the highest operation code; the fuzzer's mutator draws below it. */
-#define OP_COUNT 36
+#define OP_COUNT 37
 
 /*
  * Capability slots the kernel fills in the root task's table at boot.

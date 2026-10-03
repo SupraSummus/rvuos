@@ -347,6 +347,18 @@ A notification is one 32-bit word of sticky bits.
 so a client can be given the power to announce something
 without the power to consume the announcement.
 
+Besides its rights, a `Notification` capability carries the bits it may signal:
+every bit for the one `OP_POOL_ALLOC` returns, and fewer once `OP_NOTIFY_CARVE` has made a capability of some of them,
+below the one carved, as a frame is carved from a frame.
+A signal sets only the bits of `a1` its capability may signal,
+and naming none of them is refused with `KERR_NO_RIGHTS`;
+copying keeps the bits, as it keeps or narrows rights.
+An `Irq` signals only the bits the capability it was bound with may, and a thread's watch only those of the one it was set with.
+
+So a server with many clients gives each a capability carved to the client's own bit,
+and the bits a wait returns say who signalled, whatever a client names.
+A client need not be told its bit: naming every bit, `0xffffffff`, signals all it may.
+
 No data passes through the kernel.
 Two processes exchange bytes through a region installed in both
 and use notifications to say when.

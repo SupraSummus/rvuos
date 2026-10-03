@@ -277,7 +277,8 @@ A thread that faulted runs the faulting instruction again, unless `OP_THREAD_WRI
 
 **`OP_THREAD_WATCH` (31).**
 `a1` = slot of a `Notification` capability, which needs `RIGHT_W`, and may lie in any pool;
-`a2` = the bits the thread's faults signal there.
+`a2` = the bits the thread's faults signal there,
+of which only those the capability may signal are kept, `KERR_NO_RIGHTS` if none.
 Replaces the watch the thread had.
 `a2` = 0 clears the watch and ignores `a1`.
 See section 5.6.
@@ -319,7 +320,9 @@ While tracing, the thread can no longer run, as after `OP_THREAD_CONFIGURE`; sec
 
 **`OP_NOTIFY_SIGNAL` (14).**
 Needs `RIGHT_W`.
-`a1` = bits to set, non-zero (`KERR_INVALID_ARG`).
+`a1` = bits to set, non-zero (`KERR_INVALID_ARG`),
+of which only those the capability may signal are set;
+`a1` with none of them is refused with `KERR_NO_RIGHTS`.
 Never blocks.
 
 **`OP_NOTIFY_WAIT` (15).**
@@ -327,6 +330,14 @@ Needs `RIGHT_R`.
 Blocks until some bit is set, then returns `a1` = the bits and clears them.
 Returns `KERR_INVALID_CAP` with no bits
 if the notification's pool is destroyed while the thread waits.
+
+**`OP_NOTIFY_CARVE` (36).**
+No right needed.
+`a1` = bits, `a2` = destination slot.
+A capability to the same notification with the same rights,
+which may signal those of the bits the invoked one may, below it in the derivation tree;
+`KERR_INVALID_ARG` when none is left.
+A table operation like `OP_FRAME_CARVE`; section 5.7.
 
 ### 6.10 Operations on `IrqLine`
 
@@ -339,7 +350,8 @@ A table operation like `OP_FRAME_CARVE`.
 Needs `RIGHT_W`, and the capability must name exactly one line (`KERR_INVALID_ARG`).
 `a1` = slot of the `KernelPool` capability to allocate the `Irq` from, with `RIGHT_W`,
 `a2` = slot of the `Notification` capability the `Irq` signals, with `RIGHT_W`,
-which may lie in any pool, and the `Irq`'s hold on it hangs below that capability, section 5.9,
+which may lie in any pool, and the `Irq`'s hold on it hangs below that capability, section 5.9;
+the `Irq` signals only the bits that capability may,
 `a3` = destination slot for the `Irq` capability, which may be the invoked slot.
 The invoked slot is cleared with everything below it,
 and the `Irq` capability hangs below the `KernelPool` capability.
@@ -356,7 +368,8 @@ A timer line binds the same way as a device's.
 
 **`OP_IRQ_SET` (21).**
 Needs `RIGHT_W`.
-`a1` = bits the next interrupt signals; unmasks the line.
+`a1` = bits the next interrupt signals, of which only those the `Irq` may signal are kept,
+`KERR_NO_RIGHTS` if none; unmasks the line.
 `a1` = 0 masks the line; it takes back no signal that already happened.
 On the log's line, arming while bytes are untaken signals at once.
 On a timer line, `a2` = the delay in microseconds, and the line fires
@@ -449,8 +462,9 @@ only a wait, the tick, a fault, section 5.6, or a revoke that takes its own proc
 | 33 | `OP_THREAD_FAULT` | `Thread` |
 | 34 | `OP_THREAD_READ_REG` | `Thread` |
 | 35 | `OP_THREAD_WRITE_REG` | `Thread` |
+| 36 | `OP_NOTIFY_CARVE` | `Notification` |
 
-`OP_COUNT` is 36, one above the highest code; 16 is unused.
+`OP_COUNT` is 37, one above the highest code; 16 is unused.
 
 ## 7. What the root task starts with
 

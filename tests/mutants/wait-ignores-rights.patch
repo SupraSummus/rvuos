@@ -1,0 +1,20 @@
+A wait takes the bits through a capability without RIGHT_R,
+so a driver given the power to announce something could consume the announcement too;
+a call goes through only a capability with the rights its operation needs.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a call went through a capability without the rights its operation needs
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -512,9 +512,6 @@ static int op_notification(struct thread *t, uint32_t slot, const struct cap *ca
+         return cap_store(thread_table(t), arg[2], &sub, slot_node(t, slot));
+     }
+     case OP_NOTIFY_WAIT:
+-        if (!(cap->rights & RIGHT_R)) {
+-            return KERR_NO_RIGHTS;
+-        }
+         if (ntfn->bits != 0) {
+             arg[1] = ntfn->bits;
+             ntfn->bits = 0;

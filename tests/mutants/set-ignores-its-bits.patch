@@ -1,0 +1,18 @@
+OP_IRQ_SET arms an Irq with the bits it names, not those of them the capability it was bound with may signal,
+so whoever holds the Irq signals bits its binder was never given;
+an Irq is armed with no bit its notification capability may not signal.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: irq is armed with bits its notification capability may not signal
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -688,7 +688,6 @@ static int op_irq(const struct cap *cap, uint32_t op, uint32_t *arg)
+         return KERR_STATE;
+     }
+     /* It signals on its binder's behalf, so only the bits the capability it was bound with may. */
+-    bits &= irq->ntfn.b;
+     if (bits == 0 && arg[1] != 0) {
+         return KERR_NO_RIGHTS;
+     }

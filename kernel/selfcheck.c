@@ -703,17 +703,21 @@ static void check_irq(const struct irq *i)
     /*
      * The sweep clears an Irq's notification with the notification, in whatever pool,
      * and an Irq without one is disarmed; the tree check reads the node's links.
-     * It was bound through a capability with the right to signal, whose rights it carries.
+     * It was bound through a capability with the right to signal, whose rights and bits it carries,
+     * and it is armed with no bit that capability may not signal.
      */
     const struct cap *s = &i->ntfn;
     if (s->type != CAP_NONE) {
         struct obj_header *n = object_find(s->a);
         if (s->type != CAP_SIGNALLED || n == NULL || n->type != CAP_NOTIFICATION || (s->rights & RIGHT_W) == 0 ||
-            s->b != 0 || s->index != 0) {
+            s->b == 0 || s->index != 0) {
             fail("irq's notification slot names no live notification", v2p(i), s->type, s->a);
         }
         if (s->child != 0) {
             fail("something is derived from an irq's notification", v2p(i), s->child, 0);
+        }
+        if (i->bits & ~s->b) {
+            fail("irq is armed with bits its notification capability may not signal", v2p(i), i->bits, s->b);
         }
     } else if (irq_armed(i)) {
         fail("irq without a notification is armed", v2p(i), i->bits, 0);
@@ -872,6 +876,10 @@ static void check_captable(const struct captable *table)
             if (o == NULL || o->type != c->type) {
                 fail("dangling object capability", v2p(table), i, c->a);
             }
+            /* A notification's capability may signal some bit, and no other carries any. */
+            if ((c->b == 0) != (c->type != CAP_NOTIFICATION)) {
+                fail("object capability whose bits are not its type's", v2p(table), i, c->b);
+            }
             break;
         }
         default:
@@ -895,6 +903,7 @@ static void check_captable(const struct captable *table)
  * A destroy that left a link into freed memory, a delete that broke a ring,
  * or a revoke that stopped short all show up here.
  * A node is derived from its parent: the same object with no more rights,
+ * and for a notification no more bits to signal,
  * a range within the parent's with no more rights,
  * or an object built on the parent's range, a pool on a region, an Irq on a line,
  * a thread's process, a thread's watch or an Irq's notification on a capability to it,
@@ -986,7 +995,9 @@ static bool derived_from(const struct cap *c, const struct cap *p)
         if (c->type == CAP_FRAME || c->type == CAP_IRQ_LINE || c->type == CAP_TIME) {
             return narrower && range_within(c->a, c->b, p->a, p->b);
         }
-        return narrower && (c->type == CAP_DEBUG || c->type == CAP_CLOCK || c->a == p->a);
+        /* A notification's capability carries the bits it may signal, which narrow as rights do. */
+        return narrower && (c->type == CAP_DEBUG || c->type == CAP_CLOCK || c->a == p->a) &&
+               (c->type != CAP_NOTIFICATION || !(c->b & ~p->b));
     }
     /*
      * The clock gives out one frame, the counter's block, read only,
@@ -1005,11 +1016,13 @@ static bool derived_from(const struct cap *c, const struct cap *p)
     }
     /*
      * A thread's process is the process it was made with, its watch the notification it was set with,
-     * and an Irq's notification the one it was bound to.
+     * and an Irq's notification the one it was bound to, each signalling only bits that capability may.
      */
-    if ((c->type == CAP_HOSTED && p->type == CAP_PROCESS) ||
-        ((c->type == CAP_WATCHED || c->type == CAP_SIGNALLED) && p->type == CAP_NOTIFICATION)) {
+    if (c->type == CAP_HOSTED && p->type == CAP_PROCESS) {
         return narrower && c->a == p->a;
+    }
+    if ((c->type == CAP_WATCHED || c->type == CAP_SIGNALLED) && p->type == CAP_NOTIFICATION) {
+        return narrower && c->a == p->a && !(c->b & ~p->b);
     }
     /* Below a pool's node lies every capability to the pool and to its objects. */
     if (p->type == CAP_RETYPED || p->type == CAP_POOL) {

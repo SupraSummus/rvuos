@@ -40,7 +40,9 @@ struct obj_header {
  * and there is no object.
  * For CAP_UNTYPED a is the block, its base and size in one word as NAPOT encodes them,
  * see untyped_base, and b is 0; there is no object either, and whether it is free the tree says.
- * For every other type a is the object's physical address.
+ * For every other type a is the object's physical address,
+ * and b is 0 but for CAP_NOTIFICATION, where it is the bits the capability may signal, never none;
+ * see OP_NOTIFY_CARVE.
  *
  * child is the first slot derived from this one, by physical address, 0 if none.
  * next is the next sibling, or at the last sibling the parent with LINK_UP set,
@@ -90,13 +92,15 @@ struct cap {
  */
 #define CAP_HOSTED 0x83
 /*
- * An Irq's notification, in the Irq: a is the notification, and the node hangs below
- * the Notification capability the Irq was bound with. Kernel internal: never in a table.
+ * An Irq's notification, in the Irq: a is the notification and b the bits the Irq may signal,
+ * those of the Notification capability the Irq was bound with, below which the node hangs.
+ * Kernel internal: never in a table.
  */
 #define CAP_SIGNALLED 0x84
 /*
  * A thread's watch, in the thread: a is the notification its faults signal and b the bits, never none,
- * and the node hangs below the Notification capability the watch was set with. Kernel internal: never in a table.
+ * which the Notification capability the watch was set with may signal, and the node hangs below it.
+ * Kernel internal: never in a table.
  */
 #define CAP_WATCHED 0x85
 
@@ -541,7 +545,7 @@ bool cap_stop_here(bool preempt);
  */
 extern uint32_t preempt_countdown;
 
-/* Build a capability to an object. */
+/* Build a capability to an object; one to a notification may signal every bit. */
 struct cap cap_to_object(struct obj_header *obj, uint8_t rights);
 
 /* Build a frame capability. */

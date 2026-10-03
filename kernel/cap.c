@@ -303,7 +303,7 @@ struct cap cap_to_object(struct obj_header *obj, uint8_t rights)
         .type = obj->type,
         .rights = rights,
         .a = v2p(obj),
-        .b = 0,
+        .b = obj->type == CAP_NOTIFICATION ? NOTIFY_ALL_BITS : 0,
     };
     return c;
 }

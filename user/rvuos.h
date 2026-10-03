@@ -248,6 +248,12 @@ static inline uint32_t rv_signal(uint32_t ntfn_cap, uint32_t bits)
     return rv_invoke(OP_NOTIFY_SIGNAL, ntfn_cap, bits, 0, 0);
 }
 
+/* OP_NOTIFY_CARVE: a capability to the same notification that may signal only those of bits the invoked one may. */
+static inline uint32_t rv_notify_carve(uint32_t ntfn_cap, uint32_t bits, uint32_t dst)
+{
+    return rv_invoke(OP_NOTIFY_CARVE, ntfn_cap, bits, dst, 0);
+}
+
 /* OP_NOTIFY_WAIT: block until some bit is set, then take them all. */
 static inline uint32_t rv_wait(uint32_t ntfn_cap, uint32_t *bits)
 {

@@ -223,9 +223,11 @@ def formed(insns, image, sections):
     """Every address the function forms from constants, for the call graph's taken addresses:
     a movw, alone and with each movt of its register after it, an adr and a literal load,
     as RISC-V forms one with lui or auipc, conditional ones as well, each with bit 0 taken off.
-    A movt right after a movw of its register completes that movw alone,
-    where neither is conditional, nothing branches to the movt and the function jumps through no register,
-    since every way to the movt then runs through the movw, as clang lays a constant out;
+    A movt completes the movw that is the nearest write of its register above it alone,
+    where neither is conditional, nothing branches to the movt or to what lies between,
+    and the function jumps through no register,
+    since every way to the movt then runs through the movw, as clang lays a constant out,
+    right before the movt or with other instructions scheduled between;
     so a movw of a mask the register held earlier does not pair with it.
     A mov or mvn of an immediate forms a small number, as li does, however often it equals a function's address."""
     out = set()
@@ -244,9 +246,11 @@ def formed(insns, image, sections):
         m, args = base_of(insns, i), args_of(ops)
         if m == "movt" and len(args) == 2 and args[1].startswith("#"):
             high = imm(args[1][1:]) << 16
-            before = args_of(insns[i - 1][2]) if i > 0 else []
-            if (i > 0 and not jumps_through and pc not in landings and not in_it(insns, i) and not in_it(insns, i - 1)
-                    and base_of(insns, i - 1) == "movw" and len(before) == 2 and before[0] == args[0]
+            j = next((j for j in range(i - 1, -1, -1) if args[0] in writes(insns[j][1], insns[j][2])), None)
+            before = args_of(insns[j][2]) if j is not None else []
+            if (j is not None and not jumps_through and not in_it(insns, i) and not in_it(insns, j)
+                    and not any(insns[k][0] in landings for k in range(j + 1, i + 1))
+                    and base_of(insns, j) == "movw" and len(before) == 2 and before[0] == args[0]
                     and before[1].startswith("#")):
                 out.add((high | imm(before[1][1:])) & 0xFFFFFFFF)
             else:

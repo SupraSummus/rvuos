@@ -2,6 +2,20 @@
 
 #include "lib/libc.h"
 
+/* A notification of the parent's, carved to bits, copied with RIGHT_W alone into slot dst of table. */
+static uint32_t give_bits(struct self *s, uint32_t table, uint32_t dst, uint32_t ntfn, uint32_t bits)
+{
+    uint32_t carved;
+    PASS(slot_new(s, &carved));
+    uint32_t status = rv_notify_carve(ntfn, bits, carved);
+    if (status == KERR_OK) {
+        status = rv_cap_copy(table, dst, carved, RIGHT_W);
+    }
+    PASS(slot_free(s, carved));
+    TRY(s, "give a child bits of a notification", status);
+    return KERR_OK;
+}
+
 static uint32_t build(struct self *s, struct child *c, uint32_t table_slots, uint32_t data_size)
 {
     if (table_slots <= CHILD_FIRST || table_slots > CHILD_TABLE_MAX) {
@@ -37,18 +51,17 @@ static uint32_t build(struct self *s, struct child *c, uint32_t table_slots, uin
     TRY(s, "install a child's data",
         rv_process_install(c->process, CHILD_REGION_DATA, c->data.made, RIGHT_R | RIGHT_W));
     TRY(s, "give a child its inbox", rv_cap_copy(c->table, CHILD_INBOX, c->inbox, RIGHT_R));
-    TRY(s, "give a child its parent's inbox", rv_cap_copy(c->table, CHILD_PARENT, s->inbox, RIGHT_W));
+    PASS(bit_new(s, &c->bit_page));
+    PASS(bit_new(s, &c->bit_fault));
+    PASS(give_bits(s, c->table, CHILD_PARENT, s->inbox, c->bit_page));
     TRY(s, "give a child its process", rv_cap_copy(c->table, CHILD_SELF, c->process, RIGHT_W));
 
     PASS(region_install(s, c->data.made, RIGHT_R | RIGHT_W, &c->region));
     c->page = (struct child_page *)(uintptr_t)c->data.base;
     PASS(slot_free(s, c->data.made));
     c->data.made = 0;
-    PASS(bit_new(s, &c->bit_page));
-    PASS(bit_new(s, &c->bit_fault));
     /* A child starts from clean memory, whatever the block held before. */
     memset((void *)(uintptr_t)c->data.base, 0, c->data.size);
-    c->page->bit = c->bit_page;
     c->page->state = CHILD_STARTING;
     return KERR_OK;
 }
@@ -74,6 +87,17 @@ uint32_t child_give(struct self *s, struct child *c, uint32_t slot, uint32_t rig
         return KERR_LIMIT;
     }
     TRY(s, "give a child a capability", rv_cap_copy(c->table, c->slots_given, slot, rights));
+    *at = c->slots_given++;
+    return KERR_OK;
+}
+
+uint32_t child_give_bits(struct self *s, struct child *c, uint32_t ntfn, uint32_t bits, uint32_t *at)
+{
+    if (c->slots_given == c->table_slots) {
+        s->what = "a free slot in a child's table";
+        return KERR_LIMIT;
+    }
+    PASS(give_bits(s, c->table, c->slots_given, ntfn, bits));
     *at = c->slots_given++;
     return KERR_OK;
 }
@@ -191,7 +215,7 @@ void child_put(void *page, char c)
 {
     struct child_page *p = page;
     if (logring_put(&p->log, c)) {
-        rv_signal(CHILD_PARENT, p->bit);
+        rv_signal(CHILD_PARENT, NOTIFY_ALL_BITS);
     }
 }
 
@@ -199,7 +223,7 @@ void child_report(struct child_page *p, uint32_t state)
 {
     __atomic_thread_fence(__ATOMIC_RELEASE);
     p->state = state;
-    rv_signal(CHILD_PARENT, p->bit);
+    rv_signal(CHILD_PARENT, NOTIFY_ALL_BITS);
 }
 
 void child_stop(struct child_page *p, uint32_t state)

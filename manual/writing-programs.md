@@ -49,6 +49,7 @@ and `user/lib/` what a program of several processes needs beside them, section 8
 | `rv_thread_write_reg(thread, reg, value)` | `OP_THREAD_WRITE_REG` |
 | `rv_signal(cap, bits)` | `OP_NOTIFY_SIGNAL` |
 | `rv_wait(cap, &bits)` | `OP_NOTIFY_WAIT` |
+| `rv_notify_carve(cap, bits, dst)` | `OP_NOTIFY_CARVE` |
 | `rv_irq_carve(lines, offset, count, dst)` | `OP_IRQ_CARVE` |
 | `rv_irq_bind(line, pool, ntfn, dst)` | `OP_IRQ_BIND` |
 | `rv_irq_set(cap, bits)` | `OP_IRQ_SET` |
@@ -207,10 +208,13 @@ Its table starts with `CHILD_INBOX`, `CHILD_PARENT`, `CHILD_TIMER` and `CHILD_SE
 its process with code and data in the first two regions, and its inbox with `CHILD_BIT_TIMER` and `CHILD_BIT_PARENT`.
 Past those the parent hands out the child's slots, regions and bits, and writes which into the page,
 so the type of a child's page is all the two agree on.
-A child holds no `Debug`: it writes its log and its state into the page, and signals its parent with its own bit.
+A child holds no `Debug`: it writes its log and its state into the page,
+and signals its parent through `CHILD_PARENT`, its parent's inbox carved to the child's own bit, section 5.7,
+so the parent knows who signalled and the child names every bit, `NOTIFY_ALL_BITS`, not knowing which.
 It costs its parent six slots, and `child_free` takes back everything that was made for it.
 
-**A channel** is connected by the parent into two children, running or not.
+**A channel** is connected by the parent into two children, running or not,
+each holding the other's inbox carved to the other's bit for the channel.
 Each end keeps where its rings lie and their shape in its page, which the other child cannot write,
 so a peer can spoil a packet but not steer the other's writes outside the ring.
 

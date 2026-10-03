@@ -1,0 +1,19 @@
+A signal sets the bits it names whether or not its capability may signal them.
+A client given a capability carved to its own bit could then speak for any other client of the server;
+a signal sets only bits its capability may signal.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a signal set bits its capability may not signal
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -495,7 +495,7 @@ static int op_notification(struct thread *t, uint32_t slot, const struct cap *ca
+             return KERR_INVALID_ARG;
+         }
+         /* The capability says which bits it may signal, so a wait's bits say who signalled. */
+-        uint32_t bits = arg[1] & cap->b;
++        uint32_t bits = arg[1];
+         if (bits == 0) {
+             return KERR_NO_RIGHTS;
+         }

@@ -55,7 +55,8 @@ takes the line only while it is unbound;
 once bound, the line is the `Irq`'s until its pool goes.
 
 **An `Irq` holds its notification as a thread holds its process,**
-by a capability in a slot of its own, below the `Notification` capability it was bound with.
+by a capability in a slot of its own, below the `Notification` capability it was bound with,
+and signals only the bits that capability may, whatever `OP_IRQ_SET` names.
 A revoke above the slot, or the destroy of the notification's pool, clears it,
 which disarms the `Irq` and masks its line.
 `OP_IRQ_SET` refuses an `Irq` without a notification,

@@ -37,9 +37,6 @@ These are documented gaps, not surprises;
   Round-robin on a tick, threads with time before threads on spare time,
   is the whole policy, and units promise their part of the processor and a turn within 64 ticks, no more;
   `DESIGN.md`, open decisions 9 and 10.
-- **No badged notifications.**
-  A client's identity to a server is a convention, not kernel-enforced;
-  open decision 6.
 - **No synchronous endpoints.**
   Shared memory and notifications carry everything; open decision 5.
 - **One `Irq` per line**; open decision 11.

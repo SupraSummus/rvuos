@@ -6,7 +6,8 @@
  * and a bit each way on their inboxes.
  * Their parent makes it and connects them, and each sees the channel through an end in its page.
  *
- * An end signals the other's bit when a put makes the ring it writes non-empty,
+ * Each end holds the other's inbox carved to the other's bit for the channel, so its signals say it is the channel.
+ * An end signals the other when a put makes the ring it writes non-empty,
  * and when a take makes the ring it reads non-full;
  * the other, woken by its bit, takes until its ring is empty and puts until the other is full or it has no more.
  * So one bit says both "there is something to read" and "there is room to write",
@@ -23,8 +24,7 @@ struct child;
 /* One end, in a child's page, which its parent fills and the other child cannot write. */
 struct chan_end {
     struct ring tx, rx;   /* the ring this end writes and the one it reads */
-    uint32_t peer;        /* the slot of the other end's inbox, RIGHT_W */
-    uint32_t peer_bit;    /* the bit the other end waits on for the channel */
+    uint32_t peer;        /* the slot of the other end's inbox, RIGHT_W, carved to its bit for the channel */
     uint32_t bit;         /* the bit this end's inbox gets for it */
     uint32_t ready;       /* written last, once the rest is */
 };
@@ -54,7 +54,7 @@ struct chan {
 uint32_t chan_new(struct self *s, struct chan *ch, uint32_t size, uint32_t slot_size);
 /*
  * Connects two children, which may be running: in each, the frame installed in a free region,
- * the other's inbox given in a free slot, and a bit of its inbox for the channel;
+ * a bit of its inbox for the channel, and the other's inbox, carved to the other's bit, in a free slot;
  * then the ends written into their pages, as the rings face each one, and each child told.
  */
 uint32_t chan_connect(struct self *s, const struct chan *ch, struct child *a, struct chan_end *ea, struct child *b,

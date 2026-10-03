@@ -62,18 +62,17 @@ until the maintainer decides otherwise.
    interrupts need those either way.
 
 6. **Badged notification capabilities.**
-   Working default: the signalling thread names the bits,
-   so a client's identity to a server is a convention
-   between the two of them and not something the kernel enforces.
-   The alternative is seL4's: the bits a capability may set
-   live in the capability, and copying it can only narrow them,
-   exactly as rights narrow.
-   That makes a client unable to speak for another
-   and fits in the second word of an object capability, which is unused.
-   It needs a way to set the mask when a capability is handed out;
-   `OP_CAP_DERIVE` is the natural place, with the mask in `a4`,
-   which the dispatcher already carries.
-   Decide before a server with mutually distrusting clients exists.
+   Decided: a `Notification` capability carries the bits it may signal, in the second word of its slot,
+   and `OP_NOTIFY_CARVE` makes one that may signal fewer, below it, as a frame is carved;
+   see "Communication and synchronisation".
+   A signal sets only the bits it names that its capability may, and an `Irq` or a watch only those of the capability it was bound or set with,
+   so a client given its own bit cannot speak for another, whatever it names.
+   Before, the signalling thread named the bits, and a client's identity to a server was a convention between the two.
+   The bits are a mask rather than seL4's badge, which the signal sets whatever it names:
+   a mask of one bit is a badge, since naming every bit signals just that one,
+   and a capability that may signal every bit still names which.
+   `OP_CAP_DERIVE` with the mask in `a4` was the other way to hand out fewer bits;
+   a replay record carries three arguments, and a carve is how every other capability names less than its source.
 
 7. **What a pool destroy gives back, and to whom.**
    Decided, by the derivation tree, and since decision 14 by the Untyped:

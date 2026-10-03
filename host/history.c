@@ -1,6 +1,7 @@
 /*
- * The properties "Authority only flows", "Memory crosses zeroed", "The caller keeps what it runs on",
- * "A dying pool only gives back", "A tick charges" and "A move keeps a node's place" of DESIGN.md,
+ * The properties "Authority only flows", "A call is as good as its capability", "Memory crosses zeroed",
+ * "The caller keeps what it runs on", "A dying pool only gives back", "A tick charges"
+ * and "A move keeps a node's place" of DESIGN.md,
  * which relate the state before a call to the state after it.
  * host_trap runs history_begin before each call and history_end after it,
  * and around a fault, which must change no more than a call that moves no time.
@@ -52,6 +53,18 @@ static const struct captable *caller_table;
 static bool caller_dying;
 
 /*
+ * The call: the capability it invokes, if its slot held one, and where the caller stood,
+ * which a call stopped for an interrupt leaves as it was.
+ * For OP_NOTIFY_SIGNAL, the notification, its bits, and the thread waiting first on it.
+ */
+static bool invoked;
+static struct cap invoked_cap;
+static uint32_t call_op, call_pc;
+static const struct notification *signalled;
+static uint32_t signalled_bits;
+static const struct thread *signalled_waiter;
+
+/*
  * A traced OP_CAP_MOVE that names a filled source and a destination slot:
  * the two slots, what the source held, the node it hung below, 0 for none,
  * and the nodes that hung below it, in their order.
@@ -101,8 +114,8 @@ __attribute__((noreturn)) static void violated(const char *what)
 
 /*
  * An installed region grants what the frame it came from did, a thread's units those units,
- * a thread's process and an Irq's notification what a capability to it does,
- * a thread's watch that too, with its bits, which no capability limits but a changed watch is set anew,
+ * a thread's process what a capability to it does,
+ * a thread's watch and an Irq's notification that too, with the bits they may signal,
  * and an Untyped its block whatever it made.
  */
 static struct grant grant_of(const struct cap *c)
@@ -117,7 +130,7 @@ static struct grant grant_of(const struct cap *c)
         return (struct grant){ CAP_PROCESS, c->rights, c->a, 0 };
     }
     if (c->type == CAP_SIGNALLED) {
-        return (struct grant){ CAP_NOTIFICATION, c->rights, c->a, 0 };
+        return (struct grant){ CAP_NOTIFICATION, c->rights, c->a, c->b };
     }
     if (c->type == CAP_WATCHED) {
         return (struct grant){ CAP_NOTIFICATION, c->rights, c->a, c->b };
@@ -130,7 +143,10 @@ static bool same_grant(struct grant x, struct grant y)
     return x.type == y.type && x.rights == y.rights && x.a == y.a && x.b == y.b;
 }
 
-/* Whether a capability the caller held grants all that g does; an Untyped grants the frames it makes. */
+/*
+ * Whether a capability the caller held grants all that g does; an Untyped grants the frames it makes,
+ * and a notification's capability the bits it may signal.
+ */
 static bool covered(struct grant g)
 {
     bool range = g.type == CAP_FRAME || g.type == CAP_UNTYPED || g.type == CAP_IRQ_LINE || g.type == CAP_TIME;
@@ -138,7 +154,8 @@ static bool covered(struct grant g)
         const struct grant *h = &held.v[i];
         bool type = h->type == g.type || (g.type == CAP_FRAME && h->type == CAP_UNTYPED);
         if (type && (g.rights & ~h->rights) == 0 &&
-            (range ? g.a - h->a < h->b && g.b <= h->b - (g.a - h->a) : g.a == h->a)) {
+            (range ? g.a - h->a < h->b && g.b <= h->b - (g.a - h->a)
+                   : g.a == h->a && (g.type != CAP_NOTIFICATION || (g.b & ~h->b) == 0))) {
             return true;
         }
     }
@@ -213,6 +230,85 @@ static void children_of(const struct cap *c, addr_array *out)
         const struct cap *n = p2v(at);
         PUSH(*out, at);
         at = (n->next & LINK_UP) ? 0 : n->next;
+    }
+}
+
+/*
+ * The rights an operation needs of the capability it is invoked on, as rvuos/abi.h gives them;
+ * one invoked on a capability of another type fails before its rights matter.
+ */
+static uint8_t rights_needed(uint32_t op)
+{
+    switch (op) {
+    case OP_CAP_COPY:
+    case OP_CAP_DELETE:
+    case OP_CAP_REVOKE:
+    case OP_CAP_DERIVE:
+    case OP_CAP_MOVE:
+    case OP_POOL_ALLOC:
+    case OP_PROCESS_INSTALL:
+    case OP_PROCESS_UNINSTALL:
+    case OP_THREAD_CONFIGURE:
+    case OP_THREAD_RESUME:
+    case OP_THREAD_WATCH:
+    case OP_THREAD_FAULT:
+    case OP_THREAD_READ_REG:
+    case OP_THREAD_WRITE_REG:
+    case OP_NOTIFY_SIGNAL:
+    case OP_IRQ_BIND:
+    case OP_IRQ_SET:
+    case OP_TIME_BIND:
+        return RIGHT_W;
+    case OP_NOTIFY_WAIT:
+        return RIGHT_R;
+    default:
+        return 0;
+    }
+}
+
+/* Note what a call invokes, as the kernel will resolve it; a fault invokes nothing, whatever a7 holds. */
+static void record_call(const struct captable *table, bool call)
+{
+    invoked = false;
+    signalled = NULL;
+    if (!call || caller == NULL || table == NULL) {
+        return;
+    }
+    const struct trap_frame *f = &caller->frame;
+    call_op = f->regs[REG_A7];
+    call_pc = f->pc;
+    invoked = cap_lookup((struct captable *)table, f->regs[REG_A0], &invoked_cap) == KERR_OK;
+    if (!invoked || call_op != OP_NOTIFY_SIGNAL || invoked_cap.type != CAP_NOTIFICATION) {
+        return;
+    }
+    signalled = (const struct notification *)cap_object(&invoked_cap);
+    signalled_bits = signalled->bits;
+    signalled_waiter = signalled->waiters != 0 ? p2v(signalled->waiters) : NULL;
+}
+
+/*
+ * A call that went through, returned or blocked, was made through a capability with the rights its operation needs,
+ * and a signal set only bits its capability may signal, in the notification or in the thread it woke.
+ */
+static void check_call(void)
+{
+    if (!invoked || caller->frame.pc == call_pc ||
+        (caller->state != THREAD_WAITING && caller->frame.regs[REG_A0] != KERR_OK)) {
+        return;
+    }
+    uint8_t needs = rights_needed(call_op);
+    if ((invoked_cap.rights & needs) != needs) {
+        violated("a call went through a capability without the rights its operation needs");
+    }
+    if (signalled == NULL) {
+        return;
+    }
+    uint32_t set = signalled->bits & ~signalled_bits;
+    if (signalled_waiter != NULL && signalled_waiter->state != THREAD_WAITING) {
+        set |= signalled_waiter->frame.regs[REG_A1];
+    }
+    if (set & ~invoked_cap.b) {
+        violated("a signal set bits its capability may not signal");
     }
 }
 
@@ -291,6 +387,7 @@ void history_begin(bool call)
     each_node(&objects, record_node);
     qsort(nodes.v, nodes.n, sizeof(nodes.v[0]), cmp_at);
     record_move(table, call);
+    record_call(table, call);
 
     ticks_before = sched_ticks;
     traced_before = debug_trace;
@@ -320,7 +417,7 @@ static void check_built(const struct obj_header *o)
         bound = covered((struct grant){ CAP_PROCESS, RIGHT_W, ((const struct thread *)o)->proc.a, 0 });
     } else if (o->type == CAP_IRQ) {
         const struct irq *irq = (const struct irq *)o;
-        bound = covered((struct grant){ CAP_NOTIFICATION, RIGHT_W, irq->ntfn.a, 0 }) &&
+        bound = covered((struct grant){ CAP_NOTIFICATION, RIGHT_W, irq->ntfn.a, irq->ntfn.b }) &&
                 covered((struct grant){ CAP_IRQ_LINE, RIGHT_W, irq->line, 1 });
     }
     if (!bound) {
@@ -364,6 +461,7 @@ void history_end(void)
     record_objects(&objects_after);
     each_node(&objects_after, check_node);
     check_move();
+    check_call();
 
     /*
      * Only OP_DEBUG_TICK moves time here, and only under tracing, where the clock is the tick count:

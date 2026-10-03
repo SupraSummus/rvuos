@@ -16,7 +16,7 @@ uint8_t *chan_put_begin(const struct chan_end *e)
 void chan_put_end(const struct chan_end *e, uint32_t len)
 {
     if (ring_put_end(&e->tx, len)) {
-        rv_signal(e->peer, e->peer_bit);
+        rv_signal(e->peer, NOTIFY_ALL_BITS);
     }
 }
 
@@ -28,7 +28,7 @@ const uint8_t *chan_get_begin(const struct chan_end *e, uint32_t *len)
 void chan_get_end(const struct chan_end *e)
 {
     if (ring_get_end(&e->rx)) {
-        rv_signal(e->peer, e->peer_bit);
+        rv_signal(e->peer, NOTIFY_ALL_BITS);
     }
 }
 
@@ -63,28 +63,27 @@ uint32_t chan_new(struct self *s, struct chan *ch, uint32_t size, uint32_t slot_
     return status;
 }
 
-/* One child's side of a connection: the frame, the other's inbox and a bit; the end is written once both are. */
+/* One child's side of a connection: the frame, and the other's inbox carved to the other's bit, which is chosen first. */
 static uint32_t side(struct self *s, const struct chan *ch, struct child *c, const struct child *other,
-                     struct chan_end *e)
+                     struct chan_end *e, const struct chan_end *oe)
 {
     uint32_t region;
     PASS(child_map(s, c, ch->frame.made, RIGHT_R | RIGHT_W, &region));
-    PASS(child_give(s, c, other->inbox, RIGHT_W, &e->peer));
-    PASS(child_bit(s, c, &e->bit));
+    PASS(child_give_bits(s, c, other->inbox, oe->bit, &e->peer));
     return KERR_OK;
 }
 
 uint32_t chan_connect(struct self *s, const struct chan *ch, struct child *a, struct chan_end *ea, struct child *b,
                       struct chan_end *eb)
 {
-    PASS(side(s, ch, a, b, ea));
-    PASS(side(s, ch, b, a, eb));
+    PASS(child_bit(s, a, &ea->bit));
+    PASS(child_bit(s, b, &eb->bit));
+    PASS(side(s, ch, a, b, ea, eb));
+    PASS(side(s, ch, b, a, eb, ea));
     ea->tx = ch->a;
     ea->rx = ch->b;
-    ea->peer_bit = eb->bit;
     eb->tx = ch->b;
     eb->rx = ch->a;
-    eb->peer_bit = ea->bit;
     __atomic_store_n(&ea->ready, 1u, __ATOMIC_RELEASE);
     __atomic_store_n(&eb->ready, 1u, __ATOMIC_RELEASE);
     TRY(s, "tell a child of a channel", child_tell(a));

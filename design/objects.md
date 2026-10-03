@@ -63,7 +63,8 @@ and three links of the derivation tree.
 The index is an installed region's slot in its process,
 so that uninstalling it finds the process without a walk.
 For object capabilities the first word of content is the object's address
-and the second is unused.
+and the second is unused,
+but for a `Notification`, where it is the bits the capability may signal; see "Communication and synchronisation".
 A slot carries nothing that has to be checked against the object,
 because a destroy clears the slots naming what it takes;
 see "Kernel pools and revocation".
@@ -461,7 +462,8 @@ Whoever holds the thread with `RIGHT_W` names what its faults signal with `OP_TH
 a notification, and the bits.
 The thread holds the notification as it holds its process,
 by a capability in a slot of its own, below the `Notification` capability the watch was set with,
-which needs `RIGHT_W`, since the kernel signals on the setter's behalf, as it does for an `Irq`.
+which needs `RIGHT_W`, since the kernel signals on the setter's behalf, as it does for an `Irq`,
+and so only the bits that capability may signal.
 A fault signals the bits there as `OP_NOTIFY_SIGNAL` would,
 so a watcher waits for a fault as for anything else.
 A watcher of many threads gives each a bit, as a server gives each client one.
@@ -513,6 +515,13 @@ before the waiter got there is not lost.
 `RIGHT_W` may signal and `RIGHT_R` may wait,
 so a driver can be given the power to announce something
 without the power to consume the announcement.
+A capability also carries the bits it may signal, in the second word of its slot:
+every bit for the one an allocation returns,
+and fewer for one `OP_NOTIFY_CARVE` made, below the one carved,
+as a carve of a frame is less memory below the frame.
+A signal sets only the bits it names that its capability may signal,
+and one that names none of them is refused;
+an `Irq` or a watch signals through the capability it was bound or set with, and so only its bits too.
 A signal wakes one waiter, which takes every bit;
 which one, when there are several, is not promised.
 Today it is the one that has waited longest:
@@ -549,22 +558,21 @@ and a thread's `sc.w` fails whenever a trap came between it and its `lr.w`.
 
 **A server with many clients** waits on one notification,
 not on many, because the bits are the clients.
-Each client holds the server's notification with `RIGHT_W` only,
-owns a bit, and shares a region with the server and with nobody else.
+Each client holds the server's notification with `RIGHT_W` only, carved to its own bit,
+and shares a region with the server and with nobody else.
+The bits a wait returns therefore say who signalled:
+a client cannot set another's bit, whatever it names,
+and it need not know its own, since naming every bit signals all it may.
+This is seL4's badge, as a mask that narrows as rights do; see open decision 6.
 One wake can then carry several clients' work,
 and a burst from one client costs one wake rather than one per request.
 Thirty-two clients fill the word; past that it takes
 a second notification and a second server thread,
 or a bit meaning "read the client table"
-that clients mark with an `amo*`.
-Which client owns which bit is a convention the kernel does not enforce,
-so a client can set another's bit and cost the server
-one wasted look at a ring buffer it cannot read;
-it cannot forge data or consume another client's wake.
-Putting the bits in the capability, as seL4's badges are,
-is open decision 6.
+that clients mark with an `amo*`, which they may then all signal.
 
-`user/lib/chan.h` is that ring buffer between two children, with a bit each way.
+`user/lib/chan.h` is that ring buffer between two children, with a bit each way,
+each end holding the other's notification carved to its own bit.
 Each end keeps where its rings lie and their shape in memory the other end cannot write,
 since a ring's own header, shared, would let a peer steer the other's writes outside the ring;
 all a peer can spoil is a packet.

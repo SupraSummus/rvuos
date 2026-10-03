@@ -9,6 +9,8 @@
  * and it starts at its entry with a0 at its page.
  * The parent has the data installed too, so the page is what the two share:
  * the parent writes into it what it gave the child, and the child its state and its log, needing no Debug.
+ * Whatever signals another's inbox holds it carved to the one bit that is its own,
+ * so the bits a wait returns say who signalled, and a signaller names every bit, not knowing which.
  * Past the first slots, regions and bits below, the parent hands the child's out and says in the page which,
  * so the page's type is all the two agree on.
  */
@@ -23,7 +25,7 @@
 enum {
     CHILD_NULL,
     CHILD_INBOX,  /* the notification it waits on, RIGHT_R */
-    CHILD_PARENT, /* its parent's notification, RIGHT_W */
+    CHILD_PARENT, /* its parent's notification, RIGHT_W, carved to the child's bit there */
     CHILD_TIMER,  /* an Irq on a timer line of its own, which signals CHILD_INBOX */
     CHILD_SELF,   /* its own process, RIGHT_W, for regions of its own */
     CHILD_FIRST,  /* the slots the parent hands out begin here */
@@ -48,7 +50,6 @@ enum {
 
 /* What every child's page starts with; a program's page type begins with it. */
 struct child_page {
-    uint32_t bit;              /* what the child signals CHILD_PARENT with: a new state, a line of its log */
     volatile uint32_t state;
     volatile uint32_t step;    /* where it got to, for a failure */
     volatile uint32_t detail;  /* a value that step read, for a failure */
@@ -71,7 +72,7 @@ struct child {
     struct block data, pool;
     struct child_page *page;                /* at the base of its data, where the parent sees it too */
     uint32_t region;                        /* the parent's region its data is installed in */
-    uint32_t bit_page, bit_fault;           /* the bits it signals the parent's inbox with */
+    uint32_t bit_page, bit_fault;           /* its bits on the parent's inbox: a new state or a line of its log, and a fault */
     uint32_t unit, units;                   /* the units of time it earns */
     /* What of the child's is handed out, a bit each or a count. */
     uint32_t table_slots, slots_given, regions, bits;
@@ -88,6 +89,8 @@ struct child {
 uint32_t child_new(struct self *s, struct child *c, const char *name, uint32_t table_slots, uint32_t data_size);
 /* A copy of the parent's slot, with rights at most, in the child's next free slot, which *at says. */
 uint32_t child_give(struct self *s, struct child *c, uint32_t slot, uint32_t rights, uint32_t *at);
+/* A notification of the parent's, to signal with RIGHT_W alone and only bits, in the child's next free slot. */
+uint32_t child_give_bits(struct self *s, struct child *c, uint32_t ntfn, uint32_t bits, uint32_t *at);
 /* A frame installed in the child's next free region, which *region says. */
 uint32_t child_map(struct self *s, struct child *c, uint32_t frame, uint32_t rights, uint32_t *region);
 /* A region of the child's for the child to install frames into itself, through CHILD_SELF. */

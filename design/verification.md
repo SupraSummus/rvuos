@@ -45,7 +45,8 @@ or a range of lines the interrupt controller has, the log's among them,
 with no more than the right to bind,
 or a range of the units of time there are, with no more than the rights to bind and to run on spare time,
 or the debug capability or the clock, which name no object,
-or a live kernel object of the capability's own type.
+or a live kernel object of the capability's own type,
+which for a notification may signal some bit and for any other object carries no bits.
 Every process's table slot is empty or names a live table,
 every thread's process slot is empty or names a live process,
 every thread's watch is empty or names a live notification,
@@ -67,12 +68,12 @@ the last sibling for the first;
 a root has no siblings and no previous link,
 and a capability to a pool or an object is never one, nor a thread's process or watch or an `Irq`'s notification.
 A node is derived from its parent:
-the same object with no more rights,
+the same object with no more rights, and for a notification no more bits to signal,
 a range within the parent's range with no more rights,
 a pool's own node on an Untyped, an installed region on a frame,
 a thread's units on a capability to units that holds them, the first of them even for none,
 a thread's process or watch or an `Irq`'s notification on a capability to that object,
-to its pool, or on its pool's own node,
+the watch and the `Irq` with no more bits to signal, or on that object's pool or its pool's own node,
 the counter's block, or a region installed from it, below a clock,
 or a capability to a pool or an object below a capability to that pool or its own node.
 A revoke, a delete or a destroy stopped for an interrupt leaves such a forest too,
@@ -135,7 +136,8 @@ The core a call runs on holds the regions of its thread's process, none waiting 
 Every `Irq` names a line there is: the log's, the controller's or a timer line.
 Its notification is a leaf of the derivation tree,
 bound through a capability with the right to signal,
-and an `Irq` without one is disarmed.
+and it is armed with no bit that capability may not signal;
+an `Irq` without one is disarmed.
 At most one `Irq` is bound to any line.
 The controller forwards a line exactly while an `Irq` is armed on it,
 read back from the controller itself:
@@ -195,6 +197,12 @@ It measures a copy against all the caller held, not against its source,
 so a copy wider than its source but within another capability of the caller passes;
 the derivation invariant checks it only against the parent it shares with its source.
 
+**A call is as good as its capability.**
+A call that goes through, returning or blocking, was made through a capability
+with the rights its operation needs, as `include/rvuos/abi.h` lists them,
+and a signal sets only bits its capability may signal,
+in the notification or in the thread it wakes.
+
 **Memory crosses zeroed.**
 Every object that leaves the pools holds nothing but zeros,
 whether its pool went or a destroy stopped half way,
@@ -227,7 +235,7 @@ and above the same children, in their order.
 The tree's shape alone does not say so:
 a copy beside the source and a delete of it leave a whole tree too.
 
-These five relate the state before a call to the state after it,
+These seven relate the state before a call to the state after it,
 so the self-check, which sees one state, cannot check them.
 `host/history.c` checks them around every call of the host build, the untraced prologue's too,
 and around every fault, which must change no more than a call that moves no time,
