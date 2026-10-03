@@ -45,6 +45,9 @@ and `make BOARD=rp2350 ARCH=arm test escape`, the only run of PMSAv8 and of the 
 which a change to `kernel/arch/arm/` needs too.
 Both again with `CORES=2` are the only runs of two cores on silicon,
 which a change to how the cores lock, start or interrupt each other needs too.
+`make check` runs only the Wi-Fi system's IP stack, on the host;
+a change to `user/wifi/` with a Pico 2 W connected runs `make BOARD=rp2350 wifi` too,
+and `WIFI_CONFIG` names a network to join from a file outside the tree, never in it.
 A new kernel global needs a reset in `host_boot` too,
 since the host boots once per input in one process.
 A new `BOOT_CAP_*` or `REPLAY_CAP_*` slot, or an operation whose arguments change,

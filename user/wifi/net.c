@@ -51,25 +51,6 @@ uint32_t net_ip(uint32_t a, uint32_t b, uint32_t c, uint32_t d)
     return get_ip(p);
 }
 
-char *net_ip_text(uint32_t ip, char *buf)
-{
-    uint8_t p[4];
-    put_ip(p, ip);
-    char *o = buf;
-    for (int i = 0; i < 4; i++) {
-        uint32_t v = p[i];
-        if (v >= 100) {
-            *o++ = (char)('0' + v / 100);
-        }
-        if (v >= 10) {
-            *o++ = (char)('0' + v / 10 % 10);
-        }
-        *o++ = (char)('0' + v % 10);
-        *o++ = i < 3 ? '.' : '\0';
-    }
-    return buf;
-}
-
 /* The one's complement sum of big-endian 16-bit words, folded later. */
 static uint32_t sum16(uint32_t sum, const uint8_t *p, uint32_t len)
 {
@@ -193,9 +174,7 @@ static int ip_send(struct net *n, uint32_t to, uint32_t proto, uint32_t len)
     put_ip(ip + 12, n->ip);
     put_ip(ip + 16, to);
     put_be16(ip + 10, fold(sum16(0, ip, IP_HEADER)));
-    uint8_t mac_copy[6];
-    memcpy(mac_copy, mac, 6);
-    eth_send(n, mac_copy, ETH_IP, IP_HEADER + len);
+    eth_send(n, mac, ETH_IP, IP_HEADER + len);
     return 0;
 }
 
@@ -438,9 +417,7 @@ static void arp_input(struct net *n, const uint8_t *a, uint32_t len)
         arp_learn(n, sender, a + 8);
     }
     if (op == 1 && target == n->ip) {
-        uint8_t mac[6];
-        memcpy(mac, a + 8, 6);
-        arp_send(n, 2, mac, sender);
+        arp_send(n, 2, a + 8, sender);
     }
 }
 

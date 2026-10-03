@@ -137,7 +137,10 @@ void gspi_power(struct gspi *b, int on)
     drive(b, GSPI_PIN_ON, on);
 }
 
-/* Words out, then words in, the last of them the status; zero words in on a stall. */
+/*
+ * Words out, then words in and the status word the chip answers with after them;
+ * all ones for the status if the bus stalled before the end.
+ */
 static uint32_t transfer(struct gspi *b, const uint32_t *out, uint32_t n_out, uint32_t *in, uint32_t n_in)
 {
     drive(b, GSPI_PIN_CS, 0);
@@ -149,15 +152,15 @@ static uint32_t transfer(struct gspi *b, const uint32_t *out, uint32_t n_out, ui
     PIO(b, PIO_TXF0) = n_out * 32u - 1u;
     exec(b, I_PULL_BLOCK);
     exec(b, I_OUT_X_32);
-    PIO(b, PIO_TXF0) = n_in * 32u - 1u;
+    PIO(b, PIO_TXF0) = (n_in + 1u) * 32u - 1u;
     exec(b, I_PULL_BLOCK);
     exec(b, I_OUT_Y_32);
     exec(b, I_SET_PINDIRS1);
     exec(b, I_JMP_0);
     PIO(b, PIO_CTRL) = CTRL_SM0_ENABLE;
 
-    uint32_t sent = 0, got = 0, idle = 0;
-    while (got < n_in && idle < SPINS_PER_WORD) {
+    uint32_t sent = 0, got = 0, idle = 0, status = 0xffffffffu;
+    while (got <= n_in && idle < SPINS_PER_WORD) {
         uint32_t fstat = PIO(b, PIO_FSTAT);
         idle++;
         if (sent < n_out && !(fstat & FSTAT_TXFULL0)) {
@@ -165,55 +168,9 @@ static uint32_t transfer(struct gspi *b, const uint32_t *out, uint32_t n_out, ui
             idle = 0;
         }
         if (!(fstat & FSTAT_RXEMPTY0)) {
-            in[got++] = PIO(b, PIO_RXF0);
-            idle = 0;
-        }
-    }
-    PIO(b, PIO_CTRL) = 0;
-    drive(b, GSPI_PIN_CS, 1);
-    return got;
-}
-
-uint32_t gspi_write(struct gspi *b, const uint32_t *words, uint32_t count)
-{
-    uint32_t status = 0;
-    if (transfer(b, words, count, &status, 1) != 1) {
-        return 0xffffffffu;
-    }
-    return status;
-}
-
-uint32_t gspi_read(struct gspi *b, uint32_t cmd, uint32_t *words, uint32_t count)
-{
-    /* The status follows the answer; the caller's buffer has no room for it, so the last word goes apart. */
-    uint32_t status = 0xffffffffu;
-    if (count == 0) {
-        return gspi_write(b, &cmd, 1);
-    }
-    drive(b, GSPI_PIN_CS, 0);
-    PIO(b, PIO_CTRL) = 0;
-    PIO(b, PIO_CTRL) = CTRL_SM0_RESTART;
-    while (!(PIO(b, PIO_FSTAT) & FSTAT_RXEMPTY0)) {
-        (void)PIO(b, PIO_RXF0);
-    }
-    PIO(b, PIO_TXF0) = 31u;
-    exec(b, I_PULL_BLOCK);
-    exec(b, I_OUT_X_32);
-    PIO(b, PIO_TXF0) = (count + 1u) * 32u - 1u;
-    exec(b, I_PULL_BLOCK);
-    exec(b, I_OUT_Y_32);
-    exec(b, I_SET_PINDIRS1);
-    exec(b, I_JMP_0);
-    PIO(b, PIO_CTRL) = CTRL_SM0_ENABLE;
-    PIO(b, PIO_TXF0) = cmd;
-
-    uint32_t got = 0, idle = 0;
-    while (got <= count && idle < SPINS_PER_WORD) {
-        idle++;
-        if (!(PIO(b, PIO_FSTAT) & FSTAT_RXEMPTY0)) {
             uint32_t w = PIO(b, PIO_RXF0);
-            if (got < count) {
-                words[got] = w;
+            if (got < n_in) {
+                in[got] = w;
             } else {
                 status = w;
             }
@@ -223,5 +180,15 @@ uint32_t gspi_read(struct gspi *b, uint32_t cmd, uint32_t *words, uint32_t count
     }
     PIO(b, PIO_CTRL) = 0;
     drive(b, GSPI_PIN_CS, 1);
-    return got > count ? status : 0xffffffffu;
+    return status;
+}
+
+uint32_t gspi_write(struct gspi *b, const uint32_t *words, uint32_t count)
+{
+    return transfer(b, words, count, 0, 0);
+}
+
+uint32_t gspi_read(struct gspi *b, uint32_t cmd, uint32_t *words, uint32_t count)
+{
+    return transfer(b, &cmd, 1, words, count);
 }

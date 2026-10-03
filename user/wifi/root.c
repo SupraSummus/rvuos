@@ -49,6 +49,8 @@ enum {
 
 #define PAGE_SIZE 0x1000u
 #define POOL_SIZE 0x1000u
+#define DRV_DATA_SIZE 0x4000u /* its state, two packets' buffers among it, and its stack */
+#define NET_DATA_SIZE 0x2000u
 
 /* Who gets which of the first core's units: the root task the first, mostly waiting, the driver the most. */
 #define ROOT_UNITS   16u
@@ -66,6 +68,8 @@ static void kput(void *to, char c)
 }
 
 static const struct out kout = { kput, 0 };
+
+static const char *const child_name[CHILDREN] = { "the driver", "the network" };
 
 /* A child of the root task, as child_new builds it; see wifi.h for what every child starts with. */
 struct child {
@@ -114,11 +118,7 @@ static __attribute__((noreturn)) void halt(uint32_t code)
 static void must(const char *what, uint32_t status)
 {
     if (status != KERR_OK) {
-        print(&kout, "root: ");
-        print(&kout, what);
-        print(&kout, " failed: ");
-        print_hex(&kout, status);
-        print(&kout, "\n");
+        say(&kout, "root: %s failed: %x\n", what, status);
         halt(2);
     }
 }
@@ -379,7 +379,7 @@ static void configure(struct drv_page *s)
     }
     unpeek();
     if (s->mode != MODE_SCAN && s->ssid[0] == '\0') {
-        print(&kout, "root: the configuration names no ssid; scanning only\n");
+        say(&kout, "root: the configuration names no ssid; scanning only\n");
         s->mode = MODE_SCAN;
     }
 }
@@ -395,7 +395,7 @@ static uint32_t blob_size[DRV_SLOTS - DRV_FIRMWARE], blob_frame[DRV_SLOTS - DRV_
 static void driver_build(uint32_t free_base)
 {
     struct child *c = &children[CHILD_DRIVER];
-    child_new(c, CHILD_DRIVER, DRV_SLOTS, 0x4000u);
+    child_new(c, CHILD_DRIVER, DRV_SLOTS, DRV_DATA_SIZE);
     struct drv_page *p = (struct drv_page *)c->page;
     child_map(c, DRV_REGION_PIO, device(PIO0_BASE, PIO0_SIZE), RIGHT_R | RIGHT_W);
     child_map(c, DRV_REGION_PINS, device(IO_BANK0_HIGH, IO_BANK0_HIGH_SIZE), RIGHT_R | RIGHT_W);
@@ -411,9 +411,7 @@ static void driver_build(uint32_t free_base)
     p->blob_frames = blob_frames;
     configure(p);
     static const char *const modes[] = { "scan", "station", "access point" };
-    print(&kout, "root: mode ");
-    print(&kout, modes[p->mode]);
-    print(&kout, "\n");
+    say(&kout, "root: mode %s\n", modes[p->mode]);
     child_start(c, (void (*)(void *))driver_main, ROOT_UNITS, DRV_UNITS);
 }
 
@@ -430,7 +428,7 @@ static void net_build(void)
         give_slot(blob_frame[i]); /* the revoke emptied it */
     }
 
-    child_new(c, CHILD_NET, NET_SLOTS, 0x2000u);
+    child_new(c, CHILD_NET, NET_SLOTS, NET_DATA_SIZE);
     uint32_t link_base;
     uint32_t link = frame_of(take(LINK_SIZE, &link_base));
     peek(link, RIGHT_R | RIGHT_W);
@@ -451,69 +449,37 @@ static void net_build(void)
     must("tell the driver", rv_signal(d->inbox, CHILD_BIT_ROOT));
 }
 
-static void print_ip(uint32_t ip)
-{
-    const uint8_t *b = (const uint8_t *)&ip;
-    for (uint32_t i = 0; i < 4; i++) {
-        print_dec(&kout, b[i]);
-        print(&kout, i < 3 ? "." : "");
-    }
-}
-
 /* What a child's new state says, on the console; 1 if the run is to end. */
-static int child_told(struct child *c, uint32_t state)
+static int child_state(struct child *c, uint32_t state)
 {
     if (state == CHILD_FAILED) {
-        print(&kout, c->index == CHILD_DRIVER ? "root: the driver failed at step " : "root: the network failed at step ");
-        print_dec(&kout, c->page->step);
-        print(&kout, ", read ");
-        print_hex(&kout, c->page->detail);
-        print(&kout, "\n");
+        say(&kout, "root: %s failed at step %u, read %x\n", child_name[c->index], c->page->step, c->page->detail);
         halt(1);
     }
-    if (c->index == CHILD_DRIVER) {
-        struct drv_page *p = (struct drv_page *)c->page;
-        /* The driver may be past DRV_UP before the root task looks, so any state of a running driver will do. */
-        if (state >= DRV_UP && children[CHILD_NET].page == 0) {
-            net_build();
+    if (c->index == CHILD_NET) {
+        if (state == NET_BOUND) {
+            say(&kout, "root: the system answers at %I: ping it, or send a datagram to UDP port %u for its status\n",
+                ((struct net_page *)c->page)->ip, NET_PORT_STATUS);
         }
-        if (state == DRV_SCANNED) {
-            print(&kout, "root: ");
-            print_dec(&kout, p->net_count);
-            print(&kout, " access points heard\n");
-            for (uint32_t i = 0; i < p->net_count; i++) {
-                const struct drv_net *n = &p->nets[i];
-                print(&kout, "  ");
-                for (uint32_t j = 0; j < 6; j++) {
-                    static const char hex[] = "0123456789abcdef";
-                    char b[4] = { hex[n->bssid[j] >> 4], hex[n->bssid[j] & 15], j < 5 ? ':' : '\0', 0 };
-                    print(&kout, b);
-                }
-                print(&kout, "  ch ");
-                print_dec(&kout, n->channel);
-                print(&kout, n->rssi < 0 ? "  rssi -" : "  rssi ");
-                print_dec(&kout, (uint32_t)(n->rssi < 0 ? -n->rssi : n->rssi));
-                print(&kout, "  ");
-                print(&kout, n->ssid[0] ? n->ssid : "(hidden)");
-                print(&kout, "\n");
-            }
-            return p->mode == MODE_SCAN;
-        } else if (state == DRV_JOINED) {
-            print(&kout, "root: joined ");
-            print(&kout, p->ssid);
-            print(&kout, "\n");
-        } else if (state == DRV_AP) {
-            print(&kout, "root: access point ");
-            print(&kout, p->ssid);
-            print(&kout, " on channel ");
-            print_dec(&kout, p->channel);
-            print(&kout, "\n");
+        return 0;
+    }
+    struct drv_page *p = (struct drv_page *)c->page;
+    /* The driver may be past DRV_UP before the root task looks, so any state of a running driver will do. */
+    if (state >= DRV_UP && children[CHILD_NET].page == 0) {
+        net_build();
+    }
+    if (state == DRV_SCANNED) {
+        say(&kout, "root: %u access points heard\n", p->net_count);
+        for (uint32_t i = 0; i < p->net_count; i++) {
+            const struct drv_net *n = &p->nets[i];
+            say(&kout, "  %M  ch %u  rssi %d  %s\n", n->bssid, n->channel, n->rssi, n->ssid[0] ? n->ssid : "(hidden)");
         }
-    } else if (state == NET_BOUND) {
-        struct net_page *p = (struct net_page *)c->page;
-        print(&kout, "root: the system answers at ");
-        print_ip(p->ip);
-        print(&kout, ": ping it, or send a datagram to UDP port 7777 for its status\n");
+        return p->mode == MODE_SCAN;
+    }
+    if (state == DRV_JOINED) {
+        say(&kout, "root: joined %s\n", p->ssid);
+    } else if (state == DRV_AP) {
+        say(&kout, "root: access point %s on channel %u\n", p->ssid, p->channel);
     }
     return 0;
 }
@@ -522,23 +488,12 @@ static void summary(void)
 {
     const struct drv_page *d = (const struct drv_page *)children[CHILD_DRIVER].page;
     const struct net_page *n = (const struct net_page *)children[CHILD_NET].page;
-    print(&kout, "root: driver frames in ");
-    print_dec(&kout, d->rx_frames);
-    print(&kout, ", out ");
-    print_dec(&kout, d->tx_frames);
-    print(&kout, ", dropped ");
-    print_dec(&kout, d->rx_dropped);
+    say(&kout, "root: driver frames in %u, out %u, dropped %u", d->rx_frames, d->tx_frames, d->rx_dropped);
     if (n != 0) {
-        print(&kout, "; network frames in ");
-        print_dec(&kout, n->rx_frames);
-        print(&kout, ", out ");
-        print_dec(&kout, n->tx_frames);
-        print(&kout, ", pings ");
-        print_dec(&kout, n->pings);
-        print(&kout, ", datagrams ");
-        print_dec(&kout, n->datagrams);
+        say(&kout, "; network frames in %u, out %u, pings %u, datagrams %u", n->rx_frames, n->tx_frames, n->pings,
+            n->datagrams);
     }
-    print(&kout, "\n");
+    say(&kout, "\n");
 }
 
 int main(void)
@@ -564,16 +519,14 @@ int main(void)
     give_slot(line);
     give_slot(tline);
     must("keep the root's units", rv_invoke(OP_TIME_BIND, BOOT_CAP_TIME, BOOT_CAP_THREAD, 0, ROOT_UNITS));
-    print(&kout, "root: wifi system\n");
+    say(&kout, "root: wifi system\n");
 
     /* The blob, and frames that cover it, largest first from its start. */
     must("free RAM", rv_untyped_info(BOOT_CAP_FREE_RAM, &base, &size, &made));
     uint32_t free_base = base;
     struct blob_header h = blob_header(free_base);
     if (h.magic != BLOB_MAGIC || h.size > size) {
-        print(&kout, "root: no firmware blob at ");
-        print_hex(&kout, free_base);
-        print(&kout, "; load one with make BOARD=rp2350 wifi\n");
+        say(&kout, "root: no firmware blob at %x; load one with make BOARD=rp2350 wifi\n", free_base);
         halt(2);
     }
     free_add((struct block){ BOOT_CAP_FREE_RAM, base, size });
@@ -589,11 +542,7 @@ int main(void)
             at += block;
         }
     }
-    print(&kout, "root: blob of ");
-    print_dec(&kout, h.size);
-    print(&kout, " bytes in ");
-    print_dec(&kout, blob_frames);
-    print(&kout, " frames\n");
+    say(&kout, "root: blob of %u bytes in %u frames\n", h.size, blob_frames);
 
     driver_build(free_base);
 
@@ -611,19 +560,13 @@ int main(void)
             if (bits & ROOT_BIT_FAULT(i)) {
                 uint32_t cause, pc, addr, status;
                 rv_thread_fault(c->thread, &cause, &pc, &addr, &status);
-                print(&kout, i == CHILD_DRIVER ? "root: the driver faulted, cause " : "root: the network faulted, cause ");
-                print_hex(&kout, cause);
-                print(&kout, " at ");
-                print_hex(&kout, pc);
-                print(&kout, " address ");
-                print_hex(&kout, addr);
-                print(&kout, "\n");
+                say(&kout, "root: %s faulted, cause %x at %x, address %x\n", child_name[i], cause, pc, addr);
                 halt(3);
             }
             uint32_t state = c->page->state;
             if (state != c->told) {
                 c->told = state;
-                if (child_told(c, state)) {
+                if (child_state(c, state)) {
                     halt(0);
                 }
             }
@@ -633,10 +576,10 @@ int main(void)
             uint32_t state = children[CHILD_DRIVER].page->state;
             summary();
             if (state == DRV_JOINED || state == DRV_AP) {
-                print(&kout, "root: the run is over\n");
+                say(&kout, "root: the run is over\n");
                 halt(0);
             }
-            print(&kout, "root: out of time\n");
+            say(&kout, "root: out of time\n");
             halt(4);
         }
     }

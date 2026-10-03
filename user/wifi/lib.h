@@ -22,9 +22,12 @@ struct out {
     void *to;
 };
 
-void print(const struct out *o, const char *s);
-void print_hex(const struct out *o, uint32_t v);
-void print_dec(const struct out *o, uint32_t v);
+/*
+ * Text with values, as printf puts them, for the conversions the system needs:
+ * %s a string, %u and %d decimal, %x hexadecimal with 0x,
+ * %M the six bytes of a hardware address, %I an IPv4 address in network order.
+ */
+void say(const struct out *o, const char *fmt, ...);
 
 /*
  * A ring of text in memory a writer shares with a reader, as a child's page holds its log:

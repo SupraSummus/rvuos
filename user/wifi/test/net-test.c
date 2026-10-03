@@ -56,6 +56,7 @@ static void put_be16(uint8_t *p, uint32_t v)
     p[1] = (uint8_t)v;
 }
 
+/* The Internet checksum over len bytes, starting from sum; zero over bytes that hold their own checksum. */
 static uint16_t checksum(const uint8_t *p, uint32_t len, uint32_t sum)
 {
     for (; len > 1; len -= 2, p += 2) {
@@ -68,6 +69,13 @@ static uint16_t checksum(const uint8_t *p, uint32_t len, uint32_t sum)
         sum = (sum & 0xffff) + (sum >> 16);
     }
     return (uint16_t)~sum;
+}
+
+/* UDP's pseudo header, summed, for checksum's start. */
+static uint32_t pseudo_sum(uint32_t from, uint32_t to, uint32_t udp_len)
+{
+    const uint8_t *f = (const uint8_t *)&from, *t = (const uint8_t *)&to;
+    return be16(f) + be16(f + 2) + be16(t) + be16(t + 2) + 17u + udp_len;
 }
 
 static const uint8_t pico[6] = { 0x2c, 0xcf, 0x67, 0x01, 0x02, 0x03 };
@@ -103,17 +111,7 @@ static uint32_t udp_frame(uint8_t *f, const uint8_t *to_mac, uint32_t from, uint
     put_be16(u + 4, 8 + len);
     put_be16(u + 6, 0);
     memcpy(u + 8, data, len);
-    uint8_t pseudo[12];
-    memcpy(pseudo, &from, 4);
-    memcpy(pseudo + 4, &to, 4);
-    pseudo[8] = 0;
-    pseudo[9] = 17;
-    put_be16(pseudo + 10, 8 + len);
-    uint32_t sum = 0;
-    for (int i = 0; i < 12; i += 2) {
-        sum += be16(pseudo + i);
-    }
-    put_be16(u + 6, checksum(u, 8 + len, sum));
+    put_be16(u + 6, checksum(u, 8 + len, pseudo_sum(from, to, 8 + len)));
     return ip_frame(f, to_mac, from, to, 17, 8 + len);
 }
 
@@ -144,7 +142,6 @@ int main(void)
 {
     static struct net n;
     static uint8_t f[NET_FRAME_MAX];
-    char text[16];
     net_init(&n, pico, capture, 0);
     net_tick(&n, 1000);
 
@@ -167,7 +164,6 @@ int main(void)
     net_input(&n, f, dhcp_answer(f, discover, 5));
     CHECK(n.dhcp_state == DHCP_BOUND);
     CHECK(n.ip == net_ip(192, 168, 1, 50) && n.mask == net_ip(255, 255, 255, 0) && n.gateway == net_ip(192, 168, 1, 1));
-    CHECK(strcmp(net_ip_text(n.ip, text), "192.168.1.50") == 0);
     CHECK(n.lease == 3600);
 
     /* Who has .50? tell .1: the answer goes to the router with our address. */
@@ -215,19 +211,7 @@ int main(void)
     CHECK(got_len == 5 && memcmp(got, "hello", 5) == 0 && got_from_ip == peer && got_from_port == 40000);
     CHECK(net_udp_send(&n, peer, 40000, 7, (const uint8_t *)"hello back", 10) == 0);
     CHECK(sent_count == 1 && be16(sent[0] + 34) == 7 && be16(sent[0] + 36) == 40000);
-    {
-        uint8_t pseudo[12];
-        memcpy(pseudo, &me, 4);
-        memcpy(pseudo + 4, &peer, 4);
-        pseudo[8] = 0;
-        pseudo[9] = 17;
-        put_be16(pseudo + 10, 18);
-        uint32_t sum = 0;
-        for (int i = 0; i < 12; i += 2) {
-            sum += be16(pseudo + i);
-        }
-        CHECK(checksum(sent[0] + 34, 18, sum) == 0);
-    }
+    CHECK(checksum(sent[0] + 34, 18, pseudo_sum(me, peer, 18)) == 0);
 
     /* A corrupted datagram is dropped; one off the link goes to the gateway, whose address is known now. */
     got_len = 0;

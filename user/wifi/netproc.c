@@ -76,21 +76,10 @@ static void on_status(struct net *n, uint32_t from_ip, uint16_t from_port, const
     (void)data;
     (void)len;
     struct netp *p = (struct netp *)n;
-    struct line l;
-    l.len = 0;
-    const struct out o = { line_put, &l };
+    struct line l = { .len = 0 };
     p->page->datagrams++;
-    print(&o, "rvuos on a Pico 2 W: up ");
-    print_dec(&o, p->now / 1000u);
-    print(&o, " s, frames in ");
-    print_dec(&o, n->rx_frames);
-    print(&o, ", out ");
-    print_dec(&o, n->tx_frames);
-    print(&o, ", pings ");
-    print_dec(&o, n->pings);
-    print(&o, ", datagrams ");
-    print_dec(&o, p->page->datagrams);
-    print(&o, "\n");
+    say(&(const struct out){ line_put, &l }, "rvuos on a Pico 2 W: up %u s, frames in %u, out %u, pings %u, datagrams %u\n",
+        p->now / 1000u, n->rx_frames, n->tx_frames, n->pings, p->page->datagrams);
     net_udp_send(n, from_ip, from_port, NET_PORT_STATUS, (const uint8_t *)l.buf, l.len);
 }
 
@@ -111,7 +100,7 @@ __attribute__((noreturn)) void net_main(struct net_page *page)
     net_udp_bind(&p->net, NET_PORT_ECHO, on_echo);
     net_udp_bind(&p->net, NET_PORT_STATUS, on_status);
 
-    print(&p->out, "net: up\n");
+    say(&p->out, "net: up\n");
     report(p, NET_WAITING);
     uint32_t skipped;
     rv_timer_period(CHILD_TIMER, CHILD_BIT_TIMER, TICK_US, &skipped);
@@ -141,15 +130,10 @@ __attribute__((noreturn)) void net_main(struct net_page *page)
         page->pings = p->net.pings;
         if (!bound && p->net.dhcp_state == DHCP_BOUND) {
             bound = 1;
-            char text[16];
             page->ip = p->net.ip;
             page->mask = p->net.mask;
             page->gateway = p->net.gateway;
-            print(&p->out, "net: address ");
-            print(&p->out, net_ip_text(p->net.ip, text));
-            print(&p->out, ", gateway ");
-            print(&p->out, net_ip_text(p->net.gateway, text));
-            print(&p->out, "\n");
+            say(&p->out, "net: address %I, gateway %I\n", p->net.ip, p->net.gateway);
             report(p, NET_BOUND);
         } else if (bound && p->net.dhcp_state != DHCP_BOUND) {
             bound = 0;

@@ -26,7 +26,6 @@ struct drv {
     struct drv_page *page;
     struct out out;
     uint32_t link;     /* the link's base once the root task gave it, else 0 */
-    uint32_t pending;  /* bits that came while the driver slept */
     uint32_t window;   /* the blob frame installed in the window, or NO_FRAME */
     int scan_done;
     uint32_t results;
@@ -91,18 +90,15 @@ static void on_data(struct wlan *w, const uint8_t *frame, uint32_t len)
     }
 }
 
+/* Waits for the timer; other bits need no keeping, since what they announce lies in the page and the rings. */
 static void drv_sleep(struct cyw43 *chip, uint32_t us)
 {
-    struct drv *d = (struct drv *)chip;
+    (void)chip;
+    uint32_t bits = 0;
     rv_timer_set(CHILD_TIMER, CHILD_BIT_TIMER, us);
-    for (;;) {
-        uint32_t bits = 0;
+    while (!(bits & CHILD_BIT_TIMER)) {
         if (rv_wait(CHILD_INBOX, &bits) != KERR_OK) {
             rv_breakpoint();
-        }
-        d->pending |= bits & ~CHILD_BIT_TIMER;
-        if (bits & CHILD_BIT_TIMER) {
-            return;
         }
     }
 }
@@ -185,7 +181,7 @@ static __attribute__((noreturn)) void serve(struct drv *d)
     for (;;) {
         if (d->link == 0 && p->link_base != 0) {
             d->link = p->link_base;
-            print(&d->out, "drv: the link is up\n");
+            say(&d->out, "drv: the link is up\n");
         }
         uint32_t moved = wlan_poll(&d->wlan);
         uint32_t len;
@@ -217,6 +213,61 @@ static __attribute__((noreturn)) void stop(struct drv *d, uint32_t state)
     }
 }
 
+static __attribute__((noreturn)) void fail(struct drv *d, uint32_t step, uint32_t detail)
+{
+    d->chip.step = step;
+    d->chip.detail = detail;
+    stop(d, CHILD_FAILED);
+}
+
+/* Reads what the firmware sends until *done is set, or ms milliseconds have passed. */
+static void wait_for(struct drv *d, const int *done, uint32_t ms)
+{
+    for (uint32_t i = 0; !*done && i < ms; i++) {
+        if (wlan_poll(&d->wlan) == 0) {
+            drv_sleep(&d->chip, 1000);
+        }
+    }
+}
+
+/* Powers the chip, uploads the firmware and the NVRAM from the blob, and sets the firmware up with the CLM. */
+static void boot(struct drv *d)
+{
+    struct drv_page *s = d->page;
+    gspi_init(&d->chip.bus, s->pio_base, s->pins_base);
+    if (cyw43_bus_up(&d->chip) != 0 || cyw43_prepare(&d->chip) != 0) {
+        stop(d, CHILD_FAILED);
+    }
+    say(&d->out, "drv: chip 43439, loading firmware\n");
+
+    uint32_t left;
+    struct blob_header h = *(const struct blob_header *)blob_at(d, 0, &left);
+    if (h.magic != BLOB_MAGIC) {
+        fail(d, STEP_FW_VERIFY, h.magic);
+    }
+    /* The check reads back the first KiB and the last bytes, from a word: the chip aligns the address it is given. */
+    uint32_t tail = (h.fw_size - 256u) & ~3u;
+    if (upload(d, h.fw_offset, h.fw_size, 0, 0) != 0 || upload(d, h.fw_offset, 1024, 0, 1) != 0 ||
+        upload(d, h.fw_offset + tail, h.fw_size - tail, tail, 1) != 0) {
+        stop(d, CHILD_FAILED);
+    }
+    const uint8_t *nvram = blob_at(d, h.nvram_offset, &left);
+    if (nvram == 0 || left < ((h.nvram_size + 3u) & ~3u) || cyw43_start(&d->chip, nvram, h.nvram_size) != 0) {
+        stop(d, CHILD_FAILED);
+    }
+    say(&d->out, "drv: firmware runs, %u bytes\n", h.fw_size);
+
+    const uint8_t *clm = blob_at(d, h.clm_offset, &left);
+    if (clm == 0 || left < h.clm_size) {
+        fail(d, STEP_FW_VERIFY, h.clm_offset);
+    }
+    int32_t err = wlan_init(&d->wlan, clm, h.clm_size, s->mac);
+    if (err != 0) {
+        fail(d, STEP_WLAN_INIT, (uint32_t)err);
+    }
+    say(&d->out, "drv: up, mac %M\n", s->mac);
+}
+
 void driver_main(struct drv_page *s);
 __attribute__((noreturn)) void driver_main(struct drv_page *s)
 {
@@ -226,113 +277,37 @@ __attribute__((noreturn)) void driver_main(struct drv_page *s)
     d->window = NO_FRAME;
     d->chip.sleep = drv_sleep;
     d->out = (struct out){ drv_put, d };
-
-    print(&d->out, "drv: up\n");
-    gspi_init(&d->chip.bus, s->pio_base, s->pins_base);
-    if (cyw43_bus_up(&d->chip) != 0) {
-        stop(d, CHILD_FAILED);
-    }
-    print(&d->out, "drv: bus up\n");
-    if (cyw43_prepare(&d->chip) != 0) {
-        stop(d, CHILD_FAILED);
-    }
-    print(&d->out, "drv: chip 43439, loading firmware\n");
-
-    uint32_t left;
-    const struct blob_header *h = (const struct blob_header *)blob_at(d, 0, &left);
-    struct blob_header hdr = *h;
-    if (hdr.magic != BLOB_MAGIC) {
-        d->chip.step = STEP_FW_VERIFY;
-        d->chip.detail = hdr.magic;
-        stop(d, CHILD_FAILED);
-    }
-    /* The check reads back the first KiB and the last bytes, from a word: the chip aligns the address it is given. */
-    uint32_t tail = (hdr.fw_size - 256u) & ~3u;
-    if (upload(d, hdr.fw_offset, hdr.fw_size, 0, 0) != 0 ||
-        upload(d, hdr.fw_offset, 1024, 0, 1) != 0 ||
-        upload(d, hdr.fw_offset + tail, hdr.fw_size - tail, tail, 1) != 0) {
-        stop(d, CHILD_FAILED);
-    }
-    print(&d->out, "drv: firmware loaded, ");
-    print_dec(&d->out, hdr.fw_size);
-    print(&d->out, " bytes\n");
-
-    const uint8_t *nvram = blob_at(d, hdr.nvram_offset, &left);
-    if (nvram == 0 || left < ((hdr.nvram_size + 3u) & ~3u) || cyw43_start(&d->chip, nvram, hdr.nvram_size) != 0) {
-        stop(d, CHILD_FAILED);
-    }
-    print(&d->out, "drv: firmware runs\n");
-
     d->wlan.chip = &d->chip;
     d->wlan.on_event = on_event;
     d->wlan.on_data = on_data;
-    const uint8_t *clm = blob_at(d, hdr.clm_offset, &left);
-    if (clm == 0 || left < hdr.clm_size) {
-        stop(d, CHILD_FAILED);
-    }
-    int32_t err = wlan_init(&d->wlan, clm, hdr.clm_size, s->mac);
-    if (err != 0) {
-        d->chip.step = STEP_WLAN_INIT;
-        d->chip.detail = (uint32_t)err;
-        stop(d, CHILD_FAILED);
-    }
-    print(&d->out, "drv: up, mac ");
-    for (uint32_t i = 0; i < 6; i++) {
-        static const char hex[] = "0123456789abcdef";
-        char b[4] = { hex[s->mac[i] >> 4], hex[s->mac[i] & 15], i < 5 ? ':' : '\n', 0 };
-        print(&d->out, b);
-    }
-    report(d, DRV_UP);
 
-    if (s->mode == MODE_AP) {
+    boot(d);
+    report(d, DRV_UP);
+    int32_t err;
+    switch (s->mode) {
+    case MODE_AP:
         if ((err = wlan_start_ap(&d->wlan, s->ssid, s->pass, s->channel)) != 0) {
-            d->chip.step = STEP_AP;
-            d->chip.detail = (uint32_t)err;
-            stop(d, CHILD_FAILED);
+            fail(d, STEP_AP, (uint32_t)err);
         }
         report(d, DRV_AP);
         serve(d);
-    }
-
-    /* A station joins at once: a scan would take the run's seconds, and the firmware finds the network itself. */
-    if (s->mode == MODE_STA) {
-        goto join;
-    }
-    if ((err = wlan_scan(&d->wlan)) != 0) {
-        d->chip.step = STEP_SCAN;
-        d->chip.detail = (uint32_t)err;
-        stop(d, CHILD_FAILED);
-    }
-    for (uint32_t ms = 0; !d->scan_done && ms < 8000u; ms++) {
-        if (wlan_poll(&d->wlan) == 0) {
-            drv_sleep(&d->chip, 1000);
+    case MODE_STA:
+        /* At once: a scan first would take the run's seconds, and the firmware finds the network itself. */
+        if ((err = wlan_join(&d->wlan, s->ssid, s->pass)) != 0) {
+            fail(d, STEP_JOIN, (uint32_t)err);
         }
-    }
-    print(&d->out, d->scan_done ? "drv: scan done, " : "drv: scan timed out, ");
-    print_dec(&d->out, d->results);
-    print(&d->out, " results\n");
-    if (s->mode != MODE_STA) {
+        wait_for(d, &d->joined, 10000);
+        if (d->joined != 1) {
+            fail(d, STEP_JOIN, (uint32_t)d->joined);
+        }
+        report(d, DRV_JOINED);
+        serve(d);
+    default:
+        if ((err = wlan_scan(&d->wlan)) != 0) {
+            fail(d, STEP_SCAN, (uint32_t)err);
+        }
+        wait_for(d, &d->scan_done, 8000);
+        say(&d->out, "drv: scan %s, %u results\n", d->scan_done ? "done" : "timed out", d->results);
         stop(d, DRV_SCANNED);
     }
-    report(d, DRV_SCANNED);
-
-join:
-    print(&d->out, "drv: joining\n");
-    if ((err = wlan_join(&d->wlan, s->ssid, s->pass)) != 0) {
-        d->chip.step = STEP_JOIN;
-        d->chip.detail = (uint32_t)err;
-        stop(d, CHILD_FAILED);
-    }
-    for (uint32_t ms = 0; d->joined == 0 && ms < 10000u; ms++) {
-        if (wlan_poll(&d->wlan) == 0) {
-            drv_sleep(&d->chip, 1000);
-        }
-    }
-    if (d->joined != 1) {
-        d->chip.step = STEP_JOIN;
-        d->chip.detail = (uint32_t)d->joined;
-        stop(d, CHILD_FAILED);
-    }
-    report(d, DRV_JOINED);
-    serve(d);
 }

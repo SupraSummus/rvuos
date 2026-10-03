@@ -63,8 +63,7 @@ int net_udp_bind(struct net *n, uint16_t port, net_udp_fn fn);
 /* Sends a datagram; 0 if it went, -1 if the next hop's address is not known yet, an ARP request gone instead. */
 int net_udp_send(struct net *n, uint32_t to_ip, uint16_t to_port, uint16_t from_port, const uint8_t *data, uint32_t len);
 
-/* An address in network order from its four numbers, and back as text into buf, which needs 16 bytes. */
+/* An address in network order from its four numbers. */
 uint32_t net_ip(uint32_t a, uint32_t b, uint32_t c, uint32_t d);
-char *net_ip_text(uint32_t ip, char *buf);
 
 #endif

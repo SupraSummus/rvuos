@@ -12,24 +12,18 @@ so that the next decisions about the kernel and a library for programs can start
 
 ## What it took
 
-About 3,700 lines, of which the root task is the largest piece, 637 lines and 11.7 KiB of code.
-Little of the root task is about Wi-Fi: most of it builds processes, hands out memory and slots, and copies logs.
+About 3,400 lines of C, of which the root task is the largest piece, 586 lines and 9.6 KiB of code.
+Little of it is about Wi-Fi: most of it builds processes, hands out memory and slots, and copies logs.
 Building one child takes about 18 calls in `child_new` and 6 in `child_start`, besides halving memory,
 and the link between two children 8 more, with its conventions written down in `wifi.h`.
-
-The kernel needed two changes, and the tools three:
-`OP_DEBUG_FRAME` for the devices, and RP2350's pins and PIO opened to user mode;
-`tools/kimage.py` taking a Thumb instruction for a pointer;
-`tools/no-globals.py`, so that a child's global fails the link instead of the child;
-and `tools/rp2350-run.py --ram`, to put the firmware and the configuration beside the image.
+The kernel needed one operation, `OP_DEBUG_FRAME`, for the devices.
 
 ## What worked well
 
 **The isolation is real and cheap.**
 The driver holds PIO0's registers, 128 bytes of four pins' control, its own RAM and nothing else:
 no `Debug`, no console, no other pin.
-A 128-byte frame over sixteen pins' control registers is authority cut to the size of the job,
-which no other system on this chip gives a driver.
+A 128-byte frame over sixteen pins' control registers is authority cut to the size of the job.
 
 **PIO from user mode worked the first time,**
 and IO_BANK0's output overrides drove chip select and power without SIO, which a process cannot reach.
@@ -76,7 +70,7 @@ What costs is everything around it, and it is the same every time:
 - fences, which the programmer must remember, since two cores read the same memory.
 
 None of it is hard, and all of it is boilerplate that each program rewrites.
-`user/wifi/` grew its own: `child_new`, `child_give`, `child_map`, `child_start`, `ring.h`, `struct plog`.
+`user/wifi/` grew its own: `child_new`, `child_give`, `child_map`, `child_start`, `ring.h`, `struct plog`, `say`.
 That is a library waiting to be extracted, and most of the pain goes with it, with no change to the kernel.
 
 What a library cannot fix:
@@ -98,6 +92,8 @@ so the root task writes its `a0` with `OP_THREAD_WRITE_REG`, a debugger's operat
 which also makes the thread one that tracing cannot run.
 And no program may have initialised data, so `static uint32_t next = BOOT_CAP_COUNT;` fails to link,
 in the root task as well, which has a data region.
+There is no C library either: `lib.c` has the memory functions the compiler calls, on ARM its `__aeabi_` ones too,
+which a zeroed struct needs, and a small `say` in place of printf.
 
 ### Memory and slots by hand
 
@@ -149,8 +145,3 @@ In the kernel, by what they would save:
 5. **Badges**, open decision 6, once a server has clients that do not trust each other.
 6. **A run that lasts**: a watchdog the root task feeds through a frame, or the kernel through its tick,
    and a console that reaches the host while the system runs, which with the network up could be the network.
-
-## Left to decide
-
-- Whether the board writes the firmware to flash, which would let the driver reset the chip, and frees RAM for good.
-- How long a run on the board may last, and who feeds the watchdog.
