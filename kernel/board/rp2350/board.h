@@ -101,6 +101,9 @@
  */
 #define SYSTICK_PER_COUNT 150
 
+/* The Cortex-M33 wakes wfe when SysTick becomes pending, as when a line does; see intr_wait. */
+#define SYSTICK_WAKES_WFE 1
+
 /*
  * The devices the boot grants as frames from BOOT_CAP_DEVICES up, in this order,
  * devices a driver in user mode needs, none of them a bus master,

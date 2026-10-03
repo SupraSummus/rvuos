@@ -272,6 +272,8 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
  * Every exception has the priority the kernel runs at, so none is taken while it runs, and wfi would not wake:
  * wfe does, since SEVONPEND makes a line becoming pending an event, taken or not.
  * A core may also treat wfe as a no-op, which the loop tolerates.
+ * Where SysTick becoming pending is no event, as in QEMU's model of the MPS2 boards, wfe would sleep through the tick,
+ * so the loop polls on yield instead, a no-op on silicon, on which QEMU gives another core its turn.
  * The timer is set for the tick asked for and stays there however the stall ends,
  * until the trap's end sets it for the thread that runs.
  */
@@ -289,7 +291,11 @@ bool intr_wait(uint32_t wake, uint32_t *ticks)
         if (SCS_REG(ICSR) & ICSR_PENDSTSET) {
             counter_tick();
         }
+#if SYSTICK_WAKES_WFE
         __asm__ volatile("wfe");
+#else
+        __asm__ volatile("yield");
+#endif
     }
     core_stall_end();
     irq_sync();

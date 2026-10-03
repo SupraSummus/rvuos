@@ -56,6 +56,9 @@
 /* SysTick runs on the processor's clock, which is the system clock too; see kernel/arch/arm/systick.c. */
 #define SYSTICK_PER_COUNT 1
 
+/* QEMU's model wakes wfe when an external line becomes pending, but not when SysTick does; see intr_wait. */
+#define SYSTICK_WAKES_WFE 0
+
 /*
  * The devices the boot grants as frames from BOOT_CAP_DEVICES up: none.
  * The board's devices are the kernel's or the console.

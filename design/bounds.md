@@ -74,7 +74,8 @@ this is the only check of board code, which the host does not run.
 The shape is read from the source, so a loop the compiler unrolled is held to its bound too.
 A wait must wait on every way round, which the link checks too:
 a `wfi`, a load from a fixed address outside RAM, or a call to a function holding a `wfi`,
-and on ARM a `wfe` counts as a `wfi` does.
+and on ARM a `wfe` counts as a `wfi` does,
+and so does a `yield`, on which a board whose SysTick wakes no `wfe` polls.
 A wait on another core must read with an acquire on every way round,
 a `fence` after a load or an `lr` or `amo`, or on ARM a `dmb` or one of ARMv8-M's loads with acquire, `lda` or `ldaex`,
 which is how it reads what the other core writes;

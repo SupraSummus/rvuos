@@ -35,7 +35,8 @@ _LDM = re.compile(rf"ldm(?:ia|fd|db|ea)?({COND})?")
 _LDR = re.compile(rf"ldr({COND})?")
 _MOV = re.compile(rf"movs?({COND})?")
 LOAD = re.compile(rf"ldr(?:b|h|sb|sh|d|ex|exb|exh|t|bt|ht)?({COND})?(?:\.[wn])?$")
-WAITS = ("wfi", "wfe")
+# A board whose SysTick wakes no wfe polls on yield; see intr_wait in kernel/arch/arm/trap.c.
+WAITS = ("wfi", "wfe", "yield")
 
 # Instructions that write no register named first; everything else writes its first operand.
 NO_DEST = re.compile(rf"(?:str\w*|stm\w*|push|cmp|cmn|tst|teq|b|bl|blx|bx|cbz|cbnz|tbb|tbh|it[te]*|"

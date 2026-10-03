@@ -60,6 +60,9 @@
 /* SysTick runs on the processor's clock, which is the system clock too; see kernel/arch/arm/systick.c. */
 #define SYSTICK_PER_COUNT 1
 
+/* QEMU's model wakes wfe when an external line becomes pending, but not when SysTick does; see intr_wait. */
+#define SYSTICK_WAKES_WFE 0
+
 /*
  * The cores, for a kernel built for both, see board.c:
  * the SSE-200's CPU_IDENTITY, whose first word reads each core's own number,

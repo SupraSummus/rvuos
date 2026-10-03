@@ -192,6 +192,10 @@ The clock's counter is the FPGA's `COUNTER`, 32 bits at 25 MHz with the prescale
 so it wraps every 171 seconds;
 the kernel counts the wraps for its tick and for `OP_CLOCK_READ`, see `kernel/board/mps2/timer.c`.
 Measured under QEMU 8.2: eight MPU regions and a bkpt taken as a HardFault, DebugMonitor or not.
+QEMU 8.2's `wfe` only yields to another core; from QEMU 11.0 it sleeps until an event,
+and only an external line becoming pending is one there, not SysTick, as it is on RP2350's Cortex-M33.
+So the MPS2 boards set `SYSTICK_WAKES_WFE` to 0, and the kernel's idle wait polls on `yield` there,
+as it did on QEMU 8.2; see `intr_wait` in `kernel/arch/arm/trap.c`.
 
 **mps2-an521** is QEMU's model of the same board with the AN521 image,
 an SSE-200 with two Cortex-M33s, and ARM's development target of ARMv8-M:
