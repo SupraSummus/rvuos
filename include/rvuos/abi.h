@@ -128,17 +128,6 @@
  * since under tracing the tick stops no call; see DESIGN.md, "Verification".
  */
 #define OP_DEBUG_PREEMPT 32
-/*
- * Debug: a frame over hardware the board lists, such as a device's registers no boot capability grants.
- * a1 = base, a2 = size, a3 = destination slot.
- * The range must be a block, as for OP_FRAME_CARVE, within one of the board's ranges,
- * else KERR_INVALID_ARG; it gets that range's rights, and hangs below the invoked capability.
- * QEMU's board lists none.
- * A device may be a bus master, so a Debug capability that makes frames reaches whatever the board lists:
- * it is the machine's, and a program that does not own the machine is not given it.
- * See DESIGN.md, "Boards".
- */
-#define OP_DEBUG_FRAME 36
 
 /*
  * CapTable (RIGHT_W): copy a capability from the caller's table.
@@ -466,7 +455,7 @@
 #define OP_TIME_BIND 29
 
 /* One above the highest operation code; the fuzzer's mutator draws below it. */
-#define OP_COUNT 37
+#define OP_COUNT 36
 
 /*
  * Capability slots the kernel fills in the root task's table at boot.
@@ -500,7 +489,14 @@
  * which the root task, living there, cannot do.
  */
 #define BOOT_CAP_POOL_RAM  17
-#define BOOT_CAP_COUNT     18
+/*
+ * Frames over the devices the board lists, BOOT_DEVICES of them, from this slot up in the board's order;
+ * QEMU's lists none.
+ * BOOT_DEVICES comes from the kernel's board.h, or a program's devices.h, which names each slot.
+ */
+#define BOOT_CAP_DEVICES   18
+/* The root task's own slots start here; on QEMU it is 18. */
+#define BOOT_CAP_COUNT     (BOOT_CAP_DEVICES + BOOT_DEVICES)
 
 /*
  * The kernel's log.
@@ -560,7 +556,7 @@ struct replay_record {
 
 /* Fixed limits visible to user programs. */
 #define PROCESS_REGION_SLOTS 8
-#define ROOT_TABLE_SLOTS 64 /* slots in the root task's table */
+#define ROOT_TABLE_SLOTS (BOOT_CAP_COUNT + 46) /* slots in the root task's table, 64 on QEMU */
 #define POOL_MIN_SIZE 64 /* the smallest Untyped OP_UNTYPED_RETYPE makes a pool of */
 #define TIMER_LINES 16 /* on the whole machine; see BOOT_CAP_TIMER_LINES */
 #define TIME_UNITS 64 /* of each core, numbered core by core; see BOOT_CAP_TIME */

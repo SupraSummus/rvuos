@@ -57,11 +57,11 @@
 #define COUNTER_HZ   U32(10000000)
 
 /*
- * What OP_DEBUG_FRAME hands out: nothing.
- * QEMU's devices are the kernel's or granted at boot, and the host build, which shares this board, has no hardware.
+ * The devices the boot grants as frames from BOOT_CAP_DEVICES up: none.
+ * QEMU's devices are the kernel's or the console, and the host build, which shares this board, has no hardware.
  */
-#define DEBUG_RANGES 0
-#define DEBUG_RANGE_LIST
+#define BOOT_DEVICES 0
+#define DEVICE_RANGE_LIST
 
 /*
  * Interrupt line identifiers lie below IRQ_LINES; see irq.h.

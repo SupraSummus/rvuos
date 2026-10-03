@@ -3,12 +3,14 @@
 
 /*
  * User-side wrappers for capability invocation.
- * The ABI is in rvuos/abi.h.
+ * The ABI is in rvuos/abi.h,
+ * and the board's devices.h says how many device frames the boot grants, which BOOT_CAP_COUNT counts.
  */
 
 #include <stdint.h>
 
 #include "call.h"
+#include "devices.h"
 #include "rvuos/abi.h"
 
 static inline uint32_t rv_invoke(uint32_t op, uint32_t cap,

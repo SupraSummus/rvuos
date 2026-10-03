@@ -103,16 +103,18 @@
 #define SYSTICK_PER_COUNT 150
 
 /*
- * What OP_DEBUG_FRAME hands out: devices a driver in user mode needs, none of them a bus master,
+ * The devices the boot grants as frames from BOOT_CAP_DEVICES up, in this order,
+ * devices a driver in user mode needs, none of them a bus master,
  * each 16 KiB, its registers and their atomic aliases, read and write.
- * IO_BANK0 and PADS_BANK0, the pins' functions and pads, and the three PIO blocks.
+ * IO_BANK0 and PADS_BANK0, the pins' functions and pads, and the three PIO blocks;
+ * user/board/rp2350/devices.h names their slots.
  * board.c takes them out of reset and opens them to user mode in ACCESSCTRL,
  * and on Hazard3 opens every pin to Non-secure access, which is how user mode reaches the bus there.
  * The DMA, which reaches all of memory, and the devices the kernel keeps lie in none.
  * A device whose clock the kernel does not start, as the ADC's, never leaves reset, so it is not listed.
  */
-#define DEBUG_RANGES 5
-#define DEBUG_RANGE_LIST                                        \
+#define BOOT_DEVICES 5
+#define DEVICE_RANGE_LIST                                       \
     { U32(0x40028000), U32(0x00004000), RIGHT_R | RIGHT_W },    \
     { U32(0x40038000), U32(0x00004000), RIGHT_R | RIGHT_W },    \
     { U32(0x50200000), U32(0x00004000), RIGHT_R | RIGHT_W },    \

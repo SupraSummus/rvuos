@@ -20,10 +20,10 @@ The kernel:
    with its code, data and input frames and the boot pool below it,
    an `Untyped` for the block of RAM the board sets aside for it,
    frames for the UART's registers,
-   to the kernel's log,
-   to the machine's counter as a `Clock`,
-   and to every line of the interrupt controller with the log's line before them
-   (later also flash and other device ranges),
+   to the kernel's log
+   and to each device the board lists (later also to flash),
+   the machine's counter as a `Clock`,
+   every line of the interrupt controller with the log's line before them,
    and every unit of the processor's time, with its own thread earning them all,
 6. programs the tick, masks every interrupt line,
    starts the other cores, which idle until a thread is bound to their units, see "Cores",
@@ -43,6 +43,9 @@ so a board lays RAM out in blocks and what lies in none of them stays unused.
 The slots the root task finds filled are listed in `include/rvuos/abi.h`
 as the `BOOT_CAP_*` constants.
 Slot zero is left empty so that an uninitialised index fails.
+The devices' frames come last, from `BOOT_CAP_DEVICES` up, as many as the board lists, `BOOT_DEVICES`,
+so `BOOT_CAP_COUNT`, where the root task's own slots start, is the board's,
+and its table, `ROOT_TABLE_SLOTS`, has 46 slots past them on every board.
 
 Everything after that is policy set by the root task.
 The kernel does not know what a driver, a file system,
@@ -100,21 +103,23 @@ and the finest grain it may have, `PMP_GRAIN_MIN`;
 `timer.c`, which starts the timer, and on ARM has the counter the tick compares with;
 `irq.c`, but on ARM, where the NVIC is the architecture's, and `halt.c`;
 `console.h`, the device behind `BOOT_CAP_UART` as the root task drives it;
+`devices.h`, the slots of the devices the boot grants, as many as `board.h` lists;
 and `csrs.h`, the user-mode CSRs the demo checks the kernel sets back.
 Nothing else in the kernel names an address.
 
-**Debug frames.**
-A board lists, in `DEBUG_RANGE_LIST`, hardware that no boot capability grants,
-and `OP_DEBUG_FRAME` makes a frame of a block within one of its ranges, below the `Debug` capability,
-with that range's rights.
-The kernel keeps the ranges after the boot's grants, so they are checked as those are.
+**Devices.**
+A board lists, in `DEVICE_RANGE_LIST`, the devices a driver in user mode may have beyond the console,
+each a block with its rights, and the boot grants each as a frame, from `BOOT_CAP_DEVICES` up in the list's order,
+which the root task carves and lends as it does RAM; `DESIGN.md`, open decision 25.
+The kernel keeps the ranges after the boot's other grants, so what is made of them is checked as the rest is.
+A program's `devices.h` says how many there are and names their slots, in the order of the kernel's `board.h`,
+and the two must agree.
 RP2350 lists the pins' functions and pads and the three PIO blocks, which the Wi-Fi system of `user/wifi/` drives;
-QEMU lists none, since its devices are the kernel's or granted at boot, and the host build has no hardware;
+QEMU lists none, since its devices are the kernel's or the console, and the host build has no hardware;
 nor do the other boards yet.
-A device may be a bus master, so a `Debug` capability that makes frames reaches whatever the board lists:
-it is the machine's, and a driver is given the frame, not the capability.
-The boot table has no slot for devices, and one would move every slot the seeds and the corpus name,
-so frames come through the capability the root task holds anyway; `DESIGN.md`, open decision 25.
+So on QEMU `BOOT_CAP_COUNT` is 18, the number the seeds and the corpus are written for.
+A device that is a bus master reaches whatever its driver points it at, so a board lists none:
+its frame would be the machine's; open decision 13.
 
 **QEMU `virt`** is the development target and the one `make check` runs.
 QEMU loads the image and enters it in machine mode.
@@ -235,7 +240,7 @@ so the kernel fences them off, see "Physical Memory Protection",
 and a process reaches a peripheral only through a frame,
 and only where ACCESSCTRL lets user mode in too, which at reset it does for few.
 TIMER0 is opened, for the clock; `escape-store-clock` stores to it through no frame, and faults.
-So are the devices of `DEBUG_RANGE_LIST`, which the boot also takes out of reset,
+So are the devices of `DEVICE_RANGE_LIST`, which the boot also takes out of reset,
 and on Hazard3, whose user mode is Non-secure on the bus, every pin is opened to Non-secure access,
 without which IO_BANK0 and PADS_BANK0 show user mode none.
 A device whose clock the kernel leaves off never leaves reset, and the boot waited for the ADC's for ever,

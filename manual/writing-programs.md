@@ -164,7 +164,7 @@ and a notification bit each way says a ring that was empty has a frame, or one t
 The driver's process holds no `Debug` capability, which would let it halt the machine:
 it prints into a ring in the page it shares with the root task, and the root task copies the ring to the console.
 It reaches the chip through frames over PIO0's registers and over the control registers of four pins,
-which the root task makes with `OP_DEBUG_FRAME`, section 6.3,
+which the root task carves from the frames it is granted over PIO0 and IO_BANK0, section 3,
 and it installs the frames that hold the chip's firmware one at a time in a region of its own, since there are more of them than regions.
 Every process runs code from the one image, so a process other than the root task keeps no global:
 its state lies at the base of its data frame, whose address it is started with in `a0`, written with `OP_THREAD_WRITE_REG`,

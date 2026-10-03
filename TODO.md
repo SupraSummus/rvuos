@@ -31,7 +31,7 @@ and a laptop's ping and datagrams to UDP ports 7 and 7777 are answered;
 - A thread starts with no argument, so a creator writes `a0` with `OP_THREAD_WRITE_REG`,
   which makes the thread one tracing cannot run; `OP_THREAD_CONFIGURE` could take it.
 - No program may have initialised data; `start.S` could copy `.data` from the code region.
-- A child that only prints needs `Debug`, which halts the machine and makes frames over devices,
+- A child that only prints needs `Debug`, which halts the machine,
   or a log of its parent's; a capability that only prints would do.
 
 ## ESP32-C6
@@ -251,6 +251,10 @@ and a laptop's ping and datagrams to UDP ports 7 and 7777 are answered;
 - Once a record binds a driver thread to units, and so to time the others do not have,
   passing a record round may come back before it visited every runnable thread,
   and a record for a thread that could run is performed by another.
+- No harness reaches a device's frame from the boot: QEMU and the host list no devices,
+  and only RP2350's Wi-Fi system carves one.
+  Listing one on QEMU, its RTC say, would let the fuzzer carve and install it,
+  at the price of renumbering the seeds and the corpus and a frame more in the mutator's boot table.
 - The seeds under `tests/seeds` are binary and were written by hand.
   Renumbering a `BOOT_CAP_*` or `REPLAY_CAP_*` slot takes a one-off script
   that knows which argument of which operation is a slot,

@@ -69,12 +69,9 @@
  */
 #define COUNTER_ADDR U32(0x20001c08)
 
-/*
- * What OP_DEBUG_FRAME hands out: nothing.
- * The board lists no hardware yet.
- */
-#define DEBUG_RANGES 0
-#define DEBUG_RANGE_LIST
+/* The devices the boot grants as frames from BOOT_CAP_DEVICES up: none yet. */
+#define BOOT_DEVICES 0
+#define DEVICE_RANGE_LIST
 
 /*
  * Interrupt line identifiers lie below IRQ_LINES; see irq.h.

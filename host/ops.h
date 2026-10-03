@@ -103,12 +103,11 @@ static const struct op_info op_table[OP_COUNT] = {
     OP(OP_THREAD_FAULT, CAP_THREAD, 0, ARG_NONE, ARG_NONE, ARG_NONE),
     OP(OP_THREAD_READ_REG, CAP_THREAD, 0, ARG_OFFSET, ARG_NONE, ARG_NONE),
     OP(OP_THREAD_WRITE_REG, CAP_THREAD, 0, ARG_OFFSET, ARG_WORD, ARG_NONE),
-    OP(OP_DEBUG_FRAME, CAP_DEBUG, CAP_FRAME, ARG_WORD, ARG_SIZE, ARG_DST),
 };
 
 #undef OP
 
-_Static_assert(OP_COUNT == 37 && OP_DEBUG_FRAME == OP_COUNT - 1, "a new operation needs an entry in op_table");
+_Static_assert(OP_COUNT == 36 && OP_THREAD_WRITE_REG == OP_COUNT - 1, "a new operation needs an entry in op_table");
 
 /* The loads and stores the driver makes itself, which invoke no capability. */
 static const struct op_info op_access[2] = {

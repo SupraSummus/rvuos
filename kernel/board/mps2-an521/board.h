@@ -72,11 +72,11 @@
 #define IPI_LINE     6
 
 /*
- * What OP_DEBUG_FRAME hands out: nothing.
- * The board's devices are the kernel's or granted at boot.
+ * The devices the boot grants as frames from BOOT_CAP_DEVICES up: none.
+ * The board's devices are the kernel's or the console.
  */
-#define DEBUG_RANGES 0
-#define DEBUG_RANGE_LIST
+#define BOOT_DEVICES 0
+#define DEVICE_RANGE_LIST
 
 /*
  * Interrupt line identifiers lie below IRQ_LINES; see irq.h.

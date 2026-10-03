@@ -46,10 +46,10 @@ struct thread *boot_create_root(void)
     uint32_t counter_size = region_min_size();
     boot_granted[GRANT_COUNTER] =
         (struct granted_range){ COUNTER_ADDR & ~(counter_size - 1), counter_size, RIGHT_R };
-    /* What the board lists for OP_DEBUG_FRAME, which no boot capability holds; the array is never empty. */
-    static const struct granted_range debug_ranges[DEBUG_RANGES + 1] = { DEBUG_RANGE_LIST };
-    for (unsigned i = GRANT_DEBUG; i < GRANTED_RANGES; i++) {
-        boot_granted[i] = debug_ranges[i - GRANT_DEBUG];
+    /* The board's devices, each a frame from BOOT_CAP_DEVICES up; the array is never empty. */
+    static const struct granted_range devices[BOOT_DEVICES + 1] = { DEVICE_RANGE_LIST };
+    for (unsigned i = GRANT_DEVICES; i < GRANTED_RANGES; i++) {
+        boot_granted[i] = devices[i - GRANT_DEVICES];
     }
 
     /* The grants become frames and the Untypeds as they are, and every one of those is a NAPOT block. */
@@ -109,6 +109,10 @@ struct thread *boot_create_root(void)
         [BOOT_CAP_CLOCK] = { .type = CAP_CLOCK, .rights = RIGHT_ALL },
         [BOOT_CAP_TIME] = cap_to_time(0, MACHINE_UNITS, RIGHT_W | RIGHT_X),
     };
+    for (unsigned i = BOOT_CAP_DEVICES; i < BOOT_CAP_COUNT; i++) {
+        const struct granted_range *g = &boot_granted[GRANT_DEVICES + i - BOOT_CAP_DEVICES];
+        boot[i] = cap_to_frame(g->base, g->size, g->rights);
+    }
     for (unsigned i = BOOT_CAP_NULL + 1; i < BOOT_CAP_COUNT; i++) {
         if (i == BOOT_CAP_ROOT_RAM || i == BOOT_CAP_POOL_RAM) {
             continue;

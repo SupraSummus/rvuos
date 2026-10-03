@@ -32,12 +32,10 @@ enum {
 /* How long the run lasts before the root task halts; the watchdog reboots the chip at about 17 s. */
 #define RUN_US 14000000u
 
-/* The devices the driver needs, through OP_DEBUG_FRAME; see the board's DEBUG_RANGE_LIST. */
-#define PIO0_BASE       0x50200000u
+/* The blocks of the devices the driver needs, carved from the boot's frames; see devices.h. */
 #define PIO0_SIZE       0x1000u
-#define IO_BANK0_HIGH   0x40028080u /* GPIO16 to GPIO31's status and control */
+#define IO_BANK0_HIGH   (IO_BANK0_BASE + 0x80u) /* GPIO16 to GPIO31's status and control */
 #define IO_BANK0_HIGH_SIZE 0x80u
-#define PADS_BANK0_BASE 0x40038000u
 #define PADS_BANK0_SIZE 0x1000u
 
 #define PAD(n)       (4u + 4u * (n))
@@ -124,7 +122,7 @@ static void must(const char *what, uint32_t status)
 }
 
 /*
- * The table has 64 slots, ROOT_TABLE_SLOTS, and halving memory takes two at each step,
+ * The table has ROOT_TABLE_SLOTS slots, and halving memory takes two at each step,
  * so slots come back: those a call consumed or a revoke emptied, and those deleted.
  */
 static uint32_t spare_slots[24], spare_count;
@@ -134,7 +132,7 @@ static uint32_t new_slot(void)
     if (spare_count > 0) {
         return spare_slots[--spare_count];
     }
-    if (BOOT_CAP_COUNT + slots_used >= 64u) {
+    if (BOOT_CAP_COUNT + slots_used >= ROOT_TABLE_SLOTS) {
         must("a free slot", KERR_LIMIT);
     }
     return BOOT_CAP_COUNT + slots_used++;
@@ -218,10 +216,11 @@ static uint32_t frame_of(uint32_t untyped)
     return frame;
 }
 
-static uint32_t device(uint32_t base, uint32_t size)
+/* A block of a device's registers, carved from the frame the boot grants over the device. */
+static uint32_t device(uint32_t granted, uint32_t offset, uint32_t size)
 {
     uint32_t frame = new_slot();
-    must("a device's frame", rv_invoke(OP_DEBUG_FRAME, BOOT_CAP_DEBUG, base, size, frame));
+    must("a device's frame", rv_invoke(OP_FRAME_CARVE, granted, offset, size, frame));
     return frame;
 }
 
@@ -303,7 +302,7 @@ static void child_start(struct child *c, void (*entry)(void *), uint32_t first_u
 /* The pads of the Wi-Fi chip's pins: inputs enabled, isolation off, the bus's two lines fast and strong. */
 static void pads_set(void)
 {
-    uint32_t pads = device(PADS_BANK0_BASE, PADS_BANK0_SIZE);
+    uint32_t pads = device(BOOT_CAP_PADS_BANK0, 0, PADS_BANK0_SIZE);
     peek(pads, RIGHT_R | RIGHT_W);
     REG32(PADS_BANK0_BASE + PAD(23)) = PAD_IE | PAD_DRIVE_4MA | PAD_SCHMITT;
     REG32(PADS_BANK0_BASE + PAD(25)) = PAD_IE | PAD_DRIVE_4MA | PAD_SCHMITT;
@@ -397,8 +396,9 @@ static void driver_build(uint32_t free_base)
     struct child *c = &children[CHILD_DRIVER];
     child_new(c, CHILD_DRIVER, DRV_SLOTS, DRV_DATA_SIZE);
     struct drv_page *p = (struct drv_page *)c->page;
-    child_map(c, DRV_REGION_PIO, device(PIO0_BASE, PIO0_SIZE), RIGHT_R | RIGHT_W);
-    child_map(c, DRV_REGION_PINS, device(IO_BANK0_HIGH, IO_BANK0_HIGH_SIZE), RIGHT_R | RIGHT_W);
+    child_map(c, DRV_REGION_PIO, device(BOOT_CAP_PIO0, 0, PIO0_SIZE), RIGHT_R | RIGHT_W);
+    child_map(c, DRV_REGION_PINS, device(BOOT_CAP_IO_BANK0, IO_BANK0_HIGH - IO_BANK0_BASE, IO_BANK0_HIGH_SIZE),
+              RIGHT_R | RIGHT_W);
     pads_set();
     for (uint32_t i = 0; i < blob_frames; i++) {
         blob_frame[i] = frame_of(blob_untyped[i]);

@@ -47,8 +47,8 @@
 #define RESET_PLL_SYS     (1u << 14)
 #define RESET_PLL_USB     (1u << 15)
 #define RESET_TIMER0      (1u << 23)
-/* The devices of board.h's DEBUG_RANGE_LIST. */
-#define RESET_DEBUG_RANGES (RESET_IO_BANK0 | RESET_PADS_BANK0 | RESET_PIO0 | RESET_PIO1 | RESET_PIO2)
+/* The devices of board.h's DEVICE_RANGE_LIST. */
+#define RESET_DEVICE_RANGES (RESET_IO_BANK0 | RESET_PADS_BANK0 | RESET_PIO0 | RESET_PIO1 | RESET_PIO2)
 
 #define XOSC_CTRL     0x40048000u
 #define XOSC_STATUS   0x40048004u
@@ -208,11 +208,11 @@ void board_init(void)
     open_to_user(ACCESSCTRL_TIMER0);
 
     /*
-     * The devices OP_DEBUG_FRAME hands out, see board.h, out of reset and open to user mode.
+     * The devices the root task is granted, see board.h, out of reset and open to user mode.
      * Hazard3's user mode is Non-secure on the bus, and IO_BANK0 and PADS_BANK0 show it only the pins
      * the masks let it reach, which are all of them; the kernel drives none.
      */
-    unreset(RESET_DEBUG_RANGES);
+    unreset(RESET_DEVICE_RANGES);
     open_to_user(ACCESSCTRL_IO_BANK0);
     open_to_user(ACCESSCTRL_PADS_BANK0);
     open_to_user(ACCESSCTRL_PIO0);

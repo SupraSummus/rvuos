@@ -119,16 +119,6 @@ a call that finishes first leaves the rest of n to the next one.
 Zero disarms it, and a second call counts n anew.
 Works while tracing is on, when the tick stops no call.
 
-**`OP_DEBUG_FRAME` (36).**
-`a1` = base, `a2` = size, `a3` = destination slot in the caller's table.
-Makes a frame over hardware the board lists, such as a device's registers, which no boot capability grants;
-section 3 says what each board lists, and QEMU's lists nothing.
-The range must be a block, as for `OP_FRAME_CARVE`, within one of the board's ranges (`KERR_INVALID_ARG`),
-and gets that range's rights.
-The new frame hangs below the invoked capability.
-A device may be a bus master, so a `Debug` capability reaches whatever its board lists:
-give it only to a program that owns the machine, and give a driver the frame, not the capability.
-
 ### 6.4 Operations on `CapTable`
 
 All need `RIGHT_W` on the table.
@@ -457,9 +447,8 @@ only a wait, the tick, a fault, section 5.6, or a revoke that takes its own proc
 | 33 | `OP_THREAD_FAULT` | `Thread` |
 | 34 | `OP_THREAD_READ_REG` | `Thread` |
 | 35 | `OP_THREAD_WRITE_REG` | `Thread` |
-| 36 | `OP_DEBUG_FRAME` | `Debug` |
 
-`OP_COUNT` is 37, one above the highest code; 16 is unused.
+`OP_COUNT` is 36, one above the highest code; 16 is unused.
 
 ## 7. What the root task starts with
 
@@ -472,7 +461,7 @@ and drops into user mode with:
 - the stack pointer at the top of the data region, `0x80120000` on QEMU,
 - region slot 0: the code region, read and execute,
 - region slot 1: the data region, read and write,
-- a capability table of `ROOT_TABLE_SLOTS`, 64, filled as below.
+- a capability table of `ROOT_TABLE_SLOTS`, 46 past `BOOT_CAP_COUNT` on every board and so 64 on QEMU, filled as below.
 
 | Slot | Constant | Capability | Rights |
 |---|---|---|---|
@@ -494,11 +483,14 @@ and drops into user mode with:
 | 15 | `BOOT_CAP_TIME` | `Time`: every unit of time, `TIME_UNITS` of each core, the first core's all earned by the root task's thread | write, execute |
 | 16 | `BOOT_CAP_ROOT_RAM` | `Untyped`: the root task's own memory, its code, data and input frames and the boot pool's block, all made already | all |
 | 17 | `BOOT_CAP_POOL_RAM` | `Untyped`: the boot pool's block, below `BOOT_CAP_ROOT_RAM`, made into the boot pool | all |
+| 18 on | `BOOT_CAP_DEVICES` | `Frame`s: one over each device the board lists, in its order, none on QEMU; section 3 | each the board's, read and write on RP2350 |
 
-`BOOT_CAP_COUNT` is 18; a root task puts its own slots from there upwards.
+`BOOT_CAP_COUNT` is 18 plus `BOOT_DEVICES`, the count in the board's `devices.h`, which `rvuos.h` includes:
+18 on QEMU, the ESP32-C6 and the MPS2 boards, and 23 on RP2350.
+A root task puts its own slots from there upwards.
 
 The root task's own table, process and thread take about 2.1 KiB of the boot pool,
-so roughly 1.9 KiB remain for objects the root task allocates from `BOOT_CAP_POOL`.
+so roughly 1.9 KiB remain for objects the root task allocates from `BOOT_CAP_POOL`, a little less on RP2350.
 Anything larger goes into a pool the root task makes out of free RAM.
 The capabilities to the boot pool, its table, process and thread
 hang below the boot pool's own node, not below `BOOT_CAP_POOL`,

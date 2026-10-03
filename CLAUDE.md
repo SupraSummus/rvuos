@@ -50,7 +50,7 @@ a change to `user/wifi/` with a Pico 2 W connected runs `make BOARD=rp2350 wifi`
 and `WIFI_CONFIG` names a network to join from a file outside the tree, never in it.
 A new kernel global needs a reset in `host_boot` too,
 since the host boots once per input in one process.
-A new `BOOT_CAP_*` or `REPLAY_CAP_*` slot, or an operation whose arguments change,
+A new `BOOT_CAP_*` or `REPLAY_CAP_*` slot, a device QEMU's board lists, or an operation whose arguments change,
 changes what the seeds and the corpus mean,
 so they have to be rewritten with it; see `TODO.md`.
 When the kernel's object model changes,

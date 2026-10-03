@@ -347,12 +347,13 @@ until the maintainer decides otherwise.
       a queue of spare time for the whole machine would let any idle core take it, at the price of a thread moving with every turn.
     Decide each with the first board or workload that needs it.
 25. **Devices for drivers.**
-    Working default: the root task makes a frame over a device with `OP_DEBUG_FRAME`, within the ranges its board lists,
-    and lends the driver the frame; see "Boards".
-    It needs no boot slot, and a new one would move every slot the seeds and the corpus name,
-    but it gives devices through the capability that halts the machine,
-    so whoever hands frames out holds all of the machine's authority, as the root task does anyway.
-    The alternatives: a boot slot with a `Frame` over each device range, as `BOOT_CAP_UART` is one,
-    which the root task carves as it does RAM; or a range of slots the board fills, as seL4's device untypeds are,
-    which needs the boot table's length to be the board's.
-    Decide before a root task hands its place to a successor that should not halt the machine.
+    Decided: the boot grants a `Frame` over each device the board lists, from `BOOT_CAP_DEVICES` up,
+    which the root task carves and lends as it does RAM; see "Boards".
+    So `BOOT_CAP_COUNT` is the board's, and the root task's table grows with it,
+    leaving 46 slots of its own on every board.
+    Before, `OP_DEBUG_FRAME` made such frames through the `Debug` capability,
+    so whoever handed devices out could halt the machine too.
+    It kept the boot table the same on every board for the seeds and the corpus,
+    but QEMU lists no devices, so theirs stays the same anyway.
+    Rights on `Debug` that split its frames from its halt would have left one capability reaching every listed device,
+    where a frame per device lends each on its own.

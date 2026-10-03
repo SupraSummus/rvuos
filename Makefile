@@ -472,5 +472,6 @@ check: contents test escape host-test wifi-test qemu-replay arm-test smp-test
 clean:
 	rm -rf $(BUILD)
 
--include $(KERNEL_OBJ:.o=.d) $(patsubst %,$(BUILD)/user/%.d,$(USER_PROGRAMS)) \
+-include $(KERNEL_OBJ:.o=.d) $(patsubst %,$(BUILD)/user/%.d,$(USER_PROGRAMS) $(ESCAPE_PROGRAMS)) \
+         $(WIFI_ROOT_OBJ:.o=.d) $(WIFI_CHILD_OBJ:.o=.d) \
          $(BUILD)/kernel/kernel.d $(BUILD)/user/user.d $(HOST_OBJ:.o=.d)

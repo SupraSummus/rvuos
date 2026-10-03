@@ -30,7 +30,7 @@ static bool holds_caller(struct thread *t, const struct captable *named, uint32_
            range_contains(base, size, thread_table(t)->hdr.pool) || range_contains(base, size, named->hdr.pool);
 }
 
-static int op_debug(struct thread *t, uint32_t slot, uint32_t op, const uint32_t *arg)
+static int op_debug(uint32_t op, const uint32_t *arg)
 {
     switch (op) {
     case OP_DEBUG_PUTC:
@@ -64,18 +64,6 @@ static int op_debug(struct thread *t, uint32_t slot, uint32_t op, const uint32_t
     case OP_DEBUG_PREEMPT:
         preempt_countdown = arg[1];
         return KERR_OK;
-    case OP_DEBUG_FRAME:
-        /* Only the board's ranges, which follow the boot's grants and are blocks as those are. */
-        for (unsigned i = GRANT_DEBUG; i < GRANTED_RANGES; i++) {
-            LOOP_BOUND(GRANTED_RANGES);
-            const struct granted_range *g = &boot_granted[i];
-            if (napot_block(arg[1], arg[2]) && range_contains(g->base, g->size, arg[1]) &&
-                arg[2] <= g->size - (arg[1] - g->base)) {
-                struct cap r = cap_to_frame(arg[1], arg[2], g->rights);
-                return cap_store(thread_table(t), arg[3], &r, slot_node(t, slot));
-            }
-        }
-        return KERR_INVALID_ARG;
     default:
         return KERR_WRONG_TYPE;
     }
@@ -771,7 +759,7 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
      */
     switch (cap.type) {
     case CAP_DEBUG:
-        err = op_debug(t, slot, op, arg);
+        err = op_debug(op, arg);
         break;
     case CAP_FRAME:
         err = op_frame(t, slot, &cap, op, arg);

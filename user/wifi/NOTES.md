@@ -16,7 +16,8 @@ About 3,400 lines of C, of which the root task is the largest piece, 586 lines a
 Little of it is about Wi-Fi: most of it builds processes, hands out memory and slots, and copies logs.
 Building one child takes about 18 calls in `child_new` and 6 in `child_start`, besides halving memory,
 and the link between two children 8 more, with its conventions written down in `wifi.h`.
-The kernel needed one operation, `OP_DEBUG_FRAME`, for the devices.
+The kernel needed one operation, `OP_DEBUG_FRAME`, for the devices;
+the boot now grants a frame over each device instead, open decision 25.
 
 ## What worked well
 
@@ -98,7 +99,7 @@ which a zeroed struct needs, and a small `say` in place of printf.
 ### Memory and slots by hand
 
 There is no allocator, as the design intends, so the root task has one: free blocks kept as Untypeds, halved down to size.
-Each halving takes two slots, and the root task's table has 64, 46 of them free past the boot's;
+Each halving takes two slots, and the root task's table has 46 free past the boot's, 69 in all on RP2350;
 with three processes it ran out, and needed slots given back: deleted, consumed by a bind, emptied by a revoke.
 Reading 64 bytes of memory the root task holds took six calls:
 retype all of free RAM into a frame, carve the bytes, install, read, uninstall, revoke.
@@ -114,10 +115,12 @@ A server shares one frame carved into a block per client, which works while the 
 
 ### Devices
 
-The boot gives the root task one device, the console.
-Everything else came through `OP_DEBUG_FRAME`, which needs the capability that halts the machine, open decision 25,
+The boot gave the root task one device, the console.
+Everything else came through `OP_DEBUG_FRAME`, which needed the capability that halts the machine,
 and only for devices the kernel took out of reset and opened in ACCESSCTRL at boot;
 the first try listed the ADC, whose clock is off, and the boot never finished.
+Since open decision 25 the boot grants a frame over each device the board lists, which the root task carves as it does RAM,
+and `devices.h` names their slots; the kernel still has to list a device and start it before a program can have it.
 
 ### Running for longer than a test
 
