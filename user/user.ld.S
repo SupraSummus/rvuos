@@ -1,9 +1,9 @@
 /*
  * The single user program of the skeleton.
  * Code and read-only data live in the read-execute region,
- * zero-initialised data and the stack in the read-write region.
- * Initialised data is forbidden for now
- * because nobody would copy it into the data region.
+ * data and the stack in the read-write region.
+ * Initialised data runs at the base of the data region and is loaded right behind the read-only data,
+ * so the flat image is the code region alone, and start.S copies it over before main.
  * The Makefile runs this through the preprocessor with the board's board.h;
  * see kernel/layout.h for the addresses.
  */
@@ -29,14 +29,19 @@ SECTIONS
         *(.srodata .srodata.*)
     }
 
-    .data : {
-        *(.data .data.*)
-        *(.sdata .sdata.*)
-    }
-    ASSERT(SIZEOF(.data) == 0, "user programs may not have initialised data yet")
-    ASSERT(. <= USER_CODE_BASE + USER_CODE_SIZE, "user code does not fit its region")
+    . = ALIGN(4);
+    __data_load = .;
 
     . = USER_DATA_BASE;
+
+    .data : AT(__data_load) {
+        __data_start = .;
+        *(.data .data.*)
+        *(.sdata .sdata.*)
+        . = ALIGN(4);
+        __data_end = .;
+    }
+    ASSERT(__data_load + SIZEOF(.data) <= USER_CODE_BASE + USER_CODE_SIZE, "user code does not fit its region")
 
     .bss (NOLOAD) : {
         __bss_start = .;

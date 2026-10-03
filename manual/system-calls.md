@@ -480,6 +480,7 @@ and drops into user mode with:
 
 - the program counter at the start of the code region, `0x80100000` on QEMU,
 - the stack pointer at the top of the data region, `0x80120000` on QEMU,
+- every other register at zero, `a0` among them, as `OP_THREAD_CONFIGURE` leaves a thread, section 6.8,
 - region slot 0: the code region, read and execute,
 - region slot 1: the data region, read and write,
 - a capability table of `ROOT_TABLE_SLOTS`, 46 past `BOOT_CAP_COUNT` on every board and so 64 on QEMU, filled as below.

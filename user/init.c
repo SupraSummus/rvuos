@@ -205,6 +205,9 @@ _Static_assert(SLOT_SPINNER + SPINNERS <= ROOT_TABLE_SLOTS, "the root task's slo
 #define CAPPED_US 80000u
 static volatile uint32_t spins[SPINNERS];
 
+/* Initialised data, which start.S copies from behind the code before main; see user/user.ld.S. */
+static volatile uint32_t initialised[2] = { MAGIC, ~MAGIC };
+
 /*
  * How long a thread sleeps for its account to fill before it counts on having time ahead of spare time:
  * ten ticks' worth with the whole processor, over four with the root task's part.
@@ -1066,6 +1069,9 @@ int main(void)
     expect("give the logger units of its own",
            rv_invoke(OP_TIME_BIND, BOOT_CAP_TIME, SLOT_LOGGER, ROOT_UNITS, LOGGER_UNITS));
     expect("start the logger", rv_invoke(OP_THREAD_RESUME, SLOT_LOGGER, 0, 0, 0));
+
+    expect("initialised data was copied",
+           initialised[0] == MAGIC && initialised[1] == ~MAGIC ? KERR_OK : KERR_INVALID_ARG);
 
     expect("free ram info", rv_untyped_info(BOOT_CAP_FREE_RAM, &free_base, &free_size, &free_made));
     expect("nothing is made of the free ram yet", free_made == 0 ? KERR_OK : KERR_INVALID_ARG);

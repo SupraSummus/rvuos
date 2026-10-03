@@ -12,11 +12,13 @@ and embedded into the kernel image by the Makefile.
 Constraints of the current linker script:
 
 - code and read-only data live in the read-execute region, at `0x80100000` on QEMU,
-- zero-initialised data and the stack live in the read-write region, at `0x80110000` on QEMU,
-- **initialised data is forbidden**: nobody would copy it into the data region,
-  and the link fails if `.data` is not empty,
-- `user/arch/<arch>/start.S` zeroes `.bss`, calls `main`,
+- data and the stack live in the read-write region, at `0x80110000` on QEMU,
+  initialised data at its base and loaded right behind the read-only data,
+- `user/arch/<arch>/start.S` copies initialised data over, zeroes `.bss`, calls `main`,
   and halts with code 1 through `BOOT_CAP_DEBUG` if `main` returns.
+- A process other than the root task runs the root task's code but not with its data region,
+  so neither it nor the library it calls may keep a global, initialised or not;
+  `tools/no-globals.py` fails the link of a program of several processes whose children or library do, section 8.4.
 
 Compile flags are `-march=rv32imac -mabi=ilp32 -mcmodel=medany -ffreestanding -nostdlib`,
 or `--target=thumbv7m-none-eabi -mcpu=cortex-m3 -mfloat-abi=soft -ffreestanding -nostdlib` on ARMv7-M,

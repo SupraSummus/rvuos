@@ -49,5 +49,4 @@ These are documented gaps, not surprises;
 - **No loader.**
   The image embeds one program, linked at fixed addresses;
   a second process runs code from the same region.
-- **No initialised data** in user programs, until something copies it.
 - **The log across a reset** is not yet trustworthy; open decision 12.

@@ -26,7 +26,6 @@ and a laptop's ping and datagrams to UDP ports 7 and 7777 are answered;
 `user/wifi/NOTES.md` says what writing a program of several processes was like, and `user/lib/` is what came of it;
 what is left:
 
-- No program may have initialised data; `start.S` could copy `.data` from the code region.
 - The library's blocks never join again: the parent of a split is deleted to keep its slot,
   so free memory ends as blocks that each hold a slot,
   19 of the root task's 43 slots on QEMU once `user/libtest/` has given everything back.

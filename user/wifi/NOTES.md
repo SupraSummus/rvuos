@@ -179,3 +179,24 @@ What a library cannot fix is as it was: who signalled, asking and answering, and
 In the kernel, the list above stands, the devices excepted, which the boot grants now:
 a thread's argument, initialised data, a capability that only prints, badges, and a run that lasts.
 `make lib-test` checks the library on every board, and `make check` under QEMU on both architectures.
+
+## After the kernel's changes
+
+Four of the five changes the list above asks of the kernel are made, each the way the kernel already did something else,
+and the library and this system moved onto them:
+
+- **A thread's argument.** `OP_THREAD_CONFIGURE` takes the word a thread finds in `a0` and zeroes the other registers,
+  so `child_start` makes no debugger's call, and a thread started again starts from nothing its last run left.
+- **Initialised data.** `start.S` copies `.data` from behind the code, so the root task may write `static uint32_t next = BOOT_CAP_COUNT;`.
+  A child still keeps no global: it runs the root task's code without its data, and `tools/no-globals.py` still says so at the link.
+- **A capability that only prints.** `Debug` writes into the log with `RIGHT_W` and halts or drives the machine with `RIGHT_X`.
+  A child gets `CHILD_LOG` with `RIGHT_W` alone, so its lines reach the log in order with the kernel's, its faults' reports among them,
+  and the ring in its page and the root task's copying of it are gone; `OP_DEBUG_WRITE` carries twelve bytes a call, not one.
+- **Badges.** A notification capability carries the bits it may signal, and `OP_NOTIFY_CARVE` narrows them as a frame is carved.
+  The library gives every signaller the other side's inbox carved to its own bit,
+  so who signalled is the kernel's answer rather than a convention, and neither a child's page nor a channel's end names a bit to signal.
+
+What is left of the list is a run that lasts:
+a watchdog someone feeds and a console that reaches the host while the system runs, decisions about the board more than the kernel.
+Of what a library cannot fix, asking and answering and connecting at run time remain,
+which a server with clients in processes of their own, a socket over a channel to the network process, would measure.
