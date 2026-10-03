@@ -64,6 +64,16 @@ what is left:
   `board_watchdog` could start the RTC watchdog the same way.
 - Run `escape-store-clock` on the chip, which was not connected when it was written;
   the store goes to the CLINT's `UTIME`, which no PMP entry grants.
+- The PHY tracer around the harness in `user/phyblob/`, laid out as `user/phytrace.h` says.
+  Still to come: the root task that watches the harness and carries out its device accesses;
+  rules that fetch esp-phy-lib and ESP-IDF at pinned commits,
+  generate `phy_init_data` from ESP-IDF's `phy_init_data.c` and link the harness;
+  and `tools/esp32c6-run.py` loading the harness beside the kernel.
+  Linked by hand against esp-phy-lib `20f1db05` and ESP-IDF `4d59230d`'s
+  `esp32c6.rom.ld`, `.rom.phy.ld`, `.rom.libgcc.ld` and `.rom.libc.ld`, it fits its block with 32 KiB of stack.
+- The tracer carries out the harness's accesses through frames over the modem, the PHY and eFuse,
+  which the boot grants only once `DEVICE_RANGE_LIST` in the ESP32-C6's `board.h` lists them;
+  it lists none yet.
 - Feed the replay corpus to the board.
   Something has to put each input where `BOOT_CAP_INPUT` points,
   below the ROM's buffers or over USB once the kernel runs,
