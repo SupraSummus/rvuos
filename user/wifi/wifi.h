@@ -125,8 +125,9 @@ enum drv_mode {
     MODE_AP,   /* run an access point named ssid with pass */
 };
 
-/* A network a scan heard, the strongest of each name. */
+/* An access point a scan heard, by its address, as strong as it was heard at best. */
 struct drv_net {
+    uint8_t bssid[6];
     char ssid[33];
     uint8_t channel;
     int16_t rssi;

@@ -5,12 +5,11 @@ Open work only; an item leaves this file in the commit that finishes it.
 ## Wi-Fi system
 
 `user/wifi/`, on a Pico 2 W: the driver brings the CYW43439's firmware up, scans,
-and runs an access point a laptop's scan sees; `WIFI_CONFIG` in the Makefile says how to ask for which.
-The network process sends through the link and the driver to the air.
+runs an access point a laptop's scan sees, or joins a WPA2 network, where DHCP gives the network process an address
+and a laptop's ping and datagrams to UDP ports 7 and 7777 are answered;
+`WIFI_CONFIG` in the Makefile says how to ask for which.
 
-- Joining a network, `mode=sta`, is written after embassy's driver and has not run:
-  no network the board hears was given to it.
-  So nothing has come in through the link yet, nor has DHCP, a ping or a datagram run but against `make wifi-test`.
+- Only WPA2 with AES and open networks join; WPA3 needs the SAE passphrase the driver does not set.
 - UDP services live in the network process; a client in a process of its own needs a socket's rings
   between it and the network process, and the network process a bit and a frame for each client.
 - The driver polls the chip every millisecond.

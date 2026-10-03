@@ -480,15 +480,21 @@ static int child_told(struct child *c, uint32_t state)
         if (state == DRV_SCANNED) {
             print(&kout, "root: ");
             print_dec(&kout, p->net_count);
-            print(&kout, " networks heard\n");
+            print(&kout, " access points heard\n");
             for (uint32_t i = 0; i < p->net_count; i++) {
                 const struct drv_net *n = &p->nets[i];
+                print(&kout, "  ");
+                for (uint32_t j = 0; j < 6; j++) {
+                    static const char hex[] = "0123456789abcdef";
+                    char b[4] = { hex[n->bssid[j] >> 4], hex[n->bssid[j] & 15], j < 5 ? ':' : '\0', 0 };
+                    print(&kout, b);
+                }
                 print(&kout, "  ch ");
                 print_dec(&kout, n->channel);
                 print(&kout, n->rssi < 0 ? "  rssi -" : "  rssi ");
                 print_dec(&kout, (uint32_t)(n->rssi < 0 ? -n->rssi : n->rssi));
                 print(&kout, "  ");
-                print(&kout, n->ssid);
+                print(&kout, n->ssid[0] ? n->ssid : "(hidden)");
                 print(&kout, "\n");
             }
             return p->mode == MODE_SCAN;

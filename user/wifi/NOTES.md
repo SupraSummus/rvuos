@@ -5,6 +5,8 @@ from `MANUAL.md` and `user/rvuos.h`, reading the kernel only where the manual le
 It is a root task and two processes on a Pico 2 W:
 a driver for the CYW43439 that loads its firmware, scans, joins or runs an access point,
 and a network process with a small IPv4 stack, joined to the driver by rings of frames.
+On the board it joins a WPA2 network, takes an address by DHCP and answers a laptop's ping, about 6 ms there and back,
+and datagrams on UDP ports 7 and 7777.
 These notes say what that took, what helped and what hurt,
 so that the next decisions about the kernel and a library for programs can start from a program and not from a guess.
 
@@ -152,4 +154,3 @@ In the kernel, by what they would save:
 
 - Whether the board writes the firmware to flash, which would let the driver reset the chip, and frees RAM for good.
 - How long a run on the board may last, and who feeds the watchdog.
-- A network to join, to try what has run only on the host: joining, DHCP, ping and the UDP services.

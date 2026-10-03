@@ -39,7 +39,7 @@ static struct drv *drv_of(struct wlan *w)
     return (struct drv *)((uint8_t *)w - offsetof(struct drv, wlan));
 }
 
-/* A scan's result goes into the page, the strongest of each name; the last event says the scan is done. */
+/* A scan's result goes into the page, once for each access point; the last event says the scan is done. */
 static void on_event(struct wlan *w, const struct wlan_event *e)
 {
     struct drv *d = drv_of(w);
@@ -56,11 +56,8 @@ static void on_event(struct wlan *w, const struct wlan_event *e)
         return;
     }
     d->results++;
-    if (bss.ssid_len == 0) {
-        return;
-    }
     for (uint32_t i = 0; i < s->net_count; i++) {
-        if (memcmp(s->nets[i].ssid, bss.ssid, bss.ssid_len + 1u) == 0) {
+        if (memcmp(s->nets[i].bssid, bss.bssid, 6) == 0) {
             if (bss.rssi > s->nets[i].rssi) {
                 s->nets[i].rssi = bss.rssi;
                 s->nets[i].channel = bss.channel;
@@ -70,6 +67,7 @@ static void on_event(struct wlan *w, const struct wlan_event *e)
     }
     if (s->net_count < DRV_NETS) {
         struct drv_net *n = &s->nets[s->net_count++];
+        memcpy(n->bssid, bss.bssid, 6);
         memcpy(n->ssid, bss.ssid, sizeof(n->ssid));
         n->rssi = bss.rssi;
         n->channel = bss.channel;
@@ -296,6 +294,10 @@ __attribute__((noreturn)) void driver_main(struct drv_page *s)
         serve(d);
     }
 
+    /* A station joins at once: a scan would take the run's seconds, and the firmware finds the network itself. */
+    if (s->mode == MODE_STA) {
+        goto join;
+    }
     if ((err = wlan_scan(&d->wlan)) != 0) {
         d->chip.step = STEP_SCAN;
         d->chip.detail = (uint32_t)err;
@@ -314,6 +316,8 @@ __attribute__((noreturn)) void driver_main(struct drv_page *s)
     }
     report(d, DRV_SCANNED);
 
+join:
+    print(&d->out, "drv: joining\n");
     if ((err = wlan_join(&d->wlan, s->ssid, s->pass)) != 0) {
         d->chip.step = STEP_JOIN;
         d->chip.detail = (uint32_t)err;
