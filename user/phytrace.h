@@ -3,7 +3,8 @@
 
 /*
  * What the PHY tracer and the harness it traces, user/phyblob/, agree on; ESP32-C6 only.
- * The tracer and the rules that build and load the harness are still to come; see TODO.md.
+ * make BOARD=esp32c6 phyblob builds the harness, and tools/esp32c6-run.py --ram loads it;
+ * the tracer is still to come, see TODO.md.
  *
  * The harness is Espressif's PHY library, libphy.a, with a few lines of glue, at a fixed place in the free RAM.
  * It runs in a process that maps its own memory, the ROM and the ROM's RAM, and no device,
