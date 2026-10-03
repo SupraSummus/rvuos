@@ -62,16 +62,17 @@ what is left:
 - The chip's watchdogs stay off, so a kernel that stops altogether, and cannot halt, stays stopped here,
   where RP2350's resets the chip a second after the kernel's watchdog's deadline;
   `board_watchdog` could start the RTC watchdog the same way.
-- The PHY tracer around the harness in `user/phyblob/`, laid out as `user/phytrace.h` says.
-  Still to come: the root task that watches the harness and carries out its device accesses;
-  rules that fetch esp-phy-lib and ESP-IDF at pinned commits,
-  generate `phy_init_data` from ESP-IDF's `phy_init_data.c` and link the harness;
-  and `tools/esp32c6-run.py` loading the harness beside the kernel.
-  Linked by hand against esp-phy-lib `20f1db05` and ESP-IDF `4d59230d`'s
-  `esp32c6.rom.ld`, `.rom.phy.ld`, `.rom.libgcc.ld` and `.rom.libc.ld`, it fits its block with 32 KiB of stack.
-- The tracer carries out the harness's accesses through frames over the modem, the PHY and eFuse,
-  which the boot grants only once `DEVICE_RANGE_LIST` in the ESP32-C6's `board.h` lists them;
-  it lists none yet.
+- The PHY tracer: the root task that watches the harness of `user/phyblob/` and carries out its device accesses,
+  laid out as `user/phytrace.h` says, and a rule that boots it with the harness beside it;
+  `make BOARD=esp32c6 phyblob` builds the harness, and nothing has run it.
+- The tracer needs frames over what the harness reaches, which `DEVICE_RANGE_LIST` in the ESP32-C6's `board.h` must list;
+  it lists none.
+  Read from its code, `libphy.a` reaches the modem's blocks from `0x600a0000` to `0x600affff`,
+  APB_SARADC, eFuse, PCR, PMU and LP_AON; the ROM's PHY functions were not read.
+  Two kinds of these no board lists yet:
+  the Wi-Fi MAC, a bus master, which `mac_tx_chan_offset_new` writes at `0x600a4400`;
+  and PCR, PMU and LP_AON, which reach the clocks, power and resets of the whole chip, the kernel's devices among them.
+  Whether the tracer may log and feign their accesses instead is open.
 - Feed the replay corpus to the board.
   Something has to put each input where `BOOT_CAP_INPUT` points,
   below the ROM's buffers or over USB once the kernel runs,

@@ -27,7 +27,7 @@ typedef struct {
 int register_chipv7_phy(const esp_phy_init_data_t *init_data, esp_phy_calibration_data_t *cal_data, int mode);
 void phy_bbpll_en_usb(bool enable);
 
-/* ESP-IDF's default init data, generated from its phy_init_data.c by tools/phy-init-data.py. */
+/* ESP-IDF's default init data, written from its phy_init_data.c by tools/phyblob-fetch.py. */
 extern const esp_phy_init_data_t phy_init_data;
 
 void phyblob_main(void);

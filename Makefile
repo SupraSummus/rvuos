@@ -343,6 +343,41 @@ endif
 	tools/wifi-run.py -- $(RP2350_PYTHON) tools/rp2350-run.py --ram $(WIFI_BLOB_AT):$(WIFI_BLOB) \
 		$(if $(WIFI_CONFIG),--ram $(WIFI_INPUT_AT):$(WIFI_CONFIG)) $(BUILD)/kernel-wifi.elf
 
+# The PHY harness of user/phyblob/ on an ESP32-C6, see user/phytrace.h, around Espressif's libphy.a,
+# which tools/phyblob-fetch.py fetches with what of ESP-IDF it needs, never into the tree.
+# It is a flat image at PHYBLOB_BASE, for tools/esp32c6-run.py --ram to place beside the kernel.
+PHYBLOB_CACHE := build/esp-phy
+PHYBLOB_INIT  := $(BUILD)/user/phyblob/phy_init_data.c
+PHYBLOB_ROM   := $(addprefix $(PHYBLOB_CACHE)/,esp32c6.rom.ld esp32c6.rom.phy.ld esp32c6.rom.libgcc.ld esp32c6.rom.libc.ld)
+PHYBLOB_OBJ   := $(BUILD)/user/phyblob/start.o $(BUILD)/user/phyblob/phyblob.o $(BUILD)/user/phyblob/phy_init_data.o
+PHYBLOB       := $(BUILD)/phyblob.bin
+
+# The init data is written last, so it stands for every file fetched.
+$(PHYBLOB_INIT): tools/phyblob-fetch.py
+	@mkdir -p $(dir $@)
+	tools/phyblob-fetch.py --cache $(PHYBLOB_CACHE) --init-data $@
+
+$(BUILD)/user/phyblob/phy_init_data.o: $(PHYBLOB_INIT)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/user/phyblob/%.o: ASFLAGS += -Iuser
+$(BUILD)/user/phyblob/harness.ld: KERNEL_INC += -Iuser
+
+$(BUILD)/phyblob.elf: $(PHYBLOB_OBJ) $(BUILD)/user/phyblob/harness.ld $(PHYBLOB_INIT)
+	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/user/phyblob/harness.ld $(foreach s,$(PHYBLOB_ROM),-Wl,-T,$(s)) \
+		$(PHYBLOB_OBJ) $(PHYBLOB_CACHE)/libphy.a -o $@
+
+$(PHYBLOB): $(BUILD)/phyblob.elf
+	$(OBJCOPY) -O binary $< $@
+
+.PHONY: phyblob
+ifeq ($(BOARD),esp32c6)
+phyblob: $(PHYBLOB)
+else
+phyblob:
+	$(error the PHY harness runs on an ESP32-C6: make BOARD=esp32c6 phyblob)
+endif
+
 # Host build: the kernel's logic compiled natively,
 # with a hardware shim and a libFuzzer harness.
 # See DESIGN.md, "Properties" and "Verification".
@@ -502,5 +537,5 @@ clean:
 
 -include $(KERNEL_OBJ:.o=.d) $(patsubst %,$(BUILD)/user/%.d,$(USER_PROGRAMS) $(ESCAPE_PROGRAMS)) \
          $(foreach p,$(PROGRAMS),$(patsubst %.o,%.d,$(call program_root,$(p)) $(call program_others,$(p)))) \
-         $(LIB_OBJ:.o=.d) \
+         $(LIB_OBJ:.o=.d) $(addprefix $(BUILD)/user/phyblob/,start.d phyblob.d harness.d) \
          $(USER_COMMON:.o=.d) $(BUILD)/kernel/kernel.d $(BUILD)/user/user.d $(HOST_OBJ:.o=.d)
