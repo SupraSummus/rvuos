@@ -193,7 +193,7 @@ Each header says how its calls are used.
 | Header | What it gives |
 |---|---|
 | `lib/self.h` | what a process hands out of its own: slots, regions, bits of its inbox, timers, units of time, memory halved out of Untypeds, and room for its children's data |
-| `lib/child.h` | a child built, started, heard, checked and taken down by its parent, frames mapped into it and taken back, and the child's own calls: its log, its state, its answer, its sleep |
+| `lib/child.h` | a child built, started, heard, checked and taken down by its parent, frames mapped into it and taken back, what it may build of its own, and the child's own calls: its log, its state, its answer, its sleep, its account of what it builds |
 | `lib/chan.h` | a channel between two children: a frame of two rings of packets, and a bit each way; and a hub, a server's channels to many clients |
 | `lib/lock.h` | a lock over memory several children share: a word taken with an atomic operation, and a notification to wait on while it is held |
 | `lib/ring.h`, `lib/log.h` | the rings a channel is made of, and the kernel's log: written through `Debug`, and read as the root task reads it |
@@ -226,6 +226,20 @@ It costs its parent six slots, and `child_free` takes back everything that was m
 Its data is a block of its own, which its parent installs in a region of its own,
 or, once the parent has asked for room for its children's data with `self_room`, carved from that room,
 which the parent installs once: a parent then spends one region on all its children's pages, not one each.
+
+**A child of its own image** runs code its parent did not link, `child_code`:
+a frame of the other image goes into the child's code region, and the child starts at an entry in it.
+Such an image keeps globals, in memory its parent maps for them, since no other process runs its code.
+
+**A child that builds threads of its own**, as a driver of a library written for an operating system with tasks does,
+is given what to build them from by its parent, `child_give_own`:
+a pool, a few timer lines carved from the last of its parent's, units of the first core,
+a capability to its own table, and the last slots of that table, which the parent hands out no more.
+The child makes a `struct self` of them, `child_self`, and builds through `lib/self.h` as a root task does,
+but hands out no memory, regions or bits of its inbox, which stay its parent's, and builds no children.
+It is given its parent's inbox carved to its own fault bit too, and watches its threads with it,
+so a fault of any of them reaches its parent as the child's own.
+`child_free` takes back all of it with the rest, the pool and the units among it.
 
 **A channel** is connected by the parent into two children, running or not,
 each holding the other's inbox carved to the other's bit for the channel.
@@ -267,7 +281,9 @@ it checks a child that answers and one that spins, and finds the second;
 then, in room for children's data, it builds a server with a hub and a client on each end,
 and takes one client down and connects another in its place twice;
 has three children add to a count they share under a lock, each sleeping now and then while it holds it;
-and hands a buffer between two children and back, then takes it from the last, which must fault when it stores to it;
+hands a buffer between two children and back, then takes it from the last, which must fault when it stores to it;
+and lets a child build a thread of its own, which sleeps on its own timer and faults, which the root task hears as the child's,
+and takes it down, twice;
 checking that everything handed out comes back and that the second child left the same behind as the first.
 
 ### 8.5 A program of several processes: the Wi-Fi system

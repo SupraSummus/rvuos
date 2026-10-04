@@ -6,6 +6,7 @@
 #include "libtest.h"
 
 #include "lib/say.h"
+#include "lib/self.h"
 
 static void wait_any(void)
 {
@@ -209,5 +210,59 @@ void passer_main(struct child_page *page)
         }
         *buffer = pass;
         child_report(page, PASSER_HELD + pass);
+    }
+}
+
+/* The builder's thread, with a0 at the builder's page: a sleep on its own timer, then a breakpoint. */
+static __attribute__((noreturn)) void worker_main(struct builder_page *p)
+{
+    uint32_t bits = 0;
+    rv_timer_set(p->timer, 0x1u, OWN_SLEEP_US);
+    while (rv_wait(p->note, &bits) == KERR_OK && !(bits & 0x1u)) {
+    }
+    p->worked = bits & 0x1u;
+    for (;;) {
+        rv_breakpoint();
+    }
+}
+
+/* Builds the thread from its own account, through lib/self.h as a root task does; checks what the account refuses. */
+void builder_main(struct child_page *page)
+{
+    struct builder_page *p = (struct builder_page *)page;
+    struct self s;
+    uint32_t thread, unit, time, line, status;
+    child_self(&s, &p->own);
+    child_report(page, CHILD_RUNNING);
+    if ((status = slot_new(&s, &p->note)) != KERR_OK ||
+        (status = rv_pool_alloc(s.pool, CAP_NOTIFICATION, p->note, 0)) != KERR_OK ||
+        (status = timer_bind(&s, s.pool, p->note, &p->timer)) != KERR_OK ||
+        (status = slot_new(&s, &thread)) != KERR_OK ||
+        (status = rv_pool_alloc(s.pool, CAP_THREAD, thread, s.process)) != KERR_OK ||
+        (status = rv_thread_watch(thread, p->own.watch, NOTIFY_ALL_BITS)) != KERR_OK ||
+        (status = rv_thread_configure(thread, (uint32_t)(uintptr_t)worker_main,
+                                      (uint32_t)(uintptr_t)(p->stack + sizeof(p->stack)), (uint32_t)(uintptr_t)p)) !=
+            KERR_OK ||
+        (status = units_take(&s, OWN_UNITS, &unit)) != KERR_OK || (status = slot_new(&s, &time)) != KERR_OK ||
+        (status = rv_time_carve(s.time, unit, OWN_UNITS, time)) != KERR_OK ||
+        (status = rv_time_bind(time, thread, 0, OWN_UNITS)) != KERR_OK || (status = slot_free(&s, time)) != KERR_OK) {
+        child_fail(page, BUILDER_STEP_BUILD, status);
+    }
+    if (timer_bind(&s, s.pool, p->note, &line) != KERR_OK) {
+        child_fail(page, BUILDER_STEP_LIMIT, 1);
+    }
+    if (timer_bind(&s, s.pool, p->note, &line) != KERR_LIMIT) {
+        child_fail(page, BUILDER_STEP_LIMIT, 2);
+    }
+    if (units_take(&s, 1, &unit) != KERR_LIMIT) {
+        child_fail(page, BUILDER_STEP_LIMIT, 3);
+    }
+    if ((status = rv_thread_resume(thread)) != KERR_OK) {
+        child_fail(page, BUILDER_STEP_BUILD, status);
+    }
+    child_report(page, BUILDER_BUILT);
+    for (;;) {
+        child_answer(page);
+        wait_any();
     }
 }

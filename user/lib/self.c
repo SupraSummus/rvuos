@@ -39,6 +39,7 @@ uint32_t self_root(struct self *s, uint32_t units)
     s->pool = BOOT_CAP_POOL;
     s->code = BOOT_CAP_CODE;
     s->timer_lines = BOOT_CAP_TIMER_LINES;
+    s->timer_line_count = TIMER_LINES;
     s->time = BOOT_CAP_TIME;
     s->debug = BOOT_CAP_DEBUG;
     s->slot_first = BOOT_CAP_COUNT;
@@ -131,7 +132,7 @@ void bit_free(struct self *s, uint32_t bit)
 uint32_t timer_bind(struct self *s, uint32_t pool, uint32_t ntfn, uint32_t *irq)
 {
     PASS(slot_new(s, irq));
-    for (uint32_t line = 0; line < TIMER_LINES; line++) {
+    for (uint32_t line = 0; line < s->timer_line_count; line++) {
         uint32_t status = rv_irq_carve(s->timer_lines, line, 1, *irq);
         if (status == KERR_OK) {
             /* The bind clears the line's slot, and may take it for the Irq. */

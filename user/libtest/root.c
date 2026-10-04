@@ -11,6 +11,8 @@
  * and takes one down and connects another in its place, twice;
  * has children add to a count they share under a lock, sleeping now and then while they hold it;
  * hands a buffer between two children, and hears the last fault on it once it is taken;
+ * lets a child build a thread of its own from a pool, timer lines and units it gave it,
+ * hears that thread's fault as the child's, and takes it all back, twice;
  * then takes the rest down.
  * It ends with "libtest: ok" and halt code 0, which tests/libtest.sh checks, or with what failed and another code.
  */
@@ -33,9 +35,10 @@ static struct self self, after;
 static struct kernel_log klog;
 static uint32_t log_bit, deadline_bit, pause_bit, pause_timer;
 
-static struct child a, b, faulty, answering, spinning, server, clients[HUB_CLIENTS], lockers[LOCKERS], passers[2];
+static struct child a, b, faulty, answering, spinning, server, clients[HUB_CLIENTS], lockers[LOCKERS], passers[2],
+    builder;
 static struct child *const children[] = { &a, &b, &faulty, &answering, &spinning, &server, &clients[0], &clients[1],
-                                          &lockers[0], &lockers[1], &lockers[2], &passers[0], &passers[1] };
+                                          &lockers[0], &lockers[1], &lockers[2], &passers[0], &passers[1], &builder };
 static struct child *may_fault; /* the one child whose fault is asked for */
 static uint32_t faulted;        /* the bits of the faults the root task heard */
 
@@ -396,6 +399,35 @@ static void pass_round(void)
     check(same(tally(), unroomed), "the passers, their buffer and the room gave back what they were given");
 }
 
+/*
+ * A builder, given a pool, timer lines, units and slots of its own, builds a thread from them,
+ * whose fault is heard as the builder's; taken down, it gives back all of it,
+ * and built again from what it gave back, leaves the root task as the first did.
+ */
+static void own_round(void)
+{
+    struct tally before = tally();
+    for (uint32_t round = 0; round < 2; round++) {
+        must("build a builder", child_new(&self, &builder, "builder", BUILDER_TABLE, CHILD_DATA));
+        struct builder_page *p = (struct builder_page *)builder.page;
+        must("let a child build of its own",
+             child_give_own(&self, &builder, OWN_POOL, OWN_LINES, OWN_UNITS, OWN_SLOTS, &p->own));
+        may_fault = &builder;
+        faulted = 0;
+        must("start a builder", child_start(&self, &builder, builder_main, CHILD_UNITS));
+        while (!(faulted & builder.bit_fault) || builder.told != BUILDER_BUILT) {
+            step();
+        }
+        may_fault = 0;
+        check(p->worked, "a thread a child built of its own ran on its units and woke on its timer");
+        must("take a builder down", child_free(&self, &builder));
+        check(same(tally(), before), "a child that built of its own, taken down, gives back what it was given");
+        check(round == 0 || as_at(&after), "a builder built again from what the last gave back leaves the same behind");
+        after = self;
+    }
+    say(&out, "libtest: a child that builds a thread of its own, whose fault is the child's, taken down twice: ok\n");
+}
+
 int main(void)
 {
     uint32_t base, size, region, deadline;
@@ -471,6 +503,7 @@ int main(void)
     hub_round();
     lock_round();
     pass_round();
+    own_round();
     check(same(tally(), start), "everything handed out came back");
     say(&out, "libtest: down, %u bytes free and %u slots unused\n", mem_unused(&self), slots_unused(&self));
     say(&out, "libtest: ok\n");

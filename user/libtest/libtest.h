@@ -108,6 +108,31 @@ struct passer_page {
     volatile uint32_t pass; /* the root task's, before each tell: the pass it holds the buffer for, or PASS_GONE */
 };
 
+/*
+ * A builder: a child that builds a thread of its own from what its parent let it have, child_give_own.
+ * The thread sleeps on a timer of its own, says so in the page and stops at a breakpoint,
+ * a fault the parent hears as the builder's.
+ * The builder also finds that its account gives no more than it was given: a timer line, then none, and no unit.
+ */
+#define OWN_POOL     0x1000u
+#define OWN_LINES    2u
+#define OWN_UNITS    2u
+#define OWN_SLOTS    8u
+#define OWN_SLEEP_US 1000u
+#define BUILDER_TABLE 24u
+enum {
+    BUILDER_BUILT = CHILD_RUNNING + 1, /* its thread is started, and its account gave no more than it was given */
+};
+#define BUILDER_STEP_BUILD 1u /* a call building the thread failed; detail is the status */
+#define BUILDER_STEP_LIMIT 2u /* its account gave what it was not given, or not what it was; detail says which */
+struct builder_page {
+    struct child_page c;
+    struct child_own own;
+    uint32_t note, timer;      /* the thread's, which the builder made */
+    volatile uint32_t worked;  /* the thread's: 1 once its timer woke it */
+    uint8_t stack[1024] __attribute__((aligned(16))); /* the thread's */
+};
+
 void peer_main(struct child_page *page);
 void fault_main(struct child_page *page);
 /* A child that answers each check its parent asks, and one that spins and answers none. */
@@ -117,5 +142,6 @@ void server_main(struct child_page *page);
 void client_main(struct child_page *page);
 void locker_main(struct child_page *page);
 void passer_main(struct child_page *page);
+void builder_main(struct child_page *page);
 
 #endif

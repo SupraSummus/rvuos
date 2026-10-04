@@ -4,7 +4,8 @@
 /*
  * Processes a parent builds, from both sides.
  *
- * A child runs its parent's code but keeps no global: its state lies on its stack or in its page.
+ * A child runs its parent's code but keeps no global: its state lies on its stack or in its page;
+ * or it runs an image of its own, child_code, whose globals lie in memory its parent maps for them.
  * Its memory is one frame, its data, with its page at the base and its stack at the top,
  * and it starts at its entry with a0 at its page.
  * The data is a block of its own, or carved from the parent's room for its children's data, see self_room.
@@ -16,6 +17,8 @@
  * so the bits a wait returns say who signalled, and a signaller names every bit, not knowing which.
  * Past the first slots, regions and bits below, the parent hands the child's out and says in the page which,
  * so the page's type is all the two agree on.
+ * A child may build threads of its own too, from what its parent lets it have, child_give_own,
+ * through lib/self.h as a root task does, child_self.
  */
 
 #include <stdint.h>
@@ -44,6 +47,21 @@ enum {
 #define CHILD_BIT_TIMER  0x1u /* the child arms its timer with it */
 #define CHILD_BIT_PARENT 0x2u /* the parent wrote something into the page */
 
+/*
+ * What a parent lets a child build of its own: threads in its process, and what they wait on;
+ * the parent fills it, child_give_own, and writes it into the child's page, which hands it to child_self.
+ */
+struct child_own {
+    uint32_t table;                /* the child's own table, RIGHT_W: to delete what it made */
+    uint32_t pool;                 /* a pool its objects come from */
+    uint32_t timer_lines;          /* timer lines it may bind, carved, timer_line_count of them */
+    uint32_t timer_line_count;
+    uint32_t time;                 /* units of the first core its threads earn, carved, unit_count of them */
+    uint32_t unit_count;
+    uint32_t watch;                /* its parent's inbox, carved to the child's fault bit, to watch its threads with */
+    uint32_t slot_first, slot_end; /* the slots of its table it hands out itself */
+};
+
 /* A child's state; each child adds states of its own from CHILD_RUNNING up. */
 enum {
     CHILD_STARTING,
@@ -66,7 +84,8 @@ struct child_page {
 #define CHILD_TABLE_MAX   64u
 
 /*
- * A child, as its parent keeps it, in six slots: its four objects, and the Untypeds of its pool and data.
+ * A child, as its parent keeps it, in six slots: its four objects, and the Untypeds of its pool and data,
+ * and a seventh, the Untyped of the pool it builds from itself, if it does.
  * What only building it needs, its pool, data frame, timer and units, is deleted once used;
  * what was copied, installed or bound from them stays, below the Untypeds and the boot's capabilities.
  */
@@ -79,6 +98,8 @@ struct child {
     int in_room;                            /* its data is carved from the parent's room, not a block of its own */
     uint32_t bit_page, bit_fault;           /* its bits on the parent's inbox: a new state, and a fault */
     uint32_t unit, units;                   /* the units of time it earns */
+    struct block own;                       /* the pool it builds from itself, child_give_own, if any */
+    uint32_t own_unit, own_units;           /* and the units its threads earn */
     /* What of the child's is handed out, a bit each or a count. */
     uint32_t table_slots, slots_given, regions, bits;
     /* The last state the parent saw. */
@@ -101,6 +122,22 @@ uint32_t child_give_bits(struct self *s, struct child *c, uint32_t ntfn, uint32_
 uint32_t child_slot(struct self *s, struct child *c, uint32_t *at);
 /* As child_give_bits, into the child's slot at, which holds nothing. */
 uint32_t child_put_bits(struct self *s, struct child *c, uint32_t at, uint32_t ntfn, uint32_t bits);
+/*
+ * The child runs code from frame, an image of its own, in place of its parent's:
+ * frame is installed in its code region, read and execute, and child_start's entry lies in that image.
+ */
+uint32_t child_code(struct self *s, struct child *c, uint32_t frame);
+/*
+ * Lets the child build objects of its own, threads among them, as its parent builds its children:
+ * a pool of pool_size bytes, the last lines of its parent's timer lines, units of the first core,
+ * its own table, and the last slots of it, which the parent hands out no more,
+ * and its parent's inbox carved to the child's fault bit, for the child to watch its threads with,
+ * so that a fault of any of its threads is the child's to its parent.
+ * Each goes into the child's next free slot, and *o says which, for the child's page;
+ * child_free takes all of it back with the rest.
+ */
+uint32_t child_give_own(struct self *s, struct child *c, uint32_t pool_size, uint32_t lines, uint32_t units,
+                        uint32_t slots, struct child_own *o);
 /* A frame installed in the child's next free region, which *region says. */
 uint32_t child_map(struct self *s, struct child *c, uint32_t frame, uint32_t rights, uint32_t *region);
 /*
@@ -153,5 +190,12 @@ __attribute__((noreturn)) void child_stop(struct child_page *p, uint32_t state);
 __attribute__((noreturn)) void child_fail(struct child_page *p, uint32_t step, uint32_t detail);
 /* Waits us microseconds on the child's timer, and returns the other bits that came meanwhile, for the caller to keep. */
 uint32_t child_sleep(uint32_t us);
+/*
+ * The child's account of what it may hand out of its own, from what its parent gave it, child_give_own:
+ * its slots, pool, timer lines and units, to build threads with through lib/self.h, as a root task does.
+ * It hands out no memory, regions or bits of its inbox, which are its parent's to give,
+ * and builds no children.
+ */
+void child_self(struct self *s, const struct child_own *o);
 
 #endif

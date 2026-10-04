@@ -43,6 +43,7 @@ struct self {
     uint32_t inbox;       /* the notification it waits on, which its children's faults and pages signal */
     uint32_t code;        /* the frame of the code its children run */
     uint32_t timer_lines; /* the timer lines it may hand out */
+    uint32_t timer_line_count; /* how many, from the first */
     uint32_t time;        /* the first core's units of time it may hand out */
     uint32_t debug;       /* the kernel's log, RIGHT_W at least, which its children are given with RIGHT_W alone */
     /* What is in use, a bit each. */
@@ -106,7 +107,7 @@ uint32_t bit_new(struct self *s, uint32_t *bit);
 void bit_free(struct self *s, uint32_t bit);
 
 /*
- * An Irq on the first timer line nothing is bound to, from pool, signalling ntfn, in a new slot.
+ * An Irq on the first of its timer lines nothing is bound to, from pool, signalling ntfn, in a new slot.
  * The kernel knows which lines are bound and says so, so none is kept here:
  * a line is free again once the Irq bound to it is gone with its pool.
  */
