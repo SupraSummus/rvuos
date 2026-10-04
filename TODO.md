@@ -15,6 +15,9 @@ and the logger carries the kernel's log to a host on port 7070 while the run las
 - At half its lease the network process lets its address go and asks for one anew, as if it had none,
   so a run for good is unreachable for a moment every twelve hours with the router here, whose lease is a day.
   A renewal, a request to the server that gave the lease, would keep the address meanwhile.
+- The clock asks the one server of pool.ntp.org it was given again and again; one that never answers,
+  as happened once, leaves it without the time, and `tools/wifi-run.py`, which waits for the time, without its checks.
+  Asking DNS for another server after a few tries would move on.
 - In access point mode nobody gives the network process an address, so no client is built, the logger among them,
   and the log reaches the host only at the halt, as much of it as the ring still holds.
 - The driver polls the chip every millisecond.
