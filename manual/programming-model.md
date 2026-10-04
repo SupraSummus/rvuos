@@ -490,7 +490,7 @@ so a program takes it from `OP_CLOCK_READ`.
 The time is the machine's, not the thread's: it includes other threads' slices.
 Revoking below a `Clock` capability uninstalls every region derived through it.
 `rdtime` traps on every board.
-The ESP32-C6's performance counter is no clock: the kernel stops it at zero whenever another process runs.
+The ESP32-C6's performance counter is no clock: it is the process's, and stops whenever another process runs, section 3.
 
 **The watchdog.**
 With `RIGHT_W`, `OP_CLOCK_WATCHDOG` arms the machine's watchdog, or feeds it:

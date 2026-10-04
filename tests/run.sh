@@ -70,6 +70,8 @@ grep -q 'child: reply ok' "$text" || fail "the root task's answer did not arrive
 grep -q 'child: may not halt ok' "$text" || fail "a child given the log to write could halt the machine"
 grep -q 'root: preemption ok' "$text" \
     || fail "the tick did not take the processor from a spinning thread"
+grep -q "the counter counts on across the child's turns: ok" "$text" \
+    || fail "the performance counter the root task started did not count on across another process's turns"
 grep -q 'root: revocation ok' "$text" \
     || fail "a destroyed pool did not revoke the capabilities into it"
 grep -q 'child: revoked here too' "$text" \

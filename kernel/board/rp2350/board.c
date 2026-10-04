@@ -244,8 +244,10 @@ void board_watchdog(uint32_t us)
  * The Cortex-M33's thread mode keeps no state beyond the registers a trap saves,
  * since the kernel shuts every coprocessor to it, the floating-point unit among them; see kernel/arch/arm/trap.c.
  */
-void board_user_csrs_reset(void)
+void board_user_csrs_switch(struct process *from, struct process *to)
 {
+    (void)from;
+    (void)to;
 }
 
 /*

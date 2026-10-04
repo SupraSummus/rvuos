@@ -128,7 +128,10 @@ and only while a host has the port open.
 User mode can write some of the core's CSRs:
 `ustatus`, `uie`, `utvec`, `uepc`, `ucause`,
 the performance counter at `0x800` to `0x802` and the dedicated GPIO at `0x803` and `0x805`.
-Whenever another process has run, a program finds them set back: `utvec` at 1, the rest at zero, the counter stopped.
+Whenever another process has run, a program finds the counter as it left it, having stopped meanwhile,
+so the ROM's `ets_delay_us`, which counts on it, waits at least as long as asked;
+and the rest set back: `utvec` at 1, the others at zero.
+A new process finds the counter stopped at zero, counting nothing.
 No interrupt is delegated to user mode,
 and the dedicated GPIO reaches no pad, since no process is granted the GPIO matrix.
 

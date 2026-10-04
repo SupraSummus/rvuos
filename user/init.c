@@ -7,6 +7,7 @@
  * build a second process out of nothing but capabilities,
  * exchange a word with it through shared memory and two notifications,
  * take turns with it through shared memory alone, which only the tick allows,
+ * and keep the performance counter it started meanwhile, on a board where user mode has one,
  * destroy a pool and watch both processes lose their capabilities to it,
  * lease the child a frame through a derived capability and take it back by revoking,
  * lend the child untyped memory it turns into a pool of its own
@@ -1181,10 +1182,13 @@ int main(void)
      * Each side spins on a word only the other writes and neither waits,
      * so only the tick gets them past this.
      */
+    uint32_t count = counter_start();
     shared[SHARED_TURN] = TURN_CHILD;
     while (shared[SHARED_TURN] != TURN_ROOT) {
     }
     puts("root: preemption ok\n");
+    /* The child's process never started the counter, and the root task's counted on from where it was. */
+    expect("the counter counts on across the child's turns", counter_kept(count) ? KERR_OK : KERR_INVALID_ARG);
 
     expect("wait for the child to finish", rv_wait(SLOT_UP, &bits));
     expect("the child is done", bits == BIT_DONE ? KERR_OK : KERR_INVALID_ARG);

@@ -15,8 +15,10 @@ void board_init(void)
 }
 
 /* The counters are the only user-mode CSRs rvuos knows of on QEMU, and they stay shut. */
-void board_user_csrs_reset(void)
+void board_user_csrs_switch(struct process *from, struct process *to)
 {
+    (void)from;
+    (void)to;
 }
 
 /* The machine has no watchdog of its own. */
