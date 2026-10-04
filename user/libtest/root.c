@@ -2,7 +2,8 @@
  * The library's test: a root task that does with user/lib/ what a program of several processes does,
  * and checks that everything it hands out comes back.
  *
- * It reads bytes left in free memory, as a loader leaves a program's files there;
+ * It checks the copies and fills against byte by byte ones,
+ * and reads bytes left in free memory, as a loader leaves a program's files there;
  * connects two peers with a channel whose rings hold a few packets, and has each send the other more than that;
  * builds a child that stores where it has no region, hears it fault and takes it down, twice;
  * checks a child that answers its checks and one that spins, which it finds and takes down;
@@ -170,6 +171,45 @@ static void read_back(void)
         check(got[i] == packet_byte(3, i), "free memory reads back what was written before it was given back");
     }
     say(&out, "libtest: free memory read: ok\n");
+}
+
+/*
+ * memcpy, memmove and memset, which move whole words where both ends are aligned, against byte by byte ones
+ * at every offset of either end within two words, every length up to a few words, and overlaps either way;
+ * the whole buffer is compared, so that nothing is written beside what was asked.
+ */
+static void copy_round(void)
+{
+    static uint8_t buf[40], src[40], want[40], moved[24];
+    for (uint32_t from = 0; from < 8; from++) {
+        for (uint32_t to = 0; to < 8; to++) {
+            for (uint32_t n = 0; n <= sizeof(moved); n++) {
+                for (uint32_t i = 0; i < sizeof(buf); i++) {
+                    buf[i] = want[i] = (uint8_t)(i + 1);
+                    src[i] = (uint8_t)(i + 0x80);
+                }
+                memcpy(buf + to, src + from, n);
+                for (uint32_t i = 0; i < n; i++) {
+                    want[to + i] = src[from + i];
+                }
+                check(memcmp(buf, want, sizeof(buf)) == 0, "memcpy copies what a byte loop copies");
+                memmove(buf + to, buf + from, n);
+                for (uint32_t i = 0; i < n; i++) {
+                    moved[i] = want[from + i];
+                }
+                for (uint32_t i = 0; i < n; i++) {
+                    want[to + i] = moved[i];
+                }
+                check(memcmp(buf, want, sizeof(buf)) == 0, "memmove moves what a byte loop through a copy moves");
+                memset(buf + to, (int)(0x100 | from), n);
+                for (uint32_t i = 0; i < n; i++) {
+                    want[to + i] = (uint8_t)from;
+                }
+                check(memcmp(buf, want, sizeof(buf)) == 0, "memset fills with the value's low byte, as a byte loop does");
+            }
+        }
+    }
+    say(&out, "libtest: copies and fills: ok\n");
 }
 
 /*
@@ -373,6 +413,7 @@ int main(void)
     struct tally start = tally();
     say(&out, "libtest: up, %u bytes free and %u slots unused\n", start.bytes, slots_unused(&self));
 
+    copy_round();
     read_back();
 
     /* Two peers, connected before either starts. */
