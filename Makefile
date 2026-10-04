@@ -344,18 +344,18 @@ endif
 		$(if $(WIFI_CONFIG),--ram $(WIFI_INPUT_AT):$(WIFI_CONFIG)) $(BUILD)/kernel-wifi.elf
 
 # The PHY harness of user/phyblob/ on an ESP32-C6, see user/phytrace.h, around Espressif's libphy.a,
-# which tools/phyblob-fetch.py fetches with what of ESP-IDF it needs, never into the tree.
+# which tools/esp-fetch.py fetches with what of ESP-IDF it needs, never into the tree.
 # It is a flat image at PHYBLOB_BASE, for tools/esp32c6-run.py --ram to place beside the kernel.
-PHYBLOB_CACHE := build/esp-phy
+PHYBLOB_CACHE := build/esp
 PHYBLOB_INIT  := $(BUILD)/user/phyblob/phy_init_data.c
 PHYBLOB_ROM   := $(addprefix $(PHYBLOB_CACHE)/,esp32c6.rom.ld esp32c6.rom.phy.ld esp32c6.rom.libgcc.ld esp32c6.rom.libc.ld)
 PHYBLOB_OBJ   := $(BUILD)/user/phyblob/start.o $(BUILD)/user/phyblob/phyblob.o $(BUILD)/user/phyblob/phy_init_data.o
 PHYBLOB       := $(BUILD)/phyblob.bin
 
 # The init data is written last, so it stands for every file fetched.
-$(PHYBLOB_INIT): tools/phyblob-fetch.py
+$(PHYBLOB_INIT): tools/esp-fetch.py
 	@mkdir -p $(dir $@)
-	tools/phyblob-fetch.py --cache $(PHYBLOB_CACHE) --init-data $@
+	tools/esp-fetch.py --cache $(PHYBLOB_CACHE) --init-data $@
 
 $(BUILD)/user/phyblob/phy_init_data.o: $(PHYBLOB_INIT)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -383,8 +383,8 @@ endif
 # It reads the ROM's ELF, from Espressif's esp-rom-elfs, again never into the tree.
 PHYBLOB_ROM_ELF := $(PHYBLOB_CACHE)/esp32c6_rev0_rom.elf
 
-$(PHYBLOB_ROM_ELF): tools/phyblob-fetch.py
-	tools/phyblob-fetch.py --rom-elf $@
+$(PHYBLOB_ROM_ELF): tools/esp-fetch.py
+	tools/esp-fetch.py --rom-elf $@
 
 .PHONY: phymap
 ifeq ($(BOARD),esp32c6)

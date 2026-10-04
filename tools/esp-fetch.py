@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""Fetch what the PHY harness of user/phyblob/ links against, and write its init data.
+"""Fetch Espressif's closed libraries for the ESP32-C6 and what of ESP-IDF they need, never into the tree.
 
-Espressif's libphy.a for the ESP32-C6, the ROM linker scripts of ESP-IDF it calls the ROM through,
+The PHY's libphy.a, the ROM linker scripts of ESP-IDF it calls the ROM through,
 and ESP-IDF's phy_init_data.c are fetched file by file, about 225 KB, from one commit each,
 into a cache outside the tree, and checked against their SHA-256.
 The init data is written as a C file of its 128 bytes,
-with ESP-IDF's default maximum TX power put into the entries that take it.
+with ESP-IDF's default maximum TX power put into the entries that take it;
+user/phyblob/ links against these.
 
 With --rom-elf it writes the ESP32-C6's ROM as an ELF with its symbols, which tools/phymap.py reads.
 Espressif publishes it only in a release of every chip's ROM, about 4.9 MB,
 which is checked and unpacked in memory, so only the chip's 490 KB are kept.
 
-Usage: tools/phyblob-fetch.py --cache DIR --init-data FILE
-       tools/phyblob-fetch.py --rom-elf FILE
+Usage: tools/esp-fetch.py --cache DIR --init-data FILE
+       tools/esp-fetch.py --rom-elf FILE
 """
 
 import argparse
@@ -51,7 +52,7 @@ def fetch(cache, url, digest):
     path = os.path.join(cache, url.rsplit("/", 1)[1])
     if not os.path.exists(path):
         os.makedirs(cache, exist_ok=True)
-        print(f"phyblob-fetch: fetching {url}", file=sys.stderr)
+        print(f"esp-fetch: fetching {url}", file=sys.stderr)
         with urllib.request.urlopen(url, timeout=60) as r:
             data = r.read()
         with open(path + ".tmp", "wb") as f:
@@ -59,17 +60,17 @@ def fetch(cache, url, digest):
         os.replace(path + ".tmp", path)
     data = open(path, "rb").read()
     if hashlib.sha256(data).hexdigest() != digest:
-        sys.exit(f"phyblob-fetch: {path} is not the file expected; remove it to fetch it again")
+        sys.exit(f"esp-fetch: {path} is not the file expected; remove it to fetch it again")
     return data
 
 
 def rom_elf(path):
     if not os.path.exists(path):
-        print(f"phyblob-fetch: fetching {ROM_ELFS}", file=sys.stderr)
+        print(f"esp-fetch: fetching {ROM_ELFS}", file=sys.stderr)
         with urllib.request.urlopen(ROM_ELFS, timeout=60) as r:
             release = r.read()
         if hashlib.sha256(release).hexdigest() != ROM_ELFS_SHA256:
-            sys.exit(f"phyblob-fetch: {ROM_ELFS} is not the release expected")
+            sys.exit(f"esp-fetch: {ROM_ELFS} is not the release expected")
         with tarfile.open(fileobj=io.BytesIO(release)) as tar:
             data = tar.extractfile(ROM_ELF).read()
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
@@ -77,7 +78,7 @@ def rom_elf(path):
             f.write(data)
         os.replace(path + ".tmp", path)
     if hashlib.sha256(open(path, "rb").read()).hexdigest() != ROM_ELF_SHA256:
-        sys.exit(f"phyblob-fetch: {path} is not the ROM expected; remove it to fetch it again")
+        sys.exit(f"esp-fetch: {path} is not the ROM expected; remove it to fetch it again")
 
 
 def entry(text):
@@ -87,17 +88,17 @@ def entry(text):
         return max(int(m.group(1), 0), min(MAX_TX_POWER * 4, int(m.group(2), 0)))
     if re.fullmatch(r"0[xX][0-9a-fA-F]+|\d+", text):
         return int(text, 0)
-    sys.exit(f"phyblob-fetch: an init data entry this does not read: {text}")
+    sys.exit(f"esp-fetch: an init data entry this does not read: {text}")
 
 
 def init_data(source):
     m = re.search(r"const esp_phy_init_data_t phy_init_data\s*=\s*\{\s*\{(.*?)\}\s*\};", source, re.S)
     if not m:
-        sys.exit("phyblob-fetch: phy_init_data.c holds no phy_init_data")
+        sys.exit("esp-fetch: phy_init_data.c holds no phy_init_data")
     # The commas between entries, not those inside a LIMIT's parentheses.
     values = [entry(e.strip()) for e in re.split(r",(?![^(]*\))", m.group(1)) if e.strip()]
     if len(values) != 128:
-        sys.exit(f"phyblob-fetch: phy_init_data has {len(values)} entries, not 128")
+        sys.exit(f"esp-fetch: phy_init_data has {len(values)} entries, not 128")
     return values
 
 
@@ -106,7 +107,7 @@ def write_init_data(cache, path):
     values = init_data(fetched[ESP_PHY + "phy_init_data.c"].decode())
     rows = ",\n".join("    " + ", ".join(f"0x{v:02x}" for v in values[i:i + 8]) for i in range(0, 128, 8))
     with open(path + ".tmp", "w") as f:
-        f.write(f"/* Written by tools/phyblob-fetch.py from ESP-IDF {IDF_COMMIT[:8]}'s phy_init_data.c "
+        f.write(f"/* Written by tools/esp-fetch.py from ESP-IDF {IDF_COMMIT[:8]}'s phy_init_data.c "
                 f"with a maximum TX power of {MAX_TX_POWER} dBm. */\n\n"
                 "#include <stdint.h>\n\n"
                 f"const struct {{\n    uint8_t params[128];\n}} phy_init_data = {{{{\n{rows}\n}}}};\n")
