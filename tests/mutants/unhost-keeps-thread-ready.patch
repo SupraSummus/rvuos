@@ -8,9 +8,9 @@ Report: thread without a process is not stopped
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -344,7 +344,6 @@ void sched_unhost(struct cap *hosted)
-     if (t->state == THREAD_WAITING) {
-         unwait(t);
+@@ -363,7 +363,6 @@ void sched_unhost(struct cap *hosted)
+     if (core_self()->current == t) {
+         board_user_csrs_switch(thread_process(t), NULL);
      }
 -    t->state = THREAD_STOPPED;
      core_thread_stopped(t);

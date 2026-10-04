@@ -299,8 +299,10 @@ void irq_complete(uint32_t line)
     (void)line;
 }
 
-void board_user_csrs_reset(void)
+void board_user_csrs_switch(struct process *from, struct process *to)
 {
+    (void)from;
+    (void)to;
 }
 
 void pmp_init(void)

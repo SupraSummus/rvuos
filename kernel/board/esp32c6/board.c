@@ -23,6 +23,7 @@
 
 #include "csr.h"
 #include "kernel.h"
+#include "object.h"
 
 #define REG(addr) (*(volatile uint32_t *)(addr))
 
@@ -73,19 +74,32 @@ void board_init(void)
 /*
  * The CSRs user mode writes, measured on the chip; see DESIGN.md, "Boards".
  * By number, since the assembler names none of them.
+ * The performance counter is the process's, see BOARD_PROCESS_CSRS: it stops while the process is away,
+ * and counts on from where it was when the process is back, as the ROM's delays need;
+ * it is left stopped at zero, counting nothing, for a process that never set it and for none.
+ * The rest is set back.
  */
-void board_user_csrs_reset(void)
+void board_user_csrs_switch(struct process *from, struct process *to)
 {
+    static const uint32_t none[BOARD_PROCESS_CSRS];
     csr_clear(mstatus, 0x11); /* UIE and UPIE, which user mode writes as ustatus */
     csr_write(0x004, 0);      /* uie */
     csr_write(0x005, 1);      /* utvec, whose mode bit stays set */
     csr_write(0x041, 0);      /* uepc */
     csr_write(0x042, 0);      /* ucause */
-    csr_write(0x7e1, 0);      /* mpcmr: the performance counter stops, */
-    csr_write(0x7e2, 0);      /* mpccr: at zero, */
-    csr_write(0x7e0, 0);      /* mpcer: counting nothing */
     csr_write(0x803, 0);      /* cpu_gpio_oen */
     csr_write(0x805, 0);      /* cpu_gpio_out */
+    if (from != NULL) {
+        from->csrs[0] = csr_read(0x7e0); /* mpcer: what the counter counts */
+        from->csrs[1] = csr_read(0x7e1); /* mpcmr: whether it counts */
+        from->csrs[2] = csr_read(0x7e2); /* mpccr: the count */
+    }
+    /* Stopped while it is set, so that it starts from the count kept. */
+    const uint32_t *kept = to != NULL ? to->csrs : none;
+    csr_write(0x7e1, 0);
+    csr_write(0x7e0, kept[0]);
+    csr_write(0x7e2, kept[2]);
+    csr_write(0x7e1, kept[1]);
 }
 
 /* The chip's watchdogs stay off, as board_init leaves them, so a kernel that stopped altogether stays stopped. */

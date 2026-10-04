@@ -39,7 +39,7 @@ void kmain(void)
     struct thread *root = boot_create_root();
     sched_start(root);
     process_activate(thread_process(root));
-    board_user_csrs_reset();
+    board_user_csrs_switch(NULL, thread_process(root));
 
     kputs("rvuos: entering user mode\n");
     /*

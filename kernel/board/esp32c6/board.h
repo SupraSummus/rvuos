@@ -40,6 +40,12 @@
  */
 #define PMP_SPLIT_STORE_AS_READ 1
 
+/*
+ * A process keeps the performance counter's three CSRs, mpcer, mpcmr and mpccr, across other processes' turns,
+ * which user mode writes as 0x800 to 0x802; see board_user_csrs_switch in board.c.
+ */
+#define BOARD_PROCESS_CSRS 3
+
 /* Every pmpcfg field lies as the privileged specification lays it out; see RP2350's board.h. */
 #define PMP_CFG_RX_TRANSPOSED 0
 

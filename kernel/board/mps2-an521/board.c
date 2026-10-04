@@ -39,8 +39,10 @@ void board_init(void)
  * User mode on ARMv8-M writes no state of the core's beyond the registers a trap saves,
  * since the kernel shuts the floating-point unit to it; see kernel/arch/arm/trap.c.
  */
-void board_user_csrs_reset(void)
+void board_user_csrs_switch(struct process *from, struct process *to)
 {
+    (void)from;
+    (void)to;
 }
 
 /* The kernel starts none of the board's watchdogs; see board_init. */

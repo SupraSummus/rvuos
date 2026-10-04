@@ -109,8 +109,8 @@ A board whose counter cannot be shown so, or whose neighbours a read would chang
 The time is authority, and goal 2 allows no ambient authority:
 a process given no clock and no timer line cannot tell time passing,
 unless it builds a clock from a second thread or learns the time from someone who has one.
-On the ESP32-C6 it can time its own turn on the core's performance counter,
-which the kernel stops at zero whenever another process's thread runs; see open decision 22.
+On the ESP32-C6 it can time its own turns on the core's performance counter,
+which the kernel keeps with the process and stops while another process's thread runs; see decision 22.
 Gating `rdtime` would have needed `mcounteren` switched per process, and the ESP32-C6 has neither.
 `RIGHT_R` on the clock reads the time, and `RIGHT_W` feeds the watchdog; see "The watchdog".
 Neither needs an object, so the clock adds one type and no object.

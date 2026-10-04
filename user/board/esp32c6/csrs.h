@@ -2,10 +2,12 @@
 #define RVUOS_USER_CSRS_H
 
 /*
- * The CSRs user mode writes on the ESP32-C6, which the kernel sets back whenever another process runs;
- * see kernel/board/esp32c6/board.c.
- * The demo's root task marks them before it hands over, and its successor finds them set back.
- * Each board's csrs.h offers the same two functions.
+ * The CSRs user mode writes on the ESP32-C6; see kernel/board/esp32c6/board.c.
+ * Whenever another process has run, a process finds the performance counter as it left it and the rest set back;
+ * a new process finds them all set back.
+ * The demo's root task starts the counter before it takes turns with its child, and finds it counting on after;
+ * it marks them all before it hands over, and its successor finds them set back.
+ * Each board's csrs.h offers the same four functions.
  */
 
 #include <stdbool.h>
@@ -38,6 +40,19 @@ static inline bool csrs_mark(void)
 static inline bool csrs_are_reset(void)
 {
     return csr_read(0x802) == 0 CSRS(CSR_IS_RESET);
+}
+
+/* Starts the counter on cycles, and says where it starts from. */
+static inline uint32_t counter_start(void)
+{
+    __asm__ volatile("csrw 0x800, %0\n\tcsrw 0x801, %0" : : "r"(1));
+    return csr_read(0x802);
+}
+
+/* Whether the counter still counts cycles, on past from. */
+static inline bool counter_kept(uint32_t from)
+{
+    return csr_read(0x800) == 1 && csr_read(0x801) == 1 && (int32_t)(csr_read(0x802) - from) > 0;
 }
 
 #endif

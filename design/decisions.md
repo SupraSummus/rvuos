@@ -291,15 +291,21 @@ until the maintainer decides otherwise.
     and carries out each register access it faults at.
 
 22. **User-mode CSRs nothing shuts.**
-    Working default: on the ESP32-C6 the kernel sets them back at every change of process; see "Boards".
-    So a program cannot keep the counter or the dedicated GPIO across another process's turn;
-    saving and restoring them with the process would, at some forty bytes a process.
-    The counter counts the kernel's cycles too,
+    Decided for the ESP32-C6's performance counter: a process keeps it, in twelve bytes of the process,
+    as its threads keep their registers, and finds it stopped at zero until it starts it; see "Boards".
+    The ROM's `ets_delay_us` counts on it, and Espressif's Wi-Fi libraries call it,
+    so a counter set back whenever another process ran would never end a delay that process cut into.
+    A process holds one copy, which is enough on the chip's single core.
+    Kept so, the counter stops while another process runs,
+    so a delay lasts at least as long as asked, and a process times its own turns and nobody else's.
+    It counts the kernel's cycles too,
     so a process that starts it still sees how long the kernel took over an interrupt while no other process ran.
+    Working default for the rest: the kernel sets them back at every change of process,
+    so a program cannot keep the dedicated GPIO across another process's turn.
     The dedicated GPIO reaches a pad only through the GPIO matrix,
     and a pad routed to it is every process's whatever the kernel sets back;
     no process holds the matrix today, so the first GPIO driver decides who may route one.
-    Decide with the first program that wants the counter or the dedicated GPIO kept.
+    Decide with the first program that wants the dedicated GPIO kept.
 
 23. **A second architecture.**
     Decided: ARMv7-M, with the kernel's objects, operations and demo unchanged, and ARMv8-M's Mainline after it;

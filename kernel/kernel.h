@@ -69,10 +69,13 @@ void board_core_init(void);
 void board_watchdog(uint32_t us);
 
 /*
- * The board's board.c: set back the CSRs user mode can write, so that nothing passes through them
- * from one process to the next; at boot, and whenever the processor goes to another process's thread.
+ * The board's board.c: the CSRs user mode can write, as the processor leaves process from for process to.
+ * What the board keeps of them is saved into from and taken from to, as a thread's registers are;
+ * the rest is set back, so that nothing passes through it from one process to the next.
+ * from is NULL at boot and once the thread left has lost its process, to as the running thread loses it.
  */
-void board_user_csrs_reset(void);
+struct process;
+void board_user_csrs_switch(struct process *from, struct process *to);
 
 /*
  * Minimal output into the kernel's log; formatted printing is not worth a printf yet.

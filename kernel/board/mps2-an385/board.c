@@ -13,8 +13,10 @@ void board_init(void)
  * User mode on ARMv7-M writes no state of the core's beyond the registers a trap saves,
  * and this board has no floating point for it to leave behind.
  */
-void board_user_csrs_reset(void)
+void board_user_csrs_switch(struct process *from, struct process *to)
 {
+    (void)from;
+    (void)to;
 }
 
 /* The kernel starts none of the board's watchdogs; see board_init. */

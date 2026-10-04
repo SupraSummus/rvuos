@@ -160,8 +160,10 @@ the performance counter through `0x800` to `0x802`, user mode's names for `mpcer
 which the TRM leaves out,
 and the dedicated GPIO at `0x803` and `0x805`.
 The ROM leaves the counter counting cycles.
-The kernel sets them all back at boot and whenever another process's thread runs,
-so nothing passes through them from one process to the next; see open decision 22.
+The kernel sets them all back at boot.
+Whenever another process's thread runs, it keeps the counter with the process that leaves and gives the one that comes its own,
+stopped at zero for a process that never started it, since the ROM's delays count on it;
+the rest it sets back, so nothing passes through any of them from one process to the next; see decision 22.
 `uscratch` faults in user mode, whatever the TRM says, and `uip` takes no write with nothing delegated.
 Measured on the chip: sixteen PMP entries, all unlocked after the ROM,
 a four-byte grain, TOR, NAPOT with an entry of RAM's size, `mtval` on access faults,

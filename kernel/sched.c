@@ -356,6 +356,10 @@ void sched_unhost(struct cap *hosted)
     if (t->state == THREAD_WAITING) {
         unwait(t);
     }
+    /* switch_to would find the running thread with no process to save the CSRs it keeps into, so they go now. */
+    if (core_self()->current == t) {
+        board_user_csrs_switch(thread_process(t), NULL);
+    }
     t->state = THREAD_STOPPED;
     core_thread_stopped(t);
     *hosted = (struct cap){ 0 };
@@ -655,12 +659,14 @@ static void switch_to(struct thread *next)
      * The thread leaving may have lost its process during its call, or another core destroyed it;
      * the one coming has one, since it is ready.
      */
-    if (core->current == NULL || thread_process(next) != thread_process(core->current)) {
-        process_activate(thread_process(next));
-        board_user_csrs_reset();
+    struct process *from = core->current != NULL ? thread_process(core->current) : NULL;
+    struct process *to = thread_process(next);
+    if (to != from) {
+        process_activate(to);
+        board_user_csrs_switch(from, to);
         core->pmp_stale = false;
     } else if (core->pmp_stale) {
-        process_activate(thread_process(next));
+        process_activate(to);
         core->pmp_stale = false;
     }
     core->current = next;

@@ -154,6 +154,9 @@ struct process {
     struct cap table;   /* CAP_CAPTABLE, or CAP_NONE once the table is taken */
     struct cap slots[PROCESS_REGION_SLOTS]; /* CAP_INSTALLED, or CAP_NONE when empty */
     struct pmp_image pmp;
+#ifdef BOARD_PROCESS_CSRS
+    uint32_t csrs[BOARD_PROCESS_CSRS]; /* what the board keeps of the CSRs user mode writes, see board_user_csrs_switch */
+#endif
 };
 
 /*
@@ -259,7 +262,16 @@ _Static_assert(sizeof(struct cap) == 24, "object layout");
 _Static_assert(sizeof(struct captable) == 12, "object layout");
 _Static_assert(sizeof(struct pool) == 56, "object layout");
 _Static_assert(sizeof(struct pmp_image) == 4 + 5 * PMP_MAX_ENTRIES, "object layout");
-_Static_assert(sizeof(struct process) == 8 + 24 * (1 + PROCESS_REGION_SLOTS) + sizeof(struct pmp_image),
+#ifdef BOARD_PROCESS_CSRS
+#define PROCESS_CSRS_SIZE (4 * BOARD_PROCESS_CSRS)
+#if CORES > 1
+#error "a process keeps one copy of the CSRs, which its threads on two cores would both change"
+#endif
+#else
+#define PROCESS_CSRS_SIZE 0
+#endif
+_Static_assert(sizeof(struct process) ==
+                   8 + 24 * (1 + PROCESS_REGION_SLOTS) + sizeof(struct pmp_image) + PROCESS_CSRS_SIZE,
                "object layout");
 _Static_assert(sizeof(struct thread) == 32 + 3 * sizeof(struct cap) + sizeof(struct trap_frame), "object layout");
 _Static_assert(sizeof(struct notification) == 16, "object layout");
