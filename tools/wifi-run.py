@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Run the Wi-Fi system on a Pico 2 W, follow its log over the network, and check it from the host while it runs.
+"""Run a Wi-Fi system, follow its log while it runs, and check it from the host.
 
-The command after -- boots the system and waits for its halt, tools/rp2350-run.py as `make BOARD=rp2350 wifi` runs it.
-Meanwhile this asks for the log on UDP port 7070, by broadcast until the system answers, see user/wifi/wifi.h,
-and prints it as it comes; the halt writes out the rest.
-Once the log says the clients answer, it checks the status port, the echo, the clock,
+The command after -- boots the system and waits for its halt, printing what the board writes.
+On a Pico 2 W, as `make BOARD=rp2350 wifi` runs it, this asks for the log on UDP port 7070, see user/wifi/wifi.h,
+and once the log says the clients answer, checks the status port, the echo, the clock,
 the echo built again after a fault and after a hang, and ping.
+With --console, as `make BOARD=esp32c6 wifi-esp32c6` runs it, the command's output is the log
+and its input reaches the root task: once the log says the clients answer, this checks the same, but for the logger,
+which that system does not run, then ends the run with "end", see user/wifi/esp32c6/root.c.
+Each step follows a line of the log or the command's end, never a time.
 
 Each line goes out with its seconds since the start, into --save's file too;
 a fault's or the heap's line gets the functions its addresses fall in, from the ELF files of --symbols.
@@ -13,7 +16,7 @@ a fault's or the heap's line gets the functions its addresses fall in, from the 
 It exits with the halt's code, or if that is 0, with 1 when a check failed
 or the system had an address and its log never came.
 
-Usage: tools/wifi-run.py [--save file] [--symbols elf]... -- command...
+Usage: tools/wifi-run.py [--console] [--save file] [--symbols elf]... -- command...
 """
 
 import argparse
@@ -38,6 +41,7 @@ CLIENTS_UP = (ECHO_UP, "root: the clock says it is")
 ECHO_FAULTED = "root: the echo faulted"
 ECHO_HUNG = "root: the echo stopped answering"
 HAS_ADDRESS = "root: the system answers at"
+ADDRESS = re.compile(r"root: the system answers at (\d+\.\d+\.\d+\.\d+)")
 # The lines whose addresses are named, and the addresses in them.
 NAMED = re.compile(r"^(fault:|heap:)|mepc=")
 HEX = re.compile(r"\b(?:0x)?([0-9a-f]{8})\b")
@@ -122,6 +126,18 @@ class Log:
         self.tail = ""  # the end of a line not printed yet
         self.changed = threading.Condition()
         self.stop = threading.Event()
+        self.ended = False  # the command that boots the system is done
+
+    def feed(self, text):
+        """The log as the command's output brings it, with --console."""
+        with self.changed:
+            self.text += text
+            self.changed.notify_all()
+
+    def end(self):
+        with self.changed:
+            self.ended = True
+            self.changed.notify_all()
 
     def ask(self):
         to = (self.device or "255.255.255.255", LOG_PORT)
@@ -173,10 +189,11 @@ class Log:
         with self.changed:
             return self.text.count(line)
 
-    def wait(self, ready, timeout):
-        """Waits until ready(text) holds, for timeout seconds at most; whether it did."""
+    def wait(self, ready, timeout=None):
+        """Waits until ready(text) holds, or the command is done, for timeout seconds at most; whether it holds."""
         with self.changed:
-            return self.changed.wait_for(lambda: ready(self.text) or self.stop.is_set(), timeout) and ready(self.text)
+            self.changed.wait_for(lambda: ready(self.text) or self.stop.is_set() or self.ended, timeout)
+            return ready(self.text)
 
 
 class Checks:
@@ -223,7 +240,7 @@ class Checks:
 
     def status(self):
         got, _ = self.ask_again(STATUS_PORT, b"status?", 5)
-        ok = got is not None and got.startswith(b"rvuos on a Pico 2 W")
+        ok = got is not None and got.startswith(b"rvuos on ")
         self.result("status", ok, got.decode(errors="replace").strip() if got else "no answer on UDP port 7777")
 
     def echo(self, count=20, size=32):
@@ -269,21 +286,35 @@ class Checks:
         received = int(m.group(1)) if m else 0
         self.result("ping", received >= 4, f"{received} of 5 answered")
 
-    def run(self):
+    def run(self, then):
         self.status()
         self.echo()
         self.clock()
         self.echo_back("echo after a fault", b"fault", ECHO_FAULTED, 5)
         self.echo_back("echo after a hang", b"hang", ECHO_HUNG, 6)
         self.ping()
+        self.verdict(then)
+
+    def verdict(self, then):
         if self.failed:
             self.out.say("checks failed:", ", ".join(self.failed))
         else:
-            self.out.say("every check passed; the system runs on until its run is over")
+            self.out.say(f"every check passed; {then}")
+
+
+def tell(boot, line, out):
+    """A line to the root task, through the command's input, with --console."""
+    try:
+        boot.stdin.write(line + "\n")
+        boot.stdin.flush()
+    except (BrokenPipeError, ValueError):
+        out.say(f"could not say '{line}': the command is done")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--console", action="store_true",
+                        help="the command's output is the log, and its input reaches the root task")
     parser.add_argument("--save", metavar="FILE", help="also write every line into a file")
     parser.add_argument("--symbols", action="append", default=[], metavar="ELF",
                         help="name the functions the addresses of fault lines fall in, from this ELF file")
@@ -295,40 +326,57 @@ def main():
 
     out = Output(args.save, Symbols(args.symbols))
     log = Log(out)
-    follower = threading.Thread(target=log.run, daemon=True)
-    follower.start()
-    boot = subprocess.Popen(command, stdout=subprocess.PIPE, text=True, errors="replace")
+    follower = None
+    if not args.console:
+        follower = threading.Thread(target=log.run, daemon=True)
+        follower.start()
+    boot = subprocess.Popen(command, stdout=subprocess.PIPE, stdin=subprocess.PIPE if args.console else None,
+                            text=True, errors="replace")
     halt_text = []
 
     def through():
         for line in boot.stdout:
             halt_text.append(line)
             out.lines(line)
+            if args.console:
+                log.feed(line)
+        log.end()
 
     piper = threading.Thread(target=through, daemon=True)
     piper.start()
 
     checks = None
     try:
-        while boot.poll() is None and not log.wait(lambda t: all(s in t for s in CLIENTS_UP), 1.0):
-            pass
-        if boot.poll() is None:
+        if args.console:
+            if log.wait(lambda t: all(s in t for s in CLIENTS_UP)):
+                checks = Checks(out, log, ADDRESS.search(log.text).group(1))
+                checks.run("the run ends")
+                tell(boot, "end", out)
+        elif log.wait(lambda t: all(s in t for s in CLIENTS_UP)):
             checks = Checks(out, log, log.device)
-            checks.run()
+            checks.run("the system runs on until its run is over")
         code = boot.wait()
     except KeyboardInterrupt:
-        boot.terminate()
+        if args.console:
+            tell(boot, "end", out)
+            out.say("stopped; the run ends")
+        else:
+            boot.terminate()
+            out.say("stopped; the system runs on until its run is over or the chip is unplugged")
         code = boot.wait()
-        out.say("stopped; the system runs on until its run is over or the chip is unplugged")
     piper.join()
     log.stop.set()
-    follower.join()
+    if follower:
+        follower.join()
 
     if code != 0:
         sys.exit(code)
     if checks is not None and checks.failed:
         sys.exit(1)
-    if log.device is None and any(HAS_ADDRESS in line for line in halt_text):
+    if args.console and checks is None and "root: joining" in log.text:
+        out.say("the system's clients never answered" if HAS_ADDRESS in log.text else "the system never had an address")
+        sys.exit(1)
+    if not args.console and log.device is None and any(HAS_ADDRESS in line for line in halt_text):
         out.say("the system had an address, and its log never came over the network")
         sys.exit(1)
 

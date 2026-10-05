@@ -2,7 +2,7 @@
 #define RVUOS_WIFI_SYSTEM_H
 
 /*
- * What the Wi-Fi system's root tasks share, whatever board, and driver of its own, each runs beside:
+ * What the root tasks of the Wi-Fi system share, the Pico 2 W's and the ESP32-C6's, each beside a driver of its own:
  * the network process, the link that joins it to the driver, the clients it serves through its hub,
  * each second's question to every child whether its loop still comes round, and the watchdog fed.
  * The root task builds its driver, says what to do with it, and decides when the run ends;

@@ -1,0 +1,77 @@
+#ifndef RVUOS_WIFI_OSI_H
+#define RVUOS_WIFI_OSI_H
+
+/* The driver's pieces that Espressif's libraries reach through the adapter, and that reach each other. */
+
+#include <stdarg.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "drv.h"
+#include "esp.h"
+#include "lib/lock.h"
+#include "lib/self.h"
+
+struct thread;
+struct ets_timer;
+
+/*
+ * osi.c: the adapter, its table for esp_wifi_init_internal, the threads it runs everything on,
+ * built from the driver's own account s, its timers, which its timer thread runs,
+ * and the chip's random number generator.
+ * A thread that did not start as one of the adapter's, the driver's first, joins them with osi_adopt,
+ * its stack between stack_lo and stack_hi, before it calls the libraries.
+ */
+struct osi_funcs *osi_init(struct drv *d, struct self *s);
+void osi_log_level(unsigned int level);
+struct thread *osi_thread(void (*f)(void *), void *arg, const char *name, uint32_t stack);
+struct thread *osi_adopt(const char *name, uintptr_t stack_lo, uintptr_t stack_hi);
+uint64_t osi_now_us(void);
+struct ets_timer *osi_timer_new(void (*f)(void *), void *arg);
+void osi_timer_arm_us(struct ets_timer *t, uint32_t us);
+void osi_timer_disarm(struct ets_timer *t);
+void drv_random(uint8_t *buf, size_t len);
+
+/* heap.c: the heap, between the image's data and the ROM's at the top of the driver's block. */
+void osi_heap_init(const struct lock *l);
+void *osi_malloc(size_t size);
+void *osi_calloc(size_t n, size_t size);
+void *osi_realloc(void *p, size_t size);
+void osi_free(void *p);
+uint32_t osi_heap_free(void);
+
+/* phy.c: the modem's clocks, and the PHY Espressif's libphy.a brings up. */
+void drv_phy_clock_enable(void);
+void drv_phy_enable(void);
+void drv_phy_disable(void);
+void drv_wifi_clock_enable(void);
+void drv_wifi_reset_mac(void);
+
+/*
+ * supp.c: hostap's supplicant behind the table the libraries call a supplicant through,
+ * and the PMK of the network the driver is to join, derived before the libraries ask for it.
+ */
+esp_err_t drv_wpa_register(void);
+void drv_supp_prepare(const char *ssid, const char *pass);
+
+/* hostap.c: hostap's lines at its debug level too, from here on. */
+void drv_wpa_debug(void);
+
+/* crypto.c: hostap's crypto, in the table the libraries call crypto through. */
+void drv_crypto_funcs(struct crypto_funcs *c);
+
+/*
+ * main.c: the driver's page, text to the kernel's log, the libraries' events,
+ * and a step that failed, the first of which the page keeps for the root task.
+ */
+extern struct drv *drv_self;
+void drv_say(const char *fmt, ...);
+void drv_failed(const char *step, uint32_t detail);
+void drv_vsay(const char *tag, const char *fmt, va_list args);
+void drv_event(const char *base, int32_t id, const void *data, size_t size);
+
+/* glue.c */
+int vsnprintf(char *buf, size_t size, const char *fmt, va_list args);
+int snprintf(char *buf, size_t size, const char *fmt, ...);
+
+#endif

@@ -292,7 +292,7 @@ checking that everything handed out comes back and that the second child left th
 a root task that builds the system, a driver for the CYW43439, its Wi-Fi chip, a network process with an IP stack,
 and three clients of the network process, the echo, the clock and the logger;
 `wifi.h` says what they share, which is the types of their pages,
-and `system.h` the root task's half of the network process and its clients, which is not the driver's.
+and `system.h` the root task's half of the network process and its clients, which the ESP32-C6's root task shares.
 The driver and the network process trade Ethernet frames through a channel, the link.
 Each client has a channel from the network process's hub, through which it uses datagram sockets, `sock.h`:
 it binds ports, its own until it closes them or is gone, sends from them and receives what is sent to them.
@@ -313,6 +313,18 @@ since there are more of them than regions.
 What the system does, scan, join a network or run an access point, comes from a file the loader places in the root task's input region,
 `make BOARD=rp2350 wifi WIFI_CONFIG=file`, with lines `mode=scan|sta|ap`, `ssid=`, `pass=`, `bssid=`, `channel=` and `run=`;
 so a passphrase lies in no image and in no file git tracks; `local/`, which git ignores, is the place for one.
+On an ESP32-C6 the same network process runs beside a driver of another kind, `user/wifi/esp32c6/`:
+Espressif's closed Wi-Fi libraries around an adapter, a child that runs an image of its own from the window onto flash,
+and builds the threads the libraries want as tasks from what its root task gave it, section 8.4.
+Its root task builds the network process and its clients as the Pico 2 W's does, but for the logger,
+since it carries the kernel's log to the console itself as the log comes, section 5.10,
+where the host may type `end` or `stats`.
+`make BOARD=esp32c6 wifi-esp32c6 WIFI_CONFIG=file` writes the driver into flash, unless the flash holds it already, and runs it,
+scanning, or with `ssid=` and `pass=`, joining that network, at the access point `bssid=` names if it names one,
+where the network process takes an address by DHCP and answers ping and UDP port 7777, and its clients theirs;
+`tools/wifi-run.py` checks them from the host as it checks the Pico 2 W's, and ends the run, which otherwise lasts `run=` seconds.
+`debug=frames,stats,wpa`, `lib=`, `ax=0`, `pmf=0` and `ps=1` have the driver tell more or join otherwise,
+as `user/wifi/esp32c6/root.c` says, and a thread of the driver's that faults is told with its stack, its functions named.
 A program of several processes lies in a directory of its own, `user/<program>/`, its root task in `root.c`,
 and the Makefile's `PROGRAMS` links each with the library.
 `user/wifi/NOTES.md` says what writing it was like, before the library and after.

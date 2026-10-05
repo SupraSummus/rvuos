@@ -51,8 +51,17 @@ Of the Wi-Fi system it runs only what makes no system call, the IP stack and the
 a change to `user/wifi/` with a Pico 2 W connected runs `make BOARD=rp2350 wifi` too,
 and `WIFI_CONFIG` names a network to join from a file git does not track,
 `local/wifi.conf` on the maintainer's machine, never from one it does.
+A change to `user/wifi/esp32c6/` or `kernel/board/esp32c6/` with an ESP32-C6 connected runs `make BOARD=esp32c6 wifi-esp32c6`,
+which writes the driver into the flash at `0x210000` if it changed and scans,
+or, with `WIFI_CONFIG` naming a network as for the Pico 2 W, joins it,
+and `tools/wifi-run.py` checks it from the host as it checks the Pico 2 W's, but for the logger, before it ends the run.
+The log comes as the run goes, each line timed, and stays in `build/esp32c6/wifi-run.log`;
+the configuration's `debug=` and `lib=`, see `user/wifi/esp32c6/root.c`, have the driver tell more,
+and a fault of one of its threads comes with its stack and the names of its functions.
 `make check` builds no PHY harness either, so a change to `user/phyblob/`, `user/phytrace.h` or the ESP32-C6's device ranges
-runs `make BOARD=esp32c6 phymap`, which builds the harness and lists what it reaches that no frame covers.
+runs `make BOARD=esp32c6 phymap`, which builds the harness and lists what it reaches that no frame covers;
+`make BOARD=esp32c6 wifi-esp32c6-map` lists the same for the Wi-Fi driver,
+which a change to its device ranges or `phy.c` runs too.
 A new kernel global needs a reset in `host_boot` too,
 since the host boots once per input in one process.
 A new `BOOT_CAP_*` or `REPLAY_CAP_*` slot, a device QEMU's board lists, or an operation whose arguments change,

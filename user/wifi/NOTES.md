@@ -333,3 +333,94 @@ for the status and ten echoes of 64 bytes:
 and at the end the clock's time still agreed with the laptop's to the minute.
 Nothing was restarted but what the checks at its start set out to restart.
 
+
+## The ESP32-C6's driver as a child
+
+On the ESP32-C6 the driver is Espressif's closed Wi-Fi libraries around an adapter, `user/wifi/esp32c6/`.
+It ran in the root task's process until its frames were to reach the network process;
+now it is a child, the network process its peer through the link,
+and the board takes an address by DHCP and answers a laptop's ping, about 10 ms there and back.
+The network process did not change but for the board its status line names.
+
+**Eight regions, and the libraries want six.**
+The root task's process held its code and data, the driver's RAM, the window onto flash, the ROM, the modem,
+the SAR ADC and the random number generator: all eight, so the link had nowhere to go.
+Carving the link out of the driver's RAM would have cost half its free heap;
+a pager, a thread that installs the frame another faulted on and resumes it, works with the kernel as it is,
+but the kernel logs every fault, so it suits frames touched seldom.
+As a child the driver holds all eight too, its image in the code region in place of the root task's.
+
+**A child that builds threads.**
+The libraries want tasks, which the adapter runs as threads, and the library knew only children of one thread.
+`child_give_own` hands a child a pool, timer lines, units and slots, and `child_self` spends them
+through the calls a root task uses, so the adapter changed only where its account comes from.
+The threads' faults reach the root task as the driver's, but it holds no capability to them to ask which;
+the kernel's own report in the log says.
+
+**The ROM's delays counted on a counter the kernel stopped.**
+`ets_delay_us` counts cycles in the user-mode performance counter, which the kernel stopped at every change of process,
+so beside other processes a delay could have lasted for ever.
+Open decision 22 was waiting for a program that wanted the counter kept: a process now keeps it.
+
+**What the build and the board kept.**
+The Makefile read no dependencies of the driver's files, so a changed header left the rest with the old layout.
+And the board's RAM keeps what a longer configuration left, so one that named no network joined the last one named;
+the loaders' `--text` now ends it with a NUL.
+
+## Debugging the ESP32-C6's driver
+
+A second network, of two access points, found what the first had hidden,
+and finding it took tools the system lacked, which it keeps now.
+
+**The log at the halt misled.**
+The ESP32-C6's kernel has no console, so its log came out when the machine halted,
+and a host that waited for the address in the log pinged a board that had already halted: the board seemed out of reach.
+The root task now carries the log to the console as it comes, through the reader the boot grants it, woken by the log's line,
+and the console brings the host's commands the other way, `end` and `stats`.
+
+**A round follows events.**
+`tools/wifi-run.py` acts on the log's lines: the address starts the checks, and their end ends the run with `end`;
+the loader writes the driver into flash only when the flash's MD5 differs, on the connection that boots the kernel.
+A round that joins and checks takes 8 s, from some 40, and each line comes with its time.
+
+**A fault names its place.**
+The adapter's threads are watched by one of its own, which writes the faulted thread's registers and the top of its stack
+into the log, and the host names the functions their addresses fall in.
+It found a jump to 0x20 in `wifi_hw_stop`, through an entry of the OS table that had changed since the start.
+The heap now refuses to free what it did not hand out, and says who tried:
+hostap's `wpa_sm_deinit` frees the context `wpa_sm_init` was given, and the supplicant had given it a static one,
+which the first stop of the radio put among the heap's free blocks, and the next allocations handed out the driver's data.
+The OS table lies in flash now, read only, so that a stray write faults where it is made.
+And two of the adapter's threads read their records before `osi_thread` had stored them,
+which the watcher, started first, brought out.
+
+**Two details of the protocols.**
+hostap orders a TKIP group key's Michael keys as Linux's drivers take them and the libraries take 802.11's,
+so every frame to the group failed its check where the group used TKIP.
+An access point that protects management frames keeps an association a halted run never left,
+and refuses the next run's first join until the station fails its query, so the driver leaves at the end of a run.
+
+## One root task's half for both boards, and fewer of Espressif's libraries
+
+**What the image holds, by library.**
+A map of the driver's link gave each closed library its share:
+libnet80211.a 177 KB of code, libpp.a 102 KB, libphy.a 28 KB, libcore.a 310 bytes, libbtbb.a nothing at all;
+libcoexist.a was fetched and never linked.
+Three of the five are gone, and the driver defines the few words libcore.a gave.
+Replacing the other two takes a MAC of one's own, as esp32-open-mac wrote for the plain ESP32, a project of months.
+
+**Code that did not do what its comment said.**
+Turning the RF off at the end stood commented out, while its comment and its commit said it ran:
+called, it faulted on a register of the PMU, which the driver's frames leave to the kernel.
+And `phymap`, run over the driver, laid the PMU's registers to functions that never reach them,
+because a weakened library function keeps its code, without a symbol, in a section it shares with others.
+
+**The root tasks' shared half.**
+The two root tasks built the network process alike, and only the Pico 2 W's built clients.
+`system.h` holds what they share; it lies in the image the children run, so it keeps no global,
+and a root task hands it a `struct system`, as the library takes a `struct self`, which cost nothing to write.
+The ESP32-C6 then had too little memory for the clients: the room for children's data is a power of two,
+and the hub one frame for every client's channel, four of 16 KiB.
+The hub now has as many channels as the clients wanted need, and the driver's data a block of its own,
+which leaves the ESP32-C6's root task 8 KiB and 9 slots: enough, and a number to watch.
+Its echo answers in 13 to 22 ms at the median, run to run, where the Pico 2 W's does in about 5.

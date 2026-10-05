@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Map the device registers the PHY harness of user/phyblob/ reaches, read from its code and the ROM's.
+"""Map the device registers the PHY harness of user/phyblob/, or the Wi-Fi driver, reaches, from its code and the ROM's.
 
 libphy.a calls much of the PHY in the ROM through a table of function pointers, g_phyFuns_instance,
 whose first content lies in the ROM's ELF and some of whose slots the library fills with its own fixes.
@@ -14,7 +14,15 @@ nor a call through a pointer other than the table's slots; the report counts tho
 --i2c lists the calls to the ROM's analog I2C functions with their constant arguments,
 --functions every function reached and the blocks it touches.
 
-Usage: tools/phymap.py [--objdump llvm-objdump] [--i2c] [--functions] harness.elf rom.elf board.h
+With --all it follows from every function of the image instead,
+for an image that reaches much of its code only through pointers,
+as the Wi-Fi driver of user/wifi/esp32c6/ reaches the libraries' tasks and their interrupt's handler;
+the linker kept only functions something names, so this is what the image may reach.
+Code past the end of its function's symbol is reported apart, as the name plus an offset:
+such is a library function weakened so that one of the driver's takes its place,
+whose code stays behind in a section it shares with others.
+
+Usage: tools/phymap.py [--objdump llvm-objdump] [--i2c] [--functions] [--all] image.elf rom.elf board.h
 """
 
 import argparse
@@ -102,14 +110,17 @@ class Elf:
         self.sections = {string(names, h[0]): h for h in headers}
         self.data = data
         self.symbols = {}
+        self.sizes = {}  # of each function, by its address
         for h in headers:
             if h[1] != 2:  # SHT_SYMTAB
                 continue
             strtab = headers[h[6]]
             for off in range(h[4], h[4] + h[5], 16):
-                name, value = struct.unpack_from("<II", data, off)
+                name, value, size, info = struct.unpack_from("<IIIB", data, off)
                 if name:
                     self.symbols.setdefault(string(strtab, name), value)
+                if info & 0xf == 2 and size:  # STT_FUNC
+                    self.sizes[value] = size
 
     def words(self, section):
         h = self.sections[section]
@@ -132,13 +143,18 @@ def disassemble(objdump, path):
 
 
 class Map:
-    def __init__(self, objdump, harness, rom):
+    def __init__(self, objdump, image, rom, everything):
         self.funcs = {}
-        for origin, path in (("rom", rom), ("lib", harness)):
+        h, r = Elf(image), Elf(rom)
+        for origin, path, elf in (("rom", rom, r), ("lib", image, h)):
             for addr, (name, body) in disassemble(objdump, path).items():
+                end = addr + elf.sizes.get(addr, 1 << 32)
+                rest = [i for i in body if i[0] >= end]
+                body = [i for i in body if i[0] < end]
                 if body:
                     self.funcs[addr] = (name, body, origin)
-        h, r = Elf(harness), Elf(rom)
+                if rest:
+                    self.funcs[rest[0][0]] = (f"{name}+{rest[0][0] - addr:#x}", rest, origin)
         self.table_vars = {h.symbols["g_phyFuns"], r.symbols["rom_phyFuns"]}
         self.table_base = r.symbols["g_phyFuns_instance"]
         self.table_slots = (r.symbols["rom_phyFuns"] - self.table_base) // 4
@@ -146,7 +162,8 @@ class Map:
         first = (self.table_base - base) // 4
         self.slots = {i: {words[first + i]} - {0} for i in range(self.table_slots)}
         self.own_slots = set()
-        self.root = h.symbols["phyblob_main"]
+        self.roots = ([a for a, f in self.funcs.items() if f[2] == "lib"] if everything
+                      else [h.symbols["phyblob_main"]])
 
     def name(self, addr):
         return self.funcs[addr][0] if addr in self.funcs else f"{addr:#x}"
@@ -256,10 +273,10 @@ class Map:
         return result
 
     def reach(self):
-        """Every function reached from the root, until the slots the library fills stop growing."""
+        """Every function reached from the roots, until the slots the library fills stop growing."""
         while True:
             filled = {k: set(v) for k, v in self.slots.items()}
-            self.found, todo = {}, [self.root]
+            self.found, todo = {}, list(self.roots)
             while todo:
                 a = todo.pop()
                 if a in self.found or a not in self.funcs:
@@ -286,17 +303,19 @@ def main():
     ap.add_argument("--objdump", default="llvm-objdump")
     ap.add_argument("--i2c", action="store_true", help="list the analog I2C calls")
     ap.add_argument("--functions", action="store_true", help="list every function reached")
-    ap.add_argument("harness")
+    ap.add_argument("--all", action="store_true", help="follow from every function of the image")
+    ap.add_argument("image")
     ap.add_argument("rom")
     ap.add_argument("board")
     args = ap.parse_args()
 
-    m = Map(args.objdump, args.harness, args.rom)
+    m = Map(args.objdump, args.image, args.rom, args.all)
     m.reach()
     found = sorted(m.found)
     lib = sum(m.funcs[a][2] == "lib" for a in found)
-    print(f"phymap: {len(found)} functions reached from phyblob_main, "
-          f"{lib} of the harness and libphy.a, {len(found) - lib} of the ROM;")
+    origin, image = (("every function of the image", "the image") if args.all
+                     else ("phyblob_main", "the harness and libphy.a"))
+    print(f"phymap: {len(found)} functions reached from {origin}, {lib} of {image}, {len(found) - lib} of the ROM;")
     print(f"  libphy.a fills {len(m.own_slots)} of the ROM's {m.table_slots} slots with its own functions, "
           f"and {sum(f['lost'] for f in m.found.values())} calls go through pointers this does not follow")
 

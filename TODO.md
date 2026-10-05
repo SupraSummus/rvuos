@@ -73,14 +73,45 @@ what is left:
   `phymap` sees only constant addresses, so a register reached through a table or a loop shows first in a trace.
   The harness reaches three of the board's frames, the SAR ADC, the modem and the eFuse,
   which with the tracer's own regions have to fit a process's eight region slots.
-- Wi-Fi on the ESP32-C6 through Espressif's closed libraries, as the Wi-Fi system's driver, run from the window onto flash:
-  linked, the libraries keep about 360 KB of code and constants and 21 KB of data, more than the SRAM leaves.
-  Still to come: the driver, its adapter for the libraries' OS functions, and the WPA2 supplicant.
+- The ESP32-C6's Wi-Fi root task has 8 KiB of memory and 9 slots left once its clients run,
+  so another client needs room found first, in the driver's block or a smaller `CLIENT_CHAN_SIZE`.
+- The ESP32-C6's echo answers in 13 to 22 ms at the median, the Pico 2 W's in about 5, and the C6's ping in about 10:
+  where the time goes, the radio, the driver's turn after its interrupt, open decision 9, or the libraries' task,
+  is not measured.
+- The Pico 2 W's run lasts its `run=` whatever its checks found, since the host has no way to end it:
+  its console is the halt's alone, and a word on the logger's port could carry the end instead.
+- The ESP32-C6's driver stops once the access point lets the station go, and the root task ends the run:
+  nothing joins again, as ESP-IDF leaves to the program too.
+- WPA3 on the ESP32-C6: the libraries ask the supplicant for SAE through `wpa3_build_sae_msg` and `wpa3_parse_sae_msg`,
+  which hostap's `common/sae.c` answers on elliptic curves its own crypto lacks;
+  upstream hostap has no backend for mbedtls, which OpenWrt carries as a patch.
+  BIP-GMAC, the management group key of WPA3's 192-bit and GCMP suites, needs the crypto table's GMAC,
+  which `crypto.c` leaves out, and an install the supplicant refuses.
+- The ESP32-C6's station keeps power save off: with `ps=1` the libraries sleep nine tenths of the run between beacons,
+  and the station takes no address. The adapter's side of the modem's sleep is to be made to work.
+- ESP-IDF tracks the PHY's PLL every second while the radio runs, `phy_track_pll` of `esp_phy`;
+  the adapter does not, which a run of hours may need.
+- The ESP32-C6's radio stays on until the next boot when a thread of the driver's faults
+  or the root task halts for the network process; the driver turns it off only on its own way out,
+  and even then the RF's analog buses stay powered in the PMU, `PMU_RF_PWC`'s bits 28 to 31,
+  which the kernel's `board_init` sets and the driver's `phy_xpd_rf` leaves alone.
+  The kernel's halt could power the modem down, once what of the PMU does it is measured.
+- At one access point of a network the ESP32-C6's station joins and hears what goes to the group,
+  but nothing addressed to it, not even an aggregate by the libraries' counters, so DHCP seldom finishes;
+  alike with `ax=0` and `pmf=0`. The access point beside it serves the station, and a laptop the first;
+  the station hears the first at -73 dBm, the second at -62. ESP-IDF's stack on the board is the comparison to make.
+- The ESP32-C6's libraries refuse an open network, reason 210, no access point of compatible security;
+  what of the configuration differs from ESP-IDF's is open.
+  A sketch on Arduino's ESP32 core runs that stack on the board, so its init configuration and modem registers can be compared.
 - With the APM units confining the modem to the driver's block, as measured for open decision 13,
   the modem reached `0x4082c7ac`, in the root task's code block past its image, once in each of two runs,
   before the driver had started, and the units refused it; five runs after showed nothing.
   What of the modem reaches memory before a driver programs it, and why there, is not known;
   with the units off, as they are, such an access lands.
+- The driver's process holds all eight regions, so anything more it needs takes a region from something it has.
+  A pager would lift that: a thread that, when another faults on a frame its process may have,
+  installs the frame in place of one it is not using and resumes the thread, which runs the access again.
+  The kernel allows it as it is, but writes a report of every fault into the log, so it suits frames touched seldom.
 - Feed the replay corpus to the board.
   Something has to put each input where `BOOT_CAP_INPUT` points,
   below the ROM's buffers or over USB once the kernel runs,

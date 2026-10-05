@@ -3,8 +3,10 @@
 
 /*
  * The Wi-Fi system on a Pico 2 W: what its processes agree on.
+ * On an ESP32-C6 the network process, its clients but the logger, and the link are the same,
+ * beside a driver of its own, see esp32c6/drv.h, which reports the driver's states below.
  *
- * The root task builds the system with user/lib/ and watches it; system.h is what of it is not the driver's.
+ * The root task builds the system with user/lib/ and watches it; system.h is what of it the two boards' root tasks share.
  * The driver of the CYW43439, the radio, is a process of its own;
  * it reaches the chip through PIO0, which clocks the chip's gSPI bus, and through the control registers of four pins,
  * and loads the chip's firmware from frames the root task lends it.
@@ -49,10 +51,11 @@ struct blob_header {
 
 /* The driver. */
 enum drv_state {
-    DRV_UP = CHILD_RUNNING, /* the chip runs its firmware, set up; the blob's frames may go */
+    DRV_UP = CHILD_RUNNING, /* the chip runs its firmware, set up, the blob's frames may go; or the libraries run */
     DRV_SCANNED,            /* a scan is done, its networks in the page */
     DRV_JOINED,             /* joined the network the page names */
     DRV_AP,                 /* an access point runs, as the page names it */
+    DRV_LEFT,               /* left the network, as the root task asked once the run was over; the ESP32-C6's */
 };
 
 /* What the root task asks of the driver, from the configuration the loader left in its input region. */

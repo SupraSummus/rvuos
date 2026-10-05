@@ -12,6 +12,7 @@
  * and go out as one USB packet when WR_DONE is written.
  * The host takes a packet only while it has the port open;
  * until then the FIFO stays full and the console waits.
+ * What the host sends comes into the OUT endpoint, which console_get reads, the ESP32-C6's console alone.
  */
 
 #include <stdbool.h>
@@ -27,6 +28,8 @@
 #define USJ_INT_CLR  5
 #define USJ_WR_DONE  0x1u /* in EP1_CONF: send what the FIFO holds */
 #define USJ_FREE     0x2u /* in EP1_CONF: the FIFO takes another byte */
+#define USJ_OUT_DATA 0x4u /* in EP1_CONF: the OUT FIFO holds a byte the host sent */
+#define USJ_OUT_RECV 0x4u /* interrupt: a packet came from the host */
 #define USJ_IN_EMPTY 0x8u /* interrupt: the host has taken everything */
 
 /* Polls before the polled writer gives up on a host that takes nothing. */
@@ -91,6 +94,26 @@ static inline bool console_put(char c, void (*wait)(void))
         }
     }
     console_regs[USJ_EP1] = (uint8_t)c;
+    return true;
+}
+
+/*
+ * From here the controller raises the line when the host sends a packet, besides what console_start asked.
+ * The packet's bit is an event the controller latches, so it is cleared before the FIFO is read, not after.
+ */
+static inline void console_listen(void)
+{
+    console_regs[USJ_INT_CLR] = USJ_OUT_RECV;
+    console_regs[USJ_INT_ENA] |= USJ_OUT_RECV;
+}
+
+/* The next byte the host sent, into c: whether one was there. */
+static inline bool console_get(char *c)
+{
+    if ((console_regs[USJ_EP1_CONF] & USJ_OUT_DATA) == 0) {
+        return false;
+    }
+    *c = (char)console_regs[USJ_EP1];
     return true;
 }
 

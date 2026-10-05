@@ -4,7 +4,7 @@
  * It finds the firmware blob the loader left at the start of free RAM, lends it to the driver as frames,
  * and builds the driver's process with exactly what its page lists.
  * Once the driver says the chip runs, it takes the blob's memory back,
- * builds the network process and connects the two with the link, through system.h.
+ * builds the network process and connects the two with the link, system.h, as the ESP32-C6's root task does.
  * Once the network process has an address, it builds its clients, each connected to it through its hub,
  * the logger among them, which reads the kernel's log from then on and carries it to a host; until then nobody reads it.
  * Every second it asks each child whether its loop still comes round, and feeds the watchdog;
