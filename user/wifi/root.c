@@ -4,12 +4,11 @@
  * It finds the firmware blob the loader left at the start of free RAM, lends it to the driver as frames,
  * and builds the driver's process with exactly what its page lists.
  * Once the driver says the chip runs, it takes the blob's memory back,
- * builds the network process and connects the two with the link.
+ * builds the network process and connects the two with the link, through system.h.
  * Once the network process has an address, it builds its clients, each connected to it through its hub,
  * the logger among them, which reads the kernel's log from then on and carries it to a host; until then nobody reads it.
- * Every second it asks each child whether its loop still comes round, and feeds the watchdog.
- * A client that faults, fails or did not answer is taken down, its channel closed,
- * and built again once the network process let go of it, a few times at most.
+ * Every second it asks each child whether its loop still comes round, and feeds the watchdog;
+ * a client that faults, fails or did not answer is taken down and built again, a few times at most.
  * The run lasts as long as the configuration says, by default half a minute, or for good;
  * it ends early if the link is not up in time, the driver or the network process fails, faults or does not answer,
  * or a scan alone was asked for.
@@ -23,14 +22,13 @@
 #include "lib/libc.h"
 #include "lib/log.h"
 #include "lib/say.h"
-#include "sntp.h"
+#include "system.h"
 #include "wifi.h"
 
 /* The run's seconds unless the configuration says, by when the link must be up, and the children's checks. */
-#define RUN_S       30u
-#define UP_S        20u
-#define CHECK_US    1000000u
-#define WATCHDOG_US 3000000u /* three checks */
+#define RUN_S    30u
+#define UP_S     20u
+#define CHECK_US 1000000u
 
 /* The blocks of the devices the driver needs, carved from the boot's frames; see devices.h. */
 #define PIO0_SIZE          0x1000u
@@ -45,72 +43,40 @@
 #define PAD_DRIVE_12MA (3u << 4)
 #define PAD_IE         (1u << 6)
 
-/* Each child's table and data: its page at the base, its state and two packets' buffers on its stack. */
-#define DRV_TABLE        16u
-#define DRV_DATA_SIZE    0x4000u
-#define NET_TABLE        16u
-#define NET_DATA_SIZE    0x2000u
-#define CLIENT_TABLE     8u
-#define CLIENT_DATA_SIZE 0x2000u
-#define CLIENT_RESTARTS  3u
+/* The driver's table and data: its page at the base, its state and two packets' buffers on its stack. */
+#define DRV_TABLE     16u
+#define DRV_DATA_SIZE 0x4000u
 /*
  * Room for the data of the children built once the blob is back, which the root task sees through one region:
  * the network process's and its clients', each built again in the room the last left.
  * The driver comes first, in the memory the blob leaves, in a region of its own.
  */
-#define ROOM_SIZE        0x10000u
+#define ROOM_SIZE 0x10000u
 
-/* Who gets which of the first core's units: the root task the first, mostly waiting, the driver the most. */
-#define ROOT_UNITS   8u
-#define DRV_UNITS    32u
-#define NET_UNITS    12u
-#define CLIENT_UNITS 4u
+/*
+ * Who gets which of the first core's units: the root task the first, mostly waiting, the driver the most,
+ * and the network process and its clients theirs, system.c's, all 64 between them.
+ */
+#define ROOT_UNITS 8u
+#define DRV_UNITS  32u
 
 static struct self self;
+static const struct out kout = { log_write, (void *)BOOT_CAP_DEBUG };
+static struct system sys = {
+    .self = &self,
+    .out = &kout,
+    .board = "a Pico 2 W",
+    .clients_wanted = CLIENT_BIT(CLIENT_ECHO) | CLIENT_BIT(CLIENT_CLOCK) | CLIENT_BIT(CLIENT_LOGGER),
+};
 static uint32_t tick_bit, seconds, run_s = RUN_S;
-static uint32_t log_base;
-static struct child driver, network;
-static struct child *const children[] = { &driver, &network };
-static struct chan link;
-static struct chan_hub hub;
-
-/* The network process's clients, each on the end of the hub of its index. */
-struct client {
-    struct child child;
-    const char *name;
-    void (*entry)(struct child_page *page);
-    uint32_t restarts;
-    int down; /* taken down, to be built again once its end is idle */
-};
-enum { CLIENT_ECHO, CLIENT_CLOCK, CLIENT_LOGGER, CLIENTS };
-static struct client clients[CLIENTS] = {
-    [CLIENT_ECHO] = { .name = "the echo", .entry = echo_main },
-    [CLIENT_CLOCK] = { .name = "the clock", .entry = clock_main },
-    [CLIENT_LOGGER] = { .name = "the logger", .entry = logger_main },
-};
-static int clients_built;
 
 /* The blob's blocks, largest first from its start, and the frames made of them, which taking the blocks back revokes. */
 static struct block blob[BLOB_FRAMES];
 static uint32_t blob_frames;
 
-static const struct out kout = { log_write, (void *)BOOT_CAP_DEBUG };
-
-static __attribute__((noreturn)) void halt(uint32_t code)
-{
-    rv_halt(BOOT_CAP_DEBUG, code);
-}
-
 static void must(const char *what, uint32_t status)
 {
-    if (status != KERR_OK) {
-        say(&kout, "root: %s failed", what);
-        if (self.what != 0) {
-            say(&kout, " at %s", self.what);
-        }
-        say(&kout, ": %x\n", status);
-        halt(2);
-    }
+    system_must(&sys, what, status);
 }
 
 /*
@@ -176,7 +142,7 @@ static void configure(struct drv_page *s)
 /* Lends the driver the blob, and starts it. */
 static void driver_build(uint32_t free_base)
 {
-    struct child *c = &driver;
+    struct child *c = &sys.driver;
     must("build the driver", child_new(&self, c, "the driver", DRV_TABLE, DRV_DATA_SIZE));
     struct drv_page *p = (struct drv_page *)c->page;
     give_device(c, BOOT_CAP_PIO0, 0, PIO0_SIZE);
@@ -204,8 +170,7 @@ static void driver_build(uint32_t free_base)
 
 /*
  * Once the chip runs: the blob's memory back, which uninstalls it from the driver's window,
- * the network process, and the link between it and the driver, which the driver hears of as it runs;
- * and the network process's hub for its clients, and its own inbox to wake itself with.
+ * and the network process, with the link between it and the driver, which the driver hears of as it runs.
  */
 static void net_build(void)
 {
@@ -213,110 +178,35 @@ static void net_build(void)
         must("take the blob back", mem_give(&self, &blob[i]));
     }
     must("room for the children's data", self_room(&self, ROOM_SIZE));
-    struct drv_page *dp = (struct drv_page *)driver.page;
-    must("build the network process", child_new(&self, &network, "the network", NET_TABLE, NET_DATA_SIZE));
-    struct net_page *np = (struct net_page *)network.page;
-    memcpy(np->mac, dp->mac, 6);
-    must("the link", chan_new(&self, &link, LINK_SIZE, LINK_SLOT));
-    must("connect the driver and the network", chan_connect(&self, &link, &driver, &dp->link, &network, &np->link));
-    must("the clients' hub",
-         chan_hub_new(&self, &hub, &network, np->clients, SOCK_CLIENTS, CLIENT_CHAN_SIZE, CLIENT_SLOT));
-    must("a bit to wake itself", child_bit(&self, &network, &np->more_bit));
-    must("its inbox to wake itself", child_give_bits(&self, &network, network.inbox, np->more_bit, &np->more));
-    must("start the network process", child_start(&self, &network, net_main, NET_UNITS));
+    struct drv_page *dp = (struct drv_page *)sys.driver.page;
+    system_net_build(&sys, &dp->link, dp->mac);
+    system_net_start(&sys);
 }
 
-/* A client of the network process, on end i of the hub, which is idle; the logger is given the kernel's log too. */
-static void client_build(uint32_t i)
+static void summary(void)
 {
-    struct client *cl = &clients[i];
-    struct child *c = &cl->child;
-    must("build a client", child_new(&self, c, cl->name, CLIENT_TABLE, CLIENT_DATA_SIZE));
-    must("connect a client", chan_hub_connect(&self, &hub, i, c, &((struct client_page *)c->page)->net));
-    if (i == CLIENT_LOGGER) {
-        uint32_t region;
-        must("give the logger the log", child_map(&self, c, BOOT_CAP_LOG, RIGHT_R | RIGHT_W, &region));
-        ((struct logger_page *)c->page)->log_base = log_base;
-    }
-    must("start a client", child_start(&self, c, cl->entry, CLIENT_UNITS));
-    cl->down = 0;
+    const struct drv_page *d = (const struct drv_page *)sys.driver.page;
+    say(&kout, "root: driver frames in %u, out %u, dropped %u", d->rx_frames, d->tx_frames, d->rx_dropped);
+    system_summary(&sys);
 }
 
-/* A client that faulted or failed: its channel closed, taken down, and built again later, a few times at most. */
-static void client_down(uint32_t i)
+/* The run's summary, then the halt; system_halt halts without one. */
+static __attribute__((noreturn)) void halt(uint32_t code)
 {
-    struct client *cl = &clients[i];
-    must("close a client's channel", chan_hub_close(&self, &hub, i));
-    must("take a client down", child_free(&self, &cl->child));
-    cl->down = ++cl->restarts <= CLIENT_RESTARTS;
-    say(&kout, "root: %s %s\n", cl->name, cl->down ? "is taken down, to be built again" : "is taken down for good");
+    summary();
+    system_halt(code);
 }
 
-/* What a client's new state says, in the log. */
-static void client_state(uint32_t i, uint32_t state)
+/* What the driver's new state says, in the log; 1 if the run is to end. */
+static int driver_state(uint32_t state)
 {
-    struct client *cl = &clients[i];
+    struct drv_page *p = (struct drv_page *)sys.driver.page;
     if (state == CHILD_FAILED) {
-        say(&kout, "root: %s failed at step %u, read %x\n", cl->name, cl->child.page->step, cl->child.page->detail);
-        client_down(i);
-    } else if (i == CLIENT_ECHO && state == ECHO_SERVING) {
-        say(&kout, "root: %s answers on UDP port %u\n", cl->name, ECHO_PORT);
-    } else if (i == CLIENT_LOGGER && state == LOGGER_SERVING) {
-        say(&kout, "root: %s sends the log to whoever asks on UDP port %u\n", cl->name, LOGGER_PORT);
-    } else if (i == CLIENT_CLOCK && state == CLOCK_SET) {
-        const struct clock_page *p = (const struct clock_page *)cl->child.page;
-        char text[UTC_TEXT];
-        utc_format(text, p->seconds);
-        say(&kout, "root: %s says it is %s, by %I, and tells it on UDP port %u\n", cl->name, text, p->server,
-            CLOCK_PORT);
+        say(&kout, "root: the driver failed at step %u, read %x\n", p->c.step, p->c.detail);
+        halt(SYSTEM_FAILED);
     }
-}
-
-/* One wake's news of the clients: faults, states, and ends idle again for those to be built again. */
-static void clients_heard(uint32_t bits)
-{
-    for (uint32_t i = 0; i < CLIENTS; i++) {
-        struct client *cl = &clients[i];
-        struct child *c = &cl->child;
-        uint32_t state;
-        if (c->page == 0) {
-            if (cl->down && chan_hub_idle(&hub, i)) {
-                client_build(i);
-            }
-            continue;
-        }
-        if (bits & c->bit_fault) {
-            uint32_t cause, pc, addr, status;
-            rv_thread_fault(c->thread, &cause, &pc, &addr, &status);
-            say(&kout, "root: %s faulted, cause %x at %x, address %x\n", cl->name, cause, pc, addr);
-            client_down(i);
-        } else if (child_poll(c, &state)) {
-            client_state(i, state);
-        }
-    }
-}
-
-/* What a child's new state says, in the log; 1 if the run is to end. */
-static int child_state(struct child *c, uint32_t state)
-{
-    if (state == CHILD_FAILED) {
-        say(&kout, "root: %s failed at step %u, read %x\n", c->name, c->page->step, c->page->detail);
-        halt(1);
-    }
-    if (c == &network) {
-        if (state == NET_BOUND && !clients_built) {
-            clients_built = 1;
-            say(&kout, "root: the system answers at %I: ping it, or send a datagram to UDP port %u for its status\n",
-                ((struct net_page *)c->page)->ip, NET_PORT_STATUS);
-            for (uint32_t i = 0; i < CLIENTS; i++) {
-                client_build(i);
-            }
-        }
-        return 0;
-    }
-    struct drv_page *p = (struct drv_page *)c->page;
     /* The driver may be past DRV_UP before the root task looks, so any state of a running driver will do. */
-    if (state >= DRV_UP && network.page == 0) {
+    if (state >= DRV_UP && sys.network.page == 0) {
         net_build();
     }
     if (state == DRV_SCANNED) {
@@ -335,65 +225,27 @@ static int child_state(struct child *c, uint32_t state)
     return 0;
 }
 
-static void summary(void)
-{
-    const struct drv_page *d = (const struct drv_page *)driver.page;
-    const struct net_page *n = (const struct net_page *)network.page;
-    say(&kout, "root: driver frames in %u, out %u, dropped %u", d->rx_frames, d->tx_frames, d->rx_dropped);
-    if (n != 0) {
-        say(&kout, "; network frames in %u, out %u, pings %u, datagrams %u", n->rx_frames, n->tx_frames, n->pings,
-            n->datagrams);
-    }
-    const struct echo_page *e = (const struct echo_page *)clients[CLIENT_ECHO].child.page;
-    if (e != 0) {
-        say(&kout, "; echoed %u", e->echoed);
-    }
-    const struct logger_page *l = (const struct logger_page *)clients[CLIENT_LOGGER].child.page;
-    if (l != 0) {
-        say(&kout, "; %u bytes of the log carried", l->carried);
-    }
-    say(&kout, "; %u bytes and %u slots unused\n", mem_unused(&self), slots_unused(&self));
-}
-
 /*
- * Each child asked again whether its loop comes round: a client that missed the last check is built again,
- * and the driver or the network process that missed it ends the run.
- * Then the watchdog fed, which so halts the machine only if the root task's own loop stops.
+ * A second gone: the children checked and the watchdog fed, system_check,
+ * and the run ended if the link is not up in time or the run's time is up.
  */
-static void check(void)
-{
-    for (uint32_t i = 0; i < sizeof(children) / sizeof(children[0]); i++) {
-        if (children[i]->page != 0 && !child_check(children[i])) {
-            say(&kout, "root: %s stopped answering\n", children[i]->name);
-            halt(5);
-        }
-    }
-    for (uint32_t i = 0; i < CLIENTS; i++) {
-        if (clients[i].child.page != 0 && !child_check(&clients[i].child)) {
-            say(&kout, "root: %s stopped answering\n", clients[i].name);
-            client_down(i);
-        }
-    }
-    must("feed the watchdog", rv_clock_watchdog(BOOT_CAP_CLOCK, WATCHDOG_US));
-}
-
-/* A second gone: the children checked, and the run ended if the link is not up in time or the run's time is up. */
 static void second(void)
 {
-    check();
+    uint32_t code = system_check(&sys, 1);
+    if (code != 0) {
+        halt(code);
+    }
     seconds++;
-    uint32_t state = driver.page->state;
+    uint32_t state = sys.driver.page->state;
     int up = state == DRV_JOINED || state == DRV_AP;
     if (seconds == UP_S && !up) {
-        summary();
         say(&kout, "root: the link is not up after %u s\n", UP_S);
-        halt(4);
+        halt(SYSTEM_LATE);
     }
     if (seconds == run_s) {
         /* A link or an access point that lasted the run is what was asked for. */
-        summary();
         say(&kout, "root: the run is over after %u s\n", run_s);
-        halt(up ? 0 : 4);
+        halt(up ? 0 : SYSTEM_LATE);
     }
 }
 
@@ -401,7 +253,7 @@ int main(void)
 {
     uint32_t size, tick, skipped;
     must("the root's own", self_root(&self, ROOT_UNITS));
-    must("the kernel's log", rv_frame_info(BOOT_CAP_LOG, &log_base, &size));
+    must("the kernel's log", rv_frame_info(BOOT_CAP_LOG, &sys.log_base, &size));
     must("a bit for the seconds", bit_new(&self, &tick_bit));
     must("a timer", timer_new(&self, &tick));
     say(&kout, "root: wifi system\n");
@@ -413,7 +265,7 @@ int main(void)
     must("the blob's header", mem_read(&self, free_base, &h, sizeof(h)));
     if (h.magic != BLOB_MAGIC || h.size > free_size) {
         say(&kout, "root: no firmware blob at %x; load one with make BOARD=rp2350 wifi\n", free_base);
-        halt(2);
+        system_halt(SYSTEM_BROKEN);
     }
     uint32_t covered = (h.size + 0xfffu) & ~0xfffu;
     for (uint32_t at = free_base, block = free_size / 2; at < free_base + covered; block /= 2) {
@@ -433,23 +285,13 @@ int main(void)
     for (;;) {
         uint32_t bits = 0;
         must("wait", rv_wait(self.inbox, &bits));
-        for (uint32_t i = 0; i < sizeof(children) / sizeof(children[0]); i++) {
-            struct child *c = children[i];
-            uint32_t state;
-            if (c->page == 0) {
-                continue;
-            }
-            if (bits & c->bit_fault) {
-                uint32_t cause, pc, addr, status;
-                rv_thread_fault(c->thread, &cause, &pc, &addr, &status);
-                say(&kout, "root: %s faulted, cause %x at %x, address %x\n", c->name, cause, pc, addr);
-                halt(3);
-            }
-            if (child_poll(c, &state) && child_state(c, state)) {
-                halt(0);
-            }
+        uint32_t state, code;
+        if (child_poll(&sys.driver, &state) && driver_state(state)) {
+            system_halt(0);
         }
-        clients_heard(bits);
+        if ((code = system_heard(&sys, bits)) != 0) {
+            halt(code);
+        }
         if (bits & tick_bit) {
             must("count the seconds", rv_timer_period(tick, tick_bit, CHECK_US, &skipped));
             second();

@@ -291,7 +291,8 @@ checking that everything handed out comes back and that the second child left th
 `user/wifi/` is a program of several files and six processes on a Pico 2 W, built on the library:
 a root task that builds the system, a driver for the CYW43439, its Wi-Fi chip, a network process with an IP stack,
 and three clients of the network process, the echo, the clock and the logger;
-`wifi.h` says what they share, which is the types of their pages.
+`wifi.h` says what they share, which is the types of their pages,
+and `system.h` the root task's half of the network process and its clients, which is not the driver's.
 The driver and the network process trade Ethernet frames through a channel, the link.
 Each client has a channel from the network process's hub, through which it uses datagram sockets, `sock.h`:
 it binds ports, its own until it closes them or is gone, sends from them and receives what is sent to them.

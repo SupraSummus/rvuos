@@ -4,7 +4,7 @@
 /*
  * The Wi-Fi system on a Pico 2 W: what its processes agree on.
  *
- * The root task builds the system with user/lib/ and watches it.
+ * The root task builds the system with user/lib/ and watches it; system.h is what of it is not the driver's.
  * The driver of the CYW43439, the radio, is a process of its own;
  * it reaches the chip through PIO0, which clocks the chip's gSPI bus, and through the control registers of four pins,
  * and loads the chip's firmware from frames the root task lends it.
@@ -113,6 +113,7 @@ struct net_page {
     uint32_t more;     /* the slot of its own inbox, carved to more_bit: it wakes itself with what it left for later */
     uint32_t more_bit;
     uint8_t mac[6];
+    const char *board; /* what its status line says the system runs on */
     /* From the network process. */
     volatile uint32_t ip, mask, gateway;
     volatile uint32_t rx_frames, tx_frames, pings, datagrams;

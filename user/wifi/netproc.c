@@ -76,8 +76,8 @@ static void on_status(struct net *n, void *arg, const struct net_datagram *d)
     struct line l = { .len = 0 };
     p->page->datagrams++;
     say(&(const struct out){ line_write, &l },
-        "rvuos on a Pico 2 W: up %u s, frames in %u, out %u, pings %u, datagrams %u, to clients %u\n", p->now / 1000u,
-        n->rx_frames, n->tx_frames, n->pings, p->page->datagrams, p->sock.delivered);
+        "rvuos on %s: up %u s, frames in %u, out %u, pings %u, datagrams %u, to clients %u\n", p->page->board,
+        p->now / 1000u, n->rx_frames, n->tx_frames, n->pings, p->page->datagrams, p->sock.delivered);
     net_udp_send(n, d->from_ip, d->from_port, NET_PORT_STATUS, (const uint8_t *)l.buf, l.len);
 }
 
