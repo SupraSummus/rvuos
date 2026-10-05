@@ -1,0 +1,416 @@
+   0.501 ESP-ROM:esp32c6-20220919
+   0.501 Build:Sep 19 2022
+   0.502 rst:0x15 (USB_UART_HPSYS),boot:0x7f (SPI_FAST_FLASH_BOOT)
+   0.502 Saved PC:0x408707f8
+   0.502 SPIWP:0xee
+   0.502 mode:DIO, clock div:2
+   0.502 load:0x40875730,len:0x1278
+   0.502 load:0x4086b910,len:0xc58
+   0.502 load:0x4086e610,len:0x31c0
+   0.502 entry 0x4086b910
+   5.508 joined channel 9 rssi -78 phy11ax 1 auth 7
+   6.510 phase A begins
+   6.510 dhcp out discover
+   8.011 dhcp no offer
+   8.512 dhcp out discover
+  10.514 dhcp no offer
+  10.515 dhcp out discover
+  12.517 dhcp no offer
+  13.018 dhcp out discover
+  15.021 dhcp no offer
+  15.021 dhcp out discover
+  17.023 dhcp no offer
+  17.023 dhcp out discover
+  17.524 dhcp in offer after 35 ms
+  17.524 dhcp out request
+  19.026 dhcp no ack
+  19.526 dhcp out discover
+  21.529 dhcp no offer
+  21.529 dhcp out discover
+  23.532 dhcp no offer
+  24.033 dhcp out discover
+  26.035 dhcp no offer
+  26.035 dhcp out discover
+  28.037 dhcp no offer
+  28.538 dhcp out discover
+  30.040 dhcp no offer
+  30.540 dhcp out discover
+  32.543 dhcp in offer after 1848 ms
+  32.543 dhcp out request
+  34.044 dhcp no ack
+  34.544 dhcp out discover
+  36.546 dhcp no offer
+  36.546 dhcp out discover
+  38.551 dhcp no offer
+  39.052 dhcp out discover
+  41.055 dhcp no offer
+  41.055 dhcp out discover
+  43.058 dhcp no offer
+  43.558 dhcp out discover
+  45.060 dhcp no offer
+  45.561 dhcp out discover
+  47.563 dhcp no offer
+  47.564 dhcp out discover
+  49.566 dhcp no offer
+  50.067 dhcp out discover
+  52.069 dhcp no offer
+  52.070 dhcp out discover
+  54.072 dhcp no offer
+  54.573 dhcp out discover
+  56.074 dhcp no offer
+  56.575 dhcp out discover
+  58.577 dhcp no offer
+  58.577 dhcp out discover
+  59.078 dhcp in offer after 122 ms
+  59.078 dhcp out request
+  60.579 dhcp no ack
+  61.079 dhcp out discover
+  63.082 dhcp no offer
+  63.082 phase A: offers 3 of 25 discovers, acks 0 of 3 requests
+  63.082 phase B begins
+  63.082 dhcp out discover
+  63.082 air 59795236 ack
+  63.582 air 59889547 beacon tsf 4142240133, 0 broken
+  63.582 air 59893987 group from this-sta len 380 seq 2420 rssi -78 format 0 rate 0 more 1
+  63.582 air 60056769 ack
+  63.582 air 60098811 group from this-sta len 80 seq 2422 rssi -78 format 0 rate 0 more 0
+  64.583 air 61118368 beacon tsf 4143468933, 0 broken
+  64.583 air 61123363 group from sta-1 len 254 seq 2423 rssi -78 format 0 rate 0 more 0
+  64.583 air 61225189 group from the-ap len 83 seq 2424 rssi -78 format 0 rate 0 more 0
+  65.084 dhcp no offer
+  65.584 dhcp out discover
+  65.584 air 61994863 ack
+  65.584 air 62046078 group from this-sta len 380 seq 2425 rssi -78 format 0 rate 0 more 1
+  66.085 air 62449590 beacon tsf 4144800133, 0 broken
+  66.085 air 62455638 group from sta-2 len 98 seq 2427 rssi -78 format 0 rate 0 more 0
+  66.585 air 63170862 group from the-ap len 83 seq 2428 rssi -78 format 0 rate 0 more 0
+  67.586 air 63883213 beacon tsf 4146233733, 0 broken
+  67.586 air 63887693 group from sta-3 len 252 seq 2429 rssi -78 format 0 rate 0 more 0
+  67.586 dhcp no offer
+  67.586 air 64092477 group from sta-4 len 756 seq 2430 rssi -79 format 0 rate 0 more 1
+  67.586 air 64104823 group from sta-1 len 254 seq 2432 rssi -79 format 0 rate 0 more 0
+  67.586 dhcp out discover
+  67.586 air 64195240 ack
+  67.586 air 64195490 group from sta-4 len 736 seq 2433 rssi -78 format 0 rate 0 more 0
+  67.586 air 64297300 group from this-sta len 380 seq 2434 rssi -79 format 0 rate 0 more 1
+  67.586 air 64305775 group from sta-4 len 756 seq 2436 rssi -78 format 0 rate 0 more 0
+  68.087 air 64604485 group from sta-4 len 736 seq 2437 rssi -78 format 0 rate 0 more 0
+  68.087 air 64809249 group from sta-4 len 756 seq 2438 rssi -78 format 0 rate 0 more 0
+  68.587 air 65214435 beacon tsf 4147564933, 0 broken
+  68.587 air 65218915 group from the-ap len 83 seq 2439 rssi -78 format 0 rate 0 more 0
+  68.587 air 65321277 group from sta-4 len 736 seq 2440 rssi -77 format 0 rate 0 more 0
+  69.087 air 65833286 group from sta-4 len 756 seq 2441 rssi -78 format 0 rate 0 more 0
+  69.588 dhcp no offer
+  70.088 dhcp out discover
+  70.088 air 66394843 ack
+  70.089 air 66443256 beacon tsf 4148793733, 0 broken
+  70.089 air 66447736 group from this-sta len 380 seq 2442 rssi -78 format 0 rate 0 more 1
+  70.089 air 66754941 group from sta-4 len 736 seq 2444 rssi -78 format 0 rate 0 more 0
+  70.589 air 67164548 group from sta-1 len 254 seq 2445 rssi -78 format 0 rate 0 more 0
+  70.589 air 67267433 group from the-ap len 83 seq 2446 rssi -78 format 0 rate 0 more 0
+  71.089 air 67774478 beacon tsf 4150124933, 0 broken
+  71.089 air 67778958 group from sta-4 len 756 seq 2447 rssi -78 format 0 rate 0 more 0
+  71.590 dhcp no offer
+  72.090 dhcp out discover
+  72.090 air 68598519 ack
+  72.090 air 68700513 group from this-sta len 380 seq 2448 rssi -78 format 0 rate 0 more 1
+  72.090 air 68798495 beacon tsf 4151148933, 0 broken
+  72.090 air 68802915 group from sta-4 len 736 seq 2450 rssi -78 format 0 rate 0 more 1
+  72.590 air 69212561 group from the-ap len 83 seq 2452 rssi -78 format 0 rate 0 more 0
+  73.091 air 69724530 group from sta-4 len 756 seq 2453 rssi -78 format 0 rate 0 more 0
+  73.591 air 70129717 beacon tsf 4152480133, 0 broken
+  73.591 air 70134297 group from sta-1 len 254 seq 2454 rssi -78 format 0 rate 0 more 0
+  74.091 dhcp no offer
+  74.091 dhcp out discover
+  74.091 air 70794894 ack
+  74.091 air 70851008 group from sta-4 len 736 seq 2455 rssi -78 format 0 rate 0 more 1
+  74.592 air 70860347 group from dhcp-server len 628 seq 2457 rssi -77 format 0 rate 0 more 0
+  74.592 dhcp in offer after 72 ms
+  74.592 dhcp out request
+  74.592 air 70866850 ack
+  74.592 air 70953370 group from this-sta len 380 seq 2458 rssi -78 format 0 rate 0 more 1
+  74.592 air 71256135 beacon tsf 4153606533, 0 broken
+  74.592 air 71260555 group from the-ap len 83 seq 2460 rssi -78 format 0 rate 0 more 0
+  75.092 air 71772584 group from sta-4 len 756 seq 2461 rssi -78 format 0 rate 0 more 0
+  76.093 air 72382554 beacon tsf 4154732933, 0 broken
+  76.093 air 72387014 group from sta-2 len 98 seq 2462 rssi -78 format 0 rate 0 more 0
+  76.093 dhcp no ack
+  76.593 dhcp out discover
+  76.593 air 73066843 ack
+  76.593 air 73103806 group from sta-1 len 254 seq 2463 rssi -78 format 0 rate 0 more 1
+  76.593 air 73106043 group from this-sta len 380 seq 2464 rssi -78 format 0 rate 0 more 1
+  76.593 air 73206247 group from the-ap len 83 seq 2466 rssi -78 format 0 rate 0 more 0
+  77.094 air 73816177 beacon tsf 4156166533, 0 broken
+  77.094 air 73820638 group from sta-3 len 252 seq 2467 rssi -78 format 0 rate 0 more 0
+  77.594 air 74025461 group from sta-4 len 756 seq 2468 rssi -78 format 0 rate 0 more 1
+  77.594 air 74037807 group from sta-5 len 98 seq 2470 rssi -78 format 0 rate 0 more 0
+  77.594 air 74127803 group from sta-4 len 736 seq 2471 rssi -78 format 0 rate 0 more 0
+  77.594 air 74230264 group from sta-4 len 756 seq 2472 rssi -78 format 0 rate 0 more 1
+  77.594 air 74242611 group from sta-4 len 756 seq 2474 rssi -78 format 0 rate 0 more 0
+  77.594 air 74332694 group from sta-4 len 736 seq 2475 rssi -78 format 0 rate 0 more 0
+  78.095 air 74435028 group from sta-4 len 756 seq 2476 rssi -78 format 0 rate 0 more 1
+  78.095 air 74537469 group from sta-4 len 80 seq 2478 rssi -79 format 0 rate 0 more 0
+  78.095 air 74639811 group from sta-4 len 756 seq 2479 rssi -79 format 0 rate 0 more 0
+  78.095 air 74742273 group from sta-4 len 756 seq 2480 rssi -78 format 0 rate 0 more 1
+  78.095 air 74840194 beacon tsf 4157190533, 0 broken
+  78.095 air 74844614 group from sta-4 len 736 seq 2482 rssi -78 format 0 rate 0 more 0
+  78.595 dhcp no offer
+  78.595 air 75254221 group from the-ap len 83 seq 2483 rssi -78 format 0 rate 0 more 1
+  78.595 dhcp out discover
+  78.595 air 75266838 ack
+  78.595 air 75356683 group from sta-4 len 756 seq 2485 rssi -78 format 0 rate 0 more 1
+  79.096 air 75366181 group from dhcp-server len 98 seq 2487 rssi -78 format 0 rate 0 more 0
+  79.096 air 75459085 group from sta-4 len 756 seq 2488 rssi -78 format 0 rate 0 more 0
+  79.096 air 75561486 group from sta-4 len 736 seq 2489 rssi -78 format 0 rate 0 more 0
+  79.096 air 75663828 group from sta-4 len 736 seq 2490 rssi -78 format 0 rate 0 more 0
+  79.597 air 76069015 beacon tsf 4158419333, 0 broken
+  79.597 air 76073435 group from sta-1 len 254 seq 2491 rssi -78 format 0 rate 0 more 0
+  79.597 air 76278238 group from sta-4 len 80 seq 2492 rssi -78 format 0 rate 0 more 0
+  80.097 air 76585740 group from sta-4 len 756 seq 2493 rssi -78 format 0 rate 0 more 0
+  80.097 air 76790287 group from dhcp-server len 628 seq 2494 rssi -78 format 0 rate 0 more 0
+  80.097 dhcp in offer after 1530 ms
+  80.097 dhcp out request
+  80.097 air 76796850 ack
+  80.597 air 76892648 group from this-sta len 380 seq 2495 rssi -79 format 0 rate 0 more 1
+  80.597 air 76995131 group from sta-4 len 756 seq 2497 rssi -79 format 0 rate 0 more 0
+  80.597 air 77195433 beacon tsf 4159545733, 0 broken
+  80.597 air 77199913 group from sta-4 len 736 seq 2498 rssi -78 format 0 rate 0 more 1
+  80.598 air 77302295 group from sta-4 len 736 seq 2500 rssi -78 format 0 rate 0 more 0
+  81.098 air 77507119 group from sta-6 len 179 seq 2501 rssi -79 format 0 rate 0 more 1
+  82.099 air 78526655 beacon tsf 4160876933, 0 broken
+  82.099 air 78531115 group from sta-4 len 756 seq 2503 rssi -78 format 0 rate 0 more 0
+  82.099 dhcp no ack
+  82.099 air 78838320 group from sta-3 len 252 seq 2504 rssi -78 format 0 rate 0 more 0
+  82.599 air 78940742 group from sta-4 len 756 seq 2505 rssi -79 format 0 rate 0 more 0
+  82.599 dhcp out discover
+  82.599 air 78996847 ack
+  82.599 air 79043084 group from this-sta len 380 seq 2506 rssi -78 format 0 rate 0 more 1
+  82.600 air 79145526 group from sta-1 len 254 seq 2508 rssi -78 format 0 rate 0 more 0
+  82.600 air 79247927 group from sta-4 len 736 seq 2509 rssi -78 format 0 rate 0 more 1
+  82.600 air 79350289 group from sta-4 len 736 seq 2511 rssi -78 format 0 rate 0 more 0
+  83.601 air 80062681 beacon tsf 4162412933, 0 broken
+  84.102 air 80579109 group from sta-4 len 756 seq 2512 rssi -78 format 0 rate 0 more 0
+  84.602 air 80886354 group from dhcp-server len 226 seq 2513 rssi -78 format 0 rate 0 more 0
+  84.602 dhcp no offer
+  84.602 air 80988756 group from sta-4 len 756 seq 2514 rssi -78 format 0 rate 0 more 0
+  84.603 air 81086698 beacon tsf 4163436933, 0 broken
+  84.603 air 81091178 group from dhcp-server len 226 seq 2515 rssi -78 format 0 rate 0 more 0
+  84.603 air 81193559 group from the-ap len 83 seq 2516 rssi -78 format 0 rate 0 more 0
+  84.603 dhcp out discover
+  84.603 air 81196846 ack
+  84.603 air 81295981 group from this-sta len 380 seq 2517 rssi -78 format 0 rate 0 more 1
+  85.103 air 81398363 group from sta-4 len 736 seq 2519 rssi -78 format 0 rate 0 more 1
+  85.103 air 81706103 group from dhcp-server len 226 seq 2522 rssi -78 format 0 rate 0 more 0
+  85.603 air 81910331 group from dhcp-server len 212 seq 2523 rssi -78 format 0 rate 0 more 0
+  85.603 air 82110715 beacon tsf 4164460933, 0 broken
+  85.603 air 82115229 group from sta-1 len 254 seq 2524 rssi -78 format 0 rate 0 more 0
+  85.603 air 82217596 group from dhcp-server len 212 seq 2525 rssi -78 format 0 rate 0 more 0
+  86.103 air 82422380 group from dhcp-server len 227 seq 2526 rssi -78 format 0 rate 0 more 0
+  86.103 air 82729605 group from dhcp-server len 227 seq 2527 rssi -78 format 0 rate 0 more 0
+  86.604 air 82934368 group from dhcp-server len 227 seq 2528 rssi -78 format 0 rate 0 more 0
+  86.604 dhcp no offer
+  86.604 air 83339535 beacon tsf 4165689733, 0 broken
+  86.604 air 83344158 group from dhcp-server len 227 seq 2529 rssi -78 format 0 rate 0 more 1
+  87.104 dhcp out discover
+  87.104 air 83396838 ack
+  87.104 air 83447123 group from this-sta len 380 seq 2531 rssi -78 format 0 rate 0 more 1
+  87.104 air 83753602 group from dhcp-server len 213 seq 2534 rssi -79 format 0 rate 0 more 0
+  87.104 air 83855983 group from sta-3 len 252 seq 2535 rssi -79 format 0 rate 0 more 0
+  88.606 air 84977962 beacon tsf 4167328133, 0 broken
+  88.606 air 85084844 group from sta-1 len 254 seq 2536 rssi -78 format 0 rate 0 more 0
+  88.606 air 85289607 group from the-ap len 83 seq 2537 rssi -78 format 0 rate 0 more 0
+  88.606 dhcp no offer
+  89.106 dhcp out discover
+  89.106 air 85597182 ack
+  89.106 air 85699214 group from this-sta len 380 seq 2538 rssi -78 format 0 rate 0 more 1
+  90.108 air 86718791 beacon tsf 4169068933, 0 broken
+  90.108 air 86723271 group from sta-7 len 80 seq 2540 rssi -79 format 0 rate 0 more 0
+  90.608 air 87235245 group from the-ap len 83 seq 2541 rssi -79 format 0 rate 0 more 0
+  91.108 dhcp no offer
+  91.108 air 87644846 group from sta-7 len 80 seq 2542 rssi -79 format 0 rate 0 more 0
+  91.109 dhcp out discover
+  91.109 air 87796841 ack
+  91.109 air 87845209 beacon tsf 4170195333, 0 broken
+  91.109 air 87849689 group from this-sta len 380 seq 2543 rssi -78 format 0 rate 0 more 1
+  91.609 air 88156858 group from sta-1 len 254 seq 2545 rssi -79 format 0 rate 0 more 0
+  92.109 air 88566441 group from the-ap len 246 seq 2546 rssi -78 format 0 rate 0 more 1
+  92.109 air 88869226 beacon tsf 4171219333, 0 broken
+  92.110 air 88873666 group from sta-3 len 252 seq 2550 rssi -79 format 0 rate 0 more 0
+  92.610 air 89283293 group from the-ap len 83 seq 2551 rssi -79 format 0 rate 0 more 0
+  93.110 dhcp no offer
+  93.611 dhcp out discover
+  93.611 air 90000454 ack
+  93.611 air 90098047 beacon tsf 4172448133, 0 broken
+  93.611 air 90102467 group from this-sta len 380 seq 2552 rssi -79 format 0 rate 0 more 1
+  94.612 air 91122064 beacon tsf 4173472133, 0 broken
+  94.612 air 91127048 group from sta-1 len 254 seq 2554 rssi -78 format 0 rate 0 more 0
+  94.612 air 91228905 group from the-ap len 83 seq 2555 rssi -79 format 0 rate 0 more 0
+  95.613 dhcp no offer
+  95.613 dhcp out discover
+  95.613 air 92196839 ack
+  95.613 air 92248482 beacon tsf 4174598533, 0 broken
+  95.613 air 92252962 group from this-sta len 380 seq 2556 rssi -79 format 0 rate 0 more 1
+  96.114 air 92457746 group from sta-2 len 98 seq 2558 rssi -78 format 0 rate 0 more 0
+  96.614 air 93272499 beacon tsf 4175622533, 0 broken
+  96.614 air 93276939 group from the-ap len 83 seq 2559 rssi -79 format 0 rate 0 more 0
+  97.115 air 93481743 group from sta-2 len 98 seq 2560 rssi -79 format 0 rate 0 more 0
+  97.615 air 93891369 group from sta-3 len 252 seq 2561 rssi -78 format 0 rate 0 more 0
+  97.615 dhcp no offer
+  97.615 air 94096153 group from sta-1 len 254 seq 2562 rssi -78 format 0 rate 0 more 0
+  98.116 dhcp out discover
+  98.116 air 94396839 ack
+  98.116 air 94501319 beacon tsf 4176851333, 0 broken
+  98.116 air 94505759 group from this-sta len 380 seq 2563 rssi -78 format 0 rate 0 more 1
+  98.616 air 95222571 group from the-ap len 83 seq 2565 rssi -78 format 0 rate 0 more 0
+  99.617 air 96242148 beacon tsf 4178592133, 0 broken
+  99.617 dhcp no offer
+ 100.118 dhcp out discover
+ 100.118 air 96597658 ack
+ 100.118 air 96656195 group from this-sta len 380 seq 2566 rssi -78 format 0 rate 0 more 1
+ 100.618 air 97065802 group from sta-1 len 254 seq 2568 rssi -80 format 0 rate 0 more 0
+ 100.618 air 97266165 beacon tsf 4179616133, 0 broken
+ 100.618 air 97270605 group from the-ap len 83 seq 2569 rssi -79 format 0 rate 0 more 0
+ 101.619 air 98290182 beacon tsf 4180640133, 0 broken
+ 102.119 dhcp no offer
+ 102.119 dhcp out discover
+ 102.119 air 98796852 ack
+ 102.620 air 98909052 group from this-sta len 380 seq 2570 rssi -78 format 0 rate 0 more 1
+ 102.620 air 99216257 group from the-ap len 83 seq 2573 rssi -78 format 0 rate 0 more 0
+ 103.621 air 100133412 beacon tsf 4182483333, 0 broken
+ 103.621 air 100137891 group from sta-1 len 254 seq 2574 rssi -78 format 0 rate 0 more 0
+ 104.121 dhcp no offer
+ 104.121 air 100854644 group from dhcp-server len 628 seq 2575 rssi -81 format 0 rate 0 more 0
+ 104.621 dhcp out discover
+ 104.621 air 100996843 ack
+ 104.621 air 101059508 group from this-sta len 380 seq 2576 rssi -78 format 0 rate 0 more 1
+ 104.621 air 101157429 beacon tsf 4183507333, 0 broken
+ 104.621 air 101161889 group from sta-2 len 98 seq 2578 rssi -79 format 0 rate 0 more 0
+ 104.621 air 101264274 group from the-ap len 83 seq 2579 rssi -80 format 0 rate 0 more 0
+ 105.622 air 102083465 group from sta-8 len 98 seq 2580 rssi -82 format 0 rate 0 more 0
+ 106.123 air 102795856 beacon tsf 4185145733, 0 broken
+ 106.123 air 102800317 group from sta-9 len 98 seq 2581 rssi -84 format 0 rate 0 more 0
+ 106.623 dhcp no offer
+ 106.623 air 103107482 group from sta-1 len 254 seq 2582 rssi -82 format 0 rate 0 more 0
+ 106.623 dhcp out discover
+ 106.623 air 103196839 ack
+ 106.623 air 103209943 group from this-sta len 380 seq 2583 rssi -83 format 0 rate 0 more 1
+ 106.623 air 103214058 group from dhcp-server len 628 seq 2585 rssi -82 format 0 rate 0 more 0
+ 106.623 dhcp in offer after 24 ms
+ 106.623 dhcp out request
+ 106.623 air 103220958 ack
+ 106.623 air 103312325 group from this-sta len 380 seq 2586 rssi -83 format 0 rate 0 more 1
+ 107.123 air 103517177 group from sta-2 len 98 seq 2588 rssi -81 format 0 rate 0 more 0
+ 107.123 air 103819873 beacon tsf 4186169733, 0 broken
+ 107.123 air 103824333 group from sta-3 len 252 seq 2589 rssi -82 format 0 rate 0 more 0
+ 108.124 air 104843890 beacon tsf 4187193733, 0 broken
+ 108.624 dhcp no ack
+ 108.625 air 105257937 group from the-ap len 83 seq 2590 rssi -82 format 0 rate 0 more 0
+ 109.125 dhcp out discover
+ 109.125 air 105422441 ack
+ 109.125 air 105462740 group from this-sta len 380 seq 2591 rssi -81 format 0 rate 0 more 1
+ 109.125 air 105867907 beacon tsf 4188217733, 0 broken
+ 109.625 air 106077191 group from sta-1 len 254 seq 2593 rssi -81 format 0 rate 0 more 0
+ 110.626 air 107096727 beacon tsf 4189446533, 0 broken
+ 110.626 air 107203549 group from sta-4 len 84 seq 2594 rssi -81 format 0 rate 0 more 0
+ 110.626 air 107306011 group from the-ap len 83 seq 2595 rssi -81 format 0 rate 0 more 0
+ 110.627 dhcp no offer
+ 111.127 dhcp out discover
+ 111.127 air 107620858 ack
+ 111.127 air 107715621 group from this-sta len 380 seq 2596 rssi -82 format 0 rate 0 more 1
+ 112.128 air 108427949 beacon tsf 4190777733, 0 broken
+ 112.128 air 108842036 group from sta-3 len 252 seq 2598 rssi -82 format 0 rate 0 more 0
+ 112.628 air 109149181 group from sta-1 len 254 seq 2599 rssi -82 format 0 rate 0 more 0
+ 112.629 air 109251623 group from the-ap len 83 seq 2600 rssi -82 format 0 rate 0 more 0
+ 113.129 dhcp no offer
+ 113.129 dhcp out discover
+ 113.129 air 109820840 ack
+ 113.129 air 109861573 beacon tsf 4192211333, 0 broken
+ 113.129 air 109866053 group from this-sta len 380 seq 2601 rssi -81 format 0 rate 0 more 1
+ 114.630 air 111295197 beacon tsf 4193644933, 0 broken
+ 114.630 air 111299677 group from the-ap len 83 seq 2603 rssi -81 format 0 rate 0 more 0
+ 115.131 dhcp no offer
+ 115.631 dhcp out discover
+ 115.631 air 112020840 ack
+ 115.631 air 112118870 group from this-sta len 380 seq 2604 rssi -81 format 0 rate 0 more 1
+ 115.631 air 112127345 group from sta-1 len 254 seq 2606 rssi -80 format 0 rate 0 more 0
+ 116.632 air 113240829 beacon tsf 4195590533, 0 broken
+ 116.632 air 113250362 group from the-ap len 83 seq 2607 rssi -81 format 0 rate 0 more 0
+ 117.132 air 113859659 group from sta-10 len 92 seq 2608 rssi -81 format 0 rate 0 more 1
+ 117.132 air 113861829 group from sta-3 len 252 seq 2610 rssi -82 format 0 rate 0 more 0
+ 117.632 dhcp no offer
+ 117.632 air 114166887 group from sta-10 len 128 seq 2611 rssi -81 format 0 rate 0 more 0
+ 117.633 dhcp out discover
+ 117.633 air 114220838 ack
+ 117.633 air 114264846 beacon tsf 4196614533, 0 broken
+ 117.633 air 114269306 group from this-sta len 380 seq 2612 rssi -81 format 0 rate 0 more 1
+ 117.633 air 114277780 group from sta-10 len 258 seq 2614 rssi -81 format 0 rate 0 more 1
+ 117.633 air 114282479 group from sta-10 len 92 seq 2616 rssi -81 format 0 rate 0 more 0
+ 118.133 air 114474089 group from sta-2 len 98 seq 2617 rssi -81 format 0 rate 0 more 0
+ 118.133 air 114576511 group from sta-10 len 258 seq 2618 rssi -81 format 0 rate 0 more 1
+ 118.133 air 114781592 group from sta-10 len 258 seq 2620 rssi -80 format 0 rate 0 more 1
+ 118.633 air 115088539 group from sta-10 len 620 seq 2622 rssi -81 format 0 rate 0 more 1
+ 118.633 air 115099030 group from sta-1 len 254 seq 2624 rssi -81 format 0 rate 0 more 0
+ 118.633 air 115288863 beacon tsf 4197638533, 0 broken
+ 118.633 air 115293303 group from the-ap len 83 seq 2625 rssi -80 format 0 rate 0 more 0
+ 119.634 air 116112536 group from sta-10 len 620 seq 2626 rssi -81 format 0 rate 0 more 1
+ 119.634 dhcp no offer
+ 120.135 phase B: offers 3 of 25 discovers, acks 0 of 3 requests
+ 120.135 phase C begins
+ 120.135 dhcp out discover
+ 121.637 dhcp no offer
+ 122.138 dhcp out discover
+ 124.140 dhcp no offer
+ 124.140 dhcp out discover
+ 126.142 dhcp no offer
+ 126.643 dhcp out discover
+ 128.144 dhcp in offer after 1700 ms
+ 128.145 dhcp out request
+ 130.147 dhcp no ack
+ 130.647 dhcp out discover
+ 132.149 dhcp no offer
+ 132.649 dhcp out discover
+ 134.652 dhcp no offer
+ 134.652 dhcp out discover
+ 136.654 dhcp no offer
+ 137.155 dhcp out discover
+ 138.656 dhcp no offer
+ 139.156 dhcp out discover
+ 141.158 dhcp no offer
+ 141.158 dhcp out discover
+ 143.161 dhcp no offer
+ 143.661 dhcp out discover
+ 145.664 dhcp no offer
+ 145.664 dhcp out discover
+ 147.666 dhcp no offer
+ 148.167 dhcp out discover
+ 148.167 dhcp in offer after 71 ms
+ 148.167 dhcp out request
+ 150.170 dhcp no ack
+ 150.170 dhcp out discover
+ 152.173 dhcp no offer
+ 152.674 dhcp out discover
+ 154.176 dhcp no offer
+ 154.676 dhcp out discover
+ 156.679 dhcp no offer
+ 156.679 dhcp out discover
+ 158.682 dhcp no offer
+ 159.183 dhcp out discover
+ 161.185 dhcp no offer
+ 161.185 dhcp out discover
+ 163.188 dhcp no offer
+ 163.689 dhcp out discover
+ 165.192 dhcp no offer
+ 165.692 dhcp out discover
+ 167.695 dhcp no offer
+ 167.695 dhcp out discover
+ 169.697 dhcp no offer
+ 170.198 dhcp out discover
+ 172.200 dhcp no offer
+ 172.201 dhcp out discover
+ 174.203 dhcp no offer
+ 174.704 dhcp out discover
+ 176.207 dhcp in offer after 1858 ms
+ 176.207 dhcp out request
+ 178.210 dhcp no ack
+ 178.711 phase C: offers 3 of 25 discovers, acks 0 of 3 requests
+ 178.711 frames in 317, lines lost 0; done
