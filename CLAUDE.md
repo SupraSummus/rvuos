@@ -33,6 +33,9 @@ Do not reflow paragraphs to a fixed column width.
 Run `make check`.
 It boots QEMU, replays the fuzz corpus on the host build,
 and compares host and QEMU transcripts.
+It also holds what a system call and a switch cost, `make bench`, to the records in `tests/bench/` within a tenth;
+a change that moves a cost further, and means to, runs `make bench-refresh` with `BOARD=qemu`, `mps2-an385` and `mps2-an521`,
+and its commit says what it cost.
 When a change touches `kernel/board/esp32c6/`, `user/board/esp32c6/`,
 or anything the demo or the escape suite exercises, and an ESP32-C6 is connected,
 run `make BOARD=esp32c6 test escape` as well;

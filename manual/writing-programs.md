@@ -376,6 +376,13 @@ every thread's watch names a live notification, through a capability that could 
 no `Irq` armed on a timer line is past its deadline,
 and the controller forwards exactly the lines an `Irq` is armed on.
 
+**The benchmark.**
+`make bench` boots `user/bench/`, whose `root.c` names its measures,
+and says what a round of each costs in the core's cycles, or under QEMU, whose clock counts instructions there, in instructions.
+On QEMU's boards, where a run repeats exactly, it holds each cost to the board's record in `tests/bench/` within a tenth either way,
+and `make bench-refresh` writes the record from a run.
+The worst round beside a busy process waits for that process's turns, so the tick sets it, and its cycles grow with the clock.
+
 **Replay input.**
 `BOOT_CAP_INPUT` maps 64 KiB where QEMU's loader places a file:
 

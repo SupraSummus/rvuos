@@ -32,7 +32,8 @@ make fuzz       # fuzz the system call surface for FUZZ_TIME seconds in FUZZ_JOB
 make qemu-replay # replay the corpus on QEMU and compare traces with the host
 make arm-test   # boot the same demo under QEMU on a Cortex-M3, mps2-an385, and on one and two Cortex-M33s, mps2-an521
 make smp-test   # boot the demo on two harts of QEMU virt
-make check      # test, escape, host-test, qemu-replay, arm-test and smp-test
+make bench      # what a system call and a switch cost, held to tests/bench/
+make check      # test, escape, lib-test, bench, host-test, wifi-test, qemu-replay, arm-test and smp-test
 make mutants    # plant the bugs of tests/mutants/ and see which checks catch them
 make mutants-refresh # carry the patches of tests/mutants/ over to the kernel as it is
 ```

@@ -327,14 +327,15 @@ make             # build/qemu/kernel-init.elf and build/qemu/kernel-fuzzdrv.elf
 make run         # boot the demo root task under QEMU
 make test        # boot under QEMU and check the transcript
 make lib-test    # boot the library's test of user/libtest/ under QEMU and check what it says of itself
+make bench       # what a system call and a switch cost, in instructions, held to tests/bench/qemu.txt
 make host-test   # replay the fuzz corpus on the host build with invariants on
 make fuzz        # fuzz the system call surface for FUZZ_TIME seconds in FUZZ_JOBS processes
 make qemu-replay # replay the corpus on QEMU and compare with the host
 make smp-test    # boot the demo on two harts of QEMU and check its transcript, the second core's tests among it
 make mutants     # plant each bug under tests/mutants/ and require the checks to catch it
 make arm-test    # boot the demo on mps2-an385 and mps2-an521, there on one core and on two, and check its transcript,
-                 # with the escape suite and the library's test on one
-make check       # test, escape, lib-test, host-test, wifi-test, qemu-replay, arm-test and smp-test; run before committing
+                 # with the escape suite, the library's test and the benchmark on one
+make check       # test, escape, lib-test, bench, host-test, wifi-test, qemu-replay, arm-test and smp-test; run before committing
 ```
 
 `PMP_MAX_ENTRIES=8 make check` runs everything with a smaller PMP budget.
@@ -353,6 +354,7 @@ make BOARD=esp32c6                    # build/esp32c6/kernel-init.bin
 make BOARD=esp32c6 run                # load it into RAM and print the console until the halt
 make BOARD=esp32c6 test               # the same, and check the transcript
 make BOARD=esp32c6 escape lib-test    # the escape suite, and the library's test
+make BOARD=esp32c6 bench              # what a system call and a switch cost, in the core's cycles
 make BOARD=esp32c6 PORT=/dev/ttyACM1 run
 ```
 
@@ -370,6 +372,7 @@ make BOARD=rp2350 ARCH=arm test escape         # the same on the Cortex-M33, fro
 make BOARD=rp2350 CORES=2 test escape          # the same on both Hazard3 cores, which goes on to the second
 make BOARD=rp2350 ARCH=arm CORES=2 test escape # and on both Cortex-M33s
 make BOARD=rp2350 lib-test                     # the library's test, and with ARCH=arm on the Cortex-M33
+make BOARD=rp2350 bench                        # what a system call and a switch cost, in cycles, on either kind of core
 make BOARD=rp2350 wifi                         # the Wi-Fi system of user/wifi/, on a Pico 2 W
 ```
 
@@ -392,6 +395,7 @@ make BOARD=mps2-an385                # build/mps2-an385/kernel-init.elf
 make BOARD=mps2-an385 run            # boot the demo root task
 make BOARD=mps2-an385 test escape    # the same, and check the transcripts
 make BOARD=mps2-an385 lib-test       # the library's test
+make BOARD=mps2-an385 bench          # the benchmark, held to tests/bench/mps2-an385.txt
 make BOARD=mps2-an521 test escape    # the same on QEMU's Cortex-M33, from build/mps2-an521/
 make BOARD=mps2-an521 CORES=2 test   # the same on its two Cortex-M33s, which goes on to the second core
 ```
@@ -404,6 +408,7 @@ The images differ only in that program:
 `kernel-fuzzdrv.elf` the replay driver of `user/fuzzdrv.c`,
 `kernel-escape-*.elf` a scenario of the escape suite each,
 `kernel-libtest.elf` the library's test of `user/libtest/`,
+`kernel-bench.elf` the benchmark of `user/bench/`,
 and `kernel-wifi.elf` the Wi-Fi system of `user/wifi/`.
 
 ### Reading the transcript

@@ -64,6 +64,10 @@ until the maintainer decides otherwise.
    and a channel for each client, from a hub, answers each asker on its own channel,
    so neither cost has shown yet; see `user/wifi/NOTES.md`.
    A client of several threads asking at once, or a server whose round trips are its time, would show them.
+   `make bench` measures the round trip alone:
+   about 4,500 cycles between two processes on RP2350's Hazard3 and 5,900 on the ESP32-C6,
+   of which the four calls take 2,000 and 2,200,
+   and loading the other process's regions about 400 cycles a switch on Hazard3 and 1,000 on the ESP32-C6.
    An `Endpoint` object would not replace notifications:
    interrupts need those either way.
 
@@ -119,6 +123,9 @@ until the maintainer decides otherwise.
    at the price of a queue of refills sorted by time.
    Decide when a workload needs one thread to run before another,
    and taking turns measurably fails it.
+   `make bench`'s `contended-worst` is what taking turns costs a round trip between two processes:
+   beside a process that spins, the worst round waits for its turns, about 263,000 cycles on RP2350,
+   where the round alone costs about 4,500.
 
 10. **Yield.**
     Working default: none.

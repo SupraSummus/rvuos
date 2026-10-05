@@ -1,0 +1,7 @@
+# A round of each measure of user/bench/ on qemu, in instructions; see tests/bench.py.
+call 420
+signal-wait 815
+threads 3008
+processes 4165
+channel 4648
+contended-worst 1722900

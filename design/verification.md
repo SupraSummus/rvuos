@@ -581,6 +581,15 @@ which the demo allows for and nothing measures;
 an ARM core waits in `wfe` instead, which QEMU 8.2 takes for a turn handed to the other core.
 No check yet makes a core wait for the lock while another walks, or replays the corpus on two harts against the host.
 
+**Cost** (`make bench`).
+Goal 4 bounds what a call costs, and `user/bench/` measures what it does cost,
+in the core's cycles, which do not differ with the clock as times do.
+Under QEMU's `-icount` the clock counts instructions and a run repeats exactly,
+so on QEMU's three boards `tests/bench.py` holds each cost to the board's record in `tests/bench/` within a tenth either way,
+wide enough for one clang's code against another's and narrow enough for a step added to every call.
+A change that moves a cost further writes the record anew with `make bench-refresh`, and its commit says what it cost.
+The last measure, the worst round trip beside a process that always wants the core, is the scheduler's; see open decision 9.
+
 **Hardware.**
 QEMU's PMP may differ from a real core in Smepmp behaviour,
 and it has a four-byte grain, so a coarser grain is never seen there.

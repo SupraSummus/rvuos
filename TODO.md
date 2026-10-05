@@ -85,6 +85,10 @@ what is left:
 - The ESP32-C6's echo answers in 13 to 22 ms at the median, the Pico 2 W's in about 5, and the C6's ping in about 10:
   where the time goes, the radio, the driver's turn after its interrupt, open decision 9, or the libraries' task,
   is not measured.
+- The ESP32-C6 runs at 80 MHz, the clock the ROM leaves it at, where it could run at 160:
+  `make BOARD=esp32c6 bench` reads the CLINT's mtime, which counts the core's cycles, and the kernel measures it at 80.02 MHz.
+  `board_init` could set 160 MHz from the PLL, which halves the time every cost takes;
+  the ROM's `ets_delay_us`, which Espressif's libraries call, counts cycles by a rate the ROM keeps, which would have to follow.
 - The Pico 2 W's run lasts its `run=` whatever its checks found, since the host has no way to end it:
   its console is the halt's alone, and a word on the logger's port could carry the end instead.
 - The ESP32-C6's driver stops once the access point lets the station go, and the root task ends the run:
@@ -381,6 +385,12 @@ what is left:
   until the root task is gone; open decision 20 in `DESIGN.md`.
   Grant the rest as further blocks, or lay the board out afresh,
   when a board's RAM gets tight.
+- A change of process writes every PMP entry the core has, sixteen on QEMU and the ESP32-C6,
+  each through a read, a change and a write of its `pmpcfg` register:
+  `make bench` measures the load at about 1,000 cycles a switch on the ESP32-C6 and 400 on Hazard3,
+  beside 800 to 900 for the rest of a switch.
+  Writing the image's four `pmpcfg` words whole, and `pmpaddr` only where an entry is in use, would save most of it;
+  mutants stand in `process.c` and `pmp.c`, and the records of `tests/bench/` would move.
 - `PROCESS_REGION_SLOTS` is fixed at 8, whatever the PMP budget;
   size it per process from the budget.
 - `pmp.h` names the protection unit's interface after PMP, and `kernel/arch/arm/mpu.c` implements it too;

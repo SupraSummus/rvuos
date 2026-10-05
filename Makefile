@@ -117,6 +117,8 @@ IMAGE         := elf
 RUN_INIT      := $(QEMU) $(QEMUFLAGS) -bios $(BUILD)/kernel-init.elf
 # The escape suite and the library's test boot one image at a time; the runner appends it to this prefix.
 BOOT_PREFIX   := $(QEMU) $(QEMUFLAGS) -bios
+# Under -icount shift=0 the clock counts one nanosecond an instruction, so the benchmark counts instructions.
+BENCH_CPU_HZ  := icount
 else ifeq ($(BOARD),esp32c6)
 # The replay driver's layout is QEMU's, see rvuos/replay.h, so only the demo is built.
 USER_PROGRAMS := init
@@ -126,6 +128,8 @@ PORT          ?= /dev/ttyACM0
 ESPTOOL_PYTHON ?= $(or $(shell sed -n '1s/^\#!//p' "$$(command -v $(ESPTOOL))" 2>/dev/null),python3)
 RUN_INIT      := $(ESPTOOL_PYTHON) tools/esp32c6-run.py --port $(PORT) $(BUILD)/kernel-init.bin
 BOOT_PREFIX   := $(ESPTOOL_PYTHON) tools/esp32c6-run.py --port $(PORT)
+# The clock is the CLINT's mtime, which counts the core's cycles at whatever clock the ROM left it.
+BENCH_CPU_HZ  := clock
 else ifeq ($(BOARD),rp2350)
 # The replay driver's layout is QEMU's, so only the demo is built, as for the ESP32-C6.
 # The runner loads the ELF's segments itself, and reboots into the cores the ELF is for; it needs pyusb.
@@ -134,6 +138,8 @@ IMAGE         := elf
 RP2350_PYTHON ?= python3
 RUN_INIT      := $(RP2350_PYTHON) tools/rp2350-run.py $(BUILD)/kernel-init.elf
 BOOT_PREFIX   := $(RP2350_PYTHON) tools/rp2350-run.py
+# clk_sys, which the kernel's board_init sets on either kind of core; the clock counts microseconds.
+BENCH_CPU_HZ  := 150000000
 ifeq ($(ARCH),arm)
 # Where the Cortex-M33's transcripts differ from QEMU virt's, see tests/run.sh:
 # an MPU of eight regions, none smaller than 32 bytes, and ARM's report of a fault.
@@ -154,6 +160,7 @@ QEMUFLAGS_ARM := -M mps2-an385 -cpu cortex-m3 -nographic -nodefaults -nic none -
                  -semihosting-config enable=on,target=native -icount shift=0,sleep=off
 RUN_INIT      := $(QEMU_ARM) $(QEMUFLAGS_ARM) -kernel $(BUILD)/kernel-init.elf
 BOOT_PREFIX   := $(QEMU_ARM) $(QEMUFLAGS_ARM) -kernel
+BENCH_CPU_HZ  := icount
 # Where the core's transcripts differ from QEMU virt's, see tests/run.sh:
 # an MPU of eight regions, none smaller than 32 bytes, and ARMv7-M's report of a fault.
 BOARD_FACTS   := BOARD_PMP_ENTRIES=8 BOARD_PMP_GRAIN=32 BOARD_ARCH=arm
@@ -167,6 +174,7 @@ QEMUFLAGS_ARM := -M mps2-an521 -nographic -nodefaults -nic none -serial mon:stdi
                  -semihosting-config enable=on,target=native -icount shift=0,sleep=off
 RUN_INIT      := $(QEMU_ARM) $(QEMUFLAGS_ARM) -kernel $(BUILD)/kernel-init.elf
 BOOT_PREFIX   := $(QEMU_ARM) $(QEMUFLAGS_ARM) -kernel
+BENCH_CPU_HZ  := icount
 # The Cortex-M33's, as RP2350's: eight Secure MPU regions, none smaller than 32 bytes, and ARM's report of a fault.
 BOARD_FACTS   := BOARD_PMP_ENTRIES=8 BOARD_PMP_GRAIN=32 BOARD_ARCH=arm
 else
@@ -185,7 +193,7 @@ else
 ESCAPE_PROGRAMS += escape-load-scs escape-stack-call escape-unstack
 endif
 
-.PHONY: all clean run test escape lib-test host-harnesses host-test fuzz corpus-merge qemu-replay mutants mutants-refresh \
+.PHONY: all clean run test escape lib-test bench bench-refresh host-harnesses host-test fuzz corpus-merge qemu-replay mutants mutants-refresh \
         mutants-fuzz arm-test smp-test contents check
 
 # Pattern rules would delete the objects they chain through,
@@ -284,7 +292,7 @@ escape: $(foreach p,$(ESCAPE_PROGRAMS),$(BUILD)/kernel-$(p).$(IMAGE))
 # Every process runs code from the one image but only the root task with its data,
 # so no other object may keep a global, which the link checks, the library's among them.
 LIB_OBJ       := $(patsubst %.c,$(BUILD)/%.o,$(wildcard user/lib/*.c))
-PROGRAMS      := wifi libtest
+PROGRAMS      := wifi libtest bench
 program_root   = $(BUILD)/user/$(1)/root.o
 program_others = $(patsubst %.c,$(BUILD)/%.o,$(filter-out user/$(1)/root.c,$(wildcard user/$(1)/*.c)))
 define program
@@ -301,6 +309,16 @@ $(foreach p,$(PROGRAMS),$(eval $(call program,$(p))))
 # It runs on every board, and `make check` runs it under QEMU on both architectures.
 lib-test: $(BUILD)/kernel-libtest.$(IMAGE)
 	tests/libtest.sh "$(BOOT_PREFIX) $<"
+
+# What a system call and a switch cost, user/bench/, in the core's cycles, or under QEMU in instructions.
+# A build with a record in tests/bench/, QEMU's boards', is held to it within a tenth; bench-refresh writes it.
+BENCH_RECORD := tests/bench/$(notdir $(BUILD)).txt
+bench: $(BUILD)/kernel-bench.$(IMAGE)
+	tests/bench.py --cpu-hz $(BENCH_CPU_HZ) --board $(notdir $(BUILD)) --record $(BENCH_RECORD) "$(BOOT_PREFIX) $<"
+
+bench-refresh: $(BUILD)/kernel-bench.$(IMAGE)
+	tests/bench.py --cpu-hz $(BENCH_CPU_HZ) --board $(notdir $(BUILD)) --record $(BENCH_RECORD) --refresh \
+		"$(BOOT_PREFIX) $<"
 
 # The Wi-Fi system on a Pico 2 W, see user/wifi/wifi.h,
 # and the CYW43439's firmware beside it, which tools/cyw43-blob.py fetches and packs, never into the tree.
@@ -703,11 +721,11 @@ qemu-replay: $(BUILD)/kernel-fuzzdrv.elf $(HOST_BUILD)/fuzz
 		--kernel $(BUILD)/kernel-fuzzdrv.elf --host $(HOST_BUILD)/fuzz tests/seeds tests/corpus
 
 # The same demo on ARM, under QEMU, on ARMv7-M and on ARMv8-M, and on mps2-an521's two cores,
-# and the escape suite and the library's test on each version's one core; see DESIGN.md, "Architectures" and "Cores".
+# and the escape suite, the library's test and the benchmark on each version's one core; see DESIGN.md, "Architectures" and "Cores".
 # tests/mutants.sh leaves it out, as it leaves ARM out, which the host build does not compile.
 arm-test:
-	$(MAKE) BOARD=mps2-an385 test escape lib-test
-	$(MAKE) BOARD=mps2-an521 test escape lib-test
+	$(MAKE) BOARD=mps2-an385 test escape lib-test bench
+	$(MAKE) BOARD=mps2-an521 test escape lib-test bench
 	$(MAKE) BOARD=mps2-an521 CORES=2 test
 
 # The same demo on two harts of QEMU virt, which goes on to the second core; see DESIGN.md, "Cores".
@@ -719,7 +737,7 @@ smp-test:
 contents:
 	tools/contents.py MANUAL.md DESIGN.md
 
-check: contents test escape lib-test host-test wifi-test qemu-replay arm-test smp-test
+check: contents test escape lib-test bench host-test wifi-test qemu-replay arm-test smp-test
 
 clean:
 	rm -rf $(BUILD)
