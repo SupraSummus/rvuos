@@ -197,7 +197,7 @@ static void scan(struct drv *d)
  */
 static void trace(const char *way, const uint8_t *f, uint32_t len)
 {
-    char what[72];
+    char what[96];
     what[0] = 0;
     uint32_t type = len >= 14 ? (uint32_t)f[12] << 8 | f[13] : 0;
     if (type == 0x0806 && len >= 42 && f[21] == 1) {
@@ -212,7 +212,13 @@ static void trace(const char *way, const uint8_t *f, uint32_t len)
                          f[31], f[32], f[33], proto);
         if ((proto == 6 || proto == 17) && len >= 14 + ihl + 4 && n > 0) {
             const uint8_t *p = f + 14 + ihl;
-            snprintf(what + n, sizeof(what) - (uint32_t)n, " port %u > %u", p[0] << 8 | p[1], p[2] << 8 | p[3]);
+            uint32_t sport = (uint32_t)p[0] << 8 | p[1], dport = (uint32_t)p[2] << 8 | p[3];
+            int m = snprintf(what + n, sizeof(what) - (uint32_t)n, " port %u > %u", (unsigned)sport, (unsigned)dport);
+            if (proto == 17 && (sport == 67 || sport == 68) && (dport == 67 || dport == 68) && len >= 14 + ihl + 16 &&
+                m > 0) {
+                snprintf(what + n + m, sizeof(what) - (uint32_t)(n + m), " xid 0x%02x%02x%02x%02x", p[12], p[13], p[14],
+                         p[15]);
+            }
         }
     }
     drv_say("frame %s %02x:%02x:%02x:%02x:%02x:%02x < %02x:%02x:%02x:%02x:%02x:%02x type %04x len %u%s\n", way, f[0],
@@ -224,6 +230,66 @@ static void counters(void)
 {
     drv_say("driver: the libraries' counters follow\n");
     esp_wifi_statis_dump(WIFI_STATIS_RXTX);
+}
+
+/*
+ * What the radio hears, for debug=air, timed by the MAC in microseconds: the access point's frames to the group
+ * and to the station, with their sequence numbers, the acknowledgements that end what the station sent,
+ * broken frames about as long as a DHCP answer, and of the rest a count, told with a beacon once a second.
+ */
+static uint8_t air_own[6];
+static uint32_t air_beacon_told, air_broken;
+
+static uint32_t le32(const uint8_t *p)
+{
+    return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+}
+
+static void air(void *buf, int type)
+{
+    const uint8_t *c = buf, *f = c + RX_CTRL_SIZE;
+    const uint8_t *bssid = drv_self->joined.bssid;
+    uint32_t t = le32(c + RX_CTRL_TIMESTAMP);
+    uint32_t len = ((uint32_t)c[RX_CTRL_SIG_LEN] | (uint32_t)c[RX_CTRL_SIG_LEN + 1] << 8) & 0x3fffu;
+    int rssi = (int8_t)c[RX_CTRL_RSSI];
+    if (c[RX_CTRL_STATE] != 0 || c[RX_CTRL_RXEND] != 0) {
+        if (len >= 400 && len <= 800) {
+            drv_say("air %u broken len %u rssi %d state %u end %u\n", (unsigned)t, (unsigned)len, rssi,
+                    (unsigned)c[RX_CTRL_STATE], (unsigned)c[RX_CTRL_RXEND]);
+        } else {
+            air_broken++;
+        }
+        return;
+    }
+    if (type == WIFI_PKT_CTRL) {
+        if (len >= 10 && memcmp(f + 4, air_own, 6) == 0) {
+            drv_say("air %u %s\n", (unsigned)t, (f[0] & 0xf0) == 0x90 ? "ba" : "ack");
+        }
+        return;
+    }
+    if (len < 24 || memcmp(f + 10, bssid, 6) != 0) {
+        return;
+    }
+    if (type == WIFI_PKT_MGMT) {
+        if (f[0] == 0x80 && len >= 32 && t - air_beacon_told >= 1000000u) {
+            air_beacon_told = t;
+            drv_say("air %u beacon tsf %u, %u broken\n", (unsigned)t, (unsigned)le32(f + 24), (unsigned)air_broken);
+            air_broken = 0;
+        }
+        return;
+    }
+    if (type == WIFI_PKT_DATA) {
+        const uint8_t *to = f + 4, *from = f + 16;
+        unsigned seq = (unsigned)(f[22] | f[23] << 8) >> 4;
+        if (to[0] & 1) {
+            drv_say("air %u group from %02x:%02x:%02x:%02x:%02x:%02x len %u seq %u rssi %d format %u rate %u more %u\n",
+                    (unsigned)t, from[0], from[1], from[2], from[3], from[4], from[5], (unsigned)len, seq, rssi,
+                    (unsigned)(c[RX_CTRL_FORMAT] & 0xfu), (unsigned)(c[1] & 0x1fu), (unsigned)(f[1] >> 5 & 1));
+        } else if (memcmp(to, air_own, 6) == 0) {
+            drv_say("air %u to us len %u seq %u retry %u rssi %d\n", (unsigned)t, (unsigned)len, seq,
+                    (unsigned)(f[1] >> 3 & 1), rssi);
+        }
+    }
 }
 
 /* What the station receives, an Ethernet frame, into the link; dropped while the link is full. */
@@ -293,6 +359,16 @@ static void join(struct drv *d)
     }
     must(d, "the join", e == WIFI_EVENT_STA_CONNECTED ? ESP_OK : e < 0 || let_go == 0 ? ESP_FAIL : (esp_err_t)let_go);
     must(d, "the station's receiver", esp_wifi_internal_reg_rxcb(WIFI_IF_STA, receive));
+    if (d->debug & DRV_DEBUG_AIR) {
+        static const uint32_t heard = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_CTRL |
+                                      WIFI_PROMIS_FILTER_MASK_DATA | WIFI_PROMIS_FILTER_MASK_FCSFAIL;
+        static const uint32_t acks = WIFI_PROMIS_CTRL_FILTER_MASK_ACK | WIFI_PROMIS_CTRL_FILTER_MASK_BA;
+        must(d, "the station's address", esp_wifi_get_mac(WIFI_IF_STA, air_own));
+        must(d, "the radio's filter", esp_wifi_set_promiscuous_filter(&heard));
+        must(d, "the radio's control filter", esp_wifi_set_promiscuous_ctrl_filter(&acks));
+        must(d, "what the radio hears", esp_wifi_set_promiscuous_rx_cb(air));
+        must(d, "promiscuous", esp_wifi_set_promiscuous(true));
+    }
 }
 
 /*

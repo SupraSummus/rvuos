@@ -448,6 +448,32 @@ esp_err_t esp_wifi_statis_dump(uint32_t modules);
 #define WIFI_PS_MIN_MODEM 1
 esp_err_t esp_wifi_set_ps(int type);
 
+/*
+ * What the radio hears, promiscuous, while the station stays joined: each frame after its reception's metadata,
+ * the 92 bytes of esp_wifi_rxctrl_t of ESP-IDF's esp_wifi_he_types.h for the C6's MAC, version 2,
+ * of which these bytes are read; the filters are wifi_promiscuous_filter_t, a mask alone.
+ */
+#define RX_CTRL_SIZE      92
+#define RX_CTRL_RSSI      0  /* int8_t, dBm */
+#define RX_CTRL_RXEND     8  /* the reception's state at its end, 0 if it succeeded */
+#define RX_CTRL_TIMESTAMP 12 /* uint32_t, the MAC's microseconds at the reception */
+#define RX_CTRL_FORMAT    39 /* bits 0 to 3: wifi_rx_bb_format_t, 0 for 802.11b, 1 for 802.11a/g */
+#define RX_CTRL_SIG_LEN   84 /* bits 0 to 13: the MPDU's length, its FCS included */
+#define RX_CTRL_STATE     88 /* 0 if the frame was received whole */
+#define WIFI_PKT_MGMT     0
+#define WIFI_PKT_CTRL     1
+#define WIFI_PKT_DATA     2
+#define WIFI_PROMIS_FILTER_MASK_MGMT     0x01u
+#define WIFI_PROMIS_FILTER_MASK_CTRL     0x02u
+#define WIFI_PROMIS_FILTER_MASK_DATA     0x04u
+#define WIFI_PROMIS_FILTER_MASK_FCSFAIL  0x40u
+#define WIFI_PROMIS_CTRL_FILTER_MASK_BA  (1u << 25)
+#define WIFI_PROMIS_CTRL_FILTER_MASK_ACK (1u << 29)
+esp_err_t esp_wifi_set_promiscuous_rx_cb(void (*cb)(void *buf, int type));
+esp_err_t esp_wifi_set_promiscuous_filter(const uint32_t *mask);
+esp_err_t esp_wifi_set_promiscuous_ctrl_filter(const uint32_t *mask);
+esp_err_t esp_wifi_set_promiscuous(bool on);
+
 /* The station's received frames, as Ethernet frames, each to be freed by eb once read. */
 esp_err_t esp_wifi_internal_reg_rxcb(int ifx, esp_err_t (*fn)(void *buffer, uint16_t len, void *eb));
 void esp_wifi_internal_free_rx_buffer(void *eb);
