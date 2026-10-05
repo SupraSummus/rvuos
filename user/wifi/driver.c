@@ -70,10 +70,43 @@ static void on_event(struct wlan *w, const struct wlan_event *e)
     }
 }
 
+/*
+ * For debug=dhcp, a line for each DHCP message heard, a client's or a server's, whoever it is for:
+ * where it came from and went, its type, its transaction and the client it names.
+ */
+static void dhcp_heard(struct drv *d, const uint8_t *f, uint32_t len)
+{
+    if (len < 14 + 20 + 8 + 240 || f[12] != 0x08 || f[13] != 0x00 || (f[14] >> 4) != 4 || f[14 + 9] != 17) {
+        return;
+    }
+    const uint8_t *u = f + 14 + (f[14] & 0x0fu) * 4u;
+    uint32_t sport = (uint32_t)u[0] << 8 | u[1], dport = (uint32_t)u[2] << 8 | u[3];
+    if (!((sport == 67 && dport == 68) || (sport == 68 && dport == 67)) || u + 8 + 240 > f + len) {
+        return;
+    }
+    const uint8_t *m = u + 8;
+    uint32_t type = 0;
+    for (const uint8_t *o = m + 240; o + 2 < f + len && o[0] != 255;) {
+        if (o[0] == 0) {
+            o++;
+            continue;
+        }
+        if (o[0] == 53) {
+            type = o[2];
+        }
+        o += 2 + o[1];
+    }
+    uint32_t xid = (uint32_t)m[4] << 24 | (uint32_t)m[5] << 16 | (uint32_t)m[6] << 8 | m[7];
+    say(&d->out, "dhcp %M > %M type %u xid %x for %M\n", f + 6, f, type, xid, m + 28);
+}
+
 /* A frame from the chip to the network process; dropped while the link is down or full. */
 static void on_data(struct wlan *w, const uint8_t *frame, uint32_t len)
 {
     struct drv_page *p = drv_of(w)->page;
+    if (p->dhcp_log) {
+        dhcp_heard(drv_of(w), frame, len);
+    }
     if (chan_send(&p->link, frame, len) != 0) {
         p->rx_dropped++;
         return;
@@ -271,13 +304,19 @@ __attribute__((noreturn)) void driver_main(struct child_page *page)
         serve(d);
     case MODE_STA:
         /* At once: a scan first would take the run's seconds, and the firmware finds the network itself. */
-        if ((err = wlan_join(&d->wlan, s->ssid, s->pass)) != 0) {
+        if (s->dhcp_log) {
+            wlan_power_save_off(&d->wlan);
+        }
+        if ((err = wlan_join(&d->wlan, s->ssid, s->pass, s->bssid_set ? s->bssid : 0)) != 0) {
             fail(d, STEP_JOIN, (uint32_t)err);
         }
         wait_for(d, &d->joined, 10000);
         if (d->joined != 1) {
             fail(d, STEP_JOIN, (uint32_t)d->joined);
         }
+        uint8_t ap[6] = { 0 };
+        wlan_bssid(&d->wlan, ap);
+        say(&d->out, "drv: joined %M\n", ap);
         report(d, DRV_JOINED);
         serve(d);
     default:

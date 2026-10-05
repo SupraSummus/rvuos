@@ -23,8 +23,10 @@
 #define WLC_DOWN        3u
 #define WLC_SET_INFRA   20u
 #define WLC_SET_AUTH    22u
+#define WLC_GET_BSSID   23u
 #define WLC_SET_SSID    26u
 #define WLC_SET_CHANNEL 30u
+#define WLC_SET_PM      86u
 #define WLC_SET_ANTDIV  64u
 #define WLC_SET_GMODE   110u
 #define WLC_SET_AP      118u
@@ -446,7 +448,7 @@ static uint32_t ssid_info(uint8_t *p, const char *ssid)
     return 36;
 }
 
-int32_t wlan_join(struct wlan *w, const char *ssid, const char *passphrase)
+int32_t wlan_join(struct wlan *w, const char *ssid, const char *passphrase, const uint8_t *bssid)
 {
     int32_t err;
     wlan_set_var_u32(w, "ampdu_ba_wsize", 8);
@@ -470,8 +472,29 @@ int32_t wlan_join(struct wlan *w, const char *ssid, const char *passphrase)
         wlan_set_var_u32(w, "mfp", MFP_CAPABLE);
         wlan_set_u32(w, WLC_SET_WPA_AUTH, WPA_AUTH_WPA2_PSK);
     }
-    uint8_t info[36];
-    return wlan_ioctl(w, IOCTL_SET, WLC_SET_SSID, info, ssid_info(info, ssid), 0, 0);
+    /*
+     * The SSID, and with an access point named, the join's parameters after it: its BSSID,
+     * two bytes of padding and a count of channels, none, so that the firmware looks on every channel.
+     */
+    uint8_t info[36 + 12];
+    uint32_t n = ssid_info(info, ssid);
+    if (bssid) {
+        memcpy(info + n, bssid, 6);
+        memset(info + n + 6, 0, 6);
+        n += 12;
+    }
+    return wlan_ioctl(w, IOCTL_SET, WLC_SET_SSID, info, n, 0, 0);
+}
+
+int32_t wlan_bssid(struct wlan *w, uint8_t bssid[6])
+{
+    static const uint8_t room[6];
+    return wlan_ioctl(w, IOCTL_GET, WLC_GET_BSSID, room, sizeof(room), bssid, 6);
+}
+
+int32_t wlan_power_save_off(struct wlan *w)
+{
+    return wlan_set_u32(w, WLC_SET_PM, 0);
 }
 
 int wlan_join_event(const struct wlan_event *e, int secure)

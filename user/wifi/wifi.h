@@ -86,6 +86,9 @@ struct drv_page {
     uint32_t mode, channel;
     char ssid[33];
     char pass[65];
+    uint8_t bssid[6]; /* the access point to join, if bssid_set */
+    uint8_t bssid_set;
+    uint8_t dhcp_log; /* power save off, and a line for each DHCP message heard */
     /* Later, with CHILD_BIT_PARENT: the link, once the root task connected it. */
     struct chan_end link;
 

@@ -76,10 +76,15 @@ int32_t wlan_init(struct wlan *w, const uint8_t *clm, uint32_t clm_len, uint8_t 
 int32_t wlan_scan(struct wlan *w);
 
 /*
- * Joins a network as a station: WPA2 with AES when a passphrase is given, open when it is empty.
+ * Joins a network as a station: WPA2 with AES when a passphrase is given, open when it is empty;
+ * the access point bssid names, or any of the network's if it is 0.
  * The outcome comes as events, which wlan_join_event reads.
  */
-int32_t wlan_join(struct wlan *w, const char *ssid, const char *passphrase);
+int32_t wlan_join(struct wlan *w, const char *ssid, const char *passphrase, const uint8_t *bssid);
+/* The access point joined. */
+int32_t wlan_bssid(struct wlan *w, uint8_t bssid[6]);
+/* Power save off, so that the station hears everything the access point sends. */
+int32_t wlan_power_save_off(struct wlan *w);
 /* What an event says of a join: 1 joined, -1 failed, 0 nothing yet. */
 int wlan_join_event(const struct wlan_event *e, int secure);
 /* Starts an access point with WPA2 and AES, on a channel. */

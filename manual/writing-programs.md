@@ -311,7 +311,7 @@ which the root task carves from the frames it is granted over PIO0 and IO_BANK0,
 and it installs the frames that hold the chip's firmware one at a time in a region the root task left it,
 since there are more of them than regions.
 What the system does, scan, join a network or run an access point, comes from a file the loader places in the root task's input region,
-`make BOARD=rp2350 wifi WIFI_CONFIG=file`, with lines `mode=scan|sta|ap`, `ssid=`, `pass=`, `channel=` and `run=`;
+`make BOARD=rp2350 wifi WIFI_CONFIG=file`, with lines `mode=scan|sta|ap`, `ssid=`, `pass=`, `bssid=`, `channel=` and `run=`;
 so a passphrase lies in no image and in no file git tracks; `local/`, which git ignores, is the place for one.
 A program of several processes lies in a directory of its own, `user/<program>/`, its root task in `root.c`,
 and the Makefile's `PROGRAMS` links each with the library.

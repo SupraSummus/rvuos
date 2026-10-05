@@ -310,7 +310,7 @@ lib-test: $(BUILD)/kernel-libtest.$(IMAGE)
 board_hex      = $(shell sed -n 's/^\#define $(1)[ \t].*\(0x[0-9a-fA-F]\{1,\}\).*/\1/p' $(2))
 WIFI_BLOB      := build/cyw43/blob.bin
 WIFI_BLOB_AT   := $(call board_hex,FREE_RAM_BASE,kernel/board/rp2350/board.h)
-# What the root task is to do, lines of mode=scan|sta|ap, ssid=, pass=, channel= and run=, seconds or 0 for good,
+# What the root task is to do, lines of mode=scan|sta|ap, ssid=, pass=, bssid=, channel= and run=, seconds or 0 for good,
 # from a file git does not track, such as local/wifi.conf,
 # placed in its input region, INPUT_BASE in board.h; with none it scans,
 # for which the input region gets an empty configuration, since the board's RAM keeps the last run's.

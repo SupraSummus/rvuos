@@ -110,6 +110,8 @@ static void pads_set(void)
 /*
  * What the driver is to do, from the text the loader may have left in the input region:
  * lines of mode=scan|sta|ap, ssid=, pass= and channel=. With none, it scans.
+ * bssid= names which of the network's access points a station joins,
+ * and debug=dhcp turns power save off and has the driver tell each DHCP message it hears, whoever it is for.
  * A line run= says how many seconds the run lasts, 0 for good.
  * The passphrase lives in the driver's page and memory, never in an image.
  */
@@ -131,6 +133,8 @@ static void configure(struct drv_page *s)
     config_value(conf, size, "ssid", s->ssid, sizeof(s->ssid));
     config_value(conf, size, "pass", s->pass, sizeof(s->pass));
     s->channel = config_number(conf, size, "channel", 1);
+    s->bssid_set = (uint8_t)config_mac(conf, size, "bssid", s->bssid);
+    s->dhcp_log = (uint8_t)config_has(conf, size, "debug", "dhcp");
     run_s = config_number(conf, size, "run", RUN_S);
     must("uninstall the input", region_free(&self, region));
     if (s->mode != MODE_SCAN && s->ssid[0] == '\0') {
