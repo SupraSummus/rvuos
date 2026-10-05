@@ -68,6 +68,9 @@ until the maintainer decides otherwise.
    about 4,500 cycles between two processes on RP2350's Hazard3 and 5,900 on the ESP32-C6,
    of which the four calls take 2,000 and 2,200,
    and loading the other process's regions about 400 cycles a switch on Hazard3 and 1,000 on the ESP32-C6.
+   `make lab` shows what an endpoint would carry besides the message, `user/lab/NOTES.md`:
+   the kernel does not know whom a waiter waits for, so a client's time goes to spare time while it waits, not to its server,
+   and a server cannot tell a client that pays for its asks from one that does not.
    An `Endpoint` object would not replace notifications:
    interrupts need those either way.
 
@@ -126,6 +129,9 @@ until the maintainer decides otherwise.
    `make bench`'s `contended-worst` is what taking turns costs a round trip between two processes:
    beside a process that spins, the worst round waits for its turns, about 263,000 cycles on RP2350,
    where the round alone costs about 4,500.
+   `make lab` shows the same for an ask with work behind it, and that units do not move it:
+   beside a process that spins, twice the units for the client or for the server change its latency by less than a fiftieth,
+   since a server woken by an ask waits on the run queue behind the spinner's turn; see `user/lab/NOTES.md`.
 
 10. **Yield.**
     Working default: none.

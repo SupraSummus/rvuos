@@ -383,6 +383,11 @@ On QEMU's boards, where a run repeats exactly, it holds each cost to the board's
 and `make bench-refresh` writes the record from a run.
 The worst round beside a busy process waits for that process's turns, so the tick sets it, and its cycles grow with the clock.
 
+**The laboratory.**
+`make lab` boots `user/lab/`, a made-up system of servers and clients built from the library,
+and says, scenario by scenario, how long its clients' asks waited;
+`user/lab/NOTES.md` says what each scenario stands for and what it showed.
+
 **Replay input.**
 `BOOT_CAP_INPUT` maps 64 KiB where QEMU's loader places a file:
 

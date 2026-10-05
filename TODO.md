@@ -54,6 +54,11 @@ what is left:
   so a parent cannot keep some children in blocks of their own once it has made the room.
 - A child's stack grows down onto its page, and nothing stops it there;
   a guard would cost a region, the scarcest thing a process has.
+- `user/lab/` does not show yet a client of several threads asking at once, a driver whose work an interrupt starts,
+  two cores, a client that makes its ring look full, or one that gives up on an answer.
+  Nor a thin server, which only passes data on while its clients do the work,
+  to tell what moving work into the client saves and what the hop still costs.
+  Why its `chain`'s second hop costs no more than the first is not worked out.
 
 ## ESP32-C6
 
@@ -432,3 +437,13 @@ what is left:
 - A thread is stopped by revoking its units and started again by binding it,
   which is what a userspace scheduler, open decision 9 in `DESIGN.md`, needs.
   A thread waiting on a notification stays on it meanwhile, and cannot be taken off it today.
+- A thread that waits hands the rest of its turn to the next on the run queue,
+  so a server woken by an ask waits for the turn ahead of it, a tick beside a busy process, whatever units either side earns;
+  see `user/lab/NOTES.md`.
+  Handing it to the thread the waiter just woke, and the answer's back, might take that tick out with no change to the ABI;
+  try it against `make lab`'s `hog`, `rich-ui`, `rich-server` and `chain`.
+- The kernel does not know whom a waiter waits for,
+  so a client's time cannot reach its server, `make lab`'s `poor-server`, nor a lock's holder, `lock-hog`,
+  and a server cannot charge the client it serves, `free-rider`.
+  A wait that names the notification its answer comes through, and a server that charges a client waiting on it,
+  is the shape talked through so far; decide with open decisions 5 and 9.

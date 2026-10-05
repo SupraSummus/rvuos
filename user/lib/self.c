@@ -246,3 +246,14 @@ void units_give(struct self *s, uint32_t first, uint32_t count)
         mark(s->units, first + i, 0);
     }
 }
+
+struct self_tally self_tally(const struct self *s)
+{
+    struct self_tally t = { mem_unused(s), s->slot_end - s->slot_first - slots_unused(s), s->regions, s->bits,
+                            s->room_used, { 0 } };
+    for (uint32_t i = 0; i < s->free_count; i++) {
+        t.slots -= s->free[i].untyped >= s->slot_first && s->free[i].untyped < s->slot_end;
+    }
+    memcpy(t.units, s->units, sizeof(t.units));
+    return t;
+}

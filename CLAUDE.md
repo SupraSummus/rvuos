@@ -36,6 +36,8 @@ and compares host and QEMU transcripts.
 It also holds what a system call and a switch cost, `make bench`, to the records in `tests/bench/` within a tenth;
 a change that moves a cost further, and means to, runs `make bench-refresh` with `BOARD=qemu`, `mps2-an385` and `mps2-an521`,
 and its commit says what it cost.
+It runs the laboratory, `make lab`, to its end, and holds its numbers to nothing;
+a change to how threads take turns, wait or wake compares them before and after, and its commit says what moved.
 When a change touches `kernel/board/esp32c6/`, `user/board/esp32c6/`,
 or anything the demo or the escape suite exercises, and an ESP32-C6 is connected,
 run `make BOARD=esp32c6 test escape` as well;
