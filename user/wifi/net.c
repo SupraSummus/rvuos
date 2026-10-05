@@ -17,7 +17,15 @@
 #define IP_UDP      17u
 #define DHCP_CLIENT 68u
 #define DHCP_SERVER 67u
-#define DHCP_RETRY_MS 2000u
+
+/*
+ * An unanswered DHCP message goes again in the same transaction, so that a late answer still counts:
+ * after 4 s, then twice as long each time up to 64 s, as in RFC 2131's 4.1 less its random second.
+ * A request goes three times before the client discovers again.
+ */
+#define DHCP_FIRST_WAIT_MS 4000u
+#define DHCP_LAST_WAIT_MS  64000u
+#define DHCP_REQUESTS      3u
 
 #define BROADCAST 0xffffffffu
 
@@ -236,7 +244,13 @@ void net_udp_unbind(struct net *n, uint16_t port)
     }
 }
 
-/* DHCP: a discover, or a request for the offer taken, broadcast from 0.0.0.0. */
+/*
+ * DHCP: a discover, or a request for the offer taken, broadcast from 0.0.0.0.
+ * The broadcast flag stays clear, so the answer comes to our MAC address,
+ * which ip_input takes before we have an address:
+ * an access point sends that until it is acknowledged, a broadcast only once,
+ * and the ESP32-C6 misses many broadcasts; see TODO.md.
+ */
 static void dhcp_send(struct net *n, uint32_t type)
 {
     uint8_t *d = n->out + ETH_HEADER + IP_HEADER + UDP_HEADER;
@@ -245,7 +259,6 @@ static void dhcp_send(struct net *n, uint32_t type)
     d[1] = 1; /* Ethernet */
     d[2] = 6;
     memcpy(d + 4, &n->dhcp_xid, 4);
-    put_be16(d + 10, 0x8000u); /* answer by broadcast: the stack takes no unicast before it has an address */
     memcpy(d + 28, n->mac, 6);
     static const uint8_t cookie[4] = { 99, 130, 83, 99 };
     memcpy(d + 236, cookie, 4);
@@ -281,8 +294,10 @@ void net_dhcp_start(struct net *n)
     n->ip = 0;
     n->mask = 0;
     n->gateway = 0;
-    n->dhcp_xid = get_ip(n->mac + 2) ^ (n->now * 2654435761u) ^ n->dhcp_tries;
+    n->dhcp_xid = ((n->dhcp_xid + 1u) * 2654435761u) ^ get_ip(n->mac + 2) ^ n->now;
     n->dhcp_state = DHCP_SELECTING;
+    n->dhcp_tries = 0;
+    n->dhcp_wait = DHCP_FIRST_WAIT_MS;
     dhcp_send(n, 1);
 }
 
@@ -325,6 +340,8 @@ static void dhcp_input(struct net *n, const uint8_t *d, uint32_t len)
         n->dhcp_offer = yiaddr;
         n->server = server;
         n->dhcp_state = DHCP_REQUESTING;
+        n->dhcp_tries = 0;
+        n->dhcp_wait = DHCP_FIRST_WAIT_MS;
         dhcp_send(n, 3);
     } else if (n->dhcp_state == DHCP_REQUESTING && type == 5 && yiaddr == n->dhcp_offer) {
         n->ip = yiaddr;
@@ -335,8 +352,7 @@ static void dhcp_input(struct net *n, const uint8_t *d, uint32_t len)
         n->dhcp_state = DHCP_BOUND;
         n->dhcp_sent = n->now;
     } else if (n->dhcp_state == DHCP_REQUESTING && type == 6) {
-        n->dhcp_state = DHCP_SELECTING;
-        n->dhcp_sent = n->now - DHCP_RETRY_MS;
+        net_dhcp_start(n); /* refused: discover again */
     }
 }
 
@@ -453,8 +469,13 @@ void net_input(struct net *n, const uint8_t *frame, uint32_t len)
 void net_tick(struct net *n, uint32_t now)
 {
     n->now = now;
-    if ((n->dhcp_state == DHCP_SELECTING || n->dhcp_state == DHCP_REQUESTING) && now - n->dhcp_sent >= DHCP_RETRY_MS) {
-        net_dhcp_start(n);
+    if ((n->dhcp_state == DHCP_SELECTING || n->dhcp_state == DHCP_REQUESTING) && now - n->dhcp_sent >= n->dhcp_wait) {
+        if (n->dhcp_state == DHCP_REQUESTING && n->dhcp_tries >= DHCP_REQUESTS) {
+            net_dhcp_start(n); /* the offer is not answered: discover again */
+        } else {
+            n->dhcp_wait = n->dhcp_wait < DHCP_LAST_WAIT_MS / 2u ? n->dhcp_wait * 2u : DHCP_LAST_WAIT_MS;
+            dhcp_send(n, n->dhcp_state == DHCP_SELECTING ? 1 : 3);
+        }
     } else if (n->dhcp_state == DHCP_BOUND && n->lease != 0 &&
                now - n->dhcp_sent >= (n->lease < 4000000u ? n->lease : 4000000u) * 500u) {
         net_dhcp_start(n); /* half the lease gone: begin again, which a renewal would spare */

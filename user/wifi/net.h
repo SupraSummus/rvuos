@@ -52,7 +52,9 @@ struct net {
     uint8_t mac[6];
     uint32_t ip, mask, gateway, dns, server;
     uint32_t now;          /* ms, as the last net_tick said */
-    uint32_t dhcp_state, dhcp_xid, dhcp_offer, dhcp_sent, dhcp_tries, lease;
+    uint32_t dhcp_state, dhcp_xid, dhcp_offer, lease;
+    uint32_t dhcp_sent, dhcp_wait; /* when the message outstanding last went, and how long it is waited for, in ms */
+    uint32_t dhcp_tries;           /* how many times it went */
     uint16_t ip_id;
     struct net_arp arp[NET_ARP_ENTRIES];
     struct net_udp udp[NET_UDP_PORTS];
@@ -65,7 +67,7 @@ void net_init(struct net *n, const uint8_t mac[6], net_send_fn send, void *owner
 void net_input(struct net *n, const uint8_t *frame, uint32_t len);
 /* Time has moved to now ms: retransmits, and the lease. */
 void net_tick(struct net *n, uint32_t now);
-/* Starts DHCP: a discover now, again every two seconds until bound. */
+/* Starts DHCP: a discover now, again after 4 s and then twice as long each time, until an offer comes. */
 void net_dhcp_start(struct net *n);
 
 /* Datagrams to port, which is not 0 and not bound yet, go to fn with arg: 0, or -1 if not. */

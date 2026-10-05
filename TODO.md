@@ -89,7 +89,8 @@ what is left:
   BIP-GMAC, the management group key of the 192-bit and GCMP suites, needs the crypto table's GMAC,
   which `crypto.c` leaves out, and an install the supplicant refuses.
 - The ESP32-C6's station keeps power save off: with `ps=1` the libraries sleep nine tenths of the run between beacons,
-  and the station takes no address. The adapter's side of the modem's sleep is to be made to work.
+  and the station takes an address, but answers one ping in five, and its echo comes back 6 s after a hang, not 1.2 s.
+  The adapter's side of the modem's sleep is to be made to work.
 - ESP-IDF tracks the PHY's PLL every second while the radio runs, `phy_track_pll` of `esp_phy`;
   the adapter does not, which a run of hours may need.
 - The ESP32-C6's radio stays on until the next boot when a thread of the driver's faults
@@ -97,14 +98,16 @@ what is left:
   and even then the RF's analog buses stay powered in the PMU, `PMU_RF_PWC`'s bits 28 to 31,
   which the kernel's `board_init` sets and the driver's `phy_xpd_rf` leaves alone.
   The kernel's halt could power the modem down, once what of the PMU does it is measured.
-- At one access point of a network the ESP32-C6's station joins, by WPA2 or WPA3, and hears what goes to the group,
-  but DHCP seldom finishes: its first discover is answered, with an offer to the group,
-  and what it sends after, which the access point acknowledges with no retry, nothing answers, A-MPDU or not;
-  alike with `ax=0` and `pmf=0`.
-  Nothing addressed to the station arrives either.
-  The access point beside it serves the station, and a laptop the first; the station hears the first at -73 dBm, the second at -62.
-  ESP-IDF's stack on the board is the comparison to make.
-  It is the one access point here that offers WPA3, so data over WPA3 has not been seen to pass.
+- At a MikroTik wAP ax here the ESP32-C6 misses frames to the group that the access point sends 10 µs after another,
+  in its run after a DTIM beacon: of those after a frame with More Data set,
+  from a third to nearly all in runs of half a minute, none in some short ones, and not even as broken frames.
+  ESP-IDF's own stack misses them alike, and a Pico 2 W at the same access point at the same time heard them all:
+  the loss lies in Espressif's libraries or the chip, reported in esp-idf #16096 with a sketch on the branch `esp32c6-group-loss`.
+  `net.c` asks DHCP for unicast answers for it, but an ARP request for the station is a broadcast still,
+  so a host may wait seconds to reach it.
+  There the ping of `make BOARD=esp32c6 wifi-esp32c6` fails now and then:
+  the station answers every request, the host hears fewer than four of five, and where the answers go is not known.
+  The C6's `debug=air`, and the Pico 2 W's `debug=dhcp` and `bssid=`, measured it.
 - The ESP32-C6's libraries refuse an open network, reason 210, no access point of compatible security;
   what of the configuration differs from ESP-IDF's is open.
   A sketch on Arduino's ESP32 core runs that stack on the board, so its init configuration and modem registers can be compared.

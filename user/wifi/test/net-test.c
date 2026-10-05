@@ -49,8 +49,8 @@ static void on_udp(struct net *n, void *arg, const struct net_datagram *d)
     memcpy(got, d->data, got_len);
 }
 
-/* A DHCP answer of a type, from the router, offering .50. */
-static uint32_t dhcp_answer(uint8_t *f, const uint8_t *discover, uint32_t type)
+/* A DHCP answer of a type, from the router, offering .50: to our address and .50, or by broadcast. */
+static uint32_t dhcp_answer(uint8_t *f, const uint8_t *discover, uint32_t type, int unicast)
 {
     uint8_t d[300];
     memset(d, 0, sizeof(d));
@@ -69,7 +69,8 @@ static uint32_t dhcp_answer(uint8_t *f, const uint8_t *discover, uint32_t type)
     };
     memcpy(d + 240, opts, sizeof(opts));
     const uint8_t all[6] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
-    return udp_frame(f, all, net_ip(192, 168, 1, 1), 0xffffffffu, 67, 68, d, sizeof(d));
+    return udp_frame(f, unicast ? pico : all, net_ip(192, 168, 1, 1), unicast ? yiaddr : 0xffffffffu, 67, 68, d,
+                     sizeof(d));
 }
 
 int main(void)
@@ -79,7 +80,7 @@ int main(void)
     net_init(&n, pico, capture, 0);
     net_tick(&n, 1000);
 
-    /* A discover: broadcast, from 0.0.0.0:68 to :67, type 1, our address in chaddr. */
+    /* A discover: broadcast, from 0.0.0.0:68 to :67, type 1, our address in chaddr, the broadcast flag clear. */
     net_dhcp_start(&n);
     CHECK(sent_count == 1);
     const uint8_t *s = sent[0];
@@ -88,14 +89,40 @@ int main(void)
     CHECK(checksum(s + 14, 20, 0) == 0);
     const uint8_t *dhcp = s + 42;
     CHECK(dhcp[0] == 1 && memcmp(dhcp + 28, pico, 6) == 0 && dhcp[240] == 53 && dhcp[242] == 1);
+    CHECK(be16(dhcp + 10) == 0);
     uint8_t discover[300];
     memcpy(discover, dhcp, sizeof(discover));
 
-    /* The offer brings a request for .50 from the server .1; the acknowledgement binds. */
-    net_input(&n, f, dhcp_answer(f, discover, 2));
+    /* Unanswered, it goes again in the same transaction after 4 s, then after 8. */
+    net_tick(&n, 4999);
+    CHECK(sent_count == 1);
+    net_tick(&n, 5000);
+    CHECK(sent_count == 2 && sent[1][42 + 242] == 1 && memcmp(sent[1] + 42 + 4, discover + 4, 4) == 0);
+    net_tick(&n, 12999);
     CHECK(sent_count == 2);
-    CHECK(n.dhcp_state == DHCP_REQUESTING && sent[1][42 + 242] == 3);
-    net_input(&n, f, dhcp_answer(f, discover, 5));
+    net_tick(&n, 13000);
+    CHECK(sent_count == 3 && memcmp(sent[2] + 42 + 4, discover + 4, 4) == 0);
+
+    /* An offer to our address and .50, as the server sends it, brings a request for .50 from the server .1. */
+    net_input(&n, f, dhcp_answer(f, discover, 2, 1));
+    CHECK(sent_count == 4 && n.dhcp_state == DHCP_REQUESTING && sent[3][42 + 242] == 3);
+
+    /* Unanswered, the request goes again after 4 s and 8; after the third, a discover begins a transaction anew. */
+    net_tick(&n, 17000);
+    CHECK(sent_count == 5 && sent[4][42 + 242] == 3);
+    net_tick(&n, 25000);
+    CHECK(sent_count == 6 && sent[5][42 + 242] == 3);
+    net_tick(&n, 40999);
+    CHECK(sent_count == 6);
+    net_tick(&n, 41000);
+    CHECK(sent_count == 7 && sent[6][42 + 242] == 1 && memcmp(sent[6] + 42 + 4, discover + 4, 4) != 0);
+    CHECK(n.dhcp_state == DHCP_SELECTING);
+    memcpy(discover, sent[6] + 42, sizeof(discover));
+
+    /* A broadcast offer is taken as well; the acknowledgement, to our address and .50, binds. */
+    net_input(&n, f, dhcp_answer(f, discover, 2, 0));
+    CHECK(sent_count == 8 && n.dhcp_state == DHCP_REQUESTING && sent[7][42 + 242] == 3);
+    net_input(&n, f, dhcp_answer(f, discover, 5, 1));
     CHECK(n.dhcp_state == DHCP_BOUND);
     CHECK(n.ip == net_ip(192, 168, 1, 50) && n.mask == net_ip(255, 255, 255, 0) && n.gateway == net_ip(192, 168, 1, 1));
     CHECK(n.lease == 3600);
