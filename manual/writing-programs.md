@@ -321,9 +321,10 @@ since it carries the kernel's log to the console itself as the log comes, sectio
 where the host may type `end` or `stats`.
 `make BOARD=esp32c6 wifi-esp32c6 WIFI_CONFIG=file` writes the driver into flash, unless the flash holds it already, and runs it,
 scanning, or with `ssid=` and `pass=`, joining that network, at the access point `bssid=` names if it names one,
+by WPA3's SAE where the access point offers it and by WPA2's passphrase otherwise,
 where the network process takes an address by DHCP and answers ping and UDP port 7777, and its clients theirs;
 `tools/wifi-run.py` checks them from the host as it checks the Pico 2 W's, and ends the run, which otherwise lasts `run=` seconds.
-`debug=frames,stats,wpa`, `lib=`, `ax=0`, `pmf=0` and `ps=1` have the driver tell more or join otherwise,
+`debug=frames,stats,wpa`, `lib=`, `ax=0`, `pmf=0`, `sae=0` and `ps=1` have the driver tell more or join otherwise,
 as `user/wifi/esp32c6/root.c` says, and a thread of the driver's that faults is told with its stack, its functions named.
 A program of several processes lies in a directory of its own, `user/<program>/`, its root task in `root.c`,
 and the Makefile's `PROGRAMS` links each with the library.

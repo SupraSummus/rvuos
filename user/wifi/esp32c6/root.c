@@ -170,7 +170,8 @@ static void (*drv_entry(void))(struct child_page *)
  * and run=, how many seconds the run lasts, 0 for good.
  * debug= names what the driver tells besides its steps, any of frames, stats and wpa, see drv.h,
  * and lib= the libraries' log level, 4 for debug and 5 for verbose;
- * ax=0 joins without 802.11ax, pmf=0 without protecting management frames, and ps=1 sleeps between beacons.
+ * ax=0 joins without 802.11ax, pmf=0 without protecting management frames, sae=0 without WPA3's SAE,
+ * and ps=1 sleeps between beacons.
  * antenna=ufl has the XIAO's RF switch pick its U.FL connector rather than the antenna on the board,
  * and antenna=none leaves the pins alone, on a board without that switch.
  * The passphrase lives in the driver's page and memory, never in an image.
@@ -190,6 +191,7 @@ static void configure(struct drv *p)
     p->lib_log = config_number(conf, size, "lib", 0);
     p->no_ax = config_number(conf, size, "ax", 1) == 0;
     p->no_pmf = config_number(conf, size, "pmf", 1) == 0;
+    p->no_sae = config_number(conf, size, "sae", 1) == 0;
     p->modem_sleep = config_number(conf, size, "ps", 0) != 0;
     run_s = config_number(conf, size, "run", RUN_S);
     antenna = config_has(conf, size, "antenna", "ufl")    ? ANTENNA_UFL

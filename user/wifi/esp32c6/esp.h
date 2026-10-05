@@ -20,6 +20,7 @@
 typedef int32_t esp_err_t;
 #define ESP_OK   0
 #define ESP_FAIL -1
+#define ESP_ERR_WIFI_DISCARD 0x301b /* ESP_ERR_WIFI_BASE + 27: a frame dropped, which the libraries ignore */
 
 /*
  * The OS functions the libraries call, in the order they expect them,
@@ -183,6 +184,8 @@ struct crypto_funcs {
 };
 
 #define INIT_CONFIG_MAGIC 0x1F2F3F4F
+/* A bit of feature_caps, of esp_wifi.h: the libraries authenticate with WPA3's SAE through the supplicant. */
+#define FEATURE_WPA3_SAE 0x1u
 struct init_config {
     struct osi_funcs *osi_funcs;
     struct crypto_funcs crypto_funcs;
@@ -258,6 +261,10 @@ struct wpa_funcs {
 
 int esp_wifi_register_wpa_cb_internal(struct wpa_funcs *cb);
 
+/* The messages of SAE that wpa3_build_sae_msg and wpa3_parse_sae_msg take, as ESP-IDF's fork's sae.h numbers them. */
+#define SAE_MSG_COMMIT  1
+#define SAE_MSG_CONFIRM 2
+
 /* wifi_cipher_type_t. */
 #define WIFI_CIPHER_NONE        0
 #define WIFI_CIPHER_WEP40       1
@@ -279,13 +286,17 @@ int esp_wifi_register_wpa_cb_internal(struct wpa_funcs *cb);
 #define ESP_AUTH_WPA2_PSK_SHA256 0x08
 #define ESP_AUTH_WPA3_PSK        0x09
 
-/* esp_wifi_driver.h's enum wpa_alg, the keys the libraries take, and its wifi_appie_t's RSN element. */
+/*
+ * esp_wifi_driver.h's enum wpa_alg, the keys the libraries take,
+ * and its wifi_appie_t's elements: the RSN element, and those added to an association's request.
+ */
 #define ESP_ALG_NONE 0
 #define ESP_ALG_TKIP 2
 #define ESP_ALG_CCMP 3
 #define ESP_ALG_WEP  6
 #define ESP_ALG_GCMP 9
-#define WIFI_APPIE_RSN 4
+#define WIFI_APPIE_ASSOC_REQ 1
+#define WIFI_APPIE_RSN       4
 
 struct wifi_ssid {
     int len;
@@ -313,6 +324,8 @@ uint8_t *esp_wifi_sta_get_prof_password_internal(void);
 uint8_t esp_wifi_sta_get_pairwise_cipher_internal(void);
 uint8_t esp_wifi_sta_get_group_cipher_internal(void);
 bool esp_wifi_sta_prof_is_rsn_internal(void);
+/* How the station may derive SAE's password element, as hostap's enum sae_pwe numbers the ways. */
+uint8_t esp_wifi_get_config_sae_pwe_h2e_internal(uint8_t if_index);
 uint16_t esp_wifi_sta_pmf_enabled(void);
 int esp_wifi_sta_get_mgmt_group_cipher(void);
 uint8_t *esp_wifi_sta_get_ie(uint8_t *bssid, uint8_t elem_id);

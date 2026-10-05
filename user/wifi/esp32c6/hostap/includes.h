@@ -18,12 +18,14 @@
 #include <stdint.h>
 
 /*
- * The configuration: the 4-way and group key handshakes of rsn_supp/, with hostap's own crypto.
+ * The configuration: the 4-way and group key handshakes of rsn_supp/, with hostap's own crypto,
+ * and WPA3's SAE of common/, whose curves are ec.c's on Mbed TLS.
  * No RC4, so no WPA's TKIP key data, and no pool of hostap's own for randomness:
  * os_get_random reads the chip's generator, see hostap.c.
  */
 #define CONFIG_CRYPTO_INTERNAL
 #define CONFIG_SHA256
+#define CONFIG_SAE
 #define CONFIG_NO_RC4
 #define CONFIG_NO_RANDOM_POOL
 

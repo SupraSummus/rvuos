@@ -145,12 +145,16 @@ static int32_t await_either(int32_t a, int32_t b, uint32_t ms)
     return bits & (1u << a) ? a : bits & (1u << b) ? b : -1;
 }
 
-/* ESP-IDF's WIFI_INIT_CONFIG_DEFAULT, with fewer buffers, as the driver's block of RAM is small. */
-static void config(struct init_config *c)
+/*
+ * ESP-IDF's WIFI_INIT_CONFIG_DEFAULT, with fewer buffers, as the driver's block of RAM is small,
+ * and of its features WPA3's SAE alone, unless the page says no_sae.
+ */
+static void config(struct init_config *c, const struct drv *d)
 {
     memset(c, 0, sizeof(*c));
     c->osi_funcs = funcs;
     drv_crypto_funcs(&c->crypto_funcs);
+    c->feature_caps = d->no_sae ? 0 : FEATURE_WPA3_SAE;
     c->static_rx_buf_num = 6;
     c->dynamic_rx_buf_num = 16;
     c->tx_buf_type = 1;
@@ -243,7 +247,8 @@ static esp_err_t receive(void *buffer, uint16_t len, void *eb)
 /*
  * Joins d->ssid: the libraries scan every channel for it, take the access point heard best, or the page's bssid,
  * and authenticate and associate; the supplicant runs the handshake, the PMK of whose passphrase it derives first.
- * They take WPA2's personal at the weakest, or with no passphrase an open network, which they refuse yet; see TODO.md.
+ * They take WPA3's personal where the access point offers it, unless the page says no_sae, and WPA2's otherwise,
+ * or with no passphrase an open network, which they refuse yet; see TODO.md.
  * Power save stays off unless the page asks for it: asleep between beacons, the station takes no address; see TODO.md.
  * They hand the station's frames to the receiver once it is joined, as ESP-IDF registers it on the connection.
  */
@@ -347,7 +352,7 @@ static __attribute__((noreturn)) void serve(struct drv *d)
 static __attribute__((noreturn)) void run(struct drv *d)
 {
     static struct init_config c;
-    config(&c);
+    config(&c, d);
     drv_say("driver: %u bytes of heap free\n", (unsigned)osi_heap_free());
     must(d, "esp_wifi_init_internal", esp_wifi_init_internal(&c));
     /* The libraries' own lines at INFO, as ESP-IDF sets them, or at the level the configuration asks for. */

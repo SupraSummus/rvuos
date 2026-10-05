@@ -442,15 +442,16 @@ $(WIFI_ESP_INIT): tools/esp-fetch.py
 	tools/esp-fetch.py --cache $(PHYBLOB_CACHE) --init-data $@ --wifi
 
 # hostap's supplicant, the parts of wpa_supplicant's src/ that tools/esp-fetch.py --wifi unpacks:
-# the 4-way and group key handshakes of rsn_supp/ and the crypto of hostap's own they run on,
+# the 4-way and group key handshakes of rsn_supp/, WPA3's SAE of common/, and the crypto of hostap's own they run on,
 # but for MD5, whose md5_vector esp32c6.rom.ld gives from the ROM.
 # hostap's files, and the driver's that read its headers, take hostap/includes.h first, for the C library hostap expects;
 # hostap's own warnings are its own, so they are not the build's errors.
 HOSTAP      := $(PHYBLOB_CACHE)/hostap/src
 HOSTAP_SRC  := rsn_supp/wpa.c rsn_supp/wpa_ie.c rsn_supp/pmksa_cache.c \
-               common/wpa_common.c common/ieee802_11_common.c utils/common.c utils/wpabuf.c \
+               common/wpa_common.c common/ieee802_11_common.c common/sae.c common/dragonfly.c \
+               utils/common.c utils/wpabuf.c \
                crypto/sha1.c crypto/sha1-internal.c crypto/sha1-prf.c crypto/sha1-pbkdf2.c \
-               crypto/sha256.c crypto/sha256-internal.c crypto/sha256-prf.c crypto/md5.c \
+               crypto/sha256.c crypto/sha256-internal.c crypto/sha256-prf.c crypto/sha256-kdf.c crypto/md5.c \
                crypto/aes-internal.c crypto/aes-internal-enc.c crypto/aes-internal-dec.c \
                crypto/aes-wrap.c crypto/aes-unwrap.c crypto/aes-omac1.c crypto/aes-cbc.c
 HOSTAP_OBJ  := $(patsubst %.c,$(BUILD)/hostap/%.o,$(HOSTAP_SRC))
@@ -462,8 +463,60 @@ $(BUILD)/hostap/%.o: $(WIFI_ESP)/hostap/includes.h $(WIFI_ESP_INIT)
 	$(CC) $(ARCHFLAGS) -std=gnu11 -ffreestanding -fno-builtin -fno-pic -fno-common -O2 -g \
 		-ffunction-sections -fdata-sections -w $(HOSTAP_INC) -c $(HOSTAP)/$*.c -o $@
 
-$(addprefix $(BUILD)/$(WIFI_ESP)/,supp.o hostap.o crypto.o): CFLAGS += $(HOSTAP_INC)
-$(addprefix $(BUILD)/$(WIFI_ESP)/,supp.o hostap.o crypto.o): $(WIFI_ESP_INIT)
+# Mbed TLS's big numbers and P-256, which ec.c gives SAE as hostap's crypto, see mbedtls/config.h:
+# the parts of its library/ that tools/esp-fetch.py --wifi unpacks, built with no system headers,
+# only the few of a C library mbedtls/libc/ declares; its warnings are its own too.
+MBEDTLS     := $(PHYBLOB_CACHE)/mbedtls
+MBEDTLS_SRC := library/bignum.c library/bignum_core.c library/ecp.c library/ecp_curves.c \
+               library/constant_time.c library/platform_util.c
+MBEDTLS_OBJ := $(patsubst %.c,$(BUILD)/mbedtls/%.o,$(MBEDTLS_SRC))
+MBEDTLS_CFG := -DMBEDTLS_CONFIG_FILE='"config.h"' -I$(WIFI_ESP)/mbedtls -isystem $(MBEDTLS)/include
+MBEDTLS_INC := $(MBEDTLS_CFG) -isystem $(WIFI_ESP)/mbedtls/libc
+WIFI_ESP_OBJ += $(MBEDTLS_OBJ)
+
+$(BUILD)/mbedtls/%.o: $(wildcard $(WIFI_ESP)/mbedtls/*.h $(WIFI_ESP)/mbedtls/libc/*.h) $(WIFI_ESP_INIT)
+	@mkdir -p $(dir $@)
+	$(CC) $(ARCHFLAGS) -std=c11 -ffreestanding -fno-builtin -fno-pic -fno-common -nostdlibinc -O2 -g \
+		-ffunction-sections -fdata-sections -w $(MBEDTLS_INC) -c $(MBEDTLS)/$*.c -o $@
+
+$(addprefix $(BUILD)/$(WIFI_ESP)/,supp.o hostap.o crypto.o ec.o): CFLAGS += $(HOSTAP_INC)
+$(addprefix $(BUILD)/$(WIFI_ESP)/,supp.o hostap.o crypto.o ec.o): $(WIFI_ESP_INIT)
+$(BUILD)/$(WIFI_ESP)/ec.o: CFLAGS += $(MBEDTLS_INC)
+
+# WPA3's SAE on the host, under the sanitizers: hostap's sae.c and dragonfly.c over ec.c and Mbed TLS,
+# with hostap's own system functions, against IEEE 802.11's test vectors and whole exchanges; see test/sae-test.c.
+# It builds what tools/esp-fetch.py fetches, so make check, which fetches nothing, leaves it out,
+# and make BOARD=esp32c6 wifi-esp32c6 runs it before the board.
+SAE_HOST     := build/host/sae
+SAE_TEST     := $(SAE_HOST)/sae-test
+SAE_TEST_SRC := common/sae.c common/dragonfly.c common/wpa_common.c utils/common.c utils/wpabuf.c \
+                utils/os_unix.c utils/wpa_debug.c $(filter crypto/%,$(HOSTAP_SRC)) crypto/md5-internal.c
+SAE_TEST_DEF := -DCONFIG_SAE -DCONFIG_SHA256 -DCONFIG_CRYPTO_INTERNAL -DCONFIG_NO_RANDOM_POOL
+SAE_TEST_INC := $(SAE_TEST_DEF) -isystem $(HOSTAP) -isystem $(HOSTAP)/utils $(MBEDTLS_CFG)
+SAE_TEST_OBJ := $(patsubst %.c,$(SAE_HOST)/hostap/%.o,$(SAE_TEST_SRC)) \
+                $(patsubst %.c,$(SAE_HOST)/mbedtls/%.o,$(MBEDTLS_SRC)) \
+                $(SAE_HOST)/ec.o $(SAE_HOST)/sae-test.o
+
+$(SAE_HOST)/hostap/%.o: $(WIFI_ESP_INIT)
+	@mkdir -p $(dir $@)
+	$(HOST_CC) -std=gnu11 -O1 -g $(HOST_SAN) -w $(SAE_TEST_INC) -c $(HOSTAP)/$*.c -o $@
+
+$(SAE_HOST)/mbedtls/%.o: $(wildcard $(WIFI_ESP)/mbedtls/*.h) $(WIFI_ESP_INIT)
+	@mkdir -p $(dir $@)
+	$(HOST_CC) -std=c11 -O1 -g $(HOST_SAN) -w $(MBEDTLS_CFG) -c $(MBEDTLS)/$*.c -o $@
+
+$(SAE_HOST)/ec.o: $(WIFI_ESP)/ec.c $(wildcard $(WIFI_ESP)/mbedtls/*.h) $(WIFI_ESP_INIT)
+$(SAE_HOST)/sae-test.o: $(WIFI_ESP)/test/sae-test.c $(WIFI_ESP_INIT)
+$(SAE_HOST)/ec.o $(SAE_HOST)/sae-test.o:
+	@mkdir -p $(dir $@)
+	$(HOST_CC) -std=gnu11 -O1 -g -Wall -Wextra -Werror -Wshadow $(HOST_SAN) $(SAE_TEST_INC) -c $< -o $@
+
+$(SAE_TEST): $(SAE_TEST_OBJ)
+	$(HOST_CC) $(HOST_SAN) $^ -o $@
+
+.PHONY: sae-test
+sae-test: $(SAE_TEST)
+	$(SAE_TEST)
 
 # libphy.a's functions that reach PCR, the PMU or the LP domain, weakened in a copy, so that the driver's own,
 # in phy.c, take their place; the copy is made again when this file, which names them, changes.
@@ -497,7 +550,8 @@ $(BUILD)/user-wifi-esp32c6.elf: $(BUILD)/$(WIFI_ESP)/root.o $(WIFI_ESP_NET) $(LI
 
 .PHONY: wifi-esp32c6
 ifeq ($(BOARD),esp32c6)
-wifi-esp32c6: $(BUILD)/kernel-wifi-esp32c6.bin $(BUILD)/wifi-drv.bin
+wifi-esp32c6: $(BUILD)/kernel-wifi-esp32c6.bin $(BUILD)/wifi-drv.bin $(SAE_TEST)
+	$(SAE_TEST)
 	tools/wifi-run.py --console --save $(BUILD)/wifi-run.log \
 		$(foreach e,$(BUILD)/wifi-drv.elf $(BUILD)/kernel-wifi-esp32c6.elf $(PHYBLOB_ROM_ELF),--symbols $(e)) -- \
 		$(ESPTOOL_PYTHON) tools/esp32c6-run.py --port $(PORT) --flash $(WIFI_ESP_AT):$(BUILD)/wifi-drv.bin \

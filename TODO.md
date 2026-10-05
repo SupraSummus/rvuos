@@ -82,10 +82,11 @@ what is left:
   its console is the halt's alone, and a word on the logger's port could carry the end instead.
 - The ESP32-C6's driver stops once the access point lets the station go, and the root task ends the run:
   nothing joins again, as ESP-IDF leaves to the program too.
-- WPA3 on the ESP32-C6: the libraries ask the supplicant for SAE through `wpa3_build_sae_msg` and `wpa3_parse_sae_msg`,
-  which hostap's `common/sae.c` answers on elliptic curves its own crypto lacks;
-  upstream hostap has no backend for mbedtls, which OpenWrt carries as a patch.
-  BIP-GMAC, the management group key of WPA3's 192-bit and GCMP suites, needs the crypto table's GMAC,
+- The ESP32-C6's SAE takes 0.4 s between the access point's commit and the station's confirm, two P-256 products in software.
+  IEEE 802.11's default has the access point send its own again after 40 ms and give up after a few; the one here waited.
+  The chip's ECC accelerator, which no frame lists yet, would shorten it.
+- The ESP32-C6's WPA3 is SAE on P-256 alone: SAE's extended key, of the larger groups, and fast transition are hidden from the libraries.
+  BIP-GMAC, the management group key of the 192-bit and GCMP suites, needs the crypto table's GMAC,
   which `crypto.c` leaves out, and an install the supplicant refuses.
 - The ESP32-C6's station keeps power save off: with `ps=1` the libraries sleep nine tenths of the run between beacons,
   and the station takes no address. The adapter's side of the modem's sleep is to be made to work.
@@ -96,10 +97,14 @@ what is left:
   and even then the RF's analog buses stay powered in the PMU, `PMU_RF_PWC`'s bits 28 to 31,
   which the kernel's `board_init` sets and the driver's `phy_xpd_rf` leaves alone.
   The kernel's halt could power the modem down, once what of the PMU does it is measured.
-- At one access point of a network the ESP32-C6's station joins and hears what goes to the group,
-  but nothing addressed to it, not even an aggregate by the libraries' counters, so DHCP seldom finishes;
-  alike with `ax=0` and `pmf=0`. The access point beside it serves the station, and a laptop the first;
-  the station hears the first at -73 dBm, the second at -62. ESP-IDF's stack on the board is the comparison to make.
+- At one access point of a network the ESP32-C6's station joins, by WPA2 or WPA3, and hears what goes to the group,
+  but DHCP seldom finishes: its first discover is answered, with an offer to the group,
+  and what it sends after, which the access point acknowledges with no retry, nothing answers, A-MPDU or not;
+  alike with `ax=0` and `pmf=0`.
+  Nothing addressed to the station arrives either.
+  The access point beside it serves the station, and a laptop the first; the station hears the first at -73 dBm, the second at -62.
+  ESP-IDF's stack on the board is the comparison to make.
+  It is the one access point here that offers WPA3, so data over WPA3 has not been seen to pass.
 - The ESP32-C6's libraries refuse an open network, reason 210, no access point of compatible security;
   what of the configuration differs from ESP-IDF's is open.
   A sketch on Arduino's ESP32 core runs that stack on the board, so its init configuration and modem registers can be compared.

@@ -58,7 +58,8 @@ struct drv_header {
 
 /*
  * The driver's page.
- * With no network named the driver scans, and with one it joins it, WPA2's personal;
+ * With no network named the driver scans, and with one it joins it, WPA3's personal where the access point offers it,
+ * unless the page says no_sae, and WPA2's otherwise;
  * it asks for an open one if the page names no passphrase, which the libraries refuse yet, see TODO.md.
  * it reports the states of wifi.h's enum drv_state, DRV_UP once the libraries run in station mode,
  * then DRV_SCANNED or DRV_JOINED, and once joined it moves frames between the libraries and the link,
@@ -81,6 +82,7 @@ struct drv {
     uint32_t debug;       /* DRV_DEBUG_ bits */
     uint8_t no_ax;        /* join without 802.11ax, as 802.11n at best */
     uint8_t no_pmf;       /* join without protecting management frames, which the station otherwise offers */
+    uint8_t no_sae;       /* join without WPA3's SAE, with WPA2's passphrase where the network takes both */
     uint8_t modem_sleep;  /* sleep between beacons, WIFI_PS_MIN_MODEM, which loses the access point yet; see TODO.md */
     uint32_t lib_log;     /* the libraries' log level, ESP-IDF's wifi_log_level_t, or 0 for its INFO */
     struct chan_end link; /* to the network process, connected before the start */

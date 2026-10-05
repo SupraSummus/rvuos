@@ -16,6 +16,9 @@ It runs WPA with hostap's supplicant, upstream's own and not ESP-IDF's fork of i
 so --wifi also fetches wpa_supplicant's release, about 4.2 MB, checks it,
 and unpacks into hostap/ of the cache only the parts of src/ the driver builds, about 5 MB,
 with the license, BSD, beside them.
+WPA3's SAE needs elliptic curves, which hostap's own crypto lacks, so --wifi also fetches Mbed TLS, about 5.5 MB,
+of the 3.6 branch, the last whose big numbers and curves are public, and unpacks its include/ and library/ into mbedtls/;
+the driver takes it under Apache-2.0 rather than the GPL, which the closed libraries beside it would not allow.
 
 With --rom-elf it writes the ESP32-C6's ROM as an ELF with its symbols, which tools/phymap.py reads.
 Espressif publishes it only in a release of every chip's ROM, about 4.9 MB,
@@ -68,6 +71,11 @@ HOSTAP_PARTS = ("src/utils/", "src/common/", "src/crypto/", "src/rsn_supp/",
                 "src/drivers/driver.h", "src/eapol_supp/eapol_supp_sm.h", "src/eap_common/eap_defs.h",
                 "COPYING", "README")
 
+MBEDTLS = "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.7/mbedtls-3.6.7.tar.bz2"
+MBEDTLS_SHA256 = "a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6"
+MBEDTLS_TOP = "mbedtls-3.6.7/"
+MBEDTLS_PARTS = ("include/mbedtls/", "include/psa/", "library/", "LICENSE", "README.md")
+
 ROM_ELFS = "https://github.com/espressif/esp-rom-elfs/releases/download/20260528/esp-rom-elfs-20260528.tar.gz"
 ROM_ELFS_SHA256 = "caa463d3cbef2430a5a35847c1d9f2f152403b17a802050927ff60c8da54fe46"
 ROM_ELF = "esp32c6_rev0_rom.elf"
@@ -110,22 +118,22 @@ def rom_elf(path):
         sys.exit(f"esp-fetch: {path} is not the ROM expected; remove it to fetch it again")
 
 
-def hostap(cache):
-    """Unpacks HOSTAP_PARTS of wpa_supplicant's release into cache/hostap/, unless it is there."""
-    dest = os.path.join(cache, "hostap")
+def unpack(cache, subdir, url, digest, top, parts):
+    """Unpacks the parts of a release's top directory into cache/subdir/, unless it is there."""
+    dest = os.path.join(cache, subdir)
     if os.path.isdir(dest):
         return
-    print(f"esp-fetch: fetching {HOSTAP}", file=sys.stderr)
-    with urllib.request.urlopen(HOSTAP, timeout=60) as r:
+    print(f"esp-fetch: fetching {url}", file=sys.stderr)
+    with urllib.request.urlopen(url, timeout=60) as r:
         release = r.read()
-    if hashlib.sha256(release).hexdigest() != HOSTAP_SHA256:
-        sys.exit(f"esp-fetch: {HOSTAP} is not the release expected")
+    if hashlib.sha256(release).hexdigest() != digest:
+        sys.exit(f"esp-fetch: {url} is not the release expected")
     # Unpacked aside and moved in whole, so that a directory there is a whole one.
     shutil.rmtree(dest + ".tmp", ignore_errors=True)
     with tarfile.open(fileobj=io.BytesIO(release)) as tar:
         for m in tar.getmembers():
-            name = m.name[len(HOSTAP_TOP):] if m.name.startswith(HOSTAP_TOP) else None
-            if not m.isfile() or not name or not any(name.startswith(p) for p in HOSTAP_PARTS):
+            name = m.name[len(top):] if m.name.startswith(top) else None
+            if not m.isfile() or not name or not any(name.startswith(p) for p in parts):
                 continue
             path = os.path.join(dest + ".tmp", name)
             os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -158,7 +166,8 @@ def init_data(source):
 def write_init_data(cache, path, wifi):
     fetched = {url: fetch(cache, url, digest) for url, digest in (FILES | WIFI_FILES if wifi else FILES).items()}
     if wifi:
-        hostap(cache)
+        unpack(cache, "hostap", HOSTAP, HOSTAP_SHA256, HOSTAP_TOP, HOSTAP_PARTS)
+        unpack(cache, "mbedtls", MBEDTLS, MBEDTLS_SHA256, MBEDTLS_TOP, MBEDTLS_PARTS)
     values = init_data(fetched[ESP_PHY + "phy_init_data.c"].decode())
     rows = ",\n".join("    " + ", ".join(f"0x{v:02x}" for v in values[i:i + 8]) for i in range(0, 128, 8))
     with open(path + ".tmp", "w") as f:

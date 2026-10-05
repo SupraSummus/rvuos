@@ -15,13 +15,19 @@
  * which would then leave encrypted with a key the access point installs only once it has the message.
  * So, as ESP-IDF's fork does, the supplicant holds back what hostap installs after handing over message 4/4,
  * and installs it once the libraries report the message sent.
+ *
+ * WPA3's personal authenticates with SAE before the association: the libraries ask the supplicant for each message
+ * to send and hand it each one received, which hostap's common/sae.c makes and checks, on P-256 alone, see ec.c.
+ * The password element comes by hash to element where the access point offers it, else by hunting and pecking.
  */
 
 #include "utils/common.h"
 
 #include "common/defs.h"
 #include "common/eapol_common.h"
+#include "common/ieee802_11_common.h"
 #include "common/ieee802_11_defs.h"
+#include "common/sae.h"
 #include "common/wpa_common.h"
 #include "crypto/sha1.h"
 #include "rsn_supp/wpa.h"
@@ -62,6 +68,12 @@ static struct {
     u8 pmk_ssid[SSID_MAX_LEN];
     size_t pmk_ssid_len;
     char pmk_pass[65];
+
+    /* SAE with the access point being joined, by hash to element or not, and the message last built. */
+    struct sae_data sae;
+    int sae_h2e;
+    struct sae_pt *sae_pt;
+    struct wpabuf *sae_token, *sae_msg;
 } supp;
 
 /* --- The crypto suites, as the libraries name them and as hostap does. --- */
@@ -143,6 +155,9 @@ static int cipher_from_esp_bit(unsigned bit)
 
 /* The key management suites ESP-IDF's fork knows, whose bits hostap's share; the libraries read no others. */
 #define ESP_KEY_MGMT_KNOWN 0x07c3ffff
+
+/* SAE's suites the supplicant does not take, hidden so that the libraries do not choose them. */
+#define KEY_MGMT_SAE_OTHER (WPA_KEY_MGMT_FT_SAE | WPA_KEY_MGMT_SAE_EXT_KEY | WPA_KEY_MGMT_FT_SAE_EXT_KEY)
 
 static int alg_to_esp(enum wpa_alg alg)
 {
@@ -405,7 +420,10 @@ static u8 *alloc_eapol(void *ctx, u8 type, const void *data, u16 data_len, size_
     return (u8 *)hdr;
 }
 
-/* The libraries keep no PMKSA cache of their own, nor protection hostap could switch on and off. */
+/*
+ * The libraries keep no PMKSA cache of their own, nor protection hostap could switch on and off;
+ * hostap's cache is EAPOL's, which is not built, so its functions here do nothing.
+ */
 static int add_pmkid(void *ctx, void *network_ctx, const u8 *bssid, const u8 *pmkid, const u8 *cache_id, const u8 *pmk,
                      size_t pmk_len, u32 lifetime, u8 reauth_threshold, int akmp)
 {
@@ -458,6 +476,170 @@ void drv_supp_prepare(const char *ssid, const char *pass)
     pmk_for(pass, (const u8 *)ssid, strnlen(ssid, SSID_MAX_LEN));
 }
 
+/* --- WPA3's SAE. --- */
+
+/* The groups SAE takes, P-256's alone. */
+static int sae_groups[] = { 19, 0 };
+
+static void sae_free(void)
+{
+    sae_clear_data(&supp.sae);
+    sae_deinit_pt(supp.sae_pt);
+    supp.sae_pt = 0;
+    wpabuf_free(supp.sae_token);
+    supp.sae_token = 0;
+    wpabuf_free(supp.sae_msg);
+    supp.sae_msg = 0;
+}
+
+/* The message just built, which the libraries copy into an authentication frame; it lasts until the next. */
+static uint8_t *sae_built(size_t *len)
+{
+    *len = wpabuf_len(supp.sae_msg);
+    return wpabuf_mhead_u8(supp.sae_msg);
+}
+
+/* The commit to the access point at bssid, or once it asked for a token, the same commit again with the token. */
+static uint8_t *sae_commit(const uint8_t *bssid, size_t *len)
+{
+    uint64_t start = osi_now_us();
+    if (supp.sae_token == 0) {
+        const struct wifi_ssid *ssid = esp_wifi_sta_get_prof_ssid_internal();
+        size_t ssid_len = ssid->len < 0 || ssid->len > SSID_MAX_LEN ? 0 : (size_t)ssid->len;
+        const u8 *pass = esp_wifi_sta_get_prof_password_internal();
+        size_t pass_len = strnlen((const char *)pass, 64);
+        sae_clear_data(&supp.sae);
+        if (sae_set_group(&supp.sae, sae_groups[0]) < 0) {
+            return 0;
+        }
+        supp.sae.akmp = WPA_KEY_MGMT_SAE;
+        if (supp.sae_h2e) {
+            if (supp.sae_pt == 0) {
+                supp.sae_pt = sae_derive_pt(sae_groups, ssid->ssid, ssid_len, pass, pass_len, 0, 0);
+            }
+            if (supp.sae_pt == 0 || sae_prepare_commit_pt(&supp.sae, supp.sae_pt, supp.own, bssid, 0, 0) < 0) {
+                wpa_printf(MSG_ERROR, "supp: no SAE commit by hash to element");
+                return 0;
+            }
+        } else if (sae_prepare_commit(supp.own, bssid, pass, pass_len, &supp.sae) < 0) {
+            wpa_printf(MSG_ERROR, "supp: no SAE commit by hunting and pecking");
+            return 0;
+        }
+    }
+    wpabuf_free(supp.sae_msg);
+    supp.sae_msg = wpabuf_alloc(SAE_COMMIT_MAX_LEN + (supp.sae_token ? wpabuf_len(supp.sae_token) : 0));
+    if (supp.sae_msg == 0 || sae_write_commit(&supp.sae, supp.sae_msg, supp.sae_token, 0, 0) < 0) {
+        return 0;
+    }
+    wpabuf_free(supp.sae_token);
+    supp.sae_token = 0;
+    supp.sae.state = SAE_COMMITTED;
+    wpa_printf(MSG_INFO, "supp: SAE's commit to " MACSTR " by %s, in %u ms", MAC2STR(bssid),
+               supp.sae_h2e ? "hash to element" : "hunting and pecking", (unsigned)((osi_now_us() - start) / 1000));
+    return sae_built(len);
+}
+
+/* The confirm, once the access point's commit is taken. */
+static uint8_t *sae_confirm(size_t *len)
+{
+    if (supp.sae.state != SAE_COMMITTED) {
+        return 0;
+    }
+    wpabuf_free(supp.sae_msg);
+    supp.sae_msg = wpabuf_alloc(SAE_CONFIRM_MAX_LEN);
+    if (supp.sae_msg == 0 || sae_write_confirm(&supp.sae, supp.sae_msg) < 0) {
+        return 0;
+    }
+    supp.sae.state = SAE_CONFIRMED;
+    return sae_built(len);
+}
+
+static uint8_t *sae_build(uint8_t *bssid, uint32_t type, size_t *len)
+{
+    *len = 0;
+    return type == SAE_MSG_COMMIT ? sae_commit(bssid, len) : type == SAE_MSG_CONFIRM ? sae_confirm(len) : 0;
+}
+
+/* The access point's request for a token: the group, then the token, by hash to element in a container element. */
+static int sae_take_token(const uint8_t *buf, size_t len)
+{
+    if (len < 2 || WPA_GET_LE16(buf) != sae_groups[0]) {
+        return ESP_FAIL;
+    }
+    const u8 *token = buf + 2;
+    size_t token_len = len - 2;
+    if (supp.sae.h2e) {
+        if (token_len < 3 || token[0] != WLAN_EID_EXTENSION || token[1] < 1 || token[1] > token_len - 2 ||
+            token[2] != WLAN_EID_EXT_ANTI_CLOGGING_TOKEN) {
+            wpa_printf(MSG_ERROR, "supp: an SAE token's container that is not one");
+            return ESP_FAIL;
+        }
+        token_len = token[1] - 1u;
+        token += 3;
+    }
+    wpabuf_free(supp.sae_token);
+    supp.sae_token = wpabuf_alloc_copy(token, token_len);
+    return supp.sae_token ? ESP_OK : ESP_FAIL;
+}
+
+/*
+ * The access point's commit, from its group on, and the frame's status, which may ask for a token instead.
+ * A commit that is ours sent back is dropped, as is one in another state; else the answer is ESP_OK,
+ * or the status to fail the authentication with.
+ * With P-256 alone there is no weaker group to be led to, so the access point's list of refused groups goes unread.
+ */
+static int sae_take_commit(const uint8_t *buf, size_t len, uint16_t status)
+{
+    if (supp.sae.state != SAE_COMMITTED) {
+        return ESP_ERR_WIFI_DISCARD;
+    }
+    if (status == WLAN_STATUS_ANTI_CLOGGING_TOKEN_REQ) {
+        return sae_take_token(buf, len);
+    }
+    uint64_t start = osi_now_us();
+    int h2e = status == WLAN_STATUS_SAE_HASH_TO_ELEMENT || status == WLAN_STATUS_SAE_PK;
+    u16 r = sae_parse_commit(&supp.sae, buf, len, 0, 0, sae_groups, h2e, 0);
+    if (r == SAE_SILENTLY_DISCARD) {
+        return ESP_ERR_WIFI_DISCARD;
+    }
+    if (r != WLAN_STATUS_SUCCESS) {
+        wpa_printf(MSG_ERROR, "supp: the access point's SAE commit refused: status %u", r);
+        return r;
+    }
+    if (sae_process_commit(&supp.sae) < 0) {
+        wpa_printf(MSG_ERROR, "supp: no keys of the access point's SAE commit");
+        return ESP_FAIL;
+    }
+    wpa_printf(MSG_INFO, "supp: the access point's SAE commit taken, in %u ms",
+               (unsigned)((osi_now_us() - start) / 1000));
+    return ESP_OK;
+}
+
+/*
+ * The access point's confirm, which shows it knows the password: SAE's PMK is then the handshake's.
+ * With no PMKSA cache, hostap says it finds no PMKID for message 1/4, and goes on.
+ */
+static int sae_take_confirm(const uint8_t *buf, size_t len)
+{
+    int r = ESP_FAIL;
+    if (supp.sae.state == SAE_CONFIRMED && sae_check_confirm(&supp.sae, buf, len, 0) == 0) {
+        supp.sae.state = SAE_ACCEPTED;
+        wpa_sm_set_pmk(supp.sm, supp.sae.pmk, supp.sae.pmk_len, 0, 0);
+        r = ESP_OK;
+    }
+    wpa_printf(r == ESP_OK ? MSG_INFO : MSG_ERROR, "supp: the access point's SAE confirm %s",
+               r == ESP_OK ? "taken" : "refused");
+    sae_free();
+    return r;
+}
+
+static int sae_parse(uint8_t *buf, size_t len, uint32_t type, uint16_t status)
+{
+    return type == SAE_MSG_COMMIT ? sae_take_commit(buf, len, status)
+           : type == SAE_MSG_CONFIRM ? sae_take_confirm(buf, len)
+                                     : ESP_FAIL;
+}
+
 /* --- The table the libraries call. --- */
 
 /* What hostap calls its driver through, which wpa_sm_deinit frees, so a copy in the heap goes to wpa_sm_init. */
@@ -500,6 +682,7 @@ static bool sta_deinit(void)
 {
     esp_wifi_register_eapol_txdonecb_internal(0);
     drop_held();
+    sae_free();
     wpa_sm_deinit(supp.sm);
     supp.sm = 0;
     return true;
@@ -507,10 +690,11 @@ static bool sta_deinit(void)
 
 /*
  * The libraries chose an access point and ask what to associate with:
- * the suites of the profile, the RSN element that says them, and the PMK.
- * The supplicant takes WPA2's personal RSN, with a passphrase or a PSK,
- * and lets an open network through, which the libraries refuse before they ask, see TODO.md;
- * WPA3's SAE is not done yet, nor WPA's, WAPI or any enterprise.
+ * the suites of the profile, the RSN and RSNX elements that say them, and the PMK.
+ * The supplicant takes WPA2's personal RSN, with a passphrase or a PSK, and WPA3's, with SAE,
+ * whose PMK SAE derives before the association, and which needs management frames protected;
+ * it lets an open network through, which the libraries refuse before they ask, see TODO.md;
+ * WPA's is not done, nor WAPI or any enterprise.
  */
 static int sta_connect(uint8_t *bssid)
 {
@@ -518,18 +702,25 @@ static int sta_connect(uint8_t *bssid)
     uint8_t authmode = esp_wifi_sta_get_prof_authmode_internal();
     os_memcpy(supp.bssid, bssid, ETH_ALEN);
     drop_held();
+    sae_free();
     if (authmode == ESP_AUTH_NONE) {
         esp_wifi_unset_appie_internal(WIFI_APPIE_RSN);
+        esp_wifi_unset_appie_internal(WIFI_APPIE_ASSOC_REQ);
         return esp_wifi_sta_connect_internal(bssid);
     }
     int key_mgmt = authmode == ESP_AUTH_WPA2_PSK          ? WPA_KEY_MGMT_PSK
                    : authmode == ESP_AUTH_WPA2_PSK_SHA256 ? WPA_KEY_MGMT_PSK_SHA256
+                   : authmode == ESP_AUTH_WPA3_PSK        ? WPA_KEY_MGMT_SAE
                                                           : 0;
     if (!esp_wifi_sta_prof_is_rsn_internal() || key_mgmt == 0) {
         wpa_printf(MSG_ERROR, "supp: authentication mode %u is not supported", authmode);
         return -1;
     }
     int pmf = esp_wifi_sta_pmf_enabled() != 0;
+    if (key_mgmt == WPA_KEY_MGMT_SAE && !pmf) {
+        wpa_printf(MSG_ERROR, "supp: SAE needs management frames protected, which the station does not offer");
+        return -1;
+    }
     wpa_sm_set_param(sm, WPA_PARAM_PROTO, WPA_PROTO_RSN);
     wpa_sm_set_param(sm, WPA_PARAM_RSN_ENABLED, 1);
     wpa_sm_set_param(sm, WPA_PARAM_KEY_MGMT, (unsigned)key_mgmt);
@@ -544,16 +735,37 @@ static int sta_connect(uint8_t *bssid)
     wpa_sm_set_ssid(sm, ssid->ssid, ssid_len);
     ap_ies();
 
-    char pass[65];
-    os_memcpy(pass, esp_wifi_sta_get_prof_password_internal(), 64);
-    pass[64] = 0;
-    int bad = pmk_for(pass, ssid->ssid, ssid_len);
-    forced_memzero(pass, sizeof(pass));
-    if (bad) {
-        wpa_printf(MSG_ERROR, "supp: the passphrase is neither 8 to 63 characters nor 64 hexadecimal digits");
+    if (key_mgmt != WPA_KEY_MGMT_SAE) {
+        char pass[65];
+        os_memcpy(pass, esp_wifi_sta_get_prof_password_internal(), 64);
+        pass[64] = 0;
+        int bad = pmk_for(pass, ssid->ssid, ssid_len);
+        forced_memzero(pass, sizeof(pass));
+        if (bad) {
+            wpa_printf(MSG_ERROR, "supp: the passphrase is neither 8 to 63 characters nor 64 hexadecimal digits");
+            return -1;
+        }
+        wpa_sm_set_pmk(sm, supp.pmk, PMK_LEN, 0, 0);
+    }
+
+    /* SAE by hash to element where the profile and the access point's RSNX element allow it, which the station's says. */
+    uint8_t pwe = esp_wifi_get_config_sae_pwe_h2e_internal(WIFI_IF_STA);
+    const u8 *ap_rsnx = esp_wifi_sta_get_ie(supp.bssid, WLAN_EID_RSNX);
+    supp.sae_h2e = key_mgmt == WPA_KEY_MGMT_SAE && (pwe == SAE_PWE_HASH_TO_ELEMENT || pwe == SAE_PWE_BOTH) &&
+                   ieee802_11_rsnx_capab(ap_rsnx, WLAN_RSNX_CAPAB_SAE_H2E);
+    wpa_sm_set_param(sm, WPA_PARAM_SAE_PWE, supp.sae_h2e ? SAE_PWE_HASH_TO_ELEMENT : SAE_PWE_HUNT_AND_PECK);
+    u8 rsnx[8];
+    size_t rsnx_len = sizeof(rsnx);
+    wpa_sm_set_assoc_rsnxe(sm, 0, 0);
+    if (wpa_sm_set_assoc_rsnxe_default(sm, rsnx, &rsnx_len) < 0) {
+        wpa_printf(MSG_ERROR, "supp: no RSNX element for the association");
         return -1;
     }
-    wpa_sm_set_pmk(sm, supp.pmk, PMK_LEN, 0, 0);
+    if (rsnx_len > 0) {
+        esp_wifi_set_appie_internal(WIFI_APPIE_ASSOC_REQ, rsnx, (uint16_t)rsnx_len, 0);
+    } else {
+        esp_wifi_unset_appie_internal(WIFI_APPIE_ASSOC_REQ);
+    }
 
     /* hostap keeps the element of an earlier association unless told to drop it, and would send that in message 2/4. */
     u8 ie[80];
@@ -582,6 +794,7 @@ static void sta_disconnected(uint8_t reason)
 {
     wpa_printf(MSG_DEBUG, "supp: disconnected, reason %u", reason);
     drop_held();
+    sae_free();
     wpa_sm_notify_disassoc(supp.sm);
 }
 
@@ -633,7 +846,7 @@ static int parse_wpa_ie(const uint8_t *ie, size_t len, struct wifi_wpa_ie *data)
     data->proto = d.proto;
     data->pairwise_cipher = cipher_to_esp(d.pairwise_cipher);
     data->group_cipher = cipher_to_esp(d.group_cipher);
-    data->key_mgmt = d.key_mgmt & ESP_KEY_MGMT_KNOWN;
+    data->key_mgmt = d.key_mgmt & ESP_KEY_MGMT_KNOWN & ~KEY_MGMT_SAE_OTHER;
     data->capabilities = d.capabilities;
     data->num_pmkid = d.num_pmkid;
     data->pmkid = d.pmkid;
@@ -672,6 +885,8 @@ static const struct wpa_funcs wpa = {
     .wpa_sta_in_4way_handshake = sta_in_4way,
     .wpa_parse_wpa_ie = parse_wpa_ie,
     .wpa_michael_mic_failure = michael_mic_failure,
+    .wpa3_build_sae_msg = sae_build,
+    .wpa3_parse_sae_msg = sae_parse,
     .wpa_sta_rx_mgmt = sta_rx_mgmt,
     .wpa_config_done = config_done,
     .wpa_sta_clear_curr_pmksa = clear_pmksa,
