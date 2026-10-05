@@ -23,6 +23,8 @@
 #define WLAN_E_AUTH         3u
 #define WLAN_E_DEAUTH       5u
 #define WLAN_E_DEAUTH_IND   6u
+#define WLAN_E_ASSOC_IND    8u
+#define WLAN_E_REASSOC_IND  10u
 #define WLAN_E_DISASSOC_IND 12u
 #define WLAN_E_LINK         16u
 #define WLAN_E_PSK_SUP      46u
@@ -32,8 +34,11 @@
 #define WLAN_STATUS_PARTIAL     8u
 #define WLAN_STATUS_UNSOLICITED 6u
 
+#define WLAN_AUTH_SAE 3u /* a WLAN_E_AUTH event's auth_type when the station authenticated by SAE */
+
 struct wlan_event {
     uint32_t type, status, reason, auth_type, flags;
+    const uint8_t *addr; /* the station or access point it is about, six bytes */
     const uint8_t *data;
     uint32_t len;
 };
@@ -76,19 +81,28 @@ int32_t wlan_init(struct wlan *w, const uint8_t *clm, uint32_t clm_len, uint8_t 
 int32_t wlan_scan(struct wlan *w);
 
 /*
- * Joins a network as a station: WPA2 with AES when a passphrase is given, open when it is empty;
- * the access point bssid names, or any of the network's if it is 0.
+ * Joins a network as a station: open if the passphrase is empty,
+ * else by WPA3's SAE where the access point offers it, unless sae is 0, and by WPA2 with AES otherwise,
+ * guarding management frames where the access point can.
+ * The access point bssid names, or any of the network's if it is 0.
  * The outcome comes as events, which wlan_join_event reads.
  */
-int32_t wlan_join(struct wlan *w, const char *ssid, const char *passphrase, const uint8_t *bssid);
+int32_t wlan_join(struct wlan *w, const char *ssid, const char *passphrase, const uint8_t *bssid, int sae);
 /* The access point joined. */
 int32_t wlan_bssid(struct wlan *w, uint8_t bssid[6]);
+/* Leaves the network joined, so that the access point keeps no association of the station. */
+int32_t wlan_leave(struct wlan *w);
 /* Power save off, so that the station hears everything the access point sends. */
 int32_t wlan_power_save_off(struct wlan *w);
 /* What an event says of a join: 1 joined, -1 failed, 0 nothing yet. */
 int wlan_join_event(const struct wlan_event *e, int secure);
-/* Starts an access point with WPA2 and AES, on a channel. */
-int32_t wlan_start_ap(struct wlan *w, const char *ssid, const char *passphrase, uint32_t channel);
+/*
+ * Starts an access point on a channel, which a station joins by WPA3's SAE or by WPA2, with AES,
+ * or with sae 0 by WPA2 or WPA alone.
+ * Each station that joins comes as a WLAN_E_ASSOC_IND or WLAN_E_REASSOC_IND event;
+ * an ESP32-C6 that left, its deauthentication protected, came as no event.
+ */
+int32_t wlan_start_ap(struct wlan *w, const char *ssid, const char *passphrase, uint32_t channel, int sae);
 
 /* A scan result's fields, from an ESCAN_RESULT event of status PARTIAL; 0 if it holds none. */
 struct wlan_bss {

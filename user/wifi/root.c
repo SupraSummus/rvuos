@@ -12,7 +12,8 @@
  * The run lasts as long as the configuration says, by default half a minute, or for good;
  * it ends early if the link is not up in time, the driver or the network process fails, faults or does not answer,
  * or a scan alone was asked for.
- * Then it halts, which writes out what of the kernel's log no host had.
+ * Then it halts, which writes out what of the kernel's log no host had;
+ * a station that lasted the run leaves the network first.
  *
  * user/lib/ keeps what it hands out: its slots, regions, bits, units of time, free memory and room for children's data.
  */
@@ -69,6 +70,7 @@ static struct system sys = {
     .clients_wanted = CLIENT_BIT(CLIENT_ECHO) | CLIENT_BIT(CLIENT_CLOCK) | CLIENT_BIT(CLIENT_LOGGER),
 };
 static uint32_t tick_bit, seconds, run_s = RUN_S;
+static int leaving;
 
 /* The blob's blocks, largest first from its start, and the frames made of them, which taking the blocks back revokes. */
 static struct block blob[BLOB_FRAMES];
@@ -111,6 +113,7 @@ static void pads_set(void)
  * What the driver is to do, from the text the loader may have left in the input region:
  * lines of mode=scan|sta|ap, ssid=, pass= and channel=. With none, it scans.
  * bssid= names which of the network's access points a station joins,
+ * sae=0 has a station join by WPA2 where WPA3 is offered, and an access point offer WPA2 alone,
  * and debug=dhcp turns power save off and has the driver tell each DHCP message it hears, whoever it is for.
  * A line run= says how many seconds the run lasts, 0 for good.
  * The passphrase lives in the driver's page and memory, never in an image.
@@ -135,6 +138,7 @@ static void configure(struct drv_page *s)
     s->channel = config_number(conf, size, "channel", 1);
     s->bssid_set = (uint8_t)config_mac(conf, size, "bssid", s->bssid);
     s->dhcp_log = (uint8_t)config_has(conf, size, "debug", "dhcp");
+    s->no_sae = config_number(conf, size, "sae", 1) == 0;
     run_s = config_number(conf, size, "run", RUN_S);
     must("uninstall the input", region_free(&self, region));
     if (s->mode != MODE_SCAN && s->ssid[0] == '\0') {
@@ -223,10 +227,28 @@ static int driver_state(uint32_t state)
     }
     if (state == DRV_JOINED) {
         say(&kout, "root: joined %s\n", p->ssid);
+    } else if (state == DRV_LEFT) {
+        say(&kout, "root: the driver left the network\n");
+        system_halt(0);
     } else if (state == DRV_AP) {
         say(&kout, "root: access point %s on channel %u\n", p->ssid, p->channel);
     }
     return 0;
+}
+
+/*
+ * The run over: a station asked to leave the network, and the machine halted once it has, at the latest a second on;
+ * an access point, or a link that never came up, halts at once.
+ */
+static void run_over(int up)
+{
+    summary();
+    if (sys.driver.page->state != DRV_JOINED) {
+        system_halt(up ? 0 : SYSTEM_LATE);
+    }
+    ((struct drv_page *)sys.driver.page)->leave = 1;
+    must("ask the driver to leave", child_tell(&sys.driver));
+    leaving = 1;
 }
 
 /*
@@ -235,6 +257,10 @@ static int driver_state(uint32_t state)
  */
 static void second(void)
 {
+    if (leaving) {
+        say(&kout, "root: the driver has not left the network\n");
+        system_halt(0);
+    }
     uint32_t code = system_check(&sys, 1);
     if (code != 0) {
         halt(code);
@@ -249,7 +275,7 @@ static void second(void)
     if (seconds == run_s) {
         /* A link or an access point that lasted the run is what was asked for. */
         say(&kout, "root: the run is over after %u s\n", run_s);
-        halt(up ? 0 : SYSTEM_LATE);
+        run_over(up);
     }
 }
 

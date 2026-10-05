@@ -26,6 +26,7 @@
 #define WLC_GET_BSSID   23u
 #define WLC_SET_SSID    26u
 #define WLC_SET_CHANNEL 30u
+#define WLC_DISASSOC    52u
 #define WLC_SET_PM      86u
 #define WLC_SET_ANTDIV  64u
 #define WLC_SET_GMODE   110u
@@ -41,9 +42,11 @@
 #define WPA_AUTH_DISABLED 0x0000u
 #define WPA_AUTH_WPA_PSK  0x0004u
 #define WPA_AUTH_WPA2_PSK 0x0080u
+#define WPA_AUTH_SAE_PSK  0x40000u
 #define MFP_NONE          0u
 #define MFP_CAPABLE       1u
 #define AUTH_OPEN         0u
+#define AUTH_SAE          WLAN_AUTH_SAE
 
 #define ETHER_TYPE_LINK_CTL 0x886cu
 #define EVENT_MESSAGE       24u /* where the event's message starts in its frame */
@@ -116,6 +119,7 @@ static void rx_event(struct wlan *w, const uint8_t *p, uint32_t len)
         .auth_type = be32(m + 16),
         .data = p + EVENT_DATA,
         .len = be32(m + 20),
+        .addr = m + 24,
     };
     if (e.len > len - EVENT_DATA) {
         return;
@@ -435,6 +439,17 @@ static int32_t set_passphrase(struct wlan *w, const char *passphrase)
     return wlan_ioctl(w, IOCTL_SET, WLC_SET_WSEC_PMK, p, sizeof(p), 0, 0);
 }
 
+/* The passphrase as the sae_password variable takes it: its length, then room for 128 bytes. */
+static int32_t set_sae_password(struct wlan *w, const char *passphrase)
+{
+    uint8_t p[2 + 128];
+    uint32_t n = strlen(passphrase);
+    memset(p, 0, sizeof(p));
+    put16(p, (uint16_t)n);
+    memcpy(p + 2, passphrase, n);
+    return wlan_set_var(w, "sae_password", p, sizeof(p));
+}
+
 /* An SSID as the firmware takes it: its length as a word, then 32 bytes. */
 static uint32_t ssid_info(uint8_t *p, const char *ssid)
 {
@@ -448,7 +463,7 @@ static uint32_t ssid_info(uint8_t *p, const char *ssid)
     return 36;
 }
 
-int32_t wlan_join(struct wlan *w, const char *ssid, const char *passphrase, const uint8_t *bssid)
+int32_t wlan_join(struct wlan *w, const char *ssid, const char *passphrase, const uint8_t *bssid, int sae)
 {
     int32_t err;
     wlan_set_var_u32(w, "ampdu_ba_wsize", 8);
@@ -467,10 +482,17 @@ int32_t wlan_join(struct wlan *w, const char *ssid, const char *passphrase, cons
         if ((err = set_passphrase(w, passphrase)) != 0) {
             return err;
         }
+        /*
+         * Asked for SAE alone, the firmware falls back to WPA2 on the PMK at an access point that does not offer it;
+         * asked for WPA2's PSK beside SAE, it prunes an access point that offers both, as one whose RSN differs.
+         */
+        if (sae && (err = set_sae_password(w, passphrase)) != 0) {
+            return err;
+        }
         wlan_set_u32(w, WLC_SET_INFRA, 1);
-        wlan_set_u32(w, WLC_SET_AUTH, AUTH_OPEN);
+        wlan_set_u32(w, WLC_SET_AUTH, sae ? AUTH_SAE : AUTH_OPEN);
         wlan_set_var_u32(w, "mfp", MFP_CAPABLE);
-        wlan_set_u32(w, WLC_SET_WPA_AUTH, WPA_AUTH_WPA2_PSK);
+        wlan_set_u32(w, WLC_SET_WPA_AUTH, sae ? WPA_AUTH_SAE_PSK : WPA_AUTH_WPA2_PSK);
     }
     /*
      * The SSID, and with an access point named, the join's parameters after it: its BSSID,
@@ -490,6 +512,11 @@ int32_t wlan_bssid(struct wlan *w, uint8_t bssid[6])
 {
     static const uint8_t room[6];
     return wlan_ioctl(w, IOCTL_GET, WLC_GET_BSSID, room, sizeof(room), bssid, 6);
+}
+
+int32_t wlan_leave(struct wlan *w)
+{
+    return wlan_ioctl(w, IOCTL_SET, WLC_DISASSOC, 0, 0, 0, 0);
 }
 
 int32_t wlan_power_save_off(struct wlan *w)
@@ -517,7 +544,7 @@ int wlan_join_event(const struct wlan_event *e, int secure)
     }
 }
 
-int32_t wlan_start_ap(struct wlan *w, const char *ssid, const char *passphrase, uint32_t channel)
+int32_t wlan_start_ap(struct wlan *w, const char *ssid, const char *passphrase, uint32_t channel, int sae)
 {
     int32_t err;
     wlan_ioctl(w, IOCTL_SET, WLC_DOWN, 0, 0, 0, 0);
@@ -533,9 +560,13 @@ int32_t wlan_start_ap(struct wlan *w, const char *ssid, const char *passphrase, 
     wlan_set_var(w, "bsscfg:ssid", info, sizeof(info));
     wlan_set_u32(w, WLC_SET_CHANNEL, channel);
     set_var_u32x2(w, "bsscfg:wsec", 0, WSEC_AES);
-    wlan_set_var_u32(w, "mfp", MFP_NONE);
-    set_var_u32x2(w, "bsscfg:wpa_auth", 0, WPA_AUTH_WPA2_PSK | WPA_AUTH_WPA_PSK);
+    /* WPA3's transition mode guards management frames where the station can, as SAE requires. */
+    wlan_set_var_u32(w, "mfp", sae ? MFP_CAPABLE : MFP_NONE);
+    set_var_u32x2(w, "bsscfg:wpa_auth", 0, WPA_AUTH_WPA2_PSK | (sae ? WPA_AUTH_SAE_PSK : WPA_AUTH_WPA_PSK));
     sleep_ms(w, 100);
+    if (sae && (err = set_sae_password(w, passphrase)) != 0) {
+        return err;
+    }
     if ((err = set_passphrase(w, passphrase)) != 0) {
         return err;
     }

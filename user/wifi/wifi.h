@@ -55,7 +55,7 @@ enum drv_state {
     DRV_SCANNED,            /* a scan is done, its networks in the page */
     DRV_JOINED,             /* joined the network the page names */
     DRV_AP,                 /* an access point runs, as the page names it */
-    DRV_LEFT,               /* left the network, as the root task asked once the run was over; the ESP32-C6's */
+    DRV_LEFT,               /* left the network, as the root task asked once the run was over */
 };
 
 /* What the root task asks of the driver, from the configuration the loader left in its input region. */
@@ -92,8 +92,10 @@ struct drv_page {
     uint8_t bssid[6]; /* the access point to join, if bssid_set */
     uint8_t bssid_set;
     uint8_t dhcp_log; /* power save off, and a line for each DHCP message heard */
-    /* Later, with CHILD_BIT_PARENT: the link, once the root task connected it. */
+    uint8_t no_sae;   /* WPA2 alone: no SAE, joining or as an access point */
+    /* Later, with CHILD_BIT_PARENT: the link, once the root task connected it, and that the run is over. */
     struct chan_end link;
+    volatile uint32_t leave; /* leave the network, and report DRV_LEFT */
 
     /* From the driver. */
     uint8_t mac[6];

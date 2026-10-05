@@ -27,6 +27,7 @@ struct drv {
     int scan_done;
     uint32_t results;
     int joined;        /* 1 joined, -1 failed, 0 not yet */
+    int by_sae;        /* the join authenticated by SAE */
     struct wlan wlan;
 };
 
@@ -35,14 +36,23 @@ static struct drv *drv_of(struct wlan *w)
     return (struct drv *)((uint8_t *)w - offsetof(struct drv, wlan));
 }
 
-/* A scan's result goes into the page, once for each access point; the last event says the scan is done. */
+/*
+ * A scan's result goes into the page, once for each access point; the last event says the scan is done.
+ * An access point tells each station that joins.
+ */
 static void on_event(struct wlan *w, const struct wlan_event *e)
 {
     struct drv *d = drv_of(w);
     struct drv_page *s = d->page;
     struct wlan_bss bss;
+    if (s->mode == MODE_AP && (e->type == WLAN_E_ASSOC_IND || e->type == WLAN_E_REASSOC_IND)) {
+        say(&d->out, "drv: %M joined\n", e->addr);
+    }
     if (s->mode == MODE_STA && d->joined == 0) {
         d->joined = wlan_join_event(e, s->pass[0] != '\0');
+        if (e->type == WLAN_E_AUTH && e->status == WLAN_STATUS_SUCCESS) {
+            d->by_sae = e->auth_type == WLAN_AUTH_SAE;
+        }
     }
     if (e->type == WLAN_E_ESCAN_RESULT && e->status != WLAN_STATUS_PARTIAL) {
         d->scan_done = 1;
@@ -187,6 +197,9 @@ static void report(struct drv *d, uint32_t state)
  * For as long as the system runs: what the firmware sends, events and frames, and the frames the network process
  * put into the link, each sent as the firmware's credit allows.
  * The chip is polled every millisecond, and a frame to send wakes the driver at once.
+ * A station leaves the network once the run is over, as the root task asks:
+ * an access point that guards management frames refuses a join while it holds an association of the same station,
+ * until its query of the old one goes unanswered.
  */
 static __attribute__((noreturn)) void serve(struct drv *d)
 {
@@ -194,6 +207,11 @@ static __attribute__((noreturn)) void serve(struct drv *d)
     int linked = 0;
     for (;;) {
         child_answer(&p->c);
+        if (p->leave) {
+            int32_t err = wlan_leave(&d->wlan);
+            say(&d->out, "drv: left the network: %d\n", err);
+            child_stop(&p->c, DRV_LEFT);
+        }
         if (!linked && chan_ready(&p->link)) {
             linked = 1;
             say(&d->out, "drv: the link is up\n");
@@ -239,6 +257,38 @@ static void wait_for(struct drv *d, const int *done, uint32_t ms)
             drv_sleep(&d->chip, 1000);
         }
     }
+}
+
+#define JOIN_TRIES 3u
+
+/*
+ * Joins the page's network, at once:
+ * a scan first would take the run's seconds, and the firmware finds the network itself.
+ * A join that fails is tried again, as one after a run that ended without leaving fails, see serve.
+ */
+static void join(struct drv *d)
+{
+    struct drv_page *s = d->page;
+    int32_t err;
+    if (s->dhcp_log) {
+        wlan_power_save_off(&d->wlan);
+    }
+    for (uint32_t i = 0; i < JOIN_TRIES && d->joined != 1; i++) {
+        if (i > 0) {
+            say(&d->out, "drv: the join failed; again\n");
+        }
+        d->joined = 0;
+        if ((err = wlan_join(&d->wlan, s->ssid, s->pass, s->bssid_set ? s->bssid : 0, !s->no_sae)) != 0) {
+            fail(d, STEP_JOIN, (uint32_t)err);
+        }
+        wait_for(d, &d->joined, 10000);
+    }
+    if (d->joined != 1) {
+        fail(d, STEP_JOIN, (uint32_t)d->joined);
+    }
+    uint8_t ap[6] = { 0 };
+    wlan_bssid(&d->wlan, ap);
+    say(&d->out, "drv: joined %M %s\n", ap, s->pass[0] == '\0' ? "open" : d->by_sae ? "by WPA3's SAE" : "by WPA2");
 }
 
 /* Powers the chip, uploads the firmware and the NVRAM from the blob, and sets the firmware up with the CLM. */
@@ -297,26 +347,13 @@ __attribute__((noreturn)) void driver_main(struct child_page *page)
     int32_t err;
     switch (s->mode) {
     case MODE_AP:
-        if ((err = wlan_start_ap(&d->wlan, s->ssid, s->pass, s->channel)) != 0) {
+        if ((err = wlan_start_ap(&d->wlan, s->ssid, s->pass, s->channel, !s->no_sae)) != 0) {
             fail(d, STEP_AP, (uint32_t)err);
         }
         report(d, DRV_AP);
         serve(d);
     case MODE_STA:
-        /* At once: a scan first would take the run's seconds, and the firmware finds the network itself. */
-        if (s->dhcp_log) {
-            wlan_power_save_off(&d->wlan);
-        }
-        if ((err = wlan_join(&d->wlan, s->ssid, s->pass, s->bssid_set ? s->bssid : 0)) != 0) {
-            fail(d, STEP_JOIN, (uint32_t)err);
-        }
-        wait_for(d, &d->joined, 10000);
-        if (d->joined != 1) {
-            fail(d, STEP_JOIN, (uint32_t)d->joined);
-        }
-        uint8_t ap[6] = { 0 };
-        wlan_bssid(&d->wlan, ap);
-        say(&d->out, "drv: joined %M\n", ap);
+        join(d);
         report(d, DRV_JOINED);
         serve(d);
     default:

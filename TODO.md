@@ -5,13 +5,20 @@ Open work only; an item leaves this file in the commit that finishes it.
 ## Wi-Fi system
 
 `user/wifi/`, on a Pico 2 W: the driver brings the CYW43439's firmware up, scans,
-runs an access point a laptop's scan sees, or joins a WPA2 network, where DHCP gives the network process an address
+runs an access point an ESP32-C6 joins by WPA3's SAE, or joins a network by WPA3's SAE or WPA2,
+where DHCP gives the network process an address
 and a laptop's ping and datagrams to UDP port 7777 are answered;
 its clients, in processes of their own, answer on UDP ports 7, the echo, and 13, the clock,
 and the logger carries the kernel's log to a host on port 7070 while the run lasts.
 `WIFI_CONFIG` in the Makefile says what to do and for how long, and `tools/wifi-run.py` follows the log and checks the clients.
 
-- Only WPA2 with AES and open networks join; WPA3 needs the SAE passphrase the driver does not set.
+- The access point's WPA3 transition mode refuses a station that joins it by WPA2 and checks the RSNXE,
+  as hostap's supplicant does, the ESP32-C6's among them:
+  the firmware, 7.95.61, the one embassy carries, names hash to element in an RSNXE in its beacons,
+  but leaves the element out of the third message of WPA2's handshake, where IEEE 802.11 has it repeated.
+  A station that joins by SAE is not refused, nor one at an access point of `sae=0`, which offers WPA2 alone.
+  Of the firmware's variables tried, none turns hash to element off,
+  and whether a later firmware repeats the element is not known.
 - At half its lease the network process lets its address go and asks for one anew, as if it had none,
   so a run for good is unreachable for a moment every twelve hours with the router here, whose lease is a day.
   A renewal, a request to the server that gave the lease, would keep the address meanwhile.
