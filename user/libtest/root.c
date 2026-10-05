@@ -108,30 +108,13 @@ static uint32_t step(void)
     return bits;
 }
 
-/*
- * What the root task holds, as the library counts it: free bytes, and slots, regions, bits and units in use.
- * The slots of free blocks are left out, since halving memory adds blocks that are never joined again.
- */
-struct tally {
-    uint32_t bytes, slots, regions, bits, room, units[TIME_UNITS / 32];
-};
-
-static struct tally tally(void)
+/* What the root task holds, see self_tally. */
+static struct self_tally tally(void)
 {
-    struct tally t = { mem_unused(&self),
-                       self.slot_end - self.slot_first - slots_unused(&self),
-                       self.regions,
-                       self.bits,
-                       self.room_used,
-                       { 0 } };
-    for (uint32_t i = 0; i < self.free_count; i++) {
-        t.slots -= self.free[i].untyped >= self.slot_first && self.free[i].untyped < self.slot_end;
-    }
-    memcpy(t.units, self.units, sizeof(t.units));
-    return t;
+    return self_tally(&self);
 }
 
-static int same(struct tally x, struct tally y)
+static int same(struct self_tally x, struct self_tally y)
 {
     return memcmp(&x, &y, sizeof(x)) == 0;
 }
@@ -222,7 +205,7 @@ static void copy_round(void)
  */
 static void check_round(void)
 {
-    struct tally before = tally();
+    struct self_tally before = tally();
     must("build a child that answers", child_new(&self, &answering, "answering", CHILD_TABLE, CHILD_DATA));
     must("build a child that spins", child_new(&self, &spinning, "spinning", CHILD_TABLE, CHILD_DATA));
     must("start a child that answers", child_start(&self, &answering, answer_main, CHILD_UNITS));
@@ -259,7 +242,7 @@ static void client_go(struct chan_hub *hub, uint32_t i, uint32_t seed)
  */
 static void hub_round(void)
 {
-    struct tally unroomed = tally(), down = unroomed;
+    struct self_tally unroomed = tally(), down = unroomed;
     struct chan_hub hub;
     must("room for children's data", self_room(&self, ROOM_SIZE));
     must("build the server", child_new(&self, &server, "server", CHILD_TABLE, CHILD_DATA));
@@ -306,7 +289,7 @@ static void hub_round(void)
  */
 static void lock_round(void)
 {
-    struct tally unroomed = tally();
+    struct self_tally unroomed = tally();
     struct block shared;
     uint32_t note, waited = 0;
     must("room for children's data", self_room(&self, ROOM_SIZE));
@@ -355,7 +338,7 @@ static void lock_round(void)
 /* Two passers in room for children's data, and the buffer carved from it, which the root task sees through the room. */
 static void pass_round(void)
 {
-    struct tally unroomed = tally();
+    struct self_tally unroomed = tally();
     struct block buffer;
     uint32_t region = 0;
     must("room for children's data", self_room(&self, ROOM_SIZE));
@@ -406,7 +389,7 @@ static void pass_round(void)
  */
 static void own_round(void)
 {
-    struct tally before = tally();
+    struct self_tally before = tally();
     for (uint32_t round = 0; round < 2; round++) {
         must("build a builder", child_new(&self, &builder, "builder", BUILDER_TABLE, CHILD_DATA));
         struct builder_page *p = (struct builder_page *)builder.page;
@@ -442,7 +425,7 @@ int main(void)
     must("arm the deadline", rv_timer_set(deadline, deadline_bit, RUN_US));
     must("a bit for a pause", bit_new(&self, &pause_bit));
     must("a timer for a pause", timer_new(&self, &pause_timer));
-    struct tally start = tally();
+    struct self_tally start = tally();
     say(&out, "libtest: up, %u bytes free and %u slots unused\n", start.bytes, slots_unused(&self));
 
     copy_round();
@@ -469,7 +452,7 @@ int main(void)
      * from the blocks the first gave back, which must leave the root task as the first did,
      * so that a child restarted for good costs nothing more.
      */
-    struct tally before = tally();
+    struct self_tally before = tally();
     uint32_t root_data, root_size;
     must("the root's data", rv_frame_info(BOOT_CAP_DATA, &root_data, &root_size));
     for (uint32_t round = 0; round < 2; round++) {

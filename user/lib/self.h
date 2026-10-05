@@ -155,4 +155,14 @@ uint32_t mem_give(struct self *s, struct block *b);
 uint32_t mem_read(struct self *s, uint32_t base, void *buf, uint32_t len);
 uint32_t mem_unused(const struct self *s);
 
+/*
+ * What it holds, as the library counts it, to tell whether what it handed out came back:
+ * free bytes, and slots, regions, bits, room and units in use.
+ * The slots of free blocks are left out, since halving memory adds blocks that are never joined again.
+ */
+struct self_tally {
+    uint32_t bytes, slots, regions, bits, room, units[TIME_UNITS / 32];
+};
+struct self_tally self_tally(const struct self *s);
+
 #endif

@@ -193,7 +193,7 @@ else
 ESCAPE_PROGRAMS += escape-load-scs escape-stack-call escape-unstack
 endif
 
-.PHONY: all clean run test escape lib-test bench bench-refresh host-harnesses host-test fuzz corpus-merge qemu-replay mutants mutants-refresh \
+.PHONY: all clean run test escape lib-test bench bench-refresh lab host-harnesses host-test fuzz corpus-merge qemu-replay mutants mutants-refresh \
         mutants-fuzz arm-test smp-test contents check
 
 # Pattern rules would delete the objects they chain through,
@@ -292,7 +292,7 @@ escape: $(foreach p,$(ESCAPE_PROGRAMS),$(BUILD)/kernel-$(p).$(IMAGE))
 # Every process runs code from the one image but only the root task with its data,
 # so no other object may keep a global, which the link checks, the library's among them.
 LIB_OBJ       := $(patsubst %.c,$(BUILD)/%.o,$(wildcard user/lib/*.c))
-PROGRAMS      := wifi libtest bench
+PROGRAMS      := wifi libtest bench lab
 program_root   = $(BUILD)/user/$(1)/root.o
 program_others = $(patsubst %.c,$(BUILD)/%.o,$(filter-out user/$(1)/root.c,$(wildcard user/$(1)/*.c)))
 define program
@@ -319,6 +319,11 @@ bench: $(BUILD)/kernel-bench.$(IMAGE)
 bench-refresh: $(BUILD)/kernel-bench.$(IMAGE)
 	tests/bench.py --cpu-hz $(BENCH_CPU_HZ) --board $(notdir $(BUILD)) --record $(BENCH_RECORD) --refresh \
 		"$(BOOT_PREFIX) $<"
+
+# The laboratory, user/lab/: servers and clients, scenario by scenario, and how long their asks waited;
+# see user/lab/NOTES.md. make check runs it to its end and holds the numbers to nothing.
+lab: $(BUILD)/kernel-lab.$(IMAGE)
+	tests/lab.sh "$(BOOT_PREFIX) $<"
 
 # The Wi-Fi system on a Pico 2 W, see user/wifi/wifi.h,
 # and the CYW43439's firmware beside it, which tools/cyw43-blob.py fetches and packs, never into the tree.
@@ -737,7 +742,7 @@ smp-test:
 contents:
 	tools/contents.py MANUAL.md DESIGN.md
 
-check: contents test escape lib-test bench host-test wifi-test qemu-replay arm-test smp-test
+check: contents test escape lib-test bench lab host-test wifi-test qemu-replay arm-test smp-test
 
 clean:
 	rm -rf $(BUILD)

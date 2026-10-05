@@ -328,6 +328,7 @@ make run         # boot the demo root task under QEMU
 make test        # boot under QEMU and check the transcript
 make lib-test    # boot the library's test of user/libtest/ under QEMU and check what it says of itself
 make bench       # what a system call and a switch cost, in instructions, held to tests/bench/qemu.txt
+make lab         # the laboratory of user/lab/: servers and clients, scenario by scenario, in microseconds
 make host-test   # replay the fuzz corpus on the host build with invariants on
 make fuzz        # fuzz the system call surface for FUZZ_TIME seconds in FUZZ_JOBS processes
 make qemu-replay # replay the corpus on QEMU and compare with the host
@@ -335,7 +336,7 @@ make smp-test    # boot the demo on two harts of QEMU and check its transcript, 
 make mutants     # plant each bug under tests/mutants/ and require the checks to catch it
 make arm-test    # boot the demo on mps2-an385 and mps2-an521, there on one core and on two, and check its transcript,
                  # with the escape suite, the library's test and the benchmark on one
-make check       # test, escape, lib-test, bench, host-test, wifi-test, qemu-replay, arm-test and smp-test; run before committing
+make check       # test, escape, lib-test, bench, lab, host-test, wifi-test, qemu-replay, arm-test and smp-test; run before committing
 ```
 
 `PMP_MAX_ENTRIES=8 make check` runs everything with a smaller PMP budget.
@@ -396,6 +397,7 @@ make BOARD=mps2-an385 run            # boot the demo root task
 make BOARD=mps2-an385 test escape    # the same, and check the transcripts
 make BOARD=mps2-an385 lib-test       # the library's test
 make BOARD=mps2-an385 bench          # the benchmark, held to tests/bench/mps2-an385.txt
+make BOARD=mps2-an385 lab            # the laboratory
 make BOARD=mps2-an521 test escape    # the same on QEMU's Cortex-M33, from build/mps2-an521/
 make BOARD=mps2-an521 CORES=2 test   # the same on its two Cortex-M33s, which goes on to the second core
 ```
@@ -409,6 +411,7 @@ The images differ only in that program:
 `kernel-escape-*.elf` a scenario of the escape suite each,
 `kernel-libtest.elf` the library's test of `user/libtest/`,
 `kernel-bench.elf` the benchmark of `user/bench/`,
+`kernel-lab.elf` the laboratory of `user/lab/`,
 and `kernel-wifi.elf` the Wi-Fi system of `user/wifi/`.
 
 ### Reading the transcript

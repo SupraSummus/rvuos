@@ -222,16 +222,23 @@ uint32_t child_start(struct self *s, struct child *c, void (*entry)(struct child
     TRY(s, "configure a child",
         rv_thread_configure(c->thread, (uint32_t)(uintptr_t)entry, c->data.base + c->data.size,
                             (uint32_t)(uintptr_t)c->page));
-    /* Its units, carved for the bind alone: the binding stays with the thread once the slot is deleted. */
-    PASS(units_take(s, units, &c->unit));
-    c->units = units;
-    PASS(slot_new(s, &time));
-    uint32_t status = rv_time_carve(s->time, c->unit, units, time);
-    if (status == KERR_OK) {
-        status = rv_time_bind(time, c->thread, 0, units);
+    /*
+     * Its units, carved for the bind alone: the binding stays with the thread once the slot is deleted;
+     * or none, bound through the parent's own capability, whose RIGHT_X lets it run on spare time.
+     */
+    if (units == 0) {
+        TRY(s, "bind a child to no units", rv_time_bind(s->time, c->thread, 0, 0));
+    } else {
+        PASS(units_take(s, units, &c->unit));
+        c->units = units;
+        PASS(slot_new(s, &time));
+        uint32_t status = rv_time_carve(s->time, c->unit, units, time);
+        if (status == KERR_OK) {
+            status = rv_time_bind(time, c->thread, 0, units);
+        }
+        PASS(slot_free(s, time));
+        TRY(s, "bind a child to its units", status);
     }
-    PASS(slot_free(s, time));
-    TRY(s, "bind a child to its units", status);
     TRY(s, "start a child", rv_thread_resume(c->thread));
     return KERR_OK;
 }

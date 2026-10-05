@@ -151,7 +151,8 @@ uint32_t child_region(struct self *s, struct child *c, uint32_t *region);
 uint32_t child_bit(struct self *s, struct child *c, uint32_t *bit);
 /*
  * Starts the child at entry, with a0 at its page, its stack at the top of its data,
- * earning units of the first core, and its faults signalling the parent's inbox with bit_fault.
+ * earning units of the first core, or none and running on spare time alone,
+ * and its faults signalling the parent's inbox with bit_fault.
  */
 uint32_t child_start(struct self *s, struct child *c, void (*entry)(struct child_page *), uint32_t units);
 /* Tells a running child the parent wrote into its page. */
