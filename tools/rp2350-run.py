@@ -16,9 +16,11 @@ and this exits with that code, as QEMU exits with the kernel's.
 Closing the port then reboots the chip into BOOTSEL for the next image.
 
 Data beside the image, such as the Wi-Fi system's firmware blob, goes with --ram address:file,
-into SRAM alone and never into flash, checked as the segments are.
+into SRAM alone and never into flash, checked as the segments are;
+--text address:file writes a text, such as a configuration, with a NUL after it,
+since SRAM keeps what an earlier run left past a shorter file.
 
-Usage: tools/rp2350-run.py [--timeout seconds] [--ram address:file]... image.elf
+Usage: tools/rp2350-run.py [--timeout seconds] [--ram address:file]... [--text address:file]... image.elf
 """
 
 import argparse
@@ -209,11 +211,11 @@ class Picoboot:
         self.command(PC_REBOOT2, args, check=False)  # the chip is gone before a status could be asked for
 
 
-def ram_file(spec):
-    """An --ram argument: the address and the bytes, which must lie in SRAM."""
+def ram_file(spec, end=b""):
+    """An --ram argument: the address and the bytes, which must lie in SRAM; end follows them, --text's NUL."""
     addr, _, path = spec.partition(":")
     addr = int(addr, 0)
-    data = open(path, "rb").read()
+    data = open(path, "rb").read() + end
     if not (RAM_BASE <= addr and addr + len(data) <= SRAM_END):
         sys.exit(f"--ram {spec}: {len(data)} bytes at {addr:#010x} do not lie in SRAM")
     return addr, data
@@ -248,11 +250,13 @@ def main():
                         help="give up after this many seconds; by default wait for the halt")
     parser.add_argument("--ram", action="append", default=[], metavar="ADDRESS:FILE",
                         help="also write a file's bytes into SRAM at an address")
+    parser.add_argument("--text", action="append", default=[], metavar="ADDRESS:FILE",
+                        help="also write a text file into SRAM at an address, a NUL after it")
     parser.add_argument("image")
     args = parser.parse_args()
 
     deadline = None if args.timeout is None else time.monotonic() + args.timeout
-    load(args.image, [ram_file(spec) for spec in args.ram])
+    load(args.image, [ram_file(spec) for spec in args.ram] + [ram_file(spec, b"\0") for spec in args.text])
     say("booted; waiting for the halt's serial port")
     port = wait_for(halt_port, 1e9 if deadline is None else deadline - time.monotonic())
     if port is None:

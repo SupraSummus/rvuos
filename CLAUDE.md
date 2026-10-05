@@ -49,7 +49,8 @@ which a change to how the cores lock, start or interrupt each other needs too.
 so a change to the library with a board connected runs `make BOARD=<board> lib-test` there too, on each kind of core.
 Of the Wi-Fi system it runs only what makes no system call, the IP stack and the clients' sockets, on the host;
 a change to `user/wifi/` with a Pico 2 W connected runs `make BOARD=rp2350 wifi` too,
-and `WIFI_CONFIG` names a network to join from a file outside the tree, never in it.
+and `WIFI_CONFIG` names a network to join from a file git does not track,
+`local/wifi.conf` on the maintainer's machine, never from one it does.
 `make check` builds no PHY harness either, so a change to `user/phyblob/`, `user/phytrace.h` or the ESP32-C6's device ranges
 runs `make BOARD=esp32c6 phymap`, which builds the harness and lists what it reaches that no frame covers.
 A new kernel global needs a reset in `host_boot` too,

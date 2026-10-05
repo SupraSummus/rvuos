@@ -4,6 +4,8 @@
 /*
  * The configuration of a Wi-Fi system, as WIFI_CONFIG's file leaves it in the input region:
  * lines of key=value, of which each root task reads the keys it knows.
+ * It ends at its first NUL, which the loaders' --text writes after the file,
+ * since RAM keeps what an earlier run's longer file left past it.
  */
 
 #include <stdint.h>
@@ -14,7 +16,7 @@
 static inline void config_value(const char *conf, uint32_t len, const char *key, char *out, uint32_t room)
 {
     uint32_t klen = strlen(key);
-    for (uint32_t i = 0; i < len; i++) {
+    for (uint32_t i = 0; i < len && conf[i] != '\0'; i++) {
         if ((i == 0 || conf[i - 1] == '\n') && i + klen < len && memcmp(conf + i, key, klen) == 0 &&
             conf[i + klen] == '=') {
             uint32_t n = 0;

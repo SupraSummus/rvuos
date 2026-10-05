@@ -6,13 +6,18 @@ Meanwhile this asks for the log on UDP port 7070, by broadcast until the system 
 and prints it as it comes; the halt writes out the rest.
 Once the log says the clients answer, it checks the status port, the echo, the clock,
 the echo built again after a fault and after a hang, and ping.
+
+Each line goes out with its seconds since the start, into --save's file too;
+a fault's or the heap's line gets the functions its addresses fall in, from the ELF files of --symbols.
+
 It exits with the halt's code, or if that is 0, with 1 when a check failed
 or the system had an address and its log never came.
 
-Usage: tools/wifi-run.py -- command...
+Usage: tools/wifi-run.py [--save file] [--symbols elf]... -- command...
 """
 
 import argparse
+import os
 import re
 import shutil
 import socket
@@ -33,18 +38,70 @@ CLIENTS_UP = (ECHO_UP, "root: the clock says it is")
 ECHO_FAULTED = "root: the echo faulted"
 ECHO_HUNG = "root: the echo stopped answering"
 HAS_ADDRESS = "root: the system answers at"
+# The lines whose addresses are named, and the addresses in them.
+NAMED = re.compile(r"^(fault:|heap:)|mepc=")
+HEX = re.compile(r"\b(?:0x)?([0-9a-f]{8})\b")
+
+
+def code_ranges(path):
+    """The address ranges of a 32-bit ELF file's sections of code."""
+    with open(path, "rb") as f:
+        elf = f.read()
+    if elf[:5] != b"\x7fELF\x01":
+        return []
+    shoff = struct.unpack_from("<I", elf, 0x20)[0]
+    shentsize, shnum = struct.unpack_from("<HH", elf, 0x2E)
+    ranges = []
+    for i in range(shnum):
+        _, _, flags, addr, _, size = struct.unpack_from("<IIIIII", elf, shoff + i * shentsize)
+        if flags & 0x4 and size:  # SHF_EXECINSTR
+            ranges.append((addr, addr + size))
+    return ranges
+
+
+class Symbols:
+    """The functions addresses of code fall in, from ELF files, through llvm-symbolizer."""
+
+    def __init__(self, elfs):
+        found = shutil.which("llvm-symbolizer")
+        self.elfs = [(elf, code_ranges(elf)) for elf in elfs if found and os.path.exists(elf)]
+
+    def annotate(self, line):
+        if not self.elfs or not NAMED.search(line):
+            return line
+        left, named = list(dict.fromkeys(int(h, 16) for h in HEX.findall(line))), {}
+        for elf, ranges in self.elfs:
+            mine = [a for a in left if any(lo <= a < hi for lo, hi in ranges)]
+            if mine:
+                out = subprocess.run(["llvm-symbolizer", "--obj=" + elf, "--functions=linkage", "--no-inlines",
+                                      *map(hex, mine)], capture_output=True, text=True).stdout
+                named.update(zip(mine, (block.split("\n")[0] for block in out.strip().split("\n\n"))))
+                left = [a for a in left if a not in named]
+        names = [f"{a:08x}={n}" for a, n in named.items() if n != "??"]
+        return line.rstrip("\n") + "  [" + ", ".join(names) + "]\n" if names else line
 
 
 class Output:
-    """Whole lines to stdout, from every thread, so that the log's lines and this tool's never cut into each other."""
+    """
+    Whole lines to stdout, from every thread, so that the log's lines and this tool's never cut into each other,
+    each with the seconds since the start before it, and into the file of --save too.
+    """
 
-    def __init__(self):
+    def __init__(self, save=None, symbols=None):
         self.lock = threading.Lock()
+        self.start = time.monotonic()
+        self.file = open(save, "w") if save else None
+        self.symbols = symbols or Symbols([])
 
     def lines(self, text):
         with self.lock:
-            sys.stdout.write(text)
+            stamp = f"{time.monotonic() - self.start:8.3f} "
+            out = "".join(stamp + self.symbols.annotate(line) for line in text.splitlines(True))
+            sys.stdout.write(out)
             sys.stdout.flush()
+            if self.file:
+                self.file.write(out)
+                self.file.flush()
 
     def say(self, *words):
         self.lines("wifi-run: " + " ".join(str(w) for w in words) + "\n")
@@ -227,13 +284,16 @@ class Checks:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--save", metavar="FILE", help="also write every line into a file")
+    parser.add_argument("--symbols", action="append", default=[], metavar="ELF",
+                        help="name the functions the addresses of fault lines fall in, from this ELF file")
     parser.add_argument("command", nargs=argparse.REMAINDER, help="-- and the command that boots the system")
     args = parser.parse_args()
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         parser.error("the command that boots the system comes after --")
 
-    out = Output()
+    out = Output(args.save, Symbols(args.symbols))
     log = Log(out)
     follower = threading.Thread(target=log.run, daemon=True)
     follower.start()

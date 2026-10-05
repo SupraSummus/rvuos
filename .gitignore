@@ -2,3 +2,5 @@ build/
 # What a harness that fails leaves where it ran.
 crash-*
 tools/__pycache__/
+# This machine's own files, which no commit holds: the Wi-Fi configurations WIFI_CONFIG names, with their passphrases.
+local/

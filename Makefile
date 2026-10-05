@@ -306,12 +306,16 @@ lib-test: $(BUILD)/kernel-libtest.$(IMAGE)
 # and the CYW43439's firmware beside it, which tools/cyw43-blob.py fetches and packs, never into the tree.
 # The loader places the blob at the start of free RAM, FREE_RAM_BASE in kernel/board/rp2350/board.h.
 # tools/wifi-run.py follows the system's log over the network while it runs, and checks it from the host.
+# board_hex reads an address a board's header defines, so that what a loader writes goes where the board has it.
+board_hex      = $(shell sed -n 's/^\#define $(1)[ \t].*\(0x[0-9a-fA-F]\{1,\}\).*/\1/p' $(2))
 WIFI_BLOB      := build/cyw43/blob.bin
-WIFI_BLOB_AT   := 0x20040000
+WIFI_BLOB_AT   := $(call board_hex,FREE_RAM_BASE,kernel/board/rp2350/board.h)
 # What the root task is to do, lines of mode=scan|sta|ap, ssid=, pass=, channel= and run=, seconds or 0 for good,
-# from a file outside the tree, placed in its input region, INPUT_BASE in board.h; with none it scans.
+# from a file git does not track, such as local/wifi.conf,
+# placed in its input region, INPUT_BASE in board.h; with none it scans,
+# for which the input region gets an empty configuration, since the board's RAM keeps the last run's.
 WIFI_CONFIG    ?=
-WIFI_INPUT_AT  := 0x20038000
+WIFI_INPUT_AT  := $(call board_hex,INPUT_BASE,kernel/board/rp2350/board.h)
 
 $(WIFI_BLOB): tools/cyw43-blob.py
 	tools/cyw43-blob.py --cache build/cyw43 --out $@
@@ -340,8 +344,9 @@ wifi: $(BUILD)/kernel-wifi.elf $(WIFI_BLOB)
 ifneq ($(BOARD),rp2350)
 	$(error the Wi-Fi system runs on a Pico 2 W: make BOARD=rp2350 wifi)
 endif
-	tools/wifi-run.py -- $(RP2350_PYTHON) tools/rp2350-run.py --ram $(WIFI_BLOB_AT):$(WIFI_BLOB) \
-		$(if $(WIFI_CONFIG),--ram $(WIFI_INPUT_AT):$(WIFI_CONFIG)) $(BUILD)/kernel-wifi.elf
+	tools/wifi-run.py --save $(BUILD)/wifi-run.log --symbols $(BUILD)/kernel-wifi.elf -- \
+		$(RP2350_PYTHON) tools/rp2350-run.py --ram $(WIFI_BLOB_AT):$(WIFI_BLOB) \
+		--text $(WIFI_INPUT_AT):$(or $(WIFI_CONFIG),/dev/null) $(BUILD)/kernel-wifi.elf
 
 # The PHY harness of user/phyblob/ on an ESP32-C6, see user/phytrace.h, around Espressif's libphy.a,
 # which tools/esp-fetch.py fetches with what of ESP-IDF it needs, never into the tree.
