@@ -89,27 +89,28 @@
 /*
  * The devices the boot grants as frames from BOOT_CAP_DEVICES up, in this order;
  * user/board/esp32c6/devices.h names their slots.
- * They are what a PHY driver drives, as tools/phymap.py finds in ESP-IDF's PHY library and the ROM:
- * the SAR ADC with the temperature sensor, which board.c takes out of reset,
- * the modem's front end, Bluetooth and Wi-Fi basebands, clock controls and analog I2C master,
- * and the eFuse, read only so that no program burns a fuse.
- * No bus master is listed: the Wi-Fi MAC from 0x600A4000 and the 802.15.4 MAC at 0x600A3000 lie outside,
- * as do the modem's pages no code names, where the Bluetooth controller may be,
- * but for the last KiB of the front end's frame.
+ * The SAR ADC with the temperature sensor, which board.c takes out of reset,
+ * the whole modem in one frame, since a process has too few regions for its blocks one by one,
+ * the eFuse, read only so that no program burns a fuse,
+ * the window onto flash and the ROM, read and execute,
+ * the random number generator's data register, read only, in the smallest block that holds it,
+ * eight bytes of LPPERI's: the rest of LPPERI reaches the LP domain's clocks and resets,
+ * and the IO MUX and the GPIO matrix, the pins, for a program to set as its board wires them,
+ * the flash's among them, so that whoever holds the IO MUX can cut the window onto flash off.
  * PCR, PMU and the LP domain stay the kernel's: they reach the whole chip's clocks, power and resets.
- * The window onto flash comes last, read and execute.
+ * The modem's two MACs, Wi-Fi's and 802.15.4's, are bus masters, which nothing confines,
+ * so whoever holds the modem reaches all RAM; see DESIGN.md, open decision 13.
  */
-#define BOOT_DEVICES 9
+#define BOOT_DEVICES 8
 #define DEVICE_RANGE_LIST                                       \
     { U32(0x6000E000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
-    { U32(0x600A0000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
-    { U32(0x600A2000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
-    { U32(0x600A7000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
-    { U32(0x600A8000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
-    { U32(0x600A9800), U32(0x00000400), RIGHT_R | RIGHT_W },    \
-    { U32(0x600AF000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
+    { U32(0x600A0000), U32(0x00010000), RIGHT_R | RIGHT_W },    \
     { U32(0x600B0800), U32(0x00000400), RIGHT_R },             \
-    { FLASH_WINDOW_BASE, FLASH_WINDOW_SIZE, RIGHT_R | RIGHT_X },
+    { FLASH_WINDOW_BASE, FLASH_WINDOW_SIZE, RIGHT_R | RIGHT_X }, \
+    { U32(0x40000000), U32(0x00080000), RIGHT_R | RIGHT_X },    \
+    { U32(0x600B2808), U32(0x00000008), RIGHT_R },             \
+    { U32(0x60090000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
+    { U32(0x60091000), U32(0x00001000), RIGHT_R | RIGHT_W },
 
 /*
  * Interrupt line identifiers lie below IRQ_LINES; see irq.h.

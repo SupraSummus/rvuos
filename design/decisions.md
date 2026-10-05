@@ -167,16 +167,26 @@ until the maintainer decides otherwise.
     bytes one run wrote at `0x40838000` were still there after the reset and the next load.
 
 13. **Access permission management on the ESP32-C6.**
-    Working default: the kernel turns the APM filters off at boot,
-    because they refuse the CPU in user mode every peripheral,
+    Decided: the kernel turns the APM filters off at boot,
+    and a driver granted a device that is a bus master is trusted with all RAM.
+    The filters, as the ROM leaves them, refuse the CPU in user mode every peripheral,
     and PMP alone confines a process; see "Boards".
     PMP says nothing about DMA:
-    a peripheral that is a bus master reads and writes where its driver points it,
-    so a driver granted such a device can reach any RAM.
-    The APM units are what could confine a master,
-    by region and by security mode,
-    which would make them the kernel's to program when a DMA driver asks.
-    Decide when the first driver of a DMA-capable peripheral exists.
+    a peripheral that is a bus master reads and writes where its driver points it.
+    The ESP32-C6 lists its modem whole, its two MACs among them,
+    so whoever holds the modem's frame reaches any RAM, the kernel's too,
+    and the root task gives it only to a driver it trusts as it trusts itself.
+
+    The APM units could confine the MACs, and were measured to on the board:
+    with the CPU's user mode in REE0, given everything by a region of each unit, since PMP confines it,
+    the modem in REE1, given read and write over the driver's block of RAM alone,
+    and every other master in REE2, given nothing,
+    the Wi-Fi system passed its every check, and the units refused nothing of its traffic.
+    The CPU's user mode always takes one of the three REE modes,
+    so the chip can confine bus masters only to one set of windows they all share, not each driver to its own,
+    and the windows would take a block of RAM the board names, granted as a frame of its own,
+    or an operation that binds a frame to a master, which deleting the frame undoes.
+    Trust is simpler than either.
 
 14. **Memory authority: `Untyped` and `Frame`.**
     Decided: seL4's split; see "Kernel pools and revocation".
@@ -304,7 +314,8 @@ until the maintainer decides otherwise.
     so a program cannot keep the dedicated GPIO across another process's turn.
     The dedicated GPIO reaches a pad only through the GPIO matrix,
     and a pad routed to it is every process's whatever the kernel sets back;
-    no process holds the matrix today, so the first GPIO driver decides who may route one.
+    the board grants the matrix, so whoever holds it decides whether a pad is so shared,
+    and the Wi-Fi system's root task, which sets the XIAO's RF switch, routes none.
     Decide with the first program that wants the dedicated GPIO kept.
 
 23. **A second architecture.**

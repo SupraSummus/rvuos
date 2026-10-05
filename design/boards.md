@@ -9,6 +9,7 @@ How it reaches RAM is the board's; see "Boards".
 The kernel:
 
 1. makes the board ready, which on the ESP32-C6 means watchdogs off
+   and the radio's analog power on,
    and on RP2350 its clocks set and a watchdog armed,
    and sets up its own stack and trap vector,
 2. discovers the PMP entry count and grain by writing the CSRs and reading them back,
@@ -116,15 +117,21 @@ The kernel keeps the ranges after the boot's other grants, so what is made of th
 A program's `devices.h` says how many there are and names their slots, in the order of the kernel's `board.h`,
 and the two must agree.
 RP2350 lists the pins' functions and pads and the three PIO blocks, which the Wi-Fi system of `user/wifi/` drives;
-the ESP32-C6 lists the SAR ADC and the blocks of its modem a PHY driver drives,
-which `tools/phymap.py` finds in ESP-IDF's PHY library and the ROM's,
+the ESP32-C6 lists the SAR ADC and the whole of its modem, in one frame,
+since a process's eight regions cannot hold the modem's blocks one by one,
+where `tools/phymap.py` finds what ESP-IDF's PHY and Wi-Fi libraries reach, through the ROM's functions too,
 the eFuse's registers, read only, so that no program burns a fuse,
-and a window onto flash, read and execute, for a program larger than its SRAM;
+a window onto flash, read and execute, for a program larger than its SRAM,
+the ROM, read and execute, whose functions those libraries call,
+the random number generator's data register, read only, the eight bytes of LPPERI that hold it,
+since the rest of LPPERI reaches the LP domain's clocks and resets,
+and the IO MUX and the GPIO matrix, the pins, which a program sets as its board wires them,
+as the Wi-Fi system's root task sets the XIAO's RF switch;
 QEMU lists none, since its devices are the kernel's or the console, and the host build has no hardware;
 nor do the MPS2 boards yet.
 So on QEMU `BOOT_CAP_COUNT` is 18, the number the seeds and the corpus are written for.
-A device that is a bus master reaches whatever its driver points it at, so a board lists none:
-its frame would be the machine's; open decision 13.
+A device that is a bus master reaches whatever its driver points it at, so its frame is the machine's:
+the ESP32-C6's modem is the one a board lists, for a driver the root task trusts with all RAM; open decision 13.
 Nor does it list the devices the kernel drives itself, the timer under the tick and the watchdog:
 a program reaches those through the clock's operations, which every board can answer; see "The watchdog".
 
@@ -159,7 +166,7 @@ Those silently refuse the CPU in user mode every peripheral,
 reads returning zero and writes dropped;
 ESP-IDF turns them off at startup too.
 PMP is what confines a process, so rvuos loses nothing;
-what they could still do is open decision 13.
+they could confine the modem's DMA too, which open decision 13 leaves to trust.
 The core has user-mode traps, the N extension,
 and the ROM leaves `mideleg` at `0x111`,
 which delegates the user software, timer and external interrupts to a handler in user mode;

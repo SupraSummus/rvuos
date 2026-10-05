@@ -68,15 +68,19 @@ what is left:
 - The PHY tracer: the root task that watches the harness of `user/phyblob/` and carries out its device accesses,
   laid out as `user/phytrace.h` says, and a rule that boots it with the harness beside it;
   `make BOARD=esp32c6 phyblob` builds the harness, and nothing has run it.
-- The tracer has to log and feign the eight registers no frame covers, which `make BOARD=esp32c6 phymap` lists,
-  in PCR, PMU, the LP domain and the Wi-Fi MAC; what their reads should answer is open.
+- The tracer has to log and feign the six registers no frame covers, which `make BOARD=esp32c6 phymap` lists,
+  in PCR, PMU and the LP domain; what their reads should answer is open.
   `phymap` sees only constant addresses, so a register reached through a table or a loop shows first in a trace.
-  The board's eight frames and the tracer's own regions exceed a process's eight region slots,
-  so the tracer maps a device's frame when the harness first reaches it.
+  The harness reaches three of the board's frames, the SAR ADC, the modem and the eFuse,
+  which with the tracer's own regions have to fit a process's eight region slots.
 - Wi-Fi on the ESP32-C6 through Espressif's closed libraries, as the Wi-Fi system's driver, run from the window onto flash:
   linked, the libraries keep about 360 KB of code and constants and 21 KB of data, more than the SRAM leaves.
-  Still to come: the driver, its adapter for the libraries' OS functions, the WPA2 supplicant,
-  and the MAC's frame, a bus master no board lists (open decision 13), which HP_APM is to confine to the driver's memory.
+  Still to come: the driver, its adapter for the libraries' OS functions, and the WPA2 supplicant.
+- With the APM units confining the modem to the driver's block, as measured for open decision 13,
+  the modem reached `0x4082c7ac`, in the root task's code block past its image, once in each of two runs,
+  before the driver had started, and the units refused it; five runs after showed nothing.
+  What of the modem reaches memory before a driver programs it, and why there, is not known;
+  with the units off, as they are, such an access lands.
 - Feed the replay corpus to the board.
   Something has to put each input where `BOOT_CAP_INPUT` points,
   below the ROM's buffers or over USB once the kernel runs,

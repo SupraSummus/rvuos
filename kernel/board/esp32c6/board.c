@@ -11,10 +11,22 @@
  * its peripheral reads return zero and its writes are dropped, with no fault to show for it.
  * PMP is what confines a process on rvuos, so the filters go off as well,
  * as ESP-IDF's startup turns them off; see DESIGN.md, "Boards".
+ * With them goes what they could do for the modem's DMA, which open decision 13 leaves to trust.
  *
  * The ROM hands over the SAR ADC, a device board.h lists, with its registers held in reset, where writes are dropped,
  * and its and the temperature sensor's clocks off, as measured on the chip.
  * No program reaches PCR, so the kernel turns the clocks on and lets the registers out of reset.
+ *
+ * Espressif's PHY library, libphy.a in the Wi-Fi driver, also sets a few registers of the PMU and LP_AON,
+ * which no program reaches, and only one way:
+ * the analog I2C buses its calibration talks over powered, the baseband's I2C bus tied powered,
+ * and the power detector's capacitance.
+ * The kernel sets them at boot, and the driver's own versions of those functions leave them out;
+ * the ROM leaves only the peripheral I2C bus powered, as measured on the chip.
+ * The crystal's tick count the PHY writes into PCR is already 40 MHz's, as the chip resets.
+ *
+ * The pins stay as the ROM leaves them: how a board wires them, as the XIAO ESP32-C6 does its RF switch,
+ * is for a program to set, through the IO MUX and the GPIO matrix board.h lists.
  *
  * The window onto flash, see board.h, is the MMU's only valid entries, the window's 64 KiB pages in order,
  * which the kernel sets, with the cache emptied of what the pages held before, then lets the cache's buses through.
@@ -60,6 +72,15 @@
 #define PCR_SARADC_REG_CLK_EN (1u << 2) /* its registers' clock; bit 3 holds them in reset */
 #define PCR_TSENS_CLK_CONF    0x60096088u
 #define PCR_TSENS_CLK_EN      (1u << 22)
+
+/* The radio's analog power, in the PMU, and the power detector's capacitance, in LP_AON. */
+#define PMU_IMM_HP_CK_POWER      0x600B00CCu
+#define PMU_TIE_HIGH_XPD_BB_I2C  (1u << 28) /* written, never read: ties the baseband's I2C bus powered */
+#define PMU_RF_PWC               0x600B0154u
+#define PMU_RF_I2C_ON            0xFC000000u /* PERIF_I2C_RSTB and the XPD of PERIF_I2C to PLL_I2C */
+#define LP_AON_SAR_CCT           0x600B1054u
+#define LP_AON_SAR2_PWDET_CCT    (7u << 29)
+#define LP_AON_SAR2_PWDET_CCT_4  (4u << 29)
 
 /* The MMU, which maps 64 KiB pages of flash through the cache from 0x42000000, one entry each, and the cache. */
 #define MMU_ITEM_CONTENT     0x6000237Cu
@@ -118,6 +139,10 @@ void board_init(void)
 
     REG(PCR_SARADC_CONF) = PCR_SARADC_CLK_EN | PCR_SARADC_REG_CLK_EN;
     REG(PCR_TSENS_CLK_CONF) |= PCR_TSENS_CLK_EN;
+
+    REG(PMU_RF_PWC) |= PMU_RF_I2C_ON;
+    REG(PMU_IMM_HP_CK_POWER) = PMU_TIE_HIGH_XPD_BB_I2C;
+    REG(LP_AON_SAR_CCT) = (REG(LP_AON_SAR_CCT) & ~LP_AON_SAR2_PWDET_CCT) | LP_AON_SAR2_PWDET_CCT_4;
 
     flash_window_map();
 }

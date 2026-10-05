@@ -33,7 +33,7 @@ and `thumbv8m.main-none-eabi` for the Cortex-M33, with no floating point and no 
 
 Five boards are supported, chosen with `make BOARD=<board>`:
 `qemu`, QEMU `virt` for RV32, the default,
-`esp32c6`, an Espressif ESP32-C6,
+`esp32c6`, an Espressif ESP32-C6, as on Seeed Studio's XIAO ESP32-C6,
 `rp2350`, a Raspberry Pi RP2350 on its RISC-V cores, or with `ARCH=arm` on its Cortex-M33 ones, as on a Pico 2,
 `mps2-an385`, QEMU's model of ARM's MPS2 board with a Cortex-M3,
 and `mps2-an521`, QEMU's model of the same board with the AN521 image, two Cortex-M33s.
@@ -114,25 +114,35 @@ Interrupt lines:
 | 1 to 77 | the interrupt matrix's sources, numbered as in Espressif's `soc/interrupts.h`, plus one: the Wi-Fi MAC's source 0 is line 1, and the USB Serial/JTAG controller's is line 49 |
 
 The root task is granted a frame over each of these devices, from `BOOT_CAP_DEVICES` up,
-so `BOOT_CAP_COUNT` is 27 here and the root task's table has 73 slots.
-They are the SAR ADC and the blocks of the modem a PHY driver drives,
-as `make BOARD=esp32c6 phymap` finds them in ESP-IDF's PHY library and the ROM's,
-and the eFuse's registers:
+so `BOOT_CAP_COUNT` is 26 here and the root task's table has 72 slots.
+They are the SAR ADC and the whole modem,
+where `make BOARD=esp32c6 phymap` and `make BOARD=esp32c6 wifi-esp32c6-map` find what ESP-IDF's PHY and Wi-Fi libraries reach,
+the eFuse's registers, the window onto flash, the ROM, the random number generator's data register,
+and the IO MUX and the GPIO matrix:
 
 | Slot | Constant | Range | Size | What | Rights |
 |---|---|---|---|---|---|
 | 18 | `BOOT_CAP_SARADC` | `0x6000E000` | 4 KiB | APB_SARADC, the SAR ADC and the temperature sensor | read, write |
-| 19 | `BOOT_CAP_FE` | `0x600A0000` | 4 KiB | the modem's RF front end | read, write |
-| 20 | `BOOT_CAP_BT_BB` | `0x600A2000` | 4 KiB | the Bluetooth baseband | read, write |
-| 21, 22 | `BOOT_CAP_WIFI_BB0`, `BOOT_CAP_WIFI_BB1` | `0x600A7000`, `0x600A8000` | 4 KiB each | the Wi-Fi baseband | read, write |
-| 23 | `BOOT_CAP_MODEM_SYSCON` | `0x600A9800` | 1 KiB | MODEM_SYSCON, the modem's clocks and resets | read, write |
-| 24 | `BOOT_CAP_MODEM_LPCON` | `0x600AF000` | 4 KiB | MODEM_LPCON, the modem's LP clocks, and the analog I2C master from `0x600AF800` | read, write |
-| 25 | `BOOT_CAP_EFUSE` | `0x600B0800` | 1 KiB | the eFuse's registers, the factory MAC address among them | read |
-| 26 | `BOOT_CAP_FLASH` | `0x42000000` | 1 MiB | the window onto flash, for a program larger than the SRAM | read, execute |
+| 19 | `BOOT_CAP_MODEM` | `0x600A0000` | 64 KiB | the modem: its RF front end, basebands and MACs, MODEM_SYSCON and MODEM_LPCON, its clocks and resets, and the analog I2C master from `0x600AF800` | read, write |
+| 20 | `BOOT_CAP_EFUSE` | `0x600B0800` | 1 KiB | the eFuse's registers, the factory MAC address among them | read |
+| 21 | `BOOT_CAP_FLASH` | `0x42000000` | 1 MiB | the window onto flash, for a program larger than the SRAM | read, execute |
+| 22 | `BOOT_CAP_ROM` | `0x40000000` | 512 KiB | the ROM, whose functions ESP-IDF's libraries call | read, execute |
+| 23 | `BOOT_CAP_RNG` | `0x600B2808` | 8 bytes | LPPERI's RNG_DATA, the random number generator, whose entropy comes from the radio while it runs | read |
+| 24 | `BOOT_CAP_IO_MUX` | `0x60090000` | 4 KiB | the IO MUX, the pins' functions and pads | read, write |
+| 25 | `BOOT_CAP_GPIO` | `0x60091000` | 4 KiB | the GPIO matrix, the pins' routes, levels and interrupts | read, write |
 
-None is a bus master: the modem's two MACs, Wi-Fi's from `0x600A4000` and 802.15.4's at `0x600A3000`, are not listed,
-nor are PCR, PMU and the LP domain.
+The modem's two MACs, Wi-Fi's from `0x600A4000` and 802.15.4's at `0x600A3000`, are bus masters, and nothing confines them:
+a program that holds the modem's frame reaches all RAM, the kernel's too,
+so the root task gives it only to a driver it trusts as it trusts itself; see `DESIGN.md`, open decision 13.
+PCR, PMU and the LP domain are not listed.
 The kernel takes the SAR ADC out of the reset the ROM leaves it in and turns its clocks on.
+It also powers the radio's analog I2C buses and sets the power detector's capacitance, in the PMU and LP_AON,
+as ESP-IDF's PHY library would;
+a PHY driver leaves out its own writes there, as `user/wifi/esp32c6/phy.c` does.
+The pins are as the ROM leaves them, for a program to set as its board wires them.
+On the XIAO ESP32-C6, GPIO3 low powers the RF switch between the chip and its two antennas,
+and GPIO14 picks the antenna on the board, low, or the U.FL connector, high, as the Wi-Fi system's root task sets them.
+The flash's pins, GPIO24 to GPIO30, are in the IO MUX too, so a program that holds it can cut the window onto flash off.
 The modem's clocks are off, in MODEM_SYSCON and MODEM_LPCON, for a driver to turn on.
 The window onto flash shows 1 MiB of the flash from `0x210000`, which the usual partition table gives to a file system;
 `esptool write-flash 0x210000 <image>` puts a program there, and nothing else in rvuos writes the flash.
@@ -157,8 +167,10 @@ Whenever another process has run, a program finds the counter as it left it, hav
 so the ROM's `ets_delay_us`, which counts on it, waits at least as long as asked;
 and the rest set back: `utvec` at 1, the others at zero.
 A new process finds the counter stopped at zero, counting nothing.
-No interrupt is delegated to user mode,
-and the dedicated GPIO reaches no pad, since no process is granted the GPIO matrix.
+No interrupt is delegated to user mode.
+The dedicated GPIO reaches a pad only through the GPIO matrix, `BOOT_CAP_GPIO`,
+and a pad routed to it is every process's, each driving it in its turns;
+the Wi-Fi system's root task routes none.
 
 #### RP2350
 
