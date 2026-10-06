@@ -106,11 +106,24 @@ void sched_wait(struct thread *t, struct notification *ntfn)
     t->state = THREAD_WAITING;
 }
 
-/* Take a waiting thread off its notification's ring. */
-static void unwait(struct thread *t)
+/* Take a thread waiting on a notification off its ring. */
+static void notify_unwait(struct thread *t)
 {
     ring_remove(&((struct notification *)p2v(t->waiting_on))->waiters, t);
     t->waiting_on = 0;
+}
+
+static void mutex_unwait(struct mutex *m, struct thread *t);
+
+/* Take a waiting thread off its notification's ring, or its mutex's. */
+static void unwait(struct thread *t)
+{
+    struct obj_header *o = p2v(t->waiting_on);
+    if (o->type == CAP_MUTEX) {
+        mutex_unwait((struct mutex *)o, t);
+    } else {
+        notify_unwait(t);
+    }
 }
 
 /*
@@ -123,15 +136,25 @@ static paddr_t *queue_head(struct core *core, uint8_t queue)
     return queue == QUEUE_RUN ? &core->run_queue : queue == QUEUE_SPARE ? &core->spare_queue : &core->spent_queue;
 }
 
-/* Whether it is the thread's turn: a thread has one only on the core it runs on. */
+/*
+ * Whether it is the thread's turn, or its account pays for the turn of a thread that runs on lent time:
+ * a thread has either only on the core it runs on.
+ */
 static bool is_turn(const struct thread *t)
 {
-    return cores[t->core].turn == t;
+    const struct core *core = &cores[t->core];
+    return core->turn == t || core->payer == t;
+}
+
+/* The thread a core's turn is charged to: the one that lends the turn's thread its time, or the turn's own. */
+static struct thread *turn_payer(const struct core *core)
+{
+    return core->payer != NULL ? core->payer : core->turn;
 }
 
 /*
- * The count a thread's account is counted to: its core's while it is that core's turn, which the core charges it for,
- * and the machine's otherwise.
+ * The count a thread's account is counted to: its core's while it is that core's turn or pays for it,
+ * which the core charges it for, and the machine's otherwise.
  */
 static uint32_t count_of(const struct thread *t)
 {
@@ -146,8 +169,8 @@ static uint32_t account_now(const struct thread *t)
     return balance > cap ? cap : (uint32_t)balance;
 }
 
-/* Bring a thread's account up to the count. */
-static void account_refill(struct thread *t)
+/* Bring a thread's account up to the count; inline, since every switch calls it and clang stopped inlining it alone. */
+static inline void account_refill(struct thread *t)
 {
     t->balance = account_now(t);
     t->stamp = count_of(t);
@@ -185,7 +208,7 @@ static uint32_t account_after(uint32_t balance, uint32_t units, uint32_t ticks)
 }
 
 /*
- * What the thread whose turn it is owes for its turn up to offset counts into the tick:
+ * What the turn's payer owes for the turn up to offset counts into the tick:
  * a count's parts for each count from turn_from, if it had time as the turn began, and nothing on spare time.
  * A turn with time began with a tick in the account and owes at most the rest of the tick, so the account covers it.
  */
@@ -193,19 +216,19 @@ static uint32_t turn_owes(uint32_t offset)
 {
     const struct core *core = core_self();
     uint32_t from = core->turn_from;
-    return offset > from && has_time(core->turn->balance) ? COUNT_PARTS * (offset - from) : 0;
+    return offset > from && has_time(turn_payer(core)->balance) ? COUNT_PARTS * (offset - from) : 0;
 }
 
-/* The account of the thread whose turn it is at the next tick: it pays for the rest of this one and earns the gain. */
+/* The account of the turn's payer at the next tick: it pays for the rest of this one and earns the gain. */
 static uint32_t turn_next(void)
 {
-    struct thread *turn = core_self()->turn;
-    uint32_t next = turn->balance - turn_owes(timer_tick_counts()) + tick_gain(turn);
-    return next < account_cap(turn) ? next : account_cap(turn);
+    struct thread *payer = turn_payer(core_self());
+    uint32_t next = payer->balance - turn_owes(timer_tick_counts()) + tick_gain(payer);
+    return next < account_cap(payer) ? next : account_cap(payer);
 }
 
 /*
- * The ticks from the count to the one that drains the account of the thread whose turn it is, which has time:
+ * The ticks from the count to the one that drains the account of the turn's payer, which has time:
  * the first to leave it less than a tick; NEAREST_NONE for none, with the whole processor.
  * After the next tick every tick costs the account a tick less the gain.
  */
@@ -215,23 +238,68 @@ static uint32_t turn_drain(void)
     if (!has_time(next)) {
         return 1;
     }
-    uint32_t loss = tick_parts() - tick_gain(core_self()->turn);
+    uint32_t loss = tick_parts() - tick_gain(turn_payer(core_self()));
     return loss != 0 ? (next - tick_parts()) / loss + 2 : NEAREST_NONE;
 }
 
-/* The queue a thread waits on, as its state, its turn, its account at balance and its binding now say. */
-static uint8_t thread_queue(const struct thread *t, uint32_t balance)
+/* Whether a mutex lends its holder time: its oldest waiter lends. */
+static bool mutex_lends(const struct mutex *m)
+{
+    return m->waiters != 0 && (((const struct thread *)p2v(m->waiters))->flags & THREAD_LENDS) != 0;
+}
+
+/*
+ * The thread whose time a holder runs on while it has none of its own:
+ * the oldest waiter of the first mutex it holds, if that one lends and waits on the holder's core, else NULL.
+ * The mutexes whose oldest waiter lends come first on the holder's ring, so the first says whether any does.
+ * One step: the lender lends its own account, not what it may borrow itself.
+ */
+static struct thread *thread_lender(const struct thread *t)
+{
+    if (t->held == 0) {
+        return NULL;
+    }
+    const struct mutex *m = p2v(t->held);
+    if (!mutex_lends(m)) {
+        return NULL;
+    }
+    struct thread *l = p2v(m->waiters);
+    return l->core == t->core ? l : NULL;
+}
+
+/* The holder a waiting thread lends its time to, the inverse of thread_lender, or NULL. */
+static struct thread *thread_borrower(const struct thread *l)
+{
+    /* Only a thread waiting on a mutex lends. */
+    if (!(l->flags & THREAD_LENDS)) {
+        return NULL;
+    }
+    const struct mutex *m = p2v(l->waiting_on);
+    if (m->waiters != v2p(l) || m->holder == 0) {
+        return NULL;
+    }
+    struct thread *h = p2v(m->holder);
+    return h->held == v2p(m) && h->core == l->core ? h : NULL;
+}
+
+/*
+ * The queue a thread waits on, as its state, its turn, its account at balance, its lender's and its binding now say:
+ * a thread with time of its own or lent has the run queue,
+ * and one whose own units or its lender's will give it time again the spent queue, unless it may run on spare time.
+ * The lender is thread_lender's, which the caller looked up only if the thread has no time of its own.
+ */
+static uint8_t thread_queue(const struct thread *t, uint32_t balance, const struct thread *l)
 {
     if (t->state != THREAD_READY || is_turn(t) || t->time.type != CAP_BOUND) {
         return QUEUE_NONE;
     }
-    if (has_time(balance)) {
+    if (has_time(balance) || (l != NULL && has_time(account_now(l)))) {
         return QUEUE_RUN;
     }
     if (thread_spare(t)) {
         return QUEUE_SPARE;
     }
-    return thread_units(t) != 0 ? QUEUE_SPENT : QUEUE_NONE;
+    return thread_units(t) != 0 || (l != NULL && thread_units(l) != 0) ? QUEUE_SPENT : QUEUE_NONE;
 }
 
 /*
@@ -239,7 +307,8 @@ static uint8_t thread_queue(const struct thread *t, uint32_t balance)
  * or take it off the one it was on.
  * A thread that is no core's turn runs on the core its units lie on, from its next turn,
  * so one bound to units of another core during its turn moves there as the turn ends.
- * A thread with units that waits without time brings its core's release forward to the tick its account reaches a tick.
+ * A thread that waits without time, with units or a lender with units,
+ * brings its core's release forward to the tick its account, or its lender's, reaches a tick.
  * Another core is told of a thread that joins one of its queues, of a release it brought forward,
  * and of any change to the thread whose turn it has, which may end the turn sooner.
  */
@@ -252,7 +321,8 @@ static void thread_settle(struct thread *t)
         t->core = (uint8_t)unit_core(t->time.a);
     }
     struct core *core = &cores[t->core];
-    uint8_t queue = thread_queue(t, t->balance);
+    const struct thread *l = has_time(t->balance) ? NULL : thread_lender(t);
+    uint8_t queue = thread_queue(t, t->balance, l);
     bool joined = queue != QUEUE_NONE && (queue != t->queue || core != was);
     if (queue != t->queue || core != was) {
         if (t->queue != QUEUE_NONE) {
@@ -263,13 +333,37 @@ static void thread_settle(struct thread *t)
         }
         t->queue = queue;
     }
-    bool sooner = (queue == QUEUE_SPARE || queue == QUEUE_SPENT) && thread_units(t) != 0 &&
-                  tick_before(sched_ticks + account_fill(t, t->balance), core->nearest_release);
+    /* Neither account holds a tick there, or the thread would have the run queue. */
+    uint32_t fill = NEAREST_NONE;
+    if (queue == QUEUE_SPARE || queue == QUEUE_SPENT) {
+        if (thread_units(t) != 0) {
+            fill = account_fill(t, t->balance);
+        }
+        if (l != NULL && thread_units(l) != 0 && account_fill(l, account_now(l)) < fill) {
+            fill = account_fill(l, account_now(l));
+        }
+    }
+    bool sooner = fill != NEAREST_NONE && tick_before(sched_ticks + fill, core->nearest_release);
     if (sooner) {
-        core->nearest_release = sched_ticks + account_fill(t, t->balance);
+        core->nearest_release = sched_ticks + fill;
     }
     if (joined || sooner || is_turn(t)) {
         core_notify(core);
+    }
+}
+
+/*
+ * Settle a thread whose units or account changed other than by a turn, and the holder it lends its time to,
+ * whose queue that account decides too.
+ * A lender waits, so its holder lends nothing on in turn, and settling it is one step.
+ * A thread that becomes ready, or whose turn ends, lends nothing, and its holder's turn its caller settles.
+ */
+static void lender_settle(struct thread *t)
+{
+    thread_settle(t);
+    struct thread *h = thread_borrower(t);
+    if (h != NULL) {
+        thread_settle(h);
     }
 }
 
@@ -279,21 +373,34 @@ static uint32_t clock_offset(void)
     return debug_trace ? 0 : timer_offset();
 }
 
-/* The turn ends where the counter is: charge its thread, if any, and return how far into the tick that is. */
+/* The turn ends where the counter is: charge its payer, if any, and return how far into the tick that is. */
 static uint32_t turn_close(void)
 {
     uint32_t offset = clock_offset();
-    struct thread *turn = core_self()->turn;
-    if (turn != NULL) {
-        turn->balance -= turn_owes(offset);
+    struct thread *payer = turn_payer(core_self());
+    if (payer != NULL) {
+        payer->balance -= turn_owes(offset);
     }
     return offset;
+}
+
+/* The turn's payer pays no more, the turn being over: it goes to the queue it now waits on, if it is ready. */
+static void payer_drop(void)
+{
+    struct core *core = core_self();
+    struct thread *payer = core->payer;
+    core->payer = NULL;
+    if (payer != NULL) {
+        thread_settle(payer);
+    }
 }
 
 /*
  * The oldest thread with time, or with none the oldest that may run on spare time,
  * taken off its queue with its account brought up to the count: its turn begins offset counts into the tick,
- * and every count of it is charged to it from there. NULL when neither queue has one.
+ * and every count of it is charged to it from there,
+ * or to its lender while it has no time and its lender has, which pays for the turn from then on.
+ * NULL when neither queue has one.
  */
 static struct thread *next_turn(uint32_t offset)
 {
@@ -307,6 +414,11 @@ static struct thread *next_turn(uint32_t offset)
     ring_remove(head, t);
     t->queue = QUEUE_NONE;
     account_refill(t);
+    struct thread *l = has_time(t->balance) ? NULL : thread_lender(t);
+    if (l != NULL && has_time(account_now(l))) {
+        core->payer = l;
+        account_refill(l);
+    }
     return t;
 }
 
@@ -331,7 +443,7 @@ void sched_bind(struct thread *t, uint32_t first, uint32_t count, uint8_t rights
     }
     /* What the account held stays, and settling holds it to what the new units hold at most. */
     t->balance = kept;
-    thread_settle(t);
+    lender_settle(t);
 }
 
 void sched_unbind(struct cap *bound)
@@ -343,7 +455,7 @@ void sched_unbind(struct cap *bound)
     }
     *bound = (struct cap){ 0 };
     /* A thread without units holds nothing, so settling empties its account as it takes the thread off its queue. */
-    thread_settle(t);
+    lender_settle(t);
 }
 
 /*
@@ -392,7 +504,7 @@ void sched_accounts_fill(void)
         if (t != NULL) {
             t->balance = account_cap(t);
             t->stamp = count_of(t);
-            thread_settle(t);
+            lender_settle(t);
         }
     }
 }
@@ -414,6 +526,11 @@ static void release(uint32_t c)
         if (t != NULL && (t->queue == QUEUE_SPARE || t->queue == QUEUE_SPENT)) {
             thread_settle(t);
         }
+        /* A lender waits on no queue, and its account may give the holder it lends to time. */
+        struct thread *h = t != NULL ? thread_borrower(t) : NULL;
+        if (h != NULL && (h->queue == QUEUE_SPARE || h->queue == QUEUE_SPENT)) {
+            thread_settle(h);
+        }
     }
 }
 
@@ -432,7 +549,7 @@ void sched_start(struct thread *t)
  */
 static void wake(struct thread *t, uint32_t bits)
 {
-    unwait(t);
+    notify_unwait(t);
     t->frame.regs[REG_A0] = KERR_OK;
     t->frame.regs[REG_A1] = bits;
     sched_ready(t);
@@ -446,6 +563,160 @@ void sched_signal(struct notification *ntfn, uint32_t bits)
         wake(p2v(ntfn->waiters), ntfn->bits);
         ntfn->bits = 0;
     }
+}
+
+static void switch_to(struct thread *next);
+
+/*
+ * A holder's mutexes are a ring through their held_next and held_prev, headed by the thread's held, oldest first:
+ * those whose oldest waiter lends come first, then the others,
+ * so a mutex joins at the front while it lends and at the back while it does not, and moves as that changes.
+ */
+static void held_push(struct thread *t, struct mutex *m, bool first)
+{
+    paddr_t self = v2p(m);
+    if (t->held == 0) {
+        m->held_next = m->held_prev = self;
+        t->held = self;
+        return;
+    }
+    struct mutex *head = p2v(t->held);
+    struct mutex *last = p2v(head->held_prev);
+    m->held_next = t->held;
+    m->held_prev = head->held_prev;
+    last->held_next = self;
+    head->held_prev = self;
+    if (first) {
+        t->held = self;
+    }
+}
+
+static void held_remove(struct thread *t, struct mutex *m)
+{
+    if (m->held_next == v2p(m)) {
+        t->held = 0;
+    } else {
+        ((struct mutex *)p2v(m->held_prev))->held_next = m->held_next;
+        ((struct mutex *)p2v(m->held_next))->held_prev = m->held_prev;
+        if (t->held == v2p(m)) {
+            t->held = m->held_next;
+        }
+    }
+    m->held_next = m->held_prev = 0;
+}
+
+/*
+ * A held mutex's oldest waiter changed, and whether it lent was: the mutex moves to the front of its holder's ring
+ * if it lends now, or to the back if it no longer does, and the holder settles, whose lender may be another.
+ */
+static void mutex_waiters_changed(struct mutex *m, bool was)
+{
+    struct thread *h = p2v(m->holder);
+    bool lends = mutex_lends(m);
+    if (lends != was) {
+        held_remove(h, m);
+        held_push(h, m, lends);
+    }
+    thread_settle(h);
+}
+
+/* Take a waiting thread off its mutex's waiters; it lends nothing more. */
+static void mutex_unwait(struct mutex *m, struct thread *t)
+{
+    bool was = mutex_lends(m);
+    bool oldest = m->waiters == v2p(t);
+    ring_remove(&m->waiters, t);
+    t->waiting_on = 0;
+    t->flags &= (uint8_t)~THREAD_LENDS;
+    if (oldest && m->holder != 0) {
+        mutex_waiters_changed(m, was);
+    }
+}
+
+/*
+ * Its holder gives a mutex back: the oldest waiter takes it, its call to return KERR_OK,
+ * and is returned, still WAITING for the caller to make ready; NULL when nobody waited and the mutex is free.
+ * The holder settles, whose lender may be another, or none.
+ */
+static struct thread *mutex_give(struct mutex *m)
+{
+    struct thread *h = p2v(m->holder);
+    bool lent = mutex_lends(m);
+    held_remove(h, m);
+    m->holder = 0;
+    struct thread *w = NULL;
+    if (m->waiters != 0) {
+        w = p2v(m->waiters);
+        ring_remove(&m->waiters, w);
+        w->waiting_on = 0;
+        w->flags &= (uint8_t)~THREAD_LENDS;
+        w->frame.regs[REG_A0] = KERR_OK;
+        m->holder = v2p(w);
+        held_push(w, m, mutex_lends(m));
+    }
+    /* Only a mutex that lent was the one its holder borrowed from, the first. */
+    if (lent) {
+        thread_settle(h);
+    }
+    return w;
+}
+
+bool sched_mutex_lock(struct thread *t, struct mutex *m, bool lend)
+{
+    if (m->holder == 0) {
+        m->holder = v2p(t);
+        held_push(t, m, false);
+        return true;
+    }
+    bool was = mutex_lends(m);
+    ring_push(&m->waiters, t);
+    t->waiting_on = v2p(&m->hdr);
+    t->state = THREAD_WAITING;
+    if (lend) {
+        t->flags |= THREAD_LENDS;
+    }
+    if (m->waiters == v2p(t)) {
+        mutex_waiters_changed(m, was);
+    }
+    /*
+     * A waiter whose turn its own time pays for, and that now lends to a holder waiting for a turn on its core,
+     * hands it the rest of the turn, which it goes on paying for: the turn neither ends nor is charged here.
+     */
+    struct core *core = core_self();
+    struct thread *h = p2v(m->holder);
+    if (lend && core->payer == NULL && has_time(t->balance) && thread_lender(h) == t && h->queue != QUEUE_NONE) {
+        ring_remove(queue_head(core, h->queue), h);
+        h->queue = QUEUE_NONE;
+        core->turn = h;
+        core->payer = t;
+        account_refill(h);
+        switch_to(h);
+    }
+    return false;
+}
+
+void sched_mutex_unlock(struct mutex *m)
+{
+    struct core *core = core_self();
+    struct thread *w = mutex_give(m);
+    if (w == NULL) {
+        return;
+    }
+    if (core->payer != w) {
+        sched_ready(w);
+        return;
+    }
+    /*
+     * The turn was its time, and it may run now: it has the rest of the turn, from where it was charged,
+     * and the holder goes to the back of its queue, as at a tick.
+     */
+    struct thread *was = core->turn;
+    w->state = THREAD_READY;
+    core->payer = NULL;
+    core->turn = w;
+    thread_settle(was);
+    thread_settle(w);
+    switch_to(w);
 }
 
 /* Only an armed Irq signals, and an Irq without a notification is never armed. */
@@ -481,20 +752,24 @@ void irq_drop(struct cap *signalled)
 static void tick_advance(uint32_t ticks)
 {
     struct core *core = core_self();
-    struct thread *turn = core->turn;
+    struct thread *payer = turn_payer(core);
     uint32_t owed = sched_ticks + ticks - core->ticks;
     core->wake_stale = true;
     if (owed != 0) {
-        if (turn != NULL) {
-            account_refill(turn);
-            turn->balance = turn_next();
+        if (payer != NULL) {
+            account_refill(payer);
+            payer->balance = turn_next();
             if (owed > 1) {
-                turn->balance = account_after(turn->balance, thread_units(turn), owed - 1);
+                payer->balance = account_after(payer->balance, thread_units(payer), owed - 1);
             }
-            turn->stamp += owed;
+            payer->stamp += owed;
         }
         core->turn_from = 0;
         core->ticks += owed;
+        /* A turn on lent time costs its thread nothing, and it earns its units as every tick earns them. */
+        if (core->payer != NULL) {
+            account_refill(core->turn);
+        }
     }
     sched_ticks += ticks;
     for (uint32_t c = 0; c < CORES; c++) {
@@ -549,6 +824,10 @@ uint32_t sched_wake_ticks(void)
     }
     if (turn == NULL) {
         return wake;
+    }
+    /* Each tick decides afresh who pays for a turn on lent time, and whether it has any. */
+    if (core->payer != NULL) {
+        return 1;
     }
     /* A thread bound to another core's units during its turn here goes there as the next tick ends the turn. */
     if (core->run_queue != 0 || (turn->time.type == CAP_BOUND && unit_core(turn->time.a) != core_index())) {
@@ -618,7 +897,7 @@ bool sched_forget(struct obj_header *o, bool preempt)
         while (ntfn->waiters != 0) {
             LOOP_PAID(sched_forget, waiter, "a thread that waited, by a call of its own");
             struct thread *t = p2v(ntfn->waiters);
-            unwait(t);
+            notify_unwait(t);
             t->frame.regs[REG_A0] = KERR_INVALID_CAP;
             t->frame.regs[REG_A1] = 0;
             sched_ready(t);
@@ -628,14 +907,60 @@ bool sched_forget(struct obj_header *o, bool preempt)
         }
         break;
     }
+    case CAP_MUTEX: {
+        struct mutex *m = (struct mutex *)o;
+        /* Its holder holds it no more, and its waiters wake as a notification's do, holding nothing. */
+        if (m->holder != 0) {
+            struct thread *h = p2v(m->holder);
+            held_remove(h, m);
+            m->holder = 0;
+            thread_settle(h);
+        }
+        while (m->waiters != 0) {
+            LOOP_PAID(sched_forget, waiter, "a thread that waited, by a call of its own");
+            struct thread *t = p2v(m->waiters);
+            unwait(t);
+            t->frame.regs[REG_A0] = KERR_INVALID_CAP;
+            t->frame.regs[REG_A1] = 0;
+            sched_ready(t);
+            if (m->waiters != 0 && cap_stop_here(preempt)) {
+                return false;
+            }
+        }
+        break;
+    }
     case CAP_IRQ:
         /* It was disarmed and its line masked as its notification was cleared; the line is free again. */
         line_irq[((struct irq *)o)->line] = 0;
         break;
-    case CAP_THREAD:
-        /* It lost its process before, and so stopped; a core that ran it may not have looked since. */
-        core_thread_gone((struct thread *)o);
+    case CAP_THREAD: {
+        struct thread *t = (struct thread *)o;
+        /* What it holds goes to the oldest waiter, as its unlock would give it, or is free. */
+        while (t->held != 0) {
+            LOOP_PAID(sched_forget, hold, "a mutex it took, by a call of its own");
+            struct thread *w = mutex_give(p2v(t->held));
+            if (w != NULL) {
+                sched_ready(w);
+            }
+            if (t->held != 0 && cap_stop_here(preempt)) {
+                return false;
+            }
+        }
+        /*
+         * It lost its process before, and so stopped; a core that ran it may not have looked since,
+         * and the turn there was its, so whoever paid for it pays no more and waits on its queue.
+         */
+        for (uint32_t c = 0; c < CORES; c++) {
+            LOOP_BOUND(CORES);
+            struct thread *payer = cores[c].payer;
+            if (cores[c].turn == t && payer != NULL) {
+                cores[c].payer = NULL;
+                thread_settle(payer);
+            }
+        }
+        core_thread_gone(t);
         break;
+    }
     default:
         break;
     }
@@ -764,7 +1089,9 @@ void sched_idle(void)
 
 void sched_run_next(void)
 {
-    core_self()->turn = next_turn(turn_close());
+    uint32_t offset = turn_close();
+    payer_drop();
+    core_self()->turn = next_turn(offset);
     run_turn();
 }
 
@@ -779,6 +1106,7 @@ static void turn_end(void)
     uint32_t offset = turn_close();
     struct thread *was = core->turn;
     core->turn = NULL;
+    payer_drop();
     if (was != NULL) {
         thread_settle(was);
     }

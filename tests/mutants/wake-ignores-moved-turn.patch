@@ -7,8 +7,8 @@ Report: the timer lets the tick pass that moves the turn's thread to its core
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -521,7 +521,7 @@ uint32_t sched_wake_ticks(void)
-         return wake;
+@@ -831,7 +831,7 @@ uint32_t sched_wake_ticks(void)
+         return 1;
      }
      /* A thread bound to another core's units during its turn here goes there as the next tick ends the turn. */
 -    if (core->run_queue != 0 || (turn->time.type == CAP_BOUND && unit_core(turn->time.a) != core_index())) {

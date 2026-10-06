@@ -1,0 +1,17 @@
+An unlock that hands the turn to the thread that paid for it, which pays for it still.
+A turn's payer is the turn's own thread.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a turn's payer is not another thread of its core
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -713,7 +713,6 @@ void sched_mutex_unlock(struct mutex *m)
+      */
+     struct thread *was = core->turn;
+     w->state = THREAD_READY;
+-    core->payer = NULL;
+     core->turn = w;
+     thread_settle(was);
+     thread_settle(w);

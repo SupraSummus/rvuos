@@ -31,6 +31,7 @@ Contents:
     - [5.9 Interrupts](manual/programming-model.md#59-interrupts)
     - [5.10 The kernel log](manual/programming-model.md#510-the-kernel-log)
     - [5.11 Scheduling](manual/programming-model.md#511-scheduling)
+    - [5.12 Mutexes](manual/programming-model.md#512-mutexes)
 6. [System call reference](manual/system-calls.md#6-system-call-reference)
     - [6.1 Invocation ABI](manual/system-calls.md#61-invocation-abi)
     - [6.2 Status codes](manual/system-calls.md#62-status-codes)
@@ -45,7 +46,8 @@ Contents:
     - [6.11 Operations on `Irq`](manual/system-calls.md#611-operations-on-irq)
     - [6.12 Operations on `Clock`](manual/system-calls.md#612-operations-on-clock)
     - [6.13 Operations on `Time`](manual/system-calls.md#613-operations-on-time)
-    - [6.14 Operation codes in numeric order](manual/system-calls.md#614-operation-codes-in-numeric-order)
+    - [6.14 Operations on `Mutex`](manual/system-calls.md#614-operations-on-mutex)
+    - [6.15 Operation codes in numeric order](manual/system-calls.md#615-operation-codes-in-numeric-order)
 7. [What the root task starts with](manual/system-calls.md#7-what-the-root-task-starts-with)
 8. [Writing a program](manual/writing-programs.md#8-writing-a-program)
     - [8.1 Toolchain and layout](manual/writing-programs.md#81-toolchain-and-layout)
@@ -147,10 +149,12 @@ What rvuos is not:
   and on what its creator hands it:
   a program counter, a stack pointer, installed regions and filled slots.
   There is no executable format, no header and no runtime library.
-- **Notifications as the only blocking primitive.**
+- **Notifications to block on, and a mutex that lends time.**
   A notification is a word of sticky bits.
   Data moves through shared memory; the notification says when,
   and orders it: what a signaller stored, the thread whose wait returns its bits sees.
+  A mutex is held by one thread and handed to its waiters in turn,
+  and a waiter may lend the holder its time, so a holder with little time does not keep it waiting long.
 - **A fault stops a thread, not the machine.**
   A thread that faults stops where it faulted, and a notification its creator chose hears it;
   resumed, it runs the faulting instruction again.

@@ -8,11 +8,11 @@ Report: runnable thread waits on something
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -81,7 +81,6 @@ void sched_wait(struct thread *t, struct notification *ntfn)
- static void unwait(struct thread *t)
+@@ -110,7 +110,6 @@ void sched_wait(struct thread *t, struct notification *ntfn)
+ static void notify_unwait(struct thread *t)
  {
      ring_remove(&((struct notification *)p2v(t->waiting_on))->waiters, t);
 -    t->waiting_on = 0;
  }
  
- /*
+ static void mutex_unwait(struct mutex *m, struct thread *t);

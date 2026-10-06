@@ -1,0 +1,18 @@
+A destroy that leaves threads waiting on a mutex it took away.
+The thread waits on an object that is no longer live.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: thread waits on something that is neither a notification nor a mutex
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -917,7 +917,7 @@ bool sched_forget(struct obj_header *o, bool preempt)
+             m->holder = 0;
+             thread_settle(h);
+         }
+-        while (m->waiters != 0) {
++        while (m->waiters != 0 && o->type != CAP_MUTEX) {
+             LOOP_PAID(sched_forget, waiter, "a thread that waited, by a call of its own");
+             struct thread *t = p2v(m->waiters);
+             unwait(t);

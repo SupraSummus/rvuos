@@ -33,7 +33,7 @@ enum arg_kind {
     ARG_BITS,
     ARG_LINE,
     ARG_DELAY,        /* microseconds */
-    ARG_FLAGS,        /* OP_IRQ_SET's */
+    ARG_FLAGS,        /* OP_IRQ_SET's and OP_MUTEX_LOCK's */
     ARG_STEPS,        /* OP_DEBUG_PREEMPT's */
     ARG_ADDRESS,      /* of a load or a store */
 };
@@ -105,11 +105,13 @@ static const struct op_info op_table[OP_COUNT] = {
     OP(OP_THREAD_WRITE_REG, CAP_THREAD, 0, ARG_OFFSET, ARG_WORD, ARG_NONE),
     OP(OP_NOTIFY_CARVE, CAP_NOTIFICATION, CAP_NOTIFICATION, ARG_BITS, ARG_DST, ARG_NONE),
     OP(OP_CLOCK_WATCHDOG, CAP_CLOCK, 0, ARG_DELAY, ARG_NONE, ARG_NONE),
+    OP(OP_MUTEX_LOCK, CAP_MUTEX, 0, ARG_FLAGS, ARG_NONE, ARG_NONE),
+    OP(OP_MUTEX_UNLOCK, CAP_MUTEX, 0, ARG_NONE, ARG_NONE, ARG_NONE),
 };
 
 #undef OP
 
-_Static_assert(OP_COUNT == 38 && OP_CLOCK_WATCHDOG == OP_COUNT - 1, "a new operation needs an entry in op_table");
+_Static_assert(OP_COUNT == 40 && OP_MUTEX_UNLOCK == OP_COUNT - 1, "a new operation needs an entry in op_table");
 
 /* The loads and stores the driver makes itself, which invoke no capability. */
 static const struct op_info op_access[2] = {

@@ -126,6 +126,7 @@ Programs are encouraged to keep the same convention.
 | `Process` | `CAP_PROCESS` | a capability to its table, region slots, a PMP image | `OP_POOL_ALLOC` |
 | `Thread` | `CAP_THREAD` | a register frame and a state | `OP_POOL_ALLOC` |
 | `Notification` | `CAP_NOTIFICATION` | one word of sticky bits | `OP_POOL_ALLOC` |
+| `Mutex` | `CAP_MUTEX` | its holder and its waiters | `OP_POOL_ALLOC` |
 | `IrqLine` | `CAP_IRQ_LINE` | none: the slot holds the first line and a count | boot, `OP_IRQ_CARVE` |
 | `Irq` | `CAP_IRQ` | one line bound to a notification, with a deadline on a timer line | `OP_IRQ_BIND` |
 | `Time` | `CAP_TIME` | none: the slot holds the first unit and a count | boot, `OP_TIME_CARVE` |
@@ -368,6 +369,7 @@ and a lock or a ring buffer in shared memory is userspace's to build,
 as `lib/lock.h` and `lib/ring.h` do, section 8.4;
 what userspace cannot build is "stop me until someone says otherwise",
 and a notification is exactly that.
+A lock the kernel knows the holder of is a mutex, section 5.12.
 
 A round trip is therefore four system calls:
 signal, wait on one side; wait, signal on the other.
@@ -638,6 +640,8 @@ and moves `taken` only as far as its host says it has the bytes, so a halt write
   and for its account to reach a tick if not.
   A thread that becomes ready, whether resumed, woken, bound or preempted,
   joins the back of its queue.
+- A thread waiting on a mutex with `MUTEX_LEND` lends the holder its account, section 5.12:
+  a holder without time waits on the run queue while its lender has time, and the turns it takes so cost the lender's account.
 - The machine timer ticks at `TIMER_HZ`, 1 kHz on both boards.
   A tick ends the running thread's turn:
   the thread goes to the back of its queue,
@@ -689,3 +693,31 @@ rv_invoke(OP_CAP_DERIVE, CHILD_TABLE, CHILD_TIME, TIME, RIGHT_W);
 The child binds its threads through `CHILD_TIME` with `OP_TIME_BIND`;
 `TIME` itself keeps `RIGHT_X`, so a bind through it would give spare time too.
 Revoking below `TIME` takes the child's units back, and its threads stop.
+
+### 5.12 Mutexes
+
+A mutex is held by one thread at a time.
+`OP_MUTEX_LOCK` takes it, at once if it is free, and otherwise waits behind the threads already waiting;
+`OP_MUTEX_UNLOCK` gives it back to the thread that waited longest, which holds it as its call returns.
+Only the holder gives it back, and it may not take it twice: both are refused with `KERR_STATE`.
+Each is a system call even when nobody else wants the mutex, where `lib/lock.h` makes none, section 8.4;
+what a mutex has is the kernel's knowledge of who holds it.
+
+So a holder that gives it back and wants it again waits behind the others,
+and a waiter may lend the holder its time:
+with `MUTEX_LEND`, a holder without time of its own, section 5.11, runs on the waiter's account while it waits,
+the waiter hands it the rest of its turn at once, and the unlock hands the turn back with the mutex.
+A holder with few units then keeps a waiter with many no longer than its work takes.
+
+```c
+rv_invoke(OP_POOL_ALLOC, POOL, CAP_MUTEX, MUTEX, 0);
+/* in each thread that shares it */
+rv_mutex_lock(MUTEX, MUTEX_LEND);
+/* ... the work the mutex guards ... */
+rv_mutex_unlock(MUTEX);
+```
+
+The time goes one step, from the oldest waiter of the first mutex the holder holds, and only within a core.
+A holder that faults keeps what it holds, stopped;
+one destroyed gives each mutex to its oldest waiter, which is not told.
+A mutex keeps nobody from the memory it guards: that is the regions' work.

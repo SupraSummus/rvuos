@@ -1,0 +1,18 @@
+A tick that charges the thread running on lent time rather than the thread that lends it.
+The payer's account is no longer counted to the core's count.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a tick did not cost the thread whose turn it was a tick less its units
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -753,7 +753,7 @@ void irq_drop(struct cap *signalled)
+ static void tick_advance(uint32_t ticks)
+ {
+     struct core *core = core_self();
+-    struct thread *payer = turn_payer(core);
++    struct thread *payer = core->turn;
+     uint32_t owed = sched_ticks + ticks - core->ticks;
+     core->wake_stale = true;
+     if (owed != 0) {

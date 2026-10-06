@@ -1,0 +1,19 @@
+A holder that runs on lent time is queued as if it had only its own.
+A thread waits on another queue than its lender's account says.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a thread waits on another queue than its account says
+Report: the release is for a tick already past
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -293,7 +293,7 @@ static uint8_t thread_queue(const struct thread *t, uint32_t balance, const stru
+     if (t->state != THREAD_READY || is_turn(t) || t->time.type != CAP_BOUND) {
+         return QUEUE_NONE;
+     }
+-    if (has_time(balance) || (l != NULL && has_time(account_now(l)))) {
++    if (has_time(balance)) {
+         return QUEUE_RUN;
+     }
+     if (thread_spare(t)) {

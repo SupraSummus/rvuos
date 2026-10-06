@@ -55,7 +55,7 @@ ENTRIES = {"trap_vectors"}
 # each cut, and the variable every call to it must be guarded by.
 CUTS = {"selfcheck_run": "debug_trace"}
 # What a paid loop may take away, as host/work.c counts it.
-PAID_UNITS = {"node", "link", "object", "waiter"}
+PAID_UNITS = {"node", "link", "object", "waiter", "hold"}
 
 BRANCH = re.compile(r"^b(eq|ne|lt|ge|ltu|geu|eqz|nez|lez|gez|ltz|gtz|gt|le|gtu|leu)$")
 LOAD = re.compile(r"^(c\.)?l[bhw]u?$")

@@ -1,0 +1,18 @@
+A release that gives a lender time but leaves the holder it lends to where it waited.
+The holder waits on another queue than its lender's account says.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a thread waits on another queue than its account says
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -527,7 +527,7 @@ static void release(uint32_t c)
+             thread_settle(t);
+         }
+         /* A lender waits on no queue, and its account may give the holder it lends to time. */
+-        struct thread *h = t != NULL ? thread_borrower(t) : NULL;
++        struct thread *h = NULL;
+         if (h != NULL && (h->queue == QUEUE_SPARE || h->queue == QUEUE_SPENT)) {
+             thread_settle(h);
+         }

@@ -697,7 +697,11 @@ void host_units(unsigned out[UNITS])
         if (o->type == CAP_THREAD && ((struct thread *)o)->state == THREAD_WAITING) {
             out[UNIT_WAITER]++;
         }
+        if (o->type == CAP_MUTEX && ((struct mutex *)o)->holder != 0) {
+            out[UNIT_HOLD]++;
+        }
     }
+    out[UNIT_HOLD] += out[UNIT_WAITER];
 }
 
 static bool mapped_with(const struct process *proc, uint32_t base, uint32_t size, uint8_t rights)

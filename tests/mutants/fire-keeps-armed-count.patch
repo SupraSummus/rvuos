@@ -8,7 +8,7 @@ Report: the count of armed sources is wrong
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -223,7 +223,7 @@ void sched_signal(struct notification *ntfn, uint32_t bits)
+@@ -724,7 +724,7 @@ void sched_mutex_unlock(struct mutex *m)
  void irq_signal(struct irq *irq)
  {
      uint32_t bits = irq->bits;

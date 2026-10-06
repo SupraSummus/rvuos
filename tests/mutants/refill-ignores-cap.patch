@@ -8,7 +8,7 @@ Report: thread's account holds more than its cap
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -130,8 +130,7 @@ static uint32_t count_of(const struct thread *t)
+@@ -165,8 +165,7 @@ static uint32_t count_of(const struct thread *t)
  static uint32_t account_now(const struct thread *t)
  {
      uint64_t balance = t->balance + (uint64_t)(count_of(t) - t->stamp) * tick_gain(t);
@@ -17,4 +17,4 @@ diff --git a/kernel/sched.c b/kernel/sched.c
 +    return (uint32_t)balance;
  }
  
- /* Bring a thread's account up to the count. */
+ /* Bring a thread's account up to the count; inline, since every switch calls it and clang stopped inlining it alone. */

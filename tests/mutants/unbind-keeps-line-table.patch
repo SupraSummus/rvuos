@@ -8,11 +8,11 @@ Report: line table names an irq that is gone
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -600,7 +600,6 @@ bool sched_forget(struct obj_header *o, bool preempt)
+@@ -932,7 +932,6 @@ bool sched_forget(struct obj_header *o, bool preempt)
      }
      case CAP_IRQ:
          /* It was disarmed and its line masked as its notification was cleared; the line is free again. */
 -        line_irq[((struct irq *)o)->line] = 0;
          break;
-     case CAP_THREAD:
-         /* It lost its process before, and so stopped; a core that ran it may not have looked since. */
+     case CAP_THREAD: {
+         struct thread *t = (struct thread *)o;

@@ -1,0 +1,18 @@
+A thread taken off a mutex's waiters as off a notification's.
+It goes on lending though it waits on nothing, and its holder keeps its place.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a thread that waits on no mutex lends
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -119,7 +119,7 @@ static void mutex_unwait(struct mutex *m, struct thread *t);
+ static void unwait(struct thread *t)
+ {
+     struct obj_header *o = p2v(t->waiting_on);
+-    if (o->type == CAP_MUTEX) {
++    if (o->type == CAP_MUTEX && 0) {
+         mutex_unwait((struct mutex *)o, t);
+     } else {
+         notify_unwait(t);

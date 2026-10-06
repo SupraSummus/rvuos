@@ -55,6 +55,7 @@
 #define CAP_IRQ      10 /* one line bound to a notification; signals it when the line fires */
 #define CAP_CLOCK    11 /* the machine's time, the counter's frame, and its watchdog */
 #define CAP_TIME     12 /* a range of the processor's units of time; no kernel object behind it */
+#define CAP_MUTEX    13 /* held by one thread at a time, whose waiters may lend it their time */
 
 /*
  * Rights bits.
@@ -69,6 +70,7 @@
  * IrqLine: RIGHT_W to bind a line.
  * Irq: RIGHT_W to set or mask.
  * Time: RIGHT_W to bind a thread, RIGHT_X to let the threads bound through it run on spare time.
+ * Mutex: RIGHT_W to take and give back.
  * Debug: RIGHT_W to write into the kernel's log,
  *   RIGHT_X to halt the machine or drive it as a test does: trace, tick, interrupt, preempt;
  *   a child that only prints holds it with RIGHT_W alone.
@@ -263,7 +265,7 @@
  *   CAP_PROCESS   the slot of the CapTable capability the process will use,
  *                 which needs RIGHT_W; the table may lie in any pool,
  *   CAP_THREAD    the slot of the Process capability the thread will run in,
- *   CAP_NOTIFICATION  unused.
+ *   CAP_NOTIFICATION, CAP_MUTEX  unused.
  * The object's capability is a child of the invoked Pool capability in the derivation tree,
  * so revoking below that capability takes it.
  * Fails with KERR_STATE while the pool is being destroyed.
@@ -496,8 +498,33 @@
  */
 #define OP_TIME_BIND 29
 
+/*
+ * Mutex (RIGHT_W): take it. a1 = flags, MUTEX_LEND or none; any other bit fails with KERR_INVALID_ARG.
+ * Returns once the caller holds it, at once if nobody did.
+ * While another thread holds it the caller waits, behind the threads already waiting there,
+ * and an unlock hands it to the one that waited longest, which then holds it as its call returns.
+ * Fails with KERR_STATE when the caller holds it already.
+ * A waiter whose mutex is destroyed wakes with KERR_INVALID_CAP, holding nothing.
+ * With MUTEX_LEND the caller lends the holder its time while it waits:
+ * a holder without time runs on the account of the oldest waiter of the first mutex it holds,
+ * if that one lends and runs on the holder's core,
+ * and a caller that has time hands the rest of its turn to a holder waiting for its turn.
+ * The time goes one step, to the holder, never on to whatever the holder waits for.
+ * See DESIGN.md, "Communication and synchronisation".
+ */
+#define OP_MUTEX_LOCK 38
+#define MUTEX_LEND 0x1
+/*
+ * Mutex (RIGHT_W): give it back. Fails with KERR_STATE unless the caller holds it.
+ * The thread that waited longest takes it and wakes;
+ * if the caller's turn was paid by that thread's time, the rest of the turn is that thread's,
+ * and the caller goes to the back of its queue.
+ * A mutex whose holder is destroyed is given back so, as by an unlock.
+ */
+#define OP_MUTEX_UNLOCK 39
+
 /* One above the highest operation code; the fuzzer's mutator draws below it. */
-#define OP_COUNT 38
+#define OP_COUNT 40
 
 /*
  * Capability slots the kernel fills in the root task's table at boot.
