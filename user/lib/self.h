@@ -10,7 +10,7 @@
  *
  * Nothing in user/lib/ keeps a global: every function works on what it is handed,
  * so the library serves a root task and its children alike, which run the same code but not with the same data;
- * the Makefile's no-globals check holds it to that.
+ * the link's no-globals check, see user/build.mk, holds it to that.
  *
  * A call that fails returns the kernel's status, or KERR_LIMIT when what it hands out has run out,
  * and leaves the step that failed in what, for the caller to report.

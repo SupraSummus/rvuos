@@ -52,7 +52,7 @@ unsigned pmp_entry_count;
 unsigned pmp_entry_end;
 uint32_t pmp_grain;
 
-/* The simulated core's grain. QEMU has 4; the Makefile also builds RP2350's Hazard3, with 32. */
+/* The simulated core's grain. QEMU has 4; host/build.mk also builds RP2350's Hazard3, with 32. */
 #ifndef PMP_GRAIN
 #define PMP_GRAIN 4
 #endif

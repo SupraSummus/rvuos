@@ -2,7 +2,7 @@
  * The harness: libphy.a and its glue in one block of RAM, code, data and stack together,
  * which the ROM loads as one flat image; see phytrace.h.
  * Symbols the library takes from the ROM come from ESP-IDF's ROM linker scripts,
- * which the Makefile passes after this one.
+ * which build.mk beside this file passes after this one.
  */
 
 #include "phytrace.h"

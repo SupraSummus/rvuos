@@ -332,7 +332,7 @@ where the network process takes an address by DHCP and answers ping and UDP port
 `debug=frames,stats,wpa`, `lib=`, `ax=0`, `pmf=0`, `sae=0` and `ps=1` have the driver tell more or join otherwise,
 as `user/wifi/esp32c6/root.c` says, and a thread of the driver's that faults is told with its stack, its functions named.
 A program of several processes lies in a directory of its own, `user/<program>/`, its root task in `root.c`,
-and the Makefile's `PROGRAMS` links each with the library.
+and `PROGRAMS` in `user/build.mk` links each with the library.
 `user/wifi/NOTES.md` says what writing it was like, before the library and after.
 
 ## 9. Debugging and testing interfaces

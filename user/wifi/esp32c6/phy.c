@@ -90,7 +90,7 @@ static uint32_t enabled;
 
 /*
  * libphy.a's functions that also reach PCR, the PMU or the LP domain, which stay the kernel's:
- * the Makefile weakens the library's in a copy, so these take their place.
+ * build.mk beside this file weakens the library's in a copy, so these take their place.
  * Each does the library's work in the driver's frames and leaves out the rest,
  * which the kernel's board_init has set as the library would.
  */
