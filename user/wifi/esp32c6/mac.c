@@ -315,11 +315,11 @@ void mac_rx_give_back(void)
  * The libraries' lmacSetTxFrame and lmacTxFrame, read in their code and held against a run of debug=tx,
  * build a three-word descriptor of the frame, program the slot's PPDU words, and tell the slot to send;
  * the driver does the same, with the MAC's registers as hal_mac_tx.o names them.
- * It does not finish the frame: the libraries' interrupt reads the MAC's finished queue and clears it,
- * and their lmac_stop_hw_txq waits on that queue's state,
- * so mac_tx leaves the state of the queue it uses at zero and the libraries to end the frame.
- * The slot is the libraries' own, and with tx=own nothing else sends, so the driver may use it,
- * with the libraries' interrupt rather than the driver's own; see mac.h.
+ * The frame's completion is the driver's too: the MAC leaves a bit in a hardware txq's state when it has taken the slot,
+ * and the driver clears it as the libraries' lmacProcessTxComplete does, which lets the slot's arm bits clear;
+ * the libraries' interrupt may finish the frame instead, the driver and their pp treading the same state harmlessly.
+ * It clears the queue's own state byte to zero, which the libraries' lmac_stop_hw_txq reads, so that their way out
+ * leaves the slot alone; and with tx=own nothing else sends, so the driver may use the slot.
  */
 
 /* The slot's words, less for each slot, in hal_mac_tx.o's two blocks: the queue's, then the PPDU's. */
@@ -339,6 +339,33 @@ void mac_rx_give_back(void)
 #define TX_PLCP0_DMA    0x000fffffu
 #define TX_PLCP0_FORMAT 0x00600000u
 #define TX_PLCP0_ARM    0xc0000000u
+
+/*
+ * The MAC's hardware txq state, which its completion clears; hal_mac_tx.o's hal_mac_get_txq_state and
+ * hal_mac_clr_txq_state read and clear them: groups 0 and 1 in one word, group 2 in another,
+ * a group 0 or 1 bit cleared by a write of its own, a group 2 bit by a read, an or and a write.
+ */
+#define TXQ_STATE01 (MAC_BASE + 0xcb0u)
+#define TXQ_STATE2  (MAC_BASE + 0xcb8u)
+#define TXQ_CLR01   (MAC_BASE + 0xcacu)
+#define TXQ_CLR2    (MAC_BASE + 0xcb4u)
+
+/* The completion of the driver's own slot: the MAC sets a bit in a hardware txq's state when a slot's frame is done,
+ * and this clears it, as the libraries' lmacProcessTxComplete clears the bit of the queue it finds, which lets the
+ * slot's arm bits clear and the frame leave. */
+static void finish(uint32_t s)
+{
+    uint32_t st01 = rd(TXQ_STATE01), st2 = rd(TXQ_STATE2);
+    if (st01 & (1u << s)) {
+        wr(TXQ_CLR01, 1u << s);
+    }
+    if (st01 & (1u << (16u + s))) {
+        wr(TXQ_CLR01, 1u << (16u + s));
+    }
+    if (st2 & (1u << s)) {
+        wr(TXQ_CLR2, rd(TXQ_CLR2) | (1u << s));
+    }
+}
 
 /* CONF1's access class and lifetime, and the rest of a legacy frame at one Mbit, as a run's first probe left them. */
 #define TX_AIFSN       2u
@@ -381,9 +408,6 @@ const char *mac_tx(const uint8_t *frame, uint32_t len)
     if (len < 2u || len > TX_MAX) {
         return "the frame's length";
     }
-    if (rx.taken) {
-        return "the driver's own receiving holds the interrupt";
-    }
     if (tx == 0) {
         void *p = osi_malloc(sizeof(struct tx) + 16u);
         if (p == 0) {
@@ -417,16 +441,22 @@ const char *mac_tx(const uint8_t *frame, uint32_t len)
     __asm__ volatile("fence" : : : "memory");
     wr(TX_PLCP0(s), rd(TX_PLCP0(s)) | TX_PLCP0_ARM);
 
-    /* The MAC clears the arm bits once the frame is done; the driver reads no result beyond that. */
+    /*
+     * The MAC clears the arm bits once the frame is done; the driver reads no result beyond that,
+     * clearing the hw txq state the completion leaves for as long as the arm bits say the frame is not done.
+     * The bit is cleared once more after, the completion of a frame the libraries' interrupt ended among them.
+     */
     for (uint32_t spins = 0; spins < TX_DONE_SPINS; spins++) {
         if (!(rd(TX_PLCP0(s)) & TX_PLCP0_ARM)) {
             break;
         }
+        finish(s);
     }
     if (rd(TX_PLCP0(s)) & TX_PLCP0_ARM) {
         wr(TX_PLCP0(s), rd(TX_PLCP0(s)) & ~TX_PLCP0_ARM); /* the slot is left as it was found */
         return "the MAC did not finish the frame";
     }
+    finish(s);
     return 0;
 }
 

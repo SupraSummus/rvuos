@@ -9,7 +9,8 @@
  * so that each frame goes to heard, in the interrupt's thread, and none to the libraries;
  * mac_rx_give_back stops the MAC receiving and gives the libraries their interrupt back, before they stop.
  * It sends too: mac_tx builds a frame's descriptor, programs a slot the libraries' lmac uses and arms it,
- * and the libraries' interrupt finishes the frame; see mac.c.
+ * and finishes it, clearing the hardware txq state its completion leaves, so that it needs no interrupt of theirs;
+ * see mac.c.
  */
 
 #include <stdint.h>
@@ -40,8 +41,9 @@ void mac_channel(uint32_t channel);
 /*
  * A frame sent by the driver's own code; 0, or the step that failed.
  * The frame is the 802.11 frame without its checksum, which the MAC appends.
- * The driver programs a slot the libraries' lmac uses and arms it, and does not finish the frame;
- * their interrupt does, and their lmac_stop_hw_txq waits on the queue's state, so not with own_rx. See mac.c.
+ * The driver programs a slot the libraries' lmac uses and arms it, and finishes the frame itself,
+ * clearing the hardware txq state its completion leaves, which lets the slot's arm bits clear;
+ * it works with the libraries' interrupt or the driver's own. See mac.c.
  */
 const char *mac_tx(const uint8_t *frame, uint32_t len);
 

@@ -694,7 +694,6 @@ static __attribute__((noreturn)) void listen(struct drv *d)
     must(d, "promiscuous", esp_wifi_set_promiscuous(true));
     must(d, "the channel", esp_wifi_set_channel(d->listen, 0));
     if (d->own_rx) {
-        must(d, "a probe, with rx=own", d->probe[0] ? ESP_FAIL : ESP_OK);
         const char *failed = mac_rx_take(heard);
         must(d, failed ? failed : "the MAC receives into the driver's list", failed ? ESP_FAIL : ESP_OK);
     }

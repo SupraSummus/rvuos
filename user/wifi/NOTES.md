@@ -460,12 +460,11 @@ which `make beacon-test` runs on the host, under the sanitizers, against every c
 with `tx=own` the driver builds the frame's descriptor and programs the slot's PPDU words itself,
 as the libraries' `lmacSetTxFrame` does, and arms the slot, as their `hal_mac_txq_enable` does,
 for a legacy frame at one Mbit; a probe sent so is answered by the access point.
-Two things stayed with the libraries.
-The frame's completion: their interrupt reads the MAC's finished queue and clears it,
-and their `lmac_stop_hw_txq` waits on the queue's state, so the driver leaves that state idle before it sends.
-That is the libraries' `int: state=0 i=0` line too, one for each finished frame their handler finds,
-four of five probes in one run, and no fault beside it.
-And the queue itself: the driver programs a slot the libraries' lmac still names.
-Taking the interrupt instead, to finish the frame without them, left it unstarted:
-what the MAC wants past the arm, or whether their scheduler must run for a frame to leave, is not worked out.
-Until it is, `pp` and `net80211` stay, though the driver's own frame is the one that leaves.
+
+The completion is the driver's too. Arming alone left the frame unfinished when the driver held the interrupt,
+which `rx=own` does: the MAC's hardware txq sets a bit in its state when it has taken the slot,
+and the libraries' `lmacProcessTxComplete`, which their interrupt posts, is what cleared it, and the slot's arm bits with it.
+The driver clears that bit now, as `hal_mac_clr_txq_state` does, while it waits for the arm bits to clear,
+so a probe sent with both `rx=own` and `tx=own` is answered the same, and their interrupt is needed for neither.
+It still clears the queue's own state byte, which `lmac_stop_hw_txq` reads, to leave the slot alone,
+and reads no completion result; `pp` and `net80211` stay only for the station's own logic until that too is the driver's.

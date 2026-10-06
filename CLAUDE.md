@@ -64,7 +64,8 @@ and `tools/wifi-run.py` checks it from the host as it checks the Pico 2 W's, but
 A change to `user/wifi/esp32c6/mac.c` runs it again with `listen=` and `rx=own` in `WIFI_CONFIG`,
 which fails if the driver's own receiving hears nothing, again with `rx=own` alone, the driver's own scan,
 and again with `listen=`, `probe=` and `tx=own`, without `rx=own`, the driver's own sending,
-which fails if the access point answers none.
+which fails if the access point answers none; and with `listen=`, `probe=`, `rx=own` and `tx=own` together,
+which fails if the driver's own completion of the frame leaves it unfinished, the libraries' interrupt unsought.
 That run first runs `make sae-test`, WPA3's SAE on the host over the driver's `ec.c` and Mbed TLS,
 and `make beacon-test`, `beacon.c` over hostap's parser of elements,
 which `make check` leaves out, as it fetches nothing;
