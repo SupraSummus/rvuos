@@ -7,6 +7,12 @@
  * threads: a round trip between two threads of one process, four calls and two switches.
  * processes: the same between two processes, whose switches load the other's regions too.
  * channel: 64 bytes there and back through a channel of lib/chan.h between two children.
+ * mutex: a mutex taken and given back, nobody else wanting it, two calls.
+ * mutex-wait: a mutex another thread holds, waited for and handed over, ten calls and four switches,
+ * the holder waiting for a signal while it holds it, so that each round waits once,
+ * and for another before it takes it again, so that a tick between the two cannot leave both waiting.
+ * mutex-lend: the same with the waiter lending its time, which hands the holder the rest of its turn
+ * and has the turn back with the mutex, rather than taking the next turn and joining the queue.
  * contended-worst: the worst round of processes beside a third process that always wants the core,
  * over a tenth of a second; it waits for that process's turns, so the tick sets it.
  *
@@ -34,7 +40,8 @@ static struct self self;
 static struct kernel_log klog;
 static const struct out out = { log_write, (void *)BOOT_CAP_DEBUG };
 static uint8_t pong_stack[1024] __attribute__((aligned(16)));
-static uint32_t note, ping_note, pong_note;
+static uint8_t holder_stack[1024] __attribute__((aligned(16)));
+static uint32_t note, ping_note, pong_note, held_note, hold_note, done_note, mutex;
 static struct child pong;
 
 static void console_byte(char c)
@@ -111,6 +118,50 @@ static void round_thread(void)
     rv_wait(ping_note, &bits);
 }
 
+static void round_mutex(void)
+{
+    rv_mutex_lock(mutex, 0);
+    rv_mutex_unlock(mutex);
+}
+
+/*
+ * The other end of mutex-wait and mutex-lend: it holds the mutex until the waiter signals,
+ * and takes it again once the waiter is done with it.
+ */
+static void holder_thread(uint32_t arg)
+{
+    (void)arg;
+    for (;;) {
+        uint32_t bits;
+        rv_mutex_lock(mutex, 0);
+        rv_signal(held_note, 1);
+        rv_wait(hold_note, &bits);
+        rv_mutex_unlock(mutex);
+        rv_wait(done_note, &bits);
+    }
+}
+
+/* Once the holder holds the mutex, the waiter wakes it and waits for the mutex, which it gives back at once. */
+static void wait_for_holder(uint32_t flags)
+{
+    uint32_t bits;
+    rv_wait(held_note, &bits);
+    rv_signal(hold_note, 1);
+    rv_mutex_lock(mutex, flags);
+    rv_mutex_unlock(mutex);
+    rv_signal(done_note, 1);
+}
+
+static void round_mutex_wait(void)
+{
+    wait_for_holder(0);
+}
+
+static void round_mutex_lend(void)
+{
+    wait_for_holder(MUTEX_LEND);
+}
+
 static void round_process(void)
 {
     uint32_t bits;
@@ -163,6 +214,28 @@ int main(void)
     must("bind the units", rv_time_bind(time, thread, 0, UNITS));
     must("start the thread", rv_thread_resume(thread));
     measure("threads", round_thread);
+
+    must("a slot", slot_new(&self, &mutex));
+    must("a mutex", rv_pool_alloc(pool.made, CAP_MUTEX, mutex, 0));
+    must("a slot", slot_new(&self, &held_note));
+    must("a slot", slot_new(&self, &hold_note));
+    must("a notification", rv_pool_alloc(pool.made, CAP_NOTIFICATION, held_note, 0));
+    must("a notification", rv_pool_alloc(pool.made, CAP_NOTIFICATION, hold_note, 0));
+    must("a slot", slot_new(&self, &done_note));
+    must("a notification", rv_pool_alloc(pool.made, CAP_NOTIFICATION, done_note, 0));
+    measure("mutex", round_mutex);
+    uint32_t holder;
+    must("a slot", slot_new(&self, &holder));
+    must("a thread", rv_pool_alloc(pool.made, CAP_THREAD, holder, BOOT_CAP_PROCESS));
+    must("configure the thread", rv_thread_configure(holder, (uint32_t)(uintptr_t)holder_thread,
+                                                     (uint32_t)(uintptr_t)(holder_stack + sizeof(holder_stack)), 0));
+    must("units", units_take(&self, UNITS, &first));
+    must("a slot", slot_new(&self, &time));
+    must("carve the units", rv_time_carve(self.time, first, UNITS, time));
+    must("bind the units", rv_time_bind(time, holder, 0, UNITS));
+    must("start the thread", rv_thread_resume(holder));
+    measure("mutex-wait", round_mutex_wait);
+    measure("mutex-lend", round_mutex_lend);
 
     must("room for the children's data", self_room(&self, ROOM_SIZE));
     must("build pong", child_new(&self, &pong, "pong", CHILD_TABLE, CHILD_DATA));

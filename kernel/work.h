@@ -12,7 +12,8 @@
  * LOOP_PAID(name, unit, what)
  *                       each iteration takes away what, which an earlier call made,
  *                       counted as a unit: a node, a link (a node below another),
- *                       an object, or a waiter (a thread waiting).
+ *                       an object, a waiter (a thread waiting),
+ *                       or a hold (a mutex held, or a thread waiting).
  * LOOP_WALK(name)       a walk the table in DESIGN.md, "Bounded work", lists as name.
  * LOOP_ARG(fn, arg)     bounded by the argument arg of fn, the function it stands in,
  *                       so every call to fn says what bounds it, with a CALL_ annotation.

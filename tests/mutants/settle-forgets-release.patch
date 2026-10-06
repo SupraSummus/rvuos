@@ -3,16 +3,17 @@ The kernel would look for it too late, and the thread wait past the tick its acc
 a thread with units that waits without time reaches a tick no earlier than the release.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
+Report: a lender's account reaches a tick before the release
 Report: a thread's account reaches a tick before the release
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -254,7 +254,7 @@ static void thread_settle(struct thread *t)
-     bool sooner = (queue == QUEUE_SPARE || queue == QUEUE_SPENT) && thread_units(t) != 0 &&
-                   tick_before(sched_ticks + account_fill(t, t->balance), core->nearest_release);
+@@ -345,7 +345,7 @@ static void thread_settle(struct thread *t)
+     }
+     bool sooner = fill != NEAREST_NONE && tick_before(sched_ticks + fill, core->nearest_release);
      if (sooner) {
--        core->nearest_release = sched_ticks + account_fill(t, t->balance);
+-        core->nearest_release = sched_ticks + fill;
 +        (void)0;
      }
      if (joined || sooner || is_turn(t)) {

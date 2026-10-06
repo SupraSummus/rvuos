@@ -117,6 +117,10 @@ rather than left implicit in the code.
 Work items go to `TODO.md`,
 and leave it in the commit that finishes them;
 it holds no record of what was done.
+Numbers a run measured, the lab's, the bench's or a board's, go in the commit message,
+which keeps them with the change they belong to;
+a file says what they showed, which stays true longer.
+The records of `tests/bench/` are the exception, since `make bench` holds costs to them.
 
 `MANUAL.md` and its chapters in `manual/` are the user-facing description of the kernel:
 what it offers a program, the system call reference,

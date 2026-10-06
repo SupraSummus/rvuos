@@ -7,7 +7,8 @@
  *
  *   lab: <scenario> <member> n=<answers> median=<us> p90=<us> worst=<us>
  *
- * the median and p90 of the first LAB_SAMPLES answers and the worst of all; a locker's answers are its takes.
+ * the median and p90 of the first LAB_SAMPLES answers and the worst of all; a locker's answers are its takes,
+ * of the lock of lib/lock.h, or of the kernel's mutex, its waiters lending the holder their time or not.
  * Then it takes the cast down and checks that it got back what it handed out;
  * the run ends with "lab: done" and halt code 0.
  */
@@ -37,6 +38,9 @@
 
 enum role { NONE, STORE, GATE, UI, BULK, HOG, LOCKER };
 
+/* What lockers share: the lock of lib/lock.h, the kernel's mutex, or the mutex with MUTEX_LEND. */
+enum lock_kind { NOTE, MUTEX, LEND };
+
 static void (*const entries[])(struct child_page *) = {
     [STORE] = store_main, [GATE] = gate_main, [UI] = ui_main,
     [BULK] = bulk_main,   [HOG] = hog_main,   [LOCKER] = locker_main,
@@ -50,6 +54,7 @@ struct member {
     uint8_t units; /* of the first core; 0 for spare time alone */
     uint8_t asks;  /* the member it asks, counted from 1; 0 for nobody */
     uint8_t local;
+    uint8_t lock; /* a locker's lock_kind */
     uint32_t cost, period_us, gap;
 };
 
@@ -58,13 +63,15 @@ struct scenario {
     struct member cast[CAST_MAX]; /* up to the first without a role */
 };
 
-#define SERVER(name, role, units, asks)               { name, role, units, asks, 0, 0, 0, 0 }
-#define CLIENT(name, role, units, asks, cost, period) { name, role, units, asks, 0, cost, period, 0 }
-#define LIBRARY                                       { "ui", UI, 8, 0, 1, SMALL, PERIOD, 0 }
-#define SHARER(name, units, hold, period, gap)        { name, LOCKER, units, 0, 0, hold, period, gap }
-#define HOGGING                                       { "hog", HOG, HOG_UNITS, 0, 0, 0, 0, 0 }
+#define SERVER(name, role, units, asks)               { name, role, units, asks, 0, 0, 0, 0, 0 }
+#define CLIENT(name, role, units, asks, cost, period) { name, role, units, asks, 0, 0, cost, period, 0 }
+#define LIBRARY                                       { "ui", UI, 8, 0, 1, 0, SMALL, PERIOD, 0 }
+#define SHARER(name, kind, units, hold, period, gap)  { name, LOCKER, units, 0, 0, kind, hold, period, gap }
+#define HOGGING                                       { "hog", HOG, HOG_UNITS, 0, 0, 0, 0, 0, 0 }
 #define STORE_OF(units)                               SERVER("store", STORE, units, 0)
 #define UI_OF(units, asks)                            CLIENT("ui", UI, units, asks, SMALL, PERIOD)
+#define QUICK(kind)                                   SHARER("quick", kind, 16, SMALL, PERIOD, 0)
+#define SLOW(kind)                                    SHARER("slow", kind, 2, HOLD, 0, HOLD)
 
 static const struct scenario scenarios[] = {
     { "alone", { STORE_OF(8), UI_OF(8, 1) } },
@@ -78,8 +85,12 @@ static const struct scenario scenarios[] = {
     { "bulk-hog", { STORE_OF(8), UI_OF(8, 1), CLIENT("bulk", BULK, 8, 1, BIG, 0), HOGGING } },
     { "free-rider", { STORE_OF(8), UI_OF(8, 1), CLIENT("bulk", BULK, 0, 1, BIG, 0), HOGGING } },
     { "chain", { STORE_OF(8), SERVER("gate", GATE, 8, 1), UI_OF(8, 2), HOGGING } },
-    { "lock", { SHARER("quick", 16, SMALL, PERIOD, 0), SHARER("slow", 2, HOLD, 0, HOLD) } },
-    { "lock-hog", { SHARER("quick", 16, SMALL, PERIOD, 0), SHARER("slow", 2, HOLD, 0, HOLD), HOGGING } },
+    { "lock", { QUICK(NOTE), SLOW(NOTE) } },
+    { "lock-hog", { QUICK(NOTE), SLOW(NOTE), HOGGING } },
+    { "mutex", { QUICK(MUTEX), SLOW(MUTEX) } },
+    { "mutex-hog", { QUICK(MUTEX), SLOW(MUTEX), HOGGING } },
+    { "lend", { QUICK(LEND), SLOW(LEND) } },
+    { "lend-hog", { QUICK(LEND), SLOW(LEND), HOGGING } },
 };
 
 static struct self self;
@@ -177,10 +188,13 @@ static void report(const char *scenario, const char *member, const struct lab_st
         percentile(kept, 90) / per_us, st->worst / per_us);
 }
 
-/* The lock the lockers share: its word in a frame of its own, and a notification from a pool of its own. */
+/*
+ * The lock the lockers share: its word in a frame of its own, and a notification from a pool of its own,
+ * and the mutex they take instead, from that pool too.
+ */
 struct shared_lock {
     struct block frame, pool;
-    uint32_t note;
+    uint32_t note, mutex;
 };
 
 static void lock_new(struct shared_lock *l)
@@ -194,21 +208,29 @@ static void lock_new(struct shared_lock *l)
     must("make the lock's pool", mem_make(&self, &l->pool, CAP_POOL));
     must("a slot", slot_new(&self, &l->note));
     must("the lock's notification", rv_pool_alloc(l->pool.made, CAP_NOTIFICATION, l->note, 0));
+    must("a slot", slot_new(&self, &l->mutex));
+    must("the mutex", rv_pool_alloc(l->pool.made, CAP_MUTEX, l->mutex, 0));
 }
 
-static void lock_give_to(struct shared_lock *l, uint32_t i)
+static void lock_give_to(struct shared_lock *l, uint32_t i, uint8_t kind)
 {
+    struct lab_page *p = page_of(i);
+    if (kind != NOTE) {
+        must("give the mutex", child_give(&self, &kids[i], l->mutex, RIGHT_W, &p->mutex));
+        p->lend = kind == LEND ? MUTEX_LEND : 0;
+        return;
+    }
     uint32_t region;
     must("map the lock", child_map(&self, &kids[i], l->frame.made, RIGHT_R | RIGHT_W, &region));
-    page_of(i)->lock.word = l->frame.base;
-    must("give the lock's notification",
-         child_give(&self, &kids[i], l->note, RIGHT_R | RIGHT_W, &page_of(i)->lock.note));
+    p->lock.word = l->frame.base;
+    must("give the lock's notification", child_give(&self, &kids[i], l->note, RIGHT_R | RIGHT_W, &p->lock.note));
 }
 
 static void lock_free(struct shared_lock *l)
 {
     must("the lock's frame back", mem_give(&self, &l->frame));
     must("the lock's notification back", slot_free(&self, l->note));
+    must("the mutex back", slot_free(&self, l->mutex));
     must("the lock's pool back", mem_give(&self, &l->pool));
 }
 
@@ -247,7 +269,7 @@ static void run(const struct scenario *sc)
             if (lock.note == 0) {
                 lock_new(&lock);
             }
-            lock_give_to(&lock, i);
+            lock_give_to(&lock, i, sc->cast[i].lock);
         }
     }
     for (uint32_t i = 0; i < count; i++) {
@@ -260,8 +282,8 @@ static void run(const struct scenario *sc)
     set_phase(count, LAB_OVER);
     for (uint32_t i = 0; i < count; i++) {
         const struct member *m = &sc->cast[i];
-        /* The clients, and a locker that wants the lock in time; a locker in the background measures nothing of use. */
-        if (m->role == UI || m->role == BULK || (m->role == LOCKER && m->period_us != 0)) {
+        /* The clients, and the lockers: one that wants the lock in time, and one whose holds the other waits out. */
+        if (m->role == UI || m->role == BULK || m->role == LOCKER) {
             report(sc->name, m->name, &page_of(i)->st);
         }
     }

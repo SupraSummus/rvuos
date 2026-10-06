@@ -36,10 +36,15 @@ These are documented gaps, not surprises;
   `DESIGN.md`, open decision 23.
 - **No priorities and no yield.**
   Round-robin on a tick, threads with time before threads on spare time,
-  is the whole policy, and units promise their part of the processor and a turn within 64 ticks, no more;
+  is the whole policy, and units promise their part of the processor and a turn within 64 ticks, no more,
+  but for the time a mutex's waiter lends its holder;
   `DESIGN.md`, open decisions 9 and 10.
 - **No synchronous endpoints.**
   Shared memory and notifications carry everything; open decision 5.
+- **Lent time goes one step, on one core.**
+  A mutex's holder borrows from the oldest waiter of the first mutex it holds,
+  never through a holder that waits in turn, nor from a waiter of another core;
+  a client waiting on a server's notification lends nothing; open decision 27.
 - **One `Irq` per line**; open decision 11.
 - **Two cores at most**, on QEMU `virt`, mps2-an521 and RP2350;
   the first core takes every device interrupt, and a thread on spare time runs on its own core alone;

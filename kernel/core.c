@@ -172,6 +172,9 @@ void core_thread_gone(const struct thread *t)
         if (c->turn == t) {
             c->turn = NULL;
         }
+        if (c->payer == t) {
+            c->payer = NULL;
+        }
     }
 }
 

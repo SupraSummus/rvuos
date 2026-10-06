@@ -195,7 +195,7 @@ Each header says how its calls are used.
 | `lib/self.h` | what a process hands out of its own: slots, regions, bits of its inbox, timers, units of time, memory halved out of Untypeds, and room for its children's data |
 | `lib/child.h` | a child built, started, heard, checked and taken down by its parent, frames mapped into it and taken back, what it may build of its own, and the child's own calls: its log, its state, its answer, its sleep, its account of what it builds |
 | `lib/chan.h` | a channel between two children: a frame of two rings of packets, and a bit each way; and a hub, a server's channels to many clients |
-| `lib/lock.h` | a lock over memory several children share: a word taken with an atomic operation, and a notification to wait on while it is held |
+| `lib/lock.h` | a lock over memory several children share: a word taken with an atomic operation, and a notification to wait on while it is held; the kernel's mutex, section 5.12, is the one that knows its holder |
 | `lib/ring.h`, `lib/log.h` | the rings a channel is made of, and the kernel's log: written through `Debug`, and read as the root task reads it |
 | `lib/say.h`, `lib/libc.h` | text with values, and the memory functions the compiler calls |
 
@@ -385,7 +385,8 @@ The worst round beside a busy process waits for that process's turns, so the tic
 
 **The laboratory.**
 `make lab` boots `user/lab/`, a made-up system of servers and clients built from the library,
-and says, scenario by scenario, how long its clients' asks waited;
+and says, scenario by scenario, how long its clients' asks waited, or its lockers' takes,
+on the lock of `lib/lock.h`, on a mutex, and on a mutex whose waiters lend their time;
 `user/lab/NOTES.md` says what each scenario stands for and what it showed.
 
 **Replay input.**

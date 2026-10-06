@@ -8,14 +8,14 @@ Report: a thread waits on another queue than its account says
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -189,10 +189,7 @@ static uint8_t thread_queue(const struct thread *t, uint32_t balance)
-     if (has_time(balance)) {
+@@ -296,10 +296,7 @@ static uint8_t thread_queue(const struct thread *t, uint32_t balance, const stru
+     if (has_time(balance) || (l != NULL && has_time(account_now(l)))) {
          return QUEUE_RUN;
      }
 -    if (thread_spare(t)) {
 -        return QUEUE_SPARE;
 -    }
--    return thread_units(t) != 0 ? QUEUE_SPENT : QUEUE_NONE;
+-    return thread_units(t) != 0 || (l != NULL && thread_units(l) != 0) ? QUEUE_SPENT : QUEUE_NONE;
 +    return QUEUE_RUN;
  }
  

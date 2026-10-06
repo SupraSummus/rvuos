@@ -268,6 +268,18 @@ static inline uint32_t rv_wait(uint32_t ntfn_cap, uint32_t *bits)
     return r_a0;
 }
 
+/* OP_MUTEX_LOCK: take the mutex, waiting while another thread holds it; MUTEX_LEND lends it the caller's time meanwhile. */
+static inline uint32_t rv_mutex_lock(uint32_t mutex_cap, uint32_t flags)
+{
+    return rv_invoke(OP_MUTEX_LOCK, mutex_cap, flags, 0, 0);
+}
+
+/* OP_MUTEX_UNLOCK: give the mutex back, to the thread that waited longest. */
+static inline uint32_t rv_mutex_unlock(uint32_t mutex_cap)
+{
+    return rv_invoke(OP_MUTEX_UNLOCK, mutex_cap, 0, 0, 0);
+}
+
 /*
  * OP_IRQ_SET on a timer line: signal bits on the Irq's notification once us microseconds have passed,
  * no earlier and at the kernel's first tick after that. bits = 0 cancels.

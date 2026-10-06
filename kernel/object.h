@@ -172,7 +172,7 @@ struct process {
 enum {
     THREAD_STOPPED = 0, /* created, configured and not started, or stopped where it faulted */
     THREAD_READY,       /* running, or waiting for the processor */
-    THREAD_WAITING,     /* blocked on the notification in waiting_on */
+    THREAD_WAITING,     /* blocked on the notification or the mutex in waiting_on */
 };
 
 /*
@@ -189,6 +189,11 @@ enum {
  * A new thread's frame is zero, which is a cause too, so only this tells the two apart.
  */
 #define THREAD_FAULTED 0x2
+/*
+ * A thread waiting on a mutex that lends the holder its time while it waits, see OP_MUTEX_LOCK;
+ * set by the lock and cleared as the wait ends.
+ */
+#define THREAD_LENDS 0x4
 
 /* A thread holds its process as a process holds its table, so the two may lie in different pools. */
 struct thread {
@@ -197,10 +202,15 @@ struct thread {
     uint8_t flags;
     uint8_t queue;      /* the scheduler's queue it waits on, one of QUEUE_*, while READY and not running */
     uint8_t core;       /* the core it runs and waits on, that of its units; see thread_settle */
-    paddr_t waiting_on; /* the notification, while WAITING; 0 otherwise */
-    /* The notification's waiters while WAITING, the scheduler's queue while it waits on one. */
+    paddr_t waiting_on; /* the notification or the mutex, while WAITING; 0 otherwise */
+    /* The notification's or the mutex's waiters while WAITING, the scheduler's queue while it waits on one. */
     paddr_t queue_next;
     paddr_t queue_prev;
+    /*
+     * The mutexes it holds, a ring through their held_next and held_prev, 0 for none:
+     * those whose oldest waiter lends come first, so the first says whether any lends; see thread_lender.
+     */
+    paddr_t held;
     struct cap proc;    /* CAP_HOSTED, or CAP_NONE once the process is taken */
     struct cap time;    /* CAP_BOUND, or CAP_NONE while the thread is bound to no units */
     struct cap watch;   /* CAP_WATCHED, or CAP_NONE while nothing hears the thread's faults */
@@ -229,6 +239,23 @@ struct notification {
     struct obj_header hdr;
     uint32_t bits;
     paddr_t waiters;    /* the oldest waiting thread, 0 for none */
+};
+
+/*
+ * A mutex is held by one thread at a time, and its waiters wait for it in the order they came,
+ * a ring through their threads as a notification's are; an unlock hands it to the oldest.
+ * Its holder keeps it on a ring of its own, so that a holder's destroy gives back what it held
+ * and the holder finds a mutex whose waiters lend without a walk.
+ * It holds its holder by address, not by a node, since only the holder's own lock puts it there,
+ * and the destroy of either takes the other's link to it; see sched_forget.
+ * See DESIGN.md, "Communication and synchronisation".
+ */
+struct mutex {
+    struct obj_header hdr;
+    paddr_t holder;     /* the thread that holds it, 0 while it is free */
+    paddr_t waiters;    /* the oldest waiting thread, 0 for none */
+    paddr_t held_next;  /* the holder's ring of the mutexes it holds, while it is held */
+    paddr_t held_prev;
 };
 
 /*
@@ -273,8 +300,9 @@ _Static_assert(sizeof(struct pmp_image) == 4 + 5 * PMP_MAX_ENTRIES, "object layo
 _Static_assert(sizeof(struct process) ==
                    8 + 24 * (1 + PROCESS_REGION_SLOTS) + sizeof(struct pmp_image) + PROCESS_CSRS_SIZE,
                "object layout");
-_Static_assert(sizeof(struct thread) == 32 + 3 * sizeof(struct cap) + sizeof(struct trap_frame), "object layout");
+_Static_assert(sizeof(struct thread) == 36 + 3 * sizeof(struct cap) + sizeof(struct trap_frame), "object layout");
 _Static_assert(sizeof(struct notification) == 16, "object layout");
+_Static_assert(sizeof(struct mutex) == 24, "object layout");
 _Static_assert(sizeof(struct irq) == 20 + sizeof(struct cap), "object layout");
 
 /*
@@ -473,6 +501,8 @@ static inline size_t obj_size(const struct obj_header *obj)
         return sizeof(struct thread);
     case CAP_NOTIFICATION:
         return sizeof(struct notification);
+    case CAP_MUTEX:
+        return sizeof(struct mutex);
     case CAP_IRQ:
         return sizeof(struct irq);
     default:
@@ -677,6 +707,14 @@ struct core {
 
     /* The thread whose turn it is, the running one; NULL while none runs, and the core idles. */
     struct thread *turn;
+
+    /*
+     * The thread whose account pays for the turn while the turn's thread runs on lent time, NULL while it pays itself:
+     * a thread waiting on a mutex the turn's thread holds, of this core; see OP_MUTEX_LOCK.
+     * It is charged as the turn's thread would be, and counted to the core's count while it pays,
+     * and it pays until the turn ends, or takes the turn over with the mutex.
+     */
+    struct thread *payer;
 
     /*
      * The machine's tick the core has counted to, and charged its turn to:
@@ -986,14 +1024,30 @@ void sched_claim_interrupts(void);
 void sched_wait(struct thread *t, struct notification *ntfn);
 
 /*
+ * The running thread takes a mutex: at once while nobody holds it, true,
+ * else it waits behind the threads already waiting there, false, and lends the holder its time with lend.
+ * One that lends with time in its account hands the rest of its turn to the holder, if the holder waits for a turn;
+ * see OP_MUTEX_LOCK.
+ */
+bool sched_mutex_lock(struct thread *t, struct mutex *m, bool lend);
+
+/*
+ * The running thread gives back a mutex it holds: the oldest waiter takes it and wakes,
+ * and takes over the turn too if its time paid for it; see OP_MUTEX_UNLOCK.
+ */
+void sched_mutex_unlock(struct mutex *m);
+
+/*
  * Before an object of a pool that goes is zeroed, undo what it left in the rest of the kernel:
  * a notification wakes every thread waiting on it
  * with KERR_INVALID_CAP and no bits, because the object is gone,
+ * and so does a mutex, which its holder holds no more,
+ * a thread gives back every mutex it holds, as its unlock would,
  * and an Irq leaves its line, which is free again.
  * The nodes an object holds were cleared first:
  * a thread stopped as they were, and an Irq was disarmed and its line masked.
- * The waiters wake one step at a time, and with preempt the walk may stop between two:
- * false then, and the next call goes on with the ones still waiting.
+ * The waiters wake, and the mutexes go back, one step at a time, and with preempt the walk may stop between two:
+ * false then, and the next call goes on with the ones still waiting or held.
  */
 bool sched_forget(struct obj_header *o, bool preempt);
 

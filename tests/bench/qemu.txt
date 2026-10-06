@@ -1,7 +1,10 @@
 # A round of each measure of user/bench/ on qemu, in instructions; see tests/bench.py.
-call 420
+call 419
 signal-wait 815
-threads 3008
-processes 4165
-channel 4648
-contended-worst 1722900
+threads 3145
+mutex 851
+mutex-wait 7372
+mutex-lend 6680
+processes 4313
+channel 4785
+contended-worst 1723700

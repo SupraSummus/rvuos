@@ -8,11 +8,11 @@ Report: thread's account is stamped ahead of the count
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -479,7 +479,6 @@ static void tick_advance(uint32_t ticks)
-             turn->stamp += owed;
+@@ -766,7 +766,6 @@ static void tick_advance(uint32_t ticks)
+             payer->stamp += owed;
          }
          core->turn_from = 0;
 -        core->ticks += owed;
-     }
-     sched_ticks += ticks;
-     for (uint32_t c = 0; c < CORES; c++) {
+         /* A turn on lent time costs its thread nothing, and it earns its units as every tick earns them. */
+         if (core->payer != NULL) {
+             account_refill(core->turn);

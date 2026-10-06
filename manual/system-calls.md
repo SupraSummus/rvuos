@@ -232,6 +232,7 @@ it is destroyed by revoking below its Untyped, section 5.5.
 | `CAP_PROCESS` | slot of the `CapTable` capability the process will use, with `RIGHT_W` | the table may lie in any pool; the process's hold on it hangs below that capability |
 | `CAP_THREAD` | slot of the `Process` capability the thread will run in, with `RIGHT_W` | the process may lie in any pool; the thread's hold on it hangs below that capability; the thread starts stopped |
 | `CAP_NOTIFICATION` | unused | |
+| `CAP_MUTEX` | unused | the mutex starts free |
 
 Any other type is `KERR_INVALID_ARG`; `Irq` objects come from `OP_IRQ_BIND`.
 The new capability carries all rights and hangs below the invoked `KernelPool` capability.
@@ -441,7 +442,30 @@ it keeps its state and does not run until it is bound again, and its account is 
 A thread unbound or moved while it runs, the caller itself for one, finishes the turn it had:
 only a wait, the tick, a fault, section 5.6, or a revoke that takes its own process, section 6.4, takes the processor from it.
 
-### 6.14 Operation codes in numeric order
+### 6.14 Operations on `Mutex`
+
+Both operations need `RIGHT_W`; section 5.12.
+
+**`OP_MUTEX_LOCK` (38).**
+`a1` = flags, `MUTEX_LEND` (1) or none; any other bit is `KERR_INVALID_ARG`.
+Returns once the caller holds the mutex, at once if nobody did.
+While another thread holds it the caller waits, behind the threads already waiting there,
+and an unlock hands it to the one that waited longest, which holds it as its call returns `KERR_OK`.
+`KERR_STATE` if the caller holds it already.
+Returns `KERR_INVALID_CAP`, holding nothing, if the mutex's pool is destroyed while the thread waits.
+With `MUTEX_LEND` the caller lends the holder its time while it waits:
+a holder without time runs on the account of the oldest waiter of the first mutex it holds, if that one lends,
+and a caller whose own time pays for its turn hands the rest of the turn to the holder,
+if the holder waits for a turn; both only on the caller's core.
+
+**`OP_MUTEX_UNLOCK` (39).**
+`KERR_STATE` unless the caller holds the mutex.
+The thread that waited longest takes it and wakes;
+if that thread's time paid for the caller's turn, the rest of the turn is that thread's,
+and the caller goes to the back of its queue.
+A mutex whose holder is destroyed is given back as by an unlock.
+
+### 6.15 Operation codes in numeric order
 
 | Code | Operation | Type |
 |---|---|---|
@@ -481,8 +505,10 @@ only a wait, the tick, a fault, section 5.6, or a revoke that takes its own proc
 | 35 | `OP_THREAD_WRITE_REG` | `Thread` |
 | 36 | `OP_NOTIFY_CARVE` | `Notification` |
 | 37 | `OP_CLOCK_WATCHDOG` | `Clock` |
+| 38 | `OP_MUTEX_LOCK` | `Mutex` |
+| 39 | `OP_MUTEX_UNLOCK` | `Mutex` |
 
-`OP_COUNT` is 37, one above the highest code; 16 is unused.
+`OP_COUNT` is 40, one above the highest code; 16 is unused.
 
 ## 7. What the root task starts with
 

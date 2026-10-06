@@ -1,0 +1,18 @@
+An unbind that settles a waiting lender but not the holder it lends to.
+The holder keeps the queue the lender's old account gave it.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a thread waits on another queue than its account says
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -455,7 +455,7 @@ void sched_unbind(struct cap *bound)
+     }
+     *bound = (struct cap){ 0 };
+     /* A thread without units holds nothing, so settling empties its account as it takes the thread off its queue. */
+-    lender_settle(t);
++    thread_settle(t);
+ }
+ 
+ /*

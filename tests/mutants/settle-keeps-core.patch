@@ -7,7 +7,7 @@ Report: thread waits on another core than its units are of
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -236,9 +236,7 @@ static void thread_settle(struct thread *t)
+@@ -317,9 +317,7 @@ static void thread_settle(struct thread *t)
      core_self()->wake_stale = true;
      account_refill(t);
      struct core *was = &cores[t->core];
@@ -16,5 +16,5 @@ diff --git a/kernel/sched.c b/kernel/sched.c
 -    }
 +    (void)unit_core;
      struct core *core = &cores[t->core];
-     uint8_t queue = thread_queue(t, t->balance);
-     bool joined = queue != QUEUE_NONE && (queue != t->queue || core != was);
+     const struct thread *l = has_time(t->balance) ? NULL : thread_lender(t);
+     uint8_t queue = thread_queue(t, t->balance, l);

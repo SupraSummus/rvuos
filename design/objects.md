@@ -96,7 +96,8 @@ there is one counter and one watchdog on the machine.
 | `CapTable` | A process's capability table. Allocated from a pool. |
 | `Process` | A protection domain: a capability to its `CapTable`, a set of region slots, and its threads. |
 | `Thread` | An execution context inside a process: its registers, its state, and what its faults signal. |
-| `Notification` | A word of sticky signal bits. The only way a thread can stop and be started again. |
+| `Notification` | A word of sticky signal bits. The only way a thread can stop and be started again, but for a mutex. |
+| `Mutex` | Held by one thread at a time and handed to its waiters in the order they came, who may lend the holder their time. |
 | `IrqLine` | A range of interrupt lines: the log's and the controller's, or the timer lines. Bound one at a time into an `Irq`. |
 | `Irq` | One line bound to a notification. Signals it when the line fires. |
 | `Time` | A range of the processor's units of time. A thread runs only while bound to some, or to none with spare time. No object. |
@@ -224,9 +225,12 @@ so each may lie in any pool and outlive what it names:
 clearing the capability stops the thread or leaves its faults unheard, disarms the `Irq`,
 and leaves the process naming nothing;
 see "A process's table", "Threads", "Faults" and "Interrupts".
-A thread waiting on a notification inside a destroyed pool
+A thread waiting on a notification or a mutex inside a destroyed pool
 is woken with `KERR_INVALID_CAP` and no bits,
 because the wait can no longer be answered.
+A mutex and its holder name each other by address, as a notification and its waiters do,
+since only the holder's own lock puts it there,
+and the destroy of either takes the other's link to it; see "Communication and synchronisation".
 Nothing is allocated from a pool once its destroy has begun.
 
 A revoke below an Untyped refuses with `KERR_STATE`
@@ -538,6 +542,7 @@ Between threads on two cores a short spin is sound, but a holder the tick preemp
 So the one service userspace cannot build for itself
 is "stop running me until someone says otherwise",
 and a notification is that service and nothing else.
+The mutex below adds a second, "and give my time to whoever I wait for", which only a kernel that knows whom can give.
 Message registers, a reply capability good for one use,
 queues of senders and receivers, and capabilities inside messages
 are all mechanism an endpoint needs and this does not.
@@ -565,13 +570,30 @@ and the waiter's core takes it before the wait returns; see "Cores".
 So memory handed over by a notification needs no fence,
 and a kernel that ever signals without the lock still owes the release and the acquire.
 
-**Why no lock in the kernel.**
+**Exclusion needs no kernel.**
 The sticky bits do what a futex's comparison does:
 a give that lands between a taker's look at the word and its wait leaves a bit, and the wait returns at once,
-so a lock in shared memory, `user/lib/lock.h`, needs no call that compares a word in user memory.
-A lock object would not keep a holder from the memory either, which only the regions do,
-and it would need an owner, a rule for a holder that faults and one for priorities, open decision 9.
+so a lock in shared memory, `user/lib/lock.h`, needs no call that compares a word in user memory,
+and none at all while nobody else wants it.
 A notification alone is a lock too, a bit signalled once that takers wait for and givers signal, at two calls a hold.
+
+**A mutex, for what a lock in memory cannot do.**
+A lock in memory cannot tell the kernel who holds it,
+so a give wakes a taker without handing it the lock, and a taker that waits cannot give the holder its time.
+A `Mutex` is the experiment that does both, open decision 27.
+`OP_MUTEX_LOCK` takes it and `OP_MUTEX_UNLOCK` gives it back, a call each even when nobody else wants it,
+and an unlock hands it to the thread that waited longest.
+Like a lock in memory it keeps nobody from the memory, and a holder that faults keeps it, stopped.
+A holder keeps its mutexes on a ring, so that its destroy gives each to its oldest waiter, a paid step each;
+the waiter is not told.
+
+**A waiter may lend the holder its time.**
+A thread that locks with `MUTEX_LEND` lends the holder its account while it waits; "Scheduling" says how.
+The time goes one step, from the oldest waiter of the first mutex the holder holds, and only within a core:
+a holder keeps the mutexes whose oldest waiter lends first on its ring, so it finds its lender without a walk.
+Priority inheritance takes the most of every waiter, and goes on through a holder that waits in turn,
+walks that goal 4 rules out.
+A thread waiting on a notification lends nothing, so a client cannot lend its server time; open decisions 5 and 27.
 
 **A server with many clients** waits on one notification,
 not on many, because the bits are the clients.

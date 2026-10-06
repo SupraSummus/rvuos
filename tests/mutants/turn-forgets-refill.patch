@@ -8,11 +8,11 @@ Report: the ticks of a turn were not charged to its thread
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -289,7 +289,6 @@ static struct thread *next_turn(uint32_t offset)
+@@ -413,7 +413,6 @@ static struct thread *next_turn(uint32_t offset)
      struct thread *t = p2v(*head);
      ring_remove(head, t);
      t->queue = QUEUE_NONE;
 -    account_refill(t);
-     return t;
- }
- 
+     struct thread *l = has_time(t->balance) ? NULL : thread_lender(t);
+     if (l != NULL && has_time(account_now(l))) {
+         core->payer = l;

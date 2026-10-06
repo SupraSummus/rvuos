@@ -74,9 +74,10 @@ bool host_driver_alive(void);
 /*
  * What there is of each unit a paid loop counts in, over every object of every pool:
  * a node is a filled slot or a pool's own node, a link a node below another,
- * an object an object, and a waiter a thread waiting.
+ * an object an object, a waiter a thread waiting,
+ * and a hold a mutex held or a thread waiting, so that handing a mutex to its waiter takes one away.
  */
-enum { UNIT_NODE, UNIT_LINK, UNIT_OBJECT, UNIT_WAITER, UNITS };
+enum { UNIT_NODE, UNIT_LINK, UNIT_OBJECT, UNIT_WAITER, UNIT_HOLD, UNITS };
 void host_units(unsigned out[UNITS]);
 
 /*

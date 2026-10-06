@@ -96,20 +96,29 @@ made through a capability with the right to bind.
 A thread's process is a leaf too, and a thread without one is stopped.
 So is a thread's watch, set through a capability with the right to signal, and it signals some bit.
 A thread with a fault to tell is stopped, where it faulted.
-A waiting thread names a live notification and nothing else does,
-and a notification's queue holds exactly the threads waiting on it.
+A waiting thread names a live notification or mutex and nothing else does,
+and a notification's or a mutex's queue holds exactly the threads waiting on it.
+A thread lends its time only while it waits on a mutex.
 A ready thread but the running ones that may run waits on exactly one of the scheduler's queues and names it:
-the run queue while it has time, else the spare queue with spare time,
-else the spent queue if it has units;
+the run queue while it has time, or its lender has, else the spare queue with spare time,
+else the spent queue if it or its lender has units;
 every other thread names none and is linked into none,
 and the queues hold exactly the threads that name them.
 The queues a thread waits on are those of the core it names, the core its units are of.
-While a thread runs it is its core's turn, and a core whose turn it is runs that thread.
+While a thread runs it is its core's turn, and a core whose turn it is runs that thread;
+a turn's payer, while it has one, is another live thread of that core, and waits on no queue.
 The thread the kernel is running is one it could run:
 it is a live object and it is ready,
 though it may have lost its units during its turn, which it finishes.
 A preempted thread stays ready and joins its queue,
 so it runs again while it keeps its units or its spare time.
+
+**Mutexes.**
+A mutex is held by a live thread, which does not wait for it and finds it on its ring of the mutexes it holds,
+or it is free, on no ring, and nobody waits for it but while its pool's destroy wakes its waiters.
+A thread's ring holds live mutexes that name it, each linked back to the one before,
+those whose oldest waiter lends before those whose oldest waiter does not,
+and every mutex held lies on its holder's ring.
 
 **Units and accounts.**
 Each of every core's `TIME_UNITS` units names the one thread bound to it, or none,
@@ -117,11 +126,12 @@ and a thread's units are all of one core.
 Every account holds at most `ACCOUNT_TICKS` ticks' gain for each unit, and so nothing without units,
 and was last counted no later than the count;
 a thread has time exactly while its account holds a tick.
-The thread whose turn it is has its account counted up to the count its core reached,
-since every tick of its turn is charged to it as it passes,
+The thread whose turn it is, and the thread that pays for it, have their accounts counted up to the count their core reached,
+since every tick of the turn is charged to the payer as it passes and earns the turn's thread its units,
 and under tracing, where the clock is the tick count, it owes nothing from before the tick.
 A core counts no tick the machine did not, and the one a call runs on has counted every one.
 A thread with units that waits without time reaches a tick no earlier than its core's release,
+and so does the lender of a holder that waits for lent time,
 and every core's release lies ahead of the count.
 
 **Cores.**
@@ -159,7 +169,8 @@ and no further ahead than the longest delay a feed may name.
 The core that fed it last has its nearest deadline no later than the watchdog's.
 
 **The timer.**
-While a thread runs, every tick the timer lets pass would hand the processor back to it:
+While a thread runs on lent time the timer lets no tick pass,
+and while one runs on its own, every tick the timer lets pass would hand the processor back to it:
 nobody is on the run queue, and it has time,
 or may run on spare time with nobody on the spare queue,
 and none of those ticks is the release, the core's nearest deadline,
@@ -228,9 +239,14 @@ whatever other threads do between its steps.
 
 **A tick charges.**
 Under tracing, where the clock is the tick count,
-a tick costs the thread whose turn it is a whole tick while its account holds one,
+a tick costs the thread the turn is charged to, its payer while it runs on lent time, a whole tick while its account holds one,
 and earns it its units, as every tick does;
 a call that moves no time costs it nothing.
+
+**A mutex is taken or handed over.**
+A thread comes to hold a mutex only by its own lock, through a capability to it,
+or as the thread that waited on it longest, which an unlock or its holder's destroy hands it to;
+a mutex a call built is free.
 
 **A move keeps a node's place.**
 A move that succeeds leaves its source empty
@@ -240,7 +256,7 @@ and above the same children, in their order.
 The tree's shape alone does not say so:
 a copy beside the source and a delete of it leave a whole tree too.
 
-These seven relate the state before a call to the state after it,
+These eight relate the state before a call to the state after it,
 so the self-check, which sees one state, cannot check them.
 `host/history.c` checks them around every call of the host build, the untraced prologue's too,
 and around every fault, which must change no more than a call that moves no time,

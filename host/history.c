@@ -1,7 +1,7 @@
 /*
  * The properties "Authority only flows", "A call is as good as its capability", "Memory crosses zeroed",
- * "The caller keeps what it runs on", "A dying pool only gives back", "A tick charges"
- * and "A move keeps a node's place" of DESIGN.md,
+ * "The caller keeps what it runs on", "A dying pool only gives back", "A tick charges",
+ * "A move keeps a node's place" and "A mutex is taken or handed over" of DESIGN.md,
  * which relate the state before a call to the state after it.
  * host_trap runs history_begin before each call and history_end after it,
  * and around a fault, which must change no more than a call that moves no time.
@@ -36,6 +36,11 @@ struct obj_rec {
     uint32_t at, size, pool;
 };
 
+/* A mutex before the call: its holder and its oldest waiter, 0 for none. */
+struct mutex_rec {
+    uint32_t at, holder, oldest;
+};
+
 /* Growing arrays, kept from call to call. */
 #define ARRAY(T) struct { T *v; size_t n, cap; }
 
@@ -44,6 +49,7 @@ typedef ARRAY(uint32_t) addr_array;
 
 static ARRAY(struct grant) held;
 static ARRAY(struct node_rec) nodes;
+static ARRAY(struct mutex_rec) mutexes;
 static obj_array objects, objects_after;
 
 /* The thread that makes the call, its process and table, and whether a destroy had begun on one's pool. */
@@ -74,7 +80,10 @@ static struct cap move_was;
 static uint32_t move_parent;
 static addr_array move_children, children_after;
 
-/* The count before the call, whether it was traced, and the thread whose turn it was, NULL for none, with its units and its account. */
+/*
+ * The count before the call, whether it was traced, and the thread the turn was charged to, NULL for none,
+ * the turn's own or its payer, with its units and its account.
+ */
 static uint32_t ticks_before;
 static bool traced_before;
 static const struct thread *charged;
@@ -237,7 +246,7 @@ static void children_of(const struct cap *c, addr_array *out)
  * The rights an operation needs of the capability it is invoked on, as rvuos/abi.h gives them;
  * one invoked on a capability of another type fails before its rights matter.
  */
-_Static_assert(OP_COUNT == 38, "a new operation needs its rights in rights_needed");
+_Static_assert(OP_COUNT == 40, "a new operation needs its rights in rights_needed");
 static uint8_t rights_needed(uint32_t op)
 {
     switch (op) {
@@ -261,6 +270,8 @@ static uint8_t rights_needed(uint32_t op)
     case OP_TIME_BIND:
     case OP_DEBUG_WRITE:
     case OP_CLOCK_WATCHDOG:
+    case OP_MUTEX_LOCK:
+    case OP_MUTEX_UNLOCK:
         return RIGHT_W;
     case OP_NOTIFY_WAIT:
     case OP_CLOCK_READ:
@@ -371,6 +382,46 @@ static void check_move(void)
     }
 }
 
+/* Every mutex's holder and oldest waiter, sorted, compared after the call and never followed. */
+static void record_mutexes(void)
+{
+    mutexes.n = 0;
+    for (size_t i = 0; i < objects.n; i++) {
+        const struct obj_header *o = p2v(objects.v[i].at);
+        if (o->type == CAP_MUTEX) {
+            const struct mutex *m = (const struct mutex *)o;
+            PUSH(mutexes, ((struct mutex_rec){ objects.v[i].at, m->holder, m->waiters }));
+        }
+    }
+}
+
+/*
+ * A thread comes to hold a mutex by its own lock, through a capability to it, which check_call holds to its rights,
+ * or as the thread that waited on it longest, which an unlock or the holder's destroy hands it to;
+ * a mutex the call built is free.
+ */
+static void check_holders(void)
+{
+    for (size_t i = 0; i < objects_after.n; i++) {
+        const struct obj_header *o = p2v(objects_after.v[i].at);
+        if (o->type != CAP_MUTEX) {
+            continue;
+        }
+        uint32_t at = objects_after.v[i].at, holder = ((const struct mutex *)o)->holder;
+        const struct mutex_rec *was =
+            mutexes.n != 0 ? bsearch(&at, mutexes.v, mutexes.n, sizeof(mutexes.v[0]), cmp_at) : NULL;
+        if (holder == 0 || (was != NULL && holder == was->holder)) {
+            continue;
+        }
+        bool locked = invoked && call_op == OP_MUTEX_LOCK && invoked_cap.type == CAP_MUTEX && invoked_cap.a == at &&
+                      holder == v2p(caller);
+        bool handed = was != NULL && holder == was->oldest;
+        if (!locked && !handed) {
+            violated("a thread came to hold a mutex neither by its own lock nor as the one that waited longest");
+        }
+    }
+}
+
 void history_begin(bool call)
 {
     held.n = nodes.n = 0;
@@ -397,12 +448,13 @@ void history_begin(bool call)
     record_objects(&objects);
     each_node(&objects, record_node);
     qsort(nodes.v, nodes.n, sizeof(nodes.v[0]), cmp_at);
+    record_mutexes();
     record_move(table, call);
     record_call(table, call);
 
     ticks_before = sched_ticks;
     traced_before = debug_trace;
-    charged = core_self()->turn;
+    charged = core_self()->payer != NULL ? core_self()->payer : core_self()->turn;
     charged_units = charged != NULL ? charged->time : (struct cap){ 0 };
     charged_balance = charged != NULL ? account_at_count(charged) : 0;
 }
@@ -473,13 +525,15 @@ void history_end(void)
     each_node(&objects_after, check_node);
     check_move();
     check_call();
+    check_holders();
 
     /*
      * Only OP_DEBUG_TICK moves time here, and only under tracing, where the clock is the tick count:
-     * a tick costs the thread whose turn it is a whole tick while it holds one, and earns it its units, as every tick does,
-     * and a call that moves no time costs it nothing.
+     * a tick costs the thread the turn is charged to a whole tick while it holds one, and earns it its units,
+     * as every tick does, and a call that moves no time costs it nothing.
+     * The caller keeps what it runs on, but a payer that lent it time may go with a pool the call destroyed.
      */
-    if (charged != NULL && traced_before && sched_ticks - ticks_before <= 1 &&
+    if (charged != NULL && traced_before && sched_ticks - ticks_before <= 1 && is_object(&objects_after, v2p(charged)) &&
         same_grant(grant_of(&charged->time), grant_of(&charged_units))) {
         uint32_t gain = tick_gain(charged);
         uint32_t want = sched_ticks == ticks_before ? charged_balance

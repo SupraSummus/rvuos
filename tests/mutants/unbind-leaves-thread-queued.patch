@@ -4,16 +4,17 @@ the queues hold only live threads that may run, and no account holds more than i
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: a thread names a queue it is not for
+Report: a thread waits on another queue than its account says
 Report: thread's account holds more than its cap
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -331,7 +331,7 @@ void sched_unbind(struct cap *bound)
+@@ -455,7 +455,7 @@ void sched_unbind(struct cap *bound)
      }
      *bound = (struct cap){ 0 };
      /* A thread without units holds nothing, so settling empties its account as it takes the thread off its queue. */
--    thread_settle(t);
+-    lender_settle(t);
 +    (void)t;
  }
  

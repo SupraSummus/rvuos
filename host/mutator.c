@@ -142,7 +142,7 @@ static uint32_t draw_arg(struct rng *r, uint8_t *data, size_t count)
         return rnd(r);
     case 2:
     case 3:
-        return (uint32_t)below(r, 14); /* a type, a rights mask, a region slot, a line or a unit, all up to 12, or one past */
+        return (uint32_t)below(r, 15); /* a type, a rights mask, a region slot, a line or a unit, all up to 13, or one past */
     case 4:
     case 5:
     case 6:
@@ -371,7 +371,7 @@ static uint32_t pick_slot(struct rng *r, const struct shadow *s, unsigned t, uin
 static uint32_t draw_kind(struct rng *r, const struct shadow *s, const struct replay_record *c,
                           const struct op_info *info, unsigned i, uint8_t *data, size_t count)
 {
-    static const uint8_t allocs[] = { CAP_CAPTABLE, CAP_PROCESS, CAP_THREAD, CAP_NOTIFICATION };
+    static const uint8_t allocs[] = { CAP_CAPTABLE, CAP_PROCESS, CAP_THREAD, CAP_NOTIFICATION, CAP_MUTEX };
     static const uint8_t rights[] = { RIGHT_ALL, RIGHT_R, RIGHT_R | RIGHT_W, RIGHT_R | RIGHT_X, RIGHT_W, RIGHT_X };
     static const uint32_t delays[] = { 0, 1, 100, 10000, 1000000 };
     unsigned t = table_of(c->actor);

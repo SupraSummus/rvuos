@@ -10,7 +10,7 @@ Report: the timer lets the tick pass that drains the turn's account
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -157,7 +157,7 @@ static void account_refill(struct thread *t)
+@@ -179,7 +179,7 @@ static inline void account_refill(struct thread *t)
  /* Whether an account holds a turn's worth, a tick: then the thread has time, and takes turns with those that have. */
  static bool has_time(uint32_t balance)
  {

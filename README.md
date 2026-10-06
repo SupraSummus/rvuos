@@ -75,8 +75,8 @@ and what a process makes of memory it was lent lies below the lender's Untyped:
 revoking below it destroys every pool the process made,
 so nothing a process built in kernel memory outlives the lender's leave.
 
-No data passes through the kernel: the only blocking primitive
-is a notification, a word of sticky bits,
+No data passes through the kernel: a thread blocks on a notification, a word of sticky bits,
+or, as an experiment, on a mutex, whose waiters may lend its holder their time,
 and `DESIGN.md`, "Communication and synchronisation", says why.
 
 A thread that faults stops where it faulted, and nothing else does:
@@ -89,7 +89,7 @@ taking the threads with time in turn and then those on spare time;
 the processor is a fixed number of units of time, handed out as capabilities,
 and a thread earns the units it is bound to, each earned by one thread at a time,
 so a process that makes more threads or children gets no more of the processor than its units.
-That is all the scheduling policy the kernel has,
+That is all the scheduling policy the kernel has, but for the time a mutex's waiter lends its holder,
 and `DESIGN.md`, "Scheduling", says why.
 
 There is no sleep: a timer line is an interrupt line the tick raises

@@ -1,7 +1,10 @@
 # A round of each measure of user/bench/ on mps2-an521, in instructions; see tests/bench.py.
-call 486
-signal-wait 957
-threads 3238
-processes 3737
-channel 4210
-contended-worst 1705850
+call 521
+signal-wait 1023
+threads 3586
+mutex 1048
+mutex-wait 8366
+mutex-lend 7559
+processes 4110
+channel 4573
+contended-worst 1710000

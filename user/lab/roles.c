@@ -226,6 +226,21 @@ void hog_main(struct child_page *c)
     }
 }
 
+/* Takes the lock it shares, or the mutex: KERR_OK, or the status of a wait that failed, holding nothing. */
+static uint32_t take_lock(const struct lab_page *p)
+{
+    return p->mutex != 0 ? rv_mutex_lock(p->mutex, p->lend) : lock_take(&p->lock);
+}
+
+static void give_lock(const struct lab_page *p)
+{
+    if (p->mutex != 0) {
+        rv_mutex_unlock(p->mutex);
+    } else {
+        lock_give(&p->lock);
+    }
+}
+
 /* Holds the lock it shares for cost's work, every period, or with none again after gap's work outside it. */
 void locker_main(struct child_page *c)
 {
@@ -237,12 +252,12 @@ void locker_main(struct child_page *c)
             sink = next_period(p, &pending, seq);
         }
         uint32_t t = now(p);
-        if (lock_take(&p->lock) != KERR_OK) {
+        if (take_lock(p) != KERR_OK) {
             child_fail(c, 1, 0);
         }
         record(p, t);
         sink = lab_work(p->cost, seq);
-        lock_give(&p->lock);
+        give_lock(p);
         sink = lab_work(p->gap, seq);
     }
     (void)sink;

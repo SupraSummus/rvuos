@@ -9,11 +9,11 @@ Report: thread's account holds more than its cap
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -259,7 +259,6 @@ void sched_bind(struct thread *t, uint32_t first, uint32_t count, uint8_t rights
+@@ -443,7 +443,6 @@ void sched_bind(struct thread *t, uint32_t first, uint32_t count, uint8_t rights
      }
      /* What the account held stays, and settling holds it to what the new units hold at most. */
      t->balance = kept;
--    thread_settle(t);
+-    lender_settle(t);
  }
  
  void sched_unbind(struct cap *bound)
