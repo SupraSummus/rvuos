@@ -265,8 +265,9 @@ what is left:
 - `tools/loop-bounds.py` knows clang's jump tables by their shape;
   any other jump through a register may make up a loop, which fails the link, never passes it,
   as a table whose base clang keeps on the stack does.
-- The link checks read what clang makes, and a cloud session's clang is not the local one, 22:
-  a tree that linked in the cloud once failed `loop-bounds` locally.
+- The link checks and `make bench` read what clang makes, and a cloud session's clang is not the local one, 22:
+  a tree that linked in the cloud once failed `loop-bounds` locally,
+  and the ARM boards' costs in the cloud miss the records, which 22 wrote, by more than a tenth.
   Pin one clang in `.claude/hooks/session-start.sh`, or run the checks under both.
 - That the count of armed sources leaves the log's line out is checked by reading `irq_set_bits`.
   Under tracing each call's line reaches the log before the self-check runs,
@@ -290,13 +291,13 @@ what is left:
 - The self-check sees structure, not semantics.
   That a signal wakes a thread waiting on *that* notification,
   and hands it the bits that were set,
-  is checked only by the demo in `user/init.c`,
+  is checked only by the demo in `user/init/`,
   and so is that a fault signals the watch of the thread that faulted and stops it where it faulted;
   the host and QEMU run the same kernel code, so their transcripts agree on a fault that signals nothing.
 - The log's line is replayed through the trace itself,
   `tests/seeds/log-signals-untaken` and `log-wakes-reader`;
   a reader falling a whole ring behind, and the logger's byte-per-interrupt path,
-  are checked by the demo in `user/init.c` alone,
+  are checked by the demo's logger in `user/init/logger.c` alone,
   and the loss only by reading its code.
   A record that writes garbage into the log's `taken` is beyond the fuzzer,
   since a store record leaves the log alone, which the driver carries out on QEMU;
@@ -380,7 +381,7 @@ what is left:
 - The replay driver drains the log by polling after each record,
   so the host models it with one store into the header per event.
   A logger thread in the driver would make traced calls the host would have to follow.
-- The UART driver in `user/init.c` transmits only,
+- The UART driver in `user/init/logger.c` transmits only,
   because `make test` feeds the UART nothing to receive.
 - Revoking below a line capability takes the line back only while it is unbound.
   The `Irq` could hold its line as it holds its notification, by a node below the line capability,

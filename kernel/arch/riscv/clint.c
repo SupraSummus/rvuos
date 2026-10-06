@@ -7,6 +7,7 @@
 #include "kernel.h"
 #include "layout.h"
 #include "object.h"
+#include "sched.h"
 #include "timer.h"
 #include "work.h"
 

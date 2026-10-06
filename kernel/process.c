@@ -6,6 +6,7 @@
 #include "kernel.h"
 #include "object.h"
 #include "pmp.h"
+#include "sched.h"
 
 /*
  * The lowest entry that matches an access decides,

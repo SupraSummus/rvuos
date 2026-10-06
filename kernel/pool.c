@@ -5,6 +5,7 @@
 
 #include "kernel.h"
 #include "object.h"
+#include "sched.h"
 
 struct pool *pool_list;
 

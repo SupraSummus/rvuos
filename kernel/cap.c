@@ -5,6 +5,7 @@
 
 #include "kernel.h"
 #include "object.h"
+#include "sched.h"
 #include "trap.h"
 
 int cap_lookup(struct captable *table, uint32_t slot, struct cap *out)

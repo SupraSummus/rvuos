@@ -7,6 +7,7 @@
 #include "kernel.h"
 #include "klog.h"
 #include "object.h"
+#include "sched.h"
 
 struct granted_range boot_granted[GRANTED_RANGES];
 

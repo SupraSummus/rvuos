@@ -10,7 +10,7 @@
  * SPAREIRQ_IRQ_0 and SPAREIRQ_IRQ_1, which only software can force.
  * On the Cortex-M33 SIO's doorbell line, 26, is the kernel's once it runs on both cores;
  * Hazard3's cores interrupt each other on no line.
- * Each board's console.h offers the same functions, for user/init.c and user/fuzzdrv.c.
+ * Each board's console.h offers the same functions, for user/init/ and user/fuzzdrv.c.
  */
 
 #include <stdbool.h>

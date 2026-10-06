@@ -16,6 +16,7 @@
 #include "kernel.h"
 #include "layout.h"
 #include "object.h"
+#include "sched.h"
 #include "scs.h"
 
 #define REG(addr) (*(volatile uint32_t *)(addr))

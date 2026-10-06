@@ -14,7 +14,7 @@
 # RP2350 has both, and ARCH picks the cores; its files that differ by them lie in kernel/board/rp2350/<arch>/.
 #
 # Kernel images differ only in the embedded root task:
-#   build/<board>/kernel-init.elf     the root task of user/init.c, used by `make test`
+#   build/<board>/kernel-init.elf     the root task of user/init/, used by `make test`
 #   build/<board>/kernel-fuzzdrv.elf  the replay driver of user/fuzzdrv.c,
 #                                     used by `make qemu-replay`, QEMU only so far
 
@@ -219,6 +219,13 @@ $(BUILD)/%.ld: %.ld.S
 $(BUILD)/user-%.elf: $(BUILD)/user/%.o $(USER_COMMON) $(BUILD)/user/user.ld
 	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/user/user.ld $< $(USER_COMMON) -o $@
 
+# The demo, user/init/, runs on the root task's data but for child.c, a process of its own,
+# so the link checks that child.c keeps no global.
+INIT_OBJ := $(patsubst %.c,$(BUILD)/%.o,$(wildcard user/init/*.c))
+$(BUILD)/user-init.elf: $(INIT_OBJ) $(USER_COMMON) $(BUILD)/user/user.ld tools/no-globals.py
+	tools/no-globals.py $(BUILD)/user/init/child.o
+	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/user/user.ld $(INIT_OBJ) $(USER_COMMON) -o $@
+
 $(BUILD)/user-%.bin: $(BUILD)/user-%.elf
 	$(OBJCOPY) -O binary $< $@
 
@@ -274,7 +281,7 @@ $(BUILD)/kernel-%.bin: $(BUILD)/kernel-%.elf
 run: $(BUILD)/kernel-init.$(IMAGE)
 	$(RUN_INIT)
 
-# Boot the root task of user/init.c and check its transcript.
+# Boot the root task of user/init/ and check its transcript.
 test: $(BUILD)/kernel-init.$(IMAGE)
 	$(BOARD_FACTS) BOARD_CORES=$(CORES) tests/run.sh "$(RUN_INIT)" $(PMP_MAX_ENTRIES)
 
@@ -765,7 +772,7 @@ check: contents test escape lib-test bench lab host-test wifi-test qemu-replay a
 clean:
 	rm -rf $(BUILD)
 
--include $(KERNEL_OBJ:.o=.d) $(patsubst %,$(BUILD)/user/%.d,$(USER_PROGRAMS) $(ESCAPE_PROGRAMS)) \
+-include $(KERNEL_OBJ:.o=.d) $(patsubst %,$(BUILD)/user/%.d,$(USER_PROGRAMS) $(ESCAPE_PROGRAMS)) $(INIT_OBJ:.o=.d) \
          $(foreach p,$(PROGRAMS),$(patsubst %.o,%.d,$(call program_root,$(p)) $(call program_others,$(p)))) \
          $(LIB_OBJ:.o=.d) $(addprefix $(BUILD)/user/phyblob/,start.d phyblob.d harness.d) \
          $(patsubst %.c,$(BUILD)/%.d,$(wildcard $(WIFI_ESP)/*.c)) \

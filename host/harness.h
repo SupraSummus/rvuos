@@ -14,6 +14,7 @@
 #include "object.h"
 #include "pmp.h"
 #include "rvuos/replay.h"
+#include "sched.h"
 
 /* khalt() longjmps here, and so does host_violated() when isolated. */
 extern jmp_buf host_halt_jmp;

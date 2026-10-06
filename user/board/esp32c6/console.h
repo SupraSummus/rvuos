@@ -6,7 +6,7 @@
  * a CDC-ACM serial port on the chip's own USB, on line 49,
  * and a line nothing drives, FROM_CPU_INTR3's, which only software raises.
  * A line is an interrupt matrix source plus one; see kernel/board/esp32c6/irq.c.
- * Each board's console.h offers the same functions, for user/init.c and user/fuzzdrv.c.
+ * Each board's console.h offers the same functions, for user/init/ and user/fuzzdrv.c.
  *
  * Bytes go into a 64-byte FIFO, the IN endpoint,
  * and go out as one USB packet when WR_DONE is written.

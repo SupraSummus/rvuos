@@ -6,6 +6,7 @@
 #include "irq.h"
 #include "kernel.h"
 #include "object.h"
+#include "sched.h"
 #include "timer.h"
 #include "trap.h"
 

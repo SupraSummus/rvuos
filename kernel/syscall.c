@@ -7,6 +7,7 @@
 #include "kernel.h"
 #include "klog.h"
 #include "object.h"
+#include "sched.h"
 #include "timer.h"
 
 bool debug_trace;
