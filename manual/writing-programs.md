@@ -196,6 +196,7 @@ Each header says how its calls are used.
 | `lib/child.h` | a child built, started, heard, checked and taken down by its parent, frames mapped into it and taken back, what it may build of its own, and the child's own calls: its log, its state, its answer, its sleep, its account of what it builds |
 | `lib/chan.h` | a channel between two children: a frame of two rings of packets, and a bit each way; and a hub, a server's channels to many clients |
 | `lib/lock.h` | a lock over memory several children share: a word taken with an atomic operation, and a notification to wait on while it is held; the kernel's mutex, section 5.12, is the one that knows its holder |
+| `lib/seqlock.h` | a snapshot one child publishes and others copy out whole, from memory they may hold read only: a count and two copies, so that neither side calls the kernel or waits for the other |
 | `lib/ring.h`, `lib/log.h` | the rings a channel is made of, and the kernel's log: written through `Debug`, and read as the root task reads it |
 | `lib/say.h`, `lib/libc.h` | text with values, and the memory functions the compiler calls |
 

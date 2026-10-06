@@ -9,6 +9,7 @@
 #include "lib/chan.h"
 #include "lib/child.h"
 #include "lib/lock.h"
+#include "lib/seqlock.h"
 
 /* Each peer sends PACKETS packets of 1 to PACKET_MAX bytes, through rings of a few slots. */
 #define PACKETS    40u
@@ -91,6 +92,30 @@ struct locker_page {
 };
 
 /*
+ * A snapshot of SNAP_WORDS words, each its version, which a thread of the root task's publishes over and over,
+ * on the second core where there is one, while a child holding it read only copies it out over and over,
+ * finding every copy whole and none older than the one before.
+ * The root task then stops the writer, halfway through a write as like as not, and finds the snapshot whole still.
+ * The reader counts the copies it read with the writer halfway, the count odd, and the tries a write began under;
+ * a run with neither tried nothing, and fails.
+ */
+#define SNAP_WORDS   8u
+#define SNAP_US      50000u /* how long the writer writes */
+#define SNAP_STOP_US 3000u  /* how long the writer may go on once its units are taken: the rest of its turn */
+enum {
+    SNAP_READ = CHILD_RUNNING + 1, /* the reader stopped as asked */
+};
+#define SNAP_STEP_TORN  1u /* a copy whose words are not all its version; detail is the version */
+#define SNAP_STEP_OLDER 2u /* a copy older than the one before; detail is its version */
+struct snap_page {
+    struct child_page c;
+    struct seqlock lock;
+    volatile uint32_t stop; /* the root task's: 1 once the reader is to stop */
+    /* The reader's: whole copies, those read with the writer halfway, and tries a write began under. */
+    volatile uint32_t reads, halfway, again;
+};
+
+/*
  * A buffer of one word handed between two children PASSES times, taken from the one before it is given to the other.
  * Each, told it holds it, checks that the word is the last pass and writes its own, with no fence, MANUAL.md section 5.7;
  * the last, told it holds it no longer, stores to it anyway, which must stop it and nothing else.
@@ -142,6 +167,7 @@ void server_main(struct child_page *page);
 void client_main(struct child_page *page);
 void locker_main(struct child_page *page);
 void passer_main(struct child_page *page);
+void snap_reader_main(struct child_page *page);
 void builder_main(struct child_page *page);
 
 #endif

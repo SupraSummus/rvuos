@@ -25,6 +25,9 @@ and the logger carries the kernel's log to a host on port 7070 while the run las
 - The clock asks the one server of pool.ntp.org it was given again and again; one that never answers,
   as happened once, leaves it without the time, and `tools/wifi-run.py`, which waits for the time, without its checks.
   Asking DNS for another server after a few tries would move on.
+- A client asks the network process for its addresses through its channel, a round trip each time.
+  They change only with a lease, which is what `lib/seqlock.h` is for, and nothing uses it yet:
+  published into each client's channel, they would cost a client no ask.
 - In access point mode nobody gives the network process an address, so no client is built, the logger among them,
   and the log reaches the host only at the halt, as much of it as the ring still holds.
 - The driver polls the chip every millisecond.

@@ -625,6 +625,14 @@ A parent watching many children meets the same bound through their pages, and an
 with room for its children's data, `self_room` in `user/lib/self.h`, which it installs once and carves each child's data from.
 The Wi-Fi system's network process serves its clients through a hub, see `user/wifi/NOTES.md`.
 
+**State one process publishes to many**, a link's state or a setting, needs no ask at all.
+`user/lib/seqlock.h` keeps two copies of it and a count that sends readers to the one not being written,
+so neither side makes a call or waits for the other, and readers, which write nothing, may hold it read only.
+It is the latch of Linux's sequence counters rather than its seqlock, which keeps one copy:
+that suits a writer the tick cannot take, as Linux's are,
+but a reader of a writer in user mode stopped halfway could only spin until the writer's next turn.
+With two, a writer stopped, faulted or taken down halfway costs its readers nothing.
+
 **Handing memory over**, with the kernel's word that the giver no longer reaches it,
 is an uninstall from the one and an install into the other by a third process that holds the frame,
 `child_unmap` and `child_map` in `user/lib/child.h`;

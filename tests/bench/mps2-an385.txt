@@ -5,6 +5,8 @@ threads 3569
 mutex 1038
 mutex-wait 8321
 mutex-lend 7504
+seqlock-write 110
+seqlock-read 59
 processes 4161
 channel 4596
 contended-worst 1708560

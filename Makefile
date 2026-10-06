@@ -726,16 +726,18 @@ qemu-replay: $(BUILD)/kernel-fuzzdrv.elf $(HOST_BUILD)/fuzz
 		--kernel $(BUILD)/kernel-fuzzdrv.elf --host $(HOST_BUILD)/fuzz tests/seeds tests/corpus
 
 # The same demo on ARM, under QEMU, on ARMv7-M and on ARMv8-M, and on mps2-an521's two cores,
-# and the escape suite, the library's test and the benchmark on each version's one core; see DESIGN.md, "Architectures" and "Cores".
+# the escape suite and the benchmark on each version's one core, and the library's test on each and on both cores;
+# see DESIGN.md, "Architectures" and "Cores".
 # tests/mutants.sh leaves it out, as it leaves ARM out, which the host build does not compile.
 arm-test:
 	$(MAKE) BOARD=mps2-an385 test escape lib-test bench
 	$(MAKE) BOARD=mps2-an521 test escape lib-test bench
-	$(MAKE) BOARD=mps2-an521 CORES=2 test
+	$(MAKE) BOARD=mps2-an521 CORES=2 test lib-test
 
-# The same demo on two harts of QEMU virt, which goes on to the second core; see DESIGN.md, "Cores".
+# The same demo on two harts of QEMU virt, which goes on to the second core,
+# and the library's test, whose seqlock is written there; see DESIGN.md, "Cores".
 smp-test:
-	$(MAKE) CORES=2 test
+	$(MAKE) CORES=2 test lib-test
 
 # The contents of MANUAL.md and DESIGN.md list every section,
 # since a section cited by its number or title is found through them.

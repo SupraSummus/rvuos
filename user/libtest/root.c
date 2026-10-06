@@ -10,6 +10,8 @@
  * builds a server with a hub in room for children's data, and clients on its ends,
  * and takes one down and connects another in its place, twice;
  * has children add to a count they share under a lock, sleeping now and then while they hold it;
+ * has a thread publish a snapshot through a seqlock, on the second core where there is one, while a child reads it,
+ * and stops the writer while it writes;
  * hands a buffer between two children, and hears the last fault on it once it is taken;
  * lets a child build a thread of its own from a pool, timer lines and units it gave it,
  * hears that thread's fault as the child's, and takes it all back, twice;
@@ -35,10 +37,11 @@ static struct self self, after;
 static struct kernel_log klog;
 static uint32_t log_bit, deadline_bit, pause_bit, pause_timer;
 
-static struct child a, b, faulty, answering, spinning, server, clients[HUB_CLIENTS], lockers[LOCKERS], passers[2],
-    builder;
+static struct child a, b, faulty, answering, spinning, server, clients[HUB_CLIENTS], lockers[LOCKERS], snap_reader,
+    passers[2], builder;
 static struct child *const children[] = { &a, &b, &faulty, &answering, &spinning, &server, &clients[0], &clients[1],
-                                          &lockers[0], &lockers[1], &lockers[2], &passers[0], &passers[1], &builder };
+                                          &lockers[0], &lockers[1], &lockers[2], &snap_reader, &passers[0], &passers[1],
+                                          &builder };
 static struct child *may_fault; /* the one child whose fault is asked for */
 static uint32_t faulted;        /* the bits of the faults the root task heard */
 
@@ -106,6 +109,14 @@ static uint32_t step(void)
     }
     check(!(bits & deadline_bit), "done before the deadline");
     return bits;
+}
+
+/* Steps until a pause of us microseconds is over. */
+static void pause_for(uint32_t us)
+{
+    must("arm a pause", rv_timer_set(pause_timer, pause_bit, us));
+    while (!(step() & pause_bit)) {
+    }
 }
 
 /* What the root task holds, see self_tally. */
@@ -214,9 +225,7 @@ static void check_round(void)
         step();
     }
     check(child_check(&answering) && child_check(&spinning), "a child never asked counts as having answered");
-    must("arm a pause", rv_timer_set(pause_timer, pause_bit, PAUSE_US));
-    while (!(step() & pause_bit)) {
-    }
+    pause_for(PAUSE_US);
     check(child_check(&answering), "a child whose loop comes round answers the check its parent asked meanwhile");
     check(!child_check(&spinning), "a child that spins answers no check");
     must("take a child down", child_free(&self, &answering));
@@ -333,6 +342,83 @@ static void lock_round(void)
     must("the lock's notification back", slot_free(&self, note));
     must("give the room back", self_room_free(&self));
     check(same(tally(), unroomed), "the lockers, their lock and the room gave back what they were given");
+}
+
+/* The snapshot's writer, a thread of the root task's, and its stack. */
+static uint8_t snap_stack[1024] __attribute__((aligned(16)));
+
+static void snap_writer(uint32_t lock)
+{
+    uint32_t data[SNAP_WORDS];
+    for (uint32_t version = 1;; version++) {
+        for (uint32_t i = 0; i < SNAP_WORDS; i++) {
+            data[i] = version;
+        }
+        seqlock_write((const struct seqlock *)(uintptr_t)lock, data);
+    }
+}
+
+/*
+ * A snapshot in room for children's data, given its reader read only, and its writer,
+ * bound to the second core's units, or where there is none to some of the first's, taking turns with the reader;
+ * the writer stopped by taking its units, and the snapshot read by the root task, as it stays for good.
+ */
+static void snap_round(void)
+{
+    _Static_assert(SEQLOCK_BYTES(SNAP_WORDS * 4u) <= SELF_ROOM_UNIT, "the snapshot fits a unit of room");
+    struct self_tally unroomed = tally();
+    struct block shared;
+    uint32_t region, writer, time, first = 0, units = TIME_UNITS;
+    must("room for children's data", self_room(&self, ROOM_SIZE));
+    must("memory for a snapshot", room_take(&self, SELF_ROOM_UNIT, &shared));
+    struct seqlock lock = seqlock_shape(shared.base, SNAP_WORDS * 4u);
+    seqlock_init(&lock);
+    must("build the reader", child_new(&self, &snap_reader, "reader", CHILD_TABLE, CHILD_DATA));
+    must("give it the snapshot, read only", child_map(&self, &snap_reader, shared.made, RIGHT_R, &region));
+    struct snap_page *r = (struct snap_page *)snap_reader.page;
+    r->lock = lock;
+    must("a slot for the writer", slot_new(&self, &writer));
+    must("the writer", rv_pool_alloc(self.pool, CAP_THREAD, writer, BOOT_CAP_PROCESS));
+    must("configure the writer", rv_thread_configure(writer, (uint32_t)(uintptr_t)snap_writer,
+                                                     (uint32_t)(uintptr_t)(snap_stack + sizeof(snap_stack)),
+                                                     (uint32_t)(uintptr_t)&lock));
+    must("a slot for the writer's units", slot_new(&self, &time));
+    int second_core = rv_time_carve(BOOT_CAP_TIME, TIME_UNITS, TIME_UNITS, time) == KERR_OK;
+    if (!second_core) {
+        units = CHILD_UNITS;
+        must("units for the writer", units_take(&self, units, &first));
+        must("carve the writer's units", rv_time_carve(self.time, first, units, time));
+    }
+    must("bind the writer", rv_time_bind(time, writer, 0, units));
+    must("start the writer", rv_thread_resume(writer));
+    must("start the reader", child_start(&self, &snap_reader, snap_reader_main, CHILD_UNITS));
+    pause_for(SNAP_US);
+    must("take the writer's units", rv_cap_revoke(self.table, time));
+    pause_for(SNAP_STOP_US);
+    uint32_t data[SNAP_WORDS], version;
+    check(seqlock_read(&lock, data, &version), "a snapshot whose writer stopped reads at the first try");
+    for (uint32_t i = 0; i < SNAP_WORDS; i++) {
+        check(data[i] == version, "a snapshot whose writer stopped while it wrote is whole");
+    }
+    r->stop = 1;
+    while (snap_reader.told != SNAP_READ) {
+        step();
+    }
+    check(r->reads > 0 && version > 0, "the writer published and the reader read");
+    check(r->halfway + r->again > 0, "the reader read while the writer was in the middle of a write");
+    say(&out, "libtest: a snapshot read whole %u times as it was written on %s core, %u with the writer halfway, "
+              "%u tries again: ok\n",
+        r->reads, second_core ? "the second" : "the same", r->halfway, r->again);
+    must("take the reader down", child_free(&self, &snap_reader));
+    must("the writer's units back", slot_free(&self, time));
+    if (!second_core) {
+        units_give(&self, first, units);
+    }
+    must("the writer back", slot_free(&self, writer));
+    must("the snapshot back", slot_free(&self, shared.made));
+    room_give(&self, &shared);
+    must("give the room back", self_room_free(&self));
+    check(same(tally(), unroomed), "the snapshot, its reader and its writer gave back what they were given");
 }
 
 /* Two passers in room for children's data, and the buffer carved from it, which the root task sees through the room. */
@@ -485,6 +571,7 @@ int main(void)
     check_round();
     hub_round();
     lock_round();
+    snap_round();
     pass_round();
     own_round();
     check(same(tally(), start), "everything handed out came back");

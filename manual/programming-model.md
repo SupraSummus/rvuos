@@ -365,8 +365,8 @@ Two processes exchange bytes through a region installed in both
 and use notifications to say when.
 The build targets `rv32imac`, so the `A` extension is there in user mode,
 as `ldrex` and `strex` are on ARMv7-M,
-and a lock or a ring buffer in shared memory is userspace's to build,
-as `lib/lock.h` and `lib/ring.h` do, section 8.4;
+and a lock, a ring buffer or a snapshot in shared memory is userspace's to build,
+as `lib/lock.h`, `lib/ring.h` and `lib/seqlock.h` do, section 8.4;
 what userspace cannot build is "stop me until someone says otherwise",
 and a notification is exactly that.
 A lock the kernel knows the holder of is a mutex, section 5.12.

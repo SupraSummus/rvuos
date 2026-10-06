@@ -192,6 +192,34 @@ void locker_main(struct child_page *page)
     child_stop(page, LOCKER_DONE);
 }
 
+/* Copies the snapshot out until the root task says stop, failing at a copy that is not whole or goes back. */
+void snap_reader_main(struct child_page *page)
+{
+    struct snap_page *p = (struct snap_page *)page;
+    const volatile uint32_t *count = (const volatile uint32_t *)(uintptr_t)p->lock.base; /* at the base, lib/seqlock.h */
+    uint32_t data[SNAP_WORDS], version, last = 0;
+    child_report(page, CHILD_RUNNING);
+    while (!p->stop) {
+        uint32_t halfway = *count & 1u;
+        if (!seqlock_read(&p->lock, data, &version)) {
+            p->again++;
+            continue;
+        }
+        for (uint32_t i = 0; i < SNAP_WORDS; i++) {
+            if (data[i] != version) {
+                child_fail(page, SNAP_STEP_TORN, version);
+            }
+        }
+        if (version < last) {
+            child_fail(page, SNAP_STEP_OLDER, version);
+        }
+        last = version;
+        p->halfway += halfway;
+        p->reads++;
+    }
+    child_stop(page, SNAP_READ);
+}
+
 /* The root task tells it once for each pass it reported, so it reads after the wait that took the tell's bit. */
 void passer_main(struct child_page *page)
 {

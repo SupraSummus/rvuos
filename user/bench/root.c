@@ -13,6 +13,8 @@
  * and for another before it takes it again, so that a tick between the two cannot leave both waiting.
  * mutex-lend: the same with the waiter lending its time, which hands the holder the rest of its turn
  * and has the turn back with the mutex, rather than taking the next turn and joining the queue.
+ * seqlock-write: a snapshot of 32 bytes published through lib/seqlock.h, nobody reading, no call.
+ * seqlock-read: the same snapshot copied out whole, nobody writing, no call.
  * contended-worst: the worst round of processes beside a third process that always wants the core,
  * over a tenth of a second; it waits for that process's turns, so the tick sets it.
  *
@@ -25,6 +27,7 @@
 #include "lib/libc.h"
 #include "lib/log.h"
 #include "lib/say.h"
+#include "lib/seqlock.h"
 
 #define ROUNDS      1000u
 #define WARM_UP     10u
@@ -35,6 +38,7 @@
 #define CHILD_DATA  0x1000u
 #define ROOM_SIZE   0x8000u /* the children's data, from one room, since Hazard3 gives the root task seven regions */
 #define POOL_SIZE   0x1000u
+#define SNAPSHOT    32u /* bytes, as a little state a server publishes */
 
 static struct self self;
 static struct kernel_log klog;
@@ -43,6 +47,8 @@ static uint8_t pong_stack[1024] __attribute__((aligned(16)));
 static uint8_t holder_stack[1024] __attribute__((aligned(16)));
 static uint32_t note, ping_note, pong_note, held_note, hold_note, done_note, mutex;
 static struct child pong;
+static struct seqlock snap;
+static uint32_t snap_memory[SEQLOCK_BYTES(SNAPSHOT) / 4u], snap_data[SNAPSHOT / 4u];
 
 static void console_byte(char c)
 {
@@ -162,6 +168,17 @@ static void round_mutex_lend(void)
     wait_for_holder(MUTEX_LEND);
 }
 
+static void round_seqlock_write(void)
+{
+    seqlock_write(&snap, snap_data);
+}
+
+static void round_seqlock_read(void)
+{
+    uint32_t version;
+    seqlock_read(&snap, snap_data, &version);
+}
+
 static void round_process(void)
 {
     uint32_t bits;
@@ -236,6 +253,11 @@ int main(void)
     must("start the thread", rv_thread_resume(holder));
     measure("mutex-wait", round_mutex_wait);
     measure("mutex-lend", round_mutex_lend);
+
+    snap = seqlock_shape((uint32_t)(uintptr_t)snap_memory, SNAPSHOT);
+    seqlock_init(&snap);
+    measure("seqlock-write", round_seqlock_write);
+    measure("seqlock-read", round_seqlock_read);
 
     must("room for the children's data", self_room(&self, ROOM_SIZE));
     must("build pong", child_new(&self, &pong, "pong", CHILD_TABLE, CHILD_DATA));
