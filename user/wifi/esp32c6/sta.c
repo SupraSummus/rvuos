@@ -80,9 +80,7 @@ static void scan_heard(const struct mac_frame *m)
 
 void sta_scan(struct drv *d)
 {
-    static const uint32_t mgmt = WIFI_PROMIS_FILTER_MASK_MGMT;
-    drv_must("the radio's filter", esp_wifi_set_promiscuous_filter(&mgmt));
-    drv_must("promiscuous", esp_wifi_set_promiscuous(true));
+    drv_must_mac("every management frame heard", mac_hear(MAC_HEAR_MGMT));
     drv_must_mac("the MAC receives into the driver's list", mac_rx_take(scan_heard));
     for (uint32_t ch = MAC_CHANNEL_FIRST; ch <= MAC_CHANNEL_LAST; ch++) {
         mac_channel(ch); /* one of those it tunes to, so never refused */

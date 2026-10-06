@@ -2,14 +2,14 @@
  * What hostap's supplicant takes from its system, for the driver: see hostap/includes.h.
  * Memory, time and randomness from the adapter, text to the kernel's log,
  * the few C library functions the driver's other files and the ROM lack,
- * and eloop's timeouts, which hostap runs in its event loop and the driver on the libraries' Wi-Fi task.
+ * and eloop's timeouts, which hostap runs in its event loop and the driver in the supplicant's thread, see supp.h.
  */
 
 #include "utils/common.h"
 #include "utils/eloop.h"
 
-#include "esp.h"
 #include "osi.h"
+#include "supp.h"
 
 /* --- Memory and the C library. --- */
 
@@ -212,8 +212,8 @@ void wpa_hexdump_ascii_key(int level, const char *title, const void *buf, size_t
 /* --- eloop's timeouts. --- */
 
 /*
- * The timeouts hostap registers, on the libraries' Wi-Fi task, where the libraries call the supplicant:
- * an alarm of the adapter's, which its timer thread runs, asks the libraries to run what is due there.
+ * The timeouts hostap registers, run in the supplicant's thread:
+ * an alarm of the adapter's, which its timer thread runs, asks the supplicant's link to run what is due there.
  * As many as rsn_supp/ registers at once: a PMKSA's expiry and reauthentication, and a PTK's rekeying.
  */
 #define TIMEOUTS 4
@@ -262,8 +262,7 @@ static int run_due(void *arg)
 static void alarm_rings(void *arg)
 {
     (void)arg;
-    struct wifi_ipc ipc = { run_due, 0, 0 };
-    esp_wifi_ipc_internal(&ipc, false);
+    supp_run(run_due, 0);
 }
 
 int eloop_register_timeout(unsigned int secs, unsigned int usecs, eloop_timeout_handler handler, void *eloop_data,

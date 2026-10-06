@@ -21,6 +21,7 @@
 #include "osi.h"
 #include "rvuos.h"
 #include "sta.h"
+#include "supp.h"
 
 void drv_main(struct child_page *page);
 
@@ -370,7 +371,7 @@ static void join(struct drv *d)
         memcpy(c->bssid, d->bssid, 6);
     }
     if (d->pass[0]) {
-        drv_supp_prepare(d->ssid, d->pass);
+        supp_prepare(d->ssid, d->pass);
     }
     if (d->no_ax) {
         uint8_t bgn = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N;
@@ -566,17 +567,18 @@ static __attribute__((noreturn)) void listen(struct drv *d)
         memcpy(hear_ap, d->bssid, 6);
         hear_ap_set = 1;
     }
-    drv_must("the radio's filter", esp_wifi_set_promiscuous_filter(&all));
-    if (!d->own_rx) {
-        drv_must("what the radio hears", esp_wifi_set_promiscuous_rx_cb(heard_by_libraries));
-    }
-    drv_must("promiscuous", esp_wifi_set_promiscuous(true));
-    drv_must("the channel", esp_wifi_set_channel(d->listen, 0));
     if (d->own_rx) {
         /* The libraries' sending waits on their interrupt, which mac_rx_take takes, so their probe cannot be finished. */
         drv_must("a probe by the libraries with the driver's interrupt",
              d->probe[0] && !d->own_tx ? ESP_FAIL : ESP_OK);
+        drv_must_mac("every frame heard", mac_hear(MAC_HEAR_MGMT | MAC_HEAR_CTRL | MAC_HEAR_DATA | MAC_HEAR_BROKEN));
+        drv_must_mac("the channel", mac_channel(d->listen));
         drv_must_mac("the MAC receives into the driver's list", mac_rx_take(heard));
+    } else {
+        drv_must("the radio's filter", esp_wifi_set_promiscuous_filter(&all));
+        drv_must("what the radio hears", esp_wifi_set_promiscuous_rx_cb(heard_by_libraries));
+        drv_must("promiscuous", esp_wifi_set_promiscuous(true));
+        drv_must("the channel", esp_wifi_set_channel(d->listen, 0));
     }
     static uint8_t probe[MGMT_FRAME_MAX];
     uint32_t probe_len = 0, probes = 0, probes_failed = 0;

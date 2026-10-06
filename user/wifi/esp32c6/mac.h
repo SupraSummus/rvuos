@@ -4,7 +4,9 @@
 /*
  * The Wi-Fi MAC driven by the driver's own code rather than by Espressif's libraries,
  * on the way to a driver that leaves them the PHY alone; see TODO.md.
- * It receives and retunes the radio, once the libraries have brought the MAC up and set its filters:
+ * The driver's own path reaches the MAC through this file alone, so that giving the libraries up rewrites mac.c alone.
+ * It receives and retunes the radio, once the libraries have brought the MAC up:
+ * mac_hear says which frames the MAC passes on besides those to the station,
  * mac_rx_take gives the MAC a list of descriptors of its own and takes its interrupt,
  * so that each frame goes to heard, in the interrupt's thread, and none to the libraries;
  * mac_rx_give_back stops the MAC receiving and gives the libraries their interrupt back, before they stop.
@@ -57,6 +59,16 @@ struct mac_rx_counts {
     volatile uint32_t repointed;  /* times the take pointed the MAC at the driver's list again */
 };
 extern struct mac_rx_counts mac_rx_counts;
+
+/*
+ * The MAC passes on every frame of the MAC_HEAR_ types heard on the channel, whoever it is to;
+ * 0, or the step that failed.
+ */
+#define MAC_HEAR_MGMT   0x1u
+#define MAC_HEAR_CTRL   0x2u
+#define MAC_HEAR_DATA   0x4u
+#define MAC_HEAR_BROKEN 0x8u /* frames whose FCS fails too, which mac.c counts and drops */
+const char *mac_hear(uint32_t what);
 
 /* 0, or the step that failed. */
 const char *mac_rx_take(mac_heard_fn *heard);

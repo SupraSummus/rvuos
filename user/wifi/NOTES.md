@@ -512,3 +512,10 @@ so it stays the root task's side and passes the ask to leave on as an event,
 and a step that fails in another thread stops that thread in a wait of the adapter's, not in `child_stop`.
 No run asks the station to leave yet: the root task asks only a driver that serves.
 `mac_tx` holds a lock, since EAPOL and the link's frames will come from two threads.
+
+Two seams followed.
+Once the libraries have brought the MAC up, the own path asks them for nothing but through `mac.c`,
+which still has their promiscuous mode filter the frames.
+And the supplicant, which was one with the libraries' table, is hostap's over a link, `supp.h`,
+whose five asks, an EAPOL frame sent, a key installed, the handshakes done, a deauthentication and a timeout run,
+are all the own station has to answer; the libraries' quirks around them stay in `wpa.c`.

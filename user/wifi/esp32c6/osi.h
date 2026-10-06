@@ -70,12 +70,8 @@ void drv_phy_channel(uint32_t channel);
 void drv_wifi_clock_enable(void);
 void drv_wifi_reset_mac(void);
 
-/*
- * supp.c: hostap's supplicant behind the table the libraries call a supplicant through,
- * and the PMK of the network the driver is to join, derived before the libraries ask for it.
- */
+/* wpa.c: the supplicant, supp.h, behind the table the libraries call a supplicant through. */
 esp_err_t drv_wpa_register(void);
-void drv_supp_prepare(const char *ssid, const char *pass);
 
 /* hostap.c: hostap's lines at its debug level too, from here on. */
 void drv_wpa_debug(void);

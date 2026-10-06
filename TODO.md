@@ -93,14 +93,13 @@ what is left:
   and sends a probe by `tx=own`, the access point answering it.
   The station's logic is to be the driver's own too, on hostap's parsing, through the association, the keys and the join;
   `user/wifi/NOTES.md` says why it is the driver's own.
+  The own station is to give hostap's supplicant a link of its own, see `supp.h`:
+  EAPOL sent by `mac_tx`, and the data's CCMP in software first, on hostap's as `crypto.c` has it, the MAC's key registers later.
+  The MAC's bring-up stays the libraries': the own path runs between their `esp_wifi_start` and `esp_wifi_stop`,
+  so what those do to the modem and the MAC is the last of `pp` to read before it can go.
   Its frame completion spins in the caller's thread while the slot is armed, and borrows the libraries' slot 0;
   an own slot, the driver's own interrupt to finish the frame, and the libraries' retry of a collision or a timeout,
   with their invalidation of the queue on a timeout, would do better.
-  Before the association:
-  - the libraries' functions the driver's own path still calls, the promiscuous filter and the channel among them,
-    behind `mac.h`, so that giving `pp` up rewrites `mac.c` alone;
-  - `supp.c` split from what it asks of the libraries, sending EAPOL and installing a key,
-    so that hostap's supplicant runs over the driver's own MAC as over theirs.
   `mac.c` points a MAC that ran out of descriptors past the last it filled by `RX_BASE` alone,
   which the take found not always taken; no run has run out yet, `restarted` 0.
 - The ESP32-C6's Wi-Fi root task has 8 KiB of memory and 9 slots left once its clients run,
@@ -116,7 +115,8 @@ what is left:
   its console is the halt's alone, and a word on the logger's port could carry the end instead.
 - The ESP32-C6's driver stops once the access point lets the station go, and the root task ends the run:
   nothing joins again, as ESP-IDF leaves to the program too.
-- The ESP32-C6's SAE takes 0.4 s between the access point's commit and the station's confirm, two P-256 products in software.
+- The ESP32-C6's SAE takes 0.8 s between the access point's commit and the station's confirm, two P-256 products in software,
+  and its own commit 1.2 s; eee0042 measured half of each, and what doubled them since is not known.
   IEEE 802.11's default has the access point send its own again after 40 ms and give up after a few; the one here waited.
   The chip's ECC accelerator, which no frame lists yet, would shorten it.
 - The ESP32-C6's WPA3 is SAE on P-256 alone: SAE's extended key, of the larger groups, and fast transition are hidden from the libraries.

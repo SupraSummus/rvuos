@@ -65,8 +65,8 @@ $(BUILD)/mbedtls/%.o: $(wildcard $(WIFI_ESP)/mbedtls/*.h $(WIFI_ESP)/mbedtls/lib
 	$(CC) $(ARCHFLAGS) -std=c11 -ffreestanding -fno-builtin -fno-pic -fno-common -nostdlibinc -O2 -g \
 		-ffunction-sections -fdata-sections -w $(MBEDTLS_INC) -c $(MBEDTLS)/$*.c -o $@
 
-$(addprefix $(BUILD)/$(WIFI_ESP)/,supp.o hostap.o crypto.o ec.o mgmt.o): CFLAGS += $(HOSTAP_INC)
-$(addprefix $(BUILD)/$(WIFI_ESP)/,supp.o hostap.o crypto.o ec.o mgmt.o): $(WIFI_ESP_INIT)
+$(addprefix $(BUILD)/$(WIFI_ESP)/,supp.o wpa.o hostap.o crypto.o ec.o mgmt.o): CFLAGS += $(HOSTAP_INC)
+$(addprefix $(BUILD)/$(WIFI_ESP)/,supp.o wpa.o hostap.o crypto.o ec.o mgmt.o): $(WIFI_ESP_INIT)
 $(BUILD)/$(WIFI_ESP)/ec.o: CFLAGS += $(MBEDTLS_INC)
 
 # The driver's files that work with hostap's, on the host under the sanitizers, with hostap's own system functions:

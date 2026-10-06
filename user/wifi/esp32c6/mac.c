@@ -287,6 +287,19 @@ const char *mac_channel(uint32_t channel)
     return 0;
 }
 
+/* The libraries' promiscuous mode yet, whose filter of types they write to the MAC. */
+const char *mac_hear(uint32_t what)
+{
+    uint32_t mask = (what & MAC_HEAR_MGMT ? WIFI_PROMIS_FILTER_MASK_MGMT : 0) |
+                    (what & MAC_HEAR_CTRL ? WIFI_PROMIS_FILTER_MASK_CTRL : 0) |
+                    (what & MAC_HEAR_DATA ? WIFI_PROMIS_FILTER_MASK_DATA : 0) |
+                    (what & MAC_HEAR_BROKEN ? WIFI_PROMIS_FILTER_MASK_FCSFAIL : 0);
+    if (esp_wifi_set_promiscuous_filter(&mask) != ESP_OK) {
+        return "the MAC's filter";
+    }
+    return esp_wifi_set_promiscuous(true) == ESP_OK ? 0 : "the MAC's promiscuous mode";
+}
+
 /* 1 if the MAC fills the driver's first descriptor next: it has moved to the driver's list, and filled none of it. */
 static int moved(void)
 {
