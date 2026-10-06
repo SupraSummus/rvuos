@@ -90,10 +90,13 @@ what is left:
   beside the driver on all of them, which stays to be held against it:
   `pp` and `net80211` give way to the driver's own MAC and station, and `osi.c` shrinks to what `libphy.a` calls.
   The driver's own code receives and scans as well as the libraries do, by `listen=` and a scan, each with and without `rx=own`,
-  and sends a probe by `tx=own`, launching the slot and finishing the frame by its own code,
-  so that sending needs no interrupt of theirs; the access point answers it, with `rx=own` or the libraries' own.
-  The station's logic is to be the driver's own too, on hostap's parsing, the keys and then the join among it;
-  `user/wifi/NOTES.md` says why.
+  and sends a probe by `tx=own`, the access point answering it.
+  The station's logic is to be the driver's own too, on hostap's parsing, through the association, the keys and the join;
+  `user/wifi/NOTES.md` says why it is the driver's own.
+  Its frame completion spins in the caller's thread while the slot is armed, and borrows the libraries' slot 0,
+  whose first frame leaves a group 1 timeout bit the driver clears and ignores;
+  an own slot, the driver's own interrupt to finish the frame, and the libraries' retry of a collision or a timeout
+  would do better.
 - The ESP32-C6's Wi-Fi root task has 8 KiB of memory and 9 slots left once its clients run,
   so another client needs room found first, in the driver's block or a smaller `CLIENT_CHAN_SIZE`.
 - The ESP32-C6's echo answers in 13 to 22 ms at the median, the Pico 2 W's in about 5, and the C6's ping in about 10:
@@ -380,6 +383,8 @@ what is left:
 
 ## Code
 
+- The runs that check the ESP32-C6's `mac.c` and the station's own code are `WIFI_CONFIG` variants run by hand,
+  named in `CLAUDE.md`; a target that runs them all, `make BOARD=esp32c6 wifi-esp32c6-mac`, would hold them in one place.
 - The replay driver drains the log by polling after each record,
   so the host models it with one store into the header per event.
   A logger thread in the driver would make traced calls the host would have to follow.

@@ -169,7 +169,7 @@ static void (*drv_entry(void))(struct child_page *)
  * What to do, from the text the loader may have left in the input region: lines of ssid= and pass=,
  * the network to join, and with no ssid, a scan; bssid=, which of the network's access points to join;
  * and run=, how many seconds the run lasts, 0 for good.
- * debug= names what the driver tells besides its steps, any of frames, stats, wpa, air and tx, see drv.h,
+ * debug= names what the driver tells besides its steps, any of frames, stats, wpa and air, see drv.h,
  * and lib= the libraries' log level, 4 for debug and 5 for verbose;
  * ax=0 joins without 802.11ax, pmf=0 without protecting management frames, sae=0 without WPA3's SAE,
  * and ps=1 sleeps between beacons.
@@ -178,6 +178,9 @@ static void (*drv_entry(void))(struct child_page *)
  * rx=own with neither ssid nor listen= has the driver scan by its own code too; see drv.h.
  * probe=, with listen=, has the driver ask for that network on the channel, and count the answers,
  * sent by the libraries or, with tx=own, by the driver's own code; see drv.h.
+ * rx=own with probe= and no tx=own is refused, since the libraries' sending waits on their interrupt, which rx=own takes.
+ * sta=own, with a network named, has the driver scan for it and authenticate to it by its own code,
+ * the first step of its own station, and the run ends once the access point accepts; see drv.h.
  * antenna=ufl has the XIAO's RF switch pick its U.FL connector rather than the antenna on the board,
  * and antenna=none leaves the pins alone, on a board without that switch.
  * The passphrase lives in the driver's page and memory, never in an image.
@@ -204,6 +207,7 @@ static void configure(struct drv *p)
     p->listen = (uint8_t)(channel <= 13 ? channel : 0);
     p->own_rx = (uint8_t)config_has(conf, size, "rx", "own");
     p->own_tx = (uint8_t)config_has(conf, size, "tx", "own");
+    p->own_sta = (uint8_t)config_has(conf, size, "sta", "own");
     config_value(conf, size, "probe", p->probe, sizeof(p->probe));
     run_s = config_number(conf, size, "run", RUN_S);
     antenna = config_has(conf, size, "antenna", "ufl")    ? ANTENNA_UFL

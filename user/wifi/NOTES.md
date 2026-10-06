@@ -458,13 +458,33 @@ which `make beacon-test` runs on the host, under the sanitizers, against every c
 
 Reading what the libraries wrote to a slot to send a frame let the sending be the driver's own:
 with `tx=own` the driver builds the frame's descriptor and programs the slot's PPDU words itself,
-as the libraries' `lmacSetTxFrame` does, and arms the slot, as their `hal_mac_txq_enable` does,
-for a legacy frame at one Mbit; a probe sent so is answered by the access point.
+as the libraries' `lmacSetTxFrame` does, arms the slot, as their `hal_mac_txq_enable` does,
+and programs a slot the libraries' lmac still names, for a legacy frame at one Mbit;
+a probe sent so is answered by the access point.
 
-The completion is the driver's too. Arming alone left the frame unfinished when the driver held the interrupt,
-which `rx=own` does: the MAC's hardware txq sets a bit in its state when it has taken the slot,
+The completion is the driver's too.
+Arming alone left the frame unfinished when the driver held the interrupt, which `rx=own` does:
+the MAC leaves a bit in its hardware txq's state when the frame is done,
 and the libraries' `lmacProcessTxComplete`, which their interrupt posts, is what cleared it, and the slot's arm bits with it.
-The driver clears that bit now, as `hal_mac_clr_txq_state` does, while it waits for the arm bits to clear,
+The driver clears that bit now, as `hal_mac_clr_txq_state(2, slot)` does, while it waits for the arm bits to clear,
 so a probe sent with both `rx=own` and `tx=own` is answered the same, and their interrupt is needed for neither.
-It still clears the queue's own state byte, which `lmac_stop_hw_txq` reads, to leave the slot alone,
-and reads no completion result; `pp` and `net80211` stay only for the station's own logic until that too is the driver's.
+The state's other two groups are a timeout and a collision, which the driver clears and ignores for now:
+on the chip the first frame after it takes the interrupt leaves a group 1 timeout bit and is sent all the same,
+so reading that as a failure would fail a frame the access point answered.
+An own slot of the driver's, rather than the libraries' slot 0, would keep their completions out of its way;
+the libraries' pp, which retries a collision or a timeout, would do better than clearing and going on.
+It still clears the queue's own state byte, which `lmac_stop_hw_txq` reads to leave the slot alone
+and `lmacProcessTxComplete` reads to skip a queue it is not finishing,
+and reads no completion result; `pp` and `net80211` stay for the slot the driver borrows and the station's own logic.
+
+## The station's own authentication
+
+The station's own logic begins with the authentication.
+With `sta=own` the driver scans for the network by its own code, takes the access point heard strongest, or the page's bssid,
+retunes to it, and sends an open-system Authentication frame by `mac_tx`, reading the answer through `mac.c`;
+the access point accepts it, and the libraries' station is never asked to connect.
+The scan and the authentication are two takes of the receiving one after another, which found a fault:
+`mac_rx_take` made its list again each time, while `mac_rx_give_back` left the head and tail of the first list in place,
+so the second take linked its list after the first's and no frame came;
+the take makes the list whole again now, and its descriptors and buffers are made once and used again.
+The association, the keys and so the join are to follow the same way; `TODO.md` says what is left.

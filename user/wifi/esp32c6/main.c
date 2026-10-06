@@ -283,6 +283,103 @@ static void scan_own(struct drv *d)
 }
 
 /*
+ * The station's own authentication, the first step of its own logic: the driver scans for the network by its own code,
+ * takes the access point heard strongest, or the page's bssid, retunes to it and sends an open-system
+ * Authentication frame by mac_tx, reading the answer through mac.c; the libraries only bring the MAC up.
+ * The libraries' station is not asked to connect, so a run with sta=own ends after the authentication, and the
+ * association, the keys and the join are to follow; see TODO.md.
+ */
+#define AUTH_MGMT     0xb0u /* management, subtype Authentication */
+#define AUTH_HEADER   24u   /* frame control, duration, the three addresses and the sequence number */
+#define AUTH_OPEN     0u
+#define AUTH_REQ_SEQ  1u
+#define AUTH_RESP_SEQ 2u
+#define AUTH_WAIT_US  200000u
+
+static volatile uint32_t auth_done, auth_status;
+static uint8_t auth_ap[6];
+
+/* The Authentication answer from the access point, its transaction read; the receiver's thread alone writes. */
+static void auth_heard(const uint8_t *c)
+{
+    const uint8_t *f = c + RX_CTRL_SIZE;
+    if (!rx_ctrl_whole(c) || rx_ctrl_len(c) < AUTH_HEADER + 6u || f[0] != AUTH_MGMT) {
+        return;
+    }
+    if (memcmp(f + 4, drv_self->mac, 6) != 0 || memcmp(f + 10, auth_ap, 6) != 0) {
+        return;
+    }
+    if (((uint32_t)f[AUTH_HEADER + 2] | (uint32_t)f[AUTH_HEADER + 3] << 8) == AUTH_RESP_SEQ) {
+        auth_status = (uint32_t)f[AUTH_HEADER + 4] | (uint32_t)f[AUTH_HEADER + 5] << 8;
+        auth_done = 1;
+    }
+}
+
+/* The access point for the network: the page's bssid, or the strongest whose ssid is the network's. */
+static const struct drv_net *net_for(const struct drv *d)
+{
+    for (uint32_t i = 0; i < d->net_count; i++) {
+        if (d->bssid_set ? memcmp(d->nets[i].bssid, d->bssid, 6) == 0 : streq(d->nets[i].ssid, d->ssid)) {
+            return &d->nets[i];
+        }
+    }
+    return 0;
+}
+
+/* An open-system Authentication frame to the access point, from the station. */
+static uint32_t auth_request(uint8_t *f, const uint8_t *ap, const uint8_t *mac)
+{
+    uint32_t n = 0;
+    f[n++] = AUTH_MGMT;
+    f[n++] = 0;
+    f[n++] = 0;
+    f[n++] = 0;
+    memcpy(f + n, ap, 6);
+    memcpy(f + n + 6, mac, 6);
+    memcpy(f + n + 12, ap, 6);
+    n += 18;
+    f[n++] = 0;
+    f[n++] = 0;
+    f[n++] = (uint8_t)AUTH_OPEN;
+    f[n++] = 0;
+    f[n++] = (uint8_t)AUTH_REQ_SEQ;
+    f[n++] = 0;
+    f[n++] = 0;
+    f[n++] = 0;
+    return n;
+}
+
+static __attribute__((noreturn)) void auth_own(struct drv *d)
+{
+    scan_own(d);
+    const struct drv_net *ap = net_for(d);
+    must(d, "the network to authenticate to", ap ? ESP_OK : ESP_FAIL);
+    memcpy(auth_ap, ap->bssid, 6);
+    drv_say("auth: %s at %02x:%02x:%02x:%02x:%02x:%02x, channel %u\n", ap->ssid, ap->bssid[0], ap->bssid[1],
+            ap->bssid[2], ap->bssid[3], ap->bssid[4], ap->bssid[5], (unsigned)ap->channel);
+    const char *failed = mac_rx_take(auth_heard);
+    must(d, failed ? failed : "the MAC receives into the driver's list", failed ? ESP_FAIL : ESP_OK);
+    mac_channel(ap->channel);
+    static uint8_t frame[AUTH_HEADER + 6u];
+    uint32_t n = auth_request(frame, ap->bssid, d->mac);
+    auth_done = 0;
+    auth_status = 0;
+    failed = mac_tx(frame, n);
+    must(d, failed ? failed : "the authentication frame", failed ? ESP_FAIL : ESP_OK);
+    uint64_t start = osi_now_us();
+    while (!auth_done && osi_now_us() - start < AUTH_WAIT_US) {
+        osi_delay_ms(2);
+    }
+    mac_rx_give_back();
+    drv_say("auth: %s, status %u\n", auth_done ? (auth_status == 0 ? "accepted" : "refused") : "no answer",
+            (unsigned)auth_status);
+    must(d, "the authentication answered", auth_done && auth_status == 0 ? ESP_OK : ESP_FAIL);
+    radio_off();
+    drv_say("driver: authenticated; the radio is off\n");
+    child_stop(&d->c, DRV_SCANNED);
+}
+
+/*
  * A line about an Ethernet frame for debug=frames: which way it goes, its addresses, its type and length,
  * and what its ARP header asks or tells, or its IPv4 header's addresses and protocol, with UDP's or TCP's ports.
  */
@@ -662,6 +759,9 @@ static __attribute__((noreturn)) void listen(struct drv *d)
     must(d, "promiscuous", esp_wifi_set_promiscuous(true));
     must(d, "the channel", esp_wifi_set_channel(d->listen, 0));
     if (d->own_rx) {
+        /* The libraries' sending waits on their interrupt, which mac_rx_take takes, so their probe cannot be finished. */
+        must(d, "a probe by the libraries with the driver's interrupt",
+             d->probe[0] && !d->own_tx ? ESP_FAIL : ESP_OK);
         const char *failed = mac_rx_take(heard);
         must(d, failed ? failed : "the MAC receives into the driver's list", failed ? ESP_FAIL : ESP_OK);
     }
@@ -723,6 +823,7 @@ static __attribute__((noreturn)) void listen(struct drv *d)
     }
     radio_off();
     must(d, "a frame heard", hear.frames != 0 ? ESP_OK : ESP_FAIL);
+    must(d, "every probe sent", probes_failed == 0 ? ESP_OK : ESP_FAIL);
     must(d, "a probe answered", probe_len == 0 || hear.answers != 0 ? ESP_OK : ESP_FAIL);
     drv_say("driver: stopped listening; the radio is off\n");
     child_stop(&d->c, DRV_LEFT);
@@ -763,6 +864,9 @@ static __attribute__((noreturn)) void run(struct drv *d)
         radio_off();
         drv_say("driver: %u bytes of heap free; the radio is off\n", (unsigned)osi_heap_free());
         child_stop(&d->c, DRV_SCANNED);
+    }
+    if (d->own_sta) {
+        auth_own(d);
     }
     join(d);
     drv_say("driver: joined, %u bytes of heap free\n", (unsigned)osi_heap_free());

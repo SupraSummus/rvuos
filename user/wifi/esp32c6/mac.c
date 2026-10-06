@@ -260,22 +260,32 @@ static int moved(void)
 /*
  * The MAC stops receiving, and the libraries' task is left 50 ms for the frames it has, so that it walks no list
  * after the MAC moved to the driver's; then the interrupt is the driver's, and the MAC receives into its list.
+ * The list, its descriptors and buffers are made once and used again, and the list is emptied, since after a
+ * mac_rx_give_back and a second take the head and tail would still name the first take's list.
  */
 const char *mac_rx_take(mac_heard_fn *heard)
 {
-    rx.descs = osi_calloc(RX_DESCS, sizeof(struct desc));
     if (rx.descs == 0) {
-        return "the MAC's descriptors";
+        rx.descs = osi_calloc(RX_DESCS, sizeof(struct desc));
+        if (rx.descs == 0) {
+            return "the MAC's descriptors";
+        }
+        for (uint32_t i = 0; i < RX_DESCS; i++) {
+            struct desc *d = &rx.descs[i];
+            d->buf = osi_malloc(RX_BUF_SIZE + 4u);
+            if (d->buf == 0) {
+                return "the MAC's buffers";
+            }
+        }
     }
+    /* The list is made whole again: a previous take may have left the links broken at the frames it collected. */
     for (uint32_t i = 0; i < RX_DESCS; i++) {
         struct desc *d = &rx.descs[i];
-        d->buf = osi_malloc(RX_BUF_SIZE + 4u);
-        if (d->buf == 0) {
-            return "the MAC's buffers";
-        }
         d->flags = RX_BUF_SIZE;
         d->next = i + 1 < RX_DESCS ? d + 1 : 0;
     }
+    rx.head = 0;
+    rx.tail = 0;
     rx.heard = heard;
     wr(RX_CTRL, rd(RX_CTRL) & ~RX_CTRL_ENABLE);
     osi_delay_ms(50);
@@ -315,11 +325,13 @@ void mac_rx_give_back(void)
  * The libraries' lmacSetTxFrame and lmacTxFrame, read in their code,
  * build a three-word descriptor of the frame, program the slot's PPDU words, and tell the slot to send;
  * the driver does the same, with the MAC's registers as hal_mac_tx.o names them.
- * The frame's completion is the driver's too: the MAC leaves a bit in a hardware txq's state when it has taken the slot,
+ * The frame's completion is the driver's too: the MAC leaves a bit in a hardware txq's state when the frame is done,
  * and the driver clears it as the libraries' lmacProcessTxComplete does, which lets the slot's arm bits clear;
- * the libraries' interrupt may finish the frame instead, the driver and their pp treading the same state harmlessly.
- * It clears the queue's own state byte to zero, which the libraries' lmac_stop_hw_txq reads, so that their way out
- * leaves the slot alone; and with tx=own nothing else sends, so the driver may use the slot.
+ * it clears the state's other groups too, a timeout's and a collision's, but reads no result of its own yet.
+ * The libraries' interrupt may finish the frame instead, the driver and their pp treading the same state harmlessly.
+ * It clears the queue's own state byte to zero, which the libraries' lmac_stop_hw_txq reads so that their way out
+ * leaves the slot alone, and which their lmacProcessTxComplete reads to skip a queue it is not finishing;
+ * and with tx=own nothing else sends, so the driver may use the slot.
  */
 
 /* The slot's words, less for each slot, in hal_mac_tx.o's two blocks: the queue's, then the PPDU's. */
@@ -341,31 +353,16 @@ void mac_rx_give_back(void)
 #define TX_PLCP0_ARM    0xc0000000u
 
 /*
- * The MAC's hardware txq state, which its completion clears; hal_mac_tx.o's hal_mac_get_txq_state and
- * hal_mac_clr_txq_state read and clear them: groups 0 and 1 in one word, group 2 in another,
+ * The MAC's hardware txq state, which its events clear: hal_mac_tx.o's hal_mac_get_txq_state and
+ * hal_mac_clr_txq_state read and clear them, in three groups, groups 0 and 1 in one word and group 2 in another,
  * a group 0 or 1 bit cleared by a write of its own, a group 2 bit by a read, an or and a write.
+ * A group 2 bit is a frame's completion, which lmacProcessTxComplete reads, a group 1 bit a timeout,
+ * which lmacProcessTxTimeout disables the transmit for, and a group 0 bit a collision, which lmacProcessCollisions_task does.
  */
 #define TXQ_STATE01 (MAC_BASE + 0xcb0u)
 #define TXQ_STATE2  (MAC_BASE + 0xcb8u)
 #define TXQ_CLR01   (MAC_BASE + 0xcacu)
 #define TXQ_CLR2    (MAC_BASE + 0xcb4u)
-
-/* The completion of the driver's own slot: the MAC sets a bit in a hardware txq's state when a slot's frame is done,
- * and this clears it, as the libraries' lmacProcessTxComplete clears the bit of the queue it finds, which lets the
- * slot's arm bits clear and the frame leave. */
-static void finish(uint32_t s)
-{
-    uint32_t st01 = rd(TXQ_STATE01), st2 = rd(TXQ_STATE2);
-    if (st01 & (1u << s)) {
-        wr(TXQ_CLR01, 1u << s);
-    }
-    if (st01 & (1u << (16u + s))) {
-        wr(TXQ_CLR01, 1u << (16u + s));
-    }
-    if (st2 & (1u << s)) {
-        wr(TXQ_CLR2, rd(TXQ_CLR2) | (1u << s));
-    }
-}
 
 /* CONF1's access class and lifetime, and the rest of a legacy frame at one Mbit, as a run's first probe left them. */
 #define TX_AIFSN       2u
@@ -445,20 +442,29 @@ const char *mac_tx(const uint8_t *frame, uint32_t len)
     wr(TX_PLCP0(s), rd(TX_PLCP0(s)) | TX_PLCP0_ARM);
 
     /*
-     * The MAC clears the arm bits once the frame is done; the driver reads no result beyond that,
-     * clearing the hw txq state the completion leaves for as long as the arm bits say the frame is not done.
-     * The bit is cleared once more after, the completion of a frame the libraries' interrupt ended among them.
+     * The MAC clears the arm bits once the frame is done; the driver waits on them, clearing the hardware txq state's
+     * bits for its slot as they come, as hal_mac_clr_txq_state does for each of its three groups.
+     * A group 2 bit is the completion, a group 1 bit a timeout and a group 0 bit a collision,
+     * but the driver reads no result: on the chip the first frame after it takes the interrupt leaves a group 1 bit
+     * and is sent all the same, so the driver neither retries nor reports either; an own slot of the driver's,
+     * rather than the libraries' slot 0, would keep their completions out of its way; see TODO.md.
      */
     for (uint32_t spins = 0; spins < TX_DONE_SPINS; spins++) {
-        if (!(rd(TX_PLCP0(s)) & TX_PLCP0_ARM)) {
-            break;
+        uint32_t st2 = rd(TXQ_STATE2);
+        if (st2 & (1u << s)) {
+            wr(TXQ_CLR2, rd(TXQ_CLR2) | (1u << s));
         }
-        finish(s);
+        uint32_t st01 = rd(TXQ_STATE01);
+        if (st01 & (1u << (16u + s))) {
+            wr(TXQ_CLR01, 1u << (16u + s));
+        }
+        if (st01 & (1u << s)) {
+            wr(TXQ_CLR01, 1u << s);
+        }
+        if (!(rd(TX_PLCP0(s)) & TX_PLCP0_ARM)) {
+            return 0;
+        }
     }
-    if (rd(TX_PLCP0(s)) & TX_PLCP0_ARM) {
-        wr(TX_PLCP0(s), rd(TX_PLCP0(s)) & ~TX_PLCP0_ARM); /* the slot is left as it was found */
-        return "the MAC did not finish the frame";
-    }
-    finish(s);
-    return 0;
+    wr(TX_PLCP0(s), rd(TX_PLCP0(s)) & ~TX_PLCP0_ARM); /* the slot is left as it was found */
+    return "the MAC did not finish the frame";
 }

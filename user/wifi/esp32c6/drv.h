@@ -69,6 +69,8 @@ struct drv_header {
  * then DRV_SCANNED or DRV_JOINED, and once joined it moves frames between the libraries and the link,
  * until the root task asks it to leave, when it leaves, turns the radio off and reports DRV_LEFT;
  * a scan's run turns the radio off before DRV_SCANNED too.
+ * With sta=own and a network named, it scans by its own code, authenticates to that access point by its own code,
+ * and reports DRV_SCANNED once the access point accepts; what follows, the association and the keys, is to come.
  * A step that fails, or the access point letting the station go, is CHILD_FAILED,
  * with the step's name in the page and ESP-IDF's error, or the reason, in its detail.
  * With a channel to listen on and no network named, it hears the channel without joining and reports DRV_LISTENING,
@@ -97,6 +99,7 @@ struct drv {
     uint8_t listen;       /* the channel to hear, 1 to 13, or 0 */
     uint8_t own_rx;       /* hear it, or scan, through mac.c rather than the libraries */
     uint8_t own_tx;       /* send the probe through mac.c rather than the libraries; see mac.h */
+    uint8_t own_sta;      /* authenticate, and what follows, by the driver's own code rather than the libraries */
     char probe[33];       /* the network to probe for while listening, or empty */
     struct chan_end link; /* to the network process, connected before the start */
     /* From the root task, while it runs. */
