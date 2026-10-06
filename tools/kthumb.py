@@ -230,9 +230,14 @@ def formed(insns, image, sections):
     since every way to the movt then runs through the movw, as clang lays a constant out,
     right before the movt or with other instructions scheduled between;
     so a movw of a mask the register held earlier does not pair with it.
+    A movw that pairs so forms no address alone when nothing between reads its register,
+    an instruction that names it, takes a list of a range or transfers control,
+    since then its half is never used before the movt completes it.
     A mov or mvn of an immediate forms a small number, as li does, however often it equals a function's address."""
     out = set()
     lows = {}
+    alone = {}
+    completed = set()
     landings = set()
     jumps_through = False
     for i, (pc, mnem, ops) in enumerate(insns):
@@ -254,13 +259,26 @@ def formed(insns, image, sections):
                     and base_of(insns, j) == "movw" and len(before) == 2 and before[0] == args[0]
                     and before[1].startswith("#")):
                 out.add((high | imm(before[1][1:])) & 0xFFFFFFFF)
+                if not any(may_read(insns[k], args[0]) for k in range(j + 1, i)):
+                    completed.add(j)
             else:
                 out.update((high | low) & 0xFFFFFFFF for low in lows.get(args[0], ()))
         elif m in ("movw", "adr", "ldr") and (v := made(pc, m, args, image, sections)) is not None:
-            out.add(v)
             if m == "movw":
+                alone[i] = v
                 lows.setdefault(args[0], set()).add(v & 0xFFFF)
+            else:
+                out.add(v)
+    out.update(v for i, v in alone.items() if i not in completed)
     return out | {v & ~1 for v in out}
+
+
+def may_read(insn, reg):
+    """Whether an instruction may read reg, or go where code may: it names reg, lists a range of registers, or transfers control."""
+    _, mnem, ops = insn
+    o = operands(ops)
+    return (classify(mnem, ops)[0] is not None
+            or re.search(rf"\b{reg}\b", o) is not None or re.search(r"\{[^}]*-[^}]*\}", o) is not None)
 
 
 def table(insns, i, image, sections):
