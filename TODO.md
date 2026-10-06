@@ -90,8 +90,7 @@ what is left:
   beside the driver on all of them, which stays to be held against it:
   `pp` and `net80211` give way to the driver's own MAC and station, and `osi.c` shrinks to what `libphy.a` calls.
   The driver's own code receives and scans as well as the libraries do, by `listen=` and a scan, each with and without `rx=own`;
-  once, at `mac_rx_take`, the MAC stayed on the libraries' list, and why is open: the failure now says whether it took the reload.
-  Next it sends, at the Pico 2 W's access point, then installs keys, then joins, with hostap's supplicant as now.
+  next it sends, at the Pico 2 W's access point, then installs keys, then joins, with hostap's supplicant as now.
   The station's logic is to be the driver's own too, on hostap's parsing; `user/wifi/NOTES.md` says why.
 - The ESP32-C6's Wi-Fi root task has 8 KiB of memory and 9 slots left once its clients run,
   so another client needs room found first, in the driver's block or a smaller `CLIENT_CHAN_SIZE`.

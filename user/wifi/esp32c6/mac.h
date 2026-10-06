@@ -24,6 +24,7 @@ struct mac_rx_counts {
     volatile uint32_t overran;    /* buffers the MAC wrote past their end */
     volatile uint32_t restarted;  /* times the MAC had run out of descriptors and started again */
     volatile uint32_t stuck;      /* times the MAC did not read the list's links again in time */
+    volatile uint32_t repointed;  /* times the take pointed the MAC at the driver's list again */
 };
 extern struct mac_rx_counts mac_rx_counts;
 

@@ -205,9 +205,10 @@ static void scan(struct drv *d)
 static void mac_told(const char *who)
 {
     const struct mac_rx_counts *m = &mac_rx_counts;
-    drv_say("%s: the MAC's interrupts %u, causes %x; frames chained %u, odd %u; overran %u, restarted %u, stuck %u\n",
+    drv_say("%s: the MAC's interrupts %u, causes %x; frames chained %u, odd %u; overran %u, restarted %u, stuck %u; "
+            "pointed again %u\n",
             who, (unsigned)m->interrupts, (unsigned)m->causes, (unsigned)m->chained, (unsigned)m->odd,
-            (unsigned)m->overran, (unsigned)m->restarted, (unsigned)m->stuck);
+            (unsigned)m->overran, (unsigned)m->restarted, (unsigned)m->stuck, (unsigned)m->repointed);
 }
 
 /*

@@ -12,6 +12,8 @@
  * once it has read the link again; a MAC that had run out of descriptors, RX_NEXT 0, is pointed past the last it filled.
  * The driver points the MAC at its own list with RX_BASE and a reload, as esp-wifi-hal does:
  * with RX_BASE alone, the MAC stayed on the libraries' list in one run of four, and filled none of the driver's.
+ * With the reload too it stays there about once in ten, though it takes the reload,
+ * and moves when told again, so the take tells it until it has moved.
  * A buffer starts with the 92 bytes the MAC writes about the reception, esp.h's RX_CTRL_, and the frame follows;
  * the bytes at 0x21 and 0x22 count more before the frame in some, which the libraries skip, and the driver drops yet.
  * The word past each buffer's end holds RX_CANARY, as the libraries keep it, which a MAC that wrote too far changes.
@@ -56,6 +58,7 @@
 #define RELOAD_SPINS 100000u /* the libraries' wait for the reload to be taken */
 #define BUSY_SPINS   100000u /* the wait for the MAC to stop, which the libraries' does not bound */
 #define CAUSE_ROUNDS 8u      /* the causes read again, as long as new ones come */
+#define MOVE_TRIES   8u      /* the MAC pointed at the driver's list again, when a reload left it where it was */
 #define EXTRA_LO     0x21u
 #define EXTRA_HI     0x22u
 #define MAC_SOURCE   0u /* the MAC's interrupt source, Espressif's soc/interrupts.h */
@@ -247,6 +250,12 @@ void mac_channel(uint32_t channel)
     wr(TX_BLOCK, rd(TX_BLOCK) & ~TX_BLOCK_ALL);
 }
 
+/* 1 if the MAC fills the driver's first descriptor next: it has moved to the driver's list, and filled none of it. */
+static int moved(void)
+{
+    return ((rd(RX_NEXT) ^ (uint32_t)(uintptr_t)rx.descs) & 0x000fffffu) == 0;
+}
+
 /*
  * The MAC stops receiving, and the libraries' task is left 50 ms for the frames it has, so that it walks no list
  * after the MAC moved to the driver's; then the interrupt is the driver's, and the MAC receives into its list.
@@ -276,10 +285,15 @@ const char *mac_rx_take(mac_heard_fn *heard)
     rx.taken = 1;
     uint32_t stuck = mac_rx_counts.stuck;
     give(&rx.descs[0], &rx.descs[RX_DESCS - 1]);
-    if ((rd(RX_NEXT) ^ (uint32_t)(uintptr_t)rx.descs) & 0x000fffffu) {
+    for (uint32_t i = 0; i < MOVE_TRIES && !moved(); i++) {
+        osi_delay_ms(1);
+        wr(RX_BASE, (uint32_t)(uintptr_t)rx.descs);
+        reload();
+        mac_rx_counts.repointed++;
+    }
+    if (!moved()) {
         mac_rx_give_back();
-        return mac_rx_counts.stuck != stuck ? "the MAC's move to the driver's list, the reload not taken"
-                                            : "the MAC's move to the driver's list, the reload taken";
+        return mac_rx_counts.stuck != stuck ? "the MAC's move: reload stuck" : "the MAC's move: base not taken";
     }
     wr(RX_CTRL, rd(RX_CTRL) | RX_CTRL_ENABLE);
     return 0;
