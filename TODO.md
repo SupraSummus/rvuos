@@ -10,7 +10,7 @@ where DHCP gives the network process an address
 and a laptop's ping and datagrams to UDP port 7777 are answered;
 its clients, in processes of their own, answer on UDP ports 7, the echo, and 13, the clock,
 and the logger carries the kernel's log to a host on port 7070 while the run lasts.
-`WIFI_CONFIG` in the Makefile says what to do and for how long, and `tools/wifi-run.py` follows the log and checks the clients.
+`WIFI_CONFIG`, see `user/wifi/build.mk`, says what to do and for how long, and `tools/wifi-run.py` follows the log and checks the clients.
 
 - The access point's WPA3 transition mode refuses a station that joins it by WPA2 and checks the RSNXE,
   as hostap's supplicant does, the ESP32-C6's among them:
