@@ -1,12 +1,12 @@
 # A round of each measure of user/bench/ on mps2-an385, in instructions; see tests/bench.py.
-call 526
-signal-wait 1034
-threads 3643
-lock 41
-lock-wait 8322
-lock-lend 8006
-seqlock-write 59
-seqlock-read 66
-processes 4235
-channel 4673
-contended-worst 1707720
+call 487
+signal-wait 956
+threads 3412
+lock 29
+lock-wait 7799
+lock-lend 7469
+seqlock-write 53
+seqlock-read 58
+processes 3977
+channel 4405
+contended-worst 1707960
