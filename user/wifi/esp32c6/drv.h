@@ -52,12 +52,14 @@ struct drv_header {
  * a line for each frame to and from the link, the libraries' counters of the radio once the run is over,
  * hostap's supplicant at its debug level,
  * and once joined, a line for each frame the radio hears of the access point's to the group or to the station,
- * each acknowledgement to the station, and each frame heard broken, timed by the MAC.
+ * each acknowledgement to the station, and each frame heard broken, timed by the MAC;
+ * and of a probe the libraries send, what they wrote to the MAC to send it, see mac.h.
  */
 #define DRV_DEBUG_FRAMES 0x1u
 #define DRV_DEBUG_STATS  0x2u
 #define DRV_DEBUG_WPA    0x4u
 #define DRV_DEBUG_AIR    0x8u
+#define DRV_DEBUG_TX     0x10u
 
 /*
  * The driver's page.
@@ -74,6 +76,8 @@ struct drv_header {
  * With a channel to listen on and no network named, it hears the channel without joining and reports DRV_LISTENING,
  * then tells each second what it heard, and the beacons heard and missed of the access point bssid names or else the first,
  * received by the libraries or, with own_rx, by mac.c, so that the two can be compared; it leaves as when joined.
+ * Listening, with a network to probe for, it asks for it once a second, a few times, as a station that scans asks,
+ * and counts the answers to its own address; a run that heard none fails.
  */
 struct drv {
     struct child_page c;
@@ -94,6 +98,7 @@ struct drv {
     uint32_t lib_log;     /* the libraries' log level, ESP-IDF's wifi_log_level_t, or 0 for its INFO */
     uint8_t listen;       /* the channel to hear, 1 to 13, or 0 */
     uint8_t own_rx;       /* hear it, or scan, through mac.c rather than the libraries */
+    char probe[33];       /* the network to probe for while listening, or empty */
     struct chan_end link; /* to the network process, connected before the start */
     /* From the root task, while it runs. */
     volatile uint32_t leave; /* the run is over: leave the network, and report DRV_LEFT */

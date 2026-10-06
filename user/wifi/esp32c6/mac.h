@@ -35,4 +35,28 @@ void mac_rx_give_back(void);
 /* The radio on another channel, 1 to 13, as the libraries' chm_phy_change_channel retunes it, the MAC held meanwhile. */
 void mac_channel(uint32_t channel);
 
+/*
+ * What the libraries wrote to the MAC to send a frame, for debug=tx, which is to hold the driver's own sending against theirs:
+ * their hal_mac_txq_enable, which starts one of the MAC's slots sending, is wrapped at the link,
+ * and once armed, the next start records the slot's registers, its descriptor and the frame's first bytes, before it starts.
+ */
+#define MAC_TX_PPDU_WORDS 29u
+#define MAC_TX_DESC_WORDS 8u
+#define MAC_TX_FRAME_SIZE 48u
+struct mac_tx_seen {
+    volatile uint32_t armed, full;
+    uint32_t slot;
+    uint32_t queue[4];                /* from 0x600a4d60, less 0x10 a slot */
+    uint32_t ppdu[MAC_TX_PPDU_WORDS]; /* from 0x600a5488, less 0x74 a slot */
+    uint32_t state[4];                /* 0x600a4c5c, 0x600a4ca8, 0x600a4cb0 and 0x600a4cb8 */
+    uint32_t desc_at;                 /* 0 if the slot named no descriptor in RAM */
+    uint32_t desc[MAC_TX_DESC_WORDS];
+    uint32_t frame_at; /* 0 if the descriptor named no buffer in RAM */
+    uint8_t frame[MAC_TX_FRAME_SIZE];
+};
+extern struct mac_tx_seen mac_tx_seen;
+
+/* The slot's PPDU registers as they are now, as mac_tx_seen's ppdu holds them at the start. */
+void mac_tx_ppdu(uint32_t slot, uint32_t *words);
+
 #endif

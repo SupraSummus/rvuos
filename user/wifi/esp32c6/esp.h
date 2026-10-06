@@ -505,6 +505,8 @@ esp_err_t esp_wifi_set_promiscuous_ctrl_filter(const uint32_t *mask);
 esp_err_t esp_wifi_set_promiscuous(bool on);
 /* The channel the radio is on, with wifi_second_chan_t's WIFI_SECOND_CHAN_NONE, 0, for 20 MHz. */
 esp_err_t esp_wifi_set_channel(uint8_t primary, int second);
+/* A whole 802.11 frame sent as given, its FCS left to the MAC, its sequence number the libraries' if sys_seq. */
+esp_err_t esp_wifi_80211_tx(int ifx, const void *buffer, int len, bool sys_seq);
 
 /* The station's received frames, as Ethernet frames, each to be freed by eb once read. */
 esp_err_t esp_wifi_internal_reg_rxcb(int ifx, esp_err_t (*fn)(void *buffer, uint16_t len, void *eb));

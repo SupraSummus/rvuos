@@ -527,10 +527,69 @@ static __attribute__((noreturn)) void serve(struct drv *d)
 
 static struct hear {
     volatile uint32_t frames, broken, beacons, missed, rssi;
+    volatile uint32_t answers, retried; /* probe responses to the station, and of them those sent again */
 } hear;
 static uint8_t hear_ap[6];
 static int hear_ap_set, hear_tsf_set;
 static uint32_t hear_tsf;
+
+/*
+ * A probe request, as a station that scans sends one: to every station, from the station's own address,
+ * asking for one network, with the rates the station takes and the channel it asks on; the MAC adds the FCS.
+ */
+#define PROBE_REQUEST  0x40
+#define PROBE_RESPONSE 0x50
+#define PROBE_SSID     36 /* where a probe response's elements start, after its timestamp, interval and capabilities */
+#define PROBES         5u
+#define PROBE_MAX      (24u + 2u + 32u + 10u + 6u + 3u)
+
+static uint8_t probe_from[6];
+static uint8_t probe_ap[6];
+
+static uint32_t probe_request(uint8_t *f, const char *ssid, uint32_t channel)
+{
+    static const uint8_t rates[] = { 1, 8, 0x82, 0x84, 0x8b, 0x96, 0x0c, 0x12, 0x18, 0x24 };
+    static const uint8_t more_rates[] = { 50, 4, 0x30, 0x48, 0x60, 0x6c };
+    uint32_t n = 0, len = strlen(ssid);
+    f[n++] = PROBE_REQUEST;
+    f[n++] = 0;
+    f[n++] = 0;
+    f[n++] = 0;
+    memset(f + n, 0xff, 6);
+    memcpy(f + n + 6, probe_from, 6);
+    memset(f + n + 12, 0xff, 6);
+    n += 18;
+    f[n++] = 0;
+    f[n++] = 0;
+    f[n++] = 0;
+    f[n++] = (uint8_t)len;
+    memcpy(f + n, ssid, len);
+    n += len;
+    memcpy(f + n, rates, sizeof(rates));
+    n += sizeof(rates);
+    memcpy(f + n, more_rates, sizeof(more_rates));
+    n += sizeof(more_rates);
+    f[n++] = 3;
+    f[n++] = 1;
+    f[n++] = (uint8_t)channel;
+    return n;
+}
+
+/* A probe response to the station, for the network it asks for. */
+static void heard_answer(const uint8_t *f, uint32_t len)
+{
+    const char *ssid = drv_self->probe;
+    uint32_t n = strlen(ssid);
+    if (len < PROBE_SSID + 2u + n + 4u || memcmp(f + 4, probe_from, 6) != 0 || f[PROBE_SSID] != 0 ||
+        f[PROBE_SSID + 1] != n || memcmp(f + PROBE_SSID + 2, ssid, n) != 0) {
+        return;
+    }
+    memcpy(probe_ap, f + 16, 6);
+    hear.answers++;
+    if (f[1] & 0x08u) {
+        hear.retried++;
+    }
+}
 
 static void heard(const uint8_t *c)
 {
@@ -538,6 +597,10 @@ static void heard(const uint8_t *c)
     hear.frames++;
     if (!rx_ctrl_whole(c)) {
         hear.broken++;
+        return;
+    }
+    if (f[0] == PROBE_RESPONSE && drv_self->probe[0]) {
+        heard_answer(f, rx_ctrl_len(c));
         return;
     }
     if (f[0] != BEACON || rx_ctrl_len(c) < BEACON_MIN) {
@@ -567,6 +630,38 @@ static void heard_by_libraries(void *buf, int type)
 {
     (void)type;
     heard(buf);
+}
+
+/* What the libraries wrote to the MAC to send the first probe, for debug=tx, into the log; see mac.h. */
+static void words_told(const char *what, const uint32_t *w, uint32_t n)
+{
+    for (uint32_t i = 0; i < n; i += 8) {
+        char line[96];
+        uint32_t k = 0;
+        for (uint32_t j = i; j < n && j < i + 8; j++) {
+            k += (uint32_t)snprintf(line + k, sizeof(line) - k, " %08x", (unsigned)w[j]);
+        }
+        drv_say("tx: %s +%02x:%s\n", what, (unsigned)(4u * i), line);
+    }
+}
+
+static void tx_told(void)
+{
+    const struct mac_tx_seen *s = &mac_tx_seen;
+    uint32_t now[MAC_TX_PPDU_WORDS];
+    mac_tx_ppdu(s->slot, now);
+    drv_say("tx: slot %u\n", (unsigned)s->slot);
+    words_told("queue", s->queue, 4);
+    words_told("state", s->state, 4);
+    words_told("ppdu", s->ppdu, MAC_TX_PPDU_WORDS);
+    words_told("ppdu after", now, MAC_TX_PPDU_WORDS);
+    drv_say("tx: descriptor at %08x\n", (unsigned)s->desc_at);
+    words_told("descriptor", s->desc, s->desc_at ? MAC_TX_DESC_WORDS : 0);
+    char line[2 * MAC_TX_FRAME_SIZE + 1];
+    for (uint32_t i = 0; i < MAC_TX_FRAME_SIZE; i++) {
+        snprintf(line + 2 * i, 3, "%02x", s->frame[i]);
+    }
+    drv_say("tx: frame at %08x: %s\n", (unsigned)s->frame_at, s->frame_at ? line : "");
 }
 
 /* What was heard since then, into the log, over ms milliseconds. */
@@ -599,8 +694,18 @@ static __attribute__((noreturn)) void listen(struct drv *d)
     must(d, "promiscuous", esp_wifi_set_promiscuous(true));
     must(d, "the channel", esp_wifi_set_channel(d->listen, 0));
     if (d->own_rx) {
+        must(d, "a probe, with rx=own", d->probe[0] ? ESP_FAIL : ESP_OK);
         const char *failed = mac_rx_take(heard);
         must(d, failed ? failed : "the MAC receives into the driver's list", failed ? ESP_FAIL : ESP_OK);
+    }
+    static uint8_t probe[PROBE_MAX];
+    uint32_t probe_len = 0, probes = 0, probes_failed = 0, tx_shown = 0;
+    if (d->probe[0]) {
+        must(d, "the station's address", esp_wifi_get_mac(WIFI_IF_STA, probe_from));
+        probe_len = probe_request(probe, d->probe, d->listen);
+        drv_say("driver: probing for %s on channel %u from %02x:%02x:%02x:%02x:%02x:%02x, by the libraries\n", d->probe,
+                (unsigned)d->listen, probe_from[0], probe_from[1], probe_from[2], probe_from[3], probe_from[4],
+                probe_from[5]);
     }
     child_report(&d->c, DRV_LISTENING);
     struct hear first = { 0 }, then = { 0 };
@@ -616,6 +721,17 @@ static __attribute__((noreturn)) void listen(struct drv *d)
             hear_tell("the last", &then, (uint32_t)((now - told) / 1000u));
             then = hear;
             told = now;
+            if (mac_tx_seen.full && !tx_shown) {
+                tx_told();
+                tx_shown = 1;
+            }
+            if (probe_len && probes < PROBES) {
+                mac_tx_seen.armed = (d->debug & DRV_DEBUG_TX) != 0;
+                if (esp_wifi_80211_tx(WIFI_IF_STA, probe, (int)probe_len, true) != ESP_OK) {
+                    probes_failed++;
+                }
+                probes++;
+            }
         }
         rv_wait(CHILD_INBOX, &bits);
     }
@@ -625,8 +741,14 @@ static __attribute__((noreturn)) void listen(struct drv *d)
     }
     hear_tell(d->own_rx ? "by mac.c, in" : "by the libraries, in", &first,
               (uint32_t)((osi_now_us() - start) / 1000u));
+    if (probe_len) {
+        drv_say("probe: %u sent, %u refused; %u answers from %02x:%02x:%02x:%02x:%02x:%02x, %u of them sent again\n",
+                (unsigned)probes, (unsigned)probes_failed, (unsigned)hear.answers, probe_ap[0], probe_ap[1], probe_ap[2],
+                probe_ap[3], probe_ap[4], probe_ap[5], (unsigned)hear.retried);
+    }
     radio_off();
     must(d, "a frame heard", hear.frames != 0 ? ESP_OK : ESP_FAIL);
+    must(d, "a probe answered", probe_len == 0 || hear.answers != 0 ? ESP_OK : ESP_FAIL);
     drv_say("driver: stopped listening; the radio is off\n");
     child_stop(&d->c, DRV_LEFT);
 }

@@ -307,3 +307,52 @@ void mac_rx_give_back(void)
         rx.taken = 0;
     }
 }
+
+#define TX_QUEUE(s)  (MAC_BASE + 0xd60u - (s) * 0x10u)
+#define TX_PPDU(s)   (MAC_BASE + 0x1488u - (s) * 0x74u)
+#define TX_SLOTS     5u
+#define RAM_LOW      0x40800000u
+#define RAM_HIGH     0x40880000u
+#define RAM_ADDR(lo) (RAM_LOW | ((lo) & 0x000fffffu))
+
+struct mac_tx_seen mac_tx_seen;
+
+static int in_ram(uint32_t a, uint32_t size)
+{
+    return a >= RAM_LOW && a <= RAM_HIGH - size;
+}
+
+void mac_tx_ppdu(uint32_t slot, uint32_t *words)
+{
+    for (uint32_t i = 0; i < MAC_TX_PPDU_WORDS; i++) {
+        words[i] = slot < TX_SLOTS ? rd(TX_PPDU(slot) + 4u * i) : 0;
+    }
+}
+
+int __real_hal_mac_txq_enable(uint32_t slot);
+int __wrap_hal_mac_txq_enable(uint32_t slot);
+
+int __wrap_hal_mac_txq_enable(uint32_t slot)
+{
+    struct mac_tx_seen *s = &mac_tx_seen;
+    if (s->armed && !s->full && slot < TX_SLOTS) {
+        static const uint32_t state[4] = { MAC_BASE + 0xc5cu, MAC_BASE + 0xca8u, MAC_BASE + 0xcb0u, MAC_BASE + 0xcb8u };
+        s->slot = slot;
+        for (uint32_t i = 0; i < 4; i++) {
+            s->queue[i] = rd(TX_QUEUE(slot) + 4u * i);
+            s->state[i] = rd(state[i]);
+        }
+        mac_tx_ppdu(slot, s->ppdu);
+        uint32_t at = RAM_ADDR(s->queue[3]);
+        s->desc_at = in_ram(at, sizeof(s->desc)) ? at : 0;
+        for (uint32_t i = 0; s->desc_at && i < MAC_TX_DESC_WORDS; i++) {
+            s->desc[i] = rd(at + 4u * i);
+        }
+        s->frame_at = s->desc_at && in_ram(s->desc[1], MAC_TX_FRAME_SIZE) ? s->desc[1] : 0;
+        for (uint32_t i = 0; s->frame_at && i < MAC_TX_FRAME_SIZE; i++) {
+            s->frame[i] = ((const volatile uint8_t *)(uintptr_t)s->frame_at)[i];
+        }
+        s->full = 1;
+    }
+    return __real_hal_mac_txq_enable(slot);
+}

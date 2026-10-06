@@ -577,8 +577,10 @@ $(BUILD)/$(WIFI_ESP)/esp_wifi_regulatory.o: $(WIFI_ESP_INIT)
 	$(CC) $(CFLAGS) -Wno-unterminated-string-initialization -I$(WIFI_ESP)/shim \
 		-c $(PHYBLOB_CACHE)/esp_wifi_regulatory.c -o $@
 
+# The libraries' start of a slot of the MAC sending goes through mac.c, which records it for debug=tx.
 $(BUILD)/wifi-drv.elf: $(WIFI_ESP_OBJ) $(LIB_OBJ) $(BUILD)/$(WIFI_ESP)/flash.ld $(BUILD)/$(WIFI_ESP)/libphy.a
 	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/$(WIFI_ESP)/flash.ld $(foreach s,$(WIFI_ESP_ROM),-Wl,-T,$(s)) \
+		-Wl,--wrap=hal_mac_txq_enable \
 		$(WIFI_ESP_OBJ) $(LIB_OBJ) -Wl,--start-group $(WIFI_ESP_LIBS) -Wl,--end-group -o $@
 
 $(BUILD)/wifi-drv.bin: $(BUILD)/wifi-drv.elf
