@@ -452,7 +452,7 @@ and the MAC writes into RAM the driver allocates, which open decision 13 trusts 
 counted by the access point's own clock: a count by sequence numbers took its bursts to other stations for losses.
 A scan of the driver's own followed, passive as the libraries' now is too:
 the radio retuned through `libphy.a` alone, as the libraries retune it, and each beacon read by hostap's parser,
-which `make beacon-test` runs on the host, under the sanitizers, against every cut of a beacon.
+which `make mgmt-test` runs on the host, under the sanitizers, against every cut of a beacon.
 
 ## The MAC's sending, the driver's own
 
@@ -490,3 +490,16 @@ the access point accepts it, and the libraries' station is never asked to connec
 The scan and the authentication are two takes of the receiving one after another,
 so `mac_rx_take` makes its list whole again at each take, its descriptors and buffers made once.
 The association, the keys and so the join are to follow the same way; `TODO.md` says what is left.
+
+## A footing for the station
+
+A review before the association found the station growing in `main.c` on bare offsets,
+which is how the probe's wildcard SSID got through,
+and two things from the air reaching too far:
+a beacon's channel went to the radio unchecked, so one naming channel 14 would have tuned it out of Europe's band,
+and a frame's length came from the PHY's header, never held against what the MAC wrote.
+`mac_channel` now refuses any channel but 1 to 13,
+`mac.c` hands a reader the frame alone, its length within what was written,
+and the station's frames are `mgmt.c`'s, on hostap's definitions, which `make mgmt-test` reads back on the host.
+The bound wanted a measurement first: the MAC writes a frame without its FCS, padded to a whole word,
+and the first bound, which counted the FCS, dropped every frame of the first run.

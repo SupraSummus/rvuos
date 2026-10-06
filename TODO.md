@@ -96,11 +96,17 @@ what is left:
   Its frame completion spins in the caller's thread while the slot is armed, and borrows the libraries' slot 0;
   an own slot, the driver's own interrupt to finish the frame, and the libraries' retry of a collision or a timeout,
   with their invalidation of the queue on a timeout, would do better.
-- The ESP32-C6 driver's own frames, the probe request and the authentication, and the association's to come,
-  are built in `main.c`, which only a board's run reaches, and that run passes on a malformed frame an access point answers,
-  as one with a wildcard SSID element before its own.
-  Their builders in a file of their own, parsed on the host by hostap as `make beacon-test` parses `beacon.c`'s beacons,
-  would catch that without a board.
+  Before the association:
+  - the station's own thread, which `mac.c`'s frames, timeouts and the root task's asks reach as events,
+    where each step now polls flags of its own that the interrupt's thread writes;
+  - `mac_tx` with one owner, or a lock, since the supplicant's EAPOL and the link's frames will come from two threads,
+    and its one buffer would serve both;
+  - the libraries' functions the driver's own path still calls, the promiscuous filter and the channel among them,
+    behind `mac.h`, so that giving `pp` up rewrites `mac.c` alone;
+  - `supp.c` split from what it asks of the libraries, sending EAPOL and installing a key,
+    so that hostap's supplicant runs over the driver's own MAC as over theirs.
+  `mac.c` points a MAC that ran out of descriptors past the last it filled by `RX_BASE` alone,
+  which the take found not always taken; no run has run out yet, `restarted` 0.
 - The ESP32-C6's Wi-Fi root task has 8 KiB of memory and 9 slots left once its clients run,
   so another client needs room found first, in the driver's block or a smaller `CLIENT_CHAN_SIZE`.
 - The ESP32-C6's echo answers in 13 to 22 ms at the median, the Pico 2 W's in about 5, and the C6's ping in about 10:

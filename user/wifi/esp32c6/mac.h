@@ -15,15 +15,42 @@
 
 #include <stdint.h>
 
-/* A received frame: the 92 bytes the MAC writes about its reception, esp.h's RX_CTRL_, and the frame after them. */
-typedef void mac_heard_fn(const uint8_t *buf);
+/*
+ * The channels the radio may be tuned to, 2.4 GHz's 1 to 13, as Europe allows:
+ * mac_channel refuses any other, wherever the number came from, a beacon heard among them.
+ */
+#define MAC_CHANNEL_FIRST 1u
+#define MAC_CHANNEL_LAST  13u
+
+/*
+ * A frame received whole: the 802.11 frame without its FCS, and what the MAC says of its reception.
+ * Its length is the MAC's header's less the FCS, never more than the MAC wrote,
+ * so a reader reads only the len bytes at frame, and no header of the MAC's.
+ */
+struct mac_frame {
+    const uint8_t *frame;
+    uint32_t len;
+    int rssi;         /* dBm */
+    uint32_t channel; /* the channel mac_channel last tuned the radio to, or 0 if it did not */
+};
+
+typedef void mac_heard_fn(const struct mac_frame *f);
+
+/*
+ * The frame in buf, which starts with the MAC's 92 bytes about its reception, esp.h's RX_CTRL_,
+ * written bytes in all, the frame among them without its FCS:
+ * 1 if it was received whole, is no shorter than an acknowledgement, and fits what was written.
+ * The libraries' frames come in the same layout.
+ */
+int mac_frame_read(const uint8_t *buf, uint32_t written, struct mac_frame *f);
 
 /* What the receiving met since mac_rx_take, for the log; the interrupt's thread alone writes it. */
 struct mac_rx_counts {
     volatile uint32_t interrupts; /* the MAC's interrupt, however caused */
     volatile uint32_t causes;     /* every cause seen, ORed */
+    volatile uint32_t broken;     /* frames not received whole, dropped */
     volatile uint32_t chained;    /* frames longer than a buffer, in a chain of descriptors, dropped */
-    volatile uint32_t odd;        /* frames whose header the driver does not read yet, or too short for one, dropped */
+    volatile uint32_t odd;        /* frames mac_frame_read refuses, or of a header the driver does not read, dropped */
     volatile uint32_t overran;    /* buffers the MAC wrote past their end */
     volatile uint32_t restarted;  /* times the MAC had run out of descriptors and started again */
     volatile uint32_t stuck;      /* times the MAC did not read the list's links again in time */
@@ -35,12 +62,16 @@ extern struct mac_rx_counts mac_rx_counts;
 const char *mac_rx_take(mac_heard_fn *heard);
 void mac_rx_give_back(void);
 
-/* The radio on another channel, 1 to 13, as the libraries' chm_phy_change_channel retunes it, the MAC held meanwhile. */
-void mac_channel(uint32_t channel);
+/*
+ * The radio on another channel, MAC_CHANNEL_FIRST to MAC_CHANNEL_LAST, as the libraries' chm_phy_change_channel
+ * retunes it, the MAC held meanwhile; 0, or why not, a channel outside them left untuned.
+ */
+const char *mac_channel(uint32_t channel);
 
 /*
  * A frame sent by the driver's own code; 0, or the step that failed, a timeout or a collision among them.
- * The frame is the 802.11 frame without its checksum, which the MAC appends.
+ * The frame is the 802.11 frame without its checksum, which the MAC appends,
+ * and mac_tx gives a management frame the station's next sequence number, as the libraries give theirs.
  * The driver programs a slot the libraries' lmac names, arms it, and finishes the frame itself:
  * it clears the hardware txq state's completion bit, which lets the slot's arm bits clear, and on a timeout's
  * or a collision's bit disarms the slot and fails; the caller may send it again.

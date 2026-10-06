@@ -68,12 +68,12 @@ which fails if the driver's own receiving hears nothing, again with `rx=own` alo
 and again with `listen=`, `probe=` and `tx=own`, without `rx=own`, the driver's own sending,
 which fails if the access point answers none; and with `listen=`, `probe=`, `rx=own` and `tx=own` together,
 which fails if a probe is not sent or not answered, the driver's own completion in place of the libraries'.
-A change to the station's own code in `user/wifi/esp32c6/main.c` runs it with a network named and `sta=own`,
+A change to the station's own code in `user/wifi/esp32c6/main.c` or `mgmt.c` runs it with a network named and `sta=own`,
 the driver's own scan and authentication, which fails if the access point answers none.
 That run first runs `make sae-test`, WPA3's SAE on the host over the driver's `ec.c` and Mbed TLS,
-and `make beacon-test`, `beacon.c` over hostap's parser of elements,
+and `make mgmt-test`, the station's management frames of `mgmt.c` over hostap's parser of elements,
 which `make check` leaves out, as it fetches nothing;
-a change to `ec.c`, `beacon.c` or `user/wifi/esp32c6/mbedtls/` runs them even with no ESP32-C6 connected.
+a change to `ec.c`, `mgmt.c` or `user/wifi/esp32c6/mbedtls/` runs them even with no ESP32-C6 connected.
 The log comes as the run goes, each line timed, and stays in `build/esp32c6/wifi-run.log`;
 the configuration's `debug=` and `lib=`, see `user/wifi/esp32c6/root.c`, have the driver tell more,
 and a fault of one of its threads comes with its stack and the names of its functions.

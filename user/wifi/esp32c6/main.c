@@ -12,12 +12,12 @@
 #include <stdarg.h>
 #include <stdint.h>
 
-#include "beacon.h"
 #include "drv.h"
 #include "esp.h"
 #include "lib/libc.h"
 #include "lib/lock.h"
 #include "mac.h"
+#include "mgmt.h"
 #include "osi.h"
 #include "rvuos.h"
 
@@ -177,7 +177,6 @@ static void config(struct init_config *c, const struct drv *d)
  * A scan hears each channel for SCAN_DWELL_MS, two beacon intervals and a little, and sends nothing:
  * the libraries' passive scan, or with own_rx, the driver's own.
  */
-#define SCAN_CHANNELS 13u
 #define SCAN_DWELL_MS 250u
 
 static void scan(struct drv *d)
@@ -205,10 +204,16 @@ static void scan(struct drv *d)
 static void mac_told(const char *who)
 {
     const struct mac_rx_counts *m = &mac_rx_counts;
-    drv_say("%s: the MAC's interrupts %u, causes %x; frames chained %u, odd %u; overran %u, restarted %u, stuck %u; "
-            "pointed again %u\n",
-            who, (unsigned)m->interrupts, (unsigned)m->causes, (unsigned)m->chained, (unsigned)m->odd,
-            (unsigned)m->overran, (unsigned)m->restarted, (unsigned)m->stuck, (unsigned)m->repointed);
+    drv_say("%s: the MAC's interrupts %u, causes %x; frames broken %u, chained %u, odd %u; overran %u, restarted %u, "
+            "stuck %u; pointed again %u\n",
+            who, (unsigned)m->interrupts, (unsigned)m->causes, (unsigned)m->broken, (unsigned)m->chained,
+            (unsigned)m->odd, (unsigned)m->overran, (unsigned)m->restarted, (unsigned)m->stuck, (unsigned)m->repointed);
+}
+
+/* A step of mac.c's that must succeed: 0, or the step that failed, which stops the driver as must does. */
+static void must_mac(struct drv *d, const char *step, const char *failed)
+{
+    must(d, failed ? failed : step, failed ? ESP_FAIL : ESP_OK);
 }
 
 /*
@@ -217,18 +222,12 @@ static void mac_told(const char *who)
  * It reads beacons alone: it sends no probe, so a probe response it hears answers another station.
  * One that heard none fails, so that a receiver that does not work fails the run.
  */
-#define BEACON 0x80
-
-static volatile uint8_t scan_on; /* the channel being heard */
-
-static void scan_heard(const uint8_t *c)
+static void scan_heard(const struct mac_frame *m)
 {
     struct drv *d = drv_self;
-    struct beacon b;
-    const uint8_t *f = c + RX_CTRL_SIZE;
-    uint32_t len = rx_ctrl_len(c);
-    int rssi = (int8_t)c[RX_CTRL_RSSI];
-    if (!rx_ctrl_whole(c) || len < 4 || f[0] != BEACON || !beacon_read(f, len - 4, scan_on, &b)) {
+    struct mgmt_beacon b;
+    int rssi = m->rssi;
+    if (!mgmt_beacon(m->frame, m->len, (uint8_t)m->channel, &b) || b.probe_response) {
         return;
     }
     uint32_t n = d->net_count, weakest = 0;
@@ -263,11 +262,9 @@ static void scan_own(struct drv *d)
     static const uint32_t mgmt = WIFI_PROMIS_FILTER_MASK_MGMT;
     must(d, "the radio's filter", esp_wifi_set_promiscuous_filter(&mgmt));
     must(d, "promiscuous", esp_wifi_set_promiscuous(true));
-    const char *failed = mac_rx_take(scan_heard);
-    must(d, failed ? failed : "the MAC receives into the driver's list", failed ? ESP_FAIL : ESP_OK);
-    for (uint32_t ch = 1; ch <= SCAN_CHANNELS; ch++) {
-        scan_on = (uint8_t)ch;
-        mac_channel(ch);
+    must_mac(d, "the MAC receives into the driver's list", mac_rx_take(scan_heard));
+    for (uint32_t ch = MAC_CHANNEL_FIRST; ch <= MAC_CHANNEL_LAST; ch++) {
+        mac_channel(ch); /* one of those it tunes to, so never refused */
         osi_delay_ms(SCAN_DWELL_MS);
     }
     mac_rx_give_back();
@@ -283,54 +280,24 @@ static void scan_own(struct drv *d)
 }
 
 /*
- * The 24 bytes of a management frame's header: the subtype, the three addresses and a zero sequence number,
- * which the probe request and the authentication share.
- */
-#define MGMT_HEADER 24u
-
-static uint32_t mgmt_header(uint8_t *f, uint8_t subtype, const uint8_t *da, const uint8_t *sa, const uint8_t *bssid)
-{
-    f[0] = subtype;
-    f[1] = 0;
-    f[2] = 0;
-    f[3] = 0;
-    memcpy(f + 4, da, 6);
-    memcpy(f + 10, sa, 6);
-    memcpy(f + 16, bssid, 6);
-    f[22] = 0;
-    f[23] = 0;
-    return MGMT_HEADER;
-}
-
-/*
  * The station's own authentication, the first step of its own logic: the driver scans for the network by its own code,
  * takes the access point heard strongest, or the page's bssid, retunes to it and sends an open-system
  * Authentication frame by mac_tx, reading the answer through mac.c; the libraries only bring the MAC up.
  * The libraries' station is not asked to connect, so a run with sta=own ends after the authentication, and the
  * association, the keys and the join are to follow; see TODO.md.
  */
-#define AUTH_MGMT     0xb0u /* management, subtype Authentication */
-#define AUTH_OPEN     0u
-#define AUTH_REQ_SEQ  1u
-#define AUTH_RESP_SEQ 2u
-#define AUTH_TRIES    3u
-#define AUTH_WAIT_US  200000u
+#define AUTH_TRIES   3u
+#define AUTH_WAIT_US 200000u
 
 static volatile uint32_t auth_done, auth_status;
 static uint8_t auth_ap[6];
 
-/* The Authentication answer from the access point, its transaction read; the receiver's thread alone writes. */
-static void auth_heard(const uint8_t *c)
+/* The access point's answer to the Authentication; the receiver's thread alone writes. */
+static void auth_heard(const struct mac_frame *m)
 {
-    const uint8_t *f = c + RX_CTRL_SIZE;
-    if (!rx_ctrl_whole(c) || rx_ctrl_len(c) < MGMT_HEADER + 6u || f[0] != AUTH_MGMT) {
-        return;
-    }
-    if (memcmp(f + 4, drv_self->mac, 6) != 0 || memcmp(f + 10, auth_ap, 6) != 0) {
-        return;
-    }
-    if (((uint32_t)f[MGMT_HEADER + 2] | (uint32_t)f[MGMT_HEADER + 3] << 8) == AUTH_RESP_SEQ) {
-        auth_status = (uint32_t)f[MGMT_HEADER + 4] | (uint32_t)f[MGMT_HEADER + 5] << 8;
+    uint16_t status;
+    if (mgmt_auth_answer(m->frame, m->len, drv_self->mac, auth_ap, &status)) {
+        auth_status = status;
         auth_done = 1;
     }
 }
@@ -346,19 +313,6 @@ static const struct drv_net *net_for(const struct drv *d)
     return 0;
 }
 
-/* An open-system Authentication frame to the access point, from the station. */
-static uint32_t auth_request(uint8_t *f, const uint8_t *ap, const uint8_t *mac)
-{
-    uint32_t n = mgmt_header(f, AUTH_MGMT, ap, mac, ap);
-    f[n++] = (uint8_t)AUTH_OPEN;
-    f[n++] = 0;
-    f[n++] = (uint8_t)AUTH_REQ_SEQ;
-    f[n++] = 0;
-    f[n++] = 0;
-    f[n++] = 0;
-    return n;
-}
-
 static __attribute__((noreturn)) void auth_own(struct drv *d)
 {
     scan_own(d);
@@ -367,16 +321,16 @@ static __attribute__((noreturn)) void auth_own(struct drv *d)
     memcpy(auth_ap, ap->bssid, 6);
     drv_say("auth: %s at %02x:%02x:%02x:%02x:%02x:%02x, channel %u\n", ap->ssid, ap->bssid[0], ap->bssid[1],
             ap->bssid[2], ap->bssid[3], ap->bssid[4], ap->bssid[5], (unsigned)ap->channel);
-    const char *failed = mac_rx_take(auth_heard);
-    must(d, failed ? failed : "the MAC receives into the driver's list", failed ? ESP_FAIL : ESP_OK);
-    mac_channel(ap->channel);
-    static uint8_t frame[MGMT_HEADER + 6u];
-    uint32_t n = auth_request(frame, ap->bssid, d->mac);
+    /* The channel a beacon named, which mac_channel may refuse, tuned before the MAC is the driver's. */
+    must_mac(d, "the access point's channel", mac_channel(ap->channel));
+    must_mac(d, "the MAC receives into the driver's list", mac_rx_take(auth_heard));
+    static uint8_t frame[MGMT_FRAME_MAX];
+    uint32_t n = mgmt_auth_request(frame, sizeof(frame), d->mac, ap->bssid);
     /* A frame lost to the air, or answered too late, is sent again a few times, as a station does. */
     auth_done = 0;
     auth_status = 0;
     for (uint32_t tries = 1; tries <= AUTH_TRIES && !auth_done; tries++) {
-        failed = mac_tx(frame, n);
+        const char *failed = mac_tx(frame, n);
         if (failed) {
             drv_say("auth: the authentication frame, try %u: %s\n", (unsigned)tries, failed);
             continue;
@@ -631,12 +585,12 @@ static __attribute__((noreturn)) void serve(struct drv *d)
 }
 
 /*
- * What listen counts, in the thread that receives: every frame and those broken,
+ * What listen counts, in the thread that receives: the frames received whole and those broken,
  * and of the access point followed, its beacons, their RSSI, and the beacons missed,
  * by the access point's own time in each and its beacon interval;
  * a gap of BEACON_GAP_MAX intervals or more, as the access point's restart makes, is not counted.
+ * mac.c hands on no broken frame, but counts them, so with own_rx the broken are its count.
  */
-#define BEACON_MIN     40 /* a beacon's header, timestamp, interval and capabilities, and FCS */
 #define BEACON_GAP_MAX 64u
 
 static struct hear {
@@ -647,78 +601,34 @@ static uint8_t hear_ap[6];
 static int hear_ap_set, hear_tsf_set;
 static uint32_t hear_tsf;
 
-/*
- * A probe request, as a station that scans sends one: to every station, from the station's own address,
- * asking for one network, with the rates the station takes and the channel it asks on; the MAC adds the FCS.
- */
-#define PROBE_REQUEST  0x40
-#define PROBE_RESPONSE 0x50
-#define PROBE_SSID     36 /* where a probe response's elements start, after its timestamp, interval and capabilities */
-#define PROBES         5u
-#define PROBE_MAX      (MGMT_HEADER + 2u + 32u + 10u + 6u + 3u)
+/* The station asks for the page's network PROBES times, a probe request a second, as a station that scans asks. */
+#define PROBES 5u
 
 static uint8_t probe_ap[6];
 
-static uint32_t probe_request(uint8_t *f, const char *ssid, uint32_t channel)
+static void heard(const struct mac_frame *m)
 {
-    static const uint8_t rates[] = { 1, 8, 0x82, 0x84, 0x8b, 0x96, 0x0c, 0x12, 0x18, 0x24 };
-    static const uint8_t more_rates[] = { 50, 4, 0x30, 0x48, 0x60, 0x6c };
-    static const uint8_t bcast[6] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
-    uint32_t len = strlen(ssid);
-    uint32_t n = mgmt_header(f, PROBE_REQUEST, bcast, drv_self->mac, bcast);
-    f[n++] = 0;
-    f[n++] = (uint8_t)len;
-    memcpy(f + n, ssid, len);
-    n += len;
-    memcpy(f + n, rates, sizeof(rates));
-    n += sizeof(rates);
-    memcpy(f + n, more_rates, sizeof(more_rates));
-    n += sizeof(more_rates);
-    f[n++] = 3;
-    f[n++] = 1;
-    f[n++] = (uint8_t)channel;
-    return n;
-}
-
-/* A probe response to the station, for the network it asks for. */
-static void heard_answer(const uint8_t *f, uint32_t len)
-{
-    const char *ssid = drv_self->probe;
-    uint32_t n = strlen(ssid);
-    if (len < PROBE_SSID + 2u + n + 4u || memcmp(f + 4, drv_self->mac, 6) != 0 || f[PROBE_SSID] != 0 ||
-        f[PROBE_SSID + 1] != n || memcmp(f + PROBE_SSID + 2, ssid, n) != 0) {
-        return;
-    }
-    memcpy(probe_ap, f + 16, 6);
-    hear.answers++;
-    if (f[1] & 0x08u) {
-        hear.retried++;
-    }
-}
-
-static void heard(const uint8_t *c)
-{
-    const uint8_t *f = c + RX_CTRL_SIZE;
+    struct drv *d = drv_self;
+    struct mgmt_beacon b;
+    int again;
     hear.frames++;
-    if (!rx_ctrl_whole(c)) {
-        hear.broken++;
+    if (d->probe[0] && mgmt_probe_answer(m->frame, m->len, d->mac, d->probe, &b, &again)) {
+        memcpy(probe_ap, b.bssid, 6);
+        hear.answers++;
+        hear.retried += (uint32_t)again;
         return;
     }
-    if (f[0] == PROBE_RESPONSE && drv_self->probe[0]) {
-        heard_answer(f, rx_ctrl_len(c));
-        return;
-    }
-    if (f[0] != BEACON || rx_ctrl_len(c) < BEACON_MIN) {
+    if (!mgmt_beacon(m->frame, m->len, 0, &b) || b.probe_response) {
         return;
     }
     if (!hear_ap_set) {
-        memcpy(hear_ap, f + 10, 6);
+        memcpy(hear_ap, b.bssid, 6);
         hear_ap_set = 1;
     }
-    if (memcmp(f + 10, hear_ap, 6) != 0) {
+    if (memcmp(b.bssid, hear_ap, 6) != 0) {
         return;
     }
-    uint32_t tsf = le32(f + 24), interval = ((uint32_t)f[32] | (uint32_t)f[33] << 8) * 1024u;
+    uint32_t tsf = (uint32_t)b.tsf, interval = (uint32_t)b.interval * 1024u;
     if (hear_tsf_set && interval != 0) {
         uint32_t gap = (tsf - hear_tsf + interval / 2u) / interval;
         if (gap > 1 && gap < BEACON_GAP_MAX) {
@@ -728,23 +638,41 @@ static void heard(const uint8_t *c)
     hear_tsf = tsf;
     hear_tsf_set = 1;
     hear.beacons++;
-    hear.rssi += (uint32_t)-(int8_t)c[RX_CTRL_RSSI];
+    hear.rssi += (uint32_t)-m->rssi;
 }
 
+/* A frame the libraries heard, in the layout mac.c reads, taken to be as long as its header says: theirs to bound. */
 static void heard_by_libraries(void *buf, int type)
 {
+    const uint8_t *c = buf;
+    struct mac_frame m;
     (void)type;
-    heard(buf);
+    if (!rx_ctrl_whole(c)) {
+        hear.broken++;
+    } else if (mac_frame_read(c, RX_CTRL_SIZE + rx_ctrl_len(c), &m)) {
+        heard(&m);
+    }
 }
 
-/* What was heard since then, into the log, over ms milliseconds. */
+/* What was heard so far, the broken counted where they were dropped. */
+static struct hear heard_so_far(void)
+{
+    struct hear h = hear;
+    if (drv_self->own_rx) {
+        h.broken = mac_rx_counts.broken;
+    }
+    return h;
+}
+
+/* What was heard since then, into the log, over ms milliseconds: every frame, the broken among them. */
 static void hear_tell(const char *what, const struct hear *then, uint32_t ms)
 {
-    uint32_t beacons = hear.beacons - then->beacons;
+    struct hear now = heard_so_far();
+    uint32_t beacons = now.beacons - then->beacons, broken = now.broken - then->broken;
     drv_say("listen: %s %u ms: %u frames, %u broken; %02x:%02x:%02x:%02x:%02x:%02x: %u beacons at -%u dBm, %u missed\n",
-            what, (unsigned)ms, (unsigned)(hear.frames - then->frames), (unsigned)(hear.broken - then->broken),
-            hear_ap[0], hear_ap[1], hear_ap[2], hear_ap[3], hear_ap[4], hear_ap[5], (unsigned)beacons,
-            (unsigned)(beacons ? (hear.rssi - then->rssi) / beacons : 0), (unsigned)(hear.missed - then->missed));
+            what, (unsigned)ms, (unsigned)(now.frames - then->frames + broken), (unsigned)broken, hear_ap[0],
+            hear_ap[1], hear_ap[2], hear_ap[3], hear_ap[4], hear_ap[5], (unsigned)beacons,
+            (unsigned)(beacons ? (now.rssi - then->rssi) / beacons : 0), (unsigned)(now.missed - then->missed));
 }
 
 /*
@@ -770,20 +698,19 @@ static __attribute__((noreturn)) void listen(struct drv *d)
         /* The libraries' sending waits on their interrupt, which mac_rx_take takes, so their probe cannot be finished. */
         must(d, "a probe by the libraries with the driver's interrupt",
              d->probe[0] && !d->own_tx ? ESP_FAIL : ESP_OK);
-        const char *failed = mac_rx_take(heard);
-        must(d, failed ? failed : "the MAC receives into the driver's list", failed ? ESP_FAIL : ESP_OK);
+        must_mac(d, "the MAC receives into the driver's list", mac_rx_take(heard));
     }
-    static uint8_t probe[PROBE_MAX];
-    uint16_t probe_seq = 0;
+    static uint8_t probe[MGMT_FRAME_MAX];
     uint32_t probe_len = 0, probes = 0, probes_failed = 0;
     if (d->probe[0]) {
-        probe_len = probe_request(probe, d->probe, d->listen);
+        probe_len = mgmt_probe_request(probe, sizeof(probe), d->mac, d->probe, d->listen);
+        must(d, "the probe request", probe_len != 0 ? ESP_OK : ESP_FAIL);
         drv_say("driver: probing for %s on channel %u from %02x:%02x:%02x:%02x:%02x:%02x, by %s\n", d->probe,
                 (unsigned)d->listen, d->mac[0], d->mac[1], d->mac[2], d->mac[3], d->mac[4], d->mac[5],
                 d->own_tx ? "the driver's own MAC" : "the libraries");
     }
     child_report(&d->c, DRV_LISTENING);
-    struct hear first = { 0 }, then = { 0 };
+    struct hear first = heard_so_far(), then = first;
     uint64_t start = osi_now_us(), told = start;
     for (;;) {
         uint32_t bits;
@@ -794,14 +721,11 @@ static __attribute__((noreturn)) void listen(struct drv *d)
         uint64_t now = osi_now_us();
         if (now - told >= 1000000u) {
             hear_tell("the last", &then, (uint32_t)((now - told) / 1000u));
-            then = hear;
+            then = heard_so_far();
             told = now;
             if (probe_len && probes < PROBES) {
+                /* Either gives the frame its sequence number, the libraries as asked to, mac_tx as it does. */
                 if (d->own_tx) {
-                    /* The libraries set the frame's sequence number themselves; the driver's own frame carries it. */
-                    probe[22] = (uint8_t)(probe_seq << 4);
-                    probe[23] = (uint8_t)(probe_seq >> 4);
-                    probe_seq = (uint16_t)((probe_seq + 1u) & 0xfffu);
                     const char *failed = mac_tx(probe, probe_len);
                     if (failed) {
                         drv_say("driver: the probe, by the driver's own MAC: %s\n", failed);

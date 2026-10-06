@@ -65,14 +65,14 @@ $(BUILD)/mbedtls/%.o: $(wildcard $(WIFI_ESP)/mbedtls/*.h $(WIFI_ESP)/mbedtls/lib
 	$(CC) $(ARCHFLAGS) -std=c11 -ffreestanding -fno-builtin -fno-pic -fno-common -nostdlibinc -O2 -g \
 		-ffunction-sections -fdata-sections -w $(MBEDTLS_INC) -c $(MBEDTLS)/$*.c -o $@
 
-$(addprefix $(BUILD)/$(WIFI_ESP)/,supp.o hostap.o crypto.o ec.o beacon.o): CFLAGS += $(HOSTAP_INC)
-$(addprefix $(BUILD)/$(WIFI_ESP)/,supp.o hostap.o crypto.o ec.o beacon.o): $(WIFI_ESP_INIT)
+$(addprefix $(BUILD)/$(WIFI_ESP)/,supp.o hostap.o crypto.o ec.o mgmt.o): CFLAGS += $(HOSTAP_INC)
+$(addprefix $(BUILD)/$(WIFI_ESP)/,supp.o hostap.o crypto.o ec.o mgmt.o): $(WIFI_ESP_INIT)
 $(BUILD)/$(WIFI_ESP)/ec.o: CFLAGS += $(MBEDTLS_INC)
 
 # The driver's files that work with hostap's, on the host under the sanitizers, with hostap's own system functions:
 # WPA3's SAE, hostap's sae.c and dragonfly.c over ec.c and Mbed TLS,
 # against IEEE 802.11's test vectors and whole exchanges, test/sae-test.c,
-# and what a beacon says, beacon.c over hostap's parser of elements, test/beacon-test.c.
+# and the station's management frames, mgmt.c over hostap's parser of elements, test/mgmt-test.c.
 # They build what tools/esp-fetch.py fetches, so make check, which fetches nothing, leaves them out,
 # and make BOARD=esp32c6 wifi-esp32c6 runs them before the board.
 ESP_HOST        := build/host/esp32c6
@@ -85,9 +85,9 @@ SAE_TEST_SRC    := common/sae.c common/dragonfly.c common/wpa_common.c $(ESP_HOS
 SAE_TEST_OBJ    := $(patsubst %.c,$(ESP_HOST)/hostap/%.o,$(SAE_TEST_SRC)) \
                    $(patsubst %.c,$(ESP_HOST)/mbedtls/%.o,$(MBEDTLS_SRC)) \
                    $(ESP_HOST)/ec.o $(ESP_HOST)/sae-test.o
-BEACON_TEST     := $(ESP_HOST)/beacon-test
-BEACON_TEST_OBJ := $(patsubst %.c,$(ESP_HOST)/hostap/%.o,common/ieee802_11_common.c $(ESP_HOST_UTILS)) \
-                   $(ESP_HOST)/beacon.o $(ESP_HOST)/beacon-test.o
+MGMT_TEST       := $(ESP_HOST)/mgmt-test
+MGMT_TEST_OBJ   := $(patsubst %.c,$(ESP_HOST)/hostap/%.o,common/ieee802_11_common.c $(ESP_HOST_UTILS)) \
+                   $(ESP_HOST)/mgmt.o $(ESP_HOST)/mgmt-test.o
 
 $(ESP_HOST)/hostap/%.o: $(WIFI_ESP_INIT)
 	@mkdir -p $(dir $@)
@@ -99,9 +99,9 @@ $(ESP_HOST)/mbedtls/%.o: $(wildcard $(WIFI_ESP)/mbedtls/*.h) $(WIFI_ESP_INIT)
 
 $(ESP_HOST)/ec.o: $(WIFI_ESP)/ec.c $(wildcard $(WIFI_ESP)/mbedtls/*.h) $(WIFI_ESP_INIT)
 $(ESP_HOST)/sae-test.o: $(WIFI_ESP)/test/sae-test.c $(WIFI_ESP_INIT)
-$(ESP_HOST)/beacon.o: $(WIFI_ESP)/beacon.c $(WIFI_ESP)/beacon.h $(WIFI_ESP_INIT)
-$(ESP_HOST)/beacon-test.o: $(WIFI_ESP)/test/beacon-test.c $(WIFI_ESP)/beacon.h
-$(addprefix $(ESP_HOST)/,ec.o sae-test.o beacon.o beacon-test.o):
+$(ESP_HOST)/mgmt.o: $(WIFI_ESP)/mgmt.c $(WIFI_ESP)/mgmt.h $(WIFI_ESP_INIT)
+$(ESP_HOST)/mgmt-test.o: $(WIFI_ESP)/test/mgmt-test.c $(WIFI_ESP)/mgmt.h $(WIFI_ESP_INIT)
+$(addprefix $(ESP_HOST)/,ec.o sae-test.o mgmt.o mgmt-test.o):
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O1 -g -Wall -Wextra -Werror -Wshadow $(HOST_SAN) $(ESP_HOST_INC) -I$(WIFI_ESP) \
 		-c $< -o $@
@@ -109,15 +109,15 @@ $(addprefix $(ESP_HOST)/,ec.o sae-test.o beacon.o beacon-test.o):
 $(SAE_TEST): $(SAE_TEST_OBJ)
 	$(HOST_CC) $(HOST_SAN) $^ -o $@
 
-$(BEACON_TEST): $(BEACON_TEST_OBJ)
+$(MGMT_TEST): $(MGMT_TEST_OBJ)
 	$(HOST_CC) $(HOST_SAN) $^ -o $@
 
-.PHONY: sae-test beacon-test
+.PHONY: sae-test mgmt-test
 sae-test: $(SAE_TEST)
 	$(SAE_TEST)
 
-beacon-test: $(BEACON_TEST)
-	$(BEACON_TEST)
+mgmt-test: $(MGMT_TEST)
+	$(MGMT_TEST)
 
 # libphy.a's functions that reach PCR, the PMU or the LP domain, weakened in a copy, so that the driver's own,
 # in phy.c, take their place; the copy is made again when this file, which names them, changes.
@@ -151,9 +151,9 @@ $(BUILD)/user-wifi-esp32c6.elf: $(BUILD)/$(WIFI_ESP)/root.o $(WIFI_ESP_NET) $(LI
 
 .PHONY: wifi-esp32c6
 ifeq ($(BOARD),esp32c6)
-wifi-esp32c6: $(BUILD)/kernel-wifi-esp32c6.bin $(BUILD)/wifi-drv.bin $(SAE_TEST) $(BEACON_TEST)
+wifi-esp32c6: $(BUILD)/kernel-wifi-esp32c6.bin $(BUILD)/wifi-drv.bin $(SAE_TEST) $(MGMT_TEST)
 	$(SAE_TEST)
-	$(BEACON_TEST)
+	$(MGMT_TEST)
 	tools/wifi-run.py --console --save $(BUILD)/wifi-run.log \
 		$(foreach e,$(BUILD)/wifi-drv.elf $(BUILD)/kernel-wifi-esp32c6.elf $(PHYBLOB_ROM_ELF),--symbols $(e)) -- \
 		$(ESPTOOL_PYTHON) tools/esp32c6-run.py --port $(PORT) --flash $(WIFI_ESP_AT):$(BUILD)/wifi-drv.bin \

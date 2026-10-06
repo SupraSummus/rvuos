@@ -16,6 +16,10 @@
  * and moves when told again, so the take tells it until it has moved.
  * A buffer starts with the 92 bytes the MAC writes about the reception, esp.h's RX_CTRL_, and the frame follows;
  * the bytes at 0x21 and 0x22 count more before the frame in some, which the libraries skip, and the driver drops yet.
+ * The MAC writes the frame without its FCS, padded to a whole word, and the descriptor's length counts both,
+ * the 92 bytes and the frame: 312 for a beacon whose header says 224 bytes, 184 for a frame of 94.
+ * The header's length of the frame, its FCS included, is the PHY's, and a reader is handed it only once
+ * the frame it leaves without the FCS fits what the MAC wrote, so that no field of a frame from the air reads past it.
  * The word past each buffer's end holds RX_CANARY, as the libraries keep it, which a MAC that wrote too far changes.
  */
 
@@ -62,7 +66,9 @@
 #define MOVE_TRIES   8u      /* the MAC pointed at the driver's list again, when a reload left it where it was */
 #define EXTRA_LO     0x21u
 #define EXTRA_HI     0x22u
-#define MAC_SOURCE   0u /* the MAC's interrupt source, Espressif's soc/interrupts.h */
+#define FCS          4u  /* the checksum that ends a frame, which the MAC appends to what it sends */
+#define FRAME_MIN    10u /* the shortest frame, an acknowledgement, without its FCS */
+#define MAC_SOURCE   0u  /* the MAC's interrupt source, Espressif's soc/interrupts.h */
 
 struct desc {
     volatile uint32_t flags;
@@ -78,6 +84,7 @@ static struct {
     mac_heard_fn *heard;
     struct osi_isr isr; /* the driver's handler until taken, the libraries' while the driver's runs */
     int taken;
+    volatile uint32_t channel; /* the one mac_channel last tuned to, which each frame is told it came on */
 } rx;
 
 static uint32_t rd(uint32_t a)
@@ -150,11 +157,26 @@ static void give(struct desc *first, struct desc *last)
     rx.tail = last;
 }
 
-/* A frame the MAC wrote into n descriptors from first, to heard if it fits a buffer and its header is known. */
+int mac_frame_read(const uint8_t *buf, uint32_t written, struct mac_frame *f)
+{
+    uint32_t len = rx_ctrl_len(buf);
+    if (written < RX_CTRL_SIZE || !rx_ctrl_whole(buf) || len < FRAME_MIN + FCS ||
+        len - FCS > written - RX_CTRL_SIZE) {
+        return 0;
+    }
+    f->frame = buf + RX_CTRL_SIZE;
+    f->len = len - FCS;
+    f->rssi = (int8_t)buf[RX_CTRL_RSSI];
+    f->channel = 0;
+    return 1;
+}
+
+/* A frame the MAC wrote into n descriptors from first, to heard if mac_frame_read reads it; each other counted. */
 static void frame(const struct desc *first, uint32_t n)
 {
     const uint8_t *b = first->buf;
     uint32_t f = first->flags;
+    struct mac_frame m;
     if (*(const volatile uint32_t *)(b + DESC_SIZE(f)) != RX_CANARY) {
         mac_rx_counts.overran++;
     }
@@ -162,11 +184,20 @@ static void frame(const struct desc *first, uint32_t n)
         mac_rx_counts.chained++;
         return;
     }
-    if (DESC_LEN(f) < RX_CTRL_SIZE || b[EXTRA_LO] != 0 || (b[EXTRA_HI] & 3u) != 0) {
+    if (b[EXTRA_LO] != 0 || (b[EXTRA_HI] & 3u) != 0) {
         mac_rx_counts.odd++;
         return;
     }
-    rx.heard(b);
+    if (!rx_ctrl_whole(b)) {
+        mac_rx_counts.broken++;
+        return;
+    }
+    if (!mac_frame_read(b, DESC_LEN(f), &m)) {
+        mac_rx_counts.odd++;
+        return;
+    }
+    m.channel = rx.channel;
+    rx.heard(&m);
 }
 
 /*
@@ -244,11 +275,16 @@ static void hold(void)
     ets_delay_us(5);
 }
 
-void mac_channel(uint32_t channel)
+const char *mac_channel(uint32_t channel)
 {
+    if (channel < MAC_CHANNEL_FIRST || channel > MAC_CHANNEL_LAST) {
+        return "the channel, not one of 1 to 13";
+    }
     hold();
     drv_phy_channel(channel);
+    rx.channel = channel;
     wr(TX_BLOCK, rd(TX_BLOCK) & ~TX_BLOCK_ALL);
+    return 0;
 }
 
 /* 1 if the MAC fills the driver's first descriptor next: it has moved to the driver's list, and filled none of it. */
@@ -260,23 +296,34 @@ static int moved(void)
 /*
  * The MAC stops receiving, and the libraries' task is left 50 ms for the frames it has, so that it walks no list
  * after the MAC moved to the driver's; then the interrupt is the driver's, and the MAC receives into its list.
- * The list, its descriptors and buffers are made once and used again, and the list is emptied, since after a
- * mac_rx_give_back and a second take the head and tail would still name the first take's list.
+ * The list, its descriptors and buffers are made once, whole or not at all, and used again, and the list is emptied,
+ * since after a mac_rx_give_back and a second take the head and tail would still name the first take's list.
  */
+static const char *make_list(void)
+{
+    struct desc *descs = osi_calloc(RX_DESCS, sizeof(struct desc));
+    if (descs == 0) {
+        return "the MAC's descriptors";
+    }
+    for (uint32_t i = 0; i < RX_DESCS; i++) {
+        descs[i].buf = osi_malloc(RX_BUF_SIZE + 4u);
+        if (descs[i].buf == 0) {
+            for (uint32_t j = 0; j < i; j++) {
+                osi_free(descs[j].buf);
+            }
+            osi_free(descs);
+            return "the MAC's buffers";
+        }
+    }
+    rx.descs = descs;
+    return 0;
+}
+
 const char *mac_rx_take(mac_heard_fn *heard)
 {
-    if (rx.descs == 0) {
-        rx.descs = osi_calloc(RX_DESCS, sizeof(struct desc));
-        if (rx.descs == 0) {
-            return "the MAC's descriptors";
-        }
-        for (uint32_t i = 0; i < RX_DESCS; i++) {
-            struct desc *d = &rx.descs[i];
-            d->buf = osi_malloc(RX_BUF_SIZE + 4u);
-            if (d->buf == 0) {
-                return "the MAC's buffers";
-            }
-        }
+    const char *failed = rx.descs == 0 ? make_list() : 0;
+    if (failed) {
+        return failed;
     }
     /* The list is made whole again: a previous take may have left the links broken at the frames it collected. */
     for (uint32_t i = 0; i < RX_DESCS; i++) {
@@ -384,7 +431,9 @@ extern uint32_t our_instances_ptr; /* esp32c6.rom.pp.ld's cell to the block */
 
 #define TX_SLOT       0u
 #define TX_HDR        8u       /* the bytes the MAC reads before the frame */
-#define TX_FCS        4u       /* the checksum the MAC appends */
+#define TX_SEQ        22u      /* where a management frame's sequence control lies, after its three addresses */
+#define TX_TYPE(b)    ((b) >> 2 & 3u) /* the type in the frame control's first byte */
+#define TX_TYPE_MGMT  0u
 #define TX_MAX        1600u    /* the largest frame the driver sends */
 #define TX_DONE_SPINS 2000000u /* the wait for the MAC to finish, as the libraries bound theirs */
 
@@ -397,11 +446,12 @@ struct tx_desc {
 struct tx {
     struct tx_desc desc;
     uint8_t pad[4]; /* the frame's own first word starts whole */
-    uint8_t frame[TX_HDR + TX_MAX + TX_FCS];
+    uint8_t frame[TX_HDR + TX_MAX + FCS];
 };
 
 /* The descriptor and the frame, laid out once from the heap, which the MAC reaches; see heap.c. */
 static struct tx *tx;
+static uint16_t tx_seq; /* the station's next sequence number, of 4096 */
 
 /* The frame at the driver's own descriptor, the slot programmed as the libraries program it, and told to send. */
 const char *mac_tx(const uint8_t *frame, uint32_t len)
@@ -416,10 +466,16 @@ const char *mac_tx(const uint8_t *frame, uint32_t len)
         }
         tx = (struct tx *)(((uintptr_t)p + 15u) & ~(uintptr_t)15u);
     }
-    uint32_t n = len + TX_HDR + TX_FCS;
+    uint32_t n = len + TX_HDR + FCS;
     memcpy(tx->frame + TX_HDR, frame, len);
+    /* A management frame takes the station's next sequence number, its fragment 0, as the libraries number theirs. */
+    if (TX_TYPE(frame[0]) == TX_TYPE_MGMT && len >= TX_SEQ + 2u) {
+        tx->frame[TX_HDR + TX_SEQ] = (uint8_t)(tx_seq << 4);
+        tx->frame[TX_HDR + TX_SEQ + 1] = (uint8_t)(tx_seq >> 4);
+        tx_seq = (uint16_t)((tx_seq + 1u) & 0xfffu);
+    }
     /* The words the MAC reads before the frame: the frame's length with its checksum, then zero. */
-    wr((uint32_t)(uintptr_t)tx->frame, len + TX_FCS);
+    wr((uint32_t)(uintptr_t)tx->frame, len + FCS);
     wr((uint32_t)(uintptr_t)tx->frame + 4u, 0);
     tx->desc.ctrl = (DESC_SIZE(n) << DESC_LEN_SHIFT) | DESC_SIZE(n) | DESC_EOF | DESC_OWNER;
     tx->desc.frame = (uint32_t)(uintptr_t)tx->frame;
