@@ -94,8 +94,13 @@ what is left:
   The station's logic is to be the driver's own too, on hostap's parsing, through the association, the keys and the join;
   `user/wifi/NOTES.md` says why it is the driver's own.
   Its frame completion spins in the caller's thread while the slot is armed, and borrows the libraries' slot 0;
-  an own slot, the driver's own interrupt to finish the frame, and the libraries' retry of a collision or a timeout
-  would do better.
+  an own slot, the driver's own interrupt to finish the frame, and the libraries' retry of a collision or a timeout,
+  with their invalidation of the queue on a timeout, would do better.
+- The ESP32-C6 driver's own frames, the probe request and the authentication, and the association's to come,
+  are built in `main.c`, which only a board's run reaches, and that run passes on a malformed frame an access point answers,
+  as one with a wildcard SSID element before its own.
+  Their builders in a file of their own, parsed on the host by hostap as `make beacon-test` parses `beacon.c`'s beacons,
+  would catch that without a board.
 - The ESP32-C6's Wi-Fi root task has 8 KiB of memory and 9 slots left once its clients run,
   so another client needs room found first, in the driver's block or a smaller `CLIENT_CHAN_SIZE`.
 - The ESP32-C6's echo answers in 13 to 22 ms at the median, the Pico 2 W's in about 5, and the C6's ping in about 10:

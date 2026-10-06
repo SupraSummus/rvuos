@@ -327,7 +327,8 @@ void mac_rx_give_back(void)
  * the driver does the same, with the MAC's registers as hal_mac_tx.o names them.
  * The frame's completion is the driver's too: the MAC leaves a bit in a hardware txq's state when the frame is done,
  * and the driver clears it as the libraries' lmacProcessTxComplete does, which lets the slot's arm bits clear;
- * a timeout's bit or a collision's takes the slot back and fails, as the libraries' handlers do.
+ * on a timeout's bit or a collision's it disarms the slot, as their hal_mac_txq_disable does, and fails;
+ * their handler of a timeout also invalidates the queue, by lmacDisableTransmit, which the driver does not.
  * The libraries' interrupt may finish the frame instead, the driver and their pp treading the same state harmlessly.
  * It clears the queue's own state byte to zero, which the libraries' lmac_stop_hw_txq reads so that their way out
  * leaves the slot alone, and which their lmacProcessTxComplete reads to skip a queue it is not finishing;
@@ -449,8 +450,8 @@ const char *mac_tx(const uint8_t *frame, uint32_t len)
 
     /*
      * The MAC clears the arm bits once the frame is done, leaving a completion, a timeout or a collision in the
-     * hardware txq state; the driver clears it, and on a timeout or a collision takes the slot back and fails,
-     * as the libraries' lmacProcessTxTimeout and lmacProcessCollisions_task do; a caller that means to retries.
+     * hardware txq state; the driver clears it, and on a timeout or a collision disarms the slot and fails,
+     * for the caller to send again if it means to.
      */
     for (uint32_t spins = 0; spins < TX_DONE_SPINS; spins++) {
         if (rd(TXQ_STATE2) & (1u << s)) {

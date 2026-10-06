@@ -43,7 +43,7 @@ void mac_channel(uint32_t channel);
  * The frame is the 802.11 frame without its checksum, which the MAC appends.
  * The driver programs a slot the libraries' lmac names, arms it, and finishes the frame itself:
  * it clears the hardware txq state's completion bit, which lets the slot's arm bits clear, and on a timeout's
- * or a collision's bit takes the slot back and fails, as the libraries do; the caller may send it again.
+ * or a collision's bit disarms the slot and fails; the caller may send it again.
  * It works with the libraries' interrupt or the driver's own. See mac.c.
  */
 const char *mac_tx(const uint8_t *frame, uint32_t len);

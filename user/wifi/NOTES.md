@@ -468,8 +468,9 @@ the MAC leaves a bit in its hardware txq's state when the frame is done,
 and the libraries' `lmacProcessTxComplete`, which their interrupt posts, is what cleared it, and the slot's arm bits with it.
 The driver clears that bit now, as `hal_mac_clr_txq_state(2, slot)` does, while it waits for the arm bits to clear,
 so a probe sent with both `rx=own` and `tx=own` is answered the same, and their interrupt is needed for neither.
-The state's other two groups are a timeout and a collision, on which the driver takes the slot back and fails,
-as the libraries' lmacProcessTxTimeout and lmacProcessCollisions_task do.
+The state's other two groups are a timeout and a collision,
+on which the driver disarms the slot, as their `hal_mac_txq_disable` does, and fails;
+their `lmacProcessTxTimeout` also invalidates the queue first, by `lmacDisableTransmit`, which the driver does not.
 A state bit of the libraries' slot may lie there from before the driver took the interrupt,
 so the driver clears the slot's state just before it arms a frame;
 without that, the first frame read a stale timeout bit and was failed though the access point answered it.
@@ -477,7 +478,8 @@ An own slot of the driver's, rather than the libraries' slot 0, would keep their
 and the libraries' pp, which retries a collision or a timeout, does more than failing and letting the caller send again.
 It still clears the queue's own state byte, which `lmac_stop_hw_txq` reads to leave the slot alone
 and `lmacProcessTxComplete` reads to skip a queue it is not finishing,
-and reads no completion result; `pp` and `net80211` stay for the slot the driver borrows and the station's own logic.
+and reads none of the details `hal_mac_get_txq_complete` reads of a completion;
+`pp` and `net80211` stay for the slot the driver borrows and the station's own logic.
 
 ## The station's own authentication
 
