@@ -33,6 +33,8 @@ Do not reflow paragraphs to a fixed column width.
 Run `make check`.
 It boots QEMU, replays the fuzz corpus on the host build,
 and compares host and QEMU transcripts.
+It runs its parts side by side, a processor each, and `make CHECK_JOBS=1 check` one after another;
+QEMU's `-icount` keeps what they print the same however many run at once.
 It also holds what a system call and a switch cost, `make bench`, to the records in `tests/bench/` within a tenth;
 a change that moves a cost further, and means to, runs `make bench-refresh` with `BOARD=qemu`, `mps2-an385` and `mps2-an521`,
 and its commit says what it cost.

@@ -171,7 +171,7 @@ else
 $(error unknown BOARD '$(BOARD)'; the boards are qemu, esp32c6, rp2350, mps2-an385 and mps2-an521)
 endif
 
-.PHONY: all clean check arm-test smp-test contents
+.PHONY: all clean check arm-test arm-test-an385 arm-test-an521 arm-test-an521-smp2 smp-test contents
 
 # Pattern rules would delete the objects they chain through,
 # so every build compiled the kernel from scratch.
@@ -208,10 +208,17 @@ include kernel/build.mk user/build.mk user/wifi/build.mk user/phyblob/build.mk u
 # The same demo on ARM, under QEMU, on ARMv7-M and on ARMv8-M, and on mps2-an521's two cores,
 # the escape suite and the benchmark on each version's one core, and the library's test on each and on both cores;
 # see DESIGN.md, "Architectures" and "Cores".
+# Each board is a target of its own, so that `make check` boots them side by side.
 # tests/mutants.sh leaves it out, as it leaves ARM out, which the host build does not compile.
-arm-test:
+arm-test: arm-test-an385 arm-test-an521 arm-test-an521-smp2
+
+arm-test-an385:
 	$(MAKE) BOARD=mps2-an385 test escape lib-test bench
+
+arm-test-an521:
 	$(MAKE) BOARD=mps2-an521 test escape lib-test bench
+
+arm-test-an521-smp2:
 	$(MAKE) BOARD=mps2-an521 CORES=2 test lib-test
 
 # The same demo on two harts of QEMU virt, which goes on to the second core,
@@ -224,7 +231,15 @@ smp-test:
 contents:
 	tools/contents.py MANUAL.md DESIGN.md
 
-check: contents test escape lib-test bench lab host-test wifi-test qemu-replay arm-test smp-test
+# The parts share nothing but what they build, so they run side by side, CHECK_JOBS at a time, a processor each by default;
+# -icount keeps what they print the same however many run at once.
+# make starts them in the order named, so the longest come first:
+# the ARM demos take half a minute, their idle kernel polling through every sleep, see intr_wait in kernel/arch/arm/trap.c.
+CHECK_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
+CHECK_PARTS := arm-test-an521-smp2 arm-test-an521 arm-test-an385 smp-test lab qemu-replay test host-test \
+               bench lib-test escape wifi-test contents
+check:
+	$(MAKE) -j$(CHECK_JOBS) $(CHECK_PARTS)
 
 clean:
 	rm -rf $(BUILD)

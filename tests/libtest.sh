@@ -17,9 +17,8 @@ timeout 60 sh -c "$boot_cmd" > "$log" 2>&1
 status=$?
 set -e
 
-cat "$log"
-
 fail() {
+    cat "$log"
     echo "FAIL (libtest): $1" >&2
     exit 1
 }
