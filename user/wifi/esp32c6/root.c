@@ -174,7 +174,8 @@ static void (*drv_entry(void))(struct child_page *)
  * ax=0 joins without 802.11ax, pmf=0 without protecting management frames, sae=0 without WPA3's SAE,
  * and ps=1 sleeps between beacons.
  * listen=, a channel, with no ssid has the driver hear that channel without joining, and tell what it heard,
- * received by Espressif's libraries, or with rx=own, by the driver's own code in their place; see drv.h.
+ * received by Espressif's libraries, or with rx=own, by the driver's own code in their place;
+ * rx=own with neither ssid nor listen= has the driver scan by its own code too; see drv.h.
  * antenna=ufl has the XIAO's RF switch pick its U.FL connector rather than the antenna on the board,
  * and antenna=none leaves the pins alone, on a board without that switch.
  * The passphrase lives in the driver's page and memory, never in an image.
@@ -262,11 +263,7 @@ static void driver_state(uint32_t state)
     if (state == DRV_UP) {
         say(&kout, "root: the driver's libraries run\n");
     } else if (state == DRV_SCANNED) {
-        say(&kout, "root: %u access points heard\n", p->net_count);
-        for (uint32_t i = 0; i < p->net_count; i++) {
-            const struct drv_net *n = &p->nets[i];
-            say(&kout, "  %M  ch %u  rssi %d  %s\n", n->bssid, n->channel, n->rssi, n->ssid[0] ? n->ssid : "(hidden)");
-        }
+        system_scanned(&sys, p->nets, p->net_count);
         system_halt(0);
     } else if (state == DRV_JOINED) {
         say(&kout, "root: joined %s at %M, channel %u, authentication mode %u\n", p->joined.ssid, p->joined.bssid,

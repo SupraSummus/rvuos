@@ -90,4 +90,11 @@ uint32_t system_check(struct system *s, int driver_serves);
 /* The network process's and the clients' counters, and what the root task has unused, ending its summary's line. */
 void system_summary(struct system *s);
 
+/*
+ * The access points a scan heard, into the log, each name as printable ASCII, '?' for any other byte,
+ * since it comes from the air, and a control character would reach the host's terminal.
+ */
+struct drv_net;
+void system_scanned(struct system *s, const struct drv_net *nets, uint32_t count);
+
 #endif

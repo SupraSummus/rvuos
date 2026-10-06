@@ -1223,7 +1223,8 @@ struct osi_funcs *osi_init(struct drv *d, struct self *s)
     osi_heap_init(&osi.heap);
     /* The watcher first, which the root task watches, then the threads it watches. */
     osi.watcher = osi_thread(watcher_main, 0, "watcher", 1536);
-    osi.isr = osi_thread(isr_main, 0, "isr", 2048);
+    /* 3 KiB, for mac.c's handler reads beacons on it, hostap's parsed elements taking 536 bytes. */
+    osi.isr = osi_thread(isr_main, 0, "isr", 3072);
     osi.timers = osi_thread(timers_main, 0, "timers", 3072);
     return osi.watcher && osi.isr && osi.timers ? (struct osi_funcs *)&funcs : 0;
 }

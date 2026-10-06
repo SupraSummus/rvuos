@@ -52,6 +52,7 @@ uint32_t osi_heap_free(void);
 void drv_phy_clock_enable(void);
 void drv_phy_enable(void);
 void drv_phy_disable(void);
+void drv_phy_channel(uint32_t channel);
 void drv_wifi_clock_enable(void);
 void drv_wifi_reset_mac(void);
 

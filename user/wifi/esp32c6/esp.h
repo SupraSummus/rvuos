@@ -416,6 +416,9 @@ struct ap_record {
 };
 #define ESP_AP_RECORD_MAX 256u
 
+/* The ROM's delay, which counts the core's cycles. */
+void ets_delay_us(uint32_t us);
+
 esp_err_t esp_wifi_init_internal(const struct init_config *config);
 esp_err_t esp_wifi_set_mode(int mode);
 esp_err_t esp_wifi_start(void);
@@ -427,7 +430,22 @@ esp_err_t esp_wifi_stop(void);
 #define WIFI_PROTOCOL_11N  0x04u
 #define WIFI_PROTOCOL_11AX 0x20u
 esp_err_t esp_wifi_set_protocol(int ifx, uint8_t protocols);
-esp_err_t esp_wifi_scan_start(const void *config, bool block);
+/* wifi_scan_config_t, of which the driver sets the type and the time on each channel; zero is ESP-IDF's default. */
+#define WIFI_SCAN_TYPE_PASSIVE 1
+struct scan_config {
+    const uint8_t *ssid, *bssid;
+    uint8_t channel;
+    bool show_hidden;
+    int32_t type;
+    uint32_t active_min_ms, active_max_ms, passive_ms;
+    uint8_t home_chan_dwell_time;
+    struct {
+        uint16_t ghz_2_channels;
+        uint32_t ghz_5_channels;
+    } channel_bitmap;
+    bool coex_background_scan;
+};
+esp_err_t esp_wifi_scan_start(const struct scan_config *config, bool block);
 esp_err_t esp_wifi_scan_get_ap_num(uint16_t *number);
 esp_err_t esp_wifi_scan_get_ap_record(void *record);
 esp_err_t esp_wifi_get_mac(int ifx, uint8_t mac[6]);

@@ -450,3 +450,6 @@ the adapter runs the libraries' interrupt in a thread, so taking it is an exchan
 and the MAC writes into RAM the driver allocates, which open decision 13 trusts it with.
 `listen=` holds the two against each other, by the beacons each hears of an access point and those it misses,
 counted by the access point's own clock: a count by sequence numbers took its bursts to other stations for losses.
+A scan of the driver's own followed, passive as the libraries' now is too:
+the radio retuned through `libphy.a` alone, as the libraries retune it, and each beacon read by hostap's parser,
+which `make beacon-test` runs on the host, under the sanitizers, against every cut of a beacon.

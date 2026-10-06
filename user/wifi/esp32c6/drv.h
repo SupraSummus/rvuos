@@ -61,7 +61,8 @@ struct drv_header {
 
 /*
  * The driver's page.
- * With no network named the driver scans, and with one it joins it, WPA3's personal where the access point offers it,
+ * With no network named the driver scans, passively, by the libraries or with own_rx by its own code,
+ * and with one it joins it, WPA3's personal where the access point offers it,
  * unless the page says no_sae, and WPA2's otherwise;
  * it asks for an open one if the page names no passphrase, which the libraries refuse yet, see TODO.md.
  * it reports the states of wifi.h's enum drv_state, DRV_UP once the libraries run in station mode,
@@ -92,7 +93,7 @@ struct drv {
     uint8_t modem_sleep;  /* sleep between beacons, WIFI_PS_MIN_MODEM, which loses the access point yet; see TODO.md */
     uint32_t lib_log;     /* the libraries' log level, ESP-IDF's wifi_log_level_t, or 0 for its INFO */
     uint8_t listen;       /* the channel to hear, 1 to 13, or 0 */
-    uint8_t own_rx;       /* hear it through mac.c rather than the libraries */
+    uint8_t own_rx;       /* hear it, or scan, through mac.c rather than the libraries */
     struct chan_end link; /* to the network process, connected before the start */
     /* From the root task, while it runs. */
     volatile uint32_t leave; /* the run is over: leave the network, and report DRV_LEFT */

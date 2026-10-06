@@ -235,3 +235,18 @@ void system_summary(struct system *s)
     }
     say(s->out, "; %u bytes and %u slots unused\n", mem_unused(s->self), slots_unused(s->self));
 }
+
+void system_scanned(struct system *s, const struct drv_net *nets, uint32_t count)
+{
+    say(s->out, "root: %u access points heard\n", count);
+    for (uint32_t i = 0; i < count; i++) {
+        const struct drv_net *n = &nets[i];
+        char ssid[sizeof(n->ssid)];
+        uint32_t j = 0;
+        for (; j + 1 < sizeof(ssid) && n->ssid[j] != 0; j++) {
+            ssid[j] = n->ssid[j] >= 0x20 && n->ssid[j] < 0x7f ? n->ssid[j] : '?';
+        }
+        ssid[j] = 0;
+        say(s->out, "  %M  ch %u  rssi %d  %s\n", n->bssid, n->channel, n->rssi, j ? ssid : "(hidden)");
+    }
+}

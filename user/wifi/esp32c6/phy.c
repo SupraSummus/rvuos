@@ -74,7 +74,7 @@ void pwdet_reg_init_new(void);
 void open_i2c_xpd_new(bool cycle);
 void esp_phy_efuse_get_mac(uint8_t *mac);
 void disable_agc(void);
-void ets_delay_us(uint32_t us);
+void chip_v7_set_chan(uint8_t channel, uint8_t second);
 extern const esp_phy_init_data_t phy_init_data;
 extern uint8_t phy_param[];
 
@@ -218,6 +218,12 @@ void drv_phy_disable(void)
         phy_close_rf();
         phy_xpd_tsens();
     }
+}
+
+/* The radio on channel, 20 MHz wide, as libphy's set_chanfreq tunes it for the libraries. */
+void drv_phy_channel(uint32_t channel)
+{
+    chip_v7_set_chan((uint8_t)channel, 0);
 }
 
 void drv_wifi_clock_enable(void)

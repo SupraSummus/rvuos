@@ -12,6 +12,7 @@
 #include <stdarg.h>
 #include <stdint.h>
 
+#include "beacon.h"
 #include "drv.h"
 #include "esp.h"
 #include "lib/libc.h"
@@ -172,11 +173,19 @@ static void config(struct init_config *c, const struct drv *d)
     c->magic = INIT_CONFIG_MAGIC;
 }
 
+/*
+ * A scan hears each channel for SCAN_DWELL_MS, two beacon intervals and a little, and sends nothing:
+ * the libraries' passive scan, or with own_rx, the driver's own.
+ */
+#define SCAN_CHANNELS 13u
+#define SCAN_DWELL_MS 250u
+
 static void scan(struct drv *d)
 {
     static uint8_t record[ESP_AP_RECORD_MAX];
+    static const struct scan_config passive = { .type = WIFI_SCAN_TYPE_PASSIVE, .passive_ms = SCAN_DWELL_MS };
     uint16_t n = 0;
-    must(d, "a scan begun", esp_wifi_scan_start(0, false));
+    must(d, "a scan begun", esp_wifi_scan_start(&passive, false));
     await(d, "the scan done", WIFI_EVENT_SCAN_DONE, 15000);
     must(d, "the scan's count", esp_wifi_scan_get_ap_num(&n));
     for (uint32_t i = 0; i < n && i < DRV_NETS; i++) {
@@ -189,6 +198,86 @@ static void scan(struct drv *d)
         a->channel = r->primary;
         a->rssi = r->rssi;
         d->net_count = i + 1;
+    }
+}
+
+/* What mac.c counted while it received, into the log. */
+static void mac_told(const char *who)
+{
+    const struct mac_rx_counts *m = &mac_rx_counts;
+    drv_say("%s: the MAC's interrupts %u, causes %x; frames chained %u, odd %u; overran %u, restarted %u, stuck %u\n",
+            who, (unsigned)m->interrupts, (unsigned)m->causes, (unsigned)m->chained, (unsigned)m->odd,
+            (unsigned)m->overran, (unsigned)m->restarted, (unsigned)m->stuck);
+}
+
+/*
+ * The driver's own scan: each channel heard through mac.c, each access point kept as heard strongest,
+ * and of more than DRV_NETS, the strongest; then sorted, strongest first.
+ * It reads beacons alone: it sends no probe, so a probe response it hears answers another station.
+ * One that heard none fails, so that a receiver that does not work fails the run.
+ */
+#define BEACON 0x80
+
+static volatile uint8_t scan_on; /* the channel being heard */
+
+static void scan_heard(const uint8_t *c)
+{
+    struct drv *d = drv_self;
+    struct beacon b;
+    const uint8_t *f = c + RX_CTRL_SIZE;
+    uint32_t len = rx_ctrl_len(c);
+    int rssi = (int8_t)c[RX_CTRL_RSSI];
+    if (!rx_ctrl_whole(c) || len < 4 || f[0] != BEACON || !beacon_read(f, len - 4, scan_on, &b)) {
+        return;
+    }
+    uint32_t n = d->net_count, weakest = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        if (memcmp(d->nets[i].bssid, b.bssid, 6) == 0) {
+            if (rssi > d->nets[i].rssi) {
+                d->nets[i].rssi = (int16_t)rssi;
+                d->nets[i].channel = b.channel;
+            }
+            return;
+        }
+        if (d->nets[i].rssi < d->nets[weakest].rssi) {
+            weakest = i;
+        }
+    }
+    struct drv_net *a = n < DRV_NETS ? &d->nets[n] : rssi > d->nets[weakest].rssi ? &d->nets[weakest] : 0;
+    if (a == 0) {
+        return;
+    }
+    memcpy(a->bssid, b.bssid, 6);
+    memcpy(a->ssid, b.ssid, b.ssid_len);
+    a->ssid[b.ssid_len] = 0;
+    a->channel = b.channel;
+    a->rssi = (int16_t)rssi;
+    if (n < DRV_NETS) {
+        d->net_count = n + 1;
+    }
+}
+
+static void scan_own(struct drv *d)
+{
+    static const uint32_t mgmt = WIFI_PROMIS_FILTER_MASK_MGMT;
+    must(d, "the radio's filter", esp_wifi_set_promiscuous_filter(&mgmt));
+    must(d, "promiscuous", esp_wifi_set_promiscuous(true));
+    const char *failed = mac_rx_take(scan_heard);
+    must(d, failed ? failed : "the MAC receives into the driver's list", failed ? ESP_FAIL : ESP_OK);
+    for (uint32_t ch = 1; ch <= SCAN_CHANNELS; ch++) {
+        scan_on = (uint8_t)ch;
+        mac_channel(ch);
+        osi_delay_ms(SCAN_DWELL_MS);
+    }
+    mac_rx_give_back();
+    mac_told("scan");
+    must(d, "an access point heard", d->net_count != 0 ? ESP_OK : ESP_FAIL);
+    for (uint32_t i = 1; i < d->net_count; i++) {
+        for (uint32_t j = i; j > 0 && d->nets[j].rssi > d->nets[j - 1].rssi; j--) {
+            struct drv_net t = d->nets[j];
+            d->nets[j] = d->nets[j - 1];
+            d->nets[j - 1] = t;
+        }
     }
 }
 
@@ -450,7 +539,7 @@ static void heard(const uint8_t *c)
         hear.broken++;
         return;
     }
-    if (f[0] != 0x80 || rx_ctrl_len(c) < BEACON_MIN) {
+    if (f[0] != BEACON || rx_ctrl_len(c) < BEACON_MIN) {
         return;
     }
     if (!hear_ap_set) {
@@ -531,10 +620,7 @@ static __attribute__((noreturn)) void listen(struct drv *d)
     }
     if (d->own_rx) {
         mac_rx_give_back();
-        const struct mac_rx_counts *m = &mac_rx_counts;
-        drv_say("listen: the MAC's interrupts %u, causes %x; frames chained %u, odd %u; overran %u, restarted %u, stuck %u\n",
-                (unsigned)m->interrupts, (unsigned)m->causes, (unsigned)m->chained, (unsigned)m->odd,
-                (unsigned)m->overran, (unsigned)m->restarted, (unsigned)m->stuck);
+        mac_told("listen");
     }
     hear_tell(d->own_rx ? "by mac.c, in" : "by the libraries, in", &first,
               (uint32_t)((osi_now_us() - start) / 1000u));
@@ -568,7 +654,11 @@ static __attribute__((noreturn)) void run(struct drv *d)
         listen(d);
     }
     if (d->ssid[0] == 0) {
-        scan(d);
+        if (d->own_rx) {
+            scan_own(d);
+        } else {
+            scan(d);
+        }
         if (d->debug & DRV_DEBUG_STATS) {
             counters();
         }

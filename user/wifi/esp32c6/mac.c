@@ -39,6 +39,9 @@
 #define COLOR_EVENT      0x1000u
 #define PWR_STATUS       0x600ad0b0u /* the MAC's power events, which come with its interrupt */
 #define PWR_CLEAR        0x600ad0b4u
+#define TX_BLOCK         (MAC_BASE + 0xca8u) /* holds the MAC still, as hal_mac_deinit sets it and hal_mac_init clears it */
+#define TX_BLOCK_ALL     0x00ff1000u
+#define TX_BLOCK_BUSY    0x00006000u /* still busy */
 
 #define DESC_SIZE(f)   ((f) & 0x3fffu)
 #define DESC_LEN(f)    ((f) >> 14 & 0x3fffu)
@@ -51,6 +54,7 @@
 #define RX_BUF_SIZE  1700u /* the header and a frame of 1600 bytes, with room */
 #define RX_CANARY    0xdeadbeefu
 #define RELOAD_SPINS 100000u /* the libraries' wait for the reload to be taken */
+#define BUSY_SPINS   100000u /* the wait for the MAC to stop, which the libraries' does not bound */
 #define CAUSE_ROUNDS 8u      /* the causes read again, as long as new ones come */
 #define EXTRA_LO     0x21u
 #define EXTRA_HI     0x22u
@@ -217,6 +221,32 @@ static void isr(void *arg)
     }
 }
 
+static void idle(void)
+{
+    for (uint32_t spins = 0; spins < BUSY_SPINS && (rd(TX_BLOCK) & TX_BLOCK_BUSY); spins++) {
+    }
+}
+
+/*
+ * The MAC held still, as the libraries' hal_mac_deinit holds it to retune, with its waits:
+ * until it is not busy, then held, 20 us, until it is not busy again, and 5 us.
+ */
+static void hold(void)
+{
+    idle();
+    wr(TX_BLOCK, rd(TX_BLOCK) | TX_BLOCK_ALL);
+    ets_delay_us(20);
+    idle();
+    ets_delay_us(5);
+}
+
+void mac_channel(uint32_t channel)
+{
+    hold();
+    drv_phy_channel(channel);
+    wr(TX_BLOCK, rd(TX_BLOCK) & ~TX_BLOCK_ALL);
+}
+
 /*
  * The MAC stops receiving, and the libraries' task is left 50 ms for the frames it has, so that it walks no list
  * after the MAC moved to the driver's; then the interrupt is the driver's, and the MAC receives into its list.
@@ -244,10 +274,12 @@ const char *mac_rx_take(mac_heard_fn *heard)
         return "the MAC's interrupt";
     }
     rx.taken = 1;
+    uint32_t stuck = mac_rx_counts.stuck;
     give(&rx.descs[0], &rx.descs[RX_DESCS - 1]);
     if ((rd(RX_NEXT) ^ (uint32_t)(uintptr_t)rx.descs) & 0x000fffffu) {
         mac_rx_give_back();
-        return "the MAC's move to the driver's list";
+        return mac_rx_counts.stuck != stuck ? "the MAC's move to the driver's list, the reload not taken"
+                                            : "the MAC's move to the driver's list, the reload taken";
     }
     wr(RX_CTRL, rd(RX_CTRL) | RX_CTRL_ENABLE);
     return 0;

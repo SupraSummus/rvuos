@@ -218,11 +218,7 @@ static int driver_state(uint32_t state)
         net_build();
     }
     if (state == DRV_SCANNED) {
-        say(&kout, "root: %u access points heard\n", p->net_count);
-        for (uint32_t i = 0; i < p->net_count; i++) {
-            const struct drv_net *n = &p->nets[i];
-            say(&kout, "  %M  ch %u  rssi %d  %s\n", n->bssid, n->channel, n->rssi, n->ssid[0] ? n->ssid : "(hidden)");
-        }
+        system_scanned(&sys, p->nets, p->net_count);
         return p->mode == MODE_SCAN;
     }
     if (state == DRV_JOINED) {
