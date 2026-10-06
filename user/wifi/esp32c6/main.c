@@ -699,13 +699,14 @@ static __attribute__((noreturn)) void listen(struct drv *d)
         must(d, failed ? failed : "the MAC receives into the driver's list", failed ? ESP_FAIL : ESP_OK);
     }
     static uint8_t probe[PROBE_MAX];
+    uint16_t probe_seq = 0;
     uint32_t probe_len = 0, probes = 0, probes_failed = 0, tx_shown = 0;
     if (d->probe[0]) {
         must(d, "the station's address", esp_wifi_get_mac(WIFI_IF_STA, probe_from));
         probe_len = probe_request(probe, d->probe, d->listen);
-        drv_say("driver: probing for %s on channel %u from %02x:%02x:%02x:%02x:%02x:%02x, by the libraries\n", d->probe,
+        drv_say("driver: probing for %s on channel %u from %02x:%02x:%02x:%02x:%02x:%02x, by %s\n", d->probe,
                 (unsigned)d->listen, probe_from[0], probe_from[1], probe_from[2], probe_from[3], probe_from[4],
-                probe_from[5]);
+                probe_from[5], d->own_tx ? "the driver's own MAC" : "the libraries");
     }
     child_report(&d->c, DRV_LISTENING);
     struct hear first = { 0 }, then = { 0 };
@@ -726,9 +727,21 @@ static __attribute__((noreturn)) void listen(struct drv *d)
                 tx_shown = 1;
             }
             if (probe_len && probes < PROBES) {
-                mac_tx_seen.armed = (d->debug & DRV_DEBUG_TX) != 0;
-                if (esp_wifi_80211_tx(WIFI_IF_STA, probe, (int)probe_len, true) != ESP_OK) {
-                    probes_failed++;
+                if (d->own_tx) {
+                    /* The libraries set the frame's sequence number themselves; the driver's own frame carries it. */
+                    probe[22] = (uint8_t)(probe_seq << 4);
+                    probe[23] = (uint8_t)(probe_seq >> 4);
+                    probe_seq = (uint16_t)((probe_seq + 1u) & 0xfffu);
+                    const char *failed = mac_tx(probe, probe_len);
+                    if (failed) {
+                        drv_say("driver: the probe, by the driver's own MAC: %s\n", failed);
+                        probes_failed++;
+                    }
+                } else {
+                    mac_tx_seen.armed = (d->debug & DRV_DEBUG_TX) != 0;
+                    if (esp_wifi_80211_tx(WIFI_IF_STA, probe, (int)probe_len, true) != ESP_OK) {
+                        probes_failed++;
+                    }
                 }
                 probes++;
             }
@@ -742,7 +755,7 @@ static __attribute__((noreturn)) void listen(struct drv *d)
     hear_tell(d->own_rx ? "by mac.c, in" : "by the libraries, in", &first,
               (uint32_t)((osi_now_us() - start) / 1000u));
     if (probe_len) {
-        drv_say("probe: %u sent, %u refused; %u answers from %02x:%02x:%02x:%02x:%02x:%02x, %u of them sent again\n",
+        drv_say("probe: %u sent, %u failed; %u answers from %02x:%02x:%02x:%02x:%02x:%02x, %u of them sent again\n",
                 (unsigned)probes, (unsigned)probes_failed, (unsigned)hear.answers, probe_ap[0], probe_ap[1], probe_ap[2],
                 probe_ap[3], probe_ap[4], probe_ap[5], (unsigned)hear.retried);
     }

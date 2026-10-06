@@ -453,3 +453,19 @@ counted by the access point's own clock: a count by sequence numbers took its bu
 A scan of the driver's own followed, passive as the libraries' now is too:
 the radio retuned through `libphy.a` alone, as the libraries retune it, and each beacon read by hostap's parser,
 which `make beacon-test` runs on the host, under the sanitizers, against every cut of a beacon.
+
+## The MAC's sending, the driver's own
+
+`debug=tx`, which recorded the libraries' start of a frame, let the sending be the driver's own:
+with `tx=own` the driver builds the frame's descriptor and programs the slot's PPDU words itself,
+as the libraries' `lmacSetTxFrame` does, and arms the slot, as their `hal_mac_txq_enable` does,
+for a legacy frame at one Mbit; a probe sent so is answered by the access point.
+Two things stayed with the libraries.
+The frame's completion: their interrupt reads the MAC's finished queue and clears it,
+and their `lmac_stop_hw_txq` waits on the queue's state, so the driver leaves that state idle before it sends.
+That is the libraries' `int: state=0 i=0` line too, one for each finished frame their handler finds,
+four of five probes in one run, and no fault beside it.
+And the queue itself: the driver programs a slot the libraries' lmac still names.
+Taking the interrupt instead, to finish the frame without them, left it unstarted:
+what the MAC wants past the arm, or whether their scheduler must run for a frame to leave, is not worked out.
+Until it is, `pp` and `net80211` stay, though the driver's own frame is the one that leaves.

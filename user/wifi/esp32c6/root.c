@@ -176,7 +176,8 @@ static void (*drv_entry(void))(struct child_page *)
  * listen=, a channel, with no ssid has the driver hear that channel without joining, and tell what it heard,
  * received by Espressif's libraries, or with rx=own, by the driver's own code in their place;
  * rx=own with neither ssid nor listen= has the driver scan by its own code too; see drv.h.
- * probe=, with listen=, has the driver ask for that network on the channel, and count the answers.
+ * probe=, with listen=, has the driver ask for that network on the channel, and count the answers,
+ * sent by the libraries or, with tx=own, by the driver's own code; see drv.h.
  * antenna=ufl has the XIAO's RF switch pick its U.FL connector rather than the antenna on the board,
  * and antenna=none leaves the pins alone, on a board without that switch.
  * The passphrase lives in the driver's page and memory, never in an image.
@@ -203,6 +204,7 @@ static void configure(struct drv *p)
     uint32_t channel = config_number(conf, size, "listen", 0);
     p->listen = (uint8_t)(channel <= 13 ? channel : 0);
     p->own_rx = (uint8_t)config_has(conf, size, "rx", "own");
+    p->own_tx = (uint8_t)config_has(conf, size, "tx", "own");
     config_value(conf, size, "probe", p->probe, sizeof(p->probe));
     run_s = config_number(conf, size, "run", RUN_S);
     antenna = config_has(conf, size, "antenna", "ufl")    ? ANTENNA_UFL

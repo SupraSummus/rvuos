@@ -1,5 +1,5 @@
 /*
- * The Wi-Fi MAC's receiving, taken from Espressif's libraries once they have brought the MAC up; see mac.h.
+ * The Wi-Fi MAC's receiving, and its sending, by the driver's own code, once the libraries have brought the MAC up; see mac.h.
  *
  * What the MAC does, as the libraries' hal_mac_rx_*, wDev_Rxbuf_Init, wDev_AppendRxBlocks and wDev_ProcessFiq
  * do it, read in their code, which keeps its symbols:
@@ -22,6 +22,7 @@
 #include <stdint.h>
 
 #include "esp.h"
+#include "lib/libc.h"
 #include "mac.h"
 #include "osi.h"
 
@@ -308,8 +309,127 @@ void mac_rx_give_back(void)
     }
 }
 
-#define TX_QUEUE(s)  (MAC_BASE + 0xd60u - (s) * 0x10u)
-#define TX_PPDU(s)   (MAC_BASE + 0x1488u - (s) * 0x74u)
+/*
+ * The MAC's sending, by the driver's own code; see mac.h.
+ *
+ * The libraries' lmacSetTxFrame and lmacTxFrame, read in their code and held against a run of debug=tx,
+ * build a three-word descriptor of the frame, program the slot's PPDU words, and tell the slot to send;
+ * the driver does the same, with the MAC's registers as hal_mac_tx.o names them.
+ * It does not finish the frame: the libraries' interrupt reads the MAC's finished queue and clears it,
+ * and their lmac_stop_hw_txq waits on that queue's state,
+ * so mac_tx leaves the state of the queue it uses at zero and the libraries to end the frame.
+ * The slot is the libraries' own, and with tx=own nothing else sends, so the driver may use it,
+ * with the libraries' interrupt rather than the driver's own; see mac.h.
+ */
+
+/* The slot's words, less for each slot, in hal_mac_tx.o's two blocks: the queue's, then the PPDU's. */
+#define TX_QUEUE(s)    (MAC_BASE + 0xd60u - (s) * 0x10u) /* CONF0, the mplen's, the EDCA's, PLCP0_ENABLE */
+#define TX_CONF0(s)    (TX_QUEUE(s) + 0x00u)
+#define TX_MPLEN(s)    (TX_QUEUE(s) + 0x04u) /* whose bit 3 the HE mplen uses, and a legacy frame clears */
+#define TX_EDCA(s)     (TX_QUEUE(s) + 0x08u) /* the access class's AIFSN, backoff and lifetime */
+#define TX_PLCP0(s)    (TX_QUEUE(s) + 0x0cu)
+#define TX_PPDU(s)     (MAC_BASE + 0x1488u - (s) * 0x74u) /* PLCP1 first, then the block mac_tx_seen reads */
+#define TX_PLCP1(s)    (TX_PPDU(s) + 0x00u)
+#define TX_PROT(s)     (TX_PPDU(s) + 0x04u) /* the protect threshold of hal_he_set_tx_protection */
+#define TX_RATE_DUR(s) (TX_PPDU(s) + 0x24u)
+#define TX_TXLEN(s)    (TX_PPDU(s) + 0x30u)
+#define TX_RESP_DUR(s) (TX_PPDU(s) + 0x34u)
+
+/* PLCP0_ENABLE: the descriptor's address, the format every frame names, and the bits that tell the slot to send. */
+#define TX_PLCP0_DMA    0x000fffffu
+#define TX_PLCP0_FORMAT 0x00600000u
+#define TX_PLCP0_ARM    0xc0000000u
+
+/* CONF1's access class and lifetime, and the rest of a legacy frame at one Mbit, as a run's first probe left them. */
+#define TX_AIFSN       2u
+#define TX_BACKOFF     2u
+#define TX_TIMEOUT     0x3feu
+#define TX_PROT_1M     0x00020000u
+#define TX_RATE_DUR_1M 0x14140014u
+#define TX_TXLEN_1M    0x00400000u
+#define TX_RESP_DUR_1M 0x00400004u
+
+/* The libraries' per-access-class lmac control block, our_instances; lmac_stop_hw_txq waits on each queue's state. */
+extern uint32_t our_instances_ptr; /* esp32c6.rom.pp.ld's cell to the block */
+#define LMAC_TXQ_STRIDE 0x34u
+#define LMAC_TXQ_STATE  0x12u
+
+#define TX_SLOT       0u
+#define TX_HDR        8u       /* the bytes the MAC reads before the frame */
+#define TX_FCS        4u       /* the checksum the MAC appends */
+#define TX_MAX        1600u    /* the largest frame the driver sends */
+#define TX_DONE_SPINS 2000000u /* the wait for the MAC to finish, as the libraries bound theirs */
+
+struct tx_desc {
+    volatile uint32_t ctrl;
+    volatile uint32_t frame;
+    volatile uint32_t next;
+};
+
+struct tx {
+    struct tx_desc desc;
+    uint8_t pad[4]; /* the frame's own first word starts whole */
+    uint8_t frame[TX_HDR + TX_MAX + TX_FCS];
+};
+
+/* The descriptor and the frame, laid out once from the heap, which the MAC reaches; see heap.c. */
+static struct tx *tx;
+
+/* The frame at the driver's own descriptor, the slot programmed as the libraries program it, and told to send. */
+const char *mac_tx(const uint8_t *frame, uint32_t len)
+{
+    if (len < 2u || len > TX_MAX) {
+        return "the frame's length";
+    }
+    if (rx.taken) {
+        return "the driver's own receiving holds the interrupt";
+    }
+    if (tx == 0) {
+        void *p = osi_malloc(sizeof(struct tx) + 16u);
+        if (p == 0) {
+            return "the frame's buffer, from the heap";
+        }
+        tx = (struct tx *)(((uintptr_t)p + 15u) & ~(uintptr_t)15u);
+    }
+    uint32_t n = len + TX_HDR + TX_FCS;
+    memcpy(tx->frame + TX_HDR, frame, len);
+    /* The words the MAC reads before the frame: the frame's length with its checksum, then zero. */
+    wr((uint32_t)(uintptr_t)tx->frame, len + TX_FCS);
+    wr((uint32_t)(uintptr_t)tx->frame + 4u, 0);
+    tx->desc.ctrl = (DESC_SIZE(n) << DESC_LEN_SHIFT) | DESC_SIZE(n) | DESC_EOF | DESC_OWNER;
+    tx->desc.frame = (uint32_t)(uintptr_t)tx->frame;
+    tx->desc.next = 0;
+    __asm__ volatile("fence" : : : "memory");
+
+    const uint32_t s = TX_SLOT;
+    /* The libraries' queue is no place for the driver's frame, and their way out reads its state. */
+    uint32_t lmac = *(volatile uint32_t *)&our_instances_ptr;
+    *(volatile uint8_t *)(lmac + s * LMAC_TXQ_STRIDE + LMAC_TXQ_STATE) = 0;
+    wr(TX_PLCP0(s), ((uint32_t)(uintptr_t)&tx->desc & TX_PLCP0_DMA) | TX_PLCP0_FORMAT);
+    wr(TX_CONF0(s), 0);
+    wr(TX_MPLEN(s), 0);
+    wr(TX_EDCA(s), (TX_AIFSN << 24) | (TX_BACKOFF << 12) | TX_TIMEOUT);
+    wr(TX_PLCP1(s), (n - TX_HDR) & 0x00000fffu);
+    wr(TX_PROT(s), TX_PROT_1M);
+    wr(TX_RATE_DUR(s), TX_RATE_DUR_1M);
+    wr(TX_TXLEN(s), TX_TXLEN_1M);
+    wr(TX_RESP_DUR(s), TX_RESP_DUR_1M);
+    __asm__ volatile("fence" : : : "memory");
+    wr(TX_PLCP0(s), rd(TX_PLCP0(s)) | TX_PLCP0_ARM);
+
+    /* The MAC clears the arm bits once the frame is done; the driver reads no result beyond that. */
+    for (uint32_t spins = 0; spins < TX_DONE_SPINS; spins++) {
+        if (!(rd(TX_PLCP0(s)) & TX_PLCP0_ARM)) {
+            break;
+        }
+    }
+    if (rd(TX_PLCP0(s)) & TX_PLCP0_ARM) {
+        wr(TX_PLCP0(s), rd(TX_PLCP0(s)) & ~TX_PLCP0_ARM); /* the slot is left as it was found */
+        return "the MAC did not finish the frame";
+    }
+    return 0;
+}
+
 #define TX_SLOTS     5u
 #define RAM_LOW      0x40800000u
 #define RAM_HIGH     0x40880000u

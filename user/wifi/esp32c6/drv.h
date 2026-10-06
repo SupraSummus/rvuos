@@ -98,6 +98,7 @@ struct drv {
     uint32_t lib_log;     /* the libraries' log level, ESP-IDF's wifi_log_level_t, or 0 for its INFO */
     uint8_t listen;       /* the channel to hear, 1 to 13, or 0 */
     uint8_t own_rx;       /* hear it, or scan, through mac.c rather than the libraries */
+    uint8_t own_tx;       /* send the probe through mac.c rather than the libraries; see mac.h */
     char probe[33];       /* the network to probe for while listening, or empty */
     struct chan_end link; /* to the network process, connected before the start */
     /* From the root task, while it runs. */
