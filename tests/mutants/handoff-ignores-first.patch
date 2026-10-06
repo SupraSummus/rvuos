@@ -1,0 +1,18 @@
+A lender with time hands its turn to the borrower though another lent it time first.
+The turn is paid by a lender the borrower does not borrow from.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a turn's payer that waits is not the turn's first lender
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -626,7 +626,7 @@ void sched_lend(struct thread *t, struct notification *ntfn, struct thread *borr
+      * hands it the rest of the turn, which it goes on paying for: the turn neither ends nor is charged here.
+      */
+     struct core *core = core_self();
+-    if (core->payer == NULL && has_time(t->balance) && thread_lender(borrower) == t && borrower->queue != QUEUE_NONE) {
++    if (core->payer == NULL && has_time(t->balance) && borrower->queue != QUEUE_NONE) {
+         ring_remove(queue_head(core, borrower->queue), borrower);
+         borrower->queue = QUEUE_NONE;
+         core->turn = borrower;

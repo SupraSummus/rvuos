@@ -30,6 +30,19 @@ static uint32_t wait_inbox(void)
     return bits;
 }
 
+/* Waits for its server as wait_inbox does, lending the server its time meanwhile if given the server's thread. */
+static uint32_t wait_server(const struct lab_page *p)
+{
+    uint32_t bits = 0;
+    if (p->lend_to == 0) {
+        return wait_inbox();
+    }
+    if (rv_lend(CHILD_INBOX, p->lend_to, &bits) != KERR_OK) {
+        rv_breakpoint();
+    }
+    return bits;
+}
+
 /* The clock's low word, enough for differences shorter than its wrap. */
 static uint32_t now(const struct lab_page *p)
 {
@@ -87,13 +100,13 @@ static uint32_t ask(struct lab_page *p, uint32_t seq, uint32_t cost)
     struct ask a = { seq, cost, 0 };
     uint32_t other = 0;
     while (chan_send(&p->up, &a, sizeof(a)) != 0) {
-        other |= wait_inbox();
+        other |= wait_server(p);
     }
     for (;;) {
         uint32_t len;
         const uint8_t *in = chan_get_begin(&p->up, &len);
         if (in == 0) {
-            other |= wait_inbox();
+            other |= wait_server(p);
             continue;
         }
         struct answer an;
@@ -226,16 +239,16 @@ void hog_main(struct child_page *c)
     }
 }
 
-/* Takes the lock it shares, or the mutex: KERR_OK, or the status of a wait that failed, holding nothing. */
+/* Takes the lock it shares, of either kind: KERR_OK, or the status of a wait that failed, holding nothing. */
 static uint32_t take_lock(const struct lab_page *p)
 {
-    return p->mutex != 0 ? rv_mutex_lock(p->mutex, p->lend) : lock_take(&p->lock);
+    return p->named.word != 0 ? named_lock_take(&p->named) : lock_take(&p->lock);
 }
 
 static void give_lock(const struct lab_page *p)
 {
-    if (p->mutex != 0) {
-        rv_mutex_unlock(p->mutex);
+    if (p->named.word != 0) {
+        named_lock_give(&p->named);
     } else {
         lock_give(&p->lock);
     }

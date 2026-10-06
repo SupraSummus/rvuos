@@ -1,0 +1,20 @@
+A lender that stops lending leaves its borrower on the queue its time gave it.
+The borrower waits on another queue than its own account, or its next lender's, says.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a thread names a queue it is not for
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -609,9 +609,7 @@ static __attribute__((noinline)) void unlend(struct thread *t)
+     struct thread *h = p2v(t->lend_to);
+     bool first = h->lenders == v2p(t);
+     lend_remove(h, t);
+-    if (first) {
+-        thread_settle(h);
+-    }
++    (void)first;
+ }
+ 
+ void sched_lend(struct thread *t, struct notification *ntfn, struct thread *borrower)

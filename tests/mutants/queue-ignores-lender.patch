@@ -1,4 +1,4 @@
-A holder that runs on lent time is queued as if it had only its own.
+A borrower that runs on lent time is queued as if it had only its own.
 A thread waits on another queue than its lender's account says.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay

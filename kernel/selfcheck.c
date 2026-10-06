@@ -178,7 +178,7 @@ static void check_pools(void)
             }
             if (o->type != CAP_CAPTABLE && o->type != CAP_PROCESS &&
                 o->type != CAP_THREAD && o->type != CAP_NOTIFICATION &&
-                o->type != CAP_IRQ && o->type != CAP_MUTEX) {
+                o->type != CAP_IRQ) {
                 fail("object has an unexpected type", at, o->type, 0);
             }
             prev = at;
@@ -342,8 +342,8 @@ static uint32_t owed_threads, queued_threads;
 /* The units the threads the walk met are bound to. */
 static uint32_t units_seen;
 
-/* The mutexes found on their holders' rings, and the mutexes found held; the two counts must agree. */
-static uint32_t holds_seen, holds_named;
+/* The threads found on their borrowers' rings of lenders, and the threads found lending; the two counts must agree. */
+static uint32_t lends_seen, lends_named;
 
 /* Whether it is the thread's turn, or it pays for the turn, either of which it has only on the core it names. */
 static bool is_turn(const struct thread *t)
@@ -369,21 +369,17 @@ static uint32_t account_now(const struct thread *t)
 }
 
 /*
- * The thread a holder runs on the time of while it has none:
- * the oldest waiter of the first mutex it holds, if that one lends and names the holder's core.
- * check_held has vetted the ring and its oldest waiters.
+ * The thread a borrower runs on the time of while it has none:
+ * the one that has lent it time longest, if that one names the borrower's core.
+ * check_lenders has vetted the ring.
  */
 static const struct thread *lender_of(const struct thread *t)
 {
-    if (t->held == 0) {
+    if (t->lenders == 0) {
         return NULL;
     }
-    const struct mutex *m = p2v(t->held);
-    if (m->waiters == 0) {
-        return NULL;
-    }
-    const struct thread *l = p2v(m->waiters);
-    return (l->flags & THREAD_LENDS) && l->core == t->core ? l : NULL;
+    const struct thread *l = p2v(t->lenders);
+    return l->core == t->core ? l : NULL;
 }
 
 /*
@@ -407,42 +403,31 @@ static uint8_t queue_owed(const struct thread *t)
 }
 
 /*
- * The mutexes a thread holds are a ring of live mutexes that name it, each linked back to the one before,
- * and those whose oldest waiter lends come before those whose oldest does not.
+ * The threads that lend a thread their time are a ring of live threads that name it, each linked back to the one before.
  * The back links make the walk close at the first or fail, as a queue's do.
  */
-static void check_held(const struct thread *t)
+static void check_lenders(const struct thread *t)
 {
-    if (t->held == 0) {
+    if (t->lenders == 0) {
         return;
     }
-    bool lending = true;
-    paddr_t at = t->held;
+    paddr_t at = t->lenders;
     do {
         struct obj_header *o = object_find(at);
-        if (o == NULL || o->type != CAP_MUTEX) {
-            fail("a thread holds something that is not a mutex", v2p(t), at, 0);
+        if (o == NULL || o->type != CAP_THREAD) {
+            fail("a thread's lender is not a live thread", v2p(t), at, 0);
         }
-        const struct mutex *m = (const struct mutex *)o;
-        if (m->holder != v2p(t)) {
-            fail("a mutex a thread holds names another holder", v2p(t), at, m->holder);
+        const struct thread *l = (const struct thread *)o;
+        if (l->lend_to != v2p(t)) {
+            fail("a thread's lender lends to another", v2p(t), at, l->lend_to);
         }
-        struct obj_header *w = m->waiters != 0 ? object_find(m->waiters) : NULL;
-        if (m->waiters != 0 && (w == NULL || w->type != CAP_THREAD)) {
-            fail("a mutex's oldest waiter is not a live thread", at, m->waiters, 0);
+        struct obj_header *next = object_find(l->lend_next);
+        if (next == NULL || next->type != CAP_THREAD || ((const struct thread *)next)->lend_prev != at) {
+            fail("a thread's ring of lenders is not linked back", v2p(t), at, l->lend_next);
         }
-        bool lends = w != NULL && (((const struct thread *)w)->flags & THREAD_LENDS);
-        if (lends && !lending) {
-            fail("a mutex whose waiters lend comes after one whose waiters do not", v2p(t), at, 0);
-        }
-        lending = lends;
-        struct obj_header *next = object_find(m->held_next);
-        if (next == NULL || next->type != CAP_MUTEX || ((const struct mutex *)next)->held_prev != at) {
-            fail("a holder's ring of mutexes is not linked back", v2p(t), at, m->held_next);
-        }
-        holds_seen++;
-        at = m->held_next;
-    } while (at != t->held);
+        lends_seen++;
+        at = l->lend_next;
+    } while (at != t->lenders);
 }
 
 /* An account that gives t time once it holds a tick, its own or its lender's, reaches one no earlier than the release. */
@@ -477,7 +462,7 @@ static void check_thread(const struct thread *t)
     } else if (t->state != THREAD_STOPPED) {
         fail("thread without a process is not stopped", v2p(t), t->state, 0);
     }
-    if (t->flags & ~(uint8_t)(THREAD_UNTRACED | THREAD_FAULTED | THREAD_LENDS)) {
+    if (t->flags & ~(uint8_t)(THREAD_UNTRACED | THREAD_FAULTED)) {
         fail("thread has unknown flags", v2p(t), t->flags, 0);
     }
     /* What stopped a thread at a fault is told only while it stays stopped there; see OP_THREAD_FAULT. */
@@ -532,7 +517,7 @@ static void check_thread(const struct thread *t)
         }
     }
     units_seen += thread_units(t);
-    check_held(t);
+    check_lenders(t);
     /* Every account holds at most its cap, and so nothing without units, and was last counted no later than the count. */
     if (t->balance > account_cap(t)) {
         fail("thread's account holds more than its cap", v2p(t), t->balance, thread_units(t));
@@ -552,9 +537,21 @@ static void check_thread(const struct thread *t)
         check_release(t, t, "a thread's account reaches a tick before the release");
         check_release(t, lender_of(t), "a lender's account reaches a tick before the release");
     }
-    /* A thread lends only while it waits on a mutex. */
-    if ((t->flags & THREAD_LENDS) && t->state != THREAD_WAITING) {
-        fail("a thread that waits on no mutex lends", v2p(t), t->state, 0);
+    /*
+     * A thread lends only while it waits, to another live thread, on whose ring it lies,
+     * since every thread on a ring names the ring's thread and the rings hold as many as lend.
+     */
+    if (t->lend_to != 0) {
+        struct obj_header *borrower = object_find(t->lend_to);
+        if (t->state != THREAD_WAITING) {
+            fail("a thread that does not wait lends", v2p(t), t->state, 0);
+        }
+        if (borrower == NULL || borrower->type != CAP_THREAD || t->lend_to == v2p(t)) {
+            fail("a thread lends to something that is not another live thread", v2p(t), t->lend_to, 0);
+        }
+        lends_named++;
+    } else if (t->lend_next != 0 || t->lend_prev != 0) {
+        fail("a thread that lends nothing is linked into a ring of lenders", v2p(t), t->lend_next, t->lend_prev);
     }
     switch (t->state) {
     case THREAD_STOPPED:
@@ -570,12 +567,9 @@ static void check_thread(const struct thread *t)
         break;
     case THREAD_WAITING: {
         struct obj_header *n = object_find(t->waiting_on);
-        if (n == NULL || (n->type != CAP_NOTIFICATION && n->type != CAP_MUTEX)) {
-            fail("thread waits on something that is neither a notification nor a mutex",
+        if (n == NULL || n->type != CAP_NOTIFICATION) {
+            fail("thread waits on something that is not a notification",
                  v2p(t), t->waiting_on, 0);
-        }
-        if ((t->flags & THREAD_LENDS) && n->type != CAP_MUTEX) {
-            fail("a thread that waits on a notification lends", v2p(t), t->waiting_on, 0);
         }
         owed_threads++;
         break;
@@ -586,35 +580,9 @@ static void check_thread(const struct thread *t)
 }
 
 /*
- * A mutex is held by a live thread, which finds it on its ring, see check_held, and does not wait for it,
- * or it is free, on no ring, and nobody waits for it, but in a pool whose destroy is waking its waiters.
- * check_queue holds its waiters to it.
- */
-static void check_mutex(const struct mutex *m)
-{
-    if (m->holder != 0) {
-        struct obj_header *h = object_find(m->holder);
-        if (h == NULL || h->type != CAP_THREAD) {
-            fail("mutex is held by something that is not a live thread", v2p(m), m->holder, 0);
-        }
-        if (((const struct thread *)h)->waiting_on == v2p(m)) {
-            fail("a mutex's holder waits for it", v2p(m), m->holder, 0);
-        }
-        holds_named++;
-    } else {
-        if (m->held_next != 0 || m->held_prev != 0) {
-            fail("free mutex is linked into a holder's ring", v2p(m), m->held_next, m->held_prev);
-        }
-        if (m->waiters != 0 && !obj_pool(&m->hdr)->dying) {
-            fail("threads wait on a free mutex", v2p(m), m->waiters, 0);
-        }
-    }
-}
-
-/*
  * A queue is a ring of live threads, each linked back to the one before,
  * none of them running, and each in the state and waiting on what the queue is for:
- * a notification's or a mutex's waiters, or one of the scheduler's queues, which the thread names with its core.
+ * a notification's waiters, or one of the scheduler's queues, which the thread names with its core.
  * The back links make the walk close at the oldest or fail:
  * no thread can be entered twice from two different predecessors.
  */
@@ -704,6 +672,13 @@ static void check_core(uint32_t i)
         }
         if (payer->stamp != c->ticks) {
             fail("the ticks of a turn were not charged to its payer", v2p(payer), payer->stamp, c->ticks);
+        }
+        /*
+         * It pays from the wait in which it lent the turn's thread its time, the first of the thread's lenders,
+         * and once woken until the turn ends.
+         */
+        if (payer->state == THREAD_WAITING && (c->turn == NULL || c->turn->lenders != v2p(payer))) {
+            fail("a turn's payer that waits is not the turn's first lender", i, v2p(payer), payer->lend_to);
         }
     }
     if (debug_trace && c->turn_from != 0) {
@@ -1023,8 +998,7 @@ static void check_captable(const struct captable *table)
         case CAP_PROCESS:
         case CAP_THREAD:
         case CAP_NOTIFICATION:
-        case CAP_IRQ:
-        case CAP_MUTEX: {
+        case CAP_IRQ: {
             /* A destroy sweeps the tables, so every object capability points at a live object. */
             struct obj_header *o = object_find(c->a);
             if (o == NULL || o->type != c->type) {
@@ -1124,7 +1098,7 @@ static bool node_range(const struct cap *n, uint32_t *base, uint32_t *size)
 static bool is_object_type(uint8_t type)
 {
     return type == CAP_CAPTABLE || type == CAP_PROCESS || type == CAP_THREAD ||
-           type == CAP_NOTIFICATION || type == CAP_IRQ || type == CAP_MUTEX || type == CAP_HOSTED ||
+           type == CAP_NOTIFICATION || type == CAP_IRQ || type == CAP_HOSTED ||
            type == CAP_SIGNALLED || type == CAP_WATCHED;
 }
 
@@ -1394,7 +1368,7 @@ void selfcheck_run(void)
     /* check_pools() ran first, so the flat walk rests on checked headers. */
     owed_threads = queued_threads = 0;
     units_seen = 0;
-    holds_seen = holds_named = 0;
+    lends_seen = lends_named = 0;
     armed_seen = 0;
     for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
         switch (o->type) {
@@ -1410,10 +1384,6 @@ void selfcheck_run(void)
         case CAP_NOTIFICATION:
             check_queue(((struct notification *)o)->waiters, THREAD_WAITING, v2p(o), QUEUE_NONE, CORES);
             break;
-        case CAP_MUTEX:
-            check_mutex((struct mutex *)o);
-            check_queue(((struct mutex *)o)->waiters, THREAD_WAITING, v2p(o), QUEUE_NONE, CORES);
-            break;
         case CAP_IRQ:
             check_irq((struct irq *)o);
             break;
@@ -1427,9 +1397,9 @@ void selfcheck_run(void)
     if (owed_threads != queued_threads) {
         fail("a waiting or ready thread is on no queue", owed_threads, queued_threads, 0);
     }
-    /* Every mutex on a ring names the thread whose ring it is, so equal counts leave no held mutex off its holder's. */
-    if (holds_seen != holds_named) {
-        fail("a held mutex is missing from its holder's ring", holds_seen, holds_named, 0);
+    /* Every thread on a ring names the thread whose ring it is, so equal counts leave no lender off its borrower's. */
+    if (lends_seen != lends_named) {
+        fail("a lender is missing from its borrower's ring", lends_seen, lends_named, 0);
     }
     /* The stall in wfi reads the count instead of walking for a source. */
     if (armed_seen != armed_sources) {

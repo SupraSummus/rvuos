@@ -9,7 +9,8 @@
  * checks a child that answers its checks and one that spins, which it finds and takes down;
  * builds a server with a hub in room for children's data, and clients on its ends,
  * and takes one down and connects another in its place, twice;
- * has children add to a count they share under a lock, sleeping now and then while they hold it;
+ * has children add to a count they share under a lock, sleeping now and then while they hold it,
+ * and again under a lock that names its holder, whose takers lend the holder their time;
  * has a thread publish a snapshot through a seqlock, on the second core where there is one, while a child reads it,
  * and stops the writer while it writes;
  * hands a buffer between two children, and hears the last fault on it once it is taken;
@@ -295,8 +296,9 @@ static void hub_round(void)
 /*
  * Lockers in room for children's data, the count carved from it,
  * and the lock's notification from the root task's pool, where it stays, as every object does until its pool goes.
+ * With named the lock names its holder, locker i as i + 1, and each locker holds every other's thread to lend it time.
  */
-static void lock_round(void)
+static void lock_round(int named)
 {
     struct self_tally unroomed = tally();
     struct block shared;
@@ -319,6 +321,17 @@ static void lock_round(void)
              child_give(&self, &lockers[i], note, RIGHT_R | RIGHT_W, &p->lock.note));
         p->lock.word = lock.word;
         p->count = (uint32_t)(uintptr_t)&l->count;
+        p->named = named;
+    }
+    for (uint32_t i = 0; named && i < LOCKERS; i++) {
+        struct locker_page *p = (struct locker_page *)lockers[i].page;
+        p->name = (struct named_lock){ lock.word, p->lock.note, i + 1u, { 0 } };
+        for (uint32_t j = 0; j < LOCKERS; j++) {
+            if (j != i) {
+                must("give a locker another's thread",
+                     child_give(&self, &lockers[i], lockers[j].thread, RIGHT_X, &p->name.lend[j + 1u]));
+            }
+        }
     }
     for (uint32_t i = 0; i < LOCKERS; i++) {
         must("start a locker", child_start(&self, &lockers[i], locker_main, CHILD_UNITS));
@@ -333,7 +346,8 @@ static void lock_round(void)
     check(waited > 0, "a locker found the lock held, so the takes that wait were tried");
     check(lock_try(&lock), "the lock is free once every locker is done");
     lock_give(&lock);
-    say(&out, "libtest: %u lockers, %u rounds each under a lock, found held %u times: ok\n", LOCKERS, LOCK_ROUNDS, waited);
+    say(&out, "libtest: %u lockers, %u rounds each under a lock%s, found held %u times: ok\n", LOCKERS, LOCK_ROUNDS,
+        named ? " that names its holder" : "", waited);
     for (uint32_t i = 0; i < LOCKERS; i++) {
         must("take a locker down", child_free(&self, &lockers[i]));
     }
@@ -574,7 +588,8 @@ int main(void)
     must("free the channel", chan_free(&self, &link));
     check_round();
     hub_round();
-    lock_round();
+    lock_round(0);
+    lock_round(1);
     snap_round();
     pass_round();
     own_round();

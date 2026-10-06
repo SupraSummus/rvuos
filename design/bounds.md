@@ -25,7 +25,7 @@ What it costs is latency, and preemption is the answer to that.
 
 **Preemption.**
 A revoke, a delete below a root, a pool destroy, and the revoke that begins a bind
-take one step per capability, object, waiter or mutex held in constant time
+take one step per capability, object or waiter in constant time
 and ask `intr_pending` between two steps.
 If the tick or a device interrupt is pending, or another core waits for the kernel's lock, the walk stops,
 `syscall_dispatch` puts the thread back on its `ecall` with its registers as they were,
@@ -35,8 +35,8 @@ The kernel only notices the interrupt; the processor takes it.
 The progress stays in the derivation tree and in the pool:
 the next step is always at the first child of the slot the call names,
 or at the newest object of the pool being destroyed and the slot its descriptor says,
-or, for a notification or a mutex of it, at the first thread still waiting on it,
-and for a thread of it at the first mutex it still holds,
+or, for a notification of it, at the first thread still waiting on it,
+and for a thread of it at the first thread still lending it its time,
 so the kernel needs no record of where it stopped, no second stack and no worker,
 and the time lands in the slice of the thread that made the call.
 A pool's destroy goes on from where it stopped whichever revoke takes the next step,
@@ -83,7 +83,7 @@ which is how it reads what the other core writes;
 what bounds it is the other core: a lock held a step of a walk at most, a trap that user mode takes at once,
 or on ARM a ticket of the lock another core takes between an exclusive load and store, once a trap at most.
 Other bounds rest on an invariant, as `i < img->count` does,
-and a paid loop names its unit: a node, a link, an object, a waiter, or a hold, a mutex held or a thread waiting.
+and a paid loop names its unit: a node, a link, an object or a waiter.
 The host harness `fuzz-work` counts both after every call:
 a bound per entry of its loop,
 and paid steps at most twice what the call took away of that unit, plus one;
@@ -96,7 +96,7 @@ It finds a false claim only where the corpus reaches.
 The host answers every `intr_pending` with yes, the worst case,
 so each preemptible call stops after its first step, is made again,
 and the self-check runs between any two steps;
-every host harness requires a stopped call to have taken a node, a link, an object, a waiter or a hold away,
+every host harness requires a stopped call to have taken a node, a link, an object or a waiter away,
 and to leave its caller running, holding its table and the capability it made the call through,
 so that it can make the call again.
 

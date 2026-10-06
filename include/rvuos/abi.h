@@ -55,7 +55,6 @@
 #define CAP_IRQ      10 /* one line bound to a notification; signals it when the line fires */
 #define CAP_CLOCK    11 /* the machine's time, the counter's frame, and its watchdog */
 #define CAP_TIME     12 /* a range of the processor's units of time; no kernel object behind it */
-#define CAP_MUTEX    13 /* held by one thread at a time, whose waiters may lend it their time */
 
 /*
  * Rights bits.
@@ -64,13 +63,13 @@
  * CapTable: RIGHT_W to copy into or delete from the table.
  * Pool: RIGHT_W to allocate objects.
  * Process, Thread: RIGHT_W to control the object.
+ * Thread: RIGHT_X to lend it time, see OP_NOTIFY_LEND, which a capability with RIGHT_X alone allows and nothing else.
  * Notification: RIGHT_W to signal, RIGHT_R to wait.
  *   Besides its rights a Notification capability carries the bits it may signal,
  *   every bit for a new one and fewer once carved, see OP_NOTIFY_CARVE; copying keeps them.
  * IrqLine: RIGHT_W to bind a line.
  * Irq: RIGHT_W to set or mask.
  * Time: RIGHT_W to bind a thread, RIGHT_X to let the threads bound through it run on spare time.
- * Mutex: RIGHT_W to take and give back.
  * Debug: RIGHT_W to write into the kernel's log,
  *   RIGHT_X to halt the machine or drive it as a test does: trace, tick, interrupt, preempt;
  *   a child that only prints holds it with RIGHT_W alone.
@@ -171,7 +170,7 @@
  * with every object in it and every capability anywhere that names the pool or one of those objects.
  * The slots of the pool's tables are cleared as OP_CAP_DELETE clears one:
  * what was derived from them goes to their parents.
- * Threads waiting on a notification in a destroyed pool
+ * Threads waiting on a notification in a destroyed pool, or lending a thread in it their time,
  * are woken with KERR_INVALID_CAP and no bits,
  * threads, in whatever pool, whose process was in it stop,
  * and Irqs, in whatever pool, whose notification was in it are disarmed.
@@ -265,7 +264,7 @@
  *   CAP_PROCESS   the slot of the CapTable capability the process will use,
  *                 which needs RIGHT_W; the table may lie in any pool,
  *   CAP_THREAD    the slot of the Process capability the thread will run in,
- *   CAP_NOTIFICATION, CAP_MUTEX  unused.
+ *   CAP_NOTIFICATION  unused.
  * The object's capability is a child of the invoked Pool capability in the derivation tree,
  * so revoking below that capability takes it.
  * Fails with KERR_STATE while the pool is being destroyed.
@@ -367,7 +366,10 @@
  * Notification (RIGHT_W): set bits. a1 = the bits to set, which may not be zero.
  * Of those, only the bits the capability may signal are set, see OP_NOTIFY_CARVE,
  * and a1 with none of them fails with KERR_NO_RIGHTS.
- * Never blocks. If a thread is waiting, it takes every set bit and wakes.
+ * Never blocks. If a thread is waiting, it takes every set bit and wakes:
+ * the one whose time pays for the caller's turn, see OP_NOTIFY_LEND, if it waits there,
+ * and it takes the rest of the turn back, the caller going to the back of its queue;
+ * otherwise, today, the one that waited longest.
  */
 #define OP_NOTIFY_SIGNAL 14
 /*
@@ -377,6 +379,20 @@
  * the bits are sticky, so a signal that arrives first is not lost.
  */
 #define OP_NOTIFY_WAIT 15
+/*
+ * Notification (RIGHT_R): wait as OP_NOTIFY_WAIT does, lending a thread the caller's time meanwhile.
+ * a1 = the slot of a Thread capability with RIGHT_X, the borrower; the caller itself fails with KERR_INVALID_ARG.
+ * Returns a1 = the bits, at once if some bit is set, which lends nothing.
+ * While it waits, a borrower without time of its own runs on the account of the thread that has lent it time longest,
+ * if that one runs on the borrower's core,
+ * and a caller whose own time pays for its turn hands the rest of the turn to the borrower,
+ * if it is that one and the borrower waits for a turn.
+ * A signal from the borrower that wakes the caller hands the rest of the turn back, see OP_NOTIFY_SIGNAL.
+ * The time goes one step, to the borrower, never on to whatever the borrower waits for or lends to.
+ * A caller whose borrower is destroyed wakes with KERR_INVALID_CAP and no bits, as one whose notification is.
+ * See DESIGN.md, "Communication and synchronisation".
+ */
+#define OP_NOTIFY_LEND 38
 /*
  * Notification: derive a capability that may signal fewer bits, with the same rights.
  * a1 = the bits, of which those the invoked capability may signal are kept, a2 = destination slot.
@@ -498,33 +514,8 @@
  */
 #define OP_TIME_BIND 29
 
-/*
- * Mutex (RIGHT_W): take it. a1 = flags, MUTEX_LEND or none; any other bit fails with KERR_INVALID_ARG.
- * Returns once the caller holds it, at once if nobody did.
- * While another thread holds it the caller waits, behind the threads already waiting there,
- * and an unlock hands it to the one that waited longest, which then holds it as its call returns.
- * Fails with KERR_STATE when the caller holds it already.
- * A waiter whose mutex is destroyed wakes with KERR_INVALID_CAP, holding nothing.
- * With MUTEX_LEND the caller lends the holder its time while it waits:
- * a holder without time runs on the account of the oldest waiter of the first mutex it holds,
- * if that one lends and runs on the holder's core,
- * and a caller that has time hands the rest of its turn to a holder waiting for its turn.
- * The time goes one step, to the holder, never on to whatever the holder waits for.
- * See DESIGN.md, "Communication and synchronisation".
- */
-#define OP_MUTEX_LOCK 38
-#define MUTEX_LEND 0x1
-/*
- * Mutex (RIGHT_W): give it back. Fails with KERR_STATE unless the caller holds it.
- * The thread that waited longest takes it and wakes;
- * if the caller's turn was paid by that thread's time, the rest of the turn is that thread's,
- * and the caller goes to the back of its queue.
- * A mutex whose holder is destroyed is given back so, as by an unlock.
- */
-#define OP_MUTEX_UNLOCK 39
-
 /* One above the highest operation code; the fuzzer's mutator draws below it. */
-#define OP_COUNT 40
+#define OP_COUNT 39
 
 /*
  * Capability slots the kernel fills in the root task's table at boot.

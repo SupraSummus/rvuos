@@ -9,12 +9,12 @@ Report: a thread's account reaches a tick before the release
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -524,7 +524,7 @@ static void release(uint32_t c)
+@@ -502,7 +502,7 @@ static void release(uint32_t c)
          LOOP_BOUND(TIME_UNITS);
          struct thread *t = unit_first(first + i);
          if (t != NULL && (t->queue == QUEUE_SPARE || t->queue == QUEUE_SPENT)) {
 -            thread_settle(t);
 +            (void)t;
          }
-         /* A lender waits on no queue, and its account may give the holder it lends to time. */
+         /* A lender waits on no queue, and its account may give the borrower it lends to time. */
          struct thread *h = t != NULL ? thread_borrower(t) : NULL;

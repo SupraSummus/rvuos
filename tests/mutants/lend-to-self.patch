@@ -1,0 +1,19 @@
+A lending wait that lets a thread lend to itself.
+A thread lends to a thread that is not another.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a thread lends to something that is not another live thread
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -546,9 +546,6 @@ static __attribute__((noinline)) int op_lend(struct thread *t, struct notificati
+         return err;
+     }
+     struct thread *borrower = (struct thread *)cap_object(&bc);
+-    if (borrower == t) {
+-        return KERR_INVALID_ARG;
+-    }
+     if (ntfn->bits != 0) {
+         arg[1] = ntfn->bits;
+         ntfn->bits = 0;

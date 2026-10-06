@@ -42,7 +42,7 @@
  */
 #define WORK_SLACK 1
 
-static const char *const unit_names[UNITS] = { "node", "link", "object", "waiter", "hold" };
+static const char *const unit_names[UNITS] = { "node", "link", "object", "waiter" };
 
 struct work_frame {
     const struct work_site *site[WORK_OPEN];

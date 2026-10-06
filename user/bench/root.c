@@ -7,12 +7,12 @@
  * threads: a round trip between two threads of one process, four calls and two switches.
  * processes: the same between two processes, whose switches load the other's regions too.
  * channel: 64 bytes there and back through a channel of lib/chan.h between two children.
- * mutex: a mutex taken and given back, nobody else wanting it, two calls.
- * mutex-wait: a mutex another thread holds, waited for and handed over, ten calls and four switches,
+ * lock: a lock of lib/lock.h that names its holder, taken and given back, nobody else wanting it, no call.
+ * lock-wait: the same lock another thread holds, waited for, eleven calls and four switches,
  * the holder waiting for a signal while it holds it, so that each round waits once,
  * and for another before it takes it again, so that a tick between the two cannot leave both waiting.
- * mutex-lend: the same with the waiter lending its time, which hands the holder the rest of its turn
- * and has the turn back with the mutex, rather than taking the next turn and joining the queue.
+ * lock-lend: the same with the waiter lending the holder its time, which hands the holder the rest of its turn
+ * and has the turn back with the give's signal, rather than taking the next turn and joining the queue.
  * seqlock-write: a snapshot of 32 bytes published through lib/seqlock.h, nobody reading, no call.
  * seqlock-read: the same snapshot copied out whole, nobody writing, no call.
  * contended-worst: the worst round of processes beside a third process that always wants the core,
@@ -25,6 +25,7 @@
 #include "bench.h"
 #include "console.h"
 #include "lib/libc.h"
+#include "lib/lock.h"
 #include "lib/log.h"
 #include "lib/say.h"
 #include "lib/seqlock.h"
@@ -45,7 +46,10 @@ static struct kernel_log klog;
 static const struct out out = { log_write, (void *)BOOT_CAP_DEBUG };
 static uint8_t pong_stack[1024] __attribute__((aligned(16)));
 static uint8_t holder_stack[1024] __attribute__((aligned(16)));
-static uint32_t note, ping_note, pong_note, held_note, hold_note, done_note, mutex;
+static uint32_t note, ping_note, pong_note, held_note, hold_note, done_note, lock_note;
+/* The lock's word, and how the root thread, named 1, and the holder, named 2, take it; see lock-wait. */
+static uint32_t lock_word;
+static struct named_lock waiter_lock, holder_lock;
 static struct child pong;
 static struct seqlock snap;
 static uint32_t snap_memory[SEQLOCK_BYTES(SNAPSHOT) / 4u], snap_data[SNAPSHOT / 4u];
@@ -124,14 +128,14 @@ static void round_thread(void)
     rv_wait(ping_note, &bits);
 }
 
-static void round_mutex(void)
+static void round_lock(void)
 {
-    rv_mutex_lock(mutex, 0);
-    rv_mutex_unlock(mutex);
+    named_lock_take(&waiter_lock);
+    named_lock_give(&waiter_lock);
 }
 
 /*
- * The other end of mutex-wait and mutex-lend: it holds the mutex until the waiter signals,
+ * The other end of lock-wait and lock-lend: it holds the lock until the waiter signals,
  * and takes it again once the waiter is done with it.
  */
 static void holder_thread(uint32_t arg)
@@ -139,33 +143,23 @@ static void holder_thread(uint32_t arg)
     (void)arg;
     for (;;) {
         uint32_t bits;
-        rv_mutex_lock(mutex, 0);
+        named_lock_take(&holder_lock);
         rv_signal(held_note, 1);
         rv_wait(hold_note, &bits);
-        rv_mutex_unlock(mutex);
+        named_lock_give(&holder_lock);
         rv_wait(done_note, &bits);
     }
 }
 
-/* Once the holder holds the mutex, the waiter wakes it and waits for the mutex, which it gives back at once. */
-static void wait_for_holder(uint32_t flags)
+/* Once the holder holds the lock, the waiter wakes it and waits for the lock, which it gives back at once. */
+static void round_lock_wait(void)
 {
     uint32_t bits;
     rv_wait(held_note, &bits);
     rv_signal(hold_note, 1);
-    rv_mutex_lock(mutex, flags);
-    rv_mutex_unlock(mutex);
+    named_lock_take(&waiter_lock);
+    named_lock_give(&waiter_lock);
     rv_signal(done_note, 1);
-}
-
-static void round_mutex_wait(void)
-{
-    wait_for_holder(0);
-}
-
-static void round_mutex_lend(void)
-{
-    wait_for_holder(MUTEX_LEND);
 }
 
 static void round_seqlock_write(void)
@@ -232,15 +226,18 @@ int main(void)
     must("start the thread", rv_thread_resume(thread));
     measure("threads", round_thread);
 
-    must("a slot", slot_new(&self, &mutex));
-    must("a mutex", rv_pool_alloc(pool.made, CAP_MUTEX, mutex, 0));
     must("a slot", slot_new(&self, &held_note));
     must("a slot", slot_new(&self, &hold_note));
     must("a notification", rv_pool_alloc(pool.made, CAP_NOTIFICATION, held_note, 0));
     must("a notification", rv_pool_alloc(pool.made, CAP_NOTIFICATION, hold_note, 0));
     must("a slot", slot_new(&self, &done_note));
     must("a notification", rv_pool_alloc(pool.made, CAP_NOTIFICATION, done_note, 0));
-    measure("mutex", round_mutex);
+    must("a slot", slot_new(&self, &lock_note));
+    must("a notification", rv_pool_alloc(pool.made, CAP_NOTIFICATION, lock_note, 0));
+    waiter_lock = (struct named_lock){ (uint32_t)(uintptr_t)&lock_word, lock_note, 1, { 0 } };
+    holder_lock = (struct named_lock){ (uint32_t)(uintptr_t)&lock_word, lock_note, 2, { 0 } };
+    named_lock_init(&waiter_lock);
+    measure("lock", round_lock);
     uint32_t holder;
     must("a slot", slot_new(&self, &holder));
     must("a thread", rv_pool_alloc(pool.made, CAP_THREAD, holder, BOOT_CAP_PROCESS));
@@ -251,8 +248,10 @@ int main(void)
     must("carve the units", rv_time_carve(self.time, first, UNITS, time));
     must("bind the units", rv_time_bind(time, holder, 0, UNITS));
     must("start the thread", rv_thread_resume(holder));
-    measure("mutex-wait", round_mutex_wait);
-    measure("mutex-lend", round_mutex_lend);
+    measure("lock-wait", round_lock_wait);
+    /* The root task's table holds the holder's thread with every right, RIGHT_X among them. */
+    waiter_lock.lend[2] = holder;
+    measure("lock-lend", round_lock_wait);
 
     snap = seqlock_shape((uint32_t)(uintptr_t)snap_memory, SNAPSHOT);
     seqlock_init(&snap);

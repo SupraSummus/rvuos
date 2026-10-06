@@ -2,6 +2,7 @@ A thread bound to another core's units keeps the core it ran on, and waits on th
 where it takes the time of a core it earns nothing of; a queued thread waits on the core its units are of.
 
 Caught-by: fuzz-smp2
+Report: a thread waits on another queue than its account says
 Report: thread waits on another core than its units are of
 
 diff --git a/kernel/sched.c b/kernel/sched.c

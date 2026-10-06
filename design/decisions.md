@@ -69,10 +69,11 @@ until the maintainer decides otherwise.
    of which the four calls take 2,000 and 2,200,
    and loading the other process's regions about 400 cycles a switch on Hazard3 and 1,000 on the ESP32-C6.
    `make lab` shows what an endpoint would carry besides the message, `user/lab/NOTES.md`:
-   the kernel does not know whom a waiter waits for, so a client's time goes to spare time while it waits, not to its server,
+   a client that waits lends its time to nobody, so it goes to spare time while it waits, not to its server,
    and a server cannot tell a client that pays for its asks from one that does not.
-   A waiter on a mutex lends its holder its time, decision 27;
-   a wait that named the thread it waits for, or the notification its answer comes through, could lend a server the same way.
+   A client that names its server's thread as it waits lends it its time, decision 27,
+   and beside a process that spins is answered as fast as alone, where one that lends nothing waits over a tick and a half;
+   the server runs on the time of the client that lent it longest, though, not of the one whose ask it serves.
    An `Endpoint` object would not replace notifications:
    interrupts need those either way.
 
@@ -118,8 +119,8 @@ until the maintainer decides otherwise.
    set by whoever holds the capability and capped by the setter's own,
    round-robin within a priority, no priority inheritance;
    with units they could be a right of the `Time` capability a thread is bound through, as spare time is.
-   What priority inheritance does for priorities, a mutex's waiter does for accounts, decision 27:
-   it lends its holder its time, one step, the oldest waiter's.
+   What priority inheritance does for priorities, a waiter that names whom it waits for does for accounts, decision 27:
+   it lends that thread its time, one step, the oldest lender's.
    The alternative is a scheduler in userspace
    that decides which threads are runnable at all.
    It stops a thread by taking back the units it lent it and starts it by binding it again,
@@ -411,18 +412,24 @@ until the maintainer decides otherwise.
     its root task checks every child each second and deals with one that did not answer itself,
     so the watchdog it then feeds watches only the root task and the kernel.
     Under the alternative the root task would be the supervisor already, and feed the chip's watchdog through a frame.
-27. **A mutex in the kernel, and lent time.**
-    Working default, an experiment: a `Mutex` handed to its oldest waiter, whose waiters may lend the holder their time;
+27. **Lent time, and no mutex in the kernel.**
+    Working default, an experiment: a waiter lends a thread it names its time, `OP_NOTIFY_LEND`,
+    through a capability to it with `RIGHT_X`, and a signal that wakes the lender hands it its turn back;
     see "Communication and synchronisation" and "Scheduling".
-    Before, a lock was userspace's alone, `user/lib/lock.h`.
+    Before, a `Mutex` the kernel knew the holder of, handed to its oldest waiter, whose waiters could lend the holder their time,
+    and before that a lock was userspace's alone, `user/lib/lock.h`.
     In `make lab` a thread with a quarter of the core waits for a lock held by one with a thirty-second, `user/lab/NOTES.md`:
-    beside a process that spins, the mutex alone helps little, since a mutex handed to a waiter that waits for its turn is a convoy,
-    and lending cuts the wait from about three ticks at p90 to a fraction of one.
-    It costs a hold nobody else wants two calls, and every switch a few per cent; see `make bench`.
-    Open: lending through a wait on a notification, which a client of a server could use too, decision 5,
-    and which might take the mutex's place;
-    a hold with no call while nobody else wants it, as a futex has, though the kernel reads no user memory;
-    lending across cores, by running the holder on its lender's core;
-    lending from more than one waiter, or through a holder that waits in turn, walks that goal 4 rules out;
-    and the waiter that takes a destroyed holder's mutex without being told.
-    Decide with the first workload that shares a lock between threads of unequal time.
+    beside a process that spins, lending cuts the wait from about three ticks at p90 to a fraction of one,
+    on the mutex and on the lock of `user/lib/lock.h` that names its holder alike,
+    and the mutex without lending made a convoy.
+    The lock costs a hold nobody else wants no call, where the mutex cost two,
+    and lending costs every switch a few per cent; see `make bench`.
+    The same wait lends a server its client's time, decision 5.
+    What went with the mutex: a hand-over in order to waiters that lend nothing, which beside a busy process is the convoy,
+    and the mutexes a destroyed holder gave its oldest waiters, which were not told; a lender is told now.
+    Open: lending across cores, by running the borrower on its lender's core;
+    borrowing from more than one lender at once, or through a borrower that waits or lends in turn, walks that goal 4 rules out;
+    whether a server should run on the time of the client it serves rather than of its oldest lender, decision 5;
+    and a lock fair to takers that lend nothing,
+    which userspace can build with a bit that asks the giver to hand the lock on, as Linux's mutex has.
+    Decide with the first workload that shares a lock between threads of unequal time, or a server between clients that pay unequally.

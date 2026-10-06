@@ -2,12 +2,12 @@ A destroy that leaves a thread blocked on a notification it took away.
 The thread waits on an object that is no longer live.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
-Report: thread waits on something that is neither a notification nor a mutex
+Report: thread waits on something that is not a notification
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -895,7 +895,7 @@ bool sched_forget(struct obj_header *o, bool preempt)
+@@ -811,7 +811,7 @@ bool sched_forget(struct obj_header *o, bool preempt)
           * The thread learns that the way every other call learns it.
           * Its progress is the queue: a stop leaves the rest waiting on a notification still whole.
           */
@@ -15,4 +15,4 @@ diff --git a/kernel/sched.c b/kernel/sched.c
 +        while (ntfn->waiters != 0 && o->type != CAP_NOTIFICATION) {
              LOOP_PAID(sched_forget, waiter, "a thread that waited, by a call of its own");
              struct thread *t = p2v(ntfn->waiters);
-             notify_unwait(t);
+             unwait(t);

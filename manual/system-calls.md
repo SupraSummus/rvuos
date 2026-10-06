@@ -232,7 +232,6 @@ it is destroyed by revoking below its Untyped, section 5.5.
 | `CAP_PROCESS` | slot of the `CapTable` capability the process will use, with `RIGHT_W` | the table may lie in any pool; the process's hold on it hangs below that capability |
 | `CAP_THREAD` | slot of the `Process` capability the thread will run in, with `RIGHT_W` | the process may lie in any pool; the thread's hold on it hangs below that capability; the thread starts stopped |
 | `CAP_NOTIFICATION` | unused | |
-| `CAP_MUTEX` | unused | the mutex starts free |
 
 Any other type is `KERR_INVALID_ARG`; `Irq` objects come from `OP_IRQ_BIND`.
 The new capability carries all rights and hangs below the invoked `KernelPool` capability.
@@ -266,6 +265,7 @@ Clearing an empty slot succeeds.
 
 All need `RIGHT_W` on the thread,
 and `OP_THREAD_CONFIGURE`, `OP_THREAD_RESUME`, `OP_THREAD_READ_REG` and `OP_THREAD_WRITE_REG` a stopped thread (`KERR_STATE`).
+`RIGHT_X` on a thread allows nothing here: it lends the thread time, `OP_NOTIFY_LEND`.
 
 **`OP_THREAD_CONFIGURE` (12).**
 `a1` = program counter, `a2` = stack pointer, `a3` = the thread's argument,
@@ -330,12 +330,25 @@ Needs `RIGHT_W`.
 of which only those the capability may signal are set;
 `a1` with none of them is refused with `KERR_NO_RIGHTS`.
 Never blocks.
+A waiting thread takes the bits and wakes: the one whose time pays for the caller's turn, if it waits there,
+which then has the rest of the turn while the caller goes to the back of its queue, section 5.12,
+and otherwise, today, the one that has waited longest.
 
 **`OP_NOTIFY_WAIT` (15).**
 Needs `RIGHT_R`.
 Blocks until some bit is set, then returns `a1` = the bits and clears them.
 Returns `KERR_INVALID_CAP` with no bits
 if the notification's pool is destroyed while the thread waits.
+
+**`OP_NOTIFY_LEND` (38).**
+Needs `RIGHT_R`.
+`a1` = slot of a `Thread` capability with `RIGHT_X`, the borrower; the caller itself is `KERR_INVALID_ARG`.
+Waits as `OP_NOTIFY_WAIT` does, and returns at once, lending nothing, if some bit is set.
+While it waits, a borrower without time of its own runs on the account of the thread that has lent it time longest,
+if that one runs on the borrower's core,
+and a caller whose own time pays for its turn hands the rest of the turn to the borrower,
+if it is that one and the borrower waits for a turn; section 5.12.
+Returns `KERR_INVALID_CAP` with no bits if the notification's pool, or the borrower's, is destroyed while it waits.
 
 **`OP_NOTIFY_CARVE` (36).**
 No right needed.
@@ -440,32 +453,10 @@ Its hold on the units hangs below the invoked capability,
 so revoking below that capability unbinds it:
 it keeps its state and does not run until it is bound again, and its account is emptied.
 A thread unbound or moved while it runs, the caller itself for one, finishes the turn it had:
-only a wait, the tick, a fault, section 5.6, or a revoke that takes its own process, section 6.4, takes the processor from it.
+only a wait, the tick, a fault, section 5.6, a revoke that takes its own process, section 6.4,
+or a signal that wakes the thread paying for its turn, section 5.12, takes the processor from it.
 
-### 6.14 Operations on `Mutex`
-
-Both operations need `RIGHT_W`; section 5.12.
-
-**`OP_MUTEX_LOCK` (38).**
-`a1` = flags, `MUTEX_LEND` (1) or none; any other bit is `KERR_INVALID_ARG`.
-Returns once the caller holds the mutex, at once if nobody did.
-While another thread holds it the caller waits, behind the threads already waiting there,
-and an unlock hands it to the one that waited longest, which holds it as its call returns `KERR_OK`.
-`KERR_STATE` if the caller holds it already.
-Returns `KERR_INVALID_CAP`, holding nothing, if the mutex's pool is destroyed while the thread waits.
-With `MUTEX_LEND` the caller lends the holder its time while it waits:
-a holder without time runs on the account of the oldest waiter of the first mutex it holds, if that one lends,
-and a caller whose own time pays for its turn hands the rest of the turn to the holder,
-if the holder waits for a turn; both only on the caller's core.
-
-**`OP_MUTEX_UNLOCK` (39).**
-`KERR_STATE` unless the caller holds the mutex.
-The thread that waited longest takes it and wakes;
-if that thread's time paid for the caller's turn, the rest of the turn is that thread's,
-and the caller goes to the back of its queue.
-A mutex whose holder is destroyed is given back as by an unlock.
-
-### 6.15 Operation codes in numeric order
+### 6.14 Operation codes in numeric order
 
 | Code | Operation | Type |
 |---|---|---|
@@ -505,10 +496,9 @@ A mutex whose holder is destroyed is given back as by an unlock.
 | 35 | `OP_THREAD_WRITE_REG` | `Thread` |
 | 36 | `OP_NOTIFY_CARVE` | `Notification` |
 | 37 | `OP_CLOCK_WATCHDOG` | `Clock` |
-| 38 | `OP_MUTEX_LOCK` | `Mutex` |
-| 39 | `OP_MUTEX_UNLOCK` | `Mutex` |
+| 38 | `OP_NOTIFY_LEND` | `Notification` |
 
-`OP_COUNT` is 40, one above the highest code; 16 is unused.
+`OP_COUNT` is 39, one above the highest code; 16 is unused.
 
 ## 7. What the root task starts with
 

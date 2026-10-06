@@ -9,8 +9,8 @@ Report: a call stopped where its caller cannot make it again
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -970,7 +970,7 @@ void syscall_dispatch(struct thread *t)
-      * unless it handed its turn to the holder of the mutex it waits on, which runs now.
+@@ -963,7 +963,7 @@ void syscall_dispatch(struct thread *t)
+      * unless it handed its turn to the thread it lends its time to, which runs now.
       * One that lost its units finishes its turn, as a preempted call is made again before the tick switches.
       */
 -    if (core->current->state != THREAD_READY) {
