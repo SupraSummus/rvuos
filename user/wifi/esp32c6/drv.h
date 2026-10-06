@@ -52,14 +52,12 @@ struct drv_header {
  * a line for each frame to and from the link, the libraries' counters of the radio once the run is over,
  * hostap's supplicant at its debug level,
  * and once joined, a line for each frame the radio hears of the access point's to the group or to the station,
- * each acknowledgement to the station, and each frame heard broken, timed by the MAC;
- * and of a probe the libraries send, what they wrote to the MAC to send it, see mac.h.
+ * each acknowledgement to the station, and each frame heard broken, timed by the MAC.
  */
 #define DRV_DEBUG_FRAMES 0x1u
 #define DRV_DEBUG_STATS  0x2u
 #define DRV_DEBUG_WPA    0x4u
 #define DRV_DEBUG_AIR    0x8u
-#define DRV_DEBUG_TX     0x10u
 
 /*
  * The driver's page.

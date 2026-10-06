@@ -92,7 +92,6 @@ what is left:
   The driver's own code receives and scans as well as the libraries do, by `listen=` and a scan, each with and without `rx=own`,
   and sends a probe by `tx=own`, launching the slot and finishing the frame by its own code,
   so that sending needs no interrupt of theirs; the access point answers it, with `rx=own` or the libraries' own.
-  The `debug=tx` wrapper of their `hal_mac_txq_enable` may go, the frame now the driver's to finish.
   The station's logic is to be the driver's own too, on hostap's parsing, the keys and then the join among it;
   `user/wifi/NOTES.md` says why.
 - The ESP32-C6's Wi-Fi root task has 8 KiB of memory and 9 slots left once its clients run,

@@ -194,8 +194,7 @@ static void configure(struct drv *p)
     p->debug = (config_has(conf, size, "debug", "frames") ? DRV_DEBUG_FRAMES : 0) |
                (config_has(conf, size, "debug", "stats") ? DRV_DEBUG_STATS : 0) |
                (config_has(conf, size, "debug", "wpa") ? DRV_DEBUG_WPA : 0) |
-               (config_has(conf, size, "debug", "air") ? DRV_DEBUG_AIR : 0) |
-               (config_has(conf, size, "debug", "tx") ? DRV_DEBUG_TX : 0);
+               (config_has(conf, size, "debug", "air") ? DRV_DEBUG_AIR : 0);
     p->lib_log = config_number(conf, size, "lib", 0);
     p->no_ax = config_number(conf, size, "ax", 1) == 0;
     p->no_pmf = config_number(conf, size, "pmf", 1) == 0;

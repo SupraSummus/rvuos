@@ -632,38 +632,6 @@ static void heard_by_libraries(void *buf, int type)
     heard(buf);
 }
 
-/* What the libraries wrote to the MAC to send the first probe, for debug=tx, into the log; see mac.h. */
-static void words_told(const char *what, const uint32_t *w, uint32_t n)
-{
-    for (uint32_t i = 0; i < n; i += 8) {
-        char line[96];
-        uint32_t k = 0;
-        for (uint32_t j = i; j < n && j < i + 8; j++) {
-            k += (uint32_t)snprintf(line + k, sizeof(line) - k, " %08x", (unsigned)w[j]);
-        }
-        drv_say("tx: %s +%02x:%s\n", what, (unsigned)(4u * i), line);
-    }
-}
-
-static void tx_told(void)
-{
-    const struct mac_tx_seen *s = &mac_tx_seen;
-    uint32_t now[MAC_TX_PPDU_WORDS];
-    mac_tx_ppdu(s->slot, now);
-    drv_say("tx: slot %u\n", (unsigned)s->slot);
-    words_told("queue", s->queue, 4);
-    words_told("state", s->state, 4);
-    words_told("ppdu", s->ppdu, MAC_TX_PPDU_WORDS);
-    words_told("ppdu after", now, MAC_TX_PPDU_WORDS);
-    drv_say("tx: descriptor at %08x\n", (unsigned)s->desc_at);
-    words_told("descriptor", s->desc, s->desc_at ? MAC_TX_DESC_WORDS : 0);
-    char line[2 * MAC_TX_FRAME_SIZE + 1];
-    for (uint32_t i = 0; i < MAC_TX_FRAME_SIZE; i++) {
-        snprintf(line + 2 * i, 3, "%02x", s->frame[i]);
-    }
-    drv_say("tx: frame at %08x: %s\n", (unsigned)s->frame_at, s->frame_at ? line : "");
-}
-
 /* What was heard since then, into the log, over ms milliseconds. */
 static void hear_tell(const char *what, const struct hear *then, uint32_t ms)
 {
@@ -699,7 +667,7 @@ static __attribute__((noreturn)) void listen(struct drv *d)
     }
     static uint8_t probe[PROBE_MAX];
     uint16_t probe_seq = 0;
-    uint32_t probe_len = 0, probes = 0, probes_failed = 0, tx_shown = 0;
+    uint32_t probe_len = 0, probes = 0, probes_failed = 0;
     if (d->probe[0]) {
         must(d, "the station's address", esp_wifi_get_mac(WIFI_IF_STA, probe_from));
         probe_len = probe_request(probe, d->probe, d->listen);
@@ -721,10 +689,6 @@ static __attribute__((noreturn)) void listen(struct drv *d)
             hear_tell("the last", &then, (uint32_t)((now - told) / 1000u));
             then = hear;
             told = now;
-            if (mac_tx_seen.full && !tx_shown) {
-                tx_told();
-                tx_shown = 1;
-            }
             if (probe_len && probes < PROBES) {
                 if (d->own_tx) {
                     /* The libraries set the frame's sequence number themselves; the driver's own frame carries it. */
@@ -737,7 +701,6 @@ static __attribute__((noreturn)) void listen(struct drv *d)
                         probes_failed++;
                     }
                 } else {
-                    mac_tx_seen.armed = (d->debug & DRV_DEBUG_TX) != 0;
                     if (esp_wifi_80211_tx(WIFI_IF_STA, probe, (int)probe_len, true) != ESP_OK) {
                         probes_failed++;
                     }

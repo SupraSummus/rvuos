@@ -312,7 +312,7 @@ void mac_rx_give_back(void)
 /*
  * The MAC's sending, by the driver's own code; see mac.h.
  *
- * The libraries' lmacSetTxFrame and lmacTxFrame, read in their code and held against a run of debug=tx,
+ * The libraries' lmacSetTxFrame and lmacTxFrame, read in their code,
  * build a three-word descriptor of the frame, program the slot's PPDU words, and tell the slot to send;
  * the driver does the same, with the MAC's registers as hal_mac_tx.o names them.
  * The frame's completion is the driver's too: the MAC leaves a bit in a hardware txq's state when it has taken the slot,
@@ -328,7 +328,7 @@ void mac_rx_give_back(void)
 #define TX_MPLEN(s)    (TX_QUEUE(s) + 0x04u) /* whose bit 3 the HE mplen uses, and a legacy frame clears */
 #define TX_EDCA(s)     (TX_QUEUE(s) + 0x08u) /* the access class's AIFSN, backoff and lifetime */
 #define TX_PLCP0(s)    (TX_QUEUE(s) + 0x0cu)
-#define TX_PPDU(s)     (MAC_BASE + 0x1488u - (s) * 0x74u) /* PLCP1 first, then the block mac_tx_seen reads */
+#define TX_PPDU(s)     (MAC_BASE + 0x1488u - (s) * 0x74u) /* PLCP1 first, then the rest of the slot's PPDU words */
 #define TX_PLCP1(s)    (TX_PPDU(s) + 0x00u)
 #define TX_PROT(s)     (TX_PPDU(s) + 0x04u) /* the protect threshold of hal_he_set_tx_protection */
 #define TX_RATE_DUR(s) (TX_PPDU(s) + 0x24u)
@@ -376,7 +376,10 @@ static void finish(uint32_t s)
 #define TX_TXLEN_1M    0x00400000u
 #define TX_RESP_DUR_1M 0x00400004u
 
-/* The libraries' per-access-class lmac control block, our_instances; lmac_stop_hw_txq waits on each queue's state. */
+/*
+ * The libraries' per-access-class lmac control block, our_instances; the driver clears the state byte of its own
+ * queue, which the libraries' lmac_stop_hw_txq reads to leave that queue alone on their way out.
+ */
 extern uint32_t our_instances_ptr; /* esp32c6.rom.pp.ld's cell to the block */
 #define LMAC_TXQ_STRIDE 0x34u
 #define LMAC_TXQ_STATE  0x12u
@@ -458,51 +461,4 @@ const char *mac_tx(const uint8_t *frame, uint32_t len)
     }
     finish(s);
     return 0;
-}
-
-#define TX_SLOTS     5u
-#define RAM_LOW      0x40800000u
-#define RAM_HIGH     0x40880000u
-#define RAM_ADDR(lo) (RAM_LOW | ((lo) & 0x000fffffu))
-
-struct mac_tx_seen mac_tx_seen;
-
-static int in_ram(uint32_t a, uint32_t size)
-{
-    return a >= RAM_LOW && a <= RAM_HIGH - size;
-}
-
-void mac_tx_ppdu(uint32_t slot, uint32_t *words)
-{
-    for (uint32_t i = 0; i < MAC_TX_PPDU_WORDS; i++) {
-        words[i] = slot < TX_SLOTS ? rd(TX_PPDU(slot) + 4u * i) : 0;
-    }
-}
-
-int __real_hal_mac_txq_enable(uint32_t slot);
-int __wrap_hal_mac_txq_enable(uint32_t slot);
-
-int __wrap_hal_mac_txq_enable(uint32_t slot)
-{
-    struct mac_tx_seen *s = &mac_tx_seen;
-    if (s->armed && !s->full && slot < TX_SLOTS) {
-        static const uint32_t state[4] = { MAC_BASE + 0xc5cu, MAC_BASE + 0xca8u, MAC_BASE + 0xcb0u, MAC_BASE + 0xcb8u };
-        s->slot = slot;
-        for (uint32_t i = 0; i < 4; i++) {
-            s->queue[i] = rd(TX_QUEUE(slot) + 4u * i);
-            s->state[i] = rd(state[i]);
-        }
-        mac_tx_ppdu(slot, s->ppdu);
-        uint32_t at = RAM_ADDR(s->queue[3]);
-        s->desc_at = in_ram(at, sizeof(s->desc)) ? at : 0;
-        for (uint32_t i = 0; s->desc_at && i < MAC_TX_DESC_WORDS; i++) {
-            s->desc[i] = rd(at + 4u * i);
-        }
-        s->frame_at = s->desc_at && in_ram(s->desc[1], MAC_TX_FRAME_SIZE) ? s->desc[1] : 0;
-        for (uint32_t i = 0; s->frame_at && i < MAC_TX_FRAME_SIZE; i++) {
-            s->frame[i] = ((const volatile uint8_t *)(uintptr_t)s->frame_at)[i];
-        }
-        s->full = 1;
-    }
-    return __real_hal_mac_txq_enable(slot);
 }

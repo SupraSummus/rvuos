@@ -456,7 +456,7 @@ which `make beacon-test` runs on the host, under the sanitizers, against every c
 
 ## The MAC's sending, the driver's own
 
-`debug=tx`, which recorded the libraries' start of a frame, let the sending be the driver's own:
+Reading what the libraries wrote to a slot to send a frame let the sending be the driver's own:
 with `tx=own` the driver builds the frame's descriptor and programs the slot's PPDU words itself,
 as the libraries' `lmacSetTxFrame` does, and arms the slot, as their `hal_mac_txq_enable` does,
 for a legacy frame at one Mbit; a probe sent so is answered by the access point.
