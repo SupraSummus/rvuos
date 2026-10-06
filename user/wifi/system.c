@@ -70,7 +70,10 @@ void system_net_build(struct system *s, struct chan_end *driver_link, const uint
     }
     system_must(s, "the clients' hub",
                 chan_hub_new(self, &s->hub, n, np->clients, ends, CLIENT_CHAN_SIZE, CLIENT_SLOT));
-    /* The bytes of its page it publishes the network's addresses in, carved from the room, for the clock. */
+    /*
+     * The bytes of its page it publishes the network's addresses in, carved from the room, for the clock;
+     * the network process lives as long as the system, and a teardown of it would revoke the carve first.
+     */
     uint32_t config_at = (uint32_t)(uintptr_t)np->config - self->room.base;
     system_must(s, "a slot for the network's addresses", slot_new(self, &s->config));
     system_must(s, "carve the network's addresses",

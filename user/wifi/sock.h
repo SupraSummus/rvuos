@@ -69,6 +69,8 @@ struct sock {
 };
 
 void sock_init(struct sock *s, struct net *n, sock_put_fn put, void *owner);
+/* The network's addresses as the stack has them now. */
+struct sock_config sock_config(const struct sock *s);
 /* A message client put into its channel, len bytes as the ring says. */
 void sock_request(struct sock *s, uint32_t client, const uint8_t *msg, uint32_t len);
 /* Every port the client held, back, once it is gone. */

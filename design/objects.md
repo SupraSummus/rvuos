@@ -628,10 +628,10 @@ The Wi-Fi system's network process serves its clients through a hub, see `user/w
 **State one process publishes to many**, a link's state or a setting, needs no ask at all.
 `user/lib/seqlock.h` keeps two copies of it and a count that sends readers to the one not being written,
 so neither side makes a call or waits for the other, and readers, which write nothing, may hold it read only.
-It is the latch of Linux's sequence counters rather than its seqlock, which keeps one copy:
-that suits a writer the tick cannot take, as Linux's are,
+Linux's seqlock keeps one copy, which suits a writer the tick cannot take, as Linux's are,
 but a reader of a writer in user mode stopped halfway could only spin until the writer's next turn.
-With two, a writer stopped, faulted or taken down halfway costs its readers nothing.
+With two, a write fills the copy readers are not sent to before it sends them there,
+so a writer stopped, faulted or taken down halfway costs its readers nothing, nor does one that starts again.
 The Wi-Fi system's network process publishes its addresses so, which its clock reads without an ask.
 
 **Handing memory over**, with the kernel's word that the giver no longer reaches it,

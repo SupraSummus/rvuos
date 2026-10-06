@@ -347,14 +347,18 @@ static void lock_round(void)
 /* The snapshot's writer, a thread of the root task's, and its stack. */
 static uint8_t snap_stack[1024] __attribute__((aligned(16)));
 
-static void snap_writer(uint32_t lock)
+/* Version after version for good, every word the version, saying in the reader's page while it writes one. */
+static void snap_writer(uint32_t page)
 {
+    struct snap_page *r = (struct snap_page *)(uintptr_t)page;
     uint32_t data[SNAP_WORDS];
     for (uint32_t version = 1;; version++) {
         for (uint32_t i = 0; i < SNAP_WORDS; i++) {
             data[i] = version;
         }
-        seqlock_write((const struct seqlock *)(uintptr_t)lock, data);
+        r->writing = 1;
+        seqlock_write(&r->lock, data);
+        r->writing = 0;
     }
 }
 
@@ -381,7 +385,7 @@ static void snap_round(void)
     must("the writer", rv_pool_alloc(self.pool, CAP_THREAD, writer, BOOT_CAP_PROCESS));
     must("configure the writer", rv_thread_configure(writer, (uint32_t)(uintptr_t)snap_writer,
                                                      (uint32_t)(uintptr_t)(snap_stack + sizeof(snap_stack)),
-                                                     (uint32_t)(uintptr_t)&lock));
+                                                     (uint32_t)(uintptr_t)r));
     must("a slot for the writer's units", slot_new(&self, &time));
     int second_core = rv_time_carve(BOOT_CAP_TIME, TIME_UNITS, TIME_UNITS, time) == KERR_OK;
     if (!second_core) {
@@ -406,7 +410,7 @@ static void snap_round(void)
     }
     check(r->reads > 0 && version > 0, "the writer published and the reader read");
     check(r->halfway + r->again > 0, "the reader read while the writer was in the middle of a write");
-    say(&out, "libtest: a snapshot read whole %u times as it was written on %s core, %u with the writer halfway, "
+    say(&out, "libtest: a snapshot read whole %u times as it was written on %s core, %u in the middle of a write, "
               "%u tries again: ok\n",
         r->reads, second_core ? "the second" : "the same", r->halfway, r->again);
     must("take the reader down", child_free(&self, &snap_reader));

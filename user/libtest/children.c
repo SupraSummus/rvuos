@@ -196,11 +196,10 @@ void locker_main(struct child_page *page)
 void snap_reader_main(struct child_page *page)
 {
     struct snap_page *p = (struct snap_page *)page;
-    const volatile uint32_t *count = (const volatile uint32_t *)(uintptr_t)p->lock.base; /* at the base, lib/seqlock.h */
     uint32_t data[SNAP_WORDS], version, last = 0;
     child_report(page, CHILD_RUNNING);
     while (!p->stop) {
-        uint32_t halfway = *count & 1u;
+        uint32_t halfway = p->writing;
         if (!seqlock_read(&p->lock, data, &version)) {
             p->again++;
             continue;

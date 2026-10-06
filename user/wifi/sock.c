@@ -129,6 +129,11 @@ void sock_request(struct sock *s, uint32_t client, const uint8_t *msg, uint32_t 
     s->put(s, client, &h, 0);
 }
 
+struct sock_config sock_config(const struct sock *s)
+{
+    return (struct sock_config){ s->net->ip, s->net->mask, s->net->gateway, s->net->dns };
+}
+
 void sock_drop(struct sock *s, uint32_t client)
 {
     if (client >= SOCK_CLIENTS) {

@@ -96,8 +96,8 @@ struct locker_page {
  * on the second core where there is one, while a child holding it read only copies it out over and over,
  * finding every copy whole and none older than the one before.
  * The root task then stops the writer, halfway through a write as like as not, and finds the snapshot whole still.
- * The reader counts the copies it read with the writer halfway, the count odd, and the tries a write began under;
- * a run with neither tried nothing, and fails.
+ * The reader counts the copies it read while the writer was in the middle of a write, as the writer says in the page,
+ * and the tries a write was published under; a run with neither tried nothing, and fails.
  */
 #define SNAP_WORDS   8u
 #define SNAP_US      50000u /* how long the writer writes */
@@ -110,8 +110,9 @@ enum {
 struct snap_page {
     struct child_page c;
     struct seqlock lock;
-    volatile uint32_t stop; /* the root task's: 1 once the reader is to stop */
-    /* The reader's: whole copies, those read with the writer halfway, and tries a write began under. */
+    volatile uint32_t stop;    /* the root task's: 1 once the reader is to stop */
+    volatile uint32_t writing; /* the writer's: 1 while it is in the middle of a write */
+    /* The reader's: whole copies, those read while the writer was writing, and tries a write was published under. */
     volatile uint32_t reads, halfway, again;
 };
 

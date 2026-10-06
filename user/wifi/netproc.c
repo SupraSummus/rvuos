@@ -162,7 +162,7 @@ __attribute__((noreturn)) void net_main(struct child_page *c)
             rv_signal(page->more, NOTIFY_ALL_BITS);
         }
         page->pings = p->net.pings;
-        struct sock_config now = { p->net.ip, p->net.mask, p->net.gateway, p->net.dns };
+        struct sock_config now = sock_config(&p->sock);
         if (memcmp(&now, &p->published, sizeof(now)) != 0) {
             p->published = now;
             seqlock_write(&config, &now);
@@ -170,8 +170,6 @@ __attribute__((noreturn)) void net_main(struct child_page *c)
         if (!bound && p->net.dhcp_state == DHCP_BOUND) {
             bound = 1;
             page->ip = p->net.ip;
-            page->mask = p->net.mask;
-            page->gateway = p->net.gateway;
             say(&p->out, "net: address %I, gateway %I, lease %u s\n", p->net.ip, p->net.gateway, p->net.lease);
             child_report(c, NET_BOUND);
         } else if (bound && p->net.dhcp_state != DHCP_BOUND) {

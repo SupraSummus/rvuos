@@ -2,7 +2,7 @@
 
 /* What the writer and the readers share at the seqlock's base. */
 struct shared {
-    volatile uint32_t count;   /* odd while the first copy is filled, even otherwise */
+    volatile uint32_t count;   /* the writes published, whose last bit names the copy readers are sent to */
     volatile uint32_t words[]; /* the two copies, one after the other */
 };
 
@@ -31,32 +31,22 @@ void seqlock_init(const struct seqlock *s)
     }
 }
 
-/* Moves the count on, after every store before it and before every store after it. */
-static uint32_t advance(struct shared *m, uint32_t count)
-{
-    __atomic_thread_fence(__ATOMIC_RELEASE);
-    m->count = ++count;
-    __atomic_thread_fence(__ATOMIC_RELEASE);
-    return count;
-}
-
-/* The snapshot into the copy readers are not sent to while the count is count. */
-static void fill(struct shared *m, uint32_t words, uint32_t count, const uint32_t *data)
-{
-    volatile uint32_t *to = copy(m, words, count + 1u);
-    for (uint32_t i = 0; i < words; i++) {
-        to[i] = data[i];
-    }
-}
-
 void seqlock_write(const struct seqlock *s, const void *data)
 {
     struct shared *m = shared(s);
-    uint32_t words = s->size / 4u;
-    uint32_t count = advance(m, m->count);
-    fill(m, words, count, data);
-    count = advance(m, count);
-    fill(m, words, count, data);
+    uint32_t words = s->size / 4u, count = m->count;
+    const uint32_t *from = data;
+    /*
+     * The copy readers are not sent to: one still on it read the count before the last write, and finds it moved,
+     * as the fill comes after that write's move of the count and before this one's.
+     */
+    volatile uint32_t *to = copy(m, words, count + 1u);
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+    for (uint32_t i = 0; i < words; i++) {
+        to[i] = from[i];
+    }
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+    m->count = count + 1u;
 }
 
 int seqlock_read(const struct seqlock *s, void *out, uint32_t *version)
@@ -73,7 +63,6 @@ int seqlock_read(const struct seqlock *s, void *out, uint32_t *version)
     if (m->count != count) {
         return 0;
     }
-    /* An odd count sent it to the second copy, which holds the write before the one under way. */
-    *version = count >> 1;
+    *version = count;
     return 1;
 }

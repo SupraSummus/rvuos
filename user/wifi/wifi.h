@@ -129,7 +129,7 @@ struct net_page {
     uint8_t mac[6];
     const char *board; /* what its status line says the system runs on */
     /* From the network process. */
-    volatile uint32_t ip, mask, gateway;
+    volatile uint32_t ip; /* its address, once DHCP gave it one, for the root task's line */
     volatile uint32_t rx_frames, tx_frames, pings, datagrams;
     /* The network's addresses, as net_config lays them out; the clock is given these bytes alone. */
     uint32_t config[NET_CONFIG_SIZE / 4u] __attribute__((aligned(NET_CONFIG_SIZE)));

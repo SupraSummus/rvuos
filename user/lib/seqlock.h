@@ -5,15 +5,17 @@
  * A snapshot one writer publishes in memory it shares and any number of readers copy out whole,
  * neither side making a system call or waiting for the other; see DESIGN.md, "Communication and synchronisation".
  * The memory holds a count, then two copies:
- * a write moves the count to odd, fills the first copy, moves it to even and fills the second,
+ * a write fills the copy the count does not name, then moves the count on, which names it,
  * and a reader copies the one the count names and reads the count again.
- * So a reader gets the last whole snapshot however far the writer got, or stopped, halfway,
- * and finds the count moved only when a write began meanwhile, which sends it round again.
+ * So a reader gets the last whole snapshot however far a writer got, or stopped, halfway,
+ * a writer that starts again after one stopped fills the same copy anew,
+ * and a reader finds the count moved only when a write was published meanwhile, which sends it round again.
  *
  * Readers write nothing, so they may hold the memory read only.
  * A writer can keep its readers going round, or hand them what it likes,
  * so a reader that does not trust it bounds its tries and checks what it read.
  * One writer at a time, and no pointer in the snapshot to what a write may free, since a reader follows it after its check.
+ * The count is 32 bits: versions wrap, and a reader stopped in the middle of its copy for 2^32 writes takes a torn one.
  */
 
 #include <stdint.h>
@@ -32,7 +34,10 @@ struct seqlock seqlock_shape(uint32_t base, uint32_t size);
 void seqlock_init(const struct seqlock *s);
 /* Publishes s->size bytes from data, word aligned. */
 void seqlock_write(const struct seqlock *s, const void *data);
-/* Copies the snapshot into out, word aligned: 1, with *version the writes it holds, or 0 if a write began meanwhile. */
+/*
+ * Copies the snapshot into out, word aligned: 1, with *version the writes published before it,
+ * or 0 if one was published meanwhile, which leaves out torn.
+ */
 int seqlock_read(const struct seqlock *s, void *out, uint32_t *version);
 
 #endif
