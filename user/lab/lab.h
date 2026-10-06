@@ -6,7 +6,7 @@
  * whose root task, root.c, runs one scenario after another from the roles of roles.c
  * and says how long each client's asks waited.
  * The roles ask and answer with what the library offers, a hub of lib/chan.h on each server,
- * and the lock of lib/lock.h or the kernel's mutex, lending its waiters' time or not,
+ * and a lock of lib/lock.h, one that names its holder so that its takers lend it their time or one that does not,
  * so a way of modelling IPC is tried by changing those few calls.
  */
 
@@ -50,9 +50,9 @@ struct lab_page {
     uint32_t local;     /* a client that does the work itself, as a library would, and asks nobody */
     struct chan_end up;             /* to its server, for a client and the gate */
     struct chan_end ends[LAB_ENDS]; /* from its clients, for a server */
-    struct lock lock;               /* a locker's, unless it takes a mutex */
-    uint32_t mutex;                 /* the slot of the mutex a locker takes instead, RIGHT_W; 0 for the lock */
-    uint32_t lend;                  /* MUTEX_LEND for a locker that lends the holder its time while it waits */
+    uint32_t lend_to;               /* a client's: its server's thread, RIGHT_X, lent its time while it waits; 0 for none */
+    struct lock lock;               /* a locker's, unless it takes the one below */
+    struct named_lock named;        /* a locker's that names its holder, whose takers lend it their time; word 0 for none */
     struct lab_stats st;
 };
 

@@ -176,9 +176,9 @@ void locker_main(struct child_page *page)
     volatile uint32_t *count = (volatile uint32_t *)(uintptr_t)p->count;
     child_report(page, CHILD_RUNNING);
     for (uint32_t n = 0; n < LOCK_ROUNDS; n++) {
-        if (!lock_try(&p->lock)) {
+        if (!(p->named ? named_lock_try(&p->name) : lock_try(&p->lock))) {
             p->waited++;
-            if (lock_take(&p->lock) != KERR_OK) {
+            if ((p->named ? named_lock_take(&p->name) : lock_take(&p->lock)) != KERR_OK) {
                 child_fail(page, LOCKER_STEP_TAKE, n);
             }
         }
@@ -187,7 +187,11 @@ void locker_main(struct child_page *page)
             child_sleep(LOCK_SLEEP_US);
         }
         *count = was + 1u;
-        lock_give(&p->lock);
+        if (p->named) {
+            named_lock_give(&p->name);
+        } else {
+            lock_give(&p->lock);
+        }
     }
     child_stop(page, LOCKER_DONE);
 }

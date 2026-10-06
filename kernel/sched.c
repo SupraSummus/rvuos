@@ -106,23 +106,15 @@ void sched_wait(struct thread *t, struct notification *ntfn)
     t->state = THREAD_WAITING;
 }
 
-/* Take a thread waiting on a notification off its ring. */
-static void notify_unwait(struct thread *t)
+static void unlend(struct thread *t);
+
+/* Take a waiting thread off its notification's ring; it lends nothing any more. */
+static void unwait(struct thread *t)
 {
     ring_remove(&((struct notification *)p2v(t->waiting_on))->waiters, t);
     t->waiting_on = 0;
-}
-
-static void mutex_unwait(struct mutex *m, struct thread *t);
-
-/* Take a waiting thread off its notification's ring, or its mutex's. */
-static void unwait(struct thread *t)
-{
-    struct obj_header *o = p2v(t->waiting_on);
-    if (o->type == CAP_MUTEX) {
-        mutex_unwait((struct mutex *)o, t);
-    } else {
-        notify_unwait(t);
+    if (t->lend_to != 0) {
+        unlend(t);
     }
 }
 
@@ -242,44 +234,28 @@ static uint32_t turn_drain(void)
     return loss != 0 ? (next - tick_parts()) / loss + 2 : NEAREST_NONE;
 }
 
-/* Whether a mutex lends its holder time: its oldest waiter lends. */
-static bool mutex_lends(const struct mutex *m)
-{
-    return m->waiters != 0 && (((const struct thread *)p2v(m->waiters))->flags & THREAD_LENDS) != 0;
-}
-
 /*
- * The thread whose time a holder runs on while it has none of its own:
- * the oldest waiter of the first mutex it holds, if that one lends and waits on the holder's core, else NULL.
- * The mutexes whose oldest waiter lends come first on the holder's ring, so the first says whether any does.
+ * The thread whose time a borrower runs on while it has none of its own:
+ * the one that has lent it time longest, if that one waits on the borrower's core, else NULL.
  * One step: the lender lends its own account, not what it may borrow itself.
  */
 static struct thread *thread_lender(const struct thread *t)
 {
-    if (t->held == 0) {
+    if (t->lenders == 0) {
         return NULL;
     }
-    const struct mutex *m = p2v(t->held);
-    if (!mutex_lends(m)) {
-        return NULL;
-    }
-    struct thread *l = p2v(m->waiters);
+    struct thread *l = p2v(t->lenders);
     return l->core == t->core ? l : NULL;
 }
 
-/* The holder a waiting thread lends its time to, the inverse of thread_lender, or NULL. */
+/* The borrower a waiting thread lends its time to, if it is that one's lender: the inverse of thread_lender, or NULL. */
 static struct thread *thread_borrower(const struct thread *l)
 {
-    /* Only a thread waiting on a mutex lends. */
-    if (!(l->flags & THREAD_LENDS)) {
+    if (l->lend_to == 0) {
         return NULL;
     }
-    const struct mutex *m = p2v(l->waiting_on);
-    if (m->waiters != v2p(l) || m->holder == 0) {
-        return NULL;
-    }
-    struct thread *h = p2v(m->holder);
-    return h->held == v2p(m) && h->core == l->core ? h : NULL;
+    struct thread *h = p2v(l->lend_to);
+    return h->lenders == v2p(l) && h->core == l->core ? h : NULL;
 }
 
 /*
@@ -353,10 +329,12 @@ static void thread_settle(struct thread *t)
 }
 
 /*
- * Settle a thread whose units or account changed other than by a turn, and the holder it lends its time to,
+ * Settle a thread whose units or account changed other than by a turn, and the borrower it lends its time to,
  * whose queue that account decides too.
- * A lender waits, so its holder lends nothing on in turn, and settling it is one step.
- * A thread that becomes ready, or whose turn ends, lends nothing, and its holder's turn its caller settles.
+ * A lender waits, so its borrower's queue rests on the lender's own account and not on what it borrows,
+ * and settling it is one step.
+ * A lender moves to another core only by a bind, whose unbind settles its borrower first, while the two share a core.
+ * A thread that becomes ready, or whose turn ends, lends nothing, and its borrower's turn its caller settles.
  */
 static void lender_settle(struct thread *t)
 {
@@ -526,7 +504,7 @@ static void release(uint32_t c)
         if (t != NULL && (t->queue == QUEUE_SPARE || t->queue == QUEUE_SPENT)) {
             thread_settle(t);
         }
-        /* A lender waits on no queue, and its account may give the holder it lends to time. */
+        /* A lender waits on no queue, and its account may give the borrower it lends to time. */
         struct thread *h = t != NULL ? thread_borrower(t) : NULL;
         if (h != NULL && (h->queue == QUEUE_SPARE || h->queue == QUEUE_SPENT)) {
             thread_settle(h);
@@ -549,174 +527,119 @@ void sched_start(struct thread *t)
  */
 static void wake(struct thread *t, uint32_t bits)
 {
-    notify_unwait(t);
+    unwait(t);
     t->frame.regs[REG_A0] = KERR_OK;
     t->frame.regs[REG_A1] = bits;
     sched_ready(t);
     core_self()->trace_wake_bits = bits;
 }
 
-void sched_signal(struct notification *ntfn, uint32_t bits)
+/*
+ * Wake a thread waiting on a notification with every bit set there:
+ * the thread whose time pays for the core's turn first, so that its borrower's signal hands the turn back, true then.
+ * Out of line, so that a signal nobody waits for saves no registers.
+ */
+static __attribute__((noinline)) bool signal_wake(struct notification *ntfn)
+{
+    struct thread *payer = core_self()->payer;
+    bool paying = payer != NULL && payer->waiting_on == v2p(&ntfn->hdr);
+    wake(paying ? payer : p2v(ntfn->waiters), ntfn->bits);
+    ntfn->bits = 0;
+    return paying;
+}
+
+bool sched_signal(struct notification *ntfn, uint32_t bits)
 {
     ntfn->bits |= bits;
-    if (ntfn->waiters != 0) {
-        wake(p2v(ntfn->waiters), ntfn->bits);
-        ntfn->bits = 0;
-    }
+    return ntfn->waiters != 0 && signal_wake(ntfn);
 }
 
 static void switch_to(struct thread *next);
 
 /*
- * A holder's mutexes are a ring through their held_next and held_prev, headed by the thread's held, oldest first:
- * those whose oldest waiter lends come first, then the others,
- * so a mutex joins at the front while it lends and at the back while it does not, and moves as that changes.
+ * The thread that paid for the turn was woken, and may run now: it has the rest of the turn, from where it was charged,
+ * and the thread whose turn it was goes to the back of its queue, as at a tick.
  */
-static void held_push(struct thread *t, struct mutex *m, bool first)
+void sched_turn_back(void)
 {
-    paddr_t self = v2p(m);
-    if (t->held == 0) {
-        m->held_next = m->held_prev = self;
-        t->held = self;
-        return;
-    }
-    struct mutex *head = p2v(t->held);
-    struct mutex *last = p2v(head->held_prev);
-    m->held_next = t->held;
-    m->held_prev = head->held_prev;
-    last->held_next = self;
-    head->held_prev = self;
-    if (first) {
-        t->held = self;
+    struct core *core = core_self();
+    struct thread *was = core->turn, *payer = core->payer;
+    core->payer = NULL;
+    core->turn = payer;
+    thread_settle(was);
+    thread_settle(payer);
+    switch_to(payer);
+}
+
+/*
+ * A borrower's lenders are a ring through their lend_next and lend_prev, headed by its lenders, oldest first,
+ * as a notification's waiters are through queue_next and queue_prev, which a lender's wait has.
+ */
+static void lend_push(struct thread *h, struct thread *l)
+{
+    paddr_t self = v2p(l);
+    l->lend_to = v2p(h);
+    if (h->lenders == 0) {
+        l->lend_next = l->lend_prev = self;
+        h->lenders = self;
+    } else {
+        struct thread *oldest = p2v(h->lenders);
+        struct thread *newest = p2v(oldest->lend_prev);
+        l->lend_next = h->lenders;
+        l->lend_prev = oldest->lend_prev;
+        newest->lend_next = self;
+        oldest->lend_prev = self;
     }
 }
 
-static void held_remove(struct thread *t, struct mutex *m)
+static void lend_remove(struct thread *h, struct thread *l)
 {
-    if (m->held_next == v2p(m)) {
-        t->held = 0;
+    if (l->lend_next == v2p(l)) {
+        h->lenders = 0;
     } else {
-        ((struct mutex *)p2v(m->held_prev))->held_next = m->held_next;
-        ((struct mutex *)p2v(m->held_next))->held_prev = m->held_prev;
-        if (t->held == v2p(m)) {
-            t->held = m->held_next;
+        ((struct thread *)p2v(l->lend_prev))->lend_next = l->lend_next;
+        ((struct thread *)p2v(l->lend_next))->lend_prev = l->lend_prev;
+        if (h->lenders == v2p(l)) {
+            h->lenders = l->lend_next;
         }
     }
-    m->held_next = m->held_prev = 0;
+    l->lend_to = l->lend_next = l->lend_prev = 0;
 }
 
 /*
- * A held mutex's oldest waiter changed, and whether it lent was: the mutex moves to the front of its holder's ring
- * if it lends now, or to the back if it no longer does, and the holder settles, whose lender may be another.
+ * A thread whose wait ends lends no more, and its borrower settles if it borrowed from that one.
+ * Out of line, so that a signal that wakes a thread that lends nothing, or none, costs what it did.
  */
-static void mutex_waiters_changed(struct mutex *m, bool was)
+static __attribute__((noinline)) void unlend(struct thread *t)
 {
-    struct thread *h = p2v(m->holder);
-    bool lends = mutex_lends(m);
-    if (lends != was) {
-        held_remove(h, m);
-        held_push(h, m, lends);
-    }
-    thread_settle(h);
-}
-
-/* Take a waiting thread off its mutex's waiters; it lends nothing more. */
-static void mutex_unwait(struct mutex *m, struct thread *t)
-{
-    bool was = mutex_lends(m);
-    bool oldest = m->waiters == v2p(t);
-    ring_remove(&m->waiters, t);
-    t->waiting_on = 0;
-    t->flags &= (uint8_t)~THREAD_LENDS;
-    if (oldest && m->holder != 0) {
-        mutex_waiters_changed(m, was);
-    }
-}
-
-/*
- * Its holder gives a mutex back: the oldest waiter takes it, its call to return KERR_OK,
- * and is returned, still WAITING for the caller to make ready; NULL when nobody waited and the mutex is free.
- * The holder settles, whose lender may be another, or none.
- */
-static struct thread *mutex_give(struct mutex *m)
-{
-    struct thread *h = p2v(m->holder);
-    bool lent = mutex_lends(m);
-    held_remove(h, m);
-    m->holder = 0;
-    struct thread *w = NULL;
-    if (m->waiters != 0) {
-        w = p2v(m->waiters);
-        ring_remove(&m->waiters, w);
-        w->waiting_on = 0;
-        w->flags &= (uint8_t)~THREAD_LENDS;
-        w->frame.regs[REG_A0] = KERR_OK;
-        m->holder = v2p(w);
-        held_push(w, m, mutex_lends(m));
-    }
-    /* Only a mutex that lent was the one its holder borrowed from, the first. */
-    if (lent) {
+    struct thread *h = p2v(t->lend_to);
+    bool first = h->lenders == v2p(t);
+    lend_remove(h, t);
+    if (first) {
         thread_settle(h);
     }
-    return w;
 }
 
-bool sched_mutex_lock(struct thread *t, struct mutex *m, bool lend)
+void sched_lend(struct thread *t, struct notification *ntfn, struct thread *borrower)
 {
-    if (m->holder == 0) {
-        m->holder = v2p(t);
-        held_push(t, m, false);
-        return true;
-    }
-    bool was = mutex_lends(m);
-    ring_push(&m->waiters, t);
-    t->waiting_on = v2p(&m->hdr);
-    t->state = THREAD_WAITING;
-    if (lend) {
-        t->flags |= THREAD_LENDS;
-    }
-    if (m->waiters == v2p(t)) {
-        mutex_waiters_changed(m, was);
+    sched_wait(t, ntfn);
+    lend_push(borrower, t);
+    if (borrower->lenders == v2p(t)) {
+        thread_settle(borrower);
     }
     /*
-     * A waiter whose turn its own time pays for, and that now lends to a holder waiting for a turn on its core,
+     * A lender whose turn its own time pays for, and that now lends first to a borrower waiting for a turn on its core,
      * hands it the rest of the turn, which it goes on paying for: the turn neither ends nor is charged here.
      */
     struct core *core = core_self();
-    struct thread *h = p2v(m->holder);
-    if (lend && core->payer == NULL && has_time(t->balance) && thread_lender(h) == t && h->queue != QUEUE_NONE) {
-        ring_remove(queue_head(core, h->queue), h);
-        h->queue = QUEUE_NONE;
-        core->turn = h;
+    if (core->payer == NULL && has_time(t->balance) && thread_lender(borrower) == t && borrower->queue != QUEUE_NONE) {
+        ring_remove(queue_head(core, borrower->queue), borrower);
+        borrower->queue = QUEUE_NONE;
+        core->turn = borrower;
         core->payer = t;
-        account_refill(h);
-        switch_to(h);
+        account_refill(borrower);
+        switch_to(borrower);
     }
-    return false;
-}
-
-void sched_mutex_unlock(struct mutex *m)
-{
-    struct core *core = core_self();
-    struct thread *w = mutex_give(m);
-    if (w == NULL) {
-        return;
-    }
-    if (core->payer != w) {
-        sched_ready(w);
-        return;
-    }
-    /*
-     * The turn was its time, and it may run now: it has the rest of the turn, from where it was charged,
-     * and the holder goes to the back of its queue, as at a tick.
-     */
-    struct thread *was = core->turn;
-    w->state = THREAD_READY;
-    core->payer = NULL;
-    core->turn = w;
-    thread_settle(was);
-    thread_settle(w);
-    switch_to(w);
 }
 
 /* Only an armed Irq signals, and an Irq without a notification is never armed. */
@@ -897,33 +820,11 @@ bool sched_forget(struct obj_header *o, bool preempt)
         while (ntfn->waiters != 0) {
             LOOP_PAID(sched_forget, waiter, "a thread that waited, by a call of its own");
             struct thread *t = p2v(ntfn->waiters);
-            notify_unwait(t);
-            t->frame.regs[REG_A0] = KERR_INVALID_CAP;
-            t->frame.regs[REG_A1] = 0;
-            sched_ready(t);
-            if (ntfn->waiters != 0 && cap_stop_here(preempt)) {
-                return false;
-            }
-        }
-        break;
-    }
-    case CAP_MUTEX: {
-        struct mutex *m = (struct mutex *)o;
-        /* Its holder holds it no more, and its waiters wake as a notification's do, holding nothing. */
-        if (m->holder != 0) {
-            struct thread *h = p2v(m->holder);
-            held_remove(h, m);
-            m->holder = 0;
-            thread_settle(h);
-        }
-        while (m->waiters != 0) {
-            LOOP_PAID(sched_forget, waiter, "a thread that waited, by a call of its own");
-            struct thread *t = p2v(m->waiters);
             unwait(t);
             t->frame.regs[REG_A0] = KERR_INVALID_CAP;
             t->frame.regs[REG_A1] = 0;
             sched_ready(t);
-            if (m->waiters != 0 && cap_stop_here(preempt)) {
+            if (ntfn->waiters != 0 && cap_stop_here(preempt)) {
                 return false;
             }
         }
@@ -935,17 +836,6 @@ bool sched_forget(struct obj_header *o, bool preempt)
         break;
     case CAP_THREAD: {
         struct thread *t = (struct thread *)o;
-        /* What it holds goes to the oldest waiter, as its unlock would give it, or is free. */
-        while (t->held != 0) {
-            LOOP_PAID(sched_forget, hold, "a mutex it took, by a call of its own");
-            struct thread *w = mutex_give(p2v(t->held));
-            if (w != NULL) {
-                sched_ready(w);
-            }
-            if (t->held != 0 && cap_stop_here(preempt)) {
-                return false;
-            }
-        }
         /*
          * It lost its process before, and so stopped; a core that ran it may not have looked since,
          * and the turn there was its, so whoever paid for it pays no more and waits on its queue.
@@ -956,6 +846,22 @@ bool sched_forget(struct obj_header *o, bool preempt)
             if (cores[c].turn == t && payer != NULL) {
                 cores[c].payer = NULL;
                 thread_settle(payer);
+            }
+        }
+        /*
+         * A thread that lends it its time named it in its call, which can no longer be answered.
+         * Its progress is the ring: a stop leaves the rest lending to a thread still whole.
+         */
+        while (t->lenders != 0) {
+            LOOP_PAID(sched_forget, waiter, "a thread that lent it its time, by a call of its own");
+            struct thread *l = p2v(t->lenders);
+            lend_remove(t, l);
+            unwait(l);
+            l->frame.regs[REG_A0] = KERR_INVALID_CAP;
+            l->frame.regs[REG_A1] = 0;
+            sched_ready(l);
+            if (t->lenders != 0 && cap_stop_here(preempt)) {
+                return false;
             }
         }
         core_thread_gone(t);

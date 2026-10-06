@@ -268,16 +268,18 @@ static inline uint32_t rv_wait(uint32_t ntfn_cap, uint32_t *bits)
     return r_a0;
 }
 
-/* OP_MUTEX_LOCK: take the mutex, waiting while another thread holds it; MUTEX_LEND lends it the caller's time meanwhile. */
-static inline uint32_t rv_mutex_lock(uint32_t mutex_cap, uint32_t flags)
+/* OP_NOTIFY_LEND: as rv_wait, lending the thread of thread_cap, which has RIGHT_X, the caller's time meanwhile. */
+static inline uint32_t rv_lend(uint32_t ntfn_cap, uint32_t thread_cap, uint32_t *bits)
 {
-    return rv_invoke(OP_MUTEX_LOCK, mutex_cap, flags, 0, 0);
-}
-
-/* OP_MUTEX_UNLOCK: give the mutex back, to the thread that waited longest. */
-static inline uint32_t rv_mutex_unlock(uint32_t mutex_cap)
-{
-    return rv_invoke(OP_MUTEX_UNLOCK, mutex_cap, 0, 0, 0);
+    register uint32_t r_a0 __asm__(RV_A0) = ntfn_cap;
+    register uint32_t r_a1 __asm__(RV_A1) = thread_cap;
+    register uint32_t r_a7 __asm__(RV_A7) = OP_NOTIFY_LEND;
+    __asm__ volatile(RV_CALL
+                     : "+r"(r_a0), "+r"(r_a1)
+                     : "r"(r_a7)
+                     : "memory", RV_A2, RV_A3, RV_A4, RV_A5, RV_A6);
+    *bits = r_a1;
+    return r_a0;
 }
 
 /*

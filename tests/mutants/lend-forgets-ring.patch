@@ -1,0 +1,17 @@
+A lending wait that names the borrower in the lender but, as its first lender, leaves the borrower's ring empty.
+The borrower cannot find its lender, nor its destroy wake it.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a lender is missing from its borrower's ring
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -575,7 +575,6 @@ static void lend_push(struct thread *h, struct thread *l)
+     l->lend_to = v2p(h);
+     if (h->lenders == 0) {
+         l->lend_next = l->lend_prev = self;
+-        h->lenders = self;
+     } else {
+         struct thread *oldest = p2v(h->lenders);
+         struct thread *newest = p2v(oldest->lend_prev);

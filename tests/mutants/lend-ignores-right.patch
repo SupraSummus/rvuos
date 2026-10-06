@@ -1,0 +1,18 @@
+A lending wait that takes any Thread capability, without the right to lend.
+A thread lends its time through a capability that does not allow it.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a thread came to lend its time but by its own wait, through a capability with the right to lend
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -541,7 +541,7 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
+ static __attribute__((noinline)) int op_lend(struct thread *t, struct notification *ntfn, uint32_t *arg)
+ {
+     struct cap bc;
+-    int err = cap_lookup_typed(thread_table(t), arg[1], CAP_THREAD, RIGHT_X, &bc);
++    int err = cap_lookup_typed(thread_table(t), arg[1], CAP_THREAD, 0, &bc);
+     if (err != KERR_OK) {
+         return err;
+     }

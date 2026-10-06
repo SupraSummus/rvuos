@@ -1,0 +1,20 @@
+A thread destroyed takes the threads that lend it their time off its ring but leaves them waiting.
+The walk takes no waiter away, so its steps are paid for by nothing, and the lenders are not told.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a call was preempted before it took anything away
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -850,10 +850,6 @@ bool sched_forget(struct obj_header *o, bool preempt)
+             LOOP_PAID(sched_forget, waiter, "a thread that lent it its time, by a call of its own");
+             struct thread *l = p2v(t->lenders);
+             lend_remove(t, l);
+-            unwait(l);
+-            l->frame.regs[REG_A0] = KERR_INVALID_CAP;
+-            l->frame.regs[REG_A1] = 0;
+-            sched_ready(l);
+             if (t->lenders != 0 && cap_stop_here(preempt)) {
+                 return false;
+             }

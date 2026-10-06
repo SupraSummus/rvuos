@@ -87,6 +87,8 @@ struct locked {
 struct locker_page {
     struct child_page c;
     struct lock lock;         /* which no other locker can write */
+    uint32_t named;           /* it takes the lock below instead, over the same word and notification */
+    struct named_lock name;
     uint32_t count;           /* the address of the count */
     volatile uint32_t waited; /* the rounds it found the lock held */
 };

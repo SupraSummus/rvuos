@@ -391,14 +391,6 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
         obj = &ntfn->hdr;
         break;
     }
-    case CAP_MUTEX: {
-        struct mutex *m = pool_alloc(pool, CAP_MUTEX, sizeof(*m));
-        if (m == NULL) {
-            return KERR_NO_MEMORY;
-        }
-        obj = &m->hdr;
-        break;
-    }
     case CAP_CAPTABLE: {
         uint32_t nslots = arg[3];
         if (nslots == 0 || nslots > CAPTABLE_MAX_SLOTS) {
@@ -541,6 +533,31 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
     }
 }
 
+/*
+ * A wait that lends the thread a1 names the caller's time; see OP_NOTIFY_LEND.
+ * RIGHT_X lends a thread time and nothing else; see DESIGN.md, "Communication and synchronisation".
+ * Out of line, so that the other operations on a notification save no more registers for its lookup.
+ */
+static __attribute__((noinline)) int op_lend(struct thread *t, struct notification *ntfn, uint32_t *arg)
+{
+    struct cap bc;
+    int err = cap_lookup_typed(thread_table(t), arg[1], CAP_THREAD, RIGHT_X, &bc);
+    if (err != KERR_OK) {
+        return err;
+    }
+    struct thread *borrower = (struct thread *)cap_object(&bc);
+    if (borrower == t) {
+        return KERR_INVALID_ARG;
+    }
+    if (ntfn->bits != 0) {
+        arg[1] = ntfn->bits;
+        ntfn->bits = 0;
+        return KERR_OK;
+    }
+    sched_lend(t, ntfn, borrower);
+    return KERR_BLOCKED;
+}
+
 static int op_notification(struct thread *t, uint32_t slot, const struct cap *cap,
                            uint32_t op, uint32_t *arg)
 {
@@ -560,7 +577,10 @@ static int op_notification(struct thread *t, uint32_t slot, const struct cap *ca
         if (bits == 0) {
             return KERR_NO_RIGHTS;
         }
-        sched_signal(ntfn, bits);
+        /* The caller's status is written to its own frame, whoever runs next. */
+        if (sched_signal(ntfn, bits)) {
+            sched_turn_back();
+        }
         return KERR_OK;
     }
     case OP_NOTIFY_CARVE: {
@@ -583,35 +603,8 @@ static int op_notification(struct thread *t, uint32_t slot, const struct cap *ca
         }
         sched_wait(t, ntfn);
         return KERR_BLOCKED;
-    default:
-        return KERR_WRONG_TYPE;
-    }
-}
-
-/*
- * The thread that holds a mutex may not take it again, and it alone gives it back;
- * see DESIGN.md, "Communication and synchronisation".
- */
-static int op_mutex(struct thread *t, const struct cap *cap, uint32_t op, const uint32_t *arg)
-{
-    struct mutex *m = (struct mutex *)cap_object(cap);
-
-    switch (op) {
-    case OP_MUTEX_LOCK:
-        if (arg[1] & ~(uint32_t)MUTEX_LEND) {
-            return KERR_INVALID_ARG;
-        }
-        if (m->holder == v2p(t)) {
-            return KERR_STATE;
-        }
-        return sched_mutex_lock(t, m, (arg[1] & MUTEX_LEND) != 0) ? KERR_OK : KERR_BLOCKED;
-    case OP_MUTEX_UNLOCK:
-        if (m->holder != v2p(t)) {
-            return KERR_STATE;
-        }
-        /* The caller's status is written to its own frame, whoever runs next. */
-        sched_mutex_unlock(m);
-        return KERR_OK;
+    case OP_NOTIFY_LEND:
+        return (cap->rights & RIGHT_R) ? op_lend(t, ntfn, arg) : KERR_NO_RIGHTS;
     default:
         return KERR_WRONG_TYPE;
     }
@@ -899,9 +892,6 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
     case CAP_TIME:
         err = op_time(t, slot, &cap, op, arg);
         break;
-    case CAP_MUTEX:
-        err = (cap.rights & RIGHT_W) ? op_mutex(t, &cap, op, arg) : KERR_NO_RIGHTS;
-        break;
     default:
         err = KERR_WRONG_TYPE;
         break;
@@ -970,7 +960,7 @@ void syscall_dispatch(struct thread *t)
     }
     /*
      * A thread that waits gives the processor up, and so does one whose process the call took,
-     * unless it handed its turn to the holder of the mutex it waits on, which runs now.
+     * unless it handed its turn to the thread it lends its time to, which runs now.
      * One that lost its units finishes its turn, as a preempted call is made again before the tick switches.
      */
     if (core->current->state != THREAD_READY) {

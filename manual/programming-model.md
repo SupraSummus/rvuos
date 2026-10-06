@@ -126,7 +126,6 @@ Programs are encouraged to keep the same convention.
 | `Process` | `CAP_PROCESS` | a capability to its table, region slots, a PMP image | `OP_POOL_ALLOC` |
 | `Thread` | `CAP_THREAD` | a register frame and a state | `OP_POOL_ALLOC` |
 | `Notification` | `CAP_NOTIFICATION` | one word of sticky bits | `OP_POOL_ALLOC` |
-| `Mutex` | `CAP_MUTEX` | its holder and its waiters | `OP_POOL_ALLOC` |
 | `IrqLine` | `CAP_IRQ_LINE` | none: the slot holds the first line and a count | boot, `OP_IRQ_CARVE` |
 | `Irq` | `CAP_IRQ` | one line bound to a notification, with a deadline on a timer line | `OP_IRQ_BIND` |
 | `Time` | `CAP_TIME` | none: the slot holds the first unit and a count | boot, `OP_TIME_CARVE` |
@@ -369,7 +368,7 @@ and a lock, a ring buffer or a snapshot in shared memory is userspace's to build
 as `lib/lock.h`, `lib/ring.h` and `lib/seqlock.h` do, section 8.4;
 what userspace cannot build is "stop me until someone says otherwise",
 and a notification is exactly that.
-A lock the kernel knows the holder of is a mutex, section 5.12.
+A waiter that knows whom it waits for, a lock's holder or a server, may lend that thread its time, section 5.12.
 
 A round trip is therefore four system calls:
 signal, wait on one side; wait, signal on the other.
@@ -640,8 +639,8 @@ and moves `taken` only as far as its host says it has the bytes, so a halt write
   and for its account to reach a tick if not.
   A thread that becomes ready, whether resumed, woken, bound or preempted,
   joins the back of its queue.
-- A thread waiting on a mutex with `MUTEX_LEND` lends the holder its account, section 5.12:
-  a holder without time waits on the run queue while its lender has time, and the turns it takes so cost the lender's account.
+- A thread waiting with `OP_NOTIFY_LEND` lends the thread it names its account, section 5.12:
+  a borrower without time waits on the run queue while its lender has time, and the turns it takes so cost the lender's account.
 - The machine timer ticks at `TIMER_HZ`, 1 kHz on both boards.
   A tick ends the running thread's turn:
   the thread goes to the back of its queue,
@@ -694,30 +693,32 @@ The child binds its threads through `CHILD_TIME` with `OP_TIME_BIND`;
 `TIME` itself keeps `RIGHT_X`, so a bind through it would give spare time too.
 Revoking below `TIME` takes the child's units back, and its threads stop.
 
-### 5.12 Mutexes
+### 5.12 Lent time
 
-A mutex is held by one thread at a time.
-`OP_MUTEX_LOCK` takes it, at once if it is free, and otherwise waits behind the threads already waiting;
-`OP_MUTEX_UNLOCK` gives it back to the thread that waited longest, which holds it as its call returns.
-Only the holder gives it back, and it may not take it twice: both are refused with `KERR_STATE`.
-Each is a system call even when nobody else wants the mutex, where `lib/lock.h` makes none, section 8.4;
-what a mutex has is the kernel's knowledge of who holds it.
+A thread that waits may lend another thread its time meanwhile:
+`OP_NOTIFY_LEND` waits on a notification as `OP_NOTIFY_WAIT` does, and names the borrower
+through a capability to its thread with `RIGHT_X`, which lends it time and allows nothing else.
+A borrower without time of its own, section 5.11, runs on the account of the thread that has lent it time longest,
+and the turns it takes so cost that account;
+a lender whose own time pays for its turn hands the rest of it to the borrower at once, if the borrower waits for a turn.
+A signal from the borrower that wakes the lender hands it the rest of the turn back.
+The time goes one step, and only within a core: a borrower that waits, or lends in turn, passes none of it on.
 
-So a holder that gives it back and wants it again waits behind the others,
-and a waiter may lend the holder its time:
-with `MUTEX_LEND`, a holder without time of its own, section 5.11, runs on the waiter's account while it waits,
-the waiter hands it the rest of its turn at once, and the unlock hands the turn back with the mutex.
-A holder with few units then keeps a waiter with many no longer than its work takes.
+So a thread waiting for whoever holds a lock lends it its time, and so does a client waiting for its server's answer:
+a holder or a server with few units keeps a waiter with many no longer than its work takes.
+`lib/lock.h` has a lock that names its holder in its word, so that its takers know whom to lend to,
+and a hold nobody else wants still makes no system call, section 8.4.
 
 ```c
-rv_invoke(OP_POOL_ALLOC, POOL, CAP_MUTEX, MUTEX, 0);
-/* in each thread that shares it */
-rv_mutex_lock(MUTEX, MUTEX_LEND);
-/* ... the work the mutex guards ... */
-rv_mutex_unlock(MUTEX);
+/* each thread names itself, here 1, and holds the others' threads with RIGHT_X, here the thread named 2 */
+struct named_lock lock = { WORD, NOTE, 1, { [2] = THREAD_2 } };
+named_lock_take(&lock);
+/* ... the work the lock guards ... */
+named_lock_give(&lock);
 ```
 
-The time goes one step, from the oldest waiter of the first mutex the holder holds, and only within a core.
-A holder that faults keeps what it holds, stopped;
-one destroyed gives each mutex to its oldest waiter, which is not told.
-A mutex keeps nobody from the memory it guards: that is the regions' work.
+A name that is wrong costs the waiter the time it lends, and nothing else.
+A waiter whose borrower is destroyed wakes with `KERR_INVALID_CAP` and no bits, as one whose notification is,
+so a taker learns that the holder its lock names is gone, and may take the lock over.
+A holder that faults keeps the lock, stopped, and its watcher hears it, section 5.6.
+A lock keeps nobody from the memory it guards: that is the regions' work.

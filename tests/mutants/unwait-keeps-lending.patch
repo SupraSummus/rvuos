@@ -1,0 +1,18 @@
+A wait that ends leaves its thread lending.
+A thread that runs again still pays for its borrower's turns.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a thread that does not wait lends
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -113,7 +113,7 @@ static void unwait(struct thread *t)
+ {
+     ring_remove(&((struct notification *)p2v(t->waiting_on))->waiters, t);
+     t->waiting_on = 0;
+-    if (t->lend_to != 0) {
++    if (t->lend_to != 0 && t->waiting_on != 0) {
+         unlend(t);
+     }
+ }

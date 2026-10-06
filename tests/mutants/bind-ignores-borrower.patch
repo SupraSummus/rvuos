@@ -1,5 +1,5 @@
-A bind that settles a waiting lender but not the holder it lends to.
-The holder keeps the queue the lender's old account gave it.
+A bind that settles a waiting lender but not the borrower it lends to.
+The borrower keeps the queue the lender's old account gave it.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a ready thread that may run waits on no queue

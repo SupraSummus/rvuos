@@ -56,7 +56,7 @@ what is left:
   a guard would cost a region, the scarcest thing a process has.
 - `user/lab/` does not show yet a client of several threads asking at once, a driver whose work an interrupt starts,
   two cores, a client that makes its ring look full, or one that gives up on an answer.
-  Nor several waiters on a mutex, or a holder that waits on a second one.
+  Nor several takers lending to one holder, or a holder that waits on a second lock.
   Nor a thin server, which only passes data on while its clients do the work,
   to tell what moving work into the client saves and what the hop still costs.
   Why its `chain`'s second hop costs no more than the first is not worked out.
@@ -199,12 +199,13 @@ what is left:
 
 ## Verification
 
-- No seed reaches a destroyed holder's mutex handed to its waiter, nor a payer dropped as the turn's thread is destroyed:
-  of the driver's three threads, a waiter that outlives its holder's destroy is the thread that makes it.
-  A fourth driver thread, in a pool and a process of its own, would reach both.
+- No seed reaches a payer dropped as the turn's thread is destroyed:
+  the turn's thread is the caller on its core, which keeps what it runs on, so only a call on another core can destroy it.
 - No check sees who pays for a turn on lent time, only that the payer is charged:
-  a kernel that chose no payer, or let a waiter without time hand its turn on, would run the holder for free,
+  a kernel that chose no payer, or let a waiter without time hand its turn on, would run the borrower for free,
   and only `make lab` would show it.
+  Nor does one see that a signal wakes the thread paying for the signaller's turn first, and hands it the turn back:
+  a kernel that did neither would be slower, which only `make lab` shows, `lend-hog` and `lend-server`.
 - Feedback on the state beyond the kernel's edges, libFuzzer's extra counters
   over the objects of each type, the threads waiting and stopped, the pools dying and the `Irq`s armed,
   found no more mutants than edges alone in 5000 runs each, and was left out;
@@ -235,6 +236,11 @@ what is left:
   all with `OP_DEBUG_PREEMPT`, where 186 000 made none.
   None reaches an edge the others do not, so the corpus keeps none of them.
   A mutation that inserts the three together is untried.
+- `make mutants-fuzz` finds neither `borrower-destroy-keeps-lenders`, `borrower-destroy-keeps-waiting`
+  nor `lend-ignores-right` from the corpus in 20000 runs, and only the seeds catch them:
+  a thread that lends to another of a pool a revoke destroys after,
+  and a lend through a capability without `RIGHT_X` from a caller that holds none with it,
+  are each a few records that must name the same thread.
 - The self-check is most of what a fuzzing run costs, and grows with the square of what the machine holds:
   `check_node` walks each node's ring up to its parent and the parent's ring back to it,
   and `check_nesting` walks every node for every Untyped and every pool.
@@ -455,13 +461,12 @@ what is left:
   see `user/lab/NOTES.md`.
   Handing it to the thread the waiter just woke, and the answer's back, might take that tick out with no change to the ABI;
   try it against `make lab`'s `hog`, `rich-ui`, `rich-server` and `chain`.
-  A mutex's waiter that lends does hand its turn so, and has it back with the mutex: `lend-hog` against `mutex-hog`.
-- The kernel does not know whom a waiter on a notification waits for,
-  so a client's time cannot reach its server, `make lab`'s `poor-server`,
-  and a server cannot charge the client it serves, `free-rider`.
-  A lock's holder it reaches through a mutex, `lend-hog`.
-  A wait that names the notification its answer comes through, and a server that charges a client waiting on it,
-  is the shape talked through so far; decide with open decisions 5, 9 and 27.
-- A mutex's waiter lends only on its own core.
-  Running the holder on the lender's core for the turn, as Linux's proxy execution does, would lend across cores
+  A waiter that lends does hand its turn so, and has it back with the signal that wakes it:
+  `lend-server` against `poor-server`, `lend-hog` against `lock-hog`.
+- A server runs on the time of the client that has lent it time longest, not of the client whose ask it serves,
+  so a client that lends pays for whatever the server does until the server wakes it, other clients' asks among it.
+  A server that ran on the time of the client it serves would have to name it, a call more for each ask;
+  `make lab`'s `free-rider` and `lend-rider`, and open decisions 5 and 27.
+- A thread lends only on its own core.
+  Running the borrower on the lender's core for the turn, as Linux's proxy execution does, would lend across cores
   and keep each core's time to its units; open decision 27.

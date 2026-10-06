@@ -1,7 +1,7 @@
 /*
  * The properties "Authority only flows", "A call is as good as its capability", "Memory crosses zeroed",
  * "The caller keeps what it runs on", "A dying pool only gives back", "A tick charges",
- * "A move keeps a node's place" and "A mutex is taken or handed over" of DESIGN.md,
+ * "A move keeps a node's place" and "A thread lends by its own wait" of DESIGN.md,
  * which relate the state before a call to the state after it.
  * host_trap runs history_begin before each call and history_end after it,
  * and around a fault, which must change no more than a call that moves no time.
@@ -36,9 +36,9 @@ struct obj_rec {
     uint32_t at, size, pool;
 };
 
-/* A mutex before the call: its holder and its oldest waiter, 0 for none. */
-struct mutex_rec {
-    uint32_t at, holder, oldest;
+/* A thread before the call, and the thread it lent its time to, 0 for none. */
+struct lend_rec {
+    uint32_t at, lend_to;
 };
 
 /* Growing arrays, kept from call to call. */
@@ -49,7 +49,7 @@ typedef ARRAY(uint32_t) addr_array;
 
 static ARRAY(struct grant) held;
 static ARRAY(struct node_rec) nodes;
-static ARRAY(struct mutex_rec) mutexes;
+static ARRAY(struct lend_rec) lends;
 static obj_array objects, objects_after;
 
 /* The thread that makes the call, its process and table, and whether a destroy had begun on one's pool. */
@@ -61,14 +61,15 @@ static bool caller_dying;
 /*
  * The call: the capability it invokes, if its slot held one, and where the caller stood,
  * which a call stopped for an interrupt leaves as it was.
- * For OP_NOTIFY_SIGNAL, the notification, its bits, and the thread waiting first on it.
+ * For OP_NOTIFY_SIGNAL, the notification, its bits, and the threads waiting on it that a signal may wake first:
+ * the oldest, and the one that pays for the turn.
  */
 static bool invoked;
 static struct cap invoked_cap;
 static uint32_t call_op, call_pc;
 static const struct notification *signalled;
 static uint32_t signalled_bits;
-static const struct thread *signalled_waiter;
+static const struct thread *signalled_waiter, *signalled_payer;
 
 /*
  * A traced OP_CAP_MOVE that names a filled source and a destination slot:
@@ -246,7 +247,7 @@ static void children_of(const struct cap *c, addr_array *out)
  * The rights an operation needs of the capability it is invoked on, as rvuos/abi.h gives them;
  * one invoked on a capability of another type fails before its rights matter.
  */
-_Static_assert(OP_COUNT == 40, "a new operation needs its rights in rights_needed");
+_Static_assert(OP_COUNT == 39, "a new operation needs its rights in rights_needed");
 static uint8_t rights_needed(uint32_t op)
 {
     switch (op) {
@@ -270,10 +271,9 @@ static uint8_t rights_needed(uint32_t op)
     case OP_TIME_BIND:
     case OP_DEBUG_WRITE:
     case OP_CLOCK_WATCHDOG:
-    case OP_MUTEX_LOCK:
-    case OP_MUTEX_UNLOCK:
         return RIGHT_W;
     case OP_NOTIFY_WAIT:
+    case OP_NOTIFY_LEND:
     case OP_CLOCK_READ:
     case OP_CLOCK_FRAME:
         return RIGHT_R;
@@ -306,6 +306,10 @@ static void record_call(const struct captable *table, bool call)
     signalled = (const struct notification *)cap_object(&invoked_cap);
     signalled_bits = signalled->bits;
     signalled_waiter = signalled->waiters != 0 ? p2v(signalled->waiters) : NULL;
+    signalled_payer = core_self()->payer;
+    if (signalled_payer != NULL && signalled_payer->waiting_on != v2p(&signalled->hdr)) {
+        signalled_payer = NULL;
+    }
 }
 
 /*
@@ -328,6 +332,9 @@ static void check_call(void)
     uint32_t set = signalled->bits & ~signalled_bits;
     if (signalled_waiter != NULL && signalled_waiter->state != THREAD_WAITING) {
         set |= signalled_waiter->frame.regs[REG_A1];
+    }
+    if (signalled_payer != NULL && signalled_payer->state != THREAD_WAITING) {
+        set |= signalled_payer->frame.regs[REG_A1];
     }
     if (set & ~invoked_cap.b) {
         violated("a signal set bits its capability may not signal");
@@ -382,42 +389,38 @@ static void check_move(void)
     }
 }
 
-/* Every mutex's holder and oldest waiter, sorted, compared after the call and never followed. */
-static void record_mutexes(void)
+/* Every thread and the thread it lends its time to, sorted, compared after the call and never followed. */
+static void record_lends(void)
 {
-    mutexes.n = 0;
+    lends.n = 0;
     for (size_t i = 0; i < objects.n; i++) {
         const struct obj_header *o = p2v(objects.v[i].at);
-        if (o->type == CAP_MUTEX) {
-            const struct mutex *m = (const struct mutex *)o;
-            PUSH(mutexes, ((struct mutex_rec){ objects.v[i].at, m->holder, m->waiters }));
+        if (o->type == CAP_THREAD) {
+            PUSH(lends, ((struct lend_rec){ objects.v[i].at, ((const struct thread *)o)->lend_to }));
         }
     }
 }
 
 /*
- * A thread comes to hold a mutex by its own lock, through a capability to it, which check_call holds to its rights,
- * or as the thread that waited on it longest, which an unlock or the holder's destroy hands it to;
- * a mutex the call built is free.
+ * A thread comes to lend its time to another only by its own wait, OP_NOTIFY_LEND,
+ * through a capability to that thread with RIGHT_X, which check_call holds to the wait's rights;
+ * no other call, nor a fault, makes one thread lend to another or to a third.
  */
-static void check_holders(void)
+static void check_lends(void)
 {
     for (size_t i = 0; i < objects_after.n; i++) {
         const struct obj_header *o = p2v(objects_after.v[i].at);
-        if (o->type != CAP_MUTEX) {
+        if (o->type != CAP_THREAD) {
             continue;
         }
-        uint32_t at = objects_after.v[i].at, holder = ((const struct mutex *)o)->holder;
-        const struct mutex_rec *was =
-            mutexes.n != 0 ? bsearch(&at, mutexes.v, mutexes.n, sizeof(mutexes.v[0]), cmp_at) : NULL;
-        if (holder == 0 || (was != NULL && holder == was->holder)) {
+        uint32_t at = objects_after.v[i].at, lend_to = ((const struct thread *)o)->lend_to;
+        const struct lend_rec *was = lends.n != 0 ? bsearch(&at, lends.v, lends.n, sizeof(lends.v[0]), cmp_at) : NULL;
+        if (lend_to == 0 || (was != NULL && lend_to == was->lend_to)) {
             continue;
         }
-        bool locked = invoked && call_op == OP_MUTEX_LOCK && invoked_cap.type == CAP_MUTEX && invoked_cap.a == at &&
-                      holder == v2p(caller);
-        bool handed = was != NULL && holder == was->oldest;
-        if (!locked && !handed) {
-            violated("a thread came to hold a mutex neither by its own lock nor as the one that waited longest");
+        bool waited = invoked && call_op == OP_NOTIFY_LEND && invoked_cap.type == CAP_NOTIFICATION && at == v2p(caller);
+        if (!waited || !covered((struct grant){ CAP_THREAD, RIGHT_X, lend_to, 0 })) {
+            violated("a thread came to lend its time but by its own wait, through a capability with the right to lend");
         }
     }
 }
@@ -448,7 +451,7 @@ void history_begin(bool call)
     record_objects(&objects);
     each_node(&objects, record_node);
     qsort(nodes.v, nodes.n, sizeof(nodes.v[0]), cmp_at);
-    record_mutexes();
+    record_lends();
     record_move(table, call);
     record_call(table, call);
 
@@ -525,7 +528,7 @@ void history_end(void)
     each_node(&objects_after, check_node);
     check_move();
     check_call();
-    check_holders();
+    check_lends();
 
     /*
      * Only OP_DEBUG_TICK moves time here, and only under tracing, where the clock is the tick count:

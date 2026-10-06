@@ -141,7 +141,7 @@ A thread with no units and no spare time keeps its state and does not run:
 that is how a scheduler in userspace stops and starts a thread, open decision 9.
 A thread that loses its units while it runs finishes the turn it had,
 so only a wait, the tick, a fault, a revoke that takes its own process,
-or an unlock that hands a mutex to the thread paying for its turn takes the processor from a running thread,
+or a signal that wakes the thread paying for its turn takes the processor from a running thread,
 and a call stopped for an interrupt is made again before anything else runs.
 
 **A thread has an account.**
@@ -184,13 +184,15 @@ the thread that earns each unit, the release, the running thread, and how far in
 With every thread on spare time alone this is the plain round-robin over threads,
 which is how the replay driver runs; see "Verification".
 
-**A waiter may lend its time to the holder of a mutex**, with `MUTEX_LEND`; see "Communication and synchronisation".
-A holder without time of its own has the run queue while its lender's account holds a tick,
+**A waiter may lend its time to a thread it names**, with `OP_NOTIFY_LEND`; see "Communication and synchronisation".
+A borrower without time of its own has the run queue while its lender's account holds a tick,
 or the spent queue while the lender's units will fill it, and the release looks at the lender's account as at its own.
+Its lender is the thread that has lent it time longest, the first on its ring of lenders.
 Such a turn is charged to the lender, the turn's payer, as it would be to the turn's thread,
 and each tick decides afresh who pays, so a turn on lent time takes every tick.
-A lender whose own time pays for its turn hands the rest of it to the holder as it begins to wait,
-and the unlock that hands it the mutex hands it the rest of the turn back.
+A lender whose own time pays for its turn, and that the borrower now borrows from,
+hands the rest of the turn to the borrower as it begins to wait, if the borrower waits for a turn;
+and a signal of the turn's thread that wakes the payer hands it the rest of the turn back.
 A lender lends only on its own core, since its units are a part of that core and pay for no other's time.
 
 **A turn is charged by the counter.**
@@ -220,7 +222,7 @@ Spare time goes round by thread, so more threads there get more of it:
 it is the time nobody earned, and a thread that needs a part of the processor is given units.
 A thread with time waits for its turn at most `TIME_UNITS` ticks,
 since only threads with units of its core have time there and each takes a tick;
-a holder on lent time has the turns its lender would have had, charged to the lender.
+a borrower on lent time has the turns its lender would have had, charged to the lender.
 No other latency is promised.
 A thread with no ready work spends nothing, so an idle holder of units costs the others nothing.
 
