@@ -8,6 +8,7 @@
 #include "csr.h"
 #include "kernel.h"
 #include "object.h"
+#include "sched.h"
 
 void board_init(void)
 {

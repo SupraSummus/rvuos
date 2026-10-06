@@ -19,6 +19,7 @@
 #include "klog.h"
 #include "object.h"
 #include "pmp.h"
+#include "sched.h"
 #include "timer.h"
 
 static __attribute__((noreturn)) void fail(const char *msg, uint32_t a, uint32_t b, uint32_t c)

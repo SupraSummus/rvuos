@@ -406,7 +406,7 @@ The replay driver is not built; its layout is QEMU virt's.
 
 The kernel image embeds one user program, the root task.
 The images differ only in that program:
-`kernel-init.elf` carries the demo of `user/init.c`,
+`kernel-init.elf` carries the demo of `user/init/`,
 `kernel-fuzzdrv.elf` the replay driver of `user/fuzzdrv.c`,
 `kernel-escape-*.elf` a scenario of the escape suite each,
 `kernel-libtest.elf` the library's test of `user/libtest/`,

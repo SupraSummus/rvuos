@@ -74,7 +74,7 @@ so an interrupt or the tick finds its `Irq` without a walk.
 **No driver in the kernel.**
 The UART is the first device, and it is userspace's alone:
 the root task is granted its registers and its line at boot,
-and `user/init.c` drives the transmitter from user mode on its interrupt.
+and `user/init/logger.c` drives the transmitter from user mode on its interrupt.
 The kernel has no console to share it with.
 What the kernel has to say goes into its log,
 and the log raises a line of its own; see "The kernel log".

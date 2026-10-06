@@ -509,7 +509,7 @@ a turn with time pays a tick at each `OP_DEBUG_TICK` and nothing at a wait.
 `OP_CLOCK_READ` tells the same clock, the counts of the ticks so far, which the host, with no counter, tells too.
 The fill clears what the running thread owed from within the tick,
 and the host stands its counter half way into the tick while untraced, so that there is something to clear.
-The charge at a change of turn is checked by the demo in `user/init.c`,
+The charge at a change of turn is checked by the demo in `user/init/units.c`,
 by a thread held to an eighth that sleeps across every tick;
 see `TODO.md` for what nothing checks.
 The interrupt is still taken and acknowledged on QEMU,
@@ -523,7 +523,7 @@ A tick pending in a revoke stops it on QEMU as anywhere,
 but a stopped call is not traced, only the attempt that finishes,
 so where the tick lands leaves the transcript alone,
 and the host may stop every such call without a line of its own.
-The stall in `wfi` for an armed timer line is checked by the demo in `user/init.c`,
+The stall in `wfi` for an armed timer line is checked by the demo in `user/init/time.c`,
 and so are periods that keep pace with the clock,
 bounded on both sides, which a stall that miscounted the ticks it skipped would break;
 the host never stalls, so nothing else checks the deferral.
@@ -546,7 +546,7 @@ because a line left claimed would storm
 and one masked without its `Irq` disarmed would break an invariant;
 the replay driver holds no device and enables none,
 so none arrives during a replay, and `OP_DEBUG_IRQ` fires them by name.
-The path from the controller to the `Irq` is checked by the demo in `user/init.c`,
+The path from the controller to the `Irq` is checked by the demo in `user/init/logger.c`,
 whose logger drives the UART's transmitter on its interrupt.
 The kernel loses nothing by that:
 it runs with interrupts off, so a tick lands only in user mode,
@@ -559,11 +559,11 @@ The host stops every restartable call after each step and makes it again at once
 which checks every restart alone;
 a thread an armed stop left stands at its `ecall` until the processor comes back to it,
 and faults on the `ecall` if its process no longer maps the driver's code.
-What the demo in `user/init.c` alone still checks
+What the demo in `user/init/` alone still checks
 is the interrupt landing between two instructions.
 The replay driver starts its second thread after turning tracing on,
 so that no tick runs it before the records it takes are in place.
-Preemption itself is checked by the demo in `user/init.c`:
+Preemption itself is checked by the demo in `user/init/root.c`:
 the two processes take turns through a shared word and no notification,
 which nothing but the tick can get them past.
 

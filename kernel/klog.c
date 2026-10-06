@@ -12,6 +12,7 @@
 #include "kernel.h"
 #include "klog.h"
 #include "object.h"
+#include "sched.h"
 
 static volatile struct rvuos_log *header;
 static volatile uint8_t *ring;

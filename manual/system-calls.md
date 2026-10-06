@@ -558,7 +558,7 @@ So the root task can hand its place over:
 it moves every capability into a successor's table with `OP_CAP_MOVE`, each to the same slot, and waits,
 and the successor stops the root task's thread and revokes below `BOOT_CAP_POOL_RAM`,
 which destroys the boot pool, and the root task with it.
-`user/init.c` ends its demo this way; `DESIGN.md`, "The root task is its capabilities", gives the steps.
+`user/init/successor.c` ends the demo this way; `DESIGN.md`, "The root task is its capabilities", gives the steps.
 
 Device ranges are frames, granted read and write, or read alone where the board says so, never execute,
 but for a window onto flash, read and execute,

@@ -6,6 +6,7 @@
 
 #include "kernel.h"
 #include "object.h"
+#include "sched.h"
 
 #if CORES > 1
 _Static_assert(CORES <= 32, "the cores owed an interrupt fit a word");

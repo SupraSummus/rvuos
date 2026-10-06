@@ -214,7 +214,7 @@ a process that owns a little memory
 can create and destroy a minimal pool in a loop
 and wrap sixteen bits in under a second.
 Slots therefore carry no generation,
-and `user/init.c` rebuilds a pool over destroyed memory
+and `user/init/root.c` rebuilds a pool over destroyed memory
 to show that a stale capability does not come back with it.
 
 Objects reference each other by capability,

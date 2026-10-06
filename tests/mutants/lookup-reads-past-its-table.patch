@@ -12,7 +12,7 @@ Report: the kernel reached RAM outside its objects
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -9,7 +9,7 @@
+@@ -10,7 +10,7 @@
  
  int cap_lookup(struct captable *table, uint32_t slot, struct cap *out)
  {

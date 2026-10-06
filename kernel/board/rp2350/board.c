@@ -25,6 +25,7 @@
 #include "kernel.h"
 #include "layout.h"
 #include "object.h"
+#include "sched.h"
 #include "timer.h"
 #ifdef __riscv
 #include "csr.h"

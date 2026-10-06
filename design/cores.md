@@ -8,7 +8,7 @@ The kernel runs on `CORES` cores, a constant of the build:
 one on every board but QEMU `virt`, which `make CORES=2` builds for two harts,
 mps2-an521, which `make BOARD=mps2-an521 CORES=2` builds for its two Cortex-M33s,
 and RP2350, which `make BOARD=rp2350 CORES=2` builds for both cores of either kind.
-What a core has of its own is `struct core` in `kernel/object.h`:
+What a core has of its own is `struct core` in `kernel/sched.h`:
 its thread, its turn, its three queues, its release, its nearest deadline, its timer, the call it is in,
 and what it tells the others.
 The objects, the derivation tree, the units, the tick count, the timer lines and the device lines are the machine's.

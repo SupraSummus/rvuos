@@ -28,6 +28,7 @@
 #include "irq.h"
 #include "kernel.h"
 #include "object.h"
+#include "sched.h"
 #include "scs.h"
 #include "work.h"
 

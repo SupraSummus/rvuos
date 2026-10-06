@@ -70,7 +70,7 @@ Everything else the root task does it does through its table,
 so a process holding the same capabilities in the same places of the derivation tree can do all it could.
 
 That lets the root task hand its place over and end, as a bootloader chains to the next stage.
-`user/init.c` does it at the end of the demo:
+`user/init/successor.c` does it at the end of the demo:
 
 1. The root task builds a successor out of free RAM, as it builds any process.
 2. It moves every capability it holds into the successor's table with `OP_CAP_MOVE`, each to the same slot,
@@ -200,7 +200,7 @@ and the layout leaves a block between the log and the code and one between the d
 A program compiled for strict alignment meets neither half.
 
 **mps2-an385** is QEMU's model of ARM's MPS2 board with the AN385 image, a Cortex-M3, and ARM's development target:
-`make BOARD=mps2-an385 test` runs the demo root task of `user/init.c` there, the same program as on RISC-V,
+`make BOARD=mps2-an385 test` runs the demo root task of `user/init/` there, the same program as on RISC-V,
 `make BOARD=mps2-an385 escape` the escape suite in ARM's instructions,
 and `make check` runs both.
 QEMU loads the image into SSRAM1, where the core's reset finds the vector table,
@@ -308,7 +308,7 @@ chosen by the board: `riscv` for QEMU virt, the ESP32-C6 and RP2350's Hazard3,
 `arm` is both, and `ARMV8M` in its `arch.h` says which the compiler builds for;
 the MPU and the Security state are where they differ.
 The kernel's objects, its capabilities and every operation are the same on both,
-and so is `user/init.c`, which runs the same demo to the same transcript.
+and so is `user/init/`, which runs the same demo to the same transcript.
 What differs is what a trap is, which registers carry a call, how a region is written to the hardware,
 and which counter and compare the tick is made of;
 `arch.h` says the first two to the rest of the kernel,

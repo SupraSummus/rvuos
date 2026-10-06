@@ -26,6 +26,7 @@
 #include "irq.h"
 #include "kernel.h"
 #include "object.h"
+#include "sched.h"
 #include "work.h"
 
 #define WINDOWS ((IRQ_LINES + 15) / 16)

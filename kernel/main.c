@@ -7,6 +7,7 @@
 #include "klog.h"
 #include "object.h"
 #include "pmp.h"
+#include "sched.h"
 #include "timer.h"
 #include "trap.h"
 

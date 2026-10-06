@@ -5,7 +5,7 @@
  * The console of QEMU virt: a 16550 UART behind BOOT_CAP_UART, on line 10,
  * and a line nothing drives, the RTC's.
  * The registers come from BOOT_CAP_UART; the line numbers are the board's.
- * Each board's console.h offers the same functions, for user/init.c and user/fuzzdrv.c.
+ * Each board's console.h offers the same functions, for user/init/ and user/fuzzdrv.c.
  */
 
 #include <stdbool.h>

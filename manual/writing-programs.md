@@ -67,7 +67,7 @@ and `user/lib/` what a program of several processes needs beside them, section 8
 | `rv_debug_trace(cap)`, `rv_debug_tick(cap)` | `OP_DEBUG_TRACE`, `OP_DEBUG_TICK` |
 | `rv_debug_irq(cap, line)`, `rv_debug_preempt(cap, n)` | `OP_DEBUG_IRQ`, `OP_DEBUG_PREEMPT` |
 
-To replace the demo, edit `user/init.c` or add a program to `USER_PROGRAMS` in the Makefile;
+To replace the demo, edit `user/init/` or add a program to `USER_PROGRAMS` in the Makefile;
 each program becomes its own kernel image.
 A program of several processes lies in a directory of its own, section 8.4.
 
@@ -77,7 +77,7 @@ Today one program is embedded, and a second process runs code
 from the same code region with its own data and stack.
 Loading a separate binary is a userspace job the root task does not do yet;
 `DESIGN.md`, open decision 3.
-The steps below are what `user/init.c` does, call by call;
+The steps below are what `user/init/root.c` does, call by call;
 the library of section 8.4 takes them in one, and hands out the slots, regions and bits they name.
 
 1. **Take memory** out of `BOOT_CAP_FREE_RAM`:

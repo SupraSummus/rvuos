@@ -592,7 +592,7 @@ nothing runs that could make it write,
 so an idle kernel with only the log's `Irq` armed halts with `no runnable thread`.
 The line cannot be fired by `OP_DEBUG_IRQ` either.
 
-`user/init.c` shows the reader:
+`user/init/logger.c` shows the reader:
 a logger thread that waits on one notification with the log's bit and the UART's,
 and carries the ring out one byte per transmitter interrupt.
 `user/wifi/logger.c` is a reader the root task gave the frame to, which carries the ring over the network
