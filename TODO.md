@@ -190,6 +190,8 @@ what is left:
   so `make arm-test` waits in `intr_wait` for ever there, from the first sleep of the demo.
   QEMU 10.2 treats `wfe` as a hint and passes, and the Cortex-M33 wakes as the architecture says.
   Report it to QEMU, or make the compare a board timer on an NVIC line where one is free.
+  Under QEMU 11 that would also let the MPS2 boards sleep through what their idle kernel now polls,
+  most of each ARM demo's half minute, the longest part of `make check`.
 - The Cortex-M33 has no `DISDEFWBUF`, so a bus fault on a thread's store may come imprecise,
   after the kernel has changed threads, and stop the thread that runs next;
   a device region is nGnRnE there, and whether that makes the fault precise is unmeasured.

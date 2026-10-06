@@ -23,13 +23,15 @@ trap 'rm -f "$log" "$text"' EXIT
 
 set +e
 # The demo takes a few seconds, twice that on two harts; the rest is for a loaded machine, as under `make mutants`.
-timeout 60 sh -c "$boot_cmd" > "$log" 2>&1
+# On the MPS2 boards it takes half a minute, the idle kernel polling through every sleep, beside the rest of `make check`.
+seconds=60
+[ "$board_arch" = arm ] && seconds=120
+timeout $seconds sh -c "$boot_cmd" > "$log" 2>&1
 status=$?
 set -e
 
-cat "$log"
-
 fail() {
+    cat "$log"
     echo "FAIL: $1" >&2
     exit 1
 }
