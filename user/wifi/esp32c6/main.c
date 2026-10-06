@@ -283,6 +283,27 @@ static void scan_own(struct drv *d)
 }
 
 /*
+ * The 24 bytes of a management frame's header: the subtype, the three addresses and a zero sequence number,
+ * which the probe request and the authentication share.
+ */
+#define MGMT_HEADER 24u
+#define MGMT_BCAST  { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff }
+
+static uint32_t mgmt_header(uint8_t *f, uint8_t subtype, const uint8_t *da, const uint8_t *sa, const uint8_t *bssid)
+{
+    f[0] = subtype;
+    f[1] = 0;
+    f[2] = 0;
+    f[3] = 0;
+    memcpy(f + 4, da, 6);
+    memcpy(f + 10, sa, 6);
+    memcpy(f + 16, bssid, 6);
+    f[22] = 0;
+    f[23] = 0;
+    return MGMT_HEADER;
+}
+
+/*
  * The station's own authentication, the first step of its own logic: the driver scans for the network by its own code,
  * takes the access point heard strongest, or the page's bssid, retunes to it and sends an open-system
  * Authentication frame by mac_tx, reading the answer through mac.c; the libraries only bring the MAC up.
@@ -290,10 +311,10 @@ static void scan_own(struct drv *d)
  * association, the keys and the join are to follow; see TODO.md.
  */
 #define AUTH_MGMT     0xb0u /* management, subtype Authentication */
-#define AUTH_HEADER   24u   /* frame control, duration, the three addresses and the sequence number */
 #define AUTH_OPEN     0u
 #define AUTH_REQ_SEQ  1u
 #define AUTH_RESP_SEQ 2u
+#define AUTH_TRIES    3u
 #define AUTH_WAIT_US  200000u
 
 static volatile uint32_t auth_done, auth_status;
@@ -303,14 +324,14 @@ static uint8_t auth_ap[6];
 static void auth_heard(const uint8_t *c)
 {
     const uint8_t *f = c + RX_CTRL_SIZE;
-    if (!rx_ctrl_whole(c) || rx_ctrl_len(c) < AUTH_HEADER + 6u || f[0] != AUTH_MGMT) {
+    if (!rx_ctrl_whole(c) || rx_ctrl_len(c) < MGMT_HEADER + 6u || f[0] != AUTH_MGMT) {
         return;
     }
     if (memcmp(f + 4, drv_self->mac, 6) != 0 || memcmp(f + 10, auth_ap, 6) != 0) {
         return;
     }
-    if (((uint32_t)f[AUTH_HEADER + 2] | (uint32_t)f[AUTH_HEADER + 3] << 8) == AUTH_RESP_SEQ) {
-        auth_status = (uint32_t)f[AUTH_HEADER + 4] | (uint32_t)f[AUTH_HEADER + 5] << 8;
+    if (((uint32_t)f[MGMT_HEADER + 2] | (uint32_t)f[MGMT_HEADER + 3] << 8) == AUTH_RESP_SEQ) {
+        auth_status = (uint32_t)f[MGMT_HEADER + 4] | (uint32_t)f[MGMT_HEADER + 5] << 8;
         auth_done = 1;
     }
 }
@@ -329,17 +350,7 @@ static const struct drv_net *net_for(const struct drv *d)
 /* An open-system Authentication frame to the access point, from the station. */
 static uint32_t auth_request(uint8_t *f, const uint8_t *ap, const uint8_t *mac)
 {
-    uint32_t n = 0;
-    f[n++] = AUTH_MGMT;
-    f[n++] = 0;
-    f[n++] = 0;
-    f[n++] = 0;
-    memcpy(f + n, ap, 6);
-    memcpy(f + n + 6, mac, 6);
-    memcpy(f + n + 12, ap, 6);
-    n += 18;
-    f[n++] = 0;
-    f[n++] = 0;
+    uint32_t n = mgmt_header(f, AUTH_MGMT, ap, mac, ap);
     f[n++] = (uint8_t)AUTH_OPEN;
     f[n++] = 0;
     f[n++] = (uint8_t)AUTH_REQ_SEQ;
@@ -360,20 +371,30 @@ static __attribute__((noreturn)) void auth_own(struct drv *d)
     const char *failed = mac_rx_take(auth_heard);
     must(d, failed ? failed : "the MAC receives into the driver's list", failed ? ESP_FAIL : ESP_OK);
     mac_channel(ap->channel);
-    static uint8_t frame[AUTH_HEADER + 6u];
+    static uint8_t frame[MGMT_HEADER + 6u];
     uint32_t n = auth_request(frame, ap->bssid, d->mac);
-    auth_done = 0;
-    auth_status = 0;
-    failed = mac_tx(frame, n);
-    must(d, failed ? failed : "the authentication frame", failed ? ESP_FAIL : ESP_OK);
-    uint64_t start = osi_now_us();
-    while (!auth_done && osi_now_us() - start < AUTH_WAIT_US) {
-        osi_delay_ms(2);
+    /* A frame lost to the air, or answered too late, is sent again a few times, as a station does; see TODO.md. */
+    for (uint32_t tries = 0; tries < AUTH_TRIES && !auth_done; tries++) {
+        auth_done = 0;
+        auth_status = 0;
+        failed = mac_tx(frame, n);
+        if (failed) {
+            drv_say("auth: the authentication frame, try %u: %s\n", (unsigned)(tries + 1u), failed);
+            continue;
+        }
+        uint64_t start = osi_now_us();
+        while (!auth_done && osi_now_us() - start < AUTH_WAIT_US) {
+            osi_delay_ms(2);
+        }
     }
     mac_rx_give_back();
     drv_say("auth: %s, status %u\n", auth_done ? (auth_status == 0 ? "accepted" : "refused") : "no answer",
             (unsigned)auth_status);
     must(d, "the authentication answered", auth_done && auth_status == 0 ? ESP_OK : ESP_FAIL);
+    memcpy(d->joined.bssid, ap->bssid, 6);
+    memcpy(d->joined.ssid, ap->ssid, strlen(ap->ssid));
+    d->joined.channel = ap->channel;
+    d->authmode = WIFI_AUTH_OPEN;
     radio_off();
     drv_say("driver: authenticated; the radio is off\n");
     child_stop(&d->c, DRV_SCANNED);
@@ -640,22 +661,15 @@ static uint32_t hear_tsf;
 #define PROBES         5u
 #define PROBE_MAX      (24u + 2u + 32u + 10u + 6u + 3u)
 
-static uint8_t probe_from[6];
 static uint8_t probe_ap[6];
 
 static uint32_t probe_request(uint8_t *f, const char *ssid, uint32_t channel)
 {
     static const uint8_t rates[] = { 1, 8, 0x82, 0x84, 0x8b, 0x96, 0x0c, 0x12, 0x18, 0x24 };
     static const uint8_t more_rates[] = { 50, 4, 0x30, 0x48, 0x60, 0x6c };
-    uint32_t n = 0, len = strlen(ssid);
-    f[n++] = PROBE_REQUEST;
-    f[n++] = 0;
-    f[n++] = 0;
-    f[n++] = 0;
-    memset(f + n, 0xff, 6);
-    memcpy(f + n + 6, probe_from, 6);
-    memset(f + n + 12, 0xff, 6);
-    n += 18;
+    static const uint8_t bcast[6] = MGMT_BCAST;
+    uint32_t len = strlen(ssid);
+    uint32_t n = mgmt_header(f, PROBE_REQUEST, bcast, drv_self->mac, bcast);
     f[n++] = 0;
     f[n++] = 0;
     f[n++] = 0;
@@ -677,7 +691,7 @@ static void heard_answer(const uint8_t *f, uint32_t len)
 {
     const char *ssid = drv_self->probe;
     uint32_t n = strlen(ssid);
-    if (len < PROBE_SSID + 2u + n + 4u || memcmp(f + 4, probe_from, 6) != 0 || f[PROBE_SSID] != 0 ||
+    if (len < PROBE_SSID + 2u + n + 4u || memcmp(f + 4, drv_self->mac, 6) != 0 || f[PROBE_SSID] != 0 ||
         f[PROBE_SSID + 1] != n || memcmp(f + PROBE_SSID + 2, ssid, n) != 0) {
         return;
     }
@@ -769,11 +783,10 @@ static __attribute__((noreturn)) void listen(struct drv *d)
     uint16_t probe_seq = 0;
     uint32_t probe_len = 0, probes = 0, probes_failed = 0;
     if (d->probe[0]) {
-        must(d, "the station's address", esp_wifi_get_mac(WIFI_IF_STA, probe_from));
         probe_len = probe_request(probe, d->probe, d->listen);
         drv_say("driver: probing for %s on channel %u from %02x:%02x:%02x:%02x:%02x:%02x, by %s\n", d->probe,
-                (unsigned)d->listen, probe_from[0], probe_from[1], probe_from[2], probe_from[3], probe_from[4],
-                probe_from[5], d->own_tx ? "the driver's own MAC" : "the libraries");
+                (unsigned)d->listen, d->mac[0], d->mac[1], d->mac[2], d->mac[3], d->mac[4], d->mac[5],
+                d->own_tx ? "the driver's own MAC" : "the libraries");
     }
     child_report(&d->c, DRV_LISTENING);
     struct hear first = { 0 }, then = { 0 };

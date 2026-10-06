@@ -468,11 +468,13 @@ the MAC leaves a bit in its hardware txq's state when the frame is done,
 and the libraries' `lmacProcessTxComplete`, which their interrupt posts, is what cleared it, and the slot's arm bits with it.
 The driver clears that bit now, as `hal_mac_clr_txq_state(2, slot)` does, while it waits for the arm bits to clear,
 so a probe sent with both `rx=own` and `tx=own` is answered the same, and their interrupt is needed for neither.
-The state's other two groups are a timeout and a collision, which the driver clears and ignores for now:
-on the chip the first frame after it takes the interrupt leaves a group 1 timeout bit and is sent all the same,
-so reading that as a failure would fail a frame the access point answered.
-An own slot of the driver's, rather than the libraries' slot 0, would keep their completions out of its way;
-the libraries' pp, which retries a collision or a timeout, would do better than clearing and going on.
+The state's other two groups are a timeout and a collision, on which the driver takes the slot back and fails,
+as the libraries' lmacProcessTxTimeout and lmacProcessCollisions_task do.
+A state bit of the libraries' slot may lie there from before the driver took the interrupt,
+so the driver clears the slot's state just before it arms a frame;
+without that, the first frame read a stale timeout bit and was failed though the access point answered it.
+An own slot of the driver's, rather than the libraries' slot 0, would keep their completions out of its way,
+and the libraries' pp, which retries a collision or a timeout, does more than failing and letting the caller send again.
 It still clears the queue's own state byte, which `lmac_stop_hw_txq` reads to leave the slot alone
 and `lmacProcessTxComplete` reads to skip a queue it is not finishing,
 and reads no completion result; `pp` and `net80211` stay for the slot the driver borrows and the station's own logic.
@@ -483,8 +485,6 @@ The station's own logic begins with the authentication.
 With `sta=own` the driver scans for the network by its own code, takes the access point heard strongest, or the page's bssid,
 retunes to it, and sends an open-system Authentication frame by `mac_tx`, reading the answer through `mac.c`;
 the access point accepts it, and the libraries' station is never asked to connect.
-The scan and the authentication are two takes of the receiving one after another, which found a fault:
-`mac_rx_take` made its list again each time, while `mac_rx_give_back` left the head and tail of the first list in place,
-so the second take linked its list after the first's and no frame came;
-the take makes the list whole again now, and its descriptors and buffers are made once and used again.
+The scan and the authentication are two takes of the receiving one after another,
+so `mac_rx_take` makes its list whole again at each take, its descriptors and buffers made once.
 The association, the keys and so the join are to follow the same way; `TODO.md` says what is left.

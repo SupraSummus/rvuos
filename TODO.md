@@ -93,8 +93,7 @@ what is left:
   and sends a probe by `tx=own`, the access point answering it.
   The station's logic is to be the driver's own too, on hostap's parsing, through the association, the keys and the join;
   `user/wifi/NOTES.md` says why it is the driver's own.
-  Its frame completion spins in the caller's thread while the slot is armed, and borrows the libraries' slot 0,
-  whose first frame leaves a group 1 timeout bit the driver clears and ignores;
+  Its frame completion spins in the caller's thread while the slot is armed, and borrows the libraries' slot 0;
   an own slot, the driver's own interrupt to finish the frame, and the libraries' retry of a collision or a timeout
   would do better.
 - The ESP32-C6's Wi-Fi root task has 8 KiB of memory and 9 slots left once its clients run,
