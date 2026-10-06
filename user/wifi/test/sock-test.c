@@ -155,14 +155,6 @@ static void test_sockets(void)
     CHECK(status_of(ask(&s, 0, SOCK_RECV, 7, peer, 40000, "x", 1)) == SOCK_BAD);
     CHECK(ask(&s, SOCK_CLIENTS, SOCK_BIND, 8, 0, 0, 0, 0) == 0 && !net_udp_bound(&n, 8));
 
-    /* The network's addresses. */
-    CHECK(status_of(ask(&s, 1, SOCK_CONFIG, 0, 0, 0, 0, 0)) == SOCK_OK && answers[0].h.op == SOCK_CONFIG);
-    struct sock_config config;
-    CHECK(answers[0].h.len == sizeof(config));
-    memcpy(&config, answers[0].data, sizeof(config));
-    CHECK(config.ip == me && config.gateway == router_ip && config.dns == router_ip);
-    CHECK(config.mask == net_ip(255, 255, 255, 0));
-
     /* A port back by asking, and every port of a client that is gone; another client may take them then. */
     CHECK(status_of(ask(&s, 1, SOCK_CLOSE, picked, 0, 0, 0, 0)) == SOCK_NOT_HELD && net_udp_bound(&n, picked));
     CHECK(status_of(ask(&s, 0, SOCK_CLOSE, 0, 0, 0, 0, 0)) == SOCK_NOT_HELD);

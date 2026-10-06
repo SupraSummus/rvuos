@@ -1,10 +1,11 @@
 /*
  * The clock: a client of the network process, in a process of its own, that learns the time and tells it.
  *
- * It starts with a0 at its page and waits for the root task to connect its channel.
+ * It starts with a0 at its page and waits for the root task to connect its channel,
+ * and for the network's addresses, which the network process publishes in memory the clock reads at every wake.
  * Then each step is a question and its answer, asked again every second until it comes:
- * the network's addresses from the network process, a port of its own, the address of a server of pool.ntp.org
- * from the network's DNS server, and the time from that server by SNTP.
+ * a port of its own, the address of a server of pool.ntp.org from the network's DNS server,
+ * and the time from that server by SNTP.
  * It keeps the time by its timer from then on, and answers any datagram to UDP port 13 with it as text, RFC 867.
  */
 
@@ -18,7 +19,6 @@
 #define RESEND_MS 100u /* after a send that went nowhere, while the next hop's address is asked for */
 
 enum step {
-    ASK_CONFIG, /* the network's addresses */
     ASK_PORT,   /* a port of its own to ask from */
     ASK_NAME,   /* the server's address */
     ASK_TIME,   /* the time */
@@ -44,9 +44,6 @@ static void ask(struct clk *k)
     uint32_t len;
     k->asked = k->now;
     switch (k->step) {
-    case ASK_CONFIG:
-        client_ask(k->net, SOCK_CONFIG, 0, 0, 0, 0, 0);
-        break;
     case ASK_PORT:
         client_ask(k->net, SOCK_BIND, 0, 0, 0, 0, 0);
         break;
@@ -87,16 +84,6 @@ static void tell(struct clk *k, const struct sock_msg *h)
 static void answer(struct clk *k, const struct sock_msg *h, const uint8_t *data)
 {
     switch (h->op) {
-    case SOCK_CONFIG:
-        if (k->step == ASK_CONFIG && h->status == SOCK_OK && h->len == sizeof(k->config)) {
-            memcpy(&k->config, data, sizeof(k->config));
-            if (k->config.ip != 0 && k->config.dns != 0) {
-                say(&k->out, "clock: asking %I for %s\n", k->config.dns, CLOCK_SERVER);
-                client_ask(k->net, SOCK_BIND, CLOCK_PORT, 0, 0, 0, 0);
-                next(k, ASK_PORT);
-            }
-        }
-        break;
     case SOCK_BIND:
         if (h->status != SOCK_OK) {
             say(&k->out, "clock: port %u refused, %u\n", h->port, h->status);
@@ -160,9 +147,19 @@ __attribute__((noreturn)) void clock_main(struct child_page *page)
         if (!chan_ready(k->net)) {
             continue;
         }
+        /* The addresses as they are now, kept as they were if a write was under way. */
+        struct sock_config config;
+        uint32_t version;
+        if (seqlock_read(&k->page->config, &config, &version)) {
+            k->config = config;
+        }
         if (!asked) {
+            if (k->config.ip == 0 || k->config.dns == 0) {
+                continue;
+            }
             asked = 1;
-            say(&k->out, "clock: up\n");
+            say(&k->out, "clock: asking %I for %s\n", k->config.dns, CLOCK_SERVER);
+            client_ask(k->net, SOCK_BIND, CLOCK_PORT, 0, 0, 0, 0);
             ask(k);
         }
         uint32_t len;

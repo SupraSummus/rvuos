@@ -91,8 +91,6 @@ void sock_request(struct sock *s, uint32_t client, const uint8_t *msg, uint32_t 
 {
     struct sock_msg h;
     const uint8_t *data = msg + sizeof(h);
-    const uint8_t *out = 0;
-    struct sock_config config;
     if (client >= SOCK_CLIENTS) {
         return;
     }
@@ -125,15 +123,10 @@ void sock_request(struct sock *s, uint32_t client, const uint8_t *msg, uint32_t 
             return;
         }
         break;
-    case SOCK_CONFIG:
-        config = (struct sock_config){ s->net->ip, s->net->mask, s->net->gateway, s->net->dns };
-        out = (const uint8_t *)&config;
-        status = SOCK_OK;
-        break;
     }
     h.status = (uint8_t)status;
-    h.len = out != 0 ? sizeof(config) : 0;
-    s->put(s, client, &h, out);
+    h.len = 0;
+    s->put(s, client, &h, 0);
 }
 
 void sock_drop(struct sock *s, uint32_t client)

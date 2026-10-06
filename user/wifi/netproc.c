@@ -5,7 +5,8 @@
  * and waits on one notification for everything: the link, which says it has frames from the driver or room for more,
  * a bit for each client's channel, its timer, which ticks every 100 ms for DHCP's retries, and the root task,
  * which says when it connected or closed a client's channel.
- * It asks for an address by DHCP once started, serves its clients' sockets, sock.h,
+ * It asks for an address by DHCP once started, publishes the network's addresses as they change, lib/seqlock.h,
+ * serves its clients' sockets, sock.h,
  * and answers on UDP port 7777 itself, with a line that says what the system has done.
  *
  * It trusts the driver and not its clients: from each channel it takes as many packets as a ring holds for each wake,
@@ -23,6 +24,7 @@
 struct netp {
     struct net net; /* first, so that the stack's callbacks find the process */
     struct sock sock;
+    struct sock_config published; /* the network's addresses, as it published them last */
     struct net_page *page;
     struct out out;
     uint32_t now; /* ms since the process started, by its timer */
@@ -128,6 +130,8 @@ __attribute__((noreturn)) void net_main(struct child_page *c)
     net_init(&p->net, page->mac, np_send, p);
     sock_init(&p->sock, &p->net, np_put, p);
     net_udp_bind(&p->net, NET_PORT_STATUS, on_status, p);
+    struct seqlock config = net_config(page);
+    seqlock_init(&config);
 
     say(&p->out, "net: up\n");
     child_report(c, NET_WAITING);
@@ -158,6 +162,11 @@ __attribute__((noreturn)) void net_main(struct child_page *c)
             rv_signal(page->more, NOTIFY_ALL_BITS);
         }
         page->pings = p->net.pings;
+        struct sock_config now = { p->net.ip, p->net.mask, p->net.gateway, p->net.dns };
+        if (memcmp(&now, &p->published, sizeof(now)) != 0) {
+            p->published = now;
+            seqlock_write(&config, &now);
+        }
         if (!bound && p->net.dhcp_state == DHCP_BOUND) {
             bound = 1;
             page->ip = p->net.ip;

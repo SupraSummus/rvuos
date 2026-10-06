@@ -13,7 +13,8 @@
  * The network process runs the IP stack, and trades Ethernet frames with the driver through a channel, the link,
  * see lib/chan.h.
  * Its clients are processes of their own, each with a channel to it from a hub, through which they use sockets, sock.h:
- * the echo, which answers on UDP port 7, the clock, which asks the network for the time and tells it on port 13,
+ * the echo, which answers on UDP port 7, the clock, which asks the network for the time and tells it on port 13
+ * and reads the network's addresses as the network process publishes them,
  * and the logger, which carries the kernel's log to a host on port 7070 while the system runs.
  * The root task asks every child each second whether its loop still comes round, lib/child.h, and feeds the watchdog;
  * a client that faults or does not answer is taken down and built again,
@@ -29,6 +30,7 @@
 
 #include "lib/chan.h"
 #include "lib/child.h"
+#include "lib/seqlock.h"
 #include "sock.h"
 
 /*
@@ -114,6 +116,10 @@ enum net_state {
 #define CLIENT_CHAN_SIZE 0x4000u
 #define CLIENT_SLOT      SOCK_MSG_MAX
 
+/* The bytes of its page the network process publishes the network's addresses in, through lib/seqlock.h. */
+#define NET_CONFIG_SIZE 64u
+_Static_assert(SEQLOCK_BYTES(sizeof(struct sock_config)) <= NET_CONFIG_SIZE, "the addresses fit their bytes");
+
 struct net_page {
     struct child_page c;
     struct chan_end link;
@@ -125,7 +131,15 @@ struct net_page {
     /* From the network process. */
     volatile uint32_t ip, mask, gateway;
     volatile uint32_t rx_frames, tx_frames, pings, datagrams;
+    /* The network's addresses, as net_config lays them out; the clock is given these bytes alone. */
+    uint32_t config[NET_CONFIG_SIZE / 4u] __attribute__((aligned(NET_CONFIG_SIZE)));
 };
+
+/* The seqlock of the network's addresses in the network process's page. */
+static inline struct seqlock net_config(const struct net_page *p)
+{
+    return seqlock_shape((uint32_t)(uintptr_t)p->config, sizeof(struct sock_config));
+}
 
 /* The UDP port the network process answers on itself, with a line about the system. */
 #define NET_PORT_STATUS 7777u
@@ -157,6 +171,7 @@ enum clock_state {
 };
 struct clock_page {
     struct client_page c;
+    struct seqlock config;     /* the network's addresses, read only */
     volatile uint32_t server;  /* the NTP server's address, network order */
     volatile uint32_t seconds; /* the time it learned, since 1970 */
 };

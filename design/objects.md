@@ -632,6 +632,7 @@ It is the latch of Linux's sequence counters rather than its seqlock, which keep
 that suits a writer the tick cannot take, as Linux's are,
 but a reader of a writer in user mode stopped halfway could only spin until the writer's next turn.
 With two, a writer stopped, faulted or taken down halfway costs its readers nothing.
+The Wi-Fi system's network process publishes its addresses so, which its clock reads without an ask.
 
 **Handing memory over**, with the kernel's word that the giver no longer reaches it,
 is an uninstall from the one and an install into the other by a third process that holds the frame,

@@ -424,3 +424,13 @@ and the hub one frame for every client's channel, four of 16 KiB.
 The hub now has as many channels as the clients wanted need, and the driver's data a block of its own,
 which leaves the ESP32-C6's root task 8 KiB and 9 slots: enough, and a number to watch.
 Its echo answers in 13 to 22 ms at the median, run to run, where the Pico 2 W's does in about 5.
+
+## The network's addresses, published
+
+The clock asked the network process for its addresses, a round trip asked again every second until DHCP had given them.
+The network process now publishes them through `lib/seqlock.h`, in 64 bytes of its page,
+which the root task carves out of its room and gives the clock read only, and the clock reads them at every wake,
+so it sees an address that changes too, and the sockets lost `SOCK_CONFIG`.
+It costs the root task a slot and the clock a region.
+A frame of their own cost the Pico 2 W's root task its last slots first, since free memory is halved down to a block's size,
+a slot for each half, and the third client was not built.

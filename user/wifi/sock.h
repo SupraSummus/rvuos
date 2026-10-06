@@ -7,7 +7,7 @@
  *
  * A message is a header and the data after it, one to a packet of the channel.
  * A client binds ports, each its own until it closes it or is gone, sends datagrams from the ports it holds,
- * and receives the datagrams sent to them; it may ask for the network's addresses too.
+ * and receives the datagrams sent to them.
  * Every request is answered but a datagram sent, which is answered only when it could not go,
  * and answers come in the order of the requests, with the datagrams received among them.
  *
@@ -24,7 +24,6 @@ enum sock_op {
     SOCK_BIND = 1, /* port: the one to take, or 0 for one the server picks; answered with the port */
     SOCK_CLOSE,    /* port: one held, given back; answered */
     SOCK_SEND,     /* port: one held; ip and peer_port: where to; the data: the datagram */
-    SOCK_CONFIG,   /* answered with struct sock_config as its data */
     SOCK_RECV,     /* the server's alone: a datagram to port, from ip and peer_port */
 };
 
@@ -47,7 +46,7 @@ struct sock_msg {
 };
 #define SOCK_MSG_MAX (sizeof(struct sock_msg) + NET_UDP_MAX)
 
-/* The network's addresses, in network order; ip is 0 while the network process has none. */
+/* The network's addresses, in network order, as the network process publishes them; ip is 0 while it has none. */
 struct sock_config {
     uint32_t ip, mask, gateway, dns;
 };

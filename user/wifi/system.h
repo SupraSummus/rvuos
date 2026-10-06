@@ -48,6 +48,7 @@ struct system {
     int net_started;
     struct chan link;
     struct chan_hub hub;
+    uint32_t config;     /* a frame of the network's addresses in the network process's page, for the clock */
     struct client clients[CLIENTS];
     int clients_built;
 };
@@ -61,7 +62,8 @@ void system_must(struct system *s, const char *what, uint32_t status);
 /*
  * The network process, not started, with the system's MAC address,
  * the link between it and the driver, whose end driver_link lies in the driver's page,
- * the hub its clients will reach it through, and its own inbox to wake itself with.
+ * the hub its clients will reach it through, the network's addresses in its page carved as a frame for the clock,
+ * and its own inbox to wake itself with.
  * The root task's room must hold the network process's data, and the clients' once it has an address;
  * the hub takes a frame of free memory, CLIENT_CHAN_SIZE for each client up to the last wanted, a power of two of them.
  */

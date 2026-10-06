@@ -70,6 +70,11 @@ void system_net_build(struct system *s, struct chan_end *driver_link, const uint
     }
     system_must(s, "the clients' hub",
                 chan_hub_new(self, &s->hub, n, np->clients, ends, CLIENT_CHAN_SIZE, CLIENT_SLOT));
+    /* The bytes of its page it publishes the network's addresses in, carved from the room, for the clock. */
+    uint32_t config_at = (uint32_t)(uintptr_t)np->config - self->room.base;
+    system_must(s, "a slot for the network's addresses", slot_new(self, &s->config));
+    system_must(s, "carve the network's addresses",
+                rv_frame_carve(self->room.made, config_at, NET_CONFIG_SIZE, s->config));
     system_must(s, "a bit to wake itself", child_bit(self, n, &np->more_bit));
     system_must(s, "its inbox to wake itself", child_give_bits(self, n, n->inbox, np->more_bit, &np->more));
 }
@@ -80,17 +85,24 @@ void system_net_start(struct system *s)
     s->net_started = 1;
 }
 
-/* A client of the network process, on end i of the hub, which is idle; the logger is given the kernel's log too. */
+/*
+ * A client of the network process, on end i of the hub, which is idle;
+ * the logger is given the kernel's log too, and the clock the network's addresses, read only.
+ */
 static void client_build(struct system *s, uint32_t i)
 {
     struct client *cl = &s->clients[i];
     struct child *c = &cl->child;
+    uint32_t region;
     system_must(s, "build a client", child_new(s->self, c, kinds[i].name, CLIENT_TABLE, CLIENT_DATA_SIZE));
     system_must(s, "connect a client", chan_hub_connect(s->self, &s->hub, i, c, &((struct client_page *)c->page)->net));
     if (i == CLIENT_LOGGER) {
-        uint32_t region;
         system_must(s, "give the logger the log", child_map(s->self, c, BOOT_CAP_LOG, RIGHT_R | RIGHT_W, &region));
         ((struct logger_page *)c->page)->log_base = s->log_base;
+    }
+    if (i == CLIENT_CLOCK) {
+        system_must(s, "give the clock the addresses", child_map(s->self, c, s->config, RIGHT_R, &region));
+        ((struct clock_page *)c->page)->config = net_config((const struct net_page *)s->network.page);
     }
     system_must(s, "start a client", child_start(s->self, c, kinds[i].entry, CLIENT_UNITS));
     cl->down = 0;
