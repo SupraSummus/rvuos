@@ -287,7 +287,6 @@ static void scan_own(struct drv *d)
  * which the probe request and the authentication share.
  */
 #define MGMT_HEADER 24u
-#define MGMT_BCAST  { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff }
 
 static uint32_t mgmt_header(uint8_t *f, uint8_t subtype, const uint8_t *da, const uint8_t *sa, const uint8_t *bssid)
 {
@@ -373,13 +372,13 @@ static __attribute__((noreturn)) void auth_own(struct drv *d)
     mac_channel(ap->channel);
     static uint8_t frame[MGMT_HEADER + 6u];
     uint32_t n = auth_request(frame, ap->bssid, d->mac);
-    /* A frame lost to the air, or answered too late, is sent again a few times, as a station does; see TODO.md. */
-    for (uint32_t tries = 0; tries < AUTH_TRIES && !auth_done; tries++) {
-        auth_done = 0;
-        auth_status = 0;
+    /* A frame lost to the air, or answered too late, is sent again a few times, as a station does. */
+    auth_done = 0;
+    auth_status = 0;
+    for (uint32_t tries = 1; tries <= AUTH_TRIES && !auth_done; tries++) {
         failed = mac_tx(frame, n);
         if (failed) {
-            drv_say("auth: the authentication frame, try %u: %s\n", (unsigned)(tries + 1u), failed);
+            drv_say("auth: the authentication frame, try %u: %s\n", (unsigned)tries, failed);
             continue;
         }
         uint64_t start = osi_now_us();
@@ -391,10 +390,7 @@ static __attribute__((noreturn)) void auth_own(struct drv *d)
     drv_say("auth: %s, status %u\n", auth_done ? (auth_status == 0 ? "accepted" : "refused") : "no answer",
             (unsigned)auth_status);
     must(d, "the authentication answered", auth_done && auth_status == 0 ? ESP_OK : ESP_FAIL);
-    memcpy(d->joined.bssid, ap->bssid, 6);
-    memcpy(d->joined.ssid, ap->ssid, strlen(ap->ssid));
-    d->joined.channel = ap->channel;
-    d->authmode = WIFI_AUTH_OPEN;
+    d->joined = *ap;
     radio_off();
     drv_say("driver: authenticated; the radio is off\n");
     child_stop(&d->c, DRV_SCANNED);
@@ -659,7 +655,7 @@ static uint32_t hear_tsf;
 #define PROBE_RESPONSE 0x50
 #define PROBE_SSID     36 /* where a probe response's elements start, after its timestamp, interval and capabilities */
 #define PROBES         5u
-#define PROBE_MAX      (24u + 2u + 32u + 10u + 6u + 3u)
+#define PROBE_MAX      (MGMT_HEADER + 2u + 32u + 10u + 6u + 3u)
 
 static uint8_t probe_ap[6];
 
@@ -667,11 +663,9 @@ static uint32_t probe_request(uint8_t *f, const char *ssid, uint32_t channel)
 {
     static const uint8_t rates[] = { 1, 8, 0x82, 0x84, 0x8b, 0x96, 0x0c, 0x12, 0x18, 0x24 };
     static const uint8_t more_rates[] = { 50, 4, 0x30, 0x48, 0x60, 0x6c };
-    static const uint8_t bcast[6] = MGMT_BCAST;
+    static const uint8_t bcast[6] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
     uint32_t len = strlen(ssid);
     uint32_t n = mgmt_header(f, PROBE_REQUEST, bcast, drv_self->mac, bcast);
-    f[n++] = 0;
-    f[n++] = 0;
     f[n++] = 0;
     f[n++] = (uint8_t)len;
     memcpy(f + n, ssid, len);

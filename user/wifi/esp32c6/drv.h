@@ -99,7 +99,7 @@ struct drv {
     uint8_t listen;       /* the channel to hear, 1 to 13, or 0 */
     uint8_t own_rx;       /* hear it, or scan, through mac.c rather than the libraries */
     uint8_t own_tx;       /* send the probe through mac.c rather than the libraries; see mac.h */
-    uint8_t own_sta;      /* authenticate, and what follows, by the driver's own code rather than the libraries */
+    uint8_t own_sta;      /* with a network named, authenticate by the driver's own code rather than the libraries */
     char probe[33];       /* the network to probe for while listening, or empty */
     struct chan_end link; /* to the network process, connected before the start */
     /* From the root task, while it runs. */
@@ -110,7 +110,7 @@ struct drv {
     char failed[32]; /* the step that failed */
     volatile uint32_t net_count;
     struct drv_net nets[DRV_NETS]; /* what a scan heard */
-    struct drv_net joined;         /* the access point joined, its RSSI left zero */
+    struct drv_net joined;         /* the access point joined, its RSSI left zero, or with own_sta authenticated to */
     volatile int authmode;         /* the joined network's, a WIFI_AUTH_ of esp.h */
     volatile uint32_t rx_frames, rx_dropped, tx_frames, tx_dropped;
 };

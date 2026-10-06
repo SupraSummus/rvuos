@@ -207,7 +207,7 @@ static void configure(struct drv *p)
     p->listen = (uint8_t)(channel <= 13 ? channel : 0);
     p->own_rx = (uint8_t)config_has(conf, size, "rx", "own");
     p->own_tx = (uint8_t)config_has(conf, size, "tx", "own");
-    p->own_sta = (uint8_t)config_has(conf, size, "sta", "own");
+    p->own_sta = (uint8_t)(p->ssid[0] && config_has(conf, size, "sta", "own"));
     config_value(conf, size, "probe", p->probe, sizeof(p->probe));
     run_s = config_number(conf, size, "run", RUN_S);
     antenna = config_has(conf, size, "antenna", "ufl")    ? ANTENNA_UFL
@@ -270,11 +270,10 @@ static void driver_state(uint32_t state)
     }
     if (state == DRV_UP) {
         say(&kout, "root: the driver's libraries run\n");
+    } else if (state == DRV_SCANNED && p->own_sta) {
+        say(&kout, "root: the driver authenticated to %s at %M\n", p->joined.ssid, p->joined.bssid);
+        system_halt(0);
     } else if (state == DRV_SCANNED) {
-        if (p->own_sta) {
-            say(&kout, "root: the driver authenticated to %s at %M\n", p->joined.ssid, p->joined.bssid);
-            system_halt(0);
-        }
         system_scanned(&sys, p->nets, p->net_count);
         system_halt(0);
     } else if (state == DRV_JOINED) {
@@ -423,9 +422,8 @@ int main(void)
     rf_switch();
     must("room for the children's data", self_room(&self, ROOM_SIZE));
     struct drv *dp = (struct drv *)sys.driver.page;
-    if (dp->own_sta && dp->ssid[0]) {
-        say(&kout, run_s != 0 ? "root: authenticating to %s, for %u s\n" : "root: authenticating to %s, for good\n",
-            dp->ssid, run_s);
+    if (dp->own_sta) {
+        say(&kout, "root: authenticating to %s\n", dp->ssid);
     } else if (dp->ssid[0]) {
         system_net_build(&sys, &dp->link, mac);
         say(&kout, run_s != 0 ? "root: joining %s, for %u s\n" : "root: joining %s, for good\n", dp->ssid, run_s);
