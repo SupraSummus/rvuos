@@ -451,20 +451,25 @@ struct tx {
 
 /* The descriptor and the frame, laid out once from the heap, which the MAC reaches; see heap.c. */
 static struct tx *tx;
-static uint16_t tx_seq; /* the station's next sequence number, of 4096 */
+static struct mutex *tx_lock; /* held while a frame is sent, from its copy into tx to its completion */
+static uint16_t tx_seq;       /* the station's next sequence number, of 4096 */
+
+const char *mac_tx_init(void)
+{
+    void *p = osi_malloc(sizeof(struct tx) + 16u);
+    tx_lock = osi_mutex_new();
+    if (p == 0 || tx_lock == 0) {
+        return "the frame's buffer and lock, from the heap";
+    }
+    tx = (struct tx *)(((uintptr_t)p + 15u) & ~(uintptr_t)15u);
+    return 0;
+}
 
 /* The frame at the driver's own descriptor, the slot programmed as the libraries program it, and told to send. */
-const char *mac_tx(const uint8_t *frame, uint32_t len)
+static const char *send(const uint8_t *frame, uint32_t len)
 {
     if (len < 2u || len > TX_MAX) {
         return "the frame's length";
-    }
-    if (tx == 0) {
-        void *p = osi_malloc(sizeof(struct tx) + 16u);
-        if (p == 0) {
-            return "the frame's buffer, from the heap";
-        }
-        tx = (struct tx *)(((uintptr_t)p + 15u) & ~(uintptr_t)15u);
     }
     uint32_t n = len + TX_HDR + FCS;
     memcpy(tx->frame + TX_HDR, frame, len);
@@ -527,4 +532,16 @@ const char *mac_tx(const uint8_t *frame, uint32_t len)
     }
     wr(TX_PLCP0(s), rd(TX_PLCP0(s)) & ~TX_PLCP0_ARM); /* the slot is left as it was found */
     return "the MAC did not finish the frame";
+}
+
+/* The frame sent while the lock is held, so that no other thread's frame overwrites it before it is done. */
+const char *mac_tx(const uint8_t *frame, uint32_t len)
+{
+    if (tx == 0) {
+        return "the sending, not made";
+    }
+    osi_mutex_take(tx_lock);
+    const char *failed = send(frame, len);
+    osi_mutex_give(tx_lock);
+    return failed;
 }

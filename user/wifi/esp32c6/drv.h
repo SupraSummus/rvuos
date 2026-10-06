@@ -69,8 +69,9 @@ struct drv_header {
  * then DRV_SCANNED or DRV_JOINED, and once joined it moves frames between the libraries and the link,
  * until the root task asks it to leave, when it leaves, turns the radio off and reports DRV_LEFT;
  * a scan's run turns the radio off before DRV_SCANNED too.
- * With sta=own and a network named, it scans by its own code, authenticates to that access point by its own code,
- * and reports DRV_SCANNED once the access point accepts; what follows, the association and the keys, is to come.
+ * With sta=own and a network named, the station is a thread of its own, sta.c's, which scans by its own code,
+ * authenticates to that access point by its own code, and reports DRV_SCANNED once the access point accepts;
+ * what follows, the association and the keys, is to come.
  * A step that fails, or the access point letting the station go, is CHILD_FAILED,
  * with the step's name in the page and ESP-IDF's error, or the reason, in its detail.
  * With a channel to listen on and no network named, it hears the channel without joining and reports DRV_LISTENING,

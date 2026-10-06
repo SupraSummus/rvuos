@@ -503,3 +503,12 @@ and a frame's length came from the PHY's header, never held against what the MAC
 and the station's frames are `mgmt.c`'s, on hostap's definitions, which `make mgmt-test` reads back on the host.
 The bound wanted a measurement first: the MAC writes a frame without its FCS, padded to a whole word,
 and the first bound, which counted the FCS, dropped every frame of the first run.
+
+The station then got a thread of its own, `sta.c`, waiting for events in one of the adapter's queues.
+Two things shaped it.
+The receiving runs in the interrupt's thread and may not wait, so it copies the station's frames into buffers a second queue hands out.
+And only the first thread may wait on the driver's inbox,
+so it stays the root task's side and passes the ask to leave on as an event,
+and a step that fails in another thread stops that thread in a wait of the adapter's, not in `child_stop`.
+No run asks the station to leave yet: the root task asks only a driver that serves.
+`mac_tx` holds a lock, since EAPOL and the link's frames will come from two threads.

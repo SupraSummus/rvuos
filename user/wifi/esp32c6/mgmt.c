@@ -57,6 +57,13 @@ static uint8_t *element(uint8_t *p, uint8_t id, const uint8_t *body, uint32_t le
     return p + len;
 }
 
+int mgmt_to_station(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap)
+{
+    const struct ieee80211_hdr *h = (const struct ieee80211_hdr *)f;
+    return len >= offsetof(struct ieee80211_hdr, addr3) && memcmp(h->addr1, sta, ETH_ALEN) == 0 &&
+           memcmp(h->addr2, ap, ETH_ALEN) == 0;
+}
+
 int mgmt_beacon(const uint8_t *f, uint32_t len, uint8_t heard_on, struct mgmt_beacon *b)
 {
     const struct ieee80211_mgmt *m = (const struct ieee80211_mgmt *)f;

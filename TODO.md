@@ -97,10 +97,6 @@ what is left:
   an own slot, the driver's own interrupt to finish the frame, and the libraries' retry of a collision or a timeout,
   with their invalidation of the queue on a timeout, would do better.
   Before the association:
-  - the station's own thread, which `mac.c`'s frames, timeouts and the root task's asks reach as events,
-    where each step now polls flags of its own that the interrupt's thread writes;
-  - `mac_tx` with one owner, or a lock, since the supplicant's EAPOL and the link's frames will come from two threads,
-    and its one buffer would serve both;
   - the libraries' functions the driver's own path still calls, the promiscuous filter and the channel among them,
     behind `mac.h`, so that giving `pp` up rewrites `mac.c` alone;
   - `supp.c` split from what it asks of the libraries, sending EAPOL and installing a key,

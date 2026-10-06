@@ -27,6 +27,9 @@ struct mgmt_beacon {
     uint64_t tsf;           /* the access point's clock when it sent the frame, in us */
 };
 
+/* A frame of any type to sta from the access point ap, by its receiver's and transmitter's addresses alone. */
+int mgmt_to_station(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap);
+
 /* A beacon or a probe response, its elements parsed; one whose DS parameter set names no channel 1 to 14 is refused. */
 int mgmt_beacon(const uint8_t *f, uint32_t len, uint8_t heard_on, struct mgmt_beacon *b);
 

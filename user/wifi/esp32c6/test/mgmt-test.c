@@ -38,7 +38,7 @@ static struct mgmt_beacon b;
 static uint16_t status;
 static int again;
 
-enum reader { BEACON, PROBE_ANSWER, AUTH_ANSWER };
+enum reader { BEACON, PROBE_ANSWER, AUTH_ANSWER, TO_STATION };
 
 /* What reader makes of len bytes, in a buffer of their own length; a probe answer is asked for "rvuos". */
 static int reads(enum reader r, const uint8_t *f, uint32_t len)
@@ -47,7 +47,8 @@ static int reads(enum reader r, const uint8_t *f, uint32_t len)
     memcpy(copy, f, len);
     int ok = r == BEACON         ? mgmt_beacon(copy, len, HEARD_ON, &b)
              : r == PROBE_ANSWER ? mgmt_probe_answer(copy, len, sta, "rvuos", &b, &again)
-                                 : mgmt_auth_answer(copy, len, sta, ap, &status);
+             : r == AUTH_ANSWER  ? mgmt_auth_answer(copy, len, sta, ap, &status)
+                                 : mgmt_to_station(copy, len, sta, ap);
     free(copy);
     return ok;
 }
@@ -220,6 +221,26 @@ static void auth_answer(void)
     }
 }
 
+/* A frame to the station from its access point is the station's, of any type, once both addresses are whole. */
+static void to_station(void)
+{
+    uint8_t f[64];
+    uint32_t len = auth(f, WLAN_FC_STYPE_AUTH, sta, ap, ap, WLAN_AUTH_OPEN, 2, 0);
+    for (uint32_t cut = 0; cut <= len; cut++) {
+        if (reads(TO_STATION, f, cut) != (cut >= 16)) {
+            printf("mgmt-test: FAIL a frame to the station cut at %u bytes\n", cut);
+            failures++;
+        }
+    }
+    /* Its third address is another's, the frame's source: the transmitter is the second. */
+    len = header(f, WLAN_FC_TYPE_DATA << 2 | WLAN_FC_FROMDS, sta, ap, other);
+    check(reads(TO_STATION, f, len), "a data frame from the access point, read");
+    len = auth(f, WLAN_FC_STYPE_AUTH, other, ap, ap, WLAN_AUTH_OPEN, 2, 0);
+    check(!reads(TO_STATION, f, len), "a frame to another station refused");
+    len = auth(f, WLAN_FC_STYPE_AUTH, sta, other, ap, WLAN_AUTH_OPEN, 2, 0);
+    check(!reads(TO_STATION, f, len), "a frame from another station in the network refused");
+}
+
 int main(void)
 {
     beacon();
@@ -227,6 +248,7 @@ int main(void)
     probe_request();
     auth_request();
     auth_answer();
+    to_station();
     printf("mgmt-test: %s\n", failures ? "FAILED" : "ok");
     return failures != 0;
 }

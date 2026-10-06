@@ -69,6 +69,12 @@ void mac_rx_give_back(void);
 const char *mac_channel(uint32_t channel);
 
 /*
+ * The sending's buffer, and the lock that lets one thread send at a time, made once before any thread sends;
+ * 0, or what could not be made.
+ */
+const char *mac_tx_init(void);
+
+/*
  * A frame sent by the driver's own code; 0, or the step that failed, a timeout or a collision among them.
  * The frame is the 802.11 frame without its checksum, which the MAC appends,
  * and mac_tx gives a management frame the station's next sequence number, as the libraries give theirs.
@@ -76,6 +82,8 @@ const char *mac_channel(uint32_t channel);
  * it clears the hardware txq state's completion bit, which lets the slot's arm bits clear, and on a timeout's
  * or a collision's bit disarms the slot and fails; the caller may send it again.
  * It works with the libraries' interrupt or the driver's own. See mac.c.
+ * Any of the driver's threads may send, the station's and the link's: one waits while another's frame goes,
+ * since there is one buffer and one slot.
  */
 const char *mac_tx(const uint8_t *frame, uint32_t len);
 

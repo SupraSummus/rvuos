@@ -25,8 +25,6 @@
 #include "osi.h"
 #include "rvuos.h"
 
-#define FOREVER 0xffffffffu
-
 /* The bits of a thread's notification. */
 #define BIT_WAKE  0x1u /* something it waits on changed */
 #define BIT_TIMER 0x2u /* its timer line */
@@ -233,6 +231,11 @@ struct thread *osi_adopt(const char *name, uintptr_t stack_lo, uintptr_t stack_h
     return t;
 }
 
+struct thread *osi_self(void)
+{
+    return self();
+}
+
 /*
  * Waits, with the big lock held and given up meanwhile, on w until woken or until deadline, in microseconds;
  * 1 if woken.
@@ -290,7 +293,7 @@ static void wake(struct waiters *w, int all)
 
 static uint64_t deadline_of(uint32_t ticks)
 {
-    return ticks == FOREVER ? UINT64_MAX : osi_now_us() + (uint64_t)ticks * 1000u;
+    return ticks == OSI_FOREVER ? UINT64_MAX : osi_now_us() + (uint64_t)ticks * 1000u;
 }
 
 /* --- Interrupts, and the critical sections that hold them off. --- */
@@ -581,6 +584,21 @@ static int32_t mutex_unlock(void *mutex)
     return 1;
 }
 
+struct mutex *osi_mutex_new(void)
+{
+    return mutex_new(0);
+}
+
+void osi_mutex_take(struct mutex *m)
+{
+    mutex_lock(m);
+}
+
+void osi_mutex_give(struct mutex *m)
+{
+    mutex_unlock(m);
+}
+
 /* --- Queues. --- */
 
 static void *queue_create(uint32_t len, uint32_t item_size)
@@ -623,7 +641,7 @@ static void queue_delete(void *queue)
     osi_free(queue);
 }
 
-static int32_t queue_put(void *queue, void *item, uint32_t ticks, int front)
+static int32_t queue_put(void *queue, const void *item, uint32_t ticks, int front)
 {
     struct queue *q = queue;
     uint64_t deadline = deadline_of(ticks);
@@ -684,6 +702,21 @@ static int32_t queue_recv(void *queue, void *item, uint32_t ticks)
 static uint32_t queue_msg_waiting(void *queue)
 {
     return ((struct queue *)queue)->count;
+}
+
+struct queue *osi_queue_new(uint32_t len, uint32_t item_size)
+{
+    return queue_create(len, item_size);
+}
+
+int osi_queue_put(struct queue *q, const void *item, uint32_t ms)
+{
+    return queue_put(q, item, ms, 0);
+}
+
+int osi_queue_get(struct queue *q, void *item, uint32_t ms)
+{
+    return queue_recv(q, item, ms);
 }
 
 /* --- Event groups. --- */

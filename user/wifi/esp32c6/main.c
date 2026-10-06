@@ -20,6 +20,7 @@
 #include "mgmt.h"
 #include "osi.h"
 #include "rvuos.h"
+#include "sta.h"
 
 void drv_main(struct child_page *page);
 
@@ -29,6 +30,7 @@ extern uint8_t drv_data_load[], drv_data_start[], drv_data_end[], drv_bss_start[
 __attribute__((section(".header"), used)) const struct drv_header drv_image = { DRV_MAGIC, drv_main };
 
 struct drv *drv_self;
+static struct thread *first_thread; /* the driver's first, which alone waits on its inbox */
 static struct self own;
 static struct osi_funcs *funcs;
 static void *events; /* an event group of the adapter's, a bit for each Wi-Fi event below 32 */
@@ -115,7 +117,7 @@ void drv_event(const char *base, int32_t id, const void *data, size_t size)
 }
 
 /* The radio off, which the libraries turn on in esp_wifi_start: the PHY is closed once nothing uses it. */
-static void radio_off(void)
+void drv_radio_off(void)
 {
     if (started) {
         started = 0;
@@ -123,21 +125,36 @@ static void radio_off(void)
     }
 }
 
-/* A step of the libraries' that must succeed; one that fails stops the driver, and the page says which. */
-static void must(struct drv *d, const char *step, esp_err_t e)
+/*
+ * The state reported, and the calling thread stopped for good: the first in its inbox, as child_stop stops it,
+ * any other in a wait of the adapter's, so that it takes no wake of the first's.
+ */
+void drv_stop(uint32_t state)
+{
+    if (osi_self() == first_thread) {
+        child_stop(&drv_self->c, state);
+    }
+    child_report(&drv_self->c, state);
+    for (;;) {
+        osi_delay_ms(OSI_FOREVER);
+    }
+}
+
+/* A step of the libraries' that must succeed; one that fails stops the calling thread, and the page says which. */
+void drv_must(const char *step, esp_err_t e)
 {
     if (e != ESP_OK) {
         drv_failed(step, (uint32_t)e);
-        radio_off();
-        child_stop(&d->c, CHILD_FAILED);
+        drv_radio_off();
+        drv_stop(CHILD_FAILED);
     }
     drv_say("driver: %s\n", step);
 }
 
-static void await(struct drv *d, const char *what, int32_t id, uint32_t ms)
+static void await(const char *what, int32_t id, uint32_t ms)
 {
     uint32_t bits = funcs->event_group_wait_bits(events, 1u << id, 1, 1, ms);
-    must(d, what, bits & (1u << id) ? ESP_OK : ESP_FAIL);
+    drv_must(what, bits & (1u << id) ? ESP_OK : ESP_FAIL);
 }
 
 /* The first of the events of ids a and b, or -1 if neither comes within ms. */
@@ -173,22 +190,17 @@ static void config(struct init_config *c, const struct drv *d)
     c->magic = INIT_CONFIG_MAGIC;
 }
 
-/*
- * A scan hears each channel for SCAN_DWELL_MS, two beacon intervals and a little, and sends nothing:
- * the libraries' passive scan, or with own_rx, the driver's own.
- */
-#define SCAN_DWELL_MS 250u
-
+/* The libraries' scan, passive as the driver's own, sta_scan. */
 static void scan(struct drv *d)
 {
     static uint8_t record[ESP_AP_RECORD_MAX];
     static const struct scan_config passive = { .type = WIFI_SCAN_TYPE_PASSIVE, .passive_ms = SCAN_DWELL_MS };
     uint16_t n = 0;
-    must(d, "a scan begun", esp_wifi_scan_start(&passive, false));
-    await(d, "the scan done", WIFI_EVENT_SCAN_DONE, 15000);
-    must(d, "the scan's count", esp_wifi_scan_get_ap_num(&n));
+    drv_must("a scan begun", esp_wifi_scan_start(&passive, false));
+    await("the scan done", WIFI_EVENT_SCAN_DONE, 15000);
+    drv_must("the scan's count", esp_wifi_scan_get_ap_num(&n));
     for (uint32_t i = 0; i < n && i < DRV_NETS; i++) {
-        must(d, "a scan's record", esp_wifi_scan_get_ap_record(record));
+        drv_must("a scan's record", esp_wifi_scan_get_ap_record(record));
         const struct ap_record *r = (const struct ap_record *)record;
         struct drv_net *a = &d->nets[i];
         memcpy(a->bssid, r->bssid, 6);
@@ -201,7 +213,7 @@ static void scan(struct drv *d)
 }
 
 /* What mac.c counted while it received, into the log. */
-static void mac_told(const char *who)
+void drv_mac_told(const char *who)
 {
     const struct mac_rx_counts *m = &mac_rx_counts;
     drv_say("%s: the MAC's interrupts %u, causes %x; frames broken %u, chained %u, odd %u; overran %u, restarted %u, "
@@ -210,144 +222,10 @@ static void mac_told(const char *who)
             (unsigned)m->odd, (unsigned)m->overran, (unsigned)m->restarted, (unsigned)m->stuck, (unsigned)m->repointed);
 }
 
-/* A step of mac.c's that must succeed: 0, or the step that failed, which stops the driver as must does. */
-static void must_mac(struct drv *d, const char *step, const char *failed)
+/* A step of mac.c's that must succeed: 0, or the step that failed, which stops the driver as drv_must does. */
+void drv_must_mac(const char *step, const char *failed)
 {
-    must(d, failed ? failed : step, failed ? ESP_FAIL : ESP_OK);
-}
-
-/*
- * The driver's own scan: each channel heard through mac.c, each access point kept as heard strongest,
- * and of more than DRV_NETS, the strongest; then sorted, strongest first.
- * It reads beacons alone: it sends no probe, so a probe response it hears answers another station.
- * One that heard none fails, so that a receiver that does not work fails the run.
- */
-static void scan_heard(const struct mac_frame *m)
-{
-    struct drv *d = drv_self;
-    struct mgmt_beacon b;
-    int rssi = m->rssi;
-    if (!mgmt_beacon(m->frame, m->len, (uint8_t)m->channel, &b) || b.probe_response) {
-        return;
-    }
-    uint32_t n = d->net_count, weakest = 0;
-    for (uint32_t i = 0; i < n; i++) {
-        if (memcmp(d->nets[i].bssid, b.bssid, 6) == 0) {
-            if (rssi > d->nets[i].rssi) {
-                d->nets[i].rssi = (int16_t)rssi;
-                d->nets[i].channel = b.channel;
-            }
-            return;
-        }
-        if (d->nets[i].rssi < d->nets[weakest].rssi) {
-            weakest = i;
-        }
-    }
-    struct drv_net *a = n < DRV_NETS ? &d->nets[n] : rssi > d->nets[weakest].rssi ? &d->nets[weakest] : 0;
-    if (a == 0) {
-        return;
-    }
-    memcpy(a->bssid, b.bssid, 6);
-    memcpy(a->ssid, b.ssid, b.ssid_len);
-    a->ssid[b.ssid_len] = 0;
-    a->channel = b.channel;
-    a->rssi = (int16_t)rssi;
-    if (n < DRV_NETS) {
-        d->net_count = n + 1;
-    }
-}
-
-static void scan_own(struct drv *d)
-{
-    static const uint32_t mgmt = WIFI_PROMIS_FILTER_MASK_MGMT;
-    must(d, "the radio's filter", esp_wifi_set_promiscuous_filter(&mgmt));
-    must(d, "promiscuous", esp_wifi_set_promiscuous(true));
-    must_mac(d, "the MAC receives into the driver's list", mac_rx_take(scan_heard));
-    for (uint32_t ch = MAC_CHANNEL_FIRST; ch <= MAC_CHANNEL_LAST; ch++) {
-        mac_channel(ch); /* one of those it tunes to, so never refused */
-        osi_delay_ms(SCAN_DWELL_MS);
-    }
-    mac_rx_give_back();
-    mac_told("scan");
-    must(d, "an access point heard", d->net_count != 0 ? ESP_OK : ESP_FAIL);
-    for (uint32_t i = 1; i < d->net_count; i++) {
-        for (uint32_t j = i; j > 0 && d->nets[j].rssi > d->nets[j - 1].rssi; j--) {
-            struct drv_net t = d->nets[j];
-            d->nets[j] = d->nets[j - 1];
-            d->nets[j - 1] = t;
-        }
-    }
-}
-
-/*
- * The station's own authentication, the first step of its own logic: the driver scans for the network by its own code,
- * takes the access point heard strongest, or the page's bssid, retunes to it and sends an open-system
- * Authentication frame by mac_tx, reading the answer through mac.c; the libraries only bring the MAC up.
- * The libraries' station is not asked to connect, so a run with sta=own ends after the authentication, and the
- * association, the keys and the join are to follow; see TODO.md.
- */
-#define AUTH_TRIES   3u
-#define AUTH_WAIT_US 200000u
-
-static volatile uint32_t auth_done, auth_status;
-static uint8_t auth_ap[6];
-
-/* The access point's answer to the Authentication; the receiver's thread alone writes. */
-static void auth_heard(const struct mac_frame *m)
-{
-    uint16_t status;
-    if (mgmt_auth_answer(m->frame, m->len, drv_self->mac, auth_ap, &status)) {
-        auth_status = status;
-        auth_done = 1;
-    }
-}
-
-/* The access point for the network: the page's bssid, or the strongest whose ssid is the network's. */
-static const struct drv_net *net_for(const struct drv *d)
-{
-    for (uint32_t i = 0; i < d->net_count; i++) {
-        if (d->bssid_set ? memcmp(d->nets[i].bssid, d->bssid, 6) == 0 : streq(d->nets[i].ssid, d->ssid)) {
-            return &d->nets[i];
-        }
-    }
-    return 0;
-}
-
-static __attribute__((noreturn)) void auth_own(struct drv *d)
-{
-    scan_own(d);
-    const struct drv_net *ap = net_for(d);
-    must(d, "the network to authenticate to", ap ? ESP_OK : ESP_FAIL);
-    memcpy(auth_ap, ap->bssid, 6);
-    drv_say("auth: %s at %02x:%02x:%02x:%02x:%02x:%02x, channel %u\n", ap->ssid, ap->bssid[0], ap->bssid[1],
-            ap->bssid[2], ap->bssid[3], ap->bssid[4], ap->bssid[5], (unsigned)ap->channel);
-    /* The channel a beacon named, which mac_channel may refuse, tuned before the MAC is the driver's. */
-    must_mac(d, "the access point's channel", mac_channel(ap->channel));
-    must_mac(d, "the MAC receives into the driver's list", mac_rx_take(auth_heard));
-    static uint8_t frame[MGMT_FRAME_MAX];
-    uint32_t n = mgmt_auth_request(frame, sizeof(frame), d->mac, ap->bssid);
-    /* A frame lost to the air, or answered too late, is sent again a few times, as a station does. */
-    auth_done = 0;
-    auth_status = 0;
-    for (uint32_t tries = 1; tries <= AUTH_TRIES && !auth_done; tries++) {
-        const char *failed = mac_tx(frame, n);
-        if (failed) {
-            drv_say("auth: the authentication frame, try %u: %s\n", (unsigned)tries, failed);
-            continue;
-        }
-        uint64_t start = osi_now_us();
-        while (!auth_done && osi_now_us() - start < AUTH_WAIT_US) {
-            osi_delay_ms(2);
-        }
-    }
-    mac_rx_give_back();
-    drv_say("auth: %s, status %u\n", auth_done ? (auth_status == 0 ? "accepted" : "refused") : "no answer",
-            (unsigned)auth_status);
-    must(d, "the authentication answered", auth_done && auth_status == 0 ? ESP_OK : ESP_FAIL);
-    d->joined = *ap;
-    radio_off();
-    drv_say("driver: authenticated; the radio is off\n");
-    child_stop(&d->c, DRV_SCANNED);
+    drv_must(failed ? failed : step, failed ? ESP_FAIL : ESP_OK);
 }
 
 /*
@@ -496,10 +374,10 @@ static void join(struct drv *d)
     }
     if (d->no_ax) {
         uint8_t bgn = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N;
-        must(d, "no 802.11ax", esp_wifi_set_protocol(WIFI_IF_STA, bgn));
+        drv_must("no 802.11ax", esp_wifi_set_protocol(WIFI_IF_STA, bgn));
     }
-    must(d, "power save", esp_wifi_set_ps(d->modem_sleep ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE));
-    must(d, "the station's configuration", esp_wifi_set_config(WIFI_IF_STA, buf));
+    drv_must("power save", esp_wifi_set_ps(d->modem_sleep ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE));
+    drv_must("the station's configuration", esp_wifi_set_config(WIFI_IF_STA, buf));
     memset(buf, 0, sizeof(buf));
     /*
      * A join the access point refuses, or whose answer is lost, is tried again, as ESP-IDF leaves to the program;
@@ -510,23 +388,23 @@ static void join(struct drv *d)
         if (i > 0) {
             drv_say("driver: the join refused, reason %u; again\n", (unsigned)let_go);
         }
-        must(d, "esp_wifi_connect", esp_wifi_connect());
+        drv_must("esp_wifi_connect", esp_wifi_connect());
         e = await_either(WIFI_EVENT_STA_CONNECTED, WIFI_EVENT_STA_DISCONNECTED, 20000);
         if (e != WIFI_EVENT_STA_DISCONNECTED) {
             break;
         }
     }
-    must(d, "the join", e == WIFI_EVENT_STA_CONNECTED ? ESP_OK : e < 0 || let_go == 0 ? ESP_FAIL : (esp_err_t)let_go);
-    must(d, "the station's receiver", esp_wifi_internal_reg_rxcb(WIFI_IF_STA, receive));
+    drv_must("the join", e == WIFI_EVENT_STA_CONNECTED ? ESP_OK : e < 0 || let_go == 0 ? ESP_FAIL : (esp_err_t)let_go);
+    drv_must("the station's receiver", esp_wifi_internal_reg_rxcb(WIFI_IF_STA, receive));
     if (d->debug & DRV_DEBUG_AIR) {
         static const uint32_t heard = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_CTRL |
                                       WIFI_PROMIS_FILTER_MASK_DATA | WIFI_PROMIS_FILTER_MASK_FCSFAIL;
         static const uint32_t acks = WIFI_PROMIS_CTRL_FILTER_MASK_ACK | WIFI_PROMIS_CTRL_FILTER_MASK_BA;
-        must(d, "the station's address", esp_wifi_get_mac(WIFI_IF_STA, air_own));
-        must(d, "the radio's filter", esp_wifi_set_promiscuous_filter(&heard));
-        must(d, "the radio's control filter", esp_wifi_set_promiscuous_ctrl_filter(&acks));
-        must(d, "what the radio hears", esp_wifi_set_promiscuous_rx_cb(air));
-        must(d, "promiscuous", esp_wifi_set_promiscuous(true));
+        drv_must("the station's address", esp_wifi_get_mac(WIFI_IF_STA, air_own));
+        drv_must("the radio's filter", esp_wifi_set_promiscuous_filter(&heard));
+        drv_must("the radio's control filter", esp_wifi_set_promiscuous_ctrl_filter(&acks));
+        drv_must("what the radio hears", esp_wifi_set_promiscuous_rx_cb(air));
+        drv_must("promiscuous", esp_wifi_set_promiscuous(true));
     }
 }
 
@@ -544,7 +422,7 @@ static __attribute__((noreturn)) void leave(struct drv *d)
     if (e == ESP_OK) {
         funcs->event_group_wait_bits(events, 1u << WIFI_EVENT_STA_DISCONNECTED, 1, 1, 1000);
     }
-    radio_off();
+    drv_radio_off();
     drv_say("driver: left the network: %d; the radio is off\n", (int)e);
     child_stop(&d->c, DRV_LEFT);
 }
@@ -688,23 +566,23 @@ static __attribute__((noreturn)) void listen(struct drv *d)
         memcpy(hear_ap, d->bssid, 6);
         hear_ap_set = 1;
     }
-    must(d, "the radio's filter", esp_wifi_set_promiscuous_filter(&all));
+    drv_must("the radio's filter", esp_wifi_set_promiscuous_filter(&all));
     if (!d->own_rx) {
-        must(d, "what the radio hears", esp_wifi_set_promiscuous_rx_cb(heard_by_libraries));
+        drv_must("what the radio hears", esp_wifi_set_promiscuous_rx_cb(heard_by_libraries));
     }
-    must(d, "promiscuous", esp_wifi_set_promiscuous(true));
-    must(d, "the channel", esp_wifi_set_channel(d->listen, 0));
+    drv_must("promiscuous", esp_wifi_set_promiscuous(true));
+    drv_must("the channel", esp_wifi_set_channel(d->listen, 0));
     if (d->own_rx) {
         /* The libraries' sending waits on their interrupt, which mac_rx_take takes, so their probe cannot be finished. */
-        must(d, "a probe by the libraries with the driver's interrupt",
+        drv_must("a probe by the libraries with the driver's interrupt",
              d->probe[0] && !d->own_tx ? ESP_FAIL : ESP_OK);
-        must_mac(d, "the MAC receives into the driver's list", mac_rx_take(heard));
+        drv_must_mac("the MAC receives into the driver's list", mac_rx_take(heard));
     }
     static uint8_t probe[MGMT_FRAME_MAX];
     uint32_t probe_len = 0, probes = 0, probes_failed = 0;
     if (d->probe[0]) {
         probe_len = mgmt_probe_request(probe, sizeof(probe), d->mac, d->probe, d->listen);
-        must(d, "the probe request", probe_len != 0 ? ESP_OK : ESP_FAIL);
+        drv_must("the probe request", probe_len != 0 ? ESP_OK : ESP_FAIL);
         drv_say("driver: probing for %s on channel %u from %02x:%02x:%02x:%02x:%02x:%02x, by %s\n", d->probe,
                 (unsigned)d->listen, d->mac[0], d->mac[1], d->mac[2], d->mac[3], d->mac[4], d->mac[5],
                 d->own_tx ? "the driver's own MAC" : "the libraries");
@@ -743,7 +621,7 @@ static __attribute__((noreturn)) void listen(struct drv *d)
     }
     if (d->own_rx) {
         mac_rx_give_back();
-        mac_told("listen");
+        drv_mac_told("listen");
     }
     hear_tell(d->own_rx ? "by mac.c, in" : "by the libraries, in", &first,
               (uint32_t)((osi_now_us() - start) / 1000u));
@@ -752,12 +630,30 @@ static __attribute__((noreturn)) void listen(struct drv *d)
                 (unsigned)probes, (unsigned)probes_failed, (unsigned)hear.answers, probe_ap[0], probe_ap[1], probe_ap[2],
                 probe_ap[3], probe_ap[4], probe_ap[5], (unsigned)hear.retried);
     }
-    radio_off();
-    must(d, "a frame heard", hear.frames != 0 ? ESP_OK : ESP_FAIL);
-    must(d, "every probe sent", probes_failed == 0 ? ESP_OK : ESP_FAIL);
-    must(d, "a probe answered", probe_len == 0 || hear.answers != 0 ? ESP_OK : ESP_FAIL);
+    drv_radio_off();
+    drv_must("a frame heard", hear.frames != 0 ? ESP_OK : ESP_FAIL);
+    drv_must("every probe sent", probes_failed == 0 ? ESP_OK : ESP_FAIL);
+    drv_must("a probe answered", probe_len == 0 || hear.answers != 0 ? ESP_OK : ESP_FAIL);
     drv_say("driver: stopped listening; the radio is off\n");
     child_stop(&d->c, DRV_LEFT);
+}
+
+/*
+ * With sta=own the station runs in a thread of its own, sta.c, and the first thread attends to the root task alone,
+ * as it alone waits on the driver's inbox: it answers the root task's checks, and passes its ask to leave on, once.
+ */
+static __attribute__((noreturn)) void attend(struct drv *d)
+{
+    int passed = 0;
+    for (;;) {
+        uint32_t bits;
+        child_answer(&d->c);
+        if (d->leave && !passed) {
+            passed = 1;
+            sta_leave();
+        }
+        rv_wait(CHILD_INBOX, &bits);
+    }
 }
 
 static __attribute__((noreturn)) void run(struct drv *d)
@@ -765,39 +661,43 @@ static __attribute__((noreturn)) void run(struct drv *d)
     static struct init_config c;
     config(&c, d);
     drv_say("driver: %u bytes of heap free\n", (unsigned)osi_heap_free());
-    must(d, "esp_wifi_init_internal", esp_wifi_init_internal(&c));
+    drv_must("esp_wifi_init_internal", esp_wifi_init_internal(&c));
     /* The libraries' own lines at INFO, as ESP-IDF sets them, or at the level the configuration asks for. */
     uint32_t level = d->lib_log ? d->lib_log : WIFI_LOG_INFO;
     osi_log_level(level);
-    must(d, "the libraries' log level", esp_wifi_internal_set_log_level((int)level));
-    must(d, "the libraries' log", esp_wifi_internal_set_log_mod(0, 0, true));
+    drv_must("the libraries' log level", esp_wifi_internal_set_log_level((int)level));
+    drv_must("the libraries' log", esp_wifi_internal_set_log_mod(0, 0, true));
     if (d->debug & DRV_DEBUG_WPA) {
         drv_wpa_debug();
     }
-    must(d, "the supplicant's table", drv_wpa_register());
-    must(d, "station mode", esp_wifi_set_mode(WIFI_MODE_STA));
-    must(d, "esp_wifi_start", esp_wifi_start());
+    drv_must("the supplicant's table", drv_wpa_register());
+    drv_must("station mode", esp_wifi_set_mode(WIFI_MODE_STA));
+    drv_must("esp_wifi_start", esp_wifi_start());
     started = 1;
-    await(d, "the station started", WIFI_EVENT_STA_START, 5000);
+    await("the station started", WIFI_EVENT_STA_START, 5000);
     child_report(&d->c, DRV_UP);
+    if (d->own_tx || d->own_sta) {
+        drv_must_mac("the MAC's sending", mac_tx_init());
+    }
     if (d->ssid[0] == 0 && d->listen) {
         listen(d);
     }
     if (d->ssid[0] == 0) {
         if (d->own_rx) {
-            scan_own(d);
+            sta_scan(d);
         } else {
             scan(d);
         }
         if (d->debug & DRV_DEBUG_STATS) {
             counters();
         }
-        radio_off();
+        drv_radio_off();
         drv_say("driver: %u bytes of heap free; the radio is off\n", (unsigned)osi_heap_free());
         child_stop(&d->c, DRV_SCANNED);
     }
     if (d->own_sta) {
-        auth_own(d);
+        drv_must_mac("the station's thread", sta_start(d));
+        attend(d);
     }
     join(d);
     drv_say("driver: joined, %u bytes of heap free\n", (unsigned)osi_heap_free());
@@ -827,7 +727,7 @@ void drv_main(struct child_page *page)
     lock_init(&say_lock);
     funcs = osi_init(d, &own);
     /* This thread calls the libraries too, so it is one of the adapter's, on the stack the root task gave it. */
-    if (funcs == 0 || osi_adopt("driver", (uintptr_t)page, (uintptr_t)page + DRV_DATA_SIZE) == 0) {
+    if (funcs == 0 || (first_thread = osi_adopt("driver", (uintptr_t)page, (uintptr_t)page + DRV_DATA_SIZE)) == 0) {
         child_stop(&d->c, CHILD_FAILED);
     }
     events = funcs->event_group_create();
