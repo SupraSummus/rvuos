@@ -434,3 +434,19 @@ so it sees an address that changes too, and the sockets lost `SOCK_CONFIG`.
 It costs the root task a slot and the clock a region.
 A frame of their own cost the Pico 2 W's root task its last slots first, since free memory is halved down to a block's size,
 a slot for each half, and the third client was not built.
+
+## The MAC's receiving, the driver's own
+
+The driver is to leave Espressif's libraries the PHY alone, see `TODO.md`, and nothing open drives the ESP32-C6's MAC:
+esp-wifi-hal, in Rust, drives the plain ESP32's and the S2's, with the C3's and S3's under review,
+and esp32c6-open-mac sends a beacon from the C6, with no licence to take code from.
+So the MAC is the driver's own, read from the libraries' code, whose symbols name every function.
+The station's logic is to be its own too, on hostap, which already runs the handshakes and SAE:
+OpenBSD's or FreeBSD's net80211 would want a kernel's mbufs and timers emulated, as `osi.c` emulates FreeRTOS,
+and Linux's mac80211 is GPL, which an image holding `libphy.a` cannot carry.
+
+Receiving came easily, for rvuos's part:
+the adapter runs the libraries' interrupt in a thread, so taking it is an exchange of a handler,
+and the MAC writes into RAM the driver allocates, which open decision 13 trusts it with.
+`listen=` holds the two against each other, by the beacons each hears of an access point and those it misses,
+counted by the access point's own clock: a count by sequence numbers took its bursts to other stations for losses.

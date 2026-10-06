@@ -70,6 +70,9 @@ struct drv_header {
  * a scan's run turns the radio off before DRV_SCANNED too.
  * A step that fails, or the access point letting the station go, is CHILD_FAILED,
  * with the step's name in the page and ESP-IDF's error, or the reason, in its detail.
+ * With a channel to listen on and no network named, it hears the channel without joining and reports DRV_LISTENING,
+ * then tells each second what it heard, and the beacons heard and missed of the access point bssid names or else the first,
+ * received by the libraries or, with own_rx, by mac.c, so that the two can be compared; it leaves as when joined.
  */
 struct drv {
     struct child_page c;
@@ -88,6 +91,8 @@ struct drv {
     uint8_t no_sae;       /* join without WPA3's SAE, with WPA2's passphrase where the network takes both */
     uint8_t modem_sleep;  /* sleep between beacons, WIFI_PS_MIN_MODEM, which loses the access point yet; see TODO.md */
     uint32_t lib_log;     /* the libraries' log level, ESP-IDF's wifi_log_level_t, or 0 for its INFO */
+    uint8_t listen;       /* the channel to hear, 1 to 13, or 0 */
+    uint8_t own_rx;       /* hear it through mac.c rather than the libraries */
     struct chan_end link; /* to the network process, connected before the start */
     /* From the root task, while it runs. */
     volatile uint32_t leave; /* the run is over: leave the network, and report DRV_LEFT */

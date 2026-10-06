@@ -61,6 +61,8 @@ A change to `user/wifi/esp32c6/` or `kernel/board/esp32c6/` with an ESP32-C6 con
 which writes the driver into the flash at `0x210000` if it changed and scans,
 or, with `WIFI_CONFIG` naming a network as for the Pico 2 W, joins it,
 and `tools/wifi-run.py` checks it from the host as it checks the Pico 2 W's, but for the logger, before it ends the run.
+A change to `user/wifi/esp32c6/mac.c` runs it again with `listen=` and `rx=own` in `WIFI_CONFIG`,
+which fails if the driver's own receiving hears nothing.
 That run first runs `make sae-test`, WPA3's SAE on the host over the driver's `ec.c` and Mbed TLS,
 which `make check` leaves out, as it fetches nothing;
 a change to `ec.c` or `user/wifi/esp32c6/mbedtls/` runs it even with no ESP32-C6 connected.

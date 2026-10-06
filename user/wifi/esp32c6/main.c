@@ -16,6 +16,7 @@
 #include "esp.h"
 #include "lib/libc.h"
 #include "lib/lock.h"
+#include "mac.h"
 #include "osi.h"
 #include "rvuos.h"
 
@@ -250,9 +251,9 @@ static void air(void *buf, int type)
     const uint8_t *c = buf, *f = c + RX_CTRL_SIZE;
     const uint8_t *bssid = drv_self->joined.bssid;
     uint32_t t = le32(c + RX_CTRL_TIMESTAMP);
-    uint32_t len = ((uint32_t)c[RX_CTRL_SIG_LEN] | (uint32_t)c[RX_CTRL_SIG_LEN + 1] << 8) & 0x3fffu;
+    uint32_t len = rx_ctrl_len(c);
     int rssi = (int8_t)c[RX_CTRL_RSSI];
-    if (c[RX_CTRL_STATE] != 0 || c[RX_CTRL_RXEND] != 0) {
+    if (!rx_ctrl_whole(c)) {
         if (len >= 400 && len <= 800) {
             drv_say("air %u broken len %u rssi %d state %u end %u\n", (unsigned)t, (unsigned)len, rssi,
                     (unsigned)c[RX_CTRL_STATE], (unsigned)c[RX_CTRL_RXEND]);
@@ -425,6 +426,124 @@ static __attribute__((noreturn)) void serve(struct drv *d)
     }
 }
 
+/*
+ * What listen counts, in the thread that receives: every frame and those broken,
+ * and of the access point followed, its beacons, their RSSI, and the beacons missed,
+ * by the access point's own time in each and its beacon interval;
+ * a gap of BEACON_GAP_MAX intervals or more, as the access point's restart makes, is not counted.
+ */
+#define BEACON_MIN     40 /* a beacon's header, timestamp, interval and capabilities, and FCS */
+#define BEACON_GAP_MAX 64u
+
+static struct hear {
+    volatile uint32_t frames, broken, beacons, missed, rssi;
+} hear;
+static uint8_t hear_ap[6];
+static int hear_ap_set, hear_tsf_set;
+static uint32_t hear_tsf;
+
+static void heard(const uint8_t *c)
+{
+    const uint8_t *f = c + RX_CTRL_SIZE;
+    hear.frames++;
+    if (!rx_ctrl_whole(c)) {
+        hear.broken++;
+        return;
+    }
+    if (f[0] != 0x80 || rx_ctrl_len(c) < BEACON_MIN) {
+        return;
+    }
+    if (!hear_ap_set) {
+        memcpy(hear_ap, f + 10, 6);
+        hear_ap_set = 1;
+    }
+    if (memcmp(f + 10, hear_ap, 6) != 0) {
+        return;
+    }
+    uint32_t tsf = le32(f + 24), interval = ((uint32_t)f[32] | (uint32_t)f[33] << 8) * 1024u;
+    if (hear_tsf_set && interval != 0) {
+        uint32_t gap = (tsf - hear_tsf + interval / 2u) / interval;
+        if (gap > 1 && gap < BEACON_GAP_MAX) {
+            hear.missed += gap - 1;
+        }
+    }
+    hear_tsf = tsf;
+    hear_tsf_set = 1;
+    hear.beacons++;
+    hear.rssi += (uint32_t)-(int8_t)c[RX_CTRL_RSSI];
+}
+
+static void heard_by_libraries(void *buf, int type)
+{
+    (void)type;
+    heard(buf);
+}
+
+/* What was heard since then, into the log, over ms milliseconds. */
+static void hear_tell(const char *what, const struct hear *then, uint32_t ms)
+{
+    uint32_t beacons = hear.beacons - then->beacons;
+    drv_say("listen: %s %u ms: %u frames, %u broken; %02x:%02x:%02x:%02x:%02x:%02x: %u beacons at -%u dBm, %u missed\n",
+            what, (unsigned)ms, (unsigned)(hear.frames - then->frames), (unsigned)(hear.broken - then->broken),
+            hear_ap[0], hear_ap[1], hear_ap[2], hear_ap[3], hear_ap[4], hear_ap[5], (unsigned)beacons,
+            (unsigned)(beacons ? (hear.rssi - then->rssi) / beacons : 0), (unsigned)(hear.missed - then->missed));
+}
+
+/*
+ * The page's channel heard, promiscuous, every frame, the broken too, by the libraries or by mac.c, see drv.h;
+ * what was heard told about once a second, as the root task's checks wake the thread, and over the whole run at its end,
+ * which fails if it heard nothing, so that a receiver that does not work fails the run.
+ */
+static __attribute__((noreturn)) void listen(struct drv *d)
+{
+    static const uint32_t all = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_CTRL |
+                                WIFI_PROMIS_FILTER_MASK_DATA | WIFI_PROMIS_FILTER_MASK_FCSFAIL;
+    if (d->bssid_set) {
+        memcpy(hear_ap, d->bssid, 6);
+        hear_ap_set = 1;
+    }
+    must(d, "the radio's filter", esp_wifi_set_promiscuous_filter(&all));
+    if (!d->own_rx) {
+        must(d, "what the radio hears", esp_wifi_set_promiscuous_rx_cb(heard_by_libraries));
+    }
+    must(d, "promiscuous", esp_wifi_set_promiscuous(true));
+    must(d, "the channel", esp_wifi_set_channel(d->listen, 0));
+    if (d->own_rx) {
+        const char *failed = mac_rx_take(heard);
+        must(d, failed ? failed : "the MAC receives into the driver's list", failed ? ESP_FAIL : ESP_OK);
+    }
+    child_report(&d->c, DRV_LISTENING);
+    struct hear first = { 0 }, then = { 0 };
+    uint64_t start = osi_now_us(), told = start;
+    for (;;) {
+        uint32_t bits;
+        child_answer(&d->c);
+        if (d->leave) {
+            break;
+        }
+        uint64_t now = osi_now_us();
+        if (now - told >= 1000000u) {
+            hear_tell("the last", &then, (uint32_t)((now - told) / 1000u));
+            then = hear;
+            told = now;
+        }
+        rv_wait(CHILD_INBOX, &bits);
+    }
+    if (d->own_rx) {
+        mac_rx_give_back();
+        const struct mac_rx_counts *m = &mac_rx_counts;
+        drv_say("listen: the MAC's interrupts %u, causes %x; frames chained %u, odd %u; overran %u, restarted %u, stuck %u\n",
+                (unsigned)m->interrupts, (unsigned)m->causes, (unsigned)m->chained, (unsigned)m->odd,
+                (unsigned)m->overran, (unsigned)m->restarted, (unsigned)m->stuck);
+    }
+    hear_tell(d->own_rx ? "by mac.c, in" : "by the libraries, in", &first,
+              (uint32_t)((osi_now_us() - start) / 1000u));
+    radio_off();
+    must(d, "a frame heard", hear.frames != 0 ? ESP_OK : ESP_FAIL);
+    drv_say("driver: stopped listening; the radio is off\n");
+    child_stop(&d->c, DRV_LEFT);
+}
+
 static __attribute__((noreturn)) void run(struct drv *d)
 {
     static struct init_config c;
@@ -445,6 +564,9 @@ static __attribute__((noreturn)) void run(struct drv *d)
     started = 1;
     await(d, "the station started", WIFI_EVENT_STA_START, 5000);
     child_report(&d->c, DRV_UP);
+    if (d->ssid[0] == 0 && d->listen) {
+        listen(d);
+    }
     if (d->ssid[0] == 0) {
         scan(d);
         if (d->debug & DRV_DEBUG_STATS) {

@@ -15,18 +15,26 @@
 struct thread;
 struct ets_timer;
 
+struct osi_isr {
+    void (*f)(void *);
+    void *arg;
+};
+
 /*
  * osi.c: the adapter, its table for esp_wifi_init_internal, the threads it runs everything on,
  * built from the driver's own account s, its timers, which its timer thread runs,
  * and the chip's random number generator.
  * A thread that did not start as one of the adapter's, the driver's first, joins them with osi_adopt,
  * its stack between stack_lo and stack_hi, before it calls the libraries.
+ * osi_isr_swap exchanges the handler of an interrupt the libraries handle with one of the driver's own, mac.c's.
  */
 struct osi_funcs *osi_init(struct drv *d, struct self *s);
 void osi_log_level(unsigned int level);
 struct thread *osi_thread(void (*f)(void *), void *arg, const char *name, uint32_t stack);
 struct thread *osi_adopt(const char *name, uintptr_t stack_lo, uintptr_t stack_hi);
 uint64_t osi_now_us(void);
+void osi_delay_ms(uint32_t ms);
+int osi_isr_swap(uint32_t source, struct osi_isr *isr);
 struct ets_timer *osi_timer_new(void (*f)(void *), void *arg);
 void osi_timer_arm_us(struct ets_timer *t, uint32_t us);
 void osi_timer_disarm(struct ets_timer *t);

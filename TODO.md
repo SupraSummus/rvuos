@@ -86,6 +86,12 @@ what is left:
   `phymap` sees only constant addresses, so a register reached through a table or a loop shows first in a trace.
   The harness reaches three of the board's frames, the SAR ADC, the modem and the eFuse,
   which with the tracer's own regions have to fit a process's eight region slots.
+- A driver of the ESP32-C6's Wi-Fi that leaves Espressif's libraries the PHY alone, `libphy.a`,
+  beside the driver on all of them, which stays to be held against it:
+  `pp` and `net80211` give way to the driver's own MAC and station, and `osi.c` shrinks to what `libphy.a` calls.
+  `mac.c` receives, as well as the libraries do, by `listen=` with and without `rx=own`;
+  next it sends, at the Pico 2 W's access point, then installs keys, then joins, with hostap's supplicant as now.
+  The station's logic is to be the driver's own too, on hostap's parsing; `user/wifi/NOTES.md` says why.
 - The ESP32-C6's Wi-Fi root task has 8 KiB of memory and 9 slots left once its clients run,
   so another client needs room found first, in the driver's block or a smaller `CLIENT_CHAN_SIZE`.
 - The ESP32-C6's echo answers in 13 to 22 ms at the median, the Pico 2 W's in about 5, and the C6's ping in about 10:

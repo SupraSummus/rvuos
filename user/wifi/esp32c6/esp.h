@@ -460,6 +460,18 @@ esp_err_t esp_wifi_set_ps(int type);
 #define RX_CTRL_FORMAT    39 /* bits 0 to 3: wifi_rx_bb_format_t, 0 for 802.11b, 1 for 802.11a/g */
 #define RX_CTRL_SIG_LEN   84 /* bits 0 to 13: the MPDU's length, its FCS included */
 #define RX_CTRL_STATE     88 /* 0 if the frame was received whole */
+
+/* The MPDU's length, and whether it was received whole. */
+static inline uint32_t rx_ctrl_len(const uint8_t *c)
+{
+    return ((uint32_t)c[RX_CTRL_SIG_LEN] | (uint32_t)c[RX_CTRL_SIG_LEN + 1] << 8) & 0x3fffu;
+}
+
+static inline int rx_ctrl_whole(const uint8_t *c)
+{
+    return c[RX_CTRL_STATE] == 0 && c[RX_CTRL_RXEND] == 0;
+}
+
 #define WIFI_PKT_MGMT     0
 #define WIFI_PKT_CTRL     1
 #define WIFI_PKT_DATA     2
@@ -473,6 +485,8 @@ esp_err_t esp_wifi_set_promiscuous_rx_cb(void (*cb)(void *buf, int type));
 esp_err_t esp_wifi_set_promiscuous_filter(const uint32_t *mask);
 esp_err_t esp_wifi_set_promiscuous_ctrl_filter(const uint32_t *mask);
 esp_err_t esp_wifi_set_promiscuous(bool on);
+/* The channel the radio is on, with wifi_second_chan_t's WIFI_SECOND_CHAN_NONE, 0, for 20 MHz. */
+esp_err_t esp_wifi_set_channel(uint8_t primary, int second);
 
 /* The station's received frames, as Ethernet frames, each to be freed by eb once read. */
 esp_err_t esp_wifi_internal_reg_rxcb(int ifx, esp_err_t (*fn)(void *buffer, uint16_t len, void *eb));

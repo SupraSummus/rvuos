@@ -17,6 +17,7 @@
  * or until the host ends it, and once it is over the driver leaves the network before the machine halts;
  * it ends early if the driver or the network process fails, faults or does not answer,
  * if the driver has not joined in time, or once a scan alone was asked for and is done.
+ * A run that has the driver listen to a channel, see drv.h, builds no network process, and lasts as one that joins.
  *
  * The kernel's log goes to the console as it comes, so that the host reads the run while it lasts,
  * and the halt writes out only what was not taken yet.
@@ -172,6 +173,8 @@ static void (*drv_entry(void))(struct child_page *)
  * and lib= the libraries' log level, 4 for debug and 5 for verbose;
  * ax=0 joins without 802.11ax, pmf=0 without protecting management frames, sae=0 without WPA3's SAE,
  * and ps=1 sleeps between beacons.
+ * listen=, a channel, with no ssid has the driver hear that channel without joining, and tell what it heard,
+ * received by Espressif's libraries, or with rx=own, by the driver's own code in their place; see drv.h.
  * antenna=ufl has the XIAO's RF switch pick its U.FL connector rather than the antenna on the board,
  * and antenna=none leaves the pins alone, on a board without that switch.
  * The passphrase lives in the driver's page and memory, never in an image.
@@ -194,6 +197,9 @@ static void configure(struct drv *p)
     p->no_pmf = config_number(conf, size, "pmf", 1) == 0;
     p->no_sae = config_number(conf, size, "sae", 1) == 0;
     p->modem_sleep = config_number(conf, size, "ps", 0) != 0;
+    uint32_t channel = config_number(conf, size, "listen", 0);
+    p->listen = (uint8_t)(channel <= 13 ? channel : 0);
+    p->own_rx = (uint8_t)config_has(conf, size, "rx", "own");
     run_s = config_number(conf, size, "run", RUN_S);
     antenna = config_has(conf, size, "antenna", "ufl")    ? ANTENNA_UFL
               : config_has(conf, size, "antenna", "none") ? ANTENNA_NONE
@@ -266,20 +272,28 @@ static void driver_state(uint32_t state)
         say(&kout, "root: joined %s at %M, channel %u, authentication mode %u\n", p->joined.ssid, p->joined.bssid,
             p->joined.channel, (uint32_t)p->authmode);
         system_net_start(&sys);
+    } else if (state == DRV_LISTENING) {
+        say(&kout, "root: the driver listens on channel %u\n", (uint32_t)p->listen);
     } else if (state == DRV_LEFT) {
         say(&kout, "root: the driver left the network\n");
         system_halt(0);
     }
 }
 
+/* Whether the driver serves, joined or listening, and so answers the root task's checks. */
+static int driver_serves(void)
+{
+    return sys.driver.told == DRV_JOINED || sys.driver.told == DRV_LISTENING;
+}
+
 /*
- * The run over, its time up or as the host asked: the driver asked to leave the network, if it joined,
+ * The run over, its time up or as the host asked: the driver asked to leave the network, if it joined or listens,
  * and the machine halted once it has; a run that never joined halts at once.
  */
 static void run_over(void)
 {
     summary();
-    if (sys.driver.told != DRV_JOINED) {
+    if (!driver_serves()) {
         system_halt(SYSTEM_LATE);
     }
     if (!leaving) {
@@ -297,17 +311,17 @@ static void run_over(void)
  */
 static void second(void)
 {
-    int joined = sys.driver.told == DRV_JOINED;
+    int serves = driver_serves();
     if (leaving) {
         say(&kout, "root: the driver has not left the network\n");
         system_halt(0);
     }
-    uint32_t code = system_check(&sys, joined);
+    uint32_t code = system_check(&sys, serves);
     if (code != 0) {
         halt(code);
     }
     seconds++;
-    if (seconds == UP_S && !joined) {
+    if (seconds == UP_S && !serves) {
         say(&kout, "root: the driver has not joined after %u s\n", UP_S);
         halt(SYSTEM_LATE);
     }
@@ -403,6 +417,9 @@ int main(void)
     if (dp->ssid[0]) {
         system_net_build(&sys, &dp->link, mac);
         say(&kout, run_s != 0 ? "root: joining %s, for %u s\n" : "root: joining %s, for good\n", dp->ssid, run_s);
+    } else if (dp->listen) {
+        say(&kout, run_s != 0 ? "root: listening on channel %u, for %u s\n" : "root: listening on channel %u, for good\n",
+            (uint32_t)dp->listen, run_s);
     } else {
         say(&kout, "root: scanning\n");
     }
