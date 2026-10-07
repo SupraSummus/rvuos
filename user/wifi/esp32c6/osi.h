@@ -28,6 +28,7 @@ struct osi_isr {
  * and the chip's random number generator.
  * A thread that did not start as one of the adapter's, the driver's first, joins them with osi_adopt,
  * its stack between stack_lo and stack_hi, before it calls the libraries.
+ * osi_stack_used says the deepest a thread osi_thread made has gone into its stack.
  * osi_isr_swap exchanges the handler of an interrupt the libraries handle with one of the driver's own, mac.c's.
  * The driver's own code waits on the adapter's queues and mutexes too, as the libraries do, by these:
  * a wait of OSI_FOREVER milliseconds ends only when it is met, and one of 0 does not wait;
@@ -39,6 +40,7 @@ struct osi_funcs *osi_init(struct drv *d, struct self *s);
 void osi_log_level(unsigned int level);
 struct thread *osi_thread(void (*f)(void *), void *arg, const char *name, uint32_t stack);
 struct thread *osi_adopt(const char *name, uintptr_t stack_lo, uintptr_t stack_hi);
+uint32_t osi_stack_used(const struct thread *t);
 struct thread *osi_self(void);
 uint64_t osi_now_us(void);
 void osi_delay_ms(uint32_t ms);

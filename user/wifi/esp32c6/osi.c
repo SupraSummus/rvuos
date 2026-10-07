@@ -31,6 +31,7 @@
 #define BIT_IRQ   0x4u /* the interrupt thread's: a line it binds, from here up, one bit a CPU interrupt */
 #define BIT_FAULT 0x100u /* the watcher's: from here up, one bit for each thread of osi.threads */
 #define STACK_WORDS 16   /* of a faulted thread's stack, which the watcher tells */
+#define STACK_PAINT 0xa5u /* what a new thread's stack is filled with, so that osi_stack_used finds how deep it went */
 
 #define THREADS 8
 #define INTRS   8 /* CPU interrupts the libraries route sources to, numbered below 32 */
@@ -195,6 +196,7 @@ struct thread *osi_thread(void (*f)(void *), void *arg, const char *name, uint32
         drv_failed("a thread's stack", KERR_NO_MEMORY);
         return 0;
     }
+    memset(mem, STACK_PAINT, stack);
     lock_take(&osi.big);
     uint32_t i = osi.thread_count;
     struct thread *t = i < THREADS ? &osi.threads[i] : 0;
@@ -210,6 +212,16 @@ struct thread *osi_thread(void (*f)(void *), void *arg, const char *name, uint32
         return 0;
     }
     return t;
+}
+
+/* How deep a thread went, by the paint it left: to size a stack by, as no stack has a guard to catch an overflow. */
+uint32_t osi_stack_used(const struct thread *t)
+{
+    const uint8_t *p = (const uint8_t *)t->stack_lo, *hi = (const uint8_t *)t->stack_hi;
+    while (p < hi && *p == STACK_PAINT) {
+        p++;
+    }
+    return (uint32_t)(hi - p);
 }
 
 struct thread *osi_adopt(const char *name, uintptr_t stack_lo, uintptr_t stack_hi)

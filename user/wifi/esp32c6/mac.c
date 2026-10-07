@@ -444,9 +444,10 @@ extern uint32_t our_instances_ptr; /* esp32c6.rom.pp.ld's cell to the block */
 
 #define TX_SLOT       0u
 #define TX_HDR        8u       /* the bytes the MAC reads before the frame */
-#define TX_SEQ        22u      /* where a management frame's sequence control lies, after its three addresses */
+#define TX_SEQ        22u      /* where a frame's sequence control lies, after its three addresses */
 #define TX_TYPE(b)    ((b) >> 2 & 3u) /* the type in the frame control's first byte */
 #define TX_TYPE_MGMT  0u
+#define TX_TYPE_DATA  2u
 #define TX_MAX        1600u    /* the largest frame the driver sends */
 #define TX_DONE_SPINS 2000000u /* the wait for the MAC to finish, as the libraries bound theirs */
 
@@ -486,8 +487,11 @@ static const char *send(const uint8_t *frame, uint32_t len)
     }
     uint32_t n = len + TX_HDR + FCS;
     memcpy(tx->frame + TX_HDR, frame, len);
-    /* A management frame takes the station's next sequence number, its fragment 0, as the libraries number theirs. */
-    if (TX_TYPE(frame[0]) == TX_TYPE_MGMT && len >= TX_SEQ + 2u) {
+    /*
+     * A management or a data frame takes the station's next sequence number, its fragment 0:
+     * a station that does not do QoS numbers both from one counter.
+     */
+    if ((TX_TYPE(frame[0]) == TX_TYPE_MGMT || TX_TYPE(frame[0]) == TX_TYPE_DATA) && len >= TX_SEQ + 2u) {
         tx->frame[TX_HDR + TX_SEQ] = (uint8_t)(tx_seq << 4);
         tx->frame[TX_HDR + TX_SEQ + 1] = (uint8_t)(tx_seq >> 4);
         tx_seq = (uint16_t)((tx_seq + 1u) & 0xfffu);

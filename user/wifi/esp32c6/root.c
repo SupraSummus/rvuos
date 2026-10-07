@@ -179,8 +179,8 @@ static void (*drv_entry(void))(struct child_page *)
  * probe=, with listen=, has the driver ask for that network on the channel, and count the answers,
  * sent by the libraries or, with tx=own, by the driver's own code; see drv.h.
  * rx=own with probe= and no tx=own is refused, since the libraries' sending waits on their interrupt, which rx=own takes.
- * sta=own, with a network named, has the driver scan for it and authenticate to it by its own code,
- * the first step of its own station, and the run ends once the access point accepts; see drv.h.
+ * sta=own, with a network named, has the driver join it by its own station: it scans, authenticates, associates,
+ * and runs the supplicant's handshakes by its own code, then leaves, and the run ends; see drv.h.
  * antenna=ufl has the XIAO's RF switch pick its U.FL connector rather than the antenna on the board,
  * and antenna=none leaves the pins alone, on a board without that switch.
  * The passphrase lives in the driver's page and memory, never in an image.
@@ -271,7 +271,8 @@ static void driver_state(uint32_t state)
     if (state == DRV_UP) {
         say(&kout, "root: the driver's libraries run\n");
     } else if (state == DRV_SCANNED && p->own_sta) {
-        say(&kout, "root: the driver authenticated to %s at %M\n", p->joined.ssid, p->joined.bssid);
+        say(&kout, "root: the driver's own station joined %s at %M, its keys agreed, and left\n", p->joined.ssid,
+            p->joined.bssid);
         system_halt(0);
     } else if (state == DRV_SCANNED) {
         system_scanned(&sys, p->nets, p->net_count);
@@ -423,7 +424,8 @@ int main(void)
     must("room for the children's data", self_room(&self, ROOM_SIZE));
     struct drv *dp = (struct drv *)sys.driver.page;
     if (dp->own_sta) {
-        say(&kout, "root: authenticating to %s\n", dp->ssid);
+        /* Not "joining", which tools/wifi-run.py takes for a join whose clients it checks. */
+        say(&kout, "root: the driver's own station is to join %s\n", dp->ssid);
     } else if (dp->ssid[0]) {
         system_net_build(&sys, &dp->link, mac);
         say(&kout, run_s != 0 ? "root: joining %s, for %u s\n" : "root: joining %s, for good\n", dp->ssid, run_s);

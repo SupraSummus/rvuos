@@ -91,10 +91,15 @@ what is left:
   `pp` and `net80211` give way to the driver's own MAC and station, and `osi.c` shrinks to what `libphy.a` calls.
   The driver's own code receives and scans as well as the libraries do, by `listen=` and a scan, each with and without `rx=own`,
   and sends a probe by `tx=own`, the access point answering it.
-  The station's logic is to be the driver's own too, on hostap's parsing, through the association, the keys and the join;
-  `user/wifi/NOTES.md` says why it is the driver's own.
-  The own station is to give hostap's supplicant a link of its own, see `supp.h`:
-  EAPOL sent by `mac_tx`, and the data's CCMP in software first, on hostap's as `crypto.c` has it, the MAC's key registers later.
+  The station's logic is the driver's own too, on hostap; `user/wifi/NOTES.md` says why.
+  With `sta=own` it associates and runs the supplicant's 4-way handshake over a link of its own, see `supp.h`,
+  for WPA2's personal alone, then leaves, as nothing carries data yet.
+  The data come next, their CCMP in software first, on hostap's `aes-ccm.c`, which the build leaves out yet,
+  and the MAC's key registers later.
+  Then WPA3: SAE in the authentication, run in the station's thread, whose stack is sized for WPA2's handshakes,
+  and management frames protected, the station's deauthentication sent under CCMP,
+  and an unprotected one from the access point ignored.
+  The station hears no deauthentication to every station, which an access point that stops may send.
   The MAC's bring-up stays the libraries': the own path runs between their `esp_wifi_start` and `esp_wifi_stop`,
   so what those do to the modem and the MAC is the last of `pp` to read before it can go.
   Its frame completion spins in the caller's thread while the slot is armed, and borrows the libraries' slot 0;

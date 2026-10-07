@@ -392,6 +392,27 @@ void supp_deinit(void)
     supp.sm = 0;
 }
 
+int supp_choose(struct supp_network *n)
+{
+    struct wpa_ie_data d;
+    if (n->ap_rsn == 0 || wpa_parse_wpa_ie_rsn(n->ap_rsn, 2u + n->ap_rsn[1], &d) < 0) {
+        wpa_printf(MSG_ERROR, "supp: the access point's RSN element is not one");
+        return -1;
+    }
+    if (!(d.key_mgmt & WPA_KEY_MGMT_PSK) || !(d.pairwise_cipher & WPA_CIPHER_CCMP) ||
+        d.group_cipher != WPA_CIPHER_CCMP || (d.capabilities & WPA_CAPABILITY_MFPR)) {
+        wpa_printf(MSG_ERROR, "supp: the access point offers AKM 0x%x, pairwise 0x%x, group 0x%x, capabilities 0x%x",
+                   d.key_mgmt, d.pairwise_cipher, d.group_cipher, d.capabilities);
+        return -1;
+    }
+    n->key_mgmt = WPA_KEY_MGMT_PSK;
+    n->pairwise = WPA_CIPHER_CCMP;
+    n->group = WPA_CIPHER_CCMP;
+    n->pmf = 0;
+    n->mgmt_group = 0;
+    return 0;
+}
+
 /*
  * The supplicant takes WPA2's personal RSN, with a passphrase or a PSK, and WPA3's, with SAE,
  * whose PMK SAE derives before the association, and which needs management frames protected;

@@ -519,3 +519,15 @@ which still has their promiscuous mode filter the frames.
 And the supplicant, which was one with the libraries' table, is hostap's over a link, `supp.h`,
 whose five asks, an EAPOL frame sent, a key installed, the handshakes done, a deauthentication and a timeout run,
 are all the own station has to answer; the libraries' quirks around them stay in `wpa.c`.
+
+## The station's own association and handshake
+
+The association and WPA2's 4-way handshake took the footing as it was.
+The station reads its access point's beacon for the RSN elements, which the supplicant holds message 3/4 against,
+associates with the elements the supplicant writes, and hands it the EAPOL frames;
+those come as data frames to the station's address, which the MAC passed with only management frames heard promiscuously.
+The supplicant runs in the station's thread, and no stack has a guard,
+so the adapter now paints a thread's stack, and the station's log says how deep the handshakes went.
+The one surprise was the lab's, and `TODO.md` knew it already:
+the Pico 2 W's access point, offering WPA3 too, leaves an element hostap checks out of message 3/4,
+so the own station's runs there take `sae=0`.

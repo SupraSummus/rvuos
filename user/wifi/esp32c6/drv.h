@@ -49,7 +49,8 @@ struct drv_header {
 
 /*
  * What the driver tells besides its steps, from the configuration's debug=, see root.c:
- * a line for each frame to and from the link, the libraries' counters of the radio once the run is over,
+ * a line for each frame to and from the link, or with sta=own each frame the station reads,
+ * the libraries' counters of the radio once the run is over,
  * hostap's supplicant at its debug level,
  * and once joined, a line for each frame the radio hears of the access point's to the group or to the station,
  * each acknowledgement to the station, and each frame heard broken, timed by the MAC.
@@ -69,9 +70,9 @@ struct drv_header {
  * then DRV_SCANNED or DRV_JOINED, and once joined it moves frames between the libraries and the link,
  * until the root task asks it to leave, when it leaves, turns the radio off and reports DRV_LEFT;
  * a scan's run turns the radio off before DRV_SCANNED too.
- * With sta=own and a network named, the station is a thread of its own, sta.c's, which scans by its own code,
- * authenticates to that access point by its own code, and reports DRV_SCANNED once the access point accepts;
- * what follows, the association and the keys, is to come.
+ * With sta=own and a network named, the station is a thread of its own, sta.c's, which scans, authenticates,
+ * associates and runs the supplicant's handshakes by its own code, WPA2's personal alone yet,
+ * then leaves the access point and reports DRV_SCANNED, as nothing carries the network's data yet; see TODO.md.
  * A step that fails, or the access point letting the station go, is CHILD_FAILED,
  * with the step's name in the page and ESP-IDF's error, or the reason, in its detail.
  * With a channel to listen on and no network named, it hears the channel without joining and reports DRV_LISTENING,
@@ -100,7 +101,7 @@ struct drv {
     uint8_t listen;       /* the channel to hear, 1 to 13, or 0 */
     uint8_t own_rx;       /* hear it, or scan, through mac.c rather than the libraries */
     uint8_t own_tx;       /* send the probe through mac.c rather than the libraries; see mac.h */
-    uint8_t own_sta;      /* with a network named, authenticate by the driver's own code rather than the libraries */
+    uint8_t own_sta;      /* with a network named, join it by the driver's own station rather than the libraries' */
     char probe[33];       /* the network to probe for while listening, or empty */
     struct chan_end link; /* to the network process, connected before the start */
     /* From the root task, while it runs. */
@@ -111,7 +112,7 @@ struct drv {
     char failed[32]; /* the step that failed */
     volatile uint32_t net_count;
     struct drv_net nets[DRV_NETS]; /* what a scan heard */
-    struct drv_net joined;         /* the access point joined, its RSSI left zero, or with own_sta authenticated to */
+    struct drv_net joined;         /* the access point joined, its RSSI left zero, or with own_sta joined and left */
     volatile int authmode;         /* the joined network's, a WIFI_AUTH_ of esp.h */
     volatile uint32_t rx_frames, rx_dropped, tx_frames, tx_dropped;
 };

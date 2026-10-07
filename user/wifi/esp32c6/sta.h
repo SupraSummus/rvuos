@@ -4,8 +4,9 @@
 /*
  * The station's own logic, the driver's rather than the libraries'; see TODO.md.
  * sta_scan scans by mac.c. With sta=own, sta_start runs the station in a thread of its own, see sta.c,
- * which scans for the network, authenticates to its access point by open system,
- * and reports to the root task itself; the association, the keys and the join are to follow.
+ * which scans for the network, reads its access point's beacon, authenticates by open system, associates,
+ * and runs hostap's supplicant over a link of its own, see supp.h, through the 4-way handshake of WPA2's personal;
+ * then it leaves, and reports to the root task itself. The data, their keys, and WPA3 are to follow.
  */
 
 #include "drv.h"

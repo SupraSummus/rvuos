@@ -15,6 +15,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* EAPOL's Ethernet type, the proto of the frames the supplicant sends. */
+#define SUPP_EAPOL 0x888eu
+
 /* A key the handshakes derived, as hostap's driver is handed it. */
 struct supp_key {
     int alg;              /* hostap's enum wpa_alg */
@@ -59,6 +62,13 @@ struct supp_network {
 /* The supplicant bound to the station at own, through link, which lasts: made at the first call; 0, or -1. */
 int supp_init(const struct supp_link *link, const uint8_t *own);
 void supp_deinit(void);
+
+/*
+ * The suites the driver's own station takes of those the access point offers in n->ap_rsn, into n:
+ * WPA2's personal by PSK, CCMP pairwise and for the group, and management frames unprotected.
+ * 0, or -1 if the access point offers none of them, or requires protection, which the log says.
+ */
+int supp_choose(struct supp_network *n);
 
 /* The PMK of a passphrase, or a PSK, and an SSID, derived ahead, which takes a fifth of a second. */
 void supp_prepare(const char *ssid, const char *pass);

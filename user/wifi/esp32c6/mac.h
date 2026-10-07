@@ -89,7 +89,8 @@ const char *mac_tx_init(void);
 /*
  * A frame sent by the driver's own code; 0, or the step that failed, a timeout or a collision among them.
  * The frame is the 802.11 frame without its checksum, which the MAC appends,
- * and mac_tx gives a management frame the station's next sequence number, as the libraries give theirs.
+ * and mac_tx gives a management or a data frame the station's next sequence number, from one counter,
+ * as a station that does not do QoS numbers them.
  * The driver programs a slot the libraries' lmac names, arms it, and finishes the frame itself:
  * it clears the hardware txq state's completion bit, which lets the slot's arm bits clear, and on a timeout's
  * or a collision's bit disarms the slot and fails; the caller may send it again.

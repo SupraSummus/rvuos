@@ -2,8 +2,9 @@
 #define RVUOS_WIFI_MGMT_H
 
 /*
- * The station's own management frames: what an access point announces, what the station sends,
- * and the answers it reads, on hostap's parser of elements and its definitions of IEEE 802.11's; see TODO.md.
+ * The station's own frames: what an access point announces, the management frames the station sends
+ * and the answers it reads, and the data frames that carry EAPOL before any key is installed,
+ * on hostap's parser of elements and its definitions of IEEE 802.11's; see TODO.md.
  * They make no system call, and run on the host too, under the sanitizers, test/mgmt-test.c.
  * A frame is the 802.11 frame without its FCS.
  * A builder writes at most size bytes at f and returns the frame's length, or 0 if it does not fit;
@@ -13,8 +14,11 @@
 
 #include <stdint.h>
 
-/* The largest frame a builder here makes: a probe request for an SSID of 32 bytes. */
+/* The largest probe request, authentication or deauthentication a builder here makes: a probe request for 32 bytes. */
 #define MGMT_FRAME_MAX (24u + 2u + 32u + 2u + 8u + 2u + 4u + 2u + 1u)
+
+/* The largest association request: an SSID of 32 bytes, the rates, and an RSN and an RSNX element of 255 bytes each. */
+#define MGMT_ASSOC_MAX (24u + 4u + 2u + 32u + 2u + 8u + 2u + 4u + 2u * (2u + 255u))
 
 /* What a beacon or a probe response says of its network. */
 struct mgmt_beacon {
@@ -25,6 +29,8 @@ struct mgmt_beacon {
     uint8_t probe_response; /* 1 if it answers a station's probe, 0 if it is a beacon */
     uint16_t interval;      /* between beacons, in time units of 1024 us */
     uint64_t tsf;           /* the access point's clock when it sent the frame, in us */
+    const uint8_t *rsn;     /* its RSN element, whole, in the frame read, or 0 if it has none */
+    const uint8_t *rsnx;    /* its RSNX element, so, or 0 */
 };
 
 /* A frame of any type to sta from the access point ap, by its receiver's and transmitter's addresses alone. */
@@ -45,5 +51,48 @@ uint32_t mgmt_auth_request(uint8_t *f, uint32_t size, const uint8_t *sta, const 
 
 /* The access point ap's answer to sta's open-system Authentication, the exchange's second, its status into *status. */
 int mgmt_auth_answer(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap, uint16_t *status);
+
+/*
+ * An association request from sta to the access point ap, for ssid, with the rates the station takes,
+ * and the RSN and RSNX elements the supplicant wrote, whole, either 0 if none;
+ * its capabilities say the network's privacy where an RSN element is given, as the network's beacon says it.
+ */
+uint32_t mgmt_assoc_request(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap, const char *ssid,
+                            const uint8_t *rsn, const uint8_t *rsnx);
+
+/* The access point ap's answer to sta's association: its status into *status, and the station's AID into *aid. */
+int mgmt_assoc_answer(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap, uint16_t *status,
+                      uint16_t *aid);
+
+/* A deauthentication from sta to the access point ap, for reason, IEEE 802.11's: MGMT_LEAVING as the station leaves. */
+#define MGMT_LEAVING 3u
+uint32_t mgmt_deauth(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap, uint16_t reason);
+
+/* A deauthentication or a disassociation to sta from the access point ap, its reason into *reason. */
+int mgmt_let_go(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap, uint16_t *reason);
+
+/*
+ * A data frame carries an Ethernet type and payload behind RFC 1042's LLC/SNAP header, as IEEE 802.11 carries them.
+ * mgmt_data makes one from sta through the access point ap to dest, unprotected, with the len bytes at body,
+ * MGMT_DATA_FIXED bytes longer: the frame's header, the LLC/SNAP header and the type.
+ */
+#define MGMT_DATA_FIXED (24u + 8u)
+uint32_t mgmt_data(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap, const uint8_t *dest,
+                   uint16_t proto, const uint8_t *body, uint32_t len);
+
+/* What a data frame read carries, in the frame: its source, its Ethernet type, and its payload. */
+struct mgmt_payload {
+    const uint8_t *src;
+    uint16_t proto;
+    const uint8_t *body;
+    uint32_t len;
+};
+
+/*
+ * A data frame from the access point ap to sta, a Data or a QoS Data frame of one whole MSDU, unprotected,
+ * behind RFC 1042's LLC/SNAP header, read into p; a frame protected, a fragment, an A-MSDU,
+ * one with an HT control field, or one under another LLC header is refused.
+ */
+int mgmt_data_read(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap, struct mgmt_payload *p);
 
 #endif
