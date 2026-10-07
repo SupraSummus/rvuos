@@ -200,8 +200,9 @@ $(BUILD)/%.ld: %.ld.S
 #   user/wifi/build.mk          the Wi-Fi system on a Pico 2 W, and the tests of its network process on the host
 #   user/phyblob/build.mk       the PHY harness on an ESP32-C6
 #   user/wifi/esp32c6/build.mk  the Wi-Fi system on an ESP32-C6, its driver with hostap and Mbed TLS
+#   user/tracer/build.mk        the fault tracer's decoder, tested on the host
 #   host/build.mk               the kernel on the host: the fuzzer's harnesses, the mutants and the replay under QEMU
-include kernel/build.mk user/build.mk user/wifi/build.mk user/phyblob/build.mk user/wifi/esp32c6/build.mk host/build.mk
+include kernel/build.mk user/build.mk user/wifi/build.mk user/phyblob/build.mk user/wifi/esp32c6/build.mk user/tracer/build.mk host/build.mk
 
 # The headers each object and linker script was made from, as the compiler listed them.
 -include $(shell find $(BUILD) $(HOST_BUILD) -name '*.d' 2>/dev/null)
@@ -238,7 +239,7 @@ contents:
 # the ARM demos take half a minute, their idle kernel polling through every sleep, see intr_wait in kernel/arch/arm/trap.c.
 CHECK_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
 CHECK_PARTS := arm-test-an521-smp2 arm-test-an521 arm-test-an385 smp-test lab qemu-replay test host-test \
-               bench lib-test escape wifi-test keys-test contents
+               bench lib-test escape wifi-test keys-test decode-test contents
 check:
 	$(MAKE) -j$(CHECK_JOBS) $(CHECK_PARTS)
 
