@@ -31,7 +31,7 @@
 #define STA_RUNS      2u    /* the supplicant's work that may wait at once; see link_run */
 #define STA_STACK     4096u /* room for the supplicant's handshakes, whose depth told() says */
 #define STA_KEY_ENTRY 4u    /* the MAC's key entry the pairwise key takes, as the libraries' association left it */
-#define STA_GRP_ENTRY 1u    /* the group key's entry, which the access point's frames to every station use */
+#define STA_GRP_ENTRY 0u    /* the MAC's entry the group key of id 1 takes, and the next id 2's, as the libraries' */
 #define FC1_PROTECTED 0x40u /* the Protected bit, in the Frame Control's second octet */
 #define ADDR1         4u    /* where a frame's Address 1, its receiver, lies */
 
@@ -61,22 +61,6 @@ enum { NONE, AUTHENTICATED, ASSOCIATED };
 struct key_pn {
     uint64_t tx_pn;
     uint64_t rx_pn[CCMP_REPLAY_COUNT];
-};
-
-/* The group key: its bytes and id, and its counters. It is never staged, and the station sends under the pairwise one. */
-struct group_key {
-    volatile int set; /* written by the station's thread, read by the receiving's once it serves */
-    uint8_t id;
-    uint8_t tk[CCMP_TK_LEN];
-    uint64_t rx_pn[CCMP_REPLAY_COUNT];
-};
-
-/* The management group key (IGTK): its bytes and id, and the packet number BIP checks a received frame against. */
-struct igtk {
-    int set;
-    uint8_t id;
-    uint8_t tk[CCMP_TK_LEN];
-    uint64_t ipn;
 };
 
 static struct {
@@ -111,8 +95,10 @@ static struct {
     /* The keys, and the frames CCMP works between. */
     struct keys ptk;      /* the pairwise key in use and the one staged; see keys.h */
     struct key_pn ptk_pn; /* the pairwise key in use's packet numbers */
-    struct group_key gtk; /* the group key and its counters */
-    struct igtk igtk;     /* the management group key, under PMF */
+    /* The group keys, a slot an id (see keys.h), and each slot's counters: the group key's, and the IGTK's for BIP. */
+    struct group_keys gtk, igtk;
+    uint64_t gtk_rx_pn[KEYS_GROUP][CCMP_REPLAY_COUNT];
+    uint64_t igtk_ipn[KEYS_GROUP];
     struct mutex *key_lock; /* held while a key is installed, and by the sending while it uses one */
     uint8_t *eth, *tx_plain, *tx_crypt, *rx_plain;
 } sta;
@@ -188,7 +174,7 @@ void sta_scan(struct drv *d)
 static void heard(const struct mac_frame *m)
 {
     static const uint8_t every[6] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
-    int group = sta.gtk.set && mgmt_to_group(m->frame, m->len, sta.ap);
+    int group = (sta.gtk.set[0] || sta.gtk.set[1]) && mgmt_to_group(m->frame, m->len, sta.ap);
     if (!mgmt_to_station(m->frame, m->len, drv_self->mac, sta.ap) &&
         !(sta.beacon_wanted && mgmt_to_station(m->frame, m->len, every, sta.ap)) && !group) {
         return;
@@ -262,7 +248,9 @@ static void hand_back(void)
     part(MGMT_LEAVING);
     mac_addr_restore();
     mac_key_clear(STA_KEY_ENTRY); /* the libraries' stop meets no entry of the own path's */
-    mac_key_clear(STA_GRP_ENTRY);
+    for (uint32_t i = 0; i < KEYS_GROUP; i++) {
+        mac_key_clear(STA_GRP_ENTRY + i);
+    }
     mac_rx_give_back();
     told();
 }
@@ -396,8 +384,13 @@ static int let_go(const struct buf *b, uint16_t *reason)
     uint32_t n = b->len;
     int verified = 0;
     if (active && group) {
-        /* A group-addressed one is authenticated by BIP rather than encrypted; its reason stands in the clear. */
-        verified = sta.igtk.set && mgmt_bip_verify(f, n, sta.igtk.tk, sta.igtk.id, &sta.igtk.ipn);
+        /*
+         * A group-addressed one is authenticated by BIP rather than encrypted; its reason stands in the clear.
+         * Its MIC element's key id names the slot, and mgmt_bip_verify takes no frame under the other.
+         */
+        for (uint32_t i = 0; i < KEYS_GROUP && !verified; i++) {
+            verified = sta.igtk.set[i] && mgmt_bip_verify(f, n, sta.igtk.k[i].tk, sta.igtk.k[i].id, &sta.igtk_ipn[i]);
+        }
     } else if (active && protected_) {
         verified = open_mgmt(b, plain, &n);
         if (verified) {
@@ -537,73 +530,91 @@ static uint64_t key_rsc(const struct supp_key *k)
     return rsc;
 }
 
+/* The key an install brings, its id and bytes; 0 if its bytes are not a temporal key's. */
+static int key_value_of(const struct supp_key *k, struct key_value *v)
+{
+    if (k->key == 0 || k->key_len != CCMP_TK_LEN) {
+        return 0;
+    }
+    v->id = (uint8_t)k->idx;
+    memcpy(v->tk, k->key, CCMP_TK_LEN);
+    return 1;
+}
+
+/* What a group key's install did, for the log. */
+static const char *group_said(enum key_action a)
+{
+    return a == KEY_INSTALL ? "installed" : a == KEY_AGAIN ? "installed again, its counters kept" : "refused, no slot";
+}
+
 /*
- * A group key the supplicant derived, kept as it is, its counters from the handshake's receive sequence counter.
- * The access point sends under the new key from the switch on; keeping the old one until it does is E, see TODO.md.
+ * A group key the supplicant derived, kept in the slot of its id, its counters from the handshake's receive
+ * sequence counter; the other slot keeps the old key, which the access point sends under until it switches.
+ * Its MAC entry is the slot's, so the MAC's receiving decrypts a protected group frame under either,
+ * finding the entry by the frame's key id; see NOTES.md.
  */
 static int link_set_group(const struct supp_key *k)
 {
     if (k->alg == SUPP_ALG_NONE) {
-        osi_mutex_take(sta.key_lock);
-        sta.gtk.set = 0;
-        mac_key_clear(STA_GRP_ENTRY);
-        osi_mutex_give(sta.key_lock);
-        drv_say("sta: the group's key removed\n");
+        int s = keys_group_slot(KEYS_GROUP_ID, (uint32_t)k->idx);
+        if (s >= 0) {
+            osi_mutex_take(sta.key_lock);
+            sta.gtk.set[s] = 0;
+            mac_key_clear(STA_GRP_ENTRY + (uint32_t)s);
+            osi_mutex_give(sta.key_lock);
+            drv_say("sta: the group's key of index %d removed\n", k->idx);
+        }
         return 0;
     }
-    if (k->alg != SUPP_ALG_CCMP || k->key == 0 || k->key_len != CCMP_TK_LEN) {
+    struct key_value in = { 0 };
+    if (k->alg != SUPP_ALG_CCMP || !key_value_of(k, &in)) {
         drv_say("sta: a key of algorithm %d, %u bytes, ignored\n", k->alg, (unsigned)k->key_len);
         return 0;
     }
+    int s = keys_group_slot(KEYS_GROUP_ID, in.id);
     osi_mutex_take(sta.key_lock);
-    if (sta.gtk.set && sta.gtk.id == (uint8_t)(k->idx & 3) && memcmp(sta.gtk.tk, k->key, CCMP_TK_LEN) == 0) {
-        /* A message that comes again with the key already in use: installing it afresh would take the counters back. */
-        osi_mutex_give(sta.key_lock);
-        drv_say("sta: the group's key installed again, the counters kept\n");
-        return 0;
+    enum key_action a = keys_group_apply(&sta.gtk, KEYS_GROUP_ID, &in);
+    if (a == KEY_INSTALL) {
+        /* Every priority starts from it: its RSC bounds the frames sent before the join, whatever priority. */
+        ccmp_replay_start(sta.gtk_rx_pn[s], key_rsc(k));
+        mac_key_set(STA_GRP_ENTRY + (uint32_t)s, sta.ap, in.id, in.tk);
     }
-    memcpy(sta.gtk.tk, k->key, CCMP_TK_LEN);
-    sta.gtk.id = (uint8_t)(k->idx & 3);
-    /* Every priority starts from it: a group key's RSC bounds the frames sent before the join, whatever priority. */
-    ccmp_replay_start(sta.gtk.rx_pn, key_rsc(k));
-    sta.gtk.set = 1;
-    /* The MAC's own entry, so that its receiving takes a protected group frame to the station. */
-    mac_key_set(STA_GRP_ENTRY, sta.ap, sta.gtk.id, sta.gtk.tk);
     osi_mutex_give(sta.key_lock);
-    drv_say("sta: the group's key installed, index %d\n", sta.gtk.id);
+    drv_say("sta: the group's key of index %d %s\n", in.id, group_said(a));
     return 0;
 }
 
 /*
- * The management group key (IGTK) the handshake gives under PMF, kept for the BIP check of a group-addressed
- * robust management frame; its IPN is the packet number that check reads. The MAC's cipher decrypts data frames
- * alone, so the key waits in software, and no run has received such a frame yet; see TODO.md.
+ * The management group key (IGTK) the handshake gives under PMF, kept in the slot of its id for the BIP check of
+ * a group-addressed robust management frame; its IPN is the packet number that check reads.
+ * The MAC's cipher decrypts data frames alone, so the key waits in software,
+ * and no run has received such a frame yet; see TODO.md.
  */
 static int link_set_igtk(const struct supp_key *k)
 {
     if (k->alg == SUPP_ALG_NONE) {
-        osi_mutex_take(sta.key_lock);
-        sta.igtk.set = 0;
-        osi_mutex_give(sta.key_lock);
-        drv_say("sta: the management group key removed\n");
+        int s = keys_group_slot(KEYS_MGMT_GROUP_ID, (uint32_t)k->idx);
+        if (s >= 0) {
+            osi_mutex_take(sta.key_lock);
+            sta.igtk.set[s] = 0;
+            osi_mutex_give(sta.key_lock);
+            drv_say("sta: the management group key of index %d removed\n", k->idx);
+        }
         return 0;
     }
-    if (k->alg != SUPP_ALG_BIP_CMAC_128 || k->key == 0 || k->key_len != CCMP_TK_LEN) {
+    struct key_value in = { 0 };
+    if (k->alg != SUPP_ALG_BIP_CMAC_128 || !key_value_of(k, &in)) {
         drv_say("sta: a management group key of algorithm %d, %u bytes, ignored\n", k->alg, (unsigned)k->key_len);
         return 0;
     }
+    int s = keys_group_slot(KEYS_MGMT_GROUP_ID, in.id);
     osi_mutex_take(sta.key_lock);
-    if (sta.igtk.set && sta.igtk.id == (uint8_t)k->idx && memcmp(sta.igtk.tk, k->key, CCMP_TK_LEN) == 0) {
-        osi_mutex_give(sta.key_lock);
-        drv_say("sta: the management group key installed again, the packet number kept\n");
-        return 0;
+    enum key_action a = keys_group_apply(&sta.igtk, KEYS_MGMT_GROUP_ID, &in);
+    if (a == KEY_INSTALL) {
+        sta.igtk_ipn[s] = key_rsc(k);
     }
-    memcpy(sta.igtk.tk, k->key, CCMP_TK_LEN);
-    sta.igtk.id = (uint8_t)k->idx;
-    sta.igtk.ipn = key_rsc(k);
-    sta.igtk.set = 1;
     osi_mutex_give(sta.key_lock);
-    drv_say("sta: the management group key installed, index %d\n", sta.igtk.id);
+    drv_say("sta: the management group key of index %d %s\n", in.id, group_said(a));
     return 0;
 }
 
@@ -629,13 +640,11 @@ static int link_set_pairwise(const struct supp_key *k)
         drv_say("sta: the pairwise key removed\n");
         return 0;
     }
-    if (k->alg != SUPP_ALG_CCMP || k->key == 0 || k->key_len != CCMP_TK_LEN) {
+    struct key_value in = { 0 };
+    if (k->alg != SUPP_ALG_CCMP || !key_value_of(k, &in)) {
         drv_say("sta: a key of algorithm %d, %u bytes, ignored\n", k->alg, (unsigned)k->key_len);
         return 0;
     }
-    struct key_value in = { 0 };
-    in.id = (uint8_t)(k->idx & 3);
-    memcpy(in.tk, k->key, CCMP_TK_LEN);
     osi_mutex_take(sta.key_lock);
     enum key_action a = keys_apply(&sta.ptk, &in, (k->flag & SUPP_KEY_TX) != 0, (k->flag & SUPP_KEY_NEXT) != 0);
     if (a == KEY_PROMOTE || a == KEY_INSTALL) {
@@ -884,7 +893,9 @@ static void associate(const struct drv_net *ap)
  * on the frame's own Protected bit and the MAC's flag.
  * A protected frame the cipher took has its CCMP header's packet number and key id checked against the key's
  * replay counter, the header then taken away and the bit cleared; the receiver's address picks the key, Address 1,
- * the group's for a group address. *frame is 0, and the drop counted, if the frame is not the cipher's,
+ * the group's for a group address, whose slot the key id names, so the old key's frames are read until the access
+ * point switches.
+ * *frame is 0, and the drop counted, if the frame is not the cipher's,
  * has no key, no CCMP header, another key id, or a packet number not above the counter.
  */
 static int plain_frame(const struct buf *b, struct drv *d, const uint8_t **frame, uint32_t *len)
@@ -908,14 +919,20 @@ static int plain_frame(const struct buf *b, struct drv *d, const uint8_t **frame
      * as the sending's own counter is; the payload stands in the clear, so the cipher is passed over.
      */
     int to_group = (f[ADDR1] & 0x01) != 0;
-    int set = to_group ? sta.gtk.set : sta.ptk.cur_set;
-    uint8_t key_id = to_group ? sta.gtk.id : sta.ptk.cur.id;
-    uint64_t *rx_pn = to_group ? sta.gtk.rx_pn : sta.ptk_pn.rx_pn;
     uint32_t hl = ccmp_header_len(f); /* 0 for anything but a Data frame, as a protected management one is */
     uint64_t pn = 0;
     uint8_t id = 0;
-    if (!set || hl == 0 || *len < hl + CCMP_HEAD_LEN + 1u || !ccmp_head_read(f + hl, &pn, &id) ||
-        id != key_id) {
+    uint64_t *rx_pn = 0; /* the key's replay counters, 0 if the station holds no key of the frame's id */
+    if (hl != 0 && *len >= hl + CCMP_HEAD_LEN + 1u && ccmp_head_read(f + hl, &pn, &id)) {
+        /* A group frame's key id names its slot, the old key's or the new one's; one to the station, the key in use. */
+        int s = to_group ? keys_group_slot(KEYS_GROUP_ID, id) : -1;
+        if (s >= 0 && sta.gtk.set[s]) {
+            rx_pn = sta.gtk_rx_pn[s];
+        } else if (!to_group && sta.ptk.cur_set && id == sta.ptk.cur.id) {
+            rx_pn = sta.ptk_pn.rx_pn;
+        }
+    }
+    if (rx_pn == 0) {
         sta.drop_other++;
         d->rx_dropped++;
         return kind;

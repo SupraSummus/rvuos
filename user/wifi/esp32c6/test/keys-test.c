@@ -4,6 +4,7 @@
  * a first join stages the derived key before the 4/4 and promotes it after, a rekey stages the new key while
  * the old one still sends, and a message 3 that comes again after the promotion is neither staged nor promoted,
  * or its sending packet numbers would begin again; that last is the KRACK path. Extended key ID is refused.
+ * And the group's: a rekey keeps the old key beside the new, and a key installed again keeps its counters.
  */
 
 #include <stdio.h>
@@ -76,12 +77,54 @@ static void fresh_and_refused(void)
     check(s.cur_set && memcmp(s.cur.tk, k3.tk, CCMP_TK_LEN) == 0, "which leaves the key in use alone");
 }
 
+/* A group key of id, its bytes told apart by tag. */
+static struct key_value group(uint8_t id, uint8_t tag)
+{
+    struct key_value k = key(tag);
+    k.id = id;
+    return k;
+}
+
+static int holds(const struct group_keys *g, int slot, const struct key_value *k)
+{
+    return g->set[slot] && g->k[slot].id == k->id && memcmp(g->k[slot].tk, k->tk, CCMP_TK_LEN) == 0;
+}
+
+/* A group rekey: the access point's new key under the other id, while it still sends under the old one. */
+static void group_rekey(void)
+{
+    struct group_keys g = { 0 };
+    struct key_value a = group(2, 0x11), b = group(1, 0x22), c = group(2, 0x33);
+    check(keys_group_apply(&g, KEYS_GROUP_ID, &a) == KEY_INSTALL && holds(&g, 1, &a) && !g.set[0],
+          "the join's group key takes its id's slot");
+    check(keys_group_apply(&g, KEYS_GROUP_ID, &b) == KEY_INSTALL && holds(&g, 0, &b) && holds(&g, 1, &a),
+          "a rekey's key, of the other id, goes beside the old one");
+    check(keys_group_apply(&g, KEYS_GROUP_ID, &a) == KEY_AGAIN,
+          "the old key installed again keeps its counters, as KRACK's group path asks");
+    check(keys_group_apply(&g, KEYS_GROUP_ID, &c) == KEY_INSTALL && holds(&g, 1, &c) && holds(&g, 0, &b),
+          "the next rekey takes the old key's slot");
+}
+
+/* Ids an access point does not alternate have no slot; the management group key's are 4 and 5. */
+static void group_ids(void)
+{
+    struct group_keys g = { 0 }, m = { 0 };
+    struct key_value zero = group(0, 0x11), three = group(3, 0x22), four = group(4, 0x33);
+    check(keys_group_apply(&g, KEYS_GROUP_ID, &zero) == KEY_REFUSE &&
+              keys_group_apply(&g, KEYS_GROUP_ID, &three) == KEY_REFUSE && !g.set[0] && !g.set[1],
+          "a group key of id 0 or 3 is refused");
+    check(keys_group_apply(&m, KEYS_MGMT_GROUP_ID, &four) == KEY_INSTALL && holds(&m, 0, &four),
+          "a management group key of id 4 takes the first slot");
+}
+
 int main(void)
 {
     first_join();
     rekey();
     again();
     fresh_and_refused();
+    group_rekey();
+    group_ids();
     printf("keys-test: %s\n", failures ? "FAILED" : "ok");
     return failures != 0;
 }

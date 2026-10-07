@@ -101,13 +101,13 @@ what is left:
   with the engine word set the access point took none of the sending, so it is left unset;
   the MAC's own cipher is in `NOTES.md`.
   The station's data go at 1 Mb/s, the rate `mac_tx` programs for management frames.
-  A group key rekey installs one entry, so the frames the access point still sends under the old key
-  are dropped until it switches; two entries will want the MAC entry kept in the key, rather than chosen
-  from its kind in each of `link_set_group` and `link_set_pairwise`, and `keys`, `group_key` and `igtk`
-  each carry the same id and bytes, which could be one type.
   Then WPA3: SAE in the authentication, run in the station's thread, whose stack is sized for WPA2's handshakes.
-  A pairwise rekey's promotion is checked on the host alone: showing it live wants an access point that answers a
-  station's rekey request, which the one here does not, or one that rekeys on its own.
+  A rekey is checked on the host alone, by `keys-test`:
+  showing a pairwise one live wants an access point that answers a station's rekey request,
+  which the one here does not, or one that rekeys on its own;
+  a group one, the old key read beside the new until the access point switches,
+  wants one that rekeys its group inside a run, which the one here did not in 300 s;
+  its group key interval, shortened for a run with the maintainer's leave, would do.
   The station's protected management frames — the leave policy and the SA Query — want a file of their own beside
   `sta.c`, which has grown to hold them.
   The MAC's bring-up stays the libraries': the own path runs between their `esp_wifi_start` and `esp_wifi_stop`,

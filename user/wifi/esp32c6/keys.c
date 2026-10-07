@@ -1,4 +1,4 @@
-/* The station's pairwise key's transitions; see keys.h. */
+/* The station's keys' transitions; see keys.h. */
 
 #include "keys.h"
 
@@ -36,4 +36,23 @@ enum key_action keys_apply(struct keys *ks, const struct key_value *in, int tx, 
         return KEY_INSTALL;
     }
     return KEY_REFUSE;
+}
+
+int keys_group_slot(uint32_t first, uint32_t id)
+{
+    return id >= first && id - first < KEYS_GROUP ? (int)(id - first) : -1;
+}
+
+enum key_action keys_group_apply(struct group_keys *g, uint32_t first, const struct key_value *in)
+{
+    int s = keys_group_slot(first, in->id);
+    if (s < 0) {
+        return KEY_REFUSE;
+    }
+    if (g->set[s] && same(&g->k[s], in)) {
+        return KEY_AGAIN;
+    }
+    g->k[s] = *in;
+    g->set[s] = 1;
+    return KEY_INSTALL;
 }

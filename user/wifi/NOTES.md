@@ -541,9 +541,14 @@ frames it receives, and its sending is software CCMP, `ccmp.c` on hostap's CCM; 
 A pairwise key the handshake derives arrives twice, for receiving alone before the 4/4 and for sending too after,
 so `link_set_key` stages the first and promotes the second, `keys.c`'s state machine, host-tested in `keys-test`;
 the station keeps sending under the key in use in between, the old one at a rekey and none at the first join.
-A group key is installed at once, and one installed again with the same bytes and id is left alone, its counters kept.
-A key is written into the MAC's own entry, `mac_key_set` (`STA_KEY_ENTRY` 4 for the pairwise, `STA_GRP_ENTRY` 1
-for the group), its valid bit cleared first, so a rekey never leaves half an entry live.
+A group key is installed at once into the slot of its id, 1 or 2, which an access point alternates at each rekey,
+so the old key stays beside the new and is read until the access point switches.
+One installed again with the same bytes and id is left alone, its counters kept.
+The management group key keeps its ids, 4 and 5, alike.
+A key is written into the MAC's own entry, `mac_key_set` (`STA_KEY_ENTRY` 4 for the pairwise,
+`STA_GRP_ENTRY` 0 and 1 for the group's ids 1 and 2, as the libraries' `esp_wifi_get_sta_hw_key_idx_internal`
+places them), its valid bit cleared first, so a rekey never leaves half an entry live.
+A group key of id 0 or 3 is refused: no access point here gave one, and the libraries would put 3 in entry 4, the pairwise key's.
 An install and the sending take one lock, `sta.key_lock`, which copies the key and reserves its packet number together.
 EAPOL goes out under the key in use once one is there, and in the clear until then.
 A station's frame to the access point is addressed to it, so it goes under the pairwise key
@@ -592,6 +597,9 @@ at all, and the sending stays `ccmp.c`'s.
 A run with the group entry's temporal key one byte wrong had the access point's group frames not come at all,
 its own relayed broadcast counting none, where the right key had them come, so the MAC hands over nothing
 that failed its MIC, which the reading of a short frame rests on.
+The MAC finds a group frame's entry by the key id in its CCMP header, not by the entry's place:
+with a wrong key of the other id in the entry above the right one or below it,
+or the right key in the other id's entry, the access point's group frames still came.
 
 ## The station's protected management frames
 
