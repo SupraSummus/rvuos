@@ -97,6 +97,112 @@ static void wr(uint32_t a, uint32_t v)
     *(volatile uint32_t *)a = v;
 }
 
+/*
+ * The MAC's own station address and the access point's; the flags are what hal_mac_set_addr and hal_mac_set_bssid set.
+ * The four words are saved so mac_addr_restore gives the libraries their MAC back before esp_wifi_stop.
+ */
+#define BSSID_LO      (MAC_BASE + 0x00u)
+#define BSSID_HI      (MAC_BASE + 0x04u)
+#define STA_ADDR_LO   (MAC_BASE + 0x5cu)
+#define STA_ADDR_HI   (MAC_BASE + 0x60u)
+#define BSSID_FLAG    0x80000000u
+#define STA_ADDR_FLAG 0x00010000u /* what hal_mac_set_addr ors: lui 0x10, not 0x100000 */
+
+static uint32_t addr_saved[4];
+static int addr_held;
+
+/* The four bytes at p, little-endian. */
+static uint32_t le32(const uint8_t *p)
+{
+    return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+}
+
+void mac_station(const uint8_t sta[6], const uint8_t bssid[6])
+{
+    if (!addr_held) {
+        addr_saved[0] = rd(BSSID_LO);
+        addr_saved[1] = rd(BSSID_HI);
+        addr_saved[2] = rd(STA_ADDR_LO);
+        addr_saved[3] = rd(STA_ADDR_HI);
+        addr_held = 1;
+    }
+    wr(BSSID_LO, le32(bssid));
+    wr(BSSID_HI, (rd(BSSID_HI) & 0xffff0000u) | (uint32_t)bssid[4] | (uint32_t)bssid[5] << 8 | BSSID_FLAG);
+    wr(STA_ADDR_LO, le32(sta));
+    wr(STA_ADDR_HI, ((uint32_t)sta[4] | (uint32_t)sta[5] << 8) | STA_ADDR_FLAG);
+}
+
+void mac_addr_restore(void)
+{
+    if (addr_held) {
+        wr(BSSID_LO, addr_saved[0]);
+        wr(BSSID_HI, addr_saved[1]);
+        wr(STA_ADDR_LO, addr_saved[2]);
+        wr(STA_ADDR_HI, addr_saved[3]);
+        addr_held = 0;
+    }
+}
+
+/*
+ * The MAC's own key entry, as the libraries' hal_crypto_set_key_entry writes it:
+ * entries 0x28 apart at 0x600a5800, the peer's low four address bytes at +0x00, its high two and a control word
+ * above bit 16 at +0x04 (the CCMP cipher, the entry's class and the key id), the temporal key at +0x08,
+ * and the entry's valid bit in the bitmap at 0x600a4814.
+ * An entry alone is what the MAC's receiving decrypts a protected frame with; the engine's configuration word,
+ * which the libraries' hal_crypto_enable also writes, is left alone: with it set the access point took none of
+ * the station's sending, and without it the station's frames cross. See NOTES.md.
+ */
+extern void hal_mac_rx_set_policy(uint32_t, uint32_t, uint32_t, uint32_t);
+extern void hal_mac_set_rxq_policy(uint32_t, uint32_t);
+extern void hal_he_set_mmss_and_aid(uint32_t, int32_t, uint32_t, uint32_t);
+
+#define KEY_BASE   0x600a5800u
+#define KEY_STRIDE 0x28u
+#define KEY_VALID  0x600a4814u
+
+void mac_key_set(uint32_t entry, const uint8_t addr[6], uint8_t id, const uint8_t tk[16])
+{
+    uint32_t base = KEY_BASE + entry * KEY_STRIDE;
+    uint32_t low = (uint32_t)addr[0] | (uint32_t)addr[1] << 8;
+    uint32_t class = (low & 0x1c0u) == 0x40u ? 7u : entry > 3u ? 3u : 6u;
+    uint32_t ctrl = class << 5 | 0x0cu | ((uint32_t)(id != 3u) << 11) | ((uint32_t)id << 14);
+    /* The valid bit first: a rekey's entry is not read while it is half old and half new. */
+    wr(KEY_VALID, rd(KEY_VALID) & ~(1u << entry));
+    wr(base + 0x00u, low | (uint32_t)addr[2] << 16 | (uint32_t)addr[3] << 24);
+    wr(base + 0x04u, ((uint32_t)addr[4] | (uint32_t)addr[5] << 8) | (ctrl << 16));
+    for (uint32_t i = 0; i < 16u; i += 4u) {
+        wr(base + 0x08u + i, (uint32_t)tk[i] | (uint32_t)tk[i + 1] << 8 | (uint32_t)tk[i + 2] << 16 |
+                                  (uint32_t)tk[i + 3] << 24);
+    }
+    wr(KEY_VALID, rd(KEY_VALID) | 1u << entry);
+}
+
+void mac_key_clear(uint32_t entry)
+{
+    uint32_t base = KEY_BASE + entry * KEY_STRIDE;
+    wr(KEY_VALID, rd(KEY_VALID) & ~(1u << entry));
+    for (uint32_t o = 0; o < KEY_STRIDE; o += 4u) {
+        wr(base + o, 0);
+    }
+}
+
+/*
+ * The station-mode receiving the libraries' association programs, recorded from their own join at the same access point:
+ * the receive policy's word, the queue's and the AID.
+ */
+void mac_receive(uint16_t aid)
+{
+    hal_mac_rx_set_policy(0, 1, 1, 1);
+    hal_mac_set_rxq_policy(0, 1);
+    hal_he_set_mmss_and_aid(0, 0, aid, 0);
+}
+
+/* The channel sniffer on or off, as esp_wifi_set_promiscuous leaves the MAC; the station's receiving needs it off. */
+void mac_sniffer(int on)
+{
+    esp_wifi_set_promiscuous(on ? true : false);
+}
+
 static int ours(const struct desc *d)
 {
     return d >= rx.descs && d < rx.descs + RX_DESCS;
@@ -193,6 +299,26 @@ static void frame(const struct desc *first, uint32_t n)
         return;
     }
     if (!mac_frame_read(b, DESC_LEN(f), &m)) {
+        /*
+         * A frame the MAC's cipher decrypted is shorter than the PHY's length by the MIC it took away, 8 bytes,
+         * and its payload stands in the clear; the CCMP header is left, its packet number for the replay check.
+         * The receiver's address picks the key, as the sending's does; see read_frame.
+         * The MAC hands over nothing that failed its MIC — with the group entry's key wrong the access point's
+         * group frames did not come, the station's relayed broadcast counting none — and the exact length relation
+         * keeps any other shortfall out, to odd.
+         */
+        uint32_t len = rx_ctrl_len(b);
+        uint32_t frame_len = len >= FCS + 8u ? len - FCS - 8u : 0;
+        if (frame_len != 0 && (b[RX_CTRL_SIZE + 1] & 0x40u) &&
+            DESC_LEN(f) == RX_CTRL_SIZE + ((frame_len + 3u) & ~3u)) {
+            m.frame = b + RX_CTRL_SIZE;
+            m.len = frame_len;
+            m.rssi = (int8_t)b[RX_CTRL_RSSI];
+            m.channel = rx.channel;
+            m.decrypted = 1;
+            rx.heard(&m);
+            return;
+        }
         mac_rx_counts.odd++;
         return;
     }
@@ -338,6 +464,7 @@ const char *mac_rx_take(mac_heard_fn *heard)
     if (failed) {
         return failed;
     }
+    mac_rx_counts = (struct mac_rx_counts){ 0 }; /* each take counted on its own, for the log */
     /* The list is made whole again: a previous take may have left the links broken at the frames it collected. */
     for (uint32_t i = 0; i < RX_DESCS; i++) {
         struct desc *d = &rx.descs[i];

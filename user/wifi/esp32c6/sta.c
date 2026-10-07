@@ -28,6 +28,8 @@
 #define STA_FRAME_MAX 1600u /* the longest the station keeps: a whole data frame with its CCMP header and MIC */
 #define STA_RUNS      2u    /* the supplicant's work that may wait at once; see link_run */
 #define STA_STACK     4096u /* room for the supplicant's handshakes, whose depth told() says */
+#define STA_KEY_ENTRY 4u    /* the MAC's key entry the pairwise key takes, as the libraries' association left it */
+#define STA_GRP_ENTRY 1u    /* the group key's entry, which the access point's frames to every station use */
 
 enum { EV_FRAME, EV_RUN, EV_LEAVE };
 
@@ -40,6 +42,7 @@ struct event {
 
 struct buf {
     uint32_t len;
+    uint8_t decrypted; /* the MAC's cipher decrypted the frame; see read_frame */
     uint8_t frame[STA_FRAME_MAX];
 };
 
@@ -61,8 +64,13 @@ static struct {
     struct queue *events, *free; /* the free queue holds the numbers of the buffers free */
     struct buf *bufs;
     uint8_t ap[6]; /* the access point chosen, which the receiving reads once the station has taken it */
+    uint16_t aid;  /* the association's, which the MAC's station-mode receiving names */
     volatile uint32_t beacon_wanted; /* the receiving keeps what the access point sends every station too */
     volatile uint32_t kept, dropped, runs_lost;
+    /* The receiving's drops: copies of a frame already read, and the rest, for the log; see read_frame. */
+    volatile uint32_t drop_copy, drop_other;
+    /* The receiving's data frames by path: the MAC's cipher, and the clear; see read_frame. */
+    volatile uint32_t rx_mac, rx_mac_grp, rx_clear;
     volatile uint32_t state; /* the station's thread writes it, the first thread reads it to send the link's frames */
     /* The access point's RSN and RSNX elements, whole, from its beacon, and the station's, from the supplicant. */
     uint8_t ap_rsn[2 + 255], ap_rsnx[2 + 255];
@@ -158,6 +166,7 @@ static void heard(const struct mac_frame *m)
     struct buf *b = &sta.bufs[e.buf];
     memcpy(b->frame, m->frame, m->len);
     b->len = m->len;
+    b->decrypted = (uint8_t)m->decrypted;
     sta.kept++;
     osi_queue_put(sta.events, &e, 0);
 }
@@ -189,24 +198,35 @@ static void part(uint16_t reason)
 /* What the station counted, into the log, once the receiving is given back. */
 static void told(void)
 {
-    /* Two lines, as drv_say's line holds 160 bytes. */
-    drv_say("sta: frames to the station kept %u, dropped %u; EAPOL frames heard %u, sent %u; "
-            "the supplicant's work lost %u\n",
-            (unsigned)sta.kept, (unsigned)sta.dropped, (unsigned)sta.eapol_heard, (unsigned)sta.eapol_sent,
-            (unsigned)sta.runs_lost);
+    /* Two lines, as drv_say's line holds 160 bytes, and a third for which receiving path each frame took. */
+    drv_say("sta: frames to the station kept %u, dropped %u; read and dropped: copies %u, other %u; "
+            "EAPOL frames heard %u, sent %u; the supplicant's work lost %u\n",
+            (unsigned)sta.kept, (unsigned)sta.dropped, (unsigned)sta.drop_copy, (unsigned)sta.drop_other,
+            (unsigned)sta.eapol_heard, (unsigned)sta.eapol_sent, (unsigned)sta.runs_lost);
     drv_say("sta: the link's frames in %u, out %u, its own back from the access point %u; "
             "the stack's deepest %u bytes of %u\n",
             (unsigned)drv_self->rx_frames, (unsigned)drv_self->tx_frames, (unsigned)sta.relayed,
             (unsigned)osi_stack_used(osi_self()), (unsigned)STA_STACK);
+    drv_say("sta: the data frames through the cipher: by the MAC %u (of them group %u), in the clear %u\n",
+            (unsigned)sta.rx_mac, (unsigned)sta.rx_mac_grp, (unsigned)sta.rx_clear);
     drv_mac_told("sta");
 }
 
 /* The station fails at step: it leaves the access point, gives the receiving back, and stops as drv_must does. */
-static __attribute__((noreturn)) void fail(const char *step, uint32_t detail)
+/* The access point told, the MAC given back to the libraries, and what the station counted, into the log. */
+static void hand_back(void)
 {
     part(MGMT_LEAVING);
+    mac_addr_restore();
+    mac_key_clear(STA_KEY_ENTRY); /* the libraries' stop meets no entry of the own path's */
+    mac_key_clear(STA_GRP_ENTRY);
     mac_rx_give_back();
     told();
+}
+
+static __attribute__((noreturn)) void fail(const char *step, uint32_t detail)
+{
+    hand_back();
     drv_failed(step, detail);
     drv_radio_off();
     drv_stop(CHILD_FAILED);
@@ -224,9 +244,7 @@ static void must(const char *step, int ok)
 /* The station leaves as the root task asks: the access point, then the receiving, the radio, and DRV_LEFT. */
 static __attribute__((noreturn)) void leave(void)
 {
-    part(MGMT_LEAVING);
-    mac_rx_give_back();
-    told();
+    hand_back();
     drv_radio_off();
     drv_say("sta: left, as the root task asked; the radio is off\n");
     drv_stop(DRV_LEFT);
@@ -303,6 +321,7 @@ static int link_set_key(const struct supp_key *k)
     const char *what = key == &sta.gtk ? "the group's" : "the pairwise";
     if (k->alg == SUPP_ALG_NONE) {
         key->set = 0;
+        mac_key_clear(key == &sta.ptk ? STA_KEY_ENTRY : STA_GRP_ENTRY);
         drv_say("sta: %s key removed\n", what);
         return 0;
     }
@@ -320,6 +339,8 @@ static int link_set_key(const struct supp_key *k)
     }
     key->set = 1;
     drv_say("sta: %s key installed, index %d\n", what, key->id);
+    /* The MAC's own entry, so that its receiving takes a protected frame to the station. */
+    mac_key_set(key == &sta.ptk ? STA_KEY_ENTRY : STA_GRP_ENTRY, sta.ap, key->id, key->tk);
     return 0;
 }
 
@@ -481,6 +502,7 @@ static void associate(const struct drv_net *ap)
     if (!answered || a.status != 0) {
         fail("the association answered", answered ? a.status : (uint32_t)ESP_FAIL);
     }
+    sta.aid = a.aid;
     sta.state = ASSOCIATED;
     supp_associated(sta.ap);
 }
@@ -593,17 +615,44 @@ static int read_frame(const struct buf *b, void *arg)
 
     int encrypted = (frame[1] & FC1_PROTECTED) != 0;
     int to_group = (frame[ADDR1] & 0x01) != 0;
-    if (encrypted) {
-        struct sta_key *key = to_group ? &sta.gtk : &sta.ptk; /* the receiver's address picks the key */
-        uint64_t pn;
-        uint8_t id;
-        if (!key->set || !ccmp_decrypt(sta.rx_plain, STA_FRAME_MAX, frame, len, key->tk, &pn, &id, &len) ||
-            id != key->id || pn <= key->rx_pn) {
+    if (b->decrypted) {
+        /*
+         * The MAC's cipher decrypted it and left its CCMP header, whose packet number and key id are checked
+         * as the sending's own counter is; the payload stands in the clear, so the cipher is passed over.
+         * The receiver's address picks the key, as the sending's does.
+         */
+        struct sta_key *key = to_group ? &sta.gtk : &sta.ptk;
+        uint32_t hl = ccmp_header_len(frame); /* 0 for anything but a Data frame, as a protected management one is */
+        uint64_t pn = 0;
+        uint8_t id = 0;
+        if (!key->set || hl == 0 || len < hl + CCMP_HEAD_LEN + 1u || !ccmp_head_read(frame + hl, &pn, &id) ||
+            id != key->id || pn < key->rx_pn) {
+            sta.drop_other++;
+            d->rx_dropped++;
+            return 0;
+        }
+        if (pn == key->rx_pn) {
+            sta.drop_copy++; /* the same frame again: the access point sent it once more */
             d->rx_dropped++;
             return 0;
         }
         key->rx_pn = pn;
+        sta.rx_mac++;
+        if (to_group) {
+            sta.rx_mac_grp++;
+        }
+        memcpy(sta.rx_plain, frame, hl); /* the CCMP header taken away, the header and the payload joined */
+        memmove(sta.rx_plain + hl, frame + hl + CCMP_HEAD_LEN, len - hl - CCMP_HEAD_LEN);
+        sta.rx_plain[1] &= (uint8_t)~FC1_PROTECTED; /* the MAC decrypted it: the frame goes on in the clear */
         frame = sta.rx_plain;
+        len -= CCMP_HEAD_LEN;
+    } else if (encrypted) {
+        /* A protected frame the MAC's cipher left undecrypted: no run had one, and nothing here can check it. */
+        sta.drop_other++;
+        d->rx_dropped++;
+        return 0;
+    } else {
+        sta.rx_clear++;
     }
     if (!mgmt_data_read(frame, len, d->mac, sta.ap, &p)) {
         return 0;
@@ -613,7 +662,8 @@ static int read_frame(const struct buf *b, void *arg)
         supp_rx_eapol(p.src, p.body, p.len);
         return 0;
     }
-    if (!encrypted && sta.ptk.set) {
+    if (!b->decrypted && sta.ptk.set) {
+        sta.drop_other++;
         d->rx_dropped++;
         return 0;
     }
@@ -665,12 +715,20 @@ static void sta_main(void *arg)
             ap->bssid[2], ap->bssid[3], ap->bssid[4], ap->bssid[5], (unsigned)ap->channel);
     /* The channel a beacon named, which mac_channel may refuse, tuned before the MAC is the driver's. */
     drv_must_mac("the access point's channel", mac_channel(ap->channel));
-    /* The station's data frames, unicast to it or to the group, which the scan's management filter leaves out. */
-    drv_must_mac("every data frame heard", mac_hear(MAC_HEAR_MGMT | MAC_HEAR_DATA));
+    /*
+     * The station's own address and the access point's, set before the authentication, and the station-mode
+     * receiving the libraries' association programs; the scan's channel sniffer is left and the MAC's list taken.
+     * See mac.c.
+     */
+    mac_station(drv_self->mac, sta.ap);
+    mac_receive(0);
+    mac_sniffer(0);
     drv_must_mac("the MAC receives into the driver's list", mac_rx_take(heard));
     security(d, ap);
     authenticate();
     associate(ap);
+    /* The association's AID, the receiving's own; see mac.c. */
+    mac_receive(sta.aid);
     handshake();
     d->joined = *ap;
     d->authmode = WIFI_AUTH_WPA2_PSK;

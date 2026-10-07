@@ -93,26 +93,25 @@ what is left:
   and sends a probe by `tx=own`, the access point answering it.
   The station's logic is the driver's own too, on hostap; `user/wifi/NOTES.md` says why.
   With `sta=own` it associates, runs the supplicant's 4-way handshake over a link of its own, see `supp.h`,
-  for WPA2's personal alone, installs the keys it derives, and serves the link,
-  its data frames encrypted and decrypted in software CCMP, `ccmp.c` on hostap's `aes-ccm.c`.
-  No protected frame to the station itself comes in, so it takes no address:
-  at the home network's WPA2/WPA3 access point its frames under the pairwise key are taken,
-  its broadcasts coming back from the access point, and the network's group frames come in under the group key,
-  but its DHCP offer never does, while the MAC hands on the access point's protected frames to other stations,
-  and its EAPOL to the station in the clear.
-  The MAC seems to keep a protected frame to its own address from the list when its key registers hold no key for it,
-  so those registers, or a way to have such a frame passed on as it is, come next on the data path.
+  for WPA2's personal alone, installs the keys it derives in the MAC's own cipher and in the station, and serves the link.
+  The receiving is the MAC's: its own station address and the access point's are set before the authentication,
+  the libraries' channel sniffer is left, and the MAC decrypts each protected frame, leaving its CCMP header
+  for the replay check, so the receiving runs no software CCMP; `ccmp_decrypt` stays for `ccmp-test` alone.
+  The sending is software CCMP still, `ccmp.c` on hostap's `aes-ccm.c`, under the pairwise key;
+  with the engine word set the access point took none of the sending, so it is left unset;
+  the MAC's own cipher is in `NOTES.md`.
   A rekey's EAPOL frame is protected and is read, but its keys race `link_set_key` in the station's thread
   against `eth_send` in the first on the pairwise key, and the reply to it still goes out in the clear.
   The station's data go at 1 Mb/s, the rate `mac_tx` programs for management frames.
-  `mac_hear(MAC_HEAR_MGMT | MAC_HEAR_DATA)` passes every data frame on the channel, of any BSS,
-  through `mac.c` and the four receive buffers; the MAC's own BSSID filter, which the libraries set when they associate,
-  would spare them.
   Its receiving keeps one replay counter a key, where 802.11 keeps one a TID for QoS data,
   so a frame of one access category overtaken by a later-numbered one of another is dropped.
+  A group key rekey installs one entry, so the frames the access point still sends under the old key
+  are dropped until it switches.
   Then WPA3: SAE in the authentication, run in the station's thread, whose stack is sized for WPA2's handshakes,
   and management frames protected, the station's deauthentication sent under CCMP,
-  and an unprotected one from the access point ignored.
+  and an unprotected one from the access point ignored. The own supplicant offers no PMF yet,
+  so no access point protects its management frames to it; when one does, the protected management frames
+  the MAC decrypts need a reading of their own, an SA Query among them, which `read_frame` drops now.
   The MAC's bring-up stays the libraries': the own path runs between their `esp_wifi_start` and `esp_wifi_stop`,
   so what those do to the modem and the MAC is the last of `pp` to read before it can go.
   Its frame completion spins in the caller's thread while the slot is armed, and borrows the libraries' slot 0;
@@ -409,6 +408,9 @@ what is left:
   planting through the refresh's `carry` would make the two agree.
 
 ## Code
+
+- The four bytes little-endian, `le32`, is written three times, in `user/wifi/esp32c6/mac.c`, `main.c` and `user/wifi/wlan.c`;
+  one in `user/lib/` would serve all three.
 
 - The runs that check the ESP32-C6's `mac.c` and the station's own code are `WIFI_CONFIG` variants run by hand,
   named in `CLAUDE.md`; a target that runs them all, `make BOARD=esp32c6 wifi-esp32c6-mac`, would hold them in one place.

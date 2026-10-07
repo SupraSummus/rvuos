@@ -2,8 +2,9 @@
 #define RVUOS_WIFI_CCMP_H
 
 /*
- * IEEE 802.11's CCMP in software, on hostap's CCM, crypto/aes-ccm.c: the data path of the driver's own station
- * while the MAC's key registers are not programmed yet; see TODO.md.
+ * IEEE 802.11's CCMP in software, on hostap's CCM, crypto/aes-ccm.c: the sending of the driver's own station,
+ * and both directions of its host test. The receiving is the MAC's cipher, see mac.c; the decryption here is
+ * what the test holds the encryption against. See TODO.md.
  * A frame is the 802.11 frame without its FCS, as mac.c and mgmt.c carry it, and its header is
  * the 24 bytes of a Data frame or the 26 of a QoS Data one, without an Address 4 or an HT control field.
  * The CCMP header the two add is the 8 bytes after the frame's own header, and the MIC the 8 bytes at its end,
@@ -21,6 +22,12 @@
 #define CCMP_MIC_LEN  8u  /* the MIC the frame gains */
 
 /*
+ * The 802.11 header's length of the frame at h: the 24 bytes of a Data frame or the 26 of a QoS Data one,
+ * or 0 for any other frame, which a protected management frame is and which has no CCMP header here.
+ */
+uint32_t ccmp_header_len(const uint8_t *h);
+
+/*
  * The len bytes of the frame at in encrypted into out, which holds at least len + 16 bytes:
  * the header with its Protected bit set, the CCMP header, the ciphertext and the MIC, len + 16 bytes, returned.
  * The frame's payload begins after its header, whose length the frame control gives.
@@ -29,6 +36,13 @@
  */
 uint32_t ccmp_encrypt(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t len, const uint8_t *tk, uint64_t pn,
                       uint8_t keyid);
+
+/*
+ * The packet number and key id the CCMP header at c carries, the inverse of the header ccmp_encrypt writes;
+ * 0 if the Extended IV bit is clear, so a frame without a CCMP header reads as none.
+ * A receiver that takes a frame the MAC's cipher already decrypted reads its header back with this.
+ */
+int ccmp_head_read(const uint8_t *c, uint64_t *pn, uint8_t *keyid);
 
 /*
  * The len bytes of the protected frame at in decrypted into out, which holds at least len bytes:

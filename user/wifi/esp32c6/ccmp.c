@@ -25,7 +25,7 @@
 #define EXT_IV         0x20u /* the Extended IV bit of the CCMP header's Key ID octet, always set */
 
 /* A Data frame's header length: 24 bytes, 26 with the QoS Control field, or 0 for any other frame. */
-static uint32_t header_len(const uint8_t *h)
+uint32_t ccmp_header_len(const uint8_t *h)
 {
     uint16_t fc = (uint16_t)h[0] | (uint16_t)h[1] << 8;
     if (WLAN_FC_GET_TYPE(fc) != WLAN_FC_TYPE_DATA) {
@@ -44,7 +44,7 @@ static uint32_t header_len(const uint8_t *h)
 /* The frame's QoS Data subtype: its header is two bytes longer and its TID enters the nonce and the AAD. */
 static int is_qos(const uint8_t *h)
 {
-    return header_len(h) == 26u;
+    return ccmp_header_len(h) == 26u;
 }
 
 /*
@@ -99,10 +99,26 @@ static void head(uint8_t *c, uint64_t pn, uint8_t keyid)
     c[7] = (uint8_t)(pn >> 40);
 }
 
+/*
+ * The packet number and key id the CCMP header at c carries, head's inverse;
+ * 0 if the Extended IV bit is clear, so a frame without a CCMP header reads as none.
+ * The packet number's six bytes are not contiguous, which is the reading that is easy to get wrong.
+ */
+int ccmp_head_read(const uint8_t *c, uint64_t *pn, uint8_t *keyid)
+{
+    if ((c[3] & EXT_IV) == 0) {
+        return 0;
+    }
+    *pn = (uint64_t)c[0] | (uint64_t)c[1] << 8 | (uint64_t)c[4] << 16 | (uint64_t)c[5] << 24 |
+          (uint64_t)c[6] << 32 | (uint64_t)c[7] << 40;
+    *keyid = (uint8_t)((c[3] >> 6) & 3u);
+    return 1;
+}
+
 uint32_t ccmp_encrypt(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t len, const uint8_t *tk, uint64_t pn,
                       uint8_t keyid)
 {
-    uint32_t hdrlen = header_len(in);
+    uint32_t hdrlen = ccmp_header_len(in);
     if (hdrlen == 0 || hdrlen > len || len > size || size - len < CCMP_HEAD_LEN + CCMP_MIC_LEN) {
         return 0;
     }
@@ -132,16 +148,18 @@ uint32_t ccmp_encrypt(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t l
 int ccmp_decrypt(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t len, const uint8_t *tk, uint64_t *pn,
                  uint8_t *keyid, uint32_t *out_len)
 {
-    uint32_t hdrlen = header_len(in);
-    if (hdrlen == 0 || hdrlen + CCMP_HEAD_LEN + CCMP_MIC_LEN > len || len > size ||
-        (in[hdrlen + 3] & EXT_IV) == 0) {
+    uint32_t hdrlen = ccmp_header_len(in);
+    if (hdrlen == 0 || hdrlen + CCMP_HEAD_LEN + CCMP_MIC_LEN > len || len > size) {
         return 0;
     }
     int qos = is_qos(in);
     const uint8_t *c = in + hdrlen;
     uint32_t plen = len - hdrlen - CCMP_HEAD_LEN - CCMP_MIC_LEN;
-    uint64_t p = (uint64_t)c[0] | (uint64_t)c[1] << 8 | (uint64_t)c[4] << 16 | (uint64_t)c[5] << 24 |
-                 (uint64_t)c[6] << 32 | (uint64_t)c[7] << 40;
+    uint64_t p;
+    uint8_t id;
+    if (!ccmp_head_read(c, &p, &id)) {
+        return 0;
+    }
     uint8_t a[AAD_MAX], v[CCMP_NONCE_LEN];
 
     memcpy(out, in, hdrlen);
@@ -153,7 +171,7 @@ int ccmp_decrypt(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t len, c
         return 0;
     }
     *pn = p;
-    *keyid = (uint8_t)((c[3] >> 6) & 3u);
+    *keyid = id;
     *out_len = hdrlen + plen;
     return 1;
 }

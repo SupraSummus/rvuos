@@ -60,6 +60,11 @@ static void known_answer(void)
               same(back, in, sizeof(in)) && pn == PN && keyid == 0,
           "IEEE 802.11's CCMP vector decrypted");
 
+    /* The header alone, read back: its packet number's six bytes all differ, so a swapped pair fails. */
+    uint64_t hpn = 0;
+    uint8_t hkeyid = 0xff;
+    check(ccmp_head_read(known + 24, &hpn, &hkeyid) && hpn == PN && hkeyid == 0, "the CCMP header read back");
+
     in[1] |= 0x04; /* More Fragments */
     n = ccmp_encrypt(out, sizeof(out), in, sizeof(in), tk, PN, 0);
     check(n == sizeof(known) && same(out + 52, mf_mic, sizeof(mf_mic)), "More Fragments enters the MIC");

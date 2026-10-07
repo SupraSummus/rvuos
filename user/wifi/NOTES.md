@@ -534,29 +534,32 @@ so the own station's runs there need that access point configured with `sae=0`, 
 
 ## The station's own data path
 
-Once the handshake has installed the keys, the own station serves the link, and the network's frames cross it
-encrypted and decrypted in software CCMP, `ccmp.c` on hostap's CCM; see `TODO.md`.
+Once the handshake has installed the keys, the own station serves the link: the MAC's cipher takes the protected
+frames it receives, and its sending is software CCMP, `ccmp.c` on hostap's CCM; see `TODO.md`.
 
 **The keys.**
 `link_set_key` copies the pairwise and group temporal keys into the station with their key ids,
 where it wrote only a line before, and each keeps the receive sequence counter the handshake gives,
-and the packet number it sends.
+and the packet number it sends. It writes the same key into the MAC's own entry, `mac_key_set`
+(`STA_KEY_ENTRY` 4 for the pairwise, `STA_GRP_ENTRY` 1 for the group), whose valid bit is cleared first,
+so a rekey never leaves half an entry live.
 A station's frame to the access point is addressed to it, so it goes under the pairwise key
-however its own destination, Address 3, is addressed; only the receiving picks the key by Address 1,
+however its own destination, Address 3, is addressed; the receiving picks the key by Address 1,
 the group's for a group address.
 
 **The frames.**
-An Ethernet frame is laid into a Data frame, encrypted and sent; a received one is decrypted once,
-in the station's thread, handed to the supplicant if it is EAPOL, else made an Ethernet frame for the link.
-No thread decrypts in the interrupt, a frame whose packet number does not advance is dropped,
-and a data frame left in the clear once the pairwise key is set is not the access point's.
-The access point sends a station's group frame to the group again, the station included;
+An Ethernet frame is laid into a Data frame, encrypted in software and sent.
+A received protected frame comes to `read_frame` already decrypted by the MAC, its CCMP header left,
+so the packet number is read back with `ccmp_head_read` for the replay check and the cipher is passed over;
+the header is taken away and the frame handed to the supplicant if it is EAPOL, else made an Ethernet frame.
+A protected frame the MAC did not decrypt, and a data frame left in the clear once the pairwise key is set,
+are dropped. The access point sends a station's group frame to the group again, the station included;
 the station counts its own and hands them no further, as FreeBSD's `net80211` drops them.
 
-**The filter.**
-A scan hears management frames alone, and the station kept that filter, so the access point's broadcast frames
-never reached it; it asks for data too before it takes the receiving over.
-A frame to the station itself came through anyway, which is why the handshake worked with the management filter alone.
+**The receiving's mode.**
+A scan hears through the libraries' channel sniffer; the station leaves it and takes the receiving in station
+mode, setting its own address, the access point's and the AID through `mac_receive`.
+The MAC then hands up its own frames alone, decrypting them, where the sniffer passed every BSS's.
 
 **What the board showed.**
 Against the Pico 2 W's own access point, configured with `sae=0`, the station associated, installed the pairwise and group keys,
@@ -567,6 +570,21 @@ Nothing unicast came from the access point, so the pairwise key's receiving is n
 that access point serves none.
 The home network's WPA2 access point offers the group cipher TKIP, which the station refuses.
 Its WPA2/WPA3 one takes the station by WPA2, which the station picks wherever it is offered,
-and there too its broadcasts come back and the network's group frames come in;
-but no frame to the station itself does once the keys are set, its DHCP offer included,
-though the MAC hands on that access point's protected frames to other stations; see `TODO.md`.
+and there too its broadcasts come back and the network's group frames come in.
+No frame to the station itself did until the own path set the MAC's own station address and the BSSID,
+which the libraries' association writes (`hal_mac_set_addr` and `hal_mac_set_bssid` of `hal_mac.o`,
+at MAC + `0x5c`/`0x60` and + `0x00`/`0x04`), and took the receiving in station mode, its address set before
+the authentication, with the libraries' channel sniffer left; `mac.c`'s `mac_station` sets the two addresses
+and `mac_addr_restore` gives the libraries their MAC back at the leave.
+`mac_key_set` writes the key into the MAC's own entry, the one `hal_crypto_set_key_entry` writes:
+`0x600a5800 + entry * 0x28`, `+0x00` the peer address's low four bytes, `+0x04` its high two and a control word
+above bit 16 (`0x086c` for a pairwise key, `0x88cc` for a group key), `+0x08` the temporal key,
+and the entry's valid bit in a bit of `0x600a4814`.
+The MAC decrypts each protected frame then, leaving its CCMP header, so `read_frame` keeps the packet number
+and skips the cipher itself: with it the station takes its DHCP offer and an address and its echo answers.
+The engine word the libraries' `hal_crypto_enable(0, 3, 0, 0)` writes, `0x30103` at `KEY_CFG0` (`0x600a4800`,
+its other select `0x600a4804`), is left unset: with it set the access point took none of the station's sending
+at all, and the sending stays `ccmp.c`'s.
+A run with the group entry's temporal key one byte wrong had the access point's group frames not come at all,
+its own relayed broadcast counting none, where the right key had them come, so the MAC hands over nothing
+that failed its MIC, which the reading of a short frame rests on.

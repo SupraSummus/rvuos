@@ -34,6 +34,7 @@ struct mac_frame {
     uint32_t len;
     int rssi;         /* dBm */
     uint32_t channel; /* the channel mac_channel last tuned the radio to, or 0 if it did not */
+    int decrypted;    /* the MAC's cipher decrypted it: the payload is in the clear, the Protected bit kept */
 };
 
 typedef void mac_heard_fn(const struct mac_frame *f);
@@ -73,6 +74,24 @@ const char *mac_hear(uint32_t what);
 /* 0, or the step that failed. */
 const char *mac_rx_take(mac_heard_fn *heard);
 void mac_rx_give_back(void);
+
+/*
+ * The own station's receiving, in place of the libraries': the address and the BSSID (mac_station),
+ * a key entry the MAC's cipher holds (mac_key_set), the station-mode receive policy (mac_receive),
+ * and the channel sniffer left (mac_sniffer) before the driver's list is taken; see mac.c.
+ */
+void mac_key_set(uint32_t entry, const uint8_t addr[6], uint8_t id, const uint8_t tk[16]);
+void mac_key_clear(uint32_t entry);
+void mac_receive(uint16_t aid);
+void mac_sniffer(int on);
+
+/*
+ * The MAC's own station address and the access point's. The libraries set both when their station associates;
+ * the own path associates by its own code, so it must set them, or the MAC matches no unicast frame to the station.
+ * mac_addr_restore gives the libraries their MAC back, at the station's leave, before mac_rx_give_back.
+ */
+void mac_station(const uint8_t sta[6], const uint8_t bssid[6]);
+void mac_addr_restore(void);
 
 /*
  * The radio on another channel, MAC_CHANNEL_FIRST to MAC_CHANNEL_LAST, as the libraries' chm_phy_change_channel
