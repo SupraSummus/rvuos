@@ -550,7 +550,8 @@ the group's for a group address.
 **The frames.**
 An Ethernet frame is laid into a Data frame, encrypted in software and sent.
 A received protected frame comes to `read_frame` already decrypted by the MAC, its CCMP header left,
-so the packet number is read back with `ccmp_head_read` for the replay check and the cipher is passed over;
+so the packet number is read back with `ccmp_head_read` for the replay check, one counter a priority,
+802.11's traffic identifier, as the nonce and the additional data carry it, and the cipher is passed over;
 the header is taken away and the frame handed to the supplicant if it is EAPOL, else made an Ethernet frame.
 A protected frame the MAC did not decrypt, and a data frame left in the clear once the pairwise key is set,
 are dropped. The access point sends a station's group frame to the group again, the station included;

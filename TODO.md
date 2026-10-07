@@ -103,8 +103,6 @@ what is left:
   A rekey's EAPOL frame is protected and is read, but its keys race `link_set_key` in the station's thread
   against `eth_send` in the first on the pairwise key, and the reply to it still goes out in the clear.
   The station's data go at 1 Mb/s, the rate `mac_tx` programs for management frames.
-  Its receiving keeps one replay counter a key, where 802.11 keeps one a TID for QoS data,
-  so a frame of one access category overtaken by a later-numbered one of another is dropped.
   A group key rekey installs one entry, so the frames the access point still sends under the old key
   are dropped until it switches.
   Then WPA3: SAE in the authentication, run in the station's thread, whose stack is sized for WPA2's handshakes,

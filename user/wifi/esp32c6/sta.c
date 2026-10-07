@@ -50,14 +50,16 @@ struct buf {
 enum { NONE, AUTHENTICATED, ASSOCIATED };
 
 /*
- * A key the handshake installed, with the packet numbers CCMP uses: one for sending, one for receiving,
- * the last received being the replay counter, which a frame's must exceed.
+ * A key the handshake installed, with the packet numbers CCMP uses: one for sending, and a replay counter
+ * a priority, the last received of that priority, which a frame's must exceed; see ccmp_replay and ccmp_priority.
+ * So a frame of one access category overtaken by a later-numbered one of another is not a replay.
  */
 struct sta_key {
     volatile int set; /* written by the station's thread, read by the receiving's once it serves */
     uint8_t tk[CCMP_TK_LEN];
     uint8_t id;
-    uint64_t tx_pn, rx_pn;
+    uint64_t tx_pn;
+    uint64_t rx_pn[CCMP_REPLAY_COUNT];
 };
 
 static struct {
@@ -332,11 +334,13 @@ static int link_set_key(const struct supp_key *k)
     memcpy(key->tk, k->key, CCMP_TK_LEN);
     key->id = (uint8_t)(k->idx & 3);
     key->tx_pn = 0;
-    key->rx_pn = 0;
     /* The receive sequence counter the handshake gives, little-endian as the CCMP header's packet number. */
+    uint64_t rsc = 0;
     for (uint32_t i = 0; k->seq != 0 && i < k->seq_len && i < 6u; i++) {
-        key->rx_pn |= (uint64_t)k->seq[i] << (8u * i);
+        rsc |= (uint64_t)k->seq[i] << (8u * i);
     }
+    /* Every priority starts from it: a group key's RSC bounds the frames sent before the join, whatever priority. */
+    ccmp_replay_start(key->rx_pn, rsc);
     key->set = 1;
     drv_say("sta: %s key installed, index %d\n", what, key->id);
     /* The MAC's own entry, so that its receiving takes a protected frame to the station. */
@@ -626,17 +630,21 @@ static int read_frame(const struct buf *b, void *arg)
         uint64_t pn = 0;
         uint8_t id = 0;
         if (!key->set || hl == 0 || len < hl + CCMP_HEAD_LEN + 1u || !ccmp_head_read(frame + hl, &pn, &id) ||
-            id != key->id || pn < key->rx_pn) {
+            id != key->id) {
             sta.drop_other++;
             d->rx_dropped++;
             return 0;
         }
-        if (pn == key->rx_pn) {
-            sta.drop_copy++; /* the same frame again: the access point sent it once more */
+        int replay = ccmp_replay(pn, ccmp_priority(frame), key->rx_pn);
+        if (replay != CCMP_REPLAY_TAKEN) {
+            if (replay == CCMP_REPLAY_COPY) {
+                sta.drop_copy++; /* the same frame again: the access point sent it once more */
+            } else {
+                sta.drop_other++;
+            }
             d->rx_dropped++;
             return 0;
         }
-        key->rx_pn = pn;
         sta.rx_mac++;
         if (to_group) {
             sta.rx_mac_grp++;

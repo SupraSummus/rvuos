@@ -48,6 +48,15 @@ static int is_qos(const uint8_t *h)
 }
 
 /*
+ * The frame's priority: the traffic identifier its QoS Control field names, or 0 without one.
+ * The nonce, the additional data and the replay counter's index all read it here, and nowhere else.
+ */
+uint32_t ccmp_priority(const uint8_t *h)
+{
+    return is_qos(h) ? (h[24] & 0x0fu) : 0u;
+}
+
+/*
  * The additional authentication data of the frame at h: Frame Control, Address 1 to 3 and Sequence Control,
  * then the QoS Control field's TID alone;
  * the Duration field is not part of it, which is why it is built here rather than masked in place.
@@ -69,7 +78,7 @@ static uint32_t aad(uint8_t *a, const uint8_t *h, int qos)
     a[20] = (uint8_t)sc;
     a[21] = (uint8_t)(sc >> 8);
     if (qos) {
-        a[22] = h[24] & 0x0Fu; /* the TID alone; the rest of the QoS Control field is reserved */
+        a[22] = (uint8_t)ccmp_priority(h); /* the priority alone; the rest of the QoS Control field is reserved */
         a[23] = 0;
         return 24u;
     }
@@ -77,9 +86,9 @@ static uint32_t aad(uint8_t *a, const uint8_t *h, int qos)
 }
 
 /* The nonce of the frame at h: the priority, Address 2, and the packet number most significant octet first. */
-static void nonce(uint8_t *n, const uint8_t *h, uint64_t pn, int qos)
+static void nonce(uint8_t *n, const uint8_t *h, uint64_t pn)
 {
-    n[0] = qos ? h[24] & 0x0Fu : 0;
+    n[0] = (uint8_t)ccmp_priority(h);
     memcpy(n + 1, h + 10, 6); /* Address 2 */
     for (uint32_t i = 0; i < 6; i++) {
         n[7 + i] = (uint8_t)(pn >> (8u * (5u - i)));
@@ -115,6 +124,30 @@ int ccmp_head_read(const uint8_t *c, uint64_t *pn, uint8_t *keyid)
     return 1;
 }
 
+/* The replay check, one counter a priority; see ccmp.h. */
+int ccmp_replay(uint64_t pn, uint32_t idx, uint64_t *counters)
+{
+    if (idx >= CCMP_REPLAY_COUNT) {
+        return CCMP_REPLAY_OLD;
+    }
+    if (pn < counters[idx]) {
+        return CCMP_REPLAY_OLD;
+    }
+    if (pn == counters[idx]) {
+        return CCMP_REPLAY_COPY;
+    }
+    counters[idx] = pn;
+    return CCMP_REPLAY_TAKEN;
+}
+
+/* Every counter set to rsc; see ccmp.h. */
+void ccmp_replay_start(uint64_t *counters, uint64_t rsc)
+{
+    for (uint32_t i = 0; i < CCMP_REPLAY_COUNT; i++) {
+        counters[i] = rsc;
+    }
+}
+
 uint32_t ccmp_encrypt(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t len, const uint8_t *tk, uint64_t pn,
                       uint8_t keyid)
 {
@@ -129,7 +162,7 @@ uint32_t ccmp_encrypt(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t l
     memcpy(out, in, hdrlen);
     out[1] |= (uint8_t)(WLAN_FC_PROTECTED >> 8); /* the Protected bit, whose second octet holds it */
     uint32_t alen = aad(a, out, qos);
-    nonce(v, out, pn, qos);
+    nonce(v, out, pn);
 
     /*
      * hostap's CCM encrypts only into a buffer of its own, and writes a whole block for a last one part filled,
@@ -165,7 +198,7 @@ int ccmp_decrypt(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t len, c
     memcpy(out, in, hdrlen);
     out[1] &= (uint8_t)~(WLAN_FC_PROTECTED >> 8);
     uint32_t alen = aad(a, out, qos);
-    nonce(v, out, p, qos);
+    nonce(v, out, p);
     if (aes_ccm_ad(tk, CCMP_TK_LEN, v, CCMP_MIC_LEN, c + CCMP_HEAD_LEN, plen, a, alen, in + len - CCMP_MIC_LEN,
                    out + hdrlen) != 0) {
         return 0;

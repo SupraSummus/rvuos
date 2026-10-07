@@ -130,11 +130,43 @@ static void refuses(void)
           "a frame without the extended IV refused");
 }
 
+/*
+ * The replay check, one counter a priority: a frame of one TID overtaken by a later-numbered one of another
+ * is taken, the same number again is a copy, and one below its TID's counter is a replay;
+ * a Data frame without QoS shares TID 0's counter, and a counter starts from the handshake's receive sequence counter.
+ */
+static void replay(void)
+{
+    uint64_t c[CCMP_REPLAY_COUNT] = { 0 };
+    uint8_t qos6[26] = { 0x88 }, qos0[26] = { 0x88 }, data[24] = { 0x08 };
+    qos6[24] = 6;
+    uint32_t p6 = ccmp_priority(qos6), p0 = ccmp_priority(qos0), pd = ccmp_priority(data);
+    check(p6 == 6 && p0 == 0 && pd == 0, "the priority is a QoS frame's TID, or 0 without one");
+
+    check(ccmp_replay(10, p6, c) == CCMP_REPLAY_TAKEN, "the first frame of a TID taken");
+    check(ccmp_replay(5, p0, c) == CCMP_REPLAY_TAKEN, "another TID's lower number taken");
+    check(ccmp_replay(11, p6, c) == CCMP_REPLAY_TAKEN, "the first TID again, above, taken");
+    check(ccmp_replay(11, p6, c) == CCMP_REPLAY_COPY, "the same number again a copy");
+    check(ccmp_replay(9, p6, c) == CCMP_REPLAY_OLD, "below the TID's counter a replay");
+    check(ccmp_replay(4, p0, c) == CCMP_REPLAY_OLD, "another TID's counter is its own");
+    check(ccmp_replay(6, pd, c) == CCMP_REPLAY_TAKEN, "a Data frame's number extends TID 0's counter");
+    check(ccmp_replay(6, p0, c) == CCMP_REPLAY_COPY, "and they share one counter");
+
+    /* A key's counters start from the handshake's receive sequence counter, and an index past them reads as old. */
+    uint64_t start[CCMP_REPLAY_COUNT];
+    ccmp_replay_start(start, 100);
+    check(ccmp_replay(100, p6, start) == CCMP_REPLAY_COPY, "a frame at the RSC is a copy");
+    check(ccmp_replay(99, p6, start) == CCMP_REPLAY_OLD, "one below the RSC a replay");
+    check(ccmp_replay(101, p6, start) == CCMP_REPLAY_TAKEN, "one above the RSC taken");
+    check(ccmp_replay(1, CCMP_REPLAY_COUNT, start) == CCMP_REPLAY_OLD, "an index past the counters reads as old");
+}
+
 int main(void)
 {
     known_answer();
     qos();
     refuses();
+    replay();
     printf("ccmp-test: %s\n", failures ? "FAILED" : "ok");
     return failures != 0;
 }

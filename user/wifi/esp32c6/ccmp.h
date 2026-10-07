@@ -28,6 +28,33 @@
 uint32_t ccmp_header_len(const uint8_t *h);
 
 /*
+ * The priority of the frame at h: the traffic identifier a QoS Data frame's Control field names, or 0.
+ * It is the byte of the nonce and the additional data that CCMP authenticates, and so the counter
+ * a received frame's packet number is checked against; a frame without a QoS Control field has priority 0.
+ */
+uint32_t ccmp_priority(const uint8_t *h);
+
+/*
+ * The replay counters a key keeps: one a priority, and one more, CCMP_REPLAY_COUNT - 1, reserved for a robust
+ * management frame, which read_frame drops today and a protected one under PMF will want.
+ */
+#define CCMP_REPLAY_COUNT 17u
+
+/* The replay check's outcomes, from ccmp_replay. */
+#define CCMP_REPLAY_TAKEN 1    /* above the counter, which is then set to it */
+#define CCMP_REPLAY_COPY  0    /* equal to it: the same frame again */
+#define CCMP_REPLAY_OLD   (-1) /* below it: a replay */
+
+/*
+ * pn against the counters at idx, which hold CCMP_REPLAY_COUNT of them: CCMP_REPLAY_TAKEN, the counter set to pn,
+ * CCMP_REPLAY_COPY if pn equals it, or CCMP_REPLAY_OLD if it is below; an index past the counters reads as old.
+ */
+int ccmp_replay(uint64_t pn, uint32_t idx, uint64_t *counters);
+
+/* Every counter set to rsc, the receive sequence counter a handshake gives a key, so its frames start above it. */
+void ccmp_replay_start(uint64_t *counters, uint64_t rsc);
+
+/*
  * The len bytes of the frame at in encrypted into out, which holds at least len + 16 bytes:
  * the header with its Protected bit set, the CCMP header, the ciphertext and the MIC, len + 16 bytes, returned.
  * The frame's payload begins after its header, whose length the frame control gives.
