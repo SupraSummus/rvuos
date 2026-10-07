@@ -14,7 +14,9 @@ nor a call through a pointer other than the table's slots; the report counts tho
 --i2c lists the calls to the ROM's analog I2C functions with their constant arguments,
 --functions every function reached and the blocks it touches.
 
-With --all it follows from every function of the image instead,
+With --from it follows from the functions it names instead, each given by its symbol,
+as the Wi-Fi libraries' bring-up starts from esp_wifi_init_internal, esp_wifi_set_mode and esp_wifi_start;
+with --all it follows from every function of the image,
 for an image that reaches much of its code only through pointers,
 as the Wi-Fi driver of user/wifi/esp32c6/ reaches the libraries' tasks and their interrupt's handler;
 the linker kept only functions something names, so this is what the image may reach.
@@ -22,7 +24,7 @@ Code past the end of its function's symbol is reported apart, as the name plus a
 such is a library function weakened so that one of the driver's takes its place,
 whose code stays behind in a section it shares with others.
 
-Usage: tools/phymap.py [--objdump llvm-objdump] [--i2c] [--functions] [--all] image.elf rom.elf board.h
+Usage: tools/phymap.py [--objdump llvm-objdump] [--i2c] [--functions] [--all] [--from name]... image.elf rom.elf board.h
 """
 
 import argparse
@@ -143,7 +145,7 @@ def disassemble(objdump, path):
 
 
 class Map:
-    def __init__(self, objdump, image, rom, everything):
+    def __init__(self, objdump, image, rom, everything, starts=()):
         self.funcs = {}
         h, r = Elf(image), Elf(rom)
         for origin, path, elf in (("rom", rom, r), ("lib", image, h)):
@@ -162,8 +164,15 @@ class Map:
         first = (self.table_base - base) // 4
         self.slots = {i: {words[first + i]} - {0} for i in range(self.table_slots)}
         self.own_slots = set()
+        self.symbols = h.symbols
         self.roots = ([a for a, f in self.funcs.items() if f[2] == "lib"] if everything
-                      else [h.symbols["phyblob_main"]])
+                      else [self.symbol(n) for n in starts] if starts
+                      else [self.symbol("phyblob_main")])
+
+    def symbol(self, name):
+        if name not in self.symbols:
+            sys.exit(f"phymap: no symbol {name} in the image")
+        return self.symbols[name]
 
     def name(self, addr):
         return self.funcs[addr][0] if addr in self.funcs else f"{addr:#x}"
@@ -304,16 +313,19 @@ def main():
     ap.add_argument("--i2c", action="store_true", help="list the analog I2C calls")
     ap.add_argument("--functions", action="store_true", help="list every function reached")
     ap.add_argument("--all", action="store_true", help="follow from every function of the image")
+    ap.add_argument("--from", dest="starts", action="append", default=[], metavar="NAME",
+                    help="follow from this function of the image, rather than from phyblob_main")
     ap.add_argument("image")
     ap.add_argument("rom")
     ap.add_argument("board")
     args = ap.parse_args()
 
-    m = Map(args.objdump, args.image, args.rom, args.all)
+    m = Map(args.objdump, args.image, args.rom, args.all, args.starts)
     m.reach()
     found = sorted(m.found)
     lib = sum(m.funcs[a][2] == "lib" for a in found)
     origin, image = (("every function of the image", "the image") if args.all
+                     else (", ".join(args.starts), "the image") if args.starts
                      else ("phyblob_main", "the harness and libphy.a"))
     print(f"phymap: {len(found)} functions reached from {origin}, {lib} of {image}, {len(found) - lib} of the ROM;")
     print(f"  libphy.a fills {len(m.own_slots)} of the ROM's {m.table_slots} slots with its own functions, "
