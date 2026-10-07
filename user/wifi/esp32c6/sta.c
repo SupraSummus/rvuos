@@ -69,6 +69,14 @@ struct group_key {
     uint64_t rx_pn[CCMP_REPLAY_COUNT];
 };
 
+/* The management group key (IGTK): its bytes and id, and the packet number BIP checks a received frame against. */
+struct igtk {
+    int set;
+    uint8_t id;
+    uint8_t tk[CCMP_TK_LEN];
+    uint64_t ipn;
+};
+
 static struct {
     struct queue *events, *free; /* the free queue holds the numbers of the buffers free */
     struct buf *bufs;
@@ -87,15 +95,20 @@ static struct {
     uint8_t rsn[80], rsnx[8];
     int has_rsnx;
     int completed; /* the supplicant's handshakes are done */
+    int pmf;       /* management frames protected, from the supplicant's choice; see part */
     uint32_t eapol_heard, eapol_sent, eapol_crypt; /* the last of the supplicant's frames sent under the pairwise key */
     uint32_t relayed; /* the station's own group frames, back from the access point */
     /* The keys, and the frames CCMP works between. */
     struct keys ptk;      /* the pairwise key in use and the one staged; see keys.h */
     struct key_pn ptk_pn; /* the pairwise key in use's packet numbers */
     struct group_key gtk; /* the group key and its counters */
+    struct igtk igtk;     /* the management group key, under PMF */
     struct mutex *key_lock; /* held while a key is installed, and by the sending while it uses one */
     uint8_t *eth, *tx_plain, *tx_crypt, *rx_plain;
 } sta;
+
+static uint32_t protect(uint8_t *crypt, uint32_t size, const uint8_t *plain, uint32_t n);
+static uint32_t protect_mgmt(uint8_t *crypt, uint32_t size, const uint8_t *plain, uint32_t n);
 
 /* --- The scan. --- */
 
@@ -197,12 +210,17 @@ static int forget(void)
 /*
  * The station leaves the access point it authenticated to, for reason: a deauthentication, sent once,
  * as a station leaves, which ends an association too, so that the access point keeps none.
+ * Under PMF it goes protected under the pairwise key: an access point ignores an unprotected one, and would
+ * keep the station's state, so the next association would be told to come back.
  */
 static void part(uint16_t reason)
 {
     static uint8_t frame[MGMT_FRAME_MAX];
+    static uint8_t crypt[MGMT_FRAME_MAX + CCMP_HEAD_LEN + CCMP_MIC_LEN];
     if (forget()) {
-        const char *failed = mac_tx(frame, mgmt_deauth(frame, sizeof(frame), drv_self->mac, sta.ap, reason));
+        uint32_t n = mgmt_deauth(frame, sizeof(frame), drv_self->mac, sta.ap, reason);
+        uint32_t cn = sta.pmf ? protect_mgmt(crypt, sizeof(crypt), frame, n) : 0;
+        const char *failed = mac_tx(cn ? crypt : frame, cn ? cn : n);
         drv_say("sta: deauthenticated, reason %u%s%s\n", (unsigned)reason, failed ? ": " : "", failed ? failed : "");
     }
 }
@@ -313,9 +331,6 @@ void sta_leave(void)
 
 #define EAPOL_MAX 512u /* the longest frame the supplicant sends, a message of the handshakes with its elements */
 
-/* Defined below; the supplicant's frames take the pairwise key's path to the cipher too. */
-static uint32_t protect(uint8_t *crypt, uint32_t size, const uint8_t *plain, uint32_t n);
-
 /*
  * A frame of the supplicant's, of Ethernet type proto, to dest through the access point: 0, or -1 if not sent.
  * Under the pairwise key once the handshake installed one, and in the clear until then, as the standard asks;
@@ -391,6 +406,39 @@ static int link_set_group(const struct supp_key *k)
 }
 
 /*
+ * The management group key (IGTK) the handshake gives under PMF, kept for the BIP check of a group-addressed
+ * robust management frame; its IPN is the packet number that check reads. The MAC's cipher decrypts data frames
+ * alone, so the key waits in software, and no run has received such a frame yet; see TODO.md.
+ */
+static int link_set_igtk(const struct supp_key *k)
+{
+    if (k->alg == SUPP_ALG_NONE) {
+        osi_mutex_take(sta.key_lock);
+        sta.igtk.set = 0;
+        osi_mutex_give(sta.key_lock);
+        drv_say("sta: the management group key removed\n");
+        return 0;
+    }
+    if (k->alg != SUPP_ALG_BIP_CMAC_128 || k->key == 0 || k->key_len != CCMP_TK_LEN) {
+        drv_say("sta: a management group key of algorithm %d, %u bytes, ignored\n", k->alg, (unsigned)k->key_len);
+        return 0;
+    }
+    osi_mutex_take(sta.key_lock);
+    if (sta.igtk.set && sta.igtk.id == (uint8_t)k->idx && memcmp(sta.igtk.tk, k->key, CCMP_TK_LEN) == 0) {
+        osi_mutex_give(sta.key_lock);
+        drv_say("sta: the management group key installed again, the packet number kept\n");
+        return 0;
+    }
+    memcpy(sta.igtk.tk, k->key, CCMP_TK_LEN);
+    sta.igtk.id = (uint8_t)k->idx;
+    sta.igtk.ipn = key_rsc(k);
+    sta.igtk.set = 1;
+    osi_mutex_give(sta.key_lock);
+    drv_say("sta: the management group key installed, index %d\n", sta.igtk.id);
+    return 0;
+}
+
+/*
  * A pairwise key the supplicant derived. The handshake installs the key it derives for receiving alone before
  * the 4/4 and for sending too after, so the station stages the first and promotes it at the second; the 4/4 goes
  * under the key in use, the old one on a rekey and none on the first join. One lock guards the key and its
@@ -451,6 +499,10 @@ static int link_set_pairwise(const struct supp_key *k)
 static int link_set_key(const struct supp_key *k)
 {
     if (k->flag & SUPP_KEY_GROUP) {
+        /* The management group key's ids are 4 and 5, the group key's 1 to 3; a removal names the id too. */
+        if (k->alg == SUPP_ALG_BIP_CMAC_128 || (k->alg == SUPP_ALG_NONE && k->idx > 3)) {
+            return link_set_igtk(k);
+        }
         return link_set_group(k);
     }
     return link_set_pairwise(k);
@@ -547,8 +599,10 @@ static void security(const struct drv *d, const struct drv_net *ap)
         .pass = d->pass,
         .ap_rsn = sta.ap_rsn,
         .ap_rsnx = sta.ap_rsnx_len ? sta.ap_rsnx : 0,
+        .pmf_ok = !d->no_pmf,
     };
     must("the suites the station takes", supp_choose(&n) == 0);
+    sta.pmf = n.pmf;
     size_t rsn_len = sizeof(sta.rsn), rsnx_len = sizeof(sta.rsnx);
     must("the station's RSN element", supp_connect(&n, sta.rsn, &rsn_len, sta.rsnx, &rsnx_len) == 0);
     sta.has_rsnx = rsnx_len != 0;
@@ -597,29 +651,53 @@ static void authenticate(void)
 
 struct assoc {
     uint16_t status, aid;
+    uint32_t comeback_tu;
 };
 
 static int assoc_answer(const struct buf *b, void *arg)
 {
     struct assoc *a = arg;
-    return mgmt_assoc_answer(b->frame, b->len, drv_self->mac, sta.ap, &a->status, &a->aid);
+    return mgmt_assoc_answer(b->frame, b->len, drv_self->mac, sta.ap, &a->status, &a->aid, &a->comeback_tu);
 }
 
-/* The association, with the supplicant's elements; one refused fails with its status, one unanswered with ESP_FAIL. */
+/*
+ * The association, with the supplicant's elements; one refused fails with its status, one unanswered with ESP_FAIL.
+ * An access point that holds the station's state from an association whose end it did not hear answers status 30
+ * and names in its Timeout Interval element the time to come back: the station waits that long, during which the
+ * access point asks the state it holds after the station and, hearing nothing, drops it — its authentication with
+ * it — so the station authenticates afresh and asks again, a few times. See TODO.md.
+ */
+#define ASSOC_TRIES       3u
+#define ASSOC_COMEBACK_TU 100u       /* the wait when the access point names no time, in 802.11's time units */
+#define ASSOC_WAIT_MAX_US 10000000u  /* the longest a sorry access point may hold the join up */
+
 static void associate(const struct drv_net *ap)
 {
     static uint8_t frame[MGMT_ASSOC_MAX];
     uint32_t n = mgmt_assoc_request(frame, sizeof(frame), drv_self->mac, sta.ap, ap->ssid, sta.rsn,
                                     sta.has_rsnx ? sta.rsnx : 0);
     must("the association request", n != 0);
-    struct assoc a = { 0, 0 };
-    int answered = exchange("the association", frame, n, assoc_answer, &a);
-    drv_say("sta: association %s, status %u, AID %u\n",
-            answered ? (a.status == 0 ? "accepted" : "refused") : "not answered", (unsigned)a.status, (unsigned)a.aid);
-    if (!answered || a.status != 0) {
-        fail("the association answered", answered ? a.status : (uint32_t)ESP_FAIL);
+    for (uint32_t tries = 1;; tries++) {
+        struct assoc a = { 0, 0, 0 };
+        int answered = exchange("the association", frame, n, assoc_answer, &a);
+        drv_say("sta: association %s, status %u, AID %u\n",
+                answered ? (a.status == 0 ? "accepted" : "refused") : "not answered", (unsigned)a.status,
+                (unsigned)a.aid);
+        if (answered && a.status == 0) {
+            sta.aid = a.aid;
+            break;
+        }
+        if (!answered || a.status != MGMT_TRY_AGAIN || tries >= ASSOC_TRIES) {
+            fail("the association answered", answered ? a.status : (uint32_t)ESP_FAIL);
+        }
+        uint64_t wait_us = (uint64_t)(a.comeback_tu ? a.comeback_tu : ASSOC_COMEBACK_TU) * 1024u;
+        if (wait_us > ASSOC_WAIT_MAX_US) {
+            wait_us = ASSOC_WAIT_MAX_US;
+        }
+        drv_say("sta: told to come back in %u ms\n", (unsigned)(wait_us / 1000u));
+        osi_delay_ms((uint32_t)((wait_us + 999u) / 1000u));
+        authenticate();
     }
-    sta.aid = a.aid;
     sta.state = ASSOCIATED;
     supp_associated(sta.ap);
 }
@@ -704,10 +782,10 @@ static void eapol(const struct buf *b)
     struct mgmt_payload p;
     const uint8_t *frame;
     uint32_t len;
-    plain_frame(b, drv_self, &frame, &len);
+    int kind = plain_frame(b, drv_self, &frame, &len);
     if (frame != 0 && mgmt_data_read(frame, len, drv_self->mac, sta.ap, &p) && p.proto == SUPP_EAPOL) {
         sta.eapol_heard++;
-        supp_rx_eapol(p.src, p.body, p.len);
+        supp_rx_eapol(p.src, p.body, p.len, kind == CCMP_FRAME_CCMP ? SUPP_EAPOL_PROTECTED : SUPP_EAPOL_CLEAR);
     }
 }
 
@@ -730,27 +808,41 @@ static void handshake(void)
 /* --- The data's path, once the handshake has installed the keys. --- */
 
 /*
- * n bytes at plain, a data frame, protected under the pairwise key in use: the lock copies the key and reserves
- * the packet number, so that no two frames go with one key and packet number and the encryption runs outside it.
- * The lock rather than a `set` written last, because the compiler may move the key's stores past that flag,
- * and tx_pn is two 32-bit stores on RV32, which a rekey and this reservation would tear.
- * 0 if no pairwise key is in use, or the frame does not fit, else the frame's length at crypt.
+ * The pairwise key in use's bytes and id, and the next packet number under it, under the lock; 0 if no key is
+ * in use. The lock rather than a `set` written last, because the compiler may move the key's stores past that
+ * flag, and tx_pn is two 32-bit stores on RV32, which a rekey and this reservation would tear.
  */
-static uint32_t protect(uint8_t *crypt, uint32_t size, const uint8_t *plain, uint32_t n)
+static int reserve(uint8_t tk[CCMP_TK_LEN], uint8_t *id, uint64_t *pn)
 {
-    uint8_t tk[CCMP_TK_LEN];
-    uint8_t id;
-    uint64_t pn;
     osi_mutex_take(sta.key_lock);
     if (!sta.ptk.cur_set) {
         osi_mutex_give(sta.key_lock);
         return 0;
     }
     memcpy(tk, sta.ptk.cur.tk, CCMP_TK_LEN);
-    id = sta.ptk.cur.id;
-    pn = ++sta.ptk_pn.tx_pn;
+    *id = sta.ptk.cur.id;
+    *pn = ++sta.ptk_pn.tx_pn;
     osi_mutex_give(sta.key_lock);
-    return ccmp_encrypt(crypt, size, plain, n, tk, pn, id);
+    return 1;
+}
+
+/*
+ * n bytes at plain protected under the pairwise key in use into crypt: a data frame, and a robust management
+ * frame, which shares the key and its packet numbers. 0 if no pairwise key is in use, or the frame does not fit,
+ * else the frame's length at crypt.
+ */
+static uint32_t protect(uint8_t *crypt, uint32_t size, const uint8_t *plain, uint32_t n)
+{
+    uint8_t tk[CCMP_TK_LEN], id;
+    uint64_t pn;
+    return reserve(tk, &id, &pn) ? ccmp_encrypt(crypt, size, plain, n, tk, pn, id) : 0;
+}
+
+static uint32_t protect_mgmt(uint8_t *crypt, uint32_t size, const uint8_t *plain, uint32_t n)
+{
+    uint8_t tk[CCMP_TK_LEN], id;
+    uint64_t pn;
+    return reserve(tk, &id, &pn) ? ccmp_encrypt_mgmt(crypt, size, plain, n, tk, pn, id) : 0;
 }
 
 /* An Ethernet frame from the network process, built into a data frame, encrypted under the pairwise key and sent. */
@@ -821,7 +913,7 @@ static int read_frame(const struct buf *b, void *arg)
     }
     if (p.proto == SUPP_EAPOL) {
         sta.eapol_heard++;
-        supp_rx_eapol(p.src, p.body, p.len);
+        supp_rx_eapol(p.src, p.body, p.len, kind == CCMP_FRAME_CCMP ? SUPP_EAPOL_PROTECTED : SUPP_EAPOL_CLEAR);
         return 0;
     }
     if (kind == CCMP_FRAME_CLEAR && sta.ptk.cur_set) {

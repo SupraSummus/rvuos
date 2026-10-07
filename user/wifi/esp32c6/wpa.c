@@ -416,7 +416,8 @@ static void sta_disconnected(uint8_t reason)
 
 static int sta_rx_eapol(uint8_t *src, uint8_t *buf, uint32_t len)
 {
-    return supp_rx_eapol(src, buf, len);
+    /* The libraries hand the EAPOL payload, so whether its frame was protected is not known here. */
+    return supp_rx_eapol(src, buf, len, SUPP_EAPOL_UNKNOWN);
 }
 
 /* Whether the 4-way handshake runs, message 4/4 not yet sent: the libraries send its frames unencrypted. */

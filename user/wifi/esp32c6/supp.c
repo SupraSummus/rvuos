@@ -401,16 +401,28 @@ int supp_choose(struct supp_network *n)
         return -1;
     }
     if (!(d.key_mgmt & WPA_KEY_MGMT_PSK) || !(d.pairwise_cipher & WPA_CIPHER_CCMP) ||
-        d.group_cipher != WPA_CIPHER_CCMP || (d.capabilities & WPA_CAPABILITY_MFPR)) {
-        wpa_printf(MSG_ERROR, "supp: the access point offers AKM 0x%x, pairwise 0x%x, group 0x%x, capabilities 0x%x",
-                   d.key_mgmt, d.pairwise_cipher, d.group_cipher, d.capabilities);
+        d.group_cipher != WPA_CIPHER_CCMP) {
+        wpa_printf(MSG_ERROR, "supp: the access point offers AKM 0x%x, pairwise 0x%x, group 0x%x",
+                   d.key_mgmt, d.pairwise_cipher, d.group_cipher);
+        return -1;
+    }
+    /*
+     * The access point offering protected management frames is taken up where the station may, WPA2's PMF;
+     * one that requires them is joined only so, one that offers them is joined with them, and one that offers
+     * neither is joined without, as before.
+     */
+    int mfpc = (d.capabilities & WPA_CAPABILITY_MFPC) != 0;
+    int mfpr = (d.capabilities & WPA_CAPABILITY_MFPR) != 0;
+    if (mfpr && !n->pmf_ok) {
+        wpa_printf(MSG_ERROR, "supp: the access point requires protected management frames, "
+                              "which the station is not to give");
         return -1;
     }
     n->key_mgmt = WPA_KEY_MGMT_PSK;
     n->pairwise = WPA_CIPHER_CCMP;
     n->group = WPA_CIPHER_CCMP;
-    n->pmf = 0;
-    n->mgmt_group = 0;
+    n->pmf = n->pmf_ok && (mfpc || mfpr);
+    n->mgmt_group = n->pmf ? WPA_CIPHER_AES_128_CMAC : 0;
     return 0;
 }
 
@@ -491,9 +503,12 @@ void supp_disassociated(void)
     wpa_sm_notify_disassoc(supp.sm);
 }
 
-int supp_rx_eapol(const uint8_t *src, const uint8_t *buf, size_t len)
+int supp_rx_eapol(const uint8_t *src, const uint8_t *buf, size_t len, int encryption)
 {
-    return wpa_sm_rx_eapol(supp.sm, src, buf, len, FRAME_ENCRYPTION_UNKNOWN);
+    enum frame_encryption e = encryption == SUPP_EAPOL_PROTECTED ? FRAME_ENCRYPTED
+                            : encryption == SUPP_EAPOL_CLEAR     ? FRAME_NOT_ENCRYPTED
+                                                                 : FRAME_ENCRYPTION_UNKNOWN;
+    return wpa_sm_rx_eapol(supp.sm, src, buf, len, e);
 }
 
 int supp_in_4way(void)

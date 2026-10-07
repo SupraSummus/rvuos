@@ -174,6 +174,25 @@ static void frame_kind(void)
     check(ccmp_frame_kind(prot, 0) == CCMP_FRAME_DROP, "a protected frame the cipher did not take is dropped");
 }
 
+/*
+ * IEEE 802.11-2012 M.9.2, a unicast deauthentication: a robust management frame's additional data keeps the
+ * Frame Control's subtype, where a Data frame's mask would zero it, and sets Protected; its nonce's first byte
+ * is the Management bit alone, not a traffic identifier. Both follow hostap's own ccmp_aad_nonce of
+ * wlantest/ccmp.c; its test prints the standard's MPDU, holding no ciphertext to assert here.
+ */
+static void robust(void)
+{
+    const uint8_t deauth[24] = { 0xc0, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x00, 0x02, 0x00,
+                                 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x60, 0x00 };
+    uint8_t a[24], v[13];
+    check(ccmp_aad(a, deauth) == 22u, "a management frame's additional data is 22 bytes");
+    check(a[0] == 0xc0 && a[1] == 0x40, "with the subtype kept and Protected set");
+    check(same(a + 2, deauth + 4, 18u), "the three addresses after it");
+    ccmp_nonce(v, deauth, 1);
+    check(v[0] == 0x10, "the nonce's first byte is the Management bit alone");
+    check(same(v + 1, deauth + 10, 6u) && v[12] == 1, "Address 2 and the packet number after it");
+}
+
 int main(void)
 {
     known_answer();
@@ -181,6 +200,7 @@ int main(void)
     refuses();
     replay();
     frame_kind();
+    robust();
     printf("ccmp-test: %s\n", failures ? "FAILED" : "ok");
     return failures != 0;
 }

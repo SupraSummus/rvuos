@@ -21,6 +21,7 @@
 /* hostap's enum wpa_alg, as far as the station names it; see common/defs.h. */
 #define SUPP_ALG_NONE 0
 #define SUPP_ALG_CCMP 3
+#define SUPP_ALG_BIP_CMAC_128 4
 
 /* hostap's enum key_flag bits the station names; see common/defs.h. */
 #define SUPP_KEY_GROUP 0x10  /* a key is the group's rather than the pairwise one */
@@ -63,6 +64,7 @@ struct supp_network {
     int key_mgmt;          /* hostap's WPA_KEY_MGMT_: PSK, PSK_SHA256 or SAE */
     int pairwise, group;   /* hostap's WPA_CIPHER_ */
     int pmf;               /* management frames protected, which SAE needs, if the access point takes it */
+    int pmf_ok;            /* whether the station may protect them, from its configuration */
     int mgmt_group;        /* with pmf, the management group cipher, hostap's WPA_CIPHER_ of a BIP */
     int sae_pwe;           /* the password elements the station takes, hostap's SAE_PWE_ */
     const uint8_t *ap_rsn; /* the access point's RSN element, whole, or 0 */
@@ -75,8 +77,9 @@ void supp_deinit(void);
 
 /*
  * The suites the driver's own station takes of those the access point offers in n->ap_rsn, into n:
- * WPA2's personal by PSK, CCMP pairwise and for the group, and management frames unprotected.
- * 0, or -1 if the access point offers none of them, or requires protection, which the log says.
+ * WPA2's personal by PSK, CCMP pairwise and for the group, and management frames protected (PMF) where the
+ * access point offers them and n->pmf_ok allows. 0, or -1 if the access point offers none of them, or requires
+ * protection the station is not to give, which the log says.
  */
 int supp_choose(struct supp_network *n);
 
@@ -95,8 +98,13 @@ void supp_associated(const uint8_t *bssid);
 /* The station left the access point, or was let go. */
 void supp_disassociated(void);
 
-/* An EAPOL frame from src, from its 802.1X header on; what hostap's wpa_sm_rx_eapol answers. */
-int supp_rx_eapol(const uint8_t *src, const uint8_t *buf, size_t len);
+/* Whether an EAPOL frame was protected, which hostap uses under PMF; unknown when the sender did not say. */
+#define SUPP_EAPOL_CLEAR     0
+#define SUPP_EAPOL_PROTECTED 1
+#define SUPP_EAPOL_UNKNOWN   2
+
+/* An EAPOL frame from src, from its 802.1X header on, its protection encryption; what hostap's wpa_sm_rx_eapol answers. */
+int supp_rx_eapol(const uint8_t *src, const uint8_t *buf, size_t len, int encryption);
 
 /* Whether the 4-way handshake runs. */
 int supp_in_4way(void);

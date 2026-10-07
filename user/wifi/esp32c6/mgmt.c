@@ -209,7 +209,7 @@ uint32_t mgmt_assoc_request(uint8_t *f, uint32_t size, const uint8_t *sta, const
 }
 
 int mgmt_assoc_answer(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap, uint16_t *status,
-                      uint16_t *aid)
+                      uint16_t *aid, uint32_t *comeback_tu)
 {
     const struct ieee80211_mgmt *m = (const struct ieee80211_mgmt *)f;
     if (subtype(f, len, ANSWER_FIXED) != WLAN_FC_STYPE_ASSOC_RESP || memcmp(m->da, sta, ETH_ALEN) != 0 ||
@@ -218,6 +218,15 @@ int mgmt_assoc_answer(const uint8_t *f, uint32_t len, const uint8_t *sta, const 
     }
     *status = le_to_host16(m->u.assoc_resp.status_code);
     *aid = le_to_host16(m->u.assoc_resp.aid) & AID_MASK;
+    /* A refusal to try again later may name the time to come back, in 802.11's time units; the parser keeps
+     * the element only at its five bytes, and leaves it out otherwise. */
+    *comeback_tu = 0;
+    struct ieee802_11_elems elems;
+    if (len > ANSWER_FIXED &&
+        ieee802_11_parse_elems(f + ANSWER_FIXED, len - ANSWER_FIXED, &elems, 0) != ParseFailed &&
+        elems.timeout_int != 0 && elems.timeout_int[0] == WLAN_TIMEOUT_ASSOC_COMEBACK) {
+        *comeback_tu = WPA_GET_LE32(elems.timeout_int + 1);
+    }
     return 1;
 }
 

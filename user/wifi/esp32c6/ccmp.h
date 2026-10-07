@@ -35,6 +35,13 @@ uint32_t ccmp_header_len(const uint8_t *h);
 uint32_t ccmp_priority(const uint8_t *h);
 
 /*
+ * The additional authentication data of the frame at h into a, 22 bytes, or 24 for a QoS Data frame; and its
+ * nonce into n, 13 bytes. The test holds them against the standard's vectors, the management one among them.
+ */
+uint32_t ccmp_aad(uint8_t *a, const uint8_t *h);
+void ccmp_nonce(uint8_t *n, const uint8_t *h, uint64_t pn);
+
+/*
  * The replay counters a key keeps: one a priority, and one more, CCMP_REPLAY_COUNT - 1, reserved for a robust
  * management frame, which read_frame drops today and a protected one under PMF will want.
  */
@@ -75,6 +82,14 @@ uint32_t ccmp_encrypt(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t l
                       uint8_t keyid);
 
 /*
+ * The len bytes of a robust management frame at in encrypted into out, as ccmp_encrypt for a Data frame:
+ * its header is 24 bytes and no traffic identifier enters the nonce or the additional data.
+ * 0 if it does not fit, or is not a management frame; else the frame's length at out, len + 16 bytes.
+ */
+uint32_t ccmp_encrypt_mgmt(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t len, const uint8_t *tk,
+                           uint64_t pn, uint8_t keyid);
+
+/*
  * The packet number and key id the CCMP header at c carries, the inverse of the header ccmp_encrypt writes;
  * 0 if the Extended IV bit is clear, so a frame without a CCMP header reads as none.
  * A receiver that takes a frame the MAC's cipher already decrypted reads its header back with this.
@@ -89,5 +104,9 @@ int ccmp_head_read(const uint8_t *c, uint64_t *pn, uint8_t *keyid);
  */
 int ccmp_decrypt(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t len, const uint8_t *tk, uint64_t *pn,
                  uint8_t *keyid, uint32_t *out_len);
+
+/* As ccmp_decrypt for a robust management frame; its header is 24 bytes and no traffic identifier enters. */
+int ccmp_decrypt_mgmt(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t len, const uint8_t *tk, uint64_t *pn,
+                      uint8_t *keyid, uint32_t *out_len);
 
 #endif

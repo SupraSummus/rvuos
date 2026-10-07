@@ -40,6 +40,7 @@ static void check(int ok, const char *what)
 static struct mgmt_beacon b;
 static struct mgmt_payload payload;
 static uint16_t status, aid, reason;
+static uint32_t comeback;
 static int again;
 static long rsn_at, rsnx_at, src_at, body_at;
 
@@ -58,7 +59,7 @@ static int reads(enum reader r, const uint8_t *f, uint32_t len)
     int ok = r == BEACON         ? mgmt_beacon(copy, len, HEARD_ON, &b)
              : r == PROBE_ANSWER ? mgmt_probe_answer(copy, len, sta, "rvuos", &b, &again)
              : r == AUTH_ANSWER  ? mgmt_auth_answer(copy, len, sta, ap, &status)
-             : r == ASSOC_ANSWER ? mgmt_assoc_answer(copy, len, sta, ap, &status, &aid)
+             : r == ASSOC_ANSWER ? mgmt_assoc_answer(copy, len, sta, ap, &status, &aid, &comeback)
              : r == LET_GO       ? mgmt_let_go(copy, len, sta, ap, &reason)
              : r == DATA         ? mgmt_data_read(copy, len, sta, ap, &payload)
                                  : mgmt_to_station(copy, len, sta, ap);
@@ -341,6 +342,24 @@ static void assoc_answer(void)
     len = assoc_answer_frame(f, WLAN_FC_STYPE_ASSOC_RESP, sta, ap, ap, WLAN_STATUS_AP_UNABLE_TO_HANDLE_NEW_STA, 0);
     check(reads(ASSOC_ANSWER, f, len) && status == WLAN_STATUS_AP_UNABLE_TO_HANDLE_NEW_STA,
           "an association refused, read with its status");
+    /* One told to try again later names the time to come back in a Timeout Interval element (EID 56, length 5,
+     * type 3, a little-endian value in 802.11's time units); one that names none leaves it 0. */
+    len = assoc_answer_frame(f, WLAN_FC_STYPE_ASSOC_RESP, sta, ap, ap, WLAN_STATUS_ASSOC_REJECTED_TEMPORARILY, 0);
+    f[len++] = WLAN_EID_TIMEOUT_INTERVAL;
+    f[len++] = 5;
+    f[len++] = WLAN_TIMEOUT_ASSOC_COMEBACK;
+    WPA_PUT_LE32(f + len, 1000);
+    len += 4;
+    check(reads(ASSOC_ANSWER, f, len) && status == WLAN_STATUS_ASSOC_REJECTED_TEMPORARILY && comeback == 1000,
+          "an association to try again later, with its time to come back");
+    len = assoc_answer_frame(f, WLAN_FC_STYPE_ASSOC_RESP, sta, ap, ap, WLAN_STATUS_ASSOC_REJECTED_TEMPORARILY, 0);
+    check(reads(ASSOC_ANSWER, f, len) && comeback == 0, "and one that names no time");
+    /* An element that is a time to come back but one byte long: read as none, and nothing read past it. */
+    len = assoc_answer_frame(f, WLAN_FC_STYPE_ASSOC_RESP, sta, ap, ap, WLAN_STATUS_ASSOC_REJECTED_TEMPORARILY, 0);
+    f[len++] = WLAN_EID_TIMEOUT_INTERVAL;
+    f[len++] = 1;
+    f[len++] = WLAN_TIMEOUT_ASSOC_COMEBACK;
+    check(reads(ASSOC_ANSWER, f, len) && comeback == 0, "and a shortened time element read as none");
     for (uint32_t i = 0; i < sizeof(refused) / sizeof(refused[0]); i++) {
         len = assoc_answer_frame(f, refused[i].stype, refused[i].da, refused[i].sa, refused[i].bssid, 0, 1);
         check(!reads(ASSOC_ANSWER, f, len), refused[i].what);

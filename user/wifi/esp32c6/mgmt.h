@@ -63,13 +63,20 @@ int mgmt_auth_answer(const uint8_t *f, uint32_t len, const uint8_t *sta, const u
 uint32_t mgmt_assoc_request(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap, const char *ssid,
                             const uint8_t *rsn, const uint8_t *rsnx);
 
-/* The access point ap's answer to sta's association: its status into *status, and the station's AID into *aid. */
+/*
+ * The access point ap's answer to sta's association: its status into *status, and the station's AID into *aid.
+ * A refusal to try again later (status 30) may carry the time to come back, in 802.11's time units, into
+ * *comeback_tu, or 0 when it names none.
+ */
 int mgmt_assoc_answer(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap, uint16_t *status,
-                      uint16_t *aid);
+                      uint16_t *aid, uint32_t *comeback_tu);
 
 /* A deauthentication from sta to the access point ap, for reason, IEEE 802.11's: MGMT_LEAVING as the station leaves. */
 #define MGMT_LEAVING 3u
 uint32_t mgmt_deauth(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap, uint16_t reason);
+
+/* An association refused to try again later, IEEE 802.11's status, whose answer names a time to come back. */
+#define MGMT_TRY_AGAIN 30u
 
 /* A deauthentication or a disassociation to sta from the access point ap, its reason into *reason. */
 int mgmt_let_go(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap, uint16_t *reason);

@@ -592,3 +592,12 @@ at all, and the sending stays `ccmp.c`'s.
 A run with the group entry's temporal key one byte wrong had the access point's group frames not come at all,
 its own relayed broadcast counting none, where the right key had them come, so the MAC hands over nothing
 that failed its MIC, which the reading of a short frame rests on.
+
+## The station's protected management frames
+
+WPA2's PMF is taken where the access point offers it (`supp_choose`), the station advertising MFPC in the
+association and keeping the IGTK message 3/4 carries, in software, since the MAC's cipher decrypts data frames
+alone. Its own deauthentication goes under the pairwise key, `ccmp.c` protecting a robust management frame:
+a 24-byte header, the Frame Control's subtype kept in the additional data where a data frame's is masked, and
+the nonce's Management bit. An association answered status 30 is waited out by its Timeout Interval element and
+asked again, from the authentication, a few times.

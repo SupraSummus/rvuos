@@ -17,10 +17,13 @@
  * the Protected bit is always set, whether the frame being read says so or not.
  */
 #define AAD_FC_MASK  0xC78Fu
+#define AAD_FC_MGMT  0xC7FFu /* the same mask with the subtype kept whole, which a management frame's AAD carries */
 #define AAD_ORDER    0x8000u
 #define AAD_SEQ_MASK 0x000Fu
+#define NONCE_MGMT   0x10u   /* the nonce's Management bit, which a robust management frame's first byte sets */
 
 #define AAD_MAX        24u /* Frame Control, three addresses, Sequence Control and a QoS Control field */
+#define CCMP_MGMT_LEN  24u /* a robust management frame's header, a Data frame's without a QoS Control field */
 #define CCMP_NONCE_LEN 13u /* the priority, Address 2 and the packet number */
 #define EXT_IV         0x20u /* the Extended IV bit of the CCMP header's Key ID octet, always set */
 
@@ -58,13 +61,13 @@ uint32_t ccmp_priority(const uint8_t *h)
 
 /*
  * The additional authentication data of the frame at h: Frame Control, Address 1 to 3 and Sequence Control,
- * then the QoS Control field's TID alone;
- * the Duration field is not part of it, which is why it is built here rather than masked in place.
- * Returns the length, 22 or 24.
+ * then the QoS Control field's TID alone; the Duration field is not part of it, which is why it is built here
+ * rather than masked in place. The Frame Control's subtype is masked to zero for a Data frame alone; a robust
+ * management frame's distinguishes it, and the standard keeps it. Returns the length, 22 or 24.
  */
-static uint32_t aad(uint8_t *a, const uint8_t *h, int qos)
+static uint32_t aad(uint8_t *a, const uint8_t *h, int qos, int mgmt)
 {
-    uint16_t fc = ((uint16_t)h[0] | (uint16_t)h[1] << 8) & AAD_FC_MASK;
+    uint16_t fc = ((uint16_t)h[0] | (uint16_t)h[1] << 8) & (uint16_t)(mgmt ? AAD_FC_MGMT : AAD_FC_MASK);
     uint16_t sc = ((uint16_t)h[22] | (uint16_t)h[23] << 8) & AAD_SEQ_MASK;
     if (qos) {
         fc &= (uint16_t)~AAD_ORDER;
@@ -85,14 +88,27 @@ static uint32_t aad(uint8_t *a, const uint8_t *h, int qos)
     return 22u;
 }
 
-/* The nonce of the frame at h: the priority, Address 2, and the packet number most significant octet first. */
-static void nonce(uint8_t *n, const uint8_t *h, uint64_t pn)
+/* The nonce of the frame at h: the priority and the Management bit, Address 2, and the packet number most significant first. */
+static void nonce(uint8_t *n, const uint8_t *h, uint64_t pn, int mgmt)
 {
-    n[0] = (uint8_t)ccmp_priority(h);
+    n[0] = (uint8_t)(ccmp_priority(h) | (mgmt ? NONCE_MGMT : 0u));
     memcpy(n + 1, h + 10, 6); /* Address 2 */
     for (uint32_t i = 0; i < 6; i++) {
         n[7 + i] = (uint8_t)(pn >> (8u * (5u - i)));
     }
+}
+
+/* As aad and nonce derive them from the frame: for the test, which holds them against the standard's own vectors. */
+uint32_t ccmp_aad(uint8_t *a, const uint8_t *h)
+{
+    uint16_t fc = (uint16_t)h[0] | (uint16_t)h[1] << 8;
+    return aad(a, h, is_qos(h), WLAN_FC_GET_TYPE(fc) == WLAN_FC_TYPE_MGMT);
+}
+
+void ccmp_nonce(uint8_t *n, const uint8_t *h, uint64_t pn)
+{
+    uint16_t fc = (uint16_t)h[0] | (uint16_t)h[1] << 8;
+    nonce(n, h, pn, WLAN_FC_GET_TYPE(fc) == WLAN_FC_TYPE_MGMT);
 }
 
 /* The CCMP header the frame gains, the packet number and the key id, the Extended IV bit always set. */
@@ -160,21 +176,23 @@ int ccmp_frame_kind(const uint8_t *h, int decrypted)
     return decrypted ? CCMP_FRAME_CCMP : CCMP_FRAME_DROP;
 }
 
-uint32_t ccmp_encrypt(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t len, const uint8_t *tk, uint64_t pn,
-                      uint8_t keyid)
+/*
+ * The len bytes of the frame at in, its header hdrlen bytes, whether it has a QoS Control field, and whether it
+ * is a robust management frame, protected into out; hdrlen is 24 for a Data or management frame, 26 with QoS.
+ */
+static uint32_t ccmp_encrypt_frame(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t len, uint32_t hdrlen,
+                                   int qos, int mgmt, const uint8_t *tk, uint64_t pn, uint8_t keyid)
 {
-    uint32_t hdrlen = ccmp_header_len(in);
     if (hdrlen == 0 || hdrlen > len || len > size || size - len < CCMP_HEAD_LEN + CCMP_MIC_LEN) {
         return 0;
     }
-    int qos = is_qos(in);
     uint32_t plen = len - hdrlen;
     uint8_t a[AAD_MAX], v[CCMP_NONCE_LEN], mic[CCMP_MIC_LEN];
 
     memcpy(out, in, hdrlen);
     out[1] |= (uint8_t)(WLAN_FC_PROTECTED >> 8); /* the Protected bit, whose second octet holds it */
-    uint32_t alen = aad(a, out, qos);
-    nonce(v, out, pn);
+    uint32_t alen = aad(a, out, qos, mgmt);
+    nonce(v, out, pn, mgmt);
 
     /*
      * hostap's CCM encrypts only into a buffer of its own, and writes a whole block for a last one part filled,
@@ -190,14 +208,30 @@ uint32_t ccmp_encrypt(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t l
     return len + CCMP_HEAD_LEN + CCMP_MIC_LEN;
 }
 
-int ccmp_decrypt(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t len, const uint8_t *tk, uint64_t *pn,
-                 uint8_t *keyid, uint32_t *out_len)
+uint32_t ccmp_encrypt(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t len, const uint8_t *tk, uint64_t pn,
+                      uint8_t keyid)
 {
-    uint32_t hdrlen = ccmp_header_len(in);
+    return ccmp_encrypt_frame(out, size, in, len, ccmp_header_len(in), is_qos(in), 0, tk, pn, keyid);
+}
+
+uint32_t ccmp_encrypt_mgmt(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t len, const uint8_t *tk, uint64_t pn,
+                           uint8_t keyid)
+{
+    uint16_t fc = (uint16_t)in[0] | (uint16_t)in[1] << 8;
+    if (WLAN_FC_GET_TYPE(fc) != WLAN_FC_TYPE_MGMT) {
+        return 0;
+    }
+    return ccmp_encrypt_frame(out, size, in, len, CCMP_MGMT_LEN, 0, 1, tk, pn, keyid);
+}
+
+/* The protected frame at in, its header hdrlen bytes, whether it has a QoS Control field and whether it is
+ * a robust management frame, decrypted into out; 1 if the MIC held, 0 otherwise. */
+static int ccmp_decrypt_frame(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t len, uint32_t hdrlen, int qos,
+                              int mgmt, const uint8_t *tk, uint64_t *pn, uint8_t *keyid, uint32_t *out_len)
+{
     if (hdrlen == 0 || hdrlen + CCMP_HEAD_LEN + CCMP_MIC_LEN > len || len > size) {
         return 0;
     }
-    int qos = is_qos(in);
     const uint8_t *c = in + hdrlen;
     uint32_t plen = len - hdrlen - CCMP_HEAD_LEN - CCMP_MIC_LEN;
     uint64_t p;
@@ -209,8 +243,8 @@ int ccmp_decrypt(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t len, c
 
     memcpy(out, in, hdrlen);
     out[1] &= (uint8_t)~(WLAN_FC_PROTECTED >> 8);
-    uint32_t alen = aad(a, out, qos);
-    nonce(v, out, p);
+    uint32_t alen = aad(a, out, qos, mgmt);
+    nonce(v, out, p, mgmt);
     if (aes_ccm_ad(tk, CCMP_TK_LEN, v, CCMP_MIC_LEN, c + CCMP_HEAD_LEN, plen, a, alen, in + len - CCMP_MIC_LEN,
                    out + hdrlen) != 0) {
         return 0;
@@ -219,4 +253,20 @@ int ccmp_decrypt(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t len, c
     *keyid = id;
     *out_len = hdrlen + plen;
     return 1;
+}
+
+int ccmp_decrypt(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t len, const uint8_t *tk, uint64_t *pn,
+                 uint8_t *keyid, uint32_t *out_len)
+{
+    return ccmp_decrypt_frame(out, size, in, len, ccmp_header_len(in), is_qos(in), 0, tk, pn, keyid, out_len);
+}
+
+int ccmp_decrypt_mgmt(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t len, const uint8_t *tk, uint64_t *pn,
+                      uint8_t *keyid, uint32_t *out_len)
+{
+    uint16_t fc = (uint16_t)in[0] | (uint16_t)in[1] << 8;
+    if (WLAN_FC_GET_TYPE(fc) != WLAN_FC_TYPE_MGMT) {
+        return 0;
+    }
+    return ccmp_decrypt_frame(out, size, in, len, CCMP_MGMT_LEN, 0, 1, tk, pn, keyid, out_len);
 }

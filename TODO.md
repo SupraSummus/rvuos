@@ -108,11 +108,14 @@ what is left:
   A group key rekey installs one entry, so the frames the access point still sends under the old key
   are dropped until it switches; two entries will want the MAC entry kept in the key, rather than chosen
   from its kind in each of `link_set_group` and `link_set_pairwise`.
-  Then WPA3: SAE in the authentication, run in the station's thread, whose stack is sized for WPA2's handshakes,
-  and management frames protected, the station's deauthentication sent under CCMP,
-  and an unprotected one from the access point ignored. The own supplicant offers no PMF yet,
-  so no access point protects its management frames to it; when one does, the protected management frames
-  the MAC decrypts need a reading of their own, an SA Query among them, which `read_frame` drops now.
+  Then WPA3: SAE in the authentication, run in the station's thread, whose stack is sized for WPA2's handshakes.
+  WPA2's PMF is taken where the access point offers it: the station advertises MFPC, keeps the IGTK the 4-way
+  gives, and sends its deauthentication under the pairwise key, so an access point is left no state it should keep.
+  An access point that answers an association with status 30 is waited out by its Timeout Interval element and
+  asked again, a few times; the one here answers so, then deauthenticates rather than dropping the state it held,
+  which the station takes as the access point letting it go. The protected management frames the MAC decrypts need
+  a reading of their own, an SA Query among them, which `read_frame` drops now, and a group-addressed robust
+  management frame wants its BIP check over the IGTK in software.
   The MAC's bring-up stays the libraries': the own path runs between their `esp_wifi_start` and `esp_wifi_stop`,
   so what those do to the modem and the MAC is the last of `pp` to read before it can go.
   Its frame completion spins in the caller's thread while the slot is armed, and borrows the libraries' slot 0;
