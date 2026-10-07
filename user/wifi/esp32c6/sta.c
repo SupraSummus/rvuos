@@ -32,6 +32,8 @@
 #define STA_STACK     4096u /* room for the supplicant's handshakes, whose depth told() says */
 #define STA_KEY_ENTRY 4u    /* the MAC's key entry the pairwise key takes, as the libraries' association left it */
 #define STA_GRP_ENTRY 1u    /* the group key's entry, which the access point's frames to every station use */
+#define FC1_PROTECTED 0x40u /* the Protected bit, in the Frame Control's second octet */
+#define ADDR1         4u    /* where a frame's Address 1, its receiver, lies */
 
 enum { EV_FRAME, EV_RUN, EV_LEAVE };
 
@@ -98,6 +100,7 @@ static struct {
     int pmf;       /* management frames protected, from the supplicant's choice; see part */
     uint32_t eapol_heard, eapol_sent, eapol_crypt; /* the last of the supplicant's frames sent under the pairwise key */
     uint32_t relayed; /* the station's own group frames, back from the access point */
+    uint32_t let_go_ignored; /* a deauthentication or disassociation ignored under PMF, unforged by the check */
     /* The keys, and the frames CCMP works between. */
     struct keys ptk;      /* the pairwise key in use and the one staged; see keys.h */
     struct key_pn ptk_pn; /* the pairwise key in use's packet numbers */
@@ -238,8 +241,10 @@ static void told(void)
             "the stack's deepest %u bytes of %u\n",
             (unsigned)drv_self->rx_frames, (unsigned)drv_self->tx_frames, (unsigned)sta.relayed,
             (unsigned)osi_stack_used(osi_self()), (unsigned)STA_STACK);
-    drv_say("sta: the data frames through the cipher: by the MAC %u (of them group %u), in the clear %u\n",
-            (unsigned)sta.rx_mac, (unsigned)sta.rx_mac_grp, (unsigned)sta.rx_clear);
+    drv_say("sta: the data frames through the cipher: by the MAC %u (of them group %u), in the clear %u; "
+            "deauthentications ignored %u\n",
+            (unsigned)sta.rx_mac, (unsigned)sta.rx_mac_grp, (unsigned)sta.rx_clear,
+            (unsigned)sta.let_go_ignored);
     drv_mac_told("sta");
 }
 
@@ -282,6 +287,61 @@ static __attribute__((noreturn)) void leave(void)
 }
 
 /*
+ * The plaintext of a protected robust management frame at b into plain, its length into *len, decrypted under
+ * the pairwise key in use: 1, or 0 if no key is in use, the MIC or the key id refuses it, or its packet number
+ * is not above the counter reserved for management. The station's thread alone takes this path, and the
+ * receiving's never touches that counter. The MAC's cipher is left out of it: it takes data frames.
+ */
+static int open_mgmt(const struct buf *b, uint8_t *plain, uint32_t *len)
+{
+    uint8_t tk[CCMP_TK_LEN], id;
+    osi_mutex_take(sta.key_lock);
+    if (!sta.ptk.cur_set) {
+        osi_mutex_give(sta.key_lock);
+        return 0;
+    }
+    memcpy(tk, sta.ptk.cur.tk, CCMP_TK_LEN);
+    id = sta.ptk.cur.id;
+    osi_mutex_give(sta.key_lock);
+    uint64_t pn = 0;
+    uint8_t kid = 0;
+    if (!ccmp_decrypt_mgmt(plain, MGMT_FRAME_MAX, b->frame, b->len, tk, &pn, &kid, len) || kid != id) {
+        return 0;
+    }
+    return ccmp_replay(pn, CCMP_REPLAY_MGMT, sta.ptk_pn.rx_pn) == CCMP_REPLAY_TAKEN;
+}
+
+/*
+ * Whether a deauthentication or disassociation from the access point ends the station, its reason into *reason.
+ * Under PMF a unicast one is read only from the frame the pairwise key protects; an unprotected one is the
+ * forgery PMF exists to stop and is ignored, counted, and a group one waits on a BIP check, see TODO.md.
+ * Without PMF any of them ends the link, as before. See mgmt_let_go_policy.
+ */
+static int let_go(const struct buf *b, uint16_t *reason)
+{
+    int group = 0;
+    if (!mgmt_let_go_kind(b->frame, b->len, drv_self->mac, sta.ap, &group)) {
+        return 0;
+    }
+    int protected_ = (b->frame[1] & FC1_PROTECTED) != 0;
+    static uint8_t plain[MGMT_FRAME_MAX];
+    const uint8_t *f = b->frame;
+    uint32_t n = b->len;
+    int verified = 0;
+    if (sta.pmf && !group && protected_) {
+        verified = open_mgmt(b, plain, &n);
+        if (verified) {
+            f = plain;
+        }
+    }
+    if (mgmt_let_go_policy(sta.pmf, group, protected_, verified) == MGMT_LET_GO_IGNORE) {
+        sta.let_go_ignored++;
+        return 0;
+    }
+    return group ? mgmt_let_go_group(f, n, sta.ap, reason) : mgmt_let_go(f, n, drv_self->mac, sta.ap, reason);
+}
+
+/*
  * The events until the deadline, in osi_now_us's microseconds, each frame offered to read, given back after:
  * 1 once read takes one, the frame the step waits for, 0 at the deadline.
  * The supplicant's work runs between them; the ask to leave ends the station whatever the step,
@@ -307,8 +367,7 @@ static int wait_for(uint64_t deadline, int (*read)(const struct buf *b, void *ar
             drv_say("sta: heard frame control %02x%02x, %u bytes\n", b->frame[0], b->frame[1], (unsigned)b->len);
         }
         uint16_t reason = 0;
-        int gone = sta.state != NONE && (mgmt_let_go(b->frame, b->len, drv_self->mac, sta.ap, &reason) ||
-                                         mgmt_let_go_group(b->frame, b->len, sta.ap, &reason));
+        int gone = sta.state != NONE && let_go(b, &reason);
         int taken = !gone && read(b, arg);
         osi_queue_put(sta.free, &e.buf, 0);
         if (gone) {
@@ -709,9 +768,6 @@ static void associate(const struct drv_net *ap)
  * and after a few lets the station go.
  */
 #define HANDSHAKE_US 8000000u
-
-#define FC1_PROTECTED 0x40u /* the Protected bit, in the Frame Control's second octet */
-#define ADDR1         4u    /* where a frame's Address 1, its receiver, lies */
 
 /*
  * The frame b carries, read once: the plaintext at *frame with its length at *len, and ccmp_frame_kind's verdict

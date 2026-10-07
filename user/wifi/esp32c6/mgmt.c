@@ -265,6 +265,31 @@ int mgmt_let_go_group(const uint8_t *f, uint32_t len, const uint8_t *ap, uint16_
     return 1;
 }
 
+int mgmt_let_go_kind(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap, int *group)
+{
+    const struct ieee80211_mgmt *m = (const struct ieee80211_mgmt *)f;
+    int stype = subtype(f, len, REASON_FIXED);
+    if (stype != WLAN_FC_STYPE_DEAUTH && stype != WLAN_FC_STYPE_DISASSOC) {
+        return 0;
+    }
+    if (memcmp(m->sa, ap, ETH_ALEN) != 0 || memcmp(m->bssid, ap, ETH_ALEN) != 0) {
+        return 0;
+    }
+    *group = group_addr(m->da);
+    return *group || memcmp(m->da, sta, ETH_ALEN) == 0;
+}
+
+int mgmt_let_go_policy(int pmf, int group, int protected_, int verified)
+{
+    if (!pmf) {
+        return MGMT_LET_GO_ACCEPT;
+    }
+    if (group || !protected_ || !verified) {
+        return MGMT_LET_GO_IGNORE;
+    }
+    return MGMT_LET_GO_ACCEPT;
+}
+
 uint32_t mgmt_data(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap, const uint8_t *dest,
                    uint16_t proto, const uint8_t *body, uint32_t len)
 {

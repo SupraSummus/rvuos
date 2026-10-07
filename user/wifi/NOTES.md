@@ -601,3 +601,5 @@ alone. Its own deauthentication goes under the pairwise key, `ccmp.c` protecting
 a 24-byte header, the Frame Control's subtype kept in the additional data where a data frame's is masked, and
 the nonce's Management bit. An association answered status 30 is waited out by its Timeout Interval element and
 asked again, from the authentication, a few times.
+A deauthentication or disassociation is heeded only protected, its MIC and replay check under the pairwise key,
+on the counter reserved for management (`ccmp.c`'s index 16). An unprotected one is a forgery, ignored, counted.

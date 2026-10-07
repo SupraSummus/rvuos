@@ -42,10 +42,11 @@ uint32_t ccmp_aad(uint8_t *a, const uint8_t *h);
 void ccmp_nonce(uint8_t *n, const uint8_t *h, uint64_t pn);
 
 /*
- * The replay counters a key keeps: one a priority, and one more, CCMP_REPLAY_COUNT - 1, reserved for a robust
+ * The replay counters a key keeps: one a priority, and one more, CCMP_REPLAY_MGMT, reserved for a robust
  * management frame, which read_frame drops today and a protected one under PMF will want.
  */
 #define CCMP_REPLAY_COUNT 17u
+#define CCMP_REPLAY_MGMT  16u /* the counter a robust management frame's packet number is checked against */
 
 /* The replay check's outcomes, from ccmp_replay. */
 #define CCMP_REPLAY_TAKEN 1    /* above the counter, which is then set to it */

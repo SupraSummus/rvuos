@@ -81,6 +81,24 @@ uint32_t mgmt_deauth(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_
 /* A deauthentication or a disassociation to sta from the access point ap, its reason into *reason. */
 int mgmt_let_go(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap, uint16_t *reason);
 
+/* Whether f is a deauthentication or disassociation from the access point ap, to the station sta or, with
+ * *group set, to every station; the reason is not read, which a protected frame's is not in the clear. */
+int mgmt_let_go_kind(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap, int *group);
+
+/*
+ * What the station does with a deauthentication or disassociation from its access point. Without PMF any of
+ * them ends the link. Under PMF a unicast one ends it only protected, its MIC and replay check verified
+ * (protected_ with verified); an unprotected one is the forgery PMF exists to stop, and a group one wants BIP,
+ * which the station does not check yet, so both are ignored, counted. See TODO.md.
+ *
+ * The cost of that ignorance is an access point that lost the station's state and now says so unprotected: the
+ * station would hang on a link the access point no longer serves. 802.11w's answer is an SA Query the station
+ * sends after an unprotected deauthentication, and leaves on no answer; that is (c), see TODO.md.
+ */
+#define MGMT_LET_GO_ACCEPT 1
+#define MGMT_LET_GO_IGNORE 2
+int mgmt_let_go_policy(int pmf, int group, int protected_, int verified);
+
 /*
  * A data frame carries an Ethernet type and payload behind RFC 1042's LLC/SNAP header, as IEEE 802.11 carries them.
  * mgmt_data makes one from sta through the access point ap to dest, unprotected, with the len bytes at body,

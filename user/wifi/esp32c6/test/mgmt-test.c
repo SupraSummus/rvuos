@@ -407,6 +407,32 @@ static void let_go(void)
         len = reason_frame(f, refused[i].stype, refused[i].da, refused[i].sa, refused[i].bssid, 1);
         check(!reads(LET_GO, f, len), refused[i].what);
     }
+    /* The kind is read without the reason, which a protected frame does not carry in the clear. */
+    int group = 0;
+    len = reason_frame(f, WLAN_FC_STYPE_DEAUTH, sta, ap, ap, 7);
+    check(mgmt_let_go_kind(f, len, sta, ap, &group) && !group, "a unicast deauthentication told from a group one");
+    len = reason_frame(f, WLAN_FC_STYPE_DEAUTH, broadcast, ap, ap, 7);
+    check(mgmt_let_go_kind(f, len, sta, ap, &group) && group, "a deauthentication to every station");
+    len = reason_frame(f, WLAN_FC_STYPE_DEAUTH, other, ap, ap, 7);
+    check(!mgmt_let_go_kind(f, len, sta, ap, &group), "and one to another station is not the station's to heed");
+}
+
+/*
+ * The policy under PMF: a unicast deauthentication or disassociation ends the link only protected and verified;
+ * an unprotected one, the forgery PMF exists to stop, or a group one, is ignored. Without PMF any of them ends it.
+ */
+static void let_go_policy(void)
+{
+    for (int group = 0; group <= 1; group++) {
+        for (int prot = 0; prot <= 1; prot++) {
+            for (int verified = 0; verified <= 1; verified++) {
+                int want = !group && prot && verified ? MGMT_LET_GO_ACCEPT : MGMT_LET_GO_IGNORE;
+                check(mgmt_let_go_policy(1, group, prot, verified) == want, "the PMF policy for a leave");
+            }
+        }
+    }
+    check(mgmt_let_go_policy(0, 1, 0, 0) == MGMT_LET_GO_ACCEPT, "without PMF even an unprotected group leave ends it");
+    check(mgmt_let_go_policy(0, 0, 0, 0) == MGMT_LET_GO_ACCEPT, "and an unprotected unicast one");
 }
 
 /* A data frame to the access point carries the Ethernet type behind RFC 1042's header, then the payload as given. */
@@ -555,6 +581,7 @@ int main(void)
     assoc_answer();
     deauth();
     let_go();
+    let_go_policy();
     data();
     data_read();
     printf("mgmt-test: %s\n", failures ? "FAILED" : "ok");
