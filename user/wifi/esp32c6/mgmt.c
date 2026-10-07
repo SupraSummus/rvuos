@@ -81,6 +81,27 @@ int mgmt_to_station(const uint8_t *f, uint32_t len, const uint8_t *sta, const ui
            memcmp(h->addr2, ap, ETH_ALEN) == 0;
 }
 
+/* Whether a is a group address, IEEE 802.11's first bit of its first octet. */
+static int group_addr(const uint8_t *a)
+{
+    return (a[0] & 0x01) != 0;
+}
+
+int mgmt_to_group(const uint8_t *f, uint32_t len, const uint8_t *ap)
+{
+    const struct ieee80211_hdr *h = (const struct ieee80211_hdr *)f;
+    if (len < offsetof(struct ieee80211_hdr, addr3) || !group_addr(h->addr1) || memcmp(h->addr2, ap, ETH_ALEN) != 0) {
+        return 0;
+    }
+    uint16_t fc = le_to_host16(h->frame_control);
+    if (WLAN_FC_GET_TYPE(fc) == WLAN_FC_TYPE_DATA) {
+        return 1;
+    }
+    int stype = WLAN_FC_GET_STYPE(fc);
+    return WLAN_FC_GET_TYPE(fc) == WLAN_FC_TYPE_MGMT &&
+           (stype == WLAN_FC_STYPE_DEAUTH || stype == WLAN_FC_STYPE_DISASSOC);
+}
+
 int mgmt_beacon(const uint8_t *f, uint32_t len, uint8_t heard_on, struct mgmt_beacon *b)
 {
     const struct ieee80211_mgmt *m = (const struct ieee80211_mgmt *)f;
@@ -223,6 +244,18 @@ int mgmt_let_go(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_
     return 1;
 }
 
+int mgmt_let_go_group(const uint8_t *f, uint32_t len, const uint8_t *ap, uint16_t *reason)
+{
+    const struct ieee80211_mgmt *m = (const struct ieee80211_mgmt *)f;
+    int stype = subtype(f, len, REASON_FIXED);
+    if ((stype != WLAN_FC_STYPE_DEAUTH && stype != WLAN_FC_STYPE_DISASSOC) || !group_addr(m->da) ||
+        memcmp(m->sa, ap, ETH_ALEN) != 0 || memcmp(m->bssid, ap, ETH_ALEN) != 0) {
+        return 0;
+    }
+    *reason = le_to_host16(m->u.deauth.reason_code);
+    return 1;
+}
+
 uint32_t mgmt_data(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap, const uint8_t *dest,
                    uint16_t proto, const uint8_t *body, uint32_t len)
 {
@@ -252,14 +285,14 @@ int mgmt_data_read(const uint8_t *f, uint32_t len, const uint8_t *sta, const uin
     uint16_t fc = le_to_host16(h->frame_control);
     int stype = WLAN_FC_GET_STYPE(fc);
     uint32_t hdr = IEEE80211_HDRLEN + (stype == WLAN_FC_STYPE_QOS_DATA ? QOS_CONTROL : 0u);
+    int to_us = memcmp(h->addr1, sta, ETH_ALEN) == 0 || group_addr(h->addr1);
     /* The QoS control field is read only once the length holds it. */
     if ((fc & WLAN_FC_PVER) != 0 || WLAN_FC_GET_TYPE(fc) != WLAN_FC_TYPE_DATA ||
         (stype != WLAN_FC_STYPE_DATA && stype != WLAN_FC_STYPE_QOS_DATA) ||
         (fc & (WLAN_FC_TODS | WLAN_FC_FROMDS | WLAN_FC_MOREFRAG | WLAN_FC_PROTECTED | WLAN_FC_HTC)) != WLAN_FC_FROMDS ||
         WLAN_GET_SEQ_FRAG(le_to_host16(h->seq_ctrl)) != 0 || len < hdr + sizeof(rfc1042) + 2u ||
-        (stype == WLAN_FC_STYPE_QOS_DATA && (f[IEEE80211_HDRLEN] & QOS_AMSDU)) ||
-        memcmp(h->addr1, sta, ETH_ALEN) != 0 || memcmp(h->addr2, ap, ETH_ALEN) != 0 ||
-        memcmp(f + hdr, rfc1042, sizeof(rfc1042)) != 0) {
+        (stype == WLAN_FC_STYPE_QOS_DATA && (f[IEEE80211_HDRLEN] & QOS_AMSDU)) || !to_us ||
+        memcmp(h->addr2, ap, ETH_ALEN) != 0 || memcmp(f + hdr, rfc1042, sizeof(rfc1042)) != 0) {
         return 0;
     }
     p->src = h->addr3;

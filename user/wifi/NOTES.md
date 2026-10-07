@@ -530,4 +530,43 @@ The supplicant runs in the station's thread, and no stack has a guard,
 so the adapter now paints a thread's stack, and the station's log says how deep the handshakes went.
 The one surprise was the lab's, and `TODO.md` knew it already:
 the Pico 2 W's access point, offering WPA3 too, leaves an element hostap checks out of message 3/4,
-so the own station's runs there take `sae=0`.
+so the own station's runs there need that access point configured with `sae=0`, which offers WPA2 alone.
+
+## The station's own data path
+
+Once the handshake has installed the keys, the own station serves the link, and the network's frames cross it
+encrypted and decrypted in software CCMP, `ccmp.c` on hostap's CCM; see `TODO.md`.
+
+**The keys.**
+`link_set_key` copies the pairwise and group temporal keys into the station with their key ids,
+where it wrote only a line before, and each keeps the receive sequence counter the handshake gives,
+and the packet number it sends.
+A station's frame to the access point is addressed to it, so it goes under the pairwise key
+however its own destination, Address 3, is addressed; only the receiving picks the key by Address 1,
+the group's for a group address.
+
+**The frames.**
+An Ethernet frame is laid into a Data frame, encrypted and sent; a received one is decrypted once,
+in the station's thread, handed to the supplicant if it is EAPOL, else made an Ethernet frame for the link.
+No thread decrypts in the interrupt, a frame whose packet number does not advance is dropped,
+and a data frame left in the clear once the pairwise key is set is not the access point's.
+The access point sends a station's group frame to the group again, the station included;
+the station counts its own and hands them no further, as FreeBSD's `net80211` drops them.
+
+**The filter.**
+A scan hears management frames alone, and the station kept that filter, so the access point's broadcast frames
+never reached it; it asks for data too before it takes the receiving over.
+A frame to the station itself came through anyway, which is why the handshake worked with the management filter alone.
+
+**What the board showed.**
+Against the Pico 2 W's own access point, configured with `sae=0`, the station associated, installed the pairwise and group keys,
+and served the link.
+Each DHCP discover it sent under the pairwise key came back from the access point to the group, under the group key,
+so both keys worked one way each; the access point's own discover came in too.
+Nothing unicast came from the access point, so the pairwise key's receiving is not shown, nor an address:
+that access point serves none.
+The home network's WPA2 access point offers the group cipher TKIP, which the station refuses.
+Its WPA2/WPA3 one takes the station by WPA2, which the station picks wherever it is offered,
+and there too its broadcasts come back and the network's group frames come in;
+but no frame to the station itself does once the keys are set, its DHCP offer included,
+though the MAC hands on that access point's protected frames to other stations; see `TODO.md`.

@@ -233,7 +233,7 @@ void drv_must_mac(const char *step, const char *failed)
  * A line about an Ethernet frame for debug=frames: which way it goes, its addresses, its type and length,
  * and what its ARP header asks or tells, or its IPv4 header's addresses and protocol, with UDP's or TCP's ports.
  */
-static void trace(const char *way, const uint8_t *f, uint32_t len)
+void drv_trace(const char *way, const uint8_t *f, uint32_t len)
 {
     char what[96];
     what[0] = 0;
@@ -335,7 +335,7 @@ static esp_err_t receive(void *buffer, uint16_t len, void *eb)
 {
     struct drv *d = drv_self;
     if (d->debug & DRV_DEBUG_FRAMES) {
-        trace("in", buffer, len);
+        drv_trace("in", buffer, len);
     }
     if (chan_send(&d->link, buffer, len) == 0) {
         d->rx_frames++;
@@ -450,7 +450,7 @@ static __attribute__((noreturn)) void serve(struct drv *d)
         }
         while ((frame = chan_get_begin(&d->link, &len)) != 0) {
             if (d->debug & DRV_DEBUG_FRAMES) {
-                trace("out", frame, len);
+                drv_trace("out", frame, len);
             }
             if (esp_wifi_internal_tx(WIFI_IF_STA, (void *)frame, (uint16_t)len) == ESP_OK) {
                 d->tx_frames++;
@@ -650,6 +650,7 @@ static __attribute__((noreturn)) void attend(struct drv *d)
     for (;;) {
         uint32_t bits;
         child_answer(&d->c);
+        sta_link_take(d);
         if (d->leave && !passed) {
             passed = 1;
             sta_leave();

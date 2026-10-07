@@ -97,6 +97,7 @@ void drv_must_mac(const char *step, const char *failed);
 __attribute__((noreturn)) void drv_stop(uint32_t state);
 void drv_radio_off(void);
 void drv_mac_told(const char *who);
+void drv_trace(const char *way, const uint8_t *f, uint32_t len);
 
 /* glue.c */
 int vsnprintf(char *buf, size_t size, const char *fmt, va_list args);

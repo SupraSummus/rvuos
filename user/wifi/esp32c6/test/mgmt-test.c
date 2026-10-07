@@ -452,7 +452,6 @@ static void data_read(void)
     } refused[] = {
         { DATA_FC(WLAN_FC_STYPE_DATA, WLAN_FC_FROMDS), other, ap, 0, 0, 0, 0,
           "a data frame to another station refused" },
-        { DATA_FC(WLAN_FC_STYPE_DATA, WLAN_FC_FROMDS), broadcast, ap, 0, 0, 0, 0, "a data frame to the group refused" },
         { DATA_FC(WLAN_FC_STYPE_DATA, WLAN_FC_FROMDS), sta, other, 0, 0, 0, 0,
           "a data frame from another station refused" },
         { DATA_FC(WLAN_FC_STYPE_DATA, WLAN_FC_TODS), sta, ap, 0, 0, 0, 0, "a data frame to the DS refused" },
@@ -487,6 +486,12 @@ static void data_read(void)
         WPA_PUT_LE16(f + 22, refused[i].seq_ctrl);
         check(!reads(DATA, f, len), refused[i].what);
     }
+
+    /* A group-addressed data frame is the reader's too, as the receiving hears it with the group key. */
+    len = from_ap(f, DATA_FC(WLAN_FC_STYPE_DATA, WLAN_FC_FROMDS), broadcast, ap, 0, 0, 0);
+    check(reads(DATA, f, len) && payload.proto == ETH_P_EAPOL && payload.len == 4, "a data frame to the group read");
+    WPA_PUT_LE16(f + 10, 0); /* Address 2 zeroed: not the access point's */
+    check(!reads(DATA, f, len), "a group frame from another station refused");
 }
 
 /* A frame to the station from its access point is the station's, of any type, once both addresses are whole. */
@@ -507,6 +512,15 @@ static void to_station(void)
     check(!reads(TO_STATION, f, len), "a frame to another station refused");
     len = auth(f, WLAN_FC_STYPE_AUTH, sta, other, ap, WLAN_AUTH_OPEN, 2, 0);
     check(!reads(TO_STATION, f, len), "a frame from another station in the network refused");
+
+    /* A frame to a group address is the group's when it carries data or a reason, and not when it is a beacon. */
+    len = header(f, DATA_FC(WLAN_FC_STYPE_DATA, WLAN_FC_FROMDS), broadcast, ap, other);
+    check(mgmt_to_group(f, len, ap), "a group data frame from the access point, read");
+    check(!mgmt_to_group(f, len, other), "a group frame from another station refused");
+    len = reason_frame(f, WLAN_FC_STYPE_DEAUTH, broadcast, ap, ap, 1);
+    check(mgmt_to_group(f, len, ap), "a deauthentication to the group read");
+    len = announcement(f, WLAN_FC_STYPE_BEACON, broadcast, "rvuos", 6);
+    check(!mgmt_to_group(f, len, ap), "a beacon to the group not taken as the station's");
 }
 
 int main(void)

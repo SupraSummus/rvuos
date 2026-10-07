@@ -10,12 +10,13 @@
  * The events queue has room for every buffer, for STA_RUNS of the supplicant's work, and for the ask to leave.
  *
  * The supplicant, hostap's, see supp.h, runs in the station's thread, over the station's link:
- * the EAPOL frames it sends go out as data frames by mac_tx, unprotected, as every frame is before the keys,
- * and the keys it derives are told but kept nowhere yet, as nothing sends or receives with them; see TODO.md.
+ * the EAPOL frames it sends go out as data frames by mac_tx, in the clear even once the keys are set, see TODO.md,
+ * and the keys it derives are kept for the station's CCMP, under which it then serves the link.
  */
 
 #include <stdint.h>
 
+#include "ccmp.h"
 #include "lib/libc.h"
 #include "mac.h"
 #include "mgmt.h"
@@ -24,7 +25,7 @@
 #include "supp.h"
 
 #define STA_FRAMES    4u    /* the frames that may wait for the station at once */
-#define STA_FRAME_MAX 1024u /* the longest the station keeps; a longer one is dropped and counted */
+#define STA_FRAME_MAX 1600u /* the longest the station keeps: a whole data frame with its CCMP header and MIC */
 #define STA_RUNS      2u    /* the supplicant's work that may wait at once; see link_run */
 #define STA_STACK     4096u /* room for the supplicant's handshakes, whose depth told() says */
 
@@ -45,13 +46,24 @@ struct buf {
 /* How far the station has come with its access point, which says what leaving it undoes. */
 enum { NONE, AUTHENTICATED, ASSOCIATED };
 
+/*
+ * A key the handshake installed, with the packet numbers CCMP uses: one for sending, one for receiving,
+ * the last received being the replay counter, which a frame's must exceed.
+ */
+struct sta_key {
+    volatile int set; /* written by the station's thread, read by the receiving's once it serves */
+    uint8_t tk[CCMP_TK_LEN];
+    uint8_t id;
+    uint64_t tx_pn, rx_pn;
+};
+
 static struct {
     struct queue *events, *free; /* the free queue holds the numbers of the buffers free */
     struct buf *bufs;
     uint8_t ap[6]; /* the access point chosen, which the receiving reads once the station has taken it */
     volatile uint32_t beacon_wanted; /* the receiving keeps what the access point sends every station too */
     volatile uint32_t kept, dropped, runs_lost;
-    uint32_t state;
+    volatile uint32_t state; /* the station's thread writes it, the first thread reads it to send the link's frames */
     /* The access point's RSN and RSNX elements, whole, from its beacon, and the station's, from the supplicant. */
     uint8_t ap_rsn[2 + 255], ap_rsnx[2 + 255];
     uint32_t ap_rsn_len, ap_rsnx_len;
@@ -59,6 +71,10 @@ static struct {
     int has_rsnx;
     int completed; /* the supplicant's handshakes are done */
     uint32_t eapol_heard, eapol_sent;
+    uint32_t relayed; /* the station's own group frames, back from the access point */
+    /* The keys, and the frames CCMP works between. */
+    struct sta_key ptk, gtk;
+    uint8_t *eth, *tx_plain, *tx_crypt, *rx_plain;
 } sta;
 
 /* --- The scan. --- */
@@ -122,14 +138,16 @@ void sta_scan(struct drv *d)
 /* --- The events. --- */
 
 /*
- * A frame to the station from its access point, kept for the station's thread, and while the station reads a beacon,
+ * A frame to the station from its access point, kept for the station's thread; once the group key is set,
+ * a data frame, a deauthentication or a disassociation to the group too; and while the station reads a beacon,
  * one from the access point to every station; in the receiving's thread.
  */
 static void heard(const struct mac_frame *m)
 {
     static const uint8_t every[6] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
+    int group = sta.gtk.set && mgmt_to_group(m->frame, m->len, sta.ap);
     if (!mgmt_to_station(m->frame, m->len, drv_self->mac, sta.ap) &&
-        !(sta.beacon_wanted && mgmt_to_station(m->frame, m->len, every, sta.ap))) {
+        !(sta.beacon_wanted && mgmt_to_station(m->frame, m->len, every, sta.ap)) && !group) {
         return;
     }
     struct event e = { EV_FRAME, 0, 0, 0 };
@@ -171,10 +189,16 @@ static void part(uint16_t reason)
 /* What the station counted, into the log, once the receiving is given back. */
 static void told(void)
 {
+    /* Two lines, as drv_say's line holds 160 bytes. */
     drv_say("sta: frames to the station kept %u, dropped %u; EAPOL frames heard %u, sent %u; "
-            "the supplicant's work lost %u; the stack's deepest %u bytes of %u\n",
+            "the supplicant's work lost %u\n",
             (unsigned)sta.kept, (unsigned)sta.dropped, (unsigned)sta.eapol_heard, (unsigned)sta.eapol_sent,
-            (unsigned)sta.runs_lost, (unsigned)osi_stack_used(osi_self()), (unsigned)STA_STACK);
+            (unsigned)sta.runs_lost);
+    drv_say("sta: the link's frames in %u, out %u, its own back from the access point %u; "
+            "the stack's deepest %u bytes of %u\n",
+            (unsigned)drv_self->rx_frames, (unsigned)drv_self->tx_frames, (unsigned)sta.relayed,
+            (unsigned)osi_stack_used(osi_self()), (unsigned)STA_STACK);
+    drv_mac_told("sta");
 }
 
 /* The station fails at step: it leaves the access point, gives the receiving back, and stops as drv_must does. */
@@ -212,7 +236,7 @@ static __attribute__((noreturn)) void leave(void)
  * The events until the deadline, in osi_now_us's microseconds, each frame offered to read, given back after:
  * 1 once read takes one, the frame the step waits for, 0 at the deadline.
  * The supplicant's work runs between them; the ask to leave ends the station whatever the step,
- * and so does the access point letting it go, once it has authenticated.
+ * and so does the access point letting it, or every station, go, once it has authenticated.
  */
 static int wait_for(uint64_t deadline, int (*read)(const struct buf *b, void *arg), void *arg)
 {
@@ -234,7 +258,8 @@ static int wait_for(uint64_t deadline, int (*read)(const struct buf *b, void *ar
             drv_say("sta: heard frame control %02x%02x, %u bytes\n", b->frame[0], b->frame[1], (unsigned)b->len);
         }
         uint16_t reason = 0;
-        int gone = sta.state != NONE && mgmt_let_go(b->frame, b->len, drv_self->mac, sta.ap, &reason);
+        int gone = sta.state != NONE && (mgmt_let_go(b->frame, b->len, drv_self->mac, sta.ap, &reason) ||
+                                         mgmt_let_go_group(b->frame, b->len, sta.ap, &reason));
         int taken = !gone && read(b, arg);
         osi_queue_put(sta.free, &e.buf, 0);
         if (gone) {
@@ -271,11 +296,30 @@ static int link_send(const uint8_t *dest, uint16_t proto, const uint8_t *buf, si
     return 0;
 }
 
-/* A key the supplicant derived, told but for its bytes, and kept nowhere yet; the data's CCMP is to take it. */
+/* A key the supplicant derived, kept in the station for its CCMP; a key removed, or one of another algorithm, ignored. */
 static int link_set_key(const struct supp_key *k)
 {
-    drv_say("sta: a key, algorithm %d, index %d, %u bytes, flags %x\n", k->alg, k->idx, (unsigned)k->key_len,
-            (unsigned)k->flag);
+    struct sta_key *key = (k->flag & SUPP_KEY_GROUP) ? &sta.gtk : &sta.ptk;
+    const char *what = key == &sta.gtk ? "the group's" : "the pairwise";
+    if (k->alg == SUPP_ALG_NONE) {
+        key->set = 0;
+        drv_say("sta: %s key removed\n", what);
+        return 0;
+    }
+    if (k->alg != SUPP_ALG_CCMP || k->key == 0 || k->key_len != CCMP_TK_LEN) {
+        drv_say("sta: a key of algorithm %d, %u bytes, ignored\n", k->alg, (unsigned)k->key_len);
+        return 0;
+    }
+    memcpy(key->tk, k->key, CCMP_TK_LEN);
+    key->id = (uint8_t)(k->idx & 3);
+    key->tx_pn = 0;
+    key->rx_pn = 0;
+    /* The receive sequence counter the handshake gives, little-endian as the CCMP header's packet number. */
+    for (uint32_t i = 0; k->seq != 0 && i < k->seq_len && i < 6u; i++) {
+        key->rx_pn |= (uint64_t)k->seq[i] << (8u * i);
+    }
+    key->set = 1;
+    drv_say("sta: %s key installed, index %d\n", what, key->id);
     return 0;
 }
 
@@ -446,10 +490,8 @@ static void associate(const struct drv_net *ap)
  * until its handshakes are done: the 4-way handshake, whose message 3/4 carries the group's key too.
  * An access point sends a message again about a second later if it hears no answer,
  * and after a few lets the station go.
- * Then the station stays a while, answering what the access point sends again: 3/4 again would say 4/4 was lost.
  */
 #define HANDSHAKE_US 8000000u
-#define STAY_US      2000000u
 
 /* An EAPOL frame from the access point, handed to the supplicant; no other frame is read, nor a protected one. */
 static void eapol(const struct buf *b)
@@ -468,13 +510,6 @@ static int until_completed(const struct buf *b, void *arg)
     return sta.completed;
 }
 
-static int never(const struct buf *b, void *arg)
-{
-    (void)arg;
-    eapol(b);
-    return 0;
-}
-
 static void handshake(void)
 {
     uint64_t start = osi_now_us();
@@ -482,17 +517,142 @@ static void handshake(void)
     drv_say("sta: the handshakes %s in %u ms\n", done ? "done" : "not done",
             (unsigned)((osi_now_us() - start) / 1000u));
     must("the handshakes done", done);
-    uint32_t heard_before = sta.eapol_heard;
-    wait_for(osi_now_us() + STAY_US, never, 0);
-    drv_say("sta: stayed %u ms, EAPOL frames heard again %u\n", STAY_US / 1000u,
-            (unsigned)(sta.eapol_heard - heard_before));
+}
+
+/* --- The data's path, once the handshake has installed the keys. --- */
+
+/* An Ethernet frame from the network process, built into a data frame, encrypted under the pairwise key and sent. */
+static void eth_send(struct drv *d, const uint8_t *eth, uint32_t len)
+{
+    if (len < 14u || len > LINK_SLOT) {
+        d->tx_dropped++;
+        return;
+    }
+    if (d->debug & DRV_DEBUG_FRAMES) {
+        drv_trace("out", eth, len);
+    }
+    /*
+     * A station's frame is addressed to the access point, so 802.11 sends it under the pairwise key
+     * whatever its destination, Address 3; an access point picks the key by Address 1, as mac80211 does,
+     * and would drop a broadcast sent under the group key.
+     */
+    struct sta_key *key = &sta.ptk;
+    if (!key->set) {
+        d->tx_dropped++;
+        return;
+    }
+    uint16_t proto = (uint16_t)eth[12] << 8 | eth[13];
+    uint32_t n = mgmt_data(sta.tx_plain, MGMT_DATA_FIXED + LINK_SLOT, d->mac, sta.ap, eth, proto, eth + 14, len - 14u);
+    if (n == 0) {
+        d->tx_dropped++;
+        return;
+    }
+    uint32_t cn = ccmp_encrypt(sta.tx_crypt, MGMT_DATA_FIXED + LINK_SLOT + CCMP_HEAD_LEN + CCMP_MIC_LEN, sta.tx_plain, n,
+                               key->tk, ++key->tx_pn, key->id);
+    if (cn == 0) {
+        d->tx_dropped++;
+        return;
+    }
+    const char *failed = mac_tx(sta.tx_crypt, cn);
+    if (failed) {
+        d->tx_dropped++;
+        drv_say("sta: a frame out, %u bytes: %s\n", (unsigned)len, failed);
+    } else {
+        d->tx_frames++;
+    }
+}
+
+void sta_link_take(struct drv *d)
+{
+    uint32_t len;
+    const uint8_t *eth;
+    while ((eth = chan_get_begin(&d->link, &len)) != 0) {
+        if (sta.state != NONE) {
+            eth_send(d, eth, len);
+        }
+        chan_get_end(&d->link);
+    }
+}
+
+#define FC1_PROTECTED 0x40u     /* the Protected bit, in the Frame Control's second octet */
+#define ADDR1         4u        /* where a frame's Address 1, its receiver, lies */
+#define SERVE_US      60000000u /* how long each of the serving's waits lasts; any length would do */
+
+/*
+ * A frame the station received once it serves the link, wait_for's reader, which never takes one:
+ * decrypted once and handed to the supplicant if it is EAPOL, else built into an Ethernet frame for the network process.
+ * A data frame left in the clear once the pairwise key is set is not the access point's, and is dropped;
+ * so is the station's own group frame, which the access point sends the group again, counted.
+ */
+static int read_frame(const struct buf *b, void *arg)
+{
+    struct drv *d = arg;
+    const uint8_t *frame = b->frame;
+    uint32_t len = b->len;
+    struct mgmt_payload p;
+
+    int encrypted = (frame[1] & FC1_PROTECTED) != 0;
+    int to_group = (frame[ADDR1] & 0x01) != 0;
+    if (encrypted) {
+        struct sta_key *key = to_group ? &sta.gtk : &sta.ptk; /* the receiver's address picks the key */
+        uint64_t pn;
+        uint8_t id;
+        if (!key->set || !ccmp_decrypt(sta.rx_plain, STA_FRAME_MAX, frame, len, key->tk, &pn, &id, &len) ||
+            id != key->id || pn <= key->rx_pn) {
+            d->rx_dropped++;
+            return 0;
+        }
+        key->rx_pn = pn;
+        frame = sta.rx_plain;
+    }
+    if (!mgmt_data_read(frame, len, d->mac, sta.ap, &p)) {
+        return 0;
+    }
+    if (p.proto == SUPP_EAPOL) {
+        sta.eapol_heard++;
+        supp_rx_eapol(p.src, p.body, p.len);
+        return 0;
+    }
+    if (!encrypted && sta.ptk.set) {
+        d->rx_dropped++;
+        return 0;
+    }
+    if (to_group && memcmp(p.src, d->mac, 6) == 0) {
+        sta.relayed++;
+        return 0;
+    }
+    if (p.len > LINK_SLOT - 14u) {
+        d->rx_dropped++;
+        return 0;
+    }
+    memcpy(sta.eth, frame + ADDR1, 6); /* the destination */
+    memcpy(sta.eth + 6, p.src, 6);     /* the source, the frame's Address 3 */
+    sta.eth[12] = (uint8_t)(p.proto >> 8);
+    sta.eth[13] = (uint8_t)p.proto;
+    memcpy(sta.eth + 14, p.body, p.len);
+    if (d->debug & DRV_DEBUG_FRAMES) {
+        drv_trace("in", sta.eth, 14u + p.len);
+    }
+    if (chan_send(&d->link, sta.eth, 14u + p.len) == 0) {
+        d->rx_frames++;
+    } else {
+        d->rx_dropped++;
+    }
+    return 0;
+}
+
+/* The station's service of the link, each frame read, until the root task asks it to leave; see wait_for. */
+static __attribute__((noreturn)) void serve_station(struct drv *d)
+{
+    for (;;) {
+        wait_for(osi_now_us() + SERVE_US, read_frame, d);
+    }
 }
 
 /*
  * The station's thread: the scan, the access point's channel, the receiving the station's, the access point's beacon,
- * the authentication, the association and the supplicant's handshakes.
- * Nothing sends or receives the network's data yet, so the station leaves then, and reports DRV_SCANNED;
- * the data's path is to follow, see TODO.md.
+ * the authentication, the association, the supplicant's handshakes, and then the link's service,
+ * reporting DRV_JOINED so that the root task starts the network process; see TODO.md.
  */
 static void sta_main(void *arg)
 {
@@ -505,18 +665,18 @@ static void sta_main(void *arg)
             ap->bssid[2], ap->bssid[3], ap->bssid[4], ap->bssid[5], (unsigned)ap->channel);
     /* The channel a beacon named, which mac_channel may refuse, tuned before the MAC is the driver's. */
     drv_must_mac("the access point's channel", mac_channel(ap->channel));
+    /* The station's data frames, unicast to it or to the group, which the scan's management filter leaves out. */
+    drv_must_mac("every data frame heard", mac_hear(MAC_HEAR_MGMT | MAC_HEAR_DATA));
     drv_must_mac("the MAC receives into the driver's list", mac_rx_take(heard));
     security(d, ap);
     authenticate();
     associate(ap);
     handshake();
-    part(MGMT_LEAVING);
-    mac_rx_give_back();
-    told();
     d->joined = *ap;
-    drv_radio_off();
-    drv_say("sta: left; the radio is off\n");
-    drv_stop(DRV_SCANNED);
+    d->authmode = WIFI_AUTH_WPA2_PSK;
+    child_report(&d->c, DRV_JOINED);
+    drv_say("sta: joined, and the link is served\n");
+    serve_station(d);
 }
 
 const char *sta_start(struct drv *d)
@@ -524,7 +684,12 @@ const char *sta_start(struct drv *d)
     sta.bufs = osi_calloc(STA_FRAMES, sizeof(struct buf));
     sta.events = osi_queue_new(STA_FRAMES + STA_RUNS + 1u, sizeof(struct event));
     sta.free = osi_queue_new(STA_FRAMES, sizeof(uint32_t));
-    if (sta.bufs == 0 || sta.events == 0 || sta.free == 0) {
+    sta.eth = osi_malloc(LINK_SLOT);
+    sta.tx_plain = osi_malloc(MGMT_DATA_FIXED + LINK_SLOT);
+    sta.tx_crypt = osi_malloc(MGMT_DATA_FIXED + LINK_SLOT + CCMP_HEAD_LEN + CCMP_MIC_LEN);
+    sta.rx_plain = osi_malloc(STA_FRAME_MAX);
+    if (sta.bufs == 0 || sta.events == 0 || sta.free == 0 || sta.eth == 0 || sta.tx_plain == 0 || sta.tx_crypt == 0 ||
+        sta.rx_plain == 0) {
         return "the station's buffers and queues";
     }
     for (uint32_t i = 0; i < STA_FRAMES; i++) {

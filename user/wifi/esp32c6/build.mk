@@ -39,7 +39,7 @@ HOSTAP_SRC  := rsn_supp/wpa.c rsn_supp/wpa_ie.c rsn_supp/pmksa_cache.c \
                crypto/sha1.c crypto/sha1-internal.c crypto/sha1-prf.c crypto/sha1-pbkdf2.c \
                crypto/sha256.c crypto/sha256-internal.c crypto/sha256-prf.c crypto/sha256-kdf.c crypto/md5.c \
                crypto/aes-internal.c crypto/aes-internal-enc.c crypto/aes-internal-dec.c \
-               crypto/aes-wrap.c crypto/aes-unwrap.c crypto/aes-omac1.c crypto/aes-cbc.c
+               crypto/aes-wrap.c crypto/aes-unwrap.c crypto/aes-omac1.c crypto/aes-cbc.c crypto/aes-ccm.c
 HOSTAP_OBJ  := $(patsubst %.c,$(BUILD)/hostap/%.o,$(HOSTAP_SRC))
 HOSTAP_INC  := -include $(WIFI_ESP)/hostap/includes.h -isystem $(HOSTAP) -isystem $(HOSTAP)/utils
 WIFI_ESP_OBJ += $(HOSTAP_OBJ)
@@ -65,14 +65,15 @@ $(BUILD)/mbedtls/%.o: $(wildcard $(WIFI_ESP)/mbedtls/*.h $(WIFI_ESP)/mbedtls/lib
 	$(CC) $(ARCHFLAGS) -std=c11 -ffreestanding -fno-builtin -fno-pic -fno-common -nostdlibinc -O2 -g \
 		-ffunction-sections -fdata-sections -w $(MBEDTLS_INC) -c $(MBEDTLS)/$*.c -o $@
 
-$(addprefix $(BUILD)/$(WIFI_ESP)/,supp.o wpa.o hostap.o crypto.o ec.o mgmt.o): CFLAGS += $(HOSTAP_INC)
-$(addprefix $(BUILD)/$(WIFI_ESP)/,supp.o wpa.o hostap.o crypto.o ec.o mgmt.o): $(WIFI_ESP_INIT)
+$(addprefix $(BUILD)/$(WIFI_ESP)/,supp.o wpa.o hostap.o crypto.o ec.o mgmt.o ccmp.o): CFLAGS += $(HOSTAP_INC)
+$(addprefix $(BUILD)/$(WIFI_ESP)/,supp.o wpa.o hostap.o crypto.o ec.o mgmt.o ccmp.o): $(WIFI_ESP_INIT)
 $(BUILD)/$(WIFI_ESP)/ec.o: CFLAGS += $(MBEDTLS_INC)
 
 # The driver's files that work with hostap's, on the host under the sanitizers, with hostap's own system functions:
 # WPA3's SAE, hostap's sae.c and dragonfly.c over ec.c and Mbed TLS,
 # against IEEE 802.11's test vectors and whole exchanges, test/sae-test.c,
-# and the station's management frames, mgmt.c over hostap's parser of elements, test/mgmt-test.c.
+# the station's management frames, mgmt.c over hostap's parser of elements, test/mgmt-test.c,
+# and its CCMP, ccmp.c over hostap's CCM, against IEEE 802.11's own test vector, test/ccmp-test.c.
 # They build what tools/esp-fetch.py fetches, so make check, which fetches nothing, leaves them out,
 # and make BOARD=esp32c6 wifi-esp32c6 runs them before the board.
 ESP_HOST        := build/host/esp32c6
@@ -88,10 +89,17 @@ SAE_TEST_OBJ    := $(patsubst %.c,$(ESP_HOST)/hostap/%.o,$(SAE_TEST_SRC)) \
 MGMT_TEST       := $(ESP_HOST)/mgmt-test
 MGMT_TEST_OBJ   := $(patsubst %.c,$(ESP_HOST)/hostap/%.o,common/ieee802_11_common.c $(ESP_HOST_UTILS)) \
                    $(ESP_HOST)/mgmt.o $(ESP_HOST)/mgmt-test.o
+CCMP_TEST       := $(ESP_HOST)/ccmp-test
+CCMP_TEST_OBJ   := $(patsubst %.c,$(ESP_HOST)/hostap/%.o,crypto/aes-ccm.c crypto/aes-internal.c \
+                   crypto/aes-internal-enc.c $(ESP_HOST_UTILS)) $(ESP_HOST)/ccmp.o $(ESP_HOST)/ccmp-test.o
 
 $(ESP_HOST)/hostap/%.o: $(WIFI_ESP_INIT)
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O1 -g $(HOST_SAN) -w $(ESP_HOST_INC) -c $(HOSTAP)/$*.c -o $@
+
+# hostap's CCM reads the message in words, so a QoS frame's payload, two bytes past a word, trips the host's
+# alignment check; off for this one fetched file, on for the driver's own and its tests.
+$(ESP_HOST)/hostap/crypto/aes-ccm.o: HOST_SAN += -fno-sanitize=alignment
 
 $(ESP_HOST)/mbedtls/%.o: $(wildcard $(WIFI_ESP)/mbedtls/*.h) $(WIFI_ESP_INIT)
 	@mkdir -p $(dir $@)
@@ -101,7 +109,9 @@ $(ESP_HOST)/ec.o: $(WIFI_ESP)/ec.c $(wildcard $(WIFI_ESP)/mbedtls/*.h) $(WIFI_ES
 $(ESP_HOST)/sae-test.o: $(WIFI_ESP)/test/sae-test.c $(WIFI_ESP_INIT)
 $(ESP_HOST)/mgmt.o: $(WIFI_ESP)/mgmt.c $(WIFI_ESP)/mgmt.h $(WIFI_ESP_INIT)
 $(ESP_HOST)/mgmt-test.o: $(WIFI_ESP)/test/mgmt-test.c $(WIFI_ESP)/mgmt.h $(WIFI_ESP_INIT)
-$(addprefix $(ESP_HOST)/,ec.o sae-test.o mgmt.o mgmt-test.o):
+$(ESP_HOST)/ccmp.o: $(WIFI_ESP)/ccmp.c $(WIFI_ESP)/ccmp.h $(WIFI_ESP_INIT)
+$(ESP_HOST)/ccmp-test.o: $(WIFI_ESP)/test/ccmp-test.c $(WIFI_ESP)/ccmp.h $(WIFI_ESP_INIT)
+$(addprefix $(ESP_HOST)/,ec.o sae-test.o mgmt.o mgmt-test.o ccmp.o ccmp-test.o):
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O1 -g -Wall -Wextra -Werror -Wshadow $(HOST_SAN) $(ESP_HOST_INC) -I$(WIFI_ESP) \
 		-c $< -o $@
@@ -112,12 +122,18 @@ $(SAE_TEST): $(SAE_TEST_OBJ)
 $(MGMT_TEST): $(MGMT_TEST_OBJ)
 	$(HOST_CC) $(HOST_SAN) $^ -o $@
 
-.PHONY: sae-test mgmt-test
+$(CCMP_TEST): $(CCMP_TEST_OBJ)
+	$(HOST_CC) $(HOST_SAN) $^ -o $@
+
+.PHONY: sae-test mgmt-test ccmp-test
 sae-test: $(SAE_TEST)
 	$(SAE_TEST)
 
 mgmt-test: $(MGMT_TEST)
 	$(MGMT_TEST)
+
+ccmp-test: $(CCMP_TEST)
+	$(CCMP_TEST)
 
 # libphy.a's functions that reach PCR, the PMU or the LP domain, weakened in a copy, so that the driver's own,
 # in phy.c, take their place; the copy is made again when this file, which names them, changes.
@@ -151,9 +167,10 @@ $(BUILD)/user-wifi-esp32c6.elf: $(BUILD)/$(WIFI_ESP)/root.o $(WIFI_ESP_NET) $(LI
 
 .PHONY: wifi-esp32c6
 ifeq ($(BOARD),esp32c6)
-wifi-esp32c6: $(BUILD)/kernel-wifi-esp32c6.bin $(BUILD)/wifi-drv.bin $(SAE_TEST) $(MGMT_TEST)
+wifi-esp32c6: $(BUILD)/kernel-wifi-esp32c6.bin $(BUILD)/wifi-drv.bin $(SAE_TEST) $(MGMT_TEST) $(CCMP_TEST)
 	$(SAE_TEST)
 	$(MGMT_TEST)
+	$(CCMP_TEST)
 	tools/wifi-run.py --console --save $(BUILD)/wifi-run.log \
 		$(foreach e,$(BUILD)/wifi-drv.elf $(BUILD)/kernel-wifi-esp32c6.elf $(PHYBLOB_ROM_ELF),--symbols $(e)) -- \
 		$(ESPTOOL_PYTHON) tools/esp32c6-run.py --port $(PORT) --flash $(WIFI_ESP_AT):$(BUILD)/wifi-drv.bin \

@@ -92,14 +92,27 @@ what is left:
   The driver's own code receives and scans as well as the libraries do, by `listen=` and a scan, each with and without `rx=own`,
   and sends a probe by `tx=own`, the access point answering it.
   The station's logic is the driver's own too, on hostap; `user/wifi/NOTES.md` says why.
-  With `sta=own` it associates and runs the supplicant's 4-way handshake over a link of its own, see `supp.h`,
-  for WPA2's personal alone, then leaves, as nothing carries data yet.
-  The data come next, their CCMP in software first, on hostap's `aes-ccm.c`, which the build leaves out yet,
-  and the MAC's key registers later.
+  With `sta=own` it associates, runs the supplicant's 4-way handshake over a link of its own, see `supp.h`,
+  for WPA2's personal alone, installs the keys it derives, and serves the link,
+  its data frames encrypted and decrypted in software CCMP, `ccmp.c` on hostap's `aes-ccm.c`.
+  No protected frame to the station itself comes in, so it takes no address:
+  at the home network's WPA2/WPA3 access point its frames under the pairwise key are taken,
+  its broadcasts coming back from the access point, and the network's group frames come in under the group key,
+  but its DHCP offer never does, while the MAC hands on the access point's protected frames to other stations,
+  and its EAPOL to the station in the clear.
+  The MAC seems to keep a protected frame to its own address from the list when its key registers hold no key for it,
+  so those registers, or a way to have such a frame passed on as it is, come next on the data path.
+  A rekey's EAPOL frame is protected and is read, but its keys race `link_set_key` in the station's thread
+  against `eth_send` in the first on the pairwise key, and the reply to it still goes out in the clear.
+  The station's data go at 1 Mb/s, the rate `mac_tx` programs for management frames.
+  `mac_hear(MAC_HEAR_MGMT | MAC_HEAR_DATA)` passes every data frame on the channel, of any BSS,
+  through `mac.c` and the four receive buffers; the MAC's own BSSID filter, which the libraries set when they associate,
+  would spare them.
+  Its receiving keeps one replay counter a key, where 802.11 keeps one a TID for QoS data,
+  so a frame of one access category overtaken by a later-numbered one of another is dropped.
   Then WPA3: SAE in the authentication, run in the station's thread, whose stack is sized for WPA2's handshakes,
   and management frames protected, the station's deauthentication sent under CCMP,
   and an unprotected one from the access point ignored.
-  The station hears no deauthentication to every station, which an access point that stops may send.
   The MAC's bring-up stays the libraries': the own path runs between their `esp_wifi_start` and `esp_wifi_stop`,
   so what those do to the modem and the MAC is the last of `pp` to read before it can go.
   Its frame completion spins in the caller's thread while the slot is armed, and borrows the libraries' slot 0;
@@ -112,8 +125,11 @@ what is left:
 - The ESP32-C6's echo answers in 13 to 22 ms at the median, the Pico 2 W's in about 5, and the C6's ping in about 10:
   where the time goes, the radio, the driver's turn after its interrupt, open decision 9, or the libraries' task,
   is not measured.
-- The Pico 2 W's run lasts its `run=` whatever its checks found, since the host has no way to end it:
-  its console is the halt's alone, and a word on the logger's port could carry the end instead.
+- The Pico 2 W's run lasts its `run=` whatever its checks found, or until a reset by hand,
+  since the host has no way to end it: its USB serial port, `kernel/board/rp2350/cdc.c`, is the halt's alone.
+  That port kept up while the run lasts would let the host end it there, in either mode,
+  where the network does not reach the lab's access point; closing the port already reboots the chip into BOOTSEL.
+  Whether the kernel keeps it, or the root task is given the USB controller as the ESP32-C6's is given its console, is open.
 - The ESP32-C6's driver stops once the access point lets the station go, and the root task ends the run:
   nothing joins again, as ESP-IDF leaves to the program too.
 - The ESP32-C6's kernel moves the CPU to the SPLL from whatever source it finds, but has only found the SPLL:

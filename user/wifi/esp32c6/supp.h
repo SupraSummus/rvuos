@@ -18,6 +18,13 @@
 /* EAPOL's Ethernet type, the proto of the frames the supplicant sends. */
 #define SUPP_EAPOL 0x888eu
 
+/* hostap's enum wpa_alg, as far as the station names it; see common/defs.h. */
+#define SUPP_ALG_NONE 0
+#define SUPP_ALG_CCMP 3
+
+/* hostap's enum key_flag bit that says a key is the group's rather than the pairwise one; see common/defs.h. */
+#define SUPP_KEY_GROUP 0x10
+
 /* A key the handshakes derived, as hostap's driver is handed it. */
 struct supp_key {
     int alg;              /* hostap's enum wpa_alg */

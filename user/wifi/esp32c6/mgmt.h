@@ -36,6 +36,9 @@ struct mgmt_beacon {
 /* A frame of any type to sta from the access point ap, by its receiver's and transmitter's addresses alone. */
 int mgmt_to_station(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap);
 
+/* A data frame, or a deauthentication or a disassociation, from the access point ap to a group address. */
+int mgmt_to_group(const uint8_t *f, uint32_t len, const uint8_t *ap);
+
 /* A beacon or a probe response, its elements parsed; one whose DS parameter set names no channel 1 to 14 is refused. */
 int mgmt_beacon(const uint8_t *f, uint32_t len, uint8_t heard_on, struct mgmt_beacon *b);
 
@@ -89,10 +92,13 @@ struct mgmt_payload {
 };
 
 /*
- * A data frame from the access point ap to sta, a Data or a QoS Data frame of one whole MSDU, unprotected,
- * behind RFC 1042's LLC/SNAP header, read into p; a frame protected, a fragment, an A-MSDU,
+ * A data frame from the access point ap to sta or to the group, a Data or a QoS Data frame of one whole MSDU,
+ * unprotected, behind RFC 1042's LLC/SNAP header, read into p; a frame protected, a fragment, an A-MSDU,
  * one with an HT control field, or one under another LLC header is refused.
  */
 int mgmt_data_read(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap, struct mgmt_payload *p);
+
+/* An access point's frame to the group that says the station is let go: its reason into *reason. */
+int mgmt_let_go_group(const uint8_t *f, uint32_t len, const uint8_t *ap, uint16_t *reason);
 
 #endif
