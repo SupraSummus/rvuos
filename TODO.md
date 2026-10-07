@@ -112,12 +112,12 @@ what is left:
   WPA2's PMF is taken where the access point offers it: the station advertises MFPC, keeps the IGTK the 4-way
   gives, and sends its deauthentication under the pairwise key, so an access point is left no state it should keep.
   Under PMF it takes a deauthentication or disassociation as the access point's only protected, its MIC and replay
-  check under the pairwise key, and ignores an unprotected one, counted. The cost of that is an access point that
-  lost the station's state and says so unprotected — reason 6 or 7 — on which the station would hang; 802.11w's
-  answer, owed, is an SA Query the station sends after one, and leaves on no answer. A group-addressed robust
-  management frame still wants its BIP check over the IGTK in software, and a group deauthentication is ignored
-  until then. An access point that answers an association with status 30 is waited out by its Timeout Interval
-  element and asked again, a few times.
+  check under the pairwise key, and ignores an unprotected one, counted; after an unprotected one it asks with an
+  SA Query of its own, protected, its transaction id random, and leaves if the access point does not answer in
+  time, which is what one that lost the station's state answers. An SA Query the access point sends is answered,
+  under the pairwise key too. A group-addressed robust management frame still wants its BIP check over the IGTK in
+  software, and a group deauthentication is ignored until then. An access point that answers an association with
+  status 30 is waited out by its Timeout Interval element and asked again, a few times.
   The MAC's bring-up stays the libraries': the own path runs between their `esp_wifi_start` and `esp_wifi_stop`,
   so what those do to the modem and the MAC is the last of `pp` to read before it can go.
   Its frame completion spins in the caller's thread while the slot is armed, and borrows the libraries' slot 0;

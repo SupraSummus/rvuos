@@ -603,3 +603,5 @@ the nonce's Management bit. An association answered status 30 is waited out by i
 asked again, from the authentication, a few times.
 A deauthentication or disassociation is heeded only protected, its MIC and replay check under the pairwise key,
 on the counter reserved for management (`ccmp.c`'s index 16). An unprotected one is a forgery, ignored, counted.
+After one the station sends an SA Query of its own, its transaction id random, and leaves the link when the
+access point does not answer within the whole time. An SA Query the access point sends is answered.

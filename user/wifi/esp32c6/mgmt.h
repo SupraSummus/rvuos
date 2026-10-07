@@ -86,10 +86,10 @@ int mgmt_let_go(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_
 int mgmt_let_go_kind(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap, int *group);
 
 /*
- * What the station does with a deauthentication or disassociation from its access point. Without PMF any of
- * them ends the link. Under PMF a unicast one ends it only protected, its MIC and replay check verified
- * (protected_ with verified); an unprotected one is the forgery PMF exists to stop, and a group one wants BIP,
- * which the station does not check yet, so both are ignored, counted. See TODO.md.
+ * What the station does with a deauthentication or disassociation from its access point. Without PMF protecting
+ * management frames (active), any of them ends the link. Under it a unicast one ends it only protected, its MIC
+ * and replay check verified (protected_ with verified); an unprotected one is the forgery PMF exists to stop, and
+ * a group one wants BIP, which the station does not check yet, so both are ignored, counted. See TODO.md.
  *
  * The cost of that ignorance is an access point that lost the station's state and now says so unprotected: the
  * station would hang on a link the access point no longer serves. 802.11w's answer is an SA Query the station
@@ -97,7 +97,31 @@ int mgmt_let_go_kind(const uint8_t *f, uint32_t len, const uint8_t *sta, const u
  */
 #define MGMT_LET_GO_ACCEPT 1
 #define MGMT_LET_GO_IGNORE 2
-int mgmt_let_go_policy(int pmf, int group, int protected_, int verified);
+int mgmt_let_go_policy(int active, int group, int protected_, int verified);
+
+/*
+ * An SA Query request or response, IEEE 802.11w's: an Action frame of category SA Query to the access point ap
+ * from the station sta, its transaction id; 28 bytes, robust, and so to be protected under the pairwise key.
+ */
+uint32_t mgmt_sa_query(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap, int response, uint16_t id);
+
+/* An SA Query from ap to sta: *response 1 for an answer, 0 for a request, and its transaction id into *id. */
+int mgmt_sa_query_read(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap, int *response,
+                       uint16_t *id);
+
+/* Whether f's Frame Control names an Action frame, whose body a reader may take up, before decrypting it. */
+int mgmt_is_action(const uint8_t *f, uint32_t len);
+
+/*
+ * The SA Query's next move, from the time it started and last sent, 802.11w's retry and maximum timeouts:
+ * SA_QUERY_SEND now, SA_QUERY_WAIT, or SA_QUERY_GIVE_UP, the access point having lost the station.
+ */
+#define SA_QUERY_SEND     0
+#define SA_QUERY_WAIT     1
+#define SA_QUERY_GIVE_UP  2
+#define SA_QUERY_RETRY_US 200000u  /* between two requests, dot11AssociationSAQueryRetryTimeout */
+#define SA_QUERY_MAX_US   1000000u /* the whole query, dot11AssociationSAQueryMaximumTimeout */
+int mgmt_sa_query_step(uint64_t now_us, uint64_t start_us, uint64_t last_us);
 
 /*
  * A data frame carries an Ethernet type and payload behind RFC 1042's LLC/SNAP header, as IEEE 802.11 carries them.

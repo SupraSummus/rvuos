@@ -101,6 +101,13 @@ static struct {
     uint32_t eapol_heard, eapol_sent, eapol_crypt; /* the last of the supplicant's frames sent under the pairwise key */
     uint32_t relayed; /* the station's own group frames, back from the access point */
     uint32_t let_go_ignored; /* a deauthentication or disassociation ignored under PMF, unforged by the check */
+    uint32_t sa_query_sent;  /* SA Query requests the station sent, checking whether the access point still holds it */
+    /* The SA Query in progress: its transaction id, what the access point said as it left, and its times. */
+    struct {
+        int active;
+        uint16_t id, reason;
+        uint64_t start, last, at;
+    } sa_query;
     /* The keys, and the frames CCMP works between. */
     struct keys ptk;      /* the pairwise key in use and the one staged; see keys.h */
     struct key_pn ptk_pn; /* the pairwise key in use's packet numbers */
@@ -242,9 +249,9 @@ static void told(void)
             (unsigned)drv_self->rx_frames, (unsigned)drv_self->tx_frames, (unsigned)sta.relayed,
             (unsigned)osi_stack_used(osi_self()), (unsigned)STA_STACK);
     drv_say("sta: the data frames through the cipher: by the MAC %u (of them group %u), in the clear %u; "
-            "deauthentications ignored %u\n",
+            "deauthentications ignored %u, SA Queries sent %u\n",
             (unsigned)sta.rx_mac, (unsigned)sta.rx_mac_grp, (unsigned)sta.rx_clear,
-            (unsigned)sta.let_go_ignored);
+            (unsigned)sta.let_go_ignored, (unsigned)sta.sa_query_sent);
     drv_mac_told("sta");
 }
 
@@ -311,11 +318,70 @@ static int open_mgmt(const struct buf *b, uint8_t *plain, uint32_t *len)
     return ccmp_replay(pn, CCMP_REPLAY_MGMT, sta.ptk_pn.rx_pn) == CCMP_REPLAY_TAKEN;
 }
 
+/* The SA Query's answer to the access point, or the station's own request, protected under the pairwise key. */
+static void sa_query_send(int response, uint16_t id)
+{
+    static uint8_t frame[MGMT_FRAME_MAX];
+    static uint8_t crypt[MGMT_FRAME_MAX + CCMP_HEAD_LEN + CCMP_MIC_LEN];
+    uint32_t n = mgmt_sa_query(frame, sizeof(frame), drv_self->mac, sta.ap, response, id);
+    uint32_t cn = protect_mgmt(crypt, sizeof(crypt), frame, n);
+    if (cn == 0) {
+        return; /* nothing to protect it with: an unprotected SA Query is not sent under PMF */
+    }
+    const char *failed = mac_tx(crypt, cn);
+    if (failed) {
+        drv_say("sta: an SA Query %s: %s\n", response ? "answer" : "question", failed);
+    } else if (!response) {
+        sta.sa_query_sent++;
+    }
+}
+
+/*
+ * The access point said the station is gone, unprotected: ask it whether it still holds the station, one query
+ * at a time; mgmt_sa_query_step moves it, and no answer in the whole time leaves the link. The transaction id
+ * is random, so that a forged answer to another query is not taken for this one's.
+ */
+static void sa_query_start(uint16_t reason)
+{
+    if (sta.sa_query.active) {
+        return;
+    }
+    drv_random((uint8_t *)&sta.sa_query.id, sizeof(sta.sa_query.id));
+    sta.sa_query.active = 1;
+    sta.sa_query.reason = reason;
+    sta.sa_query.start = osi_now_us();
+    sta.sa_query.last = sta.sa_query.start - SA_QUERY_RETRY_US; /* the first request goes at once */
+    sta.sa_query.at = sta.sa_query.start;
+}
+
+/* The SA Query's next move at the time: send again, or, with no answer in the whole time, leave the link. */
+static void sa_query_time(void)
+{
+    if (!sta.sa_query.active) {
+        return;
+    }
+    uint64_t now = osi_now_us();
+    int step = mgmt_sa_query_step(now, sta.sa_query.start, sta.sa_query.last);
+    if (step == SA_QUERY_SEND) {
+        sa_query_send(0, sta.sa_query.id);
+        sta.sa_query.last = now;
+    } else if (step == SA_QUERY_GIVE_UP) {
+        sta.sa_query.active = 0;
+        forget();
+        fail("the access point's state", sta.sa_query.reason);
+    }
+    sta.sa_query.at = sta.sa_query.last + SA_QUERY_RETRY_US;
+    if (sta.sa_query.start + SA_QUERY_MAX_US < sta.sa_query.at) {
+        sta.sa_query.at = sta.sa_query.start + SA_QUERY_MAX_US;
+    }
+}
+
 /*
  * Whether a deauthentication or disassociation from the access point ends the station, its reason into *reason.
- * Under PMF a unicast one is read only from the frame the pairwise key protects; an unprotected one is the
- * forgery PMF exists to stop and is ignored, counted, and a group one waits on a BIP check, see TODO.md.
- * Without PMF any of them ends the link, as before. See mgmt_let_go_policy.
+ * Under PMF, in force once a key is in use, a unicast one is read only from the frame the pairwise key protects;
+ * an unprotected one is the forgery PMF exists to stop, ignored and counted, and answered with an SA Query,
+ * since the access point may instead have lost the station; a group one waits on a BIP check, see TODO.md.
+ * Without PMF in force any of them ends the link, as before. See mgmt_let_go_policy.
  */
 static int let_go(const struct buf *b, uint16_t *reason)
 {
@@ -324,21 +390,54 @@ static int let_go(const struct buf *b, uint16_t *reason)
         return 0;
     }
     int protected_ = (b->frame[1] & FC1_PROTECTED) != 0;
+    int active = sta.pmf && sta.ptk.cur_set;
     static uint8_t plain[MGMT_FRAME_MAX];
     const uint8_t *f = b->frame;
     uint32_t n = b->len;
     int verified = 0;
-    if (sta.pmf && !group && protected_) {
+    if (active && !group && protected_) {
         verified = open_mgmt(b, plain, &n);
         if (verified) {
             f = plain;
         }
     }
-    if (mgmt_let_go_policy(sta.pmf, group, protected_, verified) == MGMT_LET_GO_IGNORE) {
+    if (mgmt_let_go_policy(active, group, protected_, verified) == MGMT_LET_GO_IGNORE) {
         sta.let_go_ignored++;
+        if (active && !group && !protected_ && mgmt_let_go(f, n, drv_self->mac, sta.ap, reason)) {
+            sa_query_start(*reason);
+        }
         return 0;
     }
     return group ? mgmt_let_go_group(f, n, sta.ap, reason) : mgmt_let_go(f, n, drv_self->mac, sta.ap, reason);
+}
+
+/*
+ * An SA Query from the access point, protected under the pairwise key: a request is answered with a response of
+ * the same transaction id, and a response the station asked for ends the query. 1 once it took one. Only an
+ * Action frame is opened, so that a protected deauthentication is let_go's alone to read.
+ */
+static int sa_query_take(const struct buf *b)
+{
+    if (!sta.pmf || !sta.ptk.cur_set || (b->frame[1] & FC1_PROTECTED) == 0 ||
+        !mgmt_is_action(b->frame, b->len)) {
+        return 0;
+    }
+    static uint8_t plain[MGMT_FRAME_MAX];
+    uint32_t n = 0;
+    if (!open_mgmt(b, plain, &n)) {
+        return 0;
+    }
+    int response = 0;
+    uint16_t id = 0;
+    if (!mgmt_sa_query_read(plain, n, drv_self->mac, sta.ap, &response, &id)) {
+        return 0; /* another action: read_frame drops it */
+    }
+    if (!response) {
+        sa_query_send(1, id);
+    } else if (sta.sa_query.active && id == sta.sa_query.id) {
+        sta.sa_query.active = 0;
+    }
+    return 1;
 }
 
 /*
@@ -346,14 +445,21 @@ static int let_go(const struct buf *b, uint16_t *reason)
  * 1 once read takes one, the frame the step waits for, 0 at the deadline.
  * The supplicant's work runs between them; the ask to leave ends the station whatever the step,
  * and so does the access point letting it, or every station, go, once it has authenticated.
+ * An SA Query in progress shortens each wait to its next move, which request again at its retry time or,
+ * with no answer before its whole time, leaves the link; see sa_query_time.
  */
 static int wait_for(uint64_t deadline, int (*read)(const struct buf *b, void *arg), void *arg)
 {
     for (;;) {
         uint64_t now = osi_now_us();
+        uint64_t until = sta.sa_query.active && sta.sa_query.at < deadline ? sta.sa_query.at : deadline;
         struct event e;
-        if (now >= deadline || !osi_queue_get(sta.events, &e, (uint32_t)((deadline - now + 999u) / 1000u))) {
-            return 0;
+        if (now >= until || !osi_queue_get(sta.events, &e, (uint32_t)((until - now + 999u) / 1000u))) {
+            if (now >= deadline) {
+                return 0;
+            }
+            sa_query_time();
+            continue;
         }
         if (e.kind == EV_LEAVE) {
             leave();
@@ -368,7 +474,8 @@ static int wait_for(uint64_t deadline, int (*read)(const struct buf *b, void *ar
         }
         uint16_t reason = 0;
         int gone = sta.state != NONE && let_go(b, &reason);
-        int taken = !gone && read(b, arg);
+        int took = !gone && sa_query_take(b);
+        int taken = !gone && !took && read(b, arg);
         osi_queue_put(sta.free, &e.buf, 0);
         if (gone) {
             forget();

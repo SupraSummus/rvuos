@@ -435,6 +435,52 @@ static void let_go_policy(void)
     check(mgmt_let_go_policy(0, 0, 0, 0) == MGMT_LET_GO_ACCEPT, "and an unprotected unicast one");
 }
 
+/* An SA Query the station asks, and the access point's one read back, with the timing decision between them. */
+static void sa_query(void)
+{
+    uint8_t f[64], want[28];
+    uint32_t n = header(want, FC(WLAN_FC_STYPE_ACTION), ap, sta, ap);
+    want[n++] = WLAN_ACTION_SA_QUERY;
+    want[n++] = WLAN_SA_QUERY_REQUEST;
+    WPA_PUT_LE16(want + n, 0x1234);
+    n += 2;
+    check(mgmt_sa_query(f, sizeof(f), sta, ap, 0, 0x1234) == n && memcmp(f, want, n) == 0,
+          "an SA Query request to the access point");
+    FITS_ONLY(n, "an SA Query written only into a buffer it fits",
+              mgmt_sa_query(g, size, sta, ap, 0, 0x1234));
+
+    /* The access point's, read back: to the station, its category, action and transaction id. */
+    int response = -1;
+    uint16_t id = 0;
+    n = header(f, FC(WLAN_FC_STYPE_ACTION), sta, ap, ap);
+    f[n++] = WLAN_ACTION_SA_QUERY;
+    f[n++] = WLAN_SA_QUERY_REQUEST;
+    WPA_PUT_LE16(f + n, 0x1234);
+    n += 2;
+    check(mgmt_sa_query_read(f, n, sta, ap, &response, &id) && !response && id == 0x1234,
+          "an SA Query request from the access point, read");
+    f[25] = WLAN_SA_QUERY_RESPONSE;
+    check(mgmt_sa_query_read(f, n, sta, ap, &response, &id) && response && id == 0x1234, "and its response");
+    f[25] = 7; /* another action */
+    check(!mgmt_sa_query_read(f, n, sta, ap, &response, &id), "another action refused");
+    f[24] = 7; /* another category */
+    check(!mgmt_sa_query_read(f, n, sta, ap, &response, &id), "another category refused");
+
+    /* The Frame Control names an Action before anything is decrypted, and a deauthentication is not one. */
+    f[24] = WLAN_ACTION_SA_QUERY;
+    f[25] = WLAN_SA_QUERY_REQUEST;
+    check(mgmt_is_action(f, n), "an Action told by its Frame Control");
+    uint32_t d = reason_frame(f, WLAN_FC_STYPE_DEAUTH, sta, ap, ap, 1);
+    check(!mgmt_is_action(f, d), "a deauthentication not taken for one");
+
+    /* The timing at its two boundaries: the retry wait and the whole time, where it gives up. */
+    check(mgmt_sa_query_step(SA_QUERY_RETRY_US - 1, 0, 0) == SA_QUERY_WAIT, "waits before the retry time");
+    check(mgmt_sa_query_step(SA_QUERY_RETRY_US, 0, 0) == SA_QUERY_SEND, "sends again at it");
+    check(mgmt_sa_query_step(SA_QUERY_MAX_US - 1, 0, SA_QUERY_MAX_US - 1) == SA_QUERY_WAIT,
+          "waits until the whole time");
+    check(mgmt_sa_query_step(SA_QUERY_MAX_US, 0, 0) == SA_QUERY_GIVE_UP, "and gives up at it");
+}
+
 /* A data frame to the access point carries the Ethernet type behind RFC 1042's header, then the payload as given. */
 static void data(void)
 {
@@ -582,6 +628,7 @@ int main(void)
     deauth();
     let_go();
     let_go_policy();
+    sa_query();
     data();
     data_read();
     printf("mgmt-test: %s\n", failures ? "FAILED" : "ok");

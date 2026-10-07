@@ -27,6 +27,8 @@
 #define LISTEN_INTERVAL 3u
 /* A deauthentication's or a disassociation's header and reason, laid out alike. */
 #define REASON_FIXED offsetof(struct ieee80211_mgmt, u.deauth.variable)
+/* An Action frame's header, its category, and for an SA Query its action and transaction id. */
+#define SA_QUERY_FIXED offsetof(struct ieee80211_mgmt, u.action.u.sa_query_req.variable)
 /* A QoS Data frame's header is two bytes longer, its QoS control field, whose bit 7 says an A-MSDU follows. */
 #define QOS_CONTROL  2u
 #define QOS_AMSDU    0x80u
@@ -279,15 +281,62 @@ int mgmt_let_go_kind(const uint8_t *f, uint32_t len, const uint8_t *sta, const u
     return *group || memcmp(m->da, sta, ETH_ALEN) == 0;
 }
 
-int mgmt_let_go_policy(int pmf, int group, int protected_, int verified)
+int mgmt_let_go_policy(int active, int group, int protected_, int verified)
 {
-    if (!pmf) {
+    if (!active) {
         return MGMT_LET_GO_ACCEPT;
     }
     if (group || !protected_ || !verified) {
         return MGMT_LET_GO_IGNORE;
     }
     return MGMT_LET_GO_ACCEPT;
+}
+
+uint32_t mgmt_sa_query(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap, int response, uint16_t id)
+{
+    struct ieee80211_mgmt *m = (struct ieee80211_mgmt *)f;
+    if (size < SA_QUERY_FIXED) {
+        return 0;
+    }
+    header(f, WLAN_FC_STYPE_ACTION, ap, sta, ap);
+    m->u.action.category = WLAN_ACTION_SA_QUERY;
+    m->u.action.u.sa_query_req.action = response ? WLAN_SA_QUERY_RESPONSE : WLAN_SA_QUERY_REQUEST;
+    WPA_PUT_LE16(m->u.action.u.sa_query_req.trans_id, id);
+    return SA_QUERY_FIXED;
+}
+
+int mgmt_sa_query_read(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap, int *response,
+                       uint16_t *id)
+{
+    const struct ieee80211_mgmt *m = (const struct ieee80211_mgmt *)f;
+    if (subtype(f, len, SA_QUERY_FIXED) != WLAN_FC_STYPE_ACTION || memcmp(m->da, sta, ETH_ALEN) != 0 ||
+        memcmp(m->sa, ap, ETH_ALEN) != 0 || memcmp(m->bssid, ap, ETH_ALEN) != 0 ||
+        m->u.action.category != WLAN_ACTION_SA_QUERY) {
+        return 0;
+    }
+    int action = m->u.action.u.sa_query_req.action;
+    if (action != WLAN_SA_QUERY_REQUEST && action != WLAN_SA_QUERY_RESPONSE) {
+        return 0;
+    }
+    *response = action == WLAN_SA_QUERY_RESPONSE;
+    *id = WPA_GET_LE16(m->u.action.u.sa_query_req.trans_id);
+    return 1;
+}
+
+int mgmt_is_action(const uint8_t *f, uint32_t len)
+{
+    return subtype(f, len, offsetof(struct ieee80211_mgmt, u.action)) == WLAN_FC_STYPE_ACTION;
+}
+
+int mgmt_sa_query_step(uint64_t now_us, uint64_t start_us, uint64_t last_us)
+{
+    if (now_us - start_us >= SA_QUERY_MAX_US) {
+        return SA_QUERY_GIVE_UP;
+    }
+    if (now_us - last_us >= SA_QUERY_RETRY_US) {
+        return SA_QUERY_SEND;
+    }
+    return SA_QUERY_WAIT;
 }
 
 uint32_t mgmt_data(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap, const uint8_t *dest,
