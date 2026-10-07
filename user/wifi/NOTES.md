@@ -543,6 +543,8 @@ where it wrote only a line before, and each keeps the receive sequence counter t
 and the packet number it sends. It writes the same key into the MAC's own entry, `mac_key_set`
 (`STA_KEY_ENTRY` 4 for the pairwise, `STA_GRP_ENTRY` 1 for the group), whose valid bit is cleared first,
 so a rekey never leaves half an entry live.
+An install and the sending take one lock, `sta.key_lock`, which copies the key and reserves the packet number
+together; a key installed again, the same bytes under the same id, is left alone with its counters kept.
 A station's frame to the access point is addressed to it, so it goes under the pairwise key
 however its own destination, Address 3, is addressed; the receiving picks the key by Address 1,
 the group's for a group address.

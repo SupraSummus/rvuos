@@ -56,6 +56,7 @@ enum { NONE, AUTHENTICATED, ASSOCIATED };
  */
 struct sta_key {
     volatile int set; /* written by the station's thread, read by the receiving's once it serves */
+    int flags;        /* hostap's key_flag bits of the last install, to tell a promotion from a reinstallation */
     uint8_t tk[CCMP_TK_LEN];
     uint8_t id;
     uint64_t tx_pn;
@@ -84,6 +85,7 @@ static struct {
     uint32_t relayed; /* the station's own group frames, back from the access point */
     /* The keys, and the frames CCMP works between. */
     struct sta_key ptk, gtk;
+    struct mutex *key_lock; /* held while a key is installed, and by the sending while it uses one */
     uint8_t *eth, *tx_plain, *tx_crypt, *rx_plain;
 } sta;
 
@@ -316,14 +318,21 @@ static int link_send(const uint8_t *dest, uint16_t proto, const uint8_t *buf, si
     return 0;
 }
 
-/* A key the supplicant derived, kept in the station for its CCMP; a key removed, or one of another algorithm, ignored. */
+/*
+ * A key the supplicant derived, kept in the station for its CCMP; a key removed, or one of another algorithm, ignored.
+ * One lock guards the key and its counters, shared with the sending thread, so a rekey cannot catch a frame half way.
+ * A key already the station's, the same bytes and id, is not installed afresh: the handshake's second install
+ * carries the sending flag on, and any other repeat keeps its counters, since a fresh install would reuse packet numbers.
+ */
 static int link_set_key(const struct supp_key *k)
 {
     struct sta_key *key = (k->flag & SUPP_KEY_GROUP) ? &sta.gtk : &sta.ptk;
     const char *what = key == &sta.gtk ? "the group's" : "the pairwise";
     if (k->alg == SUPP_ALG_NONE) {
+        osi_mutex_take(sta.key_lock);
         key->set = 0;
         mac_key_clear(key == &sta.ptk ? STA_KEY_ENTRY : STA_GRP_ENTRY);
+        osi_mutex_give(sta.key_lock);
         drv_say("sta: %s key removed\n", what);
         return 0;
     }
@@ -331,20 +340,31 @@ static int link_set_key(const struct supp_key *k)
         drv_say("sta: a key of algorithm %d, %u bytes, ignored\n", k->alg, (unsigned)k->key_len);
         return 0;
     }
-    memcpy(key->tk, k->key, CCMP_TK_LEN);
-    key->id = (uint8_t)(k->idx & 3);
-    key->tx_pn = 0;
     /* The receive sequence counter the handshake gives, little-endian as the CCMP header's packet number. */
     uint64_t rsc = 0;
     for (uint32_t i = 0; k->seq != 0 && i < k->seq_len && i < 6u; i++) {
         rsc |= (uint64_t)k->seq[i] << (8u * i);
     }
+    osi_mutex_take(sta.key_lock);
+    if (key->set && key->id == (uint8_t)(k->idx & 3) && memcmp(key->tk, k->key, CCMP_TK_LEN) == 0) {
+        /* The handshake installs the pairwise key for receiving alone and then for sending too. */
+        int sends = (k->flag & SUPP_KEY_TX) != 0 && (key->flags & SUPP_KEY_TX) == 0;
+        key->flags = k->flag;
+        osi_mutex_give(sta.key_lock);
+        drv_say(sends ? "sta: %s key now sends too\n" : "sta: %s key installed again, the counters kept\n", what);
+        return 0;
+    }
+    memcpy(key->tk, k->key, CCMP_TK_LEN);
+    key->id = (uint8_t)(k->idx & 3);
+    key->flags = k->flag;
+    key->tx_pn = 0;
     /* Every priority starts from it: a group key's RSC bounds the frames sent before the join, whatever priority. */
     ccmp_replay_start(key->rx_pn, rsc);
     key->set = 1;
-    drv_say("sta: %s key installed, index %d\n", what, key->id);
     /* The MAC's own entry, so that its receiving takes a protected frame to the station. */
     mac_key_set(key == &sta.ptk ? STA_KEY_ENTRY : STA_GRP_ENTRY, sta.ap, key->id, key->tk);
+    osi_mutex_give(sta.key_lock);
+    drv_say("sta: %s key installed, index %d\n", what, key->id);
     return 0;
 }
 
@@ -614,6 +634,30 @@ static void handshake(void)
 
 /* --- The data's path, once the handshake has installed the keys. --- */
 
+/*
+ * n bytes at plain, a data frame, protected under the pairwise key: the lock copies the key and reserves the packet
+ * number, so that no two frames go with one key and packet number and the encryption runs outside it.
+ * The lock rather than a `set` written last, because the compiler may move the key's stores past that flag,
+ * and tx_pn is two 32-bit stores on RV32, which a rekey and this reservation would tear.
+ * 0 if no pairwise key is set, or the frame does not fit, else the frame's length at crypt.
+ */
+static uint32_t protect(uint8_t *crypt, uint32_t size, const uint8_t *plain, uint32_t n)
+{
+    uint8_t tk[CCMP_TK_LEN];
+    uint8_t id;
+    uint64_t pn;
+    osi_mutex_take(sta.key_lock);
+    if (!sta.ptk.set) {
+        osi_mutex_give(sta.key_lock);
+        return 0;
+    }
+    memcpy(tk, sta.ptk.tk, CCMP_TK_LEN);
+    id = sta.ptk.id;
+    pn = ++sta.ptk.tx_pn;
+    osi_mutex_give(sta.key_lock);
+    return ccmp_encrypt(crypt, size, plain, n, tk, pn, id);
+}
+
 /* An Ethernet frame from the network process, built into a data frame, encrypted under the pairwise key and sent. */
 static void eth_send(struct drv *d, const uint8_t *eth, uint32_t len)
 {
@@ -629,19 +673,10 @@ static void eth_send(struct drv *d, const uint8_t *eth, uint32_t len)
      * whatever its destination, Address 3; an access point picks the key by Address 1, as mac80211 does,
      * and would drop a broadcast sent under the group key.
      */
-    struct sta_key *key = &sta.ptk;
-    if (!key->set) {
-        d->tx_dropped++;
-        return;
-    }
     uint16_t proto = (uint16_t)eth[12] << 8 | eth[13];
     uint32_t n = mgmt_data(sta.tx_plain, MGMT_DATA_FIXED + LINK_SLOT, d->mac, sta.ap, eth, proto, eth + 14, len - 14u);
-    if (n == 0) {
-        d->tx_dropped++;
-        return;
-    }
-    uint32_t cn = ccmp_encrypt(sta.tx_crypt, MGMT_DATA_FIXED + LINK_SLOT + CCMP_HEAD_LEN + CCMP_MIC_LEN, sta.tx_plain, n,
-                               key->tk, ++key->tx_pn, key->id);
+    uint32_t cn = n ? protect(sta.tx_crypt, MGMT_DATA_FIXED + LINK_SLOT + CCMP_HEAD_LEN + CCMP_MIC_LEN, sta.tx_plain, n)
+                    : 0;
     if (cn == 0) {
         d->tx_dropped++;
         return;
@@ -778,9 +813,10 @@ const char *sta_start(struct drv *d)
     sta.tx_plain = osi_malloc(MGMT_DATA_FIXED + LINK_SLOT);
     sta.tx_crypt = osi_malloc(MGMT_DATA_FIXED + LINK_SLOT + CCMP_HEAD_LEN + CCMP_MIC_LEN);
     sta.rx_plain = osi_malloc(STA_FRAME_MAX);
+    sta.key_lock = osi_mutex_new();
     if (sta.bufs == 0 || sta.events == 0 || sta.free == 0 || sta.eth == 0 || sta.tx_plain == 0 || sta.tx_crypt == 0 ||
-        sta.rx_plain == 0) {
-        return "the station's buffers and queues";
+        sta.rx_plain == 0 || sta.key_lock == 0) {
+        return "the station's buffers, queues and lock";
     }
     for (uint32_t i = 0; i < STA_FRAMES; i++) {
         osi_queue_put(sta.free, &i, 0);

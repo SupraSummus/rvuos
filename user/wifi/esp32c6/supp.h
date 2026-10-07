@@ -25,6 +25,9 @@
 /* hostap's enum key_flag bit that says a key is the group's rather than the pairwise one; see common/defs.h. */
 #define SUPP_KEY_GROUP 0x10
 
+/* hostap's enum key_flag bit that says a key may send with, not only receive with; see common/defs.h. */
+#define SUPP_KEY_TX 0x08
+
 /* A key the handshakes derived, as hostap's driver is handed it. */
 struct supp_key {
     int alg;              /* hostap's enum wpa_alg */
