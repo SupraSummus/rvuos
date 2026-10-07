@@ -24,6 +24,7 @@
 #include "lib/lock.h"
 #include "osi.h"
 #include "rvuos.h"
+#include "tracer/watch.h"
 
 /* The bits of a thread's notification. */
 #define BIT_WAKE  0x1u /* something it waits on changed */
@@ -103,6 +104,20 @@ static struct {
     struct ets_timer *armed;
     uint64_t rng_last; /* when drv_random last took a byte */
 } osi;
+
+/* The traced run's counters, for the step that holds it against the same window with no trace; see osi.h. */
+static uint32_t fault_count;
+static uint32_t isr_count;
+
+uint32_t osi_faults_served(void)
+{
+    return fault_count;
+}
+
+uint32_t osi_interrupts(void)
+{
+    return isr_count;
+}
 
 /* --- Time. --- */
 
@@ -238,6 +253,19 @@ struct thread *osi_adopt(const char *name, uintptr_t stack_lo, uintptr_t stack_h
         drv_failed(osi.s->what ? osi.s->what : "adopt a thread", status);
         return 0;
     }
+    if (osi.d->trace == 1) {
+        /*
+         * Trace mode: the driver's first thread is watched by the watcher too,
+         * so every fault of the driver's, the libraries' bring-up's among them, takes the one served path.
+         * The root task gave the driver a capability to that thread, drv.h's own_thread.
+         */
+        t->cap = osi.d->own_thread;
+        status = rv_thread_watch(t->cap, osi.watcher->note, BIT_FAULT << i);
+        if (status != KERR_OK) {
+            drv_failed("watch the driver's first thread", status);
+            return 0;
+        }
+    }
     __asm__ volatile("mv tp, %0" : : "r"(t));
     return t;
 }
@@ -334,9 +362,75 @@ static void int_restore(void *mux, uint32_t tmp)
 }
 
 /*
+ * One served access in trace mode: decode the fault, hand the request to the root task, wait for its answer,
+ * and leave it in the thread; no lock is taken and nothing goes on the heap,
+ * since the faulted thread may hold one of the adapter's, which the fault keeps with it.
+ * The answer comes on its own notification, so the watcher's fault bits are not taken with it.
+ */
+static void trace_cannot(struct thread *t);
+
+static int trace_serve(struct thread *t, int batch)
+{
+    struct drv *d = osi.d;
+    struct trace_req req;
+    struct trace_pending p;
+    if (trace_fault(t->cap, &req, &p) != 0) {
+        trace_cannot(t);
+        return -1;
+    }
+    req.thread = (uint32_t)(t - osi.threads);
+    if (batch) {
+        req.flags |= TRACE_FLAG_BATCH;
+    }
+    d->share.req = req;
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+    d->share.asked++;
+    rv_signal(CHILD_PARENT, NOTIFY_ALL_BITS);
+    /* The answer's own bit may be one left from an earlier request, so wait until the root has answered this one. */
+    uint32_t bits = 0;
+    do {
+        rv_wait(d->trace_note, &bits);
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    } while (d->share.answered != d->share.asked);
+    req.value = d->share.req.value;
+    if (d->share.req.status != TRACE_DONE) {
+        return -1; /* the root task refused it, and logged why */
+    }
+    if (trace_done(t->cap, &req, &p) != 0) {
+        trace_cannot(t);
+        return -1;
+    }
+    return 0;
+}
+
+/* Why a fault could not even become a request, into the page, so the root task tells it before it halts. */
+static void trace_cannot(struct thread *t)
+{
+    struct drv *d = osi.d;
+    uint32_t cause = 0, pc = 0, addr = 0, status = 0;
+    rv_thread_fault(t->cap, &cause, &pc, &addr, &status);
+    d->share.giveup.cause = cause;
+    d->share.giveup.pc = pc;
+    d->share.giveup.address = addr;
+    d->share.giveup.thread = (uint32_t)(t - osi.threads);
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+    d->share.cannot = 1;
+}
+
+/* A fault the tracer cannot carry out, told without a lock; the root task halts the machine on it. */
+static void trace_fail(void)
+{
+    struct drv *d = osi.d;
+    static const char what[] = "the tracer cannot serve it";
+    memcpy(d->failed, what, sizeof(what));
+    child_report(&d->c, CHILD_FAILED);
+}
+
+/*
  * The faults of the adapter's threads, each told with its thread's name, cause, pc, the address it touched,
  * return address, stack pointer and the stack's top words, which may hold the return addresses of its callers;
  * the first fails the driver, which the root task halts the machine for.
+ * In trace mode each is handed to the root task and served instead, so the libraries' bring-up runs with no device mapped.
  */
 static void watcher_main(void *arg)
 {
@@ -345,10 +439,28 @@ static void watcher_main(void *arg)
     for (;;) {
         uint32_t bits;
         rv_wait(me->note, &bits);
+        /* Whether one wake brought faults of more than one thread, whose order among them is not known. */
+        uint32_t waiting = 0;
+        for (uint32_t i = 0; i < THREADS; i++) {
+            waiting += (bits & (BIT_FAULT << i)) != 0;
+        }
         for (uint32_t i = 0; i < THREADS; i++) {
             struct thread *t = &osi.threads[i];
             uint32_t cause, pc, addr, status, ra = 0, sp = 0;
-            if (!(bits & (BIT_FAULT << i)) || rv_thread_fault(t->cap, &cause, &pc, &addr, &status) != KERR_OK) {
+            if (!(bits & (BIT_FAULT << i)) || t->cap == 0) {
+                continue;
+            }
+            if (osi.d->trace == 1) {
+                if (trace_serve(t, waiting > 1) == 0) {
+                    fault_count++;
+                    continue;
+                }
+                trace_fail();
+                for (;;) {
+                    rv_wait(me->note, &bits);
+                }
+            }
+            if (rv_thread_fault(t->cap, &cause, &pc, &addr, &status) != KERR_OK) {
                 continue;
             }
             rv_thread_read_reg(t->cap, 1, &ra);
@@ -377,7 +489,12 @@ static void isr_main(void *arg)
         uint32_t bits;
         rv_wait(me->note, &bits);
         for (uint32_t n = 0; n < INTRS; n++) {
-            if (!(bits & (BIT_IRQ << n)) || !osi.intr[n].f) {
+            if (!(bits & (BIT_IRQ << n))) {
+                continue;
+            }
+            /* Counted even with no handler, so a run shows the lines firing and not only the ones the driver took. */
+            isr_count++;
+            if (!osi.intr[n].f) {
                 continue;
             }
             int_disable(0);

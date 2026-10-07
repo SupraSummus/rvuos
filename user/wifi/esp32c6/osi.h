@@ -43,6 +43,9 @@ struct thread *osi_adopt(const char *name, uintptr_t stack_lo, uintptr_t stack_h
 uint32_t osi_stack_used(const struct thread *t);
 struct thread *osi_self(void);
 uint64_t osi_now_us(void);
+/* The traced run's counters: the faults the watcher served, and the interrupts the adapter's thread ran. */
+uint32_t osi_faults_served(void);
+uint32_t osi_interrupts(void);
 void osi_delay_ms(uint32_t ms);
 int osi_isr_swap(uint32_t source, struct osi_isr *isr);
 struct ets_timer *osi_timer_new(void (*f)(void *), void *arg);

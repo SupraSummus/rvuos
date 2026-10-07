@@ -60,6 +60,11 @@ what is left:
   Nor a thin server, which only passes data on while its clients do the work,
   to tell what moving work into the client saves and what the hop still costs.
   Why its `chain`'s second hop costs no more than the first is not worked out.
+- `say()` silently misreads a conversion it does not know:
+  `%08x` prints `0` and `8` literally and takes no argument,
+  so every conversion after it reads one argument early and a `%s` can read a number as a pointer.
+  The root task is the only reader of the kernel's log, so a fault this causes there is silent.
+  An unknown conversion should be named, or its width digits refused, and `lib-test` should hold it.
 
 ## ESP32-C6
 
@@ -81,11 +86,23 @@ what is left:
 - The PHY tracer: the root task that watches the harness of `user/phyblob/` and carries out its device accesses,
   laid out as `user/phytrace.h` says, and a rule that boots it with the harness beside it;
   `make BOARD=esp32c6 phyblob` builds the harness, and nothing has run it.
+  The access is decoded by `user/tracer/trace.c`, the decoder the Wi-Fi tracer uses too;
+  the harness's ebreak requests and that decoder want one protocol, in `user/tracer/`.
 - The tracer has to log and feign the six registers no frame covers, which `make BOARD=esp32c6 phymap` lists,
   in PCR, PMU and the LP domain; what their reads should answer is open.
   `phymap` sees only constant addresses, so a register reached through a table or a loop shows first in a trace.
   The harness reaches three of the board's frames, the SAR ADC, the modem and the eFuse,
   which with the tracer's own regions have to fit a process's eight region slots.
+- The kernel writes two lines of its own for every user fault, which any tracer's log drowns in,
+  and the host's check symbolizes each;
+  whether a thread that has a watch, `OP_THREAD_WATCH`, should still be logged is a decision of `DESIGN.md`'s.
+  A tracer works around it in the root task meanwhile.
+- `tools/wifi-run.py` spawns `llvm-symbolizer` for every line it names,
+  so a run that faults tens of thousands of times stalls the reader under its lock and back-pressures the port;
+  one long-lived symbolizer, or a cache of an address's name, would keep up,
+  and would take the root task's own filter away.
+- The trace window is asked for by `WIFI_CONFIG` with `trace=1`, and `trace=2` is the same window with no fault;
+  `CLAUDE.md` should name both once the tracer lands, as it names the `mac.c` and station runs.
 - A driver of the ESP32-C6's Wi-Fi that leaves Espressif's libraries the PHY alone, `libphy.a`:
   `pp` and `net80211` give way to the driver's own MAC and station, and `osi.c` shrinks to what `libphy.a` calls.
   The station is the driver's own already, on hostap; `user/wifi/NOTES.md` says why.

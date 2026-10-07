@@ -30,6 +30,7 @@
 #ifndef __ASSEMBLER__
 #include <stdint.h>
 
+#include "tracer/trace.h"
 #include "wifi/wifi.h"
 
 #define DRV_DATA_SIZE 0x4000u
@@ -81,6 +82,14 @@ struct drv {
     struct child_own own; /* what the driver builds its threads from */
     uint32_t clock;       /* the clock, to read */
     uint32_t lines;       /* the modem's interrupt lines, DRV_LINES of them from DRV_LINE_FIRST */
+    /*
+     * The trace: the driver maps no device, so every access the libraries' bring-up makes faults to its watcher,
+     * which the root task carries out and logs; see user/tracer/trace.h and root.c.
+     */
+    uint32_t trace;      /* 1: trace the bring-up, and stop, instead of joining, scanning or listening */
+    uint32_t own_thread; /* the slot of the driver's first thread, for the watcher to serve its faults */
+    uint32_t trace_note; /* the slot of the notification the root task answers a trace request on */
+    struct trace_share share; /* the request, and the counters the watcher and the root task keep */
     uint8_t mac[6];       /* the factory MAC address, which the root task read from eFuse */
     char ssid[33];        /* the network to join, or empty to scan */
     char pass[65];        /* its passphrase, 8 to 63 characters, or its PSK in 64 hexadecimal digits; empty if open */

@@ -59,6 +59,7 @@ enum drv_state {
     DRV_AP,                 /* an access point runs, as the page names it */
     DRV_LEFT,               /* left the network, as the root task asked once the run was over */
     DRV_LISTENING,          /* hears a channel without joining, as the page names it */
+    DRV_TRACED,             /* the libraries' bring-up was traced, and the root task carries the log away */
 };
 
 /* What the root task asks of the driver, from the configuration the loader left in its input region. */

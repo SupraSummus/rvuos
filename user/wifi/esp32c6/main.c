@@ -378,12 +378,42 @@ static __attribute__((noreturn)) void attend(struct drv *d)
 }
 
 /*
+ * The trace window: only the libraries' bring-up and stop, and nothing else, so that every device access is its own.
+ * With trace=1 the driver maps no device, so each access faults to the watcher and the root task carries it out and logs it;
+ * with trace=2 the driver maps them as in a plain run, so the same window runs with no fault, the step 2 baseline.
+ * It ends with DRV_TRACED once esp_wifi_stop returns.
+ */
+static __attribute__((noreturn)) void trace_run(void)
+{
+    static struct init_config c;
+    config(&c);
+    uint64_t began = osi_now_us();
+    drv_say("driver: the trace window starts, %u bytes of heap free\n", (unsigned)osi_heap_free());
+    drv_must("esp_wifi_init_internal", esp_wifi_init_internal(&c));
+    drv_must("station mode", esp_wifi_set_mode(WIFI_MODE_STA));
+    drv_must("esp_wifi_start", esp_wifi_start());
+    started = 1;
+    /* The trace slows the libraries down, so the wait is given the whole run rather than five seconds. */
+    await("the station started", WIFI_EVENT_STA_START, 120000);
+    drv_say("driver: init to the station started took %u ms\n", (unsigned)((osi_now_us() - began) / 1000u));
+    drv_say("driver: stopping the libraries\n");
+    esp_wifi_stop();
+    started = 0;
+    drv_say("driver: the window is done; the tracer served %u faults, %u interrupts\n", osi_faults_served(),
+            osi_interrupts());
+    drv_stop(DRV_TRACED);
+}
+
+/*
  * The libraries brought up in station mode, which brings the MAC and the PHY up, though their station never joins:
  * it is given no supplicant, and the driver takes the MAC's receiving from it before anything is joined.
  */
 static __attribute__((noreturn)) void run(struct drv *d)
 {
     static struct init_config c;
+    if (d->trace) {
+        trace_run();
+    }
     config(&c);
     drv_say("driver: %u bytes of heap free\n", (unsigned)osi_heap_free());
     drv_must("esp_wifi_init_internal", esp_wifi_init_internal(&c));

@@ -42,6 +42,7 @@
 #define RUN_S    30u
 #define UP_S     30u
 #define CHECK_US 1000000u
+#define TRACE_RUN_S 180u /* a traced run's seconds unless the configuration says: the faults slow the bring-up down */
 
 /*
  * The driver's table, the most a child has, of which the slots past what the root task gives it are its own,
@@ -101,6 +102,123 @@ static struct kernel_log klog;
 static uint32_t log_bit, console_bit, console_irq;
 static char command[16];
 static uint32_t command_len;
+
+/*
+ * The trace of the libraries' bring-up, see drv.h: with trace=1 the driver maps no device, so every access it
+ * makes faults, and the root task carries it out here, logs it, and answers; trace=2 runs the same window with
+ * the driver mapping its frames, the baseline. There is one list of frames, so only who maps them differs.
+ */
+static uint32_t trace_wanted;  /* the configuration asked for the window: 1 traces, 2 runs it without a fault */
+static uint32_t trace_serving; /* the trace serves the accesses; with trace=2 the driver maps the devices and none faults */
+static uint32_t trace_note;    /* the notification a trace answer goes back on */
+/* The device frames of the driver's own, mapped by it in a plain run or by the root under the trace. */
+static const struct {
+    uint32_t cap, rights;
+    const char *name;
+} trace_frames[] = {
+    { BOOT_CAP_MODEM, RIGHT_R | RIGHT_W, "the modem" },
+    { BOOT_CAP_SARADC, RIGHT_R | RIGHT_W, "the SAR ADC" },
+    { BOOT_CAP_RNG, RIGHT_R, "the random number generator" },
+};
+static struct {
+    uint32_t base, size;
+} trace_dev[sizeof(trace_frames) / sizeof(trace_frames[0])];
+static uint32_t trace_dev_count;
+/*
+ * The stream goes straight to the console, not through the kernel's log: the kernel writes two lines of its own
+ * for every fault, and the host's check symbolizes each of those, so a trace through it drowns.
+ * A line is gathered whole and handed the FIFO one packet at a time, and the writer waits, unlike the board's
+ * polled one, which after one long wait gives up on every byte after; the host runs wifi-run.py, so it is there.
+ */
+static void console_send(const char *s, uint32_t n)
+{
+    for (uint32_t i = 0; i < n;) {
+        uint32_t chunk = n - i > 64u ? 64u : n - i; /* the FIFO holds 64 bytes, so one packet each */
+        for (uint32_t j = 0; j < chunk; j++) {
+            while ((console_regs[USJ_EP1_CONF] & USJ_FREE) == 0) {
+                console_flush();
+            }
+            console_regs[USJ_EP1] = (uint8_t)s[i + j];
+        }
+        console_flush();
+        i += chunk;
+    }
+}
+
+static char out_line[256];
+static uint32_t out_n;
+
+static void console_write(void *to, const char *s, uint32_t n)
+{
+    (void)to;
+    for (uint32_t i = 0; i < n; i++) {
+        if (out_n < sizeof(out_line)) {
+            out_line[out_n] = s[i];
+        }
+        out_n++;
+        if (s[i] == '\n' || out_n >= sizeof(out_line)) {
+            console_send(out_line, out_n < sizeof(out_line) ? out_n : sizeof(out_line));
+            out_n = 0;
+        }
+    }
+}
+static const struct out cout = { console_write, 0 };
+static uint32_t trace_seq;     /* the next line's sequence number */
+static uint32_t trace_records; /* the accesses served */
+static struct trace_cycle trace_cyc;
+
+/*
+ * The kernel's log as the trace drains it: its own fault report, two lines per traced access, is dropped,
+ * since the host would symbolize every one of them; everything else, the driver's steps and events among it, goes on.
+ * The dropped count is printed at the end, so a fault the tracer did not serve shows as a mismatch, not as silence.
+ */
+static int starts_with(const char *s, const char *p)
+{
+    for (; *p != 0; s++, p++) {
+        if (*s != *p) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int has(const char *s, const char *p)
+{
+    for (; *s != 0; s++) {
+        if (starts_with(s, p)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int kline_drop(const char *line)
+{
+    const char *s = line;
+    while (*s == ' ' || *s == '\t') {
+        s++;
+    }
+    return starts_with(s, "user fault") || has(s, "mcause=");
+}
+
+static char kline[160];
+static uint32_t kline_n;
+static uint32_t kline_dropped;
+
+static void kline_put(char c)
+{
+    if (kline_n < sizeof(kline) - 1) {
+        kline[kline_n++] = c;
+    }
+    if (c == '\n' || kline_n >= sizeof(kline) - 1) {
+        if (kline_drop(kline)) {
+            kline_dropped++;
+        } else {
+            console_send(kline, kline_n);
+        }
+        kline_n = 0;
+    }
+}
 
 static void must(const char *what, uint32_t status)
 {
@@ -195,11 +313,166 @@ static void configure(struct drv *p)
     uint32_t channel = config_number(conf, size, "listen", 0);
     p->listen = (uint8_t)(channel <= 13 ? channel : 0);
     config_value(conf, size, "probe", p->probe, sizeof(p->probe));
-    run_s = config_number(conf, size, "run", RUN_S);
+    p->trace = config_number(conf, size, "trace", 0); /* 1: the root serves each access; 2: the window with no fault */
+    trace_wanted = p->trace != 0;
+    trace_serving = p->trace == 1;
+    run_s = config_number(conf, size, "run", trace_wanted ? TRACE_RUN_S : RUN_S);
     antenna = config_has(conf, size, "antenna", "ufl")    ? ANTENNA_UFL
               : config_has(conf, size, "antenna", "none") ? ANTENNA_NONE
                                                            : ANTENNA_BOARD;
     must("uninstall the input", region_free(&self, region));
+}
+
+/* The trace's capabilities, which the driver's page needs before it starts: its first thread, and the answer. */
+static void trace_give(struct child *c)
+{
+    struct drv *p = (struct drv *)c->page;
+    must("give the driver its first thread", child_give(&self, c, c->thread, RIGHT_W, &p->own_thread));
+    must("a slot for the trace's answer", slot_new(&self, &trace_note));
+    must("the trace's answer", rv_pool_alloc(self.pool, CAP_NOTIFICATION, trace_note, 0));
+    must("give the driver the trace's answer", child_give(&self, c, trace_note, RIGHT_R, &p->trace_note));
+}
+
+/*
+ * The devices the root serves from, installed after rf_switch has let the IO MUX and the GPIO go again,
+ * so the momentary peak of those two does not run out of regions.
+ * The eight the process has hold: the code and the data in the first two, the console's, the driver's data,
+ * and these three, seven, leaving one; a trace builds no network process nor clients, so self_room is not made.
+ */
+static void trace_map(void)
+{
+    for (uint32_t i = 0; i < sizeof(trace_frames) / sizeof(trace_frames[0]); i++) {
+        uint32_t base, size, region;
+        must("a device frame's place", rv_frame_info(trace_frames[i].cap, &base, &size));
+        must(trace_frames[i].name, region_install(&self, trace_frames[i].cap, trace_frames[i].rights, &region));
+        trace_dev[trace_dev_count].base = base;
+        trace_dev[trace_dev_count].size = size;
+        trace_dev_count++;
+    }
+}
+
+/* Whether a request names an access the root may carry out: a device it maps, a whole width, and aligned. */
+static int trace_covered(uint32_t address, uint32_t width)
+{
+    if (width != 1 && width != 2 && width != 4) {
+        return 0;
+    }
+    if ((address & (width - 1)) != 0) {
+        return 0;
+    }
+    for (uint32_t i = 0; i < trace_dev_count; i++) {
+        if (address >= trace_dev[i].base && address - trace_dev[i].base <= trace_dev[i].size - width) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static uint32_t dev_read(uint32_t address, uint32_t width)
+{
+    volatile uint8_t *p = (volatile uint8_t *)(uintptr_t)address;
+    if (width == 1) {
+        return *p;
+    }
+    if (width == 2) {
+        return *(volatile uint16_t *)p;
+    }
+    return *(volatile uint32_t *)p;
+}
+
+static void dev_write(uint32_t address, uint32_t value, uint32_t width)
+{
+    volatile uint8_t *p = (volatile uint8_t *)(uintptr_t)address;
+    if (width == 1) {
+        *p = (uint8_t)value;
+    } else if (width == 2) {
+        *(volatile uint16_t *)p = (uint16_t)value;
+    } else {
+        *(volatile uint32_t *)p = value;
+    }
+}
+
+/* One access out, with its sequence number. */
+static void trace_line(const struct trace_rec *e)
+{
+    say(&cout, "[%u] pc %x t%u %s%u %x = %x%s%s\n", trace_seq++, e->pc, e->thread,
+        e->op == TRACE_WRITE ? "W" : "R", e->width, e->address, e->value,
+        e->flags & TRACE_FLAG_BATCH ? " batch" : "", e->flags & TRACE_FLAG_CHANGED ? " changed" : "");
+}
+
+static void trace_out_record(void *ctx, const struct trace_rec *e)
+{
+    (void)ctx;
+    trace_line(e);
+}
+
+/* A cycle's one turn, and how many times it turned, out in place of each turn. */
+static void trace_out_cycle(void *ctx, uint32_t turns, uint32_t len, const struct trace_rec *turn)
+{
+    (void)ctx;
+    say(&cout, "[%u] cycle x%u of %u:\n", trace_seq++, turns, len);
+    for (uint32_t i = 0; i < len; i++) {
+        trace_line(&turn[i]);
+    }
+}
+
+static const struct trace_sink trace_sink = { trace_out_record, trace_out_cycle, 0 };
+
+/* One access into the stream: the short-cycle compression of trace_cycle_feed does the rest. */
+static void trace_stream(const struct trace_req *r)
+{
+    struct trace_rec e = { .op = r->op, .address = r->address, .width = r->width, .value = r->value,
+                           .pc = r->pc, .thread = r->thread, .flags = r->flags };
+    trace_records++;
+    trace_cycle_feed(&trace_cyc, &e, &trace_sink);
+}
+
+static void log_to_console(void);
+
+/* Every request the driver's watcher left, carried out on the root's own mapping and logged. */
+static void trace_answer(void)
+{
+    struct drv *d = (struct drv *)sys.driver.page;
+    if (!trace_serving) {
+        return;
+    }
+    int logged = 0;
+    while (d->share.asked != d->share.answered) {
+        /* The request copied out first, so what the root checks is what it carries out. */
+        struct trace_req r = d->share.req;
+        if (trace_covered(r.address, r.width)) {
+            if (r.op == TRACE_WRITE) {
+                dev_write(r.address, r.value, r.width);
+            } else {
+                r.value = dev_read(r.address, r.width);
+            }
+            r.status = TRACE_DONE;
+            trace_stream(&r);
+        } else {
+            r.status = TRACE_REFUSED;
+            say(&kout, "root: the trace refuses thread %u pc %x %s%u at %x\n", r.thread, r.pc,
+                r.op == TRACE_WRITE ? "W" : "R", r.width, r.address);
+        }
+        d->share.req.value = r.value;
+        d->share.req.status = r.status;
+        __atomic_thread_fence(__ATOMIC_RELEASE);
+        d->share.answered = d->share.asked;
+        rv_signal(trace_note, 0x1);
+        logged = 1;
+    }
+    if (logged) {
+        /* A long trace outruns the kernel's log, so what it holds is carried to the console after each serving. */
+        log_to_console();
+    }
+}
+
+/* The stream's tail, and what it saw: the accesses served, the lines they took, and the kernel's fault lines dropped. */
+static void trace_dump(void)
+{
+    trace_cycle_end(&trace_cyc, &trace_sink);
+    say(&cout, "[%u] trace over: %u accesses\n", trace_seq++, trace_records);
+    say(&kout, "root: the trace saw %u accesses in %u lines\n", trace_records, trace_seq);
+    say(&kout, "root: the trace dropped %u kernel fault lines for %u accesses\n", kline_dropped, trace_records);
 }
 
 /*
@@ -213,13 +486,19 @@ static void driver_build(void)
     uint32_t region, lines;
     must("build the driver", child_new(&self, c, "the driver", DRV_TABLE, DRV_DATA_SIZE));
     struct drv *p = (struct drv *)c->page;
+    /* Before the device frames, since the configuration says whether the driver gets them or the root keeps them. */
+    configure(p);
     must("the driver's own code", child_code(&self, c, BOOT_CAP_FLASH));
     must("a frame of the driver's RAM", mem_make(&self, &drv_ram, CAP_FRAME));
     must("give the driver its RAM", child_map(&self, c, drv_ram.made, RIGHT_R | RIGHT_W, &region));
     must("give the driver the ROM", child_map(&self, c, BOOT_CAP_ROM, RIGHT_R | RIGHT_X, &region));
-    must("give the driver the modem", child_map(&self, c, BOOT_CAP_MODEM, RIGHT_R | RIGHT_W, &region));
-    must("give the driver the SAR ADC", child_map(&self, c, BOOT_CAP_SARADC, RIGHT_R | RIGHT_W, &region));
-    must("give the driver the random number generator", child_map(&self, c, BOOT_CAP_RNG, RIGHT_R, &region));
+    if (p->trace == 1) {
+        trace_give(c);
+    } else {
+        for (uint32_t i = 0; i < sizeof(trace_frames) / sizeof(trace_frames[0]); i++) {
+            must(trace_frames[i].name, child_map(&self, c, trace_frames[i].cap, trace_frames[i].rights, &region));
+        }
+    }
     must("what the driver builds of its own",
          child_give_own(&self, c, DRV_OWN_POOL, DRV_OWN_LINES, DRV_OWN_UNITS, DRV_OWN_SLOTS, &p->own));
     must("give the driver the clock", child_give(&self, c, BOOT_CAP_CLOCK, RIGHT_R, &p->clock));
@@ -228,7 +507,6 @@ static void driver_build(void)
     must("give the driver the modem's lines", child_give(&self, c, lines, RIGHT_W, &p->lines));
     must("the lines' slot back", slot_free(&self, lines));
     memcpy(p->mac, mac, 6);
-    configure(p);
 }
 
 static void summary(void)
@@ -251,6 +529,10 @@ static void driver_state(uint32_t state)
 {
     const struct drv *p = (const struct drv *)sys.driver.page;
     if (state == CHILD_FAILED) {
+        if (trace_wanted && p->share.cannot) {
+            say(&kout, "root: the trace cannot serve thread %u: cause %x, pc %x, address %x\n",
+                p->share.giveup.thread, p->share.giveup.cause, p->share.giveup.pc, p->share.giveup.address);
+        }
         say(&kout, "root: the driver failed at %s: %d (%x)\n", p->failed, (int)p->c.detail, p->c.detail);
         halt(SYSTEM_FAILED);
     }
@@ -267,6 +549,9 @@ static void driver_state(uint32_t state)
         say(&kout, "root: the driver listens on channel %u\n", (uint32_t)p->listen);
     } else if (state == DRV_LEFT) {
         say(&kout, "root: the driver left the network\n");
+        system_halt(0);
+    } else if (state == DRV_TRACED) {
+        trace_dump();
         system_halt(0);
     }
 }
@@ -302,6 +587,20 @@ static void run_over(void)
  */
 static void second(void)
 {
+    if (trace_wanted) {
+        /* A traced run has no join: only the watchdog, and the run's own end, which the driver does not answer. */
+        uint32_t code = system_check(&sys, 0);
+        if (code != 0) {
+            halt(code);
+        }
+        seconds++;
+        if (seconds == run_s) {
+            say(&kout, "root: the trace is over after %u s\n", run_s);
+            trace_dump();
+            system_halt(0);
+        }
+        return;
+    }
     int serves = driver_serves();
     if (leaving) {
         say(&kout, "root: the driver has not left the network\n");
@@ -343,7 +642,8 @@ static void console_open(void)
 /* What the kernel's log holds that the console has not had, out at once. */
 static void log_to_console(void)
 {
-    kernel_log_take(&klog, console_put_polled);
+    /* In a trace the kernel's fault report is dropped here, so the host never has to symbolize it. */
+    kernel_log_take(&klog, trace_serving ? kline_put : console_put_polled);
     console_flush();
     must("arm the log", kernel_log_arm(&klog, log_bit));
 }
@@ -399,9 +699,20 @@ int main(void)
     /* The driver's data a block of its own, built before the room is, which is the other children's. */
     driver_build();
     rf_switch();
-    must("room for the children's data", self_room(&self, ROOM_SIZE));
+    if (trace_serving) {
+        /* After rf_switch, which takes the IO MUX and the GPIO for a moment and gives them back. */
+        trace_map();
+    }
+    if (!trace_wanted) {
+        /* A trace builds no network process nor clients, so it needs no room for their data. */
+        must("room for the children's data", self_room(&self, ROOM_SIZE));
+    }
     struct drv *dp = (struct drv *)sys.driver.page;
-    if (dp->ssid[0]) {
+    if (dp->trace) {
+        say(&kout, run_s != 0 ? "root: tracing the libraries' bring-up, for %u s\n"
+                              : "root: tracing the libraries' bring-up, for good\n",
+            run_s);
+    } else if (dp->ssid[0]) {
         system_net_build(&sys, &dp->link, mac);
         say(&kout, run_s != 0 ? "root: joining %s, for %u s\n" : "root: joining %s, for good\n", dp->ssid, run_s);
     } else if (dp->listen) {
@@ -410,8 +721,12 @@ int main(void)
     } else {
         say(&kout, "root: scanning\n");
     }
+    if (trace_wanted) {
+        /* The root is the only reader of the kernel's log, so a fault of its own would hide the log's tail; the
+         * watchdog halts the machine and writes it out. Fed every second by second() as long as the root turns. */
+        must("the watchdog", rv_clock_watchdog(BOOT_CAP_CLOCK, 2000000u));
+    }
     must("start the driver", child_start(&self, &sys.driver, entry, DRV_UNITS));
-
     must("count the seconds", rv_timer_period(tick, tick_bit, CHECK_US, &skipped));
     for (;;) {
         uint32_t bits = 0;
@@ -423,6 +738,7 @@ int main(void)
         if ((code = system_heard(&sys, bits)) != 0) {
             halt(code);
         }
+        trace_answer();
         if (bits & tick_bit) {
             must("count the seconds", rv_timer_period(tick, tick_bit, CHECK_US, &skipped));
             second();

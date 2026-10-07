@@ -44,6 +44,11 @@ HOSTAP_OBJ  := $(patsubst %.c,$(BUILD)/hostap/%.o,$(HOSTAP_SRC))
 HOSTAP_INC  := -include $(WIFI_ESP)/hostap/includes.h -isystem $(HOSTAP) -isystem $(HOSTAP)/utils
 WIFI_ESP_OBJ += $(HOSTAP_OBJ)
 
+# The fault tracer's decoder and the carries-out of a served access, user/tracer/, in the driver's image:
+# the decoder is host-tested too, by user/tracer/build.mk, and the two are the same object there and here.
+WIFI_ESP_TRACE := $(BUILD)/user/tracer/trace.o $(BUILD)/user/tracer/watch.o
+WIFI_ESP_OBJ   += $(WIFI_ESP_TRACE)
+
 $(BUILD)/hostap/%.o: $(WIFI_ESP)/hostap/includes.h $(WIFI_ESP_INIT)
 	@mkdir -p $(dir $@)
 	$(CC) $(ARCHFLAGS) -std=gnu11 -ffreestanding -fno-builtin -fno-pic -fno-common -O2 -g \
@@ -173,10 +178,10 @@ $(BUILD)/wifi-drv.bin: $(BUILD)/wifi-drv.elf
 # the logger is linked, though this root task never builds it.
 WIFI_ESP_NET := $(addprefix $(BUILD)/user/wifi/,netproc.o net.o sock.o system.o echo.o clock.o sntp.o logger.o)
 $(BUILD)/user-wifi-esp32c6.elf: $(BUILD)/$(WIFI_ESP)/root.o $(WIFI_ESP_NET) $(LIB_OBJ) $(USER_COMMON) \
-                                $(BUILD)/user/user.ld tools/no-globals.py
-	tools/no-globals.py $(WIFI_ESP_NET) $(LIB_OBJ)
+                                $(BUILD)/user/tracer/trace.o $(BUILD)/user/user.ld tools/no-globals.py
+	tools/no-globals.py $(WIFI_ESP_NET) $(LIB_OBJ) $(BUILD)/user/tracer/trace.o
 	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/user/user.ld $(BUILD)/$(WIFI_ESP)/root.o $(WIFI_ESP_NET) $(LIB_OBJ) \
-		$(USER_COMMON) -o $@
+		$(BUILD)/user/tracer/trace.o $(USER_COMMON) -o $@
 
 .PHONY: wifi-esp32c6
 ifeq ($(BOARD),esp32c6)
