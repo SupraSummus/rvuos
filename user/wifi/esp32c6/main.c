@@ -712,9 +712,14 @@ void drv_main(struct child_page *page)
     struct drv *d = (struct drv *)page;
     /*
      * The ROM's ets_delay_us counts the core's cycles in the user-mode performance counter, 0x802,
-     * which rvuos leaves stopped in a new process and keeps with it after; see manual/targets.md.
+     * which rvuos leaves stopped in a new process and keeps with it after,
+     * at the rate of the clock the ROM found, which the clock's own replaces; see manual/targets.md.
      */
     __asm__ volatile("csrw 0x800, %0\n\tcsrw 0x801, %0" : : "r"(1));
+    uint64_t now;
+    uint32_t hz, counter;
+    rv_clock_read(d->clock, &now, &hz, &counter);
+    ets_update_cpu_frequency(hz / 1000000u);
     memcpy(drv_data_start, drv_data_load, (size_t)(drv_data_end - drv_data_start));
     memset(drv_bss_start, 0, (size_t)(drv_bss_end - drv_bss_start));
     drv_self = d;

@@ -159,6 +159,10 @@ the kernel takes it out and starts them, since `board.h` lists it.
 The kernel maps 1 MiB of the flash through the cache's MMU at `0x42000000`, a window `board.h` places,
 which `tools/esp32c6-run.py` attaches before the jump, as a bootloader does;
 the Wi-Fi system's driver, too large for the SRAM, is to run from it.
+The ROM sets no clock, and the reset into its download mode keeps whatever the flash's last program set,
+so a run's costs would depend on what the flash holds:
+the kernel sets 160 MHz, and the boot's log says the clock it set and the one it found.
+The ROM's delay counts by the clock the ROM found, so a program that calls it tells it the clock's rate first.
 Before anything else the kernel turns off the four watchdogs the ROM leaves running,
 which stay off however the kernel's own watchdog is fed,
 and the access permission management units.

@@ -107,16 +107,14 @@ what is left:
 - The ESP32-C6's echo answers in 13 to 22 ms at the median, the Pico 2 W's in about 5, and the C6's ping in about 10:
   where the time goes, the radio, the driver's turn after its interrupt, open decision 9, or the libraries' task,
   is not measured.
-- The ESP32-C6 runs at 80 MHz, the clock the ROM leaves it at, where it could run at 160:
-  `make BOARD=esp32c6 bench` reads the CLINT's mtime, which counts the core's cycles, and the kernel measures it at 80.02 MHz.
-  `board_init` could set 160 MHz from the PLL, which halves the time every cost takes;
-  the ROM's `ets_delay_us`, which Espressif's libraries call, counts cycles by a rate the ROM keeps, which would have to follow.
 - The Pico 2 W's run lasts its `run=` whatever its checks found, since the host has no way to end it:
   its console is the halt's alone, and a word on the logger's port could carry the end instead.
 - The ESP32-C6's driver stops once the access point lets the station go, and the root task ends the run:
   nothing joins again, as ESP-IDF leaves to the program too.
-- The ESP32-C6's SAE takes 0.8 s between the access point's commit and the station's confirm, two P-256 products in software,
-  and its own commit 1.2 s; eee0042 measured half of each, and what doubled them since is not known.
+- The ESP32-C6's kernel moves the CPU to the SPLL from whatever source it finds, but has only found the SPLL:
+  the crystal, which a power-on leaves when the flash holds no bootloader, is untried.
+- The ESP32-C6's SAE takes 0.4 s between the access point's commit and the station's confirm, two P-256 products in software,
+  and its own commit 0.6 s, at 160 MHz.
   IEEE 802.11's default has the access point send its own again after 40 ms and give up after a few; the one here waited.
   The chip's ECC accelerator, which no frame lists yet, would shorten it.
 - The ESP32-C6's WPA3 is SAE on P-256 alone: SAE's extended key, of the larger groups, and fast transition are hidden from the libraries.

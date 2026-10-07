@@ -24,6 +24,7 @@
  * The kernel sets them at boot, and the driver's own versions of those functions leave them out;
  * the ROM leaves only the peripheral I2C bus powered, as measured on the chip.
  * The crystal's tick count the PHY writes into PCR is already 40 MHz's, as the chip resets.
+ * The CPU's clock, in PCR too, is timer.c's, which sets it before it measures the counter that counts it.
  *
  * The pins stay as the ROM leaves them: how a board wires them, as the XIAO ESP32-C6 does its RF switch,
  * is for a program to set, through the IO MUX and the GPIO matrix board.h lists.

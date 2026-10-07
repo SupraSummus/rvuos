@@ -416,8 +416,9 @@ struct ap_record {
 };
 #define ESP_AP_RECORD_MAX 256u
 
-/* The ROM's delay, which counts the core's cycles. */
+/* The ROM's delay, which counts the core's cycles, as many a microsecond as the ROM was last told. */
 void ets_delay_us(uint32_t us);
+void ets_update_cpu_frequency(uint32_t ticks_per_us);
 
 esp_err_t esp_wifi_init_internal(const struct init_config *config);
 esp_err_t esp_wifi_set_mode(int mode);

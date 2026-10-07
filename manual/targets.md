@@ -92,7 +92,7 @@ Memory map:
 
 | Range | Size | What |
 |---|---|---|
-| `0x20001C08` | 8 B | the CLINT's `UTIME`, a read-only copy of `mtime` at the CPU clock, through `BOOT_CAP_CLOCK` |
+| `0x20001C08` | 8 B | the CLINT's `UTIME`, a read-only copy of `mtime` at the CPU clock, 160 MHz, through `BOOT_CAP_CLOCK` |
 | `0x6000F000` | 256 B | USB Serial/JTAG controller registers, granted to the root task |
 | `0x42000000` | 1 MiB | the window onto flash, from `0x210000` in it, through the cache; see below |
 | `0x40800000` to `0x4081E000` | 120 KiB | kernel code, data and stack |
@@ -149,7 +149,10 @@ The window onto flash shows 1 MiB of the flash from `0x210000`, which the usual 
 
 A device's interrupt reaches its `Irq` only while the device itself has it enabled,
 in the USB Serial/JTAG controller's case in its `INT_ENA` register.
-The tick is 1 kHz here too, measured against the chip's 16 MHz system timer at boot.
+The CPU runs at 160 MHz, which the kernel sets at boot, and the clock counts its cycles;
+`OP_CLOCK_READ` gives the rate the kernel measured against the chip's 16 MHz system timer,
+and the boot's log gives it too, with the rate the kernel found: `rvuos: cpu clock <hz> hz, found at <hz> hz`.
+The tick is 1 kHz here too.
 The PMP has sixteen entries and a four-byte grain.
 Keep memory accesses aligned, as clang does unless told otherwise.
 A misaligned load followed at once by a store into a region with other rights faults,
@@ -164,7 +167,8 @@ User mode can write some of the core's CSRs:
 `ustatus`, `uie`, `utvec`, `uepc`, `ucause`,
 the performance counter at `0x800` to `0x802` and the dedicated GPIO at `0x803` and `0x805`.
 Whenever another process has run, a program finds the counter as it left it, having stopped meanwhile,
-so the ROM's `ets_delay_us`, which counts on it, waits at least as long as asked;
+so the ROM's `ets_delay_us`, which counts on it, waits at least as long as asked,
+once told the clock's rate, `ets_update_cpu_frequency(hz / 1000000)`, since it counts by the clock the ROM found;
 and the rest set back: `utvec` at 1, the others at zero.
 A new process finds the counter stopped at zero, counting nothing.
 No interrupt is delegated to user mode.

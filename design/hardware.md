@@ -141,9 +141,8 @@ which has an `mtimecmp` for each hart, one after the other, and a word for each 
 which one hart raises to make another trap or wake; see "Cores".
 The ESP32-C6 has a CLINT of Espressif's,
 whose counter and interrupt stay off until a control word starts them,
-and which counts at the CPU clock the ROM left;
-the kernel measures one tick of it against the 16 MHz system timer at boot
-rather than trust a clock it did not set.
+and which counts at the CPU clock, 160 MHz, which the kernel sets at boot, see "Boards",
+then measures one tick of it against the 16 MHz system timer rather than trust the dividers.
 RP2350's is the RISC-V platform timer in the Secure bank of SIO,
 counting the microseconds a tick generator divides from the crystal.
 

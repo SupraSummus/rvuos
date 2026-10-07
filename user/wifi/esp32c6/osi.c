@@ -100,7 +100,6 @@ static struct {
     } intr[INTRS];
     uint32_t intr_on;
     struct ets_timer *armed;
-    uint64_t hz;
     uint64_t rng_last; /* when drv_random last took a byte */
 } osi;
 

@@ -118,7 +118,7 @@ PORT          ?= /dev/ttyACM0
 ESPTOOL_PYTHON ?= $(or $(shell sed -n '1s/^\#!//p' "$$(command -v $(ESPTOOL))" 2>/dev/null),python3)
 RUN_INIT      := $(ESPTOOL_PYTHON) tools/esp32c6-run.py --port $(PORT) $(BUILD)/kernel-init.bin
 BOOT_PREFIX   := $(ESPTOOL_PYTHON) tools/esp32c6-run.py --port $(PORT)
-# The clock is the CLINT's mtime, which counts the core's cycles at whatever clock the ROM left it.
+# The clock is the CLINT's mtime, which counts the core's cycles at the 160 MHz the kernel sets.
 BENCH_CPU_HZ  := clock
 else ifeq ($(BOARD),rp2350)
 # The replay driver's layout is QEMU's, so only the demo is built, as for the ESP32-C6.
