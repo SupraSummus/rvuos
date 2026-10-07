@@ -31,6 +31,7 @@ static struct {
     struct chunk *free;
     uint8_t *base, *end;
     uint32_t free_bytes;
+    uint32_t least_free; /* the fewest free bytes the heap has had */
 } heap;
 
 void osi_heap_init(const struct lock *l)
@@ -42,6 +43,7 @@ void osi_heap_init(const struct lock *l)
     heap.free->size = (uint32_t)(heap.end - heap.base);
     heap.free->next_free = 0;
     heap.free_bytes = heap.free->size;
+    heap.least_free = heap.free_bytes;
 }
 
 void *osi_malloc(size_t size)
@@ -67,6 +69,9 @@ void *osi_malloc(size_t size)
             *p = b->next_free;
         }
         heap.free_bytes -= b->size;
+        if (heap.free_bytes < heap.least_free) {
+            heap.least_free = heap.free_bytes;
+        }
         b->size |= USED;
     }
     lock_give(heap.lock);
@@ -158,4 +163,9 @@ void *osi_realloc(void *ptr, size_t size)
 uint32_t osi_heap_free(void)
 {
     return heap.free_bytes;
+}
+
+uint32_t osi_heap_least(void)
+{
+    return heap.least_free;
 }

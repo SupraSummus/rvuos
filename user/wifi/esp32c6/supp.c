@@ -18,6 +18,13 @@
 
 #include "supp.h"
 
+/* What supp.h names of hostap's own numbers, so that the station needs none of hostap's headers. */
+_Static_assert(SUPP_KEY_MGMT_SAE == WPA_KEY_MGMT_SAE, "supp.h's AKM");
+_Static_assert(SUPP_ALG_NONE == WPA_ALG_NONE && SUPP_ALG_CCMP == WPA_ALG_CCMP &&
+                   SUPP_ALG_BIP_CMAC_128 == WPA_ALG_BIP_CMAC_128, "supp.h's algorithms");
+_Static_assert(SUPP_KEY_GROUP == KEY_FLAG_GROUP && SUPP_KEY_TX == KEY_FLAG_TX && SUPP_KEY_MODIFY == KEY_FLAG_MODIFY &&
+                   SUPP_KEY_NEXT == KEY_FLAG_NEXT, "supp.h's key flags");
+
 /* EAPOL's version the supplicant sends, wpa_supplicant's default: version 2 is dropped by some access points. */
 #define EAPOL_VERSION_SENT 1
 
@@ -280,10 +287,16 @@ const uint8_t *supp_sae_commit(const uint8_t *bssid, size_t *len)
     return sae_built(len);
 }
 
+uint16_t supp_sae_commit_status(void)
+{
+    return supp.sae_h2e ? WLAN_STATUS_SAE_HASH_TO_ELEMENT : WLAN_STATUS_SUCCESS;
+}
+
+/* The confirm, or once sent, the confirm again: sae_write_confirm counts each in its Send-Confirm. */
 const uint8_t *supp_sae_confirm(size_t *len)
 {
     *len = 0;
-    if (supp.sae.state != SAE_COMMITTED) {
+    if (supp.sae.state != SAE_COMMITTED && supp.sae.state != SAE_CONFIRMED) {
         return 0;
     }
     wpabuf_free(supp.sae_msg);
@@ -314,12 +327,13 @@ static int sae_take_token(const uint8_t *buf, size_t len)
     }
     wpabuf_free(supp.sae_token);
     supp.sae_token = wpabuf_alloc_copy(token, token_len);
-    return supp.sae_token ? SUPP_TAKEN : SUPP_FAILED;
+    return supp.sae_token ? SUPP_AGAIN : SUPP_FAILED;
 }
 
 /*
  * A commit that is ours sent back is dropped, as is one in another state.
- * With P-256 alone there is no weaker group to be led to, so the access point's list of refused groups goes unread.
+ * With P-256 alone there is no weaker group to be led to, so the access point's list of refused groups goes unread,
+ * and its refusal of the group, as any other, fails.
  */
 int supp_sae_take_commit(const uint8_t *buf, size_t len, uint16_t status)
 {
@@ -329,9 +343,13 @@ int supp_sae_take_commit(const uint8_t *buf, size_t len, uint16_t status)
     if (status == WLAN_STATUS_ANTI_CLOGGING_TOKEN_REQ) {
         return sae_take_token(buf, len);
     }
+    int h2e = status == WLAN_STATUS_SAE_HASH_TO_ELEMENT || status == WLAN_STATUS_SAE_PK;
+    if (status != WLAN_STATUS_SUCCESS && !h2e) {
+        wpa_printf(MSG_ERROR, "supp: the access point refused SAE's commit: status %u", status);
+        return SUPP_FAILED;
+    }
     struct os_reltime start;
     os_get_reltime(&start);
-    int h2e = status == WLAN_STATUS_SAE_HASH_TO_ELEMENT || status == WLAN_STATUS_SAE_PK;
     u16 r = sae_parse_commit(&supp.sae, buf, len, 0, 0, sae_groups, h2e, 0);
     if (r == SAE_SILENTLY_DISCARD) {
         return SUPP_DISCARD;
@@ -400,25 +418,29 @@ int supp_choose(struct supp_network *n)
         wpa_printf(MSG_ERROR, "supp: the access point's RSN element is not one");
         return -1;
     }
-    if (!(d.key_mgmt & WPA_KEY_MGMT_PSK) || !(d.pairwise_cipher & WPA_CIPHER_CCMP) ||
+    /*
+     * The access point offering protected management frames is taken up where the station may, WPA2's PMF;
+     * one that requires them is joined only so, one that offers them is joined with them, and one that offers
+     * neither is joined without, as before.
+     * SAE needs them, so the station takes it where it may protect them, and the access point offers them too,
+     * as WPA3 has it offer them wherever it offers SAE.
+     */
+    int mfpc = (d.capabilities & WPA_CAPABILITY_MFPC) != 0;
+    int mfpr = (d.capabilities & WPA_CAPABILITY_MFPR) != 0;
+    int sae = (d.key_mgmt & WPA_KEY_MGMT_SAE) && n->sae_ok && n->pmf_ok && (mfpc || mfpr);
+    if (!(sae || (d.key_mgmt & WPA_KEY_MGMT_PSK)) || !(d.pairwise_cipher & WPA_CIPHER_CCMP) ||
         d.group_cipher != WPA_CIPHER_CCMP) {
         wpa_printf(MSG_ERROR, "supp: the access point offers AKM 0x%x, pairwise 0x%x, group 0x%x",
                    d.key_mgmt, d.pairwise_cipher, d.group_cipher);
         return -1;
     }
-    /*
-     * The access point offering protected management frames is taken up where the station may, WPA2's PMF;
-     * one that requires them is joined only so, one that offers them is joined with them, and one that offers
-     * neither is joined without, as before.
-     */
-    int mfpc = (d.capabilities & WPA_CAPABILITY_MFPC) != 0;
-    int mfpr = (d.capabilities & WPA_CAPABILITY_MFPR) != 0;
     if (mfpr && !n->pmf_ok) {
         wpa_printf(MSG_ERROR, "supp: the access point requires protected management frames, "
                               "which the station is not to give");
         return -1;
     }
-    n->key_mgmt = WPA_KEY_MGMT_PSK;
+    n->key_mgmt = sae ? WPA_KEY_MGMT_SAE : WPA_KEY_MGMT_PSK;
+    n->sae_pwe = SAE_PWE_BOTH;
     n->pairwise = WPA_CIPHER_CCMP;
     n->group = WPA_CIPHER_CCMP;
     n->pmf = n->pmf_ok && (mfpc || mfpr);

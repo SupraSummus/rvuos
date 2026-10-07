@@ -74,7 +74,8 @@ struct drv_header {
  * until the root task asks it to leave, when it leaves, turns the radio off and reports DRV_LEFT;
  * a scan's run turns the radio off before DRV_SCANNED too.
  * With sta=own and a network named, the station is a thread of its own, sta.c's, which scans, authenticates,
- * associates, runs the supplicant's handshakes by its own code, WPA2's personal alone yet,
+ * associates, runs the supplicant's handshakes by its own code, WPA3's personal by SAE where the access point
+ * offers it, unless the page says no_sae, and WPA2's otherwise,
  * installs the keys it derives and serves the link, its data frames in software CCMP, reporting DRV_JOINED; see TODO.md.
  * A step that fails, or the access point letting the station go, is CHILD_FAILED,
  * with the step's name in the page and ESP-IDF's error, or the reason, in its detail.

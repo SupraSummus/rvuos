@@ -10,6 +10,7 @@
  * The events queue has room for every buffer, for STA_RUNS of the supplicant's work, and for the ask to leave.
  *
  * The supplicant, hostap's, see supp.h, runs in the station's thread, over the station's link:
+ * under WPA3's personal it makes and checks SAE's messages, which the authentication carries, see sae;
  * the EAPOL frames it sends go out as data frames by mac_tx, under the pairwise key once the handshake
  * has installed one and in the clear until then, and the keys it derives are kept for the station's CCMP,
  * under which it then serves the link.
@@ -29,7 +30,7 @@
 #define STA_FRAMES    4u    /* the frames that may wait for the station at once */
 #define STA_FRAME_MAX 1600u /* the longest the station keeps: a whole data frame with its CCMP header and MIC */
 #define STA_RUNS      2u    /* the supplicant's work that may wait at once; see link_run */
-#define STA_STACK     4096u /* room for the supplicant's handshakes, whose depth told() says */
+#define STA_STACK     4096u /* room for the supplicant's handshakes and SAE, whose depth told() says */
 #define STA_KEY_ENTRY 4u    /* the MAC's key entry the pairwise key takes, as the libraries' association left it */
 #define STA_GRP_ENTRY 0u    /* the MAC's entry the group key of id 1 takes, and the next id 2's, as the libraries' */
 #define FC1_PROTECTED 0x40u /* the Protected bit, in the Frame Control's second octet */
@@ -82,6 +83,7 @@ static struct {
     int has_rsnx;
     int completed; /* the supplicant's handshakes are done */
     int pmf;       /* management frames protected, from the supplicant's choice; see part */
+    int sae;       /* WPA3's personal, SAE the authentication, from the supplicant's choice */
     uint32_t eapol_heard, eapol_sent, eapol_crypt; /* the last of the supplicant's frames sent under the pairwise key */
     uint32_t relayed; /* the station's own group frames, back from the access point */
     uint32_t let_go_ignored; /* a deauthentication or disassociation ignored under PMF, unforged by the check */
@@ -231,9 +233,9 @@ static void told(void)
             (unsigned)sta.eapol_heard, (unsigned)sta.eapol_sent, (unsigned)sta.eapol_crypt,
             (unsigned)sta.runs_lost);
     drv_say("sta: the link's frames in %u, out %u, its own back from the access point %u; "
-            "the stack's deepest %u bytes of %u\n",
+            "the stack's deepest %u bytes of %u, the heap's fewest free %u\n",
             (unsigned)drv_self->rx_frames, (unsigned)drv_self->tx_frames, (unsigned)sta.relayed,
-            (unsigned)osi_stack_used(osi_self()), (unsigned)STA_STACK);
+            (unsigned)osi_stack_used(osi_self()), (unsigned)STA_STACK, (unsigned)osi_heap_least());
     drv_say("sta: the data frames through the cipher: by the MAC %u (of them group %u), in the clear %u; "
             "deauthentications ignored %u, SA Queries sent %u\n",
             (unsigned)sta.rx_mac, (unsigned)sta.rx_mac_grp, (unsigned)sta.rx_clear,
@@ -778,9 +780,11 @@ static void security(const struct drv *d, const struct drv_net *ap)
         .ap_rsn = sta.ap_rsn,
         .ap_rsnx = sta.ap_rsnx_len ? sta.ap_rsnx : 0,
         .pmf_ok = !d->no_pmf,
+        .sae_ok = !d->no_sae,
     };
     must("the suites the station takes", supp_choose(&n) == 0);
     sta.pmf = n.pmf;
+    sta.sae = n.key_mgmt == SUPP_KEY_MGMT_SAE;
     size_t rsn_len = sizeof(sta.rsn), rsnx_len = sizeof(sta.rsnx);
     must("the station's RSN element", supp_connect(&n, sta.rsn, &rsn_len, sta.rsnx, &rsnx_len) == 0);
     sta.has_rsnx = rsnx_len != 0;
@@ -793,14 +797,21 @@ static void security(const struct drv *d, const struct drv_net *ap)
 #define TRIES   3u
 #define WAIT_US 200000u
 
+/* One try's sending, said in the log if it failed; 1 once mac_tx sent the frame. */
+static int sent(const char *what, uint32_t tries, const uint8_t *frame, uint32_t n)
+{
+    const char *failed = mac_tx(frame, n);
+    if (failed) {
+        drv_say("sta: %s, try %u: %s\n", what, (unsigned)tries, failed);
+    }
+    return failed == 0;
+}
+
 static int exchange(const char *what, const uint8_t *frame, uint32_t n, int (*read)(const struct buf *b, void *arg),
                     void *arg)
 {
     for (uint32_t tries = 1; tries <= TRIES; tries++) {
-        const char *failed = mac_tx(frame, n);
-        if (failed) {
-            drv_say("sta: %s, try %u: %s\n", what, (unsigned)tries, failed);
-        } else if (wait_for(osi_now_us() + WAIT_US, read, arg)) {
+        if (sent(what, tries, frame, n) && wait_for(osi_now_us() + WAIT_US, read, arg)) {
             return 1;
         }
     }
@@ -813,7 +824,7 @@ static int auth_answer(const struct buf *b, void *arg)
 }
 
 /* An open-system authentication; one refused fails with its status, one never answered with ESP_FAIL. */
-static void authenticate(void)
+static void open_system(void)
 {
     static uint8_t frame[MGMT_FRAME_MAX];
     uint32_t n = mgmt_auth_request(frame, sizeof(frame), drv_self->mac, sta.ap);
@@ -823,6 +834,97 @@ static void authenticate(void)
             (unsigned)status);
     if (!answered || status != 0) {
         fail("the authentication answered", answered ? status : (uint32_t)ESP_FAIL);
+    }
+}
+
+/*
+ * WPA3's SAE as the authentication (IEEE 802.11 12.4), its messages the supplicant's: the two commits, the access
+ * point's maybe asking for a token first, then the two confirms. A message unanswered goes again: the commit as it
+ * was, as a new one would start over, and the confirm made anew, its counter the next, which 802.11 has an access
+ * point that already accepted answer where it drops a copy.
+ */
+#define SAE_WAIT_US  1000000u
+#define SAE_TOKENS   2u /* the commits sent again with a token the access point asked for */
+/* The longest message the station sends: a commit on P-256, its group, scalar and element, and a token in its container. */
+#define SAE_BODY_MAX (2u + 32u + 64u + 3u + 255u)
+
+/* An answer of the access point's waited for, the commit or the confirm, and what the supplicant made of it. */
+struct sae_wait {
+    uint16_t transaction;
+    int r;
+};
+
+/* The access point's commit or confirm, as w waits for, handed to the supplicant; a refusal's status kept. */
+static int sae_answer(const struct buf *b, void *arg)
+{
+    struct sae_wait *w = arg;
+    struct mgmt_sae m;
+    if (!mgmt_sae_read(b->frame, b->len, drv_self->mac, sta.ap, &m) || m.transaction != w->transaction) {
+        return 0;
+    }
+    if (m.transaction == MGMT_SAE_COMMIT) {
+        w->r = supp_sae_take_commit(m.body, m.len, m.status);
+    } else {
+        w->r = m.status != 0 ? m.status : supp_sae_take_confirm(m.body, m.len);
+    }
+    return w->r != SUPP_DISCARD;
+}
+
+/*
+ * The station's commit or confirm sent, and the access point's own taken, a few times:
+ * SUPP_TAKEN, SUPP_AGAIN once the access point asked for a token, SUPP_FAILED, or the status of its refusal.
+ */
+static int sae_step(uint16_t transaction)
+{
+    static uint8_t frame[MGMT_AUTH_FIXED + SAE_BODY_MAX];
+    int commit = transaction == MGMT_SAE_COMMIT;
+    const char *what = commit ? "SAE's commit" : "SAE's confirm";
+    struct sae_wait w = { transaction, SUPP_FAILED };
+    uint32_t n = 0;
+    for (uint32_t tries = 1; tries <= TRIES; tries++) {
+        if (tries == 1 || !commit) {
+            size_t len = 0;
+            const uint8_t *m = commit ? supp_sae_commit(sta.ap, &len) : supp_sae_confirm(&len);
+            uint16_t status = commit ? supp_sae_commit_status() : 0;
+            n = m ? mgmt_sae(frame, sizeof(frame), drv_self->mac, sta.ap, transaction, status, m, (uint32_t)len) : 0;
+            if (n == 0) {
+                drv_say("sta: %s not made\n", what);
+                return SUPP_FAILED;
+            }
+        }
+        if (sent(what, tries, frame, n) && wait_for(osi_now_us() + SAE_WAIT_US, sae_answer, &w)) {
+            return w.r;
+        }
+    }
+    drv_say("sta: %s not answered\n", what);
+    return SUPP_FAILED;
+}
+
+/* SAE's exchange; one refused fails with the access point's status, one failed or never answered with ESP_FAIL. */
+static void sae(void)
+{
+    uint64_t start = osi_now_us();
+    int r = SUPP_AGAIN;
+    for (uint32_t commits = 0; r == SUPP_AGAIN && commits <= SAE_TOKENS; commits++) {
+        r = sae_step(MGMT_SAE_COMMIT);
+    }
+    if (r == SUPP_TAKEN) {
+        r = sae_step(MGMT_SAE_CONFIRM);
+    }
+    drv_say("sta: SAE %s in %u ms\n", r == SUPP_TAKEN ? "accepted" : "failed",
+            (unsigned)((osi_now_us() - start) / 1000u));
+    if (r != SUPP_TAKEN) {
+        fail("SAE's authentication", r > 0 ? (uint32_t)r : (uint32_t)ESP_FAIL);
+    }
+}
+
+/* The authentication, by SAE under WPA3's personal and by open system under WPA2's. */
+static void authenticate(void)
+{
+    if (sta.sae) {
+        sae();
+    } else {
+        open_system();
     }
     sta.state = AUTHENTICATED;
 }
@@ -1168,7 +1270,7 @@ static void sta_main(void *arg)
     mac_receive(sta.aid);
     handshake();
     d->joined = *ap;
-    d->authmode = WIFI_AUTH_WPA2_PSK;
+    d->authmode = sta.sae ? WIFI_AUTH_WPA3_PSK : WIFI_AUTH_WPA2_PSK;
     child_report(&d->c, DRV_JOINED);
     drv_say("sta: joined, and the link is served\n");
     serve_station(d);

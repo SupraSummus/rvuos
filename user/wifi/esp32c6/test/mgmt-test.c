@@ -40,12 +40,13 @@ static void check(int ok, const char *what)
  */
 static struct mgmt_beacon b;
 static struct mgmt_payload payload;
+static struct mgmt_sae sae;
 static uint16_t status, aid, reason;
 static uint32_t comeback;
 static int again;
-static long rsn_at, rsnx_at, src_at, body_at;
+static long rsn_at, rsnx_at, src_at, body_at, sae_at;
 
-enum reader { BEACON, PROBE_ANSWER, AUTH_ANSWER, TO_STATION, ASSOC_ANSWER, LET_GO, DATA };
+enum reader { BEACON, PROBE_ANSWER, AUTH_ANSWER, SAE, TO_STATION, ASSOC_ANSWER, LET_GO, DATA };
 
 static long at(const uint8_t *p, const uint8_t *frame)
 {
@@ -60,6 +61,7 @@ static int reads(enum reader r, const uint8_t *f, uint32_t len)
     int ok = r == BEACON         ? mgmt_beacon(copy, len, HEARD_ON, &b)
              : r == PROBE_ANSWER ? mgmt_probe_answer(copy, len, sta, "rvuos", &b, &again)
              : r == AUTH_ANSWER  ? mgmt_auth_answer(copy, len, sta, ap, &status)
+             : r == SAE          ? mgmt_sae_read(copy, len, sta, ap, &sae)
              : r == ASSOC_ANSWER ? mgmt_assoc_answer(copy, len, sta, ap, &status, &aid, &comeback)
              : r == LET_GO       ? mgmt_let_go(copy, len, sta, ap, &reason)
              : r == DATA         ? mgmt_data_read(copy, len, sta, ap, &payload)
@@ -67,6 +69,9 @@ static int reads(enum reader r, const uint8_t *f, uint32_t len)
     if (ok && (r == BEACON || r == PROBE_ANSWER)) {
         rsn_at = at(b.rsn, copy);
         rsnx_at = at(b.rsnx, copy);
+    }
+    if (ok && r == SAE) {
+        sae_at = at(sae.body, copy);
     }
     if (ok && r == DATA) {
         src_at = at(payload.src, copy);
@@ -265,6 +270,44 @@ static void auth_answer(void)
         len = auth(f, refused[i].stype, refused[i].da, refused[i].sa, refused[i].bssid, refused[i].alg,
                    refused[i].transaction, 0);
         check(!reads(AUTH_ANSWER, f, len), refused[i].what);
+    }
+}
+
+/* An SAE Authentication carries the supplicant's message behind its fields, as given, whatever its length. */
+static void sae_frames(void)
+{
+    static const uint8_t msg[] = { 19, 0, 0xaa, 0xbb, 0xcc };
+    uint8_t f[64], want[30 + sizeof(msg)];
+    uint32_t n = auth(want, WLAN_FC_STYPE_AUTH, ap, sta, ap, WLAN_AUTH_SAE, 1, WLAN_STATUS_SAE_HASH_TO_ELEMENT);
+    memcpy(want + n, msg, sizeof(msg));
+    check(mgmt_sae(f, sizeof(f), sta, ap, MGMT_SAE_COMMIT, WLAN_STATUS_SAE_HASH_TO_ELEMENT, msg, sizeof(msg)) ==
+                  sizeof(want) &&
+              memcmp(f, want, sizeof(want)) == 0,
+          "an SAE commit, its status, then its message");
+    FITS_ONLY(sizeof(want), "an SAE commit written only into a buffer it fits",
+              mgmt_sae(g, size, sta, ap, MGMT_SAE_COMMIT, WLAN_STATUS_SAE_HASH_TO_ELEMENT, msg, sizeof(msg)));
+
+    uint32_t len = auth(f, WLAN_FC_STYPE_AUTH, sta, ap, ap, WLAN_AUTH_SAE, 2, WLAN_STATUS_CHALLENGE_FAIL);
+    memcpy(f + len, msg, sizeof(msg));
+    len += sizeof(msg);
+    check(reads(SAE, f, len) && sae.transaction == MGMT_SAE_CONFIRM && sae.status == WLAN_STATUS_CHALLENGE_FAIL &&
+              sae_at == 30 && sae.len == sizeof(msg),
+          "an SAE confirm read, its status and its message");
+    /* Its message has no length of its own: a frame cut short of it reads with what is left, and one of its fields does not. */
+    for (uint32_t cut = 0; cut < len; cut++) {
+        int ok = reads(SAE, f, cut);
+        if (ok != (cut >= 30) || (ok && sae.len != cut - 30)) {
+            printf("mgmt-test: FAIL an SAE confirm cut at %u bytes\n", cut);
+            failures++;
+        }
+    }
+    len = auth(f, WLAN_FC_STYPE_AUTH, sta, ap, ap, WLAN_AUTH_SAE, 1, 0);
+    check(reads(SAE, f, len) && sae.transaction == MGMT_SAE_COMMIT && sae.len == 0, "an SAE commit read");
+    /* The addresses are mgmt_auth_answer's check too, held above; SAE's own are its algorithm and transactions. */
+    static const uint16_t refused[][2] = { { WLAN_AUTH_OPEN, 2 }, { WLAN_AUTH_SAE, 0 }, { WLAN_AUTH_SAE, 3 } };
+    for (uint32_t i = 0; i < sizeof(refused) / sizeof(refused[0]); i++) {
+        len = auth(f, WLAN_FC_STYPE_AUTH, sta, ap, ap, refused[i][0], refused[i][1], 0);
+        check(!reads(SAE, f, len), "an open-system answer, or an SAE transaction but 1 or 2, refused");
     }
 }
 
@@ -668,6 +711,7 @@ int main(void)
     probe_request();
     auth_request();
     auth_answer();
+    sae_frames();
     to_station();
     beacon_security();
     assoc_request();

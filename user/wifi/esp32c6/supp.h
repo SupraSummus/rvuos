@@ -3,7 +3,7 @@
 
 /*
  * The supplicant: hostap's, upstream's own (src/rsn_supp/ of wpa_supplicant, BSD), not ESP-IDF's fork of it,
- * for a station that gives it a link: Espressif's libraries, see wpa.c, or, to come, the driver's own; see TODO.md.
+ * for a station that gives it a link: Espressif's libraries, see wpa.c, or the driver's own, see sta.c.
  * The station names the network it chose, and the supplicant gives it the RSN and RSNX elements to associate with;
  * then it runs the 4-way and group key handshakes over the EAPOL frames the station hands it,
  * and sends its own and installs the keys through the link.
@@ -22,6 +22,9 @@
 #define SUPP_ALG_NONE 0
 #define SUPP_ALG_CCMP 3
 #define SUPP_ALG_BIP_CMAC_128 4
+
+/* hostap's WPA_KEY_MGMT_SAE, which the station tells WPA3's personal by; see common/defs.h. */
+#define SUPP_KEY_MGMT_SAE 0x400u
 
 /* hostap's enum key_flag bits the station names; see common/defs.h. */
 #define SUPP_KEY_GROUP 0x10  /* a key is the group's rather than the pairwise one */
@@ -65,6 +68,7 @@ struct supp_network {
     int pairwise, group;   /* hostap's WPA_CIPHER_ */
     int pmf;               /* management frames protected, which SAE needs, if the access point takes it */
     int pmf_ok;            /* whether the station may protect them, from its configuration */
+    int sae_ok;            /* whether the station may authenticate by SAE, from its configuration */
     int mgmt_group;        /* with pmf, the management group cipher, hostap's WPA_CIPHER_ of a BIP */
     int sae_pwe;           /* the password elements the station takes, hostap's SAE_PWE_ */
     const uint8_t *ap_rsn; /* the access point's RSN element, whole, or 0 */
@@ -77,9 +81,12 @@ void supp_deinit(void);
 
 /*
  * The suites the driver's own station takes of those the access point offers in n->ap_rsn, into n:
- * WPA2's personal by PSK, CCMP pairwise and for the group, and management frames protected (PMF) where the
- * access point offers them and n->pmf_ok allows. 0, or -1 if the access point offers none of them, or requires
- * protection the station is not to give, which the log says.
+ * WPA3's personal by SAE where the access point offers it and n->sae_ok and n->pmf_ok allow, since SAE needs
+ * management frames protected, else WPA2's personal by PSK; CCMP pairwise and for the group;
+ * and management frames protected (PMF) where the access point offers them and n->pmf_ok allows.
+ * SAE's password element by hash to element where the access point offers it, else by hunting and pecking.
+ * 0, or -1 if the access point offers none of them, or requires protection the station is not to give,
+ * which the log says.
  */
 int supp_choose(struct supp_network *n);
 
@@ -121,19 +128,25 @@ void supp_rekey(int after_s);
 /*
  * WPA3's SAE with the network supp_connect was given.
  * A message to send, the commit to bssid, or once the access point asked for a token, the same commit again with it,
- * then the confirm: the message, which lasts until the next, its length into *len; or 0 if none.
+ * then the confirm, or the confirm again, its counter the next, as IEEE 802.11 sends it again:
+ * the message, which lasts until the next, its length into *len; or 0 if none.
  */
 const uint8_t *supp_sae_commit(const uint8_t *bssid, size_t *len);
 const uint8_t *supp_sae_confirm(size_t *len);
 
+/* IEEE 802.11's status of the authentication frame the commit goes in: hash to element's, or success. */
+uint16_t supp_sae_commit_status(void);
+
 /*
  * A message received, from its first field on: the access point's commit, with its frame's status, which may ask
- * for a token instead, or its confirm. SUPP_TAKEN, SUPP_DISCARD if it is to be dropped silently, SUPP_FAILED,
- * or IEEE 802.11's status to refuse it with.
+ * for a token instead, or its confirm. SUPP_TAKEN, SUPP_AGAIN once a token was taken, the commit to be sent again
+ * with it, SUPP_DISCARD if it is to be dropped silently, SUPP_FAILED, or IEEE 802.11's status to refuse it with.
+ * A commit whose frame's status is a refusal, the access point's, fails.
  */
 #define SUPP_TAKEN   0
 #define SUPP_FAILED  (-1)
 #define SUPP_DISCARD (-2)
+#define SUPP_AGAIN   (-3)
 int supp_sae_take_commit(const uint8_t *buf, size_t len, uint16_t status);
 int supp_sae_take_confirm(const uint8_t *buf, size_t len);
 

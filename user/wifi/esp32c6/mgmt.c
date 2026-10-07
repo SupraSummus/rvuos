@@ -159,29 +159,72 @@ int mgmt_probe_answer(const uint8_t *f, uint32_t len, const uint8_t *sta, const 
     return 1;
 }
 
-uint32_t mgmt_auth_request(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap)
+_Static_assert(MGMT_AUTH_FIXED == AUTH_FIXED, "mgmt.h's authentication header");
+
+/* An Authentication's header and fields, from sta to the access point ap, of algorithm alg. */
+static void auth(uint8_t *f, const uint8_t *sta, const uint8_t *ap, uint16_t alg, uint16_t transaction,
+                 uint16_t status)
 {
     struct ieee80211_mgmt *m = (struct ieee80211_mgmt *)f;
+    header(f, WLAN_FC_STYPE_AUTH, ap, sta, ap);
+    m->u.auth.auth_alg = host_to_le16(alg);
+    m->u.auth.auth_transaction = host_to_le16(transaction);
+    m->u.auth.status_code = host_to_le16(status);
+}
+
+/* Whether f is an Authentication of algorithm alg from the access point ap to sta; its fields are then whole. */
+static int auth_from(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap, uint16_t alg)
+{
+    const struct ieee80211_mgmt *m = (const struct ieee80211_mgmt *)f;
+    return subtype(f, len, AUTH_FIXED) == WLAN_FC_STYPE_AUTH && memcmp(m->da, sta, ETH_ALEN) == 0 &&
+           memcmp(m->sa, ap, ETH_ALEN) == 0 && memcmp(m->bssid, ap, ETH_ALEN) == 0 &&
+           le_to_host16(m->u.auth.auth_alg) == alg;
+}
+
+uint32_t mgmt_auth_request(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap)
+{
     if (size < AUTH_FIXED) {
         return 0;
     }
-    header(f, WLAN_FC_STYPE_AUTH, ap, sta, ap);
-    m->u.auth.auth_alg = host_to_le16(WLAN_AUTH_OPEN);
-    m->u.auth.auth_transaction = host_to_le16(AUTH_FIRST);
-    m->u.auth.status_code = host_to_le16(WLAN_STATUS_SUCCESS);
+    auth(f, sta, ap, WLAN_AUTH_OPEN, AUTH_FIRST, WLAN_STATUS_SUCCESS);
     return AUTH_FIXED;
 }
 
 int mgmt_auth_answer(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap, uint16_t *status)
 {
     const struct ieee80211_mgmt *m = (const struct ieee80211_mgmt *)f;
-    if (subtype(f, len, AUTH_FIXED) != WLAN_FC_STYPE_AUTH || memcmp(m->da, sta, ETH_ALEN) != 0 ||
-        memcmp(m->sa, ap, ETH_ALEN) != 0 || memcmp(m->bssid, ap, ETH_ALEN) != 0 ||
-        le_to_host16(m->u.auth.auth_alg) != WLAN_AUTH_OPEN ||
-        le_to_host16(m->u.auth.auth_transaction) != AUTH_SECOND) {
+    if (!auth_from(f, len, sta, ap, WLAN_AUTH_OPEN) || le_to_host16(m->u.auth.auth_transaction) != AUTH_SECOND) {
         return 0;
     }
     *status = le_to_host16(m->u.auth.status_code);
+    return 1;
+}
+
+uint32_t mgmt_sae(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap, uint16_t transaction,
+                  uint16_t status, const uint8_t *body, uint32_t len)
+{
+    if (size < AUTH_FIXED || len > size - AUTH_FIXED) {
+        return 0;
+    }
+    auth(f, sta, ap, WLAN_AUTH_SAE, transaction, status);
+    memcpy(f + AUTH_FIXED, body, len);
+    return AUTH_FIXED + len;
+}
+
+int mgmt_sae_read(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap, struct mgmt_sae *s)
+{
+    const struct ieee80211_mgmt *m = (const struct ieee80211_mgmt *)f;
+    if (!auth_from(f, len, sta, ap, WLAN_AUTH_SAE)) {
+        return 0;
+    }
+    uint16_t transaction = le_to_host16(m->u.auth.auth_transaction);
+    if (transaction != MGMT_SAE_COMMIT && transaction != MGMT_SAE_CONFIRM) {
+        return 0;
+    }
+    s->transaction = transaction;
+    s->status = le_to_host16(m->u.auth.status_code);
+    s->body = f + AUTH_FIXED;
+    s->len = len - AUTH_FIXED;
     return 1;
 }
 

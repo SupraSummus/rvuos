@@ -614,3 +614,19 @@ on the counter reserved for management (`ccmp.c`'s index 16). An unprotected one
 After one the station sends an SA Query of its own, its transaction id random, and leaves the link when the
 access point does not answer within the whole time. An SA Query the access point sends is answered.
 A group-addressed one is taken only with a valid BIP MIC over the IGTK, which `mgmt.c` checks in software.
+
+## The station's own SAE
+
+The supplicant already made and checked SAE's messages for the libraries,
+so WPA3's personal on the own station is the Authentication frames around them, `mgmt_sae`.
+`supp_choose` takes SAE wherever the access point offers it and the station may protect management frames, and `sae=0` WPA2's.
+
+The heap, not the stack, was what SAE wanted:
+its products take a few kilobytes at once, in Mbed TLS's big numbers and hostap's buffers,
+and with the station's buffers and the MAC's list taken, hash to element's first step found the heap empty.
+The libraries' static receive buffers lie idle once the own station has the MAC's list, so with `sta=own` they are two, ESP-IDF's least,
+and the station's log says the fewest bytes the heap had free.
+The stack goes hardly deeper than under WPA2, and stayed as it was.
+
+The Pico 2 W's access point, offering WPA3 and WPA2 together, refuses WPA2's join, see `TODO.md`,
+but takes the own station by SAE, as it takes the libraries'.

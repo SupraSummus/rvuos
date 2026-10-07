@@ -168,6 +168,8 @@ static int32_t await_either(int32_t a, int32_t b, uint32_t ms)
 /*
  * ESP-IDF's WIFI_INIT_CONFIG_DEFAULT, with fewer buffers, as the driver's block of RAM is small,
  * and of its features WPA3's SAE alone, unless the page says no_sae.
+ * The driver's own station receives into a list of its own, see mac.c, so the libraries' static buffers,
+ * the MAC's list until then, lie idle: it leaves them two, ESP-IDF's least, so that the heap holds what SAE takes.
  */
 static void config(struct init_config *c, const struct drv *d)
 {
@@ -175,7 +177,7 @@ static void config(struct init_config *c, const struct drv *d)
     c->osi_funcs = funcs;
     drv_crypto_funcs(&c->crypto_funcs);
     c->feature_caps = d->no_sae ? 0 : FEATURE_WPA3_SAE;
-    c->static_rx_buf_num = 6;
+    c->static_rx_buf_num = d->own_sta ? 2 : 6;
     c->dynamic_rx_buf_num = 16;
     c->tx_buf_type = 1;
     c->dynamic_tx_buf_num = 16;

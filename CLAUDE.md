@@ -69,9 +69,10 @@ and again with `listen=`, `probe=` and `tx=own`, without `rx=own`, the driver's 
 which fails if the access point answers none; and with `listen=`, `probe=`, `rx=own` and `tx=own` together,
 which fails if a probe is not sent or not answered, the driver's own completion in place of the libraries'.
 A change to the station's own code in `user/wifi/esp32c6/main.c`, `sta.c` or `mgmt.c` runs it with a network named and `sta=own`,
-the driver's own scan, authentication, association and WPA2 handshake, which fails if one is not answered,
-and then serves the link the network's frames cross;
-the Pico 2 W's access point takes it only when its own configuration says `sae=0`, see `TODO.md`.
+the driver's own scan, SAE, association and 4-way handshake at an access point that offers WPA3, which fails if one is not answered,
+and then serves the link the network's frames cross,
+and again with `sae=0`, its open-system authentication and WPA2's handshake;
+the Pico 2 W's access point takes the second only when its own configuration says `sae=0`, see `TODO.md`.
 That run first runs `make sae-test`, WPA3's SAE on the host over the driver's `ec.c` and Mbed TLS,
 `make mgmt-test`, the station's management frames of `mgmt.c` over hostap's parser of elements,
 and `make ccmp-test`, its CCMP of `ccmp.c` over hostap's CCM,

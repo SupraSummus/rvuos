@@ -92,8 +92,9 @@ what is left:
   The driver's own code receives and scans as well as the libraries do, by `listen=` and a scan, each with and without `rx=own`,
   and sends a probe by `tx=own`, the access point answering it.
   The station's logic is the driver's own too, on hostap; `user/wifi/NOTES.md` says why.
-  With `sta=own` it associates, runs the supplicant's 4-way handshake over a link of its own, see `supp.h`,
-  for WPA2's personal alone, installs the keys it derives in the MAC's own cipher and in the station, and serves the link.
+  With `sta=own` it authenticates, by SAE where the access point offers WPA3's personal and by open system under WPA2's,
+  associates, runs the supplicant's 4-way handshake over a link of its own, see `supp.h`,
+  installs the keys it derives in the MAC's own cipher and in the station, and serves the link.
   The receiving is the MAC's: its own station address and the access point's are set before the authentication,
   the libraries' channel sniffer is left, and the MAC decrypts each protected frame, leaving its CCMP header
   for the replay check, so the receiving runs no software CCMP; `ccmp_decrypt` stays for `ccmp-test` alone.
@@ -101,7 +102,6 @@ what is left:
   with the engine word set the access point took none of the sending, so it is left unset;
   the MAC's own cipher is in `NOTES.md`.
   The station's data go at 1 Mb/s, the rate `mac_tx` programs for management frames.
-  Then WPA3: SAE in the authentication, run in the station's thread, whose stack is sized for WPA2's handshakes.
   A rekey is checked on the host alone, by `keys-test`:
   showing a pairwise one live wants an access point that answers a station's rekey request,
   which the one here does not, or one that rekeys on its own;
@@ -117,6 +117,11 @@ what is left:
   with their invalidation of the queue on a timeout, would do better.
   `mac.c` points a MAC that ran out of descriptors past the last it filled by `RX_BASE` alone,
   which the take found not always taken; no run has run out yet, `restarted` 0.
+- The ESP32-C6's driver takes all its memory from one heap: the libraries' as they run,
+  the own path's buffers, stacks and queues once, at its start, and the supplicant's and SAE's as they run, hostap's and Mbed TLS's way;
+  with `sta=own` SAE leaves a few kilobytes at the fewest.
+  Once the libraries' station path is gone the own path's memory can be static,
+  and the supplicant's a bounded arena of its own, or fixed buffers over a P-256 of fixed width.
 - The ESP32-C6's Wi-Fi root task has 8 KiB of memory and 9 slots left once its clients run,
   so another client needs room found first, in the driver's block or a smaller `CLIENT_CHAN_SIZE`.
 - The ESP32-C6's echo answers in 13 to 22 ms at the median, the Pico 2 W's in about 5, and the C6's ping in about 10:
@@ -131,9 +136,9 @@ what is left:
   nothing joins again, as ESP-IDF leaves to the program too.
 - The ESP32-C6's kernel moves the CPU to the SPLL from whatever source it finds, but has only found the SPLL:
   the crystal, which a power-on leaves when the flash holds no bootloader, is untried.
-- The ESP32-C6's SAE takes 0.4 s between the access point's commit and the station's confirm, two P-256 products in software,
-  and its own commit 0.6 s, at 160 MHz.
-  IEEE 802.11's default has the access point send its own again after 40 ms and give up after a few; the one here waited.
+- The ESP32-C6's SAE takes a fifth of a second between the access point's commit and the station's confirm,
+  two P-256 products in software, and its own commit a third of one by hash to element, or twice that by hunting and pecking.
+  IEEE 802.11's default has the access point send its own again after 40 ms and give up after a few; the two here waited.
   The chip's ECC accelerator, which no frame lists yet, would shorten it.
 - The ESP32-C6's WPA3 is SAE on P-256 alone: SAE's extended key, of the larger groups, and fast transition are hidden from the libraries.
   BIP-GMAC, the management group key of the 192-bit and GCMP suites, needs the crypto table's GMAC,

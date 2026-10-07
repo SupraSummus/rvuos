@@ -453,7 +453,11 @@ static int sae_parse(uint8_t *buf, size_t len, uint32_t type, uint16_t status)
     int r = type == SAE_MSG_COMMIT    ? supp_sae_take_commit(buf, len, status)
             : type == SAE_MSG_CONFIRM ? supp_sae_take_confirm(buf, len)
                                       : SUPP_FAILED;
-    return r == SUPP_TAKEN ? ESP_OK : r == SUPP_FAILED ? ESP_FAIL : r == SUPP_DISCARD ? ESP_ERR_WIFI_DISCARD : r;
+    /* The libraries build the commit again on a token's request themselves, asking supp_sae_commit. */
+    return r == SUPP_TAKEN || r == SUPP_AGAIN ? ESP_OK
+           : r == SUPP_FAILED                 ? ESP_FAIL
+           : r == SUPP_DISCARD                ? ESP_ERR_WIFI_DISCARD
+                                              : r;
 }
 
 /*

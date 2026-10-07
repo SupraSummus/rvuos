@@ -63,6 +63,7 @@ void *osi_calloc(size_t n, size_t size);
 void *osi_realloc(void *p, size_t size);
 void osi_free(void *p);
 uint32_t osi_heap_free(void);
+uint32_t osi_heap_least(void); /* the fewest bytes free since the heap began */
 
 /* phy.c: the modem's clocks, and the PHY Espressif's libphy.a brings up. */
 void drv_phy_clock_enable(void);

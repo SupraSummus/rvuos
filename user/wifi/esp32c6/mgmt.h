@@ -56,6 +56,27 @@ uint32_t mgmt_auth_request(uint8_t *f, uint32_t size, const uint8_t *sta, const 
 int mgmt_auth_answer(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap, uint16_t *status);
 
 /*
+ * An SAE Authentication, WPA3's personal (IEEE 802.11 12.4), from sta to the access point ap:
+ * its transaction, MGMT_SAE_COMMIT or MGMT_SAE_CONFIRM, its status, and the len bytes of the message at body,
+ * which the supplicant makes; MGMT_AUTH_FIXED bytes longer.
+ */
+#define MGMT_AUTH_FIXED  (24u + 6u)
+#define MGMT_SAE_COMMIT  1u
+#define MGMT_SAE_CONFIRM 2u
+uint32_t mgmt_sae(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap, uint16_t transaction,
+                  uint16_t status, const uint8_t *body, uint32_t len);
+
+/* What an SAE Authentication read carries: its transaction, its status, and its message, in the frame. */
+struct mgmt_sae {
+    uint16_t transaction, status;
+    const uint8_t *body;
+    uint32_t len;
+};
+
+/* An SAE Authentication from the access point ap to sta, a commit or a confirm, read into s. */
+int mgmt_sae_read(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap, struct mgmt_sae *s);
+
+/*
  * An association request from sta to the access point ap, for ssid, with the rates the station takes,
  * and the RSN and RSNX elements the supplicant wrote, whole, either 0 if none;
  * its capabilities say the network's privacy where an RSN element is given, as the network's beacon says it.
