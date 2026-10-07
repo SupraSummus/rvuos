@@ -111,6 +111,8 @@ what is left:
   `sta.c`, which has grown to hold them.
   The MAC's bring-up stays the libraries': the own path runs between their `esp_wifi_start` and `esp_wifi_stop`,
   so what those do to the modem and the MAC is the last of `pp` to read before it can go.
+  The driver asks the flash libraries for six symbols alone, the four bring-up ones and two of the log,
+  so their replacement is the bring-up's own code over `libphy` and `mac.c`.
   Its frame completion spins in the caller's thread while the slot is armed, and borrows the libraries' slot 0;
   an own slot, the driver's own interrupt to finish the frame, and the libraries' retry of a collision or a timeout,
   with their invalidation of the queue on a timeout, would do better.
