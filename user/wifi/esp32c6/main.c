@@ -294,7 +294,7 @@ static void hear_tell(const char *what, const struct hear *then, uint32_t ms)
 }
 
 /*
- * The page's channel heard, promiscuous, every frame, the broken too, see drv.h;
+ * The page's channel heard, every frame the sniffer passes, see drv.h;
  * what was heard told about once a second, as the root task's checks wake the thread, and over the whole run at its end,
  * which fails if it heard nothing, so that a receiver that does not work fails the run.
  */
@@ -304,7 +304,7 @@ static __attribute__((noreturn)) void listen(struct drv *d)
         memcpy(hear_ap, d->bssid, 6);
         hear_ap_set = 1;
     }
-    drv_must_mac("every frame heard", mac_hear(MAC_HEAR_MGMT | MAC_HEAR_CTRL | MAC_HEAR_DATA | MAC_HEAR_BROKEN));
+    mac_sniffer(1);
     drv_must_mac("the channel", mac_channel(d->listen));
     drv_must_mac("the MAC receives into the driver's list", mac_rx_take(heard));
     static uint8_t probe[MGMT_FRAME_MAX];
@@ -340,6 +340,7 @@ static __attribute__((noreturn)) void listen(struct drv *d)
         }
         rv_wait(CHILD_INBOX, &bits);
     }
+    mac_sniffer(0);
     mac_rx_give_back();
     drv_mac_told("listen");
     hear_tell("in", &first, (uint32_t)((osi_now_us() - start) / 1000u));

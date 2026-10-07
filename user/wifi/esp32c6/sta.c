@@ -148,12 +148,13 @@ static void scan_heard(const struct mac_frame *m)
 
 void sta_scan(struct drv *d)
 {
-    drv_must_mac("every management frame heard", mac_hear(MAC_HEAR_MGMT));
+    mac_sniffer(1);
     drv_must_mac("the MAC receives into the driver's list", mac_rx_take(scan_heard));
     for (uint32_t ch = MAC_CHANNEL_FIRST; ch <= MAC_CHANNEL_LAST; ch++) {
         mac_channel(ch); /* one of those it tunes to, so never refused */
         osi_delay_ms(SCAN_DWELL_MS);
     }
+    mac_sniffer(0);
     mac_rx_give_back();
     drv_mac_told("scan");
     drv_must("an access point heard", d->net_count != 0 ? ESP_OK : ESP_FAIL);
@@ -1273,13 +1274,11 @@ static void sta_main(void *arg)
         drv_must_mac("the access point's channel", mac_channel(ap->channel));
         /*
          * The station's own address and the access point's, set before the authentication, and the station-mode
-         * receiving the libraries' association programs; the scan's channel sniffer is left and the MAC's list
-         * taken, once. See mac.c.
+         * receiving the libraries' association programs, the MAC's list taken once. See mac.c.
          */
         mac_station(drv_self->mac, sta.ap);
         if (!taken) {
             mac_receive(0);
-            mac_sniffer(0);
             drv_must_mac("the MAC receives into the driver's list", mac_rx_take(heard));
             taken = 1;
         }

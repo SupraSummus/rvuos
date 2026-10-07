@@ -93,7 +93,7 @@ what is left:
   and by open system under WPA2's, associates, runs the supplicant's 4-way handshake over a link of its own, see `supp.h`,
   installs the keys it derives in the MAC's own cipher and in the station, and serves the link.
   What the driver still calls of `pp` and `net80211`, `make BOARD=esp32c6 wifi-esp32c6-refs` lists:
-  the bring-up, and through `mac.c` their promiscuous mode and their lmac's control block.
+  the bring-up, and through `mac.c` their lmac's control block.
   The receiving is the MAC's: its own station address and the access point's are set before the authentication,
   the libraries' channel sniffer is left, and the MAC decrypts each protected frame, leaving its CCMP header
   for the replay check, so the receiving runs no software CCMP; `ccmp_decrypt` stays for `ccmp-test` alone.

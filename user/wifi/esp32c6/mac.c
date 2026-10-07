@@ -224,10 +224,34 @@ void mac_receive(uint16_t aid)
     wr(HE_BCAST, (rd(HE_BCAST) & ~(HE_BCAST_RU | HE_BCAST_RU2)) | HE_BCAST_SET | ru);
 }
 
-/* The channel sniffer on or off, as esp_wifi_set_promiscuous leaves the MAC; the station's receiving needs it off. */
+/*
+ * The MAC's sniffer, as the libraries' promiscuous mode turns it on and off, hal_sniffer_enable and _disable:
+ * SNIFF_ALL set passes every frame heard, and the station's receiving's drops, SNIFF_DROPS, are cleared meanwhile.
+ * That mode writes the miscellaneous frames' word and the control frames' words besides, as their
+ * hal_sniffer_set_promis_misc_pkt and hal_sniffer_rx_set_promis do with their default filters, none of either;
+ * the driver writes them so too.
+ * Read before and after the libraries' calls, with their station started, SNIFF alone changed: the others held
+ * those values already.
+ */
+#define SNIFF                 (MAC_BASE + 0x0e4u)
+#define SNIFF_ALL             0x00020000u
+#define SNIFF_DROPS           0x0000038fu
+#define SNIFF_MISC            (MAC_BASE + 0x0f4u)
+#define SNIFF_MISC_MASK       0x0007fe00u
+#define SNIFF_MISC_NONE       0x00078600u
+#define SNIFF_CTRL0           (MAC_BASE + 0x0f8u)
+#define SNIFF_CTRL1           (MAC_BASE + 0x0fcu)
+#define SNIFF_CTRL_NONE       0x05000000u
+#define SNIFF_CTRL_TYPES      (MAC_BASE + 0x104u)
+#define SNIFF_CTRL_TYPES_MASK 0xffff0000u
+
 void mac_sniffer(int on)
 {
-    esp_wifi_set_promiscuous(on ? true : false);
+    wr(SNIFF, on ? (rd(SNIFF) | SNIFF_ALL) & ~SNIFF_DROPS : (rd(SNIFF) & ~SNIFF_ALL) | SNIFF_DROPS);
+    wr(SNIFF_MISC, (rd(SNIFF_MISC) & ~SNIFF_MISC_MASK) | SNIFF_MISC_NONE);
+    wr(SNIFF_CTRL_TYPES, rd(SNIFF_CTRL_TYPES) & ~SNIFF_CTRL_TYPES_MASK);
+    wr(SNIFF_CTRL0, rd(SNIFF_CTRL0) | SNIFF_CTRL_NONE);
+    wr(SNIFF_CTRL1, rd(SNIFF_CTRL1) | SNIFF_CTRL_NONE);
 }
 
 static int ours(const struct desc *d)
@@ -439,19 +463,6 @@ const char *mac_channel(uint32_t channel)
     rx.channel = channel;
     wr(TX_BLOCK, rd(TX_BLOCK) & ~TX_BLOCK_ALL);
     return 0;
-}
-
-/* The libraries' promiscuous mode yet, whose filter of types they write to the MAC. */
-const char *mac_hear(uint32_t what)
-{
-    uint32_t mask = (what & MAC_HEAR_MGMT ? WIFI_PROMIS_FILTER_MASK_MGMT : 0) |
-                    (what & MAC_HEAR_CTRL ? WIFI_PROMIS_FILTER_MASK_CTRL : 0) |
-                    (what & MAC_HEAR_DATA ? WIFI_PROMIS_FILTER_MASK_DATA : 0) |
-                    (what & MAC_HEAR_BROKEN ? WIFI_PROMIS_FILTER_MASK_FCSFAIL : 0);
-    if (esp_wifi_set_promiscuous_filter(&mask) != ESP_OK) {
-        return "the MAC's filter";
-    }
-    return esp_wifi_set_promiscuous(true) == ESP_OK ? 0 : "the MAC's promiscuous mode";
 }
 
 /* 1 if the MAC fills the driver's first descriptor next: it has moved to the driver's list, and filled none of it. */

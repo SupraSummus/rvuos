@@ -6,7 +6,7 @@
  * on the way to a driver that leaves them the PHY alone; see TODO.md.
  * The driver's own path reaches the MAC through this file alone, so that giving the libraries up rewrites mac.c alone.
  * It receives and retunes the radio, once the libraries have brought the MAC up:
- * mac_hear says which frames the MAC passes on besides those to the station,
+ * mac_sniffer has the MAC pass on every frame heard on the channel, or the station's alone,
  * mac_rx_take gives the MAC a list of descriptors of its own and takes its interrupt,
  * so that each frame goes to heard, in the interrupt's thread, and none to the libraries;
  * mac_rx_give_back stops the MAC receiving and gives the libraries their interrupt back, before they stop.
@@ -63,14 +63,12 @@ struct mac_rx_counts {
 extern struct mac_rx_counts mac_rx_counts;
 
 /*
- * The MAC passes on every frame of the MAC_HEAR_ types heard on the channel, whoever it is to;
- * 0, or the step that failed.
+ * The MAC passes on every management and data frame heard on the channel, whoever it is to, while the sniffer is on,
+ * as a scan and listen= want, and only the station's while it is off, as the station's receiving wants.
+ * Of control frames it passes none: they pass by a mask of their subtypes, which the driver leaves empty, as the
+ * libraries' default did.
  */
-#define MAC_HEAR_MGMT   0x1u
-#define MAC_HEAR_CTRL   0x2u
-#define MAC_HEAR_DATA   0x4u
-#define MAC_HEAR_BROKEN 0x8u /* frames whose FCS fails too, which mac.c counts and drops */
-const char *mac_hear(uint32_t what);
+void mac_sniffer(int on);
 
 /* 0, or the step that failed. */
 const char *mac_rx_take(mac_heard_fn *heard);
@@ -78,13 +76,12 @@ void mac_rx_give_back(void);
 
 /*
  * The own station's receiving, in place of the libraries': the address and the BSSID (mac_station),
- * a key entry the MAC's cipher holds (mac_key_set), the station-mode receive policy (mac_receive),
- * and the channel sniffer left (mac_sniffer) before the driver's list is taken; see mac.c.
+ * a key entry the MAC's cipher holds (mac_key_set), and the station-mode receive policy (mac_receive),
+ * written with the sniffer off, before the driver's list is taken; see mac.c.
  */
 void mac_key_set(uint32_t entry, const uint8_t addr[6], uint8_t id, const uint8_t tk[16]);
 void mac_key_clear(uint32_t entry);
 void mac_receive(uint16_t aid);
-void mac_sniffer(int on);
 
 /*
  * The MAC's own station address and the access point's. The libraries set both when their station associates;

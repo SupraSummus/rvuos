@@ -250,12 +250,4 @@ static inline int rx_ctrl_whole(const uint8_t *c)
     return c[RX_CTRL_STATE] == 0 && c[RX_CTRL_RXEND] == 0;
 }
 
-/* The libraries' promiscuous mode, whose filter of types, wifi_promiscuous_filter_t, a mask alone, mac.c sets. */
-#define WIFI_PROMIS_FILTER_MASK_MGMT    0x01u
-#define WIFI_PROMIS_FILTER_MASK_CTRL    0x02u
-#define WIFI_PROMIS_FILTER_MASK_DATA    0x04u
-#define WIFI_PROMIS_FILTER_MASK_FCSFAIL 0x40u
-esp_err_t esp_wifi_set_promiscuous_filter(const uint32_t *mask);
-esp_err_t esp_wifi_set_promiscuous(bool on);
-
 #endif

@@ -648,3 +648,13 @@ So the own station now takes, of the network's access points, the strongest whos
 as wpa_supplicant passes over a BSS whose security does not match,
 where it took the strongest and failed if that one offered nothing it took.
 The comparison the libraries gave, the same run on either path, went with them; the history keeps the runs that held it.
+
+What `mac.c` still asked of the libraries came next, read in their code as the receiving and the sending were.
+The station-mode receive policy their association programs is three small functions of `pp`,
+read-modify-writes of interface 0's words, which `mac_receive` now makes itself.
+Their promiscuous mode is more: a virtual interface for the sniffer, their own bookkeeping, and under it
+`hal_sniffer_enable`, a filter word and the words for miscellaneous and control frames.
+A read of the MAC's words before and after their calls, with their station started, showed the filter word alone changing,
+so `mac_sniffer` writes what their hal writes and nothing of their bookkeeping;
+a scan without it hears nothing, not even an interrupt.
+What is left of theirs is the bring-up, and the lmac's block, whose state byte the sending clears for their way out.
