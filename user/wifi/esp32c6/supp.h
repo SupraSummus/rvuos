@@ -22,11 +22,11 @@
 #define SUPP_ALG_NONE 0
 #define SUPP_ALG_CCMP 3
 
-/* hostap's enum key_flag bit that says a key is the group's rather than the pairwise one; see common/defs.h. */
-#define SUPP_KEY_GROUP 0x10
-
-/* hostap's enum key_flag bit that says a key may send with, not only receive with; see common/defs.h. */
-#define SUPP_KEY_TX 0x08
+/* hostap's enum key_flag bits the station names; see common/defs.h. */
+#define SUPP_KEY_GROUP 0x10  /* a key is the group's rather than the pairwise one */
+#define SUPP_KEY_TX 0x08     /* a key may send with, not only receive with */
+#define SUPP_KEY_MODIFY 0x01 /* an install only modifies a key: its activate for sending */
+#define SUPP_KEY_NEXT 0x80   /* a key is staged for receiving until one that may send; see keys.h */
 
 /* A key the handshakes derived, as hostap's driver is handed it. */
 struct supp_key {
@@ -106,6 +106,9 @@ void supp_michael_failed(int pairwise);
 
 /* fn(arg) run in the supplicant's thread, through the link; see hostap.c. */
 void supp_run(int (*fn)(void *arg), void *arg);
+
+/* Ask the access point for a new pairwise key, after_s seconds from now; the station's `debug=rekey` drives this. */
+void supp_rekey(int after_s);
 
 /*
  * WPA3's SAE with the network supp_connect was given.

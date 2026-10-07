@@ -169,7 +169,7 @@ static void (*drv_entry(void))(struct child_page *)
  * What to do, from the text the loader may have left in the input region: lines of ssid= and pass=,
  * the network to join, and with no ssid, a scan; bssid=, which of the network's access points to join;
  * and run=, how many seconds the run lasts, 0 for good.
- * debug= names what the driver tells besides its steps, any of frames, stats, wpa and air, see drv.h,
+ * debug= names what the driver tells besides its steps, any of frames, stats, wpa, air and rekey, see drv.h,
  * and lib= the libraries' log level, 4 for debug and 5 for verbose;
  * ax=0 joins without 802.11ax, pmf=0 without protecting management frames, sae=0 without WPA3's SAE,
  * and ps=1 sleeps between beacons.
@@ -197,7 +197,8 @@ static void configure(struct drv *p)
     p->debug = (config_has(conf, size, "debug", "frames") ? DRV_DEBUG_FRAMES : 0) |
                (config_has(conf, size, "debug", "stats") ? DRV_DEBUG_STATS : 0) |
                (config_has(conf, size, "debug", "wpa") ? DRV_DEBUG_WPA : 0) |
-               (config_has(conf, size, "debug", "air") ? DRV_DEBUG_AIR : 0);
+               (config_has(conf, size, "debug", "air") ? DRV_DEBUG_AIR : 0) |
+               (config_has(conf, size, "debug", "rekey") ? DRV_DEBUG_REKEY : 0);
     p->lib_log = config_number(conf, size, "lib", 0);
     p->no_ax = config_number(conf, size, "ax", 1) == 0;
     p->no_pmf = config_number(conf, size, "pmf", 1) == 0;

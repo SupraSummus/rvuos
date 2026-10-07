@@ -54,11 +54,14 @@ struct drv_header {
  * hostap's supplicant at its debug level,
  * and once joined, a line for each frame the radio hears of the access point's to the group or to the station,
  * each acknowledgement to the station, and each frame heard broken, timed by the MAC.
+ * rekey asks the access point for a new pairwise key after the join; the request is itself an EAPOL frame under
+ * the key, so it is how that sending is exercised on a board, though this access point answers no rekey.
  */
 #define DRV_DEBUG_FRAMES 0x1u
 #define DRV_DEBUG_STATS  0x2u
 #define DRV_DEBUG_WPA    0x4u
 #define DRV_DEBUG_AIR    0x8u
+#define DRV_DEBUG_REKEY  0x10u
 
 /*
  * The driver's page.

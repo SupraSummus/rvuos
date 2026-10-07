@@ -100,15 +100,14 @@ what is left:
   The sending is software CCMP still, `ccmp.c` on hostap's `aes-ccm.c`, under the pairwise key;
   with the engine word set the access point took none of the sending, so it is left unset;
   the MAC's own cipher is in `NOTES.md`.
-  A rekey's EAPOL frame is protected and is read, but its answer still goes out in the clear:
-  an EAPOL frame is protected only once the pairwise key is, and hostap installs that key for receiving alone
-  (RX|NEXT) before the 4/4 and for sending too (RX_TX) after it, in `wpa_supplicant_process_3_of_4` of `rsn_supp/wpa.c`,
-  so the station wants a key it sends under apart from one it receives under, and a rekey's 4/4 must go out
-  under the old sending key while the new one is installed for receiving.
+  Its EAPOL goes under the pairwise key once the handshake has installed one, and in the clear until then:
+  hostap installs the key for receiving alone before the 4/4 and for sending too after it, so the station stages
+  that first install and promotes it at the second, the 4/4 of a rekey going under the old key; `debug=rekey` asks
+  the access point here for a rekey, which it ignores, so a rekey's promotion is checked on the host alone.
   The station's data go at 1 Mb/s, the rate `mac_tx` programs for management frames.
   A group key rekey installs one entry, so the frames the access point still sends under the old key
   are dropped until it switches; two entries will want the MAC entry kept in the key, rather than chosen
-  from `&sta.ptk` in each of its two users.
+  from its kind in each of `link_set_group` and `link_set_pairwise`.
   Then WPA3: SAE in the authentication, run in the station's thread, whose stack is sized for WPA2's handshakes,
   and management frames protected, the station's deauthentication sent under CCMP,
   and an unprotected one from the access point ignored. The own supplicant offers no PMF yet,

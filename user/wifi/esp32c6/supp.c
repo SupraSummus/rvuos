@@ -14,6 +14,7 @@
 #include "common/wpa_common.h"
 #include "crypto/sha1.h"
 #include "rsn_supp/wpa.h"
+#include "utils/eloop.h"
 
 #include "supp.h"
 
@@ -503,6 +504,20 @@ int supp_in_4way(void)
 void supp_michael_failed(int pairwise)
 {
     wpa_sm_key_request(supp.sm, 1, pairwise);
+}
+
+/* hostap's own timeout, in the supplicant's thread: ask the access point for a new pairwise key. */
+static void rekey_timeout(void *eloop_data, void *user_data)
+{
+    (void)eloop_data, (void)user_data;
+    wpa_sm_key_request(supp.sm, 0, 1);
+}
+
+void supp_rekey(int after_s)
+{
+    if (eloop_register_timeout((unsigned)after_s, 0, rekey_timeout, 0, 0) < 0) {
+        wpa_printf(MSG_ERROR, "supp: no room to ask for a pairwise rekey");
+    }
 }
 
 void supp_run(int (*fn)(void *arg), void *arg)

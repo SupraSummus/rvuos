@@ -92,6 +92,12 @@ MGMT_TEST_OBJ   := $(patsubst %.c,$(ESP_HOST)/hostap/%.o,common/ieee802_11_commo
 CCMP_TEST       := $(ESP_HOST)/ccmp-test
 CCMP_TEST_OBJ   := $(patsubst %.c,$(ESP_HOST)/hostap/%.o,crypto/aes-ccm.c crypto/aes-internal.c \
                    crypto/aes-internal-enc.c $(ESP_HOST_UTILS)) $(ESP_HOST)/ccmp.o $(ESP_HOST)/ccmp-test.o
+# The station's key transitions of keys.c hold nothing fetched, so their test is a part of `make check` too;
+# the tests above are left out of it, as they fetch hostap and Mbed TLS. See CLAUDE.md.
+KEYS_TEST       := $(ESP_HOST)/keys-test
+KEYS_TEST_OBJ   := $(ESP_HOST)/keys.o $(ESP_HOST)/keys-test.o
+$(ESP_HOST)/keys.o: $(WIFI_ESP)/keys.c $(WIFI_ESP)/keys.h
+$(ESP_HOST)/keys-test.o: $(WIFI_ESP)/test/keys-test.c $(WIFI_ESP)/keys.h
 
 $(ESP_HOST)/hostap/%.o: $(WIFI_ESP_INIT)
 	@mkdir -p $(dir $@)
@@ -111,9 +117,9 @@ $(ESP_HOST)/mgmt.o: $(WIFI_ESP)/mgmt.c $(WIFI_ESP)/mgmt.h $(WIFI_ESP_INIT)
 $(ESP_HOST)/mgmt-test.o: $(WIFI_ESP)/test/mgmt-test.c $(WIFI_ESP)/mgmt.h $(WIFI_ESP_INIT)
 $(ESP_HOST)/ccmp.o: $(WIFI_ESP)/ccmp.c $(WIFI_ESP)/ccmp.h $(WIFI_ESP_INIT)
 $(ESP_HOST)/ccmp-test.o: $(WIFI_ESP)/test/ccmp-test.c $(WIFI_ESP)/ccmp.h $(WIFI_ESP_INIT)
-$(addprefix $(ESP_HOST)/,ec.o sae-test.o mgmt.o mgmt-test.o ccmp.o ccmp-test.o):
+$(addprefix $(ESP_HOST)/,ec.o sae-test.o mgmt.o mgmt-test.o ccmp.o ccmp-test.o keys.o keys-test.o):
 	@mkdir -p $(dir $@)
-	$(HOST_CC) -std=gnu11 -O1 -g -Wall -Wextra -Werror -Wshadow $(HOST_SAN) $(ESP_HOST_INC) -I$(WIFI_ESP) \
+	$(HOST_CC) -std=gnu11 -O1 -g -Wall -Wextra -Werror -Wshadow $(HOST_SAN) $(ESP_HOST_INC) -I$(WIFI_ESP) -Iuser \
 		-c $< -o $@
 
 $(SAE_TEST): $(SAE_TEST_OBJ)
@@ -125,7 +131,10 @@ $(MGMT_TEST): $(MGMT_TEST_OBJ)
 $(CCMP_TEST): $(CCMP_TEST_OBJ)
 	$(HOST_CC) $(HOST_SAN) $^ -o $@
 
-.PHONY: sae-test mgmt-test ccmp-test
+$(KEYS_TEST): $(KEYS_TEST_OBJ)
+	$(HOST_CC) $(HOST_SAN) $^ -o $@
+
+.PHONY: sae-test mgmt-test ccmp-test keys-test
 sae-test: $(SAE_TEST)
 	$(SAE_TEST)
 
@@ -134,6 +143,9 @@ mgmt-test: $(MGMT_TEST)
 
 ccmp-test: $(CCMP_TEST)
 	$(CCMP_TEST)
+
+keys-test: $(KEYS_TEST)
+	$(KEYS_TEST)
 
 # libphy.a's functions that reach PCR, the PMU or the LP domain, weakened in a copy, so that the driver's own,
 # in phy.c, take their place; the copy is made again when this file, which names them, changes.

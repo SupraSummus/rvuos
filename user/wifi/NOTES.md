@@ -538,13 +538,14 @@ Once the handshake has installed the keys, the own station serves the link: the 
 frames it receives, and its sending is software CCMP, `ccmp.c` on hostap's CCM; see `TODO.md`.
 
 **The keys.**
-`link_set_key` copies the pairwise and group temporal keys into the station with their key ids,
-where it wrote only a line before, and each keeps the receive sequence counter the handshake gives,
-and the packet number it sends. It writes the same key into the MAC's own entry, `mac_key_set`
-(`STA_KEY_ENTRY` 4 for the pairwise, `STA_GRP_ENTRY` 1 for the group), whose valid bit is cleared first,
-so a rekey never leaves half an entry live.
-An install and the sending take one lock, `sta.key_lock`, which copies the key and reserves the packet number
-together; a key installed again, the same bytes under the same id, is left alone with its counters kept.
+A pairwise key the handshake derives arrives twice, for receiving alone before the 4/4 and for sending too after,
+so `link_set_key` stages the first and promotes the second, `keys.c`'s state machine, host-tested in `keys-test`;
+the station keeps sending under the key in use in between, the old one at a rekey and none at the first join.
+A group key is installed at once, and one installed again with the same bytes and id is left alone, its counters kept.
+A key is written into the MAC's own entry, `mac_key_set` (`STA_KEY_ENTRY` 4 for the pairwise, `STA_GRP_ENTRY` 1
+for the group), its valid bit cleared first, so a rekey never leaves half an entry live.
+An install and the sending take one lock, `sta.key_lock`, which copies the key and reserves its packet number together.
+EAPOL goes out under the key in use once one is there, and in the clear until then.
 A station's frame to the access point is addressed to it, so it goes under the pairwise key
 however its own destination, Address 3, is addressed; the receiving picks the key by Address 1,
 the group's for a group address.

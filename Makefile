@@ -237,7 +237,7 @@ contents:
 # the ARM demos take half a minute, their idle kernel polling through every sleep, see intr_wait in kernel/arch/arm/trap.c.
 CHECK_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
 CHECK_PARTS := arm-test-an521-smp2 arm-test-an521 arm-test-an385 smp-test lab qemu-replay test host-test \
-               bench lib-test escape wifi-test contents
+               bench lib-test escape wifi-test keys-test contents
 check:
 	$(MAKE) -j$(CHECK_JOBS) $(CHECK_PARTS)
 
