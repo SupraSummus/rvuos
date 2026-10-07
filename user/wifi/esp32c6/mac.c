@@ -152,10 +152,6 @@ void mac_addr_restore(void)
  * which the libraries' hal_crypto_enable also writes, is left alone: with it set the access point took none of
  * the station's sending, and without it the station's frames cross. See NOTES.md.
  */
-extern void hal_mac_rx_set_policy(uint32_t, uint32_t, uint32_t, uint32_t);
-extern void hal_mac_set_rxq_policy(uint32_t, uint32_t);
-extern void hal_he_set_mmss_and_aid(uint32_t, int32_t, uint32_t, uint32_t);
-
 #define KEY_BASE   0x600a5800u
 #define KEY_STRIDE 0x28u
 #define KEY_VALID  0x600a4814u
@@ -187,14 +183,45 @@ void mac_key_clear(uint32_t entry)
 }
 
 /*
- * The station-mode receiving the libraries' association programs, recorded from their own join at the same access point:
- * the receive policy's word, the queue's and the AID.
+ * The station-mode receiving the libraries' association programs, recorded from their own join at the same access point
+ * as three calls, hal_mac_rx_set_policy(0, 1, 1, 1), hal_mac_set_rxq_policy(0, 1) and hal_he_set_mmss_and_aid(0, 0, aid, 0),
+ * which the driver makes as their code does, on interface 0's words: its receive policy, the BSSID's high word,
+ * whose top bit the policy sets and bit 30 it clears, and the station address's, whose valid bit it sets.
+ * The AID, once there is one, goes into the BSSID's high word and into the HE words, with the broadcast RU,
+ * which the MAC configuration's bit 8 says, as hal_he_set_bcast_ru sets them; HE's minimum MPDU spacing is zero.
  */
+#define RX_POLICY           (MAC_BASE + 0x0d8u) /* interface 0's; interface n's 4 * n further */
+#define RX_POLICY_CLEAR     0x00000450u         /* cleared by a policy of 1 and 1, as the station's */
+#define RX_POLICY_QUEUE     0x00000102u         /* set by hal_mac_set_rxq_policy's 1 */
+#define BSSID_HI_POLICY     0x40000000u         /* cleared by the policy, beside BSSID_FLAG, which it sets */
+#define BSSID_HI_MMSS       0x38000000u
+#define BSSID_HI_AID        0x07ff0000u
+#define MAC_CONF            (MAC_BASE + 0x020u)
+#define MAC_CONF_BCAST_RU   0x00000100u
+#define HE_AID              (MAC_BASE + 0x038u)
+#define HE_AID_MASK         0x000007ffu
+#define HE_AID_RU_SET       0x00400000u
+#define HE_AID_RU           0x003ff800u
+#define HE_BCAST            (MAC_BASE + 0x03cu)
+#define HE_BCAST_SET        0x00800800u
+#define HE_BCAST_RU         0x000007ffu
+#define HE_BCAST_RU2        0x007ff000u
+
 void mac_receive(uint16_t aid)
 {
-    hal_mac_rx_set_policy(0, 1, 1, 1);
-    hal_mac_set_rxq_policy(0, 1);
-    hal_he_set_mmss_and_aid(0, 0, aid, 0);
+    wr(RX_POLICY, rd(RX_POLICY) & ~RX_POLICY_CLEAR);
+    wr(BSSID_HI, (rd(BSSID_HI) & ~BSSID_HI_POLICY) | BSSID_FLAG);
+    wr(STA_ADDR_HI, rd(STA_ADDR_HI) | STA_ADDR_FLAG);
+    wr(RX_POLICY, rd(RX_POLICY) | RX_POLICY_QUEUE);
+    wr(BSSID_HI, rd(BSSID_HI) & ~BSSID_HI_MMSS);
+    if (aid == 0) {
+        return;
+    }
+    wr(BSSID_HI, (rd(BSSID_HI) & ~BSSID_HI_AID) | ((uint32_t)aid << 16 & BSSID_HI_AID));
+    wr(HE_AID, (rd(HE_AID) & ~HE_AID_MASK) | (aid & HE_AID_MASK));
+    uint32_t ru = rd(MAC_CONF) & MAC_CONF_BCAST_RU ? HE_BCAST_RU : 0;
+    wr(HE_AID, (rd(HE_AID) | HE_AID_RU_SET) & ~HE_AID_RU);
+    wr(HE_BCAST, (rd(HE_BCAST) & ~(HE_BCAST_RU | HE_BCAST_RU2)) | HE_BCAST_SET | ru);
 }
 
 /* The channel sniffer on or off, as esp_wifi_set_promiscuous leaves the MAC; the station's receiving needs it off. */
