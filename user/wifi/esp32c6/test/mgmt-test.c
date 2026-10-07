@@ -11,6 +11,7 @@
 
 #include "common/ieee802_11_common.h"
 #include "common/ieee802_11_defs.h"
+#include "crypto/aes_wrap.h"
 
 #include "mgmt.h"
 
@@ -426,7 +427,7 @@ static void let_go_policy(void)
     for (int group = 0; group <= 1; group++) {
         for (int prot = 0; prot <= 1; prot++) {
             for (int verified = 0; verified <= 1; verified++) {
-                int want = !group && prot && verified ? MGMT_LET_GO_ACCEPT : MGMT_LET_GO_IGNORE;
+                int want = verified && (group || prot) ? MGMT_LET_GO_ACCEPT : MGMT_LET_GO_IGNORE;
                 check(mgmt_let_go_policy(1, group, prot, verified) == want, "the PMF policy for a leave");
             }
         }
@@ -479,6 +480,52 @@ static void sa_query(void)
     check(mgmt_sa_query_step(SA_QUERY_MAX_US - 1, 0, SA_QUERY_MAX_US - 1) == SA_QUERY_WAIT,
           "waits until the whole time");
     check(mgmt_sa_query_step(SA_QUERY_MAX_US, 0, 0) == SA_QUERY_GIVE_UP, "and gives up at it");
+}
+
+/*
+ * BIP-CMAC-128 over a group deauthentication, IEEE 802.11 12.5.4. This holds the reader's accept/reject logic:
+ * a good MIC taken with its IPN advanced, and an old IPN, another key and a changed MIC refused. It does NOT
+ * hold the additional data's semantics, since it computes the MIC with the same construction the reader uses;
+ * that was checked bit for bit against hostap's own bip_protect of wlantest/bip.c (BSD): the additional data
+ * is the Frame Control with Retry, Power Management and More Data zeroed and Address 1 to 3, 20 bytes and no
+ * Sequence Control, and the MIC is the first eight bytes of AES-128-CMAC over it and the body from byte 24
+ * with the MIC element's MIC field zero. The key is the IGTK of the standard's M.9.1 example, so that a
+ * published expected MIC for it would have a place here.
+ */
+static void bip(void)
+{
+    static const uint8_t igtk[16] = { 0x4e, 0xa9, 0x54, 0x3e, 0x09, 0xcf, 0x2b, 0x1e,
+                                      0xca, 0x66, 0xff, 0xc5, 0x8b, 0xde, 0xcb, 0xcf };
+    uint8_t f[64];
+    uint32_t n = reason_frame(f, WLAN_FC_STYPE_DEAUTH, broadcast, ap, ap, 2);
+    f[n++] = WLAN_EID_MMIE;
+    f[n++] = 16;
+    WPA_PUT_LE16(f + n, 4); /* the IGTK's key id */
+    n += 2;
+    for (unsigned i = 0; i < 6; i++) {
+        f[n++] = (uint8_t)((uint64_t)4u >> (8u * i)); /* the IPN, little-endian */
+    }
+    uint8_t aad[20];
+    WPA_PUT_LE16(aad, ((uint16_t)f[0] | (uint16_t)f[1] << 8) & (uint16_t)~0x3800u);
+    memcpy(aad + 2, f + 4, 18);
+    static const uint8_t zero[8];
+    const uint8_t *addr[3] = { aad, f + 24, zero };
+    size_t seg[3] = { sizeof(aad), n - 24, sizeof(zero) };
+    uint8_t mac[16];
+    check(omac1_aes_128_vector(igtk, 3, addr, seg, mac) == 0, "the MIC computed");
+    memcpy(f + n, mac, 8);
+    n += 8;
+
+    uint64_t ipn = 0;
+    check(mgmt_bip_verify(f, n, igtk, 4, &ipn) && ipn == 4, "a BIP-protected group deauthentication taken");
+    check(!mgmt_bip_verify(f, n, igtk, 4, &ipn), "and the same one again refused, its IPN not above");
+    uint64_t stale = 0;
+    check(!mgmt_bip_verify(f, n, igtk, 5, &stale), "one naming another key refused");
+    f[n - 1] ^= 1;
+    check(!mgmt_bip_verify(f, n, igtk, 4, &stale), "a changed MIC refused");
+    f[n - 1] ^= 1;
+    f[n - 16] = 0; /* the MIC element's key id */
+    check(!mgmt_bip_verify(f, n, igtk, 4, &stale), "a changed key id refused");
 }
 
 /* A data frame to the access point carries the Ethernet type behind RFC 1042's header, then the payload as given. */
@@ -629,6 +676,7 @@ int main(void)
     let_go();
     let_go_policy();
     sa_query();
+    bip();
     data();
     data_read();
     printf("mgmt-test: %s\n", failures ? "FAILED" : "ok");

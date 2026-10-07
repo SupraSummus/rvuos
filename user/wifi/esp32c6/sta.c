@@ -395,7 +395,10 @@ static int let_go(const struct buf *b, uint16_t *reason)
     const uint8_t *f = b->frame;
     uint32_t n = b->len;
     int verified = 0;
-    if (active && !group && protected_) {
+    if (active && group) {
+        /* A group-addressed one is authenticated by BIP rather than encrypted; its reason stands in the clear. */
+        verified = sta.igtk.set && mgmt_bip_verify(f, n, sta.igtk.tk, sta.igtk.id, &sta.igtk.ipn);
+    } else if (active && protected_) {
         verified = open_mgmt(b, plain, &n);
         if (verified) {
             f = plain;

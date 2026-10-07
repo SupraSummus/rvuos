@@ -6,6 +6,7 @@
 
 #include "common/ieee802_11_common.h"
 #include "common/ieee802_11_defs.h"
+#include "crypto/aes_wrap.h"
 
 #include "mgmt.h"
 
@@ -286,10 +287,10 @@ int mgmt_let_go_policy(int active, int group, int protected_, int verified)
     if (!active) {
         return MGMT_LET_GO_ACCEPT;
     }
-    if (group || !protected_ || !verified) {
-        return MGMT_LET_GO_IGNORE;
+    if (verified && (group || protected_)) {
+        return MGMT_LET_GO_ACCEPT;
     }
-    return MGMT_LET_GO_ACCEPT;
+    return MGMT_LET_GO_IGNORE;
 }
 
 uint32_t mgmt_sa_query(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap, int response, uint16_t id)
@@ -337,6 +338,47 @@ int mgmt_sa_query_step(uint64_t now_us, uint64_t start_us, uint64_t last_us)
         return SA_QUERY_SEND;
     }
     return SA_QUERY_WAIT;
+}
+
+int mgmt_bip_verify(const uint8_t *f, uint32_t len, const uint8_t *igtk, uint8_t igtk_id, uint64_t *ipn)
+{
+    /* The MIC element a group-addressed robust management frame ends with: its id, its length, the key id,
+     * the IPN and the MIC, 18 bytes. */
+    const uint32_t mmie = 2u + 2u + 6u + 8u;
+    if (len < IEEE80211_HDRLEN + mmie || f[len - mmie] != WLAN_EID_MMIE || f[len - mmie + 1u] != mmie - 2u ||
+        WPA_GET_LE16(f + len - mmie + 2u) != igtk_id) {
+        return 0;
+    }
+    uint64_t frame_ipn = 0;
+    for (unsigned i = 0; i < 6u; i++) {
+        frame_ipn |= (uint64_t)f[len - mmie + 4u + i] << (8u * i);
+    }
+    if (frame_ipn <= *ipn) {
+        return 0;
+    }
+    /*
+     * The additional data of BIP: the Frame Control with the Retry, Power Management and More Data bits zeroed,
+     * then Address 1 to 3; 20 bytes, and no Sequence Control, the frame being authenticated and not encrypted.
+     */
+    uint8_t aad[20];
+    WPA_PUT_LE16(aad, ((uint16_t)f[0] | (uint16_t)f[1] << 8) & (uint16_t)~0x3800u);
+    memcpy(aad + 2, f + 4, 18);
+    /*
+     * The MIC is the first eight bytes of AES-128-CMAC over the additional data and the frame from its body on,
+     * the MIC element's own MIC field being zero; that field is the frame's last eight bytes, given as zeroes.
+     */
+    static const uint8_t zero[8];
+    const uint8_t *addr[3] = { aad, f + IEEE80211_HDRLEN, zero };
+    size_t seg[3] = { sizeof(aad), len - IEEE80211_HDRLEN - sizeof(zero), sizeof(zero) };
+    uint8_t mac[16];
+    if (omac1_aes_128_vector(igtk, 3, addr, seg, mac) != 0) {
+        return 0;
+    }
+    if (os_memcmp_const(mac, f + len - 8, 8) != 0) {
+        return 0;
+    }
+    *ipn = frame_ipn;
+    return 1;
 }
 
 uint32_t mgmt_data(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap, const uint8_t *dest,

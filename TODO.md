@@ -100,24 +100,16 @@ what is left:
   The sending is software CCMP still, `ccmp.c` on hostap's `aes-ccm.c`, under the pairwise key;
   with the engine word set the access point took none of the sending, so it is left unset;
   the MAC's own cipher is in `NOTES.md`.
-  Its EAPOL goes under the pairwise key once the handshake has installed one, and in the clear until then:
-  hostap installs the key for receiving alone before the 4/4 and for sending too after it, so the station stages
-  that first install and promotes it at the second, the 4/4 of a rekey going under the old key; `debug=rekey` asks
-  the access point here for a rekey, which it ignores, so a rekey's promotion is checked on the host alone.
   The station's data go at 1 Mb/s, the rate `mac_tx` programs for management frames.
   A group key rekey installs one entry, so the frames the access point still sends under the old key
   are dropped until it switches; two entries will want the MAC entry kept in the key, rather than chosen
-  from its kind in each of `link_set_group` and `link_set_pairwise`.
+  from its kind in each of `link_set_group` and `link_set_pairwise`, and `keys`, `group_key` and `igtk`
+  each carry the same id and bytes, which could be one type.
   Then WPA3: SAE in the authentication, run in the station's thread, whose stack is sized for WPA2's handshakes.
-  WPA2's PMF is taken where the access point offers it: the station advertises MFPC, keeps the IGTK the 4-way
-  gives, and sends its deauthentication under the pairwise key, so an access point is left no state it should keep.
-  Under PMF it takes a deauthentication or disassociation as the access point's only protected, its MIC and replay
-  check under the pairwise key, and ignores an unprotected one, counted; after an unprotected one it asks with an
-  SA Query of its own, protected, its transaction id random, and leaves if the access point does not answer in
-  time, which is what one that lost the station's state answers. An SA Query the access point sends is answered,
-  under the pairwise key too. A group-addressed robust management frame still wants its BIP check over the IGTK in
-  software, and a group deauthentication is ignored until then. An access point that answers an association with
-  status 30 is waited out by its Timeout Interval element and asked again, a few times.
+  A pairwise rekey's promotion is checked on the host alone: showing it live wants an access point that answers a
+  station's rekey request, which the one here does not, or one that rekeys on its own.
+  The station's protected management frames — the leave policy and the SA Query — want a file of their own beside
+  `sta.c`, which has grown to hold them.
   The MAC's bring-up stays the libraries': the own path runs between their `esp_wifi_start` and `esp_wifi_stop`,
   so what those do to the modem and the MAC is the last of `pp` to read before it can go.
   Its frame completion spins in the caller's thread while the slot is armed, and borrows the libraries' slot 0;

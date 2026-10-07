@@ -87,9 +87,9 @@ int mgmt_let_go_kind(const uint8_t *f, uint32_t len, const uint8_t *sta, const u
 
 /*
  * What the station does with a deauthentication or disassociation from its access point. Without PMF protecting
- * management frames (active), any of them ends the link. Under it a unicast one ends it only protected, its MIC
- * and replay check verified (protected_ with verified); an unprotected one is the forgery PMF exists to stop, and
- * a group one wants BIP, which the station does not check yet, so both are ignored, counted. See TODO.md.
+ * management frames (active), any of them ends the link. Under it, a unicast one must be protected and verified
+ * (its MIC and replay check) and a group one must carry a valid BIP MIC (verified too); anything else is the
+ * forgery PMF exists to stop, and is ignored, counted. See TODO.md.
  *
  * The cost of that ignorance is an access point that lost the station's state and now says so unprotected: the
  * station would hang on a link the access point no longer serves. 802.11w's answer is an SA Query the station
@@ -111,6 +111,14 @@ int mgmt_sa_query_read(const uint8_t *f, uint32_t len, const uint8_t *sta, const
 
 /* Whether f's Frame Control names an Action frame, whose body a reader may take up, before decrypting it. */
 int mgmt_is_action(const uint8_t *f, uint32_t len);
+
+/*
+ * Whether the group-addressed robust management frame f carries a valid BIP-CMAC-128 MIC (IEEE 802.11 12.5.4)
+ * under the IGTK igtk, whose key id is igtk_id and whose last packet number is *ipn: 1, with *ipn advanced to
+ * the frame's, or 0 if the frame's MIC element names another key, its IPN is not above *ipn, or its MIC is not
+ * the one that data gives. A group deauthentication or disassociation is worth heeding only so.
+ */
+int mgmt_bip_verify(const uint8_t *f, uint32_t len, const uint8_t *igtk, uint8_t igtk_id, uint64_t *ipn);
 
 /*
  * The SA Query's next move, from the time it started and last sent, 802.11w's retry and maximum timeouts:

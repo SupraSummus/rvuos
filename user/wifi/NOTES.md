@@ -605,3 +605,4 @@ A deauthentication or disassociation is heeded only protected, its MIC and repla
 on the counter reserved for management (`ccmp.c`'s index 16). An unprotected one is a forgery, ignored, counted.
 After one the station sends an SA Query of its own, its transaction id random, and leaves the link when the
 access point does not answer within the whole time. An SA Query the access point sends is answered.
+A group-addressed one is taken only with a valid BIP MIC over the IGTK, which `mgmt.c` checks in software.

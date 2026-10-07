@@ -87,7 +87,8 @@ SAE_TEST_OBJ    := $(patsubst %.c,$(ESP_HOST)/hostap/%.o,$(SAE_TEST_SRC)) \
                    $(patsubst %.c,$(ESP_HOST)/mbedtls/%.o,$(MBEDTLS_SRC)) \
                    $(ESP_HOST)/ec.o $(ESP_HOST)/sae-test.o
 MGMT_TEST       := $(ESP_HOST)/mgmt-test
-MGMT_TEST_OBJ   := $(patsubst %.c,$(ESP_HOST)/hostap/%.o,common/ieee802_11_common.c $(ESP_HOST_UTILS)) \
+MGMT_TEST_OBJ   := $(patsubst %.c,$(ESP_HOST)/hostap/%.o,common/ieee802_11_common.c \
+                   crypto/aes-omac1.c crypto/aes-internal.c crypto/aes-internal-enc.c $(ESP_HOST_UTILS)) \
                    $(ESP_HOST)/mgmt.o $(ESP_HOST)/mgmt-test.o
 CCMP_TEST       := $(ESP_HOST)/ccmp-test
 CCMP_TEST_OBJ   := $(patsubst %.c,$(ESP_HOST)/hostap/%.o,crypto/aes-ccm.c crypto/aes-internal.c \
