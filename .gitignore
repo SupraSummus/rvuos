@@ -4,3 +4,5 @@ crash-*
 tools/__pycache__/
 # This machine's own files, which no commit holds: the Wi-Fi configurations WIFI_CONFIG names, with their passphrases.
 local/
+# What the sessions working on the tree tell each other, which no commit holds.
+talk/
