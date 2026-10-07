@@ -101,8 +101,6 @@ what is left:
   so a run that faults tens of thousands of times stalls the reader under its lock and back-pressures the port;
   one long-lived symbolizer, or a cache of an address's name, would keep up,
   and would take the root task's own filter away.
-- The trace window is asked for by `WIFI_CONFIG` with `trace=1`, and `trace=2` is the same window with no fault;
-  `CLAUDE.md` should name both once the tracer lands, as it names the `mac.c` and station runs.
 - A driver of the ESP32-C6's Wi-Fi that leaves Espressif's libraries the PHY alone, `libphy.a`:
   `pp` and `net80211` give way to the driver's own MAC and station, and `osi.c` shrinks to what `libphy.a` calls.
   The station is the driver's own already, on hostap; `user/wifi/NOTES.md` says why.

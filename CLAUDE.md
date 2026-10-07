@@ -66,6 +66,10 @@ and `tools/wifi-run.py` checks it from the host as it checks the Pico 2 W's, but
 A change to `user/wifi/esp32c6/mac.c` runs it again with `listen=` in `WIFI_CONFIG`,
 which fails if the driver hears nothing, again with `listen=` and `probe=`,
 which fails if a probe is not sent or not answered, and again with neither, the driver's scan.
+A change to `user/tracer/` or to the trace in `user/wifi/esp32c6/` runs it with `trace=1` in `WIFI_CONFIG`,
+which has the root task carry out and log every device access of the libraries' bring-up,
+and again with `trace=2`, the same window with the driver mapping its frames and nothing faulting;
+the two runs must agree on the driver's lines, its events and its code, and the stream comes as `build/esp32c6/wifi-run.log`.
 A change to the station in `user/wifi/esp32c6/main.c`, `sta.c` or `mgmt.c` runs it with a network named,
 the station's scan, SAE, association and 4-way handshake at an access point that offers WPA3, which fails if one is not answered,
 and then serves the link the network's frames cross,
