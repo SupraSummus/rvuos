@@ -1,4 +1,4 @@
-/* The faulting load or store a tracer carries out; see trace.h. */
+/* The load or store a faulting instruction is, and the stream's short-cycle compression; see trace.h. */
 
 #include "trace.h"
 
@@ -75,23 +75,99 @@ int trace_decode(uint32_t insn, struct trace_access *out)
     return TRACE_BAD;
 }
 
-uint32_t trace_address(const struct trace_access *a, const uint32_t *regs)
+/* --- The stream's short-cycle compression; see trace.h. --- */
+
+static int rec_same(const struct trace_rec *a, const struct trace_rec *b)
 {
-    return regs[a->base] + (uint32_t)a->offset;
+    return a->op == b->op && a->address == b->address && a->width == b->width && a->pc == b->pc;
 }
 
-void trace_apply(const struct trace_access *a, uint32_t *regs, trace_read read, trace_write write)
+void trace_cycle_init(struct trace_cycle *c)
 {
-    uint32_t address = trace_address(a, regs);
-    if (a->store) {
-        write(address, regs[a->reg], a->width);
+    c->hn = 0;
+    c->len = 0;
+    c->records = 0;
+}
+
+/* The shortest p whose last two turns in the head are equal, or 0. */
+static uint32_t cycle_find(const struct trace_rec *head, uint32_t hn)
+{
+    for (uint32_t p = 1; p <= TRACE_MAXP && 2 * p <= hn; p++) {
+        int same = 1;
+        for (uint32_t i = 0; i < p; i++) {
+            if (!rec_same(&head[hn - 2 * p + i], &head[hn - p + i])) {
+                same = 0;
+                break;
+            }
+        }
+        if (same) {
+            return p;
+        }
+    }
+    return 0;
+}
+
+/* Hand the active cycle to the sink, if any, and clear it: its full turns once, then the records past them. */
+static void cycle_emit(struct trace_cycle *c, const struct trace_sink *sink)
+{
+    if (c->len == 0) {
         return;
     }
-    uint32_t value = read(address, a->width);
-    if (a->sign) {
-        value = (uint32_t)sign_extend(value, 8 * a->width);
+    sink->cycle(sink->ctx, c->records / c->len, c->len, c->turn);
+    uint32_t rem = c->records % c->len;
+    for (uint32_t i = 0; i < rem; i++) {
+        sink->record(sink->ctx, &c->turn[i]);
     }
-    if (a->reg != 0) {
-        regs[a->reg] = value;
+    c->len = 0;
+    c->records = 0;
+}
+
+void trace_cycle_feed(struct trace_cycle *c, const struct trace_rec *e, const struct trace_sink *sink)
+{
+    if (c->len != 0) {
+        struct trace_rec *turn = &c->turn[c->records % c->len];
+        if (rec_same(e, turn)) {
+            if (e->value != turn->value) {
+                turn->flags |= TRACE_FLAG_CHANGED;
+                turn->value = e->value;
+            }
+            c->records++;
+            return;
+        }
+        cycle_emit(c, sink);
     }
+    /* The head keeps two turns of the longest cycle at most, so a cycle is found before its start is printed. */
+    if (c->hn == 2 * TRACE_MAXP) {
+        sink->record(sink->ctx, &c->head[0]);
+        for (uint32_t i = 1; i < c->hn; i++) {
+            c->head[i - 1] = c->head[i];
+        }
+        c->hn--;
+    }
+    c->head[c->hn++] = *e;
+    uint32_t p = cycle_find(c->head, c->hn);
+    if (p != 0) {
+        for (uint32_t i = 0; i + 2 * p < c->hn; i++) {
+            sink->record(sink->ctx, &c->head[i]);
+        }
+        /* The turn keeps the last turn's values, and says whether they changed from the turn before it. */
+        for (uint32_t i = 0; i < p; i++) {
+            c->turn[i] = c->head[c->hn - p + i];
+            if (c->head[c->hn - 2 * p + i].value != c->turn[i].value) {
+                c->turn[i].flags |= TRACE_FLAG_CHANGED;
+            }
+        }
+        c->len = p;
+        c->records = 2 * p;
+        c->hn = 0;
+    }
+}
+
+void trace_cycle_end(struct trace_cycle *c, const struct trace_sink *sink)
+{
+    for (uint32_t i = 0; i < c->hn; i++) {
+        sink->record(sink->ctx, &c->head[i]);
+    }
+    c->hn = 0;
+    cycle_emit(c, sink);
 }

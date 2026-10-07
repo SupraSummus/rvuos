@@ -1,7 +1,8 @@
 /*
- * trace.c on the host, under the sanitizers.
+ * trace.c on the host, under the sanitizers: the decoder, and the stream's compression.
  * The encodings are llvm-objdump's own for clang -march=rv32imac: a sign and a zero form of each width,
  * the four compressed forms a compiler emits, and three c.lw offsets, each hitting other offset bits.
+ * The compression is driven over short sequences a busy-wait makes, and over a value that changes.
  */
 
 #include <stdio.h>
@@ -16,24 +17,6 @@ static void check(int ok, const char *what)
     if (!ok) {
         printf("decode-test: FAIL %s\n", what);
         failures++;
-    }
-}
-
-static uint8_t dev[256];
-
-static uint32_t dev_read(uint32_t address, unsigned width)
-{
-    uint32_t v = 0;
-    for (unsigned i = 0; i < width; i++) {
-        v |= (uint32_t)dev[(address + i) & 0xff] << (8 * i);
-    }
-    return v;
-}
-
-static void dev_write(uint32_t address, uint32_t value, unsigned width)
-{
-    for (unsigned i = 0; i < width; i++) {
-        dev[(address + i) & 0xff] = (uint8_t)(value >> (8 * i));
     }
 }
 
@@ -66,7 +49,7 @@ static const struct {
 
 static void decode(void)
 {
-    uint32_t regs[TRACE_REGS] = { 0 };
+    uint32_t regs[32] = { 0 };
     struct trace_access a;
 
     regs[11] = 0x100; /* a1 */
@@ -78,7 +61,7 @@ static void decode(void)
         int len = trace_decode(decoded[i].insn, &a);
         check(len == decoded[i].len && a.store == decoded[i].store && a.width == decoded[i].width &&
                   a.reg == decoded[i].reg && a.sign == decoded[i].sign &&
-                  trace_address(&a, regs) == decoded[i].address, decoded[i].name);
+                  regs[a.base] + (uint32_t)a.offset == decoded[i].address, decoded[i].name);
     }
     /* The caller knows from the fault's cause that it is a load or store, so anything else is refused. */
     check(trace_decode(0x00000013, &a) == TRACE_BAD, "an instruction of another kind");
@@ -88,64 +71,78 @@ static void decode(void)
     check(trace_decode(0x0080, &a) == TRACE_BAD, "a compressed instruction that is not c.lw or c.sw");
 }
 
-static const uint8_t pattern[4] = { 0x80, 0xff, 0x34, 0x12 };
+/* The stream's compression: a cycle prints one turn, how often it turned, and the records past the full turns. */
+static char cyc_log[256];
+static unsigned cyc_n;
 
-static void apply(void)
+static char cyc_char(uint32_t pc)
 {
-    uint32_t regs[TRACE_REGS] = { 0 };
-    struct trace_access a;
+    return pc == 0x100 ? 'A' : pc == 0x200 ? 'B' : 'C';
+}
 
-    regs[11] = 0x10;
-    for (unsigned i = 0; i < sizeof(pattern) / sizeof(pattern[0]); i++) {
-        dev[0x10 + i] = pattern[i];
-    }
-    static const struct {
-        uint32_t insn;
-        uint32_t out;
-        const char *name;
-    } loads[] = {
-        { 0x00058503, 0xffffff80u, "lb sign-extends" },
-        { 0x0005c503, 0x80, "lbu zero-extends" },
-        { 0x00059503, 0xffffff80u, "lh sign-extends" },
-        { 0x0005d503, 0xff80, "lhu zero-extends" },
-        { 0x0005a503, 0x1234ff80u, "lw reads the word" },
-    };
-    for (unsigned i = 0; i < sizeof(loads) / sizeof(loads[0]); i++) {
-        regs[10] = 0;
-        trace_decode(loads[i].insn, &a);
-        trace_apply(&a, regs, dev_read, dev_write);
-        check(regs[10] == loads[i].out, loads[i].name);
-    }
-    regs[0] = 0; /* lw x0,0(a1) leaves x0 zero */
-    trace_decode(0x0005a003, &a);
-    trace_apply(&a, regs, dev_read, dev_write);
-    check(regs[0] == 0, "x0 stays zero");
+static void cyc_note(const struct trace_rec *e)
+{
+    cyc_n += (unsigned)snprintf(cyc_log + cyc_n, sizeof(cyc_log) - cyc_n, " %c%u%s", cyc_char(e->pc), e->value,
+                                e->flags & TRACE_FLAG_CHANGED ? "*" : "");
+}
 
-    static const struct {
-        uint32_t insn;
-        uint32_t value;
-        unsigned width;
-        const char *name;
-    } stores[] = {
-        { 0x00a58023, 0x12345678, 1, "sb writes one byte" },
-        { 0x00a59023, 0x1234abcd, 2, "sh writes two bytes" },
-        { 0x00a5a023, 0xdeadbeef, 4, "sw writes the word little-endian" },
-    };
-    for (unsigned i = 0; i < sizeof(stores) / sizeof(stores[0]); i++) {
-        memset(dev, 0, sizeof(dev));
-        regs[10] = stores[i].value;
-        trace_decode(stores[i].insn, &a);
-        trace_apply(&a, regs, dev_read, dev_write);
-        uint32_t mask = stores[i].width == 4 ? 0xffffffffu : (1u << (8 * stores[i].width)) - 1;
-        check(dev_read(0x10, stores[i].width) == (stores[i].value & mask) &&
-                  (stores[i].width == 4 || dev[0x10 + stores[i].width] == 0), stores[i].name);
+static void cyc_sink_rec(void *ctx, const struct trace_rec *e)
+{
+    (void)ctx;
+    cyc_note(e);
+}
+
+static void cyc_sink_cycle(void *ctx, uint32_t turns, uint32_t len, const struct trace_rec *turn)
+{
+    (void)ctx;
+    cyc_n += (unsigned)snprintf(cyc_log + cyc_n, sizeof(cyc_log) - cyc_n, " cycle x%u of %u:", turns, len);
+    for (uint32_t i = 0; i < len; i++) {
+        cyc_note(&turn[i]);
     }
+}
+
+static const struct trace_sink cyc_sink = { cyc_sink_rec, cyc_sink_cycle, 0 };
+
+static void cyc_feed(struct trace_cycle *c, const char *seq, const uint32_t *vals)
+{
+    struct trace_rec e = { .op = TRACE_READ, .width = 4 };
+    for (unsigned i = 0; seq[i] != 0; i++) {
+        e.pc = seq[i] == 'A' ? 0x100 : seq[i] == 'B' ? 0x200 : 0x300;
+        e.address = e.pc << 4;
+        e.value = vals ? vals[i] : 0;
+        e.flags = 0;
+        trace_cycle_feed(c, &e, &cyc_sink);
+    }
+}
+
+static void cyc_case(const char *seq, const uint32_t *vals, const char *want)
+{
+    struct trace_cycle c;
+    trace_cycle_init(&c);
+    cyc_n = 0;
+    cyc_feed(&c, seq, vals);
+    trace_cycle_end(&c, &cyc_sink);
+    cyc_log[cyc_n] = 0;
+    check(strcmp(cyc_log, want) == 0, seq);
+    if (strcmp(cyc_log, want) != 0) {
+        printf("decode-test: cycle %s gave '%s', wanted '%s'\n", seq, cyc_log, want);
+    }
+}
+
+static void cycle(void)
+{
+    cyc_case("ABABABC", 0, " cycle x3 of 2: A0 B0 C0");   /* the turn once, its count, then the breaking record */
+    cyc_case("ABABAC", 0, " cycle x2 of 2: A0 B0 A0 C0"); /* the part turn past the full turns is not lost */
+    cyc_case("ABC", 0, " A0 B0 C0");                      /* no cycle: every record stands */
+    cyc_case("ABABABAB", 0, " cycle x4 of 2: A0 B0");
+    static const uint32_t vals[] = { 0, 0, 0, 1, 7 };     /* a poll's value: the turn keeps the last, and changed */
+    cyc_case("AAAAC", vals, " cycle x4 of 1: A1* C7");
 }
 
 int main(void)
 {
     decode();
-    apply();
+    cycle();
     if (failures != 0) {
         printf("decode-test: %d failures\n", failures);
         return 1;
