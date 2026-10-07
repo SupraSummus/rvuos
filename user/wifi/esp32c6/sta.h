@@ -2,8 +2,8 @@
 #define RVUOS_WIFI_STA_H
 
 /*
- * The station's own logic, the driver's rather than the libraries'; see TODO.md.
- * sta_scan scans by mac.c. With sta=own, sta_start runs the station in a thread of its own, see sta.c,
+ * The station, the driver's own; see TODO.md.
+ * sta_scan scans by mac.c. sta_start runs the station in a thread of its own, see sta.c,
  * which scans for the network, reads its access point's beacon, authenticates, by SAE under WPA3's personal
  * where the access point offers it and by open system under WPA2's, associates,
  * runs hostap's supplicant over a link of its own, see supp.h, through the 4-way handshake,
@@ -16,7 +16,7 @@
 
 /*
  * A scan hears each channel for SCAN_DWELL_MS, two beacon intervals and a little, and sends nothing,
- * as the libraries' passive scan does.
+ * as a passive scan does.
  */
 #define SCAN_DWELL_MS 250u
 

@@ -2,8 +2,8 @@
 #define RVUOS_WIFI_DRV_H
 
 /*
- * The Wi-Fi driver of the ESP32-C6, Espressif's closed libraries around an adapter of rvuos's,
- * a child of the root task, and its page, which is all the two agree on.
+ * The Wi-Fi driver of the ESP32-C6, a child of the root task, and its page, which is all the two agree on:
+ * a station of its own, which Espressif's closed libraries, around an adapter of rvuos's, bring the MAC up for.
  *
  * The driver is an image of its own, too large for the SRAM:
  * its code and constants run from the window onto flash, BOOT_CAP_FLASH, at FLASH_WINDOW_BASE,
@@ -49,39 +49,29 @@ struct drv_header {
 
 /*
  * What the driver tells besides its steps, from the configuration's debug=, see root.c:
- * a line for each frame to and from the link, or with sta=own each frame the station reads,
- * the libraries' counters of the radio once the run is over,
- * hostap's supplicant at its debug level,
- * and once joined, a line for each frame the radio hears of the access point's to the group or to the station,
- * each acknowledgement to the station, and each frame heard broken, timed by the MAC.
+ * a line for each frame to and from the link, and each frame the station reads,
+ * and hostap's supplicant at its debug level.
  * rekey asks the access point for a new pairwise key after the join; the request is itself an EAPOL frame under
  * the key, so it is how that sending is exercised on a board, though this access point answers no rekey.
  */
 #define DRV_DEBUG_FRAMES 0x1u
-#define DRV_DEBUG_STATS  0x2u
-#define DRV_DEBUG_WPA    0x4u
-#define DRV_DEBUG_AIR    0x8u
-#define DRV_DEBUG_REKEY  0x10u
+#define DRV_DEBUG_WPA    0x2u
+#define DRV_DEBUG_REKEY  0x4u
 
 /*
  * The driver's page.
- * With no network named the driver scans, passively, by the libraries or with own_rx by its own code,
- * and with one it joins it, WPA3's personal where the access point offers it,
- * unless the page says no_sae, and WPA2's otherwise;
- * it asks for an open one if the page names no passphrase, which the libraries refuse yet, see TODO.md.
- * it reports the states of wifi.h's enum drv_state, DRV_UP once the libraries run in station mode,
- * then DRV_SCANNED or DRV_JOINED, and once joined it moves frames between the libraries and the link,
- * until the root task asks it to leave, when it leaves, turns the radio off and reports DRV_LEFT;
- * a scan's run turns the radio off before DRV_SCANNED too.
- * With sta=own and a network named, the station is a thread of its own, sta.c's, which scans, authenticates,
- * associates, runs the supplicant's handshakes by its own code, WPA3's personal by SAE where the access point
- * offers it, unless the page says no_sae, and WPA2's otherwise,
- * installs the keys it derives and serves the link, its data frames in software CCMP, reporting DRV_JOINED; see TODO.md.
+ * The driver reports the states of wifi.h's enum drv_state, DRV_UP once the libraries have brought the MAC up.
+ * With no network named it scans, passively, reports DRV_SCANNED, and turns the radio off.
+ * With one, its station, a thread of its own, sta.c's, scans for it, authenticates, associates,
+ * and runs the supplicant's handshakes, WPA3's personal by SAE where the access point offers it,
+ * unless the page says no_sae, and WPA2's otherwise; a network with no passphrase it refuses, see TODO.md.
+ * It installs the keys it derives, reports DRV_JOINED, and serves the link, its data frames in software CCMP,
+ * until the root task asks it to leave, when it leaves, turns the radio off and reports DRV_LEFT.
  * A step that fails, or the access point letting the station go, is CHILD_FAILED,
- * with the step's name in the page and ESP-IDF's error, or the reason, in its detail.
+ * with the step's name in the page and the error, or IEEE 802.11's status or reason, in its detail.
  * With a channel to listen on and no network named, it hears the channel without joining and reports DRV_LISTENING,
- * then tells each second what it heard, and the beacons heard and missed of the access point bssid names or else the first,
- * received by the libraries or, with own_rx, by mac.c, so that the two can be compared; it leaves as when joined.
+ * then tells each second what it heard, and the beacons heard and missed of the access point bssid names or else the first;
+ * it leaves as when joined.
  * Listening, with a network to probe for, it asks for it once a second, a few times, as a station that scans asks,
  * and counts the answers to its own address; a run that heard none fails.
  */
@@ -97,26 +87,20 @@ struct drv {
     uint8_t bssid[6];     /* the access point of the network to join, if bssid_set, else the one heard best */
     uint8_t bssid_set;
     uint32_t debug;       /* DRV_DEBUG_ bits */
-    uint8_t no_ax;        /* join without 802.11ax, as 802.11n at best */
     uint8_t no_pmf;       /* join without protecting management frames, which the station otherwise offers */
     uint8_t no_sae;       /* join without WPA3's SAE, with WPA2's passphrase where the network takes both */
-    uint8_t modem_sleep;  /* sleep between beacons, WIFI_PS_MIN_MODEM, which loses the access point yet; see TODO.md */
     uint32_t lib_log;     /* the libraries' log level, ESP-IDF's wifi_log_level_t, or 0 for its INFO */
     uint8_t listen;       /* the channel to hear, 1 to 13, or 0 */
-    uint8_t own_rx;       /* hear it, or scan, through mac.c rather than the libraries */
-    uint8_t own_tx;       /* send the probe through mac.c rather than the libraries; see mac.h */
-    uint8_t own_sta;      /* with a network named, join it by the driver's own station rather than the libraries' */
     char probe[33];       /* the network to probe for while listening, or empty */
     struct chan_end link; /* to the network process, connected before the start */
     /* From the root task, while it runs. */
     volatile uint32_t leave; /* the run is over: leave the network, and report DRV_LEFT */
-    volatile uint32_t stats; /* how many times the libraries' counters were asked for; told once joined */
 
     /* From the driver. */
     char failed[32]; /* the step that failed */
     volatile uint32_t net_count;
     struct drv_net nets[DRV_NETS]; /* what a scan heard */
-    struct drv_net joined;         /* the access point joined, its RSSI left zero, or with own_sta joined and left */
+    struct drv_net joined;         /* the access point joined */
     volatile int authmode;         /* the joined network's, a WIFI_AUTH_ of esp.h */
     volatile uint32_t rx_frames, rx_dropped, tx_frames, tx_dropped;
 };

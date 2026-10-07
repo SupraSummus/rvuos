@@ -520,7 +520,7 @@ void mac_rx_give_back(void)
  * The libraries' interrupt may finish the frame instead, the driver and their pp treading the same state harmlessly.
  * It clears the queue's own state byte to zero, which the libraries' lmac_stop_hw_txq reads so that their way out
  * leaves the slot alone, and which their lmacProcessTxComplete reads to skip a queue it is not finishing;
- * and with tx=own nothing else sends, so the driver may use the slot.
+ * and the libraries' station never sends, so the driver may use the slot.
  */
 
 /* The slot's words, less for each slot, in hal_mac_tx.o's two blocks: the queue's, then the PPDU's. */

@@ -3,7 +3,7 @@
 
 /*
  * The supplicant: hostap's, upstream's own (src/rsn_supp/ of wpa_supplicant, BSD), not ESP-IDF's fork of it,
- * for a station that gives it a link: Espressif's libraries, see wpa.c, or the driver's own, see sta.c.
+ * for the driver's own station, sta.c, which gives it a link.
  * The station names the network it chose, and the supplicant gives it the RSN and RSNX elements to associate with;
  * then it runs the 4-way and group key handshakes over the EAPOL frames the station hands it,
  * and sends its own and installs the keys through the link.
@@ -90,9 +90,6 @@ void supp_deinit(void);
  */
 int supp_choose(struct supp_network *n);
 
-/* The PMK of a passphrase, or a PSK, and an SSID, derived ahead, which takes a fifth of a second. */
-void supp_prepare(const char *ssid, const char *pass);
-
 /*
  * The station is to associate with n: the RSN element to associate with into rsn, at most *rsn_len bytes,
  * and the RSNX element into rsnx, at most *rsnx_len, of length 0 if none; 0, or -1 if the supplicant cannot.
@@ -105,19 +102,12 @@ void supp_associated(const uint8_t *bssid);
 /* The station left the access point, or was let go. */
 void supp_disassociated(void);
 
-/* Whether an EAPOL frame was protected, which hostap uses under PMF; unknown when the sender did not say. */
+/* Whether an EAPOL frame was protected, which hostap uses under PMF. */
 #define SUPP_EAPOL_CLEAR     0
 #define SUPP_EAPOL_PROTECTED 1
-#define SUPP_EAPOL_UNKNOWN   2
 
 /* An EAPOL frame from src, from its 802.1X header on, its protection encryption; what hostap's wpa_sm_rx_eapol answers. */
 int supp_rx_eapol(const uint8_t *src, const uint8_t *buf, size_t len, int encryption);
-
-/* Whether the 4-way handshake runs. */
-int supp_in_4way(void);
-
-/* Michael's check failed on a frame received, to the station if pairwise, else to the group. */
-void supp_michael_failed(int pairwise);
 
 /* fn(arg) run in the supplicant's thread, through the link; see hostap.c. */
 void supp_run(int (*fn)(void *arg), void *arg);

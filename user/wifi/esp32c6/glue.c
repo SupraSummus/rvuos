@@ -330,10 +330,3 @@ int rtc_clk_xtal_freq_get(void)
 {
     return 40;
 }
-
-/* ESP-IDF's wifi_init.c: the connect the libraries leave to it, with no roaming. */
-esp_err_t esp_wifi_connect_internal(void);
-esp_err_t esp_wifi_connect(void)
-{
-    return esp_wifi_connect_internal();
-}

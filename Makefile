@@ -23,6 +23,7 @@
 CC      := clang
 OBJCOPY := llvm-objcopy
 OBJDUMP := llvm-objdump
+NM      := llvm-nm
 SYMBOLIZER := llvm-symbolizer
 QEMU    := qemu-system-riscv32
 ESPTOOL := esptool

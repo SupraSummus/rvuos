@@ -86,15 +86,14 @@ what is left:
   `phymap` sees only constant addresses, so a register reached through a table or a loop shows first in a trace.
   The harness reaches three of the board's frames, the SAR ADC, the modem and the eFuse,
   which with the tracer's own regions have to fit a process's eight region slots.
-- A driver of the ESP32-C6's Wi-Fi that leaves Espressif's libraries the PHY alone, `libphy.a`,
-  beside the driver on all of them, which stays to be held against it:
+- A driver of the ESP32-C6's Wi-Fi that leaves Espressif's libraries the PHY alone, `libphy.a`:
   `pp` and `net80211` give way to the driver's own MAC and station, and `osi.c` shrinks to what `libphy.a` calls.
-  The driver's own code receives and scans as well as the libraries do, by `listen=` and a scan, each with and without `rx=own`,
-  and sends a probe by `tx=own`, the access point answering it.
-  The station's logic is the driver's own too, on hostap; `user/wifi/NOTES.md` says why.
-  With `sta=own` it authenticates, by SAE where the access point offers WPA3's personal and by open system under WPA2's,
-  associates, runs the supplicant's 4-way handshake over a link of its own, see `supp.h`,
+  The station is the driver's own already, on hostap; `user/wifi/NOTES.md` says why.
+  It receives, scans and sends by `mac.c`, authenticates, by SAE where the access point offers WPA3's personal
+  and by open system under WPA2's, associates, runs the supplicant's 4-way handshake over a link of its own, see `supp.h`,
   installs the keys it derives in the MAC's own cipher and in the station, and serves the link.
+  What the driver still calls of `pp` and `net80211`, `make BOARD=esp32c6 wifi-esp32c6-refs` lists:
+  the bring-up, and through `mac.c` their promiscuous mode, their receive policy, and their lmac's control block.
   The receiving is the MAC's: its own station address and the access point's are set before the authentication,
   the libraries' channel sniffer is left, and the MAC decrypts each protected frame, leaving its CCMP header
   for the replay check, so the receiving runs no software CCMP; `ccmp_decrypt` stays for `ccmp-test` alone.
@@ -119,13 +118,13 @@ what is left:
   which the take found not always taken; no run has run out yet, `restarted` 0.
 - The ESP32-C6's driver takes all its memory from one heap: the libraries' as they run,
   the own path's buffers, stacks and queues once, at its start, and the supplicant's and SAE's as they run, hostap's and Mbed TLS's way;
-  with `sta=own` SAE leaves a few kilobytes at the fewest.
-  Once the libraries' station path is gone the own path's memory can be static,
+  SAE leaves a few kilobytes at the fewest.
+  The own path's memory can be static,
   and the supplicant's a bounded arena of its own, or fixed buffers over a P-256 of fixed width.
 - The ESP32-C6's Wi-Fi root task has 8 KiB of memory and 9 slots left once its clients run,
   so another client needs room found first, in the driver's block or a smaller `CLIENT_CHAN_SIZE`.
-- The ESP32-C6's echo answers in 13 to 22 ms at the median, the Pico 2 W's in about 5, and the C6's ping in about 10:
-  where the time goes, the radio, the driver's turn after its interrupt, open decision 9, or the libraries' task,
+- The ESP32-C6's echo answers in about 7 ms at the median, the Pico 2 W's in about 5:
+  where the time goes, the radio at 1 Mb/s, the software CCMP, or the driver's turn after its interrupt, open decision 9,
   is not measured.
 - The Pico 2 W's run lasts its `run=` whatever its checks found, or until a reset by hand,
   since the host has no way to end it: its USB serial port, `kernel/board/rp2350/cdc.c`, is the halt's alone.
@@ -140,12 +139,12 @@ what is left:
   two P-256 products in software, and its own commit a third of one by hash to element, or twice that by hunting and pecking.
   IEEE 802.11's default has the access point send its own again after 40 ms and give up after a few; the two here waited.
   The chip's ECC accelerator, which no frame lists yet, would shorten it.
-- The ESP32-C6's WPA3 is SAE on P-256 alone: SAE's extended key, of the larger groups, and fast transition are hidden from the libraries.
-  BIP-GMAC, the management group key of the 192-bit and GCMP suites, needs the crypto table's GMAC,
-  which `crypto.c` leaves out, and an install the supplicant refuses.
-- The ESP32-C6's station keeps power save off: with `ps=1` the libraries sleep nine tenths of the run between beacons,
-  and the station takes an address, but answers one ping in five, and its echo comes back 6 s after a hang, not 1.2 s.
-  The adapter's side of the modem's sleep is to be made to work.
+- The ESP32-C6's station takes WPA2's PSK and WPA3's SAE on P-256, with CCMP alone, pairwise and for the group:
+  SAE's extended key, of the larger groups, fast transition, PSK over SHA-256, and a TKIP group key it does not take,
+  and of the network's access points it joins the strongest whose suites it takes.
+  Of the management group ciphers it takes BIP-CMAC-128 alone, not the GMAC of the 192-bit and GCMP suites.
+- The ESP32-C6's station keeps the radio on between beacons, and tells the access point nothing of power save:
+  the modem's sleep until each DTIM beacon, which the libraries' station did, though not well over the adapter, is to be its own.
 - ESP-IDF tracks the PHY's PLL every second while the radio runs, `phy_track_pll` of `esp_phy`;
   the adapter does not, which a run of hours may need.
 - The ESP32-C6's radio stays on until the next boot when a thread of the driver's faults
@@ -162,10 +161,10 @@ what is left:
   so a host may wait seconds to reach it.
   There the ping of `make BOARD=esp32c6 wifi-esp32c6` fails now and then:
   the station answers every request, the host hears fewer than four of five, and where the answers go is not known.
-  The C6's `debug=air`, and the Pico 2 W's `debug=dhcp` and `bssid=`, measured it.
-- The ESP32-C6's libraries refuse an open network, reason 210, no access point of compatible security;
-  what of the configuration differs from ESP-IDF's is open.
-  A sketch on Arduino's ESP32 core runs that stack on the board, so its init configuration and modem registers can be compared.
+  The Pico 2 W's `debug=dhcp` and `bssid=` measure it; whether the own station, which receives through the MAC
+  without the libraries, misses the same frames is not measured.
+- The ESP32-C6's station refuses an open network: it takes an access point whose beacon has an RSN element,
+  and a passphrase.
 - With the APM units confining the modem to the driver's block, as measured for open decision 13,
   the modem reached `0x4082c7ac`, in the root task's code block past its image, once in each of two runs,
   before the driver had started, and the units refused it; five runs after showed nothing.

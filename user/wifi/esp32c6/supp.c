@@ -39,12 +39,6 @@ static struct {
     size_t ssid_len;
     char pass[65];
 
-    /* The PMK of the passphrase and SSID last asked, which costs a fifth of a second to derive. */
-    u8 pmk[PMK_LEN];
-    u8 pmk_ssid[SSID_MAX_LEN];
-    size_t pmk_ssid_len;
-    char pmk_pass[65];
-
     /* SAE with the access point being joined, by hash to element or not, and the message last built. */
     struct sae_data sae;
     int sae_h2e;
@@ -188,33 +182,16 @@ static const struct wpa_sm_ctx sm_ctx = {
 /* --- The PMK of a passphrase. --- */
 
 /*
- * The PMK for the passphrase, or the PSK in 64 hexadecimal digits, and the SSID, into supp.pmk:
- * 0, or -1 if pass is neither 8 to 63 characters nor 64 digits.
+ * The PMK for the passphrase, or the PSK in 64 hexadecimal digits, and the SSID, into pmk, which takes a fifth of
+ * a second: 0, or -1 if pass is neither 8 to 63 characters nor 64 digits.
  */
-static int pmk_for(const char *pass, const u8 *ssid, size_t ssid_len)
+static int pmk_for(const char *pass, const u8 *ssid, size_t ssid_len, u8 pmk[PMK_LEN])
 {
     size_t n = strnlen(pass, 64);
     if (ssid_len > SSID_MAX_LEN || n < 8) {
         return -1;
     }
-    if (ssid_len == supp.pmk_ssid_len && os_memcmp(ssid, supp.pmk_ssid, ssid_len) == 0 &&
-        os_strncmp(pass, supp.pmk_pass, sizeof(supp.pmk_pass)) == 0) {
-        return 0;
-    }
-    if (n == 64 ? hexstr2bin(pass, supp.pmk, PMK_LEN) : pbkdf2_sha1(pass, ssid, ssid_len, 4096, supp.pmk, PMK_LEN)) {
-        supp.pmk_ssid_len = 0;
-        return -1;
-    }
-    os_memcpy(supp.pmk_ssid, ssid, ssid_len);
-    supp.pmk_ssid_len = ssid_len;
-    os_memcpy(supp.pmk_pass, pass, n);
-    supp.pmk_pass[n] = 0;
-    return 0;
-}
-
-void supp_prepare(const char *ssid, const char *pass)
-{
-    pmk_for(pass, (const u8 *)ssid, strnlen(ssid, SSID_MAX_LEN));
+    return n == 64 ? hexstr2bin(pass, pmk, PMK_LEN) : pbkdf2_sha1(pass, ssid, ssid_len, 4096, pmk, PMK_LEN);
 }
 
 /* --- WPA3's SAE. --- */
@@ -485,11 +462,14 @@ int supp_connect(const struct supp_network *n, uint8_t *rsn, size_t *rsn_len, ui
     wpa_sm_set_ap_rsnxe(sm, n->ap_rsnx, n->ap_rsnx ? 2u + n->ap_rsnx[1] : 0);
 
     if (n->key_mgmt != WPA_KEY_MGMT_SAE) {
-        if (pmk_for(supp.pass, supp.ssid, ssid_len)) {
+        u8 pmk[PMK_LEN];
+        if (pmk_for(supp.pass, supp.ssid, ssid_len, pmk)) {
+            forced_memzero(pmk, sizeof(pmk));
             wpa_printf(MSG_ERROR, "supp: the passphrase is neither 8 to 63 characters nor 64 hexadecimal digits");
             return -1;
         }
-        wpa_sm_set_pmk(sm, supp.pmk, PMK_LEN, 0, 0);
+        wpa_sm_set_pmk(sm, pmk, PMK_LEN, 0, 0);
+        forced_memzero(pmk, sizeof(pmk));
     }
 
     /* SAE by hash to element where the station and the access point's RSNX element allow it, which the station's says. */
@@ -527,20 +507,8 @@ void supp_disassociated(void)
 
 int supp_rx_eapol(const uint8_t *src, const uint8_t *buf, size_t len, int encryption)
 {
-    enum frame_encryption e = encryption == SUPP_EAPOL_PROTECTED ? FRAME_ENCRYPTED
-                            : encryption == SUPP_EAPOL_CLEAR     ? FRAME_NOT_ENCRYPTED
-                                                                 : FRAME_ENCRYPTION_UNKNOWN;
+    enum frame_encryption e = encryption == SUPP_EAPOL_PROTECTED ? FRAME_ENCRYPTED : FRAME_NOT_ENCRYPTED;
     return wpa_sm_rx_eapol(supp.sm, src, buf, len, e);
-}
-
-int supp_in_4way(void)
-{
-    return supp.state == WPA_4WAY_HANDSHAKE;
-}
-
-void supp_michael_failed(int pairwise)
-{
-    wpa_sm_key_request(supp.sm, 1, pairwise);
 }
 
 /* hostap's own timeout, in the supplicant's thread: ask the access point for a new pairwise key. */

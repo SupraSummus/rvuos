@@ -63,13 +63,11 @@ A change to `user/wifi/esp32c6/` or `kernel/board/esp32c6/` with an ESP32-C6 con
 which writes the driver into the flash at `0x210000` if it changed and scans,
 or, with `WIFI_CONFIG` naming a network as for the Pico 2 W, joins it,
 and `tools/wifi-run.py` checks it from the host as it checks the Pico 2 W's, but for the logger, before it ends the run.
-A change to `user/wifi/esp32c6/mac.c` runs it again with `listen=` and `rx=own` in `WIFI_CONFIG`,
-which fails if the driver's own receiving hears nothing, again with `rx=own` alone, the driver's own scan,
-and again with `listen=`, `probe=` and `tx=own`, without `rx=own`, the driver's own sending,
-which fails if the access point answers none; and with `listen=`, `probe=`, `rx=own` and `tx=own` together,
-which fails if a probe is not sent or not answered, the driver's own completion in place of the libraries'.
-A change to the station's own code in `user/wifi/esp32c6/main.c`, `sta.c` or `mgmt.c` runs it with a network named and `sta=own`,
-the driver's own scan, SAE, association and 4-way handshake at an access point that offers WPA3, which fails if one is not answered,
+A change to `user/wifi/esp32c6/mac.c` runs it again with `listen=` in `WIFI_CONFIG`,
+which fails if the driver hears nothing, again with `listen=` and `probe=`,
+which fails if a probe is not sent or not answered, and again with neither, the driver's scan.
+A change to the station in `user/wifi/esp32c6/main.c`, `sta.c` or `mgmt.c` runs it with a network named,
+the station's scan, SAE, association and 4-way handshake at an access point that offers WPA3, which fails if one is not answered,
 and then serves the link the network's frames cross,
 and again with `sae=0`, its open-system authentication and WPA2's handshake;
 the Pico 2 W's access point takes the second only when its own configuration says `sae=0`, see `TODO.md`.
@@ -86,6 +84,8 @@ and a fault of one of its threads comes with its stack and the names of its func
 runs `make BOARD=esp32c6 phymap`, which builds the harness and lists what it reaches that no frame covers;
 `make BOARD=esp32c6 wifi-esp32c6-map` lists the same for the Wi-Fi driver,
 which a change to its device ranges or `phy.c` runs too.
+`make BOARD=esp32c6 wifi-esp32c6-refs` counts what the driver's own code calls of Espressif's `net80211` and `pp`,
+and a change that drops such a call gives the counts before and after in its commit.
 A new kernel global needs a reset in `host_boot` too,
 since the host boots once per input in one process.
 A new `BOOT_CAP_*` or `REPLAY_CAP_*` slot, a device QEMU's board lists, or an operation whose arguments change,

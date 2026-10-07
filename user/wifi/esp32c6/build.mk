@@ -205,3 +205,19 @@ else
 wifi-esp32c6-map:
 	$(error the driver runs on an ESP32-C6: make BOARD=esp32c6 wifi-esp32c6-map)
 endif
+
+# What the driver's own objects reach of the closed libraries directly, net80211's, pp's and the PHY's,
+# each with the ROM's half of it, see tools/esp-refs.py:
+# the counts a commit that drops a call into net80211 or pp gives in its message, before and after, as CLAUDE.md asks.
+WIFI_ESP_OWN := $(filter $(BUILD)/$(WIFI_ESP)/%,$(WIFI_ESP_OBJ))
+.PHONY: wifi-esp32c6-refs
+ifeq ($(BOARD),esp32c6)
+wifi-esp32c6-refs: $(WIFI_ESP_OWN) $(BUILD)/$(WIFI_ESP)/libphy.a
+	tools/esp-refs.py --nm $(NM) \
+		--lib net80211=$(PHYBLOB_CACHE)/libnet80211.a:$(PHYBLOB_CACHE)/esp32c6.rom.net80211.ld \
+		--lib pp=$(PHYBLOB_CACHE)/libpp.a:$(PHYBLOB_CACHE)/esp32c6.rom.pp.ld \
+		--lib phy=$(BUILD)/$(WIFI_ESP)/libphy.a:$(PHYBLOB_CACHE)/esp32c6.rom.phy.ld $(WIFI_ESP_OWN)
+else
+wifi-esp32c6-refs:
+	$(error the driver runs on an ESP32-C6: make BOARD=esp32c6 wifi-esp32c6-refs)
+endif

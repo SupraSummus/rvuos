@@ -728,12 +728,16 @@ static int streq(const char *a, const char *b)
     return n == strlen(b) && memcmp(a, b, n) == 0;
 }
 
-/* The access point for the network: the page's bssid, or the strongest whose ssid is the network's. */
-static const struct drv_net *net_for(const struct drv *d)
+/*
+ * The next access point heard for the network from *next on, strongest first, the scan having sorted them:
+ * the page's bssid, or one whose ssid is the network's; or 0 once there are no more.
+ */
+static const struct drv_net *net_next(const struct drv *d, uint32_t *next)
 {
-    for (uint32_t i = 0; i < d->net_count; i++) {
-        if (d->bssid_set ? memcmp(d->nets[i].bssid, d->bssid, 6) == 0 : streq(d->nets[i].ssid, d->ssid)) {
-            return &d->nets[i];
+    while (*next < d->net_count) {
+        const struct drv_net *a = &d->nets[(*next)++];
+        if (d->bssid_set ? memcmp(a->bssid, d->bssid, 6) == 0 : streq(a->ssid, d->ssid)) {
+            return a;
         }
     }
     return 0;
@@ -763,15 +767,18 @@ static int beacon_read(const struct buf *b, void *arg)
 /*
  * What the station associates with: the access point's elements, read from its beacon, the suites the supplicant
  * takes of them, and the station's own elements, which the supplicant writes, deriving the passphrase's PMK.
+ * 1, or 0 if the beacon was not heard, or offers no suites the station takes, so that another access point
+ * of the network may be tried.
  */
-static void security(const struct drv *d, const struct drv_net *ap)
+static int security(const struct drv *d, const struct drv_net *ap)
 {
     sta.beacon_wanted = 1;
     int read = wait_for(osi_now_us() + BEACON_WAIT_US, beacon_read, 0);
     sta.beacon_wanted = 0;
-    must("the access point's beacon", read);
-    must("the network's RSN element", sta.ap_rsn_len != 0);
-    must("a passphrase", d->pass[0] != 0);
+    if (!read || sta.ap_rsn_len == 0) {
+        drv_say("sta: %s\n", read ? "no RSN element in the beacon" : "no beacon heard");
+        return 0;
+    }
     struct supp_network n = {
         .bssid = sta.ap,
         .ssid = (const uint8_t *)ap->ssid,
@@ -782,12 +789,16 @@ static void security(const struct drv *d, const struct drv_net *ap)
         .pmf_ok = !d->no_pmf,
         .sae_ok = !d->no_sae,
     };
-    must("the suites the station takes", supp_choose(&n) == 0);
+    if (supp_choose(&n) != 0) {
+        return 0;
+    }
+    drv_say("sta: the suites the station takes\n");
     sta.pmf = n.pmf;
     sta.sae = n.key_mgmt == SUPP_KEY_MGMT_SAE;
     size_t rsn_len = sizeof(sta.rsn), rsnx_len = sizeof(sta.rsnx);
     must("the station's RSN element", supp_connect(&n, sta.rsn, &rsn_len, sta.rsnx, &rsnx_len) == 0);
     sta.has_rsnx = rsnx_len != 0;
+    return 1;
 }
 
 /*
@@ -1239,31 +1250,40 @@ static __attribute__((noreturn)) void serve_station(struct drv *d)
 }
 
 /*
- * The station's thread: the scan, the access point's channel, the receiving the station's, the access point's beacon,
- * the authentication, the association, the supplicant's handshakes, and then the link's service,
+ * The station's thread: the scan, then of the network's access points, strongest first, the first whose beacon
+ * offers suites the station takes, on its channel, with the receiving the station's; the authentication,
+ * the association, the supplicant's handshakes, and then the link's service,
  * reporting DRV_JOINED so that the root task starts the network process; see TODO.md.
  */
 static void sta_main(void *arg)
 {
     struct drv *d = arg;
     sta_scan(d);
-    const struct drv_net *ap = net_for(d);
-    must("the network to join", ap != 0);
-    memcpy(sta.ap, ap->bssid, 6);
-    drv_say("sta: %s at %02x:%02x:%02x:%02x:%02x:%02x, channel %u\n", ap->ssid, ap->bssid[0], ap->bssid[1],
-            ap->bssid[2], ap->bssid[3], ap->bssid[4], ap->bssid[5], (unsigned)ap->channel);
-    /* The channel a beacon named, which mac_channel may refuse, tuned before the MAC is the driver's. */
-    drv_must_mac("the access point's channel", mac_channel(ap->channel));
-    /*
-     * The station's own address and the access point's, set before the authentication, and the station-mode
-     * receiving the libraries' association programs; the scan's channel sniffer is left and the MAC's list taken.
-     * See mac.c.
-     */
-    mac_station(drv_self->mac, sta.ap);
-    mac_receive(0);
-    mac_sniffer(0);
-    drv_must_mac("the MAC receives into the driver's list", mac_rx_take(heard));
-    security(d, ap);
+    must("a passphrase", d->pass[0] != 0);
+    const struct drv_net *ap;
+    uint32_t next = 0;
+    int taken = 0;
+    do {
+        ap = net_next(d, &next);
+        must("an access point of the network that the station takes", ap != 0);
+        memcpy(sta.ap, ap->bssid, 6);
+        drv_say("sta: %s at %02x:%02x:%02x:%02x:%02x:%02x, channel %u\n", ap->ssid, ap->bssid[0], ap->bssid[1],
+                ap->bssid[2], ap->bssid[3], ap->bssid[4], ap->bssid[5], (unsigned)ap->channel);
+        /* The channel a beacon named, which mac_channel may refuse. */
+        drv_must_mac("the access point's channel", mac_channel(ap->channel));
+        /*
+         * The station's own address and the access point's, set before the authentication, and the station-mode
+         * receiving the libraries' association programs; the scan's channel sniffer is left and the MAC's list
+         * taken, once. See mac.c.
+         */
+        mac_station(drv_self->mac, sta.ap);
+        if (!taken) {
+            mac_receive(0);
+            mac_sniffer(0);
+            drv_must_mac("the MAC receives into the driver's list", mac_rx_take(heard));
+            taken = 1;
+        }
+    } while (!security(d, ap));
     authenticate();
     associate(ap);
     /* The association's AID, the receiving's own; see mac.c. */

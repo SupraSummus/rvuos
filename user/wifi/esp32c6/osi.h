@@ -73,9 +73,6 @@ void drv_phy_channel(uint32_t channel);
 void drv_wifi_clock_enable(void);
 void drv_wifi_reset_mac(void);
 
-/* wpa.c: the supplicant, supp.h, behind the table the libraries call a supplicant through. */
-esp_err_t drv_wpa_register(void);
-
 /* hostap.c: hostap's lines at its debug level too, from here on. */
 void drv_wpa_debug(void);
 

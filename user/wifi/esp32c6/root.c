@@ -21,8 +21,7 @@
  *
  * The kernel's log goes to the console as it comes, so that the host reads the run while it lasts,
  * and the halt writes out only what was not taken yet.
- * The host may type a line on the console: "end" ends the run now, as if its time were up,
- * and "stats" has the driver tell the libraries' counters of the radio, once it has joined.
+ * The host may type a line on the console: "end" ends the run now, as if its time were up.
  * tools/wifi-run.py waits for the clients, checks the system from the host, and ends the run.
  *
  * user/lib/ keeps what it hands out: its slots, regions, bits, units of time, free memory and room for children's data.
@@ -169,18 +168,11 @@ static void (*drv_entry(void))(struct child_page *)
  * What to do, from the text the loader may have left in the input region: lines of ssid= and pass=,
  * the network to join, and with no ssid, a scan; bssid=, which of the network's access points to join;
  * and run=, how many seconds the run lasts, 0 for good.
- * debug= names what the driver tells besides its steps, any of frames, stats, wpa, air and rekey, see drv.h,
+ * debug= names what the driver tells besides its steps, any of frames, wpa and rekey, see drv.h,
  * and lib= the libraries' log level, 4 for debug and 5 for verbose;
- * ax=0 joins without 802.11ax, pmf=0 without protecting management frames, sae=0 without WPA3's SAE,
- * and ps=1 sleeps between beacons.
- * listen=, a channel, with no ssid has the driver hear that channel without joining, and tell what it heard,
- * received by Espressif's libraries, or with rx=own, by the driver's own code in their place;
- * rx=own with neither ssid nor listen= has the driver scan by its own code too; see drv.h.
- * probe=, with listen=, has the driver ask for that network on the channel, and count the answers,
- * sent by the libraries or, with tx=own, by the driver's own code; see drv.h.
- * rx=own with probe= and no tx=own is refused, since the libraries' sending waits on their interrupt, which rx=own takes.
- * sta=own, with a network named, has the driver join it by its own station: it scans, authenticates, associates,
- * runs the supplicant's handshakes by its own code, and then serves the link, its frames in software CCMP; see drv.h.
+ * pmf=0 joins without protecting management frames, and sae=0 without WPA3's SAE.
+ * listen=, a channel, with no ssid has the driver hear that channel without joining, and tell what it heard;
+ * probe=, with listen=, has it ask for that network on the channel, and count the answers; see drv.h.
  * antenna=ufl has the XIAO's RF switch pick its U.FL connector rather than the antenna on the board,
  * and antenna=none leaves the pins alone, on a board without that switch.
  * The passphrase lives in the driver's page and memory, never in an image.
@@ -195,20 +187,13 @@ static void configure(struct drv *p)
     config_value(conf, size, "pass", p->pass, sizeof(p->pass));
     p->bssid_set = (uint8_t)config_mac(conf, size, "bssid", p->bssid);
     p->debug = (config_has(conf, size, "debug", "frames") ? DRV_DEBUG_FRAMES : 0) |
-               (config_has(conf, size, "debug", "stats") ? DRV_DEBUG_STATS : 0) |
                (config_has(conf, size, "debug", "wpa") ? DRV_DEBUG_WPA : 0) |
-               (config_has(conf, size, "debug", "air") ? DRV_DEBUG_AIR : 0) |
                (config_has(conf, size, "debug", "rekey") ? DRV_DEBUG_REKEY : 0);
     p->lib_log = config_number(conf, size, "lib", 0);
-    p->no_ax = config_number(conf, size, "ax", 1) == 0;
     p->no_pmf = config_number(conf, size, "pmf", 1) == 0;
     p->no_sae = config_number(conf, size, "sae", 1) == 0;
-    p->modem_sleep = config_number(conf, size, "ps", 0) != 0;
     uint32_t channel = config_number(conf, size, "listen", 0);
     p->listen = (uint8_t)(channel <= 13 ? channel : 0);
-    p->own_rx = (uint8_t)config_has(conf, size, "rx", "own");
-    p->own_tx = (uint8_t)config_has(conf, size, "tx", "own");
-    p->own_sta = (uint8_t)(p->ssid[0] && config_has(conf, size, "sta", "own"));
     config_value(conf, size, "probe", p->probe, sizeof(p->probe));
     run_s = config_number(conf, size, "run", RUN_S);
     antenna = config_has(conf, size, "antenna", "ufl")    ? ANTENNA_UFL
@@ -312,8 +297,8 @@ static void run_over(void)
 /*
  * A second gone: the children checked and the watchdog fed, system_check,
  * and the run ended if the driver has not joined in time or the run's time is up.
- * The driver answers once it serves the link: until it joins, its first thread waits on the libraries,
- * and once asked to leave, the libraries again; the machine halts at the next second whether it has left or not.
+ * The driver answers once it serves the link, its first thread waiting on the libraries' bring-up until then;
+ * once asked to leave, its station leaves, and the machine halts at the next second whether it has left or not.
  */
 static void second(void)
 {
@@ -371,15 +356,11 @@ static int typed(const char *word)
 
 static void obey(void)
 {
-    struct drv *p = (struct drv *)sys.driver.page;
     if (typed("end")) {
         say(&kout, "root: the run is over, as the host asked\n");
         run_over();
-    } else if (typed("stats")) {
-        p->stats++;
-        must("ask the driver for the counters", child_tell(&sys.driver));
     } else {
-        say(&kout, "root: no command %s; there are end and stats\n", command);
+        say(&kout, "root: no command %s; there is end\n", command);
     }
 }
 
@@ -422,12 +403,7 @@ int main(void)
     struct drv *dp = (struct drv *)sys.driver.page;
     if (dp->ssid[0]) {
         system_net_build(&sys, &dp->link, mac);
-        if (dp->own_sta) {
-            /* Not "joining", which tools/wifi-run.py takes for a join whose clients it then checks. */
-            say(&kout, "root: the driver's own station is to join %s\n", dp->ssid);
-        } else {
-            say(&kout, run_s != 0 ? "root: joining %s, for %u s\n" : "root: joining %s, for good\n", dp->ssid, run_s);
-        }
+        say(&kout, run_s != 0 ? "root: joining %s, for %u s\n" : "root: joining %s, for good\n", dp->ssid, run_s);
     } else if (dp->listen) {
         say(&kout, run_s != 0 ? "root: listening on channel %u, for %u s\n" : "root: listening on channel %u, for good\n",
             (uint32_t)dp->listen, run_s);

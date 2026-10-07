@@ -518,7 +518,7 @@ Once the libraries have brought the MAC up, the own path asks them for nothing b
 which still has their promiscuous mode filter the frames.
 And the supplicant, which was one with the libraries' table, is hostap's over a link, `supp.h`,
 whose five asks, an EAPOL frame sent, a key installed, the handshakes done, a deauthentication and a timeout run,
-are all the own station has to answer; the libraries' quirks around them stay in `wpa.c`.
+are all the own station has to answer; the libraries' quirks around them stayed in `wpa.c`, until it went.
 
 ## The station's own association and handshake
 
@@ -624,9 +624,27 @@ so WPA3's personal on the own station is the Authentication frames around them, 
 The heap, not the stack, was what SAE wanted:
 its products take a few kilobytes at once, in Mbed TLS's big numbers and hostap's buffers,
 and with the station's buffers and the MAC's list taken, hash to element's first step found the heap empty.
-The libraries' static receive buffers lie idle once the own station has the MAC's list, so with `sta=own` they are two, ESP-IDF's least,
+The libraries' static receive buffers lie idle once the own station has the MAC's list, so they are two, ESP-IDF's least,
 and the station's log says the fewest bytes the heap had free.
 The stack goes hardly deeper than under WPA2, and stayed as it was.
 
 The Pico 2 W's access point, offering WPA3 and WPA2 together, refuses WPA2's join, see `TODO.md`,
 but takes the own station by SAE, as it takes the libraries'.
+
+## The libraries' station gone
+
+Once the own station joined both kinds of network, the libraries' station went:
+their scan, join and data path in `main.c`, `wpa.c`, which bound the supplicant to them,
+and the options that chose a path, `rx=own`, `tx=own` and `sta=own`, with the knobs only their station read.
+What the libraries still do is bring the MAC up and stop it, and a little through `mac.c`;
+`make BOARD=esp32c6 wifi-esp32c6-refs` counts it, and each step that drops a call can say how far it went.
+They are given no supplicant now.
+Their station's start and stop look for its table and go on without one;
+some of their handling of a received management frame reads it unchecked,
+which no run has reached, as the driver takes the MAC's receiving before anything is joined.
+The libraries' station had joined what the own one does not:
+the router's own WPA2 network, whose group key is TKIP, open networks, and a modem asleep between beacons.
+So the own station now takes, of the network's access points, the strongest whose suites it takes,
+as wpa_supplicant passes over a BSS whose security does not match,
+where it took the strongest and failed if that one offered nothing it took.
+The comparison the libraries gave, the same run on either path, went with them; the history keeps the runs that held it.
