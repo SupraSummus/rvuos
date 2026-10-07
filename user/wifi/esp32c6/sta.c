@@ -168,7 +168,7 @@ static void heard(const struct mac_frame *m)
     struct buf *b = &sta.bufs[e.buf];
     memcpy(b->frame, m->frame, m->len);
     b->len = m->len;
-    b->decrypted = (uint8_t)m->decrypted;
+    b->decrypted = (uint8_t)(m->decrypted != 0);
     sta.kept++;
     osi_queue_put(sta.events, &e, 0);
 }
@@ -519,11 +519,78 @@ static void associate(const struct drv_net *ap)
  */
 #define HANDSHAKE_US 8000000u
 
-/* An EAPOL frame from the access point, handed to the supplicant; no other frame is read, nor a protected one. */
+#define FC1_PROTECTED 0x40u /* the Protected bit, in the Frame Control's second octet */
+#define ADDR1         4u    /* where a frame's Address 1, its receiver, lies */
+
+/*
+ * The frame b carries, read once: the plaintext at *frame with its length at *len, and ccmp_frame_kind's verdict
+ * on the frame's own Protected bit and the MAC's flag.
+ * A protected frame the cipher took has its CCMP header's packet number and key id checked against the key's
+ * replay counter, the header then taken away and the bit cleared; the receiver's address picks the key, Address 1,
+ * the group's for a group address. *frame is 0, and the drop counted, if the frame is not the cipher's,
+ * has no key, no CCMP header, another key id, or a packet number not above the counter.
+ */
+static int plain_frame(const struct buf *b, struct drv *d, const uint8_t **frame, uint32_t *len)
+{
+    const uint8_t *f = b->frame;
+    *frame = 0;
+    *len = b->len;
+    int kind = ccmp_frame_kind(f, b->decrypted);
+    if (kind == CCMP_FRAME_CLEAR) {
+        sta.rx_clear++;
+        *frame = f;
+        return kind;
+    }
+    if (kind == CCMP_FRAME_DROP) {
+        sta.drop_other++;
+        d->rx_dropped++;
+        return kind;
+    }
+    /*
+     * The MAC's cipher decrypted it and left its CCMP header, whose packet number and key id are checked
+     * as the sending's own counter is; the payload stands in the clear, so the cipher is passed over.
+     */
+    int to_group = (f[ADDR1] & 0x01) != 0;
+    struct sta_key *key = to_group ? &sta.gtk : &sta.ptk;
+    uint32_t hl = ccmp_header_len(f); /* 0 for anything but a Data frame, as a protected management one is */
+    uint64_t pn = 0;
+    uint8_t id = 0;
+    if (!key->set || hl == 0 || *len < hl + CCMP_HEAD_LEN + 1u || !ccmp_head_read(f + hl, &pn, &id) ||
+        id != key->id) {
+        sta.drop_other++;
+        d->rx_dropped++;
+        return kind;
+    }
+    int replay = ccmp_replay(pn, ccmp_priority(f), key->rx_pn);
+    if (replay != CCMP_REPLAY_TAKEN) {
+        if (replay == CCMP_REPLAY_COPY) {
+            sta.drop_copy++; /* the same frame again: the access point sent it once more */
+        } else {
+            sta.drop_other++;
+        }
+        d->rx_dropped++;
+        return kind;
+    }
+    sta.rx_mac++;
+    if (to_group) {
+        sta.rx_mac_grp++;
+    }
+    memcpy(sta.rx_plain, f, hl); /* the CCMP header taken away, the header and the payload joined */
+    memmove(sta.rx_plain + hl, f + hl + CCMP_HEAD_LEN, *len - hl - CCMP_HEAD_LEN);
+    sta.rx_plain[1] &= (uint8_t)~FC1_PROTECTED; /* the MAC decrypted it: the frame goes on in the clear */
+    *len -= CCMP_HEAD_LEN;
+    *frame = sta.rx_plain;
+    return kind;
+}
+
+/* An EAPOL frame from the access point, handed to the supplicant, through the one reading of a frame above. */
 static void eapol(const struct buf *b)
 {
     struct mgmt_payload p;
-    if (mgmt_data_read(b->frame, b->len, drv_self->mac, sta.ap, &p) && p.proto == SUPP_EAPOL) {
+    const uint8_t *frame;
+    uint32_t len;
+    plain_frame(b, drv_self, &frame, &len);
+    if (frame != 0 && mgmt_data_read(frame, len, drv_self->mac, sta.ap, &p) && p.proto == SUPP_EAPOL) {
         sta.eapol_heard++;
         supp_rx_eapol(p.src, p.body, p.len);
     }
@@ -600,67 +667,24 @@ void sta_link_take(struct drv *d)
     }
 }
 
-#define FC1_PROTECTED 0x40u     /* the Protected bit, in the Frame Control's second octet */
-#define ADDR1         4u        /* where a frame's Address 1, its receiver, lies */
-#define SERVE_US      60000000u /* how long each of the serving's waits lasts; any length would do */
+#define SERVE_US 60000000u /* how long each of the serving's waits lasts; any length would do */
 
 /*
  * A frame the station received once it serves the link, wait_for's reader, which never takes one:
- * decrypted once and handed to the supplicant if it is EAPOL, else built into an Ethernet frame for the network process.
- * A data frame left in the clear once the pairwise key is set is not the access point's, and is dropped;
+ * read once through plain_frame, and handed to the supplicant if it is EAPOL,
+ * else built into an Ethernet frame for the network process. A data frame left in the clear
+ * once the pairwise key is set is not the access point's, and is dropped;
  * so is the station's own group frame, which the access point sends the group again, counted.
  */
 static int read_frame(const struct buf *b, void *arg)
 {
     struct drv *d = arg;
-    const uint8_t *frame = b->frame;
-    uint32_t len = b->len;
     struct mgmt_payload p;
-
-    int encrypted = (frame[1] & FC1_PROTECTED) != 0;
-    int to_group = (frame[ADDR1] & 0x01) != 0;
-    if (b->decrypted) {
-        /*
-         * The MAC's cipher decrypted it and left its CCMP header, whose packet number and key id are checked
-         * as the sending's own counter is; the payload stands in the clear, so the cipher is passed over.
-         * The receiver's address picks the key, as the sending's does.
-         */
-        struct sta_key *key = to_group ? &sta.gtk : &sta.ptk;
-        uint32_t hl = ccmp_header_len(frame); /* 0 for anything but a Data frame, as a protected management one is */
-        uint64_t pn = 0;
-        uint8_t id = 0;
-        if (!key->set || hl == 0 || len < hl + CCMP_HEAD_LEN + 1u || !ccmp_head_read(frame + hl, &pn, &id) ||
-            id != key->id) {
-            sta.drop_other++;
-            d->rx_dropped++;
-            return 0;
-        }
-        int replay = ccmp_replay(pn, ccmp_priority(frame), key->rx_pn);
-        if (replay != CCMP_REPLAY_TAKEN) {
-            if (replay == CCMP_REPLAY_COPY) {
-                sta.drop_copy++; /* the same frame again: the access point sent it once more */
-            } else {
-                sta.drop_other++;
-            }
-            d->rx_dropped++;
-            return 0;
-        }
-        sta.rx_mac++;
-        if (to_group) {
-            sta.rx_mac_grp++;
-        }
-        memcpy(sta.rx_plain, frame, hl); /* the CCMP header taken away, the header and the payload joined */
-        memmove(sta.rx_plain + hl, frame + hl + CCMP_HEAD_LEN, len - hl - CCMP_HEAD_LEN);
-        sta.rx_plain[1] &= (uint8_t)~FC1_PROTECTED; /* the MAC decrypted it: the frame goes on in the clear */
-        frame = sta.rx_plain;
-        len -= CCMP_HEAD_LEN;
-    } else if (encrypted) {
-        /* A protected frame the MAC's cipher left undecrypted: no run had one, and nothing here can check it. */
-        sta.drop_other++;
-        d->rx_dropped++;
+    const uint8_t *frame;
+    uint32_t len;
+    int kind = plain_frame(b, d, &frame, &len);
+    if (frame == 0) {
         return 0;
-    } else {
-        sta.rx_clear++;
     }
     if (!mgmt_data_read(frame, len, d->mac, sta.ap, &p)) {
         return 0;
@@ -670,12 +694,12 @@ static int read_frame(const struct buf *b, void *arg)
         supp_rx_eapol(p.src, p.body, p.len);
         return 0;
     }
-    if (!b->decrypted && sta.ptk.set) {
+    if (kind == CCMP_FRAME_CLEAR && sta.ptk.set) {
         sta.drop_other++;
         d->rx_dropped++;
         return 0;
     }
-    if (to_group && memcmp(p.src, d->mac, 6) == 0) {
+    if ((frame[ADDR1] & 0x01) != 0 && memcmp(p.src, d->mac, 6) == 0) {
         sta.relayed++;
         return 0;
     }

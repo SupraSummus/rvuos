@@ -274,6 +274,7 @@ int mac_frame_read(const uint8_t *buf, uint32_t written, struct mac_frame *f)
     f->len = len - FCS;
     f->rssi = (int8_t)buf[RX_CTRL_RSSI];
     f->channel = 0;
+    f->decrypted = 0; /* the cipher did not take it; the frame is in the clear */
     return 1;
 }
 
@@ -282,7 +283,7 @@ static void frame(const struct desc *first, uint32_t n)
 {
     const uint8_t *b = first->buf;
     uint32_t f = first->flags;
-    struct mac_frame m;
+    struct mac_frame m = {0};
     if (*(const volatile uint32_t *)(b + DESC_SIZE(f)) != RX_CANARY) {
         mac_rx_counts.overran++;
     }

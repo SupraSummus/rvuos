@@ -524,7 +524,7 @@ static void heard(const struct mac_frame *m)
 static void heard_by_libraries(void *buf, int type)
 {
     const uint8_t *c = buf;
-    struct mac_frame m;
+    struct mac_frame m = {0};
     (void)type;
     if (!rx_ctrl_whole(c)) {
         hear.broken++;

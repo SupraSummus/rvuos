@@ -34,7 +34,8 @@ struct mac_frame {
     uint32_t len;
     int rssi;         /* dBm */
     uint32_t channel; /* the channel mac_channel last tuned the radio to, or 0 if it did not */
-    int decrypted;    /* the MAC's cipher decrypted it: the payload is in the clear, the Protected bit kept */
+    int decrypted;    /* the MAC's cipher took it: the payload is in the clear and the Protected bit is kept,
+                         so a frame is the cipher's only with that bit set and this flag set; see ccmp_frame_kind */
 };
 
 typedef void mac_heard_fn(const struct mac_frame *f);

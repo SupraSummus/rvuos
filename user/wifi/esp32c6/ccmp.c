@@ -148,6 +148,18 @@ void ccmp_replay_start(uint64_t *counters, uint64_t rsc)
     }
 }
 
+/*
+ * What a received frame is, from its Frame Control and the MAC's flag; see ccmp.h.
+ * The Protected bit is the frame's own, so a frame in the clear is read as one whatever the flag holds.
+ */
+int ccmp_frame_kind(const uint8_t *h, int decrypted)
+{
+    if ((h[1] & (uint8_t)(WLAN_FC_PROTECTED >> 8)) == 0) {
+        return CCMP_FRAME_CLEAR;
+    }
+    return decrypted ? CCMP_FRAME_CCMP : CCMP_FRAME_DROP;
+}
+
 uint32_t ccmp_encrypt(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t len, const uint8_t *tk, uint64_t pn,
                       uint8_t keyid)
 {

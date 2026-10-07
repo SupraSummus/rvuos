@@ -161,12 +161,26 @@ static void replay(void)
     check(ccmp_replay(1, CCMP_REPLAY_COUNT, start) == CCMP_REPLAY_OLD, "an index past the counters reads as old");
 }
 
+/*
+ * What a frame is, from its Frame Control and the MAC's flag, in the two cases that are not the plain one:
+ * a frame without the Protected bit, which is in the clear whatever the flag says,
+ * and a protected frame the cipher did not take, which is dropped.
+ */
+static void frame_kind(void)
+{
+    uint8_t clear[24] = { 0x08 }; /* Data, the Protected bit clear */
+    uint8_t prot[24] = { 0x08, 0x40 };
+    check(ccmp_frame_kind(clear, 1) == CCMP_FRAME_CLEAR, "an unprotected frame the flag calls decrypted is still clear");
+    check(ccmp_frame_kind(prot, 0) == CCMP_FRAME_DROP, "a protected frame the cipher did not take is dropped");
+}
+
 int main(void)
 {
     known_answer();
     qos();
     refuses();
     replay();
+    frame_kind();
     printf("ccmp-test: %s\n", failures ? "FAILED" : "ok");
     return failures != 0;
 }

@@ -55,6 +55,16 @@ int ccmp_replay(uint64_t pn, uint32_t idx, uint64_t *counters);
 void ccmp_replay_start(uint64_t *counters, uint64_t rsc);
 
 /*
+ * What a received frame is, from the Protected bit of its Frame Control and whether the MAC's cipher took it.
+ * A frame without the Protected bit is in the clear whatever the flag says, since the cipher leaves the bit set
+ * on a frame it took (mac.h); a protected one the cipher took is CCMP's, and one it did not is to be dropped.
+ */
+#define CCMP_FRAME_CLEAR 0
+#define CCMP_FRAME_CCMP  1
+#define CCMP_FRAME_DROP  2
+int ccmp_frame_kind(const uint8_t *h, int decrypted);
+
+/*
  * The len bytes of the frame at in encrypted into out, which holds at least len + 16 bytes:
  * the header with its Protected bit set, the CCMP header, the ciphertext and the MIC, len + 16 bytes, returned.
  * The frame's payload begins after its header, whose length the frame control gives.
