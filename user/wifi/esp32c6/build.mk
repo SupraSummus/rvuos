@@ -291,6 +291,19 @@ wifi-esp32c6-replay:
 	$(error the driver runs on an ESP32-C6: make BOARD=esp32c6 wifi-esp32c6-replay)
 endif
 
+# Every check of a step of the own start, as CLAUDE.md names them, in their order, on the board, each verdict told,
+# the diff's places left to read; see tools/esp32c6-gate.py. WIFI_GATE_JOINS names the networks to join,
+# from files git does not track, as WIFI_CONFIG does.
+WIFI_GATE_JOINS ?=
+.PHONY: wifi-esp32c6-gate
+ifeq ($(BOARD),esp32c6)
+wifi-esp32c6-gate:
+	tools/esp32c6-gate.py $(addprefix --join ,$(WIFI_GATE_JOINS))
+else
+wifi-esp32c6-gate:
+	$(error the driver runs on an ESP32-C6: make BOARD=esp32c6 wifi-esp32c6-gate)
+endif
+
 # The first access the own run differs at, thread by thread, the bases naming the volatile words: the own start's
 # bring-up runs on the thread that called it where the libraries posted it to the wifi task, so --join compares one
 # stream, and libphy's calibration folds to one marker a run. WIFI_TRACE_BASE names the libraries' start's logs (two
