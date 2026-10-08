@@ -107,6 +107,7 @@ $(ESP_HOST)/keys-test.o: $(WIFI_ESP)/test/keys-test.c $(WIFI_ESP)/keys.h
 # The bring-up's register sequences of macstart.c, held to what the libraries' own did in a run of their start,
 # the files of test/replay/, which wifi-esp32c6-replay below takes again; they fetch nothing, so make check runs them.
 MAC_REPLAY_TEST     := $(ESP_HOST)/mac-replay-test
+MAC_REPLAY_DIR      ?= $(WIFI_ESP)/test/replay
 MAC_REPLAY_TEST_OBJ := $(ESP_HOST)/macstart.o $(ESP_HOST)/mac-replay-test.o
 $(ESP_HOST)/macstart.o: $(WIFI_ESP)/macstart.c $(WIFI_ESP)/mac.h $(WIFI_ESP)/macregs.h
 $(ESP_HOST)/mac-replay-test.o: $(WIFI_ESP)/test/mac-replay-test.c $(WIFI_ESP)/mac.h $(WIFI_ESP)/macregs.h
@@ -164,7 +165,7 @@ keys-test: $(KEYS_TEST)
 	$(KEYS_TEST)
 
 mac-replay-test: $(MAC_REPLAY_TEST)
-	$(MAC_REPLAY_TEST) $(WIFI_ESP)/test/replay
+	$(MAC_REPLAY_TEST) $(MAC_REPLAY_DIR)
 
 # libphy.a's functions that reach PCR, the PMU or the LP domain, weakened in a copy, so that the driver's own,
 # in phy.c, take their place; the copy is made again when this file, which names them, changes.
@@ -267,6 +268,7 @@ endif
 # a trace=1 libstart=1 run of the build at hand: their hal_init and the groups the driver has taken over,
 # up to the first group it still calls, and from the low-rate group up to their hal_set_ofdma_sequence_pti, the last
 # group the driver still calls, with their coex PTI.
+# MAC_REPLAY_DIR, the test's files by default, takes them elsewhere, as the gate does to hold the files to the run.
 # A group the driver takes over joins MAC_REPLAY_HEAD or MAC_REPLAY_TAIL, and the bounds move past it;
 # see test/mac-replay-test.c, whose cases call the sequences in drv_mac_config's order.
 MAC_REPLAY_HEAD      := hal_init mac_txrx_init hal_mac_rx_set_policy mac_rxbuf_init
@@ -285,7 +287,8 @@ wifi-esp32c6-replay: $(BUILD)/wifi-drv.elf $(BUILD)/wifi-drv.bin $(PHYBLOB_ROM_E
 	$(MAC_REPLAY_TAKE) $(addprefix --function ,$(MAC_REPLAY_TAIL)) --from $(MAC_REPLAY_TAIL_FROM) \
 		--to $(MAC_REPLAY_TAIL_TO) $(WIFI_TRACE_LOG) \
 		> $(BUILD)/config-tail.txt
-	mv $(BUILD)/config-head.txt $(BUILD)/config-tail.txt $(WIFI_ESP)/test/replay/
+	mkdir -p $(MAC_REPLAY_DIR)
+	mv $(BUILD)/config-head.txt $(BUILD)/config-tail.txt $(MAC_REPLAY_DIR)/
 else
 wifi-esp32c6-replay:
 	$(error the driver runs on an ESP32-C6: make BOARD=esp32c6 wifi-esp32c6-replay)
