@@ -103,9 +103,10 @@ what is left:
   and would take the root task's own filter away.
 - Whether the rare whole stops of the trace stream can still happen, now that the console writer is fixed,
   wants a longer series; write each stop down with its sequence number and time.
-- The `trace: req` lines (a driver step or an adapter call) have no reader that joins them to the accesses:
-  `tools/mac-trace.py attrib` could split a log into the segments between two lines' requests
-  and say how many accesses fall in each and of which library.
+- `tools/mac-trace.py` is the oracle of every step of the own bring-up and has no test.
+  Its pure text logic -- a cycle cut at a range's edge, a polling loop's turns, joining threads, an interrupt
+  thread's accesses as a multiset, the volatile words a pair of runs differ in -- would take a few synthetic logs
+  of a dozen lines each, and a rule that runs them.
 - A driver of the ESP32-C6's Wi-Fi that leaves Espressif's libraries the PHY alone, `libphy.a`:
   `pp` and `net80211` give way to the driver's own MAC and station, and `osi.c` shrinks to what `libphy.a` calls.
   The station is the driver's own already, on hostap; `user/wifi/NOTES.md` says why.
@@ -129,10 +130,14 @@ what is left:
   its group key interval, shortened for a run with the maintainer's leave, would do.
   The station's protected management frames — the leave policy and the SA Query — want a file of their own beside
   `sta.c`, which has grown to hold them.
-  The MAC's bring-up stays the libraries': the own path runs between their `esp_wifi_start` and `esp_wifi_stop`,
-  so what those do to the modem and the MAC is the last of `pp` to read before it can go.
-  The driver asks the flash libraries for six symbols alone, the four bring-up ones and two of the log,
-  so their replacement is the bring-up's own code over `libphy` and `mac.c`.
+  The MAC's bring-up is being taken from the libraries, from the last entry point.
+  The stop is the driver's own (`mac_stop`), and the start is being taken over: the driver's own `esp_wifi_start` runs
+  the libraries' bring-up's body itself, and the HAL's functions go over one at a time.
+  The method, the order and the groups are in `user/wifi/NOTES.md`.
+  `libstart=1` in `WIFI_CONFIG` runs the libraries' start instead of the driver's own, for a traced comparison of
+  the two from one image; it goes when the own start is proven and no comparison is wanted.
+  The four bring-up symbols and the two of the log that the driver once asked of the flash libraries are taken one
+  by one, over `libphy` and `mac.c`; `make BOARD=esp32c6 wifi-esp32c6-refs` counts what is left of `pp` and `net80211`.
   Its frame completion spins in the caller's thread while the slot is armed, and borrows the libraries' slot 0;
   an own slot, the driver's own interrupt to finish the frame, and the libraries' retry of a collision or a timeout,
   with their invalidation of the queue on a timeout, would do better.

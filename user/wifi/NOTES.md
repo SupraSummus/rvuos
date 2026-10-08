@@ -658,3 +658,47 @@ A read of the MAC's words before and after their calls, with their station start
 so `mac_sniffer` writes what their hal writes and nothing of their bookkeeping;
 a scan without it hears nothing, not even an interrupt.
 What is left of theirs is the bring-up, and the lmac's block, whose state byte the sending clears for their way out.
+
+## The libraries' bring-up, the driver's own
+
+The bring-up the libraries still do is being taken from them, from the last entry point,
+so that each step's state is read no more by what remains.
+Those entry points are `esp_wifi_init_internal`, `esp_wifi_set_mode`, `esp_wifi_start` and `esp_wifi_stop`,
+the four bring-up symbols the driver asks of the flash libraries, with their two of the log.
+The stop is the driver's own now, `mac.c`'s `mac_stop`: it turns interface 0's receive off,
+makes its addresses invalid, holds the MAC still, sets the coex PTI back,
+and calls `drv_phy_disable`, which stays `libphy`'s.
+`make BOARD=esp32c6 wifi-esp32c6-refs` fell from net80211 6 and pp 1 to net80211 5 and pp 0,
+the last reference being `our_instances_ptr`, which the library's stop alone read.
+
+The oracle is the trace window: `trace=1` has the tracer fault on the device accesses and records,
+on the same request counter, the driver's own steps and the calls the libraries make into `osi.c`;
+`trace=2` runs the same window with the devices mapped and nothing faulting.
+`tools/mac-trace.py` attributes each access to its library and function,
+and with `--segments` splits the log at the `trace: req` lines, so the adapter calls frame each group of accesses;
+`snapshot` and `compare` hold the window's end against two dry runs;
+and the ordinary runs, scan, `listen=`, `probe=`, the WPA3 join and `sae=0`, hold what the window cannot show.
+
+The start is next. Its adapter calls, in order, are the frame the own `esp_wifi_start` must build;
+they are not device accesses, so the trace shows the call beside the accesses it made:
+`wifi_clock_enable`, the driver's clock enable;
+`phy_enable`, libphy's calibration, most of the window, which stays `libphy`'s;
+`coex_enable` and `wifi_reset_mac`, the MAC's reset pulse, then `hal_mac_init` sets the pm-txblock bits;
+the MAC config, pp's `mac_txrx_init`, `hal_init` and `hal_he_init`, the RX filter, the RX buffers,
+the TX power and rate tables, the antenna table, the cipher and the PTI,
+with pp calling phy for the channel and the gain;
+`slowclk_cal_get`, `hal_timer_update_by_rtc` and the PTI;
+`set_intr`, `set_isr` and `ints_on`, the interrupt handler, the address, the RX enable and the STA TSF;
+and `event_post` STA_START, where the start reports.
+
+What the own start must also carry is the power and rate tables a library task of its own writes in response to the
+start, just after the event, `hal_init_tb_power`, `hal_init_imrsp_power` and `rate_to_index`, with no timer armed.
+That is the start's duty once the library's start is gone, and the transmitting runs and the snapshot are its oracle.
+Whether the HE, beamforming and antenna groups can be left out is the own start's to find as it runs,
+each dropped on its own and held to the snapshot and the runs.
+
+Most of the start's HAL functions write registers alone, their objects carrying no relocation to any library's data,
+so the own start can call them as they are, given the right arguments, and take them over one at a time.
+`mac_rxbuf_init`, which reads the interface's control block, waits for the init to be the driver's too.
+A step's diff holds the device accesses; the writes a step makes to the libraries' own memory -- the mode it reads
+and the flag it sets on the control block -- are not in the trace, so only the runs hold those.
