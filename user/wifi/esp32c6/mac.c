@@ -31,7 +31,6 @@
 #include "macregs.h"
 #include "osi.h"
 
-#define RX_BASE          (MAC_BASE + 0x084u)
 #define RX_NEXT          (MAC_BASE + 0x088u) /* the descriptor the MAC fills next, its low 20 bits, or 0 */
 #define RX_LAST          (MAC_BASE + 0x08cu) /* the last descriptor filled, its low 20 bits */
 #define RX_LAST_HIGH     (MAC_BASE + 0xc70u) /* whose top 12 bits are this register's */

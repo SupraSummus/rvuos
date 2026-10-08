@@ -268,8 +268,8 @@ endif
 # up to the first group it still calls, and from the cipher on, with their coex PTI.
 # A group the driver takes over joins MAC_REPLAY_HEAD or MAC_REPLAY_TAIL, and the bounds move past it;
 # see test/mac-replay-test.c, whose cases call the sequences in drv_mac_config's order.
-MAC_REPLAY_HEAD      := hal_init mac_txrx_init hal_mac_rx_set_policy
-MAC_REPLAY_HEAD_TO   := mac_rxbuf_init
+MAC_REPLAY_HEAD      := hal_init mac_txrx_init hal_mac_rx_set_policy mac_rxbuf_init
+MAC_REPLAY_HEAD_TO   := hal_he_init
 MAC_REPLAY_TAIL      := hal_crypto_init hal_init hal_coex_pti_init hal_set_rx_active_pti hal_set_rx_ack_pti \
                         hal_set_wifi_default_pti
 MAC_REPLAY_TAIL_FROM := hal_crypto_init

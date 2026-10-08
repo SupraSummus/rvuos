@@ -1,4 +1,4 @@
-# hal_crypto_init hal_init hal_coex_pti_init hal_set_rx_active_pti hal_set_rx_ack_pti hal_set_wifi_default_pti from hal_crypto_init, in a run of the image sha256 9d4a949f321a9f5274eeb67de3826db75112b87a2246aae6423b6c15dc7e6cdf
+# hal_crypto_init hal_init hal_coex_pti_init hal_set_rx_active_pti hal_set_rx_ack_pti hal_set_wifi_default_pti from hal_crypto_init, in a run of the image sha256 49044747afac0d5ceae3b02471b97dc730cfc80a7621063be6a19003dc39bf40
 W4 0x600a4800 0x00030000
 W4 0x600a4804 0x00030000
 W4 0x600a4808 0x00000000

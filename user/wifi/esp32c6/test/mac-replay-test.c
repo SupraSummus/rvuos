@@ -25,6 +25,9 @@ static unsigned count, next;
 static const char *running;
 static int wrong; /* the case's first wrong access is told, and the rest of it does nothing */
 
+/* The libraries' receive control block, which their write to RX_BASE carries and the driver's mac_rx_base_init reads. */
+uint32_t wDevCtrl;
+
 static void tell(char op, uint32_t a, uint32_t v)
 {
     printf("mac-replay-test: %s: access %u, %c 0x%08x", running, next + 1, op, a);
@@ -79,7 +82,7 @@ void hal_he_set_bbrxhung_time(uint32_t a)
     (void)a;
 }
 
-/* Their hal_init up to the RX buffers, as the driver's drv_mac_config calls it, in main.c. */
+/* Their hal_init up to the HE group, as the driver's drv_mac_config calls it, in main.c. */
 static void head(void)
 {
     mac_config_start();
@@ -88,6 +91,14 @@ static void head(void)
         mac_rx_policy_word(i);
         mac_rx_set_policy(i);
     }
+    /* The libraries' receive control block, which the trace holds as their write to RX_BASE and no more,
+       so the own read is given it, and that write is held by address and place, not by value. */
+    for (unsigned i = 0; i < count; i++) {
+        if (steps[i].op == 'W' && steps[i].address == RX_BASE) {
+            wDevCtrl = steps[i].value;
+        }
+    }
+    mac_rx_base_init();
 }
 
 /* Their hal_init from the cipher, and the coex PTI with the values the recorded run's coex gave. */

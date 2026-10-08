@@ -130,6 +130,21 @@ void mac_rx_set_policy(uint32_t iface)
     wr(a, rd(a) & ~STA_ADDR_FLAG);
 }
 
+/*
+ * The libraries' mac_rxbuf_init, written out: the low byte of the word before RX_CTRL cleared, 0x600a407c,
+ * whose other bits are not known, and the receive base pointed at their own control block, wDevCtrl,
+ * the descriptor list their receive fills, which the driver's own list replaces once it takes the MAC; see mac.c.
+ */
+#define RXBUF_MAC_7C (MAC_BASE + 0x07cu)
+
+extern uint32_t wDevCtrl; /* the libraries' receive control block, whose first word their receive base takes */
+
+void mac_rx_base_init(void)
+{
+    wr(RXBUF_MAC_7C, rd(RXBUF_MAC_7C) & 0xffffff00u);
+    wr(RX_BASE, wDevCtrl);
+}
+
 void mac_config_finish(void)
 {
     wr(HAL_HOLD, 0x19a879e0u);
