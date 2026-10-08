@@ -381,12 +381,13 @@ static __attribute__((noreturn)) void attend(struct drv *d)
  * The driver's own esp_wifi_start, taking the libraries' bring-up over a step at a time: the body is the libraries'
  * wifi_start_process written out -- adc2_wifi_acquire, ieee80211_set_hmac_stop, wifi_hw_start, wifi_mode_set,
  * _do_wifi_start, ieee80211_update_phy_country -- so that each of those can be taken over in turn and the window's
- * sequence held to the libraries' by tools/mac-trace.py's diff. The mode is the one the libraries' configuration
- * holds. See user/wifi/NOTES.md.
+ * sequence held to the libraries' by tools/mac-trace.py's diff. Only the station is written; the libraries' start
+ * brings an interface up per mode -- reason 0 the station, 1 the soft AP, 3 then both, and none for another -- so
+ * another mode stops here rather than guesses. See user/wifi/NOTES.md.
  */
 extern int wifi_init_completed(void);
 extern int adc2_wifi_acquire(void);
-extern void ieee80211_set_hmac_stop(void);
+extern void ieee80211_set_hmac_stop(int stop);
 extern int wifi_hw_start(int reason);
 extern int wifi_mode_set(int mode);
 extern int _do_wifi_start(int mode);
@@ -403,9 +404,17 @@ static int drv_wifi_start(void)
     if (rv != 0) {
         return rv;
     }
-    ieee80211_set_hmac_stop();
+    ieee80211_set_hmac_stop(0);
     int mode = *(const uint8_t *)g_wifi_nvs;
-    wifi_hw_start(mode == 0 ? 3 : (mode == 1 ? 0 : (mode == 2 ? 1 : -1)));
+    /*
+     * The libraries' code brings the hardware up once per interface, its reason the interface: 0 the station, 1 the
+     * soft AP, 3 then both, and none for another mode. The driver sets station mode alone, so only reason 0 is
+     * written and another mode stops here rather than repeat the libraries' AP branches unwritten.
+     */
+    if (mode != WIFI_MODE_STA) {
+        return ESP_FAIL;
+    }
+    wifi_hw_start(0);
     if ((rv = wifi_mode_set(mode)) != 0) {
         return rv;
     }
