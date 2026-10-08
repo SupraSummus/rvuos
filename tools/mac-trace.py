@@ -53,6 +53,13 @@ SNAPHDR = re.compile(r"snapshot of (\d+) addresses")
 FLASHED = re.compile(r"# flashed 0x[0-9a-fA-F]+ sha256 ([0-9a-f]{64})")
 # A ROM linker script: "name = 0x...", possibly inside PROVIDE(...), comments left to strip.
 PLACED = re.compile(r"^\s*(?:PROVIDE\s*\(\s*)?([A-Za-z_][A-Za-z0-9_.$]*)\s*=\s*0x[0-9a-fA-F]+", re.M)
+# The words that count events over the window, each with the reason it is one. Such a word's value depends on how long the window takes:
+# the same window traced faults, takes longer, and the air carries more past it, so its count differs between the
+# modes by design, not the code. `compare` reads them apart from the verdict. A word is here as a counter, with its
+# reason -- never because two runs disagreed on it.
+COUNTERS = {
+    0x600A708C: "the frames the air carries over the window, more of them while the window is traced",
+}
 
 
 def scan(path):
@@ -186,7 +193,8 @@ def compare(args):
     """The words the dry runs differ in, then the traced run's divergences from them; the count of those.
 
     A word any pair of the dry runs differs in is volatile, so that a word which varies run to run but which two of
-    them happen to agree on is still set aside; two dry runs are the least.
+    them happen to agree on is still set aside; two dry runs are the least. The words COUNTERS names are read apart
+    from the verdict, since their count depends on how long the window takes; see its reason.
     """
     dry = [snapshots(p) for p in args.dry]
     traced = snapshots(args.traced)
@@ -195,11 +203,16 @@ def compare(args):
             sys.exit("mac-trace: the runs' snapshots name different addresses")
     volatile = sorted({a for i in range(len(dry)) for j in range(i + 1, len(dry)) for a in dry[i]
                        if dry[i][a] != dry[j][a]})
-    divergent = sorted(a for a in dry[0] if a not in volatile and traced[a] != dry[0][a])
-    print("mac-trace: %d addresses; %d volatile between the dry runs; %d divergences"
-          % (len(dry[0]), len(volatile), len(divergent)))
+    counters = sorted(a for a in dry[0]
+                      if a not in volatile and a in COUNTERS and traced[a] != dry[0][a])
+    divergent = sorted(a for a in dry[0]
+                       if a not in volatile and a not in COUNTERS and traced[a] != dry[0][a])
+    print("mac-trace: %d addresses; %d volatile between the dry runs; %d counters, not compared; %d divergences"
+          % (len(dry[0]), len(volatile), len(counters), len(divergent)))
     for a in volatile:
         print("  volatile  0x%08x  dry %s" % (a, " / ".join("0x%08x" % d[a] for d in dry)))
+    for a in counters:
+        print("  counter   0x%08x  dry 0x%08x / traced 0x%08x  (%s)" % (a, dry[0][a], traced[a], COUNTERS[a]))
     for a in divergent:
         print("  divergent 0x%08x  dry 0x%08x / traced 0x%08x" % (a, dry[0][a], traced[a]))
     return 1 if divergent else 0
