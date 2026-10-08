@@ -98,10 +98,13 @@ what is left:
   and would take the root task's own filter away.
 - Whether the rare whole stops of the trace stream can still happen, now that the console writer is fixed,
   wants a longer series; write each stop down with its sequence number and time.
-  The stream still loses bytes within a line:
-  a trace=1 run on 2026-10-08 printed record 23018, 10.0 s in, without its `pc 0x...` field, 14 bytes,
-  the rest of the line and the lines around it whole, one line in about 50,000;
-  `tools/mac-trace.py` refuses such a log, as it should, and the run is made again.
+  The stream still loses bytes within a line, a piece of it whole and the line's ends kept:
+  on 2026-10-08 record 23018's `pc 0x...` field, 14 bytes, and a `trace: req ` line's front, 11 bytes,
+  and on 2026-10-09 record 25300's `pc 0x... t3 R4 `, 20 bytes; about one traced run in eight.
+  The root task writes each line whole, from one thread, in one `console_send`, so the piece goes after it:
+  in the USB Serial/JTAG FIFO, written while the packet before is still in it, or on the host.
+  `tools/mac-trace.py` refuses such a log, and `tools/esp32c6-gate.py` makes the run again
+  and writes each loss into `build/esp32c6/gate/losses.txt`, the series to read the cause from.
 - A driver of the ESP32-C6's Wi-Fi that leaves Espressif's libraries the PHY alone, `libphy.a`:
   `pp` and `net80211` give way to the driver's own MAC and station, and `osi.c` shrinks to what `libphy.a` calls.
   The station is the driver's own already, on hostap; `user/wifi/NOTES.md` says why.
