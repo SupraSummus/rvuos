@@ -114,9 +114,18 @@ static void wr(uint32_t a, uint32_t v)
 #define BSSID_HI      (MAC_BASE + 0x04u)
 #define STA_ADDR_LO   (MAC_BASE + 0x5cu)
 #define STA_ADDR_HI   (MAC_BASE + 0x60u)
-#define STA_ADDR2_HI  (MAC_BASE + 0x68u) /* the second address pair, which hal_mac_set_addr's index 1 sets */
-#define BSSID_FLAG    0x80000000u
-#define STA_ADDR_FLAG 0x00010000u /* what hal_mac_set_addr ors: lui 0x10, not 0x100000 */
+#define STA_ADDR2_LO  (MAC_BASE + 0x64u) /* interface 1's, the soft AP's, which hal_mac_set_addr's index 1 sets */
+#define STA_ADDR2_HI  (MAC_BASE + 0x68u)
+#define BSSID_FLAG      0x80000000u
+#define BSSID_HI_OTHER  0x00040000u /* their default policy clears it; the bit's meaning is not known */
+#define BSSID_HI_LOW    0x00000001u /* their default policy clears it too, in the bssid's word and interface 1's */
+#define STA_ADDR_FLAG   0x00010000u /* what hal_mac_set_addr ors: lui 0x10, not 0x100000 */
+/*
+ * Interface 1's own word by the bssid's, which the libraries' default receive policy gives bit 30 and no other code
+ * the driver reads writes; the bit's meaning is not known, so the driver sets it as they do.
+ */
+#define IF1_DEFAULT_WORD (MAC_BASE + 0x0cu)
+#define IF1_DEFAULT_BIT  0x40000000u
 
 /* The four bytes at p, little-endian. */
 static uint32_t le32(const uint8_t *p)
@@ -180,6 +189,7 @@ void mac_key_clear(uint32_t entry)
  * which the MAC configuration's bit 8 says, as hal_he_set_bcast_ru sets them; HE's minimum MPDU spacing is zero.
  */
 #define RX_POLICY           (MAC_BASE + 0x0d8u) /* interface 0's; interface n's 4 * n further */
+#define RX_POLICY1          (RX_POLICY + 4u)    /* interface 1's, which the default policy writes too */
 #define RX_POLICY_CLEAR     0x00000450u         /* cleared by a policy of 1 and 1, as the station's */
 #define RX_POLICY_QUEUE     0x00000102u         /* set by hal_mac_set_rxq_policy's 1 */
 #define BSSID_HI_POLICY     0x40000000u         /* cleared by the policy, beside BSSID_FLAG, which it sets */
@@ -211,6 +221,27 @@ void mac_receive(uint16_t aid)
     uint32_t ru = rd(MAC_CONF) & MAC_CONF_BCAST_RU ? HE_BCAST_RU : 0;
     wr(HE_AID, (rd(HE_AID) | HE_AID_RU_SET) & ~HE_AID_RU);
     wr(HE_BCAST, (rd(HE_BCAST) & ~(HE_BCAST_RU | HE_BCAST_RU2)) | HE_BCAST_SET | ru);
+}
+
+/*
+ * The default receive policy the libraries' wifi_set_rx_policy(0) writes at the bring-up, before anything is joined,
+ * as the driver's own writes on the same words: interface 0's address from the factory MAC and interface 1's from the
+ * soft AP's, its last byte one more as their read_mac derives it, both left invalid, the bssid's flag clear, and
+ * their receive policies cleared, the queueing off. Interface 1's own word keeps the bit 30 their policy sets.
+ */
+void mac_default_policy(const uint8_t mac[6])
+{
+    uint8_t ap[6];
+    memcpy(ap, mac, 6);
+    ap[5] = (uint8_t)(ap[5] + 1u); /* the soft AP's address, as the libraries' read_mac gives its type 1 */
+    wr(STA_ADDR_LO, le32(mac));
+    wr(STA_ADDR_HI, (uint32_t)mac[4] | (uint32_t)mac[5] << 8);
+    wr(STA_ADDR2_LO, le32(ap));
+    wr(STA_ADDR2_HI, (uint32_t)ap[4] | (uint32_t)ap[5] << 8);
+    wr(BSSID_HI, rd(BSSID_HI) & ~(BSSID_FLAG | BSSID_HI_OTHER | BSSID_HI_LOW));
+    wr(RX_POLICY, rd(RX_POLICY) & ~(RX_POLICY_CLEAR | RX_POLICY_QUEUE));
+    wr(RX_POLICY1, rd(RX_POLICY1) & ~RX_POLICY_CLEAR);
+    wr(IF1_DEFAULT_WORD, (rd(IF1_DEFAULT_WORD) & ~BSSID_HI_LOW) | IF1_DEFAULT_BIT);
 }
 
 /*
@@ -450,8 +481,13 @@ const char *mac_channel(uint32_t channel)
     hold();
     drv_phy_channel(channel);
     rx.channel = channel;
-    wr(TX_BLOCK, rd(TX_BLOCK) & ~TX_BLOCK_ALL);
+    mac_tx_block_clear();
     return 0;
+}
+
+void mac_tx_block_clear(void)
+{
+    wr(TX_BLOCK, rd(TX_BLOCK) & ~TX_BLOCK_ALL);
 }
 
 /* 1 if the MAC fills the driver's first descriptor next: it has moved to the driver's list, and filled none of it. */
@@ -532,6 +568,16 @@ void mac_rx_give_back(void)
         osi_isr_swap(MAC_SOURCE, &rx.isr);
         rx.taken = 0;
     }
+}
+
+void mac_rx_off(void)
+{
+    wr(RX_CTRL, rd(RX_CTRL) & ~(RX_CTRL_ENABLE | RX_CTRL_RELOAD));
+}
+
+void mac_rx_on(void)
+{
+    wr(RX_CTRL, rd(RX_CTRL) | RX_CTRL_ENABLE);
 }
 
 /*

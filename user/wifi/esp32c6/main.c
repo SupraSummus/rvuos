@@ -379,21 +379,80 @@ static __attribute__((noreturn)) void attend(struct drv *d)
 
 /*
  * The driver's own esp_wifi_start, taking the libraries' bring-up over a step at a time: the body is the libraries'
- * wifi_start_process written out -- adc2_wifi_acquire, ieee80211_set_hmac_stop, wifi_hw_start, wifi_mode_set,
- * _do_wifi_start, ieee80211_update_phy_country -- so that each of those can be taken over in turn and the window's
- * sequence held to the libraries' by tools/mac-trace.py's diff. Only the station is written; the libraries' start
- * brings an interface up per mode -- reason 0 the station, 1 the soft AP, 3 then both, and none for another -- so
- * another mode stops here rather than guesses. See user/wifi/NOTES.md.
+ * wifi_start_process written out -- adc2_wifi_acquire, ieee80211_set_hmac_stop, the hardware bring-up's calls,
+ * wifi_mode_set, _do_wifi_start, ieee80211_update_phy_country -- so that each of those can be taken over in turn and
+ * the window's sequence held to the libraries' by tools/mac-trace.py's diff. Only the station is written; the
+ * libraries' start brings an interface up per mode -- reason 0 the station, 1 the soft AP, 3 then both, and none for
+ * another -- so another mode stops here rather than guesses. See user/wifi/NOTES.md.
  */
 extern int wifi_init_completed(void);
 extern int adc2_wifi_acquire(void);
 extern void ieee80211_set_hmac_stop(int stop);
-extern int wifi_hw_start(int reason);
 extern int wifi_mode_set(int mode);
 extern int _do_wifi_start(int mode);
 extern void ieee80211_update_phy_country(void);
-extern void *g_wifi_nvs; /* the libraries' configuration, whose first byte is the mode */
-extern char g_ic[];      /* the libraries' shared control block */
+extern void chm_init(void *chm);
+extern void ic_set_interrupt_handler(void);
+extern void pm_noise_check_enable(void);
+extern void pm_disconnected_start(void);
+extern uint8_t g_mac_sleep_en;           /* the libraries' MAC sleep flag, which gates the modem wake */
+extern void *g_wdev_last_desc_reset_ptr; /* the ROM cell holding their wdev whose first byte is the flag below */
+extern void *g_wifi_nvs;                 /* the libraries' configuration, whose first byte is the mode */
+extern char g_ic[];                      /* the libraries' shared control block */
+
+/*
+ * The libraries' control block's per-interface masks, a bit each: the interfaces a stop has left, and the ones that
+ * are up. The station is their interface 0, its bit the low one.
+ */
+#define G_IC_STOP_MASK  0x24du
+#define G_IC_START_MASK 0x24eu
+
+/*
+ * The libraries' wifi_reset_mac, written out: their reset pulse through the adapter, their wdev told its last RX
+ * descriptor was reset -- a flag their own receive reads until the driver takes the receive over -- and the MAC's
+ * receive off, which their hal_mac_rx_disable does, the one function of theirs this call had left.
+ */
+static void drv_reset_mac(void)
+{
+    funcs->wifi_reset_mac();
+    *(uint8_t *)g_wdev_last_desc_reset_ptr = 1;
+    mac_rx_off();
+}
+
+/*
+ * The libraries' wifi_hw_start, the hardware bring-up they run once before their task brings the interface up,
+ * written out for the station's fresh start: the stop mask clear, neither guard tripped. The libraries' other
+ * branch -- an interface a stop left behind, woken rather than brought up anew -- is not written, since the driver
+ * starts the station once from a stopped radio; another state stops here. See user/wifi/NOTES.md.
+ */
+static int drv_hw_start(void)
+{
+    uint8_t *ic = (uint8_t *)g_ic;
+    if (ic[G_IC_STOP_MASK] != 0 || (ic[G_IC_START_MASK] & 1) != 0) {
+        return ESP_FAIL; /* the libraries' wake branch, or the station already up: neither is written */
+    }
+    ieee80211_set_hmac_stop(0);
+    funcs->wifi_pm_sleep_lock_acquire();
+    funcs->wifi_clock_enable();
+    if (g_mac_sleep_en) {
+        funcs->wifi_rtc_disable_iso();
+    }
+    funcs->phy_enable();
+    funcs->coex_enable();
+    drv_reset_mac();
+    mac_tx_block_clear();              /* the libraries' ic_mac_init: their hal_mac_init's tx-block clear */
+    chm_init(g_ic);
+    ic_set_interrupt_handler();
+    mac_default_policy(drv_self->mac); /* the libraries' chip_enable: their default receive policy */
+    mac_rx_on();                       /* and their ic_enable_rx */
+    pm_noise_check_enable();
+    funcs->wifi_bb_sleep_retention_attach();
+    funcs->wifi_mac_sleep_retention_attach();
+    ic[G_IC_STOP_MASK] |= 1; /* the station's interface, the libraries' reason 0 */
+    ic[G_IC_START_MASK] |= 1;
+    pm_disconnected_start();
+    return ESP_OK;
+}
 
 static int drv_wifi_start(void)
 {
@@ -406,15 +465,12 @@ static int drv_wifi_start(void)
     }
     ieee80211_set_hmac_stop(0);
     int mode = *(const uint8_t *)g_wifi_nvs;
-    /*
-     * The libraries' code brings the hardware up once per interface, its reason the interface: 0 the station, 1 the
-     * soft AP, 3 then both, and none for another mode. The driver sets station mode alone, so only reason 0 is
-     * written and another mode stops here rather than repeat the libraries' AP branches unwritten.
-     */
     if (mode != WIFI_MODE_STA) {
-        return ESP_FAIL;
+        return ESP_FAIL; /* only the station is written; the libraries' other modes do not */
     }
-    wifi_hw_start(0);
+    if ((rv = drv_hw_start()) != 0) {
+        return rv;
+    }
     if ((rv = wifi_mode_set(mode)) != 0) {
         return rv;
     }

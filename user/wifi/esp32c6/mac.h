@@ -75,6 +75,24 @@ const char *mac_rx_take(mac_heard_fn *heard);
 void mac_rx_give_back(void);
 
 /*
+ * The MAC's receive off for the bring-up, in place of the libraries' hal_mac_rx_disable: RX_CTRL's enable and its
+ * reload cleared, as the MAC is reset, before the driver's own list is taken.
+ */
+void mac_rx_off(void);
+
+/*
+ * The MAC's tx-block hold cleared, as the libraries' hal_mac_init clears it when the interface is brought up
+ * (their ic_mac_init) and mac_channel clears it after a retune.
+ */
+void mac_tx_block_clear(void);
+
+/*
+ * The MAC's receive on, in place of the libraries' ic_enable_rx: RX_CTRL's enable bit set, after the bring-up has
+ * set the receive policy.
+ */
+void mac_rx_on(void);
+
+/*
  * The own station's receiving, in place of the libraries': the address and the BSSID (mac_station),
  * a key entry the MAC's cipher holds (mac_key_set), and the station-mode receive policy (mac_receive),
  * written with the sniffer off, before the driver's list is taken; see mac.c.
@@ -82,6 +100,13 @@ void mac_rx_give_back(void);
 void mac_key_set(uint32_t entry, const uint8_t addr[6], uint8_t id, const uint8_t tk[16]);
 void mac_key_clear(uint32_t entry);
 void mac_receive(uint16_t aid);
+
+/*
+ * The default receive policy the bring-up writes before anything is joined, in place of the libraries'
+ * wifi_set_rx_policy(0): both interfaces' addresses from the factory MAC and the soft AP's, and their filters
+ * left invalid and empty; see mac.c.
+ */
+void mac_default_policy(const uint8_t mac[6]);
 
 /*
  * The MAC's own station address and the access point's. The libraries set both when their station associates;
