@@ -139,13 +139,23 @@ static uint32_t snap_count;
  * A line is gathered whole and handed the FIFO one packet at a time, and the writer waits, unlike the board's
  * polled one, which after one long wait gives up on every byte after; the host runs wifi-run.py, so it is there.
  */
+static uint32_t console_waited; /* lines the FIFO held longer than USJ_POLLS turns; a slow host shows here */
+
 static void console_send(const char *s, uint32_t n)
 {
+    int waited = 0;
     for (uint32_t i = 0; i < n;) {
         uint32_t chunk = n - i > 64u ? 64u : n - i; /* the FIFO holds 64 bytes, so one packet each */
         for (uint32_t j = 0; j < chunk; j++) {
-            while ((console_regs[USJ_EP1_CONF] & USJ_FREE) == 0) {
-                console_flush();
+            /* Send what the FIFO holds once, when it is full, then wait, as the board's console_put_polled does. */
+            for (uint32_t k = 0; (console_regs[USJ_EP1_CONF] & USJ_FREE) == 0; k++) {
+                if (k == 0) {
+                    console_flush();
+                }
+                if (k == USJ_POLLS && !waited) {
+                    console_waited++;
+                    waited = 1;
+                }
             }
             console_regs[USJ_EP1] = (uint8_t)s[i + j];
         }
@@ -548,6 +558,9 @@ static void trace_dump(void)
     }
     say(&kout, "root: the trace saw %u accesses in %u lines\n", trace_records, trace_seq);
     say(&kout, "root: the trace dropped %u kernel fault lines for %u accesses\n", kline_dropped, trace_records);
+    if (console_waited) {
+        say(&kout, "root: the console waited long on %u lines\n", console_waited);
+    }
 }
 
 /*

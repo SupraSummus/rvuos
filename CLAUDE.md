@@ -70,6 +70,12 @@ A change to `user/tracer/` or to the trace in `user/wifi/esp32c6/` runs it with 
 which has the root task carry out and log every device access of the libraries' bring-up,
 and again with `trace=2`, the same window with the driver mapping its frames and nothing faulting;
 the two runs must agree on the driver's lines, its events and its code, and the stream comes as `build/esp32c6/wifi-run.log`.
+The driver's lines beginning `trace:` are the tracer's own instrumentation,
+present only with `trace=1` and left out of that agreement:
+the driver's own phase markers,
+and, from `osi.c`'s `osi_trace`, the calls the libraries make into the adapter (clocks, phy, interrupts, events),
+each `trace: req <n> t<thread> <name> <a0> <a1>`,
+so the window's device accesses and adapter calls read as one sequence.
 The final state is held to the dry run's too: `tools/mac-trace.py snapshot` makes the window's `snap=` lines from a traced log,
 and `compare`, with two dry logs and the traced one, fails on any divergence outside the words the dry runs differ in.
 `make BOARD=esp32c6 wifi-esp32c6-attrib` attributes every access of a traced log to its library and function.

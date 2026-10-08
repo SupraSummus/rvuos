@@ -37,6 +37,17 @@
 #define THREADS 8
 #define INTRS   8 /* CPU interrupts the libraries route sources to, numbered below 32 */
 
+/*
+ * trace=1: the driver's steps and the calls the libraries make into the adapter, in the request order the device
+ * accesses come in, so the window's two halves -- the accesses the root serves, and what the libraries asked the
+ * adapter for between them -- read as one sequence. The buffer is taken from the heap by a traced run's start
+ * (osi_trace_init, from trace_run, in both trace modes so the heap they see is alike), so an ordinary run pays
+ * nothing; no lock on the path (a faulting thread may call it); printed after the window. Purely synchronising
+ * calls (mutexes, semaphores, queues) are left out.
+ */
+static struct { uint32_t asked, thread, a0, a1; const char *what; } *osi_trace_buf;
+static uint32_t osi_trace_max, osi_trace_n, osi_trace_lost;
+
 struct thread {
     uint32_t cap, note, timer;
     uintptr_t stack_lo, stack_hi;
@@ -137,6 +148,45 @@ static struct thread *self(void)
     struct thread *t;
     __asm__ volatile("mv %0, tp" : "=r"(t));
     return t;
+}
+
+/* --- The adapter calls, the start's other half, for trace=1; the buffer is declared at the top. --- */
+
+void osi_trace_init(uint32_t entries)
+{
+    osi_trace_buf = osi_malloc(entries * sizeof(*osi_trace_buf));
+    osi_trace_max = osi_trace_buf ? entries : 0;
+    osi_trace_n = 0;
+    osi_trace_lost = 0;
+}
+
+void osi_trace(const char *what, uint32_t a0, uint32_t a1)
+{
+    if (drv_self->trace != 1 || osi_trace_buf == 0) {
+        return;
+    }
+    uint32_t i = __atomic_fetch_add(&osi_trace_n, 1, __ATOMIC_RELAXED);
+    if (i >= osi_trace_max) {
+        __atomic_fetch_add(&osi_trace_lost, 1, __ATOMIC_RELAXED);
+        return;
+    }
+    osi_trace_buf[i].asked = drv_self->share.asked;
+    osi_trace_buf[i].thread = (uint32_t)(self() - osi.threads);
+    osi_trace_buf[i].what = what;
+    osi_trace_buf[i].a0 = a0;
+    osi_trace_buf[i].a1 = a1;
+}
+
+void osi_trace_dump(void)
+{
+    uint32_t n = osi_trace_n < osi_trace_max ? osi_trace_n : osi_trace_max;
+    for (uint32_t i = 0; i < n; i++) {
+        drv_say("trace: req %u t%u %s %u %u\n", osi_trace_buf[i].asked, osi_trace_buf[i].thread,
+                osi_trace_buf[i].what, osi_trace_buf[i].a0, osi_trace_buf[i].a1);
+    }
+    if (osi_trace_lost) {
+        drv_say("trace: %u more past the buffer\n", osi_trace_lost);
+    }
 }
 
 /* Every thread starts here, with a0 at its own record, which it keeps in tp. */
@@ -512,6 +562,7 @@ static void set_intr(int32_t cpu, uint32_t source, uint32_t n, int32_t prio)
 {
     (void)cpu;
     (void)prio;
+    osi_trace("set_intr", source, n);
     drv_say("osi: source %u to interrupt %u\n", (unsigned)source, (unsigned)n);
     if (n < INTRS) {
         osi.intr[n].source = source;
@@ -520,12 +571,12 @@ static void set_intr(int32_t cpu, uint32_t source, uint32_t n, int32_t prio)
 
 static void clear_intr(uint32_t source, uint32_t n)
 {
-    (void)source;
-    (void)n;
+    osi_trace("clear_intr", source, n);
 }
 
 static void set_isr(int32_t n, void *f, void *arg)
 {
+    osi_trace("set_isr", (uint32_t)n, 0);
     if ((uint32_t)n < INTRS) {
         osi.intr[n].f = (void (*)(void *))f;
         osi.intr[n].arg = arg;
@@ -558,6 +609,7 @@ int osi_isr_swap(uint32_t source, struct osi_isr *isr)
  */
 static void ints_on(uint32_t mask)
 {
+    osi_trace("ints_on", mask, 0);
     struct self *s = osi.s;
     for (uint32_t n = 0; n < INTRS; n++) {
         if (!(mask & (1u << n))) {
@@ -586,6 +638,7 @@ static void ints_on(uint32_t mask)
 
 static void ints_off(uint32_t mask)
 {
+    osi_trace("ints_off", mask, 0);
     for (uint32_t n = 0; n < INTRS; n++) {
         if ((mask & (1u << n)) && osi.intr[n].irq) {
             osi.intr_on &= ~(1u << n);
@@ -908,6 +961,7 @@ static uint32_t event_group_wait_bits(void *event, uint32_t bits, int clear, int
 static int32_t task_create(void *f, const char *name, uint32_t stack, void *arg, uint32_t prio, void *handle)
 {
     (void)prio;
+    osi_trace("task", stack, 0); /* the name is in the log line below */
     drv_say("osi: task %s, %u bytes of stack\n", name, (unsigned)stack);
     struct thread *t = osi_thread((void (*)(void *))f, arg, name, stack);
     if (handle) {
@@ -987,6 +1041,7 @@ static void timer_link(struct ets_timer *t)
 
 static void timer_disarm(void *timer)
 {
+    osi_trace("timer_disarm", 0, 0);
     lock_take(&osi.big);
     timer_unlink(timer);
     lock_give(&osi.big);
@@ -1005,6 +1060,7 @@ static void timer_setfn(void *timer, void *f, void *arg)
 
 static void timer_arm_us(void *timer, uint32_t us, bool repeat)
 {
+    osi_trace("timer_arm_us", us, repeat);
     struct ets_timer *t = timer;
     lock_take(&osi.big);
     timer_unlink(t);
@@ -1103,6 +1159,7 @@ static bool env_is_chip(void)
 static int32_t event_post(const char *base, int32_t id, void *data, size_t size, uint32_t ticks)
 {
     (void)ticks;
+    osi_trace("event_post", (uint32_t)id, size);
     drv_event(base, id, data, size);
     return 0;
 }
@@ -1167,11 +1224,14 @@ static int64_t timer_get_time(void)
 /* The slow clock's period in microseconds, as Q13.19: about 136 kHz, the RC oscillator's; not measured. */
 static uint32_t slowclk_cal_get(void)
 {
-    return 3855000u;
+    uint32_t hz = 3855000u;
+    osi_trace("slowclk", hz, 0);
+    return hz;
 }
 
 static int read_mac(uint8_t *mac, unsigned int type)
 {
+    osi_trace("read_mac", type, 0);
     memcpy(mac, osi.d->mac, 6);
     mac[5] += (uint8_t)type; /* ESP-IDF derives the soft-AP's and the rest from the station's this way */
     return 0;
@@ -1216,9 +1276,56 @@ static int zero(void)
     return 0;
 }
 
+static int coex_log_init(void)
+{
+    osi_trace("coex_init", 0, 0);
+    return 0;
+}
+
+static int coex_log_enable(void)
+{
+    osi_trace("coex_enable", 0, 0);
+    return 0;
+}
+
 static int nvs_none(void)
 {
     return 0x1102; /* ESP_ERR_NVS_NOT_FOUND */
+}
+
+/*
+ * The two coex stubs that have an output. ESP-IDF's adapter without coexistence returns success and writes
+ * nothing, so the libraries program the byte or word as they find it -- uninitialized stack, which shifts with
+ * the image's layout. These instead write what the coexistence library would, so the register is the same
+ * whatever the image. The PTI is the value the chip expects: esp-coex-lib's coex_pti_tab
+ * (espressif/esp-coex-lib, c758e7b56e0fa22177a0539796e1df59978dc322, esp32c6/libcoexist.a), which the ROM's
+ * coex_core_pti_get reads as tab[event]; a wrong PTI there costs the reception. esp-coex-lib is Apache-2.0, as
+ * the rest of the libraries. The cast the other stubs use would hide a missing write, so these are typed.
+ */
+static const uint8_t coex_pti_tab[49] = {
+    0x0a, 0x05, 0x07, 0x07, 0x0a, 0x01, 0x01, 0x01, 0x01, 0x07, 0x03, 0x02, 0x01, 0x01, 0x01, 0x01,
+    0x04, 0x09, 0x04, 0x04, 0x09, 0x04, 0x09, 0x04, 0x04, 0x05, 0x05, 0x05, 0x05, 0x04, 0x04, 0x04,
+    0x04, 0x02, 0x02, 0x02, 0x0f, 0x0a, 0x04, 0x0e, 0x00, 0x0c, 0x08, 0x03, 0x01, 0x0a, 0x0a, 0x0f,
+    0x0f,
+};
+
+static int coex_pti_get(uint32_t event, uint8_t *pti)
+{
+    *pti = event < sizeof(coex_pti_tab) ? coex_pti_tab[event] : 0;
+    return 0;
+}
+
+static int coex_event_duration_get(uint32_t event, uint32_t *duration)
+{
+    /* esp-coex-lib's coex_core_event_duration_get: a duration in microseconds per event, and -1 for the rest. */
+    switch (event) {
+    case 4:    *duration = 25000; return 0;
+    case 7:    *duration = 20000; return 0;
+    case 9:    *duration = 5000;  return 0;
+    case 0x2d: *duration = 25000; return 0;
+    case 0x2e: *duration = 50000; return 0;
+    default:   *duration = 0;     return -1;
+    }
 }
 
 static void *null(void)
@@ -1331,17 +1438,17 @@ static const struct osi_funcs funcs = {
     .wifi_zalloc = zalloc,
     .wifi_create_queue = wifi_create_queue,
     .wifi_delete_queue = wifi_delete_queue,
-    .coex_init = zero,
+    .coex_init = coex_log_init,
     .coex_deinit = nothing,
-    .coex_enable = zero,
+    .coex_enable = coex_log_enable,
     .coex_disable = nothing,
     STUB(coex_status_get, zero),
     STUB(coex_condition_set, nothing),
     STUB(coex_wifi_request, zero),
     STUB(coex_wifi_release, zero),
     STUB(coex_wifi_channel_set, zero),
-    STUB(coex_event_duration_get, zero),
-    STUB(coex_pti_get, zero),
+    .coex_event_duration_get = coex_event_duration_get,
+    .coex_pti_get = coex_pti_get,
     STUB(coex_schm_status_bit_clear, nothing),
     STUB(coex_schm_status_bit_set, nothing),
     STUB(coex_schm_interval_set, zero),

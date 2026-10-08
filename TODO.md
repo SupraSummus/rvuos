@@ -98,14 +98,14 @@ what is left:
   whether a thread that has a watch, `OP_THREAD_WATCH`, should still be logged is a decision of `DESIGN.md`'s.
   A tracer works around it in the root task meanwhile.
 - `tools/wifi-run.py` spawns `llvm-symbolizer` for every line it names,
-  so a run that faults tens of thousands of times stalls the reader under its lock and back-pressures the port;
+  which is slow on a run that faults tens of thousands of times;
   one long-lived symbolizer, or a cache of an address's name, would keep up,
   and would take the root task's own filter away.
-- The ESP32-C6's console loses bytes on a long unbroken stream: a trace log is short by ten-odd lines of ~50k,
-  a sequence number missing or a line cut, in the dense PHY polling loops; and once the stream stopped whole
-  mid-window, the root's writer waiting on a host that had stopped reading, and the chip then wanted unplugging
-  before it answered again. It is the transport, not the root, since two runs of one image lose at different
-  sequence numbers; why the channel drops them is open. `tools/mac-trace.py` names what it finds and holds a log to it.
+- Whether the rare whole stops of the trace stream can still happen, now that the console writer is fixed,
+  wants a longer series; write each stop down with its sequence number and time.
+- The `trace: req` lines (a driver step or an adapter call) have no reader that joins them to the accesses:
+  `tools/mac-trace.py attrib` could split a log into the segments between two lines' requests
+  and say how many accesses fall in each and of which library.
 - A driver of the ESP32-C6's Wi-Fi that leaves Espressif's libraries the PHY alone, `libphy.a`:
   `pp` and `net80211` give way to the driver's own MAC and station, and `osi.c` shrinks to what `libphy.a` calls.
   The station is the driver's own already, on hostap; `user/wifi/NOTES.md` says why.

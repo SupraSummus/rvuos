@@ -50,6 +50,15 @@
 #define TX_BLOCK_ALL     0x00ff1000u
 #define TX_BLOCK_BUSY    0x00006000u /* still busy */
 
+/* The stop's words, as the libraries' own functions write them; see own_wifi_stop. */
+#define TSF_CTRL    0x600ad050u /* the STA's TSF and its wakeups, which hal_disable_sta_tsf clears */
+#define PTI_RX      0x600a42fcu /* what hal_set_rx_active_pti and hal_set_rx_ack_pti clear */
+#define PTI_DEFAULT 0x600a4dd8u /* its low nibble, which hal_set_wifi_default_pti sets */
+#define HAL_CTRL    0x600a4308u /* hal_deinit's four; what they are is pp's, and no driver code reads them */
+#define HAL_HOLD    0x600a4c40u
+#define HAL_MISC    0x600a4c4cu
+#define HAL_CFG     0x600a4ddcu
+
 #define DESC_SIZE(f)   ((f) & 0x3fffu)
 #define DESC_LEN(f)    ((f) >> 14 & 0x3fffu)
 #define DESC_LEN_SHIFT 14
@@ -99,17 +108,15 @@ static void wr(uint32_t a, uint32_t v)
 
 /*
  * The MAC's own station address and the access point's; the flags are what hal_mac_set_addr and hal_mac_set_bssid set.
- * The four words are saved so mac_addr_restore gives the libraries their MAC back before esp_wifi_stop.
+ * The driver writes them when its station associates, and mac_stop makes them invalid when it leaves.
  */
 #define BSSID_LO      (MAC_BASE + 0x00u)
 #define BSSID_HI      (MAC_BASE + 0x04u)
 #define STA_ADDR_LO   (MAC_BASE + 0x5cu)
 #define STA_ADDR_HI   (MAC_BASE + 0x60u)
+#define STA_ADDR2_HI  (MAC_BASE + 0x68u) /* the second address pair, which hal_mac_set_addr's index 1 sets */
 #define BSSID_FLAG    0x80000000u
 #define STA_ADDR_FLAG 0x00010000u /* what hal_mac_set_addr ors: lui 0x10, not 0x100000 */
-
-static uint32_t addr_saved[4];
-static int addr_held;
 
 /* The four bytes at p, little-endian. */
 static uint32_t le32(const uint8_t *p)
@@ -119,28 +126,10 @@ static uint32_t le32(const uint8_t *p)
 
 void mac_station(const uint8_t sta[6], const uint8_t bssid[6])
 {
-    if (!addr_held) {
-        addr_saved[0] = rd(BSSID_LO);
-        addr_saved[1] = rd(BSSID_HI);
-        addr_saved[2] = rd(STA_ADDR_LO);
-        addr_saved[3] = rd(STA_ADDR_HI);
-        addr_held = 1;
-    }
     wr(BSSID_LO, le32(bssid));
     wr(BSSID_HI, (rd(BSSID_HI) & 0xffff0000u) | (uint32_t)bssid[4] | (uint32_t)bssid[5] << 8 | BSSID_FLAG);
     wr(STA_ADDR_LO, le32(sta));
     wr(STA_ADDR_HI, ((uint32_t)sta[4] | (uint32_t)sta[5] << 8) | STA_ADDR_FLAG);
-}
-
-void mac_addr_restore(void)
-{
-    if (addr_held) {
-        wr(BSSID_LO, addr_saved[0]);
-        wr(BSSID_HI, addr_saved[1]);
-        wr(STA_ADDR_LO, addr_saved[2]);
-        wr(STA_ADDR_HI, addr_saved[3]);
-        addr_held = 0;
-    }
 }
 
 /*
@@ -600,14 +589,6 @@ void mac_rx_give_back(void)
 #define TX_TXLEN_1M    0x00400000u
 #define TX_RESP_DUR_1M 0x00400004u
 
-/*
- * The libraries' per-access-class lmac control block, our_instances; the driver clears the state byte of its own
- * queue, which the libraries' lmac_stop_hw_txq reads to leave that queue alone on their way out.
- */
-extern uint32_t our_instances_ptr; /* esp32c6.rom.pp.ld's cell to the block */
-#define LMAC_TXQ_STRIDE 0x34u
-#define LMAC_TXQ_STATE  0x12u
-
 #define TX_SLOT       0u
 #define TX_HDR        8u       /* the bytes the MAC reads before the frame */
 #define TX_SEQ        22u      /* where a frame's sequence control lies, after its three addresses */
@@ -671,9 +652,6 @@ static const char *send(const uint8_t *frame, uint32_t len)
     __asm__ volatile("fence" : : : "memory");
 
     const uint32_t s = TX_SLOT;
-    /* The libraries' queue is no place for the driver's frame, and their way out reads its state. */
-    uint32_t lmac = *(volatile uint32_t *)&our_instances_ptr;
-    *(volatile uint8_t *)(lmac + s * LMAC_TXQ_STRIDE + LMAC_TXQ_STATE) = 0;
     wr(TX_PLCP0(s), ((uint32_t)(uintptr_t)&tx->desc & TX_PLCP0_DMA) | TX_PLCP0_FORMAT);
     wr(TX_CONF0(s), 0);
     wr(TX_MPLEN(s), 0);
@@ -727,4 +705,27 @@ const char *mac_tx(const uint8_t *frame, uint32_t len)
     const char *failed = send(frame, len);
     osi_mutex_give(tx_lock);
     return failed;
+}
+
+/*
+ * The driver's own stop, in place of Espressif's esp_wifi_stop: the call that ends the trace window, and a run's
+ * radio. It turns the vif's receive off, makes its addresses invalid, holds the MAC still and closes the PHY.
+ * The library's stop writes the filter and the address registers more; those accesses that write back the value
+ * they read change nothing (a plain field), and the snapshot holds this to the library's own end state.
+ */
+void mac_stop(void)
+{
+    wr(RX_CTRL, rd(RX_CTRL) & ~RX_CTRL_ENABLE); /* the vif's receive off */
+    wr(BSSID_HI, rd(BSSID_HI) & ~BSSID_FLAG);   /* its bssid no longer valid */
+    wr(STA_ADDR_HI, rd(STA_ADDR_HI) & ~STA_ADDR_FLAG); /* nor its station address */
+    wr(STA_ADDR2_HI, rd(STA_ADDR2_HI) & ~STA_ADDR_FLAG);
+    wr(TSF_CTRL, 0);                            /* the STA's TSF off */
+    wr(TX_BLOCK, TX_BLOCK_ALL);                 /* hold the MAC still */
+    wr(PTI_RX, 0);
+    wr(PTI_DEFAULT, rd(PTI_DEFAULT) & ~0xfu);
+    wr(HAL_CTRL, rd(HAL_CTRL) | 1u);
+    wr(HAL_HOLD, 0);
+    wr(HAL_MISC, 0xffffffffu);
+    wr(HAL_CFG, rd(HAL_CFG) | 2u);
+    drv_phy_disable();
 }

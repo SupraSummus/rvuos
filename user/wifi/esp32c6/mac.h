@@ -86,10 +86,8 @@ void mac_receive(uint16_t aid);
 /*
  * The MAC's own station address and the access point's. The libraries set both when their station associates;
  * the own path associates by its own code, so it must set them, or the MAC matches no unicast frame to the station.
- * mac_addr_restore gives the libraries their MAC back, at the station's leave, before mac_rx_give_back.
  */
 void mac_station(const uint8_t sta[6], const uint8_t bssid[6]);
-void mac_addr_restore(void);
 
 /*
  * The radio on another channel, MAC_CHANNEL_FIRST to MAC_CHANNEL_LAST, as the libraries' chm_phy_change_channel
@@ -116,5 +114,12 @@ const char *mac_tx_init(void);
  * since there is one buffer and one slot.
  */
 const char *mac_tx(const uint8_t *frame, uint32_t len);
+
+/*
+ * The driver's own stop, in place of Espressif's esp_wifi_stop: it turns the vif's receive off, holds the MAC
+ * still and closes the PHY. Call it where the library's stop was called, in the trace window and when a run
+ * turns the radio off; why it can leave some of the library's writes out is in mac.c.
+ */
+void mac_stop(void);
 
 #endif

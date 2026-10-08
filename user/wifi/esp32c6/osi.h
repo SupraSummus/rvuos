@@ -46,6 +46,10 @@ uint64_t osi_now_us(void);
 /* The traced run's counters: the faults the watcher served, and the interrupts the adapter's thread ran. */
 uint32_t osi_faults_served(void);
 uint32_t osi_interrupts(void);
+/* trace=1: the driver's steps and the adapter calls, in request order, and their dump; see osi.c. */
+void osi_trace_init(uint32_t entries);
+void osi_trace(const char *what, uint32_t a0, uint32_t a1);
+void osi_trace_dump(void);
 void osi_delay_ms(uint32_t ms);
 int osi_isr_swap(uint32_t source, struct osi_isr *isr);
 struct ets_timer *osi_timer_new(void (*f)(void *), void *arg);

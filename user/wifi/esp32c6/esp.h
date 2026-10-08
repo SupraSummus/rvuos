@@ -222,7 +222,6 @@ void ets_update_cpu_frequency(uint32_t ticks_per_us);
 esp_err_t esp_wifi_init_internal(const struct init_config *config);
 esp_err_t esp_wifi_set_mode(int mode);
 esp_err_t esp_wifi_start(void);
-esp_err_t esp_wifi_stop(void);
 
 /* The libraries' own log: its level, wifi_log_level_t, and its modules, all of them with module 0 and submodule 0. */
 #define WIFI_LOG_INFO 3

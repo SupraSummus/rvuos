@@ -249,8 +249,7 @@ static void told(void)
 static void hand_back(void)
 {
     part(MGMT_LEAVING);
-    mac_addr_restore();
-    mac_key_clear(STA_KEY_ENTRY); /* the libraries' stop meets no entry of the own path's */
+    mac_key_clear(STA_KEY_ENTRY); /* no entry of the own path's is left in the hardware */
     for (uint32_t i = 0; i < KEYS_GROUP; i++) {
         mac_key_clear(STA_GRP_ENTRY + i);
     }

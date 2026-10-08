@@ -191,6 +191,7 @@ void drv_phy_clock_enable(void)
 
 void drv_phy_enable(void)
 {
+    osi_trace("phy_enable", 0, 0);
     if (enabled++ == 0) {
         drv_phy_clock_enable();
         if (!calibrated) {
@@ -213,6 +214,7 @@ void drv_phy_enable(void)
  */
 void drv_phy_disable(void)
 {
+    osi_trace("phy_disable", 0, 0);
     phy_wifi_enable_set(0);
     if (enabled > 0 && --enabled == 0) {
         phy_close_rf();
@@ -228,6 +230,7 @@ void drv_phy_channel(uint32_t channel)
 
 void drv_wifi_clock_enable(void)
 {
+    osi_trace("wifi_clock_enable", 0, 0);
     REG(MODEM_SYSCON_CLK_CONF1) |= CLK_WIFIMAC_EN | CLK_WIFI_APB_EN | CLK_WIFIBB_ALL;
     /*
      * The MAC's timers and power block, at 0x600AD000, run on a clock of their own,
@@ -241,6 +244,7 @@ void drv_wifi_clock_enable(void)
 
 void drv_wifi_reset_mac(void)
 {
+    osi_trace("wifi_reset_mac", 0, 0);
     REG(MODEM_SYSCON_RST_CONF) |= RST_WIFIMAC;
     REG(MODEM_SYSCON_RST_CONF) &= ~RST_WIFIMAC;
 }
