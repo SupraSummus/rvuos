@@ -55,12 +55,12 @@ SNAPHDR = re.compile(r"snapshot of (\d+) addresses")
 FLASHED = re.compile(r"# flashed 0x[0-9a-fA-F]+ sha256 ([0-9a-f]{64})")
 # A ROM linker script: "name = 0x...", possibly inside PROVIDE(...), comments left to strip.
 PLACED = re.compile(r"^\s*(?:PROVIDE\s*\(\s*)?([A-Za-z_][A-Za-z0-9_.$]*)\s*=\s*0x[0-9a-fA-F]+", re.M)
-# The words that count events over the window, each with the reason it is one. Such a word's value depends on how long the window takes:
-# the same window traced faults, takes longer, and the air carries more past it, so its count differs between the
-# modes by design, not the code. `compare` reads them apart from the verdict. A word is here as a counter, with its
-# reason -- never because two runs disagreed on it.
+# The words whose value is the moment's, not the code's, each with its reason: a count of events over the window,
+# which the traced window, taking longer, makes larger, or a measurement such as the chip's temperature.
+# `compare` reads them apart from the verdict. A word is here for its reason -- never because two runs disagreed on it.
 COUNTERS = {
     0x600A708C: "the frames the air carries over the window, more of them while the window is traced",
+    0x6000E058: "the temperature sensor's reading, TSENS_OUT in bits 0 to 7, which the chip's warmth moves",
 }
 
 

@@ -78,7 +78,7 @@ each `trace: req <n> t<thread> <name> <a0> <a1>`,
 so the window's device accesses and adapter calls read as one sequence.
 The final state is held to the dry run's too: `tools/mac-trace.py snapshot` makes the window's `snap=` lines from a traced log,
 and `compare`, with dry logs and the traced one, fails on any divergence outside the words the dry runs differ in,
-the words that count events over the window read apart, `mac-trace.py`'s `COUNTERS` naming each with its reason.
+the words that count events over the window or measure the moment read apart, `mac-trace.py`'s `COUNTERS` naming each with its reason.
 `tests/mac-trace-test.py`, a part of `make check`, holds what the tool lets pass and what it stops;
 a change to what it compares changes that test with it.
 `make mac-replay-test`, a part of `make check` too, runs the own start's register sequences of `macstart.c` on the host,
