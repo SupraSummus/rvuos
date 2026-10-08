@@ -392,7 +392,8 @@ extern int wifi_mode_set(int mode);
 extern int _do_wifi_start(int mode);
 extern void ieee80211_update_phy_country(void);
 extern void chm_init(void *chm);
-extern void ic_set_interrupt_handler(void);
+extern void hal_init(void);          /* pp: the MAC's configuration, the first thing their ic_set_interrupt_handler runs */
+extern void wDev_ProcessFiq(void);   /* pp: their interrupt handler, which they install for the MAC's source */
 extern void pm_noise_check_enable(void);
 extern void pm_disconnected_start(void);
 extern uint8_t g_mac_sleep_en;           /* the libraries' MAC sleep flag, which gates the modem wake */
@@ -442,7 +443,18 @@ static int drv_hw_start(void)
     drv_reset_mac();
     mac_tx_block_clear();              /* the libraries' ic_mac_init: their hal_mac_init's tx-block clear */
     chm_init(g_ic);
-    ic_set_interrupt_handler();
+    /*
+     * The libraries' ic_set_interrupt_handler, written out: their hal_init, the MAC's configuration -- the HE
+     * tables, the txrx queues, the receive filter, the addresses, the antenna, the cipher and the PTI, most of
+     * the window's device work -- then the two interrupt sources the adapter routes and their handler, armed.
+     * Their set_intr passes the core the Wi-Fi task runs on and the adapter ignores it; the driver passes none.
+     * Their handler is the one the driver's own receive trades for its own once it takes the MAC, see mac.c.
+     */
+    hal_init();
+    funcs->set_intr(0, 2 /* the modem's power */, 1, 1);
+    funcs->set_intr(0, 0 /* the MAC */, 1, 1);
+    funcs->set_isr(1, (void *)wDev_ProcessFiq, 0);
+    funcs->ints_on(1u << 1);
     mac_default_policy(drv_self->mac); /* the libraries' chip_enable: their default receive policy */
     mac_rx_on();                       /* and their ic_enable_rx */
     pm_noise_check_enable();
