@@ -622,6 +622,22 @@ void mac_config_finish(void)
 }
 
 /*
+ * The libraries' hal_crypto_init, written out:
+ * their cipher's two configuration words, each 0x30000, and the three words after them cleared.
+ * Their engine word, 0x30103, which their hal_crypto_enable writes into the first, stays unset:
+ * with it set the access point took none of the station's sending; see NOTES.md.
+ */
+#define CRYPTO_BASE 0x600a4800u
+void mac_crypto_init(void)
+{
+    wr(CRYPTO_BASE + 0x00u, 0x30000u);
+    wr(CRYPTO_BASE + 0x04u, 0x30000u);
+    wr(CRYPTO_BASE + 0x08u, 0);
+    wr(CRYPTO_BASE + 0x0cu, 0);
+    wr(CRYPTO_BASE + 0x10u, 0);
+}
+
+/*
  * The MAC's sending, by the driver's own code; see mac.h.
  *
  * The libraries' lmacSetTxFrame and lmacTxFrame, read in their code,

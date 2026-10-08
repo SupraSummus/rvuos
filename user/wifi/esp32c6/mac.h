@@ -102,6 +102,12 @@ void mac_rx_policy_word(uint32_t iface);
 void mac_config_finish(void);
 
 /*
+ * The cipher's two configuration words and the three words after them, as the libraries' hal_crypto_init sets them.
+ * The engine word their hal_crypto_enable writes into the first stays unset; see mac.c.
+ */
+void mac_crypto_init(void);
+
+/*
  * The own station's receiving, in place of the libraries': the address and the BSSID (mac_station),
  * a key entry the MAC's cipher holds (mac_key_set), and the station-mode receive policy (mac_receive),
  * written with the sniffer off, before the driver's list is taken; see mac.c.
