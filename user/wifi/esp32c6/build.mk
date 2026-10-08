@@ -230,7 +230,10 @@ endif
 # The library and function each device access of a trace log belongs to, see tools/mac-trace.py:
 # what of the log the own bring-up has to reproduce, and what is libphy's calibration and stays.
 # The log has to be the one the attributed image ran, which the rule holds by the log's own flashed-image hash.
-# WIFI_TRACE_ONLY=pp holds pp's part alone, which the channel's losses miss.
+# WIFI_TRACE_ONLY=pp holds pp's part alone, and refuses a log short beside pp; a loss is a fault, not the channel.
+# WIFI_TRACE_SEGMENTS=1 splits the log by the trace: lines' request numbers, the calls framing each segment; a
+# short log is refused, since a loss shifts every boundary past it. WIFI_TRACE_TOP names that many functions
+# under each segment (0 names all); the default is 8.
 WIFI_TRACE_LOG ?= $(BUILD)/wifi-run.log
 .PHONY: wifi-esp32c6-attrib
 ifeq ($(BOARD),esp32c6)
@@ -240,8 +243,31 @@ wifi-esp32c6-attrib: $(BUILD)/wifi-drv.elf $(BUILD)/wifi-drv.bin $(PHYBLOB_ROM_E
 		--lib pp=$(PHYBLOB_CACHE)/libpp.a:$(PHYBLOB_CACHE)/esp32c6.rom.pp.ld \
 		--lib phy=$(BUILD)/$(WIFI_ESP)/libphy.a:$(PHYBLOB_CACHE)/esp32c6.rom.phy.ld \
 		$(addprefix --own ,$(WIFI_ESP_OBJ) $(LIB_OBJ)) \
-		$(if $(WIFI_TRACE_ONLY),--only $(WIFI_TRACE_ONLY),) $(WIFI_TRACE_LOG)
+		$(if $(WIFI_TRACE_ONLY),--only $(WIFI_TRACE_ONLY),) $(if $(WIFI_TRACE_SEGMENTS),--segments,) \
+		$(if $(WIFI_TRACE_TOP),--top $(WIFI_TRACE_TOP),) $(WIFI_TRACE_LOG)
 else
 wifi-esp32c6-attrib:
 	$(error the driver runs on an ESP32-C6: make BOARD=esp32c6 wifi-esp32c6-attrib)
+endif
+
+# The first access the own run differs at, thread by thread, the bases naming the volatile words: the own start's
+# bring-up runs on the thread that called it where the libraries posted it to the wifi task, so --join compares one
+# stream, and libphy's calibration folds to one marker a run. WIFI_TRACE_BASE names the libraries' start's logs (two
+# or more) and WIFI_TRACE_OWN the own start's; the rule knows the ELF, the ROM and the libraries, so CLAUDE.md names
+# it and not the whole command. See tools/mac-trace.py.
+WIFI_TRACE_BASE ?=
+WIFI_TRACE_OWN ?=
+.PHONY: wifi-esp32c6-diff
+ifeq ($(BOARD),esp32c6)
+wifi-esp32c6-diff: $(BUILD)/wifi-drv.elf $(BUILD)/wifi-drv.bin $(PHYBLOB_ROM_ELF)
+	tools/mac-trace.py diff --from start --to stop --join --collapse phy \
+		--elf $(BUILD)/wifi-drv.elf --rom $(PHYBLOB_ROM_ELF) \
+		--lib net80211=$(PHYBLOB_CACHE)/libnet80211.a:$(PHYBLOB_CACHE)/esp32c6.rom.net80211.ld \
+		--lib pp=$(PHYBLOB_CACHE)/libpp.a:$(PHYBLOB_CACHE)/esp32c6.rom.pp.ld \
+		--lib phy=$(BUILD)/$(WIFI_ESP)/libphy.a:$(PHYBLOB_CACHE)/esp32c6.rom.phy.ld \
+		$(addprefix --own ,$(WIFI_ESP_OBJ) $(LIB_OBJ)) \
+		$(WIFI_TRACE_BASE) $(WIFI_TRACE_OWN)
+else
+wifi-esp32c6-diff:
+	$(error the driver runs on an ESP32-C6: make BOARD=esp32c6 wifi-esp32c6-diff)
 endif

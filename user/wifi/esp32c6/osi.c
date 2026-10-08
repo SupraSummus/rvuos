@@ -179,6 +179,17 @@ void osi_trace(const char *what, uint32_t a0, uint32_t a1)
 
 void osi_trace_dump(void)
 {
+    /*
+     * Each thread's role first, a line of its own: a reader can tell the interrupt's and the timers' accesses, whose
+     * place in time is the hardware's, from the synchronous ones'; tools/mac-trace.py's diff reads these lines.
+     */
+    for (uint32_t i = 0; i < osi.thread_count; i++) {
+        const char *role = &osi.threads[i] == osi.isr      ? "isr"
+                           : &osi.threads[i] == osi.timers ? "timers"
+                           : &osi.threads[i] == osi.watcher ? "watcher"
+                                                            : "other";
+        drv_say("trace: thread %u %s\n", i, role);
+    }
     uint32_t n = osi_trace_n < osi_trace_max ? osi_trace_n : osi_trace_max;
     for (uint32_t i = 0; i < n; i++) {
         drv_say("trace: req %u t%u %s %u %u\n", osi_trace_buf[i].asked, osi_trace_buf[i].thread,

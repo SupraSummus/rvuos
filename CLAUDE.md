@@ -77,8 +77,14 @@ and, from `osi.c`'s `osi_trace`, the calls the libraries make into the adapter (
 each `trace: req <n> t<thread> <name> <a0> <a1>`,
 so the window's device accesses and adapter calls read as one sequence.
 The final state is held to the dry run's too: `tools/mac-trace.py snapshot` makes the window's `snap=` lines from a traced log,
-and `compare`, with two dry logs and the traced one, fails on any divergence outside the words the dry runs differ in.
-`make BOARD=esp32c6 wifi-esp32c6-attrib` attributes every access of a traced log to its library and function.
+and `compare`, with dry logs and the traced one, fails on any divergence outside the words the dry runs differ in;
+two dry logs are the least, and four are kept for the start's steps, since a word that varies run to run can agree
+between two by chance.
+`make BOARD=esp32c6 wifi-esp32c6-attrib` attributes every access of a traced log to its library and function,
+and `WIFI_TRACE_SEGMENTS=1` splits that log into the segments between the `trace: ` lines' requests.
+`make BOARD=esp32c6 wifi-esp32c6-diff WIFI_TRACE_BASE=... WIFI_TRACE_OWN=...` holds the own start's access stream
+to the library start's, thread by thread, the bases naming the volatile words; a change to the driver's own start
+goes through it. WIFI_TRACE_BASE names the libraries' start's logs, two or more.
 A change to the station in `user/wifi/esp32c6/main.c`, `sta.c` or `mgmt.c` runs it with a network named,
 the station's scan, SAE, association and 4-way handshake at an access point that offers WPA3, which fails if one is not answered,
 and then serves the link the network's frames cross,
