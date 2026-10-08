@@ -141,6 +141,12 @@ what is left:
   Their `mac_txrx_init` passes its first HE call, `hal_he_set_mac_delay`, a register's address,
   which that tests only against zero, so `mac_queues_init` passes 1;
   whether the delay is meant on, or off as the two calls after it pass, is a step of its own, held by the gate.
+  The registers these groups write are the libraries' to the bit;
+  those not named carry the offset they were reached at.
+  A pass of its own, once the groups are over, should name them from the libraries' own functions that reach them --
+  `attrib` on a trace for the paths that ran, a static scan like `phymap`'s for the rest -- and from the ROM's symbols,
+  since the IDF's headers leave 0x600a4xxx unnamed.
+  Then a write that does nothing can be left out, and the `a0` above settled, on a role rather than on the bit.
   `mac_default_policy` writes interface 1's address and receive policy, the soft AP's, which the driver never brings
   up; each such write is the first of the own start's to try leaving out, one at a time, held by the gate.
   Its frame completion spins in the caller's thread while the slot is armed, and borrows the libraries' slot 0;
