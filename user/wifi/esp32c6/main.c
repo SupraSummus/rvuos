@@ -392,7 +392,29 @@ extern int wifi_mode_set(int mode);
 extern int _do_wifi_start(int mode);
 extern void ieee80211_update_phy_country(void);
 extern void chm_init(void *chm);
-extern void hal_init(void);          /* pp: the MAC's configuration, the first thing their ic_set_interrupt_handler runs */
+
+/*
+ * The libraries' MAC configuration, their hal_init, group by group: its register writes about HAL_CFG, HAL_HOLD and
+ * HAL_MISC are the driver's own, mac.c's, and the groups between them are still the libraries' calls, each marked in
+ * drv_mac_config below so that the trace's segments show it and a later step can take it over. See user/wifi/NOTES.md.
+ */
+extern void mac_txrx_init(void);
+extern void hal_mac_rx_set_policy(uint32_t iface, uint32_t a, uint32_t b, uint32_t c);
+extern void mac_rxbuf_init(void);
+extern void hal_he_init(void);
+extern void mac_last_rxbuf_init(void);
+extern void hal_mac_rate_autoack_init(void);
+extern void hal_mac_disable_low_rate(void);
+extern void hal_crypto_init(void);
+extern void hal_attenna_init(void);
+extern void hal_mac_set_rxbuf_reload_use_hw_beacon_enable(void);
+extern void hal_timer_update_by_rtc(uint32_t which, uint32_t hz);
+extern void hal_coex_pti_init(void);
+extern void hal_set_rx_active_pti(uint32_t pti);
+extern void hal_set_rx_ack_pti(uint32_t pti);
+extern void hal_set_wifi_default_pti(uint32_t pti);
+extern void hal_set_ofdma_sequence_pti(void);
+
 extern void wDev_ProcessFiq(void);   /* pp: their interrupt handler, which they install for the MAC's source */
 extern void pm_noise_check_enable(void);
 extern void pm_disconnected_start(void);
@@ -421,6 +443,51 @@ static void drv_reset_mac(void)
 }
 
 /*
+ * The libraries' hal_init, the MAC's configuration, written out: their register writes about HAL_CFG, HAL_HOLD and
+ * HAL_MISC and their RX-policy words (mac.c), and the groups between them -- the txrx queues, the receive policy,
+ * the RX buffers, the HE tables, the ack rates and low-rate mask, the cipher, the antenna, the timer and the coex
+ * PTI -- still their calls, each marked so that the trace's segments show its accesses and a later step is held to
+ * it alone. Their hal_init calls the groups in this order, with no argument but the interface's and the timer's.
+ */
+static void drv_mac_config(void)
+{
+    osi_trace("mac-config", 0, 0);
+    mac_config_start();
+    osi_trace("mac-txrx", 0, 0);
+    mac_txrx_init();
+    osi_trace("mac-policy", 0, 0);
+    for (uint32_t i = 0; i < 4u; i++) {
+        mac_rx_policy_word(i);
+        hal_mac_rx_set_policy(i, 0, 0, 0);
+    }
+    osi_trace("mac-rxbuf", 0, 0);
+    mac_rxbuf_init();
+    osi_trace("mac-he", 0, 0);
+    hal_he_init();
+    mac_last_rxbuf_init();
+    osi_trace("mac-rate", 0, 0);
+    hal_mac_rate_autoack_init();
+    hal_mac_disable_low_rate();
+    osi_trace("mac-crypto", 0, 0);
+    hal_crypto_init();
+    osi_trace("mac-antenna", 0, 0);
+    hal_attenna_init();
+    osi_trace("mac-post", 0, 0);
+    mac_config_finish();
+    hal_mac_set_rxbuf_reload_use_hw_beacon_enable();
+    osi_trace("mac-pti", 0, 0);
+    hal_timer_update_by_rtc(1, funcs->slowclk_cal_get());
+    hal_coex_pti_init();
+    uint8_t pti_active = 0, pti_default = 1; /* their hal_init's own bytes, which their coex_pti_get fills */
+    funcs->coex_pti_get(3, &pti_active);
+    funcs->coex_pti_get(0xfu, &pti_default);
+    hal_set_rx_active_pti(0);
+    hal_set_rx_ack_pti(pti_active);
+    hal_set_wifi_default_pti(pti_default);
+    hal_set_ofdma_sequence_pti();
+}
+
+/*
  * The libraries' wifi_hw_start, the hardware bring-up they run once before their task brings the interface up,
  * written out for the station's fresh start: the stop mask clear, neither guard tripped. The libraries' other
  * branch -- an interface a stop left behind, woken rather than brought up anew -- is not written, since the driver
@@ -444,13 +511,12 @@ static int drv_hw_start(void)
     mac_tx_block_clear();              /* the libraries' ic_mac_init: their hal_mac_init's tx-block clear */
     chm_init(g_ic);
     /*
-     * The libraries' ic_set_interrupt_handler, written out: their hal_init, the MAC's configuration -- the HE
-     * tables, the txrx queues, the receive filter, the addresses, the antenna, the cipher and the PTI, most of
-     * the window's device work -- then the two interrupt sources the adapter routes and their handler, armed.
-     * Their set_intr passes the core the Wi-Fi task runs on and the adapter ignores it; the driver passes none.
-     * Their handler is the one the driver's own receive trades for its own once it takes the MAC, see mac.c.
+     * The libraries' ic_set_interrupt_handler, written out: their hal_init, the MAC's configuration, which
+     * drv_mac_config writes out group by group, then the two interrupt sources the adapter routes and their handler,
+     * armed. Their set_intr passes the core the Wi-Fi task runs on and the adapter ignores it; the driver passes
+     * none. Their handler is the one the driver's own receive trades for its own once it takes the MAC, see mac.c.
      */
-    hal_init();
+    drv_mac_config();
     funcs->set_intr(0, 2 /* the modem's power */, 1, 1);
     funcs->set_intr(0, 0 /* the MAC */, 1, 1);
     funcs->set_isr(1, (void *)wDev_ProcessFiq, 0);

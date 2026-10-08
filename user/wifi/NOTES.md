@@ -700,6 +700,13 @@ each dropped on its own and held to the snapshot and the runs.
 Most of the start's HAL functions write registers alone, their objects carrying no relocation to any library's data,
 so the own start can call them as they are, given the right arguments, and take them over one at a time.
 `mac_rxbuf_init`, which reads the interface's control block, waits for the init to be the driver's too.
+The MAC's configuration, their `hal_init`, is the driver's own sequence now:
+the register writes it makes about HAL_CFG, HAL_HOLD and HAL_MISC and its receive-policy words are `mac.c`'s,
+and the groups between them are still their calls,
+each marked (`osi_trace`) so that a traced run's segments show it,
+and a later step is held to that group alone, `diff` started at its mark:
+the txrx queues, the receive policy, the RX buffers, the HE tables, the ack rates and the low-rate mask,
+the cipher, the antenna, the timer and the coex PTI.
 A step's diff holds the device accesses; the writes a step makes to the libraries' own memory are not in the trace, so only the runs hold those.
 Of the start's calls, one that only writes the libraries' own memory -- their pm or their control block -- is left a call:
 taking it over moves no device work to the driver, and would carry their structures' layout into its code.

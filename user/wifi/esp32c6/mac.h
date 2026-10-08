@@ -93,6 +93,15 @@ void mac_tx_block_clear(void);
 void mac_rx_on(void);
 
 /*
+ * The register writes the libraries' hal_init makes around the groups of its MAC configuration: their HAL_CFG start
+ * and the wait for it, HAL_HOLD and HAL_MISC, and, after the groups, HAL_HOLD, HAL_WORD and RX_WORD; and the
+ * read-modify-writes before each interface's hal_mac_rx_set_policy. The driver's own start makes them; see mac.c.
+ */
+void mac_config_start(void);
+void mac_rx_policy_word(uint32_t iface);
+void mac_config_finish(void);
+
+/*
  * The own station's receiving, in place of the libraries': the address and the BSSID (mac_station),
  * a key entry the MAC's cipher holds (mac_key_set), and the station-mode receive policy (mac_receive),
  * written with the sniffer off, before the driver's list is taken; see mac.c.
