@@ -702,7 +702,7 @@ so the own start can call them as they are, given the right arguments, and take 
 `mac_rxbuf_init`, which reads the interface's control block, waits for the init to be the driver's too.
 The MAC's configuration, their `hal_init`, is the driver's own sequence now:
 the register writes it makes about HAL_CFG, HAL_HOLD and HAL_MISC and its receive-policy words are `mac.c`'s,
-and the groups between them are still their calls,
+and the groups between them go over one at a time,
 each named with `osi_trace`, so that a traced run's segments show its accesses:
 the txrx queues, the receive policy, the RX buffers, the HE tables, the ack rates and the low-rate mask,
 the cipher, the antenna, the timer and the coex PTI.

@@ -138,6 +138,9 @@ what is left:
   Calling `hal_init` still, and replacing one group at a time by weakening `libpp.a`'s symbol for it,
   as `libphy.a`'s are weakened for `phy.c`, would leave the libraries' sequence as it is,
   with no parent to transcribe first.
+  Their `mac_txrx_init` passes its first HE call, `hal_he_set_mac_delay`, a register's address,
+  which that tests only against zero, so `mac_queues_init` passes 1;
+  whether the delay is meant on, or off as the two calls after it pass, is a step of its own, held by the gate.
   `mac_default_policy` writes interface 1's address and receive policy, the soft AP's, which the driver never brings
   up; each such write is the first of the own start's to try leaving out, one at a time, held by the gate.
   Its frame completion spins in the caller's thread while the slot is armed, and borrows the libraries' slot 0;

@@ -603,6 +603,71 @@ void mac_config_start(void)
     wr(HAL_MISC, 0xffffffffu);
 }
 
+/*
+ * The libraries' mac_txrx_init, written out:
+ * its sniffers cleared and set to their default, the words that set up its queues and hold the MAC,
+ * the receive left disabled, which mac_rx_on sets again, and the three HE calls at its middle.
+ * The sniffers, HAL_WORD, HAL_CTRL and RX_CTRL are named above; the others carry the offset they were reached at,
+ * since what they are is not known.
+ * Each of their read-modify-writes is one here, in their order, since the trace holds each access.
+ */
+#define TXRX_MAC_100  (MAC_BASE + 0x100u)
+#define TXRX_MAC_110  (MAC_BASE + 0x110u)
+#define TXRX_MAC_114  (MAC_BASE + 0x114u)
+#define TXRX_HAL_C1C  0x600a4c1cu
+#define TXRX_HAL_C20  0x600a4c20u
+#define TXRX_HAL_C24  0x600a4c24u
+#define TXRX_HAL_C60  0x600a4c60u
+#define TXRX_HAL_C98  0x600a4c98u
+#define TXRX_HAL_C9C  0x600a4c9cu
+#define TXRX_HAL_CA4  0x600a4ca4u
+
+/* The three HE calls mac_txrx_init makes; they stay theirs, leaves with device writes of their own. */
+extern void hal_he_set_mac_delay(uint32_t);
+extern void hal_he_set_ack_rate(uint32_t);
+extern void hal_he_set_bbrxhung_time(uint32_t);
+
+void mac_queues_init(void)
+{
+    wr(HAL_WORD, rd(HAL_WORD) | 0x8080a000u);
+    wr(HAL_WORD, rd(HAL_WORD) | 0x1000u);
+    wr(HAL_WORD, rd(HAL_WORD) | 0x10000000u);
+    wr(TXRX_HAL_C98, rd(TXRX_HAL_C98) & ~0x8u);
+
+    wr(SNIFF_CTRL0, rd(SNIFF_CTRL0) & 0xffffu);
+    wr(SNIFF_CTRL1, rd(SNIFF_CTRL1) & 0xffffu);
+    wr(TXRX_MAC_100, rd(TXRX_MAC_100) & 0xffffu);
+    wr(SNIFF_CTRL_TYPES, rd(SNIFF_CTRL_TYPES) & 0xffffu);
+    wr(SNIFF_CTRL0, rd(SNIFF_CTRL0) | 0x01000000u);
+    wr(SNIFF_CTRL1, rd(SNIFF_CTRL1) | 0x01000000u);
+    wr(SNIFF_CTRL0, rd(SNIFF_CTRL0) | 0x04000000u);
+    wr(SNIFF_CTRL1, rd(SNIFF_CTRL1) | 0x04000000u); /* the two bits together are SNIFF_CTRL_NONE */
+
+    wr(HAL_WORD, rd(HAL_WORD) | 0x200u);
+    wr(TXRX_MAC_110, rd(TXRX_MAC_110) | 1u);
+    wr(TXRX_MAC_110, rd(TXRX_MAC_110) | 0x10u);
+    wr(TXRX_MAC_114, rd(TXRX_MAC_114) | 0x80000000u);
+    wr(TXRX_MAC_114, (rd(TXRX_MAC_114) & 0xf00fffffu) | 0x01b00000u);
+    wr(TXRX_HAL_C9C, rd(TXRX_HAL_C9C) | 3u);
+
+    /* Their first call passes a register's address left in a0,
+       which hal_he_set_mac_delay tests only against zero, so the driver passes 1;
+       the two after it pass zero. */
+    hal_he_set_mac_delay(1);
+    hal_he_set_ack_rate(0);
+    hal_he_set_bbrxhung_time(0);
+
+    wr(TXRX_HAL_C1C, rd(TXRX_HAL_C1C) | 0x80000000u);
+    wr(TXRX_HAL_C1C, rd(TXRX_HAL_C1C) | 0x40000000u);
+    wr(TXRX_HAL_C20, (rd(TXRX_HAL_C20) & 0xfffff000u) | 0xf0u);
+    wr(TXRX_HAL_C24, (rd(TXRX_HAL_C24) & 0xfffff000u) | 0xf0u);
+    wr(TXRX_HAL_CA4, (rd(TXRX_HAL_CA4) & ~0xf0u) | 0x40u);
+    wr(TXRX_HAL_C60, rd(TXRX_HAL_C60) | 0x7fff0000u);
+    wr(TXRX_HAL_C60, rd(TXRX_HAL_C60) | 0x80000000u);
+    wr(HAL_CTRL, rd(HAL_CTRL) | 2u);
+    wr(RX_CTRL, rd(RX_CTRL) & ~RX_CTRL_ENABLE);
+}
+
 /* The read-modify-writes their hal_init makes on an interface's receive-policy word, before each policy call. */
 void mac_rx_policy_word(uint32_t iface)
 {

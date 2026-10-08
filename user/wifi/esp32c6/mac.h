@@ -103,6 +103,9 @@ void mac_config_start(void);
 void mac_rx_policy_word(uint32_t iface);
 void mac_config_finish(void);
 
+/* The libraries' mac_txrx_init, written out: their queues and sniffers settled; see mac.c. */
+void mac_queues_init(void);
+
 /*
  * The cipher's two configuration words and the three words after them, as the libraries' hal_crypto_init sets them.
  * The engine word their hal_crypto_enable writes into the first stays unset; see mac.c.
