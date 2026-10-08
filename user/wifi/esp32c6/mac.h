@@ -108,6 +108,15 @@ void mac_config_finish(void);
 void mac_crypto_init(void);
 
 /*
+ * The coex PTI: their hal_coex_pti_init's fifth bit of PTI_DEFAULT, their hal_set_rx_active_pti and
+ * hal_set_wifi_default_pti's low nibble, and their hal_set_rx_ack_pti's second. See mac.c.
+ */
+void mac_coex_pti_init(void);
+void mac_rx_active_pti(uint32_t pti);
+void mac_rx_ack_pti(uint32_t pti);
+void mac_wifi_default_pti(uint32_t pti);
+
+/*
  * The own station's receiving, in place of the libraries': the address and the BSSID (mac_station),
  * a key entry the MAC's cipher holds (mac_key_set), and the station-mode receive policy (mac_receive),
  * written with the sniffer off, before the driver's list is taken; see mac.c.

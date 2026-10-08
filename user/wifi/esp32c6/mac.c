@@ -638,6 +638,34 @@ void mac_crypto_init(void)
 }
 
 /*
+ * The libraries' coex PTI, the packet-type map their hal_set_*_pti write into PTI_DEFAULT and PTI_RX (see mac_stop),
+ * written out for the four whose value the driver's start supplies: their hal_coex_pti_init sets PTI_DEFAULT's
+ * fifth bit, their hal_set_rx_active_pti and hal_set_wifi_default_pti the low nibble -- the active PTI and the
+ * default one their start reads through the adapter's coex_pti_get -- and their hal_set_rx_ack_pti the second
+ * nibble. Their hal_set_ofdma_sequence_pti and hal_timer_update_by_rtc, whose groups the driver still calls, write
+ * the words those two name.
+ */
+void mac_coex_pti_init(void)
+{
+    wr(PTI_DEFAULT, rd(PTI_DEFAULT) | 0x20u);
+}
+
+void mac_rx_active_pti(uint32_t pti)
+{
+    wr(PTI_RX, (rd(PTI_RX) & ~0xfu) | (pti & 0xfu));
+}
+
+void mac_rx_ack_pti(uint32_t pti)
+{
+    wr(PTI_RX, (rd(PTI_RX) & ~0xf0u) | ((pti << 4) & 0xffu));
+}
+
+void mac_wifi_default_pti(uint32_t pti)
+{
+    wr(PTI_DEFAULT, (rd(PTI_DEFAULT) & ~0xfu) | (pti & 0xfu));
+}
+
+/*
  * The MAC's sending, by the driver's own code; see mac.h.
  *
  * The libraries' lmacSetTxFrame and lmacTxFrame, read in their code,

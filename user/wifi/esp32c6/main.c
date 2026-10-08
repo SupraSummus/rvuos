@@ -408,10 +408,6 @@ extern void hal_mac_disable_low_rate(void);
 extern void hal_attenna_init(void);
 extern void hal_mac_set_rxbuf_reload_use_hw_beacon_enable(void);
 extern void hal_timer_update_by_rtc(uint32_t which, uint32_t hz);
-extern void hal_coex_pti_init(void);
-extern void hal_set_rx_active_pti(uint32_t pti);
-extern void hal_set_rx_ack_pti(uint32_t pti);
-extern void hal_set_wifi_default_pti(uint32_t pti);
 extern void hal_set_ofdma_sequence_pti(void);
 
 extern void wDev_ProcessFiq(void);   /* pp: their interrupt handler, which they install for the MAC's source */
@@ -476,13 +472,13 @@ static void drv_mac_config(void)
     hal_mac_set_rxbuf_reload_use_hw_beacon_enable();
     osi_trace("mac-pti", 0, 0);
     hal_timer_update_by_rtc(1, funcs->slowclk_cal_get());
-    hal_coex_pti_init();
+    mac_coex_pti_init();
     uint8_t pti_active = 0, pti_default = 1; /* their hal_init's own bytes, which their coex_pti_get fills */
     funcs->coex_pti_get(3, &pti_active);
     funcs->coex_pti_get(0xfu, &pti_default);
-    hal_set_rx_active_pti(0);
-    hal_set_rx_ack_pti(pti_active);
-    hal_set_wifi_default_pti(pti_default);
+    mac_rx_active_pti(0);
+    mac_rx_ack_pti(pti_active);
+    mac_wifi_default_pti(pti_default);
     hal_set_ofdma_sequence_pti();
 }
 
