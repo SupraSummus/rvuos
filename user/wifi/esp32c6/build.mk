@@ -261,7 +261,7 @@ WIFI_TRACE_OWN ?=
 ifeq ($(BOARD),esp32c6)
 wifi-esp32c6-diff: $(BUILD)/wifi-drv.elf $(BUILD)/wifi-drv.bin $(PHYBLOB_ROM_ELF)
 	tools/mac-trace.py diff --from start --to stop --join --collapse phy \
-		--elf $(BUILD)/wifi-drv.elf --rom $(PHYBLOB_ROM_ELF) \
+		--elf $(BUILD)/wifi-drv.elf --rom $(PHYBLOB_ROM_ELF) --image $(BUILD)/wifi-drv.bin \
 		--lib net80211=$(PHYBLOB_CACHE)/libnet80211.a:$(PHYBLOB_CACHE)/esp32c6.rom.net80211.ld \
 		--lib pp=$(PHYBLOB_CACHE)/libpp.a:$(PHYBLOB_CACHE)/esp32c6.rom.pp.ld \
 		--lib phy=$(BUILD)/$(WIFI_ESP)/libphy.a:$(PHYBLOB_CACHE)/esp32c6.rom.phy.ld \

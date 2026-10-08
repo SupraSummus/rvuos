@@ -79,14 +79,16 @@ so the window's device accesses and adapter calls read as one sequence.
 The final state is held to the dry run's too: `tools/mac-trace.py snapshot` makes the window's `snap=` lines from a traced log,
 and `compare`, with dry logs and the traced one, fails on any divergence outside the words the dry runs differ in,
 the words that count events over the window read apart, `mac-trace.py`'s `COUNTERS` naming each with its reason.
+`tests/mac-trace-test.py`, a part of `make check`, holds what the tool lets pass and what it stops;
+a change to what it compares changes that test with it.
 `make BOARD=esp32c6 wifi-esp32c6-attrib` attributes every access of a traced log to its library and function,
 and `WIFI_TRACE_SEGMENTS=1` splits that log into the segments between the `trace: ` lines' requests.
 A step of the own start goes through four checks:
 `compare` above, against the step's own dry runs;
-`make BOARD=esp32c6 wifi-esp32c6-diff WIFI_TRACE_BASE=... WIFI_TRACE_OWN=...`, the own start's access stream against the libraries' start's, thread by thread, WIFI_TRACE_BASE naming two or more of the libraries' start's logs;
+`make BOARD=esp32c6 wifi-esp32c6-diff WIFI_TRACE_BASE=... WIFI_TRACE_OWN=...`, the own start's access stream against the libraries' start's, thread by thread, WIFI_TRACE_BASE naming four or more of the libraries' start's logs, each one the build at hand flashed;
 `tools/mac-trace.py compare LIB... OWN`, the final state across images, the dry logs four or more trace=2 `libstart=1` runs made interleaved with the driver's, since what the air carries changes over time, and the traced log the driver's own start's trace=2;
 and the ordinary runs below.
-Each `compare` keeps four dry logs, not two: a word that varies run to run can agree between two by chance and show as a divergence that is not one.
+The diff's bases and each `compare`'s dry logs are four, not two: a word that varies run to run can agree between two by chance and show as a difference that is not one.
 A change to the station in `user/wifi/esp32c6/main.c`, `sta.c` or `mgmt.c` runs it with a network named,
 the station's scan, SAE, association and 4-way handshake at an access point that offers WPA3, which fails if one is not answered,
 and then serves the link the network's frames cross,

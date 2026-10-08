@@ -172,7 +172,7 @@ else
 $(error unknown BOARD '$(BOARD)'; the boards are qemu, esp32c6, rp2350, mps2-an385 and mps2-an521)
 endif
 
-.PHONY: all clean check arm-test arm-test-an385 arm-test-an521 arm-test-an521-smp2 smp-test contents
+.PHONY: all clean check arm-test arm-test-an385 arm-test-an521 arm-test-an521-smp2 smp-test contents mac-trace-test
 
 # Pattern rules would delete the objects they chain through,
 # so every build compiled the kernel from scratch.
@@ -233,13 +233,17 @@ smp-test:
 contents:
 	tools/contents.py MANUAL.md DESIGN.md
 
+# tools/mac-trace.py's text logic, which holds every step of the ESP32-C6's own bring-up, on synthetic logs.
+mac-trace-test:
+	tests/mac-trace-test.py
+
 # The parts share nothing but what they build, so they run side by side, CHECK_JOBS at a time, a processor each by default;
 # -icount keeps what they print the same however many run at once.
 # make starts them in the order named, so the longest come first:
 # the ARM demos take half a minute, their idle kernel polling through every sleep, see intr_wait in kernel/arch/arm/trap.c.
 CHECK_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
 CHECK_PARTS := arm-test-an521-smp2 arm-test-an521 arm-test-an385 smp-test lab qemu-replay test host-test \
-               bench lib-test escape wifi-test keys-test decode-test contents
+               bench lib-test escape wifi-test keys-test decode-test contents mac-trace-test
 check:
 	$(MAKE) -j$(CHECK_JOBS) $(CHECK_PARTS)
 

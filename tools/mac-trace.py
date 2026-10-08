@@ -4,7 +4,7 @@ the library and function each device access belongs to.
 
   snapshot LOG              the aligned whole-word addresses the run read, as the snap= lines a later run reads back
   compare DRY... TRACED     the traced run's final state against the dry runs', nonzero on a divergence
-  diff BASE... OWN          the first access the own run differs at, the bases naming the volatile words
+  diff BASE... OWN          every place the own run differs, the bases naming the volatile words
   attrib [--only NAME] [--segments] LOG  the library and function each access is in, see below
 
 The root task of root.c owns what this parses, see its trace_line and trace_dump. A log is meant to be whole: the
@@ -18,6 +18,7 @@ Usage: tools/mac-trace.py {snapshot,compare,diff,attrib} ... ; each subcommand h
 import argparse
 import bisect
 import collections
+import difflib
 import glob
 import hashlib
 import re
@@ -127,6 +128,14 @@ def snapshots(path):
     if len(out) != want:
         sys.exit("mac-trace: %s says %d snapshot addresses but holds %d" % (path, want, len(out)))
     return out
+
+
+def flashed_from(path, image):
+    """Refuse a log that did not flash this file: its names and its objects' addresses are another build's."""
+    want = hashlib.sha256(open(image, "rb").read()).hexdigest()
+    with open(path, errors="replace") as f:
+        if want not in {m.group(1) for m in FLASHED.finditer(f.read())}:
+            sys.exit("mac-trace: %s did not flash %s" % (path, image))
 
 
 def symbolizer(elf, addrs):
@@ -256,23 +265,37 @@ def phase(path, name):
     return None
 
 
-def compare_seq(base, own, volatile):
-    """The first real difference between two record ranges, and the polling notes before it.
+def align(base, own, volatile):
+    """Where two record lists differ, aligned, and the polling notes in what they share.
 
     Two records agree when their operation, width and address agree, and their values agree unless the address is
-    volatile; a pair that agrees but turned a different number of times (a polling loop, whose count is the time's)
-    is a note, not a difference. Returns (index or None, notes): None means no difference, through the shorter
-    length, with the lengths equal.
+    volatile; the turns a cycle printed a record for are left out, so a polling loop that turned a different number
+    of times (its count is the time's) aligns, and is a note. The lists are aligned as a whole, so a difference does
+    not hide what comes after it: a step that writes one word its own way is one block, and the rest is still held.
+    Returns (blocks, notes): a block is (base from, base to, own from, own to), half-open; a note is (base, own).
     """
-    notes = []
-    for i in range(min(len(base), len(own))):
-        if base[i][:3] != own[i][:3] or (base[i][3] != own[i][3] and base[i][2] not in volatile):
-            return i, notes
-        if base[i][4] != own[i][4]:
-            notes.append((i, base[i], own[i]))
-    if len(base) != len(own):
-        return min(len(base), len(own)), notes
-    return None, notes
+    def key(e):
+        return e[:2] if e[0] == "*" else (e[0], e[1], e[2], None if e[2] in volatile else e[3])
+
+    matcher = difflib.SequenceMatcher(None, [key(e) for e in base], [key(e) for e in own], autojunk=False)
+    blocks, notes = [], []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag != "equal":
+            blocks.append((i1, i2, j1, j2))
+        else:
+            notes += [(i1 + k, j1 + k) for k in range(i2 - i1) if base[i1 + k][4] != own[j1 + k][4]]
+    return blocks, notes
+
+
+# The records of a differing block shown on each side; the rest are counted.
+SHOWN = 8
+
+
+def span(lo, hi):
+    """A half-open range of records, counted from one, as a diff line names it."""
+    if hi == lo:
+        return "nothing, before record %d" % (lo + 1)
+    return "record %d" % (lo + 1) if hi == lo + 1 else "records %d-%d" % (lo + 1, hi)
 
 
 def element(e):
@@ -283,7 +306,7 @@ def element(e):
 
 
 def diff(args):
-    """The first access the own run differs at, thread by thread, the bases naming the volatile words.
+    """Every place the own run differs, thread by thread, the bases naming the volatile words.
 
     The base runs are of the same image, so a word any pair of them reads differently is volatile and its value is
     set aside; two bases are the least, and more are given when a word that varies run to run agrees between two by
@@ -294,9 +317,14 @@ def diff(args):
     phase markers, not by request number. A library named by --collapse folds into one marker per run (libphy's
     calibration, whose count and values are the time's). With --join every thread is one stream, for a run whose own
     start makes the bring-up on the thread that called it where the libraries posted it to another. A polling loop
-    whose cycle turned a different number of times is a note, never the first difference. A short log is refused.
+    whose cycle turned a different number of times is a note, never a difference. The streams are aligned as a
+    whole, so every block where they differ is shown, not the first alone. A short log is refused,
+    and with --image a log that did not flash that file, since the names come from the ELF of the build at hand.
     """
     paths = args.base + [args.own_log]
+    if args.image:
+        for path in paths:
+            flashed_from(path, args.image)
     logs = [scan(p) for p in paths]
     for path, (_acc, bad) in zip(paths, logs):
         if bad:
@@ -350,16 +378,20 @@ def diff(args):
                 for e, n in missing.items():
                     print("  own has x%d  %s" % (n, element(e)))
             continue
-        j, notes = compare_seq(a, o, volatile)
-        for k, _b, _o in notes:
-            print("  t%d polling %5d  0x%08x  x%d vs x%d" % (t, k + 1, a[k][2], a[k][4], o[k][4]))
-        if j is not None:
+        blocks, notes = align(a, o, volatile)
+        for i, j in notes:
+            print("  t%d polling %5d  0x%08x  x%d vs x%d" % (t, i + 1, a[i][2], a[i][4], o[j][4]))
+        if blocks:
             bad = 1
-            print("mac-trace: thread %d: base %d records, own %d; the first difference at record %d:"
-                  % (t, len(a), len(o), j + 1))
-            for k in range(max(0, j - 3), min(min(len(a), len(o)), j + 4)):
-                print("%s t%d %5d  base %-34s   own %s"
-                      % ("<--" if k == j else "   ", t, k + 1, element(a[k]), element(o[k])))
+            print("mac-trace: thread %d: base %d records, own %d; they differ in %d place%s:"
+                  % (t, len(a), len(o), len(blocks), "" if len(blocks) == 1 else "s"))
+        for i1, i2, j1, j2 in blocks:
+            print("  base %s, own %s:" % (span(i1, i2), span(j1, j2)))
+            for side, recs, lo, hi in (("base", a, i1, i2), ("own ", o, j1, j2)):
+                for k in range(lo, min(hi, lo + SHOWN)):
+                    print("    %s %5d  %s" % (side, k + 1, element(recs[k])))
+                if hi - lo > SHOWN:
+                    print("    %s ... and %d more" % (side, hi - lo - SHOWN))
     if bad:
         return 1
     print("mac-trace: every thread agrees, by operation, width and address, and by value, %d volatile words aside"
@@ -475,10 +507,7 @@ def attrib(args):
     no --only its counts are lower bounds over the whole log, and every memory-mapped access is named.
     """
     if args.image:
-        want = hashlib.sha256(open(args.image, "rb").read()).hexdigest()
-        with open(args.log, errors="replace") as f:
-            if want not in {m.group(1) for m in FLASHED.finditer(f.read())}:
-                sys.exit("mac-trace: %s is not the image the log flashed" % args.image)
+        flashed_from(args.log, args.image)
 
     acc, damaged = scan(args.log)
     library, function = classifier(args, {r[1] for r in acc})
@@ -559,7 +588,7 @@ def main():
     p.add_argument("traced")
     p.set_defaults(run=compare)
 
-    p = sub.add_parser("diff", help="the first access the own run differs at, the bases naming the volatile words")
+    p = sub.add_parser("diff", help="every place the own run differs, the bases naming the volatile words")
     p.add_argument("--from", dest="from_", metavar="NAME", help="start at the request of this trace: line")
     p.add_argument("--to", dest="to", metavar="NAME", help="stop before the request of this trace: line")
     p.add_argument("--join", action="store_true",
@@ -572,6 +601,7 @@ def main():
                    help="a library, by the archive that defines it and the ROM script that places the rest")
     p.add_argument("--own", action="append", default=[], metavar="OBJ",
                    help="the driver's own objects, by path or glob; the owner not any library's")
+    p.add_argument("--image", metavar="FILE", help="refuse a log, base or own, unless it flashed this file")
     p.add_argument("base", nargs="+", metavar="BASE", help="two or more runs of the image; a word any pair differs in is volatile")
     p.add_argument("own_log", metavar="OWN", help="the own run's log")
     p.set_defaults(run=diff)

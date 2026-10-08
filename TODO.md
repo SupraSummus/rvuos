@@ -103,10 +103,6 @@ what is left:
   and would take the root task's own filter away.
 - Whether the rare whole stops of the trace stream can still happen, now that the console writer is fixed,
   wants a longer series; write each stop down with its sequence number and time.
-- `tools/mac-trace.py` is the oracle of every step of the own bring-up and has no test.
-  Its pure text logic -- a cycle cut at a range's edge, a polling loop's turns, joining threads, an interrupt
-  thread's accesses as a multiset, the volatile words a pair of runs differ in -- would take a few synthetic logs
-  of a dozen lines each, and a rule that runs them.
 - A driver of the ESP32-C6's Wi-Fi that leaves Espressif's libraries the PHY alone, `libphy.a`:
   `pp` and `net80211` give way to the driver's own MAC and station, and `osi.c` shrinks to what `libphy.a` calls.
   The station is the driver's own already, on hostap; `user/wifi/NOTES.md` says why.
