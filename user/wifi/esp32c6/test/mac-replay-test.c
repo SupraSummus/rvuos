@@ -111,6 +111,7 @@ static void tail(void)
 {
     mac_low_rate_disable();
     mac_crypto_init();
+    mac_antenna_init();
     mac_config_finish();
     mac_coex_pti_init();
     mac_rx_active_pti(0);

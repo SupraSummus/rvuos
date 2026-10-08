@@ -271,8 +271,8 @@ endif
 # see test/mac-replay-test.c, whose cases call the sequences in drv_mac_config's order.
 MAC_REPLAY_HEAD      := hal_init mac_txrx_init hal_mac_rx_set_policy mac_rxbuf_init
 MAC_REPLAY_HEAD_TO   := hal_he_init
-MAC_REPLAY_TAIL      := hal_mac_disable_low_rate hal_crypto_init hal_init hal_coex_pti_init hal_set_rx_active_pti \
-                        hal_set_rx_ack_pti hal_set_wifi_default_pti
+MAC_REPLAY_TAIL      := hal_mac_disable_low_rate hal_crypto_init hal_attenna_init hal_init hal_coex_pti_init \
+                        hal_set_rx_active_pti hal_set_rx_ack_pti hal_set_wifi_default_pti
 MAC_REPLAY_TAIL_FROM := hal_mac_disable_low_rate
 MAC_REPLAY_TAIL_TO   := hal_set_ofdma_sequence_pti
 MAC_REPLAY_TAKE       = tools/mac-trace.py replay --elf $(BUILD)/wifi-drv.elf --rom $(PHYBLOB_ROM_ELF) \

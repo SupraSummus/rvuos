@@ -1,7 +1,8 @@
 /*
  * The register sequences of the libraries' bring-up, written out, so that the driver's own start makes them:
  * their hal_init's words about HAL_CFG, HAL_HOLD and HAL_MISC, its txrx queues, its receive policy and the words
- * around them, its receive base and its low-rate group, their hal_crypto_init's cipher words, and their coex PTI.
+ * around them, its receive base and its low-rate group, their hal_crypto_init's cipher words, its antenna group, and
+ * their coex PTI.
  * main.c calls these where the libraries' hal_init called the groups; the accesses each makes are the libraries',
  * and the trace holds them. They reach the device through macregs.h alone, so they build on the host for their replay;
  * the libraries' calls they leave are declared below.
@@ -190,6 +191,31 @@ void mac_crypto_init(void)
     wr(CRYPTO_BASE + 0x08u, 0);
     wr(CRYPTO_BASE + 0x0cu, 0);
     wr(CRYPTO_BASE + 0x10u, 0);
+}
+
+/*
+ * The libraries' hal_attenna_init (their spelling), written out: their eight words 0x74 apart, from 0x600a54bc down
+ * to 0x600a5190, each cleared of bits 0 to 4 and set at bit 5, in their two passes -- 0 to 2 cleared first, then 3
+ * cleared, 5 set and 4 cleared -- and the single word at 0x600a42cc, cleared of 0 to 2 and set at 5. What the words
+ * are is not known; each access is one here, in their order, since the trace holds each.
+ */
+#define ANTENNA_MAC_LO   (MAC_BASE + 0x1190u)
+#define ANTENNA_MAC_HI   (MAC_BASE + 0x14bcu)
+#define ANTENNA_MAC_STEP 0x74u
+#define ANTENNA_MAC_2CC  (MAC_BASE + 0x2ccu)
+
+void mac_antenna_init(void)
+{
+    for (uint32_t a = ANTENNA_MAC_HI; a >= ANTENNA_MAC_LO; a -= ANTENNA_MAC_STEP) {
+        wr(a, rd(a) & ~0x7u);
+    }
+    for (uint32_t a = ANTENNA_MAC_HI; a >= ANTENNA_MAC_LO; a -= ANTENNA_MAC_STEP) {
+        wr(a, rd(a) & ~0x8u);
+        wr(a, rd(a) | 0x20u);
+        wr(a, rd(a) & ~0x10u);
+    }
+    wr(ANTENNA_MAC_2CC, rd(ANTENNA_MAC_2CC) & ~0x7u);
+    wr(ANTENNA_MAC_2CC, rd(ANTENNA_MAC_2CC) | 0x20u);
 }
 
 /*

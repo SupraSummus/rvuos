@@ -106,6 +106,7 @@ void mac_queues_init(void);
 void mac_rx_base_init(void);
 void mac_low_rate_disable(void);
 void mac_crypto_init(void);
+void mac_antenna_init(void);
 void mac_coex_pti_init(void);
 void mac_rx_active_pti(uint32_t pti);
 void mac_rx_ack_pti(uint32_t pti);
