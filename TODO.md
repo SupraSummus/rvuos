@@ -138,6 +138,8 @@ what is left:
   the two from one image; it goes when the own start is proven and no comparison is wanted.
   The four bring-up symbols and the two of the log that the driver once asked of the flash libraries are taken one
   by one, over `libphy` and `mac.c`; `make BOARD=esp32c6 wifi-esp32c6-refs` counts what is left of `pp` and `net80211`.
+  `mac_default_policy` writes interface 1's address and receive policy, the soft AP's, which the driver never brings
+  up; each such write is the first of the own start's to try leaving out, one at a time, held by the gate.
   Its frame completion spins in the caller's thread while the slot is armed, and borrows the libraries' slot 0;
   an own slot, the driver's own interrupt to finish the frame, and the libraries' retry of a collision or a timeout,
   with their invalidation of the queue on a timeout, would do better.

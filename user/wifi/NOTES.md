@@ -691,8 +691,8 @@ with pp calling phy for the channel and the gain;
 `set_intr`, `set_isr` and `ints_on`, the interrupt handler, the address, the RX enable and the STA TSF;
 and `event_post` STA_START, where the start reports.
 
-What the own start must also carry is the power and rate tables a library task of its own writes in response to the
-start, just after the event, `hal_init_tb_power`, `hal_init_imrsp_power` and `rate_to_index`, with no timer armed.
+What the own start must also carry is the power and rate tables a library task of its own writes in response to the start,
+just after the event, `hal_init_tb_power`, `hal_init_imrsp_power` and `rate_to_index`, with no timer armed.
 That is the start's duty once the library's start is gone, and the transmitting runs and the snapshot are its oracle.
 Whether the HE, beamforming and antenna groups can be left out is the own start's to find as it runs,
 each dropped on its own and held to the snapshot and the runs.
@@ -700,5 +700,8 @@ each dropped on its own and held to the snapshot and the runs.
 Most of the start's HAL functions write registers alone, their objects carrying no relocation to any library's data,
 so the own start can call them as they are, given the right arguments, and take them over one at a time.
 `mac_rxbuf_init`, which reads the interface's control block, waits for the init to be the driver's too.
-A step's diff holds the device accesses; the writes a step makes to the libraries' own memory -- the mode it reads
-and the flag it sets on the control block -- are not in the trace, so only the runs hold those.
+A step's diff holds the device accesses; the writes a step makes to the libraries' own memory are not in the trace, so only the runs hold those.
+Of the start's calls, one that only writes the libraries' own memory -- their pm or their control block -- is left a call:
+taking it over moves no device work to the driver, and would carry their structures' layout into its code.
+A write to their memory that a transcribed body brings -- their wdev's flag, the masks by their control block -- is named where it is written,
+and goes whole when the reader of that state is the driver's own.
