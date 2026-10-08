@@ -678,6 +678,34 @@ void mac_rx_policy_word(uint32_t iface)
     wr(a, rd(a) & ~0x2040u);
 }
 
+/*
+ * The policy call their hal_init's loop makes for each interface, their hal_mac_rx_set_policy(i, 0, 0, 0),
+ * after the word above: the policy's 0x410 and 0x40 cleared (together RX_POLICY_CLEAR),
+ * the interface's bssid word's bits 30 and 31 cleared, but interface 1's bit 30 set, IF1_DEFAULT_BIT,
+ * and its own address made invalid, STA_ADDR_FLAG, as its bssid is, BSSID_FLAG.
+ * Their function takes three flags beyond the interface, zero here, and touches nothing for interface 3;
+ * their station's own call, hal_mac_rx_set_policy(0, 1, 1, 1), is mac_receive's.
+ */
+void mac_rx_set_policy(uint32_t iface)
+{
+    if (iface > 2u) {
+        return; /* their function returns for interface 3, touching nothing */
+    }
+    uint32_t p = RX_POLICY + 4u * iface;
+    uint32_t w = BSSID_HI + 8u * iface;    /* interface 1's is IF1_DEFAULT_WORD */
+    uint32_t a = STA_ADDR_HI + 8u * iface; /* interface 1's is STA_ADDR2_HI */
+
+    wr(p, rd(p) & ~0x410u);
+    if (iface == 1u) {
+        wr(w, rd(w) | IF1_DEFAULT_BIT);
+    } else {
+        wr(w, rd(w) & ~BSSID_HI_POLICY);
+    }
+    wr(p, rd(p) & ~0x40u);
+    wr(w, rd(w) & ~BSSID_FLAG);
+    wr(a, rd(a) & ~STA_ADDR_FLAG);
+}
+
 void mac_config_finish(void)
 {
     wr(HAL_HOLD, 0x19a879e0u);

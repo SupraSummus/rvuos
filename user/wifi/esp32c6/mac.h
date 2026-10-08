@@ -103,6 +103,9 @@ void mac_config_start(void);
 void mac_rx_policy_word(uint32_t iface);
 void mac_config_finish(void);
 
+/* The policy call their hal_init's loop makes for each interface, hal_mac_rx_set_policy(i, 0, 0, 0); see mac.c. */
+void mac_rx_set_policy(uint32_t iface);
+
 /* The libraries' mac_txrx_init, written out: their queues and sniffers settled; see mac.c. */
 void mac_queues_init(void);
 
