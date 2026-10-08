@@ -267,6 +267,16 @@ def phase(path, name):
     return None
 
 
+def cut_marker(path, name):
+    """A line that is a trace: line named `name` with its front lost, as the stream sometimes loses bytes, or None."""
+    tail = re.compile(r"(?<!req )\b\d+\s+t\d+\s+%s\s+\S+\s+\S+\s*$" % re.escape(name))
+    with open(path, errors="replace") as f:
+        for line in f:
+            if tail.search(line) and not TRACE_REQ.search(line):
+                return line.strip()
+    return None
+
+
 def align(base, own, volatile):
     """Where two record lists differ, aligned, and the polling notes in what they share.
 
@@ -339,7 +349,12 @@ def diff(args):
         lo = phase(path, args.from_) if args.from_ else 0
         hi = phase(path, args.to) if args.to else None
         if (args.from_ and lo is None) or (args.to and hi is None):
-            sys.exit("mac-trace: %s has no trace: line named %s" % (path, args.from_ if lo is None else args.to))
+            name = args.from_ if lo is None else args.to
+            cut = cut_marker(path, name)
+            if cut:
+                sys.exit("mac-trace: %s lost the front of its trace: line named %s, \"%s\"; the stream lost bytes, "
+                         "so run it again" % (path, name, cut))
+            sys.exit("mac-trace: %s has no trace: line named %s" % (path, name))
         return lo, hi if hi is not None else 1 << 62
 
     # A thread the driver's role lines name as the interrupt's or a timer's has its accesses placed by the

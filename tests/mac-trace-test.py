@@ -9,7 +9,7 @@ a word any pair of base or dry runs differs in is volatile, even where two of th
 an interrupt thread's accesses are a multiset;
 --join makes one stream of every thread but the interrupt's;
 --from aligns two runs by their phase markers, a cycle cut at the marker keeping its share;
-a short log is refused, and with --image one that flashed another build;
+a short log is refused, and with --image one that flashed another build, and a marker cut by a loss is told as one;
 the words COUNTERS names stay out of compare's verdict;
 and replay takes the named functions' own accesses alone, between the functions --from and --to name.
 The ELF and the libraries are not read: every pc is given to one library, and to the function FUNCTIONS names.
@@ -166,6 +166,18 @@ def test_short_log_is_refused(f):
         assert "short" in str(e), e
     else:
         raise AssertionError("a log missing a sequence number passed")
+
+
+def test_a_cut_marker_is_told(f):
+    # The stream lost the front of the line naming the start: diff says so, not that the driver never named it.
+    base = f("base", log((1, "W", A, 1), "   1.000 trace: req 1 t1 start 0 0"))
+    own = f("own", log((1, "W", A, 1), "   1.000 1 t1 start 0 0"))
+    try:
+        diff([base, base], own, from_="start")
+    except SystemExit as e:
+        assert "lost the front" in str(e) and "1 t1 start 0 0" in str(e), e
+    else:
+        raise AssertionError("a log whose marker lost its front passed")
 
 
 def test_another_build_is_refused(f):
