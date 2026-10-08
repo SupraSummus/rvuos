@@ -309,8 +309,11 @@ endif
 # stream, and libphy's calibration folds to one marker a run. WIFI_TRACE_BASE names the libraries' start's logs (two
 # or more) and WIFI_TRACE_OWN the own start's; the rule knows the ELF, the ROM and the libraries, so CLAUDE.md names
 # it and not the whole command. See tools/mac-trace.py.
+# WIFI_TRACE_EXPECT names the places the own start differs in by design, each with its reason, which pass alone
+# and exactly; WIFI_TRACE_EXPECT_NEW=1 prints a place that does not as such a file holds it.
 WIFI_TRACE_BASE ?=
 WIFI_TRACE_OWN ?=
+WIFI_TRACE_EXPECT ?= $(wildcard $(WIFI_ESP)/test/diff-expected.txt)
 .PHONY: wifi-esp32c6-diff
 ifeq ($(BOARD),esp32c6)
 wifi-esp32c6-diff: $(BUILD)/wifi-drv.elf $(BUILD)/wifi-drv.bin $(PHYBLOB_ROM_ELF)
@@ -320,6 +323,7 @@ wifi-esp32c6-diff: $(BUILD)/wifi-drv.elf $(BUILD)/wifi-drv.bin $(PHYBLOB_ROM_ELF
 		--lib pp=$(PHYBLOB_CACHE)/libpp.a:$(PHYBLOB_CACHE)/esp32c6.rom.pp.ld \
 		--lib phy=$(BUILD)/$(WIFI_ESP)/libphy.a:$(PHYBLOB_CACHE)/esp32c6.rom.phy.ld \
 		$(addprefix --own ,$(WIFI_ESP_OBJ) $(LIB_OBJ)) \
+		$(if $(WIFI_TRACE_EXPECT),--expect $(WIFI_TRACE_EXPECT),) $(if $(WIFI_TRACE_EXPECT_NEW),--as-expected,) \
 		$(WIFI_TRACE_BASE) $(WIFI_TRACE_OWN)
 else
 wifi-esp32c6-diff:

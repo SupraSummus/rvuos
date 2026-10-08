@@ -10,6 +10,7 @@ an interrupt thread's accesses are a multiset;
 --join makes one stream of every thread but the interrupt's;
 --from aligns two runs by their phase markers, a cycle cut at the marker keeping its share;
 a short log is refused, and with --image one that flashed another build, and a marker cut by a loss is told as one;
+diff's expectations let a place the own start differs in by design pass, that place alone and exactly;
 the words COUNTERS names stay out of compare's verdict;
 and replay takes the named functions' own accesses alone, between the functions --from and --to name.
 The ELF and the libraries are not read: every pc is given to one library, and to the function FUNCTIONS names.
@@ -80,7 +81,7 @@ def run(fn, **kw):
 
 def diff(bases, own, **kw):
     args = dict(base=bases, own_log=own, from_=None, to=None, join=False, collapse=[], elf="", rom="", lib=[], own=[],
-                image=None)
+                image=None, expect=None, as_expected=False)
     args.update(kw)
     return run(mt.diff, **args)
 
@@ -104,6 +105,27 @@ def test_every_difference_is_shown(f):
     status, out = diff([base, base], own)
     assert status == 1 and "differ in 2 places" in out, out
     assert "base record 2, own record 2" in out and "base nothing, before record 5, own record 5" in out, out
+
+
+def test_an_expected_place_is_met_exactly(f):
+    # The own start writes B its own way, by design: an expectation naming that place, reason and all, lets it pass;
+    # the same place with another value fails, and so does an expectation no place meets.
+    base = f("base", log((1, "W", A, 1), (1, "R", B, 0), (1, "W", B, 4), (1, "W", C, 1)))
+    own = f("own", log((1, "W", A, 1), (1, "W", B, 5), (1, "W", C, 1)))
+    place = "# B written once\n-R4 0x%08x 0x00000000\n-W4 0x%08x 0x00000004\n+W4 0x%08x 0x00000005\n" % (B, B, B)
+    status, out = diff([base, base], own, expect=f("expect", place))
+    assert status == 0 and "expected, base records 2-3, own record 2: B written once" in out, out
+    status, out = diff([base, base], f("own2", log((1, "W", A, 1), (1, "W", B, 6), (1, "W", C, 1))),
+                       expect=f("expect2", place))
+    assert status == 1 and "differ in 1 place" in out and "did not come: B written once" in out, out
+    masked = place.replace("+W4 0x%08x 0x00000005" % B, "+W4 0x%08x 0x00000000/0xfffffff0" % B)
+    assert diff([base, base], own, expect=f("masked", masked))[0] == 0
+    status, out = diff([base, base], base, expect=f("expect3", place))
+    assert status == 1 and "did not come" in out, out
+    twice = f("twice", log((1, "R", B, 0), (1, "W", B, 4), (1, "W", C, 1), (1, "R", B, 0), (1, "W", B, 4)))
+    status, out = diff([twice, twice], f("own3", log((1, "W", B, 5), (1, "W", C, 1), (1, "W", B, 5))),
+                       expect=f("expect4", place))
+    assert status == 1 and "differ in 1 place" in out, out
 
 
 def test_volatile_from_any_pair(f):

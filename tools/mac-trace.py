@@ -310,6 +310,50 @@ def span(lo, hi):
     return "record %d" % (lo + 1) if hi == lo + 1 else "records %d-%d" % (lo + 1, hi)
 
 
+# A place of an expectation file: "-R4 0xaddress 0xvalue" an access of the libraries' side, "+..." one of the own side;
+# "0xvalue/0xmask" holds the value's masked bits alone, as a word that carries the chip's own address needs.
+EXPECTED = re.compile(r"^([-+])([RW])(\d) (0x[0-9a-fA-F]+) (0x[0-9a-fA-F]+)(?:/(0x[0-9a-fA-F]+))?$")
+
+
+def expectations(path):
+    """The places the own start differs from the libraries' by design, [(reason, base, own)]: each place is its
+    reason on "#" lines, then its accesses, "-" the libraries' and "+" the own start's; a blank line ends it."""
+    out, reason, sides = [], [], {"-": [], "+": []}
+
+    def end():
+        if sides["-"] or sides["+"]:
+            if not reason:
+                sys.exit("mac-trace: %s: a place with no reason" % path)
+            out.append((" ".join(reason), sides["-"], sides["+"]))
+        reason.clear()
+        sides["-"], sides["+"] = [], []
+
+    with open(path) as f:
+        for n, line in enumerate(f, 1):
+            line = line.strip()
+            if line.startswith("#"):
+                if sides["-"] or sides["+"]:
+                    end()
+                reason.append(line[1:].strip())
+            elif not line:
+                end()
+            else:
+                m = EXPECTED.match(line)
+                if not m:
+                    sys.exit("mac-trace: %s:%d: not an access of a place: %s" % (path, n, line))
+                sides[m.group(1)].append((m.group(2), int(m.group(3)), int(m.group(4), 16), int(m.group(5), 16),
+                                          int(m.group(6) or "0xffffffff", 16)))
+    end()
+    return out
+
+
+def same(want, got, volatile):
+    """Whether a side of a place holds the accesses an expectation names, a volatile word's value aside."""
+    return len(want) == len(got) and all(
+        g[0] != "*" and (w[0], w[1], w[2]) == g[:3] and (w[2] in volatile or g[3] & w[4] == w[3])
+        for w, g in zip(want, got))
+
+
 def element(e):
     """A record or a folded marker, as a diff line reads it."""
     if e[0] == "*":
@@ -383,6 +427,8 @@ def diff(args):
                     if a[k][3] != c[k][3]:
                         volatile.add(a[k][2])
 
+    expect = expectations(args.expect) if args.expect else []
+    met = [False] * len(expect)
     bad = 0
     for t in sorted({t for b in bases for t in b} | set(own)):
         a, o = bases[0].get(t, []), own.get(t, [])
@@ -399,6 +445,16 @@ def diff(args):
         blocks, notes = align(a, o, volatile)
         for i, j in notes:
             print("  t%d polling %5d  0x%08x  x%d vs x%d" % (t, i + 1, a[i][2], a[i][4], o[j][4]))
+        unexpected = []
+        for i1, i2, j1, j2 in blocks:
+            k = next((k for k, (_, eb, eo) in enumerate(expect)
+                      if not met[k] and same(eb, a[i1:i2], volatile) and same(eo, o[j1:j2], volatile)), None)
+            if k is None:
+                unexpected.append((i1, i2, j1, j2))
+            else:
+                met[k] = True
+                print("  t%d expected, base %s, own %s: %s" % (t, span(i1, i2), span(j1, j2), expect[k][0]))
+        blocks = unexpected
         if blocks:
             bad = 1
             print("mac-trace: thread %d: base %d records, own %d; they differ in %d place%s:"
@@ -410,10 +466,21 @@ def diff(args):
                     print("    %s %5d  %s" % (side, k + 1, element(recs[k])))
                 if hi - lo > SHOWN:
                     print("    %s ... and %d more" % (side, hi - lo - SHOWN))
+            if args.as_expected:
+                print("# the reason")
+                for mark, recs, lo, hi in (("-", a, i1, i2), ("+", o, j1, j2)):
+                    for e in recs[lo:hi]:
+                        print("%s%c%d 0x%08x 0x%08x" % (mark, e[0], e[1], e[2], e[3]) if e[0] != "*"
+                              else "# %s's folded run, which no place can name" % e[1])
+                print()
+    for k, (reason, _, _) in enumerate(expect):
+        if not met[k]:
+            bad = 1
+            print("mac-trace: an expected place did not come: %s" % reason)
     if bad:
         return 1
-    print("mac-trace: every thread agrees, by operation, width and address, and by value, %d volatile words aside"
-          % len(volatile))
+    print("mac-trace: every thread agrees, by operation, width and address, and by value, %d volatile words aside%s"
+          % (len(volatile), ", %d expected places met" % len(expect) if expect else ""))
     return 0
 
 
@@ -668,6 +735,10 @@ def main():
     p.add_argument("--own", action="append", default=[], metavar="OBJ",
                    help="the driver's own objects, by path or glob; the owner not any library's")
     p.add_argument("--image", metavar="FILE", help="refuse a log, base or own, unless it flashed this file")
+    p.add_argument("--expect", metavar="FILE",
+                   help="the places the own start differs by design, each with its reason; one that does not come fails")
+    p.add_argument("--as-expected", action="store_true",
+                   help="print each unexpected place whole, as an expectation file holds it, its reason to write")
     p.add_argument("base", nargs="+", metavar="BASE", help="two or more runs of the image; a word any pair differs in is volatile")
     p.add_argument("own_log", metavar="OWN", help="the own run's log")
     p.set_defaults(run=diff)

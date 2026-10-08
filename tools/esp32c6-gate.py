@@ -9,8 +9,8 @@ four trace=2 runs of each start, interleaved, and the three compares of the fina
 run against its dry runs, the libraries' against theirs, and the own start's dry run against the libraries' across
 the images; the scan, listen= and listen= with probe=; a join for each --join; and make check.
 Every configuration it writes and every log stays in build/esp32c6/gate/. A check that could not run is told as not
-run. The diff's places are shown for reading, not judged, since the own start differs from the libraries' by design
-in some (see TODO.md); the exit status is 1 when any other check failed.
+run. The diff is judged against the places the own start differs in by design, user/wifi/esp32c6/test/diff-expected.txt,
+and only shown for reading without it; the exit status is 1 when any check failed.
 The probe's network is --probe, or the ssid= of the first --join, which is read and never printed.
 """
 
@@ -26,6 +26,7 @@ import time
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 BUILD = "build/esp32c6"
 DIR = os.path.join(BUILD, "gate")
+EXPECTED = "user/wifi/esp32c6/test/diff-expected.txt"  # the diff's places by design, which the diff rule reads
 spec = importlib.util.spec_from_file_location("mac_trace", os.path.join(ROOT, "tools", "mac-trace.py"))
 mt = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mt)
@@ -173,10 +174,15 @@ def main():
     if not args.dry_run:
         text = open(os.path.join(DIR, "diff.out"), errors="replace").read()
         found = re.findall(r"they differ in (\d+) place", text)
-        places = ("differs in %s places, read them in %s" % ("+".join(found), os.path.join(DIR, "diff.out"))
-                  if found else "agrees" if status == 0 else "refused, see %s" % os.path.join(DIR, "diff.out"))
-    print("gate: %-28s %s" % ("diff, four bases", places), flush=True)
-    gate.rows.append(("diff, four bases", "read", places))
+        met = len(re.findall(r"^  t\d+ expected, ", text, re.M))
+        places = ("differs in %s places, see %s" % ("+".join(found), os.path.join(DIR, "diff.out")) if found
+                  else "%d expected places" % met if status == 0 and met else "" if status == 0
+                  else "see %s" % os.path.join(DIR, "diff.out"))
+    if os.path.exists(EXPECTED):
+        gate.tell("diff, four bases", status, places)
+    else:
+        print("gate: %-28s %s" % ("diff, four bases", places + ", to read: no " + EXPECTED), flush=True)
+        gate.rows.append(("diff, four bases", "read", places))
 
     for i in range(1, 5):
         gate.tell("trace=2 libraries' %d" % i, gate.traced("dry-lib%d" % i, 2, True, snap))
