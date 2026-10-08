@@ -393,11 +393,7 @@ extern int _do_wifi_start(int mode);
 extern void ieee80211_update_phy_country(void);
 extern void chm_init(void *chm);
 
-/*
- * The libraries' MAC configuration, their hal_init, group by group: its register writes about HAL_CFG, HAL_HOLD and
- * HAL_MISC are the driver's own, mac.c's, and the groups between them are still the libraries' calls, each marked in
- * drv_mac_config below so that the trace's segments show it and a later step can take it over. See user/wifi/NOTES.md.
- */
+/* The groups of the libraries' hal_init that drv_mac_config has not taken over yet, in its order there. */
 extern void mac_txrx_init(void);
 extern void hal_mac_rx_set_policy(uint32_t iface, uint32_t a, uint32_t b, uint32_t c);
 extern void mac_rxbuf_init(void);
@@ -405,7 +401,7 @@ extern void hal_he_init(void);
 extern void mac_last_rxbuf_init(void);
 extern void hal_mac_rate_autoack_init(void);
 extern void hal_mac_disable_low_rate(void);
-extern void hal_attenna_init(void);
+extern void hal_attenna_init(void); /* their spelling */
 extern void hal_mac_set_rxbuf_reload_use_hw_beacon_enable(void);
 extern void hal_timer_update_by_rtc(uint32_t which, uint32_t hz);
 extern void hal_set_ofdma_sequence_pti(void);
@@ -438,11 +434,12 @@ static void drv_reset_mac(void)
 }
 
 /*
- * The libraries' hal_init, the MAC's configuration, written out: their register writes about HAL_CFG, HAL_HOLD and
- * HAL_MISC and their RX-policy words (mac.c), and the groups between them -- the txrx queues, the receive policy,
- * the RX buffers, the HE tables, the ack rates and low-rate mask, the cipher, the antenna, the timer and the coex
- * PTI -- still their calls, each marked so that the trace's segments show its accesses and a later step is held to
- * it alone. Their hal_init calls the groups in this order, with no argument but the interface's and the timer's.
+ * The libraries' hal_init, the MAC's configuration, written out:
+ * their register writes about HAL_CFG and HAL_HOLD and their receive-policy words are mac.c's,
+ * and the groups between them are still their calls, in their order and with their arguments,
+ * each named so that a traced run's segments show its accesses.
+ * The groups: the txrx queues, the receive policy, the RX buffers, the HE tables, the ack rates and low-rate mask,
+ * the cipher, the antenna, the timer and the coex PTI. See user/wifi/NOTES.md.
  */
 static void drv_mac_config(void)
 {
@@ -506,10 +503,11 @@ static int drv_hw_start(void)
     mac_tx_block_clear();              /* the libraries' ic_mac_init: their hal_mac_init's tx-block clear */
     chm_init(g_ic);
     /*
-     * The libraries' ic_set_interrupt_handler, written out: their hal_init, the MAC's configuration, which
-     * drv_mac_config writes out group by group, then the two interrupt sources the adapter routes and their handler,
-     * armed. Their set_intr passes the core the Wi-Fi task runs on and the adapter ignores it; the driver passes
-     * none. Their handler is the one the driver's own receive trades for its own once it takes the MAC, see mac.c.
+     * The libraries' ic_set_interrupt_handler, written out:
+     * their hal_init, the MAC's configuration, which drv_mac_config writes out group by group,
+     * then the two interrupt sources the adapter routes, their handler and the line armed.
+     * Their set_intr passes the core the Wi-Fi task runs on, which the adapter ignores; the driver passes none.
+     * Their handler is the one the driver's own receive trades for its own once it takes the MAC; see mac.c.
      */
     drv_mac_config();
     funcs->set_intr(0, 2 /* the modem's power */, 1, 1);

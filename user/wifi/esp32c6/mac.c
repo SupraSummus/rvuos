@@ -60,8 +60,9 @@
 #define HAL_CFG     0x600a4ddcu
 
 /*
- * The two words of the libraries' hal_init whose set bits the driver sets too, since no driver code reads them and
- * the bit's meaning is not known: HAL_WORD's top bit, and RX_WORD's low two written twice, as their hal_init does.
+ * The two words of the libraries' hal_init whose set bits the driver sets too:
+ * HAL_WORD's top bit, and RX_WORD's low two written twice, as their hal_init does.
+ * No driver code reads them, and the bits' meaning is not known.
  */
 #define HAL_WORD 0x600a4c8cu
 #define RX_WORD  (MAC_BASE + 0x98u)
@@ -588,11 +589,10 @@ void mac_rx_on(void)
 }
 
 /*
- * The libraries' hal_init's own register writes, around the groups of its MAC configuration that it calls: their
- * HAL_CFG start and the wait for it, HAL_HOLD and HAL_MISC cleared; and then, after the groups, HAL_HOLD, HAL_WORD
- * and RX_WORD as their hal_init leaves them, before their hal_mac_set_rxbuf_reload_use_hw_beacon_enable. The
- * driver's own start makes these, so that the groups it still calls sit where the libraries put them; each group is
- * marked in main.c, so the trace's segments show it and a later step can take it over. See user/wifi/NOTES.md.
+ * The libraries' hal_init's own register writes, around the groups of its MAC configuration that it calls:
+ * their HAL_CFG start and the wait for it, and HAL_HOLD and HAL_MISC cleared.
+ * Then, after the groups, HAL_HOLD, HAL_WORD and RX_WORD as their hal_init leaves them.
+ * The driver's own start makes these, so that the groups it still calls sit where the libraries put them; see main.c.
  */
 void mac_config_start(void)
 {
@@ -603,7 +603,7 @@ void mac_config_start(void)
     wr(HAL_MISC, 0xffffffffu);
 }
 
-/* The read-modify-writes their hal_init makes on an interface's receive-policy word, before their hal_mac_rx_set_policy. */
+/* The read-modify-writes their hal_init makes on an interface's receive-policy word, before each policy call. */
 void mac_rx_policy_word(uint32_t iface)
 {
     uint32_t a = RX_POLICY + 4u * iface;

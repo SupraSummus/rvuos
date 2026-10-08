@@ -93,9 +93,11 @@ void mac_tx_block_clear(void);
 void mac_rx_on(void);
 
 /*
- * The register writes the libraries' hal_init makes around the groups of its MAC configuration: their HAL_CFG start
- * and the wait for it, HAL_HOLD and HAL_MISC, and, after the groups, HAL_HOLD, HAL_WORD and RX_WORD; and the
- * read-modify-writes before each interface's hal_mac_rx_set_policy. The driver's own start makes them; see mac.c.
+ * The register writes the libraries' hal_init makes around the groups of its MAC configuration:
+ * their HAL_CFG start and the wait for it, and HAL_HOLD and HAL_MISC;
+ * and, after the groups, HAL_HOLD, HAL_WORD and RX_WORD.
+ * mac_rx_policy_word is the read-modify-writes before each interface's hal_mac_rx_set_policy.
+ * The driver's own start makes them; see mac.c.
  */
 void mac_config_start(void);
 void mac_rx_policy_word(uint32_t iface);
