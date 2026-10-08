@@ -6,13 +6,14 @@ the library and function each device access belongs to.
   compare DRY... TRACED     the traced run's final state against the dry runs', nonzero on a divergence
   diff BASE... OWN          every place the own run differs, the bases naming the volatile words
   attrib [--only NAME] [--segments] LOG  the library and function each access is in, see below
+  replay --function NAME... LOG          the named functions' own accesses, which the host replays the own code on
 
 The root task of root.c owns what this parses, see its trace_line and trace_dump. A log is meant to be whole: the
 writer no longer loses the odd line, so a short log is a fault to report, and each subcommand says what it found of
 one, and wrongs its answer only where the loss lies beside what it reports. `attrib --segments` refuses a short log,
 whose loss would shift every segment past it.
 
-Usage: tools/mac-trace.py {snapshot,compare,diff,attrib} ... ; each subcommand has its own --help.
+Usage: tools/mac-trace.py {snapshot,compare,diff,attrib,replay} ... ; each subcommand has its own --help.
 """
 
 import argparse
@@ -577,6 +578,54 @@ def attrib(args):
                     print("    %-46s w%d 0x%08x" % (function.get(pc, "?"), width, address))
 
 
+def replay(args):
+    """The accesses the named functions made, in the log's order, as the host's replay of the own code reads them.
+
+    One line each, "R4 0xaddress 0xvalue" or "W4 ...", after a "#" line naming the functions, the bounds and the
+    log's image;
+    what the functions' callees did is left out, as the own code calls those.
+    --from and --to bound them by other functions' first accesses, so that a caller's calls are told from another's.
+    A log short anywhere is refused, as is a function no access names, and a cycle, which the replay does not unroll.
+    """
+    if args.image:
+        flashed_from(args.log, args.image)
+    acc, damaged = scan(args.log)
+    if damaged:
+        sys.exit("mac-trace: %s is short in %d places, so a function's accesses may be missing"
+                 % (args.log, len(damaged)))
+    _, function = classifier(args, {r[1] for r in acc})
+
+    def first(name):
+        for i, r in enumerate(acc):
+            if function.get(r[1]) == name:
+                return i
+        sys.exit("mac-trace: no access of %s in %s" % (name, args.log))
+
+    lo = first(args.from_) if args.from_ else 0
+    hi = first(args.to) if args.to else len(acc)
+    acc = acc[lo:hi]
+    wanted = set(args.function)
+    mine = [r for r in acc if function.get(r[1]) in wanted]
+    missing = wanted - {function[r[1]] for r in mine}
+    if missing:
+        sys.exit("mac-trace: no access of %s in %s" % (", ".join(sorted(missing)), args.log))
+    cycled = [r for r in mine if r[6] > 1]
+    if cycled:
+        sys.exit("mac-trace: record %d of %s is in a cycle, which the replay does not unroll"
+                 % (cycled[0][0], function[cycled[0][1]]))
+    sha = None
+    with open(args.log, errors="replace") as f:
+        for line in f:
+            m = FLASHED.search(line)
+            if m:
+                sha = m.group(1)
+    bounds = (" from %s" % args.from_ if args.from_ else "") + (" up to %s" % args.to if args.to else "")
+    print("# %s%s, in a run of the image sha256 %s" % (" ".join(args.function), bounds, sha or "unknown"))
+    for _seq, _pc, op, width, address, value, _turns, _thread in mine:
+        print("%s%d 0x%08x 0x%08x" % (op, width, address, value))
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -622,6 +671,21 @@ def main():
     p.add_argument("--top", type=int, default=8, metavar="N", help="functions to name under a segment, 0 for all")
     p.add_argument("log")
     p.set_defaults(run=attrib)
+
+    p = sub.add_parser("replay", help="the named functions' accesses, for the host's replay of the own code")
+    p.add_argument("--elf", required=True, help="the driver's ELF, for the image's code")
+    p.add_argument("--rom", required=True, help="the ROM's ELF, for the ROM's code")
+    p.add_argument("--lib", action="append", default=[], metavar="NAME=ARCHIVE[:ROM.ld]",
+                   help="a library, by the archive that defines it and the ROM script that places the rest")
+    p.add_argument("--own", action="append", default=[], metavar="OBJ",
+                   help="the driver's own objects, by path or glob; the owner not any library's")
+    p.add_argument("--image", metavar="FILE", help="refuse unless the log flashed this file, by its sha256")
+    p.add_argument("--function", action="append", required=True, metavar="NAME",
+                   help="a function whose own accesses to take, repeatable; its callees' are left out")
+    p.add_argument("--from", dest="from_", metavar="NAME", help="start at this function's first access")
+    p.add_argument("--to", metavar="NAME", help="stop before this function's first access")
+    p.add_argument("log")
+    p.set_defaults(run=replay)
 
     args = parser.parse_args()
     sys.exit(args.run(args))

@@ -10,8 +10,9 @@ an interrupt thread's accesses are a multiset;
 --join makes one stream of every thread but the interrupt's;
 --from aligns two runs by their phase markers, a cycle cut at the marker keeping its share;
 a short log is refused, and with --image one that flashed another build;
-and the words COUNTERS names stay out of compare's verdict.
-The ELF and the libraries are not read: every pc is given to one library.
+the words COUNTERS names stay out of compare's verdict;
+and replay takes the named functions' own accesses alone, between the functions --from and --to name.
+The ELF and the libraries are not read: every pc is given to one library, and to the function FUNCTIONS names.
 """
 
 import argparse
@@ -27,14 +28,15 @@ TOOL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools", "
 spec = importlib.util.spec_from_file_location("mac_trace", TOOL)
 mt = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mt)
-mt.classifier = lambda args, pcs: (lambda pc: "lib", {})
-
 PC = 0x42000010
+FUNCTIONS = {PC: "f", PC + 4: "g", PC + 8: "h"}
+mt.classifier = lambda args, pcs: (lambda pc: "lib", FUNCTIONS)
 
 
 def log(*lines):
-    """A trace log's text: a record is (thread, op, address, value), a cycle is ("cycle", turns, length),
-    and a string is a line as it stands; records and cycles take the next sequence numbers."""
+    """A trace log's text: a record is (thread, op, address, value), its pc PC, or with a fifth item, that pc;
+    a cycle is ("cycle", turns, length), and a string is a line as it stands;
+    records and cycles take the next sequence numbers."""
     out = []
     seq = 0
     for item in lines:
@@ -45,8 +47,9 @@ def log(*lines):
         if item[0] == "cycle":
             out.append("   1.000 [%d] cycle x%d of %d:" % (seq, item[1], item[2]))
         else:
-            t, op, address, value = item
-            out.append("   1.000 [%d] pc 0x%08x t%d %s4 0x%08x = 0x%08x" % (seq, PC, t, op, address, value))
+            t, op, address, value = item[:4]
+            pc = item[4] if len(item) > 4 else PC
+            out.append("   1.000 [%d] pc 0x%08x t%d %s4 0x%08x = 0x%08x" % (seq, pc, t, op, address, value))
     return "\n".join(out) + "\n"
 
 
@@ -186,6 +189,34 @@ def test_compare_volatile_and_counters(f):
     assert status == 0 and "1 volatile" in out and "1 counters, not compared" in out, out
     status, out = run(mt.compare, dry=dry, traced=f("t2", snaps({X: 1, Y: 6, k: 10})))
     assert status == 1 and "divergent 0x%08x" % Y in out, out
+
+
+def test_replay_takes_one_function(f):
+    # f writes A around g, which reads B; h calls f again later: --to h keeps the first call alone.
+    g, h = PC + 4, PC + 8
+    trace = f("lib", log("# flashed 0x210000 sha256 " + "ab" * 32,
+                         (1, "R", A, 1), (1, "W", A, 3), (1, "R", B, 7, g), (1, "W", A, 2),
+                         (1, "W", C, 0, h), (1, "W", A, 9)))
+    status, out = run(mt.replay, log=trace, function=["f"], from_=None, to="h", image=None)
+    assert status == 0, out
+    assert out.splitlines() == ["# f up to h, in a run of the image sha256 " + "ab" * 32,
+                                "R4 0x%08x 0x00000001" % A, "W4 0x%08x 0x00000003" % A,
+                                "W4 0x%08x 0x00000002" % A], out
+    status, out = run(mt.replay, log=trace, function=["f", "h"], from_="h", to=None, image=None)
+    assert out.splitlines()[1:] == ["W4 0x%08x 0x00000000" % C, "W4 0x%08x 0x00000009" % A], out
+
+
+def test_replay_refuses(f):
+    for name, text, why in [("cycle", log((1, "W", A, 1), ("cycle", 3, 1), (1, "R", P, 0)), "cycle"),
+                            ("none", log((1, "W", A, 1, PC + 4)), "no access of f"),
+                            ("short", "\n".join(log((1, "W", A, 1), (1, "W", B, 1), (1, "W", C, 1))
+                                                 .splitlines()[::2]) + "\n", "short")]:
+        try:
+            run(mt.replay, log=f(name, text), function=["f"], from_=None, to=None, image=None)
+        except SystemExit as e:
+            assert why in str(e), e
+        else:
+            raise AssertionError("replay took the %s log" % name)
 
 
 def main():
