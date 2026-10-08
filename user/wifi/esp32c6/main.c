@@ -396,8 +396,6 @@ extern void chm_init(void *chm);
 /* The groups of the libraries' hal_init that drv_mac_config has not taken over yet, in its order there. */
 extern void hal_he_init(void);
 extern void mac_last_rxbuf_init(void);
-extern void hal_mac_rate_autoack_init(void);
-extern void hal_mac_disable_low_rate(void);
 extern void hal_attenna_init(void); /* their spelling */
 extern void hal_mac_set_rxbuf_reload_use_hw_beacon_enable(void);
 extern void hal_timer_update_by_rtc(uint32_t which, uint32_t hz);
@@ -455,8 +453,7 @@ static void drv_mac_config(void)
     hal_he_init();
     mac_last_rxbuf_init();
     osi_trace("mac-rate", 0, 0);
-    hal_mac_rate_autoack_init();
-    hal_mac_disable_low_rate();
+    mac_low_rate_disable();
     osi_trace("mac-crypto", 0, 0);
     mac_crypto_init();
     osi_trace("mac-antenna", 0, 0);

@@ -104,6 +104,7 @@ void mac_config_finish(void);
 void mac_rx_set_policy(uint32_t iface);
 void mac_queues_init(void);
 void mac_rx_base_init(void);
+void mac_low_rate_disable(void);
 void mac_crypto_init(void);
 void mac_coex_pti_init(void);
 void mac_rx_active_pti(uint32_t pti);

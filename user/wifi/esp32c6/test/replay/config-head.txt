@@ -1,4 +1,4 @@
-# hal_init mac_txrx_init hal_mac_rx_set_policy mac_rxbuf_init up to hal_he_init, in a run of the image sha256 49044747afac0d5ceae3b02471b97dc730cfc80a7621063be6a19003dc39bf40
+# hal_init mac_txrx_init hal_mac_rx_set_policy mac_rxbuf_init up to hal_he_init, in a run of the image sha256 19b965477e6394ca1c4db52b661ddf3d2cdcddee9ca7bc1a07816a6cd78f3192
 R4 0x600a4ddc 0x00000000
 W4 0x600a4ddc 0x00000002
 R4 0x600a4ddc 0x00000001

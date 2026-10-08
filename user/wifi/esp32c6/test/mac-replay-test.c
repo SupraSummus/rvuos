@@ -82,6 +82,11 @@ void hal_he_set_bbrxhung_time(uint32_t a)
     (void)a;
 }
 
+/* The ROM's, which the low-rate group calls; its own accesses are the ROM's and stay out of the replay. */
+void phy_disable_low_rate(void)
+{
+}
+
 /* Their hal_init up to the HE group, as the driver's drv_mac_config calls it, in main.c. */
 static void head(void)
 {
@@ -101,9 +106,10 @@ static void head(void)
     mac_rx_base_init();
 }
 
-/* Their hal_init from the cipher, and the coex PTI with the values the recorded run's coex gave. */
+/* Their hal_init from the low-rate group on, and the coex PTI with the values the recorded run's coex gave. */
 static void tail(void)
 {
+    mac_low_rate_disable();
     mac_crypto_init();
     mac_config_finish();
     mac_coex_pti_init();

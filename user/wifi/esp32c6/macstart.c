@@ -1,10 +1,10 @@
 /*
  * The register sequences of the libraries' bring-up, written out, so that the driver's own start makes them:
  * their hal_init's words about HAL_CFG, HAL_HOLD and HAL_MISC, its txrx queues, its receive policy and the words
- * around them, their hal_crypto_init's cipher words, and their coex PTI.
+ * around them, its receive base and its low-rate group, their hal_crypto_init's cipher words, and their coex PTI.
  * main.c calls these where the libraries' hal_init called the groups; the accesses each makes are the libraries',
  * and the trace holds them. They reach the device through macregs.h alone, so they build on the host for their replay;
- * the libraries' calls they leave (the HE ones) are declared below.
+ * the libraries' calls they leave are declared below.
  */
 
 #include <stdint.h>
@@ -50,6 +50,9 @@ void mac_config_start(void)
 extern void hal_he_set_mac_delay(uint32_t);
 extern void hal_he_set_ack_rate(uint32_t);
 extern void hal_he_set_bbrxhung_time(uint32_t);
+
+/* The ROM's low-rate toggle, which the driver's start still calls, as their rate group does. */
+extern void phy_disable_low_rate(void);
 
 void mac_queues_init(void)
 {
@@ -143,6 +146,26 @@ void mac_rx_base_init(void)
 {
     wr(RXBUF_MAC_7C, rd(RXBUF_MAC_7C) & 0xffffff00u);
     wr(RX_BASE, wDevCtrl);
+}
+
+/*
+ * The libraries' hal_mac_disable_low_rate, written out: the ROM's phy_disable_low_rate first, then their four
+ * low-rate registers, 0x90a0b and 0x50100 written twice each, and their hal_he_set_bbrxhung_time(0).
+ * Their hal_mac_rate_autoack_init, which hal_init calls just before it, is an empty return; the driver's start drops it.
+ */
+#define RATE_MAC_440 (MAC_BASE + 0x440u)
+#define RATE_MAC_444 (MAC_BASE + 0x444u)
+#define RATE_MAC_44C (MAC_BASE + 0x44cu)
+#define RATE_MAC_450 (MAC_BASE + 0x450u)
+
+void mac_low_rate_disable(void)
+{
+    phy_disable_low_rate();
+    wr(RATE_MAC_44C, 0x90a0bu);
+    wr(RATE_MAC_450, 0x50100u);
+    wr(RATE_MAC_440, 0x90a0bu);
+    wr(RATE_MAC_444, 0x50100u);
+    hal_he_set_bbrxhung_time(0);
 }
 
 void mac_config_finish(void)
