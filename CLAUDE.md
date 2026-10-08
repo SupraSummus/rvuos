@@ -63,7 +63,7 @@ A change to `user/wifi/esp32c6/` or `kernel/board/esp32c6/` with an ESP32-C6 con
 which writes the driver into the flash at `0x210000` if it changed and scans,
 or, with `WIFI_CONFIG` naming a network as for the Pico 2 W, joins it,
 and `tools/wifi-run.py` checks it from the host as it checks the Pico 2 W's, but for the logger, before it ends the run.
-A change to `user/wifi/esp32c6/mac.c` runs it again with `listen=` in `WIFI_CONFIG`,
+A change to `user/wifi/esp32c6/mac.c` or `macstart.c` runs it again with `listen=` in `WIFI_CONFIG`,
 which fails if the driver hears nothing, again with `listen=` and `probe=`,
 which fails if a probe is not sent or not answered, and again with neither, the driver's scan.
 A change to `user/tracer/` or to the trace in `user/wifi/esp32c6/` runs it with `trace=1` in `WIFI_CONFIG`,

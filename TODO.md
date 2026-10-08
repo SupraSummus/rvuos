@@ -132,8 +132,9 @@ what is left:
   `libstart=1` in `WIFI_CONFIG` runs the libraries' start instead of the driver's own, for a traced comparison of
   the two from one image; it goes when the own start is proven and no comparison is wanted.
   The four bring-up symbols and the two of the log that the driver once asked of the flash libraries are taken one
-  by one, over `libphy` and `mac.c`; `make BOARD=esp32c6 wifi-esp32c6-refs` counts what is left of `pp` and `net80211`.
-  The groups of the MAC's configuration go over one at a time, transcribed into `mac.c`,
+  by one, over `libphy`, `mac.c` and `macstart.c`; `make BOARD=esp32c6 wifi-esp32c6-refs` counts what is left of `pp`
+  and `net80211`.
+  The groups of the MAC's configuration go over one at a time, transcribed into `macstart.c`,
   and until then the driver calls each of them, so its references into `pp` rise and fall as they go.
   Calling `hal_init` still, and replacing one group at a time by weakening `libpp.a`'s symbol for it,
   as `libphy.a`'s are weakened for `phy.c`, would leave the libraries' sequence as it is,

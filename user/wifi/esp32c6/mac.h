@@ -4,7 +4,8 @@
 /*
  * The Wi-Fi MAC driven by the driver's own code rather than by Espressif's libraries,
  * on the way to a driver that leaves them the PHY alone; see TODO.md.
- * The driver's own path reaches the MAC through this file alone, so that giving the libraries up rewrites mac.c alone.
+ * The driver's own path reaches the MAC through this file alone, so that giving the libraries up rewrites mac.c and
+ * macstart.c alone, the second holding the bring-up's register sequences.
  * It receives and retunes the radio, once the libraries have brought the MAC up:
  * mac_sniffer has the MAC pass on every frame heard on the channel, or the station's alone,
  * mac_rx_take gives the MAC a list of descriptors of its own and takes its interrupt,
@@ -93,32 +94,16 @@ void mac_tx_block_clear(void);
 void mac_rx_on(void);
 
 /*
- * The register writes the libraries' hal_init makes around the groups of its MAC configuration:
- * their HAL_CFG start and the wait for it, and HAL_HOLD and HAL_MISC;
- * and, after the groups, HAL_HOLD, HAL_WORD and RX_WORD.
- * mac_rx_policy_word is the read-modify-writes before each interface's hal_mac_rx_set_policy.
- * The driver's own start makes them; see mac.c.
+ * The register sequences of the libraries' bring-up, written out in macstart.c, which holds their detail:
+ * their hal_init's words and groups, their hal_crypto_init's cipher words, and their coex PTI.
+ * main.c calls them where the libraries' hal_init called the groups, in drv_mac_config's order; see macstart.c.
  */
 void mac_config_start(void);
 void mac_rx_policy_word(uint32_t iface);
 void mac_config_finish(void);
-
-/* The policy call their hal_init's loop makes for each interface, hal_mac_rx_set_policy(i, 0, 0, 0); see mac.c. */
 void mac_rx_set_policy(uint32_t iface);
-
-/* The libraries' mac_txrx_init, written out: their queues and sniffers settled; see mac.c. */
 void mac_queues_init(void);
-
-/*
- * The cipher's two configuration words and the three words after them, as the libraries' hal_crypto_init sets them.
- * The engine word their hal_crypto_enable writes into the first stays unset; see mac.c.
- */
 void mac_crypto_init(void);
-
-/*
- * The coex PTI: their hal_coex_pti_init's fifth bit of PTI_DEFAULT, their hal_set_rx_active_pti and
- * hal_set_wifi_default_pti's low nibble, and their hal_set_rx_ack_pti's second. See mac.c.
- */
 void mac_coex_pti_init(void);
 void mac_rx_active_pti(uint32_t pti);
 void mac_rx_ack_pti(uint32_t pti);

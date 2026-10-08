@@ -28,12 +28,9 @@
 #include "esp.h"
 #include "lib/libc.h"
 #include "mac.h"
+#include "macregs.h"
 #include "osi.h"
 
-#define MAC_BASE         0x600a4000u
-#define RX_CTRL          (MAC_BASE + 0x080u)
-#define RX_CTRL_RELOAD   0x1u
-#define RX_CTRL_ENABLE   0x80000000u
 #define RX_BASE          (MAC_BASE + 0x084u)
 #define RX_NEXT          (MAC_BASE + 0x088u) /* the descriptor the MAC fills next, its low 20 bits, or 0 */
 #define RX_LAST          (MAC_BASE + 0x08cu) /* the last descriptor filled, its low 20 bits */
@@ -52,20 +49,6 @@
 
 /* The stop's words, as the libraries' own functions write them; see own_wifi_stop. */
 #define TSF_CTRL    0x600ad050u /* the STA's TSF and its wakeups, which hal_disable_sta_tsf clears */
-#define PTI_RX      0x600a42fcu /* what hal_set_rx_active_pti and hal_set_rx_ack_pti clear */
-#define PTI_DEFAULT 0x600a4dd8u /* its low nibble, which hal_set_wifi_default_pti sets */
-#define HAL_CTRL    0x600a4308u /* hal_deinit's four; what they are is pp's, and no driver code reads them */
-#define HAL_HOLD    0x600a4c40u
-#define HAL_MISC    0x600a4c4cu
-#define HAL_CFG     0x600a4ddcu
-
-/*
- * The two words of the libraries' hal_init whose set bits the driver sets too:
- * HAL_WORD's top bit, and RX_WORD's low two written twice, as their hal_init does.
- * No driver code reads them, and the bits' meaning is not known.
- */
-#define HAL_WORD 0x600a4c8cu
-#define RX_WORD  (MAC_BASE + 0x98u)
 
 #define DESC_SIZE(f)   ((f) & 0x3fffu)
 #define DESC_LEN(f)    ((f) >> 14 & 0x3fffu)
@@ -104,36 +87,6 @@ static struct {
     volatile uint32_t channel; /* the one mac_channel last tuned to, which each frame is told it came on */
 } rx;
 
-static uint32_t rd(uint32_t a)
-{
-    return *(volatile uint32_t *)a;
-}
-
-static void wr(uint32_t a, uint32_t v)
-{
-    *(volatile uint32_t *)a = v;
-}
-
-/*
- * The MAC's own station address and the access point's; the flags are what hal_mac_set_addr and hal_mac_set_bssid set.
- * The driver writes them when its station associates, and mac_stop makes them invalid when it leaves.
- */
-#define BSSID_LO      (MAC_BASE + 0x00u)
-#define BSSID_HI      (MAC_BASE + 0x04u)
-#define STA_ADDR_LO   (MAC_BASE + 0x5cu)
-#define STA_ADDR_HI   (MAC_BASE + 0x60u)
-#define STA_ADDR2_LO  (MAC_BASE + 0x64u) /* interface 1's, the soft AP's, which hal_mac_set_addr's index 1 sets */
-#define STA_ADDR2_HI  (MAC_BASE + 0x68u)
-#define BSSID_FLAG      0x80000000u
-#define BSSID_HI_OTHER  0x00040000u /* their default policy clears it; the bit's meaning is not known */
-#define BSSID_HI_LOW    0x00000001u /* their default policy clears it too, in the bssid's word and interface 1's */
-#define STA_ADDR_FLAG   0x00010000u /* what hal_mac_set_addr ors: lui 0x10, not 0x100000 */
-/*
- * Interface 1's own word by the bssid's, which the libraries' default receive policy gives bit 30 and no other code
- * the driver reads writes; the bit's meaning is not known, so the driver sets it as they do.
- */
-#define IF1_DEFAULT_WORD (MAC_BASE + 0x0cu)
-#define IF1_DEFAULT_BIT  0x40000000u
 
 /* The four bytes at p, little-endian. */
 static uint32_t le32(const uint8_t *p)
@@ -196,11 +149,6 @@ void mac_key_clear(uint32_t entry)
  * The AID, once there is one, goes into the BSSID's high word and into the HE words, with the broadcast RU,
  * which the MAC configuration's bit 8 says, as hal_he_set_bcast_ru sets them; HE's minimum MPDU spacing is zero.
  */
-#define RX_POLICY           (MAC_BASE + 0x0d8u) /* interface 0's; interface n's 4 * n further */
-#define RX_POLICY1          (RX_POLICY + 4u)    /* interface 1's, which the default policy writes too */
-#define RX_POLICY_CLEAR     0x00000450u         /* cleared by a policy of 1 and 1, as the station's */
-#define RX_POLICY_QUEUE     0x00000102u         /* set by hal_mac_set_rxq_policy's 1 */
-#define BSSID_HI_POLICY     0x40000000u         /* cleared by the policy, beside BSSID_FLAG, which it sets */
 #define BSSID_HI_MMSS       0x38000000u
 #define BSSID_HI_AID        0x07ff0000u
 #define MAC_CONF            (MAC_BASE + 0x020u)
@@ -267,11 +215,6 @@ void mac_default_policy(const uint8_t mac[6])
 #define SNIFF_MISC            (MAC_BASE + 0x0f4u)
 #define SNIFF_MISC_MASK       0x0007fe00u
 #define SNIFF_MISC_NONE       0x00078600u
-#define SNIFF_CTRL0           (MAC_BASE + 0x0f8u)
-#define SNIFF_CTRL1           (MAC_BASE + 0x0fcu)
-#define SNIFF_CTRL_NONE       0x05000000u
-#define SNIFF_CTRL_TYPES      (MAC_BASE + 0x104u)
-#define SNIFF_CTRL_TYPES_MASK 0xffff0000u
 
 void mac_sniffer(int on)
 {
@@ -586,176 +529,6 @@ void mac_rx_off(void)
 void mac_rx_on(void)
 {
     wr(RX_CTRL, rd(RX_CTRL) | RX_CTRL_ENABLE);
-}
-
-/*
- * The libraries' hal_init's own register writes, around the groups of its MAC configuration that it calls:
- * their HAL_CFG start and the wait for it, and HAL_HOLD and HAL_MISC cleared.
- * Then, after the groups, HAL_HOLD, HAL_WORD and RX_WORD as their hal_init leaves them.
- * The driver's own start makes these, so that the groups it still calls sit where the libraries put them; see main.c.
- */
-void mac_config_start(void)
-{
-    wr(HAL_CFG, rd(HAL_CFG) | 2u);
-    while (!(rd(HAL_CFG) & 1u)) {
-    }
-    wr(HAL_HOLD, 0);
-    wr(HAL_MISC, 0xffffffffu);
-}
-
-/*
- * The libraries' mac_txrx_init, written out:
- * its sniffers cleared and set to their default, the words that set up its queues and hold the MAC,
- * the receive left disabled, which mac_rx_on sets again, and the three HE calls at its middle.
- * The sniffers, HAL_WORD, HAL_CTRL and RX_CTRL are named above; the others carry the offset they were reached at,
- * since what they are is not known.
- * Each of their read-modify-writes is one here, in their order, since the trace holds each access.
- */
-#define TXRX_MAC_100  (MAC_BASE + 0x100u)
-#define TXRX_MAC_110  (MAC_BASE + 0x110u)
-#define TXRX_MAC_114  (MAC_BASE + 0x114u)
-#define TXRX_HAL_C1C  0x600a4c1cu
-#define TXRX_HAL_C20  0x600a4c20u
-#define TXRX_HAL_C24  0x600a4c24u
-#define TXRX_HAL_C60  0x600a4c60u
-#define TXRX_HAL_C98  0x600a4c98u
-#define TXRX_HAL_C9C  0x600a4c9cu
-#define TXRX_HAL_CA4  0x600a4ca4u
-
-/* The three HE calls mac_txrx_init makes; they stay theirs, leaves with device writes of their own. */
-extern void hal_he_set_mac_delay(uint32_t);
-extern void hal_he_set_ack_rate(uint32_t);
-extern void hal_he_set_bbrxhung_time(uint32_t);
-
-void mac_queues_init(void)
-{
-    wr(HAL_WORD, rd(HAL_WORD) | 0x8080a000u);
-    wr(HAL_WORD, rd(HAL_WORD) | 0x1000u);
-    wr(HAL_WORD, rd(HAL_WORD) | 0x10000000u);
-    wr(TXRX_HAL_C98, rd(TXRX_HAL_C98) & ~0x8u);
-
-    wr(SNIFF_CTRL0, rd(SNIFF_CTRL0) & 0xffffu);
-    wr(SNIFF_CTRL1, rd(SNIFF_CTRL1) & 0xffffu);
-    wr(TXRX_MAC_100, rd(TXRX_MAC_100) & 0xffffu);
-    wr(SNIFF_CTRL_TYPES, rd(SNIFF_CTRL_TYPES) & 0xffffu);
-    wr(SNIFF_CTRL0, rd(SNIFF_CTRL0) | 0x01000000u);
-    wr(SNIFF_CTRL1, rd(SNIFF_CTRL1) | 0x01000000u);
-    wr(SNIFF_CTRL0, rd(SNIFF_CTRL0) | 0x04000000u);
-    wr(SNIFF_CTRL1, rd(SNIFF_CTRL1) | 0x04000000u); /* the two bits together are SNIFF_CTRL_NONE */
-
-    wr(HAL_WORD, rd(HAL_WORD) | 0x200u);
-    wr(TXRX_MAC_110, rd(TXRX_MAC_110) | 1u);
-    wr(TXRX_MAC_110, rd(TXRX_MAC_110) | 0x10u);
-    wr(TXRX_MAC_114, rd(TXRX_MAC_114) | 0x80000000u);
-    wr(TXRX_MAC_114, (rd(TXRX_MAC_114) & 0xf00fffffu) | 0x01b00000u);
-    wr(TXRX_HAL_C9C, rd(TXRX_HAL_C9C) | 3u);
-
-    /* Their first call passes a register's address left in a0,
-       which hal_he_set_mac_delay tests only against zero, so the driver passes 1;
-       the two after it pass zero. */
-    hal_he_set_mac_delay(1);
-    hal_he_set_ack_rate(0);
-    hal_he_set_bbrxhung_time(0);
-
-    wr(TXRX_HAL_C1C, rd(TXRX_HAL_C1C) | 0x80000000u);
-    wr(TXRX_HAL_C1C, rd(TXRX_HAL_C1C) | 0x40000000u);
-    wr(TXRX_HAL_C20, (rd(TXRX_HAL_C20) & 0xfffff000u) | 0xf0u);
-    wr(TXRX_HAL_C24, (rd(TXRX_HAL_C24) & 0xfffff000u) | 0xf0u);
-    wr(TXRX_HAL_CA4, (rd(TXRX_HAL_CA4) & ~0xf0u) | 0x40u);
-    wr(TXRX_HAL_C60, rd(TXRX_HAL_C60) | 0x7fff0000u);
-    wr(TXRX_HAL_C60, rd(TXRX_HAL_C60) | 0x80000000u);
-    wr(HAL_CTRL, rd(HAL_CTRL) | 2u);
-    wr(RX_CTRL, rd(RX_CTRL) & ~RX_CTRL_ENABLE);
-}
-
-/* The read-modify-writes their hal_init makes on an interface's receive-policy word, before each policy call. */
-void mac_rx_policy_word(uint32_t iface)
-{
-    uint32_t a = RX_POLICY + 4u * iface;
-    wr(a, rd(a) | 0x280u);
-    wr(a, rd(a) & ~0x400u);
-    wr(a, rd(a) | 0x5u);
-    wr(a, rd(a) & ~0x2040u);
-}
-
-/*
- * The policy call their hal_init's loop makes for each interface, their hal_mac_rx_set_policy(i, 0, 0, 0),
- * after the word above: the policy's 0x410 and 0x40 cleared (together RX_POLICY_CLEAR),
- * the interface's bssid word's bits 30 and 31 cleared, but interface 1's bit 30 set, IF1_DEFAULT_BIT,
- * and its own address made invalid, STA_ADDR_FLAG, as its bssid is, BSSID_FLAG.
- * Their function takes three flags beyond the interface, zero here, and touches nothing for interface 3;
- * their station's own call, hal_mac_rx_set_policy(0, 1, 1, 1), is mac_receive's.
- */
-void mac_rx_set_policy(uint32_t iface)
-{
-    if (iface > 2u) {
-        return; /* their function returns for interface 3, touching nothing */
-    }
-    uint32_t p = RX_POLICY + 4u * iface;
-    uint32_t w = BSSID_HI + 8u * iface;    /* interface 1's is IF1_DEFAULT_WORD */
-    uint32_t a = STA_ADDR_HI + 8u * iface; /* interface 1's is STA_ADDR2_HI */
-
-    wr(p, rd(p) & ~0x410u);
-    if (iface == 1u) {
-        wr(w, rd(w) | IF1_DEFAULT_BIT);
-    } else {
-        wr(w, rd(w) & ~BSSID_HI_POLICY);
-    }
-    wr(p, rd(p) & ~0x40u);
-    wr(w, rd(w) & ~BSSID_FLAG);
-    wr(a, rd(a) & ~STA_ADDR_FLAG);
-}
-
-void mac_config_finish(void)
-{
-    wr(HAL_HOLD, 0x19a879e0u);
-    wr(HAL_WORD, rd(HAL_WORD) | 0x10000000u);
-    wr(RX_WORD, (rd(RX_WORD) & 0xffffff00u) | 1u);
-    wr(RX_WORD, (rd(RX_WORD) & 0xffff00ffu) | 0x100u);
-}
-
-/*
- * The libraries' hal_crypto_init, written out:
- * their cipher's two configuration words, each 0x30000, and the three words after them cleared.
- * Their engine word, 0x30103, which their hal_crypto_enable writes into the first, stays unset:
- * with it set the access point took none of the station's sending; see NOTES.md.
- */
-#define CRYPTO_BASE 0x600a4800u
-void mac_crypto_init(void)
-{
-    wr(CRYPTO_BASE + 0x00u, 0x30000u);
-    wr(CRYPTO_BASE + 0x04u, 0x30000u);
-    wr(CRYPTO_BASE + 0x08u, 0);
-    wr(CRYPTO_BASE + 0x0cu, 0);
-    wr(CRYPTO_BASE + 0x10u, 0);
-}
-
-/*
- * The libraries' coex PTI, the packet-type map their hal_set_*_pti write into PTI_DEFAULT and PTI_RX (see mac_stop),
- * written out for the four whose value the driver's start supplies: their hal_coex_pti_init sets PTI_DEFAULT's
- * fifth bit, their hal_set_rx_active_pti and hal_set_wifi_default_pti the low nibble -- the active PTI and the
- * default one their start reads through the adapter's coex_pti_get -- and their hal_set_rx_ack_pti the second
- * nibble. Their hal_set_ofdma_sequence_pti and hal_timer_update_by_rtc, whose groups the driver still calls, write
- * the words those two name.
- */
-void mac_coex_pti_init(void)
-{
-    wr(PTI_DEFAULT, rd(PTI_DEFAULT) | 0x20u);
-}
-
-void mac_rx_active_pti(uint32_t pti)
-{
-    wr(PTI_RX, (rd(PTI_RX) & ~0xfu) | (pti & 0xfu));
-}
-
-void mac_rx_ack_pti(uint32_t pti)
-{
-    wr(PTI_RX, (rd(PTI_RX) & ~0xf0u) | ((pti << 4) & 0xffu));
-}
-
-void mac_wifi_default_pti(uint32_t pti)
-{
-    wr(PTI_DEFAULT, (rd(PTI_DEFAULT) & ~0xfu) | (pti & 0xfu));
 }
 
 /*
