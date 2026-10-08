@@ -60,11 +60,6 @@ what is left:
   Nor a thin server, which only passes data on while its clients do the work,
   to tell what moving work into the client saves and what the hop still costs.
   Why its `chain`'s second hop costs no more than the first is not worked out.
-- `say()` silently misreads a conversion it does not know:
-  `%08x` prints `0` and `8` literally and takes no argument,
-  so every conversion after it reads one argument early and a `%s` can read a number as a pointer.
-  The root task is the only reader of the kernel's log, so a fault this causes there is silent.
-  An unknown conversion should be named, or its width digits refused, and `lib-test` should hold it.
 
 ## ESP32-C6
 

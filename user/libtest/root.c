@@ -2,7 +2,7 @@
  * The library's test: a root task that does with user/lib/ what a program of several processes does,
  * and checks that everything it hands out comes back.
  *
- * It checks the copies and fills against byte by byte ones,
+ * It checks the copies and fills against byte by byte ones, and say's text, a conversion it does not know among it,
  * and reads bytes left in free memory, as a loader leaves a program's files there;
  * connects two peers with a channel whose rings hold a few packets, and has each send the other more than that;
  * builds a child that stores where it has no region, hears it fault and takes it down, twice;
@@ -208,6 +208,41 @@ static void copy_round(void)
         }
     }
     say(&out, "libtest: copies and fills: ok\n");
+}
+
+/* What say formats, kept in memory, for the round that checks say itself. */
+struct text {
+    char buf[64];
+    uint32_t n;
+};
+
+static void text_write(void *to, const char *s, uint32_t n)
+{
+    struct text *t = to;
+    for (uint32_t i = 0; i < n && t->n < sizeof(t->buf); i++) {
+        t->buf[t->n++] = s[i];
+    }
+}
+
+static int text_is(const struct text *t, const char *want)
+{
+    return t->n == strlen(want) && memcmp(t->buf, want, t->n) == 0;
+}
+
+/*
+ * say's conversions into memory, and one it does not know: that one is named, and the %s after it reads no
+ * argument, which here is no string, so a say that read it would fault.
+ */
+static void say_round(void)
+{
+    struct text t = { .n = 0 };
+    const struct out mem = { text_write, &t };
+    say(&mem, "%u %d %x %s %%", 7u, -3, 0x1234u, "s");
+    check(text_is(&t, "7 -3 0x00001234 s %"), "say formats its conversions");
+    t.n = 0;
+    say(&mem, "%u %08x %s", 7u, 0x12u, (const char *)1);
+    check(text_is(&t, "7 [say: unknown %0]8x %s"), "say names a conversion it does not know and reads past it nothing");
+    say(&out, "libtest: say's conversions, and one it does not know: ok\n");
 }
 
 /*
@@ -533,6 +568,7 @@ int main(void)
     say(&out, "libtest: up, %u bytes free and %u slots unused\n", start.bytes, slots_unused(&self));
 
     copy_round();
+    say_round();
     read_back();
 
     /* Two peers, connected before either starts. */

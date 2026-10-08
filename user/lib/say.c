@@ -27,6 +27,13 @@ static void put(struct pending *p, char c)
     }
 }
 
+static void put_str(struct pending *p, const char *s)
+{
+    for (; *s; s++) {
+        put(p, *s);
+    }
+}
+
 static void put_hex(struct pending *o, uint32_t v, int digits)
 {
     for (int shift = 4 * (digits - 1); shift >= 0; shift -= 4) {
@@ -53,18 +60,17 @@ void say(const struct out *out, const char *fmt, ...)
     struct pending *o = &pending;
     o->o = out;
     o->n = 0;
+    int known = 1; /* cleared at a conversion say does not know; the text past it goes out as it stands */
     va_list ap;
     va_start(ap, fmt);
     for (; *fmt; fmt++) {
-        if (*fmt != '%' || fmt[1] == '\0') {
+        if (*fmt != '%' || fmt[1] == '\0' || !known) {
             put(o, *fmt);
             continue;
         }
         switch (*++fmt) {
         case 's':
-            for (const char *s = va_arg(ap, const char *); *s; s++) {
-                put(o, *s);
-            }
+            put_str(o, va_arg(ap, const char *));
             break;
         case 'u':
             put_dec(o, va_arg(ap, uint32_t));
@@ -103,8 +109,19 @@ void say(const struct out *out, const char *fmt, ...)
             }
             break;
         }
+        case '%':
+            put(o, '%');
+            break;
         default:
+            /*
+             * Whether a conversion say does not know takes an argument cannot be told, and one read wrongly
+             * shifts every conversion after it, a %s reading a number as a pointer: it is named, and no argument
+             * is read past it.
+             */
+            known = 0;
+            put_str(o, "[say: unknown %");
             put(o, *fmt);
+            put(o, ']');
         }
     }
     va_end(ap);
