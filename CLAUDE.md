@@ -70,6 +70,9 @@ A change to `user/tracer/` or to the trace in `user/wifi/esp32c6/` runs it with 
 which has the root task carry out and log every device access of the libraries' bring-up,
 and again with `trace=2`, the same window with the driver mapping its frames and nothing faulting;
 the two runs must agree on the driver's lines, its events and its code, and the stream comes as `build/esp32c6/wifi-run.log`.
+The final state is held to the dry run's too: `tools/mac-trace.py snapshot` makes the window's `snap=` lines from a traced log,
+and `compare`, with two dry logs and the traced one, fails on any divergence outside the words the dry runs differ in.
+`make BOARD=esp32c6 wifi-esp32c6-attrib` attributes every access of a traced log to its library and function.
 A change to the station in `user/wifi/esp32c6/main.c`, `sta.c` or `mgmt.c` runs it with a network named,
 the station's scan, SAE, association and 4-way handshake at an access point that offers WPA3, which fails if one is not answered,
 and then serves the link the network's frames cross,

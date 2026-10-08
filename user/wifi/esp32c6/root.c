@@ -125,6 +125,15 @@ static struct {
 } trace_dev[sizeof(trace_frames) / sizeof(trace_frames[0])];
 static uint32_t trace_dev_count;
 /*
+ * The addresses a snapshot run reads back at the end of the window, from the configuration's snap= lines:
+ * the ones the traced code read at least once. A read of only what the run read adds no access of a kind
+ * the run did not make; a register whose read has an effect, or whose value moves, comes out different
+ * between two dry runs and drops out of the compare. tools/mac-trace.py makes the list and compares the runs.
+ */
+#define SNAP_MAX 512
+static uint32_t snap_addrs[SNAP_MAX];
+static uint32_t snap_count;
+/*
  * The stream goes straight to the console, not through the kernel's log: the kernel writes two lines of its own
  * for every fault, and the host's check symbolizes each of those, so a trace through it drowns.
  * A line is gathered whole and handed the FIFO one packet at a time, and the writer waits, unlike the board's
@@ -282,6 +291,58 @@ static void (*drv_entry(void))(struct child_page *)
     return h.entry;
 }
 
+/* One hexadecimal number at s, into *out; returns whether it read one, leaving *end past it. */
+static int snap_hex(const char *s, uint32_t *out, const char **end)
+{
+    if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+        s += 2;
+    }
+    uint32_t v = 0;
+    const char *p = s;
+    for (; *p != '\0'; p++) {
+        int d;
+        if (*p >= '0' && *p <= '9') {
+            d = *p - '0';
+        } else if (*p >= 'a' && *p <= 'f') {
+            d = *p - 'a' + 10;
+        } else if (*p >= 'A' && *p <= 'F') {
+            d = *p - 'A' + 10;
+        } else {
+            break;
+        }
+        v = v * 16u + (uint32_t)d;
+    }
+    *out = v;
+    *end = p;
+    return p != s;
+}
+
+/* The configuration's snap= lines into snap_addrs: one address, or one range lo-hi, both four apart. */
+static void snap_parse(const char *conf, uint32_t len)
+{
+    snap_count = 0;
+    for (uint32_t i = 0; i < len && conf[i] != '\0'; i++) {
+        if ((i != 0 && conf[i - 1] != '\n') || i + 5 > len || memcmp(conf + i, "snap=", 5) != 0) {
+            continue;
+        }
+        const char *p;
+        uint32_t lo, hi;
+        if (!snap_hex(conf + i + 5, &lo, &p)) {
+            continue;
+        }
+        if (*p == '-') {
+            if (!snap_hex(p + 1, &hi, &p)) {
+                continue;
+            }
+        } else {
+            hi = lo;
+        }
+        for (lo &= ~3u; lo <= hi && snap_count < SNAP_MAX; lo += 4) {
+            snap_addrs[snap_count++] = lo;
+        }
+    }
+}
+
 /*
  * What to do, from the text the loader may have left in the input region: lines of ssid= and pass=,
  * the network to join, and with no ssid, a scan; bssid=, which of the network's access points to join;
@@ -320,6 +381,7 @@ static void configure(struct drv *p)
     antenna = config_has(conf, size, "antenna", "ufl")    ? ANTENNA_UFL
               : config_has(conf, size, "antenna", "none") ? ANTENNA_NONE
                                                            : ANTENNA_BOARD;
+    snap_parse(conf, size);
     must("uninstall the input", region_free(&self, region));
 }
 
@@ -392,7 +454,8 @@ static void dev_write(uint32_t address, uint32_t value, uint32_t width)
     }
 }
 
-/* One access out, with its sequence number. */
+/* One access out, with its sequence number; tools/mac-trace.py reads this line and the snapshot's, so the
+ * format is theirs too, and a change to it is a change to what they parse. */
 static void trace_line(const struct trace_rec *e)
 {
     say(&cout, "[%u] pc %x t%u %s%u %x = %x%s%s\n", trace_seq++, e->pc, e->thread,
@@ -466,11 +529,23 @@ static void trace_answer(void)
     }
 }
 
-/* The stream's tail, and what it saw: the accesses served, the lines they took, and the kernel's fault lines dropped. */
+/* The stream's tail, the snapshot the configuration asked for, and what it saw: the accesses served, the lines. */
 static void trace_dump(void)
 {
     trace_cycle_end(&trace_cyc, &trace_sink);
     say(&cout, "[%u] trace over: %u accesses\n", trace_seq++, trace_records);
+    if (snap_count != 0) {
+        say(&cout, "[%u] snapshot of %u addresses\n", trace_seq++, snap_count);
+        for (uint32_t i = 0; i < snap_count; i++) {
+            uint32_t address = snap_addrs[i];
+            if (trace_covered(address, 4)) {
+                say(&cout, "snap %x = %x\n", address, dev_read(address, 4));
+            } else {
+                /* A stale list, or a frame the root does not map; named so the compare tells it from a value. */
+                say(&cout, "snap %x = none\n", address);
+            }
+        }
+    }
     say(&kout, "root: the trace saw %u accesses in %u lines\n", trace_records, trace_seq);
     say(&kout, "root: the trace dropped %u kernel fault lines for %u accesses\n", kline_dropped, trace_records);
 }
@@ -699,8 +774,9 @@ int main(void)
     /* The driver's data a block of its own, built before the room is, which is the other children's. */
     driver_build();
     rf_switch();
-    if (trace_serving) {
-        /* After rf_switch, which takes the IO MUX and the GPIO for a moment and gives them back. */
+    if (trace_wanted) {
+        /* After rf_switch, which takes the IO MUX and the GPIO for a moment and gives them back;
+         * with trace=2 the root serves nothing, but reads the frames back there for the snapshot. */
         trace_map();
     }
     if (!trace_wanted) {

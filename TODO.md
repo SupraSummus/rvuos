@@ -101,6 +101,11 @@ what is left:
   so a run that faults tens of thousands of times stalls the reader under its lock and back-pressures the port;
   one long-lived symbolizer, or a cache of an address's name, would keep up,
   and would take the root task's own filter away.
+- The ESP32-C6's console loses bytes on a long unbroken stream: a trace log is short by ten-odd lines of ~50k,
+  a sequence number missing or a line cut, in the dense PHY polling loops; and once the stream stopped whole
+  mid-window, the root's writer waiting on a host that had stopped reading, and the chip then wanted unplugging
+  before it answered again. It is the transport, not the root, since two runs of one image lose at different
+  sequence numbers; why the channel drops them is open. `tools/mac-trace.py` names what it finds and holds a log to it.
 - A driver of the ESP32-C6's Wi-Fi that leaves Espressif's libraries the PHY alone, `libphy.a`:
   `pp` and `net80211` give way to the driver's own MAC and station, and `osi.c` shrinks to what `libphy.a` calls.
   The station is the driver's own already, on hostap; `user/wifi/NOTES.md` says why.

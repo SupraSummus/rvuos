@@ -226,3 +226,22 @@ else
 wifi-esp32c6-refs:
 	$(error the driver runs on an ESP32-C6: make BOARD=esp32c6 wifi-esp32c6-refs)
 endif
+
+# The library and function each device access of a trace log belongs to, see tools/mac-trace.py:
+# what of the log the own bring-up has to reproduce, and what is libphy's calibration and stays.
+# The log has to be the one the attributed image ran, which the rule holds by the log's own flashed-image hash.
+# WIFI_TRACE_ONLY=pp holds pp's part alone, which the channel's losses miss.
+WIFI_TRACE_LOG ?= $(BUILD)/wifi-run.log
+.PHONY: wifi-esp32c6-attrib
+ifeq ($(BOARD),esp32c6)
+wifi-esp32c6-attrib: $(BUILD)/wifi-drv.elf $(BUILD)/wifi-drv.bin $(PHYBLOB_ROM_ELF)
+	tools/mac-trace.py attrib --elf $(BUILD)/wifi-drv.elf --rom $(PHYBLOB_ROM_ELF) --image $(BUILD)/wifi-drv.bin \
+		--lib net80211=$(PHYBLOB_CACHE)/libnet80211.a:$(PHYBLOB_CACHE)/esp32c6.rom.net80211.ld \
+		--lib pp=$(PHYBLOB_CACHE)/libpp.a:$(PHYBLOB_CACHE)/esp32c6.rom.pp.ld \
+		--lib phy=$(BUILD)/$(WIFI_ESP)/libphy.a:$(PHYBLOB_CACHE)/esp32c6.rom.phy.ld \
+		$(addprefix --own ,$(WIFI_ESP_OBJ) $(LIB_OBJ)) \
+		$(if $(WIFI_TRACE_ONLY),--only $(WIFI_TRACE_ONLY),) $(WIFI_TRACE_LOG)
+else
+wifi-esp32c6-attrib:
+	$(error the driver runs on an ESP32-C6: make BOARD=esp32c6 wifi-esp32c6-attrib)
+endif

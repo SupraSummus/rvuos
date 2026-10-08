@@ -119,6 +119,10 @@ def main():
     args = parser.parse_args()
 
     extra = [ram_file(spec) for spec in args.ram] + [ram_file(spec, b"\0") for spec in args.text]
+    # What the run flashes, into the log's own stream, so the host's tools can hold a log to the image that ran.
+    for spec in args.flash:
+        address, path = spec.split(":", 1)
+        print("# flashed %#x sha256 %s" % (int(address, 0), hashlib.sha256(open(path, "rb").read()).hexdigest()))
     serial = load(args.port, args.image, extra, [ram_file(spec) for spec in args.flash])
     threading.Thread(target=forward, args=(serial,), daemon=True).start()
     serial.timeout = 0.05
