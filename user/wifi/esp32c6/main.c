@@ -378,6 +378,55 @@ static __attribute__((noreturn)) void attend(struct drv *d)
 }
 
 /*
+ * The driver's own esp_wifi_start, taking the libraries' bring-up over a step at a time: the body is the libraries'
+ * wifi_start_process written out -- adc2_wifi_acquire, ieee80211_set_hmac_stop, wifi_hw_start, wifi_mode_set,
+ * _do_wifi_start, ieee80211_update_phy_country -- so that each of those can be taken over in turn and the window's
+ * sequence held to the libraries' by tools/mac-trace.py's diff. The mode is the one the libraries' configuration
+ * holds. See user/wifi/NOTES.md.
+ */
+extern int wifi_init_completed(void);
+extern int adc2_wifi_acquire(void);
+extern void ieee80211_set_hmac_stop(void);
+extern int wifi_hw_start(int reason);
+extern int wifi_mode_set(int mode);
+extern int _do_wifi_start(int mode);
+extern void ieee80211_update_phy_country(void);
+extern void *g_wifi_nvs; /* the libraries' configuration, whose first byte is the mode */
+extern char g_ic[];      /* the libraries' shared control block */
+
+static int drv_wifi_start(void)
+{
+    if (!wifi_init_completed()) {
+        return ESP_FAIL;
+    }
+    int rv = adc2_wifi_acquire();
+    if (rv != 0) {
+        return rv;
+    }
+    ieee80211_set_hmac_stop();
+    int mode = *(const uint8_t *)g_wifi_nvs;
+    wifi_hw_start(mode == 0 ? 3 : (mode == 1 ? 0 : (mode == 2 ? 1 : -1)));
+    if ((rv = wifi_mode_set(mode)) != 0) {
+        return rv;
+    }
+    if ((rv = _do_wifi_start(mode)) != 0) {
+        return rv;
+    }
+    ((uint8_t *)g_ic)[0x1f1] = 2;
+    ieee80211_update_phy_country();
+    return ESP_OK;
+}
+
+/*
+ * The libraries' start or the driver's own, so that a traced run of each, of the same image, can be held together by
+ * tools/mac-trace.py's diff; the driver's own posts the libraries' bring-up for now, so the two agree. See drv.h.
+ */
+static int bringup_start(void)
+{
+    return drv_self->lib_start ? esp_wifi_start() : drv_wifi_start();
+}
+
+/*
  * The trace window: only the libraries' bring-up and stop, and nothing else, so that every device access is its own.
  * With trace=1 the driver maps no device, so each access faults to the watcher and the root task carries it out and logs it;
  * with trace=2 the driver maps them as in a plain run, so the same window runs with no fault, the step 2 baseline.
@@ -395,7 +444,7 @@ static __attribute__((noreturn)) void trace_run(void)
     osi_trace("mode", 0, 0);
     drv_must("station mode", esp_wifi_set_mode(WIFI_MODE_STA));
     osi_trace("start", 0, 0);
-    drv_must("esp_wifi_start", esp_wifi_start());
+    drv_must("esp_wifi_start", bringup_start());
     started = 1;
     /* The trace slows the libraries down, so the wait is given the whole run rather than five seconds. */
     await("the station started", WIFI_EVENT_STA_START, 120000);
@@ -433,7 +482,7 @@ static __attribute__((noreturn)) void run(struct drv *d)
         drv_wpa_debug();
     }
     drv_must("station mode", esp_wifi_set_mode(WIFI_MODE_STA));
-    drv_must("esp_wifi_start", esp_wifi_start());
+    drv_must("esp_wifi_start", bringup_start());
     started = 1;
     await("the station started", WIFI_EVENT_STA_START, 5000);
     child_report(&d->c, DRV_UP);
