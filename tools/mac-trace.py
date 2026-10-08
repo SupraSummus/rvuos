@@ -227,15 +227,16 @@ def compare(args):
     return 1 if divergent else 0
 
 
-def by_thread(acc, lo, hi, library, fold, join=False):
+def by_thread(acc, lo, hi, library, fold, join=False, apart=frozenset()):
     """The accesses in (lo, hi], split by thread, each unbroken run of a folded library turned into one marker.
 
     A record a cycle printed once stands for `turns` accesses, and one crossing the range's edge keeps its share,
     as `attrib`'s segments do. Each thread's accesses are kept apart, since another thread's (the interrupt's)
     interleave asynchronously; a run of a library named in `fold` (libphy's calibration, whose count and values are
-    the time's) becomes a single ("*", name, ...) marker. With `join`, every thread's accesses go into one stream,
-    for a run whose own start makes the bring-up on the thread that called it where the libraries posted it to
-    another. Returns {thread: [element, ...]}, an element being (op, width, address, value, turns) or a marker.
+    the time's) becomes a single ("*", name, ...) marker. With `join`, every thread's accesses but those `apart`
+    names go into one stream, for a run whose own start makes the bring-up on the thread that called it where the
+    libraries posted it to another. Returns {thread: [element, ...]}, an element being (op, width, address, value,
+    turns) or a marker.
     `library` is None when nothing folds.
     """
     out = collections.defaultdict(list)
@@ -246,7 +247,7 @@ def by_thread(acc, lo, hi, library, fold, join=False):
         a, b = max(first, lo + 1), min(last, hi)
         if a > b:
             continue
-        seq = out[0 if join else thread]
+        seq = out[0 if join and thread not in apart else thread]
         if fold:
             lib = library(pc)
             if lib in fold:
@@ -316,7 +317,8 @@ def diff(args):
     window by default), resolved in each log, so a run whose own start adds or drops an access is aligned by its
     phase markers, not by request number. A library named by --collapse folds into one marker per run (libphy's
     calibration, whose count and values are the time's). With --join every thread is one stream, for a run whose own
-    start makes the bring-up on the thread that called it where the libraries posted it to another. A polling loop
+    start makes the bring-up on the thread that called it where the libraries posted it to another, the interrupt's
+    and the timers' kept apart all the same. A polling loop
     whose cycle turned a different number of times is a note, never a difference. The streams are aligned as a
     whole, so every block where they differ is shown, not the first alone. A short log is refused,
     and with --image a log that did not flash that file, since the names come from the ELF of the build at hand.
@@ -339,18 +341,18 @@ def diff(args):
             sys.exit("mac-trace: %s has no trace: line named %s" % (path, args.from_ if lo is None else args.to))
         return lo, hi if hi is not None else 1 << 62
 
+    # A thread the driver's role lines name as the interrupt's or a timer's has its accesses placed by the
+    # hardware's timing, so its stream is compared as a multiset and apart, not positionally, --join or not.
+    async_t = set()
+    for path in paths:
+        async_t |= {t for t, role in roles(path).items() if role in ("isr", "timers")}
+
     def take(acc, path):
         lo, hi = bounds(path)
-        return by_thread(acc, lo, hi, library, fold, args.join)
+        return by_thread(acc, lo, hi, library, fold, args.join, async_t)
 
     bases = [take(logs[i][0], paths[i]) for i in range(len(args.base))]
     own = take(logs[-1][0], args.own_log)
-
-    # A thread the driver's role lines name as the interrupt's or a timer's has its accesses placed by the
-    # hardware's timing, so its stream is compared as a multiset and apart, not positionally.
-    async_t = set()
-    for path in (() if args.join else paths):
-        async_t |= {t for t, role in roles(path).items() if role in ("isr", "timers")}
 
     volatile = set()
     for t in sorted({t for b in bases for t in b}):

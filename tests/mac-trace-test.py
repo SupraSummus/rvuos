@@ -7,7 +7,7 @@ a polling loop's turns are a note, not a difference;
 a difference does not hide what comes after it;
 a word any pair of base or dry runs differs in is volatile, even where two of them agree;
 an interrupt thread's accesses are a multiset;
---join makes one stream of every thread;
+--join makes one stream of every thread but the interrupt's;
 --from aligns two runs by their phase markers, a cycle cut at the marker keeping its share;
 a short log is refused, and with --image one that flashed another build;
 and the words COUNTERS names stay out of compare's verdict.
@@ -127,6 +127,16 @@ def test_join_makes_one_stream(f):
     own = f("own", log((1, "W", A, 1), (1, "W", B, 1), (1, "W", C, 1)))
     assert diff([base, base], own)[0] == 1
     assert diff([base, base], own, join=True)[0] == 0
+
+
+def test_join_keeps_the_interrupt_apart(f):
+    # The interrupt came at another moment and once more: with --join the bring-up's threads are one stream,
+    # and the interrupt's is still a multiset, reported apart.
+    role = "trace: thread 2 isr"
+    base = f("base", log((1, "W", A, 1), (2, "R", X, 0), (3, "W", B, 1), role))
+    own = f("own", log((1, "W", A, 1), (1, "W", B, 1), (2, "R", X, 0), (2, "R", X, 0), role))
+    status, out = diff([base, base], own, join=True)
+    assert status == 0 and "thread 2 is an interrupt's" in out and "own has x1" in out, out
 
 
 def test_from_aligns_and_cuts_a_cycle(f):
