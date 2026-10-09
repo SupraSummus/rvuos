@@ -93,7 +93,8 @@ class Gate:
 
     def traced(self, name, trace, lib, snap):
         """A traced run, made again, twice at most, when the stream lost bytes of its log (see TODO.md)
-        or the run never halted, each loss written down in DIR/losses.txt with the run, the place and the line.
+        or the run never halted, each loss written down in DIR/losses.txt with the run, the place and the line,
+        and the run's log kept beside it, DIR/name-lost-TIME.log, for the cause to be read from.
         """
         conf = os.path.join(DIR, name + ".conf")
         with open(conf, "w") as f:
@@ -106,8 +107,11 @@ class Gate:
                 lost = None if status != 0 or self.args.dry_run else loss(os.path.join(DIR, name + ".log"), trace, snap)
             if not lost:
                 return status
+            kept = os.path.join(DIR, "%s-lost-%s.log" % (name, time.strftime("%Y%m%d-%H%M%S")))
+            if os.path.exists(os.path.join(DIR, name + ".log")):
+                shutil.copy(os.path.join(DIR, name + ".log"), kept)
             with open(os.path.join(DIR, "losses.txt"), "a") as f:
-                f.write("%s %s: %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), name, lost))
+                f.write("%s %s: %s; %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), name, lost, kept))
             print("gate: %s: %s; %s" % (name, lost, "run again" if attempt < 2 else "given up"), flush=True)
         return 1
 
