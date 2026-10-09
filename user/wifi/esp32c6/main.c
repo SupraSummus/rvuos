@@ -383,7 +383,7 @@ static __attribute__((noreturn)) void attend(struct drv *d)
  * wifi_mode_set, _do_wifi_start, ieee80211_update_phy_country -- so that each of those can be taken over in turn and
  * the window's sequence held to the libraries' by tools/mac-trace.py's diff. Only the station is written; the
  * libraries' start brings an interface up per mode -- reason 0 the station, 1 the soft AP, 3 then both, and none for
- * another -- so another mode stops here rather than guesses. See user/wifi/NOTES.md.
+ * another -- so another mode stops here rather than guesses. See NOTES.md.
  */
 extern int wifi_init_completed(void);
 extern int adc2_wifi_acquire(void);
@@ -424,7 +424,7 @@ static void drv_reset_mac(void)
  * The libraries' wifi_hw_start, the hardware bring-up they run once before their task brings the interface up,
  * written out for the station's fresh start: the stop mask clear, neither guard tripped. The libraries' other
  * branch -- an interface a stop left behind, woken rather than brought up anew -- is not written, since the driver
- * starts the station once from a stopped radio; another state stops here. See user/wifi/NOTES.md.
+ * starts the station once from a stopped radio; another state stops here. See NOTES.md.
  */
 static int drv_hw_start(void)
 {

@@ -443,7 +443,7 @@ static const uint8_t ofdma_pti_events[12] = {1, 3, 3, 3, 1, 1, 1, 1, 3, 3, 0xau,
 /*
  * The libraries' hal_init, the MAC's configuration, written out whole:
  * its own register writes about HAL_CFG and HAL_HOLD and its receive-policy words, and its groups in its order,
- * each named through osi_trace so that a traced run's segments show its accesses. See user/wifi/NOTES.md.
+ * each named through osi_trace so that a traced run's segments show its accesses. See NOTES.md.
  * The driver's start and the host's replay both call this, so neither keeps the order of its own;
  * the two adapter values it needs, the slow clock's period and the coex PTI bytes, come through the pointers.
  */

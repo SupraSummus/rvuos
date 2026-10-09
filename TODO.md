@@ -113,7 +113,7 @@ what is left:
   and writes each loss into `build/esp32c6/gate/losses.txt`, the series to read the cause from.
 - A driver of the ESP32-C6's Wi-Fi that leaves Espressif's libraries the PHY alone, `libphy.a`:
   `pp` and `net80211` give way to the driver's own MAC and station, and `osi.c` shrinks to what `libphy.a` calls.
-  The station is the driver's own already, on hostap; `user/wifi/NOTES.md` says why.
+  The station is the driver's own already, on hostap; `user/wifi/esp32c6/NOTES.md` says why.
   It receives, scans and sends by `mac.c`, authenticates, by SAE where the access point offers WPA3's personal
   and by open system under WPA2's, associates, runs the supplicant's 4-way handshake over a link of its own, see `supp.h`,
   installs the keys it derives in the MAC's own cipher and in the station, and serves the link.
@@ -124,7 +124,7 @@ what is left:
   for the replay check, so the receiving runs no software CCMP; `ccmp_decrypt` stays for `ccmp-test` alone.
   The sending is software CCMP still, `ccmp.c` on hostap's `aes-ccm.c`, under the pairwise key;
   with the engine word set the access point took none of the sending, so it is left unset;
-  the MAC's own cipher is in `NOTES.md`.
+  the MAC's own cipher is in `user/wifi/esp32c6/NOTES.md`.
   The station's data go at 1 Mb/s, the rate `mac_tx` programs for management frames.
   A rekey is checked on the host alone, by `keys-test`:
   showing a pairwise one live wants an access point that answers a station's rekey request,
@@ -137,7 +137,7 @@ what is left:
   The MAC's bring-up is being taken from the libraries, from the last entry point.
   The stop is the driver's own (`mac_stop`), and the start is being taken over: the driver's own `esp_wifi_start` runs
   the libraries' bring-up's body itself, and the HAL's functions go over one at a time.
-  The method, the order and the groups are in `user/wifi/NOTES.md`.
+  The method, the order and the groups are in `user/wifi/esp32c6/NOTES.md`.
   `libstart=1` in `WIFI_CONFIG` runs the libraries' start instead of the driver's own, for a traced comparison of
   the two from one image; it goes when the own start is proven and no comparison is wanted.
   The four bring-up symbols and the two of the log that the driver once asked of the flash libraries are taken one
