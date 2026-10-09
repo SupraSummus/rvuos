@@ -169,7 +169,7 @@ void mac_receive(uint16_t aid)
     }
     wr(BSSID_HI, (rd(BSSID_HI) & ~BSSID_HI_AID) | ((uint32_t)aid << 16 & BSSID_HI_AID));
     wr(HE_AID, (rd(HE_AID) & ~HE_AID_MASK) | (aid & HE_AID_MASK));
-    uint32_t ru = rd(MAC_CONF) & MAC_CONF_BCAST_RU ? HE_BCAST_RU : 0;
+    uint32_t ru = rd(MAC_CONF(0)) & MAC_CONF_BCAST_RU ? HE_BCAST_RU : 0;
     wr(HE_AID, (rd(HE_AID) | HE_AID_RU_SET) & ~HE_AID_RU);
     wr(HE_BCAST, (rd(HE_BCAST) & ~(HE_BCAST_RU | HE_BCAST_RU2)) | HE_BCAST_SET | ru);
 }

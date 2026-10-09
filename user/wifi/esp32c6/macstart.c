@@ -251,11 +251,11 @@ static void mac_he_set_ersu(uint32_t enable)
 static void mac_he_set_co_hosted_bss(uint32_t enable, uint32_t mask)
 {
     if (enable != 0) {
-        wr(MAC_CONF, rd(MAC_CONF) | 0x20000u);
-        wr(MAC_CONF, (rd(MAC_CONF) & 0xfffe01ffu) | (((0xffffffffu << (mask & 31u)) & 0xffu) << 9));
+        wr(MAC_CONF(0), rd(MAC_CONF(0)) | 0x20000u);
+        wr(MAC_CONF(0), (rd(MAC_CONF(0)) & 0xfffe01ffu) | (((0xffffffffu << (mask & 31u)) & 0xffu) << 9));
     } else {
-        wr(MAC_CONF, rd(MAC_CONF) & ~0x20000u);
-        wr(MAC_CONF, rd(MAC_CONF) | 0x1fe00u);
+        wr(MAC_CONF(0), rd(MAC_CONF(0)) & ~0x20000u);
+        wr(MAC_CONF(0), rd(MAC_CONF(0)) | 0x1fe00u);
     }
 }
 
@@ -333,34 +333,31 @@ static void mac_addr_set(uint32_t iface, const uint8_t *addr)
 
 /*
  * The libraries' hal_he_clr_multi_bssid, written out: their start's call clears interface 2's queue bits, its BSSID
- * and address and gives it the default policy, which takes their flags away, first; then, on HE_MAC_2C and MAC_CONF,
- * it clears bit 8, sets bits 9 to 16 and clears the low byte, and, on HE_MAC_34 and HE_MAC_28, clears bits 16 to 23;
- * then each of the eight slots' TX_MPLEN, bit 2 cleared.
- * Their read of MAC_CONF first is the guard: if its bit 17 is set, the call returns unwritten.
+ * and address and gives it the default policy, which takes their flags away, first; then, on MAC_CONF(1) and
+ * MAC_CONF(0), it clears bit 8, sets bits 9 to 16 and clears the low byte, and, on HE_MULTI_BSSID(1) and
+ * HE_MULTI_BSSID(0), clears bits 16 to 23; then each of the eight slots' TX_MPLEN, bit 2 cleared.
+ * Their read of MAC_CONF(0) first is the guard: if its bit 17 is set, the call returns unwritten.
  */
-#define HE_MAC_2C (MAC_BASE + 0x2cu)
-#define HE_MAC_28 (MAC_BASE + 0x28u)
-#define HE_MAC_34 (MAC_BASE + 0x34u)
 
 static void mac_he_clr_multi_bssid(void)
 {
     static const uint8_t zero[6];
 
-    if (rd(MAC_CONF) & 0x20000u) {
+    if (rd(MAC_CONF(0)) & 0x20000u) {
         return;
     }
     mac_rxq_policy(2u, 0u);
     mac_bssid_set(2u, zero);
     mac_addr_set(2u, zero);
     mac_rx_set_policy(2u);
-    wr(HE_MAC_2C, rd(HE_MAC_2C) & ~0x100u);
-    wr(HE_MAC_2C, rd(HE_MAC_2C) | 0x1fe00u);
-    wr(HE_MAC_2C, rd(HE_MAC_2C) & ~0xffu);
-    wr(HE_MAC_34, rd(HE_MAC_34) & 0xff00ffffu);
-    wr(MAC_CONF, rd(MAC_CONF) & ~0x100u);
-    wr(MAC_CONF, rd(MAC_CONF) | 0x1fe00u);
-    wr(MAC_CONF, rd(MAC_CONF) & ~0xffu);
-    wr(HE_MAC_28, rd(HE_MAC_28) & 0xff00ffffu);
+    wr(MAC_CONF(1), rd(MAC_CONF(1)) & ~0x100u);
+    wr(MAC_CONF(1), rd(MAC_CONF(1)) | 0x1fe00u);
+    wr(MAC_CONF(1), rd(MAC_CONF(1)) & ~0xffu);
+    wr(HE_MULTI_BSSID(1), rd(HE_MULTI_BSSID(1)) & 0xff00ffffu);
+    wr(MAC_CONF(0), rd(MAC_CONF(0)) & ~0x100u);
+    wr(MAC_CONF(0), rd(MAC_CONF(0)) | 0x1fe00u);
+    wr(MAC_CONF(0), rd(MAC_CONF(0)) & ~0xffu);
+    wr(HE_MULTI_BSSID(0), rd(HE_MULTI_BSSID(0)) & 0xff00ffffu);
     for (uint32_t a = TX_MPLEN(0); a != TX_MPLEN(TX_SLOTS); a -= TX_QUEUE_STEP) {
         wr(a, rd(a) & ~0x4u);
     }
@@ -558,8 +555,8 @@ void mac_he_init(void)
     mac_he_set_bcast_ru(0x7fd, 0, 0);
     mac_he_set_uora_parameter(&uora);
     wr(HE_TX_MIN, rd(HE_TX_MIN) | 0x20000u);
-    wr(MAC_CONF, rd(MAC_CONF) & ~0x100u);
-    wr(MAC_CONF, rd(MAC_CONF) & ~0x20000u);
+    wr(MAC_CONF(0), rd(MAC_CONF(0)) & ~0x100u);
+    wr(MAC_CONF(0), rd(MAC_CONF(0)) & ~0x20000u);
     mac_he_clr_multi_bssid();
     mac_he_set_co_hosted_bss(0, 0);
 }

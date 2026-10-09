@@ -53,8 +53,16 @@
 #define RX_POLICY_QUEUE     0x00000102u         /* set by hal_mac_set_rxq_policy's 1 */
 #define BSSID_HI_POLICY     0x40000000u         /* cleared by the policy, beside BSSID_FLAG, which it sets */
 
-/* The BSS-config words macstart.c's mac_he_init and mac.c's station both write. */
-#define MAC_CONF (MAC_BASE + 0x020u) /* the multi-BSSID, co-hosted BSS and BSS colour control */
+/*
+ * The HE words macstart.c's mac_he_init and mac.c's station both write.
+ * MAC_CONF's and HE_MULTI_BSSID's come in two instances, 0xc apart, with the same fields:
+ * their hal_he_set_bss_color and hal_he_bssid_deinit take the instance's index, 0 or 1, and write MAC_CONF(i),
+ * and their hal_he_bssid_init, given 0, writes both;
+ * their hal_he_set/clr_multi_bssid write HE_MULTI_BSSID's two alike.
+ * What the two instances are is not known.
+ */
+#define MAC_CONF(i)       (MAC_BASE + 0x020u + 0xcu * (i)) /* the multi-BSSID, co-hosted BSS and BSS colour control */
+#define HE_MULTI_BSSID(i) (MAC_BASE + 0x028u + 0xcu * (i))
 #define HE_AID   (MAC_BASE + 0x038u)
 #define HE_BCAST (MAC_BASE + 0x03cu)
 
