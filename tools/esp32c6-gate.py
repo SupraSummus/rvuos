@@ -176,6 +176,8 @@ def host_replay(gate):
     """
     base1 = os.path.join(DIR, "base1.log")
     replay = os.path.join(DIR, "replay")
+    if not gate.args.dry_run:
+        shutil.rmtree(replay, ignore_errors=True)  # a file an earlier gate took, and this one no longer does, is not held
     status = gate.run("replay", ["make", "BOARD=esp32c6", "wifi-esp32c6-replay", "WIFI_TRACE_LOG=" + base1,
                                  "MAC_REPLAY_DIR=" + replay])
     detail = ""
@@ -193,8 +195,9 @@ def host_replay(gate):
     def accesses(path):
         return [line for line in open(path) if not line.startswith("#")]
 
-    stale = [f for f in sorted(os.listdir(replay))
-             if not os.path.exists(os.path.join(REPLAY, f))
+    # A file test/replay holds that the base no longer gives is stale too, a case the test may still read.
+    stale = [f for f in sorted(set(os.listdir(replay)) | set(os.listdir(REPLAY)))
+             if not os.path.exists(os.path.join(REPLAY, f)) or not os.path.exists(os.path.join(replay, f))
              or accesses(os.path.join(replay, f)) != accesses(os.path.join(REPLAY, f))]
     gate.tell("test/replay as base1 gives", 1 if stale else 0,
               "%s differ: make BOARD=esp32c6 wifi-esp32c6-replay WIFI_TRACE_LOG=%s" % (", ".join(stale), base1)
