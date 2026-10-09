@@ -4,8 +4,9 @@
   tools/esp32c6-gate.py [--join CONF]... [--probe SSID] [--snap CONF] [--no-check] [--dry-run]
 
 In order:
-the snap= list, from a trace=1 run of each start, unless --snap names a configuration that holds one;
-four trace=1 runs of the libraries' start and one of the own start;
+the snap= list: --snap's, or the one the last gate's traced runs read, or, with none kept, a trace=1 run of each start's;
+four trace=1 runs of the libraries' start and one of the own start,
+made again with what they read if a kept list lacks a word they all read, and what they read kept for the next gate;
 the host replay of macstart.c against the first base's accesses, and whether test/replay holds those accesses;
 the diff of the access streams, judged against the places by design in user/wifi/esp32c6/test/diff-expected.txt;
 four trace=2 runs of each start, interleaved, and the three compares of the final state:
@@ -57,6 +58,11 @@ TSENS_RANGE = re.compile(r"R4 0x600af800 = 0x00([0-9a-f]{2})0669\b")
 TSENS_OFFSET = {5: -2, 7: -1, 15: 0, 11: 1, 10: 2}
 
 SNAPLINE = re.compile(r"^snap=([0-9a-f]+)(?:-([0-9a-f]+))?$", re.M)
+# The snap= lines the last gate's traced runs read, which the next takes rather than two runs of its own.
+# What a run reads varies with what the air brings over its window, so the lines are the union of the five runs',
+# and a gate that takes them holds them to the words every one of its own five read: a word the start reads that they
+# lack makes the runs go again, with the lines their reads give.
+SNAPS = os.path.join(DIR, "snap.list")
 # What a run's log says of the checks the gate reports beside its verdict.
 SAID = re.compile(r"listen: in .*|probe: \d+ sent.*|every check passed.*|\S+: failed.*")
 
@@ -175,25 +181,56 @@ def loss(log, trace, snap):
     return None
 
 
+def words(text):
+    """The words snap= lines name."""
+    found = set()
+    for lo, hi in SNAPLINE.findall(text):
+        found.update(range(int(lo, 16), int(hi or lo, 16) + 4, 4))
+    return found
+
+
+def lines(found):
+    """The snap= lines that name the words found."""
+    return "".join("snap=%x\n" % lo if lo == hi else "snap=%x-%x\n" % (lo, hi) for lo, hi in mt.ranges(found))
+
+
+def read(name):
+    """The words a traced run read, as mac-trace.py snapshot gives them."""
+    return words(subprocess.run([sys.executable, "tools/mac-trace.py", "snapshot", os.path.join(DIR, name + ".log")],
+                                capture_output=True, text=True, cwd=ROOT).stdout)
+
+
 def snap_list(gate):
-    """The snap= lines: those of --snap's configuration, or the union of what a traced run of each start read."""
-    if gate.args.snap:
-        text = open(gate.args.snap).read()
+    """The snap= lines and whether they are the last gate's:
+    those of --snap's configuration; or what the last gate's traced runs read, kept in SNAPS and held below to what
+    this gate's read; or, with none kept, the union of what a traced run of each start read.
+    """
+    kept = not gate.args.snap and os.path.exists(SNAPS)
+    if gate.args.snap or kept:
+        found = words(open(gate.args.snap or SNAPS).read())
     else:
-        text = ""
+        found = set()
         for name, lib in (("snap-lib", True), ("snap-own", False)):
             if gate.traced(name, 1, lib, "") != 0:
                 sys.exit("gate: the traced run %s failed; see %s" % (name, os.path.join(DIR, name + ".out")))
             if not gate.args.dry_run:
-                text += subprocess.run([sys.executable, "tools/mac-trace.py", "snapshot",
-                                        os.path.join(DIR, name + ".log")],
-                                       capture_output=True, text=True, cwd=ROOT).stdout
-    words = set()
-    for lo, hi in SNAPLINE.findall(text):
-        words.update(range(int(lo, 16), int(hi or lo, 16) + 4, 4))
-    if not words and not gate.args.dry_run:
+                found |= read(name)
+    if not found and not gate.args.dry_run:
         sys.exit("gate: no snap= lines")
-    return "".join("snap=%x\n" % lo if lo == hi else "snap=%x-%x\n" % (lo, hi) for lo, hi in mt.ranges(words))
+    return lines(found), kept
+
+
+def traced_runs(gate, snap):
+    """The four trace=1 runs of the libraries' start and the one of the own start, each verdict told;
+    the words each read, or None when one failed.
+    """
+    names = ["base%d" % i for i in range(1, 5)] + ["own"]
+    failed = False
+    for name in names:
+        status = gate.traced(name, 1, name != "own", snap)
+        gate.tell("trace=1 " + name.replace("base", "base "), status, gate.chip(name))
+        failed = failed or status != 0
+    return None if failed or gate.args.dry_run else [read(name) for name in names]
 
 
 def host_replay(gate):
@@ -256,11 +293,17 @@ def main():
 
     if gate.run("build", ["make", "BOARD=esp32c6", BUILD + "/wifi-drv.bin"]) != 0:
         sys.exit("gate: the driver did not build; see %s" % os.path.join(DIR, "build.out"))
-    snap = snap_list(gate)
-
-    for i in range(1, 5):
-        gate.tell("trace=1 base %d" % i, gate.traced("base%d" % i, 1, True, snap), gate.chip("base%d" % i))
-    gate.tell("trace=1 own", gate.traced("own", 1, False, snap), gate.chip("own"))
+    snap, kept = snap_list(gate)
+    reads = traced_runs(gate, snap)
+    missed = set.intersection(*reads) - words(snap) if reads and kept else None
+    if missed:
+        print("gate: the kept snap= lines lack %d words every traced run read, %s; the traced runs again"
+              % (len(missed), lines(missed).replace("\n", " ").strip()), flush=True)
+        del gate.rows[-5:]
+        snap = lines(set.union(*reads))
+        reads = traced_runs(gate, snap)
+    if reads:
+        open(SNAPS, "w").write(lines(set.union(*reads)))
     host_replay(gate)
     bases = " ".join(os.path.join(DIR, "base%d.log" % i) for i in range(1, 5))
     status = gate.run("diff", ["make", "BOARD=esp32c6", "wifi-esp32c6-diff", "WIFI_TRACE_BASE=" + bases,
