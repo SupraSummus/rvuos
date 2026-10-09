@@ -38,8 +38,6 @@
 #define BSSID_HI       (MAC_BASE + 0x04u)
 #define STA_ADDR_LO    (MAC_BASE + 0x5cu)
 #define STA_ADDR_HI    (MAC_BASE + 0x60u)
-#define STA_ADDR2_LO   (MAC_BASE + 0x64u) /* interface 1's, the soft AP's, which hal_mac_set_addr's index 1 sets */
-#define STA_ADDR2_HI   (MAC_BASE + 0x68u)
 #define BSSID_FLAG     0x80000000u
 #define BSSID_HI_OTHER 0x00040000u /* their default policy clears it; the bit's meaning is not known */
 #define BSSID_HI_LOW   0x00000001u /* their default policy clears it too, in the bssid's word and interface 1's */
@@ -48,7 +46,6 @@
 #define IF1_DEFAULT_BIT  0x40000000u
 
 #define RX_POLICY           (MAC_BASE + 0x0d8u) /* interface 0's; interface n's 4 * n further */
-#define RX_POLICY1          (RX_POLICY + 4u)    /* interface 1's, which the default policy writes too */
 #define RX_POLICY_CLEAR     0x00000450u         /* cleared by a policy of 1 and 1, as the station's */
 #define RX_POLICY_QUEUE     0x00000102u         /* set by hal_mac_set_rxq_policy's 1 */
 #define BSSID_HI_POLICY     0x40000000u         /* cleared by the policy, beside BSSID_FLAG, which it sets */

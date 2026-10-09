@@ -691,7 +691,6 @@ void mac_stop(void)
     wr(RX_CTRL, rd(RX_CTRL) & ~RX_CTRL_ENABLE); /* the vif's receive off */
     wr(BSSID_HI, rd(BSSID_HI) & ~BSSID_FLAG);   /* its bssid no longer valid */
     wr(STA_ADDR_HI, rd(STA_ADDR_HI) & ~STA_ADDR_FLAG); /* nor its station address */
-    wr(STA_ADDR2_HI, rd(STA_ADDR2_HI) & ~STA_ADDR_FLAG);
     wr(TSF_CTRL, 0);                            /* the STA's TSF off */
     wr(TX_BLOCK, TX_BLOCK_ALL);                 /* hold the MAC still */
     wr(PTI_RX, 0);

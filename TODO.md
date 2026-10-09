@@ -111,6 +111,8 @@ what is left:
   in the USB Serial/JTAG FIFO, written while the packet before is still in it, or on the host.
   `tools/mac-trace.py` refuses such a log, and `tools/esp32c6-gate.py` makes the run again
   and writes each loss into `build/esp32c6/gate/losses.txt`, the series to read the cause from.
+  `tools/mac-trace.py diff` holds the own start's run to the first base alone, so a receive the air brings into its
+  window fails it though another base has the same; it should hold the own run to the bases together.
 - A driver of the ESP32-C6's Wi-Fi that leaves Espressif's libraries the PHY alone, `libphy.a`:
   `pp` and `net80211` give way to the driver's own MAC and station, and `osi.c` shrinks to what `libphy.a` calls.
   The station is the driver's own already, on hostap; `user/wifi/esp32c6/NOTES.md` says why.
@@ -148,9 +150,6 @@ what is left:
   Gathering the driver's address macros into `macregs.h`, ordered by address, would show a word two files name
   beside its twin.
   A write that does nothing can be left out, on a role rather than on the bit.
-  Interface 1, the soft AP's, is configured in the MAC's own `mac_rx_set_policy` too, whose per-interface loop the
-  driver's `mac_config` runs for it, and its flag cleared in `mac_stop`; whether those writes can be left out as well,
-  each a step of its own, the gate holding it.
   A skip inside `mac_config` needs `mac-replay-test` to know the intended ones first, as `diff-expected.txt` and
   `compare-expected.txt` let the diff and the compare;
   its hold is access by access, so it stops at the first one left out.

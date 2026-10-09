@@ -379,6 +379,9 @@ A MAC register is named for the library function that reaches it, by constant ad
 one that only the start's own group reaches, or several with no one role, carries the offset it was reached at.
 One address has one name, in `macregs.h` when two files share it.
 
+`mac_config`'s receive policy for interface 1 is not inert -- left out, the libraries' receive interrupt ran in the
+window where it did not with it -- so it stays, though the driver never brings that interface up.
+
 Of the start's calls after the hardware's, their `wifi_mode_set` and `_do_wifi_start` are not written out:
 they carry net80211's state -- offsets into their control block, and a static of `ieee80211_sta.o` this driver cannot
 name -- for little device work, one TSF word and `ic_set_vif`, so they stay calls.
