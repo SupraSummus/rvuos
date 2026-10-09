@@ -12,7 +12,8 @@ an interrupt thread's accesses are a multiset;
 a short log is refused, and with --image one that flashed another build, and a marker cut by a loss is told as one;
 diff's expectations let a place the own start differs in by design pass, that place alone and exactly;
 the words COUNTERS names stay out of compare's verdict;
-and replay takes the named functions' own accesses alone, between the functions --from and --to name.
+and replay takes the named functions' own accesses alone, between the functions --from and --to name,
+and none within a function --outside names.
 The ELF and the libraries are not read: every pc is given to one library, and to the function FUNCTIONS names.
 """
 
@@ -231,13 +232,17 @@ def test_replay_takes_one_function(f):
     trace = f("lib", log("# flashed 0x210000 sha256 " + "ab" * 32,
                          (1, "R", A, 1), (1, "W", A, 3), (1, "R", B, 7, g), (1, "W", A, 2),
                          (1, "W", C, 0, h), (1, "W", A, 9)))
-    status, out = run(mt.replay, log=trace, function=["f"], from_=None, to="h", image=None)
+    status, out = run(mt.replay, log=trace, function=["f"], from_=None, to="h", outside=[], image=None)
     assert status == 0, out
     assert out.splitlines() == ["# f up to h, in a run of the image sha256 " + "ab" * 32,
                                 "R4 0x%08x 0x00000001" % A, "W4 0x%08x 0x00000003" % A,
                                 "W4 0x%08x 0x00000002" % A], out
-    status, out = run(mt.replay, log=trace, function=["f", "h"], from_="h", to=None, image=None)
+    status, out = run(mt.replay, log=trace, function=["f", "h"], from_="h", to=None, outside=[], image=None)
     assert out.splitlines()[1:] == ["W4 0x%08x 0x00000000" % C, "W4 0x%08x 0x00000009" % A], out
+    # g, which the own code still calls, calls f in its turn: --outside g leaves f's call within g out.
+    nested = f("nested", log((1, "W", A, 1), (1, "R", B, 7, g), (1, "W", C, 2), (1, "W", B, 8, g), (1, "W", A, 3)))
+    status, out = run(mt.replay, log=nested, function=["f"], from_=None, to=None, outside=["g"], image=None)
+    assert out.splitlines()[1:] == ["W4 0x%08x 0x00000001" % A, "W4 0x%08x 0x00000003" % A], out
 
 
 def test_replay_refuses(f):
@@ -246,7 +251,7 @@ def test_replay_refuses(f):
                             ("short", "\n".join(log((1, "W", A, 1), (1, "W", B, 1), (1, "W", C, 1))
                                                  .splitlines()[::2]) + "\n", "short")]:
         try:
-            run(mt.replay, log=f(name, text), function=["f"], from_=None, to=None, image=None)
+            run(mt.replay, log=f(name, text), function=["f"], from_=None, to=None, outside=[], image=None)
         except SystemExit as e:
             assert why in str(e), e
         else:

@@ -270,9 +270,11 @@ endif
 # group the driver still calls, with their coex PTI.
 # MAC_REPLAY_DIR, the test's files by default, takes them elsewhere, as the gate does to hold the files to the run.
 # A group the driver takes over joins MAC_REPLAY_HEAD or MAC_REPLAY_TAIL, and the bounds move past it;
+# a function the driver still calls that calls a named one in its turn goes into MAC_REPLAY_HEAD_OUT;
 # see test/mac-replay-test.c, whose cases call the sequences in drv_mac_config's order.
 MAC_REPLAY_HEAD      := hal_init mac_txrx_init hal_mac_rx_set_policy mac_rxbuf_init
 MAC_REPLAY_HEAD_TO   := hal_he_init
+MAC_REPLAY_HEAD_OUT  :=
 MAC_REPLAY_TAIL      := hal_mac_disable_low_rate hal_crypto_init hal_attenna_init hal_init hal_coex_pti_init \
                         hal_set_rx_active_pti hal_set_rx_ack_pti hal_set_wifi_default_pti
 MAC_REPLAY_TAIL_FROM := hal_mac_disable_low_rate
@@ -282,7 +284,8 @@ MAC_REPLAY_TAKE       = tools/mac-trace.py replay --elf $(BUILD)/wifi-drv.elf --
 .PHONY: wifi-esp32c6-replay
 ifeq ($(BOARD),esp32c6)
 wifi-esp32c6-replay: $(BUILD)/wifi-drv.elf $(BUILD)/wifi-drv.bin $(PHYBLOB_ROM_ELF)
-	$(MAC_REPLAY_TAKE) $(addprefix --function ,$(MAC_REPLAY_HEAD)) --to $(MAC_REPLAY_HEAD_TO) $(WIFI_TRACE_LOG) \
+	$(MAC_REPLAY_TAKE) $(addprefix --function ,$(MAC_REPLAY_HEAD)) --to $(MAC_REPLAY_HEAD_TO) \
+		$(addprefix --outside ,$(MAC_REPLAY_HEAD_OUT)) $(WIFI_TRACE_LOG) \
 		> $(BUILD)/config-head.txt
 	$(MAC_REPLAY_TAKE) $(addprefix --function ,$(MAC_REPLAY_TAIL)) --from $(MAC_REPLAY_TAIL_FROM) \
 		--to $(MAC_REPLAY_TAIL_TO) $(WIFI_TRACE_LOG) \

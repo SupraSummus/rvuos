@@ -666,7 +666,9 @@ def replay(args):
     One line each, "R4 0xaddress 0xvalue" or "W4 ...", after a "#" line naming the functions, the bounds and the
     log's image;
     what the functions' callees did is left out, as the own code calls those.
-    --from and --to bound them by other functions' first accesses, so that a caller's calls are told from another's.
+    --from and --to bound them by other functions' first accesses, so that a caller's calls are told from another's;
+    --outside leaves out what a function the own code still calls did, from its first access to its last, its callees
+    among it, when one of them is a named function too.
     A log short anywhere is refused, as is a function no access names, and a cycle, which the replay does not unroll.
     """
     if args.image:
@@ -686,6 +688,11 @@ def replay(args):
     lo = first(args.from_) if args.from_ else 0
     hi = first(args.to) if args.to else len(acc)
     acc = acc[lo:hi]
+    for name in args.outside:
+        inside = [i for i, r in enumerate(acc) if function.get(r[1]) == name]
+        if not inside:
+            sys.exit("mac-trace: no access of %s in %s" % (name, args.log))
+        acc = acc[:inside[0]] + acc[inside[-1] + 1:]
     wanted = set(args.function)
     mine = [r for r in acc if function.get(r[1]) in wanted]
     missing = wanted - {function[r[1]] for r in mine}
@@ -701,7 +708,8 @@ def replay(args):
             m = FLASHED.search(line)
             if m:
                 sha = m.group(1)
-    bounds = (" from %s" % args.from_ if args.from_ else "") + (" up to %s" % args.to if args.to else "")
+    bounds = ((" from %s" % args.from_ if args.from_ else "") + (" up to %s" % args.to if args.to else "")
+              + "".join(" outside %s" % name for name in args.outside))
     print("# %s%s, in a run of the image sha256 %s" % (" ".join(args.function), bounds, sha or "unknown"))
     for _seq, _pc, op, width, address, value, _turns, _thread in mine:
         print("%s%d 0x%08x 0x%08x" % (op, width, address, value))
@@ -770,6 +778,8 @@ def main():
                    help="a function whose own accesses to take, repeatable; its callees' are left out")
     p.add_argument("--from", dest="from_", metavar="NAME", help="start at this function's first access")
     p.add_argument("--to", metavar="NAME", help="stop before this function's first access")
+    p.add_argument("--outside", action="append", default=[], metavar="NAME",
+                   help="leave out this function's first access to its last, its callees' with it; repeatable")
     p.add_argument("log")
     p.set_defaults(run=replay)
 
