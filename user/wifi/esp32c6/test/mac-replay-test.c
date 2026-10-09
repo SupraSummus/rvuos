@@ -67,22 +67,9 @@ void wr(uint32_t a, uint32_t v)
     next++;
 }
 
-/* The HE group's calls, which mac_he_init leaves theirs. */
-void hal_init_bf(void)
-{
-}
-
-void hal_init_tb_tx(void)
-{
-}
-
+/* The HE group's one call left theirs: the power table. */
 void hal_init_tx_pwr(void)
 {
-}
-
-void hal_set_tx_min_pwr(int a)
-{
-    (void)a;
 }
 
 /* The ROM's, which the low-rate group calls; its own accesses are the ROM's and stay out of the replay. */

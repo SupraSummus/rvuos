@@ -228,11 +228,8 @@ void mac_rx_base_init(void)
 #define HE_TABLE    0x600a55f0u /* their table, cleared */
 #define HE_TABLE_END 0x600a57d0u
 
-/* The HE calls hal_he_init makes; the ones that stay theirs, leaves with device writes of their own. */
-extern void hal_init_bf(void);
-extern void hal_init_tb_tx(void);
+/* The one HE call hal_he_init still makes, the power table: their hal_init_tx_pwr, whose callees write the registers. */
 extern void hal_init_tx_pwr(void);
-extern void hal_set_tx_min_pwr(int);
 
 /*
  * The libraries' hal_he_set_ersu, written out: 0x600a4c7c's bit 10 cleared for a nonzero argument and set for the
@@ -377,18 +374,101 @@ static void mac_he_clr_multi_bssid(void)
     }
 }
 
+/*
+ * The libraries' hal_he_set_bf_report_rate, written out: their beamforming report rate, a byte their two arguments
+ * fold into -- enable's two low bits into 0x60, and rate's low byte less 0x10 or, when at most 9 is left after 0x10
+ * is taken off, less 0x1a -- and four read-modify-writes that put it into MAC+0x458's bits 21 to 27, 14 to 20, 7 to 13
+ * and 0 to 6.
+ */
+#define HE_MAC_458 (MAC_BASE + 0x458u)
+
+static void mac_he_set_bf_report_rate(uint32_t enable, uint32_t rate)
+{
+    uint32_t v = rate & 0xffu;
+
+    if (enable != 0) {
+        uint32_t sub = (rate - 0x10u <= 9u) ? 0x10u : 0x1au;
+
+        v = ((v - sub) & 0xffu) | ((enable << 5) & 0x60u);
+    }
+    wr(HE_MAC_458, (rd(HE_MAC_458) & 0xf01fffffu) | ((v << 21) & 0x0fe00000u));
+    wr(HE_MAC_458, (rd(HE_MAC_458) & 0xffe03fffu) | ((v << 14) & 0x1fc000u));
+    wr(HE_MAC_458, (rd(HE_MAC_458) & 0xffffc07fu) | ((v << 7) & 0x3f80u));
+    wr(HE_MAC_458, (rd(HE_MAC_458) & ~0x7fu) | (v & 0x7fu));
+}
+
+/*
+ * The libraries' hal_init_bf, written out: their beamforming group. On 0x600a4c78, six read-modify-writes clear bits
+ * 21 and 23, set bit 19, clear bits 8 to 15 and give them 0x7100, clear the low byte and set bit 5, then clear bits 16
+ * to 18 and give them 0x50000; bit 31 set on MAC+0x474; bits 12 to 27 cleared and 0x801000 or'd on MAC+0x470;
+ * 0x600a4de0's bits 20 to 24, read twice, raised by one; bit 2 cleared and bit 3 set on MAC+0x9c; their report-rate
+ * call with one and 0x10; and 0x600a7128's low 24 bits kept and 0xd2000000 or'd, its word read once more after.
+ * Their body asks the adapter's env_is_chip first, which the board's answers true, so the field's one is the chip's
+ * and their other path, three there instead, is not written.
+ */
+#define HE_HAL_C78  0x600a4c78u
+#define HE_MAC_474  (MAC_BASE + 0x474u)
+#define HE_MAC_470  (MAC_BASE + 0x470u)
+#define HE_HAL_DE0  0x600a4de0u
+#define HE_MAC_9C   (MAC_BASE + 0x9cu)
+#define HE_HAL_7128 0x600a7128u
+
+static void mac_init_bf(void)
+{
+    uint32_t base, field;
+
+    wr(HE_HAL_C78, rd(HE_HAL_C78) & ~0x200000u);
+    wr(HE_HAL_C78, rd(HE_HAL_C78) & ~0x800000u);
+    wr(HE_HAL_C78, rd(HE_HAL_C78) | 0x80000u);
+    wr(HE_HAL_C78, (rd(HE_HAL_C78) & ~0xff00u) | 0x7100u);
+    wr(HE_HAL_C78, (rd(HE_HAL_C78) & ~0xffu) | 0x20u);
+    wr(HE_HAL_C78, (rd(HE_HAL_C78) & 0xfff8ffffu) | 0x50000u);
+    wr(HE_MAC_474, rd(HE_MAC_474) | 0x80000000u);
+    wr(HE_MAC_470, (rd(HE_MAC_470) & 0xff000fffu) | 0x801000u);
+
+    base = rd(HE_HAL_DE0);
+    field = ((rd(HE_HAL_DE0) >> 20) & 0x1fu) + 1u;
+    wr(HE_HAL_DE0, (base & ~0x1f00000u) | ((field << 20) & 0x1f00000u));
+
+    wr(HE_MAC_9C, rd(HE_MAC_9C) & ~0x4u);
+    wr(HE_MAC_9C, rd(HE_MAC_9C) | 0x8u);
+    mac_he_set_bf_report_rate(1u, 0x10u);
+    wr(HE_HAL_7128, (rd(HE_HAL_7128) & 0x00ffffffu) | 0xd2000000u);
+    (void)rd(HE_HAL_7128); /* their body's last read, which it makes and does not use */
+}
+
+/*
+ * The libraries' hal_init_tb_tx, written out: their trigger-based TX word 0x600a4df8, bit 15 cleared and then bit 14.
+ */
+#define HE_HAL_DF8 0x600a4df8u
+
+static void mac_init_tb_tx(void)
+{
+    wr(HE_HAL_DF8, rd(HE_HAL_DF8) & ~0x8000u);
+    wr(HE_HAL_DF8, rd(HE_HAL_DF8) & ~0x4000u);
+}
+
+/*
+ * The libraries' hal_set_tx_min_pwr, written out: HE_TX_MIN's bits 4 to 9 given the argument's low six bits raised
+ * by four, -11 for the start's call giving 0x350.
+ */
+static void mac_set_tx_min_pwr(int pwr)
+{
+    wr(HE_TX_MIN, (rd(HE_TX_MIN) & ~0x3f0u) | (((uint32_t)pwr << 4) & 0x3f0u));
+}
+
 void mac_he_init(void)
 {
     wr(HE_CTRL, rd(HE_CTRL) & ~0x80000000u);
     wr(HE_CTRL, rd(HE_CTRL) & ~0xc0000000u);
-    hal_init_bf();
+    mac_init_bf();
     wr(HE_MAC_10C, (rd(HE_MAC_10C) & ~0xc0000u) | 0x80000u);
     wr(HE_MAC_48, (rd(HE_MAC_48) & ~0xfcu) | 0xf0u);
     wr(HE_HAL_C2C, rd(HE_HAL_C2C) & ~0x1000u);
-    hal_init_tb_tx();
+    mac_init_tb_tx();
     hal_init_tx_pwr();
     mac_he_set_ersu(0);
-    hal_set_tx_min_pwr(-0xb);
+    mac_set_tx_min_pwr(-0xb);
     wr(HE_CTRL, (rd(HE_CTRL) & ~0xff8u) | 0xbe0u);
     for (uint32_t a = HE_TABLE; a != HE_TABLE_END; a += 4u) {
         wr(a, 0);
