@@ -1,8 +1,8 @@
 /*
  * The register sequences of the libraries' bring-up, written out, so that the driver's own start makes them:
  * their hal_init's words about HAL_CFG, HAL_HOLD and HAL_MISC, its txrx queues, its receive policy and the words
- * around them, its receive base, its HE group and its low-rate group, their hal_crypto_init's cipher words, its
- * antenna group, and their coex PTI.
+ * around them, its receive base, its HE group, its receive match rules and its low-rate group,
+ * their hal_crypto_init's cipher words, its antenna group, and their coex PTI.
  * main.c calls these where the libraries' hal_init called the groups; the accesses each makes are the libraries',
  * and the trace holds them. They reach the device through macregs.h alone, so they build on the host for their replay;
  * the libraries' calls they leave are declared below.
@@ -220,6 +220,44 @@ void mac_he_init(void)
     wr(HE_MAC_20, rd(HE_MAC_20) & ~0x20000u);
     hal_he_clr_multi_bssid();
     hal_he_set_co_hosted_bss(0, 0);
+}
+
+/*
+ * The libraries' mac_last_rxbuf_init, written out: six rules that match a frame's payload,
+ * each a control word, a value and a mask, and then the word before the table and RX_WORD given their bits.
+ * The control word's low byte is the offset the value is matched at, which the readings bear out:
+ * at 6, the LLC/SNAP's EtherType, 0x0806 ARP and 0x888e EAPOL; at 28, the IPv4 UDP ports, 0x0043 and 0x0044 both ways,
+ * DHCP; at 17, the IPv4 protocol, 1, ICMP.
+ * The values are the frame's bytes read little-endian, so the register holds each reversed.
+ * The third value, 0x0808, reads as an EtherType too but is not known, nor are the rest of the control word,
+ * the two six-bit groups of the word before the table (named for the six rules it holds a bit for, a guess),
+ * or what the match is for.
+ */
+#define RX_MATCH_CTRL(i)  (MAC_BASE + 0x120u + 4u * (i))
+#define RX_MATCH_VALUE(i) (MAC_BASE + 0x13cu + 4u * (i))
+#define RX_MATCH_MASK(i)  (MAC_BASE + 0x158u + 4u * (i))
+#define RX_MATCH_ENABLE   (MAC_BASE + 0x11cu)
+
+void mac_rx_match_init(void)
+{
+    static const struct {
+        uint32_t ctrl, value, mask;
+    } rules[6] = {
+        {0x00023006u, 0x00000608u, 0x0000ffffu}, /* at 6, 08 06: ARP */
+        {0x00023006u, 0x00000808u, 0x0000ffffu}, /* at 6, 08 08: not known */
+        {0x00023006u, 0x00008e88u, 0x0000ffffu}, /* at 6, 88 8e: EAPOL */
+        {0x0002301cu, 0x44004300u, 0xffffffffu}, /* at 28, 00 43 00 44: DHCP, 67 to 68 */
+        {0x0002301cu, 0x43004400u, 0xffffffffu}, /* at 28, 00 44 00 43: DHCP, 68 to 67 */
+        {0x00023011u, 0x00000001u, 0x000000ffu}, /* at 17, 01: ICMP */
+    };
+    for (uint32_t i = 0; i < 6u; i++) {
+        wr(RX_MATCH_CTRL(i), rules[i].ctrl);
+        wr(RX_MATCH_VALUE(i), rules[i].value);
+        wr(RX_MATCH_MASK(i), rules[i].mask);
+    }
+    wr(RX_MATCH_ENABLE, rd(RX_MATCH_ENABLE) | 0x3f00u);
+    wr(RX_MATCH_ENABLE, rd(RX_MATCH_ENABLE) | 0x7eu);
+    wr(RX_WORD, rd(RX_WORD) | 0x08000000u);
 }
 
 /*

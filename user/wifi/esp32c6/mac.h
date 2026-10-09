@@ -105,6 +105,7 @@ void mac_rx_set_policy(uint32_t iface);
 void mac_queues_init(void);
 void mac_rx_base_init(void);
 void mac_he_init(void);
+void mac_rx_match_init(void);
 void mac_low_rate_disable(void);
 void mac_crypto_init(void);
 void mac_antenna_init(void);

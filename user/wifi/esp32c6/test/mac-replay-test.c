@@ -132,7 +132,7 @@ void phy_disable_low_rate(void)
 {
 }
 
-/* Their hal_init through the HE group, as the driver's drv_mac_config calls it, in main.c. */
+/* Their hal_init through the HE group and the RX match, as the driver's drv_mac_config calls it, in main.c. */
 static void head(void)
 {
     mac_config_start();
@@ -150,6 +150,7 @@ static void head(void)
     }
     mac_rx_base_init();
     mac_he_init();
+    mac_rx_match_init();
 }
 
 /* Their hal_init from the low-rate group on, and the coex PTI with the values the recorded run's coex gave. */

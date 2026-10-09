@@ -394,7 +394,6 @@ extern void ieee80211_update_phy_country(void);
 extern void chm_init(void *chm);
 
 /* The groups of the libraries' hal_init that drv_mac_config has not taken over yet, in its order there. */
-extern void mac_last_rxbuf_init(void);
 extern void hal_mac_set_rxbuf_reload_use_hw_beacon_enable(void);
 extern void hal_timer_update_by_rtc(uint32_t which, uint32_t hz);
 extern void hal_set_ofdma_sequence_pti(void);
@@ -428,11 +427,12 @@ static void drv_reset_mac(void)
 
 /*
  * The libraries' hal_init, the MAC's configuration, written out:
- * their register writes about HAL_CFG and HAL_HOLD and their receive-policy words are mac.c's,
- * and the groups between them are still their calls, in their order and with their arguments,
+ * their register writes about HAL_CFG and HAL_HOLD and their receive-policy words are macstart.c's,
+ * and the groups between them go over to macstart.c one at a time;
+ * the groups still theirs are called in their order and with their arguments,
  * each named so that a traced run's segments show its accesses.
- * The groups: the txrx queues, the receive policy, the RX buffers, the HE tables, the ack rates and low-rate mask,
- * the cipher, the antenna, the timer and the coex PTI. See user/wifi/NOTES.md.
+ * The groups: the txrx queues, the receive policy, the RX buffers, the HE tables, the RX match, the ack rates and
+ * low-rate mask, the cipher, the antenna, the timer and the coex PTI. See user/wifi/NOTES.md.
  */
 static void drv_mac_config(void)
 {
@@ -449,7 +449,7 @@ static void drv_mac_config(void)
     mac_rx_base_init();
     osi_trace("mac-he", 0, 0);
     mac_he_init();
-    mac_last_rxbuf_init();
+    mac_rx_match_init();
     osi_trace("mac-rate", 0, 0);
     mac_low_rate_disable();
     osi_trace("mac-crypto", 0, 0);
