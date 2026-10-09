@@ -1,4 +1,4 @@
-# hal_init mac_txrx_init hal_mac_rx_set_policy mac_rxbuf_init hal_he_init hal_he_set_ersu hal_he_set_bbrxhung_time hal_he_set_co_hosted_bss mac_last_rxbuf_init hal_mac_disable_low_rate hal_crypto_init hal_attenna_init hal_mac_set_rxbuf_reload_use_hw_beacon_enable hal_timer_update_by_rtc hal_coex_pti_init hal_set_rx_active_pti hal_set_rx_ack_pti hal_set_wifi_default_pti hal_set_tb_pti hal_set_beamf_pti hal_set_beamf_mt_pti hal_set_ofdma_sequence_pti through hal_set_ofdma_sequence_pti outside hal_he_clr_multi_bssid, in a run of the image sha256 42bb3ca916a1f2d9a930374075db36cdc8e1e0a36a9b9cd8ca28624f6b424fe4
+# hal_init mac_txrx_init hal_mac_rx_set_policy mac_rxbuf_init hal_he_init hal_he_set_ersu hal_he_set_bbrxhung_time hal_he_set_co_hosted_bss hal_he_set_ack_rate hal_he_set_mac_delay mac_last_rxbuf_init hal_mac_disable_low_rate hal_crypto_init hal_attenna_init hal_mac_set_rxbuf_reload_use_hw_beacon_enable hal_timer_update_by_rtc hal_coex_pti_init hal_set_rx_active_pti hal_set_rx_ack_pti hal_set_wifi_default_pti hal_set_tb_pti hal_set_beamf_pti hal_set_beamf_mt_pti hal_set_ofdma_sequence_pti through hal_set_ofdma_sequence_pti outside hal_he_clr_multi_bssid, in a run of the image sha256 dd222ba446a658c632452e72a81c9a6c4e876bfa6dde73ea05429b621d448d8f
 R4 0x600a4ddc 0x00000000
 W4 0x600a4ddc 0x00000002
 R4 0x600a4ddc 0x00000001
@@ -40,6 +40,34 @@ R4 0x600a4114 0x80e00000
 W4 0x600a4114 0x81b00000
 R4 0x600a4c9c 0x00000000
 W4 0x600a4c9c 0x00000003
+R4 0x600a4c58 0x0bd2356d
+W4 0x600a4c58 0x0bd2356d
+R4 0x600a4c58 0x0bd2356d
+W4 0x600a4c58 0x0bd234a0
+R4 0x600a4c58 0x0bd234a0
+W4 0x600a4c58 0x0bd234a0
+R4 0x600a4c54 0x2ea9d800
+W4 0x600a4c54 0x1409d800
+R4 0x600a4c54 0x1409d800
+W4 0x600a4c54 0x1409d800
+W4 0x600a4440 0x00090a0b
+W4 0x600a444c 0x00090a0b
+W4 0x600a4444 0x00050100
+W4 0x600a4450 0x00050100
+R4 0x600a4440 0x00090a0b
+R4 0x600a4440 0x00090a0b
+R4 0x600a4440 0x00090a0b
+R4 0x600a4440 0x00090a0b
+R4 0x600a4440 0x00090a0b
+R4 0x600a4440 0x00090a0b
+R4 0x600a4440 0x00090a0b
+R4 0x600a444c 0x00090a0b
+R4 0x600a444c 0x00090a0b
+R4 0x600a444c 0x00090a0b
+R4 0x600a444c 0x00090a0b
+R4 0x600a444c 0x00090a0b
+R4 0x600a444c 0x00090a0b
+R4 0x600a444c 0x00090a0b
 R4 0x600a4c1c 0xc0000157
 W4 0x600a4c1c 0xc0000011
 R4 0x600a4c1c 0xc0000011

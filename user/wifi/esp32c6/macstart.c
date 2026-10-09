@@ -30,7 +30,7 @@ void mac_config_start(void)
 /*
  * The libraries' mac_txrx_init, written out:
  * its sniffers cleared and set to their default, the words that set up its queues and hold the MAC,
- * the receive left disabled, which mac_rx_on sets again, and the three HE calls at its middle.
+ * the receive left disabled, which mac_rx_on sets again, and the three HE leaves at its middle, written out above.
  * The sniffers, HAL_WORD, HAL_CTRL and RX_CTRL are named in macregs.h; the others carry the offset they were reached
  * at, since what they are is not known.
  * Each of their read-modify-writes is one here, in their order, since the trace holds each access.
@@ -45,10 +45,13 @@ void mac_config_start(void)
 #define TXRX_HAL_C98  0x600a4c98u
 #define TXRX_HAL_C9C  0x600a4c9cu
 #define TXRX_HAL_CA4  0x600a4ca4u
-
-/* The HE calls mac_txrx_init makes; the two that stay theirs, leaves with device writes of their own. */
-extern void hal_he_set_mac_delay(uint32_t);
-extern void hal_he_set_ack_rate(uint32_t);
+#define TXRX_HAL_C54  0x600a4c54u
+#define TXRX_HAL_C58  0x600a4c58u
+/* The rate words their ack-rate call writes and their low-rate group repeats, both written out below. */
+#define RATE_MAC_440  (MAC_BASE + 0x440u)
+#define RATE_MAC_444  (MAC_BASE + 0x444u)
+#define RATE_MAC_44C  (MAC_BASE + 0x44cu)
+#define RATE_MAC_450  (MAC_BASE + 0x450u)
 
 /*
  * The libraries' hal_he_set_bbrxhung_time, written out, the HE word their txrx and low-rate groups both write:
@@ -64,6 +67,45 @@ static void mac_he_set_bbrxhung_time(uint32_t interval)
         w |= 0x11u;
     }
     wr(TXRX_HAL_C1C, w);
+}
+
+/*
+ * The libraries' hal_he_set_mac_delay, written out: five read-modify-writes on the words 0x600a4c58 and 0x600a4c54.
+ * Their body asks the adapter's env_is_chip first, which the board's answers true, so the chip's values are the ones
+ * below and their other path is not written; their txrx group leaves a register's address in a0, which the body does
+ * not read, so the leaf takes no argument.
+ */
+static void mac_he_set_mac_delay(void)
+{
+    wr(TXRX_HAL_C58, (rd(TXRX_HAL_C58) & 0xffe003ffu) | 0x123400u);
+    wr(TXRX_HAL_C58, (rd(TXRX_HAL_C58) & ~0x3ffu) | 0xa0u);
+    wr(TXRX_HAL_C58, (rd(TXRX_HAL_C58) & 0x801fffffu) | 0x0bc00000u);
+    wr(TXRX_HAL_C54, (rd(TXRX_HAL_C54) & 0x801fffffu) | 0x14000000u);
+    wr(TXRX_HAL_C54, (rd(TXRX_HAL_C54) & 0xffe003ffu) | 0x9d800u);
+}
+
+/*
+ * The libraries' hal_he_set_ack_rate, written out: their four rate words given their values, 0x90a0b in 0x4440 and
+ * 0x444c, 0xb0b0b there for a nonzero argument, and 0x50100 in 0x4444 and 0x4450; then their body reads 0x4440 seven
+ * times and 0x444c seven times for its log, reads the own start makes too, with no log of them.
+ */
+static void mac_he_set_ack_rate(uint32_t rate)
+{
+    if (rate != 0) {
+        wr(RATE_MAC_440, 0xb0b0bu);
+        wr(RATE_MAC_44C, 0xb0b0bu);
+    } else {
+        wr(RATE_MAC_440, 0x90a0bu);
+        wr(RATE_MAC_44C, 0x90a0bu);
+    }
+    wr(RATE_MAC_444, 0x50100u);
+    wr(RATE_MAC_450, 0x50100u);
+    for (uint32_t i = 0; i < 7u; i++) {
+        (void)rd(RATE_MAC_440);
+    }
+    for (uint32_t i = 0; i < 7u; i++) {
+        (void)rd(RATE_MAC_44C);
+    }
 }
 
 /* The ROM's low-rate toggle, which the driver's start still calls, as their rate group does. */
@@ -92,11 +134,9 @@ void mac_queues_init(void)
     wr(TXRX_MAC_114, (rd(TXRX_MAC_114) & 0xf00fffffu) | 0x01b00000u);
     wr(TXRX_HAL_C9C, rd(TXRX_HAL_C9C) | 3u);
 
-    /* Their first call passes a register's address left in a0,
-       which hal_he_set_mac_delay tests only against zero, so the driver passes 1;
-       the two after it pass zero. */
-    hal_he_set_mac_delay(1);
-    hal_he_set_ack_rate(0);
+    /* Their first call leaves a register's address in a0, which its leaf does not read; the two after it pass zero. */
+    mac_he_set_mac_delay();
+    mac_he_set_ack_rate(0);
     mac_he_set_bbrxhung_time(0);
 
     wr(TXRX_HAL_C1C, rd(TXRX_HAL_C1C) | 0x80000000u);
@@ -306,11 +346,6 @@ void mac_rx_match_init(void)
  * low-rate registers, 0x90a0b and 0x50100 written twice each, and their hal_he_set_bbrxhung_time(0).
  * Their hal_mac_rate_autoack_init, which hal_init calls just before it, is an empty return; the driver's start drops it.
  */
-#define RATE_MAC_440 (MAC_BASE + 0x440u)
-#define RATE_MAC_444 (MAC_BASE + 0x444u)
-#define RATE_MAC_44C (MAC_BASE + 0x44cu)
-#define RATE_MAC_450 (MAC_BASE + 0x450u)
-
 void mac_low_rate_disable(void)
 {
     phy_disable_low_rate();

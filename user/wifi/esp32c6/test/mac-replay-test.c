@@ -67,17 +67,6 @@ void wr(uint32_t a, uint32_t v)
     next++;
 }
 
-/* The libraries' functions the sequences call, which keep their accesses. */
-void hal_he_set_mac_delay(uint32_t a)
-{
-    (void)a;
-}
-
-void hal_he_set_ack_rate(uint32_t a)
-{
-    (void)a;
-}
-
 /* The HE group's calls, which mac_he_init leaves theirs. */
 void hal_init_bf(void)
 {
