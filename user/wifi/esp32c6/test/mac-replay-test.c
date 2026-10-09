@@ -67,9 +67,20 @@ void wr(uint32_t a, uint32_t v)
     next++;
 }
 
-/* The HE group's one call left theirs: the power table. */
-void hal_init_tx_pwr(void)
+/*
+ * The libphy call the power table is filled through, which stays theirs; its values are the recorded run's, so that
+ * the writes the table feeds are held here. What is not named is unused by the table's readers.
+ */
+void phy_get_max_pwr(uint32_t index, uint8_t out[2])
 {
+    static const uint8_t pwr[0x2b] = {
+        [0x00] = 0x14, [0x05] = 0x14, [0x09] = 0x14, [0x0a] = 0x14, [0x0b] = 0x14,
+        [0x10] = 0x13, [0x11] = 0x13, [0x12] = 0x13, [0x13] = 0x13, [0x14] = 0x13, [0x15] = 0x13,
+        [0x16] = 0x12, [0x17] = 0x12, [0x18] = 0x11, [0x19] = 0x0f, [0x1a] = 0x0f, [0x1b] = 0x0f,
+    };
+
+    out[0] = pwr[index];
+    out[1] = 0;
 }
 
 /* The ROM's, which the low-rate group calls; its own accesses are the ROM's and stay out of the replay. */

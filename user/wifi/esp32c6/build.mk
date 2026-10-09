@@ -278,6 +278,7 @@ MAC_REPLAY_FUNCTIONS := hal_init mac_txrx_init hal_mac_rx_set_policy mac_rxbuf_i
                         hal_he_set_bcast_ru hal_he_set_uora_parameter \
                         hal_he_clr_multi_bssid hal_mac_set_rxq_policy hal_mac_set_bssid hal_mac_set_addr \
                         hal_init_bf hal_he_set_bf_report_rate hal_init_tb_tx hal_set_tx_min_pwr \
+                        hal_init_tb_power hal_init_imrsp_power \
                         mac_last_rxbuf_init hal_mac_disable_low_rate hal_crypto_init hal_attenna_init \
                         hal_mac_set_rxbuf_reload_use_hw_beacon_enable hal_timer_update_by_rtc \
                         hal_coex_pti_init hal_set_rx_active_pti hal_set_rx_ack_pti hal_set_wifi_default_pti \

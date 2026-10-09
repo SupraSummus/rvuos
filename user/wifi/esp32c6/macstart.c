@@ -228,9 +228,6 @@ void mac_rx_base_init(void)
 #define HE_TABLE    0x600a55f0u /* their table, cleared */
 #define HE_TABLE_END 0x600a57d0u
 
-/* The one HE call hal_he_init still makes, the power table: their hal_init_tx_pwr, whose callees write the registers. */
-extern void hal_init_tx_pwr(void);
-
 /*
  * The libraries' hal_he_set_ersu, written out: 0x600a4c7c's bit 10 cleared for a nonzero argument and set for the
  * zero their start passes, the word just before HE_CTRL. What the bit gates is not known.
@@ -457,6 +454,84 @@ static void mac_set_tx_min_pwr(int pwr)
     wr(HE_TX_MIN, (rd(HE_TX_MIN) & ~0x3f0u) | (((uint32_t)pwr << 4) & 0x3f0u));
 }
 
+/*
+ * The libraries' hal_init_tx_pwr, written out: their power table, one two-byte entry for each of their 43 rates,
+ * filled by their phy_get_max_pwr, and then their hal_init_tb_power and hal_init_imrsp_power, both below.
+ * The table is the driver's own; the one their net80211 paths read is theirs, refilled by their hal_init_tx_pwr from
+ * ieee80211_update_phy_country at the end of the driver's start, so the two hold the same values.
+ * phy_get_max_pwr stays a libphy call, and the host replay stubs it with the values of the recorded run.
+ */
+static uint8_t mac_pwr_table[0x2b * 2u];
+
+extern void phy_get_max_pwr(uint32_t index, uint8_t out[2]);
+
+/* The libraries' hal_get_tx_pwr, written out: a table entry, the rates above 0x19 read ten back. */
+static uint8_t mac_get_tx_pwr(uint32_t index)
+{
+    return mac_pwr_table[2u * (index > 0x19u ? index - 0xau : index)];
+}
+
+/*
+ * The libraries' hal_init_tb_power, written out: three of their power words, MAC+0x430, MAC+0x434 and MAC+0x438,
+ * each given a six-bit field of a table entry at a time -- rates 0x10 to 0x19 from the table, the last two through
+ * phy_get_max_pwr. What the fields mean is not known.
+ */
+#define HE_MAC_430 (MAC_BASE + 0x430u)
+#define HE_MAC_434 (MAC_BASE + 0x434u)
+#define HE_MAC_438 (MAC_BASE + 0x438u)
+
+static void mac_init_tb_power(void)
+{
+    uint8_t v[2];
+
+    wr(HE_MAC_430, (rd(HE_MAC_430) & ~0x3fu) | (mac_get_tx_pwr(0x10u) & 0x3fu));
+    wr(HE_MAC_430, (rd(HE_MAC_430) & ~0x3f00u) | (((uint32_t)mac_get_tx_pwr(0x11u) << 8) & 0x3f00u));
+    wr(HE_MAC_430, (rd(HE_MAC_430) & ~0x3f0000u) | (((uint32_t)mac_get_tx_pwr(0x12u) << 16) & 0x3f0000u));
+    wr(HE_MAC_430, (rd(HE_MAC_430) & ~0x3f000000u) | (((uint32_t)mac_get_tx_pwr(0x13u) << 24) & 0x3f000000u));
+    wr(HE_MAC_434, (rd(HE_MAC_434) & ~0x3fu) | (mac_get_tx_pwr(0x14u) & 0x3fu));
+    wr(HE_MAC_434, (rd(HE_MAC_434) & ~0x3f00u) | (((uint32_t)mac_get_tx_pwr(0x15u) << 8) & 0x3f00u));
+    wr(HE_MAC_434, (rd(HE_MAC_434) & ~0x3f0000u) | (((uint32_t)mac_get_tx_pwr(0x16u) << 16) & 0x3f0000u));
+    wr(HE_MAC_434, (rd(HE_MAC_434) & ~0x3f000000u) | (((uint32_t)mac_get_tx_pwr(0x17u) << 24) & 0x3f000000u));
+    wr(HE_MAC_438, (rd(HE_MAC_438) & ~0x3fu) | (mac_get_tx_pwr(0x18u) & 0x3fu));
+    wr(HE_MAC_438, (rd(HE_MAC_438) & ~0x3f00u) | (((uint32_t)mac_get_tx_pwr(0x19u) << 8) & 0x3f00u));
+    phy_get_max_pwr(0x1au, v);
+    wr(HE_MAC_438, (rd(HE_MAC_438) & ~0x3f0000u) | (((uint32_t)v[0] << 16) & 0x3f0000u));
+    phy_get_max_pwr(0x1bu, v);
+    wr(HE_MAC_438, (rd(HE_MAC_438) & ~0x3f000000u) | (((uint32_t)v[0] << 24) & 0x3f000000u));
+}
+
+/*
+ * The libraries' hal_init_imrsp_power, written out: ten of their power words, MAC+0x408 on, 4 apart, each with three
+ * read-modify-writes -- bits 22 and 23 cleared, bit 23 set again from the seventh word on; bits 16 to 21 cleared and
+ * given one of their constants; and bits 8 to 13 given a table entry. Their name says the implicit response's power.
+ */
+static void mac_init_imrsp_power(void)
+{
+    static const struct {
+        uint8_t high, rate; /* the constant for bits 16 to 21, and the rate whose entry goes to bits 8 to 13 */
+    } words[10] = {
+        {0x00, 0x00}, {0x01, 0x00}, {0x05, 0x05}, {0x0b, 0x0b}, {0x0a, 0x0a},
+        {0x09, 0x09}, {0x10, 0x10}, {0x11, 0x11}, {0x12, 0x12}, {0x12, 0x12},
+    };
+
+    for (uint32_t i = 0; i < 10u; i++) {
+        uint32_t a = MAC_BASE + 0x408u + 4u * i;
+
+        wr(a, (rd(a) & ~0xc00000u) | (i >= 6u ? 0x800000u : 0u));
+        wr(a, (rd(a) & ~0x3f0000u) | ((uint32_t)words[i].high << 16));
+        wr(a, (rd(a) & ~0x3f00u) | (((uint32_t)mac_get_tx_pwr(words[i].rate) << 8) & 0x3f00u));
+    }
+}
+
+static void mac_init_tx_pwr(void)
+{
+    for (uint32_t i = 0; i < 0x2bu; i++) {
+        phy_get_max_pwr(i, &mac_pwr_table[2u * i]);
+    }
+    mac_init_tb_power();
+    mac_init_imrsp_power();
+}
+
 void mac_he_init(void)
 {
     wr(HE_CTRL, rd(HE_CTRL) & ~0x80000000u);
@@ -466,7 +541,7 @@ void mac_he_init(void)
     wr(HE_MAC_48, (rd(HE_MAC_48) & ~0xfcu) | 0xf0u);
     wr(HE_HAL_C2C, rd(HE_HAL_C2C) & ~0x1000u);
     mac_init_tb_tx();
-    hal_init_tx_pwr();
+    mac_init_tx_pwr();
     mac_he_set_ersu(0);
     mac_set_tx_min_pwr(-0xb);
     wr(HE_CTRL, (rd(HE_CTRL) & ~0xff8u) | 0xbe0u);
