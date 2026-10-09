@@ -163,11 +163,6 @@ what is left:
   with their invalidation of the queue on a timeout, would do better.
   `mac.c` points a MAC that ran out of descriptors past the last it filled by `RX_BASE` alone,
   which the take found not always taken; no run has run out yet, `restarted` 0.
-- The replay harness copies `drv_mac_config`'s order in `mac-replay-test.c`'s `head()` and `tail()`,
-  so a change to that order passes the host and shows only on the board;
-  nothing of the libraries' is called between them now, so the two can be one:
-  `drv_mac_config`'s body as `macstart.c`'s `mac_config`, its adapter values (the PTI bytes, the slow clock) passed in,
-  one fixture and one case, and no `MAC_REPLAY_HEAD_TO`/`_TAIL_FROM` in build.mk.
 - The ESP32-C6's driver takes all its memory from one heap: the libraries' as they run,
   the own path's buffers, stacks and queues once, at its start, and the supplicant's and SAE's as they run, hostap's and Mbed TLS's way;
   SAE leaves a few kilobytes at the fewest.

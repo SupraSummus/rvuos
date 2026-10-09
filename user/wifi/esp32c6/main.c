@@ -421,59 +421,6 @@ static void drv_reset_mac(void)
 }
 
 /*
- * The OFDMA sequence's twelve PTI events, in their hal_set_ofdma_sequence_pti's order, which its body reads through
- * the adapter's coex_pti_get: the map's event 1, 3 and 0xa, which gave 5, 7 and 3 in the recorded run.
- */
-static const uint8_t ofdma_pti_events[12] = {1, 3, 3, 3, 1, 1, 1, 1, 3, 3, 0xau, 0xau};
-
-/*
- * The libraries' hal_init, the MAC's configuration, written out whole:
- * its own register writes about HAL_CFG and HAL_HOLD and its receive-policy words are macstart.c's,
- * and its groups are called there in its order, each named with osi_trace so that a traced run's segments
- * show its accesses. See user/wifi/NOTES.md.
- */
-static void drv_mac_config(void)
-{
-    osi_trace("mac-config", 0, 0);
-    mac_config_start();
-    osi_trace("mac-txrx", 0, 0);
-    mac_queues_init();
-    osi_trace("mac-policy", 0, 0);
-    for (uint32_t i = 0; i < 4u; i++) {
-        mac_rx_policy_word(i);
-        mac_rx_set_policy(i);
-    }
-    osi_trace("mac-rxbuf", 0, 0);
-    mac_rx_base_init();
-    osi_trace("mac-he", 0, 0);
-    mac_he_init();
-    mac_rx_match_init();
-    osi_trace("mac-rate", 0, 0);
-    mac_low_rate_disable();
-    osi_trace("mac-crypto", 0, 0);
-    mac_crypto_init();
-    osi_trace("mac-antenna", 0, 0);
-    mac_antenna_init();
-    osi_trace("mac-post", 0, 0);
-    mac_config_finish();
-    mac_rx_reload_hw_beacon();
-    osi_trace("mac-pti", 0, 0);
-    mac_timer_update_by_rtc(1, funcs->slowclk_cal_get());
-    mac_coex_pti_init();
-    uint8_t pti_active = 0, pti_default = 1; /* their hal_init's own bytes, which their coex_pti_get fills */
-    funcs->coex_pti_get(3, &pti_active);
-    funcs->coex_pti_get(0xfu, &pti_default);
-    mac_rx_active_pti(0);
-    mac_rx_ack_pti(pti_active);
-    mac_wifi_default_pti(pti_default);
-    uint8_t ofdma[12]; /* the OFDMA sequence's twelve PTI bytes, which their coex_pti_get fills */
-    for (uint32_t i = 0; i < 12u; i++) {
-        funcs->coex_pti_get(ofdma_pti_events[i], &ofdma[i]);
-    }
-    mac_ofdma_sequence_pti(ofdma);
-}
-
-/*
  * The libraries' wifi_hw_start, the hardware bring-up they run once before their task brings the interface up,
  * written out for the station's fresh start: the stop mask clear, neither guard tripped. The libraries' other
  * branch -- an interface a stop left behind, woken rather than brought up anew -- is not written, since the driver
@@ -498,12 +445,12 @@ static int drv_hw_start(void)
     chm_init(g_ic);
     /*
      * The libraries' ic_set_interrupt_handler, written out:
-     * their hal_init, the MAC's configuration, which drv_mac_config writes out group by group,
+     * their hal_init, the MAC's configuration, which mac_config in macstart.c writes out whole,
      * then the two interrupt sources the adapter routes, their handler and the line armed.
      * Their set_intr passes the core the Wi-Fi task runs on, which the adapter ignores; the driver passes none.
      * Their handler is the one the driver's own receive trades for its own once it takes the MAC; see mac.c.
      */
-    drv_mac_config();
+    mac_config(funcs->slowclk_cal_get, funcs->coex_pti_get);
     funcs->set_intr(0, 2 /* the modem's power */, 1, 1);
     funcs->set_intr(0, 0 /* the MAC */, 1, 1);
     funcs->set_isr(1, (void *)wDev_ProcessFiq, 0);

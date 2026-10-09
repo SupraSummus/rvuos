@@ -83,7 +83,7 @@ the bits whose value is the moment's -- a count over the window, a measurement, 
 a change to what it compares changes that test with it.
 `make mac-replay-test`, a part of `make check` too, runs the own start's register sequences of `macstart.c` on the host,
 each read answered and each write held by the libraries' accesses `test/replay/` holds;
-a step that takes a group over adds it there, and `make BOARD=esp32c6 wifi-esp32c6-replay` takes the files again
+a step that takes a group over adds it there, and `make BOARD=esp32c6 wifi-esp32c6-replay` takes the file again
 from a `trace=1 libstart=1` log of the build at hand, so that a wrong mask shows before the board does.
 `make BOARD=esp32c6 wifi-esp32c6-attrib` attributes every access of a traced log to its library and function,
 and `WIFI_TRACE_SEGMENTS=1` splits that log into the segments between the `trace: ` lines' requests.

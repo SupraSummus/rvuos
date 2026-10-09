@@ -1,10 +1,11 @@
 /*
  * The bring-up's register sequences of macstart.c, run on the host against what the libraries' own did.
- * Each case's file under test/replay/ lists their accesses in a run of their start, in order,
+ * The case's file under test/replay/ lists their accesses in a run of their start, in order,
  * as tools/mac-trace.py's replay takes them from its trace:
  * rd() answers each read with the value theirs had, and wr() holds each write to theirs, address and value.
  * The calls the sequences still make into the libraries do nothing here, as replay leaves out their accesses.
- * make BOARD=esp32c6 wifi-esp32c6-replay takes the files again; see user/wifi/esp32c6/build.mk.
+ * mac_config is the driver's own start's whole MAC configuration, so its order is this case's.
+ * make BOARD=esp32c6 wifi-esp32c6-replay takes the file again; see user/wifi/esp32c6/build.mk.
  */
 
 #include <stdint.h>
@@ -132,15 +133,49 @@ void phy_disable_low_rate(void)
 {
 }
 
-/* Their hal_init through the HE group and the RX match, as the driver's drv_mac_config calls it, in main.c. */
-static void head(void)
+/*
+ * The adapter's trace, the driver's own, which mac_config calls to name its segments; a no-op here, since the
+ * segments are not device accesses and the fixture holds none.
+ */
+void osi_trace(const char *what, uint32_t a0, uint32_t a1)
 {
-    mac_config_start();
-    mac_queues_init();
-    for (uint32_t i = 0; i < 4u; i++) {
-        mac_rx_policy_word(i);
-        mac_rx_set_policy(i);
+    (void)what;
+    (void)a0;
+    (void)a1;
+}
+
+/* The adapter's slow clock period, the recorded run's, in Q13.19 microseconds. */
+static uint32_t host_slowclk_cal_get(void)
+{
+    return 3855000u;
+}
+
+/* The coex PTI bytes the recorded run's adapter gave, by their event; the twelve ofdma events among them. */
+static int host_coex_pti_get(uint32_t event, uint8_t *pti)
+{
+    switch (event) {
+    case 1:
+        *pti = 5;
+        return 0;
+    case 3:
+        *pti = 7;
+        return 0;
+    case 0xa:
+        *pti = 3;
+        return 0;
+    case 0xf:
+        *pti = 1;
+        return 0;
     }
+    return -1;
+}
+
+/*
+ * The libraries' hal_init, which mac_config in macstart.c runs, as main.c's own start calls it:
+ * one case, so that a change to that order fails here rather than on the board alone.
+ */
+static void run(void)
+{
     /* The libraries' receive control block, which the trace holds as their write to RX_BASE and no more,
        so the own read is given it, and that write is held by address and place, not by value. */
     for (unsigned i = 0; i < count; i++) {
@@ -148,35 +183,14 @@ static void head(void)
             wDevCtrl = steps[i].value;
         }
     }
-    mac_rx_base_init();
-    mac_he_init();
-    mac_rx_match_init();
-}
-
-/* Their hal_init from the low-rate group on through the OFDMA sequence, and the coex PTI with the values the
-   recorded run's coex gave. */
-static void tail(void)
-{
-    mac_low_rate_disable();
-    mac_crypto_init();
-    mac_antenna_init();
-    mac_config_finish();
-    mac_rx_reload_hw_beacon();
-    mac_timer_update_by_rtc(1, 3855000u); /* the adapter's slowclk_cal_get, in Q13.19 microseconds */
-    mac_coex_pti_init();
-    mac_rx_active_pti(0);
-    mac_rx_ack_pti(7);
-    mac_wifi_default_pti(1);
-    static const uint8_t ofdma[12] = {5, 7, 7, 7, 5, 5, 5, 5, 7, 7, 3, 3}; /* their coex_pti_get's, in base1 */
-    mac_ofdma_sequence_pti(ofdma);
+    mac_config(host_slowclk_cal_get, host_coex_pti_get);
 }
 
 static const struct {
     const char *file;
     void (*run)(void);
 } cases[] = {
-    {"config-head", head},
-    {"config-tail", tail},
+    {"config", run},
 };
 
 static void load(const char *dir, const char *file)
@@ -192,12 +206,15 @@ static void load(const char *dir, const char *file)
     while (fgets(line, sizeof line, f)) {
         char op;
         unsigned width, a, v;
+        if (line[0] == '#') {
+            /* A comment: the header naming the functions can run past the buffer, so skip to its end. */
+            while (!strchr(line, '\n') && fgets(line, sizeof line, f)) {
+            }
+            continue;
+        }
         if (!strchr(line, '\n')) {
             printf("mac-replay-test: %s: a line longer than %zu bytes\n", path, sizeof line - 2);
             exit(1);
-        }
-        if (line[0] == '#') {
-            continue;
         }
         if (sscanf(line, "%c%u %x %x", &op, &width, &a, &v) != 4 || (op != 'R' && op != 'W') || width != 4) {
             printf("mac-replay-test: %s: not an access of four bytes: %s", path, line);

@@ -267,35 +267,27 @@ endif
 
 # The libraries' accesses mac-replay-test holds macstart.c to, taken again from WIFI_TRACE_LOG,
 # a trace=1 libstart=1 run of the build at hand:
-# their hal_init, all the driver's own now, split at the low-rate group so that the two files hold the sequences
-# as main.c's drv_mac_config runs them, with their coex PTI.
-# MAC_REPLAY_DIR, the test's files by default, takes them elsewhere, as the gate does to hold the files to the run.
-# A group the driver takes over joins MAC_REPLAY_HEAD or MAC_REPLAY_TAIL, and the bounds move past it;
-# a function the driver still calls that calls a named one in its turn goes into MAC_REPLAY_HEAD_OUT;
-# see test/mac-replay-test.c, whose cases call the sequences in drv_mac_config's order.
-MAC_REPLAY_HEAD         := hal_init mac_txrx_init hal_mac_rx_set_policy mac_rxbuf_init hal_he_init \
-                           mac_last_rxbuf_init
-MAC_REPLAY_HEAD_TO      := hal_mac_disable_low_rate
-MAC_REPLAY_HEAD_OUT     := hal_he_clr_multi_bssid
-MAC_REPLAY_TAIL         := hal_mac_disable_low_rate hal_crypto_init hal_attenna_init hal_init \
-                           hal_mac_set_rxbuf_reload_use_hw_beacon_enable hal_timer_update_by_rtc \
-                           hal_coex_pti_init hal_set_rx_active_pti hal_set_rx_ack_pti hal_set_wifi_default_pti \
-                           hal_set_tb_pti hal_set_beamf_pti hal_set_beamf_mt_pti hal_set_ofdma_sequence_pti
-MAC_REPLAY_TAIL_FROM    := hal_mac_disable_low_rate
-MAC_REPLAY_TAIL_THROUGH := hal_set_ofdma_sequence_pti
-MAC_REPLAY_TAKE       = tools/mac-trace.py replay --elf $(BUILD)/wifi-drv.elf --rom $(PHYBLOB_ROM_ELF) \
+# their hal_init, all the driver's own now, so one file holds the sequences as mac_config runs them, with their coex PTI.
+# MAC_REPLAY_DIR, the test's file by default, takes it elsewhere, as the gate does to hold the file to the run.
+# A group the driver takes over joins MAC_REPLAY_FUNCTIONS, the end being MAC_REPLAY_THROUGH;
+# a function the driver still calls that calls a named one in its turn goes into MAC_REPLAY_OUT;
+# see test/mac-replay-test.c, whose one case calls mac_config.
+MAC_REPLAY_FUNCTIONS := hal_init mac_txrx_init hal_mac_rx_set_policy mac_rxbuf_init hal_he_init \
+                        mac_last_rxbuf_init hal_mac_disable_low_rate hal_crypto_init hal_attenna_init \
+                        hal_mac_set_rxbuf_reload_use_hw_beacon_enable hal_timer_update_by_rtc \
+                        hal_coex_pti_init hal_set_rx_active_pti hal_set_rx_ack_pti hal_set_wifi_default_pti \
+                        hal_set_tb_pti hal_set_beamf_pti hal_set_beamf_mt_pti hal_set_ofdma_sequence_pti
+MAC_REPLAY_THROUGH   := hal_set_ofdma_sequence_pti
+MAC_REPLAY_OUT       := hal_he_clr_multi_bssid
+MAC_REPLAY_TAKE      = tools/mac-trace.py replay --elf $(BUILD)/wifi-drv.elf --rom $(PHYBLOB_ROM_ELF) \
                         --image $(BUILD)/wifi-drv.bin
 .PHONY: wifi-esp32c6-replay
 ifeq ($(BOARD),esp32c6)
 wifi-esp32c6-replay: $(BUILD)/wifi-drv.elf $(BUILD)/wifi-drv.bin $(PHYBLOB_ROM_ELF)
-	$(MAC_REPLAY_TAKE) $(addprefix --function ,$(MAC_REPLAY_HEAD)) --to $(MAC_REPLAY_HEAD_TO) \
-		$(addprefix --outside ,$(MAC_REPLAY_HEAD_OUT)) $(WIFI_TRACE_LOG) \
-		> $(BUILD)/config-head.txt
-	$(MAC_REPLAY_TAKE) $(addprefix --function ,$(MAC_REPLAY_TAIL)) --from $(MAC_REPLAY_TAIL_FROM) \
-		--through $(MAC_REPLAY_TAIL_THROUGH) $(WIFI_TRACE_LOG) \
-		> $(BUILD)/config-tail.txt
+	$(MAC_REPLAY_TAKE) $(addprefix --function ,$(MAC_REPLAY_FUNCTIONS)) --through $(MAC_REPLAY_THROUGH) \
+		$(addprefix --outside ,$(MAC_REPLAY_OUT)) $(WIFI_TRACE_LOG) > $(BUILD)/config.txt
 	mkdir -p $(MAC_REPLAY_DIR)
-	mv $(BUILD)/config-head.txt $(BUILD)/config-tail.txt $(MAC_REPLAY_DIR)/
+	mv $(BUILD)/config.txt $(MAC_REPLAY_DIR)/
 else
 wifi-esp32c6-replay:
 	$(error the driver runs on an ESP32-C6: make BOARD=esp32c6 wifi-esp32c6-replay)

@@ -1,8 +1,9 @@
 /*
  * The register sequences of the libraries' bring-up, written out, so that the driver's own start makes them:
- * their hal_init's groups, in drv_mac_config's order, their hal_crypto_init's cipher words, and their coex PTI.
- * main.c calls these where the libraries' hal_init called the groups; the accesses each makes are the libraries',
- * and the trace holds them. They reach the device through macregs.h alone, so they build on the host for their replay;
+ * their hal_init's groups, which mac_config below calls in its order, their hal_crypto_init's cipher words,
+ * and their coex PTI. main.c's start calls mac_config where the libraries' hal_init called the groups;
+ * the accesses each makes are the libraries', and the trace holds them.
+ * They reach the device through macregs.h alone, so they build on the host for their replay;
  * the libraries' calls they leave are declared below.
  */
 
@@ -15,7 +16,7 @@
  * The libraries' hal_init's own register writes, around the groups of its MAC configuration that it calls:
  * their HAL_CFG start and the wait for it, and HAL_HOLD and HAL_MISC cleared.
  * Then, after the groups, HAL_HOLD, HAL_WORD and RX_WORD as their hal_init leaves them.
- * The driver's own start makes these, so that the groups it still calls sit where the libraries put them; see main.c.
+ * The driver's own start makes these, and mac_config below runs them and the groups in the libraries' order.
  */
 void mac_config_start(void)
 {
@@ -429,4 +430,60 @@ void mac_ofdma_sequence_pti(const uint8_t pti[12])
     mac_beamf_mt_pti(pti[10], pti[11]);
     (void)rd(OFDMA_PTI_W0); /* their body's two reads, for its log */
     (void)rd(OFDMA_PTI_W1);
+}
+
+/* The adapter's trace, the driver's own, which names the segments between the groups; declared here rather than
+   through osi.h, which pulls what the host does not build. The replay test leaves it a no-op. */
+extern void osi_trace(const char *what, uint32_t a0, uint32_t a1);
+
+/* The OFDMA sequence's twelve PTI events, in their hal_set_ofdma_sequence_pti's order, which its body reads through
+   the adapter's coex_pti_get: the map's event 1, 3 and 0xa, which gave 5, 7 and 3 in the recorded run. */
+static const uint8_t ofdma_pti_events[12] = {1, 3, 3, 3, 1, 1, 1, 1, 3, 3, 0xau, 0xau};
+
+/*
+ * The libraries' hal_init, the MAC's configuration, written out whole:
+ * its own register writes about HAL_CFG and HAL_HOLD and its receive-policy words, and its groups in its order,
+ * each named through osi_trace so that a traced run's segments show its accesses. See user/wifi/NOTES.md.
+ * The driver's start and the host's replay both call this, so neither keeps the order of its own;
+ * the two adapter values it needs, the slow clock's period and the coex PTI bytes, come through the pointers.
+ */
+void mac_config(uint32_t (*slowclk_cal_get)(void), int (*coex_pti_get)(uint32_t, uint8_t *))
+{
+    osi_trace("mac-config", 0, 0);
+    mac_config_start();
+    osi_trace("mac-txrx", 0, 0);
+    mac_queues_init();
+    osi_trace("mac-policy", 0, 0);
+    for (uint32_t i = 0; i < 4u; i++) {
+        mac_rx_policy_word(i);
+        mac_rx_set_policy(i);
+    }
+    osi_trace("mac-rxbuf", 0, 0);
+    mac_rx_base_init();
+    osi_trace("mac-he", 0, 0);
+    mac_he_init();
+    mac_rx_match_init();
+    osi_trace("mac-rate", 0, 0);
+    mac_low_rate_disable();
+    osi_trace("mac-crypto", 0, 0);
+    mac_crypto_init();
+    osi_trace("mac-antenna", 0, 0);
+    mac_antenna_init();
+    osi_trace("mac-post", 0, 0);
+    mac_config_finish();
+    mac_rx_reload_hw_beacon();
+    osi_trace("mac-pti", 0, 0);
+    mac_timer_update_by_rtc(1, slowclk_cal_get());
+    mac_coex_pti_init();
+    uint8_t pti_active = 0, pti_default = 1; /* their hal_init's own bytes, which their coex_pti_get fills */
+    coex_pti_get(3, &pti_active);
+    coex_pti_get(0xfu, &pti_default);
+    mac_rx_active_pti(0);
+    mac_rx_ack_pti(pti_active);
+    mac_wifi_default_pti(pti_default);
+    uint8_t ofdma[12]; /* the OFDMA sequence's twelve PTI bytes, which their coex_pti_get fills */
+    for (uint32_t i = 0; i < 12u; i++) {
+        coex_pti_get(ofdma_pti_events[i], &ofdma[i]);
+    }
+    mac_ofdma_sequence_pti(ofdma);
 }

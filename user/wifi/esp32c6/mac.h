@@ -96,8 +96,10 @@ void mac_rx_on(void);
 /*
  * The register sequences of the libraries' bring-up, written out in macstart.c, which holds their detail:
  * their hal_init's words and groups, their hal_crypto_init's cipher words, and their coex PTI.
- * main.c calls them where the libraries' hal_init called the groups, in drv_mac_config's order; see macstart.c.
+ * main.c's start calls mac_config, which runs them in the libraries' order, taking the slow clock's period
+ * and the coex PTI bytes through the two pointers; see macstart.c.
  */
+void mac_config(uint32_t (*slowclk_cal_get)(void), int (*coex_pti_get)(uint32_t event, uint8_t *pti));
 void mac_config_start(void);
 void mac_rx_policy_word(uint32_t iface);
 void mac_config_finish(void);
