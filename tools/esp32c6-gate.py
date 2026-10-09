@@ -7,7 +7,7 @@ In order:
 the snap= list: --snap's, or the one the last gate's traced runs read, or, with none kept, a trace=1 run of each start's;
 four trace=1 runs of the libraries' start and one of the own start,
 made again with what they read if a kept list lacks a word they all read, and what they read kept for the next gate;
-the host replay of macstart.c against the first base's accesses, and whether test/replay holds those accesses;
+the host replay of macstart.c against the first base's accesses, and whether test/replay holds what the four give;
 the diff of the access streams, judged against the places by design in user/wifi/esp32c6/test/diff-expected.txt;
 four trace=2 runs of each start, interleaved, and the three compares of the final state:
 the own start's traced run against its dry runs, the libraries' against theirs, and across the images;
@@ -236,36 +236,56 @@ def traced_runs(gate, snap):
 def host_replay(gate):
     """The bring-up's sequences replayed on the host against the libraries' accesses of the first base,
     taken into DIR/replay;
-    and whether test/replay holds what that base gives, so that a group taken over is not held to files taken before it.
+    and whether test/replay holds what the four bases give, so that a group taken over is not held to files taken
+    before it: each access as they all give it, and where they differ in a value, the moment's, its operation and address.
     """
     base1 = os.path.join(DIR, "base1.log")
-    replay = os.path.join(DIR, "replay")
+    taken = [os.path.join(DIR, "replay")] + [os.path.join(DIR, "replay-%d" % i) for i in range(2, 5)]
     if not gate.args.dry_run:
-        shutil.rmtree(replay, ignore_errors=True)  # a file an earlier gate took, and this one no longer does, is not held
+        for d in taken:
+            shutil.rmtree(d, ignore_errors=True)  # a file an earlier gate took, and this one no longer does, is not held
     status = gate.run("replay", ["make", "BOARD=esp32c6", "wifi-esp32c6-replay", "WIFI_TRACE_LOG=" + base1,
-                                 "MAC_REPLAY_DIR=" + replay])
+                                 "MAC_REPLAY_DIR=" + taken[0]])
     detail = ""
     if status != 0:
         detail = "the files could not be taken; see %s" % os.path.join(DIR, "replay.out")
     else:
-        status = gate.run("replay-test", ["make", "mac-replay-test", "MAC_REPLAY_DIR=" + replay])
+        status = gate.run("replay-test", ["make", "mac-replay-test", "MAC_REPLAY_DIR=" + taken[0]])
         if not gate.args.dry_run:
             said = re.findall(r"^mac-replay-test: .*", open(os.path.join(DIR, "replay-test.out")).read(), re.M)
             detail = said[0] if said else ""
     gate.tell("host replay", status, detail)
     if gate.args.dry_run or status != 0:
         return
+    for i, d in enumerate(taken[1:], 2):
+        if gate.run("replay-%d" % i, ["make", "BOARD=esp32c6", "wifi-esp32c6-replay",
+                                      "WIFI_TRACE_LOG=" + os.path.join(DIR, "base%d.log" % i), "MAC_REPLAY_DIR=" + d]):
+            gate.tell("test/replay as bases give", 1, "see %s" % os.path.join(DIR, "replay-%d.out" % i))
+            return
 
     def accesses(path):
-        return [line for line in open(path) if not line.startswith("#")]
+        return [line.split() for line in open(path) if not line.startswith("#")] if os.path.exists(path) else None
 
-    # A file test/replay holds that the base no longer gives is stale too, a case the test may still read.
-    stale = [f for f in sorted(set(os.listdir(replay)) | set(os.listdir(REPLAY)))
-             if not os.path.exists(os.path.join(REPLAY, f)) or not os.path.exists(os.path.join(replay, f))
-             or accesses(os.path.join(replay, f)) != accesses(os.path.join(REPLAY, f))]
-    gate.tell("test/replay as base1 gives", 1 if stale else 0,
+    # A file test/replay holds that the bases no longer give is stale too, a case the test may still read.
+    stale, moments = [], 0
+    for f in sorted(set(os.listdir(REPLAY)).union(*(os.listdir(d) for d in taken))):
+        held = accesses(os.path.join(REPLAY, f))
+        given = [accesses(os.path.join(d, f)) for d in taken]
+        if held is None or None in given or any(len(g) != len(held) for g in given):
+            stale.append(f)
+            continue
+        for line, *bases in zip(held, *given):
+            if all(b == bases[0] for b in bases):
+                wrong = line != bases[0]
+            else:
+                moments += 1
+                wrong = any(b[:2] != line[:2] for b in bases)
+            if wrong:
+                stale.append(f)
+                break
+    gate.tell("test/replay as bases give", 1 if stale else 0,
               "%s differ: make BOARD=esp32c6 wifi-esp32c6-replay WIFI_TRACE_LOG=%s" % (", ".join(stale), base1)
-              if stale else "")
+              if stale else "%d values the bases differ in, held by address" % moments if moments else "")
 
 
 def probe_ssid(args):
