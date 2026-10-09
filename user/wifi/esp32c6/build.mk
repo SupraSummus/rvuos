@@ -105,7 +105,8 @@ KEYS_TEST_OBJ   := $(ESP_HOST)/keys.o $(ESP_HOST)/keys-test.o
 $(ESP_HOST)/keys.o: $(WIFI_ESP)/keys.c $(WIFI_ESP)/keys.h
 $(ESP_HOST)/keys-test.o: $(WIFI_ESP)/test/keys-test.c $(WIFI_ESP)/keys.h
 # The bring-up's register sequences of macstart.c, held to what the libraries' own did in a run of their start,
-# the files of test/replay/, which wifi-esp32c6-replay below takes again; they fetch nothing, so make check runs them.
+# the files of test/replay/, which wifi-esp32c6-replay below takes again;
+# they fetch nothing, so make check runs them.
 MAC_REPLAY_TEST     := $(ESP_HOST)/mac-replay-test
 MAC_REPLAY_DIR      ?= $(WIFI_ESP)/test/replay
 MAC_REPLAY_TEST_OBJ := $(ESP_HOST)/macstart.o $(ESP_HOST)/mac-replay-test.o
@@ -265,9 +266,10 @@ wifi-esp32c6-attrib:
 endif
 
 # The libraries' accesses mac-replay-test holds macstart.c to, taken again from WIFI_TRACE_LOG,
-# a trace=1 libstart=1 run of the build at hand: their hal_init and the groups the driver has taken over,
-# up to the first group it still calls, and from the low-rate group up to their hal_set_ofdma_sequence_pti, the last
-# group the driver still calls, with their coex PTI.
+# a trace=1 libstart=1 run of the build at hand:
+# their hal_init and the groups the driver has taken over, up to the first group it still calls,
+# and from the low-rate group up to their hal_set_ofdma_sequence_pti, the last group the driver still calls,
+# with their coex PTI.
 # MAC_REPLAY_DIR, the test's files by default, takes them elsewhere, as the gate does to hold the files to the run.
 # A group the driver takes over joins MAC_REPLAY_HEAD or MAC_REPLAY_TAIL, and the bounds move past it;
 # a function the driver still calls that calls a named one in its turn goes into MAC_REPLAY_HEAD_OUT;
@@ -297,9 +299,9 @@ wifi-esp32c6-replay:
 	$(error the driver runs on an ESP32-C6: make BOARD=esp32c6 wifi-esp32c6-replay)
 endif
 
-# Every check of a step of the own start, as CLAUDE.md names them, in their order, on the board, each verdict told,
-# the diff's places left to read; see tools/esp32c6-gate.py. WIFI_GATE_JOINS names the networks to join,
-# from files git does not track, as WIFI_CONFIG does.
+# Every check of a step of the own start, as CLAUDE.md names them, in their order, on the board, each verdict told;
+# see tools/esp32c6-gate.py.
+# WIFI_GATE_JOINS names the networks to join, from files git does not track, as WIFI_CONFIG does.
 WIFI_GATE_JOINS ?=
 .PHONY: wifi-esp32c6-gate
 ifeq ($(BOARD),esp32c6)
@@ -315,8 +317,9 @@ endif
 # stream, and libphy's calibration folds to one marker a run. WIFI_TRACE_BASE names the libraries' start's logs (two
 # or more) and WIFI_TRACE_OWN the own start's; the rule knows the ELF, the ROM and the libraries, so CLAUDE.md names
 # it and not the whole command. See tools/mac-trace.py.
-# WIFI_TRACE_EXPECT names the places the own start differs in by design, each with its reason, which pass alone
-# and exactly; WIFI_TRACE_EXPECT_NEW=1 prints a place that does not as such a file holds it.
+# WIFI_TRACE_EXPECT names the places the own start differs in by design, each with its reason,
+# which pass alone and exactly;
+# WIFI_TRACE_EXPECT_NEW=1 prints a place that does not, as such a file holds it.
 WIFI_TRACE_BASE ?=
 WIFI_TRACE_OWN ?=
 WIFI_TRACE_EXPECT ?= $(wildcard $(WIFI_ESP)/test/diff-expected.txt)

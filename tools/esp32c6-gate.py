@@ -3,15 +3,16 @@
 
   tools/esp32c6-gate.py [--join CONF]... [--probe SSID] [--snap CONF] [--no-check] [--dry-run]
 
-In order: the snap= list, from a trace=1 run of each start unless --snap names a configuration that holds one;
-four trace=1 runs of the libraries' start and one of the own start, and the diff of their access streams;
+In order:
+the snap= list, from a trace=1 run of each start, unless --snap names a configuration that holds one;
+four trace=1 runs of the libraries' start and one of the own start;
 the host replay of macstart.c against the first base's accesses, and whether test/replay holds those accesses;
-four trace=2 runs of each start, interleaved, and the three compares of the final state -- the own start's traced
-run against its dry runs, the libraries' against theirs, and the own start's dry run against the libraries' across
-the images; the scan, listen= and listen= with probe=; a join for each --join; and make check.
-Every configuration it writes and every log stays in build/esp32c6/gate/. A check that could not run is told as not
-run. The diff is judged against the places the own start differs in by design, user/wifi/esp32c6/test/diff-expected.txt,
-and only shown for reading without it; the exit status is 1 when any check failed.
+the diff of the access streams, judged against the places by design in user/wifi/esp32c6/test/diff-expected.txt;
+four trace=2 runs of each start, interleaved, and the three compares of the final state:
+the own start's traced run against its dry runs, the libraries' against theirs, and across the images;
+the scan, listen= and listen= with probe=; a join for each --join; and make check.
+Every configuration it writes and every log stays in build/esp32c6/gate/.
+A check that could not run is told as not run, and the exit status is 1 when any check failed.
 The probe's network is --probe, or the ssid= of the first --join, which is read and never printed.
 """
 
@@ -33,9 +34,9 @@ spec = importlib.util.spec_from_file_location("mac_trace", os.path.join(ROOT, "t
 mt = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mt)
 
-# Each make the gate runs starts afresh, not as a part of the make that may have started the gate: without its flags,
-# and without the variables its command line set, which make puts in the environment, BOARD=esp32c6 among them,
-# so that make check builds for its own boards.
+# Each make the gate runs starts afresh, not as a part of the make that may have started the gate:
+# without its flags, and without the variables its command line set, which make puts in the environment,
+# BOARD=esp32c6 among them, so that make check builds for its own boards.
 ENV = {k: v for k, v in os.environ.items()
        if k not in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL")
        and k not in re.findall(r"(?:^|\s)([A-Za-z_][A-Za-z0-9_]*)=", os.environ.get("MAKEFLAGS", ""))}
@@ -60,7 +61,8 @@ class Gate:
 
     def board(self, name, conf):
         """A run on the board with the configuration at conf, its log kept as DIR/name.log.
-        The last run's log goes first, so that a run that wrote none leaves none rather than another's."""
+        The last run's log goes first, so that a run that wrote none leaves none rather than another's.
+        """
         log = os.path.join(BUILD, "wifi-run.log")
         for path in (log, os.path.join(DIR, name + ".log")):
             if os.path.exists(path) and not self.args.dry_run:
@@ -72,7 +74,8 @@ class Gate:
 
     def traced(self, name, trace, lib, snap):
         """A traced run, made again, twice at most, when the stream lost bytes of its log (see TODO.md),
-        each loss written down in DIR/losses.txt with the run, the place and the line."""
+        each loss written down in DIR/losses.txt with the run, the place and the line.
+        """
         conf = os.path.join(DIR, name + ".conf")
         with open(conf, "w") as f:
             f.write("trace=%d\nrun=60\n%s%s" % (trace, "libstart=1\n" if lib else "", snap))
@@ -100,8 +103,9 @@ class Gate:
 
 
 def loss(log, trace, snap):
-    """Where the stream lost bytes of a traced run's log, or None: a sequence number missing or a line cut,
-    a phase marker whose front went, or a snapshot short of its lines."""
+    """Where the stream lost bytes of a traced run's log, or None:
+    a sequence number missing or a line cut, a phase marker whose front went, or a snapshot short of its lines.
+    """
     acc, damaged = mt.scan(log)
     if damaged:
         return "seq %d %s" % damaged[0]
@@ -141,8 +145,9 @@ def snap_list(gate):
 
 def host_replay(gate):
     """The bring-up's sequences replayed on the host against the libraries' accesses of the first base,
-    taken into DIR/replay; and whether test/replay holds what that base gives, so that a group taken over is not
-    held to files taken before it."""
+    taken into DIR/replay;
+    and whether test/replay holds what that base gives, so that a group taken over is not held to files taken before it.
+    """
     base1 = os.path.join(DIR, "base1.log")
     replay = os.path.join(DIR, "replay")
     status = gate.run("replay", ["make", "BOARD=esp32c6", "wifi-esp32c6-replay", "WIFI_TRACE_LOG=" + base1,

@@ -94,7 +94,7 @@ and the places the own start differs in by design passing alone and exactly, eac
 `tools/mac-trace.py compare LIB... OWN`, the final state across images, the dry logs four or more trace=2 `libstart=1` runs made interleaved with the driver's, since what the air carries changes over time, and the traced log the driver's own start's trace=2;
 and the ordinary runs below.
 `make BOARD=esp32c6 wifi-esp32c6-gate WIFI_GATE_JOINS="..."` runs the four in that order, with `make check`, and tells each verdict.
-A step that makes a new difference by design adds its place there with the reason, in the same commit.
+A step that makes a new difference by design adds its place to `diff-expected.txt` with the reason, in the same commit.
 The diff's bases and each `compare`'s dry logs are four, not two: a word that varies run to run can agree between two by chance and show as a difference that is not one.
 A change to the station in `user/wifi/esp32c6/main.c`, `sta.c` or `mgmt.c` runs it with a network named,
 the station's scan, SAE, association and 4-way handshake at an access point that offers WPA3, which fails if one is not answered,

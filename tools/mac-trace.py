@@ -55,9 +55,10 @@ SNAPHDR = re.compile(r"snapshot of (\d+) addresses")
 FLASHED = re.compile(r"# flashed 0x[0-9a-fA-F]+ sha256 ([0-9a-f]{64})")
 # A ROM linker script: "name = 0x...", possibly inside PROVIDE(...), comments left to strip.
 PLACED = re.compile(r"^\s*(?:PROVIDE\s*\(\s*)?([A-Za-z_][A-Za-z0-9_.$]*)\s*=\s*0x[0-9a-fA-F]+", re.M)
-# The bits of a word whose value is the moment's, not the code's, each with its mask and reason: a count of events
-# over the window, which the traced window, taking longer, makes larger, a measurement such as the chip's temperature,
-# or a status the hardware keeps. `compare` and `diff` read those bits apart from the verdict and hold the rest.
+# The bits of a word whose value is the moment's, not the code's, each with its mask and reason:
+# a count of events over the window, which the traced window, taking longer, makes larger,
+# a measurement such as the chip's temperature, or a status the hardware keeps.
+# `compare` and `diff` read those bits apart from the verdict and hold the rest.
 # A word is here for its reason -- never because two runs disagreed on it.
 MOMENT = {
     0x600A708C: (0xFFFFFFFF, "the frames the air carries over the window, more of them while the window is traced"),
@@ -323,8 +324,10 @@ EXPECTED = re.compile(r"^([-+])([RW])(\d) (0x[0-9a-fA-F]+) (0x[0-9a-fA-F]+)(?:/(
 
 
 def expectations(path):
-    """The places the own start differs from the libraries' by design, [(reason, base, own)]: each place is its
-    reason on "#" lines, then its accesses, "-" the libraries' and "+" the own start's; a blank line ends it."""
+    """The places the own start differs from the libraries' by design, [(reason, base, own)]:
+    each place is its reason on "#" lines, then its accesses, "-" the libraries' and "+" the own start's;
+    a blank line ends it.
+    """
     out, reason, sides = [], [], {"-": [], "+": []}
 
     def end():
@@ -670,12 +673,12 @@ def attrib(args):
 def replay(args):
     """The accesses the named functions made, in the log's order, as the host's replay of the own code reads them.
 
-    One line each, "R4 0xaddress 0xvalue" or "W4 ...", after a "#" line naming the functions, the bounds and the
-    log's image;
+    One line each, "R4 0xaddress 0xvalue" or "W4 ...",
+    after a "#" line naming the functions, the bounds and the log's image;
     what the functions' callees did is left out, as the own code calls those.
     --from and --to bound them by other functions' first accesses, so that a caller's calls are told from another's;
-    --outside leaves out what a function the own code still calls did, from its first access to its last, its callees
-    among it, when one of them is a named function too.
+    --outside leaves out what a function the own code still calls did, from its first access to its last,
+    its callees among it, when one of them is a named function too.
     A log short anywhere is refused, as is a function no access names, and a cycle, which the replay does not unroll.
     """
     if args.image:
