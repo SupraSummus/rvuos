@@ -160,6 +160,15 @@ what is left:
   with their invalidation of the queue on a timeout, would do better.
   `mac.c` points a MAC that ran out of descriptors past the last it filled by `RX_BASE` alone,
   which the take found not always taken; no run has run out yet, `restarted` 0.
+- The MAC configuration's last call, their `hal_set_ofdma_sequence_pti`, wants taking over with its leaves
+  `hal_set_tb_pti`, `hal_set_beamf_pti` and `hal_set_beamf_mt_pti`, as the coex PTI group was:
+  the body takes twelve bytes through their `coex_pti_get`, at which 1, 3, 3, 3, 1, 1, 1, 1, 3, 3, 0xa and 0xa
+  (1 giving 5, 3 giving 7 and 0xa giving 3), calls the three leaves, and reads 0x600a4dd0 and 0x600a4dd4 for its log.
+  The leaves write nibbles of those two words: tb takes its v0 to 0x600a4dd0's [27:24], v1 to [23:20], v2 to [19:16],
+  v3 to [15:12], v5 to [11:8], v6 to [7:4] and v4 to [3:0]; beamf takes v7 to [31:28] of that word, v8 to 0x600a4dd4's
+  [7:4] and v9 to its [3:0]; beamf_mt takes v10 to [11:8] of that word and v11 to its [15:12].
+  The tail's fixture takes the three leaves and its upper bound moves past the call; pp falls from 18 to 17,
+  `drv_mac_config` then the driver's whole.
 - The ESP32-C6's driver takes all its memory from one heap: the libraries' as they run,
   the own path's buffers, stacks and queues once, at its start, and the supplicant's and SAE's as they run, hostap's and Mbed TLS's way;
   SAE leaves a few kilobytes at the fewest.
