@@ -458,8 +458,8 @@ static void mac_set_tx_min_pwr(int pwr)
 /*
  * The libraries' hal_init_tx_pwr, written out: their power table, one two-byte entry for each of their 43 rates,
  * filled by their phy_get_max_pwr, and then their hal_init_tb_power and hal_init_imrsp_power, both below.
- * The table is the driver's own; the one their net80211 paths read is theirs, refilled by their hal_init_tx_pwr from
- * ieee80211_update_phy_country at the end of the driver's start, so the two hold the same values.
+ * The table is the driver's own; the one their net80211 paths read is theirs, filled by their hal_init_tx_pwr at
+ * the end of the driver's start, so the two hold the same values.
  * phy_get_max_pwr stays a libphy call, and the host replay stubs it with the values of the recorded run.
  */
 static uint8_t mac_pwr_table[0x2b * 2u];

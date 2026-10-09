@@ -354,9 +354,11 @@ with pp calling phy for the channel and the gain;
 `set_intr`, `set_isr` and `ints_on`, the interrupt handler, the address, the RX enable and the STA TSF;
 and `event_post` STA_START, where the start reports.
 
-What the own start must also carry is the power and rate tables a library task of its own writes in response to the start,
-just after the event, `hal_init_tb_power`, `hal_init_imrsp_power` and `rate_to_index`, with no timer armed.
-That is the start's duty once the library's start is gone, and the transmitting runs and the snapshot are its oracle.
+The start's last call, their `ieee80211_update_phy_country`, comes just after the event:
+written out, it is their `hal_init_tx_pwr`, which fills their power table, the one their association reads,
+and writes the power registers again by `hal_init_tb_power` and `hal_init_imrsp_power`
+and reads libphy's `rate_to_index`, with no timer armed.
+The driver's start calls it now, and the transmitting runs and the snapshot are its oracle.
 Whether the HE, beamforming and antenna groups can be left out is the own start's to find as it runs,
 each dropped on its own and held to the snapshot and the runs.
 
@@ -372,3 +374,8 @@ Of the start's calls, one that only writes the libraries' own memory -- their pm
 taking it over moves no device work to the driver, and would carry their structures' layout into its code.
 A write to their memory that a transcribed body brings -- their wdev's flag, the masks by their control block -- is named where it is written,
 and goes whole when the reader of that state is the driver's own.
+
+Of the start's calls after the hardware's, their `wifi_mode_set` and `_do_wifi_start` are not written out:
+they carry net80211's state -- offsets into their control block, and a static of `ieee80211_sta.o` this driver cannot
+name -- for little device work, one TSF word and `ic_set_vif`, so they stay calls.
+Whether the driver wants net80211's state after the start at all is open.
