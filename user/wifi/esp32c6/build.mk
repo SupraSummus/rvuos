@@ -275,6 +275,7 @@ endif
 MAC_REPLAY_FUNCTIONS := hal_init mac_txrx_init hal_mac_rx_set_policy mac_rxbuf_init hal_he_init \
                         hal_he_set_ersu hal_he_set_bbrxhung_time hal_he_set_co_hosted_bss \
                         hal_he_set_ack_rate hal_he_set_mac_delay \
+                        hal_he_set_bcast_ru hal_he_set_uora_parameter \
                         mac_last_rxbuf_init hal_mac_disable_low_rate hal_crypto_init hal_attenna_init \
                         hal_mac_set_rxbuf_reload_use_hw_beacon_enable hal_timer_update_by_rtc \
                         hal_coex_pti_init hal_set_rx_active_pti hal_set_rx_ack_pti hal_set_wifi_default_pti \

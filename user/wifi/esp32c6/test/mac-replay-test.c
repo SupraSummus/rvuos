@@ -85,18 +85,6 @@ void hal_set_tx_min_pwr(int a)
     (void)a;
 }
 
-void hal_he_set_bcast_ru(uint32_t a, uint32_t b, uint32_t c)
-{
-    (void)a;
-    (void)b;
-    (void)c;
-}
-
-void hal_he_set_uora_parameter(uint8_t *p)
-{
-    (void)p;
-}
-
 void hal_he_clr_multi_bssid(void)
 {
 }

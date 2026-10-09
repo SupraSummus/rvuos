@@ -233,8 +233,6 @@ extern void hal_init_bf(void);
 extern void hal_init_tb_tx(void);
 extern void hal_init_tx_pwr(void);
 extern void hal_set_tx_min_pwr(int);
-extern void hal_he_set_bcast_ru(uint32_t, uint32_t, uint32_t);
-extern void hal_he_set_uora_parameter(uint8_t *);
 extern void hal_he_clr_multi_bssid(void);
 
 /*
@@ -268,6 +266,38 @@ static void mac_he_set_co_hosted_bss(uint32_t enable, uint32_t mask)
     }
 }
 
+/*
+ * The libraries' hal_he_set_bcast_ru, written out: two read-modify-writes on MAC+0x38, bit 22 set and then the field
+ * in bits 11 to 21 given the first argument, and four on MAC+0x3c, bit 11 set, the low 11 bits given the second
+ * argument, bit 23 set and bits 12 to 22 given the third. Their name says a broadcast resource unit; the fields'
+ * meaning is not known.
+ */
+#define HE_MAC_38 (MAC_BASE + 0x38u)
+#define HE_MAC_3C (MAC_BASE + 0x3cu)
+
+static void mac_he_set_bcast_ru(uint32_t ru, uint32_t low, uint32_t high)
+{
+    wr(HE_MAC_38, rd(HE_MAC_38) | 0x400000u);
+    wr(HE_MAC_38, (rd(HE_MAC_38) & 0xffc007ffu) | ((ru << 11) & 0x3ff800u));
+    wr(HE_MAC_3C, rd(HE_MAC_3C) | 0x800u);
+    wr(HE_MAC_3C, (rd(HE_MAC_3C) & ~0x7ffu) | (low & 0x7ffu));
+    wr(HE_MAC_3C, rd(HE_MAC_3C) | 0x800000u);
+    wr(HE_MAC_3C, (rd(HE_MAC_3C) & 0xff800fffu) | ((high << 12) & 0x7ff000u));
+}
+
+/*
+ * The libraries' hal_he_set_uora_parameter, written out: their word 0x600a4c84's bits 25 to 31 given 2^OCWmin - 1 and
+ * its bits 18 to 24 given 2^OCWmax - 1, the two from the byte's low three bits and its next three. Their start's byte,
+ * 0x2b, holds OCWmin 3 and OCWmax 5, so the fields take 7 and 31. What the register's fields otherwise are is not known.
+ */
+#define HE_HAL_C84 0x600a4c84u
+
+static void mac_he_set_uora_parameter(const uint8_t *p)
+{
+    wr(HE_HAL_C84, (rd(HE_HAL_C84) & 0x01ffffffu) | (((1u << (p[0] & 7u)) - 1u) << 25));
+    wr(HE_HAL_C84, (rd(HE_HAL_C84) & 0xfe03ffffu) | (((1u << ((p[0] >> 3) & 7u)) - 1u) << 18));
+}
+
 void mac_he_init(void)
 {
     wr(HE_CTRL, rd(HE_CTRL) & ~0x80000000u);
@@ -296,8 +326,8 @@ void mac_he_init(void)
     /* The byte their start passed: the UORA contention window, as 802.11ax's OCW Range lays it out, OCWmin 3 in
        bits 0 to 2 and OCWmax 5 in bits 3 to 5; their call reads it on the spot, so a local carries it. */
     uint8_t uora = 0x2b;
-    hal_he_set_bcast_ru(0x7fd, 0, 0);
-    hal_he_set_uora_parameter(&uora);
+    mac_he_set_bcast_ru(0x7fd, 0, 0);
+    mac_he_set_uora_parameter(&uora);
     wr(HE_TX_MIN, rd(HE_TX_MIN) | 0x20000u);
     wr(HE_MAC_20, rd(HE_MAC_20) & ~0x100u);
     wr(HE_MAC_20, rd(HE_MAC_20) & ~0x20000u);

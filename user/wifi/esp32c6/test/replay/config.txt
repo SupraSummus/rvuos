@@ -1,4 +1,4 @@
-# hal_init mac_txrx_init hal_mac_rx_set_policy mac_rxbuf_init hal_he_init hal_he_set_ersu hal_he_set_bbrxhung_time hal_he_set_co_hosted_bss hal_he_set_ack_rate hal_he_set_mac_delay mac_last_rxbuf_init hal_mac_disable_low_rate hal_crypto_init hal_attenna_init hal_mac_set_rxbuf_reload_use_hw_beacon_enable hal_timer_update_by_rtc hal_coex_pti_init hal_set_rx_active_pti hal_set_rx_ack_pti hal_set_wifi_default_pti hal_set_tb_pti hal_set_beamf_pti hal_set_beamf_mt_pti hal_set_ofdma_sequence_pti through hal_set_ofdma_sequence_pti outside hal_he_clr_multi_bssid, in a run of the image sha256 dd222ba446a658c632452e72a81c9a6c4e876bfa6dde73ea05429b621d448d8f
+# hal_init mac_txrx_init hal_mac_rx_set_policy mac_rxbuf_init hal_he_init hal_he_set_ersu hal_he_set_bbrxhung_time hal_he_set_co_hosted_bss hal_he_set_ack_rate hal_he_set_mac_delay hal_he_set_bcast_ru hal_he_set_uora_parameter mac_last_rxbuf_init hal_mac_disable_low_rate hal_crypto_init hal_attenna_init hal_mac_set_rxbuf_reload_use_hw_beacon_enable hal_timer_update_by_rtc hal_coex_pti_init hal_set_rx_active_pti hal_set_rx_ack_pti hal_set_wifi_default_pti hal_set_tb_pti hal_set_beamf_pti hal_set_beamf_mt_pti hal_set_ofdma_sequence_pti through hal_set_ofdma_sequence_pti outside hal_he_clr_multi_bssid, in a run of the image sha256 2768b4a989dc66f3b5e4ee2a200863778d81edf081267b9e1cd96050f3d7d88e
 R4 0x600a4ddc 0x00000000
 W4 0x600a4ddc 0x00000002
 R4 0x600a4ddc 0x00000001
@@ -305,6 +305,22 @@ R4 0x600a4c88 0x0000001e
 W4 0x600a4c88 0x0000001f
 R4 0x600a42d4 0x0fe3f8fe
 W4 0x600a42d4 0x4fe3f8fe
+R4 0x600a4038 0x003fe800
+W4 0x600a4038 0x007fe800
+R4 0x600a4038 0x007fe800
+W4 0x600a4038 0x007fe800
+R4 0x600a403c 0x00000000
+W4 0x600a403c 0x00000800
+R4 0x600a403c 0x00000800
+W4 0x600a403c 0x00000800
+R4 0x600a403c 0x00000800
+W4 0x600a403c 0x00800800
+R4 0x600a403c 0x00800800
+W4 0x600a403c 0x00800800
+R4 0x600a4c84 0x0e7c0000
+W4 0x600a4c84 0x0e7c0000
+R4 0x600a4c84 0x0e7c0000
+W4 0x600a4c84 0x0e7c0000
 R4 0x600a4400 0xc1c93754
 W4 0x600a4400 0xc1cb3754
 R4 0x600a4020 0x18000000
