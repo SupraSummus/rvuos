@@ -427,10 +427,8 @@ static void drv_reset_mac(void)
  * The libraries' hal_init, the MAC's configuration, written out:
  * their register writes about HAL_CFG and HAL_HOLD and their receive-policy words are macstart.c's,
  * and the groups between them go over to macstart.c one at a time;
- * the groups still theirs are called in their order and with their arguments,
- * each named so that a traced run's segments show its accesses.
- * The groups: the txrx queues, the receive policy, the RX buffers, the HE tables, the RX match, the ack rates and
- * low-rate mask, the cipher, the antenna, the timer and the coex PTI. See user/wifi/NOTES.md.
+ * the calls still theirs are called in their order and with their arguments, each named so that a traced run's
+ * segments show its accesses. See user/wifi/NOTES.md.
  */
 static void drv_mac_config(void)
 {

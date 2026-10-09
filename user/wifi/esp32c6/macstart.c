@@ -1,9 +1,6 @@
 /*
  * The register sequences of the libraries' bring-up, written out, so that the driver's own start makes them:
- * their hal_init's words about HAL_CFG, HAL_HOLD and HAL_MISC, its txrx queues, its receive policy and the words
- * around them, its receive base, its HE group, its receive match rules and its low-rate group,
- * their hal_crypto_init's cipher words, its antenna group, the receive buffer's reload by the beacon, the timer by the
- * slow clock, and their coex PTI.
+ * their hal_init's groups, in drv_mac_config's order, their hal_crypto_init's cipher words, and their coex PTI.
  * main.c calls these where the libraries' hal_init called the groups; the accesses each makes are the libraries',
  * and the trace holds them. They reach the device through macregs.h alone, so they build on the host for their replay;
  * the libraries' calls they leave are declared below.
@@ -226,10 +223,8 @@ void mac_he_init(void)
 /*
  * The libraries' mac_last_rxbuf_init, written out: six rules that match a frame's payload,
  * each a control word, a value and a mask, and then the word before the table and RX_WORD given their bits.
- * The control word's low byte is the offset the value is matched at, which the readings bear out:
- * at 6, the LLC/SNAP's EtherType, 0x0806 ARP and 0x888e EAPOL; at 28, the IPv4 UDP ports, 0x0043 and 0x0044 both ways,
- * DHCP; at 17, the IPv4 protocol, 1, ICMP.
- * The values are the frame's bytes read little-endian, so the register holds each reversed.
+ * The control word's low byte is the offset the value is matched at, and the values are the frame's bytes read
+ * little-endian, so the register holds each reversed; the rows below name what they read.
  * The third value, 0x0808, reads as an EtherType too but is not known, nor are the rest of the control word,
  * the two six-bit groups of the word before the table (named for the six rules it holds a bit for, a guess),
  * or what the match is for.

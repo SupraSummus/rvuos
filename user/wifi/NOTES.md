@@ -703,9 +703,7 @@ so the own start can call them as they are, given the right arguments, and take 
 The MAC's configuration, their `hal_init`, is the driver's own sequence now:
 the register writes it makes about HAL_CFG, HAL_HOLD and HAL_MISC and its receive-policy words are `macstart.c`'s,
 and the groups between them go over one at a time,
-each named with `osi_trace`, so that a traced run's segments show its accesses:
-the txrx queues, the receive policy, the RX buffers, the HE tables, the RX match, the ack rates and the low-rate mask,
-the cipher, the antenna, the timer and the coex PTI.
+each named with `osi_trace`, so that a traced run's segments show its accesses.
 A step's diff holds the device accesses; the writes a step makes to the libraries' own memory are not in the trace, so only the runs hold those.
 Of the start's calls, one that only writes the libraries' own memory -- their pm or their control block -- is left a call:
 taking it over moves no device work to the driver, and would carry their structures' layout into its code.
