@@ -45,8 +45,6 @@ void mac_config_start(void)
 #define TXRX_HAL_C98  0x600a4c98u
 #define TXRX_HAL_C9C  0x600a4c9cu
 #define TXRX_HAL_CA4  0x600a4ca4u
-#define TXRX_HAL_C54  0x600a4c54u
-#define TXRX_HAL_C58  0x600a4c58u
 /* The rate words their ack-rate call writes and their low-rate group repeats, both written out below. */
 #define RATE_MAC_440  (MAC_BASE + 0x440u)
 #define RATE_MAC_444  (MAC_BASE + 0x444u)
@@ -75,13 +73,16 @@ static void mac_he_set_bbrxhung_time(uint32_t interval)
  * below and their other path is not written; their txrx group leaves a register's address in a0, which the body does
  * not read, so the leaf takes no argument.
  */
+#define HE_MAC_DELAY0 0x600a4c54u
+#define HE_MAC_DELAY1 0x600a4c58u
+
 static void mac_he_set_mac_delay(void)
 {
-    wr(TXRX_HAL_C58, (rd(TXRX_HAL_C58) & 0xffe003ffu) | 0x123400u);
-    wr(TXRX_HAL_C58, (rd(TXRX_HAL_C58) & ~0x3ffu) | 0xa0u);
-    wr(TXRX_HAL_C58, (rd(TXRX_HAL_C58) & 0x801fffffu) | 0x0bc00000u);
-    wr(TXRX_HAL_C54, (rd(TXRX_HAL_C54) & 0x801fffffu) | 0x14000000u);
-    wr(TXRX_HAL_C54, (rd(TXRX_HAL_C54) & 0xffe003ffu) | 0x9d800u);
+    wr(HE_MAC_DELAY1, (rd(HE_MAC_DELAY1) & 0xffe003ffu) | 0x123400u);
+    wr(HE_MAC_DELAY1, (rd(HE_MAC_DELAY1) & ~0x3ffu) | 0xa0u);
+    wr(HE_MAC_DELAY1, (rd(HE_MAC_DELAY1) & 0x801fffffu) | 0x0bc00000u);
+    wr(HE_MAC_DELAY0, (rd(HE_MAC_DELAY0) & 0x801fffffu) | 0x14000000u);
+    wr(HE_MAC_DELAY0, (rd(HE_MAC_DELAY0) & 0xffe003ffu) | 0x9d800u);
 }
 
 /*
@@ -232,14 +233,14 @@ void mac_rx_base_init(void)
  * The libraries' hal_he_set_ersu, written out: 0x600a4c7c's bit 10 cleared for a nonzero argument and set for the
  * zero their start passes, the word just before HE_CTRL. What the bit gates is not known.
  */
-#define HE_HAL_C7C 0x600a4c7cu
+#define HE_ERSU 0x600a4c7cu
 
 static void mac_he_set_ersu(uint32_t enable)
 {
     if (enable != 0) {
-        wr(HE_HAL_C7C, rd(HE_HAL_C7C) & ~0x400u);
+        wr(HE_ERSU, rd(HE_ERSU) & ~0x400u);
     } else {
-        wr(HE_HAL_C7C, rd(HE_HAL_C7C) | 0x400u);
+        wr(HE_ERSU, rd(HE_ERSU) | 0x400u);
     }
 }
 
@@ -283,12 +284,12 @@ static void mac_he_set_bcast_ru(uint32_t ru, uint32_t low, uint32_t high)
  * its bits 18 to 24 given 2^OCWmax - 1, the two from the byte's low three bits and its next three. Their start's byte,
  * 0x2b, holds OCWmin 3 and OCWmax 5, so the fields take 7 and 31. What the register's fields otherwise are is not known.
  */
-#define HE_HAL_C84 0x600a4c84u
+#define HE_UORA 0x600a4c84u
 
 static void mac_he_set_uora_parameter(const uint8_t *p)
 {
-    wr(HE_HAL_C84, (rd(HE_HAL_C84) & 0x01ffffffu) | (((1u << (p[0] & 7u)) - 1u) << 25));
-    wr(HE_HAL_C84, (rd(HE_HAL_C84) & 0xfe03ffffu) | (((1u << ((p[0] >> 3) & 7u)) - 1u) << 18));
+    wr(HE_UORA, (rd(HE_UORA) & 0x01ffffffu) | (((1u << (p[0] & 7u)) - 1u) << 25));
+    wr(HE_UORA, (rd(HE_UORA) & 0xfe03ffffu) | (((1u << ((p[0] >> 3) & 7u)) - 1u) << 18));
 }
 
 /*
@@ -377,7 +378,7 @@ static void mac_he_clr_multi_bssid(void)
  * is taken off, less 0x1a -- and four read-modify-writes that put it into MAC+0x458's bits 21 to 27, 14 to 20, 7 to 13
  * and 0 to 6.
  */
-#define HE_MAC_458 (MAC_BASE + 0x458u)
+#define HE_BF_REPORT_RATE (MAC_BASE + 0x458u)
 
 static void mac_he_set_bf_report_rate(uint32_t enable, uint32_t rate)
 {
@@ -388,10 +389,10 @@ static void mac_he_set_bf_report_rate(uint32_t enable, uint32_t rate)
 
         v = ((v - sub) & 0xffu) | ((enable << 5) & 0x60u);
     }
-    wr(HE_MAC_458, (rd(HE_MAC_458) & 0xf01fffffu) | ((v << 21) & 0x0fe00000u));
-    wr(HE_MAC_458, (rd(HE_MAC_458) & 0xffe03fffu) | ((v << 14) & 0x1fc000u));
-    wr(HE_MAC_458, (rd(HE_MAC_458) & 0xffffc07fu) | ((v << 7) & 0x3f80u));
-    wr(HE_MAC_458, (rd(HE_MAC_458) & ~0x7fu) | (v & 0x7fu));
+    wr(HE_BF_REPORT_RATE, (rd(HE_BF_REPORT_RATE) & 0xf01fffffu) | ((v << 21) & 0x0fe00000u));
+    wr(HE_BF_REPORT_RATE, (rd(HE_BF_REPORT_RATE) & 0xffe03fffu) | ((v << 14) & 0x1fc000u));
+    wr(HE_BF_REPORT_RATE, (rd(HE_BF_REPORT_RATE) & 0xffffc07fu) | ((v << 7) & 0x3f80u));
+    wr(HE_BF_REPORT_RATE, (rd(HE_BF_REPORT_RATE) & ~0x7fu) | (v & 0x7fu));
 }
 
 /*
@@ -437,12 +438,12 @@ static void mac_init_bf(void)
 /*
  * The libraries' hal_init_tb_tx, written out: their trigger-based TX word 0x600a4df8, bit 15 cleared and then bit 14.
  */
-#define HE_HAL_DF8 0x600a4df8u
+#define HE_TB_TX 0x600a4df8u
 
 static void mac_init_tb_tx(void)
 {
-    wr(HE_HAL_DF8, rd(HE_HAL_DF8) & ~0x8000u);
-    wr(HE_HAL_DF8, rd(HE_HAL_DF8) & ~0x4000u);
+    wr(HE_TB_TX, rd(HE_TB_TX) & ~0x8000u);
+    wr(HE_TB_TX, rd(HE_TB_TX) & ~0x4000u);
 }
 
 /*
@@ -476,28 +477,28 @@ static uint8_t mac_get_tx_pwr(uint32_t index)
  * each given a six-bit field of a table entry at a time -- rates 0x10 to 0x19 from the table, the last two through
  * phy_get_max_pwr. What the fields mean is not known.
  */
-#define HE_MAC_430 (MAC_BASE + 0x430u)
-#define HE_MAC_434 (MAC_BASE + 0x434u)
-#define HE_MAC_438 (MAC_BASE + 0x438u)
+#define HE_TB_POWER0 (MAC_BASE + 0x430u)
+#define HE_TB_POWER1 (MAC_BASE + 0x434u)
+#define HE_TB_POWER2 (MAC_BASE + 0x438u)
 
 static void mac_init_tb_power(void)
 {
     uint8_t v[2];
 
-    wr(HE_MAC_430, (rd(HE_MAC_430) & ~0x3fu) | (mac_get_tx_pwr(0x10u) & 0x3fu));
-    wr(HE_MAC_430, (rd(HE_MAC_430) & ~0x3f00u) | (((uint32_t)mac_get_tx_pwr(0x11u) << 8) & 0x3f00u));
-    wr(HE_MAC_430, (rd(HE_MAC_430) & ~0x3f0000u) | (((uint32_t)mac_get_tx_pwr(0x12u) << 16) & 0x3f0000u));
-    wr(HE_MAC_430, (rd(HE_MAC_430) & ~0x3f000000u) | (((uint32_t)mac_get_tx_pwr(0x13u) << 24) & 0x3f000000u));
-    wr(HE_MAC_434, (rd(HE_MAC_434) & ~0x3fu) | (mac_get_tx_pwr(0x14u) & 0x3fu));
-    wr(HE_MAC_434, (rd(HE_MAC_434) & ~0x3f00u) | (((uint32_t)mac_get_tx_pwr(0x15u) << 8) & 0x3f00u));
-    wr(HE_MAC_434, (rd(HE_MAC_434) & ~0x3f0000u) | (((uint32_t)mac_get_tx_pwr(0x16u) << 16) & 0x3f0000u));
-    wr(HE_MAC_434, (rd(HE_MAC_434) & ~0x3f000000u) | (((uint32_t)mac_get_tx_pwr(0x17u) << 24) & 0x3f000000u));
-    wr(HE_MAC_438, (rd(HE_MAC_438) & ~0x3fu) | (mac_get_tx_pwr(0x18u) & 0x3fu));
-    wr(HE_MAC_438, (rd(HE_MAC_438) & ~0x3f00u) | (((uint32_t)mac_get_tx_pwr(0x19u) << 8) & 0x3f00u));
+    wr(HE_TB_POWER0, (rd(HE_TB_POWER0) & ~0x3fu) | (mac_get_tx_pwr(0x10u) & 0x3fu));
+    wr(HE_TB_POWER0, (rd(HE_TB_POWER0) & ~0x3f00u) | (((uint32_t)mac_get_tx_pwr(0x11u) << 8) & 0x3f00u));
+    wr(HE_TB_POWER0, (rd(HE_TB_POWER0) & ~0x3f0000u) | (((uint32_t)mac_get_tx_pwr(0x12u) << 16) & 0x3f0000u));
+    wr(HE_TB_POWER0, (rd(HE_TB_POWER0) & ~0x3f000000u) | (((uint32_t)mac_get_tx_pwr(0x13u) << 24) & 0x3f000000u));
+    wr(HE_TB_POWER1, (rd(HE_TB_POWER1) & ~0x3fu) | (mac_get_tx_pwr(0x14u) & 0x3fu));
+    wr(HE_TB_POWER1, (rd(HE_TB_POWER1) & ~0x3f00u) | (((uint32_t)mac_get_tx_pwr(0x15u) << 8) & 0x3f00u));
+    wr(HE_TB_POWER1, (rd(HE_TB_POWER1) & ~0x3f0000u) | (((uint32_t)mac_get_tx_pwr(0x16u) << 16) & 0x3f0000u));
+    wr(HE_TB_POWER1, (rd(HE_TB_POWER1) & ~0x3f000000u) | (((uint32_t)mac_get_tx_pwr(0x17u) << 24) & 0x3f000000u));
+    wr(HE_TB_POWER2, (rd(HE_TB_POWER2) & ~0x3fu) | (mac_get_tx_pwr(0x18u) & 0x3fu));
+    wr(HE_TB_POWER2, (rd(HE_TB_POWER2) & ~0x3f00u) | (((uint32_t)mac_get_tx_pwr(0x19u) << 8) & 0x3f00u));
     phy_get_max_pwr(0x1au, v);
-    wr(HE_MAC_438, (rd(HE_MAC_438) & ~0x3f0000u) | (((uint32_t)v[0] << 16) & 0x3f0000u));
+    wr(HE_TB_POWER2, (rd(HE_TB_POWER2) & ~0x3f0000u) | (((uint32_t)v[0] << 16) & 0x3f0000u));
     phy_get_max_pwr(0x1bu, v);
-    wr(HE_MAC_438, (rd(HE_MAC_438) & ~0x3f000000u) | (((uint32_t)v[0] << 24) & 0x3f000000u));
+    wr(HE_TB_POWER2, (rd(HE_TB_POWER2) & ~0x3f000000u) | (((uint32_t)v[0] << 24) & 0x3f000000u));
 }
 
 /*
