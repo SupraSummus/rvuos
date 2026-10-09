@@ -143,20 +143,14 @@ what is left:
   The four bring-up symbols and the two of the log that the driver once asked of the flash libraries are taken one
   by one, over `libphy`, `mac.c` and `macstart.c`; `make BOARD=esp32c6 wifi-esp32c6-refs` counts what is left of `pp`
   and `net80211`.
-  The groups of the MAC's configuration go over one at a time, transcribed into `macstart.c`,
-  and until then the driver calls each of them, so its references into `pp` rise and fall as they go.
-  Calling `hal_init` still, and replacing one group at a time by weakening `libpp.a`'s symbol for it,
-  as `libphy.a`'s are weakened for `phy.c`, would leave the libraries' sequence as it is,
-  with no parent to transcribe first.
-  Their `mac_txrx_init` passes its first HE call, `hal_he_set_mac_delay`, a register's address,
-  which that tests only against zero, so `mac_queues_init` passes 1;
-  whether the delay is meant on, or off as the two calls after it pass, is a step of its own, held by the gate.
+  The MAC's configuration, their `hal_init`, is the driver's own, every group transcribed into `macstart.c`'s
+  `mac_config`.
   The registers these groups write are the libraries' to the bit;
   those not named carry the offset they were reached at.
-  A pass of its own, once the groups are over, should name them from the libraries' own functions that reach them --
+  A pass of its own, now that the groups are over, should name them from the libraries' own functions that reach them --
   `attrib` on a trace for the paths that ran, a static scan like `phymap`'s for the rest -- and from the ROM's symbols,
   since the IDF's headers leave 0x600a4xxx unnamed.
-  Then a write that does nothing can be left out, and the `a0` above settled, on a role rather than on the bit.
+  Then a write that does nothing can be left out, on a role rather than on the bit.
   `mac_default_policy` writes interface 1's address and receive policy, the soft AP's, which the driver never brings
   up; each such write is the first of the own start's to try leaving out, one at a time, held by the gate.
   The bring-up's receive base points at their control block as well, which the driver's own list replaces once it
