@@ -35,7 +35,6 @@
 #define RX_LAST          (MAC_BASE + 0x08cu) /* the last descriptor filled, its low 20 bits */
 #define RX_LAST_HIGH     (MAC_BASE + 0xc70u) /* whose top 12 bits are this register's */
 #define INT_STATUS       (MAC_BASE + 0xc48u)
-#define INT_CLEAR        (MAC_BASE + 0xc4cu)
 #define INT_RX           0x4000u
 #define COLOR_STATUS     (MAC_BASE + 0xc34u) /* the BSS colour's interrupt, bit 12, set to clear */
 #define COLOR_CLEAR      (MAC_BASE + 0xc38u)
@@ -150,13 +149,10 @@ void mac_key_clear(uint32_t entry)
  */
 #define BSSID_HI_MMSS       0x38000000u
 #define BSSID_HI_AID        0x07ff0000u
-#define MAC_CONF            (MAC_BASE + 0x020u)
 #define MAC_CONF_BCAST_RU   0x00000100u
-#define HE_AID              (MAC_BASE + 0x038u)
 #define HE_AID_MASK         0x000007ffu
 #define HE_AID_RU_SET       0x00400000u
 #define HE_AID_RU           0x003ff800u
-#define HE_BCAST            (MAC_BASE + 0x03cu)
 #define HE_BCAST_SET        0x00800800u
 #define HE_BCAST_RU         0x000007ffu
 #define HE_BCAST_RU2        0x007ff000u
@@ -540,19 +536,6 @@ void mac_rx_on(void)
  * and the libraries' station never sends, so the driver may use the slot.
  */
 
-/* The slot's words, less for each slot, in hal_mac_tx.o's two blocks: the queue's, then the PPDU's. */
-#define TX_QUEUE(s)    (MAC_BASE + 0xd60u - (s) * 0x10u) /* CONF0, the mplen's, the EDCA's, PLCP0_ENABLE */
-#define TX_CONF0(s)    (TX_QUEUE(s) + 0x00u)
-#define TX_MPLEN(s)    (TX_QUEUE(s) + 0x04u) /* whose bit 3 the HE mplen uses, and a legacy frame clears */
-#define TX_EDCA(s)     (TX_QUEUE(s) + 0x08u) /* the access class's AIFSN, backoff and lifetime */
-#define TX_PLCP0(s)    (TX_QUEUE(s) + 0x0cu)
-#define TX_PPDU(s)     (MAC_BASE + 0x1488u - (s) * 0x74u) /* PLCP1 first, then the rest of the slot's PPDU words */
-#define TX_PLCP1(s)    (TX_PPDU(s) + 0x00u)
-#define TX_PROT(s)     (TX_PPDU(s) + 0x04u) /* the protect threshold of hal_he_set_tx_protection */
-#define TX_RATE_DUR(s) (TX_PPDU(s) + 0x24u)
-#define TX_TXLEN(s)    (TX_PPDU(s) + 0x30u)
-#define TX_RESP_DUR(s) (TX_PPDU(s) + 0x34u)
-
 /* PLCP0_ENABLE: the descriptor's address, the format every frame names, and the bits that tell the slot to send. */
 #define TX_PLCP0_DMA    0x000fffffu
 #define TX_PLCP0_FORMAT 0x00600000u
@@ -715,7 +698,7 @@ void mac_stop(void)
     wr(PTI_DEFAULT, rd(PTI_DEFAULT) & ~0xfu);
     wr(HAL_CTRL, rd(HAL_CTRL) | 1u);
     wr(HAL_HOLD, 0);
-    wr(HAL_MISC, 0xffffffffu);
+    wr(INT_CLEAR, 0xffffffffu);
     wr(HAL_CFG, rd(HAL_CFG) | 2u);
     drv_phy_disable();
 }

@@ -14,7 +14,7 @@
 
 /*
  * The libraries' hal_init's own register writes, around the groups of its MAC configuration that it calls:
- * their HAL_CFG start and the wait for it, and HAL_HOLD and HAL_MISC cleared.
+ * their HAL_CFG start and the wait for it, and HAL_HOLD and INT_CLEAR cleared.
  * Then, after the groups, HAL_HOLD, HAL_WORD and RX_WORD as their hal_init leaves them.
  * The driver's own start makes these, and mac_config below runs them and the groups in the libraries' order.
  */
@@ -24,7 +24,7 @@ void mac_config_start(void)
     while (!(rd(HAL_CFG) & 1u)) {
     }
     wr(HAL_HOLD, 0);
-    wr(HAL_MISC, 0xffffffffu);
+    wr(INT_CLEAR, 0xffffffffu);
 }
 
 /*
@@ -45,11 +45,15 @@ void mac_config_start(void)
 #define TXRX_HAL_C98  0x600a4c98u
 #define TXRX_HAL_C9C  0x600a4c9cu
 #define TXRX_HAL_CA4  0x600a4ca4u
-/* The rate words their ack-rate call writes and their low-rate group repeats, both written out below. */
-#define RATE_MAC_440  (MAC_BASE + 0x440u)
-#define RATE_MAC_444  (MAC_BASE + 0x444u)
-#define RATE_MAC_44C  (MAC_BASE + 0x44cu)
-#define RATE_MAC_450  (MAC_BASE + 0x450u)
+/*
+ * The ack rate's and the cts rate's words: their dbg_read_ack_rate and dbg_read_cts_rate read them, and their
+ * hal_he_set_ack_rate, hal_mac_enable_low_rate and hal_mac_disable_low_rate write them, at these constant addresses
+ * alone; written out below.
+ */
+#define RATE_ACK0 (MAC_BASE + 0x440u)
+#define RATE_ACK1 (MAC_BASE + 0x444u)
+#define RATE_CTS0 (MAC_BASE + 0x44cu)
+#define RATE_CTS1 (MAC_BASE + 0x450u)
 
 /*
  * The libraries' hal_he_set_bbrxhung_time, written out, the HE word their txrx and low-rate groups both write:
@@ -93,19 +97,19 @@ static void mac_he_set_mac_delay(void)
 static void mac_he_set_ack_rate(uint32_t rate)
 {
     if (rate != 0) {
-        wr(RATE_MAC_440, 0xb0b0bu);
-        wr(RATE_MAC_44C, 0xb0b0bu);
+        wr(RATE_ACK0, 0xb0b0bu);
+        wr(RATE_CTS0, 0xb0b0bu);
     } else {
-        wr(RATE_MAC_440, 0x90a0bu);
-        wr(RATE_MAC_44C, 0x90a0bu);
+        wr(RATE_ACK0, 0x90a0bu);
+        wr(RATE_CTS0, 0x90a0bu);
     }
-    wr(RATE_MAC_444, 0x50100u);
-    wr(RATE_MAC_450, 0x50100u);
+    wr(RATE_ACK1, 0x50100u);
+    wr(RATE_CTS1, 0x50100u);
     for (uint32_t i = 0; i < 7u; i++) {
-        (void)rd(RATE_MAC_440);
+        (void)rd(RATE_ACK0);
     }
     for (uint32_t i = 0; i < 7u; i++) {
-        (void)rd(RATE_MAC_44C);
+        (void)rd(RATE_CTS0);
     }
 }
 
@@ -219,11 +223,6 @@ void mac_rx_base_init(void)
 #define HE_HAL_C2C  0x600a4c2cu
 #define HE_HAL_C88  0x600a4c88u
 #define HE_HAL_CBC  0x600a4cbcu
-#define HE_HAL_D30  0x600a4d30u
-#define HE_HAL_D40  0x600a4d40u
-#define HE_HAL_D50  0x600a4d50u
-#define HE_HAL_D60  0x600a4d60u
-#define HE_MAC_20   (MAC_BASE + 0x20u) /* the multi-BSSID and co-hosted BSS control, which their two calls write too */
 #define HE_MAC_2D4  (MAC_BASE + 0x2d4u)
 #define HE_TX_MIN   (MAC_BASE + 0x400u)
 #define HE_TABLE    0x600a55f0u /* their table, cleared */
@@ -252,11 +251,11 @@ static void mac_he_set_ersu(uint32_t enable)
 static void mac_he_set_co_hosted_bss(uint32_t enable, uint32_t mask)
 {
     if (enable != 0) {
-        wr(HE_MAC_20, rd(HE_MAC_20) | 0x20000u);
-        wr(HE_MAC_20, (rd(HE_MAC_20) & 0xfffe01ffu) | (((0xffffffffu << (mask & 31u)) & 0xffu) << 9));
+        wr(MAC_CONF, rd(MAC_CONF) | 0x20000u);
+        wr(MAC_CONF, (rd(MAC_CONF) & 0xfffe01ffu) | (((0xffffffffu << (mask & 31u)) & 0xffu) << 9));
     } else {
-        wr(HE_MAC_20, rd(HE_MAC_20) & ~0x20000u);
-        wr(HE_MAC_20, rd(HE_MAC_20) | 0x1fe00u);
+        wr(MAC_CONF, rd(MAC_CONF) & ~0x20000u);
+        wr(MAC_CONF, rd(MAC_CONF) | 0x1fe00u);
     }
 }
 
@@ -266,17 +265,14 @@ static void mac_he_set_co_hosted_bss(uint32_t enable, uint32_t mask)
  * argument, bit 23 set and bits 12 to 22 given the third. Their name says a broadcast resource unit; the fields'
  * meaning is not known.
  */
-#define HE_MAC_38 (MAC_BASE + 0x38u)
-#define HE_MAC_3C (MAC_BASE + 0x3cu)
-
 static void mac_he_set_bcast_ru(uint32_t ru, uint32_t low, uint32_t high)
 {
-    wr(HE_MAC_38, rd(HE_MAC_38) | 0x400000u);
-    wr(HE_MAC_38, (rd(HE_MAC_38) & 0xffc007ffu) | ((ru << 11) & 0x3ff800u));
-    wr(HE_MAC_3C, rd(HE_MAC_3C) | 0x800u);
-    wr(HE_MAC_3C, (rd(HE_MAC_3C) & ~0x7ffu) | (low & 0x7ffu));
-    wr(HE_MAC_3C, rd(HE_MAC_3C) | 0x800000u);
-    wr(HE_MAC_3C, (rd(HE_MAC_3C) & 0xff800fffu) | ((high << 12) & 0x7ff000u));
+    wr(HE_AID, rd(HE_AID) | 0x400000u);
+    wr(HE_AID, (rd(HE_AID) & 0xffc007ffu) | ((ru << 11) & 0x3ff800u));
+    wr(HE_BCAST, rd(HE_BCAST) | 0x800u);
+    wr(HE_BCAST, (rd(HE_BCAST) & ~0x7ffu) | (low & 0x7ffu));
+    wr(HE_BCAST, rd(HE_BCAST) | 0x800000u);
+    wr(HE_BCAST, (rd(HE_BCAST) & 0xff800fffu) | ((high << 12) & 0x7ff000u));
 }
 
 /*
@@ -337,22 +333,20 @@ static void mac_addr_set(uint32_t iface, const uint8_t *addr)
 
 /*
  * The libraries' hal_he_clr_multi_bssid, written out: their start's call clears interface 2's queue bits, its BSSID
- * and address and gives it the default policy, which takes their flags away, first; then, on MAC+0x2c and MAC+0x20,
- * it clears bit 8, sets bits 9 to 16 and clears the low byte, and, on MAC+0x34 and MAC+0x28, clears bits 16 to 23;
- * then the eight words 0x600a4d64 down to 0x600a4cf4, 0x10 apart, each with bit 2 cleared. Their read of MAC+0x20
- * first is the guard: if its bit 17 is set, the call returns unwritten.
+ * and address and gives it the default policy, which takes their flags away, first; then, on HE_MAC_2C and MAC_CONF,
+ * it clears bit 8, sets bits 9 to 16 and clears the low byte, and, on HE_MAC_34 and HE_MAC_28, clears bits 16 to 23;
+ * then each of the eight slots' TX_MPLEN, bit 2 cleared.
+ * Their read of MAC_CONF first is the guard: if its bit 17 is set, the call returns unwritten.
  */
 #define HE_MAC_2C (MAC_BASE + 0x2cu)
 #define HE_MAC_28 (MAC_BASE + 0x28u)
 #define HE_MAC_34 (MAC_BASE + 0x34u)
-#define HE_HAL_D64 0x600a4d64u
-#define HE_HAL_CE4 0x600a4ce4u
 
 static void mac_he_clr_multi_bssid(void)
 {
     static const uint8_t zero[6];
 
-    if (rd(HE_MAC_20) & 0x20000u) {
+    if (rd(MAC_CONF) & 0x20000u) {
         return;
     }
     mac_rxq_policy(2u, 0u);
@@ -363,11 +357,11 @@ static void mac_he_clr_multi_bssid(void)
     wr(HE_MAC_2C, rd(HE_MAC_2C) | 0x1fe00u);
     wr(HE_MAC_2C, rd(HE_MAC_2C) & ~0xffu);
     wr(HE_MAC_34, rd(HE_MAC_34) & 0xff00ffffu);
-    wr(HE_MAC_20, rd(HE_MAC_20) & ~0x100u);
-    wr(HE_MAC_20, rd(HE_MAC_20) | 0x1fe00u);
-    wr(HE_MAC_20, rd(HE_MAC_20) & ~0xffu);
+    wr(MAC_CONF, rd(MAC_CONF) & ~0x100u);
+    wr(MAC_CONF, rd(MAC_CONF) | 0x1fe00u);
+    wr(MAC_CONF, rd(MAC_CONF) & ~0xffu);
     wr(HE_MAC_28, rd(HE_MAC_28) & 0xff00ffffu);
-    for (uint32_t a = HE_HAL_D64; a != HE_HAL_CE4; a -= 0x10u) {
+    for (uint32_t a = TX_MPLEN(0); a != TX_MPLEN(TX_SLOTS); a -= TX_QUEUE_STEP) {
         wr(a, rd(a) & ~0x4u);
     }
 }
@@ -549,10 +543,10 @@ void mac_he_init(void)
     for (uint32_t a = HE_TABLE; a != HE_TABLE_END; a += 4u) {
         wr(a, 0);
     }
-    wr(HE_HAL_D60, rd(HE_HAL_D60) & ~0xc0000000u);
-    wr(HE_HAL_D50, rd(HE_HAL_D50) & ~0xc0000000u);
-    wr(HE_HAL_D40, rd(HE_HAL_D40) & ~0xc0000000u);
-    wr(HE_HAL_D30, rd(HE_HAL_D30) & ~0xc0000000u);
+    wr(TX_CONF0(0), rd(TX_CONF0(0)) & ~0xc0000000u);
+    wr(TX_CONF0(1), rd(TX_CONF0(1)) & ~0xc0000000u);
+    wr(TX_CONF0(2), rd(TX_CONF0(2)) & ~0xc0000000u);
+    wr(TX_CONF0(3), rd(TX_CONF0(3)) & ~0xc0000000u);
     wr(TXRX_HAL_C98, rd(TXRX_HAL_C98) | 0x4u);
     wr(HE_HAL_CBC, rd(HE_HAL_CBC) | 0x80000000u);
     wr(HE_HAL_C88, rd(HE_HAL_C88) | 0x2u);
@@ -564,8 +558,8 @@ void mac_he_init(void)
     mac_he_set_bcast_ru(0x7fd, 0, 0);
     mac_he_set_uora_parameter(&uora);
     wr(HE_TX_MIN, rd(HE_TX_MIN) | 0x20000u);
-    wr(HE_MAC_20, rd(HE_MAC_20) & ~0x100u);
-    wr(HE_MAC_20, rd(HE_MAC_20) & ~0x20000u);
+    wr(MAC_CONF, rd(MAC_CONF) & ~0x100u);
+    wr(MAC_CONF, rd(MAC_CONF) & ~0x20000u);
     mac_he_clr_multi_bssid();
     mac_he_set_co_hosted_bss(0, 0);
 }
@@ -614,10 +608,10 @@ void mac_rx_match_init(void)
 void mac_low_rate_disable(void)
 {
     phy_disable_low_rate();
-    wr(RATE_MAC_44C, 0x90a0bu);
-    wr(RATE_MAC_450, 0x50100u);
-    wr(RATE_MAC_440, 0x90a0bu);
-    wr(RATE_MAC_444, 0x50100u);
+    wr(RATE_CTS0, 0x90a0bu);
+    wr(RATE_CTS1, 0x50100u);
+    wr(RATE_ACK0, 0x90a0bu);
+    wr(RATE_ACK1, 0x50100u);
     mac_he_set_bbrxhung_time(0);
 }
 
@@ -676,22 +670,19 @@ void mac_crypto_init(void)
 }
 
 /*
- * The libraries' hal_attenna_init (their spelling), written out: their eight words 0x74 apart, from 0x600a54bc down
- * to 0x600a5190, each cleared of bits 0 to 4 and set at bit 5, in their two passes -- 0 to 2 cleared first, then 3
- * cleared, 5 set and 4 cleared -- and the single word at 0x600a42cc, cleared of 0 to 2 and set at 5. What the words
- * are is not known; each access is one here, in their order, since the trace holds each.
+ * The libraries' hal_attenna_init (their spelling), written out: each of the eight slots' TX_RESP_DUR, slot 0 down to
+ * slot 7, cleared of bits 0 to 4 and set at bit 5, in their two passes -- 0 to 2 cleared first, then 3 cleared, 5 set
+ * and 4 cleared -- and the single word ANTENNA_MAC_2CC, cleared of 0 to 2 and set at 5. What ANTENNA_MAC_2CC holds
+ * is not known; each access is one here, in their order, since the trace holds each.
  */
-#define ANTENNA_MAC_LO   (MAC_BASE + 0x1190u)
-#define ANTENNA_MAC_HI   (MAC_BASE + 0x14bcu)
-#define ANTENNA_MAC_STEP 0x74u
 #define ANTENNA_MAC_2CC  (MAC_BASE + 0x2ccu)
 
 void mac_antenna_init(void)
 {
-    for (uint32_t a = ANTENNA_MAC_HI; a >= ANTENNA_MAC_LO; a -= ANTENNA_MAC_STEP) {
+    for (uint32_t a = TX_RESP_DUR(0); a >= TX_RESP_DUR(TX_SLOTS - 1); a -= TX_PPDU_STEP) {
         wr(a, rd(a) & ~0x7u);
     }
-    for (uint32_t a = ANTENNA_MAC_HI; a >= ANTENNA_MAC_LO; a -= ANTENNA_MAC_STEP) {
+    for (uint32_t a = TX_RESP_DUR(0); a >= TX_RESP_DUR(TX_SLOTS - 1); a -= TX_PPDU_STEP) {
         wr(a, rd(a) & ~0x8u);
         wr(a, rd(a) | 0x20u);
         wr(a, rd(a) & ~0x10u);

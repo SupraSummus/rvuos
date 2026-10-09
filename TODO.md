@@ -150,10 +150,17 @@ what is left:
   A pass of its own, now that the groups are over, should name them from the libraries' own functions that reach them --
   `attrib` on a trace for the paths that ran, a static scan like `phymap`'s for the rest -- and from the ROM's symbols,
   since the IDF's headers leave 0x600a4xxx unnamed.
+  The words still carrying offsets need the reverse scan, for constant addresses, which `phymap` could take up
+  (`--who LO-HI`) so the evidence lives in the tree;
+  a word an index or a slot reaches escapes it, so its evidence must come from the trace or the disassembly.
+  Gathering the address macros into `macregs.h`, ordered by address, would show a word two files name beside its twin.
   Then a write that does nothing can be left out, on a role rather than on the bit.
   Interface 1, the soft AP's, is configured in the MAC's own `mac_rx_set_policy` too, whose per-interface loop the
   driver's `mac_config` runs for it, and its flag cleared in `mac_stop`; whether those writes can be left out as well,
   steps of the same pass.
+  A skip inside `mac_config` needs `mac-replay-test` to know the intended ones first, as `diff-expected.txt` and
+  `compare-expected.txt` let the diff and the compare;
+  its hold is access by access, so it stops at the first one left out.
   The bring-up's receive base points at their control block as well, which the driver's own list replaces once it
   takes the MAC; whether that write can be left out, a step of its own, the gate holding it.
   Its frame completion spins in the caller's thread while the slot is armed, and borrows the libraries' slot 0;

@@ -21,7 +21,7 @@
 
 #define HAL_CTRL 0x600a4308u /* hal_deinit's four; what they are is pp's, and no driver code reads them */
 #define HAL_HOLD 0x600a4c40u
-#define HAL_MISC 0x600a4c4cu
+#define INT_CLEAR 0x600a4c4cu /* the MAC's interrupt clear, which their hal_mac_interrupt_clr_event writes */
 #define HAL_CFG  0x600a4ddcu
 #define HAL_WORD 0x600a4c8cu /* whose set bits, and RX_WORD's, the libraries' hal_init sets too; the bits' meaning is not known */
 
@@ -53,11 +53,35 @@
 #define RX_POLICY_QUEUE     0x00000102u         /* set by hal_mac_set_rxq_policy's 1 */
 #define BSSID_HI_POLICY     0x40000000u         /* cleared by the policy, beside BSSID_FLAG, which it sets */
 
+/* The BSS-config words macstart.c's mac_he_init and mac.c's station both write. */
+#define MAC_CONF (MAC_BASE + 0x020u) /* the multi-BSSID, co-hosted BSS and BSS colour control */
+#define HE_AID   (MAC_BASE + 0x038u)
+#define HE_BCAST (MAC_BASE + 0x03cu)
+
 #define SNIFF_CTRL0           (MAC_BASE + 0x0f8u)
 #define SNIFF_CTRL1           (MAC_BASE + 0x0fcu)
 #define SNIFF_CTRL_NONE       0x05000000u
 #define SNIFF_CTRL_TYPES      (MAC_BASE + 0x104u)
 #define SNIFF_CTRL_TYPES_MASK 0xffff0000u
+
+/* The slot's words, less for each slot, in hal_mac_tx.o's two blocks: the queue's, then the PPDU's. */
+#define TX_QUEUE_STEP 0x10u
+#define TX_PPDU_STEP  0x74u
+/*
+ * The slots their start writes, eight: their hal_he_clr_multi_bssid and hal_attenna_init walk slot 0 to slot 7.
+ */
+#define TX_SLOTS 8u
+#define TX_QUEUE(s)    (MAC_BASE + 0xd60u - (s) * TX_QUEUE_STEP) /* CONF0, the mplen's, the EDCA's, PLCP0_ENABLE */
+#define TX_CONF0(s)    (TX_QUEUE(s) + 0x00u)
+#define TX_MPLEN(s)    (TX_QUEUE(s) + 0x04u) /* whose bit 3 the HE mplen uses, and a legacy frame clears */
+#define TX_EDCA(s)     (TX_QUEUE(s) + 0x08u) /* the access class's AIFSN, backoff and lifetime */
+#define TX_PLCP0(s)    (TX_QUEUE(s) + 0x0cu)
+#define TX_PPDU(s)     (MAC_BASE + 0x1488u - (s) * TX_PPDU_STEP) /* PLCP1 first, then the slot's PPDU words */
+#define TX_PLCP1(s)    (TX_PPDU(s) + 0x00u)
+#define TX_PROT(s)     (TX_PPDU(s) + 0x04u) /* the protect threshold of hal_he_set_tx_protection */
+#define TX_RATE_DUR(s) (TX_PPDU(s) + 0x24u)
+#define TX_TXLEN(s)    (TX_PPDU(s) + 0x30u)
+#define TX_RESP_DUR(s) (TX_PPDU(s) + 0x34u)
 
 /*
  * A register read and write, volatile, as the driver makes them; on the host, for the bring-up's replay,
