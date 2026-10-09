@@ -101,6 +101,9 @@ what is left:
   On 2026-10-09 a `trace=1 libstart=1` run stopped after its window's last record, 73573, at 28.07 s,
   short of its halt line, and waited for it 24 minutes;
   `tools/esp32c6-gate.py` now stops a board's run after 180 s and makes a traced one again.
+  Both that stop and the next came at a gate's fourth or fifth traced run,
+  where a later gate read the chip at its warmest, 65 C against the first run's 56,
+  so `losses.txt` now carries the chip's temperature with each loss, to tell heat from chance.
   The stream still loses bytes within a line, a piece of it whole and the line's ends kept:
   on 2026-10-08 record 23018's `pc 0x...` field, 14 bytes, and a `trace: req ` line's front, 11 bytes,
   and on 2026-10-09 record 25300's `pc 0x... t3 R4 `, 20 bytes; about one traced run in eight.

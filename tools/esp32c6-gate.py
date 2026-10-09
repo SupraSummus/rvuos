@@ -48,6 +48,14 @@ ENV = {k: v for k, v in os.environ.items()
 BOARD_SECONDS = 180
 HUNG = 124
 
+# The chip's temperature, at the last reading the PHY library took in a traced run: the sensor's code, TSENS_OUT,
+# and its range, which the library reads back over the analog I2C, block 0x69's register 6; esp-idf's
+# temperature_sensor_attributes gives each range's offset, and temperature_sensor_ll.h the line through them.
+# The eFuse's calibration is not read, so it is the sensor's own, within its range's error, 2 C at 20 to 100.
+TSENS = re.compile(r"R4 0x6000e058 = 0x[0-9a-f]{6}([0-9a-f]{2})\b")
+TSENS_RANGE = re.compile(r"R4 0x600af800 = 0x00([0-9a-f]{2})0669\b")
+TSENS_OFFSET = {5: -2, 7: -1, 15: 0, 11: 1, 10: 2}
+
 SNAPLINE = re.compile(r"^snap=([0-9a-f]+)(?:-([0-9a-f]+))?$", re.M)
 # What a run's log says of the checks the gate reports beside its verdict.
 SAID = re.compile(r"listen: in .*|probe: \d+ sent.*|every check passed.*|\S+: failed.*")
@@ -110,10 +118,17 @@ class Gate:
             kept = os.path.join(DIR, "%s-lost-%s.log" % (name, time.strftime("%Y%m%d-%H%M%S")))
             if os.path.exists(os.path.join(DIR, name + ".log")):
                 shutil.copy(os.path.join(DIR, name + ".log"), kept)
+            warm = self.chip(name)
             with open(os.path.join(DIR, "losses.txt"), "a") as f:
-                f.write("%s %s: %s; %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), name, lost, kept))
+                f.write("%s %s: %s; %s%s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), name, lost, kept,
+                                               "; " + warm if warm else ""))
             print("gate: %s: %s; %s" % (name, lost, "run again" if attempt < 2 else "given up"), flush=True)
         return 1
+
+    def chip(self, name):
+        """What a traced run's log says of the chip's temperature, beside its verdict."""
+        c = None if self.args.dry_run else chip(os.path.join(DIR, name + ".log"))
+        return "" if c is None else "chip %.0f C" % c
 
     def said(self, name):
         if self.args.dry_run:
@@ -126,6 +141,18 @@ class Gate:
         verdict = "ok" if status == 0 else "not run" if status is None else "FAIL (%d)" % status
         self.rows.append((check, verdict, detail))
         print("gate: %-28s %s%s" % (check, verdict, "  " + detail if detail else ""), flush=True)
+
+
+def chip(log):
+    """The chip's temperature in C at the last reading a traced run's log holds, or None."""
+    if not os.path.exists(log):
+        return None
+    text = open(log, errors="replace").read()
+    codes, ranges = TSENS.findall(text), TSENS_RANGE.findall(text)
+    offset = TSENS_OFFSET.get(int(ranges[-1], 16) & 0xF) if ranges else None
+    if not codes or offset is None:
+        return None
+    return (4386 * int(codes[-1], 16) - 278800 * offset - 205200) / 10000
 
 
 def loss(log, trace, snap):
@@ -232,8 +259,8 @@ def main():
     snap = snap_list(gate)
 
     for i in range(1, 5):
-        gate.tell("trace=1 base %d" % i, gate.traced("base%d" % i, 1, True, snap))
-    gate.tell("trace=1 own", gate.traced("own", 1, False, snap))
+        gate.tell("trace=1 base %d" % i, gate.traced("base%d" % i, 1, True, snap), gate.chip("base%d" % i))
+    gate.tell("trace=1 own", gate.traced("own", 1, False, snap), gate.chip("own"))
     host_replay(gate)
     bases = " ".join(os.path.join(DIR, "base%d.log" % i) for i in range(1, 5))
     status = gate.run("diff", ["make", "BOARD=esp32c6", "wifi-esp32c6-diff", "WIFI_TRACE_BASE=" + bases,
