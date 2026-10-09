@@ -352,6 +352,13 @@ def align(base, own, volatile):
     return blocks, notes
 
 
+def unpaired(x, y, volatile):
+    """The records of x, and of y, that their alignment leaves without a partner."""
+    blocks, _notes = align(x, y, volatile)
+    return ({i for i1, i2, _j1, _j2 in blocks for i in range(i1, i2)},
+            {j for _i1, _i2, j1, j2 in blocks for j in range(j1, j2)})
+
+
 # The records of a differing block shown on each side; the rest are counted.
 SHOWN = 8
 
@@ -423,7 +430,9 @@ def diff(args):
 
     The base runs are of the same image, so a word any pair of them reads differently is volatile and its value is
     set aside; two bases are the least, and more are given when a word that varies run to run agrees between two by
-    chance. The own run is held to the first base. Each thread is compared on its own, since the interrupt's accesses
+    chance. The own run is held to the first base; where it differs from it as another base does -- a receive the air
+    brought into one run's window and not into another's -- that place is the run's, not the own start's, and is a
+    note. Each thread is compared on its own, since the interrupt's accesses
     interleave asynchronously; a thread whose every access is an interrupt handler's is compared as a multiset and
     reported apart, not as a failure. The range comes from the trace: lines named by --from and --to (the whole
     window by default), resolved in each log, so a run whose own start adds or drops an access is aligned by its
@@ -511,7 +520,17 @@ def diff(args):
             else:
                 met[k] = True
                 print("  t%d expected, base %s, own %s: %s" % (t, span(i1, i2), span(j1, j2), expect[k][0]))
-        blocks = unexpected
+        blocks = []
+        shared = [(n, unpaired(a, c, volatile)[0], unpaired(c, o, volatile)[1])
+                  for n, c in enumerate((b.get(t, []) for b in bases[1:]), 2)] if unexpected else []
+        for i1, i2, j1, j2 in unexpected:
+            n = next((n for n, base_alone, own_alone in shared
+                      if all(i in base_alone for i in range(i1, i2)) and not any(j in own_alone for j in range(j1, j2))),
+                     None)
+            if n is None:
+                blocks.append((i1, i2, j1, j2))
+            else:
+                print("  t%d as base %d has it, base %s, own %s" % (t, n, span(i1, i2), span(j1, j2)))
         if blocks:
             bad = 1
             print("mac-trace: thread %d: base %d records, own %d; they differ in %d place%s:"

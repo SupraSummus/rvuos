@@ -11,6 +11,7 @@ an interrupt thread's accesses are a multiset;
 --from aligns two runs by their phase markers, a cycle cut at the marker keeping its share;
 a short log is refused, and with --image one that flashed another build, and a marker cut by a loss is told as one;
 diff's expectations let a place the own start differs in by design pass, that place alone and exactly;
+a place where the own run differs from the first base as another base does is the run's, a note, and no more;
 the bits MOMENT names stay out of compare's and diff's verdict, the rest of their word in;
 and replay takes the named functions' own accesses alone, between the functions --from and --to name,
 or up to the last access of the one --through names, and none within a function --outside names.
@@ -138,6 +139,25 @@ def test_an_expected_place_is_met_exactly(f):
     status, out = diff([twice, twice], f("own3", log((1, "W", B, 5), (1, "W", C, 1), (1, "W", B, 5))),
                        expect=f("expect4", place))
     assert status == 1 and "differ in 1 place" in out, out
+
+
+def test_a_place_another_base_shares_is_a_note(f):
+    # A receive the air brings into the own run's window and into one base's, not the first's: the run's, not the start's.
+    plain = log((1, "W", A, 1), (1, "W", B, 1))
+    burst = log((1, "W", A, 1), (1, "R", X, 7), (1, "W", B, 1))
+    status, out = diff([f("plain", plain), f("burst", burst)], f("own", burst))
+    assert status == 0 and "as base 2 has it" in out, out
+    # The first base's own extra, which another base lacks as the own run does, alike.
+    status, out = diff([f("burst", burst), f("plain", plain)], f("own", plain))
+    assert status == 0 and "as base 2 has it" in out, out
+    # No base differs that way, or one shares a part of it alone: still a difference.
+    status, out = diff([f("plain", plain), f("plain2", plain)], f("own", burst))
+    assert status == 1, out
+    status, out = diff([f("burst", burst), f("burst2", burst)], f("own", plain))
+    assert status == 1, out
+    more = log((1, "W", A, 1), (1, "R", X, 7), (1, "R", Y, 7), (1, "W", B, 1))
+    status, out = diff([f("plain", plain), f("burst", burst)], f("own", more))
+    assert status == 1, out
 
 
 def test_volatile_from_any_pair(f):
