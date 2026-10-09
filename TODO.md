@@ -156,9 +156,6 @@ what is left:
   Gathering the driver's address macros into `macregs.h`, ordered by address, would show a word two files name
   beside its twin.
   A write that does nothing can be left out, on a role rather than on the bit.
-  A skip inside `mac_config` needs `mac-replay-test` to know the intended ones first, as `diff-expected.txt` and
-  `compare-expected.txt` let the diff and the compare;
-  its hold is access by access, so it stops at the first one left out.
   Its frame completion spins in the caller's thread while the slot is armed, and borrows the libraries' slot 0;
   an own slot, the driver's own interrupt to finish the frame, and the libraries' retry of a collision or a timeout,
   with their invalidation of the queue on a timeout, would do better.

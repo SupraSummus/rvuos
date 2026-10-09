@@ -1,0 +1,5 @@
+# The places the own start's mac_config leaves the libraries' accesses out by design, each with its reason, which
+# test/mac-replay-test.c steps over alone and exactly; the form is diff-expected.txt's, the libraries' accesses alone.
+# A place is its reason on "#" lines, then the accesses of theirs it leaves out, in their order, each
+# "-R4 0xaddress 0xvalue" or "-W4 0xaddress 0xvalue", a value "/0xmask" holding the masked bits alone;
+# a blank line ends it. Each place must be met once, where the own start's access first differs from theirs.

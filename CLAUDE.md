@@ -95,7 +95,8 @@ and the places the own start differs in by design passing alone and exactly, eac
 and the ordinary runs below.
 `make BOARD=esp32c6 wifi-esp32c6-gate WIFI_GATE_JOINS="..."` runs the four in that order, with `make check`, and tells each verdict.
 A step that makes a new difference by design adds its place to `diff-expected.txt` with the reason, in the same commit,
-and a word whose final state it changes to `compare-expected.txt` beside it, which the compare across images reads.
+and a word whose final state it changes to `compare-expected.txt` beside it, which the compare across images reads,
+and the libraries' accesses it leaves out of `mac_config` to `replay-expected.txt`, which `mac-replay-test` steps over.
 The diff's bases and each `compare`'s dry logs are four, not two: a word that varies run to run can agree between two by chance and show as a difference that is not one.
 The gate is a step's, at its end, not each change's:
 a change after it that is to leave the start's device work as the gate held it -- a refactor, a call that writes the libraries' memory alone dropped --

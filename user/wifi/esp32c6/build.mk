@@ -109,6 +109,7 @@ $(ESP_HOST)/keys-test.o: $(WIFI_ESP)/test/keys-test.c $(WIFI_ESP)/keys.h
 # they fetch nothing, so make check runs them.
 MAC_REPLAY_TEST     := $(ESP_HOST)/mac-replay-test
 MAC_REPLAY_DIR      ?= $(WIFI_ESP)/test/replay
+MAC_REPLAY_EXPECTED := $(WIFI_ESP)/test/replay-expected.txt
 MAC_REPLAY_TEST_OBJ := $(ESP_HOST)/macstart.o $(ESP_HOST)/mac-replay-test.o
 $(ESP_HOST)/macstart.o: $(WIFI_ESP)/macstart.c $(WIFI_ESP)/mac.h $(WIFI_ESP)/macregs.h
 $(ESP_HOST)/mac-replay-test.o: $(WIFI_ESP)/test/mac-replay-test.c $(WIFI_ESP)/mac.h $(WIFI_ESP)/macregs.h
@@ -166,7 +167,8 @@ keys-test: $(KEYS_TEST)
 	$(KEYS_TEST)
 
 mac-replay-test: $(MAC_REPLAY_TEST)
-	$(MAC_REPLAY_TEST) $(MAC_REPLAY_DIR)
+	$(MAC_REPLAY_TEST) $(MAC_REPLAY_DIR) $(MAC_REPLAY_EXPECTED)
+	tests/mac-replay-test.py $(MAC_REPLAY_TEST) $(WIFI_ESP)/test/replay $(MAC_REPLAY_EXPECTED)
 
 # libphy.a's functions that reach PCR, the PMU or the LP domain, weakened in a copy, so that the driver's own,
 # in phy.c, take their place; the copy is made again when this file, which names them, changes.
