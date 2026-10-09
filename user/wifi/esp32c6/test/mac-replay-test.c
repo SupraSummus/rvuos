@@ -78,11 +78,6 @@ void hal_he_set_ack_rate(uint32_t a)
     (void)a;
 }
 
-void hal_he_set_bbrxhung_time(uint32_t a)
-{
-    (void)a;
-}
-
 /* The HE group's calls, which mac_he_init leaves theirs. */
 void hal_init_bf(void)
 {
@@ -94,11 +89,6 @@ void hal_init_tb_tx(void)
 
 void hal_init_tx_pwr(void)
 {
-}
-
-void hal_he_set_ersu(uint32_t a)
-{
-    (void)a;
 }
 
 void hal_set_tx_min_pwr(int a)
@@ -120,12 +110,6 @@ void hal_he_set_uora_parameter(uint8_t *p)
 
 void hal_he_clr_multi_bssid(void)
 {
-}
-
-void hal_he_set_co_hosted_bss(uint32_t a, uint32_t b)
-{
-    (void)a;
-    (void)b;
 }
 
 /* The ROM's, which the low-rate group calls; its own accesses are the ROM's and stay out of the replay. */

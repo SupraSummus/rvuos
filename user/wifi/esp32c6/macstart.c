@@ -46,10 +46,25 @@ void mac_config_start(void)
 #define TXRX_HAL_C9C  0x600a4c9cu
 #define TXRX_HAL_CA4  0x600a4ca4u
 
-/* The three HE calls mac_txrx_init makes; they stay theirs, leaves with device writes of their own. */
+/* The HE calls mac_txrx_init makes; the two that stay theirs, leaves with device writes of their own. */
 extern void hal_he_set_mac_delay(uint32_t);
 extern void hal_he_set_ack_rate(uint32_t);
-extern void hal_he_set_bbrxhung_time(uint32_t);
+
+/*
+ * The libraries' hal_he_set_bbrxhung_time, written out, the HE word their txrx and low-rate groups both write:
+ * TXRX_HAL_C1C's low 12 bits cleared, then 0x11 for the zero both calls pass and 0x46 otherwise.
+ * Their name says a receive-hung timeout; what the field is is not known.
+ */
+static void mac_he_set_bbrxhung_time(uint32_t interval)
+{
+    uint32_t w = rd(TXRX_HAL_C1C) & 0xfffff000u;
+    if (interval != 0) {
+        w |= 0x46u;
+    } else {
+        w |= 0x11u;
+    }
+    wr(TXRX_HAL_C1C, w);
+}
 
 /* The ROM's low-rate toggle, which the driver's start still calls, as their rate group does. */
 extern void phy_disable_low_rate(void);
@@ -82,7 +97,7 @@ void mac_queues_init(void)
        the two after it pass zero. */
     hal_he_set_mac_delay(1);
     hal_he_set_ack_rate(0);
-    hal_he_set_bbrxhung_time(0);
+    mac_he_set_bbrxhung_time(0);
 
     wr(TXRX_HAL_C1C, rd(TXRX_HAL_C1C) | 0x80000000u);
     wr(TXRX_HAL_C1C, rd(TXRX_HAL_C1C) | 0x40000000u);
@@ -150,9 +165,9 @@ void mac_rx_base_init(void)
 
 /*
  * The libraries' hal_he_init, written out: their hal_init's 802.11ax (HE) group, the words it writes itself and the
- * HE calls it leaves, in its order. The calls' names give the mechanisms -- beamforming, trigger-based TX and its
+ * HE calls it makes, in its order. The calls' names give the mechanisms -- beamforming, trigger-based TX and its
  * power tables, ER SU, the transmitting minimum power, the broadcast RU, the UORA contention window, multi-BSSID and
- * the co-hosted BSS mask -- and each stays their call, with the argument their start passed.
+ * the co-hosted BSS mask -- and each call keeps the argument their start passed.
  * Of the words it writes itself, the two that read as something are their table at 0x600a55f0, cleared, and the
  * transmitting minimum power's own word, 0x600a4400, whose bits 4 to 9 their minimum-power call sets to -11 and
  * where this group ors bit 17; the rest carry the offset they were reached at, since which bit is which is not known.
@@ -173,16 +188,45 @@ void mac_rx_base_init(void)
 #define HE_TABLE    0x600a55f0u /* their table, cleared */
 #define HE_TABLE_END 0x600a57d0u
 
-/* The HE calls hal_he_init makes; they stay theirs, leaves with device writes of their own. */
+/* The HE calls hal_he_init makes; the ones that stay theirs, leaves with device writes of their own. */
 extern void hal_init_bf(void);
 extern void hal_init_tb_tx(void);
 extern void hal_init_tx_pwr(void);
-extern void hal_he_set_ersu(uint32_t);
 extern void hal_set_tx_min_pwr(int);
 extern void hal_he_set_bcast_ru(uint32_t, uint32_t, uint32_t);
 extern void hal_he_set_uora_parameter(uint8_t *);
 extern void hal_he_clr_multi_bssid(void);
-extern void hal_he_set_co_hosted_bss(uint32_t, uint32_t);
+
+/*
+ * The libraries' hal_he_set_ersu, written out: 0x600a4c7c's bit 10 cleared for a nonzero argument and set for the
+ * zero their start passes, the word just before HE_CTRL. What the bit gates is not known.
+ */
+#define HE_HAL_C7C 0x600a4c7cu
+
+static void mac_he_set_ersu(uint32_t enable)
+{
+    if (enable != 0) {
+        wr(HE_HAL_C7C, rd(HE_HAL_C7C) & ~0x400u);
+    } else {
+        wr(HE_HAL_C7C, rd(HE_HAL_C7C) | 0x400u);
+    }
+}
+
+/*
+ * The libraries' hal_he_set_co_hosted_bss, written out, the HE word their HE group and its multi-BSSID clear share,
+ * MAC+0x20: bit 17 cleared and then bits 9 to 16 set, for the zero the driver's call passes as its first argument;
+ * their other path sets bit 17 and writes a mask of the second argument's low five bits into bits 9 to 16, untaken.
+ */
+static void mac_he_set_co_hosted_bss(uint32_t enable, uint32_t mask)
+{
+    if (enable != 0) {
+        wr(HE_MAC_20, rd(HE_MAC_20) | 0x20000u);
+        wr(HE_MAC_20, (rd(HE_MAC_20) & 0xfffe01ffu) | (((0xffffffffu << (mask & 31u)) & 0xffu) << 9));
+    } else {
+        wr(HE_MAC_20, rd(HE_MAC_20) & ~0x20000u);
+        wr(HE_MAC_20, rd(HE_MAC_20) | 0x1fe00u);
+    }
+}
 
 void mac_he_init(void)
 {
@@ -194,7 +238,7 @@ void mac_he_init(void)
     wr(HE_HAL_C2C, rd(HE_HAL_C2C) & ~0x1000u);
     hal_init_tb_tx();
     hal_init_tx_pwr();
-    hal_he_set_ersu(0);
+    mac_he_set_ersu(0);
     hal_set_tx_min_pwr(-0xb);
     wr(HE_CTRL, (rd(HE_CTRL) & ~0xff8u) | 0xbe0u);
     for (uint32_t a = HE_TABLE; a != HE_TABLE_END; a += 4u) {
@@ -218,7 +262,7 @@ void mac_he_init(void)
     wr(HE_MAC_20, rd(HE_MAC_20) & ~0x100u);
     wr(HE_MAC_20, rd(HE_MAC_20) & ~0x20000u);
     hal_he_clr_multi_bssid();
-    hal_he_set_co_hosted_bss(0, 0);
+    mac_he_set_co_hosted_bss(0, 0);
 }
 
 /*
@@ -274,7 +318,7 @@ void mac_low_rate_disable(void)
     wr(RATE_MAC_450, 0x50100u);
     wr(RATE_MAC_440, 0x90a0bu);
     wr(RATE_MAC_444, 0x50100u);
-    hal_he_set_bbrxhung_time(0);
+    mac_he_set_bbrxhung_time(0);
 }
 
 void mac_config_finish(void)

@@ -1,4 +1,4 @@
-# hal_init mac_txrx_init hal_mac_rx_set_policy mac_rxbuf_init hal_he_init mac_last_rxbuf_init hal_mac_disable_low_rate hal_crypto_init hal_attenna_init hal_mac_set_rxbuf_reload_use_hw_beacon_enable hal_timer_update_by_rtc hal_coex_pti_init hal_set_rx_active_pti hal_set_rx_ack_pti hal_set_wifi_default_pti hal_set_tb_pti hal_set_beamf_pti hal_set_beamf_mt_pti hal_set_ofdma_sequence_pti through hal_set_ofdma_sequence_pti outside hal_he_clr_multi_bssid, in a run of the image sha256 0dfa5537bd8f907813b9f692fd42c88a58012e4bbd96c4894342711f4b2d2818
+# hal_init mac_txrx_init hal_mac_rx_set_policy mac_rxbuf_init hal_he_init hal_he_set_ersu hal_he_set_bbrxhung_time hal_he_set_co_hosted_bss mac_last_rxbuf_init hal_mac_disable_low_rate hal_crypto_init hal_attenna_init hal_mac_set_rxbuf_reload_use_hw_beacon_enable hal_timer_update_by_rtc hal_coex_pti_init hal_set_rx_active_pti hal_set_rx_ack_pti hal_set_wifi_default_pti hal_set_tb_pti hal_set_beamf_pti hal_set_beamf_mt_pti hal_set_ofdma_sequence_pti through hal_set_ofdma_sequence_pti outside hal_he_clr_multi_bssid, in a run of the image sha256 42bb3ca916a1f2d9a930374075db36cdc8e1e0a36a9b9cd8ca28624f6b424fe4
 R4 0x600a4ddc 0x00000000
 W4 0x600a4ddc 0x00000002
 R4 0x600a4ddc 0x00000001
@@ -40,6 +40,8 @@ R4 0x600a4114 0x80e00000
 W4 0x600a4114 0x81b00000
 R4 0x600a4c9c 0x00000000
 W4 0x600a4c9c 0x00000003
+R4 0x600a4c1c 0xc0000157
+W4 0x600a4c1c 0xc0000011
 R4 0x600a4c1c 0xc0000011
 W4 0x600a4c1c 0xc0000011
 R4 0x600a4c1c 0xc0000011
@@ -133,6 +135,8 @@ R4 0x600a4048 0x00000128
 W4 0x600a4048 0x000001f0
 R4 0x600a4c2c 0x00000000
 W4 0x600a4c2c 0x00000000
+R4 0x600a4c7c 0x10823800
+W4 0x600a4c7c 0x10823c00
 R4 0x600a4c80 0x28010c80
 W4 0x600a4c80 0x28010be0
 W4 0x600a55f0 0x00000000
@@ -279,6 +283,10 @@ R4 0x600a4020 0x18000000
 W4 0x600a4020 0x18000000
 R4 0x600a4020 0x18000000
 W4 0x600a4020 0x18000000
+R4 0x600a4020 0x1801fe00
+W4 0x600a4020 0x1801fe00
+R4 0x600a4020 0x1801fe00
+W4 0x600a4020 0x1801fe00
 W4 0x600a4120 0x00023006
 W4 0x600a413c 0x00000608
 W4 0x600a4158 0x0000ffff
@@ -307,6 +315,8 @@ W4 0x600a444c 0x00090a0b
 W4 0x600a4450 0x00050100
 W4 0x600a4440 0x00090a0b
 W4 0x600a4444 0x00050100
+R4 0x600a4c1c 0xc0000011
+W4 0x600a4c1c 0xc0000011
 W4 0x600a4800 0x00030000
 W4 0x600a4804 0x00030000
 W4 0x600a4808 0x00000000
