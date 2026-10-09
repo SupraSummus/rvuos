@@ -23,7 +23,7 @@ static struct step {
     uint32_t address, value;
 } steps[STEPS];
 static unsigned count, next;
-static const char *running;
+static const char *const running = "config";
 static int wrong; /* the case's first wrong access is told, and the rest of it does nothing */
 
 /* The libraries' receive control block, which their write to RX_BASE carries and the driver's mac_rx_base_init reads. */
@@ -143,13 +143,6 @@ static void run(void)
     mac_config(host_slowclk_cal_get, host_coex_pti_get);
 }
 
-static const struct {
-    const char *file;
-    void (*run)(void);
-} cases[] = {
-    {"config", run},
-};
-
 static void load(const char *dir, const char *file)
 {
     char path[256], line[512];
@@ -188,29 +181,21 @@ static void load(const char *dir, const char *file)
 
 int main(int argc, char **argv)
 {
-    unsigned failures = 0, accesses = 0;
     if (argc != 2) {
         printf("usage: mac-replay-test DIR\n");
         return 2;
     }
-    for (unsigned i = 0; i < sizeof cases / sizeof cases[0]; i++) {
-        running = cases[i].file;
-        load(argv[1], running);
-        next = 0;
-        wrong = 0;
-        cases[i].run();
-        if (!wrong && next != count) {
-            printf("mac-replay-test: %s: their run made %u accesses more, from %c 0x%08x 0x%08x\n", running,
-                   count - next, steps[next].op, steps[next].address, steps[next].value);
-            wrong = 1;
-        }
-        failures += wrong;
-        accesses += count;
+    load(argv[1], running);
+    run();
+    if (!wrong && next != count) {
+        printf("mac-replay-test: %s: their run made %u accesses more, from %c 0x%08x 0x%08x\n", running,
+               count - next, steps[next].op, steps[next].address, steps[next].value);
+        wrong = 1;
     }
-    if (failures) {
-        printf("mac-replay-test: %u of %zu cases failed\n", failures, sizeof cases / sizeof cases[0]);
+    if (wrong) {
+        printf("mac-replay-test: the case failed\n");
         return 1;
     }
-    printf("mac-replay-test: ok, %zu cases, %u accesses\n", sizeof cases / sizeof cases[0], accesses);
+    printf("mac-replay-test: ok, %u accesses\n", count);
     return 0;
 }
