@@ -31,14 +31,14 @@ void mac_config_start(void)
  * The libraries' mac_txrx_init, written out:
  * its sniffers cleared and set to their default, the words that set up its queues and hold the MAC,
  * the receive left disabled, which mac_rx_on sets again, and the three HE leaves at its middle, written out above.
- * The sniffers, HAL_WORD, HAL_CTRL and RX_CTRL are named in macregs.h; the others carry the offset they were reached
- * at, since what they are is not known.
+ * The sniffers, HAL_WORD, HAL_CTRL and RX_CTRL are named in macregs.h, and DUMP_CTRL_FRAME and BBRXHUNG_TIME just
+ * below; the others carry the offset they were reached at, since what they are is not known.
  * Each of their read-modify-writes is one here, in their order, since the trace holds each access.
  */
-#define TXRX_MAC_100  (MAC_BASE + 0x100u)
+#define DUMP_CTRL_FRAME (MAC_BASE + 0x100u) /* what their hal_set_dump_ctrl_frame_cfg touches, beside the sniffers */
 #define TXRX_MAC_110  (MAC_BASE + 0x110u)
 #define TXRX_MAC_114  (MAC_BASE + 0x114u)
-#define TXRX_HAL_C1C  0x600a4c1cu
+#define BBRXHUNG_TIME 0x600a4c1cu /* their hal_he_set_bbrxhung_time's low 12 bits; the txrx group's bits 30, 31 */
 #define TXRX_HAL_C20  0x600a4c20u
 #define TXRX_HAL_C24  0x600a4c24u
 #define TXRX_HAL_C60  0x600a4c60u
@@ -57,18 +57,18 @@ void mac_config_start(void)
 
 /*
  * The libraries' hal_he_set_bbrxhung_time, written out, the HE word their txrx and low-rate groups both write:
- * TXRX_HAL_C1C's low 12 bits cleared, then 0x11 for the zero both calls pass and 0x46 otherwise.
+ * BBRXHUNG_TIME's low 12 bits cleared, then 0x11 for the zero both calls pass and 0x46 otherwise.
  * Their name says a receive-hung timeout; what the field is is not known.
  */
 static void mac_he_set_bbrxhung_time(uint32_t interval)
 {
-    uint32_t w = rd(TXRX_HAL_C1C) & 0xfffff000u;
+    uint32_t w = rd(BBRXHUNG_TIME) & 0xfffff000u;
     if (interval != 0) {
         w |= 0x46u;
     } else {
         w |= 0x11u;
     }
-    wr(TXRX_HAL_C1C, w);
+    wr(BBRXHUNG_TIME, w);
 }
 
 /*
@@ -125,7 +125,7 @@ void mac_queues_init(void)
 
     wr(SNIFF_CTRL0, rd(SNIFF_CTRL0) & 0xffffu);
     wr(SNIFF_CTRL1, rd(SNIFF_CTRL1) & 0xffffu);
-    wr(TXRX_MAC_100, rd(TXRX_MAC_100) & 0xffffu);
+    wr(DUMP_CTRL_FRAME, rd(DUMP_CTRL_FRAME) & 0xffffu);
     wr(SNIFF_CTRL_TYPES, rd(SNIFF_CTRL_TYPES) & 0xffffu);
     wr(SNIFF_CTRL0, rd(SNIFF_CTRL0) | 0x01000000u);
     wr(SNIFF_CTRL1, rd(SNIFF_CTRL1) | 0x01000000u);
@@ -144,8 +144,8 @@ void mac_queues_init(void)
     mac_he_set_ack_rate(0);
     mac_he_set_bbrxhung_time(0);
 
-    wr(TXRX_HAL_C1C, rd(TXRX_HAL_C1C) | 0x80000000u);
-    wr(TXRX_HAL_C1C, rd(TXRX_HAL_C1C) | 0x40000000u);
+    wr(BBRXHUNG_TIME, rd(BBRXHUNG_TIME) | 0x80000000u);
+    wr(BBRXHUNG_TIME, rd(BBRXHUNG_TIME) | 0x40000000u);
     wr(TXRX_HAL_C20, (rd(TXRX_HAL_C20) & 0xfffff000u) | 0xf0u);
     wr(TXRX_HAL_C24, (rd(TXRX_HAL_C24) & 0xfffff000u) | 0xf0u);
     wr(TXRX_HAL_CA4, (rd(TXRX_HAL_CA4) & ~0xf0u) | 0x40u);
@@ -215,15 +215,16 @@ void mac_rx_base_init(void)
  * the co-hosted BSS mask -- and each call keeps the argument their start passed.
  * Of the words it writes itself, the two that read as something are their table at 0x600a55f0, cleared, and the
  * transmitting minimum power's own word, 0x600a4400, whose bits 4 to 9 their minimum-power call sets to -11 and
- * where this group ors bit 17; the rest carry the offset they were reached at, since which bit is which is not known.
+ * where this group ors bit 17; three more name their library function, COLOR_BITMAP, COLOR_ISR and BEACON_CRC,
+ * and the rest carry the offset they were reached at, since which bit is which is not known.
  */
 #define HE_CTRL     0x600a4c80u /* cleared before the calls and set after them, whatever it gates */
 #define HE_MAC_10C  (MAC_BASE + 0x10cu)
-#define HE_MAC_48   (MAC_BASE + 0x48u)
-#define HE_HAL_C2C  0x600a4c2cu
+#define COLOR_BITMAP (MAC_BASE + 0x48u) /* bit 0 their hal_mac_color_clr_bitmap sets, dbg_read_color_collision reads */
+#define COLOR_ISR 0x600a4c2cu /* bit 12, the interrupt their hal_mac_color_enable/disable_collision_isr gate */
 #define HE_HAL_C88  0x600a4c88u
 #define HE_HAL_CBC  0x600a4cbcu
-#define HE_MAC_2D4  (MAC_BASE + 0x2d4u)
+#define BEACON_CRC (MAC_BASE + 0x2d4u) /* what their pwr_hal_set_beacon_filter_frame_crc_state sets, the ROM's */
 #define HE_TX_MIN   (MAC_BASE + 0x400u)
 #define HE_TABLE    0x600a55f0u /* their table, cleared */
 #define HE_TABLE_END 0x600a57d0u
@@ -390,7 +391,7 @@ static void mac_he_set_bf_report_rate(uint32_t enable, uint32_t rate)
  * The libraries' hal_init_bf, written out: their beamforming group. On 0x600a4c78, six read-modify-writes clear bits
  * 21 and 23, set bit 19, clear bits 8 to 15 and give them 0x7100, clear the low byte and set bit 5, then clear bits 16
  * to 18 and give them 0x50000; bit 31 set on MAC+0x474; bits 12 to 27 cleared and 0x801000 or'd on MAC+0x470;
- * 0x600a4de0's bits 20 to 24, read twice, raised by one; bit 2 cleared and bit 3 set on MAC+0x9c; their report-rate
+ * 0x600a4de0's bits 20 to 24, read twice, raised by one; bit 2 cleared and bit 3 set on BF_FEEDBACK; their report-rate
  * call with one and 0x10; and 0x600a7128's low 24 bits kept and 0xd2000000 or'd, its word read once more after.
  * Their body asks the adapter's env_is_chip first, which the board's answers true, so the field's one is the chip's
  * and their other path, three there instead, is not written.
@@ -399,7 +400,7 @@ static void mac_he_set_bf_report_rate(uint32_t enable, uint32_t rate)
 #define HE_MAC_474  (MAC_BASE + 0x474u)
 #define HE_MAC_470  (MAC_BASE + 0x470u)
 #define HE_HAL_DE0  0x600a4de0u
-#define HE_MAC_9C   (MAC_BASE + 0x9cu)
+#define BF_FEEDBACK (MAC_BASE + 0x9cu) /* bit 2 cleared and bit 3 set, as their esp_test_bf_set_feedback sets them */
 #define HE_HAL_7128 0x600a7128u
 
 static void mac_init_bf(void)
@@ -419,8 +420,8 @@ static void mac_init_bf(void)
     field = ((rd(HE_HAL_DE0) >> 20) & 0x1fu) + 1u;
     wr(HE_HAL_DE0, (base & ~0x1f00000u) | ((field << 20) & 0x1f00000u));
 
-    wr(HE_MAC_9C, rd(HE_MAC_9C) & ~0x4u);
-    wr(HE_MAC_9C, rd(HE_MAC_9C) | 0x8u);
+    wr(BF_FEEDBACK, rd(BF_FEEDBACK) & ~0x4u);
+    wr(BF_FEEDBACK, rd(BF_FEEDBACK) | 0x8u);
     mac_he_set_bf_report_rate(1u, 0x10u);
     wr(HE_HAL_7128, (rd(HE_HAL_7128) & 0x00ffffffu) | 0xd2000000u);
     (void)rd(HE_HAL_7128); /* their body's last read, which it makes and does not use */
@@ -530,8 +531,8 @@ void mac_he_init(void)
     wr(HE_CTRL, rd(HE_CTRL) & ~0xc0000000u);
     mac_init_bf();
     wr(HE_MAC_10C, (rd(HE_MAC_10C) & ~0xc0000u) | 0x80000u);
-    wr(HE_MAC_48, (rd(HE_MAC_48) & ~0xfcu) | 0xf0u);
-    wr(HE_HAL_C2C, rd(HE_HAL_C2C) & ~0x1000u);
+    wr(COLOR_BITMAP, (rd(COLOR_BITMAP) & ~0xfcu) | 0xf0u);
+    wr(COLOR_ISR, rd(COLOR_ISR) & ~0x1000u);
     mac_init_tb_tx();
     mac_init_tx_pwr();
     mac_he_set_ersu(0);
@@ -548,7 +549,7 @@ void mac_he_init(void)
     wr(HE_HAL_CBC, rd(HE_HAL_CBC) | 0x80000000u);
     wr(HE_HAL_C88, rd(HE_HAL_C88) | 0x2u);
     wr(HE_HAL_C88, rd(HE_HAL_C88) | 0x1u);
-    wr(HE_MAC_2D4, (rd(HE_MAC_2D4) & 0x3fffffffu) | 0x40000000u);
+    wr(BEACON_CRC, (rd(BEACON_CRC) & 0x3fffffffu) | 0x40000000u);
     /* The byte their start passed: the UORA contention window, as 802.11ax's OCW Range lays it out, OCWmin 3 in
        bits 0 to 2 and OCWmax 5 in bits 3 to 5; their call reads it on the spot, so a local carries it. */
     uint8_t uora = 0x2b;

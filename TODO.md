@@ -145,19 +145,12 @@ what is left:
   and `net80211`.
   The MAC's configuration, their `hal_init`, is the driver's own, every group transcribed into `macstart.c`'s
   `mac_config`.
-  The registers these groups write are the libraries' to the bit;
-  those not named carry the offset they were reached at.
-  A pass of its own, now that the groups are over, should name them from the libraries' own functions that reach them --
-  `attrib` on a trace for the paths that ran, a static scan like `phymap`'s for the rest -- and from the ROM's symbols,
-  since the IDF's headers leave 0x600a4xxx unnamed.
-  The words still carrying offsets need the reverse scan, for constant addresses, which `phymap` could take up
-  (`--who LO-HI`) so the evidence lives in the tree;
-  a word an index or a slot reaches escapes it, so its evidence must come from the trace or the disassembly.
-  Gathering the address macros into `macregs.h`, ordered by address, would show a word two files name beside its twin.
-  Then a write that does nothing can be left out, on a role rather than on the bit.
+  Gathering the driver's address macros into `macregs.h`, ordered by address, would show a word two files name
+  beside its twin.
+  A write that does nothing can be left out, on a role rather than on the bit.
   Interface 1, the soft AP's, is configured in the MAC's own `mac_rx_set_policy` too, whose per-interface loop the
   driver's `mac_config` runs for it, and its flag cleared in `mac_stop`; whether those writes can be left out as well,
-  steps of the same pass.
+  each a step of its own, the gate holding it.
   A skip inside `mac_config` needs `mac-replay-test` to know the intended ones first, as `diff-expected.txt` and
   `compare-expected.txt` let the diff and the compare;
   its hold is access by access, so it stops at the first one left out.
