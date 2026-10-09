@@ -98,6 +98,9 @@ what is left:
   and would take the root task's own filter away.
 - Whether the rare whole stops of the trace stream can still happen, now that the console writer is fixed,
   wants a longer series; write each stop down with its sequence number and time.
+  On 2026-10-09 a `trace=1 libstart=1` run stopped after its window's last record, 73573, at 28.07 s,
+  short of its halt line, and waited for it 24 minutes;
+  `tools/esp32c6-gate.py` now stops a board's run after 180 s and makes a traced one again.
   The stream still loses bytes within a line, a piece of it whole and the line's ends kept:
   on 2026-10-08 record 23018's `pc 0x...` field, 14 bytes, and a `trace: req ` line's front, 11 bytes,
   and on 2026-10-09 record 25300's `pc 0x... t3 R4 `, 20 bytes; about one traced run in eight.

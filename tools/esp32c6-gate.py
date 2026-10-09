@@ -21,6 +21,7 @@ import importlib.util
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -41,6 +42,12 @@ ENV = {k: v for k, v in os.environ.items()
        if k not in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL")
        and k not in re.findall(r"(?:^|\s)([A-Za-z_][A-Za-z0-9_]*)=", os.environ.get("MAKEFLAGS", ""))}
 
+# The seconds a run on the board gets: a traced one takes about thirty, the rest less.
+# One that lost its halt line, or whose board stopped short of it, would wait for it for good, so it is stopped then,
+# and the status is timeout(1)'s.
+BOARD_SECONDS = 180
+HUNG = 124
+
 SNAPLINE = re.compile(r"^snap=([0-9a-f]+)(?:-([0-9a-f]+))?$", re.M)
 # What a run's log says of the checks the gate reports beside its verdict.
 SAID = re.compile(r"listen: in .*|probe: \d+ sent.*|every check passed.*|\S+: failed.*")
@@ -51,13 +58,25 @@ class Gate:
         self.args = args
         self.rows = []  # (check, verdict, detail)
 
-    def run(self, name, cmd):
-        """A command's exit status, its output in DIR/name.out; with --dry-run, the command alone, as passed."""
+    def run(self, name, cmd, seconds=None):
+        """A command's exit status, its output in DIR/name.out; with --dry-run, the command alone, as passed.
+        One still running after seconds is stopped, the make and every process it started, and its status is HUNG;
+        one running when the gate is interrupted is stopped too, since its own session keeps the terminal's ^C from it.
+        """
         if self.args.dry_run:
             print("  " + " ".join(cmd))
             return 0
         with open(os.path.join(DIR, name + ".out"), "w") as out:
-            return subprocess.run(cmd, stdout=out, stderr=subprocess.STDOUT, cwd=ROOT, env=ENV).returncode
+            p = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT, cwd=ROOT, env=ENV, start_new_session=True)
+            try:
+                return p.wait(seconds)
+            except subprocess.TimeoutExpired:
+                out.write("gate: stopped after %d s\n" % seconds)
+                return HUNG
+            finally:
+                if p.poll() is None:
+                    os.killpg(p.pid, signal.SIGTERM)
+                    p.wait()
 
     def board(self, name, conf):
         """A run on the board with the configuration at conf, its log kept as DIR/name.log.
@@ -67,26 +86,29 @@ class Gate:
         for path in (log, os.path.join(DIR, name + ".log")):
             if os.path.exists(path) and not self.args.dry_run:
                 os.remove(path)
-        status = self.run(name, ["make", "BOARD=esp32c6", "wifi-esp32c6", "WIFI_CONFIG=" + conf])
+        status = self.run(name, ["make", "BOARD=esp32c6", "wifi-esp32c6", "WIFI_CONFIG=" + conf], BOARD_SECONDS)
         if os.path.exists(log) and not self.args.dry_run:
             shutil.copy(log, os.path.join(DIR, name + ".log"))
         return status
 
     def traced(self, name, trace, lib, snap):
-        """A traced run, made again, twice at most, when the stream lost bytes of its log (see TODO.md),
-        each loss written down in DIR/losses.txt with the run, the place and the line.
+        """A traced run, made again, twice at most, when the stream lost bytes of its log (see TODO.md)
+        or the run never halted, each loss written down in DIR/losses.txt with the run, the place and the line.
         """
         conf = os.path.join(DIR, name + ".conf")
         with open(conf, "w") as f:
             f.write("trace=%d\nrun=60\n%s%s" % (trace, "libstart=1\n" if lib else "", snap))
         for attempt in range(3):
             status = self.board(name, conf)
-            lost = None if status != 0 or self.args.dry_run else loss(os.path.join(DIR, name + ".log"), trace, snap)
+            if status == HUNG:
+                lost = "no halt within %d s" % BOARD_SECONDS
+            else:
+                lost = None if status != 0 or self.args.dry_run else loss(os.path.join(DIR, name + ".log"), trace, snap)
             if not lost:
                 return status
             with open(os.path.join(DIR, "losses.txt"), "a") as f:
                 f.write("%s %s: %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), name, lost))
-            print("gate: %s lost bytes, %s; %s" % (name, lost, "run again" if attempt < 2 else "given up"), flush=True)
+            print("gate: %s: %s; %s" % (name, lost, "run again" if attempt < 2 else "given up"), flush=True)
         return 1
 
     def said(self, name):
