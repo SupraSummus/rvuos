@@ -3,3 +3,8 @@
 # across images, the libraries' dry runs against the own start's.
 # A word is its reason on "#" lines, then "0xaddress 0xvalue/0xmask": the own start's bits under the mask, where the
 # libraries' start leaves others, the rest of the word as theirs; the mask is the whole word if left out.
+
+# The libraries' default policy sets interface 1's address, the soft AP's, which the driver never brings up; the own
+# start writes interface 0's alone, so interface 1's address bytes stay zero. The mask holds them; the address itself
+# is not written down.
+0x600a4068 0x00000000/0x0000ffff

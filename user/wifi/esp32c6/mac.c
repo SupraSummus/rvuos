@@ -180,23 +180,17 @@ void mac_receive(uint16_t aid)
 
 /*
  * The default receive policy the libraries' wifi_set_rx_policy(0) writes at the bring-up, before anything is joined,
- * as the driver's own writes on the same words: interface 0's address from the factory MAC and interface 1's from the
- * soft AP's, its last byte one more as their read_mac derives it, both left invalid, the bssid's flag clear, and
- * their receive policies cleared, the queueing off. Interface 1's own word keeps the bit 30 their policy sets.
+ * as the driver's own writes on interface 0's words alone, the station's: its address from the factory MAC, left
+ * invalid, the bssid's flag clear, and its receive policy cleared, the queueing off. The libraries' writes for
+ * interface 1, the soft AP's, which the driver never brings up, are left out; test/diff-expected.txt holds the
+ * places that leaves and test/compare-expected.txt the word, interface 1's address.
  */
 void mac_default_policy(const uint8_t mac[6])
 {
-    uint8_t ap[6];
-    memcpy(ap, mac, 6);
-    ap[5] = (uint8_t)(ap[5] + 1u); /* the soft AP's address, as the libraries' read_mac gives its type 1 */
     wr(STA_ADDR_LO, le32(mac));
     wr(STA_ADDR_HI, (uint32_t)mac[4] | (uint32_t)mac[5] << 8);
-    wr(STA_ADDR2_LO, le32(ap));
-    wr(STA_ADDR2_HI, (uint32_t)ap[4] | (uint32_t)ap[5] << 8);
     wr(BSSID_HI, rd(BSSID_HI) & ~(BSSID_FLAG | BSSID_HI_OTHER | BSSID_HI_LOW));
     wr(RX_POLICY, rd(RX_POLICY) & ~(RX_POLICY_CLEAR | RX_POLICY_QUEUE));
-    wr(RX_POLICY1, rd(RX_POLICY1) & ~RX_POLICY_CLEAR);
-    wr(IF1_DEFAULT_WORD, (rd(IF1_DEFAULT_WORD) & ~BSSID_HI_LOW) | IF1_DEFAULT_BIT);
 }
 
 /*

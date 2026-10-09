@@ -1,33 +1,33 @@
 # The places the own start's access stream differs from the libraries' start's by design, each with its reason,
 # which tools/mac-trace.py diff --expect lets pass alone and exactly; the names are macregs.h's.
 # A place is its reason, then the libraries' accesses ("-") and the own start's ("+"); a blank line ends it.
-# A value "/0xmask" holds the masked bits alone: STA_ADDR_HI's low half is the chip's own address.
+# A value "/0xmask" holds the masked bits alone: STA_ADDR_HI's and STA_ADDR2_LO's own addresses are the chip's,
+# so a zero mask holds none of them.
 # --as-expected, WIFI_TRACE_EXPECT_NEW=1 in make, prints a place that does not pass in this form.
 
-# Their default policy marks interface 0's own address valid, STA_ADDR_FLAG, to clear it again further on;
-# mac_default_policy leaves out both, which come to nothing.
+# The libraries' default policy configures interface 1, the soft AP's, besides interface 0's: its address and its
+# address flag; the own start writes interface 0's words alone, so the interface-1 writes, and the interface-0
+# round-trips they sit among, come unmatched.
 -R4 0x600a4060 0x00000000/0xffff0000
 -W4 0x600a4060 0x00010000/0xffff0000
-
-# Their default policy marks interface 1's address valid, the soft AP's, to clear it again further on,
-# and writes interface 0's receive policy back unchanged; mac_default_policy leaves them out.
+-W4 0x600a4064 0x00000000/0x00000000
+-W4 0x600a4068 0x00000000/0xffff0000
 -R4 0x600a4068 0x00000000/0xffff0000
 -W4 0x600a4068 0x00010000/0xffff0000
 -R4 0x600a40d8 0x0001c385
 -W4 0x600a40d8 0x0001c385
 
-# Their default policy writes interface 0's receive policy and BSSID_HI back unchanged and clears interface 0's
-# address flag again; mac_default_policy writes the policy's final value at once, its bit 8 clear.
+# The libraries' default policy's rest, its interface-1 receive policy and own word and its interface-0 words'
+# round-trips, unmatched the same way.
 -W4 0x600a40d8 0x0001c385
 -R4 0x600a4004 0x00000000
 -W4 0x600a4004 0x00000000
 -R4 0x600a4060 0x00010000/0xffff0000
 -W4 0x600a4060 0x00000000/0xffff0000
-+W4 0x600a40d8 0x0001c285
-
-# Their default policy writes interface 1's receive policy and IF1_DEFAULT_WORD back unchanged, clears interface 1's
-# address flag again, and clears interface 0's policy bit 8, then writes it back unchanged;
-# mac_default_policy's one write above stands for it.
+-R4 0x600a40dc 0x0001c385
+-W4 0x600a40dc 0x0001c385
+-R4 0x600a400c 0x40000000
+-W4 0x600a400c 0x40000000
 -R4 0x600a40dc 0x0001c385
 -W4 0x600a40dc 0x0001c385
 -R4 0x600a400c 0x40000000
@@ -37,4 +37,3 @@
 -R4 0x600a40d8 0x0001c385
 -W4 0x600a40d8 0x0001c285
 -R4 0x600a40d8 0x0001c285
--W4 0x600a40d8 0x0001c285

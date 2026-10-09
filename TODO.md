@@ -151,8 +151,9 @@ what is left:
   `attrib` on a trace for the paths that ran, a static scan like `phymap`'s for the rest -- and from the ROM's symbols,
   since the IDF's headers leave 0x600a4xxx unnamed.
   Then a write that does nothing can be left out, on a role rather than on the bit.
-  `mac_default_policy` writes interface 1's address and receive policy, the soft AP's, which the driver never brings
-  up; each such write is the first of the own start's to try leaving out, one at a time, held by the gate.
+  Interface 1, the soft AP's, is configured in the MAC's own `mac_rx_set_policy` too, whose per-interface loop the
+  driver's `mac_config` runs for it, and its flag cleared in `mac_stop`; whether those writes can be left out as well,
+  steps of the same pass.
   The bring-up's receive base points at their control block as well, which the driver's own list replaces once it
   takes the MAC; whether that write can be left out, a step of its own, the gate holding it.
   Its frame completion spins in the caller's thread while the slot is armed, and borrows the libraries' slot 0;
