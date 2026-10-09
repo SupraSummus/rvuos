@@ -1,4 +1,4 @@
-# hal_mac_disable_low_rate hal_crypto_init hal_attenna_init hal_init hal_coex_pti_init hal_set_rx_active_pti hal_set_rx_ack_pti hal_set_wifi_default_pti hal_mac_set_rxbuf_reload_use_hw_beacon_enable from hal_mac_disable_low_rate up to hal_set_ofdma_sequence_pti, in a run of the image sha256 f4ebb30b98c637a5fd9b1f72b2e3d8c1a6e3a2c185aa44cde5923f31c021b090
+# hal_mac_disable_low_rate hal_crypto_init hal_attenna_init hal_init hal_coex_pti_init hal_set_rx_active_pti hal_set_rx_ack_pti hal_set_wifi_default_pti hal_mac_set_rxbuf_reload_use_hw_beacon_enable hal_timer_update_by_rtc from hal_mac_disable_low_rate up to hal_set_ofdma_sequence_pti, in a run of the image sha256 5d54338b442d2a0cefc1dcea392ce41d8fbe38c15bbf5818b3ffa939ba0958fc
 W4 0x600a444c 0x00090a0b
 W4 0x600a4450 0x00050100
 W4 0x600a4440 0x00090a0b
@@ -85,6 +85,10 @@ R4 0x600a4098 0x08280101
 W4 0x600a4098 0x08280101
 R4 0x600a4080 0x00000000
 W4 0x600a4080 0x08000000
+R4 0x600ad030 0x0cf10a00
+W4 0x600ad030 0x0cf10a00
+R4 0x600ad070 0x00000000
+W4 0x600ad070 0x0002d298
 R4 0x600a4dd8 0x00000051
 W4 0x600a4dd8 0x00000071
 R4 0x600a42fc 0x00000000

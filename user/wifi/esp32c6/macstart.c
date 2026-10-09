@@ -2,8 +2,8 @@
  * The register sequences of the libraries' bring-up, written out, so that the driver's own start makes them:
  * their hal_init's words about HAL_CFG, HAL_HOLD and HAL_MISC, its txrx queues, its receive policy and the words
  * around them, its receive base, its HE group, its receive match rules and its low-rate group,
- * their hal_crypto_init's cipher words, its antenna group, the receive buffer's reload by the beacon,
- * and their coex PTI.
+ * their hal_crypto_init's cipher words, its antenna group, the receive buffer's reload by the beacon, the timer by the
+ * slow clock, and their coex PTI.
  * main.c calls these where the libraries' hal_init called the groups; the accesses each makes are the libraries',
  * and the trace holds them. They reach the device through macregs.h alone, so they build on the host for their replay;
  * the libraries' calls they leave are declared below.
@@ -296,6 +296,27 @@ void mac_config_finish(void)
 void mac_rx_reload_hw_beacon(void)
 {
     wr(RX_CTRL, rd(RX_CTRL) | RX_CTRL_HW_BEACON_RELOAD);
+}
+
+/*
+ * The libraries' hal_timer_update_by_rtc, written out: 0x600ad030's bit 27 set, or cleared for a which of zero,
+ * which the driver's call, always 1, never takes; and 0x600ad070's low 18 bits given the hz the call passed,
+ * the slow clock's period in Q13.19 microseconds, which the adapter's slowclk_cal_get gives.
+ * The 18-bit mask is the disassembly's: it keeps a Q13.19 value's fraction alone, so what the field holds is not
+ * known.
+ * Nor is what the timer is, beyond their name, in the block mac.c's TSF_CTRL and PWR_STATUS sit.
+ */
+#define TIMER_30 0x600ad030u
+#define TIMER_70 0x600ad070u
+
+void mac_timer_update_by_rtc(uint32_t which, uint32_t hz)
+{
+    if (which != 0) {
+        wr(TIMER_30, rd(TIMER_30) | 0x08000000u);
+        wr(TIMER_70, (rd(TIMER_70) & 0xfffc0000u) | (hz & 0x3ffffu));
+    } else {
+        wr(TIMER_30, rd(TIMER_30) & ~0x08000000u);
+    }
 }
 
 /*

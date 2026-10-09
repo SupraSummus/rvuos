@@ -394,7 +394,6 @@ extern void ieee80211_update_phy_country(void);
 extern void chm_init(void *chm);
 
 /* The groups of the libraries' hal_init that drv_mac_config has not taken over yet, in its order there. */
-extern void hal_timer_update_by_rtc(uint32_t which, uint32_t hz);
 extern void hal_set_ofdma_sequence_pti(void);
 
 extern void wDev_ProcessFiq(void);   /* pp: their interrupt handler, which they install for the MAC's source */
@@ -459,7 +458,7 @@ static void drv_mac_config(void)
     mac_config_finish();
     mac_rx_reload_hw_beacon();
     osi_trace("mac-pti", 0, 0);
-    hal_timer_update_by_rtc(1, funcs->slowclk_cal_get());
+    mac_timer_update_by_rtc(1, funcs->slowclk_cal_get());
     mac_coex_pti_init();
     uint8_t pti_active = 0, pti_default = 1; /* their hal_init's own bytes, which their coex_pti_get fills */
     funcs->coex_pti_get(3, &pti_active);

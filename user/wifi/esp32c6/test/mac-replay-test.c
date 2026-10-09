@@ -162,6 +162,7 @@ static void tail(void)
     mac_antenna_init();
     mac_config_finish();
     mac_rx_reload_hw_beacon();
+    mac_timer_update_by_rtc(1, 3855000u); /* the adapter's slowclk_cal_get, in Q13.19 microseconds */
     mac_coex_pti_init();
     mac_rx_active_pti(0);
     mac_rx_ack_pti(7);
