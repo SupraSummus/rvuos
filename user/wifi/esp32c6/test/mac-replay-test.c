@@ -153,13 +153,15 @@ static void head(void)
     mac_rx_match_init();
 }
 
-/* Their hal_init from the low-rate group on, and the coex PTI with the values the recorded run's coex gave. */
+/* Their hal_init from the low-rate group on through the receive buffer's reload, and the coex PTI with the values
+   the recorded run's coex gave. */
 static void tail(void)
 {
     mac_low_rate_disable();
     mac_crypto_init();
     mac_antenna_init();
     mac_config_finish();
+    mac_rx_reload_hw_beacon();
     mac_coex_pti_init();
     mac_rx_active_pti(0);
     mac_rx_ack_pti(7);

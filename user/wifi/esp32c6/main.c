@@ -394,7 +394,6 @@ extern void ieee80211_update_phy_country(void);
 extern void chm_init(void *chm);
 
 /* The groups of the libraries' hal_init that drv_mac_config has not taken over yet, in its order there. */
-extern void hal_mac_set_rxbuf_reload_use_hw_beacon_enable(void);
 extern void hal_timer_update_by_rtc(uint32_t which, uint32_t hz);
 extern void hal_set_ofdma_sequence_pti(void);
 
@@ -458,7 +457,7 @@ static void drv_mac_config(void)
     mac_antenna_init();
     osi_trace("mac-post", 0, 0);
     mac_config_finish();
-    hal_mac_set_rxbuf_reload_use_hw_beacon_enable();
+    mac_rx_reload_hw_beacon();
     osi_trace("mac-pti", 0, 0);
     hal_timer_update_by_rtc(1, funcs->slowclk_cal_get());
     mac_coex_pti_init();

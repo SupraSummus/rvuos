@@ -113,6 +113,7 @@ void mac_coex_pti_init(void);
 void mac_rx_active_pti(uint32_t pti);
 void mac_rx_ack_pti(uint32_t pti);
 void mac_wifi_default_pti(uint32_t pti);
+void mac_rx_reload_hw_beacon(void);
 
 /*
  * The own station's receiving, in place of the libraries': the address and the BSSID (mac_station),

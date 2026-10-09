@@ -15,6 +15,7 @@
 #define RX_CTRL        (MAC_BASE + 0x080u)
 #define RX_CTRL_RELOAD 0x1u
 #define RX_CTRL_ENABLE 0x80000000u
+#define RX_CTRL_HW_BEACON_RELOAD 0x08000000u /* the receive buffer's reload by the hardware beacon; see macstart.c */
 #define RX_BASE        (MAC_BASE + 0x084u) /* the descriptor list the MAC fills, which mac.c points at the driver's own */
 #define RX_WORD        (MAC_BASE + 0x98u)
 

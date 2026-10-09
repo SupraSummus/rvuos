@@ -2,7 +2,8 @@
  * The register sequences of the libraries' bring-up, written out, so that the driver's own start makes them:
  * their hal_init's words about HAL_CFG, HAL_HOLD and HAL_MISC, its txrx queues, its receive policy and the words
  * around them, its receive base, its HE group, its receive match rules and its low-rate group,
- * their hal_crypto_init's cipher words, its antenna group, and their coex PTI.
+ * their hal_crypto_init's cipher words, its antenna group, the receive buffer's reload by the beacon,
+ * and their coex PTI.
  * main.c calls these where the libraries' hal_init called the groups; the accesses each makes are the libraries',
  * and the trace holds them. They reach the device through macregs.h alone, so they build on the host for their replay;
  * the libraries' calls they leave are declared below.
@@ -286,6 +287,15 @@ void mac_config_finish(void)
     wr(HAL_WORD, rd(HAL_WORD) | 0x10000000u);
     wr(RX_WORD, (rd(RX_WORD) & 0xffffff00u) | 1u);
     wr(RX_WORD, (rd(RX_WORD) & 0xffff00ffu) | 0x100u);
+}
+
+/*
+ * The libraries' hal_mac_set_rxbuf_reload_use_hw_beacon_enable, written out: RX_CTRL's bit 27,
+ * which their name gives as the receive buffer's reload by the hardware beacon.
+ */
+void mac_rx_reload_hw_beacon(void)
+{
+    wr(RX_CTRL, rd(RX_CTRL) | RX_CTRL_HW_BEACON_RELOAD);
 }
 
 /*
