@@ -394,7 +394,6 @@ extern void ieee80211_update_phy_country(void);
 extern void chm_init(void *chm);
 
 /* The groups of the libraries' hal_init that drv_mac_config has not taken over yet, in its order there. */
-extern void hal_he_init(void);
 extern void mac_last_rxbuf_init(void);
 extern void hal_mac_set_rxbuf_reload_use_hw_beacon_enable(void);
 extern void hal_timer_update_by_rtc(uint32_t which, uint32_t hz);
@@ -449,7 +448,7 @@ static void drv_mac_config(void)
     osi_trace("mac-rxbuf", 0, 0);
     mac_rx_base_init();
     osi_trace("mac-he", 0, 0);
-    hal_he_init();
+    mac_he_init();
     mac_last_rxbuf_init();
     osi_trace("mac-rate", 0, 0);
     mac_low_rate_disable();

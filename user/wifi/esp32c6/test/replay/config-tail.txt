@@ -1,4 +1,4 @@
-# hal_mac_disable_low_rate hal_crypto_init hal_attenna_init hal_init hal_coex_pti_init hal_set_rx_active_pti hal_set_rx_ack_pti hal_set_wifi_default_pti from hal_mac_disable_low_rate up to hal_set_ofdma_sequence_pti, in a run of the image sha256 19b965477e6394ca1c4db52b661ddf3d2cdcddee9ca7bc1a07816a6cd78f3192
+# hal_mac_disable_low_rate hal_crypto_init hal_attenna_init hal_init hal_coex_pti_init hal_set_rx_active_pti hal_set_rx_ack_pti hal_set_wifi_default_pti from hal_mac_disable_low_rate up to hal_set_ofdma_sequence_pti, in a run of the image sha256 d51a8c35a76eb23452e0211e37c55beb8b453427f9bb126d8ffcb07a0092fa1c
 W4 0x600a444c 0x00090a0b
 W4 0x600a4450 0x00050100
 W4 0x600a4440 0x00090a0b

@@ -82,12 +82,57 @@ void hal_he_set_bbrxhung_time(uint32_t a)
     (void)a;
 }
 
+/* The HE group's calls, which mac_he_init leaves theirs. */
+void hal_init_bf(void)
+{
+}
+
+void hal_init_tb_tx(void)
+{
+}
+
+void hal_init_tx_pwr(void)
+{
+}
+
+void hal_he_set_ersu(uint32_t a)
+{
+    (void)a;
+}
+
+void hal_set_tx_min_pwr(int a)
+{
+    (void)a;
+}
+
+void hal_he_set_bcast_ru(uint32_t a, uint32_t b, uint32_t c)
+{
+    (void)a;
+    (void)b;
+    (void)c;
+}
+
+void hal_he_set_uora_parameter(uint8_t *p)
+{
+    (void)p;
+}
+
+void hal_he_clr_multi_bssid(void)
+{
+}
+
+void hal_he_set_co_hosted_bss(uint32_t a, uint32_t b)
+{
+    (void)a;
+    (void)b;
+}
+
 /* The ROM's, which the low-rate group calls; its own accesses are the ROM's and stay out of the replay. */
 void phy_disable_low_rate(void)
 {
 }
 
-/* Their hal_init up to the HE group, as the driver's drv_mac_config calls it, in main.c. */
+/* Their hal_init through the HE group, as the driver's drv_mac_config calls it, in main.c. */
 static void head(void)
 {
     mac_config_start();
@@ -104,6 +149,7 @@ static void head(void)
         }
     }
     mac_rx_base_init();
+    mac_he_init();
 }
 
 /* Their hal_init from the low-rate group on, and the coex PTI with the values the recorded run's coex gave. */

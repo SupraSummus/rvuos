@@ -1,8 +1,8 @@
 /*
  * The register sequences of the libraries' bring-up, written out, so that the driver's own start makes them:
  * their hal_init's words about HAL_CFG, HAL_HOLD and HAL_MISC, its txrx queues, its receive policy and the words
- * around them, its receive base and its low-rate group, their hal_crypto_init's cipher words, its antenna group, and
- * their coex PTI.
+ * around them, its receive base, its HE group and its low-rate group, their hal_crypto_init's cipher words, its
+ * antenna group, and their coex PTI.
  * main.c calls these where the libraries' hal_init called the groups; the accesses each makes are the libraries',
  * and the trace holds them. They reach the device through macregs.h alone, so they build on the host for their replay;
  * the libraries' calls they leave are declared below.
@@ -147,6 +147,79 @@ void mac_rx_base_init(void)
 {
     wr(RXBUF_MAC_7C, rd(RXBUF_MAC_7C) & 0xffffff00u);
     wr(RX_BASE, wDevCtrl);
+}
+
+/*
+ * The libraries' hal_he_init, written out: their hal_init's 802.11ax (HE) group, the words it writes itself and the
+ * HE calls it leaves, in its order. The calls' names give the mechanisms -- beamforming, trigger-based TX and its
+ * power tables, ER SU, the transmitting minimum power, the broadcast RU, the UORA contention window, multi-BSSID and
+ * the co-hosted BSS mask -- and each stays their call, with the argument their start passed.
+ * Of the words it writes itself, the two that read as something are their table at 0x600a55f0, cleared, and the
+ * transmitting minimum power's own word, 0x600a4400, whose bits 4 to 9 their minimum-power call sets to -11 and
+ * where this group ors bit 17; the rest carry the offset they were reached at, since which bit is which is not known.
+ */
+#define HE_CTRL     0x600a4c80u /* cleared before the calls and set after them, whatever it gates */
+#define HE_MAC_10C  (MAC_BASE + 0x10cu)
+#define HE_MAC_48   (MAC_BASE + 0x48u)
+#define HE_HAL_C2C  0x600a4c2cu
+#define HE_HAL_C88  0x600a4c88u
+#define HE_HAL_CBC  0x600a4cbcu
+#define HE_HAL_D30  0x600a4d30u
+#define HE_HAL_D40  0x600a4d40u
+#define HE_HAL_D50  0x600a4d50u
+#define HE_HAL_D60  0x600a4d60u
+#define HE_MAC_20   (MAC_BASE + 0x20u) /* the multi-BSSID and co-hosted BSS control, which their two calls write too */
+#define HE_MAC_2D4  (MAC_BASE + 0x2d4u)
+#define HE_TX_MIN   (MAC_BASE + 0x400u)
+#define HE_TABLE    0x600a55f0u /* their table, cleared */
+#define HE_TABLE_END 0x600a57d0u
+
+/* The HE calls hal_he_init makes; they stay theirs, leaves with device writes of their own. */
+extern void hal_init_bf(void);
+extern void hal_init_tb_tx(void);
+extern void hal_init_tx_pwr(void);
+extern void hal_he_set_ersu(uint32_t);
+extern void hal_set_tx_min_pwr(int);
+extern void hal_he_set_bcast_ru(uint32_t, uint32_t, uint32_t);
+extern void hal_he_set_uora_parameter(uint8_t *);
+extern void hal_he_clr_multi_bssid(void);
+extern void hal_he_set_co_hosted_bss(uint32_t, uint32_t);
+
+void mac_he_init(void)
+{
+    wr(HE_CTRL, rd(HE_CTRL) & ~0x80000000u);
+    wr(HE_CTRL, rd(HE_CTRL) & ~0xc0000000u);
+    hal_init_bf();
+    wr(HE_MAC_10C, (rd(HE_MAC_10C) & ~0xc0000u) | 0x80000u);
+    wr(HE_MAC_48, (rd(HE_MAC_48) & ~0xfcu) | 0xf0u);
+    wr(HE_HAL_C2C, rd(HE_HAL_C2C) & ~0x1000u);
+    hal_init_tb_tx();
+    hal_init_tx_pwr();
+    hal_he_set_ersu(0);
+    hal_set_tx_min_pwr(-0xb);
+    wr(HE_CTRL, (rd(HE_CTRL) & ~0xff8u) | 0xbe0u);
+    for (uint32_t a = HE_TABLE; a != HE_TABLE_END; a += 4u) {
+        wr(a, 0);
+    }
+    wr(HE_HAL_D60, rd(HE_HAL_D60) & ~0xc0000000u);
+    wr(HE_HAL_D50, rd(HE_HAL_D50) & ~0xc0000000u);
+    wr(HE_HAL_D40, rd(HE_HAL_D40) & ~0xc0000000u);
+    wr(HE_HAL_D30, rd(HE_HAL_D30) & ~0xc0000000u);
+    wr(TXRX_HAL_C98, rd(TXRX_HAL_C98) | 0x4u);
+    wr(HE_HAL_CBC, rd(HE_HAL_CBC) | 0x80000000u);
+    wr(HE_HAL_C88, rd(HE_HAL_C88) | 0x2u);
+    wr(HE_HAL_C88, rd(HE_HAL_C88) | 0x1u);
+    wr(HE_MAC_2D4, (rd(HE_MAC_2D4) & 0x3fffffffu) | 0x40000000u);
+    /* The byte their start passed: the UORA contention window, as 802.11ax's OCW Range lays it out, OCWmin 3 in
+       bits 0 to 2 and OCWmax 5 in bits 3 to 5; their call reads it on the spot, so a local carries it. */
+    uint8_t uora = 0x2b;
+    hal_he_set_bcast_ru(0x7fd, 0, 0);
+    hal_he_set_uora_parameter(&uora);
+    wr(HE_TX_MIN, rd(HE_TX_MIN) | 0x20000u);
+    wr(HE_MAC_20, rd(HE_MAC_20) & ~0x100u);
+    wr(HE_MAC_20, rd(HE_MAC_20) & ~0x20000u);
+    hal_he_clr_multi_bssid();
+    hal_he_set_co_hosted_bss(0, 0);
 }
 
 /*
