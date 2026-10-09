@@ -55,13 +55,20 @@ SNAPHDR = re.compile(r"snapshot of (\d+) addresses")
 FLASHED = re.compile(r"# flashed 0x[0-9a-fA-F]+ sha256 ([0-9a-f]{64})")
 # A ROM linker script: "name = 0x...", possibly inside PROVIDE(...), comments left to strip.
 PLACED = re.compile(r"^\s*(?:PROVIDE\s*\(\s*)?([A-Za-z_][A-Za-z0-9_.$]*)\s*=\s*0x[0-9a-fA-F]+", re.M)
-# The words whose value is the moment's, not the code's, each with its reason: a count of events over the window,
-# which the traced window, taking longer, makes larger, or a measurement such as the chip's temperature.
-# `compare` reads them apart from the verdict. A word is here for its reason -- never because two runs disagreed on it.
-COUNTERS = {
-    0x600A708C: "the frames the air carries over the window, more of them while the window is traced",
-    0x6000E058: "the temperature sensor's reading, TSENS_OUT in bits 0 to 7, which the chip's warmth moves",
+# The bits of a word whose value is the moment's, not the code's, each with its mask and reason: a count of events
+# over the window, which the traced window, taking longer, makes larger, a measurement such as the chip's temperature,
+# or a status the hardware keeps. `compare` and `diff` read those bits apart from the verdict and hold the rest.
+# A word is here for its reason -- never because two runs disagreed on it.
+MOMENT = {
+    0x600A708C: (0xFFFFFFFF, "the frames the air carries over the window, more of them while the window is traced"),
+    0x6000E058: (0x000000FF, "the temperature sensor's reading, TSENS_OUT, which the chip's warmth moves"),
+    0x600A4CA8: (0x00006000, "TX_BLOCK's busy bits, which the MAC holds while it still sends"),
 }
+
+
+def steady(address, value):
+    """A word's value without the bits MOMENT names as the moment's."""
+    return value & ~MOMENT[address][0] if address in MOMENT else value
 
 
 def scan(path):
@@ -203,8 +210,8 @@ def compare(args):
     """The words the dry runs differ in, then the traced run's divergences from them; the count of those.
 
     A word any pair of the dry runs differs in is volatile, so that a word which varies run to run but which two of
-    them happen to agree on is still set aside; two dry runs are the least. The words COUNTERS names are read apart
-    from the verdict, since their count depends on how long the window takes; see its reason.
+    them happen to agree on is still set aside; two dry runs are the least. The bits MOMENT names are read apart
+    from the verdict, since their value is the moment's; see its reasons. The rest of such a word is held.
     """
     dry = [snapshots(p) for p in args.dry]
     traced = snapshots(args.traced)
@@ -212,17 +219,17 @@ def compare(args):
         if set(d) != set(dry[0]) or set(d) != set(traced):
             sys.exit("mac-trace: the runs' snapshots name different addresses")
     volatile = sorted({a for i in range(len(dry)) for j in range(i + 1, len(dry)) for a in dry[i]
-                       if dry[i][a] != dry[j][a]})
-    counters = sorted(a for a in dry[0]
-                      if a not in volatile and a in COUNTERS and traced[a] != dry[0][a])
+                       if steady(a, dry[i][a]) != steady(a, dry[j][a])})
+    moment = sorted(a for a in dry[0] if a not in volatile and a in MOMENT
+                    and any(d[a] != traced[a] for d in dry) and steady(a, traced[a]) == steady(a, dry[0][a]))
     divergent = sorted(a for a in dry[0]
-                       if a not in volatile and a not in COUNTERS and traced[a] != dry[0][a])
-    print("mac-trace: %d addresses; %d volatile between the dry runs; %d counters, not compared; %d divergences"
-          % (len(dry[0]), len(volatile), len(counters), len(divergent)))
+                       if a not in volatile and steady(a, traced[a]) != steady(a, dry[0][a]))
+    print("mac-trace: %d addresses; %d volatile between the dry runs; %d of the moment, not compared; %d divergences"
+          % (len(dry[0]), len(volatile), len(moment), len(divergent)))
     for a in volatile:
         print("  volatile  0x%08x  dry %s" % (a, " / ".join("0x%08x" % d[a] for d in dry)))
-    for a in counters:
-        print("  counter   0x%08x  dry 0x%08x / traced 0x%08x  (%s)" % (a, dry[0][a], traced[a], COUNTERS[a]))
+    for a in moment:
+        print("  moment    0x%08x  dry 0x%08x / traced 0x%08x  (%s)" % (a, dry[0][a], traced[a], MOMENT[a][1]))
     for a in divergent:
         print("  divergent 0x%08x  dry 0x%08x / traced 0x%08x" % (a, dry[0][a], traced[a]))
     return 1 if divergent else 0
@@ -287,7 +294,7 @@ def align(base, own, volatile):
     Returns (blocks, notes): a block is (base from, base to, own from, own to), half-open; a note is (base, own).
     """
     def key(e):
-        return e[:2] if e[0] == "*" else (e[0], e[1], e[2], None if e[2] in volatile else e[3])
+        return e[:2] if e[0] == "*" else (e[0], e[1], e[2], None if e[2] in volatile else steady(e[2], e[3]))
 
     matcher = difflib.SequenceMatcher(None, [key(e) for e in base], [key(e) for e in own], autojunk=False)
     blocks, notes = [], []
@@ -424,7 +431,7 @@ def diff(args):
                     if a[k][:3] != c[k][:3]:
                         print("mac-trace: thread %d: two bases differ in shape at record %d" % (t, k + 1))
                         break
-                    if a[k][3] != c[k][3]:
+                    if steady(a[k][2], a[k][3]) != steady(c[k][2], c[k][3]):
                         volatile.add(a[k][2])
 
     expect = expectations(args.expect) if args.expect else []

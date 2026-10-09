@@ -11,7 +11,7 @@ an interrupt thread's accesses are a multiset;
 --from aligns two runs by their phase markers, a cycle cut at the marker keeping its share;
 a short log is refused, and with --image one that flashed another build, and a marker cut by a loss is told as one;
 diff's expectations let a place the own start differs in by design pass, that place alone and exactly;
-the words COUNTERS names stay out of compare's verdict;
+the bits MOMENT names stay out of compare's and diff's verdict, the rest of their word in;
 and replay takes the named functions' own accesses alone, between the functions --from and --to name,
 and none within a function --outside names.
 The ELF and the libraries are not read: every pc is given to one library, and to the function FUNCTIONS names.
@@ -88,6 +88,7 @@ def diff(bases, own, **kw):
 
 
 A, B, C, P, V, X, Y = (0x600A4000 + 4 * i for i in range(7))
+TX_BLOCK = 0x600A4CA8
 
 
 def test_polling_is_a_note(f):
@@ -217,13 +218,24 @@ def test_another_build_is_refused(f):
         raise AssertionError("a base that flashed another build passed")
 
 
-def test_compare_volatile_and_counters(f):
-    k = next(iter(mt.COUNTERS))
+def test_compare_volatile_and_the_moment(f):
+    k = next(a for a, (mask, _) in mt.MOMENT.items() if mask == 0xFFFFFFFF)
     dry = [f("d1", snaps({X: 1, Y: 5, k: 10})), f("d2", snaps({X: 1, Y: 5, k: 10})), f("d3", snaps({X: 2, Y: 5, k: 10}))]
     status, out = run(mt.compare, dry=dry, traced=f("t", snaps({X: 3, Y: 5, k: 12})))
-    assert status == 0 and "1 volatile" in out and "1 counters, not compared" in out, out
+    assert status == 0 and "1 volatile" in out and "1 of the moment, not compared" in out, out
     status, out = run(mt.compare, dry=dry, traced=f("t2", snaps({X: 1, Y: 6, k: 10})))
     assert status == 1 and "divergent 0x%08x" % Y in out, out
+
+
+def test_the_moments_bits_alone_are_read_apart(f):
+    # TX_BLOCK's busy bits are the moment's, its other bits the code's: in compare and in diff alike.
+    t, busy = TX_BLOCK, mt.MOMENT[TX_BLOCK][0]
+    dry = [f("d%d" % i, snaps({t: 0x1000})) for i in range(2)]
+    assert run(mt.compare, dry=dry, traced=f("t", snaps({t: 0x1000 | busy})))[0] == 0
+    assert run(mt.compare, dry=dry, traced=f("t2", snaps({t: 0})))[0] == 1
+    base = f("base", log((1, "R", t, 0), (1, "W", t, 0)))
+    assert diff([base, base], f("own", log((1, "R", t, busy), (1, "W", t, busy))))[0] == 0
+    assert diff([base, base], f("own2", log((1, "R", t, 0), (1, "W", t, 0x1000))))[0] == 1
 
 
 def test_replay_takes_one_function(f):
