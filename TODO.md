@@ -151,8 +151,6 @@ what is left:
   A skip inside `mac_config` needs `mac-replay-test` to know the intended ones first, as `diff-expected.txt` and
   `compare-expected.txt` let the diff and the compare;
   its hold is access by access, so it stops at the first one left out.
-  The bring-up's receive base points at their control block as well, which the driver's own list replaces once it
-  takes the MAC; whether that write can be left out, a step of its own, the gate holding it.
   Its frame completion spins in the caller's thread while the slot is armed, and borrows the libraries' slot 0;
   an own slot, the driver's own interrupt to finish the frame, and the libraries' retry of a collision or a timeout,
   with their invalidation of the queue on a timeout, would do better.

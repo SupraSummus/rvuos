@@ -381,6 +381,13 @@ One address has one name, in `macregs.h` when two files share it.
 
 `mac_config`'s receive policy for interface 1 is not inert -- left out, the libraries' receive interrupt ran in the
 window where it did not with it -- so it stays, though the driver never brings that interface up.
+The receive base's write stays as well.
+Their receive reads the word: `wdev_record_rx_linked_list` read it in base 2, where their receive interrupt ran in
+the window.
+Read in the write's place, before it, the word held 0x00800000 in three own runs, after their `wifi_reset_mac`.
+How the MAC makes an address of it is not known;
+read back as their 0x4086e138 is, as 0x0086e138, without bit 30, it would be 0x40800000, `__ram_start`, the kernel's
+`_start`.
 
 Of the start's calls after the hardware's, their `wifi_mode_set` and `_do_wifi_start` are not written out:
 they carry net80211's state -- offsets into their control block, and a static of `ieee80211_sta.o` this driver cannot
