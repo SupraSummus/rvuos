@@ -270,18 +270,19 @@ endif
 # their hal_init, all the driver's own now, so one file holds the sequences as mac_config runs them, with their coex PTI.
 # MAC_REPLAY_DIR, the test's file by default, takes it elsewhere, as the gate does to hold the file to the run.
 # A group the driver takes over joins MAC_REPLAY_FUNCTIONS, the end being MAC_REPLAY_THROUGH;
-# a function the driver still calls that calls a named one in its turn goes into MAC_REPLAY_OUT;
+# a function the driver still calls that calls a named one in its turn goes into MAC_REPLAY_OUT, none now;
 # see test/mac-replay-test.c, whose one case calls mac_config.
 MAC_REPLAY_FUNCTIONS := hal_init mac_txrx_init hal_mac_rx_set_policy mac_rxbuf_init hal_he_init \
                         hal_he_set_ersu hal_he_set_bbrxhung_time hal_he_set_co_hosted_bss \
                         hal_he_set_ack_rate hal_he_set_mac_delay \
                         hal_he_set_bcast_ru hal_he_set_uora_parameter \
+                        hal_he_clr_multi_bssid hal_mac_set_rxq_policy hal_mac_set_bssid hal_mac_set_addr \
                         mac_last_rxbuf_init hal_mac_disable_low_rate hal_crypto_init hal_attenna_init \
                         hal_mac_set_rxbuf_reload_use_hw_beacon_enable hal_timer_update_by_rtc \
                         hal_coex_pti_init hal_set_rx_active_pti hal_set_rx_ack_pti hal_set_wifi_default_pti \
                         hal_set_tb_pti hal_set_beamf_pti hal_set_beamf_mt_pti hal_set_ofdma_sequence_pti
 MAC_REPLAY_THROUGH   := hal_set_ofdma_sequence_pti
-MAC_REPLAY_OUT       := hal_he_clr_multi_bssid
+MAC_REPLAY_OUT       :=
 MAC_REPLAY_TAKE      = tools/mac-trace.py replay --elf $(BUILD)/wifi-drv.elf --rom $(PHYBLOB_ROM_ELF) \
                         --image $(BUILD)/wifi-drv.bin
 .PHONY: wifi-esp32c6-replay

@@ -16,7 +16,7 @@
 #include "mac.h"
 #include "macregs.h"
 
-#define STEPS 512
+#define STEPS 2048
 
 static struct step {
     char op; /* 'R' or 'W' */
@@ -83,10 +83,6 @@ void hal_init_tx_pwr(void)
 void hal_set_tx_min_pwr(int a)
 {
     (void)a;
-}
-
-void hal_he_clr_multi_bssid(void)
-{
 }
 
 /* The ROM's, which the low-rate group calls; its own accesses are the ROM's and stay out of the replay. */

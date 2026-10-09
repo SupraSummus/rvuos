@@ -233,7 +233,6 @@ extern void hal_init_bf(void);
 extern void hal_init_tb_tx(void);
 extern void hal_init_tx_pwr(void);
 extern void hal_set_tx_min_pwr(int);
-extern void hal_he_clr_multi_bssid(void);
 
 /*
  * The libraries' hal_he_set_ersu, written out: 0x600a4c7c's bit 10 cleared for a nonzero argument and set for the
@@ -298,6 +297,86 @@ static void mac_he_set_uora_parameter(const uint8_t *p)
     wr(HE_HAL_C84, (rd(HE_HAL_C84) & 0xfe03ffffu) | (((1u << ((p[0] >> 3) & 7u)) - 1u) << 18));
 }
 
+/*
+ * The libraries' hal_mac_set_rxq_policy, written out: the interface's policy word's two queue bits, RX_POLICY_QUEUE's
+ * 0x100 and 2, set for a nonzero argument and cleared for the zero their start passes.
+ */
+static void mac_rxq_policy(uint32_t iface, uint32_t enable)
+{
+    uint32_t a = RX_POLICY + 4u * iface;
+    if (enable != 0) {
+        wr(a, rd(a) | 0x100u);
+        wr(a, rd(a) | 0x2u);
+    } else {
+        wr(a, rd(a) & ~0x100u);
+        wr(a, rd(a) & ~0x2u);
+    }
+}
+
+/*
+ * The libraries' hal_mac_set_bssid, written out: the interface's six BSSID bytes into BSSID_LO and the low 16 bits of
+ * BSSID_HI, the flag BSSID_FLAG cleared before them and set after.
+ */
+static void mac_bssid_set(uint32_t iface, const uint8_t *bssid)
+{
+    uint32_t lo = BSSID_LO + 8u * iface;
+    uint32_t hi = BSSID_HI + 8u * iface;
+    wr(hi, rd(hi) & ~BSSID_FLAG);
+    wr(lo, bssid[0] | (bssid[1] << 8) | (bssid[2] << 16) | ((uint32_t)bssid[3] << 24));
+    wr(hi, (rd(hi) & 0xffff0000u) | bssid[4] | ((uint32_t)bssid[5] << 8));
+    wr(hi, rd(hi) | BSSID_FLAG);
+}
+
+/*
+ * The libraries' hal_mac_set_addr, written out: the interface's six address bytes into STA_ADDR_LO and STA_ADDR_HI,
+ * the second write covering the whole word, so its high bits clear, then the flag STA_ADDR_FLAG set.
+ */
+static void mac_addr_set(uint32_t iface, const uint8_t *addr)
+{
+    uint32_t lo = STA_ADDR_LO + 8u * iface;
+    uint32_t hi = STA_ADDR_HI + 8u * iface;
+    wr(lo, addr[0] | (addr[1] << 8) | (addr[2] << 16) | ((uint32_t)addr[3] << 24));
+    wr(hi, addr[4] | (addr[5] << 8));
+    wr(hi, rd(hi) | STA_ADDR_FLAG);
+}
+
+/*
+ * The libraries' hal_he_clr_multi_bssid, written out: their start's call clears interface 2's queue bits, its BSSID
+ * and address and gives it the default policy, which takes their flags away, first; then, on MAC+0x2c and MAC+0x20,
+ * it clears bit 8, sets bits 9 to 16 and clears the low byte, and, on MAC+0x34 and MAC+0x28, clears bits 16 to 23;
+ * then the eight words 0x600a4d64 down to 0x600a4cf4, 0x10 apart, each with bit 2 cleared. Their read of MAC+0x20
+ * first is the guard: if its bit 17 is set, the call returns unwritten.
+ */
+#define HE_MAC_2C (MAC_BASE + 0x2cu)
+#define HE_MAC_28 (MAC_BASE + 0x28u)
+#define HE_MAC_34 (MAC_BASE + 0x34u)
+#define HE_HAL_D64 0x600a4d64u
+#define HE_HAL_CE4 0x600a4ce4u
+
+static void mac_he_clr_multi_bssid(void)
+{
+    static const uint8_t zero[6];
+
+    if (rd(HE_MAC_20) & 0x20000u) {
+        return;
+    }
+    mac_rxq_policy(2u, 0u);
+    mac_bssid_set(2u, zero);
+    mac_addr_set(2u, zero);
+    mac_rx_set_policy(2u);
+    wr(HE_MAC_2C, rd(HE_MAC_2C) & ~0x100u);
+    wr(HE_MAC_2C, rd(HE_MAC_2C) | 0x1fe00u);
+    wr(HE_MAC_2C, rd(HE_MAC_2C) & ~0xffu);
+    wr(HE_MAC_34, rd(HE_MAC_34) & 0xff00ffffu);
+    wr(HE_MAC_20, rd(HE_MAC_20) & ~0x100u);
+    wr(HE_MAC_20, rd(HE_MAC_20) | 0x1fe00u);
+    wr(HE_MAC_20, rd(HE_MAC_20) & ~0xffu);
+    wr(HE_MAC_28, rd(HE_MAC_28) & 0xff00ffffu);
+    for (uint32_t a = HE_HAL_D64; a != HE_HAL_CE4; a -= 0x10u) {
+        wr(a, rd(a) & ~0x4u);
+    }
+}
+
 void mac_he_init(void)
 {
     wr(HE_CTRL, rd(HE_CTRL) & ~0x80000000u);
@@ -331,7 +410,7 @@ void mac_he_init(void)
     wr(HE_TX_MIN, rd(HE_TX_MIN) | 0x20000u);
     wr(HE_MAC_20, rd(HE_MAC_20) & ~0x100u);
     wr(HE_MAC_20, rd(HE_MAC_20) & ~0x20000u);
-    hal_he_clr_multi_bssid();
+    mac_he_clr_multi_bssid();
     mac_he_set_co_hosted_bss(0, 0);
 }
 
