@@ -1,0 +1,5 @@
+# The words the own start's final state differs in from the libraries' start's by design, each with its reason,
+# which tools/mac-trace.py compare --expect lets pass alone and exactly; tools/esp32c6-gate.py gives it to the compare
+# across images, the libraries' dry runs against the own start's.
+# A word is its reason on "#" lines, then "0xaddress 0xvalue/0xmask": the own start's bits under the mask, where the
+# libraries' start leaves others, the rest of the word as theirs; the mask is the whole word if left out.

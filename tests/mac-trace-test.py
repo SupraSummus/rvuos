@@ -87,6 +87,10 @@ def diff(bases, own, **kw):
     return run(mt.diff, **args)
 
 
+def compare(dry, traced, expect=None):
+    return run(mt.compare, dry=dry, traced=traced, expect=expect)
+
+
 def replay(trace, *function, **kw):
     args = dict(log=trace, function=list(function), from_=None, to=None, through=None, outside=[], image=None)
     args.update(kw)
@@ -227,9 +231,9 @@ def test_another_build_is_refused(f):
 def test_compare_volatile_and_the_moment(f):
     k = next(a for a, (mask, _) in mt.MOMENT.items() if mask == 0xFFFFFFFF)
     dry = [f("d1", snaps({X: 1, Y: 5, k: 10})), f("d2", snaps({X: 1, Y: 5, k: 10})), f("d3", snaps({X: 2, Y: 5, k: 10}))]
-    status, out = run(mt.compare, dry=dry, traced=f("t", snaps({X: 3, Y: 5, k: 12})))
+    status, out = compare(dry, f("t", snaps({X: 3, Y: 5, k: 12})))
     assert status == 0 and "1 volatile" in out and "1 of the moment, not compared" in out, out
-    status, out = run(mt.compare, dry=dry, traced=f("t2", snaps({X: 1, Y: 6, k: 10})))
+    status, out = compare(dry, f("t2", snaps({X: 1, Y: 6, k: 10})))
     assert status == 1 and "divergent 0x%08x" % Y in out, out
 
 
@@ -237,11 +241,29 @@ def test_the_moments_bits_alone_are_read_apart(f):
     # TX_BLOCK's busy bits are the moment's, its other bits the code's: in compare and in diff alike.
     t, busy = TX_BLOCK, mt.MOMENT[TX_BLOCK][0]
     dry = [f("d%d" % i, snaps({t: 0x1000})) for i in range(2)]
-    assert run(mt.compare, dry=dry, traced=f("t", snaps({t: 0x1000 | busy})))[0] == 0
-    assert run(mt.compare, dry=dry, traced=f("t2", snaps({t: 0})))[0] == 1
+    assert compare(dry, f("t", snaps({t: 0x1000 | busy})))[0] == 0
+    assert compare(dry, f("t2", snaps({t: 0})))[0] == 1
     base = f("base", log((1, "R", t, 0), (1, "W", t, 0)))
     assert diff([base, base], f("own", log((1, "R", t, busy), (1, "W", t, busy))))[0] == 0
     assert diff([base, base], f("own2", log((1, "R", t, 0), (1, "W", t, 0x1000))))[0] == 1
+
+
+def test_an_expected_word_passes_exactly(f):
+    # The own start leaves a bit its final state would hold out by design: that difference alone passes.
+    dry = [f("d%d" % i, snaps({X: 0x41, Y: 5})) for i in range(2)]
+    expect = f("expect", "# Interface 1's bit, which the own start leaves out.\n0x%08x 0x00/0x40\n" % X)
+    status, out = compare(dry, f("t", snaps({X: 0x01, Y: 5})), expect=expect)
+    assert status == 0 and "by design 0x%08x" % X in out, out
+    for name, words in (("outside", {X: 0x00, Y: 5}), ("as dry", {X: 0x41, Y: 5}), ("other", {X: 0x01, Y: 6})):
+        status, out = compare(dry, f(name, snaps(words)), expect=expect)
+        assert status == 1, (name, out)
+    # Dry runs that leave the bit out as well: the expected difference is gone, and the file is stale.
+    gone = [f("g%d" % i, snaps({X: 0x01, Y: 5})) for i in range(2)]
+    status, out = compare(gone, f("t2", snaps({X: 0x01, Y: 5})), expect=expect)
+    assert status == 1 and "not as expected 0x%08x" % X in out, out
+    # A word the dry runs differ in cannot be held to a value either.
+    varies = [f("v1", snaps({X: 0x41, Y: 5})), f("v2", snaps({X: 0x43, Y: 5}))]
+    assert compare(varies, f("t3", snaps({X: 0x01, Y: 5})), expect=expect)[0] == 1
 
 
 def test_replay_takes_one_function(f):

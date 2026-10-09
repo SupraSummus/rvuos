@@ -207,12 +207,41 @@ def snapshot(args):
           file=sys.stderr)
 
 
+def compare_expectations(path):
+    """The words the own start's final state differs in by design, {address: (value, mask, reason)}:
+    each is its reason on "#" lines, then "0xaddress 0xvalue/0xmask", the bits the traced run holds where the dry
+    runs hold others, the mask the whole word if left out; a blank line ends a reason, and a "#" line after a word
+    begins the next.
+    """
+    out, reason, worded = {}, [], False
+    with open(path) as f:
+        for n, line in enumerate(f, 1):
+            line = line.strip()
+            if line.startswith("#"):
+                if worded:
+                    reason, worded = [], False  # a reason after a word begins the next place
+                reason.append(line[1:].strip())
+            elif not line:
+                reason, worded = [], False
+            else:
+                worded = True
+                m = COMPARE_EXPECTED.match(line)
+                if not m:
+                    sys.exit("mac-trace: %s:%d: not a word of a place: %s" % (path, n, line))
+                if not reason:
+                    sys.exit("mac-trace: %s:%d: a word with no reason" % (path, n))
+                out[int(m.group(1), 16)] = (int(m.group(2), 16), int(m.group(3) or "0xffffffff", 16), " ".join(reason))
+    return out
+
+
 def compare(args):
     """The words the dry runs differ in, then the traced run's divergences from them; the count of those.
 
     A word any pair of the dry runs differs in is volatile, so that a word which varies run to run but which two of
     them happen to agree on is still set aside; two dry runs are the least. The bits MOMENT names are read apart
     from the verdict, since their value is the moment's; see its reasons. The rest of such a word is held.
+    A word --expect names differs by design: it passes only as the file says, the traced run's bits under the mask
+    as given where the dry runs' are not and the rest as theirs, and an expected word that does not differ fails too.
     """
     dry = [snapshots(p) for p in args.dry]
     traced = snapshots(args.traced)
@@ -221,19 +250,35 @@ def compare(args):
             sys.exit("mac-trace: the runs' snapshots name different addresses")
     volatile = sorted({a for i in range(len(dry)) for j in range(i + 1, len(dry)) for a in dry[i]
                        if steady(a, dry[i][a]) != steady(a, dry[j][a])})
+    expect = compare_expectations(args.expect) if args.expect else {}
+    for a in expect:
+        if a not in dry[0]:
+            sys.exit("mac-trace: %s names 0x%08x, which the snapshots do not read" % (args.expect, a))
     moment = sorted(a for a in dry[0] if a not in volatile and a in MOMENT
                     and any(d[a] != traced[a] for d in dry) and steady(a, traced[a]) == steady(a, dry[0][a]))
     divergent = sorted(a for a in dry[0]
-                       if a not in volatile and steady(a, traced[a]) != steady(a, dry[0][a]))
-    print("mac-trace: %d addresses; %d volatile between the dry runs; %d of the moment, not compared; %d divergences"
-          % (len(dry[0]), len(volatile), len(moment), len(divergent)))
+                       if a not in volatile and a not in expect and steady(a, traced[a]) != steady(a, dry[0][a]))
+    met, unmet = [], []
+    for a, (value, mask, _reason) in sorted(expect.items()):
+        t, d = steady(a, traced[a]), steady(a, dry[0][a])
+        held = a not in volatile and t & mask == value and d & mask != value and t & ~mask == d & ~mask
+        (met if held else unmet).append(a)
+    print("mac-trace: %d addresses; %d volatile between the dry runs; %d of the moment, not compared; %d divergences%s"
+          % (len(dry[0]), len(volatile), len(moment), len(divergent),
+             "; %d by design, %d not as expected" % (len(met), len(unmet)) if expect else ""))
     for a in volatile:
         print("  volatile  0x%08x  dry %s" % (a, " / ".join("0x%08x" % d[a] for d in dry)))
     for a in moment:
         print("  moment    0x%08x  dry 0x%08x / traced 0x%08x  (%s)" % (a, dry[0][a], traced[a], MOMENT[a][1]))
+    for a in met:
+        print("  by design 0x%08x  dry 0x%08x / traced 0x%08x  (%s)" % (a, dry[0][a], traced[a], expect[a][2]))
+    for a in unmet:
+        value, mask, reason = expect[a]
+        print("  not as expected 0x%08x  dry 0x%08x / traced 0x%08x, expected 0x%08x/0x%08x%s  (%s)"
+              % (a, dry[0][a], traced[a], value, mask, ", volatile" if a in volatile else "", reason))
     for a in divergent:
         print("  divergent 0x%08x  dry 0x%08x / traced 0x%08x" % (a, dry[0][a], traced[a]))
-    return 1 if divergent else 0
+    return 1 if divergent or unmet else 0
 
 
 def by_thread(acc, lo, hi, library, fold, join=False, apart=frozenset()):
@@ -321,6 +366,8 @@ def span(lo, hi):
 # A place of an expectation file: "-R4 0xaddress 0xvalue" an access of the libraries' side, "+..." one of the own side;
 # "0xvalue/0xmask" holds the value's masked bits alone, as a word that carries the chip's own address needs.
 EXPECTED = re.compile(r"^([-+])([RW])(\d) (0x[0-9a-fA-F]+) (0x[0-9a-fA-F]+)(?:/(0x[0-9a-fA-F]+))?$")
+# A word of compare's expectation file: "0xaddress 0xvalue/0xmask", the traced run's masked bits.
+COMPARE_EXPECTED = re.compile(r"^(0x[0-9a-fA-F]+) (0x[0-9a-fA-F]+)(?:/(0x[0-9a-fA-F]+))?$")
 
 
 def expectations(path):
@@ -735,6 +782,7 @@ def main():
     p.set_defaults(run=snapshot)
 
     p = sub.add_parser("compare", help="the traced run's final state against the dry runs'")
+    p.add_argument("--expect", metavar="FILE", help="the words the traced run differs in by design, each with its reason")
     p.add_argument("dry", nargs="+", metavar="DRY", help="two or more dry runs; a word any pair differs in is volatile")
     p.add_argument("traced")
     p.set_defaults(run=compare)

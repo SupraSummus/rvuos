@@ -31,6 +31,7 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 BUILD = "build/esp32c6"
 DIR = os.path.join(BUILD, "gate")
 EXPECTED = "user/wifi/esp32c6/test/diff-expected.txt"  # the diff's places by design, which the diff rule reads
+COMPARE_EXPECTED = "user/wifi/esp32c6/test/compare-expected.txt"  # the final state's words by design, across images
 REPLAY = "user/wifi/esp32c6/test/replay"  # the libraries' accesses mac-replay-test holds macstart.c to
 spec = importlib.util.spec_from_file_location("mac_trace", os.path.join(ROOT, "tools", "mac-trace.py"))
 mt = importlib.util.module_from_spec(spec)
@@ -351,7 +352,8 @@ def main():
     gate.tell("compare, own start", gate.run("compare-own", compare + own_dry + [os.path.join(DIR, "own.log")]))
     gate.tell("compare, libraries' start",
               gate.run("compare-lib", compare + lib_dry + [os.path.join(DIR, "base1.log")]))
-    gate.tell("compare, across images", gate.run("compare-across", compare + lib_dry + own_dry[:1]))
+    across = ["--expect", COMPARE_EXPECTED] if os.path.exists(COMPARE_EXPECTED) else []
+    gate.tell("compare, across images", gate.run("compare-across", compare + across + lib_dry + own_dry[:1]))
 
     for name, text in (("scan", ""), ("listen", "listen=1\nrun=15\n")):
         conf = os.path.join(DIR, name + ".conf")
