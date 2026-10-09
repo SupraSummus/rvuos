@@ -153,8 +153,8 @@ static void head(void)
     mac_rx_match_init();
 }
 
-/* Their hal_init from the low-rate group on through the receive buffer's reload, and the coex PTI with the values
-   the recorded run's coex gave. */
+/* Their hal_init from the low-rate group on through the OFDMA sequence, and the coex PTI with the values the
+   recorded run's coex gave. */
 static void tail(void)
 {
     mac_low_rate_disable();
@@ -167,6 +167,8 @@ static void tail(void)
     mac_rx_active_pti(0);
     mac_rx_ack_pti(7);
     mac_wifi_default_pti(1);
+    static const uint8_t ofdma[12] = {5, 7, 7, 7, 5, 5, 5, 5, 7, 7, 3, 3}; /* their coex_pti_get's, in base1 */
+    mac_ofdma_sequence_pti(ofdma);
 }
 
 static const struct {

@@ -382,3 +382,51 @@ void mac_wifi_default_pti(uint32_t pti)
 {
     wr(PTI_DEFAULT, (rd(PTI_DEFAULT) & ~0xfu) | (pti & 0xfu));
 }
+
+/*
+ * The libraries' OFDMA sequence PTI, their hal_set_ofdma_sequence_pti with its leaves hal_set_tb_pti,
+ * hal_set_beamf_pti and hal_set_beamf_mt_pti, written out: the twelve bytes their body reads through the adapter's
+ * coex_pti_get reach the two words 0x600a4dd0 and 0x600a4dd4, one nibble each, the leaves' read-modify-writes in
+ * their order. Their body then reads the two words for its log; the own makes the reads too and has no log of them.
+ * A leaf is one read-modify-write per nibble, since the trace holds each access.
+ */
+#define OFDMA_PTI_W0 0x600a4dd0u
+#define OFDMA_PTI_W1 0x600a4dd4u
+
+/* Their hal_set_tb_pti: v0 to the first word's [27:24], v1 to [23:20], v2 to [19:16], v3 to [15:12], v5 to [11:8],
+   v6 to [7:4] and v4 to [3:0]. */
+static void mac_tb_pti(uint32_t v0, uint32_t v1, uint32_t v2, uint32_t v3, uint32_t v4, uint32_t v5, uint32_t v6)
+{
+    wr(OFDMA_PTI_W0, (rd(OFDMA_PTI_W0) & 0xf0ffffffu) | ((v0 << 24) & 0x0f000000u));
+    wr(OFDMA_PTI_W0, (rd(OFDMA_PTI_W0) & 0xff0fffffu) | ((v1 << 20) & 0x00f00000u));
+    wr(OFDMA_PTI_W0, (rd(OFDMA_PTI_W0) & 0xfff0ffffu) | ((v2 << 16) & 0x000f0000u));
+    wr(OFDMA_PTI_W0, (rd(OFDMA_PTI_W0) & 0xffff0fffu) | ((v3 << 12) & 0x0000f000u));
+    wr(OFDMA_PTI_W0, (rd(OFDMA_PTI_W0) & 0xfffff0ffu) | ((v5 << 8) & 0x00000f00u));
+    wr(OFDMA_PTI_W0, (rd(OFDMA_PTI_W0) & 0xffffff0fu) | ((v6 << 4) & 0x000000f0u));
+    wr(OFDMA_PTI_W0, (rd(OFDMA_PTI_W0) & 0xfffffff0u) | (v4 & 0x0000000fu));
+}
+
+/* Their hal_set_beamf_pti: v7 to the first word's [31:28], and v8 to the second's [7:4] and v9 to its [3:0]. */
+static void mac_beamf_pti(uint32_t v7, uint32_t v8, uint32_t v9)
+{
+    wr(OFDMA_PTI_W0, (rd(OFDMA_PTI_W0) & 0x0fffffffu) | (v7 << 28));
+    wr(OFDMA_PTI_W1, (rd(OFDMA_PTI_W1) & 0xffffff0fu) | ((v8 << 4) & 0x000000f0u));
+    wr(OFDMA_PTI_W1, (rd(OFDMA_PTI_W1) & 0xfffffff0u) | (v9 & 0x0000000fu));
+}
+
+/* Their hal_set_beamf_mt_pti: v11 to the second word's [11:8] and v10 to its [15:12] -- the order the disassembly
+   gives, since the trace cannot settle the two, both bytes being 3. */
+static void mac_beamf_mt_pti(uint32_t v10, uint32_t v11)
+{
+    wr(OFDMA_PTI_W1, (rd(OFDMA_PTI_W1) & 0xfffff0ffu) | ((v11 << 8) & 0x00000f00u));
+    wr(OFDMA_PTI_W1, (rd(OFDMA_PTI_W1) & 0xffff0fffu) | ((v10 << 12) & 0x0000f000u));
+}
+
+void mac_ofdma_sequence_pti(const uint8_t pti[12])
+{
+    mac_tb_pti(pti[0], pti[1], pti[2], pti[3], pti[4], pti[5], pti[6]);
+    mac_beamf_pti(pti[7], pti[8], pti[9]);
+    mac_beamf_mt_pti(pti[10], pti[11]);
+    (void)rd(OFDMA_PTI_W0); /* their body's two reads, for its log */
+    (void)rd(OFDMA_PTI_W1);
+}

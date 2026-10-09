@@ -1,4 +1,4 @@
-# hal_init mac_txrx_init hal_mac_rx_set_policy mac_rxbuf_init hal_he_init mac_last_rxbuf_init up to hal_mac_disable_low_rate outside hal_he_clr_multi_bssid, in a run of the image sha256 d51a8c35a76eb23452e0211e37c55beb8b453427f9bb126d8ffcb07a0092fa1c
+# hal_init mac_txrx_init hal_mac_rx_set_policy mac_rxbuf_init hal_he_init mac_last_rxbuf_init up to hal_mac_disable_low_rate outside hal_he_clr_multi_bssid, in a run of the image sha256 f85372301505c65cf8ed9b25d181c71213c04571f3ebfba1a41f19e41e7abc4b
 R4 0x600a4ddc 0x00000000
 W4 0x600a4ddc 0x00000002
 R4 0x600a4ddc 0x00000001

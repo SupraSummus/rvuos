@@ -393,9 +393,6 @@ extern int _do_wifi_start(int mode);
 extern void ieee80211_update_phy_country(void);
 extern void chm_init(void *chm);
 
-/* The groups of the libraries' hal_init that drv_mac_config has not taken over yet, in its order there. */
-extern void hal_set_ofdma_sequence_pti(void);
-
 extern void wDev_ProcessFiq(void);   /* pp: their interrupt handler, which they install for the MAC's source */
 extern void pm_noise_check_enable(void);
 extern void pm_disconnected_start(void);
@@ -424,11 +421,16 @@ static void drv_reset_mac(void)
 }
 
 /*
- * The libraries' hal_init, the MAC's configuration, written out:
- * their register writes about HAL_CFG and HAL_HOLD and their receive-policy words are macstart.c's,
- * and the groups between them go over to macstart.c one at a time;
- * the calls still theirs are called in their order and with their arguments, each named so that a traced run's
- * segments show its accesses. See user/wifi/NOTES.md.
+ * The OFDMA sequence's twelve PTI events, in their hal_set_ofdma_sequence_pti's order, which its body reads through
+ * the adapter's coex_pti_get: the map's event 1, 3 and 0xa, which gave 5, 7 and 3 in the recorded run.
+ */
+static const uint8_t ofdma_pti_events[12] = {1, 3, 3, 3, 1, 1, 1, 1, 3, 3, 0xau, 0xau};
+
+/*
+ * The libraries' hal_init, the MAC's configuration, written out whole:
+ * its own register writes about HAL_CFG and HAL_HOLD and its receive-policy words are macstart.c's,
+ * and its groups are called there in its order, each named with osi_trace so that a traced run's segments
+ * show its accesses. See user/wifi/NOTES.md.
  */
 static void drv_mac_config(void)
 {
@@ -464,7 +466,11 @@ static void drv_mac_config(void)
     mac_rx_active_pti(0);
     mac_rx_ack_pti(pti_active);
     mac_wifi_default_pti(pti_default);
-    hal_set_ofdma_sequence_pti();
+    uint8_t ofdma[12]; /* the OFDMA sequence's twelve PTI bytes, which their coex_pti_get fills */
+    for (uint32_t i = 0; i < 12u; i++) {
+        funcs->coex_pti_get(ofdma_pti_events[i], &ofdma[i]);
+    }
+    mac_ofdma_sequence_pti(ofdma);
 }
 
 /*
