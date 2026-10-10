@@ -457,7 +457,7 @@ struct thread *host_boot(void)
     host_threads[1] = root;
     for (unsigned i = 0; i < REPLAY_THREADS - 1; i++) {
         struct cap c;
-        if (cap_lookup(thread_table(root), slots[i], &c) != KERR_OK || c.type != CAP_THREAD) {
+        if (slot_lookup(root, slots[i], &c) != KERR_OK || c.type != CAP_THREAD) {
             abort();
         }
         host_threads[i + 2] = (struct thread *)cap_object(&c);
@@ -626,11 +626,11 @@ static void host_call(bool record)
         }
         /*
          * The thread makes a stopped call again, so it runs on and can still name what it invoked:
-         * the slot resolved as the call began, and nothing refills a slot within a call.
+         * the slot resolved as the call began, and nothing refills a slot or mounts a table within a call.
          * Only an armed stop hands the processor on.
          */
-        if (stopped && ((core_self()->current != caller && !armed) || thread_table(caller) == NULL ||
-                        thread_table(caller)->slots[slot].type == CAP_NONE)) {
+        if (stopped && ((core_self()->current != caller && !armed) || slot_at(caller, slot) == NULL ||
+                        slot_at(caller, slot)->type == CAP_NONE)) {
             fprintf(stderr, "invariant violated: a call stopped where its caller cannot make it again\n");
             host_violated();
         }

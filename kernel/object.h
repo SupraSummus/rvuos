@@ -51,7 +51,7 @@ struct obj_header {
  * so that a node leaves its ring without a walk;
  * an only child's is itself, and a root's and an empty slot's is 0.
  * A process's region slots are slots of this type too, CAP_INSTALLED, and leaves of the tree,
- * and so is its table slot, which holds a CAP_CAPTABLE capability,
+ * and so are its table slots, which hold CAP_CAPTABLE capabilities,
  * and a thread's process, CAP_HOSTED, its units, CAP_BOUND, and its watch, CAP_WATCHED,
  * and an Irq's notification, CAP_SIGNALLED,
  * and so is a pool's own node, CAP_RETYPED, in the pool's descriptor.
@@ -104,6 +104,7 @@ struct cap {
 #define CAP_WATCHED 0x85
 
 #define CAPTABLE_MAX_SLOTS 1024
+_Static_assert(CAPTABLE_MAX_SLOTS <= 1u << SLOT_TABLE_SHIFT, "a slot number's index reaches every slot of a table");
 
 struct captable {
     struct obj_header hdr;
@@ -143,14 +144,15 @@ struct pmp_image {
 };
 
 /*
- * A process holds its table by a capability, not a pointer:
- * a node of the derivation tree below the capability the process was made with,
+ * A process holds its tables by capabilities, not pointers:
+ * nodes of the derivation tree, each below the capability the process was made with or the table mounted with,
  * which a revoke or the destroy of the table's pool clears.
- * See DESIGN.md, "A process's table".
+ * The region slots follow the table slots, so obj_nodes hands both out as one array.
+ * See DESIGN.md, "A process's tables".
  */
 struct process {
     struct obj_header hdr;
-    struct cap table;   /* CAP_CAPTABLE, or CAP_NONE once the table is taken */
+    struct cap tables[PROCESS_TABLES]; /* CAP_CAPTABLE, or CAP_NONE while none is mounted */
     struct cap slots[PROCESS_REGION_SLOTS]; /* CAP_INSTALLED, or CAP_NONE when empty */
     struct pmp_image pmp;
 #ifdef BOARD_PROCESS_CSRS
@@ -189,7 +191,7 @@ enum {
  */
 #define THREAD_FAULTED 0x2
 
-/* A thread holds its process as a process holds its table, so the two may lie in different pools. */
+/* A thread holds its process as a process holds its tables, so the two may lie in different pools. */
 struct thread {
     struct obj_header hdr;
     uint8_t state;
@@ -279,7 +281,7 @@ _Static_assert(sizeof(struct pmp_image) == 4 + 5 * PMP_MAX_ENTRIES, "object layo
 #define PROCESS_CSRS_SIZE 0
 #endif
 _Static_assert(sizeof(struct process) ==
-                   8 + 24 * (1 + PROCESS_REGION_SLOTS) + sizeof(struct pmp_image) + PROCESS_CSRS_SIZE,
+                   8 + 24 * (PROCESS_TABLES + PROCESS_REGION_SLOTS) + sizeof(struct pmp_image) + PROCESS_CSRS_SIZE,
                "object layout");
 _Static_assert(sizeof(struct thread) == 48 + 3 * sizeof(struct cap) + sizeof(struct trap_frame), "object layout");
 _Static_assert(sizeof(struct notification) == 16, "object layout");
@@ -310,15 +312,15 @@ static inline bool untyped_free(const struct cap *c) { return c->child == 0; }
 
 static inline struct pool *obj_pool(const struct obj_header *o) { return p2v(o->pool); }
 
-_Static_assert(offsetof(struct process, slots) == offsetof(struct process, table) + sizeof(struct cap),
-               "a process's table slot and region slots are one array of nodes");
+_Static_assert(offsetof(struct process, slots) == offsetof(struct process, tables) + sizeof(((struct process *)0)->tables),
+               "a process's table slots and region slots are one array of nodes");
 _Static_assert(offsetof(struct thread, time) == offsetof(struct thread, proc) + sizeof(struct cap) &&
                    offsetof(struct thread, watch) == offsetof(struct thread, time) + sizeof(struct cap),
                "a thread's process, units and watch are one array of nodes");
 
 /*
  * The nodes of the derivation tree an object holds, as one array, and how many:
- * a table's slots, a process's table slot and region slots, a thread's process, units and watch,
+ * a table's slots, a process's table slots and region slots, a thread's process, units and watch,
  * an Irq's notification, a pool's own node.
  * Other objects hold none.
  */
@@ -329,8 +331,8 @@ static inline struct cap *obj_nodes(struct obj_header *o, uint32_t *count)
         *count = ((struct captable *)o)->nslots;
         return ((struct captable *)o)->slots;
     case CAP_PROCESS:
-        *count = 1 + PROCESS_REGION_SLOTS;
-        return &((struct process *)o)->table;
+        *count = PROCESS_TABLES + PROCESS_REGION_SLOTS;
+        return ((struct process *)o)->tables;
     case CAP_THREAD:
         *count = 3;
         return &((struct thread *)o)->proc;
@@ -346,13 +348,14 @@ static inline struct cap *obj_nodes(struct obj_header *o, uint32_t *count)
     }
 }
 static inline struct pool *pool_next_pool(const struct pool *p) { return p->next ? p2v(p->next) : NULL; }
-/* The table a process names capabilities in, or NULL once it was taken. The type test is cap_lookup's. */
-static inline struct captable *process_table(const struct process *p)
+/* The table a process mounts in table slot i, or NULL while none is. The type test is cap_lookup's. */
+static inline struct captable *process_table(const struct process *p, uint32_t i)
 {
-    if (p->table.type != CAP_CAPTABLE) {
+    const struct cap *c = &p->tables[i];
+    if (c->type != CAP_CAPTABLE) {
         return NULL;
     }
-    struct captable *t = p2v(p->table.a);
+    struct captable *t = p2v(c->a);
     return t->hdr.type == CAP_CAPTABLE ? t : NULL;
 }
 /* The process a thread runs in, or NULL once it was taken. */
@@ -370,11 +373,24 @@ static inline struct thread *bound_thread(struct cap *n)
 {
     return (struct thread *)((char *)n - offsetof(struct thread, time));
 }
-/* The table a thread names capabilities in, or NULL once its process or the process's table was taken. */
-static inline struct captable *thread_table(const struct thread *t)
+/*
+ * The table a slot number of a thread's points into, see SLOT_TABLE_SHIFT,
+ * or NULL once its process was taken or while the process mounts no table there.
+ */
+static inline struct captable *slot_table(const struct thread *t, uint32_t slot)
 {
     const struct process *p = thread_process(t);
-    return p != NULL ? process_table(p) : NULL;
+    uint32_t i = slot >> SLOT_TABLE_SHIFT;
+    return p != NULL && i < PROCESS_TABLES ? process_table(p, i) : NULL;
+}
+/* A slot number's index in the table it points into. */
+static inline uint32_t slot_index(uint32_t slot) { return slot & ((1u << SLOT_TABLE_SHIFT) - 1); }
+/* The slot a slot number of a thread's names, filled or not, or NULL when it names none. */
+static inline struct cap *slot_at(const struct thread *t, uint32_t slot)
+{
+    struct captable *table = slot_table(t, slot);
+    uint32_t i = slot_index(slot);
+    return table != NULL && i < table->nslots ? &table->slots[i] : NULL;
 }
 /* The notification a thread's faults signal, or NULL while it has no watch. */
 static inline struct notification *thread_watch(const struct thread *t)
@@ -455,7 +471,7 @@ static inline struct pool *node_pool(struct cap *n)
  * then clear the pool's node and zero the descriptor.
  * With preempt it may stop between two steps for a pending interrupt and return false,
  * the pool dying and the rest of the work kept in it; see DESIGN.md, "Bounded work".
- * The caller has checked that the running thread and its table do not live in the pool.
+ * The caller has checked that the running thread and its process's tables do not live in the pool.
  */
 bool pool_destroy(struct pool *pool, bool preempt);
 
@@ -514,11 +530,38 @@ int cap_store(struct captable *table, uint32_t slot, const struct cap *cap, stru
 /* Store into an empty slot as a sibling of beside: derived from the same parent. */
 int cap_store_beside(struct captable *table, uint32_t slot, const struct cap *cap, struct cap *beside);
 
+/*
+ * cap_lookup, cap_lookup_typed, cap_slot_free and cap_store for a slot number of a thread's,
+ * in whichever of its tables the number points into, see SLOT_TABLE_SHIFT;
+ * KERR_INVALID_CAP when it points where its process mounts no table, or the thread has no process.
+ */
+static inline int slot_lookup(const struct thread *t, uint32_t slot, struct cap *out)
+{
+    struct captable *table = slot_table(t, slot);
+    return table != NULL ? cap_lookup(table, slot_index(slot), out) : KERR_INVALID_CAP;
+}
+static inline int slot_lookup_typed(const struct thread *t, uint32_t slot, uint8_t type, uint8_t rights,
+                                    struct cap *out)
+{
+    struct captable *table = slot_table(t, slot);
+    return table != NULL ? cap_lookup_typed(table, slot_index(slot), type, rights, out) : KERR_INVALID_CAP;
+}
+static inline int slot_vacant(const struct thread *t, uint32_t slot)
+{
+    const struct captable *table = slot_table(t, slot);
+    return table != NULL ? cap_slot_free(table, slot_index(slot)) : KERR_INVALID_CAP;
+}
+static inline int slot_store(const struct thread *t, uint32_t slot, const struct cap *cap, struct cap *parent)
+{
+    struct captable *table = slot_table(t, slot);
+    return table != NULL ? cap_store(table, slot_index(slot), cap, parent) : KERR_INVALID_CAP;
+}
+
 /* Make an already filled node, an installed region, a child of parent, or a root when parent is NULL. */
 void cap_attach(struct cap *parent, struct cap *node);
 
 /*
- * Move a filled table slot into an empty one, from and to distinct:
+ * Move a filled slot of a table into an empty one, from and to distinct:
  * the new node has the parent, the siblings and the children the old one had,
  * and the old one is left empty. Constant time.
  */
@@ -543,11 +586,12 @@ bool cap_delete(struct cap *node, bool preempt);
 /*
  * Clear every node below one, leaving the node itself; preemptible as cap_delete is.
  * A pool's own node below it is a pool to destroy, which pool_destroy does.
- * It ends early, and true, once it took the running thread's table or process,
- * or through, the slot the call was made through.
+ * It ends early, and true, once through, the running thread's slot number the call was made through,
+ * no longer names a filled slot: the revoke took the thread's process, the table the number points into,
+ * or the capability in the slot.
  * The caller has checked that no pool it destroys takes any of the three.
  */
-bool cap_revoke_below(struct cap *node, const struct cap *through, bool preempt);
+bool cap_revoke_below(struct cap *node, uint32_t through, bool preempt);
 
 /*
  * One step of a revoke below a pool's own node, where no other pool's node lies:
@@ -593,6 +637,10 @@ int process_install(struct process *proc, unsigned slot,
                     uint32_t base, uint32_t size, uint8_t rights, struct cap *parent);
 /* Clear a region slot, which leaves the derivation tree as cap_clear does. */
 int process_uninstall(struct process *proc, unsigned slot);
+/* Mount a table into a table slot, as a node below parent, the capability it was named by. */
+int process_mount(struct process *proc, uint32_t index, const struct cap *table, struct cap *parent);
+/* Clear a table slot, a leaf, so in a step. */
+int process_unmount(struct process *proc, uint32_t index);
 /* Clear an installed region the tree has already let go of, and rebuild the process's PMP image. */
 void process_drop(struct cap *installed);
 

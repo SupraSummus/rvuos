@@ -215,7 +215,7 @@ until the maintainer decides otherwise.
     The questions the proposal left are decided so:
     - deleting the Pool capability a retype returned neither refuses nor destroys,
       since the retype's own node lies in the pool's descriptor;
-    - a revoke below an Untyped refuses when the caller or its table lives
+    - a revoke below an Untyped refuses when the caller or a table its process mounts lives
       in the memory it would destroy, a test by address;
     - a frame carries the rights of the Untyped it was made of;
     - a stopped destroy keeps its progress in the pool:
@@ -227,28 +227,26 @@ until the maintainer decides otherwise.
     and revoking below a line capability no longer takes an `Irq` bound from it;
     see "Interrupts".
 
-15. **What a process's table slot could do.**
-    Working default: the slot is filled once, at allocation, and its rights mean nothing.
-    - **Replacing the table.**
-      An operation on a `Process` could refill the slot;
-      every thread would see the new table from its next call.
-      With flat slot numbers a full table then grows by a table's worth of calls:
-      a larger table, every capability moved over with `OP_CAP_MOVE`,
-      which a copy could not do, since it leaves behind what was derived from its source,
-      and the slot refilled.
-    - **Nested tables.**
-      A slot number could be a path, read from the most significant bit:
-      each `CapTable` capability skips a guard, kept in its unused second word,
-      then takes the bits that index its table.
-      A table grows under a new two-slot root, the old table in the first slot
-      with a guard one bit shorter, so every old name keeps its meaning.
-      At least one bit per level bounds a lookup at 32 steps.
-      Open: whether a name that ends at a slot holding a table means the slot
-      or descends into the table; seL4 passes a depth.
-    - **Rights.**
-      A slot without `RIGHT_W` could seal the table against its own process.
+15. **A process's tables.**
+    Decided: two table slots in the `Process`, `OP_PROCESS_MOUNT` and `OP_PROCESS_UNMOUNT`,
+    and slot numbers `SLOT_IN(table slot, index)`; see "A process's tables".
+    Before, one slot was filled at allocation for good,
+    so a process that outgrew its table, or lived in memory its table was to leave, needed a successor.
+    - **Replacing the table**, one slot refilled, keeps numbers flat,
+      but the replacement is named through capabilities in the old table,
+      so those to the process and to the new table are copied rather than moved and stay behind,
+      and what has moved is out of reach until it.
+    - **Nested tables**, a number read from the top bits with a guard at each level as in seL4,
+      grow without a move, but cost each lookup a walk as deep as the tree,
+      and a rule for whether a number that ends at a table means the slot or the table, which seL4 passes a depth for.
+    - **More table slots**, four, would let a process keep a table of its own beside a shared one and still move either.
+      Each costs every process twenty-four bytes and nothing asks for it yet;
+      the bits above the index leave room for them without changing what a number means.
 
-    Decide with the first program whose creator cannot size its table in advance.
+    Open: a table slot carries the rights of the capability it was filled from, which has `RIGHT_W`, and they mean nothing more;
+    one without `RIGHT_W` could seal a table that a group of processes shares against all of them.
+    Open: `RIGHT_W` on a table lets its holder use what the table holds, by making a process of it or mounting it,
+    so a table others may only put capabilities into would need a right of its own.
 
 16. **Drift of a periodic timer.**
     Decided: `IRQ_SET_PERIOD` counts a timer line's next deadline from its last one,

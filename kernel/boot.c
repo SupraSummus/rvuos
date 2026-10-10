@@ -80,8 +80,8 @@ struct thread *boot_create_root(void)
      * Below the pool's node, as every capability to an object of the pool is,
      * so that only a destroy of the boot pool takes the root task's table or process.
      */
-    proc->table = cap_to_object(&table->hdr, RIGHT_ALL);
-    cap_attach(&pool->node, &proc->table);
+    proc->tables[0] = cap_to_object(&table->hdr, RIGHT_ALL);
+    cap_attach(&pool->node, &proc->tables[0]);
     thread->proc = (struct cap){ .type = CAP_HOSTED, .rights = RIGHT_ALL, .a = v2p(proc) };
     cap_attach(&pool->node, &thread->proc);
 

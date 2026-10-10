@@ -98,6 +98,16 @@ uint32_t slot_free(struct self *s, uint32_t slot);
 void slot_back(struct self *s, uint32_t slot);
 uint32_t slots_unused(const struct self *s);
 
+/*
+ * Moves the process to a new table of slots slots from pool, slots no fewer than slot_end and at most SELF_SLOTS,
+ * every capability below slot_end keeping its number, and hands out the slots up to the new end;
+ * s->table names the new table after it; see DESIGN.md, "A process's tables".
+ * The new table is mounted in the second table slot while the capabilities move, one by one, and then in the first.
+ * The old table stays in its pool, empty, and what anyone gives through a capability to it no longer reaches the process.
+ * No other thread of the process may make a call meanwhile, since what it names is half moved.
+ */
+uint32_t self_migrate(struct self *s, uint32_t pool, uint32_t slots);
+
 /* A frame installed in a region of its own process, and the region back. */
 uint32_t region_install(struct self *s, uint32_t frame, uint32_t rights, uint32_t *region);
 uint32_t region_free(struct self *s, uint32_t region);

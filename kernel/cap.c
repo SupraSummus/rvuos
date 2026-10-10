@@ -228,7 +228,7 @@ bool cap_revoke_step(struct cap *root)
     return true;
 }
 
-bool cap_revoke_below(struct cap *root, const struct cap *through, bool preempt)
+bool cap_revoke_below(struct cap *root, uint32_t through, bool preempt)
 {
     /*
      * The first child goes and its children take its place at the front of the ring,
@@ -251,11 +251,13 @@ bool cap_revoke_below(struct cap *root, const struct cap *through, bool preempt)
             clear_node(n);
         }
         /*
-         * A revoke that took its caller's table, the process it runs in,
+         * A revoke that took the process its caller runs in, the table the call's slot lies in,
          * or the capability it was made through ends there:
          * the caller could not make the call again, so an interrupt must not decide how far it got.
+         * A table slot of its process can only be cleared here, never filled, so the number still names the same slot.
          */
-        if (thread_table(core_self()->current) == NULL || through->type == CAP_NONE) {
+        const struct cap *at = slot_at(core_self()->current, through);
+        if (at == NULL || at->type == CAP_NONE) {
             return true;
         }
         if (root->child != 0 && cap_stop_here(preempt)) {

@@ -14,7 +14,7 @@ Report: the paid loop at kernel/cap.c took a second step without asking intr_pen
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -239,6 +239,7 @@ bool cap_revoke_below(struct cap *root, const struct cap *through, bool preempt)
+@@ -247,6 +247,7 @@ bool cap_revoke_below(struct cap *root, uint32_t through, bool preempt)
                  return false;
              }
          } else {

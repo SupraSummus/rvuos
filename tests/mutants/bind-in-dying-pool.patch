@@ -7,7 +7,7 @@ Report: a call built an object in a pool being destroyed
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -516,9 +516,6 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
+@@ -674,9 +674,6 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
              return err;
          }
          struct pool *pool = (struct pool *)cap_object(&pc);
@@ -16,4 +16,4 @@ diff --git a/kernel/syscall.c b/kernel/syscall.c
 -        }
          /* The Irq signals on its creator's behalf, so the creator must be able to. */
          struct cap nc;
-         err = cap_lookup_typed(thread_table(t), arg[2], CAP_NOTIFICATION, RIGHT_W, &nc);
+         err = slot_lookup_typed(t, arg[2], CAP_NOTIFICATION, RIGHT_W, &nc);

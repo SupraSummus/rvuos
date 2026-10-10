@@ -7,7 +7,7 @@ Report: a call built an object in a pool being destroyed
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -280,9 +280,6 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
+@@ -348,9 +348,6 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
      if (op != OP_POOL_ALLOC) {
          return KERR_WRONG_TYPE;
      }
@@ -15,5 +15,5 @@ diff --git a/kernel/syscall.c b/kernel/syscall.c
 -        return KERR_STATE;
 -    }
      uint32_t dst = arg[2];
-     int err = cap_slot_free(thread_table(t), dst);
+     int err = slot_vacant(t, dst);
      if (err != KERR_OK) {

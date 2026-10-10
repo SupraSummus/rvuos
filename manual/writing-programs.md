@@ -41,6 +41,8 @@ and `user/lib/` what a program of several processes needs beside them, section 8
 | `rv_pool_alloc(pool, type, dst, arg)` | `OP_POOL_ALLOC` |
 | `rv_process_install(process, region, frame, rights)` | `OP_PROCESS_INSTALL` |
 | `rv_process_uninstall(process, region)` | `OP_PROCESS_UNINSTALL` |
+| `rv_process_mount(process, index, table)` | `OP_PROCESS_MOUNT` |
+| `rv_process_unmount(process, index)` | `OP_PROCESS_UNMOUNT` |
 | `rv_thread_configure(thread, pc, sp, arg)` | `OP_THREAD_CONFIGURE` |
 | `rv_thread_resume(thread)` | `OP_THREAD_RESUME` |
 | `rv_thread_watch(thread, ntfn, bits)` | `OP_THREAD_WATCH` |
@@ -192,7 +194,7 @@ Each header says how its calls are used.
 
 | Header | What it gives |
 |---|---|
-| `lib/self.h` | what a process hands out of its own: slots, regions, bits of its inbox, timers, units of time, memory halved out of Untypeds, and room for its children's data |
+| `lib/self.h` | what a process hands out of its own: slots, regions, bits of its inbox, timers, units of time, memory halved out of Untypeds, and room for its children's data; and its move to a larger table |
 | `lib/child.h` | a child built, started, heard, checked and taken down by its parent, frames mapped into it and taken back, what it may build of its own, and the child's own calls: its log, its state, its answer, its sleep, its account of what it builds |
 | `lib/chan.h` | a channel between two children: a frame of two rings of packets, and a bit each way; and a hub, a server's channels to many clients |
 | `lib/lock.h` | a lock over memory several children share: a word taken with an atomic operation, and a notification to wait on while it is held; and one whose word names its holder, so that a taker that waits lends the holder its time, section 5.12 |
@@ -241,6 +243,10 @@ but hands out no memory, regions or bits of its inbox, which stay its parent's, 
 It is given its parent's inbox carved to its own fault bit too, and watches its threads with it,
 so a fault of any of them reaches its parent as the child's own.
 `child_free` takes back all of it with the rest, the pool and the units among it.
+Such a child may outgrow its table: `self_migrate` moves it to a larger one from its pool,
+every capability keeping its number, section 5.2,
+while no other thread of its makes a call;
+what its parent gives it afterwards through `child_give` goes into the old table, which it no longer names.
 
 **A channel** is connected by the parent into two children, running or not,
 each holding the other's inbox carved to the other's bit for the channel.

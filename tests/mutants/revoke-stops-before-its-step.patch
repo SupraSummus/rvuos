@@ -8,7 +8,7 @@ Report: a call was preempted before it took anything away
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -226,6 +226,9 @@ bool cap_revoke_below(struct cap *root, const struct cap *through, bool preempt)
+@@ -241,6 +241,9 @@ bool cap_revoke_below(struct cap *root, uint32_t through, bool preempt)
       */
      while (root->child != 0) {
          LOOP_PAID(cap_revoke_below, node, "a node it clears");

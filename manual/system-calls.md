@@ -34,6 +34,11 @@ The C wrapper in `user/rvuos.h`, the same on both, with the registers from `user
 uint32_t rv_invoke(uint32_t op, uint32_t cap, uint32_t a1, uint32_t a2, uint32_t a3);
 ```
 
+Every slot an argument names, `a0` among them, is a slot of the caller's and so a slot number,
+`SLOT_IN(table slot, index)`, section 5.2, unless this chapter says it is in the invoked table:
+below 1024 it is the index in the first table.
+A slot of the invoked table, as `OP_CAP_COPY`'s destination is, is its index there.
+
 The kernel checks in this order:
 the slot resolves (`KERR_INVALID_CAP`),
 the capability type carries `RIGHT_W` where the type needs it for every operation
@@ -62,12 +67,12 @@ and may fail, with what it already revoked staying revoked.
 | Code | Name | Meaning |
 |---|---|---|
 | 0 | `KERR_OK` | success |
-| 1 | `KERR_INVALID_CAP` | slot out of range, empty, or its object was destroyed; every call of a process whose table was taken |
+| 1 | `KERR_INVALID_CAP` | slot out of range, empty, or its object was destroyed, or in a table slot that holds no table; every call of a process whose tables were all taken |
 | 2 | `KERR_WRONG_TYPE` | the capability's type does not accept this operation |
 | 3 | `KERR_NO_RIGHTS` | the capability lacks a right the operation needs |
 | 4 | `KERR_INVALID_ARG` | an argument is out of range or breaks a rule stated below |
 | 5 | `KERR_NO_MEMORY` | the pool has no room for the object, or the Untyped has made something already |
-| 6 | `KERR_SLOT_IN_USE` | the destination slot already holds a capability |
+| 6 | `KERR_SLOT_IN_USE` | the destination slot already holds a capability, or the table slot a table |
 | 7 | `KERR_OVERLAP` | a region overlaps another installed in the same process, or on the ESP32-C6 touches one as `OP_PROCESS_INSTALL` says, or the line is already bound |
 | 8 | `KERR_LIMIT` | a fixed kernel limit was hit, such as the PMP entry count |
 | 9 | `KERR_STATE` | the object is not in a state that allows this |
@@ -130,7 +135,7 @@ All need `RIGHT_W` on the table.
 
 **`OP_CAP_COPY` (3).**
 `a1` = destination slot in the invoked table,
-`a2` = source slot in the caller's table,
+`a2` = source slot in the caller's tables,
 `a3` = rights mask ANDed into the copy.
 The destination must be empty (`KERR_SLOT_IN_USE`).
 The source may be any type, frames and lines included, but an Untyped (`KERR_WRONG_TYPE`).
@@ -146,7 +151,7 @@ and a revoke below it takes back whatever the borrower made of the derived one.
 
 **`OP_CAP_MOVE` (18).**
 `a1` = destination slot in the invoked table,
-`a2` = source slot in the caller's table, which must be filled (`KERR_INVALID_CAP`).
+`a2` = source slot in the caller's tables, which must be filled (`KERR_INVALID_CAP`).
 The destination must be empty (`KERR_SLOT_IN_USE`), so a slot does not move onto itself.
 The capability goes to the destination with its rights, and the source is left empty.
 It keeps its place in the derivation tree, section 5.2:
@@ -171,11 +176,11 @@ Regions installed from capabilities below it are uninstalled,
 and threads of those processes lose access at once;
 threads made through a `Process` capability below it stop, section 5.6,
 and `Irq`s bound through a `Notification` capability below it are disarmed, section 5.9.
-A revoke that takes the caller's own process, its process's table,
+A revoke that takes the caller's own process, the table the call's `a0` lies in,
 or the capability the call is made through ends there,
 returns `KERR_OK`, and leaves the rest below the slot for another call to revoke.
 Below an Untyped, every pool made of it is destroyed, section 5.5;
-`KERR_STATE` if the calling thread, its process, the process's table or the invoked table
+`KERR_STATE` if the calling thread, its process, a table the process mounts or the invoked table
 lies in the Untyped's memory.
 The call may be made again, section 6.1.
 
@@ -188,7 +193,7 @@ Returns `a1` = base, `a2` = size, `a3` = rights,
 
 **`OP_FRAME_CARVE` (5).**
 No right needed.
-`a1` = offset from the frame's base, `a2` = size, `a3` = destination slot in the caller's table.
+`a1` = offset from the frame's base, `a2` = size, `a3` = destination slot in the caller's tables.
 Produces a frame with the same rights, hanging below the invoked one.
 The size must be a power of two no smaller than the smallest region,
 the offset a multiple of the size,
@@ -203,7 +208,7 @@ Returns `a1` = base, `a2` = size, `a3` = rights,
 
 **`OP_UNTYPED_RETYPE` (6).**
 `a1` = the type, `CAP_FRAME` or `CAP_POOL` (`KERR_INVALID_ARG`),
-`a2` = destination slot in the caller's table.
+`a2` = destination slot in the caller's tables.
 Makes the whole of the Untyped into it, and returns `a1` = its base.
 A pool needs `RIGHT_R` and `RIGHT_W` on the Untyped (`KERR_NO_RIGHTS`)
 and an Untyped no smaller than `POOL_MIN_SIZE` (`KERR_INVALID_ARG`);
@@ -213,7 +218,7 @@ The new capability hangs below the invoked one, a pool's below the pool's own no
 
 **`OP_UNTYPED_SPLIT` (30).**
 No right needed.
-`a1` = destination slot for the lower half, `a2` = for the upper half, two slots in the caller's table.
+`a1` = destination slot for the lower half, `a2` = for the upper half, two slots in the caller's tables.
 Makes the two halves of the Untyped, each an Untyped with the invoked one's rights, hanging below it.
 A half must be no smaller than the smallest region, and the two slots must differ (`KERR_INVALID_ARG`).
 `KERR_NO_MEMORY` while something made of the Untyped is left.
@@ -229,7 +234,7 @@ it is destroyed by revoking below its Untyped, section 5.5.
 | `a1` | `a3` | Rule |
 |---|---|---|
 | `CAP_CAPTABLE` | number of slots, 1 to `CAPTABLE_MAX_SLOTS` (1024) | |
-| `CAP_PROCESS` | slot of the `CapTable` capability the process will use, with `RIGHT_W` | the table may lie in any pool; the process's hold on it hangs below that capability |
+| `CAP_PROCESS` | slot of the `CapTable` capability the process will use, with `RIGHT_W` | the table may lie in any pool; the process holds it in its first table slot, below that capability |
 | `CAP_THREAD` | slot of the `Process` capability the thread will run in, with `RIGHT_W` | the process may lie in any pool; the thread's hold on it hangs below that capability; the thread starts stopped |
 | `CAP_NOTIFICATION` | unused | |
 
@@ -240,11 +245,11 @@ The new capability carries all rights and hangs below the invoked `KernelPool` c
 
 ### 6.7 Operations on `Process`
 
-Both need `RIGHT_W` on the process.
+All four need `RIGHT_W` on the process.
 
 **`OP_PROCESS_INSTALL` (8).**
 `a1` = region slot index, below `PROCESS_REGION_SLOTS`,
-`a2` = slot of a frame in the caller's table,
+`a2` = slot of a frame in the caller's tables,
 `a3` = rights to install.
 The rights must be a non-empty subset of the frame's (`KERR_NO_RIGHTS`);
 write without read is `KERR_INVALID_ARG`, and so on ARM is execute without read;
@@ -260,6 +265,24 @@ so `OP_CAP_REVOKE` on that capability's slot, or on any slot above it, uninstall
 Clears it and rebuilds the PMP image.
 Threads of the process lose access at once.
 Clearing an empty slot succeeds.
+
+**`OP_PROCESS_MOUNT` (39).**
+`a1` = table slot index, below `PROCESS_TABLES`, else `KERR_INVALID_ARG`,
+`a2` = slot of a `CapTable` capability in the caller's tables, with `RIGHT_W` (`KERR_NO_RIGHTS`).
+A table slot that holds a table already is `KERR_SLOT_IN_USE`.
+The process's threads then name the table's slots `SLOT_IN(a1, index)`, section 5.2.
+The process's hold on the table hangs below that capability in the derivation tree,
+so `OP_CAP_REVOKE` on its slot, or on any slot above it, unmounts the table,
+as it does the table the process was allocated with, which is in table slot 0.
+One table may be mounted in several processes, and in several table slots of one,
+where two numbers then name each of its slots.
+
+**`OP_PROCESS_UNMOUNT` (40).**
+`a1` = table slot index, below `PROCESS_TABLES`, else `KERR_INVALID_ARG`.
+Clears it; the table stays as long as its pool does,
+and the numbers that pointed into it name nothing, `KERR_INVALID_CAP`, from the next call on.
+Clearing an empty table slot succeeds.
+With `OP_PROCESS_MOUNT` and `OP_CAP_MOVE` a process moves to another table, section 5.2.
 
 ### 6.8 Operations on `Thread`
 
@@ -414,7 +437,7 @@ The time is 64 bits on every board, whatever the width of the board's counter.
 Under tracing it is the counts of the ticks so far, section 9.
 
 **`OP_CLOCK_FRAME` (26).**
-`a1` = destination slot in the caller's table.
+`a1` = destination slot in the caller's tables.
 Produces a frame, read only, the smallest block that holds the counter's low 32 bits,
 hanging below the invoked capability.
 Installed, it lets a thread read them with a load and no call;
@@ -497,8 +520,10 @@ or a signal that wakes the thread paying for its turn, section 5.12, takes the p
 | 36 | `OP_NOTIFY_CARVE` | `Notification` |
 | 37 | `OP_CLOCK_WATCHDOG` | `Clock` |
 | 38 | `OP_NOTIFY_LEND` | `Notification` |
+| 39 | `OP_PROCESS_MOUNT` | `Process` |
+| 40 | `OP_PROCESS_UNMOUNT` | `Process` |
 
-`OP_COUNT` is 39, one above the highest code; 16 is unused.
+`OP_COUNT` is 41, one above the highest code; 16 is unused.
 
 ## 7. What the root task starts with
 
@@ -512,7 +537,8 @@ and drops into user mode with:
 - every other register at zero, `a0` among them, as `OP_THREAD_CONFIGURE` leaves a thread, section 6.8,
 - region slot 0: the code region, read and execute,
 - region slot 1: the data region, read and write,
-- a capability table of `ROOT_TABLE_SLOTS`, 46 past `BOOT_CAP_COUNT` on every board and so 64 on QEMU, filled as below.
+- a capability table of `ROOT_TABLE_SLOTS`, 46 past `BOOT_CAP_COUNT` on every board and so 64 on QEMU, filled as below,
+  in table slot 0, and table slot 1 empty.
 
 | Slot | Constant | Capability | Rights |
 |---|---|---|---|

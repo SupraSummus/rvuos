@@ -16,6 +16,7 @@
  * hands a buffer between two children, and hears the last fault on it once it is taken;
  * lets a child build a thread of its own from a pool, timer lines and units it gave it,
  * hears that thread's fault as the child's, and takes it all back, twice;
+ * lets a child move its table to a larger one from a pool it gave it, every capability keeping its number, twice;
  * then takes the rest down.
  * It ends with "libtest: ok" and halt code 0, which tests/libtest.sh checks, or with what failed and another code.
  */
@@ -39,10 +40,10 @@ static struct kernel_log klog;
 static uint32_t log_bit, deadline_bit, pause_bit, pause_timer;
 
 static struct child a, b, faulty, answering, spinning, server, clients[HUB_CLIENTS], lockers[LOCKERS], snap_reader,
-    passers[2], builder;
+    passers[2], builder, mover;
 static struct child *const children[] = { &a, &b, &faulty, &answering, &spinning, &server, &clients[0], &clients[1],
                                           &lockers[0], &lockers[1], &lockers[2], &snap_reader, &passers[0], &passers[1],
-                                          &builder };
+                                          &builder, &mover };
 static struct child *may_fault; /* the one child whose fault is asked for */
 static uint32_t faulted;        /* the bits of the faults the root task heard */
 
@@ -550,6 +551,31 @@ static void own_round(void)
     say(&out, "libtest: a child that builds a thread of its own, whose fault is the child's, taken down twice: ok\n");
 }
 
+/*
+ * A mover, given a pool and slots of its own, moves its table to one twice as large from that pool,
+ * uses a slot past the old end and reports through the capabilities it had;
+ * taken down, it gives back all of it, and built again leaves the root task as the first did.
+ */
+static void move_round(void)
+{
+    struct self_tally before = tally();
+    for (uint32_t round = 0; round < 2; round++) {
+        must("build a mover", child_new(&self, &mover, "mover", MOVER_TABLE, CHILD_DATA));
+        struct mover_page *p = (struct mover_page *)mover.page;
+        must("let a child build of its own",
+             child_give_own(&self, &mover, OWN_POOL, OWN_LINES, OWN_UNITS, OWN_SLOTS, &p->own));
+        must("start a mover", child_start(&self, &mover, mover_main, CHILD_UNITS));
+        while (mover.told != MOVER_MOVED) {
+            step();
+        }
+        must("take a mover down", child_free(&self, &mover));
+        check(same(tally(), before), "a child that moved its table, taken down, gives back what it was given");
+        check(round == 0 || as_at(&after), "a mover built again from what the last gave back leaves the same behind");
+        after = self;
+    }
+    say(&out, "libtest: a child that moves its table to one twice as large, taken down twice: ok\n");
+}
+
 int main(void)
 {
     uint32_t base, size, region, deadline;
@@ -629,6 +655,7 @@ int main(void)
     snap_round();
     pass_round();
     own_round();
+    move_round();
     check(same(tally(), start), "everything handed out came back");
     say(&out, "libtest: down, %u bytes free and %u slots unused\n", mem_unused(&self), slots_unused(&self));
     say(&out, "libtest: ok\n");

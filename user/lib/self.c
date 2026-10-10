@@ -98,6 +98,45 @@ uint32_t slots_unused(const struct self *s)
     return n;
 }
 
+uint32_t self_migrate(struct self *s, uint32_t pool, uint32_t slots)
+{
+    if (slots < s->slot_end || slots > SELF_SLOTS) {
+        s->what = "a table no smaller than the one it has, nor larger than a self keeps account of";
+        return KERR_INVALID_ARG;
+    }
+    uint32_t table, status;
+    PASS(slot_new(s, &table));
+    if ((status = rv_pool_alloc(pool, CAP_CAPTABLE, table, slots)) != KERR_OK ||
+        (status = rv_process_mount(s->process, 1, table)) != KERR_OK) {
+        s->what = "a new table, mounted second";
+        slot_back(s, table);
+        return status;
+    }
+    /*
+     * Each capability goes to the same index of the new table, where SLOT_IN(1, i) names it meanwhile,
+     * the new table's own capability last, as it is the one they move through.
+     * An empty slot has nothing to move.
+     */
+    for (uint32_t i = 0; i < s->slot_end; i++) {
+        status = i != table ? rv_cap_move(table, i, i) : KERR_INVALID_CAP;
+        if (status != KERR_OK && status != KERR_INVALID_CAP) {
+            s->what = "move a capability to the new table";
+            return status;
+        }
+    }
+    TRY(s, "move the new table's capability into it", rv_cap_move(table, table, table));
+    /* Every number then names the new table again, first through the second table slot and then through the first. */
+    TRY(s, "unmount the old table", rv_process_unmount(SLOT_IN(1, s->process), 0));
+    TRY(s, "mount the new table first", rv_process_mount(SLOT_IN(1, s->process), 0, SLOT_IN(1, table)));
+    TRY(s, "unmount the second table slot", rv_process_unmount(s->process, 1));
+    /* What s->table holds names the old table: the new one's capability takes its place. */
+    TRY(s, "delete the old table's capability", rv_cap_delete(table, s->table));
+    TRY(s, "name the new table where the old one was named", rv_cap_move(table, s->table, table));
+    PASS(slot_free(s, table));
+    s->slot_end = slots;
+    return KERR_OK;
+}
+
 uint32_t region_install(struct self *s, uint32_t frame, uint32_t rights, uint32_t *region)
 {
     PASS(take_lowest(s, &s->regions, PROCESS_REGION_SLOTS, region, "a free region"));

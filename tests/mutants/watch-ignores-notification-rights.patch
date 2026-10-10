@@ -7,12 +7,12 @@ Report: thread's watch names no live notification
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -455,7 +455,7 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
+@@ -533,7 +533,7 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
          uint32_t bits = arg[2];
          struct cap nc;
          if (bits != 0) {
--            int err = cap_lookup_typed(thread_table(t), arg[1], CAP_NOTIFICATION, RIGHT_W, &nc);
-+            int err = cap_lookup_typed(thread_table(t), arg[1], CAP_NOTIFICATION, 0, &nc);
+-            int err = slot_lookup_typed(t, arg[1], CAP_NOTIFICATION, RIGHT_W, &nc);
++            int err = slot_lookup_typed(t, arg[1], CAP_NOTIFICATION, 0, &nc);
              if (err != KERR_OK) {
                  return err;
              }

@@ -11,7 +11,7 @@
  * Every system call is an invocation on a capability.
  * Registers at the ecall:
  *   a7      operation code, one of OP_*
- *   a0      slot index of the invoked capability in the caller's table
+ *   a0      slot of the invoked capability in the caller's tables, see SLOT_TABLE_SHIFT
  *   a1..a3  operation arguments; a4..a6 are reserved
  * Registers on return:
  *   a0      status, one of KERR_*
@@ -24,19 +24,29 @@
  * so the thread makes the same call again and it goes on from there.
  * The call made again checks everything afresh.
  *
- * Slots that receive a new capability are always in the caller's own table.
- * A process needs no capability to write its own table;
+ * Slots that receive a new capability are always in the caller's own tables.
+ * A process needs no capability to write its own tables;
  * the CapTable capability exists to write another process's table.
  */
 
+/*
+ * A process names capabilities in up to PROCESS_TABLES tables, mounted in its table slots, see OP_PROCESS_MOUNT.
+ * A slot of the caller's is numbered SLOT_IN(table slot, index), the table slot in the bits from SLOT_TABLE_SHIFT up,
+ * so the numbers below 1024, as many as a table may have, are the first table's.
+ * A number that points where no table is mounted names nothing, KERR_INVALID_CAP.
+ * A slot of an invoked table is its index there.
+ */
+#define SLOT_TABLE_SHIFT 10
+#define SLOT_IN(table, index) (((table) << SLOT_TABLE_SHIFT) | (index))
+
 /* Status codes returned in a0. */
 #define KERR_OK           0
-#define KERR_INVALID_CAP  1 /* slot out of range, empty, or stale */
+#define KERR_INVALID_CAP  1 /* slot out of range, empty, or stale, or in a table slot no table is mounted in */
 #define KERR_WRONG_TYPE   2 /* capability does not accept this operation */
 #define KERR_NO_RIGHTS    3 /* capability lacks a right the operation needs */
 #define KERR_INVALID_ARG  4
 #define KERR_NO_MEMORY    5 /* pool exhausted, or an Untyped with something made of it */
-#define KERR_SLOT_IN_USE  6 /* destination slot already holds a capability */
+#define KERR_SLOT_IN_USE  6 /* destination slot already holds a capability, or table slot a table */
 #define KERR_OVERLAP      7 /* region overlaps or, on the ESP32-C6, touches one installed in the same process; line already bound */
 #define KERR_LIMIT        8 /* a fixed kernel limit was hit, such as PMP entries */
 #define KERR_STATE        9 /* the object is not in a state that allows this */
@@ -60,7 +70,7 @@
  * Rights bits.
  * Frame: RIGHT_R, RIGHT_W, RIGHT_X as memory permissions.
  * Untyped: the memory permissions of the frames made of it; a pool needs RIGHT_R and RIGHT_W.
- * CapTable: RIGHT_W to copy into or delete from the table.
+ * CapTable: RIGHT_W to copy into or delete from the table, and to make it a process's, by an allocation or a mount.
  * Pool: RIGHT_W to allocate objects.
  * Process, Thread: RIGHT_W to control the object.
  * Thread: RIGHT_X to lend it time, see OP_NOTIFY_LEND, which a capability with RIGHT_X alone allows and nothing else.
@@ -142,9 +152,9 @@
 #define OP_DEBUG_PREEMPT 32
 
 /*
- * CapTable (RIGHT_W): copy a capability from the caller's table.
+ * CapTable (RIGHT_W): copy a capability from the caller's tables.
  * a1 = destination slot in the invoked table,
- * a2 = source slot in the caller's table,
+ * a2 = source slot in the caller's tables,
  * a3 = rights mask applied to the copy.
  * The copy is a sibling of the source in the derivation tree:
  * derived from what the source was derived from, and as good as the source.
@@ -174,17 +184,17 @@
  * are woken with KERR_INVALID_CAP and no bits,
  * threads, in whatever pool, whose process was in it stop,
  * and Irqs, in whatever pool, whose notification was in it are disarmed.
- * A revoke that takes the calling thread's process, its process's table,
+ * A revoke that takes the calling thread's process, the table its a0 lies in,
  * or the capability it is made through ends there with KERR_OK,
  * and what it did not reach stays for another call to revoke.
  * Fails with KERR_INVALID_CAP for an empty slot,
  * and with KERR_STATE when the slot is an Untyped whose memory holds
- * the calling thread, its process, the process's table or the invoked table.
+ * the calling thread, its process, a table the process mounts or the invoked table.
  * Restartable.
  */
 #define OP_CAP_REVOKE 23
 /*
- * CapTable (RIGHT_W): derive a capability from one in the caller's table.
+ * CapTable (RIGHT_W): derive a capability from one in the caller's tables.
  * The arguments are OP_CAP_COPY's.
  * The result is a child of the source in the derivation tree,
  * so revoking below the source takes it, and everything derived from it in turn.
@@ -194,8 +204,8 @@
  */
 #define OP_CAP_DERIVE 24
 /*
- * CapTable (RIGHT_W): move a capability from the caller's table.
- * a1 = destination slot in the invoked table, a2 = source slot in the caller's table.
+ * CapTable (RIGHT_W): move a capability from the caller's tables.
+ * a1 = destination slot in the invoked table, a2 = source slot in the caller's tables.
  * The destination takes the source's place in the derivation tree:
  * the parent, the siblings and what was derived from it are the source's,
  * so a revoke through it takes what one through the source would have,
@@ -261,7 +271,7 @@
  * a1 = object type, a2 = destination slot,
  * a3 = type specific:
  *   CAP_CAPTABLE  the number of slots,
- *   CAP_PROCESS   the slot of the CapTable capability the process will use,
+ *   CAP_PROCESS   the slot of the CapTable capability the process will use, mounted in its table slot 0,
  *                 which needs RIGHT_W; the table may lie in any pool,
  *   CAP_THREAD    the slot of the Process capability the thread will run in,
  *   CAP_NOTIFICATION  unused.
@@ -270,7 +280,7 @@
  * Fails with KERR_STATE while the pool is being destroyed.
  * A process holds its table by a capability derived from the one named,
  * so revoking below that capability, or destroying the table's pool,
- * leaves the process naming nothing: every call it makes fails with KERR_INVALID_CAP.
+ * leaves the process naming nothing there: every call that names a slot of it fails with KERR_INVALID_CAP.
  * A thread holds its process the same way, and the process may lie in any pool;
  * revoking below that capability, or destroying the process's pool,
  * stops the thread for good: see OP_THREAD_RESUME.
@@ -279,7 +289,7 @@
 #define OP_POOL_ALLOC 7
 /*
  * Process (RIGHT_W): install a region into one of the process's region slots.
- * a1 = region slot index, a2 = Frame capability slot in the caller's table,
+ * a1 = region slot index, a2 = Frame capability slot in the caller's tables,
  * a3 = rights to install, a subset of the frame's rights.
  * RIGHT_W without RIGHT_R is rejected with KERR_INVALID_ARG,
  * because PMP reserves that encoding,
@@ -292,6 +302,25 @@
 #define OP_PROCESS_INSTALL 8
 /* Process (RIGHT_W): clear a region slot. a1 = region slot index. Clearing an empty slot succeeds. */
 #define OP_PROCESS_UNINSTALL 9
+/*
+ * Process (RIGHT_W): mount a table into one of the process's table slots,
+ * so that its threads name the table's slots SLOT_IN(a1, index).
+ * a1 = table slot index, below PROCESS_TABLES, else KERR_INVALID_ARG,
+ * a2 = slot of a CapTable capability with RIGHT_W in the caller's tables.
+ * Fails with KERR_SLOT_IN_USE when a table is mounted there already.
+ * The process's hold on the table is a child of that capability in the derivation tree,
+ * so revoking below it unmounts the table, as it does the one the process was allocated with, in table slot 0.
+ * A process moves to another table with this, OP_CAP_MOVE and OP_PROCESS_UNMOUNT;
+ * see DESIGN.md, "A process's tables".
+ */
+#define OP_PROCESS_MOUNT 39
+/*
+ * Process (RIGHT_W): clear a table slot.
+ * a1 = table slot index, below PROCESS_TABLES, else KERR_INVALID_ARG.
+ * Clearing an empty one succeeds.
+ * The table stays as long as its pool does; the numbers that pointed into this table slot name nothing.
+ */
+#define OP_PROCESS_UNMOUNT 40
 
 /*
  * Thread (RIGHT_W): set where a stopped thread will start, and its argument.
@@ -515,7 +544,7 @@
 #define OP_TIME_BIND 29
 
 /* One above the highest operation code; the fuzzer's mutator draws below it. */
-#define OP_COUNT 39
+#define OP_COUNT 41
 
 /*
  * Capability slots the kernel fills in the root task's table at boot.
@@ -616,6 +645,7 @@ struct replay_record {
 
 /* Fixed limits visible to user programs. */
 #define PROCESS_REGION_SLOTS 8
+#define PROCESS_TABLES 2 /* table slots per process, see SLOT_TABLE_SHIFT */
 #define ROOT_TABLE_SLOTS (BOOT_CAP_COUNT + 46) /* slots in the root task's table, 64 on QEMU */
 #define POOL_MIN_SIZE 64 /* the smallest Untyped OP_UNTYPED_RETYPE makes a pool of */
 #define TIMER_LINES 16 /* on the whole machine; see BOOT_CAP_TIMER_LINES */

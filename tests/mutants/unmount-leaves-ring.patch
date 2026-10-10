@@ -1,0 +1,20 @@
+An unmount empties the table slot without taking its node out of the ring below the CapTable capability,
+so the ring leads into a slot that is empty, and a revoke that comes to it clears nothing.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: child link to a slot that is not a live, filled one
+Report: link to a slot that is not a live, filled one
+Report: parent's ring does not reach the slot
+
+diff --git a/kernel/process.c b/kernel/process.c
+--- a/kernel/process.c
++++ b/kernel/process.c
+@@ -164,7 +164,7 @@ int process_unmount(struct process *proc, uint32_t index)
+     }
+     /* Nothing is derived from a table slot, so it leaves the tree as a leaf, and the table stays where it is. */
+     if (proc->tables[index].type != CAP_NONE) {
+-        cap_delete(&proc->tables[index], false);
++        proc->tables[index] = (struct cap){ 0 };
+     }
+     return KERR_OK;
+ }

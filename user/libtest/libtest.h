@@ -161,6 +161,22 @@ struct builder_page {
     uint8_t stack[1024] __attribute__((aligned(16))); /* the thread's */
 };
 
+/*
+ * A mover: a child that moves its own table to one twice as large, from the pool its parent let it have, self_migrate.
+ * Its capabilities keep their numbers, so its reports reach its parent through the slot they did,
+ * and the first slot past the old table's end holds a notification it makes and signals there.
+ */
+#define MOVER_TABLE 24u
+enum {
+    MOVER_MOVED = CHILD_RUNNING + 1, /* its table is the new one, and a slot past the old end works */
+};
+#define MOVER_STEP_MOVE 1u /* self_migrate failed, or handed out no more slots; detail is the status */
+#define MOVER_STEP_FAR  2u /* the first slot past the old end did not hold what it made there; detail is the status */
+struct mover_page {
+    struct child_page c;
+    struct child_own own;
+};
+
 void peer_main(struct child_page *page);
 void fault_main(struct child_page *page);
 /* A child that answers each check its parent asks, and one that spins and answers none. */
@@ -172,5 +188,6 @@ void locker_main(struct child_page *page);
 void passer_main(struct child_page *page);
 void snap_reader_main(struct child_page *page);
 void builder_main(struct child_page *page);
+void mover_main(struct child_page *page);
 
 #endif

@@ -98,12 +98,15 @@ static uint8_t draw_actor(struct rng *r)
     return (uint8_t)below(r, REPLAY_THREADS + 1);
 }
 
-/* Mostly a slot the setup filled or one just above it; sometimes any slot at all. */
+/*
+ * Mostly a slot the setup filled or one just above it; sometimes any slot at all,
+ * and sometimes one of a table mounted in the second table slot, which only an input mounts.
+ */
 static uint16_t draw_slot(struct rng *r)
 {
     switch (below(r, 8)) {
     case 0:
-        return (uint16_t)below(r, REPLAY_TABLE_SLOTS + 2);
+        return (uint16_t)SLOT_IN(below(r, 2), below(r, REPLAY_TABLE_SLOTS + 2));
     case 1:
         return (uint16_t)rnd(r);
     default:
@@ -393,6 +396,7 @@ static uint32_t draw_kind(struct rng *r, const struct shadow *s, const struct re
     case ARG_POOL:
     case ARG_NOTIFICATION:
     case ARG_THREAD:
+    case ARG_CAPTABLE:
         return pick_slot(r, s, t, arg_type(info->arg[i]), 1);
     case ARG_TYPE:
         if (c->op == OP_UNTYPED_RETYPE) {
@@ -414,6 +418,8 @@ static uint32_t draw_kind(struct rng *r, const struct shadow *s, const struct re
         return rights[below(r, sizeof(rights))];
     case ARG_REGION:
         return (uint32_t)below(r, PROCESS_REGION_SLOTS + 1);
+    case ARG_MOUNT:
+        return (uint32_t)below(r, PROCESS_TABLES + 1);
     case ARG_OFFSET:
         return below(r, 2) ? (uint32_t)below(r, 16) : (uint32_t)below(r, 64) << below(r, 16);
     case ARG_SIZE:
