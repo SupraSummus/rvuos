@@ -29,6 +29,7 @@
 #include "mac.h"
 #include "macregs.h"
 #include "osi.h"
+#include "txctl.h"
 
 #define RX_NEXT          (MAC_BASE + 0x088u) /* the descriptor the MAC fills next, its low 20 bits, or 0 */
 #define RX_LAST          (MAC_BASE + 0x08cu) /* the last descriptor filled, its low 20 bits */
@@ -77,6 +78,9 @@ static struct {
     volatile uint32_t channel; /* the one mac_channel last tuned to, which each frame is told it came on */
 } rx;
 
+static volatile int tx_pwr_asked; /* the sending's power asked of libphy since the last retune; see mac_tx */
+static void tx_control_start(void);
+
 
 /* The four bytes at p, little-endian. */
 static uint32_t le32(const uint8_t *p)
@@ -90,6 +94,7 @@ void mac_station(const uint8_t sta[6], const uint8_t bssid[6])
     wr(BSSID_HI, (rd(BSSID_HI) & 0xffff0000u) | (uint32_t)bssid[4] | (uint32_t)bssid[5] << 8 | BSSID_FLAG);
     wr(STA_ADDR_LO, le32(sta));
     wr(STA_ADDR_HI, ((uint32_t)sta[4] | (uint32_t)sta[5] << 8) | STA_ADDR_FLAG);
+    tx_control_start(); /* each access point's rate learnt anew */
 }
 
 /*
@@ -430,6 +435,7 @@ const char *mac_channel(uint32_t channel)
     hold();
     drv_phy_channel(channel);
     rx.channel = channel;
+    tx_pwr_asked = 0;
     mac_tx_block_clear();
     return 0;
 }
@@ -472,6 +478,7 @@ void mac_home_channel(void)
     mac_deinit(); /* their ic_mac_deinit */
     phy_change_channel(2412u, 1u, 0u, 0u); /* their PHY's tune, which stays libphy's; the 1 and 0 are their call's */
     wr(CSI_CBW, rd(CSI_CBW) & ~CSI_CBW_BIT8); /* their hal_mac_set_csi_cbw, the 0 their frame passes */
+    tx_pwr_asked = 0;
     mac_tx_block_clear(); /* their ic_mac_init */
 }
 
@@ -535,16 +542,27 @@ void mac_rx_on(void)
  * The libraries' lmacSetTxFrame and lmacTxFrame, read in their code,
  * build a three-word descriptor of the frame, program the slot's PPDU words, and tell the slot to send;
  * the driver does the same, with the MAC's registers as hal_mac_tx.o names them.
- * The frame's completion is the driver's too: the MAC leaves a bit in a hardware txq's state when the frame is done,
- * and the driver clears it as the libraries' lmacProcessTxComplete does, which lets the slot's arm bits clear;
- * on a timeout's bit or a collision's it disarms the slot, as their hal_mac_txq_disable does, and fails;
+ * Each arm sends the frame once.
+ * The try is done when the MAC leaves a completion, a timeout or a collision in a hardware txq's state,
+ * not when the arm bits read clear, which they do at once;
+ * the driver clears that state as their lmacProcessTxComplete does, and reads the try's end from the slot's
+ * completion word, acknowledged or not.
+ * A frame not acknowledged goes again with its Retry bit set, as their lmacRetryTxFrame sends it,
+ * at the rate and after the backoff txctl.c picks for the try.
+ * On a timeout or a collision the driver disarms the slot, as their hal_mac_txq_disable does;
  * their handler of a timeout also invalidates the queue, by lmacDisableTransmit, which the driver does not.
- * The slot is theirs in their start, slot 0, and the driver's own since nothing of theirs runs.
+ * The slot is their slot 0, which nothing of theirs uses since their lmac does not run.
  */
 
-/* PLCP0_ENABLE: the descriptor's address, the format every frame names, and the bits that tell the slot to send. */
+/*
+ * PLCP0_ENABLE: the descriptor's address, the format every frame names, the response the MAC waits for,
+ * and the bits that tell the slot to send.
+ * Without TX_PLCP0_ACK, as their mac_tx_set_plcp0 leaves it for a group, the MAC waits for no acknowledgement
+ * and ends each try as acknowledged: a frame to the access point on a channel it is not on showed it.
+ */
 #define TX_PLCP0_DMA    0x000fffffu
 #define TX_PLCP0_FORMAT 0x00600000u
+#define TX_PLCP0_ACK    0x01000000u
 #define TX_PLCP0_ARM    0xc0000000u
 
 /*
@@ -552,21 +570,37 @@ void mac_rx_on(void)
  * hal_mac_clr_txq_state read and clear them, in three groups, groups 0 and 1 in one word and group 2 in another,
  * a group 0 or 1 bit cleared by a write of its own, a group 2 bit by a read, an or and a write.
  * A group 2 bit is a frame's completion, which lmacProcessTxComplete reads, a group 1 bit a timeout,
- * which lmacProcessTxTimeout disables the transmit for, and a group 0 bit a collision, which lmacProcessCollisions_task does.
+ * which lmacProcessTxTimeout disables the transmit for,
+ * and a group 0 bit a collision, which lmacProcessCollisions_task does.
  */
 #define TXQ_STATE01 (MAC_BASE + 0xcb0u)
 #define TXQ_STATE2  (MAC_BASE + 0xcb8u)
 #define TXQ_CLR01   (MAC_BASE + 0xcacu)
 #define TXQ_CLR2    (MAC_BASE + 0xcb4u)
 
-/* CONF1's access class and lifetime, and the rest of a legacy frame at one Mbit, as a run's first probe left them. */
-#define TX_AIFSN       2u
-#define TX_BACKOFF     2u
-#define TX_TIMEOUT     0x3feu
-#define TX_PROT_1M     0x00020000u
-#define TX_RATE_DUR_1M 0x14140014u
-#define TX_TXLEN_1M    0x00400000u
-#define TX_RESP_DUR_1M 0x00400004u
+/*
+ * A try's end, bits 12 to 15 of the slot's completion word, which their hal_mac_get_txq_complete reads and
+ * lmacProcessTxComplete dispatches on: 0 to lmacProcessTxSuccess, 5 to lmacProcessAckTimeout,
+ * the rest to their RTS's, CTS's and other errors.
+ */
+#define TX_DONE_KIND(w) ((w) >> 12 & 0xfu)
+#define TX_DONE_ACKED   0u
+
+/*
+ * CONF1's access class: the best effort's AIFSN, as their lmacInitAc gives their best-effort queue,
+ * the try's backoff, as their lmacTxFrame draws it, and the frame's lifetime.
+ * PLCP1 holds the rate's code above the frame's length, as their mac_tx_set_plcp1 writes it for a legacy frame,
+ * and TX_RESP the response's rate, as their mac_tx_set_len does;
+ * the rest of a legacy frame's words are as a run's first probe found them, whatever its rate.
+ */
+#define TX_AIFSN        3u
+#define TX_TIMEOUT      0x3feu
+#define TX_PLCP1_RATE   12
+#define TX_PLCP1_LEN    0x00000fffu
+#define TX_RESP_RATE    6
+#define TX_RESP_LEGACY  0x00400004u
+#define TX_PROT_LEGACY  0x00020000u
+#define TX_TXLEN_LEGACY 0x00400000u
 
 #define TX_SLOT       0u
 #define TX_HDR        8u       /* the bytes the MAC reads before the frame */
@@ -574,8 +608,63 @@ void mac_rx_on(void)
 #define TX_TYPE(b)    ((b) >> 2 & 3u) /* the type in the frame control's first byte */
 #define TX_TYPE_MGMT  0u
 #define TX_TYPE_DATA  2u
+#define TX_RETRY      0x08u    /* the Retry bit, in the frame control's second byte */
+#define TX_GROUP      0x01u    /* the group bit of Address 1's first byte */
 #define TX_MAX        1600u    /* the largest frame the driver sends */
 #define TX_DONE_SPINS 2000000u /* the wait for the MAC to finish, as the libraries bound theirs */
+#define TX_TRIES      7u       /* a frame's tries, 802.11's dot11ShortRetryLimit */
+
+/*
+ * The rates, fastest first, by the PHY's code, as their wifi_phy_rate_t numbers them:
+ * OFDM's eight, whose codes are the RATE field of the OFDM SIGNAL, and 802.11b's 1 Mb/s, code 0,
+ * which every station takes, and which management frames and frames to a group go at.
+ * The response, the acknowledgement, comes at the rate their mac_tx_get_rts_rate picks for the frame's.
+ * A try's power is libphy's, phy_get_max_pwr's for the rate and for its response's, in TX_PWR's bytes 0, 2 and 3,
+ * as their hal_mac_tx_set_ppdu writes it; the driver asks again after each retune, as it may follow the channel.
+ */
+struct tx_rate {
+    uint8_t code;
+    uint8_t resp; /* the response's code */
+    uint16_t kbps;
+};
+
+static const struct tx_rate tx_rates[MAC_TX_RATES] = {
+    { 0x0c, 0x09, 54000 }, { 0x08, 0x09, 48000 }, { 0x0d, 0x09, 36000 }, { 0x09, 0x09, 24000 },
+    { 0x0e, 0x0a, 18000 }, { 0x0a, 0x0a, 12000 }, { 0x0f, 0x0b, 9000 },  { 0x0b, 0x0b, 6000 },
+    { 0x00, 0x00, 1000 },
+};
+#define TX_LOWEST (MAC_TX_RATES - 1u)
+#define TX_START  3u /* 24 Mb/s, the rate an access point's data starts at */
+
+extern int phy_get_max_pwr(uint8_t rate, int8_t pwr[2]); /* libphy's, which their hal_init_tx_pwr calls */
+
+static uint32_t tx_pwr[MAC_TX_RATES]; /* each rate's TX_PWR word, asked since the last retune */
+
+static uint32_t pwr_word(uint32_t i)
+{
+    int8_t own[2] = { 0, 0 }, resp[2] = { 0, 0 };
+    phy_get_max_pwr(tx_rates[i].code, own);
+    phy_get_max_pwr(tx_rates[i].resp, resp);
+    return (uint32_t)(uint8_t)own[0] | (uint32_t)(uint8_t)resp[0] << 16 | (uint32_t)(uint8_t)resp[1] << 24;
+}
+
+uint32_t mac_tx_kbps(uint32_t i)
+{
+    return i < MAC_TX_RATES ? tx_rates[i].kbps : 0;
+}
+
+struct mac_tx_counts mac_tx_counts;
+
+/* Each try's rate and backoff, txctl.c's, its generator seeded from the chip's, too slow to draw each try from. */
+static struct txctl ctl;
+
+static void tx_control_start(void)
+{
+    uint32_t seed;
+    drv_random((uint8_t *)&seed, sizeof(seed));
+    txctl_start(&ctl, MAC_TX_RATES, TX_START, seed);
+    mac_tx_counts.rate = ctl.at;
+}
 
 struct tx_desc {
     volatile uint32_t ctrl;
@@ -602,20 +691,17 @@ const char *mac_tx_init(void)
         return "the frame's buffer and lock, from the heap";
     }
     tx = (struct tx *)(((uintptr_t)p + 15u) & ~(uintptr_t)15u);
+    tx_control_start();
     return 0;
 }
 
-/* The frame at the driver's own descriptor, the slot programmed as the libraries program it, and told to send. */
-static const char *send(const uint8_t *frame, uint32_t len)
+/* The frame copied in after the words the MAC reads before it, given the station's next sequence number. */
+static void load(const uint8_t *frame, uint32_t len)
 {
-    if (len < 2u || len > TX_MAX) {
-        return "the frame's length";
-    }
-    uint32_t n = len + TX_HDR + FCS;
     memcpy(tx->frame + TX_HDR, frame, len);
     /*
      * A management or a data frame takes the station's next sequence number, its fragment 0:
-     * a station that does not do QoS numbers both from one counter.
+     * a station that does not do QoS numbers both from one counter. Its tries share the number.
      */
     if ((TX_TYPE(frame[0]) == TX_TYPE_MGMT || TX_TYPE(frame[0]) == TX_TYPE_DATA) && len >= TX_SEQ + 2u) {
         tx->frame[TX_HDR + TX_SEQ] = (uint8_t)(tx_seq << 4);
@@ -625,21 +711,37 @@ static const char *send(const uint8_t *frame, uint32_t len)
     /* The words the MAC reads before the frame: the frame's length with its checksum, then zero. */
     wr((uint32_t)(uintptr_t)tx->frame, len + FCS);
     wr((uint32_t)(uintptr_t)tx->frame + 4u, 0);
+}
+
+enum try_end { TRY_ACKED, TRY_LOST, TRY_TIMEOUT, TRY_COLLISION, TRY_UNFINISHED };
+
+static const char *const try_failed[] = {
+    [TRY_ACKED] = 0,
+    [TRY_LOST] = "no try acknowledged",
+    [TRY_TIMEOUT] = "the MAC's sending timed out",
+    [TRY_COLLISION] = "the MAC's sending met a collision",
+    [TRY_UNFINISHED] = "the MAC did not finish the frame",
+};
+
+/* The frame loaded, len bytes, sent once at rate i after backoff slots: the slot programmed, armed and waited for. */
+static enum try_end try(uint32_t len, uint32_t i, uint32_t backoff, int group)
+{
+    uint32_t n = len + TX_HDR + FCS;
     tx->desc.ctrl = (DESC_SIZE(n) << DESC_LEN_SHIFT) | DESC_SIZE(n) | DESC_EOF | DESC_OWNER;
     tx->desc.frame = (uint32_t)(uintptr_t)tx->frame;
     tx->desc.next = 0;
     __asm__ volatile("fence" : : : "memory");
 
     const uint32_t s = TX_SLOT;
-    wr(TX_PLCP0(s), ((uint32_t)(uintptr_t)&tx->desc & TX_PLCP0_DMA) | TX_PLCP0_FORMAT);
+    wr(TX_PLCP0(s), ((uint32_t)(uintptr_t)&tx->desc & TX_PLCP0_DMA) | TX_PLCP0_FORMAT | (group ? 0u : TX_PLCP0_ACK));
     wr(TX_CONF0(s), 0);
     wr(TX_MPLEN(s), 0);
-    wr(TX_EDCA(s), (TX_AIFSN << 24) | (TX_BACKOFF << 12) | TX_TIMEOUT);
-    wr(TX_PLCP1(s), (n - TX_HDR) & 0x00000fffu);
-    wr(TX_PROT(s), TX_PROT_1M);
-    wr(TX_RATE_DUR(s), TX_RATE_DUR_1M);
-    wr(TX_TXLEN(s), TX_TXLEN_1M);
-    wr(TX_RESP_DUR(s), TX_RESP_DUR_1M);
+    wr(TX_EDCA(s), (TX_AIFSN << 24) | (backoff << 12) | TX_TIMEOUT);
+    wr(TX_PLCP1(s), (uint32_t)tx_rates[i].code << TX_PLCP1_RATE | ((n - TX_HDR) & TX_PLCP1_LEN));
+    wr(TX_PROT(s), TX_PROT_LEGACY);
+    wr(TX_PWR(s), tx_pwr[i]);
+    wr(TX_TXLEN(s), TX_TXLEN_LEGACY);
+    wr(TX_RESP(s), TX_RESP_LEGACY | (uint32_t)tx_rates[i].resp << TX_RESP_RATE);
     __asm__ volatile("fence" : : : "memory");
     /*
      * The slot's state bits may lie there from a frame before; they are cleared here, so that a bit that comes after
@@ -648,30 +750,35 @@ static const char *send(const uint8_t *frame, uint32_t len)
     wr(TXQ_CLR01, (1u << s) | (1u << (16u + s)));
     wr(TXQ_CLR2, rd(TXQ_CLR2) | (1u << s));
     wr(TX_PLCP0(s), rd(TX_PLCP0(s)) | TX_PLCP0_ARM);
+    mac_tx_counts.tries[i]++;
 
-    /*
-     * The MAC clears the arm bits once the frame is done, leaving a completion, a timeout or a collision in the
-     * hardware txq state; the driver clears it, and on a timeout or a collision disarms the slot and fails,
-     * for the caller to send again if it means to.
-     */
     for (uint32_t spins = 0; spins < TX_DONE_SPINS; spins++) {
         if (rd(TXQ_STATE2) & (1u << s)) {
+            uint32_t end = TX_DONE_KIND(rd(TX_DONE(s)));
             wr(TXQ_CLR2, rd(TXQ_CLR2) | (1u << s)); /* the completion, as hal_mac_clr_txq_state(2, slot) */
-        } else if (rd(TXQ_STATE01) & (1u << (16u + s))) {
+            mac_tx_counts.ends |= 1u << end;
+            if (end != TX_DONE_ACKED) {
+                return TRY_LOST;
+            }
+            mac_tx_counts.acked[i]++;
+            return TRY_ACKED;
+        }
+        uint32_t state = rd(TXQ_STATE01);
+        if (state & (1u << (16u + s))) {
             wr(TXQ_CLR01, 1u << (16u + s));
             wr(TX_PLCP0(s), rd(TX_PLCP0(s)) & ~TX_PLCP0_ARM);
-            return "the MAC's sending timed out";
-        } else if (rd(TXQ_STATE01) & (1u << s)) {
+            mac_tx_counts.timeouts++;
+            return TRY_TIMEOUT;
+        }
+        if (state & (1u << s)) {
             wr(TXQ_CLR01, 1u << s);
             wr(TX_PLCP0(s), rd(TX_PLCP0(s)) & ~TX_PLCP0_ARM);
-            return "the MAC's sending met a collision";
-        }
-        if (!(rd(TX_PLCP0(s)) & TX_PLCP0_ARM)) {
-            return 0;
+            mac_tx_counts.collisions++;
+            return TRY_COLLISION;
         }
     }
     wr(TX_PLCP0(s), rd(TX_PLCP0(s)) & ~TX_PLCP0_ARM); /* the slot is left as it was found */
-    return "the MAC did not finish the frame";
+    return TRY_UNFINISHED;
 }
 
 /* The frame sent while the lock is held, so that no other thread's frame overwrites it before it is done. */
@@ -680,10 +787,32 @@ const char *mac_tx(const uint8_t *frame, uint32_t len)
     if (tx == 0) {
         return "the sending, not made";
     }
+    if (len < FRAME_MIN || len > TX_MAX) {
+        return "the frame's length";
+    }
     osi_mutex_take(tx_lock);
-    const char *failed = send(frame, len);
+    if (!tx_pwr_asked) {
+        for (uint32_t i = 0; i < MAC_TX_RATES; i++) {
+            tx_pwr[i] = pwr_word(i);
+        }
+        tx_pwr_asked = 1;
+    }
+    load(frame, len);
+    int group = frame[4] & TX_GROUP, data = !group && TX_TYPE(frame[0]) == TX_TYPE_DATA;
+    enum try_end end = TRY_LOST;
+    for (uint32_t t = 0; t < (group ? 1u : TX_TRIES) && end != TRY_ACKED && end != TRY_UNFINISHED; t++) {
+        if (t > 0) {
+            tx->frame[TX_HDR + 1] |= TX_RETRY;
+        }
+        end = try(len, data ? txctl_rate(&ctl, t) : TX_LOWEST, txctl_backoff(&ctl, t), group);
+        if (data && t == 0) {
+            txctl_first(&ctl, end == TRY_ACKED);
+        }
+    }
+    mac_tx_counts.lost += end != TRY_ACKED;
+    mac_tx_counts.rate = ctl.at;
     osi_mutex_give(tx_lock);
-    return failed;
+    return try_failed[end];
 }
 
 /*

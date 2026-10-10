@@ -175,6 +175,21 @@ void drv_mac_told(const char *who)
             "stuck %u\n",
             who, (unsigned)m->interrupts, (unsigned)m->causes, (unsigned)m->broken, (unsigned)m->chained,
             (unsigned)m->odd, (unsigned)m->overran, (unsigned)m->restarted, (unsigned)m->stuck);
+    /* The sending's, in two lines, as drv_say's line holds 160 bytes: each rate's tries and those acknowledged. */
+    const struct mac_tx_counts *t = &mac_tx_counts;
+    char line[120];
+    uint32_t at = 0;
+    for (uint32_t i = 0; i < MAC_TX_RATES && at < sizeof(line); i++) {
+        if (t->tries[i] != 0) {
+            at += (uint32_t)snprintf(line + at, sizeof(line) - at, " %u:%u/%u", (unsigned)(mac_tx_kbps(i) / 1000u),
+                                     (unsigned)t->acked[i], (unsigned)t->tries[i]);
+        }
+    }
+    line[at < sizeof(line) ? at : sizeof(line) - 1u] = 0;
+    drv_say("%s: the sending's tries acknowledged by Mb/s%s\n", who, at ? line : " none");
+    drv_say("%s: frames not sent %u, ends seen %x, timeouts %u, collisions %u; the rate held %u Mb/s\n", who,
+            (unsigned)t->lost, (unsigned)t->ends, (unsigned)t->timeouts, (unsigned)t->collisions,
+            (unsigned)(mac_tx_kbps(t->rate) / 1000u));
 }
 
 /* A step of mac.c's that must succeed: 0, or the step that failed, which stops the driver as drv_must does. */

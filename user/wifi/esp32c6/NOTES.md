@@ -120,29 +120,29 @@ which `make mgmt-test` runs on the host, under the sanitizers, against every cut
 ## The MAC's sending, the driver's own
 
 Reading what the libraries wrote to a slot to send a frame let the sending be the driver's own:
-with `tx=own` the driver builds the frame's descriptor and programs the slot's PPDU words itself,
-as the libraries' `lmacSetTxFrame` does, arms the slot, as their `hal_mac_txq_enable` does,
-and programs a slot the libraries' lmac still names, for a legacy frame at one Mbit;
-a probe sent so is answered by the access point.
+the driver builds the frame's descriptor and programs the slot's PPDU words itself,
+as the libraries' `lmacSetTxFrame` does, and arms the slot, as their `hal_mac_txq_enable` does.
 
-The completion is the driver's too.
-Arming alone left the frame unfinished when the driver held the interrupt, which `rx=own` does:
-the MAC leaves a bit in its hardware txq's state when the frame is done,
-and the libraries' `lmacProcessTxComplete`, which their interrupt posts, is what cleared it, and the slot's arm bits with it.
-The driver clears that bit now, as `hal_mac_clr_txq_state(2, slot)` does, while it waits for the arm bits to clear,
-so a probe sent with both `rx=own` and `tx=own` is answered the same, and their interrupt is needed for neither.
-The state's other two groups are a timeout and a collision,
-on which the driver disarms the slot, as their `hal_mac_txq_disable` does, and fails;
-their `lmacProcessTxTimeout` also invalidates the queue first, by `lmacDisableTransmit`, which the driver does not.
-A state bit of the libraries' slot may lie there from before the driver took the interrupt,
-so the driver clears the slot's state just before it arms a frame;
-without that, the first frame read a stale timeout bit and was failed though the access point answered it.
-An own slot of the driver's, rather than the libraries' slot 0, would keep their completions out of its way,
-and the libraries' pp, which retries a collision or a timeout, does more than failing and letting the caller send again.
-It still clears the queue's own state byte, which `lmac_stop_hw_txq` reads to leave the slot alone
-and `lmacProcessTxComplete` reads to skip a queue it is not finishing,
-and reads none of the details `hal_mac_get_txq_complete` reads of a completion;
-`pp` and `net80211` stay for the slot the driver borrows and the station's own logic.
+The words were first copied from a probe to the group, and so they were wrong for a frame to the access point.
+PLCP0's response field was 0, which has the MAC wait for no acknowledgement and end every try as acknowledged,
+and the driver took the arm bits clearing for the frame's end, which they do at once:
+the next frame was copied over one the MAC still read,
+and the access point acknowledged frames it then dropped, a few in a hundred of the echo's answers.
+The backoff was the one draw the probe left, 2 slots, under the libraries' voice queue's AIFSN,
+so the station took the medium before stations that drew theirs.
+
+Now a frame to the access point asks for the acknowledgement, as their `mac_tx_set_plcp0` does for one;
+a frame to the access point's address on a channel it is not on showed the difference, never acknowledged.
+A try is done when the MAC leaves its completion in the hardware txq state,
+and the slot's completion word says whether it was acknowledged, as their `hal_mac_get_txq_complete` reads it.
+A frame not acknowledged goes again, its Retry bit set, seven tries at the most.
+Data go at OFDM's rates, management frames and frames to a group at 1 Mb/s, each at libphy's power for its rate;
+`txctl.c` picks each try's rate, by AARF, and its backoff, from the best-effort window that doubles with the tries,
+and `make txctl-test` holds both.
+The slot's state is cleared just before each arm, since a bit from a frame before would end the new one at once.
+
+Fairness is the board's to show: `tools/wifi-share.py` drives a Pico 2 W's echo and the C6's at one access point,
+alone and together. Beside the C6 with the fixed backoff, the Pico kept about half what it kept beside the fair one.
 
 ## The station's own authentication
 
@@ -428,7 +428,5 @@ The ordinary runs hold both, the joins among them.
 
 Some of the driver's choices are made for the libraries that still run beside it, not for the MAC,
 and each goes, or is looked at again, when what it answers to goes:
-- `mac.c`'s sending borrows their slot 0 and clears its queue's state byte so that their lmac leaves the slot alone;
-  an own slot, see `TODO.md`, ends that.
 - The comparison's tools -- `libstart=1`, the diff, the compare across images and their expected files -- go once
   no call of theirs is left in the start, as `TODO.md` says.

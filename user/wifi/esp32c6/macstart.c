@@ -673,7 +673,7 @@ void mac_crypto_init(void)
 }
 
 /*
- * The libraries' hal_attenna_init (their spelling), written out: each of the eight slots' TX_RESP_DUR, slot 0 down to
+ * The libraries' hal_attenna_init (their spelling), written out: each of the eight slots' TX_RESP, slot 0 down to
  * slot 7, cleared of bits 0 to 4 and set at bit 5, in their two passes -- 0 to 2 cleared first, then 3 cleared, 5 set
  * and 4 cleared -- and the single word ANTENNA_MAC_2CC, cleared of 0 to 2 and set at 5. What ANTENNA_MAC_2CC holds
  * is not known; each access is one here, in their order, since the trace holds each.
@@ -682,10 +682,10 @@ void mac_crypto_init(void)
 
 void mac_antenna_init(void)
 {
-    for (uint32_t a = TX_RESP_DUR(0); a >= TX_RESP_DUR(TX_SLOTS - 1); a -= TX_PPDU_STEP) {
+    for (uint32_t a = TX_RESP(0); a >= TX_RESP(TX_SLOTS - 1); a -= TX_PPDU_STEP) {
         wr(a, rd(a) & ~0x7u);
     }
-    for (uint32_t a = TX_RESP_DUR(0); a >= TX_RESP_DUR(TX_SLOTS - 1); a -= TX_PPDU_STEP) {
+    for (uint32_t a = TX_RESP(0); a >= TX_RESP(TX_SLOTS - 1); a -= TX_PPDU_STEP) {
         wr(a, rd(a) & ~0x8u);
         wr(a, rd(a) | 0x20u);
         wr(a, rd(a) & ~0x10u);

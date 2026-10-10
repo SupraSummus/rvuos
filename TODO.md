@@ -125,7 +125,6 @@ what is left:
   The sending is software CCMP still, `ccmp.c` on hostap's `aes-ccm.c`, under the pairwise key;
   with the engine word set the access point took none of the sending, so it is left unset;
   the MAC's own cipher is in `user/wifi/esp32c6/NOTES.md`.
-  The station's data go at 1 Mb/s, the rate `mac_tx` programs for management frames.
   A rekey is checked on the host alone, by `keys-test`:
   showing a pairwise one live wants an access point that answers a station's rekey request,
   which the one here does not, or one that rekeys on its own;
@@ -156,9 +155,10 @@ what is left:
   Gathering the driver's address macros into `macregs.h`, ordered by address, would show a word two files name
   beside its twin.
   A write that does nothing can be left out, on a role rather than on the bit.
-  Its frame completion spins in the caller's thread while the slot is armed, and borrows the libraries' slot 0;
-  an own slot, the driver's own interrupt to finish the frame, and the libraries' retry of a collision or a timeout,
-  with their invalidation of the queue on a timeout, would do better.
+  `mac-trace.py seq` holds `RX_BASE`'s value, the address of the driver's descriptor list in its heap,
+  which any change to the driver's `.bss` moves; holding that word to the driver's block would spare such a change.
+  Its sending spins in the caller's thread through each try's backoff and airtime;
+  the MAC's interrupt finishing the try, its cause 0x80, would let the next frame's CCMP run meanwhile.
   `mac.c` points a MAC that ran out of descriptors past the last it filled by `RX_BASE` alone,
   which a move off the libraries' list found not always taken; no run has run out yet, `restarted` 0.
 - The ESP32-C6's driver aims at a station alone, the profile its work is held to:
@@ -174,12 +174,11 @@ what is left:
   and the supplicant's a bounded arena of its own, or fixed buffers over a P-256 of fixed width.
 - The ESP32-C6's Wi-Fi root task has 8 KiB of memory and 9 slots left once its clients run,
   so another client needs room found first, in the driver's block or a smaller `CLIENT_CHAN_SIZE`.
-- The ESP32-C6's echo answers in about 6 ms at the median, the Pico 2 W's in about 5,
-  and `tools/wifi-run.py`'s throughput check sees the C6 carry about a sixth of what the Pico 2 W does,
-  more datagrams in flight than two only losing more:
-  where the time goes, the radio sending at 1 Mb/s, the software CCMP, the frame's completion spun in the caller's
-  thread, or the driver's turn after its interrupt, open decision 9, is not measured;
-  the radio's own rate is the first to raise, with a rate control, see the profile above.
+- The ESP32-C6's echo carries about what the Pico 2 W's does in `tools/wifi-run.py`'s throughput check,
+  and more with more datagrams in flight.
+  Of the cycles a frame sent costs, the software CCMP takes about two thirds and the spun try the rest;
+  why its AES costs several times a table-driven AES-128's cycles a block, its code and tables read through the
+  flash's cache among the guesses, is not measured. HT's rates and aggregation come after, see the profile above.
 - The Pico 2 W's run lasts its `run=` whatever its checks found, or until a reset by hand,
   since the host has no way to end it: its USB serial port, `kernel/board/rp2350/cdc.c`, is the halt's alone.
   That port kept up while the run lasts would let the host end it there, in either mode,
@@ -215,6 +214,8 @@ what is left:
   so a host may wait seconds to reach it.
   There the ping of `make BOARD=esp32c6 wifi-esp32c6` fails now and then:
   the station answers every request, the host hears fewer than four of five, and where the answers go is not known.
+  The sending once copied a frame over the one the MAC still read, which lost answers just so;
+  whether that was all of it wants a longer series.
   The Pico 2 W's `debug=dhcp` and `bssid=` measure it.
   The own receive, through the MAC without the libraries, misses them too:
   `listen=` counts the access point's frames to the group and whether the next by number is heard after each,

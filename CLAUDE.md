@@ -66,6 +66,10 @@ and `tools/wifi-run.py` checks it from the host as it checks the Pico 2 W's, but
 A change to `user/wifi/esp32c6/mac.c` or `macstart.c` runs it again with `listen=` in `WIFI_CONFIG`,
 which fails if the driver hears nothing, again with `listen=` and `probe=`,
 which fails if a probe is not sent or not answered, and again with neither, the driver's scan.
+A change to how the C6 sends, `mac.c`'s sending or `txctl.c`, with a Pico 2 W connected too,
+runs `make BOARD=esp32c6 wifi-esp32c6-share` with `SHARE_BEFORE` naming the driver image from before it:
+the Pico must keep as much beside the new C6 as beside the old, within its rounds' spread,
+or the new takes more of the medium.
 A change to `user/tracer/` or to the trace in `user/wifi/esp32c6/` runs it with `trace=1` in `WIFI_CONFIG`,
 which has the root task carry out and log every device access of the libraries' bring-up,
 and again with `trace=2`, the same window with the driver mapping its frames and nothing faulting;

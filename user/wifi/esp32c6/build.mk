@@ -104,6 +104,11 @@ KEYS_TEST       := $(ESP_HOST)/keys-test
 KEYS_TEST_OBJ   := $(ESP_HOST)/keys.o $(ESP_HOST)/keys-test.o
 $(ESP_HOST)/keys.o: $(WIFI_ESP)/keys.c $(WIFI_ESP)/keys.h
 $(ESP_HOST)/keys-test.o: $(WIFI_ESP)/test/keys-test.c $(WIFI_ESP)/keys.h
+# The sending's choices of txctl.c, each try's rate and backoff, likewise.
+TXCTL_TEST      := $(ESP_HOST)/txctl-test
+TXCTL_TEST_OBJ  := $(ESP_HOST)/txctl.o $(ESP_HOST)/txctl-test.o
+$(ESP_HOST)/txctl.o: $(WIFI_ESP)/txctl.c $(WIFI_ESP)/txctl.h
+$(ESP_HOST)/txctl-test.o: $(WIFI_ESP)/test/txctl-test.c $(WIFI_ESP)/txctl.h
 # The bring-up's register sequences of macstart.c, held to what the libraries' own did in a run of their start,
 # the files of test/replay/, which wifi-esp32c6-replay below takes again;
 # they fetch nothing, so make check runs them.
@@ -133,7 +138,8 @@ $(ESP_HOST)/mgmt.o: $(WIFI_ESP)/mgmt.c $(WIFI_ESP)/mgmt.h $(WIFI_ESP_INIT)
 $(ESP_HOST)/mgmt-test.o: $(WIFI_ESP)/test/mgmt-test.c $(WIFI_ESP)/mgmt.h $(WIFI_ESP_INIT)
 $(ESP_HOST)/ccmp.o: $(WIFI_ESP)/ccmp.c $(WIFI_ESP)/ccmp.h $(WIFI_ESP_INIT)
 $(ESP_HOST)/ccmp-test.o: $(WIFI_ESP)/test/ccmp-test.c $(WIFI_ESP)/ccmp.h $(WIFI_ESP_INIT)
-$(addprefix $(ESP_HOST)/,ec.o sae-test.o mgmt.o mgmt-test.o ccmp.o ccmp-test.o keys.o keys-test.o) $(MAC_REPLAY_TEST_OBJ):
+$(addprefix $(ESP_HOST)/,ec.o sae-test.o mgmt.o mgmt-test.o ccmp.o ccmp-test.o keys.o keys-test.o) \
+		$(TXCTL_TEST_OBJ) $(MAC_REPLAY_TEST_OBJ):
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O1 -g -Wall -Wextra -Werror -Wshadow $(HOST_SAN) $(ESP_HOST_INC) -I$(WIFI_ESP) -Iuser \
 		-c $< -o $@
@@ -150,10 +156,13 @@ $(CCMP_TEST): $(CCMP_TEST_OBJ)
 $(KEYS_TEST): $(KEYS_TEST_OBJ)
 	$(HOST_CC) $(HOST_SAN) $^ -o $@
 
+$(TXCTL_TEST): $(TXCTL_TEST_OBJ)
+	$(HOST_CC) $(HOST_SAN) $^ -o $@
+
 $(MAC_REPLAY_TEST): $(MAC_REPLAY_TEST_OBJ)
 	$(HOST_CC) $(HOST_SAN) $^ -o $@
 
-.PHONY: sae-test mgmt-test ccmp-test keys-test mac-replay-test
+.PHONY: sae-test mgmt-test ccmp-test keys-test txctl-test mac-replay-test
 sae-test: $(SAE_TEST)
 	$(SAE_TEST)
 
@@ -165,6 +174,9 @@ ccmp-test: $(CCMP_TEST)
 
 keys-test: $(KEYS_TEST)
 	$(KEYS_TEST)
+
+txctl-test: $(TXCTL_TEST)
+	$(TXCTL_TEST)
 
 mac-replay-test: $(MAC_REPLAY_TEST)
 	$(MAC_REPLAY_TEST) $(MAC_REPLAY_DIR) $(MAC_REPLAY_EXPECTED)
@@ -213,6 +225,21 @@ wifi-esp32c6: $(BUILD)/kernel-wifi-esp32c6.bin $(BUILD)/wifi-drv.bin $(SAE_TEST)
 else
 wifi-esp32c6:
 	$(error the driver runs on an ESP32-C6: make BOARD=esp32c6 wifi-esp32c6)
+endif
+
+# The medium shared with a Pico 2 W at the C6's access point, see tools/wifi-share.py:
+# PICO_CONFIG names the Pico's configuration, as WIFI_CONFIG the C6's, each with the access point's bssid and a run=
+# that outlasts the rounds, and SHARE_BEFORE a driver image from before a change, held against this one.
+.PHONY: wifi-esp32c6-share
+ifeq ($(BOARD),esp32c6)
+WIFI_ESP_BOOT = $(ESPTOOL_PYTHON) tools/esp32c6-run.py --port $(PORT) --flash $(WIFI_ESP_AT):$(1) \
+	--text $(WIFI_ESP_INPUT_AT):$(WIFI_CONFIG) $(BUILD)/kernel-wifi-esp32c6.bin
+wifi-esp32c6-share: $(BUILD)/kernel-wifi-esp32c6.bin $(BUILD)/wifi-drv.bin
+	tools/wifi-share.py --pico "make BOARD=rp2350 wifi WIFI_CONFIG=$(PICO_CONFIG)" \
+		--c6 "$(call WIFI_ESP_BOOT,$(BUILD)/wifi-drv.bin)" $(if $(SHARE_BEFORE),--c6 "$(call WIFI_ESP_BOOT,$(SHARE_BEFORE))")
+else
+wifi-esp32c6-share:
+	$(error the driver runs on an ESP32-C6: make BOARD=esp32c6 wifi-esp32c6-share)
 endif
 
 # The device registers the driver reaches, as `make phymap` lists the PHY harness's, see user/phyblob/build.mk,

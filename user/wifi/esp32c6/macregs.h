@@ -88,9 +88,10 @@
 #define TX_PPDU(s)     (MAC_BASE + 0x1488u - (s) * TX_PPDU_STEP) /* PLCP1 first, then the slot's PPDU words */
 #define TX_PLCP1(s)    (TX_PPDU(s) + 0x00u)
 #define TX_PROT(s)     (TX_PPDU(s) + 0x04u) /* the protect threshold of hal_he_set_tx_protection */
-#define TX_RATE_DUR(s) (TX_PPDU(s) + 0x24u)
+#define TX_PWR(s)      (TX_PPDU(s) + 0x24u) /* the frame's power and its response's, from libphy; see mac.c */
 #define TX_TXLEN(s)    (TX_PPDU(s) + 0x30u)
-#define TX_RESP_DUR(s) (TX_PPDU(s) + 0x34u)
+#define TX_RESP(s)     (TX_PPDU(s) + 0x34u) /* the response's rate, and the antennas of hal_attenna_init */
+#define TX_DONE(s)     (TX_PPDU(s) + 0x60u) /* how the frame sent last ended, which hal_mac_get_txq_complete reads */
 
 /*
  * A register read and write, volatile, as the driver makes them; on the host, for the bring-up's replay,

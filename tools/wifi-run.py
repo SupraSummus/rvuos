@@ -260,7 +260,7 @@ class Checks:
     def throughput(self, seconds=5.0, size=1024, window=2, wait=0.5):
         """Datagrams of size bytes to the echo, window of them in flight, for seconds: the bytes that came back a
         second, each way, which the slower of the two ways bounds; one not back within wait is lost.
-        Two in flight keep the ESP32-C6's sending busy, as one does not; more only lose more."""
+        Two in flight keep either board's sending busy, as one does not."""
         self.sock.setblocking(False)
         try:
             while True:

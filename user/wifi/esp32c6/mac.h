@@ -172,18 +172,31 @@ void mac_home_channel(void);
 const char *mac_tx_init(void);
 
 /*
- * A frame sent by the driver's own code; 0, or the step that failed, a timeout or a collision among them.
+ * A frame sent by the driver's own code; 0, or why not, no try acknowledged among the reasons.
  * The frame is the 802.11 frame without its checksum, which the MAC appends,
  * and mac_tx gives a management or a data frame the station's next sequence number, from one counter,
  * as a station that does not do QoS numbers them.
- * The driver programs a slot the libraries' lmac names, arms it, and finishes the frame itself:
- * it clears the hardware txq state's completion bit, which lets the slot's arm bits clear, and on a timeout's
- * or a collision's bit disarms the slot and fails; the caller may send it again.
- * It works with the libraries' interrupt or the driver's own. See mac.c.
+ * A frame to a group goes once, at 1 Mb/s.
+ * One to a station goes until it is acknowledged, seven tries at the most, its Retry bit set after the first:
+ * a management frame at 1 Mb/s, a data frame at OFDM's rates, as txctl.c learns them from the tries. See mac.c.
  * Any of the driver's threads may send, the station's and the link's: one waits while another's frame goes,
  * since there is one buffer and one slot.
  */
 const char *mac_tx(const uint8_t *frame, uint32_t len);
+
+/* What the sending met since the start, for the log; the sending alone writes it, under its lock. */
+#define MAC_TX_RATES 9u
+struct mac_tx_counts {
+    uint32_t tries[MAC_TX_RATES]; /* by rate, fastest first, mac_tx_kbps naming each */
+    uint32_t acked[MAC_TX_RATES];
+    uint32_t lost;                /* frames no try of was acknowledged */
+    uint32_t ends;                /* every try's end seen, a bit each by the MAC's number: 0 acknowledged, 5 not */
+    uint32_t timeouts;            /* tries the MAC's timeout ended */
+    uint32_t collisions;
+    uint32_t rate;                /* the rate the rate control holds */
+};
+extern struct mac_tx_counts mac_tx_counts;
+uint32_t mac_tx_kbps(uint32_t i);
 
 /*
  * The driver's own stop, in place of Espressif's esp_wifi_stop: it turns the vif's receive off, holds the MAC
