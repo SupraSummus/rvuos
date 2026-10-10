@@ -313,10 +313,6 @@ what is left:
   over the objects of each type, the threads waiting and stopped, the pools dying and the `Irq`s armed,
   found no more mutants than edges alone in 5000 runs each, and was left out;
   a finer picture, such as the derivation tree's depth, is untried.
-- From nothing, `-len_control=100` keeps the inputs to one record for tens of thousands of runs,
-  since libFuzzer grows the limit by bytes and a record is sixteen;
-  `-len_control=20` reached more edges in a short run.
-  Measure it with `make mutants-fuzz MUTANTS_FUZZ=-e` before `make fuzz` takes it.
 - Two cores are checked by `fuzz-smp2`, which takes the cores' traps one after another, and by the demo,
   which on mps2-an521 and RP2350's Cortex-M33 is the only check of ARM's lock, its waits in `wfe`
   and the start of the second core;

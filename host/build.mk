@@ -84,6 +84,8 @@ mutants-fuzz:
 # Fold the interesting inputs back into the repository with `make corpus-merge`.
 # libFuzzer turns -len_control off when it finds the record mutator of host/mutator.c;
 # asked for explicitly, it stays on and keeps the inputs short and the runs per second high.
+# It grows the limit only after len_control runs times the limit's logarithm add nothing,
+# and the value profile adds an input every few runs, so at libFuzzer's 100 an input from nothing stayed one record.
 # The kernel's edges are nearly all reached, so the values its comparisons meet guide the search too:
 # a pool run out at the one allocation that fails is a size compared, not an edge.
 # `make mutants-fuzz` measures with the same flags.
@@ -92,7 +94,7 @@ mutants-fuzz:
 # Each writes build/host/fuzz-<n>.log, the run prints how each ended,
 # and a failure leaves its input at the top of the tree.
 # libFuzzer's fork mode made a third fewer runs in a minute: each job it starts replays part of the corpus first.
-FUZZ_FLAGS := -max_len=2048 -len_control=100 -use_value_profile=1
+FUZZ_FLAGS := -max_len=2048 -len_control=20 -use_value_profile=1
 FUZZ_JOBS  ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
 FUZZ_HARNESS ?= fuzz
 fuzz: $(HOST_BUILD)/$(FUZZ_HARNESS)
