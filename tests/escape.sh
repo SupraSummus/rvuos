@@ -12,7 +12,8 @@
 # PMP or the MPU is what confines a process, so this runs on the target, like `make test`.
 # The scenarios say what the specification has a core report;
 # BOARD_MTVAL and BOARD_MISALIGNED say where the board's differs, see tests/run.sh,
-# and BOARD_ARCH=arm that the fault is reported as ARM has it, see kernel/arch/arm/frame.c.
+# and BOARD_ARCH=arm that the fault is reported as ARM has it, see kernel/arch/arm/frame.c,
+# BOARD_STACKING=call that the core enters a call whose frame it cannot stack as the call, not the MemManage.
 
 set -eu
 
@@ -20,6 +21,7 @@ boot_cmd=$1
 scenario=$2
 board_mtval=${BOARD_MTVAL:-address}
 board_misaligned=${BOARD_MISALIGNED:-split}
+board_stacking=${BOARD_STACKING:-fault}
 board_arch=${BOARD_ARCH:-riscv}
 log=$(mktemp)
 trap 'rm -f "$log"' EXIT
@@ -52,6 +54,7 @@ else load_cause=0x00000004 store_cause=0x00000006; fi
 # a MemManage, 4, for what the MPU refuses, IACCVIOL, 0x1, on a fetch,
 # DACCVIOL with MMFAR valid, 0x82, on data, and MSTKERR, 0x10, or MUNSTKERR, 0x8, on the core's own stacking,
 # which name no address, and a BusFault, 5, precise with BFAR valid, 0x8200, on the System Control Space.
+if [ "$board_stacking" = call ]; then stack_call=0x0000000b; else stack_call=0x00000004; fi
 if [ "$board_arch" = arm ]; then
 case "$scenario" in
 escape-execute-data | escape-jump-kernel) fault="exception=0x00000004 cfsr=0x00000001 pc=$addr addr=0x00000000" ;;
@@ -59,8 +62,9 @@ escape-misaligned-load | escape-misaligned-store) fault="exception=0x00000004 cf
 escape-store-kernel | escape-store-clock | escape-past-region)
     fault="exception=0x00000004 cfsr=0x00000082 pc=$addr addr=$target" ;;
 escape-load-scs) fault="exception=0x00000005 cfsr=0x00008200 pc=$addr addr=$target" ;;
-# The core wrote no frame, so the pc is what the thread's last trap left, which the scenario names.
-escape-stack-call) fault="exception=0x00000004 cfsr=0x00000010 pc=$addr addr=0x00000000" ;;
+# The core wrote no frame, so the pc is what the thread's last trap left, which the scenario names;
+# nRF52840's Cortex-M4 enters the SVCall, 11, and QEMU's cores and the Cortex-M33 the MemManage, either a fault to the kernel.
+escape-stack-call) fault="exception=$stack_call cfsr=0x00000010 pc=$addr addr=0x00000000" ;;
 escape-unstack) fault="exception=0x00000004 cfsr=0x00000008 pc=$addr addr=0x00000000" ;;
 *) fail "unknown scenario" ;;
 esac

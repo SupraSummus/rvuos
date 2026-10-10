@@ -15,6 +15,7 @@ Contents:
       - [QEMU `virt`, RV32](manual/targets.md#qemu-virt-rv32)
       - [ESP32-C6](manual/targets.md#esp32-c6)
       - [RP2350](manual/targets.md#rp2350)
+      - [nRF52840](manual/targets.md#nrf52840)
       - [mps2-an385](manual/targets.md#mps2-an385)
       - [mps2-an521](manual/targets.md#mps2-an521)
 4. [Building and running](manual/targets.md#4-building-and-running)

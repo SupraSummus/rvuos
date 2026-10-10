@@ -31,10 +31,11 @@ and `thumbv8m.main-none-eabi` for the Cortex-M33, with no floating point and no 
 
 ### Boards
 
-Five boards are supported, chosen with `make BOARD=<board>`:
+Six boards are supported, chosen with `make BOARD=<board>`:
 `qemu`, QEMU `virt` for RV32, the default,
 `esp32c6`, an Espressif ESP32-C6, as on Seeed Studio's XIAO ESP32-C6,
 `rp2350`, a Raspberry Pi RP2350 on its RISC-V cores, or with `ARCH=arm` on its Cortex-M33 ones, as on a Pico 2,
+`nrf52840`, a Nordic nRF52840, a Cortex-M4, as on Fanstel's BT840X,
 `mps2-an385`, QEMU's model of ARM's MPS2 board with a Cortex-M3,
 and `mps2-an521`, QEMU's model of the same board with the AN521 image, two Cortex-M33s.
 A board picks its architecture, whose files lie in `kernel/arch/<arch>/` and `user/arch/<arch>/`;
@@ -242,6 +243,50 @@ With `CORES=2` the kernel starts the second core at the end of the boot, on eith
 and a process has the same regions on both, where an atomic operation on RAM reaches the other core;
 every device line reaches both cores' controllers, of which only the first core's enables any.
 
+#### nRF52840
+
+`tools/nrf52840-run.py` loads the image into RAM over SWD, through an ST-Link and OpenOCD, and starts the Cortex-M4;
+nothing is written to flash, and a program that never halts runs on once the runner stops, until the chip is reset.
+The console is a block of RAM, which the runner follows as the core runs, with no pin wired.
+
+Memory map:
+
+| Range | Size | What |
+|---|---|---|
+| `0x40008544` | 4 B | TIMER0's `CC[1]`, 1 MHz, read only through `BOOT_CAP_CLOCK`; no word holds the high half |
+| `0x20000000` | 8 KiB | the console, granted to the root task |
+| `0x20002000` to `0x2000F000` | 52 KiB | kernel code, data and stack, the vector table first |
+| `0x2000F000` | 4 KiB | the kernel log: a 32-byte header and the ring |
+| `0x20010000` | 64 KiB | the root task's memory, granted to it as an Untyped with all rights, which has made the four ranges below and makes nothing more |
+| `0x20010000` | 32 KiB | root task code, read and execute |
+| `0x20018000` | 16 KiB | root task data and stack, read and write |
+| `0x2001C000` | 4 KiB | input region, read only; nothing fills it yet |
+| `0x2001D000` | 4 KiB | the boot pool |
+| `0x20020000` | 128 KiB | free RAM, granted to the root task as an Untyped with all rights |
+
+Interrupt lines:
+
+| Line | What |
+|---|---|
+| 0 | the kernel log; POWER_CLOCK cannot be bound |
+| 1 to 47 | the peripherals' lines, numbered by their IDs; nothing raises the console's line, 20, SWI0 |
+
+The root task is granted a frame over GPIO, from `BOOT_CAP_DEVICES` up,
+so `BOOT_CAP_COUNT` is 19 here and the root task's table has 65 slots:
+
+| Slot | Constant | Range | Size | What | Rights |
+|---|---|---|---|---|---|
+| 18 | `BOOT_CAP_GPIO` | `0x50000000` | 4 KiB | GPIO, both ports, P0's registers and P1's at `0x50000300` | read, write |
+
+The console's first word counts every byte written, and byte n lies at offset 16 plus n modulo 8176,
+so it is a ring, and the runner says how much it lost when it fell a whole ring behind.
+The tick is 1 kHz, on the counter, with SysTick for the compare.
+The counter is TIMER0's, which TIMER1 and a PPI channel capture into `CC[1]` every microsecond;
+it is 32 bits wide and wraps every 71 minutes, and `OP_CLOCK_READ` counts the wraps.
+The MPU has eight regions, none smaller than 32 bytes, and a fault is reported as on `mps2-an385`,
+but for a call whose frame the core cannot stack, which comes as the call, exception 11, not as a MemManage.
+The floating-point unit stays shut, so a floating-point instruction faults its thread.
+
 #### mps2-an385
 
 QEMU loads the image into SSRAM1 and resets the Cortex-M3, which finds the kernel's vector table at 0;
@@ -325,6 +370,7 @@ The host build needs clang's sanitizer and libFuzzer runtimes.
 The ESP32-C6 needs Espressif's `esptool`, version 5, as a command and as a Python module.
 RP2350 needs Python's `pyusb` and write access to the chip's USB devices,
 which a udev rule such as `SUBSYSTEM=="usb", ATTRS{idVendor}=="2e8a", TAG+="uaccess"` gives.
+The nRF52840 needs OpenOCD, version 0.12, and an ST-Link on its SWD pins, which OpenOCD's udev rules open to the user.
 
 ```
 make             # build/qemu/kernel-init.elf and build/qemu/kernel-fuzzdrv.elf
@@ -392,6 +438,14 @@ The run lasts half a minute, or the seconds of the configuration's `run=`, `run=
 
 `tools/rp2350-run.py` loads the image through the bootrom's PICOBOOT interface,
 waits for the halt's serial port and reads it; closing it reboots the chip into BOOTSEL.
+
+On the nRF52840, through an ST-Link:
+
+```
+make BOARD=nrf52840 test escape                        # boot the demo and the escape suite, and check the transcripts
+make BOARD=nrf52840 build/nrf52840/kernel-blink.elf    # user/blink.c, which blinks the LED of a Fanstel BT840X
+tools/nrf52840-run.py build/nrf52840/kernel-blink.elf  # load it, and print its console until Ctrl-C
+```
 
 On ARM, under QEMU:
 

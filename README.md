@@ -59,7 +59,7 @@ make BOARD=esp32c6 test  # the same, and check the transcript
 
 The kernel boots in machine mode on QEMU `virt`, the ESP32-C6 and RP2350's Hazard3 cores
 and runs an embedded root task in user mode behind PMP,
-and in handler mode on QEMU's Cortex-M3 and Cortex-M33 and RP2350's Cortex-M33,
+and in handler mode on QEMU's Cortex-M3 and Cortex-M33, RP2350's Cortex-M33 and the nRF52840's Cortex-M4,
 where the same root task runs unprivileged behind the MPU.
 The root task holds capabilities to its own objects and to untyped memory,
 makes frames and a kernel pool of it,

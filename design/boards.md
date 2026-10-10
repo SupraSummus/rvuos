@@ -127,6 +127,7 @@ the random number generator's data register, read only, the eight bytes of LPPER
 since the rest of LPPERI reaches the LP domain's clocks and resets,
 and the IO MUX and the GPIO matrix, the pins, which a program sets as its board wires them,
 as the Wi-Fi system's root task sets the XIAO's RF switch;
+the nRF52840 lists GPIO, both ports in one block, which `user/blink.c` drives;
 QEMU lists none, since its devices are the kernel's or the console, and the host build has no hardware;
 nor do the MPS2 boards yet.
 So on QEMU `BOOT_CAP_COUNT` is 18, the number the seeds and the corpus are written for.
@@ -304,11 +305,27 @@ which hung Hazard3 on about one boot in five, and the Cortex-M33 in none of abou
 so that no watchdog brought the chip back, the one that counts `clk_ref`'s ticks among them.
 The crystal gets six milliseconds to start, as the pico-sdk gives it.
 
+**nRF52840** runs the demo root task and the escape suite on its Cortex-M4, `make BOARD=nrf52840 test escape`,
+the only ARMv7-M on silicon.
+`tools/nrf52840-run.py` drives OpenOCD through an ST-Link:
+it resets the chip and holds the core before its first instruction, writes the image into RAM and starts it at `_start`,
+then turns halting debug off, so a thread's `bkpt` is a fault the kernel takes, as with no probe; nothing is written to flash.
+The chip reaches the host through its pins alone, so the console is a ring in RAM the runner reads over SWD as the core runs,
+and the halt only leaves its code where the runner looks, which then writes out the log as RP2350's halt does.
+Its 256 KiB of RAM leave the root task half RP2350's free RAM and a code region of 32 KiB.
+A TIMER's count is seen only by capturing it into a CC register,
+so TIMER1 and a PPI channel capture TIMER0's into one every microsecond, which a load reads, the kernel's and user mode's alike.
+Measured on a Fanstel BT840X, revision 1: eight MPU regions;
+a call whose frame the core cannot stack taken as the SVCall, where QEMU and the Cortex-M33 take the MemManage,
+which `trap.c` takes as one fault either way;
+and SysTick waking `wfe` only while a debugger holds the chip in its debug interface mode:
+let go, a program sleeping in `wfe` slowed to a step every two seconds, so the board sets `SYSTICK_WAKES_WFE` to 0.
+
 ## Architectures
 
 An architecture is the files of `kernel/arch/<arch>/` and `user/arch/<arch>/`,
 chosen by the board: `riscv` for QEMU virt, the ESP32-C6 and RP2350's Hazard3,
-`arm` for mps2-an385's Cortex-M3, ARMv7-M, and mps2-an521's and RP2350's Cortex-M33, ARMv8-M's Mainline.
+`arm` for mps2-an385's Cortex-M3 and the nRF52840's Cortex-M4, ARMv7-M, and mps2-an521's and RP2350's Cortex-M33, ARMv8-M's Mainline.
 `arm` is both, and `ARMV8M` in its `arch.h` says which the compiler builds for;
 the MPU and the Security state are where they differ.
 The kernel's objects, its capabilities and every operation are the same on both,
@@ -403,7 +420,7 @@ A fault of the kernel's own nests, and the core pushes its 32-byte frame on the 
 which `tools/stack-depth.py` does not count; `kernel_trap` takes the stack back at once and halts.
 The host build compiles the kernel with RISC-V's frame, as QEMU virt has it,
 so the fuzzer and `make qemu-replay` see the portable kernel and not `kernel/arch/arm/`,
-which only the link checks, the demo and the escape suite exercise, under QEMU and on RP2350's Cortex-M33,
+which only the link checks, the demo and the escape suite exercise, under QEMU, on RP2350's Cortex-M33 and on the nRF52840's Cortex-M4,
 PMSAv8 mps2-an521's under QEMU and RP2350's, and the demo the second core of each.
 Beside RISC-V's scenarios the suite tries the frame on the thread's stack,
 a call the core cannot stack and one it cannot unstack;

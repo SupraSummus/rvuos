@@ -8,6 +8,7 @@
 #            on its Hazard3 cores, or with ARCH=arm on its Cortex-M33 ones
 #   mps2-an385  QEMU's MPS2 with the AN385 image, a Cortex-M3; `make arm-test` runs its demo
 #   mps2-an521  QEMU's MPS2 with the AN521 image, two Cortex-M33s; `make arm-test` runs its demo too, on both
+#   nrf52840 an nRF52840, a Cortex-M4, loaded into RAM over SWD through an ST-Link and OpenOCD
 # and the board selects its architecture, ARCH, kernel/arch/<arch>/ and user/arch/<arch>/:
 #   riscv    RV32IMAC, machine and user mode, PMP
 #   arm      ARMv7-M or ARMv8-M, handler and unprivileged thread mode, a PMSAv7 or PMSAv8 MPU
@@ -56,7 +57,7 @@ VARIANT := $(PMP_VARIANT)$(if $(filter-out 1,$(CORES)),-smp$(CORES))
 
 # The board's architecture, which only RP2350 lets the command line change;
 # the other one builds in a directory of its own, as a budget does.
-BOARD_ARCH_DEFAULT := $(if $(filter mps2-an385 mps2-an521,$(BOARD)),arm,riscv)
+BOARD_ARCH_DEFAULT := $(if $(filter mps2-an385 mps2-an521 nrf52840,$(BOARD)),arm,riscv)
 ARCH := $(BOARD_ARCH_DEFAULT)
 ifneq ($(ARCH),$(BOARD_ARCH_DEFAULT))
 ifneq ($(BOARD)$(ARCH),rp2350arm)
@@ -168,8 +169,20 @@ BOOT_PREFIX   := $(QEMU_ARM) $(QEMUFLAGS_ARM) -kernel
 BENCH_CPU_HZ  := icount
 # The Cortex-M33's, as RP2350's: eight Secure MPU regions, none smaller than 32 bytes, and ARM's report of a fault.
 BOARD_FACTS   := BOARD_PMP_ENTRIES=8 BOARD_PMP_GRAIN=32 BOARD_ARCH=arm
+else ifeq ($(BOARD),nrf52840)
+# The demo alone, as for the other chips.
+# The runner drives OpenOCD, which loads the ELF's segments into RAM through an ST-Link, and follows the console as the core runs.
+USER_PROGRAMS := init
+IMAGE         := elf
+RUN_INIT      := tools/nrf52840-run.py $(BUILD)/kernel-init.elf
+BOOT_PREFIX   := tools/nrf52840-run.py
+# The processor's clock; the clock counts microseconds.
+BENCH_CPU_HZ  := 64000000
+# The Cortex-M4's, as mps2-an385's Cortex-M3: eight MPU regions, none smaller than 32 bytes, and ARMv7-M's report of a fault,
+# but a call whose frame it cannot stack is taken as the call, see tests/escape.sh.
+BOARD_FACTS   := BOARD_PMP_ENTRIES=8 BOARD_PMP_GRAIN=32 BOARD_ARCH=arm BOARD_STACKING=call
 else
-$(error unknown BOARD '$(BOARD)'; the boards are qemu, esp32c6, rp2350, mps2-an385 and mps2-an521)
+$(error unknown BOARD '$(BOARD)'; the boards are qemu, esp32c6, rp2350, mps2-an385, mps2-an521 and nrf52840)
 endif
 
 .PHONY: all clean check arm-test arm-test-an385 arm-test-an521 arm-test-an521-smp2 smp-test contents mac-trace-test

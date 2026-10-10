@@ -351,7 +351,8 @@ until the maintainer decides otherwise.
       A register for the flags, and a pc write that advances the IT state, would.
     - **The floating point unit.** The Cortex-M3 has none; a core with one stacks its registers lazily,
       and a process switch then owes them a save the kernel does not make.
-      The Cortex-M33 has one, which the kernel shuts, so a floating-point instruction faults its thread.
+      The Cortex-M33 has one, which the kernel shuts, so a floating-point instruction faults its thread;
+      the nRF52840's Cortex-M4 has one too, which reset leaves shut and the kernel leaves so.
     - **The name.** rvuos says RISC-V, which the kernel no longer is alone.
     Decide each with the first board or program that needs it.
 

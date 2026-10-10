@@ -268,6 +268,15 @@ what is left:
   nor the second Cortex-M33's MPU;
   a scenario bound to the second core's units would.
 
+## nRF52840
+
+- The library's test does not fit the root task's 32 KiB code region, so `make BOARD=nrf52840 lib-test` fails to link.
+  A kernel run from flash would leave its RAM to a larger region, and boot without the probe.
+- The idle kernel polls, since SysTick wakes `wfe` only under a debugger;
+  a compare on a TIMER's CC register, raising its line, would let it sleep, as the item under "ARM" says for QEMU 11.
+- Code runs from RAM at its system-bus address; the alias at `0x00800000` fetches over the core's code bus,
+  which may cost a call fewer of the cycles `make BOARD=nrf52840 bench` counts, unmeasured.
+
 ## ARM
 
 - The escape suite's two scenarios of the frame on the thread's stack have one thread each, which leaves two holes.
