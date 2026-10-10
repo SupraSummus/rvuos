@@ -387,7 +387,6 @@ static __attribute__((noreturn)) void attend(struct drv *d)
  * weak stub in their ieee80211_ioctl.o that returns 0, is left out. See NOTES.md.
  */
 extern int wifi_init_completed(void);
-extern void chm_init(void *chm);
 
 extern void wDev_ProcessFiq(void);   /* pp: their interrupt handler, which they install for the MAC's source */
 extern void pm_noise_check_enable(void);
@@ -438,7 +437,7 @@ static int drv_hw_start(void)
     funcs->coex_enable();
     drv_reset_mac();
     mac_tx_block_clear();              /* the libraries' ic_mac_init: their hal_mac_init's tx-block clear */
-    chm_init(g_ic);
+    mac_home_channel();                /* the libraries' chm_init: the channel manager's start, the driver's own */
     /*
      * The libraries' ic_set_interrupt_handler, written out:
      * their hal_init, the MAC's configuration, which mac_config in macstart.c writes out whole,

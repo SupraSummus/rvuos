@@ -149,6 +149,13 @@ void mac_station(const uint8_t sta[6], const uint8_t bssid[6]);
 const char *mac_channel(uint32_t channel);
 
 /*
+ * The libraries' chm_init, the channel manager's start, the driver's own: their home channel, which the station
+ * starts on, programmed through their chm_phy_change_channel's frame. Their channel manager's state is not written;
+ * see mac.c and NOTES.md.
+ */
+void mac_home_channel(void);
+
+/*
  * The sending's buffer, and the lock that lets one thread send at a time, made once before any thread sends;
  * 0, or what could not be made.
  */

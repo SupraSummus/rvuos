@@ -397,16 +397,24 @@ static void idle(void)
 }
 
 /*
- * The MAC held still, as the libraries' hal_mac_deinit holds it to retune, with its waits:
- * until it is not busy, then held, 20 us, until it is not busy again, and 5 us.
+ * The MAC held: the block word set, 20 us, until it is not busy again, and 5 us -- the tail their hal_mac_deinit
+ * and a retune share.
  */
-static void hold(void)
+static void block(void)
 {
-    idle();
     wr(TX_BLOCK, rd(TX_BLOCK) | TX_BLOCK_ALL);
     ets_delay_us(20);
     idle();
     ets_delay_us(5);
+}
+
+/*
+ * The MAC held still for a retune: until it is not busy, then block()'s hold and waits.
+ */
+static void hold(void)
+{
+    idle();
+    block();
 }
 
 const char *mac_channel(uint32_t channel)
@@ -424,6 +432,42 @@ const char *mac_channel(uint32_t channel)
 void mac_tx_block_clear(void)
 {
     wr(TX_BLOCK, rd(TX_BLOCK) & ~TX_BLOCK_ALL);
+}
+
+/*
+ * The MAC's channel width word, which their hal_mac_set_csi_cbw clears or sets by the width it is given: its bit 8
+ * cleared for 0 or 1, and set for 2 or more, its bit 7 cleared for 2 and set above; the start's frame passes 0.
+ */
+#define CSI_CBW      (MAC_BASE + 0x118u)
+#define CSI_CBW_BIT8 0x00000100u
+
+extern void phy_change_channel(uint32_t mhz, uint32_t a1, uint32_t a2, uint32_t width); /* libphy's tune, left a call */
+
+/*
+ * The libraries' hal_mac_deinit, the register part the start's channel frame makes, as hold() is for a retune:
+ * their two reads of the block word, whose bits 14 and 13 they keep in their own statics -- the driver keeps none,
+ * so the values are dropped -- then block()'s hold and waits. Their TWT arms are not written.
+ */
+static void mac_deinit(void)
+{
+    (void)rd(TX_BLOCK);
+    (void)rd(TX_BLOCK);
+    block();
+}
+
+/*
+ * The libraries' chm_init, the channel manager's start, written out for the station: their channel manager picks
+ * the driver's home channel -- channel 1 of the 2.4 GHz band, 2412 MHz -- and their chm_phy_change_channel programs
+ * it: the MAC held, the PHY tuned, its width set, the MAC released. Their chm_init's own state -- its 14-entry
+ * channel table, the control block's home- and current-channel words, the home-channel event -- and the PM
+ * bookkeeping around the retune are not written; the diff holds the channel, the runs the rest.
+ */
+void mac_home_channel(void)
+{
+    mac_deinit(); /* their ic_mac_deinit */
+    phy_change_channel(2412u, 1u, 0u, 0u); /* their PHY's tune, which stays libphy's; the 1 and 0 are their call's */
+    wr(CSI_CBW, rd(CSI_CBW) & ~CSI_CBW_BIT8); /* their hal_mac_set_csi_cbw, the 0 their frame passes */
+    mac_tx_block_clear(); /* their ic_mac_init */
 }
 
 /* 1 if the MAC fills the driver's first descriptor next: it has moved to the driver's list, and filled none of it. */

@@ -145,8 +145,7 @@ what is left:
   and `net80211`.
   The MAC's configuration, their `hal_init`, is the driver's own, every group transcribed into `macstart.c`'s
   `mac_config`.
-  Whether the rest of net80211's state -- what `esp_wifi_init_internal` and `chm_init` set -- is wanted is open,
-  each a step.
+  Whether the rest of net80211's state -- what `esp_wifi_init_internal` sets -- is wanted is open, each a step.
   Gathering the driver's address macros into `macregs.h`, ordered by address, would show a word two files name
   beside its twin.
   A write that does nothing can be left out, on a role rather than on the bit.

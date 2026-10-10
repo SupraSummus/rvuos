@@ -398,5 +398,14 @@ clear, the receive enable, and the cipher's own entry clear -- and posts their S
 None of net80211's own state -- the control block's vif words and `ieee80211_sta.o`'s static -- is written,
 and the ordinary runs hold it: the scan, `listen=`, `listen=` with `probe=`, and the gate's three joins,
 with no library line reaching the driver after the start.
-So the state these two calls set is not wanted;
-whether the rest is -- what `esp_wifi_init_internal` and `chm_init` set -- is open.
+So the state these two calls set is not wanted.
+
+Their `chm_init`, the channel manager's start, is the driver's own too: their channel manager picks the station's
+home channel -- channel 1 of the 2.4 GHz band, 2412 MHz -- and `mac_home_channel`, in `mac.c`, programs it through
+their `chm_phy_change_channel`'s frame: the MAC held, the PHY tuned, its width word's bit 8 cleared for the 0 their
+call passes, and the MAC released.
+Their PM bookkeeping around the frame and the channel manager's own state -- its 14-entry channel table,
+the control block's home- and current-channel words, and the home-channel event -- are not written;
+the diff holds the channel, the runs the rest.
+So the state these calls set is not wanted;
+whether the rest is -- what `esp_wifi_init_internal` sets -- is open.
