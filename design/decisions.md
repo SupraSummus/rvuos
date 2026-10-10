@@ -433,3 +433,17 @@ until the maintainer decides otherwise.
     and a lock fair to takers that lend nothing,
     which userspace can build with a bit that asks the giver to hand the lock on, as Linux's mutex has.
     Decide with the first workload that shares a lock between threads of unequal time, or a server between clients that pay unequally.
+28. **What the ESP32-C6's Wi-Fi driver takes from Espressif's libraries.**
+    Working default: the driver's own MAC and bring-up are written from what `libpp.a` and `libnet80211.a` do to the device --
+    the registers, the values and their order, read by disassembly and by the trace window, see `user/wifi/esp32c6/NOTES.md` --
+    and none of their code is copied;
+    `libphy.a` stays, linked as Espressif ships it.
+    Those libraries are esp32-wifi-lib's and esp-phy-lib's, whose READMEs give the binaries ESP-IDF's license,
+    the Apache License 2.0, as its "Object" form.
+    The station runs on hostap, under the BSD license, and its SAE on Mbed TLS, under Apache 2.0 or the GPL at the taker's choice;
+    this repository's own license is MIT, `LICENSE`.
+    esp32c6-open-mac, which sends a beacon from the C6, states no license, so nothing is taken from it.
+    Open: what the Apache License asks of a driver written from an Object form's behaviour --
+    nothing, as for facts about a device, or a notice --
+    and what an image that links `libphy.a`, and the libraries until they go, must carry beside it.
+    Decide before the Wi-Fi system's image is handed to anyone.
