@@ -8,3 +8,8 @@
 # start writes interface 0's alone, so interface 1's address bytes stay zero. The mask holds them; the address itself
 # is not written down.
 0x600a4068 0x00000000/0x0000ffff
+
+# Interface 1's receive policy, which the own start leaves out of mac_config: interface 1's own word keeps bit 30,
+# the default their policy sets, clear, and its policy word stays as the MAC's reset leaves it.
+0x600a400c 0x00000000
+0x600a40dc 0x0001e7c0

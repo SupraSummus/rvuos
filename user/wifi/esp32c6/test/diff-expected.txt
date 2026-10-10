@@ -12,6 +12,28 @@
 -W4 0x600a4084 0x00000000/0x00000000
 +W4 0x600a4084 0x00000000/0x00000000
 
+# Interface 1's receive policy, the soft AP's, which the own start leaves out of mac_config: their hal_init's loop
+# gives it its policy word and its policy; the driver never brings that interface up. replay-expected.txt names
+# the same accesses.
+-R4 0x600a40dc 0x0001e7c0
+-W4 0x600a40dc 0x0001e7c0
+-R4 0x600a40dc 0x0001e7c0
+-W4 0x600a40dc 0x0001e3c0
+-R4 0x600a40dc 0x0001e3c0
+-W4 0x600a40dc 0x0001e3c5
+-R4 0x600a40dc 0x0001e3c5
+-W4 0x600a40dc 0x0001c385
+-R4 0x600a40dc 0x0001c385
+-W4 0x600a40dc 0x0001c385
+-R4 0x600a400c 0x00000000
+-W4 0x600a400c 0x40000000
+-R4 0x600a40dc 0x0001c385
+-W4 0x600a40dc 0x0001c385
+-R4 0x600a400c 0x40000000
+-W4 0x600a400c 0x40000000
+-R4 0x600a4068 0x00000000
+-W4 0x600a4068 0x00000000
+
 # The libraries' default policy configures interface 1, the soft AP's, besides interface 0's: its address and its
 # address flag; the own start writes interface 0's words alone, so the interface-1 writes, and the interface-0
 # round-trips they sit among, come unmatched.

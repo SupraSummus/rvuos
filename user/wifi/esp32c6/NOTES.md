@@ -380,8 +380,10 @@ A MAC register is named for the library function that reaches it, by constant ad
 one that only the start's own group reaches, or several with no one role, carries the offset it was reached at.
 One address has one name, in `macregs.h` when two files share it.
 
-`mac_config`'s receive policy for interface 1 is not inert -- left out, the libraries' receive interrupt ran in the
-window where it did not with it -- so it stays, though the driver never brings that interface up.
+`mac_config`'s receive policy for interface 1 was not inert while the libraries' receive interrupt was installed --
+left out, that interrupt ran in the window where it did not with it -- so it stayed then.
+With the driver's own interrupt the MAC's from its start, three traced runs without it took no interrupt in the
+window, so it goes: the driver never brings that interface up, and `test/replay-expected.txt` names its accesses.
 The receive base's write stays as well, and points at the driver's own list, `mac.c`'s, where it pointed at their
 control block until their receive went.
 Read in the write's place, before it, the word held 0x00800000 in three own runs, after their `wifi_reset_mac`.
@@ -419,8 +421,6 @@ The ordinary runs hold both, the joins among them.
 
 Some of the driver's choices are made for the libraries that still run beside it, not for the MAC,
 and each goes, or is looked at again, when what it answers to goes:
-- `mac_config`'s receive policy for interface 1 stays because, left out, their receive interrupt ran in the window;
-  their interrupt is no longer installed, so whether the policy is wanted is open again, a step of its own.
 - The start writes their control block's interface masks and its started state, which their API's functions read:
   these go with their init, whose state they serve.
 - `mac.c`'s sending borrows their slot 0 and clears its queue's state byte so that their lmac leaves the slot alone;

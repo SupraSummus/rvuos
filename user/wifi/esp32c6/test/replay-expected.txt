@@ -3,3 +3,24 @@
 # A place is its reason on "#" lines, then the accesses of theirs it leaves out, in their order, each
 # "-R4 0xaddress 0xvalue" or "-W4 0xaddress 0xvalue", a value "/0xmask" holding the masked bits alone;
 # a blank line ends it. Each place must be met once, where the own start's access first differs from theirs.
+
+# Interface 1's receive policy, the soft AP's: their hal_init's loop gives it its policy word and its policy,
+# which the own start leaves out, since the driver never brings that interface up; see NOTES.md.
+-R4 0x600a40dc 0x0001e7c0
+-W4 0x600a40dc 0x0001e7c0
+-R4 0x600a40dc 0x0001e7c0
+-W4 0x600a40dc 0x0001e3c0
+-R4 0x600a40dc 0x0001e3c0
+-W4 0x600a40dc 0x0001e3c5
+-R4 0x600a40dc 0x0001e3c5
+-W4 0x600a40dc 0x0001c385
+-R4 0x600a40dc 0x0001c385
+-W4 0x600a40dc 0x0001c385
+-R4 0x600a400c 0x00000000
+-W4 0x600a400c 0x40000000
+-R4 0x600a40dc 0x0001c385
+-W4 0x600a40dc 0x0001c385
+-R4 0x600a400c 0x40000000
+-W4 0x600a400c 0x40000000
+-R4 0x600a4068 0x00000000
+-W4 0x600a4068 0x00000000

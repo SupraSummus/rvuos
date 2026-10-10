@@ -819,6 +819,9 @@ void mac_config(uint32_t (*slowclk_cal_get)(void), int (*coex_pti_get)(uint32_t,
     mac_queues_init();
     osi_trace("mac-policy", 0, 0);
     for (uint32_t i = 0; i < 4u; i++) {
+        if (i == 1u) {
+            continue; /* interface 1, the soft AP's, which the driver never brings up; see NOTES.md */
+        }
         mac_rx_policy_word(i);
         mac_rx_set_policy(i, 0);
     }
