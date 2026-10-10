@@ -416,3 +416,26 @@ calls, a path the own station does not run;
 their `pm_disconnected_start`'s PM state no path the driver runs reads, and what it reaches beyond pp is their
 coex, which `osi.c` stubs out, and a sleep-delay timer it leaves done.
 The ordinary runs hold both, the joins among them.
+
+## What stands only while the libraries run
+
+Some of the driver's choices are made for the libraries that still run beside it, not for the MAC,
+and each goes, or is looked at again, when what it answers to goes:
+- `mac_config`'s receive policy for interface 1 stays because, left out, their receive interrupt ran in the window;
+  it is looked at again once their interrupt is no longer installed.
+- The start points `RX_BASE` at their control block, `wDevCtrl`, and `drv_reset_mac` sets the flag in their wdev
+  their receive reads: both serve their receive until the driver takes the MAC, and go when the MAC is the driver's from the start.
+- `mac_rx_take` turns the receive off, leaves their task 50 ms for its frames, exchanges the interrupt,
+  and points `RX_BASE` and reloads until the MAC moves off their list, and `mac_rx_give_back` hands it back:
+  all of it because their receive holds the MAC first; with the driver's receive from the start,
+  a take is the receive turned on and a give-back the receive turned off.
+- `tools/mac-trace.py`'s `MOMENT` names the receive's words, `RX_LAST` and the two after it, the received frame's end
+  and the word beside it, partly for their interrupt's reads of them;
+  once their interrupt is gone those reads leave the trace, though the words still move with what the air brings.
+- The start writes their control block's interface masks and the byte their `ieee80211_update_phy_country`'s guard
+  reads, and calls their `hal_init_tx_pwr` for the power table their association reads:
+  these go with their init, whose state they serve.
+- `mac.c`'s sending borrows their slot 0 and clears its queue's state byte so that their lmac leaves the slot alone;
+  an own slot, see `TODO.md`, ends that.
+- The comparison's tools -- `libstart=1`, the diff, the compare across images and their expected files -- go once
+  no call of theirs is left in the start, as `TODO.md` says.

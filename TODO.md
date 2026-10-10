@@ -165,6 +165,12 @@ what is left:
   with their invalidation of the queue on a timeout, would do better.
   `mac.c` points a MAC that ran out of descriptors past the last it filled by `RX_BASE` alone,
   which the take found not always taken; no run has run out yet, `restarted` 0.
+- The ESP32-C6's driver aims at a station alone, the profile its work is held to:
+  WPA2's PSK and WPA3's SAE with CCMP, OFDM and HT rates with a simple rate control and retries,
+  and the modem's sleep until the DTIM beacon with the PHY's PLL tracked, as the items below say;
+  no soft AP, no HE or OFDMA, no coexistence with Bluetooth.
+  So the start's HE and beamforming groups, which `mac_config` writes out, can go, each a step held by the runs,
+  and the rest of 802.11ax is not written.
 - The ESP32-C6's driver takes all its memory from one heap: the libraries' as they run,
   the own path's buffers, stacks and queues once, at its start, and the supplicant's and SAE's as they run, hostap's and Mbed TLS's way;
   SAE leaves a few kilobytes at the fewest.
@@ -172,7 +178,7 @@ what is left:
   and the supplicant's a bounded arena of its own, or fixed buffers over a P-256 of fixed width.
 - The ESP32-C6's Wi-Fi root task has 8 KiB of memory and 9 slots left once its clients run,
   so another client needs room found first, in the driver's block or a smaller `CLIENT_CHAN_SIZE`.
-- The ESP32-C6's echo answers in about 7 ms at the median, the Pico 2 W's in about 5:
+- The ESP32-C6's echo answers in about 6 ms at the median, the Pico 2 W's in about 5:
   where the time goes, the radio at 1 Mb/s, the software CCMP, or the driver's turn after its interrupt, open decision 9,
   is not measured.
 - The Pico 2 W's run lasts its `run=` whatever its checks found, or until a reset by hand,
