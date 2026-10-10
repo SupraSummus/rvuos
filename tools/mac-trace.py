@@ -64,6 +64,11 @@ MOMENT = {
     0x600A708C: (0xFFFFFFFF, "the frames the air carries over the window, more of them while the window is traced"),
     0x6000E058: (0x000000FF, "the temperature sensor's reading, TSENS_OUT, which the chip's warmth moves"),
     0x600A4CA8: (0x00006000, "TX_BLOCK's busy bits, which the MAC holds while it still sends"),
+    0x600A43AC: (0xFFFFFFFF, "the received frame's end, which their hal_mac_rx_get_end_info and receive interrupt read"),
+    0x600A43B4: (0xFFFFFFFF, "beside the received frame's end, read by their receive interrupt and their diagnostics alone"),
+    0x600A408C: (0xFFFFFFFF, "RX_LAST, the descriptor the MAC filled last, which a frame received in the window moves"),
+    0x600A4090: (0xFFFFFFFF, "the word after RX_LAST, which their receive interrupt reads with it, and which moves with it"),
+    0x600A4094: (0xFFFFFFFF, "the second word after RX_LAST, which their receive interrupt reads with it, and moves with it"),
 }
 
 
