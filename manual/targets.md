@@ -271,12 +271,17 @@ Interrupt lines:
 | 0 | the kernel log; POWER_CLOCK cannot be bound |
 | 1 to 47 | the peripherals' lines, numbered by their IDs; nothing raises the console's line, 20, SWI0 |
 
-The root task is granted a frame over GPIO, from `BOOT_CAP_DEVICES` up,
-so `BOOT_CAP_COUNT` is 19 here and the root task's table has 65 slots:
+The root task is granted a frame over GPIO and one over the radio, from `BOOT_CAP_DEVICES` up,
+so `BOOT_CAP_COUNT` is 20 here and the root task's table has 66 slots:
 
 | Slot | Constant | Range | Size | What | Rights |
 |---|---|---|---|---|---|
 | 18 | `BOOT_CAP_GPIO` | `0x50000000` | 4 KiB | GPIO, both ports, P0's registers and P1's at `0x50000300` | read, write |
+| 19 | `BOOT_CAP_RADIO` | `0x40001000` | 4 KiB | RADIO, the 2.4 GHz radio of Bluetooth LE and IEEE 802.15.4; its line is 1 | read, write |
+
+The radio is a bus master: its EasyDMA reads and writes a packet wherever its `PACKETPTR` points, the kernel's RAM too,
+so a program that holds its frame reaches all RAM,
+and the root task gives it only to a driver it trusts as it trusts itself, as the ESP32-C6's modem; see `DESIGN.md`, open decision 13.
 
 The console's first word counts every byte written, and byte n lies at offset 16 plus n modulo 8176,
 so it is a ring, and the runner says how much it lost when it fell a whole ring behind.

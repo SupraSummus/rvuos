@@ -67,14 +67,19 @@
 
 /*
  * The devices the boot grants as frames from BOOT_CAP_DEVICES up, in this order,
- * devices a driver in user mode needs, none of them a bus master:
+ * devices a driver in user mode needs:
  * GPIO, both ports' registers, P0's at 0x50000000 and P1's at 0x50000300, in one 4 KiB block, read and write;
+ * and RADIO, the 2.4 GHz radio of Bluetooth LE and IEEE 802.15.4, read and write.
+ * The radio is a bus master: its EasyDMA reads and writes a packet wherever PACKETPTR points, the kernel's RAM too,
+ * so whoever holds its frame reaches all RAM, as the ESP32-C6's modem does,
+ * and the root task gives it only to a driver it trusts as it trusts itself; see DESIGN.md, open decision 13.
  * user/board/nrf52840/devices.h names their slots.
  * TIMER0, TIMER1 and the PPI are the kernel's, for the counter, and lie in none.
  */
-#define BOOT_DEVICES 1
+#define BOOT_DEVICES 2
 #define DEVICE_RANGE_LIST                                       \
-    { U32(0x50000000), U32(0x00001000), RIGHT_R | RIGHT_W },
+    { U32(0x50000000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
+    { U32(0x40001000), U32(0x00001000), RIGHT_R | RIGHT_W },
 
 /*
  * Interrupt line identifiers lie below IRQ_LINES; see irq.h.

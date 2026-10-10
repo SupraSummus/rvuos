@@ -214,8 +214,10 @@ $(BUILD)/%.ld: %.ld.S
 #   user/phyblob/build.mk       the PHY harness on an ESP32-C6
 #   user/wifi/esp32c6/build.mk  the Wi-Fi system on an ESP32-C6, its driver with hostap and Mbed TLS
 #   user/tracer/build.mk        the fault tracer's decoder, tested on the host
+#   user/thread/build.mk        Thread on IEEE 802.15.4, on an nRF52840
 #   host/build.mk               the kernel on the host: the fuzzer's harnesses, the mutants and the replay under QEMU
-include kernel/build.mk user/build.mk user/wifi/build.mk user/phyblob/build.mk user/wifi/esp32c6/build.mk user/tracer/build.mk host/build.mk
+include kernel/build.mk user/build.mk user/wifi/build.mk user/phyblob/build.mk user/wifi/esp32c6/build.mk user/tracer/build.mk user/thread/build.mk \
+        host/build.mk
 
 # The headers each object and linker script was made from, as the compiler listed them.
 -include $(shell find $(BUILD) $(HOST_BUILD) -name '*.d' 2>/dev/null)
