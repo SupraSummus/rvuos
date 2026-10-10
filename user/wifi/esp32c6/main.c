@@ -21,6 +21,7 @@
 #include "mac.h"
 #include "mgmt.h"
 #include "osi.h"
+#include "prof.h"
 #include "rvuos.h"
 #include "sta.h"
 
@@ -192,6 +193,17 @@ void drv_mac_told(const char *who)
     drv_say("%s: frames not sent %u, ends seen %x, timeouts %u, collisions %u; the rate held %u Mb/s\n", who,
             (unsigned)t->lost, (unsigned)t->ends, (unsigned)t->timeouts, (unsigned)t->collisions,
             (unsigned)(mac_tx_kbps(t->rate) / 1000u));
+    const struct drv_prof *p = &drv_prof;
+    const struct prof *const rows[] = { &p->tx_lock, &p->tx_prep, &p->tx_air, &p->tx_gap, &p->rx_isr, &p->sta_frame,
+                                        &p->eth_send };
+    static const char *const names[] = { "lock wait", "preparing", "on the air us", "gap us", "interrupt",
+                                         "station", "eth_send" };
+    for (uint32_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) {
+        if (rows[i]->n != 0) {
+            drv_say("%s: cost %s: %u times, %u on average, %u at most\n", who, names[i], (unsigned)rows[i]->n,
+                    (unsigned)(rows[i]->sum / rows[i]->n), (unsigned)rows[i]->most);
+        }
+    }
     if (drv_phy_tracks.count != 0) {
         drv_say("%s: the PHY kept to the temperature %u times, the costliest in %u cycles\n", who,
                 (unsigned)drv_phy_tracks.count, (unsigned)drv_phy_tracks.most);

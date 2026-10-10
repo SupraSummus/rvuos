@@ -30,6 +30,7 @@
 #include "mac.h"
 #include "macregs.h"
 #include "osi.h"
+#include "prof.h"
 #include "txctl.h"
 
 #define RX_NEXT          (MAC_BASE + 0x088u) /* the descriptor the MAC fills next, its low 20 bits, or 0 */
@@ -76,6 +77,7 @@ struct desc {
 };
 
 struct mac_rx_counts mac_rx_counts;
+struct drv_prof drv_prof;
 
 /*
  * Set by the interrupt when one of INT_TX_END's causes says a try ended, which the sending waits for, see try;
@@ -304,6 +306,7 @@ int mac_frame_read(const uint8_t *buf, uint32_t written, struct mac_frame *f)
         return 0;
     }
     f->frame = buf + RX_CTRL_SIZE;
+    f->ctrl = buf;
     f->len = len - FCS;
     f->rssi = (int8_t)buf[RX_CTRL_RSSI];
     f->channel = 0;
@@ -350,6 +353,7 @@ static void frame(const struct desc *first, uint32_t n)
         if (frame_len != 0 && (b[RX_CTRL_SIZE + 1] & 0x40u) &&
             DESC_LEN(f) == RX_CTRL_SIZE + ((frame_len + 3u) & ~3u)) {
             m.frame = b + RX_CTRL_SIZE;
+            m.ctrl = b;
             m.len = frame_len;
             m.rssi = (int8_t)b[RX_CTRL_RSSI];
             m.channel = rx.channel;
@@ -382,12 +386,14 @@ static void collect(void)
         int end = d == last;
         n++;
         if (d->flags & DESC_EOF) {
+            uint32_t c = prof_cycles();
             frame(first, n);
             rx.head = next;
             if (next == 0) {
                 rx.tail = 0;
             }
             give(first, d);
+            prof_add(&drv_prof.rx_isr, prof_cycles() - c);
             first = next;
             n = 0;
         }
@@ -752,6 +758,9 @@ static const char *const try_failed[] = {
     [TRY_UNFINISHED] = "the MAC did not finish the frame",
 };
 
+static uint32_t armed_cycles; /* when the last try was armed, for drv_prof */
+static uint64_t armed_us, ended_us;
+
 /* The frame loaded, len bytes, sent once at rate i after backoff slots: the slot programmed, armed and waited for.
  * keyslot, when not 0, is the MAC's key entry the frame's cipher encrypts under; see mac_tx_key. */
 static enum try_end try(uint32_t len, uint32_t i, uint32_t backoff, int group, uint32_t keyslot)
@@ -782,6 +791,8 @@ static enum try_end try(uint32_t len, uint32_t i, uint32_t backoff, int group, u
      */
     wr(TXQ_CLR01, (1u << s) | (1u << (16u + s)));
     wr(TXQ_CLR2, rd(TXQ_CLR2) | (1u << s));
+    armed_cycles = prof_cycles();
+    armed_us = osi_now_us();
     wr(TX_PLCP0(s), rd(TX_PLCP0(s)) | TX_PLCP0_ARM);
     mac_tx_counts.tries[i]++;
 
@@ -944,7 +955,10 @@ const char *mac_tx_key(const uint8_t *frame, uint32_t len, uint32_t keyslot)
     if (len < FRAME_MIN || len > TX_MAX) {
         return "the frame's length";
     }
+    uint32_t c = prof_cycles();
     osi_mutex_take(tx_lock);
+    prof_add(&drv_prof.tx_lock, prof_cycles() - c);
+    c = prof_cycles();
     wake_locked();
     if (!tx_pwr_asked) {
         for (uint32_t i = 0; i < MAC_TX_RATES; i++) {
@@ -967,10 +981,18 @@ const char *mac_tx_key(const uint8_t *frame, uint32_t len, uint32_t keyslot)
             tx->frame[TX_HDR + 1] |= TX_RETRY;
         }
         end = try(len, data ? txctl_rate(&ctl, t) : TX_LOWEST, txctl_backoff(&ctl, t), group, keyslot);
+        prof_add(&drv_prof.tx_air, (uint32_t)(osi_now_us() - armed_us));
+        if (t == 0) {
+            prof_add(&drv_prof.tx_prep, armed_cycles - c);
+            if (ended_us != 0 && armed_us - ended_us < 10000u) {
+                prof_add(&drv_prof.tx_gap, (uint32_t)(armed_us - ended_us));
+            }
+        }
         if (data && t == 0) {
             txctl_first(&ctl, end == TRY_ACKED);
         }
     }
+    ended_us = osi_now_us();
     mac_tx_counts.lost += end != TRY_ACKED;
     mac_tx_counts.rate = ctl.at;
     int sleeps = (frame[1] & FC1_PWRMGT) != 0;

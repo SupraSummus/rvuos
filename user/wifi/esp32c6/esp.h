@@ -234,6 +234,7 @@ esp_err_t esp_wifi_internal_set_log_mod(int module, uint32_t submodule, bool ena
  */
 #define RX_CTRL_SIZE      92
 #define RX_CTRL_RSSI      0  /* int8_t, dBm */
+#define RX_CTRL_RATE      1  /* bits 0 to 4: the rate, as ESP-IDF's esp_wifi_rxctrl_t names the field */
 #define RX_CTRL_RXEND     8  /* the reception's state at its end, 0 if it succeeded */
 #define RX_CTRL_SIG_LEN   84 /* bits 0 to 13: the MPDU's length, its FCS included */
 #define RX_CTRL_STATE     88 /* 0 if the frame was received whole */

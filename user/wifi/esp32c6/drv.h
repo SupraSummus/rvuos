@@ -52,7 +52,7 @@ struct drv_header {
 
 /*
  * What the driver tells besides its steps, from the configuration's debug=, see root.c:
- * a line for each frame to and from the link, and each frame the station reads,
+ * a line for each frame to and from the link, each frame the station reads, and the MAC's header of its first data frames,
  * and hostap's supplicant at its debug level.
  * rekey asks the access point for a new pairwise key after the join; the request is itself an EAPOL frame under
  * the key, so it is how that sending is exercised on a board, though this access point answers no rekey.
@@ -106,6 +106,8 @@ struct drv {
     uint8_t no_pmf;       /* join without protecting management frames, which the station otherwise offers */
     uint8_t no_sae;       /* join without WPA3's SAE, with WPA2's passphrase where the network takes both */
     uint8_t ps;           /* sleep between beacons once joined, the radio off while the link is idle; see sta.c */
+    uint8_t blast;        /* seconds the station sends a datagram to its port 9 back to its sender, as fast as the MAC
+                             lets it: a test of the sending alone, once a run; see sta.c */
     uint32_t lib_log;     /* libphy's log level, ESP-IDF's wifi_log_level_t, or 0 for its INFO */
     uint8_t lib_start;    /* 1: bring the MAC up by the libraries' esp_wifi_start, 0 by the driver's own, to compare;
                              a traced window's alone, since the driver's receive is its own from its start */

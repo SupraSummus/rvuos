@@ -232,6 +232,10 @@ A received protected frame comes to `read_frame` already decrypted by the MAC, i
 so the packet number is read back with `ccmp_head_read` for the replay check, one counter a priority,
 802.11's traffic identifier, as the nonce and the additional data carry it, and the cipher is passed over;
 the header is taken away and the frame handed to the supplicant if it is EAPOL, else made an Ethernet frame.
+The header is taken away where the frame lies, the 802.11 header moved up onto it, and the Ethernet frame is built
+straight into the link's slot, its payload copied by halfwords, as it lies two bytes off a word where the 802.11
+payload lies on one: the library's `memcpy` goes by words only where both ends start on one, and three byte-wise
+copies of each frame once cost the receiving more than the rest of it together.
 A protected frame the MAC did not decrypt, and a data frame left in the clear once the pairwise key is set,
 are dropped. The access point sends a station's group frame to the group again, the station included;
 the station counts its own and hands them no further, as FreeBSD's `net80211` drops them.
@@ -290,6 +294,24 @@ that failed its MIC, which the reading of a short frame rests on.
 The MAC finds a group frame's entry by the key id in its CCMP header, not by the entry's place:
 with a wrong key of the other id in the entry above the right one or below it,
 or the right key in the other id's entry, the access point's group frames still came.
+
+## What the link carries
+
+Each direction is measured alone, and both together, from the host, the station joined:
+datagrams to the station's UDP port 9, which nothing serves, at a rate, the network process's count of frames in,
+from its status port, before and after, saying how many arrived; `blast=`, seconds, has the station send the first
+such datagram back to its sender as fast as the MAC lets it, the sending alone; and the echo, with a window of
+datagrams in flight, every frame crossing the network process and its client too.
+The log tells what each frame costs, `cost` lines in the core's cycles and the time on the air in microseconds,
+which data rates the access point sends the station's frames at, by the MAC's header about each, and their signal.
+
+At 54 Mb/s, the fastest of OFDM's, either direction alone carried about what single frames at that rate can,
+each with its preamble, its acknowledgement and its backoff: the driver is not what bounds it.
+The echo carried a quarter of that each way: its datagrams cross the link to the network process, the client and
+back, every one through threads of three processes, and the link holds four frames each way, its 16 KiB split in two
+and each ring's slots rounded down to a power of two, so a burst of more is dropped there.
+More over the air wants more in each transmission: HT's rates, A-MSDU, several frames in one, once the station
+associates for QoS, and A-MPDU from the access point, which wants the MAC's block acknowledgement; see `TODO.md`.
 
 ## The station's protected management frames
 

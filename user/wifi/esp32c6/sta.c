@@ -19,11 +19,13 @@
 #include <stdint.h>
 
 #include "ccmp.h"
+#include "esp.h"
 #include "keys.h"
 #include "lib/libc.h"
 #include "mac.h"
 #include "mgmt.h"
 #include "osi.h"
+#include "prof.h"
 #include "sta.h"
 #include "supp.h"
 
@@ -49,7 +51,7 @@ struct buf {
     uint64_t at; /* when the receiving's thread heard it, in osi_now_us's microseconds; see ps_beacon */
     uint32_t len;
     uint8_t decrypted; /* the MAC's cipher decrypted the frame; see read_frame */
-    uint8_t frame[STA_FRAME_MAX];
+    _Alignas(4) uint8_t frame[STA_FRAME_MAX]; /* as the MAC's buffer lies, so that the copy goes by words */
 };
 
 /* How far the station has come with its access point, which says what leaving it undoes. */
@@ -100,6 +102,14 @@ static struct {
         uint32_t late_n; /* beacons heard asleep after the wake they were due for, which late_ counts */
         int64_t late_sum, late_most, late_least; /* how late such a beacon came after its due time, in us */
     } ps_counts;
+    /*
+     * The data frames to the station by the rate field of the MAC's header about each, and their signal summed, for
+     * the log; with debug=frames the first four headers' first 32 bytes: what the access point sends at, and how.
+     */
+    volatile uint32_t rx_rate[32];
+    volatile uint32_t rx_rssi;
+    uint8_t ctrl[4][32];
+    volatile uint32_t ctrl_kept;
     volatile uint32_t kept, dropped, runs_lost;
     /* The receiving's drops: copies of a frame already read, and the rest, for the log; see read_frame. */
     volatile uint32_t drop_copy, drop_other;
@@ -132,7 +142,7 @@ static struct {
     uint64_t gtk_rx_pn[KEYS_GROUP][CCMP_REPLAY_COUNT];
     uint64_t igtk_ipn[KEYS_GROUP];
     struct mutex *key_lock; /* held while a key is installed, and by the sending while it uses one */
-    uint8_t *eth, *tx_plain, *tx_crypt, *rx_plain;
+    uint8_t *tx_plain, *tx_crypt;
 } sta;
 
 static uint32_t protect(uint8_t *crypt, uint32_t size, const uint8_t *plain, uint32_t n);
@@ -243,6 +253,14 @@ static void heard(const struct mac_frame *m)
     uint64_t at = osi_now_us();
     int beacon = mgmt_beacon_of(m->frame, m->len, sta.ap);
     sta.beacons += (uint32_t)beacon;
+    if (m->ctrl != 0 && m->len > 0 && (m->frame[0] & 0x0cu) == 0x08u &&
+        mgmt_to_station(m->frame, m->len, drv_self->mac, sta.ap)) {
+        sta.rx_rate[m->ctrl[RX_CTRL_RATE] & 0x1fu]++;
+        sta.rx_rssi += (uint32_t)-m->rssi;
+        if (sta.ctrl_kept < sizeof(sta.ctrl) / sizeof(sta.ctrl[0])) {
+            memcpy(sta.ctrl[sta.ctrl_kept++], m->ctrl, sizeof(sta.ctrl[0]));
+        }
+    }
     int group = (sta.gtk.set[0] || sta.gtk.set[1]) && mgmt_to_group(m->frame, m->len, sta.ap);
     if (!mgmt_to_station(m->frame, m->len, drv_self->mac, sta.ap) &&
         !(sta.beacon_wanted && mgmt_to_station(m->frame, m->len, every, sta.ap)) && !group && !(sta.ps.on && beacon)) {
@@ -308,6 +326,25 @@ static void told(void)
             "deauthentications ignored %u, SA Queries sent %u\n",
             (unsigned)sta.rx_mac, (unsigned)sta.rx_mac_grp, (unsigned)sta.rx_clear,
             (unsigned)sta.let_go_ignored, (unsigned)sta.sa_query_sent);
+    char line[120];
+    uint32_t at = 0, n = 0;
+    for (uint32_t i = 0; i < 32u && at < sizeof(line); i++) {
+        if (sta.rx_rate[i] != 0) {
+            n += sta.rx_rate[i];
+            at += (uint32_t)snprintf(line + at, sizeof(line) - at, " %x:%u", (unsigned)i, (unsigned)sta.rx_rate[i]);
+        }
+    }
+    line[at < sizeof(line) ? at : sizeof(line) - 1u] = 0;
+    drv_say("sta: data frames to the station at -%u dBm, by the rate field of the MAC's header%s\n",
+            (unsigned)(n ? sta.rx_rssi / n : 0), at ? line : ", none");
+    for (uint32_t i = 0; (drv_self->debug & DRV_DEBUG_FRAMES) && i < sta.ctrl_kept; i++) {
+        const uint8_t *c = sta.ctrl[i];
+        drv_say("sta: a header: %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x "
+                "%02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x\n",
+                c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9], c[10], c[11], c[12], c[13], c[14], c[15],
+                c[16], c[17], c[18], c[19], c[20], c[21], c[22], c[23], c[24], c[25], c[26], c[27], c[28], c[29],
+                c[30], c[31]);
+    }
     drv_say("sta: the access point's beacons heard %u; Null frames asking for it %u, unanswered %u; "
             "links ended and joined again %u\n",
             (unsigned)sta.beacons, (unsigned)sta.nulls, (unsigned)sta.nulls_lost, (unsigned)sta.ends);
@@ -1198,11 +1235,15 @@ static int plain_frame(const struct buf *b, struct drv *d, const uint8_t **frame
     if (to_group) {
         sta.rx_mac_grp++;
     }
-    memcpy(sta.rx_plain, f, hl); /* the CCMP header taken away, the header and the payload joined */
-    memmove(sta.rx_plain + hl, f + hl + CCMP_HEAD_LEN, *len - hl - CCMP_HEAD_LEN);
-    sta.rx_plain[1] &= (uint8_t)~FC1_PROTECTED; /* the MAC decrypted it: the frame goes on in the clear */
+    /*
+     * The CCMP header taken away where the frame lies, the header moved up onto it and the payload left in place:
+     * the buffer is the station's until wait_for gives it back, and the frame is read once.
+     */
+    uint8_t *g = (uint8_t *)(uintptr_t)f;
+    memmove(g + CCMP_HEAD_LEN, g, hl);
+    g[CCMP_HEAD_LEN + 1] &= (uint8_t)~FC1_PROTECTED; /* the MAC decrypted it: the frame goes on in the clear */
     *len -= CCMP_HEAD_LEN;
-    *frame = sta.rx_plain;
+    *frame = g + CCMP_HEAD_LEN;
     return kind;
 }
 
@@ -1338,7 +1379,9 @@ void sta_link_take(struct drv *d)
     const uint8_t *eth;
     while ((eth = chan_get_begin(&d->link, &len)) != 0) {
         if (sta.state != NONE) {
+            uint32_t c = prof_cycles();
             eth_send(d, eth, len);
+            prof_add(&drv_prof.eth_send, prof_cycles() - c);
         }
         chan_get_end(&d->link);
     }
@@ -1553,6 +1596,74 @@ static void ps_step(struct drv *d, uint64_t now)
 }
 
 /*
+ * n bytes from src to dst, as memcpy copies them, but by halfwords where the two lie two bytes apart in a word,
+ * as an 802.11 frame's payload, a word into its buffer, and an Ethernet frame's, two bytes off one, do; memcpy goes
+ * by words only where both start on one, and else by bytes.
+ */
+static void copy(uint8_t *dst, const uint8_t *src, uint32_t n)
+{
+    uint32_t apart = ((uint32_t)(uintptr_t)dst ^ (uint32_t)(uintptr_t)src) & 3u;
+    if (apart == 0u) {
+        for (; n != 0 && ((uintptr_t)dst & 3u) != 0; n--) {
+            *dst++ = *src++;
+        }
+    } else if (apart == 2u) {
+        if (n != 0 && ((uintptr_t)dst & 1u) != 0) {
+            *dst++ = *src++;
+            n--;
+        }
+        for (; n >= 2u; n -= 2u, dst += 2, src += 2) {
+            *(uint16_t *)(void *)dst = *(const uint16_t *)(const void *)src;
+        }
+    }
+    memcpy(dst, src, n);
+}
+
+/*
+ * blast=: a datagram to the station's UDP port 9, the discard port nothing serves, sent back to its sender as fast
+ * as the MAC lets it for the page's seconds, once a run: its Ethernet and IP addresses and its UDP ports swapped,
+ * which leaves both checksums as they were, since each sums those fields. A test of the sending alone, where the
+ * echo's frames cross the network process and its client too. The station's thread sends them, its frames waiting
+ * meanwhile, beside the first thread's sending of the link's.
+ */
+#define BLAST_PORT 9u
+#define IPV4_UDP   17u
+
+static int blasted;
+
+static int blast(struct drv *d, const uint8_t *dst, const uint8_t *src, uint16_t proto, const uint8_t *body,
+                 uint32_t n)
+{
+    static uint8_t eth[LINK_SLOT];
+    uint32_t ihl = n >= 20u ? (body[0] & 0xfu) * 4u : 0;
+    if (d->blast == 0 || blasted || proto != 0x0800u || (body[0] >> 4) != 4u || ihl < 20u || n < ihl + 8u ||
+        n > LINK_SLOT - 14u || body[9] != IPV4_UDP || (body[ihl + 2] << 8 | body[ihl + 3]) != BLAST_PORT) {
+        return 0;
+    }
+    blasted = 1;
+    memcpy(eth, src, 6);
+    memcpy(eth + 6, dst, 6);
+    eth[12] = 0x08;
+    eth[13] = 0x00;
+    memcpy(eth + 14, body, n);
+    memcpy(eth + 14 + 12, body + 16, 4); /* the IP addresses swapped */
+    memcpy(eth + 14 + 16, body + 12, 4);
+    memcpy(eth + 14 + ihl, body + ihl + 2, 2); /* and the UDP ports */
+    memcpy(eth + 14 + ihl + 2, body + ihl, 2);
+    uint32_t sent = d->tx_frames, dropped = d->tx_dropped;
+    uint64_t start = osi_now_us(), end = start + (uint64_t)d->blast * 1000000u;
+    while (osi_now_us() < end) {
+        eth_send(d, eth, 14u + n);
+    }
+    uint64_t took = osi_now_us() - start;
+    sent = d->tx_frames - sent;
+    drv_say("sta: blasted %u datagrams of %u bytes in %u ms, %u kb/s, %u not sent\n", (unsigned)sent,
+            (unsigned)(14u + n), (unsigned)(took / 1000u), (unsigned)((uint64_t)sent * (14u + n) * 8000u / took),
+            (unsigned)(d->tx_dropped - dropped));
+    return 1;
+}
+
+/*
  * A frame the station received once it serves the link:
  * read once through plain_frame, and handed to the supplicant if it is EAPOL,
  * else built into an Ethernet frame for the network process. A data frame left in the clear
@@ -1585,23 +1696,24 @@ static void link_frame(const struct buf *b, struct drv *d)
         sta.relayed++;
         return;
     }
-    if (p.len > LINK_SLOT - 14u) {
-        d->rx_dropped++;
+    if (blast(d, frame + ADDR1, p.src, p.proto, p.body, p.len)) {
         return;
     }
-    memcpy(sta.eth, frame + ADDR1, 6); /* the destination */
-    memcpy(sta.eth + 6, p.src, 6);     /* the source, the frame's Address 3 */
-    sta.eth[12] = (uint8_t)(p.proto >> 8);
-    sta.eth[13] = (uint8_t)p.proto;
-    memcpy(sta.eth + 14, p.body, p.len);
+    uint8_t *eth = p.len <= LINK_SLOT - 14u ? chan_put_begin(&d->link) : 0;
+    if (eth == 0) {
+        d->rx_dropped++; /* too long, or the link full */
+        return;
+    }
+    memcpy(eth, frame + ADDR1, 6); /* the destination */
+    memcpy(eth + 6, p.src, 6);     /* the source, the frame's Address 3 */
+    eth[12] = (uint8_t)(p.proto >> 8);
+    eth[13] = (uint8_t)p.proto;
+    copy(eth + 14, p.body, p.len);
     if (d->debug & DRV_DEBUG_FRAMES) {
-        drv_trace("in", sta.eth, 14u + p.len);
+        drv_trace("in", eth, 14u + p.len);
     }
-    if (chan_send(&d->link, sta.eth, 14u + p.len) == 0) {
-        d->rx_frames++;
-    } else {
-        d->rx_dropped++;
-    }
+    chan_put_end(&d->link, 14u + p.len);
+    d->rx_frames++;
 }
 
 /*
@@ -1611,7 +1723,9 @@ static void link_frame(const struct buf *b, struct drv *d)
 static int read_frame(const struct buf *b, void *arg)
 {
     if (!(sta.ps.on && ps_frame(b))) {
+        uint32_t c = prof_cycles();
         link_frame(b, arg);
+        prof_add(&drv_prof.sta_frame, prof_cycles() - c);
     }
     return sta.ps.on && ps_until() <= osi_now_us();
 }
@@ -1827,13 +1941,11 @@ const char *sta_start(struct drv *d)
     sta.bufs = osi_calloc(STA_FRAMES, sizeof(struct buf));
     sta.events = osi_queue_new(STA_FRAMES + STA_RUNS + 1u, sizeof(struct event));
     sta.free = osi_queue_new(STA_FRAMES, sizeof(uint32_t));
-    sta.eth = osi_malloc(LINK_SLOT);
     sta.tx_plain = osi_malloc(MGMT_DATA_FIXED + LINK_SLOT);
     sta.tx_crypt = osi_malloc(MGMT_DATA_FIXED + LINK_SLOT + CCMP_HEAD_LEN + CCMP_MIC_LEN);
-    sta.rx_plain = osi_malloc(STA_FRAME_MAX);
     sta.key_lock = osi_mutex_new();
-    if (sta.bufs == 0 || sta.events == 0 || sta.free == 0 || sta.eth == 0 || sta.tx_plain == 0 || sta.tx_crypt == 0 ||
-        sta.rx_plain == 0 || sta.key_lock == 0) {
+    if (sta.bufs == 0 || sta.events == 0 || sta.free == 0 || sta.tx_plain == 0 || sta.tx_crypt == 0 ||
+        sta.key_lock == 0) {
         return "the station's buffers, queues and lock";
     }
     for (uint32_t i = 0; i < STA_FRAMES; i++) {

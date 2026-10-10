@@ -360,7 +360,9 @@ static void snap_parse(const char *conf, uint32_t len)
  * debug= names what the driver tells besides its steps, any of frames, wpa, rekey and ps, see drv.h,
  * and lib= the libraries' log level, 4 for debug and 5 for verbose;
  * pmf=0 joins without protecting management frames, and sae=0 without WPA3's SAE;
- * ps=1 has the station sleep between beacons while its link is idle, IEEE 802.11's power save.
+ * ps=1 has the station sleep between beacons while its link is idle, IEEE 802.11's power save;
+ * blast=, seconds up to 30, has it send a datagram to its UDP port 9 back to its sender as fast as it may, once,
+ * a test of the sending alone.
  * listen=, a channel, with no ssid has the driver hear that channel without joining, and tell what it heard;
  * probe=, with listen=, has it ask for that network on the channel, and count the answers; see drv.h.
  * i154=, a channel of IEEE 802.15.4's, 11 to 26, has the driver bring that radio up instead of Wi-Fi's,
@@ -387,6 +389,8 @@ static void configure(struct drv *p)
     p->no_pmf = config_number(conf, size, "pmf", 1) == 0;
     p->no_sae = config_number(conf, size, "sae", 1) == 0;
     p->ps = config_number(conf, size, "ps", 0) != 0;
+    uint32_t blast = config_number(conf, size, "blast", 0);
+    p->blast = (uint8_t)(blast <= 30u ? blast : 30u);
     uint32_t channel = config_number(conf, size, "listen", 0);
     p->listen = (uint8_t)(channel <= 13 ? channel : 0);
     config_value(conf, size, "probe", p->probe, sizeof(p->probe));

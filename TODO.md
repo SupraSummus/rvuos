@@ -203,10 +203,13 @@ what is left:
   and the supplicant's a bounded arena of its own, or fixed buffers over a P-256 of fixed width.
 - The ESP32-C6's Wi-Fi root task has 8 KiB of memory and 9 slots left once its clients run,
   so another client needs room found first, in the driver's block or a smaller `CLIENT_CHAN_SIZE`.
-- The ESP32-C6's echo is bound by the access point and the medium, about 5 Mb/s, not by the core.
-  Two or more frames wait behind the one sent most of the time, so aggregation would carry more:
-  an A-MSDU up, once the station associates for QoS and takes the access point's EDCA parameters,
-  and an A-MPDU down, which wants the MAC's block ack; and HT's rates, see the profile above.
+- The ESP32-C6's link carries about 21 Mb/s either way alone at OFDM's 54 Mb/s, about what single frames at that
+  rate can, see `user/wifi/esp32c6/NOTES.md`, and its echo about a quarter of that each way.
+  More over the air wants aggregation: an A-MSDU up, once the station associates for QoS and takes the access point's
+  EDCA parameters, and an A-MPDU down, which wants the MAC's block ack; and HT's rates, see the profile above.
+  The echo is bound by the system: each datagram crosses three processes' threads twice, and the link, whose 16 KiB
+  `LINK_SIZE` gives each way four slots of `LINK_SLOT`, drops a burst of more; eight would take 32 KiB, which the
+  root task's memory, see below, has no room for yet.
 - The ESP32-C6's driver locks its own sending and keys, `tx_lock` and `key_lock`, with the adapter's mutexes,
   which exist for the libraries and go through the one lock all the adapter's objects share;
   `lib/lock.h`'s would serve them alone.
