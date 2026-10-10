@@ -447,3 +447,26 @@ until the maintainer decides otherwise.
     nothing, as for facts about a device, or a notice --
     and what an image that links `libphy.a`, and the libraries until they go, must carry beside it.
     Decide before the Wi-Fi system's image is handed to anyone.
+
+29. **How tightly a slot packs.**
+    Working default: twenty-four bytes, a word for each of the three links; see "Slot format".
+    Slots take most of a child's objects as `user/lib/` builds them, three fifths, and four fifths with a table of 64;
+    an empty slot takes as much as a filled one.
+    - **Sixteen bytes**, as seL4's on 32 bits, with sixteen-bit links:
+      a node's offset in eight-byte steps from the base of a 512 KiB window every pool lies in.
+      The ESP32-C6's and RP2350's RAM is that window; QEMU and MPS2 would keep 256 KiB of free RAM in it, not 4 and 2 MiB.
+      A retype makes no pool outside it, and a table's header grows to sixteen bytes, so its slots lie on eight.
+      A prototype, the branch `claude/elegant-planck-pjp8ch-slot16`, passes the checks its base passes
+      and makes most of the bench's operations a little cheaper, since a lookup copies less;
+      six mutants' patches no longer apply, two report otherwise,
+      and `lookup-reads-past-its-table` goes uncaught, since a table no longer ends on padding ASan poisons.
+    - **Twenty bytes** need no window, and leave no bit spare:
+      slots twenty bytes apart lie on four bytes, so three links take 90 bits,
+      a notification's pointer and badge 61, and its type, rights and the link up the rest.
+    - **seL4's other savings** are not ours:
+      its badge is 28 bits, its frames are pages,
+      and its tree has two links, which "The derivation tree" says why rvuos does not.
+
+    A smaller slot frees memory only in pools sized to what they hold, and sizing them comes first:
+    it frees 8 KiB of the ESP32-C6's Wi-Fi system, where sixteen-byte slots would free 3 more; see `TODO.md`.
+    Decide once the system calls settle.

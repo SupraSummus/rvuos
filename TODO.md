@@ -50,6 +50,12 @@ what is left:
   and the child built in its place needs a channel of its own, which the other end has to learn of.
   A hub's ends are connected again, with the server's word that it let go of the last client;
   a peer could be given the same, which the driver and the network process have not needed, as neither is built again.
+- Every child's objects get a pool of `CHILD_POOL_SIZE`, 4 KiB, whatever its table,
+  where the ESP32-C6's clients fill 912 bytes and its network process 1104,
+  and the driver's own pool, `DRV_OWN_POOL`, is 8 KiB for 1544.
+  Sized to fit, they would leave the ESP32-C6's root task 8 KiB more,
+  and 14 with the driver's own, at a slot for each block that halving it leaves;
+  but no header gives an object's size, only `MANUAL.md`, section 5.5.
 - A child's data comes from the parent's room whenever there is one, `self_room`,
   so a parent cannot keep some children in blocks of their own once it has made the room.
 - A child's stack grows down onto its page, and nothing stops it there;
@@ -516,6 +522,8 @@ what is left:
   mutants stand in `process.c` and `pmp.c`, and the records of `tests/bench/` would move.
 - `PROCESS_REGION_SLOTS` is fixed at 8, whatever the PMP budget;
   size it per process from the budget.
+- A process's PMP image has room for `PMP_MAX_ENTRIES` entries, sixteen, and fills `PROCESS_REGION_SLOTS` at most;
+  sized by the smaller, a process takes 40 bytes less, and the self-check bounds the image's count by it too.
 - `pmp.h` names the protection unit's interface after PMP, and `kernel/arch/arm/mpu.c` implements it too;
   the image keeps PMP's encoding on both, but `pmp_set` and `pmp_entry_count` read as RISC-V's.
   Rename it with the next change to the image in `process.c`, where mutants stand,
