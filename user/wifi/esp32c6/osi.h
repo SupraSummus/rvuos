@@ -17,11 +17,6 @@ struct ets_timer;
 struct queue;
 struct mutex;
 
-struct osi_isr {
-    void (*f)(void *);
-    void *arg;
-};
-
 /*
  * osi.c: the adapter, its table for esp_wifi_init_internal, the threads it runs everything on,
  * built from the driver's own account s, its timers, which its timer thread runs,
@@ -29,7 +24,6 @@ struct osi_isr {
  * A thread that did not start as one of the adapter's, the driver's first, joins them with osi_adopt,
  * its stack between stack_lo and stack_hi, before it calls the libraries.
  * osi_stack_used says the deepest a thread osi_thread made has gone into its stack.
- * osi_isr_swap exchanges the handler of an interrupt the libraries handle with one of the driver's own, mac.c's.
  * The driver's own code waits on the adapter's queues and mutexes too, as the libraries do, by these:
  * a wait of OSI_FOREVER milliseconds ends only when it is met, and one of 0 does not wait;
  * a put or a get returns 1 if it was done.
@@ -51,7 +45,6 @@ void osi_trace_init(uint32_t entries);
 void osi_trace(const char *what, uint32_t a0, uint32_t a1);
 void osi_trace_dump(void);
 void osi_delay_ms(uint32_t ms);
-int osi_isr_swap(uint32_t source, struct osi_isr *isr);
 struct ets_timer *osi_timer_new(void (*f)(void *), void *arg);
 void osi_timer_arm_us(struct ets_timer *t, uint32_t us);
 void osi_timer_disarm(struct ets_timer *t);

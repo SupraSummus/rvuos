@@ -26,9 +26,6 @@ static unsigned count, next;
 static const char *const running = "config";
 static int wrong; /* the case's first wrong access is told, and the rest of it does nothing */
 
-/* The libraries' receive control block, which their write to RX_BASE carries and the driver's mac_rx_base_init reads. */
-uint32_t wDevCtrl;
-
 static void tell(char op, uint32_t a, uint32_t v)
 {
     printf("mac-replay-test: %s: access %u, %c 0x%08x", running, next + 1, op, a);
@@ -131,14 +128,15 @@ static int host_coex_pti_get(uint32_t event, uint8_t *pti)
  */
 static void run(void)
 {
-    /* The libraries' receive control block, which the trace holds as their write to RX_BASE and no more,
-       so the own read is given it, and that write is held by address and place, not by value. */
+    /* The receive base, the list the MAC fills first: their start's is their control block, which the trace holds as
+       their write to RX_BASE and no more, so the own start is given it, and that write is held by its place. */
+    uint32_t rx_base = 0;
     for (unsigned i = 0; i < count; i++) {
         if (steps[i].op == 'W' && steps[i].address == RX_BASE) {
-            wDevCtrl = steps[i].value;
+            rx_base = steps[i].value;
         }
     }
-    mac_config(host_slowclk_cal_get, host_coex_pti_get);
+    mac_config(host_slowclk_cal_get, host_coex_pti_get, rx_base);
 }
 
 static void load(const char *dir, const char *file)

@@ -59,7 +59,6 @@ struct mac_rx_counts {
     volatile uint32_t overran;    /* buffers the MAC wrote past their end */
     volatile uint32_t restarted;  /* times the MAC had run out of descriptors and started again */
     volatile uint32_t stuck;      /* times the MAC did not read the list's links again in time */
-    volatile uint32_t repointed;  /* times the take pointed the MAC at the driver's list again */
 };
 extern struct mac_rx_counts mac_rx_counts;
 
@@ -71,13 +70,24 @@ extern struct mac_rx_counts mac_rx_counts;
  */
 void mac_sniffer(int on);
 
-/* 0, or the step that failed. */
+/*
+ * The MAC's receive list, made at the start, before mac_config, which points the MAC at it by *base,
+ * and its interrupt, which the start installs in place of the libraries' wDev_ProcessFiq: the list is the MAC's
+ * from then on. 0, or what could not be made.
+ */
+const char *mac_rx_prepare(uint32_t *base);
+void mac_rx_isr(void *arg);
+
+/*
+ * The frames handed to heard, the receive on, as a scan, a listen or the station's link take them;
+ * given back, the receive is off and the frames go to no one, as before the first take. 0, or what failed.
+ */
 const char *mac_rx_take(mac_heard_fn *heard);
 void mac_rx_give_back(void);
 
 /*
  * The MAC's receive off for the bring-up, in place of the libraries' hal_mac_rx_disable: RX_CTRL's enable and its
- * reload cleared, as the MAC is reset, before the driver's own list is taken.
+ * reload cleared, as the MAC is reset, before its list is pointed at.
  */
 void mac_rx_off(void);
 
@@ -97,16 +107,16 @@ void mac_rx_on(void);
  * The register sequences of the libraries' bring-up, written out in macstart.c, which holds their detail:
  * their hal_init's words and groups, their hal_crypto_init's cipher words, and their coex PTI.
  * main.c's start calls mac_config, which runs them in the libraries' order, taking the slow clock's period
- * and the coex PTI bytes through the two pointers; see macstart.c.
+ * and the coex PTI bytes through the two pointers, and the receive base, mac_rx_prepare's list; see macstart.c.
  */
-void mac_config(uint32_t (*slowclk_cal_get)(void), int (*coex_pti_get)(uint32_t event, uint8_t *pti));
+void mac_config(uint32_t (*slowclk_cal_get)(void), int (*coex_pti_get)(uint32_t event, uint8_t *pti), uint32_t rx_base);
 void mac_station_start(const uint8_t sta[6], void (*sta_start)(void));
 void mac_config_start(void);
 void mac_rx_policy_word(uint32_t iface);
 void mac_config_finish(void);
 void mac_rx_set_policy(uint32_t iface, uint32_t valid);
 void mac_queues_init(void);
-void mac_rx_base_init(void);
+void mac_rx_base_init(uint32_t base);
 void mac_he_init(void);
 void mac_rx_match_init(void);
 void mac_low_rate_disable(void);

@@ -139,7 +139,8 @@ what is left:
   the libraries' bring-up's body itself, and the HAL's functions go over one at a time.
   The method, the order and the groups are in `user/wifi/esp32c6/NOTES.md`.
   `libstart=1` in `WIFI_CONFIG` runs the libraries' start instead of the driver's own, for a traced comparison of
-  the two from one image; it goes when the own start is proven and no comparison is wanted.
+  the two from one image, in a traced window alone, the driver's receive being its own from its start;
+  it goes when the own start is proven and no comparison is wanted.
   The four bring-up symbols and the two of the log that the driver once asked of the flash libraries are taken one
   by one, over `libphy`, `mac.c` and `macstart.c`; `make BOARD=esp32c6 wifi-esp32c6-refs` counts what is left of `pp`
   and `net80211`.
@@ -149,9 +150,8 @@ what is left:
   A link without the two archives leaves only what the driver's own code names: `libphy.a` and the ROM reach nothing
   of theirs.
   What is left is their init's -- `esp_wifi_init_internal`, its log level and module, `wifi_init_completed`, `g_ic`,
-  `g_wifi_nvs`, `g_mac_sleep_en` --, the receive's `wDev_ProcessFiq`, `wDevCtrl` and `g_wdev_last_desc_reset_ptr`,
-  which an own interrupt and list from the start would take, `hal_init_tx_pwr`, and `esp_wifi_set_mode` and
-  `esp_wifi_start`, the `libstart=1` comparison's.
+  `g_wifi_nvs`, `g_mac_sleep_en` --, `hal_init_tx_pwr`, and `esp_wifi_set_mode` and `esp_wifi_start`, the
+  `libstart=1` comparison's.
   The comparison's tools -- `libstart=1`, the diff, the compare across images and their expected files -- go once no
   call of theirs is left in the start.
   Gathering the driver's address macros into `macregs.h`, ordered by address, would show a word two files name
@@ -164,7 +164,7 @@ what is left:
   an own slot, the driver's own interrupt to finish the frame, and the libraries' retry of a collision or a timeout,
   with their invalidation of the queue on a timeout, would do better.
   `mac.c` points a MAC that ran out of descriptors past the last it filled by `RX_BASE` alone,
-  which the take found not always taken; no run has run out yet, `restarted` 0.
+  which a move off the libraries' list found not always taken; no run has run out yet, `restarted` 0.
 - The ESP32-C6's driver aims at a station alone, the profile its work is held to:
   WPA2's PSK and WPA3's SAE with CCMP, OFDM and HT rates with a simple rate control and retries,
   and the modem's sleep until the DTIM beacon with the PHY's PLL tracked, as the items below say;

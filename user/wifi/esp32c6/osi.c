@@ -595,26 +595,6 @@ static void set_isr(int32_t n, void *f, void *arg)
 }
 
 /*
- * The handler of the CPU interrupt the libraries routed source to, exchanged with isr in the critical section,
- * which holds the interrupt's thread off; 0 if they routed nothing from source.
- */
-int osi_isr_swap(uint32_t source, struct osi_isr *isr)
-{
-    for (uint32_t n = 0; n < INTRS; n++) {
-        if (osi.intr[n].f != 0 && osi.intr[n].source == source) {
-            int_disable(0);
-            struct osi_isr was = { osi.intr[n].f, osi.intr[n].arg };
-            osi.intr[n].f = isr->f;
-            osi.intr[n].arg = isr->arg;
-            int_restore(0, 0);
-            *isr = was;
-            return 1;
-        }
-    }
-    return 0;
-}
-
-/*
  * The line of a source is the source plus one, see kernel/board/esp32c6/irq.c,
  * carved from the modem's lines the root task gave the driver, which start at DRV_LINE_FIRST.
  */

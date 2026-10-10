@@ -5,6 +5,12 @@
 # so a zero mask holds none of them.
 # --as-expected, WIFI_TRACE_EXPECT_NEW=1 in make, prints a place that does not pass in this form.
 
+# The receive base: the libraries' start points the MAC at their control block, wDevCtrl, and the own start at
+# its own list, which mac.c makes; both are addresses in RAM, which move with the image, so a zero mask holds the
+# write's place alone.
+-W4 0x600a4084 0x00000000/0x00000000
++W4 0x600a4084 0x00000000/0x00000000
+
 # The libraries' default policy configures interface 1, the soft AP's, besides interface 0's: its address and its
 # address flag; the own start writes interface 0's words alone, so the interface-1 writes, and the interface-0
 # round-trips they sit among, come unmatched.

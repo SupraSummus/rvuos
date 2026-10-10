@@ -109,7 +109,7 @@ OpenBSD's or FreeBSD's net80211 would want a kernel's mbufs and timers emulated,
 and Linux's mac80211 is GPL, which an image holding `libphy.a` cannot carry.
 
 Receiving came easily, for rvuos's part:
-the adapter runs the libraries' interrupt in a thread, so taking it is an exchange of a handler,
+the adapter runs the MAC's interrupt in a thread, so the driver's handler takes the place of theirs,
 and the MAC writes into RAM the driver allocates, which open decision 13 trusts it with.
 `listen=` holds the two against each other, by the beacons each hears of an access point and those it misses,
 counted by the access point's own clock: a count by sequence numbers took its bursts to other stations for losses.
@@ -150,8 +150,7 @@ The station's own logic begins with the authentication.
 With `sta=own` the driver scans for the network by its own code, takes the access point heard strongest, or the page's bssid,
 retunes to it, and sends an open-system Authentication frame by `mac_tx`, reading the answer through `mac.c`;
 the access point accepts it, and the libraries' station is never asked to connect.
-The scan and the authentication are two takes of the receiving one after another,
-so `mac_rx_take` makes its list whole again at each take, its descriptors and buffers made once.
+The scan and the authentication are two takes of the receiving one after another, on the one list the start makes.
 The association, the keys and so the join are to follow the same way; `TODO.md` says what is left.
 
 ## A footing for the station
@@ -304,7 +303,7 @@ What the libraries still do is bring the MAC up and stop it, and a little throug
 They are given no supplicant now.
 Their station's start and stop look for its table and go on without one;
 some of their handling of a received management frame reads it unchecked,
-which no run has reached, as the driver takes the MAC's receiving before anything is joined.
+which no run reaches, as their receive never runs: the driver's list and interrupt are the MAC's from its start.
 The libraries' station had joined what the own one does not:
 the router's own WPA2 network, whose group key is TKIP, open networks, and a modem asleep between beacons.
 So the own station now takes, of the network's access points, the strongest whose suites it takes,
@@ -383,9 +382,8 @@ One address has one name, in `macregs.h` when two files share it.
 
 `mac_config`'s receive policy for interface 1 is not inert -- left out, the libraries' receive interrupt ran in the
 window where it did not with it -- so it stays, though the driver never brings that interface up.
-The receive base's write stays as well.
-Their receive reads the word: `wdev_record_rx_linked_list` read it in base 2, where their receive interrupt ran in
-the window.
+The receive base's write stays as well, and points at the driver's own list, `mac.c`'s, where it pointed at their
+control block until their receive went.
 Read in the write's place, before it, the word held 0x00800000 in three own runs, after their `wifi_reset_mac`.
 How the MAC makes an address of it is not known;
 read back as their 0x4086e138 is, as 0x0086e138, without bit 30, it would be 0x40800000, `__ram_start`, the kernel's
@@ -422,16 +420,7 @@ The ordinary runs hold both, the joins among them.
 Some of the driver's choices are made for the libraries that still run beside it, not for the MAC,
 and each goes, or is looked at again, when what it answers to goes:
 - `mac_config`'s receive policy for interface 1 stays because, left out, their receive interrupt ran in the window;
-  it is looked at again once their interrupt is no longer installed.
-- The start points `RX_BASE` at their control block, `wDevCtrl`, and `drv_reset_mac` sets the flag in their wdev
-  their receive reads: both serve their receive until the driver takes the MAC, and go when the MAC is the driver's from the start.
-- `mac_rx_take` turns the receive off, leaves their task 50 ms for its frames, exchanges the interrupt,
-  and points `RX_BASE` and reloads until the MAC moves off their list, and `mac_rx_give_back` hands it back:
-  all of it because their receive holds the MAC first; with the driver's receive from the start,
-  a take is the receive turned on and a give-back the receive turned off.
-- `tools/mac-trace.py`'s `MOMENT` names the receive's words, `RX_LAST` and the two after it, the received frame's end
-  and the word beside it, partly for their interrupt's reads of them;
-  once their interrupt is gone those reads leave the trace, though the words still move with what the air brings.
+  their interrupt is no longer installed, so whether the policy is wanted is open again, a step of its own.
 - The start writes their control block's interface masks and the byte their `ieee80211_update_phy_country`'s guard
   reads, and calls their `hal_init_tx_pwr` for the power table their association reads:
   these go with their init, whose state they serve.

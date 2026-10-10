@@ -172,9 +172,9 @@ void drv_mac_told(const char *who)
 {
     const struct mac_rx_counts *m = &mac_rx_counts;
     drv_say("%s: the MAC's interrupts %u, causes %x; frames broken %u, chained %u, odd %u; overran %u, restarted %u, "
-            "stuck %u; pointed again %u\n",
+            "stuck %u\n",
             who, (unsigned)m->interrupts, (unsigned)m->causes, (unsigned)m->broken, (unsigned)m->chained,
-            (unsigned)m->odd, (unsigned)m->overran, (unsigned)m->restarted, (unsigned)m->stuck, (unsigned)m->repointed);
+            (unsigned)m->odd, (unsigned)m->overran, (unsigned)m->restarted, (unsigned)m->stuck);
 }
 
 /* A step of mac.c's that must succeed: 0, or the step that failed, which stops the driver as drv_must does. */
@@ -388,10 +388,8 @@ static __attribute__((noreturn)) void attend(struct drv *d)
  */
 extern int wifi_init_completed(void);
 
-extern void wDev_ProcessFiq(void);   /* pp: their interrupt handler, which they install for the MAC's source */
 extern void hal_init_tx_pwr(void);   /* pp: their power table's one filling in the start, read at their association */
 extern uint8_t g_mac_sleep_en;           /* the libraries' MAC sleep flag, which gates the modem wake */
-extern void *g_wdev_last_desc_reset_ptr; /* the ROM cell holding their wdev whose first byte is the flag below */
 extern void *g_wifi_nvs;                 /* the libraries' configuration, whose first byte is the mode */
 extern char g_ic[];                      /* the libraries' shared control block */
 
@@ -403,14 +401,13 @@ extern char g_ic[];                      /* the libraries' shared control block 
 #define G_IC_START_MASK 0x24eu
 
 /*
- * The libraries' wifi_reset_mac, written out: their reset pulse through the adapter, their wdev told its last RX
- * descriptor was reset -- a flag their own receive reads until the driver takes the receive over -- and the MAC's
- * receive off, which their hal_mac_rx_disable does, the one function of theirs this call had left.
+ * The libraries' wifi_reset_mac, written out: their reset pulse through the adapter and the MAC's receive off, which
+ * their hal_mac_rx_disable does. Their wdev's flag that its last RX descriptor was reset, which their receive alone
+ * reads, is not set: their receive never runs.
  */
 static void drv_reset_mac(void)
 {
     funcs->wifi_reset_mac();
-    *(uint8_t *)g_wdev_last_desc_reset_ptr = 1;
     mac_rx_off();
 }
 
@@ -441,12 +438,15 @@ static int drv_hw_start(void)
      * their hal_init, the MAC's configuration, which mac_config in macstart.c writes out whole,
      * then the two interrupt sources the adapter routes, their handler and the line armed.
      * Their set_intr passes the core the Wi-Fi task runs on, which the adapter ignores; the driver passes none.
-     * Their handler is the one the driver's own receive trades for its own once it takes the MAC; see mac.c.
+     * The receive list and the handler are the driver's own, mac.c's, in place of their wDev_ProcessFiq and the
+     * control block their mac_rxbuf_init points the MAC at.
      */
-    mac_config(funcs->slowclk_cal_get, funcs->coex_pti_get);
+    uint32_t rx_base;
+    drv_must_mac("the MAC's receive list", mac_rx_prepare(&rx_base));
+    mac_config(funcs->slowclk_cal_get, funcs->coex_pti_get, rx_base);
     funcs->set_intr(0, 2 /* the modem's power */, 1, 1);
     funcs->set_intr(0, 0 /* the MAC */, 1, 1);
-    funcs->set_isr(1, (void *)wDev_ProcessFiq, 0);
+    funcs->set_isr(1, (void *)mac_rx_isr, 0);
     funcs->ints_on(1u << 1);
     mac_default_policy(drv_self->mac); /* the libraries' chip_enable: their default receive policy */
     mac_rx_on();                       /* and their ic_enable_rx */
@@ -494,10 +494,15 @@ static int drv_wifi_start(void)
 
 /*
  * The libraries' start or the driver's own, so that a traced run of each, of the same image, can be held together by
- * tools/mac-trace.py's diff; the driver's own posts the libraries' bring-up for now, so the two agree. See drv.h.
+ * tools/mac-trace.py's diff. The libraries' start leaves the MAC on their receive list and handler, which the
+ * driver's receive no longer moves it off, so it is a traced window's alone, which ends before any frame is taken.
  */
 static int bringup_start(void)
 {
+    if (drv_self->lib_start && !drv_self->trace) {
+        drv_say("driver: libstart=1 is for a traced window alone; the driver's receive is its own from its start\n");
+        return ESP_FAIL;
+    }
     return drv_self->lib_start ? esp_wifi_start() : drv_wifi_start();
 }
 

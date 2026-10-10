@@ -10,10 +10,9 @@
  * DESC_EOF once a frame ends in it, and DESC_OWNER, which the libraries set on a descriptor they give the MAC.
  * The list grows at its tail: the driver links descriptors there, then sets RX_CTRL_RELOAD, which the MAC clears
  * once it has read the link again; a MAC that had run out of descriptors, RX_NEXT 0, is pointed past the last it filled.
- * The driver points the MAC at its own list with RX_BASE and a reload, as esp-wifi-hal does:
- * with RX_BASE alone, the MAC stayed on the libraries' list in one run of four, and filled none of the driver's.
- * With the reload too it stays there about once in ten, though it takes the reload,
- * and moves when told again, so the take tells it until it has moved.
+ * The list is the MAC's from the start: mac_rx_prepare makes it, the start writes its first descriptor to RX_BASE
+ * where the libraries' own start writes their control block, and mac_rx_isr is the MAC's interrupt from then on,
+ * in place of their wDev_ProcessFiq, so their receive never runs.
  * A buffer starts with the 92 bytes the MAC writes about the reception, esp.h's RX_CTRL_, and the frame follows;
  * the bytes at 0x21 and 0x22 count more before the frame in some, which the libraries skip, and the driver drops yet.
  * The MAC writes the frame without its FCS, padded to a whole word, and the descriptor's length counts both,
@@ -58,12 +57,10 @@
 #define RELOAD_SPINS 100000u /* the libraries' wait for the reload to be taken */
 #define BUSY_SPINS   100000u /* the wait for the MAC to stop, which the libraries' does not bound */
 #define CAUSE_ROUNDS 8u      /* the causes read again, as long as new ones come */
-#define MOVE_TRIES   8u      /* the MAC pointed at the driver's list again, when a reload left it where it was */
 #define EXTRA_LO     0x21u
 #define EXTRA_HI     0x22u
 #define FCS          4u  /* the checksum that ends a frame, which the MAC appends to what it sends */
 #define FRAME_MIN    10u /* the shortest frame, an acknowledgement, without its FCS */
-#define MAC_SOURCE   0u  /* the MAC's interrupt source, Espressif's soc/interrupts.h */
 
 struct desc {
     volatile uint32_t flags;
@@ -76,9 +73,7 @@ struct mac_rx_counts mac_rx_counts;
 static struct {
     struct desc *descs;
     struct desc *head, *tail; /* the list the MAC fills, head first; 0 while empty */
-    mac_heard_fn *heard;
-    struct osi_isr isr; /* the driver's handler until taken, the libraries' while the driver's runs */
-    int taken;
+    mac_heard_fn *volatile heard; /* the reader the frames go to, 0 while none takes them */
     volatile uint32_t channel; /* the one mac_channel last tuned to, which each frame is told it came on */
 } rx;
 
@@ -233,11 +228,8 @@ static int reload(void)
     return 0;
 }
 
-/*
- * Descriptors first to last, a chain, given to the MAC at the list's tail, written whole before the MAC reads;
- * into an empty list, the MAC is pointed at them, and reads them at once.
- */
-static void give(struct desc *first, struct desc *last)
+/* Descriptors first to last, a chain, made the MAC's: owned, their lengths their sizes, their canaries set. */
+static void ready(struct desc *first, struct desc *last)
 {
     struct desc *d = first;
     for (uint32_t i = 0; i < RX_DESCS; i++, d = d->next) {
@@ -250,6 +242,15 @@ static void give(struct desc *first, struct desc *last)
     }
     last->next = 0;
     __asm__ volatile("fence" : : : "memory");
+}
+
+/*
+ * Descriptors first to last, a chain, given to the MAC at the list's tail, written whole before the MAC reads;
+ * into an empty list, the MAC is pointed at them, and reads them at once.
+ */
+static void give(struct desc *first, struct desc *last)
+{
+    ready(first, last);
     if (rx.head == 0) {
         rx.head = first;
         rx.tail = last;
@@ -288,6 +289,10 @@ int mac_frame_read(const uint8_t *buf, uint32_t written, struct mac_frame *f)
 /* A frame the MAC wrote into n descriptors from first, to heard if mac_frame_read reads it; each other counted. */
 static void frame(const struct desc *first, uint32_t n)
 {
+    mac_heard_fn *heard = rx.heard;
+    if (heard == 0) {
+        return; /* no reader takes the frames yet, or any more */
+    }
     const uint8_t *b = first->buf;
     uint32_t f = first->flags;
     struct mac_frame m = {0};
@@ -324,14 +329,14 @@ static void frame(const struct desc *first, uint32_t n)
             m.rssi = (int8_t)b[RX_CTRL_RSSI];
             m.channel = rx.channel;
             m.decrypted = 1;
-            rx.heard(&m);
+            heard(&m);
             return;
         }
         mac_rx_counts.odd++;
         return;
     }
     m.channel = rx.channel;
-    rx.heard(&m);
+    heard(&m);
 }
 
 /*
@@ -369,7 +374,7 @@ static void collect(void)
 }
 
 /* The MAC's interrupt, in place of the libraries' wDev_ProcessFiq: its causes read and cleared, as that does. */
-static void isr(void *arg)
+void mac_rx_isr(void *arg)
 {
     (void)arg;
     mac_rx_counts.interrupts++;
@@ -470,19 +475,8 @@ void mac_home_channel(void)
     mac_tx_block_clear(); /* their ic_mac_init */
 }
 
-/* 1 if the MAC fills the driver's first descriptor next: it has moved to the driver's list, and filled none of it. */
-static int moved(void)
-{
-    return ((rd(RX_NEXT) ^ (uint32_t)(uintptr_t)rx.descs) & 0x000fffffu) == 0;
-}
-
-/*
- * The MAC stops receiving, and the libraries' task is left 50 ms for the frames it has, so that it walks no list
- * after the MAC moved to the driver's; then the interrupt is the driver's, and the MAC receives into its list.
- * The list, its descriptors and buffers are made once, whole or not at all, and used again, and the list is emptied,
- * since after a mac_rx_give_back and a second take the head and tail would still name the first take's list.
- */
-static const char *make_list(void)
+/* The list, its descriptors and buffers, made once, at the start, whole or not at all, and given the MAC. */
+const char *mac_rx_prepare(uint32_t *base)
 {
     struct desc *descs = osi_calloc(RX_DESCS, sizeof(struct desc));
     if (descs == 0) {
@@ -497,46 +491,24 @@ static const char *make_list(void)
             osi_free(descs);
             return "the MAC's buffers";
         }
+        descs[i].flags = RX_BUF_SIZE;
+        descs[i].next = i + 1 < RX_DESCS ? &descs[i + 1] : 0;
     }
+    ready(&descs[0], &descs[RX_DESCS - 1]);
     rx.descs = descs;
+    rx.head = &descs[0];
+    rx.tail = &descs[RX_DESCS - 1];
+    *base = (uint32_t)(uintptr_t)descs;
     return 0;
 }
 
 const char *mac_rx_take(mac_heard_fn *heard)
 {
-    const char *failed = rx.descs == 0 ? make_list() : 0;
-    if (failed) {
-        return failed;
+    if (rx.descs == 0) {
+        return "the MAC's list, which the start makes";
     }
     mac_rx_counts = (struct mac_rx_counts){ 0 }; /* each take counted on its own, for the log */
-    /* The list is made whole again: a previous take may have left the links broken at the frames it collected. */
-    for (uint32_t i = 0; i < RX_DESCS; i++) {
-        struct desc *d = &rx.descs[i];
-        d->flags = RX_BUF_SIZE;
-        d->next = i + 1 < RX_DESCS ? d + 1 : 0;
-    }
-    rx.head = 0;
-    rx.tail = 0;
     rx.heard = heard;
-    wr(RX_CTRL, rd(RX_CTRL) & ~RX_CTRL_ENABLE);
-    osi_delay_ms(50);
-    rx.isr = (struct osi_isr){ isr, 0 };
-    if (!osi_isr_swap(MAC_SOURCE, &rx.isr)) {
-        return "the MAC's interrupt";
-    }
-    rx.taken = 1;
-    uint32_t stuck = mac_rx_counts.stuck;
-    give(&rx.descs[0], &rx.descs[RX_DESCS - 1]);
-    for (uint32_t i = 0; i < MOVE_TRIES && !moved(); i++) {
-        osi_delay_ms(1);
-        wr(RX_BASE, (uint32_t)(uintptr_t)rx.descs);
-        reload();
-        mac_rx_counts.repointed++;
-    }
-    if (!moved()) {
-        mac_rx_give_back();
-        return mac_rx_counts.stuck != stuck ? "the MAC's move: reload stuck" : "the MAC's move: base not taken";
-    }
     wr(RX_CTRL, rd(RX_CTRL) | RX_CTRL_ENABLE);
     return 0;
 }
@@ -544,10 +516,7 @@ const char *mac_rx_take(mac_heard_fn *heard)
 void mac_rx_give_back(void)
 {
     wr(RX_CTRL, rd(RX_CTRL) & ~RX_CTRL_ENABLE);
-    if (rx.taken) {
-        osi_isr_swap(MAC_SOURCE, &rx.isr);
-        rx.taken = 0;
-    }
+    rx.heard = 0;
 }
 
 void mac_rx_off(void)

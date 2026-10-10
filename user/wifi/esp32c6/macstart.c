@@ -202,17 +202,15 @@ void mac_rx_set_policy(uint32_t iface, uint32_t valid)
 
 /*
  * The libraries' mac_rxbuf_init, written out: the low byte of the word before RX_CTRL cleared, 0x600a407c,
- * whose other bits are not known, and the receive base pointed at their own control block, wDevCtrl,
- * the descriptor list their receive fills, which the driver's own list replaces once it takes the MAC; see mac.c.
+ * whose other bits are not known, and the receive base pointed at the list the MAC fills first --
+ * their own control block, wDevCtrl, in their start, and the driver's list, which mac.c makes, in its own.
  */
 #define RXBUF_MAC_7C (MAC_BASE + 0x07cu)
 
-extern uint32_t wDevCtrl; /* the libraries' receive control block, whose first word their receive base takes */
-
-void mac_rx_base_init(void)
+void mac_rx_base_init(uint32_t base)
 {
     wr(RXBUF_MAC_7C, rd(RXBUF_MAC_7C) & 0xffffff00u);
-    wr(RX_BASE, wDevCtrl);
+    wr(RX_BASE, base);
 }
 
 /*
@@ -813,7 +811,7 @@ static const uint8_t ofdma_pti_events[12] = {1, 3, 3, 3, 1, 1, 1, 1, 3, 3, 0xau,
  * The driver's start and the host's replay both call this, so neither keeps the order of its own;
  * the two adapter values it needs, the slow clock's period and the coex PTI bytes, come through the pointers.
  */
-void mac_config(uint32_t (*slowclk_cal_get)(void), int (*coex_pti_get)(uint32_t, uint8_t *))
+void mac_config(uint32_t (*slowclk_cal_get)(void), int (*coex_pti_get)(uint32_t, uint8_t *), uint32_t rx_base)
 {
     osi_trace("mac-config", 0, 0);
     mac_config_start();
@@ -825,7 +823,7 @@ void mac_config(uint32_t (*slowclk_cal_get)(void), int (*coex_pti_get)(uint32_t,
         mac_rx_set_policy(i, 0);
     }
     osi_trace("mac-rxbuf", 0, 0);
-    mac_rx_base_init();
+    mac_rx_base_init(rx_base);
     osi_trace("mac-he", 0, 0);
     mac_he_init();
     mac_rx_match_init();
