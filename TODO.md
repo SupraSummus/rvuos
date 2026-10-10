@@ -146,6 +146,14 @@ what is left:
   The MAC's configuration, their `hal_init`, is the driver's own, every group transcribed into `macstart.c`'s
   `mac_config`.
   Whether the rest of net80211's state -- what `esp_wifi_init_internal` sets -- is wanted is open, each a step.
+  A link without the two archives leaves only what the driver's own code names: `libphy.a` and the ROM reach nothing
+  of theirs.
+  What is left is their init's -- `esp_wifi_init_internal`, its log level and module, `wifi_init_completed`, `g_ic`,
+  `g_wifi_nvs`, `g_mac_sleep_en` --, the receive's `wDev_ProcessFiq`, `wDevCtrl` and `g_wdev_last_desc_reset_ptr`,
+  which an own interrupt and list from the start would take, `hal_init_tx_pwr`, and `esp_wifi_set_mode` and
+  `esp_wifi_start`, the `libstart=1` comparison's.
+  The comparison's tools -- `libstart=1`, the diff, the compare across images and their expected files -- go once no
+  call of theirs is left in the start.
   Gathering the driver's address macros into `macregs.h`, ordered by address, would show a word two files name
   beside its twin.
   A write that does nothing can be left out, on a role rather than on the bit.
