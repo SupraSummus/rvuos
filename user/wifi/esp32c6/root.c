@@ -357,9 +357,10 @@ static void snap_parse(const char *conf, uint32_t len)
  * What to do, from the text the loader may have left in the input region: lines of ssid= and pass=,
  * the network to join, and with no ssid, a scan; bssid=, which of the network's access points to join;
  * and run=, how many seconds the run lasts, 0 for good.
- * debug= names what the driver tells besides its steps, any of frames, wpa and rekey, see drv.h,
+ * debug= names what the driver tells besides its steps, any of frames, wpa, rekey and ps, see drv.h,
  * and lib= the libraries' log level, 4 for debug and 5 for verbose;
- * pmf=0 joins without protecting management frames, and sae=0 without WPA3's SAE.
+ * pmf=0 joins without protecting management frames, and sae=0 without WPA3's SAE;
+ * ps=1 has the station sleep between beacons while its link is idle, IEEE 802.11's power save.
  * listen=, a channel, with no ssid has the driver hear that channel without joining, and tell what it heard;
  * probe=, with listen=, has it ask for that network on the channel, and count the answers; see drv.h.
  * i154=, a channel of IEEE 802.15.4's, 11 to 26, has the driver bring that radio up instead of Wi-Fi's,
@@ -379,11 +380,13 @@ static void configure(struct drv *p)
     p->bssid_set = (uint8_t)config_mac(conf, size, "bssid", p->bssid);
     p->debug = (config_has(conf, size, "debug", "frames") ? DRV_DEBUG_FRAMES : 0) |
                (config_has(conf, size, "debug", "wpa") ? DRV_DEBUG_WPA : 0) |
-               (config_has(conf, size, "debug", "rekey") ? DRV_DEBUG_REKEY : 0);
+               (config_has(conf, size, "debug", "rekey") ? DRV_DEBUG_REKEY : 0) |
+               (config_has(conf, size, "debug", "ps") ? DRV_DEBUG_PS : 0);
     p->lib_log = config_number(conf, size, "lib", 0);
     p->lib_start = (uint8_t)(config_number(conf, size, "libstart", 0) != 0);
     p->no_pmf = config_number(conf, size, "pmf", 1) == 0;
     p->no_sae = config_number(conf, size, "sae", 1) == 0;
+    p->ps = config_number(conf, size, "ps", 0) != 0;
     uint32_t channel = config_number(conf, size, "listen", 0);
     p->listen = (uint8_t)(channel <= 13 ? channel : 0);
     config_value(conf, size, "probe", p->probe, sizeof(p->probe));

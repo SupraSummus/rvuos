@@ -225,8 +225,15 @@ what is left:
   SAE's extended key, of the larger groups, fast transition, PSK over SHA-256, and a TKIP group key it does not take,
   and of the network's access points it joins the strongest whose suites it takes.
   Of the management group ciphers it takes BIP-CMAC-128 alone, not the GMAC of the 192-bit and GCMP suites.
-- The ESP32-C6's station keeps the radio on between beacons, and tells the access point nothing of power save:
-  the modem's sleep until each DTIM beacon, which the libraries' station did, though not well over the adapter, is to be its own.
+- The ESP32-C6's station sleeps between beacons with `ps=1`, the RF off, see `user/wifi/esp32c6/NOTES.md`;
+  it is off by default until runs of hours, and more access points than the three of two networks it ran at, have held it.
+  It wakes by its own clock, a few milliseconds before a beacon is due, and is on some milliseconds a beacon:
+  the MAC's TSF and its TBTT interrupt, which the libraries' `pm` reads, would wake it nearer.
+  The core stays at its clock and waits in `wfi` meanwhile, and the modem's power domain stays on:
+  a lower clock while the link is idle, and light sleep, would save more.
+  What it saves the log tells as the RF's time off alone; a meter between the board and its supply would tell the current.
+  One run of `make BOARD=esp32c6 wifi-esp32c6` with `ps=1` got none of the host's unicast frames through for its whole length,
+  and the five after it, at both networks, passed; the cause is not known.
 - The ESP32-C6's radio stays on until the next boot when a thread of the driver's faults
   or the root task halts for the network process; the driver turns it off only on its own way out,
   and even then the RF's analog buses stay powered in the PMU, `PMU_RF_PWC`'s bits 28 to 31,

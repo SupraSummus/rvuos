@@ -12,7 +12,7 @@
  * The CCMP is the MAC's both ways; see TODO.md.
  * While it serves, it counts its access point's beacons and asks a silent one by Null frames whether it still hears
  * the station; a link lost so, or ended by the access point, is joined again, the network process keeping its address.
- * See sta.c.
+ * With ps= it sleeps between beacons while the link is idle, IEEE 802.11's power save, the RF off. See sta.c.
  */
 
 #include "drv.h"

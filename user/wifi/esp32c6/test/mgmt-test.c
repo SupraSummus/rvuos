@@ -457,6 +457,69 @@ static void beacon_of(void)
     check(!mgmt_beacon_of(f, ANNOUNCED, ap), "a data frame not taken for a beacon");
 }
 
+/* The access point's beacon with a TIM element last: its DTIM count and period, bitmap control, and bitmap. */
+static uint32_t tim_beacon(uint8_t *f, uint8_t count, uint8_t period, uint8_t control, const uint8_t *bitmap,
+                           uint32_t octets)
+{
+    uint32_t n = announcement(f, WLAN_FC_STYPE_BEACON, broadcast, "rvuos", 6);
+    f[n++] = WLAN_EID_TIM;
+    f[n++] = (uint8_t)(3u + octets);
+    f[n++] = count;
+    f[n++] = period;
+    f[n++] = control;
+    memcpy(f + n, bitmap, octets);
+    return n + octets;
+}
+
+/* A TIM read whole, and every cut short of its end refused, the element being the beacon's last. */
+static int tim_reads(const uint8_t *f, uint32_t len, uint16_t station, struct mgmt_tim *t)
+{
+    for (uint32_t cut = 0; cut < len; cut++) {
+        uint8_t *copy = malloc(cut ? cut : 1);
+        memcpy(copy, f, cut);
+        if (mgmt_tim(copy, cut, ap, station, t)) {
+            printf("mgmt-test: FAIL a TIM read from a beacon cut at %u bytes\n", cut);
+            failures++;
+        }
+        free(copy);
+    }
+    uint8_t *copy = malloc(len);
+    memcpy(copy, f, len);
+    int ok = mgmt_tim(copy, len, ap, station, t);
+    free(copy);
+    return ok;
+}
+
+static void tim(void)
+{
+    uint8_t f[256];
+    struct mgmt_tim t;
+    static const uint8_t two[] = { 0x04 };
+    uint32_t len = tim_beacon(f, 0, 3, 0x01, two, sizeof(two));
+    check(tim_reads(f, len, 2, &t) && t.dtim_count == 0 && t.dtim_period == 3 && t.group && t.ours &&
+              t.interval == 100 && t.tsf == 0x8000000000000001ull,
+          "a DTIM beacon with the group's frames and the station's, read");
+    check(tim_reads(f, len, 3, &t) && !t.ours, "and another station's frames are not the station's");
+    check(tim_reads(f, len, 0, &t) && !t.ours, "and no AID holds none");
+    len = tim_beacon(f, 1, 3, 0x01, two, sizeof(two));
+    check(tim_reads(f, len, 2, &t) && t.dtim_count == 1 && !t.group,
+          "a beacon before the DTIM beacon tells of no frames to the group, whatever its bit");
+    /* An offset of 2: the bitmap starts at octet 2, AIDs 16 to 31; AID 17 is octet 2's bit 1. */
+    static const uint8_t past[] = { 0x02, 0x00 };
+    len = tim_beacon(f, 0, 1, 0x02, past, sizeof(past));
+    check(tim_reads(f, len, 17, &t) && t.ours && !t.group, "the station's frames past the bitmap's offset, read");
+    check(tim_reads(f, len, 2, &t) && !t.ours, "an AID before the offset holds none");
+    check(tim_reads(f, len, 33, &t) && !t.ours, "nor one past the bitmap's end");
+    len = tim_beacon(f, 0, 0, 0, two, sizeof(two));
+    check(!mgmt_tim(f, len, ap, 2, &t), "a DTIM period of 0 refused");
+    len = tim_beacon(f, 0, 1, 0, two, 0);
+    check(!mgmt_tim(f, len, ap, 2, &t), "a TIM with no bitmap refused");
+    len = announcement(f, WLAN_FC_STYPE_BEACON, broadcast, "rvuos", 6);
+    check(!mgmt_tim(f, len, ap, 2, &t), "a beacon with no TIM refused");
+    len = tim_beacon(f, 0, 1, 0, two, sizeof(two));
+    check(!mgmt_tim(f, len, other, 2, &t), "another's beacon refused");
+}
+
 static uint32_t reason_frame(uint8_t *f, uint16_t stype, const uint8_t *da, const uint8_t *sa, const uint8_t *bssid,
                              uint16_t reason_code)
 {
@@ -755,6 +818,7 @@ int main(void)
     deauth();
     null_frame();
     beacon_of();
+    tim();
     let_go();
     let_go_policy();
     sa_query();

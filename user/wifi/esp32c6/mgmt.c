@@ -21,11 +21,6 @@
 #define ASSOC_FIXED  offsetof(struct ieee80211_mgmt, u.assoc_req.variable)
 #define ANSWER_FIXED offsetof(struct ieee80211_mgmt, u.assoc_resp.variable)
 #define AID_MASK     0x3fffu /* the AID's bits of its field, whose top two are set */
-/*
- * The beacon intervals between two of the station's wakes, as it tells the access point, ESP-IDF's default:
- * the station never sleeps yet, so the access point keeps nothing for it.
- */
-#define LISTEN_INTERVAL 3u
 /* A deauthentication's or a disassociation's header and reason, laid out alike. */
 #define REASON_FIXED offsetof(struct ieee80211_mgmt, u.deauth.variable)
 /* An Action frame's header, its category, and for an SA Query its action and transaction id. */
@@ -239,7 +234,7 @@ uint32_t mgmt_assoc_request(uint8_t *f, uint32_t size, const uint8_t *sta, const
     }
     header(f, WLAN_FC_STYPE_ASSOC_REQ, ap, sta, ap);
     m->u.assoc_req.capab_info = host_to_le16(WLAN_CAPABILITY_ESS | (rsn ? WLAN_CAPABILITY_PRIVACY : 0));
-    m->u.assoc_req.listen_interval = host_to_le16(LISTEN_INTERVAL);
+    m->u.assoc_req.listen_interval = host_to_le16(MGMT_LISTEN_INTERVAL);
     uint8_t *p = f + ASSOC_FIXED;
     p = element(p, WLAN_EID_SSID, (const uint8_t *)ssid, ssid_len);
     p = element(p, WLAN_EID_SUPP_RATES, rates, sizeof(rates));
@@ -464,6 +459,32 @@ int mgmt_beacon_of(const uint8_t *f, uint32_t len, const uint8_t *ap)
     const struct ieee80211_mgmt *m = (const struct ieee80211_mgmt *)f;
     return subtype(f, len, BEACON_FIXED) == WLAN_FC_STYPE_BEACON && memcmp(m->sa, ap, ETH_ALEN) == 0 &&
            memcmp(m->bssid, ap, ETH_ALEN) == 0;
+}
+
+/* A TIM element's fixed fields, which a partial virtual bitmap of an octet at least follows, and its bitmap control. */
+#define TIM_FIXED      3u
+#define TIM_GROUP      0x01u /* the bitmap control's group bit */
+#define TIM_OFFSET     0xfeu /* the bitmap control's offset, the bitmap's first octet, always even */
+
+int mgmt_tim(const uint8_t *f, uint32_t len, const uint8_t *ap, uint16_t aid, struct mgmt_tim *t)
+{
+    const struct ieee80211_mgmt *m = (const struct ieee80211_mgmt *)f;
+    if (!mgmt_beacon_of(f, len, ap)) {
+        return 0;
+    }
+    const uint8_t *e = get_ie(f + BEACON_FIXED, len - BEACON_FIXED, WLAN_EID_TIM);
+    if (e == NULL || e[1] < TIM_FIXED + 1u || e[3] == 0) {
+        return 0;
+    }
+    const uint8_t *bitmap = e + 2u + TIM_FIXED;
+    uint32_t first = e[4] & TIM_OFFSET, octets = e[1] - TIM_FIXED, octet = (uint32_t)aid >> 3;
+    t->tsf = WPA_GET_LE64(m->u.beacon.timestamp);
+    t->interval = le_to_host16(m->u.beacon.beacon_int);
+    t->dtim_count = e[2];
+    t->dtim_period = e[3];
+    t->group = e[2] == 0 && (e[4] & TIM_GROUP) != 0;
+    t->ours = aid != 0 && octet >= first && octet < first + octets && (bitmap[octet - first] >> (aid & 7u) & 1u) != 0;
+    return 1;
 }
 
 int mgmt_data_read(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap, struct mgmt_payload *p)

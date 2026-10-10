@@ -60,6 +60,7 @@ struct drv_header {
 #define DRV_DEBUG_FRAMES 0x1u
 #define DRV_DEBUG_WPA    0x2u
 #define DRV_DEBUG_REKEY  0x4u
+#define DRV_DEBUG_PS     0x8u /* a line for each of the power save's moves, and a beacon's TIM now and then */
 
 /*
  * The driver's page.
@@ -72,8 +73,8 @@ struct drv_header {
  * until the root task asks it to leave, when it leaves, turns the radio off and reports DRV_LEFT.
  * A step of the first join that fails is CHILD_FAILED,
  * with the step's name in the page and the error, or IEEE 802.11's status or reason, in its detail;
- * once joined, a link the access point ends, or that the station loses, is joined again, the state staying DRV_JOINED;
- * see sta.c.
+ * once joined, a link the access point ends, or that the station loses, is joined again, the state staying DRV_JOINED,
+ * and with ps the station sleeps between beacons while its link is idle; see sta.c.
  * With a channel to listen on and no network named, it hears the channel without joining and reports DRV_LISTENING,
  * then tells each second what it heard, and the beacons heard and missed of the access point bssid names or else the first;
  * it leaves as when joined.
@@ -104,6 +105,7 @@ struct drv {
     uint32_t debug;       /* DRV_DEBUG_ bits */
     uint8_t no_pmf;       /* join without protecting management frames, which the station otherwise offers */
     uint8_t no_sae;       /* join without WPA3's SAE, with WPA2's passphrase where the network takes both */
+    uint8_t ps;           /* sleep between beacons once joined, the radio off while the link is idle; see sta.c */
     uint32_t lib_log;     /* libphy's log level, ESP-IDF's wifi_log_level_t, or 0 for its INFO */
     uint8_t lib_start;    /* 1: bring the MAC up by the libraries' esp_wifi_start, 0 by the driver's own, to compare;
                              a traced window's alone, since the driver's receive is its own from its start */

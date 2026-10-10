@@ -824,7 +824,93 @@ static enum try_end try(uint32_t len, uint32_t i, uint32_t backoff, int group, u
     return TRY_UNFINISHED;
 }
 
-/* The PHY tracked at most once a second, as ESP-IDF's phy_track_pll. */
+/*
+ * The station's power save, the MAC's part: the RF off between beacons while the access point holds the station's
+ * frames, and on again for a beacon or for a frame to send. The access point holds them while the last frame of
+ * the station's it acknowledged had the Power Management bit set (IEEE 802.11 11.2.3.2); one sent without the bit
+ * may have reached it unacknowledged, so the station counts itself awake after it whatever its end.
+ * The RF goes off and on as ESP-IDF's esp_phy_disable and esp_phy_enable turn it once the PHY is calibrated,
+ * drv_phy_disable and drv_phy_enable, under the sending's lock, so that no frame goes while it is off.
+ */
+#define FC1_PWRMGT 0x10u /* the Power Management bit, in the frame control's second byte */
+
+static volatile int ps;     /* the access point holds the station's frames */
+static volatile int dozing; /* the RF is off */
+static uint64_t dozed_at, woke_at;
+struct mac_doze_counts mac_doze_counts;
+
+static uint32_t cycles(void)
+{
+    uint32_t c;
+    __asm__ volatile("csrr %0, 0x802" : "=r"(c));
+    return c;
+}
+
+/* The RF on again, if it was off, under the sending's lock. */
+static void wake_locked(void)
+{
+    if (!dozing) {
+        return;
+    }
+    uint32_t c = cycles();
+    drv_phy_enable();
+    c = cycles() - c;
+    dozing = 0;
+    woke_at = osi_now_us();
+    mac_doze_counts.wakes++;
+    mac_doze_counts.slept_us += woke_at - dozed_at;
+    if (c > mac_doze_counts.wake_most) {
+        mac_doze_counts.wake_most = c;
+    }
+}
+
+int mac_ps(void)
+{
+    return ps;
+}
+
+int mac_dozing(void)
+{
+    return dozing;
+}
+
+int mac_doze(void)
+{
+    if (tx == 0) {
+        return 0;
+    }
+    osi_mutex_take(tx_lock);
+    if (ps && !dozing) {
+        uint32_t c = cycles();
+        drv_phy_disable();
+        c = cycles() - c;
+        dozing = 1;
+        dozed_at = osi_now_us();
+        if (woke_at != 0) {
+            mac_doze_counts.woke_us += dozed_at - woke_at;
+            woke_at = 0;
+        }
+        mac_doze_counts.dozes++;
+        if (c > mac_doze_counts.doze_most) {
+            mac_doze_counts.doze_most = c;
+        }
+    }
+    int off = dozing;
+    osi_mutex_give(tx_lock);
+    return off;
+}
+
+void mac_wake(void)
+{
+    if (tx == 0) {
+        return;
+    }
+    osi_mutex_take(tx_lock);
+    wake_locked();
+    osi_mutex_give(tx_lock);
+}
+
+/* The PHY tracked at most once a second, as ESP-IDF's phy_track_pll, and only while the RF is on. */
 #define TRACK_US 1000000u
 
 static uint64_t tracked_at;
@@ -836,7 +922,7 @@ void mac_phy_track(void)
     }
     osi_mutex_take(tx_lock);
     uint64_t now = osi_now_us();
-    if (now - tracked_at >= TRACK_US) {
+    if (!dozing && now - tracked_at >= TRACK_US) {
         drv_phy_track();
         tracked_at = now;
         tx_pwr_asked = 0; /* the power a rate is sent at asked again, after a correction for the temperature */
@@ -859,6 +945,7 @@ const char *mac_tx_key(const uint8_t *frame, uint32_t len, uint32_t keyslot)
         return "the frame's length";
     }
     osi_mutex_take(tx_lock);
+    wake_locked();
     if (!tx_pwr_asked) {
         for (uint32_t i = 0; i < MAC_TX_RATES; i++) {
             tx_pwr[i] = pwr_word(i);
@@ -886,6 +973,10 @@ const char *mac_tx_key(const uint8_t *frame, uint32_t len, uint32_t keyslot)
     }
     mac_tx_counts.lost += end != TRY_ACKED;
     mac_tx_counts.rate = ctl.at;
+    int sleeps = (frame[1] & FC1_PWRMGT) != 0;
+    if (!group && (end == TRY_ACKED || !sleeps)) {
+        ps = sleeps;
+    }
     if (keyslot) {
         mac_crypto_engine(0);
     }

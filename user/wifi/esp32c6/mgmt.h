@@ -20,6 +20,12 @@
 /* The largest association request: an SSID of 32 bytes, the rates, and an RSN and an RSNX element of 255 bytes each. */
 #define MGMT_ASSOC_MAX (24u + 4u + 2u + 32u + 2u + 8u + 2u + 4u + 2u * (2u + 255u))
 
+/*
+ * The beacon intervals between two of the station's wakes, as its association tells the access point,
+ * ESP-IDF's default: a station that sleeps hears a beacon at least this often, see sta.c's power save.
+ */
+#define MGMT_LISTEN_INTERVAL 3u
+
 /* What a beacon or a probe response says of its network. */
 struct mgmt_beacon {
     uint8_t bssid[6];
@@ -188,6 +194,24 @@ uint32_t mgmt_null(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t 
  * cheap enough for the receiving's thread to count every one by.
  */
 int mgmt_beacon_of(const uint8_t *f, uint32_t len, const uint8_t *ap);
+
+/*
+ * What the access point's beacon tells a station that sleeps between beacons, from its TIM element (IEEE 802.11
+ * 9.4.2.5): its clock and the beacons' interval, which say when the next comes; how many beacons until the next
+ * DTIM beacon, 0 for this one, and how many from one to the next; whether, this being a DTIM beacon, frames to the
+ * group follow it; and whether the access point holds frames for the station of AID aid.
+ */
+struct mgmt_tim {
+    uint64_t tsf;         /* the access point's clock when it sent the beacon, in us */
+    uint16_t interval;    /* between beacons, in time units of 1024 us */
+    uint8_t dtim_count;
+    uint8_t dtim_period;  /* 1 or more */
+    uint8_t group;
+    uint8_t ours;
+};
+
+/* The beacon of the access point ap, its TIM element read into t; one with none, or a DTIM period of 0, is refused. */
+int mgmt_tim(const uint8_t *f, uint32_t len, const uint8_t *ap, uint16_t aid, struct mgmt_tim *t);
 
 /* An access point's frame to the group that says the station is let go: its reason into *reason. */
 int mgmt_let_go_group(const uint8_t *f, uint32_t len, const uint8_t *ap, uint16_t *reason);

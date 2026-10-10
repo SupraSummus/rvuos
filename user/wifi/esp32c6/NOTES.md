@@ -346,7 +346,33 @@ The Pico 2 W's access point, its run let end and started again, showed both halv
 the station called the link lost a few seconds after the access point went, and joined again once it was back.
 
 The PHY is kept to the chip's temperature once a second while the station is joined, as ESP-IDF's `phy_track_pll` keeps it:
-libphy's `phy_param_track_tot`, Wi-Fi's part, under the sending's lock, so that no frame is on the air meanwhile.
+libphy's `phy_param_track_tot`, Wi-Fi's part, under the sending's lock, so that no frame is on the air meanwhile,
+and only while the RF is on.
+
+## The station's power save
+
+With `ps=1` the station sleeps between beacons while its link is idle, IEEE 802.11's power save (11.2.3),
+the libraries' modem sleep made the driver's own:
+the RF off, as ESP-IDF's `esp_phy_disable` turns it off once the PHY is calibrated, and on as `esp_phy_enable` turns it on,
+`drv_phy_disable` and `drv_phy_enable`, under the sending's lock.
+The access point holds the station's frames while the last frame of the station's it acknowledged had the
+Power Management bit set: a Null frame with the bit, once the link has carried nothing of the station's own for 200 ms.
+Every other frame the station sends has the bit clear, so the station is awake again whenever it sends;
+`mac_tx_key` reads the bit off each frame it sends, and turns the RF on before.
+
+The station wakes for the next DTIM beacon, or at the latest every listen interval's, the three its association
+promised, a few milliseconds before the beacon is due. When that is, it reads from each beacon heard:
+the receiving's thread's clock when the beacon came, less the beacon's time on the air at 1 Mb/s, the longest it takes,
+less how late the access point's own clock says it went, its TSF modulo the interval.
+The beacon's TIM says whether the access point holds frames for the station's AID,
+whereupon the station wakes by a Null frame without the bit, as mac80211's dynamic power save does rather than poll,
+and whether frames to the group follow a DTIM beacon, whereupon the RF stays on until the group's frame without More Data.
+Four beacons missed in a row keep the RF on until one is heard, which sets the time again.
+
+The beacons came within a few milliseconds of the time so read, so the driver's own clock serves;
+the MAC's TSF and its TBTT interrupt, which the libraries' `pm` times its wakes by, would wake it nearer.
+What the power save saves the log tells as the RF's time off, not as the chip's current, which nothing here measured.
+`debug=ps` has the driver tell each sleep, each beacon that holds frames for the station, and every frame to it.
 
 ## The libraries' station gone
 

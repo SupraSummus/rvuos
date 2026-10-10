@@ -46,6 +46,7 @@ struct event {
 };
 
 struct buf {
+    uint64_t at; /* when the receiving's thread heard it, in osi_now_us's microseconds; see ps_beacon */
     uint32_t len;
     uint8_t decrypted; /* the MAC's cipher decrypted the frame; see read_frame */
     uint8_t frame[STA_FRAME_MAX];
@@ -76,6 +77,29 @@ static struct {
     volatile uint32_t beacons;       /* the access point's beacons heard, which the link's supervision counts by */
     uint32_t nulls, nulls_lost;      /* Null frames that asked whether the access point heard, and those it did not */
     uint32_t ends;                   /* the links that ended, each joined again after */
+    /* The power save, ps= in the configuration, a link's; see ps_step. Only the station's thread writes it. */
+    struct sta_ps {
+        volatile int on;     /* the receiving keeps the access point's beacons, which the power save reads */
+        uint64_t tbtt;       /* when the last beacon heard was due, 0 until one is heard */
+        uint32_t interval;   /* between beacons, in us */
+        uint8_t dtim_count;  /* the last beacon's beacons until a DTIM beacon, and from one to the next */
+        uint8_t dtim_period;
+        uint64_t wake_at;    /* when the RF comes on again while it is off */
+        uint64_t due;        /* when the beacon it comes on for is due */
+        uint64_t stay_until; /* the RF stays on until then: a beacon's window, or the group's frames after one */
+        uint64_t active;     /* when the link last carried a frame of the station's own */
+        uint32_t seen;       /* the link's frames at the last look, which say whether it carried one since */
+        uint64_t since;      /* when the link's service began, which the time the RF slept is told against */
+        int heard;           /* a beacon was heard since the RF came on */
+        uint32_t missed_run; /* beacons not heard in their window, in a row */
+    } ps;
+    /* The power save's over the run, for the log: beacons heard asleep and missed, wakes for frames, sleeps. */
+    struct {
+        uint32_t beacons, missed, ours, group, sleeps;
+        uint32_t group_frames, group_ends; /* frames to the group heard asleep, and of them a run's last */
+        uint32_t late_n; /* beacons heard asleep after the wake they were due for, which late_ counts */
+        int64_t late_sum, late_most, late_least; /* how late such a beacon came after its due time, in us */
+    } ps_counts;
     volatile uint32_t kept, dropped, runs_lost;
     /* The receiving's drops: copies of a frame already read, and the rest, for the log; see read_frame. */
     volatile uint32_t drop_copy, drop_other;
@@ -210,16 +234,18 @@ void sta_scan(struct drv *d)
  * A frame to the station from its access point, kept for the station's thread; once the group key is set,
  * a data frame, a deauthentication or a disassociation to the group too; and while the station reads a beacon,
  * one from the access point to every station; in the receiving's thread.
- * Each of the access point's beacons is counted, read or not, for the link's supervision; see serve_station.
+ * Each of the access point's beacons is counted, read or not, for the link's supervision, see serve_station,
+ * and kept while the station sleeps between them, for the power save to read, see ps_beacon.
  */
 static void heard(const struct mac_frame *m)
 {
     static const uint8_t every[6] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
+    uint64_t at = osi_now_us();
     int beacon = mgmt_beacon_of(m->frame, m->len, sta.ap);
     sta.beacons += (uint32_t)beacon;
     int group = (sta.gtk.set[0] || sta.gtk.set[1]) && mgmt_to_group(m->frame, m->len, sta.ap);
     if (!mgmt_to_station(m->frame, m->len, drv_self->mac, sta.ap) &&
-        !(sta.beacon_wanted && mgmt_to_station(m->frame, m->len, every, sta.ap)) && !group) {
+        !(sta.beacon_wanted && mgmt_to_station(m->frame, m->len, every, sta.ap)) && !group && !(sta.ps.on && beacon)) {
         return;
     }
     struct event e = { EV_FRAME, 0, 0, 0 };
@@ -229,6 +255,7 @@ static void heard(const struct mac_frame *m)
     }
     struct buf *b = &sta.bufs[e.buf];
     memcpy(b->frame, m->frame, m->len);
+    b->at = at;
     b->len = m->len;
     b->decrypted = (uint8_t)(m->decrypted != 0);
     sta.kept++;
@@ -284,6 +311,23 @@ static void told(void)
     drv_say("sta: the access point's beacons heard %u; Null frames asking for it %u, unanswered %u; "
             "links ended and joined again %u\n",
             (unsigned)sta.beacons, (unsigned)sta.nulls, (unsigned)sta.nulls_lost, (unsigned)sta.ends);
+    if (drv_self->ps) {
+        const struct mac_doze_counts *z = &mac_doze_counts;
+        uint64_t served = sta.ps.since ? osi_now_us() - sta.ps.since : 0;
+        const uint32_t timed = sta.ps_counts.late_n ? sta.ps_counts.late_n : 1u;
+        drv_say("sta: the power save slept %u times, the RF off %u ms of the link's last %u ms, on %u ms between\n",
+                (unsigned)sta.ps_counts.sleeps, (unsigned)(z->slept_us / 1000u), (unsigned)(served / 1000u),
+                (unsigned)(z->woke_us / 1000u));
+        drv_say("sta: beacons heard asleep %u, %d us late on average, %d at least, %d at most; missed %u\n",
+                (unsigned)sta.ps_counts.beacons, (int)(sta.ps_counts.late_sum / timed),
+                (int)sta.ps_counts.late_least, (int)sta.ps_counts.late_most, (unsigned)sta.ps_counts.missed);
+        drv_say("sta: woken for the station's frames %u, the group's %u; "
+                "frames to the group asleep %u, a run's last %u\n",
+                (unsigned)sta.ps_counts.ours, (unsigned)sta.ps_counts.group, (unsigned)sta.ps_counts.group_frames,
+                (unsigned)sta.ps_counts.group_ends);
+        drv_say("sta: the RF off %u times and on %u, the costliest in %u and %u cycles\n", (unsigned)z->dozes,
+                (unsigned)z->wakes, (unsigned)z->doze_most, (unsigned)z->wake_most);
+    }
     drv_mac_told("sta");
 }
 
@@ -1301,42 +1345,249 @@ void sta_link_take(struct drv *d)
 }
 
 /*
- * A frame the station received once it serves the link, wait_for's reader, which never takes one:
+ * The station's power save (IEEE 802.11 11.2.3), ps= in the configuration, the station's thread's part; mac.c's
+ * turns the RF off and on. Once the link has carried no frame of the station's own for PS_IDLE_US, the station
+ * tells the access point it sleeps, by a Null frame with the Power Management bit, and turns the RF off until just
+ * before the beacon it must hear: the next DTIM beacon, after which the access point sends what it holds for the
+ * group, and never later than the listen interval its association promised. Each beacon heard says when the next is
+ * due, by the access point's clock and the interval, and whether the access point holds frames for the station,
+ * whereupon the station wakes, by a Null frame without the bit, or for the group, whereupon the RF stays on until
+ * the group's last frame, the one without More Data. Any frame the station sends wakes it too, its bit clear, so
+ * the access point sends straight to it again until it sleeps again.
+ * The beacon's due time is read from its arrival: the receiving's thread's clock when it heard the beacon, less the
+ * beacon's time on the air at 1 Mb/s, the longest it takes, and less how late the access point's clock says it went.
+ */
+#define PS_IDLE_US     200000u /* the link idle this long, and the station sleeps */
+#define PS_EARLY_US    3000u   /* the RF on this long before a beacon is due */
+#define PS_WINDOW_US   20000u  /* and on until this long after, unless the beacon comes first */
+#define PS_GROUP_US    30000u  /* on until the group's frames after a DTIM beacon end, or this long at most */
+#define PS_PREAMBLE_US 192u    /* 802.11b's long preamble and header, before a frame at 1 Mb/s */
+#define PS_MISSED_MAX  4u      /* beacons missed in a row, after which the RF stays on until one is heard */
+#define FC_DATA_TYPE   0x08u   /* the frame control's first byte: a data frame */
+#define FC_TYPE_MASK   0x0cu
+#define FC1_MORE_DATA  0x20u
+
+#define FCS_BYTES      4u      /* the checksum that ends a frame on the air, which the receiving leaves out */
+
+static void ps_start(struct drv *d, uint64_t now)
+{
+    sta.ps = (struct sta_ps){ 0 };
+    sta.ps.since = now;
+    sta.ps.active = now;
+    sta.ps.seen = d->tx_frames;
+    sta.ps.on = d->ps;
+}
+
+/* The RF on again, and the power save off, as the link ends: the next starts awake. */
+static void ps_stop(void)
+{
+    sta.ps.on = 0;
+    mac_wake();
+}
+
+/* The beacon b, the access point's: when the next are due, and what the access point holds. */
+static void ps_beacon(const struct buf *b)
+{
+    struct mgmt_tim t;
+    if (!mgmt_tim(b->frame, b->len, sta.ap, sta.aid, &t) || t.interval == 0) {
+        return;
+    }
+    uint32_t interval = (uint32_t)t.interval * 1024u;
+    uint64_t air = PS_PREAMBLE_US + ((uint64_t)b->len + FCS_BYTES) * 8u;
+    sta.ps.tbtt = b->at - air - t.tsf % interval;
+    sta.ps.interval = interval;
+    sta.ps.dtim_count = t.dtim_count;
+    sta.ps.dtim_period = t.dtim_period;
+    sta.ps.heard = 1;
+    sta.ps.missed_run = 0;
+    if ((drv_self->debug & DRV_DEBUG_PS) && (t.ours || sta.beacons % 50u == 0)) {
+        const uint8_t *e = b->frame + 36u;
+        while (e + 2u <= b->frame + b->len && e[0] != 5u) {
+            e += 2u + e[1];
+        }
+        drv_say("ps: beacon %u, AID %u ours %u group %u count %u period %u; asleep %u; "
+                "TIM %02x %02x %02x %02x %02x %02x\n",
+                (unsigned)sta.beacons, (unsigned)sta.aid, t.ours, t.group, t.dtim_count, t.dtim_period, mac_ps(),
+                e[0], e[1], e[2], e[3], e[4], e[5]);
+    }
+    if (!mac_ps()) {
+        return; /* awake: the beacon only keeps the time */
+    }
+    sta.ps_counts.beacons++;
+    if (sta.ps.due != 0 && b->at >= sta.ps.wake_at) { /* one heard before the RF went off is the beacon before */
+        int64_t late = (int64_t)(b->at - sta.ps.due);
+        sta.ps_counts.late_n++;
+        sta.ps_counts.late_sum += late;
+        if (late > sta.ps_counts.late_most || sta.ps_counts.late_n == 1) {
+            sta.ps_counts.late_most = late;
+        }
+        if (late < sta.ps_counts.late_least || sta.ps_counts.late_n == 1) {
+            sta.ps_counts.late_least = late;
+        }
+    }
+    uint64_t now = osi_now_us();
+    if (t.ours) {
+        /* The access point holds the station's frames: a Null frame without the bit, and it sends them. */
+        static uint8_t f[MGMT_FRAME_MAX];
+        uint32_t n = mgmt_null(f, sizeof(f), drv_self->mac, sta.ap, 0);
+        sta.ps_counts.ours++;
+        sta.ps.active = now;
+        if (n != 0) {
+            mac_tx(f, n);
+        }
+    } else if (t.group) {
+        sta.ps_counts.group++;
+        sta.ps.stay_until = now + PS_GROUP_US;
+    } else {
+        sta.ps.stay_until = now; /* nothing for the station: the RF goes off at once */
+    }
+}
+
+/*
+ * A frame the station's link takes while it may sleep: a beacon, the power save's alone, 1; else 0, its frame read
+ * on. One to the station itself is the link's activity; the group's last after a DTIM beacon lets the RF go off.
+ */
+static int ps_frame(const struct buf *b)
+{
+    const uint8_t *f = b->frame;
+    if (mgmt_beacon_of(f, b->len, sta.ap)) {
+        ps_beacon(b);
+        return 1;
+    }
+    if (b->len >= ADDR1 + 6u && (f[0] & FC_TYPE_MASK) == FC_DATA_TYPE) {
+        if ((f[ADDR1] & 0x01) == 0) {
+            if (drv_self->debug & DRV_DEBUG_PS) {
+                drv_say("ps: a frame to the station, %02x%02x seq %u, %u bytes, asleep %u, RF %s\n", f[0], f[1],
+                        (unsigned)((f[22] | f[23] << 8) >> 4), (unsigned)b->len, mac_ps(), mac_dozing() ? "off" : "on");
+            }
+            sta.ps.active = b->at;
+        } else if (mac_ps()) {
+            sta.ps_counts.group_frames++;
+            if ((f[1] & FC1_MORE_DATA) == 0) {
+                sta.ps_counts.group_ends++;
+                sta.ps.stay_until = b->at;
+            }
+        }
+    }
+    return 0;
+}
+
+/*
+ * The beacon the RF comes on for next, after now and PS_EARLY_US: the beacons from the last heard, index 0, whose
+ * DTIM count says which are DTIM beacons; the next DTIM beacon where they come within the listen interval, else every
+ * listen interval's.
+ */
+static void ps_next(uint64_t now)
+{
+    uint64_t interval = sta.ps.interval;
+    uint64_t k = (now + PS_EARLY_US - sta.ps.tbtt) / interval + 1u;
+    uint64_t period = sta.ps.dtim_period, first = sta.ps.dtim_count;
+    if (period <= MGMT_LISTEN_INTERVAL) {
+        k = k <= first ? first : first + (k - first + period - 1u) / period * period;
+    } else {
+        k = (k + MGMT_LISTEN_INTERVAL - 1u) / MGMT_LISTEN_INTERVAL * MGMT_LISTEN_INTERVAL;
+    }
+    sta.ps.due = sta.ps.tbtt + k * interval;
+    sta.ps.wake_at = sta.ps.due - PS_EARLY_US;
+}
+
+/*
+ * When ps_step has next to look: the link's idle time out, once a beacon told the time,
+ * the RF's stay out, or its wake.
+ */
+static uint64_t ps_until(void)
+{
+    if (!mac_ps()) {
+        return sta.ps.tbtt != 0 ? sta.ps.active + PS_IDLE_US : UINT64_MAX;
+    }
+    return mac_dozing() ? sta.ps.wake_at : sta.ps.stay_until;
+}
+
+/* The power save's next move at now: to sleep once the link is idle, the RF off, or on for a beacon. */
+static void ps_step(struct drv *d, uint64_t now)
+{
+    if (d->tx_frames != sta.ps.seen) {
+        sta.ps.seen = d->tx_frames;
+        sta.ps.active = now;
+    }
+    if (!mac_ps()) {
+        /* Awake, as the access point sees it, until the link is idle; the first beacon heard tells the time. */
+        if (now - sta.ps.active < PS_IDLE_US || sta.ps.tbtt == 0) {
+            return;
+        }
+        static uint8_t f[MGMT_FRAME_MAX];
+        uint32_t n = mgmt_null(f, sizeof(f), drv_self->mac, sta.ap, 1);
+        if (n == 0 || mac_tx(f, n) != 0 || !mac_ps()) {
+            sta.ps.active = now; /* not acknowledged: asked again after another idle while */
+            return;
+        }
+        sta.ps_counts.sleeps++;
+        sta.ps.stay_until = now;
+        if (drv_self->debug & DRV_DEBUG_PS) {
+            drv_say("ps: asleep, the Null frame acknowledged, %02x%02x\n", f[0], f[1]);
+        }
+    }
+    if (mac_dozing()) {
+        if (now >= sta.ps.wake_at) {
+            mac_wake();
+            mac_phy_track();
+            sta.ps.heard = 0;
+            sta.ps.stay_until = sta.ps.due + PS_WINDOW_US;
+        }
+        return;
+    }
+    if (now < sta.ps.stay_until) {
+        return;
+    }
+    if (!sta.ps.heard && sta.ps.due != 0 && now >= sta.ps.due) {
+        sta.ps_counts.missed++;
+        sta.ps.missed_run++;
+        sta.ps.due = 0;
+    }
+    if (sta.ps.missed_run >= PS_MISSED_MAX) {
+        sta.ps.stay_until = now + sta.ps.interval; /* on until a beacon is heard, which sets the time again */
+        return;
+    }
+    ps_next(now);
+    mac_doze();
+}
+
+/*
+ * A frame the station received once it serves the link:
  * read once through plain_frame, and handed to the supplicant if it is EAPOL,
  * else built into an Ethernet frame for the network process. A data frame left in the clear
  * once the pairwise key is set is not the access point's, and is dropped;
  * so is the station's own group frame, which the access point sends the group again, counted.
  */
-static int read_frame(const struct buf *b, void *arg)
+static void link_frame(const struct buf *b, struct drv *d)
 {
-    struct drv *d = arg;
     struct mgmt_payload p;
     const uint8_t *frame;
     uint32_t len;
     int kind = plain_frame(b, d, &frame, &len);
     if (frame == 0) {
-        return 0;
+        return;
     }
     if (!mgmt_data_read(frame, len, d->mac, sta.ap, &p)) {
-        return 0;
+        return;
     }
     if (p.proto == SUPP_EAPOL) {
         sta.eapol_heard++;
         supp_rx_eapol(p.src, p.body, p.len, kind == CCMP_FRAME_CCMP ? SUPP_EAPOL_PROTECTED : SUPP_EAPOL_CLEAR);
-        return 0;
+        return;
     }
     if (kind == CCMP_FRAME_CLEAR && sta.ptk.cur_set) {
         sta.drop_other++;
         d->rx_dropped++;
-        return 0;
+        return;
     }
     if ((frame[ADDR1] & 0x01) != 0 && memcmp(p.src, d->mac, 6) == 0) {
         sta.relayed++;
-        return 0;
+        return;
     }
     if (p.len > LINK_SLOT - 14u) {
         d->rx_dropped++;
-        return 0;
+        return;
     }
     memcpy(sta.eth, frame + ADDR1, 6); /* the destination */
     memcpy(sta.eth + 6, p.src, 6);     /* the source, the frame's Address 3 */
@@ -1351,7 +1602,18 @@ static int read_frame(const struct buf *b, void *arg)
     } else {
         d->rx_dropped++;
     }
-    return 0;
+}
+
+/*
+ * wait_for's reader once the station serves the link, which takes a frame, ending the wait, only once the power
+ * save has a move to make, a beacon or the group's last frame having let the RF go off before the wait's end.
+ */
+static int read_frame(const struct buf *b, void *arg)
+{
+    if (!(sta.ps.on && ps_frame(b))) {
+        link_frame(b, arg);
+    }
+    return sta.ps.on && ps_until() <= osi_now_us();
 }
 
 /*
@@ -1383,18 +1645,27 @@ static int ask_access_point(void)
 /*
  * The station's service of the link, each frame read, until the root task asks it to leave, see wait_for,
  * or the station's time with its access point ends, which ended says: the access point letting it go, or lost.
- * Once a second the PHY is kept to the temperature and the link supervised.
+ * The power save moves when it asks, see ps_step; once a second the PHY is kept to the temperature, while the RF
+ * is on, and the link supervised.
  */
 static void serve_station(struct drv *d)
 {
     uint32_t beacons = sta.beacons, unanswered = 0;
     uint64_t heard = osi_now_us(), tick = heard;
+    ps_start(d, heard);
     while (ended.step == 0) {
-        wait_for(tick + SUPERVISE_US, read_frame, d);
+        uint64_t until = tick + SUPERVISE_US;
+        if (sta.ps.on && ps_until() < until) {
+            until = ps_until();
+        }
+        wait_for(until, read_frame, d);
         if (ended.step != 0) {
             break;
         }
         uint64_t now = osi_now_us();
+        if (sta.ps.on) {
+            ps_step(d, now);
+        }
         if (now - tick < SUPERVISE_US) {
             continue;
         }
@@ -1415,6 +1686,7 @@ static void serve_station(struct drv *d)
             }
         }
     }
+    ps_stop();
 }
 
 /*

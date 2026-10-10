@@ -202,11 +202,34 @@ const char *mac_tx(const uint8_t *frame, uint32_t len);
 const char *mac_tx_key(const uint8_t *frame, uint32_t len, uint32_t keyslot);
 
 /*
- * The PHY kept to the chip's temperature, drv_phy_track, between two frames, at most once a second:
- * the sending's lock is held around it, so that no frame is on the air while libphy corrects the RF,
+ * The PHY kept to the chip's temperature, drv_phy_track, between two frames, at most once a second and only while
+ * the RF is on: the sending's lock is held around it, so that no frame is on the air while libphy corrects the RF,
  * and each rate's power is asked again after.
  */
 void mac_phy_track(void);
+
+/*
+ * The station's power save, the MAC's part; the station's thread decides when, see sta.c.
+ * mac_ps says whether the access point holds the station's frames, which the Power Management bit of the station's
+ * last acknowledged frame says, a Null frame's (mgmt_null): every other frame the station sends wakes it.
+ * mac_doze turns the RF off while the access point holds them, and says whether it is off, as mac_dozing does;
+ * mac_wake turns it on again, as any frame sent does first.
+ */
+int mac_ps(void);
+int mac_dozing(void);
+int mac_doze(void);
+void mac_wake(void);
+
+/*
+ * What the RF's sleep cost, for the log: the core's cycles of the costliest turn off and on, the time off, and the
+ * time on from each wake to the next sleep.
+ */
+struct mac_doze_counts {
+    uint32_t dozes, wakes;
+    uint32_t doze_most, wake_most;
+    uint64_t slept_us, woke_us;
+};
+extern struct mac_doze_counts mac_doze_counts;
 
 /* What the sending met since the start, for the log; the sending alone writes it, under its lock. */
 #define MAC_TX_RATES 9u
