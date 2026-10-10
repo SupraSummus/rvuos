@@ -7,13 +7,14 @@ the library and function each device access belongs to.
   diff BASE... OWN          every place the own run differs, the bases naming the volatile words
   attrib [--only NAME] [--segments] LOG  the library and function each access is in, see below
   replay --function NAME... LOG          the named functions' own accesses, which the host replays the own code on
+  seq GATED OWN             the own start's MAC accesses against a gated run's, one by one
 
 The root task of root.c owns what this parses, see its trace_line and trace_dump. A log is meant to be whole: the
 writer no longer loses the odd line, so a short log is a fault to report, and each subcommand says what it found of
 one, and wrongs its answer only where the loss lies beside what it reports. `attrib --segments` refuses a short log,
 whose loss would shift every segment past it.
 
-Usage: tools/mac-trace.py {snapshot,compare,diff,attrib,replay} ... ; each subcommand has its own --help.
+Usage: tools/mac-trace.py {snapshot,compare,diff,attrib,replay,seq} ... ; each subcommand has its own --help.
 """
 
 import argparse
@@ -69,12 +70,18 @@ MOMENT = {
     0x600A408C: (0xFFFFFFFF, "RX_LAST, the descriptor the MAC filled last, which a frame received in the window moves"),
     0x600A4090: (0xFFFFFFFF, "the word after RX_LAST, which their receive interrupt reads with it, and which moves with it"),
     0x600A4094: (0xFFFFFFFF, "the second word after RX_LAST, which their receive interrupt reads with it, and moves with it"),
+    0x600AD000: (0xFFFFFFFF, "the MAC's clock, which their hal_now reads"),
 }
 
 
 def steady(address, value):
     """A word's value without the bits MOMENT names as the moment's."""
     return value & ~MOMENT[address][0] if address in MOMENT else value
+
+
+# The MAC's words, its registers and its timer block: what the own start writes and the libraries' start did.
+# libphy's words lie outside them, its calibration's loops turning as the time does.
+MAC_WORDS = ((0x600A4000, 0x600A6000), (0x600AD000, 0x600AE000))
 
 
 def scan(path):
@@ -797,6 +804,49 @@ def replay(args):
     return 0
 
 
+def seq(args):
+    """The own start's accesses to the MAC on its thread against a run the gate held, one by one.
+
+    For a step meant to leave the start's device work as it was -- a refactor, a call to the libraries' memory alone
+    dropped -- one traced run of the new image is held to the gated run's own log, with no bases: each access to
+    MAC_WORDS on the start's thread is to make the same operation on the same word, with the same value but for the
+    bits MOMENT names. A polling loop's turns are the time's and are not counted; another thread's accesses and
+    libphy's words are not held. The start's thread is the gated run's "start" line's, or --thread's. A short log is
+    refused, as a lost line would shift every access after it. Nonzero at the first access that differs.
+    """
+    logs = []
+    for path in (args.gated, args.own_log):
+        acc, damaged = scan(path)
+        if damaged:
+            sys.exit("mac-trace: %s is short in %d places" % (path, len(damaged)))
+        logs.append(acc)
+    thread = args.thread
+    if thread is None:
+        thread = next((t for _req, t, what in trace_landmarks(args.gated) if what == "start"), None)
+        if thread is None:
+            sys.exit("mac-trace: %s has no trace: line named start; name the thread with --thread" % args.gated)
+
+    def stream(acc):
+        return [(seq_, op, width, address, steady(address, value))
+                for seq_, _pc, op, width, address, value, _turns, t in acc
+                if t == thread and any(lo <= address < hi for lo, hi in MAC_WORDS)]
+
+    gated, own = (stream(acc) for acc in logs)
+    for i, (g, o) in enumerate(zip(gated, own)):
+        if g[1:] != o[1:]:
+            print("mac-trace: thread %d's MAC accesses part at access %d, gated record %d %s%d 0x%08x = 0x%08x, "
+                  "own record %d %s%d 0x%08x = 0x%08x" % ((thread, i + 1) + g + o))
+            return 1
+    if len(gated) != len(own):
+        longer, name = (gated, "gated") if len(gated) > len(own) else (own, "own")
+        r = longer[min(len(gated), len(own))]
+        print("mac-trace: thread %d's MAC accesses, %d gated and %d own, the same until the %s run's record %d %s%d "
+              "0x%08x = 0x%08x" % ((thread, len(gated), len(own), name) + r))
+        return 1
+    print("mac-trace: thread %d's %d MAC accesses, the same in both" % (thread, len(gated)))
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -866,6 +916,12 @@ def main():
                    help="leave out this function's first access to its last, its callees' with it; repeatable")
     p.add_argument("log")
     p.set_defaults(run=replay)
+
+    p = sub.add_parser("seq", help="the own start's MAC accesses against a gated run's, for a step that keeps them")
+    p.add_argument("--thread", type=int, metavar="N", help="the start's thread, if the gated log names none")
+    p.add_argument("gated", metavar="GATED", help="the own start's traced log from the gate that held the last step")
+    p.add_argument("own_log", metavar="OWN", help="a traced run of the image at hand")
+    p.set_defaults(run=seq)
 
     args = parser.parse_args()
     sys.exit(args.run(args))

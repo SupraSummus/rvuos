@@ -97,6 +97,11 @@ and the ordinary runs below.
 A step that makes a new difference by design adds its place to `diff-expected.txt` with the reason, in the same commit,
 and a word whose final state it changes to `compare-expected.txt` beside it, which the compare across images reads.
 The diff's bases and each `compare`'s dry logs are four, not two: a word that varies run to run can agree between two by chance and show as a difference that is not one.
+The gate is a step's, at its end, not each change's:
+a change after it that is to leave the start's device work as the gate held it -- a refactor, a call that writes the libraries' memory alone dropped --
+needs one `trace=1` run and `make BOARD=esp32c6 wifi-esp32c6-seq`, which holds its accesses to the MAC to the gated run's, `build/esp32c6/gate/own.log`, value by value,
+and the ordinary runs the change touches; a change that leaves the image's sha256 as it was needs none.
+A gate that fails is read from its logs, its counts held to a baseline's, before it runs again.
 A change to the station in `user/wifi/esp32c6/main.c`, `sta.c` or `mgmt.c` runs it with a network named,
 the station's scan, SAE, association and 4-way handshake at an access point that offers WPA3, which fails if one is not answered,
 and then serves the link the network's frames cross,

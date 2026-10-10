@@ -13,8 +13,9 @@ a short log is refused, and with --image one that flashed another build, and a m
 diff's expectations let a place the own start differs in by design pass, that place alone and exactly;
 a place where the own run differs from the first base as another base does is the run's, a note, and no more;
 the bits MOMENT names stay out of compare's and diff's verdict, the rest of their word in;
-and replay takes the named functions' own accesses alone, between the functions --from and --to name,
-or up to the last access of the one --through names, and none within a function --outside names.
+replay takes the named functions' own accesses alone, between the functions --from and --to name,
+or up to the last access of the one --through names, and none within a function --outside names;
+and seq holds a run's MAC accesses on the start's thread to a gated run's, value by value, the moment's bits apart.
 The ELF and the libraries are not read: every pc is given to one library, and to the function FUNCTIONS names.
 """
 
@@ -90,6 +91,10 @@ def diff(bases, own, **kw):
 
 def compare(dry, traced, expect=None):
     return run(mt.compare, dry=dry, traced=traced, expect=expect)
+
+
+def seq(gated, own, thread=1):
+    return run(mt.seq, gated=gated, own_log=own, thread=thread)
 
 
 def replay(trace, *function, **kw):
@@ -323,6 +328,24 @@ def test_replay_refuses(f):
             assert why in str(e), e
         else:
             raise AssertionError("replay took the %s log" % name)
+
+
+def test_seq_holds_the_mac_stream(f):
+    # One traced run against the gated one: the MAC's accesses on the start's thread, value by value, the moment's
+    # bits and a poll's turns apart; another thread's accesses and libphy's words are not held.
+    clock, phy = 0x600AD000, 0x600A0450
+    gated = f("gated", log((1, "W", A, 1), ("cycle", 5, 1), (1, "R", B, 0), (1, "R", clock, 10), (2, "R", C, 7),
+                           (1, "W", phy, 1)))
+    same = f("same", log((1, "W", A, 1), ("cycle", 2, 1), (1, "R", B, 0), (1, "R", clock, 99), (2, "R", C, 8),
+                         (1, "W", phy, 2)))
+    status, out = seq(gated, same)
+    assert status == 0 and "3 MAC accesses, the same" in out, out
+    status, out = seq(gated, f("value", log((1, "W", A, 3), (1, "R", B, 0), (1, "R", clock, 10))))
+    assert status == 1 and "part at access 1" in out, out
+    status, out = seq(gated, f("short", log((1, "W", A, 1), (1, "R", clock, 10))))
+    assert status == 1 and "part at access 2" in out, out
+    status, out = seq(gated, f("longer", log((1, "W", A, 1), (1, "R", B, 0), (1, "R", clock, 10), (1, "W", A, 0))))
+    assert status == 1 and "3 gated and 4 own" in out, out
 
 
 def main():

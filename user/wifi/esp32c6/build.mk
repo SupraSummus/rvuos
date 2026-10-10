@@ -338,3 +338,10 @@ else
 wifi-esp32c6-diff:
 	$(error the driver runs on an ESP32-C6: make BOARD=esp32c6 wifi-esp32c6-diff)
 endif
+
+# The own start's accesses to the MAC in a trace=1 run of the build at hand, WIFI_TRACE_OWN, held to the gated run's,
+# WIFI_TRACE_GATED, value by value: the check of a change meant to leave the start's device work as the gate held it.
+WIFI_TRACE_GATED ?= $(BUILD)/gate/own.log
+.PHONY: wifi-esp32c6-seq
+wifi-esp32c6-seq:
+	tools/mac-trace.py seq $(WIFI_TRACE_GATED) $(or $(WIFI_TRACE_OWN),$(BUILD)/wifi-run.log)
