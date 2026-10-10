@@ -384,6 +384,10 @@ A seed that catches a mutant says the checks are strong enough, not that the fuz
 `make mutants-fuzz` measures that: it fuzzes each mutant from the corpus alone, or from nothing,
 for a budget of runs with libFuzzer's seed fixed, and prints the runs to the first report,
 so two versions of the mutator compare by the numbers; `make check` leaves it out.
+A seed repeats a run only with ASLR, `-rss_limit_mb`'s thread and `-reload` off and the environment the same,
+as the measurement keeps them.
+A change of a flag or of the harness moves the stack as another seed would,
+and two seeds differ by a few mutants, so a change is judged over several.
 
 **QEMU** (`make test`, `make qemu-replay`).
 The kernel has no console, so a transcript reaches QEMU's UART two ways:

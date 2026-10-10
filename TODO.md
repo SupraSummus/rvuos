@@ -339,6 +339,9 @@ what is left:
   all with `OP_DEBUG_PREEMPT`, where 186 000 made none.
   None reaches an edge the others do not, so the corpus keeps none of them.
   A mutation that inserts the three together is untried.
+- `use_made` and `repeat`'s chains in `host/mutator.c` follow only what a record puts in an `ARG_DST` slot,
+  so a call through what a copy or a derive made comes only by a typed record's draw,
+  and nearly half the mutants `make mutants-fuzz` misses from the corpus ignore a right such a copy would take away.
 - The mutator's guess of what each slot holds, in `host/mutator.c`, knows one table a thread and nothing of mounts,
   so a record names a slot of a table mounted second only by `draw_slot`'s chance,
   and only the seeds move a process to another table.

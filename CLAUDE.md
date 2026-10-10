@@ -148,7 +148,7 @@ The full run takes minutes, so while working run only the mutants a change touch
 a change to the seeds, the corpus or the checks moves every mutant's reports,
 so it needs one full run before it is committed.
 A change to `host/mutator.c` or to the flags `make fuzz` runs with
-is measured with `make mutants-fuzz`, from the corpus and from nothing, before and after,
+is measured with `make mutants-fuzz`, from the corpus and from nothing, before and after, over a few seeds,
 and the commit says what it found.
 `make fuzz` follows the default machine's coverage alone,
 so a change to what a second core does runs `make fuzz FUZZ_HARNESS=fuzz-smp2` for a few minutes too.

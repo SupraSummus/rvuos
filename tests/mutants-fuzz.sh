@@ -5,7 +5,7 @@
 # which says the checks are strong enough, not that the fuzzer would have found the input.
 # Here each mutant the default machine catches is fuzzed from the corpus, the seeds left out,
 # or from nothing with -e, for a budget of runs with libFuzzer's seed fixed,
-# so that two versions of the mutator or the harness compare by the numbers alone.
+# so that a run repeats, and two versions of the mutator or the harness compare by the numbers over a few seeds.
 # A result is the runs to the first report, "start" when what it starts from reports at once,
 # or "-" when the budget ran out; the seconds follow.
 # The unmutated kernel is fuzzed first with the same budget and seeds, and must not report.
@@ -15,9 +15,20 @@
 
 set -eu
 
+# A run repeats with its seed only with nothing in it placed or timed by chance:
+# ASLR is off for this script and all it starts, as the value profile sees the kernel's pointers;
+# the fuzzer's environment is PATH alone, as its size moves the stack;
+# and the flags below turn off -rss_limit_mb's thread, which races the RAM's malloc,
+# and -reload, which runs an input when the clock says.
+if [ -z "${MUTANTS_SETARCH-}" ]; then
+    export MUTANTS_SETARCH=1
+    setarch "$(uname -m)" -R true 2>/dev/null && exec setarch "$(uname -m)" -R "$0" "$@"
+    echo "setarch cannot turn ASLR off here, so a run will not repeat with its seed" >&2
+fi
+
 root=$(cd "$(dirname "$0")/.." && pwd)
 logs=$root/build/mutants
-flags="${FUZZ_FLAGS:?run it as make mutants-fuzz, which passes the flags of make fuzz} -print_final_stats=1"
+flags="${FUZZ_FLAGS:?run it as make mutants-fuzz, which passes the flags of make fuzz} -print_final_stats=1 -rss_limit_mb=0 -reload=0"
 
 # One fuzzing run in a tree; prints the runs or "start" or "-", the seconds, and the report.
 fuzz_once() {
@@ -28,7 +39,7 @@ fuzz_once() {
     mkdir "$dir/start"
     [ -n "$empty" ] || cp "$root"/tests/corpus/* "$dir/start/"
     start=$(date +%s.%N)
-    if (cd "$dir" && build/host/fuzz $flags -runs="$runs" -seed="$seed" start) >"$log" 2>&1; then
+    if (cd "$dir" && env -i PATH="$PATH" build/host/fuzz $flags -runs="$runs" -seed="$seed" start) >"$log" 2>&1; then
         echo "- $(elapsed "$start")"
         return
     fi
