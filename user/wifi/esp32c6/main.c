@@ -389,8 +389,6 @@ static __attribute__((noreturn)) void attend(struct drv *d)
 extern int wifi_init_completed(void);
 
 extern void wDev_ProcessFiq(void);   /* pp: their interrupt handler, which they install for the MAC's source */
-extern void pm_noise_check_enable(void);
-extern void pm_disconnected_start(void);
 extern void hal_init_tx_pwr(void);   /* pp: their power table's one filling in the start, read at their association */
 extern uint8_t g_mac_sleep_en;           /* the libraries' MAC sleep flag, which gates the modem wake */
 extern void *g_wdev_last_desc_reset_ptr; /* the ROM cell holding their wdev whose first byte is the flag below */
@@ -452,12 +450,10 @@ static int drv_hw_start(void)
     funcs->ints_on(1u << 1);
     mac_default_policy(drv_self->mac); /* the libraries' chip_enable: their default receive policy */
     mac_rx_on();                       /* and their ic_enable_rx */
-    pm_noise_check_enable();
     funcs->wifi_bb_sleep_retention_attach();
     funcs->wifi_mac_sleep_retention_attach();
     ic[G_IC_STOP_MASK] |= 1; /* the station's interface, the libraries' reason 0 */
     ic[G_IC_START_MASK] |= 1;
-    pm_disconnected_start();
     return ESP_OK;
 }
 

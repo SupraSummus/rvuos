@@ -409,3 +409,10 @@ the control block's home- and current-channel words, and the home-channel event 
 the diff holds the channel, the runs the rest.
 So the state these calls set is not wanted;
 whether the rest is -- what `esp_wifi_init_internal` sets -- is open.
+
+Their `pm_noise_check_enable` and `pm_disconnected_start` go as well:
+their `pm_noise_check_enable`'s byte is read only by their `pm_noise_check`, which their `pm_tbtt_process` alone
+calls, a path the own station does not run;
+their `pm_disconnected_start`'s PM state no path the driver runs reads, and what it reaches beyond pp is their
+coex, which `osi.c` stubs out, and a sleep-delay timer it leaves done.
+The ordinary runs hold both, the joins among them.
