@@ -218,8 +218,13 @@ what is left:
   so a host may wait seconds to reach it.
   There the ping of `make BOARD=esp32c6 wifi-esp32c6` fails now and then:
   the station answers every request, the host hears fewer than four of five, and where the answers go is not known.
-  The Pico 2 W's `debug=dhcp` and `bssid=` measure it; whether the own station, which receives through the MAC
-  without the libraries, misses the same frames is not measured.
+  The Pico 2 W's `debug=dhcp` and `bssid=` measure it.
+  The own receive, through the MAC without the libraries, misses them too:
+  `listen=` counts the access point's frames to the group and whether the next by number is heard after each,
+  and at the access point here heard at about -77 dBm it missed the next after every frame with More Data,
+  at the one heard at about -56 dBm after none.
+  So the loss lies not in the libraries' receive but in the chip, or in what `libphy.a` and the MAC's configuration,
+  the same in the own start as in theirs, set; esp-idf #16096 can be told so.
 - The ESP32-C6's station refuses an open network: it takes an access point whose beacon has an RSN element,
   and a passphrase.
 - With the APM units confining the modem to the driver's block, as measured for open decision 13,

@@ -223,16 +223,53 @@ void drv_trace(const char *way, const uint8_t *f, uint32_t len)
  * by the access point's own time in each and its beacon interval;
  * a gap of BEACON_GAP_MAX intervals or more, as the access point's restart makes, is not counted.
  * mac.c hands on no broken frame, but counts them, so the broken are its count.
+ * Of the data the access point sends to the group, which it numbers on a count of their own, each frame is counted,
+ * and whether the next one heard is the next by number, after a frame with More Data set -- one the access point
+ * sends right after, in its run after a DTIM beacon -- and after one without: esp-idf #16096, see TODO.md.
  */
 #define BEACON_GAP_MAX 64u
 
 static struct hear {
     volatile uint32_t frames, broken, beacons, missed, rssi;
     volatile uint32_t answers, retried; /* probe responses to the station, and of them those sent again */
+    volatile uint32_t group, more;      /* the access point's frames to the group, and of them with More Data */
+    volatile uint32_t after_more, gaps_more, after_none, gaps_none; /* the next heard, and of them not the next */
 } hear;
 static uint8_t hear_ap[6];
-static int hear_ap_set, hear_tsf_set;
-static uint32_t hear_tsf;
+static int hear_ap_set, hear_tsf_set, group_set, group_more;
+static uint32_t hear_tsf, group_seq;
+
+#define FC_DATA      0x08u /* the frame control's first byte: a data frame, of any subtype */
+#define FC_TYPE      0x0cu
+#define FC_FROM_DS   0x02u /* its second byte's flags */
+#define FC_TO_DS     0x01u
+#define FC_MORE_DATA 0x20u
+
+/* A data frame the access point followed sends to the group, its number to the next's. */
+static void heard_group(const uint8_t *f, uint32_t len)
+{
+    if (!hear_ap_set || len < 24u || (f[0] & FC_TYPE) != FC_DATA || (f[1] & (FC_FROM_DS | FC_TO_DS)) != FC_FROM_DS ||
+        !(f[4] & 1u) || memcmp(f + 10, hear_ap, 6) != 0) {
+        return;
+    }
+    uint32_t seq = (uint32_t)(f[22] | f[23] << 8) >> 4;
+    int more = (f[1] & FC_MORE_DATA) != 0;
+    if (group_set && seq != group_seq) {
+        int gap = ((seq - group_seq) & 0xfffu) != 1u;
+        if (group_more) {
+            hear.after_more++;
+            hear.gaps_more += (uint32_t)gap;
+        } else {
+            hear.after_none++;
+            hear.gaps_none += (uint32_t)gap;
+        }
+    }
+    hear.group++;
+    hear.more += (uint32_t)more;
+    group_seq = seq;
+    group_more = more;
+    group_set = 1;
+}
 
 /* The station asks for the page's network PROBES times, a probe request a second, as a station that scans asks. */
 #define PROBES 5u
@@ -245,6 +282,7 @@ static void heard(const struct mac_frame *m)
     struct mgmt_beacon b;
     int again;
     hear.frames++;
+    heard_group(m->frame, m->len);
     if (d->probe[0] && mgmt_probe_answer(m->frame, m->len, d->mac, d->probe, &b, &again)) {
         memcpy(probe_ap, b.bssid, 6);
         hear.answers++;
@@ -344,6 +382,10 @@ static __attribute__((noreturn)) void listen(struct drv *d)
     mac_rx_give_back();
     drv_mac_told("listen");
     hear_tell("in", &first, (uint32_t)((osi_now_us() - start) / 1000u));
+    drv_say("listen: %u frames to the group, %u with More Data; the next not heard after More Data %u of %u, "
+            "after none %u of %u\n",
+            (unsigned)hear.group, (unsigned)hear.more, (unsigned)hear.gaps_more, (unsigned)hear.after_more,
+            (unsigned)hear.gaps_none, (unsigned)hear.after_none);
     if (probe_len) {
         drv_say("probe: %u sent, %u failed; %u answers from %02x:%02x:%02x:%02x:%02x:%02x, %u of them sent again\n",
                 (unsigned)probes, (unsigned)probes_failed, (unsigned)hear.answers, probe_ap[0], probe_ap[1], probe_ap[2],
