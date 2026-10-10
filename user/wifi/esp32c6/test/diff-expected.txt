@@ -3,6 +3,7 @@
 # A place is its reason, then the libraries' accesses ("-") and the own start's ("+"); a blank line ends it.
 # A value "/0xmask" holds the masked bits alone: the address words' own addresses are the chip's,
 # so a zero mask holds none of them.
+# A line "-(name)" or "+(name)" is a folded run of the library --collapse names, libphy's.
 # --as-expected, WIFI_TRACE_EXPECT_NEW=1 in make, prints a place that does not pass in this form.
 
 # The receive base: the libraries' start points the MAC at their control block, wDevCtrl, and the own start at

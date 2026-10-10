@@ -385,6 +385,8 @@ def span(lo, hi):
 # A place of an expectation file: "-R4 0xaddress 0xvalue" an access of the libraries' side, "+..." one of the own side;
 # "0xvalue/0xmask" holds the value's masked bits alone, as a word that carries the chip's own address needs.
 EXPECTED = re.compile(r"^([-+])([RW])(\d) (0x[0-9a-fA-F]+) (0x[0-9a-fA-F]+)(?:/(0x[0-9a-fA-F]+))?$")
+# A folded run of a place, "-(name)" or "+(name)": an unbroken run of the library --collapse names, which a marker stands for.
+EXPECTED_FOLD = re.compile(r"^([-+])\((\w+)\)$")
 # A word of compare's expectation file: "0xaddress 0xvalue/0xmask", the traced run's masked bits.
 COMPARE_EXPECTED = re.compile(r"^(0x[0-9a-fA-F]+) (0x[0-9a-fA-F]+)(?:/(0x[0-9a-fA-F]+))?$")
 
@@ -413,6 +415,9 @@ def expectations(path):
                 reason.append(line[1:].strip())
             elif not line:
                 end()
+            elif EXPECTED_FOLD.match(line):
+                m = EXPECTED_FOLD.match(line)
+                sides[m.group(1)].append(("*", m.group(2)))
             else:
                 m = EXPECTED.match(line)
                 if not m:
@@ -424,8 +429,10 @@ def expectations(path):
 
 
 def same(want, got, volatile):
-    """Whether a side of a place holds the accesses an expectation names, a volatile word's value aside."""
+    """Whether a side of a place holds the accesses an expectation names, a volatile word's value aside,
+    and a folded run where it names one."""
     return len(want) == len(got) and all(
+        (g[0], g[1]) == w if w[0] == "*" else
         g[0] != "*" and (w[0], w[1], w[2]) == g[:3] and (w[2] in volatile or g[3] & w[4] == w[3])
         for w, g in zip(want, got))
 
@@ -559,7 +566,7 @@ def diff(args):
                 for mark, recs, lo, hi in (("-", a, i1, i2), ("+", o, j1, j2)):
                     for e in recs[lo:hi]:
                         print("%s%c%d 0x%08x 0x%08x" % (mark, e[0], e[1], e[2], e[3]) if e[0] != "*"
-                              else "# %s's folded run, which no place can name" % e[1])
+                              else "%s(%s)" % (mark, e[1]))
                 print()
     for k, (reason, _, _) in enumerate(expect):
         if not met[k]:

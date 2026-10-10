@@ -10,7 +10,8 @@ an interrupt thread's accesses are a multiset;
 --join makes one stream of every thread but the interrupt's;
 --from aligns two runs by their phase markers, a cycle cut at the marker keeping its share;
 a short log is refused, and with --image one that flashed another build, and a marker cut by a loss is told as one;
-diff's expectations let a place the own start differs in by design pass, that place alone and exactly;
+diff's expectations let a place the own start differs in by design pass, that place alone and exactly,
+a folded library's run named by its library;
 a place where the own run differs from the first base as another base does is the run's, a note, and no more;
 the bits MOMENT names stay out of compare's and diff's verdict, the rest of their word in;
 replay takes the named functions' own accesses alone, between the functions --from and --to name,
@@ -164,6 +165,27 @@ def test_a_place_another_base_shares_is_a_note(f):
     status, out = diff([f("plain", plain), f("burst", burst)], f("own", more))
     assert status == 1, out
 
+
+def test_an_expected_place_names_a_folded_run(f):
+    # The libraries' start makes a call the own start leaves out, libphy's accesses among the library's: the place
+    # names the folded run by its library; with no such line, or another library's, it is not met.
+    phy = PC + 4
+    base = f("base", log((1, "W", A, 1), (1, "W", B, 2), (1, "R", C, 3, phy), (1, "R", X, 4, phy), (1, "W", B, 5),
+                         (1, "W", P, 1)))
+    own = f("own", log((1, "W", A, 1), (1, "W", P, 1)))
+    place = "# the call left out\n-W4 0x%08x 0x00000002\n-(phy)\n-W4 0x%08x 0x00000005\n" % (B, B)
+    saved = mt.classifier
+    mt.classifier = lambda args, pcs: (lambda pc: "phy" if pc == phy else "lib", FUNCTIONS)
+    try:
+        status, out = diff([base, base], own, collapse=["phy"], expect=f("expect", place))
+        assert status == 0 and "the call left out" in out, out
+        for other in (place.replace("-(phy)\n", ""), place.replace("(phy)", "(lib)")):
+            status, out = diff([base, base], own, collapse=["phy"], expect=f("other", other))
+            assert status == 1 and "did not come" in out, out
+        status, out = diff([base, base], own, collapse=["phy"], as_expected=True)
+        assert "\n-(phy)\n" in out, out
+    finally:
+        mt.classifier = saved
 
 def test_volatile_from_any_pair(f):
     b1 = f("b1", log((1, "W", A, 1), (1, "R", V, 5)))
