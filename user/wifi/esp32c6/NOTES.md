@@ -141,6 +141,12 @@ Data go at OFDM's rates, management frames and frames to a group at 1 Mb/s, each
 and `make txctl-test` holds both.
 The slot's state is cleared just before each arm, since a bit from a frame before would end the new one at once.
 
+Between its reads of the state the sending waits on a `lib/event.h` event,
+which the interrupt's thread sets on the causes their `wDev_ProcessFiq` hands their completion's, timeout's and collisions' handlers.
+It once spun through the try instead, and the receiving's threads waited behind it for their turn:
+beside a Pico 2 W, where each try waits longer for the medium, the C6 then carried a sixth of what it carried alone,
+and now carries about half of what the two carry.
+
 Fairness is the board's to show: `tools/wifi-share.py` drives a Pico 2 W's echo and the C6's at one access point,
 alone and together. Beside the C6 with the fixed backoff, the Pico kept about half what it kept beside the fair one.
 

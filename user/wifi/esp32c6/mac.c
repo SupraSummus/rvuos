@@ -25,6 +25,7 @@
 #include <stdint.h>
 
 #include "esp.h"
+#include "lib/event.h"
 #include "lib/libc.h"
 #include "mac.h"
 #include "macregs.h"
@@ -36,6 +37,11 @@
 #define RX_LAST_HIGH     (MAC_BASE + 0xc70u) /* whose top 12 bits are this register's */
 #define INT_STATUS       (MAC_BASE + 0xc48u)
 #define INT_RX           0x4000u
+/*
+ * A try's end among the causes, as their wDev_ProcessFiq dispatches them: 0x80 to lmacPostTxComplete,
+ * 0x80000 to lmacProcessAllTxTimeout and 0x100 to lmacProcessCollisions; any of them wakes the sending, see try.
+ */
+#define INT_TX_END       0x00080180u
 #define COLOR_STATUS     (MAC_BASE + 0xc34u) /* the BSS colour's interrupt, bit 12, set to clear */
 #define COLOR_CLEAR      (MAC_BASE + 0xc38u)
 #define COLOR_EVENT      0x1000u
@@ -70,6 +76,14 @@ struct desc {
 };
 
 struct mac_rx_counts mac_rx_counts;
+
+/*
+ * Set by the interrupt when one of INT_TX_END's causes says a try ended, which the sending waits for, see try;
+ * one thread waits at a time, as tx_lock has it. Its word is there from the start, and a set signals nothing
+ * before a wait, so the interrupt may set it before mac_tx_init names its notification and timer.
+ */
+static uint32_t tx_end_word;
+static struct event tx_end = { (uint32_t)(uintptr_t)&tx_end_word, 0, 0 };
 
 static struct {
     struct desc *descs;
@@ -403,6 +417,9 @@ void mac_rx_isr(void *arg)
         if (cause & INT_RX) {
             collect();
         }
+        if (cause & INT_TX_END) {
+            event_set(&tx_end);
+        }
     }
 }
 
@@ -619,7 +636,7 @@ void mac_rx_on(void)
 #define TX_RETRY      0x08u    /* the Retry bit, in the frame control's second byte */
 #define TX_GROUP      0x01u    /* the group bit of Address 1's first byte */
 #define TX_MAX        1600u    /* the largest frame the driver sends */
-#define TX_DONE_SPINS 2000000u /* the wait for the MAC to finish, as the libraries bound theirs */
+#define TX_DONE_US    500000u  /* the wait for the MAC to finish a try, longer than any try of the slowest rate */
 #define TX_TRIES      7u       /* a frame's tries, 802.11's dot11ShortRetryLimit */
 
 /*
@@ -691,12 +708,16 @@ static struct tx *tx;
 static struct mutex *tx_lock; /* held while a frame is sent, from its copy into tx to its completion */
 static uint16_t tx_seq;       /* the station's next sequence number, of 4096 */
 
-const char *mac_tx_init(void)
+const char *mac_tx_init(struct self *s)
 {
     void *p = osi_malloc(sizeof(struct tx) + 16u);
     tx_lock = osi_mutex_new();
     if (p == 0 || tx_lock == 0) {
         return "the frame's buffer and lock, from the heap";
+    }
+    if (slot_new(s, &tx_end.note) != KERR_OK || rv_pool_alloc(s->pool, CAP_NOTIFICATION, tx_end.note, 0) != KERR_OK ||
+        timer_bind(s, s->pool, tx_end.note, &tx_end.timer) != KERR_OK) {
+        return "the notification and timer line the sending waits on";
     }
     tx = (struct tx *)(((uintptr_t)p + 15u) & ~(uintptr_t)15u);
     tx_control_start();
@@ -764,7 +785,13 @@ static enum try_end try(uint32_t len, uint32_t i, uint32_t backoff, int group, u
     wr(TX_PLCP0(s), rd(TX_PLCP0(s)) | TX_PLCP0_ARM);
     mac_tx_counts.tries[i]++;
 
-    for (uint32_t spins = 0; spins < TX_DONE_SPINS; spins++) {
+    /*
+     * The try's end is read from the txq state; between the reads the thread waits for the MAC's interrupt
+     * to set tx_end, so that the receiving's threads run while the frame is on the air.
+     * A set left over from a try before, or one of a try's other causes, only costs a read.
+     */
+    uint64_t deadline = osi_now_us() + TX_DONE_US;
+    for (;;) {
         if (rd(TXQ_STATE2) & (1u << s)) {
             uint32_t end = TX_DONE_KIND(rd(TX_DONE(s)));
             wr(TXQ_CLR2, rd(TXQ_CLR2) | (1u << s)); /* the completion, as hal_mac_clr_txq_state(2, slot) */
@@ -787,6 +814,10 @@ static enum try_end try(uint32_t len, uint32_t i, uint32_t backoff, int group, u
             wr(TX_PLCP0(s), rd(TX_PLCP0(s)) & ~TX_PLCP0_ARM);
             mac_tx_counts.collisions++;
             return TRY_COLLISION;
+        }
+        uint64_t now = osi_now_us();
+        if (now >= deadline || !event_wait(&tx_end, (uint32_t)(deadline - now))) {
+            break;
         }
     }
     wr(TX_PLCP0(s), rd(TX_PLCP0(s)) & ~TX_PLCP0_ARM); /* the slot is left as it was found */

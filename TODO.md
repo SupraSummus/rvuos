@@ -166,8 +166,6 @@ what is left:
   A write that does nothing can be left out, on a role rather than on the bit.
   `mac-trace.py seq` holds `RX_BASE`'s value, the address of the driver's descriptor list in its heap,
   which any change to the driver's `.bss` moves; holding that word to the driver's block would spare such a change.
-  Its sending spins in the caller's thread through each try's backoff and airtime;
-  the MAC's interrupt finishing the try, its cause 0x80, would let the next frame's CCMP run meanwhile.
   `mac.c` points a MAC that ran out of descriptors past the last it filled by `RX_BASE` alone,
   which a move off the libraries' list found not always taken; no run has run out yet, `restarted` 0.
 - The ESP32-C6's driver aims at a station alone, the profile its work is held to:
@@ -183,12 +181,13 @@ what is left:
   and the supplicant's a bounded arena of its own, or fixed buffers over a P-256 of fixed width.
 - The ESP32-C6's Wi-Fi root task has 8 KiB of memory and 9 slots left once its clients run,
   so another client needs room found first, in the driver's block or a smaller `CLIENT_CHAN_SIZE`.
-- The ESP32-C6's echo carries about what the Pico 2 W's does in `tools/wifi-run.py`'s throughput check,
-  and more with more datagrams in flight.
-  A frame sent costs the frame's build (about 8 000 cycles), the slot's arming and its wait for the air and the
-  acknowledgement (about 100 000, the spun try), and the receiving (about 18 000);
-  the software CCMP's 236 000 cycles are gone, the MAC's cipher taking them, and the ceiling is now the access
-  point and the medium, about 5 Mb/s, not the core. HT's rates and aggregation come after, see the profile above.
+- The ESP32-C6's echo is bound by the access point and the medium, about 5 Mb/s, not by the core.
+  Two or more frames wait behind the one sent most of the time, so aggregation would carry more:
+  an A-MSDU up, once the station associates for QoS and takes the access point's EDCA parameters,
+  and an A-MPDU down, which wants the MAC's block ack; and HT's rates, see the profile above.
+- The ESP32-C6's driver locks its own sending and keys, `tx_lock` and `key_lock`, with the adapter's mutexes,
+  which exist for the libraries and go through the one lock all the adapter's objects share;
+  `lib/lock.h`'s would serve them alone.
 - The Pico 2 W's run lasts its `run=` whatever its checks found, or until a reset by hand,
   since the host has no way to end it: its USB serial port, `kernel/board/rp2350/cdc.c`, is the halt's alone.
   That port kept up while the run lasts would let the host end it there, in either mode,

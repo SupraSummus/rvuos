@@ -174,10 +174,11 @@ const char *mac_channel(uint32_t channel);
 void mac_home_channel(void);
 
 /*
- * The sending's buffer, and the lock that lets one thread send at a time, made once before any thread sends;
- * 0, or what could not be made.
+ * The sending's buffer, the lock that lets one thread send at a time, and the notification and timer line it waits on
+ * for the MAC's interrupt, from s, made once before any thread sends; 0, or what could not be made.
  */
-const char *mac_tx_init(void);
+struct self;
+const char *mac_tx_init(struct self *s);
 
 /*
  * A frame sent by the driver's own code; 0, or why not, no try acknowledged among the reasons.

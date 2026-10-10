@@ -583,7 +583,7 @@ static __attribute__((noreturn)) void run(struct drv *d)
     started = 1;
     await("the station started", WIFI_EVENT_STA_START, 5000);
     child_report(&d->c, DRV_UP);
-    drv_must_mac("the MAC's sending", mac_tx_init());
+    drv_must_mac("the MAC's sending", mac_tx_init(&own));
     if (d->ssid[0] == 0 && d->listen) {
         listen(d);
     }
