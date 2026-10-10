@@ -67,7 +67,9 @@ uint32_t osi_heap_least(void); /* the fewest bytes free since the heap began */
 
 /* phy.c: the modem's clocks, and the PHY Espressif's libphy.a brings up. */
 void drv_phy_clock_enable(void);
-void drv_phy_enable(void);
+void drv_phy_on(void); /* the PHY alone, as 802.15.4 wants it */
+void drv_phy_off(void);
+void drv_phy_enable(void); /* the PHY and Wi-Fi's part of it */
 void drv_phy_disable(void);
 void drv_phy_channel(uint32_t channel);
 void drv_wifi_clock_enable(void);

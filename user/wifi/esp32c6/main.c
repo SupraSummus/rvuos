@@ -1,6 +1,7 @@
 /*
  * The driver's entry and its first thread: Espressif's libraries brought up in station mode, which brings the MAC up,
  * then a channel heard, a scan, or the station's own thread, which joins the network the page names; see drv.h.
+ * Or, with a channel of IEEE 802.15.4's named, that radio instead of Wi-Fi's, i154.c.
  *
  * The root task starts the driver as a child at drv_main, with a0 at its page and its stack in the child's data.
  * The thread fills the image's data, makes its account of what it may build of its own,
@@ -14,6 +15,7 @@
 
 #include "drv.h"
 #include "esp.h"
+#include "i154.h"
 #include "lib/libc.h"
 #include "lib/lock.h"
 #include "mac.h"
@@ -572,6 +574,9 @@ static __attribute__((noreturn)) void run(struct drv *d)
 {
     if (d->trace) {
         trace_run();
+    }
+    if (d->i154) {
+        i154_run(d, &own);
     }
     drv_say("driver: %u bytes of heap free\n", (unsigned)osi_heap_free());
     /* libphy's own lines at INFO, or at the level the configuration asks for. */

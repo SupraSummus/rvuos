@@ -189,9 +189,9 @@ void drv_phy_clock_enable(void)
     REG(MODEM_LPCON_CLK_CONF) |= CLK_I2C_MST_EN;
 }
 
-void drv_phy_enable(void)
+/* The PHY alone on for one more user, as esp_phy_enable turns it on for any modem, 802.15.4's among them. */
+void drv_phy_on(void)
 {
-    osi_trace("phy_enable", 0, 0);
     if (enabled++ == 0) {
         drv_phy_clock_enable();
         if (!calibrated) {
@@ -205,21 +205,33 @@ void drv_phy_enable(void)
             phy_wakeup_init();
         }
     }
-    phy_wifi_enable_set(1);
 }
 
 /*
  * Once nothing uses the PHY, the RF and the temperature sensor are turned off, as esp_phy_disable does,
  * but for the RF's power in the PMU, which phy_xpd_rf leaves on.
  */
-void drv_phy_disable(void)
+void drv_phy_off(void)
 {
-    osi_trace("phy_disable", 0, 0);
-    phy_wifi_enable_set(0);
     if (enabled > 0 && --enabled == 0) {
         phy_close_rf();
         phy_xpd_tsens();
     }
+}
+
+/* For Wi-Fi, as ESP-IDF's adapter enables it: the PHY, then Wi-Fi's part of it. */
+void drv_phy_enable(void)
+{
+    osi_trace("phy_enable", 0, 0);
+    drv_phy_on();
+    phy_wifi_enable_set(1);
+}
+
+void drv_phy_disable(void)
+{
+    osi_trace("phy_disable", 0, 0);
+    phy_wifi_enable_set(0);
+    drv_phy_off();
 }
 
 /* The radio on channel, 20 MHz wide, as libphy's set_chanfreq tunes it for the libraries. */

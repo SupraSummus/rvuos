@@ -55,6 +55,9 @@ which a change to how the cores lock, start or interrupt each other needs too.
 The same goes for `kernel/board/nrf52840/` and `user/board/nrf52840/`
 with an nRF52840 on an ST-Link connected, `make BOARD=nrf52840 test escape`,
 the only run of ARMv7-M on silicon, which a change to `kernel/arch/arm/` needs too.
+A change to `user/thread/` or to the ESP32-C6's `user/wifi/esp32c6/i154.c`, with both boards connected,
+runs `tools/thread-pair.sh`, IEEE 802.15.4's frames between them, which fails if either hears nothing of the other;
+a traced Wi-Fi run of the C6 after it waits for a plain Wi-Fi run first, see the driver's `NOTES.md`.
 `make check` runs the test of `user/lib/` under QEMU alone,
 so a change to the library with a board connected runs `make BOARD=<board> lib-test` there too, on each kind of core,
 and on the RP2350 with `CORES=2` as well, where a snapshot of `lib/seqlock.h` is written on one core while read on the other.

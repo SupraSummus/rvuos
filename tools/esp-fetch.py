@@ -10,7 +10,8 @@ user/phyblob/ links against these.
 
 With --wifi, the two Wi-Fi libraries are fetched too, about 2.5 MB,
 with the ROM linker scripts for the Wi-Fi functions the ROM holds
-and ESP-IDF's tables of the channels each country allows, esp_wifi_regulatory.c;
+and ESP-IDF's tables of the channels each country allows, esp_wifi_regulatory.c,
+and the BT baseband's libbtbb.a from the PHY's repository, about 20 KB, which brings the radio up for IEEE 802.15.4;
 the Wi-Fi system's driver for the ESP32-C6 links against these.
 It runs WPA with hostap's supplicant, upstream's own and not ESP-IDF's fork of it,
 so --wifi also fetches wpa_supplicant's release, about 4.2 MB, checks it,
@@ -58,6 +59,7 @@ FILES = {
 WIFI_FILES = {
     WIFI_LIB + "libnet80211.a": "40c03728cf922d5ee70d0bd78c3573da3ee06b448458f6357117c2df24d0c113",
     WIFI_LIB + "libpp.a": "c155f4bf97fda9f2f1c4f72e827d39f490a3aa39a26aaab54b6bd587af64380b",
+    PHY_LIB + "libbtbb.a": "1843c31dbd6abfabe33439882bf1ad4ffa5ac60d885da98040c0d909872187e2",
     ROM_LD + "esp32c6.rom.pp.ld": "421e8f9a3f0d3dd11d351398f6e48f0c66ad5b6a350583df400098f44f59ec3b",
     ROM_LD + "esp32c6.rom.net80211.ld": "4acdeceed6d2229367cd18ecf122ec29c257be50340b1777f589426f088fa337",
     ESP_WIFI + "regulatory/esp_wifi_regulatory.c": "54a664aa696e583352c3865bc441a837828b8b0ce26f09015583f43d2f24ff51",

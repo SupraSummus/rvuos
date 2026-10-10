@@ -362,6 +362,8 @@ static void snap_parse(const char *conf, uint32_t len)
  * pmf=0 joins without protecting management frames, and sae=0 without WPA3's SAE.
  * listen=, a channel, with no ssid has the driver hear that channel without joining, and tell what it heard;
  * probe=, with listen=, has it ask for that network on the channel, and count the answers; see drv.h.
+ * i154=, a channel of IEEE 802.15.4's, 11 to 26, has the driver bring that radio up instead of Wi-Fi's,
+ * and exchange frames there with the nRF52840's user/thread/ until the run is over; see i154.h.
  * antenna=ufl has the XIAO's RF switch pick its U.FL connector rather than the antenna on the board,
  * and antenna=none leaves the pins alone, on a board without that switch.
  * The passphrase lives in the driver's page and memory, never in an image.
@@ -385,6 +387,8 @@ static void configure(struct drv *p)
     uint32_t channel = config_number(conf, size, "listen", 0);
     p->listen = (uint8_t)(channel <= 13 ? channel : 0);
     config_value(conf, size, "probe", p->probe, sizeof(p->probe));
+    channel = config_number(conf, size, "i154", 0);
+    p->i154 = (uint8_t)(channel >= 11 && channel <= 26 ? channel : 0);
     p->trace = config_number(conf, size, "trace", 0); /* 1: the root serves each access; 2: the window with no fault */
     trace_wanted = p->trace != 0;
     trace_serving = p->trace == 1;
@@ -595,6 +599,12 @@ static void driver_build(void)
     must("the modem's lines", rv_irq_carve(BOOT_CAP_IRQ_LINES, DRV_LINE_FIRST, DRV_LINES, lines));
     must("give the driver the modem's lines", child_give(&self, c, lines, RIGHT_W, &p->lines));
     must("the lines' slot back", slot_free(&self, lines));
+    if (p->i154) {
+        must("a slot", slot_new(&self, &lines));
+        must("the 802.15.4 MAC's line", rv_irq_carve(BOOT_CAP_IRQ_LINES, DRV_LINE_I154, 1, lines));
+        must("give the driver the 802.15.4 MAC's line", child_give(&self, c, lines, RIGHT_W, &p->i154_line));
+        must("the line's slot back", slot_free(&self, lines));
+    }
     memcpy(p->mac, mac, 6);
 }
 
@@ -635,7 +645,7 @@ static void driver_state(uint32_t state)
             p->joined.channel, (uint32_t)p->authmode);
         system_net_start(&sys);
     } else if (state == DRV_LISTENING) {
-        say(&kout, "root: the driver listens on channel %u\n", (uint32_t)p->listen);
+        say(&kout, "root: the driver listens on channel %u\n", (uint32_t)(p->i154 ? p->i154 : p->listen));
     } else if (state == DRV_LEFT) {
         say(&kout, "root: the driver left the network\n");
         system_halt(0);
@@ -805,6 +815,10 @@ int main(void)
     } else if (dp->ssid[0]) {
         system_net_build(&sys, &dp->link, mac);
         say(&kout, run_s != 0 ? "root: joining %s, for %u s\n" : "root: joining %s, for good\n", dp->ssid, run_s);
+    } else if (dp->i154) {
+        say(&kout, run_s != 0 ? "root: IEEE 802.15.4 on channel %u, for %u s\n"
+                              : "root: IEEE 802.15.4 on channel %u, for good\n",
+            (uint32_t)dp->i154, run_s);
     } else if (dp->listen) {
         say(&kout, run_s != 0 ? "root: listening on channel %u, for %u s\n" : "root: listening on channel %u, for good\n",
             (uint32_t)dp->listen, run_s);

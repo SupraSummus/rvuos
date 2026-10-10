@@ -34,6 +34,28 @@ and the logger carries the kernel's log to a host on port 7070 while the run las
   the firmware in flash would let it, and writing flash is the maintainer's to decide.
 - The bus runs at 25 MHz; embassy runs it at 37.5 MHz with the faster of its programs, and DMA would free the core meanwhile.
 
+## Thread
+
+`user/thread/`, on an nRF52840, drives its radio in IEEE 802.15.4's mode, surveys the channels,
+and exchanges frames with the ESP32-C6's driver on `i154=`, each acknowledging the other's; `tools/thread-pair.sh` runs both.
+Thread, IPv6 over 802.15.4 in a mesh, needs more of it, step by step:
+
+- The level the nRF52840's survey reports is the radio's own, 0 to 127, and which dBm it stands for is unmeasured;
+  the C6's frames would do as a known signal, since the C6 hears the nRF52840's, sent at the same 0 dBm, at about -58 dBm.
+- The nRF52840 sends with no assessment of the channel and never tries again; 802.15.4's CSMA-CA and its retries,
+  which the C6's MAC does in hardware but for the retries, are the MAC's next.
+  A pong now and then goes unacknowledged, up to a few in fifty, with about as many frames heard with a bad FCS,
+  which may be the acknowledgements; nothing sends it again.
+- The nRF52840 receives into one buffer and starts the next reception only after the driver has read the frame,
+  so a frame that follows another within the driver's wake is lost; a second buffer would keep it.
+- The two use fixed short addresses in a PAN of mac154.h's own, until Thread gives them theirs.
+- 6LoWPAN over the frames, and IPv6, ICMPv6 and UDP over it; `user/wifi/net.c` knows IPv4 alone.
+  Both sides' exchange is a test of its own today, the C6's inside its driver;
+  under IPv6 each radio serves a link to a network process instead, as the C6's Wi-Fi does.
+- Thread's own: MLE, by which a node attaches and the routers form the mesh,
+  and a border router, the ESP32-C6, between the mesh and the Wi-Fi network,
+  which on one chip shares the radio between the two; its driver brings up one or the other today.
+
 ## Programs
 
 `user/wifi/NOTES.md` says what writing a program of several processes was like, and `user/lib/` is what came of it;

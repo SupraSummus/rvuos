@@ -47,6 +47,8 @@ struct drv_header {
  */
 #define DRV_LINE_FIRST 1u
 #define DRV_LINES      4u
+/* The IEEE 802.15.4 MAC's line, its ZB_MAC source's, which the root task carves for the driver alone; see i154.h. */
+#define DRV_LINE_I154 13u
 
 /*
  * What the driver tells besides its steps, from the configuration's debug=, see root.c:
@@ -75,6 +77,8 @@ struct drv_header {
  * it leaves as when joined.
  * Listening, with a network to probe for, it asks for it once a second, a few times, as a station that scans asks,
  * and counts the answers to its own address; a run that heard none fails.
+ * With a channel of IEEE 802.15.4's named, i154, it brings that radio up instead of Wi-Fi's, see i154.h,
+ * reports DRV_LISTENING once it exchanges frames on the channel, and leaves as when listening.
  */
 struct drv {
     struct child_page c;
@@ -103,6 +107,8 @@ struct drv {
                              a traced window's alone, since the driver's receive is its own from its start */
     uint8_t listen;       /* the channel to hear, 1 to 13, or 0 */
     char probe[33];       /* the network to probe for while listening, or empty */
+    uint8_t i154;         /* the channel of IEEE 802.15.4 to exchange frames on, 11 to 26, instead of Wi-Fi, or 0 */
+    uint32_t i154_line;   /* the 802.15.4 MAC's line, DRV_LINE_I154, given with i154 */
     struct chan_end link; /* to the network process, connected before the start */
     /* From the root task, while it runs. */
     volatile uint32_t leave; /* the run is over: leave the network, and report DRV_LEFT */

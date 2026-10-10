@@ -458,3 +458,16 @@ Some of the driver's choices are made for the libraries that still run beside it
 and each goes, or is looked at again, when what it answers to goes:
 - The comparison's tools -- `libstart=1`, the diff, the compare across images and their expected files -- go once
   no call of theirs is left in the start, as `TODO.md` says.
+
+## IEEE 802.15.4 beside Wi-Fi
+
+`i154=` brings the chip's 802.15.4 radio up instead of Wi-Fi's, as ESP-IDF's open driver does; `i154.c` says how.
+Its MAC is a whole one in hardware, unlike Wi-Fi's, so the driver only starts and ends each step.
+It needs the BT baseband's `libbtbb.a`, whose `.bss` is linked into every image,
+so Wi-Fi's runs see the driver's RAM 24 bytes further on:
+a traced start held to one from before differs only in the address the receive list is written at.
+
+A run of 802.15.4 leaves the modem in a state the runner's reset does not clear:
+a traced Wi-Fi start straight after one read `0x600A4400` at its third access as `0xc1c93734`,
+where runs after a Wi-Fi run read `0xc1cb3754`, as the gate's did.
+A traced run, or a gate, goes after a Wi-Fi run.

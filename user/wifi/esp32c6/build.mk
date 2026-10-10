@@ -10,8 +10,9 @@ WIFI_ESP      := user/wifi/esp32c6
 WIFI_ESP_INIT := $(BUILD)/$(WIFI_ESP)/phy_init_data.c
 WIFI_ESP_OBJ  := $(patsubst %.c,$(BUILD)/%.o,$(filter-out $(WIFI_ESP)/root.c,$(wildcard $(WIFI_ESP)/*.c))) \
                  $(BUILD)/$(WIFI_ESP)/phy_init_data.o $(BUILD)/$(WIFI_ESP)/esp_wifi_regulatory.o
-# The closed libraries the driver links: the Wi-Fi's two and the PHY's; glue.c stands for what libcore.a held.
-WIFI_ESP_LIBS := $(addprefix $(PHYBLOB_CACHE)/,libnet80211.a libpp.a) $(BUILD)/$(WIFI_ESP)/libphy.a
+# The closed libraries the driver links: the Wi-Fi's two, the PHY's, and the BT baseband's, which IEEE 802.15.4 runs on;
+# glue.c stands for what libcore.a held.
+WIFI_ESP_LIBS := $(addprefix $(PHYBLOB_CACHE)/,libnet80211.a libpp.a libbtbb.a) $(BUILD)/$(WIFI_ESP)/libphy.a
 WIFI_ESP_ROM  := $(addprefix $(PHYBLOB_CACHE)/,esp32c6.rom.ld esp32c6.rom.pp.ld \
                  esp32c6.rom.net80211.ld esp32c6.rom.phy.ld esp32c6.rom.libgcc.ld esp32c6.rom.libc.ld)
 # The driver goes where the window onto flash starts, and the configuration to the input region,

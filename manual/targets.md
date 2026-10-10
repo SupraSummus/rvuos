@@ -450,6 +450,7 @@ On the nRF52840, through an ST-Link:
 make BOARD=nrf52840 test escape                        # boot the demo and the escape suite, and check the transcripts
 make BOARD=nrf52840 build/nrf52840/kernel-blink.elf    # user/blink.c, which blinks the LED of a Fanstel BT840X
 tools/nrf52840-run.py build/nrf52840/kernel-blink.elf  # load it, and print its console until Ctrl-C
+tools/thread-pair.sh                                   # user/thread/: 802.15.4's frames between it and an ESP32-C6
 ```
 
 On ARM, under QEMU:
