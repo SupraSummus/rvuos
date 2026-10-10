@@ -678,7 +678,7 @@ static void count_node(const struct cap *c, unsigned out[UNITS])
 {
     if (c->type != CAP_NONE) {
         out[UNIT_NODE]++;
-        if (c->next != LINK_UP) {
+        if (!node_root(c)) {
             out[UNIT_LINK]++;
         }
     }

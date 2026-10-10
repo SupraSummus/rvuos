@@ -265,7 +265,8 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
             if ((cap->rights & (RIGHT_R | RIGHT_W)) != (RIGHT_R | RIGHT_W)) {
                 return KERR_NO_RIGHTS;
             }
-            if (size < POOL_MIN_SIZE) {
+            /* Its nodes are named by sixteen-bit links, which reach only so far; see struct cap. */
+            if (size < POOL_MIN_SIZE || !node_window_holds(base, size)) {
                 return KERR_INVALID_ARG;
             }
         }
