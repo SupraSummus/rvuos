@@ -193,6 +193,43 @@ static void robust(void)
     check(same(v + 1, deauth + 10, 6u) && v[12] == 1, "Address 2 and the packet number after it");
 }
 
+/*
+ * The layout the MAC's cipher is given to encrypt (ccmp_encap_hw) against ccmp_encrypt's: the header and the CCMP
+ * header byte for byte, the frame's length, and the payload left in the clear. A Data frame and a QoS Data one,
+ * whose header and payload offset differ, as the link's frames are; the guard the two share is ccmp_open's.
+ */
+static void hw_path_case(const uint8_t *in, uint32_t len, uint64_t pn, uint8_t keyid, uint32_t hdrlen)
+{
+    uint8_t sw[24 + 26 + 16 + 16], hw[24 + 26 + 16 + 16];
+    uint32_t ns = ccmp_encrypt(sw, sizeof(sw), in, len, tk, pn, keyid);
+    uint32_t nh = ccmp_encap_hw(hw, sizeof(hw), in, len, pn, keyid);
+    check(ns == len + 16u && nh == ns, "the hardware layout is ccmp_encrypt's length");
+    check(nh != 0 && same(hw, sw, hdrlen + CCMP_HEAD_LEN),
+          "the hardware layout keeps ccmp_encrypt's header and CCMP header");
+    check(nh != 0 && same(hw + hdrlen + CCMP_HEAD_LEN, in + hdrlen, len - hdrlen),
+          "and lays the payload in the clear where ccmp_encrypt writes the ciphertext");
+}
+
+static void hw_path(void)
+{
+    uint8_t data[24 + sizeof(plain)], qos[26 + 16], mgmt[24 + sizeof(plain)], out[sizeof(mgmt) + 16];
+    memcpy(data, header, 24);
+    memcpy(data + 24, plain, sizeof(plain));
+    hw_path_case(data, sizeof(data), PN, 0, 24);
+    memcpy(qos, header, 24);
+    qos[0] = 0x88; /* the QoS Data subtype, whose header is two bytes longer */
+    qos[24] = 0x06; /* TID 6 */
+    qos[25] = 0x00;
+    memcpy(qos + 26, plain, 16);
+    hw_path_case(qos, sizeof(qos), 9, 2, 26);
+
+    /* A management frame is no Data frame of this header; ccmp_encap_hw refuses it, as ccmp_encrypt does. */
+    memcpy(mgmt, header, 24);
+    memcpy(mgmt + 24, plain, sizeof(plain));
+    mgmt[0] = 0x80;
+    check(ccmp_encap_hw(out, sizeof(out), mgmt, sizeof(mgmt), PN, 0) == 0, "a management frame refused");
+}
+
 int main(void)
 {
     known_answer();
@@ -201,6 +238,7 @@ int main(void)
     replay();
     frame_kind();
     robust();
+    hw_path();
     printf("ccmp-test: %s\n", failures ? "FAILED" : "ok");
     return failures != 0;
 }

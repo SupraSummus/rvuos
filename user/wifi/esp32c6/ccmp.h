@@ -83,6 +83,16 @@ uint32_t ccmp_encrypt(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t l
                       uint8_t keyid);
 
 /*
+ * The len bytes of the frame at in laid out for the MAC's cipher to encrypt: the header with its Protected bit set,
+ * the CCMP header ccmp_encrypt builds, the payload left in the clear and the MIC's room set to zero, len + 16 bytes,
+ * returned. The MAC writes the ciphertext and the MIC, given the key entry its PLCP1 keyslot field names.
+ * 0 if it does not fit, or is not a Data frame of a header this reads.
+ * ccmp_encrypt and this agree on the header, the CCMP header and the frame's length, and differ in the payload
+ * (the ciphertext against the clear) and the MIC, which ccmp-test's hw_path holds.
+ */
+uint32_t ccmp_encap_hw(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t len, uint64_t pn, uint8_t keyid);
+
+/*
  * The len bytes of a robust management frame at in encrypted into out, as ccmp_encrypt for a Data frame:
  * its header is 24 bytes and no traffic identifier enters the nonce or the additional data.
  * 0 if it does not fit, or is not a management frame; else the frame's length at out, len + 16 bytes.

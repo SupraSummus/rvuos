@@ -177,23 +177,35 @@ int ccmp_frame_kind(const uint8_t *h, int decrypted)
 }
 
 /*
+ * The frame at in's header hdrlen bytes into out with its Protected bit set, and whether it and the room for the
+ * CCMP header and the MIC fit: 1, or 0 when nothing is written. The two builders, ccmp_encrypt_frame and
+ * ccmp_encap_hw, open a frame so, and the test holds their layouts alike.
+ */
+static int ccmp_open(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t len, uint32_t hdrlen)
+{
+    if (hdrlen == 0 || hdrlen > len || len > size || size - len < CCMP_HEAD_LEN + CCMP_MIC_LEN) {
+        return 0;
+    }
+    memcpy(out, in, hdrlen);
+    out[1] |= (uint8_t)(WLAN_FC_PROTECTED >> 8); /* the Protected bit, whose second octet holds it */
+    return 1;
+}
+
+/*
  * The len bytes of the frame at in, its header hdrlen bytes, whether it has a QoS Control field, and whether it
  * is a robust management frame, protected into out; hdrlen is 24 for a Data or management frame, 26 with QoS.
  */
 static uint32_t ccmp_encrypt_frame(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t len, uint32_t hdrlen,
                                    int qos, int mgmt, const uint8_t *tk, uint64_t pn, uint8_t keyid)
 {
-    if (hdrlen == 0 || hdrlen > len || len > size || size - len < CCMP_HEAD_LEN + CCMP_MIC_LEN) {
+    if (!ccmp_open(out, size, in, len, hdrlen)) {
         return 0;
     }
     uint32_t plen = len - hdrlen;
     uint8_t a[AAD_MAX], v[CCMP_NONCE_LEN], mic[CCMP_MIC_LEN];
 
-    memcpy(out, in, hdrlen);
-    out[1] |= (uint8_t)(WLAN_FC_PROTECTED >> 8); /* the Protected bit, whose second octet holds it */
     uint32_t alen = aad(a, out, qos, mgmt);
     nonce(v, out, pn, mgmt);
-
     /*
      * hostap's CCM encrypts only into a buffer of its own, and writes a whole block for a last one part filled,
      * so the ciphertext is written where the payload lies and the CCMP header is made room for after:
@@ -212,6 +224,18 @@ uint32_t ccmp_encrypt(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t l
                       uint8_t keyid)
 {
     return ccmp_encrypt_frame(out, size, in, len, ccmp_header_len(in), is_qos(in), 0, tk, pn, keyid);
+}
+
+uint32_t ccmp_encap_hw(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t len, uint64_t pn, uint8_t keyid)
+{
+    uint32_t hdrlen = ccmp_header_len(in);
+    if (!ccmp_open(out, size, in, len, hdrlen)) {
+        return 0;
+    }
+    head(out + hdrlen, pn, keyid);
+    memcpy(out + hdrlen + CCMP_HEAD_LEN, in + hdrlen, len - hdrlen);
+    memset(out + len + CCMP_HEAD_LEN, 0, CCMP_MIC_LEN); /* the MAC fills the MIC */
+    return len + CCMP_HEAD_LEN + CCMP_MIC_LEN;
 }
 
 uint32_t ccmp_encrypt_mgmt(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t len, const uint8_t *tk, uint64_t pn,
