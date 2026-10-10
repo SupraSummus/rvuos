@@ -217,13 +217,13 @@ Sizes a developer needs for planning, as the kernel rounds them:
 |---|---|
 | pool descriptor | 56 |
 | `CapTable` with `n` slots | 12 + 24 × n, rounded up to 8 |
-| `Process` | 312 (272 with `PMP_MAX_ENTRIES=8`) |
-| `Thread` | 224 |
+| `Process` | 312 (272 with `PMP_MAX_ENTRIES=8`), 320 on the ESP32-C6 |
+| `Thread` | 264 on RISC-V, 208 on ARM |
 | `Notification` | 16 |
 | `Irq` | 48 |
 
 A minimal child process, table of 10 slots, process, thread and two notifications,
-costs 880 bytes including the descriptor.
+costs 920 bytes including the descriptor on RISC-V, 8 more on the ESP32-C6, and 864 on ARM.
 
 **Objects in different pools.**
 A process's table, a thread's process and an `Irq`'s notification may each lie in any pool,
