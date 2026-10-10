@@ -1,5 +1,5 @@
 /*
- * The Wi-Fi MAC's receiving, and its sending, by the driver's own code, once the libraries have brought the MAC up; see mac.h.
+ * The Wi-Fi MAC's receiving, and its sending, by the driver's own code, once its start has brought the MAC up; see mac.h.
  *
  * What the MAC does, as the libraries' hal_mac_rx_*, wDev_Rxbuf_Init, wDev_AppendRxBlocks and wDev_ProcessFiq
  * do it, read in their code, which keeps its symbols:
@@ -539,10 +539,7 @@ void mac_rx_on(void)
  * and the driver clears it as the libraries' lmacProcessTxComplete does, which lets the slot's arm bits clear;
  * on a timeout's bit or a collision's it disarms the slot, as their hal_mac_txq_disable does, and fails;
  * their handler of a timeout also invalidates the queue, by lmacDisableTransmit, which the driver does not.
- * The libraries' interrupt may finish the frame instead, the driver and their pp treading the same state harmlessly.
- * It clears the queue's own state byte to zero, which the libraries' lmac_stop_hw_txq reads so that their way out
- * leaves the slot alone, and which their lmacProcessTxComplete reads to skip a queue it is not finishing;
- * and the libraries' station never sends, so the driver may use the slot.
+ * The slot is theirs in their start, slot 0, and the driver's own since nothing of theirs runs.
  */
 
 /* PLCP0_ENABLE: the descriptor's address, the format every frame names, and the bits that tell the slot to send. */
@@ -645,8 +642,8 @@ static const char *send(const uint8_t *frame, uint32_t len)
     wr(TX_RESP_DUR(s), TX_RESP_DUR_1M);
     __asm__ volatile("fence" : : : "memory");
     /*
-     * The state bits of the libraries' slot may lie there from before the driver took the interrupt;
-     * they are cleared here, so that a bit that comes after the arm is the driver's own frame's.
+     * The slot's state bits may lie there from a frame before; they are cleared here, so that a bit that comes after
+     * the arm is this frame's.
      */
     wr(TXQ_CLR01, (1u << s) | (1u << (16u + s)));
     wr(TXQ_CLR2, rd(TXQ_CLR2) | (1u << s));
