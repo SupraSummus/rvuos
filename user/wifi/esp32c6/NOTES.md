@@ -370,8 +370,10 @@ the register writes it makes about HAL_CFG, HAL_HOLD and HAL_MISC and its receiv
 and the groups between them go over one at a time,
 each named with `osi_trace`, so that a traced run's segments show its accesses.
 A step's diff holds the device accesses; the writes a step makes to the libraries' own memory are not in the trace, so only the runs hold those.
-Of the start's calls, one that only writes the libraries' own memory -- their pm or their control block -- is left a call:
-taking it over moves no device work to the driver, and would carry their structures' layout into its code.
+Of the start's calls, one that only writes the libraries' own memory -- their pm or their control block -- is left a call, or goes, never transcribed:
+taking it over moves no device work to the driver, and would carry their structures' layout into its code;
+it goes when the runs show its state is not wanted, as `wifi_mode_set`'s and `_do_wifi_start`'s,
+or when what it writes is there already, as `ieee80211_set_hmac_stop`'s zero.
 A write to their memory that a transcribed body brings -- their wdev's flag, the masks by their control block -- is named where it is written,
 and goes whole when the reader of that state is the driver's own.
 
@@ -397,4 +399,4 @@ None of net80211's own state -- the control block's vif words and `ieee80211_sta
 and the ordinary runs hold it: the scan, `listen=`, `listen=` with `probe=`, and the gate's three joins,
 with no library line reaching the driver after the start.
 So the state these two calls set is not wanted;
-whether the rest is -- what `esp_wifi_init_internal`, `chm_init` and `ieee80211_set_hmac_stop` set -- is open.
+whether the rest is -- what `esp_wifi_init_internal` and `chm_init` set -- is open.

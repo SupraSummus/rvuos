@@ -379,15 +379,14 @@ static __attribute__((noreturn)) void attend(struct drv *d)
 
 /*
  * The driver's own esp_wifi_start, taking the libraries' bring-up over a step at a time: the body is the libraries'
- * wifi_start_process written out -- ieee80211_set_hmac_stop, the hardware bring-up's calls,
- * wifi_mode_set, _do_wifi_start, ieee80211_update_phy_country to its hal_init_tx_pwr -- so each can be taken over and
- * the window's sequence held to the libraries' by tools/mac-trace.py's diff. Only the station is written; the
- * libraries' start brings an interface up per mode -- reason 0 the station, 1 the soft AP, 3 then both, and none for
- * another -- so another mode stops here rather than guesses. Their adc2_wifi_acquire, a weak stub in their
- * ieee80211_ioctl.o that returns 0, is left out. See NOTES.md.
+ * wifi_start_process written out -- ieee80211_set_hmac_stop, whose zero the byte holds until their stop, gone; the
+ * hardware bring-up's calls, wifi_mode_set, _do_wifi_start, ieee80211_update_phy_country to its hal_init_tx_pwr -- so
+ * each can be taken over and the window's sequence held to the libraries' by tools/mac-trace.py's diff. Only the
+ * station is written; the libraries' start brings an interface up per mode -- reason 0 the station, 1 the soft AP,
+ * 3 then both, and none for another -- so another mode stops here rather than guesses. Their adc2_wifi_acquire, a
+ * weak stub in their ieee80211_ioctl.o that returns 0, is left out. See NOTES.md.
  */
 extern int wifi_init_completed(void);
-extern void ieee80211_set_hmac_stop(int stop);
 extern void chm_init(void *chm);
 
 extern void wDev_ProcessFiq(void);   /* pp: their interrupt handler, which they install for the MAC's source */
@@ -430,7 +429,6 @@ static int drv_hw_start(void)
     if (ic[G_IC_STOP_MASK] != 0 || (ic[G_IC_START_MASK] & 1) != 0) {
         return ESP_FAIL; /* the libraries' wake branch, or the station already up: neither is written */
     }
-    ieee80211_set_hmac_stop(0);
     funcs->wifi_pm_sleep_lock_acquire();
     funcs->wifi_clock_enable();
     if (g_mac_sleep_en) {
@@ -475,7 +473,6 @@ static int drv_wifi_start(void)
     if (!wifi_init_completed()) {
         return ESP_FAIL;
     }
-    ieee80211_set_hmac_stop(0);
     int mode = *(const uint8_t *)g_wifi_nvs;
     if (mode != WIFI_MODE_STA) {
         return ESP_FAIL; /* only the station is written; the libraries' other modes do not */
