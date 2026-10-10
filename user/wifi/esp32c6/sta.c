@@ -69,7 +69,13 @@ static struct {
     struct buf *bufs;
     uint8_t ap[6]; /* the access point chosen, which the receiving reads once the station has taken it */
     uint16_t aid;  /* the association's, which the MAC's station-mode receiving names */
+    struct drv_net last; /* the access point last joined, tried first when the link ends; see join */
+    int joins;           /* how many times the station joined */
+    int taken;           /* the receiving is the station's, heard's */
     volatile uint32_t beacon_wanted; /* the receiving keeps what the access point sends every station too */
+    volatile uint32_t beacons;       /* the access point's beacons heard, which the link's supervision counts by */
+    uint32_t nulls, nulls_lost;      /* Null frames that asked whether the access point heard, and those it did not */
+    uint32_t ends;                   /* the links that ended, each joined again after */
     volatile uint32_t kept, dropped, runs_lost;
     /* The receiving's drops: copies of a frame already read, and the rest, for the log; see read_frame. */
     volatile uint32_t drop_copy, drop_other;
@@ -107,6 +113,26 @@ static struct {
 
 static uint32_t protect(uint8_t *crypt, uint32_t size, const uint8_t *plain, uint32_t n);
 static uint32_t protect_mgmt(uint8_t *crypt, uint32_t size, const uint8_t *plain, uint32_t n);
+
+/*
+ * Where the station's time with its access point ended: the step, and IEEE 802.11's status or reason, or ESP_FAIL.
+ * A step that fails says so here and returns 0, and so does each step that called it, up to the station's thread,
+ * which fails the driver if the station never joined and joins again if it had; see sta_main.
+ * The first step to fail is kept, as the one the others failed for. Only the station's thread writes it.
+ */
+static struct {
+    const char *step;
+    uint32_t detail;
+} ended;
+
+static int give_up(const char *step, uint32_t detail)
+{
+    if (ended.step == 0) {
+        ended.step = step;
+        ended.detail = detail;
+    }
+    return 0;
+}
 
 /* --- The scan. --- */
 
@@ -146,18 +172,23 @@ static void scan_heard(const struct mac_frame *m)
     }
 }
 
-void sta_scan(struct drv *d)
+/*
+ * Every channel heard for a while, afresh, its access points into the page, strongest first; how many were heard.
+ * The root task's ask to leave cuts it short,
+ * so that the station's thread, which leaves on its next wait, leaves in time.
+ */
+static uint32_t scan(struct drv *d)
 {
+    d->net_count = 0;
     mac_sniffer(1);
     drv_must_mac("the MAC receives into the driver's list", mac_rx_take(scan_heard));
-    for (uint32_t ch = MAC_CHANNEL_FIRST; ch <= MAC_CHANNEL_LAST; ch++) {
+    for (uint32_t ch = MAC_CHANNEL_FIRST; ch <= MAC_CHANNEL_LAST && !d->leave; ch++) {
         mac_channel(ch); /* one of those it tunes to, so never refused */
         osi_delay_ms(SCAN_DWELL_MS);
     }
     mac_sniffer(0);
     mac_rx_give_back();
     drv_mac_told("scan");
-    drv_must("an access point heard", d->net_count != 0 ? ESP_OK : ESP_FAIL);
     for (uint32_t i = 1; i < d->net_count; i++) {
         for (uint32_t j = i; j > 0 && d->nets[j].rssi > d->nets[j - 1].rssi; j--) {
             struct drv_net t = d->nets[j];
@@ -165,6 +196,12 @@ void sta_scan(struct drv *d)
             d->nets[j - 1] = t;
         }
     }
+    return d->net_count;
+}
+
+void sta_scan(struct drv *d)
+{
+    drv_must("an access point heard", scan(d) != 0 ? ESP_OK : ESP_FAIL);
 }
 
 /* --- The events. --- */
@@ -173,10 +210,13 @@ void sta_scan(struct drv *d)
  * A frame to the station from its access point, kept for the station's thread; once the group key is set,
  * a data frame, a deauthentication or a disassociation to the group too; and while the station reads a beacon,
  * one from the access point to every station; in the receiving's thread.
+ * Each of the access point's beacons is counted, read or not, for the link's supervision; see serve_station.
  */
 static void heard(const struct mac_frame *m)
 {
     static const uint8_t every[6] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
+    int beacon = mgmt_beacon_of(m->frame, m->len, sta.ap);
+    sta.beacons += (uint32_t)beacon;
     int group = (sta.gtk.set[0] || sta.gtk.set[1]) && mgmt_to_group(m->frame, m->len, sta.ap);
     if (!mgmt_to_station(m->frame, m->len, drv_self->mac, sta.ap) &&
         !(sta.beacon_wanted && mgmt_to_station(m->frame, m->len, every, sta.ap)) && !group) {
@@ -241,22 +281,49 @@ static void told(void)
             "deauthentications ignored %u, SA Queries sent %u\n",
             (unsigned)sta.rx_mac, (unsigned)sta.rx_mac_grp, (unsigned)sta.rx_clear,
             (unsigned)sta.let_go_ignored, (unsigned)sta.sa_query_sent);
+    drv_say("sta: the access point's beacons heard %u; Null frames asking for it %u, unanswered %u; "
+            "links ended and joined again %u\n",
+            (unsigned)sta.beacons, (unsigned)sta.nulls, (unsigned)sta.nulls_lost, (unsigned)sta.ends);
     drv_mac_told("sta");
 }
 
-/* The station fails at step: it leaves the access point, gives the receiving back, and stops as drv_must does. */
-/* The access point told, the MAC given back to the libraries, and what the station counted, into the log. */
+/*
+ * The link's keys gone, the MAC's entries and the station's own with their counters, so that no entry of the own
+ * path's is left in the hardware, and the next link starts from none: its EAPOL in the clear until its handshake.
+ */
+static void drop_keys(void)
+{
+    osi_mutex_take(sta.key_lock);
+    mac_key_clear(STA_KEY_ENTRY);
+    for (uint32_t i = 0; i < KEYS_GROUP; i++) {
+        mac_key_clear(STA_GRP_ENTRY + i);
+        sta.gtk.set[i] = 0;
+        sta.igtk.set[i] = 0;
+        sta.igtk_ipn[i] = 0;
+    }
+    sta.ptk = (struct keys){ 0 };
+    sta.ptk_pn = (struct key_pn){ 0 };
+    memset(sta.gtk_rx_pn, 0, sizeof(sta.gtk_rx_pn));
+    osi_mutex_give(sta.key_lock);
+    sta.completed = 0;
+}
+
+/*
+ * The access point told, the keys dropped, the MAC's receiving given back,
+ * and what the station counted, into the log.
+ */
 static void hand_back(void)
 {
     part(MGMT_LEAVING);
-    mac_key_clear(STA_KEY_ENTRY); /* no entry of the own path's is left in the hardware */
-    for (uint32_t i = 0; i < KEYS_GROUP; i++) {
-        mac_key_clear(STA_GRP_ENTRY + i);
+    drop_keys();
+    if (sta.taken) {
+        mac_rx_give_back();
+        sta.taken = 0;
     }
-    mac_rx_give_back();
     told();
 }
 
+/* The station fails at step, never having joined: it leaves the access point, and stops as drv_must does. */
 static __attribute__((noreturn)) void fail(const char *step, uint32_t detail)
 {
     hand_back();
@@ -265,13 +332,17 @@ static __attribute__((noreturn)) void fail(const char *step, uint32_t detail)
     drv_stop(CHILD_FAILED);
 }
 
-/* A step of the station's that must succeed. */
-static void must(const char *step, int ok)
+/*
+ * A step of the station's: 1 if it succeeded, which the log says,
+ * else 0, the station's time with its access point ended at it.
+ */
+static int must(const char *step, int ok)
 {
     if (!ok) {
-        fail(step, (uint32_t)ESP_FAIL);
+        return give_up(step, (uint32_t)ESP_FAIL);
     }
     drv_say("sta: %s\n", step);
+    return 1;
 }
 
 /* The station leaves as the root task asks: the access point, then the receiving, the radio, and DRV_LEFT. */
@@ -358,7 +429,7 @@ static void sa_query_time(void)
     } else if (step == SA_QUERY_GIVE_UP) {
         sta.sa_query.active = 0;
         forget();
-        fail("the access point's state", sta.sa_query.reason);
+        give_up("the access point's state", sta.sa_query.reason);
     }
     sta.sa_query.at = sta.sa_query.last + SA_QUERY_RETRY_US;
     if (sta.sa_query.start + SA_QUERY_MAX_US < sta.sa_query.at) {
@@ -440,15 +511,19 @@ static int sa_query_take(const struct buf *b)
 
 /*
  * The events until the deadline, in osi_now_us's microseconds, each frame offered to read, given back after:
- * 1 once read takes one, the frame the step waits for, 0 at the deadline.
- * The supplicant's work runs between them; the ask to leave ends the station whatever the step,
- * and so does the access point letting it, or every station, go, once it has authenticated.
+ * 1 once read takes one, the frame the step waits for, 0 at the deadline, or once the station's time with its
+ * access point has ended, which the step that waits reads in ended.
+ * The supplicant's work runs between them; the ask to leave ends the station whatever the step;
+ * the access point letting it, or every station, go, once it has authenticated, ends its time with it.
  * An SA Query in progress shortens each wait to its next move, which request again at its retry time or,
- * with no answer before its whole time, leaves the link; see sa_query_time.
+ * with no answer before its whole time, ends the link; see sa_query_time.
  */
 static int wait_for(uint64_t deadline, int (*read)(const struct buf *b, void *arg), void *arg)
 {
     for (;;) {
+        if (ended.step != 0) {
+            return 0;
+        }
         uint64_t now = osi_now_us();
         uint64_t until = sta.sa_query.active && sta.sa_query.at < deadline ? sta.sa_query.at : deadline;
         struct event e;
@@ -477,9 +552,9 @@ static int wait_for(uint64_t deadline, int (*read)(const struct buf *b, void *ar
         osi_queue_put(sta.free, &e.buf, 0);
         if (gone) {
             forget();
-            fail("let go by the access point", reason);
+            give_up("let go by the access point", reason);
         }
-        if (taken) {
+        if (taken && ended.step == 0) {
             return 1;
         }
     }
@@ -698,11 +773,14 @@ static void link_completed(void)
     }
 }
 
-/* The supplicant ends the association, a handshake having failed: the station leaves for its reason, and fails. */
+/*
+ * The supplicant ends the association, a handshake having failed: the station leaves for its reason, and its time
+ * with the access point ends; the supplicant's call returns, and the station's thread reads why in ended.
+ */
 static void link_deauthenticate(uint16_t reason)
 {
     part(reason);
-    fail("the supplicant's handshakes", reason);
+    give_up("the supplicant's handshakes", reason);
 }
 
 /*
@@ -796,7 +874,9 @@ static int security(const struct drv *d, const struct drv_net *ap)
     sta.pmf = n.pmf;
     sta.sae = n.key_mgmt == SUPP_KEY_MGMT_SAE;
     size_t rsn_len = sizeof(sta.rsn), rsnx_len = sizeof(sta.rsnx);
-    must("the station's RSN element", supp_connect(&n, sta.rsn, &rsn_len, sta.rsnx, &rsnx_len) == 0);
+    if (!must("the station's RSN element", supp_connect(&n, sta.rsn, &rsn_len, sta.rsnx, &rsnx_len) == 0)) {
+        return 0;
+    }
     sta.has_rsnx = rsnx_len != 0;
     return 1;
 }
@@ -834,8 +914,8 @@ static int auth_answer(const struct buf *b, void *arg)
     return mgmt_auth_answer(b->frame, b->len, drv_self->mac, sta.ap, arg);
 }
 
-/* An open-system authentication; one refused fails with its status, one never answered with ESP_FAIL. */
-static void open_system(void)
+/* An open-system authentication: 1, or 0 for one refused, ended at its status, or never answered, at ESP_FAIL. */
+static int open_system(void)
 {
     static uint8_t frame[MGMT_FRAME_MAX];
     uint32_t n = mgmt_auth_request(frame, sizeof(frame), drv_self->mac, sta.ap);
@@ -844,8 +924,9 @@ static void open_system(void)
     drv_say("sta: authentication %s, status %u\n", answered ? (status == 0 ? "accepted" : "refused") : "not answered",
             (unsigned)status);
     if (!answered || status != 0) {
-        fail("the authentication answered", answered ? status : (uint32_t)ESP_FAIL);
+        return give_up("the authentication answered", answered ? status : (uint32_t)ESP_FAIL);
     }
+    return 1;
 }
 
 /*
@@ -911,8 +992,11 @@ static int sae_step(uint16_t transaction)
     return SUPP_FAILED;
 }
 
-/* SAE's exchange; one refused fails with the access point's status, one failed or never answered with ESP_FAIL. */
-static void sae(void)
+/*
+ * SAE's exchange: 1, or 0 for one refused, ended at the access point's status,
+ * or failed or never answered, at ESP_FAIL.
+ */
+static int sae(void)
 {
     uint64_t start = osi_now_us();
     int r = SUPP_AGAIN;
@@ -925,19 +1009,19 @@ static void sae(void)
     drv_say("sta: SAE %s in %u ms\n", r == SUPP_TAKEN ? "accepted" : "failed",
             (unsigned)((osi_now_us() - start) / 1000u));
     if (r != SUPP_TAKEN) {
-        fail("SAE's authentication", r > 0 ? (uint32_t)r : (uint32_t)ESP_FAIL);
+        return give_up("SAE's authentication", r > 0 ? (uint32_t)r : (uint32_t)ESP_FAIL);
     }
+    return 1;
 }
 
-/* The authentication, by SAE under WPA3's personal and by open system under WPA2's. */
-static void authenticate(void)
+/* The authentication, by SAE under WPA3's personal and by open system under WPA2's: 1, or 0, ended. */
+static int authenticate(void)
 {
-    if (sta.sae) {
-        sae();
-    } else {
-        open_system();
+    if (!(sta.sae ? sae() : open_system())) {
+        return 0;
     }
     sta.state = AUTHENTICATED;
+    return 1;
 }
 
 struct assoc {
@@ -952,7 +1036,8 @@ static int assoc_answer(const struct buf *b, void *arg)
 }
 
 /*
- * The association, with the supplicant's elements; one refused fails with its status, one unanswered with ESP_FAIL.
+ * The association, with the supplicant's elements: 1, or 0 for one refused, ended at its status, or unanswered,
+ * at ESP_FAIL.
  * An access point that holds the station's state from an association whose end it did not hear answers status 30
  * and names in its Timeout Interval element the time to come back: the station waits that long, during which the
  * access point asks the state it holds after the station and, hearing nothing, drops it — its authentication with
@@ -962,12 +1047,14 @@ static int assoc_answer(const struct buf *b, void *arg)
 #define ASSOC_COMEBACK_TU 100u       /* the wait when the access point names no time, in 802.11's time units */
 #define ASSOC_WAIT_MAX_US 10000000u  /* the longest a sorry access point may hold the join up */
 
-static void associate(const struct drv_net *ap)
+static int associate(const struct drv_net *ap)
 {
     static uint8_t frame[MGMT_ASSOC_MAX];
     uint32_t n = mgmt_assoc_request(frame, sizeof(frame), drv_self->mac, sta.ap, ap->ssid, sta.rsn,
                                     sta.has_rsnx ? sta.rsnx : 0);
-    must("the association request", n != 0);
+    if (!must("the association request", n != 0)) {
+        return 0;
+    }
     for (uint32_t tries = 1;; tries++) {
         struct assoc a = { 0, 0, 0 };
         int answered = exchange("the association", frame, n, assoc_answer, &a);
@@ -979,7 +1066,7 @@ static void associate(const struct drv_net *ap)
             break;
         }
         if (!answered || a.status != MGMT_TRY_AGAIN || tries >= ASSOC_TRIES) {
-            fail("the association answered", answered ? a.status : (uint32_t)ESP_FAIL);
+            return give_up("the association answered", answered ? a.status : (uint32_t)ESP_FAIL);
         }
         uint64_t wait_us = (uint64_t)(a.comeback_tu ? a.comeback_tu : ASSOC_COMEBACK_TU) * 1024u;
         if (wait_us > ASSOC_WAIT_MAX_US) {
@@ -987,10 +1074,13 @@ static void associate(const struct drv_net *ap)
         }
         drv_say("sta: told to come back in %u ms\n", (unsigned)(wait_us / 1000u));
         osi_delay_ms((uint32_t)((wait_us + 999u) / 1000u));
-        authenticate();
+        if (!authenticate()) {
+            return 0;
+        }
     }
     sta.state = ASSOCIATED;
     supp_associated(sta.ap);
+    return 1;
 }
 
 /*
@@ -1092,13 +1182,13 @@ static int until_completed(const struct buf *b, void *arg)
     return sta.completed;
 }
 
-static void handshake(void)
+static int handshake(void)
 {
     uint64_t start = osi_now_us();
     int done = wait_for(start + HANDSHAKE_US, until_completed, 0);
     drv_say("sta: the handshakes %s in %u ms\n", done ? "done" : "not done",
             (unsigned)((osi_now_us() - start) / 1000u));
-    must("the handshakes done", done);
+    return must("the handshakes done", done);
 }
 
 /* --- The data's path, once the handshake has installed the keys. --- */
@@ -1210,8 +1300,6 @@ void sta_link_take(struct drv *d)
     }
 }
 
-#define SERVE_US 60000000u /* how long each of the serving's waits lasts; any length would do */
-
 /*
  * A frame the station received once it serves the link, wait_for's reader, which never takes one:
  * read once through plain_frame, and handed to the supplicant if it is EAPOL,
@@ -1266,57 +1354,200 @@ static int read_frame(const struct buf *b, void *arg)
     return 0;
 }
 
-/* The station's service of the link, each frame read, until the root task asks it to leave; see wait_for. */
-static __attribute__((noreturn)) void serve_station(struct drv *d)
+/*
+ * The link's supervision: the station counts its access point's beacons, and once none has come for BEACON_LOSS_US,
+ * about twenty beacon intervals, asks the access point by a Null frame each second whether it still hears the
+ * station, as Linux's mac80211 probes an access point whose beacons it lost; NULLS_LOST in a row unacknowledged
+ * end the link, and so does a silence of BEACON_DEAD_US, which an access point that still acknowledges does not
+ * excuse: the station that hears nothing of it cannot be served by it.
+ * The beacons count frames the receiving handed over, so a receiving that has stopped ends the link too.
+ */
+#define SUPERVISE_US   1000000u  /* how often the station looks after its link */
+#define BEACON_LOSS_US 2000000u
+#define BEACON_DEAD_US 30000000u
+#define NULLS_LOST     3u
+
+/* A Null frame to the access point: 1 once it is acknowledged, which says the access point still hears the station. */
+static int ask_access_point(void)
 {
-    for (;;) {
-        wait_for(osi_now_us() + SERVE_US, read_frame, d);
+    uint8_t f[MGMT_FRAME_MAX];
+    uint32_t n = mgmt_null(f, sizeof(f), drv_self->mac, sta.ap, 0);
+    sta.nulls++;
+    if (n != 0 && mac_tx(f, n) == 0) {
+        return 1;
+    }
+    sta.nulls_lost++;
+    return 0;
+}
+
+/*
+ * The station's service of the link, each frame read, until the root task asks it to leave, see wait_for,
+ * or the station's time with its access point ends, which ended says: the access point letting it go, or lost.
+ * Once a second the PHY is kept to the temperature and the link supervised.
+ */
+static void serve_station(struct drv *d)
+{
+    uint32_t beacons = sta.beacons, unanswered = 0;
+    uint64_t heard = osi_now_us(), tick = heard;
+    while (ended.step == 0) {
+        wait_for(tick + SUPERVISE_US, read_frame, d);
+        if (ended.step != 0) {
+            break;
+        }
+        uint64_t now = osi_now_us();
+        if (now - tick < SUPERVISE_US) {
+            continue;
+        }
+        tick = now;
+        mac_phy_track();
+        if (sta.beacons != beacons) {
+            beacons = sta.beacons;
+            heard = now;
+            unanswered = 0;
+            continue;
+        }
+        if (now - heard >= BEACON_DEAD_US) {
+            give_up("the access point's beacons", (uint32_t)ESP_FAIL);
+        } else if (now - heard >= BEACON_LOSS_US) {
+            unanswered = ask_access_point() ? 0 : unanswered + 1;
+            if (unanswered >= NULLS_LOST) {
+                give_up("the access point's acknowledgement", (uint32_t)ESP_FAIL);
+            }
+        }
     }
 }
 
 /*
- * The station's thread: the scan, then of the network's access points, strongest first, the first whose beacon
- * offers suites the station takes, on its channel, with the receiving the station's; the authentication,
- * the association, the supplicant's handshakes, and then the link's service,
- * reporting DRV_JOINED so that the root task starts the network process; see TODO.md.
+ * The access point ap taken for the station: its channel tuned to, the station's address and its own set, the
+ * receiving taken in station mode if it was not, and its beacon read for what the station associates with.
+ * 1, or 0 if its beacon was not heard, or offers nothing the station takes, so that another may be tried;
+ * 0, ended, if the station can go no further.
+ */
+static int take(struct drv *d, const struct drv_net *ap)
+{
+    memcpy(sta.ap, ap->bssid, 6);
+    drv_say("sta: %s at %02x:%02x:%02x:%02x:%02x:%02x, channel %u\n", ap->ssid, ap->bssid[0], ap->bssid[1],
+            ap->bssid[2], ap->bssid[3], ap->bssid[4], ap->bssid[5], (unsigned)ap->channel);
+    /* The channel a beacon named, which mac_channel may refuse. */
+    const char *refused = mac_channel(ap->channel);
+    if (refused != 0) {
+        return give_up(refused, (uint32_t)ESP_FAIL);
+    }
+    drv_say("driver: the access point's channel\n");
+    /*
+     * The station's own address and the access point's, set before the authentication, and the station-mode
+     * receiving the libraries' association programs, the MAC's list taken once. See mac.c.
+     */
+    mac_station(drv_self->mac, sta.ap);
+    if (!sta.taken) {
+        mac_receive(0);
+        drv_must_mac("the MAC receives into the driver's list", mac_rx_take(heard));
+        sta.taken = 1;
+    }
+    return security(d, ap);
+}
+
+/*
+ * The station joins: the access point it joined last, if it did, on its channel, else after a scan of the
+ * network's access points, strongest first, the first whose beacon offers suites the station takes;
+ * then the authentication, the association with the AID the receiving names, and the supplicant's handshakes.
+ * 1 once joined, the access point in sta.last; 0 once ended says where the station could go no further.
+ */
+static int join(struct drv *d)
+{
+    struct drv_net ap = sta.last;
+    int found = sta.joins != 0 && take(d, &ap);
+    if (!found && ended.step == 0) {
+        if (sta.taken) {
+            mac_rx_give_back();
+            sta.taken = 0;
+        }
+        if (scan(d) == 0) {
+            return give_up("an access point heard", (uint32_t)ESP_FAIL);
+        }
+        drv_say("driver: an access point heard\n");
+        uint32_t next = 0;
+        while (!found && ended.step == 0) {
+            const struct drv_net *a = net_next(d, &next);
+            if (!must("an access point of the network that the station takes", a != 0)) {
+                return 0;
+            }
+            ap = *a;
+            found = take(d, &ap);
+        }
+    }
+    if (!found || !authenticate() || !associate(&ap)) {
+        return 0;
+    }
+    /* The association's AID, the receiving's own; see mac.c. */
+    mac_receive(sta.aid);
+    if (!handshake()) {
+        return 0;
+    }
+    sta.last = ap;
+    return 1;
+}
+
+/*
+ * After a link that ended, the next join waits a while, doubling from REJOIN_FIRST_MS to REJOIN_MOST_MS as joins
+ * fail, so that an access point that is gone for long is not asked for without end; a link that ended at once
+ * after a join waits the least again.
+ */
+#define REJOIN_FIRST_MS 500u
+#define REJOIN_MOST_MS  16000u
+
+static int never(const struct buf *b, void *arg)
+{
+    (void)b;
+    (void)arg;
+    return 0;
+}
+
+/*
+ * The station's thread: it joins, reports DRV_JOINED so that the root task starts the network process, and serves
+ * the link; once its time with its access point ends, it leaves what is left of the link and joins again, the
+ * network process keeping its address meanwhile, until the root task asks it to leave.
+ * The first join failing fails the driver, at its step; see TODO.md.
  */
 static void sta_main(void *arg)
 {
     struct drv *d = arg;
-    sta_scan(d);
-    must("a passphrase", d->pass[0] != 0);
-    const struct drv_net *ap;
-    uint32_t next = 0;
-    int taken = 0;
-    do {
-        ap = net_next(d, &next);
-        must("an access point of the network that the station takes", ap != 0);
-        memcpy(sta.ap, ap->bssid, 6);
-        drv_say("sta: %s at %02x:%02x:%02x:%02x:%02x:%02x, channel %u\n", ap->ssid, ap->bssid[0], ap->bssid[1],
-                ap->bssid[2], ap->bssid[3], ap->bssid[4], ap->bssid[5], (unsigned)ap->channel);
-        /* The channel a beacon named, which mac_channel may refuse. */
-        drv_must_mac("the access point's channel", mac_channel(ap->channel));
-        /*
-         * The station's own address and the access point's, set before the authentication, and the station-mode
-         * receiving the libraries' association programs, the MAC's list taken once. See mac.c.
-         */
-        mac_station(drv_self->mac, sta.ap);
-        if (!taken) {
-            mac_receive(0);
-            drv_must_mac("the MAC receives into the driver's list", mac_rx_take(heard));
-            taken = 1;
+    if (!must("a passphrase", d->pass[0] != 0)) {
+        fail(ended.step, ended.detail);
+    }
+    uint32_t wait_ms = REJOIN_FIRST_MS;
+    for (;;) {
+        int served = 0;
+        if (join(d)) {
+            sta.joins++;
+            d->joined = sta.last;
+            d->authmode = sta.sae ? WIFI_AUTH_WPA3_PSK : WIFI_AUTH_WPA2_PSK;
+            if (sta.joins == 1) {
+                child_report(&d->c, DRV_JOINED);
+                drv_say("sta: joined, and the link is served\n");
+            } else {
+                drv_say("sta: joined again, after %u links ended, and the link is served\n", (unsigned)sta.ends);
+            }
+            wait_ms = REJOIN_FIRST_MS;
+            serve_station(d);
+            served = 1;
         }
-    } while (!security(d, ap));
-    authenticate();
-    associate(ap);
-    /* The association's AID, the receiving's own; see mac.c. */
-    mac_receive(sta.aid);
-    handshake();
-    d->joined = *ap;
-    d->authmode = sta.sae ? WIFI_AUTH_WPA3_PSK : WIFI_AUTH_WPA2_PSK;
-    child_report(&d->c, DRV_JOINED);
-    drv_say("sta: joined, and the link is served\n");
-    serve_station(d);
+        if (ended.step == 0) {
+            give_up("the join", (uint32_t)ESP_FAIL); /* every step that fails says where, so this is a guard alone */
+        }
+        if (sta.joins == 0) {
+            fail(ended.step, ended.detail);
+        }
+        sta.ends += (uint32_t)served;
+        drv_say("sta: %s at %s: %d (0x%x); joining again in %u ms\n", served ? "the link ended" : "the join failed",
+                ended.step, (int)ended.detail, (unsigned)ended.detail, (unsigned)wait_ms);
+        part(MGMT_LEAVING);
+        drop_keys();
+        sta.sa_query.active = 0;
+        ended.step = 0;
+        wait_for(osi_now_us() + (uint64_t)wait_ms * 1000u, never, 0);
+        wait_ms = wait_ms * 2u < REJOIN_MOST_MS ? wait_ms * 2u : REJOIN_MOST_MS;
+    }
 }
 
 const char *sta_start(struct drv *d)

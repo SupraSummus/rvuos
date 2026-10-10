@@ -68,10 +68,12 @@ struct drv_header {
  * With one, its station, a thread of its own, sta.c's, scans for it, authenticates, associates,
  * and runs the supplicant's handshakes, WPA3's personal by SAE where the access point offers it,
  * unless the page says no_sae, and WPA2's otherwise; a network with no passphrase it refuses, see TODO.md.
- * It installs the keys it derives, reports DRV_JOINED, and serves the link, its data frames in software CCMP,
+ * It installs the keys it derives, reports DRV_JOINED, and serves the link, its data frames under the MAC's CCMP,
  * until the root task asks it to leave, when it leaves, turns the radio off and reports DRV_LEFT.
- * A step that fails, or the access point letting the station go, is CHILD_FAILED,
- * with the step's name in the page and the error, or IEEE 802.11's status or reason, in its detail.
+ * A step of the first join that fails is CHILD_FAILED,
+ * with the step's name in the page and the error, or IEEE 802.11's status or reason, in its detail;
+ * once joined, a link the access point ends, or that the station loses, is joined again, the state staying DRV_JOINED;
+ * see sta.c.
  * With a channel to listen on and no network named, it hears the channel without joining and reports DRV_LISTENING,
  * then tells each second what it heard, and the beacons heard and missed of the access point bssid names or else the first;
  * it leaves as when joined.

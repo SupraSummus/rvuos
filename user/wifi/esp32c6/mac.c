@@ -824,6 +824,26 @@ static enum try_end try(uint32_t len, uint32_t i, uint32_t backoff, int group, u
     return TRY_UNFINISHED;
 }
 
+/* The PHY tracked at most once a second, as ESP-IDF's phy_track_pll. */
+#define TRACK_US 1000000u
+
+static uint64_t tracked_at;
+
+void mac_phy_track(void)
+{
+    if (tx == 0) {
+        return;
+    }
+    osi_mutex_take(tx_lock);
+    uint64_t now = osi_now_us();
+    if (now - tracked_at >= TRACK_US) {
+        drv_phy_track();
+        tracked_at = now;
+        tx_pwr_asked = 0; /* the power a rate is sent at asked again, after a correction for the temperature */
+    }
+    osi_mutex_give(tx_lock);
+}
+
 /* The frame sent while the lock is held, so that no other thread's frame overwrites it before it is done. */
 const char *mac_tx(const uint8_t *frame, uint32_t len)
 {

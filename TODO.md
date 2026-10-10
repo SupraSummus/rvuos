@@ -215,8 +215,6 @@ what is left:
   That port kept up while the run lasts would let the host end it there, in either mode,
   where the network does not reach the lab's access point; closing the port already reboots the chip into BOOTSEL.
   Whether the kernel keeps it, or the root task is given the USB controller as the ESP32-C6's is given its console, is open.
-- The ESP32-C6's driver stops once the access point lets the station go, and the root task ends the run:
-  nothing joins again, as ESP-IDF leaves to the program too.
 - The ESP32-C6's kernel moves the CPU to the SPLL from whatever source it finds, but has only found the SPLL:
   the crystal, which a power-on leaves when the flash holds no bootloader, is untried.
 - The ESP32-C6's SAE takes a fifth of a second between the access point's commit and the station's confirm,
@@ -229,8 +227,6 @@ what is left:
   Of the management group ciphers it takes BIP-CMAC-128 alone, not the GMAC of the 192-bit and GCMP suites.
 - The ESP32-C6's station keeps the radio on between beacons, and tells the access point nothing of power save:
   the modem's sleep until each DTIM beacon, which the libraries' station did, though not well over the adapter, is to be its own.
-- ESP-IDF tracks the PHY's PLL every second while the radio runs, `phy_track_pll` of `esp_phy`;
-  the adapter does not, which a run of hours may need.
 - The ESP32-C6's radio stays on until the next boot when a thread of the driver's faults
   or the root task halts for the network process; the driver turns it off only on its own way out,
   and even then the RF's analog buses stay powered in the PMU, `PMU_RF_PWC`'s bits 28 to 31,

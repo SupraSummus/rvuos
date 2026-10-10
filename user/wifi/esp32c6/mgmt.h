@@ -176,6 +176,19 @@ struct mgmt_payload {
  */
 int mgmt_data_read(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap, struct mgmt_payload *p);
 
+/*
+ * A Null frame from sta to the access point ap, a data frame with no body, which the access point acknowledges:
+ * the station asks by it whether the access point still hears it, and tells it, by its Power Management bit,
+ * whether the station sleeps between beacons, sleeps 1, or stays awake, 0.
+ */
+uint32_t mgmt_null(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap, int sleeps);
+
+/*
+ * A beacon of the access point ap, by its subtype and addresses alone, its elements not read:
+ * cheap enough for the receiving's thread to count every one by.
+ */
+int mgmt_beacon_of(const uint8_t *f, uint32_t len, const uint8_t *ap);
+
 /* An access point's frame to the group that says the station is let go: its reason into *reason. */
 int mgmt_let_go_group(const uint8_t *f, uint32_t len, const uint8_t *ap, uint16_t *reason);
 

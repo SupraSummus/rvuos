@@ -321,6 +321,33 @@ The stack goes hardly deeper than under WPA2, and stayed as it was.
 The Pico 2 W's access point, offering WPA3 and WPA2 together, refuses WPA2's join, see `TODO.md`,
 but takes the own station by SAE, as it takes the libraries'.
 
+## The station's link, kept
+
+Once joined, the station watches its access point.
+The receiving's thread counts the access point's beacons, by a frame's subtype and addresses alone (`mgmt_beacon_of`),
+and the station's thread looks once a second.
+Two seconds without one, about twenty beacon intervals, and it asks the access point by a Null frame
+whether it still hears the station, as Linux's mac80211 probes an access point whose beacons it lost;
+three unacknowledged in a row end the link, and so do thirty seconds without a beacon, acknowledged or not,
+since a station that hears nothing of its access point cannot be served by it.
+
+A link that ends so, or that the access point ends -- a deauthentication heeded, a handshake of the supplicant's failing,
+an SA Query unanswered -- no longer stops the driver: the station joins again,
+the access point it last joined first, on its channel, else after a scan,
+pausing half a second before, and twice as long after each join that fails, up to sixteen.
+The network process keeps its address meanwhile, and its frames are dropped until the station serves the link again.
+Only the first join failing fails the driver, so that a wrong passphrase or a network not there still ends the run at its step.
+A step that fails therefore returns, saying where in `ended`, up to the station's thread,
+where it once stopped the thread for good:
+it is called from inside hostap's supplicant too, which neither a stop nor a jump out of it would leave whole.
+The supplicant keeps what the network's SSID and passphrase alone derive, WPA2's PMK and SAE's password element,
+so that a join again derives neither; the PMK's PBKDF2 is most of a second on the C6.
+The Pico 2 W's access point, its run let end and started again, showed both halves:
+the station called the link lost a few seconds after the access point went, and joined again once it was back.
+
+The PHY is kept to the chip's temperature once a second while the station is joined, as ESP-IDF's `phy_track_pll` keeps it:
+libphy's `phy_param_track_tot`, Wi-Fi's part, under the sending's lock, so that no frame is on the air meanwhile.
+
 ## The libraries' station gone
 
 Once the own station joined both kinds of network, the libraries' station went:

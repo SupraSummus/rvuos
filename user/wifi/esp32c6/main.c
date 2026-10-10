@@ -192,6 +192,10 @@ void drv_mac_told(const char *who)
     drv_say("%s: frames not sent %u, ends seen %x, timeouts %u, collisions %u; the rate held %u Mb/s\n", who,
             (unsigned)t->lost, (unsigned)t->ends, (unsigned)t->timeouts, (unsigned)t->collisions,
             (unsigned)(mac_tx_kbps(t->rate) / 1000u));
+    if (drv_phy_tracks.count != 0) {
+        drv_say("%s: the PHY kept to the temperature %u times, the costliest in %u cycles\n", who,
+                (unsigned)drv_phy_tracks.count, (unsigned)drv_phy_tracks.most);
+    }
 }
 
 /* A step of mac.c's that must succeed: 0, or the step that failed, which stops the driver as drv_must does. */

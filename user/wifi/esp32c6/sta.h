@@ -9,7 +9,10 @@
  * runs hostap's supplicant over a link of its own, see supp.h, through the 4-way handshake,
  * installs the keys it derives, and then serves the link: the network process's Ethernet frames are encrypted
  * with CCMP and sent, and the station's received frames are decrypted and handed to it, until the root task asks it to leave.
- * The sending's CCMP is in software, the receiving's the MAC's; see TODO.md.
+ * The CCMP is the MAC's both ways; see TODO.md.
+ * While it serves, it counts its access point's beacons and asks a silent one by Null frames whether it still hears
+ * the station; a link lost so, or ended by the access point, is joined again, the network process keeping its address.
+ * See sta.c.
  */
 
 #include "drv.h"

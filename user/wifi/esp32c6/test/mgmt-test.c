@@ -421,6 +421,42 @@ static void deauth(void)
               mgmt_deauth(g, size, sta, ap, MGMT_LEAVING));
 }
 
+/* A Null frame to the access point, its Power Management bit as the station sleeps or not. */
+static void null_frame(void)
+{
+    uint8_t f[IEEE80211_HDRLEN], want[IEEE80211_HDRLEN];
+    for (int sleeps = 0; sleeps <= 1; sleeps++) {
+        uint16_t flags = WLAN_FC_TODS | (sleeps ? WLAN_FC_PWRMGT : 0);
+        header(want, WLAN_FC_TYPE_DATA << 2 | WLAN_FC_STYPE_NULLFUNC << 4 | flags, ap, sta, ap);
+        check(mgmt_null(f, sizeof(f), sta, ap, sleeps) == sizeof(want) && memcmp(f, want, sizeof(want)) == 0,
+              sleeps ? "a Null frame as the station sleeps" : "a Null frame as the station stays awake");
+    }
+    FITS_ONLY(sizeof(want), "a Null frame written only into a buffer it fits", mgmt_null(g, size, sta, ap, 1));
+}
+
+/* The access point's beacon told by its subtype and addresses, every cut short of its fixed fields refused. */
+static void beacon_of(void)
+{
+    uint8_t f[256];
+    uint32_t len = announcement(f, WLAN_FC_STYPE_BEACON, broadcast, "rvuos", 6);
+    check(mgmt_beacon_of(f, len, ap), "the access point's beacon told");
+    check(!mgmt_beacon_of(f, len, other), "another's beacon refused");
+    for (uint32_t cut = 0; cut < len; cut++) {
+        uint8_t *copy = malloc(cut ? cut : 1);
+        memcpy(copy, f, cut);
+        if (mgmt_beacon_of(copy, cut, ap) != (cut >= ANNOUNCED)) {
+            printf("mgmt-test: FAIL the access point's beacon cut at %u bytes\n", cut);
+            failures++;
+        }
+        free(copy);
+    }
+    len = announcement(f, WLAN_FC_STYPE_PROBE_RESP, sta, "rvuos", 6);
+    check(!mgmt_beacon_of(f, len, ap), "a probe response not taken for a beacon");
+    len = header(f, WLAN_FC_TYPE_DATA << 2 | WLAN_FC_STYPE_DATA << 4 | WLAN_FC_FROMDS, broadcast, ap, ap);
+    memset(f + len, 0, ANNOUNCED - len);
+    check(!mgmt_beacon_of(f, ANNOUNCED, ap), "a data frame not taken for a beacon");
+}
+
 static uint32_t reason_frame(uint8_t *f, uint16_t stype, const uint8_t *da, const uint8_t *sa, const uint8_t *bssid,
                              uint16_t reason_code)
 {
@@ -717,6 +753,8 @@ int main(void)
     assoc_request();
     assoc_answer();
     deauth();
+    null_frame();
+    beacon_of();
     let_go();
     let_go_policy();
     sa_query();

@@ -201,6 +201,13 @@ const char *mac_tx(const uint8_t *frame, uint32_t len);
  */
 const char *mac_tx_key(const uint8_t *frame, uint32_t len, uint32_t keyslot);
 
+/*
+ * The PHY kept to the chip's temperature, drv_phy_track, between two frames, at most once a second:
+ * the sending's lock is held around it, so that no frame is on the air while libphy corrects the RF,
+ * and each rate's power is asked again after.
+ */
+void mac_phy_track(void);
+
 /* What the sending met since the start, for the log; the sending alone writes it, under its lock. */
 #define MAC_TX_RATES 9u
 struct mac_tx_counts {

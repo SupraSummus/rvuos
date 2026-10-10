@@ -72,6 +72,13 @@ void drv_phy_off(void);
 void drv_phy_enable(void); /* the PHY and Wi-Fi's part of it */
 void drv_phy_disable(void);
 void drv_phy_channel(uint32_t channel);
+/* The PHY kept to the temperature, once a second while the station is joined; see phy.c. */
+void drv_phy_track(void);
+struct drv_phy_tracks {
+    uint32_t count; /* the trackings made */
+    uint32_t most;  /* the core's cycles the costliest took */
+};
+extern struct drv_phy_tracks drv_phy_tracks;
 void drv_wifi_clock_enable(void);
 void drv_wifi_reset_mac(void);
 

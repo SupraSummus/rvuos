@@ -444,6 +444,28 @@ uint32_t mgmt_data(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t 
     return MGMT_DATA_FIXED + len;
 }
 
+uint32_t mgmt_null(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap, int sleeps)
+{
+    struct ieee80211_hdr *h = (struct ieee80211_hdr *)f;
+    if (size < IEEE80211_HDRLEN) {
+        return 0;
+    }
+    memset(f, 0, IEEE80211_HDRLEN);
+    h->frame_control = IEEE80211_FC(WLAN_FC_TYPE_DATA, WLAN_FC_STYPE_NULLFUNC) |
+                       host_to_le16(WLAN_FC_TODS | (sleeps ? WLAN_FC_PWRMGT : 0));
+    memcpy(h->addr1, ap, ETH_ALEN);
+    memcpy(h->addr2, sta, ETH_ALEN);
+    memcpy(h->addr3, ap, ETH_ALEN);
+    return IEEE80211_HDRLEN;
+}
+
+int mgmt_beacon_of(const uint8_t *f, uint32_t len, const uint8_t *ap)
+{
+    const struct ieee80211_mgmt *m = (const struct ieee80211_mgmt *)f;
+    return subtype(f, len, BEACON_FIXED) == WLAN_FC_STYPE_BEACON && memcmp(m->sa, ap, ETH_ALEN) == 0 &&
+           memcmp(m->bssid, ap, ETH_ALEN) == 0;
+}
+
 int mgmt_data_read(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap, struct mgmt_payload *p)
 {
     const struct ieee80211_hdr *h = (const struct ieee80211_hdr *)f;

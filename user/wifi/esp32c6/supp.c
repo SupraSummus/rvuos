@@ -38,6 +38,12 @@ static struct {
     u8 ssid[SSID_MAX_LEN];
     size_t ssid_len;
     char pass[65];
+    /*
+     * What the network's SSID and passphrase alone derive, kept while the network stays the same, so that the
+     * station that joins again derives neither anew: WPA2's PMK, if pmk_set, and SAE's password element, sae_pt.
+     */
+    u8 pmk[PMK_LEN];
+    int pmk_set;
 
     /* SAE with the access point being joined, by hash to element or not, and the message last built. */
     struct sae_data sae;
@@ -182,8 +188,9 @@ static const struct wpa_sm_ctx sm_ctx = {
 /* --- The PMK of a passphrase. --- */
 
 /*
- * The PMK for the passphrase, or the PSK in 64 hexadecimal digits, and the SSID, into pmk, which takes a fifth of
- * a second: 0, or -1 if pass is neither 8 to 63 characters nor 64 digits.
+ * The PMK for the passphrase, or the PSK in 64 hexadecimal digits, and the SSID, into pmk, which takes most of a
+ * second on the C6, so supp_connect keeps it for the network: 0, or -1 if pass is neither 8 to 63 characters nor
+ * 64 digits.
  */
 static int pmk_for(const char *pass, const u8 *ssid, size_t ssid_len, u8 pmk[PMK_LEN])
 {
@@ -208,11 +215,10 @@ static unsigned ms_since(struct os_reltime *start)
 /* The groups SAE takes, P-256's alone. */
 static int sae_groups[] = { 19, 0 };
 
+/* An SAE exchange's own state, its password element kept for the network's next; see supp's. */
 static void sae_free(void)
 {
     sae_clear_data(&supp.sae);
-    sae_deinit_pt(supp.sae_pt);
-    supp.sae_pt = 0;
     wpabuf_free(supp.sae_token);
     supp.sae_token = 0;
     wpabuf_free(supp.sae_msg);
@@ -380,9 +386,19 @@ int supp_init(const struct supp_link *link, const uint8_t *own)
     return 0;
 }
 
+/* What the network alone derives, forgotten, as another network or the end asks. */
+static void network_free(void)
+{
+    sae_deinit_pt(supp.sae_pt);
+    supp.sae_pt = 0;
+    forced_memzero(supp.pmk, sizeof(supp.pmk));
+    supp.pmk_set = 0;
+}
+
 void supp_deinit(void)
 {
     sae_free();
+    network_free();
     forced_memzero(supp.pass, sizeof(supp.pass));
     wpa_sm_deinit(supp.sm);
     supp.sm = 0;
@@ -444,9 +460,13 @@ int supp_connect(const struct supp_network *n, uint8_t *rsn, size_t *rsn_len, ui
         return -1;
     }
     size_t ssid_len = n->ssid_len > SSID_MAX_LEN ? 0 : n->ssid_len;
+    size_t pass_len = strnlen(n->pass, 64);
+    if (ssid_len != supp.ssid_len || os_memcmp(supp.ssid, n->ssid, ssid_len) != 0 ||
+        pass_len != os_strlen(supp.pass) || os_memcmp(supp.pass, n->pass, pass_len) != 0) {
+        network_free();
+    }
     os_memcpy(supp.ssid, n->ssid, ssid_len);
     supp.ssid_len = ssid_len;
-    size_t pass_len = strnlen(n->pass, 64);
     os_memcpy(supp.pass, n->pass, pass_len);
     supp.pass[pass_len] = 0;
 
@@ -462,14 +482,13 @@ int supp_connect(const struct supp_network *n, uint8_t *rsn, size_t *rsn_len, ui
     wpa_sm_set_ap_rsnxe(sm, n->ap_rsnx, n->ap_rsnx ? 2u + n->ap_rsnx[1] : 0);
 
     if (n->key_mgmt != WPA_KEY_MGMT_SAE) {
-        u8 pmk[PMK_LEN];
-        if (pmk_for(supp.pass, supp.ssid, ssid_len, pmk)) {
-            forced_memzero(pmk, sizeof(pmk));
+        if (!supp.pmk_set && pmk_for(supp.pass, supp.ssid, ssid_len, supp.pmk)) {
+            forced_memzero(supp.pmk, sizeof(supp.pmk));
             wpa_printf(MSG_ERROR, "supp: the passphrase is neither 8 to 63 characters nor 64 hexadecimal digits");
             return -1;
         }
-        wpa_sm_set_pmk(sm, pmk, PMK_LEN, 0, 0);
-        forced_memzero(pmk, sizeof(pmk));
+        supp.pmk_set = 1;
+        wpa_sm_set_pmk(sm, supp.pmk, PMK_LEN, 0, 0);
     }
 
     /* SAE by hash to element where the station and the access point's RSNX element allow it, which the station's says. */
