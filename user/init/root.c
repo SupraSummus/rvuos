@@ -19,8 +19,11 @@
 #include "init.h"
 #include "rvuos.h"
 
-/* The least block the root task takes, see take_untyped: the successor's pool holds a table as large as its own. */
-#define CHUNK 0x1000u
+/*
+ * The least block the root task takes, see take_untyped:
+ * the sixth halving of the least free RAM a board gives, nRF52840's 128 KiB.
+ */
+#define CHUNK 0x800u
 
 /* Initialised data, which start.S copies from behind the code before main; see user/user.ld.S. */
 static volatile uint32_t initialised[2] = { MAGIC, ~MAGIC };
@@ -42,9 +45,9 @@ void expect(const char *what, uint32_t status)
  * The Untyped it split goes each time, and what it made hangs right below the free RAM,
  * which holds on to every block.
  */
-uint32_t rest = BOOT_CAP_FREE_RAM;
+static uint32_t rest = BOOT_CAP_FREE_RAM;
 
-/* The next block as an Untyped in slot: where it lies and how large it is, at least a page. */
+/* The next block as an Untyped in slot: where it lies and how large it is, at least a chunk. */
 static void take_untyped(uint32_t slot, uint32_t *base, uint32_t *size)
 {
     uint32_t made;
@@ -55,7 +58,7 @@ static void take_untyped(uint32_t slot, uint32_t *base, uint32_t *size)
     expect("keep the upper half",
            rv_invoke(OP_CAP_MOVE, BOOT_CAP_CAPTABLE, SLOT_REST, SLOT_SPLIT, 0));
     rest = SLOT_REST;
-    expect("the block holds a page",
+    expect("the block holds a chunk",
            rv_untyped_info(slot, base, size, &made) == KERR_OK && *size >= CHUNK
                ? KERR_OK : KERR_INVALID_ARG);
 }
@@ -98,7 +101,7 @@ int main(void)
 
     expect("free ram info", rv_untyped_info(BOOT_CAP_FREE_RAM, &free_base, &free_size, &free_made));
     expect("nothing is made of the free ram yet", free_made == 0 ? KERR_OK : KERR_INVALID_ARG);
-    /* Read through a4. Every block below holds a page, which is a block no smaller than the smallest region. */
+    /* Read through a4. Every block below holds a chunk, which is a block no smaller than the smallest region. */
     expect("the layout fits the smallest region",
            rv_frame_min_size(BOOT_CAP_DATA, &min_size) == KERR_OK && CHUNK % min_size == 0
                ? KERR_OK : KERR_INVALID_ARG);
@@ -349,7 +352,7 @@ int main(void)
 
     /*
      * The timer went with the driver's pool, so it comes back in a pool of the child's memory,
-     * with the second core's threads below, for the sleeps that follow and the successor's.
+     * with the second core's threads below, for the sleeps that follow and the successor.
      */
     expect("make a pool of the child's memory again", rv_retype(SLOT_POOL_MEMORY, CAP_POOL, SLOT_POOL, &pool_base));
     expect("allocate the timer's notification again",

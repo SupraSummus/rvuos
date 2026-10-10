@@ -91,7 +91,7 @@ static __attribute__((noreturn)) void successor_main(void)
     expect("stop the root task's thread for good",
            rv_invoke(OP_TIME_BIND, SLOT_FREEZE_TIME, BOOT_CAP_THREAD, 0, 0));
     /*
-     * The successor lives in a pool of its own, so nothing keeps it from destroying the boot pool,
+     * The successor lives in a pool of the child's memory, so nothing keeps it from destroying the boot pool,
      * by a revoke below the block it was made of, which leaves the code both run where it is.
      */
     expect("destroy the boot pool, and the root task with it",
@@ -128,9 +128,9 @@ static __attribute__((noreturn)) void successor_main(void)
      */
     expect("data info", rv_frame_info(BOOT_CAP_DATA, &data_base, &data_size));
     expect("allocate the prober's watch",
-           rv_invoke(OP_POOL_ALLOC, SLOT_SUCC_POOL, CAP_NOTIFICATION, SLOT_PROBE_NTFN, 0));
+           rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_NOTIFICATION, SLOT_PROBE_NTFN, 0));
     expect("allocate the prober",
-           rv_invoke(OP_POOL_ALLOC, SLOT_SUCC_POOL, CAP_THREAD, SLOT_PROBER, BOOT_CAP_PROCESS));
+           rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_THREAD, SLOT_PROBER, BOOT_CAP_PROCESS));
     expect("configure it",
            rv_invoke(OP_THREAD_CONFIGURE, SLOT_PROBER, (uint32_t)&prober_main, data_base + data_size / 2, 0));
     expect("watch it", rv_invoke(OP_THREAD_WATCH, SLOT_PROBER, SLOT_PROBE_NTFN, BIT_FAULT, 0));
@@ -204,7 +204,7 @@ static __attribute__((noreturn)) void successor_main(void)
  */
 __attribute__((noreturn)) void hand_over(uint32_t sp)
 {
-    uint32_t base, bits;
+    uint32_t bits;
 
     puts("root: handing over\n");
     /* A thread keeps what it runs on: the root task cannot destroy the pool it lives in. */
@@ -215,14 +215,12 @@ __attribute__((noreturn)) void hand_over(uint32_t sp)
            rv_invoke(OP_CAP_DERIVE, BOOT_CAP_CAPTABLE, SLOT_FREEZE_TIME, BOOT_CAP_TIME, RIGHT_W));
     expect("stop the logger", rv_invoke(OP_TIME_BIND, SLOT_FREEZE_TIME, SLOT_LOGGER, 0, 0));
 
-    expect("make the successor's pool of what is left of the free ram",
-           rv_retype(rest, CAP_POOL, SLOT_SUCC_POOL, &base));
     expect("allocate the successor's table",
-           rv_invoke(OP_POOL_ALLOC, SLOT_SUCC_POOL, CAP_CAPTABLE, SLOT_SUCC_TABLE, ROOT_TABLE_SLOTS));
+           rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_CAPTABLE, SLOT_SUCC_TABLE, ROOT_TABLE_SLOTS));
     expect("allocate the successor's process",
-           rv_invoke(OP_POOL_ALLOC, SLOT_SUCC_POOL, CAP_PROCESS, SLOT_SUCC_PROCESS, SLOT_SUCC_TABLE));
+           rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_PROCESS, SLOT_SUCC_PROCESS, SLOT_SUCC_TABLE));
     expect("allocate the successor's thread",
-           rv_invoke(OP_POOL_ALLOC, SLOT_SUCC_POOL, CAP_THREAD, SLOT_SUCC_THREAD, SLOT_SUCC_PROCESS));
+           rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_THREAD, SLOT_SUCC_THREAD, SLOT_SUCC_PROCESS));
     expect("map the successor's code",
            rv_invoke(OP_PROCESS_INSTALL, SLOT_SUCC_PROCESS, 0, BOOT_CAP_CODE, RIGHT_R | RIGHT_X));
     expect("map the successor's data",

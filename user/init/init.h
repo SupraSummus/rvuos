@@ -49,8 +49,7 @@ enum {
     SLOT_CAPPED_TIME,   /* the same units without spare time, derived from those */
     SLOT_FREEZE_TIME,   /* every unit without spare time, to stop a thread for good */
     SLOT_EXIT_NTFN,     /* what the root task waits on once it has handed everything over */
-    SLOT_SUCC_POOL,     /* the successor's pool, table, process and thread */
-    SLOT_SUCC_TABLE,
+    SLOT_SUCC_TABLE,    /* the successor's table, process and thread, in the child's memory's pool */
     SLOT_SUCC_PROCESS,
     SLOT_SUCC_THREAD,
     SLOT_REST,          /* what is left of the free RAM, which the next block is taken from */
@@ -156,9 +155,6 @@ static inline void puts(const char *s)
 
 /* Say what was done and whether it went through, and halt the machine if it did not. */
 void expect(const char *what, uint32_t status);
-
-/* The slot of what is left of the free RAM; see root.c. */
-extern uint32_t rest;
 
 /* The timer's bit, and it alone, on its notification. */
 uint32_t timer_wait(void);
