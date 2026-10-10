@@ -3,7 +3,7 @@
 
 The command after -- boots the system and waits for its halt, printing what the board writes.
 On a Pico 2 W, as `make BOARD=rp2350 wifi` runs it, this asks for the log on UDP port 7070, see user/wifi/wifi.h,
-and once the log says the clients answer, checks the status port, the echo, the clock,
+and once the log says the clients answer, checks the status port, the echo, the echo's throughput, the clock,
 the echo built again after a fault and after a hang, and ping.
 With --console, as `make BOARD=esp32c6 wifi-esp32c6` runs it, the command's output is the log
 and its input reaches the root task: once the log says the clients answer, this checks the same, but for the logger,
@@ -257,6 +257,47 @@ class Checks:
             detail += f", median {statistics.median(times):.1f} ms"
         self.result("echo", lost == 0, detail)
 
+    def throughput(self, seconds=5.0, size=1024, window=2, wait=0.5):
+        """Datagrams of size bytes to the echo, window of them in flight, for seconds: the bytes that came back a
+        second, each way, which the slower of the two ways bounds; one not back within wait is lost.
+        Two in flight keep the ESP32-C6's sending busy, as one does not; more only lose more."""
+        self.sock.setblocking(False)
+        try:
+            while True:
+                self.sock.recvfrom(2048)
+        except BlockingIOError:
+            pass
+        out, times, sent, back, lost = {}, [], 0, 0, 0
+        start = time.perf_counter()
+        while True:
+            now = time.perf_counter()
+            for n, t in list(out.items()):
+                if now - t > wait:
+                    del out[n]
+                    lost += 1
+            if now - start < seconds:
+                while len(out) < window:
+                    self.sock.sendto((b"T%07d" % sent).ljust(size, b"t"), (self.ip, ECHO_PORT))
+                    out[sent] = time.perf_counter()
+                    sent += 1
+            elif not out:
+                break
+            self.sock.settimeout(0.05)
+            try:
+                got, frm = self.sock.recvfrom(2048)
+            except socket.timeout:
+                continue
+            n = int(got[1:8]) if frm == (self.ip, ECHO_PORT) and len(got) == size and got[:1] == b"T" else None
+            if n in out:
+                times.append((time.perf_counter() - out.pop(n)) * 1000)
+                back += 1
+        took = time.perf_counter() - start
+        detail = (f"{back} of {sent} datagrams of {size} bytes back in {took:.1f} s, "
+                  f"{back * size * 8 / took / 1000:.0f} kb/s each way, {lost} lost")
+        if times:
+            detail += f", median {statistics.median(times):.1f} ms"
+        self.result("throughput", back > 0, detail)
+
     def clock(self):
         got, _ = self.ask_again(CLOCK_PORT, b"time?", 5)
         ok = got is not None and re.match(rb"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC\n$", got) is not None
@@ -289,6 +330,7 @@ class Checks:
     def run(self, then):
         self.status()
         self.echo()
+        self.throughput()
         self.clock()
         self.echo_back("echo after a fault", b"fault", ECHO_FAULTED, 5)
         self.echo_back("echo after a hang", b"hang", ECHO_HUNG, 6)

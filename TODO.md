@@ -177,9 +177,12 @@ what is left:
   and the supplicant's a bounded arena of its own, or fixed buffers over a P-256 of fixed width.
 - The ESP32-C6's Wi-Fi root task has 8 KiB of memory and 9 slots left once its clients run,
   so another client needs room found first, in the driver's block or a smaller `CLIENT_CHAN_SIZE`.
-- The ESP32-C6's echo answers in about 6 ms at the median, the Pico 2 W's in about 5:
-  where the time goes, the radio at 1 Mb/s, the software CCMP, or the driver's turn after its interrupt, open decision 9,
-  is not measured.
+- The ESP32-C6's echo answers in about 6 ms at the median, the Pico 2 W's in about 5,
+  and `tools/wifi-run.py`'s throughput check sees the C6 carry about a sixth of what the Pico 2 W does,
+  more datagrams in flight than two only losing more:
+  where the time goes, the radio sending at 1 Mb/s, the software CCMP, the frame's completion spun in the caller's
+  thread, or the driver's turn after its interrupt, open decision 9, is not measured;
+  the radio's own rate is the first to raise, with a rate control, see the profile above.
 - The Pico 2 W's run lasts its `run=` whatever its checks found, or until a reset by hand,
   since the host has no way to end it: its USB serial port, `kernel/board/rp2350/cdc.c`, is the halt's alone.
   That port kept up while the run lasts would let the host end it there, in either mode,
