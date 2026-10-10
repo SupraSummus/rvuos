@@ -389,7 +389,12 @@ How the MAC makes an address of it is not known;
 read back as their 0x4086e138 is, as 0x0086e138, without bit 30, it would be 0x40800000, `__ram_start`, the kernel's
 `_start`.
 
-Of the start's calls after the hardware's, their `wifi_mode_set` and `_do_wifi_start` are not written out:
-they carry net80211's state -- offsets into their control block, and a static of `ieee80211_sta.o` this driver cannot
-name -- for little device work, one TSF word and `ic_set_vif`, so they stay calls.
-Whether the driver wants net80211's state after the start at all is open.
+Of the start's calls after the hardware's, their `wifi_mode_set` and `_do_wifi_start` are the driver's own now:
+`mac_station_start` makes their hardware accesses in their order -- the low-rate disable, the STA's TSF,
+interface 0's address and its access point's, its receive policy with its own flags set and its queue policy left
+clear, the receive enable, and the cipher's own entry clear -- and posts their STA_START through the adapter.
+None of net80211's own state -- the control block's vif words and `ieee80211_sta.o`'s static -- is written,
+and the ordinary runs hold it: the scan, `listen=`, `listen=` with `probe=`, and the gate's three joins,
+with no library line reaching the driver after the start.
+So the state these two calls set is not wanted;
+whether the rest is -- what `esp_wifi_init_internal`, `chm_init` and `ieee80211_set_hmac_stop` set -- is open.

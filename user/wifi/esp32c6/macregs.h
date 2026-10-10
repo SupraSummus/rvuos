@@ -18,6 +18,10 @@
 #define RX_CTRL_HW_BEACON_RELOAD 0x08000000u /* the receive buffer's reload by the hardware beacon; see macstart.c */
 #define RX_BASE        (MAC_BASE + 0x084u) /* the descriptor list the MAC fills, which mac.c points at the driver's own */
 #define RX_WORD        (MAC_BASE + 0x98u)
+/* The STA's TSF and its wakeups (their hal_enable_sta_tsf, and the stop), and the cipher entries' valid bits
+   (their hal_crypto_disable, and mac.c's own keys): both reached from mac.c and macstart.c. */
+#define TSF_CTRL  0x600ad050u
+#define KEY_VALID 0x600a4814u
 
 #define HAL_CTRL 0x600a4308u /* hal_deinit's four; what they are is pp's, and no driver code reads them */
 #define HAL_HOLD 0x600a4c40u

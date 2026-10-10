@@ -100,10 +100,11 @@ void mac_rx_on(void);
  * and the coex PTI bytes through the two pointers; see macstart.c.
  */
 void mac_config(uint32_t (*slowclk_cal_get)(void), int (*coex_pti_get)(uint32_t event, uint8_t *pti));
+void mac_station_start(const uint8_t sta[6], void (*sta_start)(void));
 void mac_config_start(void);
 void mac_rx_policy_word(uint32_t iface);
 void mac_config_finish(void);
-void mac_rx_set_policy(uint32_t iface);
+void mac_rx_set_policy(uint32_t iface, uint32_t valid);
 void mac_queues_init(void);
 void mac_rx_base_init(void);
 void mac_he_init(void);

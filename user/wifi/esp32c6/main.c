@@ -388,8 +388,6 @@ static __attribute__((noreturn)) void attend(struct drv *d)
  */
 extern int wifi_init_completed(void);
 extern void ieee80211_set_hmac_stop(int stop);
-extern int wifi_mode_set(int mode);
-extern int _do_wifi_start(int mode);
 extern void chm_init(void *chm);
 
 extern void wDev_ProcessFiq(void);   /* pp: their interrupt handler, which they install for the MAC's source */
@@ -466,6 +464,12 @@ static int drv_hw_start(void)
     return ESP_OK;
 }
 
+/* The STA_START their wifi_station_start posts, through the adapter, which logs it and sets the group's bit. */
+static void sta_start_post(void)
+{
+    funcs->event_post("WIFI_EVENT", WIFI_EVENT_STA_START, 0, 0, 0);
+}
+
 static int drv_wifi_start(void)
 {
     if (!wifi_init_completed()) {
@@ -480,12 +484,11 @@ static int drv_wifi_start(void)
     if ((rv = drv_hw_start()) != 0) {
         return rv;
     }
-    if ((rv = wifi_mode_set(mode)) != 0) {
-        return rv;
-    }
-    if ((rv = _do_wifi_start(mode)) != 0) {
-        return rv;
-    }
+    /*
+     * The libraries' wifi_mode_set and _do_wifi_start, the driver's own now: the station's start's hardware
+     * accesses and the STA_START event, with none of net80211's own state. See macstart.c and NOTES.md.
+     */
+    mac_station_start(drv_self->mac, sta_start_post);
     ((uint8_t *)g_ic)[0x1f1] = 2;
     /*
      * The libraries' ieee80211_update_phy_country, written out: its guard on the byte the write above sets, met at

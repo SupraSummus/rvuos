@@ -170,10 +170,12 @@ void mac_rx_policy_word(uint32_t iface)
  * after the word above: the policy's 0x410 and 0x40 cleared (together RX_POLICY_CLEAR),
  * the interface's bssid word's bits 30 and 31 cleared, but interface 1's bit 30 set, IF1_DEFAULT_BIT,
  * and its own address made invalid, STA_ADDR_FLAG, as its bssid is, BSSID_FLAG.
- * Their function takes three flags beyond the interface, zero here, and touches nothing for interface 3;
- * their station's own call, hal_mac_rx_set_policy(0, 1, 1, 1), is mac_receive's.
+ * Their station's own call, hal_mac_rx_set_policy(0, 1, 1, 1), is the same with valid: its last two accesses set
+ * the two flags rather than clear them, and mac_station_start makes it, for interface 0.
+ * Their function takes three flags beyond the interface, zero in hal_init's loop and 1, 1, 1 in the station's call,
+ * and touches nothing for interface 3.
  */
-void mac_rx_set_policy(uint32_t iface)
+void mac_rx_set_policy(uint32_t iface, uint32_t valid)
 {
     if (iface > 2u) {
         return; /* their function returns for interface 3, touching nothing */
@@ -189,8 +191,13 @@ void mac_rx_set_policy(uint32_t iface)
         wr(w, rd(w) & ~BSSID_HI_POLICY);
     }
     wr(p, rd(p) & ~0x40u);
-    wr(w, rd(w) & ~BSSID_FLAG);
-    wr(a, rd(a) & ~STA_ADDR_FLAG);
+    if (valid) {
+        wr(w, rd(w) | BSSID_FLAG);
+        wr(a, rd(a) | STA_ADDR_FLAG);
+    } else {
+        wr(w, rd(w) & ~BSSID_FLAG);
+        wr(a, rd(a) & ~STA_ADDR_FLAG);
+    }
 }
 
 /*
@@ -350,7 +357,7 @@ static void mac_he_clr_multi_bssid(void)
     mac_rxq_policy(2u, 0u);
     mac_bssid_set(2u, zero);
     mac_addr_set(2u, zero);
-    mac_rx_set_policy(2u);
+    mac_rx_set_policy(2u, 0);
     wr(MAC_CONF(1), rd(MAC_CONF(1)) & ~0x100u);
     wr(MAC_CONF(1), rd(MAC_CONF(1)) | 0x1fe00u);
     wr(MAC_CONF(1), rd(MAC_CONF(1)) & ~0xffu);
@@ -765,6 +772,32 @@ void mac_ofdma_sequence_pti(const uint8_t pti[12])
     (void)rd(OFDMA_PTI_W1);
 }
 
+/*
+ * The libraries' wifi_mode_set and _do_wifi_start, written out for the station's fresh start, so that their two
+ * entry points go: their wifi_mode_set's low-rate disable, then their _do_wifi_start's wifi_station_start --
+ * the STA's TSF on, interface 0's address and its access point's, its receive policy with its own flags set and
+ * its queue policy left clear, the receive enabled, and their cipher's own entry cleared -- with their STA_START
+ * posted through the adapter, which main.c waits on. Only the hardware's accesses are here: none of net80211's own
+ * state, its control block's vif words and statics, is written, and the ordinary runs hold that it is not wanted.
+ * See NOTES.md.
+ */
+void mac_station_start(const uint8_t sta[6], void (*sta_start)(void))
+{
+    mac_low_rate_disable();
+    wr(TSF_CTRL, rd(TSF_CTRL) | 0x88000000u);
+    wr(TSF_CTRL, (rd(TSF_CTRL) & 0xff87ffffu) | 0x00080000u);
+    mac_addr_set(0, sta);
+    mac_bssid_set(0, sta);
+    mac_rx_set_policy(0, 1);
+    mac_rxq_policy(0, 0);
+    wr(RX_CTRL, rd(RX_CTRL) | RX_CTRL_ENABLE);
+    wr(CRYPTO_BASE, 0x30000u);
+    /* their wDev_Crypto_Disable passes hal_crypto_disable the mask their wdev wrote for the interface;
+       the word reads 0 in the start, so the write returns what it read. */
+    wr(KEY_VALID, rd(KEY_VALID));
+    sta_start();
+}
+
 /* The adapter's trace, the driver's own, which names the segments between the groups; declared here rather than
    through osi.h, which pulls what the host does not build. The replay test leaves it a no-op. */
 extern void osi_trace(const char *what, uint32_t a0, uint32_t a1);
@@ -789,7 +822,7 @@ void mac_config(uint32_t (*slowclk_cal_get)(void), int (*coex_pti_get)(uint32_t,
     osi_trace("mac-policy", 0, 0);
     for (uint32_t i = 0; i < 4u; i++) {
         mac_rx_policy_word(i);
-        mac_rx_set_policy(i);
+        mac_rx_set_policy(i, 0);
     }
     osi_trace("mac-rxbuf", 0, 0);
     mac_rx_base_init();

@@ -45,9 +45,6 @@
 #define TX_BLOCK_ALL     0x00ff1000u
 #define TX_BLOCK_BUSY    0x00006000u /* still busy */
 
-/* The stop's words, as the libraries' own functions write them; see own_wifi_stop. */
-#define TSF_CTRL    0x600ad050u /* the STA's TSF and its wakeups, which hal_disable_sta_tsf clears */
-
 #define DESC_SIZE(f)   ((f) & 0x3fffu)
 #define DESC_LEN(f)    ((f) >> 14 & 0x3fffu)
 #define DESC_LEN_SHIFT 14
@@ -111,7 +108,6 @@ void mac_station(const uint8_t sta[6], const uint8_t bssid[6])
  */
 #define KEY_BASE   0x600a5800u
 #define KEY_STRIDE 0x28u
-#define KEY_VALID  0x600a4814u
 
 void mac_key_set(uint32_t entry, const uint8_t addr[6], uint8_t id, const uint8_t tk[16])
 {
