@@ -56,55 +56,65 @@ int cap_slot_free(const struct captable *table, uint32_t slot)
     return KERR_OK;
 }
 
-/* The node a link names, the tag stripped. */
-static inline struct cap *node(uint32_t link)
+/* The node a link names, which is not 0. */
+static inline struct cap *node(uint16_t link)
 {
-    return p2v(link & ~LINK_UP);
+    return link_node(link);
 }
 
 /* The sibling after a node that has a parent, the first one after the last. */
 static struct cap *ring_next(const struct cap *n)
 {
-    return (n->next & LINK_UP) ? node(node(n->next)->child) : node(n->next);
+    return n->up ? node(node(n->next)->child) : node(n->next);
+}
+
+/* A root: in no ring. */
+static inline void make_root(struct cap *n)
+{
+    n->next = 0;
+    n->up = 1;
+    n->prev = 0;
 }
 
 void cap_attach(struct cap *parent, struct cap *n)
 {
     n->child = 0;
     if (parent == NULL) {
-        n->next = LINK_UP;
-        n->prev = 0;
+        make_root(n);
         return;
     }
     /* At the front of the ring; the last child keeps the link up to the parent. */
     if (parent->child == 0) {
-        n->next = v2p(parent) | LINK_UP;
-        n->prev = v2p(n);
+        n->next = node_link(parent);
+        n->up = 1;
+        n->prev = node_link(n);
     } else {
         struct cap *first = node(parent->child);
         n->next = parent->child;
+        n->up = 0;
         n->prev = first->prev;
-        first->prev = v2p(n);
+        first->prev = node_link(n);
     }
-    parent->child = v2p(n);
+    parent->child = node_link(n);
 }
 
 /* Put the siblings first to last right after beside, which has a parent, in its ring. */
 static void splice_after(struct cap *beside, struct cap *first, struct cap *last)
 {
-    ring_next(beside)->prev = v2p(last);
+    ring_next(beside)->prev = node_link(last);
     last->next = beside->next;
-    first->prev = v2p(beside);
-    beside->next = v2p(first);
+    last->up = beside->up;
+    first->prev = node_link(beside);
+    beside->next = node_link(first);
+    beside->up = 0;
 }
 
 /* Right after beside in its ring, so under the same parent. Roots have no ring: beside a root, a root. */
 static void attach_beside(struct cap *beside, struct cap *n)
 {
     n->child = 0;
-    if (beside->next == LINK_UP) {
-        n->next = LINK_UP;
-        n->prev = 0;
+    if (node_root(beside)) {
+        make_root(n);
         return;
     }
     splice_after(beside, n, n);
@@ -120,21 +130,23 @@ void cap_move(struct cap *from, struct cap *to)
      * An only child is its own predecessor and successor, and a root is in no ring.
      */
     *to = *from;
-    if (from->next != LINK_UP) {
+    if (!node_root(from)) {
         struct cap *pred = node(from->prev);
         if (pred == from) {
-            to->prev = v2p(to);
+            to->prev = node_link(to);
         } else {
-            ring_next(from)->prev = v2p(to);
+            ring_next(from)->prev = node_link(to);
         }
-        if (pred->next & LINK_UP) {
-            node(pred->next)->child = v2p(to);
+        if (pred->up) {
+            node(pred->next)->child = node_link(to);
         } else {
-            pred->next = v2p(to);
+            pred->next = node_link(to);
         }
     }
     if (from->child != 0) {
-        node(node(from->child)->prev)->next = v2p(to) | LINK_UP;
+        struct cap *last = node(node(from->child)->prev);
+        last->next = node_link(to);
+        last->up = 1;
     }
     *from = (struct cap){ 0 };
 }
@@ -194,10 +206,11 @@ static void detach(struct cap *n, bool adopt)
     struct cap *pred = node(n->prev);
     ring_next(n)->prev = n->prev;
     /* n is first exactly when its predecessor links up: it is the last child then, or n itself. */
-    if (pred->next & LINK_UP) {
-        node(pred->next)->child = (n->next & LINK_UP) ? 0 : n->next;
+    if (pred->up) {
+        node(pred->next)->child = n->up ? 0 : n->next;
     } else {
         pred->next = n->next;
+        pred->up = n->up;
     }
 }
 
@@ -267,7 +280,7 @@ bool cap_revoke_below(struct cap *root, const struct cap *through, bool preempt)
 
 bool cap_delete(struct cap *n, bool preempt)
 {
-    if (n->next != LINK_UP) {
+    if (!node_root(n)) {
         detach(n, true);
         clear_node(n);
         return true;
@@ -277,8 +290,7 @@ bool cap_delete(struct cap *n, bool preempt)
         LOOP_PAID(cap_delete, link, "a child below a root, which becomes a root itself");
         struct cap *c = node(n->child);
         detach(c, false);
-        c->next = LINK_UP;
-        c->prev = 0;
+        make_root(c);
         if (n->child != 0 && cap_stop_here(preempt)) {
             return false;
         }

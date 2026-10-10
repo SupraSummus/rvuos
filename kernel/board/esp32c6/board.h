@@ -32,6 +32,8 @@
 #define BOOT_POOL_BASE U32(0x4083A000)
 #define FREE_RAM_BASE  U32(0x40840000)
 #define FREE_RAM_SIZE  U32(0x00040000)
+/* The derivation tree's nodes lie in RAM, all 512 KiB of it; see struct cap. */
+#define NODE_WINDOW_BASE RAM_BASE
 
 /*
  * A misaligned store checks its second word for reading unless a store follows it,

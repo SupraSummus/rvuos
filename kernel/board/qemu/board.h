@@ -9,7 +9,7 @@
  * The kernel owns [RAM_BASE, USER_CODE_BASE).
  * The root task's memory follows, one block holding its code, data and input regions
  * and the boot pool its kernel objects live in,
- * and the upper half of RAM is handed to the root task as free RAM.
+ * and the 256 KiB right above it are handed to the root task as free RAM, see FREE_RAM_BASE.
  * Each is a block aligned to its own size; what lies in none of them is left unused.
  */
 #define RAM_BASE       U32(0x80000000)
@@ -24,8 +24,14 @@
 #define INPUT_BASE     U32(0x80120000)
 #define INPUT_SIZE     U32(0x00010000)
 #define BOOT_POOL_BASE U32(0x80130000)
-#define FREE_RAM_BASE  U32(0x80400000)
-#define FREE_RAM_SIZE  U32(0x00400000)
+/*
+ * The free RAM lies right above the root task's memory,
+ * in the 512 KiB from its base where the derivation tree's nodes lie, see struct cap;
+ * the RAM above it is left unused.
+ */
+#define FREE_RAM_BASE  U32(0x80140000)
+#define FREE_RAM_SIZE  U32(0x00040000)
+#define NODE_WINDOW_BASE ROOT_RAM_BASE
 
 /* A misaligned store is checked for writing throughout; see the ESP32-C6's board.h. */
 #define PMP_SPLIT_STORE_AS_READ 0

@@ -32,6 +32,9 @@
 /* The boot pool, where the kernel builds the root task's objects. */
 #define BOOT_POOL_SIZE U32(0x00001000)
 
+/* The window every node of the derivation tree lies in, from the board's NODE_WINDOW_BASE; see struct cap. */
+#define NODE_WINDOW_SIZE U32(0x00080000)
+
 #ifndef __ASSEMBLER__
 /* The root task's memory holds its code, data and input regions and the boot pool, in that order. */
 _Static_assert(ROOT_RAM_BASE <= USER_CODE_BASE && USER_CODE_BASE + USER_CODE_SIZE <= USER_DATA_BASE &&
@@ -57,6 +60,16 @@ _Static_assert(ROOT_RAM_BASE <= USER_CODE_BASE && USER_CODE_BASE + USER_CODE_SIZ
 #ifndef __ASSEMBLER__
 _Static_assert(!PMP_SPLIT_STORE_AS_READ || USER_DATA_BASE + USER_DATA_SIZE < INPUT_BASE,
                "the data region may not touch the input region");
+/*
+ * Every node of the derivation tree lies in the window, see struct cap,
+ * so every pool does: the boot pool, and every one a retype makes, which is refused outside it.
+ * The window's first word is never a node, so a link of 0 names none:
+ * it is the kernel's code or the root task's, or a pool descriptor's header.
+ */
+_Static_assert(BOOT_POOL_BASE >= NODE_WINDOW_BASE && BOOT_POOL_BASE + BOOT_POOL_SIZE <= NODE_WINDOW_BASE + NODE_WINDOW_SIZE &&
+                   ROOT_RAM_BASE >= NODE_WINDOW_BASE && ROOT_RAM_BASE + ROOT_RAM_SIZE <= NODE_WINDOW_BASE + NODE_WINDOW_SIZE &&
+                   FREE_RAM_BASE >= NODE_WINDOW_BASE && FREE_RAM_BASE + FREE_RAM_SIZE <= NODE_WINDOW_BASE + NODE_WINDOW_SIZE,
+               "every Untyped the boot grants lies in the window of the derivation tree's nodes");
 #endif
 
 #endif

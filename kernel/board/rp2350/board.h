@@ -30,6 +30,8 @@
 #define BOOT_POOL_BASE U32(0x20039000)
 #define FREE_RAM_BASE  U32(0x20040000)
 #define FREE_RAM_SIZE  U32(0x00040000)
+/* The derivation tree's nodes lie in RAM, all 512 KiB of it; see struct cap. */
+#define NODE_WINDOW_BASE RAM_BASE
 
 /*
  * Hazard3 does not split a misaligned access: it raises a misaligned exception instead.
