@@ -360,6 +360,8 @@ static void snap_parse(const char *conf, uint32_t len)
  * debug= names what the driver tells besides its steps, any of frames, wpa, rekey and ps, see drv.h,
  * and lib= the libraries' log level, 4 for debug and 5 for verbose;
  * pmf=0 joins without protecting management frames, and sae=0 without WPA3's SAE;
+ * qos=0 associates without QoS, amsdu=0 sends no A-MSDU, and ht=1 asks for HT, which the access point protects
+ * its frames for, at the access point here to its own cost, see NOTES.md;
  * ps=1 has the station sleep between beacons while its link is idle, IEEE 802.11's power save;
  * blast=, seconds up to 30, has it send a datagram to its UDP port 9 back to its sender as fast as it may, once,
  * a test of the sending alone.
@@ -388,6 +390,9 @@ static void configure(struct drv *p)
     p->lib_start = (uint8_t)(config_number(conf, size, "libstart", 0) != 0);
     p->no_pmf = config_number(conf, size, "pmf", 1) == 0;
     p->no_sae = config_number(conf, size, "sae", 1) == 0;
+    p->ht = config_number(conf, size, "ht", 0) != 0;
+    p->no_qos = config_number(conf, size, "qos", 1) == 0;
+    p->no_amsdu = config_number(conf, size, "amsdu", 1) == 0;
     p->ps = config_number(conf, size, "ps", 0) != 0;
     uint32_t blast = config_number(conf, size, "blast", 0);
     p->blast = (uint8_t)(blast <= 30u ? blast : 30u);

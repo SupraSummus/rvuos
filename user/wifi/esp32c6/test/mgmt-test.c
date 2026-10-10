@@ -43,6 +43,7 @@ static struct mgmt_payload payload;
 static struct mgmt_sae sae;
 static uint16_t status, aid, reason;
 static uint32_t comeback;
+static int qos_taken;
 static int again;
 static long rsn_at, rsnx_at, src_at, body_at, sae_at;
 
@@ -62,7 +63,7 @@ static int reads(enum reader r, const uint8_t *f, uint32_t len)
              : r == PROBE_ANSWER ? mgmt_probe_answer(copy, len, sta, "rvuos", &b, &again)
              : r == AUTH_ANSWER  ? mgmt_auth_answer(copy, len, sta, ap, &status)
              : r == SAE          ? mgmt_sae_read(copy, len, sta, ap, &sae)
-             : r == ASSOC_ANSWER ? mgmt_assoc_answer(copy, len, sta, ap, &status, &aid, &comeback)
+             : r == ASSOC_ANSWER ? mgmt_assoc_answer(copy, len, sta, ap, &status, &aid, &comeback, &qos_taken)
              : r == LET_GO       ? mgmt_let_go(copy, len, sta, ap, &reason)
              : r == DATA         ? mgmt_data_read(copy, len, sta, ap, &payload)
                                  : mgmt_to_station(copy, len, sta, ap);
@@ -316,7 +317,7 @@ static void assoc_request(void)
 {
     uint8_t f[MGMT_ASSOC_MAX], want[28];
     struct ieee802_11_elems elems;
-    uint32_t len = mgmt_assoc_request(f, sizeof(f), sta, ap, "rvuos", rsn, rsnx);
+    uint32_t len = mgmt_assoc_request(f, sizeof(f), sta, ap, "rvuos", rsn, rsnx, 0);
     uint32_t n = header(want, FC(WLAN_FC_STYPE_ASSOC_REQ), ap, sta, ap);
     WPA_PUT_LE16(want + n, WLAN_CAPABILITY_ESS | WLAN_CAPABILITY_PRIVACY);
     WPA_PUT_LE16(want + n + 2, 3);
@@ -326,15 +327,37 @@ static void assoc_request(void)
     check(ieee802_11_parse_elems(f + 28, len - 28, &elems, 1) == ParseOK && elems.supp_rates_len == 8 &&
               elems.ext_supp_rates_len == 4 && elems.rsn_ie && elems.rsn_ie_len == rsn[1] &&
               memcmp(elems.rsn_ie, rsn + 2, rsn[1]) == 0 && elems.rsnxe && elems.rsnxe_len == rsnx[1] &&
-              elems.rsnxe > elems.rsn_ie,
+              elems.rsnxe > elems.rsn_ie && !elems.ht_capabilities && !elems.wmm,
           "an association request's rates, then its RSN and RSNX elements");
     FITS_ONLY(len, "an association request written only into a buffer it fits",
-              mgmt_assoc_request(g, size, sta, ap, "rvuos", rsn, rsnx));
+              mgmt_assoc_request(g, size, sta, ap, "rvuos", rsn, rsnx, 0));
 
-    len = mgmt_assoc_request(f, sizeof(f), sta, ap, "rvuos", 0, 0);
+    /* With HT: its capabilities after the RSN element, and WMM's information, which a QoS station sends, last. */
+    len = mgmt_assoc_request(f, sizeof(f), sta, ap, "rvuos", rsn, rsnx, MGMT_ASSOC_HT);
+    const struct ieee80211_ht_capabilities *ht = 0;
+    int parsed = ieee802_11_parse_elems(f + 28, len - 28, &elems, 1) == ParseOK && elems.ht_capabilities &&
+                 elems.ht_capabilities[-1] == sizeof(*ht) && elems.wmm && elems.wmm_len == 7;
+    ht = parsed ? (const struct ieee80211_ht_capabilities *)elems.ht_capabilities : 0;
+    check(ht && le_to_host16(ht->ht_capabilities_info) == (HT_CAP_INFO_SMPS_DISABLED | HT_CAP_INFO_SHORT_GI20MHZ) &&
+              ht->supported_mcs_set[0] == 0xff && ht->supported_mcs_set[1] == 0 && ht->a_mpdu_params == 0,
+          "an HT association request's capabilities: 20 MHz, MCS 0 to 7, the short guard interval");
+    check(parsed && elems.wmm[3] == WMM_OUI_TYPE && elems.wmm[4] == WMM_OUI_SUBTYPE_INFORMATION_ELEMENT &&
+              elems.wmm[5] == WMM_VERSION && elems.wmm[6] == 0 && elems.ht_capabilities > elems.rsn_ie &&
+              elems.wmm > elems.rsnxe,
+          "and WMM's information, no U-APSD, after the RSNX element");
+    FITS_ONLY(len, "an HT association request written only into a buffer it fits",
+              mgmt_assoc_request(g, size, sta, ap, "rvuos", rsn, rsnx, MGMT_ASSOC_HT));
+
+    /* QoS alone: WMM's information, and no HT capabilities. */
+    len = mgmt_assoc_request(f, sizeof(f), sta, ap, "rvuos", rsn, rsnx, MGMT_ASSOC_QOS);
+    check(ieee802_11_parse_elems(f + 28, len - 28, &elems, 1) == ParseOK && !elems.ht_capabilities && elems.wmm &&
+              elems.wmm_len == 7,
+          "a QoS association request: WMM's information, without HT's capabilities");
+
+    len = mgmt_assoc_request(f, sizeof(f), sta, ap, "rvuos", 0, 0, 0);
     check(len == 28 + 7 + 10 + 6 && WPA_GET_LE16(f + 24) == WLAN_CAPABILITY_ESS,
           "an association request without elements to an open network, its privacy not said");
-    len = mgmt_assoc_request(f, sizeof(f), sta, ap, "rvuos", rsn, 0);
+    len = mgmt_assoc_request(f, sizeof(f), sta, ap, "rvuos", rsn, 0, 0);
     check(ieee802_11_parse_elems(f + 28, len - 28, &elems, 1) == ParseOK && elems.rsn_ie && !elems.rsnxe,
           "an association request with an RSN element alone");
 
@@ -346,11 +369,48 @@ static void assoc_request(void)
     big_rsn[1] = 255;
     big_rsnx[0] = WLAN_EID_RSNX;
     big_rsnx[1] = 255;
-    check(mgmt_assoc_request(f, sizeof(f), sta, ap, "0123456789abcdef0123456789abcdef", big_rsn, big_rsnx) ==
+    check(mgmt_assoc_request(f, sizeof(f), sta, ap, "0123456789abcdef0123456789abcdef", big_rsn, big_rsnx,
+                             MGMT_ASSOC_HT) ==
               MGMT_ASSOC_MAX,
-          "an association request for 32 bytes with the largest elements, the largest");
-    check(mgmt_assoc_request(f, sizeof(f), sta, ap, "0123456789abcdef0123456789abcdefX", rsn, rsnx) == 0,
+          "an HT association request for 32 bytes with the largest elements, the largest");
+    check(mgmt_assoc_request(f, sizeof(f), sta, ap, "0123456789abcdef0123456789abcdefX", rsn, rsnx, 0) == 0,
           "an association request for 33 bytes refused");
+}
+
+/* An ADDBA Request read, every cut short refused, and the Response that declines it. */
+static void addba(void)
+{
+    uint8_t f[64], want[33];
+    uint32_t len = header(f, FC(WLAN_FC_STYPE_ACTION), sta, ap, ap);
+    static const uint8_t body[] = { WLAN_ACTION_BLOCK_ACK, 0, 0x17, 0x02, 0x10, 0x00, 0x00, 0x30, 0x01 };
+    memcpy(f + len, body, sizeof(body));
+    len += sizeof(body);
+    struct mgmt_addba a = { 0, 0 };
+    check(mgmt_addba_read(f, len, sta, ap, &a) && a.token == 0x17 && a.params == 0x1002,
+          "an ADDBA Request read, its token and its parameters");
+    for (uint32_t cut = 0; cut < len; cut++) {
+        uint8_t *copy = malloc(cut ? cut : 1);
+        memcpy(copy, f, cut);
+        if (mgmt_addba_read(copy, cut, sta, ap, &a)) {
+            printf("mgmt-test: FAIL an ADDBA Request cut at %u bytes read\n", cut);
+            failures++;
+        }
+        free(copy);
+    }
+    check(!mgmt_addba_read(f, len, other, ap, &a), "one to another station refused");
+    f[IEEE80211_HDRLEN + 1] = 1;
+    check(!mgmt_addba_read(f, len, sta, ap, &a), "an ADDBA Response not taken for a Request");
+    f[IEEE80211_HDRLEN + 1] = 0;
+    f[IEEE80211_HDRLEN] = WLAN_ACTION_SA_QUERY;
+    check(!mgmt_addba_read(f, len, sta, ap, &a), "another category's action refused");
+
+    a = (struct mgmt_addba){ 0x17, 0x1002 };
+    uint32_t n = header(want, FC(WLAN_FC_STYPE_ACTION), ap, sta, ap);
+    static const uint8_t answer[] = { WLAN_ACTION_BLOCK_ACK, 1, 0x17, WLAN_STATUS_REQUEST_DECLINED, 0, 0x02, 0x10, 0, 0 };
+    memcpy(want + n, answer, sizeof(answer));
+    check(mgmt_addba_decline(f, sizeof(f), sta, ap, &a) == sizeof(want) && memcmp(f, want, sizeof(want)) == 0,
+          "the ADDBA Response that declines it, its token and parameters echoed");
+    FITS_ONLY(sizeof(want), "an ADDBA Response written only into a buffer it fits", mgmt_addba_decline(g, size, sta, ap, &a));
 }
 
 static uint32_t assoc_answer_frame(uint8_t *f, uint16_t stype, const uint8_t *da, const uint8_t *sa,
@@ -379,10 +439,20 @@ static void assoc_answer(void)
     uint8_t f[64];
     /* An AID has its top two bits set, which are not its own. */
     uint32_t len = assoc_answer_frame(f, WLAN_FC_STYPE_ASSOC_RESP, sta, ap, ap, WLAN_STATUS_SUCCESS, 0xc000 | 5);
-    check(reads(ASSOC_ANSWER, f, len) && status == WLAN_STATUS_SUCCESS && aid == 5, "an association answer, its AID");
+    check(reads(ASSOC_ANSWER, f, len) && status == WLAN_STATUS_SUCCESS && aid == 5 && !qos_taken,
+          "an association answer, its AID, not for QoS");
     cuts(ASSOC_ANSWER, f, len, NONE, NONE, "an association answer");
     memcpy(f + len, rsn, sizeof(rsn));
     check(reads(ASSOC_ANSWER, f, len + sizeof(rsn)), "an association answer with elements after its fields, read");
+    /* A QoS association's: the WMM Parameter element, its QoS info, a reserved octet and four access categories. */
+    static const uint8_t wmm_param[2 + 24] = { WLAN_EID_VENDOR_SPECIFIC, 24, 0x00, 0x50, 0xf2, WMM_OUI_TYPE,
+                                               WMM_OUI_SUBTYPE_PARAMETER_ELEMENT, WMM_VERSION };
+    memcpy(f + len, wmm_param, sizeof(wmm_param));
+    check(reads(ASSOC_ANSWER, f, len + sizeof(wmm_param)) && qos_taken, "an answer with WMM's parameters, for QoS");
+    uint8_t info[2 + 7] = { WLAN_EID_VENDOR_SPECIFIC, 7, 0x00, 0x50, 0xf2, WMM_OUI_TYPE,
+                            WMM_OUI_SUBTYPE_INFORMATION_ELEMENT, WMM_VERSION, 0 };
+    memcpy(f + len, info, sizeof(info));
+    check(reads(ASSOC_ANSWER, f, len + sizeof(info)) && !qos_taken, "and one with WMM's information alone, not");
     len = assoc_answer_frame(f, WLAN_FC_STYPE_ASSOC_RESP, sta, ap, ap, WLAN_STATUS_AP_UNABLE_TO_HANDLE_NEW_STA, 0);
     check(reads(ASSOC_ANSWER, f, len) && status == WLAN_STATUS_AP_UNABLE_TO_HANDLE_NEW_STA,
           "an association refused, read with its status");
@@ -518,6 +588,42 @@ static void tim(void)
     check(!mgmt_tim(f, len, ap, 2, &t), "a beacon with no TIM refused");
     len = tim_beacon(f, 0, 1, 0, two, sizeof(two));
     check(!mgmt_tim(f, len, other, 2, &t), "another's beacon refused");
+}
+
+/* An A-MSDU of two MSDUs, laid out as 802.11 9.3.2.2 has it, the first padded to a word; one that does not fit refused. */
+static void amsdu(void)
+{
+    static const uint8_t dest[ETH_ALEN] = { 0x02, 0, 0, 0, 0, 0x0c };
+    uint8_t f[MGMT_AMSDU_FIXED + 128], body1[5] = { 1, 2, 3, 4, 5 }, body2[3] = { 6, 7, 8 };
+    uint32_t n = mgmt_amsdu_start(f, sizeof(f), sta, ap);
+    check(n == MGMT_AMSDU_FIXED && WPA_GET_LE16(f) == (WLAN_FC_TYPE_DATA << 2 | WLAN_FC_STYPE_QOS_DATA << 4 | WLAN_FC_TODS) &&
+              memcmp(f + 4, ap, 6) == 0 && memcmp(f + 10, sta, 6) == 0 && memcmp(f + 16, ap, 6) == 0 &&
+              f[24] == 0x80 && f[25] == 0,
+          "an A-MSDU's header: QoS Data to the access point, TID 0, A-MSDU Present");
+    check(mgmt_amsdu_add(f, sizeof(f), 0, dest, sta, 0x0800, body1, sizeof(body1)) == 0,
+          "a subframe before the header refused");
+    n = mgmt_amsdu_add(f, sizeof(f), n, dest, sta, 0x0800, body1, sizeof(body1));
+    check(n == MGMT_AMSDU_FIXED + 14 + 8 + 5, "the first subframe, its length unpadded");
+    uint32_t second = n;
+    n = mgmt_amsdu_add(f, sizeof(f), n, broadcast, sta, 0x0806, body2, sizeof(body2));
+    const uint8_t *first = f + MGMT_AMSDU_FIXED, *next = f + MGMT_AMSDU_FIXED + 28;
+    check(n == MGMT_AMSDU_FIXED + 28 + 14 + 8 + 3, "the second at the next word from the A-MSDU's start");
+    check(memcmp(first, dest, 6) == 0 && memcmp(first + 6, sta, 6) == 0 && WPA_GET_BE16(first + 12) == 13 &&
+              memcmp(first + 14, "\xaa\xaa\x03\x00\x00\x00\x08\x00", 8) == 0 && memcmp(first + 22, body1, 5) == 0,
+          "the first subframe: destination, source, length, LLC/SNAP, type, body");
+    check(second == MGMT_AMSDU_FIXED + 27 && f[second] == 0, "its padding zeroed");
+    check(memcmp(next, broadcast, 6) == 0 && WPA_GET_BE16(next + 12) == 11 && WPA_GET_BE16(next + 20) == 0x0806 &&
+              memcmp(next + 22, body2, 3) == 0,
+          "the second subframe, its own type and body");
+    /* The second ends 53 bytes into the A-MSDU, so the third starts 3 bytes on, at 56. */
+    check(mgmt_amsdu_add(f, n + 3 + 14 + 8 + 3 - 1, n, dest, sta, 0x0800, body2, sizeof(body2)) == 0 &&
+              mgmt_amsdu_add(f, n + 3 + 14 + 8 + 3, n, dest, sta, 0x0800, body2, sizeof(body2)) == n + 3 + 14 + 8 + 3,
+          "a third written only where it fits, its padding counted");
+    check(mgmt_amsdu_start(f, MGMT_AMSDU_FIXED - 1, sta, ap) == 0, "a header that does not fit refused");
+    memset(f + n, 0xee, 40);
+    uint32_t m = mgmt_amsdu_add(f, sizeof(f), n, dest, sta, 0x0800, 0, 5);
+    check(m == n + 3 + 14 + 8 + 5 && f[m - 1] == 0xee && f[m - 5] == 0xee && WPA_GET_BE16(f + m - 7) == 0x0800,
+          "a body of 0 left for the caller, its subframe's header written");
 }
 
 static uint32_t reason_frame(uint8_t *f, uint16_t stype, const uint8_t *da, const uint8_t *sa, const uint8_t *bssid,
@@ -818,6 +924,8 @@ int main(void)
     deauth();
     null_frame();
     beacon_of();
+    addba();
+    amsdu();
     tim();
     let_go();
     let_go_policy();

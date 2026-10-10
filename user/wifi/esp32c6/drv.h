@@ -105,6 +105,9 @@ struct drv {
     uint32_t debug;       /* DRV_DEBUG_ bits */
     uint8_t no_pmf;       /* join without protecting management frames, which the station otherwise offers */
     uint8_t no_sae;       /* join without WPA3's SAE, with WPA2's passphrase where the network takes both */
+    uint8_t ht;           /* associate for HT too, which the access point sends at MCS rates under */
+    uint8_t no_qos;       /* associate without QoS, and so send no A-MSDU */
+    uint8_t no_amsdu;     /* send the link's frames one to a transmission, though associated for QoS */
     uint8_t ps;           /* sleep between beacons once joined, the radio off while the link is idle; see sta.c */
     uint8_t blast;        /* seconds the station sends a datagram to its port 9 back to its sender, as fast as the MAC
                              lets it: a test of the sending alone, once a run; see sta.c */

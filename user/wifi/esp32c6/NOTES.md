@@ -298,9 +298,9 @@ or the right key in the other id's entry, the access point's group frames still 
 ## What the link carries
 
 Each direction is measured alone, and both together, from the host, the station joined:
-datagrams to the station's UDP port 9, which nothing serves, at a rate, the network process's count of frames in,
-from its status port, before and after, saying how many arrived; `blast=`, seconds, has the station send the first
-such datagram back to its sender as fast as the MAC lets it, the sending alone; and the echo, with a window of
+datagrams to a UDP port of the station's that nothing serves, at a rate, the network process's count of frames in,
+from its status port, before and after, saying how many arrived; `blast=`, seconds, has the station send a datagram
+to its port 9 back to its sender as fast as the MAC lets it, the sending alone; and the echo, with a window of
 datagrams in flight, every frame crossing the network process and its client too.
 The log tells what each frame costs, `cost` lines in the core's cycles and the time on the air in microseconds,
 which data rates the access point sends the station's frames at, by the MAC's header about each, and their signal.
@@ -312,6 +312,18 @@ back, every one through threads of three processes, and the link holds four fram
 and each ring's slots rounded down to a power of two, so a burst of more is dropped there.
 More over the air wants more in each transmission: HT's rates, A-MSDU, several frames in one, once the station
 associates for QoS, and A-MPDU from the access point, which wants the MAC's block acknowledgement; see `TODO.md`.
+
+So the station associates for QoS, by WMM's information element, and once the access point's answer carries WMM's
+parameters, sends the link's frames as A-MSDUs, as many as wait and fit 3839 bytes, which an access point that
+takes HT takes: two of the link's largest, which then share a transmission's preamble, backoff and acknowledgement.
+The access point here sent its own frames more slowly to a QoS station, about a tenth less, and the station's
+A-MSDUs carried about a sixth more; `qos=0` associates without it, `amsdu=0` sends a frame to a transmission.
+The frame is laid out straight into the buffer the MAC sends from (`mac_tx_begin`), its header written CCMP's header's
+length in and moved down after, so that the room lies before the payload, which is copied once, by halfwords as it
+lies two bytes off a word; three copies of it, two of them byte by byte, once took longer than the frame on the air.
+HT, `ht=1`, has the access point send at MCS 7 with the short guard interval, yet carry less: it protects each HT frame,
+by all that was seen, and does not offer block acknowledgement, which would aggregate them; the station declines
+an ADDBA Request, as the MAC's block acknowledgement is not the driver's yet.
 
 ## The station's protected management frames
 

@@ -17,8 +17,11 @@
 /* The largest probe request, authentication or deauthentication a builder here makes: a probe request for 32 bytes. */
 #define MGMT_FRAME_MAX (24u + 2u + 32u + 2u + 8u + 2u + 4u + 2u + 1u)
 
-/* The largest association request: an SSID of 32 bytes, the rates, and an RSN and an RSNX element of 255 bytes each. */
-#define MGMT_ASSOC_MAX (24u + 4u + 2u + 32u + 2u + 8u + 2u + 4u + 2u * (2u + 255u))
+/*
+ * The largest association request: an SSID of 32 bytes, the rates, an RSN and an RSNX element of 255 bytes each,
+ * and HT's capabilities and WMM's information.
+ */
+#define MGMT_ASSOC_MAX (24u + 4u + 2u + 32u + 2u + 8u + 2u + 4u + 2u * (2u + 255u) + 2u + 26u + 2u + 7u)
 
 /*
  * The beacon intervals between two of the station's wakes, as its association tells the access point,
@@ -86,17 +89,33 @@ int mgmt_sae_read(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint
  * An association request from sta to the access point ap, for ssid, with the rates the station takes,
  * and the RSN and RSNX elements the supplicant wrote, whole, either 0 if none;
  * its capabilities say the network's privacy where an RSN element is given, as the network's beacon says it.
+ * asks, MGMT_ASSOC_ bits, says what else the station asks for: QoS, by WMM's information, and HT, its capabilities
+ * 20 MHz and MCS 0 to 7, QoS with it, since an access point gives HT to a QoS station alone.
  */
+#define MGMT_ASSOC_QOS 0x1u
+#define MGMT_ASSOC_HT  0x2u
 uint32_t mgmt_assoc_request(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap, const char *ssid,
-                            const uint8_t *rsn, const uint8_t *rsnx);
+                            const uint8_t *rsn, const uint8_t *rsnx, uint32_t asks);
+
+/*
+ * An ADDBA Request from the access point ap to sta, the frame in the clear, its dialog token and its Block Ack
+ * parameters read into a; and the Response that declines it, IEEE 802.11's status 37, the parameters echoed and no
+ * timeout: the station takes no block acknowledgement, which the MAC would have to send for it.
+ */
+struct mgmt_addba {
+    uint8_t token;
+    uint16_t params;
+};
+int mgmt_addba_read(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap, struct mgmt_addba *a);
+uint32_t mgmt_addba_decline(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap, const struct mgmt_addba *a);
 
 /*
  * The access point ap's answer to sta's association: its status into *status, and the station's AID into *aid.
  * A refusal to try again later (status 30) may carry the time to come back, in 802.11's time units, into
- * *comeback_tu, or 0 when it names none.
+ * *comeback_tu, or 0 when it names none. *qos is 1 where it took the station for QoS, its WMM Parameter element said.
  */
 int mgmt_assoc_answer(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap, uint16_t *status,
-                      uint16_t *aid, uint32_t *comeback_tu);
+                      uint16_t *aid, uint32_t *comeback_tu, int *qos);
 
 /* A deauthentication from sta to the access point ap, for reason, IEEE 802.11's: MGMT_LEAVING as the station leaves. */
 #define MGMT_LEAVING 3u
@@ -161,11 +180,27 @@ int mgmt_sa_query_step(uint64_t now_us, uint64_t start_us, uint64_t last_us);
 /*
  * A data frame carries an Ethernet type and payload behind RFC 1042's LLC/SNAP header, as IEEE 802.11 carries them.
  * mgmt_data makes one from sta through the access point ap to dest, unprotected, with the len bytes at body,
- * MGMT_DATA_FIXED bytes longer: the frame's header, the LLC/SNAP header and the type.
+ * MGMT_DATA_FIXED bytes longer: the frame's header, the LLC/SNAP header and the type;
+ * with body 0 the len bytes are left for the caller to fill.
  */
 #define MGMT_DATA_FIXED (24u + 8u)
 uint32_t mgmt_data(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap, const uint8_t *dest,
                    uint16_t proto, const uint8_t *body, uint32_t len);
+
+/*
+ * An A-MSDU, several MSDUs in one QoS Data frame (IEEE 802.11 9.3.2.2): mgmt_amsdu_start writes the frame's header
+ * from sta through the access point ap, TID 0 and the A-MSDU Present bit set, and returns its length,
+ * MGMT_AMSDU_FIXED; each mgmt_amsdu_add then appends a subframe to the frame at, len bytes long, the one before
+ * padded to a whole word from the A-MSDU's start: the destination dest, the source src, and the MSDU, the Ethernet
+ * type proto and the len bytes at body behind RFC 1042's LLC/SNAP header. It returns the frame's new length, or 0 if
+ * the subframe does not fit size. An access point that takes HT takes an A-MSDU of 3839 bytes, MGMT_AMSDU_MAX.
+ * With body 0 the len bytes are left for the caller to fill, the last of the frame's new length.
+ */
+#define MGMT_AMSDU_FIXED (24u + 2u)
+#define MGMT_AMSDU_MAX   3839u
+uint32_t mgmt_amsdu_start(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap);
+uint32_t mgmt_amsdu_add(uint8_t *f, uint32_t size, uint32_t at, const uint8_t *dest, const uint8_t *src,
+                        uint16_t proto, const uint8_t *body, uint32_t len);
 
 /* What a data frame read carries, in the frame: its source, its Ethernet type, and its payload. */
 struct mgmt_payload {

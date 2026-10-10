@@ -28,6 +28,8 @@
 /* A QoS Data frame's header is two bytes longer, its QoS control field, whose bit 7 says an A-MSDU follows. */
 #define QOS_CONTROL  2u
 #define QOS_AMSDU    0x80u
+/* An A-MSDU's subframe header: its destination, its source and the MSDU's length, which its LLC/SNAP header starts. */
+#define AMSDU_SUBFRAME 14u
 
 static const uint8_t broadcast[ETH_ALEN] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
 
@@ -40,6 +42,24 @@ static const uint8_t rfc1042[6] = { 0xaa, 0xaa, 0x03, 0x00, 0x00, 0x00 };
  */
 static const uint8_t rates[] = { 0x82, 0x84, 0x8b, 0x96, 0x0c, 0x12, 0x18, 0x24 };
 static const uint8_t more_rates[] = { 0x30, 0x48, 0x60, 0x6c };
+
+/*
+ * The HT Capabilities element's body the station associates with: 20 MHz alone, the spatial multiplexing power save
+ * off, the short guard interval at 20 MHz, A-MSDUs of 3839 bytes, no A-MPDU parameters beyond the least, and MCS 0
+ * to 7 received, one stream's; the extended, beamforming and antenna capabilities none.
+ */
+static const uint8_t ht_cap[26] = {
+    (uint8_t)(HT_CAP_INFO_SMPS_DISABLED | HT_CAP_INFO_SHORT_GI20MHZ), 0, 0, 0xff,
+};
+/* The WMM Information element's body: the OUI, its type and subtype, the version, and the QoS info, U-APSD none. */
+static const uint8_t wmm_info[7] = { 0x00, 0x50, 0xf2, WMM_OUI_TYPE, WMM_OUI_SUBTYPE_INFORMATION_ELEMENT, WMM_VERSION, 0 };
+
+/* An ADDBA Request's and its Response's bodies, after the category and the action: offsets and lengths. */
+#define ADDBA_FIXED       (IEEE80211_HDRLEN + 2u)
+#define ADDBA_REQUEST_LEN (ADDBA_FIXED + 1u + 2u + 2u + 2u) /* the token, parameters, timeout, starting sequence */
+#define ADDBA_RESPONSE_LEN (ADDBA_FIXED + 1u + 2u + 2u + 2u) /* the token, status, parameters, timeout */
+#define ADDBA_REQUEST     0u
+#define ADDBA_RESPONSE    1u
 
 /* The subtype of a management frame at least fixed bytes long, its header among them, or -1 for any other frame. */
 static int subtype(const uint8_t *f, uint32_t len, uint32_t fixed)
@@ -224,11 +244,13 @@ int mgmt_sae_read(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint
 }
 
 uint32_t mgmt_assoc_request(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap, const char *ssid,
-                            const uint8_t *rsn, const uint8_t *rsnx)
+                            const uint8_t *rsn, const uint8_t *rsnx, uint32_t asks)
 {
     struct ieee80211_mgmt *m = (struct ieee80211_mgmt *)f;
     uint32_t ssid_len = strlen(ssid), rsn_len = rsn ? 2u + rsn[1] : 0, rsnx_len = rsnx ? 2u + rsnx[1] : 0;
-    uint32_t len = ASSOC_FIXED + 2u + ssid_len + 2u + sizeof(rates) + 2u + sizeof(more_rates) + rsn_len + rsnx_len;
+    int ht = (asks & MGMT_ASSOC_HT) != 0, qos = ht || (asks & MGMT_ASSOC_QOS) != 0;
+    uint32_t len = ASSOC_FIXED + 2u + ssid_len + 2u + sizeof(rates) + 2u + sizeof(more_rates) + rsn_len + rsnx_len +
+                   (ht ? 2u + sizeof(ht_cap) : 0u) + (qos ? 2u + sizeof(wmm_info) : 0u);
     if (ssid_len > SSID_MAX_LEN || len > size) {
         return 0;
     }
@@ -239,18 +261,24 @@ uint32_t mgmt_assoc_request(uint8_t *f, uint32_t size, const uint8_t *sta, const
     p = element(p, WLAN_EID_SSID, (const uint8_t *)ssid, ssid_len);
     p = element(p, WLAN_EID_SUPP_RATES, rates, sizeof(rates));
     p = element(p, WLAN_EID_EXT_SUPP_RATES, more_rates, sizeof(more_rates));
-    /* In IEEE 802.11's order: the RSN element early, the RSNX element among the last. */
+    /* In IEEE 802.11's order: the RSN element early, HT's after it, the RSNX element among the last, a vendor's last. */
     if (rsn) {
         p = element(p, rsn[0], rsn + 2, rsn[1]);
     }
+    if (ht) {
+        p = element(p, WLAN_EID_HT_CAP, ht_cap, sizeof(ht_cap));
+    }
     if (rsnx) {
-        element(p, rsnx[0], rsnx + 2, rsnx[1]);
+        p = element(p, rsnx[0], rsnx + 2, rsnx[1]);
+    }
+    if (qos) {
+        element(p, WLAN_EID_VENDOR_SPECIFIC, wmm_info, sizeof(wmm_info));
     }
     return len;
 }
 
 int mgmt_assoc_answer(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap, uint16_t *status,
-                      uint16_t *aid, uint32_t *comeback_tu)
+                      uint16_t *aid, uint32_t *comeback_tu, int *qos)
 {
     const struct ieee80211_mgmt *m = (const struct ieee80211_mgmt *)f;
     if (subtype(f, len, ANSWER_FIXED) != WLAN_FC_STYPE_ASSOC_RESP || memcmp(m->da, sta, ETH_ALEN) != 0 ||
@@ -262,11 +290,14 @@ int mgmt_assoc_answer(const uint8_t *f, uint32_t len, const uint8_t *sta, const 
     /* A refusal to try again later may name the time to come back, in 802.11's time units; the parser keeps
      * the element only at its five bytes, and leaves it out otherwise. */
     *comeback_tu = 0;
+    *qos = 0;
     struct ieee802_11_elems elems;
-    if (len > ANSWER_FIXED &&
-        ieee802_11_parse_elems(f + ANSWER_FIXED, len - ANSWER_FIXED, &elems, 0) != ParseFailed &&
-        elems.timeout_int != 0 && elems.timeout_int[0] == WLAN_TIMEOUT_ASSOC_COMEBACK) {
-        *comeback_tu = WPA_GET_LE32(elems.timeout_int + 1);
+    if (len > ANSWER_FIXED && ieee802_11_parse_elems(f + ANSWER_FIXED, len - ANSWER_FIXED, &elems, 0) != ParseFailed) {
+        if (elems.timeout_int != 0 && elems.timeout_int[0] == WLAN_TIMEOUT_ASSOC_COMEBACK) {
+            *comeback_tu = WPA_GET_LE32(elems.timeout_int + 1);
+        }
+        /* A QoS association's answer carries the WMM Parameter element, the access point's EDCA. */
+        *qos = elems.wmm != 0 && elems.wmm_len >= 5u && elems.wmm[4] == WMM_OUI_SUBTYPE_PARAMETER_ELEMENT;
     }
     return 1;
 }
@@ -362,6 +393,34 @@ int mgmt_sa_query_read(const uint8_t *f, uint32_t len, const uint8_t *sta, const
     return 1;
 }
 
+int mgmt_addba_read(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap, struct mgmt_addba *a)
+{
+    const struct ieee80211_mgmt *m = (const struct ieee80211_mgmt *)f;
+    if (subtype(f, len, ADDBA_REQUEST_LEN) != WLAN_FC_STYPE_ACTION || memcmp(m->da, sta, ETH_ALEN) != 0 ||
+        memcmp(m->sa, ap, ETH_ALEN) != 0 || memcmp(m->bssid, ap, ETH_ALEN) != 0 ||
+        f[IEEE80211_HDRLEN] != WLAN_ACTION_BLOCK_ACK || f[IEEE80211_HDRLEN + 1u] != ADDBA_REQUEST) {
+        return 0;
+    }
+    a->token = f[ADDBA_FIXED];
+    a->params = WPA_GET_LE16(f + ADDBA_FIXED + 1u);
+    return 1;
+}
+
+uint32_t mgmt_addba_decline(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap, const struct mgmt_addba *a)
+{
+    if (size < ADDBA_RESPONSE_LEN) {
+        return 0;
+    }
+    header(f, WLAN_FC_STYPE_ACTION, ap, sta, ap);
+    f[IEEE80211_HDRLEN] = WLAN_ACTION_BLOCK_ACK;
+    f[IEEE80211_HDRLEN + 1u] = ADDBA_RESPONSE;
+    f[ADDBA_FIXED] = a->token;
+    WPA_PUT_LE16(f + ADDBA_FIXED + 1u, WLAN_STATUS_REQUEST_DECLINED);
+    WPA_PUT_LE16(f + ADDBA_FIXED + 3u, a->params);
+    WPA_PUT_LE16(f + ADDBA_FIXED + 5u, 0);
+    return ADDBA_RESPONSE_LEN;
+}
+
 int mgmt_is_action(const uint8_t *f, uint32_t len)
 {
     return subtype(f, len, offsetof(struct ieee80211_mgmt, u.action)) == WLAN_FC_STYPE_ACTION;
@@ -433,7 +492,7 @@ uint32_t mgmt_data(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t 
     memcpy(h->addr3, dest, ETH_ALEN);
     memcpy(f + IEEE80211_HDRLEN, rfc1042, sizeof(rfc1042));
     WPA_PUT_BE16(f + IEEE80211_HDRLEN + sizeof(rfc1042), proto);
-    if (len) {
+    if (len && body) {
         memcpy(f + MGMT_DATA_FIXED, body, len);
     }
     return MGMT_DATA_FIXED + len;
@@ -485,6 +544,43 @@ int mgmt_tim(const uint8_t *f, uint32_t len, const uint8_t *ap, uint16_t aid, st
     t->group = e[2] == 0 && (e[4] & TIM_GROUP) != 0;
     t->ours = aid != 0 && octet >= first && octet < first + octets && (bitmap[octet - first] >> (aid & 7u) & 1u) != 0;
     return 1;
+}
+
+uint32_t mgmt_amsdu_start(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap)
+{
+    struct ieee80211_hdr *h = (struct ieee80211_hdr *)f;
+    if (size < MGMT_AMSDU_FIXED) {
+        return 0;
+    }
+    memset(f, 0, MGMT_AMSDU_FIXED);
+    h->frame_control = IEEE80211_FC(WLAN_FC_TYPE_DATA, WLAN_FC_STYPE_QOS_DATA) | host_to_le16(WLAN_FC_TODS);
+    memcpy(h->addr1, ap, ETH_ALEN);
+    memcpy(h->addr2, sta, ETH_ALEN);
+    memcpy(h->addr3, ap, ETH_ALEN);
+    f[IEEE80211_HDRLEN] = QOS_AMSDU; /* TID 0, best effort, acknowledged as any frame */
+    return MGMT_AMSDU_FIXED;
+}
+
+uint32_t mgmt_amsdu_add(uint8_t *f, uint32_t size, uint32_t at, const uint8_t *dest, const uint8_t *src,
+                        uint16_t proto, const uint8_t *body, uint32_t len)
+{
+    /* The subframe before padded to a whole word from the A-MSDU's start: none before the first. */
+    uint32_t start = (at + 3u - MGMT_AMSDU_FIXED) / 4u * 4u + MGMT_AMSDU_FIXED;
+    uint32_t msdu = sizeof(rfc1042) + 2u + len;
+    if (at < MGMT_AMSDU_FIXED || start > size || size - start < AMSDU_SUBFRAME + msdu || msdu > 0xffffu) {
+        return 0;
+    }
+    memset(f + at, 0, start - at);
+    uint8_t *p = f + start;
+    memcpy(p, dest, ETH_ALEN);
+    memcpy(p + ETH_ALEN, src, ETH_ALEN);
+    WPA_PUT_BE16(p + 2u * ETH_ALEN, (uint16_t)msdu);
+    memcpy(p + AMSDU_SUBFRAME, rfc1042, sizeof(rfc1042));
+    WPA_PUT_BE16(p + AMSDU_SUBFRAME + sizeof(rfc1042), proto);
+    if (len && body) {
+        memcpy(p + AMSDU_SUBFRAME + sizeof(rfc1042) + 2u, body, len);
+    }
+    return start + AMSDU_SUBFRAME + msdu;
 }
 
 int mgmt_data_read(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap, struct mgmt_payload *p)

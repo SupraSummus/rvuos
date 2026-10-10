@@ -94,6 +94,15 @@ uint32_t ccmp_encrypt(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t l
 uint32_t ccmp_encap_hw(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t len, uint64_t pn, uint8_t keyid);
 
 /*
+ * As ccmp_encap_hw, where the frame already lies: f holds the header, CCMP_HEAD_LEN bytes of room, then the payload,
+ * len bytes in all, the room counted; the Protected bit is set, the CCMP header written into the room and the MIC's
+ * room after the payload set to zero, so the payload is copied once, into the frame the MAC sends.
+ * The frame's length then, len + CCMP_MIC_LEN, or 0 if it does not fit size or is not a Data frame of a header this
+ * reads. Its frame is ccmp_encap_hw's, byte for byte, which ccmp-test's hw_path holds.
+ */
+uint32_t ccmp_head_hw(uint8_t *f, uint32_t size, uint32_t len, uint64_t pn, uint8_t keyid);
+
+/*
  * The len bytes of a robust management frame at in encrypted into out, as ccmp_encrypt for a Data frame:
  * its header is 24 bytes and no traffic identifier enters the nonce or the additional data.
  * 0 if it does not fit, or is not a management frame; else the frame's length at out, len + 16 bytes.

@@ -641,7 +641,7 @@ void mac_rx_on(void)
 #define TX_TYPE_DATA  2u
 #define TX_RETRY      0x08u    /* the Retry bit, in the frame control's second byte */
 #define TX_GROUP      0x01u    /* the group bit of Address 1's first byte */
-#define TX_MAX        1600u    /* the largest frame the driver sends */
+#define TX_MAX        MAC_TX_MAX /* the largest frame the driver sends: an A-MSDU of 3839 bytes, its header and CCMP's */
 #define TX_DONE_US    500000u  /* the wait for the MAC to finish a try, longer than any try of the slowest rate */
 #define TX_TRIES      7u       /* a frame's tries, 802.11's dot11ShortRetryLimit */
 
@@ -730,10 +730,10 @@ const char *mac_tx_init(struct self *s)
     return 0;
 }
 
-/* The frame copied in after the words the MAC reads before it, given the station's next sequence number. */
-static void load(const uint8_t *frame, uint32_t len)
+/* The frame laid out after the words the MAC reads before it, len bytes, given the station's next sequence number. */
+static void number(uint32_t len)
 {
-    memcpy(tx->frame + TX_HDR, frame, len);
+    const uint8_t *frame = tx->frame + TX_HDR;
     /*
      * A management or a data frame takes the station's next sequence number, its fragment 0:
      * a station that does not do QoS numbers both from one counter. Its tries share the number.
@@ -955,10 +955,37 @@ const char *mac_tx_key(const uint8_t *frame, uint32_t len, uint32_t keyslot)
     if (len < FRAME_MIN || len > TX_MAX) {
         return "the frame's length";
     }
+    memcpy(mac_tx_begin(), frame, len);
+    return mac_tx_send(len, keyslot);
+}
+
+static uint32_t begun_cycles; /* when the lock was taken for the frame, for drv_prof */
+
+void mac_tx_cancel(void)
+{
+    osi_mutex_give(tx_lock);
+}
+
+uint8_t *mac_tx_begin(void)
+{
+    if (tx == 0) {
+        return 0;
+    }
     uint32_t c = prof_cycles();
     osi_mutex_take(tx_lock);
-    prof_add(&drv_prof.tx_lock, prof_cycles() - c);
-    c = prof_cycles();
+    begun_cycles = prof_cycles();
+    prof_add(&drv_prof.tx_lock, begun_cycles - c);
+    return tx->frame + TX_HDR;
+}
+
+const char *mac_tx_send(uint32_t len, uint32_t keyslot)
+{
+    const uint8_t *frame = tx->frame + TX_HDR;
+    if (len < FRAME_MIN || len > TX_MAX) {
+        osi_mutex_give(tx_lock);
+        return "the frame's length";
+    }
+    uint32_t c = begun_cycles;
     wake_locked();
     if (!tx_pwr_asked) {
         for (uint32_t i = 0; i < MAC_TX_RATES; i++) {
@@ -973,7 +1000,7 @@ const char *mac_tx_key(const uint8_t *frame, uint32_t len, uint32_t keyslot)
     if (keyslot) {
         mac_crypto_engine(1);
     }
-    load(frame, len);
+    number(len);
     int group = frame[4] & TX_GROUP, data = !group && TX_TYPE(frame[0]) == TX_TYPE_DATA;
     enum try_end end = TRY_LOST;
     for (uint32_t t = 0; t < (group ? 1u : TX_TRIES) && end != TRY_ACKED && end != TRY_UNFINISHED; t++) {

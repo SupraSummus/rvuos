@@ -72,6 +72,8 @@ static struct {
     struct buf *bufs;
     uint8_t ap[6]; /* the access point chosen, which the receiving reads once the station has taken it */
     uint16_t aid;  /* the association's, which the MAC's station-mode receiving names */
+    int qos;       /* the access point took the station for QoS: the link's frames go as A-MSDUs; see amsdu_send */
+    uint32_t amsdus, amsdu_frames; /* A-MSDUs sent, and the link's frames in them, for the log */
     struct drv_net last; /* the access point last joined, tried first when the link ends; see join */
     int joins;           /* how many times the station joined */
     int taken;           /* the receiving is the station's, heard's */
@@ -104,7 +106,8 @@ static struct {
     } ps_counts;
     /*
      * The data frames to the station by the rate field of the MAC's header about each, and their signal summed, for
-     * the log; with debug=frames the first four headers' first 32 bytes: what the access point sends at, and how.
+     * the log; with debug=frames the first 32 bytes of the first and the hundredth header of each rate, four at most:
+     * what the access point sends at, and how.
      */
     volatile uint32_t rx_rate[32];
     volatile uint32_t rx_rssi;
@@ -128,6 +131,8 @@ static struct {
     uint32_t relayed; /* the station's own group frames, back from the access point */
     uint32_t let_go_ignored; /* a deauthentication or disassociation ignored under PMF, unforged by the check */
     uint32_t sa_query_sent;  /* SA Query requests the station sent, checking whether the access point still holds it */
+    uint32_t addba_declined; /* ADDBA Requests the station declined */
+    uint32_t unread, unread_amsdu; /* data frames mgmt_data_read refused, and of them QoS Data carrying an A-MSDU */
     /* The SA Query in progress: its transaction id, what the access point said as it left, and its times. */
     struct {
         int active;
@@ -142,7 +147,6 @@ static struct {
     uint64_t gtk_rx_pn[KEYS_GROUP][CCMP_REPLAY_COUNT];
     uint64_t igtk_ipn[KEYS_GROUP];
     struct mutex *key_lock; /* held while a key is installed, and by the sending while it uses one */
-    uint8_t *tx_plain, *tx_crypt;
 } sta;
 
 static uint32_t protect(uint8_t *crypt, uint32_t size, const uint8_t *plain, uint32_t n);
@@ -255,9 +259,10 @@ static void heard(const struct mac_frame *m)
     sta.beacons += (uint32_t)beacon;
     if (m->ctrl != 0 && m->len > 0 && (m->frame[0] & 0x0cu) == 0x08u &&
         mgmt_to_station(m->frame, m->len, drv_self->mac, sta.ap)) {
-        sta.rx_rate[m->ctrl[RX_CTRL_RATE] & 0x1fu]++;
+        uint32_t rate = m->ctrl[RX_CTRL_RATE] & 0x1fu;
+        sta.rx_rate[rate]++;
         sta.rx_rssi += (uint32_t)-m->rssi;
-        if (sta.ctrl_kept < sizeof(sta.ctrl) / sizeof(sta.ctrl[0])) {
+        if (sta.ctrl_kept < sizeof(sta.ctrl) / sizeof(sta.ctrl[0]) && (sta.rx_rate[rate] == 1u || sta.rx_rate[rate] == 100u)) {
             memcpy(sta.ctrl[sta.ctrl_kept++], m->ctrl, sizeof(sta.ctrl[0]));
         }
     }
@@ -345,6 +350,10 @@ static void told(void)
                 c[16], c[17], c[18], c[19], c[20], c[21], c[22], c[23], c[24], c[25], c[26], c[27], c[28], c[29],
                 c[30], c[31]);
     }
+    drv_say("sta: for QoS %u; A-MSDUs sent %u, of %u frames; ADDBA Requests declined %u; data frames not read %u, "
+            "of them A-MSDUs %u\n",
+            sta.qos, (unsigned)sta.amsdus, (unsigned)sta.amsdu_frames, (unsigned)sta.addba_declined,
+            (unsigned)sta.unread, (unsigned)sta.unread_amsdu);
     drv_say("sta: the access point's beacons heard %u; Null frames asking for it %u, unanswered %u; "
             "links ended and joined again %u\n",
             (unsigned)sta.beacons, (unsigned)sta.nulls, (unsigned)sta.nulls_lost, (unsigned)sta.ends);
@@ -562,32 +571,59 @@ static int let_go(const struct buf *b, uint16_t *reason)
 }
 
 /*
- * An SA Query from the access point, protected under the pairwise key: a request is answered with a response of
- * the same transaction id, and a response the station asked for ends the query. 1 once it took one. Only an
- * Action frame is opened, so that a protected deauthentication is let_go's alone to read.
+ * The ADDBA Request an access point sends once the station associates for HT, to aggregate its frames, declined:
+ * the station takes no block acknowledgement, which the MAC would send for it. Under PMF the answer goes protected,
+ * as the request came, since a Block Ack action is a robust management frame.
  */
-static int sa_query_take(const struct buf *b)
+static void addba_decline(const struct mgmt_addba *a, int protected_)
 {
-    if (!sta.pmf || !sta.ptk.cur_set || (b->frame[1] & FC1_PROTECTED) == 0 ||
-        !mgmt_is_action(b->frame, b->len)) {
+    static uint8_t frame[MGMT_FRAME_MAX];
+    static uint8_t crypt[MGMT_FRAME_MAX + CCMP_HEAD_LEN + CCMP_MIC_LEN];
+    uint32_t n = mgmt_addba_decline(frame, sizeof(frame), drv_self->mac, sta.ap, a);
+    uint32_t cn = protected_ && n ? protect_mgmt(crypt, sizeof(crypt), frame, n) : 0;
+    const char *failed = n == 0 || (protected_ && cn == 0) ? "not made" : mac_tx(cn ? crypt : frame, cn ? cn : n);
+    sta.addba_declined++;
+    if (failed) {
+        drv_say("sta: an ADDBA Request declined: %s\n", failed);
+    }
+}
+
+/*
+ * An Action frame from the access point the station answers, opened once, since its packet number is counted then:
+ * an SA Query, protected under the pairwise key, a request answered with a response of the same transaction id and a
+ * response the station asked for ending the query; and an ADDBA Request, declined. Under PMF an action in the clear
+ * is not the access point's to be heeded. 1 once it took one. Only an Action frame is opened, so that a protected
+ * deauthentication is let_go's alone to read.
+ */
+static int action_take(const struct buf *b)
+{
+    if (!mgmt_is_action(b->frame, b->len)) {
         return 0;
     }
+    int protected_ = (b->frame[1] & FC1_PROTECTED) != 0, pmf = sta.pmf && sta.ptk.cur_set;
     static uint8_t plain[MGMT_FRAME_MAX];
-    uint32_t n = 0;
-    if (!open_mgmt(b, plain, &n)) {
+    const uint8_t *f = b->frame;
+    uint32_t n = b->len;
+    if (protected_ != pmf || (protected_ && !open_mgmt(b, plain, &n))) {
         return 0;
     }
+    f = protected_ ? plain : f;
     int response = 0;
     uint16_t id = 0;
-    if (!mgmt_sa_query_read(plain, n, drv_self->mac, sta.ap, &response, &id)) {
-        return 0; /* another action: read_frame drops it */
+    struct mgmt_addba a;
+    if (protected_ && mgmt_sa_query_read(f, n, drv_self->mac, sta.ap, &response, &id)) {
+        if (!response) {
+            sa_query_send(1, id);
+        } else if (sta.sa_query.active && id == sta.sa_query.id) {
+            sta.sa_query.active = 0;
+        }
+        return 1;
     }
-    if (!response) {
-        sa_query_send(1, id);
-    } else if (sta.sa_query.active && id == sta.sa_query.id) {
-        sta.sa_query.active = 0;
+    if (mgmt_addba_read(f, n, drv_self->mac, sta.ap, &a)) {
+        addba_decline(&a, protected_);
+        return 1;
     }
-    return 1;
+    return 0; /* another action: read_frame drops it */
 }
 
 /*
@@ -628,7 +664,7 @@ static int wait_for(uint64_t deadline, int (*read)(const struct buf *b, void *ar
         }
         uint16_t reason = 0;
         int gone = sta.state != NONE && let_go(b, &reason);
-        int took = !gone && sa_query_take(b);
+        int took = !gone && action_take(b);
         int taken = !gone && !took && read(b, arg);
         osi_queue_put(sta.free, &e.buf, 0);
         if (gone) {
@@ -1108,12 +1144,13 @@ static int authenticate(void)
 struct assoc {
     uint16_t status, aid;
     uint32_t comeback_tu;
+    int qos;
 };
 
 static int assoc_answer(const struct buf *b, void *arg)
 {
     struct assoc *a = arg;
-    return mgmt_assoc_answer(b->frame, b->len, drv_self->mac, sta.ap, &a->status, &a->aid, &a->comeback_tu);
+    return mgmt_assoc_answer(b->frame, b->len, drv_self->mac, sta.ap, &a->status, &a->aid, &a->comeback_tu, &a->qos);
 }
 
 /*
@@ -1132,18 +1169,20 @@ static int associate(const struct drv_net *ap)
 {
     static uint8_t frame[MGMT_ASSOC_MAX];
     uint32_t n = mgmt_assoc_request(frame, sizeof(frame), drv_self->mac, sta.ap, ap->ssid, sta.rsn,
-                                    sta.has_rsnx ? sta.rsnx : 0);
+                                    sta.has_rsnx ? sta.rsnx : 0,
+                                    (drv_self->no_qos ? 0u : MGMT_ASSOC_QOS) | (drv_self->ht ? MGMT_ASSOC_HT : 0u));
     if (!must("the association request", n != 0)) {
         return 0;
     }
     for (uint32_t tries = 1;; tries++) {
-        struct assoc a = { 0, 0, 0 };
+        struct assoc a = { 0, 0, 0, 0 };
         int answered = exchange("the association", frame, n, assoc_answer, &a);
         drv_say("sta: association %s, status %u, AID %u\n",
                 answered ? (a.status == 0 ? "accepted" : "refused") : "not answered", (unsigned)a.status,
                 (unsigned)a.aid);
         if (answered && a.status == 0) {
             sta.aid = a.aid;
+            sta.qos = a.qos;
             break;
         }
         if (!answered || a.status != MGMT_TRY_AGAIN || tries >= ASSOC_TRIES) {
@@ -1281,7 +1320,7 @@ static int handshake(void)
 /*
  * Under sta.key_lock, which the caller holds: the pairwise key in use's id and the next packet number under it;
  * 0 if no key is in use. The MAC's own sending keeps the lock from here to the frame's end, since the MAC takes
- * the key from its entry then; see eth_send.
+ * the key from its entry then; see send_from.
  */
 static int reserve_pn(uint8_t *id, uint64_t *pn)
 {
@@ -1328,62 +1367,146 @@ static uint32_t protect_mgmt(uint8_t *crypt, uint32_t size, const uint8_t *plain
     return reserve(tk, &id, &pn) ? ccmp_encrypt_mgmt(crypt, size, plain, n, tk, pn, id) : 0;
 }
 
-/* An Ethernet frame from the network process, built into a data frame, encrypted under the pairwise key and sent. */
-static void eth_send(struct drv *d, const uint8_t *eth, uint32_t len)
+/*
+ * n bytes from src to dst, as memcpy copies them, but by halfwords where the two lie two bytes apart in a word,
+ * as an 802.11 frame's payload, a word into its buffer, and an Ethernet frame's, two bytes off one, do; memcpy goes
+ * by words only where both start on one, and else by bytes.
+ */
+static void copy(uint8_t *dst, const uint8_t *src, uint32_t n)
 {
-    if (len < 14u || len > LINK_SLOT) {
-        d->tx_dropped++;
-        return;
+    uint32_t apart = ((uint32_t)(uintptr_t)dst ^ (uint32_t)(uintptr_t)src) & 3u;
+    if (apart == 0u) {
+        for (; n != 0 && ((uintptr_t)dst & 3u) != 0; n--) {
+            *dst++ = *src++;
+        }
+    } else if (apart == 2u) {
+        if (n != 0 && ((uintptr_t)dst & 1u) != 0) {
+            *dst++ = *src++;
+            n--;
+        }
+        for (; n >= 2u; n -= 2u, dst += 2, src += 2) {
+            *(uint16_t *)(void *)dst = *(const uint16_t *)(const void *)src;
+        }
     }
-    if (d->debug & DRV_DEBUG_FRAMES) {
-        drv_trace("out", eth, len);
+    memcpy(dst, src, n);
+}
+
+/*
+ * Where the frames the station sends come from: the link's, or blast='s, see blast. next gives the next Ethernet
+ * frame and its length, or 0 if there is none, and taken says the one it gave is copied, or dropped, and goes.
+ */
+struct source {
+    const uint8_t *(*next)(void *arg, uint32_t *len);
+    void (*taken)(void *arg);
+    void *arg;
+};
+
+/*
+ * The source's next frames sent as one data frame: once the access point took the station for QoS, as many as fit
+ * an A-MSDU, AMSDU_FRAMES at most, so that they share one transmission's preamble, backoff and acknowledgement, a
+ * frame alone an A-MSDU of one; else one, a Data frame. A frame that does not fit is left in the source for the next.
+ * The frame is laid out straight into the buffer the MAC sends from, built CCMP_HEAD_LEN bytes in and its 802.11
+ * header moved down after, so that the room for CCMP's header lies between it and the payload, each payload copied
+ * once. The MAC's cipher encrypts the frame and writes its MIC, given the entry its PLCP1 keyslot field takes; the
+ * packet number is one, from reserve_pn, for both ciphers. The key's lock is held from that reservation to the
+ * frame's end, the sending's lock inside it: the MAC takes the key from its entry then, so a key installed meanwhile
+ * would put an old packet number under a new key, and the access point, reading it as a replay, would drop the frames
+ * after. See mac.h's mac_tx_begin and NOTES.md. Whether any frame was taken from the source.
+ */
+#define AMSDU_FRAMES 2u /* two of the link's largest frames fit MGMT_AMSDU_MAX, three do not */
+#define AMSDU_MAX    (MGMT_AMSDU_FIXED + MGMT_AMSDU_MAX)
+
+static int send_from(struct drv *d, const struct source *src)
+{
+    uint32_t len;
+    const uint8_t *eth = src->next(src->arg, &len);
+    if (eth == 0) {
+        return 0;
     }
-    /*
-     * A station's frame is addressed to the access point, so 802.11 sends it under the pairwise key
-     * whatever its destination, Address 3; an access point picks the key by Address 1, as mac80211 does,
-     * and would drop a broadcast sent under the group key.
-     */
-    uint16_t proto = (uint16_t)eth[12] << 8 | eth[13];
-    uint32_t n = mgmt_data(sta.tx_plain, MGMT_DATA_FIXED + LINK_SLOT, d->mac, sta.ap, eth, proto, eth + 14, len - 14u);
-    if (n == 0) {
-        d->tx_dropped++;
-        return;
-    }
-    /*
-     * The MAC's cipher encrypts the frame and writes its MIC, so the driver lays the frame out for it and names the
-     * entry its PLCP1 keyslot field takes; the packet number is one, from reserve_pn, for both ciphers.
-     * The key's lock is held from that reservation to the frame's end: the MAC takes the key from its entry then,
-     * so a key installed meanwhile would put an old packet number under a new key, and the access point, reading it
-     * as a replay, would drop the frames after. See mac.h's mac_tx_key and NOTES.md.
-     */
     osi_mutex_take(sta.key_lock);
     uint8_t id;
     uint64_t pn;
-    uint32_t cn = reserve_pn(&id, &pn)
-                      ? ccmp_encap_hw(sta.tx_crypt, MGMT_DATA_FIXED + LINK_SLOT + CCMP_HEAD_LEN + CCMP_MIC_LEN,
-                                      sta.tx_plain, n, pn, id)
-                      : 0;
-    const char *failed = cn != 0 ? mac_tx_key(sta.tx_crypt, cn, STA_KEY_ENTRY) : "no pairwise key in use";
-    osi_mutex_give(sta.key_lock);
-    if (failed) {
+    uint8_t *f = reserve_pn(&id, &pn) ? mac_tx_begin() : 0;
+    if (f == 0) {
+        osi_mutex_give(sta.key_lock);
         d->tx_dropped++;
-        drv_say("sta: a frame out, %u bytes: %s\n", (unsigned)len, failed);
-    } else {
-        d->tx_frames++;
+        src->taken(src->arg);
+        return 1;
     }
+    uint8_t *g = f + CCMP_HEAD_LEN;
+    int amsdu = sta.qos && !d->no_amsdu;
+    uint32_t hdr = amsdu ? MGMT_AMSDU_FIXED : MGMT_DATA_FIXED - 8u, k = 0; /* the header, before the LLC/SNAP header */
+    uint32_t n = amsdu ? mgmt_amsdu_start(g, AMSDU_MAX, d->mac, sta.ap) : 0;
+    while (eth != 0 && k < (amsdu ? AMSDU_FRAMES : 1u)) {
+        uint32_t body = len >= 14u ? len - 14u : 0, m = 0;
+        uint16_t proto = len >= 14u ? (uint16_t)(eth[12] << 8 | eth[13]) : 0;
+        if (len >= 14u && len <= LINK_SLOT) {
+            m = amsdu ? mgmt_amsdu_add(g, AMSDU_MAX, n, eth, eth + 6, proto, 0, body)
+                      : mgmt_data(g, MAC_TX_MAX - CCMP_HEAD_LEN - CCMP_MIC_LEN, d->mac, sta.ap, eth, proto, 0, body);
+        }
+        if (m == 0 && k != 0 && len >= 14u && len <= LINK_SLOT) {
+            break; /* left for the next frame */
+        }
+        if (m == 0) {
+            d->tx_dropped++;
+        } else {
+            copy(g + m - body, eth + 14, body);
+            if (d->debug & DRV_DEBUG_FRAMES) {
+                drv_trace("out", eth, len);
+            }
+            n = m;
+            k++;
+        }
+        src->taken(src->arg);
+        eth = src->next(src->arg, &len);
+    }
+    const char *failed = "nothing to send";
+    if (k != 0) {
+        memmove(f, g, hdr);
+        uint32_t cn = ccmp_head_hw(f, MAC_TX_MAX, n + CCMP_HEAD_LEN, pn, id);
+        failed = cn != 0 ? mac_tx_send(cn, STA_KEY_ENTRY) : "the frame's layout";
+        if (cn == 0) {
+            mac_tx_cancel();
+        }
+    } else {
+        mac_tx_cancel();
+    }
+    osi_mutex_give(sta.key_lock);
+    if (k != 0 && failed) {
+        d->tx_dropped += k;
+        drv_say("sta: a frame out of %u, %u bytes: %s\n", (unsigned)k, (unsigned)n, failed);
+    } else if (k != 0) {
+        d->tx_frames += k;
+        sta.amsdus += (uint32_t)amsdu;
+        sta.amsdu_frames += amsdu ? k : 0u;
+    }
+    return 1;
+}
+
+static const uint8_t *link_next(void *arg, uint32_t *len)
+{
+    struct drv *d = arg;
+    return chan_get_begin(&d->link, len);
+}
+
+static void link_taken(void *arg)
+{
+    struct drv *d = arg;
+    chan_get_end(&d->link);
 }
 
 void sta_link_take(struct drv *d)
 {
+    const struct source link_source = { link_next, link_taken, d };
     uint32_t len;
-    const uint8_t *eth;
-    while ((eth = chan_get_begin(&d->link, &len)) != 0) {
-        if (sta.state != NONE) {
-            uint32_t c = prof_cycles();
-            eth_send(d, eth, len);
-            prof_add(&drv_prof.eth_send, prof_cycles() - c);
+    while (chan_get_begin(&d->link, &len) != 0) {
+        if (sta.state == NONE) {
+            chan_get_end(&d->link);
+            continue;
         }
-        chan_get_end(&d->link);
+        uint32_t c = prof_cycles();
+        send_from(d, &link_source);
+        prof_add(&drv_prof.eth_send, prof_cycles() - c);
     }
 }
 
@@ -1595,29 +1718,6 @@ static void ps_step(struct drv *d, uint64_t now)
     mac_doze();
 }
 
-/*
- * n bytes from src to dst, as memcpy copies them, but by halfwords where the two lie two bytes apart in a word,
- * as an 802.11 frame's payload, a word into its buffer, and an Ethernet frame's, two bytes off one, do; memcpy goes
- * by words only where both start on one, and else by bytes.
- */
-static void copy(uint8_t *dst, const uint8_t *src, uint32_t n)
-{
-    uint32_t apart = ((uint32_t)(uintptr_t)dst ^ (uint32_t)(uintptr_t)src) & 3u;
-    if (apart == 0u) {
-        for (; n != 0 && ((uintptr_t)dst & 3u) != 0; n--) {
-            *dst++ = *src++;
-        }
-    } else if (apart == 2u) {
-        if (n != 0 && ((uintptr_t)dst & 1u) != 0) {
-            *dst++ = *src++;
-            n--;
-        }
-        for (; n >= 2u; n -= 2u, dst += 2, src += 2) {
-            *(uint16_t *)(void *)dst = *(const uint16_t *)(const void *)src;
-        }
-    }
-    memcpy(dst, src, n);
-}
 
 /*
  * blast=: a datagram to the station's UDP port 9, the discard port nothing serves, sent back to its sender as fast
@@ -1630,11 +1730,26 @@ static void copy(uint8_t *dst, const uint8_t *src, uint32_t n)
 #define IPV4_UDP   17u
 
 static int blasted;
+static uint8_t blast_eth[LINK_SLOT];
+static uint32_t blast_len;
+
+/* blast='s source: the one datagram, again and again. */
+static const uint8_t *blast_next(void *arg, uint32_t *len)
+{
+    (void)arg;
+    *len = blast_len;
+    return blast_eth;
+}
+
+static void blast_taken(void *arg)
+{
+    (void)arg;
+}
 
 static int blast(struct drv *d, const uint8_t *dst, const uint8_t *src, uint16_t proto, const uint8_t *body,
                  uint32_t n)
 {
-    static uint8_t eth[LINK_SLOT];
+    uint8_t *eth = blast_eth;
     uint32_t ihl = n >= 20u ? (body[0] & 0xfu) * 4u : 0;
     if (d->blast == 0 || blasted || proto != 0x0800u || (body[0] >> 4) != 4u || ihl < 20u || n < ihl + 8u ||
         n > LINK_SLOT - 14u || body[9] != IPV4_UDP || (body[ihl + 2] << 8 | body[ihl + 3]) != BLAST_PORT) {
@@ -1650,10 +1765,12 @@ static int blast(struct drv *d, const uint8_t *dst, const uint8_t *src, uint16_t
     memcpy(eth + 14 + 16, body + 12, 4);
     memcpy(eth + 14 + ihl, body + ihl + 2, 2); /* and the UDP ports */
     memcpy(eth + 14 + ihl + 2, body + ihl, 2);
+    blast_len = 14u + n;
+    const struct source source = { blast_next, blast_taken, 0 };
     uint32_t sent = d->tx_frames, dropped = d->tx_dropped;
     uint64_t start = osi_now_us(), end = start + (uint64_t)d->blast * 1000000u;
     while (osi_now_us() < end) {
-        eth_send(d, eth, 14u + n);
+        send_from(d, &source); /* as the link's frames go, A-MSDUs once the station is the access point's for QoS */
     }
     uint64_t took = osi_now_us() - start;
     sent = d->tx_frames - sent;
@@ -1680,6 +1797,8 @@ static void link_frame(const struct buf *b, struct drv *d)
         return;
     }
     if (!mgmt_data_read(frame, len, d->mac, sta.ap, &p)) {
+        sta.unread++;
+        sta.unread_amsdu += len > 26u && (frame[0] & 0xfcu) == 0x88u && (frame[24] & 0x80u) != 0; /* QoS, A-MSDU */
         return;
     }
     if (p.proto == SUPP_EAPOL) {
@@ -1941,11 +2060,8 @@ const char *sta_start(struct drv *d)
     sta.bufs = osi_calloc(STA_FRAMES, sizeof(struct buf));
     sta.events = osi_queue_new(STA_FRAMES + STA_RUNS + 1u, sizeof(struct event));
     sta.free = osi_queue_new(STA_FRAMES, sizeof(uint32_t));
-    sta.tx_plain = osi_malloc(MGMT_DATA_FIXED + LINK_SLOT);
-    sta.tx_crypt = osi_malloc(MGMT_DATA_FIXED + LINK_SLOT + CCMP_HEAD_LEN + CCMP_MIC_LEN);
     sta.key_lock = osi_mutex_new();
-    if (sta.bufs == 0 || sta.events == 0 || sta.free == 0 || sta.tx_plain == 0 || sta.tx_crypt == 0 ||
-        sta.key_lock == 0) {
+    if (sta.bufs == 0 || sta.events == 0 || sta.free == 0 || sta.key_lock == 0) {
         return "the station's buffers, queues and lock";
     }
     for (uint32_t i = 0; i < STA_FRAMES; i++) {

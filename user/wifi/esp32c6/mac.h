@@ -232,6 +232,17 @@ struct mac_doze_counts {
 };
 extern struct mac_doze_counts mac_doze_counts;
 
+/*
+ * The sending without the copy mac_tx_key makes: mac_tx_begin takes the sending's lock and returns the buffer the MAC
+ * sends from, TX_MAX bytes, 3900, where the caller lays the frame out; mac_tx_send then sends its len bytes as
+ * mac_tx_key would, and gives the lock back, whatever it returns. Between the two the caller holds the lock: it
+ * takes no lock the sending's holder may wait for, the key's being taken before, as mac_tx_key's callers take it.
+ */
+#define MAC_TX_MAX 3900u
+uint8_t *mac_tx_begin(void);
+const char *mac_tx_send(uint32_t len, uint32_t keyslot);
+void mac_tx_cancel(void); /* the lock given back, nothing sent */
+
 /* What the sending met since the start, for the log; the sending alone writes it, under its lock. */
 #define MAC_TX_RATES 9u
 struct mac_tx_counts {

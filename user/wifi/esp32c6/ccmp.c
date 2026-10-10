@@ -238,6 +238,18 @@ uint32_t ccmp_encap_hw(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t 
     return len + CCMP_HEAD_LEN + CCMP_MIC_LEN;
 }
 
+uint32_t ccmp_head_hw(uint8_t *f, uint32_t size, uint32_t len, uint64_t pn, uint8_t keyid)
+{
+    uint32_t hdrlen = ccmp_header_len(f);
+    if (hdrlen == 0 || len < hdrlen + CCMP_HEAD_LEN || len > size || size - len < CCMP_MIC_LEN) {
+        return 0;
+    }
+    f[1] |= (uint8_t)(WLAN_FC_PROTECTED >> 8);
+    head(f + hdrlen, pn, keyid);
+    memset(f + len, 0, CCMP_MIC_LEN); /* the MAC fills the MIC */
+    return len + CCMP_MIC_LEN;
+}
+
 uint32_t ccmp_encrypt_mgmt(uint8_t *out, uint32_t size, const uint8_t *in, uint32_t len, const uint8_t *tk, uint64_t pn,
                            uint8_t keyid)
 {

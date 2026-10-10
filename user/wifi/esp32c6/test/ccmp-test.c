@@ -208,6 +208,16 @@ static void hw_path_case(const uint8_t *in, uint32_t len, uint64_t pn, uint8_t k
           "the hardware layout keeps ccmp_encrypt's header and CCMP header");
     check(nh != 0 && same(hw + hdrlen + CCMP_HEAD_LEN, in + hdrlen, len - hdrlen),
           "and lays the payload in the clear where ccmp_encrypt writes the ciphertext");
+    /* The same frame laid out where it lies: the header, room, then the payload; and refused a byte short. */
+    uint8_t place[24 + 26 + 16 + 16];
+    memcpy(place, in, hdrlen);
+    memset(place + hdrlen, 0xee, CCMP_HEAD_LEN);
+    memcpy(place + hdrlen + CCMP_HEAD_LEN, in + hdrlen, len - hdrlen);
+    memset(place + len + CCMP_HEAD_LEN, 0xee, CCMP_MIC_LEN);
+    uint32_t np = ccmp_head_hw(place, len + CCMP_HEAD_LEN + CCMP_MIC_LEN, len + CCMP_HEAD_LEN, pn, keyid);
+    check(np == nh && nh != 0 && same(place, hw, nh), "the frame laid out in place is ccmp_encap_hw's, byte for byte");
+    check(ccmp_head_hw(place, len + CCMP_HEAD_LEN + CCMP_MIC_LEN - 1u, len + CCMP_HEAD_LEN, pn, keyid) == 0,
+          "and refused where the MIC's room does not fit");
 }
 
 static void hw_path(void)

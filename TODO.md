@@ -203,10 +203,13 @@ what is left:
   and the supplicant's a bounded arena of its own, or fixed buffers over a P-256 of fixed width.
 - The ESP32-C6's Wi-Fi root task has 8 KiB of memory and 9 slots left once its clients run,
   so another client needs room found first, in the driver's block or a smaller `CLIENT_CHAN_SIZE`.
-- The ESP32-C6's link carries about 21 Mb/s either way alone at OFDM's 54 Mb/s, about what single frames at that
-  rate can, see `user/wifi/esp32c6/NOTES.md`, and its echo about a quarter of that each way.
-  More over the air wants aggregation: an A-MSDU up, once the station associates for QoS and takes the access point's
-  EDCA parameters, and an A-MPDU down, which wants the MAC's block ack; and HT's rates, see the profile above.
+- The ESP32-C6's link carries about 26 Mb/s up, in A-MSDUs, and about 19 down, at OFDM's 54 Mb/s, see
+  `user/wifi/esp32c6/NOTES.md`, and its echo about a quarter of that each way.
+  The sending builds a frame only once the one before has ended, so the medium waits on the core between them,
+  about as long as the frame was on it; a second buffer, built while the first is on the air, would fill the gap.
+  Down, an A-MPDU wants the MAC's block acknowledgement, HT's rates with it; up, HT's rates want the PLCP words of
+  an HT frame, which only the libraries' sending knows. The station keeps the best-effort EDCA, not the access
+  point's parameters for it, which WMM's parameter element in the association's answer carries.
   The echo is bound by the system: each datagram crosses three processes' threads twice, and the link, whose 16 KiB
   `LINK_SIZE` gives each way four slots of `LINK_SLOT`, drops a burst of more; eight would take 32 KiB, which the
   root task's memory, see below, has no room for yet.
