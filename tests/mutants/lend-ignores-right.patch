@@ -7,12 +7,12 @@ Report: a thread came to lend its time but by its own wait, through a capability
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -541,7 +541,7 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
+@@ -566,7 +566,7 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
  static __attribute__((noinline)) int op_lend(struct thread *t, struct notification *ntfn, uint32_t *arg)
  {
      struct cap bc;
--    int err = cap_lookup_typed(thread_table(t), arg[1], CAP_THREAD, RIGHT_X, &bc);
-+    int err = cap_lookup_typed(thread_table(t), arg[1], CAP_THREAD, 0, &bc);
+-    int err = slot_lookup_typed(t, arg[1], CAP_THREAD, RIGHT_X, &bc);
++    int err = slot_lookup_typed(t, arg[1], CAP_THREAD, 0, &bc);
      if (err != KERR_OK) {
          return err;
      }

@@ -7,12 +7,12 @@ Report: untyped outside granted memory, or not a block
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -233,7 +233,7 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
+@@ -307,7 +307,7 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
      case OP_UNTYPED_SPLIT: {
          /* Each half is a block, so that a frame made of it is one NAPOT entry. */
          uint32_t half = size / 2;
--        if (!napot_block(base, half) || arg[1] == arg[2]) {
-+        if (arg[1] == arg[2]) {
+-        if (!napot_block(base, half)) {
++        if (!napot_block(base, half) && 0) {
              return KERR_INVALID_ARG;
          }
-         int err = cap_slot_free(table, arg[1]);
+         int err = slot_vacant(t, arg[1]);

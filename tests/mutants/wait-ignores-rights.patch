@@ -8,8 +8,8 @@ Report: a call went through a capability without the rights its operation needs
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -512,9 +512,6 @@ static int op_notification(struct thread *t, uint32_t slot, const struct cap *ca
-         return cap_store(thread_table(t), arg[2], &sub, slot_node(t, slot));
+@@ -618,9 +618,6 @@ static int op_notification(struct thread *t, uint32_t slot, const struct cap *ca
+         return slot_store(t, arg[2], &sub, slot_node(t, slot));
      }
      case OP_NOTIFY_WAIT:
 -        if (!(cap->rights & RIGHT_R)) {

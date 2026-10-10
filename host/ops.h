@@ -15,18 +15,20 @@
 enum arg_kind {
     ARG_NONE,
     ARG_WORD,         /* any word: bytes to log, a halt code, a program counter, a word to store */
-    ARG_DST,          /* an empty slot of the caller's table, which receives what the operation makes */
+    ARG_DST,          /* an empty slot of the caller's tables, which receives what the operation makes */
     ARG_DST_INVOKED,  /* an empty slot of the invoked table, which receives a copy of a2 */
     ARG_SLOT_INVOKED, /* a filled slot of the invoked table */
-    ARG_ANY,          /* a filled slot of the caller's table */
+    ARG_ANY,          /* a filled slot of the caller's tables */
     ARG_FRAME,        /* ... holding a frame, and so on */
     ARG_POOL,
     ARG_NOTIFICATION,
     ARG_THREAD,
+    ARG_CAPTABLE,
     ARG_TYPE,         /* an object type: what a retype or an allocation makes */
     ARG_ALLOC,        /* what an allocation's type wants: a count of slots, a table's slot, a process's slot */
     ARG_RIGHTS,
     ARG_REGION,       /* a region slot of the process */
+    ARG_MOUNT,        /* a table slot of the process */
     ARG_OFFSET,       /* into a frame, a range of lines or of units, or a thread's registers */
     ARG_SIZE,         /* a frame's, a power of two */
     ARG_COUNT,        /* of lines or units */
@@ -50,6 +52,8 @@ static inline uint8_t arg_type(uint8_t kind)
         return CAP_NOTIFICATION;
     case ARG_THREAD:
         return CAP_THREAD;
+    case ARG_CAPTABLE:
+        return CAP_CAPTABLE;
     default:
         return CAP_NONE;
     }
@@ -106,11 +110,13 @@ static const struct op_info op_table[OP_COUNT] = {
     OP(OP_NOTIFY_CARVE, CAP_NOTIFICATION, CAP_NOTIFICATION, ARG_BITS, ARG_DST, ARG_NONE),
     OP(OP_CLOCK_WATCHDOG, CAP_CLOCK, 0, ARG_DELAY, ARG_NONE, ARG_NONE),
     OP(OP_NOTIFY_LEND, CAP_NOTIFICATION, 0, ARG_THREAD, ARG_NONE, ARG_NONE),
+    OP(OP_PROCESS_MOUNT, CAP_PROCESS, 0, ARG_MOUNT, ARG_CAPTABLE, ARG_NONE),
+    OP(OP_PROCESS_UNMOUNT, CAP_PROCESS, 0, ARG_MOUNT, ARG_NONE, ARG_NONE),
 };
 
 #undef OP
 
-_Static_assert(OP_COUNT == 39 && OP_NOTIFY_LEND == OP_COUNT - 1, "a new operation needs an entry in op_table");
+_Static_assert(OP_COUNT == 41 && OP_PROCESS_UNMOUNT == OP_COUNT - 1, "a new operation needs an entry in op_table");
 
 /* The loads and stores the driver makes itself, which invoke no capability. */
 static const struct op_info op_access[2] = {

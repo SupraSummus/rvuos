@@ -47,14 +47,14 @@ or a range of the units of time there are, with no more than the rights to bind 
 or the debug capability or the clock, which name no object,
 or a live kernel object of the capability's own type,
 which for a notification may signal some bit and for any other object carries no bits.
-Every process's table slot is empty or names a live table,
+Every process's table slot is empty or names a live table, with the right to write it,
 every thread's process slot is empty or names a live process,
 every thread's watch is empty or names a live notification,
 and every `Irq`'s notification slot is empty or names a live notification.
 
 **Derivation.**
 The slots of every live table,
-the table slot and region slots of every live process,
+the table slots and region slots of every live process,
 the process, units and watch of every live thread,
 the notification of every live `Irq`
 and the own node of every pool
@@ -190,12 +190,13 @@ Any kernel panic reachable from user mode is a bug.
 **Authority only flows.**
 A call leaves no capability its caller could not have made.
 Every node it fills or changes is covered by a capability
-the caller's table held before the call:
+the caller's tables held before the call:
 the same object, or a range within its range, with no more rights,
 where an Untyped covers the frames it makes,
 and a thread's units are covered as a range of units, with the rights it was bound with,
 and its watch as a capability to its notification, with the rights it was set with,
-each only on a thread the caller held a capability to with the right to control it.
+each only on a thread the caller held a capability to with the right to control it,
+and a table mounted in a process only in one the caller held a capability to with the right to control it.
 Or it names an object the call built,
 in a pool the caller could allocate from,
 bound to what the caller could write,
@@ -223,7 +224,7 @@ and no byte a process wrote becomes part of an object when its memory becomes a 
 The rest of a pool's memory comes back as it went in; see "Zeroing goes with the object" in "Bounded work".
 
 **The caller keeps what it runs on.**
-No call begins to destroy the pool its thread, its process or its process's table lives in.
+No call begins to destroy the pool its thread, its process or a table its process mounts lives in.
 A destroy stopped half way leaves the pool's threads running,
 so this is what keeps a thread from making a call it cannot return from.
 

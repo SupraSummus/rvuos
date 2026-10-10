@@ -52,11 +52,14 @@ static ARRAY(struct node_rec) nodes;
 static ARRAY(struct lend_rec) lends;
 static obj_array objects, objects_after;
 
-/* The thread that makes the call, its process and table, and whether a destroy had begun on one's pool. */
+/*
+ * The thread that makes the call, its process and the tables the process mounts,
+ * and on which of their pools a destroy had begun, as dying_under says.
+ */
 static const struct thread *caller;
 static const struct process *caller_process;
-static const struct captable *caller_table;
-static bool caller_dying;
+static const struct captable *caller_tables[PROCESS_TABLES];
+static uint32_t caller_dying;
 
 /*
  * The call: the capability it invokes, if its slot held one, and where the caller stood,
@@ -98,10 +101,18 @@ static uint32_t account_at_count(const struct thread *t)
     return balance > account_cap(t) ? account_cap(t) : (uint32_t)balance;
 }
 
-static bool dying_under(const struct thread *t, const struct process *proc, const struct captable *table)
+/*
+ * The pools a thread runs on and names capabilities in, a bit for each a destroy has begun on:
+ * the thread's, its process's, and each table's, so that one already dying hides none of the others.
+ */
+static uint32_t dying_under(const struct thread *t, const struct process *proc,
+                            const struct captable *const tables[PROCESS_TABLES])
 {
-    return obj_pool(&t->hdr)->dying || (proc != NULL && obj_pool(&proc->hdr)->dying) ||
-           (table != NULL && obj_pool(&table->hdr)->dying);
+    uint32_t dying = (obj_pool(&t->hdr)->dying != 0) | (uint32_t)(proc != NULL && obj_pool(&proc->hdr)->dying) << 1;
+    for (unsigned i = 0; i < PROCESS_TABLES; i++) {
+        dying |= (uint32_t)(tables[i] != NULL && obj_pool(&tables[i]->hdr)->dying) << (2 + i);
+    }
+    return dying;
 }
 
 #define PUSH(arr, x)                                                           \
@@ -247,7 +258,7 @@ static void children_of(const struct cap *c, addr_array *out)
  * The rights an operation needs of the capability it is invoked on, as rvuos/abi.h gives them;
  * one invoked on a capability of another type fails before its rights matter.
  */
-_Static_assert(OP_COUNT == 39, "a new operation needs its rights in rights_needed");
+_Static_assert(OP_COUNT == 41, "a new operation needs its rights in rights_needed");
 static uint8_t rights_needed(uint32_t op)
 {
     switch (op) {
@@ -259,6 +270,8 @@ static uint8_t rights_needed(uint32_t op)
     case OP_POOL_ALLOC:
     case OP_PROCESS_INSTALL:
     case OP_PROCESS_UNINSTALL:
+    case OP_PROCESS_MOUNT:
+    case OP_PROCESS_UNMOUNT:
     case OP_THREAD_CONFIGURE:
     case OP_THREAD_RESUME:
     case OP_THREAD_WATCH:
@@ -289,17 +302,17 @@ static uint8_t rights_needed(uint32_t op)
 }
 
 /* Note what a call invokes, as the kernel will resolve it; a fault invokes nothing, whatever a7 holds. */
-static void record_call(const struct captable *table, bool call)
+static void record_call(bool call)
 {
     invoked = false;
     signalled = NULL;
-    if (!call || caller == NULL || table == NULL) {
+    if (!call || caller == NULL) {
         return;
     }
     const struct trap_frame *f = &caller->frame;
     call_op = f->regs[REG_A7];
     call_pc = f->pc;
-    invoked = cap_lookup((struct captable *)table, f->regs[REG_A0], &invoked_cap) == KERR_OK;
+    invoked = slot_lookup(caller, f->regs[REG_A0], &invoked_cap) == KERR_OK;
     if (!invoked || call_op != OP_NOTIFY_SIGNAL || invoked_cap.type != CAP_NOTIFICATION) {
         return;
     }
@@ -342,23 +355,24 @@ static void check_call(void)
 }
 
 /* Note a move's source and destination, as the kernel will resolve them; a fault is no move, whatever a7 holds. */
-static void record_move(const struct captable *table, bool call)
+static void record_move(bool call)
 {
     move_from = move_to = NULL;
-    if (!call || !debug_trace || caller == NULL || table == NULL || caller->frame.regs[REG_A7] != OP_CAP_MOVE) {
+    if (!call || !debug_trace || caller == NULL || caller->frame.regs[REG_A7] != OP_CAP_MOVE) {
         return;
     }
     const struct trap_frame *f = &caller->frame;
     struct cap tc;
-    if (cap_lookup((struct captable *)table, f->regs[REG_A0], &tc) != KERR_OK || tc.type != CAP_CAPTABLE) {
+    if (slot_lookup(caller, f->regs[REG_A0], &tc) != KERR_OK || tc.type != CAP_CAPTABLE) {
         return;
     }
     struct captable *dst = (struct captable *)cap_object(&tc);
-    uint32_t to = f->regs[REG_A1], from = f->regs[REG_A2];
-    if (to >= dst->nslots || from >= table->nslots || table->slots[from].type == CAP_NONE) {
+    uint32_t to = f->regs[REG_A1];
+    struct cap *from = slot_at(caller, f->regs[REG_A2]);
+    if (to >= dst->nslots || from == NULL || from->type == CAP_NONE) {
         return;
     }
-    move_from = (struct cap *)&table->slots[from];
+    move_from = from;
     move_to = &dst->slots[to];
     move_was = *move_from;
     move_parent = parent_of(move_from);
@@ -430,36 +444,63 @@ void history_begin(bool call)
     held.n = nodes.n = 0;
 
     const struct thread *current = core_self()->current;
-    const struct captable *table = current != NULL ? thread_table(current) : NULL;
     caller = current;
     caller_process = current != NULL ? thread_process(current) : NULL;
-    caller_table = table;
-    caller_dying = caller != NULL && dying_under(caller, caller_process, table);
-    for (uint32_t i = 0; table != NULL && i < table->nslots; i++) {
-        const struct cap *c = &table->slots[i];
-        if (c->type == CAP_NONE) {
-            continue;
-        }
-        PUSH(held, grant_of(c));
-        /* A clock that reads holds the counter's frame, which OP_CLOCK_FRAME hands out. */
-        if (c->type == CAP_CLOCK && (c->rights & RIGHT_R)) {
-            const struct granted_range *r = &boot_granted[GRANT_COUNTER];
-            PUSH(held, ((struct grant){ CAP_FRAME, r->rights, r->base, r->size }));
+    /* What the caller holds is what any of its tables does. */
+    for (uint32_t t = 0; t < PROCESS_TABLES; t++) {
+        const struct captable *table = caller_process != NULL ? process_table(caller_process, t) : NULL;
+        caller_tables[t] = table;
+        for (uint32_t i = 0; table != NULL && i < table->nslots; i++) {
+            const struct cap *c = &table->slots[i];
+            if (c->type == CAP_NONE) {
+                continue;
+            }
+            PUSH(held, grant_of(c));
+            /* A clock that reads holds the counter's frame, which OP_CLOCK_FRAME hands out. */
+            if (c->type == CAP_CLOCK && (c->rights & RIGHT_R)) {
+                const struct granted_range *r = &boot_granted[GRANT_COUNTER];
+                PUSH(held, ((struct grant){ CAP_FRAME, r->rights, r->base, r->size }));
+            }
         }
     }
+    caller_dying = caller != NULL ? dying_under(caller, caller_process, caller_tables) : 0;
 
     record_objects(&objects);
     each_node(&objects, record_node);
     qsort(nodes.v, nodes.n, sizeof(nodes.v[0]), cmp_at);
     record_lends();
-    record_move(table, call);
-    record_call(table, call);
+    record_move(call);
+    record_call(call);
 
     ticks_before = sched_ticks;
     traced_before = debug_trace;
     charged = core_self()->payer != NULL ? core_self()->payer : core_self()->turn;
     charged_units = charged != NULL ? charged->time : (struct cap){ 0 };
     charged_balance = charged != NULL ? account_at_count(charged) : 0;
+}
+
+/*
+ * A table mounted by this call is mounted in a process its caller could control.
+ * A process the call built holds the table it was allocated with, which check_node holds to a capability the caller had.
+ */
+static void check_mounts(void)
+{
+    for (size_t i = 0; i < objects_after.n; i++) {
+        uint32_t at = objects_after.v[i].at;
+        const struct obj_header *o = p2v(at);
+        if (o->type != CAP_PROCESS || !is_object(&objects, at)) {
+            continue;
+        }
+        for (unsigned j = 0; j < PROCESS_TABLES; j++) {
+            const struct cap *c = &((const struct process *)o)->tables[j];
+            uint32_t node = v2p(c);
+            const struct node_rec *was = bsearch(&node, nodes.v, nodes.n, sizeof(nodes.v[0]), cmp_at);
+            if (c->type != CAP_NONE && (was == NULL || !same_grant(was->g, grant_of(c))) &&
+                !covered((struct grant){ CAP_PROCESS, RIGHT_W, at, 0 })) {
+                violated("a call mounted a table in a process its caller could not control");
+            }
+        }
+    }
 }
 
 /* An object the call built, which the caller must have been able to build. */
@@ -520,12 +561,14 @@ static void check_node(const struct cap *c)
 
 void history_end(void)
 {
-    if (caller != NULL && !caller_dying && dying_under(caller, caller_process, caller_table)) {
-        violated("a call began to destroy the pool its caller, its process or its table lives in");
+    /* The tables are those the call began with: one it mounted from a dying pool it did not begin to destroy. */
+    if (caller != NULL && (dying_under(caller, caller_process, caller_tables) & ~caller_dying) != 0) {
+        violated("a call began to destroy the pool its caller, its process or one of its tables lives in");
     }
 
     record_objects(&objects_after);
     each_node(&objects_after, check_node);
+    check_mounts();
     check_move();
     check_call();
     check_lends();

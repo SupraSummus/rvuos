@@ -7,11 +7,12 @@ Chapter 5 of the user manual; [`MANUAL.md`](../MANUAL.md) has its contents.
 ### 5.1 Processes, threads and regions
 
 A **process** is a protection domain:
-a capability table, `PROCESS_REGION_SLOTS` region slots, eight today,
+`PROCESS_TABLES` table slots, two today, which hold the capability tables it names capabilities in,
+`PROCESS_REGION_SLOTS` region slots, eight today,
 and the threads that run in it.
 A **thread** is an execution context inside a process:
 a register frame and a state.
-Threads of one process share its regions and its capability table.
+Threads of one process share its regions and its capability tables.
 
 A **frame** is a physical address range with maximum rights,
 and a **region** is a frame installed into one of a process's slots,
@@ -22,9 +23,12 @@ it cannot be installed, and it is made into a frame, a pool or its two halves.
 The kernel does not know what a code segment, a stack or a heap is;
 whoever builds a process decides its layout.
 
-### 5.2 Capabilities and the table
+### 5.2 Capabilities and the tables
 
-A process names everything by **slot index** into its capability table.
+A process names everything by **slot number**, a slot of one of its capability tables:
+`SLOT_IN(t, i)`, `t << SLOT_TABLE_SHIFT | i`, is index `i` of the table in table slot `t`,
+and `SLOT_TABLE_SHIFT` is 10, so the numbers below 1024 are the first table's,
+and a process with one table names its slots by their indices.
 A slot is empty or holds one capability:
 a type, a set of rights, and two words the kernel interprets by type.
 Userspace never sees a slot's contents,
@@ -36,17 +40,30 @@ The kernel resolves the slot,
 checks the capability's type and rights against the operation,
 and only then looks at the arguments;
 section 6.1 gives the exact order.
-An empty slot or an index out of range fails with `KERR_INVALID_CAP`.
+An empty slot, an index out of range, or a number whose table slot holds no table fails with `KERR_INVALID_CAP`.
 
-A process holds its table by a capability of its own,
-derived from the `CapTable` capability it was allocated with.
-The table may lie in any pool,
-and several processes may be allocated with one table, which they then share.
+A process holds each of its tables by a capability of its own,
+derived from the `CapTable` capability it was allocated with, for the first table,
+or mounted with, `OP_PROCESS_MOUNT`, section 6.7, for any table slot.
+A table may lie in any pool,
+and several processes may be allocated with one table, or mount it, and then share it.
 Revoking below that capability, or destroying the pool the table lies in,
-takes the table from the process,
-and from then on every call its threads make fails with `KERR_INVALID_CAP`.
+takes the table from the process, as `OP_PROCESS_UNMOUNT` does,
+and from then on every number pointing into that table slot fails with `KERR_INVALID_CAP`;
+a process whose table slots are all empty fails every call.
 The table itself stays as long as its pool does,
 and so does everything in it.
+
+A process moves to another table by itself, every capability keeping its number:
+it mounts the new table in table slot 1,
+moves each capability `i` to index `i` of it with `OP_CAP_MOVE`, where `SLOT_IN(1, i)` names it meanwhile,
+the new table's own capability last,
+then unmounts table slot 0 and mounts the new table there, both through `SLOT_IN(1, process)`,
+and unmounts table slot 1.
+So a process outgrows the table it was made with, or leaves memory it is to give back,
+which a revoke refuses to destroy while one of its tables lies there, section 5.5.
+No other thread of the process may make a call meanwhile.
+`self_migrate` in `user/lib/self.h` does it.
 
 Rights are three bits:
 
@@ -57,9 +74,9 @@ Rights are three bits:
 | `RIGHT_X` | 4 | execute | `Time`: the threads bound through it run on spare time; `Debug`: halt and drive the machine |
 
 Every operation that produces a capability
-puts it into a slot of the caller's own table,
+puts it into a slot of one of the caller's own tables,
 named by an argument, and that slot must be empty.
-A process needs no capability to receive into its own table.
+A process needs no capability to receive into its own tables.
 The `CapTable` capability exists for writing into a table:
 a parent fills a child's table with `OP_CAP_COPY`, `OP_CAP_DERIVE` or `OP_CAP_MOVE` before starting it,
 and a process that holds a capability to its own table
@@ -79,7 +96,8 @@ The tree grows in these ways:
 | `OP_UNTYPED_RETYPE` of a pool | below the pool's own node, which hangs below the invoked Untyped |
 | `OP_PROCESS_INSTALL` | the installed region hangs below the frame |
 | `OP_POOL_ALLOC` | below the invoked `KernelPool` capability |
-| `OP_POOL_ALLOC` of a `Process` | and the process's hold on its table below the `CapTable` capability |
+| `OP_POOL_ALLOC` of a `Process` | and the process's hold on its first table below the `CapTable` capability |
+| `OP_PROCESS_MOUNT` | the process's hold on the table below the `CapTable` capability |
 | `OP_POOL_ALLOC` of a `Thread` | and the thread's hold on its process below the `Process` capability |
 | `OP_IRQ_BIND` | below the `KernelPool` capability; the line goes with what was derived from it |
 | `OP_IRQ_BIND` | and the `Irq`'s hold on its notification below the `Notification` capability |
@@ -123,7 +141,7 @@ Programs are encouraged to keep the same convention.
 | `Frame` | `CAP_FRAME` | none: the slot holds base and size | boot, `OP_FRAME_CARVE`, `OP_UNTYPED_RETYPE` |
 | `KernelPool` | `CAP_POOL` | the pool's descriptor, at its base | `OP_UNTYPED_RETYPE` |
 | `CapTable` | `CAP_CAPTABLE` | a table of `n` slots | `OP_POOL_ALLOC` |
-| `Process` | `CAP_PROCESS` | a capability to its table, region slots, a PMP image | `OP_POOL_ALLOC` |
+| `Process` | `CAP_PROCESS` | capabilities to its tables, region slots, a PMP image | `OP_POOL_ALLOC` |
 | `Thread` | `CAP_THREAD` | a register frame and a state | `OP_POOL_ALLOC` |
 | `Notification` | `CAP_NOTIFICATION` | one word of sticky bits | `OP_POOL_ALLOC` |
 | `IrqLine` | `CAP_IRQ_LINE` | none: the slot holds the first line and a count | boot, `OP_IRQ_CARVE` |
@@ -217,16 +235,16 @@ Sizes a developer needs for planning, as the kernel rounds them:
 |---|---|
 | pool descriptor | 56 |
 | `CapTable` with `n` slots | 12 + 24 × n, rounded up to 8 |
-| `Process` | 312 (272 with `PMP_MAX_ENTRIES=8`), 320 on the ESP32-C6 |
+| `Process` | 336 (296 with `PMP_MAX_ENTRIES=8`), 344 on the ESP32-C6 |
 | `Thread` | 264 on RISC-V, 208 on ARM |
 | `Notification` | 16 |
 | `Irq` | 48 |
 
 A minimal child process, table of 10 slots, process, thread and two notifications,
-costs 920 bytes including the descriptor on RISC-V, 8 more on the ESP32-C6, and 864 on ARM.
+costs 944 bytes including the descriptor on RISC-V, 8 more on the ESP32-C6, and 888 on ARM.
 
 **Objects in different pools.**
-A process's table, a thread's process and an `Irq`'s notification may each lie in any pool,
+A process's tables, a thread's process and an `Irq`'s notification may each lie in any pool,
 sections 5.2, 5.6 and 5.9:
 each is held by a capability that a destroy of its pool clears.
 
@@ -259,9 +277,9 @@ The destroy:
 - gives the memory back to the Untyped the pool was made of.
 
 The revoke fails with `KERR_STATE`
-when the calling thread, its process or the process's table lies in the Untyped's memory,
+when the calling thread, its process or a table the process mounts lies in the Untyped's memory,
 so a thread cannot destroy what it runs on
-nor the table it names capabilities in,
+nor a table it names capabilities in, which it unmounts or moves out of first,
 and when the table it names the Untyped in does,
 since the capability the call is made through would go half way through the destroy of that table's pool.
 The boot pool holds the root task, which therefore cannot destroy it,
@@ -294,7 +312,7 @@ A thread is **stopped**, **ready** or **waiting**.
 - A thread that faults is stopped where it faulted; see **Faults** below.
 
 A thread holds its process by a capability derived from the `Process` capability it was allocated with,
-as a process holds its table, section 5.2, so the thread may lie in any pool.
+as a process holds its tables, section 5.2, so the thread may lie in any pool.
 Revoking below that capability, or destroying the pool the process lies in,
 takes the process from the thread, and the thread stops for good:
 `OP_THREAD_RESUME` refuses it with `KERR_STATE`.

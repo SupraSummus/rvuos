@@ -51,7 +51,7 @@ what is left:
   A hub's ends are connected again, with the server's word that it let go of the last client;
   a peer could be given the same, which the driver and the network process have not needed, as neither is built again.
 - Every child's objects get a pool of `CHILD_POOL_SIZE`, 4 KiB, whatever its table,
-  where the ESP32-C6's clients fill 912 bytes and its network process 1104,
+  where the ESP32-C6's clients fill 936 bytes and its network process 1128,
   and the driver's own pool, `DRV_OWN_POOL`, is 8 KiB for 1544.
   Sized to fit, they would leave the ESP32-C6's root task 8 KiB more,
   and 14 with the driver's own, at a slot for each block that halving it leaves;
@@ -339,6 +339,11 @@ what is left:
   all with `OP_DEBUG_PREEMPT`, where 186 000 made none.
   None reaches an edge the others do not, so the corpus keeps none of them.
   A mutation that inserts the three together is untried.
+- The mutator's guess of what each slot holds, in `host/mutator.c`, knows one table a thread and nothing of mounts,
+  so a record names a slot of a table mounted second only by `draw_slot`'s chance,
+  and only the seeds move a process to another table.
+  A guess kept per process, of which table each table slot holds, would let a typed record pick from the second,
+  and a mutation could insert a whole move as it repeats a record.
 - `make mutants-fuzz` finds neither `borrower-destroy-keeps-lenders`, `borrower-destroy-keeps-waiting`
   nor `lend-ignores-right` from the corpus in 20000 runs, and only the seeds catch them:
   a thread that lends to another of a pool a revoke destroys after,
@@ -405,10 +410,16 @@ what is left:
   A record that writes garbage into the log's `taken` is beyond the fuzzer,
   since a store record leaves the log alone, which the driver carries out on QEMU;
   the clamp in `klog.c` is checked by reading it.
-- `KERR_STATE` for a thread destroying the pool its table or its process lies in, but not the thread,
-  is checked only for the two together:
-  the driver's third thread lies apart from its process, but the process's table lies with it,
+- `KERR_STATE` for a thread destroying the pool its process or its first table lies in, but not the thread,
+  is checked only for the two together, and alone only for a table mounted second, `tests/seeds/revoke-keeps-mounted-table`:
+  the driver's third thread lies apart from its process, but the process's first table lies with it,
   and the demo's root task lives with both.
+- That a call which fails changes nothing is checked by no invariant,
+  so a call that tells two slots apart by their numbers, where a table mounted twice gives one slot two,
+  could make half of what it makes and fail, and nothing but `tests/seeds/table-mounted-twice`'s status would show it,
+  which the host and QEMU agree on;
+  `OP_UNTYPED_SPLIT`'s and `OP_IRQ_BIND`'s comparisons are checked by reading them.
+  A host check that a failed call left every node as it was would cover all of them.
 - The replay driver has three threads, and the third shares the second's process and lies in the first's pool.
   More of them, each with its process, pool and Untyped as the second has,
   would give the derivation below the free RAM more branches;

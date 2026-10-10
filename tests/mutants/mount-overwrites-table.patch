@@ -1,0 +1,20 @@
+A mount fills a table slot that holds a table already,
+so the node of the table it held stays in its ring, a slot that no longer is what the ring says,
+and a revoke or a destroy that comes to it clears the new table instead.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: slot is not derived from its parent
+
+diff --git a/kernel/process.c b/kernel/process.c
+--- a/kernel/process.c
++++ b/kernel/process.c
+@@ -148,9 +148,6 @@ int process_mount(struct process *proc, uint32_t index, const struct cap *table,
+     if (index >= PROCESS_TABLES) {
+         return KERR_INVALID_ARG;
+     }
+-    if (proc->tables[index].type != CAP_NONE) {
+-        return KERR_SLOT_IN_USE;
+-    }
+     /* It hangs below the capability it was mounted with, as the first hangs below the one the process was made with. */
+     proc->tables[index] = *table;
+     cap_attach(parent, &proc->tables[index]);

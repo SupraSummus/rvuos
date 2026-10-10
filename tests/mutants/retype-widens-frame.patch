@@ -7,7 +7,7 @@ Report: slot is not derived from its parent
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -225,7 +225,7 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
+@@ -299,7 +299,7 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
              c = cap_to_object(&pool->hdr, RIGHT_ALL);
              parent = &pool->node;
          } else {
@@ -15,4 +15,4 @@ diff --git a/kernel/syscall.c b/kernel/syscall.c
 +            c = cap_to_frame(base, size, RIGHT_ALL);
          }
          arg[1] = base;
-         return cap_store(table, arg[2], &c, parent);
+         return slot_store(t, arg[2], &c, parent);

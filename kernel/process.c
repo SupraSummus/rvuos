@@ -1,6 +1,6 @@
 /*
- * Processes: region slots and the PMP image derived from them.
- * See DESIGN.md, "Region slots".
+ * Processes: table slots, region slots and the PMP image derived from the region slots.
+ * See DESIGN.md, "A process's tables" and "Region slots".
  */
 
 #include "kernel.h"
@@ -136,9 +136,35 @@ int process_uninstall(struct process *proc, unsigned slot)
     if (slot >= PROCESS_REGION_SLOTS) {
         return KERR_INVALID_ARG;
     }
-    /* Leaves the tree as clearing a table slot does; process_drop then rebuilds the image. */
+    /* Leaves the tree as clearing a slot of a table does; process_drop then rebuilds the image. */
     if (proc->slots[slot].type != CAP_NONE) {
         cap_delete(&proc->slots[slot], false);
+    }
+    return KERR_OK;
+}
+
+int process_mount(struct process *proc, uint32_t index, const struct cap *table, struct cap *parent)
+{
+    if (index >= PROCESS_TABLES) {
+        return KERR_INVALID_ARG;
+    }
+    if (proc->tables[index].type != CAP_NONE) {
+        return KERR_SLOT_IN_USE;
+    }
+    /* It hangs below the capability it was mounted with, as the first hangs below the one the process was made with. */
+    proc->tables[index] = *table;
+    cap_attach(parent, &proc->tables[index]);
+    return KERR_OK;
+}
+
+int process_unmount(struct process *proc, uint32_t index)
+{
+    if (index >= PROCESS_TABLES) {
+        return KERR_INVALID_ARG;
+    }
+    /* Nothing is derived from a table slot, so it leaves the tree as a leaf, and the table stays where it is. */
+    if (proc->tables[index].type != CAP_NONE) {
+        cap_delete(&proc->tables[index], false);
     }
     return KERR_OK;
 }

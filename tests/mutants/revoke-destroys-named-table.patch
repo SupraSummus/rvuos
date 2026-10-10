@@ -9,14 +9,14 @@ Report: a call stopped where its caller cannot make it again
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -26,8 +26,9 @@ static struct cap *slot_node(struct thread *t, uint32_t slot)
-  */
+@@ -28,8 +28,8 @@ static struct cap *slot_node(struct thread *t, uint32_t slot)
  static bool holds_caller(struct thread *t, const struct captable *named, uint32_t base, uint32_t size)
  {
+     const struct process *proc = thread_process(t);
+-    if (range_contains(base, size, t->hdr.pool) || range_contains(base, size, proc->hdr.pool) ||
+-        range_contains(base, size, named->hdr.pool)) {
 +    (void)named;
-     return range_contains(base, size, t->hdr.pool) || range_contains(base, size, thread_process(t)->hdr.pool) ||
--           range_contains(base, size, thread_table(t)->hdr.pool) || range_contains(base, size, named->hdr.pool);
-+           range_contains(base, size, thread_table(t)->hdr.pool);
- }
- 
- /* The bytes of a1 to a3 into the log, the lowest of a1 first, up to the first zero. */
++    if (range_contains(base, size, t->hdr.pool) || range_contains(base, size, proc->hdr.pool)) {
+         return true;
+     }
+     for (uint32_t i = 0; i < PROCESS_TABLES; i++) {

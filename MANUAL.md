@@ -21,7 +21,7 @@ Contents:
     - [Reading the transcript](manual/targets.md#reading-the-transcript)
 5. [The programming model](manual/programming-model.md#5-the-programming-model)
     - [5.1 Processes, threads and regions](manual/programming-model.md#51-processes-threads-and-regions)
-    - [5.2 Capabilities and the table](manual/programming-model.md#52-capabilities-and-the-table)
+    - [5.2 Capabilities and the tables](manual/programming-model.md#52-capabilities-and-the-tables)
     - [5.3 Objects](manual/programming-model.md#53-objects)
     - [5.4 Memory: Untyped, frames and installing](manual/programming-model.md#54-memory-untyped-frames-and-installing)
     - [5.5 Pools](manual/programming-model.md#55-pools)
@@ -85,7 +85,7 @@ Three goals shape everything, in priority order.
    a capability to that memory installs it in both.
    The kernel's own memory is reachable by nobody.
 2. **Capability-based authority.**
-   Every system call names a capability in the caller's own table,
+   Every system call names a capability in the caller's own tables,
    and the kernel hands nothing out by a global name:
    there is no way to look up another process, thread or kernel object,
    and a device's registers reach a process only as a frame

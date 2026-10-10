@@ -287,12 +287,14 @@ uint32_t child_free(struct self *s, struct child *c)
     /*
      * Its pool: its objects go with it, and so does every capability to them, wherever it lies;
      * its thread's binding to its units goes with the thread, and its timer line with the Irq.
+     * Then what it built of its own, once its thread and process are gone,
+     * since that may hold the table it names everything in, if it moved to one, see self_migrate.
      */
-    if (c->own.untyped != 0) {
-        note(s, &f, 0, mem_give(s, &c->own));
-    }
     if (c->pool.untyped != 0) {
         note(s, &f, 0, mem_give(s, &c->pool));
+    }
+    if (c->own.untyped != 0) {
+        note(s, &f, 0, mem_give(s, &c->own));
     }
     units_give(s, c->unit, c->units);
     units_give(s, c->own_unit, c->own_units);

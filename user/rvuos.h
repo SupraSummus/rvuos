@@ -83,6 +83,18 @@ static inline uint32_t rv_process_uninstall(uint32_t process_cap, uint32_t regio
     return rv_invoke(OP_PROCESS_UNINSTALL, process_cap, region, 0, 0);
 }
 
+/* OP_PROCESS_MOUNT: a table in a table slot of the process, whose threads then name its slots SLOT_IN(index, i). */
+static inline uint32_t rv_process_mount(uint32_t process_cap, uint32_t index, uint32_t table_cap)
+{
+    return rv_invoke(OP_PROCESS_MOUNT, process_cap, index, table_cap, 0);
+}
+
+/* OP_PROCESS_UNMOUNT: clear a table slot of the process. */
+static inline uint32_t rv_process_unmount(uint32_t process_cap, uint32_t index)
+{
+    return rv_invoke(OP_PROCESS_UNMOUNT, process_cap, index, 0, 0);
+}
+
 /* OP_THREAD_CONFIGURE: where a stopped thread starts, and the argument its entry is called with. */
 static inline uint32_t rv_thread_configure(uint32_t thread_cap, uint32_t pc, uint32_t sp, uint32_t arg)
 {

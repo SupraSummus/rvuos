@@ -12,23 +12,34 @@
 
 bool debug_trace;
 
-/* The slot itself, as a node of the derivation tree, once cap_lookup has vetted the index. */
+/* The slot itself, as a node of the derivation tree, once slot_lookup has vetted the number. */
 static struct cap *slot_node(struct thread *t, uint32_t slot)
 {
-    return &thread_table(t)->slots[slot];
+    return &slot_table(t, slot)->slots[slot_index(slot)];
 }
 
 /*
  * True if [base, base + size), the memory of an Untyped, holds what a revoke below it must leave:
- * the calling thread, its process and the process's table, which it runs on and names capabilities in,
+ * the calling thread, its process and the tables the process mounts, which it runs on and names capabilities in,
  * and the table the Untyped is named in, since the capability to it that the call is made through
  * would go half way through the destroy of that table's pool.
  * A pool lies within an Untyped or outside it, so its base says which.
  */
 static bool holds_caller(struct thread *t, const struct captable *named, uint32_t base, uint32_t size)
 {
-    return range_contains(base, size, t->hdr.pool) || range_contains(base, size, thread_process(t)->hdr.pool) ||
-           range_contains(base, size, thread_table(t)->hdr.pool) || range_contains(base, size, named->hdr.pool);
+    const struct process *proc = thread_process(t);
+    if (range_contains(base, size, t->hdr.pool) || range_contains(base, size, proc->hdr.pool) ||
+        range_contains(base, size, named->hdr.pool)) {
+        return true;
+    }
+    for (uint32_t i = 0; i < PROCESS_TABLES; i++) {
+        LOOP_BOUND(PROCESS_TABLES);
+        const struct captable *table = process_table(proc, i);
+        if (table != NULL && range_contains(base, size, table->hdr.pool)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /* The bytes of a1 to a3 into the log, the lowest of a1 first, up to the first zero. */
@@ -96,7 +107,7 @@ static int op_captable(struct thread *t, uint32_t slot, const struct cap *cap,
     case OP_CAP_COPY:
     case OP_CAP_DERIVE: {
         struct cap src;
-        int err = cap_lookup(thread_table(t), arg[2], &src);
+        int err = slot_lookup(t, arg[2], &src);
         if (err != KERR_OK) {
             return err;
         }
@@ -122,7 +133,7 @@ static int op_captable(struct thread *t, uint32_t slot, const struct cap *cap,
     case OP_CAP_MOVE: {
         /* The node goes where the source stood, so the same revokes reach it and it reaches the same nodes. */
         struct cap src;
-        int err = cap_lookup(thread_table(t), arg[2], &src);
+        int err = slot_lookup(t, arg[2], &src);
         if (err != KERR_OK) {
             return err;
         }
@@ -144,7 +155,7 @@ static int op_captable(struct thread *t, uint32_t slot, const struct cap *cap,
         if (c.type == CAP_UNTYPED && holds_caller(t, table, untyped_base(&c), untyped_size(&c))) {
             return KERR_STATE;
         }
-        return cap_revoke_below(&table->slots[arg[1]], slot_node(t, slot), true) ? KERR_OK : KERR_PREEMPTED;
+        return cap_revoke_below(&table->slots[arg[1]], slot, true) ? KERR_OK : KERR_PREEMPTED;
     }
     default:
         return KERR_WRONG_TYPE;
@@ -189,7 +200,7 @@ static int op_clock(struct thread *t, uint32_t slot, const struct cap *cap, uint
     case OP_CLOCK_FRAME: {
         const struct granted_range *g = &boot_granted[GRANT_COUNTER];
         struct cap r = cap_to_frame(g->base, g->size, g->rights);
-        return cap_store(thread_table(t), arg[1], &r, slot_node(t, slot));
+        return slot_store(t, arg[1], &r, slot_node(t, slot));
     }
     case OP_CLOCK_WATCHDOG: {
         uint32_t us = arg[1];
@@ -227,7 +238,7 @@ static int op_frame(struct thread *t, uint32_t slot, const struct cap *cap,
             return KERR_INVALID_ARG;
         }
         struct cap sub = cap_to_frame(base + off, len, cap->rights);
-        return cap_store(thread_table(t), arg[3], &sub, slot_node(t, slot));
+        return slot_store(t, arg[3], &sub, slot_node(t, slot));
     }
     default:
         return KERR_WRONG_TYPE;
@@ -241,7 +252,6 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
     uint32_t base = untyped_base(cap);
     uint32_t size = untyped_size(cap);
     struct cap *u = slot_node(t, slot);
-    struct captable *table = thread_table(t);
 
     switch (op) {
     case OP_UNTYPED_INFO:
@@ -269,7 +279,7 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
                 return KERR_INVALID_ARG;
             }
         }
-        int err = cap_slot_free(table, arg[2]);
+        int err = slot_vacant(t, arg[2]);
         if (err != KERR_OK) {
             return err;
         }
@@ -292,29 +302,33 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
             c = cap_to_frame(base, size, cap->rights);
         }
         arg[1] = base;
-        return cap_store(table, arg[2], &c, parent);
+        return slot_store(t, arg[2], &c, parent);
     }
     case OP_UNTYPED_SPLIT: {
         /* Each half is a block, so that a frame made of it is one NAPOT entry. */
         uint32_t half = size / 2;
-        if (!napot_block(base, half) || arg[1] == arg[2]) {
+        if (!napot_block(base, half)) {
             return KERR_INVALID_ARG;
         }
-        int err = cap_slot_free(table, arg[1]);
+        int err = slot_vacant(t, arg[1]);
         if (err == KERR_OK) {
-            err = cap_slot_free(table, arg[2]);
+            err = slot_vacant(t, arg[2]);
         }
         if (err != KERR_OK) {
             return err;
         }
+        /* Two numbers name one slot when they are one, or point into one table mounted twice. */
+        if (slot_node(t, arg[1]) == slot_node(t, arg[2])) {
+            return KERR_INVALID_ARG;
+        }
         if (!untyped_free(u)) {
             return KERR_NO_MEMORY;
         }
-        /* Both slots are free, so neither store fails and the split is whole or not at all. */
+        /* Both slots are free and distinct, so neither store fails and the split is whole or not at all. */
         struct cap lower = cap_to_untyped(base, half, cap->rights);
         struct cap upper = cap_to_untyped(base + half, half, cap->rights);
-        cap_store(table, arg[1], &lower, u);
-        return cap_store(table, arg[2], &upper, u);
+        slot_store(t, arg[1], &lower, u);
+        return slot_store(t, arg[2], &upper, u);
     }
     default:
         return KERR_WRONG_TYPE;
@@ -338,7 +352,7 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
         return KERR_STATE;
     }
     uint32_t dst = arg[2];
-    int err = cap_slot_free(thread_table(t), dst);
+    int err = slot_vacant(t, dst);
     if (err != KERR_OK) {
         return err;
     }
@@ -351,7 +365,7 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
      */
     case CAP_PROCESS: {
         struct cap tc;
-        int terr = cap_lookup_typed(thread_table(t), arg[3], CAP_CAPTABLE, RIGHT_W, &tc);
+        int terr = slot_lookup_typed(t, arg[3], CAP_CAPTABLE, RIGHT_W, &tc);
         if (terr != KERR_OK) {
             return terr;
         }
@@ -359,15 +373,15 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
         if (proc == NULL) {
             return KERR_NO_MEMORY;
         }
-        /* It hangs below the capability it was made with, so a revoke above that takes it. */
-        proc->table = tc;
-        cap_attach(slot_node(t, arg[3]), &proc->table);
+        /* Its first table hangs below the capability it was made with, so a revoke above that takes it. */
+        proc->tables[0] = tc;
+        cap_attach(slot_node(t, arg[3]), &proc->tables[0]);
         obj = &proc->hdr;
         break;
     }
     case CAP_THREAD: {
         struct cap pc;
-        int perr = cap_lookup_typed(thread_table(t), arg[3], CAP_PROCESS, RIGHT_W, &pc);
+        int perr = slot_lookup_typed(t, arg[3], CAP_PROCESS, RIGHT_W, &pc);
         if (perr != KERR_OK) {
             return perr;
         }
@@ -412,7 +426,7 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
 
     /* A new object hangs below the capability it was allocated through, and so below the pool's node. */
     struct cap c = cap_to_object(obj, RIGHT_ALL);
-    return cap_store(thread_table(t), dst, &c, slot_node(t, slot));
+    return slot_store(t, dst, &c, slot_node(t, slot));
 }
 
 static int op_process(struct thread *t, const struct cap *cap,
@@ -423,7 +437,7 @@ static int op_process(struct thread *t, const struct cap *cap,
     switch (op) {
     case OP_PROCESS_INSTALL: {
         struct cap region;
-        int err = cap_lookup_typed(thread_table(t), arg[2], CAP_FRAME, 0, &region);
+        int err = slot_lookup_typed(t, arg[2], CAP_FRAME, 0, &region);
         if (err != KERR_OK) {
             return err;
         }
@@ -443,6 +457,16 @@ static int op_process(struct thread *t, const struct cap *cap,
     }
     case OP_PROCESS_UNINSTALL:
         return process_uninstall(proc, arg[1]);
+    case OP_PROCESS_MOUNT: {
+        struct cap tc;
+        int err = slot_lookup_typed(t, arg[2], CAP_CAPTABLE, RIGHT_W, &tc);
+        if (err != KERR_OK) {
+            return err;
+        }
+        return process_mount(proc, arg[1], &tc, slot_node(t, arg[2]));
+    }
+    case OP_PROCESS_UNMOUNT:
+        return process_unmount(proc, arg[1]);
     default:
         return KERR_WRONG_TYPE;
     }
@@ -509,7 +533,7 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
         uint32_t bits = arg[2];
         struct cap nc;
         if (bits != 0) {
-            int err = cap_lookup_typed(thread_table(t), arg[1], CAP_NOTIFICATION, RIGHT_W, &nc);
+            int err = slot_lookup_typed(t, arg[1], CAP_NOTIFICATION, RIGHT_W, &nc);
             if (err != KERR_OK) {
                 return err;
             }
@@ -542,7 +566,7 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
 static __attribute__((noinline)) int op_lend(struct thread *t, struct notification *ntfn, uint32_t *arg)
 {
     struct cap bc;
-    int err = cap_lookup_typed(thread_table(t), arg[1], CAP_THREAD, RIGHT_X, &bc);
+    int err = slot_lookup_typed(t, arg[1], CAP_THREAD, RIGHT_X, &bc);
     if (err != KERR_OK) {
         return err;
     }
@@ -591,7 +615,7 @@ static int op_notification(struct thread *t, uint32_t slot, const struct cap *ca
         if (sub.b == 0) {
             return KERR_INVALID_ARG;
         }
-        return cap_store(thread_table(t), arg[2], &sub, slot_node(t, slot));
+        return slot_store(t, arg[2], &sub, slot_node(t, slot));
     }
     case OP_NOTIFY_WAIT:
         if (!(cap->rights & RIGHT_R)) {
@@ -623,7 +647,7 @@ static int carve_range(struct thread *t, uint32_t slot, const struct cap *cap, c
         return KERR_INVALID_ARG;
     }
     struct cap sub = { .type = cap->type, .rights = cap->rights, .a = cap->a + off, .b = len };
-    return cap_store(thread_table(t), arg[3], &sub, slot_node(t, slot));
+    return slot_store(t, arg[3], &sub, slot_node(t, slot));
 }
 
 /* arg[1..] carry the arguments in. */
@@ -645,7 +669,7 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
             return KERR_INVALID_ARG;
         }
         struct cap pc;
-        int err = cap_lookup_typed(thread_table(t), arg[1], CAP_POOL, RIGHT_W, &pc);
+        int err = slot_lookup_typed(t, arg[1], CAP_POOL, RIGHT_W, &pc);
         if (err != KERR_OK) {
             return err;
         }
@@ -655,7 +679,7 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
         }
         /* The Irq signals on its creator's behalf, so the creator must be able to. */
         struct cap nc;
-        err = cap_lookup_typed(thread_table(t), arg[2], CAP_NOTIFICATION, RIGHT_W, &nc);
+        err = slot_lookup_typed(t, arg[2], CAP_NOTIFICATION, RIGHT_W, &nc);
         if (err != KERR_OK) {
             return err;
         }
@@ -663,9 +687,9 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
         if (line_binding(first) != NULL || line_is_cores(first)) {
             return KERR_OVERLAP;
         }
-        /* The invoked slot is cleared below, so it may receive the Irq capability. */
-        if (arg[3] != slot) {
-            err = cap_slot_free(thread_table(t), arg[3]);
+        /* The invoked slot is cleared below, so it may receive the Irq capability, under whichever number names it. */
+        if (slot_at(t, arg[3]) != slot_node(t, slot)) {
+            err = slot_vacant(t, arg[3]);
             if (err != KERR_OK) {
                 return err;
             }
@@ -674,7 +698,7 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
         if (!pool_fits(pool, sizeof(struct irq))) {
             return KERR_NO_MEMORY;
         }
-        if (!cap_revoke_below(slot_node(t, slot), slot_node(t, slot), true)) {
+        if (!cap_revoke_below(slot_node(t, slot), slot, true)) {
             return KERR_PREEMPTED;
         }
         struct irq *irq = pool_alloc(pool, CAP_IRQ, sizeof(*irq));
@@ -689,7 +713,7 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
         cap_delete(slot_node(t, slot), false);
         /* Its bits are zero, so it is disarmed, and its line stays masked as every line does until a set. */
         struct cap ic = cap_to_object(&irq->hdr, RIGHT_ALL);
-        return cap_store(thread_table(t), arg[3], &ic, slot_node(t, arg[1]));
+        return slot_store(t, arg[3], &ic, slot_node(t, arg[1]));
     }
     default:
         return KERR_WRONG_TYPE;
@@ -708,7 +732,7 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
             return KERR_NO_RIGHTS;
         }
         struct cap tc;
-        int err = cap_lookup_typed(thread_table(t), arg[1], CAP_THREAD, RIGHT_W, &tc);
+        int err = slot_lookup_typed(t, arg[1], CAP_THREAD, RIGHT_W, &tc);
         if (err != KERR_OK) {
             return err;
         }
@@ -837,15 +861,18 @@ static void trace_call(uint32_t op, uint32_t slot, const uint32_t *arg, int stat
 static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
 {
     /*
-     * A thread whose process, or its process's table, was taken names nothing.
-     * Within a call only a revoke, which then returns, can take either.
+     * A thread whose process was taken names nothing,
+     * and one whose process mounts no table where the slot points names nothing there.
+     * Within a call only a revoke takes either, or an unmount a table, and the call then returns.
+     * The lookup is slot_lookup's spelt out, which keeps the compiler from inlining the handlers into this frame,
+     * on the stack's deepest path; see DESIGN.md, "Bounded stack".
      */
-    struct captable *table = thread_table(t);
+    struct captable *table = slot_table(t, slot);
     if (table == NULL) {
         return KERR_INVALID_CAP;
     }
     struct cap cap;
-    int err = cap_lookup(table, slot, &cap);
+    int err = cap_lookup(table, slot_index(slot), &cap);
     if (err != KERR_OK) {
         return err;
     }

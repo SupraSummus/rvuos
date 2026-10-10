@@ -3,17 +3,28 @@ so a thread that lives there and names an Untyped in another table
 destroys the pool it runs from, itself with it, and the call returns into a frame that is gone.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
-Report: a call began to destroy the pool its caller, its process or its table lives in
+Report: a call began to destroy the pool its caller, its process or one of its tables lives in
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -26,8 +26,8 @@ static struct cap *slot_node(struct thread *t, uint32_t slot)
+@@ -27,19 +27,8 @@ static struct cap *slot_node(struct thread *t, uint32_t slot)
   */
  static bool holds_caller(struct thread *t, const struct captable *named, uint32_t base, uint32_t size)
  {
--    return range_contains(base, size, t->hdr.pool) || range_contains(base, size, thread_process(t)->hdr.pool) ||
--           range_contains(base, size, thread_table(t)->hdr.pool) || range_contains(base, size, named->hdr.pool);
+-    const struct process *proc = thread_process(t);
+-    if (range_contains(base, size, t->hdr.pool) || range_contains(base, size, proc->hdr.pool) ||
+-        range_contains(base, size, named->hdr.pool)) {
+-        return true;
+-    }
+-    for (uint32_t i = 0; i < PROCESS_TABLES; i++) {
+-        LOOP_BOUND(PROCESS_TABLES);
+-        const struct captable *table = process_table(proc, i);
+-        if (table != NULL && range_contains(base, size, table->hdr.pool)) {
+-            return true;
+-        }
+-    }
+-    return false;
 +    (void)t;
 +    return range_contains(base, size, named->hdr.pool);
  }

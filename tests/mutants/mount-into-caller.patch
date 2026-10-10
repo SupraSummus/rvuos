@@ -1,0 +1,18 @@
+A mount fills a table slot of the caller's own process rather than of the process it was invoked on,
+so a capability to one process changes what another names.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a call mounted a table in a process its caller could not control
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -463,7 +463,7 @@ static int op_process(struct thread *t, const struct cap *cap,
+         if (err != KERR_OK) {
+             return err;
+         }
+-        return process_mount(proc, arg[1], &tc, slot_node(t, arg[2]));
++        return process_mount(thread_process(t), arg[1], &tc, slot_node(t, arg[2]));
+     }
+     case OP_PROCESS_UNMOUNT:
+         return process_unmount(proc, arg[1]);

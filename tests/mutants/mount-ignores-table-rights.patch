@@ -1,0 +1,19 @@
+A mount takes a CapTable capability without the right to write the table,
+so a process comes to name the capabilities of a table its holder was let to read and nothing more,
+where only one that may write a table makes it a process's.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: process's table slot without the right to write the table
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -459,7 +459,7 @@ static int op_process(struct thread *t, const struct cap *cap,
+         return process_uninstall(proc, arg[1]);
+     case OP_PROCESS_MOUNT: {
+         struct cap tc;
+-        int err = slot_lookup_typed(t, arg[2], CAP_CAPTABLE, RIGHT_W, &tc);
++        int err = slot_lookup_typed(t, arg[2], CAP_CAPTABLE, 0, &tc);
+         if (err != KERR_OK) {
+             return err;
+         }

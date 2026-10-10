@@ -45,12 +45,12 @@ A walk asks only after a step, so every attempt takes something away and the res
 Whether `intr_pending` is right changes when a walk stops, never what it does.
 A restart is a new call:
 it checks everything again, and revokes what was derived in between too.
-A revoke that takes its caller's table, the caller's process,
-or the capability the call was made through ends at that step:
+A revoke after whose step the slot number the call was made through no longer names a filled slot ends at that step,
+as when it took the caller's process, the table the number points into, or the capability the call was made through:
 nothing can make the call again,
 so where an interrupt landed would otherwise decide how far it got.
 A pool the revoke destroys takes none of them,
-since a revoke below an Untyped refuses when the caller's process or table,
+since a revoke below an Untyped refuses when the caller's process or a table it mounts,
 or the table the call names, lies in the Untyped's memory;
 see "Kernel pools and revocation".
 So a bind revokes only once every check that can fail has passed,
@@ -97,7 +97,7 @@ The host answers every `intr_pending` with yes, the worst case,
 so each preemptible call stops after its first step, is made again,
 and the self-check runs between any two steps;
 every host harness requires a stopped call to have taken a node, a link, an object or a waiter away,
-and to leave its caller running, holding its table and the capability it made the call through,
+and to leave its caller running, its slot number still naming the capability it made the call through,
 so that it can make the call again.
 
 **Where the kernel falls short.**

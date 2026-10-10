@@ -28,7 +28,7 @@ Contents:
   - [Object types](design/objects.md#object-types)
   - [Kernel pools and revocation](design/objects.md#kernel-pools-and-revocation)
   - [The derivation tree](design/objects.md#the-derivation-tree)
-  - [A process's table](design/objects.md#a-processs-table)
+  - [A process's tables](design/objects.md#a-processs-tables)
   - [Region slots](design/objects.md#region-slots)
   - [Threads](design/objects.md#threads)
   - [Faults](design/objects.md#faults)

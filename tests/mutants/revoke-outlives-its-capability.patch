@@ -8,12 +8,12 @@ Report: a call stopped where its caller cannot make it again
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -254,7 +254,7 @@ bool cap_revoke_below(struct cap *root, const struct cap *through, bool preempt)
-          * or the capability it was made through ends there:
-          * the caller could not make the call again, so an interrupt must not decide how far it got.
+@@ -257,7 +257,7 @@ bool cap_revoke_below(struct cap *root, uint32_t through, bool preempt)
+          * A table slot of its process can only be cleared here, never filled, so the number still names the same slot.
           */
--        if (thread_table(core_self()->current) == NULL || through->type == CAP_NONE) {
-+        if (thread_table(core_self()->current) == NULL || through == NULL) {
+         const struct cap *at = slot_at(core_self()->current, through);
+-        if (at == NULL || at->type == CAP_NONE) {
++        if (at == NULL) {
              return true;
          }
          if (root->child != 0 && cap_stop_here(preempt)) {

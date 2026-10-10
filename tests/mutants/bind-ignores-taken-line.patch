@@ -9,7 +9,7 @@ Report: irq is missing from the line table
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -558,7 +558,7 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
+@@ -684,7 +684,7 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
              return err;
          }
          /* The cores' line is bound already, to the kernel. */
@@ -17,4 +17,4 @@ diff --git a/kernel/syscall.c b/kernel/syscall.c
 +        if (line_is_cores(first)) {
              return KERR_OVERLAP;
          }
-         /* The invoked slot is cleared below, so it may receive the Irq capability. */
+         /* The invoked slot is cleared below, so it may receive the Irq capability, under whichever number names it. */

@@ -244,6 +244,40 @@ void passer_main(struct child_page *page)
     }
 }
 
+/*
+ * Moves its table to one twice as large, a notification it made in a slot of its own among what moves,
+ * then makes another in the first slot past the old end, signals it there and deletes it through s.table,
+ * which the old table, too small for that slot, would refuse; the second table slot is empty again.
+ */
+void mover_main(struct child_page *page)
+{
+    struct mover_page *p = (struct mover_page *)page;
+    struct self s;
+    uint32_t status, near, bits = 0;
+    child_self(&s, &p->own);
+    child_report(page, CHILD_RUNNING);
+    if ((status = slot_new(&s, &near)) != KERR_OK ||
+        (status = rv_pool_alloc(s.pool, CAP_NOTIFICATION, near, 0)) != KERR_OK) {
+        child_fail(page, MOVER_STEP_MOVE, status);
+    }
+    uint32_t end = s.slot_end, unused = slots_unused(&s);
+    if ((status = self_migrate(&s, s.pool, 2 * end)) != KERR_OK || slots_unused(&s) != unused + end ||
+        (status = rv_signal(near, 0x1u)) != KERR_OK || (status = rv_wait(near, &bits)) != KERR_OK || bits != 0x1u ||
+        (status = slot_free(&s, near)) != KERR_OK || rv_signal(SLOT_IN(1, s.inbox), 0x1u) != KERR_INVALID_CAP) {
+        child_fail(page, MOVER_STEP_MOVE, status);
+    }
+    if ((status = rv_pool_alloc(s.pool, CAP_NOTIFICATION, end, 0)) != KERR_OK ||
+        (status = rv_signal(end, 0x1u)) != KERR_OK || (status = rv_wait(end, &bits)) != KERR_OK || bits != 0x1u ||
+        (status = rv_cap_delete(s.table, end)) != KERR_OK) {
+        child_fail(page, MOVER_STEP_FAR, status);
+    }
+    child_report(page, MOVER_MOVED);
+    for (;;) {
+        child_answer(page);
+        wait_any();
+    }
+}
+
 /* The builder's thread, with a0 at the builder's page: a sleep on its own timer, then a breakpoint. */
 static __attribute__((noreturn)) void worker_main(struct builder_page *p)
 {

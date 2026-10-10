@@ -327,12 +327,20 @@ static void check_process(const struct process *proc)
     }
     check_pmp_image(proc, proc->pmp.addr, proc->pmp.cfg, proc->pmp.count, false);
 
-    /* The sweep clears the table slot with the table, in whatever pool; the tree check reads its links. */
-    const struct cap *tc = &proc->table;
-    if (tc->type != CAP_NONE) {
-        struct obj_header *t = object_find(tc->a);
-        if (tc->type != CAP_CAPTABLE || t == NULL || t->type != CAP_CAPTABLE) {
-            fail("process's table slot names no live table", v2p(proc), tc->type, tc->a);
+    /*
+     * The sweep clears a table slot with the table, in whatever pool; the tree check reads its links.
+     * Only a capability that may write a table makes it a process's, by an allocation or a mount.
+     */
+    for (unsigned i = 0; i < PROCESS_TABLES; i++) {
+        const struct cap *tc = &proc->tables[i];
+        if (tc->type != CAP_NONE) {
+            struct obj_header *t = object_find(tc->a);
+            if (tc->type != CAP_CAPTABLE || t == NULL || t->type != CAP_CAPTABLE) {
+                fail("process's table slot names no live table", v2p(proc), i, tc->a);
+            }
+            if (!(tc->rights & RIGHT_W)) {
+                fail("process's table slot without the right to write the table", v2p(proc), i, tc->rights);
+            }
         }
     }
 }
@@ -1021,7 +1029,7 @@ static void check_captable(const struct captable *table)
  * The derivation tree.
  *
  * Its nodes are the slots of every live table,
- * the table slot and region slots of every live process,
+ * the table slots and region slots of every live process,
  * the process, units and watch of every live thread
  * and the notification of every live Irq,
  * linked by physical address and never checked on use,
