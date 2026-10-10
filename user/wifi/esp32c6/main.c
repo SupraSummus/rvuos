@@ -420,26 +420,13 @@ static __attribute__((noreturn)) void attend(struct drv *d)
 }
 
 /*
- * The driver's own esp_wifi_start, taking the libraries' bring-up over a step at a time: the body is the libraries'
- * wifi_start_process written out -- ieee80211_set_hmac_stop, whose zero the byte holds until their stop, gone; the
- * hardware bring-up's calls, wifi_mode_set, _do_wifi_start, and ieee80211_update_phy_country, gone -- so
- * each can be taken over and the window's sequence held to the libraries' by tools/mac-trace.py's diff. Only the
- * station is written; the libraries' start brings an interface up per mode -- reason 0 the station, 1 the soft AP,
- * 3 then both, and none for another -- so another mode stops here rather than guesses. Their adc2_wifi_acquire, a
- * weak stub in their ieee80211_ioctl.o that returns 0, is left out. See NOTES.md.
+ * The driver's own esp_wifi_start, the libraries' wifi_start_process written out for the station, which the driver
+ * brings up alone: the hardware bring-up's calls and the station's start, with none of the libraries' state, so the
+ * window's sequence is held to the libraries' by tools/mac-trace.py's diff. Their init, their mode and their state --
+ * their ieee80211_set_hmac_stop, wifi_mode_set, _do_wifi_start's bookkeeping, ieee80211_update_phy_country, their
+ * control block's interface masks and started state -- are not made: their station never runs. Their
+ * adc2_wifi_acquire, a weak stub in their ieee80211_ioctl.o that returns 0, is left out. See NOTES.md.
  */
-extern int wifi_init_completed(void);
-
-extern uint8_t g_mac_sleep_en;           /* the libraries' MAC sleep flag, which gates the modem wake */
-extern void *g_wifi_nvs;                 /* the libraries' configuration, whose first byte is the mode */
-extern char g_ic[];                      /* the libraries' shared control block */
-
-/*
- * The libraries' control block's per-interface masks, a bit each: the interfaces a stop has left, and the ones that
- * are up. The station is their interface 0, its bit the low one.
- */
-#define G_IC_STOP_MASK  0x24du
-#define G_IC_START_MASK 0x24eu
 
 /*
  * The libraries' wifi_reset_mac, written out: their reset pulse through the adapter and the MAC's receive off, which
@@ -454,21 +441,14 @@ static void drv_reset_mac(void)
 
 /*
  * The libraries' wifi_hw_start, the hardware bring-up they run once before their task brings the interface up,
- * written out for the station's fresh start: the stop mask clear, neither guard tripped. The libraries' other
- * branch -- an interface a stop left behind, woken rather than brought up anew -- is not written, since the driver
- * starts the station once from a stopped radio; another state stops here. See NOTES.md.
+ * written out for the station's fresh start from a stopped radio. Their guards on their control block's interface
+ * masks, and the masks they set, are their state, and their MAC sleep flag, which their init leaves clear, would
+ * have the RTC's isolation turned off: neither is made. See NOTES.md.
  */
-static int drv_hw_start(void)
+static void drv_hw_start(void)
 {
-    uint8_t *ic = (uint8_t *)g_ic;
-    if (ic[G_IC_STOP_MASK] != 0 || (ic[G_IC_START_MASK] & 1) != 0) {
-        return ESP_FAIL; /* the libraries' wake branch, or the station already up: neither is written */
-    }
     funcs->wifi_pm_sleep_lock_acquire();
     funcs->wifi_clock_enable();
-    if (g_mac_sleep_en) {
-        funcs->wifi_rtc_disable_iso();
-    }
     funcs->phy_enable();
     funcs->coex_enable();
     drv_reset_mac();
@@ -493,9 +473,6 @@ static int drv_hw_start(void)
     mac_rx_on();                       /* and their ic_enable_rx */
     funcs->wifi_bb_sleep_retention_attach();
     funcs->wifi_mac_sleep_retention_attach();
-    ic[G_IC_STOP_MASK] |= 1; /* the station's interface, the libraries' reason 0 */
-    ic[G_IC_START_MASK] |= 1;
-    return ESP_OK;
 }
 
 /* The STA_START their wifi_station_start posts, through the adapter, which logs it and sets the group's bit. */
@@ -506,25 +483,14 @@ static void sta_start_post(void)
 
 static int drv_wifi_start(void)
 {
-    if (!wifi_init_completed()) {
-        return ESP_FAIL;
-    }
-    int mode = *(const uint8_t *)g_wifi_nvs;
-    if (mode != WIFI_MODE_STA) {
-        return ESP_FAIL; /* only the station is written; the libraries' other modes do not */
-    }
-    int rv;
-    if ((rv = drv_hw_start()) != 0) {
-        return rv;
-    }
+    drv_hw_start();
     /*
      * The libraries' wifi_mode_set and _do_wifi_start, the driver's own now: the station's start's hardware
      * accesses and the STA_START event, with none of net80211's own state. See macstart.c and NOTES.md.
      */
     mac_station_start(drv_self->mac, sta_start_post);
-    ((uint8_t *)g_ic)[0x1f1] = 2; /* their control block's state, started, which their API's functions read */
     /*
-     * The libraries' ieee80211_update_phy_country is left out: its guard reads the byte above, its
+     * The libraries' ieee80211_update_phy_country is left out: its guard reads their started state, its
      * ieee80211_regdomain_get_country is a read alone, its phy_update_country_info this driver's stub, and its
      * hal_init_tx_pwr fills the power table their association alone reads and writes the power registers again,
      * with the values mac_init_tx_pwr wrote. Their association never runs.
@@ -555,14 +521,17 @@ static int bringup_start(void)
 static __attribute__((noreturn)) void trace_run(void)
 {
     static struct init_config c;
-    config(&c);
     uint64_t began = osi_now_us();
     drv_say("driver: the trace window starts, %u bytes of heap free\n", (unsigned)osi_heap_free());
     osi_trace_init(128);
     osi_trace("window", 0, 0);
-    drv_must("esp_wifi_init_internal", esp_wifi_init_internal(&c));
-    osi_trace("mode", 0, 0);
-    drv_must("station mode", esp_wifi_set_mode(WIFI_MODE_STA));
+    if (drv_self->lib_start) {
+        /* Their start wants their init and their mode first; the driver's own wants neither. */
+        config(&c);
+        drv_must("esp_wifi_init_internal", esp_wifi_init_internal(&c));
+        osi_trace("mode", 0, 0);
+        drv_must("station mode", esp_wifi_set_mode(WIFI_MODE_STA));
+    }
     osi_trace("start", 0, 0);
     drv_must("esp_wifi_start", bringup_start());
     started = 1;
@@ -581,27 +550,20 @@ static __attribute__((noreturn)) void trace_run(void)
 }
 
 /*
- * The libraries brought up in station mode, which brings the MAC and the PHY up, though their station never joins:
- * it is given no supplicant, and the driver takes the MAC's receiving from it before anything is joined.
+ * The station brought up by the driver's own start, which brings the MAC and the PHY up, libphy's calibration among
+ * it; the libraries are not initialised, and run nothing.
  */
 static __attribute__((noreturn)) void run(struct drv *d)
 {
-    static struct init_config c;
     if (d->trace) {
         trace_run();
     }
-    config(&c);
     drv_say("driver: %u bytes of heap free\n", (unsigned)osi_heap_free());
-    drv_must("esp_wifi_init_internal", esp_wifi_init_internal(&c));
-    /* The libraries' own lines at INFO, as ESP-IDF sets them, or at the level the configuration asks for. */
-    uint32_t level = d->lib_log ? d->lib_log : WIFI_LOG_INFO;
-    osi_log_level(level);
-    drv_must("the libraries' log level", esp_wifi_internal_set_log_level((int)level));
-    drv_must("the libraries' log", esp_wifi_internal_set_log_mod(0, 0, true));
+    /* libphy's own lines at INFO, or at the level the configuration asks for. */
+    osi_log_level(d->lib_log ? d->lib_log : WIFI_LOG_INFO);
     if (d->debug & DRV_DEBUG_WPA) {
         drv_wpa_debug();
     }
-    drv_must("station mode", esp_wifi_set_mode(WIFI_MODE_STA));
     drv_must("esp_wifi_start", bringup_start());
     started = 1;
     await("the station started", WIFI_EVENT_STA_START, 5000);

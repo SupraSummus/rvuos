@@ -407,8 +407,15 @@ call passes, and the MAC released.
 Their PM bookkeeping around the frame and the channel manager's own state -- its 14-entry channel table,
 the control block's home- and current-channel words, and the home-channel event -- are not written;
 the diff holds the channel, the runs the rest.
-So the state these calls set is not wanted;
-whether the rest is -- what `esp_wifi_init_internal` sets -- is open.
+So the state these calls set is not wanted.
+
+Nor is their init's: the driver's own start makes no `esp_wifi_init_internal` and no `esp_wifi_set_mode`,
+and reads and writes none of what they leave -- their configuration's mode, their control block's interface masks
+and started state, their MAC sleep flag.
+Their init's device work, before their start, is the Wi-Fi clocks enabled through the adapter, which the start's own
+enable does, and their task's disables of the TBTT and beacon-miss interrupts and wakeups;
+the compare across images holds the final state without them, and the diff names the one read that differs.
+`libstart=1`, the comparison's, still runs their init, their mode and their start.
 
 Their `pm_noise_check_enable` and `pm_disconnected_start` go as well:
 their `pm_noise_check_enable`'s byte is read only by their `pm_noise_check`, which their `pm_tbtt_process` alone
@@ -421,8 +428,6 @@ The ordinary runs hold both, the joins among them.
 
 Some of the driver's choices are made for the libraries that still run beside it, not for the MAC,
 and each goes, or is looked at again, when what it answers to goes:
-- The start writes their control block's interface masks and its started state, which their API's functions read:
-  these go with their init, whose state they serve.
 - `mac.c`'s sending borrows their slot 0 and clears its queue's state byte so that their lmac leaves the slot alone;
   an own slot, see `TODO.md`, ends that.
 - The comparison's tools -- `libstart=1`, the diff, the compare across images and their expected files -- go once

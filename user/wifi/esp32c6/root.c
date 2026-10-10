@@ -626,7 +626,7 @@ static void driver_state(uint32_t state)
         halt(SYSTEM_FAILED);
     }
     if (state == DRV_UP) {
-        say(&kout, "root: the driver's libraries run\n");
+        say(&kout, "root: the driver's radio is up\n");
     } else if (state == DRV_SCANNED) {
         system_scanned(&sys, p->nets, p->net_count);
         system_halt(0);

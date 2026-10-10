@@ -6,6 +6,11 @@
 # A line "-(name)" or "+(name)" is a folded run of the library --collapse names, libphy's.
 # --as-expected, WIFI_TRACE_EXPECT_NEW=1 in make, prints a place that does not pass in this form.
 
+# The Wi-Fi clocks: their init enables them through the adapter before their start, so the start's own enable
+# finds them on; the own start makes no init, so its enable, in drv_hw_start, reads them off, and turns them on.
+-R4 0x600af018 0x00000003
++R4 0x600af018 0x00000000
+
 # The receive base: the libraries' start points the MAC at their control block, wDevCtrl, and the own start at
 # its own list, which mac.c makes; both are addresses in RAM, which move with the image, so a zero mask holds the
 # write's place alone.

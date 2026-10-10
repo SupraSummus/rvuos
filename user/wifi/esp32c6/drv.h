@@ -98,7 +98,7 @@ struct drv {
     uint32_t debug;       /* DRV_DEBUG_ bits */
     uint8_t no_pmf;       /* join without protecting management frames, which the station otherwise offers */
     uint8_t no_sae;       /* join without WPA3's SAE, with WPA2's passphrase where the network takes both */
-    uint32_t lib_log;     /* the libraries' log level, ESP-IDF's wifi_log_level_t, or 0 for its INFO */
+    uint32_t lib_log;     /* libphy's log level, ESP-IDF's wifi_log_level_t, or 0 for its INFO */
     uint8_t lib_start;    /* 1: bring the MAC up by the libraries' esp_wifi_start, 0 by the driver's own, to compare;
                              a traced window's alone, since the driver's receive is its own from its start */
     uint8_t listen;       /* the channel to hear, 1 to 13, or 0 */
