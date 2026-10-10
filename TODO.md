@@ -150,8 +150,7 @@ what is left:
   A link without the two archives leaves only what the driver's own code names: `libphy.a` and the ROM reach nothing
   of theirs.
   What is left is their init's -- `esp_wifi_init_internal`, its log level and module, `wifi_init_completed`, `g_ic`,
-  `g_wifi_nvs`, `g_mac_sleep_en` --, `hal_init_tx_pwr`, and `esp_wifi_set_mode` and `esp_wifi_start`, the
-  `libstart=1` comparison's.
+  `g_wifi_nvs`, `g_mac_sleep_en` --, and `esp_wifi_set_mode` and `esp_wifi_start`, the `libstart=1` comparison's.
   The comparison's tools -- `libstart=1`, the diff, the compare across images and their expected files -- go once no
   call of theirs is left in the start.
   Gathering the driver's address macros into `macregs.h`, ordered by address, would show a word two files name

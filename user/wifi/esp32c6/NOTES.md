@@ -353,11 +353,11 @@ with pp calling phy for the channel and the gain;
 `set_intr`, `set_isr` and `ints_on`, the interrupt handler, the address, the RX enable and the STA TSF;
 and `event_post` STA_START, where the start reports.
 
-The start's last call, their `ieee80211_update_phy_country`, comes just after the event:
-written out, it is their `hal_init_tx_pwr`, which fills their power table, the one their association reads,
-and writes the power registers again by `hal_init_tb_power` and `hal_init_imrsp_power`
-and reads libphy's `rate_to_index`, with no timer armed.
-The driver's start calls it now, and the transmitting runs and the snapshot are its oracle.
+The start's last call, their `ieee80211_update_phy_country`, came just after the event:
+written out, it was their `hal_init_tx_pwr`, which fills their power table, the one their association reads,
+and writes the power registers again by `hal_init_tb_power` and `hal_init_imrsp_power`, with the values the start
+wrote, reading libphy's `rate_to_index`, with no timer armed.
+Their association never runs, so the driver's start leaves it out; the diff names the place.
 Whether the HE, beamforming and antenna groups can be left out is the own start's to find as it runs,
 each dropped on its own and held to the snapshot and the runs.
 
@@ -421,8 +421,7 @@ Some of the driver's choices are made for the libraries that still run beside it
 and each goes, or is looked at again, when what it answers to goes:
 - `mac_config`'s receive policy for interface 1 stays because, left out, their receive interrupt ran in the window;
   their interrupt is no longer installed, so whether the policy is wanted is open again, a step of its own.
-- The start writes their control block's interface masks and the byte their `ieee80211_update_phy_country`'s guard
-  reads, and calls their `hal_init_tx_pwr` for the power table their association reads:
+- The start writes their control block's interface masks and its started state, which their API's functions read:
   these go with their init, whose state they serve.
 - `mac.c`'s sending borrows their slot 0 and clears its queue's state byte so that their lmac leaves the slot alone;
   an own slot, see `TODO.md`, ends that.

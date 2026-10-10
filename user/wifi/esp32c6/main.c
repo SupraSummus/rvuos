@@ -380,7 +380,7 @@ static __attribute__((noreturn)) void attend(struct drv *d)
 /*
  * The driver's own esp_wifi_start, taking the libraries' bring-up over a step at a time: the body is the libraries'
  * wifi_start_process written out -- ieee80211_set_hmac_stop, whose zero the byte holds until their stop, gone; the
- * hardware bring-up's calls, wifi_mode_set, _do_wifi_start, ieee80211_update_phy_country to its hal_init_tx_pwr -- so
+ * hardware bring-up's calls, wifi_mode_set, _do_wifi_start, and ieee80211_update_phy_country, gone -- so
  * each can be taken over and the window's sequence held to the libraries' by tools/mac-trace.py's diff. Only the
  * station is written; the libraries' start brings an interface up per mode -- reason 0 the station, 1 the soft AP,
  * 3 then both, and none for another -- so another mode stops here rather than guesses. Their adc2_wifi_acquire, a
@@ -388,7 +388,6 @@ static __attribute__((noreturn)) void attend(struct drv *d)
  */
 extern int wifi_init_completed(void);
 
-extern void hal_init_tx_pwr(void);   /* pp: their power table's one filling in the start, read at their association */
 extern uint8_t g_mac_sleep_en;           /* the libraries' MAC sleep flag, which gates the modem wake */
 extern void *g_wifi_nvs;                 /* the libraries' configuration, whose first byte is the mode */
 extern char g_ic[];                      /* the libraries' shared control block */
@@ -481,14 +480,13 @@ static int drv_wifi_start(void)
      * accesses and the STA_START event, with none of net80211's own state. See macstart.c and NOTES.md.
      */
     mac_station_start(drv_self->mac, sta_start_post);
-    ((uint8_t *)g_ic)[0x1f1] = 2;
+    ((uint8_t *)g_ic)[0x1f1] = 2; /* their control block's state, started, which their API's functions read */
     /*
-     * The libraries' ieee80211_update_phy_country, written out: its guard on the byte the write above sets, met at
-     * 2, its ieee80211_regdomain_get_country, a read alone, and its phy_update_country_info, this driver's stub,
-     * all dropped, leave their hal_init_tx_pwr -- their power table's one filling in the start, which their
-     * association reads; it writes the power registers a second time, with the values mac_init_tx_pwr wrote.
+     * The libraries' ieee80211_update_phy_country is left out: its guard reads the byte above, its
+     * ieee80211_regdomain_get_country is a read alone, its phy_update_country_info this driver's stub, and its
+     * hal_init_tx_pwr fills the power table their association alone reads and writes the power registers again,
+     * with the values mac_init_tx_pwr wrote. Their association never runs.
      */
-    hal_init_tx_pwr();
     return ESP_OK;
 }
 
