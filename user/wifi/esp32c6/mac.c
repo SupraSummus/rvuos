@@ -135,6 +135,12 @@ void mac_key_clear(uint32_t entry)
     }
 }
 
+/* The station's cipher engine word; see mac.h. */
+void mac_crypto_engine(int on)
+{
+    wr(KEY_CFG0, on ? KEY_CFG_CCMP : KEY_CFG_OFF);
+}
+
 /*
  * The station-mode receiving the libraries' association programs, recorded from their own join at the same access point
  * as three calls, hal_mac_rx_set_policy(0, 1, 1, 1), hal_mac_set_rxq_policy(0, 1) and hal_he_set_mmss_and_aid(0, 0, aid, 0),
@@ -597,6 +603,8 @@ void mac_rx_on(void)
 #define TX_TIMEOUT      0x3feu
 #define TX_PLCP1_RATE   12
 #define TX_PLCP1_LEN    0x00000fffu
+#define TX_PLCP1_KEYSLOT 17       /* the MAC's key entry, whose cipher the sending encrypts under; see mac_tx_key */
+#define TX_PLCP1_KEYSLOT_MASK 0x01fe0000u
 #define TX_RESP_RATE    6
 #define TX_RESP_LEGACY  0x00400004u
 #define TX_PROT_LEGACY  0x00020000u
@@ -723,11 +731,14 @@ static const char *const try_failed[] = {
     [TRY_UNFINISHED] = "the MAC did not finish the frame",
 };
 
-/* The frame loaded, len bytes, sent once at rate i after backoff slots: the slot programmed, armed and waited for. */
-static enum try_end try(uint32_t len, uint32_t i, uint32_t backoff, int group)
+/* The frame loaded, len bytes, sent once at rate i after backoff slots: the slot programmed, armed and waited for.
+ * keyslot, when not 0, is the MAC's key entry the frame's cipher encrypts under; see mac_tx_key. */
+static enum try_end try(uint32_t len, uint32_t i, uint32_t backoff, int group, uint32_t keyslot)
 {
     uint32_t n = len + TX_HDR + FCS;
-    tx->desc.ctrl = (DESC_SIZE(n) << DESC_LEN_SHIFT) | DESC_SIZE(n) | DESC_EOF | DESC_OWNER;
+    /* Bit 29 is what the libraries' ppProcTxSecFrame sets for a keyed frame; the MAC encrypts with or without it. */
+    tx->desc.ctrl = (DESC_SIZE(n) << DESC_LEN_SHIFT) | DESC_SIZE(n) | DESC_EOF | DESC_OWNER |
+                    (keyslot ? DESC_BIT29 : 0u);
     tx->desc.frame = (uint32_t)(uintptr_t)tx->frame;
     tx->desc.next = 0;
     __asm__ volatile("fence" : : : "memory");
@@ -737,7 +748,8 @@ static enum try_end try(uint32_t len, uint32_t i, uint32_t backoff, int group)
     wr(TX_CONF0(s), 0);
     wr(TX_MPLEN(s), 0);
     wr(TX_EDCA(s), (TX_AIFSN << 24) | (backoff << 12) | TX_TIMEOUT);
-    wr(TX_PLCP1(s), (uint32_t)tx_rates[i].code << TX_PLCP1_RATE | ((n - TX_HDR) & TX_PLCP1_LEN));
+    wr(TX_PLCP1(s), (uint32_t)tx_rates[i].code << TX_PLCP1_RATE | ((n - TX_HDR) & TX_PLCP1_LEN) |
+                        ((keyslot << TX_PLCP1_KEYSLOT) & TX_PLCP1_KEYSLOT_MASK));
     wr(TX_PROT(s), TX_PROT_LEGACY);
     wr(TX_PWR(s), tx_pwr[i]);
     wr(TX_TXLEN(s), TX_TXLEN_LEGACY);
@@ -784,6 +796,11 @@ static enum try_end try(uint32_t len, uint32_t i, uint32_t backoff, int group)
 /* The frame sent while the lock is held, so that no other thread's frame overwrites it before it is done. */
 const char *mac_tx(const uint8_t *frame, uint32_t len)
 {
+    return mac_tx_key(frame, len, 0);
+}
+
+const char *mac_tx_key(const uint8_t *frame, uint32_t len, uint32_t keyslot)
+{
     if (tx == 0) {
         return "the sending, not made";
     }
@@ -797,6 +814,13 @@ const char *mac_tx(const uint8_t *frame, uint32_t len)
         }
         tx_pwr_asked = 1;
     }
+    /*
+     * The MAC's cipher is enabled for this frame alone: with it on the MAC encrypts every protected frame,
+     * the software-CCMP ones among them, so it is turned off again before the lock is given up; see mac.h.
+     */
+    if (keyslot) {
+        mac_crypto_engine(1);
+    }
     load(frame, len);
     int group = frame[4] & TX_GROUP, data = !group && TX_TYPE(frame[0]) == TX_TYPE_DATA;
     enum try_end end = TRY_LOST;
@@ -804,13 +828,16 @@ const char *mac_tx(const uint8_t *frame, uint32_t len)
         if (t > 0) {
             tx->frame[TX_HDR + 1] |= TX_RETRY;
         }
-        end = try(len, data ? txctl_rate(&ctl, t) : TX_LOWEST, txctl_backoff(&ctl, t), group);
+        end = try(len, data ? txctl_rate(&ctl, t) : TX_LOWEST, txctl_backoff(&ctl, t), group, keyslot);
         if (data && t == 0) {
             txctl_first(&ctl, end == TRY_ACKED);
         }
     }
     mac_tx_counts.lost += end != TRY_ACKED;
     mac_tx_counts.rate = ctl.at;
+    if (keyslot) {
+        mac_crypto_engine(0);
+    }
     osi_mutex_give(tx_lock);
     return try_failed[end];
 }

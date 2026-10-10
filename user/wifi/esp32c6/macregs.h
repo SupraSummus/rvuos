@@ -22,6 +22,11 @@
    (their hal_crypto_disable, and mac.c's own keys): both reached from mac.c and macstart.c. */
 #define TSF_CTRL  0x600ad050u
 #define KEY_VALID 0x600a4814u
+/* The cipher engine's configuration word for the station's interface, KEY_CFG0: 0x30000 with the engine off,
+   0x30103, which their hal_crypto_enable(0, 3, 0, 0) writes for CCMP, with the sending's bits set; see mac.c. */
+#define KEY_CFG0  0x600a4800u
+#define KEY_CFG_OFF 0x30000u
+#define KEY_CFG_CCMP 0x30103u
 
 #define HAL_CTRL 0x600a4308u /* hal_deinit's four; what they are is pp's, and no driver code reads them */
 #define HAL_HOLD 0x600a4c40u

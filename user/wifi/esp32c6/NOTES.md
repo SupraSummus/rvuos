@@ -197,7 +197,8 @@ so the own station's runs there need that access point configured with `sae=0`, 
 ## The station's own data path
 
 Once the handshake has installed the keys, the own station serves the link: the MAC's cipher takes the protected
-frames it receives, and its sending is software CCMP, `ccmp.c` on hostap's CCM; see `TODO.md`.
+frames it receives and encrypts the ones it sends, and `ccmp.c`'s software CCMP keeps the robust management frames
+and the EAPOL ones, which the driver leaves off the MAC; see `TODO.md`.
 
 **The keys.**
 A pairwise key the handshake derives arrives twice, for receiving alone before the 4/4 and for sending too after,
@@ -211,14 +212,16 @@ A key is written into the MAC's own entry, `mac_key_set` (`STA_KEY_ENTRY` 4 for 
 `STA_GRP_ENTRY` 0 and 1 for the group's ids 1 and 2, as the libraries' `esp_wifi_get_sta_hw_key_idx_internal`
 places them), its valid bit cleared first, so a rekey never leaves half an entry live.
 A group key of id 0 or 3 is refused: no access point here gave one, and the libraries would put 3 in entry 4, the pairwise key's.
-An install and the sending take one lock, `sta.key_lock`, which copies the key and reserves its packet number together.
+An install and the sending take one lock, `sta.key_lock`, which copies the key and reserves its packet number together;
+the MAC's own sending holds it from the reservation to the frame's end, since the MAC takes the key from its entry then,
+so a frame's packet number and the entry it is encrypted under belong together, a rekey's among them.
 EAPOL goes out under the key in use once one is there, and in the clear until then.
 A station's frame to the access point is addressed to it, so it goes under the pairwise key
 however its own destination, Address 3, is addressed; the receiving picks the key by Address 1,
 the group's for a group address.
 
 **The frames.**
-An Ethernet frame is laid into a Data frame, encrypted in software and sent.
+An Ethernet frame is laid into a Data frame, its CCMP header written and its MIC's room left for the MAC's cipher alone to fill, and sent.
 A received protected frame comes to `read_frame` already decrypted by the MAC, its CCMP header left,
 so the packet number is read back with `ccmp_head_read` for the replay check, one counter a priority,
 802.11's traffic identifier, as the nonce and the additional data carry it, and the cipher is passed over;
@@ -253,9 +256,28 @@ above bit 16 (`0x086c` for a pairwise key, `0x88cc` for a group key), `+0x08` th
 and the entry's valid bit in a bit of `0x600a4814`.
 The MAC decrypts each protected frame then, leaving its CCMP header, so `read_frame` keeps the packet number
 and skips the cipher itself: with it the station takes its DHCP offer and an address and its echo answers.
-The engine word the libraries' `hal_crypto_enable(0, 3, 0, 0)` writes, `0x30103` at `KEY_CFG0` (`0x600a4800`,
-its other select `0x600a4804`), is left unset: with it set the access point took none of the station's sending
-at all, and the sending stays `ccmp.c`'s.
+The same entries and the engine word encrypt the sending: the driver lays a data frame out with its CCMP header
+and a zeroed MIC's room (`ccmp_encap_hw`), arms it with the pairwise entry in `PLCP1`'s keyslot field, and the MAC
+writes the ciphertext and the MIC. The engine word (`hal_crypto_enable(0, 3, 0, 0)`: `0x30103` at `KEY_CFG0`,
+`0x600a4800`, its other select `0x600a4804`) covers the whole MAC, so `mac_tx_key` turns it on for the frame and off
+again after; left on across frames it encrypts the software-CCMP frames too and the access point drops them.
+`0x30000`, which the bring-up's `mac_crypto_init` leaves, is the engine off.
+
+**The MAC's cipher fields, what is known of each.**
+Confirmed by a run: the engine's bits that matter for the sending, 0, 1 and 8 of `0x30103`;
+the valid bitmap `0x600a4814`, a bit an entry;
+an entry's peer and temporary key, a wrong key losing every frame;
+`PLCP1`'s bits 17 to 24, the entry the sending encrypts under.
+From the disassembly alone: `KEY_CFG0`'s bit 17, which `hal_crypto_mgmt_rx_enabled` reads as management RX,
+and bits 16 and 17, present with the engine off too;
+an entry's control word, its bits 2 to 4 the cipher, 5 to 7 a class, 8 and 9 the interface, 11 and 14 and 15 the key id;
+the entry's four words at `+0x18` to `+0x24`, which a 32-byte TKIP key reaches and a CCMP key does not;
+and `0x4810`, whose bits 6 to 17 `hal_crypto_enable` sets for cipher 4 alone.
+The transmit descriptor's bit 29, which `ppProcTxSecFrame` sets for a keyed frame, is not the gate:
+the MAC encrypts without it.
+Unknown: what each of `0x30103`'s bits 0, 1 and 8 does alone, what `0x4810` means,
+and `0x4808` and `0x480c`, written by `hal_crypto_init` and read by nothing found.
+The C6's TRM leaves the MAC's registers out, so none of this is from a datasheet.
 A run with the group entry's temporal key one byte wrong had the access point's group frames not come at all,
 its own relayed broadcast counting none, where the right key had them come, so the MAC hands over nothing
 that failed its MIC, which the reading of a short frame rests on.

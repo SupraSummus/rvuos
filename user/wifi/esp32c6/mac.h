@@ -140,6 +140,14 @@ void mac_key_clear(uint32_t entry);
 void mac_receive(uint16_t aid);
 
 /*
+ * The MAC's cipher engine for the sending: on, the MAC encrypts a protected frame whose PLCP1 keyslot names a valid
+ * key entry; off, a software-CCMP frame crosses as the software built it. The engine covers the whole MAC, so a
+ * hardware frame turns it on and off again around that frame (mac_tx_key), and the software's frames are unaffected.
+ * 0x30103 is what the libraries' hal_crypto_enable writes for CCMP, 0x30000 what their hal_crypto_init leaves.
+ */
+void mac_crypto_engine(int on);
+
+/*
  * The default receive policy the bring-up writes before anything is joined, in place of the libraries'
  * wifi_set_rx_policy(0): both interfaces' addresses from the factory MAC and the soft AP's, and their filters
  * left invalid and empty; see mac.c.
@@ -183,6 +191,14 @@ const char *mac_tx_init(void);
  * since there is one buffer and one slot.
  */
 const char *mac_tx(const uint8_t *frame, uint32_t len);
+
+/*
+ * As mac_tx, with keyslot the MAC's key entry the frame is protected under: 0 sends the frame as the software built it,
+ * any other is written into PLCP1's keyslot field, so the MAC encrypts a frame the software left in the clear and
+ * writes its MIC, under that entry and the CCMP header the software wrote. The engine is enabled for the frame alone,
+ * since it covers the whole MAC; see mac_crypto_engine.
+ */
+const char *mac_tx_key(const uint8_t *frame, uint32_t len, uint32_t keyslot);
 
 /* What the sending met since the start, for the log; the sending alone writes it, under its lock. */
 #define MAC_TX_RATES 9u

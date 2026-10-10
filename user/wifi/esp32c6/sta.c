@@ -1104,22 +1104,34 @@ static void handshake(void)
 /* --- The data's path, once the handshake has installed the keys. --- */
 
 /*
- * The pairwise key in use's bytes and id, and the next packet number under it, under the lock; 0 if no key is
- * in use. The lock rather than a `set` written last, because the compiler may move the key's stores past that
- * flag, and tx_pn is two 32-bit stores on RV32, which a rekey and this reservation would tear.
+ * Under sta.key_lock, which the caller holds: the pairwise key in use's id and the next packet number under it;
+ * 0 if no key is in use. The MAC's own sending keeps the lock from here to the frame's end, since the MAC takes
+ * the key from its entry then; see eth_send.
+ */
+static int reserve_pn(uint8_t *id, uint64_t *pn)
+{
+    if (!sta.ptk.cur_set) {
+        return 0;
+    }
+    *id = sta.ptk.cur.id;
+    *pn = ++sta.ptk_pn.tx_pn;
+    return 1;
+}
+
+/*
+ * The pairwise key in use's bytes and id, and the next packet number under it, for a frame the software protects;
+ * 0 if no key is in use. The lock makes the key and its packet number one pair; it is given back before the cipher
+ * runs, which the software's own frame carries.
  */
 static int reserve(uint8_t tk[CCMP_TK_LEN], uint8_t *id, uint64_t *pn)
 {
     osi_mutex_take(sta.key_lock);
-    if (!sta.ptk.cur_set) {
-        osi_mutex_give(sta.key_lock);
-        return 0;
+    int r = reserve_pn(id, pn);
+    if (r) {
+        memcpy(tk, sta.ptk.cur.tk, CCMP_TK_LEN);
     }
-    memcpy(tk, sta.ptk.cur.tk, CCMP_TK_LEN);
-    *id = sta.ptk.cur.id;
-    *pn = ++sta.ptk_pn.tx_pn;
     osi_mutex_give(sta.key_lock);
-    return 1;
+    return r;
 }
 
 /*
@@ -1158,13 +1170,26 @@ static void eth_send(struct drv *d, const uint8_t *eth, uint32_t len)
      */
     uint16_t proto = (uint16_t)eth[12] << 8 | eth[13];
     uint32_t n = mgmt_data(sta.tx_plain, MGMT_DATA_FIXED + LINK_SLOT, d->mac, sta.ap, eth, proto, eth + 14, len - 14u);
-    uint32_t cn = n ? protect(sta.tx_crypt, MGMT_DATA_FIXED + LINK_SLOT + CCMP_HEAD_LEN + CCMP_MIC_LEN, sta.tx_plain, n)
-                    : 0;
-    if (cn == 0) {
+    if (n == 0) {
         d->tx_dropped++;
         return;
     }
-    const char *failed = mac_tx(sta.tx_crypt, cn);
+    /*
+     * The MAC's cipher encrypts the frame and writes its MIC, so the driver lays the frame out for it and names the
+     * entry its PLCP1 keyslot field takes; the packet number is one, from reserve_pn, for both ciphers.
+     * The key's lock is held from that reservation to the frame's end: the MAC takes the key from its entry then,
+     * so a key installed meanwhile would put an old packet number under a new key, and the access point, reading it
+     * as a replay, would drop the frames after. See mac.h's mac_tx_key and NOTES.md.
+     */
+    osi_mutex_take(sta.key_lock);
+    uint8_t id;
+    uint64_t pn;
+    uint32_t cn = reserve_pn(&id, &pn)
+                      ? ccmp_encap_hw(sta.tx_crypt, MGMT_DATA_FIXED + LINK_SLOT + CCMP_HEAD_LEN + CCMP_MIC_LEN,
+                                      sta.tx_plain, n, pn, id)
+                      : 0;
+    const char *failed = cn != 0 ? mac_tx_key(sta.tx_crypt, cn, STA_KEY_ENTRY) : "no pairwise key in use";
+    osi_mutex_give(sta.key_lock);
     if (failed) {
         d->tx_dropped++;
         drv_say("sta: a frame out, %u bytes: %s\n", (unsigned)len, failed);

@@ -128,9 +128,12 @@ what is left:
   The receiving is the MAC's: its own station address and the access point's are set before the authentication,
   the libraries' channel sniffer is left, and the MAC decrypts each protected frame, leaving its CCMP header
   for the replay check, so the receiving runs no software CCMP; `ccmp_decrypt` stays for `ccmp-test` alone.
-  The sending is software CCMP still, `ccmp.c` on hostap's `aes-ccm.c`, under the pairwise key;
-  with the engine word set the access point took none of the sending, so it is left unset;
-  the MAC's own cipher is in `user/wifi/esp32c6/NOTES.md`.
+  The sending is the MAC's cipher too: the driver lays the frame out with its CCMP header (`ccmp_encap_hw`) and
+  arms it with the pairwise entry in `PLCP1`'s keyslot field, and the MAC writes the ciphertext and the MIC;
+  the engine word covers the whole MAC, so it is turned on for the frame; the field table is in `NOTES.md`.
+  A rekey's key and packet number move together under `sta.key_lock`, which the sending holds to the frame's end,
+  the MAC taking its key from the entry then; the transitions are `keys-test`'s on the host,
+  a live one waiting for an access point that rekeys, as below.
   A rekey is checked on the host alone, by `keys-test`:
   showing a pairwise one live wants an access point that answers a station's rekey request,
   which the one here does not, or one that rekeys on its own;
@@ -182,9 +185,10 @@ what is left:
   so another client needs room found first, in the driver's block or a smaller `CLIENT_CHAN_SIZE`.
 - The ESP32-C6's echo carries about what the Pico 2 W's does in `tools/wifi-run.py`'s throughput check,
   and more with more datagrams in flight.
-  Of the cycles a frame sent costs, the software CCMP takes about two thirds and the spun try the rest;
-  why its AES costs several times a table-driven AES-128's cycles a block, its code and tables read through the
-  flash's cache among the guesses, is not measured. HT's rates and aggregation come after, see the profile above.
+  A frame sent costs the frame's build (about 8 000 cycles), the slot's arming and its wait for the air and the
+  acknowledgement (about 100 000, the spun try), and the receiving (about 18 000);
+  the software CCMP's 236 000 cycles are gone, the MAC's cipher taking them, and the ceiling is now the access
+  point and the medium, about 5 Mb/s, not the core. HT's rates and aggregation come after, see the profile above.
 - The Pico 2 W's run lasts its `run=` whatever its checks found, or until a reset by hand,
   since the host has no way to end it: its USB serial port, `kernel/board/rp2350/cdc.c`, is the halt's alone.
   That port kept up while the run lasts would let the host end it there, in either mode,

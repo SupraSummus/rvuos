@@ -2,9 +2,10 @@
 #define RVUOS_WIFI_CCMP_H
 
 /*
- * IEEE 802.11's CCMP in software, on hostap's CCM, crypto/aes-ccm.c: the sending of the driver's own station,
- * and both directions of its host test. The receiving is the MAC's cipher, see mac.c; the decryption here is
- * what the test holds the encryption against. See TODO.md.
+ * IEEE 802.11's CCMP in software, on hostap's CCM, crypto/aes-ccm.c: the frames the driver keeps off the MAC,
+ * the robust management ones and the EAPOL ones, and both directions of its host test.
+ * The data sending and the receiving are the MAC's cipher, see mac.c and NOTES.md;
+ * the decryption here is what the test holds the encryption against.
  * A frame is the 802.11 frame without its FCS, as mac.c and mgmt.c carry it, and its header is
  * the 24 bytes of a Data frame or the 26 of a QoS Data one, without an Address 4 or an HT control field.
  * The CCMP header the two add is the 8 bytes after the frame's own header, and the MIC the 8 bytes at its end,
