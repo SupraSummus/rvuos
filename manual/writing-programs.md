@@ -198,6 +198,7 @@ Each header says how its calls are used.
 | `lib/child.h` | a child built, started, heard, checked and taken down by its parent, frames mapped into it and taken back, what it may build of its own, and the child's own calls: its log, its state, its answer, its sleep, its account of what it builds |
 | `lib/chan.h` | a channel between two children: a frame of two rings of packets, and a bit each way; and a hub, a server's channels to many clients |
 | `lib/lock.h` | a lock over memory several children share: a word taken with an atomic operation, and a notification to wait on while it is held; and one whose word names its holder, so that a taker that waits lends the holder its time, section 5.12 |
+| `lib/event.h` | an event one thread waits for, until a deadline at most, and others set from memory they share with it: a word set with an atomic operation, and a notification and a timer line of the waiter's |
 | `lib/seqlock.h` | a snapshot one child publishes and others copy out whole, from memory they may hold read only: a count and two copies, so that neither side calls the kernel or waits for the other |
 | `lib/ring.h`, `lib/log.h` | the rings a channel is made of, and the kernel's log: written through `Debug`, and read as the root task reads it |
 | `lib/say.h`, `lib/libc.h` | text with values, and the memory functions the compiler calls |
@@ -288,6 +289,7 @@ it checks a child that answers and one that spins, and finds the second;
 then, in room for children's data, it builds a server with a hub and a client on each end,
 and takes one client down and connects another in its place twice;
 has three children add to a count they share under a lock, each sleeping now and then while it holds it;
+waits for an event a child sets, each set ending a wait, and for one nothing sets, which its deadline ends;
 hands a buffer between two children and back, then takes it from the last, which must fault when it stores to it;
 and lets a child build a thread of its own, which sleeps on its own timer and faults, which the root task hears as the child's,
 and takes it down, twice;

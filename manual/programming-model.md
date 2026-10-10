@@ -382,8 +382,8 @@ Two processes exchange bytes through a region installed in both
 and use notifications to say when.
 The build targets `rv32imac`, so the `A` extension is there in user mode,
 as `ldrex` and `strex` are on ARMv7-M,
-and a lock, a ring buffer or a snapshot in shared memory is userspace's to build,
-as `lib/lock.h`, `lib/ring.h` and `lib/seqlock.h` do, section 8.4;
+and a lock, an event, a ring buffer or a snapshot in shared memory is userspace's to build,
+as `lib/lock.h`, `lib/event.h`, `lib/ring.h` and `lib/seqlock.h` do, section 8.4;
 what userspace cannot build is "stop me until someone says otherwise",
 and a notification is exactly that.
 A waiter that knows whom it waits for, a lock's holder or a server, may lend that thread its time, section 5.12.

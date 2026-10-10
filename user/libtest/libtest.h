@@ -8,6 +8,7 @@
 
 #include "lib/chan.h"
 #include "lib/child.h"
+#include "lib/event.h"
 #include "lib/lock.h"
 #include "lib/seqlock.h"
 
@@ -91,6 +92,29 @@ struct locker_page {
     struct named_lock name;
     uint32_t count;           /* the address of the count */
     volatile uint32_t waited; /* the rounds it found the lock held */
+};
+
+/*
+ * An event the root task waits for, and a child, the setter, sets EVENT_SETS times, each once the root task asks:
+ * it sleeps until the asks pass the sets it made, so that the root task is waiting when the set comes.
+ * Before it the root task sets the event itself, and finds a set before the wait kept, two sets before one wait one,
+ * and the bits a wait before may leave, a set's and the other timer's, passed over.
+ */
+#define EVENT_SETS     20u
+#define EVENT_SLEEP_US 500u
+#define EVENT_SHORT_US 3000u    /* a wait nothing but its deadline ends */
+#define EVENT_LONG_US  1000000u /* a wait a set ends */
+enum {
+    SETTER_DONE = CHILD_RUNNING + 1,
+};
+struct evented {
+    uint32_t word;
+    volatile uint32_t asked; /* the root task's: the sets it has asked for */
+};
+struct setter_page {
+    struct child_page c;
+    struct event event; /* its notification may be signalled and not waited on, and it has no timer */
+    uint32_t asked;     /* the address of the count of asks */
 };
 
 /*
@@ -185,6 +209,7 @@ void spin_main(struct child_page *page);
 void server_main(struct child_page *page);
 void client_main(struct child_page *page);
 void locker_main(struct child_page *page);
+void setter_main(struct child_page *page);
 void passer_main(struct child_page *page);
 void snap_reader_main(struct child_page *page);
 void builder_main(struct child_page *page);

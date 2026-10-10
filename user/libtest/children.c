@@ -196,6 +196,21 @@ void locker_main(struct child_page *page)
     child_stop(page, LOCKER_DONE);
 }
 
+/* Sets the event each time the root task asks, once it has asked. */
+void setter_main(struct child_page *page)
+{
+    struct setter_page *p = (struct setter_page *)page;
+    volatile uint32_t *asked = (volatile uint32_t *)(uintptr_t)p->asked;
+    child_report(page, CHILD_RUNNING);
+    for (uint32_t n = 0; n < EVENT_SETS; n++) {
+        while (*asked <= n) {
+            child_sleep(EVENT_SLEEP_US);
+        }
+        event_set(&p->event);
+    }
+    child_stop(page, SETTER_DONE);
+}
+
 /* Copies the snapshot out until the root task says stop, failing at a copy that is not whole or goes back. */
 void snap_reader_main(struct child_page *page)
 {

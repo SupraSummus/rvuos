@@ -11,6 +11,7 @@
  * and takes one down and connects another in its place, twice;
  * has children add to a count they share under a lock, sleeping now and then while they hold it,
  * and again under a lock that names its holder, whose takers lend the holder their time;
+ * waits for an event a child sets, and for one nothing sets, which its deadline ends;
  * has a thread publish a snapshot through a seqlock, on the second core where there is one, while a child reads it,
  * and stops the writer while it writes;
  * hands a buffer between two children, and hears the last fault on it once it is taken;
@@ -40,10 +41,10 @@ static struct kernel_log klog;
 static uint32_t log_bit, deadline_bit, pause_bit, pause_timer;
 
 static struct child a, b, faulty, answering, spinning, server, clients[HUB_CLIENTS], lockers[LOCKERS], snap_reader,
-    passers[2], builder, mover;
+    passers[2], builder, mover, setter;
 static struct child *const children[] = { &a, &b, &faulty, &answering, &spinning, &server, &clients[0], &clients[1],
                                           &lockers[0], &lockers[1], &lockers[2], &snap_reader, &passers[0], &passers[1],
-                                          &builder, &mover };
+                                          &builder, &mover, &setter };
 static struct child *may_fault; /* the one child whose fault is asked for */
 static uint32_t faulted;        /* the bits of the faults the root task heard */
 
@@ -394,6 +395,81 @@ static void lock_round(int named)
     check(same(tally(), unroomed), "the lockers, their lock and the room gave back what they were given");
 }
 
+/* The machine's time, in its counter's counts, and how many of them a microsecond is. */
+static uint64_t now(uint32_t *per_us)
+{
+    uint64_t counts;
+    uint32_t hz, counter;
+    must("read the clock", rv_clock_read(BOOT_CAP_CLOCK, &counts, &hz, &counter));
+    *per_us = hz / 1000000u;
+    return counts;
+}
+
+/* A wait for the event e that nothing ends but its deadline, which it must not end before. */
+static void wait_out(const struct event *e, const char *what)
+{
+    uint32_t per_us;
+    uint64_t from = now(&per_us);
+    check(!event_wait(e, EVENT_SHORT_US), what);
+    check(now(&per_us) - from >= (uint64_t)EVENT_SHORT_US * per_us,
+          "a wait nothing sets ends no earlier than its deadline");
+}
+
+/*
+ * An event in room for children's data, its notification and timer line from the root task's pool,
+ * where they stay, as every object does until its pool goes; the root task waits for it, and the setter sets it.
+ */
+static void event_round(void)
+{
+    struct self_tally unroomed = tally();
+    struct block shared;
+    uint32_t note, line, region;
+    must("room for children's data", self_room(&self, ROOM_SIZE));
+    must("memory for the event's word", room_take(&self, SELF_ROOM_UNIT, &shared));
+    struct evented *v = (struct evented *)(uintptr_t)shared.base;
+    must("a slot for the event's notification", slot_new(&self, &note));
+    must("the event's notification", rv_pool_alloc(self.pool, CAP_NOTIFICATION, note, 0));
+    must("the event's timer", timer_bind(&self, self.pool, note, &line));
+    struct event e = { (uint32_t)(uintptr_t)&v->word, note, line };
+    event_init(&e);
+    v->asked = 0;
+    wait_out(&e, "a wait with nothing set ends at its deadline");
+    event_set(&e);
+    event_set(&e);
+    check(event_wait(&e, EVENT_LONG_US), "a set before the wait is kept");
+    wait_out(&e, "two sets before one wait are one, which the wait takes");
+    uint32_t phase = __atomic_load_n(&v->word, __ATOMIC_RELAXED) & EVENT_PHASE;
+    must("the timer's bit the next wait does not arm", rv_signal(note, phase ? EVENT_BIT_TIMER0 : EVENT_BIT_TIMER1));
+    must("a set's bit with the word clear", rv_signal(note, EVENT_BIT_SET));
+    wait_out(&e, "a bit a wait before may leave does not end the wait");
+
+    must("build the setter", child_new(&self, &setter, "setter", CHILD_TABLE, CHILD_DATA));
+    struct setter_page *p = (struct setter_page *)setter.page;
+    must("give the setter the event's memory", child_map(&self, &setter, shared.made, RIGHT_R | RIGHT_W, &region));
+    must("give the setter the notification to signal", child_give(&self, &setter, note, RIGHT_W, &p->event.note));
+    p->event.word = e.word;
+    p->asked = (uint32_t)(uintptr_t)&v->asked;
+    must("start the setter", child_start(&self, &setter, setter_main, CHILD_UNITS));
+    uint32_t seen = 0;
+    for (uint32_t n = 0; n < EVENT_SETS; n++) {
+        v->asked = n + 1u;
+        seen += (uint32_t)event_wait(&e, EVENT_LONG_US);
+    }
+    check(seen == EVENT_SETS, "each of the setter's sets ended a wait");
+    while (setter.told != SETTER_DONE) {
+        step();
+    }
+    wait_out(&e, "no set is left once each ended its wait");
+    say(&out, "libtest: an event set %u times by another process, each ending a wait, and deadlines: ok\n", EVENT_SETS);
+    must("take the setter down", child_free(&self, &setter));
+    must("the event's memory back", slot_free(&self, shared.made));
+    room_give(&self, &shared);
+    must("the event's timer back", slot_free(&self, line));
+    must("the event's notification back", slot_free(&self, note));
+    must("give the room back", self_room_free(&self));
+    check(same(tally(), unroomed), "the setter, the event and the room gave back what they were given");
+}
+
 /* The snapshot's writer, a thread of the root task's, and its stack. */
 static uint8_t snap_stack[1024] __attribute__((aligned(16)));
 
@@ -652,6 +728,7 @@ int main(void)
     hub_round();
     lock_round(0);
     lock_round(1);
+    event_round();
     snap_round();
     pass_round();
     own_round();
