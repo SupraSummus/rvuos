@@ -262,7 +262,8 @@ static void heard(const struct mac_frame *m)
         uint32_t rate = m->ctrl[RX_CTRL_RATE] & 0x1fu;
         sta.rx_rate[rate]++;
         sta.rx_rssi += (uint32_t)-m->rssi;
-        if (sta.ctrl_kept < sizeof(sta.ctrl) / sizeof(sta.ctrl[0]) && (sta.rx_rate[rate] == 1u || sta.rx_rate[rate] == 100u)) {
+        if (sta.ctrl_kept < sizeof(sta.ctrl) / sizeof(sta.ctrl[0]) &&
+            (sta.rx_rate[rate] == 1u || sta.rx_rate[rate] == 100u)) {
             memcpy(sta.ctrl[sta.ctrl_kept++], m->ctrl, sizeof(sta.ctrl[0]));
         }
     }

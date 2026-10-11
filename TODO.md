@@ -209,6 +209,12 @@ what is left:
   Down, an A-MPDU wants the MAC's block acknowledgement, HT's rates with it; up, HT's rates want the PLCP words of
   an HT frame, which only the libraries' sending knows. The station keeps the best-effort EDCA, not the access
   point's parameters for it, which WMM's parameter element in the association's answer carries.
+  Up, OFDM's frame holds 4095 bytes, so an A-MSDU carries two of the link's frames; an HT frame would carry an A-MSDU
+  of 7935 where the access point takes one, at MCS 7: `pp`'s `hal_mac_tx_set_ppdu`, `mac_tx_set_plcp0` to `2`,
+  `mac_tx_set_htsig` and `mac_tx_set_len` write the slot's words for one, which `mac.c` writes for OFDM's.
+  Down, `pp`'s `hal_agreement_add_rx_ba` and `_del_rx_ba` write the MAC's side of an agreement the station would
+  accept rather than decline, and the station would reorder the frames of a window before its replay check.
+  Either is the libraries' code read, as `mac.c`'s sending and receiving were.
   The echo is bound by the system: each datagram crosses three processes' threads twice, and the link, whose 16 KiB
   `LINK_SIZE` gives each way four slots of `LINK_SLOT`, drops a burst of more; eight would take 32 KiB, which the
   root task's memory, see below, has no room for yet.
@@ -231,14 +237,15 @@ what is left:
   and of the network's access points it joins the strongest whose suites it takes.
   Of the management group ciphers it takes BIP-CMAC-128 alone, not the GMAC of the 192-bit and GCMP suites.
 - The ESP32-C6's station sleeps between beacons with `ps=1`, the RF off, see `user/wifi/esp32c6/NOTES.md`;
-  it is off by default until runs of hours, and more access points than the three of two networks it ran at, have held it.
+  it is off by default until longer runs, and more access points than the three of two networks it ran at, have held it:
+  an hour at the MikroTik, probed every half minute, lost nothing.
   It wakes by its own clock, a few milliseconds before a beacon is due, and is on some milliseconds a beacon:
   the MAC's TSF and its TBTT interrupt, which the libraries' `pm` reads, would wake it nearer.
   The core stays at its clock and waits in `wfi` meanwhile, and the modem's power domain stays on:
   a lower clock while the link is idle, and light sleep, would save more.
   What it saves the log tells as the RF's time off alone; a meter between the board and its supply would tell the current.
-  One run of `make BOARD=esp32c6 wifi-esp32c6` with `ps=1` got none of the host's unicast frames through for its whole length,
-  and the five after it, at both networks, passed; the cause is not known.
+  One run of `make BOARD=esp32c6 wifi-esp32c6` with `ps=1` got none of the host's unicast frames through for its
+  whole length, and the five after it, at both networks, passed; the cause is not known.
 - The ESP32-C6's radio stays on until the next boot when a thread of the driver's faults
   or the root task halts for the network process; the driver turns it off only on its own way out,
   and even then the RF's analog buses stay powered in the PMU, `PMU_RF_PWC`'s bits 28 to 31,

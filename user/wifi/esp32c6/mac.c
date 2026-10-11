@@ -641,7 +641,7 @@ void mac_rx_on(void)
 #define TX_TYPE_DATA  2u
 #define TX_RETRY      0x08u    /* the Retry bit, in the frame control's second byte */
 #define TX_GROUP      0x01u    /* the group bit of Address 1's first byte */
-#define TX_MAX        MAC_TX_MAX /* the largest frame the driver sends: an A-MSDU of 3839 bytes, its header and CCMP's */
+#define TX_MAX        MAC_TX_MAX /* the largest frame sent: an A-MSDU of 3839 bytes, its header and CCMP's */
 #define TX_DONE_US    500000u  /* the wait for the MAC to finish a try, longer than any try of the slowest rate */
 #define TX_TRIES      7u       /* a frame's tries, 802.11's dot11ShortRetryLimit */
 

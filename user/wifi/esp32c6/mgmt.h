@@ -107,7 +107,8 @@ struct mgmt_addba {
     uint16_t params;
 };
 int mgmt_addba_read(const uint8_t *f, uint32_t len, const uint8_t *sta, const uint8_t *ap, struct mgmt_addba *a);
-uint32_t mgmt_addba_decline(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap, const struct mgmt_addba *a);
+uint32_t mgmt_addba_decline(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap,
+                            const struct mgmt_addba *a);
 
 /*
  * The access point ap's answer to sta's association: its status into *status, and the station's AID into *aid.

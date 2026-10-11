@@ -406,11 +406,13 @@ static void addba(void)
 
     a = (struct mgmt_addba){ 0x17, 0x1002 };
     uint32_t n = header(want, FC(WLAN_FC_STYPE_ACTION), ap, sta, ap);
-    static const uint8_t answer[] = { WLAN_ACTION_BLOCK_ACK, 1, 0x17, WLAN_STATUS_REQUEST_DECLINED, 0, 0x02, 0x10, 0, 0 };
+    static const uint8_t answer[] = { WLAN_ACTION_BLOCK_ACK, 1, 0x17, WLAN_STATUS_REQUEST_DECLINED, 0, 0x02, 0x10,
+                                      0, 0 };
     memcpy(want + n, answer, sizeof(answer));
     check(mgmt_addba_decline(f, sizeof(f), sta, ap, &a) == sizeof(want) && memcmp(f, want, sizeof(want)) == 0,
           "the ADDBA Response that declines it, its token and parameters echoed");
-    FITS_ONLY(sizeof(want), "an ADDBA Response written only into a buffer it fits", mgmt_addba_decline(g, size, sta, ap, &a));
+    FITS_ONLY(sizeof(want), "an ADDBA Response written only into a buffer it fits",
+              mgmt_addba_decline(g, size, sta, ap, &a));
 }
 
 static uint32_t assoc_answer_frame(uint8_t *f, uint16_t stype, const uint8_t *da, const uint8_t *sa,
@@ -590,13 +592,14 @@ static void tim(void)
     check(!mgmt_tim(f, len, other, 2, &t), "another's beacon refused");
 }
 
-/* An A-MSDU of two MSDUs, laid out as 802.11 9.3.2.2 has it, the first padded to a word; one that does not fit refused. */
+/* An A-MSDU of two MSDUs, laid out as 802.11 9.3.2.2 has it, the first padded to a word; one too long refused. */
 static void amsdu(void)
 {
     static const uint8_t dest[ETH_ALEN] = { 0x02, 0, 0, 0, 0, 0x0c };
     uint8_t f[MGMT_AMSDU_FIXED + 128], body1[5] = { 1, 2, 3, 4, 5 }, body2[3] = { 6, 7, 8 };
     uint32_t n = mgmt_amsdu_start(f, sizeof(f), sta, ap);
-    check(n == MGMT_AMSDU_FIXED && WPA_GET_LE16(f) == (WLAN_FC_TYPE_DATA << 2 | WLAN_FC_STYPE_QOS_DATA << 4 | WLAN_FC_TODS) &&
+    check(n == MGMT_AMSDU_FIXED &&
+              WPA_GET_LE16(f) == (WLAN_FC_TYPE_DATA << 2 | WLAN_FC_STYPE_QOS_DATA << 4 | WLAN_FC_TODS) &&
               memcmp(f + 4, ap, 6) == 0 && memcmp(f + 10, sta, 6) == 0 && memcmp(f + 16, ap, 6) == 0 &&
               f[24] == 0x80 && f[25] == 0,
           "an A-MSDU's header: QoS Data to the access point, TID 0, A-MSDU Present");

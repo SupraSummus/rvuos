@@ -370,7 +370,8 @@ an SA Query unanswered -- no longer stops the driver: the station joins again,
 the access point it last joined first, on its channel, else after a scan,
 pausing half a second before, and twice as long after each join that fails, up to sixteen.
 The network process keeps its address meanwhile, and its frames are dropped until the station serves the link again.
-Only the first join failing fails the driver, so that a wrong passphrase or a network not there still ends the run at its step.
+Only the first join failing fails the driver,
+so that a wrong passphrase or a network not there still ends the run at its step.
 A step that fails therefore returns, saying where in `ended`, up to the station's thread,
 where it once stopped the thread for good:
 it is called from inside hostap's supplicant too, which neither a stop nor a jump out of it would leave whole.

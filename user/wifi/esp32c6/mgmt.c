@@ -52,7 +52,8 @@ static const uint8_t ht_cap[26] = {
     (uint8_t)(HT_CAP_INFO_SMPS_DISABLED | HT_CAP_INFO_SHORT_GI20MHZ), 0, 0, 0xff,
 };
 /* The WMM Information element's body: the OUI, its type and subtype, the version, and the QoS info, U-APSD none. */
-static const uint8_t wmm_info[7] = { 0x00, 0x50, 0xf2, WMM_OUI_TYPE, WMM_OUI_SUBTYPE_INFORMATION_ELEMENT, WMM_VERSION, 0 };
+static const uint8_t wmm_info[7] = { 0x00, 0x50, 0xf2, WMM_OUI_TYPE, WMM_OUI_SUBTYPE_INFORMATION_ELEMENT,
+                                     WMM_VERSION, 0 };
 
 /* An ADDBA Request's and its Response's bodies, after the category and the action: offsets and lengths. */
 #define ADDBA_FIXED       (IEEE80211_HDRLEN + 2u)
@@ -261,7 +262,7 @@ uint32_t mgmt_assoc_request(uint8_t *f, uint32_t size, const uint8_t *sta, const
     p = element(p, WLAN_EID_SSID, (const uint8_t *)ssid, ssid_len);
     p = element(p, WLAN_EID_SUPP_RATES, rates, sizeof(rates));
     p = element(p, WLAN_EID_EXT_SUPP_RATES, more_rates, sizeof(more_rates));
-    /* In IEEE 802.11's order: the RSN element early, HT's after it, the RSNX element among the last, a vendor's last. */
+    /* In IEEE 802.11's order: the RSN element early, HT's after it, the RSNX element late, a vendor's last. */
     if (rsn) {
         p = element(p, rsn[0], rsn + 2, rsn[1]);
     }
@@ -406,7 +407,8 @@ int mgmt_addba_read(const uint8_t *f, uint32_t len, const uint8_t *sta, const ui
     return 1;
 }
 
-uint32_t mgmt_addba_decline(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap, const struct mgmt_addba *a)
+uint32_t mgmt_addba_decline(uint8_t *f, uint32_t size, const uint8_t *sta, const uint8_t *ap,
+                            const struct mgmt_addba *a)
 {
     if (size < ADDBA_RESPONSE_LEN) {
         return 0;
