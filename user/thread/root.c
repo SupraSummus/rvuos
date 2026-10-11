@@ -8,7 +8,8 @@
  * see user/wifi/esp32c6/i154.c: its link, link.c, acknowledges each ping, as 802.15.4 has a receiver acknowledge
  * a frame that asks, and it answers each with a pong of its own, which the link sends after CSMA-CA,
  * and sends again until the C6 acknowledges it.
- * With stream= it also sends the C6 that many frames a second, which contend with the pings and pongs for the channel.
+ * With stream= it also sends the C6 that many frames a second, which contend with the pings and pongs for the channel;
+ * frames of the C6's own stream, i154stream= on its side, it only counts.
  * Of other frames it counts only how many came, and reads nothing else of them.
  * It halts once the exchange's time is up, with HALT_SILENT if no ping was heard or no pong acknowledged,
  * or, with stream=, no frame of the stream acknowledged, and tells what the link did, for the C6 as a neighbour:
@@ -188,7 +189,7 @@ struct sent {
 
 /* What the exchange did, for its summary. */
 struct tally {
-    uint32_t pings, lqi_sum, stream_skipped;
+    uint32_t pings, lqi_sum, heard_stream, stream_skipped;
     struct sent pongs, stream;
 };
 
@@ -235,10 +236,17 @@ static void finished(struct sent **sending)
     }
 }
 
-/* A frame the link took: a ping of the C6's is told about, and answered with a pong once the step's timer fires. */
+/*
+ * A frame the link took: a ping of the C6's is told about, and answered with a pong once the step's timer fires;
+ * a frame of its stream is counted.
+ */
 static bool heard(struct tally *t, const struct link_frame *f)
 {
     if (f->src != MAC154_ADDR_C6) {
+        return false;
+    }
+    if (f->length < 4u || memcmp(f->payload, "ping", 4) != 0) {
+        t->heard_stream++;
         return false;
     }
     t->pings++;
@@ -260,8 +268,8 @@ static void tell(const char *what, const struct sent *s)
 static void summary(const struct tally *t, const struct config *c)
 {
     const struct link_counts *k = &link.counts;
-    say(&cout, "thread: heard %u pings at link quality %u in the mean\n", t->pings,
-        t->pings ? t->lqi_sum / t->pings : 0);
+    say(&cout, "thread: heard %u pings at link quality %u in the mean, and %u frames of the C6's stream\n", t->pings,
+        t->pings ? t->lqi_sum / t->pings : 0, t->heard_stream);
     tell("sent pongs", &t->pongs);
     say(&cout, "\n");
     if (c->stream != 0) {

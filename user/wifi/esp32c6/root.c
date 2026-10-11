@@ -368,7 +368,8 @@ static void snap_parse(const char *conf, uint32_t len)
  * listen=, a channel, with no ssid has the driver hear that channel without joining, and tell what it heard;
  * probe=, with listen=, has it ask for that network on the channel, and count the answers; see drv.h.
  * i154=, a channel of IEEE 802.15.4's, 11 to 26, has the driver bring that radio up instead of Wi-Fi's,
- * and exchange frames there with the nRF52840's user/thread/ until the run is over; see i154.h.
+ * and exchange frames there with the nRF52840's user/thread/ until the run is over; see i154.h;
+ * i154stream=, up to 200, has it send the nRF52840 that many frames a second besides.
  * antenna=ufl has the XIAO's RF switch pick its U.FL connector rather than the antenna on the board,
  * and antenna=none leaves the pins alone, on a board without that switch.
  * The passphrase lives in the driver's page and memory, never in an image.
@@ -401,6 +402,8 @@ static void configure(struct drv *p)
     config_value(conf, size, "probe", p->probe, sizeof(p->probe));
     channel = config_number(conf, size, "i154", 0);
     p->i154 = (uint8_t)(channel >= 11 && channel <= 26 ? channel : 0);
+    uint32_t stream = config_number(conf, size, "i154stream", 0);
+    p->i154_stream = (uint8_t)(stream <= 200u ? stream : 200u);
     p->trace = config_number(conf, size, "trace", 0); /* 1: the root serves each access; 2: the window with no fault */
     trace_wanted = p->trace != 0;
     trace_serving = p->trace == 1;

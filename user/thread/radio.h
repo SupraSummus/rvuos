@@ -86,6 +86,8 @@ void radio_receive_start(struct radio *r);
  * so the frame stays as it is until the next call that returns one.
  */
 bool radio_received(struct radio *r, struct radio_frame *f);
+/* Whether a frame is arriving: its length heard, its end not yet, which a send would cut off. */
+bool radio_receiving(struct radio *r);
 
 /*
  * Starts sending frame, length bytes without its FCS, at once, with no assessment of the channel:

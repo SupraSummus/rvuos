@@ -3,10 +3,10 @@
 
 /*
  * IEEE 802.15.4's MAC frames, as far as the nodes of rvuos send and read them:
- * data frames between two short addresses of one PAN, and the acknowledgement of one.
+ * data frames between two short addresses of one PAN, the acknowledgement of one, and the sending's backoffs.
  * A frame here is the MPDU without its FCS, which every radio here computes and checks itself.
  * Every field is little-endian on the air, as 802.15.4 sends it.
- * The ESP32-C6's driver and the nRF52840's program include it alike; it keeps no state.
+ * The ESP32-C6's driver and the nRF52840's program include it alike; it keeps no state of its own.
  */
 
 #include <stdbool.h>
@@ -106,6 +106,58 @@ static inline uint32_t mac154_ack_frame(uint8_t *out, uint8_t seq)
 static inline bool mac154_acks(const uint8_t *f, uint32_t length, uint8_t seq)
 {
     return length == MAC154_ACK_LENGTH && (mac154_get16(f) & MAC154_TYPE_MASK) == MAC154_TYPE_ACK && f[2] == seq;
+}
+
+/*
+ * 802.15.4-2006's unslotted CSMA-CA and retransmission, 7.5.1.4 and 7.5.6.4, with its defaults,
+ * which both radios here leave to their drivers: each assesses the channel and sends when told, no more.
+ * A backoff is a random number of periods below 2 to the exponent; the exponent grows each time the channel is busy,
+ * up to MAC154_MAX_CSMA_BACKOFFS times, and a frame not acknowledged goes again from the first backoff.
+ */
+#define MAC154_SYMBOL_US          16u
+#define MAC154_BACKOFF_US         (20u * MAC154_SYMBOL_US) /* aUnitBackoffPeriod */
+#define MAC154_MIN_BE             3u
+#define MAC154_MAX_BE             5u
+#define MAC154_MAX_CSMA_BACKOFFS  4u
+#define MAC154_MAX_FRAME_RETRIES  3u
+#define MAC154_ACK_WAIT_SYMBOLS   54u /* macAckWaitDuration */
+
+struct mac154_csma {
+    uint32_t backoffs, exponent, tries; /* 802.15.4's NB and BE, and the transmissions so far */
+};
+
+static inline void mac154_csma_start(struct mac154_csma *c)
+{
+    c->backoffs = 0;
+    c->exponent = MAC154_MIN_BE;
+    c->tries = 0;
+}
+
+/* The next backoff's microseconds, from random bits. */
+static inline uint32_t mac154_backoff_us(const struct mac154_csma *c, uint32_t random)
+{
+    return (random & ((1u << c->exponent) - 1u)) * MAC154_BACKOFF_US;
+}
+
+/* The channel was busy: whether to back off and assess again, false once it was busy too often. */
+static inline bool mac154_csma_busy(struct mac154_csma *c)
+{
+    if (++c->backoffs > MAC154_MAX_CSMA_BACKOFFS) {
+        return false;
+    }
+    c->exponent = c->exponent < MAC154_MAX_BE ? c->exponent + 1u : MAC154_MAX_BE;
+    return true;
+}
+
+/* The frame went unacknowledged: whether to send it again, false once it went MAC154_MAX_FRAME_RETRIES times more. */
+static inline bool mac154_csma_retry(struct mac154_csma *c)
+{
+    if (c->tries > MAC154_MAX_FRAME_RETRIES) {
+        return false;
+    }
+    c->backoffs = 0;
+    c->exponent = MAC154_MIN_BE;
+    return true;
 }
 
 #endif

@@ -1,12 +1,8 @@
 /*
  * IEEE 802.15.4's MAC over the nRF52840's radio; see link.h.
  *
- * Its numbers are 802.15.4-2006's for the 2.4 GHz O-QPSK PHY, its tables 70 and 86:
- * a symbol lasts 16 us and a backoff period 20 of them;
- * a frame waits macAckWaitDuration for its acknowledgement, 54 symbols,
- * a backoff period, the turnaround of 12, the synchronization header's 10 and six of the acknowledgement's octets;
- * the backoff's exponent goes from macMinBE, 3, to macMaxBE, 5, the channel is assessed at most macMaxCSMABackoffs, 4,
- * times again, and a frame is sent again at most macMaxFrameRetries, 3, times.
+ * The backoffs and retries are mac154.h's; a frame waits macAckWaitDuration for its acknowledgement, 54 symbols,
+ * a backoff period, the turnaround of 12, the synchronization header's 10 and six of the acknowledgement's octets.
  *
  * A wait on the counter receives meanwhile and acknowledges what asks,
  * so a neighbour that sends during a backoff or while this node waits for an acknowledgement is answered.
@@ -17,19 +13,14 @@
 #include "lib/libc.h"
 #include "rvuos.h"
 
-#define BACKOFF_PERIOD_US 320u
-#define MIN_BE            3u
-#define MAX_BE            5u
-#define MAX_CSMA_BACKOFFS 4u
-#define MAX_FRAME_RETRIES 3u
-#define ACK_WAIT_US       864u
+#define ACK_WAIT_US (MAC154_ACK_WAIT_SYMBOLS * MAC154_SYMBOL_US)
 /*
  * An acknowledgement starts aTurnaroundTime, 12 symbols, after the frame it acknowledges, and not before:
  * its sender turns round to receive meanwhile, and the C6 hears none that comes earlier.
  * The radio ramps up to sending in 40 us, so it is told to send that much before.
  * Once told, the acknowledgement takes the ramp, then its 11 octets on the air, 352 us; bounded well past them.
  */
-#define TURNAROUND_US 192u
+#define TURNAROUND_US (12u * MAC154_SYMBOL_US)
 #define RAMP_US       40u
 #define ACK_SEND_US   2000u
 /*
@@ -40,7 +31,7 @@
 /* The assessment finds the channel busy at -75 dBm or more, 10 dB above the sensitivity 802.15.4 asks of a receiver. */
 #define CCA_DBM (-75)
 /* A frame never acknowledged counts in ETX as twice the transmissions it was given. */
-#define ETX_NO_ACK (2u * (MAX_FRAME_RETRIES + 1u))
+#define ETX_NO_ACK (2u * (MAC154_MAX_FRAME_RETRIES + 1u))
 /* A mean moves by an eighth of the way to each new sample. */
 #define MEAN_WEIGHT 8u
 /* The random numbers' state, should a seed or the counter's bits make it zero, where xorshift would stay. */
@@ -194,14 +185,14 @@ static bool receive(struct link *l)
 
 static void finish(struct link *l, enum link_result result)
 {
-    l->counts.tries += l->out.tries;
+    l->counts.tries += l->out.csma.tries;
     if (l->out.ack) {
         struct link_neighbor *n = neighbor(l, l->out.dst);
         n->frames++;
-        n->tries += l->out.tries;
+        n->tries += l->out.csma.tries;
         if (result == LINK_ACKED) {
             n->acked++;
-            n->etx = mean(n->etx, l->out.tries * LINK_ETX_ONE, n->etx == 0);
+            n->etx = mean(n->etx, l->out.csma.tries * LINK_ETX_ONE, n->etx == 0);
         } else if (result == LINK_NO_ACK) {
             n->failed++;
             n->etx = mean(n->etx, ETX_NO_ACK * LINK_ETX_ONE, n->etx == 0);
@@ -215,7 +206,7 @@ static void finish(struct link *l, enum link_result result)
 /* A backoff of a random number of periods below 2 to the exponent; a long one is slept through first. */
 static void backoff_start(struct link *l)
 {
-    uint32_t us = (random_next(l) & ((1u << l->out.exponent) - 1u)) * BACKOFF_PERIOD_US;
+    uint32_t us = mac154_backoff_us(&l->out.csma, random_next(l));
     l->out.due = now(l) + us;
     l->state = LINK_BACKOFF;
     if (us >= SLEEP_MIN_US) {
@@ -230,25 +221,28 @@ static void backoff_start(struct link *l)
  */
 static void backoff_end(struct link *l)
 {
-    for (uint32_t i = 0; i <= MAX_CSMA_BACKOFFS && l->state == LINK_BACKOFF; i++) {
+    for (uint32_t i = 0; i <= MAC154_MAX_CSMA_BACKOFFS && l->state == LINK_BACKOFF; i++) {
         if (before(now(l), l->out.due - SLEEP_MIN_US)) {
             return;
         }
         while (before(now(l), l->out.due)) {
             receive(l);
         }
-        if (radio_send_clear(&l->radio, l->out.frame, l->out.length)) {
-            l->out.tries++;
+        /* A frame arriving makes the channel as busy as an assessment would find it, and is left to arrive. */
+        bool arriving = radio_receiving(&l->radio);
+        if (!arriving && radio_send_clear(&l->radio, l->out.frame, l->out.length)) {
+            l->out.csma.tries++;
             l->state = LINK_SENDING;
             return;
         }
         l->counts.busy++;
-        radio_receive_start(&l->radio);
-        if (++l->out.backoffs > MAX_CSMA_BACKOFFS) {
+        if (!arriving) {
+            radio_receive_start(&l->radio);
+        }
+        if (!mac154_csma_busy(&l->out.csma)) {
             finish(l, LINK_BUSY);
             return;
         }
-        l->out.exponent = l->out.exponent < MAX_BE ? l->out.exponent + 1u : MAX_BE;
         backoff_start(l);
     }
 }
@@ -267,12 +261,10 @@ static void sent(struct link *l)
             return;
         }
     }
-    if (l->out.tries > MAX_FRAME_RETRIES) {
+    if (!mac154_csma_retry(&l->out.csma)) {
         finish(l, LINK_NO_ACK);
         return;
     }
-    l->out.backoffs = 0;
-    l->out.exponent = MIN_BE;
     backoff_start(l);
     backoff_end(l);
 }
@@ -334,9 +326,7 @@ bool link_send(struct link *l, uint16_t dst, const uint8_t *payload, uint32_t le
     l->out.dst = dst;
     l->out.seq = d.seq;
     l->out.ack = d.ack_request;
-    l->out.backoffs = 0;
-    l->out.exponent = MIN_BE;
-    l->out.tries = 0;
+    mac154_csma_start(&l->out.csma);
     l->done = false;
     l->counts.frames++;
     backoff_start(l);

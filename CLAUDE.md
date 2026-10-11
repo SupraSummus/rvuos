@@ -57,7 +57,7 @@ with an nRF52840 on an ST-Link connected, `make BOARD=nrf52840 test escape`,
 the only run of ARMv7-M on silicon, which a change to `kernel/arch/arm/` needs too.
 A change to `user/thread/` or to the ESP32-C6's `user/wifi/esp32c6/i154.c`, with both boards connected,
 runs `tools/thread-pair.sh`, IEEE 802.15.4's frames between them, which fails if either hears nothing of the other
-or nothing of either is acknowledged, and a change to `user/thread/link.c` runs it again with `stream=` in `THREAD_CONFIG`,
+or nothing of either is acknowledged, and a change to how either sends runs it again with `STREAM=`,
 as only a stream has the two contend for the channel;
 a traced Wi-Fi run of the C6 after it waits for a plain Wi-Fi run first, see the driver's `NOTES.md`.
 `make check` runs the test of `user/lib/` under QEMU alone,

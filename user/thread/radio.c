@@ -25,6 +25,7 @@
 #define EVENTS_DISABLED 0x110u
 #define EVENTS_CRCOK   0x130u
 #define EVENTS_CRCERROR 0x134u
+#define EVENTS_FRAMESTART 0x138u
 #define EVENTS_EDEND   0x13cu
 #define EVENTS_CCAIDLE 0x144u
 #define EVENTS_CCABUSY 0x148u
@@ -115,6 +116,7 @@ void radio_off(struct radio *r)
     REG(r, EVENTS_DISABLED) = 0;
     REG(r, EVENTS_CRCOK) = 0;
     REG(r, EVENTS_CRCERROR) = 0;
+    REG(r, EVENTS_FRAMESTART) = 0;
     REG(r, EVENTS_EDEND) = 0;
     REG(r, EVENTS_CCAIDLE) = 0;
     REG(r, EVENTS_CCABUSY) = 0;
@@ -200,6 +202,7 @@ bool radio_received(struct radio *r, struct radio_frame *f)
     /* The radio waits, ready, after a frame: it receives the next at once, into the other buffer. */
     r->rx_next = (r->rx_next + 1u) % RADIO_RX_BUFFERS;
     REG(r, PACKETPTR) = (uint32_t)(uintptr_t)r->rx[r->rx_next];
+    REG(r, EVENTS_FRAMESTART) = 0;
     REG(r, TASKS_START) = 1;
     uint32_t psdu = rx[0] & PHR_LENGTH;
     f->bytes = &rx[1];
@@ -211,6 +214,11 @@ bool radio_received(struct radio *r, struct radio_frame *f)
         f->lqi = lqi > LQI_MAX ? LQI_MAX : lqi;
     }
     return true;
+}
+
+bool radio_receiving(struct radio *r)
+{
+    return REG(r, EVENTS_FRAMESTART) != 0 && REG(r, EVENTS_CRCOK) == 0 && REG(r, EVENTS_CRCERROR) == 0;
 }
 
 /* The frame into the radio's own bytes, the length first. */
@@ -281,6 +289,7 @@ bool radio_sent(struct radio *r)
         return false;
     }
     REG(r, EVENTS_DISABLED) = 0;
+    REG(r, EVENTS_FRAMESTART) = 0;
     /* Receiving from here on, and no later off turns the radio on again. */
     REG(r, SHORTS) = SHORT_READY_START;
     REG(r, INTENCLR) = INT_DISABLED;

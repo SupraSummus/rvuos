@@ -81,8 +81,8 @@ struct link {
         uint16_t dst;
         uint8_t seq;
         bool ack;
-        uint32_t backoffs, exponent, tries; /* 802.15.4's NB and BE, and the transmissions so far */
-        uint32_t due;                       /* the counter's value at the end of the backoff */
+        struct mac154_csma csma;
+        uint32_t due; /* the counter's value at the end of the backoff */
     } out;
     bool done;
     enum link_result result;
