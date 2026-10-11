@@ -64,6 +64,8 @@
 #define INT_CRCOK    (1u << 12)
 #define INT_CRCERROR (1u << 13)
 #define INT_EDEND    (1u << 15)
+#define INT_CCABUSY  (1u << 18)
+#define INT_TXREADY  (1u << 21)
 
 #define MODE_IEEE802154_250KBIT 15u
 /* A length field of 8 bits, the 32-bit zero preamble, and a length that counts the FCS. */
@@ -89,13 +91,8 @@
 /* The link quality follows a frame of at least this many octets; it is not measured on a shorter one. */
 #define LQI_MIN_PSDU 3u
 
-/*
- * A disable takes some microseconds, a ramp up 40, and an assessment 128 after it;
- * these bound the waits well past them.
- */
+/* A disable takes some microseconds; this bounds the wait well past them. */
 #define DISABLE_POLLS 100000u
-#define READY_POLLS   100000u
-#define CCA_POLLS     100000u
 
 /* The powers the chip sends at, in dBm as TXPOWER takes them, most first; its byte is the dBm's two's complement. */
 static const int8_t powers[] = { 8, 7, 6, 5, 4, 3, 2, 0, -4, -8, -12, -16, -20, -40 };
@@ -239,6 +236,7 @@ static void then_receive(struct radio *r)
 {
     REG(r, SHORTS) = SHORT_PHYEND_DISABLE | SHORT_DISABLED_RXEN | SHORT_RXREADY_START;
     REG(r, PACKETPTR) = (uint32_t)(uintptr_t)r->rx[r->rx_next];
+    REG(r, INTENCLR) = INT_TXREADY | INT_CCABUSY;
     REG(r, INTENSET) = INT_DISABLED;
 }
 
@@ -248,14 +246,11 @@ void radio_send_start(struct radio *r, const uint8_t *frame, uint32_t length)
     frame_put(r, frame, length);
     REG(r, PACKETPTR) = (uint32_t)(uintptr_t)r->tx;
     REG(r, SHORTS) = SHORT_TXREADY_START | SHORT_PHYEND_DISABLE;
+    REG(r, INTENSET) = INT_TXREADY;
     REG(r, TASKS_TXEN) = 1;
-    for (uint32_t i = 0; i < READY_POLLS && REG(r, EVENTS_TXREADY) == 0; i++) {
-    }
-    REG(r, EVENTS_TXREADY) = 0;
-    then_receive(r);
 }
 
-bool radio_send_clear(struct radio *r, const uint8_t *frame, uint32_t length)
+void radio_send_clear(struct radio *r, const uint8_t *frame, uint32_t length)
 {
     radio_off(r);
     frame_put(r, frame, length);
@@ -266,27 +261,22 @@ bool radio_send_clear(struct radio *r, const uint8_t *frame, uint32_t length)
      */
     REG(r, SHORTS) = SHORT_RXREADY_CCASTART | SHORT_CCAIDLE_TXEN | SHORT_CCABUSY_DISABLE | SHORT_TXREADY_START |
                      SHORT_PHYEND_DISABLE;
+    REG(r, INTENSET) = INT_CCABUSY | INT_TXREADY;
     REG(r, TASKS_RXEN) = 1;
-    for (uint32_t i = 0; i < CCA_POLLS && REG(r, EVENTS_CCAIDLE) == 0 && REG(r, EVENTS_CCABUSY) == 0; i++) {
-    }
-    if (REG(r, EVENTS_CCAIDLE) == 0) {
-        for (uint32_t i = 0; i < DISABLE_POLLS && REG(r, EVENTS_DISABLED) == 0; i++) {
-        }
-        radio_off(r);
-        return false;
-    }
-    REG(r, EVENTS_CCAIDLE) = 0;
-    for (uint32_t i = 0; i < READY_POLLS && REG(r, EVENTS_TXREADY) == 0; i++) {
-    }
-    REG(r, EVENTS_TXREADY) = 0;
-    then_receive(r);
-    return true;
 }
 
-bool radio_sent(struct radio *r)
+enum radio_send radio_sending(struct radio *r)
 {
+    if (REG(r, EVENTS_CCABUSY) != 0) {
+        radio_off(r);
+        return RADIO_BUSY;
+    }
+    if (REG(r, EVENTS_TXREADY) != 0) {
+        REG(r, EVENTS_TXREADY) = 0;
+        then_receive(r);
+    }
     if (REG(r, EVENTS_DISABLED) == 0) {
-        return false;
+        return RADIO_GOING;
     }
     REG(r, EVENTS_DISABLED) = 0;
     REG(r, EVENTS_FRAMESTART) = 0;
@@ -294,5 +284,10 @@ bool radio_sent(struct radio *r)
     REG(r, SHORTS) = SHORT_READY_START;
     REG(r, INTENCLR) = INT_DISABLED;
     REG(r, INTENSET) = INT_CRCOK | INT_CRCERROR;
-    return true;
+    /* Off still, the frame ended before then_receive came, and the radio is turned to receiving here. */
+    if (REG(r, STATE) == STATE_DISABLED) {
+        r->late++;
+        REG(r, TASKS_RXEN) = 1;
+    }
+    return RADIO_SENT;
 }

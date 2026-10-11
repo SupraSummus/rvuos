@@ -551,7 +551,7 @@ and each goes, or is looked at again, when what it answers to goes:
 
 `i154=` brings the chip's 802.15.4 radio up instead of Wi-Fi's, as ESP-IDF's open driver does; `i154.c` says how.
 Its MAC is a whole one in hardware, unlike Wi-Fi's, but for CSMA-CA's backoffs and the retries,
-which the driver times itself, `mac154.h`'s, as the nRF52840's link does.
+`mac154.h`'s, as the nRF52840's link has them, which the driver times on the MAC's own timer0.
 It needs the BT baseband's `libbtbb.a`, whose `.bss` is linked into every image,
 so Wi-Fi's runs see the driver's RAM 24 bytes further on:
 a traced start held to one from before differs only in the address the receive list is written at.

@@ -9,8 +9,7 @@
  * The radio raises its line for the one event the step at hand waits for;
  * the driver arms the line's Irq, waits on its notification and then asks what came,
  * so a step is started by one call and ended by another.
- * A step shorter than a wake through the kernel, the assessment of the channel before sending,
- * is waited for in the call that starts it.
+ * Only a disable, some microseconds, is waited for in the call that asks it.
  * Nothing here keeps a global: the radio's state is handed in.
  */
 
@@ -48,6 +47,7 @@ struct radio {
     uint32_t rx_next; /* the buffer the radio receives into next */
     /* What it sends, the length first, which counts the FCS the radio appends. */
     uint8_t tx[1u + RADIO_PSDU_MAX] __attribute__((aligned(4)));
+    uint32_t late; /* frames sent that ended before the driver woke to set the radio to receive after them */
 };
 
 /* What a received frame was: its length without the FCS, its link quality, and whether its FCS was right. */
@@ -92,20 +92,27 @@ bool radio_receiving(struct radio *r);
 /*
  * Starts sending frame, length bytes without its FCS, at once, with no assessment of the channel:
  * from receiving, the radio turns round as fast as it can, so an acknowledgement goes out in 802.15.4's time.
- * Once the frame's last bit has gone, the radio receives again by itself,
- * so an acknowledgement 192 us later is heard, which a driver woken through the kernel would turn round for too late.
- * The radio_received after radio_sent is the first frame heard since.
  */
 void radio_send_start(struct radio *r, const uint8_t *frame, uint32_t length);
 
-/*
- * The same, after an assessment of the channel, which the call waits for, eight symbols:
- * true if the channel was clear and the frame is going,
- * false if it was busy, and the radio is off the air, which radio_receive_start ends.
- */
-bool radio_send_clear(struct radio *r, const uint8_t *frame, uint32_t length);
+/* The same, after an assessment of the channel, eight symbols, which finds it clear or busy. */
+void radio_send_clear(struct radio *r, const uint8_t *frame, uint32_t length);
 
-/* After the line: whether the frame has gone, and the radio receives. */
-bool radio_sent(struct radio *r);
+/* How far a frame being sent has come. */
+enum radio_send {
+    RADIO_GOING, /* still being assessed or sent */
+    RADIO_BUSY,  /* the channel was busy, and the radio is off the air, which radio_receive_start ends */
+    RADIO_SENT,  /* gone, and the radio receives */
+};
+
+/*
+ * After the line: how far the frame has come.
+ * The line comes once the radio is ready to send, and the call sets it to receive once the frame's last bit has gone,
+ * so an acknowledgement 192 us later is heard, which a driver woken by the frame's end would turn round for too late.
+ * The wake has to come while the frame is on the air, 352 us for an acknowledgement, the shortest;
+ * after a later one the radio turns to receiving only then, and counts the frame late.
+ * The radio_received after RADIO_SENT is the first frame heard since.
+ */
+enum radio_send radio_sending(struct radio *r);
 
 #endif

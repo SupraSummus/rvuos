@@ -4,8 +4,9 @@
  * The backoffs and retries are mac154.h's; a frame waits macAckWaitDuration for its acknowledgement, 54 symbols,
  * a backoff period, the turnaround of 12, the synchronization header's 10 and six of the acknowledgement's octets.
  *
- * A wait on the counter receives meanwhile and acknowledges what asks,
- * so a neighbour that sends during a backoff or while this node waits for an acknowledgement is answered.
+ * A frame heard during a backoff or the wait for an acknowledgement is acknowledged if it asks,
+ * so a neighbour that sends meanwhile is answered;
+ * a backoff that ends while an acknowledgement is being sent finds the channel busy.
  */
 
 #include "link.h"
@@ -18,34 +19,24 @@
  * An acknowledgement starts aTurnaroundTime, 12 symbols, after the frame it acknowledges, and not before:
  * its sender turns round to receive meanwhile, and the C6 hears none that comes earlier.
  * The radio ramps up to sending in 40 us, so it is told to send that much before.
- * Once told, the acknowledgement takes the ramp, then its 11 octets on the air, 352 us; bounded well past them.
  */
 #define TURNAROUND_US (12u * MAC154_SYMBOL_US)
 #define RAMP_US       40u
-#define ACK_SEND_US   2000u
-/*
- * A backoff at least this long is slept through on the timer line, which fires up to a tick past its delay,
- * and its last part waited for on the counter.
- */
-#define SLEEP_MIN_US 2000u
+/* The alarms: the frame being sent's, for its backoff or its acknowledgement, and the acknowledgement's turnaround. */
+#define ALARM_OUT 0u
+#define ALARM_ACK 1u
 /* The assessment finds the channel busy at -75 dBm or more, 10 dB above the sensitivity 802.15.4 asks of a receiver. */
 #define CCA_DBM (-75)
 /* A frame never acknowledged counts in ETX as twice the transmissions it was given. */
 #define ETX_NO_ACK (2u * (MAC154_MAX_FRAME_RETRIES + 1u))
 /* A mean moves by an eighth of the way to each new sample. */
 #define MEAN_WEIGHT 8u
-/* The random numbers' state, should a seed or the counter's bits make it zero, where xorshift would stay. */
+/* The random numbers' state, should a seed or the TIMER's bits make it zero, where xorshift would stay. */
 #define RANDOM_NONZERO 0x9e3779b9u
 
-static uint32_t now(const struct link *l)
+static uint32_t now(struct link *l)
 {
-    return rv_counter_low(l->counter);
-}
-
-/* Whether the counter's value t is still before due, as differences of the wrapping counter tell. */
-static bool before(uint32_t t, uint32_t due)
-{
-    return (int32_t)(due - t) > 0;
+    return alarm_now(&l->alarm);
 }
 
 static void call(struct link *l, uint32_t status)
@@ -55,12 +46,7 @@ static void call(struct link *l, uint32_t status)
     }
 }
 
-static void arm(struct link *l)
-{
-    call(l, rv_irq_set(l->irq, l->irq_bit));
-}
-
-/* A random number for a backoff: xorshift32, stirred with the counter, whose low bits the wakes' timing moves. */
+/* A random number for a backoff: xorshift32, stirred with the TIMER's count, whose low bits the wakes' timing moves. */
 static uint32_t random_next(struct link *l)
 {
     uint32_t x = l->random ^ now(l);
@@ -101,31 +87,31 @@ static struct link_neighbor *neighbor(struct link *l, uint16_t addr)
     return n;
 }
 
-/*
- * The acknowledgement of the frame numbered seq, which ended no later than the counter's value ended,
- * sent once its turnaround is over, and waited for; the radio receives again after it.
- * A frame is noticed some microseconds after it ends, a wake's or a wait's,
- * so the acknowledgement starts that much past the turnaround, well within the 54 symbols its sender waits.
- */
-static void acknowledge(struct link *l, uint8_t seq, uint32_t ended)
+/* The acknowledgement being sent, its turnaround over. */
+static void ack_send(struct link *l)
 {
     uint8_t ack[MAC154_ACK_LENGTH];
-    uint32_t length = mac154_ack_frame(ack, seq);
-    while (before(now(l), ended + TURNAROUND_US - RAMP_US)) {
-    }
-    radio_send_start(&l->radio, ack, length);
-    uint32_t due = now(l) + ACK_SEND_US;
-    bool gone;
-    while (!(gone = radio_sent(&l->radio)) && before(now(l), due)) {
-    }
-    if (!gone) {
-        radio_receive_start(&l->radio);
-    }
-    l->counts.acks_sent++;
+    radio_send_start(&l->radio, ack, mac154_ack_frame(ack, l->ack_seq));
+    l->acking = LINK_ACK_ON_AIR;
 }
 
 /*
- * A frame heard, which ended no later than the counter's value ended:
+ * The acknowledgement of the frame numbered seq, which ended no later than the TIMER's count ended,
+ * sent once its turnaround is over.
+ * A frame is noticed a wake after it ends, and the alarm comes a wake late,
+ * so the acknowledgement starts two wakes past the turnaround, well within the 54 symbols its sender waits.
+ */
+static void acknowledge(struct link *l, uint8_t seq, uint32_t ended)
+{
+    l->ack_seq = seq;
+    l->acking = LINK_ACK_TURNAROUND;
+    if (!alarm_set(&l->alarm, ALARM_ACK, ended + TURNAROUND_US - RAMP_US)) {
+        ack_send(l);
+    }
+}
+
+/*
+ * A frame heard, which ended no later than the TIMER's count ended:
  * acknowledged if it is a data frame for this node that asks, held if it is no repeat, counted otherwise.
  * True if it is the acknowledgement of the frame being sent.
  */
@@ -136,7 +122,7 @@ static bool heard(struct link *l, const struct radio_frame *f, uint32_t ended)
         return false;
     }
     if (f->length > 0 && (f->bytes[0] & MAC154_TYPE_MASK) == MAC154_TYPE_ACK) {
-        if (l->state == LINK_SENDING && l->out.ack && mac154_acks(f->bytes, f->length, l->out.seq)) {
+        if (l->state == LINK_ACK_WAIT && mac154_acks(f->bytes, f->length, l->out.seq)) {
             return true;
         }
         l->counts.stray_acks++;
@@ -148,8 +134,8 @@ static bool heard(struct link *l, const struct radio_frame *f, uint32_t ended)
         l->counts.others++;
         return false;
     }
-    /* First, as its sender waits only 54 symbols; the frame stays where the radio wrote it meanwhile. */
-    if (d.ack_request && d.dst == l->addr) {
+    /* No frame is short enough to end within another's turnaround; one that did would go unacknowledged. */
+    if (d.ack_request && d.dst == l->addr && l->acking == LINK_ACK_NONE) {
         acknowledge(l, d.seq, ended);
     }
     struct link_neighbor *n = neighbor(l, d.src);
@@ -176,13 +162,6 @@ static bool heard(struct link *l, const struct radio_frame *f, uint32_t ended)
     return false;
 }
 
-/* A frame, if one has been received since the last; true if it acknowledges the frame being sent. */
-static bool receive(struct link *l)
-{
-    struct radio_frame f;
-    return radio_received(&l->radio, &f) && heard(l, &f, now(l));
-}
-
 static void finish(struct link *l, enum link_result result)
 {
     l->counts.tries += l->out.csma.tries;
@@ -198,82 +177,114 @@ static void finish(struct link *l, enum link_result result)
             n->etx = mean(n->etx, ETX_NO_ACK * LINK_ETX_ONE, n->etx == 0);
         }
     }
+    alarm_off(&l->alarm, ALARM_OUT);
     l->result = result;
     l->done = true;
     l->state = LINK_IDLE;
 }
 
-/* A backoff of a random number of periods below 2 to the exponent; a long one is slept through first. */
-static void backoff_start(struct link *l)
+/* A frame, if one has been received since the last: the frame being sent done if it acknowledges it. */
+static void receive(struct link *l)
 {
-    uint32_t us = mac154_backoff_us(&l->out.csma, random_next(l));
-    l->out.due = now(l) + us;
-    l->state = LINK_BACKOFF;
-    if (us >= SLEEP_MIN_US) {
-        call(l, rv_timer_set(l->timer, l->timer_bit, us - SLEEP_MIN_US));
+    struct radio_frame f;
+    if (radio_received(&l->radio, &f) && heard(l, &f, now(l))) {
+        finish(l, LINK_ACKED);
     }
+}
+
+/* The channel was busy: true if another backoff follows, false if the frame was given up, busy too often. */
+static bool busy(struct link *l)
+{
+    l->counts.busy++;
+    if (mac154_csma_busy(&l->out.csma)) {
+        return true;
+    }
+    finish(l, LINK_BUSY);
+    return false;
 }
 
 /*
- * The backoffs from the one at hand, once its sleep is over: the rest of each waited for on the counter,
- * then the assessment, and the frame sent if the channel is clear, or another backoff if not,
- * until one is long enough to sleep through or the channel was busy too often.
+ * The assessment once a backoff is over: true if the frame went to the radio or was given up,
+ * false if another backoff follows.
+ * A frame arriving or an acknowledgement being sent makes the channel as busy as an assessment would find it,
+ * and the frame arriving is left to arrive.
  */
-static void backoff_end(struct link *l)
+static bool assess(struct link *l)
 {
-    for (uint32_t i = 0; i <= MAC154_MAX_CSMA_BACKOFFS && l->state == LINK_BACKOFF; i++) {
-        if (before(now(l), l->out.due - SLEEP_MIN_US)) {
-            return;
-        }
-        while (before(now(l), l->out.due)) {
-            receive(l);
-        }
-        /* A frame arriving makes the channel as busy as an assessment would find it, and is left to arrive. */
-        bool arriving = radio_receiving(&l->radio);
-        if (!arriving && radio_send_clear(&l->radio, l->out.frame, l->out.length)) {
-            l->out.csma.tries++;
-            l->state = LINK_SENDING;
-            return;
-        }
-        l->counts.busy++;
-        if (!arriving) {
-            radio_receive_start(&l->radio);
-        }
-        if (!mac154_csma_busy(&l->out.csma)) {
-            finish(l, LINK_BUSY);
-            return;
-        }
-        backoff_start(l);
+    if (l->acking == LINK_ACK_NONE && !radio_receiving(&l->radio)) {
+        radio_send_clear(&l->radio, l->out.frame, l->out.length);
+        l->state = LINK_SENDING;
+        return true;
+    }
+    return !busy(l);
+}
+
+/*
+ * Backoffs, each a random number of periods below 2 to the exponent, and the assessment after each,
+ * until one is to be waited for on the alarm, the frame went to the radio, or the channel was busy too often;
+ * only a backoff of no periods is over before its alarm is set.
+ */
+static void backoff(struct link *l)
+{
+    l->state = LINK_BACKOFF;
+    while (!alarm_set(&l->alarm, ALARM_OUT, now(l) + mac154_backoff_us(&l->out.csma, random_next(l))) && !assess(l)) {
     }
 }
 
-/* The frame has gone: done if it asked nothing, otherwise its acknowledgement waited for, and it sent again if none. */
+/* No acknowledgement came: the frame sent again after a backoff, or given up once it went too often. */
+static void unacknowledged(struct link *l)
+{
+    if (mac154_csma_retry(&l->out.csma)) {
+        backoff(l);
+    } else {
+        finish(l, LINK_NO_ACK);
+    }
+}
+
+/* The frame has gone: done if it asked nothing, otherwise its acknowledgement waited for. */
 static void sent(struct link *l)
 {
+    l->out.csma.tries++;
     if (!l->out.ack) {
         finish(l, LINK_SENT);
         return;
     }
-    uint32_t due = now(l) + ACK_WAIT_US;
-    while (before(now(l), due)) {
-        if (receive(l)) {
-            finish(l, LINK_ACKED);
-            return;
-        }
+    l->state = LINK_ACK_WAIT;
+    if (!alarm_set(&l->alarm, ALARM_OUT, now(l) + ACK_WAIT_US)) {
+        unacknowledged(l);
     }
-    if (!mac154_csma_retry(&l->out.csma)) {
-        finish(l, LINK_NO_ACK);
-        return;
-    }
-    backoff_start(l);
-    backoff_end(l);
 }
 
-void link_init(struct link *l, uint32_t base, uint32_t counter, uint32_t irq, uint32_t irq_bit, uint32_t timer,
-               uint32_t timer_bit, uint16_t pan, uint16_t addr, uint32_t seed)
+/* Whether the radio is sending, the link's own frame or an acknowledgement, rather than receiving. */
+static bool on_air(const struct link *l)
+{
+    return l->state == LINK_SENDING || l->acking == LINK_ACK_ON_AIR;
+}
+
+/* What the radio's line ended of a frame being sent, the link's own or an acknowledgement. */
+static void sending(struct link *l)
+{
+    enum radio_send s = radio_sending(&l->radio);
+    if (l->acking == LINK_ACK_ON_AIR) {
+        if (s == RADIO_SENT) {
+            l->acking = LINK_ACK_NONE;
+            l->counts.acks_sent++;
+        }
+    } else if (s == RADIO_BUSY) {
+        radio_receive_start(&l->radio);
+        if (busy(l)) {
+            backoff(l);
+        }
+    } else if (s == RADIO_SENT) {
+        sent(l);
+    }
+}
+
+void link_init(struct link *l, uint32_t radio_base, uint32_t timer_base, uint32_t irq, uint32_t irq_bit,
+               uint32_t timer, uint32_t timer_bit, uint16_t pan, uint16_t addr, uint32_t seed)
 {
     memset(l, 0, sizeof(*l));
-    l->counter = counter;
+    alarm_init(&l->alarm, timer_base);
     l->irq = irq;
     l->irq_bit = irq_bit;
     l->timer = timer;
@@ -283,8 +294,9 @@ void link_init(struct link *l, uint32_t base, uint32_t counter, uint32_t irq, ui
     l->random = seed != 0 ? seed : RANDOM_NONZERO;
     l->seq = (uint8_t)random_next(l);
     l->state = LINK_IDLE;
+    l->acking = LINK_ACK_NONE;
     l->fault = KERR_OK;
-    radio_init(&l->radio, base, (uint32_t)(CCA_DBM - RADIO_LEVEL_DBM));
+    radio_init(&l->radio, radio_base, (uint32_t)(CCA_DBM - RADIO_LEVEL_DBM));
 }
 
 void link_stir(struct link *l, uint32_t bits)
@@ -302,15 +314,20 @@ void link_listen(struct link *l, uint32_t channel)
 {
     radio_channel(&l->radio, channel);
     radio_receive_start(&l->radio);
-    arm(l);
+    call(l, rv_irq_set(l->irq, l->irq_bit));
+    call(l, rv_irq_set(l->timer, l->timer_bit));
 }
 
 void link_off(struct link *l)
 {
     radio_off(&l->radio);
+    for (uint32_t n = 0; n < ALARMS; n++) {
+        alarm_off(&l->alarm, n);
+    }
     call(l, rv_irq_set(l->irq, 0));
-    call(l, rv_timer_set(l->timer, 0, 0));
+    call(l, rv_irq_set(l->timer, 0));
     l->state = LINK_IDLE;
+    l->acking = LINK_ACK_NONE;
 }
 
 bool link_send(struct link *l, uint16_t dst, const uint8_t *payload, uint32_t length)
@@ -329,24 +346,34 @@ bool link_send(struct link *l, uint16_t dst, const uint8_t *payload, uint32_t le
     mac154_csma_start(&l->out.csma);
     l->done = false;
     l->counts.frames++;
-    backoff_start(l);
-    backoff_end(l);
-    arm(l);
+    backoff(l);
     return true;
 }
 
 void link_wake(struct link *l, uint32_t bits)
 {
-    if (l->state == LINK_SENDING && radio_sent(&l->radio)) {
-        sent(l);
+    if (on_air(l)) {
+        sending(l);
     }
-    if (l->state != LINK_SENDING) {
+    if (!on_air(l)) {
         receive(l);
     }
-    if (l->state == LINK_BACKOFF && ((bits & l->timer_bit) || !before(now(l), l->out.due - SLEEP_MIN_US))) {
-        backoff_end(l);
+    if (alarm_fired(&l->alarm, ALARM_ACK) && l->acking == LINK_ACK_TURNAROUND) {
+        ack_send(l);
     }
-    arm(l);
+    if (alarm_fired(&l->alarm, ALARM_OUT)) {
+        if (l->state == LINK_BACKOFF && !assess(l)) {
+            backoff(l);
+        } else if (l->state == LINK_ACK_WAIT) {
+            unacknowledged(l);
+        }
+    }
+    if (bits & l->irq_bit) {
+        call(l, rv_irq_set(l->irq, l->irq_bit));
+    }
+    if (bits & l->timer_bit) {
+        call(l, rv_irq_set(l->timer, l->timer_bit));
+    }
 }
 
 bool link_done(struct link *l, enum link_result *result)

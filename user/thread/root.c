@@ -62,7 +62,7 @@
 
 static struct self self;
 static struct link link;
-static uint32_t radio_irq, radio_bit, link_timer, link_bit, end_irq, end_bit, step_irq, step_bit;
+static uint32_t radio_irq, radio_bit, timer_irq, timer_bit, end_irq, end_bit, step_irq, step_bit;
 static uint32_t stream_irq, stream_bit, pending;
 
 static void console_write(void *to, const char *s, uint32_t n)
@@ -279,6 +279,7 @@ static void summary(const struct tally *t, const struct config *c)
     say(&cout, "thread: the link sent %u frames in %u transmissions, the channel busy at %u assessments; "
                "sent %u acknowledgements; %u frames with a bad FCS, %u stray acknowledgements, %u others, %u dropped\n",
         k->frames, k->tries, k->busy, k->acks_sent, k->bad_fcs, k->stray_acks, k->others, k->dropped);
+    say(&cout, "thread: %u frames sent ended before the radio was set to receive after them\n", link.radio.late);
     for (uint32_t i = 0; i < LINK_NEIGHBORS; i++) {
         const struct link_neighbor *n = &link.neighbors[i];
         if (!n->used) {
@@ -315,11 +316,11 @@ static bool exchange(const struct config *c)
         must("set the stream's period", rv_timer_period(stream_irq, stream_bit, US_PER_S / c->stream, &skipped));
     }
     for (;;) {
-        uint32_t got = wait_for(radio_bit | link_bit | end_bit | step_bit | stream_bit);
+        uint32_t got = wait_for(radio_bit | timer_bit | end_bit | step_bit | stream_bit);
         if (got & end_bit) {
             break;
         }
-        if (got & (radio_bit | link_bit)) {
+        if (got & (radio_bit | timer_bit)) {
             link_wake(&link, got);
         }
         struct link_frame f;
@@ -368,24 +369,19 @@ int main(void)
     must("map the console", region_install(&self, BOOT_CAP_UART, RIGHT_R | RIGHT_W, &region));
     console_init(base);
     must("map the radio", region_install(&self, BOOT_CAP_RADIO, RIGHT_R | RIGHT_W, &region));
+    /* The TIMER the link times what is shorter than a tick by. */
+    must("map the TIMER", region_install(&self, BOOT_CAP_TIMER2, RIGHT_R | RIGHT_W, &region));
     struct config c;
     configure(&c);
-
-    /* The clock's counter, which the link times what is shorter than a tick by, a load away. */
-    uint64_t at;
-    uint32_t hz, counter, counter_frame;
-    must("read the clock", rv_clock_read(BOOT_CAP_CLOCK, &at, &hz, &counter));
-    must("the link's clock counts microseconds", hz == US_PER_S ? KERR_OK : KERR_INVALID_ARG);
-    must("a slot for the counter", slot_new(&self, &counter_frame));
-    must("the counter's frame", rv_clock_frame(BOOT_CAP_CLOCK, counter_frame));
-    must("map the counter", region_install(&self, counter_frame, RIGHT_R, &region));
 
     must("a bit for the radio", bit_new(&self, &radio_bit));
     must("a slot for the radio's line", slot_new(&self, &radio_irq));
     must("the radio's line", rv_irq_carve(BOOT_CAP_IRQ_LINES, RADIO_IRQ, 1, radio_irq));
     must("bind the radio's line", rv_irq_bind(radio_irq, self.pool, self.inbox, radio_irq));
-    must("a bit for the link", bit_new(&self, &link_bit));
-    must("a timer for the link", timer_new(&self, &link_timer));
+    must("a bit for the TIMER", bit_new(&self, &timer_bit));
+    must("a slot for the TIMER's line", slot_new(&self, &timer_irq));
+    must("the TIMER's line", rv_irq_carve(BOOT_CAP_IRQ_LINES, TIMER2_IRQ, 1, timer_irq));
+    must("bind the TIMER's line", rv_irq_bind(timer_irq, self.pool, self.inbox, timer_irq));
     must("a bit for the end", bit_new(&self, &end_bit));
     must("a timer for the end", timer_new(&self, &end_irq));
     must("a bit for the steps", bit_new(&self, &step_bit));
@@ -393,8 +389,11 @@ int main(void)
     must("a bit for the stream", bit_new(&self, &stream_bit));
     must("a timer for the stream", timer_new(&self, &stream_irq));
 
-    link_init(&link, RADIO_BASE, counter, radio_irq, radio_bit, link_timer, link_bit, MAC154_PAN_RVUOS,
-              MAC154_ADDR_NRF, (uint32_t)at ^ rv_counter_low(counter));
+    uint64_t at;
+    uint32_t hz, counter;
+    must("read the clock", rv_clock_read(BOOT_CAP_CLOCK, &at, &hz, &counter));
+    link_init(&link, RADIO_BASE, TIMER2_BASE, radio_irq, radio_bit, timer_irq, timer_bit, MAC154_PAN_RVUOS,
+              MAC154_ADDR_NRF, (uint32_t)at);
     say(&cout, "thread: the radio is on, set for IEEE 802.15.4\n");
     if (c.survey) {
         link_stir(&link, survey_energy());

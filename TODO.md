@@ -47,6 +47,10 @@ Thread, IPv6 over 802.15.4 in a mesh, needs more of it, step by step:
 - The nRF52840's radio starts its next reception as the driver wakes for the last frame,
   so a frame that begins within that wake is lost; only an acknowledgement follows so closely, 192 us after its frame.
   A shortcut from END to START, with the buffers' turn kept, would close it.
+- The nRF52840 acknowledges a frame two wakes past aTurnaroundTime rather than at it,
+  as its driver learns of a frame's end only by waking for it, and its alarm comes a wake late.
+  The C6 waits macAckWaitDuration, which holds that, but a receiver that waits less would not;
+  Nordic's driver arms the radio's own turnaround, TIFS, while the frame still arrives, from its addresses.
 - The nRF52840's backoffs draw from xorshift, seeded by the clock and the survey, where the C6's draw from its RNG;
   the chip's RNG, a device the boot does not grant, would keep two nodes booted together from drawing the same.
 - The two use fixed short addresses in a PAN of mac154.h's own, until Thread gives them theirs.

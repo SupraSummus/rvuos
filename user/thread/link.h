@@ -7,14 +7,15 @@
  * a frame for this node that asks is acknowledged, and a repeat, told by its sequence number, is not taken twice.
  * Each neighbour's frames are counted, and from them ETX, the transmissions a frame to it takes.
  *
- * The driver's thread waits on the radio's line and on the link's timer line and hands it the bits that came;
- * what is shorter than the kernel's tick is waited for on the clock's counter, receiving meanwhile.
+ * The driver's thread waits on the radio's line and on the TIMER's line and hands the link the bits that came;
+ * the backoffs, the turnaround and the wait for an acknowledgement, all shorter than the kernel's tick, are alarm.c's.
  * Nothing here keeps a global: the link's state is handed in.
  */
 
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "alarm.h"
 #include "mac154.h"
 #include "radio.h"
 
@@ -62,18 +63,24 @@ struct link_counts {
     uint32_t acks_sent, bad_fcs, stray_acks, others, dropped;
 };
 
-enum link_state { LINK_IDLE, LINK_BACKOFF, LINK_SENDING };
+/* Where the frame being sent is: in a backoff, with the radio, assessed and sent, or waiting to be acknowledged. */
+enum link_state { LINK_IDLE, LINK_BACKOFF, LINK_SENDING, LINK_ACK_WAIT };
+
+/* Where the acknowledgement of a frame heard is: waiting for the turnaround to pass, or on the air. */
+enum link_acking { LINK_ACK_NONE, LINK_ACK_TURNAROUND, LINK_ACK_ON_AIR };
 
 struct link {
     struct radio radio;
-    uint32_t counter;          /* the clock's counter, counting microseconds, where it is mapped */
+    struct alarm alarm;
     uint32_t irq, irq_bit;     /* the radio's line, and its bit */
-    uint32_t timer, timer_bit; /* the link's timer line, and its bit */
+    uint32_t timer, timer_bit; /* the TIMER's line, and its bit */
     uint16_t pan, addr;
     uint32_t random;
     uint8_t seq;               /* the next data frame's sequence number */
     uint32_t seen;
     enum link_state state;
+    enum link_acking acking;
+    uint8_t ack_seq;           /* the sequence number the acknowledgement being sent repeats */
     /* The frame being sent, and how far its sending has come. */
     struct {
         uint8_t frame[RADIO_PSDU_MAX - RADIO_FCS];
@@ -82,7 +89,6 @@ struct link {
         uint8_t seq;
         bool ack;
         struct mac154_csma csma;
-        uint32_t due; /* the counter's value at the end of the backoff */
     } out;
     bool done;
     enum link_result result;
@@ -94,13 +100,12 @@ struct link {
 };
 
 /*
- * The link of a node, addr in pan, over the radio at base, off the air:
- * counter is where the clock's counter is mapped, which counts microseconds;
- * irq is the radio's line and timer a timer line, each signalling the driver's notification with its bit;
+ * The link of a node, addr in pan, over the radio at radio_base, off the air, its alarms on the TIMER at timer_base:
+ * irq is the radio's line and timer the TIMER's, each signalling the driver's notification with its bit;
  * seed starts the backoffs' random numbers, and should differ from node to node.
  */
-void link_init(struct link *l, uint32_t base, uint32_t counter, uint32_t irq, uint32_t irq_bit, uint32_t timer,
-               uint32_t timer_bit, uint16_t pan, uint16_t addr, uint32_t seed);
+void link_init(struct link *l, uint32_t radio_base, uint32_t timer_base, uint32_t irq, uint32_t irq_bit,
+               uint32_t timer, uint32_t timer_bit, uint16_t pan, uint16_t addr, uint32_t seed);
 
 /* Stirs bits into the backoffs' random numbers, such as what a node measured that another did not. */
 void link_stir(struct link *l, uint32_t bits);
@@ -108,7 +113,7 @@ void link_stir(struct link *l, uint32_t bits);
 /* The power it sends at, as radio_power picks it. */
 int32_t link_power(struct link *l, int32_t dbm);
 
-/* Receiving on channel from now on. */
+/* Receiving on channel from now on, both lines armed. */
 void link_listen(struct link *l, uint32_t channel);
 
 /* Off the air, its lines quiet. */
@@ -120,7 +125,10 @@ void link_off(struct link *l);
  */
 bool link_send(struct link *l, uint16_t dst, const uint8_t *payload, uint32_t length);
 
-/* After a wait: what the bits of the radio's line and of the timer line, if they came, end. */
+/*
+ * After a wait: what the bits of the radio's line and of the TIMER's, if they came, end;
+ * the lines that came are armed again.
+ */
 void link_wake(struct link *l, uint32_t bits);
 
 /* Whether the frame link_send started has finished, once, and how. */

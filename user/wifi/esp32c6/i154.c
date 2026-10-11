@@ -10,7 +10,8 @@
  * the power an index into libbtbb.a's own table.
  * The MAC does the rest in hardware: it sends a frame, with a clear channel assessment first,
  * receives one through its address filter, acknowledges one that asks, and waits for the acknowledgement of its own.
- * It assesses once and waits once, so the backoffs and retries of 802.15.4's CSMA-CA are the driver's, mac154.h's.
+ * It assesses once and waits once, so the backoffs and retries of 802.15.4's CSMA-CA are the driver's, mac154.h's,
+ * each backoff timed in microseconds by the MAC's timer0, whose event comes on the MAC's line.
  * Its registers are ESP-IDF's soc/esp32c6/register/soc/ieee802154_reg.h and ieee802154_struct.h,
  * its commands and events ieee802154_common_ll.h's.
  *
@@ -69,6 +70,7 @@
 #define TX_STATUS       0x084u
 #define TXDMA_ADDR      0x0d0u
 #define RXDMA_ADDR      0x0e0u
+#define TIMER0_THRESHOLD 0x0a8u /* in microseconds */
 #define CRC_ERROR_CNT      0x148u
 #define RX_FILTER_FAIL_CNT 0x154u
 
@@ -76,6 +78,8 @@
 #define CMD_CCA_TX_START 0x43u
 #define CMD_ED_START     0x44u
 #define CMD_STOP         0x45u
+#define CMD_TIMER0_START 0x4cu
+#define CMD_TIMER0_STOP  0x4du
 
 #define CFG_AUTO_ACK_TX   (1u << 0)
 #define CFG_AUTO_ENHACK   (1u << 1)
@@ -92,7 +96,9 @@
 #define EV_RX_ABORT    (1u << 4)
 #define EV_TX_ABORT    (1u << 5)
 #define EV_ED_DONE     (1u << 6)
-#define EV_ALL (EV_TX_DONE | EV_RX_DONE | EV_ACK_TX_DONE | EV_ACK_RX_DONE | EV_RX_ABORT | EV_TX_ABORT | EV_ED_DONE)
+#define EV_TIMER0      (1u << 8) /* timer0 reached its threshold */
+#define EV_ALL (EV_TX_DONE | EV_RX_DONE | EV_ACK_TX_DONE | EV_ACK_RX_DONE | EV_RX_ABORT | EV_TX_ABORT | EV_ED_DONE | \
+                EV_TIMER0)
 
 /* A frame is arriving once its SFD is heard, as ESP-IDF's ieee802154_ll_is_current_rx_frame reads RX_STATUS. */
 #define RX_STATE(status) (((status) >> 16) & 0x7u)
@@ -139,13 +145,11 @@
 
 /*
  * The exchange: a ping to the nRF52840 every half second, with a stream of frames between if the page asks,
- * and what was heard told every few. A backoff at least SLEEP_MIN_US long is slept through on the backoff's timer,
- * which fires up to a tick past its delay, and its last part waited for on the clock.
+ * and what was heard told every few.
  */
 #define PING_US      500000u
 #define TELL_US      5000000u
 #define PAYLOAD_MAX  32u
-#define SLEEP_MIN_US 2000u
 #define US_PER_S     1000000u
 
 
@@ -157,20 +161,21 @@ void ieee802154_txon_delay_set(void);
 /* The bits the radio's notification is signalled with. */
 #define BIT_RADIO   0x1u
 #define BIT_TICK    0x2u
-#define BIT_BACKOFF 0x4u
 
 /* What the MAC is doing, which says what its next event ends; ACKING, sending the acknowledgement of a frame received. */
 enum state { IDLE, RX, ACKING, TX, ED };
 
-/* Where the frame being sent is: in a backoff, receiving meanwhile, or with the MAC, assessed, sent and waited for. */
+/*
+ * Where the frame being sent is: in a backoff, timed by the MAC's timer0 while it receives,
+ * or with the MAC, assessed, sent and waited for.
+ */
 enum sending { SEND_NONE, SEND_BACKOFF, SEND_TX };
 
 struct radio {
-    uint32_t note, irq, timer, backoff_timer;
+    uint32_t note, irq, timer;
     enum state state;
     enum sending sending;
     struct mac154_csma csma;
-    uint32_t due; /* the clock's microseconds, their low 32 bits, at the end of the backoff */
     bool ping_due, stream_due;
     /* The frames, a length octet first, as the MAC's DMA reads and writes them. */
     uint8_t rx[1u + 127u + 1u] __attribute__((aligned(4)));
@@ -311,22 +316,15 @@ static void survey(struct radio *r)
     I154(ED_CFG) |= ED_SAMPLE_AVG;
 }
 
-static uint32_t now_us(void)
-{
-    return (uint32_t)osi_now_us();
-}
-
-/* A backoff before the frame in tx is sent, receiving meanwhile; a long one is slept through first. */
+/* A backoff before the frame in tx is sent, receiving meanwhile; one of no periods lasts the timer's least. */
 static void backoff_start(struct radio *r)
 {
     uint8_t random;
     drv_random(&random, sizeof(random));
     uint32_t us = mac154_backoff_us(&r->csma, random);
-    r->due = now_us() + us;
     r->sending = SEND_BACKOFF;
-    if (us >= SLEEP_MIN_US) {
-        must("the backoff's timer", rv_timer_set(r->backoff_timer, BIT_BACKOFF, us - SLEEP_MIN_US));
-    }
+    I154(TIMER0_THRESHOLD) = us != 0 ? us : 1u;
+    I154(COMMAND) = CMD_TIMER0_START;
 }
 
 /* The next frame to the nRF52840, a ping before the stream's, which asks to be acknowledged. */
@@ -424,6 +422,19 @@ static void received(struct radio *r)
 }
 
 /*
+ * The backoff over: the frame to the MAC, unless a frame is arriving or being acknowledged,
+ * which makes the channel as busy as an assessment would find it, and which stopping the MAC to send would cut off.
+ */
+static void backoff_end(struct radio *r)
+{
+    if (r->state == RX && RX_STATE(I154(RX_STATUS)) <= RX_STATE_SFD) {
+        transmit(r);
+    } else {
+        channel_busy(r);
+    }
+}
+
+/*
  * What the MAC's events end, as ESP-IDF's ieee802154_isr takes them:
  * a frame received and acknowledged if it asked, a frame sent and acknowledged or not; then receiving again,
  * and the frame sent again after a backoff if the channel was busy or no acknowledgement came, as mac154.h counts.
@@ -467,24 +478,12 @@ static void events(struct radio *r)
             drv_say("i154: sending aborted, reason %u\n", (unsigned)reason);
         }
     }
-}
-
-/*
- * The rest of the backoff waited for on the clock, the MAC's events taken meanwhile; then the frame goes to the MAC,
- * unless a frame is arriving or being acknowledged, which makes the channel as busy as an assessment would find it,
- * and which stopping the MAC to send would cut off.
- */
-static void backoff_end(struct radio *r)
-{
-    while ((int32_t)(r->due - now_us()) > 0) {
-        if (I154(EVENT_STATUS) != 0) {
-            events(r);
+    /* Last, so that a frame received with it, and being acknowledged, makes the channel busy. */
+    if (ev & EV_TIMER0) {
+        I154(COMMAND) = CMD_TIMER0_STOP;
+        if (r->sending == SEND_BACKOFF) {
+            backoff_end(r);
         }
-    }
-    if (r->state == RX && RX_STATE(I154(RX_STATUS)) <= RX_STATE_SFD) {
-        transmit(r);
-    } else {
-        channel_busy(r);
     }
 }
 
@@ -513,7 +512,6 @@ void i154_run(struct drv *d, struct self *own)
     must("the radio's line", rv_irq_carve(d->i154_line, 0, 1, r->irq));
     must("bind the radio's line", rv_irq_bind(r->irq, own->pool, r->note, r->irq));
     must("the radio's timer", timer_bind(own, own->pool, r->note, &r->timer));
-    must("the backoff's timer", timer_bind(own, own->pool, r->note, &r->backoff_timer));
 
     clocks_on();
     /* The Wi-Fi power block's slow clock, which the PHY's calibration waits on, as for Wi-Fi. */
@@ -555,9 +553,6 @@ void i154_run(struct drv *d, struct self *own)
         /* Not while a frame is half received, or while the MAC acknowledges one. */
         if (r->sending == SEND_NONE && r->state == RX && (r->ping_due || r->stream_due)) {
             frame_start(r);
-        }
-        if (r->sending == SEND_BACKOFF && (int32_t)(r->due - SLEEP_MIN_US - now_us()) <= 0) {
-            backoff_end(r);
         }
         if (now - told_at >= TELL_US) {
             told_at = now;

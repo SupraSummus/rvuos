@@ -273,13 +273,14 @@ Interrupt lines:
 | 0 | the kernel log; POWER_CLOCK cannot be bound |
 | 1 to 47 | the peripherals' lines, numbered by their IDs; nothing raises the console's line, 20, SWI0 |
 
-The root task is granted a frame over GPIO and one over the radio, from `BOOT_CAP_DEVICES` up,
-so `BOOT_CAP_COUNT` is 20 here and the root task's table has 66 slots:
+The root task is granted a frame over GPIO, one over the radio and one over TIMER2, from `BOOT_CAP_DEVICES` up,
+so `BOOT_CAP_COUNT` is 21 here and the root task's table has 67 slots:
 
 | Slot | Constant | Range | Size | What | Rights |
 |---|---|---|---|---|---|
 | 18 | `BOOT_CAP_GPIO` | `0x50000000` | 4 KiB | GPIO, both ports, P0's registers and P1's at `0x50000300` | read, write |
 | 19 | `BOOT_CAP_RADIO` | `0x40001000` | 4 KiB | RADIO, the 2.4 GHz radio of Bluetooth LE and IEEE 802.15.4; its line is 1 | read, write |
+| 20 | `BOOT_CAP_TIMER2` | `0x4000A000` | 4 KiB | TIMER2, which times what is shorter than a tick, such as 802.15.4's backoffs; its line is 10 | read, write |
 
 The radio is a bus master: its EasyDMA reads and writes a packet wherever its `PACKETPTR` points, the kernel's RAM too,
 so a program that holds its frame reaches all RAM,

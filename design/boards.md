@@ -127,7 +127,8 @@ the random number generator's data register, read only, the eight bytes of LPPER
 since the rest of LPPERI reaches the LP domain's clocks and resets,
 and the IO MUX and the GPIO matrix, the pins, which a program sets as its board wires them,
 as the Wi-Fi system's root task sets the XIAO's RF switch;
-the nRF52840 lists GPIO, both ports in one block, which `user/blink.c` drives, and its radio, which `user/thread/` drives;
+the nRF52840 lists GPIO, both ports in one block, which `user/blink.c` drives, and its radio, which `user/thread/` drives,
+with TIMER2 for what is shorter than a tick, as the kernel's timer keeps TIMER0 and TIMER1;
 QEMU lists none, since its devices are the kernel's or the console, and the host build has no hardware;
 nor do the MPS2 boards yet.
 So on QEMU `BOOT_CAP_COUNT` is 18, the number the seeds and the corpus are written for.
