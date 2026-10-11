@@ -317,13 +317,13 @@ So the station associates for QoS, by WMM's information element, and once the ac
 parameters, sends the link's frames as A-MSDUs, as many as wait and fit 3839 bytes, which an access point that
 takes HT takes: two of the link's largest, which then share a transmission's preamble, backoff and acknowledgement.
 The access point here sent its own frames more slowly to a QoS station, about a tenth less, and the station's
-A-MSDUs carried about a sixth more; `qos=0` associates without it, `amsdu=0` sends a frame to a transmission.
+A-MSDUs carried about a seventh more; `qos=0` associates without it, `amsdu=0` sends a frame to a transmission.
 The frame is laid out straight into the buffer the MAC sends from (`mac_tx_begin`), its header written CCMP's header's
 length in and moved down after, so that the room lies before the payload, which is copied once, by halfwords as it
-lies two bytes off a word; three copies of it, two of them byte by byte, once took longer than the frame on the air.
-HT, `ht=1`, has the access point send at MCS 7 with the short guard interval, yet carry less: it protects each HT frame,
-by all that was seen, and does not offer block acknowledgement, which would aggregate them; the station declines
-an ADDBA Request, as the MAC's block acknowledgement is not the driver's yet.
+lies two bytes off a word, where it was copied three times, two of them byte by byte.
+HT, `ht=1`, has the access point send at MCS 7 with the short guard interval, yet less arrived, for a reason not found;
+it offered no block acknowledgement, which would aggregate its frames, and the station declines an ADDBA Request,
+as the MAC's block acknowledgement is not the driver's yet.
 
 ## The station's protected management frames
 
@@ -393,7 +393,7 @@ the RF off, as ESP-IDF's `esp_phy_disable` turns it off once the PHY is calibrat
 The access point holds the station's frames while the last frame of the station's it acknowledged had the
 Power Management bit set: a Null frame with the bit, once the link has carried nothing of the station's own for 200 ms.
 Every other frame the station sends has the bit clear, so the station is awake again whenever it sends;
-`mac_tx_key` reads the bit off each frame it sends, and turns the RF on before.
+`mac_tx_send` reads the bit off each frame it sends, and turns the RF on before.
 
 The station wakes for the next DTIM beacon, or at the latest every listen interval's, the three its association
 promised, a few milliseconds before the beacon is due. When that is, it reads from each beacon heard:

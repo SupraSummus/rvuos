@@ -46,8 +46,11 @@ static uint32_t comeback;
 static int qos_taken;
 static int again;
 static long rsn_at, rsnx_at, src_at, body_at, sae_at;
+static struct mgmt_addba addba_read;
+static struct mgmt_tim tim_read;
+static uint16_t tim_aid; /* the station's AID the TIM is read for */
 
-enum reader { BEACON, PROBE_ANSWER, AUTH_ANSWER, SAE, TO_STATION, ASSOC_ANSWER, LET_GO, DATA };
+enum reader { BEACON, PROBE_ANSWER, AUTH_ANSWER, SAE, TO_STATION, ASSOC_ANSWER, LET_GO, DATA, BEACON_OF, ADDBA, TIM };
 
 static long at(const uint8_t *p, const uint8_t *frame)
 {
@@ -66,6 +69,9 @@ static int reads(enum reader r, const uint8_t *f, uint32_t len)
              : r == ASSOC_ANSWER ? mgmt_assoc_answer(copy, len, sta, ap, &status, &aid, &comeback, &qos_taken)
              : r == LET_GO       ? mgmt_let_go(copy, len, sta, ap, &reason)
              : r == DATA         ? mgmt_data_read(copy, len, sta, ap, &payload)
+             : r == BEACON_OF    ? mgmt_beacon_of(copy, len, ap)
+             : r == ADDBA        ? mgmt_addba_read(copy, len, sta, ap, &addba_read)
+             : r == TIM          ? mgmt_tim(copy, len, ap, tim_aid, &tim_read)
                                  : mgmt_to_station(copy, len, sta, ap);
     if (ok && (r == BEACON || r == PROBE_ANSWER)) {
         rsn_at = at(b.rsn, copy);
@@ -385,24 +391,16 @@ static void addba(void)
     static const uint8_t body[] = { WLAN_ACTION_BLOCK_ACK, 0, 0x17, 0x02, 0x10, 0x00, 0x00, 0x30, 0x01 };
     memcpy(f + len, body, sizeof(body));
     len += sizeof(body);
-    struct mgmt_addba a = { 0, 0 };
-    check(mgmt_addba_read(f, len, sta, ap, &a) && a.token == 0x17 && a.params == 0x1002,
+    check(reads(ADDBA, f, len) && addba_read.token == 0x17 && addba_read.params == 0x1002,
           "an ADDBA Request read, its token and its parameters");
-    for (uint32_t cut = 0; cut < len; cut++) {
-        uint8_t *copy = malloc(cut ? cut : 1);
-        memcpy(copy, f, cut);
-        if (mgmt_addba_read(copy, cut, sta, ap, &a)) {
-            printf("mgmt-test: FAIL an ADDBA Request cut at %u bytes read\n", cut);
-            failures++;
-        }
-        free(copy);
-    }
+    cuts(ADDBA, f, len, NONE, NONE, "an ADDBA Request");
+    struct mgmt_addba a;
     check(!mgmt_addba_read(f, len, other, ap, &a), "one to another station refused");
     f[IEEE80211_HDRLEN + 1] = 1;
-    check(!mgmt_addba_read(f, len, sta, ap, &a), "an ADDBA Response not taken for a Request");
+    check(!reads(ADDBA, f, len), "an ADDBA Response not taken for a Request");
     f[IEEE80211_HDRLEN + 1] = 0;
     f[IEEE80211_HDRLEN] = WLAN_ACTION_SA_QUERY;
-    check(!mgmt_addba_read(f, len, sta, ap, &a), "another category's action refused");
+    check(!reads(ADDBA, f, len), "another category's action refused");
 
     a = (struct mgmt_addba){ 0x17, 0x1002 };
     uint32_t n = header(want, FC(WLAN_FC_STYPE_ACTION), ap, sta, ap);
@@ -506,27 +504,19 @@ static void null_frame(void)
     FITS_ONLY(sizeof(want), "a Null frame written only into a buffer it fits", mgmt_null(g, size, sta, ap, 1));
 }
 
-/* The access point's beacon told by its subtype and addresses, every cut short of its fixed fields refused. */
+/* The access point's beacon told by its subtype and addresses, its fixed fields alone, every cut short refused. */
 static void beacon_of(void)
 {
     uint8_t f[256];
     uint32_t len = announcement(f, WLAN_FC_STYPE_BEACON, broadcast, "rvuos", 6);
-    check(mgmt_beacon_of(f, len, ap), "the access point's beacon told");
+    check(reads(BEACON_OF, f, ANNOUNCED), "the access point's beacon told by its fixed fields");
+    cuts(BEACON_OF, f, ANNOUNCED, NONE, NONE, "the access point's beacon");
     check(!mgmt_beacon_of(f, len, other), "another's beacon refused");
-    for (uint32_t cut = 0; cut < len; cut++) {
-        uint8_t *copy = malloc(cut ? cut : 1);
-        memcpy(copy, f, cut);
-        if (mgmt_beacon_of(copy, cut, ap) != (cut >= ANNOUNCED)) {
-            printf("mgmt-test: FAIL the access point's beacon cut at %u bytes\n", cut);
-            failures++;
-        }
-        free(copy);
-    }
     len = announcement(f, WLAN_FC_STYPE_PROBE_RESP, sta, "rvuos", 6);
-    check(!mgmt_beacon_of(f, len, ap), "a probe response not taken for a beacon");
+    check(!reads(BEACON_OF, f, len), "a probe response not taken for a beacon");
     len = header(f, WLAN_FC_TYPE_DATA << 2 | WLAN_FC_STYPE_DATA << 4 | WLAN_FC_FROMDS, broadcast, ap, ap);
     memset(f + len, 0, ANNOUNCED - len);
-    check(!mgmt_beacon_of(f, ANNOUNCED, ap), "a data frame not taken for a beacon");
+    check(!reads(BEACON_OF, f, ANNOUNCED), "a data frame not taken for a beacon");
 }
 
 /* The access point's beacon with a TIM element last: its DTIM count and period, bitmap control, and bitmap. */
@@ -543,53 +533,44 @@ static uint32_t tim_beacon(uint8_t *f, uint8_t count, uint8_t period, uint8_t co
     return n + octets;
 }
 
-/* A TIM read whole, and every cut short of its end refused, the element being the beacon's last. */
-static int tim_reads(const uint8_t *f, uint32_t len, uint16_t station, struct mgmt_tim *t)
+/* A TIM read for AID station, every cut short of the beacon's end refused, the element being its last. */
+static int tim_reads(const uint8_t *f, uint32_t len, uint16_t station)
 {
-    for (uint32_t cut = 0; cut < len; cut++) {
-        uint8_t *copy = malloc(cut ? cut : 1);
-        memcpy(copy, f, cut);
-        if (mgmt_tim(copy, cut, ap, station, t)) {
-            printf("mgmt-test: FAIL a TIM read from a beacon cut at %u bytes\n", cut);
-            failures++;
-        }
-        free(copy);
-    }
-    uint8_t *copy = malloc(len);
-    memcpy(copy, f, len);
-    int ok = mgmt_tim(copy, len, ap, station, t);
-    free(copy);
-    return ok;
+    tim_aid = station;
+    cuts(TIM, f, len, NONE, NONE, "a TIM's beacon");
+    return reads(TIM, f, len);
 }
 
 static void tim(void)
 {
     uint8_t f[256];
-    struct mgmt_tim t;
+    const struct mgmt_tim *t = &tim_read;
     static const uint8_t two[] = { 0x04 };
     uint32_t len = tim_beacon(f, 0, 3, 0x01, two, sizeof(two));
-    check(tim_reads(f, len, 2, &t) && t.dtim_count == 0 && t.dtim_period == 3 && t.group && t.ours &&
-              t.interval == 100 && t.tsf == 0x8000000000000001ull,
+    check(tim_reads(f, len, 2) && t->dtim_count == 0 && t->dtim_period == 3 && t->group && t->ours &&
+              t->interval == 100 && t->tsf == 0x8000000000000001ull,
           "a DTIM beacon with the group's frames and the station's, read");
-    check(tim_reads(f, len, 3, &t) && !t.ours, "and another station's frames are not the station's");
-    check(tim_reads(f, len, 0, &t) && !t.ours, "and no AID holds none");
+    check(tim_reads(f, len, 3) && !t->ours, "and another station's frames are not the station's");
+    check(tim_reads(f, len, 0) && !t->ours, "and no AID holds none");
     len = tim_beacon(f, 1, 3, 0x01, two, sizeof(two));
-    check(tim_reads(f, len, 2, &t) && t.dtim_count == 1 && !t.group,
+    check(tim_reads(f, len, 2) && t->dtim_count == 1 && !t->group,
           "a beacon before the DTIM beacon tells of no frames to the group, whatever its bit");
     /* An offset of 2: the bitmap starts at octet 2, AIDs 16 to 31; AID 17 is octet 2's bit 1. */
     static const uint8_t past[] = { 0x02, 0x00 };
     len = tim_beacon(f, 0, 1, 0x02, past, sizeof(past));
-    check(tim_reads(f, len, 17, &t) && t.ours && !t.group, "the station's frames past the bitmap's offset, read");
-    check(tim_reads(f, len, 2, &t) && !t.ours, "an AID before the offset holds none");
-    check(tim_reads(f, len, 33, &t) && !t.ours, "nor one past the bitmap's end");
+    check(tim_reads(f, len, 17) && t->ours && !t->group, "the station's frames past the bitmap's offset, read");
+    check(tim_reads(f, len, 2) && !t->ours, "an AID before the offset holds none");
+    check(tim_reads(f, len, 33) && !t->ours, "nor one past the bitmap's end");
+    tim_aid = 2;
     len = tim_beacon(f, 0, 0, 0, two, sizeof(two));
-    check(!mgmt_tim(f, len, ap, 2, &t), "a DTIM period of 0 refused");
+    check(!reads(TIM, f, len), "a DTIM period of 0 refused");
     len = tim_beacon(f, 0, 1, 0, two, 0);
-    check(!mgmt_tim(f, len, ap, 2, &t), "a TIM with no bitmap refused");
+    check(!reads(TIM, f, len), "a TIM with no bitmap refused");
     len = announcement(f, WLAN_FC_STYPE_BEACON, broadcast, "rvuos", 6);
-    check(!mgmt_tim(f, len, ap, 2, &t), "a beacon with no TIM refused");
+    check(!reads(TIM, f, len), "a beacon with no TIM refused");
+    struct mgmt_tim other_read;
     len = tim_beacon(f, 0, 1, 0, two, sizeof(two));
-    check(!mgmt_tim(f, len, other, 2, &t), "another's beacon refused");
+    check(!mgmt_tim(f, len, other, 2, &other_read), "another's beacon refused");
 }
 
 /* An A-MSDU of two MSDUs, laid out as 802.11 9.3.2.2 has it, the first padded to a word; one too long refused. */

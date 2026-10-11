@@ -850,29 +850,18 @@ static volatile int dozing; /* the RF is off */
 static uint64_t dozed_at, woke_at;
 struct mac_doze_counts mac_doze_counts;
 
-static uint32_t cycles(void)
-{
-    uint32_t c;
-    __asm__ volatile("csrr %0, 0x802" : "=r"(c));
-    return c;
-}
-
 /* The RF on again, if it was off, under the sending's lock. */
 static void wake_locked(void)
 {
     if (!dozing) {
         return;
     }
-    uint32_t c = cycles();
+    uint32_t c = prof_cycles();
     drv_phy_enable();
-    c = cycles() - c;
+    prof_add(&drv_prof.rf_on, prof_cycles() - c);
     dozing = 0;
     woke_at = osi_now_us();
-    mac_doze_counts.wakes++;
     mac_doze_counts.slept_us += woke_at - dozed_at;
-    if (c > mac_doze_counts.wake_most) {
-        mac_doze_counts.wake_most = c;
-    }
 }
 
 int mac_ps(void)
@@ -892,18 +881,14 @@ int mac_doze(void)
     }
     osi_mutex_take(tx_lock);
     if (ps && !dozing) {
-        uint32_t c = cycles();
+        uint32_t c = prof_cycles();
         drv_phy_disable();
-        c = cycles() - c;
+        prof_add(&drv_prof.rf_off, prof_cycles() - c);
         dozing = 1;
         dozed_at = osi_now_us();
         if (woke_at != 0) {
             mac_doze_counts.woke_us += dozed_at - woke_at;
             woke_at = 0;
-        }
-        mac_doze_counts.dozes++;
-        if (c > mac_doze_counts.doze_most) {
-            mac_doze_counts.doze_most = c;
         }
     }
     int off = dozing;

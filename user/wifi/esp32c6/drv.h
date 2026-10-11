@@ -52,8 +52,7 @@ struct drv_header {
 
 /*
  * What the driver tells besides its steps, from the configuration's debug=, see root.c:
- * a line for each frame to and from the link, each frame the station reads,
- * and the MAC's header of its first data frames,
+ * a line for each frame to and from the link, and each frame the station reads,
  * and hostap's supplicant at its debug level.
  * rekey asks the access point for a new pairwise key after the join; the request is itself an EAPOL frame under
  * the key, so it is how that sending is exercised on a board, though this access point answers no rekey.

@@ -221,13 +221,8 @@ int mac_dozing(void);
 int mac_doze(void);
 void mac_wake(void);
 
-/*
- * What the RF's sleep cost, for the log: the core's cycles of the costliest turn off and on, the time off, and the
- * time on from each wake to the next sleep.
- */
+/* The RF's time off, and on from each wake to the next sleep, for the log; what turning it costs is drv_prof's. */
 struct mac_doze_counts {
-    uint32_t dozes, wakes;
-    uint32_t doze_most, wake_most;
     uint64_t slept_us, woke_us;
 };
 extern struct mac_doze_counts mac_doze_counts;

@@ -202,22 +202,30 @@ what is left:
   and the supplicant's a bounded arena of its own, or fixed buffers over a P-256 of fixed width.
 - The ESP32-C6's Wi-Fi root task has 8 KiB of memory and 9 slots left once its clients run,
   so another client needs room found first, in the driver's block or a smaller `CLIENT_CHAN_SIZE`.
-- The ESP32-C6's link carries about 26 Mb/s up, in A-MSDUs, and about 19 down, at OFDM's 54 Mb/s, see
-  `user/wifi/esp32c6/NOTES.md`, and its echo about a quarter of that each way.
-  The sending builds a frame only once the one before has ended, so the medium waits on the core between them,
-  about as long as the frame was on it; a second buffer, built while the first is on the air, would fill the gap.
-  Down, an A-MPDU wants the MAC's block acknowledgement, HT's rates with it; up, HT's rates want the PLCP words of
-  an HT frame, which only the libraries' sending knows. The station keeps the best-effort EDCA, not the access
-  point's parameters for it, which WMM's parameter element in the association's answer carries.
-  Up, OFDM's frame holds 4095 bytes, so an A-MSDU carries two of the link's frames; an HT frame would carry an A-MSDU
-  of 7935 where the access point takes one, at MCS 7: `pp`'s `hal_mac_tx_set_ppdu`, `mac_tx_set_plcp0` to `2`,
-  `mac_tx_set_htsig` and `mac_tx_set_len` write the slot's words for one, which `mac.c` writes for OFDM's.
-  Down, `pp`'s `hal_agreement_add_rx_ba` and `_del_rx_ba` write the MAC's side of an agreement the station would
-  accept rather than decline, and the station would reorder the frames of a window before its replay check.
-  Either is the libraries' code read, as `mac.c`'s sending and receiving were.
-  The echo is bound by the system: each datagram crosses three processes' threads twice, and the link, whose 16 KiB
-  `LINK_SIZE` gives each way four slots of `LINK_SLOT`, drops a burst of more; eight would take 32 KiB, which the
-  root task's memory, see below, has no room for yet.
+- The ESP32-C6's link carries about what OFDM's 54 Mb/s can, up in A-MSDUs of two frames and down in single frames,
+  see `user/wifi/esp32c6/NOTES.md`; more wants HT's rates, which only the libraries' code knows yet,
+  to be read as `mac.c`'s sending and receiving were.
+  Up, OFDM's frame holds 4095 bytes; an HT frame at MCS 7 would carry an A-MSDU of 7935 where the access point takes one.
+  `pp`'s `hal_mac_tx_set_ppdu`, `mac_tx_set_plcp0` to `2`, `mac_tx_set_htsig` and `mac_tx_set_len`
+  write the slot's words for one, which `mac.c` writes for OFDM's.
+  A second buffer, laid out while the frame before is on the air, carried no more.
+- The ESP32-C6's rate control fell to 1 Mb/s and stayed there twice in ten minutes at -74 dBm, `blast=` then sending
+  a fiftieth of its usual: an A-MSDU of two frames is 24 ms on the air at that rate, and was almost never acknowledged,
+  so the ten first tries in a row that raise the rate never came. Linux sends no A-MSDU at the legacy rates;
+  A-MSDUs held to the faster rates, or a long frame's tries kept above 1 Mb/s, would bound it.
+- The ESP32-C6's station declines the access point's block acknowledgement, so the access point sends no A-MPDU:
+  `pp`'s `hal_agreement_add_rx_ba` and `_del_rx_ba` write the MAC's side of an agreement the station would accept,
+  and the station would reorder a window's frames before its replay check.
+  With `ht=1` it also promises to take an A-MSDU, which `mgmt_data_read` refuses.
+- The ESP32-C6's station keeps the best-effort EDCA, not the access point's parameters for it,
+  which WMM's parameter element in the association's answer carries.
+- The ESP32-C6's `sta.c` holds the join, the link's frames both ways, its supervision, the power save and `blast=`,
+  two thousand lines over one struct of state; the power save, whose state is already its own, `struct sta_ps`,
+  would leave it first, a file of its own given the access point and the AID.
+- The ESP32-C6's echo carries about a quarter of what its link does each way, bound by the system:
+  each datagram crosses three processes' threads twice, and the link, whose 16 KiB `LINK_SIZE` gives each way
+  four slots of `LINK_SLOT`, drops a burst of more; eight would take 32 KiB, which the root task's memory,
+  see below, has no room for yet.
 - The ESP32-C6's driver locks its own sending and keys, `tx_lock` and `key_lock`, with the adapter's mutexes,
   which exist for the libraries and go through the one lock all the adapter's objects share;
   `lib/lock.h`'s would serve them alone.
@@ -238,7 +246,7 @@ what is left:
   Of the management group ciphers it takes BIP-CMAC-128 alone, not the GMAC of the 192-bit and GCMP suites.
 - The ESP32-C6's station sleeps between beacons with `ps=1`, the RF off, see `user/wifi/esp32c6/NOTES.md`;
   it is off by default until longer runs, and more access points than the three of two networks it ran at, have held it:
-  an hour at the MikroTik, probed every half minute, lost nothing.
+  an hour at the MikroTik, probed every half minute, lost one echo of its probes and no ping.
   It wakes by its own clock, a few milliseconds before a beacon is due, and is on some milliseconds a beacon:
   the MAC's TSF and its TBTT interrupt, which the libraries' `pm` reads, would wake it nearer.
   The core stays at its clock and waits in `wfi` meanwhile, and the modem's power domain stays on:

@@ -193,20 +193,22 @@ void drv_mac_told(const char *who)
     drv_say("%s: frames not sent %u, ends seen %x, timeouts %u, collisions %u; the rate held %u Mb/s\n", who,
             (unsigned)t->lost, (unsigned)t->ends, (unsigned)t->timeouts, (unsigned)t->collisions,
             (unsigned)(mac_tx_kbps(t->rate) / 1000u));
-    const struct drv_prof *p = &drv_prof;
-    const struct prof *const rows[] = { &p->tx_lock, &p->tx_prep, &p->tx_air, &p->tx_gap, &p->rx_isr, &p->sta_frame,
-                                        &p->eth_send };
-    static const char *const names[] = { "lock wait", "preparing", "on the air us", "gap us", "interrupt",
-                                         "station", "eth_send" };
-    for (uint32_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) {
-        if (rows[i]->n != 0) {
-            drv_say("%s: cost %s: %u times, %u on average, %u at most\n", who, names[i], (unsigned)rows[i]->n,
-                    (unsigned)(rows[i]->sum / rows[i]->n), (unsigned)rows[i]->most);
+    static const struct {
+        const char *name;
+        const struct prof *p;
+    } costs[] = {
+        { "the sending's lock", &drv_prof.tx_lock },  { "a frame's preparing", &drv_prof.tx_prep },
+        { "a try on the air, us", &drv_prof.tx_air }, { "between frames, us", &drv_prof.tx_gap },
+        { "a frame's interrupt", &drv_prof.rx_isr },  { "a frame read", &drv_prof.rx_read },
+        { "the link's frames sent", &drv_prof.tx_link }, { "the PHY tracked", &drv_prof.phy_track },
+        { "the RF off", &drv_prof.rf_off },           { "the RF on", &drv_prof.rf_on },
+    };
+    for (uint32_t i = 0; i < sizeof(costs) / sizeof(costs[0]); i++) {
+        const struct prof *c = costs[i].p;
+        if (c->n != 0) {
+            drv_say("%s: cost %s: %u times, %u on average, %u at most\n", who, costs[i].name, (unsigned)c->n,
+                    (unsigned)(c->sum / c->n), (unsigned)c->most);
         }
-    }
-    if (drv_phy_tracks.count != 0) {
-        drv_say("%s: the PHY kept to the temperature %u times, the costliest in %u cycles\n", who,
-                (unsigned)drv_phy_tracks.count, (unsigned)drv_phy_tracks.most);
     }
 }
 

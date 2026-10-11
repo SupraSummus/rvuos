@@ -9,6 +9,7 @@
 
 #include "lib/libc.h"
 #include "osi.h"
+#include "prof.h"
 
 #define REG(addr) (*(volatile uint32_t *)(addr))
 
@@ -239,24 +240,15 @@ void drv_phy_disable(void)
  * Wi-Fi's modem is on: libphy's phy_param_track_tot, Wi-Fi's part alone, which retunes the RF PLL's capacitance
  * and corrects Wi-Fi's power and calibrations as the temperature has moved since it last ran.
  * ESP-IDF takes its PHY lock around it, which its enable and disable take; here the station's thread alone enables
- * and tunes, and calls this, so mac.c keeps it from a frame on the air alone. Its cost is counted in the core's
- * cycles, by the user-mode counter drv_main starts, for the log.
+ * and tunes, and calls this, so mac.c keeps it from a frame on the air alone.
  */
 void phy_param_track_tot(bool en_wifi, bool en_ble_154);
 
-struct drv_phy_tracks drv_phy_tracks;
-
 void drv_phy_track(void)
 {
-    uint32_t before, after;
-    __asm__ volatile("csrr %0, 0x802" : "=r"(before));
+    uint32_t c = prof_cycles();
     phy_param_track_tot(true, false);
-    __asm__ volatile("csrr %0, 0x802" : "=r"(after));
-    uint32_t cycles = after - before;
-    drv_phy_tracks.count++;
-    if (cycles > drv_phy_tracks.most) {
-        drv_phy_tracks.most = cycles;
-    }
+    prof_add(&drv_prof.phy_track, prof_cycles() - c);
 }
 
 /* The radio on channel, 20 MHz wide, as libphy's set_chanfreq tunes it for the libraries. */

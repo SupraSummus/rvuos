@@ -35,7 +35,10 @@
 #define STA_STACK     4096u /* room for the supplicant's handshakes and SAE, whose depth told() says */
 #define STA_KEY_ENTRY 4u    /* the MAC's key entry the pairwise key takes, as the libraries' association left it */
 #define STA_GRP_ENTRY 0u    /* the MAC's entry the group key of id 1 takes, and the next id 2's, as the libraries' */
+#define FC_TYPE_MASK  0x0cu /* the type's bits, in the Frame Control's first octet */
+#define FC_DATA_TYPE  0x08u /* and their value for a data frame */
 #define FC1_PROTECTED 0x40u /* the Protected bit, in the Frame Control's second octet */
+#define FC1_MORE_DATA 0x20u /* the More Data bit, there too */
 #define ADDR1         4u    /* where a frame's Address 1, its receiver, lies */
 
 enum { EV_FRAME, EV_RUN, EV_LEAVE };
@@ -72,11 +75,11 @@ static struct {
     struct buf *bufs;
     uint8_t ap[6]; /* the access point chosen, which the receiving reads once the station has taken it */
     uint16_t aid;  /* the association's, which the MAC's station-mode receiving names */
-    int qos;       /* the access point took the station for QoS: the link's frames go as A-MSDUs; see amsdu_send */
+    int qos;       /* the access point took the station for QoS: the link's frames go as A-MSDUs; see send_from */
     uint32_t amsdus, amsdu_frames; /* A-MSDUs sent, and the link's frames in them, for the log */
     struct drv_net last; /* the access point last joined, tried first when the link ends; see join */
     int joins;           /* how many times the station joined */
-    int taken;           /* the receiving is the station's, heard's */
+    int taken;           /* the MAC's receiving is taken for heard; see take */
     volatile uint32_t beacon_wanted; /* the receiving keeps what the access point sends every station too */
     volatile uint32_t beacons;       /* the access point's beacons heard, which the link's supervision counts by */
     uint32_t nulls, nulls_lost;      /* Null frames that asked whether the access point heard, and those it did not */
@@ -104,15 +107,9 @@ static struct {
         uint32_t late_n; /* beacons heard asleep after the wake they were due for, which late_ counts */
         int64_t late_sum, late_most, late_least; /* how late such a beacon came after its due time, in us */
     } ps_counts;
-    /*
-     * The data frames to the station by the rate field of the MAC's header about each, and their signal summed, for
-     * the log; with debug=frames the first 32 bytes of the first and the hundredth header of each rate, four at most:
-     * what the access point sends at, and how.
-     */
+    /* The data frames to the station by the rate field of the MAC's header about each, and their signal summed. */
     volatile uint32_t rx_rate[32];
     volatile uint32_t rx_rssi;
-    uint8_t ctrl[4][32];
-    volatile uint32_t ctrl_kept;
     volatile uint32_t kept, dropped, runs_lost;
     /* The receiving's drops: copies of a frame already read, and the rest, for the log; see read_frame. */
     volatile uint32_t drop_copy, drop_other;
@@ -132,7 +129,7 @@ static struct {
     uint32_t let_go_ignored; /* a deauthentication or disassociation ignored under PMF, unforged by the check */
     uint32_t sa_query_sent;  /* SA Query requests the station sent, checking whether the access point still holds it */
     uint32_t addba_declined; /* ADDBA Requests the station declined */
-    uint32_t unread, unread_amsdu; /* data frames mgmt_data_read refused, and of them QoS Data carrying an A-MSDU */
+    uint32_t unread;         /* data frames mgmt_data_read refused, a Null frame or an A-MSDU among them */
     /* The SA Query in progress: its transaction id, what the access point said as it left, and its times. */
     struct {
         int active;
@@ -257,19 +254,14 @@ static void heard(const struct mac_frame *m)
     uint64_t at = osi_now_us();
     int beacon = mgmt_beacon_of(m->frame, m->len, sta.ap);
     sta.beacons += (uint32_t)beacon;
-    if (m->ctrl != 0 && m->len > 0 && (m->frame[0] & 0x0cu) == 0x08u &&
-        mgmt_to_station(m->frame, m->len, drv_self->mac, sta.ap)) {
-        uint32_t rate = m->ctrl[RX_CTRL_RATE] & 0x1fu;
-        sta.rx_rate[rate]++;
+    int ours = mgmt_to_station(m->frame, m->len, drv_self->mac, sta.ap);
+    if (ours && m->ctrl != 0 && (m->frame[0] & FC_TYPE_MASK) == FC_DATA_TYPE) {
+        sta.rx_rate[m->ctrl[RX_CTRL_RATE] & 0x1fu]++;
         sta.rx_rssi += (uint32_t)-m->rssi;
-        if (sta.ctrl_kept < sizeof(sta.ctrl) / sizeof(sta.ctrl[0]) &&
-            (sta.rx_rate[rate] == 1u || sta.rx_rate[rate] == 100u)) {
-            memcpy(sta.ctrl[sta.ctrl_kept++], m->ctrl, sizeof(sta.ctrl[0]));
-        }
     }
     int group = (sta.gtk.set[0] || sta.gtk.set[1]) && mgmt_to_group(m->frame, m->len, sta.ap);
-    if (!mgmt_to_station(m->frame, m->len, drv_self->mac, sta.ap) &&
-        !(sta.beacon_wanted && mgmt_to_station(m->frame, m->len, every, sta.ap)) && !group && !(sta.ps.on && beacon)) {
+    if (!ours && !(sta.beacon_wanted && mgmt_to_station(m->frame, m->len, every, sta.ap)) && !group &&
+        !(sta.ps.on && beacon)) {
         return;
     }
     struct event e = { EV_FRAME, 0, 0, 0 };
@@ -343,18 +335,9 @@ static void told(void)
     line[at < sizeof(line) ? at : sizeof(line) - 1u] = 0;
     drv_say("sta: data frames to the station at -%u dBm, by the rate field of the MAC's header%s\n",
             (unsigned)(n ? sta.rx_rssi / n : 0), at ? line : ", none");
-    for (uint32_t i = 0; (drv_self->debug & DRV_DEBUG_FRAMES) && i < sta.ctrl_kept; i++) {
-        const uint8_t *c = sta.ctrl[i];
-        drv_say("sta: a header: %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x "
-                "%02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x\n",
-                c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9], c[10], c[11], c[12], c[13], c[14], c[15],
-                c[16], c[17], c[18], c[19], c[20], c[21], c[22], c[23], c[24], c[25], c[26], c[27], c[28], c[29],
-                c[30], c[31]);
-    }
-    drv_say("sta: for QoS %u; A-MSDUs sent %u, of %u frames; ADDBA Requests declined %u; data frames not read %u, "
-            "of them A-MSDUs %u\n",
+    drv_say("sta: for QoS %u; A-MSDUs sent %u, of %u frames; ADDBA Requests declined %u; data frames not read %u\n",
             sta.qos, (unsigned)sta.amsdus, (unsigned)sta.amsdu_frames, (unsigned)sta.addba_declined,
-            (unsigned)sta.unread, (unsigned)sta.unread_amsdu);
+            (unsigned)sta.unread);
     drv_say("sta: the access point's beacons heard %u; Null frames asking for it %u, unanswered %u; "
             "links ended and joined again %u\n",
             (unsigned)sta.beacons, (unsigned)sta.nulls, (unsigned)sta.nulls_lost, (unsigned)sta.ends);
@@ -372,8 +355,6 @@ static void told(void)
                 "frames to the group asleep %u, a run's last %u\n",
                 (unsigned)sta.ps_counts.ours, (unsigned)sta.ps_counts.group, (unsigned)sta.ps_counts.group_frames,
                 (unsigned)sta.ps_counts.group_ends);
-        drv_say("sta: the RF off %u times and on %u, the costliest in %u and %u cycles\n", (unsigned)z->dozes,
-                (unsigned)z->wakes, (unsigned)z->doze_most, (unsigned)z->wake_most);
     }
     drv_mac_told("sta");
 }
@@ -1439,13 +1420,14 @@ static int send_from(struct drv *d, const struct source *src)
     uint32_t hdr = amsdu ? MGMT_AMSDU_FIXED : MGMT_DATA_FIXED - 8u, k = 0; /* the header, before the LLC/SNAP header */
     uint32_t n = amsdu ? mgmt_amsdu_start(g, AMSDU_MAX, d->mac, sta.ap) : 0;
     while (eth != 0 && k < (amsdu ? AMSDU_FRAMES : 1u)) {
-        uint32_t body = len >= 14u ? len - 14u : 0, m = 0;
-        uint16_t proto = len >= 14u ? (uint16_t)(eth[12] << 8 | eth[13]) : 0;
-        if (len >= 14u && len <= LINK_SLOT) {
+        int fits = len >= 14u && len <= LINK_SLOT;
+        uint32_t body = fits ? len - 14u : 0, m = 0;
+        uint16_t proto = fits ? (uint16_t)(eth[12] << 8 | eth[13]) : 0;
+        if (fits) {
             m = amsdu ? mgmt_amsdu_add(g, AMSDU_MAX, n, eth, eth + 6, proto, 0, body)
                       : mgmt_data(g, MAC_TX_MAX - CCMP_HEAD_LEN - CCMP_MIC_LEN, d->mac, sta.ap, eth, proto, 0, body);
         }
-        if (m == 0 && k != 0 && len >= 14u && len <= LINK_SLOT) {
+        if (m == 0 && fits && k != 0) {
             break; /* left for the next frame */
         }
         if (m == 0) {
@@ -1461,15 +1443,13 @@ static int send_from(struct drv *d, const struct source *src)
         src->taken(src->arg);
         eth = src->next(src->arg, &len);
     }
-    const char *failed = "nothing to send";
+    uint32_t cn = 0;
     if (k != 0) {
         memmove(f, g, hdr);
-        uint32_t cn = ccmp_head_hw(f, MAC_TX_MAX, n + CCMP_HEAD_LEN, pn, id);
-        failed = cn != 0 ? mac_tx_send(cn, STA_KEY_ENTRY) : "the frame's layout";
-        if (cn == 0) {
-            mac_tx_cancel();
-        }
-    } else {
+        cn = ccmp_head_hw(f, MAC_TX_MAX, n + CCMP_HEAD_LEN, pn, id);
+    }
+    const char *failed = cn != 0 ? mac_tx_send(cn, STA_KEY_ENTRY) : "the frame's layout";
+    if (cn == 0) {
         mac_tx_cancel();
     }
     osi_mutex_give(sta.key_lock);
@@ -1507,7 +1487,7 @@ void sta_link_take(struct drv *d)
         }
         uint32_t c = prof_cycles();
         send_from(d, &link_source);
-        prof_add(&drv_prof.eth_send, prof_cycles() - c);
+        prof_add(&drv_prof.tx_link, prof_cycles() - c);
     }
 }
 
@@ -1530,10 +1510,6 @@ void sta_link_take(struct drv *d)
 #define PS_GROUP_US    30000u  /* on until the group's frames after a DTIM beacon end, or this long at most */
 #define PS_PREAMBLE_US 192u    /* 802.11b's long preamble and header, before a frame at 1 Mb/s */
 #define PS_MISSED_MAX  4u      /* beacons missed in a row, after which the RF stays on until one is heard */
-#define FC_DATA_TYPE   0x08u   /* the frame control's first byte: a data frame */
-#define FC_TYPE_MASK   0x0cu
-#define FC1_MORE_DATA  0x20u
-
 #define FCS_BYTES      4u      /* the checksum that ends a frame on the air, which the receiving leaves out */
 
 static void ps_start(struct drv *d, uint64_t now)
@@ -1568,14 +1544,8 @@ static void ps_beacon(const struct buf *b)
     sta.ps.heard = 1;
     sta.ps.missed_run = 0;
     if ((drv_self->debug & DRV_DEBUG_PS) && (t.ours || sta.beacons % 50u == 0)) {
-        const uint8_t *e = b->frame + 36u;
-        while (e + 2u <= b->frame + b->len && e[0] != 5u) {
-            e += 2u + e[1];
-        }
-        drv_say("ps: beacon %u, AID %u ours %u group %u count %u period %u; asleep %u; "
-                "TIM %02x %02x %02x %02x %02x %02x\n",
-                (unsigned)sta.beacons, (unsigned)sta.aid, t.ours, t.group, t.dtim_count, t.dtim_period, mac_ps(),
-                e[0], e[1], e[2], e[3], e[4], e[5]);
+        drv_say("ps: beacon %u, AID %u ours %u group %u count %u period %u; asleep %u\n", (unsigned)sta.beacons,
+                (unsigned)sta.aid, t.ours, t.group, t.dtim_count, t.dtim_period, mac_ps());
     }
     if (!mac_ps()) {
         return; /* awake: the beacon only keeps the time */
@@ -1719,7 +1689,6 @@ static void ps_step(struct drv *d, uint64_t now)
     mac_doze();
 }
 
-
 /*
  * blast=: a datagram to the station's UDP port 9, the discard port nothing serves, sent back to its sender as fast
  * as the MAC lets it for the page's seconds, once a run: its Ethernet and IP addresses and its UDP ports swapped,
@@ -1752,7 +1721,7 @@ static int blast(struct drv *d, const uint8_t *dst, const uint8_t *src, uint16_t
 {
     uint8_t *eth = blast_eth;
     uint32_t ihl = n >= 20u ? (body[0] & 0xfu) * 4u : 0;
-    if (d->blast == 0 || blasted || proto != 0x0800u || (body[0] >> 4) != 4u || ihl < 20u || n < ihl + 8u ||
+    if (d->blast == 0 || blasted || proto != 0x0800u || ihl < 20u || (body[0] >> 4) != 4u || n < ihl + 8u ||
         n > LINK_SLOT - 14u || body[9] != IPV4_UDP || (body[ihl + 2] << 8 | body[ihl + 3]) != BLAST_PORT) {
         return 0;
     }
@@ -1799,7 +1768,6 @@ static void link_frame(const struct buf *b, struct drv *d)
     }
     if (!mgmt_data_read(frame, len, d->mac, sta.ap, &p)) {
         sta.unread++;
-        sta.unread_amsdu += len > 26u && (frame[0] & 0xfcu) == 0x88u && (frame[24] & 0x80u) != 0; /* QoS, A-MSDU */
         return;
     }
     if (p.proto == SUPP_EAPOL) {
@@ -1845,7 +1813,7 @@ static int read_frame(const struct buf *b, void *arg)
     if (!(sta.ps.on && ps_frame(b))) {
         uint32_t c = prof_cycles();
         link_frame(b, arg);
-        prof_add(&drv_prof.sta_frame, prof_cycles() - c);
+        prof_add(&drv_prof.rx_read, prof_cycles() - c);
     }
     return sta.ps.on && ps_until() <= osi_now_us();
 }

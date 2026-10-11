@@ -231,6 +231,8 @@ endif
 # The medium shared with a Pico 2 W at the C6's access point, see tools/wifi-share.py:
 # PICO_CONFIG names the Pico's configuration, as WIFI_CONFIG the C6's, each with the access point's bssid and a run=
 # that outlasts the rounds, and SHARE_BEFORE a driver image from before a change, held against this one.
+# Both boot with the kernel image at hand, whose root task lays out the driver's page: an image from before a change
+# to drv.h's page wants the kernel image built with it, each boot then given to tools/wifi-share.py as its own --c6.
 .PHONY: wifi-esp32c6-share
 ifeq ($(BOARD),esp32c6)
 WIFI_ESP_BOOT = $(ESPTOOL_PYTHON) tools/esp32c6-run.py --port $(PORT) --flash $(WIFI_ESP_AT):$(1) \
