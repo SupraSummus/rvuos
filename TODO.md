@@ -533,8 +533,9 @@ what is left:
   run over the seeds and the corpus,
   and checked by replaying every seed on the kernels before and after and comparing the statuses;
   an operation whose arguments change leaves the seeds that use it to be written anew.
-  `build/host/fuzz --print` shows a seed a record per line, by the names of `host/ops.h`;
-  a generator in the repository reading such lines back
+  `build/host/fuzz --print` shows a seed a record per line, by the names of `host/ops.h`,
+  and `tools/seed.py` reads such lines back, a name of the ABI's headers allowed for any number;
+  seeds kept as that text, slots by name, and built by it at `make host-test`
   would make the seeds readable and the next renumbering a rebuild;
   replay slots that start a few above `BOOT_CAP_COUNT` would spare the next one.
   A seed written before a renumbering and merged after it keeps passing and tests nothing:
