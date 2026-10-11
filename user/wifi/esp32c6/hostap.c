@@ -218,14 +218,16 @@ void wpa_hexdump_ascii_key(int level, const char *title, const void *buf, size_t
  */
 #define TIMEOUTS 4
 
+static void alarm_rings(void *arg);
+
 static struct {
     struct timeout {
         eloop_timeout_handler handler;
         void *eloop_data, *user_data;
         uint64_t at; /* in microseconds of osi_now_us */
     } t[TIMEOUTS];
-    struct ets_timer *alarm;
-} eloop;
+    struct ets_timer alarm;
+} eloop = { .alarm = { .f = alarm_rings } };
 
 static void alarm_set(void)
 {
@@ -236,12 +238,12 @@ static void alarm_set(void)
         }
     }
     if (first == UINT64_MAX) {
-        osi_timer_disarm(eloop.alarm);
+        osi_timer_disarm(&eloop.alarm);
         return;
     }
     /* A timeout half an hour off or more is looked at again in half an hour. */
     uint64_t left = first > now ? first - now : 0;
-    osi_timer_arm_us(eloop.alarm, left < 0x7fffffffu ? (uint32_t)left : 0x7fffffffu);
+    osi_timer_arm_us(&eloop.alarm, left < 0x7fffffffu ? (uint32_t)left : 0x7fffffffu);
 }
 
 static int run_due(void *arg)
@@ -268,9 +270,6 @@ static void alarm_rings(void *arg)
 int eloop_register_timeout(unsigned int secs, unsigned int usecs, eloop_timeout_handler handler, void *eloop_data,
                            void *user_data)
 {
-    if (eloop.alarm == 0 && (eloop.alarm = osi_timer_new(alarm_rings, 0)) == 0) {
-        return -1;
-    }
     for (unsigned i = 0; i < TIMEOUTS; i++) {
         if (eloop.t[i].handler == 0) {
             eloop.t[i] = (struct timeout){ handler, eloop_data, user_data,
@@ -298,7 +297,7 @@ int eloop_cancel_timeout(eloop_timeout_handler handler, void *eloop_data, void *
             n++;
         }
     }
-    if (n && eloop.alarm) {
+    if (n) {
         alarm_set();
     }
     return n;

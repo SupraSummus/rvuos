@@ -387,12 +387,8 @@ static void tell(const struct radio *r)
 
 void i154_run(struct drv *d, struct self *own)
 {
-    /* From the heap, as an 802.15.4 run alone needs it. */
-    struct radio *r = osi_calloc(1, sizeof(*r));
-    if (r == 0) {
-        drv_failed("the radio's state", KERR_NO_MEMORY);
-        drv_stop(CHILD_FAILED);
-    }
+    static struct radio radio;
+    struct radio *r = &radio;
     drv_say("i154: bringing IEEE 802.15.4 up, channel %u\n", (unsigned)d->i154);
     must("a slot for the radio's notification", slot_new(own, &r->note));
     must("the radio's notification", rv_pool_alloc(own->pool, CAP_NOTIFICATION, r->note, 0));

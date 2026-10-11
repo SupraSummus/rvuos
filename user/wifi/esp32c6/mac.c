@@ -87,6 +87,10 @@ struct drv_prof drv_prof;
 static uint32_t tx_end_word;
 static struct event tx_end = { (uint32_t)(uintptr_t)&tx_end_word, 0, 0 };
 
+/* The MAC's list, which it writes the frames it receives into, laid out once by mac_rx_prepare. */
+static struct desc rx_descs[RX_DESCS];
+static uint8_t rx_bufs[RX_DESCS][RX_BUF_SIZE + 4u] __attribute__((aligned(4)));
+
 static struct {
     struct desc *descs;
     struct desc *head, *tail; /* the list the MAC fills, head first; 0 while empty */
@@ -511,22 +515,12 @@ void mac_home_channel(void)
     mac_tx_block_clear(); /* their ic_mac_init */
 }
 
-/* The list, its descriptors and buffers, made once, at the start, whole or not at all, and given the MAC. */
+/* The list, its descriptors and buffers, laid out once, at the start, and given the MAC. */
 const char *mac_rx_prepare(uint32_t *base)
 {
-    struct desc *descs = osi_calloc(RX_DESCS, sizeof(struct desc));
-    if (descs == 0) {
-        return "the MAC's descriptors";
-    }
+    struct desc *descs = rx_descs;
     for (uint32_t i = 0; i < RX_DESCS; i++) {
-        descs[i].buf = osi_malloc(RX_BUF_SIZE + 4u);
-        if (descs[i].buf == 0) {
-            for (uint32_t j = 0; j < i; j++) {
-                osi_free(descs[j].buf);
-            }
-            osi_free(descs);
-            return "the MAC's buffers";
-        }
+        descs[i].buf = rx_bufs[i];
         descs[i].flags = RX_BUF_SIZE;
         descs[i].next = i + 1 < RX_DESCS ? &descs[i + 1] : 0;
     }
@@ -709,23 +703,19 @@ struct tx {
     uint8_t frame[TX_HDR + TX_MAX + FCS];
 };
 
-/* The descriptor and the frame, laid out once from the heap, which the MAC reaches; see heap.c. */
+/* The descriptor and the frame, which the MAC reads; tx is 0 until mac_tx_init, the sending's start. */
+static struct tx tx_mem __attribute__((aligned(16)));
 static struct tx *tx;
-static struct mutex *tx_lock; /* held while a frame is sent, from its copy into tx to its completion */
+static struct mutex tx_lock; /* held while a frame is sent, from its layout in tx to its completion */
 static uint16_t tx_seq;       /* the station's next sequence number, of 4096 */
 
 const char *mac_tx_init(struct self *s)
 {
-    void *p = osi_malloc(sizeof(struct tx) + 16u);
-    tx_lock = osi_mutex_new();
-    if (p == 0 || tx_lock == 0) {
-        return "the frame's buffer and lock, from the heap";
-    }
     if (slot_new(s, &tx_end.note) != KERR_OK || rv_pool_alloc(s->pool, CAP_NOTIFICATION, tx_end.note, 0) != KERR_OK ||
         timer_bind(s, s->pool, tx_end.note, &tx_end.timer) != KERR_OK) {
         return "the notification and timer line the sending waits on";
     }
-    tx = (struct tx *)(((uintptr_t)p + 15u) & ~(uintptr_t)15u);
+    tx = &tx_mem;
     tx_control_start();
     return 0;
 }
@@ -879,7 +869,7 @@ int mac_doze(void)
     if (tx == 0) {
         return 0;
     }
-    osi_mutex_take(tx_lock);
+    osi_mutex_take(&tx_lock);
     if (ps && !dozing) {
         uint32_t c = prof_cycles();
         drv_phy_disable();
@@ -892,7 +882,7 @@ int mac_doze(void)
         }
     }
     int off = dozing;
-    osi_mutex_give(tx_lock);
+    osi_mutex_give(&tx_lock);
     return off;
 }
 
@@ -901,9 +891,9 @@ void mac_wake(void)
     if (tx == 0) {
         return;
     }
-    osi_mutex_take(tx_lock);
+    osi_mutex_take(&tx_lock);
     wake_locked();
-    osi_mutex_give(tx_lock);
+    osi_mutex_give(&tx_lock);
 }
 
 /* The PHY tracked at most once a second, as ESP-IDF's phy_track_pll, and only while the RF is on. */
@@ -916,14 +906,14 @@ void mac_phy_track(void)
     if (tx == 0) {
         return;
     }
-    osi_mutex_take(tx_lock);
+    osi_mutex_take(&tx_lock);
     uint64_t now = osi_now_us();
     if (!dozing && now - tracked_at >= TRACK_US) {
         drv_phy_track();
         tracked_at = now;
         tx_pwr_asked = 0; /* the power a rate is sent at asked again, after a correction for the temperature */
     }
-    osi_mutex_give(tx_lock);
+    osi_mutex_give(&tx_lock);
 }
 
 /* The frame sent while the lock is held, so that no other thread's frame overwrites it before it is done. */
@@ -948,7 +938,7 @@ static uint32_t begun_cycles; /* when the lock was taken for the frame, for drv_
 
 void mac_tx_cancel(void)
 {
-    osi_mutex_give(tx_lock);
+    osi_mutex_give(&tx_lock);
 }
 
 uint8_t *mac_tx_begin(void)
@@ -957,7 +947,7 @@ uint8_t *mac_tx_begin(void)
         return 0;
     }
     uint32_t c = prof_cycles();
-    osi_mutex_take(tx_lock);
+    osi_mutex_take(&tx_lock);
     begun_cycles = prof_cycles();
     prof_add(&drv_prof.tx_lock, begun_cycles - c);
     return tx->frame + TX_HDR;
@@ -967,7 +957,7 @@ const char *mac_tx_send(uint32_t len, uint32_t keyslot)
 {
     const uint8_t *frame = tx->frame + TX_HDR;
     if (len < FRAME_MIN || len > TX_MAX) {
-        osi_mutex_give(tx_lock);
+        osi_mutex_give(&tx_lock);
         return "the frame's length";
     }
     uint32_t c = begun_cycles;
@@ -1014,7 +1004,7 @@ const char *mac_tx_send(uint32_t len, uint32_t keyslot)
     if (keyslot) {
         mac_crypto_engine(0);
     }
-    osi_mutex_give(tx_lock);
+    osi_mutex_give(&tx_lock);
     return try_failed[end];
 }
 

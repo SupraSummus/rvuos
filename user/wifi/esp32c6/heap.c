@@ -1,10 +1,11 @@
 /*
- * The heap the adapter hands Espressif's libraries, from the end of the image's data to the ROM's data.
+ * The heap, from the end of the image's data to the ROM's data, for the code that is not the driver's own
+ * and is written around one: hostap's supplicant and Mbed TLS as a station joins, and Espressif's libraries
+ * in a traced window of their start; the two never run in one run. The driver's own memory is its image's, see osi.h.
  * First fit over blocks in address order, each with its size before it, free ones linked;
  * a block freed merges with a free neighbour on either side.
  * A pointer freed that is no block in use of the heap's is told in the log with whoever freed it, and left alone,
  * since taking it would hand out memory that is not the heap's.
- * The MAC reaches its buffers here, and these are what HP_APM is to let it reach; see drv.h.
  */
 
 #include <stdint.h>

@@ -36,7 +36,7 @@ struct drv *drv_self;
 static struct thread *first_thread; /* the driver's first, which alone waits on its inbox */
 static struct self own;
 static struct osi_funcs *funcs;
-static void *events; /* an event group of the adapter's, a bit for each Wi-Fi event below 32 */
+static struct event_group events; /* the adapter's, a bit for each Wi-Fi event below 32 */
 static struct lock say_lock;
 static uint32_t say_word;
 static int started; /* whether esp_wifi_start ran, so that the radio is to be turned off */
@@ -96,10 +96,10 @@ void drv_event(const char *base, int32_t id, const void *data, size_t size)
 {
     (void)data;
     drv_say("event: %s %d, %u bytes\n", base, (int)id, (unsigned)size);
-    if (!streq(base, "WIFI_EVENT") || (uint32_t)id >= 32 || events == 0) {
+    if (!streq(base, "WIFI_EVENT") || (uint32_t)id >= 32 || funcs == 0) {
         return;
     }
-    funcs->event_group_set_bits(events, 1u << id);
+    funcs->event_group_set_bits(&events, 1u << id);
 }
 
 /* The radio off, which the libraries turn on in esp_wifi_start: the PHY is closed once nothing uses it. */
@@ -139,7 +139,7 @@ void drv_must(const char *step, esp_err_t e)
 
 static void await(const char *what, int32_t id, uint32_t ms)
 {
-    uint32_t bits = funcs->event_group_wait_bits(events, 1u << id, 1, 1, ms);
+    uint32_t bits = funcs->event_group_wait_bits(&events, 1u << id, 1, 1, ms);
     drv_must(what, bits & (1u << id) ? ESP_OK : ESP_FAIL);
 }
 
@@ -650,6 +650,5 @@ void drv_main(struct child_page *page)
     if (funcs == 0 || (first_thread = osi_adopt("driver", (uintptr_t)page, (uintptr_t)page + DRV_DATA_SIZE)) == 0) {
         child_stop(&d->c, CHILD_FAILED);
     }
-    events = funcs->event_group_create();
     run(d);
 }

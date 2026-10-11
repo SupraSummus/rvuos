@@ -3,7 +3,7 @@
  *
  * The libraries expect a FreeRTOS: tasks, semaphores, mutexes, queues, event groups and timers,
  * an interrupt that preempts the tasks, and critical sections that hold it off.
- * Here every task is a thread of the driver's process, with a stack from the heap,
+ * Here every task is a thread of the driver's process, with a stack of its own,
  * a notification of its own it waits on, and a timer line that signals it there,
  * all built from the driver's own account, lib/child.h's child_self;
  * the driver's first thread, which the root task started, joins them, osi_adopt;
@@ -11,7 +11,8 @@
  * the interrupt is a thread that waits for the MAC's line and calls the handler the libraries set,
  * and a critical section holds a lock that thread takes too.
  * A watcher, a thread of the adapter's, tells the faults of the others; the root task watches the watcher.
- * The objects lie in the heap, under one lock, and a thread that waits on one leaves it a link in the object's list;
+ * The objects lie where their user declares them, the libraries' in the heap, under one lock,
+ * and a thread that waits on one leaves it a link in the object's list;
  * whoever changes the object wakes the first, or every, thread on it, which looks again.
  * A tick is a millisecond.
  */
@@ -59,40 +60,9 @@ struct thread {
     const char *name;
 };
 
-struct waiters {
-    struct thread *first;
-};
-
 struct semphr {
     struct waiters w;
     uint32_t count, max;
-};
-
-struct mutex {
-    struct waiters w;
-    struct thread *owner;
-    uint32_t depth;
-    int recursive;
-};
-
-struct queue {
-    struct waiters senders, receivers;
-    uint32_t len, item_size, head, count;
-    uint8_t items[];
-};
-
-struct event_group {
-    struct waiters w;
-    uint32_t bits;
-};
-
-/* ETSTimer's layout, which the libraries allocate: the driver keeps its armed timers listed through next. */
-struct ets_timer {
-    struct ets_timer *next;
-    uint32_t expire;
-    uint32_t period;
-    void (*f)(void *);
-    void *arg;
 };
 
 static struct {
@@ -259,31 +229,22 @@ static uint32_t start_thread(struct self *s, struct thread *t, void (*f)(void *)
     return status;
 }
 
-/*
- * A thread more, which starts at f with arg on a stack of its own from the heap;
- * the process's account of its slots and units is the big lock's too, since threads share it.
- */
-struct thread *osi_thread(void (*f)(void *), void *arg, const char *name, uint32_t stack)
+/* The process's account of its slots and units is the big lock's too, since threads share it. */
+struct thread *osi_thread(void (*f)(void *), void *arg, const char *name, uint8_t *stack, uint32_t size)
 {
     struct self *s = osi.s;
-    stack = (stack + 15u) & ~15u;
-    uint8_t *mem = osi_malloc(stack);
-    if (mem == 0) {
-        drv_failed("a thread's stack", KERR_NO_MEMORY);
-        return 0;
-    }
-    memset(mem, STACK_PAINT, stack);
+    size &= ~15u;
+    memset(stack, STACK_PAINT, size);
     lock_take(&osi.big);
     uint32_t i = osi.thread_count;
     struct thread *t = i < THREADS ? &osi.threads[i] : 0;
-    uint32_t status = t ? start_thread(s, t, f, arg, name, mem, stack) : KERR_LIMIT;
+    uint32_t status = t ? start_thread(s, t, f, arg, name, stack, size) : KERR_LIMIT;
     if (status == KERR_OK) {
         osi.thread_count = i + 1;
         status = rv_thread_resume(t->cap);
     }
     lock_give(&osi.big);
     if (status != KERR_OK) {
-        osi_free(mem);
         drv_failed(s->what ? s->what : "start a thread", status);
         return 0;
     }
@@ -756,11 +717,6 @@ static int32_t mutex_unlock(void *mutex)
     return 1;
 }
 
-struct mutex *osi_mutex_new(void)
-{
-    return mutex_new(0);
-}
-
 void osi_mutex_take(struct mutex *m)
 {
     mutex_lock(m);
@@ -779,6 +735,7 @@ static void *queue_create(uint32_t len, uint32_t item_size)
     if (q) {
         q->len = len;
         q->item_size = item_size;
+        q->items = (uint8_t *)(q + 1);
     }
     return q;
 }
@@ -876,11 +833,6 @@ static uint32_t queue_msg_waiting(void *queue)
     return ((struct queue *)queue)->count;
 }
 
-struct queue *osi_queue_new(uint32_t len, uint32_t item_size)
-{
-    return queue_create(len, item_size);
-}
-
 int osi_queue_put(struct queue *q, const void *item, uint32_t ms)
 {
     return queue_put(q, item, ms, 0);
@@ -954,7 +906,14 @@ static int32_t task_create(void *f, const char *name, uint32_t stack, void *arg,
     (void)prio;
     osi_trace("task", stack, 0); /* the name is in the log line below */
     drv_say("osi: task %s, %u bytes of stack\n", name, (unsigned)stack);
-    struct thread *t = osi_thread((void (*)(void *))f, arg, name, stack);
+    stack = (stack + 15u) & ~15u;
+    uint8_t *mem = osi_malloc(stack);
+    struct thread *t = mem ? osi_thread((void (*)(void *))f, arg, name, mem, stack) : 0;
+    if (mem == 0) {
+        drv_failed("a task's stack", KERR_NO_MEMORY);
+    } else if (t == 0) {
+        osi_free(mem);
+    }
     if (handle) {
         *(void **)handle = t;
     }
@@ -1075,15 +1034,6 @@ static void timer_done(void *timer)
 }
 
 /* A timer of the driver's own, which the timer thread runs as it runs the libraries'. */
-struct ets_timer *osi_timer_new(void (*f)(void *), void *arg)
-{
-    struct ets_timer *t = osi_calloc(1, sizeof(*t));
-    if (t) {
-        timer_setfn(t, (void *)f, arg);
-    }
-    return t;
-}
-
 void osi_timer_arm_us(struct ets_timer *t, uint32_t us)
 {
     timer_arm_us(t, us, false);
@@ -1480,10 +1430,15 @@ struct osi_funcs *osi_init(struct drv *d, struct self *s)
     lock_init(&osi.crit);
     lock_init(&osi.heap);
     osi_heap_init(&osi.heap);
-    /* The watcher first, which the root task watches, then the threads it watches. */
-    osi.watcher = osi_thread(watcher_main, 0, "watcher", 1536);
-    /* 3 KiB, for mac.c's handler reads beacons on it, hostap's parsed elements taking 536 bytes. */
-    osi.isr = osi_thread(isr_main, 0, "isr", 3072);
-    osi.timers = osi_thread(timers_main, 0, "timers", 3072);
+    /*
+     * The watcher first, which the root task watches, then the threads it watches;
+     * the interrupt's 3 KiB, for mac.c's handler reads beacons on it, hostap's parsed elements taking 536 bytes.
+     */
+    static uint8_t watcher_stack[1536] __attribute__((aligned(16)));
+    static uint8_t isr_stack[3072] __attribute__((aligned(16)));
+    static uint8_t timers_stack[3072] __attribute__((aligned(16)));
+    osi.watcher = osi_thread(watcher_main, 0, "watcher", watcher_stack, sizeof(watcher_stack));
+    osi.isr = osi_thread(isr_main, 0, "isr", isr_stack, sizeof(isr_stack));
+    osi.timers = osi_thread(timers_main, 0, "timers", timers_stack, sizeof(timers_stack));
     return osi.watcher && osi.isr && osi.timers ? (struct osi_funcs *)&funcs : 0;
 }

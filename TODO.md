@@ -195,11 +195,9 @@ what is left:
   no soft AP, no HE or OFDMA, no coexistence with Bluetooth.
   So the start's HE and beamforming groups, which `mac_config` writes out, can go, each a step held by the runs,
   and the rest of 802.11ax is not written.
-- The ESP32-C6's driver takes all its memory from one heap: the libraries' as they run,
-  the own path's buffers, stacks and queues once, at its start, and the supplicant's and SAE's as they run, hostap's and Mbed TLS's way;
-  SAE leaves a few kilobytes at the fewest.
-  The own path's memory can be static,
-  and the supplicant's a bounded arena of its own, or fixed buffers over a P-256 of fixed width.
+- The ESP32-C6's heap is left to hostap and Mbed TLS as a station joins, see `user/wifi/esp32c6/NOTES.md`,
+  and SAE's arithmetic is most of what they take: Mbed TLS's numbers grow and shrink some thousands of times a join.
+  `ec.c` over a P-256 of fixed width, its numbers and points in slots of its own, would leave hostap's few.
 - The ESP32-C6's Wi-Fi root task has 8 KiB of memory and 9 slots left once its clients run,
   so another client needs room found first, in the driver's block or a smaller `CLIENT_CHAN_SIZE`.
 - The ESP32-C6's link carries about what OFDM's 54 Mb/s can, up in A-MSDUs of two frames and down in single frames,

@@ -197,7 +197,13 @@ $(BUILD)/$(WIFI_ESP)/esp_wifi_regulatory.o: $(WIFI_ESP_INIT)
 	$(CC) $(CFLAGS) -Wno-unterminated-string-initialization -I$(WIFI_ESP)/shim \
 		-c $(PHYBLOB_CACHE)/esp_wifi_regulatory.c -o $@
 
+# The driver's own code takes no memory as it runs, see osi.h, so the link fails if an object but the glue
+# of the foreign code calls an allocator: hostap.c, supp.c and ec.c for hostap's and Mbed TLS's, osi.c for the libraries'.
+WIFI_ESP_HEAP := $(addprefix $(BUILD)/$(WIFI_ESP)/,ec.o heap.o hostap.o osi.o supp.o)
+
 $(BUILD)/wifi-drv.elf: $(WIFI_ESP_OBJ) $(LIB_OBJ) $(BUILD)/$(WIFI_ESP)/flash.ld $(BUILD)/$(WIFI_ESP)/libphy.a
+	@! $(NM) -u $(filter-out $(WIFI_ESP_HEAP),$(filter $(BUILD)/$(WIFI_ESP)/%,$(WIFI_ESP_OBJ))) | grep -E ' (osi_(m|c|re)alloc|os_(m|z)alloc|malloc|calloc)$$' \
+		|| { echo "$@: the driver's own code calls an allocator" >&2; exit 1; }
 	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/$(WIFI_ESP)/flash.ld $(foreach s,$(WIFI_ESP_ROM),-Wl,-T,$(s)) \
 		$(WIFI_ESP_OBJ) $(LIB_OBJ) -Wl,--start-group $(WIFI_ESP_LIBS) -Wl,--end-group -o $@
 

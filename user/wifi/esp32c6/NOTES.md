@@ -559,3 +559,15 @@ A run of 802.15.4 leaves the modem in a state the runner's reset does not clear:
 a traced Wi-Fi start straight after one read `0x600A4400` at its third access as `0xc1c93734`,
 where runs after a Wi-Fi run read `0xc1cb3754`, as the gate's did.
 A traced run, or a gate, goes after a Wi-Fi run.
+
+## The driver's memory
+
+The driver's own code takes no memory as it runs.
+The MAC's list and its sending's frame, the station's frames, the queues and locks, and every thread's stack
+are declared where they are used, so the image says what the driver needs and a run cannot fail for want of it;
+`osi.h`'s objects are ready zeroed, but for a timer, which names its function, and a queue, which `OSI_QUEUE` declares with its slots.
+The heap is left to the code that is not the driver's and is written around one:
+hostap's supplicant and Mbed TLS as a station joins, about 12 KB at the most under WPA3 and 6 KB under WPA2,
+and the libraries in a traced window of their start, about 28 KB; the two never run in one run.
+`libphy.a` takes nothing from it in the driver's own start, as a heap that named each block's caller found.
+The link fails if any other of the driver's objects calls an allocator, `WIFI_ESP_HEAP` in `build.mk`.

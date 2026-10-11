@@ -70,9 +70,11 @@ struct key_pn {
     uint64_t rx_pn[CCMP_REPLAY_COUNT];
 };
 
+static struct buf bufs[STA_FRAMES];
+OSI_QUEUE(events, STA_FRAMES + STA_RUNS + 1u, sizeof(struct event));
+OSI_QUEUE(free_bufs, STA_FRAMES, sizeof(uint32_t)); /* the numbers of the buffers free */
+
 static struct {
-    struct queue *events, *free; /* the free queue holds the numbers of the buffers free */
-    struct buf *bufs;
     uint8_t ap[6]; /* the access point chosen, which the receiving reads once the station has taken it */
     uint16_t aid;  /* the association's, which the MAC's station-mode receiving names */
     int qos;       /* the access point took the station for QoS: the link's frames go as A-MSDUs; see send_from */
@@ -143,7 +145,7 @@ static struct {
     struct group_keys gtk, igtk;
     uint64_t gtk_rx_pn[KEYS_GROUP][CCMP_REPLAY_COUNT];
     uint64_t igtk_ipn[KEYS_GROUP];
-    struct mutex *key_lock; /* held while a key is installed, and by the sending while it uses one */
+    struct mutex key_lock; /* held while a key is installed, and by the sending while it uses one */
 } sta;
 
 static uint32_t protect(uint8_t *crypt, uint32_t size, const uint8_t *plain, uint32_t n);
@@ -265,17 +267,17 @@ static void heard(const struct mac_frame *m)
         return;
     }
     struct event e = { EV_FRAME, 0, 0, 0 };
-    if (m->len > STA_FRAME_MAX || !osi_queue_get(sta.free, &e.buf, 0)) {
+    if (m->len > STA_FRAME_MAX || !osi_queue_get(&free_bufs, &e.buf, 0)) {
         sta.dropped++;
         return;
     }
-    struct buf *b = &sta.bufs[e.buf];
+    struct buf *b = &bufs[e.buf];
     memcpy(b->frame, m->frame, m->len);
     b->at = at;
     b->len = m->len;
     b->decrypted = (uint8_t)(m->decrypted != 0);
     sta.kept++;
-    osi_queue_put(sta.events, &e, 0);
+    osi_queue_put(&events, &e, 0);
 }
 
 /* The access point is the station's no longer; the supplicant is told if it was associated. Whether it was, 1 or 0. */
@@ -365,7 +367,7 @@ static void told(void)
  */
 static void drop_keys(void)
 {
-    osi_mutex_take(sta.key_lock);
+    osi_mutex_take(&sta.key_lock);
     mac_key_clear(STA_KEY_ENTRY);
     for (uint32_t i = 0; i < KEYS_GROUP; i++) {
         mac_key_clear(STA_GRP_ENTRY + i);
@@ -376,7 +378,7 @@ static void drop_keys(void)
     sta.ptk = (struct keys){ 0 };
     sta.ptk_pn = (struct key_pn){ 0 };
     memset(sta.gtk_rx_pn, 0, sizeof(sta.gtk_rx_pn));
-    osi_mutex_give(sta.key_lock);
+    osi_mutex_give(&sta.key_lock);
     sta.completed = 0;
 }
 
@@ -435,14 +437,14 @@ static __attribute__((noreturn)) void leave(void)
 static int open_mgmt(const struct buf *b, uint8_t *plain, uint32_t *len)
 {
     uint8_t tk[CCMP_TK_LEN], id;
-    osi_mutex_take(sta.key_lock);
+    osi_mutex_take(&sta.key_lock);
     if (!sta.ptk.cur_set) {
-        osi_mutex_give(sta.key_lock);
+        osi_mutex_give(&sta.key_lock);
         return 0;
     }
     memcpy(tk, sta.ptk.cur.tk, CCMP_TK_LEN);
     id = sta.ptk.cur.id;
-    osi_mutex_give(sta.key_lock);
+    osi_mutex_give(&sta.key_lock);
     uint64_t pn = 0;
     uint8_t kid = 0;
     if (!ccmp_decrypt_mgmt(plain, MGMT_FRAME_MAX, b->frame, b->len, tk, &pn, &kid, len) || kid != id) {
@@ -626,7 +628,7 @@ static int wait_for(uint64_t deadline, int (*read)(const struct buf *b, void *ar
         uint64_t now = osi_now_us();
         uint64_t until = sta.sa_query.active && sta.sa_query.at < deadline ? sta.sa_query.at : deadline;
         struct event e;
-        if (now >= until || !osi_queue_get(sta.events, &e, (uint32_t)((until - now + 999u) / 1000u))) {
+        if (now >= until || !osi_queue_get(&events, &e, (uint32_t)((until - now + 999u) / 1000u))) {
             if (now >= deadline) {
                 return 0;
             }
@@ -640,7 +642,7 @@ static int wait_for(uint64_t deadline, int (*read)(const struct buf *b, void *ar
             e.fn(e.arg);
             continue;
         }
-        const struct buf *b = &sta.bufs[e.buf];
+        const struct buf *b = &bufs[e.buf];
         if (drv_self->debug & DRV_DEBUG_FRAMES) {
             drv_say("sta: heard frame control %02x%02x, %u bytes\n", b->frame[0], b->frame[1], (unsigned)b->len);
         }
@@ -648,7 +650,7 @@ static int wait_for(uint64_t deadline, int (*read)(const struct buf *b, void *ar
         int gone = sta.state != NONE && let_go(b, &reason);
         int took = !gone && action_take(b);
         int taken = !gone && !took && read(b, arg);
-        osi_queue_put(sta.free, &e.buf, 0);
+        osi_queue_put(&free_bufs, &e.buf, 0);
         if (gone) {
             forget();
             give_up("let go by the access point", reason);
@@ -662,7 +664,7 @@ static int wait_for(uint64_t deadline, int (*read)(const struct buf *b, void *ar
 void sta_leave(void)
 {
     static const struct event e = { EV_LEAVE, 0, 0, 0 };
-    osi_queue_put(sta.events, &e, 0);
+    osi_queue_put(&events, &e, 0);
 }
 
 /* --- The supplicant's link. --- */
@@ -734,10 +736,10 @@ static int link_set_group(const struct supp_key *k)
     if (k->alg == SUPP_ALG_NONE) {
         int s = keys_group_slot(KEYS_GROUP_ID, (uint32_t)k->idx);
         if (s >= 0) {
-            osi_mutex_take(sta.key_lock);
+            osi_mutex_take(&sta.key_lock);
             sta.gtk.set[s] = 0;
             mac_key_clear(STA_GRP_ENTRY + (uint32_t)s);
-            osi_mutex_give(sta.key_lock);
+            osi_mutex_give(&sta.key_lock);
             drv_say("sta: the group's key of index %d removed\n", k->idx);
         }
         return 0;
@@ -748,14 +750,14 @@ static int link_set_group(const struct supp_key *k)
         return 0;
     }
     int s = keys_group_slot(KEYS_GROUP_ID, in.id);
-    osi_mutex_take(sta.key_lock);
+    osi_mutex_take(&sta.key_lock);
     enum key_action a = keys_group_apply(&sta.gtk, KEYS_GROUP_ID, &in);
     if (a == KEY_INSTALL) {
         /* Every priority starts from it: its RSC bounds the frames sent before the join, whatever priority. */
         ccmp_replay_start(sta.gtk_rx_pn[s], key_rsc(k));
         mac_key_set(STA_GRP_ENTRY + (uint32_t)s, sta.ap, in.id, in.tk);
     }
-    osi_mutex_give(sta.key_lock);
+    osi_mutex_give(&sta.key_lock);
     drv_say("sta: the group's key of index %d %s\n", in.id, group_said(a));
     return 0;
 }
@@ -771,9 +773,9 @@ static int link_set_igtk(const struct supp_key *k)
     if (k->alg == SUPP_ALG_NONE) {
         int s = keys_group_slot(KEYS_MGMT_GROUP_ID, (uint32_t)k->idx);
         if (s >= 0) {
-            osi_mutex_take(sta.key_lock);
+            osi_mutex_take(&sta.key_lock);
             sta.igtk.set[s] = 0;
-            osi_mutex_give(sta.key_lock);
+            osi_mutex_give(&sta.key_lock);
             drv_say("sta: the management group key of index %d removed\n", k->idx);
         }
         return 0;
@@ -784,12 +786,12 @@ static int link_set_igtk(const struct supp_key *k)
         return 0;
     }
     int s = keys_group_slot(KEYS_MGMT_GROUP_ID, in.id);
-    osi_mutex_take(sta.key_lock);
+    osi_mutex_take(&sta.key_lock);
     enum key_action a = keys_group_apply(&sta.igtk, KEYS_MGMT_GROUP_ID, &in);
     if (a == KEY_INSTALL) {
         sta.igtk_ipn[s] = key_rsc(k);
     }
-    osi_mutex_give(sta.key_lock);
+    osi_mutex_give(&sta.key_lock);
     drv_say("sta: the management group key of index %d %s\n", in.id, group_said(a));
     return 0;
 }
@@ -808,11 +810,11 @@ static int link_set_pairwise(const struct supp_key *k)
         return 0;
     }
     if (k->alg == SUPP_ALG_NONE) {
-        osi_mutex_take(sta.key_lock);
+        osi_mutex_take(&sta.key_lock);
         sta.ptk.cur_set = 0;
         sta.ptk.next_set = 0;
         mac_key_clear(STA_KEY_ENTRY);
-        osi_mutex_give(sta.key_lock);
+        osi_mutex_give(&sta.key_lock);
         drv_say("sta: the pairwise key removed\n");
         return 0;
     }
@@ -821,7 +823,7 @@ static int link_set_pairwise(const struct supp_key *k)
         drv_say("sta: a key of algorithm %d, %u bytes, ignored\n", k->alg, (unsigned)k->key_len);
         return 0;
     }
-    osi_mutex_take(sta.key_lock);
+    osi_mutex_take(&sta.key_lock);
     enum key_action a = keys_apply(&sta.ptk, &in, (k->flag & SUPP_KEY_TX) != 0, (k->flag & SUPP_KEY_NEXT) != 0);
     if (a == KEY_PROMOTE || a == KEY_INSTALL) {
         sta.ptk_pn.tx_pn = 0;
@@ -829,7 +831,7 @@ static int link_set_pairwise(const struct supp_key *k)
         /* The MAC's own entry, so that its receiving takes a protected unicast frame to the station. */
         mac_key_set(STA_KEY_ENTRY, sta.ap, sta.ptk.cur.id, sta.ptk.cur.tk);
     }
-    osi_mutex_give(sta.key_lock);
+    osi_mutex_give(&sta.key_lock);
     switch (a) {
     case KEY_STAGE:
         drv_say("sta: the pairwise key staged for receiving, index %d\n", sta.ptk.next.id);
@@ -890,7 +892,7 @@ static void link_deauthenticate(uint16_t reason)
 static void link_run(int (*fn)(void *arg), void *arg)
 {
     struct event e = { EV_RUN, 0, fn, arg };
-    if (!osi_queue_put(sta.events, &e, 0)) {
+    if (!osi_queue_put(&events, &e, 0)) {
         sta.runs_lost++;
     }
 }
@@ -1321,12 +1323,12 @@ static int reserve_pn(uint8_t *id, uint64_t *pn)
  */
 static int reserve(uint8_t tk[CCMP_TK_LEN], uint8_t *id, uint64_t *pn)
 {
-    osi_mutex_take(sta.key_lock);
+    osi_mutex_take(&sta.key_lock);
     int r = reserve_pn(id, pn);
     if (r) {
         memcpy(tk, sta.ptk.cur.tk, CCMP_TK_LEN);
     }
-    osi_mutex_give(sta.key_lock);
+    osi_mutex_give(&sta.key_lock);
     return r;
 }
 
@@ -1405,12 +1407,12 @@ static int send_from(struct drv *d, const struct source *src)
     if (eth == 0) {
         return 0;
     }
-    osi_mutex_take(sta.key_lock);
+    osi_mutex_take(&sta.key_lock);
     uint8_t id;
     uint64_t pn;
     uint8_t *f = reserve_pn(&id, &pn) ? mac_tx_begin() : 0;
     if (f == 0) {
-        osi_mutex_give(sta.key_lock);
+        osi_mutex_give(&sta.key_lock);
         d->tx_dropped++;
         src->taken(src->arg);
         return 1;
@@ -1452,7 +1454,7 @@ static int send_from(struct drv *d, const struct source *src)
     if (cn == 0) {
         mac_tx_cancel();
     }
-    osi_mutex_give(sta.key_lock);
+    osi_mutex_give(&sta.key_lock);
     if (k != 0 && failed) {
         d->tx_dropped += k;
         drv_say("sta: a frame out of %u, %u bytes: %s\n", (unsigned)k, (unsigned)n, failed);
@@ -2026,18 +2028,12 @@ static void sta_main(void *arg)
 
 const char *sta_start(struct drv *d)
 {
-    sta.bufs = osi_calloc(STA_FRAMES, sizeof(struct buf));
-    sta.events = osi_queue_new(STA_FRAMES + STA_RUNS + 1u, sizeof(struct event));
-    sta.free = osi_queue_new(STA_FRAMES, sizeof(uint32_t));
-    sta.key_lock = osi_mutex_new();
-    if (sta.bufs == 0 || sta.events == 0 || sta.free == 0 || sta.key_lock == 0) {
-        return "the station's buffers, queues and lock";
-    }
     for (uint32_t i = 0; i < STA_FRAMES; i++) {
-        osi_queue_put(sta.free, &i, 0);
+        osi_queue_put(&free_bufs, &i, 0);
     }
     if (supp_init(&link, d->mac) != 0) {
         return "the supplicant";
     }
-    return osi_thread(sta_main, d, "station", STA_STACK) ? 0 : "the station's thread";
+    static uint8_t stack[STA_STACK] __attribute__((aligned(16)));
+    return osi_thread(sta_main, d, "station", stack, sizeof(stack)) ? 0 : "the station's thread";
 }
