@@ -234,30 +234,42 @@ static void test_dns(void)
     static const uint8_t addr[] = { 0xc0, 42, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 213, 222, 217, 10 };
     memcpy(a + at, addr, sizeof(addr));
     at += sizeof(addr);
-    CHECK(dns_answer(a, at, 0x1234) == net_ip(213, 222, 217, 10));
-    CHECK(dns_answer(a, at, 0x1235) == 0);
+    CHECK(dns_answer(a, at, 0x1234, 0) == net_ip(213, 222, 217, 10));
+    CHECK(dns_answer(a, at, 0x1235, 0) == 0);
     for (uint32_t cut = 0; cut < at; cut++) {
-        CHECK(dns_answer(a, cut, 0x1234) == 0);
+        CHECK(dns_answer(a, cut, 0x1234, 0) == 0);
     }
     put_be16(a + 2, 0x8183); /* no such name */
-    CHECK(dns_answer(a, at, 0x1234) == 0);
+    CHECK(dns_answer(a, at, 0x1234, 0) == 0);
     put_be16(a + 2, 0x0100); /* a question, not an answer */
-    CHECK(dns_answer(a, at, 0x1234) == 0);
+    CHECK(dns_answer(a, at, 0x1234, 0) == 0);
     put_be16(a + 2, 0x8180);
 
     /* Counts and lengths that point past the end, and every byte of the answer garbled, read nothing outside it. */
     put_be16(a + 4, 0xffff);
-    CHECK(dns_answer(a, at, 0x1234) == 0);
+    CHECK(dns_answer(a, at, 0x1234, 0) == 0);
     put_be16(a + 4, 1);
     for (uint32_t i = 2; i < at; i++) {
         uint8_t keep = a[i];
         for (uint32_t v = 0; v < 256; v += 51) {
             a[i] = (uint8_t)v;
-            (void)dns_answer(a, at, 0x1234);
+            (void)dns_answer(a, at, 0x1234, 0);
         }
         a[i] = keep;
     }
-    CHECK(dns_answer(a, at, 0x1234) == net_ip(213, 222, 217, 10));
+    CHECK(dns_answer(a, at, 0x1234, 0) == net_ip(213, 222, 217, 10));
+
+    /* A second address, after the first: picked in turn, round from the first again, the CNAME not one of them. */
+    static const uint8_t addr2[] = { 0xc0, 42, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 10, 0, 0, 2 };
+    memcpy(a + at, addr2, sizeof(addr2));
+    put_be16(a + 6, 3);
+    uint32_t two = at + sizeof(addr2);
+    CHECK(dns_answer(a, two, 0x1234, 0) == net_ip(213, 222, 217, 10));
+    CHECK(dns_answer(a, two, 0x1234, 1) == net_ip(10, 0, 0, 2));
+    CHECK(dns_answer(a, two, 0x1234, 2) == net_ip(213, 222, 217, 10));
+    CHECK(dns_answer(a, two, 0x1234, 7) == net_ip(10, 0, 0, 2));
+    CHECK(dns_answer(a, two - 1u, 0x1234, 0) == 0); /* the second cut short: the answer is not taken at all */
+    put_be16(a + 6, 2);
 }
 
 static void put_be32(uint8_t *p, uint32_t v)

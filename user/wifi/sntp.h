@@ -16,8 +16,11 @@
 
 /* A question for the IPv4 address of name, with id, into out of DNS_MSG_MAX bytes: its length, or 0 if the name is not one. */
 uint32_t dns_query(uint8_t *out, uint16_t id, const char *name);
-/* The first IPv4 address an answer to id gives, in network order, or 0. */
-uint32_t dns_answer(const uint8_t *msg, uint32_t len, uint16_t id);
+/*
+ * An IPv4 address an answer to id gives, in network order, or 0: of its addresses, in the answer's order, the pick-th,
+ * counted round from the first again once past the last, so that a server that does not answer can be passed over.
+ */
+uint32_t dns_answer(const uint8_t *msg, uint32_t len, uint16_t id, uint32_t pick);
 
 /* An SNTP request, NTP_MSG bytes, carrying nonce as its transmit time, which the answer returns. */
 void ntp_query(uint8_t *out, uint32_t nonce);

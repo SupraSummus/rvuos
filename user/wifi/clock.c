@@ -5,7 +5,8 @@
  * and for the network's addresses, which the network process publishes in memory the clock reads at every wake.
  * Then each step is a question and its answer, asked again every second until it comes:
  * a port of its own, the address of a server of pool.ntp.org from the network's DNS server,
- * and the time from that server by SNTP.
+ * and the time from that server by SNTP; a server that has not answered TIME_TRIES times is passed over,
+ * the DNS server asked again and the next of the addresses it gives taken.
  * It keeps the time by its timer from then on, and answers any datagram to UDP port 13 with it as text, RFC 867.
  */
 
@@ -17,6 +18,7 @@
 #define TICK_US  100000u
 #define RETRY_MS 1000u
 #define RESEND_MS 100u /* after a send that went nowhere, while the next hop's address is asked for */
+#define TIME_TRIES 4u  /* the questions a server is asked for the time before another is */
 
 enum step {
     ASK_PORT,   /* a port of its own to ask from */
@@ -34,6 +36,7 @@ struct clk {
     struct sock_config config;
     uint16_t port, id;
     uint32_t server, nonce;
+    uint32_t pick, tries; /* which of the DNS answer's addresses is the server, and how often it was asked */
     uint32_t seconds, at; /* the time it learned, and when, by now */
     uint8_t msg[DNS_MSG_MAX];
 };
@@ -53,6 +56,13 @@ static void ask(struct clk *k)
         client_ask(k->net, SOCK_SEND, k->port, k->config.dns, DNS_PORT, k->msg, len);
         break;
     case ASK_TIME:
+        if (k->tries++ == TIME_TRIES) {
+            say(&k->out, "clock: %I does not answer; asking %I for another\n", k->server, k->config.dns);
+            k->pick++;
+            k->step = ASK_NAME;
+            ask(k);
+            break;
+        }
         k->nonce = k->nonce * 1103515245u + 12345u + k->now;
         ntp_query(k->msg, k->nonce);
         client_ask(k->net, SOCK_SEND, k->port, k->server, NTP_PORT, k->msg, NTP_MSG);
@@ -102,9 +112,10 @@ static void answer(struct clk *k, const struct sock_msg *h, const uint8_t *data)
         if (h->port == CLOCK_PORT) {
             tell(k, h);
         } else if (k->step == ASK_NAME && h->ip == k->config.dns && h->peer_port == DNS_PORT) {
-            uint32_t ip = dns_answer(data, h->len, k->id);
+            uint32_t ip = dns_answer(data, h->len, k->id, k->pick);
             if (ip != 0) {
                 k->server = ip;
+                k->tries = 0;
                 say(&k->out, "clock: asking %I for the time\n", ip);
                 next(k, ASK_TIME);
             }

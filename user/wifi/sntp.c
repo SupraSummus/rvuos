@@ -65,7 +65,8 @@ static uint32_t skip_name(const uint8_t *msg, uint32_t len, uint32_t at)
     return 0;
 }
 
-uint32_t dns_answer(const uint8_t *msg, uint32_t len, uint16_t id)
+/* The answer's IPv4 addresses, walked: the pick-th into *ip, and how many there are; 0 for a malformed answer. */
+static uint32_t dns_addresses(const uint8_t *msg, uint32_t len, uint16_t id, uint32_t pick, uint32_t *ip)
 {
     if (len < DNS_HEADER || be16(msg) != id) {
         return 0;
@@ -74,7 +75,7 @@ uint32_t dns_answer(const uint8_t *msg, uint32_t len, uint16_t id)
     if (!(flags & DNS_RESPONSE) || (flags & 0x7800u) != 0 || (flags & 0x000fu) != 0) {
         return 0;
     }
-    uint32_t questions = be16(msg + 4), answers = be16(msg + 6);
+    uint32_t questions = be16(msg + 4), answers = be16(msg + 6), found = 0;
     uint32_t at = DNS_HEADER;
     /* Each record takes bytes, so neither count can take the walk past len. */
     for (uint32_t i = 0; i < questions; i++) {
@@ -95,13 +96,24 @@ uint32_t dns_answer(const uint8_t *msg, uint32_t len, uint16_t id)
             return 0;
         }
         if (type == DNS_TYPE_A && class == DNS_CLASS_IN && size == 4u) {
-            uint32_t ip;
-            memcpy(&ip, msg + at, 4);
-            return ip;
+            if (found == pick) {
+                memcpy(ip, msg + at, 4);
+            }
+            found++;
         }
         at += size;
     }
-    return 0;
+    return found;
+}
+
+uint32_t dns_answer(const uint8_t *msg, uint32_t len, uint16_t id, uint32_t pick)
+{
+    uint32_t ip = 0, found = dns_addresses(msg, len, id, UINT32_MAX, &ip);
+    if (found == 0) {
+        return 0;
+    }
+    dns_addresses(msg, len, id, pick % found, &ip);
+    return ip;
 }
 
 void ntp_query(uint8_t *out, uint32_t nonce)
