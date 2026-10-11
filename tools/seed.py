@@ -24,8 +24,11 @@ TERM = re.compile(r"^(0x[0-9a-fA-F]+|[0-9]+)u?$")
 
 
 def defines():
-    """Every object-like #define of the two headers, by name, as its text."""
-    found = {}
+    """
+    Every object-like #define of the two headers, by name, as its text,
+    and BOOT_DEVICES, which a board's devices.h gives: none, since the seeds are QEMU's.
+    """
+    found = {"BOOT_DEVICES": "0"}
     for header in HEADERS:
         for line in header.read_text().splitlines():
             m = DEFINE.match(line)

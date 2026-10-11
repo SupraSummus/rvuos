@@ -173,8 +173,10 @@ void core_thread_gone(const struct thread *t)
         if (c->turn == t) {
             c->turn = NULL;
         }
+        /* The turn it paid for may be left on spare time, which a thread with time waiting there takes. */
         if (c->payer == t) {
             c->payer = NULL;
+            core_notify(c);
         }
     }
 }
@@ -205,11 +207,13 @@ void core_notify(struct core *c)
 #if CORES > 1
     c->wake_stale = true;
     /*
-     * A core in the kernel sets its timer again before it leaves, and one whose timer comes within a tick then;
-     * an idle one waits for an interrupt, and so does one that runs on with its timer set further.
+     * A core in the kernel looks at its timer and its turn before it leaves, and one whose timer comes within a tick then;
+     * an idle one waits for an interrupt, and so does one that runs on with its timer set further,
+     * or on spare time while a thread with time waits on its run queue, which takes the core at once.
      */
     if (c != core_self() &&
-        (c->turn == NULL || (__atomic_load_n(&c->in_user, __ATOMIC_ACQUIRE) && c->wake_tick - c->ticks > 1))) {
+        (c->turn == NULL || (__atomic_load_n(&c->in_user, __ATOMIC_ACQUIRE) &&
+                             (c->wake_tick - c->ticks > 1 || (c->run_queue != 0 && sched_spare_turn(c)))))) {
         c->interrupt_owed = true;
     }
 #else

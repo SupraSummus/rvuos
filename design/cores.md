@@ -87,7 +87,8 @@ marks that core's timer stale, and the other core sets its timer again before it
 It interrupts the other core for it, with the software interrupt of QEMU `virt`'s CLINT or of RP2350's SIO on Hazard3,
 or on the Cortex-M33 on a line of each core's NVIC,
 through MHU0 on mps2-an521, the SSE-200's message handling unit, and through SIO's doorbells on RP2350,
-when that core idles, or runs user mode with its timer set past the next tick;
+when that core idles, or runs user mode with its timer set past the next tick,
+or runs a turn on spare time that a thread with time now waits for on its run queue, which takes it at once;
 one whose timer comes within a tick, or that runs the kernel, finds the mark itself.
 The interrupt is sent once the lock is given up, `interrupt_owed` in `struct core` until then,
 so that the other core does not trap only to wait for the lock the sender still holds.

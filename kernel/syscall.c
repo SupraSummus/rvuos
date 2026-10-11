@@ -949,6 +949,8 @@ void syscall_dispatch(struct thread *t)
     /* A wake is traced after the line of the call that caused it; no bits means none. */
     core->trace_wake_bits = 0;
     int err = dispatch(t, op, arg[0], arg);
+    /* A stopped call is made again before a turn on spare time gives the processor up; see spare_end in sched.c. */
+    core->recall = err == KERR_PREEMPTED;
     if (err == KERR_PREEMPTED) {
         /*
          * Back to the call instruction, with the registers as the call found them.
@@ -989,10 +991,11 @@ void syscall_dispatch(struct thread *t)
     /*
      * A thread that waits gives the processor up, and so does one whose process the call took,
      * unless it handed its turn to the thread it lends its time to, which runs now.
-     * One that lost its units finishes its turn, as a preempted call is made again before the tick switches.
+     * One that lost its units finishes its turn, as a preempted call is made again before the tick switches,
+     * unless that left the turn on spare time, which a thread with time the call made ready takes at once.
      */
-    if (core->current->state != THREAD_READY) {
-        sched_run_next();
+    if (core->current->state != THREAD_READY || core->run_queue != 0) {
+        sched_call_end();
     }
     if (debug_trace) {
         selfcheck_run();

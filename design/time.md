@@ -139,10 +139,12 @@ The binding is a node of the derivation tree held in the thread, below the capab
 so revoking above that capability unbinds the thread, as it unmaps a region installed from a frame.
 A thread with no units and no spare time keeps its state and does not run:
 that is how a scheduler in userspace stops and starts a thread, open decision 9.
-A thread that loses its units while it runs finishes the turn it had,
+A thread that loses its units while it runs finishes the turn it had, unless a thread with time waits for it, below,
 so only a wait, the tick, a fault, a revoke that takes its own process,
-or a signal that wakes the thread paying for its turn takes the processor from a running thread,
-and a call stopped for an interrupt is made again before anything else runs.
+a signal that wakes the thread paying for its turn,
+or a thread with time that becomes ready while the turn runs on spare time takes the processor from a running thread.
+A call stopped for an interrupt is made again when its thread next runs:
+at once, unless the interrupt was the tick and ended the turn.
 
 **A thread has an account.**
 An account counts in parts of a count of the counter, `COUNT_PARTS` of them to a count.
@@ -162,7 +164,15 @@ A turn lasts at most to the next tick, and every count of a turn the thread bega
 while it earns its units as in any tick.
 A turn with time began with a tick in the account, so it never costs the account more than it holds.
 A thread with less than a tick has no time until its account reaches a tick again.
-Spare time is the turns no thread with time wants.
+Spare time is the turns no thread with time wants, so a turn on spare time ends as soon as one wants it:
+a thread with time that becomes ready, woken, resumed, bound or given time again at a tick,
+takes the processor as the trap that made it ready ends,
+and a core that runs a turn on spare time is interrupted for one another core made ready there.
+A turn left without time, by a bind, an unbind or its payer's destroy, is spare from then on,
+and another core that runs it is interrupted the same way.
+Only a call stopped for an interrupt goes first: its thread makes it again, and the turn ends as the call does,
+so that on its core no other thread runs between a call's steps but at a tick.
+So spare time delays a thread with time by the kernel's path alone, where before it held it to the tick.
 A thread bound through a capability with `RIGHT_X` runs on it, for free, while its account fills as usual.
 The boot grant has `RIGHT_X`, so a thread bound through it to no units runs whenever the threads with time let it.
 A thread without `RIGHT_X` runs at most its units' part and a full account,
@@ -220,9 +230,52 @@ A thread a process adds earns only units split off the process's own, or runs on
 so it takes nothing another thread earns, and a child gets time only through units its creator lends it.
 Spare time goes round by thread, so more threads there get more of it:
 it is the time nobody earned, and a thread that needs a part of the processor is given units.
-A thread with time waits for its turn at most `TIME_UNITS` ticks,
-since only threads with units of its core have time there and each takes a tick;
-a borrower on lent time has the turns its lender would have had, charged to the lender.
+A borrower on lent time has the turns its lender would have had, charged to the lender.
+
+**How long a thread with time waits for its turn** is bounded by the tick, the quantum, and by the kernel's steps:
+at most a tick for each other thread with units of its core, k ticks with k of them, so fewer than `TIME_UNITS`.
+Each thread on the run queue ahead of it has time of its own, and so units,
+or the time of the one thread that lends to it first, which waits and so takes no turn itself;
+a thread that joins later, wakes or is bound goes behind it,
+handing a turn to a borrower, or back to its lender, uses only the turn in progress,
+and a turn on spare time ends as the thread becomes ready.
+A tick more is owed only to a turn no unit of the core pays for that does not end so:
+a thread bound to another core's units during its turn, which finishes it,
+and a call stopped for an interrupt, which its thread makes again first.
+The build sets the tick, `TIMER_HZ`, and with it the bound, against the switches a shorter tick costs while threads compete.
+On top come the kernel's steps: the longest it takes without looking for an interrupt,
+and on several cores one such step of each other core, which the lock waits for,
+and the trap that ends the last turn ahead, which counts the tick, its timer lines and the releases.
+While that longest step is shorter than a tick, they add to the wait once;
+a longer one may cost each turn ahead as much again,
+and the longest today, zeroing a table of `CAPTABLE_MAX_SLOTS` slots a byte a store, is longer than a tick at 10 kHz on every board, `TODO.md`.
+A thread made ready from another core waits besides for the rest of that core's trap, the interrupt between them, and the lock.
+A timer line's thread starts within those k ticks and steps of its deadline, so a periodic line keeps its deadlines and its thread starts within as much of each;
+a device's driver within them of the trap that took its interrupt.
+It all holds while tracing is off, since tracing stops the tick ending a turn,
+while nobody drives the machine with `OP_DEBUG_TICK` or `OP_DEBUG_PREEMPT`, which move the count without time passing,
+and while the thread keeps its binding: a bind, even to more units, puts it at the back of its queue.
+A pool destroy is the exception, `TODO.md`:
+it runs to its end unless an interrupt is pending, so a thread its walk wakes waits for the rest of the walk
+while the core's timer lies further than the next tick, and on several cores for all of it.
+
+**How much work a thread gets** is bounded by its units, not by its turns.
+A turn that begins mid-tick lasts only to the next tick,
+so threads that wait just before each tick can leave a thread with time only the end of each,
+which is its units' part and no more.
+Over any stretch the other threads of its core run at most what their accounts held as it began and what their units earn during it,
+so a thread with u units that wants the processor all along gets at least u sixty-fourths of the stretch,
+less those accounts, a tenth of a second's worth of the other units at most, a tick, and the kernel's steps.
+Those accounts, not the tick, are what bound how long work takes beside threads that save up their time:
+at worst (64 - u) / u tenths of a second for a thread with u units, whatever the work.
+A periodic task of cost C and period T has time at every release
+when its units earn the cost, u T / `COUNT_PARTS` ticks at least C,
+when its account holds the cost and a tick, u `ACCOUNT_TICKS` / `COUNT_PARTS` ticks at least C and one,
+and when its account held that much at the first release, its units bound long enough before;
+C counts what the kernel charges to the task's turns too.
+What the accounts may hold, `ACCOUNT_TICKS`, is a tenth of a second whatever the tick, and at least `COUNT_PARTS` ticks and one,
+so a shorter tick shortens the wait and leaves this bound where it is; open decision 9.
+On several cores a driver on another core whose arms each interrupt the first, `TODO.md`, takes the kernel's share of the first core's turns too.
 No other latency is promised.
 A thread with no ready work spends nothing, so an idle holder of units costs the others nothing.
 

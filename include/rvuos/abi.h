@@ -539,7 +539,9 @@
  * The thread leaves the units it earned before, and keeps what its account held, up to what the new units hold.
  * The binding is a child of the invoked capability, so revoking below that capability unbinds the thread:
  * it keeps its state and its account is emptied, and it does not run until it is bound again.
- * A thread unbound or moved while it runs, the caller itself among them, finishes the turn it had.
+ * A thread unbound or moved while it runs, the caller itself among them, finishes the turn it had,
+ * but for a thread with time that waits for the core, which takes it once an unbind left the turn without time;
+ * a turn on spare time ends as a thread with time becomes ready, see DESIGN.md, "Scheduling".
  */
 #define OP_TIME_BIND 29
 

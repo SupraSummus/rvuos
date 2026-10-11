@@ -901,6 +901,10 @@ static void switch_to(struct thread *next)
         process_activate(to);
         core->pmp_stale = false;
     }
+    /* A call stopped for an interrupt is the thread's, made again when it next runs. */
+    if (next != core->current) {
+        core->recall = false;
+    }
     core->current = next;
     core->wake_stale = true;
 }
@@ -1027,6 +1031,29 @@ void sched_tick(uint32_t ticks)
     turn_end();
 }
 
+/*
+ * A turn on spare time is one no thread with time wants, so it ends as soon as one waits on the core's run queue,
+ * unless the running thread stands at a call that stopped for an interrupt, which it makes again first.
+ * The end of a call and of every trap ask it, so a wake by a call, an interrupt or another core takes the processor at once;
+ * see DESIGN.md, "Scheduling".
+ */
+static void spare_end(struct core *core)
+{
+    if (core->run_queue != 0 && !core->recall && sched_spare_turn(core)) {
+        turn_end();
+    }
+}
+
+void sched_call_end(void)
+{
+    struct core *core = core_self();
+    if (core->current->state != THREAD_READY) {
+        sched_run_next();
+    } else {
+        spare_end(core);
+    }
+}
+
 void sched_count(uint32_t ticks)
 {
     struct core *core = core_self();
@@ -1046,6 +1073,8 @@ uint32_t sched_wake(void)
             turn_end();
         }
     }
+    /* An interrupt, or another core, may have made a thread with time ready while the turn runs on spare time. */
+    spare_end(core);
     if (!core->wake_stale) {
         return 0;
     }

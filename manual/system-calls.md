@@ -477,7 +477,9 @@ so revoking below that capability unbinds it:
 it keeps its state and does not run until it is bound again, and its account is emptied.
 A thread unbound or moved while it runs, the caller itself for one, finishes the turn it had:
 only a wait, the tick, a fault, section 5.6, a revoke that takes its own process, section 6.4,
-or a signal that wakes the thread paying for its turn, section 5.12, takes the processor from it.
+a signal that wakes the thread paying for its turn, section 5.12,
+or a thread with time that becomes ready while the turn runs on spare time, section 5.11, takes the processor from it,
+and an unbind that empties the account leaves the rest of the turn on spare time.
 
 ### 6.14 Operation codes in numeric order
 
