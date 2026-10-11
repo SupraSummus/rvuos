@@ -53,7 +53,7 @@ Thread, IPv6 over 802.15.4 in a mesh, needs more of it, step by step:
 - 6LoWPAN over the frames, and IPv6, ICMPv6 and UDP over it; `user/wifi/net.c` knows IPv4 alone.
   Both sides' exchange is a test of its own today, the C6's inside its driver;
   under IPv6 each radio serves a link to a network process instead, as the C6's Wi-Fi does.
-- Thread's own: MLE, by which a node attaches and the routers form the mesh,
+- The mesh, RPL by default, see `design/decisions.md`, 30,
   and a border router, the ESP32-C6, between the mesh and the Wi-Fi network,
   which on one chip shares the radio between the two; its driver brings up one or the other today.
 

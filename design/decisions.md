@@ -469,3 +469,14 @@ until the maintainer decides otherwise.
     A smaller slot frees memory only in pools sized to what they hold, and sizing them comes first:
     it frees 8 KiB of the ESP32-C6's Wi-Fi system, where sixteen-byte slots would free 3 more; see `TODO.md`.
     Decide once the system calls settle.
+
+30. **How the IEEE 802.15.4 nodes form a mesh.**
+    Working default: RPL, RFC 6550, over 6LoWPAN: a tree towards a root, the node with the most memory,
+    each other node keeping only its parents, and no loop at any moment if a node's rank never rises within a version.
+    It suits nodes that stay where they are, links that fail now and then, and traffic to and from a border router.
+    - **Thread's MLE**, which Matter and the border routers of Apple and Google speak,
+      but whose specification comes under a licence for internal use that grants no right to implement it,
+      its patents free only to members who certify.
+    - **Babel**, RFC 8966, for traffic between any two nodes, at a route to every node kept on each.
+    Open: whether working with Thread's devices is worth its licence.
+    Decide before the mesh's first routing code.
