@@ -8,7 +8,8 @@ Part of the design document; [`DESIGN.md`](../DESIGN.md) lists every section and
 
 A capability is a kernel-held reference to a kernel object
 together with a set of rights.
-Userspace never sees a capability's contents.
+Userspace never sees a capability's links nor the address of an object;
+its type, its rights and what it names, `OP_CAP_INFO` tells whoever holds it.
 It names capabilities by slot numbers, which say which of its process's tables and the index in it,
 and the kernel validates the number, the object type, and the rights
 on every use; see "A process's tables".
@@ -55,6 +56,16 @@ and that the capability carries the rights it needs,
 and only then looks at the arguments.
 A wrong type and a missing right are distinct errors
 so that a caller can tell a programming mistake from a policy decision.
+
+Describing is the exception: `OP_CAP_INFO` comes before the types' checks, every type takes it,
+and it needs no right, nor does `OP_POOL_INFO` on a pool.
+Describing grants no authority: it changes nothing and returns nothing a call takes as a reference,
+only the capability's own words, the constants of the machine its type's operations depend on,
+and the accounting its holder needs, a pool's room and what an Untyped made.
+It does tell what nothing told before:
+a clock with no right reads the counter's rate and the tick, though not the time,
+an Untyped's holder the kind of what lies first below it,
+and a `KernelPool` capability with no right a pool's room, and so what its other holders allocate; open decision 33.
 
 #### Slot format
 
@@ -107,6 +118,8 @@ Every object's size follows from its type,
 a `CapTable` from its slot count,
 so a pool can be a bump allocator
 whose contents can be walked without a free list.
+`OP_POOL_INFO` tells each size as a pool counts it,
+so a program sizes its pools by asking, and the kernel may change the sizes, open decision 29.
 
 ### Kernel pools and revocation
 
@@ -171,6 +184,22 @@ The kernel keeps no per-pool state outside the pool
 but a list head that only the self-check and the host harness walk.
 Objects are bump-allocated behind the descriptor, eight-byte aligned,
 and each records its pool and how far back the object before it lies.
+
+A pool tells its room.
+`OP_CAP_INFO` on a pool tells its size, its room, the bytes an allocation may still take, and whether it is being destroyed,
+when the room is nothing, since nothing is allocated from a pool then;
+`OP_POOL_INFO` tells what an object of a type would take, as the allocation counts it.
+So an allocation that passes its other checks finds no room exactly when what its type takes is more than the room,
+while nothing else allocates of the pool in between, which another core or another thread may.
+A pool for a set of objects is the descriptor and them, rounded up to a block, a power of two of at least `POOL_MIN_SIZE`.
+The allocator and the description take their sizes from one place, `obj_type_size`,
+and the self-check's walk and the destroy from another, `obj_size`,
+so the tiling holds the two to each other on every build,
+and `host/history.c` holds what an allocation takes to the structures' own sizes.
+`OP_CAP_INFO` on an Untyped tells what lies first below it,
+so a pool that nothing names any more shows there as `CAP_POOL` until a revoke below the Untyped destroys it;
+it tells neither what the pool holds nor whether something outside it still holds its objects,
+so it is no proof that the revoke harms nobody; open decision 33.
 
 Kernel memory comes back at pool granularity.
 Objects are never freed individually,

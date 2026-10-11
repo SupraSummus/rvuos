@@ -1,0 +1,18 @@
+OP_POOL_INFO tells the bytes past the used mark as the room of a pool being destroyed,
+which no allocation may take.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a description differs from the capability it describes
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -351,7 +351,7 @@ static int pool_info(const struct pool *pool, uint32_t *arg)
+         return KERR_INVALID_ARG;
+     }
+     arg[1] = obj_align((uint32_t)obj_type_size((uint8_t)type, slots));
+-    arg[2] = pool_room(pool);
++    arg[2] = pool->size - pool->used;
+     return KERR_OK;
+ }
+ 

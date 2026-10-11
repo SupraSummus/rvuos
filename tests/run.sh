@@ -66,6 +66,12 @@ grep -q "rvuos: $regions $entries grain $grain" "$text" \
     || fail "the protection unit's probe did not report $entries entries and a grain of $grain"
 grep -q 'the layout fits the smallest region: ok' "$text" \
     || fail "the root task did not see the smallest region"
+# Described, the root task's process says a region an entry, PROCESS_REGION_SLOTS at most,
+# and its data the smallest region, eight bytes or the grain where that is coarser.
+budget=$((max_entries < board_entries ? max_entries : board_entries))
+told=$(printf 'regions 0x%08x smallest 0x%08x' $((budget < 8 ? budget : 8)) $((board_grain > 8 ? board_grain : 8)))
+grep -q "root: described: $told" "$text" \
+    || fail "the root task's process and data did not describe themselves as $told"
 grep -q 'hello from user mode' "$text" || fail "user mode did not run"
 grep -q 'root: message ok' "$text" || fail "the child's message did not arrive"
 grep -q 'child: reply ok' "$text" || fail "the root task's answer did not arrive"
@@ -109,6 +115,8 @@ grep -q 'the idle line stays quiet: ok' "$text" \
     || fail "an armed line nothing raises signalled"
 grep -q 'root: irq ok' "$text" \
     || fail "destroying the irq's pool did not free its line"
+grep -q 'root: pool info ok' "$text" \
+    || fail "an object took other bytes of its pool than OP_POOL_INFO said, or a pool told another room than it had"
 grep -q "root: cores $(printf '0x%08x' "$board_cores")" "$text" \
     || fail "the root task did not find the $board_cores cores in the units it was granted"
 if [ "$board_cores" -gt 1 ]; then

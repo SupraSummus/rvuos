@@ -8,6 +8,8 @@
  * and a guess of what each slot holds, which follows the records from the prologue:
  * a record invokes a capability of the type its operation wants, takes its sources from slots of their types,
  * and may use what an earlier record made, or come again with fresh slots.
+ * An operation that describes is drawn apart, one time in eight,
+ * so that every type taking it leaves a type's own operations their share of the draws.
  * Byte mutations and untyped draws stay, for the refusals the types leave out.
  *
  * The harness ignores a trailing partial record;
@@ -375,6 +377,7 @@ static uint32_t draw_kind(struct rng *r, const struct shadow *s, const struct re
                           const struct op_info *info, unsigned i, uint8_t *data, size_t count)
 {
     static const uint8_t allocs[] = { CAP_CAPTABLE, CAP_PROCESS, CAP_THREAD, CAP_NOTIFICATION };
+    static const uint8_t sized[] = { CAP_CAPTABLE, CAP_PROCESS, CAP_THREAD, CAP_NOTIFICATION, CAP_IRQ, CAP_POOL };
     static const uint8_t rights[] = { RIGHT_ALL, RIGHT_R, RIGHT_R | RIGHT_W, RIGHT_R | RIGHT_X, RIGHT_W, RIGHT_X };
     static const uint32_t delays[] = { 0, 1, 100, 10000, 1000000 };
     unsigned t = table_of(c->actor);
@@ -402,6 +405,9 @@ static uint32_t draw_kind(struct rng *r, const struct shadow *s, const struct re
         if (c->op == OP_UNTYPED_RETYPE) {
             return below(r, 2) ? CAP_FRAME : CAP_POOL;
         }
+        if (c->op == OP_POOL_INFO) {
+            return sized[below(r, sizeof(sized))];
+        }
         return allocs[below(r, sizeof(allocs))];
     case ARG_ALLOC:
         switch (c->a1) {
@@ -414,6 +420,11 @@ static uint32_t draw_kind(struct rng *r, const struct shadow *s, const struct re
         default:
             return 0;
         }
+    case ARG_SLOTS:
+        if (c->a1 != CAP_CAPTABLE) {
+            return 0;
+        }
+        return below(r, 2) ? 1 + (uint32_t)below(r, 16) : 1u << below(r, 11);
     case ARG_RIGHTS:
         return rights[below(r, sizeof(rights))];
     case ARG_REGION:
@@ -443,16 +454,34 @@ static uint32_t draw_kind(struct rng *r, const struct shadow *s, const struct re
     }
 }
 
-/* The operations invoked on a type, into ops; returns how many. */
+/* The operations invoked on a type but those that describe, into ops; returns how many. */
 static size_t ops_on(uint8_t type, uint8_t ops[OP_COUNT])
 {
     size_t n = 0;
     for (uint8_t op = 1; op < OP_COUNT; op++) {
-        if (op_table[op].name != NULL && op_table[op].cap == type) {
+        if (op_table[op].name != NULL && op_table[op].cap == type && !op_table[op].describes) {
             ops[n++] = op;
         }
     }
     return n;
+}
+
+/*
+ * An operation on a capability of the type, 0 for a type that takes none:
+ * one time in eight one that describes it, OP_CAP_INFO, or on a pool OP_POOL_INFO as often,
+ * and otherwise one of the type's own.
+ */
+static uint8_t op_on(struct rng *r, uint8_t type)
+{
+    uint8_t ops[OP_COUNT];
+    size_t n = ops_on(type, ops);
+    if (n == 0) {
+        return 0;
+    }
+    if (below(r, 8) == 0) {
+        return type == CAP_POOL && below(r, 2) ? OP_POOL_INFO : OP_CAP_INFO;
+    }
+    return ops[below(r, n)];
 }
 
 /* The arguments of a record whose actor, operation and slot are set, by the table. */
@@ -468,7 +497,6 @@ static void draw_args(struct rng *r, const struct shadow *s, struct replay_recor
 /* A typed record: an operation on a capability the thread's table is guessed to hold, or a load or a store. */
 static void typed_record(struct rng *r, const struct shadow *s, struct replay_record *c, uint8_t *data, size_t count)
 {
-    uint8_t ops[OP_COUNT];
     c->actor = draw_actor(r);
     unsigned t = table_of(c->actor);
     if (below(r, 8) == 0) {
@@ -476,8 +504,8 @@ static void typed_record(struct rng *r, const struct shadow *s, struct replay_re
         c->slot = 0;
     } else {
         c->slot = (uint16_t)pick_slot(r, s, t, CAP_NONE, 1);
-        size_t n = ops_on(slot_type(s, t, c->slot), ops);
-        c->op = n != 0 ? ops[below(r, n)] : draw_op(r);
+        uint8_t op = op_on(r, slot_type(s, t, c->slot));
+        c->op = op != 0 ? op : draw_op(r);
     }
     draw_args(r, s, c, data, count);
 }
@@ -493,8 +521,9 @@ static void typed_field(struct rng *r, uint8_t *data, size_t count, size_t at)
     if (info == NULL) {
         mutate_field(r, c, data, count);
     } else if (field == 0) {
+        /* An operation every type takes is invoked on any filled slot. */
         if (info->cap != CAP_NONE) {
-            c->slot = (uint16_t)pick_slot(r, &s, table_of(c->actor), info->cap, 1);
+            c->slot = (uint16_t)pick_slot(r, &s, table_of(c->actor), info->cap == ON_ANY ? CAP_NONE : info->cap, 1);
         }
     } else {
         uint32_t *a[3] = { &c->a1, &c->a2, &c->a3 };
@@ -530,12 +559,11 @@ static size_t use_made(struct rng *r, uint8_t *data, size_t count, size_t room)
     struct shadow s;
     shadow_at(&s, data, k + 1);
     unsigned t = table_of(record(data, k)->actor);
-    uint8_t ops[OP_COUNT];
-    size_t n = ops_on(slot_type(&s, t, slot), ops);
-    if (n == 0) {
+    uint8_t op = op_on(r, slot_type(&s, t, slot));
+    if (op == 0) {
         return count;
     }
-    struct replay_record c = { .op = ops[below(r, n)], .actor = record(data, k)->actor, .slot = (uint16_t)slot };
+    struct replay_record c = { .op = op, .actor = record(data, k)->actor, .slot = (uint16_t)slot };
     draw_args(r, &s, &c, data, count);
     return insert_at(data, count, room, k + 1 + below(r, count - k), &c);
 }

@@ -1,7 +1,7 @@
 /*
  * Cores; see DESIGN.md, "Cores".
  * BOOT_CAP_TIME holds the units of every core, TIME_UNITS of each, numbered core by core,
- * so the units of core n can be carved out of it only where there is a core n.
+ * so its count, which its description tells, is TIME_UNITS for each core.
  * A thread runs on the core its units are of, and only there.
  */
 
@@ -82,14 +82,14 @@ static int moved_while_spinning(const volatile uint32_t *word, uint32_t was, uin
     return moved;
 }
 
+/* BOOT_CAP_TIME holds every core's units, from the first, so its description counts the cores. */
 static uint32_t count_cores(void)
 {
-    uint32_t n = 1;
-    while (n < 256u && rv_invoke(OP_TIME_CARVE, BOOT_CAP_TIME, n * TIME_UNITS, TIME_UNITS, SLOT_CORE_TIME) == KERR_OK) {
-        expect("let the core's units go", rv_invoke(OP_CAP_DELETE, BOOT_CAP_CAPTABLE, SLOT_CORE_TIME, 0, 0));
-        n++;
-    }
-    return n;
+    uint32_t type, rights, w[3];
+    expect("describe the boot grant's units", rv_cap_info(BOOT_CAP_TIME, &type, &rights, w));
+    expect("they are every core's",
+           type == CAP_TIME && w[0] == 0 && w[1] != 0 && w[1] % TIME_UNITS == 0 ? KERR_OK : KERR_INVALID_ARG);
+    return w[1] / TIME_UNITS;
 }
 
 static void second_core(uint32_t data_base, uint32_t data_size, uint32_t shared_base, uint32_t counter, uint32_t hz)

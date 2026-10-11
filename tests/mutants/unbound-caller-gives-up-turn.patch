@@ -21,7 +21,7 @@ diff --git a/kernel/syscall.c b/kernel/syscall.c
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -1047,7 +1047,7 @@ static void spare_end(struct core *core)
+@@ -1076,7 +1076,7 @@ static void spare_end(struct core *core)
  void sched_call_end(void)
  {
      struct core *core = core_self();

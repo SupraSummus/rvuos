@@ -1,0 +1,17 @@
+A notification's description tells every bit, whatever the capability may signal once carved.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a description differs from the capability it describes
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -940,7 +940,7 @@ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *a
+         break;
+     case CAP_NOTIFICATION:
+         /* The bits it may signal, never those that are set, which only a wait takes, with RIGHT_R. */
+-        arg[2] = cap->b;
++        arg[2] = NOTIFY_ALL_BITS;
+         break;
+     case CAP_IRQ_LINE:
+         /* Carving narrows within one grant, so a range is all timer lines or none. */

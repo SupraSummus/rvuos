@@ -1,0 +1,19 @@
+A describing call takes any arguments, and reads a page other than the first as the first,
+so a later kernel could not give one a meaning without changing what a program that left garbage there gets.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a describing call took an argument it does not take
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -909,9 +909,6 @@ static __attribute__((noinline)) void trace_info(uint32_t op, const uint32_t *ar
+ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *arg)
+ {
+     /* a1 is the page, and only page 0 is told; see DESIGN.md, open decision 33. */
+-    if (arg[1] != 0 || arg[2] != 0 || arg[3] != 0) {
+-        return KERR_INVALID_ARG;
+-    }
+     arg[4] = 0;
+     switch (cap->type) {
+     case CAP_FRAME:

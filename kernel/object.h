@@ -136,6 +136,8 @@ struct pool {
 };
 
 static inline paddr_t pool_base(const struct pool *p) { return p->hdr.pool; }
+/* The bytes an allocation may still take of a pool, OP_CAP_INFO's room: none while it is being destroyed. */
+static inline uint32_t pool_room(const struct pool *p) { return p->dying ? 0 : p->size - p->used; }
 
 struct pmp_image {
     unsigned count;
@@ -314,6 +316,20 @@ static inline uint32_t untyped_size(const struct cap *c) { return (c->a ^ (c->a 
 static inline uint32_t untyped_base(const struct cap *c) { return c->a & ~(untyped_size(c) - 1); }
 /* Whether an Untyped makes something: only while nothing made of it is left below it. */
 static inline bool untyped_free(const struct cap *c) { return c->child == 0; }
+/*
+ * What an Untyped made, as OP_CAP_INFO tells it: 0 while it is free, else the type of the node first below it,
+ * CAP_FRAME for a frame or a region installed from one, CAP_UNTYPED for a half or a derived Untyped,
+ * and CAP_POOL for a pool's own node.
+ * Nothing else lies below an Untyped, as the self-check's derivation rule holds.
+ */
+static inline uint32_t untyped_made(const struct cap *c)
+{
+    if (c->child == 0) {
+        return 0;
+    }
+    uint8_t type = ((const struct cap *)p2v(c->child))->type;
+    return type == CAP_RETYPED ? CAP_POOL : type == CAP_INSTALLED ? CAP_FRAME : type;
+}
 
 static inline struct pool *obj_pool(const struct obj_header *o) { return p2v(o->pool); }
 
@@ -429,6 +445,9 @@ static inline bool irq_due(const struct irq *i, uint32_t now)
 
 #define OBJ_ALIGN 8
 
+/* A size as a pool counts it, rounded up to OBJ_ALIGN. */
+static inline uint32_t obj_align(uint32_t size) { return (size + OBJ_ALIGN - 1) & ~(uint32_t)(OBJ_ALIGN - 1); }
+
 /* The largest object, a table of the most slots; pool_alloc refuses a larger one. */
 #define OBJ_MAX_SIZE (sizeof(struct captable) + CAPTABLE_MAX_SLOTS * sizeof(struct cap))
 
@@ -485,6 +504,31 @@ bool pool_fits(const struct pool *pool, size_t size);
 
 /* Allocate a zeroed object of the given type and size. NULL if exhausted, or larger than OBJ_MAX_SIZE. */
 void *pool_alloc(struct pool *pool, uint8_t type, size_t size);
+
+/*
+ * The bytes an object of a type takes, before rounding, slots its count for a table:
+ * what an allocation asks of a pool and what OP_POOL_INFO tells, CAP_POOL's being the descriptor.
+ * obj_size below keeps a switch of its own, so the self-check's tiling and the destroy hold the two to each other.
+ */
+static inline size_t obj_type_size(uint8_t type, uint32_t slots)
+{
+    switch (type) {
+    case CAP_POOL:
+        return sizeof(struct pool);
+    case CAP_CAPTABLE:
+        return sizeof(struct captable) + slots * sizeof(struct cap);
+    case CAP_PROCESS:
+        return sizeof(struct process);
+    case CAP_THREAD:
+        return sizeof(struct thread);
+    case CAP_NOTIFICATION:
+        return sizeof(struct notification);
+    case CAP_IRQ:
+        return sizeof(struct irq);
+    default:
+        kpanic("size of an unknown type");
+    }
+}
 
 /* Byte length of an object, from its header; inline, so the self-check's walks have a copy of their own. */
 static inline size_t obj_size(const struct obj_header *obj)

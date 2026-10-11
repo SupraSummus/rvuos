@@ -1,0 +1,17 @@
+A notification's description tells the bits that are set, which only a wait takes, with RIGHT_R,
+so a client that may only signal sees what the others signalled.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a description differs from the capability it describes
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -941,6 +941,7 @@ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *a
+     case CAP_NOTIFICATION:
+         /* The bits it may signal, never those that are set, which only a wait takes, with RIGHT_R. */
+         arg[2] = cap->b;
++        arg[3] = ((const struct notification *)cap_object(cap))->bits;
+         break;
+     case CAP_IRQ_LINE:
+         /* Carving narrows within one grant, so a range is all timer lines or none. */

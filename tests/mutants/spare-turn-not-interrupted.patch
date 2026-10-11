@@ -7,7 +7,7 @@ Report: a turn on spare time runs while a thread with time waits
 diff --git a/kernel/core.c b/kernel/core.c
 --- a/kernel/core.c
 +++ b/kernel/core.c
-@@ -213,7 +213,7 @@ void core_notify(struct core *c)
+@@ -239,7 +239,7 @@ void core_notify(struct core *c)
       */
      if (c != core_self() &&
          (c->turn == NULL || (__atomic_load_n(&c->in_user, __ATOMIC_ACQUIRE) &&

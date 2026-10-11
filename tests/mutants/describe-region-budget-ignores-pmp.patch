@@ -1,0 +1,18 @@
+A process's description tells PROCESS_REGION_SLOTS as the regions it may have installed,
+where the PMP has fewer entries for them, as RP2350's Hazard3 has seven.
+
+Caught-by: fuzz-rp2350
+Report: a description differs from the capability it describes
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -936,7 +936,7 @@ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *a
+         break;
+     case CAP_PROCESS:
+         /* What process_install holds an install to: a slot each, and an entry each. */
+-        arg[2] = pmp_entry_count < PROCESS_REGION_SLOTS ? pmp_entry_count : PROCESS_REGION_SLOTS;
++        arg[2] = PROCESS_REGION_SLOTS;
+         break;
+     case CAP_NOTIFICATION:
+         /* The bits it may signal, never those that are set, which only a wait takes, with RIGHT_R. */

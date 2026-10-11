@@ -11,6 +11,8 @@ The kernel has no console: on QEMU the replay driver carries the log
 to the UART after each record and the halt writes out what the last one left;
 on the host each byte is printed as the kernel appends it.
 Both print one `trace:` line per call from the same kernel code,
+a `trace: info` line after a describing call with what it returned,
+so the answers are compared with the statuses, the probe of the PMP and the timer among them,
 and a `user fault` line for each fault of a driver thread,
 which stops that thread alone: when the records unmapped it,
 and when it finds the records done, since the driver ends with a breakpoint.

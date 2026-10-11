@@ -7,7 +7,7 @@ Report: a thread waits for a turn on a core that idles
 diff --git a/kernel/core.c b/kernel/core.c
 --- a/kernel/core.c
 +++ b/kernel/core.c
-@@ -212,7 +212,7 @@ void core_notify(struct core *c)
+@@ -238,7 +238,7 @@ void core_notify(struct core *c)
       * or on spare time while a thread with time waits on its run queue, which takes the core at once.
       */
      if (c != core_self() &&

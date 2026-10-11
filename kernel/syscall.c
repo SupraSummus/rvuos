@@ -336,15 +336,39 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
 }
 
 /*
- * A pool only allocates.
+ * What an object of a type would take of a pool, and the room, see OP_POOL_INFO:
+ * the types OP_POOL_ALLOC makes, the Irq OP_IRQ_BIND makes of a pool, and the descriptor.
+ */
+static int pool_info(const struct pool *pool, uint32_t *arg)
+{
+    uint32_t type = arg[1];
+    uint32_t slots = arg[3];
+    if (type != CAP_CAPTABLE && type != CAP_PROCESS && type != CAP_THREAD && type != CAP_NOTIFICATION &&
+        type != CAP_IRQ && type != CAP_POOL) {
+        return KERR_INVALID_ARG;
+    }
+    if (arg[2] != 0 || (type == CAP_CAPTABLE ? slots == 0 || slots > CAPTABLE_MAX_SLOTS : slots != 0)) {
+        return KERR_INVALID_ARG;
+    }
+    arg[1] = obj_align((uint32_t)obj_type_size((uint8_t)type, slots));
+    arg[2] = pool_room(pool);
+    return KERR_OK;
+}
+
+/*
+ * A pool allocates, and tells what an allocation would take of it.
  * It is destroyed by a revoke below the Untyped it was made of, whose holder owns the memory;
  * see DESIGN.md, "Kernel pools and revocation".
+ * arg[1..] carry the arguments in and the results out.
  */
 static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
-                   uint32_t op, const uint32_t *arg)
+                   uint32_t op, uint32_t *arg)
 {
     struct pool *pool = (struct pool *)cap_object(cap);
 
+    if (op == OP_POOL_INFO) {
+        return pool_info(pool, arg);
+    }
     if (op != OP_POOL_ALLOC) {
         return KERR_WRONG_TYPE;
     }
@@ -369,7 +393,7 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
         if (terr != KERR_OK) {
             return terr;
         }
-        struct process *proc = pool_alloc(pool, CAP_PROCESS, sizeof(*proc));
+        struct process *proc = pool_alloc(pool, CAP_PROCESS, obj_type_size(CAP_PROCESS, 0));
         if (proc == NULL) {
             return KERR_NO_MEMORY;
         }
@@ -385,7 +409,7 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
         if (perr != KERR_OK) {
             return perr;
         }
-        struct thread *nt = pool_alloc(pool, CAP_THREAD, sizeof(*nt));
+        struct thread *nt = pool_alloc(pool, CAP_THREAD, obj_type_size(CAP_THREAD, 0));
         if (nt == NULL) {
             return KERR_NO_MEMORY;
         }
@@ -399,7 +423,7 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
         break;
     }
     case CAP_NOTIFICATION: {
-        struct notification *ntfn = pool_alloc(pool, CAP_NOTIFICATION, sizeof(*ntfn));
+        struct notification *ntfn = pool_alloc(pool, CAP_NOTIFICATION, obj_type_size(CAP_NOTIFICATION, 0));
         if (ntfn == NULL) {
             return KERR_NO_MEMORY;
         }
@@ -411,8 +435,7 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
         if (nslots == 0 || nslots > CAPTABLE_MAX_SLOTS) {
             return KERR_INVALID_ARG;
         }
-        struct captable *table = pool_alloc(
-            pool, CAP_CAPTABLE, sizeof(*table) + nslots * sizeof(struct cap));
+        struct captable *table = pool_alloc(pool, CAP_CAPTABLE, obj_type_size(CAP_CAPTABLE, nslots));
         if (table == NULL) {
             return KERR_NO_MEMORY;
         }
@@ -702,13 +725,13 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
             }
         }
         /* Room is checked before the line's derivation goes, since what a revoke took stays taken. */
-        if (!pool_fits(pool, sizeof(struct irq))) {
+        if (!pool_fits(pool, obj_type_size(CAP_IRQ, 0))) {
             return KERR_NO_MEMORY;
         }
         if (!cap_revoke_below(slot_node(t, slot), slot, true)) {
             return KERR_PREEMPTED;
         }
-        struct irq *irq = pool_alloc(pool, CAP_IRQ, sizeof(*irq));
+        struct irq *irq = pool_alloc(pool, CAP_IRQ, obj_type_size(CAP_IRQ, 0));
         /* It hangs below the capability it was bound with, so a revoke above that disarms the Irq. */
         irq->ntfn = (struct cap){ .type = CAP_SIGNALLED, .rights = nc.rights, .a = nc.a, .b = nc.b };
         cap_attach(slot_node(t, arg[2]), &irq->ntfn);
@@ -865,6 +888,100 @@ static void trace_call(uint32_t op, uint32_t slot, const uint32_t *arg, int stat
     kputc('\n');
 }
 
+/*
+ * The results of a describing call, after its line, so that the replay compares its answers as well:
+ * OP_CAP_INFO's four words and OP_POOL_INFO's two, as a3 and a4 are what its caller left there.
+ * Out of line, and only under tracing, so that the call's own path saves no more registers for it.
+ */
+static __attribute__((noinline)) void trace_info(uint32_t op, const uint32_t *arg)
+{
+    kputs("trace: info a1=");
+    kput_hex(arg[1]);
+    kputs(" a2=");
+    kput_hex(arg[2]);
+    if (op == OP_CAP_INFO) {
+        kputs(" a3=");
+        kput_hex(arg[3]);
+        kputs(" a4=");
+        kput_hex(arg[4]);
+    }
+    kputc('\n');
+}
+
+/*
+ * What a capability is and what it names, see OP_CAP_INFO: its type and rights in a1, and three words by type.
+ * It looks at most at the slot's copy and at one thing more, the object or the node first below an Untyped.
+ * Out of line, so that dispatch saves no more registers for it, on the stack's deepest path.
+ */
+static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *arg)
+{
+    /* a1 is the page, and only page 0 is told; see DESIGN.md, open decision 33. */
+    if (arg[1] != 0 || arg[2] != 0 || arg[3] != 0) {
+        return KERR_INVALID_ARG;
+    }
+    arg[4] = 0;
+    switch (cap->type) {
+    case CAP_FRAME:
+        arg[2] = cap->a;
+        arg[3] = cap->b;
+        arg[4] = region_min_size();
+        break;
+    case CAP_UNTYPED:
+        arg[2] = untyped_base(cap);
+        arg[3] = untyped_size(cap);
+        arg[4] = untyped_made(cap);
+        break;
+    case CAP_POOL: {
+        const struct pool *pool = (const struct pool *)cap_object(cap);
+        arg[2] = pool->size;
+        arg[3] = pool_room(pool);
+        arg[4] = pool->dying;
+        break;
+    }
+    case CAP_CAPTABLE:
+        arg[2] = ((const struct captable *)cap_object(cap))->nslots;
+        break;
+    case CAP_PROCESS:
+        /* What process_install holds an install to: a slot each, and an entry each. */
+        arg[2] = pmp_entry_count < PROCESS_REGION_SLOTS ? pmp_entry_count : PROCESS_REGION_SLOTS;
+        break;
+    case CAP_NOTIFICATION:
+        /* The bits it may signal, never those that are set, which only a wait takes, with RIGHT_R. */
+        arg[2] = cap->b;
+        break;
+    case CAP_IRQ_LINE:
+        /* Carving narrows within one grant, so a range is all timer lines or none. */
+        arg[2] = cap->a;
+        arg[3] = cap->b;
+        arg[4] = line_is_timer(cap->a);
+        break;
+    case CAP_IRQ: {
+        /* What the bind's capability may signal, zero once the notification was taken, and never what is armed. */
+        const struct irq *irq = (const struct irq *)cap_object(cap);
+        arg[2] = irq->line;
+        arg[3] = irq->ntfn.b;
+        arg[4] = line_is_timer(irq->line);
+        break;
+    }
+    case CAP_TIME:
+        arg[2] = cap->a;
+        arg[3] = cap->b;
+        arg[4] = TIMER_US_PER_TICK;
+        break;
+    case CAP_CLOCK:
+        /* The rate and the tick, not the time, so no RIGHT_R. */
+        arg[2] = timer_counter_hz();
+        arg[3] = timer_tick_counts();
+        arg[4] = TIMER_US_PER_TICK;
+        break;
+    default:
+        /* A thread and the debug capability tell nothing more. */
+        break;
+    }
+    arg[1] = cap->type | (uint32_t)cap->rights << 8;
+    return KERR_OK;
+}
+
 static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
 {
     /*
@@ -883,9 +1000,13 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
     if (err != KERR_OK) {
         return err;
     }
+    /* Describing grants no authority, so every type takes it, with no right, before the types' own checks. */
+    if (op == OP_CAP_INFO) {
+        return cap_info(&cap, arg);
+    }
 
     /*
-     * Operations that change an object need RIGHT_W on it.
+     * Operations that change an object need RIGHT_W on it, but for a pool's telling what an allocation would take.
      * Frames, Untypeds, interrupt lines, units of time, notifications, the debug capability and the clock
      * are checked in their handlers,
      * because which right they need depends on the operation.
@@ -907,7 +1028,7 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
         err = (cap.rights & RIGHT_W) ? op_captable(t, slot, &cap, op, arg) : KERR_NO_RIGHTS;
         break;
     case CAP_POOL:
-        err = (cap.rights & RIGHT_W) ? op_pool(t, slot, &cap, op, arg) : KERR_NO_RIGHTS;
+        err = (op == OP_POOL_INFO || (cap.rights & RIGHT_W)) ? op_pool(t, slot, &cap, op, arg) : KERR_NO_RIGHTS;
         break;
     case CAP_PROCESS:
         err = (cap.rights & RIGHT_W) ? op_process(t, &cap, op, arg) : KERR_NO_RIGHTS;
@@ -977,6 +1098,9 @@ void syscall_dispatch(struct thread *t)
 
     if (traced) {
         trace_call(op, in[0], in, err);
+        if ((op == OP_CAP_INFO || op == OP_POOL_INFO) && err == KERR_OK) {
+            trace_info(op, arg);
+        }
         trace_wake();
     }
     /*

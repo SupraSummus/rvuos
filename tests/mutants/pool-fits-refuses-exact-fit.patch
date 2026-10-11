@@ -1,0 +1,18 @@
+An object that fills the rest of its pool exactly does not fit,
+where the room OP_POOL_INFO tells says it does.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: an allocation's room differs from the pool's
+
+diff --git a/kernel/pool.c b/kernel/pool.c
+--- a/kernel/pool.c
++++ b/kernel/pool.c
+@@ -132,7 +132,7 @@ bool pool_destroy(struct pool *pool, bool preempt)
+ 
+ bool pool_fits(const struct pool *pool, size_t size)
+ {
+-    return obj_align((uint32_t)size) <= pool->size - pool->used;
++    return obj_align((uint32_t)size) < pool->size - pool->used;
+ }
+ 
+ void *pool_alloc(struct pool *pool, uint8_t type, size_t size)

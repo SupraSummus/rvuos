@@ -6,7 +6,7 @@ Chapters 10 and 11 of the user manual; [`MANUAL.md`](../MANUAL.md) has its conte
 
 | Limit | Value | Where |
 |---|---|---|
-| region slots per process | 8 | `PROCESS_REGION_SLOTS` |
+| region slots per process | 8, of which 7 may be filled on RP2350's Hazard3 | `PROCESS_REGION_SLOTS`; `OP_CAP_INFO` on a process |
 | table slots per process | 2 | `PROCESS_TABLES` |
 | PMP entries the kernel uses | 16, or `PMP_MAX_ENTRIES` | Makefile |
 | minimum PMP entries to boot | 4 | `kernel/main.c` |
@@ -16,16 +16,17 @@ Chapters 10 and 11 of the user manual; [`MANUAL.md`](../MANUAL.md) has its conte
 | boot pool | 4 KiB | `BOOT_POOL_SIZE` in `kernel/layout.h` |
 | smallest pool | 64 bytes | `POOL_MIN_SIZE` |
 | object alignment | 8 bytes | `OBJ_ALIGN` |
+| an object's size | section 5.5 | `OP_POOL_INFO` |
 | notification bits | 32 | the word size |
 | timer lines | 16, on the whole machine | `TIMER_LINES` |
 | units of time | 64 of each core | `TIME_UNITS` |
-| cores | 1, or 2 on QEMU `virt`, mps2-an521 and RP2350 with `CORES=2` | Makefile |
+| cores | 1, or 2 on QEMU `virt`, mps2-an521 and RP2350 with `CORES=2` | Makefile; `OP_CAP_INFO` on `BOOT_CAP_TIME`, its count over `TIME_UNITS` |
 | most of its units an account holds | 100 ticks' worth, 100 ms (`ACCOUNT_TICKS`) | `kernel/timer.h` |
 | timer delay or period per call | 2^32 - 1 µs | `OP_IRQ_SET` |
 | watchdog's delay | 10 s | `WATCHDOG_US_MAX` |
-| tick, the quantum | 1 ms (`TIMER_HZ` 1000) unless the build sets another rate, `make TIMER_HZ=` | `kernel/timer.h`, Makefile |
+| tick, the quantum | 1 ms (`TIMER_HZ` 1000) unless the build sets another rate, `make TIMER_HZ=` | `kernel/timer.h`, Makefile; `OP_CAP_INFO` on a `Clock` or a `Time` capability |
 | interrupt lines | 96 on QEMU, 77 on the ESP32-C6, 52 on RP2350, 32 on mps2-an385, 48 on mps2-an521, line 0 the log's | `IRQ_LINES` |
-| smallest region | 8 bytes, or the PMP grain if coarser, 32 bytes on ARM | `region_min_size` in `kernel/pmp.h` |
+| smallest region | 8 bytes, or the PMP grain if coarser, 32 bytes on ARM | `region_min_size` in `kernel/pmp.h`; `OP_CAP_INFO` or `OP_FRAME_INFO` on any frame |
 | kernel log ring | 4 KiB less a 32-byte header | `KLOG_SIZE` |
 | replay records per input | 256 | `REPLAY_MAX_RECORDS` |
 

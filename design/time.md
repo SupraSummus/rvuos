@@ -93,6 +93,8 @@ The `Clock` capability gives the time:
 The kernel counts a 32-bit counter's wraps for its tick anyway, so the MPS2 boards' time is whole too,
 and under tracing the time is the tick count's, as every clock is there; see "Verification".
 The rate is the board's, and on the ESP32-C6 measured at boot, so a program takes it from the clock.
+The clock's description, `OP_CAP_INFO`, tells the rate and the tick without `RIGHT_R`,
+since neither is the time: a program that may not read the time may still know the grain its timers and turns come in.
 
 **And the counter's frame, for a reader that cannot trap.**
 A call is a trap, which a program that measures what the kernel does to it cannot afford:
@@ -310,6 +312,9 @@ The tick has a fixed period, `TIMER_HZ` in `kernel/timer.h`, which the build set
 and one tick is one turn: a preempted thread goes to the back of its queue.
 So the tick is the quantum, the longest turn a thread takes while another could run,
 and the build trades how long a thread may wait for its turn against how often the core switches while threads compete.
+A program reads it, for a timing analysis of its own as above, from a `Clock`'s description,
+in counts of the counter and in microseconds, or a `Time` capability's, in microseconds,
+rather than take it for a millisecond; the demo's charge check reads it so.
 `make lab` and `make bench` at 4 kHz and at 10 kHz showed the worst round trip beside a busy process shrink with the tick,
 and no call cost more; the commit that made the rate the build's says by how much.
 A turn that begins when a thread waits mid-tick lasts only to the next tick;

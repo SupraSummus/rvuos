@@ -1,8 +1,9 @@
 /*
  * The properties "Authority only flows", "A call is as good as its capability", "Memory crosses zeroed",
  * "The caller keeps what it runs on", "A dying pool only gives back", "A tick charges",
- * "A move keeps a node's place", "A thread lends by its own wait" and "A thread stops by its holder, where it stood"
- * of DESIGN.md, which relate the state before a call to the state after it.
+ * "A move keeps a node's place", "A thread lends by its own wait", "A thread stops by its holder, where it stood",
+ * "A description is the capability's" and "A pool's room is what an allocation may take" of DESIGN.md,
+ * which relate the state before a call to the state after it.
  * host_trap runs history_begin before each call and history_end after it,
  * and around a fault, which must change no more than a call that moves no time.
  *
@@ -17,6 +18,7 @@
 #include <string.h>
 
 #include "harness.h"
+#include "layout.h"
 
 /* What a capability grants, as the covering rule compares it: a range, an object, or the debug capability. */
 struct grant {
@@ -53,6 +55,7 @@ struct thread_rec {
 
 typedef ARRAY(struct obj_rec) obj_array;
 typedef ARRAY(uint32_t) addr_array;
+typedef ARRAY(uint8_t) byte_array;
 
 static ARRAY(struct grant) held;
 static ARRAY(struct node_rec) nodes;
@@ -77,6 +80,7 @@ static uint32_t caller_dying;
 static bool call_made, invoked;
 static struct cap invoked_cap;
 static uint32_t call_op, call_pc;
+static uint32_t call_args[4]; /* a1 to a4 */
 static const struct notification *signalled;
 static uint32_t signalled_bits;
 static const struct thread *signalled_waiter, *signalled_payer;
@@ -90,6 +94,23 @@ static struct cap *move_from, *move_to;
 static struct cap move_was;
 static uint32_t move_parent;
 static addr_array move_children, children_after;
+
+/*
+ * A traced describing call, OP_CAP_INFO or OP_POOL_INFO on a pool or on a slot that names nothing:
+ * whether it takes its arguments, what it should return in a1 to a4,
+ * and what of the kernel's state it must leave, see record_state.
+ */
+static bool describing, describe_takes;
+static uint32_t describe_want[4];
+static byte_array state, state_after;
+
+/*
+ * An allocation from a pool, OP_POOL_ALLOC's or OP_IRQ_BIND's, of a type whose size its arguments say:
+ * the pool, its bytes in use and whether it was dying as the attempt began, and the bytes the type takes.
+ */
+static const struct pool *room_pool;
+static uint32_t room_used, room_size, room_need;
+static bool room_dying;
 
 /*
  * The count before the call, whether it was traced, and the thread the turn was charged to, NULL for none,
@@ -263,13 +284,13 @@ static void children_of(const struct cap *c, addr_array *out)
 
 /*
  * The rights an operation needs of the capability it is invoked on, as rvuos/abi.h gives them;
- * one invoked on a capability of another type fails before its rights matter.
+ * one invoked on a capability of another type fails before its rights matter, and a describing one needs none.
  * RIGHTS_IN_HANDLER names an operation whose handler decides by what the call asks,
  * and RIGHTS_UNKNOWN a code that is no operation, which history_begin holds no code below OP_COUNT to.
  */
 #define RIGHTS_IN_HANDLER 0
 #define RIGHTS_UNKNOWN 0xff
-_Static_assert(OP_COUNT == 41, "a new operation needs its rights in rights_needed");
+_Static_assert(OP_COUNT == 43 && OP_POOL_INFO == OP_COUNT - 1, "a new operation needs its rights in rights_needed");
 static uint8_t rights_needed(uint32_t op)
 {
     switch (op) {
@@ -317,6 +338,10 @@ static uint8_t rights_needed(uint32_t op)
     case OP_TIME_CARVE:
     case OP_NOTIFY_CARVE:
         return RIGHTS_IN_HANDLER;
+    /* A description grants nothing, so it needs no right. */
+    case OP_CAP_INFO:
+    case OP_POOL_INFO:
+        return 0;
     default:
         return RIGHTS_UNKNOWN;
     }
@@ -335,11 +360,192 @@ static void check_rights_table(void)
     checked = true;
 }
 
+/* The bytes an object of a type takes of a pool, slots its count for a table, by its structure; 0 for no such object. */
+static uint32_t type_bytes(uint32_t type, uint32_t slots)
+{
+    size_t size;
+    switch (type) {
+    case CAP_CAPTABLE:
+        size = slots != 0 && slots <= CAPTABLE_MAX_SLOTS ? sizeof(struct captable) + slots * sizeof(struct cap) : 0;
+        break;
+    case CAP_PROCESS:
+        size = sizeof(struct process);
+        break;
+    case CAP_THREAD:
+        size = sizeof(struct thread);
+        break;
+    case CAP_NOTIFICATION:
+        size = sizeof(struct notification);
+        break;
+    case CAP_IRQ:
+        size = sizeof(struct irq);
+        break;
+    case CAP_POOL:
+        size = sizeof(struct pool);
+        break;
+    default:
+        size = 0;
+        break;
+    }
+    return (uint32_t)(size + 7) & ~7u;
+}
+
+static void push_bytes(byte_array *out, const void *p, size_t n)
+{
+    for (size_t i = 0; i < n; i++) {
+        PUSH(*out, ((const uint8_t *)p)[i]);
+    }
+}
+
+/*
+ * What a describing call leaves as it was, every object in order:
+ * the nodes it holds, a pool's descriptor and a table's header.
+ * What the tail of any call and its trace line may move is left out:
+ * a thread's state, queues, account and frame, a notification's bits and waiters,
+ * and an Irq's bits, which the log's line may signal as the line is written.
+ */
+static void record_state(const obj_array *a, byte_array *out)
+{
+    out->n = 0;
+    for (size_t i = 0; i < a->n; i++) {
+        struct obj_header *o = p2v(a->v[i].at);
+        uint32_t count;
+        const struct cap *held_nodes = obj_nodes(o, &count);
+        push_bytes(out, held_nodes, count * sizeof(struct cap));
+        if (o->type == CAP_POOL) {
+            push_bytes(out, o, sizeof(struct pool));
+        } else if (o->type == CAP_CAPTABLE) {
+            push_bytes(out, o, sizeof(struct captable));
+        }
+    }
+}
+
+/*
+ * What a describing call returns in a1 to a4, as abi.h says, from the capability and what it names before the call,
+ * which only a traced call follows.
+ */
+static void describe_expect(void)
+{
+    const struct cap *c = &invoked_cap;
+    uint32_t *w = describe_want;
+    if (call_op == OP_POOL_INFO) {
+        const struct pool *p = (const struct pool *)cap_object(c);
+        w[0] = type_bytes(call_args[0], call_args[2]);
+        w[1] = p->dying ? 0 : p->size - p->used;
+        w[2] = call_args[2];
+        w[3] = call_args[3];
+        return;
+    }
+    w[0] = c->type | (uint32_t)c->rights << 8;
+    w[1] = w[2] = w[3] = 0;
+    switch (c->type) {
+    case CAP_FRAME:
+        w[1] = c->a;
+        w[2] = c->b;
+        w[3] = pmp_grain < 8 ? 8 : pmp_grain;
+        break;
+    case CAP_UNTYPED: {
+        w[1] = untyped_base(c);
+        w[2] = untyped_size(c);
+        uint8_t below = c->child != 0 ? ((const struct cap *)p2v(c->child))->type : CAP_NONE;
+        w[3] = below == CAP_RETYPED ? CAP_POOL : below == CAP_INSTALLED ? CAP_FRAME : below;
+        break;
+    }
+    case CAP_POOL: {
+        const struct pool *p = (const struct pool *)cap_object(c);
+        w[1] = p->size;
+        w[2] = p->dying ? 0 : p->size - p->used;
+        w[3] = p->dying != 0;
+        break;
+    }
+    case CAP_CAPTABLE:
+        w[1] = ((const struct captable *)cap_object(c))->nslots;
+        break;
+    case CAP_PROCESS:
+        w[1] = pmp_entry_count < PROCESS_REGION_SLOTS ? pmp_entry_count : PROCESS_REGION_SLOTS;
+        break;
+    case CAP_NOTIFICATION:
+        w[1] = c->b;
+        break;
+    case CAP_IRQ_LINE:
+        w[1] = c->a;
+        w[2] = c->b;
+        w[3] = c->a >= IRQ_LINES;
+        break;
+    case CAP_IRQ: {
+        const struct irq *irq = (const struct irq *)cap_object(c);
+        w[1] = irq->line;
+        w[2] = irq->ntfn.type == CAP_SIGNALLED ? irq->ntfn.b : 0;
+        w[3] = irq->line >= IRQ_LINES;
+        break;
+    }
+    case CAP_TIME:
+        w[1] = c->a;
+        w[2] = c->b;
+        w[3] = 1000000u / TIMER_HZ;
+        break;
+    case CAP_CLOCK:
+        w[1] = COUNTER_HZ;
+        w[2] = COUNTER_HZ / TIMER_HZ;
+        w[3] = 1000000u / TIMER_HZ;
+        break;
+    default:
+        break;
+    }
+}
+
+/*
+ * Note a traced describing call, as the kernel will resolve it:
+ * whether it takes its arguments, what it should return, and the state it must leave.
+ * OP_POOL_INFO on another type than a pool fails as any operation of another type does, which check_call holds.
+ */
+static void record_describe(void)
+{
+    describing = debug_trace && (call_op == OP_CAP_INFO ||
+                                 (call_op == OP_POOL_INFO && (!invoked || invoked_cap.type == CAP_POOL)));
+    if (!describing) {
+        return;
+    }
+    if (call_op == OP_CAP_INFO) {
+        describe_takes = (call_args[0] | call_args[1] | call_args[2]) == 0;
+    } else {
+        describe_takes = type_bytes(call_args[0], call_args[2]) != 0 && call_args[1] == 0 &&
+                         (call_args[0] == CAP_CAPTABLE || call_args[2] == 0);
+    }
+    if (invoked) {
+        describe_expect();
+    }
+    record_state(&objects, &state);
+}
+
+/* Note an allocation from a pool, as the kernel will resolve the pool, from the objects walked. */
+static void record_room(void)
+{
+    room_pool = NULL;
+    struct cap pc = invoked_cap;
+    if (call_op == OP_POOL_ALLOC && invoked_cap.type == CAP_POOL) {
+        room_need = call_args[0] == CAP_IRQ || call_args[0] == CAP_POOL ? 0 : type_bytes(call_args[0], call_args[2]);
+    } else if (call_op == OP_IRQ_BIND && invoked_cap.type == CAP_IRQ_LINE &&
+               slot_lookup(caller, call_args[0], &pc) == KERR_OK && pc.type == CAP_POOL) {
+        room_need = type_bytes(CAP_IRQ, 0);
+    } else {
+        return;
+    }
+    if (room_need == 0 || !is_object(&objects, pc.a)) {
+        return;
+    }
+    room_pool = (const struct pool *)cap_object(&pc);
+    room_used = room_pool->used;
+    room_size = room_pool->size;
+    room_dying = room_pool->dying != 0;
+}
+
 /* Note what a call invokes, as the kernel will resolve it; a fault invokes nothing, whatever a7 holds. */
 static void record_call(bool call)
 {
     call_made = call;
-    invoked = false;
+    invoked = describing = false;
+    room_pool = NULL;
     signalled = NULL;
     if (!call || caller == NULL) {
         return;
@@ -347,7 +553,14 @@ static void record_call(bool call)
     const struct trap_frame *f = &caller->frame;
     call_op = f->regs[REG_A7];
     call_pc = f->pc;
+    for (unsigned i = 0; i < 4; i++) {
+        call_args[i] = f->regs[REG_A1 + i];
+    }
     invoked = slot_lookup(caller, f->regs[REG_A0], &invoked_cap) == KERR_OK;
+    record_describe();
+    if (invoked) {
+        record_room();
+    }
     if (!invoked || call_op != OP_NOTIFY_SIGNAL || invoked_cap.type != CAP_NOTIFICATION) {
         return;
     }
@@ -386,6 +599,57 @@ static void check_call(void)
     }
     if (set & ~invoked_cap.b) {
         violated("a signal set bits its capability may not signal");
+    }
+}
+
+/*
+ * A traced describing call that returned took exactly the arguments abi.h gives it,
+ * succeeded on any filled slot whatever its rights, returned what abi.h says the capability tells,
+ * and changed nothing of the state record_state keeps.
+ */
+static void check_describe(void)
+{
+    if (!describing || caller->frame.pc == call_pc) {
+        return;
+    }
+    uint32_t status = caller->frame.regs[REG_A0];
+    if (!invoked) {
+        if (status != KERR_INVALID_CAP) {
+            violated("a describing call described a slot that names nothing");
+        }
+    } else if (!describe_takes) {
+        if (status != KERR_INVALID_ARG) {
+            violated("a describing call took an argument it does not take");
+        }
+    } else if (status != KERR_OK) {
+        violated("a describing call failed on a filled slot");
+    } else if (memcmp(&caller->frame.regs[REG_A1], describe_want, sizeof(describe_want)) != 0) {
+        violated("a description differs from the capability it describes");
+    }
+    record_state(&objects_after, &state_after);
+    if (objects_after.n != objects.n || memcmp(objects_after.v, objects.v, objects.n * sizeof(objects.v[0])) != 0 ||
+        state_after.n != state.n || memcmp(state_after.v, state.v, state.n) != 0) {
+        violated("a describing call changed the kernel's state");
+    }
+}
+
+/*
+ * An allocation that finished found no room exactly when its type took more than the room as the attempt found it,
+ * in a pool not being destroyed, and one that succeeded took exactly what its type takes.
+ * Every other status comes from a check before the room, and says nothing of it.
+ */
+static void check_room(void)
+{
+    if (room_pool == NULL || caller->frame.pc == call_pc) {
+        return;
+    }
+    uint32_t status = caller->frame.regs[REG_A0];
+    bool fits = !room_dying && room_need <= room_size - room_used;
+    if ((status == KERR_NO_MEMORY && fits) || (status == KERR_OK && !fits)) {
+        violated("an allocation's room differs from the pool's");
+    }
+    if (status == KERR_OK && (!is_object(&objects_after, v2p(&room_pool->hdr)) || room_pool->used != room_used + room_need)) {
+        violated("an object took other bytes than its type takes");
     }
 }
 
@@ -676,6 +940,8 @@ void history_end(void)
     check_call();
     check_lends();
     check_stops();
+    check_describe();
+    check_room();
 
     /*
      * Only OP_DEBUG_TICK moves time here, and only under tracing, where the clock is the tick count:

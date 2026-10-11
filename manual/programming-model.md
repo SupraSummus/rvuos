@@ -31,9 +31,10 @@ and `SLOT_TABLE_SHIFT` is 10, so the numbers below 1024 are the first table's,
 and a process with one table names its slots by their indices.
 A slot is empty or holds one capability:
 a type, a set of rights, and two words the kernel interprets by type.
-Userspace never sees a slot's contents,
-but it can ask a frame what it covers with `OP_FRAME_INFO`,
-and an Untyped with `OP_UNTYPED_INFO`.
+Userspace never sees a slot's links, nor the address of an object,
+but whoever holds a capability may ask what it is, with no right, `OP_CAP_INFO`, section 6.14:
+its type, its rights and what it names,
+as `OP_FRAME_INFO` asks a frame what it covers and `OP_UNTYPED_INFO` an Untyped.
 
 Every system call is an invocation on the capability in one slot.
 The kernel resolves the slot,
@@ -163,12 +164,15 @@ Every frame and every Untyped is a **block**:
 its size is a power of two and its base a multiple of its size,
 which is the range one PMP entry in NAPOT mode describes.
 The smallest block is eight bytes, or the PMP's grain if that is coarser;
-`OP_FRAME_INFO` returns it in `a4`.
+`OP_FRAME_INFO` returns it in `a4`, and so does `OP_CAP_INFO` on any frame.
 A range of any other size is rounded up or made of several blocks,
 one region slot each.
 
 An Untyped is **free** while nothing made of it is left, and **made** while something is;
-`OP_UNTYPED_INFO` says which in `a4`.
+`OP_UNTYPED_INFO` says which in `a4`,
+and `OP_CAP_INFO` what lies first below it, `CAP_FRAME`, `CAP_UNTYPED` or `CAP_POOL`, or 0 while it is free.
+That is the first of what lies there:
+once a delete handed up what lay below the deleted capability, several kinds may lie side by side.
 A free Untyped makes one thing of the whole of its memory:
 `OP_UNTYPED_SPLIT` its lower and its upper half, two Untypeds,
 `OP_UNTYPED_RETYPE` a frame or a pool,
@@ -203,7 +207,8 @@ PMP budget.
 Every installed region is one NAPOT entry, so `n` regions cost `n` entries.
 An install beyond the core's entries fails with `KERR_LIMIT`,
 which with eight region slots happens only on a core with fewer entries for regions,
-such as RP2350's Hazard3, with seven.
+such as RP2350's Hazard3, with seven;
+`OP_CAP_INFO` on a process tells how many of its region slots may be filled at once.
 
 An access must lie entirely within one PMP entry.
 Two regions that touch share a boundary
@@ -229,7 +234,13 @@ so what the process left in the memory never becomes part of an object.
 
 Objects are bump-allocated from a pool, eight-byte aligned,
 and never freed individually.
-Sizes a developer needs for planning, as the kernel rounds them:
+Sizes depend on the architecture, the board and the build, and the kernel may change them,
+so a program asks the pool: `OP_POOL_INFO` tells what an object of a type takes, as the pool counts it,
+`CAP_POOL` the descriptor, section 6.6,
+and `OP_CAP_INFO` on the pool what is left of it, its room.
+A pool for a set of objects needs the descriptor and them,
+rounded up to a power of two of at least `POOL_MIN_SIZE`, since an Untyped is a block.
+Today's sizes, as the kernel rounds them:
 
 | Object | Bytes (16 PMP entries) |
 |---|---|
@@ -254,7 +265,8 @@ and every `KernelPool` capability below the pool's own node,
 which the kernel keeps in the pool and no process can name.
 So revoking below a `KernelPool` capability takes what was allocated through it,
 and deleting the last `KernelPool` capability leaves the pool standing,
-reachable through nothing, until the Untyped it was made of is revoked.
+reachable through nothing, until the Untyped it was made of is revoked;
+`OP_CAP_INFO` on that Untyped tells a pool below it all the while.
 
 **Destroying a pool** is revoking below the Untyped it was made of, or below one above that;
 no operation on the pool does it, so a `KernelPool` capability only allocates.
@@ -286,7 +298,8 @@ The boot pool holds the root task, which therefore cannot destroy it,
 but any other thread holding `BOOT_CAP_POOL_RAM`, the block the boot pool was made of, can,
 and the root task goes with it, section 7.
 A destroy is restartable: it may stop for an interrupt and go on when the call is made again,
-and a pool being destroyed allocates nothing, `KERR_STATE`.
+and a pool being destroyed allocates nothing, `KERR_STATE`;
+a capability to it that still stands describes it as being destroyed, with no room.
 
 A lender that wants memory back from a living borrower
 lends it as an Untyped derived from its own
@@ -538,6 +551,9 @@ uint32_t counts = rv_counter_low(counter) - at;
 
 The rate is the board's, 10 MHz on QEMU, the CPU clock on the ESP32-C6 and 1 MHz on RP2350,
 so a program takes it from `OP_CLOCK_READ`.
+`OP_CAP_INFO` on the clock tells the rate too, with no right, since it is not the time,
+and the tick, in counts of the counter and in microseconds:
+the quantum, which a program's own timing analysis works in, section 5.11.
 The time is the machine's, not the thread's: it includes other threads' slices.
 Revoking below a `Clock` capability uninstalls every region derived through it.
 `rdtime` traps on every board.
@@ -655,8 +671,8 @@ and moves `taken` only as far as its host says it has the bytes, so a halt write
   the first core's are 0 to 63, the second's 64 to 127, and so on.
   The root task receives them all in `BOOT_CAP_TIME`, its own thread earning every one of the first core's,
   and hands them out with `OP_TIME_CARVE` and `OP_CAP_DERIVE` as it hands out memory.
-  A program learns how many cores there are by the units it can carve out of `BOOT_CAP_TIME`:
-  a carve of 64 units at 64 succeeds only with a second core.
+  `OP_CAP_INFO` on `BOOT_CAP_TIME` tells its count, `TIME_UNITS` for each core,
+  so a program learns how many cores there are from it.
 - A thread runs on the core its units are of, and on no other.
   A bind's units must all be of one core; a bind to none puts the thread on spare time on the core of the first unit named.
   A thread bound to another core's units while it runs finishes its turn where it runs and moves at the next tick.
@@ -696,7 +712,8 @@ and moves `taken` only as far as its host says it has the bytes, so a halt write
 - A thread waiting with `OP_NOTIFY_LEND` lends the thread it names its account, section 5.12:
   a borrower without time waits on the run queue while its lender has time, and the turns it takes so cost the lender's account.
 - The machine timer ticks at `TIMER_HZ`, 1 kHz on every board unless the build sets another rate, `make TIMER_HZ=`,
-  which divides a second and the board's counter and is at least 650.
+  which divides a second and the board's counter and is at least 650;
+  `OP_CAP_INFO` on a `Clock` or a `Time` capability tells the tick, section 6.14, so a program need not assume one.
   A tick ends the running thread's turn:
   the thread goes to the back of its queue,
   and the thread that has waited longest on the run queue runs,

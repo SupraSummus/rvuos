@@ -84,6 +84,14 @@ static uint32_t spin_traps(uint32_t counter, uint32_t hz, uint32_t ms)
 
 void units_demo(uint32_t data_base, uint32_t data_size, uint32_t counter, uint32_t hz)
 {
+    /* The tick is the build's, and the clock tells it, in counts of the counter and in microseconds, with no right. */
+    uint32_t type, rights, clock[3];
+    expect("describe the clock", rv_cap_info(BOOT_CAP_CLOCK, &type, &rights, clock));
+    expect("it tells the rate a read does, and a tick of it",
+           type == CAP_CLOCK && clock[0] == hz && clock[2] != 0 && clock[1] * (1000000u / clock[2]) == hz
+               ? KERR_OK : KERR_INVALID_ARG);
+    uint32_t tick_counts = clock[1], tick_us = clock[2];
+
     /*
      * The child is done, and its half goes to three spinners: the first earns a quarter of the processor
      * without spare time, and the other two earn nothing and run on spare time alone.
@@ -137,9 +145,9 @@ void units_demo(uint32_t data_base, uint32_t data_size, uint32_t counter, uint32
     /*
      * Spare time; see DESIGN.md, "Scheduling".
      * Without spare time a thread runs no more than its units earn, however idle the processor is otherwise.
-     * With an eighth and an account that starts empty, the spinner runs about 10 of the 81 ticks of the sleep,
-     * one in eight, and the processor idles the rest;
-     * with spare time it runs all of the next 41, since nothing else wants the processor.
+     * With an eighth and an account that starts empty, the spinner runs about one tick in eight of the sleep,
+     * 10 of its 81 at a millisecond's tick, and the processor idles the rest;
+     * with spare time it runs all of the next sleep, half as long, since nothing else wants the processor.
      */
     expect("derive the half without spare time again",
            rv_invoke(OP_CAP_DERIVE, BOOT_CAP_CAPTABLE, SLOT_CAPPED_TIME, SLOT_HALF_TIME, RIGHT_W));
@@ -163,11 +171,11 @@ void units_demo(uint32_t data_base, uint32_t data_size, uint32_t counter, uint32
      * Charging; see DESIGN.md, "Scheduling".
      * A turn costs the counts it ran, so a thread cannot dodge the charge by sleeping across every tick.
      * The dodger earns an eighth without spare time and spins nine tenths of each tick it runs:
-     * it runs about ten rounds in the 81 ticks of the sleep, where a charge of whoever the tick found running let it run some seventy.
+     * it runs a round in about eight ticks of the sleep, ten in its 81 at a millisecond's tick,
+     * where a charge of whoever the tick found running let it run in nearly every tick.
      */
     dodge_counter = counter;
-    /* Nine tenths of a millisecond, a tick on every board so far. */
-    dodge_counts = hz / 1000u * 9u / 10u;
+    dodge_counts = tick_counts * 9u / 10u;
     expect("carve a second timer line",
            rv_invoke(OP_IRQ_CARVE, BOOT_CAP_TIMER_LINES, 1, 1, SLOT_DODGER_TIMER));
     expect("bind it for the dodger",
@@ -188,7 +196,7 @@ void units_demo(uint32_t data_base, uint32_t data_size, uint32_t counter, uint32
            rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_HALF_TIME, 0, 0));
     expect("cancel its timer", rv_timer_set(SLOT_DODGER_TIMER, 0, 0));
     expect("it paid for the time it ran, though no tick found it running",
-           dodges != 0 && 4 * dodges < DODGE_US / 1000u ? KERR_OK : KERR_INVALID_ARG);
+           dodges != 0 && 4 * dodges < DODGE_US / tick_us ? KERR_OK : KERR_INVALID_ARG);
     puts("root: charge ok\n");
 
     /*
@@ -196,13 +204,13 @@ void units_demo(uint32_t data_base, uint32_t data_size, uint32_t counter, uint32
      * The timer interrupts only at a tick that could change what runs,
      * so a thread that spins while every other thread waits runs without a trap,
      * since it may go on with spare time whatever its account holds,
-     * where a tick at every millisecond would end its turn only to hand it back.
+     * where a timer at every tick would end its turn only to hand it back.
      * It sleeps first so that the logger carries everything out and waits, and prints nothing as it spins.
      */
     uint32_t status = sleep_us(SLEEP_US);
     uint32_t traps = spin_traps(counter, hz, SPIN_US / 1000u);
     expect("let the logger finish", status);
     expect("the only thread to run spun through the ticks",
-           4 * traps < SPIN_US / 1000u ? KERR_OK : KERR_INVALID_ARG);
+           4 * traps < SPIN_US / tick_us ? KERR_OK : KERR_INVALID_ARG);
     puts("root: tickless ok\n");
 }
