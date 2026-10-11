@@ -437,9 +437,10 @@ static __attribute__((noreturn)) void listen(struct drv *d)
 
 /*
  * The station runs in a thread of its own, sta.c, and the first thread attends to the root task alone,
- * as it alone waits on the driver's inbox: it answers the root task's checks, hands the station what the network
- * process put into the link, and passes the root task's ask to leave on, once.
- * It waits only once the link is empty, as the network process signals a put into an empty ring alone.
+ * as it alone waits on the driver's inbox: it answers the root task's checks, hands the station the frames the network
+ * process filled the link's buffers with, and passes the root task's ask to leave on, once.
+ * It waits only once a turn of the link left nothing,
+ * as the network process signals a frame only once the driver has taken those it was last woken for.
  */
 static __attribute__((noreturn)) void attend(struct drv *d)
 {
@@ -649,6 +650,12 @@ void drv_main(struct child_page *page)
     }
     say_lock = (struct lock){ (uint32_t)(uintptr_t)&say_word, note };
     lock_init(&say_lock);
+    if ((status = slot_new(&own, &note)) != KERR_OK ||
+        (status = rv_pool_alloc(own.pool, CAP_NOTIFICATION, note, 0)) != KERR_OK) {
+        failed_at(d, "the link's lock", status);
+        child_stop(&d->c, CHILD_FAILED);
+    }
+    sta_link_init(note);
     funcs = osi_init(d, &own);
     /* This thread calls the libraries too, so it is one of the adapter's, on the stack the root task gave it. */
     if (funcs == 0 || (first_thread = osi_adopt("driver", (uintptr_t)page, (uintptr_t)page + DRV_DATA_SIZE)) == 0) {

@@ -3,7 +3,7 @@
 
 /*
  * What the root tasks of the Wi-Fi system share, the Pico 2 W's and the ESP32-C6's, each beside a driver of its own:
- * the network process, the link that joins it to the driver, the clients it serves through its hub,
+ * the network process, the link that joins it to the driver, the clients it serves through connections it lends,
  * each second's question to every child whether its loop still comes round, and the watchdog fed.
  * The root task builds its driver, says what to do with it, and decides when the run ends;
  * it keeps a struct system, which it hands to every call here.
@@ -12,12 +12,12 @@
 
 #include <stdint.h>
 
-#include "lib/chan.h"
+#include "lib/bulk.h"
 #include "lib/child.h"
 #include "lib/say.h"
 #include "lib/self.h"
 
-/* The network process's clients, each on the end of the hub of its index; see wifi.h. */
+/* The network process's clients, each on the connection of its index; see wifi.h. */
 enum { CLIENT_ECHO, CLIENT_CLOCK, CLIENT_LOGGER, CLIENTS };
 #define CLIENT_BIT(i) (1u << (i))
 
@@ -46,8 +46,8 @@ struct system {
     /* The rest is this code's. */
     struct child network;
     int net_started;
-    struct chan link;
-    struct chan_hub hub;
+    struct bulk link;  /* which the driver lends the network process */
+    struct bulk socks; /* which the network process lends its clients */
     uint32_t config;     /* a frame of the network's addresses in the network process's page, for the clock */
     struct client clients[CLIENTS];
     int clients_built;
@@ -61,13 +61,14 @@ void system_must(struct system *s, const char *what, uint32_t status);
 
 /*
  * The network process, not started, with the system's MAC address,
- * the link between it and the driver, whose end driver_link lies in the driver's page,
- * the hub its clients will reach it through, the network's addresses in its page carved as a frame for the clock,
+ * the link the driver lends it, whose lender's end driver_link lies in the driver's page,
+ * the connections it will lend its clients, the network's addresses in its page carved as a frame for the clock,
  * and its own inbox to wake itself with.
  * The root task's room must hold the network process's data, and the clients' once it has an address;
- * the hub takes a frame of free memory, CLIENT_CHAN_SIZE for each client up to the last wanted, a power of two of them.
+ * the link takes a frame of free memory, and the clients' connections one of a power of two of them,
+ * as many as the clients wanted need.
  */
-void system_net_build(struct system *s, struct chan_end *driver_link, const uint8_t mac[6]);
+void system_net_build(struct system *s, struct bulk_end *driver_link, const uint8_t mac[6]);
 void system_net_start(struct system *s);
 
 /*

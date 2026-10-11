@@ -840,7 +840,8 @@ the driver reads the destination once and lays its own header in front of the fr
 or has the MAC gather the two where they lie.
 So the side the other trusts holds the memory at each boundary, the driver for the stack and the stack for its clients;
 a datagram is copied once on its way in and twice on its way out, or once if the MAC gathers,
-where the Wi-Fi system's link and its clients' channels copy it twice in and three times out.
+where the Wi-Fi system copied it twice in and three times out, through channels.
+It lends both boundaries now, and copies as many times still; `TODO.md`.
 
 **Room is not news.**
 Both sides do the same four things: take a buffer to fill, hand it over with its bytes,

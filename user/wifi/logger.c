@@ -24,7 +24,7 @@
 
 struct lg {
     struct logger_page *page;
-    const struct chan_end *net;
+    struct bulk_end *net;
     struct out out;
     volatile struct rvuos_log *log;
     const volatile uint8_t *ring;
@@ -50,7 +50,7 @@ static uint32_t taken(struct lg *g, uint32_t head)
     return t;
 }
 
-/* What the host lacks, as far ahead of what it said it has as the window lets, while the channel takes it. */
+/* What the host lacks, as far ahead of what it said it has as the window lets, while a buffer is free for it. */
 static void pump(struct lg *g)
 {
     for (;;) {
@@ -115,8 +115,9 @@ static void heard(struct lg *g, const struct sock_msg *h, const uint8_t *data)
     }
 }
 
-static void answer(struct lg *g, const struct sock_msg *h, const uint8_t *data)
+static void answer(void *arg, const struct sock_msg *h, const uint8_t *data)
 {
+    struct lg *g = arg;
     if (h->op == SOCK_BIND) {
         if (h->status != SOCK_OK) {
             child_fail(&g->page->c.c, STEP_BIND, h->status);
@@ -144,35 +145,29 @@ __attribute__((noreturn)) void logger_main(struct child_page *page)
     child_report(page, CHILD_RUNNING);
     uint32_t skipped;
     rv_timer_period(CHILD_TIMER, CHILD_BIT_TIMER, TICK_US, &skipped);
-    int asked = 0;
+    int asked = 0, more = 0;
     for (;;) {
         uint32_t bits = 0;
-        if (rv_wait(CHILD_INBOX, &bits) != KERR_OK) {
+        if (!more && rv_wait(CHILD_INBOX, &bits) != KERR_OK) {
             rv_breakpoint();
         }
+        more = 0;
         child_answer(page);
         if (bits & CHILD_BIT_TIMER) {
             rv_timer_period(CHILD_TIMER, CHILD_BIT_TIMER, TICK_US, &skipped);
             g->now += (skipped + 1u) * (TICK_US / 1000u);
             g->held = 0;
         }
-        if (!chan_ready(g->net)) {
+        if (!bulk_ready(g->net)) {
             continue;
         }
+        more = client_take(g->net, answer, g);
         if (!asked) {
-            asked = 1;
-            client_ask(g->net, SOCK_BIND, LOGGER_PORT, 0, 0, 0, 0);
-            say(&g->out, "logger: up\n");
-        }
-        uint32_t len;
-        const uint8_t *in;
-        while ((in = chan_get_begin(g->net, &len)) != 0) {
-            struct sock_msg h;
-            const uint8_t *data;
-            if (sock_answer(in, len, &h, &data)) {
-                answer(g, &h, data);
+            if (client_ask(g->net, SOCK_BIND, LOGGER_PORT, 0, 0, 0, 0) != 0) {
+                continue;
             }
-            chan_get_end(g->net);
+            asked = 1;
+            say(&g->out, "logger: up\n");
         }
         if (g->host != 0 && g->now - g->heard >= QUIET_MS) {
             say(&g->out, "logger: %I said nothing for %u s; the log waits for a host\n", g->host, QUIET_MS / 1000u);

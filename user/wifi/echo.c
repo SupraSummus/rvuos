@@ -1,7 +1,7 @@
 /*
  * The echo: a client of the network process, in a process of its own, that sends every datagram to UDP port 7 back.
  *
- * It starts with a0 at its page and waits for the root task to connect its channel, then binds its port.
+ * It starts with a0 at its page and waits for the root task to connect it to the network process, then binds its port.
  * A datagram that reads "fault" makes it store where it has no region, as a broken client would,
  * and one that reads "hang" makes it spin, as a client caught in a loop would,
  * which show what each costs the rest of the system: the root task takes it down and builds it again,
@@ -24,8 +24,9 @@ static void wait_any(struct child_page *page)
     child_answer(page);
 }
 
-static void answer(struct echo_page *p, const struct sock_msg *h, const uint8_t *data)
+static void answer(void *arg, const struct sock_msg *h, const uint8_t *data)
 {
+    struct echo_page *p = arg;
     if (h->op == SOCK_BIND) {
         if (h->status != SOCK_OK) {
             child_fail(&p->c.c, STEP_BIND, h->status);
@@ -39,7 +40,7 @@ static void answer(struct echo_page *p, const struct sock_msg *h, const uint8_t 
             for (;;) {
             }
         }
-        /* Back from the port it came to, to where it came from; a full channel drops it, as a network may. */
+        /* Back from the port it came to, to where it came from; with no buffer spare it is dropped, as a network may. */
         if (client_ask(&p->c.net, SOCK_SEND, ECHO_PORT, h->ip, h->peer_port, data, h->len) == 0) {
             p->echoed++;
         }
@@ -51,22 +52,16 @@ __attribute__((noreturn)) void echo_main(struct child_page *page)
     struct echo_page *p = (struct echo_page *)page;
     struct out out = child_out();
     child_report(page, CHILD_RUNNING);
-    while (!chan_ready(&p->c.net)) {
+    while (!bulk_ready(&p->c.net)) {
         wait_any(page);
     }
     client_ask(&p->c.net, SOCK_BIND, ECHO_PORT, 0, 0, 0, 0);
     say(&out, "echo: up\n");
     for (;;) {
-        uint32_t len;
-        const uint8_t *in;
-        while ((in = chan_get_begin(&p->c.net, &len)) != 0) {
-            struct sock_msg h;
-            const uint8_t *data;
-            if (sock_answer(in, len, &h, &data)) {
-                answer(p, &h, data);
-            }
-            chan_get_end(&p->c.net);
+        if (!client_take(&p->c.net, answer, p)) {
+            wait_any(page);
+        } else {
+            child_answer(page);
         }
-        wait_any(page);
     }
 }

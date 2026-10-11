@@ -2,15 +2,18 @@
  * The network process: the IP stack of net.c between the link and its clients; see wifi.h.
  *
  * It starts with a0 at the page it shares with the root task, keeps its state on its stack,
- * and waits on one notification for everything: the link, which says it has frames from the driver or room for more,
- * a bit for each client's channel, its timer, which ticks every 100 ms for DHCP's retries, and the root task,
- * which says when it connected or closed a client's channel.
+ * and waits on one notification for everything: the link, which says the driver lent it frames or took some back,
+ * a bit for each client's connection, its timer, which ticks every 100 ms for DHCP's retries, and the root task,
+ * which says when it connected or closed a client's connection.
  * It asks for an address by DHCP once started, publishes the network's addresses as they change, lib/seqlock.h,
  * serves its clients' sockets, sock.h,
  * and answers on UDP port 7777 itself, with a line that says what the system has done.
  *
- * It trusts the driver and not its clients: from each channel it takes as many packets as a ring holds for each wake,
- * so a client that keeps its ring full, or makes it seem so, cannot keep it from the link and the other clients,
+ * It trusts the driver and not its clients, lib/bulk.h: the driver lends it the link, so it reads each frame where it
+ * lies, which nothing but the driver writes; it lends each client a connection, so it copies a datagram once into the
+ * client's buffers, as clients may not read each other's, and reads a client's request once, sock.h.
+ * From each it takes a turn for each wake, a ring's worth at most,
+ * so a client that keeps handing it references cannot keep it from the link and the other clients,
  * and wakes itself for what it left.
  */
 
@@ -31,31 +34,40 @@ struct netp {
     uint32_t tx_full;
 };
 
-/* A frame to the driver; dropped if the link is full. */
+/* A frame to the driver, in a buffer the driver lent it to fill; dropped if none is free. */
 static void np_send(struct net *n, const uint8_t *frame, uint32_t len)
 {
     struct netp *p = (struct netp *)n;
-    if (chan_send(&p->page->link, frame, len) != 0) {
+    struct bulk_end *e = &p->page->link;
+    struct bulk_ref r;
+    if (len > e->size || bulk_take(e, &r) != 0) {
+        p->tx_full++;
+        return;
+    }
+    memcpy(r.room, frame, len);
+    r.len = len;
+    if (bulk_hand(e, &r) != 0) {
         p->tx_full++;
         return;
     }
     p->page->tx_frames++;
 }
 
-/* A message to a client; dropped if its channel is full, which costs that client alone. */
+/* A message to a client, in a buffer of its connection lent to read; dropped if none is free, which costs it alone. */
 static void np_put(struct sock *s, uint32_t client, const struct sock_msg *h, const uint8_t *data)
 {
     struct netp *p = s->owner;
-    const struct chan_end *e = &p->page->clients[client];
-    uint8_t *slot = chan_put_begin(e);
-    if (slot == 0 || sizeof(*h) + h->len > e->tx.slot_size) {
+    struct bulk_end *e = &p->page->clients[client];
+    struct bulk_ref r;
+    if (sizeof(*h) + h->len > e->size || bulk_take(e, &r) != 0) {
         return;
     }
-    memcpy(slot, h, sizeof(*h));
+    memcpy(r.room, h, sizeof(*h));
     if (h->len != 0) {
-        memcpy(slot + sizeof(*h), data, h->len);
+        memcpy(r.room + sizeof(*h), data, h->len);
     }
-    chan_put_end(e, sizeof(*h) + h->len);
+    r.len = sizeof(*h) + h->len;
+    bulk_hand(e, &r);
 }
 
 /* Text into a buffer, for the status line. */
@@ -83,39 +95,46 @@ static void on_status(struct net *n, void *arg, const struct net_datagram *d)
     net_udp_send(n, d->from_ip, d->from_port, NET_PORT_STATUS, (const uint8_t *)l.buf, l.len);
 }
 
-/*
- * At most as many packets as the channel's ring holds, which is as many as an honest peer can have put meanwhile,
- * the link's to the stack and a client's to its sockets; 1 if it had more.
- */
-static int take(struct netp *p, const struct chan_end *e, uint32_t client)
+/* A turn of the link: each frame the driver lent read where it lies by the stack, and given back; 1 if it had more. */
+static int link_turn(struct netp *p)
 {
-    uint32_t len;
-    const uint8_t *in;
-    for (uint32_t n = 0; n < e->rx.slots; n++) {
-        if ((in = chan_get_begin(e, &len)) == 0) {
-            return 0;
-        }
-        if (e == &p->page->link) {
-            net_input(&p->net, in, len);
-            p->page->rx_frames++;
-        } else {
-            sock_request(&p->sock, client, in, len);
-        }
-        chan_get_end(e);
+    struct bulk_end *e = &p->page->link;
+    struct bulk_turn t = bulk_turn(e);
+    struct bulk_ref r;
+    while (bulk_next(&t, &r)) {
+        net_input(&p->net, r.bytes, r.len);
+        p->page->rx_frames++;
+        bulk_put(e, r.buf);
     }
-    return chan_get_begin(e, &len) != 0;
+    return bulk_more(&t);
 }
 
-/* The clients' channels the root task connected or closed: a closed one's ports go, and so does a new one's last. */
+/*
+ * A turn of client i's connection: each request read once where it lies, sock.h, and its buffer given back to fill
+ * again; 1 if it had more.
+ */
+static int client_turn(struct netp *p, uint32_t i)
+{
+    struct bulk_end *e = &p->page->clients[i];
+    struct bulk_turn t = bulk_turn(e);
+    struct bulk_ref r;
+    while (bulk_next(&t, &r)) {
+        sock_request(&p->sock, i, r.bytes, r.len);
+        bulk_put(e, r.buf);
+    }
+    return bulk_more(&t);
+}
+
+/* The clients' connections the root task connected or closed: a closed one's ports go, and so does a new one's last. */
 static void clients_changed(struct netp *p)
 {
     for (uint32_t i = 0; i < SOCK_CLIENTS; i++) {
-        struct chan_end *e = &p->page->clients[i];
+        struct bulk_end *e = &p->page->clients[i];
         uint32_t gen;
-        if (chan_changed(e, &gen)) {
+        if (bulk_changed(e, &gen)) {
             sock_drop(&p->sock, i);
             say(&p->out, "net: client %u %s\n", i, (gen & 1u) ? "connected" : "gone");
-            chan_seen(e, gen);
+            bulk_seen(e, gen);
         }
     }
 }
@@ -154,9 +173,9 @@ __attribute__((noreturn)) void net_main(struct child_page *c)
         if (bits & CHILD_BIT_PARENT) {
             clients_changed(p);
         }
-        int more = take(p, &page->link, 0);
+        int more = link_turn(p);
         for (uint32_t i = 0; i < SOCK_CLIENTS; i++) {
-            more |= take(p, &page->clients[i], i);
+            more |= client_turn(p, i);
         }
         if (more) {
             rv_signal(page->more, NOTIFY_ALL_BITS);

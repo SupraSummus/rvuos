@@ -119,7 +119,7 @@ struct drv {
     uint8_t i154;         /* the channel of IEEE 802.15.4 to exchange frames on, 11 to 26, instead of Wi-Fi, or 0 */
     uint32_t i154_line;   /* the 802.15.4 MAC's line, DRV_LINE_I154, given with i154 */
     uint8_t i154_stream;  /* frames a second the driver sends the nRF52840 besides its pings, with i154, or 0 */
-    struct chan_end link; /* to the network process, connected before the start */
+    struct bulk_end link; /* which the driver lends the network process, connected before the start */
     /* From the root task, while it runs. */
     volatile uint32_t leave; /* the run is over: leave the network, and report DRV_LEFT */
 

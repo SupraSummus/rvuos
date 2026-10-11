@@ -1,7 +1,7 @@
 /*
  * The clock: a client of the network process, in a process of its own, that learns the time and tells it.
  *
- * It starts with a0 at its page and waits for the root task to connect its channel,
+ * It starts with a0 at its page and waits for the root task to connect it to the network process,
  * and for the network's addresses, which the network process publishes in memory the clock reads at every wake.
  * Then each step is a question and its answer, asked again every second until it comes:
  * a port of its own, the address of a server of pool.ntp.org from the network's DNS server,
@@ -29,7 +29,7 @@ enum step {
 
 struct clk {
     struct clock_page *page;
-    const struct chan_end *net;
+    struct bulk_end *net;
     struct out out;
     uint32_t step;
     uint32_t now, asked; /* ms since it started, by its timer, and when it last asked */
@@ -91,8 +91,9 @@ static void tell(struct clk *k, const struct sock_msg *h)
     client_ask(k->net, SOCK_SEND, CLOCK_PORT, h->ip, h->peer_port, text, len);
 }
 
-static void answer(struct clk *k, const struct sock_msg *h, const uint8_t *data)
+static void answer(void *arg, const struct sock_msg *h, const uint8_t *data)
 {
+    struct clk *k = arg;
     switch (h->op) {
     case SOCK_BIND:
         if (h->status != SOCK_OK) {
@@ -144,18 +145,19 @@ __attribute__((noreturn)) void clock_main(struct child_page *page)
     child_report(page, CHILD_RUNNING);
     uint32_t skipped;
     rv_timer_period(CHILD_TIMER, CHILD_BIT_TIMER, TICK_US, &skipped);
-    int asked = 0;
+    int asked = 0, more = 0;
     for (;;) {
         uint32_t bits = 0;
-        if (rv_wait(CHILD_INBOX, &bits) != KERR_OK) {
+        if (!more && rv_wait(CHILD_INBOX, &bits) != KERR_OK) {
             rv_breakpoint();
         }
+        more = 0;
         child_answer(page);
         if (bits & CHILD_BIT_TIMER) {
             rv_timer_period(CHILD_TIMER, CHILD_BIT_TIMER, TICK_US, &skipped);
             k->now += (skipped + 1u) * (TICK_US / 1000u);
         }
-        if (!chan_ready(k->net)) {
+        if (!bulk_ready(k->net)) {
             continue;
         }
         /* The addresses as they are now, kept as they were if a write was under way. */
@@ -164,24 +166,15 @@ __attribute__((noreturn)) void clock_main(struct child_page *page)
         if (seqlock_read(&k->page->config, &config, &version)) {
             k->config = config;
         }
+        more = client_take(k->net, answer, k);
         if (!asked) {
-            if (k->config.ip == 0 || k->config.dns == 0) {
+            if (k->config.ip == 0 || k->config.dns == 0 ||
+                client_ask(k->net, SOCK_BIND, CLOCK_PORT, 0, 0, 0, 0) != 0) {
                 continue;
             }
             asked = 1;
             say(&k->out, "clock: asking %I for %s\n", k->config.dns, CLOCK_SERVER);
-            client_ask(k->net, SOCK_BIND, CLOCK_PORT, 0, 0, 0, 0);
             ask(k);
-        }
-        uint32_t len;
-        const uint8_t *in;
-        while ((in = chan_get_begin(k->net, &len)) != 0) {
-            struct sock_msg h;
-            const uint8_t *data;
-            if (sock_answer(in, len, &h, &data)) {
-                answer(k, &h, data);
-            }
-            chan_get_end(k->net);
         }
         if (k->step != KNOWS && k->now - k->asked >= RETRY_MS) {
             ask(k);

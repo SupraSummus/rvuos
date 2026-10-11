@@ -342,3 +342,35 @@ so it sees an address that changes too, and the sockets lost `SOCK_CONFIG`.
 It costs the root task a slot and the clock a region.
 A frame of their own cost the Pico 2 W's root task its last slots first, since free memory is halved down to a block's size,
 a slot for each half, and the third client was not built.
+
+## Lent buffers
+
+The link and the clients' sockets moved from channels to lent buffers, `lib/bulk.h`:
+the driver lends the network process the frames it received and buffers to fill with the frames to send,
+and the network process lends each client its datagrams and buffers to fill with its requests.
+It took about a hundred lines of each side's code,
+and `client.c`, a client's two calls, in place of the inline ask of `wifi.h`; `sock.c` and `net.c` did not change.
+Every check of `tools/wifi-run.py` passed on the Pico 2 W's two kinds of core and on the ESP32-C6, by WPA3 and by WPA2.
+
+**Returns were news, and are room now.**
+Lending made every buffer's return a reference of its own, where a channel's reader freed a slot without a word,
+and each return woke its lender: the ESP32-C6's driver woke half again as often as with channels.
+The library now takes in a buffer given back empty as the side passes it, and wakes the side only if it asked for room;
+the driver wakes once a frame it sends, as with channels; see `DESIGN.md`, "Bulk data".
+
+**A connection cost the parent two slots, and costs none now.**
+The Pico 2 W's root task ran out of slots at its second client: a connection kept a carve of each of its two blocks.
+The library deletes each carve once it is installed and uninstalls the borrower's regions at a close,
+so the Pico 2 W's root task ends a run with eight slots unused, and the ESP32-C6's with ten, from eight.
+
+**Two threads on one end want a lock.**
+The ESP32-C6's station lends what it receives in its own thread and sends in the first,
+so each call on the link's end holds a lock of `lib/lock.h`;
+the adapter's mutex in its place doubled what a frame cost to hand on.
+A received frame's bookkeeping, the lock, the take and the hand, costs about 1,700 cycles more than a channel's put,
+which a copy it spares would pay for: copying a kilobyte costs about 4,800 cycles there.
+
+**The copies stay, for now.**
+A datagram is copied twice on its way in and three times out, as through channels:
+the ESP32-C6's MAC writes into the driver's own buffers, and the network process builds each frame in a buffer of its own.
+What would spare each is in `TODO.md`.

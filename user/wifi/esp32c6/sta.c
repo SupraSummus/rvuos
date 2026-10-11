@@ -146,7 +146,21 @@ static struct {
     uint64_t gtk_rx_pn[KEYS_GROUP][CCMP_REPLAY_COUNT];
     uint64_t igtk_ipn[KEYS_GROUP];
     struct mutex key_lock; /* held while a key is installed, and by the sending while it uses one */
+    /*
+     * The link's end is the station's thread's, which lends the network process the frames it receives, and the first
+     * thread's, which sends what the network process filled; lib/bulk.h asks one thread at a time of an end.
+     * A lock of lib/lock.h, not the adapter's mutex, which takes the adapter's lock the receiving's interrupt takes too:
+     * no call on the end waits, so the lock is held for a few hundred cycles and costs nothing while nobody wants it.
+     */
+    struct lock link_lock;
+    uint32_t link_word;
 } sta;
+
+void sta_link_init(uint32_t note)
+{
+    sta.link_lock = (struct lock){ (uint32_t)(uintptr_t)&sta.link_word, note };
+    lock_init(&sta.link_lock);
+}
 
 static uint32_t protect(uint8_t *crypt, uint32_t size, const uint8_t *plain, uint32_t n);
 static uint32_t protect_mgmt(uint8_t *crypt, uint32_t size, const uint8_t *plain, uint32_t n);
@@ -1423,7 +1437,7 @@ static int send_from(struct drv *d, const struct source *src)
     uint32_t hdr = amsdu ? MGMT_AMSDU_FIXED : MGMT_DATA_FIXED - 8u, k = 0; /* the header, before the LLC/SNAP header */
     uint32_t n = amsdu ? mgmt_amsdu_start(g, AMSDU_MAX, d->mac, sta.ap) : 0;
     while (eth != 0 && k < (amsdu ? AMSDU_FRAMES : 1u)) {
-        int fits = len >= 14u && len <= LINK_SLOT;
+        int fits = len >= 14u && len <= LINK_BUFFER;
         uint32_t body = fits ? len - 14u : 0, m = 0;
         uint16_t proto = fits ? (uint16_t)(eth[12] << 8 | eth[13]) : 0;
         if (fits) {
@@ -1468,32 +1482,49 @@ static int send_from(struct drv *d, const struct source *src)
 }
 
 /*
- * The link's source, which gives no more frames in a take than the ring holds, as many as an honest network process
- * can have put meanwhile, so that one that keeps the ring looking full keeps the first thread from nothing else.
+ * The link's source: the frames the network process filled the buffers the driver lent it with, a turn's worth,
+ * as many as an honest network process can have handed back meanwhile, so that one that keeps handing references
+ * keeps the first thread from nothing else. Each frame's buffer is given back to fill again once the frame is taken.
+ * Each call on the link's end holds link_lock.
  */
 struct link_take {
     struct drv *d;
-    uint32_t taken;
+    struct bulk_turn turn;
+    struct bulk_ref frame; /* the frame the source gave, until it is taken */
+    int holding;
 };
 
 static const uint8_t *link_next(void *arg, uint32_t *len)
 {
     struct link_take *t = arg;
-    return t->taken < t->d->link.rx.slots ? chan_get_begin(&t->d->link, len) : 0;
+    if (!t->holding) {
+        lock_take(&sta.link_lock);
+        t->holding = bulk_next(&t->turn, &t->frame);
+        lock_give(&sta.link_lock);
+        if (!t->holding) {
+            return 0;
+        }
+    }
+    *len = t->frame.len;
+    return t->frame.bytes;
 }
 
 static void link_taken(void *arg)
 {
     struct link_take *t = arg;
-    chan_get_end(&t->d->link);
-    t->taken++;
+    lock_take(&sta.link_lock);
+    bulk_put(&t->d->link, t->frame.buf);
+    lock_give(&sta.link_lock);
+    t->holding = 0;
 }
 
 int sta_link_take(struct drv *d)
 {
-    struct link_take t = { d, 0 };
-    const struct source link_source = { link_next, link_taken, &t };
     uint32_t len;
+    lock_take(&sta.link_lock);
+    struct link_take t = { d, bulk_turn(&d->link), { 0, 0, 0, 0, 0, 0 }, 0 };
+    lock_give(&sta.link_lock);
+    const struct source link_source = { link_next, link_taken, &t };
     while (link_next(&t, &len) != 0) {
         if (sta.state == NONE) {
             link_taken(&t);
@@ -1503,7 +1534,10 @@ int sta_link_take(struct drv *d)
         send_from(d, &link_source);
         prof_add(&drv_prof.tx_link, prof_cycles() - c);
     }
-    return chan_get_begin(&d->link, &len) != 0;
+    lock_take(&sta.link_lock);
+    int more = bulk_more(&t.turn);
+    lock_give(&sta.link_lock);
+    return more;
 }
 
 /*
@@ -1715,7 +1749,7 @@ static void ps_step(struct drv *d, uint64_t now)
 #define IPV4_UDP   17u
 
 static int blasted;
-static uint8_t blast_eth[LINK_SLOT];
+static uint8_t blast_eth[LINK_BUFFER];
 static uint32_t blast_len;
 
 /* blast='s source: the one datagram, again and again. */
@@ -1737,7 +1771,7 @@ static int blast(struct drv *d, const uint8_t *dst, const uint8_t *src, uint16_t
     uint8_t *eth = blast_eth;
     uint32_t ihl = n >= 20u ? (body[0] & 0xfu) * 4u : 0;
     if (d->blast == 0 || blasted || proto != 0x0800u || ihl < 20u || (body[0] >> 4) != 4u || n < ihl + 8u ||
-        n > LINK_SLOT - 14u || body[9] != IPV4_UDP || (body[ihl + 2] << 8 | body[ihl + 3]) != BLAST_PORT) {
+        n > LINK_BUFFER - 14u || body[9] != IPV4_UDP || (body[ihl + 2] << 8 | body[ihl + 3]) != BLAST_PORT) {
         return 0;
     }
     blasted = 1;
@@ -1802,11 +1836,15 @@ static void link_frame(const struct buf *b, struct drv *d)
     if (blast(d, frame + ADDR1, p.src, p.proto, p.body, p.len)) {
         return;
     }
-    uint8_t *eth = p.len <= LINK_SLOT - 14u ? chan_put_begin(&d->link) : 0;
-    if (eth == 0) {
-        d->rx_dropped++; /* too long, or the link full */
+    struct bulk_ref r;
+    lock_take(&sta.link_lock);
+    int taken = p.len <= LINK_BUFFER - 14u && bulk_take(&d->link, &r) == 0;
+    lock_give(&sta.link_lock);
+    if (!taken) {
+        d->rx_dropped++; /* too long, or every buffer to read lent, or the link not connected */
         return;
     }
+    uint8_t *eth = r.room;
     memcpy(eth, frame + ADDR1, 6); /* the destination */
     memcpy(eth + 6, p.src, 6);     /* the source, the frame's Address 3 */
     eth[12] = (uint8_t)(p.proto >> 8);
@@ -1815,7 +1853,14 @@ static void link_frame(const struct buf *b, struct drv *d)
     if (d->debug & DRV_DEBUG_FRAMES) {
         drv_trace("in", eth, 14u + p.len);
     }
-    chan_put_end(&d->link, 14u + p.len);
+    r.len = 14u + p.len;
+    lock_take(&sta.link_lock);
+    taken = bulk_hand(&d->link, &r) == 0;
+    lock_give(&sta.link_lock);
+    if (!taken) {
+        d->rx_dropped++;
+        return;
+    }
     d->rx_frames++;
 }
 

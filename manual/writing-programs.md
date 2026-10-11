@@ -346,8 +346,10 @@ a root task that builds the system, a driver for the CYW43439, its Wi-Fi chip, a
 and three clients of the network process, the echo, the clock and the logger;
 `wifi.h` says what they share, which is the types of their pages,
 and `system.h` the root task's half of the network process and its clients, which the ESP32-C6's root task shares.
-The driver and the network process trade Ethernet frames through a channel, the link.
-Each client has a channel from the network process's hub, through which it uses datagram sockets, `sock.h`:
+The driver and the network process trade Ethernet frames through the link, which the driver lends, `lib/bulk.h`:
+the frames the driver received, to read, and buffers to fill with the frames to send.
+Each client has a connection the network process lends it, through which it uses datagram sockets, `sock.h`,
+its requests in buffers lent to fill and its answers and datagrams in buffers lent to read:
 it binds ports, its own until it closes them or is gone, sends from them and receives what is sent to them.
 The echo sends back every datagram to UDP port 7;
 the clock asks the network's DNS server for a server of pool.ntp.org, asks that server for the time by SNTP,

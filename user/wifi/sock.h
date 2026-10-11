@@ -2,10 +2,10 @@
 #define RVUOS_WIFI_SOCK_H
 
 /*
- * Datagram sockets over a channel: what a client in a process of its own asks of the network process,
- * and what it is answered.
+ * Datagram sockets over the connection the network process lends a client, lib/bulk.h:
+ * what a client in a process of its own asks of the network process, and what it is answered.
  *
- * A message is a header and the data after it, one to a packet of the channel.
+ * A message is a header and the data after it, one to a buffer of the connection.
  * A client binds ports, each its own until it closes it or is gone, sends datagrams from the ports it holds,
  * and receives the datagrams sent to them.
  * Every request is answered but a datagram sent, which is answered only when it could not go,
@@ -56,7 +56,7 @@ struct sock_config {
 #define SOCK_EPHEMERAL    49152u  /* where the ports the server picks begin */
 
 struct sock;
-/* An answer for client: the header, and its len bytes of data, for the caller to put into the client's channel. */
+/* An answer for client: the header, and its len bytes of data, for the caller to lend the client. */
 typedef void (*sock_put_fn)(struct sock *s, uint32_t client, const struct sock_msg *h, const uint8_t *data);
 
 struct sock {
@@ -71,13 +71,13 @@ struct sock {
 void sock_init(struct sock *s, struct net *n, sock_put_fn put, void *owner);
 /* The network's addresses as the stack has them now. */
 struct sock_config sock_config(const struct sock *s);
-/* A message client put into its channel, len bytes as the ring says. */
+/* A message client handed over, len bytes as its reference says. */
 void sock_request(struct sock *s, uint32_t client, const uint8_t *msg, uint32_t len);
 /* Every port the client held, back, once it is gone. */
 void sock_drop(struct sock *s, uint32_t client);
 
-/* The client's side: a request written into slot, which holds SOCK_MSG_MAX bytes; returns its length. */
-uint32_t sock_ask(uint8_t *slot, uint32_t op, uint16_t port, uint32_t ip, uint16_t peer_port, const void *data,
+/* The client's side: a request written into buf, which holds SOCK_MSG_MAX bytes; returns its length. */
+uint32_t sock_ask(uint8_t *buf, uint32_t op, uint16_t port, uint32_t ip, uint16_t peer_port, const void *data,
                   uint32_t len);
 /* The client's side: an answer's header, and *data at its data; 0 if what came is not a whole message. */
 int sock_answer(const uint8_t *msg, uint32_t len, struct sock_msg *h, const uint8_t **data);

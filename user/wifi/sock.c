@@ -1,5 +1,5 @@
 /*
- * Datagram sockets over a channel; see sock.h.
+ * Datagram sockets; see sock.h.
  */
 
 #include "sock.h"
@@ -26,7 +26,7 @@ static uint16_t *held(struct sock *s, uint32_t client, uint16_t port)
     return 0;
 }
 
-/* A datagram for a port a client holds, into that client's channel. */
+/* A datagram for a port a client holds, to that client. */
 static void deliver(struct net *n, void *arg, const struct net_datagram *d)
 {
     (void)n;
@@ -145,13 +145,13 @@ void sock_drop(struct sock *s, uint32_t client)
     }
 }
 
-uint32_t sock_ask(uint8_t *slot, uint32_t op, uint16_t port, uint32_t ip, uint16_t peer_port, const void *data,
+uint32_t sock_ask(uint8_t *buf, uint32_t op, uint16_t port, uint32_t ip, uint16_t peer_port, const void *data,
                   uint32_t len)
 {
     const struct sock_msg h = { (uint8_t)op, SOCK_OK, port, ip, peer_port, (uint16_t)len };
-    memcpy(slot, &h, sizeof(h));
+    memcpy(buf, &h, sizeof(h));
     if (len != 0) {
-        memcpy(slot + sizeof(h), data, len);
+        memcpy(buf + sizeof(h), data, len);
     }
     return sizeof(h) + len;
 }

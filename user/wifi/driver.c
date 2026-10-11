@@ -5,8 +5,10 @@
  * and keeps its state on its stack, since the globals are the root task's.
  * The firmware blob is lent as frames that together are larger than the regions left,
  * so the driver installs them one at a time in a region of its own, its window, and uploads what each holds.
- * Once the chip runs, the root task takes the blob back and connects the link,
- * and the driver moves frames between the chip and the link for as long as the system runs.
+ * Once the chip runs, the root task takes the blob back and connects the link, which the driver lends, lib/bulk.h,
+ * and the driver moves frames between the chip and the link for as long as the system runs:
+ * each frame the chip hands up copied into a buffer it lends the network process to read,
+ * and each frame the network process filled a buffer it was lent to fill with sent from where it lies.
  */
 
 #include <stddef.h>
@@ -28,6 +30,8 @@ struct drv {
     uint32_t results;
     int joined;        /* 1 joined, -1 failed, 0 not yet */
     int by_sae;        /* the join authenticated by SAE */
+    struct bulk_ref out_frame; /* a frame of the network process's the firmware's credit has not let go yet */
+    int holding;               /* whether out_frame holds one */
     struct wlan wlan;
 };
 
@@ -110,18 +114,49 @@ static void dhcp_heard(struct drv *d, const uint8_t *f, uint32_t len)
     say(&d->out, "dhcp %M > %M type %u xid %x for %M\n", f + 6, f, type, xid, m + 28);
 }
 
-/* A frame from the chip to the network process; dropped while the link is down or full. */
+/* A frame from the chip to the network process, in a buffer lent to read; dropped while the link is down or full. */
 static void on_data(struct wlan *w, const uint8_t *frame, uint32_t len)
 {
     struct drv_page *p = drv_of(w)->page;
+    struct bulk_ref r;
     if (p->dhcp_log) {
         dhcp_heard(drv_of(w), frame, len);
     }
-    if (chan_send(&p->link, frame, len) != 0) {
+    if (len > LINK_BUFFER || bulk_take(&p->link, &r) != 0) {
+        p->rx_dropped++;
+        return;
+    }
+    memcpy(r.room, frame, len);
+    r.len = len;
+    if (bulk_hand(&p->link, &r) != 0) {
         p->rx_dropped++;
         return;
     }
     p->rx_frames++;
+}
+
+/*
+ * A turn of the link: each frame the network process filled a buffer with sent, and the buffer given back to fill again,
+ * as long as the firmware's credit allows; a frame it does not allow yet is held for the next turn. The frames sent.
+ */
+static uint32_t link_send(struct drv *d)
+{
+    struct bulk_end *e = &d->page->link;
+    struct bulk_turn t = bulk_turn(e);
+    uint32_t sent = 0;
+    for (;;) {
+        if (!d->holding && !bulk_next(&t, &d->out_frame)) {
+            return sent;
+        }
+        d->holding = 1;
+        if (wlan_send(&d->wlan, d->out_frame.bytes, d->out_frame.len) != 0) {
+            return sent;
+        }
+        d->holding = 0;
+        d->page->tx_frames++;
+        sent++;
+        bulk_put(e, d->out_frame.buf);
+    }
 }
 
 /*
@@ -195,7 +230,7 @@ static void report(struct drv *d, uint32_t state)
 
 /*
  * For as long as the system runs: what the firmware sends, events and frames, and the frames the network process
- * put into the link, each sent as the firmware's credit allows.
+ * filled the link's buffers with, each sent as the firmware's credit allows.
  * The chip is polled every millisecond, and a frame to send wakes the driver at once.
  * A station leaves the network once the run is over, as the root task asks:
  * an access point that guards management frames refuses a join while it holds an association of the same station,
@@ -212,21 +247,12 @@ static __attribute__((noreturn)) void serve(struct drv *d)
             say(&d->out, "drv: left the network: %d\n", err);
             child_stop(&p->c, DRV_LEFT);
         }
-        if (!linked && chan_ready(&p->link)) {
+        if (!linked && bulk_ready(&p->link)) {
             linked = 1;
             say(&d->out, "drv: the link is up\n");
         }
         uint32_t moved = wlan_poll(&d->wlan);
-        uint32_t len;
-        const uint8_t *frame;
-        while ((frame = chan_get_begin(&p->link, &len)) != 0) {
-            if (wlan_send(&d->wlan, frame, len) != 0) {
-                break;
-            }
-            p->tx_frames++;
-            moved++;
-            chan_get_end(&p->link);
-        }
+        moved += link_send(d);
         if (moved == 0) {
             uint32_t bits = 0;
             rv_timer_set(CHILD_TIMER, CHILD_BIT_TIMER, 1000);

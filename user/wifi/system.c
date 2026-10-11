@@ -49,27 +49,27 @@ void system_must(struct system *s, const char *what, uint32_t status)
     }
 }
 
-void system_net_build(struct system *s, struct chan_end *driver_link, const uint8_t mac[6])
+void system_net_build(struct system *s, struct bulk_end *driver_link, const uint8_t mac[6])
 {
     struct self *self = s->self;
     struct child *n = &s->network;
+    const struct bulk_shape link = { LINK_BUFFER, LINK_READS, LINK_FILLS };
+    const struct bulk_shape sock = { CLIENT_BUFFER, CLIENT_READS, CLIENT_FILLS };
     system_must(s, "build the network process", child_new(self, n, "the network", NET_TABLE, NET_DATA_SIZE));
     struct net_page *np = (struct net_page *)n->page;
     memcpy(np->mac, mac, 6);
     np->board = s->board;
-    system_must(s, "the link", chan_new(self, &s->link, LINK_SIZE, LINK_SLOT));
-    system_must(s, "connect the driver and the network",
-                chan_connect(self, &s->link, &s->driver, driver_link, n, &np->link));
+    system_must(s, "the link", bulk_new(self, &s->link, &s->driver, driver_link, 1, &link));
+    system_must(s, "connect the driver and the network", bulk_connect(self, &s->link, 0, n, &np->link));
     /*
-     * The hub's channels lie in one frame, so a power of two of them, as many as the clients wanted need;
-     * the network process finds the ends past them closed.
+     * The clients' connections lie in one frame, so a power of two of them, as many as the clients wanted need;
+     * the network process finds those past them closed.
      */
     uint32_t ends = 1;
     while ((s->clients_wanted >> ends) != 0) {
         ends *= 2;
     }
-    system_must(s, "the clients' hub",
-                chan_hub_new(self, &s->hub, n, np->clients, ends, CLIENT_CHAN_SIZE, CLIENT_SLOT));
+    system_must(s, "the clients' connections", bulk_new(self, &s->socks, n, np->clients, ends, &sock));
     /*
      * The bytes of its page it publishes the network's addresses in, carved from the room, for the clock;
      * the network process lives as long as the system, and a teardown of it would revoke the carve first.
@@ -89,7 +89,7 @@ void system_net_start(struct system *s)
 }
 
 /*
- * A client of the network process, on end i of the hub, which is idle;
+ * A client of the network process, on its connection i, which is idle;
  * the logger is given the kernel's log too, and the clock the network's addresses, read only.
  */
 static void client_build(struct system *s, uint32_t i)
@@ -98,7 +98,7 @@ static void client_build(struct system *s, uint32_t i)
     struct child *c = &cl->child;
     uint32_t region;
     system_must(s, "build a client", child_new(s->self, c, kinds[i].name, CLIENT_TABLE, CLIENT_DATA_SIZE));
-    system_must(s, "connect a client", chan_hub_connect(s->self, &s->hub, i, c, &((struct client_page *)c->page)->net));
+    system_must(s, "connect a client", bulk_connect(s->self, &s->socks, i, c, &((struct client_page *)c->page)->net));
     if (i == CLIENT_LOGGER) {
         system_must(s, "give the logger the log", child_map(s->self, c, BOOT_CAP_LOG, RIGHT_R | RIGHT_W, &region));
         ((struct logger_page *)c->page)->log_base = s->log_base;
@@ -111,11 +111,11 @@ static void client_build(struct system *s, uint32_t i)
     cl->down = 0;
 }
 
-/* A client that faulted or failed: its channel closed, taken down, and built again later, a few times at most. */
+/* A client that faulted or failed: its connection closed, taken down, and built again later, a few times at most. */
 static void client_down(struct system *s, uint32_t i)
 {
     struct client *cl = &s->clients[i];
-    system_must(s, "close a client's channel", chan_hub_close(s->self, &s->hub, i));
+    system_must(s, "close a client's connection", bulk_close(s->self, &s->socks, i));
     system_must(s, "take a client down", child_free(s->self, &cl->child));
     cl->down = ++cl->restarts <= CLIENT_RESTARTS;
     say(s->out, "root: %s is taken down%s\n", kinds[i].name, cl->down ? ", to be built again" : " for good");
@@ -184,7 +184,7 @@ uint32_t system_heard(struct system *s, uint32_t bits)
         struct client *cl = &s->clients[i];
         struct child *c = &cl->child;
         if (c->page == 0) {
-            if (cl->down && chan_hub_idle(&s->hub, i)) {
+            if (cl->down && bulk_idle(&s->socks, i)) {
                 client_build(s, i);
             }
             continue;

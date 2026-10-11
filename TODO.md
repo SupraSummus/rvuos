@@ -90,12 +90,14 @@ what is left:
 - `child_stop` in `user/lib/child.h` reports and then waits for good, since a child holds no capability to its own thread:
   the convention giving each child its thread, which a self-stop takes, would let a stopped child be used again by a resume,
   but `RIGHT_W` on it also sets its watch, so it waits for the narrower right open decision 32 weighs.
-- `lib/bulk.h` has no user but its test and the bench.
-  The Wi-Fi system's link and sockets would be the first:
-  the driver lending the network process the MAC's received frames to read, where they lie, a buffer kept back for its own,
-  the network process copying each datagram once into its client's buffers lent to read,
-  and lending each client buffers to fill for what it sends, as the driver would lend it buffers to fill for frames;
-  `DESIGN.md`, "Bulk data", counts the copies that leaves.
+- The Wi-Fi system lends its link and its clients' connections, `lib/bulk.h`, and copies as many times as its channels did,
+  twice on a datagram's way in and three times out; `DESIGN.md`, "Bulk data", counts what lending leaves.
+  The ESP32-C6's driver copies each frame it receives out of the MAC's buffers, its own, into one lent to read,
+  about 4,800 cycles a kilobyte:
+  the MAC's list would hold buffers of the link's instead, the driver keeping some back for its own frames,
+  at a block of 32 KiB the root task's free memory cannot spare while the driver keeps its own 24.
+  The network process builds each frame in a buffer of its own and copies it into one the driver lent it:
+  `net.c` would build it there, its four builders taking the buffer first, an ARP request sent instead in the same one.
   The ESP32-C6's MAC reading a frame from a chain of descriptors, untried,
   would let the driver send the network process's frame where it lies, its own header in front, and spare the copy out.
 - A borrower cannot lend on what it was lent:

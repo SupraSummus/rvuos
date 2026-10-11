@@ -10,9 +10,10 @@
  * The driver of the CYW43439, the radio, is a process of its own;
  * it reaches the chip through PIO0, which clocks the chip's gSPI bus, and through the control registers of four pins,
  * and loads the chip's firmware from frames the root task lends it.
- * The network process runs the IP stack, and trades Ethernet frames with the driver through a channel, the link,
- * see lib/chan.h.
- * Its clients are processes of their own, each with a channel to it from a hub, through which they use sockets, sock.h:
+ * The network process runs the IP stack, and trades Ethernet frames with the driver through the link, which the driver
+ * lends, lib/bulk.h: the frames the driver received, lent to read, and buffers lent to fill with the frames to send.
+ * Its clients are processes of their own, each with a connection the network process lends,
+ * through which they use sockets, sock.h: their answers and datagrams lent to read, and buffers to fill with requests;
  * the echo, which answers on UDP port 7, the clock, which asks the network for the time and tells it on port 13
  * and reads the network's addresses as the network process publishes them,
  * and the logger, which carries the kernel's log to a host on port 7070 while the system runs.
@@ -28,7 +29,7 @@
 
 #include <stdint.h>
 
-#include "lib/chan.h"
+#include "lib/bulk.h"
 #include "lib/child.h"
 #include "lib/seqlock.h"
 #include "sock.h"
@@ -47,9 +48,14 @@ struct blob_header {
 };
 #define BLOB_FRAMES 8u /* the most frames it is lent in */
 
-/* The link: a channel of two rings of Ethernet frames, from the chip and to it. */
-#define LINK_SIZE 0x4000u
-#define LINK_SLOT 1536u
+/*
+ * The link, which the driver lends the network process: LINK_READS buffers of LINK_BUFFER bytes, which the driver
+ * lends with the Ethernet frames it received, to read, and LINK_FILLS, which it lends to fill with the frames to send.
+ * The driver keeps none back for itself, as it reads its own frames in buffers of its own.
+ */
+#define LINK_BUFFER 1536u
+#define LINK_READS  4u
+#define LINK_FILLS  4u
 
 /* The driver. */
 enum drv_state {
@@ -97,8 +103,8 @@ struct drv_page {
     uint8_t bssid_set;
     uint8_t dhcp_log; /* power save off, and a line for each DHCP message heard */
     uint8_t no_sae;   /* WPA2 alone: no SAE, joining or as an access point */
-    /* Later, with CHILD_BIT_PARENT: the link, once the root task connected it, and that the run is over. */
-    struct chan_end link;
+    /* Later, with CHILD_BIT_PARENT: the link, which the driver lends, once the root task connected it, and that the run is over. */
+    struct bulk_end link;
     volatile uint32_t leave; /* leave the network, and report DRV_LEFT */
 
     /* From the driver. */
@@ -114,9 +120,14 @@ enum net_state {
     NET_BOUND,                   /* DHCP gave it an address */
 };
 
-/* The clients' channels, from a hub in the network process: two rings each, of a few messages of the most a datagram takes. */
-#define CLIENT_CHAN_SIZE 0x4000u
-#define CLIENT_SLOT      SOCK_MSG_MAX
+/*
+ * A client's connection, which the network process lends: CLIENT_READS buffers, which it lends with the client's answers
+ * and datagrams, to read, and CLIENT_FILLS, which it lends to fill with the client's requests, sock.h;
+ * each holds a message of the most a datagram takes.
+ */
+#define CLIENT_BUFFER ((SOCK_MSG_MAX + 7u) & ~7u)
+#define CLIENT_READS  4u
+#define CLIENT_FILLS  4u
 
 /* The bytes of its page the network process publishes the network's addresses in, through lib/seqlock.h. */
 #define NET_CONFIG_SIZE 64u
@@ -124,8 +135,8 @@ _Static_assert(SEQLOCK_BYTES(sizeof(struct sock_config)) <= NET_CONFIG_SIZE, "th
 
 struct net_page {
     struct child_page c;
-    struct chan_end link;
-    struct chan_end clients[SOCK_CLIENTS];
+    struct bulk_end link;                  /* the driver's connection, which lends it frames */
+    struct bulk_end clients[SOCK_CLIENTS]; /* its connections to its clients, which it lends */
     uint32_t more;     /* the slot of its own inbox, carved to more_bit: it wakes itself with what it left for later */
     uint32_t more_bit;
     uint8_t mac[6];
@@ -146,10 +157,10 @@ static inline struct seqlock net_config(const struct net_page *p)
 /* The UDP port the network process answers on itself, with a line about the system. */
 #define NET_PORT_STATUS 7777u
 
-/* What every client's page starts with: its channel to the network process. */
+/* What every client's page starts with: its connection to the network process, which the network process lends. */
 struct client_page {
     struct child_page c;
-    struct chan_end net;
+    struct bulk_end net;
 };
 
 /*
@@ -203,16 +214,17 @@ void echo_main(struct child_page *page);
 void clock_main(struct child_page *page);
 void logger_main(struct child_page *page);
 
-/* A client's request into its channel: 0, or -1 if the ring is full or the channel not connected; see sock_ask. */
-static inline int client_ask(const struct chan_end *e, uint32_t op, uint16_t port, uint32_t ip, uint16_t peer_port,
-                             const void *data, uint32_t len)
-{
-    uint8_t *slot = chan_put_begin(e);
-    if (slot == 0 || sizeof(struct sock_msg) + len > e->tx.slot_size) {
-        return -1;
-    }
-    chan_put_end(e, sock_ask(slot, op, port, ip, peer_port, data, len));
-    return 0;
-}
+/*
+ * A client's side of its connection to the network process, client.c:
+ * its requests in the buffers it was lent to fill, and its answers and datagrams read where they lie, a turn at a time.
+ */
+/* A request in a buffer lent to fill, handed back, see sock_ask: 0, or -1 if none is free or the request does not fit. */
+int client_ask(struct bulk_end *e, uint32_t op, uint16_t port, uint32_t ip, uint16_t peer_port, const void *data,
+               uint32_t len);
+/*
+ * Each answer and datagram the network process lent the client, a turn's worth, handed to fn where it lies and given
+ * back after. Whether more came than the turn took, for the client to come back to.
+ */
+int client_take(struct bulk_end *e, void (*fn)(void *arg, const struct sock_msg *h, const uint8_t *data), void *arg);
 
 #endif

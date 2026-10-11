@@ -212,7 +212,7 @@ $(BUILD)/wifi-drv.bin: $(BUILD)/wifi-drv.elf
 
 # What it shares with the Pico 2 W's: the network process, its clients, and the root task's half of both, system.c;
 # the logger is linked, though this root task never builds it.
-WIFI_ESP_NET := $(addprefix $(BUILD)/user/wifi/,netproc.o net.o sock.o system.o echo.o clock.o sntp.o logger.o)
+WIFI_ESP_NET := $(addprefix $(BUILD)/user/wifi/,netproc.o net.o sock.o system.o client.o echo.o clock.o sntp.o logger.o)
 $(BUILD)/user-wifi-esp32c6.elf: $(BUILD)/$(WIFI_ESP)/root.o $(WIFI_ESP_NET) $(LIB_OBJ) $(USER_COMMON) \
                                 $(BUILD)/user/tracer/trace.o $(BUILD)/user/user.ld tools/no-globals.py
 	tools/no-globals.py $(WIFI_ESP_NET) $(LIB_OBJ) $(BUILD)/user/tracer/trace.o

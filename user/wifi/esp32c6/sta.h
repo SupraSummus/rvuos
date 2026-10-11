@@ -42,5 +42,7 @@ void sta_leave(void);
  * No more than the ring holds at a time, as the network process is not trusted: 1 if it has more.
  */
 int sta_link_take(struct drv *d);
+/* The lock of the link's end, over the notification note, which the driver's start makes before either thread runs. */
+void sta_link_init(uint32_t note);
 
 #endif

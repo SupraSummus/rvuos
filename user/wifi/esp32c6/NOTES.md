@@ -581,12 +581,17 @@ That was a copy of every frame in the receiving's thread, half of what it spent 
 The driver holds the modem, a bus master that reaches all of RAM, so it is trusted as the root task is;
 see open decision 13. The network process trusts the driver, as it cannot do otherwise,
 and the driver does not trust the network process, nor the network process its clients.
-So the driver reads each slot of the link once, into the frame the MAC sends, and writes each frame it hands on once,
-and it takes no more of the link at a time than the ring holds, as `lib/chan.h` asks of an end that does not trust its peer:
-a network process that kept the ring looking full would otherwise keep the first thread from the root task's checks.
-That copy at the boundary stays: at the air's full rate it costs a few hundredths of the core each way.
-Reading in place across it would want the MAC's buffers in a pool the network process maps read-only,
-so that it can neither change a frame the driver checks nor forge what the MAC says of it,
-references and their return through the ring, and a region more;
-sending from the link in place would want the MAC to read a frame from a chain of descriptors, which is untried.
-`lib/bulk.h` is that shape for any lender and borrower, `DESIGN.md`, "Bulk data"; the driver does not lend through it yet, `TODO.md`.
+So the driver lends the link, `lib/bulk.h`:
+the network process reads each frame the driver received in a buffer lent to read, which it cannot write,
+and fills the buffers it was lent to fill with the frames it sends,
+of which the driver reads each once, into the frame the MAC sends;
+and the driver takes no more of the link for each wake than its ring held as the turn began,
+so a network process that kept handing references would not keep the first thread from the root task's checks.
+The station's thread lends what it receives and the first thread sends what comes back filled, two threads on one end,
+so each call on the end holds a lock of `lib/lock.h`, `sta.link_lock`;
+the adapter's mutex, which takes the lock the receiving's interrupt takes too, doubled what a frame cost to hand on.
+The copies stay: the MAC writes into the driver's own buffers, so a frame is copied once into a buffer lent to read,
+about 4,800 cycles a kilobyte here.
+Reading in place across the boundary would want the MAC's list to hold the link's own buffers,
+a block the root task's free memory cannot spare yet,
+and sending in place would want the MAC to read a frame from a chain of descriptors, which is untried; see `TODO.md`.
