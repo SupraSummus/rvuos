@@ -88,6 +88,9 @@ void osi_timer_arm_us(struct ets_timer *t, uint32_t us);
 void osi_timer_disarm(struct ets_timer *t);
 int osi_queue_put(struct queue *q, const void *item, uint32_t ms);
 int osi_queue_get(struct queue *q, void *item, uint32_t ms);
+/* The interrupt's thread held off, as the libraries' critical sections hold it; nested by the same thread. */
+void osi_crit_enter(void);
+void osi_crit_exit(void);
 void osi_mutex_take(struct mutex *m);
 void osi_mutex_give(struct mutex *m);
 void drv_random(uint8_t *buf, size_t len);

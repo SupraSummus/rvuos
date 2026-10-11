@@ -383,6 +383,16 @@ static void int_restore(void *mux, uint32_t tmp)
     }
 }
 
+void osi_crit_enter(void)
+{
+    int_disable(0);
+}
+
+void osi_crit_exit(void)
+{
+    int_restore(0, 0);
+}
+
 /*
  * One served access in trace mode: decode the fault, hand the request to the root task, wait for its answer,
  * and leave it in the thread; no lock is taken and nothing goes on the heap,

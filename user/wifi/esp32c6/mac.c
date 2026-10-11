@@ -59,7 +59,7 @@
 #define DESC_EOF       (1u << 30)
 #define DESC_OWNER     (1u << 31)
 
-#define RX_DESCS     10u
+#define RX_DESCS     (10u + MAC_RX_KEPT) /* 10 for the MAC however many a reader keeps */
 #define RX_BUF_SIZE  1700u /* the header and a frame of 1600 bytes, with room */
 #define RX_CANARY    0xdeadbeefu
 #define RELOAD_SPINS 100000u /* the libraries' wait for the reload to be taken */
@@ -318,12 +318,15 @@ int mac_frame_read(const uint8_t *buf, uint32_t written, struct mac_frame *f)
     return 1;
 }
 
-/* A frame the MAC wrote into n descriptors from first, to heard if mac_frame_read reads it; each other counted. */
-static void frame(const struct desc *first, uint32_t n)
+/*
+ * A frame the MAC wrote into n descriptors from first, to heard if mac_frame_read reads it; each other counted.
+ * 1 if heard keeps its buffer.
+ */
+static int frame(struct desc *first, uint32_t n)
 {
     mac_heard_fn *heard = rx.heard;
     if (heard == 0) {
-        return; /* no reader takes the frames yet, or any more */
+        return 0; /* no reader takes the frames yet, or any more */
     }
     const uint8_t *b = first->buf;
     uint32_t f = first->flags;
@@ -333,15 +336,15 @@ static void frame(const struct desc *first, uint32_t n)
     }
     if (n > 1) {
         mac_rx_counts.chained++;
-        return;
+        return 0;
     }
     if (b[EXTRA_LO] != 0 || (b[EXTRA_HI] & 3u) != 0) {
         mac_rx_counts.odd++;
-        return;
+        return 0;
     }
     if (!rx_ctrl_whole(b)) {
         mac_rx_counts.broken++;
-        return;
+        return 0;
     }
     if (!mac_frame_read(b, DESC_LEN(f), &m)) {
         /*
@@ -362,14 +365,15 @@ static void frame(const struct desc *first, uint32_t n)
             m.rssi = (int8_t)b[RX_CTRL_RSSI];
             m.channel = rx.channel;
             m.decrypted = 1;
-            heard(&m);
-            return;
+            m.desc = first;
+            return heard(&m);
         }
         mac_rx_counts.odd++;
-        return;
+        return 0;
     }
     m.channel = rx.channel;
-    heard(&m);
+    m.desc = first;
+    return heard(&m);
 }
 
 /*
@@ -391,12 +395,14 @@ static void collect(void)
         n++;
         if (d->flags & DESC_EOF) {
             uint32_t c = prof_cycles();
-            frame(first, n);
+            int kept = frame(first, n);
             rx.head = next;
             if (next == 0) {
                 rx.tail = 0;
             }
-            give(first, d);
+            if (!kept) {
+                give(first, d);
+            }
             prof_add(&drv_prof.rx_isr, prof_cycles() - c);
             first = next;
             n = 0;
@@ -530,6 +536,14 @@ const char *mac_rx_prepare(uint32_t *base)
     rx.tail = &descs[RX_DESCS - 1];
     *base = (uint32_t)(uintptr_t)descs;
     return 0;
+}
+
+/* A kept frame's buffer given back at the list's tail, the interrupt's thread held off meanwhile. */
+void mac_rx_release(struct desc *d)
+{
+    osi_crit_enter();
+    give(d, d);
+    osi_crit_exit();
 }
 
 const char *mac_rx_take(mac_heard_fn *heard)

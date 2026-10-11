@@ -563,7 +563,7 @@ A traced run, or a gate, goes after a Wi-Fi run.
 ## The driver's memory, and whom it trusts
 
 The driver's own code takes no memory as it runs.
-The MAC's list and its sending's frame, the station's frames, the queues and locks, and every thread's stack
+The MAC's list and its sending's frame, the queues and locks, and every thread's stack
 are declared where they are used, so the image says what the driver needs and a run cannot fail for want of it;
 `osi.h`'s objects are ready zeroed, but for a timer, which names its function, and a queue, which `OSI_QUEUE` declares with its slots.
 The heap is left to the code that is not the driver's and is written around one:
@@ -572,9 +572,19 @@ and the libraries in a traced window of their start, about 28 KB; the two never 
 `libphy.a` takes nothing from it in the driver's own start, as a heap that named each block's caller found.
 The link fails if any other of the driver's objects calls an allocator, `WIFI_ESP_HEAP` in `build.mk`.
 
+Inside the driver nothing crosses a boundary of trust, so a frame is read where the MAC wrote it:
+the receiving's thread keeps the MAC's buffer of a frame for the station and queues it, `MAC_RX_KEPT` at most,
+and the station's thread gives each back once read, `mac_rx_release`; the MAC's list has room for them besides its own.
+That was a copy of every frame in the receiving's thread, half of what it spent on one.
+
 The driver holds the modem, a bus master that reaches all of RAM, so it is trusted as the root task is;
 see open decision 13. The network process trusts the driver, as it cannot do otherwise,
 and the driver does not trust the network process, nor the network process its clients.
 So the driver reads each slot of the link once, into the frame the MAC sends, and writes each frame it hands on once,
 and it takes no more of the link at a time than the ring holds, as `lib/chan.h` asks of an end that does not trust its peer:
 a network process that kept the ring looking full would otherwise keep the first thread from the root task's checks.
+That copy at the boundary stays: at the air's full rate it costs a few hundredths of the core each way.
+Reading in place across it would want the MAC's buffers in a pool the network process maps read-only,
+so that it can neither change a frame the driver checks nor forge what the MAC says of it,
+references and their return through the ring, and a region more;
+sending from the link in place would want the MAC to read a frame from a chain of descriptors, which is untried.

@@ -311,7 +311,7 @@ static void heard_group(const uint8_t *f, uint32_t len)
 
 static uint8_t probe_ap[6];
 
-static void heard(const struct mac_frame *m)
+static int heard(const struct mac_frame *m)
 {
     struct drv *d = drv_self;
     struct mgmt_beacon b;
@@ -322,17 +322,17 @@ static void heard(const struct mac_frame *m)
         memcpy(probe_ap, b.bssid, 6);
         hear.answers++;
         hear.retried += (uint32_t)again;
-        return;
+        return 0;
     }
     if (!mgmt_beacon(m->frame, m->len, 0, &b) || b.probe_response) {
-        return;
+        return 0;
     }
     if (!hear_ap_set) {
         memcpy(hear_ap, b.bssid, 6);
         hear_ap_set = 1;
     }
     if (memcmp(b.bssid, hear_ap, 6) != 0) {
-        return;
+        return 0;
     }
     uint32_t tsf = (uint32_t)b.tsf, interval = (uint32_t)b.interval * 1024u;
     if (hear_tsf_set && interval != 0) {
@@ -345,6 +345,7 @@ static void heard(const struct mac_frame *m)
     hear_tsf_set = 1;
     hear.beacons++;
     hear.rssi += (uint32_t)-m->rssi;
+    return 0;
 }
 
 /* What was heard so far, the broken as mac.c counted them. */

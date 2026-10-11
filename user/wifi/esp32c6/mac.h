@@ -30,6 +30,8 @@
  * Its length is the MAC's header's less the FCS, never more than the MAC wrote,
  * so a reader reads only the len bytes at frame, and no header of the MAC's.
  */
+struct desc;
+
 struct mac_frame {
     const uint8_t *frame;
     uint32_t len;
@@ -38,9 +40,18 @@ struct mac_frame {
     int decrypted;    /* the MAC's cipher took it: the payload is in the clear and the Protected bit is kept,
                          so a frame is the cipher's only with that bit set and this flag set; see ccmp_frame_kind */
     const uint8_t *ctrl; /* what the MAC wrote about the reception, RX_CTRL_SIZE bytes, esp.h's RX_CTRL_ */
+    struct desc *desc;   /* the MAC's descriptor of the buffer the frame lies in, mac.c's */
 };
 
-typedef void mac_heard_fn(const struct mac_frame *f);
+/*
+ * A reader of the frames the MAC receives, in the receiving's thread, which must not wait:
+ * 1 if it keeps the frame's buffer past its return, to read the frame in another thread, which then gives the
+ * buffer back to the MAC by mac_rx_release; 0 if the buffer goes back at once.
+ * It keeps MAC_RX_KEPT at the most, which the MAC's list has room for besides its own.
+ */
+#define MAC_RX_KEPT 4u
+typedef int mac_heard_fn(const struct mac_frame *f);
+void mac_rx_release(struct desc *d);
 
 /*
  * The frame in buf, which starts with the MAC's 92 bytes about its reception, esp.h's RX_CTRL_,

@@ -4,10 +4,10 @@
  * The station's thread waits for events in a queue of the adapter's: its frames, the supplicant's work,
  * and the root task's ask to leave.
  * A step sends a frame and waits for the answer until a deadline, wait_for.
- * The receiving runs in the interrupt's thread, which must not wait, so it copies a frame to the station
- * from its access point into one of STA_FRAMES buffers, which a second queue hands out and the station gives back,
- * and drops the frame, counted, when all are taken.
- * The events queue has room for every buffer, for STA_RUNS of the supplicant's work, and for the ask to leave.
+ * The receiving runs in the interrupt's thread, which must not wait, so it keeps the MAC's buffer of a frame to the
+ * station from its access point and queues it, STA_FRAMES at most, the station's thread giving each back once read,
+ * and drops a frame, counted, while it keeps that many: the frame is read where the MAC wrote it.
+ * The events queue has room for every frame kept, for STA_RUNS of the supplicant's work, and for the ask to leave.
  *
  * The supplicant, hostap's, see supp.h, runs in the station's thread, over the station's link:
  * under WPA3's personal it makes and checks SAE's messages, which the authentication carries, see sae;
@@ -29,8 +29,7 @@
 #include "sta.h"
 #include "supp.h"
 
-#define STA_FRAMES    4u    /* the frames that may wait for the station at once */
-#define STA_FRAME_MAX 1600u /* the longest the station keeps: a whole data frame with its CCMP header and MIC */
+#define STA_FRAMES    MAC_RX_KEPT /* the frames that may wait for the station at once, in the MAC's buffers */
 #define STA_RUNS      2u    /* the supplicant's work that may wait at once; see link_run */
 #define STA_STACK     4096u /* room for the supplicant's handshakes and SAE, whose depth told() says */
 #define STA_KEY_ENTRY 4u    /* the MAC's key entry the pairwise key takes, as the libraries' association left it */
@@ -43,18 +42,20 @@
 
 enum { EV_FRAME, EV_RUN, EV_LEAVE };
 
-struct event {
-    uint32_t kind;
-    uint32_t buf;         /* EV_FRAME's buffer */
-    int (*fn)(void *arg); /* EV_RUN's work, and its argument */
-    void *arg;
-};
-
+/* A frame kept for the station's thread, in the MAC's buffer, which is the station's until wait_for gives it back. */
 struct buf {
     uint64_t at; /* when the receiving's thread heard it, in osi_now_us's microseconds; see ps_beacon */
+    uint8_t *frame;
     uint32_t len;
     uint8_t decrypted; /* the MAC's cipher decrypted the frame; see read_frame */
-    _Alignas(4) uint8_t frame[STA_FRAME_MAX]; /* as the MAC's buffer lies, so that the copy goes by words */
+    struct desc *desc; /* the MAC's buffer's, see mac_rx_release */
+};
+
+struct event {
+    uint32_t kind;
+    struct buf buf;       /* EV_FRAME's */
+    int (*fn)(void *arg); /* EV_RUN's work, and its argument */
+    void *arg;
 };
 
 /* How far the station has come with its access point, which says what leaving it undoes. */
@@ -70,9 +71,7 @@ struct key_pn {
     uint64_t rx_pn[CCMP_REPLAY_COUNT];
 };
 
-static struct buf bufs[STA_FRAMES];
 OSI_QUEUE(events, STA_FRAMES + STA_RUNS + 1u, sizeof(struct event));
-OSI_QUEUE(free_bufs, STA_FRAMES, sizeof(uint32_t)); /* the numbers of the buffers free */
 
 static struct {
     uint8_t ap[6]; /* the access point chosen, which the receiving reads once the station has taken it */
@@ -113,6 +112,7 @@ static struct {
     volatile uint32_t rx_rate[32];
     volatile uint32_t rx_rssi;
     volatile uint32_t kept, dropped, runs_lost;
+    volatile uint32_t held; /* the MAC's buffers kept: the receiving's thread alone adds, the station's alone takes */
     /* The receiving's drops: copies of a frame already read, and the rest, for the log; see read_frame. */
     volatile uint32_t drop_copy, drop_other;
     /* The receiving's data frames by path: the MAC's cipher, and the clear; see read_frame. */
@@ -174,13 +174,13 @@ static int give_up(const char *step, uint32_t detail)
 /* --- The scan. --- */
 
 /* Each access point kept as heard strongest, and of more than DRV_NETS, the strongest; in the receiving's thread. */
-static void scan_heard(const struct mac_frame *m)
+static int scan_heard(const struct mac_frame *m)
 {
     struct drv *d = drv_self;
     struct mgmt_beacon b;
     int rssi = m->rssi;
     if (!mgmt_beacon(m->frame, m->len, (uint8_t)m->channel, &b) || b.probe_response) {
-        return;
+        return 0;
     }
     uint32_t n = d->net_count, weakest = 0;
     for (uint32_t i = 0; i < n; i++) {
@@ -189,7 +189,7 @@ static void scan_heard(const struct mac_frame *m)
                 d->nets[i].rssi = (int16_t)rssi;
                 d->nets[i].channel = b.channel;
             }
-            return;
+            return 0;
         }
         if (d->nets[i].rssi < d->nets[weakest].rssi) {
             weakest = i;
@@ -197,7 +197,7 @@ static void scan_heard(const struct mac_frame *m)
     }
     struct drv_net *a = n < DRV_NETS ? &d->nets[n] : rssi > d->nets[weakest].rssi ? &d->nets[weakest] : 0;
     if (a == 0) {
-        return;
+        return 0;
     }
     memcpy(a->bssid, b.bssid, 6);
     memcpy(a->ssid, b.ssid, b.ssid_len);
@@ -207,6 +207,7 @@ static void scan_heard(const struct mac_frame *m)
     if (n < DRV_NETS) {
         d->net_count = n + 1;
     }
+    return 0;
 }
 
 /*
@@ -250,7 +251,7 @@ void sta_scan(struct drv *d)
  * Each of the access point's beacons is counted, read or not, for the link's supervision, see serve_station,
  * and kept while the station sleeps between them, for the power save to read, see ps_beacon.
  */
-static void heard(const struct mac_frame *m)
+static int heard(const struct mac_frame *m)
 {
     static const uint8_t every[6] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
     uint64_t at = osi_now_us();
@@ -264,20 +265,19 @@ static void heard(const struct mac_frame *m)
     int group = (sta.gtk.set[0] || sta.gtk.set[1]) && mgmt_to_group(m->frame, m->len, sta.ap);
     if (!ours && !(sta.beacon_wanted && mgmt_to_station(m->frame, m->len, every, sta.ap)) && !group &&
         !(sta.ps.on && beacon)) {
-        return;
+        return 0;
     }
-    struct event e = { EV_FRAME, 0, 0, 0 };
-    if (m->len > STA_FRAME_MAX || !osi_queue_get(&free_bufs, &e.buf, 0)) {
+    if (sta.held >= STA_FRAMES) {
         sta.dropped++;
-        return;
+        return 0;
     }
-    struct buf *b = &bufs[e.buf];
-    memcpy(b->frame, m->frame, m->len);
-    b->at = at;
-    b->len = m->len;
-    b->decrypted = (uint8_t)(m->decrypted != 0);
+    __atomic_add_fetch(&sta.held, 1u, __ATOMIC_RELAXED);
+    const struct event e = {
+        EV_FRAME, { at, (uint8_t *)(uintptr_t)m->frame, m->len, (uint8_t)(m->decrypted != 0), m->desc }, 0, 0
+    };
     sta.kept++;
     osi_queue_put(&events, &e, 0);
+    return 1;
 }
 
 /* The access point is the station's no longer; the supplicant is told if it was associated. Whether it was, 1 or 0. */
@@ -642,7 +642,7 @@ static int wait_for(uint64_t deadline, int (*read)(const struct buf *b, void *ar
             e.fn(e.arg);
             continue;
         }
-        const struct buf *b = &bufs[e.buf];
+        const struct buf *b = &e.buf;
         if (drv_self->debug & DRV_DEBUG_FRAMES) {
             drv_say("sta: heard frame control %02x%02x, %u bytes\n", b->frame[0], b->frame[1], (unsigned)b->len);
         }
@@ -650,7 +650,8 @@ static int wait_for(uint64_t deadline, int (*read)(const struct buf *b, void *ar
         int gone = sta.state != NONE && let_go(b, &reason);
         int took = !gone && action_take(b);
         int taken = !gone && !took && read(b, arg);
-        osi_queue_put(&free_bufs, &e.buf, 0);
+        mac_rx_release(b->desc);
+        __atomic_sub_fetch(&sta.held, 1u, __ATOMIC_RELAXED);
         if (gone) {
             forget();
             give_up("let go by the access point", reason);
@@ -663,7 +664,7 @@ static int wait_for(uint64_t deadline, int (*read)(const struct buf *b, void *ar
 
 void sta_leave(void)
 {
-    static const struct event e = { EV_LEAVE, 0, 0, 0 };
+    static const struct event e = { .kind = EV_LEAVE };
     osi_queue_put(&events, &e, 0);
 }
 
@@ -891,7 +892,7 @@ static void link_deauthenticate(uint16_t reason)
  */
 static void link_run(int (*fn)(void *arg), void *arg)
 {
-    struct event e = { EV_RUN, 0, fn, arg };
+    struct event e = { .kind = EV_RUN, .fn = fn, .arg = arg };
     if (!osi_queue_put(&events, &e, 0)) {
         sta.runs_lost++;
     }
@@ -2040,9 +2041,6 @@ static void sta_main(void *arg)
 
 const char *sta_start(struct drv *d)
 {
-    for (uint32_t i = 0; i < STA_FRAMES; i++) {
-        osi_queue_put(&free_bufs, &i, 0);
-    }
     if (supp_init(&link, d->mac) != 0) {
         return "the supplicant";
     }
