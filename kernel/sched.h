@@ -172,6 +172,13 @@ struct core {
     /* Whether a walk stopped where OP_DEBUG_PREEMPT armed it, which the call's dispatch turns into a tick. */
     bool preempt_stopped;
 
+    /*
+     * Whether the running thread stands at a call that stopped for an interrupt, which it makes again
+     * before a turn on spare time gives the processor up: set as the call stops,
+     * and cleared as a call ends without stopping, or another thread runs; see spare_end in sched.c.
+     */
+    bool recall;
+
     /* The bits the last wake handed over, zero if none; for the trace. */
     uint32_t trace_wake_bits;
 
@@ -377,6 +384,15 @@ void sched_turn_back(void);
 void sched_run_next(void);
 
 /*
+ * The end of a call whose thread may not run on, or after which a thread waits on the run queue:
+ * the processor goes to the next thread as sched_run_next has it,
+ * or the turn ends if it runs on spare time and a thread with time waits; see spare_end in sched.c.
+ * Out of line, and the one call at the end of a call, so that the call's frame stays as it was
+ * on the stack's deepest path; see DESIGN.md, "Bounded stack".
+ */
+void sched_call_end(void);
+
+/*
  * The core has no thread to run: wait for an interrupt until one has its turn, then hand the processor to it,
  * or stop the machine once nothing can ever run again.
  * The architecture's core_idle calls it as a trap ends with nobody's turn, and as a core starts.
@@ -412,6 +428,17 @@ void sched_count(uint32_t ticks);
  * Every trap calls it on its way back, and the host after every call, so that the self-check can hold it.
  */
 uint32_t sched_wake(void);
+
+/*
+ * Whether a core's turn runs on spare time: nobody pays for it, its thread having less than a tick and no lender paying,
+ * as was decided when the turn began or at the last tick, or since, by a bind or an unbind that emptied the account
+ * or the destroy of its payer.
+ * Inline, since core_notify asks it on the stack's deepest path; see DESIGN.md, "Bounded stack".
+ */
+static inline bool sched_spare_turn(const struct core *c)
+{
+    return c->turn != NULL && c->payer == NULL && c->turn->balance < tick_parts();
+}
 
 /*
  * The ticks from the count to the first that could change what runs, at least one:

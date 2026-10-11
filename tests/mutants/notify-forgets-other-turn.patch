@@ -2,12 +2,13 @@ A change to the thread whose turn another core has, as a bind to units of anothe
 whose timer stays deferred for a turn that should end at the next tick.
 
 Caught-by: fuzz-smp2
+Report: a turn on spare time runs while a thread with time waits
 Report: the timer is set past a tick an unmarked change brought forward
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -347,7 +347,7 @@ static void thread_settle(struct thread *t)
+@@ -324,7 +324,7 @@ static void thread_settle(struct thread *t)
      if (sooner) {
          core->nearest_release = sched_ticks + fill;
      }

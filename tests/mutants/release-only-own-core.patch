@@ -4,6 +4,7 @@ until its own core happens to count a tick; the release of every core lies ahead
 
 Caught-by: fuzz-smp2
 Report: a thread waits on another queue than its account says
+Report: the release is for a tick already past
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c

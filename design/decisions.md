@@ -72,7 +72,7 @@ until the maintainer decides otherwise.
    a client that waits lends its time to nobody, so it goes to spare time while it waits, not to its server,
    and a server cannot tell a client that pays for its asks from one that does not.
    A client that names its server's thread as it waits lends it its time, decision 27,
-   and beside a process that spins is answered as fast as alone, where one that lends nothing waits over a tick and a half;
+   and beside a process that spins is answered as fast as alone, where one that lends nothing waits about a tick at the median;
    the server runs on the time of the client that lent it longest, though, not of the one whose ask it serves.
    An `Endpoint` object would not replace notifications:
    interrupts need those either way.
@@ -113,8 +113,13 @@ until the maintainer decides otherwise.
    Decided in part: units of time earned by one thread each, an account per thread they fill,
    and spare time only by `RIGHT_X`; see "Scheduling" and open decision 18.
    Working default for the rest: no priorities;
-   units promise a thread their part of the processor, give or take its account,
-   and a thread with time a turn within `TIME_UNITS` ticks, and no more.
+   units promise a thread their part of the processor, give or take the accounts,
+   and a thread with time a turn within a tick for each other thread with units of its core, and no more; see "Scheduling".
+   The tick is the quantum and the build's, `TIMER_HZ`, so the wait is the build's to set,
+   against a switch every tick while threads compete, which nothing has measured yet;
+   the work a thread gets is bounded by the others' accounts, which a shorter tick does not shorten, `TODO.md`.
+   Priorities with preemption on wake, bounded by the account as a budget, are what a wait below a tick would take;
+   decide them when a workload needs one at a cost the switches allow.
    The earlier plan was fixed priorities on `Thread`,
    set by whoever holds the capability and capped by the setter's own,
    round-robin within a priority, no priority inheritance;
@@ -372,7 +377,7 @@ until the maintainer decides otherwise.
       the call interrupts that core and waits until its trap has begun, and the core loads its regions again
       as it takes the lock, or hands its taken thread's turn on.
     - **Wakes.** A core that changes what another runs marks the other's timer stale,
-      and interrupts it when it idles or runs on with its timer set past the next tick.
+      and interrupts it when it idles, runs on with its timer set past the next tick, or runs a turn on spare time a thread with time now waits for.
     - **The units.** `TIME_UNITS` of each core, so that which core a thread runs on is held as its units are;
       a program learns how many cores there are by the units it can carve.
     - **A controller of each core's own**, as ARM's NVIC and RP2350's Hazard3's are: the first core's alone enables a device line,
@@ -480,3 +485,69 @@ until the maintainer decides otherwise.
     - **Babel**, RFC 8966, for traffic between any two nodes, at a route to every node kept on each.
     Open: whether working with Thread's devices is worth its licence.
     Decide before the mesh's first routing code.
+
+31. **A stable ABI.**
+    Working default: none; the ABI changes with the kernel, and the seeds and the corpus are written anew with it.
+    The model holds, and three things it lacks add without breaking anything:
+    a stop for a thread, introspection, and arguments a program must leave zero, `TODO.md`;
+    the processor's time keeps its turns, whose wait the tick bounds, decision 9.
+    The rest would break a binary built against today's ABI, so it goes in one change, before the ABI is held still:
+    - **What the test format chose.**
+      A replay record carries three arguments, so no operation takes a fourth:
+      `OP_IRQ_BIND` makes its object through the `IrqLine` it consumes rather than through the pool,
+      `OP_TIME_BIND`'s offset names the core of a bind to no units,
+      `OP_POOL_ALLOC`'s `a3` means another thing for each type,
+      and routing a device line to a core, decision 24, has no argument left.
+      The watchdog went onto the clock, the boot table keeps a test input and a console on every board,
+      and execute-only stays open, decision 23, each because the alternative would have renumbered the seeds and the corpus.
+      A record of the six arguments the registers carry, and seeds written from text, `TODO.md`,
+      would let each be decided on its merits.
+    - **The numbering.**
+      Operation codes are flat, in the order the operations came,
+      and `Debug`'s four operations for tests lie among the rest.
+      Codes grouped by type, with the tests' in a range of their own that a stable program never calls,
+      would keep `KERR_WRONG_TYPE` and say which calls the ABI promises.
+    - **Where a new capability goes.**
+      `a1` for `OP_CAP_COPY`, `OP_CAP_DERIVE`, `OP_CAP_MOVE`, `OP_CLOCK_FRAME` and `OP_UNTYPED_SPLIT`,
+      `a2` for `OP_UNTYPED_RETYPE`, `OP_POOL_ALLOC` and `OP_NOTIFY_CARVE`,
+      and `a3` for the other carves and `OP_IRQ_BIND`; one place would do.
+    - **The errors.**
+      A signal, an arm or a watch that names none of the bits its capability may is `KERR_NO_RIGHTS`, and such a carve `KERR_INVALID_ARG`;
+      an Untyped that has made something already is `KERR_NO_MEMORY`, where it is a state;
+      `KERR_OVERLAP` is a region, a line already bound and a unit another thread earns;
+      and a revoke that ends early because it took the caller's own table returns `KERR_OK`, done or not.
+    - **`Debug` is three things.**
+      Writing into the log is how every child prints, halting is what a supervisor needs, decision 26,
+      and tracing, ticking, interrupting and preempting drive the machine for a test;
+      `RIGHT_X` gives a supervisor the last two together.
+      Nothing resets the machine, and what a halt does is the board's.
+    - **The boot table.**
+      `BOOT_CAP_INPUT` is the test's input on every board,
+      and `BOOT_CAP_UART` is RP2350's block of RAM, where a console would be one of `BOOT_CAP_DEVICES`.
+    - **An `Irq` holds its line by no node**, `TODO.md`, so a revoke takes back a bound line no other way a lender takes back what it lent.
+    - **What a fault tells is the architecture's.**
+      `OP_THREAD_FAULT` returns `mcause` or the exception number,
+      and a breakpoint, which ends a thread, arrives as a HardFault under QEMU and a DebugMonitor exception on RP2350;
+      a class beside the raw values, an access by load, store or fetch, an illegal or misaligned instruction, a breakpoint, a stacking,
+      would serve a watcher on every board.
+    - **Copy is the name of the grant its giver cannot revoke.**
+      A copy stands beside its source, and a copy of a root is a root,
+      so the operation named as the plain one hands out what only a common parent takes back;
+      a parent nearly always wants a derivation.
+    - **A process's own table asks for a capability to delete from.**
+      What makes a capability writes into the caller's tables with no capability,
+      but deleting, revoking, copying or deriving there takes a `CapTable` capability with `RIGHT_W` to the caller's own table,
+      which also makes a process of the table or mounts it, decision 15;
+      a child that only tidies its own slots is given more than that.
+    - **The rights a table does not use.**
+      Decision 15's two open questions, a sealed table and one others may only put into, would each take a right,
+      and `RIGHT_R` and `RIGHT_X` on a `CapTable` mean nothing yet.
+    - **A limit the board does not keep.**
+      `PROCESS_REGION_SLOTS` is eight, and RP2350's Hazard3 grants a process seven; `TODO.md`.
+    - **What lending promises.**
+      `OP_NOTIFY_LEND` is an experiment, decision 27, and its text states the scheduler's steps;
+      a stable ABI would promise that the borrower may run on the lender's time while it waits, and leave the rest to policy,
+      as it leaves which waiter a signal wakes.
+    - **A version.**
+      The root task's thread starts with `a0` zero, which could carry the ABI's version.
+    Decide them together, with the seeds written anew once, after the three additions.

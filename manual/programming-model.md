@@ -657,6 +657,10 @@ and moves `taken` only as far as its host says it has the bytes, so a halt write
   and for its account to reach a tick if not.
   A thread that becomes ready, whether resumed, woken, bound or preempted,
   joins the back of its queue.
+  A turn on spare time is one no thread with time wants, so it ends as soon as one wants it:
+  a thread with time that becomes ready while its core runs a turn on spare time takes the processor at once,
+  as the call or the interrupt that made it ready returns,
+  after the running thread has made again a call that stopped for an interrupt, if it stands at one.
 - A thread waiting with `OP_NOTIFY_LEND` lends the thread it names its account, section 5.12:
   a borrower without time waits on the run queue while its lender has time, and the turns it takes so cost the lender's account.
 - The machine timer ticks at `TIMER_HZ`, 1 kHz on every board unless the build sets another rate, `make TIMER_HZ=`,
@@ -674,7 +678,13 @@ and moves `taken` only as far as its host says it has the bytes, so a halt write
 - So threads with work and time take equal turns, and then threads on spare time do.
   A thread with work all along gets its units' part of the processor,
   give or take a tenth of a second's worth of the accounts.
-  A thread with time waits for its turn at most `TIME_UNITS` ticks, since only a thread with units of its core has time there.
+  A thread with time waits for its turn at most a tick for each other thread with units of its core,
+  since only such a thread has time there, or lends it, and a turn on spare time ends as the thread becomes ready;
+  so the build's tick, `TIMER_HZ`, sets that wait,
+  while tracing is off, nobody drives the machine with `OP_DEBUG_TICK` or `OP_DEBUG_PREEMPT`, and the thread keeps its binding.
+  Its work is bounded by its units, not by its turns: a turn that begins mid-tick lasts to the next tick,
+  and over any stretch the others run at most what their accounts held and what their units earn;
+  `DESIGN.md`, "Scheduling", gives the bounds and what a periodic task needs of its units.
   A thread a process adds earns only units split off the process's own, or runs on spare time:
   it takes nothing another thread earns.
   Spare time goes round by thread, so more threads there get more of it.

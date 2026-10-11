@@ -1,7 +1,7 @@
 A thread that loses its units in a call gives the processor up at once, not at the end of its turn.
 A revoke that unbinds its caller and stops for an interrupt would switch threads in the middle of the call,
 which the host, making the call again at once, does not;
-a call stopped for an interrupt is made again before anything else runs.
+a call stopped for an interrupt is made again at once unless the tick ended the turn.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a call stopped where its caller cannot make it again
@@ -9,12 +9,24 @@ Report: a call stopped where its caller cannot make it again
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -963,7 +963,7 @@ void syscall_dispatch(struct thread *t)
-      * unless it handed its turn to the thread it lends its time to, which runs now.
-      * One that lost its units finishes its turn, as a preempted call is made again before the tick switches.
+@@ -994,7 +994,7 @@ void syscall_dispatch(struct thread *t)
+      * One that lost its units finishes its turn, as a preempted call is made again before the tick switches,
+      * unless that left the turn on spare time, which a thread with time the call made ready takes at once.
       */
+-    if (core->current->state != THREAD_READY || core->run_queue != 0) {
++    if (core->current->state != THREAD_READY || core->current->time.type != CAP_BOUND || core->run_queue != 0) {
+         sched_call_end();
+     }
+     if (debug_trace) {
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -1047,7 +1047,7 @@ static void spare_end(struct core *core)
+ void sched_call_end(void)
+ {
+     struct core *core = core_self();
 -    if (core->current->state != THREAD_READY) {
 +    if (core->current->state != THREAD_READY || core->current->time.type != CAP_BOUND) {
          sched_run_next();
-     }
-     if (debug_trace) {
+     } else {
+         spare_end(core);

@@ -45,7 +45,8 @@ The hop to a server costs a few microseconds alone and about a tick beside the h
 
 **The client's time does not reach its server, unless it lends it.**
 With no units the store runs on spare time alone, `poor-server`,
-and its client waits over a tick and a half at the median though it earns a quarter of the core.
+and its client waits about a tick at the median and nearly two at p90 though it earns a quarter of the core:
+the store runs only on turns no thread with time wants, and beside the hog those come when the hog's account runs dry.
 A client that lends the store its time while it waits, `lend-server`, is answered as fast as `alone`:
 its wait hands the store the rest of its turn, and the answer's signal hands the turn back.
 
@@ -65,10 +66,12 @@ That is the store's own order, which no kernel would change.
 **A second hop cost no more than the first** beside the hog; why is not worked out yet.
 
 **A lock waits for its holder's turns.**
-Quick earns eight times slow's units, and still waits two ticks or more at p90 for slow to give the lock back,
-about four beside the hog.
+Quick earns eight times slow's units, and still waits a third of a tick at p90 for slow to give the lock back,
+nearly two ticks beside the hog.
 The kernel does not know who holds the lock, so quick's units cannot help slow finish,
-and a give wakes quick without handing it the lock, so slow may take it again before quick's turn comes.
+and a give wakes quick without handing it the lock, so slow may take it again before quick's turn comes,
+while slow has time of its own:
+once slow has spent it and runs on spare time, the give that wakes quick, which has time, hands quick the processor at once.
 
 **A taker that lends its time takes its holder's wait away.**
 On the lock that names its holder, `lend-hog`, quick waits under a fifth of a tick at p90 beside the hog,

@@ -361,6 +361,8 @@ what is left:
 
 - No seed reaches a payer dropped as the turn's thread is destroyed:
   the turn's thread is the caller on its core, which keeps what it runs on, so only a call on another core can destroy it.
+  Nor one destroyed itself from another core, which `core_thread_gone` tells its core of, as the turn may be left on spare time:
+  the borrower, its lender, a thread with time beside them and the destroyer are four threads, and the replay driver has three.
 - No check sees who pays for a turn on lent time, only that the payer is charged:
   a kernel that chose no payer, or let a waiter without time hand its turn on, would run the borrower for free,
   and only `make lab` would show it.
@@ -547,6 +549,24 @@ what is left:
   A refresh calls such a patch stale;
   planting through the refresh's `carry` would make the two agree.
 
+## System calls
+
+What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
+
+- No operation stops a thread: a thread is stopped only where it faults, or for good once its process is taken,
+  so a supervisor cannot start a hung thread afresh, read a running thread's registers, or take a thread off a notification,
+  and a thread that ends by waiting for good cannot be used again but by destroying its pool.
+  An `OP_THREAD_STOP` would take it to the stopped state from any other, a waiting one off its waiters at its call,
+  which a resume makes again; opcode 16 is free.
+- A program can read a frame and an Untyped and no other capability:
+  not the units or lines a `Time` or `IrqLine` capability names, nor the bits a `Notification` capability may signal,
+  so it learns how many cores there are by the units it can carve;
+  nor how much room a pool has left, nor the size an object takes, which only `MANUAL.md` gives, section 5.5,
+  nor the tick, which a program's own timing analysis and the demo's charge check need.
+- The kernel ignores the arguments an operation does not use, and never reads `a4` to `a6`, which `rv_invoke` leaves as they were,
+  so no unused argument can be given a meaning later without changing what a program that left garbage there does.
+- The breaking changes decision 31 lists, in one change with the seeds and the corpus written anew once.
+
 ## Code
 
 - The four bytes little-endian, `le32`, is written three times, in `user/wifi/esp32c6/mac.c`, `main.c` and `user/wifi/wlan.c`;
@@ -603,6 +623,28 @@ what is left:
 
 ## Scheduling
 
+What the wait for a turn and the work a thread gets are bound by is in `DESIGN.md`, "Scheduling";
+the first five below are what does not keep to it yet, each a constant-time change:
+
+- A pool destroy stops only for a pending interrupt, `cap_stop_here`,
+  so a thread with time its walk wakes waits for the rest of the walk while the core's timer lies past the next tick,
+  and on another core for all of it, since the interrupt between cores goes out as the lock is given up.
+  Stopping also where the trap made ready a thread the core's timer does not allow for,
+  or owes another core an interrupt, would bound that by a tick;
+  the transcripts would not move, as the host stops at every step.
+- `pool_alloc` zeroes an object a byte a store with interrupts off,
+  and a table of `CAPTABLE_MAX_SLOTS` slots is 24,596 stores, longer than a tick at 10 kHz on every board,
+  where the wait's bound needs the kernel's longest step shorter than a tick.
+  Zeroing a word a store, or a table in steps that stop, and measuring the longest step on each board,
+  would say how short a tick each board can take.
+- On ARM and RP2350's Hazard3 an `OP_IRQ_SET` on a core other than the first interrupts the first core each time,
+  so a driver there that arms its line in a loop takes what it likes of the first core's turns, which its threads pay for.
+  Interrupting it only as `core_notify` does, or routing a line to its waiter's core, open decision 24, would bound it.
+- `OP_DEBUG_TICK` and a stop `OP_DEBUG_PREEMPT` armed move the tick count without time passing,
+  and untraced the count stays ahead of the counter for good, so every deadline set before fires early, the watchdog's among them.
+  Only the replay driver calls them, under tracing, so refusing them untraced with `KERR_STATE` would cost nothing.
+- A bind of a ready thread, even to more units of its core, puts it at the back of its queue,
+  since the old binding goes through `sched_unbind`'s settle; keeping its place would keep its wait.
 - The tick is the build's, `TIMER_HZ`, and `make check` builds the default alone.
   The demo's charge check in `user/init/units.c` takes a tick for a millisecond, so `make test` fails it at any other rate:
   nothing the kernel tells a program says how long a tick is,
@@ -614,7 +656,9 @@ what is left:
   Time judged against what the rest of the tick costs, as `turn_owes` charges it, rather than a whole tick,
   would keep its turn, and change nothing under tracing, where every turn begins at a tick.
 - A turn is one tick while another thread could run, so the timer skips ticks only for a thread alone,
-  and a turn that begins mid-tick gets only the rest of one.
+  and a turn that begins mid-tick gets only the rest of one,
+  so threads that wait just before every tick can leave a thread with time the end of each,
+  and its work is bounded by its units, `DESIGN.md`, "Scheduling", where turns of a whole quantum would bound it by its turns too.
   A turn of a few ticks, or of what the thread's account holds, would skip them while threads compete too,
   and give turns the length the scheduler chooses: `sched_wake_ticks` would return the turn's end instead of one.
   It changes what `OP_DEBUG_TICK` means to the replay, which passes records with it,
@@ -636,6 +680,8 @@ what is left:
   More lets an idle thread bring back a longer burst, which the others then wait out;
   less holds a thread nearer its units over short stretches;
   decide when a workload measures the difference.
+  It bounds the work a thread gets beside threads that save up their time, (64 - u) / u tenths of a second at worst, whatever the tick;
+  a cap in ticks, `COUNT_PARTS` and one at the least, or one the granter sets with the units, would shorten that with the tick.
 - A thread is stopped by revoking its units and started again by binding it,
   which is what a userspace scheduler, open decision 9 in `DESIGN.md`, needs.
   A thread waiting on a notification stays on it meanwhile, and cannot be taken off it today.

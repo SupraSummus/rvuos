@@ -690,6 +690,15 @@ static void check_core(uint32_t i)
             fail("a turn's payer that waits is not the turn's first lender", i, v2p(payer), payer->lend_to);
         }
     }
+    /*
+     * A turn on spare time is one no thread with time wants, so it ends as the trap that makes one ready does,
+     * unless its thread stands at a call stopped for an interrupt, which it makes again first;
+     * on another core that runs user mode it ends as that core traps, which whoever made the thread ready owes it.
+     */
+    if (!c->recall && c->run_queue != 0 && sched_spare_turn(c) &&
+        (c == core_self() || (c->in_user && !c->interrupt_owed))) {
+        fail("a turn on spare time runs while a thread with time waits", i, v2p(c->turn), c->run_queue);
+    }
     if (debug_trace && c->turn_from != 0) {
         fail("a traced turn is charged from within a tick", i, c->turn_from, 0);
     }
