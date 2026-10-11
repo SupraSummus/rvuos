@@ -111,6 +111,11 @@ uint32_t self_migrate(struct self *s, uint32_t pool, uint32_t slots);
 /* A frame installed in a region of its own process, and the region back. */
 uint32_t region_install(struct self *s, uint32_t frame, uint32_t rights, uint32_t *region);
 uint32_t region_free(struct self *s, uint32_t region);
+/*
+ * Zeroes a frame of size bytes at base through a region of its own for the moment,
+ * so that nothing the memory's last user wrote is left for the next.
+ */
+uint32_t frame_zero(struct self *s, uint32_t frame, uint32_t base, uint32_t size);
 
 /* A bit of its inbox, to name one thing that signals it. */
 uint32_t bit_new(struct self *s, uint32_t *bit);

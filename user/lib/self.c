@@ -155,6 +155,14 @@ uint32_t region_free(struct self *s, uint32_t region)
     return KERR_OK;
 }
 
+uint32_t frame_zero(struct self *s, uint32_t frame, uint32_t base, uint32_t size)
+{
+    uint32_t region;
+    PASS(region_install(s, frame, RIGHT_R | RIGHT_W, &region));
+    memset((void *)(uintptr_t)base, 0, size);
+    return region_free(s, region);
+}
+
 uint32_t bit_new(struct self *s, uint32_t *bit)
 {
     uint32_t i;

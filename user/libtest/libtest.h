@@ -58,6 +58,7 @@ struct fault_page {
 enum {
     CLIENT_DONE = CHILD_RUNNING + 1, /* had every packet back as it sent it */
 };
+#define CLIENT_STEP_DIRTY 3u /* its channel held bytes when it started; detail is the offset in a ring */
 struct server_page {
     struct child_page c;
     struct chan_end ends[HUB_CLIENTS];

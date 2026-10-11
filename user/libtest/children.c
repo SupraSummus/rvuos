@@ -131,16 +131,34 @@ void server_main(struct child_page *page)
     }
 }
 
+/* The offset of the first byte of a ring's that is not zero, or the ring's bytes. */
+static uint32_t ring_dirt(const struct ring *r)
+{
+    const volatile uint8_t *b = (const volatile uint8_t *)(uintptr_t)r->base;
+    uint32_t bytes = ring_bytes(r->slots, r->slot_size);
+    for (uint32_t k = 0; k < bytes; k++) {
+        if (b[k] != 0) {
+            return k;
+        }
+    }
+    return bytes;
+}
+
 /*
- * A packet at a time, and each back before the next;
- * then one more, whose echo it leaves in the ring, which the next client on its end must not see.
+ * A packet at a time, and each back before the next, once it found its channel zeroed;
+ * then one more, whose echo it leaves in the ring, which the next client on its end must neither take nor read.
  */
 void client_main(struct child_page *page)
 {
     struct client_page *p = (struct client_page *)page;
+    uint32_t at;
     child_report(page, CHILD_RUNNING);
     while (!chan_ready(&p->link)) {
         wait_any();
+    }
+    if ((at = ring_dirt(&p->link.rx)) != ring_bytes(p->link.rx.slots, p->link.rx.slot_size) ||
+        (at = ring_dirt(&p->link.tx)) != ring_bytes(p->link.tx.slots, p->link.tx.slot_size)) {
+        child_fail(page, CLIENT_STEP_DIRTY, at);
     }
     for (uint32_t n = 0; n < PACKETS; n++) {
         uint8_t *slot;

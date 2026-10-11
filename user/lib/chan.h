@@ -70,7 +70,7 @@ struct chan {
     struct ring a, b; /* the first half's ring and the second's */
 };
 
-/* A channel of size bytes, a power of two, its two rings of packets of up to slot_size bytes laid out. */
+/* A channel of size bytes, a power of two, zeroed, its two rings of packets of up to slot_size bytes laid out. */
 uint32_t chan_new(struct self *s, struct chan *ch, uint32_t size, uint32_t slot_size);
 /*
  * Connects two children, which may be running: in each, the frame installed in a free region,
@@ -101,7 +101,8 @@ uint32_t chan_hub_new(struct self *s, struct chan_hub *h, struct child *server, 
                       uint32_t size, uint32_t slot_size);
 /*
  * Connects a client to end i, both of which may be running, once the end is idle:
- * its channel carved and installed in the client, a bit of the client's inbox for it,
+ * its channel carved, zeroed, so that nothing of the end's last client's is left to read, and installed in the client,
+ * a bit of the client's inbox for it,
  * and each side's inbox in the other's table, carved to its bit; then both ends written and both children told.
  * KERR_STATE when the server has not let go of the end's last client yet.
  */

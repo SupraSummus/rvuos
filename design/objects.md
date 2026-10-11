@@ -717,6 +717,9 @@ Each end keeps where its rings lie and their shape in memory the other end canno
 since a ring's own header, shared, would let a peer steer the other's writes outside the ring;
 all a peer can spoil is a packet.
 It can still make a ring seem as full as it likes, so a server takes a ring's worth from each client for each wake.
+A channel starts zeroed, a hub's end connected again among them,
+since the memory's last user, a client taken down or a child whose block it was, wrote what the next has no business reading;
+"Kernel pools and revocation" leaves that to whoever lends memory.
 
 A region for each client would bound a server's clients by its regions, seven at most on RP2350's Hazard3,
 less the server's code, data and devices.

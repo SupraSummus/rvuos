@@ -268,7 +268,7 @@ which takes the channel from the client and the client's inbox from the server, 
 The server, told, sees with `chan_changed` that an end was closed or connected,
 forgets what it kept for the end's last client, and says so with `chan_seen`;
 only then is the end idle, `chan_hub_idle`, and may another client be connected to it,
-whose rings start empty.
+whose channel starts zeroed, as every channel does, so that nothing the last client sent or was sent is left to read.
 
 **A lock** over memory children share is a word in that memory and a notification each holds with `RIGHT_R` and `RIGHT_W`,
 both from their parent, which writes the word's address and the notification's slot into each page.
@@ -290,7 +290,7 @@ Its root task reads bytes back out of free memory, has two children send each ot
 and builds, hears fault and takes down a child twice;
 it checks a child that answers and one that spins, and finds the second;
 then, in room for children's data, it builds a server with a hub and a client on each end,
-and takes one client down and connects another in its place twice;
+and takes one client down and connects another in its place twice, each finding its channel zeroed;
 has three children add to a count they share under a lock, each sleeping now and then while it holds it;
 waits for an event a child sets, each set ending a wait, and for one nothing sets, which its deadline ends;
 hands a buffer between two children and back, then takes it from the last, which must fault when it stores to it;

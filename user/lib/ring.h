@@ -29,10 +29,13 @@ struct ring {
     uint32_t slot_size; /* bytes a slot holds past its length word, a multiple of four */
 };
 
-/* A ring laid out in bytes of memory at base: the slots of slot_size that fit, rounded down to a power of two. */
+/*
+ * A ring laid out in bytes of memory at base: the slots of slot_size that fit, rounded down to a power of two.
+ * Zeroed memory is an empty ring.
+ */
 struct ring ring_shape(uint32_t base, uint32_t bytes, uint32_t slot_size);
-/* Empties a ring, before either side uses it. */
-void ring_init(const struct ring *r);
+/* The bytes a ring of slots slots of slot_size takes, its counters among them. */
+uint32_t ring_bytes(uint32_t slots, uint32_t slot_size);
 
 /* The slot to fill next, or 0 if the ring is full. */
 uint8_t *ring_put_begin(const struct ring *r);

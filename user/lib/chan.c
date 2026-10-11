@@ -55,16 +55,6 @@ void chan_seen(struct chan_end *e, uint32_t gen)
     rv_signal(CHILD_PARENT, NOTIFY_ALL_BITS);
 }
 
-/* Empties the rings of a frame, through a region of the parent's for the moment. */
-static uint32_t rings_init(struct self *s, uint32_t frame, const struct ring *a, const struct ring *b)
-{
-    uint32_t region;
-    PASS(region_install(s, frame, RIGHT_R | RIGHT_W, &region));
-    ring_init(a);
-    ring_init(b);
-    return region_free(s, region);
-}
-
 /* Written last, once the rest of the end is, and odd: connected. */
 static void open_end(struct chan_end *e)
 {
@@ -76,7 +66,7 @@ uint32_t chan_new(struct self *s, struct chan *ch, uint32_t size, uint32_t slot_
     PASS(mem_frame(s, size, &ch->frame));
     ch->a = ring_shape(ch->frame.base, size / 2u, slot_size);
     ch->b = ring_shape(ch->frame.base + size / 2u, size / 2u, slot_size);
-    uint32_t status = rings_init(s, ch->frame.made, &ch->a, &ch->b);
+    uint32_t status = frame_zero(s, ch->frame.made, ch->frame.base, size); /* its rings empty */
     if (status != KERR_OK) {
         const char *what = s->what;
         mem_give(s, &ch->frame);
@@ -167,7 +157,7 @@ uint32_t chan_hub_connect(struct self *s, struct chan_hub *h, uint32_t i, struct
     }
     PASS(slot_new(s, &h->slices[i]));
     TRY(s, "a client's channel", rv_frame_carve(h->frame.made, i * h->size, h->size, h->slices[i]));
-    PASS(rings_init(s, h->slices[i], &se->tx, &se->rx));
+    PASS(frame_zero(s, h->slices[i], h->frame.base + i * h->size, h->size));
     PASS(child_map(s, client, h->slices[i], RIGHT_R | RIGHT_W, &region));
     PASS(child_bit(s, client, &ce->bit));
     PASS(child_give_bits(s, client, h->server->inbox, se->bit, &ce->peer));

@@ -30,10 +30,9 @@ struct ring ring_shape(uint32_t base, uint32_t bytes, uint32_t slot_size)
     return (struct ring){ base, slots, slot_size };
 }
 
-void ring_init(const struct ring *r)
+uint32_t ring_bytes(uint32_t slots, uint32_t slot_size)
 {
-    counters(r)->head = 0;
-    counters(r)->tail = 0;
+    return sizeof(struct counters) + slots * (SLOT_HEADER + ((slot_size + 3u) & ~3u));
 }
 
 uint8_t *ring_put_begin(const struct ring *r)
