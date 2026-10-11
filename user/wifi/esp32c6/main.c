@@ -438,6 +438,7 @@ static __attribute__((noreturn)) void listen(struct drv *d)
  * The station runs in a thread of its own, sta.c, and the first thread attends to the root task alone,
  * as it alone waits on the driver's inbox: it answers the root task's checks, hands the station what the network
  * process put into the link, and passes the root task's ask to leave on, once.
+ * It waits only once the link is empty, as the network process signals a put into an empty ring alone.
  */
 static __attribute__((noreturn)) void attend(struct drv *d)
 {
@@ -445,12 +446,14 @@ static __attribute__((noreturn)) void attend(struct drv *d)
     for (;;) {
         uint32_t bits;
         child_answer(&d->c);
-        sta_link_take(d);
+        int more = sta_link_take(d);
         if (d->leave && !passed) {
             passed = 1;
             sta_leave();
         }
-        rv_wait(CHILD_INBOX, &bits);
+        if (!more) {
+            rv_wait(CHILD_INBOX, &bits);
+        }
     }
 }
 

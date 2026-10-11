@@ -39,7 +39,8 @@ void sta_leave(void);
 /*
  * What the network process put into the link, encrypted and sent, by the driver's first thread,
  * which alone waits on the driver's inbox and so alone is woken by the link; see main.c.
+ * No more than the ring holds at a time, as the network process is not trusted: 1 if it has more.
  */
-void sta_link_take(struct drv *d);
+int sta_link_take(struct drv *d);
 
 #endif

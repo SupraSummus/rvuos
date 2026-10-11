@@ -560,7 +560,7 @@ a traced Wi-Fi start straight after one read `0x600A4400` at its third access as
 where runs after a Wi-Fi run read `0xc1cb3754`, as the gate's did.
 A traced run, or a gate, goes after a Wi-Fi run.
 
-## The driver's memory
+## The driver's memory, and whom it trusts
 
 The driver's own code takes no memory as it runs.
 The MAC's list and its sending's frame, the station's frames, the queues and locks, and every thread's stack
@@ -571,3 +571,10 @@ hostap's supplicant and Mbed TLS as a station joins, about 12 KB at the most und
 and the libraries in a traced window of their start, about 28 KB; the two never run in one run.
 `libphy.a` takes nothing from it in the driver's own start, as a heap that named each block's caller found.
 The link fails if any other of the driver's objects calls an allocator, `WIFI_ESP_HEAP` in `build.mk`.
+
+The driver holds the modem, a bus master that reaches all of RAM, so it is trusted as the root task is;
+see open decision 13. The network process trusts the driver, as it cannot do otherwise,
+and the driver does not trust the network process, nor the network process its clients.
+So the driver reads each slot of the link once, into the frame the MAC sends, and writes each frame it hands on once,
+and it takes no more of the link at a time than the ring holds, as `lib/chan.h` asks of an end that does not trust its peer:
+a network process that kept the ring looking full would otherwise keep the first thread from the root task's checks.

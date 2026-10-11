@@ -1466,31 +1466,43 @@ static int send_from(struct drv *d, const struct source *src)
     return 1;
 }
 
+/*
+ * The link's source, which gives no more frames in a take than the ring holds, as many as an honest network process
+ * can have put meanwhile, so that one that keeps the ring looking full keeps the first thread from nothing else.
+ */
+struct link_take {
+    struct drv *d;
+    uint32_t taken;
+};
+
 static const uint8_t *link_next(void *arg, uint32_t *len)
 {
-    struct drv *d = arg;
-    return chan_get_begin(&d->link, len);
+    struct link_take *t = arg;
+    return t->taken < t->d->link.rx.slots ? chan_get_begin(&t->d->link, len) : 0;
 }
 
 static void link_taken(void *arg)
 {
-    struct drv *d = arg;
-    chan_get_end(&d->link);
+    struct link_take *t = arg;
+    chan_get_end(&t->d->link);
+    t->taken++;
 }
 
-void sta_link_take(struct drv *d)
+int sta_link_take(struct drv *d)
 {
-    const struct source link_source = { link_next, link_taken, d };
+    struct link_take t = { d, 0 };
+    const struct source link_source = { link_next, link_taken, &t };
     uint32_t len;
-    while (chan_get_begin(&d->link, &len) != 0) {
+    while (link_next(&t, &len) != 0) {
         if (sta.state == NONE) {
-            chan_get_end(&d->link);
+            link_taken(&t);
             continue;
         }
         uint32_t c = prof_cycles();
         send_from(d, &link_source);
         prof_add(&drv_prof.tx_link, prof_cycles() - c);
     }
+    return chan_get_begin(&d->link, &len) != 0;
 }
 
 /*
