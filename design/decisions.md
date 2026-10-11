@@ -263,7 +263,7 @@ until the maintainer decides otherwise.
     Before, a periodic task drifted by each wake's lateness,
     and each tick was set a period after its handling, a few percent slow under QEMU.
 
-17. **CPU time per thread.**
+17. **CPU time and wakes per thread.**
     Working default: none; the clock gives the machine's time, which includes other threads' slices.
     Only the kernel sees a switch, so only it can count,
     and it reads the counter at every change of turn already, to charge the turn;
@@ -272,6 +272,14 @@ until the maintainer decides otherwise.
     because a thread that can read its own time has a clock.
     A read of the counter by system call could join it,
     for a board whose counter no region can show, or to spare a region slot.
+    - **Turns and wakes.**
+      Beside the time, the kernel could count each thread's turns and the waits that parked it, four bytes each,
+      on paths that change the thread already.
+      A mechanism's cost shows in the wakes it takes for its work:
+      `lib/bulk.h`'s first lenders woke half again as often as a channel's ends for the same frames,
+      which only a count the Wi-Fi driver kept of itself found.
+      The counts are not time, so a page of a thread's description could tell them, `OP_CAP_INFO`, decision 33,
+      to a holder with `RIGHT_W`, as a stopped thread's registers are, since they tell when the thread ran.
     Decide with the first program that needs it.
 
 18. **What a thread's account counts, and when it has time.**
