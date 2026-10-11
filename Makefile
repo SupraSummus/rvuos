@@ -53,7 +53,11 @@ ifeq ($(filter qemu mps2-an521 rp2350,$(BOARD)),)
 $(error BOARD=$(BOARD) runs one core; only qemu, mps2-an521 and rp2350 take CORES=$(CORES))
 endif
 endif
-VARIANT := $(PMP_VARIANT)$(if $(filter-out 1,$(CORES)),-smp$(CORES))
+# The tick's rate, which is the quantum: the longest turn a thread takes while another could run; see DESIGN.md, "Scheduling".
+# A rate other than the default builds in a directory of its own, the host harnesses' too, as a budget does.
+TIMER_HZ ?= 1000
+TIMER_VARIANT := $(if $(filter-out 1000,$(TIMER_HZ)),-hz$(TIMER_HZ))
+VARIANT := $(PMP_VARIANT)$(if $(filter-out 1,$(CORES)),-smp$(CORES))$(TIMER_VARIANT)
 
 # The board's architecture, which only RP2350 lets the command line change;
 # the other one builds in a directory of its own, as a budget does.
@@ -77,7 +81,7 @@ endif
 CFLAGS    := $(ARCHFLAGS) -std=c11 -ffreestanding -fno-builtin -fno-pic -fno-common \
              -nostdlib -O2 -g -Wall -Wextra -Werror -Wundef -Wshadow \
              -Wstrict-prototypes -Wmissing-prototypes -Iinclude \
-             -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -DCORES=$(CORES)
+             -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -DCORES=$(CORES) -DTIMER_HZ=$(TIMER_HZ)
 ASFLAGS   := $(ARCHFLAGS) -g -Iinclude -DCORES=$(CORES)
 LDFLAGS   := $(ARCHFLAGS) -nostdlib -static -fuse-ld=lld -Wl,--gc-sections -Wl,--no-dynamic-linker
 

@@ -23,7 +23,7 @@ Chapters 10 and 11 of the user manual; [`MANUAL.md`](../MANUAL.md) has its conte
 | most of its units an account holds | 100 ticks' worth, 100 ms (`ACCOUNT_TICKS`) | `kernel/timer.h` |
 | timer delay or period per call | 2^32 - 1 µs | `OP_IRQ_SET` |
 | watchdog's delay | 10 s | `WATCHDOG_US_MAX` |
-| tick | 1 ms (`TIMER_HZ` 1000) | `kernel/timer.h` |
+| tick, the quantum | 1 ms (`TIMER_HZ` 1000) unless the build sets another rate, `make TIMER_HZ=` | `kernel/timer.h`, Makefile |
 | interrupt lines | 96 on QEMU, 77 on the ESP32-C6, 52 on RP2350, 32 on mps2-an385, 48 on mps2-an521, line 0 the log's | `IRQ_LINES` |
 | smallest region | 8 bytes, or the PMP grain if coarser, 32 bytes on ARM | `region_min_size` in `kernel/pmp.h` |
 | kernel log ring | 4 KiB less a 32-byte header | `KLOG_SIZE` |

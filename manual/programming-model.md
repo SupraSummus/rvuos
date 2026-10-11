@@ -435,7 +435,7 @@ and arms one line for the nearest.
 The contract is a **lower bound**.
 The kernel fires at the first tick that surely lies past the delay:
 the delay rounded up to whole ticks, plus one.
-With a millisecond tick, as on both boards,
+With a millisecond tick, as every board has unless the build sets another rate,
 a delay of zero fires at the next tick,
 and a delay of 10 000 µs fires on the eleventh tick after the call,
 between 10 and 11 ms later.
@@ -659,7 +659,8 @@ and moves `taken` only as far as its host says it has the bytes, so a halt write
   joins the back of its queue.
 - A thread waiting with `OP_NOTIFY_LEND` lends the thread it names its account, section 5.12:
   a borrower without time waits on the run queue while its lender has time, and the turns it takes so cost the lender's account.
-- The machine timer ticks at `TIMER_HZ`, 1 kHz on both boards.
+- The machine timer ticks at `TIMER_HZ`, 1 kHz on every board unless the build sets another rate, `make TIMER_HZ=`,
+  which divides a second and the board's counter and is at least 650.
   A tick ends the running thread's turn:
   the thread goes to the back of its queue,
   and the thread that has waited longest on the run queue runs,

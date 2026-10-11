@@ -603,6 +603,10 @@ what is left:
 
 ## Scheduling
 
+- The tick is the build's, `TIMER_HZ`, and `make check` builds the default alone.
+  The demo's charge check in `user/init/units.c` takes a tick for a millisecond, so `make test` fails it at any other rate:
+  nothing the kernel tells a program says how long a tick is,
+  which the check, and a program's own timing analysis, would read from the kernel.
 - A thread whose account holds little more than a tick loses its time when its turn ends a few counts past a tick,
   as a trap that counts the tick late ends it, and spends the rest of that tick on spare time, or waiting without it.
   One that earns its whole core keeps its account where it is while it runs,

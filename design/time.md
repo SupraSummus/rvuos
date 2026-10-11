@@ -248,8 +248,12 @@ a thread has time again at a tick, which bounds how long it waits; open decision
 **The machine timer provides the tick.**
 A thread runs until it waits on a notification, until it faults,
 or until the tick takes the processor from it.
-The tick has a fixed period, `TIMER_HZ` in `kernel/timer.h`,
+The tick has a fixed period, `TIMER_HZ` in `kernel/timer.h`, which the build sets, a thousand a second unless `make TIMER_HZ=` says otherwise,
 and one tick is one turn: a preempted thread goes to the back of its queue.
+So the tick is the quantum, the longest turn a thread takes while another could run,
+and the build trades how long a thread may wait for its turn against how often the core switches while threads compete.
+`make lab` and `make bench` at 4 kHz and at 10 kHz showed the worst round trip beside a busy process shrink with the tick,
+and no call cost more; the commit that made the rate the build's says by how much.
 A turn that begins when a thread waits mid-tick lasts only to the next tick;
 `TODO.md` carries a turn counted from the switch.
 Interrupts are taken in user mode only:
