@@ -82,7 +82,7 @@ what is left:
   and the driver's own pool, `DRV_OWN_POOL`, is 8 KiB for 1544.
   Sized to fit, they would leave the ESP32-C6's root task 8 KiB more,
   and 14 with the driver's own, at a slot for each block that halving it leaves;
-  but no header gives an object's size, only `MANUAL.md`, section 5.5.
+  `OP_POOL_INFO` tells what each object takes, so `user/lib/child.c` could size them by asking.
 - A child's data comes from the parent's room whenever there is one, `self_room`,
   so a parent cannot keep some children in blocks of their own once it has made the room.
 - A child's stack grows down onto its page, and nothing stops it there;
@@ -365,6 +365,9 @@ what is left:
 
 ## Verification
 
+- The mutator's draws of the describing operations apart, one typed draw in eight, are not measured yet:
+  `make mutants-fuzz` before and after, from the corpus and from nothing, over a few seeds,
+  would say whether the allocations, a pool's other operation, kept their share, and what fuzzing finds of the new mutants.
 - No seed reaches a payer dropped as the turn's thread is destroyed:
   the turn's thread is the caller on its core, which keeps what it runs on, so only a call on another core can destroy it.
   Nor one destroyed itself from another core, which `core_thread_gone` tells its core of, as the turn may be left on spare time:
@@ -559,14 +562,9 @@ what is left:
 
 What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
 
-- A program can read a frame and an Untyped and no other capability:
-  not the units or lines a `Time` or `IrqLine` capability names, nor the bits a `Notification` capability may signal,
-  so it learns how many cores there are by the units it can carve;
-  nor how much room a pool has left, nor the size an object takes, which only `MANUAL.md` gives, section 5.5,
-  nor the tick, which a program's own timing analysis and the demo's charge check need.
 - The kernel ignores the arguments an operation does not use, and never reads `a4` to `a6`, which `rv_invoke` leaves as they were,
   so no unused argument can be given a meaning later without changing what a program that left garbage there does.
-  `OP_THREAD_STOP` alone refuses `a1` to `a3` not zero.
+  `OP_THREAD_STOP`, `OP_CAP_INFO` and `OP_POOL_INFO` alone refuse an argument they do not take.
   A design for decision 31's one change:
   one constant table in `kernel/syscall.c`, `op_shapes[OP_COUNT]`, gives each operation a mask of the types it is invoked on,
   so that one describing every type fits, the right it needs, and which of `a1` to `a3` it reads,
@@ -598,8 +596,8 @@ What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
   The `Irq` could hold its line as it holds its notification, by a node below the line capability,
   whose clearing disarms the `Irq` and frees the line; `DESIGN.md`, "Interrupts".
 - A pool whose every capability was deleted or revoked stays until the Untyped above it is revoked,
-  and nothing tells the holder of that Untyped what is left below it:
-  `OP_UNTYPED_INFO` says only that something is.
+  and `OP_CAP_INFO` on that Untyped says only that a pool lies first below it:
+  not the bytes the pool holds, nor whether anything outside it still holds its objects; open decision 33 in `DESIGN.md`.
 - A signal and a wait in one system call, the shape of seL4's `ReplyRecv`.
   Today it saves one trap per round trip and no context switch,
   because a signal does not take the processor away from the signaller.
@@ -660,10 +658,6 @@ the first five below are what does not keep to it yet, each a constant-time chan
   Only the replay driver calls them, under tracing, so refusing them untraced with `KERR_STATE` would cost nothing.
 - A bind of a ready thread, even to more units of its core, puts it at the back of its queue,
   since the old binding goes through `sched_unbind`'s settle; keeping its place would keep its wait.
-- The tick is the build's, `TIMER_HZ`, and `make check` builds the default alone.
-  The demo's charge check in `user/init/units.c` takes a tick for a millisecond, so `make test` fails it at any other rate:
-  nothing the kernel tells a program says how long a tick is,
-  which the check, and a program's own timing analysis, would read from the kernel.
 - A thread whose account holds little more than a tick loses its time when its turn ends a few counts past a tick,
   as a trap that counts the tick late ends it, and spends the rest of that tick on spare time, or waiting without it.
   One that earns its whole core keeps its account where it is while it runs,

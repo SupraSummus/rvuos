@@ -65,7 +65,8 @@ Consequences that shape the design:
   so every frame is exactly one PMP entry.
   Whether it may be installed depends on nothing but the process it goes into,
   since no frame overlaps a pool; see "Kernel pools and revocation".
-  `OP_FRAME_INFO` returns the smallest region, since user mode cannot read the PMP CSRs.
+  A frame's description, `OP_CAP_INFO` or `OP_FRAME_INFO`, returns the smallest region, since user mode cannot read the PMP CSRs,
+  and a process's how many regions it may have installed.
 - **An access must lie within one entry.**
   The lowest-numbered entry that matches any byte of an access decides,
   and it must match every byte or the access fails,

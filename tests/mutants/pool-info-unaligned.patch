@@ -1,0 +1,18 @@
+OP_POOL_INFO tells an object's bytes without the rounding to eight the pool counts them with,
+so an object it says fits may not.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
+Report: a description differs from the capability it describes
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -350,7 +350,7 @@ static int pool_info(const struct pool *pool, uint32_t *arg)
+     if (arg[2] != 0 || (type == CAP_CAPTABLE ? slots == 0 || slots > CAPTABLE_MAX_SLOTS : slots != 0)) {
+         return KERR_INVALID_ARG;
+     }
+-    arg[1] = obj_align((uint32_t)obj_type_size((uint8_t)type, slots));
++    arg[1] = (uint32_t)obj_type_size((uint8_t)type, slots);
+     arg[2] = pool_room(pool);
+     return KERR_OK;
+ }

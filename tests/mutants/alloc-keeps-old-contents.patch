@@ -13,7 +13,7 @@ Report: a call made a capability no capability of its caller covers
 diff --git a/kernel/boot.c b/kernel/boot.c
 --- a/kernel/boot.c
 +++ b/kernel/boot.c
-@@ -17,6 +17,9 @@ struct granted_range boot_granted[GRANTED_RANGES];
+@@ -22,6 +22,9 @@ struct granted_range boot_granted[GRANTED_RANGES];
  struct thread *boot_create_root(void)
  {
      /* Its own node is a root until the Untyped it lies below is in the table. */
@@ -22,7 +22,7 @@ diff --git a/kernel/boot.c b/kernel/boot.c
 +    ram_poison(p2v(BOOT_POOL_BASE), BOOT_POOL_SIZE);
      struct pool *pool = pool_create(BOOT_POOL_BASE, BOOT_POOL_SIZE, NULL);
  
-     struct captable *table = pool_alloc(
+     struct captable *table = pool_alloc(pool, CAP_CAPTABLE, obj_type_size(CAP_CAPTABLE, ROOT_TABLE_SLOTS));
 diff --git a/kernel/pool.c b/kernel/pool.c
 --- a/kernel/pool.c
 +++ b/kernel/pool.c

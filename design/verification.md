@@ -263,12 +263,34 @@ and above the same children, in their order.
 The tree's shape alone does not say so:
 a copy beside the source and a delete of it leave a whole tree too.
 
-These nine relate the state before a call to the state after it,
-so the self-check, which sees one state, cannot check them.
+**A description is the capability's.**
+A describing call, `OP_CAP_INFO` on any slot and `OP_POOL_INFO` on a pool,
+succeeds on a filled slot whatever the capability's rights,
+unless it is given an argument it does not take, which it refuses,
+and fails on a slot that names nothing, as every call does.
+It returns the type, the rights and what `include/rvuos/abi.h` says the type tells, as the call found them,
+no object's address among them,
+and it changes no node, no object, no pool's descriptor and no table's header.
+What the tail of every call and its trace line may move is left out:
+a thread's state, queues, account and frame, a notification's bits and waiters, an `Irq`'s bits.
+
+**A pool's room is what an allocation may take.**
+An allocation from a pool, `OP_POOL_ALLOC`'s or `OP_IRQ_BIND`'s, fails for want of room
+only when what its type takes, rounded as the pool counts it, is more than the room as the attempt found it,
+in a pool not being destroyed,
+and one that succeeds takes exactly that; `OP_POOL_INFO` tells those bytes and that room.
+Any other status comes from a check before the room's and says nothing of it.
+The type is measured by the structures' own sizes, as `MANUAL.md` gives them, not by the kernel's `obj_type_size`,
+so an allocator and a walk that agree on a wrong size show too.
+
+These eleven relate the state before a call to the state after it,
+so the self-check, which sees one state, cannot check them,
+and it gains no check for the last two: a description changes no state,
+and the self-check's tiling holds the sizes the allocator takes, `obj_type_size`'s, to those the walk steps by, `obj_size`'s.
 `host/history.c` checks them around every call of the host build, the untraced prologue's too,
 and around every fault, which must change no more than a call that moves no time,
-but a move's place only around a traced call,
-since it follows the tree's links and only the self-check vets them.
+but a move's place and a description only around a traced call,
+since they follow the tree's links and only the self-check vets them.
 It does not know what memory held before a call,
 so an object handed out unzeroed shows only by what it holds:
 the host's RAM starts out holding a pattern and keeps the objects of the input before,
@@ -330,6 +352,9 @@ and may use what an earlier record made or come again with fresh slots,
 so a chain of splits down to a small pool is a mutation or two.
 A wrong entry in the table draws worse arguments and hides nothing,
 and the untyped draws stay, for the refusals the types leave out.
+An operation that describes is drawn apart, one typed draw in eight,
+since every type takes `OP_CAP_INFO` and a pool `OP_POOL_INFO` besides,
+which drawn among the rest would halve the draws of a pool's allocation, the operation that builds every object.
 The coverage that guides it is the kernel's alone:
 the self-check and the harness walk every object after every call,
 so their edges would reward an input for the objects it leaves rather than for what the kernel did,
@@ -473,8 +498,11 @@ one on the second destroys the boot pool and the first thread with it,
 and either is refused its own.
 The state both builds start from is in `include/rvuos/replay.h`
 rather than written out twice.
-`OP_DEBUG_TRACE` makes the kernel print one line per call
+`OP_DEBUG_TRACE` makes the kernel print one line per call,
+and after a describing call that succeeded a line of what it returned,
 and run the self-check after it, reading the PMP CSRs back.
+So the replay holds the real kernel's answers to the host's as well as its statuses:
+the probe of the PMP and the timer, which the host's shim stands in for, show in a description.
 `tests/differential.py` requires the host and QEMU transcripts
 to match line for line,
 and fails an input whose transcript ends in an invariant report or a kernel panic,

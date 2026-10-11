@@ -1,0 +1,17 @@
+A table's description tells where the table lies in the kernel's memory, besides its slots;
+no result of a describing call is an object capability's address.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a description differs from the capability it describes
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -933,6 +933,7 @@ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *a
+     }
+     case CAP_CAPTABLE:
+         arg[2] = ((const struct captable *)cap_object(cap))->nslots;
++        arg[3] = cap->a;
+         break;
+     case CAP_PROCESS:
+         /* What process_install holds an install to: a slot each, and an entry each. */

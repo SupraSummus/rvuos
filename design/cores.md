@@ -56,7 +56,7 @@ So which core a thread runs on is authority, held as units are, and no policy in
 A thread bound to another core's units during its turn finishes the turn, which then ends at the next tick, and moves:
 `t->core` names the core it runs and waits on, and changes as the thread settles while it is no core's turn.
 Spare time is each core's own: a thread on spare time runs on its core when nobody there with time wants it.
-A program learns how many cores there are by the units it can carve out of `BOOT_CAP_TIME`.
+A program learns how many cores there are from `BOOT_CAP_TIME`'s count, which its description, `OP_CAP_INFO`, tells.
 
 **Time is the machine's, and each core counts up to it.**
 The tick count, the deadlines of the timer lines and every account count the machine's ticks,

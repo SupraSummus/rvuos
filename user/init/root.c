@@ -75,6 +75,25 @@ static void take_frame(uint32_t slot, uint32_t *base, uint32_t *size)
     expect("let its Untyped go", rv_invoke(OP_CAP_DELETE, BOOT_CAP_CAPTABLE, SLOT_BLOCK, 0, 0));
 }
 
+/* The bytes an allocation may still take of a pool, as its description tells them. */
+static uint32_t room_of(uint32_t pool)
+{
+    uint32_t type, rights, w[3];
+    expect("describe the pool",
+           rv_cap_info(pool, &type, &rights, w) == KERR_OK && type == CAP_POOL ? KERR_OK : KERR_INVALID_ARG);
+    return w[1];
+}
+
+/* What the pool's room fell by since *room is what OP_POOL_INFO says an object of the type takes. */
+static void took(uint32_t pool, uint32_t *room, uint32_t type, uint32_t slots)
+{
+    uint32_t bytes, left;
+    expect("it took what the pool said it would",
+           rv_pool_info(pool, type, slots, &bytes, &left) == KERR_OK && left == room_of(pool) && *room - left == bytes
+               ? KERR_OK : KERR_INVALID_ARG);
+    *room = left;
+}
+
 int main(void);
 
 int main(void)
@@ -105,6 +124,24 @@ int main(void)
     expect("the layout fits the smallest region",
            rv_frame_min_size(BOOT_CAP_DATA, &min_size) == KERR_OK && CHUNK % min_size == 0
                ? KERR_OK : KERR_INVALID_ARG);
+    /*
+     * A capability describes itself to whoever holds it, and with it what the machine allows its type:
+     * a process how many regions it may have installed at once, a frame the smallest region.
+     */
+    uint32_t type, rights, w[3];
+    expect("describe the root task's process",
+           rv_cap_info(BOOT_CAP_PROCESS, &type, &rights, w) == KERR_OK && type == CAP_PROCESS && rights == RIGHT_ALL
+               ? KERR_OK : KERR_INVALID_ARG);
+    uint32_t regions = w[0];
+    expect("describe its data, as the frame's own operation does",
+           rv_cap_info(BOOT_CAP_DATA, &type, &rights, w) == KERR_OK && type == CAP_FRAME &&
+                   rights == (RIGHT_R | RIGHT_W) && w[0] == data_base && w[1] == data_size && w[2] == min_size
+               ? KERR_OK : KERR_INVALID_ARG);
+    puts("root: described: regions ");
+    rv_put_hex(BOOT_CAP_DEBUG, regions);
+    puts(" smallest ");
+    rv_put_hex(BOOT_CAP_DEBUG, w[2]);
+    puts("\n");
 
     take_frame(SLOT_SHARED, &shared_base, &shared_size);
     take_frame(SLOT_CHILD_DATA, &child_data_base, &child_data_size);
@@ -355,12 +392,38 @@ int main(void)
      * with the second core's threads below, for the sleeps that follow and the successor.
      */
     expect("make a pool of the child's memory again", rv_retype(SLOT_POOL_MEMORY, CAP_POOL, SLOT_POOL, &pool_base));
+    /*
+     * A pool tells what is left of it and what an object of each type takes, so a program sizes its pools by asking;
+     * see DESIGN.md, "Kernel pools and revocation".
+     * Each object made of this one, and a table, a process and a thread in slots the second core's take later,
+     * takes of it what OP_POOL_INFO said: on ARM and on the boards nothing else holds the two to each other.
+     */
+    uint32_t room = room_of(SLOT_POOL), descriptor, left;
+    expect("its room is all of it but its descriptor",
+           rv_pool_info(SLOT_POOL, CAP_POOL, 0, &descriptor, &left) == KERR_OK && left == room &&
+                   room == pool_size - descriptor
+               ? KERR_OK : KERR_INVALID_ARG);
     expect("allocate the timer's notification again",
            rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_NOTIFICATION, SLOT_TIMER_NTFN, 0));
+    took(SLOT_POOL, &room, CAP_NOTIFICATION, 0);
     expect("carve the timer line again, which its bind took",
            rv_invoke(OP_IRQ_CARVE, BOOT_CAP_TIMER_LINES, 0, 1, SLOT_TIMER_LINE));
     expect("bind it to the notification",
            rv_invoke(OP_IRQ_BIND, SLOT_TIMER_LINE, SLOT_POOL, SLOT_TIMER_NTFN, SLOT_TIMER));
+    took(SLOT_POOL, &room, CAP_IRQ, 0);
+    expect("allocate a table to weigh",
+           rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_CAPTABLE, SLOT_CHILD_TABLE, CHILD_TABLE_SLOTS));
+    took(SLOT_POOL, &room, CAP_CAPTABLE, CHILD_TABLE_SLOTS);
+    expect("a process of it",
+           rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_PROCESS, SLOT_CHILD_PROCESS, SLOT_CHILD_TABLE));
+    took(SLOT_POOL, &room, CAP_PROCESS, 0);
+    expect("a thread in it",
+           rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_THREAD, SLOT_CHILD_THREAD, SLOT_CHILD_PROCESS));
+    took(SLOT_POOL, &room, CAP_THREAD, 0);
+    expect("let the thread go", rv_invoke(OP_CAP_DELETE, BOOT_CAP_CAPTABLE, SLOT_CHILD_THREAD, 0, 0));
+    expect("and the process", rv_invoke(OP_CAP_DELETE, BOOT_CAP_CAPTABLE, SLOT_CHILD_PROCESS, 0, 0));
+    expect("and the table", rv_invoke(OP_CAP_DELETE, BOOT_CAP_CAPTABLE, SLOT_CHILD_TABLE, 0, 0));
+    puts("root: pool info ok\n");
 
     cores_demo(data_base, data_size, shared_base, counter, hz);
 

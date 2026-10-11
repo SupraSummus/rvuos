@@ -1,0 +1,28 @@
+A table takes a slot more than its count wherever the kernel counts it, so the walks agree with the allocator,
+and only the structure's own size, 12 bytes and 24 a slot rounded to eight as the manual gives it, tells the error,
+in the untraced prologue's table already.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: an object took other bytes than its type takes
+
+diff --git a/kernel/object.h b/kernel/object.h
+--- a/kernel/object.h
++++ b/kernel/object.h
+@@ -511,7 +511,7 @@ static inline size_t obj_type_size(uint8_t type, uint32_t slots)
+     case CAP_POOL:
+         return sizeof(struct pool);
+     case CAP_CAPTABLE:
+-        return sizeof(struct captable) + slots * sizeof(struct cap);
++        return sizeof(struct captable) + (slots + 1) * sizeof(struct cap);
+     case CAP_PROCESS:
+         return sizeof(struct process);
+     case CAP_THREAD:
+@@ -533,7 +533,7 @@ static inline size_t obj_size(const struct obj_header *obj)
+         return sizeof(struct pool);
+     case CAP_CAPTABLE: {
+         const struct captable *t = (const struct captable *)obj;
+-        return sizeof(*t) + t->nslots * sizeof(struct cap);
++        return sizeof(*t) + (t->nslots + 1) * sizeof(struct cap);
+     }
+     case CAP_PROCESS:
+         return sizeof(struct process);

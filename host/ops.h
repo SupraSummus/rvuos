@@ -26,6 +26,7 @@ enum arg_kind {
     ARG_CAPTABLE,
     ARG_TYPE,         /* an object type: what a retype or an allocation makes */
     ARG_ALLOC,        /* what an allocation's type wants: a count of slots, a table's slot, a process's slot */
+    ARG_SLOTS,        /* for a table, a count of slots, and 0 for another type: what OP_POOL_INFO's a3 wants */
     ARG_RIGHTS,
     ARG_REGION,       /* a region slot of the process */
     ARG_MOUNT,        /* a table slot of the process */
@@ -62,15 +63,23 @@ static inline uint8_t arg_type(uint8_t kind)
 /* What an operation puts in its ARG_DST slots when not a type of its own: the type a1 names. */
 #define MAKES_A1 0xff
 
-/* One operation: its name, the type of the capability it is invoked on, what it makes, and a1..a3. */
+/* The type of the capability an operation every type takes is invoked on, which no capability has. */
+#define ON_ANY 0xfe
+
+/*
+ * One operation: its name, the type of the capability it is invoked on, what it makes, and a1..a3,
+ * and whether it describes and changes nothing, which the mutator draws apart from the rest; see host/mutator.c.
+ */
 struct op_info {
     const char *name;
     uint8_t cap;
     uint8_t makes;
     uint8_t arg[3];
+    uint8_t describes;
 };
 
-#define OP(op, cap, makes, a1, a2, a3) [op] = { #op, cap, makes, { a1, a2, a3 } }
+#define OP(op, cap, makes, a1, a2, a3) [op] = { #op, cap, makes, { a1, a2, a3 }, 0 }
+#define DESCRIBE(op, cap, a1, a2, a3) [op] = { #op, cap, 0, { a1, a2, a3 }, 1 }
 
 static const struct op_info op_table[OP_COUNT] = {
     OP(OP_DEBUG_WRITE, CAP_DEBUG, 0, ARG_WORD, ARG_WORD, ARG_WORD),
@@ -113,16 +122,20 @@ static const struct op_info op_table[OP_COUNT] = {
     OP(OP_NOTIFY_LEND, CAP_NOTIFICATION, 0, ARG_THREAD, ARG_NONE, ARG_NONE),
     OP(OP_PROCESS_MOUNT, CAP_PROCESS, 0, ARG_MOUNT, ARG_CAPTABLE, ARG_NONE),
     OP(OP_PROCESS_UNMOUNT, CAP_PROCESS, 0, ARG_MOUNT, ARG_NONE, ARG_NONE),
+    DESCRIBE(OP_CAP_INFO, ON_ANY, ARG_NONE, ARG_NONE, ARG_NONE),
+    DESCRIBE(OP_POOL_INFO, CAP_POOL, ARG_TYPE, ARG_NONE, ARG_SLOTS),
 };
 
 #undef OP
+#undef DESCRIBE
 
-_Static_assert(OP_COUNT == 41 && OP_PROCESS_UNMOUNT == OP_COUNT - 1, "a new operation needs an entry in op_table");
+/* The assert sees only the highest code; LLVMFuzzerInitialize holds every code below it to an entry. */
+_Static_assert(OP_COUNT == 43 && OP_POOL_INFO == OP_COUNT - 1, "a new operation needs an entry in op_table");
 
 /* The loads and stores the driver makes itself, which invoke no capability. */
 static const struct op_info op_access[2] = {
-    { "REPLAY_OP_LOAD", CAP_NONE, 0, { ARG_ADDRESS, ARG_NONE, ARG_NONE } },
-    { "REPLAY_OP_STORE", CAP_NONE, 0, { ARG_ADDRESS, ARG_WORD, ARG_NONE } },
+    { "REPLAY_OP_LOAD", CAP_NONE, 0, { ARG_ADDRESS, ARG_NONE, ARG_NONE }, 0 },
+    { "REPLAY_OP_STORE", CAP_NONE, 0, { ARG_ADDRESS, ARG_WORD, ARG_NONE }, 0 },
 };
 
 /* The entry for an operation code, or NULL for one the kernel refuses. */

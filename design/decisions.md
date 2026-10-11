@@ -115,7 +115,8 @@ until the maintainer decides otherwise.
    Working default for the rest: no priorities;
    units promise a thread their part of the processor, give or take the accounts,
    and a thread with time a turn within a tick for each other thread with units of its core, and no more; see "Scheduling".
-   The tick is the quantum and the build's, `TIMER_HZ`, so the wait is the build's to set,
+   The tick is the quantum and the build's, `TIMER_HZ`, which a program reads from a clock's description, decision 33,
+   so the wait is the build's to set,
    against a switch every tick while threads compete, which nothing has measured yet;
    the work a thread gets is bounded by the others' accounts, which a shorter tick does not shorten, `TODO.md`.
    Priorities with preemption on wake, bounded by the account as a budget, are what a wait below a tick would take;
@@ -381,7 +382,7 @@ until the maintainer decides otherwise.
     - **Wakes.** A core that changes what another runs marks the other's timer stale,
       and interrupts it when it idles, runs on with its timer set past the next tick, or runs a turn on spare time a thread with time now waits for.
     - **The units.** `TIME_UNITS` of each core, so that which core a thread runs on is held as its units are;
-      a program learns how many cores there are by the units it can carve.
+      a program learns how many cores there are from `BOOT_CAP_TIME`'s count, which its description tells.
     - **A controller of each core's own**, as ARM's NVIC and RP2350's Hazard3's are: the first core's alone enables a device line,
       and a call on another that arms or disarms one leaves the change for the first to make as it next takes the lock,
       interrupting it for that; the line the cores interrupt each other on is the kernel's, and no `Irq` binds it.
@@ -475,6 +476,8 @@ until the maintainer decides otherwise.
 
     A smaller slot frees memory only in pools sized to what they hold, and sizing them comes first:
     it frees 8 KiB of the ESP32-C6's Wi-Fi system, where sixteen-byte slots would free 3 more; see `TODO.md`.
+    `OP_POOL_INFO` tells what each object takes as the pool counts it,
+    so a program that sizes its pools by asking survives a smaller slot unchanged; `user/lib/` does not ask yet.
     Decide once the system calls settle.
 
 30. **How the IEEE 802.15.4 nodes form a mesh.**
@@ -490,11 +493,10 @@ until the maintainer decides otherwise.
 
 31. **A stable ABI.**
     Working default: none; the ABI changes with the kernel, and the seeds and the corpus are written anew with it.
-    The model holds, and three things it lacks add without breaking anything:
-    a stop for a thread, which `OP_THREAD_STOP` is now, decision 32,
-    introspection, and arguments a program must leave zero, `TODO.md`;
-    the processor's time keeps its turns, whose wait the tick bounds, decision 9.
-    The rest would break a binary built against today's ABI, so it goes in one change, before the ABI is held still:
+    The model holds; two things it lacked were added without breaking anything:
+    a stop for a thread, `OP_THREAD_STOP`, decision 32, and introspection, `OP_CAP_INFO` and `OP_POOL_INFO`, decision 33.
+    Arguments a program must leave zero, `TODO.md`, and the rest below would break a binary built against today's ABI,
+    so they go in one change, before the ABI is held still:
     - **What the test format chose.**
       A replay record carries three arguments, so no operation takes a fourth:
       `OP_IRQ_BIND` makes its object through the `IrqLine` it consumes rather than through the pool,
@@ -509,7 +511,13 @@ until the maintainer decides otherwise.
       Operation codes are flat, in the order the operations came,
       and `Debug`'s four operations for tests lie among the rest.
       Codes grouped by type, with the tests' in a range of their own that a stable program never calls,
-      would keep `KERR_WRONG_TYPE` and say which calls the ABI promises.
+      would keep `KERR_WRONG_TYPE` and say which calls the ABI promises;
+      the describing calls, 41 and 42, came last, and every type takes the first.
+    - **Two ways to describe.**
+      `OP_FRAME_INFO` and `OP_UNTYPED_INFO` tell what `OP_CAP_INFO` tells of a frame and an Untyped,
+      with the rights in `a3` where it has them beside the type in `a1`, and an Untyped's `a4` as made or free;
+      they would go, and `rv_frame_info`, `rv_frame_min_size` and `rv_untyped_info` read `OP_CAP_INFO` instead,
+      so a program built against the wrappers changes only by being built again.
     - **Where a new capability goes.**
       `a1` for `OP_CAP_COPY`, `OP_CAP_DERIVE`, `OP_CAP_MOVE`, `OP_CLOCK_FRAME` and `OP_UNTYPED_SPLIT`,
       `a2` for `OP_UNTYPED_RETYPE`, `OP_POOL_ALLOC` and `OP_NOTIFY_CARVE`,
@@ -545,7 +553,8 @@ until the maintainer decides otherwise.
       a child that only tidies its own slots is given more than that.
     - **The rights a table does not use.**
       Decision 15's two open questions, a sealed table and one others may only put into, would each take a right,
-      and `RIGHT_R` and `RIGHT_X` on a `CapTable` mean nothing yet.
+      and `RIGHT_R` and `RIGHT_X` on a `CapTable` mean nothing yet;
+      describing another process's slots through a table, decision 33, could give the first its meaning.
     - **A limit the board does not keep.**
       `PROCESS_REGION_SLOTS` is eight, and RP2350's Hazard3 grants a process seven; `TODO.md`.
     - **What lending promises.**
@@ -558,7 +567,7 @@ until the maintainer decides otherwise.
       which it could tell from the pc instead, decision 32.
     - **A version.**
       The root task's thread starts with `a0` zero, which could carry the ABI's version.
-    Decide them together, with the seeds written anew once, after the two additions left.
+    Decide them together, with the seeds written anew once.
 32. **Stopping a thread.**
     Decided: `OP_THREAD_STOP` takes a thread to stopped from whatever it is doing, through a capability to it with `RIGHT_W`,
     with `a1` to `a3` zero, so that they may be given a meaning, and returns the state it found;
@@ -591,3 +600,35 @@ until the maintainer decides otherwise.
       Today a child kept from its watch ends with a breakpoint, and the library's children hold no capability to their own threads.
       Decide with the first child that should exit cleanly and be kept from its watch.
     - **Waking a stopped borrower's lenders**, a walk only a destroy pays for; see "Communication and synchronisation".
+33. **What a description tells.**
+    Working default: `OP_CAP_INFO` on any capability, with no right, tells its type and rights and three words by type,
+    and `OP_POOL_INFO` on a pool, with no right, what an object of a type takes of it and the room;
+    see "Capabilities" and "Kernel pools and revocation", and `include/rvuos/abi.h` for the words.
+    Each takes constant time, a load past the slot at most, changes nothing,
+    and returns no object's address, no bits a notification holds and not the time.
+    The machine's constants come from the capability they belong to:
+    the smallest region from a frame, the tick from a clock or a capability to units, the cores from `BOOT_CAP_TIME`'s count,
+    and the regions a process may have installed from the process,
+    so a program given no clock learns no tick, as one given no units learns no cores.
+    The results follow the call's line under tracing, so the replay holds QEMU's answers to the host's.
+    - **Pages.**
+      `OP_CAP_INFO`'s `a1` is a page, and only page 0 is told, so a later kernel can tell more without a new code:
+      a thread's state and core, which go with a stop for a thread, a process's installed regions and mounted tables,
+      or the smallest region to the holder of an Untyped alone.
+      `OP_POOL_INFO` could be such a page of a pool's description, at the price of arguments that differ by type.
+    - **The room without a right.**
+      A `KernelPool` capability with no right reads the pool's room, and so what its other holders allocate,
+      a channel between them that did not exist before;
+      `RIGHT_R` on a pool would close it, at the price of a right for that alone.
+    - **What an Untyped made.**
+      Its description tells the type of what lies first below it, which once a delete handed things up is one of a mixture,
+      and neither the bytes an unnamed pool below it holds nor whether something outside the pool still holds its objects,
+      which is the pool's node having no child;
+      nor can the Untyped's holder have a capability to that pool again.
+    - **Another process's slots.**
+      A supervisor or a debugger could describe a slot of a table it holds a capability to, by its index,
+      where today a copy goes only into a table, never out of one.
+    - **The words left at zero.**
+      A thread's, a table's, a process's and the debug capability's;
+      what fills them comes with the first program that needs it, or a page.
+    Decide with decision 31's changes, before the ABI is held still.

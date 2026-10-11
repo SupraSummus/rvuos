@@ -41,8 +41,9 @@ A slot of the invoked table, as `OP_CAP_COPY`'s destination is, is its index the
 
 The kernel checks in this order:
 the slot resolves (`KERR_INVALID_CAP`),
-the capability type carries `RIGHT_W` where the type needs it for every operation
-(`KERR_NO_RIGHTS`),
+then `OP_CAP_INFO`, which every type takes with no right, looks at its arguments, section 6.14;
+the capability type carries `RIGHT_W` where the type needs it for every operation,
+but for `OP_POOL_INFO` on a pool, which needs none (`KERR_NO_RIGHTS`),
 the type accepts the operation (`KERR_WRONG_TYPE`),
 the operation's own right and arguments.
 Operation codes are a single flat numbering across all types,
@@ -190,6 +191,8 @@ The call may be made again, section 6.1.
 No right needed.
 Returns `a1` = base, `a2` = size, `a3` = rights,
 `a4` = the size of the smallest region in bytes, a power of two of at least 8.
+`OP_CAP_INFO` tells the same, section 6.14;
+this operation goes with the ABI's breaking changes, `DESIGN.md`, open decision 31.
 
 **`OP_FRAME_CARVE` (5).**
 No right needed.
@@ -205,6 +208,8 @@ The parent capability is unchanged.
 No right needed.
 Returns `a1` = base, `a2` = size, `a3` = rights,
 `a4` = 1 while something made of it is left, 0 while it is free, section 5.4.
+`OP_CAP_INFO` tells the same, `a4` as the type of what lies first below it, section 6.14;
+this operation goes with the ABI's breaking changes, `DESIGN.md`, open decision 31.
 
 **`OP_UNTYPED_RETYPE` (6).**
 `a1` = the type, `CAP_FRAME` or `CAP_POOL` (`KERR_INVALID_ARG`),
@@ -225,7 +230,7 @@ A half must be no smaller than the smallest region, and the two slots must diffe
 
 ### 6.6 Operations on `KernelPool`
 
-A pool has one operation, which needs `RIGHT_W` on it;
+A pool allocates, which needs `RIGHT_W` on it, and tells what an allocation would take of it, which needs none;
 it is destroyed by revoking below its Untyped, section 5.5.
 
 **`OP_POOL_ALLOC` (7).**
@@ -242,6 +247,20 @@ Any other type is `KERR_INVALID_ARG`; `Irq` objects come from `OP_IRQ_BIND`.
 The new capability carries all rights and hangs below the invoked `KernelPool` capability.
 `KERR_NO_MEMORY` when the pool is full,
 `KERR_STATE` while the pool is being destroyed.
+
+**`OP_POOL_INFO` (42).**
+No right needed.
+`a1` = the type: `CAP_CAPTABLE`, `CAP_PROCESS`, `CAP_THREAD` or `CAP_NOTIFICATION`, as `OP_POOL_ALLOC` makes them,
+`CAP_IRQ`, as `OP_IRQ_BIND` makes one of a pool, or `CAP_POOL` for the descriptor at the base of a pool;
+`a2` = 0; `a3` = the number of slots for `CAP_CAPTABLE`, 1 to 1024, and 0 for the others.
+Anything else is `KERR_INVALID_ARG`, and nothing is written.
+Returns `a1` = the bytes the object takes, a multiple of 8, as the pool counts them,
+and `a2` = the bytes left, the pool's room as `OP_CAP_INFO` tells it, zero while the pool is being destroyed;
+`a3` and `a4` are unchanged.
+An allocation of the type that passes its other checks fails with `KERR_NO_MEMORY` exactly when `a1` is more than `a2`,
+unless something else allocates of the pool in between, on another core or while a bind stopped to be made again.
+A fresh pool of n bytes has n less the descriptor's bytes left.
+The sizes are the build's, its architecture's and its board's, and may change from one kernel to the next, section 5.5.
 
 ### 6.7 Operations on `Process`
 
@@ -502,7 +521,45 @@ a signal that wakes the thread paying for its turn, section 5.12,
 or a thread with time that becomes ready while the turn runs on spare time, section 5.11, takes the processor from it,
 and an unbind that empties the account leaves the rest of the turn on spare time.
 
-### 6.14 Operation codes in numeric order
+### 6.14 Describing a capability
+
+**`OP_CAP_INFO` (41).**
+Any capability, and no right needed.
+`a1` is the page, 0, the only one so far, and `a2` and `a3` are 0; anything else is `KERR_INVALID_ARG`, and nothing is written.
+Returns `a1` = the type, one of `CAP_*`, in the low byte and the rights in the next, `CAP_INFO_TYPE` and `CAP_INFO_RIGHTS`,
+and in `a2` to `a4` what the capability names, by its type:
+
+| Type | `a2` | `a3` | `a4` |
+|---|---|---|---|
+| `Frame` | base | size | the smallest region, as `OP_FRAME_INFO`'s `a4` |
+| `Untyped` | base | size | 0 while it is free, else what lies first below it: `CAP_FRAME`, `CAP_UNTYPED` or `CAP_POOL`, section 5.4 |
+| `KernelPool` | size | the room: the bytes an allocation may still take, 0 while it is being destroyed | 1 while it is being destroyed, else 0 |
+| `CapTable` | its number of slots | 0 | 0 |
+| `Process` | how many of its region slots may be filled at once; past it, where it is fewer than `PROCESS_REGION_SLOTS`, an install is `KERR_LIMIT` | 0 | 0 |
+| `Thread` | 0 | 0 | 0 |
+| `Notification` | the bits it may signal, never those set | 0 | 0 |
+| `IrqLine` | the first line | the count | 1 for timer lines, 0 for the log's and the controller's |
+| `Irq` | its line | the bits it may signal, 0 once its notification was taken, never those it is armed with | 1 on a timer line, else 0 |
+| `Time` | the first unit | the count | the tick in microseconds |
+| `Clock` | the counter's rate in hertz, as `OP_CLOCK_READ`'s | the tick in counts of the counter | the tick in microseconds |
+| `Debug` | 0 | 0 | 0 |
+
+Describing grants nothing:
+it changes nothing, and returns nothing a call takes as a reference,
+only the capability's own words, the constants of the machine its type's operations depend on,
+and the accounting its holder needs, a pool's room and what an Untyped made.
+No result is an object capability's address or a link of the derivation tree,
+though an Untyped's base may be where a pool made of it keeps its descriptor;
+nor the bits a notification holds, nor the time, which only `RIGHT_R` reads.
+Unit `u` of a `Time` capability is of core `u / TIME_UNITS`,
+so `BOOT_CAP_TIME`'s count is `TIME_UNITS` for each core the kernel runs, section 5.11.
+The tick is the quantum, which bounds a turn while tracing is off, section 5.11.
+What lies below an Untyped is as the call found it, one kind of what may be a mixture once a delete handed things up, section 5.4,
+and a pool's room is as the call found it; a call on another core may change either at once.
+A pool that nothing names any more shows as `CAP_POOL` below its Untyped, until a revoke below the Untyped destroys it;
+whether something outside the pool still holds its objects it does not tell.
+
+### 6.15 Operation codes in numeric order
 
 | Code | Operation | Type |
 |---|---|---|
@@ -546,8 +603,10 @@ and an unbind that empties the account leaves the rest of the turn on spare time
 | 38 | `OP_NOTIFY_LEND` | `Notification` |
 | 39 | `OP_PROCESS_MOUNT` | `Process` |
 | 40 | `OP_PROCESS_UNMOUNT` | `Process` |
+| 41 | `OP_CAP_INFO` | any |
+| 42 | `OP_POOL_INFO` | `KernelPool` |
 
-`OP_COUNT` is 41, one above the highest code.
+`OP_COUNT` is 43, one above the highest code.
 
 ## 7. What the root task starts with
 

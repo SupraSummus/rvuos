@@ -40,6 +40,8 @@ a change that moves a cost further, and means to, runs `make bench-refresh` with
 and its commit says what it cost.
 It runs the laboratory, `make lab`, to its end, and holds its numbers to nothing;
 a change to how threads take turns, wait or wake compares them before and after, and its commit says what moved.
+It builds the tick's default rate alone,
+so a change to how the kernel counts ticks, or to a timing check of the demo, runs `make TIMER_HZ=10000 test` too.
 When a change touches `kernel/board/esp32c6/`, `user/board/esp32c6/`,
 or anything the demo or the escape suite exercises, and an ESP32-C6 is connected,
 run `make BOARD=esp32c6 test escape` as well;

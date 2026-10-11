@@ -164,6 +164,9 @@ static void check_pools(void)
          * This is the one walk that does not use object_first/object_next:
          * those cross pools by an object's own header,
          * which is what this loop is here to check.
+         * The walk steps by obj_size and the allocator by obj_type_size, which OP_POOL_INFO tells,
+         * so this holds the two to each other; what a describing call returns, and that it changes nothing,
+         * relates a call to the state before it, which only host/history.c sees.
          */
         paddr_t at = base + aligned_size(&p->hdr);
         paddr_t prev = base;

@@ -86,6 +86,8 @@
  *   a child that only prints holds it with RIGHT_W alone.
  * Clock: RIGHT_R to read the time, and the counter through a frame,
  *   RIGHT_W to hold the machine to the watchdog, which halts it unless fed.
+ * Any capability: no right to describe it, see OP_CAP_INFO, and a Pool none to tell what an object takes of it,
+ *   see OP_POOL_INFO.
  * Copying a capability can only remove rights.
  */
 #define RIGHT_R 0x1
@@ -108,7 +110,8 @@
 #define OP_DEBUG_HALT 2
 /*
  * Debug (RIGHT_X): turn on tracing and self-checking.
- * From then on the kernel prints every system call with its status
+ * From then on the kernel prints every system call with its status,
+ * and the results of a describing one, see OP_CAP_INFO,
  * and runs the invariant checker after each one.
  * The timer tick stops preempting,
  * because a transcript the host build must reproduce
@@ -223,6 +226,7 @@
  * the same for every region on the machine.
  * Every frame is a block: its size is a power of two of at least that,
  * and its base is a multiple of its size.
+ * OP_CAP_INFO tells the same; this goes with the changes of DESIGN.md, open decision 31.
  */
 #define OP_FRAME_INFO 11
 /*
@@ -248,6 +252,7 @@
 /*
  * Untyped: describe it. Returns a1 = base, a2 = size, a3 = rights,
  * a4 = 1 while something made of it is left, 0 while it is free.
+ * OP_CAP_INFO tells the same, a4 as the type of what lies below; this goes with the changes of DESIGN.md, open decision 31.
  */
 #define OP_UNTYPED_INFO 27
 /*
@@ -537,6 +542,7 @@
  * Returns a1 = the low word, a2 = the high word, a3 = the rate in Hz, measured at boot on the ESP32-C6,
  * and a4 = the address of the counter's low 32 bits, which OP_CLOCK_FRAME shows.
  * Under tracing the time is the tick count's; see DESIGN.md, "Verification".
+ * The rate and the tick, the quantum, are OP_CAP_INFO's too, which needs no right.
  */
 #define OP_CLOCK_READ 25
 /*
@@ -587,8 +593,64 @@
  */
 #define OP_TIME_BIND 29
 
+/*
+ * Any capability: describe it. a1 = the page, 0, the only one so far, and a2 = a3 = 0;
+ * anything else fails with KERR_INVALID_ARG and writes nothing.
+ * Every type takes it, and it needs no right:
+ * describing changes nothing and returns nothing a call takes as a reference;
+ * it tells the capability's own words, the constants of the machine its type's operations depend on,
+ * and the accounting its holder needs.
+ * Returns a1 = the type, one of CAP_*, in the low byte and the rights in the byte above,
+ * see CAP_INFO_TYPE and CAP_INFO_RIGHTS, and in a2, a3 and a4 by the type:
+ *   CAP_FRAME         the base, the size, and the size of the smallest region, as OP_FRAME_INFO's a4
+ *   CAP_UNTYPED       the base, the size, and 0 while it is free, else the type of what lies first below it:
+ *                     CAP_FRAME for a frame or a region installed from one, CAP_UNTYPED for a half or a derived Untyped,
+ *                     and CAP_POOL for a pool, which lies there whether anything names it or not,
+ *                     until a revoke below destroys it;
+ *                     once a delete handed up what lay below the deleted capability, it is one of a mixture
+ *   CAP_POOL          its size, its room, the bytes an allocation may still take of it,
+ *                     and 1 while it is being destroyed, when its room is 0, else 0
+ *   CAP_CAPTABLE      its number of slots, 0, 0
+ *   CAP_PROCESS       how many of its region slots may be filled at once, 0, 0;
+ *                     where that is fewer than PROCESS_REGION_SLOTS, an install past it fails with KERR_LIMIT
+ *   CAP_THREAD        0, 0, 0
+ *   CAP_NOTIFICATION  the bits it may signal, see OP_NOTIFY_CARVE, 0, 0; never the bits that are set
+ *   CAP_IRQ_LINE      the first line, the count, and 1 for timer lines, 0 for the log's and the controller's;
+ *                     the cores' line, where there is one, reads as the controller's, and binding it fails with KERR_OVERLAP
+ *   CAP_IRQ           its line, the bits it may signal, 0 once its notification was taken, see OP_IRQ_BIND,
+ *                     and 1 on a timer line, else 0; never the bits it is armed with
+ *   CAP_TIME          the first unit, the count, and the tick in microseconds, which an account counts in, see OP_TIME_BIND;
+ *                     unit u is of core u / TIME_UNITS, so BOOT_CAP_TIME's count is TIME_UNITS for each core the kernel runs
+ *   CAP_CLOCK         the counter's rate in Hz, as OP_CLOCK_READ gives it, the tick in counts of the counter,
+ *                     and the tick in microseconds: the quantum, which bounds a turn while tracing is off;
+ *                     DESIGN.md, "Scheduling", says what the kernel's steps add to it
+ *   CAP_DEBUG         0, 0, 0
+ * No result is an object capability's address or a link of the derivation tree,
+ * though an Untyped's base may be where a pool made of it keeps its descriptor.
+ * A pool's room and what lies below an Untyped are as the call found them; a call on another core may change them at once.
+ */
+#define OP_CAP_INFO 41
+#define CAP_INFO_TYPE(a1)   ((a1) & 0xffu)
+#define CAP_INFO_RIGHTS(a1) (((a1) >> 8) & 0xffu)
+/*
+ * Pool: what an object of a type would take of it. No right needed, as for OP_CAP_INFO.
+ * a1 = the type: CAP_CAPTABLE, CAP_PROCESS, CAP_THREAD or CAP_NOTIFICATION, as OP_POOL_ALLOC makes them,
+ *      CAP_IRQ, as OP_IRQ_BIND makes one of a pool, or CAP_POOL, the descriptor at the base of a pool's memory;
+ * a2 = 0; a3 = the number of slots for CAP_CAPTABLE, 1 to 1024, and 0 for every other type.
+ * Anything else fails with KERR_INVALID_ARG and writes nothing.
+ * Returns a1 = the bytes, a multiple of eight, as the pool counts them,
+ * and a2 = the pool's room, as OP_CAP_INFO tells it; a3 and a4 are unchanged.
+ * An allocation of the type that passes its other checks fails with KERR_NO_MEMORY exactly when a1 is more than a2,
+ * and with KERR_STATE while the pool is being destroyed, whose room is 0,
+ * unless something else allocates of the pool in between, on another core or while a bind stopped to be made again.
+ * A pool of n bytes has a room of n less what CAP_POOL takes before anything is allocated of it.
+ * The sizes are the kernel build's, its architecture and board among them, and may change from one kernel to the next;
+ * see DESIGN.md, open decision 29.
+ */
+#define OP_POOL_INFO 42
+
 /* One above the highest operation code; the fuzzer's mutator draws below it. */
-#define OP_COUNT 41
+#define OP_COUNT 43
 
 /*
  * Capability slots the kernel fills in the root task's table at boot.

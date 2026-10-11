@@ -9,11 +9,6 @@
 
 struct pool *pool_list;
 
-static inline uint32_t align_up(uint32_t v, uint32_t a)
-{
-    return (v + a - 1) & ~(a - 1);
-}
-
 struct pool *pool_create(paddr_t base, uint32_t size, struct cap *parent)
 {
     struct pool *pool = p2v(base);
@@ -25,7 +20,7 @@ struct pool *pool_create(paddr_t base, uint32_t size, struct cap *parent)
     pool->node = (struct cap){ .type = CAP_RETYPED, .rights = RIGHT_ALL, .a = base };
     cap_attach(parent, &pool->node);
     pool->size = size;
-    pool->used = align_up(sizeof(*pool), OBJ_ALIGN);
+    pool->used = obj_align(sizeof(*pool));
     pool->last = base;
     /* The list is the self-check's and the host's, and costs a step to join and one to leave. */
     pool->next = pool_list ? v2p(pool_list) : 0;
@@ -112,7 +107,7 @@ bool pool_destroy(struct pool *pool, bool preempt)
             return false;
         }
         /* The padding too, so that everything the pool ever handed out goes back zeroed. */
-        uint32_t size = align_up((uint32_t)obj_size(o), OBJ_ALIGN);
+        uint32_t size = obj_align((uint32_t)obj_size(o));
         pool->last = v2p(o) - o->back * OBJ_ALIGN;
         pool->used = v2p(o) - pool_base(pool);
         pool->sweep = 0;
@@ -137,7 +132,7 @@ bool pool_destroy(struct pool *pool, bool preempt)
 
 bool pool_fits(const struct pool *pool, size_t size)
 {
-    return align_up((uint32_t)size, OBJ_ALIGN) <= pool->size - pool->used;
+    return obj_align((uint32_t)size) <= pool->size - pool->used;
 }
 
 void *pool_alloc(struct pool *pool, uint8_t type, size_t size)
@@ -146,7 +141,7 @@ void *pool_alloc(struct pool *pool, uint8_t type, size_t size)
         return NULL;
     }
     struct obj_header *obj = p2v(pool_base(pool) + pool->used);
-    uint32_t aligned = align_up((uint32_t)size, OBJ_ALIGN);
+    uint32_t aligned = obj_align((uint32_t)size);
     pool->used += aligned;
     /* The memory holds what it held before the pool took it; the padding is zeroed with the rest. */
     ram_unpoison(obj, aligned);

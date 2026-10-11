@@ -1,0 +1,17 @@
+An Irq's description tells the bits it is armed with, not those it may signal.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a description differs from the capability it describes
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -952,7 +952,7 @@ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *a
+         /* What the bind's capability may signal, zero once the notification was taken, and never what is armed. */
+         const struct irq *irq = (const struct irq *)cap_object(cap);
+         arg[2] = irq->line;
+-        arg[3] = irq->ntfn.b;
++        arg[3] = irq->bits;
+         arg[4] = line_is_timer(irq->line);
+         break;
+     }

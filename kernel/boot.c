@@ -24,11 +24,9 @@ struct thread *boot_create_root(void)
     /* Its own node is a root until the Untyped it lies below is in the table. */
     struct pool *pool = pool_create(BOOT_POOL_BASE, BOOT_POOL_SIZE, NULL);
 
-    struct captable *table = pool_alloc(
-        pool, CAP_CAPTABLE,
-        sizeof(*table) + ROOT_TABLE_SLOTS * sizeof(struct cap));
-    struct process *proc = pool_alloc(pool, CAP_PROCESS, sizeof(*proc));
-    struct thread *thread = pool_alloc(pool, CAP_THREAD, sizeof(*thread));
+    struct captable *table = pool_alloc(pool, CAP_CAPTABLE, obj_type_size(CAP_CAPTABLE, ROOT_TABLE_SLOTS));
+    struct process *proc = pool_alloc(pool, CAP_PROCESS, obj_type_size(CAP_PROCESS, 0));
+    struct thread *thread = pool_alloc(pool, CAP_THREAD, obj_type_size(CAP_THREAD, 0));
     if (table == NULL || proc == NULL || thread == NULL) {
         kpanic("boot pool too small for the root task");
     }

@@ -217,6 +217,47 @@ static inline uint32_t rv_untyped_info(uint32_t untyped_cap, uint32_t *base, uin
     return r_a0;
 }
 
+/*
+ * OP_CAP_INFO: what a capability is, *type one of CAP_* and *rights its rights,
+ * and in w the three words its type tells, see rvuos/abi.h. Page 0, the only one.
+ */
+static inline uint32_t rv_cap_info(uint32_t cap, uint32_t *type, uint32_t *rights, uint32_t w[3])
+{
+    register uint32_t r_a0 __asm__(RV_A0) = cap;
+    register uint32_t r_a1 __asm__(RV_A1) = 0;
+    register uint32_t r_a2 __asm__(RV_A2) = 0;
+    register uint32_t r_a3 __asm__(RV_A3) = 0;
+    register uint32_t r_a4 __asm__(RV_A4);
+    register uint32_t r_a7 __asm__(RV_A7) = OP_CAP_INFO;
+    __asm__ volatile(RV_CALL
+                     : "+r"(r_a0), "+r"(r_a1), "+r"(r_a2), "+r"(r_a3), "=r"(r_a4)
+                     : "r"(r_a7)
+                     : "memory", RV_A5, RV_A6);
+    *type = CAP_INFO_TYPE(r_a1);
+    *rights = CAP_INFO_RIGHTS(r_a1);
+    w[0] = r_a2;
+    w[1] = r_a3;
+    w[2] = r_a4;
+    return r_a0;
+}
+
+/* OP_POOL_INFO: the bytes an object of a type takes of a pool, slots its count for a table, and the bytes left. */
+static inline uint32_t rv_pool_info(uint32_t pool_cap, uint32_t type, uint32_t slots, uint32_t *bytes, uint32_t *left)
+{
+    register uint32_t r_a0 __asm__(RV_A0) = pool_cap;
+    register uint32_t r_a1 __asm__(RV_A1) = type;
+    register uint32_t r_a2 __asm__(RV_A2) = 0;
+    register uint32_t r_a3 __asm__(RV_A3) = slots;
+    register uint32_t r_a7 __asm__(RV_A7) = OP_POOL_INFO;
+    __asm__ volatile(RV_CALL
+                     : "+r"(r_a0), "+r"(r_a1), "+r"(r_a2)
+                     : "r"(r_a3), "r"(r_a7)
+                     : "memory", RV_A4, RV_A5, RV_A6);
+    *bytes = r_a1;
+    *left = r_a2;
+    return r_a0;
+}
+
 /* OP_UNTYPED_RETYPE: make the whole of an Untyped into a frame or a pool. */
 static inline uint32_t rv_retype(uint32_t untyped_cap, uint32_t type, uint32_t dst, uint32_t *base)
 {

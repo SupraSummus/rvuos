@@ -1,0 +1,17 @@
+An empty slot describes itself, as CAP_NONE with no rights, rather than failing as every call on it does.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a describing call described a slot that names nothing
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -998,7 +998,7 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
+     struct cap cap;
+     int err = cap_lookup(table, slot_index(slot), &cap);
+     if (err != KERR_OK) {
+-        return err;
++        return op == OP_CAP_INFO ? cap_info(&(struct cap){ 0 }, arg) : err;
+     }
+     /* Describing grants no authority, so every type takes it, with no right, before the types' own checks. */
+     if (op == OP_CAP_INFO) {

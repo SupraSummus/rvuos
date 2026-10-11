@@ -32,6 +32,7 @@ and `user/lib/` what a program of several processes needs beside them, section 8
 | `rv_cap_move(table, dst, src)` | `OP_CAP_MOVE` |
 | `rv_cap_delete(table, slot)` | `OP_CAP_DELETE` |
 | `rv_cap_revoke(table, slot)` | `OP_CAP_REVOKE` |
+| `rv_cap_info(cap, &type, &rights, words)` | `OP_CAP_INFO`, on any capability |
 | `rv_frame_info(cap, &base, &size)` | `OP_FRAME_INFO` |
 | `rv_frame_min_size(cap, &min)` | `OP_FRAME_INFO`, reading `a4` |
 | `rv_frame_carve(cap, offset, size, dst)` | `OP_FRAME_CARVE` |
@@ -39,6 +40,7 @@ and `user/lib/` what a program of several processes needs beside them, section 8
 | `rv_retype(cap, type, dst, &base)` | `OP_UNTYPED_RETYPE` |
 | `rv_split(cap, lower, upper)` | `OP_UNTYPED_SPLIT` |
 | `rv_pool_alloc(pool, type, dst, arg)` | `OP_POOL_ALLOC` |
+| `rv_pool_info(pool, type, slots, &bytes, &left)` | `OP_POOL_INFO` |
 | `rv_process_install(process, region, frame, rights)` | `OP_PROCESS_INSTALL` |
 | `rv_process_uninstall(process, region)` | `OP_PROCESS_UNINSTALL` |
 | `rv_process_mount(process, index, table)` | `OP_PROCESS_MOUNT` |
@@ -355,6 +357,8 @@ trace: op=0x00000007 slot=0x00000004 a1=0x00000007 a2=0x0000000d a3=0x00000000 -
 ```
 
 with `blocked` in place of a status when the call blocked,
+`trace: info a1=... a2=...` after a describing call that succeeded, with its results,
+four words for `OP_CAP_INFO` and two for `OP_POOL_INFO`, section 6.14,
 and `trace: wake <bits>` after a call that woke a waiter,
 or after the `user fault` of a thread whose watch woke one.
 A call stopped where `OP_DEBUG_PREEMPT` armed prints `trace: preempt` instead of its line,
