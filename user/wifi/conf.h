@@ -2,7 +2,7 @@
 #define RVUOS_WIFI_CONF_H
 
 /*
- * The configuration of a Wi-Fi system, as WIFI_CONFIG's file leaves it in the input region:
+ * The configuration of a Wi-Fi system, as WIFI_CONFIG's file leaves it in the input region, and of user/thread/:
  * lines of key=value, of which each root task reads the keys it knows.
  * It ends at its first NUL, which the loaders' --text writes after the file,
  * since RAM keeps what an earlier run's longer file left past it.

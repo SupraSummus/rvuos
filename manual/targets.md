@@ -248,6 +248,8 @@ every device line reaches both cores' controllers, of which only the first core'
 `tools/nrf52840-run.py` loads the image into RAM over SWD, through an ST-Link and OpenOCD, and starts the Cortex-M4;
 nothing is written to flash, and a program that never halts runs on once the runner stops, until the chip is reset.
 The console is a block of RAM, which the runner follows as the core runs, with no pin wired.
+`--text address:file` leaves a text in RAM before the core starts, as the other boards' runners do;
+`make BOARD=nrf52840 thread` leaves `THREAD_CONFIG`'s file in the input region, `user/thread/`'s configuration.
 
 Memory map:
 

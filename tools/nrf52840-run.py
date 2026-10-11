@@ -12,7 +12,10 @@ This then writes out what no logger took from the kernel's log, under the line Q
 and "rvuos: halted with code <n>", and exits with that code, as QEMU exits with the kernel's.
 A program that never halts runs on once this is stopped, until the chip is reset.
 
-Usage: tools/nrf52840-run.py image.elf
+--text address:file writes a text, such as a configuration, with a NUL after it, into RAM before the core starts,
+as the other boards' runners do.
+
+Usage: tools/nrf52840-run.py [--text address:file]... image.elf
 """
 
 import os
@@ -175,10 +178,22 @@ def log_untaken(ocd, base):
     return bytes(ring[(head - n + i) % size] for i in range(n))
 
 
+def text_file(spec):
+    """A --text argument: the address, and the file's bytes with a NUL after them, padded to whole words."""
+    address, _, path = spec.partition(":")
+    data = open(path, "rb").read() + b"\0"
+    return int(address, 0), data + b"\0" * (-len(data) % 4)
+
+
 def main():
-    if len(sys.argv) != 2:
+    args = sys.argv[1:]
+    texts = []
+    while len(args) > 2 and args[0] == "--text":
+        texts.append(text_file(args[1]))
+        args = args[2:]
+    if len(args) != 1:
         sys.exit(__doc__.strip().splitlines()[-1])
-    image = sys.argv[1]
+    image = args[0]
     segments, symbols = elf_image(image)
     if "_start" not in symbols or "halt_record" not in symbols:
         sys.exit(f"{image} is not an rvuos kernel for nRF52840")
@@ -196,6 +211,11 @@ def main():
             if back != data:
                 at = next(i for i in range(len(data)) if back[i] != data[i])
                 ocd.fail(f"RAM at {address + at:#x} did not take the image")
+        for address, data in texts:
+            words = struct.unpack(f"<{len(data) // 4}I", data)
+            ocd(f"write_memory {address:#x} 32 {{{' '.join(f'{w:#x}' for w in words)}}}")
+            if ocd.bytes(address, len(data)) != data:
+                ocd.fail(f"RAM at {address:#x} did not take the text")
         # RAM keeps what the last run left: the console starts empty and the halt unsaid.
         ocd(f"write_memory {CONSOLE_BASE:#x} 32 {{0}}")
         ocd(f"write_memory {record:#x} 32 {{0}}")

@@ -37,16 +37,23 @@ and the logger carries the kernel's log to a host on port 7070 while the run las
 
 `user/thread/`, on an nRF52840, drives its radio in IEEE 802.15.4's mode, surveys the channels,
 and exchanges frames with the ESP32-C6's driver on `i154=`, each acknowledging the other's; `tools/thread-pair.sh` runs both.
+The nRF52840's link, `link.c`, sends after CSMA-CA and again until acknowledged, and counts each neighbour's ETX.
 Thread, IPv6 over 802.15.4 in a mesh, needs more of it, step by step:
 
-- The level the nRF52840's survey reports is the radio's own, 0 to 127, and which dBm it stands for is unmeasured;
-  the C6's frames would do as a known signal, since the C6 hears the nRF52840's, sent at the same 0 dBm, at about -58 dBm.
-- The nRF52840 sends with no assessment of the channel and never tries again; 802.15.4's CSMA-CA and its retries,
-  which the C6's MAC does in hardware but for the retries, are the MAC's next.
-  A pong now and then goes unacknowledged, up to a few in fifty, with about as many frames heard with a bad FCS,
-  which may be the acknowledgements; nothing sends it again.
-- The nRF52840 receives into one buffer and starts the next reception only after the driver has read the frame,
-  so a frame that follows another within the driver's wake is lost; a second buffer would keep it.
+- The C6's driver assesses the channel once and gives a frame up if it is busy,
+  never sends again a frame that goes unacknowledged, skips a ping while it acknowledges a frame,
+  and takes a repeat for a new frame, which on a channel Wi-Fi shares comes whenever its acknowledgement is lost;
+  `link.c` is its model, and with it the C6 could stream to the nRF52840 too, so that two senders contend.
+  Its acknowledgement timeout, 108 symbols, is twice 802.15.4's 54;
+  set to 54 it would hold the nRF52840's acknowledgements, sent from a wake, to what 802.15.4 has a sender wait.
+- The level the nRF52840's survey reports is the radio's own, 0 to 127;
+  beside the C6's survey, which reads dBm, a level is the dBm above -94, to a few dB, but the two surveyed seconds apart.
+  The assessment's threshold, -75 dBm, rests on that; the C6's frames at one moment would do as a known signal.
+- The nRF52840's radio starts its next reception as the driver wakes for the last frame,
+  so a frame that begins within that wake is lost; only an acknowledgement follows so closely, 192 us after its frame.
+  A shortcut from END to START, with the buffers' turn kept, would close it.
+- The backoffs' random numbers are xorshift's, seeded by the clock and the survey;
+  the chip's RNG, a device the boot does not grant, would keep two nodes booted together from drawing the same.
 - The two use fixed short addresses in a PAN of mac154.h's own, until Thread gives them theirs.
 - 6LoWPAN over the frames, and IPv6, ICMPv6 and UDP over it; `user/wifi/net.c` knows IPv4 alone.
   Both sides' exchange is a test of its own today, the C6's inside its driver;
