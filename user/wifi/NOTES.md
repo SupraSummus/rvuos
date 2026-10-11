@@ -349,7 +349,7 @@ The link and the clients' sockets moved from channels to lent buffers, `lib/bulk
 the driver lends the network process the frames it received and buffers to fill with the frames to send,
 and the network process lends each client its datagrams and buffers to fill with its requests.
 It took about a hundred lines of each side's code,
-and `client.c`, a client's two calls, in place of the inline ask of `wifi.h`; `sock.c` and `net.c` did not change.
+and `client.c`, a client's two calls, in place of the inline ask of `wifi.h`; `sock.c` and `net.c` did not change at first.
 Every check of `tools/wifi-run.py` passed on the Pico 2 W's two kinds of core and on the ESP32-C6, by WPA3 and by WPA2.
 
 **Returns were news, and are room now.**
@@ -370,7 +370,14 @@ the adapter's mutex in its place doubled what a frame cost to hand on.
 A received frame's bookkeeping, the lock, the take and the hand, costs about 1,700 cycles more than a channel's put,
 which a copy it spares would pay for: copying a kilobyte costs about 4,800 cycles there.
 
-**The copies stay, for now.**
-A datagram is copied twice on its way in and three times out, as through channels:
-the ESP32-C6's MAC writes into the driver's own buffers, and the network process builds each frame in a buffer of its own.
-What would spare each is in `TODO.md`.
+**The stack builds each frame in a buffer the driver lent.**
+`net.c` built every frame in a buffer of its own, which the network process then copied into one the driver lent it to fill.
+Now it finds the next hop first, an ARP request going in a buffer of its own,
+then asks its owner for a buffer and builds the frame there, so that every buffer it is given is sent.
+That owes nothing to lending: a slot of the channel the link was would have taken the frame as well.
+On the ESP32-C6 a kilobyte's datagram cost the network process about 15,300 cycles in its clients' turns, from 16,800:
+the copy between two buffers of its own memory was about a tenth of the work.
+A datagram is copied twice on its way in and twice out now, where it was copied three times out:
+in, each driver copies a frame it received into a buffer lent to read, and the network process into its client's;
+out, the network process copies the client's bytes behind its headers, and each driver the frame to its chip.
+What would spare the drivers' copies is in `TODO.md`.

@@ -9,9 +9,11 @@
  * serves its clients' sockets, sock.h,
  * and answers on UDP port 7777 itself, with a line that says what the system has done.
  *
- * It trusts the driver and not its clients, lib/bulk.h: the driver lends it the link, so it reads each frame where it
- * lies, which nothing but the driver writes; it lends each client a connection, so it copies a datagram once into the
- * client's buffers, as clients may not read each other's, and reads a client's request once, sock.h.
+ * It trusts the driver and not its clients, lib/bulk.h.
+ * The driver lends it the link: it reads each frame where it lies, which nothing but the driver writes,
+ * and builds each frame it sends in a buffer the driver lent it to fill.
+ * It lends each client a connection: it copies a datagram once into the client's buffers,
+ * as clients may not read each other's, and reads a client's request once, sock.h.
  * From each it takes a turn for each wake, a ring's worth at most,
  * so a client that keeps handing it references cannot keep it from the link and the other clients,
  * and wakes itself for what it left.
@@ -31,22 +33,30 @@ struct netp {
     struct net_page *page;
     struct out out;
     uint32_t now; /* ms since the process started, by its timer */
+    struct bulk_ref frame; /* the buffer the driver lent to fill that the stack builds its next frame in */
     uint32_t tx_full;
 };
 
-/* A frame to the driver, in a buffer the driver lent it to fill; dropped if none is free. */
-static void np_send(struct net *n, const uint8_t *frame, uint32_t len)
+_Static_assert(LINK_BUFFER >= NET_FRAME_MAX, "the stack builds a frame in a buffer the driver lends");
+
+/* A buffer the driver lent to fill, for the stack's next frame; 0 if none is free, and the frame is dropped. */
+static uint8_t *np_buffer(struct net *n)
 {
     struct netp *p = (struct netp *)n;
-    struct bulk_end *e = &p->page->link;
-    struct bulk_ref r;
-    if (len > e->size || bulk_take(e, &r) != 0) {
+    if (bulk_take(&p->page->link, &p->frame) != 0) {
         p->tx_full++;
-        return;
+        return 0;
     }
-    memcpy(r.room, frame, len);
-    r.len = len;
-    if (bulk_hand(e, &r) != 0) {
+    return p->frame.room;
+}
+
+/* The frame the stack built in it, handed to the driver. */
+static void np_send(struct net *n, uint8_t *frame, uint32_t len)
+{
+    struct netp *p = (struct netp *)n;
+    (void)frame;
+    p->frame.len = len;
+    if (bulk_hand(&p->page->link, &p->frame) != 0) {
         p->tx_full++;
         return;
     }
@@ -146,7 +156,7 @@ __attribute__((noreturn)) void net_main(struct child_page *c)
     memset(p, 0, sizeof(*p));
     p->page = page;
     p->out = child_out();
-    net_init(&p->net, page->mac, np_send, p);
+    net_init(&p->net, page->mac, np_buffer, np_send, p);
     sock_init(&p->sock, &p->net, np_put, p);
     net_udp_bind(&p->net, NET_PORT_STATUS, on_status, p);
     struct seqlock config = net_config(page);

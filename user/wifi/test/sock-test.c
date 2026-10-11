@@ -29,9 +29,10 @@ static int failures;
 static uint8_t frame[NET_FRAME_MAX];
 static uint32_t frame_len, frames;
 
-static void capture(struct net *n, const uint8_t *f, uint32_t len)
+static void capture(struct net *n, uint8_t *f, uint32_t len)
 {
     (void)n;
+    sent_from(f);
     memcpy(frame, f, len);
     frame_len = len;
     frames++;
@@ -90,7 +91,7 @@ static void test_sockets(void)
     static struct sock s;
     static uint8_t f[NET_FRAME_MAX];
     const uint32_t me = net_ip(192, 168, 1, 50), peer = net_ip(192, 168, 1, 7), router_ip = net_ip(192, 168, 1, 1);
-    net_init(&n, pico, capture, 0);
+    net_init(&n, pico, give, capture, 0);
     n.ip = me;
     n.mask = net_ip(255, 255, 255, 0);
     n.gateway = router_ip;
@@ -192,7 +193,7 @@ static void test_sockets(void)
     CHECK(status_of(ask(&s, 2, SOCK_SEND, 5353, 0, 53, "q", 1)) == SOCK_NO_ROUTE);
     static struct net bare;
     static struct sock t;
-    net_init(&bare, pico, capture, 0);
+    net_init(&bare, pico, give, capture, 0);
     sock_init(&t, &bare, put, 0);
     CHECK(status_of(ask(&t, 0, SOCK_BIND, 5353, 0, 0, 0, 0)) == SOCK_OK);
     frames = 0;
@@ -326,6 +327,7 @@ int main(void)
     test_sockets();
     test_dns();
     test_ntp();
+    CHECK(misused == 0 && !given_out);
     if (failures) {
         fprintf(stderr, "sock-test: %d failed\n", failures);
         return 1;

@@ -841,7 +841,8 @@ or has the MAC gather the two where they lie.
 So the side the other trusts holds the memory at each boundary, the driver for the stack and the stack for its clients;
 a datagram is copied once on its way in and twice on its way out, or once if the MAC gathers,
 where the Wi-Fi system copied it twice in and three times out, through channels.
-It lends both boundaries now, and copies as many times still; `TODO.md`.
+It lends both boundaries now and builds each frame where it goes, as it could have in a channel's slot,
+so it copies a datagram twice out, and twice in still, its drivers copying each frame they receive; `TODO.md`.
 
 **Room is not news.**
 Both sides do the same four things: take a buffer to fill, hand it over with its bytes,

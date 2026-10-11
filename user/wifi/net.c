@@ -69,10 +69,11 @@ static uint16_t fold(uint32_t sum)
     return (uint16_t)~sum;
 }
 
-void net_init(struct net *n, const uint8_t mac[6], net_send_fn send, void *owner)
+void net_init(struct net *n, const uint8_t mac[6], net_buffer_fn buffer, net_send_fn send, void *owner)
 {
     memset(n, 0, sizeof(*n));
     memcpy(n->mac, mac, 6);
+    n->buffer = buffer;
     n->send = send;
     n->owner = owner;
     n->ip_id = (uint16_t)((mac[4] << 8) | mac[5]);
@@ -110,18 +111,23 @@ static const uint8_t *arp_find(struct net *n, uint32_t ip)
     return 0;
 }
 
-static void eth_send(struct net *n, const uint8_t *to, uint32_t type, uint32_t len)
+/* The Ethernet header of the frame in f, whose len bytes past it the caller wrote, and the frame sent. */
+static void eth_send(struct net *n, uint8_t *f, const uint8_t *to, uint32_t type, uint32_t len)
 {
-    memcpy(n->out, to, 6);
-    memcpy(n->out + 6, n->mac, 6);
-    put_be16(n->out + 12, type);
+    memcpy(f, to, 6);
+    memcpy(f + 6, n->mac, 6);
+    put_be16(f + 12, type);
     n->tx_frames++;
-    n->send(n, n->out, ETH_HEADER + len);
+    n->send(n, f, ETH_HEADER + len);
 }
 
 static void arp_send(struct net *n, uint32_t op, const uint8_t *to_mac, uint32_t to_ip)
 {
-    uint8_t *a = n->out + ETH_HEADER;
+    uint8_t *f = n->buffer(n);
+    if (f == 0) {
+        return;
+    }
+    uint8_t *a = f + ETH_HEADER;
     put_be16(a, 1);
     put_be16(a + 2, ETH_IP);
     a[4] = 6;
@@ -131,7 +137,7 @@ static void arp_send(struct net *n, uint32_t op, const uint8_t *to_mac, uint32_t
     put_ip(a + 14, n->ip);
     memcpy(a + 18, op == 1 ? (const uint8_t[6]){ 0 } : to_mac, 6);
     put_ip(a + 24, to_ip);
-    eth_send(n, op == 1 ? broadcast_mac : to_mac, ETH_ARP, 28);
+    eth_send(n, f, op == 1 ? broadcast_mac : to_mac, ETH_ARP, 28);
 }
 
 static int on_link(const struct net *n, uint32_t ip)
@@ -140,27 +146,32 @@ static int on_link(const struct net *n, uint32_t ip)
 }
 
 /*
- * Sends the IP packet whose payload of len bytes the caller wrote at out + 34:
- * to the address itself on the link, else to the gateway, broadcast to everyone.
- * -1 if the next hop's address is unknown, when an ARP request goes instead.
+ * The MAC address of the next hop to `to`, found before a buffer is asked for the packet:
+ * the address itself on the link, else the gateway, broadcast to everyone.
+ * -1 if there is none, or it is not known yet, when an ARP request goes instead, in a buffer of its own.
  */
-static int ip_send(struct net *n, uint32_t to, uint32_t proto, uint32_t len)
+static int next_hop(struct net *n, uint32_t to, const uint8_t **mac)
 {
-    const uint8_t *mac;
     if (to == BROADCAST || (n->mask != 0 && to == (n->ip | ~n->mask))) {
-        mac = broadcast_mac;
-    } else {
-        uint32_t hop = on_link(n, to) ? to : n->gateway;
-        if (hop == 0) {
-            return -1;
-        }
-        mac = arp_find(n, hop);
-        if (mac == 0) {
-            arp_send(n, 1, 0, hop);
-            return -1;
-        }
+        *mac = broadcast_mac;
+        return 0;
     }
-    uint8_t *ip = n->out + ETH_HEADER;
+    uint32_t hop = on_link(n, to) ? to : n->gateway;
+    if (hop == 0) {
+        return -1;
+    }
+    *mac = arp_find(n, hop);
+    if (*mac == 0) {
+        arp_send(n, 1, 0, hop);
+        return -1;
+    }
+    return 0;
+}
+
+/* Sends the IP packet in f whose payload of len bytes the caller wrote at f + 34, through the next hop at mac. */
+static void ip_send(struct net *n, uint8_t *f, const uint8_t *mac, uint32_t to, uint32_t proto, uint32_t len)
+{
+    uint8_t *ip = f + ETH_HEADER;
     ip[0] = 0x45;
     ip[1] = 0;
     put_be16(ip + 2, IP_HEADER + len);
@@ -172,8 +183,7 @@ static int ip_send(struct net *n, uint32_t to, uint32_t proto, uint32_t len)
     put_ip(ip + 12, n->ip);
     put_ip(ip + 16, to);
     put_be16(ip + 10, fold(sum16(0, ip, IP_HEADER)));
-    eth_send(n, mac, ETH_IP, IP_HEADER + len);
-    return 0;
+    eth_send(n, f, mac, ETH_IP, IP_HEADER + len);
 }
 
 static uint16_t udp_checksum(uint32_t from, uint32_t to, const uint8_t *udp, uint32_t len)
@@ -188,25 +198,31 @@ static uint16_t udp_checksum(uint32_t from, uint32_t to, const uint8_t *udp, uin
     return c == 0 ? 0xffffu : c;
 }
 
-/* The UDP header for a payload of len bytes already at out + 42, then the IP packet. */
-static int udp_out(struct net *n, uint32_t to, uint16_t to_port, uint16_t from_port, uint32_t len)
+/* The UDP header for a payload of len bytes already at f + 42, then the IP packet. */
+static void udp_out(struct net *n, uint8_t *f, const uint8_t *mac, uint32_t to, uint16_t to_port, uint16_t from_port,
+                    uint32_t len)
 {
-    uint8_t *u = n->out + ETH_HEADER + IP_HEADER;
+    uint8_t *u = f + ETH_HEADER + IP_HEADER;
     put_be16(u, from_port);
     put_be16(u + 2, to_port);
     put_be16(u + 4, UDP_HEADER + len);
     put_be16(u + 6, 0);
     put_be16(u + 6, udp_checksum(n->ip, to, u, UDP_HEADER + len));
-    return ip_send(n, to, IP_UDP, UDP_HEADER + len);
+    ip_send(n, f, mac, to, IP_UDP, UDP_HEADER + len);
 }
 
 int net_udp_send(struct net *n, uint32_t to, uint16_t to_port, uint16_t from_port, const uint8_t *data, uint32_t len)
 {
-    if (len > NET_UDP_MAX) {
+    const uint8_t *mac;
+    if (len > NET_UDP_MAX || next_hop(n, to, &mac) != 0) {
         return -1;
     }
-    memmove(n->out + ETH_HEADER + IP_HEADER + UDP_HEADER, data, len);
-    return udp_out(n, to, to_port, from_port, len);
+    uint8_t *f = n->buffer(n);
+    if (f != 0) {
+        memcpy(f + ETH_HEADER + IP_HEADER + UDP_HEADER, data, len);
+        udp_out(n, f, mac, to, to_port, from_port, len);
+    }
+    return 0;
 }
 
 static struct net_udp *udp_find(const struct net *n, uint16_t port)
@@ -253,7 +269,13 @@ void net_udp_unbind(struct net *n, uint16_t port)
  */
 static void dhcp_send(struct net *n, uint32_t type)
 {
-    uint8_t *d = n->out + ETH_HEADER + IP_HEADER + UDP_HEADER;
+    n->dhcp_sent = n->now;
+    n->dhcp_tries++;
+    uint8_t *f = n->buffer(n);
+    if (f == 0) {
+        return; /* it goes again once its wait is over, as if it was lost */
+    }
+    uint8_t *d = f + ETH_HEADER + IP_HEADER + UDP_HEADER;
     memset(d, 0, 300);
     d[0] = 1; /* a request */
     d[1] = 1; /* Ethernet */
@@ -283,10 +305,8 @@ static void dhcp_send(struct net *n, uint32_t type)
     uint32_t len = (uint32_t)(o - d) < 300u ? 300u : (uint32_t)(o - d);
     uint32_t ip = n->ip;
     n->ip = 0;
-    udp_out(n, BROADCAST, DHCP_SERVER, DHCP_CLIENT, len);
+    udp_out(n, f, broadcast_mac, BROADCAST, DHCP_SERVER, DHCP_CLIENT, len);
     n->ip = ip;
-    n->dhcp_sent = n->now;
-    n->dhcp_tries++;
 }
 
 void net_dhcp_start(struct net *n)
@@ -358,19 +378,24 @@ static void dhcp_input(struct net *n, const uint8_t *d, uint32_t len)
 
 static void icmp_input(struct net *n, uint32_t from, const uint8_t *p, uint32_t len)
 {
+    const uint8_t *mac;
+    uint8_t *f;
     if (len < 8 || p[0] != 8 || fold(sum16(0, p, len)) != 0) {
         return;
     }
     if (len > NET_FRAME_MAX - ETH_HEADER - IP_HEADER) {
         return;
     }
-    uint8_t *r = n->out + ETH_HEADER + IP_HEADER;
-    memmove(r, p, len);
+    n->pings++;
+    if (next_hop(n, from, &mac) != 0 || (f = n->buffer(n)) == 0) {
+        return;
+    }
+    uint8_t *r = f + ETH_HEADER + IP_HEADER;
+    memcpy(r, p, len);
     r[0] = 0; /* an echo reply */
     put_be16(r + 2, 0);
     put_be16(r + 2, fold(sum16(0, r, len)));
-    n->pings++;
-    ip_send(n, from, IP_ICMP, len);
+    ip_send(n, f, mac, from, IP_ICMP, len);
 }
 
 static void udp_input(struct net *n, uint32_t from, uint32_t to, const uint8_t *u, uint32_t len)

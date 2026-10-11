@@ -23,9 +23,10 @@ static int failures;
         }                                                                             \
     } while (0)
 
-static void capture(struct net *n, const uint8_t *frame, uint32_t len)
+static void capture(struct net *n, uint8_t *frame, uint32_t len)
 {
     (void)n;
+    sent_from(frame);
     if (sent_count < 8) {
         memcpy(sent[sent_count], frame, len);
         sent_len[sent_count] = len;
@@ -77,7 +78,7 @@ int main(void)
 {
     static struct net n;
     static uint8_t f[NET_FRAME_MAX];
-    net_init(&n, pico, capture, 0);
+    net_init(&n, pico, give, capture, 0);
     net_tick(&n, 1000);
 
     /* A discover: broadcast, from 0.0.0.0:68 to :67, type 1, our address in chaddr, the broadcast flag clear. */
@@ -165,6 +166,13 @@ int main(void)
     CHECK(checksum(sent[0] + 14, 20, 0) == 0 && memcmp(sent[0] + 14 + 16, &peer, 4) == 0);
     CHECK(memcmp(sent[0] + 42, "rvuos ping", 10) == 0);
 
+    /* With no buffer to build in, the reply does not go, and nothing else happens. */
+    no_buffer = 1;
+    sent_count = 0;
+    net_input(&n, f, 34 + 18);
+    CHECK(sent_count == 0 && n.pings == 2);
+    no_buffer = 0;
+
     /* UDP to a bound port reaches it, with what it was bound with; an answer goes back with its checksum right. */
     CHECK(net_udp_bind(&n, 7, on_udp, &n) == 0);
     CHECK(net_udp_bind(&n, 7, on_udp, 0) == -1 && net_udp_bind(&n, 68, on_udp, 0) == -1);
@@ -176,6 +184,9 @@ int main(void)
     CHECK(net_udp_send(&n, peer, 40000, 7, (const uint8_t *)"hello back", 10) == 0);
     CHECK(sent_count == 1 && be16(sent[0] + 34) == 7 && be16(sent[0] + 36) == 40000);
     CHECK(checksum(sent[0] + 34, 18, pseudo_sum(me, peer, 18)) == 0);
+    no_buffer = 1;
+    CHECK(net_udp_send(&n, peer, 40000, 7, (const uint8_t *)"dropped", 7) == 0 && sent_count == 1);
+    no_buffer = 0;
 
     /* Unbound, the port takes nothing, and may be bound again. */
     net_udp_unbind(&n, 7);
@@ -195,13 +206,14 @@ int main(void)
 
     /* With the gateway unknown, a send off the link asks for it instead. */
     static struct net m;
-    net_init(&m, pico, capture, 0);
+    net_init(&m, pico, give, capture, 0);
     m.ip = me;
     m.mask = net_ip(255, 255, 255, 0);
     m.gateway = r_ip;
     sent_count = 0;
     CHECK(net_udp_send(&m, net_ip(8, 8, 8, 8), 53, 5353, (const uint8_t *)"x", 1) == -1);
     CHECK(sent_count == 1 && be16(sent[0] + 12) == 0x0806 && be16(sent[0] + 20) == 1);
+    CHECK(misused == 0 && !given_out);
 
     if (failures) {
         fprintf(stderr, "net-test: %d failed\n", failures);

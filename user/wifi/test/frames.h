@@ -3,11 +3,14 @@
 
 /*
  * Frames a network would send the Wi-Fi system's IP stack, for its tests on the host:
- * Ethernet around IPv4 around UDP, from the router's address, with their checksums.
+ * Ethernet around IPv4 around UDP, from the router's address, with their checksums;
+ * and the buffers the stack builds its own frames in, as the network process gives them.
  */
 
 #include <stdint.h>
 #include <string.h>
+
+#include "../net.h"
 
 static inline uint16_t be16(const uint8_t *p)
 {
@@ -77,6 +80,32 @@ static inline uint32_t udp_frame(uint8_t *f, const uint8_t *to_mac, uint32_t fro
     memcpy(u + 8, data, len);
     put_be16(u + 6, checksum(u, 8 + len, pseudo_sum(from, to, 8 + len)));
     return ip_frame(f, to_mac, from, to, 17, 8 + len);
+}
+
+/*
+ * The one buffer the stack is given to build a frame in, none while no_buffer is set, as when every buffer is lent.
+ * The network process keeps one buffer's reference at a time,
+ * so a buffer asked for while the last is out, or a frame sent from any other, is counted in misused.
+ */
+static uint8_t given[NET_FRAME_MAX];
+static int given_out, no_buffer, misused;
+
+static inline uint8_t *give(struct net *n)
+{
+    (void)n;
+    misused += given_out;
+    if (no_buffer) {
+        return 0;
+    }
+    given_out = 1;
+    return given;
+}
+
+/* What each test's send calls first: the frame lies in the buffer given, which is out no more. */
+static inline void sent_from(const uint8_t *f)
+{
+    misused += !given_out || f != given;
+    given_out = 0;
 }
 
 #endif

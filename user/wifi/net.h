@@ -4,7 +4,8 @@
 /*
  * A small IPv4 stack over Ethernet frames: ARP, ICMP echo, UDP and a DHCP client.
  * It makes no system call and keeps no global, so it runs in any process and on the host for its tests:
- * frames come in through net_input, time through net_tick, and frames go out through the send function it is given.
+ * frames come in through net_input and time through net_tick,
+ * and each frame that goes out is built in a buffer its owner gives it, where it lies, and then sent.
  * Addresses are kept in network order, as they travel.
  */
 
@@ -16,7 +17,10 @@
 #define NET_UDP_PORTS 8u
 
 struct net;
-typedef void (*net_send_fn)(struct net *n, const uint8_t *frame, uint32_t len);
+/* A buffer of NET_FRAME_MAX bytes to build the next frame in, or 0 if there is none, when the frame does not go. */
+typedef uint8_t *(*net_buffer_fn)(struct net *n);
+/* The frame built in the buffer last given, len bytes, to send: every buffer given is, before the next is asked for. */
+typedef void (*net_send_fn)(struct net *n, uint8_t *frame, uint32_t len);
 
 /* A datagram for a bound port: who sent it, to which of the ports, and its bytes. */
 struct net_datagram {
@@ -47,6 +51,7 @@ struct net_udp {
 };
 
 struct net {
+    net_buffer_fn buffer;
     net_send_fn send;
     void *owner;
     uint8_t mac[6];
@@ -59,10 +64,9 @@ struct net {
     struct net_arp arp[NET_ARP_ENTRIES];
     struct net_udp udp[NET_UDP_PORTS];
     uint32_t rx_frames, tx_frames, rx_dropped, pings;
-    uint8_t out[NET_FRAME_MAX];
 };
 
-void net_init(struct net *n, const uint8_t mac[6], net_send_fn send, void *owner);
+void net_init(struct net *n, const uint8_t mac[6], net_buffer_fn buffer, net_send_fn send, void *owner);
 /* A frame from the link. */
 void net_input(struct net *n, const uint8_t *frame, uint32_t len);
 /* Time has moved to now ms: retransmits, and the lease. */
@@ -75,7 +79,10 @@ int net_udp_bind(struct net *n, uint16_t port, net_udp_fn fn, void *arg);
 void net_udp_unbind(struct net *n, uint16_t port);
 /* Whether port is bound, or DHCP's, which the stack holds itself. */
 int net_udp_bound(const struct net *n, uint16_t port);
-/* Sends a datagram; 0 if it went, -1 if the next hop's address is not known yet, an ARP request gone instead. */
+/*
+ * Sends a datagram: 0 if it went, or if there was no buffer for it, which drops it as a network may;
+ * -1 if the next hop's address is not known yet, an ARP request gone instead.
+ */
 int net_udp_send(struct net *n, uint32_t to_ip, uint16_t to_port, uint16_t from_port, const uint8_t *data, uint32_t len);
 
 /* An address in network order from its four numbers. */
