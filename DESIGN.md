@@ -172,3 +172,21 @@ rvuos adopts this shape for kernel object memory.
 Tock is not capability-based in the seL4 sense:
 processes talk to kernel drivers by driver number,
 not by held capability.
+
+**Hubris** (`https://hubris.oxide.computer`), Oxide Computer Company's operating system
+for the microcontrollers in its servers, written in Rust, is the nearest in shape.
+Its drivers are tasks in unprivileged mode behind the MPU;
+an interrupt reaches its task as one of 32 notification bits and stays masked until the task unmasks it,
+and a line goes to one task alone;
+a task that faults stops, and a supervisor task is told and decides whether to start it again.
+rvuos does each of these alike; see "Interrupts" and "Faults".
+It differs where Hubris is static by design.
+Every task is declared when the image is built, and the kernel's tables are sized then,
+where rvuos's root task builds its processes as it runs, from memory it hands the kernel.
+Tasks name each other by an index and a generation, which suits a table of tasks that never changes,
+and any task may send to any other, a mandatory access control being planned,
+where rvuos names everything by capability and carries no generation; see "Kernel pools and revocation".
+IPC is a synchronous send, receive and reply of up to 256 bytes, larger data going through leases the kernel copies,
+where rvuos has no endpoints, open decision 5, and lends bulk data where it lies, decision 34.
+And tasks run by strict priority, cooperatively within one,
+where rvuos's threads earn units of time; see "Scheduling".
