@@ -335,6 +335,8 @@ each input from RAM as at power-up and ending at its first report, as if it ran 
 since starting the harness costs more than most inputs do.
 A seed is written by hand for a scenario the kernel must handle,
 is named after that scenario, and is kept for as long as the scenario exists.
+`build/host/fuzz --print` shows one a record per line,
+and `tools/seed.py` writes one from such lines, the operations and any number by their names in the ABI's headers.
 The corpus is what the fuzzer found,
 and `make corpus-merge` rebuilds it from scratch each time:
 an input stays only while it reaches an edge on some harness
