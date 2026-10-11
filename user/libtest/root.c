@@ -15,6 +15,8 @@
  * has a thread publish a snapshot through a seqlock, on the second core where there is one, while a child reads it,
  * and stops the writer while it writes;
  * hands a buffer between two children, and hears the last fault on it once it is taken;
+ * has a lender lend buffers to two borrowers to fill and to read, refuse what a forger hands it,
+ * zero a connection for its next borrower, and fault a borrower that stores into a buffer lent to read;
  * lets a child build a thread of its own from a pool, timer lines and units it gave it,
  * hears that thread's fault as the child's, and takes it all back, twice;
  * lets a child move its table to a larger one from a pool it gave it, every capability keeping its number, twice;
@@ -41,10 +43,10 @@ static struct kernel_log klog;
 static uint32_t log_bit, deadline_bit, pause_bit, pause_timer;
 
 static struct child a, b, faulty, answering, spinning, server, clients[HUB_CLIENTS], lockers[LOCKERS], snap_reader,
-    passers[2], builder, mover, setter;
+    passers[2], lender, borrowers[BULK_PEERS], builder, mover, setter;
 static struct child *const children[] = { &a, &b, &faulty, &answering, &spinning, &server, &clients[0], &clients[1],
                                           &lockers[0], &lockers[1], &lockers[2], &snap_reader, &passers[0], &passers[1],
-                                          &builder, &mover, &setter };
+                                          &lender, &borrowers[0], &borrowers[1], &builder, &mover, &setter };
 static struct child *may_fault; /* the one child whose fault is asked for */
 static uint32_t faulted;        /* the bits of the faults the root task heard */
 
@@ -598,6 +600,111 @@ static void pass_round(void)
     check(same(tally(), unroomed), "the passers, their buffer and the room gave back what they were given");
 }
 
+/* A borrower on connection i, built, connected and started; seed is its connection's. */
+enum { BORROWS, FORGES, BREACHES, FLOODS }; /* what a borrower does */
+
+static void borrower_go(struct bulk *bk, uint32_t i, uint32_t seed, uint32_t does)
+{
+    struct child *c = &borrowers[i];
+    must("build a borrower", child_new(&self, c, "borrower", CHILD_TABLE, CHILD_DATA));
+    struct borrower_page *p = (struct borrower_page *)c->page;
+    p->seed = seed;
+    p->forge = does == FORGES;
+    p->breach = does == BREACHES;
+    p->flood = does == FLOODS;
+    must("connect a borrower", bulk_connect(&self, bk, i, c, &p->link));
+    must("start a borrower", child_start(&self, c, borrower_main, CHILD_UNITS));
+}
+
+/* Connection i closed and its borrower taken down, until the lender has let go of it. */
+static void borrower_gone(struct bulk *bk, uint32_t i)
+{
+    must("close a connection", bulk_close(&self, bk, i));
+    must("take a borrower down", child_free(&self, &borrowers[i]));
+    while (!bulk_idle(bk, i)) {
+        step();
+    }
+}
+
+/*
+ * A lender in room for children's data, with a connection for each of two borrowers, the second a forger:
+ * each asked and answered, and the forger's references refused;
+ * then the first borrower taken down and another connected in its place, which finds nothing of the first's,
+ * then one that stores into an answer, which faults holding it, and another in its place;
+ * then one served beside a flooder; then all of it back, the room too.
+ */
+static void bulk_round(void)
+{
+    struct self_tally unroomed = tally();
+    const struct bulk_shape shape = { BULK_SIZE, BULK_READS, BULK_FILLS };
+    struct bulk bk;
+    must("room for children's data", self_room(&self, ROOM_SIZE));
+    must("build the lender", child_new(&self, &lender, "lender", CHILD_TABLE, CHILD_DATA));
+    struct lender_page *pl = (struct lender_page *)lender.page;
+    for (uint32_t i = 0; i < BULK_PEERS; i++) {
+        pl->seed[i] = 1u + i;
+    }
+    must("a lender's connections", bulk_new(&self, &bk, &lender, pl->ends, BULK_PEERS, &shape));
+    must("start the lender", child_start(&self, &lender, lender_main, CHILD_UNITS));
+    borrower_go(&bk, 0, pl->seed[0], BORROWS);
+    borrower_go(&bk, 1, pl->seed[1], FORGES);
+    while (borrowers[0].told != BORROWER_DONE || borrowers[1].told != BORROWER_DONE) {
+        step();
+    }
+    for (uint32_t i = 0; i < BULK_PEERS; i++) {
+        const struct borrower_page *p = (const struct borrower_page *)borrowers[i].page;
+        check(pl->asked[i] == BULK_ROUNDS && pl->answered[i] == BULK_ROUNDS && p->filled == BULK_ROUNDS &&
+                  p->read == BULK_ROUNDS,
+              "a lender asked and answered each borrower every round, each request and answer read where it lay");
+        check(p->link.refused == 0, "a borrower was lent nothing but its connection's buffers");
+    }
+    check(pl->ends[0].refused == 0 && pl->ends[1].refused == BULK_FORGED,
+          "a lender refused every reference a forger handed it that named nothing it lent, and no other");
+    say(&out, "libtest: two borrowers of a lender asked and answered %u times, %u forged references refused: ok\n",
+        BULK_ROUNDS, BULK_FORGED);
+    borrower_gone(&bk, 0);
+    borrower_go(&bk, 0, pl->seed[0], BORROWS);
+    while (borrowers[0].told != BORROWER_DONE) {
+        step();
+    }
+    check(pl->let_go == 1, "the lender let go of the connection the root task closed");
+    say(&out, "libtest: a borrower taken down and another connected in its place, which found nothing of the last: ok\n");
+    borrower_gone(&bk, 0);
+    may_fault = &borrowers[0];
+    faulted = 0;
+    borrower_go(&bk, 0, pl->seed[0], BREACHES);
+    while (!(faulted & borrowers[0].bit_fault) && borrowers[0].told != BORROWER_BREACHED) {
+        step();
+    }
+    may_fault = 0;
+    check(borrowers[0].told != BORROWER_BREACHED, "a store into a buffer lent to read faulted");
+    borrower_gone(&bk, 0);
+    borrower_go(&bk, 0, pl->seed[0], BORROWS);
+    while (borrowers[0].told != BORROWER_DONE) {
+        step();
+    }
+    say(&out, "libtest: a borrower's store into a buffer lent to read stopped it, and the next had every buffer: ok\n");
+    borrower_gone(&bk, 0);
+    borrower_gone(&bk, 1);
+    borrower_go(&bk, 1, pl->seed[1], FLOODS);
+    while (borrowers[1].told != BORROWER_FLOODED) {
+        step();
+    }
+    borrower_go(&bk, 0, pl->seed[0], BORROWS);
+    while (borrowers[0].told != BORROWER_DONE) {
+        step();
+    }
+    check(pl->ends[1].refused != 0, "the lender took what a flooder's ring seemed to hold, a ring's worth at a time");
+    say(&out, "libtest: a borrower served beside one whose ring seems to hold a billion references: ok\n");
+    borrower_gone(&bk, 0);
+    borrower_gone(&bk, 1);
+    check(pl->let_go == 7, "the lender let go of every connection the root task closed");
+    must("take the lender down", child_free(&self, &lender));
+    must("free the connections", bulk_free(&self, &bk));
+    must("give the room back", self_room_free(&self));
+    check(same(tally(), unroomed), "the lender, its borrowers, their connections and the room gave back what they were given");
+}
+
 /*
  * A builder, given a pool, timer lines, units and slots of its own, builds a thread from them,
  * whose fault is heard as the builder's; taken down, it gives back all of it,
@@ -731,6 +838,7 @@ int main(void)
     event_round();
     snap_round();
     pass_round();
+    bulk_round();
     own_round();
     move_round();
     check(same(tally(), start), "everything handed out came back");

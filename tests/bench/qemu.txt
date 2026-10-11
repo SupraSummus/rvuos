@@ -9,4 +9,6 @@ seqlock-write 65
 seqlock-read 70
 processes 4326
 channel 4796
+channel-1k 7786
+bulk 5450
 contended-worst 1723200

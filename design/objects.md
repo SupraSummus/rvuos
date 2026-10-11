@@ -747,3 +747,134 @@ So there is no object for a buffer passed from hand to hand: it would save one c
 
 Interrupts arrive as signals on the notification bound to an `Irq`,
 which needed no new mechanism; see "Interrupts".
+
+### Bulk data
+
+**Bulk data is lent, not sent.**
+A frame a radio received, a block a disk read, a picture a program drew for a display:
+data too large to copy at every hop, or that a device writes or reads by itself, stays where it lies,
+and a reference to it travels instead.
+`user/lib/bulk.h` keeps each connection's buffers in the lender's memory,
+lends them to the borrower one at a time through a ring of references, and has them back through another;
+a reference says which buffer, where in it the bytes begin and how many, and a word the two give a meaning to.
+The rings are a channel's, so a buffer costs a few loads and stores, and a signal at most when the other side may wait for it,
+and the bytes cross no ring and no kernel.
+
+**The kernel decides who may touch what, and until when; never which buffer.**
+The parent makes the memory of a lender's connections one frame, which the lender installs once,
+carves each connection's blocks out of it and installs them in the borrower with the rights the trust between the two allows,
+gives each side the other's inbox carved to its bit,
+and uninstalls the blocks from the borrower when it closes the connection.
+The hardware holds every access to that, which is the kernel's word.
+Which buffer is whose at a moment is the two sides' protocol, which each keeps in memory the other cannot write.
+A region for each buffer would take one of a process's seven or eight regions, an install and a revoke a buffer,
+and a buffer a power of two at a multiple of its size;
+so the kernel knows no buffer, as it knows no packet,
+and handing memory over for good remains the uninstall and install above.
+
+**Who lends follows whom each trusts.**
+The lender is the side its borrowers trust and that outlives them: a driver to the stack it serves, a server to its clients.
+Its memory holds all of a connection,
+so a borrower taken down unmaps nothing the lender reads,
+and it keeps which buffers it lent in its page, where no borrower writes.
+It takes back only a buffer it lent and has not had back,
+so a forged reference costs its forger the reference and nothing else,
+and no buffer is lent twice at once.
+
+**The rights are the trust, a block at a time.**
+A connection is two blocks:
+the buffers lent to read, which the borrower maps read only,
+and the two rings with the buffers lent to fill, which it maps to write too.
+A buffer the lender reads itself, a frame its device wrote among them, lies in the first,
+so the borrower can change no frame its driver has yet to parse, lent or not.
+The hardware's word is a block's, though, not a buffer's:
+a borrower may read every buffer lent to read, lent to it or not yet,
+so a lender puts into a connection's buffers only what that borrower may see,
+everything a device that writes whatever arrives received, for one,
+and a connection starts zeroed, nothing of its last borrower's in it.
+A buffer lent to fill comes back with what the borrower wrote there, which it can change still.
+
+**Parse what you trust, carry what you do not.**
+Bytes are as trustworthy as the least trusted side that can write them.
+A side decides in place only on bytes no less trusted side can write;
+what the other side can write it reads once, into memory of its own, and decides on that copy,
+and the rest it carries, copying it, summing it or handing it to a device, deciding nothing on it twice:
+a change under its feet then costs the writer its own bytes and nobody else anything.
+So a network stack reads a client's request header once and carries the datagram,
+and a driver reads a frame's destination once and lets its device read the rest.
+
+**Two places want a copy, whatever the mechanism.**
+Bytes a less trusted side wrote, laid beside what a more trusted side asserts of them, a header in front of a payload,
+are copied into one buffer by the more trusted side,
+since a header it wrote into the other's buffer could be changed once checked;
+a device that gathers a frame from several places spares that copy.
+And bytes one source shares out among borrowers that may not read each other's, a stack's frames among its clients,
+are copied once, where they are shared out, into each borrower's own buffers;
+a reference passed on uncopied is for a borrower that may read the whole block it lies in.
+
+**A network stack, for one.**
+Its driver lends it the frames the radio received, to read:
+the MAC writes each into a buffer of the driver's read block, the driver checks it and lends it where it lies,
+and the stack parses it there, since only the driver and its MAC can write it;
+the driver keeps a buffer or two back for frames it reads itself, its handshake's.
+The stack lends each client, a connection each, the datagrams for the client's ports to read,
+copying each once out of the driver's frame, since clients may not read each other's, and hands the frame back.
+For what a client sends, the stack lends it buffers to fill;
+it reads the request's header once into its own memory, checks that the port is the client's,
+and writes its own headers into a buffer the driver lent it to fill, the payload copied after them;
+the driver reads the destination once and lays its own header in front of the frame in the MAC's buffer, copying it,
+or has the MAC gather the two where they lie.
+So the side the other trusts holds the memory at each boundary, the driver for the stack and the stack for its clients;
+a datagram is copied once on its way in and twice on its way out, or once if the MAC gathers,
+where the Wi-Fi system's link and its clients' channels copy it twice in and three times out.
+
+**Room is not news.**
+Both sides do the same four things: take a buffer to fill, hand it over with its bytes,
+take the next one handed over with bytes, and give that back once its bytes are used.
+A buffer handed over with bytes wakes the other side, unless a buffer it was woken for is still unread;
+a buffer given back empty is room, which the library takes in as the side next passes it,
+and which wakes the other side only if that side asked for room, by finding none to take.
+Lending made every buffer's return a reference of its own, where a channel's reader freed a slot without a word,
+and with a wake for each, the Wi-Fi system's driver woke half again as often as with channels, each wake a wait and two switches.
+A side that asks writes its word before it looks at its ring a last time,
+and a side that gives room back writes the reference before it reads the word, so one of the two sees the other.
+The words lie in the block both write, so a borrower can cost its lender wakes, as it can with bytes,
+or spare it some it asked for, which costs the borrower its own: the lender takes the room in on its next wake for anything else,
+and serves its other connections meanwhile.
+The parent lends the borrower every buffer to fill as it connects it, so neither side does anything to begin.
+
+**Neither side waits for the other.**
+A side takes for each wake no more references than the other's ring held as its turn began, a ring's worth at most,
+and leaves the rest for its next wake,
+so a peer that keeps writing, or makes its ring seem to hold a billion, keeps it from nothing else.
+A lender lends what it has and keeps what it needs for itself, a buffer for frames it reads itself, say;
+a borrower that keeps what it was lent has less lent to it, and the lender drops what it cannot lend.
+Each ring has two slots for every buffer, so an honest side never finds the other's ring even half full.
+
+**A bus master answers to its driver alone.**
+A device that reaches memory by itself reaches all of it, PMP or not,
+and its driver is trusted as the root task is, open decision 13.
+Its connections are as safe as its own checks:
+it hands its device only buffers its end, which its parent wrote, says are the connection's,
+and once a connection is closed it stops the device using them before it says it let go,
+since the kernel takes a block back from processes, never from a device.
+
+**What it costs.**
+A lender spends one region on the connections it was made with,
+and a borrower one, or two if it is lent buffers to read.
+A buffer lent and handed back between two processes costs about what 64 bytes there and back through a channel cost,
+whatever its size, the difference being the checks each side makes of what it is handed,
+so lending pays from a few hundred bytes a message; `make bench` holds `bulk` beside `channel` and `channel-1k`.
+Each ring holding a slot for every buffer twice over costs sixteen bytes a slot.
+
+**Weighed and left.**
+- **Copies by the kernel**, as Hubris's leases: decision 34.
+- **A region for each buffer**, as Xen's grant tables map pages: above.
+- **One block both write**, as a channel's: the borrower could change a frame its driver has yet to parse.
+- **The borrower's memory for what it writes**: the lender reading a block of the borrower's data
+  would cost each side one region, rather than the borrower two,
+  but a borrower taken down would unmap it from the lender, which would fault at its next touch
+  unless the parent first waited for its word.
+- **seL4's device driver framework** passes buffers of a shared region through a free and an active queue each way,
+  and copies between a driver's region and each client's in a component of its own;
+  `bulk.h` keeps a ring each way, the lender's free buffers in its page, which no borrower writes, rather than in a queue.

@@ -589,3 +589,4 @@ Reading in place across it would want the MAC's buffers in a pool the network pr
 so that it can neither change a frame the driver checks nor forge what the MAC says of it,
 references and their return through the ring, and a region more;
 sending from the link in place would want the MAC to read a frame from a chain of descriptors, which is untried.
+`lib/bulk.h` is that shape for any lender and borrower, `DESIGN.md`, "Bulk data"; the driver does not lend through it yet, `TODO.md`.

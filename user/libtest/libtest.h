@@ -6,6 +6,7 @@
  * which is only their pages, since the library hands out their slots, regions and bits.
  */
 
+#include "lib/bulk.h"
 #include "lib/chan.h"
 #include "lib/child.h"
 #include "lib/event.h"
@@ -162,6 +163,80 @@ struct passer_page {
 };
 
 /*
+ * Bulk data, lib/bulk.h: a lender with a connection for each of BULK_PEERS borrowers, asked and answered BULK_ROUNDS times.
+ * Each borrower asks its requests in order in the buffers to fill it was lent, and hands each back filled;
+ * the lender, having checked every byte where it lies, answers it in a buffer lent to read and gives the request's buffer
+ * back to fill again. The borrower checks every byte of each answer where it lies, and that it may write a request
+ * and not an answer, and gives the answer's buffer back.
+ * Since the lender writes nothing of a connection's but answers, a borrower that starts finds its blocks zeroed,
+ * nothing of the last borrower's; and the lender, which keeps a buffer to read for itself, finds every buffer free again.
+ * A borrower that forges also hands over BULK_FORGED references that name nothing it holds,
+ * which the lender refuses and goes on; one told to breach stores into an answer, which must stop it and nothing else;
+ * and one told to flood moves its ring's count of references a billion on, which must keep the lender from no other.
+ */
+#define BULK_PEERS  2u
+#define BULK_ROUNDS 24u
+#define BULK_SIZE   128u
+#define BULK_READS  4u
+#define BULK_FILLS  4u
+#define BULK_FORGED 4u
+
+static inline uint8_t bulk_byte(uint32_t seed, uint32_t n, uint32_t i)
+{
+    return (uint8_t)(seed * 31u + n * 7u + i * 13u + 5u);
+}
+
+/* Request n is filled from its offset with its length of bytes, and answered so; neither runs past a buffer. */
+static inline uint32_t request_off(uint32_t n)
+{
+    return n % 8u;
+}
+static inline uint32_t request_len(uint32_t n)
+{
+    return 1u + n * 29u % (BULK_SIZE - 8u);
+}
+static inline uint32_t answer_off(uint32_t n)
+{
+    return n % 4u;
+}
+static inline uint32_t answer_len(uint32_t n)
+{
+    return 1u + n * 37u % (BULK_SIZE - 4u);
+}
+/* What a borrower fills a request with, beside the seed of its connection's answers. */
+#define REQUEST_SEED(seed) ((seed) + 1000u)
+
+#define LENDER_STEP_BYTES 1u /* a request came back with other bytes; detail is the connection */
+#define LENDER_STEP_LEND  2u /* a buffer it held would not go; detail is the connection */
+#define LENDER_STEP_BOOKS 3u /* a connection connected anew had a buffer someone held; detail is the connection */
+struct lender_page {
+    struct child_page c;
+    struct bulk_end ends[BULK_PEERS];
+    uint32_t seed[BULK_PEERS]; /* the root task's: what each connection's bytes start from */
+    /* Each connection's requests back and checked, and answers lent; and the closes it let go of. */
+    volatile uint32_t asked[BULK_PEERS], answered[BULK_PEERS], let_go;
+};
+
+enum {
+    BORROWER_DONE = CHILD_RUNNING + 1, /* filled every request and read every answer as it was written */
+    BORROWER_BREACHED,                 /* stored into an answer */
+    BORROWER_FLOODED,                  /* moved its ring's count on */
+};
+#define BORROWER_STEP_DIRTY 1u /* its blocks held bytes when it started; detail is the offset in the block */
+#define BORROWER_STEP_BYTES 2u /* an answer held other bytes; detail is its round */
+#define BORROWER_STEP_ROOM  3u /* it may write an answer, or may not a request; detail is the buffer */
+#define BORROWER_STEP_HAND  4u /* a buffer it held would not go back; detail is the buffer */
+struct borrower_page {
+    struct child_page c;
+    struct bulk_end link;
+    uint32_t seed;   /* its connection's */
+    uint32_t forge;  /* hands over references it does not hold, too */
+    uint32_t breach; /* stores into its first answer */
+    uint32_t flood;  /* moves its ring's count of references on, and does nothing else */
+    volatile uint32_t filled, read;
+};
+
+/*
  * A builder: a child that builds a thread of its own from what its parent let it have, child_give_own.
  * The thread sleeps on a timer of its own, says so in the page and stops at a breakpoint,
  * a fault the parent hears as the builder's.
@@ -212,6 +287,8 @@ void client_main(struct child_page *page);
 void locker_main(struct child_page *page);
 void setter_main(struct child_page *page);
 void passer_main(struct child_page *page);
+void lender_main(struct child_page *page);
+void borrower_main(struct child_page *page);
 void snap_reader_main(struct child_page *page);
 void builder_main(struct child_page *page);
 void mover_main(struct child_page *page);

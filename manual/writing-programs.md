@@ -200,6 +200,7 @@ Each header says how its calls are used.
 | `lib/self.h` | what a process hands out of its own: slots, regions, bits of its inbox, timers, units of time, memory halved out of Untypeds, and room for its children's data; and its move to a larger table |
 | `lib/child.h` | a child built, started, heard, checked and taken down by its parent, frames mapped into it and taken back, what it may build of its own, and the child's own calls: its log, its state, its answer, its sleep, its account of what it builds |
 | `lib/chan.h` | a channel between two children: a frame of two rings of packets, and a bit each way; and a hub, a server's channels to many clients |
+| `lib/bulk.h` | bulk data a lender lends its borrowers where it lies: a connection's buffers in the lender's memory, lent to read, which the borrower maps read only, or to fill, through two rings of references |
 | `lib/lock.h` | a lock over memory several children share: a word taken with an atomic operation, and a notification to wait on while it is held; and one whose word names its holder, so that a taker that waits lends the holder its time, section 5.12 |
 | `lib/event.h` | an event one thread waits for, until a deadline at most, and others set from memory they share with it: a word set with an atomic operation, and a notification and a timer line of the waiter's |
 | `lib/seqlock.h` | a snapshot one child publishes and others copy out whole, from memory they may hold read only: a count and two copies, so that neither side calls the kernel or waits for the other |
@@ -270,6 +271,38 @@ forgets what it kept for the end's last client, and says so with `chan_seen`;
 only then is the end idle, `chan_hub_idle`, and may another client be connected to it,
 whose channel starts zeroed, as every channel does, so that nothing the last client sent or was sent is left to read.
 
+**Bulk data** is lent rather than copied, `lib/bulk.h`,
+once messages grow past a few hundred bytes, or a device reads or writes them by itself.
+A lender, the side its borrowers trust and that outlives them, a driver or a server, holds a connection's buffers in its own memory:
+its parent makes a lender's connections with `bulk_new`, one frame the lender installs once,
+and connects a borrower to each with `bulk_connect`, both running or not,
+which zeroes the connection, installs its buffers lent to read in the borrower read only,
+and its rings with its buffers lent to fill so that the borrower writes them too, and lends the borrower every one of those.
+Both sides then do the same four things.
+`bulk_take` gives a buffer to fill: the lender's own that no one holds, a borrower's that it was lent to fill;
+`bulk_hand` hands it over with its bytes, the lender lending it to read, a borrower giving it back filled;
+`bulk_next` gives the next buffer the other side handed over with bytes, a turn at a time, `bulk_turn`,
+no more for a wake than the other's ring held as the turn began,
+so a peer that keeps writing references keeps it from nothing else, and `bulk_more` says to come back;
+and `bulk_put` gives that buffer back once its bytes are used, the lender's to fill again, a borrower's read.
+A buffer given back empty is room, which the library takes in as it passes it:
+it wakes the other side only if that side asked for room by finding none to take, where a buffer handed over with bytes wakes it.
+The lender reads what it decides on of a buffer given back filled once, into its own memory,
+since the borrower can still write it.
+The lender takes back only what it lent and has not had back, and counts what it refused,
+so a borrower can lose only what it was lent.
+The parent closes a connection with `bulk_close` when it takes the borrower down;
+the lender, told, sees it with `bulk_changed` and says with `bulk_seen` that it let go of all of it,
+once nothing of its touches those buffers, its device least of all,
+and only then is the connection idle, `bulk_idle`, for another borrower.
+`DESIGN.md`, "Bulk data", says which side lends, why the rights are what they are, and where a copy is the price.
+
+**Which to use.**
+A message, a request or its answer, goes through a channel;
+state one child publishes to many through a seqlock;
+a stream of buffers, large or filled and emptied by a device, through a bulk connection;
+and memory handed over for good by `child_unmap` and `child_map`, below.
+
 **A lock** over memory children share is a word in that memory and a notification each holds with `RIGHT_R` and `RIGHT_W`,
 both from their parent, which writes the word's address and the notification's slot into each page.
 It makes no system call while nobody waits.
@@ -294,6 +327,9 @@ and takes one client down and connects another in its place twice, each finding 
 has three children add to a count they share under a lock, each sleeping now and then while it holds it;
 waits for an event a child sets, each set ending a wait, and for one nothing sets, which its deadline ends;
 hands a buffer between two children and back, then takes it from the last, which must fault when it stores to it;
+has a lender lend buffers to two borrowers to fill and to read, refuse what a forger hands it,
+zero a connection for its next borrower, and serve one borrower beside another that makes its ring seem to hold a billion,
+and a borrower that stores into a buffer lent to read fault;
 and lets a child build a thread of its own, which sleeps on its own timer and faults, which the root task hears as the child's,
 and takes it down, twice;
 checking that everything handed out comes back and that the second child left the same behind as the first.

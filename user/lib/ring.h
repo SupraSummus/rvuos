@@ -42,6 +42,13 @@ uint8_t *ring_put_begin(const struct ring *r);
 /* Hands the slot over with len bytes; 1 if the ring was empty, when the reader is to be woken. */
 int ring_put_end(const struct ring *r, uint32_t len);
 
+/*
+ * How many packets the ring holds as the writer says, at most its slots, which no honest writer goes past:
+ * what a reader that does not trust the writer takes for one wake.
+ */
+uint32_t ring_ready(const struct ring *r);
+/* The packets the reader has taken, as it says, counted from the ring's start: what a writer knows it has seen. */
+uint32_t ring_taken(const struct ring *r);
 /* The next slot to read and its length, at most slot_size, or 0 if the ring is empty. */
 const uint8_t *ring_get_begin(const struct ring *r, uint32_t *len);
 /* Gives the slot back; 1 if the ring was full, when the writer is to be woken. */

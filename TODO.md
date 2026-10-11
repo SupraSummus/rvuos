@@ -90,6 +90,23 @@ what is left:
 - `child_stop` in `user/lib/child.h` reports and then waits for good, since a child holds no capability to its own thread:
   the convention giving each child its thread, which a self-stop takes, would let a stopped child be used again by a resume,
   but `RIGHT_W` on it also sets its watch, so it waits for the narrower right open decision 32 weighs.
+- `lib/bulk.h` has no user but its test and the bench.
+  The Wi-Fi system's link and sockets would be the first:
+  the driver lending the network process the MAC's received frames to read, where they lie, a buffer kept back for its own,
+  the network process copying each datagram once into its client's buffers lent to read,
+  and lending each client buffers to fill for what it sends, as the driver would lend it buffers to fill for frames;
+  `DESIGN.md`, "Bulk data", counts the copies that leaves.
+  The ESP32-C6's MAC reading a frame from a chain of descriptors, untried,
+  would let the driver send the network process's frame where it lies, its own header in front, and spare the copy out.
+- A borrower cannot lend on what it was lent:
+  a stack passing a driver's frames uncopied to a client allowed to read them all, `DESIGN.md`, "Bulk data",
+  would need a lender's end over a block of another lender's frame,
+  the stack keeping what it lent on until the client hands it back.
+- `bulk_close` takes a connection's blocks from its borrower at once, so a borrower that is to live on faults at its next touch;
+  one whose lender is built again, a network process whose driver is,
+  would want a close that tells it first and waits for its word, as the lender's.
+- A hub keeps a slot of its parent's for each client connected, its channel's carve, which `chan_hub_close` revokes;
+  `lib/bulk.h` deletes its carves once installed and uninstalls them at a close, which would spare a hub's parent those slots too.
 - `user/lab/` does not show yet a client of several threads asking at once, a driver whose work an interrupt starts,
   two cores, a client that makes its ring look full, or one that gives up on an answer.
   Nor several takers lending to one holder, or a holder that waits on a second lock.

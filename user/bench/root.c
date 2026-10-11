@@ -7,6 +7,8 @@
  * threads: a round trip between two threads of one process, four calls and two switches.
  * processes: the same between two processes, whose switches load the other's regions too.
  * channel: 64 bytes there and back through a channel of lib/chan.h between two children.
+ * channel-1k: the same with 1 KiB, a datagram's worth, copied into each ring and out of the echo's.
+ * bulk: a buffer of 1 KiB lent to read through lib/bulk.h and handed back between two children, no byte copied.
  * lock: a lock of lib/lock.h that names its holder, taken and given back, nobody else wanting it, no call.
  * lock-wait: the same lock another thread holds, waited for, eleven calls and four switches,
  * the holder waiting for a signal while it holds it, so that each round waits once,
@@ -180,6 +182,41 @@ static void round_process(void)
     rv_wait(self.inbox, &bits);
 }
 
+/* Until the one that times its rounds says it is done, the other's fault or its own failure halting the run. */
+static void children_done(struct child *timer, struct child *other)
+{
+    while (timer->told != PING_DONE) {
+        uint32_t bits, state;
+        must("wait for the children", rv_wait(self.inbox, &bits));
+        if ((child_poll(timer, &state) && state == CHILD_FAILED) || (bits & (timer->bit_fault | other->bit_fault))) {
+            say(&out, "bench: %s and %s failed\n", timer->name, other->name);
+            halt(1);
+        }
+    }
+}
+
+/* A channel's measure: the ping times its own rounds of len bytes there and back, and the page says how long they took. */
+static void channel(const char *name, uint32_t len, uint32_t size, uint32_t slot)
+{
+    struct child ping, echo;
+    struct chan link;
+    must("build ping", child_new(&self, &ping, "ping", CHILD_TABLE, CHILD_DATA));
+    must("build echo", child_new(&self, &echo, "echo", CHILD_TABLE, CHILD_DATA));
+    struct ping_page *pp = (struct ping_page *)ping.page, *ep = (struct ping_page *)echo.page;
+    pp->rounds = ROUNDS;
+    pp->len = len;
+    must("give ping the clock", child_give(&self, &ping, BOOT_CAP_CLOCK, RIGHT_R, &pp->clock));
+    must("a channel", chan_new(&self, &link, size, slot));
+    must("connect ping and echo", chan_connect(&self, &link, &ping, &pp->link, &echo, &ep->link));
+    must("start echo", child_start(&self, &echo, echo_main, UNITS));
+    must("start ping", child_start(&self, &ping, ping_main, UNITS));
+    children_done(&ping, &echo);
+    report(name, ROUNDS, pp->counts, pp->hz);
+    must("the channel back", chan_free(&self, &link));
+    must("ping back", child_free(&self, &ping));
+    must("echo back", child_free(&self, &echo));
+}
+
 static void measure(const char *name, void (*round)(void))
 {
     uint32_t hz;
@@ -263,30 +300,28 @@ int main(void)
     must("start pong", child_start(&self, &pong, pong_main, UNITS));
     measure("processes", round_process);
 
-    /* channel: the ping times its own rounds, and the page says how long they took. */
-    struct child ping, echo;
-    struct chan link;
-    must("build ping", child_new(&self, &ping, "ping", CHILD_TABLE, CHILD_DATA));
-    must("build echo", child_new(&self, &echo, "echo", CHILD_TABLE, CHILD_DATA));
-    struct ping_page *pp = (struct ping_page *)ping.page, *ep = (struct ping_page *)echo.page;
-    pp->rounds = ROUNDS;
-    must("give ping the clock", child_give(&self, &ping, BOOT_CAP_CLOCK, RIGHT_R, &pp->clock));
-    must("a channel", chan_new(&self, &link, LINK_SIZE, LINK_SLOT));
-    must("connect ping and echo", chan_connect(&self, &link, &ping, &pp->link, &echo, &ep->link));
-    must("start echo", child_start(&self, &echo, echo_main, UNITS));
-    must("start ping", child_start(&self, &ping, ping_main, UNITS));
-    while (ping.told != PING_DONE) {
-        uint32_t bits, state;
-        must("wait for ping", rv_wait(self.inbox, &bits));
-        if ((child_poll(&ping, &state) && state == CHILD_FAILED) || (bits & (ping.bit_fault | echo.bit_fault))) {
-            say(&out, "bench: the channel's children failed\n");
-            halt(1);
-        }
-    }
-    report("channel", ROUNDS, pp->counts, pp->hz);
-    must("the channel back", chan_free(&self, &link));
-    must("ping back", child_free(&self, &ping));
-    must("echo back", child_free(&self, &echo));
+    channel("channel", PACKET, LINK_SIZE, LINK_SLOT);
+    channel("channel-1k", PACKET_1K, LINK_SIZE_1K, PACKET_1K);
+
+    /* bulk: the lender times its own rounds, as the ping does. */
+    struct child lend, borrow;
+    struct bulk bk;
+    const struct bulk_shape shape = { PACKET_1K, 1, 0 };
+    must("build the lender", child_new(&self, &lend, "lender", CHILD_TABLE, CHILD_DATA));
+    must("build the borrower", child_new(&self, &borrow, "borrower", CHILD_TABLE, CHILD_DATA));
+    struct lend_page *lp = (struct lend_page *)lend.page, *bp = (struct lend_page *)borrow.page;
+    lp->rounds = ROUNDS;
+    must("give the lender the clock", child_give(&self, &lend, BOOT_CAP_CLOCK, RIGHT_R, &lp->clock));
+    must("a lender's connection", bulk_new(&self, &bk, &lend, &lp->link, 1, &shape));
+    must("connect the borrower", bulk_connect(&self, &bk, 0, &borrow, &bp->link));
+    must("start the borrower", child_start(&self, &borrow, borrow_main, UNITS));
+    must("start the lender", child_start(&self, &lend, lend_main, UNITS));
+    children_done(&lend, &borrow);
+    report("bulk", ROUNDS, lp->counts, lp->hz);
+    must("close the connection", bulk_close(&self, &bk, 0));
+    must("the borrower back", child_free(&self, &borrow));
+    must("the lender back", child_free(&self, &lend));
+    must("the connection back", bulk_free(&self, &bk));
 
     struct child spin;
     must("build spin", child_new(&self, &spin, "spin", CHILD_TABLE, CHILD_DATA));

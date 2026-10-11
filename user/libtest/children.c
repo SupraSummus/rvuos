@@ -5,6 +5,7 @@
 
 #include "libtest.h"
 
+#include "lib/libc.h"
 #include "lib/say.h"
 #include "lib/self.h"
 
@@ -275,6 +276,232 @@ void passer_main(struct child_page *page)
         *buffer = pass;
         child_report(page, PASSER_HELD + pass);
     }
+}
+
+/* A connection's requests back and checked, held until a buffer to answer in is free. */
+struct asking {
+    struct bulk_ref held[BULK_FILLS];
+    uint32_t count;
+};
+
+/*
+ * Hands a buffer the lender took to connection i's borrower: 1, or 0 once the root task has closed the connection,
+ * which may come at any moment, and which the lender acts on at its next look, letting go of all of it.
+ */
+static int lend(struct lender_page *p, uint32_t i, const struct bulk_ref *r)
+{
+    if (bulk_hand(&p->ends[i], r) == 0) {
+        return 1;
+    }
+    if (bulk_ready(&p->ends[i])) {
+        child_fail(&p->c, LENDER_STEP_LEND, i);
+    }
+    return 0;
+}
+
+/*
+ * A connection connected anew: every buffer to read free, as nothing of a connection the lender let go of is held,
+ * and a hand of one it does not hold refused;
+ * then one kept for itself, as a driver keeps one for frames it reads itself.
+ */
+static void ask(struct lender_page *p, uint32_t i)
+{
+    struct bulk_end *e = &p->ends[i];
+    struct bulk_ref r;
+    uint32_t taken = 0;
+    while (bulk_take(e, &r) == 0) {
+        taken++;
+    }
+    for (uint32_t buf = 0; buf < taken; buf++) {
+        bulk_put(e, buf);
+    }
+    struct bulk_ref free = { 1, 0, 1, 0, 0, 0 };
+    if (taken != BULK_READS || bulk_hand(e, &free) == 0 || bulk_take(e, &r) != 0) {
+        if (bulk_ready(e)) {
+            child_fail(&p->c, LENDER_STEP_BOOKS, i);
+        }
+        return;
+    }
+    p->asked[i] = 0;
+    p->answered[i] = 0;
+}
+
+/* A turn of what connection i handed back with bytes: requests, each checked where it lies and held; 1 if it had more. */
+static int take_back(struct lender_page *p, uint32_t i, struct asking *a)
+{
+    struct bulk_end *e = &p->ends[i];
+    struct bulk_turn t = bulk_turn(e);
+    struct bulk_ref r;
+    while (bulk_next(&t, &r)) {
+        uint32_t n = r.tag;
+        int same = r.buf >= e->reads && r.off == request_off(n) && r.len == request_len(n);
+        for (uint32_t k = 0; same && k < r.len; k++) {
+            same = r.bytes[k] == bulk_byte(REQUEST_SEED(p->seed[i]), n, k);
+        }
+        if (!same) {
+            child_fail(&p->c, LENDER_STEP_BYTES, i);
+        }
+        p->asked[i]++;
+        a->held[a->count++] = r;
+    }
+    return bulk_more(&t);
+}
+
+/* Each request held answered while a buffer to read is free, and its buffer given back to fill again. */
+static void answer(struct lender_page *p, uint32_t i, struct asking *a)
+{
+    struct bulk_end *e = &p->ends[i];
+    struct bulk_ref ans;
+    while (a->count != 0 && bulk_take(e, &ans) == 0) {
+        struct bulk_ref req = a->held[--a->count];
+        uint32_t n = req.tag;
+        ans.off = answer_off(n);
+        ans.len = answer_len(n);
+        ans.tag = n;
+        for (uint32_t k = 0; k < ans.len; k++) {
+            ans.room[ans.off + k] = bulk_byte(p->seed[i], n, k);
+        }
+        if (!lend(p, i, &ans)) {
+            return;
+        }
+        p->answered[i]++;
+        bulk_put(e, req.buf);
+    }
+}
+
+/* Asks each borrower and answers it; a connection the root task closed is let go of, and nothing kept of it. */
+void lender_main(struct child_page *page)
+{
+    struct lender_page *p = (struct lender_page *)page;
+    struct asking asking[BULK_PEERS];
+    memset(asking, 0, sizeof(asking));
+    child_report(page, CHILD_RUNNING);
+    for (;;) {
+        int more = 0;
+        for (uint32_t i = 0; i < BULK_PEERS; i++) {
+            uint32_t gen;
+            if (bulk_changed(&p->ends[i], &gen)) {
+                p->let_go += !(gen & 1u);
+                bulk_seen(&p->ends[i], gen);
+                asking[i] = (struct asking){ .count = 0 };
+                if (gen & 1u) {
+                    ask(p, i);
+                }
+            }
+            more |= take_back(p, i, &asking[i]);
+            answer(p, i, &asking[i]);
+        }
+        if (!more) {
+            wait_any();
+        }
+    }
+}
+
+/* The offset of the first of len bytes at base that is not zero, or len. */
+static uint32_t first_set(uint32_t base, uint32_t len)
+{
+    const volatile uint8_t *b = (const volatile uint8_t *)(uintptr_t)base;
+    for (uint32_t k = 0; k < len; k++) {
+        if (b[k] != 0) {
+            return k;
+        }
+    }
+    return len;
+}
+
+/* A reference it does not hold, written straight into its ring, of bytes bytes, as a borrower that forges would. */
+static void forge(const struct bulk_end *e, uint32_t buf, uint32_t off, uint32_t len, uint32_t bytes)
+{
+    uint8_t *slot = chan_put_begin(&e->refs);
+    const uint32_t words[BULK_REF_BYTES / 4u] = { buf << BULK_OFF_BITS | off, len, 0 };
+    if (slot != 0) {
+        memcpy(slot, words, sizeof(words));
+        chan_put_end(&e->refs, bytes);
+    }
+}
+
+/*
+ * Asks its requests in order in each buffer to fill it can take, and reads each answer where it lies and gives it back,
+ * once it has found its blocks zeroed; a forger hands over what it does not hold too,
+ * and one told to breach stores into its first answer.
+ */
+void borrower_main(struct child_page *page)
+{
+    struct borrower_page *p = (struct borrower_page *)page;
+    struct bulk_end *e = &p->link;
+    child_report(page, CHILD_RUNNING);
+    while (!bulk_ready(e)) {
+        wait_any();
+    }
+    if (p->flood) {
+        *(volatile uint32_t *)(uintptr_t)e->refs.tx.base += 0x40000000u; /* the head, see lib/ring.c */
+        rv_signal(e->refs.peer, NOTIFY_ALL_BITS);
+        child_stop(page, BORROWER_FLOODED);
+    }
+    struct bulk_ref none = { e->reads, 0, 1, 0, 0, 0 };
+    if (bulk_hand(e, &none) == 0) {
+        child_fail(page, BORROWER_STEP_HAND, none.buf);
+    }
+    /* The answers, the requests and both rings, which the lender writes nothing of before it is asked. */
+    uint32_t at, rings = 2u * ring_bytes(e->refs.rx.slots, e->refs.rx.slot_size);
+    if ((at = first_set(e->read_base, e->reads * e->size)) != e->reads * e->size ||
+        (at = first_set(e->fill_base, e->fills * e->size)) != e->fills * e->size ||
+        (at = first_set(e->refs.rx.base, rings)) != rings) {
+        child_fail(page, BORROWER_STEP_DIRTY, at);
+    }
+    uint32_t next = 0;
+    int forged = !p->forge;
+    while (p->filled < BULK_ROUNDS || p->read < BULK_ROUNDS) {
+        struct bulk_turn t = bulk_turn(e);
+        struct bulk_ref r;
+        while (bulk_next(&t, &r)) {
+            uint32_t n = r.tag;
+            if (r.room != 0) {
+                child_fail(page, BORROWER_STEP_ROOM, r.buf);
+            }
+            if (r.off != answer_off(n) || r.len != answer_len(n)) {
+                child_fail(page, BORROWER_STEP_BYTES, n);
+            }
+            for (uint32_t k = 0; k < r.len; k++) {
+                if (r.bytes[k] != bulk_byte(p->seed, n, k)) {
+                    child_fail(page, BORROWER_STEP_BYTES, n);
+                }
+            }
+            if (p->breach) {
+                *(volatile uint8_t *)(uintptr_t)r.bytes = 0;
+                child_stop(page, BORROWER_BREACHED);
+            }
+            bulk_put(e, r.buf);
+            p->read++;
+        }
+        while (next < BULK_ROUNDS && bulk_take(e, &r) == 0) {
+            if (r.room == 0) {
+                child_fail(page, BORROWER_STEP_ROOM, r.buf);
+            }
+            /* Once it holds a request, before it hands anything, so that no answer is lent yet. */
+            if (!forged) {
+                forge(e, 1, 0, 1, BULK_REF_BYTES);                  /* an answer, none of which is lent yet */
+                forge(e, 200, 0, 1, BULK_REF_BYTES);                /* no buffer of the connection's */
+                forge(e, r.buf, 0, 1, 4);                           /* the request it holds, cut short */
+                forge(e, r.buf, 0, BULK_SIZE + 1u, BULK_REF_BYTES); /* the same, past the end of its buffer */
+                forged = 1;
+            }
+            for (uint32_t k = 0; k < request_len(next); k++) {
+                r.room[request_off(next) + k] = bulk_byte(REQUEST_SEED(p->seed), next, k);
+            }
+            r.off = request_off(next);
+            r.len = request_len(next);
+            r.tag = next++;
+            if (bulk_hand(e, &r) != 0) {
+                child_fail(page, BORROWER_STEP_HAND, r.buf);
+            }
+            p->filled++;
+        }
+        if (!bulk_more(&t) && (p->filled < BULK_ROUNDS || p->read < BULK_ROUNDS)) {
+            wait_any();
+        }
+    }
+    child_stop(page, BORROWER_DONE);
 }
 
 /*

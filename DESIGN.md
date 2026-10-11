@@ -33,6 +33,7 @@ Contents:
   - [Threads](design/objects.md#threads)
   - [Faults](design/objects.md#faults)
 - [Communication and synchronisation](design/objects.md#communication-and-synchronisation)
+  - [Bulk data](design/objects.md#bulk-data)
 - [Time](design/time.md#time)
 - [Scheduling](design/time.md#scheduling)
 - [The watchdog](design/time.md#the-watchdog)

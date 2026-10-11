@@ -212,6 +212,8 @@ until the maintainer decides otherwise.
     and the windows would take a block of RAM the board names, granted as a frame of its own,
     or an operation that binds a frame to a master, which deleting the frame undoes.
     Trust is simpler than either.
+    A driver's connections of `user/lib/bulk.h` rest on it: the driver hands its device only buffers its end names,
+    and lets go of a closed connection only once its device no longer uses them; see "Bulk data".
 
 14. **Memory authority: `Untyped` and `Frame`.**
     Decided: seL4's split; see "Kernel pools and revocation".
@@ -632,3 +634,15 @@ until the maintainer decides otherwise.
       A thread's, a table's, a process's and the debug capability's;
       what fills them comes with the first program that needs it, or a page.
     Decide with decision 31's changes, before the ABI is held still.
+34. **Copies by the kernel.**
+    Decided: none; the kernel moves no data, see "Communication and synchronisation",
+    and bulk data is lent where it lies, `user/lib/bulk.h`; see "Bulk data".
+    An operation that copies bytes between two frames the caller holds, as Hubris's leases let a server reach a client's memory,
+    was weighed: it would let a server take a client's bytes, or give it some, with no region over the client's memory,
+    and take them as a snapshot the client cannot change halfway.
+    Lending gives both already.
+    The lender's memory holds a connection, so a server spends one region on all its borrowers, and a borrower one or two;
+    and a server takes a snapshot of what it decides on by copying it into its own memory, at the cost the kernel's copy would have.
+    The kernel would have read and written user memory, which it does nowhere,
+    held its lock on several cores for as long as a copy takes, which goal 4 would have had to bound,
+    and needed the host build and the fuzzer to model the memory it copied.

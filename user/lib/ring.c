@@ -56,6 +56,18 @@ int ring_put_end(const struct ring *r, uint32_t len)
     return c->tail == head;
 }
 
+uint32_t ring_ready(const struct ring *r)
+{
+    struct counters *c = counters(r);
+    uint32_t held = c->head - c->tail;
+    return held < r->slots ? held : r->slots;
+}
+
+uint32_t ring_taken(const struct ring *r)
+{
+    return counters(r)->tail;
+}
+
 const uint8_t *ring_get_begin(const struct ring *r, uint32_t *len)
 {
     struct counters *c = counters(r);
