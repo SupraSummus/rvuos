@@ -114,6 +114,8 @@ grep -q "root: cores $(printf '0x%08x' "$board_cores")" "$text" \
 if [ "$board_cores" -gt 1 ]; then
     grep -q 'root: second core ok' "$text" \
         || fail "a thread bound to the second core's units did not run beside the root task"
+    grep -q 'cores: stop ok' "$text" \
+        || fail "a thread stopped on the second core ran on, or did not run again once resumed"
     grep -q 'root: move ok' "$text" \
         || fail "a thread moved from the second core to an eighth of the first ran more than that there, or not at all"
     grep -q 'root: wake across cores ok' "$text" \
@@ -131,6 +133,8 @@ grep -q 'root: handover ok' "$text" \
     || fail "a successor given everything the root task held could not destroy the root task and take its place"
 grep -q 'root: fault ok' "$text" \
     || fail "a fault stopped more than its thread, its watch did not hear it, a resume did not run the load again, or its registers did not move it on"
+grep -q 'root: stop ok' "$text" \
+    || fail "a stop did not take a waiter off its wait to stand at its call, or a resume did not make the wait again"
 grep -q 'root: watchdog fed ok' "$text" \
     || fail "the watchdog halted the machine although it was fed in time"
 grep -q 'watchdog: not fed in time' "$text" \

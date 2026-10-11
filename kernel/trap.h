@@ -63,6 +63,13 @@ void frame_fault(const struct trap_frame *frame, uint32_t *out);
 bool frame_read(const struct trap_frame *frame, uint32_t reg, uint32_t *value);
 bool frame_write(struct trap_frame *frame, uint32_t reg, uint32_t value);
 
+/*
+ * Whether the trap that made the frame lost registers the thread had, which a resume then cannot run on:
+ * on ARM a stacking that faulted, which left the hardware frame unwritten; never on RISC-V,
+ * whose trap saves every register itself. In frame.c too.
+ */
+bool frame_lost(const struct trap_frame *frame);
+
 /* Called from start.S when the kernel itself traps. */
 __attribute__((noreturn)) void kernel_trap_panic(void);
 

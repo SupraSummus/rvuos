@@ -94,7 +94,7 @@ static uint32_t count_cores(void)
 
 static void second_core(uint32_t data_base, uint32_t data_size, uint32_t shared_base, uint32_t counter, uint32_t hz)
 {
-    uint32_t base, bits, status, was, cause, pc, addr, fault_status;
+    uint32_t base, bits, status, was, cause, pc, addr, fault_status, state;
     uint32_t counts = hz / 1000u * (SPIN_US / 1000u);
     uint32_t stack = data_base + data_size / 4;
 
@@ -117,6 +117,20 @@ static void second_core(uint32_t data_base, uint32_t data_size, uint32_t shared_
     expect("it spins while this thread spins, making no call",
            moved_while_spinning(&spins[0], was, counter, counts) ? KERR_OK : KERR_INVALID_ARG);
     puts("root: second core ok\n");
+
+    /*
+     * A stop of the thread the second core runs: that core traps before the stop returns, and drops the trap,
+     * so the spinner counts no more, however long this thread sleeps, until it is resumed.
+     */
+    expect("stop the spinner there",
+           rv_thread_stop(SLOT_SPINNER, &state) == KERR_OK && state == THREAD_WAS_READY ? KERR_OK : KERR_INVALID_ARG);
+    was = spins[0];
+    expect("sleep while it is stopped", sleep_us(SLEEP_US));
+    expect("it counted nothing meanwhile", spins[0] == was ? KERR_OK : KERR_INVALID_ARG);
+    expect("resume it", rv_thread_resume(SLOT_SPINNER));
+    expect("it spins there again",
+           moved_while_spinning(&spins[0], was, counter, counts) ? KERR_OK : KERR_INVALID_ARG);
+    puts("cores: stop ok\n");
 
     /*
      * Alone on the second core it has the whole of it while this thread sleeps.

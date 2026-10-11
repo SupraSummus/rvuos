@@ -87,6 +87,9 @@ what is left:
   so a parent cannot keep some children in blocks of their own once it has made the room.
 - A child's stack grows down onto its page, and nothing stops it there;
   a guard would cost a region, the scarcest thing a process has.
+- `child_stop` in `user/lib/child.h` reports and then waits for good, since a child holds no capability to its own thread:
+  the convention giving each child its thread, which a self-stop takes, would let a stopped child be used again by a resume,
+  but `RIGHT_W` on it also sets its watch, so it waits for the narrower right open decision 32 weighs.
 - `user/lab/` does not show yet a client of several threads asking at once, a driver whose work an interrupt starts,
   two cores, a client that makes its ring look full, or one that gives up on an answer.
   Nor several takers lending to one holder, or a holder that waits on a second lock.
@@ -346,6 +349,9 @@ what is left:
   a device region is nGnRnE there, and whether that makes the fault precise is unmeasured.
 - A host harness with ARM's frame, so the fuzzer reaches `frame.c` and the call registers;
   the host build knows RISC-V's alone.
+  So nothing checks the rule that a stop which made another core trap reports a frame that trap could not stack, `sched_stop`:
+  the host's frame loses nothing, and no demo stops a thread whose sp lies where it may not write.
+  A two-core scenario of the escape suite, a thread stopped from the first core with its sp below its stack's region, would.
 - The demo's console never waits on UART0's line under QEMU, whose transmitter sends at once,
   so nothing runs `irq_enable` unmasking a line of the NVIC with its level still high.
 - `kernel/board/mps2/timer.c` keeps the counter's wraps with an exclusive pair on memory the MPU leaves Non-shareable,
@@ -553,11 +559,6 @@ what is left:
 
 What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
 
-- No operation stops a thread: a thread is stopped only where it faults, or for good once its process is taken,
-  so a supervisor cannot start a hung thread afresh, read a running thread's registers, or take a thread off a notification,
-  and a thread that ends by waiting for good cannot be used again but by destroying its pool.
-  An `OP_THREAD_STOP` would take it to the stopped state from any other, a waiting one off its waiters at its call,
-  which a resume makes again; opcode 16 is free.
 - A program can read a frame and an Untyped and no other capability:
   not the units or lines a `Time` or `IrqLine` capability names, nor the bits a `Notification` capability may signal,
   so it learns how many cores there are by the units it can carve;
@@ -565,6 +566,20 @@ What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
   nor the tick, which a program's own timing analysis and the demo's charge check need.
 - The kernel ignores the arguments an operation does not use, and never reads `a4` to `a6`, which `rv_invoke` leaves as they were,
   so no unused argument can be given a meaning later without changing what a program that left garbage there does.
+  `OP_THREAD_STOP` alone refuses `a1` to `a3` not zero.
+  A design for decision 31's one change:
+  one constant table in `kernel/syscall.c`, `op_shapes[OP_COUNT]`, gives each operation a mask of the types it is invoked on,
+  so that one describing every type fits, the right it needs, and which of `a1` to `a3` it reads,
+  with a flag for the three whose own values decide what they read:
+  `OP_POOL_ALLOC` of a notification, `OP_THREAD_WATCH` with no bits, `OP_IRQ_SET` with no bits or off a timer line;
+  `dispatch` checks in the manual's order, the slot, the type, the right, then every unread argument and every unread bit zero,
+  the high bits of a rights mask among them, else `KERR_INVALID_ARG`,
+  so a foreign operation on a capability without its right is `KERR_WRONG_TYPE` where it is `KERR_NO_RIGHTS` today;
+  `a4` to `a6` stay unread by every operation until the replay record carries them;
+  the wrappers of `user/rvuos.h` that take results in `a1` to `a3`, and `start.S`'s halts, pass zero in what they do not set;
+  `host/history.c` holds every refused call to the status of its first failing check, an oracle of the order;
+  and the 74 records of 46 corpus inputs that carry garbage are zeroed once, which today's kernel takes as they were,
+  a seed that reads a fault and a register added, since those records are the only ones that do.
 - The breaking changes decision 31 lists, in one change with the seeds and the corpus written anew once.
 
 ## Code
@@ -682,9 +697,10 @@ the first five below are what does not keep to it yet, each a constant-time chan
   decide when a workload measures the difference.
   It bounds the work a thread gets beside threads that save up their time, (64 - u) / u tenths of a second at worst, whatever the tick;
   a cap in ticks, `COUNT_PARTS` and one at the least, or one the granter sets with the units, would shorten that with the tick.
-- A thread is stopped by revoking its units and started again by binding it,
-  which is what a userspace scheduler, open decision 9 in `DESIGN.md`, needs.
-  A thread waiting on a notification stays on it meanwhile, and cannot be taken off it today.
+- A fault hands the rest of the turn to the next thread as a wait does, though its watch's signal wakes the watcher
+  whose time pays for the turn, if it lends the thread its time: that watcher waits on the run queue for its own turn.
+  Handing it the rest of the turn, as a signal from the borrower does, would not;
+  a thread that reports and then stops itself, `OP_THREAD_STOP`, has the report's signal hand it back already.
 - A thread that waits hands the rest of its turn to the next on the run queue,
   so a server woken by an ask waits for the turn ahead of it, a tick beside a busy process, whatever units either side earns;
   see `user/lab/NOTES.md`.

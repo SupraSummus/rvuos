@@ -63,6 +63,7 @@ enum {
     /* The prober's are ones the destroy of the boot pool emptied in the successor's table. */
     SLOT_PROBER = SLOT_LOGGER,            /* the successor's thread that faults */
     SLOT_PROBE_NTFN = SLOT_LOG_NTFN,      /* what its faults signal, its watch */
+    SLOT_STOP_NTFN = SLOT_LOG_IRQ,        /* what it waits on while it is stopped */
     /* The second core's are ones the destroy of the child's pool emptied. */
     SLOT_CORE_TIME = SLOT_CHILD_TABLE,    /* the second core's units, carved out of the boot grant */
     SLOT_PING = SLOT_UP,                  /* what the ponger waits on */
@@ -116,6 +117,7 @@ enum {
 #define BIT_SPARE   0x100u /* the spare line's bit on that same notification */
 #define BIT_FAULT   0x800u /* the prober's faults, on the notification that watches it */
 #define BIT_PONG    0x1000u /* the ponger's answer, on the timer's notification */
+#define BIT_STOP    0x2000u /* what the prober waits for while it is stopped, on its own notification */
 #define BIT_PING    0x1u    /* what the ponger waits for, on its own notification */
 #define MAGIC 0x5eaf00du
 

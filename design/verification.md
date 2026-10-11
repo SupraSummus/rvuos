@@ -135,6 +135,9 @@ A core idles only while some core runs a thread or holds one waiting for a turn,
 or something armed could make one runnable.
 A core runs user mode only for a ready thread, and only with the regions its process has:
 a call that takes either from it waits for the core to trap first.
+A core whose turn's thread another core stopped is marked to drop the trap it takes next,
+and a core holds a mark only from another core, and only while it has trapped;
+under tracing a core has its turn for a thread the host cannot follow only while it is so marked.
 The core a call runs on holds the regions of its thread's process, none waiting to be loaded again.
 
 **Interrupts.**
@@ -244,6 +247,14 @@ A thread comes to lend its time to another only by its own lending wait,
 through a capability to that thread with the right to lend;
 no other call, and no fault, makes one thread lend to another.
 
+**A thread stops by its holder, where it stood.**
+A thread ready or waiting before a call and stopped after it is the caller of a fault, one whose process the call took,
+or the thread the call's `OP_THREAD_STOP` named, through a capability with the right to control it.
+The caller of a call stands past it;
+a waiter stands at the call it waited in, every register as it was, unless the call answered its wait first,
+as a destroy does with `KERR_INVALID_CAP` and no bits;
+any other stands where it stood, every register as it was.
+
 **A move keeps a node's place.**
 A move that succeeds leaves its source empty
 and its destination holding the same capability,
@@ -252,7 +263,7 @@ and above the same children, in their order.
 The tree's shape alone does not say so:
 a copy beside the source and a delete of it leave a whole tree too.
 
-These eight relate the state before a call to the state after it,
+These nine relate the state before a call to the state after it,
 so the self-check, which sees one state, cannot check them.
 `host/history.c` checks them around every call of the host build, the untraced prologue's too,
 and around every fault, which must change no more than a call that moves no time,
@@ -566,6 +577,9 @@ The host stops every restartable call after each step and makes it again at once
 which checks every restart alone;
 a thread an armed stop left stands at its `ecall` until the processor comes back to it,
 and faults on the `ecall` if its process no longer maps the driver's code.
+So does a thread `OP_THREAD_STOP` took off its wait, back at the `ecall` whose registers the host loaded:
+the host follows it by the stop's result, `THREAD_WAS_WAITING`, as it follows an armed stop,
+and the wait made again prints its line on both builds.
 What the demo in `user/init/` alone still checks
 is the interrupt landing between two instructions.
 The replay driver starts its second thread after turning tracing on,
@@ -583,9 +597,20 @@ A core that a call waits for in `core_shoot` traps at once, its registers saved,
 while one only told of a change goes on in user mode until then,
 so the self-check sees a core left running what the call took from it.
 Such a core drops what its trap was for through the kernel's own `core_trapped`, as the target's trap does.
+A core an `OP_THREAD_STOP` shot is slower: its trap waits, as the trap of a core slow to take its ticket of the lock would,
+until a record comes for the thread whose turn it has or that waits there for one,
+until no other core has a turn, until its turn goes with a destroy, or until the records end,
+so the calls of other cores between, a resume, a write of a register, a destroy, come before it,
+which is the case the stop's mark is for, and the one order of the traps in which the thread's state and the mark disagree.
+The self-check holds there that a traced core has its turn for a thread the host cannot follow only while marked,
+which a trap that went by the state breaks once a register was written,
+and that a ready thread waits on its queue, which a trap that handed the processor on as a wait does breaks once the thread was resumed.
+A shot for a lost process or a region traps at once, as before.
 Each core has its own PMP CSRs there, and the host checks after every round of interrupts
 that no core idles while a thread waits for a turn on it.
 The seeds named `cores-` bind a driver thread to the second core's units and take things from it there,
+`cores-thread-stopped`, `cores-waiter-stopped`, `cores-resume-before-trap`, `cores-resumed-thread-runs`
+and `cores-stopped-thread-destroyed` among them, which stop it there,
 or arm a timer line there that a tick the first core counts fires;
 the other seeds and the corpus run on the first core alone, as on one.
 `make smp-test` boots the demo on two harts of QEMU `virt`,

@@ -1,0 +1,21 @@
+A stop moves every thread it stops back by a call, the ready ones too,
+so one stopped between two instructions runs again from an instruction before,
+and one that stops itself makes its stop again once resumed:
+a thread stops where it stood.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a stop moved a thread from where it stood
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -454,8 +454,8 @@ static bool thread_stop(struct thread *t)
+ {
+     if (t->state == THREAD_WAITING) {
+         unwait(t);
+-        t->frame.pc -= CALL_SIZE;
+     }
++    t->frame.pc -= CALL_SIZE;
+     t->state = THREAD_STOPPED;
+     return core_thread_stopped(t);
+ }

@@ -107,6 +107,25 @@ static inline uint32_t rv_thread_resume(uint32_t thread_cap)
     return rv_invoke(OP_THREAD_RESUME, thread_cap, 0, 0, 0);
 }
 
+/*
+ * OP_THREAD_STOP: stop a thread, whatever it is doing; *was = what it was doing, THREAD_WAS_*.
+ * a1 to a3 are zero, as the call asks.
+ */
+static inline uint32_t rv_thread_stop(uint32_t thread_cap, uint32_t *was)
+{
+    register uint32_t r_a0 __asm__(RV_A0) = thread_cap;
+    register uint32_t r_a1 __asm__(RV_A1) = 0;
+    register uint32_t r_a2 __asm__(RV_A2) = 0;
+    register uint32_t r_a3 __asm__(RV_A3) = 0;
+    register uint32_t r_a7 __asm__(RV_A7) = OP_THREAD_STOP;
+    __asm__ volatile(RV_CALL
+                     : "+r"(r_a0), "+r"(r_a1)
+                     : "r"(r_a2), "r"(r_a3), "r"(r_a7)
+                     : "memory", RV_A4, RV_A5, RV_A6);
+    *was = r_a1;
+    return r_a0;
+}
+
 /* OP_THREAD_WATCH: the bits the thread's faults signal on a notification; bits = 0 clears the watch. */
 static inline uint32_t rv_thread_watch(uint32_t thread_cap, uint32_t ntfn_cap, uint32_t bits)
 {

@@ -1,0 +1,19 @@
+A trap another core marked hands the processor on as a wait does, and settles nothing,
+so a thread a call resumed between the stop and the trap is left ready on no queue, its turn being over, and never runs:
+a ready thread that may run waits on its queue.
+
+Caught-by: fuzz-smp2
+Report: a ready thread that may run waits on no queue
+
+diff --git a/kernel/core.c b/kernel/core.c
+--- a/kernel/core.c
++++ b/kernel/core.c
+@@ -211,7 +211,7 @@ struct thread *core_trapped(void)
+      */
+     core->turn_due = false;
+     core->recall = false;
+-    sched_turn_end();
++    sched_run_next();
+     return NULL;
+ }
+ 

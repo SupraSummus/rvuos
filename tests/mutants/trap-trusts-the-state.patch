@@ -1,0 +1,19 @@
+A trap clears the mark another core's stop left but goes by its thread's state,
+so a thread a call resumed between the stop and the trap runs on as the trap returns,
+on registers a watcher may have written since, which under tracing the host cannot follow:
+a traced core has its turn only for a thread the host follows, but while its trap is marked.
+
+Caught-by: fuzz-smp2
+Report: a traced core has its turn for a thread the host cannot follow
+
+diff --git a/kernel/core.c b/kernel/core.c
+--- a/kernel/core.c
++++ b/kernel/core.c
+@@ -198,7 +198,6 @@ struct thread *core_trapped(void)
+     /* A trap another core marked is not its thread's any more, whatever the thread is by then. */
+     if (core->drop_trap) {
+         core->drop_trap = false;
+-        t = NULL;
+     }
+ #endif
+     if (t != NULL && t->state == THREAD_READY) {

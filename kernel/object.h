@@ -169,12 +169,16 @@ struct process {
  * A thread bound to no units keeps its state and does not run.
  * A thread without a process is stopped, and stays so.
  * A thread that faults stops, and its watch hears it; see DESIGN.md, "Faults".
+ * A thread stopped while it waited stands at its call; see OP_THREAD_STOP.
  */
 enum {
-    THREAD_STOPPED = 0, /* created, configured and not started, or stopped where it faulted */
+    THREAD_STOPPED = 0, /* created, configured and not started, stopped where it faulted, or by OP_THREAD_STOP */
     THREAD_READY,       /* running, or waiting for the processor */
     THREAD_WAITING,     /* blocked on the notification in waiting_on */
 };
+_Static_assert(THREAD_WAS_STOPPED == THREAD_STOPPED && THREAD_WAS_READY == THREAD_READY &&
+                   THREAD_WAS_WAITING == THREAD_WAITING,
+               "OP_THREAD_STOP returns the state as it is");
 
 /*
  * A thread whose code the host build cannot follow.
@@ -227,7 +231,8 @@ struct thread {
 
 /*
  * A notification is a word of sticky bits, and the only way
- * a thread can stop running and be started again.
+ * a thread can stop running until a signal starts it again;
+ * OP_THREAD_STOP stops one until a resume does.
  * Data does not travel through it:
  * two processes that share a region move bytes through the region
  * and use the notification to say when.

@@ -691,6 +691,23 @@ static void check_core(uint32_t i)
         }
     }
     /*
+     * A core whose turn's thread another core stopped drops the trap it takes next, whatever the thread is by then:
+     * the stopping core marks it as it shoots it, and the mark stays until that trap takes the lock,
+     * so neither a core in user mode nor the one that runs this check, which took the lock, holds one;
+     * it goes with the turn, which a destroy may take first.
+     * Under tracing a thread the host cannot follow never runs, so only a core so marked has its turn for one:
+     * a watcher may write a stopped thread's registers before that core's trap, and resume it.
+     */
+    if (c->drop_trap && (c == core_self() || c->in_user)) {
+        fail("a core is to drop a trap it is not taking", i, c->turn != NULL ? v2p(c->turn) : 0, c->in_user);
+    }
+    if (c != core_self() && c->turn != NULL && c->turn->state != THREAD_READY && !c->drop_trap) {
+        fail("a core would take a trap as the thread another core stopped", i, v2p(c->turn), c->turn->state);
+    }
+    if (debug_trace && c->turn != NULL && (c->turn->flags & THREAD_UNTRACED) && !c->drop_trap) {
+        fail("a traced core has its turn for a thread the host cannot follow", i, v2p(c->turn), c->turn->flags);
+    }
+    /*
      * A turn on spare time is one no thread with time wants, so it ends as the trap that makes one ready does,
      * unless its thread stands at a call stopped for an interrupt, which it makes again first;
      * on another core that runs user mode it ends as that core traps, which whoever made the thread ready owes it.

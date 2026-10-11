@@ -58,3 +58,9 @@ bool frame_write(struct trap_frame *frame, uint32_t reg, uint32_t value)
     }
     return true;
 }
+
+bool frame_lost(const struct trap_frame *frame)
+{
+    (void)frame;
+    return false;
+}

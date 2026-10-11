@@ -1,0 +1,18 @@
+A thread destroyed while another core's trap for it is marked to be dropped leaves the mark,
+so a core woken with nothing to run keeps it, to drop a trap of the next thread it runs:
+the mark goes with the turn it was set for.
+
+Caught-by: fuzz-smp2
+Report: a core is to drop a trap it is not taking
+
+diff --git a/kernel/core.c b/kernel/core.c
+--- a/kernel/core.c
++++ b/kernel/core.c
+@@ -182,7 +182,6 @@ void core_thread_gone(const struct thread *t)
+         /* The trap finds no thread, and drops what it was for all the same. */
+         if (c->turn == t) {
+             c->turn = NULL;
+-            c->drop_trap = false;
+         }
+         /* The turn it paid for may be left on spare time, which a thread with time waiting there takes. */
+         if (c->payer == t) {

@@ -1,21 +1,20 @@
 A thread another core runs is stopped without that core trapping first.
 It runs on while a watcher reads its frame, and while its memory may go;
-a core runs user mode only for a thread that may run.
+a core runs user mode only for a thread that may run, and is marked only once it has trapped.
 
 Caught-by: fuzz-smp2
-Report: a core runs user mode for a thread that may not run
+Report: a core is to drop a trap it is not taking
 
 diff --git a/kernel/core.c b/kernel/core.c
 --- a/kernel/core.c
 +++ b/kernel/core.c
-@@ -146,9 +146,7 @@ void core_thread_stopped(const struct thread *t)
- #if CORES > 1
-     for (uint32_t i = 0; i < CORES; i++) {
-         LOOP_BOUND(CORES);
--        if (cores[i].current == t) {
--            core_shoot(&cores[i]);
+@@ -160,9 +160,6 @@ bool core_thread_stopped(const struct thread *t)
+             c->drop_trap = true;
+             marked = true;
+         }
+-        if (c->current == t) {
+-            core_shoot(c);
 -        }
-+        (void)t;
      }
+     return marked;
  #else
-     (void)t;

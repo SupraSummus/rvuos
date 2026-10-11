@@ -45,6 +45,7 @@ and `user/lib/` what a program of several processes needs beside them, section 8
 | `rv_process_unmount(process, index)` | `OP_PROCESS_UNMOUNT` |
 | `rv_thread_configure(thread, pc, sp, arg)` | `OP_THREAD_CONFIGURE` |
 | `rv_thread_resume(thread)` | `OP_THREAD_RESUME` |
+| `rv_thread_stop(thread, &was)` | `OP_THREAD_STOP` |
 | `rv_thread_watch(thread, ntfn, bits)` | `OP_THREAD_WATCH` |
 | `rv_thread_fault(thread, &cause, &pc, &addr, &status)` | `OP_THREAD_FAULT` |
 | `rv_thread_read_reg(thread, reg, &value)` | `OP_THREAD_READ_REG` |
@@ -370,6 +371,10 @@ a turn with time pays a whole tick at each `OP_DEBUG_TICK` and nothing at a wait
 A thread whose program counter was set while tracing was on,
 or any of whose registers `OP_THREAD_WRITE_REG` wrote then,
 cannot be run under tracing; the kernel halts with code 6 instead.
+`OP_THREAD_STOP` and `OP_THREAD_READ_REG` are allowed:
+the only pc a stop moves is a waiter's, back to the call it made, which the host build makes again too,
+so a traced thread that a stop took off its wait prints its wait's line again once resumed.
+A watcher that answers the wait instead writes registers, and the thread cannot run under tracing any more.
 
 **The self-check** (`kernel/selfcheck.c`) verifies, among other things:
 no installed region or frame overlaps a pool,

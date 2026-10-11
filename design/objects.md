@@ -96,7 +96,7 @@ there is one counter and one watchdog on the machine.
 | `CapTable` | A process's capability table. Allocated from a pool. |
 | `Process` | A protection domain: capabilities to its `CapTable`s, a set of region slots, and its threads. |
 | `Thread` | An execution context inside a process: its registers, its state, and what its faults signal. |
-| `Notification` | A word of sticky signal bits. The only way a thread can stop and be started again. |
+| `Notification` | A word of sticky signal bits. The only way a thread can wait to be started again by a signal. |
 | `IrqLine` | A range of interrupt lines: the log's and the controller's, or the timer lines. Bound one at a time into an `Irq`. |
 | `Irq` | One line bound to a notification. Signals it when the line fires. |
 | `Time` | A range of the processor's units of time. A thread runs only while bound to some, or to none with spare time. No object. |
@@ -448,13 +448,13 @@ a ready thread leaves its queue, a waiting one its notification's waiters and le
 and the running one gives the processor up as its call returns.
 `OP_THREAD_RESUME` refuses a thread without a process,
 so it stays stopped until its own pool goes.
-The running thread can lose its process only to a revoke it makes itself;
-see "Bounded work".
-A thread another core runs can lose it to any call, which makes that core trap first; see "Cores".
+The running thread can lose its process only to a revoke it makes itself, see "Bounded work",
+and can be stopped only by itself.
+A thread another core runs can lose it, or be stopped, by any call, which makes that core trap first; see "Cores".
 It costs twenty bytes per thread and a test on every call and every switch;
 before, a thread had to lie in its process's pool so a pointer could not dangle.
 
-A thread is either stopped or ready.
+A thread is stopped, ready or waiting.
 `OP_THREAD_CONFIGURE` sets a stopped thread's program counter, stack pointer
 and argument, the first register of a call, and zeroes the rest,
 and `OP_THREAD_RESUME` makes it ready.
@@ -464,6 +464,31 @@ The kernel validates none of the three:
 it knows no executable format and no calling convention beyond where a function finds its first argument,
 so a thread that starts nowhere useful faults,
 which is its creator's business: the thread stops, and its watch hears it; see "Faults".
+
+**Any thread can be stopped.**
+`OP_THREAD_STOP` takes a thread to stopped from whatever it is doing, and says what that was,
+through a capability to it with `RIGHT_W`, the one that configures and resumes it.
+A stopped thread stays as it is, a fault to tell among it, so a supervisor may stop a child whatever happened meanwhile.
+A ready one leaves its queue, and one another core runs makes that core trap first, which drops that trap; see "Cores".
+A waiting one leaves its notification's waiters, and its borrower's ring of lenders,
+and stands at the call it waited in, its pc back by the call's size, every register as the call found it,
+since a call that blocks writes none.
+It keeps its process, its watch, its units and its account, and its own lenders, whose time buys nothing while it is stopped;
+a turn it pays for, lent to another thread, runs on to its end, charged to it.
+Nothing is signalled, the watch included: a stop is always asked for, and the watch hears what nobody asked for.
+The loss of a process stops a thread the same way, a waiter standing at its call too, so one rule holds for every stop.
+It costs a flag in each core, set by a stop and read by every trap on several cores, and no walk:
+the stop's work is the loss of a process's, which the kernel did already.
+
+**Why at the call, and not a status.**
+A waiter stopped could instead be answered, `KERR_STATE` say, and resumed past its call.
+At its call it is the shape a restartable call that stopped for an interrupt has, `include/rvuos/abi.h`:
+a resume makes the call again, which checks everything afresh,
+so stop and resume are invisible to the thread but for what any call made again sees,
+bits another waiter took, a place lost among the waiters, a slot cleared meanwhile.
+A watcher may answer the wait itself, writing `a0`, `a1` and the pc past the call as it emulates an instruction.
+The host build follows it without a register written, so tracing allows the stop; see "Verification".
+A status would need a new error or an overloaded `KERR_STATE`, and every wait in `user/lib/` a retry on it.
 
 ### Faults
 
@@ -500,16 +525,19 @@ It costs twenty-four bytes per thread, one node more for a destroy to look at, a
 The kernel stops the thread, signals its watch and does no more, since every answer is an operation already:
 resume it once what it reached for is mapped, which maps a region on demand;
 configure it to start again; take its process, which ends it, or its units, which a stopped thread still earns;
-revoke below the Untyped it was made of; or leave it stopped.
-A breakpoint is a fault like any other, so a thread that is done can stop with one and its watcher hears it:
-that is as near as rvuos comes to an exit, and it needs nothing more.
+revoke below the Untyped it was made of; stop it, which leaves it as it is; or leave it stopped.
+A thread that is done says so first by its own means, as `child_report` in `user/lib/child.h` does,
+then stops itself, through a capability to its own thread with `RIGHT_W`,
+which is as near as rvuos comes to an exit and signals nothing, since whoever hears the report may stop it anyway.
+That capability also reaches the thread's watch, which the node above keeps out of a thread's reach,
+so a thread kept from its watch ends with a breakpoint instead, a fault like any other, which its watcher hears.
 
 **The watcher can ask what the fault was, and move the thread on.**
 The kernel writes `user fault` and the frame's `mcause`, `mepc` and `mtval` into its log,
 on ARMv7-M the exception, the fault status, the pc and the fault address,
 while the bits say only which thread.
 `OP_THREAD_FAULT` returns the same to whoever holds the thread with `RIGHT_W`,
-from the frame, which keeps them while the thread stays stopped where it faulted.
+from the frame, which keeps them while the thread stays stopped where it faulted, a stop of it since among that.
 A new thread's frame is zero, which is a cause too, so a flag, `THREAD_FAULTED`, tells a fault from none.
 `OP_THREAD_READ_REG` and `OP_THREAD_WRITE_REG` reach any general register of a stopped thread and its program counter,
 so a watcher can emulate the instruction the thread faulted at, write the program counter past it, and resume it;
@@ -559,6 +587,8 @@ Between threads on two cores a short spin is sound, but a holder the tick preemp
 So the one service userspace cannot build for itself
 is "stop running me until someone says otherwise",
 and a notification is that service and nothing else.
+A thread that stops itself, `OP_THREAD_STOP`, is no such service:
+a resume that comes before the stop is refused and lost, where a signal before a wait stays.
 A lending wait, below, adds a second, "and give my time to whoever I wait for", which only the waiter can name.
 Message registers, a reply capability good for one use,
 queues of senders and receivers, and capabilities inside messages
@@ -625,7 +655,9 @@ A taker that lends nothing, or lends from another core, takes its chances with a
 A thread destroyed wakes every thread that lends it its time with `KERR_INVALID_CAP` and no bits, a paid step each,
 as a notification's destroy wakes its waiters: the call each made names something that is gone.
 So a taker learns that the holder its lock names is gone, and may take the lock over, knowing the data it guards may be broken.
-A holder that faults keeps the lock, stopped, which its watcher hears.
+A holder that faults keeps the lock, stopped, which its watcher hears, and so does one stopped, which nobody hears.
+A stopped borrower keeps its lenders, which go on waiting, their time buying it nothing until it is resumed:
+it is still there, and waking them is a walk only a destroy pays for.
 
 **Why not a mutex in the kernel.**
 A `Mutex` object did all of this with its holder in the kernel, open decision 27:

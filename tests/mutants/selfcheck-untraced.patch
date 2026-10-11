@@ -7,11 +7,11 @@ Caught-by: loop-bounds
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -546,6 +546,7 @@ static void turn_end(void)
+@@ -1063,6 +1063,7 @@ void sched_turn_end(void)
  
  void sched_tick(uint32_t ticks)
  {
 +    selfcheck_run();
      tick_advance(ticks);
-     turn_end();
+     sched_turn_end();
  }

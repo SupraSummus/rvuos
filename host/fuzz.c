@@ -36,6 +36,13 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
 
 int LLVMFuzzerInitialize(int *argc, char ***argv)
 {
+    /* Every code below OP_COUNT is an operation, so a new one without an entry in host/ops.h stops the harness here. */
+    for (unsigned op = 1; op < OP_COUNT; op++) {
+        if (op_table[op].name == NULL) {
+            fprintf(stderr, "host/ops.h: operation %u has no entry in op_table\n", op);
+            abort();
+        }
+    }
     for (int i = 1; i < *argc; i++) {
         if (strcmp((*argv)[i], "--verbose") == 0) {
             host_verbose = true;

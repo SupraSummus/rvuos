@@ -1,0 +1,19 @@
+A stop stops its caller rather than the thread its capability names,
+so a supervisor that stops a child stops itself, and the child runs on:
+a thread stops by its holder.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
+Report: a thread stopped that no stop named, nor its own fault nor the loss of its process
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -508,7 +508,7 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
+         if ((arg[1] | arg[2] | arg[3]) != 0) {
+             return KERR_INVALID_ARG;
+         }
+-        arg[1] = sched_stop(target);
++        arg[1] = sched_stop(t);
+         return KERR_OK;
+     case OP_THREAD_FAULT:
+         /* The frame keeps what the trap saved, and only a fault leaves the thread stopped with it. */

@@ -78,3 +78,8 @@ bool frame_write(struct trap_frame *frame, uint32_t reg, uint32_t value)
     frame->regs[reg] = value;
     return true;
 }
+
+bool frame_lost(const struct trap_frame *frame)
+{
+    return (frame->cfsr & CFSR_STACKING) != 0;
+}

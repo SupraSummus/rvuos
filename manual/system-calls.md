@@ -287,7 +287,8 @@ With `OP_PROCESS_MOUNT` and `OP_CAP_MOVE` a process moves to another table, sect
 ### 6.8 Operations on `Thread`
 
 All need `RIGHT_W` on the thread,
-and `OP_THREAD_CONFIGURE`, `OP_THREAD_RESUME`, `OP_THREAD_READ_REG` and `OP_THREAD_WRITE_REG` a stopped thread (`KERR_STATE`).
+and `OP_THREAD_CONFIGURE`, `OP_THREAD_RESUME`, `OP_THREAD_READ_REG` and `OP_THREAD_WRITE_REG` a stopped thread (`KERR_STATE`),
+which `OP_THREAD_STOP` makes of any.
 `RIGHT_X` on a thread allows nothing here: it lends the thread time, `OP_NOTIFY_LEND`.
 
 **`OP_THREAD_CONFIGURE` (12).**
@@ -301,8 +302,26 @@ one without bit 0 starts the thread in a fault.
 **`OP_THREAD_RESUME` (13).**
 Makes the thread ready.
 It runs once it is bound to units, or to spare time.
-A thread that faulted runs the faulting instruction again, unless `OP_THREAD_WRITE_REG` moved its program counter.
+A thread that faulted runs the faulting instruction again, unless `OP_THREAD_WRITE_REG` moved its program counter,
+and one stopped while it waited makes its wait again.
 `KERR_STATE` too once the thread's process was taken, section 5.6.
+
+**`OP_THREAD_STOP` (16).**
+`a1`, `a2` and `a3` = 0, else `KERR_INVALID_ARG`.
+Stops the thread, whatever it is doing, and returns `a1` = what it was doing:
+`THREAD_WAS_STOPPED` (0), `THREAD_WAS_READY` (1) or `THREAD_WAS_WAITING` (2).
+A stopped thread is left as it is, with a fault to tell if it had one.
+A ready one stops where it stands;
+one another core runs stops once that core has trapped, which the call waits for,
+and a call it was making there is not made, its pc staying at the `ecall` or `svc`.
+A waiting one leaves its notification, and the borrower it lent its time to, and stands at its call:
+`OP_THREAD_READ_REG` reads the pc of its `ecall` or `svc`, the operation in `a7` (`r12` on ARM), the slot in `a0`.
+A resume makes the call again, checking everything afresh,
+and a watcher may answer the wait instead, writing `a0`, `a1` and the pc past the call.
+On ARM a thread whose core could not stack its registers as it trapped for the stop has lost them, section 5.6:
+the stop leaves it stopped where it faulted, `OP_THREAD_FAULT` telling the stacking fault.
+The caller may stop itself, through a capability to its own thread, and goes on past the call once resumed.
+Units, account, process, watch and lenders stay, and nothing is signalled, the watch included; section 5.6.
 
 **`OP_THREAD_WATCH` (31).**
 `a1` = slot of a `Notification` capability, which needs `RIGHT_W`, and may lie in any pool;
@@ -362,6 +381,7 @@ Needs `RIGHT_R`.
 Blocks until some bit is set, then returns `a1` = the bits and clears them.
 Returns `KERR_INVALID_CAP` with no bits
 if the notification's pool is destroyed while the thread waits.
+A stop leaves the waiter at this call, which a resume makes again; `OP_THREAD_STOP`.
 
 **`OP_NOTIFY_LEND` (38).**
 Needs `RIGHT_R`.
@@ -372,6 +392,7 @@ if that one runs on the borrower's core,
 and a caller whose own time pays for its turn hands the rest of the turn to the borrower,
 if it is that one and the borrower waits for a turn; section 5.12.
 Returns `KERR_INVALID_CAP` with no bits if the notification's pool, or the borrower's, is destroyed while it waits.
+A stop leaves the waiter at this call, lending nothing, which a resume makes again; `OP_THREAD_STOP`.
 
 **`OP_NOTIFY_CARVE` (36).**
 No right needed.
@@ -500,6 +521,7 @@ and an unbind that empties the account leaves the rest of the turn on spare time
 | 13 | `OP_THREAD_RESUME` | `Thread` |
 | 14 | `OP_NOTIFY_SIGNAL` | `Notification` |
 | 15 | `OP_NOTIFY_WAIT` | `Notification` |
+| 16 | `OP_THREAD_STOP` | `Thread` |
 | 17 | `OP_DEBUG_TICK` | `Debug` |
 | 18 | `OP_CAP_MOVE` | `CapTable` |
 | 19 | `OP_IRQ_CARVE` | `IrqLine` |
@@ -525,7 +547,7 @@ and an unbind that empties the account leaves the rest of the turn on spare time
 | 39 | `OP_PROCESS_MOUNT` | `Process` |
 | 40 | `OP_PROCESS_UNMOUNT` | `Process` |
 
-`OP_COUNT` is 41, one above the highest code; 16 is unused.
+`OP_COUNT` is 41, one above the highest code.
 
 ## 7. What the root task starts with
 

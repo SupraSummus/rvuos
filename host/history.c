@@ -1,8 +1,8 @@
 /*
  * The properties "Authority only flows", "A call is as good as its capability", "Memory crosses zeroed",
  * "The caller keeps what it runs on", "A dying pool only gives back", "A tick charges",
- * "A move keeps a node's place" and "A thread lends by its own wait" of DESIGN.md,
- * which relate the state before a call to the state after it.
+ * "A move keeps a node's place", "A thread lends by its own wait" and "A thread stops by its holder, where it stood"
+ * of DESIGN.md, which relate the state before a call to the state after it.
  * host_trap runs history_begin before each call and history_end after it,
  * and around a fault, which must change no more than a call that moves no time.
  *
@@ -36,9 +36,16 @@ struct obj_rec {
     uint32_t at, size, pool;
 };
 
-/* A thread before the call, and the thread it lent its time to, 0 for none. */
-struct lend_rec {
+/*
+ * A thread before the call: the thread it lent its time to, 0 for none, its state, and where it stood,
+ * its pc and its registers; the frame's cause and address are left out, which a fault writes.
+ */
+#define THREAD_REGS (sizeof(((struct trap_frame *)0)->regs) / sizeof(uint32_t))
+struct thread_rec {
     uint32_t at, lend_to;
+    uint8_t state;
+    uint32_t pc;
+    uint32_t regs[THREAD_REGS];
 };
 
 /* Growing arrays, kept from call to call. */
@@ -49,7 +56,7 @@ typedef ARRAY(uint32_t) addr_array;
 
 static ARRAY(struct grant) held;
 static ARRAY(struct node_rec) nodes;
-static ARRAY(struct lend_rec) lends;
+static ARRAY(struct thread_rec) threads;
 static obj_array objects, objects_after;
 
 /*
@@ -62,12 +69,12 @@ static const struct captable *caller_tables[PROCESS_TABLES];
 static uint32_t caller_dying;
 
 /*
- * The call: the capability it invokes, if its slot held one, and where the caller stood,
+ * The call, or the fault, and what it invokes, if its slot held a capability, and where the caller stood,
  * which a call stopped for an interrupt leaves as it was.
  * For OP_NOTIFY_SIGNAL, the notification, its bits, and the threads waiting on it that a signal may wake first:
  * the oldest, and the one that pays for the turn.
  */
-static bool invoked;
+static bool call_made, invoked;
 static struct cap invoked_cap;
 static uint32_t call_op, call_pc;
 static const struct notification *signalled;
@@ -257,7 +264,11 @@ static void children_of(const struct cap *c, addr_array *out)
 /*
  * The rights an operation needs of the capability it is invoked on, as rvuos/abi.h gives them;
  * one invoked on a capability of another type fails before its rights matter.
+ * RIGHTS_IN_HANDLER names an operation whose handler decides by what the call asks,
+ * and RIGHTS_UNKNOWN a code that is no operation, which history_begin holds no code below OP_COUNT to.
  */
+#define RIGHTS_IN_HANDLER 0
+#define RIGHTS_UNKNOWN 0xff
 _Static_assert(OP_COUNT == 41, "a new operation needs its rights in rights_needed");
 static uint8_t rights_needed(uint32_t op)
 {
@@ -274,6 +285,7 @@ static uint8_t rights_needed(uint32_t op)
     case OP_PROCESS_UNMOUNT:
     case OP_THREAD_CONFIGURE:
     case OP_THREAD_RESUME:
+    case OP_THREAD_STOP:
     case OP_THREAD_WATCH:
     case OP_THREAD_FAULT:
     case OP_THREAD_READ_REG:
@@ -296,14 +308,37 @@ static uint8_t rights_needed(uint32_t op)
     case OP_DEBUG_IRQ:
     case OP_DEBUG_PREEMPT:
         return RIGHT_X;
+    case OP_FRAME_CARVE:
+    case OP_FRAME_INFO:
+    case OP_UNTYPED_RETYPE:
+    case OP_UNTYPED_INFO:
+    case OP_UNTYPED_SPLIT:
+    case OP_IRQ_CARVE:
+    case OP_TIME_CARVE:
+    case OP_NOTIFY_CARVE:
+        return RIGHTS_IN_HANDLER;
     default:
-        return 0;
+        return RIGHTS_UNKNOWN;
     }
+}
+
+/* Every code below OP_COUNT is an operation, so each says what it needs; checked once, at the first call. */
+static void check_rights_table(void)
+{
+    static bool checked;
+    for (uint32_t op = 1; !checked && op < OP_COUNT; op++) {
+        if (rights_needed(op) == RIGHTS_UNKNOWN) {
+            fprintf(stderr, "host/history.c: operation %u has no rights in rights_needed\n", (unsigned)op);
+            abort();
+        }
+    }
+    checked = true;
 }
 
 /* Note what a call invokes, as the kernel will resolve it; a fault invokes nothing, whatever a7 holds. */
 static void record_call(bool call)
 {
+    call_made = call;
     invoked = false;
     signalled = NULL;
     if (!call || caller == NULL) {
@@ -403,16 +438,26 @@ static void check_move(void)
     }
 }
 
-/* Every thread and the thread it lends its time to, sorted, compared after the call and never followed. */
-static void record_lends(void)
+/* Every thread as it stands, sorted, compared after the call and never followed. */
+static void record_threads(void)
 {
-    lends.n = 0;
+    threads.n = 0;
     for (size_t i = 0; i < objects.n; i++) {
         const struct obj_header *o = p2v(objects.v[i].at);
-        if (o->type == CAP_THREAD) {
-            PUSH(lends, ((struct lend_rec){ objects.v[i].at, ((const struct thread *)o)->lend_to }));
+        if (o->type != CAP_THREAD) {
+            continue;
         }
+        const struct thread *t = (const struct thread *)o;
+        struct thread_rec r = { objects.v[i].at, t->lend_to, t->state, t->frame.pc, { 0 } };
+        memcpy(r.regs, t->frame.regs, sizeof(r.regs));
+        PUSH(threads, r);
     }
+}
+
+/* The record of the thread at at before the call, or NULL for one the call built. */
+static const struct thread_rec *thread_before(uint32_t at)
+{
+    return threads.n != 0 ? bsearch(&at, threads.v, threads.n, sizeof(threads.v[0]), cmp_at) : NULL;
 }
 
 /*
@@ -428,7 +473,7 @@ static void check_lends(void)
             continue;
         }
         uint32_t at = objects_after.v[i].at, lend_to = ((const struct thread *)o)->lend_to;
-        const struct lend_rec *was = lends.n != 0 ? bsearch(&at, lends.v, lends.n, sizeof(lends.v[0]), cmp_at) : NULL;
+        const struct thread_rec *was = thread_before(at);
         if (lend_to == 0 || (was != NULL && lend_to == was->lend_to)) {
             continue;
         }
@@ -439,8 +484,66 @@ static void check_lends(void)
     }
 }
 
+/*
+ * A thread stops by its holder, where it stood.
+ * One ready or waiting before a call, or a fault, and stopped after it is the caller of a fault,
+ * one whose process the call took, or the thread the call's OP_THREAD_STOP named,
+ * through a capability check_call holds to the rights the stop needs.
+ * The caller of a call stands past it, as every call's does that it does not stop for an interrupt.
+ * A waiter stands at the call it waited in, every register as it was, since that call wrote none,
+ * unless the call answered its wait first, as a destroy does, with KERR_INVALID_CAP and no bits.
+ * Any other stands where it stood, every register as it was.
+ */
+static bool same_regs(const struct thread *t, const struct thread_rec *was, bool but_results)
+{
+    for (unsigned r = 0; r < THREAD_REGS; r++) {
+        if (t->frame.regs[r] != was->regs[r] && !(but_results && (r == REG_A0 || r == REG_A1))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void check_stops(void)
+{
+    for (size_t i = 0; i < objects_after.n; i++) {
+        uint32_t at = objects_after.v[i].at;
+        const struct obj_header *o = p2v(at);
+        if (o->type != CAP_THREAD || ((const struct thread *)o)->state != THREAD_STOPPED) {
+            continue;
+        }
+        const struct thread *t = (const struct thread *)o;
+        const struct thread_rec *was = thread_before(at);
+        if (was == NULL || was->state == THREAD_STOPPED) {
+            continue;
+        }
+        bool self = caller != NULL && at == v2p(caller);
+        bool named = call_made && invoked && call_op == OP_THREAD_STOP && invoked_cap.type == CAP_THREAD &&
+                     invoked_cap.a == at;
+        if (!(self && !call_made) && t->proc.type != CAP_NONE && !named) {
+            violated("a thread stopped that no stop named, nor its own fault nor the loss of its process");
+        }
+        const struct trap_frame *f = &t->frame;
+        if (self && call_made) {
+            if (f->pc != call_pc + CALL_SIZE) {
+                violated("a stop moved a thread from where it stood");
+            }
+        } else if (was->state == THREAD_WAITING) {
+            bool at_call = f->pc == was->pc - CALL_SIZE && same_regs(t, was, false);
+            bool answered = f->pc == was->pc && f->regs[REG_A0] == KERR_INVALID_CAP && f->regs[REG_A1] == 0 &&
+                            same_regs(t, was, true);
+            if (!at_call && !answered) {
+                violated("a stop left a waiting thread elsewhere than at the call it waited in");
+            }
+        } else if (f->pc != was->pc || !same_regs(t, was, false)) {
+            violated("a stop moved a thread from where it stood");
+        }
+    }
+}
+
 void history_begin(bool call)
 {
+    check_rights_table();
     held.n = nodes.n = 0;
 
     const struct thread *current = core_self()->current;
@@ -468,7 +571,7 @@ void history_begin(bool call)
     record_objects(&objects);
     each_node(&objects, record_node);
     qsort(nodes.v, nodes.n, sizeof(nodes.v[0]), cmp_at);
-    record_lends();
+    record_threads();
     record_move(call);
     record_call(call);
 
@@ -572,6 +675,7 @@ void history_end(void)
     check_move();
     check_call();
     check_lends();
+    check_stops();
 
     /*
      * Only OP_DEBUG_TICK moves time here, and only under tracing, where the clock is the tick count:

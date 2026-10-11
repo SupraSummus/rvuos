@@ -1,9 +1,9 @@
-Taking a waiting thread's process stops it but leaves it on the notification's waiters,
-so a signal would wake a thread that has no process to run in,
+Stopping a waiting thread, by a stop or by taking its process, leaves it on the notification's waiters,
+so a signal would wake a thread that is stopped, or has no process to run in,
 and a destroy of the thread's pool would leave the ring leading into memory that is no longer a thread;
 a notification queues only the threads waiting on it.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: a thread that does not wait lends
 Report: queue holds a thread it is not for
 Report: runnable thread waits on something
@@ -11,13 +11,11 @@ Report: runnable thread waits on something
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -353,9 +353,6 @@ void sched_unbind(struct cap *bound)
- void sched_unhost(struct cap *hosted)
+@@ -453,7 +453,6 @@ void sched_unbind(struct cap *bound)
+ static bool thread_stop(struct thread *t)
  {
-     struct thread *t = hosted_thread(hosted);
--    if (t->state == THREAD_WAITING) {
+     if (t->state == THREAD_WAITING) {
 -        unwait(t);
--    }
-     /* switch_to would find the running thread with no process to save the CSRs it keeps into, so they go now. */
-     if (core_self()->current == t) {
-         board_user_csrs_switch(thread_process(t), NULL);
+         t->frame.pc -= CALL_SIZE;
+     }
+     t->state = THREAD_STOPPED;

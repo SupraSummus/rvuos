@@ -7,12 +7,12 @@ Report: a call stopped where its caller cannot make it again
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -1039,7 +1039,7 @@ void sched_tick(uint32_t ticks)
+@@ -1068,7 +1068,7 @@ void sched_tick(uint32_t ticks)
   */
  static void spare_end(struct core *core)
  {
 -    if (core->run_queue != 0 && !core->recall && sched_spare_turn(core)) {
 +    if (core->run_queue != 0 && sched_spare_turn(core)) {
-         turn_end();
+         sched_turn_end();
      }
  }

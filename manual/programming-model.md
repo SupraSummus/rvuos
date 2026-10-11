@@ -310,6 +310,8 @@ A thread is **stopped**, **ready** or **waiting**.
 - A thread waiting on a notification is waiting;
   a signal makes it ready again.
 - A thread that faults is stopped where it faulted; see **Faults** below.
+- `OP_THREAD_STOP` stops a thread whatever it is doing, and says which of the three it was;
+  see **Stopping a thread** below.
 
 A thread holds its process by a capability derived from the `Process` capability it was allocated with,
 as a process holds its tables, section 5.2, so the thread may lie in any pool.
@@ -320,10 +322,39 @@ takes the process from the thread, and the thread stops for good:
 Apart from its state, a thread is bound to units of time or it is not.
 A new thread is not, and a thread that is not keeps its state and does not run:
 `OP_TIME_BIND` binds it, and revoking below the capability it was bound through unbinds it.
-That is how a started thread is stopped and started again.
-No thread exits: a thread that has nothing left to do waits forever
-on a notification nobody signals, or loses its units or its process,
-or stops itself with a breakpoint, which is a fault its watch hears, below.
+That is how a scheduler takes a thread's time and gives it back; `OP_THREAD_STOP` stops it, whatever it is doing.
+No thread exits: a thread that has nothing left to do says so by its own means first,
+then stops itself, through a capability to its own thread with `RIGHT_W`,
+or stops with a breakpoint, which is a fault its watch hears, below,
+or waits forever on a notification nobody signals;
+whoever hears it may stop it, or take its units or its process.
+A capability to a thread with `RIGHT_W` also sets its watch,
+so a creator that keeps a child's thread from its watch gives it none, and the child ends with a breakpoint.
+
+**Stopping a thread.**
+`OP_THREAD_STOP` takes a thread to stopped from whatever it is doing, and returns what that was in `a1`,
+`THREAD_WAS_STOPPED`, `THREAD_WAS_READY` or `THREAD_WAS_WAITING`; section 6.8.
+- A stopped thread stays as it is, with the fault it has to tell, so a stop may come whatever happened meanwhile.
+- A ready thread stops where it stands, between two instructions or at a call it has not made yet.
+  One another core runs stops once that core has trapped, which the call waits for,
+  and a call it was making there is not made: its pc stays at the `ecall` or `svc`.
+- A waiting thread leaves its notification, and lends its time to nobody,
+  and stands at the call it waited in, with every register as the call found it:
+  `OP_THREAD_READ_REG` reads the call instruction at its pc, the operation in `a7` and the slot in `a0`.
+  A resume makes the call again, which checks everything afresh, as a call made again after an interrupt does:
+  bits signalled meanwhile are taken unless another waiter took them,
+  the thread joins the back of the waiters, and a slot cleared meanwhile answers `KERR_INVALID_CAP`.
+  A watcher may instead answer the wait as it emulates an instruction:
+  it writes `a0`, `a1` and the pc past the call with `OP_THREAD_WRITE_REG`, and resumes the thread.
+- The caller may stop itself, through a capability to its own thread, and goes on past the call once resumed;
+  with nothing else left to run, the machine halts with `no runnable thread`.
+
+The thread keeps its process, its watch, its units and its account, which goes on filling, as at a fault,
+and the threads that lend it their time go on waiting, lending it nothing while it is stopped.
+A stop is no fault: it signals nothing, the watch included, and leaves `OP_THREAD_FAULT` nothing to tell.
+On ARM alone, a thread whose core could not stack its registers as it trapped for the stop has lost them,
+and the stop leaves it stopped where it faulted: the log reports the fault and `OP_THREAD_FAULT` tells it,
+but nothing is signalled.
 
 **Faults.**
 A thread that faults, by an access fault, an illegal instruction, a misaligned access or a breakpoint,
@@ -342,6 +373,7 @@ What happens next is the watcher's to decide, with the operations there are:
 `OP_THREAD_RESUME` runs the faulting instruction again, after installing the region it reached for, say;
 `OP_THREAD_CONFIGURE` first starts it afresh;
 taking its process ends it, and taking its units, which a stopped thread still earns, frees them.
+A watcher may stop a thread too, which leaves one that faulted as it is, its fault still to tell.
 The bits say which thread faulted, and `OP_THREAD_FAULT` says why while it stays stopped there.
 A watcher that emulates the instruction writes the thread's registers with `OP_THREAD_WRITE_REG`,
 the program counter past the instruction among them, and resumes it; section 6.8.
@@ -669,7 +701,8 @@ and moves `taken` only as far as its host says it has the bytes, so a halt write
   the thread goes to the back of its queue,
   and the thread that has waited longest on the run queue runs,
   or, if the run queue is empty, the one that has waited longest on the spare queue.
-  A thread that waits hands the rest of the tick to the next, which pays for no more than it runs of it.
+  A thread that waits, or that a stop takes off the processor, hands the rest of the tick to the next,
+  which pays for no more than it runs of it.
   A tick that would hand the processor back to the thread that had it takes no interrupt:
   the kernel counts and charges it at its next trap all the same,
   so a thread alone on the processor is interrupted only at a timer line's deadline,
@@ -749,5 +782,9 @@ named_lock_give(&lock);
 A name that is wrong costs the waiter the time it lends, and nothing else.
 A waiter whose borrower is destroyed wakes with `KERR_INVALID_CAP` and no bits, as one whose notification is,
 so a taker learns that the holder its lock names is gone, and may take the lock over.
-A holder that faults keeps the lock, stopped, and its watcher hears it, section 5.6.
+A holder that faults keeps the lock, stopped, and its watcher hears it, section 5.6,
+and so does a holder stopped with `OP_THREAD_STOP`, which nobody hears: takers that lend to it wait on.
+A stopped borrower keeps its lenders, whose time buys it nothing until it is resumed,
+and a stopped lender lends nothing more: a stop takes it off its wait, and its borrower's ring of lenders.
+A stopped lender whose time pays for the borrower's turn pays to the end of that turn, at the next tick or the borrower's wait.
 A lock keeps nobody from the memory it guards: that is the regions' work.

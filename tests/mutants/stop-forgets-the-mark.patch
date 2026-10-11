@@ -1,0 +1,18 @@
+A stop of a thread another core runs shoots that core but does not mark its trap,
+so the trap goes on as the thread's if a call between resumed it, a call made on registers a watcher may have written:
+a core whose turn another core stopped drops the trap it takes next.
+
+Caught-by: fuzz-smp2
+Report: a core would take a trap as the thread another core stopped
+
+diff --git a/kernel/core.c b/kernel/core.c
+--- a/kernel/core.c
++++ b/kernel/core.c
+@@ -157,7 +157,6 @@ bool core_thread_stopped(const struct thread *t)
+         struct core *c = &cores[i];
+         /* A call between this one and the core's trap may resume the thread, so the mark, not its state, says it stopped. */
+         if (c != core_self() && c->turn == t) {
+-            c->drop_trap = true;
+             marked = true;
+         }
+         if (c->current == t) {
