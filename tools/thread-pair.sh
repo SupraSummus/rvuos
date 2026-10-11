@@ -3,7 +3,9 @@
 # and the nRF52840 once the C6's log says its driver listens.
 # Each side fails if it heard nothing of the other, or none of its own frames was acknowledged.
 # The nRF52840's exchange lasts RUN seconds, 30 unless named, and the C6's run 15 more, as it starts some seconds before.
-# STREAM has each send the other that many frames a second besides the pings and pongs, so that the two contend.
+# STREAM has each send the other that many frames a second besides the pings and pongs, so that the two contend;
+# the C6 a few fewer, for a period at least a tick longer, as a timer's period is whole ticks,
+# so that the two streams' phase turns and every run sees them contend alike.
 # THREAD_CONFIG names a file of the nRF52840's other keys, power= among them, see user/thread/root.c.
 # The C6's port is PORT, or the first Espressif serial port by its USB id; its log is build/thread-pair-c6.log.
 #
@@ -19,10 +21,12 @@ make BOARD=esp32c6 build/esp32c6/kernel-wifi-esp32c6.bin build/esp32c6/wifi-drv.
 channel=${CHANNEL:-25}
 run=${RUN:-30}
 stream=${STREAM:-0}
+period_ms=$(( stream > 0 ? (1000 + stream - 1) / stream : 0 ))
+c6_stream=$(( stream > 0 ? 1000 / (period_ms + 1) : 0 ))
 conf=$(mktemp)
 nrf_conf=$(mktemp)
 log=build/thread-pair-c6.log
-printf 'i154=%s\ni154stream=%s\nrun=%s\n' "$channel" "$stream" $((run + 15)) > "$conf"
+printf 'i154=%s\ni154stream=%s\nrun=%s\n' "$channel" "$c6_stream" $((run + 15)) > "$conf"
 printf 'channel=%s\nstream=%s\nrun=%s\n' "$channel" "$stream" "$run" > "$nrf_conf"
 if [ -n "${THREAD_CONFIG:-}" ]; then
     cat "$THREAD_CONFIG" >> "$nrf_conf"
