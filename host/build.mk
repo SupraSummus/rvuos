@@ -4,10 +4,10 @@
 
 .PHONY: host-harnesses host-test fuzz corpus-merge qemu-replay mutants mutants-refresh mutants-fuzz
 
-HOST_BUILD  := build/host$(PMP_VARIANT)
+HOST_BUILD  := build/host$(PMP_VARIANT)$(TIMER_VARIANT)
 HOST_CORPUS := $(HOST_BUILD)/corpus
 HOST_CFLAGS := -std=c11 -O1 -g -Wall -Wextra -Werror -Wshadow \
-               -DRVUOS_HOST -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -DCORES=1 -Ikernel -Ikernel/arch/riscv \
+               -DRVUOS_HOST -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -DCORES=1 -DTIMER_HZ=$(TIMER_HZ) -Ikernel -Ikernel/arch/riscv \
                -Ikernel/board/qemu -Ihost -Iinclude
 
 HOST_KERNEL_SRC := kernel/cap.c kernel/core.c kernel/pool.c kernel/process.c kernel/sched.c \

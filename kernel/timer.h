@@ -11,8 +11,16 @@
  * The kernel handles it directly; see DESIGN.md, "Scheduling".
  */
 
-/* Ticks per second. */
+/*
+ * Ticks per second, the build's, TIMER_HZ=, and a thousand unless it says otherwise.
+ * A tick is the quantum, the longest turn a thread takes while another could run,
+ * so it bounds how long a thread with time waits for its turn, and it is the grain of the timer lines;
+ * see DESIGN.md, "Scheduling".
+ * It divides a second and the board's counter, and an account holds more than COUNT_PARTS ticks, so it is 650 or more.
+ */
+#ifndef TIMER_HZ
 #define TIMER_HZ 1000
+#endif
 
 /* Microseconds per tick; the delay OP_IRQ_SET takes on a timer line is rounded up to whole ticks. */
 #define TIMER_US_PER_TICK (1000000u / TIMER_HZ)

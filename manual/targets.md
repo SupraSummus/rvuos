@@ -79,7 +79,7 @@ Interrupt lines:
 | 0 | the kernel log (no controller behind it) |
 | 1 to 95 | the PLIC's sources; the UART is line 10 |
 
-The kernel's tick on this board is 1 kHz, `TIMER_HZ` in `kernel/timer.h`,
+The kernel's tick on this board is 1 kHz, `TIMER_HZ` in `kernel/timer.h`, unless the build sets another rate,
 so one tick is one millisecond.
 QEMU's PMP has sixteen entries and a four-byte grain.
 
