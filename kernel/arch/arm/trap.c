@@ -40,10 +40,6 @@ extern char __kernel_stack_bottom[];
 /* The hardware frame: r0 to r3, r12, lr, pc and xpsr, in eight words. */
 #define HW_FRAME 32u
 
-/* The fault status a stacking, which leaves the frame unwritten, or an unstacking reports. */
-#define CFSR_STACKING (CFSR_MSTKERR | CFSR_STKERR)
-#define CFSR_UNSTACKING (CFSR_MUNSTKERR | CFSR_UNSTKERR)
-
 /*
  * The core as the kernel wants it, before anything else runs; start.S calls this before kmain.
  * ARMv8-M has no DISDEFWBUF, and its boot ROM may leave state of its own, RP2350's does:
@@ -260,7 +256,7 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
             kpanic("unhandled exception");
         }
     }
-    /* A trap that lost the thread's frame is the thread's fault, whatever it entered on. */
+    /* A trap that lost the thread's frame is the thread's fault, whatever it entered on; a stop reports a dropped one's. */
     if (t != NULL && lost) {
         fault_dispatch(t);
     }

@@ -38,8 +38,8 @@ static bool host_drains[REPLAY_THREADS + 1];
 /*
  * Which of them stand at the instruction of a record they have yet to make, by actor number:
  * the ecall of a call, whose registers are loaded, or a load or a store, see rvuos/replay.h.
- * A thread stands there from when it takes the record, and again after a stop OP_DEBUG_PREEMPT armed
- * or a fault on the access, until host_run_on finds it running.
+ * A thread stands there from when it takes the record, and again after a stop OP_DEBUG_PREEMPT armed,
+ * a fault on the access, or an OP_THREAD_STOP that took it off its wait, until host_run_on finds it running.
  */
 enum { HOST_ON, HOST_AT_CALL, HOST_AT_ACCESS };
 static uint8_t host_at[REPLAY_THREADS + 1];
@@ -89,6 +89,15 @@ static uint8_t pmp_cfgs[CORES][PMP_MAX_ENTRIES];
  */
 static uint32_t host_core;
 static bool host_ipi[CORES];
+/*
+ * The cores an OP_THREAD_STOP shot, whose traps wait, their registers saved, as a core slow to take its ticket would:
+ * other cores' calls go first, and one may resume the thread the trap was for,
+ * which is why the stop's mark, and not the thread's state, says what the trap drops; see core_trapped.
+ * Such a core traps once a record comes for the thread whose turn it has or that waits for one there,
+ * once no other core has a turn, once its turn is gone, or as the records end.
+ * A shot for a lost process or a region traps at once, as it always did.
+ */
+static bool host_deferred[CORES];
 
 uint32_t core_id(void)
 {
@@ -115,6 +124,9 @@ void host_core_traps(uint32_t core)
         host_violated();
     }
     __atomic_store_n(&cores[core].in_user, false, __ATOMIC_RELEASE);
+    if (core_self()->current->frame.regs[REG_A7] == OP_THREAD_STOP) {
+        host_deferred[core] = true;
+    }
 }
 
 void ipi_clear(void)
@@ -404,6 +416,7 @@ struct thread *host_boot(void)
     kernel_lock = (struct kernel_lock){ 0 };
     host_core = 0;
     memset(host_ipi, 0, sizeof(host_ipi));
+    memset(host_deferred, 0, sizeof(host_deferred));
 #endif
     memset(unit_thread, 0, sizeof(unit_thread));
     armed_sources = 0;
@@ -513,13 +526,58 @@ static void host_trap(bool call)
     host_interrupts();
 }
 
+#if CORES > 1
 /*
- * Every core another core's trap interrupted traps in turn, as the target's trap_handler and sched_idle have it:
+ * The interrupted core host_core traps, as the target's trap_handler and sched_idle have it:
  * one that idles wakes in its stall and looks for a turn,
- * and one that runs a thread hands the processor on if another core stopped or destroyed the thread,
+ * and one that runs a thread drops what it trapped for, ending the turn, if another core stopped or destroyed the thread,
  * through the kernel's own core_trapped, as trap_handler does.
- * Either may interrupt others again, and the host takes their traps too, until none is left.
- * Under tracing the self-check holds what each left.
+ * Under tracing the self-check holds what it left.
+ */
+static void host_core_trap(void)
+{
+    struct core *core = core_self();
+    host_deferred[host_core] = false;
+    if (core->turn == NULL) {
+        core_stall_end();
+        ipi_clear();
+        if (sched_idle_wake(0, false)) {
+            sched_wake();
+        }
+    } else {
+        core_enter();
+        sched_count(0);
+        ipi_clear();
+        core_trapped();
+        sched_wake();
+    }
+    if (debug_trace) {
+        selfcheck_run();
+    }
+    host_leave();
+    if (poison_reached) {
+        host_violated();
+    }
+}
+
+/* Whether a core's trap waits, see host_deferred: while it has a turn, and some core not waiting has one too. */
+static bool host_waits(uint32_t c)
+{
+    if (!host_deferred[c] || cores[c].turn == NULL) {
+        return false;
+    }
+    for (uint32_t i = 0; i < CORES; i++) {
+        if (!host_deferred[i] && cores[i].turn != NULL) {
+            return true;
+        }
+    }
+    return false;
+}
+#endif
+
+/*
+ * Every core another core's trap interrupted traps in turn, see host_core_trap, but for one whose trap waits.
+ * Each may interrupt others again, and the host takes their traps too, until none is left.
  */
 static void host_interrupts(void)
 {
@@ -527,7 +585,7 @@ static void host_interrupts(void)
     uint32_t back = host_core;
     for (unsigned rounds = 0;; rounds++) {
         unsigned c = 0;
-        while (c < CORES && !host_ipi[c]) {
+        while (c < CORES && (!host_ipi[c] || host_waits(c))) {
             c++;
         }
         if (c == CORES) {
@@ -538,27 +596,7 @@ static void host_interrupts(void)
             host_violated();
         }
         host_core = c;
-        struct core *core = core_self();
-        if (core->turn == NULL) {
-            core_stall_end();
-            ipi_clear();
-            if (sched_idle_wake(0, false)) {
-                sched_wake();
-            }
-        } else {
-            core_enter();
-            sched_count(0);
-            ipi_clear();
-            core_trapped();
-            sched_wake();
-        }
-        if (debug_trace) {
-            selfcheck_run();
-        }
-        host_leave();
-        if (poison_reached) {
-            host_violated();
-        }
+        host_core_trap();
     }
     /* A core idles only with no thread waiting for a turn there, or its interrupt would have woken it. */
     for (uint32_t c = 0; c < CORES; c++) {
@@ -600,6 +638,12 @@ static void host_call(bool record)
     struct thread *caller = core_self()->current;
     struct trap_frame *f = &caller->frame;
     uint32_t op = f->regs[REG_A7], slot = f->regs[REG_A0];
+    /* The thread a stop names, which it may leave at a call to make again; see below. */
+    const struct thread *stops = NULL;
+    struct cap named;
+    if (op == OP_THREAD_STOP && slot_lookup(caller, slot, &named) == KERR_OK && named.type == CAP_THREAD) {
+        stops = (const struct thread *)cap_object(&named);
+    }
     bool stopped;
     do {
         uint32_t pc = f->pc, ticks = sched_ticks;
@@ -639,6 +683,14 @@ static void host_call(bool record)
             return;
         }
     } while (stopped);
+    /*
+     * A stop that found a driver thread waiting left it at its ecall with the registers host_load gave it,
+     * so it makes that call again when it next runs, as after an armed stop.
+     */
+    if (stops != NULL && f->regs[REG_A0] == KERR_OK && f->regs[REG_A1] == THREAD_WAS_WAITING &&
+        host_actor_of(stops) != 0) {
+        host_at[host_actor_of(stops)] = HOST_AT_CALL;
+    }
     if (record) {
         host_drains[host_actor_of(caller)] = true;
     }
@@ -847,7 +899,8 @@ static void host_settle_cores(void)
     for (unsigned rounds = 0;; rounds++) {
         uint32_t c = 0;
         for (; c < CORES; c++) {
-            if (cores[c].turn == NULL) {
+            /* A core whose trap waits runs nothing until it is taken. */
+            if (cores[c].turn == NULL || host_deferred[c]) {
                 continue;
             }
             host_core = c;
@@ -866,16 +919,47 @@ static void host_settle_cores(void)
     }
 }
 
-/* The first core whose turn it is, from the one the host runs on; CORES for none. */
+/* The first core whose turn it is, from the one the host runs on, of those whose traps do not wait; CORES for none. */
 static uint32_t host_core_with_turn(void)
 {
     for (uint32_t i = 0; i < CORES; i++) {
         uint32_t c = (host_core + i) % CORES;
-        if (cores[c].turn != NULL) {
+        if (cores[c].turn != NULL && !host_deferred[c]) {
             return c;
         }
     }
     return CORES;
+}
+
+/* The waiting trap of a core is taken, and what it hands on runs on, as after any trap. */
+static void host_take_deferred(uint32_t c)
+{
+    uint32_t back = host_core;
+    host_core = c;
+    host_core_trap();
+    host_core = back;
+    host_interrupts();
+    host_settle_cores();
+}
+
+/* A record for a thread whose turn a core waiting to trap has, or that waits there for one, takes that trap first. */
+static void host_take_deferred_for(const struct thread *actor)
+{
+    for (uint32_t i = 0; actor != NULL && i < CORES; i++) {
+        if (host_deferred[i] && cores[i].turn != NULL && (cores[i].turn == actor || host_queued(&cores[i], actor))) {
+            host_take_deferred(i);
+        }
+    }
+}
+
+/* Every trap still waiting, as the records end. */
+static void host_take_every_deferred(void)
+{
+    for (uint32_t i = 0; i < CORES; i++) {
+        if (host_deferred[i]) {
+            host_take_deferred(i);
+        }
+    }
 }
 #else
 static void host_settle_cores(void)
@@ -896,13 +980,14 @@ static void host_pick_core(const struct replay_record *c)
 #if CORES > 1
     /* Compared, never followed, unless the thread lies on a queue: a destroyed thread is simply never current again. */
     const struct thread *actor = c->actor >= 1 && c->actor <= REPLAY_THREADS ? host_threads[c->actor] : NULL;
+    host_take_deferred_for(actor);
     for (uint32_t i = 0; actor != NULL && i < CORES; i++) {
         if (cores[i].turn == actor || (cores[i].turn != NULL && host_queued(&cores[i], actor))) {
             host_core = i;
             return;
         }
     }
-    if (cores[host_core].turn == NULL) {
+    if (cores[host_core].turn == NULL || host_deferred[host_core]) {
         host_core = host_core_with_turn();
     }
     if (host_core == CORES) {
@@ -951,11 +1036,17 @@ void host_event(const struct replay_record *c)
 
 void host_end(void)
 {
+#if CORES > 1
+    host_take_every_deferred();
+#endif
     /*
      * Each thread that runs faults, at its breakpoint or before it, on whichever core runs it,
      * and the kernel halts after the last.
+     * A thread a stop took off its wait makes the wait again as it runs, which may leave its core idle,
+     * so a round faults nobody then, at most once for each thread.
      */
-    for (unsigned i = 0; i < REPLAY_THREADS; i++) {
+    unsigned faulted = 0;
+    for (unsigned rounds = 0; faulted < REPLAY_THREADS && rounds < 2 * REPLAY_THREADS; rounds++) {
 #if CORES > 1
         host_core = host_core_with_turn();
         if (host_core == CORES) {
@@ -964,7 +1055,10 @@ void host_end(void)
         }
 #endif
         host_run_on();
-        host_fault(CAUSE_BREAKPOINT);
+        if (core_self()->turn != NULL) {
+            host_fault(CAUSE_BREAKPOINT);
+            faulted++;
+        }
     }
     fprintf(stderr, "invariant violated: a thread ran again after every driver thread faulted\n");
     host_violated();

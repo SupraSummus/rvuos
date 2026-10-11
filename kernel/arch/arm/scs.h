@@ -57,6 +57,9 @@
 #define CFSR_UNSTKERR  (1u << 11)
 #define CFSR_STKERR    (1u << 12)
 #define CFSR_BFARVALID (1u << 15)
+/* The fault status a stacking, which leaves the frame unwritten, or an unstacking reports. */
+#define CFSR_STACKING (CFSR_MSTKERR | CFSR_STKERR)
+#define CFSR_UNSTACKING (CFSR_MUNSTKERR | CFSR_UNSTKERR)
 #define HFSR  0xe000ed2cu
 #define MMFAR 0xe000ed34u
 #define BFAR  0xe000ed38u

@@ -7,11 +7,11 @@ Report: a turn on spare time runs while a thread with time waits
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -1040,7 +1040,6 @@ void sched_tick(uint32_t ticks)
+@@ -1069,7 +1069,6 @@ void sched_tick(uint32_t ticks)
  static void spare_end(struct core *core)
  {
      if (core->run_queue != 0 && !core->recall && sched_spare_turn(core)) {
--        turn_end();
+-        sched_turn_end();
      }
  }
  

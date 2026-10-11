@@ -1,0 +1,18 @@
+A stop takes a waiting thread off its wait but leaves its pc past the call it waited in,
+so a resume goes on as if the wait had returned, with registers the call never wrote:
+a waiter stands at the call it waited in.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
+Report: a stop left a waiting thread elsewhere than at the call it waited in
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -454,7 +454,6 @@ static bool thread_stop(struct thread *t)
+ {
+     if (t->state == THREAD_WAITING) {
+         unwait(t);
+-        t->frame.pc -= CALL_SIZE;
+     }
+     t->state = THREAD_STOPPED;
+     return core_thread_stopped(t);

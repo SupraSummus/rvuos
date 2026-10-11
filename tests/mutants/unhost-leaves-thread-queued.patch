@@ -8,11 +8,11 @@ Report: a thread names a queue it is not for
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -347,7 +347,6 @@ void sched_unhost(struct cap *hosted)
-     t->state = THREAD_STOPPED;
-     core_thread_stopped(t);
+@@ -476,7 +476,6 @@ void sched_unhost(struct cap *hosted)
+         thread_stop(t);
+     }
      *hosted = (struct cap){ 0 };
 -    thread_settle(t);
  }
  
- /* The thread that earns a unit first of those it earns, else NULL, so that a look at each unit meets it once. */
+ /*

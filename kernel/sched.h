@@ -100,7 +100,7 @@ extern uint32_t armed_sources;
 
 /*
  * What each core has of its own: its thread, its turn, its queues, its release, its nearest deadline, its timer,
- * the call it is in, and what it tells the others.
+ * the call it is in, what it tells the others, and what another core's stop left its trap to drop.
  * The units, the tick count and the lines are the machine's.
  * Every core's is the others' to read and change under the kernel's lock, in_user aside; see DESIGN.md, "Cores".
  */
@@ -194,6 +194,14 @@ struct core {
 
     /* Whether a core told this one of a change it must trap for, which it interrupts as it gives the lock up. */
     bool interrupt_owed;
+
+    /*
+     * Whether another core stopped the thread whose turn this one has, while this core ran it or had trapped for it:
+     * the trap that next takes the lock here drops what it was for, whatever the thread's state is by then,
+     * since a call between may have resumed it; see core_trapped.
+     * Only another core sets it, under the lock, and it goes with the turn it was set for.
+     */
+    bool drop_trap;
 };
 
 extern struct core cores[CORES];
@@ -251,19 +259,22 @@ void core_shoot(struct core *c);
 /*
  * What another core runs lost something it may reach, before the call goes on:
  * a region of the process, after which the core loads the regions again before its thread runs on,
- * or the thread its process, after which its frame is the one a watcher reads.
+ * or the thread stopped, by a stop or by the loss of its process, after which its frame is the one a watcher reads.
+ * A core whose turn the stopped thread has is marked to drop its trap, see drop_trap in struct core,
+ * and the result says whether one was: that core has the thread's registers from a trap of its own by then.
  */
 void core_regions_changed(const struct process *proc);
-void core_thread_stopped(const struct thread *t);
+bool core_thread_stopped(const struct thread *t);
 
-/* The thread is destroyed: no core runs it any more, nor has a turn for it. */
+/* The thread is destroyed: no core runs it any more, nor has a turn for it, nor a trap to drop for it. */
 void core_thread_gone(const struct thread *t);
 
 /*
  * The thread a trap from user mode is for, once the trap has the lock and has counted its ticks:
  * the core's running thread, or NULL if another core stopped or destroyed it while the trap waited for the lock,
- * when what it trapped for is dropped and the core hands the processor on; see DESIGN.md, "Cores".
- * Another core stops a thread only by taking its process, which it never gets back, so its state tells.
+ * when what it trapped for is dropped and the turn ends as at a tick; see DESIGN.md, "Cores".
+ * The stopping core marked the trap, and the mark decides, not the state:
+ * another call may have resumed the thread in between, and it then joins its queue as the turn ends.
  */
 struct thread *core_trapped(void);
 
@@ -323,11 +334,21 @@ void sched_bind(struct thread *t, uint32_t first, uint32_t count, uint8_t rights
 void sched_unbind(struct cap *bound);
 
 /*
- * Clear a thread's process the tree has already let go of: the thread stops,
- * leaving its queue or its notification's waiters,
+ * Clear a thread's process the tree has already let go of: the thread stops, as sched_stop has it,
+ * leaving its queue, or its notification's waiters to stand at the call it waited in,
  * and the running one gives the processor up as its call returns.
  */
 void sched_unhost(struct cap *hosted);
+
+/*
+ * OP_THREAD_STOP: stop a thread, and return the state it was in.
+ * A ready one leaves its queue, and another core that runs it traps first and drops that trap;
+ * a waiting one leaves its notification's waiters and its borrower's ring of lenders,
+ * and stands at the call it waited in, every register as the call found it, so that a resume makes the call again.
+ * The running thread gives the processor up as its call returns.
+ * A stopped thread is left as it is.
+ */
+uint32_t sched_stop(struct thread *t);
 
 /*
  * Fill the account of every thread with units, and put each on the queue that puts it on.
@@ -376,7 +397,7 @@ bool sched_signal(struct notification *ntfn, uint32_t bits);
 void sched_turn_back(void);
 
 /*
- * The running thread waits.
+ * The running thread waits, or stopped, by a fault, a stop of itself or the loss of its process.
  * Charge it for the counts its turn ran,
  * and hand the processor to the next ready thread, or leave the core to idle once the trap is over,
  * or stop the machine.
@@ -412,6 +433,14 @@ bool sched_idle_wake(uint32_t ticks, bool device);
  * OP_DEBUG_TICK calls it; the interrupt does the same through sched_count and sched_wake.
  */
 void sched_tick(uint32_t ticks);
+
+/*
+ * The turn ends: the thread whose turn it was is charged for it
+ * and goes to the back of the queue its account puts it on, if it may run, and the next thread has its turn.
+ * One that lost its units during its turn goes nowhere, and without it the queues may be empty.
+ * The tick ends a turn so, and so does a trap another core marked to be dropped, see core_trapped.
+ */
+void sched_turn_end(void);
 
 /*
  * The ticks a trap found passed since the last counted one, which the timer did not interrupt for:

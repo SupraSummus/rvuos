@@ -8,11 +8,11 @@ Report: thread runs with a fault to tell
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -422,7 +422,6 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
+@@ -500,7 +500,6 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
          if (target->state != THREAD_STOPPED || thread_process(target) == NULL) {
              return KERR_STATE;
          }
 -        target->flags &= (uint8_t)~THREAD_FAULTED;
          sched_ready(target);
          return KERR_OK;
-     case OP_THREAD_FAULT:
+     case OP_THREAD_STOP:

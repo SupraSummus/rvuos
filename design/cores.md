@@ -97,7 +97,7 @@ so that the other core does not trap only to wait for the lock the sender still 
 A core runs user mode with the regions of its thread's process in its protection unit,
 which only that core can change, and with its thread's registers out of the kernel's reach until it traps.
 So a call that takes a region from a process another core runs,
-or stops the thread another core runs, by taking its process or destroying it,
+or stops the thread another core runs, with `OP_THREAD_STOP`, by taking its process or by destroying it,
 interrupts that core and waits until it has trapped,
 before the memory can go to anything else and before a watcher reads the frame.
 Each core says without the lock whether it runs user mode, `in_user`,
@@ -107,11 +107,34 @@ so the hardware bounds it, and the other core needs no lock for it.
 That core then waits for the lock the call holds,
 and as it takes the lock loads its regions again, or finds its thread taken and hands the processor on.
 A trap whose thread another core stopped or destroyed while the trap waited for the lock is dropped:
-a call is not made and its pc stays at it, and a fault is not reported,
+the interrupt it entered on is still taken, a call is not made and its pc stays at it, and a fault is not reported,
 since a thread that runs again makes the call, or faults, again.
-`core_trapped` says whether it is, and hands the processor on if so, for every architecture's trap and for the host's.
+`core_trapped` says whether it is, and ends the turn if so, as a tick does, for every architecture's trap and for the host's.
+
+**The stopping core marks the trap, and the mark decides.**
+A stopped thread can be resumed, so its state cannot say what a trap is for:
+the trapped core takes its ticket only once it has cleared `in_user`,
+and on three cores, or on two with one slow to take its ticket, another core's call may take the lock first and resume the thread,
+after which a trap that went by the state would make the call it trapped for
+on registers a watcher may have written meanwhile, with `OP_THREAD_WRITE_REG` or `OP_THREAD_CONFIGURE`.
+So the stopping core marks each other core whose turn the thread has, `drop_trap` in `struct core`,
+and the trap that next takes the lock there drops what it was for whatever the thread is by then.
+A thread resumed in between is the turn of that core still, so it waits on no queue, and runs nowhere, until the trap;
+the trap ends the turn as a tick does, `sched_turn_end`, which puts it at the back of its queue,
+where handing the processor on as a wait does would leave it ready on no queue for good.
+The turn is over, so an end the trap's count found due is moot, and the thread stands at no call it is to make again first:
+the drop clears both, as the stall does.
+A mark goes with the turn it was set for: a destroy of the thread clears it with the turn,
+and the trap that finds no thread drops what it was for all the same.
+A core is marked only by another, under the lock, and only while it runs the thread, which the stop then shoots,
+or has trapped for it and waits for the lock, so the mark is there whenever such a trap takes the lock.
 On ARM half the frame lies on the thread's stack until the trap copies it in,
-so the trap does that before it clears `in_user`, and a frame a watcher reads, or one that is dropped, is whole.
+so the trap does that before it clears `in_user`, and a frame a watcher reads, or one that is dropped, is whole,
+unless the core could not stack it, and the thread's `r0` to `r3`, `r12`, `lr`, pc and `xpsr` are lost.
+A stop that marked a core reads the frame that core's trap took, which is final once the shoot returns,
+and finds the loss there as the dropped trap would have: the thread stays stopped where it faulted,
+the log says so as for any fault, and `OP_THREAD_FAULT` tells the stacking fault, but nothing is signalled, as for any stop.
+The loss of a process keeps the rule out, as before: a thread without one never runs again.
 A thread that only loses its units runs on as it does on one core, to the end of its turn.
 
 **A core with nothing to run idles, outside any trap.**
@@ -162,3 +185,4 @@ on ARM it reads which core it is from the board's register a few times too,
 and the ticket's borrowed region costs about a dozen accesses to the system control space.
 A core that changes what another runs pays an interrupt to it,
 and a call that takes what another core runs waits for that core's trap to begin.
+A stop marks the trap in a flag of the core, and every trap reads and clears it, on several cores alone.

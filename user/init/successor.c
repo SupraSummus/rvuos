@@ -43,6 +43,38 @@ static __attribute__((noreturn)) void prober_again(uint32_t word)
     }
 }
 
+/*
+ * The prober once more, configured to wait on a notification of its own and say what woke it,
+ * which its watcher stops while it waits and resumes: the wait is made again, and takes the bit signalled meanwhile.
+ */
+static __attribute__((noreturn)) void prober_waits(void)
+{
+    uint32_t bits = 0;
+    probed = rv_wait(SLOT_STOP_NTFN, &bits) == KERR_OK ? bits : 0;
+    for (;;) {
+        rv_breakpoint();
+    }
+}
+
+/* Whether a stop found the thread doing what it was expected to. */
+static uint32_t stop_finds(uint32_t thread_cap, uint32_t expected)
+{
+    uint32_t was;
+    uint32_t err = rv_thread_stop(thread_cap, &was);
+    return err != KERR_OK ? err : was == expected ? KERR_OK : KERR_INVALID_ARG;
+}
+
+/* Whether a thread stopped while it waited stands at its call: the call instruction at its pc, the wait in a7. */
+static uint32_t stands_at_wait(uint32_t thread_cap)
+{
+    uint32_t pc, op;
+    if (rv_thread_read_reg(thread_cap, THREAD_REG_PC, &pc) != KERR_OK ||
+        rv_thread_read_reg(thread_cap, RV_REG_A7, &op) != KERR_OK) {
+        return KERR_STATE;
+    }
+    return rv_call_at(pc) && op == OP_NOTIFY_WAIT ? KERR_OK : KERR_INVALID_ARG;
+}
+
 /* What woke the successor on the prober's watch, and whether it was the prober's fault. */
 static uint32_t fault_wait(void)
 {
@@ -178,6 +210,31 @@ static __attribute__((noreturn)) void successor_main(void)
     expect("hear its breakpoint there", fault_wait());
     expect("it ran from there on what it was given", probed == MAGIC + 2 ? KERR_OK : KERR_INVALID_ARG);
     puts("root: fault ok\n");
+
+    /*
+     * A stop; see OP_THREAD_STOP.
+     * The prober waits on a notification of its own, and a stop takes it off, at the call it waited in,
+     * every register as the call found it, which it makes again once resumed.
+     * It runs on spare time, so it has waited by the time this thread's sleep ends.
+     */
+    expect("allocate what the prober waits on",
+           rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_NOTIFICATION, SLOT_STOP_NTFN, 0));
+    expect("set it to wait there",
+           rv_thread_configure(SLOT_PROBER, (uint32_t)&prober_waits, data_base + data_size / 2, 0));
+    probed = 0;
+    expect("start it", rv_thread_resume(SLOT_PROBER));
+    expect("let it wait", sleep_us(SLEEP_US));
+    expect("stop it as it waits", stop_finds(SLOT_PROBER, THREAD_WAS_WAITING));
+    expect("it stands at its wait", stands_at_wait(SLOT_PROBER));
+    expect("a stop of it again finds it stopped", stop_finds(SLOT_PROBER, THREAD_WAS_STOPPED));
+    expect("a stop is no fault",
+           rv_thread_fault(SLOT_PROBER, &ignored, &ignored, &ignored, &ignored) == KERR_STATE
+               ? KERR_OK : KERR_INVALID_ARG);
+    expect("resume it at its wait", rv_thread_resume(SLOT_PROBER));
+    expect("signal what it waits for", rv_signal(SLOT_STOP_NTFN, BIT_STOP));
+    expect("hear its breakpoint after the wait", fault_wait());
+    expect("its wait made again took the bit", probed == BIT_STOP ? KERR_OK : KERR_INVALID_ARG);
+    puts("root: stop ok\n");
 
     /*
      * The watchdog; see DESIGN.md, "The watchdog".

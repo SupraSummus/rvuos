@@ -8,7 +8,7 @@ Report: a core's thread is not a live object
 diff --git a/kernel/core.c b/kernel/core.c
 --- a/kernel/core.c
 +++ b/kernel/core.c
-@@ -160,9 +160,7 @@ void core_thread_gone(const struct thread *t)
+@@ -176,9 +176,7 @@ void core_thread_gone(const struct thread *t)
      for (uint32_t i = 0; i < CORES; i++) {
          LOOP_BOUND(CORES);
          struct core *c = &cores[i];
@@ -16,6 +16,6 @@ diff --git a/kernel/core.c b/kernel/core.c
 -            c->current = NULL;
 -        }
 +        (void)t;
+         /* The trap finds no thread, and drops what it was for all the same. */
          if (c->turn == t) {
              c->turn = NULL;
-         }

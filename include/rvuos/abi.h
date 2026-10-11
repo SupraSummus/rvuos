@@ -23,6 +23,7 @@
  * and resume the thread at its ecall, every register unchanged,
  * so the thread makes the same call again and it goes on from there.
  * The call made again checks everything afresh.
+ * A thread stopped while it waits stands at its call the same way; see OP_THREAD_STOP.
  *
  * Slots that receive a new capability are always in the caller's own tables.
  * A process needs no capability to write its own tables;
@@ -338,11 +339,44 @@
  * It runs once it is bound to units of time, see OP_TIME_BIND,
  * when its turn comes.
  * A thread that faulted goes on at the instruction that faulted, which runs again,
- * unless OP_THREAD_WRITE_REG moved its program counter.
+ * unless OP_THREAD_WRITE_REG moved its program counter,
+ * and one stopped while it waited makes its wait again, see OP_THREAD_STOP.
+ * One resumed while it still pays for a turn it lent, or before the core that ran it has trapped,
+ * joins its queue as that turn ends.
  * Fails with KERR_STATE unless the thread is stopped,
  * and once its process was taken, see OP_POOL_ALLOC: it has nothing to run in.
  */
 #define OP_THREAD_RESUME 13
+/*
+ * Thread (RIGHT_W): stop the thread, whatever it is doing.
+ * a1, a2 and a3 are zero, else KERR_INVALID_ARG, so that they may be given a meaning later.
+ * Returns a1 = what it found the thread doing: THREAD_WAS_STOPPED, THREAD_WAS_READY or THREAD_WAS_WAITING.
+ * A stopped thread is left as it is, with the fault it has to tell, if any; see OP_THREAD_FAULT.
+ * A ready one stops where it stands, between two instructions or at a call it has not made yet.
+ * One another core runs stops once that core has trapped, which the call waits for,
+ * and that trap is dropped, whatever the thread is by then:
+ * a call it was making is not made, its pc staying at it, and a fault is not reported; see DESIGN.md, "Cores".
+ * On ARM a trap that could not stack the thread's registers lost r0 to r3, r12, lr, pc and xpsr;
+ * the stop then leaves the thread stopped where it faulted, with the kernel's report in the log, and signals nothing.
+ * A waiting one leaves the notification's waiters, and the ring of lenders of the thread its OP_NOTIFY_LEND names,
+ * and stands at the call it waited in, every register as that call found it:
+ * a resume makes the call again, which checks everything afresh as a restartable call made again does,
+ * and takes the bits signalled meanwhile unless another waiter took them,
+ * or a watcher answers it, writing a0, a1 and the pc past the call with OP_THREAD_WRITE_REG.
+ * The caller may stop itself, through a capability to its own thread; once resumed, it goes on past its call.
+ * The thread keeps its process, its watch, its units and its account, which goes on filling, as at a fault,
+ * and the threads that lend it their time go on waiting, lending it nothing while it is stopped.
+ * A turn it pays for, lent to another thread, runs on, charged to it, until it ends,
+ * at the next tick or as that thread waits, as one whose payer another core or an interrupt woke does.
+ * It signals nothing, the watch included: a stop by another thread is known to the one that made it,
+ * and a thread that stops itself says so first by its own means.
+ * See DESIGN.md, "Threads".
+ */
+#define OP_THREAD_STOP 16
+/* What OP_THREAD_STOP found the thread doing. */
+#define THREAD_WAS_STOPPED 0
+#define THREAD_WAS_READY   1
+#define THREAD_WAS_WAITING 2
 /*
  * Thread (RIGHT_W): name what the thread's faults signal, its watch.
  * a1 = the slot of a Notification capability, which needs RIGHT_W and may lie in any pool,
@@ -352,6 +386,7 @@
  * stops the thread at the instruction that faulted, with its registers as they were,
  * and signals the bits as OP_NOTIFY_SIGNAL would; nothing else stops, the machine goes on.
  * A thread without a watch stops all the same, and nobody hears.
+ * OP_THREAD_STOP signals nothing.
  * The kernel's log says what the fault was, and so does OP_THREAD_FAULT.
  * It replaces the watch before and stays, so a thread that faults again signals again.
  * The thread holds the notification by a capability derived from the one named,
@@ -367,6 +402,8 @@
  * The program counter is where a resume goes on, as OP_THREAD_READ_REG reads it.
  * Fails with KERR_STATE unless the thread is stopped where it faulted:
  * a resume or a configure since, or no fault at all, leaves nothing to tell.
+ * A stop of a running or waiting thread is no fault, and leaves nothing to tell but a lost frame on ARM,
+ * and a stop of one stopped where it faulted keeps the fault; see OP_THREAD_STOP.
  * See DESIGN.md, "Faults".
  */
 #define OP_THREAD_FAULT 33
@@ -375,8 +412,9 @@
  * a1 = the register: x0 to x31 on RISC-V, where x0 reads zero, r0 to r14 on ARMv7-M,
  * or THREAD_REG_PC for the program counter, which on ARM carries bit 0 for Thumb, as OP_THREAD_CONFIGURE takes it.
  * Returns a1 = its value.
- * Fails with KERR_STATE unless the thread is stopped,
+ * Fails with KERR_STATE unless the thread is stopped, which OP_THREAD_STOP makes any thread,
  * and with KERR_INVALID_ARG for a number that names no register.
+ * One stopped while it waited reads at its call: the pc at its ecall or svc, a7 the operation, a0 to a3 the call's arguments.
  */
 #define OP_THREAD_READ_REG 34
 /*
@@ -406,6 +444,7 @@
  * Returns a1 = the bits, which is never zero, and clears them.
  * Blocks until some bit is set;
  * the bits are sticky, so a signal that arrives first is not lost.
+ * A stop takes the waiter off and leaves it at this call, which a resume makes again; see OP_THREAD_STOP.
  */
 #define OP_NOTIFY_WAIT 15
 /*
@@ -419,6 +458,9 @@
  * A signal from the borrower that wakes the caller hands the rest of the turn back, see OP_NOTIFY_SIGNAL.
  * The time goes one step, to the borrower, never on to whatever the borrower waits for or lends to.
  * A caller whose borrower is destroyed wakes with KERR_INVALID_CAP and no bits, as one whose notification is.
+ * A stop takes the caller off its notification and its borrower's lenders and leaves it at this call,
+ * which a resume makes again, looking the borrower up afresh; see OP_THREAD_STOP.
+ * A stopped borrower keeps its lenders, whose time buys nothing until it is resumed.
  * See DESIGN.md, "Communication and synchronisation".
  */
 #define OP_NOTIFY_LEND 38

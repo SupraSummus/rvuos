@@ -503,6 +503,13 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
         target->flags &= (uint8_t)~THREAD_FAULTED;
         sched_ready(target);
         return KERR_OK;
+    case OP_THREAD_STOP:
+        /* Zero, so that they may mean something later. */
+        if ((arg[1] | arg[2] | arg[3]) != 0) {
+            return KERR_INVALID_ARG;
+        }
+        arg[1] = sched_stop(target);
+        return KERR_OK;
     case OP_THREAD_FAULT:
         /* The frame keeps what the trap saved, and only a fault leaves the thread stopped with it. */
         if (!(target->flags & THREAD_FAULTED)) {
@@ -989,7 +996,7 @@ void syscall_dispatch(struct thread *t)
         }
     }
     /*
-     * A thread that waits gives the processor up, and so does one whose process the call took,
+     * A thread that waits gives the processor up, and so does one whose process the call took, or that stopped itself,
      * unless it handed its turn to the thread it lends its time to, which runs now.
      * One that lost its units finishes its turn, as a preempted call is made again before the tick switches,
      * unless that left the turn on spare time, which a thread with time the call made ready takes at once.

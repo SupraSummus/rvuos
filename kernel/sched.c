@@ -438,23 +438,57 @@ void sched_unbind(struct cap *bound)
 }
 
 /*
+ * Stop a thread that is not stopped, the stop's and the loss of a process's alike, which its caller settles.
+ * A waiting one leaves its notification's waiters and lends nothing any more,
+ * and goes back to the call it waited in, which wrote no register, so a resume makes the call again.
+ * Another core that runs it traps first, marked to drop the trap; whether one has, see core_thread_stopped.
+ */
+static bool thread_stop(struct thread *t)
+{
+    if (t->state == THREAD_WAITING) {
+        unwait(t);
+        t->frame.pc -= CALL_SIZE;
+    }
+    t->state = THREAD_STOPPED;
+    return core_thread_stopped(t);
+}
+
+/*
  * Settling takes a stopped thread off its queue; syscall_dispatch hands the processor on from a running one,
  * and another core that runs it traps first, and hands it on as it has the lock.
+ * A thread stopped already, by a stop or a fault, stays as it is.
  */
 void sched_unhost(struct cap *hosted)
 {
     struct thread *t = hosted_thread(hosted);
-    if (t->state == THREAD_WAITING) {
-        unwait(t);
-    }
     /* switch_to would find the running thread with no process to save the CSRs it keeps into, so they go now. */
     if (core_self()->current == t) {
         board_user_csrs_switch(thread_process(t), NULL);
     }
-    t->state = THREAD_STOPPED;
-    core_thread_stopped(t);
+    if (t->state != THREAD_STOPPED) {
+        thread_stop(t);
+    }
     *hosted = (struct cap){ 0 };
     thread_settle(t);
+}
+
+/*
+ * A trap another core took for the thread before the stop dropped it, whose stacking lost the thread's registers,
+ * is the thread's fault, as it would have been at that trap: it stays stopped where it faulted, unheard,
+ * which the log says as for any fault; see OP_THREAD_STOP.
+ */
+uint32_t sched_stop(struct thread *t)
+{
+    uint32_t was = t->state;
+    if (was != THREAD_STOPPED) {
+        if (thread_stop(t) && frame_lost(&t->frame)) {
+            t->flags |= THREAD_FAULTED;
+            kputs("user fault\n");
+            report_frame(&t->frame);
+        }
+        thread_settle(t);
+    }
+    return was;
 }
 
 /* The thread that earns a unit first of those it earns, else NULL, so that a look at each unit meets it once. */
@@ -1006,12 +1040,7 @@ void sched_run_next(void)
     run_turn();
 }
 
-/*
- * The turn ends: the thread whose turn it was is charged for it
- * and goes to the back of the queue its account puts it on, if it may run, and the next thread has its turn.
- * One that lost its units during its turn goes nowhere, and without it the queues may be empty.
- */
-static void turn_end(void)
+void sched_turn_end(void)
 {
     struct core *core = core_self();
     uint32_t offset = turn_close();
@@ -1028,7 +1057,7 @@ static void turn_end(void)
 void sched_tick(uint32_t ticks)
 {
     tick_advance(ticks);
-    turn_end();
+    sched_turn_end();
 }
 
 /*
@@ -1040,7 +1069,7 @@ void sched_tick(uint32_t ticks)
 static void spare_end(struct core *core)
 {
     if (core->run_queue != 0 && !core->recall && sched_spare_turn(core)) {
-        turn_end();
+        sched_turn_end();
     }
 }
 
@@ -1070,7 +1099,7 @@ uint32_t sched_wake(void)
     if (core->turn_due) {
         core->turn_due = false;
         if (!debug_trace) {
-            turn_end();
+            sched_turn_end();
         }
     }
     /* An interrupt, or another core, may have made a thread with time ready while the turn runs on spare time. */

@@ -138,9 +138,11 @@ and the time of the units nobody earns is spare.
 The binding is a node of the derivation tree held in the thread, below the capability it was bound through,
 so revoking above that capability unbinds the thread, as it unmaps a region installed from a frame.
 A thread with no units and no spare time keeps its state and does not run:
-that is how a scheduler in userspace stops and starts a thread, open decision 9.
+that is how a scheduler in userspace stops and starts a thread, open decision 9,
+or with `OP_THREAD_STOP`, which also takes a waiting thread off its notification.
 A thread that loses its units while it runs finishes the turn it had, unless a thread with time waits for it, below,
-so only a wait, the tick, a fault, a revoke that takes its own process,
+so only a wait, the tick, a fault, a revoke that takes its own process, a stop of itself,
+a stop or a revoke on another core, which makes its core trap first,
 a signal that wakes the thread paying for its turn,
 or a thread with time that becomes ready while the turn runs on spare time takes the processor from a running thread.
 A call stopped for an interrupt is made again when its thread next runs:
@@ -203,6 +205,9 @@ and each tick decides afresh who pays, so a turn on lent time takes every tick.
 A lender whose own time pays for its turn, and that the borrower now borrows from,
 hands the rest of the turn to the borrower as it begins to wait, if the borrower waits for a turn;
 and a signal of the turn's thread that wakes the payer hands it the rest of the turn back.
+A payer stopped, or woken from another core or by an interrupt, pays on until the turn ends, at the next tick or the borrower's wait,
+since whether a turn is paid is decided as it begins and at each tick;
+resumed meanwhile, it joins its queue as the turn ends.
 A lender lends only on its own core, since its units are a part of that core and pay for no other's time.
 
 **A turn is charged by the counter.**

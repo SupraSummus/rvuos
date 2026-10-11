@@ -129,6 +129,7 @@ until the maintainer decides otherwise.
    The alternative is a scheduler in userspace
    that decides which threads are runnable at all.
    It stops a thread by taking back the units it lent it and starts it by binding it again,
+   or with `OP_THREAD_STOP` and `OP_THREAD_RESUME`, which also take a waiting thread off its notification and back to its wait, decision 32,
    and has a tick of its own in a timer line, the shape every device interrupt takes.
    What it cannot do is choose between two runnable threads
    for less than a system call per switch.
@@ -315,6 +316,7 @@ until the maintainer decides otherwise.
 21. **What a fault tells.**
     Decided: `OP_THREAD_FAULT` returns what the log says,
     and `OP_THREAD_READ_REG` and `OP_THREAD_WRITE_REG` reach a stopped thread's registers; see "Faults".
+    `OP_THREAD_STOP` makes any thread stopped, so a live thread's registers are read by a stop, a read and a resume, decision 32.
     Before, only the log said why, which serves a watcher that restarts or ends the thread,
     but not one that maps regions on demand, which needs the address,
     nor one that emulates an instruction, which needs the program counter.
@@ -489,7 +491,8 @@ until the maintainer decides otherwise.
 31. **A stable ABI.**
     Working default: none; the ABI changes with the kernel, and the seeds and the corpus are written anew with it.
     The model holds, and three things it lacks add without breaking anything:
-    a stop for a thread, introspection, and arguments a program must leave zero, `TODO.md`;
+    a stop for a thread, which `OP_THREAD_STOP` is now, decision 32,
+    introspection, and arguments a program must leave zero, `TODO.md`;
     the processor's time keeps its turns, whose wait the tick bounds, decision 9.
     The rest would break a binary built against today's ABI, so it goes in one change, before the ABI is held still:
     - **What the test format chose.**
@@ -527,7 +530,8 @@ until the maintainer decides otherwise.
     - **An `Irq` holds its line by no node**, `TODO.md`, so a revoke takes back a bound line no other way a lender takes back what it lent.
     - **What a fault tells is the architecture's.**
       `OP_THREAD_FAULT` returns `mcause` or the exception number,
-      and a breakpoint, which ends a thread, arrives as a HardFault under QEMU and a DebugMonitor exception on RP2350;
+      and a breakpoint, which ends a thread kept from its watch, as a stop of itself ends one that holds its own thread,
+      arrives as a HardFault under QEMU and a DebugMonitor exception on RP2350;
       a class beside the raw values, an access by load, store or fetch, an illegal or misaligned instruction, a breakpoint, a stacking,
       would serve a watcher on every board.
     - **Copy is the name of the grant its giver cannot revoke.**
@@ -548,6 +552,42 @@ until the maintainer decides otherwise.
       `OP_NOTIFY_LEND` is an experiment, decision 27, and its text states the scheduler's steps;
       a stable ABI would promise that the borrower may run on the lender's time while it waits, and leave the rest to policy,
       as it leaves which waiter a signal wakes.
+    - **What a stop says.**
+      `OP_THREAD_STOP` returns the state it found, `THREAD_WAS_*`, which commits the ABI to the three states;
+      a supervisor needs it to know whether it may answer a wait, and the host build to know a thread stands at its call again,
+      which it could tell from the pc instead, decision 32.
     - **A version.**
       The root task's thread starts with `a0` zero, which could carry the ABI's version.
-    Decide them together, with the seeds written anew once, after the three additions.
+    Decide them together, with the seeds written anew once, after the two additions left.
+32. **Stopping a thread.**
+    Decided: `OP_THREAD_STOP` takes a thread to stopped from whatever it is doing, through a capability to it with `RIGHT_W`,
+    with `a1` to `a3` zero, so that they may be given a meaning, and returns the state it found;
+    see "Threads" and "Cores".
+    A waiting thread leaves its notification and its borrower's ring of lenders and stands at the call it waited in,
+    which a resume makes again; the loss of a process stops a waiter the same way, so one rule holds for every stop.
+    It keeps its process, watch, units, account and lenders, and nothing is signalled.
+    A stop of a thread another core runs marks that core's trap to be dropped, whatever the thread is by then,
+    and on ARM finds a frame that trap could not stack, which it reports as the fault it is.
+    Weighed and left:
+    - **A status instead of the rewind**; "Threads" says why not.
+    - **A watch signal on a self-stop.**
+      A thread that stops itself could signal its watch, `THREAD_FAULTED` clear, so `OP_THREAD_FAULT`'s `KERR_STATE` told an exit from a fault.
+      An exit others should hear is said first by the thread's own means, as `child_report` does,
+      and whoever hears it may stop the thread whatever it is doing by then, since a stop of a stopped thread changes nothing;
+      a signal would cost a test on the stop and a case for the host's history, and echo a supervisor's own stops on its fault bit.
+    - **No result.**
+      The host could tell a waiter stopped from its pc, one call back, and a supervisor could read the registers,
+      but a supervisor needs to know whether it may answer a wait before it touches one, and the state is no clock.
+    - **Ending a paid turn at once.**
+      A stopped lender whose time pays for another thread's turn could stop paying as it stops,
+      charged up to now, the turn's thread paying for itself from there;
+      it would charge another core's turn from this one, against the counter that core counted to,
+      and break "whether a turn is paid is decided as it begins and at each tick",
+      so it pays to the end of the turn, as a payer another core's signal woke does.
+    - **A narrower right.**
+      `RIGHT_R` on a thread means nothing yet, and could allow a stop alone,
+      so a child could stop itself without the capability that also sets its watch, which `RIGHT_W` is;
+      a self-stop needing no capability at all, as a fault needs none, would be ambient authority, against goal 2.
+      Today a child kept from its watch ends with a breakpoint, and the library's children hold no capability to their own threads.
+      Decide with the first child that should exit cleanly and be kept from its watch.
+    - **Waking a stopped borrower's lenders**, a walk only a destroy pays for; see "Communication and synchronisation".

@@ -148,17 +148,26 @@ void core_regions_changed(const struct process *proc)
 #endif
 }
 
-void core_thread_stopped(const struct thread *t)
+bool core_thread_stopped(const struct thread *t)
 {
 #if CORES > 1
+    bool marked = false;
     for (uint32_t i = 0; i < CORES; i++) {
         LOOP_BOUND(CORES);
-        if (cores[i].current == t) {
-            core_shoot(&cores[i]);
+        struct core *c = &cores[i];
+        /* A call between this one and the core's trap may resume the thread, so the mark, not its state, says it stopped. */
+        if (c != core_self() && c->turn == t) {
+            c->drop_trap = true;
+            marked = true;
+        }
+        if (c->current == t) {
+            core_shoot(c);
         }
     }
+    return marked;
 #else
     (void)t;
+    return false;
 #endif
 }
 
@@ -170,8 +179,10 @@ void core_thread_gone(const struct thread *t)
         if (c->current == t) {
             c->current = NULL;
         }
+        /* The trap finds no thread, and drops what it was for all the same. */
         if (c->turn == t) {
             c->turn = NULL;
+            c->drop_trap = false;
         }
         /* The turn it paid for may be left on spare time, which a thread with time waiting there takes. */
         if (c->payer == t) {
@@ -183,11 +194,26 @@ void core_thread_gone(const struct thread *t)
 
 struct thread *core_trapped(void)
 {
-    struct thread *t = core_self()->current;
+    struct core *core = core_self();
+    struct thread *t = core->current;
+#if CORES > 1
+    /* A trap another core marked is not its thread's any more, whatever the thread is by then. */
+    if (core->drop_trap) {
+        core->drop_trap = false;
+        t = NULL;
+    }
+#endif
     if (t != NULL && t->state == THREAD_READY) {
         return t;
     }
-    sched_run_next();
+    /*
+     * The turn is over, as the stall has it: an end the trap's count found due is moot,
+     * and the thread stands at no call it is to make again first, whatever a watcher did to it meanwhile.
+     * One resumed since goes to the back of its queue, as at a tick.
+     */
+    core->turn_due = false;
+    core->recall = false;
+    sched_turn_end();
     return NULL;
 }
 

@@ -8,7 +8,7 @@ Report: a ready thread that may run waits on no queue
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -1108,9 +1108,7 @@ static void turn_end(void)
+@@ -1054,9 +1054,7 @@ void sched_turn_end(void)
      struct thread *was = core->turn;
      core->turn = NULL;
      payer_drop();
