@@ -6,6 +6,8 @@
 
 HOST_BUILD  := build/host$(PMP_VARIANT)$(TIMER_VARIANT)
 HOST_CORPUS := $(HOST_BUILD)/corpus
+# The seeds are text under tests/seeds, by the names of the ABI's headers, built into records here; see tools/seed.py.
+SEEDS       := build/seeds
 HOST_CFLAGS := -std=c11 -O1 -g -Wall -Wextra -Werror -Wshadow \
                -DRVUOS_HOST -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -DCORES=1 -DTIMER_HZ=$(TIMER_HZ) -Ikernel -Ikernel/arch/riscv \
                -Ikernel/board/qemu -Ihost -Iinclude
@@ -61,9 +63,13 @@ $(foreach h,$(HOST_HARNESSES),$(eval $(call host_harness,$(h))))
 # Build the host harnesses without running them; tests/mutants.sh runs each on its own.
 host-harnesses: $(HOST_HARNESSES)
 
+# The records of every seed, the directory written anew, so that a seed removed leaves nothing behind.
+$(SEEDS): tests/seeds $(wildcard tests/seeds/*) tools/seed.py include/rvuos/abi.h include/rvuos/replay.h
+	tools/seed.py --build tests/seeds $@
+
 # Replay the seeds and the corpus once on every harness, self-check after every call.
-host-test: $(HOST_HARNESSES)
-	for h in $^; do $$h -runs=0 tests/seeds tests/corpus || exit 1; done
+host-test: $(HOST_HARNESSES) $(SEEDS)
+	for h in $(HOST_HARNESSES); do $$h -runs=0 $(SEEDS) tests/corpus || exit 1; done
 
 # Plant the bugs of tests/mutants/ in the kernel one at a time.
 # The link or the host replay must catch each,
@@ -97,9 +103,9 @@ mutants-fuzz:
 FUZZ_FLAGS := -max_len=2048 -len_control=20 -use_value_profile=1
 FUZZ_JOBS  ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
 FUZZ_HARNESS ?= fuzz
-fuzz: $(HOST_BUILD)/$(FUZZ_HARNESS)
+fuzz: $(HOST_BUILD)/$(FUZZ_HARNESS) $(SEEDS)
 	@mkdir -p $(HOST_CORPUS)
-	cp -n tests/seeds/* tests/corpus/* $(HOST_CORPUS)/
+	cp -n $(SEEDS)/* tests/corpus/* $(HOST_CORPUS)/
 	rm -f $(HOST_BUILD)/fuzz-*.log
 	cd $(HOST_BUILD) && ./$(FUZZ_HARNESS) -max_total_time=$(FUZZ_TIME) -jobs=$(FUZZ_JOBS) -workers=$(FUZZ_JOBS) \
 		-artifact_prefix=$(CURDIR)/ $(FUZZ_FLAGS) $(CURDIR)/$(HOST_CORPUS); \
@@ -115,16 +121,16 @@ fuzz: $(HOST_BUILD)/$(FUZZ_HARNESS)
 # Run `make mutants` afterwards: it is the check that the minimisation lost nothing.
 # libFuzzer's merge passes over an input that fails a harness and goes on,
 # so the rule stops after it if one did, leaving the input in build/host/merge-* and tests/corpus as it was.
-corpus-merge: $(HOST_MACHINES)
+corpus-merge: $(HOST_MACHINES) $(SEEDS)
 	@mkdir -p $(HOST_CORPUS)
 	rm -rf $(HOST_BUILD)/corpus-merged $(HOST_BUILD)/merge-* && mkdir -p $(HOST_BUILD)/corpus-merged
-	cp tests/seeds/* $(HOST_BUILD)/corpus-merged/
+	cp $(SEEDS)/* $(HOST_BUILD)/corpus-merged/
 	for h in $(HOST_MACHINES); do \
 		$$h -merge=1 -use_counters=0 -artifact_prefix=$(HOST_BUILD)/merge- \
 			$(HOST_BUILD)/corpus-merged tests/corpus $(HOST_CORPUS) || exit 1; \
 	done
 	@! ls $(HOST_BUILD)/merge-* 2>/dev/null || { echo "these inputs fail a harness" >&2; exit 1; }
-	for s in tests/seeds/*; do rm $(HOST_BUILD)/corpus-merged/$$(basename $$s); done
+	for s in $(SEEDS)/*; do rm $(HOST_BUILD)/corpus-merged/$$(basename $$s); done
 	rm -f tests/corpus/*
 	cp $(HOST_BUILD)/corpus-merged/* tests/corpus/
 
@@ -133,8 +139,8 @@ corpus-merge: $(HOST_MACHINES)
 # an invariant report on either side fails the input, matching or not.
 # It runs one QEMU per processor, or REPLAY_JOBS.
 # REPLAY_FAIL_FAST=1 stops it at the first input that fails, as `make mutants` has it.
-qemu-replay: $(BUILD)/kernel-fuzzdrv.elf $(HOST_BUILD)/fuzz
+qemu-replay: $(BUILD)/kernel-fuzzdrv.elf $(HOST_BUILD)/fuzz $(SEEDS)
 	@[ "$(BOARD)" = qemu ] || { echo "qemu-replay runs on BOARD=qemu"; exit 1; }
 	tests/differential.py --qemu "$(QEMU) $(QEMUFLAGS)" $(if $(REPLAY_JOBS),--jobs $(REPLAY_JOBS)) \
 		$(if $(REPLAY_FAIL_FAST),--fail-fast) \
-		--kernel $(BUILD)/kernel-fuzzdrv.elf --host $(HOST_BUILD)/fuzz tests/seeds tests/corpus
+		--kernel $(BUILD)/kernel-fuzzdrv.elf --host $(HOST_BUILD)/fuzz $(SEEDS) tests/corpus

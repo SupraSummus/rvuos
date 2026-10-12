@@ -371,8 +371,14 @@ each input from RAM as at power-up and ending at its first report, as if it ran 
 since starting the harness costs more than most inputs do.
 A seed is written by hand for a scenario the kernel must handle,
 is named after that scenario, and is kept for as long as the scenario exists.
-`build/host/fuzz --print` shows one a record per line,
-and `tools/seed.py` writes one from such lines, the operations and any number by their names in the ABI's headers.
+It is text, a record per line,
+the operations, the slots, the types and the rights by their names in the ABI's headers,
+a slot the replay's setup leaves empty as `REPLAY_CAP_FREE+n`,
+and `tools/seed.py` builds the records of every seed into `build/seeds` before a replay,
+so that the ABI renumbering what a seed names leaves the seed meaning what it did.
+`tools/seed.py --text` writes such text from records,
+an input of the corpus a mutant needs, say,
+and `build/host/fuzz --print` shows records a line each, by number.
 The corpus is what the fuzzer found,
 and `make corpus-merge` rebuilds it from scratch each time:
 an input stays only while it reaches an edge on some harness

@@ -119,6 +119,8 @@ static inline int replay_leaves_alone(uint32_t at)
 #define REPLAY_CAP_HALF     24 /* the upper half of the free RAM */
 #define REPLAY_CAP_POOL_RAM 25 /* its lower half, the second thread's pool, which goes to the first table */
 #define REPLAY_CAP_LENT     26 /* its upper half, which the second thread's memory is derived from */
+/* The first slot the setup leaves empty; the seeds name the slots a record fills from it, see tools/seed.py. */
+#define REPLAY_CAP_FREE     (REPLAY_CAP_LENT + 1)
 _Static_assert(REPLAY_CAP_NOTIFY == BOOT_CAP_COUNT, "the setup's slots follow the boot capabilities");
 /* The third thread, stopped until a record resumes it: the last slot, which the corpus leaves alone. */
 #define REPLAY_CAP_THIRD   (REPLAY_TABLE_SLOTS - 1)

@@ -462,6 +462,6 @@ and `tests/differential.py` requires the two transcripts to match line for line.
 A driver thread the records unmapped faults, and the next goes on with the records;
 every driver thread ends in a breakpoint, a fault too, once the records are done,
 so a transcript ends in `no runnable thread` unless something stopped it first.
-Hand-written scenarios live in `tests/seeds`,
+Hand-written scenarios live in `tests/seeds`, as text that `tools/seed.py` turns into records,
 what the fuzzer found in `tests/corpus`,
 and `tests/mutants/` holds one planted bug per invariant.
