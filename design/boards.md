@@ -357,7 +357,7 @@ A region takes its memory type from where it lies, normal memory in RAM and a de
 a device is nGnRnE on PMSAv8.
 The MPU fetches only what it lets the thread read, so a region may not be execute only there,
 `EXECUTE_NEEDS_READ` in `arch.h`, as no region anywhere may be write only.
-The smallest region is 32 bytes, `PMP_GRAIN_MIN`, which `OP_FRAME_INFO` returns as on RP2350.
+The smallest region is 32 bytes, `PMP_GRAIN_MIN`, which `OP_CAP_INFO` of a frame returns as on RP2350.
 
 **Modes and traps.**
 The kernel runs in handler mode and a thread in thread mode, unprivileged, on the process stack.

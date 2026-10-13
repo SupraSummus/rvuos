@@ -33,10 +33,10 @@ and `user/lib/` what a program of several processes needs beside them, section 8
 | `rv_cap_delete(table, slot)` | `OP_CAP_DELETE` |
 | `rv_cap_revoke(table, slot)` | `OP_CAP_REVOKE` |
 | `rv_cap_info(cap, &type, &rights, words)` | `OP_CAP_INFO`, on any capability |
-| `rv_frame_info(cap, &base, &size)` | `OP_FRAME_INFO` |
-| `rv_frame_min_size(cap, &min)` | `OP_FRAME_INFO`, reading `a4` |
+| `rv_frame_info(cap, &base, &size)` | `OP_CAP_INFO` of a frame, else `KERR_WRONG_TYPE` |
+| `rv_frame_min_size(cap, &min)` | `OP_CAP_INFO` of a frame, reading `a4` |
 | `rv_frame_carve(cap, offset, size, dst)` | `OP_FRAME_CARVE` |
-| `rv_untyped_info(cap, &base, &size, &made)` | `OP_UNTYPED_INFO` |
+| `rv_untyped_info(cap, &base, &size, &made)` | `OP_CAP_INFO` of an Untyped, `made` whether `a4` is not 0 |
 | `rv_retype(cap, type, dst, &base)` | `OP_UNTYPED_RETYPE` |
 | `rv_split(cap, lower, upper)` | `OP_UNTYPED_SPLIT` |
 | `rv_pool_alloc(pool, type, dst, arg)` | `OP_POOL_ALLOC` |

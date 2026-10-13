@@ -224,12 +224,6 @@ static int op_frame(struct thread *t, uint32_t slot, const struct cap *cap,
     uint32_t size = cap->b;
 
     switch (op) {
-    case OP_FRAME_INFO:
-        arg[1] = base;
-        arg[2] = size;
-        arg[3] = cap->rights;
-        arg[4] = region_min_size();
-        return KERR_OK;
     case OP_FRAME_CARVE: {
         uint32_t off = arg[1];
         uint32_t len = arg[2];
@@ -254,12 +248,6 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
     struct cap *u = slot_node(t, slot);
 
     switch (op) {
-    case OP_UNTYPED_INFO:
-        arg[1] = base;
-        arg[2] = size;
-        arg[3] = cap->rights;
-        arg[4] = !untyped_free(u);
-        return KERR_OK;
     case OP_UNTYPED_RETYPE: {
         uint32_t type = arg[1];
         if (type != CAP_FRAME && type != CAP_POOL) {
