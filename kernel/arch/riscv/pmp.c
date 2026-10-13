@@ -11,7 +11,7 @@
 #include "layout.h"
 #include "pmp.h"
 
-_Static_assert(PMP_MAX_ENTRIES >= 1 && PMP_MAX_ENTRIES <= 16,
+_Static_assert(PMP_MAX_ENTRIES >= 1 && PMP_MAX_ENTRIES <= PMP_CSR_ENTRIES,
                "pmp.c addresses at most sixteen entries");
 
 static uint32_t pmpaddr_read(unsigned idx)
@@ -102,7 +102,7 @@ uint32_t pmp_grain;
 
 void pmp_init(void)
 {
-    for (unsigned reg = 0; reg < (PMP_MAX_ENTRIES + 3) / 4; reg++) {
+    for (unsigned reg = 0; reg < PMP_CSR_ENTRIES / 4; reg++) {
         pmpcfg_write(reg, 0);
     }
 
@@ -153,9 +153,12 @@ void pmp_init(void)
     }
     pmp_entry_count = count;
 
-    /* Every entry was turned off above, so one past the run still on is hardwired, as RP2350's three are. */
+    /*
+     * Every entry was turned off above, so one past the run still on is hardwired, as RP2350's three are.
+     * They are looked for past the budget too, since a budget below them would leave them open.
+     */
     pmp_entry_end = count;
-    for (unsigned i = count; i < PMP_MAX_ENTRIES; i++) {
+    for (unsigned i = count; i < PMP_CSR_ENTRIES; i++) {
         uint8_t cfg = pmpcfg_get_byte(i);
         if ((cfg & 0x18) != PMP_A_OFF && (cfg & (PMP_R | PMP_W | PMP_X)) != 0) {
             pmp_entry_end = i + 1;

@@ -245,7 +245,7 @@ static void check_pmp_image(const struct process *proc, const uint32_t *addr,
         }
     }
 
-    uint64_t points[2 * PROCESS_REGION_SLOTS + 2 * PMP_MAX_ENTRIES + 2];
+    uint64_t points[2 * PROCESS_REGION_SLOTS + 2 * PMP_CSR_ENTRIES + 2];
     size_t n = 0;
     points[n++] = 0;
     points[n++] = 0x100000000ull;
@@ -1462,8 +1462,8 @@ void selfcheck_run(void)
             fail("the core's regions wait to be loaded again", v2p(current), 0, 0);
         }
         /* The CSRs, hardwired entries included, must grant exactly what the current process's slots do. */
-        uint32_t addr[PMP_MAX_ENTRIES];
-        uint8_t cfg[PMP_MAX_ENTRIES];
+        uint32_t addr[PMP_CSR_ENTRIES];
+        uint8_t cfg[PMP_CSR_ENTRIES];
         for (unsigned i = 0; i < pmp_entry_end; i++) {
             pmp_get(i, &addr[i], &cfg[i]);
         }

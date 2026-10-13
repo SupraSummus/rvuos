@@ -382,6 +382,10 @@ what is left:
 
 ## Verification
 
+- The host shim states what `pmp_init` finds rather than running it,
+  so its search for hardwired entries, past the budget too, runs only on an RP2350, and no mutant can stand in it.
+  Running `pmp.c` over the shim's CSRs, which already model the grain and RP2350's three, would let `fuzz-rp2350` hold it;
+  the CSR accessors are on the path of a switch, so they stay inline on the target.
 - The mutator's draws of the describing operations apart, one typed draw in eight, are not measured yet:
   `make mutants-fuzz` before and after, from the corpus and from nothing, over a few seeds,
   would say whether the allocations, a pool's other operation, kept their share, and what fuzzing finds of the new mutants.
