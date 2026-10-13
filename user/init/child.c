@@ -78,7 +78,7 @@ void child_main(void)
     rv_puts(CHILD_DEBUG,
             bits == BIT_POOL &&
                     rv_retype(CHILD_LENT, CAP_POOL, CHILD_LENT_POOL, &base) == KERR_OK &&
-                    rv_invoke(OP_POOL_ALLOC, CHILD_LENT_POOL, CAP_NOTIFICATION, CHILD_OWN_NTFN, 0) ==
+                    rv_pool_alloc(CHILD_LENT_POOL, CAP_NOTIFICATION, CHILD_OWN_NTFN, 0) ==
                         KERR_OK
                 ? "child: pool made\n"
                 : "child: pool made FAILED\n");

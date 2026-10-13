@@ -524,9 +524,9 @@ static void record_room(void)
     room_pool = NULL;
     struct cap pc = invoked_cap;
     if (call_op == OP_POOL_ALLOC && invoked_cap.type == CAP_POOL) {
-        room_need = call_args[0] == CAP_IRQ || call_args[0] == CAP_POOL ? 0 : type_bytes(call_args[0], call_args[2]);
+        room_need = call_args[1] == CAP_IRQ || call_args[1] == CAP_POOL ? 0 : type_bytes(call_args[1], call_args[2]);
     } else if (call_op == OP_IRQ_BIND && invoked_cap.type == CAP_IRQ_LINE &&
-               slot_lookup(caller, call_args[0], &pc) == KERR_OK && pc.type == CAP_POOL) {
+               slot_lookup(caller, call_args[1], &pc) == KERR_OK && pc.type == CAP_POOL) {
         room_need = type_bytes(CAP_IRQ, 0);
     } else {
         return;

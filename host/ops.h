@@ -60,8 +60,8 @@ static inline uint8_t arg_type(uint8_t kind)
     }
 }
 
-/* What an operation puts in its ARG_DST slots when not a type of its own: the type a1 names. */
-#define MAKES_A1 0xff
+/* What an operation puts in its ARG_DST slots when not a type of its own: the type its ARG_TYPE argument names. */
+#define MAKES_TYPE 0xff
 
 /* The type of the capability an operation every type takes is invoked on, which no capability has. */
 #define ON_ANY 0xfe
@@ -86,9 +86,9 @@ static const struct op_info op_table[OP_COUNT] = {
     OP(OP_DEBUG_HALT, CAP_DEBUG, 0, ARG_WORD, ARG_NONE, ARG_NONE),
     OP(OP_CAP_COPY, CAP_CAPTABLE, 0, ARG_DST_INVOKED, ARG_ANY, ARG_RIGHTS),
     OP(OP_CAP_DELETE, CAP_CAPTABLE, 0, ARG_SLOT_INVOKED, ARG_NONE, ARG_NONE),
-    OP(OP_FRAME_CARVE, CAP_FRAME, CAP_FRAME, ARG_OFFSET, ARG_SIZE, ARG_DST),
-    OP(OP_UNTYPED_RETYPE, CAP_UNTYPED, MAKES_A1, ARG_TYPE, ARG_DST, ARG_NONE),
-    OP(OP_POOL_ALLOC, CAP_POOL, MAKES_A1, ARG_TYPE, ARG_DST, ARG_ALLOC),
+    OP(OP_FRAME_CARVE, CAP_FRAME, CAP_FRAME, ARG_DST, ARG_OFFSET, ARG_SIZE),
+    OP(OP_UNTYPED_RETYPE, CAP_UNTYPED, MAKES_TYPE, ARG_DST, ARG_TYPE, ARG_NONE),
+    OP(OP_POOL_ALLOC, CAP_POOL, MAKES_TYPE, ARG_DST, ARG_TYPE, ARG_ALLOC),
     OP(OP_PROCESS_INSTALL, CAP_PROCESS, 0, ARG_REGION, ARG_FRAME, ARG_RIGHTS),
     OP(OP_PROCESS_UNINSTALL, CAP_PROCESS, 0, ARG_REGION, ARG_NONE, ARG_NONE),
     OP(OP_DEBUG_TRACE, CAP_DEBUG, 0, ARG_NONE, ARG_NONE, ARG_NONE),
@@ -99,15 +99,15 @@ static const struct op_info op_table[OP_COUNT] = {
     OP(OP_THREAD_STOP, CAP_THREAD, 0, ARG_NONE, ARG_NONE, ARG_NONE),
     OP(OP_DEBUG_TICK, CAP_DEBUG, 0, ARG_NONE, ARG_NONE, ARG_NONE),
     OP(OP_CAP_MOVE, CAP_CAPTABLE, 0, ARG_DST_INVOKED, ARG_ANY, ARG_NONE),
-    OP(OP_IRQ_CARVE, CAP_IRQ_LINE, CAP_IRQ_LINE, ARG_OFFSET, ARG_COUNT, ARG_DST),
-    OP(OP_IRQ_BIND, CAP_IRQ_LINE, CAP_IRQ, ARG_POOL, ARG_NOTIFICATION, ARG_DST),
+    OP(OP_IRQ_CARVE, CAP_IRQ_LINE, CAP_IRQ_LINE, ARG_DST, ARG_OFFSET, ARG_COUNT),
+    OP(OP_IRQ_BIND, CAP_IRQ_LINE, CAP_IRQ, ARG_DST, ARG_POOL, ARG_NOTIFICATION),
     OP(OP_IRQ_SET, CAP_IRQ, 0, ARG_BITS, ARG_DELAY, ARG_FLAGS),
     OP(OP_DEBUG_IRQ, CAP_DEBUG, 0, ARG_LINE, ARG_NONE, ARG_NONE),
     OP(OP_CAP_REVOKE, CAP_CAPTABLE, 0, ARG_SLOT_INVOKED, ARG_NONE, ARG_NONE),
     OP(OP_CAP_DERIVE, CAP_CAPTABLE, 0, ARG_DST_INVOKED, ARG_ANY, ARG_RIGHTS),
     OP(OP_CLOCK_READ, CAP_CLOCK, 0, ARG_NONE, ARG_NONE, ARG_NONE),
     OP(OP_CLOCK_FRAME, CAP_CLOCK, CAP_FRAME, ARG_DST, ARG_NONE, ARG_NONE),
-    OP(OP_TIME_CARVE, CAP_TIME, CAP_TIME, ARG_OFFSET, ARG_COUNT, ARG_DST),
+    OP(OP_TIME_CARVE, CAP_TIME, CAP_TIME, ARG_DST, ARG_OFFSET, ARG_COUNT),
     OP(OP_TIME_BIND, CAP_TIME, 0, ARG_THREAD, ARG_OFFSET, ARG_COUNT),
     OP(OP_UNTYPED_SPLIT, CAP_UNTYPED, CAP_UNTYPED, ARG_DST, ARG_DST, ARG_NONE),
     OP(OP_THREAD_WATCH, CAP_THREAD, 0, ARG_NOTIFICATION, ARG_BITS, ARG_NONE),
@@ -115,7 +115,7 @@ static const struct op_info op_table[OP_COUNT] = {
     OP(OP_THREAD_FAULT, CAP_THREAD, 0, ARG_NONE, ARG_NONE, ARG_NONE),
     OP(OP_THREAD_READ_REG, CAP_THREAD, 0, ARG_OFFSET, ARG_NONE, ARG_NONE),
     OP(OP_THREAD_WRITE_REG, CAP_THREAD, 0, ARG_OFFSET, ARG_WORD, ARG_NONE),
-    OP(OP_NOTIFY_CARVE, CAP_NOTIFICATION, CAP_NOTIFICATION, ARG_BITS, ARG_DST, ARG_NONE),
+    OP(OP_NOTIFY_CARVE, CAP_NOTIFICATION, CAP_NOTIFICATION, ARG_DST, ARG_BITS, ARG_NONE),
     OP(OP_CLOCK_WATCHDOG, CAP_CLOCK, 0, ARG_DELAY, ARG_NONE, ARG_NONE),
     OP(OP_NOTIFY_LEND, CAP_NOTIFICATION, 0, ARG_THREAD, ARG_NONE, ARG_NONE),
     OP(OP_PROCESS_MOUNT, CAP_PROCESS, 0, ARG_MOUNT, ARG_CAPTABLE, ARG_NONE),
@@ -129,6 +129,18 @@ static const struct op_info op_table[OP_COUNT] = {
 
 /* The assert sees only the highest code; LLVMFuzzerInitialize holds every code below it to an entry. */
 _Static_assert(OP_COUNT == 43 && OP_POOL_INFO == OP_COUNT - 1, "a new operation needs an entry in op_table");
+
+/* The value of a record's argument that names a type, ARG_TYPE, or CAP_NONE for an operation that takes none. */
+static inline uint32_t op_type_arg(const struct op_info *info, const struct replay_record *c)
+{
+    const uint32_t a[3] = { c->a1, c->a2, c->a3 };
+    for (unsigned i = 0; i < 3; i++) {
+        if (info->arg[i] == ARG_TYPE) {
+            return a[i];
+        }
+    }
+    return CAP_NONE;
+}
 
 /* A code below OP_COUNT that is no operation any more, see OP_COUNT, which the kernel refuses as any other. */
 static inline int op_retired(unsigned op)

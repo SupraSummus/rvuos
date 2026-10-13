@@ -105,7 +105,7 @@ void units_demo(uint32_t data_base, uint32_t data_size, uint32_t counter, uint32
            rv_invoke(OP_CAP_DERIVE, BOOT_CAP_CAPTABLE, SLOT_CAPPED_TIME, SLOT_HALF_TIME, RIGHT_W));
     for (uint32_t i = 0; i < SPINNERS; i++) {
         expect("allocate a spinner",
-               rv_invoke(OP_POOL_ALLOC, BOOT_CAP_POOL, CAP_THREAD, SLOT_SPINNER + i, BOOT_CAP_PROCESS));
+               rv_pool_alloc(BOOT_CAP_POOL, CAP_THREAD, SLOT_SPINNER + i, BOOT_CAP_PROCESS));
         expect("configure it",
                rv_invoke(OP_THREAD_CONFIGURE, SLOT_SPINNER + i, (uint32_t)&spinner_main,
                          data_base + data_size / 4 - i * SPINNER_STACK, i));
@@ -177,11 +177,11 @@ void units_demo(uint32_t data_base, uint32_t data_size, uint32_t counter, uint32
     dodge_counter = counter;
     dodge_counts = tick_counts * 9u / 10u;
     expect("carve a second timer line",
-           rv_invoke(OP_IRQ_CARVE, BOOT_CAP_TIMER_LINES, 1, 1, SLOT_DODGER_TIMER));
+           rv_irq_carve(BOOT_CAP_TIMER_LINES, 1, 1, SLOT_DODGER_TIMER));
     expect("bind it for the dodger",
-           rv_invoke(OP_IRQ_BIND, SLOT_DODGER_TIMER, SLOT_NEW_POOL, SLOT_DODGER_NTFN, SLOT_DODGER_TIMER));
+           rv_irq_bind(SLOT_DODGER_TIMER, SLOT_NEW_POOL, SLOT_DODGER_NTFN, SLOT_DODGER_TIMER));
     expect("allocate the dodger",
-           rv_invoke(OP_POOL_ALLOC, BOOT_CAP_POOL, CAP_THREAD, SLOT_DODGER, BOOT_CAP_PROCESS));
+           rv_pool_alloc(BOOT_CAP_POOL, CAP_THREAD, SLOT_DODGER, BOOT_CAP_PROCESS));
     expect("configure it",
            rv_invoke(OP_THREAD_CONFIGURE, SLOT_DODGER, (uint32_t)&dodger_main,
                      data_base + data_size / 4 - SPINNERS * SPINNER_STACK, 0));
