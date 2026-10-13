@@ -2,7 +2,7 @@
 #define RVUOS_LIB_LOG_H
 
 /*
- * The kernel's log, from both sides: text a process writes into it through a Debug capability,
+ * The kernel's log, from both sides: text a process writes into it through a Print capability,
  * and the reader's view, which the boot grants the root task.
  */
 
@@ -14,13 +14,13 @@
 struct self;
 
 /*
- * Text into the kernel's log through the Debug capability in slot debug, which needs RIGHT_W alone,
- * in order with the kernel's own lines and every other writer's, DEBUG_WRITE_BYTES a call.
+ * Text into the kernel's log through the Print capability in slot print, which needs RIGHT_W,
+ * in order with the kernel's own lines and every other writer's, PRINT_BYTES a call.
  */
-void log_write(void *debug, const char *s, uint32_t n);
-static inline struct out log_out(uint32_t debug)
+void log_write(void *print, const char *s, uint32_t n);
+static inline struct out log_out(uint32_t print)
 {
-    return (struct out){ log_write, (void *)(uintptr_t)debug };
+    return (struct out){ log_write, (void *)(uintptr_t)print };
 }
 
 /*

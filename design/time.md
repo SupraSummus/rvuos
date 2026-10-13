@@ -160,7 +160,7 @@ The ESP32-C6 measures the counter's rate at boot, so the timer starts before the
 A new thread's account is empty, and the root thread's starts full.
 A thread bound to other units keeps what its account held, up to what the new units hold,
 and an unbound one loses it, so no bind puts time into an account.
-`OP_DEBUG_TRACE` fills every account as tracing begins, and a second one fills none;
+`OP_TEST_TRACE` fills every account as tracing begins, and a second one fills none;
 no call tells what one holds, which would be a clock.
 
 **A thread has time while its account holds a tick.**
@@ -260,7 +260,7 @@ A thread made ready from another core waits besides for the rest of that core's 
 A timer line's thread starts within those k ticks and steps of its deadline, so a periodic line keeps its deadlines and its thread starts within as much of each;
 a device's driver within them of the trap that took its interrupt.
 It all holds while tracing is off, since tracing stops the tick ending a turn,
-while nobody drives the machine with `OP_DEBUG_TICK` or `OP_DEBUG_PREEMPT`, which move the count without time passing,
+while nobody drives the machine with `OP_TEST_TICK` or `OP_TEST_PREEMPT`, which move the count without time passing,
 and while the thread keeps its binding: a bind, even to more units, puts it at the back of its queue.
 A pool destroy is the exception, `TODO.md`:
 it runs to its end unless an interrupt is pending, so a thread its walk wakes waits for the rest of the walk

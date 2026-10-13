@@ -1,0 +1,30 @@
+# Print, Halt and Test each take RIGHT_W, and each refuses the others' operations.
+# Print with RIGHT_W prints, and neither drives nor halts the machine.
+actor 1 OP_CAP_COPY slot BOOT_CAP_CAPTABLE a1 REPLAY_CAP_FREE+3 a2 BOOT_CAP_PRINT a3 RIGHT_W
+actor 1 OP_PRINT slot REPLAY_CAP_FREE+3 a1 0x64636261 a2 0x68676665 a3 0xa6b6a69
+actor 1 OP_PRINT slot REPLAY_CAP_FREE+3 a1 0x6f000a78 a2 0xa6b6f6f a3 0
+actor 1 OP_TEST_TICK slot REPLAY_CAP_FREE+3
+actor 1 OP_TEST_IRQ slot REPLAY_CAP_FREE+3 a1 10
+actor 1 OP_TEST_PREEMPT slot REPLAY_CAP_FREE+3 a1 1
+actor 1 OP_TEST_TRACE slot REPLAY_CAP_FREE+3
+actor 1 OP_HALT slot REPLAY_CAP_FREE+3 a1 0x5
+# Without RIGHT_W none of the three does anything.
+actor 1 OP_CAP_COPY slot BOOT_CAP_CAPTABLE a1 REPLAY_CAP_FREE+4 a2 BOOT_CAP_PRINT a3 RIGHT_X
+actor 1 OP_PRINT slot REPLAY_CAP_FREE+4 a1 0xa7a7a7a a2 0 a3 0
+actor 1 OP_CAP_COPY slot BOOT_CAP_CAPTABLE a1 REPLAY_CAP_FREE+6 a2 BOOT_CAP_TEST a3 RIGHT_R|RIGHT_X
+actor 1 OP_TEST_TICK slot REPLAY_CAP_FREE+6
+actor 1 OP_TEST_IRQ slot REPLAY_CAP_FREE+6 a1 10
+actor 1 OP_TEST_PREEMPT slot REPLAY_CAP_FREE+6 a1 1
+actor 1 OP_TEST_TRACE slot REPLAY_CAP_FREE+6
+actor 1 OP_CAP_COPY slot BOOT_CAP_CAPTABLE a1 REPLAY_CAP_FREE+7 a2 BOOT_CAP_HALT a3 RIGHT_R|RIGHT_X
+actor 1 OP_HALT slot REPLAY_CAP_FREE+7 a1 0x5
+# Test with RIGHT_W ticks, and neither prints nor halts.
+actor 1 OP_CAP_COPY slot BOOT_CAP_CAPTABLE a1 REPLAY_CAP_FREE+8 a2 BOOT_CAP_TEST a3 RIGHT_W
+actor 1 OP_TEST_TICK slot REPLAY_CAP_FREE+8
+actor 1 OP_PRINT slot REPLAY_CAP_FREE+8 a1 0xa7a7a7a a2 0 a3 0
+actor 1 OP_HALT slot REPLAY_CAP_FREE+8 a1 0x5
+# Halt with RIGHT_W neither prints nor ticks.
+actor 1 OP_CAP_COPY slot BOOT_CAP_CAPTABLE a1 REPLAY_CAP_FREE+9 a2 BOOT_CAP_HALT a3 RIGHT_W
+actor 1 OP_PRINT slot REPLAY_CAP_FREE+9 a1 0xa7a7a7a a2 0 a3 0
+actor 1 OP_TEST_TICK slot REPLAY_CAP_FREE+9
+actor 2 OP_PRINT slot BOOT_CAP_PRINT a1 0xa6b6f a2 0 a3 0

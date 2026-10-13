@@ -29,7 +29,7 @@ static void ponger_main(void)
         uint32_t bits;
         if (rv_wait(SLOT_PING, &bits) != KERR_OK || bits != BIT_PING) {
             puts("ponger: cannot wait\n");
-            rv_halt(BOOT_CAP_DEBUG, 1);
+            rv_halt(BOOT_CAP_HALT, 1);
         }
         pongs++;
         rv_signal(SLOT_TIMER_NTFN, BIT_PONG);
@@ -259,7 +259,7 @@ void cores_demo(uint32_t data_base, uint32_t data_size, uint32_t shared_base, ui
 {
     uint32_t cores = count_cores();
     puts("root: cores ");
-    rv_put_hex(BOOT_CAP_DEBUG, cores);
+    rv_put_hex(BOOT_CAP_PRINT, cores);
     puts("\n");
     if (cores > 1) {
         second_core(data_base, data_size, shared_base, counter, hz);

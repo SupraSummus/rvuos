@@ -147,7 +147,7 @@ until the maintainer decides otherwise.
 
 10. **Yield.**
     Working default: none.
-    `OP_DEBUG_TICK` is the tick on request,
+    `OP_TEST_TICK` is the tick on request,
     so a yield would be that under a name that invites spinning,
     and a spinning thread is always runnable and keeps the machine from `wfi`,
     while a waiting thread says what it waits for.
@@ -419,11 +419,10 @@ until the maintainer decides otherwise.
     Working default: the kernel keeps a deadline on its own tick, which `OP_CLOCK_WATCHDOG` feeds, and halts at it;
     see "The watchdog".
     A watchdog is a device, every other of which is a driver's, and userspace could do the same:
-    a supervisor with a timer line halts the machine through `Debug` when nobody fed it in time,
+    a supervisor with a timer line halts the machine through `Halt` when nobody fed it in time,
     and a driver feeds the board's own watchdog through a frame, which catches a kernel that stops, since no process runs then.
     RP2350's would be listed as its first 32 bytes, which hold the count and stop short of the boot vector.
-    That costs the supervisor `RIGHT_X` on `Debug`, which drives the machine as a test does,
-    the boot's BOOTSEL watchdog shared with a driver, and a halt that waits for the supervisor's turn.
+    That costs the boot's BOOTSEL watchdog shared with a driver, and a halt that waits for the supervisor's turn.
     Decide with the first system meant to run unattended.
     The Wi-Fi system, with `run=0`, is the first:
     its root task checks every child each second and deals with one that did not answer itself,
@@ -517,6 +516,8 @@ until the maintainer decides otherwise.
     The next put every destination in `a1`, where a copy, a move, a split and the clock's frame had it,
     and the carves, the retype, the allocation and the bind came to have it, the arguments otherwise in their order;
     the wrappers kept their parameters, and the seeds and the corpus their calls, each record's arguments moved with them.
+    The next made `Debug` three types, `Print`, `Halt` and `Test`,
+    so a child that prints holds nothing that halts, and a supervisor that halts, decision 26, nothing that drives the machine.
     The rest below would break a binary built against today's ABI.
     The seeds are text that names the operations, slots, types and rights it calls, `tools/seed.py`,
     so each goes in a change of its own, which rebuilds them,
@@ -533,7 +534,7 @@ until the maintainer decides otherwise.
       would let each be decided on its merits.
     - **The numbering.**
       Operation codes are flat, in the order the operations came,
-      and `Debug`'s four operations for tests lie among the rest.
+      and `Test`'s four operations lie among the rest.
       Codes grouped by type, with the tests' in a range of their own that a stable program never calls,
       would keep `KERR_WRONG_TYPE` and say which calls the ABI promises;
       the describing calls, 41 and 42, came last, and every type takes the first.
@@ -542,11 +543,11 @@ until the maintainer decides otherwise.
       an Untyped that has made something already is `KERR_NO_MEMORY`, where it is a state;
       `KERR_OVERLAP` is a region, a line already bound and a unit another thread earns;
       and a revoke that ends early because it took the caller's own table returns `KERR_OK`, done or not.
-    - **`Debug` is three things.**
-      Writing into the log is how every child prints, halting is what a supervisor needs, decision 26,
-      and tracing, ticking, interrupting and preempting drive the machine for a test;
-      `RIGHT_X` gives a supervisor the last two together.
+    - **What a halt does.**
       Nothing resets the machine, and what a halt does is the board's.
+    - **`Test` on every board.**
+      The boot grants it on every board, so any root task may move time and fire lines no device raised.
+      Granting it only to the test programs would close that, and refusing its calls untraced, `TODO.md`, most of it.
     - **The boot table.**
       `BOOT_CAP_INPUT` is the test's input on every board,
       and `BOOT_CAP_UART` is RP2350's block of RAM, where a console would be one of `BOOT_CAP_DEVICES`.
@@ -644,7 +645,7 @@ until the maintainer decides otherwise.
       A supervisor or a debugger could describe a slot of a table it holds a capability to, by its index,
       where today a copy goes only into a table, never out of one.
     - **The words left at zero.**
-      A thread's, a table's, a process's and the debug capability's;
+      A thread's, a table's, a process's, and those of `Print`, `Halt` and `Test`;
       what fills them comes with the first program that needs it, or a page.
     Decide as decision 31's changes are.
 34. **Copies by the kernel.**

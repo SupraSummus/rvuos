@@ -25,16 +25,16 @@ extern const char load_at[];
 
 static void puts(const char *s)
 {
-    rv_puts(BOOT_CAP_DEBUG, s);
+    rv_puts(BOOT_CAP_PRINT, s);
 }
 
 int main(void);
 int main(void)
 {
     puts("escape: reading the fault status ");
-    rv_put_hex(BOOT_CAP_DEBUG, CFSR_ADDR);
+    rv_put_hex(BOOT_CAP_PRINT, CFSR_ADDR);
     puts(" at ");
-    rv_put_hex(BOOT_CAP_DEBUG, (uint32_t)(uintptr_t)load_at);
+    rv_put_hex(BOOT_CAP_PRINT, (uint32_t)(uintptr_t)load_at);
     puts(", expecting a fault\n");
 
     uint32_t v;
@@ -42,8 +42,8 @@ int main(void)
 
     /* Not reached when the core keeps unprivileged code out of the System Control Space. */
     puts("escape: breached, read the fault status ");
-    rv_put_hex(BOOT_CAP_DEBUG, v);
+    rv_put_hex(BOOT_CAP_PRINT, v);
     puts("\n");
-    rv_halt(BOOT_CAP_DEBUG, 2);
+    rv_halt(BOOT_CAP_HALT, 2);
     return 0;
 }

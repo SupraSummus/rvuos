@@ -426,73 +426,73 @@ static inline uint32_t rv_counter_low(uint32_t counter)
     return *(const volatile uint32_t *)counter;
 }
 
-/* OP_DEBUG_WRITE: the first n bytes of s, DEBUG_WRITE_BYTES at most, into the kernel's log; a zero byte ends them. */
-static inline uint32_t rv_debug_write(uint32_t debug_cap, const char *s, uint32_t n)
+/* OP_PRINT: the first n bytes of s, PRINT_BYTES at most, into the kernel's log; a zero byte ends them. */
+static inline uint32_t rv_print(uint32_t print_cap, const char *s, uint32_t n)
 {
     uint32_t w[3] = { 0, 0, 0 };
-    for (uint32_t i = 0; i < n && i < DEBUG_WRITE_BYTES; i++) {
+    for (uint32_t i = 0; i < n && i < PRINT_BYTES; i++) {
         w[i / 4] |= (uint32_t)(uint8_t)s[i] << (8 * (i % 4));
     }
-    return rv_invoke(OP_DEBUG_WRITE, debug_cap, w[0], w[1], w[2]);
+    return rv_invoke(OP_PRINT, print_cap, w[0], w[1], w[2]);
 }
 
-/* n bytes of text into the kernel's log, DEBUG_WRITE_BYTES a call. */
-static inline void rv_write(uint32_t debug_cap, const char *s, uint32_t n)
+/* n bytes of text into the kernel's log, PRINT_BYTES a call. */
+static inline void rv_write(uint32_t print_cap, const char *s, uint32_t n)
 {
-    for (uint32_t at = 0; at < n; at += DEBUG_WRITE_BYTES) {
-        rv_debug_write(debug_cap, s + at, n - at);
+    for (uint32_t at = 0; at < n; at += PRINT_BYTES) {
+        rv_print(print_cap, s + at, n - at);
     }
 }
 
-static inline void rv_putc(uint32_t debug_cap, char c)
+static inline void rv_putc(uint32_t print_cap, char c)
 {
-    rv_debug_write(debug_cap, &c, 1);
+    rv_print(print_cap, &c, 1);
 }
 
-static inline void rv_puts(uint32_t debug_cap, const char *s)
+static inline void rv_puts(uint32_t print_cap, const char *s)
 {
     uint32_t n = 0;
     while (s[n] != '\0') {
         n++;
     }
-    rv_write(debug_cap, s, n);
+    rv_write(print_cap, s, n);
 }
 
-static inline void rv_put_hex(uint32_t debug_cap, uint32_t v)
+static inline void rv_put_hex(uint32_t print_cap, uint32_t v)
 {
     char text[10] = { '0', 'x' };
     for (int i = 0; i < 8; i++) {
         text[2 + i] = "0123456789abcdef"[(v >> (28 - 4 * i)) & 0xfu];
     }
-    rv_write(debug_cap, text, sizeof(text));
+    rv_write(print_cap, text, sizeof(text));
 }
 
-static inline __attribute__((noreturn)) void rv_halt(uint32_t debug_cap, uint32_t code)
+static inline __attribute__((noreturn)) void rv_halt(uint32_t halt_cap, uint32_t code)
 {
-    rv_invoke(OP_DEBUG_HALT, debug_cap, code, 0, 0);
+    rv_invoke(OP_HALT, halt_cap, code, 0, 0);
     for (;;) {
     }
 }
 
-/* OP_DEBUG_TRACE, OP_DEBUG_TICK, OP_DEBUG_IRQ and OP_DEBUG_PREEMPT, for tests; see rvuos/abi.h. */
-static inline uint32_t rv_debug_trace(uint32_t debug_cap)
+/* OP_TEST_TRACE, OP_TEST_TICK, OP_TEST_IRQ and OP_TEST_PREEMPT, for tests; see rvuos/abi.h. */
+static inline uint32_t rv_test_trace(uint32_t test_cap)
 {
-    return rv_invoke(OP_DEBUG_TRACE, debug_cap, 0, 0, 0);
+    return rv_invoke(OP_TEST_TRACE, test_cap, 0, 0, 0);
 }
 
-static inline uint32_t rv_debug_tick(uint32_t debug_cap)
+static inline uint32_t rv_test_tick(uint32_t test_cap)
 {
-    return rv_invoke(OP_DEBUG_TICK, debug_cap, 0, 0, 0);
+    return rv_invoke(OP_TEST_TICK, test_cap, 0, 0, 0);
 }
 
-static inline uint32_t rv_debug_irq(uint32_t debug_cap, uint32_t line)
+static inline uint32_t rv_test_irq(uint32_t test_cap, uint32_t line)
 {
-    return rv_invoke(OP_DEBUG_IRQ, debug_cap, line, 0, 0);
+    return rv_invoke(OP_TEST_IRQ, test_cap, line, 0, 0);
 }
 
-static inline uint32_t rv_debug_preempt(uint32_t debug_cap, uint32_t n)
+static inline uint32_t rv_test_preempt(uint32_t test_cap, uint32_t n)
 {
-    return rv_invoke(OP_DEBUG_PREEMPT, debug_cap, n, 0, 0);
+    return rv_invoke(OP_TEST_PREEMPT, test_cap, n, 0, 0);
 }
 
 #endif

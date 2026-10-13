@@ -31,7 +31,7 @@ enum {
 
 static void puts(const char *s)
 {
-    rv_puts(BOOT_CAP_DEBUG, s);
+    rv_puts(BOOT_CAP_PRINT, s);
 }
 
 static void expect(const char *what, uint32_t status)
@@ -40,7 +40,7 @@ static void expect(const char *what, uint32_t status)
         puts("escape: ");
         puts(what);
         puts(": FAILED\n");
-        rv_halt(BOOT_CAP_DEBUG, 3);
+        rv_halt(BOOT_CAP_HALT, 3);
     }
 }
 
@@ -59,11 +59,11 @@ int main(void)
 
     uint32_t addr = base + min_size;
     puts("escape: reading past the smallest region, ");
-    rv_put_hex(BOOT_CAP_DEBUG, min_size);
+    rv_put_hex(BOOT_CAP_PRINT, min_size);
     puts(" bytes, from ");
-    rv_put_hex(BOOT_CAP_DEBUG, addr);
+    rv_put_hex(BOOT_CAP_PRINT, addr);
     puts(" at ");
-    rv_put_hex(BOOT_CAP_DEBUG, (uint32_t)(uintptr_t)load_at);
+    rv_put_hex(BOOT_CAP_PRINT, (uint32_t)(uintptr_t)load_at);
     puts(", expecting a fault\n");
 
     uint32_t v;
@@ -71,8 +71,8 @@ int main(void)
 
     /* Not reached when PMP ends the region where the kernel says it ends. */
     puts("escape: breached, read past the smallest region ");
-    rv_put_hex(BOOT_CAP_DEBUG, v);
+    rv_put_hex(BOOT_CAP_PRINT, v);
     puts("\n");
-    rv_halt(BOOT_CAP_DEBUG, 2);
+    rv_halt(BOOT_CAP_HALT, 2);
     return 0;
 }

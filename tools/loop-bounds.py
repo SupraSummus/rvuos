@@ -51,7 +51,7 @@ from ksource import Source, counted, symbolize
 # Where a trap enters: RISC-V's vectors are code that jumps to trap_entry,
 # ARMv7-M's a table of addresses, whose entries past the stack and the reset are, see entries.
 ENTRIES = {"trap_vectors"}
-# The self-check walks every object by design and runs only while OP_DEBUG_TRACE is on:
+# The self-check walks every object by design and runs only while OP_TEST_TRACE is on:
 # each cut, and the variable every call to it must be guarded by.
 CUTS = {"selfcheck_run": "debug_trace"}
 # What a paid loop may take away, as host/work.c counts it.

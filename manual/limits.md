@@ -12,7 +12,7 @@ Chapters 10 and 11 of the user manual; [`MANUAL.md`](../MANUAL.md) has its conte
 | minimum PMP entries to boot | 4 | `kernel/main.c` |
 | slots per `CapTable` | 1 to 1024 | `CAPTABLE_MAX_SLOTS` |
 | a slot number | `SLOT_IN(table slot, index)`: the table slot from bit 10 up, the index below | `SLOT_TABLE_SHIFT` |
-| root task's table | 46 slots past the boot capabilities, 64 in all on QEMU | `ROOT_TABLE_SLOTS` |
+| root task's table | 46 slots past the boot capabilities, 66 in all on QEMU | `ROOT_TABLE_SLOTS` |
 | boot pool | 4 KiB | `BOOT_POOL_SIZE` in `kernel/layout.h` |
 | smallest pool | 64 bytes | `POOL_MIN_SIZE` |
 | object alignment | 8 bytes | `OBJ_ALIGN` |

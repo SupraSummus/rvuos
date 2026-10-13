@@ -137,6 +137,7 @@ class Namer:
         self.types = {v: n for n, v in num.items()
                       if n.startswith("CAP_") and n != "CAP_NONE" and re.fullmatch(r"CAP_[A-Z_]+", n)}
         self.free = num["REPLAY_CAP_FREE"]
+        self.table_slots = value(names["REPLAY_TABLE_SLOTS"], names)
         self.rights = [(num[n], n) for n in ("RIGHT_R", "RIGHT_W", "RIGHT_X")]
         self.all_rights = num["RIGHT_ALL"]
         self.num = num
@@ -148,6 +149,8 @@ class Namer:
     def slot(self, v):
         table, index = v >> self.shift, v & ((1 << self.shift) - 1)
         name = self.slots.get(index)
+        if index == self.table_slots:
+            name = "REPLAY_TABLE_SLOTS"
         if name is None:
             free = index - self.free
             name = f"REPLAY_CAP_FREE+{free}" if 0 <= free < self.num["REPLAY_CAP_THIRD"] - self.free else str(index)

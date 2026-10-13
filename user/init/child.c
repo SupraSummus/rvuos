@@ -15,12 +15,12 @@ void child_main(void)
 {
     uint32_t base, size, bits;
 
-    rv_puts(CHILD_DEBUG, "child: started\n");
+    rv_puts(CHILD_PRINT, "child: started\n");
     /* Its log writes and does no more: the machine is not the child's to stop. */
-    rv_puts(CHILD_DEBUG, rv_invoke(OP_DEBUG_HALT, CHILD_DEBUG, 3, 0, 0) == KERR_NO_RIGHTS ? "child: may not halt ok\n"
-                                                                                       : "child: may not halt FAILED\n");
+    rv_puts(CHILD_PRINT, rv_invoke(OP_HALT, CHILD_PRINT, 3, 0, 0) == KERR_WRONG_TYPE ? "child: may not halt ok\n"
+                                                                                        : "child: may not halt FAILED\n");
     if (rv_frame_info(CHILD_SHARED, &base, &size) != KERR_OK) {
-        rv_puts(CHILD_DEBUG, "child: no shared region FAILED\n");
+        rv_puts(CHILD_PRINT, "child: no shared region FAILED\n");
         for (;;) {
             rv_wait(CHILD_DOWN, &bits);
         }
@@ -31,7 +31,7 @@ void child_main(void)
     rv_signal(CHILD_UP, BIT_REQUEST);
 
     rv_wait(CHILD_DOWN, &bits);
-    rv_puts(CHILD_DEBUG,
+    rv_puts(CHILD_PRINT,
             bits == BIT_REPLY && shared[SHARED_ANSWER] == MAGIC + 1 ? "child: reply ok\n"
                                                                     : "child: reply FAILED\n");
 
@@ -49,7 +49,7 @@ void child_main(void)
      * and which this thread never touches.
      */
     rv_wait(CHILD_DOWN, &bits);
-    rv_puts(CHILD_DEBUG,
+    rv_puts(CHILD_PRINT,
             bits == BIT_CHECK && rv_signal(CHILD_DOOMED, BIT_REQUEST) == KERR_INVALID_CAP
                 ? "child: revoked here too\n"
                 : "child: revoked here too FAILED\n");
@@ -62,7 +62,7 @@ void child_main(void)
      * the mapping is checked from the root task's side, since touching it here would fault.
      */
     rv_wait(CHILD_DOWN, &bits);
-    rv_puts(CHILD_DEBUG,
+    rv_puts(CHILD_PRINT,
             bits == BIT_LEASE && rv_frame_info(CHILD_LEASE, &base, &size) == KERR_INVALID_CAP
                 ? "child: lease revoked here too\n"
                 : "child: lease revoked here too FAILED\n");
@@ -75,7 +75,7 @@ void child_main(void)
      * or the memory would carry kernel objects nobody can reach.
      */
     rv_wait(CHILD_DOWN, &bits);
-    rv_puts(CHILD_DEBUG,
+    rv_puts(CHILD_PRINT,
             bits == BIT_POOL &&
                     rv_retype(CHILD_LENT, CAP_POOL, CHILD_LENT_POOL, &base) == KERR_OK &&
                     rv_pool_alloc(CHILD_LENT_POOL, CAP_NOTIFICATION, CHILD_OWN_NTFN, 0) ==

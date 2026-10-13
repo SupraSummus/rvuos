@@ -30,7 +30,7 @@ extern const char last_at[];
 
 static void puts(const char *s)
 {
-    rv_puts(BOOT_CAP_DEBUG, s);
+    rv_puts(BOOT_CAP_PRINT, s);
 }
 
 int main(void);
@@ -38,17 +38,17 @@ int main(void)
 {
     uint32_t sp = (uint32_t)(uintptr_t)__kernel_start + HW_FRAME;
     puts("escape: calling with sp ");
-    rv_put_hex(BOOT_CAP_DEBUG, sp);
+    rv_put_hex(BOOT_CAP_PRINT, sp);
     puts(" in the kernel, after the call that returns at ");
-    rv_put_hex(BOOT_CAP_DEBUG, (uint32_t)(uintptr_t)last_at);
+    rv_put_hex(BOOT_CAP_PRINT, (uint32_t)(uintptr_t)last_at);
     puts(", expecting a fault");
 
-    /* The line's end, OP_DEBUG_WRITE, and the same call again from the kernel's memory; nothing goes on after it. */
-    register uint32_t r_a0 __asm__(RV_A0) = BOOT_CAP_DEBUG;
+    /* The line's end, OP_PRINT, and the same call again from the kernel's memory; nothing goes on after it. */
+    register uint32_t r_a0 __asm__(RV_A0) = BOOT_CAP_PRINT;
     register uint32_t r_a1 __asm__(RV_A1) = '\n';
     register uint32_t r_a2 __asm__(RV_A2) = 0;
     register uint32_t r_a3 __asm__(RV_A3) = 0;
-    register uint32_t r_a7 __asm__(RV_A7) = OP_DEBUG_WRITE;
+    register uint32_t r_a7 __asm__(RV_A7) = OP_PRINT;
     __asm__ volatile(RV_CALL "\n.globl last_at\nlast_at:\n\tmov sp, %5\n\t" RV_CALL "\n\tudf #0"
                      : "+r"(r_a0), "+r"(r_a1), "+r"(r_a2), "+r"(r_a3)
                      : "r"(r_a7), "r"(sp)

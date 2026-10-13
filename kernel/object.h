@@ -296,14 +296,14 @@ _Static_assert(sizeof(struct irq) == 20 + sizeof(struct cap), "object layout");
 
 /*
  * True if a capability of this type names a kernel object.
- * Frames, Untypeds, interrupt lines, units of time and the clock name hardware, and the debug capability nothing,
+ * Frames, Untypeds, interrupt lines, units of time and the clock name hardware, and Print, Halt and Test nothing,
  * so they carry no address to check.
  */
 static inline bool cap_has_object(uint8_t type)
 {
     return type != CAP_NONE && type != CAP_FRAME && type != CAP_UNTYPED && type != CAP_IRQ_LINE &&
-           type != CAP_DEBUG && type != CAP_CLOCK && type != CAP_INSTALLED && type != CAP_TIME &&
-           type != CAP_BOUND;
+           type != CAP_PRINT && type != CAP_HALT && type != CAP_TEST && type != CAP_CLOCK && type != CAP_INSTALLED &&
+           type != CAP_TIME && type != CAP_BOUND;
 }
 
 /*
@@ -649,11 +649,11 @@ bool cap_revoke_below(struct cap *node, uint32_t through, bool preempt);
  */
 bool cap_revoke_step(struct cap *root);
 
-/* Whether a preemptible walk that has done a step stops before its next; see intr_pending and OP_DEBUG_PREEMPT. */
+/* Whether a preemptible walk that has done a step stops before its next; see intr_pending and OP_TEST_PREEMPT. */
 bool cap_stop_here(bool preempt);
 
 /*
- * OP_DEBUG_PREEMPT's count of the places a walk may stop before the one it stops at, 0 when disarmed;
+ * OP_TEST_PREEMPT's count of the places a walk may stop before the one it stops at, 0 when disarmed;
  * the walk that stops there marks its core's preempt_stopped.
  */
 extern uint32_t preempt_countdown;
@@ -713,7 +713,7 @@ void fault_dispatch(struct thread *t);
 /* Run every invariant in DESIGN.md, "Properties". Calls selfcheck_fail() on the first violation. */
 void selfcheck_run(void);
 
-/* Set by OP_DEBUG_TRACE: print each system call and run the self-check after it. */
+/* Set by OP_TEST_TRACE: print each system call and run the self-check after it. */
 extern bool debug_trace;
 
 /* Walk one pool's objects, the descriptor excluded. Returns NULL at the end. */

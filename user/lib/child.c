@@ -56,7 +56,7 @@ static uint32_t build(struct self *s, struct child *c, uint32_t table_slots, uin
     PASS(bit_new(s, &c->bit_fault));
     PASS(give_bits(s, c->table, CHILD_PARENT, s->inbox, c->bit_page));
     TRY(s, "give a child its process", rv_cap_copy(c->table, CHILD_SELF, c->process, RIGHT_W));
-    TRY(s, "give a child the log, to write", rv_cap_copy(c->table, CHILD_LOG, s->debug, RIGHT_W));
+    TRY(s, "give a child the log, to write", rv_cap_copy(c->table, CHILD_LOG, s->print, RIGHT_W));
 
     if (c->in_room) {
         c->region = s->room_region;
@@ -361,7 +361,7 @@ void child_self(struct self *s, const struct child_own *o)
     s->timer_lines = o->timer_lines;
     s->timer_line_count = o->timer_line_count;
     s->time = o->time;
-    s->debug = CHILD_LOG;
+    s->print = CHILD_LOG;
     s->slot_first = o->slot_first;
     s->slot_end = o->slot_end;
     s->regions = ~0u;

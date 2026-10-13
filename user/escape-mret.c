@@ -18,20 +18,20 @@ extern const char mret_at[];
 
 static void puts(const char *s)
 {
-    rv_puts(BOOT_CAP_DEBUG, s);
+    rv_puts(BOOT_CAP_PRINT, s);
 }
 
 int main(void);
 int main(void)
 {
     puts("escape: running mret in user mode at ");
-    rv_put_hex(BOOT_CAP_DEBUG, (uint32_t)(uintptr_t)mret_at);
+    rv_put_hex(BOOT_CAP_PRINT, (uint32_t)(uintptr_t)mret_at);
     puts(", expecting a fault\n");
 
     __asm__ volatile(".globl mret_at\nmret_at:\n\tmret" : : : "memory");
 
     /* Not reached when user mode may not run a machine-mode instruction. */
     puts("escape: breached, ran mret\n");
-    rv_halt(BOOT_CAP_DEBUG, 2);
+    rv_halt(BOOT_CAP_HALT, 2);
     return 0;
 }

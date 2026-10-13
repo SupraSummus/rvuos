@@ -23,7 +23,7 @@ extern const char load_at[];
 
 static void puts(const char *s)
 {
-    rv_puts(BOOT_CAP_DEBUG, s);
+    rv_puts(BOOT_CAP_PRINT, s);
 }
 
 int main(void);
@@ -32,14 +32,14 @@ int main(void)
     uint32_t base, size;
     if (rv_frame_info(BOOT_CAP_DATA, &base, &size) != KERR_OK) {
         puts("escape: data info: FAILED\n");
-        rv_halt(BOOT_CAP_DEBUG, 3);
+        rv_halt(BOOT_CAP_HALT, 3);
     }
     uint32_t addr = base + size - 2;
 
     puts("escape: reading across the end of the data region from ");
-    rv_put_hex(BOOT_CAP_DEBUG, addr);
+    rv_put_hex(BOOT_CAP_PRINT, addr);
     puts(" at ");
-    rv_put_hex(BOOT_CAP_DEBUG, (uint32_t)(uintptr_t)load_at);
+    rv_put_hex(BOOT_CAP_PRINT, (uint32_t)(uintptr_t)load_at);
     puts(", expecting a fault\n");
 
     uint32_t v;
@@ -47,8 +47,8 @@ int main(void)
 
     /* Not reached when PMP stops the part past the region. */
     puts("escape: breached, read past the data region ");
-    rv_put_hex(BOOT_CAP_DEBUG, v);
+    rv_put_hex(BOOT_CAP_PRINT, v);
     puts("\n");
-    rv_halt(BOOT_CAP_DEBUG, 2);
+    rv_halt(BOOT_CAP_HALT, 2);
     return 0;
 }

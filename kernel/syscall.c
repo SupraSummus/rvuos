@@ -42,32 +42,33 @@ static bool holds_caller(struct thread *t, const struct captable *named, uint32_
     return false;
 }
 
-/* The bytes of a1 to a3 into the log, the lowest of a1 first, up to the first zero. */
-static void debug_write(const uint32_t *arg)
+/* Into the log: the bytes of a1 to a3, the lowest of a1 first, up to the first zero; dispatch checked the type. */
+static int op_print(const uint32_t *arg)
 {
-    for (unsigned i = 0; i < DEBUG_WRITE_BYTES; i++) {
-        LOOP_BOUND(DEBUG_WRITE_BYTES);
+    for (unsigned i = 0; i < PRINT_BYTES; i++) {
+        LOOP_BOUND(PRINT_BYTES);
         char c = (char)(arg[1 + i / 4] >> (8 * (i % 4)));
         if (c == '\0') {
-            return;
+            break;
         }
         kputc(c);
     }
+    return KERR_OK;
 }
 
-/* Writing into the log takes RIGHT_W, and the rest, which halts or drives the machine, RIGHT_X; see op_shapes. */
-static int op_debug(uint32_t op, const uint32_t *arg)
+/* Halt's one operation, the type checked in dispatch. */
+static int op_halt(const uint32_t *arg)
+{
+    kputs("user halt with code ");
+    kput_hex(arg[1]);
+    kputc('\n');
+    khalt((int)arg[1]);
+}
+
+static int op_test(uint32_t op, const uint32_t *arg)
 {
     switch (op) {
-    case OP_DEBUG_WRITE:
-        debug_write(arg);
-        return KERR_OK;
-    case OP_DEBUG_HALT:
-        kputs("user halt with code ");
-        kput_hex(arg[1]);
-        kputc('\n');
-        khalt((int)arg[1]);
-    case OP_DEBUG_TRACE:
+    case OP_TEST_TRACE:
         /*
          * The host boots with full accounts, and the target has run a while before its first traced call.
          * Once tracing is on the call changes nothing, or it would fill an account at will.
@@ -77,17 +78,17 @@ static int op_debug(uint32_t op, const uint32_t *arg)
             sched_accounts_fill();
         }
         return KERR_OK;
-    case OP_DEBUG_TICK:
+    case OP_TEST_TICK:
         /* The caller's status is written to its own frame, whoever runs next. */
         sched_tick(1);
         return KERR_OK;
-    case OP_DEBUG_IRQ:
+    case OP_TEST_IRQ:
         /* The log's line is not a device's: its level is the log's, and no record fires it. */
         if (arg[1] == LOG_IRQ_LINE || arg[1] >= IRQ_LINES) {
             return KERR_INVALID_ARG;
         }
         return sched_interrupt(arg[1]) ? KERR_OK : KERR_STATE;
-    case OP_DEBUG_PREEMPT:
+    case OP_TEST_PREEMPT:
         preempt_countdown = arg[1];
         return KERR_OK;
     default:
@@ -942,7 +943,7 @@ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *a
         arg[4] = TIMER_US_PER_TICK;
         break;
     default:
-        /* A thread and the debug capability tell nothing more. */
+        /* A thread, Print, Halt and Test tell nothing more. */
         break;
     }
     arg[1] = cap->type | (uint32_t)cap->rights << 8;
@@ -967,12 +968,12 @@ struct op_shape {
     uint8_t reads;
 };
 static const struct op_shape op_shapes[OP_COUNT] = {
-    [OP_DEBUG_WRITE] = { CAP_DEBUG, RIGHT_W, SHAPE_A123 },
-    [OP_DEBUG_HALT] = { CAP_DEBUG, RIGHT_X, SHAPE_A1 },
-    [OP_DEBUG_TRACE] = { CAP_DEBUG, RIGHT_X, 0 },
-    [OP_DEBUG_TICK] = { CAP_DEBUG, RIGHT_X, 0 },
-    [OP_DEBUG_IRQ] = { CAP_DEBUG, RIGHT_X, SHAPE_A1 },
-    [OP_DEBUG_PREEMPT] = { CAP_DEBUG, RIGHT_X, SHAPE_A1 },
+    [OP_PRINT] = { CAP_PRINT, RIGHT_W, SHAPE_A123 },
+    [OP_HALT] = { CAP_HALT, RIGHT_W, SHAPE_A1 },
+    [OP_TEST_TRACE] = { CAP_TEST, RIGHT_W, 0 },
+    [OP_TEST_TICK] = { CAP_TEST, RIGHT_W, 0 },
+    [OP_TEST_IRQ] = { CAP_TEST, RIGHT_W, SHAPE_A1 },
+    [OP_TEST_PREEMPT] = { CAP_TEST, RIGHT_W, SHAPE_A1 },
     [OP_CAP_COPY] = { CAP_CAPTABLE, RIGHT_W, SHAPE_A123 | SHAPE_RIGHTS_A3 },
     [OP_CAP_DELETE] = { CAP_CAPTABLE, RIGHT_W, SHAPE_A1 },
     [OP_CAP_REVOKE] = { CAP_CAPTABLE, RIGHT_W, SHAPE_A1 },
@@ -1077,8 +1078,14 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
     }
 
     switch (cap.type) {
-    case CAP_DEBUG:
-        err = op_debug(op, arg);
+    case CAP_PRINT:
+        err = op_print(arg);
+        break;
+    case CAP_HALT:
+        err = op_halt(arg);
+        break;
+    case CAP_TEST:
+        err = op_test(op, arg);
         break;
     case CAP_FRAME:
         err = op_frame(t, slot, &cap, op, arg);
@@ -1169,7 +1176,7 @@ void syscall_dispatch(struct thread *t)
         trace_wake();
     }
     /*
-     * The stop OP_DEBUG_PREEMPT armed is where the tick lands, as OP_DEBUG_TICK does it:
+     * The stop OP_TEST_PREEMPT armed is where the tick lands, as OP_TEST_TICK does it:
      * the caller stays at its call instruction, ready, and the next thread has its turn.
      * Whatever the call's attempt woke is left untraced, as a stopped attempt's always is.
      */

@@ -98,13 +98,13 @@ static uint32_t fault_tell(uint32_t *pc)
         return err;
     }
     puts("the prober's fault: cause=");
-    rv_put_hex(BOOT_CAP_DEBUG, cause);
+    rv_put_hex(BOOT_CAP_PRINT, cause);
     puts(" pc=");
-    rv_put_hex(BOOT_CAP_DEBUG, *pc);
+    rv_put_hex(BOOT_CAP_PRINT, *pc);
     puts(" addr=");
-    rv_put_hex(BOOT_CAP_DEBUG, addr);
+    rv_put_hex(BOOT_CAP_PRINT, addr);
     puts(" status=");
-    rv_put_hex(BOOT_CAP_DEBUG, status);
+    rv_put_hex(BOOT_CAP_PRINT, status);
     puts("\n");
     return KERR_OK;
 }
@@ -179,7 +179,7 @@ static __attribute__((noreturn)) void successor_main(void)
      * so the halt writes it out; tests/run.sh reads it there.
      */
     puts("reading the removed region at ");
-    rv_put_hex(BOOT_CAP_DEBUG, base);
+    rv_put_hex(BOOT_CAP_PRINT, base);
     puts(", expecting a fault\n");
     expect("start the prober", rv_invoke(OP_THREAD_RESUME, SLOT_PROBER, 0, 0, 0));
     expect("hear its fault", fault_wait());
@@ -250,7 +250,7 @@ static __attribute__((noreturn)) void successor_main(void)
     puts("root: watchdog fed ok\n");
     expect("sleep past the watchdog", sleep_us(2 * WATCHDOG_US));
     puts("root: the watchdog let the machine run\n");
-    rv_halt(BOOT_CAP_DEBUG, 0);
+    rv_halt(BOOT_CAP_HALT, 0);
 }
 
 /*
@@ -295,7 +295,7 @@ __attribute__((noreturn)) void hand_over(uint32_t sp)
            rv_pool_alloc(BOOT_CAP_POOL, CAP_NOTIFICATION, SLOT_EXIT_NTFN, 0));
     expect("mark the user-mode csrs", csrs_mark() ? KERR_OK : KERR_INVALID_ARG);
 
-    /* From here on this thread holds no debug capability and says nothing; the empty slots fail. */
+    /* From here on this thread holds no Print capability and says nothing; the empty slots fail. */
     for (uint32_t slot = BOOT_CAP_NULL + 1; slot < ROOT_TABLE_SLOTS; slot++) {
         if (slot != SLOT_SUCC_TABLE && slot != SLOT_EXIT_NTFN) {
             rv_invoke(OP_CAP_MOVE, SLOT_SUCC_TABLE, slot, slot, 0);

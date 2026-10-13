@@ -29,4 +29,4 @@ diff --git a/kernel/syscall.c b/kernel/syscall.c
 +    return range_contains(base, size, named->hdr.pool);
  }
  
- /* The bytes of a1 to a3 into the log, the lowest of a1 first, up to the first zero. */
+ /* Into the log: the bytes of a1 to a3, the lowest of a1 first, up to the first zero; dispatch checked the type. */
