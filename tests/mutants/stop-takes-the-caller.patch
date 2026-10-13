@@ -8,10 +8,10 @@ Report: a thread stopped that no stop named, nor its own fault nor the loss of i
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -508,7 +508,7 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
-         if ((arg[1] | arg[2] | arg[3]) != 0) {
-             return KERR_INVALID_ARG;
-         }
+@@ -521,7 +521,7 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
+         sched_ready(target);
+         return KERR_OK;
+     case OP_THREAD_STOP:
 -        arg[1] = sched_stop(target);
 +        arg[1] = sched_stop(t);
          return KERR_OK;

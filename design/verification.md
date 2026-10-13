@@ -218,6 +218,13 @@ with the rights its operation needs, as `include/rvuos/abi.h` lists them,
 and a signal sets only bits its capability may signal,
 in the notification or in the thread it wakes.
 
+**A refusal says the first check it fails.**
+A call that returns failed at the first of the checks the manual orders that it fails, if any does:
+a slot that names nothing, a type that does not take the operation, a right the capability lacks,
+or something nonzero in what the operation does not read, a rights mask's bits past `RIGHT_ALL` among it.
+`host/history.c` works out each from `host/ops.h`, the kernel's `op_shapes` aside,
+so the two tables are held to each other, and to `include/rvuos/abi.h`, through every refused call.
+
 **Memory crosses zeroed.**
 Every object that leaves the pools holds nothing but zeros,
 whether its pool went or a destroy stopped half way,
@@ -283,7 +290,7 @@ Any other status comes from a check before the room's and says nothing of it.
 The type is measured by the structures' own sizes, as `MANUAL.md` gives them, not by the kernel's `obj_type_size`,
 so an allocator and a walk that agree on a wrong size show too.
 
-These eleven relate the state before a call to the state after it,
+These twelve relate the state before a call to the state after it,
 so the self-check, which sees one state, cannot check them,
 and it gains no check for the last two: a description changes no state,
 and the self-check's tiling holds the sizes the allocator takes, `obj_type_size`'s, to those the walk steps by, `obj_size`'s.

@@ -55,12 +55,9 @@ static void debug_write(const uint32_t *arg)
     }
 }
 
-/* Writing into the log takes RIGHT_W, and the rest, which halts or drives the machine, RIGHT_X. */
-static int op_debug(const struct cap *cap, uint32_t op, const uint32_t *arg)
+/* Writing into the log takes RIGHT_W, and the rest, which halts or drives the machine, RIGHT_X; see op_shapes. */
+static int op_debug(uint32_t op, const uint32_t *arg)
 {
-    if (!(cap->rights & (op == OP_DEBUG_WRITE ? RIGHT_W : RIGHT_X))) {
-        return KERR_NO_RIGHTS;
-    }
     switch (op) {
     case OP_DEBUG_WRITE:
         debug_write(arg);
@@ -180,14 +177,11 @@ static uint32_t delay_deadline(uint32_t ticks)
 }
 
 /*
- * Reading the time and the counter's frame takes RIGHT_R, and the watchdog, which halts the machine, RIGHT_W.
+ * Reading the time and the counter's frame takes RIGHT_R, and the watchdog, which halts the machine, RIGHT_W; see op_shapes.
  * arg[1..] carry the arguments in and the results out.
  */
-static int op_clock(struct thread *t, uint32_t slot, const struct cap *cap, uint32_t op, uint32_t *arg)
+static int op_clock(struct thread *t, uint32_t slot, uint32_t op, uint32_t *arg)
 {
-    if (!(cap->rights & (op == OP_CLOCK_WATCHDOG ? RIGHT_W : RIGHT_R))) {
-        return KERR_NO_RIGHTS;
-    }
     switch (op) {
     case OP_CLOCK_READ: {
         uint64_t now = timer_now();
@@ -347,7 +341,7 @@ static int pool_info(const struct pool *pool, uint32_t *arg)
         type != CAP_IRQ && type != CAP_POOL) {
         return KERR_INVALID_ARG;
     }
-    if (arg[2] != 0 || (type == CAP_CAPTABLE ? slots == 0 || slots > CAPTABLE_MAX_SLOTS : slots != 0)) {
+    if (type == CAP_CAPTABLE ? slots == 0 || slots > CAPTABLE_MAX_SLOTS : slots != 0) {
         return KERR_INVALID_ARG;
     }
     arg[1] = obj_align((uint32_t)obj_type_size((uint8_t)type, slots));
@@ -527,10 +521,6 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
         sched_ready(target);
         return KERR_OK;
     case OP_THREAD_STOP:
-        /* Zero, so that they may mean something later. */
-        if ((arg[1] | arg[2] | arg[3]) != 0) {
-            return KERR_INVALID_ARG;
-        }
         arg[1] = sched_stop(target);
         return KERR_OK;
     case OP_THREAD_FAULT:
@@ -620,9 +610,6 @@ static int op_notification(struct thread *t, uint32_t slot, const struct cap *ca
 
     switch (op) {
     case OP_NOTIFY_SIGNAL: {
-        if (!(cap->rights & RIGHT_W)) {
-            return KERR_NO_RIGHTS;
-        }
         /* A wait never returns zero bits, so signalling none would be a lie. */
         if (arg[1] == 0) {
             return KERR_INVALID_ARG;
@@ -648,9 +635,6 @@ static int op_notification(struct thread *t, uint32_t slot, const struct cap *ca
         return slot_store(t, arg[2], &sub, slot_node(t, slot));
     }
     case OP_NOTIFY_WAIT:
-        if (!(cap->rights & RIGHT_R)) {
-            return KERR_NO_RIGHTS;
-        }
         if (ntfn->bits != 0) {
             arg[1] = ntfn->bits;
             ntfn->bits = 0;
@@ -659,7 +643,7 @@ static int op_notification(struct thread *t, uint32_t slot, const struct cap *ca
         sched_wait(t, ntfn);
         return KERR_BLOCKED;
     case OP_NOTIFY_LEND:
-        return (cap->rights & RIGHT_R) ? op_lend(t, ntfn, arg) : KERR_NO_RIGHTS;
+        return op_lend(t, ntfn, arg);
     default:
         return KERR_WRONG_TYPE;
     }
@@ -691,9 +675,6 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
     case OP_IRQ_CARVE:
         return carve_range(t, slot, cap, arg);
     case OP_IRQ_BIND: {
-        if (!(cap->rights & RIGHT_W)) {
-            return KERR_NO_RIGHTS;
-        }
         /* One Irq per line, so a binding names one line. */
         if (count != 1) {
             return KERR_INVALID_ARG;
@@ -758,9 +739,6 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
     case OP_TIME_CARVE:
         return carve_range(t, slot, cap, arg);
     case OP_TIME_BIND: {
-        if (!(cap->rights & RIGHT_W)) {
-            return KERR_NO_RIGHTS;
-        }
         struct cap tc;
         int err = slot_lookup_typed(t, arg[1], CAP_THREAD, RIGHT_W, &tc);
         if (err != KERR_OK) {
@@ -982,6 +960,106 @@ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *a
     return KERR_OK;
 }
 
+/*
+ * What dispatch checks of an operation before its handler, in the manual's order:
+ * the type it is invoked on, the right it needs, and zero in what of a1 to a3 it does not read.
+ * A code with no entry has type CAP_NONE, which no capability a slot resolves to has.
+ * A right of 0 is none, or one the handler decides by what the call asks: a retype into a pool takes RIGHT_R and RIGHT_W.
+ */
+#define SHAPE_A1 0x1
+#define SHAPE_A2 0x2
+#define SHAPE_A3 0x4
+#define SHAPE_A123 (SHAPE_A1 | SHAPE_A2 | SHAPE_A3)
+#define SHAPE_RIGHTS_A3 0x8 /* a3 is a rights mask, zero past RIGHT_ALL */
+#define SHAPE_VARIES 0x10   /* its own values decide what it reads; see shape_reads */
+struct op_shape {
+    uint8_t type;
+    uint8_t right;
+    uint8_t reads;
+};
+static const struct op_shape op_shapes[OP_COUNT] = {
+    [OP_DEBUG_WRITE] = { CAP_DEBUG, RIGHT_W, SHAPE_A123 },
+    [OP_DEBUG_HALT] = { CAP_DEBUG, RIGHT_X, SHAPE_A1 },
+    [OP_DEBUG_TRACE] = { CAP_DEBUG, RIGHT_X, 0 },
+    [OP_DEBUG_TICK] = { CAP_DEBUG, RIGHT_X, 0 },
+    [OP_DEBUG_IRQ] = { CAP_DEBUG, RIGHT_X, SHAPE_A1 },
+    [OP_DEBUG_PREEMPT] = { CAP_DEBUG, RIGHT_X, SHAPE_A1 },
+    [OP_CAP_COPY] = { CAP_CAPTABLE, RIGHT_W, SHAPE_A123 | SHAPE_RIGHTS_A3 },
+    [OP_CAP_DELETE] = { CAP_CAPTABLE, RIGHT_W, SHAPE_A1 },
+    [OP_CAP_REVOKE] = { CAP_CAPTABLE, RIGHT_W, SHAPE_A1 },
+    [OP_CAP_DERIVE] = { CAP_CAPTABLE, RIGHT_W, SHAPE_A123 | SHAPE_RIGHTS_A3 },
+    [OP_CAP_MOVE] = { CAP_CAPTABLE, RIGHT_W, SHAPE_A1 | SHAPE_A2 },
+    [OP_FRAME_INFO] = { CAP_FRAME, 0, 0 },
+    [OP_FRAME_CARVE] = { CAP_FRAME, 0, SHAPE_A123 },
+    [OP_UNTYPED_INFO] = { CAP_UNTYPED, 0, 0 },
+    [OP_UNTYPED_RETYPE] = { CAP_UNTYPED, 0, SHAPE_A1 | SHAPE_A2 },
+    [OP_UNTYPED_SPLIT] = { CAP_UNTYPED, 0, SHAPE_A1 | SHAPE_A2 },
+    [OP_POOL_ALLOC] = { CAP_POOL, RIGHT_W, SHAPE_A123 | SHAPE_VARIES },
+    [OP_POOL_INFO] = { CAP_POOL, 0, SHAPE_A1 | SHAPE_A3 },
+    [OP_PROCESS_INSTALL] = { CAP_PROCESS, RIGHT_W, SHAPE_A123 | SHAPE_RIGHTS_A3 },
+    [OP_PROCESS_UNINSTALL] = { CAP_PROCESS, RIGHT_W, SHAPE_A1 },
+    [OP_PROCESS_MOUNT] = { CAP_PROCESS, RIGHT_W, SHAPE_A1 | SHAPE_A2 },
+    [OP_PROCESS_UNMOUNT] = { CAP_PROCESS, RIGHT_W, SHAPE_A1 },
+    [OP_THREAD_CONFIGURE] = { CAP_THREAD, RIGHT_W, SHAPE_A123 },
+    [OP_THREAD_RESUME] = { CAP_THREAD, RIGHT_W, 0 },
+    [OP_THREAD_STOP] = { CAP_THREAD, RIGHT_W, 0 },
+    [OP_THREAD_WATCH] = { CAP_THREAD, RIGHT_W, SHAPE_A1 | SHAPE_A2 | SHAPE_VARIES },
+    [OP_THREAD_FAULT] = { CAP_THREAD, RIGHT_W, 0 },
+    [OP_THREAD_READ_REG] = { CAP_THREAD, RIGHT_W, SHAPE_A1 },
+    [OP_THREAD_WRITE_REG] = { CAP_THREAD, RIGHT_W, SHAPE_A1 | SHAPE_A2 },
+    [OP_NOTIFY_SIGNAL] = { CAP_NOTIFICATION, RIGHT_W, SHAPE_A1 },
+    [OP_NOTIFY_WAIT] = { CAP_NOTIFICATION, RIGHT_R, 0 },
+    [OP_NOTIFY_LEND] = { CAP_NOTIFICATION, RIGHT_R, SHAPE_A1 },
+    [OP_NOTIFY_CARVE] = { CAP_NOTIFICATION, 0, SHAPE_A1 | SHAPE_A2 },
+    [OP_IRQ_CARVE] = { CAP_IRQ_LINE, 0, SHAPE_A123 },
+    [OP_IRQ_BIND] = { CAP_IRQ_LINE, RIGHT_W, SHAPE_A123 },
+    [OP_IRQ_SET] = { CAP_IRQ, RIGHT_W, SHAPE_A123 | SHAPE_VARIES },
+    [OP_CLOCK_READ] = { CAP_CLOCK, RIGHT_R, 0 },
+    [OP_CLOCK_FRAME] = { CAP_CLOCK, RIGHT_R, SHAPE_A1 },
+    [OP_CLOCK_WATCHDOG] = { CAP_CLOCK, RIGHT_W, SHAPE_A1 },
+    [OP_TIME_CARVE] = { CAP_TIME, 0, SHAPE_A123 },
+    [OP_TIME_BIND] = { CAP_TIME, RIGHT_W, SHAPE_A123 },
+};
+
+/*
+ * What of a1 to a3 an operation reads, by its shape and, for three, its own values:
+ * an allocation of a notification reads no a3, a watch with no bits no a1,
+ * and a set with no bits, or of a line that is no timer's, no a2 or a3.
+ */
+static uint8_t shape_reads(uint32_t op, const struct cap *cap, const uint32_t *arg, uint8_t reads)
+{
+    switch (op) {
+    case OP_POOL_ALLOC:
+        return arg[1] == CAP_NOTIFICATION ? reads & (uint8_t)~SHAPE_A3 : reads;
+    case OP_THREAD_WATCH:
+        return arg[2] == 0 ? reads & (uint8_t)~SHAPE_A1 : reads;
+    case OP_IRQ_SET: {
+        const struct irq *irq = (const struct irq *)cap_object(cap);
+        return arg[1] == 0 || !line_is_timer(irq->line) ? reads & (uint8_t)~(SHAPE_A2 | SHAPE_A3) : reads;
+    }
+    default:
+        return reads;
+    }
+}
+
+static int shape_check(uint32_t op, const struct cap *cap, const uint32_t *arg)
+{
+    const struct op_shape *shape = op < OP_COUNT ? &op_shapes[op] : NULL;
+    if (shape == NULL || shape->type != cap->type) {
+        return KERR_WRONG_TYPE;
+    }
+    if ((cap->rights & shape->right) != shape->right) {
+        return KERR_NO_RIGHTS;
+    }
+    uint8_t reads = shape->reads;
+    if (reads & SHAPE_VARIES) {
+        reads = shape_reads(op, cap, arg, reads);
+    }
+    uint32_t unread = ((reads & SHAPE_A1) ? 0 : arg[1]) | ((reads & SHAPE_A2) ? 0 : arg[2]) |
+                      ((reads & SHAPE_A3) ? 0 : arg[3]) | ((reads & SHAPE_RIGHTS_A3) ? arg[3] & ~(uint32_t)RIGHT_ALL : 0);
+    return unread != 0 ? KERR_INVALID_ARG : KERR_OK;
+}
+
 static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
 {
     /*
@@ -1005,15 +1083,15 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
         return cap_info(&cap, arg);
     }
 
-    /*
-     * Operations that change an object need RIGHT_W on it, but for a pool's telling what an allocation would take.
-     * Frames, Untypeds, interrupt lines, units of time, notifications, the debug capability and the clock
-     * are checked in their handlers,
-     * because which right they need depends on the operation.
-     */
+    /* The type it is invoked on, the right it needs, and zero in what it does not read; see op_shapes. */
+    err = shape_check(op, &cap, arg);
+    if (err != KERR_OK) {
+        return err;
+    }
+
     switch (cap.type) {
     case CAP_DEBUG:
-        err = op_debug(&cap, op, arg);
+        err = op_debug(op, arg);
         break;
     case CAP_FRAME:
         err = op_frame(t, slot, &cap, op, arg);
@@ -1022,19 +1100,19 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
         err = op_untyped(t, slot, &cap, op, arg);
         break;
     case CAP_CLOCK:
-        err = op_clock(t, slot, &cap, op, arg);
+        err = op_clock(t, slot, op, arg);
         break;
     case CAP_CAPTABLE:
-        err = (cap.rights & RIGHT_W) ? op_captable(t, slot, &cap, op, arg) : KERR_NO_RIGHTS;
+        err = op_captable(t, slot, &cap, op, arg);
         break;
     case CAP_POOL:
-        err = (op == OP_POOL_INFO || (cap.rights & RIGHT_W)) ? op_pool(t, slot, &cap, op, arg) : KERR_NO_RIGHTS;
+        err = op_pool(t, slot, &cap, op, arg);
         break;
     case CAP_PROCESS:
-        err = (cap.rights & RIGHT_W) ? op_process(t, &cap, op, arg) : KERR_NO_RIGHTS;
+        err = op_process(t, &cap, op, arg);
         break;
     case CAP_THREAD:
-        err = (cap.rights & RIGHT_W) ? op_thread(t, &cap, op, arg) : KERR_NO_RIGHTS;
+        err = op_thread(t, &cap, op, arg);
         break;
     case CAP_NOTIFICATION:
         err = op_notification(t, slot, &cap, op, arg);
@@ -1043,7 +1121,7 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
         err = op_irq_line(t, slot, &cap, op, arg);
         break;
     case CAP_IRQ:
-        err = (cap.rights & RIGHT_W) ? op_irq(&cap, op, arg) : KERR_NO_RIGHTS;
+        err = op_irq(&cap, op, arg);
         break;
     case CAP_TIME:
         err = op_time(t, slot, &cap, op, arg);

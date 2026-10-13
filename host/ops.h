@@ -2,9 +2,9 @@
 #define RVUOS_HOST_OPS_H
 
 /*
- * What each record's fields mean, for the mutator and for printing a record by name.
- * Only the mutator's: an entry that is wrong draws worse arguments for its operation
- * and hides nothing, since every record still reaches the kernel as it is.
+ * What each record's fields mean, for the mutator and for printing a record by name,
+ * and, to host/history.c, what each operation is invoked on and which arguments it leaves unread,
+ * written apart from the kernel's op_shapes so that each holds the other.
  */
 
 #include <stdint.h>

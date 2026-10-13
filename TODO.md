@@ -575,22 +575,6 @@ what is left:
 
 What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
 
-- The kernel ignores the arguments an operation does not use, and never reads `a4` to `a6`, which `rv_invoke` leaves as they were,
-  so no unused argument can be given a meaning later without changing what a program that left garbage there does.
-  `OP_THREAD_STOP`, `OP_CAP_INFO` and `OP_POOL_INFO` alone refuse an argument they do not take.
-  A design for decision 31's one change:
-  one constant table in `kernel/syscall.c`, `op_shapes[OP_COUNT]`, gives each operation a mask of the types it is invoked on,
-  so that one describing every type fits, the right it needs, and which of `a1` to `a3` it reads,
-  with a flag for the three whose own values decide what they read:
-  `OP_POOL_ALLOC` of a notification, `OP_THREAD_WATCH` with no bits, `OP_IRQ_SET` with no bits or off a timer line;
-  `dispatch` checks in the manual's order, the slot, the type, the right, then every unread argument and every unread bit zero,
-  the high bits of a rights mask among them, else `KERR_INVALID_ARG`,
-  so a foreign operation on a capability without its right is `KERR_WRONG_TYPE` where it is `KERR_NO_RIGHTS` today;
-  `a4` to `a6` stay unread by every operation until the replay record carries them;
-  the wrappers of `user/rvuos.h` that take results in `a1` to `a3`, and `start.S`'s halts, pass zero in what they do not set;
-  `host/history.c` holds every refused call to the status of its first failing check, an oracle of the order;
-  and the 74 records of 46 corpus inputs that carry garbage are zeroed once, which today's kernel takes as they were,
-  a seed that reads a fault and a register added, since those records are the only ones that do.
 - The breaking changes decision 31 lists, in one change with the seeds and the corpus written anew once.
 
 ## Code

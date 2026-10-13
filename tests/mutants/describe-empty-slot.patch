@@ -6,7 +6,7 @@ Report: a describing call described a slot that names nothing
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -998,7 +998,7 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
+@@ -1076,7 +1076,7 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
      struct cap cap;
      int err = cap_lookup(table, slot_index(slot), &cap);
      if (err != KERR_OK) {

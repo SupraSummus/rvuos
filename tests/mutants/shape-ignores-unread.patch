@@ -1,0 +1,20 @@
+dispatch lets garbage through in what an operation does not read, as the kernel did before,
+so no unread argument could be given a meaning later;
+a refused call fails at the first check it fails, the unread arguments' among them.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a refused call did not fail at the first check it fails
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -1055,8 +1055,7 @@ static int shape_check(uint32_t op, const struct cap *cap, const uint32_t *arg)
+     if (reads & SHAPE_VARIES) {
+         reads = shape_reads(op, cap, arg, reads);
+     }
+-    uint32_t unread = ((reads & SHAPE_A1) ? 0 : arg[1]) | ((reads & SHAPE_A2) ? 0 : arg[2]) |
+-                      ((reads & SHAPE_A3) ? 0 : arg[3]) | ((reads & SHAPE_RIGHTS_A3) ? arg[3] & ~(uint32_t)RIGHT_ALL : 0);
++    uint32_t unread = (reads & SHAPE_RIGHTS_A3) ? arg[3] & ~(uint32_t)RIGHT_ALL : 0;
+     return unread != 0 ? KERR_INVALID_ARG : KERR_OK;
+ }
+ 

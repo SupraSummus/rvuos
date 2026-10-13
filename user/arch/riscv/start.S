@@ -30,10 +30,12 @@ _start:
     j       3b
 4:
     call    main
-    /* main must not return; halt through the boot debug capability. */
+    /* main must not return; halt through the boot debug capability, with nothing in what it does not read. */
     li      a7, OP_DEBUG_HALT
     li      a0, BOOT_CAP_DEBUG
     li      a1, 1
+    li      a2, 0
+    li      a3, 0
     ecall
 5:
     j       5b
