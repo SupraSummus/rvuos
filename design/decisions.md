@@ -511,6 +511,9 @@ until the maintainer decides otherwise.
     so that an argument unread today may mean something later without changing what a program that left it does;
     a foreign operation on a capability without its right is `KERR_WRONG_TYPE` since, where it was `KERR_NO_RIGHTS`.
     `a4` to `a6` stay unread, and unchecked until the replay's record carries them, below.
+    The next took the two older descriptions, `OP_FRAME_INFO` and `OP_UNTYPED_INFO`,
+    whose wrappers read `OP_CAP_INFO` since, so a program built against them changed only by being built again;
+    their codes, 11 and 27, are no operation's.
     The rest below would break a binary built against today's ABI.
     The seeds are text that names the operations, slots, types and rights it calls, `tools/seed.py`,
     so each goes in a change of its own, which rebuilds them,
@@ -531,11 +534,6 @@ until the maintainer decides otherwise.
       Codes grouped by type, with the tests' in a range of their own that a stable program never calls,
       would keep `KERR_WRONG_TYPE` and say which calls the ABI promises;
       the describing calls, 41 and 42, came last, and every type takes the first.
-    - **Two ways to describe.**
-      `OP_FRAME_INFO` and `OP_UNTYPED_INFO` tell what `OP_CAP_INFO` tells of a frame and an Untyped,
-      with the rights in `a3` where it has them beside the type in `a1`, and an Untyped's `a4` as made or free;
-      they would go, and `rv_frame_info`, `rv_frame_min_size` and `rv_untyped_info` read `OP_CAP_INFO` instead,
-      so a program built against the wrappers changes only by being built again.
     - **Where a new capability goes.**
       `a1` for `OP_CAP_COPY`, `OP_CAP_DERIVE`, `OP_CAP_MOVE`, `OP_CLOCK_FRAME` and `OP_UNTYPED_SPLIT`,
       `a2` for `OP_UNTYPED_RETYPE`, `OP_POOL_ALLOC` and `OP_NOTIFY_CARVE`,

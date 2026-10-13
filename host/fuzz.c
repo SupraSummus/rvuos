@@ -36,9 +36,9 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
 
 int LLVMFuzzerInitialize(int *argc, char ***argv)
 {
-    /* Every code below OP_COUNT is an operation, so a new one without an entry in host/ops.h stops the harness here. */
+    /* Every code below OP_COUNT but a retired one is an operation, so a new one without an entry in host/ops.h stops the harness here. */
     for (unsigned op = 1; op < OP_COUNT; op++) {
-        if (op_table[op].name == NULL) {
+        if (op_table[op].name == NULL && !op_retired(op)) {
             fprintf(stderr, "host/ops.h: operation %u has no entry in op_table\n", op);
             abort();
         }

@@ -288,7 +288,8 @@ static void children_of(const struct cap *c, addr_array *out)
  * The rights an operation needs of the capability it is invoked on, as rvuos/abi.h gives them;
  * one invoked on a capability of another type fails before its rights matter, and a describing one needs none.
  * RIGHTS_IN_HANDLER names an operation whose handler decides by what the call asks,
- * and RIGHTS_UNKNOWN a code that is no operation, which history_begin holds no code below OP_COUNT to.
+ * and RIGHTS_UNKNOWN a code that is no operation, which history_begin holds no code below OP_COUNT to but a retired one,
+ * so a call of one that went through is a violation.
  */
 #define RIGHTS_IN_HANDLER 0
 #define RIGHTS_UNKNOWN 0xff
@@ -332,9 +333,7 @@ static uint8_t rights_needed(uint32_t op)
     case OP_DEBUG_PREEMPT:
         return RIGHT_X;
     case OP_FRAME_CARVE:
-    case OP_FRAME_INFO:
     case OP_UNTYPED_RETYPE:
-    case OP_UNTYPED_INFO:
     case OP_UNTYPED_SPLIT:
     case OP_IRQ_CARVE:
     case OP_TIME_CARVE:
@@ -349,12 +348,12 @@ static uint8_t rights_needed(uint32_t op)
     }
 }
 
-/* Every code below OP_COUNT is an operation, so each says what it needs; checked once, at the first call. */
+/* Every code below OP_COUNT but a retired one is an operation, so each says what it needs; checked once, at the first call. */
 static void check_rights_table(void)
 {
     static bool checked;
     for (uint32_t op = 1; !checked && op < OP_COUNT; op++) {
-        if (rights_needed(op) == RIGHTS_UNKNOWN) {
+        if (rights_needed(op) == RIGHTS_UNKNOWN && !op_retired(op)) {
             fprintf(stderr, "host/history.c: operation %u has no rights in rights_needed\n", (unsigned)op);
             abort();
         }
