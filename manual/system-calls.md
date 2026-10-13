@@ -42,13 +42,19 @@ A slot of the invoked table, as `OP_CAP_COPY`'s destination is, is its index the
 The kernel checks in this order:
 the slot resolves (`KERR_INVALID_CAP`),
 then `OP_CAP_INFO`, which every type takes with no right, looks at its arguments, section 6.14;
-the capability type carries `RIGHT_W` where the type needs it for every operation,
-but for `OP_POOL_INFO` on a pool, which needs none (`KERR_NO_RIGHTS`),
-the type accepts the operation (`KERR_WRONG_TYPE`),
-the operation's own right and arguments.
+the capability's type takes the operation (`KERR_WRONG_TYPE`);
+the capability carries the right the operation needs, as each operation below says (`KERR_NO_RIGHTS`);
+every argument of `a1` to `a3` the operation does not read is zero,
+and so is every bit of a rights mask past `RIGHT_ALL` (`KERR_INVALID_ARG`),
+so that an argument may be given a meaning later without changing what an existing program does;
+then the operation's own checks.
 Operation codes are a single flat numbering across all types,
-so invoking an `Irq` operation on a `Frame` is `KERR_WRONG_TYPE`,
+so invoking an `Irq` operation on a `Frame` is `KERR_WRONG_TYPE`, whatever its rights,
 not `KERR_INVALID_ARG`.
+What an operation reads its description says; three read by their own values:
+`OP_POOL_ALLOC` of a notification no `a3`, `OP_THREAD_WATCH` with no bits no `a1`,
+and `OP_IRQ_SET` with no bits, or of a line that is no timer's, no `a2` or `a3`.
+`a4` to `a6` are read by no operation, and not checked yet.
 
 A call whose work grows with the derivation tree or with a pool can be interrupted and made again:
 `OP_CAP_REVOKE`, `OP_CAP_DELETE` of a root with capabilities below it,
@@ -462,7 +468,7 @@ On a timer line, `a3` = 0 or `IRQ_SET_PERIOD`, and unused elsewhere.
 With `IRQ_SET_PERIOD`, `a2` is a period counted from the line's last deadline, section 5.8,
 and the call returns `a1` = the periods skipped.
 `KERR_INVALID_ARG` for any other bit of `a3`, or a period of zero.
-With `a1` = 0, `a2` and `a3` are ignored.
+With `a1` = 0, `a2` and `a3` are not read.
 `KERR_STATE` once the `Irq`'s notification was taken, section 5.9: it has nothing to signal.
 
 ### 6.12 Operations on `Clock`

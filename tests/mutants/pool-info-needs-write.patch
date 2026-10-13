@@ -7,12 +7,12 @@ Report: a describing call failed on a filled slot
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -1021,7 +1021,7 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
-         err = (cap.rights & RIGHT_W) ? op_captable(t, slot, &cap, op, arg) : KERR_NO_RIGHTS;
-         break;
-     case CAP_POOL:
--        err = (op == OP_POOL_INFO || (cap.rights & RIGHT_W)) ? op_pool(t, slot, &cap, op, arg) : KERR_NO_RIGHTS;
-+        err = (cap.rights & RIGHT_W) ? op_pool(t, slot, &cap, op, arg) : KERR_NO_RIGHTS;
-         break;
-     case CAP_PROCESS:
-         err = (cap.rights & RIGHT_W) ? op_process(t, &cap, op, arg) : KERR_NO_RIGHTS;
+@@ -995,7 +995,7 @@ static const struct op_shape op_shapes[OP_COUNT] = {
+     [OP_UNTYPED_RETYPE] = { CAP_UNTYPED, 0, SHAPE_A1 | SHAPE_A2 },
+     [OP_UNTYPED_SPLIT] = { CAP_UNTYPED, 0, SHAPE_A1 | SHAPE_A2 },
+     [OP_POOL_ALLOC] = { CAP_POOL, RIGHT_W, SHAPE_A123 | SHAPE_VARIES },
+-    [OP_POOL_INFO] = { CAP_POOL, 0, SHAPE_A1 | SHAPE_A3 },
++    [OP_POOL_INFO] = { CAP_POOL, RIGHT_W, SHAPE_A1 | SHAPE_A3 },
+     [OP_PROCESS_INSTALL] = { CAP_PROCESS, RIGHT_W, SHAPE_A123 | SHAPE_RIGHTS_A3 },
+     [OP_PROCESS_UNINSTALL] = { CAP_PROCESS, RIGHT_W, SHAPE_A1 },
+     [OP_PROCESS_MOUNT] = { CAP_PROCESS, RIGHT_W, SHAPE_A1 | SHAPE_A2 },

@@ -505,7 +505,13 @@ until the maintainer decides otherwise.
     Working default: none; the ABI changes with the kernel, and the seeds and the corpus are written anew with it.
     The model holds; two things it lacked were added without breaking anything:
     a stop for a thread, `OP_THREAD_STOP`, decision 32, and introspection, `OP_CAP_INFO` and `OP_POOL_INFO`, decision 33.
-    Arguments a program must leave zero, `TODO.md`, and the rest below would break a binary built against today's ABI,
+    The first change that broke something had dispatch check every operation alike, from one table, `op_shapes`, in the manual's order:
+    the slot, the type that takes the operation, the right it needs, and zero in every argument of `a1` to `a3` it does not read
+    and every bit of a rights mask past `RIGHT_ALL`, else `KERR_INVALID_ARG`,
+    so that an argument unread today may mean something later without changing what a program that left it does;
+    a foreign operation on a capability without its right is `KERR_WRONG_TYPE` since, where it was `KERR_NO_RIGHTS`.
+    `a4` to `a6` stay unread, and unchecked until the replay's record carries them, below.
+    The rest below would break a binary built against today's ABI,
     so they go in one change, before the ABI is held still:
     - **What the test format chose.**
       A replay record carries three arguments, so no operation takes a fourth:

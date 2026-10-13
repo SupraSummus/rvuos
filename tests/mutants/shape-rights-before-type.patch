@@ -1,0 +1,25 @@
+dispatch checks the right before the type, so a foreign operation on a capability without its right says the right is missing;
+a refused call fails at the first check it fails, in the manual's order.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a refused call did not fail at the first check it fails
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -1045,12 +1045,12 @@ static uint8_t shape_reads(uint32_t op, const struct cap *cap, const uint32_t *a
+ static int shape_check(uint32_t op, const struct cap *cap, const uint32_t *arg)
+ {
+     const struct op_shape *shape = op < OP_COUNT ? &op_shapes[op] : NULL;
++    if (shape != NULL && (cap->rights & shape->right) != shape->right) {
++        return KERR_NO_RIGHTS;
++    }
+     if (shape == NULL || shape->type != cap->type) {
+         return KERR_WRONG_TYPE;
+     }
+-    if ((cap->rights & shape->right) != shape->right) {
+-        return KERR_NO_RIGHTS;
+-    }
+     uint8_t reads = shape->reads;
+     if (reads & SHAPE_VARIES) {
+         reads = shape_reads(op, cap, arg, reads);

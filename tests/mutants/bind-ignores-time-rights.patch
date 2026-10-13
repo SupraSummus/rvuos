@@ -8,13 +8,12 @@ Report: thread's units are malformed
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -728,9 +728,6 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
-     case OP_TIME_CARVE:
-         return carve_range(t, slot, cap, arg);
-     case OP_TIME_BIND: {
--        if (!(cap->rights & RIGHT_W)) {
--            return KERR_NO_RIGHTS;
--        }
-         struct cap tc;
-         int err = slot_lookup_typed(t, arg[1], CAP_THREAD, RIGHT_W, &tc);
-         if (err != KERR_OK) {
+@@ -1018,7 +1018,7 @@ static const struct op_shape op_shapes[OP_COUNT] = {
+     [OP_CLOCK_FRAME] = { CAP_CLOCK, RIGHT_R, SHAPE_A1 },
+     [OP_CLOCK_WATCHDOG] = { CAP_CLOCK, RIGHT_W, SHAPE_A1 },
+     [OP_TIME_CARVE] = { CAP_TIME, 0, SHAPE_A123 },
+-    [OP_TIME_BIND] = { CAP_TIME, RIGHT_W, SHAPE_A123 },
++    [OP_TIME_BIND] = { CAP_TIME, 0, SHAPE_A123 },
+ };
+ 
+ /*
