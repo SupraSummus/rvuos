@@ -221,14 +221,10 @@
 #define OP_CAP_MOVE 18
 
 /*
- * Frame: describe it. Returns a1 = base, a2 = size, a3 = rights,
- * a4 = the size of the smallest region, a power of two of at least 8,
- * the same for every region on the machine.
- * Every frame is a block: its size is a power of two of at least that,
+ * Every frame is a block: its size is a power of two of at least the smallest region,
+ * the same for every region on the machine, which OP_CAP_INFO tells of any frame,
  * and its base is a multiple of its size.
- * OP_CAP_INFO tells the same; this goes with the changes of DESIGN.md, open decision 31.
  */
-#define OP_FRAME_INFO 11
 /*
  * Frame: derive a smaller frame with the same rights.
  * a1 = offset from the frame base, a2 = size, a3 = destination slot.
@@ -249,12 +245,6 @@
  * Where each block lies is the program's to choose, by which half it takes.
  */
 
-/*
- * Untyped: describe it. Returns a1 = base, a2 = size, a3 = rights,
- * a4 = 1 while something made of it is left, 0 while it is free.
- * OP_CAP_INFO tells the same, a4 as the type of what lies below; this goes with the changes of DESIGN.md, open decision 31.
- */
-#define OP_UNTYPED_INFO 27
 /*
  * Untyped: make the whole of its memory into one thing, below the invoked one in the tree.
  * a1 = the type: CAP_FRAME or CAP_POOL, a2 = destination slot.
@@ -602,7 +592,7 @@
  * and the accounting its holder needs.
  * Returns a1 = the type, one of CAP_*, in the low byte and the rights in the byte above,
  * see CAP_INFO_TYPE and CAP_INFO_RIGHTS, and in a2, a3 and a4 by the type:
- *   CAP_FRAME         the base, the size, and the size of the smallest region, as OP_FRAME_INFO's a4
+ *   CAP_FRAME         the base, the size, and the size of the smallest region, a power of two of at least 8
  *   CAP_UNTYPED       the base, the size, and 0 while it is free, else the type of what lies first below it:
  *                     CAP_FRAME for a frame or a region installed from one, CAP_UNTYPED for a half or a derived Untyped,
  *                     and CAP_POOL for a pool, which lies there whether anything names it or not,
@@ -649,7 +639,10 @@
  */
 #define OP_POOL_INFO 42
 
-/* One above the highest operation code; the fuzzer's mutator draws below it. */
+/*
+ * One above the highest operation code; the fuzzer's mutator draws below it.
+ * Codes 11 and 27 are no operation's: they were OP_FRAME_INFO and OP_UNTYPED_INFO, which OP_CAP_INFO replaced.
+ */
 #define OP_COUNT 43
 
 /*

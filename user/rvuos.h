@@ -168,55 +168,6 @@ static inline uint32_t rv_time_bind(uint32_t time_cap, uint32_t thread_cap, uint
     return rv_invoke(OP_TIME_BIND, time_cap, thread_cap, offset, count);
 }
 
-/* OP_FRAME_INFO: where a frame points. */
-static inline uint32_t rv_frame_info(uint32_t frame_cap, uint32_t *base, uint32_t *size)
-{
-    register uint32_t r_a0 __asm__(RV_A0) = frame_cap;
-    register uint32_t r_a1 __asm__(RV_A1);
-    register uint32_t r_a2 __asm__(RV_A2);
-    register uint32_t r_a7 __asm__(RV_A7) = OP_FRAME_INFO;
-    __asm__ volatile(RV_CALL
-                     : "+r"(r_a0), "=r"(r_a1), "=r"(r_a2)
-                     : "r"(r_a7)
-                     : "memory", RV_A3, RV_A4, RV_A5, RV_A6);
-    *base = r_a1;
-    *size = r_a2;
-    return r_a0;
-}
-
-/* OP_FRAME_INFO again, for the smallest region the machine protects. */
-static inline uint32_t rv_frame_min_size(uint32_t frame_cap, uint32_t *min_out)
-{
-    register uint32_t r_a0 __asm__(RV_A0) = frame_cap;
-    register uint32_t r_a4 __asm__(RV_A4);
-    register uint32_t r_a7 __asm__(RV_A7) = OP_FRAME_INFO;
-    __asm__ volatile(RV_CALL
-                     : "+r"(r_a0), "=r"(r_a4)
-                     : "r"(r_a7)
-                     : "memory", RV_A1, RV_A2, RV_A3, RV_A5, RV_A6);
-    *min_out = r_a4;
-    return r_a0;
-}
-
-/* OP_UNTYPED_INFO: where an Untyped's memory lies, and whether something made of it is left. */
-static inline uint32_t rv_untyped_info(uint32_t untyped_cap, uint32_t *base, uint32_t *size,
-                                       uint32_t *made)
-{
-    register uint32_t r_a0 __asm__(RV_A0) = untyped_cap;
-    register uint32_t r_a1 __asm__(RV_A1);
-    register uint32_t r_a2 __asm__(RV_A2);
-    register uint32_t r_a4 __asm__(RV_A4);
-    register uint32_t r_a7 __asm__(RV_A7) = OP_UNTYPED_INFO;
-    __asm__ volatile(RV_CALL
-                     : "+r"(r_a0), "=r"(r_a1), "=r"(r_a2), "=r"(r_a4)
-                     : "r"(r_a7)
-                     : "memory", RV_A3, RV_A5, RV_A6);
-    *base = r_a1;
-    *size = r_a2;
-    *made = r_a4;
-    return r_a0;
-}
-
 /*
  * OP_CAP_INFO: what a capability is, *type one of CAP_* and *rights its rights,
  * and in w the three words its type tells, see rvuos/abi.h. Page 0, the only one.
@@ -239,6 +190,47 @@ static inline uint32_t rv_cap_info(uint32_t cap, uint32_t *type, uint32_t *right
     w[1] = r_a3;
     w[2] = r_a4;
     return r_a0;
+}
+
+/*
+ * OP_CAP_INFO of a capability that must be of the type, the three words its type tells into w;
+ * KERR_WRONG_TYPE, and w as the call left it, for another type.
+ */
+static inline uint32_t rv_cap_info_of(uint32_t cap, uint32_t type, uint32_t w[3])
+{
+    uint32_t found, rights;
+    uint32_t err = rv_cap_info(cap, &found, &rights, w);
+    return err == KERR_OK && found != type ? (uint32_t)KERR_WRONG_TYPE : err;
+}
+
+/* Where a frame points, by OP_CAP_INFO. */
+static inline uint32_t rv_frame_info(uint32_t frame_cap, uint32_t *base, uint32_t *size)
+{
+    uint32_t w[3];
+    uint32_t err = rv_cap_info_of(frame_cap, CAP_FRAME, w);
+    *base = w[0];
+    *size = w[1];
+    return err;
+}
+
+/* The smallest region the machine protects, by OP_CAP_INFO of a frame. */
+static inline uint32_t rv_frame_min_size(uint32_t frame_cap, uint32_t *min_out)
+{
+    uint32_t w[3];
+    uint32_t err = rv_cap_info_of(frame_cap, CAP_FRAME, w);
+    *min_out = w[2];
+    return err;
+}
+
+/* Where an Untyped's memory lies, and whether something made of it is left, by OP_CAP_INFO. */
+static inline uint32_t rv_untyped_info(uint32_t untyped_cap, uint32_t *base, uint32_t *size, uint32_t *made)
+{
+    uint32_t w[3];
+    uint32_t err = rv_cap_info_of(untyped_cap, CAP_UNTYPED, w);
+    *base = w[0];
+    *size = w[1];
+    *made = w[2] != 0;
+    return err;
 }
 
 /* OP_POOL_INFO: the bytes an object of a type takes of a pool, slots its count for a table, and the bytes left. */

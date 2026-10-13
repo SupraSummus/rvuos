@@ -26,7 +26,7 @@ Chapters 10 and 11 of the user manual; [`MANUAL.md`](../MANUAL.md) has its conte
 | watchdog's delay | 10 s | `WATCHDOG_US_MAX` |
 | tick, the quantum | 1 ms (`TIMER_HZ` 1000) unless the build sets another rate, `make TIMER_HZ=` | `kernel/timer.h`, Makefile; `OP_CAP_INFO` on a `Clock` or a `Time` capability |
 | interrupt lines | 96 on QEMU, 77 on the ESP32-C6, 52 on RP2350, 32 on mps2-an385, 48 on mps2-an521, line 0 the log's | `IRQ_LINES` |
-| smallest region | 8 bytes, or the PMP grain if coarser, 32 bytes on ARM | `region_min_size` in `kernel/pmp.h`; `OP_CAP_INFO` or `OP_FRAME_INFO` on any frame |
+| smallest region | 8 bytes, or the PMP grain if coarser, 32 bytes on ARM | `region_min_size` in `kernel/pmp.h`; `OP_CAP_INFO` on any frame |
 | kernel log ring | 4 KiB less a 32-byte header | `KLOG_SIZE` |
 | replay records per input | 256 | `REPLAY_MAX_RECORDS` |
 
