@@ -567,6 +567,17 @@ what is left:
 
 What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
 
+- `a4` to `a6` are read by no operation and checked by none, so none can be given a meaning later
+  without changing what a program that left something there does, as the unread of `a1` to `a3` now can.
+  Holding them to zero, as `dispatch` does `a1` to `a3`, has every wrapper of `user/rvuos.h` set them:
+  on ARM, where `r4` to `r6` are the callee's to keep, that is three moves and their saving at every call,
+  which grew the nRF52840's bench by 2.7 KiB, past its 32 KiB code region, and a call by a fortieth on the MPS2 boards.
+  A wrapper out of line on ARM would hold them at the price of a call within the call.
+  The count of arguments a call sets, in the bits of `a7` above the code, would hold them at no price:
+  a wrapper loads its code as a constant either way, and `dispatch` would take a register past the count as zero,
+  so an operation given `a4` later reads it only from a program that says it set it.
+  `a7` past the code is refused today, so the bits are free until the ABI is held still, and not after;
+  the replay's record would carry the count with the code.
 - The breaking changes decision 31 lists, each in a change of its own.
 
 ## Code

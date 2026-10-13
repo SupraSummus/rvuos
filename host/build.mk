@@ -100,7 +100,8 @@ mutants-fuzz:
 # Each writes build/host/fuzz-<n>.log, the run prints how each ended,
 # and a failure leaves its input at the top of the tree.
 # libFuzzer's fork mode made a third fewer runs in a minute: each job it starts replays part of the corpus first.
-FUZZ_FLAGS := -max_len=2048 -len_control=20 -use_value_profile=1
+# An input keeps 128 records at most, of twenty-eight bytes each.
+FUZZ_FLAGS := -max_len=3584 -len_control=20 -use_value_profile=1
 FUZZ_JOBS  ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
 FUZZ_HARNESS ?= fuzz
 fuzz: $(HOST_BUILD)/$(FUZZ_HARNESS) $(SEEDS)

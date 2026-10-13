@@ -107,8 +107,9 @@ static void print(const uint8_t *data, size_t size)
         const struct op_info *info = op_info(c.op);
         char op[16];
         snprintf(op, sizeof(op), "op %u", (unsigned)c.op);
-        printf("%3zu actor %u %-20s slot %-3u a1 0x%08x a2 0x%08x a3 0x%08x\n", off / sizeof(c), (unsigned)c.actor,
-               info != NULL ? info->name : op, (unsigned)c.slot, (unsigned)c.a1, (unsigned)c.a2, (unsigned)c.a3);
+        printf("%3zu actor %u %-20s slot %-3u a1 0x%08x a2 0x%08x a3 0x%08x a4 0x%08x a5 0x%08x a6 0x%08x\n",
+               off / sizeof(c), (unsigned)c.actor, info != NULL ? info->name : op, (unsigned)c.slot, (unsigned)c.a1,
+               (unsigned)c.a2, (unsigned)c.a3, (unsigned)c.a4, (unsigned)c.a5, (unsigned)c.a6);
     }
 }
 

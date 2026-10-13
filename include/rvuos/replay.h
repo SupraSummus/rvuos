@@ -134,7 +134,7 @@ static inline int replay_leaves_alone(uint32_t at)
 #define REPLAY_THREAD_SP 0x80118000u
 #define REPLAY_THIRD_SP  0x8011c000u
 
-#define REPLAY_COPY(slot) { OP_CAP_COPY, 0, REPLAY_CAP_TABLE, slot, slot, RIGHT_ALL }
+#define REPLAY_COPY(slot) { OP_CAP_COPY, 0, REPLAY_CAP_TABLE, slot, slot, RIGHT_ALL, 0, 0, 0 }
 
 /*
  * The threads' entry points are the one value the two builds differ on:
@@ -145,32 +145,32 @@ static inline int replay_leaves_alone(uint32_t at)
  * and the host never fetches an instruction.
  */
 static const struct replay_record replay_prologue[] = {
-    { OP_PROCESS_INSTALL, 0, BOOT_CAP_PROCESS, REPLAY_REGION_SLOT, BOOT_CAP_INPUT, RIGHT_R },
-    { OP_POOL_ALLOC, 0, BOOT_CAP_POOL, CAP_NOTIFICATION, REPLAY_CAP_NOTIFY, 0 },
+    { OP_PROCESS_INSTALL, 0, BOOT_CAP_PROCESS, REPLAY_REGION_SLOT, BOOT_CAP_INPUT, RIGHT_R, 0, 0, 0 },
+    { OP_POOL_ALLOC, 0, BOOT_CAP_POOL, CAP_NOTIFICATION, REPLAY_CAP_NOTIFY, 0, 0, 0, 0 },
     /* The free RAM in halves, and the upper in halves again. */
-    { OP_UNTYPED_SPLIT, 0, BOOT_CAP_FREE_RAM, REPLAY_CAP_RAM, REPLAY_CAP_HALF, 0 },
-    { OP_UNTYPED_SPLIT, 0, REPLAY_CAP_HALF, REPLAY_CAP_POOL_RAM, REPLAY_CAP_LENT, 0 },
+    { OP_UNTYPED_SPLIT, 0, BOOT_CAP_FREE_RAM, REPLAY_CAP_RAM, REPLAY_CAP_HALF, 0, 0, 0, 0 },
+    { OP_UNTYPED_SPLIT, 0, REPLAY_CAP_HALF, REPLAY_CAP_POOL_RAM, REPLAY_CAP_LENT, 0, 0, 0, 0 },
     /* The second thread's pool, table, process and thread, and the third thread in the first one's pool. */
-    { OP_UNTYPED_RETYPE, 0, REPLAY_CAP_POOL_RAM, CAP_POOL, REPLAY_CAP_POOL, 0 },
-    { OP_POOL_ALLOC, 0, REPLAY_CAP_POOL, CAP_CAPTABLE, REPLAY_CAP_TABLE, REPLAY_TABLE_SLOTS },
-    { OP_POOL_ALLOC, 0, REPLAY_CAP_POOL, CAP_PROCESS, REPLAY_CAP_PROCESS, REPLAY_CAP_TABLE },
-    { OP_POOL_ALLOC, 0, REPLAY_CAP_POOL, CAP_THREAD, REPLAY_CAP_THREAD, REPLAY_CAP_PROCESS },
-    { OP_POOL_ALLOC, 0, BOOT_CAP_POOL, CAP_THREAD, REPLAY_CAP_THIRD, REPLAY_CAP_PROCESS },
+    { OP_UNTYPED_RETYPE, 0, REPLAY_CAP_POOL_RAM, CAP_POOL, REPLAY_CAP_POOL, 0, 0, 0, 0 },
+    { OP_POOL_ALLOC, 0, REPLAY_CAP_POOL, CAP_CAPTABLE, REPLAY_CAP_TABLE, REPLAY_TABLE_SLOTS, 0, 0, 0 },
+    { OP_POOL_ALLOC, 0, REPLAY_CAP_POOL, CAP_PROCESS, REPLAY_CAP_PROCESS, REPLAY_CAP_TABLE, 0, 0, 0 },
+    { OP_POOL_ALLOC, 0, REPLAY_CAP_POOL, CAP_THREAD, REPLAY_CAP_THREAD, REPLAY_CAP_PROCESS, 0, 0, 0 },
+    { OP_POOL_ALLOC, 0, BOOT_CAP_POOL, CAP_THREAD, REPLAY_CAP_THIRD, REPLAY_CAP_PROCESS, 0, 0, 0 },
     /* It runs the same code on the same data as the first thread; the input it never reads. */
-    { OP_PROCESS_INSTALL, 0, REPLAY_CAP_PROCESS, 0, BOOT_CAP_CODE, RIGHT_R | RIGHT_X },
-    { OP_PROCESS_INSTALL, 0, REPLAY_CAP_PROCESS, 1, BOOT_CAP_DATA, RIGHT_R | RIGHT_W },
-    { OP_PROCESS_INSTALL, 0, REPLAY_CAP_PROCESS, REPLAY_UART_SLOT, BOOT_CAP_UART, RIGHT_R | RIGHT_W },
-    { OP_PROCESS_INSTALL, 0, REPLAY_CAP_PROCESS, REPLAY_LOG_SLOT, BOOT_CAP_LOG, RIGHT_R | RIGHT_W },
+    { OP_PROCESS_INSTALL, 0, REPLAY_CAP_PROCESS, 0, BOOT_CAP_CODE, RIGHT_R | RIGHT_X, 0, 0, 0 },
+    { OP_PROCESS_INSTALL, 0, REPLAY_CAP_PROCESS, 1, BOOT_CAP_DATA, RIGHT_R | RIGHT_W, 0, 0, 0 },
+    { OP_PROCESS_INSTALL, 0, REPLAY_CAP_PROCESS, REPLAY_UART_SLOT, BOOT_CAP_UART, RIGHT_R | RIGHT_W, 0, 0, 0 },
+    { OP_PROCESS_INSTALL, 0, REPLAY_CAP_PROCESS, REPLAY_LOG_SLOT, BOOT_CAP_LOG, RIGHT_R | RIGHT_W, 0, 0, 0 },
     /*
      * Its own memory, derived into its table;
      * then the halves between go, and what they made hangs below the free RAM.
      * Each table takes the block of the other thread's pool.
      */
-    { OP_CAP_DERIVE, 0, REPLAY_CAP_TABLE, REPLAY_CAP_RAM, REPLAY_CAP_LENT, RIGHT_ALL },
-    { OP_CAP_DELETE, 0, BOOT_CAP_CAPTABLE, REPLAY_CAP_HALF, 0, 0 },
-    { OP_CAP_DELETE, 0, BOOT_CAP_CAPTABLE, REPLAY_CAP_LENT, 0, 0 },
-    { OP_CAP_MOVE, 0, REPLAY_CAP_TABLE, BOOT_CAP_POOL_RAM, BOOT_CAP_POOL_RAM, 0 },
-    { OP_CAP_MOVE, 0, BOOT_CAP_CAPTABLE, BOOT_CAP_POOL_RAM, REPLAY_CAP_POOL_RAM, 0 },
+    { OP_CAP_DERIVE, 0, REPLAY_CAP_TABLE, REPLAY_CAP_RAM, REPLAY_CAP_LENT, RIGHT_ALL, 0, 0, 0 },
+    { OP_CAP_DELETE, 0, BOOT_CAP_CAPTABLE, REPLAY_CAP_HALF, 0, 0, 0, 0, 0 },
+    { OP_CAP_DELETE, 0, BOOT_CAP_CAPTABLE, REPLAY_CAP_LENT, 0, 0, 0, 0, 0 },
+    { OP_CAP_MOVE, 0, REPLAY_CAP_TABLE, BOOT_CAP_POOL_RAM, BOOT_CAP_POOL_RAM, 0, 0, 0, 0 },
+    { OP_CAP_MOVE, 0, BOOT_CAP_CAPTABLE, BOOT_CAP_POOL_RAM, REPLAY_CAP_POOL_RAM, 0, 0, 0, 0 },
     /* Its table mirrors the first one, the boot capabilities included. */
     REPLAY_COPY(BOOT_CAP_CAPTABLE),
     REPLAY_COPY(BOOT_CAP_PROCESS),
@@ -198,11 +198,11 @@ static const struct replay_record replay_prologue[] = {
      * Every thread earns no unit and runs on spare time, so the three take turns as one queue
      * and every unit is left for the records to bind.
      */
-    { OP_TIME_BIND, 0, BOOT_CAP_TIME, BOOT_CAP_THREAD, 0, 0 },
-    { OP_TIME_BIND, 0, BOOT_CAP_TIME, REPLAY_CAP_THREAD, 0, 0 },
-    { OP_TIME_BIND, 0, BOOT_CAP_TIME, REPLAY_CAP_THIRD, 0, 0 },
-    { OP_THREAD_CONFIGURE, 0, REPLAY_CAP_THREAD, 0, REPLAY_THREAD_SP, 2 },
-    { OP_THREAD_CONFIGURE, 0, REPLAY_CAP_THIRD, 0, REPLAY_THIRD_SP, 3 },
+    { OP_TIME_BIND, 0, BOOT_CAP_TIME, BOOT_CAP_THREAD, 0, 0, 0, 0, 0 },
+    { OP_TIME_BIND, 0, BOOT_CAP_TIME, REPLAY_CAP_THREAD, 0, 0, 0, 0, 0 },
+    { OP_TIME_BIND, 0, BOOT_CAP_TIME, REPLAY_CAP_THIRD, 0, 0, 0, 0, 0 },
+    { OP_THREAD_CONFIGURE, 0, REPLAY_CAP_THREAD, 0, REPLAY_THREAD_SP, 2, 0, 0, 0 },
+    { OP_THREAD_CONFIGURE, 0, REPLAY_CAP_THIRD, 0, REPLAY_THIRD_SP, 3, 0, 0, 0 },
 };
 
 #define REPLAY_PROLOGUE_COUNT \
@@ -216,9 +216,9 @@ static const struct replay_record replay_prologue[] = {
  * The halt writes out what the last record left, see DESIGN.md, "The kernel log".
  */
 static const struct replay_record replay_after_input[] = {
-    { OP_PROCESS_UNINSTALL, 0, BOOT_CAP_PROCESS, REPLAY_REGION_SLOT, 0, 0 },
-    { OP_PROCESS_INSTALL, 0, BOOT_CAP_PROCESS, REPLAY_UART_SLOT, BOOT_CAP_UART, RIGHT_R | RIGHT_W },
-    { OP_PROCESS_INSTALL, 0, BOOT_CAP_PROCESS, REPLAY_LOG_SLOT, BOOT_CAP_LOG, RIGHT_R | RIGHT_W },
+    { OP_PROCESS_UNINSTALL, 0, BOOT_CAP_PROCESS, REPLAY_REGION_SLOT, 0, 0, 0, 0, 0 },
+    { OP_PROCESS_INSTALL, 0, BOOT_CAP_PROCESS, REPLAY_UART_SLOT, BOOT_CAP_UART, RIGHT_R | RIGHT_W, 0, 0, 0 },
+    { OP_PROCESS_INSTALL, 0, BOOT_CAP_PROCESS, REPLAY_LOG_SLOT, BOOT_CAP_LOG, RIGHT_R | RIGHT_W, 0, 0, 0 },
 };
 
 #define REPLAY_AFTER_INPUT_COUNT \
@@ -231,10 +231,10 @@ static const struct replay_record replay_after_input[] = {
  * which is after the records are in place.
  */
 static const struct replay_record replay_start =
-    { OP_THREAD_RESUME, 0, REPLAY_CAP_THREAD, 0, 0, 0 };
+    { OP_THREAD_RESUME, 0, REPLAY_CAP_THREAD, 0, 0, 0, 0, 0, 0 };
 
 /* What a thread performs to pass a record on. */
 static const struct replay_record replay_tick =
-    { OP_TEST_TICK, 0, BOOT_CAP_TEST, 0, 0, 0 };
+    { OP_TEST_TICK, 0, BOOT_CAP_TEST, 0, 0, 0, 0, 0, 0 };
 
 #endif

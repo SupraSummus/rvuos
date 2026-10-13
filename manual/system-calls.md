@@ -32,7 +32,11 @@ The C wrapper in `user/rvuos.h`, the same on both, with the registers from `user
 
 ```c
 uint32_t rv_invoke(uint32_t op, uint32_t cap, uint32_t a1, uint32_t a2, uint32_t a3);
+uint32_t rv_invoke6(uint32_t op, uint32_t cap, uint32_t a1, uint32_t a2, uint32_t a3,
+                    uint32_t a4, uint32_t a5, uint32_t a6);
 ```
+
+`rv_invoke6` sets `a4` to `a6` too, as the replay driver does a record's; `rv_invoke` leaves them as they were.
 
 Every slot an argument names, `a0` among them, is a slot of the caller's and so a slot number,
 `SLOT_IN(table slot, index)`, section 5.2, unless this chapter says it is in the invoked table:

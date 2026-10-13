@@ -8,13 +8,13 @@ Usage: tools/seed.py TEXT SEED, TEXT being - for standard input,
 
 The seeds under tests/seeds are such text, and `make host-test` builds them into build/seeds.
 
-A line is `[n] actor A OP slot S a1 X a2 Y a3 Z`, as `build/host/fuzz --print` writes it:
+A line is `[n] actor A OP slot S a1 X a2 Y a3 Z`, and a4 to a6 where they are not zero, as `build/host/fuzz --print` writes it:
 the operation by its name in include/rvuos/abi.h or include/rvuos/replay.h, or `op N`,
 and each number decimal or hexadecimal, or a name of either header whose value is a number,
 or `SLOT_IN(table, index)`, or such terms joined by |, + or -, as `RIGHT_R|RIGHT_W` or `REPLAY_CAP_THIRD`.
 A field left out is zero.
 What follows a # is a comment, and a line with nothing else is skipped.
-A record is struct replay_record of include/rvuos/abi.h, little-endian, sixteen bytes.
+A record is struct replay_record of include/rvuos/abi.h, little-endian, twenty-eight bytes.
 
 --text names what host/ops.h says each field holds:
 a slot by its BOOT_CAP_ or REPLAY_CAP_ name, one the setup leaves empty as REPLAY_CAP_FREE+n,
@@ -35,7 +35,7 @@ OPS_H = ROOT / "host/ops.h"
 DEFINE = re.compile(r"^#define\s+([A-Z_][A-Z0-9_]*)\s+(.+?)\s*(?:/\*.*)?$")
 TERM = re.compile(r"^(0x[0-9a-fA-F]+|[0-9]+)u?$")
 SLOT_IN = re.compile(r"^SLOT_IN\s*\(([^,]+),([^)]+)\)$")
-RECORD = struct.Struct("<BBHIII")
+RECORD = struct.Struct("<BBHIIIIII")
 
 
 def defines():
@@ -85,7 +85,7 @@ def operations(names):
 
 
 def record(line, names, ops):
-    """The sixteen bytes of one line."""
+    """The twenty-eight bytes of one line."""
     words = re.sub(r"SLOT_IN\s*\(\s*([^,\s]+)\s*,\s*([^)\s]+)\s*\)", r"SLOT_IN(\1,\2)", line).split()
     if words and words[0].isdigit():
         words = words[1:]
@@ -100,10 +100,10 @@ def record(line, names, ops):
     else:
         raise ValueError(f"{rest[0]}: not an operation")
     fields = dict(zip(rest[0::2], rest[1::2]))
-    unknown = set(fields) - {"slot", "a1", "a2", "a3"}
+    unknown = set(fields) - {"slot", "a1", "a2", "a3", "a4", "a5", "a6"}
     if unknown or len(rest) % 2:
-        raise ValueError(f"expected slot, a1, a2 and a3, found {' '.join(rest)}")
-    args = [value(fields.get(k, "0"), names) for k in ("slot", "a1", "a2", "a3")]
+        raise ValueError(f"expected slot and a1 to a6, found {' '.join(rest)}")
+    args = [value(fields.get(k, "0"), names) for k in ("slot", "a1", "a2", "a3", "a4", "a5", "a6")]
     return RECORD.pack(op, actor, *args)
 
 
@@ -190,7 +190,7 @@ def text(data, names):
         op, actor, slot, *args = RECORD.unpack_from(data, off)
         name = ops.get(op)
         if name not in table:
-            words = [f"op {op}", f"slot {slot}"] + [f"a{i + 1} 0x{a:x}" for i, a in enumerate(args)]
+            words = [f"op {op}", f"slot {slot}"] + [f"a{i + 1} 0x{a:x}" for i, a in enumerate(args[:3])]
         else:
             cap, arg = table[name]
             words = [name]
@@ -199,6 +199,8 @@ def text(data, names):
             for i, (kind, a) in enumerate(zip(arg, args)):
                 if a or kind != "ARG_NONE":
                     words.append(f"a{i + 1} {namer.name(kind, a, name, args[0])}")
+        # a4 to a6, which no operation reads, only where they are not zero.
+        words += [f"a{i + 4} 0x{a:x}" for i, a in enumerate(args[3:]) if a]
         lines.append(f"actor {actor} " + " ".join(words))
     return "".join(line + "\n" for line in lines)
 

@@ -180,6 +180,30 @@ static uint32_t tweak_arg(struct rng *r, uint32_t old, uint8_t *data, size_t cou
     }
 }
 
+/*
+ * a4 to a6, which no operation reads: mostly zero,
+ * and one of them anything one time in sixteen, which a call must leave alone.
+ */
+static void draw_high(struct rng *r, struct replay_record *c, uint8_t *data, size_t count)
+{
+    c->a4 = c->a5 = c->a6 = 0;
+    if (below(r, 16) != 0) {
+        return;
+    }
+    uint32_t v = draw_arg(r, data, count);
+    switch (below(r, 3)) {
+    case 0:
+        c->a4 = v;
+        break;
+    case 1:
+        c->a5 = v;
+        break;
+    default:
+        c->a6 = v;
+        break;
+    }
+}
+
 static void draw_record(struct rng *r, struct replay_record *c, uint8_t *data, size_t count)
 {
     c->op = draw_op(r);
@@ -188,11 +212,12 @@ static void draw_record(struct rng *r, struct replay_record *c, uint8_t *data, s
     c->a1 = draw_arg(r, data, count);
     c->a2 = draw_arg(r, data, count);
     c->a3 = draw_arg(r, data, count);
+    draw_high(r, c, data, count);
 }
 
 static void mutate_field(struct rng *r, struct replay_record *c, uint8_t *data, size_t count)
 {
-    switch (below(r, 6)) {
+    switch (below(r, 7)) {
     case 0:
         c->op = draw_op(r);
         break;
@@ -208,8 +233,11 @@ static void mutate_field(struct rng *r, struct replay_record *c, uint8_t *data, 
     case 4:
         c->a2 = tweak_arg(r, c->a2, data, count);
         break;
-    default:
+    case 5:
         c->a3 = tweak_arg(r, c->a3, data, count);
+        break;
+    default:
+        draw_high(r, c, data, count);
         break;
     }
 }
@@ -493,6 +521,7 @@ static void draw_args(struct rng *r, const struct shadow *s, struct replay_recor
     for (unsigned i = 0; i < 3; i++) {
         *a[i] = info != NULL ? draw_kind(r, s, c, info, i, data, count) : draw_arg(r, data, count);
     }
+    draw_high(r, c, data, count);
 }
 
 /* A typed record: an operation on a capability the thread's table is guessed to hold, or a load or a store. */
