@@ -8,7 +8,7 @@ Report: a refused call did not fail at the first check it fails
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -1055,8 +1055,7 @@ static int shape_check(uint32_t op, const struct cap *cap, const uint32_t *arg)
+@@ -1043,8 +1043,7 @@ static int shape_check(uint32_t op, const struct cap *cap, const uint32_t *arg)
      if (reads & SHAPE_VARIES) {
          reads = shape_reads(op, cap, arg, reads);
      }

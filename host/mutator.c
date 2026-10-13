@@ -58,13 +58,22 @@ static struct replay_record *record(uint8_t *data, size_t i)
 /* Mostly a valid operation; now and then a load or a store, see rvuos/replay.h, or any byte, for the rejection path. */
 static uint8_t draw_op(struct rng *r)
 {
+    static uint8_t ops[OP_LIMIT];
+    static size_t n;
+    if (n == 0) {
+        for (unsigned op = 1; op < OP_LIMIT; op++) {
+            if (op_table[op].name != NULL) {
+                ops[n++] = (uint8_t)op;
+            }
+        }
+    }
     switch (below(r, 16)) {
     case 0:
         return (uint8_t)rnd(r);
     case 1:
         return below(r, 2) ? REPLAY_OP_LOAD : REPLAY_OP_STORE;
     default:
-        return (uint8_t)(1 + below(r, OP_COUNT - 1));
+        return ops[below(r, n)];
     }
 }
 
@@ -484,10 +493,10 @@ static uint32_t draw_kind(struct rng *r, const struct shadow *s, const struct re
 }
 
 /* The operations invoked on a type but those that describe, into ops; returns how many. */
-static size_t ops_on(uint8_t type, uint8_t ops[OP_COUNT])
+static size_t ops_on(uint8_t type, uint8_t ops[OP_LIMIT])
 {
     size_t n = 0;
-    for (uint8_t op = 1; op < OP_COUNT; op++) {
+    for (uint8_t op = 1; op < OP_LIMIT; op++) {
         if (op_table[op].name != NULL && op_table[op].cap == type && !op_table[op].describes) {
             ops[n++] = op;
         }
@@ -502,7 +511,7 @@ static size_t ops_on(uint8_t type, uint8_t ops[OP_COUNT])
  */
 static uint8_t op_on(struct rng *r, uint8_t type)
 {
-    uint8_t ops[OP_COUNT];
+    uint8_t ops[OP_LIMIT];
     size_t n = ops_on(type, ops);
     if (n == 0) {
         return 0;

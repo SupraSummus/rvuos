@@ -8,12 +8,12 @@ Report: a call went through a capability without the rights its operation needs
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -1002,7 +1002,7 @@ static const struct op_shape op_shapes[OP_COUNT] = {
-     [OP_PROCESS_UNMOUNT] = { CAP_PROCESS, RIGHT_W, SHAPE_A1 },
-     [OP_THREAD_CONFIGURE] = { CAP_THREAD, RIGHT_W, SHAPE_A123 },
-     [OP_THREAD_RESUME] = { CAP_THREAD, RIGHT_W, 0 },
--    [OP_THREAD_STOP] = { CAP_THREAD, RIGHT_W, 0 },
-+    [OP_THREAD_STOP] = { CAP_THREAD, 0, 0 },
-     [OP_THREAD_WATCH] = { CAP_THREAD, RIGHT_W, SHAPE_A1 | SHAPE_A2 | SHAPE_VARIES },
-     [OP_THREAD_FAULT] = { CAP_THREAD, RIGHT_W, 0 },
-     [OP_THREAD_READ_REG] = { CAP_THREAD, RIGHT_W, SHAPE_A1 },
+@@ -982,7 +982,7 @@ static const struct op_shape op_shapes[OP_LIMIT] = {
+     [OP_PROCESS_UNMOUNT] = SHAPE(RIGHT_W, SHAPE_A1),
+     [OP_THREAD_CONFIGURE] = SHAPE(RIGHT_W, SHAPE_A123),
+     [OP_THREAD_RESUME] = SHAPE(RIGHT_W, 0),
+-    [OP_THREAD_STOP] = SHAPE(RIGHT_W, 0),
++    [OP_THREAD_STOP] = SHAPE(0, 0),
+     [OP_THREAD_WATCH] = SHAPE(RIGHT_W, SHAPE_A1 | SHAPE_A2 | SHAPE_VARIES),
+     [OP_THREAD_FAULT] = SHAPE(RIGHT_W, 0),
+     [OP_THREAD_READ_REG] = SHAPE(RIGHT_W, SHAPE_A1),

@@ -81,7 +81,7 @@ struct op_info {
 #define OP(op, cap, makes, a1, a2, a3) [op] = { #op, cap, makes, { a1, a2, a3 }, 0 }
 #define DESCRIBE(op, cap, a1, a2, a3) [op] = { #op, cap, 0, { a1, a2, a3 }, 1 }
 
-static const struct op_info op_table[OP_COUNT] = {
+static const struct op_info op_table[OP_LIMIT] = {
     OP(OP_PRINT, CAP_PRINT, 0, ARG_WORD, ARG_WORD, ARG_WORD),
     OP(OP_HALT, CAP_HALT, 0, ARG_WORD, ARG_NONE, ARG_NONE),
     OP(OP_CAP_COPY, CAP_CAPTABLE, 0, ARG_DST_INVOKED, ARG_ANY, ARG_RIGHTS),
@@ -127,15 +127,6 @@ static const struct op_info op_table[OP_COUNT] = {
 #undef OP
 #undef DESCRIBE
 
-/* The assert sees only the highest code; LLVMFuzzerInitialize holds every code below it to an entry. */
-_Static_assert(OP_COUNT == 43 && OP_POOL_INFO == OP_COUNT - 1, "a new operation needs an entry in op_table");
-
-/* A code below OP_COUNT that is no operation any more, see OP_COUNT, which the kernel refuses as any other. */
-static inline int op_retired(unsigned op)
-{
-    return op == 11 || op == 27;
-}
-
 /* The loads and stores the driver makes itself, which invoke no capability. */
 static const struct op_info op_access[2] = {
     { "REPLAY_OP_LOAD", CAP_NONE, 0, { ARG_ADDRESS, ARG_NONE, ARG_NONE }, 0 },
@@ -148,7 +139,7 @@ static inline const struct op_info *op_info(uint8_t op)
     if (op == REPLAY_OP_LOAD || op == REPLAY_OP_STORE) {
         return &op_access[op - REPLAY_OP_LOAD];
     }
-    return op < OP_COUNT && op_table[op].name != 0 ? &op_table[op] : 0;
+    return op < OP_LIMIT && op_table[op].name != 0 ? &op_table[op] : 0;
 }
 
 #endif

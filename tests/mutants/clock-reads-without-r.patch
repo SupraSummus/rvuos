@@ -7,12 +7,12 @@ Report: a call went through a capability without the rights its operation needs
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -1014,7 +1014,7 @@ static const struct op_shape op_shapes[OP_COUNT] = {
-     [OP_IRQ_CARVE] = { CAP_IRQ_LINE, 0, SHAPE_A123 },
-     [OP_IRQ_BIND] = { CAP_IRQ_LINE, RIGHT_W, SHAPE_A123 },
-     [OP_IRQ_SET] = { CAP_IRQ, RIGHT_W, SHAPE_A123 | SHAPE_VARIES },
--    [OP_CLOCK_READ] = { CAP_CLOCK, RIGHT_R, 0 },
-+    [OP_CLOCK_READ] = { CAP_CLOCK, 0, 0 },
-     [OP_CLOCK_FRAME] = { CAP_CLOCK, RIGHT_R, SHAPE_A1 },
-     [OP_CLOCK_WATCHDOG] = { CAP_CLOCK, RIGHT_W, SHAPE_A1 },
-     [OP_TIME_CARVE] = { CAP_TIME, 0, SHAPE_A123 },
+@@ -997,7 +997,7 @@ static const struct op_shape op_shapes[OP_LIMIT] = {
+     [OP_IRQ_CARVE] = SHAPE(0, SHAPE_A123),
+     [OP_IRQ_BIND] = SHAPE(RIGHT_W, SHAPE_A123),
+     [OP_IRQ_SET] = SHAPE(RIGHT_W, SHAPE_A123 | SHAPE_VARIES),
+-    [OP_CLOCK_READ] = SHAPE(RIGHT_R, 0),
++    [OP_CLOCK_READ] = SHAPE(0, 0),
+     [OP_CLOCK_FRAME] = SHAPE(RIGHT_R, SHAPE_A1),
+     [OP_CLOCK_WATCHDOG] = SHAPE(RIGHT_W, SHAPE_A1),
+     [OP_TIME_CARVE] = SHAPE(0, SHAPE_A123),

@@ -50,7 +50,8 @@ and is summarised here.
 On ARMv7-M `r0` to `r6` stand for `a0` to `a6`, `r12` for `a7`, and `svc` makes the call;
 see "Architectures".
 
-Operation codes are a single flat numbering across all types.
+An operation's code says the type it is invoked on, `OP_TYPE`, in the bits above the low four,
+so one numbering covers every type.
 The kernel resolves the slot, checks that the type accepts the operation,
 that the capability carries the rights it needs,
 and that what the operation does not read is zero, from one table, `op_shapes`,
