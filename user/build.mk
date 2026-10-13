@@ -73,10 +73,10 @@ lib-test: $(BUILD)/kernel-libtest.$(IMAGE)
 # A build with a record in tests/bench/, QEMU's boards', is held to it within a tenth; bench-refresh writes it.
 BENCH_RECORD := tests/bench/$(notdir $(BUILD)).txt
 bench: $(BUILD)/kernel-bench.$(IMAGE)
-	tests/bench.py --cpu-hz $(BENCH_CPU_HZ) --board $(notdir $(BUILD)) --record $(BENCH_RECORD) "$(BOOT_PREFIX) $<"
+	tests/bench.py --cc $(CC) --cpu-hz $(BENCH_CPU_HZ) --board $(notdir $(BUILD)) --record $(BENCH_RECORD) "$(BOOT_PREFIX) $<"
 
 bench-refresh: $(BUILD)/kernel-bench.$(IMAGE)
-	tests/bench.py --cpu-hz $(BENCH_CPU_HZ) --board $(notdir $(BUILD)) --record $(BENCH_RECORD) --refresh \
+	tests/bench.py --cc $(CC) --cpu-hz $(BENCH_CPU_HZ) --board $(notdir $(BUILD)) --record $(BENCH_RECORD) --refresh \
 		"$(BOOT_PREFIX) $<"
 
 # The laboratory, user/lab/: servers and clients, scenario by scenario, and how long their asks waited;
