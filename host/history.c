@@ -288,12 +288,11 @@ static void children_of(const struct cap *c, addr_array *out)
  * The rights an operation needs of the capability it is invoked on, as rvuos/abi.h gives them;
  * one invoked on a capability of another type fails before its rights matter, and a describing one needs none.
  * RIGHTS_IN_HANDLER names an operation whose handler decides by what the call asks,
- * and RIGHTS_UNKNOWN a code that is no operation, which history_begin holds no code below OP_COUNT to but a retired one,
+ * and RIGHTS_UNKNOWN a code that is no operation, which history_begin holds no code of host/ops.h's table to,
  * so a call of one that went through is a violation.
  */
 #define RIGHTS_IN_HANDLER 0
 #define RIGHTS_UNKNOWN 0xff
-_Static_assert(OP_COUNT == 43 && OP_POOL_INFO == OP_COUNT - 1, "a new operation needs its rights in rights_needed");
 static uint8_t rights_needed(uint32_t op)
 {
     switch (op) {
@@ -347,12 +346,12 @@ static uint8_t rights_needed(uint32_t op)
     }
 }
 
-/* Every code below OP_COUNT but a retired one is an operation, so each says what it needs; checked once, at the first call. */
+/* Every operation of host/ops.h's table says what it needs; checked once, at the first call. */
 static void check_rights_table(void)
 {
     static bool checked;
-    for (uint32_t op = 1; !checked && op < OP_COUNT; op++) {
-        if (rights_needed(op) == RIGHTS_UNKNOWN && !op_retired(op)) {
+    for (uint32_t op = 1; !checked && op < OP_LIMIT; op++) {
+        if (rights_needed(op) == RIGHTS_UNKNOWN && op_info((uint8_t)op) != NULL) {
             fprintf(stderr, "host/history.c: operation %u has no rights in rights_needed\n", (unsigned)op);
             abort();
         }
@@ -613,7 +612,7 @@ static void check_order(void)
     }
     uint32_t status = caller->frame.regs[REG_A0];
     uint32_t want;
-    const struct op_info *info = call_op < OP_COUNT ? op_info((uint8_t)call_op) : NULL;
+    const struct op_info *info = call_op < OP_LIMIT ? op_info((uint8_t)call_op) : NULL;
     if (!invoked) {
         want = (uint32_t)invoked_status;
     } else if (info == NULL || info->cap != invoked_cap.type) {

@@ -951,8 +951,7 @@ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *a
 
 /*
  * What dispatch checks of an operation before its handler, in the manual's order:
- * the type it is invoked on, the right it needs, and zero in what of a1 to a3 it does not read.
- * A code with no entry has type CAP_NONE, which no capability a slot resolves to has.
+ * the type its code says, the right it needs, and zero in what of a1 to a3 it does not read.
  * A right of 0 is none, or one the handler decides by what the call asks: a retype into a pool takes RIGHT_R and RIGHT_W.
  */
 #define SHAPE_A1 0x1
@@ -961,51 +960,52 @@ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *a
 #define SHAPE_A123 (SHAPE_A1 | SHAPE_A2 | SHAPE_A3)
 #define SHAPE_RIGHTS_A3 0x8 /* a3 is a rights mask, zero past RIGHT_ALL */
 #define SHAPE_VARIES 0x10   /* its own values decide what it reads; see shape_reads */
+#define SHAPE_OP 0x80       /* an operation */
 struct op_shape {
-    uint8_t type;
     uint8_t right;
     uint8_t reads;
 };
-static const struct op_shape op_shapes[OP_COUNT] = {
-    [OP_PRINT] = { CAP_PRINT, RIGHT_W, SHAPE_A123 },
-    [OP_HALT] = { CAP_HALT, RIGHT_W, SHAPE_A1 },
-    [OP_TEST_TRACE] = { CAP_TEST, RIGHT_W, 0 },
-    [OP_TEST_TICK] = { CAP_TEST, RIGHT_W, 0 },
-    [OP_TEST_IRQ] = { CAP_TEST, RIGHT_W, SHAPE_A1 },
-    [OP_TEST_PREEMPT] = { CAP_TEST, RIGHT_W, SHAPE_A1 },
-    [OP_CAP_COPY] = { CAP_CAPTABLE, RIGHT_W, SHAPE_A123 | SHAPE_RIGHTS_A3 },
-    [OP_CAP_DELETE] = { CAP_CAPTABLE, RIGHT_W, SHAPE_A1 },
-    [OP_CAP_REVOKE] = { CAP_CAPTABLE, RIGHT_W, SHAPE_A1 },
-    [OP_CAP_DERIVE] = { CAP_CAPTABLE, RIGHT_W, SHAPE_A123 | SHAPE_RIGHTS_A3 },
-    [OP_CAP_MOVE] = { CAP_CAPTABLE, RIGHT_W, SHAPE_A1 | SHAPE_A2 },
-    [OP_FRAME_CARVE] = { CAP_FRAME, 0, SHAPE_A123 },
-    [OP_UNTYPED_RETYPE] = { CAP_UNTYPED, 0, SHAPE_A1 | SHAPE_A2 },
-    [OP_UNTYPED_SPLIT] = { CAP_UNTYPED, 0, SHAPE_A1 | SHAPE_A2 },
-    [OP_POOL_ALLOC] = { CAP_POOL, RIGHT_W, SHAPE_A123 | SHAPE_VARIES },
-    [OP_POOL_INFO] = { CAP_POOL, 0, SHAPE_A1 | SHAPE_A3 },
-    [OP_PROCESS_INSTALL] = { CAP_PROCESS, RIGHT_W, SHAPE_A123 | SHAPE_RIGHTS_A3 },
-    [OP_PROCESS_UNINSTALL] = { CAP_PROCESS, RIGHT_W, SHAPE_A1 },
-    [OP_PROCESS_MOUNT] = { CAP_PROCESS, RIGHT_W, SHAPE_A1 | SHAPE_A2 },
-    [OP_PROCESS_UNMOUNT] = { CAP_PROCESS, RIGHT_W, SHAPE_A1 },
-    [OP_THREAD_CONFIGURE] = { CAP_THREAD, RIGHT_W, SHAPE_A123 },
-    [OP_THREAD_RESUME] = { CAP_THREAD, RIGHT_W, 0 },
-    [OP_THREAD_STOP] = { CAP_THREAD, RIGHT_W, 0 },
-    [OP_THREAD_WATCH] = { CAP_THREAD, RIGHT_W, SHAPE_A1 | SHAPE_A2 | SHAPE_VARIES },
-    [OP_THREAD_FAULT] = { CAP_THREAD, RIGHT_W, 0 },
-    [OP_THREAD_READ_REG] = { CAP_THREAD, RIGHT_W, SHAPE_A1 },
-    [OP_THREAD_WRITE_REG] = { CAP_THREAD, RIGHT_W, SHAPE_A1 | SHAPE_A2 },
-    [OP_NOTIFY_SIGNAL] = { CAP_NOTIFICATION, RIGHT_W, SHAPE_A1 },
-    [OP_NOTIFY_WAIT] = { CAP_NOTIFICATION, RIGHT_R, 0 },
-    [OP_NOTIFY_LEND] = { CAP_NOTIFICATION, RIGHT_R, SHAPE_A1 },
-    [OP_NOTIFY_CARVE] = { CAP_NOTIFICATION, 0, SHAPE_A1 | SHAPE_A2 },
-    [OP_IRQ_CARVE] = { CAP_IRQ_LINE, 0, SHAPE_A123 },
-    [OP_IRQ_BIND] = { CAP_IRQ_LINE, RIGHT_W, SHAPE_A123 },
-    [OP_IRQ_SET] = { CAP_IRQ, RIGHT_W, SHAPE_A123 | SHAPE_VARIES },
-    [OP_CLOCK_READ] = { CAP_CLOCK, RIGHT_R, 0 },
-    [OP_CLOCK_FRAME] = { CAP_CLOCK, RIGHT_R, SHAPE_A1 },
-    [OP_CLOCK_WATCHDOG] = { CAP_CLOCK, RIGHT_W, SHAPE_A1 },
-    [OP_TIME_CARVE] = { CAP_TIME, 0, SHAPE_A123 },
-    [OP_TIME_BIND] = { CAP_TIME, RIGHT_W, SHAPE_A123 },
+#define SHAPE(right, reads) { (right), SHAPE_OP | (reads) }
+static const struct op_shape op_shapes[OP_LIMIT] = {
+    [OP_FRAME_CARVE] = SHAPE(0, SHAPE_A123),
+    [OP_POOL_ALLOC] = SHAPE(RIGHT_W, SHAPE_A123 | SHAPE_VARIES),
+    [OP_POOL_INFO] = SHAPE(0, SHAPE_A1 | SHAPE_A3),
+    [OP_CAP_COPY] = SHAPE(RIGHT_W, SHAPE_A123 | SHAPE_RIGHTS_A3),
+    [OP_CAP_DELETE] = SHAPE(RIGHT_W, SHAPE_A1),
+    [OP_CAP_REVOKE] = SHAPE(RIGHT_W, SHAPE_A1),
+    [OP_CAP_DERIVE] = SHAPE(RIGHT_W, SHAPE_A123 | SHAPE_RIGHTS_A3),
+    [OP_CAP_MOVE] = SHAPE(RIGHT_W, SHAPE_A1 | SHAPE_A2),
+    [OP_PROCESS_INSTALL] = SHAPE(RIGHT_W, SHAPE_A123 | SHAPE_RIGHTS_A3),
+    [OP_PROCESS_UNINSTALL] = SHAPE(RIGHT_W, SHAPE_A1),
+    [OP_PROCESS_MOUNT] = SHAPE(RIGHT_W, SHAPE_A1 | SHAPE_A2),
+    [OP_PROCESS_UNMOUNT] = SHAPE(RIGHT_W, SHAPE_A1),
+    [OP_THREAD_CONFIGURE] = SHAPE(RIGHT_W, SHAPE_A123),
+    [OP_THREAD_RESUME] = SHAPE(RIGHT_W, 0),
+    [OP_THREAD_STOP] = SHAPE(RIGHT_W, 0),
+    [OP_THREAD_WATCH] = SHAPE(RIGHT_W, SHAPE_A1 | SHAPE_A2 | SHAPE_VARIES),
+    [OP_THREAD_FAULT] = SHAPE(RIGHT_W, 0),
+    [OP_THREAD_READ_REG] = SHAPE(RIGHT_W, SHAPE_A1),
+    [OP_THREAD_WRITE_REG] = SHAPE(RIGHT_W, SHAPE_A1 | SHAPE_A2),
+    [OP_PRINT] = SHAPE(RIGHT_W, SHAPE_A123),
+    [OP_NOTIFY_SIGNAL] = SHAPE(RIGHT_W, SHAPE_A1),
+    [OP_NOTIFY_WAIT] = SHAPE(RIGHT_R, 0),
+    [OP_NOTIFY_CARVE] = SHAPE(0, SHAPE_A1 | SHAPE_A2),
+    [OP_NOTIFY_LEND] = SHAPE(RIGHT_R, SHAPE_A1),
+    [OP_UNTYPED_RETYPE] = SHAPE(0, SHAPE_A1 | SHAPE_A2),
+    [OP_UNTYPED_SPLIT] = SHAPE(0, SHAPE_A1 | SHAPE_A2),
+    [OP_IRQ_CARVE] = SHAPE(0, SHAPE_A123),
+    [OP_IRQ_BIND] = SHAPE(RIGHT_W, SHAPE_A123),
+    [OP_IRQ_SET] = SHAPE(RIGHT_W, SHAPE_A123 | SHAPE_VARIES),
+    [OP_CLOCK_READ] = SHAPE(RIGHT_R, 0),
+    [OP_CLOCK_FRAME] = SHAPE(RIGHT_R, SHAPE_A1),
+    [OP_CLOCK_WATCHDOG] = SHAPE(RIGHT_W, SHAPE_A1),
+    [OP_TIME_CARVE] = SHAPE(0, SHAPE_A123),
+    [OP_TIME_BIND] = SHAPE(RIGHT_W, SHAPE_A123),
+    [OP_HALT] = SHAPE(RIGHT_W, SHAPE_A1),
+    [OP_TEST_TRACE] = SHAPE(RIGHT_W, 0),
+    [OP_TEST_TICK] = SHAPE(RIGHT_W, 0),
+    [OP_TEST_IRQ] = SHAPE(RIGHT_W, SHAPE_A1),
+    [OP_TEST_PREEMPT] = SHAPE(RIGHT_W, SHAPE_A1),
 };
 
 /*
@@ -1031,8 +1031,8 @@ static uint8_t shape_reads(uint32_t op, const struct cap *cap, const uint32_t *a
 
 static int shape_check(uint32_t op, const struct cap *cap, const uint32_t *arg)
 {
-    const struct op_shape *shape = op < OP_COUNT ? &op_shapes[op] : NULL;
-    if (shape == NULL || shape->type != cap->type) {
+    const struct op_shape *shape = op < OP_LIMIT ? &op_shapes[op] : NULL;
+    if (shape == NULL || !(shape->reads & SHAPE_OP) || OP_TYPE(op) != cap->type) {
         return KERR_WRONG_TYPE;
     }
     if ((cap->rights & shape->right) != shape->right) {
@@ -1070,7 +1070,7 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
         return cap_info(&cap, arg);
     }
 
-    /* The type it is invoked on, the right it needs, and zero in what it does not read; see op_shapes. */
+    /* The type its code says, the right it needs, and zero in what it does not read; see op_shapes. */
     err = shape_check(op, &cap, arg);
     if (err != KERR_OK) {
         return err;

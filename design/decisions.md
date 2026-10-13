@@ -517,6 +517,9 @@ until the maintainer decides otherwise.
     The next had the replay's record carry all six arguments the registers do, twenty-eight bytes,
     and the fuzzer's inputs keep 128 records at most, its `-max_len` 3584;
     `a4` to `a6` stay unread and unchecked, `TODO.md` says why.
+    The next made a code its type in the four bits above the low four, `OP_TYPE`, and its number among the type's operations,
+    `OP_CAP_INFO`, which every type takes, 0x01, and `Test`'s together from 0xe0, apart from what a program that only runs calls,
+    so `op_shapes` lost its column of types.
     The rest below would break a binary built against today's ABI, and each goes in a change of its own:
     the seeds name what they call, `tools/seed.py`,
     so a change rebuilds them and rewrites only those that call an operation whose arguments it changes.
@@ -529,12 +532,6 @@ until the maintainer decides otherwise.
       The watchdog went onto the clock, the boot table keeps a test input and a console on every board,
       and execute-only stays open, decision 23, each because the alternative would have renumbered the seeds and the corpus.
       The record carries six now, and the seeds are text, so each may be decided on its merits.
-    - **The numbering.**
-      Operation codes are flat, in the order the operations came,
-      and `Test`'s four operations lie among the rest.
-      Codes grouped by type, with the tests' in a range of their own that a stable program never calls,
-      would keep `KERR_WRONG_TYPE` and say which calls the ABI promises;
-      the describing calls, 41 and 42, came last, and every type takes the first.
     - **Where a new capability goes.**
       `a1` for `OP_CAP_COPY`, `OP_CAP_DERIVE`, `OP_CAP_MOVE`, `OP_CLOCK_FRAME` and `OP_UNTYPED_SPLIT`,
       `a2` for `OP_UNTYPED_RETYPE`, `OP_POOL_ALLOC` and `OP_NOTIFY_CARVE`,

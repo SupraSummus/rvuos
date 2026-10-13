@@ -110,10 +110,10 @@
  * a1, a2, a3 = up to PRINT_BYTES bytes, the lowest byte of a1 first,
  * which end at the first zero byte: the log is text.
  */
-#define OP_PRINT 1
+#define OP_PRINT 0x60
 #define PRINT_BYTES 12
 /* Halt (RIGHT_W): halt the machine. a1 = exit code. Does not return. */
-#define OP_HALT 2
+#define OP_HALT 0xd0
 /*
  * Test (RIGHT_W): turn on tracing and self-checking.
  * From then on the kernel prints every system call with its status,
@@ -127,7 +127,7 @@
  * It cannot be turned off again, so a traced program cannot hide,
  * and once it is on the call changes nothing.
  */
-#define OP_TEST_TRACE 10
+#define OP_TEST_TRACE 0xe0
 /*
  * Test (RIGHT_W): what the timer tick does, on request.
  * Time moves by one tick, charged to the caller while it has time,
@@ -137,7 +137,7 @@
  * Works while tracing is on, unlike the tick itself;
  * see DESIGN.md, "Verification".
  */
-#define OP_TEST_TICK 17
+#define OP_TEST_TICK 0xe1
 /*
  * Test (RIGHT_W): what a device interrupt does, on request. a1 = the line.
  * The Irq armed on the line masks it and signals its bits,
@@ -150,7 +150,7 @@
  * It is how a replay fires an interrupt, since the host build has no devices;
  * see DESIGN.md, "Verification".
  */
-#define OP_TEST_IRQ 22
+#define OP_TEST_IRQ 0xe2
 /*
  * Test (RIGHT_W): a tick landing within a restartable call, on request. a1 = n.
  * The n-th place from now at which any restartable call could stop between two steps, it stops,
@@ -159,7 +159,7 @@
  * It is how a replay has a thread run while another's call is half done,
  * since under tracing the tick stops no call; see DESIGN.md, "Verification".
  */
-#define OP_TEST_PREEMPT 32
+#define OP_TEST_PREEMPT 0xe3
 
 /*
  * CapTable (RIGHT_W): copy a capability from the caller's tables.
@@ -172,14 +172,14 @@
  * An Untyped is derived, never copied: a copy would be a second allocator over the same memory,
  * so copying one fails with KERR_WRONG_TYPE.
  */
-#define OP_CAP_COPY 3
+#define OP_CAP_COPY 0x30
 /*
  * CapTable (RIGHT_W): clear a slot. a1 = slot.
  * What was derived from the slot is not cleared: it is adopted by the slot's parent,
  * or, when the slot is a root, each child becomes a root, which is restartable.
  * Clearing an empty slot succeeds.
  */
-#define OP_CAP_DELETE 4
+#define OP_CAP_DELETE 0x31
 /*
  * CapTable (RIGHT_W): clear everything derived from a slot, in every table and every process,
  * and leave the slot itself. a1 = slot.
@@ -202,7 +202,7 @@
  * the calling thread, its process, a table the process mounts or the invoked table.
  * Restartable.
  */
-#define OP_CAP_REVOKE 23
+#define OP_CAP_REVOKE 0x32
 /*
  * CapTable (RIGHT_W): derive a capability from one in the caller's tables.
  * The arguments are OP_CAP_COPY's.
@@ -212,7 +212,7 @@
  * and the derived one is the whole of it: the source makes nothing more
  * until the derived one and what was made of it are gone.
  */
-#define OP_CAP_DERIVE 24
+#define OP_CAP_DERIVE 0x33
 /*
  * CapTable (RIGHT_W): move a capability from the caller's tables.
  * a1 = destination slot in the invoked table, a2 = source slot in the caller's tables.
@@ -224,7 +224,7 @@
  * since what was derived from the source may hold all of them.
  * An Untyped moves too, with what was made of it: a move makes no second allocator.
  */
-#define OP_CAP_MOVE 18
+#define OP_CAP_MOVE 0x34
 
 /*
  * Every frame is a block: its size is a power of two of at least the smallest region,
@@ -239,7 +239,7 @@
  * so that the new frame is a block and costs one PMP entry wherever it is installed.
  * The new frame is a child of the invoked one in the derivation tree.
  */
-#define OP_FRAME_CARVE 5
+#define OP_FRAME_CARVE 0x10
 
 /*
  * An Untyped is either free or made: while nothing lies below it in the derivation tree
@@ -260,13 +260,13 @@
  * it lies below the pool's own node in the tree, and the returned Pool capability below that node,
  * so revoking below the Untyped destroys the pool.
  */
-#define OP_UNTYPED_RETYPE 6
+#define OP_UNTYPED_RETYPE 0x80
 /*
  * Untyped: split its memory into two halves, each an Untyped with the invoked one's rights,
  * below it in the tree. a1 = slot for the lower half, a2 = slot for the upper half, two slots.
  * A half is no smaller than the smallest region, else KERR_INVALID_ARG.
  */
-#define OP_UNTYPED_SPLIT 30
+#define OP_UNTYPED_SPLIT 0x81
 
 /*
  * Pool (RIGHT_W): allocate a kernel object.
@@ -288,7 +288,7 @@
  * stops the thread for good: see OP_THREAD_RESUME.
  * An Irq is not allocated here but bound, with OP_IRQ_BIND.
  */
-#define OP_POOL_ALLOC 7
+#define OP_POOL_ALLOC 0x20
 /*
  * Process (RIGHT_W): install a region into one of the process's region slots.
  * a1 = region slot index, a2 = Frame capability slot in the caller's tables,
@@ -301,9 +301,9 @@
  * The installed region is a child of the Frame capability in the derivation tree:
  * revoking below that capability uninstalls it.
  */
-#define OP_PROCESS_INSTALL 8
+#define OP_PROCESS_INSTALL 0x40
 /* Process (RIGHT_W): clear a region slot. a1 = region slot index. Clearing an empty slot succeeds. */
-#define OP_PROCESS_UNINSTALL 9
+#define OP_PROCESS_UNINSTALL 0x41
 /*
  * Process (RIGHT_W): mount a table into one of the process's table slots,
  * so that its threads name the table's slots SLOT_IN(a1, index).
@@ -315,14 +315,14 @@
  * A process moves to another table with this, OP_CAP_MOVE and OP_PROCESS_UNMOUNT;
  * see DESIGN.md, "A process's tables".
  */
-#define OP_PROCESS_MOUNT 39
+#define OP_PROCESS_MOUNT 0x42
 /*
  * Process (RIGHT_W): clear a table slot.
  * a1 = table slot index, below PROCESS_TABLES, else KERR_INVALID_ARG.
  * Clearing an empty one succeeds.
  * The table stays as long as its pool does; the numbers that pointed into this table slot name nothing.
  */
-#define OP_PROCESS_UNMOUNT 40
+#define OP_PROCESS_UNMOUNT 0x43
 
 /*
  * Thread (RIGHT_W): set where a stopped thread will start, and its argument.
@@ -334,7 +334,7 @@
  * The kernel does not check either value:
  * a thread that starts nowhere useful faults, which is its creator's business; see OP_THREAD_WATCH.
  */
-#define OP_THREAD_CONFIGURE 12
+#define OP_THREAD_CONFIGURE 0x50
 /*
  * Thread (RIGHT_W): make a stopped thread ready.
  * It runs once it is bound to units of time, see OP_TIME_BIND,
@@ -347,7 +347,7 @@
  * Fails with KERR_STATE unless the thread is stopped,
  * and once its process was taken, see OP_POOL_ALLOC: it has nothing to run in.
  */
-#define OP_THREAD_RESUME 13
+#define OP_THREAD_RESUME 0x51
 /*
  * Thread (RIGHT_W): stop the thread, whatever it is doing.
  * a1, a2 and a3 are zero, else KERR_INVALID_ARG, so that they may be given a meaning later.
@@ -373,7 +373,7 @@
  * and a thread that stops itself says so first by its own means.
  * See DESIGN.md, "Threads".
  */
-#define OP_THREAD_STOP 16
+#define OP_THREAD_STOP 0x52
 /* What OP_THREAD_STOP found the thread doing. */
 #define THREAD_WAS_STOPPED 0
 #define THREAD_WAS_READY   1
@@ -394,7 +394,7 @@
  * so revoking below that capability, or destroying the notification's pool, clears the watch.
  * See DESIGN.md, "Faults".
  */
-#define OP_THREAD_WATCH 31
+#define OP_THREAD_WATCH 0x53
 /*
  * Thread (RIGHT_W): what stopped a thread that faulted.
  * Returns a1 = the cause, a2 = the program counter, a3 = the address, a4 = the status:
@@ -407,7 +407,7 @@
  * and a stop of one stopped where it faulted keeps the fault; see OP_THREAD_STOP.
  * See DESIGN.md, "Faults".
  */
-#define OP_THREAD_FAULT 33
+#define OP_THREAD_FAULT 0x54
 /*
  * Thread (RIGHT_W): read one register of a stopped thread.
  * a1 = the register: x0 to x31 on RISC-V, where x0 reads zero, r0 to r14 on ARMv7-M,
@@ -417,7 +417,7 @@
  * and with KERR_INVALID_ARG for a number that names no register.
  * One stopped while it waited reads at its call: the pc at its ecall or svc, a7 the operation, a0 to a3 the call's arguments.
  */
-#define OP_THREAD_READ_REG 34
+#define OP_THREAD_READ_REG 0x55
 /*
  * Thread (RIGHT_W): write one register of a stopped thread.
  * a1 = the register, as for OP_THREAD_READ_REG; a write to x0 changes nothing. a2 = the value.
@@ -427,7 +427,7 @@
  * Under tracing the thread cannot run any more, as after OP_THREAD_CONFIGURE; see DESIGN.md, "Verification".
  * Fails as OP_THREAD_READ_REG does.
  */
-#define OP_THREAD_WRITE_REG 35
+#define OP_THREAD_WRITE_REG 0x56
 #define THREAD_REG_PC 32
 
 /*
@@ -439,7 +439,7 @@
  * and it takes the rest of the turn back, the caller going to the back of its queue;
  * otherwise, today, the one that waited longest.
  */
-#define OP_NOTIFY_SIGNAL 14
+#define OP_NOTIFY_SIGNAL 0x70
 /*
  * Notification (RIGHT_R): take the bits that are set.
  * Returns a1 = the bits, which is never zero, and clears them.
@@ -447,7 +447,7 @@
  * the bits are sticky, so a signal that arrives first is not lost.
  * A stop takes the waiter off and leaves it at this call, which a resume makes again; see OP_THREAD_STOP.
  */
-#define OP_NOTIFY_WAIT 15
+#define OP_NOTIFY_WAIT 0x71
 /*
  * Notification (RIGHT_R): wait as OP_NOTIFY_WAIT does, lending a thread the caller's time meanwhile.
  * a1 = the slot of a Thread capability with RIGHT_X, the borrower; the caller itself fails with KERR_INVALID_ARG.
@@ -464,7 +464,7 @@
  * A stopped borrower keeps its lenders, whose time buys nothing until it is resumed.
  * See DESIGN.md, "Communication and synchronisation".
  */
-#define OP_NOTIFY_LEND 38
+#define OP_NOTIFY_LEND 0x73
 /*
  * Notification: derive a capability that may signal fewer bits, with the same rights.
  * a1 = the bits, of which those the invoked capability may signal are kept, a2 = destination slot.
@@ -473,7 +473,7 @@
  * and the new capability is a child of the invoked one.
  * A client given its own bit this way cannot signal another's; see DESIGN.md, "Communication and synchronisation".
  */
-#define OP_NOTIFY_CARVE 36
+#define OP_NOTIFY_CARVE 0x72
 /* Every bit: what a new Notification capability may signal, and what a signal names to set all its capability may. */
 #define NOTIFY_ALL_BITS 0xffffffffu
 
@@ -483,7 +483,7 @@
  * Like OP_FRAME_CARVE, this is a table operation that touches no kernel memory,
  * and the new capability is a child of the invoked one.
  */
-#define OP_IRQ_CARVE 19
+#define OP_IRQ_CARVE 0x90
 /*
  * IrqLine (RIGHT_W): bind the one line the capability names to a notification,
  * as an Irq object; a timer line binds the same way as a controller's.
@@ -503,7 +503,7 @@
  * Every check comes before the clearing, which is restartable.
  * The new Irq is masked: it signals nothing until OP_IRQ_SET arms it.
  */
-#define OP_IRQ_BIND 20
+#define OP_IRQ_BIND 0x91
 /*
  * Irq (RIGHT_W): unmask the line and name the bits the next interrupt signals.
  * a1 = the bits, of which only those the Irq may signal are kept, see OP_IRQ_BIND,
@@ -530,7 +530,7 @@
  * Fails with KERR_STATE once the Irq's notification was taken, see OP_IRQ_BIND:
  * it has nothing to signal, and its line stays bound until the Irq's pool is destroyed.
  */
-#define OP_IRQ_SET 21
+#define OP_IRQ_SET 0xa0
 #define IRQ_SET_PERIOD 0x1
 
 /*
@@ -540,7 +540,7 @@
  * Under tracing the time is the tick count's; see DESIGN.md, "Verification".
  * The rate and the tick, the quantum, are OP_CAP_INFO's too, which needs no right.
  */
-#define OP_CLOCK_READ 25
+#define OP_CLOCK_READ 0xb0
 /*
  * Clock (RIGHT_R): derive a read-only frame holding the counter's low 32 bits, a child of the clock.
  * a1 = destination slot.
@@ -549,7 +549,7 @@
  * the whole time is OP_CLOCK_READ's, since where the rest of the counter lies, if anywhere, is the board's.
  * It is the smallest block holding the word, so a coarse PMP grain shows its neighbours too.
  */
-#define OP_CLOCK_FRAME 26
+#define OP_CLOCK_FRAME 0xb1
 /*
  * Clock (RIGHT_W): the watchdog. a1 = microseconds, more than zero and at most WATCHDOG_US_MAX,
  * else KERR_INVALID_ARG.
@@ -559,7 +559,7 @@
  * There is one watchdog on the machine, which every capability with RIGHT_W to the clock feeds.
  * See DESIGN.md, "The watchdog".
  */
-#define OP_CLOCK_WATCHDOG 37
+#define OP_CLOCK_WATCHDOG 0xb2
 #define WATCHDOG_US_MAX 10000000u /* ten seconds */
 
 /*
@@ -568,7 +568,7 @@
  * Like OP_IRQ_CARVE, this is a table operation that touches no kernel memory,
  * and the new capability is a child of the invoked one.
  */
-#define OP_TIME_CARVE 28
+#define OP_TIME_CARVE 0xc0
 /*
  * Time (RIGHT_W): bind a thread to units of the capability, which it then earns.
  * a1 = the slot of the Thread capability, which needs RIGHT_W,
@@ -587,7 +587,7 @@
  * but for a thread with time that waits for the core, which takes it once an unbind left the turn without time;
  * a turn on spare time ends as a thread with time becomes ready, see DESIGN.md, "Scheduling".
  */
-#define OP_TIME_BIND 29
+#define OP_TIME_BIND 0xc1
 
 /*
  * Any capability: describe it. a1 = the page, 0, the only one so far, and a2 = a3 = 0;
@@ -625,7 +625,7 @@
  * though an Untyped's base may be where a pool made of it keeps its descriptor.
  * A pool's room and what lies below an Untyped are as the call found them; a call on another core may change them at once.
  */
-#define OP_CAP_INFO 41
+#define OP_CAP_INFO 0x01
 #define CAP_INFO_TYPE(a1)   ((a1) & 0xffu)
 #define CAP_INFO_RIGHTS(a1) (((a1) >> 8) & 0xffu)
 /*
@@ -643,13 +643,17 @@
  * The sizes are the kernel build's, its architecture and board among them, and may change from one kernel to the next;
  * see DESIGN.md, open decision 29.
  */
-#define OP_POOL_INFO 42
+#define OP_POOL_INFO 0x21
 
 /*
- * One above the highest operation code; the fuzzer's mutator draws below it.
- * Codes 11 and 27 are no operation's: they were OP_FRAME_INFO and OP_UNTYPED_INFO, which OP_CAP_INFO replaced.
+ * An operation's code is the type of the capability it is invoked on, in the four bits above the low four,
+ * and its number among that type's operations, so the code says the type, OP_TYPE;
+ * a code below 0x10, CAP_NONE's, is an operation every type takes, OP_CAP_INFO alone so far.
+ * Test's lie together, from 0xe0, apart from what a program that only runs ever calls.
+ * Every code is below OP_LIMIT; the replay's own records lie above it, see rvuos/replay.h.
  */
-#define OP_COUNT 43
+#define OP_TYPE(op) ((op) >> 4)
+#define OP_LIMIT 0xf0
 
 /*
  * Capability slots the kernel fills in the root task's table at boot.

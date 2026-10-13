@@ -8,12 +8,12 @@ Report: a call went through a capability without the rights its operation needs
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -1008,7 +1008,7 @@ static const struct op_shape op_shapes[OP_COUNT] = {
-     [OP_THREAD_READ_REG] = { CAP_THREAD, RIGHT_W, SHAPE_A1 },
-     [OP_THREAD_WRITE_REG] = { CAP_THREAD, RIGHT_W, SHAPE_A1 | SHAPE_A2 },
-     [OP_NOTIFY_SIGNAL] = { CAP_NOTIFICATION, RIGHT_W, SHAPE_A1 },
--    [OP_NOTIFY_WAIT] = { CAP_NOTIFICATION, RIGHT_R, 0 },
-+    [OP_NOTIFY_WAIT] = { CAP_NOTIFICATION, 0, 0 },
-     [OP_NOTIFY_LEND] = { CAP_NOTIFICATION, RIGHT_R, SHAPE_A1 },
-     [OP_NOTIFY_CARVE] = { CAP_NOTIFICATION, 0, SHAPE_A1 | SHAPE_A2 },
-     [OP_IRQ_CARVE] = { CAP_IRQ_LINE, 0, SHAPE_A123 },
+@@ -989,7 +989,7 @@ static const struct op_shape op_shapes[OP_LIMIT] = {
+     [OP_THREAD_WRITE_REG] = SHAPE(RIGHT_W, SHAPE_A1 | SHAPE_A2),
+     [OP_PRINT] = SHAPE(RIGHT_W, SHAPE_A123),
+     [OP_NOTIFY_SIGNAL] = SHAPE(RIGHT_W, SHAPE_A1),
+-    [OP_NOTIFY_WAIT] = SHAPE(RIGHT_R, 0),
++    [OP_NOTIFY_WAIT] = SHAPE(0, 0),
+     [OP_NOTIFY_CARVE] = SHAPE(0, SHAPE_A1 | SHAPE_A2),
+     [OP_NOTIFY_LEND] = SHAPE(RIGHT_R, SHAPE_A1),
+     [OP_UNTYPED_RETYPE] = SHAPE(0, SHAPE_A1 | SHAPE_A2),

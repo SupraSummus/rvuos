@@ -81,7 +81,7 @@ def value(text, names, depth=0):
 
 def operations(names):
     """Every operation's code, by name."""
-    return {n: value(names[n], names) for n in names if n.startswith(("OP_", "REPLAY_OP_")) and n != "OP_COUNT"}
+    return {n: value(names[n], names) for n in names if n.startswith(("OP_", "REPLAY_OP_")) and n != "OP_LIMIT"}
 
 
 def record(line, names, ops):
@@ -234,6 +234,10 @@ def main():
         return
     ops = operations(names)
     if len(sys.argv) == 4 and sys.argv[1] == "--build":
+        # Every operation the ABI has is one host/ops.h describes, or the mutator and --text pass over it.
+        missing = sorted(set(ops) - set(kinds()))
+        if missing:
+            sys.exit(f"host/ops.h has no entry for {', '.join(missing)}")
         # Anew, so that a seed renamed or removed leaves nothing behind to replay,
         # and whole or not at all, so that a seed that does not build leaves no directory make takes as built.
         out = Path(sys.argv[3])

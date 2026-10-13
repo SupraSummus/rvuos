@@ -389,7 +389,7 @@ and `PROGRAMS` in `user/build.mk` links each with the library.
 `OP_TEST_TRACE` makes the kernel print one line per system call,
 
 ```
-trace: op=0x00000007 slot=0x00000004 a1=0x00000007 a2=0x0000000d a3=0x00000000 -> 0x00000000
+trace: op=0x00000020 slot=0x00000004 a1=0x00000016 a2=0x00000007 a3=0x00000000 -> 0x00000000
 ```
 
 with `blocked` in place of a status when the call blocked,

@@ -36,10 +36,14 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
 
 int LLVMFuzzerInitialize(int *argc, char ***argv)
 {
-    /* Every code below OP_COUNT but a retired one is an operation, so a new one without an entry in host/ops.h stops the harness here. */
-    for (unsigned op = 1; op < OP_COUNT; op++) {
-        if (op_table[op].name == NULL && !op_retired(op)) {
-            fprintf(stderr, "host/ops.h: operation %u has no entry in op_table\n", op);
+    /*
+     * An entry of host/ops.h's table is invoked on the type its code says, see OP_TYPE, or on any for a code below 0x10;
+     * tools/seed.py, which builds the seeds, holds every operation of rvuos/abi.h to an entry.
+     */
+    for (unsigned op = 1; op < OP_LIMIT; op++) {
+        const struct op_info *info = &op_table[op];
+        if (info->name != NULL && info->cap != (OP_TYPE(op) == CAP_NONE ? ON_ANY : OP_TYPE(op))) {
+            fprintf(stderr, "host/ops.h: operation %s is invoked on a type its code does not say\n", info->name);
             abort();
         }
     }
