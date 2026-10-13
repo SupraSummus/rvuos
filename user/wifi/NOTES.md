@@ -28,7 +28,7 @@ the boot now grants a frame over each device instead, open decision 25.
 
 **The isolation is real and cheap.**
 The driver holds PIO0's registers, 128 bytes of four pins' control, its own RAM and nothing else:
-no `Debug`, no console, no other pin.
+no `Print`, no console, no other pin.
 A 128-byte frame over sixteen pins' control registers is authority cut to the size of the job.
 
 **PIO from user mode worked the first time,**
@@ -192,9 +192,9 @@ and the library and this system moved onto them:
   so `child_start` makes no debugger's call, and a thread started again starts from nothing its last run left.
 - **Initialised data.** `start.S` copies `.data` from behind the code, so the root task may write `static uint32_t next = BOOT_CAP_COUNT;`.
   A child still keeps no global: it runs the root task's code without its data, and `tools/no-globals.py` still says so at the link.
-- **A capability that only prints.** `Debug` writes into the log with `RIGHT_W` and halts or drives the machine with `RIGHT_X`.
-  A child gets `CHILD_LOG` with `RIGHT_W` alone, so its lines reach the log in order with the kernel's, its faults' reports among them,
-  and the ring in its page and the root task's copying of it are gone; `OP_DEBUG_WRITE` carries twelve bytes a call, not one.
+- **A capability that only prints.** `Print` writes into the log, and halting and driving the machine are `Halt`'s and `Test`'s.
+  A child gets `CHILD_LOG`, so its lines reach the log in order with the kernel's, its faults' reports among them,
+  and the ring in its page and the root task's copying of it are gone; `OP_PRINT` carries twelve bytes a call, not one.
 - **Badges.** A notification capability carries the bits it may signal, and `OP_NOTIFY_CARVE` narrows them as a frame is carved.
   The library gives every signaller the other side's inbox carved to its own bit,
   so who signalled is the kernel's answer rather than a convention, and neither a child's page nor a channel's end names a bit to signal.

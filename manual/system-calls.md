@@ -80,33 +80,34 @@ and may fail, with what it already revoked staying revoked.
 | 8 | `KERR_LIMIT` | a fixed kernel limit was hit, such as the PMP entry count |
 | 9 | `KERR_STATE` | the object is not in a state that allows this |
 
-### 6.3 Operations on `Debug`
+### 6.3 Operations on `Print`, `Halt` and `Test`
 
-`OP_DEBUG_WRITE` needs `RIGHT_W`,
-and every other operation `RIGHT_X`, since it halts or drives the machine;
-a `Debug` capability with `RIGHT_W` alone writes into the log and can do nothing else,
-which is how a child is given somewhere to print.
+Three types, each with no object behind it and each needing `RIGHT_W`:
+`Print` writes into the log, `Halt` halts the machine, and `Test` drives it as a test does.
+Another's operation is `KERR_WRONG_TYPE`,
+so a child given `Print` writes into the log and can do nothing else,
+and a supervisor given `Halt` halts and drives nothing.
 
-**`OP_DEBUG_WRITE` (1).**
-`a1`, `a2`, `a3` = up to `DEBUG_WRITE_BYTES`, 12, bytes, the lowest byte of `a1` first,
+**`OP_PRINT` (1)**, on `Print`.
+`a1`, `a2`, `a3` = up to `PRINT_BYTES`, 12, bytes, the lowest byte of `a1` first,
 which end at the first zero byte.
 Appends them to the kernel log, section 5.10.
 `rv_write` in `user/rvuos.h` writes a longer text a call per 12 bytes.
 
-**`OP_DEBUG_HALT` (2).**
+**`OP_HALT` (2)**, on `Halt`.
 `a1` = exit code.
 Stops the machine; on QEMU the emulator exits with that code,
 on the ESP32-C6 the core parks after printing it,
 and RP2350 prints it and reboots into BOOTSEL.
 Does not return.
 
-**`OP_DEBUG_TRACE` (10).**
+**`OP_TEST_TRACE` (10)**, on `Test`.
 Turns tracing and self-checking on; see section 9.
 Every thread's account is filled, section 5.11.
 Cannot be turned off again,
 and once tracing is on the call changes nothing.
 
-**`OP_DEBUG_TICK` (17).**
+**`OP_TEST_TICK` (17)**, on `Test`.
 Does what the timer tick does, on request:
 time moves by one tick, charged to the caller if it had time as its turn began, every due timer line fires,
 every thread whose account reached a tick has time again,
@@ -114,17 +115,17 @@ the caller's turn ends as section 5.11 says,
 and the caller stays ready.
 Works while tracing is on, unlike the tick itself.
 
-**`OP_DEBUG_IRQ` (22).**
+**`OP_TEST_IRQ` (22)**, on `Test`.
 `a1` = a line.
 Does what a device interrupt on that line does:
 the `Irq` armed on it masks the line and signals its bits.
 `KERR_STATE` when nothing is armed on the line;
 `KERR_INVALID_ARG` for a line the controller does not have, line 0 included.
 
-**`OP_DEBUG_PREEMPT` (32).**
+**`OP_TEST_PREEMPT` (32)**, on `Test`.
 `a1` = n.
 The n-th place from now at which a restartable call could stop between two steps, it stops,
-whether or not an interrupt is pending, and `OP_DEBUG_TICK` is done there:
+whether or not an interrupt is pending, and `OP_TEST_TICK` is done there:
 time moves by one tick, and the caller's turn ends with the caller ready at its `ecall`,
 so another thread may run before the caller makes its call again.
 Every such place counts, in whichever thread's call;
@@ -532,7 +533,7 @@ and in `a2` to `a4` what the capability names, by its type:
 | `Irq` | its line | the bits it may signal, 0 once its notification was taken, never those it is armed with | 1 on a timer line, else 0 |
 | `Time` | the first unit | the count | the tick in microseconds |
 | `Clock` | the counter's rate in hertz, as `OP_CLOCK_READ`'s | the tick in counts of the counter | the tick in microseconds |
-| `Debug` | 0 | 0 | 0 |
+| `Print`, `Halt`, `Test` | 0 | 0 | 0 |
 
 Describing grants nothing:
 it changes nothing, and returns nothing a call takes as a reference,
@@ -553,8 +554,8 @@ whether something outside the pool still holds its objects it does not tell.
 
 | Code | Operation | Type |
 |---|---|---|
-| 1 | `OP_DEBUG_WRITE` | `Debug` |
-| 2 | `OP_DEBUG_HALT` | `Debug` |
+| 1 | `OP_PRINT` | `Print` |
+| 2 | `OP_HALT` | `Halt` |
 | 3 | `OP_CAP_COPY` | `CapTable` |
 | 4 | `OP_CAP_DELETE` | `CapTable` |
 | 5 | `OP_FRAME_CARVE` | `Frame` |
@@ -562,19 +563,19 @@ whether something outside the pool still holds its objects it does not tell.
 | 7 | `OP_POOL_ALLOC` | `KernelPool` |
 | 8 | `OP_PROCESS_INSTALL` | `Process` |
 | 9 | `OP_PROCESS_UNINSTALL` | `Process` |
-| 10 | `OP_DEBUG_TRACE` | `Debug` |
+| 10 | `OP_TEST_TRACE` | `Test` |
 | 11 | none; it was `OP_FRAME_INFO` | |
 | 12 | `OP_THREAD_CONFIGURE` | `Thread` |
 | 13 | `OP_THREAD_RESUME` | `Thread` |
 | 14 | `OP_NOTIFY_SIGNAL` | `Notification` |
 | 15 | `OP_NOTIFY_WAIT` | `Notification` |
 | 16 | `OP_THREAD_STOP` | `Thread` |
-| 17 | `OP_DEBUG_TICK` | `Debug` |
+| 17 | `OP_TEST_TICK` | `Test` |
 | 18 | `OP_CAP_MOVE` | `CapTable` |
 | 19 | `OP_IRQ_CARVE` | `IrqLine` |
 | 20 | `OP_IRQ_BIND` | `IrqLine` |
 | 21 | `OP_IRQ_SET` | `Irq` |
-| 22 | `OP_DEBUG_IRQ` | `Debug` |
+| 22 | `OP_TEST_IRQ` | `Test` |
 | 23 | `OP_CAP_REVOKE` | `CapTable` |
 | 24 | `OP_CAP_DERIVE` | `CapTable` |
 | 25 | `OP_CLOCK_READ` | `Clock` |
@@ -584,7 +585,7 @@ whether something outside the pool still holds its objects it does not tell.
 | 29 | `OP_TIME_BIND` | `Time` |
 | 30 | `OP_UNTYPED_SPLIT` | `Untyped` |
 | 31 | `OP_THREAD_WATCH` | `Thread` |
-| 32 | `OP_DEBUG_PREEMPT` | `Debug` |
+| 32 | `OP_TEST_PREEMPT` | `Test` |
 | 33 | `OP_THREAD_FAULT` | `Thread` |
 | 34 | `OP_THREAD_READ_REG` | `Thread` |
 | 35 | `OP_THREAD_WRITE_REG` | `Thread` |
@@ -610,7 +611,7 @@ and drops into user mode with:
 - every other register at zero, `a0` among them, as `OP_THREAD_CONFIGURE` leaves a thread, section 6.8,
 - region slot 0: the code region, read and execute,
 - region slot 1: the data region, read and write,
-- a capability table of `ROOT_TABLE_SLOTS`, 46 past `BOOT_CAP_COUNT` on every board and so 64 on QEMU, filled as below,
+- a capability table of `ROOT_TABLE_SLOTS`, 46 past `BOOT_CAP_COUNT` on every board and so 66 on QEMU, filled as below,
   in table slot 0, and table slot 1 empty.
 
 | Slot | Constant | Capability | Rights |
@@ -620,7 +621,7 @@ and drops into user mode with:
 | 2 | `BOOT_CAP_PROCESS` | the root task's own process | all |
 | 3 | `BOOT_CAP_THREAD` | the root task's first thread | all |
 | 4 | `BOOT_CAP_POOL` | the boot pool | all |
-| 5 | `BOOT_CAP_DEBUG` | `Debug` | all |
+| 5 | `BOOT_CAP_PRINT` | `Print` | all |
 | 6 | `BOOT_CAP_CODE` | `Frame`: the root task's code | read, execute |
 | 7 | `BOOT_CAP_DATA` | `Frame`: the root task's data and stack | read, write |
 | 8 | `BOOT_CAP_FREE_RAM` | `Untyped`: the block of RAM the board sets aside for the root task | all |
@@ -633,10 +634,12 @@ and drops into user mode with:
 | 15 | `BOOT_CAP_TIME` | `Time`: every unit of time, `TIME_UNITS` of each core, the first core's all earned by the root task's thread | write, execute |
 | 16 | `BOOT_CAP_ROOT_RAM` | `Untyped`: the root task's own memory, its code, data and input frames and the boot pool's block, all made already | all |
 | 17 | `BOOT_CAP_POOL_RAM` | `Untyped`: the boot pool's block, below `BOOT_CAP_ROOT_RAM`, made into the boot pool | all |
-| 18 on | `BOOT_CAP_DEVICES` | `Frame`s: one over each device the board lists, in its order, none on QEMU; section 3 | each the board's: read and write, but read only for the ESP32-C6's eFuse and read and execute for its window onto flash |
+| 18 | `BOOT_CAP_HALT` | `Halt` | all |
+| 19 | `BOOT_CAP_TEST` | `Test` | all |
+| 20 on | `BOOT_CAP_DEVICES` | `Frame`s: one over each device the board lists, in its order, none on QEMU; section 3 | each the board's: read and write, but read only for the ESP32-C6's eFuse and read and execute for its window onto flash |
 
-`BOOT_CAP_COUNT` is 18 plus `BOOT_DEVICES`, the count in the board's `devices.h`, which `rvuos.h` includes:
-18 on QEMU and the MPS2 boards, 23 on RP2350 and 27 on the ESP32-C6.
+`BOOT_CAP_COUNT` is 20 plus `BOOT_DEVICES`, the count in the board's `devices.h`, which `rvuos.h` includes:
+20 on QEMU and the MPS2 boards, 25 on RP2350 and 29 on the ESP32-C6.
 A root task puts its own slots from there upwards.
 
 The root task's own table, process and thread take about 2.1 KiB of the boot pool,

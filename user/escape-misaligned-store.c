@@ -36,7 +36,7 @@ enum {
 
 static void puts(const char *s)
 {
-    rv_puts(BOOT_CAP_DEBUG, s);
+    rv_puts(BOOT_CAP_PRINT, s);
 }
 
 static void expect(const char *what, uint32_t status)
@@ -45,7 +45,7 @@ static void expect(const char *what, uint32_t status)
         puts("escape: ");
         puts(what);
         puts(": FAILED\n");
-        rv_halt(BOOT_CAP_DEBUG, 3);
+        rv_halt(BOOT_CAP_HALT, 3);
     }
 }
 
@@ -80,15 +80,15 @@ int main(void)
 
     uint32_t addr = upper - 2;
     puts("escape: storing across the end of the lower half to ");
-    rv_put_hex(BOOT_CAP_DEBUG, addr);
+    rv_put_hex(BOOT_CAP_PRINT, addr);
     puts(" at ");
-    rv_put_hex(BOOT_CAP_DEBUG, (uint32_t)(uintptr_t)store_at);
+    rv_put_hex(BOOT_CAP_PRINT, (uint32_t)(uintptr_t)store_at);
     puts(", expecting a fault\n");
 
     ESCAPE_STORE("store_at", 0x5a5a5a5au, addr);
 
     /* Not reached when the part in the upper half faults. */
     puts("escape: breached, stored past the lower half\n");
-    rv_halt(BOOT_CAP_DEBUG, 2);
+    rv_halt(BOOT_CAP_HALT, 2);
     return 0;
 }

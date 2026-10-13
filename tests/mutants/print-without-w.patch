@@ -1,0 +1,18 @@
+Print writes into the kernel's log with any right, or none;
+a call goes through only a capability with the rights its operation needs.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a call went through a capability without the rights its operation needs
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -1005,7 +1005,7 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
+      */
+     switch (cap.type) {
+     case CAP_PRINT:
+-        err = (cap.rights & RIGHT_W) ? op_print(op, arg) : KERR_NO_RIGHTS;
++        err = op_print(op, arg);
+         break;
+     case CAP_HALT:
+         err = (cap.rights & RIGHT_W) ? op_halt(op, arg) : KERR_NO_RIGHTS;

@@ -1,0 +1,20 @@
+Print takes every operation as a print, so a tick or a halt through a Print capability prints and goes through;
+a call goes through only a capability of the type its operation takes.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
+Report: a call went through a capability of a type its operation does not take
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -45,9 +45,7 @@ static bool holds_caller(struct thread *t, const struct captable *named, uint32_
+ /* Into the log: the bytes of a1 to a3, the lowest of a1 first, up to the first zero. */
+ static int op_print(uint32_t op, const uint32_t *arg)
+ {
+-    if (op != OP_PRINT) {
+-        return KERR_WRONG_TYPE;
+-    }
++    (void)op;
+     for (unsigned i = 0; i < PRINT_BYTES; i++) {
+         LOOP_BOUND(PRINT_BYTES);
+         char c = (char)(arg[1 + i / 4] >> (8 * (i % 4)));

@@ -21,7 +21,7 @@ extern const char __kernel_start[];
 
 static void puts(const char *s)
 {
-    rv_puts(BOOT_CAP_DEBUG, s);
+    rv_puts(BOOT_CAP_PRINT, s);
 }
 
 int main(void);
@@ -29,13 +29,13 @@ int main(void)
 {
     uint32_t at = (uint32_t)(uintptr_t)__kernel_start;
     puts("escape: jumping into the kernel at ");
-    rv_put_hex(BOOT_CAP_DEBUG, at);
+    rv_put_hex(BOOT_CAP_PRINT, at);
     puts(", expecting a fault\n");
 
     ESCAPE_CODE(at)();
 
     /* Not reached when PMP keeps user mode out of the kernel. */
     puts("escape: breached, returned from the kernel\n");
-    rv_halt(BOOT_CAP_DEBUG, 2);
+    rv_halt(BOOT_CAP_HALT, 2);
     return 0;
 }

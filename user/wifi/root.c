@@ -62,7 +62,7 @@
 #define DRV_UNITS  32u
 
 static struct self self;
-static const struct out kout = { log_write, (void *)BOOT_CAP_DEBUG };
+static const struct out kout = { log_write, (void *)BOOT_CAP_PRINT };
 static struct system sys = {
     .self = &self,
     .out = &kout,

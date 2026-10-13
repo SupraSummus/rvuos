@@ -45,7 +45,7 @@ struct self {
     uint32_t timer_lines; /* the timer lines it may hand out */
     uint32_t timer_line_count; /* how many, from the first */
     uint32_t time;        /* the first core's units of time it may hand out */
-    uint32_t debug;       /* the kernel's log, RIGHT_W at least, which its children are given with RIGHT_W alone */
+    uint32_t print;       /* the kernel's log, through Print, which its children are given too */
     /* What is in use, a bit each. */
     uint32_t slot_first, slot_end; /* the slots it hands out, from first up to end */
     uint32_t slots[SELF_SLOTS / 32];

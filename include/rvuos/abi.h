@@ -61,13 +61,15 @@
 #define CAP_CAPTABLE 3
 #define CAP_PROCESS  4
 #define CAP_THREAD   5
-#define CAP_DEBUG    6 /* writing into the kernel's log, and halting and driving the machine, for tests */
+#define CAP_PRINT    6 /* writing into the kernel's log */
 #define CAP_NOTIFICATION 7
 #define CAP_UNTYPED  8 /* memory that may become a frame, a pool or two halves; never mapped */
 #define CAP_IRQ_LINE 9 /* a range of interrupt lines; no kernel object behind it */
 #define CAP_IRQ      10 /* one line bound to a notification; signals it when the line fires */
 #define CAP_CLOCK    11 /* the machine's time, the counter's frame, and its watchdog */
 #define CAP_TIME     12 /* a range of the processor's units of time; no kernel object behind it */
+#define CAP_HALT     13 /* halting the machine */
+#define CAP_TEST     14 /* driving the machine as a test does: tracing, ticking, interrupting, preempting */
 
 /*
  * Rights bits.
@@ -83,9 +85,11 @@
  * IrqLine: RIGHT_W to bind a line.
  * Irq: RIGHT_W to set or mask.
  * Time: RIGHT_W to bind a thread, RIGHT_X to let the threads bound through it run on spare time.
- * Debug: RIGHT_W to write into the kernel's log,
- *   RIGHT_X to halt the machine or drive it as a test does: trace, tick, interrupt, preempt;
- *   a child that only prints holds it with RIGHT_W alone.
+ * Print: RIGHT_W to write into the kernel's log.
+ * Halt: RIGHT_W to halt the machine.
+ * Test: RIGHT_W to drive the machine as a test does: trace, tick, interrupt, preempt.
+ *   Three types, so that a child that only prints holds nothing that halts or drives the machine,
+ *   and a supervisor that may halt nothing that drives it.
  * Clock: RIGHT_R to read the time, and the counter through a frame,
  *   RIGHT_W to hold the machine to the watchdog, which halts it unless fed.
  * Any capability: no right to describe it, see OP_CAP_INFO, and a Pool none to tell what an object takes of it,
@@ -102,16 +106,16 @@
  */
 
 /*
- * Debug (RIGHT_W): write into the kernel's log, see BOOT_CAP_LOG.
- * a1, a2, a3 = up to DEBUG_WRITE_BYTES bytes, the lowest byte of a1 first,
+ * Print (RIGHT_W): write into the kernel's log, see BOOT_CAP_LOG.
+ * a1, a2, a3 = up to PRINT_BYTES bytes, the lowest byte of a1 first,
  * which end at the first zero byte: the log is text.
  */
-#define OP_DEBUG_WRITE 1
-#define DEBUG_WRITE_BYTES 12
-/* Debug (RIGHT_X): halt the machine. a1 = exit code. Does not return. */
-#define OP_DEBUG_HALT 2
+#define OP_PRINT 1
+#define PRINT_BYTES 12
+/* Halt (RIGHT_W): halt the machine. a1 = exit code. Does not return. */
+#define OP_HALT 2
 /*
- * Debug (RIGHT_X): turn on tracing and self-checking.
+ * Test (RIGHT_W): turn on tracing and self-checking.
  * From then on the kernel prints every system call with its status,
  * and the results of a describing one, see OP_CAP_INFO,
  * and runs the invariant checker after each one.
@@ -123,9 +127,9 @@
  * It cannot be turned off again, so a traced program cannot hide,
  * and once it is on the call changes nothing.
  */
-#define OP_DEBUG_TRACE 10
+#define OP_TEST_TRACE 10
 /*
- * Debug (RIGHT_X): what the timer tick does, on request.
+ * Test (RIGHT_W): what the timer tick does, on request.
  * Time moves by one tick, charged to the caller while it has time,
  * every timer line that is due signals, a thread whose account reached a tick has time again,
  * and the caller's turn ends: it goes to the back of the queue its account puts it on,
@@ -133,29 +137,29 @@
  * Works while tracing is on, unlike the tick itself;
  * see DESIGN.md, "Verification".
  */
-#define OP_DEBUG_TICK 17
+#define OP_TEST_TICK 17
 /*
- * Debug (RIGHT_X): what a device interrupt does, on request. a1 = the line.
+ * Test (RIGHT_W): what a device interrupt does, on request. a1 = the line.
  * The Irq armed on the line masks it and signals its bits,
  * exactly as the interrupt would; the controller is not consulted.
  * Fails with KERR_STATE when nothing is armed on the line,
  * which is when the controller would not raise it either,
  * and with KERR_INVALID_ARG for a line the controller does not have,
  * LOG_IRQ_LINE among them: the log's level is the log's, not a record's,
- * and so are the timer lines, which only OP_DEBUG_TICK moves.
+ * and so are the timer lines, which only OP_TEST_TICK moves.
  * It is how a replay fires an interrupt, since the host build has no devices;
  * see DESIGN.md, "Verification".
  */
-#define OP_DEBUG_IRQ 22
+#define OP_TEST_IRQ 22
 /*
- * Debug (RIGHT_X): a tick landing within a restartable call, on request. a1 = n.
+ * Test (RIGHT_W): a tick landing within a restartable call, on request. a1 = n.
  * The n-th place from now at which any restartable call could stop between two steps, it stops,
- * interrupt pending or not, and does what OP_DEBUG_TICK does,
+ * interrupt pending or not, and does what OP_TEST_TICK does,
  * so another thread may run before the caller makes its call again. Zero disarms it.
  * It is how a replay has a thread run while another's call is half done,
  * since under tracing the tick stops no call; see DESIGN.md, "Verification".
  */
-#define OP_DEBUG_PREEMPT 32
+#define OP_TEST_PREEMPT 32
 
 /*
  * CapTable (RIGHT_W): copy a capability from the caller's tables.
@@ -616,7 +620,7 @@
  *   CAP_CLOCK         the counter's rate in Hz, as OP_CLOCK_READ gives it, the tick in counts of the counter,
  *                     and the tick in microseconds: the quantum, which bounds a turn while tracing is off;
  *                     DESIGN.md, "Scheduling", says what the kernel's steps add to it
- *   CAP_DEBUG         0, 0, 0
+ *   CAP_PRINT, CAP_HALT and CAP_TEST  0, 0, 0
  * No result is an object capability's address or a link of the derivation tree,
  * though an Untyped's base may be where a pool made of it keeps its descriptor.
  * A pool's room and what lies below an Untyped are as the call found them; a call on another core may change them at once.
@@ -656,7 +660,7 @@
 #define BOOT_CAP_PROCESS   2 /* the root task's own process */
 #define BOOT_CAP_THREAD    3 /* the root task's only thread */
 #define BOOT_CAP_POOL      4 /* the boot pool the root objects live in */
-#define BOOT_CAP_DEBUG     5
+#define BOOT_CAP_PRINT     5 /* Print: writing into the kernel's log */
 #define BOOT_CAP_CODE      6 /* Frame: the root task's code, read and execute */
 #define BOOT_CAP_DATA      7 /* Frame: the root task's data and stack */
 #define BOOT_CAP_FREE_RAM  8 /* Untyped: the block of RAM the board sets aside for the root task */
@@ -679,18 +683,20 @@
  * which the root task, living there, cannot do.
  */
 #define BOOT_CAP_POOL_RAM  17
+#define BOOT_CAP_HALT      18 /* Halt: halting the machine */
+#define BOOT_CAP_TEST      19 /* Test: driving the machine as a test does */
 /*
  * Frames over the devices the board lists, BOOT_DEVICES of them, from this slot up in the board's order;
  * QEMU's lists none.
  * BOOT_DEVICES comes from the kernel's board.h, or a program's devices.h, which names each slot.
  */
-#define BOOT_CAP_DEVICES   18
-/* The root task's own slots start here; on QEMU it is 18. */
+#define BOOT_CAP_DEVICES   20
+/* The root task's own slots start here; on QEMU it is 20. */
 #define BOOT_CAP_COUNT     (BOOT_CAP_DEVICES + BOOT_DEVICES)
 
 /*
  * The kernel's log.
- * The kernel has no console: every byte it prints, OP_DEBUG_WRITE's included,
+ * The kernel has no console: every byte it prints, OP_PRINT's included,
  * goes into a ring in the kernel's memory, which BOOT_CAP_LOG maps.
  * The region starts with this header and the ring follows at RVUOS_LOG_HEADER.
  * The kernel writes head, a count of every byte ever written; byte n lies at n % size.
@@ -747,7 +753,7 @@ struct replay_record {
 /* Fixed limits visible to user programs. */
 #define PROCESS_REGION_SLOTS 8
 #define PROCESS_TABLES 2 /* table slots per process, see SLOT_TABLE_SHIFT */
-#define ROOT_TABLE_SLOTS (BOOT_CAP_COUNT + 46) /* slots in the root task's table, 64 on QEMU */
+#define ROOT_TABLE_SLOTS (BOOT_CAP_COUNT + 46) /* slots in the root task's table, 66 on QEMU */
 #define POOL_MIN_SIZE 64 /* the smallest Untyped OP_UNTYPED_RETYPE makes a pool of */
 #define TIMER_LINES 16 /* on the whole machine; see BOOT_CAP_TIMER_LINES */
 #define TIME_UNITS 64 /* of each core, numbered core by core; see BOOT_CAP_TIME */

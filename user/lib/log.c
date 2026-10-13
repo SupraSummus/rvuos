@@ -2,9 +2,9 @@
 
 #include "lib/self.h"
 
-void log_write(void *debug, const char *s, uint32_t n)
+void log_write(void *print, const char *s, uint32_t n)
 {
-    rv_write((uint32_t)(uintptr_t)debug, s, n);
+    rv_write((uint32_t)(uintptr_t)print, s, n);
 }
 
 uint32_t kernel_log_open(struct self *s, struct kernel_log *k)

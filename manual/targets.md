@@ -484,7 +484,7 @@ and `kernel-wifi.elf` the Wi-Fi system of `user/wifi/`.
 ### Reading the transcript
 
 The kernel has no console.
-Everything the kernel prints, and everything a program writes with `OP_DEBUG_WRITE`,
+Everything the kernel prints, and everything a program writes with `OP_PRINT`,
 goes into the kernel log.
 Two things carry that log to the board's UART:
 
@@ -511,13 +511,13 @@ the board's runner exits with the code:
 
 | Code | Meaning |
 |---|---|
-| 0 | `OP_DEBUG_HALT` with code 0 |
+| 0 | `OP_HALT` with code 0 |
 | 1 | kernel panic |
 | 3 | the self-check found an invariant violated |
 | 5 | no runnable thread and nothing armed that could make one |
 | 6 | tracing is on and a thread the host build cannot follow was about to run |
 | 7 | the watchdog was not fed in time, after the line `watchdog: not fed in time`, section 5.8 |
-| other | what the root task passed to `OP_DEBUG_HALT` |
+| other | what the root task passed to `OP_HALT` |
 
 A user fault, an access fault, an illegal instruction, a misaligned access or a breakpoint,
 prints `user fault` followed by `mcause`, `mepc` and `mtval`,

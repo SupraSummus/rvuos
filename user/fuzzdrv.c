@@ -54,7 +54,7 @@ static uint32_t cursor;
 
 static void puts(const char *s)
 {
-    rv_puts(BOOT_CAP_DEBUG, s);
+    rv_puts(BOOT_CAP_PRINT, s);
 }
 
 /* A system call, or an access the driver makes itself, which faults where the process may not make it. */
@@ -129,20 +129,20 @@ int main(void)
         }
         if (perform(&r) != KERR_OK) {
             puts("replay setup failed\n");
-            rv_halt(BOOT_CAP_DEBUG, 2);
+            rv_halt(BOOT_CAP_HALT, 2);
         }
     }
 
     uint32_t input_base, input_size;
     if (rv_frame_info(BOOT_CAP_INPUT, &input_base, &input_size) != KERR_OK) {
         puts("cannot read the input region\n");
-        rv_halt(BOOT_CAP_DEBUG, 2);
+        rv_halt(BOOT_CAP_HALT, 2);
     }
 
     const volatile struct replay_header *hdr = (const volatile struct replay_header *)input_base;
     if (hdr->magic != REPLAY_MAGIC || hdr->count > REPLAY_MAX_RECORDS) {
         puts("bad replay header\n");
-        rv_halt(BOOT_CAP_DEBUG, 2);
+        rv_halt(BOOT_CAP_HALT, 2);
     }
     count = hdr->count;
     const volatile struct replay_record *in =
@@ -159,23 +159,23 @@ int main(void)
     for (unsigned i = 0; i < REPLAY_AFTER_INPUT_COUNT; i++) {
         if (perform(&replay_after_input[i]) != KERR_OK) {
             puts("replay setup failed\n");
-            rv_halt(BOOT_CAP_DEBUG, 2);
+            rv_halt(BOOT_CAP_HALT, 2);
         }
     }
     uint32_t uart_base, log_base, size;
     if (rv_frame_info(BOOT_CAP_UART, &uart_base, &size) != KERR_OK ||
         rv_frame_info(BOOT_CAP_LOG, &log_base, &size) != KERR_OK) {
         puts("cannot find the uart or the log\n");
-        rv_halt(BOOT_CAP_DEBUG, 2);
+        rv_halt(BOOT_CAP_HALT, 2);
     }
     console_init(uart_base);
     log_header = (volatile struct rvuos_log *)log_base;
     log_ring = (const volatile uint8_t *)(log_base + RVUOS_LOG_HEADER);
 
-    rv_invoke(OP_DEBUG_TRACE, BOOT_CAP_DEBUG, 0, 0, 0);
+    rv_invoke(OP_TEST_TRACE, BOOT_CAP_TEST, 0, 0, 0);
     if (perform(&replay_start) != KERR_OK) {
         puts("replay setup failed\n");
-        rv_halt(BOOT_CAP_DEBUG, 2);
+        rv_halt(BOOT_CAP_HALT, 2);
     }
 
     replay_loop(1);

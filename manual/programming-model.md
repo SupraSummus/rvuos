@@ -70,8 +70,8 @@ Rights are three bits:
 | Bit | Value | Frame, Untyped | Other types |
 |---|---|---|---|
 | `RIGHT_R` | 1 | read | `Notification`: wait |
-| `RIGHT_W` | 2 | write | control the object: allocate, install, configure, signal, set, bind, copy or move into a table; `Debug`: write into the log |
-| `RIGHT_X` | 4 | execute | `Time`: the threads bound through it run on spare time; `Debug`: halt and drive the machine |
+| `RIGHT_W` | 2 | write | control the object: allocate, install, configure, signal, set, bind, copy or move into a table; `Print`: write into the log; `Halt`: halt the machine; `Test`: drive it as a test does |
+| `RIGHT_X` | 4 | execute | `Time`: the threads bound through it run on spare time |
 
 Every operation that produces a capability
 puts it into a slot of one of the caller's own tables,
@@ -147,10 +147,12 @@ Programs are encouraged to keep the same convention.
 | `IrqLine` | `CAP_IRQ_LINE` | none: the slot holds the first line and a count | boot, `OP_IRQ_CARVE` |
 | `Irq` | `CAP_IRQ` | one line bound to a notification, with a deadline on a timer line | `OP_IRQ_BIND` |
 | `Time` | `CAP_TIME` | none: the slot holds the first unit and a count | boot, `OP_TIME_CARVE` |
-| `Debug` | `CAP_DEBUG` | none | boot |
+| `Print` | `CAP_PRINT` | none | boot |
+| `Halt` | `CAP_HALT` | none | boot |
+| `Test` | `CAP_TEST` | none | boot |
 | `Clock` | `CAP_CLOCK` | none: there is one counter | boot |
 
-`Untyped`, `Frame`, `IrqLine`, `Time`, `Debug` and `Clock` capabilities have no kernel object behind them.
+`Untyped`, `Frame`, `IrqLine`, `Time`, `Print`, `Halt`, `Test` and `Clock` capabilities have no kernel object behind them.
 Carving a frame, a line range or a range of units, retyping an Untyped into a frame and splitting one,
 are pure table operations
 that touch no kernel memory,
@@ -624,7 +626,7 @@ Sharing a line between drivers is not supported;
 
 ### 5.10 The kernel log
 
-The kernel writes every byte it prints, `OP_DEBUG_WRITE`'s included,
+The kernel writes every byte it prints, `OP_PRINT`'s included,
 into a ring behind a header of `RVUOS_LOG_HEADER` bytes,
 and never waits for a reader.
 The ring's size is the kernel's `KLOG_SIZE`, 4 KiB less the header today;
@@ -654,7 +656,7 @@ The log's line cannot wake the machine from an idle stall:
 only the kernel writes the log, and with no thread runnable
 nothing runs that could make it write,
 so an idle kernel with only the log's `Irq` armed halts with `no runnable thread`.
-The line cannot be fired by `OP_DEBUG_IRQ` either.
+The line cannot be fired by `OP_TEST_IRQ` either.
 
 `user/init/logger.c` shows the reader:
 a logger thread that waits on one notification with the log's bit and the UART's,
@@ -729,7 +731,7 @@ and moves `taken` only as far as its host says it has the bytes, so a halt write
   A thread with time waits for its turn at most a tick for each other thread with units of its core,
   since only such a thread has time there, or lends it, and a turn on spare time ends as the thread becomes ready;
   so the build's tick, `TIMER_HZ`, sets that wait,
-  while tracing is off, nobody drives the machine with `OP_DEBUG_TICK` or `OP_DEBUG_PREEMPT`, and the thread keeps its binding.
+  while tracing is off, nobody drives the machine with `OP_TEST_TICK` or `OP_TEST_PREEMPT`, and the thread keeps its binding.
   Its work is bounded by its units, not by its turns: a turn that begins mid-tick lasts to the next tick,
   and over any stretch the others run at most what their accounts held and what their units earn;
   `DESIGN.md`, "Scheduling", gives the bounds and what a periodic task needs of its units.

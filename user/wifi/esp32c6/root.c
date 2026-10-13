@@ -86,7 +86,7 @@
 enum antenna { ANTENNA_BOARD, ANTENNA_UFL, ANTENNA_NONE };
 
 static struct self self;
-static const struct out kout = { log_write, (void *)BOOT_CAP_DEBUG };
+static const struct out kout = { log_write, (void *)BOOT_CAP_PRINT };
 static struct system sys = {
     .self = &self,
     .out = &kout,

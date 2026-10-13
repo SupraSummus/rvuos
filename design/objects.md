@@ -94,7 +94,7 @@ An `IrqLine` capability has the same shape for the same reason:
 its words are the first line and the count, there is no object,
 and the root task hands lines out as it hands out memory.
 A `Time` capability is the same again, with units of the processor's time for lines.
-A `Clock` capability, like `Debug`, has neither object nor content:
+A `Clock` capability, like `Print`, `Halt` and `Test`, has neither object nor content:
 there is one counter and one watchdog on the machine.
 
 ### Object types
@@ -111,7 +111,9 @@ there is one counter and one watchdog on the machine.
 | `IrqLine` | A range of interrupt lines: the log's and the controller's, or the timer lines. Bound one at a time into an `Irq`. |
 | `Irq` | One line bound to a notification. Signals it when the line fires. |
 | `Time` | A range of the processor's units of time. A thread runs only while bound to some, or to none with spare time. No object. |
-| `Debug` | Writing into the kernel's log with `RIGHT_W`; halting and driving the machine, for tests, with `RIGHT_X`. No object. |
+| `Print` | Writing into the kernel's log. No object. |
+| `Halt` | Halting the machine. No object. |
+| `Test` | Driving the machine as a test does: tracing, ticking, interrupting, preempting. No object. |
 | `Clock` | The machine's time, read with `RIGHT_R`, also through the counter's frame, and its watchdog, fed with `RIGHT_W`. No object. |
 
 Every object's size follows from its type,

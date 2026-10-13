@@ -24,7 +24,7 @@ extern const char store_at[];
 
 static void puts(const char *s)
 {
-    rv_puts(BOOT_CAP_DEBUG, s);
+    rv_puts(BOOT_CAP_PRINT, s);
 }
 
 static void expect(const char *what, uint32_t status)
@@ -33,7 +33,7 @@ static void expect(const char *what, uint32_t status)
         puts("escape: ");
         puts(what);
         puts(": FAILED\n");
-        rv_halt(BOOT_CAP_DEBUG, 3);
+        rv_halt(BOOT_CAP_HALT, 3);
     }
 }
 
@@ -44,15 +44,15 @@ int main(void)
     uint32_t hz, addr;
     expect("clock read", rv_clock_read(BOOT_CAP_CLOCK, &now, &hz, &addr));
     puts("escape: storing to the clock's counter, with no frame for it, to ");
-    rv_put_hex(BOOT_CAP_DEBUG, addr);
+    rv_put_hex(BOOT_CAP_PRINT, addr);
     puts(" at ");
-    rv_put_hex(BOOT_CAP_DEBUG, (uint32_t)(uintptr_t)store_at);
+    rv_put_hex(BOOT_CAP_PRINT, (uint32_t)(uintptr_t)store_at);
     puts(", expecting a fault\n");
 
     ESCAPE_STORE("store_at", 0u, addr);
 
     /* Not reached when PMP keeps user mode off every device it holds no frame for. */
     puts("escape: breached, stored to the clock's counter\n");
-    rv_halt(BOOT_CAP_DEBUG, 2);
+    rv_halt(BOOT_CAP_HALT, 2);
     return 0;
 }

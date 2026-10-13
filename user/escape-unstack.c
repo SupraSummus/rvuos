@@ -25,14 +25,14 @@ extern const char return_at[];
 
 static void puts(const char *s)
 {
-    rv_puts(BOOT_CAP_DEBUG, s);
+    rv_puts(BOOT_CAP_PRINT, s);
 }
 
 int main(void);
 int main(void)
 {
     puts("escape: taking the stack's region out of the process, to return at ");
-    rv_put_hex(BOOT_CAP_DEBUG, (uint32_t)(uintptr_t)return_at);
+    rv_put_hex(BOOT_CAP_PRINT, (uint32_t)(uintptr_t)return_at);
     puts(", expecting a fault\n");
 
     /* OP_PROCESS_UNINSTALL of the data region; nothing goes on after it. */

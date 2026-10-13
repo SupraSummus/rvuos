@@ -8,7 +8,7 @@
 struct pending {
     const struct out *o;
     uint32_t n;
-    char buf[4 * DEBUG_WRITE_BYTES];
+    char buf[4 * PRINT_BYTES];
 };
 
 static void flush(struct pending *p)

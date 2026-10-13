@@ -55,7 +55,7 @@ static void console_byte(char c)
     console_put_polled(c);
 }
 
-static const struct out out = { log_write, (void *)BOOT_CAP_DEBUG };
+static const struct out out = { log_write, (void *)BOOT_CAP_PRINT };
 
 /* The kernel's log to the console: the kernel's lines, the root task's and its children's, in their order. */
 static void drain(void)
@@ -66,7 +66,7 @@ static void drain(void)
 static __attribute__((noreturn)) void halt(uint32_t code)
 {
     drain();
-    rv_halt(BOOT_CAP_DEBUG, code);
+    rv_halt(BOOT_CAP_HALT, code);
 }
 
 static void must(const char *what, uint32_t status)
