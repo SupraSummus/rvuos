@@ -33,7 +33,7 @@ enum {
     CHILD_PARENT, /* its parent's notification, RIGHT_W, carved to the child's bit there */
     CHILD_TIMER,  /* an Irq on a timer line of its own, which signals CHILD_INBOX */
     CHILD_SELF,   /* its own process, RIGHT_W, for regions of its own */
-    CHILD_LOG,    /* the kernel's log, Debug with RIGHT_W alone: it writes, and cannot halt the machine */
+    CHILD_LOG,    /* the kernel's log, through Print: it writes, and cannot halt the machine */
     CHILD_FIRST,  /* the slots the parent hands out begin here */
 };
 

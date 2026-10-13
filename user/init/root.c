@@ -33,7 +33,7 @@ void expect(const char *what, uint32_t status)
     puts(what);
     puts(status == KERR_OK ? ": ok\n" : ": FAILED\n");
     if (status != KERR_OK) {
-        rv_halt(BOOT_CAP_DEBUG, 1);
+        rv_halt(BOOT_CAP_HALT, 1);
     }
 }
 
@@ -138,9 +138,9 @@ int main(void)
                    rights == (RIGHT_R | RIGHT_W) && w[0] == data_base && w[1] == data_size && w[2] == min_size
                ? KERR_OK : KERR_INVALID_ARG);
     puts("root: described: regions ");
-    rv_put_hex(BOOT_CAP_DEBUG, regions);
+    rv_put_hex(BOOT_CAP_PRINT, regions);
     puts(" smallest ");
-    rv_put_hex(BOOT_CAP_DEBUG, w[2]);
+    rv_put_hex(BOOT_CAP_PRINT, w[2]);
     puts("\n");
 
     take_frame(SLOT_SHARED, &shared_base, &shared_size);
@@ -181,7 +181,7 @@ int main(void)
 
     /* Authority the child starts with, and nothing besides. */
     expect("give the child the log, to write",
-           rv_invoke(OP_CAP_COPY, SLOT_CHILD_TABLE, CHILD_DEBUG, BOOT_CAP_DEBUG, RIGHT_W));
+           rv_invoke(OP_CAP_COPY, SLOT_CHILD_TABLE, CHILD_PRINT, BOOT_CAP_PRINT, RIGHT_W));
     expect("give the child the shared region",
            rv_invoke(OP_CAP_COPY, SLOT_CHILD_TABLE, CHILD_SHARED, SLOT_SHARED, RIGHT_R | RIGHT_W));
     expect("give the child a way to signal",

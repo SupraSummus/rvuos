@@ -94,7 +94,7 @@ struct thread *boot_create_root(void)
         [BOOT_CAP_PROCESS] = cap_to_object(&proc->hdr, RIGHT_ALL),
         [BOOT_CAP_THREAD] = cap_to_object(&thread->hdr, RIGHT_ALL),
         [BOOT_CAP_POOL] = cap_to_object(&pool->hdr, RIGHT_ALL),
-        [BOOT_CAP_DEBUG] = { .type = CAP_DEBUG, .rights = RIGHT_ALL },
+        [BOOT_CAP_PRINT] = { .type = CAP_PRINT, .rights = RIGHT_ALL },
         [BOOT_CAP_CODE] = cap_to_frame(USER_CODE_BASE, USER_CODE_SIZE, RIGHT_R | RIGHT_X),
         [BOOT_CAP_DATA] = cap_to_frame(USER_DATA_BASE, USER_DATA_SIZE, RIGHT_R | RIGHT_W),
         [BOOT_CAP_FREE_RAM] = cap_to_untyped(FREE_RAM_BASE, FREE_RAM_SIZE, RIGHT_ALL),
@@ -107,6 +107,8 @@ struct thread *boot_create_root(void)
         [BOOT_CAP_TIMER_LINES] = cap_to_lines(IRQ_LINES, TIMER_LINES, RIGHT_W),
         [BOOT_CAP_CLOCK] = { .type = CAP_CLOCK, .rights = RIGHT_ALL },
         [BOOT_CAP_TIME] = cap_to_time(0, MACHINE_UNITS, RIGHT_W | RIGHT_X),
+        [BOOT_CAP_HALT] = { .type = CAP_HALT, .rights = RIGHT_ALL },
+        [BOOT_CAP_TEST] = { .type = CAP_TEST, .rights = RIGHT_ALL },
     };
     for (unsigned i = BOOT_CAP_NULL + 1; i < BOOT_CAP_DEVICES; i++) {
         if (i == BOOT_CAP_ROOT_RAM || i == BOOT_CAP_POOL_RAM) {

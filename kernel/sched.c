@@ -951,8 +951,8 @@ static void switch_to(struct thread *next)
  * no Irq armed on either kind of line and no such thread nothing can change this.
  * The log's line is not a source: only the kernel raises it,
  * and the kernel runs only when a thread or one of these does.
- * While tracing is on, time moves and lines fire only through OP_DEBUG_TICK
- * and OP_DEBUG_IRQ, which nobody is left to perform, so the same holds
+ * While tracing is on, time moves and lines fire only through OP_TEST_TICK
+ * and OP_TEST_IRQ, which nobody is left to perform, so the same holds
  * and the host build, which has no clock and no devices, agrees.
  */
 static bool machine_stuck(void)

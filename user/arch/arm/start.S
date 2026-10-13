@@ -34,9 +34,9 @@ _start:
     b       3b
 4:
     bl      main
-    /* main must not return; halt through the boot debug capability, with nothing in what it does not read. */
-    mov     r12, #OP_DEBUG_HALT
-    movs    r0, #BOOT_CAP_DEBUG
+    /* main must not return; halt through BOOT_CAP_HALT, with nothing in what it does not read. */
+    mov     r12, #OP_HALT
+    movs    r0, #BOOT_CAP_HALT
     movs    r1, #1
     movs    r2, #0
     movs    r3, #0

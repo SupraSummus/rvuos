@@ -21,7 +21,7 @@
 #include "layout.h"
 #include "ops.h"
 
-/* What a capability grants, as the covering rule compares it: a range, an object, or the debug capability. */
+/* What a capability grants, as the covering rule compares it: a range, an object, or a type that names nothing. */
 struct grant {
     uint8_t type;
     uint8_t rights;
@@ -317,7 +317,12 @@ static uint8_t rights_needed(uint32_t op)
     case OP_IRQ_BIND:
     case OP_IRQ_SET:
     case OP_TIME_BIND:
-    case OP_DEBUG_WRITE:
+    case OP_PRINT:
+    case OP_HALT:
+    case OP_TEST_TRACE:
+    case OP_TEST_TICK:
+    case OP_TEST_IRQ:
+    case OP_TEST_PREEMPT:
     case OP_CLOCK_WATCHDOG:
         return RIGHT_W;
     case OP_NOTIFY_WAIT:
@@ -325,12 +330,6 @@ static uint8_t rights_needed(uint32_t op)
     case OP_CLOCK_READ:
     case OP_CLOCK_FRAME:
         return RIGHT_R;
-    case OP_DEBUG_HALT:
-    case OP_DEBUG_TRACE:
-    case OP_DEBUG_TICK:
-    case OP_DEBUG_IRQ:
-    case OP_DEBUG_PREEMPT:
-        return RIGHT_X;
     case OP_FRAME_CARVE:
     case OP_FRAME_INFO:
     case OP_UNTYPED_RETYPE:
@@ -1011,7 +1010,7 @@ void history_end(void)
     check_room();
 
     /*
-     * Only OP_DEBUG_TICK moves time here, and only under tracing, where the clock is the tick count:
+     * Only OP_TEST_TICK moves time here, and only under tracing, where the clock is the tick count:
      * a tick costs the thread the turn is charged to a whole tick while it holds one, and earns it its units,
      * as every tick does, and a call that moves no time costs it nothing.
      * The caller keeps what it runs on, but a payer that lent it time may go with a pool the call destroyed.

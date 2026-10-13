@@ -1,0 +1,26 @@
+A Test capability with any right, or none, traces the machine, ticks it, fires its interrupts or preempts a call,
+so a Test narrowed to RIGHT_R still drives it;
+a call goes through only a capability with the rights its operation needs.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a call went through a capability without the rights its operation needs
+Report: a refused call did not fail at the first check it fails
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -981,10 +981,10 @@ struct op_shape {
+ static const struct op_shape op_shapes[OP_COUNT] = {
+     [OP_PRINT] = { CAP_PRINT, RIGHT_W, SHAPE_A123 },
+     [OP_HALT] = { CAP_HALT, RIGHT_W, SHAPE_A1 },
+-    [OP_TEST_TRACE] = { CAP_TEST, RIGHT_W, 0 },
+-    [OP_TEST_TICK] = { CAP_TEST, RIGHT_W, 0 },
+-    [OP_TEST_IRQ] = { CAP_TEST, RIGHT_W, SHAPE_A1 },
+-    [OP_TEST_PREEMPT] = { CAP_TEST, RIGHT_W, SHAPE_A1 },
++    [OP_TEST_TRACE] = { CAP_TEST, 0, 0 },
++    [OP_TEST_TICK] = { CAP_TEST, 0, 0 },
++    [OP_TEST_IRQ] = { CAP_TEST, 0, SHAPE_A1 },
++    [OP_TEST_PREEMPT] = { CAP_TEST, 0, SHAPE_A1 },
+     [OP_CAP_COPY] = { CAP_CAPTABLE, RIGHT_W, SHAPE_A123 | SHAPE_RIGHTS_A3 },
+     [OP_CAP_DELETE] = { CAP_CAPTABLE, RIGHT_W, SHAPE_A1 },
+     [OP_CAP_REVOKE] = { CAP_CAPTABLE, RIGHT_W, SHAPE_A1 },

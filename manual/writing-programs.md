@@ -15,7 +15,7 @@ Constraints of the current linker script:
 - data and the stack live in the read-write region, at `0x80110000` on QEMU,
   initialised data at its base and loaded right behind the read-only data,
 - `user/arch/<arch>/start.S` copies initialised data over, zeroes `.bss`, calls `main`,
-  and halts with code 1 through `BOOT_CAP_DEBUG` if `main` returns,
+  and halts with code 1 through `BOOT_CAP_HALT` if `main` returns,
 - a child runs this code without the data region, so the code a child runs keeps no global, section 8.4.
 
 Compile flags are `-march=rv32imac -mabi=ilp32 -mcmodel=medany -ffreestanding -nostdlib`,
@@ -66,11 +66,11 @@ and `user/lib/` what a program of several processes needs beside them, section 8
 | `rv_clock_watchdog(cap, us)` | `OP_CLOCK_WATCHDOG` |
 | `rv_time_carve(time, offset, count, dst)` | `OP_TIME_CARVE` |
 | `rv_time_bind(time, thread, offset, count)` | `OP_TIME_BIND` |
-| `rv_debug_write(cap, s, n)` | `OP_DEBUG_WRITE`, 12 bytes at most |
-| `rv_write(cap, s, n)`, `rv_putc(cap, c)`, `rv_puts(cap, s)`, `rv_put_hex(cap, v)` | `OP_DEBUG_WRITE`, a call per 12 bytes |
-| `rv_halt(cap, code)` | `OP_DEBUG_HALT` |
-| `rv_debug_trace(cap)`, `rv_debug_tick(cap)` | `OP_DEBUG_TRACE`, `OP_DEBUG_TICK` |
-| `rv_debug_irq(cap, line)`, `rv_debug_preempt(cap, n)` | `OP_DEBUG_IRQ`, `OP_DEBUG_PREEMPT` |
+| `rv_print(cap, s, n)` | `OP_PRINT`, 12 bytes at most |
+| `rv_write(cap, s, n)`, `rv_putc(cap, c)`, `rv_puts(cap, s)`, `rv_put_hex(cap, v)` | `OP_PRINT`, a call per 12 bytes |
+| `rv_halt(cap, code)` | `OP_HALT` |
+| `rv_test_trace(cap)`, `rv_test_tick(cap)` | `OP_TEST_TRACE`, `OP_TEST_TICK` |
+| `rv_test_irq(cap, line)`, `rv_test_preempt(cap, n)` | `OP_TEST_IRQ`, `OP_TEST_PREEMPT` |
 
 To replace the demo, edit `user/init/` or add a program to `USER_PROGRAMS` in the Makefile;
 each program becomes its own kernel image.
@@ -126,7 +126,7 @@ the library of section 8.4 takes them in one, and hands out the slots, regions a
    narrowing rights as you go.
 
    ```c
-   rv_invoke(OP_CAP_COPY, SLOT_CHILD_TABLE, CHILD_DEBUG,  BOOT_CAP_DEBUG, RIGHT_ALL);
+   rv_invoke(OP_CAP_COPY, SLOT_CHILD_TABLE, CHILD_PRINT,  BOOT_CAP_PRINT, RIGHT_W);
    rv_invoke(OP_CAP_COPY, SLOT_CHILD_TABLE, CHILD_SHARED, SLOT_SHARED,    RIGHT_R | RIGHT_W);
    rv_invoke(OP_CAP_COPY, SLOT_CHILD_TABLE, CHILD_UP,     SLOT_UP,        RIGHT_W);
    rv_invoke(OP_CAP_COPY, SLOT_CHILD_TABLE, CHILD_DOWN,   SLOT_DOWN,      RIGHT_R);
@@ -204,7 +204,7 @@ Each header says how its calls are used.
 | `lib/lock.h` | a lock over memory several children share: a word taken with an atomic operation, and a notification to wait on while it is held; and one whose word names its holder, so that a taker that waits lends the holder its time, section 5.12 |
 | `lib/event.h` | an event one thread waits for, until a deadline at most, and others set from memory they share with it: a word set with an atomic operation, and a notification and a timer line of the waiter's |
 | `lib/seqlock.h` | a snapshot one child publishes and others copy out whole, from memory they may hold read only: a count and two copies, so that neither side calls the kernel or waits for the other |
-| `lib/ring.h`, `lib/log.h` | the rings a channel is made of, and the kernel's log: written through `Debug`, and read as the root task reads it |
+| `lib/ring.h`, `lib/log.h` | the rings a channel is made of, and the kernel's log: written through `Print`, and read as the root task reads it |
 | `lib/say.h`, `lib/libc.h` | text with values, and the memory functions the compiler calls |
 
 **Nothing in it keeps a global**,
@@ -227,7 +227,7 @@ A parent that checks every so often, `child_check`, asks through the page whethe
 and the child answers each time round it, `child_answer`;
 a check finds a child that did not answer the last, one that spins or waits for what never comes,
 and what to do about it, take it down and build it again or halt, is the parent's.
-Its text goes into the kernel's log through `CHILD_LOG`, a `Debug` capability with `RIGHT_W` alone, section 6.3,
+Its text goes into the kernel's log through `CHILD_LOG`, a `Print` capability, section 6.3,
 in order with the kernel's lines, among them its own faults, and it cannot halt the machine.
 `say` in `lib/say.h` formats it, and `log_out` in `lib/log.h` writes it a call per 12 bytes.
 It costs its parent six slots, and `child_free` takes back everything that was made for it.
@@ -386,7 +386,7 @@ and `PROGRAMS` in `user/build.mk` links each with the library.
 ## 9. Debugging and testing interfaces
 
 **Tracing.**
-`OP_DEBUG_TRACE` makes the kernel print one line per system call,
+`OP_TEST_TRACE` makes the kernel print one line per system call,
 
 ```
 trace: op=0x00000007 slot=0x00000004 a1=0x00000007 a2=0x0000000d a3=0x00000000 -> 0x00000000
@@ -397,17 +397,17 @@ with `blocked` in place of a status when the call blocked,
 four words for `OP_CAP_INFO` and two for `OP_POOL_INFO`, section 6.14,
 and `trace: wake <bits>` after a call that woke a waiter,
 or after the `user fault` of a thread whose watch woke one.
-A call stopped where `OP_DEBUG_PREEMPT` armed prints `trace: preempt` instead of its line,
+A call stopped where `OP_TEST_PREEMPT` armed prints `trace: preempt` instead of its line,
 followed by what the tick woke,
 and its line comes once the call is made again and finishes.
 After every traced call the kernel runs the self-check,
 the executable form of the properties in `DESIGN.md`,
 and halts with code 3 on the first violation.
 While tracing is on the tick preempts nobody and moves no time;
-only `OP_DEBUG_TICK` does,
+only `OP_TEST_TICK` does,
 so that the host build can reproduce the transcript.
 The clock that charges turns is then the tick count alone:
-a turn with time pays a whole tick at each `OP_DEBUG_TICK` and nothing at a wait.
+a turn with time pays a whole tick at each `OP_TEST_TICK` and nothing at a wait.
 A thread whose program counter was set while tracing was on,
 or any of whose registers `OP_THREAD_WRITE_REG` wrote then,
 cannot be run under tracing; the kernel halts with code 6 instead.

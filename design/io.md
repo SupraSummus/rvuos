@@ -92,16 +92,16 @@ So the kernel writes into a ring of bytes in its own memory,
 The kernel never waits for a reader:
 one more than a ring behind loses the oldest bytes and can tell,
 because the head has run past its own count by more than the size.
-`OP_DEBUG_WRITE` appends up to twelve bytes to the same ring,
+`OP_PRINT` appends up to twelve bytes to the same ring,
 so a program's output and the kernel's keep their order.
 
-**Writing is a right of its own.**
-A `Debug` capability writes into the log with `RIGHT_W`,
-and halts, traces, ticks, interrupts or preempts the machine with `RIGHT_X`,
-so a child given it with `RIGHT_W` alone prints, its lines among the kernel's and its own faults' reports,
+**Writing is a capability of its own.**
+A `Print` capability writes into the log, a `Halt` one halts the machine,
+and a `Test` one traces, ticks, interrupts or preempts it,
+so a child given `Print` prints, its lines among the kernel's and its own faults' reports,
 and can stop nothing.
-Before, one capability did all of it, so a child printed into a ring its parent copied out,
-and reached the log only while its parent ran.
+One capability for all of it would leave a child printing into a ring its parent copies out,
+and rights on it, as `Debug` had, would give a supervisor that may halt the means to drive the machine too.
 The bytes travel in the call's registers, as everything does, twelve a call, so a line is a few calls;
 a writer that floods the ring costs the reader the oldest bytes, the kernel's among them,
 the price of one log every writer shares.
@@ -149,7 +149,7 @@ the tick or a device makes it,
 so a kernel with nothing runnable and only the log's `Irq` armed
 stops with `no runnable thread` rather than stall in `wfi`.
 And it is not a line a replay can fire by name:
-`OP_DEBUG_IRQ` refuses it, since its level is the log's and not the record's.
+`OP_TEST_IRQ` refuses it, since its level is the log's and not the record's.
 A replay reaches it all the same, because the trace is bytes into the log
 and the trace of the very call that arms the `Irq` is what raises the line;
 `tests/seeds/log-wakes-reader` rests on that.

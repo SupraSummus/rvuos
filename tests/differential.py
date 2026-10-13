@@ -2,7 +2,7 @@
 """Replay fuzz inputs on QEMU and on the host build and compare the traces.
 
 Each input is a sequence of 16-byte records:
-a system call with the thread that makes it, or the tick as OP_DEBUG_TICK.
+a system call with the thread that makes it, or the tick as OP_TEST_TICK.
 The host build performs them directly on the kernel's logic,
 passing a record to the thread it names as the driver does;
 QEMU boots the real kernel with the replay driver as root task
@@ -68,7 +68,7 @@ HOST_DIED = "host harness died"
 
 
 def decode(raw: bytes) -> str:
-    """The log may contain arbitrary bytes from OP_DEBUG_WRITE."""
+    """The log may contain arbitrary bytes from OP_PRINT."""
     return raw.decode("utf-8", errors="replace")
 
 

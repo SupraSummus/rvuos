@@ -38,7 +38,7 @@ static bool host_drains[REPLAY_THREADS + 1];
 /*
  * Which of them stand at the instruction of a record they have yet to make, by actor number:
  * the ecall of a call, whose registers are loaded, or a load or a store, see rvuos/replay.h.
- * A thread stands there from when it takes the record, and again after a stop OP_DEBUG_PREEMPT armed,
+ * A thread stands there from when it takes the record, and again after a stop OP_TEST_PREEMPT armed,
  * a fault on the access, or an OP_THREAD_STOP that took it off its wait, until host_run_on finds it running.
  */
 enum { HOST_ON, HOST_AT_CALL, HOST_AT_ACCESS };
@@ -265,7 +265,7 @@ void board_watchdog(uint32_t us)
 /*
  * The host's clock is the tick count, and the scheduler asks where the counter is only untraced.
  * Half way into the tick stands for wherever QEMU's is when the replay driver turns tracing on,
- * so that OP_DEBUG_TRACE has an offset to clear.
+ * so that OP_TEST_TRACE has an offset to clear.
  */
 uint32_t timer_offset(void)
 {
@@ -302,7 +302,7 @@ bool irq_enabled(uint32_t line)
 
 uint32_t irq_claim(void)
 {
-    /* No device ever raises a line here; OP_DEBUG_IRQ fires them by name instead. */
+    /* No device ever raises a line here; OP_TEST_IRQ fires them by name instead. */
     return 0;
 }
 
@@ -631,7 +631,7 @@ static unsigned host_actor(void)
  * after which the thread drains the log.
  * The host stops every restartable call after each step, and the thread makes it again at once,
  * as it would once the interrupt is taken;
- * after a stop OP_DEBUG_PREEMPT armed it stands at its ecall, since another thread may run first.
+ * after a stop OP_TEST_PREEMPT armed it stands at its ecall, since another thread may run first.
  */
 static void host_call(bool record)
 {
@@ -658,8 +658,8 @@ static void host_call(bool record)
             took |= after[u] < before[u];
         }
         stopped = f->pc == pc;
-        /* Under tracing only OP_DEBUG_TICK moves time, and the tick an armed stop lands. */
-        bool armed = debug_trace && sched_ticks != ticks && op != OP_DEBUG_TICK;
+        /* Under tracing only OP_TEST_TICK moves time, and the tick an armed stop lands. */
+        bool armed = debug_trace && sched_ticks != ticks && op != OP_TEST_TICK;
         if (stopped && !took) {
             fprintf(stderr, "invariant violated: a call was preempted before it took anything away\n");
             host_violated();
@@ -1004,7 +1004,7 @@ static void host_pick_core(const struct replay_record *c)
  * every thread the round visits ticks until the actor has the processor
  * or the processor comes back to a thread that ticked, with the record untaken.
  * That is the thread the round started from,
- * or one whose tick failed, its table no longer holding the debug capability,
+ * or one whose tick failed, its table no longer holding the Test capability,
  * and gave the processor to nobody.
  * A thread the processor comes to that could not run faults, and the round goes on from the next.
  * With more than one core the round goes on the core of host_pick_core.

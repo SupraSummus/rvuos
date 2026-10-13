@@ -417,7 +417,7 @@ what is left:
   are three records the mutator must line up.
   A longer run lines them up now and then:
   about 664 000 runs of `make fuzz` made 28 inputs that catch `alloc-in-dying-pool` and 8 `bind-in-dying-pool`,
-  all with `OP_DEBUG_PREEMPT`, where 186 000 made none.
+  all with `OP_TEST_PREEMPT`, where 186 000 made none.
   None reaches an edge the others do not, so the corpus keeps none of them.
   A mutation that inserts the three together is untried.
 - `use_made` and `repeat`'s chains in `host/mutator.c` follow only what a record puts in an `ARG_DST` slot,
@@ -537,7 +537,7 @@ what is left:
   The corpus has no such input; the fuzzer made one within minutes,
   which `make qemu-replay` fails by that line.
 - A call that stops without putting its thread back on the `ecall`
-  the host takes as finished, and no host check sees it unless `OP_DEBUG_PREEMPT` armed the stop;
+  the host takes as finished, and no host check sees it unless `OP_TEST_PREEMPT` armed the stop;
   `make qemu-replay` does, by the trace line the host then lacks.
 - The host moves time a tick at a time, and under tracing every turn begins at a tick,
   so what a turn begun within a tick pays at the tick, `turn_next`,
@@ -650,7 +650,7 @@ the first five below are what does not keep to it yet, each a constant-time chan
 - On ARM and RP2350's Hazard3 an `OP_IRQ_SET` on a core other than the first interrupts the first core each time,
   so a driver there that arms its line in a loop takes what it likes of the first core's turns, which its threads pay for.
   Interrupting it only as `core_notify` does, or routing a line to its waiter's core, open decision 24, would bound it.
-- `OP_DEBUG_TICK` and a stop `OP_DEBUG_PREEMPT` armed move the tick count without time passing,
+- `OP_TEST_TICK` and a stop `OP_TEST_PREEMPT` armed move the tick count without time passing,
   and untraced the count stays ahead of the counter for good, so every deadline set before fires early, the watchdog's among them.
   Only the replay driver calls them, under tracing, so refusing them untraced with `KERR_STATE` would cost nothing.
 - A bind of a ready thread, even to more units of its core, puts it at the back of its queue,
@@ -667,7 +667,7 @@ the first five below are what does not keep to it yet, each a constant-time chan
   and its work is bounded by its units, `DESIGN.md`, "Scheduling", where turns of a whole quantum would bound it by its turns too.
   A turn of a few ticks, or of what the thread's account holds, would skip them while threads compete too,
   and give turns the length the scheduler chooses: `sched_wake_ticks` would return the turn's end instead of one.
-  It changes what `OP_DEBUG_TICK` means to the replay, which passes records with it,
+  It changes what `OP_TEST_TICK` means to the replay, which passes records with it,
   and what the demo's "root: units ok" measures; decide it with open decision 9.
 - Threads with time take equal turns,
   so a thread with more units gets its larger part only by running on

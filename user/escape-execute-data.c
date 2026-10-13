@@ -24,7 +24,7 @@ static volatile uint32_t code_word;
 
 static void puts(const char *s)
 {
-    rv_puts(BOOT_CAP_DEBUG, s);
+    rv_puts(BOOT_CAP_PRINT, s);
 }
 
 int main(void);
@@ -35,13 +35,13 @@ int main(void)
 
     uint32_t at = (uint32_t)(uintptr_t)&code_word;
     puts("escape: executing from the data region at ");
-    rv_put_hex(BOOT_CAP_DEBUG, at);
+    rv_put_hex(BOOT_CAP_PRINT, at);
     puts(", expecting a fault\n");
 
     ESCAPE_CODE(at)();
 
     /* Not reached when PMP marks the data region no-execute. */
     puts("escape: breached, executed from data\n");
-    rv_halt(BOOT_CAP_DEBUG, 2);
+    rv_halt(BOOT_CAP_HALT, 2);
     return 0;
 }

@@ -33,7 +33,7 @@ static void dodger_main(void)
         if (rv_timer_set(SLOT_DODGER_TIMER, BIT_TIMER, 0) != KERR_OK ||
             rv_wait(SLOT_DODGER_NTFN, &bits) != KERR_OK || bits != BIT_TIMER) {
             puts("dodger: cannot sleep\n");
-            rv_halt(BOOT_CAP_DEBUG, 1);
+            rv_halt(BOOT_CAP_HALT, 1);
         }
         uint32_t start = *low;
         while (*low - start < dodge_counts) {

@@ -36,7 +36,7 @@ Contents:
 6. [System call reference](manual/system-calls.md#6-system-call-reference)
     - [6.1 Invocation ABI](manual/system-calls.md#61-invocation-abi)
     - [6.2 Status codes](manual/system-calls.md#62-status-codes)
-    - [6.3 Operations on `Debug`](manual/system-calls.md#63-operations-on-debug)
+    - [6.3 Operations on `Print`, `Halt` and `Test`](manual/system-calls.md#63-operations-on-print-halt-and-test)
     - [6.4 Operations on `CapTable`](manual/system-calls.md#64-operations-on-captable)
     - [6.5 Operations on `Frame` and `Untyped`](manual/system-calls.md#65-operations-on-frame-and-untyped)
     - [6.6 Operations on `KernelPool`](manual/system-calls.md#66-operations-on-kernelpool)

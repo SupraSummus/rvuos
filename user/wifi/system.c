@@ -34,7 +34,7 @@ static const struct {
 
 void system_halt(uint32_t code)
 {
-    rv_halt(BOOT_CAP_DEBUG, code);
+    rv_halt(BOOT_CAP_HALT, code);
 }
 
 void system_must(struct system *s, const char *what, uint32_t status)

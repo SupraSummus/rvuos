@@ -83,7 +83,7 @@ static void must(const char *what, uint32_t status)
             say(&cout, " at %s", self.what);
         }
         say(&cout, "\n");
-        rv_halt(BOOT_CAP_DEBUG, 1);
+        rv_halt(BOOT_CAP_HALT, 1);
     }
 }
 
@@ -400,5 +400,5 @@ int main(void)
     }
     bool both_ways = exchange(&c);
     say(&cout, both_ways ? "thread: done\n" : "thread: no ping heard, or nothing of ours acknowledged\n");
-    rv_halt(BOOT_CAP_DEBUG, both_ways ? 0 : HALT_SILENT);
+    rv_halt(BOOT_CAP_HALT, both_ways ? 0 : HALT_SILENT);
 }
