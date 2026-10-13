@@ -219,14 +219,14 @@ static int op_frame(struct thread *t, uint32_t slot, const struct cap *cap,
 
     switch (op) {
     case OP_FRAME_CARVE: {
-        uint32_t off = arg[1];
-        uint32_t len = arg[2];
+        uint32_t off = arg[2];
+        uint32_t len = arg[3];
         /* A block within the frame, so that every frame capability is one NAPOT entry. */
         if (off >= size || len > size - off || !napot_block(base + off, len)) {
             return KERR_INVALID_ARG;
         }
         struct cap sub = cap_to_frame(base + off, len, cap->rights);
-        return slot_store(t, arg[3], &sub, slot_node(t, slot));
+        return slot_store(t, arg[1], &sub, slot_node(t, slot));
     }
     default:
         return KERR_WRONG_TYPE;
@@ -243,7 +243,8 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
 
     switch (op) {
     case OP_UNTYPED_RETYPE: {
-        uint32_t type = arg[1];
+        uint32_t dst = arg[1];
+        uint32_t type = arg[2];
         if (type != CAP_FRAME && type != CAP_POOL) {
             return KERR_INVALID_ARG;
         }
@@ -261,7 +262,7 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
                 return KERR_INVALID_ARG;
             }
         }
-        int err = slot_vacant(t, arg[2]);
+        int err = slot_vacant(t, dst);
         if (err != KERR_OK) {
             return err;
         }
@@ -284,7 +285,7 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
             c = cap_to_frame(base, size, cap->rights);
         }
         arg[1] = base;
-        return slot_store(t, arg[2], &c, parent);
+        return slot_store(t, dst, &c, parent);
     }
     case OP_UNTYPED_SPLIT: {
         /* Each half is a block, so that a frame made of it is one NAPOT entry. */
@@ -357,14 +358,14 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
     if (pool->dying) {
         return KERR_STATE;
     }
-    uint32_t dst = arg[2];
+    uint32_t dst = arg[1];
     int err = slot_vacant(t, dst);
     if (err != KERR_OK) {
         return err;
     }
 
     struct obj_header *obj;
-    switch (arg[1]) {
+    switch (arg[2]) {
     /*
      * A process's table and a thread's process may lie in any pool,
      * since the sweep clears the hold on them; see DESIGN.md, "Kernel pools and revocation".
@@ -616,11 +617,11 @@ static int op_notification(struct thread *t, uint32_t slot, const struct cap *ca
     case OP_NOTIFY_CARVE: {
         /* Fewer bits, as a carve of a frame is less memory: a table operation, below the invoked capability. */
         struct cap sub = *cap;
-        sub.b &= arg[1];
+        sub.b &= arg[2];
         if (sub.b == 0) {
             return KERR_INVALID_ARG;
         }
-        return slot_store(t, arg[2], &sub, slot_node(t, slot));
+        return slot_store(t, arg[1], &sub, slot_node(t, slot));
     }
     case OP_NOTIFY_WAIT:
         if (ntfn->bits != 0) {
@@ -643,13 +644,13 @@ static int op_notification(struct thread *t, uint32_t slot, const struct cap *ca
  */
 static int carve_range(struct thread *t, uint32_t slot, const struct cap *cap, const uint32_t *arg)
 {
-    uint32_t off = arg[1];
-    uint32_t len = arg[2];
+    uint32_t off = arg[2];
+    uint32_t len = arg[3];
     if (len == 0 || off > cap->b || len > cap->b - off) {
         return KERR_INVALID_ARG;
     }
     struct cap sub = { .type = cap->type, .rights = cap->rights, .a = cap->a + off, .b = len };
-    return slot_store(t, arg[3], &sub, slot_node(t, slot));
+    return slot_store(t, arg[1], &sub, slot_node(t, slot));
 }
 
 /* arg[1..] carry the arguments in. */
@@ -668,7 +669,7 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
             return KERR_INVALID_ARG;
         }
         struct cap pc;
-        int err = slot_lookup_typed(t, arg[1], CAP_POOL, RIGHT_W, &pc);
+        int err = slot_lookup_typed(t, arg[2], CAP_POOL, RIGHT_W, &pc);
         if (err != KERR_OK) {
             return err;
         }
@@ -678,7 +679,7 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
         }
         /* The Irq signals on its creator's behalf, so the creator must be able to. */
         struct cap nc;
-        err = slot_lookup_typed(t, arg[2], CAP_NOTIFICATION, RIGHT_W, &nc);
+        err = slot_lookup_typed(t, arg[3], CAP_NOTIFICATION, RIGHT_W, &nc);
         if (err != KERR_OK) {
             return err;
         }
@@ -687,8 +688,8 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
             return KERR_OVERLAP;
         }
         /* The invoked slot is cleared below, so it may receive the Irq capability, under whichever number names it. */
-        if (slot_at(t, arg[3]) != slot_node(t, slot)) {
-            err = slot_vacant(t, arg[3]);
+        if (slot_at(t, arg[1]) != slot_node(t, slot)) {
+            err = slot_vacant(t, arg[1]);
             if (err != KERR_OK) {
                 return err;
             }
@@ -703,7 +704,7 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
         struct irq *irq = pool_alloc(pool, CAP_IRQ, obj_type_size(CAP_IRQ, 0));
         /* It hangs below the capability it was bound with, so a revoke above that disarms the Irq. */
         irq->ntfn = (struct cap){ .type = CAP_SIGNALLED, .rights = nc.rights, .a = nc.a, .b = nc.b };
-        cap_attach(slot_node(t, arg[2]), &irq->ntfn);
+        cap_attach(slot_node(t, arg[3]), &irq->ntfn);
         irq->line = first;
         /* A period counts from the last deadline, and a line that never fired from its bind. */
         irq->deadline = sched_ticks;
@@ -712,7 +713,7 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
         cap_delete(slot_node(t, slot), false);
         /* Its bits are zero, so it is disarmed, and its line stays masked as every line does until a set. */
         struct cap ic = cap_to_object(&irq->hdr, RIGHT_ALL);
-        return slot_store(t, arg[3], &ic, slot_node(t, arg[1]));
+        return slot_store(t, arg[1], &ic, slot_node(t, arg[2]));
     }
     default:
         return KERR_WRONG_TYPE;
@@ -1016,7 +1017,7 @@ static uint8_t shape_reads(uint32_t op, const struct cap *cap, const uint32_t *a
 {
     switch (op) {
     case OP_POOL_ALLOC:
-        return arg[1] == CAP_NOTIFICATION ? reads & (uint8_t)~SHAPE_A3 : reads;
+        return arg[2] == CAP_NOTIFICATION ? reads & (uint8_t)~SHAPE_A3 : reads;
     case OP_THREAD_WATCH:
         return arg[2] == 0 ? reads & (uint8_t)~SHAPE_A1 : reads;
     case OP_IRQ_SET: {

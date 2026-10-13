@@ -38,6 +38,8 @@ Every slot an argument names, `a0` among them, is a slot of the caller's and so 
 `SLOT_IN(table slot, index)`, section 5.2, unless this chapter says it is in the invoked table:
 below 1024 it is the index in the first table.
 A slot of the invoked table, as `OP_CAP_COPY`'s destination is, is its index there.
+An operation that puts a capability in a slot names that slot, its destination, in `a1`,
+and `OP_UNTYPED_SPLIT`, which fills two, the second in `a2`.
 
 The kernel checks in this order:
 the slot resolves (`KERR_INVALID_CAP`),
@@ -197,7 +199,7 @@ What a frame or an Untyped covers `OP_CAP_INFO` tells, section 6.14.
 
 **`OP_FRAME_CARVE` (5).**
 No right needed.
-`a1` = offset from the frame's base, `a2` = size, `a3` = destination slot in the caller's tables.
+`a1` = destination slot in the caller's tables, `a2` = offset from the frame's base, `a3` = size.
 Produces a frame with the same rights, hanging below the invoked one.
 The size must be a power of two no smaller than the smallest region,
 the offset a multiple of the size,
@@ -206,8 +208,8 @@ so the new frame is a block.
 The parent capability is unchanged.
 
 **`OP_UNTYPED_RETYPE` (6).**
-`a1` = the type, `CAP_FRAME` or `CAP_POOL` (`KERR_INVALID_ARG`),
-`a2` = destination slot in the caller's tables.
+`a1` = destination slot in the caller's tables,
+`a2` = the type, `CAP_FRAME` or `CAP_POOL` (`KERR_INVALID_ARG`).
 Makes the whole of the Untyped into it, and returns `a1` = its base.
 A pool needs `RIGHT_R` and `RIGHT_W` on the Untyped (`KERR_NO_RIGHTS`)
 and an Untyped no smaller than `POOL_MIN_SIZE` (`KERR_INVALID_ARG`);
@@ -228,9 +230,9 @@ A pool allocates, which needs `RIGHT_W` on it, and tells what an allocation woul
 it is destroyed by revoking below its Untyped, section 5.5.
 
 **`OP_POOL_ALLOC` (7).**
-`a1` = object type, `a2` = destination slot, `a3` = type-specific:
+`a1` = destination slot, `a2` = object type, `a3` = type-specific:
 
-| `a1` | `a3` | Rule |
+| `a2` | `a3` | Rule |
 |---|---|---|
 | `CAP_CAPTABLE` | number of slots, 1 to `CAPTABLE_MAX_SLOTS` (1024) | |
 | `CAP_PROCESS` | slot of the `CapTable` capability the process will use, with `RIGHT_W` | the table may lie in any pool; the process holds it in its first table slot, below that capability |
@@ -409,7 +411,7 @@ A stop leaves the waiter at this call, lending nothing, which a resume makes aga
 
 **`OP_NOTIFY_CARVE` (36).**
 No right needed.
-`a1` = bits, `a2` = destination slot.
+`a1` = destination slot, `a2` = bits.
 A capability to the same notification with the same rights,
 which may signal those of the bits the invoked one may, below it in the derivation tree;
 `KERR_INVALID_ARG` when none is left.
@@ -419,16 +421,16 @@ A table operation like `OP_FRAME_CARVE`; section 5.7.
 
 **`OP_IRQ_CARVE` (19).**
 No right needed.
-`a1` = offset from the first line, `a2` = count, `a3` = destination slot.
+`a1` = destination slot, `a2` = offset from the first line, `a3` = count.
 A table operation like `OP_FRAME_CARVE`.
 
 **`OP_IRQ_BIND` (20).**
 Needs `RIGHT_W`, and the capability must name exactly one line (`KERR_INVALID_ARG`).
-`a1` = slot of the `KernelPool` capability to allocate the `Irq` from, with `RIGHT_W`,
-`a2` = slot of the `Notification` capability the `Irq` signals, with `RIGHT_W`,
+`a1` = destination slot for the `Irq` capability, which may be the invoked slot,
+`a2` = slot of the `KernelPool` capability to allocate the `Irq` from, with `RIGHT_W`,
+`a3` = slot of the `Notification` capability the `Irq` signals, with `RIGHT_W`,
 which may lie in any pool, and the `Irq`'s hold on it hangs below that capability, section 5.9;
-the `Irq` signals only the bits that capability may,
-`a3` = destination slot for the `Irq` capability, which may be the invoked slot.
+the `Irq` signals only the bits that capability may.
 The invoked slot is cleared with everything below it,
 and the `Irq` capability hangs below the `KernelPool` capability.
 `KERR_OVERLAP` if an `Irq` is already bound to the line,
@@ -490,7 +492,7 @@ Until it is first armed nothing halts the machine for want of feeding, RP2350's 
 
 **`OP_TIME_CARVE` (28).**
 No right needed.
-`a1` = offset from the first unit, `a2` = count, `a3` = destination slot.
+`a1` = destination slot, `a2` = offset from the first unit, `a3` = count.
 A table operation like `OP_IRQ_CARVE`.
 
 **`OP_TIME_BIND` (29).**
