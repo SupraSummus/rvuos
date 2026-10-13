@@ -12,7 +12,9 @@
  * Registers at the ecall:
  *   a7      operation code, one of OP_*
  *   a0      slot of the invoked capability in the caller's tables, see SLOT_TABLE_SHIFT
- *   a1..a3  operation arguments; a4..a6 are reserved
+ *   a1..a3  operation arguments; one an operation does not read, and a bit of a rights mask past RIGHT_ALL,
+ *           must be zero, else KERR_INVALID_ARG, so that it may mean something later;
+ *           a4..a6 are reserved, and unread
  * Registers on return:
  *   a0      status, one of KERR_*
  *   a1..a4  results, operation specific; unchanged unless documented

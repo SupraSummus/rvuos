@@ -51,8 +51,9 @@ On ARMv7-M `r0` to `r6` stand for `a0` to `a6`, `r12` for `a7`, and `svc` makes 
 see "Architectures".
 
 Operation codes are a single flat numbering across all types.
-The kernel resolves the slot, checks that the type accepts the operation
-and that the capability carries the rights it needs,
+The kernel resolves the slot, checks that the type accepts the operation,
+that the capability carries the rights it needs,
+and that what the operation does not read is zero, from one table, `op_shapes`,
 and only then looks at the arguments.
 A wrong type and a missing right are distinct errors
 so that a caller can tell a programming mistake from a policy decision.

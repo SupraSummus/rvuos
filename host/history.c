@@ -19,6 +19,7 @@
 
 #include "harness.h"
 #include "layout.h"
+#include "ops.h"
 
 /* What a capability grants, as the covering rule compares it: a range, an object, or the debug capability. */
 struct grant {
@@ -78,6 +79,7 @@ static uint32_t caller_dying;
  * the oldest, and the one that pays for the turn.
  */
 static bool call_made, invoked;
+static int invoked_status; /* what the slot's lookup returned */
 static struct cap invoked_cap;
 static uint32_t call_op, call_pc;
 static uint32_t call_args[4]; /* a1 to a4 */
@@ -556,7 +558,8 @@ static void record_call(bool call)
     for (unsigned i = 0; i < 4; i++) {
         call_args[i] = f->regs[REG_A1 + i];
     }
-    invoked = slot_lookup(caller, f->regs[REG_A0], &invoked_cap) == KERR_OK;
+    invoked_status = slot_lookup(caller, f->regs[REG_A0], &invoked_cap);
+    invoked = invoked_status == KERR_OK;
     record_describe();
     if (invoked) {
         record_room();
@@ -570,6 +573,69 @@ static void record_call(bool call)
     signalled_payer = core_self()->payer;
     if (signalled_payer != NULL && signalled_payer->waiting_on != v2p(&signalled->hdr)) {
         signalled_payer = NULL;
+    }
+}
+
+/*
+ * Of a1 to a3, those a call of the operation leaves unread: the ARG_NONE of host/ops.h,
+ * and those three operations leave by their own values, as rvuos/abi.h says:
+ * an allocation of a notification its a3, a watch with no bits its a1,
+ * and a set with no bits, or of an Irq that is no timer's, its a2 and a3.
+ */
+static unsigned unread_args(const struct op_info *info)
+{
+    unsigned unread = 0;
+    for (unsigned i = 0; i < 3; i++) {
+        if (info->arg[i] == ARG_NONE) {
+            unread |= 1u << i;
+        }
+    }
+    if (call_op == OP_POOL_ALLOC && call_args[0] == CAP_NOTIFICATION) {
+        unread |= 4;
+    } else if (call_op == OP_THREAD_WATCH && call_args[1] == 0) {
+        unread |= 1;
+    } else if (call_op == OP_IRQ_SET &&
+               (call_args[0] == 0 || ((const struct irq *)cap_object(&invoked_cap))->line < IRQ_LINES)) {
+        unread |= 6;
+    }
+    return unread;
+}
+
+/*
+ * A call that returned failed at the first of the checks the manual orders that it fails, if any does:
+ * a slot that names nothing, an operation the capability's type does not take, a right it lacks,
+ * or something in what the operation does not read, a bit of a rights mask past RIGHT_ALL among it.
+ * Which of the rest fails is the operation's own, and a description's arguments check_describe holds.
+ */
+static void check_order(void)
+{
+    if (!call_made || caller == NULL || caller->frame.pc == call_pc || caller->state == THREAD_WAITING ||
+        call_op == OP_CAP_INFO) {
+        return;
+    }
+    uint32_t status = caller->frame.regs[REG_A0];
+    uint32_t want;
+    const struct op_info *info = call_op < OP_COUNT ? op_info((uint8_t)call_op) : NULL;
+    if (!invoked) {
+        want = (uint32_t)invoked_status;
+    } else if (info == NULL || info->cap != invoked_cap.type) {
+        want = KERR_WRONG_TYPE;
+    } else if ((invoked_cap.rights & rights_needed(call_op)) != rights_needed(call_op)) {
+        want = KERR_NO_RIGHTS;
+    } else {
+        unsigned unread = unread_args(info);
+        bool garbage = false;
+        for (unsigned i = 0; i < 3; i++) {
+            garbage |= ((unread >> i) & 1) && call_args[i] != 0;
+            garbage |= info->arg[i] == ARG_RIGHTS && (call_args[i] & ~(uint32_t)RIGHT_ALL) != 0;
+        }
+        if (!garbage) {
+            return;
+        }
+        want = KERR_INVALID_ARG;
+    }
+    if (status != want) {
+        violated("a refused call did not fail at the first check it fails");
     }
 }
 
@@ -938,6 +1004,7 @@ void history_end(void)
     check_mounts();
     check_move();
     check_call();
+    check_order();
     check_lends();
     check_stops();
     check_describe();

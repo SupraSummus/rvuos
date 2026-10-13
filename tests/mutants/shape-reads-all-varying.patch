@@ -1,0 +1,19 @@
+The three operations whose own values decide what they read are held to read it all,
+so a watch with no bits takes a notification's slot it does not look at;
+a refused call fails at the first check it fails, the unread arguments' among them.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a refused call did not fail at the first check it fails
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -1052,7 +1052,7 @@ static int shape_check(uint32_t op, const struct cap *cap, const uint32_t *arg)
+         return KERR_NO_RIGHTS;
+     }
+     uint8_t reads = shape->reads;
+-    if (reads & SHAPE_VARIES) {
++    if ((reads & SHAPE_VARIES) && op == OP_COUNT) {
+         reads = shape_reads(op, cap, arg, reads);
+     }
+     uint32_t unread = ((reads & SHAPE_A1) ? 0 : arg[1]) | ((reads & SHAPE_A2) ? 0 : arg[2]) |

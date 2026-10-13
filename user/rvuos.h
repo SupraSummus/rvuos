@@ -172,13 +172,14 @@ static inline uint32_t rv_time_bind(uint32_t time_cap, uint32_t thread_cap, uint
 static inline uint32_t rv_frame_info(uint32_t frame_cap, uint32_t *base, uint32_t *size)
 {
     register uint32_t r_a0 __asm__(RV_A0) = frame_cap;
-    register uint32_t r_a1 __asm__(RV_A1);
-    register uint32_t r_a2 __asm__(RV_A2);
+    register uint32_t r_a1 __asm__(RV_A1) = 0;
+    register uint32_t r_a2 __asm__(RV_A2) = 0;
+    register uint32_t r_a3 __asm__(RV_A3) = 0;
     register uint32_t r_a7 __asm__(RV_A7) = OP_FRAME_INFO;
     __asm__ volatile(RV_CALL
-                     : "+r"(r_a0), "=r"(r_a1), "=r"(r_a2)
+                     : "+r"(r_a0), "+r"(r_a1), "+r"(r_a2), "+r"(r_a3)
                      : "r"(r_a7)
-                     : "memory", RV_A3, RV_A4, RV_A5, RV_A6);
+                     : "memory", RV_A4, RV_A5, RV_A6);
     *base = r_a1;
     *size = r_a2;
     return r_a0;
@@ -188,12 +189,15 @@ static inline uint32_t rv_frame_info(uint32_t frame_cap, uint32_t *base, uint32_
 static inline uint32_t rv_frame_min_size(uint32_t frame_cap, uint32_t *min_out)
 {
     register uint32_t r_a0 __asm__(RV_A0) = frame_cap;
+    register uint32_t r_a1 __asm__(RV_A1) = 0;
+    register uint32_t r_a2 __asm__(RV_A2) = 0;
+    register uint32_t r_a3 __asm__(RV_A3) = 0;
     register uint32_t r_a4 __asm__(RV_A4);
     register uint32_t r_a7 __asm__(RV_A7) = OP_FRAME_INFO;
     __asm__ volatile(RV_CALL
-                     : "+r"(r_a0), "=r"(r_a4)
+                     : "+r"(r_a0), "+r"(r_a1), "+r"(r_a2), "+r"(r_a3), "=r"(r_a4)
                      : "r"(r_a7)
-                     : "memory", RV_A1, RV_A2, RV_A3, RV_A5, RV_A6);
+                     : "memory", RV_A5, RV_A6);
     *min_out = r_a4;
     return r_a0;
 }
@@ -203,14 +207,15 @@ static inline uint32_t rv_untyped_info(uint32_t untyped_cap, uint32_t *base, uin
                                        uint32_t *made)
 {
     register uint32_t r_a0 __asm__(RV_A0) = untyped_cap;
-    register uint32_t r_a1 __asm__(RV_A1);
-    register uint32_t r_a2 __asm__(RV_A2);
+    register uint32_t r_a1 __asm__(RV_A1) = 0;
+    register uint32_t r_a2 __asm__(RV_A2) = 0;
+    register uint32_t r_a3 __asm__(RV_A3) = 0;
     register uint32_t r_a4 __asm__(RV_A4);
     register uint32_t r_a7 __asm__(RV_A7) = OP_UNTYPED_INFO;
     __asm__ volatile(RV_CALL
-                     : "+r"(r_a0), "=r"(r_a1), "=r"(r_a2), "=r"(r_a4)
+                     : "+r"(r_a0), "+r"(r_a1), "+r"(r_a2), "+r"(r_a3), "=r"(r_a4)
                      : "r"(r_a7)
-                     : "memory", RV_A3, RV_A5, RV_A6);
+                     : "memory", RV_A5, RV_A6);
     *base = r_a1;
     *size = r_a2;
     *made = r_a4;
@@ -264,11 +269,12 @@ static inline uint32_t rv_retype(uint32_t untyped_cap, uint32_t type, uint32_t d
     register uint32_t r_a0 __asm__(RV_A0) = untyped_cap;
     register uint32_t r_a1 __asm__(RV_A1) = type;
     register uint32_t r_a2 __asm__(RV_A2) = dst;
+    register uint32_t r_a3 __asm__(RV_A3) = 0;
     register uint32_t r_a7 __asm__(RV_A7) = OP_UNTYPED_RETYPE;
     __asm__ volatile(RV_CALL
-                     : "+r"(r_a0), "+r"(r_a1), "+r"(r_a2)
+                     : "+r"(r_a0), "+r"(r_a1), "+r"(r_a2), "+r"(r_a3)
                      : "r"(r_a7)
-                     : "memory", RV_A3, RV_A4, RV_A5, RV_A6);
+                     : "memory", RV_A4, RV_A5, RV_A6);
     *base = r_a1;
     return r_a0;
 }
@@ -284,13 +290,13 @@ static inline uint32_t rv_thread_fault(uint32_t thread_cap, uint32_t *cause, uin
                                        uint32_t *status)
 {
     register uint32_t r_a0 __asm__(RV_A0) = thread_cap;
-    register uint32_t r_a1 __asm__(RV_A1);
-    register uint32_t r_a2 __asm__(RV_A2);
-    register uint32_t r_a3 __asm__(RV_A3);
+    register uint32_t r_a1 __asm__(RV_A1) = 0;
+    register uint32_t r_a2 __asm__(RV_A2) = 0;
+    register uint32_t r_a3 __asm__(RV_A3) = 0;
     register uint32_t r_a4 __asm__(RV_A4);
     register uint32_t r_a7 __asm__(RV_A7) = OP_THREAD_FAULT;
     __asm__ volatile(RV_CALL
-                     : "+r"(r_a0), "=r"(r_a1), "=r"(r_a2), "=r"(r_a3), "=r"(r_a4)
+                     : "+r"(r_a0), "+r"(r_a1), "+r"(r_a2), "+r"(r_a3), "=r"(r_a4)
                      : "r"(r_a7)
                      : "memory", RV_A5, RV_A6);
     *cause = r_a1;
@@ -305,11 +311,13 @@ static inline uint32_t rv_thread_read_reg(uint32_t thread_cap, uint32_t reg, uin
 {
     register uint32_t r_a0 __asm__(RV_A0) = thread_cap;
     register uint32_t r_a1 __asm__(RV_A1) = reg;
+    register uint32_t r_a2 __asm__(RV_A2) = 0;
+    register uint32_t r_a3 __asm__(RV_A3) = 0;
     register uint32_t r_a7 __asm__(RV_A7) = OP_THREAD_READ_REG;
     __asm__ volatile(RV_CALL
-                     : "+r"(r_a0), "+r"(r_a1)
+                     : "+r"(r_a0), "+r"(r_a1), "+r"(r_a2), "+r"(r_a3)
                      : "r"(r_a7)
-                     : "memory", RV_A2, RV_A3, RV_A4, RV_A5, RV_A6);
+                     : "memory", RV_A4, RV_A5, RV_A6);
     *value = r_a1;
     return r_a0;
 }
@@ -330,12 +338,14 @@ static inline uint32_t rv_notify_carve(uint32_t ntfn_cap, uint32_t bits, uint32_
 static inline uint32_t rv_wait(uint32_t ntfn_cap, uint32_t *bits)
 {
     register uint32_t r_a0 __asm__(RV_A0) = ntfn_cap;
-    register uint32_t r_a1 __asm__(RV_A1);
+    register uint32_t r_a1 __asm__(RV_A1) = 0;
+    register uint32_t r_a2 __asm__(RV_A2) = 0;
+    register uint32_t r_a3 __asm__(RV_A3) = 0;
     register uint32_t r_a7 __asm__(RV_A7) = OP_NOTIFY_WAIT;
     __asm__ volatile(RV_CALL
-                     : "+r"(r_a0), "=r"(r_a1)
+                     : "+r"(r_a0), "+r"(r_a1), "+r"(r_a2), "+r"(r_a3)
                      : "r"(r_a7)
-                     : "memory", RV_A2, RV_A3, RV_A4, RV_A5, RV_A6);
+                     : "memory", RV_A4, RV_A5, RV_A6);
     *bits = r_a1;
     return r_a0;
 }
@@ -345,11 +355,13 @@ static inline uint32_t rv_lend(uint32_t ntfn_cap, uint32_t thread_cap, uint32_t 
 {
     register uint32_t r_a0 __asm__(RV_A0) = ntfn_cap;
     register uint32_t r_a1 __asm__(RV_A1) = thread_cap;
+    register uint32_t r_a2 __asm__(RV_A2) = 0;
+    register uint32_t r_a3 __asm__(RV_A3) = 0;
     register uint32_t r_a7 __asm__(RV_A7) = OP_NOTIFY_LEND;
     __asm__ volatile(RV_CALL
-                     : "+r"(r_a0), "+r"(r_a1)
+                     : "+r"(r_a0), "+r"(r_a1), "+r"(r_a2), "+r"(r_a3)
                      : "r"(r_a7)
-                     : "memory", RV_A2, RV_A3, RV_A4, RV_A5, RV_A6);
+                     : "memory", RV_A4, RV_A5, RV_A6);
     *bits = r_a1;
     return r_a0;
 }
@@ -397,13 +409,13 @@ static inline uint32_t rv_irq_set(uint32_t irq_cap, uint32_t bits)
 static inline uint32_t rv_clock_read(uint32_t clock_cap, uint64_t *now, uint32_t *hz, uint32_t *counter)
 {
     register uint32_t r_a0 __asm__(RV_A0) = clock_cap;
-    register uint32_t r_a1 __asm__(RV_A1);
-    register uint32_t r_a2 __asm__(RV_A2);
-    register uint32_t r_a3 __asm__(RV_A3);
+    register uint32_t r_a1 __asm__(RV_A1) = 0;
+    register uint32_t r_a2 __asm__(RV_A2) = 0;
+    register uint32_t r_a3 __asm__(RV_A3) = 0;
     register uint32_t r_a4 __asm__(RV_A4);
     register uint32_t r_a7 __asm__(RV_A7) = OP_CLOCK_READ;
     __asm__ volatile(RV_CALL
-                     : "+r"(r_a0), "=r"(r_a1), "=r"(r_a2), "=r"(r_a3), "=r"(r_a4)
+                     : "+r"(r_a0), "+r"(r_a1), "+r"(r_a2), "+r"(r_a3), "=r"(r_a4)
                      : "r"(r_a7)
                      : "memory", RV_A5, RV_A6);
     *now = ((uint64_t)r_a2 << 32) | r_a1;

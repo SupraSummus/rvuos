@@ -7,12 +7,12 @@ Report: a call went through a capability without the rights its operation needs
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -803,7 +803,7 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
-         err = (cap.rights & RIGHT_W) ? op_process(t, &cap, op, arg) : KERR_NO_RIGHTS;
-         break;
-     case CAP_THREAD:
--        err = (cap.rights & RIGHT_W) ? op_thread(t, &cap, op, arg) : KERR_NO_RIGHTS;
-+        err = (cap.rights & RIGHT_W) || op == OP_THREAD_WATCH ? op_thread(t, &cap, op, arg) : KERR_NO_RIGHTS;
-         break;
-     case CAP_NOTIFICATION:
-         err = op_notification(t, slot, &cap, op, arg);
+@@ -1003,7 +1003,7 @@ static const struct op_shape op_shapes[OP_COUNT] = {
+     [OP_THREAD_CONFIGURE] = { CAP_THREAD, RIGHT_W, SHAPE_A123 },
+     [OP_THREAD_RESUME] = { CAP_THREAD, RIGHT_W, 0 },
+     [OP_THREAD_STOP] = { CAP_THREAD, RIGHT_W, 0 },
+-    [OP_THREAD_WATCH] = { CAP_THREAD, RIGHT_W, SHAPE_A1 | SHAPE_A2 | SHAPE_VARIES },
++    [OP_THREAD_WATCH] = { CAP_THREAD, 0, SHAPE_A1 | SHAPE_A2 | SHAPE_VARIES },
+     [OP_THREAD_FAULT] = { CAP_THREAD, RIGHT_W, 0 },
+     [OP_THREAD_READ_REG] = { CAP_THREAD, RIGHT_W, SHAPE_A1 },
+     [OP_THREAD_WRITE_REG] = { CAP_THREAD, RIGHT_W, SHAPE_A1 | SHAPE_A2 },

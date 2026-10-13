@@ -1,4 +1,4 @@
-A Debug capability with RIGHT_W alone halts the machine, traces it, ticks it, fires its interrupts or preempts a call,
+A Debug capability with any right halts the machine, traces it, ticks it, fires its interrupts or preempts a call,
 so a child given the log only to write could stop every other process;
 a call goes through only a capability with the rights its operation needs.
 
@@ -8,12 +8,20 @@ Report: a call went through a capability without the rights its operation needs
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -46,7 +46,7 @@ static void debug_write(const uint32_t *arg)
- /* Writing into the log takes RIGHT_W, and the rest, which halts or drives the machine, RIGHT_X. */
- static int op_debug(const struct cap *cap, uint32_t op, const uint32_t *arg)
- {
--    if (!(cap->rights & (op == OP_DEBUG_WRITE ? RIGHT_W : RIGHT_X))) {
-+    if (!(cap->rights & (op == OP_DEBUG_WRITE ? RIGHT_W : RIGHT_X | RIGHT_W))) {
-         return KERR_NO_RIGHTS;
-     }
-     switch (op) {
+@@ -979,11 +979,11 @@ struct op_shape {
+ };
+ static const struct op_shape op_shapes[OP_COUNT] = {
+     [OP_DEBUG_WRITE] = { CAP_DEBUG, RIGHT_W, SHAPE_A123 },
+-    [OP_DEBUG_HALT] = { CAP_DEBUG, RIGHT_X, SHAPE_A1 },
+-    [OP_DEBUG_TRACE] = { CAP_DEBUG, RIGHT_X, 0 },
+-    [OP_DEBUG_TICK] = { CAP_DEBUG, RIGHT_X, 0 },
+-    [OP_DEBUG_IRQ] = { CAP_DEBUG, RIGHT_X, SHAPE_A1 },
+-    [OP_DEBUG_PREEMPT] = { CAP_DEBUG, RIGHT_X, SHAPE_A1 },
++    [OP_DEBUG_HALT] = { CAP_DEBUG, 0, SHAPE_A1 },
++    [OP_DEBUG_TRACE] = { CAP_DEBUG, 0, 0 },
++    [OP_DEBUG_TICK] = { CAP_DEBUG, 0, 0 },
++    [OP_DEBUG_IRQ] = { CAP_DEBUG, 0, SHAPE_A1 },
++    [OP_DEBUG_PREEMPT] = { CAP_DEBUG, 0, SHAPE_A1 },
+     [OP_CAP_COPY] = { CAP_CAPTABLE, RIGHT_W, SHAPE_A123 | SHAPE_RIGHTS_A3 },
+     [OP_CAP_DELETE] = { CAP_CAPTABLE, RIGHT_W, SHAPE_A1 },
+     [OP_CAP_REVOKE] = { CAP_CAPTABLE, RIGHT_W, SHAPE_A1 },

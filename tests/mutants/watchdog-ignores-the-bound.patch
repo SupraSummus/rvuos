@@ -7,7 +7,7 @@ Report: the watchdog is set further than the longest delay
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -192,7 +192,7 @@ static int op_clock(struct thread *t, uint32_t slot, const struct cap *cap, uint
+@@ -198,7 +198,7 @@ static int op_clock(struct thread *t, uint32_t slot, uint32_t op, uint32_t *arg)
      }
      case OP_CLOCK_WATCHDOG: {
          uint32_t us = arg[1];

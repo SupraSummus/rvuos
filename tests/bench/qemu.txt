@@ -1,14 +1,14 @@
 # A round of each measure of user/bench/ on qemu, in instructions; see tests/bench.py.
-call 410
-signal-wait 810
-threads 3161
+call 458
+signal-wait 910
+threads 3142
 lock 21
-lock-wait 7183
-lock-lend 7020
+lock-wait 7245
+lock-lend 7545
 seqlock-write 65
-seqlock-read 70
-processes 4326
-channel 4796
-channel-1k 7786
-bulk 5450
-contended-worst 1723200
+seqlock-read 66
+processes 4307
+channel 5053
+channel-1k 7932
+bulk 5584
+contended-worst 1725500
