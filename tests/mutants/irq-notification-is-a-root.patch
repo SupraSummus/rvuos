@@ -13,7 +13,7 @@ diff --git a/kernel/syscall.c b/kernel/syscall.c
          struct irq *irq = pool_alloc(pool, CAP_IRQ, obj_type_size(CAP_IRQ, 0));
          /* It hangs below the capability it was bound with, so a revoke above that disarms the Irq. */
          irq->ntfn = (struct cap){ .type = CAP_SIGNALLED, .rights = nc.rights, .a = nc.a, .b = nc.b };
--        cap_attach(slot_node(t, arg[2]), &irq->ntfn);
+-        cap_attach(slot_node(t, arg[3]), &irq->ntfn);
 +        cap_attach(NULL, &irq->ntfn);
          irq->line = first;
          /* A period counts from the last deadline, and a line that never fired from its bind. */

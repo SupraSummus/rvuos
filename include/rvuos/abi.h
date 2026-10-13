@@ -27,6 +27,8 @@
  * The call made again checks everything afresh.
  * A thread stopped while it waits stands at its call the same way; see OP_THREAD_STOP.
  *
+ * An operation that puts a capability in a slot names that slot, its destination, in a1,
+ * and a split, which fills two, the second in a2.
  * Slots that receive a new capability are always in the caller's own tables.
  * A process needs no capability to write its own tables;
  * the CapTable capability exists to write another process's table.
@@ -233,7 +235,7 @@
  */
 /*
  * Frame: derive a smaller frame with the same rights.
- * a1 = offset from the frame base, a2 = size, a3 = destination slot.
+ * a1 = destination slot, a2 = offset from the frame base, a3 = size.
  * The size must be a power of two no smaller than the smallest region
  * and the offset a multiple of the size,
  * so that the new frame is a block and costs one PMP entry wherever it is installed.
@@ -253,7 +255,7 @@
 
 /*
  * Untyped: make the whole of its memory into one thing, below the invoked one in the tree.
- * a1 = the type: CAP_FRAME or CAP_POOL, a2 = destination slot.
+ * a1 = destination slot, a2 = the type: CAP_FRAME or CAP_POOL.
  * Returns a1 = the base of the memory.
  * A frame carries the invoked one's rights.
  * A pool needs RIGHT_R and RIGHT_W and an Untyped no smaller than POOL_MIN_SIZE;
@@ -270,7 +272,7 @@
 
 /*
  * Pool (RIGHT_W): allocate a kernel object.
- * a1 = object type, a2 = destination slot,
+ * a1 = destination slot, a2 = object type,
  * a3 = type specific:
  *   CAP_CAPTABLE  the number of slots,
  *   CAP_PROCESS   the slot of the CapTable capability the process will use, mounted in its table slot 0,
@@ -467,7 +469,7 @@
 #define OP_NOTIFY_LEND 38
 /*
  * Notification: derive a capability that may signal fewer bits, with the same rights.
- * a1 = the bits, of which those the invoked capability may signal are kept, a2 = destination slot.
+ * a1 = destination slot, a2 = the bits, of which those the invoked capability may signal are kept.
  * Fails with KERR_INVALID_ARG when none is kept.
  * Like OP_FRAME_CARVE, this is a table operation that touches no kernel memory,
  * and the new capability is a child of the invoked one.
@@ -479,7 +481,7 @@
 
 /*
  * IrqLine: derive a smaller range of lines with the same rights.
- * a1 = offset from the first line, a2 = count, a3 = destination slot.
+ * a1 = destination slot, a2 = offset from the first line, a3 = count.
  * Like OP_FRAME_CARVE, this is a table operation that touches no kernel memory,
  * and the new capability is a child of the invoked one.
  */
@@ -487,10 +489,10 @@
 /*
  * IrqLine (RIGHT_W): bind the one line the capability names to a notification,
  * as an Irq object; a timer line binds the same way as a controller's.
- * a1 = the slot of the Pool capability the Irq is allocated from, which needs RIGHT_W,
- * a2 = the slot of the Notification capability the Irq signals, which needs RIGHT_W
- *      and may lie in any pool; the Irq signals only the bits that capability may,
- * a3 = destination slot for the Irq capability.
+ * a1 = destination slot for the Irq capability,
+ * a2 = the slot of the Pool capability the Irq is allocated from, which needs RIGHT_W,
+ * a3 = the slot of the Notification capability the Irq signals, which needs RIGHT_W
+ *      and may lie in any pool; the Irq signals only the bits that capability may.
  * The invoked slot is cleared with everything derived from it, and may be the destination;
  * the Irq capability is a child of the Pool capability, as an allocated object's is.
  * The Irq holds its notification by a capability derived from the one named,
@@ -564,7 +566,7 @@
 
 /*
  * Time: derive a smaller range of units with the same rights.
- * a1 = offset from the first unit, a2 = count, a3 = destination slot.
+ * a1 = destination slot, a2 = offset from the first unit, a3 = count.
  * Like OP_IRQ_CARVE, this is a table operation that touches no kernel memory,
  * and the new capability is a child of the invoked one.
  */

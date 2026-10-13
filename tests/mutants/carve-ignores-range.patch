@@ -8,13 +8,13 @@ Report: time capability outside the units there are
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -643,9 +643,6 @@ static int carve_range(struct thread *t, uint32_t slot, const struct cap *cap, c
+@@ -662,9 +662,6 @@ static int carve_range(struct thread *t, uint32_t slot, const struct cap *cap, c
  {
-     uint32_t off = arg[1];
-     uint32_t len = arg[2];
+     uint32_t off = arg[2];
+     uint32_t len = arg[3];
 -    if (len == 0 || off > cap->b || len > cap->b - off) {
 -        return KERR_INVALID_ARG;
 -    }
      struct cap sub = { .type = cap->type, .rights = cap->rights, .a = cap->a + off, .b = len };
-     return slot_store(t, arg[3], &sub, slot_node(t, slot));
+     return slot_store(t, arg[1], &sub, slot_node(t, slot));
  }

@@ -311,7 +311,8 @@ static void follow(struct shadow *s, const struct replay_record *c)
         return;
     }
     uint32_t a[3] = { c->a1, c->a2, c->a3 };
-    uint8_t made = info->makes != MAKES_A1 ? info->makes : c->a1 < 0x100 ? (uint8_t)c->a1 : CAP_NONE;
+    uint32_t type = op_type_arg(info, c);
+    uint8_t made = info->makes != MAKES_TYPE ? info->makes : type < 0x100 ? (uint8_t)type : CAP_NONE;
     uint8_t inv = s->names[t][c->slot];
     /* A bind takes the invoked slot, which may receive the Irq. */
     if (c->op == OP_IRQ_BIND) {
@@ -368,7 +369,7 @@ static const struct shadow *shadow_start(void)
     for (size_t i = 0; i < REPLAY_PROLOGUE_COUNT; i++) {
         follow(&start, &replay_prologue[i]);
         /* The table the prologue makes is the second thread's. */
-        if (replay_prologue[i].op == OP_POOL_ALLOC && replay_prologue[i].a2 == REPLAY_CAP_TABLE) {
+        if (replay_prologue[i].op == OP_POOL_ALLOC && replay_prologue[i].a1 == REPLAY_CAP_TABLE) {
             start.names[0][REPLAY_CAP_TABLE] = 1;
         }
     }
@@ -439,7 +440,7 @@ static uint32_t draw_kind(struct rng *r, const struct shadow *s, const struct re
         }
         return allocs[below(r, sizeof(allocs))];
     case ARG_ALLOC:
-        switch (c->a1) {
+        switch (op_type_arg(info, c)) {
         case CAP_CAPTABLE:
             return below(r, 2) ? 1 + (uint32_t)below(r, 16) : 1u << below(r, 8);
         case CAP_PROCESS:
@@ -450,7 +451,7 @@ static uint32_t draw_kind(struct rng *r, const struct shadow *s, const struct re
             return 0;
         }
     case ARG_SLOTS:
-        if (c->a1 != CAP_CAPTABLE) {
+        if (op_type_arg(info, c) != CAP_CAPTABLE) {
             return 0;
         }
         return below(r, 2) ? 1 + (uint32_t)below(r, 16) : 1u << below(r, 11);

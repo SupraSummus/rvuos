@@ -158,15 +158,15 @@ int main(void)
                ? KERR_OK : KERR_INVALID_ARG);
 
     expect("allocate the child's table",
-           rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_CAPTABLE, SLOT_CHILD_TABLE, CHILD_TABLE_SLOTS));
+           rv_pool_alloc(SLOT_POOL, CAP_CAPTABLE, SLOT_CHILD_TABLE, CHILD_TABLE_SLOTS));
     expect("allocate the child's process",
-           rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_PROCESS, SLOT_CHILD_PROCESS, SLOT_CHILD_TABLE));
+           rv_pool_alloc(SLOT_POOL, CAP_PROCESS, SLOT_CHILD_PROCESS, SLOT_CHILD_TABLE));
     expect("allocate the child's thread",
-           rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_THREAD, SLOT_CHILD_THREAD, SLOT_CHILD_PROCESS));
+           rv_pool_alloc(SLOT_POOL, CAP_THREAD, SLOT_CHILD_THREAD, SLOT_CHILD_PROCESS));
     expect("allocate the upward notification",
-           rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_NOTIFICATION, SLOT_UP, 0));
+           rv_pool_alloc(SLOT_POOL, CAP_NOTIFICATION, SLOT_UP, 0));
     expect("allocate the downward notification",
-           rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_NOTIFICATION, SLOT_DOWN, 0));
+           rv_pool_alloc(SLOT_POOL, CAP_NOTIFICATION, SLOT_DOWN, 0));
 
     /* The child executes the same flash as the root task, with its own data. */
     expect("map the child's code",
@@ -199,7 +199,7 @@ int main(void)
      * while both want the processor, they take turns.
      */
     expect("carve the child half the processor",
-           rv_invoke(OP_TIME_CARVE, BOOT_CAP_TIME, HALF_UNITS, HALF_UNITS, SLOT_HALF_TIME));
+           rv_time_carve(BOOT_CAP_TIME, HALF_UNITS, HALF_UNITS, SLOT_HALF_TIME));
     expect("bind the child to it",
            rv_invoke(OP_TIME_BIND, SLOT_HALF_TIME, SLOT_CHILD_THREAD, 0, HALF_UNITS));
     expect("start the child",
@@ -250,7 +250,7 @@ int main(void)
     expect("make it a pool",
            rv_retype(SLOT_DOOMED_MEMORY, CAP_POOL, SLOT_DOOMED_POOL, &doomed_base));
     expect("allocate a notification in it",
-           rv_invoke(OP_POOL_ALLOC, SLOT_DOOMED_POOL, CAP_NOTIFICATION, SLOT_DOOMED_NTFN, 0));
+           rv_pool_alloc(SLOT_DOOMED_POOL, CAP_NOTIFICATION, SLOT_DOOMED_NTFN, 0));
     expect("copy that capability aside",
            rv_invoke(OP_CAP_COPY, BOOT_CAP_CAPTABLE, SLOT_STALE, SLOT_DOOMED_NTFN, RIGHT_ALL));
     expect("give the child one as well",
@@ -274,7 +274,7 @@ int main(void)
            rv_retype(SLOT_DOOMED_MEMORY, CAP_POOL, SLOT_NEW_POOL, &new_pool_base));
     expect("it is the same memory", new_pool_base == doomed_base ? KERR_OK : KERR_INVALID_ARG);
     expect("allocate a notification at the same address",
-           rv_invoke(OP_POOL_ALLOC, SLOT_NEW_POOL, CAP_NOTIFICATION, SLOT_NEW_NTFN, 0));
+           rv_pool_alloc(SLOT_NEW_POOL, CAP_NOTIFICATION, SLOT_NEW_NTFN, 0));
     expect("the stale capability did not come back",
            rv_signal(SLOT_STALE, BIT_REQUEST) == KERR_INVALID_CAP ? KERR_OK : KERR_INVALID_ARG);
     puts("root: revocation ok\n");
@@ -362,13 +362,13 @@ int main(void)
      * which is what makes a wait with a timeout the same call as a wait.
      */
     expect("carve a spare line",
-           rv_invoke(OP_IRQ_CARVE, BOOT_CAP_IRQ_LINES, SPARE_IRQ, 1, SLOT_SPARE_LINE));
+           rv_irq_carve(BOOT_CAP_IRQ_LINES, SPARE_IRQ, 1, SLOT_SPARE_LINE));
     expect("carve it again",
-           rv_invoke(OP_IRQ_CARVE, BOOT_CAP_IRQ_LINES, SPARE_IRQ, 1, SLOT_SPARE_LINE_COPY));
+           rv_irq_carve(BOOT_CAP_IRQ_LINES, SPARE_IRQ, 1, SLOT_SPARE_LINE_COPY));
     expect("bind the line to the timer's notification",
-           rv_invoke(OP_IRQ_BIND, SLOT_SPARE_LINE, SLOT_NEW_POOL, SLOT_TIMER_NTFN, SLOT_SPARE_IRQ));
+           rv_irq_bind(SLOT_SPARE_LINE, SLOT_NEW_POOL, SLOT_TIMER_NTFN, SLOT_SPARE_IRQ));
     expect("the line is taken",
-           rv_invoke(OP_IRQ_BIND, SLOT_SPARE_LINE_COPY, SLOT_NEW_POOL, SLOT_TIMER_NTFN,
+           rv_irq_bind(SLOT_SPARE_LINE_COPY, SLOT_NEW_POOL, SLOT_TIMER_NTFN,
                      SLOT_SPARE_IRQ_AGAIN) == KERR_OVERLAP
                ? KERR_OK : KERR_INVALID_ARG);
     expect("arm the line", rv_irq_set(SLOT_SPARE_IRQ, BIT_SPARE));
@@ -381,9 +381,9 @@ int main(void)
     expect("the irq is revoked",
            rv_irq_set(SLOT_SPARE_IRQ, BIT_SPARE) == KERR_INVALID_CAP ? KERR_OK : KERR_INVALID_ARG);
     expect("allocate a notification in the boot pool",
-           rv_invoke(OP_POOL_ALLOC, BOOT_CAP_POOL, CAP_NOTIFICATION, SLOT_BOOT_NTFN, 0));
+           rv_pool_alloc(BOOT_CAP_POOL, CAP_NOTIFICATION, SLOT_BOOT_NTFN, 0));
     expect("the line is free again",
-           rv_invoke(OP_IRQ_BIND, SLOT_SPARE_LINE_COPY, BOOT_CAP_POOL, SLOT_BOOT_NTFN,
+           rv_irq_bind(SLOT_SPARE_LINE_COPY, BOOT_CAP_POOL, SLOT_BOOT_NTFN,
                      SLOT_SPARE_IRQ_AGAIN));
     puts("root: irq ok\n");
 
@@ -404,21 +404,21 @@ int main(void)
                    room == pool_size - descriptor
                ? KERR_OK : KERR_INVALID_ARG);
     expect("allocate the timer's notification again",
-           rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_NOTIFICATION, SLOT_TIMER_NTFN, 0));
+           rv_pool_alloc(SLOT_POOL, CAP_NOTIFICATION, SLOT_TIMER_NTFN, 0));
     took(SLOT_POOL, &room, CAP_NOTIFICATION, 0);
     expect("carve the timer line again, which its bind took",
-           rv_invoke(OP_IRQ_CARVE, BOOT_CAP_TIMER_LINES, 0, 1, SLOT_TIMER_LINE));
+           rv_irq_carve(BOOT_CAP_TIMER_LINES, 0, 1, SLOT_TIMER_LINE));
     expect("bind it to the notification",
-           rv_invoke(OP_IRQ_BIND, SLOT_TIMER_LINE, SLOT_POOL, SLOT_TIMER_NTFN, SLOT_TIMER));
+           rv_irq_bind(SLOT_TIMER_LINE, SLOT_POOL, SLOT_TIMER_NTFN, SLOT_TIMER));
     took(SLOT_POOL, &room, CAP_IRQ, 0);
     expect("allocate a table to weigh",
-           rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_CAPTABLE, SLOT_CHILD_TABLE, CHILD_TABLE_SLOTS));
+           rv_pool_alloc(SLOT_POOL, CAP_CAPTABLE, SLOT_CHILD_TABLE, CHILD_TABLE_SLOTS));
     took(SLOT_POOL, &room, CAP_CAPTABLE, CHILD_TABLE_SLOTS);
     expect("a process of it",
-           rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_PROCESS, SLOT_CHILD_PROCESS, SLOT_CHILD_TABLE));
+           rv_pool_alloc(SLOT_POOL, CAP_PROCESS, SLOT_CHILD_PROCESS, SLOT_CHILD_TABLE));
     took(SLOT_POOL, &room, CAP_PROCESS, 0);
     expect("a thread in it",
-           rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_THREAD, SLOT_CHILD_THREAD, SLOT_CHILD_PROCESS));
+           rv_pool_alloc(SLOT_POOL, CAP_THREAD, SLOT_CHILD_THREAD, SLOT_CHILD_PROCESS));
     took(SLOT_POOL, &room, CAP_THREAD, 0);
     expect("let the thread go", rv_invoke(OP_CAP_DELETE, BOOT_CAP_CAPTABLE, SLOT_CHILD_THREAD, 0, 0));
     expect("and the process", rv_invoke(OP_CAP_DELETE, BOOT_CAP_CAPTABLE, SLOT_CHILD_PROCESS, 0, 0));

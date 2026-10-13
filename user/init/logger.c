@@ -125,18 +125,18 @@ void logger_start(uint32_t uart_base, uint32_t log_base, uint32_t sp)
     log_ring = (const volatile uint8_t *)(log_base + RVUOS_LOG_HEADER);
 
     expect("allocate the logger's notification",
-           rv_invoke(OP_POOL_ALLOC, BOOT_CAP_POOL, CAP_NOTIFICATION, SLOT_LOG_NTFN, 0));
+           rv_pool_alloc(BOOT_CAP_POOL, CAP_NOTIFICATION, SLOT_LOG_NTFN, 0));
     /* A bind takes the line's slot, so the Irq may go where the line was. */
     expect("carve the log's line",
-           rv_invoke(OP_IRQ_CARVE, BOOT_CAP_IRQ_LINES, LOG_IRQ_LINE, 1, SLOT_LOG_IRQ));
+           rv_irq_carve(BOOT_CAP_IRQ_LINES, LOG_IRQ_LINE, 1, SLOT_LOG_IRQ));
     expect("bind the log's line",
-           rv_invoke(OP_IRQ_BIND, SLOT_LOG_IRQ, BOOT_CAP_POOL, SLOT_LOG_NTFN, SLOT_LOG_IRQ));
+           rv_irq_bind(SLOT_LOG_IRQ, BOOT_CAP_POOL, SLOT_LOG_NTFN, SLOT_LOG_IRQ));
     expect("carve the uart's line",
-           rv_invoke(OP_IRQ_CARVE, BOOT_CAP_IRQ_LINES, CONSOLE_IRQ, 1, SLOT_UART_IRQ));
+           rv_irq_carve(BOOT_CAP_IRQ_LINES, CONSOLE_IRQ, 1, SLOT_UART_IRQ));
     expect("bind the uart's line",
-           rv_invoke(OP_IRQ_BIND, SLOT_UART_IRQ, BOOT_CAP_POOL, SLOT_LOG_NTFN, SLOT_UART_IRQ));
+           rv_irq_bind(SLOT_UART_IRQ, BOOT_CAP_POOL, SLOT_LOG_NTFN, SLOT_UART_IRQ));
     expect("allocate the logger's thread",
-           rv_invoke(OP_POOL_ALLOC, BOOT_CAP_POOL, CAP_THREAD, SLOT_LOGGER, BOOT_CAP_PROCESS));
+           rv_pool_alloc(BOOT_CAP_POOL, CAP_THREAD, SLOT_LOGGER, BOOT_CAP_PROCESS));
     expect("configure the logger",
            rv_invoke(OP_THREAD_CONFIGURE, SLOT_LOGGER, (uint32_t)&logger_main, sp, 0));
     /*
