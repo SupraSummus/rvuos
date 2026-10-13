@@ -1,4 +1,4 @@
-# A round of each measure of user/bench/ on qemu, in instructions; see tests/bench.py.
+# A round of each measure of user/bench/ on qemu, in instructions, as clang 22 builds it; see tests/bench.py.
 call 410
 signal-wait 810
 threads 3161

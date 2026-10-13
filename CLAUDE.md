@@ -165,7 +165,8 @@ so a change to what a second core does runs `make fuzz FUZZ_HARNESS=fuzz-smp2` f
 
 ## Environment
 
-In a cloud session, `.claude/hooks/session-start.sh` installs what `make check` needs.
+In a cloud session, `.claude/hooks/session-start.sh` installs what `make check` needs;
+its clang 22 comes from apt.llvm.org, which the environment's network has to let in.
 If a tool is still missing, run the hook, or install the tool and add it to the hook;
 never skip the check.
 A check that could not run is reported as not run, never as passed.

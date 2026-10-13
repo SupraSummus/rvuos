@@ -4,7 +4,8 @@
 The program counts by the clock, whose rate differs from board to board, where cycles do not:
 --cpu-hz is the core's clock, `clock` where the clock counts the core's cycles itself, as on the ESP32-C6,
 or `icount` under QEMU, whose -icount shift=0 has the clock count instructions, which are the costs there.
-Each cost is held to the record within a tenth either way, a band one clang's code against another's stays in;
+Each cost is held to the record within a tenth either way,
+a band that holds for the record's own clang alone, whose major version its first line names;
 a build with no record, a chip's, prints its costs alone, and --refresh writes the record from the run.
 """
 
@@ -16,6 +17,7 @@ import sys
 
 BAND = 0.10
 LINE = re.compile(r"bench: (\S+) rounds=(\d+) counts=(\d+) hz=(\d+)")
+CLANG = re.compile(r"clang \d+")
 
 
 def costs(output, cpu_hz):
@@ -37,9 +39,12 @@ def main():
     parser.add_argument("--board", required=True)
     parser.add_argument("--record", required=True, help="the costs to hold the run to, if the file exists")
     parser.add_argument("--refresh", action="store_true", help="write the record from the run")
+    parser.add_argument("--cc", default="clang", help="the compiler that built the image")
     parser.add_argument("boot", help="the command that boots the image and exits with its halt code")
     args = parser.parse_args()
     unit = "instructions" if args.cpu_hz == "icount" else "cycles"
+    version = subprocess.run([args.cc, "-dumpversion"], capture_output=True, text=True).stdout
+    clang = "clang " + version.split(".")[0]
 
     try:
         run = subprocess.run(args.boot, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
@@ -53,12 +58,15 @@ def main():
 
     if args.refresh:
         with open(args.record, "w") as f:
-            f.write(f"# A round of each measure of user/bench/ on {args.board}, in {unit}; see tests/bench.py.\n")
+            f.write(f"# A round of each measure of user/bench/ on {args.board}, in {unit}, as {clang} builds it;"
+                    " see tests/bench.py.\n")
             f.writelines(f"{name} {value}\n" for name, value in found.items())
-    record = {}
+    record, record_clang = {}, None
     if os.path.exists(args.record):
         with open(args.record) as f:
-            record = dict(line.split() for line in f if not line.startswith("#"))
+            header, *lines = f.readlines()
+        record = dict(line.split() for line in lines)
+        record_clang = CLANG.search(header).group()
 
     print(f"bench: {args.board}, in {unit}, a round each" + ("" if record else "; no record to hold them to"))
     failed = [name for name in record if name not in found]
@@ -72,6 +80,8 @@ def main():
                 line += "  <- moved more than a tenth"
         print(line)
     if failed:
+        if record_clang != clang:
+            print(f"bench: the record holds for {record_clang}'s code, and this build is {clang}'s")
         sys.exit(
             f"FAIL (bench): {', '.join(failed)}, against {args.record};\n"
             "if the change means it, make bench-refresh writes the record anew, and its commit says what it cost"

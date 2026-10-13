@@ -1,4 +1,4 @@
-# A round of each measure of user/bench/ on mps2-an385, in instructions; see tests/bench.py.
+# A round of each measure of user/bench/ on mps2-an385, in instructions, as clang 22 builds it; see tests/bench.py.
 call 487
 signal-wait 956
 threads 3412

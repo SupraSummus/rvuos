@@ -457,10 +457,6 @@ what is left:
 - `tools/loop-bounds.py` knows clang's jump tables by their shape;
   any other jump through a register may make up a loop, which fails the link, never passes it,
   as a table whose base clang keeps on the stack does.
-- The link checks and `make bench` read what clang makes, and a cloud session's clang is not the local one, 22:
-  a tree that linked in the cloud once failed `loop-bounds` locally,
-  and the ARM boards' costs in the cloud miss the records, which 22 wrote, by more than a tenth.
-  Pin one clang in `.claude/hooks/session-start.sh`, or run the checks under both.
 - That the count of armed sources leaves the log's line out is checked by reading `irq_set_bits`.
   Under tracing each call's line reaches the log before the self-check runs,
   so an `Irq` armed on the log's line has always signalled by then.
