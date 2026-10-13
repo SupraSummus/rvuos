@@ -8,9 +8,9 @@ Report: frame is not a NAPOT block
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -151,7 +151,7 @@ static int op_frame(struct thread *t, uint32_t slot, const struct cap *cap,
-         uint32_t off = arg[1];
-         uint32_t len = arg[2];
+@@ -228,7 +228,7 @@ static int op_frame(struct thread *t, uint32_t slot, const struct cap *cap,
+         uint32_t off = arg[2];
+         uint32_t len = arg[3];
          /* A block within the frame, so that every frame capability is one NAPOT entry. */
 -        if (off >= size || len > size - off || !napot_block(base + off, len)) {
 +        if (off >= size || len > size - off || !napot_block(base, len)) {

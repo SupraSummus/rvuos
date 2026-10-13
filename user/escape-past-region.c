@@ -51,7 +51,7 @@ int main(void)
     expect("make the free ram a frame", rv_retype(BOOT_CAP_FREE_RAM, CAP_FRAME, SLOT_FREE_FRAME, &base));
     expect("smallest region", rv_frame_min_size(SLOT_FREE_FRAME, &min_size));
     expect("carve the smallest frame",
-           rv_invoke(OP_FRAME_CARVE, SLOT_FREE_FRAME, 0, min_size, SLOT_SMALLEST));
+           rv_frame_carve(SLOT_FREE_FRAME, 0, min_size, SLOT_SMALLEST));
     expect("map it",
            rv_invoke(OP_PROCESS_INSTALL, BOOT_CAP_PROCESS, SMALLEST_SLOT, SLOT_SMALLEST, RIGHT_R | RIGHT_W));
     /* The frame's own first word loads, so that the fault below is the end's and not the install's. */

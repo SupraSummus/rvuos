@@ -54,11 +54,11 @@ static uint32_t period_wait(uint32_t us)
 void time_demo(uint32_t *hz_out, uint32_t *counter_out)
 {
     expect("allocate the timer's notification",
-           rv_invoke(OP_POOL_ALLOC, SLOT_NEW_POOL, CAP_NOTIFICATION, SLOT_TIMER_NTFN, 0));
+           rv_pool_alloc(SLOT_NEW_POOL, CAP_NOTIFICATION, SLOT_TIMER_NTFN, 0));
     expect("carve a timer line",
-           rv_invoke(OP_IRQ_CARVE, BOOT_CAP_TIMER_LINES, 0, 1, SLOT_TIMER_LINE));
+           rv_irq_carve(BOOT_CAP_TIMER_LINES, 0, 1, SLOT_TIMER_LINE));
     expect("bind the timer line",
-           rv_invoke(OP_IRQ_BIND, SLOT_TIMER_LINE, SLOT_NEW_POOL, SLOT_TIMER_NTFN, SLOT_TIMER));
+           rv_irq_bind(SLOT_TIMER_LINE, SLOT_NEW_POOL, SLOT_TIMER_NTFN, SLOT_TIMER));
 
     /*
      * The clock times the two sleeps, through a call and through the counter's frame.

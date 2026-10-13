@@ -153,8 +153,8 @@ class Namer:
             name = f"REPLAY_CAP_FREE+{free}" if 0 <= free < self.num["REPLAY_CAP_THIRD"] - self.free else str(index)
         return f"SLOT_IN({table}, {name})" if table else name
 
-    def name(self, kind, v, op, a1):
-        if kind in SLOT_KINDS or (kind == "ARG_ALLOC" and a1 in (self.num["CAP_PROCESS"], self.num["CAP_THREAD"])):
+    def name(self, kind, v, op, type):
+        if kind in SLOT_KINDS or (kind == "ARG_ALLOC" and type in (self.num["CAP_PROCESS"], self.num["CAP_THREAD"])):
             return self.slot(v)
         if kind == "ARG_TYPE" and v in self.types:
             return self.types[v]
@@ -186,12 +186,13 @@ def text(data, names):
             words = [f"op {op}", f"slot {slot}"] + [f"a{i + 1} 0x{a:x}" for i, a in enumerate(args)]
         else:
             cap, arg = table[name]
+            type = args[arg.index("ARG_TYPE")] if "ARG_TYPE" in arg else None
             words = [name]
             if slot or cap != "CAP_NONE":
                 words.append(f"slot {namer.slot(slot) if cap != 'CAP_NONE' else namer.number(slot)}")
             for i, (kind, a) in enumerate(zip(arg, args)):
                 if a or kind != "ARG_NONE":
-                    words.append(f"a{i + 1} {namer.name(kind, a, name, args[0])}")
+                    words.append(f"a{i + 1} {namer.name(kind, a, name, type)}")
         lines.append(f"actor {actor} " + " ".join(words))
     return "".join(line + "\n" for line in lines)
 
