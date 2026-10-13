@@ -219,12 +219,6 @@ static int op_frame(struct thread *t, uint32_t slot, const struct cap *cap,
     uint32_t size = cap->b;
 
     switch (op) {
-    case OP_FRAME_INFO:
-        arg[1] = base;
-        arg[2] = size;
-        arg[3] = cap->rights;
-        arg[4] = region_min_size();
-        return KERR_OK;
     case OP_FRAME_CARVE: {
         uint32_t off = arg[1];
         uint32_t len = arg[2];
@@ -249,12 +243,6 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
     struct cap *u = slot_node(t, slot);
 
     switch (op) {
-    case OP_UNTYPED_INFO:
-        arg[1] = base;
-        arg[2] = size;
-        arg[3] = cap->rights;
-        arg[4] = !untyped_free(u);
-        return KERR_OK;
     case OP_UNTYPED_RETYPE: {
         uint32_t type = arg[1];
         if (type != CAP_FRAME && type != CAP_POOL) {
@@ -990,9 +978,7 @@ static const struct op_shape op_shapes[OP_COUNT] = {
     [OP_CAP_REVOKE] = { CAP_CAPTABLE, RIGHT_W, SHAPE_A1 },
     [OP_CAP_DERIVE] = { CAP_CAPTABLE, RIGHT_W, SHAPE_A123 | SHAPE_RIGHTS_A3 },
     [OP_CAP_MOVE] = { CAP_CAPTABLE, RIGHT_W, SHAPE_A1 | SHAPE_A2 },
-    [OP_FRAME_INFO] = { CAP_FRAME, 0, 0 },
     [OP_FRAME_CARVE] = { CAP_FRAME, 0, SHAPE_A123 },
-    [OP_UNTYPED_INFO] = { CAP_UNTYPED, 0, 0 },
     [OP_UNTYPED_RETYPE] = { CAP_UNTYPED, 0, SHAPE_A1 | SHAPE_A2 },
     [OP_UNTYPED_SPLIT] = { CAP_UNTYPED, 0, SHAPE_A1 | SHAPE_A2 },
     [OP_POOL_ALLOC] = { CAP_POOL, RIGHT_W, SHAPE_A123 | SHAPE_VARIES },

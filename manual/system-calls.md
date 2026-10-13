@@ -50,7 +50,8 @@ so that an argument may be given a meaning later without changing what an existi
 then the operation's own checks.
 Operation codes are a single flat numbering across all types,
 so invoking an `Irq` operation on a `Frame` is `KERR_WRONG_TYPE`, whatever its rights,
-not `KERR_INVALID_ARG`.
+not `KERR_INVALID_ARG`,
+and so is a code that is no operation's on any capability, 0, 11, 27, or `OP_COUNT` and above, section 6.15.
 What an operation reads its description says; three read by their own values:
 `OP_POOL_ALLOC` of a notification no `a3`, `OP_THREAD_WATCH` with no bits no `a1`,
 and `OP_IRQ_SET` with no bits, or of a line that is no timer's, no `a2` or `a3`.
@@ -194,12 +195,7 @@ The call may be made again, section 6.1.
 
 ### 6.5 Operations on `Frame` and `Untyped`
 
-**`OP_FRAME_INFO` (11).**
-No right needed.
-Returns `a1` = base, `a2` = size, `a3` = rights,
-`a4` = the size of the smallest region in bytes, a power of two of at least 8.
-`OP_CAP_INFO` tells the same, section 6.14;
-this operation goes with the ABI's breaking changes, `DESIGN.md`, open decision 31.
+`OP_CAP_INFO` tells what a frame or an Untyped covers, section 6.14.
 
 **`OP_FRAME_CARVE` (5).**
 No right needed.
@@ -210,13 +206,6 @@ the offset a multiple of the size,
 and the sub-range within the frame (`KERR_INVALID_ARG`),
 so the new frame is a block.
 The parent capability is unchanged.
-
-**`OP_UNTYPED_INFO` (27).**
-No right needed.
-Returns `a1` = base, `a2` = size, `a3` = rights,
-`a4` = 1 while something made of it is left, 0 while it is free, section 5.4.
-`OP_CAP_INFO` tells the same, `a4` as the type of what lies first below it, section 6.14;
-this operation goes with the ABI's breaking changes, `DESIGN.md`, open decision 31.
 
 **`OP_UNTYPED_RETYPE` (6).**
 `a1` = the type, `CAP_FRAME` or `CAP_POOL` (`KERR_INVALID_ARG`),
@@ -538,7 +527,7 @@ and in `a2` to `a4` what the capability names, by its type:
 
 | Type | `a2` | `a3` | `a4` |
 |---|---|---|---|
-| `Frame` | base | size | the smallest region, as `OP_FRAME_INFO`'s `a4` |
+| `Frame` | base | size | the smallest region in bytes, a power of two of at least 8 |
 | `Untyped` | base | size | 0 while it is free, else what lies first below it: `CAP_FRAME`, `CAP_UNTYPED` or `CAP_POOL`, section 5.4 |
 | `KernelPool` | size | the room: the bytes an allocation may still take, 0 while it is being destroyed | 1 while it is being destroyed, else 0 |
 | `CapTable` | its number of slots | 0 | 0 |
@@ -580,7 +569,7 @@ whether something outside the pool still holds its objects it does not tell.
 | 8 | `OP_PROCESS_INSTALL` | `Process` |
 | 9 | `OP_PROCESS_UNINSTALL` | `Process` |
 | 10 | `OP_TEST_TRACE` | `Test` |
-| 11 | `OP_FRAME_INFO` | `Frame` |
+| 11 | none; it was `OP_FRAME_INFO` | |
 | 12 | `OP_THREAD_CONFIGURE` | `Thread` |
 | 13 | `OP_THREAD_RESUME` | `Thread` |
 | 14 | `OP_NOTIFY_SIGNAL` | `Notification` |
@@ -596,7 +585,7 @@ whether something outside the pool still holds its objects it does not tell.
 | 24 | `OP_CAP_DERIVE` | `CapTable` |
 | 25 | `OP_CLOCK_READ` | `Clock` |
 | 26 | `OP_CLOCK_FRAME` | `Clock` |
-| 27 | `OP_UNTYPED_INFO` | `Untyped` |
+| 27 | none; it was `OP_UNTYPED_INFO` | |
 | 28 | `OP_TIME_CARVE` | `Time` |
 | 29 | `OP_TIME_BIND` | `Time` |
 | 30 | `OP_UNTYPED_SPLIT` | `Untyped` |

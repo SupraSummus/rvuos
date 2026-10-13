@@ -92,7 +92,6 @@ static const struct op_info op_table[OP_COUNT] = {
     OP(OP_PROCESS_INSTALL, CAP_PROCESS, 0, ARG_REGION, ARG_FRAME, ARG_RIGHTS),
     OP(OP_PROCESS_UNINSTALL, CAP_PROCESS, 0, ARG_REGION, ARG_NONE, ARG_NONE),
     OP(OP_TEST_TRACE, CAP_TEST, 0, ARG_NONE, ARG_NONE, ARG_NONE),
-    OP(OP_FRAME_INFO, CAP_FRAME, 0, ARG_NONE, ARG_NONE, ARG_NONE),
     OP(OP_THREAD_CONFIGURE, CAP_THREAD, 0, ARG_WORD, ARG_WORD, ARG_WORD),
     OP(OP_THREAD_RESUME, CAP_THREAD, 0, ARG_NONE, ARG_NONE, ARG_NONE),
     OP(OP_NOTIFY_SIGNAL, CAP_NOTIFICATION, 0, ARG_BITS, ARG_NONE, ARG_NONE),
@@ -108,7 +107,6 @@ static const struct op_info op_table[OP_COUNT] = {
     OP(OP_CAP_DERIVE, CAP_CAPTABLE, 0, ARG_DST_INVOKED, ARG_ANY, ARG_RIGHTS),
     OP(OP_CLOCK_READ, CAP_CLOCK, 0, ARG_NONE, ARG_NONE, ARG_NONE),
     OP(OP_CLOCK_FRAME, CAP_CLOCK, CAP_FRAME, ARG_DST, ARG_NONE, ARG_NONE),
-    OP(OP_UNTYPED_INFO, CAP_UNTYPED, 0, ARG_NONE, ARG_NONE, ARG_NONE),
     OP(OP_TIME_CARVE, CAP_TIME, CAP_TIME, ARG_OFFSET, ARG_COUNT, ARG_DST),
     OP(OP_TIME_BIND, CAP_TIME, 0, ARG_THREAD, ARG_OFFSET, ARG_COUNT),
     OP(OP_UNTYPED_SPLIT, CAP_UNTYPED, CAP_UNTYPED, ARG_DST, ARG_DST, ARG_NONE),
@@ -131,6 +129,12 @@ static const struct op_info op_table[OP_COUNT] = {
 
 /* The assert sees only the highest code; LLVMFuzzerInitialize holds every code below it to an entry. */
 _Static_assert(OP_COUNT == 43 && OP_POOL_INFO == OP_COUNT - 1, "a new operation needs an entry in op_table");
+
+/* A code below OP_COUNT that is no operation any more, see OP_COUNT, which the kernel refuses as any other. */
+static inline int op_retired(unsigned op)
+{
+    return op == 11 || op == 27;
+}
 
 /* The loads and stores the driver makes itself, which invoke no capability. */
 static const struct op_info op_access[2] = {
