@@ -550,20 +550,12 @@ what is left:
 - No harness reaches a device's frame from the boot: QEMU and the host list no devices,
   and only RP2350's Wi-Fi system carves one.
   Listing one on QEMU, its RTC say, would let the fuzzer carve and install it,
-  at the price of renumbering the seeds and the corpus and a frame more in the mutator's boot table.
-- The seeds under `tests/seeds` are binary and were written by hand.
-  Renumbering a `BOOT_CAP_*` or `REPLAY_CAP_*` slot takes a one-off script
-  that knows which argument of which operation is a slot,
-  run over the seeds and the corpus,
-  and checked by replaying every seed on the kernels before and after and comparing the statuses;
-  an operation whose arguments change leaves the seeds that use it to be written anew.
-  `build/host/fuzz --print` shows a seed a record per line, by the names of `host/ops.h`,
-  and `tools/seed.py` reads such lines back, a name of the ABI's headers allowed for any number;
-  seeds kept as that text, slots by name, and built by it at `make host-test`
-  would make the seeds readable and the next renumbering a rebuild;
-  replay slots that start a few above `BOOT_CAP_COUNT` would spare the next one.
-  A seed written before a renumbering and merged after it keeps passing and tests nothing:
-  three seeds once did, and only a mutant nothing caught showed it.
+  at the price of renumbering the corpus and a frame more in the mutator's boot table.
+- The corpus under `tests/corpus` is records, as the fuzzer wrote them,
+  so renumbering a slot or an operation leaves its inputs calling other things than they were kept for:
+  they still replay, and cover less until `make fuzz` and `make corpus-merge` find their like again.
+  `tools/seed.py --text` run with the headers before the change, and the text built with those after,
+  would carry them over, as the seeds are carried by being text.
 - `make mutants` plants with `git apply -C1`,
   which, when the context has changed and one line of it matches in several places,
   silently takes the place nearest the patch's line numbers,
@@ -575,7 +567,7 @@ what is left:
 
 What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
 
-- The breaking changes decision 31 lists, in one change with the seeds and the corpus written anew once.
+- The breaking changes decision 31 lists, each in a change of its own.
 
 ## Code
 

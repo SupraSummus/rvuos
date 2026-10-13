@@ -140,8 +140,9 @@ and a change that drops such a call gives the counts before and after in its com
 A new kernel global needs a reset in `host_boot` too,
 since the host boots once per input in one process.
 A new `BOOT_CAP_*` or `REPLAY_CAP_*` slot, a device QEMU's board lists, or an operation whose arguments change,
-changes what the seeds and the corpus mean,
-so they have to be rewritten with it; see `TODO.md`.
+changes what the corpus means, see `TODO.md`.
+The seeds name their slots and operations, so a renumbering only rebuilds them,
+but an operation whose arguments change has the seeds that call it rewritten with it.
 When the kernel's object model changes,
 update `kernel/selfcheck.c` with it;
 it is the executable form of the properties in `DESIGN.md`.
