@@ -3,7 +3,7 @@
  *
  * The PMP decodes no block smaller than its grain,
  * so a kernel that took the grain for finer than it is would make frames that open more than they hold.
- * This program carves a frame of the smallest region's size, see OP_FRAME_INFO, out of the free RAM,
+ * This program carves a frame of the smallest region's size, see OP_CAP_INFO, out of the free RAM,
  * installs it read and write, and loads the word right after it, where the root task holds no region:
  * PMP must fault the load, mcause=5, naming its own address in mepc and the word's in mtval;
  * on ARM the MPU must, with a MemManage, DACCVIOL, naming them in pc and MMFAR.

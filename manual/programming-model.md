@@ -33,8 +33,7 @@ A slot is empty or holds one capability:
 a type, a set of rights, and two words the kernel interprets by type.
 Userspace never sees a slot's links, nor the address of an object,
 but whoever holds a capability may ask what it is, with no right, `OP_CAP_INFO`, section 6.14:
-its type, its rights and what it names,
-as `OP_FRAME_INFO` asks a frame what it covers and `OP_UNTYPED_INFO` an Untyped.
+its type, its rights and what it names, what a frame covers, say.
 
 Every system call is an invocation on the capability in one slot.
 The kernel resolves the slot,
@@ -166,13 +165,12 @@ Every frame and every Untyped is a **block**:
 its size is a power of two and its base a multiple of its size,
 which is the range one PMP entry in NAPOT mode describes.
 The smallest block is eight bytes, or the PMP's grain if that is coarser;
-`OP_FRAME_INFO` returns it in `a4`, and so does `OP_CAP_INFO` on any frame.
+`OP_CAP_INFO` on any frame returns it in `a4`.
 A range of any other size is rounded up or made of several blocks,
 one region slot each.
 
 An Untyped is **free** while nothing made of it is left, and **made** while something is;
-`OP_UNTYPED_INFO` says which in `a4`,
-and `OP_CAP_INFO` what lies first below it, `CAP_FRAME`, `CAP_UNTYPED` or `CAP_POOL`, or 0 while it is free.
+`OP_CAP_INFO` says which in `a4`: what lies first below it, `CAP_FRAME`, `CAP_UNTYPED` or `CAP_POOL`, or 0 while it is free.
 That is the first of what lies there:
 once a delete handed up what lay below the deleted capability, several kinds may lie side by side.
 A free Untyped makes one thing of the whole of its memory:
