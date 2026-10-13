@@ -704,9 +704,9 @@ static void host_load(const struct replay_record *c)
     f->regs[REG_A1] = c->a1;
     f->regs[REG_A2] = c->a2;
     f->regs[REG_A3] = c->a3;
-    f->regs[REG_A4] = 0;
-    f->regs[REG_A5] = 0;
-    f->regs[REG_A6] = 0;
+    f->regs[REG_A4] = c->a4;
+    f->regs[REG_A5] = c->a5;
+    f->regs[REG_A6] = c->a6;
     f->mcause = 8;
 }
 

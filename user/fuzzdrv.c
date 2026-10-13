@@ -61,7 +61,7 @@ static void puts(const char *s)
 static uint32_t perform(const struct replay_record *r)
 {
     if (!replay_accesses(r)) {
-        return rv_invoke(r->op, r->slot, r->a1, r->a2, r->a3);
+        return rv_invoke6(r->op, r->slot, r->a1, r->a2, r->a3, r->a4, r->a5, r->a6);
     }
     volatile uint32_t *at = (volatile uint32_t *)(r->a1 & ~3u);
     if (!replay_leaves_alone((uint32_t)at)) {
@@ -154,6 +154,9 @@ int main(void)
         records[i].a1 = in[i].a1;
         records[i].a2 = in[i].a2;
         records[i].a3 = in[i].a3;
+        records[i].a4 = in[i].a4;
+        records[i].a5 = in[i].a5;
+        records[i].a6 = in[i].a6;
     }
 
     for (unsigned i = 0; i < REPLAY_AFTER_INPUT_COUNT; i++) {

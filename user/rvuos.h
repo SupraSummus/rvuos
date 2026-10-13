@@ -28,6 +28,28 @@ static inline uint32_t rv_invoke(uint32_t op, uint32_t cap,
     return r_a0;
 }
 
+/*
+ * A call with all six argument registers set, as the replay driver makes a record's;
+ * no operation reads a4 to a6 yet, and rv_invoke leaves them as they were.
+ */
+static inline uint32_t rv_invoke6(uint32_t op, uint32_t cap, uint32_t a1, uint32_t a2, uint32_t a3,
+                                  uint32_t a4, uint32_t a5, uint32_t a6)
+{
+    register uint32_t r_a0 __asm__(RV_A0) = cap;
+    register uint32_t r_a1 __asm__(RV_A1) = a1;
+    register uint32_t r_a2 __asm__(RV_A2) = a2;
+    register uint32_t r_a3 __asm__(RV_A3) = a3;
+    register uint32_t r_a4 __asm__(RV_A4) = a4;
+    register uint32_t r_a5 __asm__(RV_A5) = a5;
+    register uint32_t r_a6 __asm__(RV_A6) = a6;
+    register uint32_t r_a7 __asm__(RV_A7) = op;
+    __asm__ volatile(RV_CALL
+                     : "+r"(r_a0), "+r"(r_a1), "+r"(r_a2), "+r"(r_a3), "+r"(r_a4), "+r"(r_a5), "+r"(r_a6)
+                     : "r"(r_a7)
+                     : "memory");
+    return r_a0;
+}
+
 /* OP_CAP_COPY: a copy of the caller's src in slot dst of the table, with rights at most. */
 static inline uint32_t rv_cap_copy(uint32_t table_cap, uint32_t dst, uint32_t src, uint32_t rights)
 {

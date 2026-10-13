@@ -89,7 +89,7 @@ until the maintainer decides otherwise.
    a mask of one bit is a badge, since naming every bit signals just that one,
    and a capability that may signal every bit still names which.
    `OP_CAP_DERIVE` with the mask in `a4` was the other way to hand out fewer bits;
-   a replay record carries three arguments, and a carve is how every other capability names less than its source.
+   a replay record carried three arguments then, and a carve is how every other capability names less than its source.
 
 7. **What a pool destroy gives back, and to whom.**
    Decided, by the derivation tree, and since decision 14 by the Untyped:
@@ -509,24 +509,26 @@ until the maintainer decides otherwise.
     and every bit of a rights mask past `RIGHT_ALL`, else `KERR_INVALID_ARG`,
     so that an argument unread today may mean something later without changing what a program that left it does;
     a foreign operation on a capability without its right is `KERR_WRONG_TYPE` since, where it was `KERR_NO_RIGHTS`.
-    `a4` to `a6` stay unread, and unchecked until the replay's record carries them, below.
     The next made `Debug` three types, `Print`, `Halt` and `Test`,
     so a child that prints holds nothing that halts, and a supervisor that halts, decision 26, nothing that drives the machine.
     The next took the two older descriptions, `OP_FRAME_INFO` and `OP_UNTYPED_INFO`,
     whose wrappers read `OP_CAP_INFO` since, so a program built against them changed only by being built again;
     their codes, 11 and 27, are no operation's.
+    The next had the replay's record carry all six arguments the registers do, twenty-eight bytes,
+    and the fuzzer's inputs keep 128 records at most, its `-max_len` 3584;
+    `a4` to `a6` stay unread and unchecked, `TODO.md` says why.
     The rest below would break a binary built against today's ABI, and each goes in a change of its own:
     the seeds name what they call, `tools/seed.py`,
     so a change rebuilds them and rewrites only those that call an operation whose arguments it changes.
     - **What the test format chose.**
-      A replay record carries three arguments, so no operation takes a fourth:
+      A replay record carried three arguments, so no operation takes a fourth:
       `OP_IRQ_BIND` makes its object through the `IrqLine` it consumes rather than through the pool,
       `OP_TIME_BIND`'s offset names the core of a bind to no units,
       `OP_POOL_ALLOC`'s `a3` means another thing for each type,
       and routing a device line to a core, decision 24, has no argument left.
       The watchdog went onto the clock, the boot table keeps a test input and a console on every board,
       and execute-only stays open, decision 23, each because the alternative would have renumbered the seeds and the corpus.
-      A record of the six arguments the registers carry would let each be decided on its merits.
+      The record carries six now, and the seeds are text, so each may be decided on its merits.
     - **The numbering.**
       Operation codes are flat, in the order the operations came,
       and `Test`'s four operations lie among the rest.

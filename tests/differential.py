@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Replay fuzz inputs on QEMU and on the host build and compare the traces.
 
-Each input is a sequence of 16-byte records:
+Each input is a sequence of 28-byte records:
 a system call with the thread that makes it, or the tick as OP_TEST_TICK.
 The host build performs them directly on the kernel's logic,
 passing a record to the thread it names as the driver does;
@@ -48,7 +48,7 @@ import tempfile
 # Must match kernel/board/qemu/board.h and include/rvuos/abi.h.
 INPUT_BASE = 0x80120000
 REPLAY_MAGIC = 0x5A465652
-RECORD_SIZE = 16
+RECORD_SIZE = 28
 MAX_RECORDS = 256
 TIMEOUT = 20
 # The line the host prints after each input it replays isolated; HOST_INPUT_END in host/harness.h.

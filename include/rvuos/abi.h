@@ -746,7 +746,7 @@ struct replay_record {
     uint8_t op;
     uint8_t actor;
     uint16_t slot;
-    uint32_t a1, a2, a3;
+    uint32_t a1, a2, a3, a4, a5, a6;
 };
 #endif
 
