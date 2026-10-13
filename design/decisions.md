@@ -511,8 +511,10 @@ until the maintainer decides otherwise.
     so that an argument unread today may mean something later without changing what a program that left it does;
     a foreign operation on a capability without its right is `KERR_WRONG_TYPE` since, where it was `KERR_NO_RIGHTS`.
     `a4` to `a6` stay unread, and unchecked until the replay's record carries them, below.
-    The rest below would break a binary built against today's ABI,
-    so they go in one change, before the ABI is held still:
+    The rest below would break a binary built against today's ABI.
+    The seeds are text that names the operations, slots, types and rights it calls, `tools/seed.py`,
+    so each goes in a change of its own, which rebuilds them,
+    and rewrites only those that call an operation whose arguments it changes:
     - **What the test format chose.**
       A replay record carries three arguments, so no operation takes a fourth:
       `OP_IRQ_BIND` makes its object through the `IrqLine` it consumes rather than through the pool,
@@ -583,7 +585,7 @@ until the maintainer decides otherwise.
       which it could tell from the pc instead, decision 32.
     - **A version.**
       The root task's thread starts with `a0` zero, which could carry the ABI's version.
-    Decide them together, with the seeds written anew once.
+    Each is decided on its own merits, and made when it is.
 32. **Stopping a thread.**
     Decided: `OP_THREAD_STOP` takes a thread to stopped from whatever it is doing, through a capability to it with `RIGHT_W`,
     with `a1` to `a3` zero, so that they may be given a meaning, and returns the state it found;
@@ -647,7 +649,7 @@ until the maintainer decides otherwise.
     - **The words left at zero.**
       A thread's, a table's, a process's and the debug capability's;
       what fills them comes with the first program that needs it, or a page.
-    Decide with decision 31's changes, before the ABI is held still.
+    Decide as decision 31's changes are.
 34. **Copies by the kernel.**
     Decided: none; the kernel moves no data, see "Communication and synchronisation",
     and bulk data is lent where it lies, `user/lib/bulk.h`; see "Bulk data".

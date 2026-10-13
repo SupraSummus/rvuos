@@ -72,7 +72,7 @@ broken() {
 replay() {
     bin=$tree/build/host/$1
     hit=""
-    if (cd "$tree" && "$bin" --verbose --isolated tests/seeds/*) >"$out" 2>&1; then
+    if (cd "$tree" && "$bin" --verbose --isolated build/seeds/*) >"$out" 2>&1; then
         status=0
     else
         status=$?
@@ -83,7 +83,7 @@ replay() {
         substr($0, length($0) - length(end) + 1) == end { close(out n); n++ }
     ' n=0 "$out"
     n=0
-    for seed in "$tree"/tests/seeds/*; do
+    for seed in "$tree"/build/seeds/*; do
         part=$out.$n
         n=$((n + 1))
         line=$(grep -o 'invariant violated: .*' "$part" 2>/dev/null | head -1 | sed 's/^invariant violated: //;
