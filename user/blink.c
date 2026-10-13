@@ -58,10 +58,10 @@ static void puts(const char *s)
 static void expect(const char *what, uint32_t status)
 {
     if (status != KERR_OK) {
-        rv_puts(BOOT_CAP_DEBUG, "blink: ");
-        rv_puts(BOOT_CAP_DEBUG, what);
-        rv_puts(BOOT_CAP_DEBUG, ": FAILED\n");
-        rv_halt(BOOT_CAP_DEBUG, 1);
+        rv_puts(BOOT_CAP_PRINT, "blink: ");
+        rv_puts(BOOT_CAP_PRINT, what);
+        rv_puts(BOOT_CAP_PRINT, ": FAILED\n");
+        rv_halt(BOOT_CAP_HALT, 1);
     }
 }
 

@@ -41,7 +41,7 @@ uint32_t self_root(struct self *s, uint32_t units)
     s->timer_lines = BOOT_CAP_TIMER_LINES;
     s->timer_line_count = TIMER_LINES;
     s->time = BOOT_CAP_TIME;
-    s->debug = BOOT_CAP_DEBUG;
+    s->print = BOOT_CAP_PRINT;
     s->slot_first = BOOT_CAP_COUNT;
     s->slot_end = ROOT_TABLE_SLOTS;
     s->regions = 0x3u; /* the boot installs the code in the first and the data in the second */

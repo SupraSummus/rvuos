@@ -33,7 +33,7 @@ static __attribute__((noreturn)) void logger_fail(const char *s)
         console_put_polled(*s);
     }
     console_flush();
-    rv_halt(BOOT_CAP_DEBUG, 1);
+    rv_halt(BOOT_CAP_HALT, 1);
 }
 
 /*

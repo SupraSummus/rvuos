@@ -19,14 +19,14 @@ extern const char csrr_at[];
 
 static void puts(const char *s)
 {
-    rv_puts(BOOT_CAP_DEBUG, s);
+    rv_puts(BOOT_CAP_PRINT, s);
 }
 
 int main(void);
 int main(void)
 {
     puts("escape: reading mstatus from user mode at ");
-    rv_put_hex(BOOT_CAP_DEBUG, (uint32_t)(uintptr_t)csrr_at);
+    rv_put_hex(BOOT_CAP_PRINT, (uint32_t)(uintptr_t)csrr_at);
     puts(", expecting a fault\n");
 
     uint32_t v;
@@ -35,6 +35,6 @@ int main(void)
     /* Not reached when user mode may not touch a machine CSR. */
     puts("escape: breached, read a machine csr\n");
     (void)v;
-    rv_halt(BOOT_CAP_DEBUG, 2);
+    rv_halt(BOOT_CAP_HALT, 2);
     return 0;
 }

@@ -24,7 +24,7 @@ extern const char store_at[];
 
 static void puts(const char *s)
 {
-    rv_puts(BOOT_CAP_DEBUG, s);
+    rv_puts(BOOT_CAP_PRINT, s);
 }
 
 int main(void);
@@ -32,15 +32,15 @@ int main(void)
 {
     uint32_t addr = (uint32_t)(uintptr_t)__kernel_start;
     puts("escape: storing into the kernel to ");
-    rv_put_hex(BOOT_CAP_DEBUG, addr);
+    rv_put_hex(BOOT_CAP_PRINT, addr);
     puts(" at ");
-    rv_put_hex(BOOT_CAP_DEBUG, (uint32_t)(uintptr_t)store_at);
+    rv_put_hex(BOOT_CAP_PRINT, (uint32_t)(uintptr_t)store_at);
     puts(", expecting a fault\n");
 
     ESCAPE_STORE("store_at", 0u, addr);
 
     /* Not reached when PMP keeps user mode out of the kernel. */
     puts("escape: breached, stored into the kernel\n");
-    rv_halt(BOOT_CAP_DEBUG, 2);
+    rv_halt(BOOT_CAP_HALT, 2);
     return 0;
 }

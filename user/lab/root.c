@@ -98,7 +98,7 @@ static const struct scenario scenarios[] = {
 
 static struct self self;
 static struct kernel_log klog;
-static const struct out out = { log_write, (void *)BOOT_CAP_DEBUG };
+static const struct out out = { log_write, (void *)BOOT_CAP_PRINT };
 static uint32_t timer, timer_bit;
 static struct child kids[CAST_MAX];
 static struct chan_hub hubs[CAST_MAX];
@@ -121,7 +121,7 @@ static void drain(void)
 static __attribute__((noreturn)) void halt(uint32_t code)
 {
     drain();
-    rv_halt(BOOT_CAP_DEBUG, code);
+    rv_halt(BOOT_CAP_HALT, code);
 }
 
 static void must(const char *what, uint32_t status)

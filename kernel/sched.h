@@ -169,7 +169,7 @@ struct core {
     bool wake_stale;
     bool turn_due;
 
-    /* Whether a walk stopped where OP_DEBUG_PREEMPT armed it, which the call's dispatch turns into a tick. */
+    /* Whether a walk stopped where OP_TEST_PREEMPT armed it, which the call's dispatch turns into a tick. */
     bool preempt_stopped;
 
     /*
@@ -352,7 +352,7 @@ uint32_t sched_stop(struct thread *t);
 
 /*
  * Fill the account of every thread with units, and put each on the queue that puts it on.
- * The boot calls it once the root thread is bound, and OP_DEBUG_TRACE does.
+ * The boot calls it once the root thread is bound, and OP_TEST_TRACE does.
  */
 void sched_accounts_fill(void);
 
@@ -361,7 +361,7 @@ void sched_start(struct thread *t);
 
 /*
  * Ticks so far, on the whole machine.
- * Only a trap's count of the ticks, the stall's and OP_DEBUG_TICK move it,
+ * Only a trap's count of the ticks, the stall's and OP_TEST_TICK move it,
  * and the deadlines of timer lines are counted in it.
  * Each core counts up to it as its traps begin; see struct core.
  */
@@ -430,7 +430,7 @@ bool sched_idle_wake(uint32_t ticks, bool device);
  * fire every timer line that is due, give time again to the threads whose account reached a tick,
  * and end the running thread's turn: it is charged for the counts it ran past the tick,
  * goes to the back of the queue its account puts it on, and the next thread has its turn.
- * OP_DEBUG_TICK calls it; the interrupt does the same through sched_count and sched_wake.
+ * OP_TEST_TICK calls it; the interrupt does the same through sched_count and sched_wake.
  */
 void sched_tick(uint32_t ticks);
 
@@ -482,7 +482,7 @@ uint32_t sched_wake_ticks(void);
  * A device interrupt on a line: the Irq armed on it masks the line,
  * disarms and signals its bits.
  * False, and nothing done, when no Irq is armed on the line.
- * The interrupt calls it through sched_claim_interrupts, and OP_DEBUG_IRQ does on request.
+ * The interrupt calls it through sched_claim_interrupts, and OP_TEST_IRQ does on request.
  */
 bool sched_interrupt(uint32_t line);
 

@@ -44,7 +44,7 @@ with rights no greater than the root task received for it
 or a range of lines the interrupt controller has, the log's among them,
 with no more than the right to bind,
 or a range of the units of time there are, with no more than the rights to bind and to run on spare time,
-or the debug capability or the clock, which name no object,
+or `Print`, `Halt`, `Test` or the clock, which name no object,
 or a live kernel object of the capability's own type,
 which for a notification may signal some bit and for any other object carries no bits.
 Every process's table slot is empty or names a live table, with the right to write it,
@@ -334,10 +334,10 @@ and the input ends as the call returns.
 An input is a sequence of events the kernel receives,
 not the behaviour of one process:
 each record is a system call with the thread that makes it,
-and the tick is a record too, `OP_DEBUG_TICK`,
+and the tick is a record too, `OP_TEST_TICK`,
 which moves time by one tick and fires the timer lines due,
 so the host has a clock that ticks when the input says;
-a device interrupt is a record as well, `OP_DEBUG_IRQ`,
+a device interrupt is a record as well, `OP_TEST_IRQ`,
 which does to an armed `Irq` what the controller would,
 so the host has devices that fire when the input says.
 libFuzzer feeds the records into the threads' registers
@@ -489,7 +489,7 @@ and a destroy of the second's pool leaves it stopped without a process.
 All three earn no units and run on spare time, so they take turns as one queue
 and passing a record round visits every runnable thread,
 until a record binds one of them to units, and so to time the others do not have.
-A record that names a thread is passed to it with `OP_DEBUG_TICK`
+A record that names a thread is passed to it with `OP_TEST_TICK`
 by the protocol in `include/rvuos/replay.h`,
 which the host runs from the kernel's state;
 the passing is system calls, so both transcripts carry it.
@@ -505,7 +505,7 @@ one on the second destroys the boot pool and the first thread with it,
 and either is refused its own.
 The state both builds start from is in `include/rvuos/replay.h`
 rather than written out twice.
-`OP_DEBUG_TRACE` makes the kernel print one line per call,
+`OP_TEST_TRACE` makes the kernel print one line per call,
 and after a describing call that succeeded a line of what it returned,
 and run the self-check after it, reading the PMP CSRs back.
 So the replay holds the real kernel's answers to the host's as well as its statuses:
@@ -552,13 +552,13 @@ A preemption lands between two instructions,
 and the host runs records rather than instructions,
 so it cannot say where one would land.
 While tracing is on, the tick therefore preempts nobody
-and moves no time: timer lines fire only through `OP_DEBUG_TICK`,
+and moves no time: timer lines fire only through `OP_TEST_TICK`,
 and so do accounts get charged and fill, and the watchdog halt.
-`OP_DEBUG_TRACE` fills every account,
+`OP_TEST_TRACE` fills every account,
 so the host, which boots with them full, starts from the same accounts as QEMU,
 where the driver ran untraced for a while before and a tick may have come.
 The clock that charges a turn is then the tick count alone, on both builds:
-a turn with time pays a tick at each `OP_DEBUG_TICK` and nothing at a wait.
+a turn with time pays a tick at each `OP_TEST_TICK` and nothing at a wait.
 `OP_CLOCK_READ` tells the same clock, the counts of the ticks so far, which the host, with no counter, tells too.
 The fill clears what the running thread owed from within the tick,
 and the host stands its counter half way into the tick while untraced, so that there is something to clear.
@@ -568,7 +568,7 @@ see `TODO.md` for what nothing checks.
 The interrupt is still taken and acknowledged on QEMU,
 so the replay exercises the interrupt entry and return,
 but a switch happens only when a thread waits
-or when a record asks for the tick through `OP_DEBUG_TICK`.
+or when a record asks for the tick through `OP_TEST_TICK`.
 A traced run in which every thread waits, or waits for an account to fill, therefore stops
 even with a timer line armed, since no record is left to fire it,
 and the host build, which has no clock, agrees.
@@ -598,16 +598,16 @@ A device interrupt is delivered under tracing as it is otherwise,
 because a line left claimed would storm
 and one masked without its `Irq` disarmed would break an invariant;
 the replay driver holds no device and enables none,
-so none arrives during a replay, and `OP_DEBUG_IRQ` fires them by name.
+so none arrives during a replay, and `OP_TEST_IRQ` fires them by name.
 The path from the controller to the `Irq` is checked by the demo in `user/init/logger.c`,
 whose logger drives the UART's transmitter on its interrupt.
 The kernel loses nothing by that:
 it runs with interrupts off, so a tick lands only in user mode,
 and every such landing is the same to it, a ready thread whose frame is saved.
-A tick landing within a restartable call is a record too, `OP_DEBUG_PREEMPT`:
+A tick landing within a restartable call is a record too, `OP_TEST_PREEMPT`:
 it arms a stop at the n-th place from now at which a call could stop between two steps,
 counted whether an interrupt is pending or not, so both builds stop at the same place,
-and does there what `OP_DEBUG_TICK` does, so another thread may run while the call is half done.
+and does there what `OP_TEST_TICK` does, so another thread may run while the call is half done.
 The host stops every restartable call after each step and makes it again at once,
 which checks every restart alone;
 a thread an armed stop left stands at its `ecall` until the processor comes back to it,

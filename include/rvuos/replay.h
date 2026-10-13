@@ -18,7 +18,7 @@
  *
  * A record may name the thread that performs it, its actor.
  * A thread that finds the next record is another thread's
- * passes the processor on with OP_DEBUG_TICK
+ * passes the processor on with OP_TEST_TICK
  * and looks at the cursor when the processor comes back:
  * moved, some thread took the record;
  * not moved, the processor went round and none took it,
@@ -109,17 +109,16 @@ static inline int replay_leaves_alone(uint32_t at)
 #define REPLAY_LOG_SLOT 6
 
 /* Capability slots the setup fills, above the boot capabilities, in both tables. */
-#define REPLAY_CAP_NOTIFY  18
-#define REPLAY_CAP_THREAD  19 /* the second thread */
-#define REPLAY_CAP_POOL    20 /* the second thread's pool */
-#define REPLAY_CAP_TABLE   21 /* the second thread's table */
-#define REPLAY_CAP_PROCESS 22 /* the second thread's process */
-#define REPLAY_CAP_RAM     23 /* the thread's own memory, an Untyped */
+#define REPLAY_CAP_NOTIFY  (BOOT_CAP_COUNT + 0)
+#define REPLAY_CAP_THREAD  (BOOT_CAP_COUNT + 1) /* the second thread */
+#define REPLAY_CAP_POOL    (BOOT_CAP_COUNT + 2) /* the second thread's pool */
+#define REPLAY_CAP_TABLE   (BOOT_CAP_COUNT + 3) /* the second thread's table */
+#define REPLAY_CAP_PROCESS (BOOT_CAP_COUNT + 4) /* the second thread's process */
+#define REPLAY_CAP_RAM     (BOOT_CAP_COUNT + 5) /* the thread's own memory, an Untyped */
 /* The halves the second thread's pool and memory are cut from, empty afterwards. */
-#define REPLAY_CAP_HALF     24 /* the upper half of the free RAM */
-#define REPLAY_CAP_POOL_RAM 25 /* its lower half, the second thread's pool, which goes to the first table */
-#define REPLAY_CAP_LENT     26 /* its upper half, which the second thread's memory is derived from */
-_Static_assert(REPLAY_CAP_NOTIFY == BOOT_CAP_COUNT, "the setup's slots follow the boot capabilities");
+#define REPLAY_CAP_HALF     (BOOT_CAP_COUNT + 6) /* the upper half of the free RAM */
+#define REPLAY_CAP_POOL_RAM (BOOT_CAP_COUNT + 7) /* its lower half, the second thread's pool, which goes to the first table */
+#define REPLAY_CAP_LENT     (BOOT_CAP_COUNT + 8) /* its upper half, which the second thread's memory is derived from */
 /* The third thread, stopped until a record resumes it: the last slot, which the corpus leaves alone. */
 #define REPLAY_CAP_THIRD   (REPLAY_TABLE_SLOTS - 1)
 
@@ -175,7 +174,7 @@ static const struct replay_record replay_prologue[] = {
     REPLAY_COPY(BOOT_CAP_PROCESS),
     REPLAY_COPY(BOOT_CAP_THREAD),
     REPLAY_COPY(BOOT_CAP_POOL),
-    REPLAY_COPY(BOOT_CAP_DEBUG),
+    REPLAY_COPY(BOOT_CAP_PRINT),
     REPLAY_COPY(BOOT_CAP_CODE),
     REPLAY_COPY(BOOT_CAP_DATA),
     REPLAY_COPY(BOOT_CAP_INPUT),
@@ -185,6 +184,8 @@ static const struct replay_record replay_prologue[] = {
     REPLAY_COPY(BOOT_CAP_TIMER_LINES),
     REPLAY_COPY(BOOT_CAP_CLOCK),
     REPLAY_COPY(BOOT_CAP_TIME),
+    REPLAY_COPY(BOOT_CAP_HALT),
+    REPLAY_COPY(BOOT_CAP_TEST),
     REPLAY_COPY(REPLAY_CAP_NOTIFY),
     REPLAY_COPY(REPLAY_CAP_THREAD),
     REPLAY_COPY(REPLAY_CAP_POOL),
@@ -232,6 +233,6 @@ static const struct replay_record replay_start =
 
 /* What a thread performs to pass a record on. */
 static const struct replay_record replay_tick =
-    { OP_DEBUG_TICK, 0, BOOT_CAP_DEBUG, 0, 0, 0 };
+    { OP_TEST_TICK, 0, BOOT_CAP_TEST, 0, 0, 0 };
 
 #endif

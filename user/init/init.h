@@ -78,7 +78,7 @@ enum {
  * and means nothing to the kernel.
  */
 enum {
-    CHILD_DEBUG = 1,
+    CHILD_PRINT = 1,
     CHILD_SHARED,
     CHILD_UP,
     CHILD_DOWN,
@@ -152,7 +152,7 @@ extern volatile uint32_t spins[SPINNERS];
 
 static inline void puts(const char *s)
 {
-    rv_puts(BOOT_CAP_DEBUG, s);
+    rv_puts(BOOT_CAP_PRINT, s);
 }
 
 /* Say what was done and whether it went through, and halt the machine if it did not. */

@@ -45,7 +45,7 @@
 
 static struct self self;
 static struct kernel_log klog;
-static const struct out out = { log_write, (void *)BOOT_CAP_DEBUG };
+static const struct out out = { log_write, (void *)BOOT_CAP_PRINT };
 static uint8_t pong_stack[1024] __attribute__((aligned(16)));
 static uint8_t holder_stack[1024] __attribute__((aligned(16)));
 static uint32_t note, ping_note, pong_note, held_note, hold_note, done_note, lock_note;
@@ -71,7 +71,7 @@ static void drain(void)
 static __attribute__((noreturn)) void halt(uint32_t code)
 {
     drain();
-    rv_halt(BOOT_CAP_DEBUG, code);
+    rv_halt(BOOT_CAP_HALT, code);
 }
 
 static void must(const char *what, uint32_t status)

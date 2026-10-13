@@ -10,7 +10,7 @@
  * and the CSR values read back from the hardware.
  *
  * It runs after every system call in the host fuzzer
- * and, once OP_DEBUG_TRACE has been invoked, on the target as well.
+ * and, once OP_TEST_TRACE has been invoked, on the target as well.
  * It is freestanding so that the same file serves both.
  */
 
@@ -985,7 +985,9 @@ static void check_captable(const struct captable *table)
             fail("capability has unknown rights bits", v2p(table), i, c->rights);
         }
         switch (c->type) {
-        case CAP_DEBUG:
+        case CAP_PRINT:
+        case CAP_HALT:
+        case CAP_TEST:
         case CAP_CLOCK:
             break;
         case CAP_FRAME: {
@@ -1162,7 +1164,8 @@ static bool derived_from(const struct cap *c, const struct cap *p)
             return narrower && range_within(c->a, c->b, p->a, p->b);
         }
         /* A notification's capability carries the bits it may signal, which narrow as rights do. */
-        return narrower && (c->type == CAP_DEBUG || c->type == CAP_CLOCK || c->a == p->a) &&
+        return narrower && (c->type == CAP_PRINT || c->type == CAP_HALT || c->type == CAP_TEST || c->type == CAP_CLOCK ||
+                            c->a == p->a) &&
                (c->type != CAP_NOTIFICATION || !(c->b & ~p->b));
     }
     /*
