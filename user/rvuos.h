@@ -83,13 +83,13 @@ static inline uint32_t rv_cap_revoke(uint32_t table_cap, uint32_t slot)
 /* OP_FRAME_CARVE: a smaller frame, a block of size at offset, in slot dst. */
 static inline uint32_t rv_frame_carve(uint32_t frame_cap, uint32_t offset, uint32_t size, uint32_t dst)
 {
-    return rv_invoke(OP_FRAME_CARVE, frame_cap, offset, size, dst);
+    return rv_invoke(OP_FRAME_CARVE, frame_cap, dst, offset, size);
 }
 
 /* OP_POOL_ALLOC: an object of type in slot dst; arg is the type's, see rvuos/abi.h. */
 static inline uint32_t rv_pool_alloc(uint32_t pool_cap, uint32_t type, uint32_t dst, uint32_t arg)
 {
-    return rv_invoke(OP_POOL_ALLOC, pool_cap, type, dst, arg);
+    return rv_invoke(OP_POOL_ALLOC, pool_cap, dst, type, arg);
 }
 
 /* OP_PROCESS_INSTALL: a frame in a region slot of the process, with rights at most the frame's. */
@@ -163,13 +163,13 @@ static inline uint32_t rv_thread_write_reg(uint32_t thread_cap, uint32_t reg, ui
 /* OP_IRQ_CARVE: a smaller range of lines, count from offset, in slot dst. */
 static inline uint32_t rv_irq_carve(uint32_t lines_cap, uint32_t offset, uint32_t count, uint32_t dst)
 {
-    return rv_invoke(OP_IRQ_CARVE, lines_cap, offset, count, dst);
+    return rv_invoke(OP_IRQ_CARVE, lines_cap, dst, offset, count);
 }
 
 /* OP_IRQ_BIND: the one line of line_cap bound to a notification, as an Irq from the pool in slot dst. */
 static inline uint32_t rv_irq_bind(uint32_t line_cap, uint32_t pool_cap, uint32_t ntfn_cap, uint32_t dst)
 {
-    return rv_invoke(OP_IRQ_BIND, line_cap, pool_cap, ntfn_cap, dst);
+    return rv_invoke(OP_IRQ_BIND, line_cap, dst, pool_cap, ntfn_cap);
 }
 
 /* OP_CLOCK_FRAME: a read-only frame over the counter, in slot dst. */
@@ -181,7 +181,7 @@ static inline uint32_t rv_clock_frame(uint32_t clock_cap, uint32_t dst)
 /* OP_TIME_CARVE: a smaller range of units, count from offset, in slot dst. */
 static inline uint32_t rv_time_carve(uint32_t time_cap, uint32_t offset, uint32_t count, uint32_t dst)
 {
-    return rv_invoke(OP_TIME_CARVE, time_cap, offset, count, dst);
+    return rv_invoke(OP_TIME_CARVE, time_cap, dst, offset, count);
 }
 
 /* OP_TIME_BIND: a thread bound to count units of the capability from offset, which it then earns. */
@@ -276,8 +276,8 @@ static inline uint32_t rv_pool_info(uint32_t pool_cap, uint32_t type, uint32_t s
 static inline uint32_t rv_retype(uint32_t untyped_cap, uint32_t type, uint32_t dst, uint32_t *base)
 {
     register uint32_t r_a0 __asm__(RV_A0) = untyped_cap;
-    register uint32_t r_a1 __asm__(RV_A1) = type;
-    register uint32_t r_a2 __asm__(RV_A2) = dst;
+    register uint32_t r_a1 __asm__(RV_A1) = dst;
+    register uint32_t r_a2 __asm__(RV_A2) = type;
     register uint32_t r_a3 __asm__(RV_A3) = 0;
     register uint32_t r_a7 __asm__(RV_A7) = OP_UNTYPED_RETYPE;
     __asm__ volatile(RV_CALL
@@ -340,7 +340,7 @@ static inline uint32_t rv_signal(uint32_t ntfn_cap, uint32_t bits)
 /* OP_NOTIFY_CARVE: a capability to the same notification that may signal only those of bits the invoked one may. */
 static inline uint32_t rv_notify_carve(uint32_t ntfn_cap, uint32_t bits, uint32_t dst)
 {
-    return rv_invoke(OP_NOTIFY_CARVE, ntfn_cap, bits, dst, 0);
+    return rv_invoke(OP_NOTIFY_CARVE, ntfn_cap, dst, bits, 0);
 }
 
 /* OP_NOTIFY_WAIT: block until some bit is set, then take them all. */

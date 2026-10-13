@@ -517,6 +517,9 @@ until the maintainer decides otherwise.
     The next had the replay's record carry all six arguments the registers do, twenty-eight bytes,
     and the fuzzer's inputs keep 128 records at most, its `-max_len` 3584;
     `a4` to `a6` stay unread and unchecked, `TODO.md` says why.
+    The next put every destination in `a1`, where a copy, a move, a split and the clock's frame had it,
+    and the carves, the retype, the allocation and the bind came to have it, the arguments otherwise in their order;
+    the wrappers kept their parameters, and the seeds and the corpus their calls, each record's arguments moved with them.
     The rest below would break a binary built against today's ABI, and each goes in a change of its own:
     the seeds name what they call, `tools/seed.py`,
     so a change rebuilds them and rewrites only those that call an operation whose arguments it changes.
@@ -535,10 +538,6 @@ until the maintainer decides otherwise.
       Codes grouped by type, with the tests' in a range of their own that a stable program never calls,
       would keep `KERR_WRONG_TYPE` and say which calls the ABI promises;
       the describing calls, 41 and 42, came last, and every type takes the first.
-    - **Where a new capability goes.**
-      `a1` for `OP_CAP_COPY`, `OP_CAP_DERIVE`, `OP_CAP_MOVE`, `OP_CLOCK_FRAME` and `OP_UNTYPED_SPLIT`,
-      `a2` for `OP_UNTYPED_RETYPE`, `OP_POOL_ALLOC` and `OP_NOTIFY_CARVE`,
-      and `a3` for the other carves and `OP_IRQ_BIND`; one place would do.
     - **The errors.**
       A signal, an arm or a watch that names none of the bits its capability may is `KERR_NO_RIGHTS`, and such a carve `KERR_INVALID_ARG`;
       an Untyped that has made something already is `KERR_NO_MEMORY`, where it is a state;

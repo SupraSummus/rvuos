@@ -101,16 +101,16 @@ static void second_core(uint32_t data_base, uint32_t data_size, uint32_t shared_
 #ifdef CORES_IRQ
     /* Where each core's controller is its own, the line the cores interrupt each other on is the kernel's. */
     expect("carve the cores' line",
-           rv_invoke(OP_IRQ_CARVE, BOOT_CAP_IRQ_LINES, CORES_IRQ, 1, SLOT_SPARE_LINE));
+           rv_irq_carve(BOOT_CAP_IRQ_LINES, CORES_IRQ, 1, SLOT_SPARE_LINE));
     expect("the cores' line is the kernel's",
-           rv_invoke(OP_IRQ_BIND, SLOT_SPARE_LINE, SLOT_POOL, SLOT_TIMER_NTFN, SLOT_SPARE_IRQ) == KERR_OVERLAP
+           rv_irq_bind(SLOT_SPARE_LINE, SLOT_POOL, SLOT_TIMER_NTFN, SLOT_SPARE_IRQ) == KERR_OVERLAP
                ? KERR_OK : KERR_INVALID_ARG);
     expect("let it go", rv_invoke(OP_CAP_DELETE, BOOT_CAP_CAPTABLE, SLOT_SPARE_LINE, 0, 0));
 #endif
 
     /* The spinner earns the whole second core and nothing of this one, so it spins there while this thread does too. */
     expect("carve the second core's units",
-           rv_invoke(OP_TIME_CARVE, BOOT_CAP_TIME, TIME_UNITS, TIME_UNITS, SLOT_CORE_TIME));
+           rv_time_carve(BOOT_CAP_TIME, TIME_UNITS, TIME_UNITS, SLOT_CORE_TIME));
     was = spins[0];
     expect("bind a spinner to the whole of the second core",
            rv_invoke(OP_TIME_BIND, SLOT_CORE_TIME, SLOT_SPINNER, 0, TIME_UNITS));
@@ -163,8 +163,8 @@ static void second_core(uint32_t data_base, uint32_t data_size, uint32_t shared_
      * and a hart that waits for the kernel's lock keeps it for the rest of its slice, tens of milliseconds.
      */
     expect("allocate what the ponger waits on",
-           rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_NOTIFICATION, SLOT_PING, 0));
-    expect("allocate the ponger", rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_THREAD, SLOT_PONGER, BOOT_CAP_PROCESS));
+           rv_pool_alloc(SLOT_POOL, CAP_NOTIFICATION, SLOT_PING, 0));
+    expect("allocate the ponger", rv_pool_alloc(SLOT_POOL, CAP_THREAD, SLOT_PONGER, BOOT_CAP_PROCESS));
     expect("configure it",
            rv_invoke(OP_THREAD_CONFIGURE, SLOT_PONGER, (uint32_t)&ponger_main,
                      stack - CORE_STACK(0) * SPINNER_STACK, 0));
@@ -195,7 +195,7 @@ static void second_core(uint32_t data_base, uint32_t data_size, uint32_t shared_
      * It reads the second word, so that its fault does not pass for the prober's, which reads the first.
      */
     read_at = shared_base + 4;
-    expect("allocate the reader", rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_THREAD, SLOT_READER, BOOT_CAP_PROCESS));
+    expect("allocate the reader", rv_pool_alloc(SLOT_POOL, CAP_THREAD, SLOT_READER, BOOT_CAP_PROCESS));
     expect("configure it",
            rv_invoke(OP_THREAD_CONFIGURE, SLOT_READER, (uint32_t)&reader_main,
                      stack - CORE_STACK(1) * SPINNER_STACK, 0));
@@ -230,7 +230,7 @@ static void second_core(uint32_t data_base, uint32_t data_size, uint32_t shared_
            rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_CORE_TIME, 0, 0));
     expect("make a pool to destroy", rv_retype(SLOT_DOOMED_MEMORY, CAP_POOL, SLOT_DOOMED_POOL, &base));
     expect("allocate a thread in it",
-           rv_invoke(OP_POOL_ALLOC, SLOT_DOOMED_POOL, CAP_THREAD, SLOT_LOST, BOOT_CAP_PROCESS));
+           rv_pool_alloc(SLOT_DOOMED_POOL, CAP_THREAD, SLOT_LOST, BOOT_CAP_PROCESS));
     expect("configure it",
            rv_invoke(OP_THREAD_CONFIGURE, SLOT_LOST, (uint32_t)&lost_main, stack - CORE_STACK(2) * SPINNER_STACK, 0));
     expect("bind it to the whole of the second core",
