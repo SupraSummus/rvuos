@@ -88,7 +88,8 @@ Consequences that shape the design:
   which `pmp.c` swaps on the way to the CSRs and back.
 - **What the core hardwires past the run is fenced off.**
   The lowest-numbered entry that matches decides,
-  so where an entry past the run is still on after the probe and grants a right, as RP2350's three do,
+  so where an entry past the run, up to the sixteenth whatever the budget,
+  is still on after the probe and grants a right, as RP2350's three do,
   the last entry of the run becomes the fence: NAPOT over the whole address space, with no right.
   An access no region holds faults there before any hardwired entry sees it,
   so a device is a process's only through a frame, and the budget is seven on RP2350.

@@ -68,15 +68,15 @@ _Static_assert(PMP_GRAIN >= 4 && (PMP_GRAIN & (PMP_GRAIN - 1)) == 0,
 #define PMP_WRITABLE 8
 static const uint32_t pmp_hardwired_addr[] = { 0x01ffffff, 0x13ffffff, 0x35ffffff };
 #define PMP_HARDWIRED_COUNT (sizeof(pmp_hardwired_addr) / sizeof(pmp_hardwired_addr[0]))
-_Static_assert(PMP_WRITABLE + PMP_HARDWIRED_COUNT <= PMP_MAX_ENTRIES, "the hardwired entries lie within the CSRs");
+_Static_assert(PMP_WRITABLE + PMP_HARDWIRED_COUNT <= PMP_CSR_ENTRIES, "the hardwired entries lie within the CSRs");
 #else
-#define PMP_WRITABLE PMP_MAX_ENTRIES
+#define PMP_WRITABLE PMP_CSR_ENTRIES
 #define PMP_HARDWIRED_COUNT 0
 #endif
 
 /* Each core's PMP CSRs as last written, the hardwired entries as the core holds them. */
-static uint32_t pmp_addrs[CORES][PMP_MAX_ENTRIES];
-static uint8_t pmp_cfgs[CORES][PMP_MAX_ENTRIES];
+static uint32_t pmp_addrs[CORES][PMP_CSR_ENTRIES];
+static uint8_t pmp_cfgs[CORES][PMP_CSR_ENTRIES];
 #define pmp_addr (pmp_addrs[core_index()])
 #define pmp_cfg (pmp_cfgs[core_index()])
 
@@ -329,8 +329,9 @@ void pmp_init(void)
         }
     }
 #endif
-    pmp_entry_count = PMP_WRITABLE;
-    pmp_entry_end = PMP_WRITABLE + PMP_HARDWIRED_COUNT;
+    /* What the probe in pmp.c finds: the writable run, cut at the budget, and the hardwired entries past it. */
+    pmp_entry_count = PMP_WRITABLE < PMP_MAX_ENTRIES ? PMP_WRITABLE : PMP_MAX_ENTRIES;
+    pmp_entry_end = PMP_HARDWIRED_COUNT > 0 ? PMP_WRITABLE + PMP_HARDWIRED_COUNT : pmp_entry_count;
     pmp_grain = PMP_GRAIN;
 }
 
@@ -369,7 +370,7 @@ void pmp_clear(unsigned idx)
 
 void pmp_get(unsigned idx, uint32_t *addr, uint8_t *cfg)
 {
-    if (idx >= PMP_MAX_ENTRIES) {
+    if (idx >= PMP_CSR_ENTRIES) {
         kpanic("pmp_get index out of range");
     }
     *addr = pmp_addr[idx];

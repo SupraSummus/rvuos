@@ -24,6 +24,9 @@
 #define PMP_MAX_ENTRIES 16
 #endif
 
+/* The entries RV32 names; pmp_init looks at them all, past the budget too. */
+#define PMP_CSR_ENTRIES 16
+
 /*
  * Entries the image may use: the leading run whose address and mode take a write,
  * less the fence where there is one; see process_fence.
