@@ -1,5 +1,67 @@
 # rvuos: repository conventions
 
+> There are two ways of constructing a software design:
+> One way is to make it so simple that there are obviously no deficiencies
+> and the other way is to make it so complicated that there are no obvious deficiencies.
+> The first method is far more difficult.
+>
+> At first I hoped that such a technically unsound project would collapse
+> but I soon realized it was doomed to success.
+> Almost anything in software can be implemented, sold, and even used given enough determination.
+> There is nothing a mere scientist can say that will stand against the flood of a hundred million dollars.
+> But there is one quality that cannot be purchased in this way -- and that is reliability.
+> The price of reliability is the pursuit of the utmost simplicity.
+> It is a price which the very rich find most hard to pay.
+>
+> -- C. A. R. Hoare, "The Emperor's Old Clothes",
+> the 1980 ACM Turing Award Lecture, Communications of the ACM 24(2), 1981, pp. 81-82;
+> the second paragraph is about PL/I.
+
+> Beauty is more important in computing than anywhere else in technology
+> because software is so complicated.
+> Beauty is the ultimate defense against complexity.
+>
+> -- David Gelernter, Machine Beauty: Elegance and the Heart of Technology, 1998
+
+> The key to performance is elegance, not battalions of special cases.
+> The terrible temptation to tweak should be resisted unless the payoff is really noticeable.
+>
+> -- Jon L. Bentley and M. Douglas McIlroy, "Engineering a Sort Function",
+> Software -- Practice and Experience 23(11), 1993
+
+> In software, the most beautiful code, the most beautiful functions,
+> and the most beautiful programs are sometimes not there at all.
+>
+> -- Jon Bentley, "The Most Beautiful Code I Never Wrote", in Beautiful Code, 2007
+
+> Increasingly, people seem to misinterpret complexity as sophistication,
+> which is baffling -- the incomprehensible should cause suspicion rather than admiration.
+>
+> -- Niklaus Wirth, "A Plea for Lean Software", IEEE Computer 28(2), 1995
+
+> The competent programmer is fully aware of the strictly limited size of his own skull;
+> therefore he approaches the programming task in full humility,
+> and among other things he avoids clever tricks like the plague.
+>
+> -- Edsger W. Dijkstra, "The Humble Programmer", EWD340, the 1972 ACM Turing Award Lecture
+
+> A complex system that works is invariably found to have evolved from a simple system that worked.
+> The inverse proposition also appears to be true:
+> A complex system designed from scratch never works and cannot be made to work.
+>
+> -- John Gall, Systemantics, 1975, p. 71
+
+> Program testing can be a very effective way to show the presence of bugs,
+> but is hopelessly inadequate for showing their absence.
+>
+> -- Edsger W. Dijkstra, "The Humble Programmer", EWD340
+
+> For a successful technology, reality must take precedence over public relations,
+> for nature cannot be fooled.
+>
+> -- Richard P. Feynman, Appendix F of the Report of the Presidential Commission
+> on the Space Shuttle Challenger Accident, 1986
+
 rvuos is a capability-based microkernel for RISC-V microcontrollers
 without an MMU, and for ARMv7-M and ARMv8-M ones with an MPU; see "Architectures" in `DESIGN.md`.
 Read `DESIGN.md` before changing anything in the kernel,
