@@ -1,14 +1,14 @@
 # A round of each measure of user/bench/ on mps2-an385, in instructions, as clang 22 builds it; see tests/bench.py.
 call 536
 signal-wait 1057
-threads 3357
+threads 3080
 lock 30
-lock-wait 7825
-lock-lend 8010
+lock-wait 7263
+lock-lend 7485
 seqlock-write 54
 seqlock-read 59
-processes 3837
-channel 4512
-channel-1k 6086
-bulk 5124
-contended-worst 1707560
+processes 3560
+channel 4250
+channel-1k 5826
+bulk 4855
+contended-worst 1706440
