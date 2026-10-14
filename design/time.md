@@ -223,7 +223,8 @@ the others are brought up to the count when the kernel looks at them.
 A thread with units that waits without time has time again once its account reaches a tick,
 and the kernel keeps each core's release, the nearest tick at which that happens for any such thread of the core.
 Only at the release does it look at the core's `TIME_UNITS` units, as the tick looks at the timer lines;
-every thread with units earns one of them, so the look finds them all.
+every thread with units earns one of them, so the look finds them all,
+and a thread's units are a run of them, so the look steps over a thread's at once.
 A trap that counts several ticks at once charges them as if each had been taken, in constant time;
 `account_after` in `kernel/sched.c` says how.
 So a thread that waits just before every tick pays for its time all the same,
@@ -294,7 +295,8 @@ only a thread with units waits for its account, and each earns a unit,
 so the release looks at the units and at nothing else,
 where accounts on objects made of memory would need a queue of refills sorted by time,
 as seL4's scheduling contexts have.
-Sixty-four makes a unit a fine enough part of the processor and the release a look at 64 words.
+Sixty-four makes a unit a fine enough part of the processor and the release a look at 64 words at most,
+one for each thread with units and each unit nobody earns.
 
 **Why threads earn, and not shares.**
 Before the units, the processor was 32 shares: kernel objects threads were bound to,

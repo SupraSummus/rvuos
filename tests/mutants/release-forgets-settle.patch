@@ -9,9 +9,9 @@ Report: a thread's account reaches a tick before the release
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -502,7 +502,7 @@ static void release(uint32_t c)
-         LOOP_BOUND(TIME_UNITS);
+@@ -540,7 +540,7 @@ static void release(uint32_t c)
          struct thread *t = unit_first(first + i);
+         i += t != NULL ? t->time.b : 1;
          if (t != NULL && (t->queue == QUEUE_SPARE || t->queue == QUEUE_SPENT)) {
 -            thread_settle(t);
 +            (void)t;
