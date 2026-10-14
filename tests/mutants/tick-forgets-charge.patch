@@ -9,12 +9,12 @@ Report: the timer lets the tick pass that drains the turn's account
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -223,7 +223,7 @@ static uint32_t turn_owes(uint32_t offset)
- static uint32_t turn_next(void)
+@@ -252,7 +252,7 @@ static uint32_t turn_owes(const struct place *p, uint32_t offset)
+ /* The account of the turn's place, p, at the next tick: it pays for the rest of this one and earns the gain. */
+ static uint32_t turn_next(const struct place *p)
  {
-     struct thread *payer = turn_payer(core_self());
--    uint32_t next = payer->balance - turn_owes(timer_tick_counts()) + tick_gain(payer);
-+    uint32_t next = payer->balance - turn_owes(timer_tick_counts()) + tick_parts();
-     return next < account_cap(payer) ? next : account_cap(payer);
+-    uint32_t next = p->balance - turn_owes(p, timer_tick_counts()) + tick_gain(p);
++    uint32_t next = p->balance - turn_owes(p, timer_tick_counts()) + tick_parts();
+     return next < account_cap(p) ? next : account_cap(p);
  }
  

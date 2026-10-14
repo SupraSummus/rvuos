@@ -9,24 +9,25 @@ Report: a call stopped where its caller cannot make it again
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -994,7 +994,7 @@ void syscall_dispatch(struct thread *t)
+@@ -1221,7 +1221,8 @@ void syscall_dispatch(struct thread *t)
       * One that lost its units finishes its turn, as a preempted call is made again before the tick switches,
       * unless that left the turn on spare time, which a thread with time the call made ready takes at once.
       */
 -    if (core->current->state != THREAD_READY || core->run_queue != 0) {
-+    if (core->current->state != THREAD_READY || core->current->time.type != CAP_BOUND || core->run_queue != 0) {
++    if (core->current->state != THREAD_READY || thread_place_on(core->current, core_index()) == NULL ||
++        core->run_queue != 0) {
          sched_call_end();
      }
      if (debug_trace) {
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -1076,7 +1076,7 @@ static void spare_end(struct core *core)
+@@ -1179,7 +1179,7 @@ static void spare_end(struct core *core)
  void sched_call_end(void)
  {
      struct core *core = core_self();
 -    if (core->current->state != THREAD_READY) {
-+    if (core->current->state != THREAD_READY || core->current->time.type != CAP_BOUND) {
++    if (core->current->state != THREAD_READY || thread_place_on(core->current, core_index()) == NULL) {
          sched_run_next();
      } else {
          spare_end(core);

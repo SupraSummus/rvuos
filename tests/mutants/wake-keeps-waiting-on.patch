@@ -8,10 +8,10 @@ Report: runnable thread waits on something
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -112,7 +112,6 @@ static void unlend(struct thread *t);
+@@ -128,7 +128,6 @@ static void unlend(struct thread *t);
  static void unwait(struct thread *t)
  {
-     ring_remove(&((struct notification *)p2v(t->waiting_on))->waiters, t);
+     ring_remove(&((struct notification *)p2v(t->waiting_on))->waiters, v2p(t), WAITERS);
 -    t->waiting_on = 0;
      if (t->lend_to != 0) {
          unlend(t);

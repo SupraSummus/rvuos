@@ -3,6 +3,7 @@ It would take turns on the run queue it cannot pay for, before the threads on sp
 a thread has time exactly while its account holds a tick.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
+Report: a place waits on another queue than its account says
 Report: a tick did not cost the thread whose turn it was a tick less its units
 Report: the timer lets a tick pass that ends the turn
 Report: the timer lets the tick pass that drains the turn's account
@@ -10,7 +11,7 @@ Report: the timer lets the tick pass that drains the turn's account
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -179,7 +179,7 @@ static inline void account_refill(struct thread *t)
+@@ -210,7 +210,7 @@ static inline void account_refill(struct place *p)
  /* Whether an account holds a turn's worth, a tick: then the thread has time, and takes turns with those that have. */
  static bool has_time(uint32_t balance)
  {
@@ -18,4 +19,4 @@ diff --git a/kernel/sched.c b/kernel/sched.c
 +    return balance != 0;
  }
  
- /* The ticks an account at balance, below a tick, takes to reach one, for a thread with units. */
+ /* The ticks an account at balance, below a tick, takes to reach one, for a place with units. */

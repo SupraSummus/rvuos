@@ -59,7 +59,7 @@ and so is a code that is no operation's on any capability, 0, 11, 27, or `OP_COU
 What an operation reads its description says; three read by their own values:
 `OP_POOL_ALLOC` of a notification no `a3`, `OP_THREAD_WATCH` with no bits no `a1`,
 and `OP_IRQ_SET` with no bits, or of a line that is no timer's, no `a2` or `a3`.
-`a4` to `a6` are read by no operation, and not checked yet.
+`a4` is read only by `OP_POOL_ALLOC` of a thread, `a5` and `a6` by no operation, and none of them is checked yet.
 
 A call whose work grows with the derivation tree or with a pool can be interrupted and made again:
 `OP_CAP_REVOKE`, `OP_CAP_DELETE` of a root with capabilities below it,
@@ -234,13 +234,13 @@ A pool allocates, which needs `RIGHT_W` on it, and tells what an allocation woul
 it is destroyed by revoking below its Untyped, section 5.5.
 
 **`OP_POOL_ALLOC` (7).**
-`a1` = object type, `a2` = destination slot, `a3` = type-specific:
+`a1` = object type, `a2` = destination slot, `a3` = type-specific, and for a thread `a4` too:
 
 | `a1` | `a3` | Rule |
 |---|---|---|
 | `CAP_CAPTABLE` | number of slots, 1 to `CAPTABLE_MAX_SLOTS` (1024) | |
 | `CAP_PROCESS` | slot of the `CapTable` capability the process will use, with `RIGHT_W` | the table may lie in any pool; the process holds it in its first table slot, below that capability |
-| `CAP_THREAD` | slot of the `Process` capability the thread will run in, with `RIGHT_W` | the process may lie in any pool; the thread's hold on it hangs below that capability; the thread starts stopped |
+| `CAP_THREAD` | slot of the `Process` capability the thread will run in, with `RIGHT_W` | `a4` = its places, the cores it may hold the time of at once, 1 to the machine's cores, else `KERR_INVALID_ARG`; section 5.11; the process may lie in any pool; the thread's hold on it hangs below that capability; the thread starts stopped |
 | `CAP_NOTIFICATION` | unused | |
 
 Any other type is `KERR_INVALID_ARG`; `Irq` objects come from `OP_IRQ_BIND`.
@@ -252,7 +252,8 @@ The new capability carries all rights and hangs below the invoked `KernelPool` c
 No right needed.
 `a1` = the type: `CAP_CAPTABLE`, `CAP_PROCESS`, `CAP_THREAD` or `CAP_NOTIFICATION`, as `OP_POOL_ALLOC` makes them,
 `CAP_IRQ`, as `OP_IRQ_BIND` makes one of a pool, or `CAP_POOL` for the descriptor at the base of a pool;
-`a2` = 0; `a3` = the number of slots for `CAP_CAPTABLE`, 1 to 1024, and 0 for the others.
+`a2` = 0; `a3` = the number of slots for `CAP_CAPTABLE`, 1 to 1024, of places for `CAP_THREAD`, 1 to the machine's cores,
+and 0 for the others.
 Anything else is `KERR_INVALID_ARG`, and nothing is written.
 Returns `a1` = the bytes the object takes, a multiple of 8, as the pool counts them,
 and `a2` = the bytes left, the pool's room as `OP_CAP_INFO` tells it, zero while the pool is being destroyed;
@@ -406,8 +407,8 @@ A stop leaves the waiter at this call, which a resume makes again; `OP_THREAD_ST
 Needs `RIGHT_R`.
 `a1` = slot of a `Thread` capability with `RIGHT_X`, the borrower; the caller itself is `KERR_INVALID_ARG`.
 Waits as `OP_NOTIFY_WAIT` does, and returns at once, lending nothing, if some bit is set.
-While it waits, a borrower without time of its own runs on the account of the thread that has lent it time longest,
-if that one runs on the borrower's core,
+While it waits, a borrower without time of its own on a core runs there on the account of the thread that has lent it time longest,
+if that one holds the time of that core too,
 and a caller whose own time pays for its turn hands the rest of the turn to the borrower,
 if it is that one and the borrower waits for a turn; section 5.12.
 Returns `KERR_INVALID_CAP` with no bits if the notification's pool, or the borrower's, is destroyed while it waits.
@@ -505,17 +506,20 @@ Needs `RIGHT_W`.
 `a2` = the first unit, as an offset from the capability's first
 (`KERR_INVALID_ARG` past the last, even for none),
 `a3` = how many units (`KERR_INVALID_ARG` past the last), zero for none.
-The units must all be of one core, `KERR_INVALID_ARG` otherwise,
-and the thread runs on that core, or with none on the first unit's; section 5.11.
+The units must all be of one core, `KERR_INVALID_ARG` otherwise, the first unit's with none: the core the bind is of.
+It fills the thread's place that holds that core's time, or an empty one, section 5.11,
+and fails with `KERR_LIMIT` when every place holds another core's;
+the thread's places on other cores stay as they are.
 Fails with `KERR_OVERLAP` if another thread earns one of the units.
-The thread leaves the units it earned, whoever bound it to them,
-and earns these; with `RIGHT_X` on the invoked capability it runs on spare time too.
+The place leaves the units it earned, whoever bound it to them,
+and earns these; with `RIGHT_X` on the invoked capability the thread runs on that core's spare time too.
+None without `RIGHT_X` holds the core's time all the same: the thread runs there on lent time alone, section 5.12.
 Its account keeps what it held, up to what the new units hold at most,
 and a ready thread joins the back of the queue its account puts it on, section 5.11.
 Its hold on the units hangs below the invoked capability,
-so revoking below that capability unbinds it:
-it keeps its state and does not run until it is bound again, and its account is emptied.
-A thread unbound or moved while it runs, the caller itself for one, finishes the turn it had:
+so revoking below that capability empties the place:
+its account is emptied, and a thread whose places are all empty keeps its state and does not run until it is bound again.
+A thread whose place is emptied or bound anew while it runs there, the caller itself for one, finishes the turn it had:
 only a wait, the tick, a fault, section 5.6, a revoke that takes its own process, section 6.4,
 a signal that wakes the thread paying for its turn, section 5.12,
 or a thread with time that becomes ready while the turn runs on spare time, section 5.11, takes the processor from it,
@@ -536,7 +540,7 @@ and in `a2` to `a4` what the capability names, by its type:
 | `KernelPool` | size | the room: the bytes an allocation may still take, 0 while it is being destroyed | 1 while it is being destroyed, else 0 |
 | `CapTable` | its number of slots | 0 | 0 |
 | `Process` | how many of its region slots may be filled at once; past it, where it is fewer than `PROCESS_REGION_SLOTS`, an install is `KERR_LIMIT` | 0 | 0 |
-| `Thread` | 0 | 0 | 0 |
+| `Thread` | its places, section 5.11 | the cores whose time its places hold, bit `c` for core `c` | 0 |
 | `Notification` | the bits it may signal, never those set | 0 | 0 |
 | `IrqLine` | the first line | the count | 1 for timer lines, 0 for the log's and the controller's |
 | `Irq` | its line | the bits it may signal, 0 once its notification was taken, never those it is armed with | 1 on a timer line, else 0 |
@@ -628,7 +632,7 @@ and drops into user mode with:
 | 0 | `BOOT_CAP_NULL` | empty on purpose | |
 | 1 | `BOOT_CAP_CAPTABLE` | the root task's own table | all |
 | 2 | `BOOT_CAP_PROCESS` | the root task's own process | all |
-| 3 | `BOOT_CAP_THREAD` | the root task's first thread | all |
+| 3 | `BOOT_CAP_THREAD` | the root task's first thread, with a place on every core, its first holding the first core's units | all |
 | 4 | `BOOT_CAP_POOL` | the boot pool | all |
 | 5 | `BOOT_CAP_PRINT` | `Print` | all |
 | 6 | `BOOT_CAP_CODE` | `Frame`: the root task's code | read, execute |

@@ -121,14 +121,26 @@ static bool room_dying;
 static uint32_t ticks_before;
 static bool traced_before;
 static const struct thread *charged;
+static const struct place *charged_place;
 static struct cap charged_units;
 static uint32_t charged_balance;
 
-/* A thread's account at the count, as its stamp and its units make it, held to the cap. */
-static uint32_t account_at_count(const struct thread *t)
+/* The place of a thread that holds a core's time, as thread_place_on finds it, outside the frames fuzz-work follows. */
+static const struct place *place_on(const struct thread *t, uint32_t core)
 {
-    uint64_t balance = t->balance + (uint64_t)(sched_ticks - t->stamp) * tick_gain(t);
-    return balance > account_cap(t) ? account_cap(t) : (uint32_t)balance;
+    for (uint32_t i = 0; i < t->places; i++) {
+        if (t->time[i].type == CAP_BOUND && unit_core(t->time[i].a) == core) {
+            return thread_place(t, i);
+        }
+    }
+    return NULL;
+}
+
+/* A place's account at the count, as its stamp and its units make it, held to the cap. */
+static uint32_t account_at_count(const struct place *p)
+{
+    uint64_t balance = p->balance + (uint64_t)(sched_ticks - p->stamp) * tick_gain(p);
+    return balance > account_cap(p) ? account_cap(p) : (uint32_t)balance;
 }
 
 /*
@@ -360,7 +372,10 @@ static void check_rights_table(void)
     checked = true;
 }
 
-/* The bytes an object of a type takes of a pool, slots its count for a table, by its structure; 0 for no such object. */
+/*
+ * The bytes an object of a type takes of a pool, slots its count for a table and its places for a thread, by its structure;
+ * 0 for no such object.
+ */
 static uint32_t type_bytes(uint32_t type, uint32_t slots)
 {
     size_t size;
@@ -372,7 +387,8 @@ static uint32_t type_bytes(uint32_t type, uint32_t slots)
         size = sizeof(struct process);
         break;
     case CAP_THREAD:
-        size = sizeof(struct thread);
+        size = slots != 0 && slots <= CORES ? sizeof(struct thread) +
+                                                  slots * (sizeof(struct cap) + sizeof(struct place)) : 0;
         break;
     case CAP_NOTIFICATION:
         size = sizeof(struct notification);
@@ -464,6 +480,16 @@ static void describe_expect(void)
     case CAP_PROCESS:
         w[1] = pmp_entry_count < PROCESS_REGION_SLOTS ? pmp_entry_count : PROCESS_REGION_SLOTS;
         break;
+    case CAP_THREAD: {
+        const struct thread *t = (const struct thread *)cap_object(c);
+        w[1] = t->places;
+        for (uint32_t i = 0; i < t->places; i++) {
+            if (t->time[i].type == CAP_BOUND) {
+                w[2] |= 1u << (t->time[i].a / TIME_UNITS);
+            }
+        }
+        break;
+    }
     case CAP_NOTIFICATION:
         w[1] = c->b;
         break;
@@ -510,7 +536,7 @@ static void record_describe(void)
         describe_takes = (call_args[0] | call_args[1] | call_args[2]) == 0;
     } else {
         describe_takes = type_bytes(call_args[0], call_args[2]) != 0 && call_args[1] == 0 &&
-                         (call_args[0] == CAP_CAPTABLE || call_args[2] == 0);
+                         (call_args[0] == CAP_CAPTABLE || call_args[0] == CAP_THREAD || call_args[2] == 0);
     }
     if (invoked) {
         describe_expect();
@@ -524,7 +550,9 @@ static void record_room(void)
     room_pool = NULL;
     struct cap pc = invoked_cap;
     if (call_op == OP_POOL_ALLOC && invoked_cap.type == CAP_POOL) {
-        room_need = call_args[0] == CAP_IRQ || call_args[0] == CAP_POOL ? 0 : type_bytes(call_args[0], call_args[2]);
+        /* A thread's places are its a4, a table's slots its a3. */
+        room_need = call_args[0] == CAP_IRQ || call_args[0] == CAP_POOL ? 0
+                    : type_bytes(call_args[0], call_args[0] == CAP_THREAD ? call_args[3] : call_args[2]);
     } else if (call_op == OP_IRQ_BIND && invoked_cap.type == CAP_IRQ_LINE &&
                slot_lookup(caller, call_args[0], &pc) == KERR_OK && pc.type == CAP_POOL) {
         room_need = type_bytes(CAP_IRQ, 0);
@@ -906,8 +934,9 @@ void history_begin(bool call)
     ticks_before = sched_ticks;
     traced_before = debug_trace;
     charged = core_self()->payer != NULL ? core_self()->payer : core_self()->turn;
-    charged_units = charged != NULL ? charged->time : (struct cap){ 0 };
-    charged_balance = charged != NULL ? account_at_count(charged) : 0;
+    charged_place = charged != NULL ? place_on(charged, core_index()) : NULL;
+    charged_units = charged_place != NULL ? *place_time(charged_place) : (struct cap){ 0 };
+    charged_balance = charged_place != NULL ? account_at_count(charged_place) : 0;
 }
 
 /*
@@ -1014,13 +1043,13 @@ void history_end(void)
      * as every tick does, and a call that moves no time costs it nothing.
      * The caller keeps what it runs on, but a payer that lent it time may go with a pool the call destroyed.
      */
-    if (charged != NULL && traced_before && sched_ticks - ticks_before <= 1 && is_object(&objects_after, v2p(charged)) &&
-        same_grant(grant_of(&charged->time), grant_of(&charged_units))) {
-        uint32_t gain = tick_gain(charged);
+    if (charged_place != NULL && traced_before && sched_ticks - ticks_before <= 1 &&
+        is_object(&objects_after, v2p(charged)) && same_grant(grant_of(place_time(charged_place)), grant_of(&charged_units))) {
+        uint32_t gain = tick_gain(charged_place);
         uint32_t want = sched_ticks == ticks_before ? charged_balance
                         : charged_balance >= tick_parts() ? charged_balance - tick_parts() + gain
                                                           : charged_balance + gain;
-        if (account_at_count(charged) != want) {
+        if (account_at_count(charged_place) != want) {
             violated(sched_ticks == ticks_before ? "a traced call that moved no time charged the thread whose turn it was"
                                                  : "a tick did not cost the thread whose turn it was a tick less its units");
         }

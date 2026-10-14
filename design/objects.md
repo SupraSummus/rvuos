@@ -107,7 +107,7 @@ there is one counter and one watchdog on the machine.
 | `KernelPool` | Memory retyped from an Untyped and handed to the kernel. All other objects are allocated from pools. |
 | `CapTable` | A process's capability table. Allocated from a pool. |
 | `Process` | A protection domain: capabilities to its `CapTable`s, a set of region slots, and its threads. |
-| `Thread` | An execution context inside a process: its registers, its state, and what its faults signal. |
+| `Thread` | An execution context inside a process: its registers, its state, what its faults signal, and a place for each core it may run on. |
 | `Notification` | A word of sticky signal bits. The only way a thread can wait to be started again by a signal. |
 | `IrqLine` | A range of interrupt lines: the log's and the controller's, or the timer lines. Bound one at a time into an `Irq`. |
 | `Irq` | One line bound to a notification. Signals it when the line fires. |
@@ -118,7 +118,7 @@ there is one counter and one watchdog on the machine.
 | `Clock` | The machine's time, read with `RIGHT_R`, also through the counter's frame, and its watchdog, fed with `RIGHT_W`. No object. |
 
 Every object's size follows from its type,
-a `CapTable` from its slot count,
+a `CapTable` from its slot count and a `Thread` from its places,
 so a pool can be a bump allocator
 whose contents can be walked without a free list.
 `OP_POOL_INFO` tells each size as a pool counts it,
@@ -304,7 +304,7 @@ Every filled slot of every capability table,
 every region installed in a process,
 which is a slot of the same layout living in the `Process`,
 every process's table slots, which live there too,
-every thread's process, units and watch, which live in the `Thread`,
+every thread's process, watch and each of its places' units, which live in the `Thread`,
 every `Irq`'s notification, which lives in the `Irq`,
 and every pool's own node, which lives in its descriptor;
 see `kernel/object.h`.
@@ -468,7 +468,8 @@ and starts a thread at whatever entry point and stack pointer it likes.
 ### Threads
 
 A `Thread` is an execution context inside a process:
-a register frame, a state, and the process it belongs to.
+a register frame, a state, the process it belongs to,
+and its places, as many as its creator asked for, one for each core it may hold the time of at once; see "Cores".
 Creating one takes a `Process` capability with the write right,
 and the new thread may be allocated from any pool.
 
@@ -490,7 +491,7 @@ A thread is stopped, ready or waiting.
 `OP_THREAD_CONFIGURE` sets a stopped thread's program counter, stack pointer
 and argument, the first register of a call, and zeroes the rest,
 and `OP_THREAD_RESUME` makes it ready.
-It runs only while it is bound to units of time, which is apart from its state;
+It runs only while a place of it is bound to units of time, or to none with spare time, which is apart from its state;
 see "Scheduling".
 The kernel validates none of the three:
 it knows no executable format and no calling convention beyond where a function finds its first argument,
@@ -505,7 +506,7 @@ A ready one leaves its queue, and one another core runs makes that core trap fir
 A waiting one leaves its notification's waiters, and its borrower's ring of lenders,
 and stands at the call it waited in, its pc back by the call's size, every register as the call found it,
 since a call that blocks writes none.
-It keeps its process, its watch, its units and its account, and its own lenders, whose time buys nothing while it is stopped;
+It keeps its process, its watch, its places' units and accounts, and its own lenders, whose time buys nothing while it is stopped;
 a turn it pays for, lent to another thread, runs on to its end, charged to it.
 Nothing is signalled, the watch included: a stop is always asked for, and the watch hears what nobody asked for.
 The loss of a process stops a thread the same way, a waiter standing at its call too, so one rule holds for every stop.

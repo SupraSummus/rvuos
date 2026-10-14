@@ -162,7 +162,7 @@ int main(void)
     expect("allocate the child's process",
            rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_PROCESS, SLOT_CHILD_PROCESS, SLOT_CHILD_TABLE));
     expect("allocate the child's thread",
-           rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_THREAD, SLOT_CHILD_THREAD, SLOT_CHILD_PROCESS));
+           rv_thread_alloc(SLOT_POOL, SLOT_CHILD_THREAD, SLOT_CHILD_PROCESS, 1));
     expect("allocate the upward notification",
            rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_NOTIFICATION, SLOT_UP, 0));
     expect("allocate the downward notification",
@@ -418,8 +418,8 @@ int main(void)
            rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_PROCESS, SLOT_CHILD_PROCESS, SLOT_CHILD_TABLE));
     took(SLOT_POOL, &room, CAP_PROCESS, 0);
     expect("a thread in it",
-           rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_THREAD, SLOT_CHILD_THREAD, SLOT_CHILD_PROCESS));
-    took(SLOT_POOL, &room, CAP_THREAD, 0);
+           rv_thread_alloc(SLOT_POOL, SLOT_CHILD_THREAD, SLOT_CHILD_PROCESS, 1));
+    took(SLOT_POOL, &room, CAP_THREAD, 1);
     expect("let the thread go", rv_invoke(OP_CAP_DELETE, BOOT_CAP_CAPTABLE, SLOT_CHILD_THREAD, 0, 0));
     expect("and the process", rv_invoke(OP_CAP_DELETE, BOOT_CAP_CAPTABLE, SLOT_CHILD_PROCESS, 0, 0));
     expect("and the table", rv_invoke(OP_CAP_DELETE, BOOT_CAP_CAPTABLE, SLOT_CHILD_TABLE, 0, 0));

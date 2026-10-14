@@ -330,7 +330,8 @@ static int pool_info(const struct pool *pool, uint32_t *arg)
         type != CAP_IRQ && type != CAP_POOL) {
         return KERR_INVALID_ARG;
     }
-    if (type == CAP_CAPTABLE ? slots == 0 || slots > CAPTABLE_MAX_SLOTS : slots != 0) {
+    uint32_t most = type == CAP_CAPTABLE ? CAPTABLE_MAX_SLOTS : type == CAP_THREAD ? CORES : 0;
+    if (most != 0 ? slots == 0 || slots > most : slots != 0) {
         return KERR_INVALID_ARG;
     }
     arg[1] = obj_align((uint32_t)obj_type_size((uint8_t)type, slots));
@@ -392,10 +393,16 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
         if (perr != KERR_OK) {
             return perr;
         }
-        struct thread *nt = pool_alloc(pool, CAP_THREAD, obj_type_size(CAP_THREAD, 0));
+        /* A place for each core it may hold the time of at once, one at least and one of each core at most. */
+        uint32_t places = arg[4];
+        if (places == 0 || places > CORES) {
+            return KERR_INVALID_ARG;
+        }
+        struct thread *nt = pool_alloc(pool, CAP_THREAD, obj_type_size(CAP_THREAD, places));
         if (nt == NULL) {
             return KERR_NO_MEMORY;
         }
+        thread_make_places(nt, places);
         /* It hangs below the capability it was made with, so a revoke above that stops the thread. */
         nt->proc = (struct cap){ .type = CAP_HOSTED, .rights = pc.rights, .a = pc.a };
         cap_attach(slot_node(t, arg[3]), &nt->proc);
@@ -739,21 +746,27 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
         if (off >= cap->b || count > cap->b - off) {
             return KERR_INVALID_ARG;
         }
-        /* A thread runs on one core, so the units it earns are of one. */
+        /* A place holds the time of one core, so the units it earns are of one. */
         uint32_t first = cap->a + off;
         if (count != 0 && unit_core(first) != unit_core(first + count - 1)) {
             return KERR_INVALID_ARG;
         }
-        /* A unit is earned by one thread at a time; the thread's own it leaves as it binds. */
+        /* A unit is earned by one place at a time; the thread's own on the core its place leaves as it binds. */
         struct thread *target = (struct thread *)cap_object(&tc);
         for (uint32_t i = 0; i < count; i++) {
             LOOP_BOUND(TIME_UNITS);
-            if (unit_thread[first + i] != 0 && unit_thread[first + i] != v2p(target)) {
+            paddr_t at = unit_place[first + i];
+            if (at != 0 && place_thread(p2v(at)) != target) {
                 return KERR_OVERLAP;
             }
         }
-        /* The binding hangs below the invoked capability, so a revoke above it unbinds the thread. */
-        sched_bind(target, first, count, cap->rights, slot_node(t, slot));
+        /* The place of the core, or an empty one: none is a place too few. */
+        struct place *p = sched_place_for(target, unit_core(first));
+        if (p == NULL) {
+            return KERR_LIMIT;
+        }
+        /* The binding hangs below the invoked capability, so a revoke above it empties the place. */
+        sched_bind(p, first, count, cap->rights, slot_node(t, slot));
         return KERR_OK;
     }
     default:
@@ -941,8 +954,20 @@ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *a
         arg[3] = timer_tick_counts();
         arg[4] = TIMER_US_PER_TICK;
         break;
+    case CAP_THREAD: {
+        /* How many places it has, and the cores whose time they hold, a bit each. */
+        const struct thread *th = (const struct thread *)cap_object(cap);
+        arg[2] = th->places;
+        for (uint32_t i = 0; i < th->places; i++) {
+            LOOP_BOUND(CORES);
+            if (th->time[i].type == CAP_BOUND) {
+                arg[3] |= 1u << unit_core(th->time[i].a);
+            }
+        }
+        break;
+    }
     default:
-        /* A thread, Print, Halt and Test tell nothing more. */
+        /* Print, Halt and Test tell nothing more. */
         break;
     }
     arg[1] = cap->type | (uint32_t)cap->rights << 8;

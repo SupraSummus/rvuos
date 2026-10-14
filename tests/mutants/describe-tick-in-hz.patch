@@ -6,7 +6,7 @@ Report: a description differs from the capability it describes
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -964,7 +964,7 @@ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *a
+@@ -951,7 +951,7 @@ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *a
      case CAP_CLOCK:
          /* The rate and the tick, not the time, so no RIGHT_R. */
          arg[2] = timer_counter_hz();
@@ -14,4 +14,4 @@ diff --git a/kernel/syscall.c b/kernel/syscall.c
 +        arg[3] = TIMER_HZ;
          arg[4] = TIMER_US_PER_TICK;
          break;
-     default:
+     case CAP_THREAD: {

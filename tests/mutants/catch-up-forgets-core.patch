@@ -3,16 +3,16 @@ so it charges the same ticks again as its next trap counts up to the machine's c
 a core counts the machine's ticks once each.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
-Report: thread's account is stamped ahead of the count
+Report: a place's account is stamped ahead of the count
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -766,7 +766,6 @@ static void tick_advance(uint32_t ticks)
-             payer->stamp += owed;
+@@ -829,7 +829,6 @@ static void tick_advance(uint32_t ticks)
+             paid->stamp += owed;
          }
          core->turn_from = 0;
 -        core->ticks += owed;
          /* A turn on lent time costs its thread nothing, and it earns its units as every tick earns them. */
          if (core->payer != NULL) {
-             account_refill(core->turn);
+             struct place *own = thread_place_on(core->turn, core_index());

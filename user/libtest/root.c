@@ -510,7 +510,7 @@ static void snap_round(void)
     struct snap_page *r = (struct snap_page *)snap_reader.page;
     r->lock = lock;
     must("a slot for the writer", slot_new(&self, &writer));
-    must("the writer", rv_pool_alloc(self.pool, CAP_THREAD, writer, BOOT_CAP_PROCESS));
+    must("the writer", rv_thread_alloc(self.pool, writer, BOOT_CAP_PROCESS, 1));
     must("configure the writer", rv_thread_configure(writer, (uint32_t)(uintptr_t)snap_writer,
                                                      (uint32_t)(uintptr_t)(snap_stack + sizeof(snap_stack)),
                                                      (uint32_t)(uintptr_t)r));

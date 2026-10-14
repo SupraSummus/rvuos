@@ -348,10 +348,12 @@ static void check_process(const struct process *proc)
     }
 }
 
-/* Threads that belong on a queue, and threads found on one; the two counts must agree. */
+/*
+ * Waiting threads and places that belong on a queue, and threads and places found on one; the two counts must agree.
+ */
 static uint32_t owed_threads, queued_threads;
 
-/* The units the threads the walk met are bound to. */
+/* The units the places the walk met are bound to. */
 static uint32_t units_seen;
 
 /* The threads found on their borrowers' rings of lenders, and the threads found lending; the two counts must agree. */
@@ -364,54 +366,59 @@ static bool is_turn(const struct thread *t)
 }
 
 /*
- * The count a thread's account is counted to: the count its core charged its turn to while it has one there or pays for one,
+ * The count a place's account is counted to:
+ * the count of the core whose turn its thread has or pays for while it holds that core's time,
  * which lags the machine's while that core has not trapped since another counted, and the machine's otherwise.
  */
-static uint32_t count_of(const struct thread *t)
+static uint32_t count_of(const struct place *p)
 {
-    return is_turn(t) ? cores[t->core].ticks : sched_ticks;
+    const struct thread *t = place_thread(p);
+    const struct cap *b = place_time(p);
+    return is_turn(t) && b->type == CAP_BOUND && unit_core(b->a) == t->core ? cores[t->core].ticks : sched_ticks;
 }
 
-/* A thread's account at the count, its stamp's balance and its tick's gain every tick since, held to the cap. */
-static uint32_t account_now(const struct thread *t)
+/* A place's account at the count, its stamp's balance and its tick's gain every tick since, held to the cap. */
+static uint32_t account_now(const struct place *p)
 {
-    uint64_t balance = t->balance + (uint64_t)(count_of(t) - t->stamp) * tick_gain(t);
-    uint32_t cap = account_cap(t);
+    uint64_t balance = p->balance + (uint64_t)(count_of(p) - p->stamp) * tick_gain(p);
+    uint32_t cap = account_cap(p);
     return balance > cap ? cap : (uint32_t)balance;
 }
 
 /*
- * The thread a borrower runs on the time of while it has none:
- * the one that has lent it time longest, if that one names the borrower's core.
+ * The place a borrower's place runs on the time of while it has none:
+ * that of the thread that has lent it time longest, if that one holds the time of the place's core.
  * check_lenders has vetted the ring.
  */
-static const struct thread *lender_of(const struct thread *t)
+static const struct place *lender_of(const struct place *p)
 {
-    if (t->lenders == 0) {
+    const struct thread *t = place_thread(p);
+    const struct cap *b = place_time(p);
+    if (t->lenders == 0 || b->type != CAP_BOUND) {
         return NULL;
     }
-    const struct thread *l = p2v(t->lenders);
-    return l->core == t->core ? l : NULL;
+    return thread_place_on(p2v(t->lenders), unit_core(b->a));
 }
 
 /*
- * The queue a thread belongs on: none unless it is ready, bound, and it is not its turn;
+ * The queue a place belongs on: none unless its thread is ready, the place is bound, and its thread's turn is nowhere;
  * the run queue with a tick in its account or its lender's, else the spare queue with spare time,
  * else the spent queue with units of its own or its lender's, and none without.
  */
-static uint8_t queue_owed(const struct thread *t)
+static uint8_t queue_owed(const struct place *p)
 {
-    if (t->state != THREAD_READY || is_turn(t) || t->time.type != CAP_BOUND) {
+    const struct thread *t = place_thread(p);
+    if (t->state != THREAD_READY || is_turn(t) || place_time(p)->type != CAP_BOUND) {
         return QUEUE_NONE;
     }
-    const struct thread *l = lender_of(t);
-    if (account_now(t) >= tick_parts() || (l != NULL && account_now(l) >= tick_parts())) {
+    const struct place *l = lender_of(p);
+    if (account_now(p) >= tick_parts() || (l != NULL && account_now(l) >= tick_parts())) {
         return QUEUE_RUN;
     }
-    if (thread_spare(t)) {
+    if (place_spare(p)) {
         return QUEUE_SPARE;
     }
-    return thread_units(t) != 0 || (l != NULL && thread_units(l) != 0) ? QUEUE_SPENT : QUEUE_NONE;
+    return place_units(p) != 0 || (l != NULL && place_units(l) != 0) ? QUEUE_SPENT : QUEUE_NONE;
 }
 
 /*
@@ -442,17 +449,90 @@ static void check_lenders(const struct thread *t)
     } while (at != t->lenders);
 }
 
-/* An account that gives t time once it holds a tick, its own or its lender's, reaches one no earlier than the release. */
-static void check_release(const struct thread *t, const struct thread *a, const char *what)
+/* An account that gives p time once it holds a tick, its own or its lender's, reaches one no earlier than the release. */
+static void check_release(const struct place *p, const struct place *a, const char *what)
 {
-    if (a == NULL || thread_units(a) == 0) {
+    if (a == NULL || place_units(a) == 0) {
         return;
     }
     uint32_t missing = tick_parts() - account_now(a);
     uint32_t at = sched_ticks + (missing + tick_gain(a) - 1) / tick_gain(a);
-    uint32_t release = cores[t->core].nearest_release;
+    uint32_t release = cores[p->core].nearest_release;
     if ((int32_t)(at - release) < 0) {
-        fail(what, v2p(t), at, release);
+        fail(what, v2p(p), at, release);
+    }
+}
+
+/*
+ * A place knows its thread and which of its places it is, its units are a leaf of the tree, which the tree check reads,
+ * bound through a capability with the right to bind, whose rights they carry, units of one core, which it alone earns,
+ * and its account holds at most its cap and was last counted no later than the count.
+ * It waits on the queue of its core its account says, and on none while its thread's turn is anywhere.
+ * The cores whose time it holds go into *held, which must not hold its core already.
+ */
+static void check_place(const struct thread *t, uint32_t i, uint32_t *held)
+{
+    const struct place *p = thread_place(t, i);
+    const struct cap *b = &t->time[i];
+    if (p->thread != v2p(t) || p->index != i) {
+        fail("a place does not know its thread", v2p(t), i, p->thread);
+    }
+    if (b->type != CAP_NONE &&
+        (b->type != CAP_BOUND || (b->rights & RIGHT_W) == 0 || (b->rights & ~(RIGHT_W | RIGHT_X)) != 0 ||
+         b->a >= MACHINE_UNITS || b->b > MACHINE_UNITS - b->a || b->index != i)) {
+        fail("a place's units are malformed", v2p(t), i, b->a);
+    }
+    if (b->type != CAP_NONE && b->b != 0 && unit_core(b->a) != unit_core(b->a + b->b - 1)) {
+        fail("a place's units are of two cores", v2p(t), b->a, b->b);
+    }
+    if (b->type != CAP_NONE) {
+        uint32_t core = 1u << unit_core(b->a);
+        if (*held & core) {
+            fail("two places of a thread hold the time of one core", v2p(t), i, b->a);
+        }
+        *held |= core;
+    }
+    if (b->type != CAP_NONE && b->child != 0) {
+        fail("something is derived from a place's units", v2p(t), b->child, 0);
+    }
+    for (uint32_t u = 0; b->type != CAP_NONE && u < b->b; u++) {
+        if (unit_place[b->a + u] != v2p(p)) {
+            fail("a unit a place is bound to names another", v2p(t), b->a + u, unit_place[b->a + u]);
+        }
+    }
+    units_seen += place_units(p);
+    if (p->balance > account_cap(p)) {
+        fail("a place's account holds more than its cap", v2p(t), p->balance, place_units(p));
+    }
+    if ((int32_t)(count_of(p) - p->stamp) < 0) {
+        fail("a place's account is stamped ahead of the count", v2p(t), p->stamp, count_of(p));
+    }
+    if (p->core >= CORES) {
+        fail("a place names a core there is not", v2p(t), i, p->core);
+    }
+    /* A turn on one core takes a thread off the queues of every other until it ends; see turn_take. */
+    if (is_turn(t) && p->queue != QUEUE_NONE) {
+        fail("a place of a thread whose turn it is waits on a queue", v2p(t), i, p->queue);
+    }
+    uint8_t owed = queue_owed(p);
+    if (p->queue != owed) {
+        fail(owed == QUEUE_NONE ? "a place names a queue it is not for"
+             : p->queue == QUEUE_NONE ? "a place of a ready thread that may run waits on no queue"
+                                      : "a place waits on another queue than its account says",
+             v2p(t), p->queue, owed);
+    }
+    if (owed != QUEUE_NONE && p->core != unit_core(b->a)) {
+        fail("a place waits on another core than its units are of", v2p(t), p->core, b->a);
+    }
+    if (owed != QUEUE_NONE) {
+        owed_threads++;
+    } else if (p->queue_next != 0 || p->queue_prev != 0) {
+        fail("a place on no queue is linked into one", v2p(t), i, p->queue_next);
+    }
+    /* One that waits without time has it again at the release, by its own account or its lender's, which waits on no queue. */
+    if (owed == QUEUE_SPARE || owed == QUEUE_SPENT) {
+        check_release(p, p, "a place's account reaches a tick before the release");
+        check_release(p, lender_of(p), "a lender's account reaches a tick before the release");
     }
 }
 
@@ -481,37 +561,16 @@ static void check_thread(const struct thread *t)
     if ((t->flags & THREAD_FAULTED) && t->state != THREAD_STOPPED) {
         fail("thread runs with a fault to tell", v2p(t), t->state, 0);
     }
-    /*
-     * A thread's units are a leaf of the tree, which the tree check reads the links of, and it alone earns them.
-     * They were bound through a capability with the right to bind, whose rights they carry.
-     */
-    const struct cap *b = &t->time;
-    if (b->type != CAP_NONE &&
-        (b->type != CAP_BOUND || (b->rights & RIGHT_W) == 0 || (b->rights & ~(RIGHT_W | RIGHT_X)) != 0 ||
-         b->a >= MACHINE_UNITS ||
-         b->b > MACHINE_UNITS - b->a || b->index != 0)) {
-        fail("thread's units are malformed", v2p(t), b->type, b->a);
-    }
-    /*
-     * A thread runs on one core, the one its units are of, and names it as it joins a queue there;
-     * one bound elsewhere during its turn finishes the turn where it had it, and names that core till it settles again.
-     */
-    if (b->type != CAP_NONE && b->b != 0 && unit_core(b->a) != unit_core(b->a + b->b - 1)) {
-        fail("thread's units are of two cores", v2p(t), b->a, b->b);
-    }
     if (t->core >= CORES) {
         fail("thread names a core there is not", v2p(t), t->core, 0);
     }
-    if (b->type != CAP_NONE && t->queue != QUEUE_NONE && t->core != unit_core(b->a)) {
-        fail("thread waits on another core than its units are of", v2p(t), t->core, b->a);
+    /* A place for each core it may hold the time of at once, one at least, and no two holding one core's. */
+    if (t->places == 0 || t->places > CORES) {
+        fail("thread has an impossible count of places", v2p(t), t->places, 0);
     }
-    if (b->type != CAP_NONE && b->child != 0) {
-        fail("something is derived from a thread's units", v2p(t), b->child, 0);
-    }
-    for (uint32_t i = 0; b->type != CAP_NONE && i < b->b; i++) {
-        if (unit_thread[b->a + i] != v2p(t)) {
-            fail("a unit a thread is bound to names another", v2p(t), b->a + i, unit_thread[b->a + i]);
-        }
+    uint32_t held = 0;
+    for (uint32_t i = 0; i < t->places; i++) {
+        check_place(t, i, &held);
     }
     /*
      * The sweep clears a thread's watch with its notification, in whatever pool; the tree check reads the node's links.
@@ -528,27 +587,7 @@ static void check_thread(const struct thread *t)
             fail("something is derived from a thread's watch", v2p(t), w->child, 0);
         }
     }
-    units_seen += thread_units(t);
     check_lenders(t);
-    /* Every account holds at most its cap, and so nothing without units, and was last counted no later than the count. */
-    if (t->balance > account_cap(t)) {
-        fail("thread's account holds more than its cap", v2p(t), t->balance, thread_units(t));
-    }
-    if ((int32_t)(count_of(t) - t->stamp) < 0) {
-        fail("thread's account is stamped ahead of the count", v2p(t), t->stamp, count_of(t));
-    }
-    uint8_t owed = queue_owed(t);
-    if (t->queue != owed) {
-        fail(owed == QUEUE_NONE ? "a thread names a queue it is not for"
-             : t->queue == QUEUE_NONE ? "a ready thread that may run waits on no queue"
-                                      : "a thread waits on another queue than its account says",
-             v2p(t), t->queue, owed);
-    }
-    /* One that waits without time has it again at the release, by its own account or its lender's, which waits on no queue. */
-    if (owed == QUEUE_SPARE || owed == QUEUE_SPENT) {
-        check_release(t, t, "a thread's account reaches a tick before the release");
-        check_release(t, lender_of(t), "a lender's account reaches a tick before the release");
-    }
     /*
      * A thread lends only while it waits, to another live thread, on whose ring it lies,
      * since every thread on a ring names the ring's thread and the rings hold as many as lend.
@@ -571,10 +610,8 @@ static void check_thread(const struct thread *t)
         if (t->waiting_on != 0) {
             fail("runnable thread waits on something", v2p(t), t->waiting_on, t->state);
         }
-        if (owed != QUEUE_NONE) {
-            owed_threads++;
-        } else if (t->queue_next != 0 || t->queue_prev != 0) {
-            fail("thread on no queue is linked into one", v2p(t), t->queue_next, t->state);
+        if (t->queue_next != 0 || t->queue_prev != 0) {
+            fail("thread that waits on nothing is linked into a notification's waiters", v2p(t), t->queue_next, t->state);
         }
         break;
     case THREAD_WAITING: {
@@ -592,14 +629,14 @@ static void check_thread(const struct thread *t)
 }
 
 /*
- * A queue is a ring of live threads, each linked back to the one before,
- * none of them running, and each in the state and waiting on what the queue is for:
- * a notification's waiters, or one of the scheduler's queues, which the thread names with its core.
+ * A notification's waiters are a ring of live threads, each linked back to the one before, each waiting on it,
+ * none of them a core's turn, though one may pay for a turn it lent its time to.
  * The back links make the walk close at the oldest or fail:
  * no thread can be entered twice from two different predecessors.
  */
-static void check_queue(paddr_t head, uint8_t state, paddr_t waiting_on, uint8_t queue, uint32_t core)
+static void check_waiters(const struct notification *ntfn)
 {
+    paddr_t head = ntfn->waiters;
     if (head == 0) {
         return;
     }
@@ -610,13 +647,8 @@ static void check_queue(paddr_t head, uint8_t state, paddr_t waiting_on, uint8_t
             fail("queue holds something that is not a thread", head, at, 0);
         }
         const struct thread *t = (const struct thread *)o;
-        /* A waiter may pay for a turn it lent its time to, while a thread on the scheduler's queues has none. */
-        bool turn = queue != QUEUE_NONE ? is_turn(t) : t->core < CORES && cores[t->core].turn == t;
-        if (t->state != state || t->waiting_on != waiting_on || turn || t->queue != queue) {
+        if (t->state != THREAD_WAITING || t->waiting_on != v2p(ntfn) || (t->core < CORES && cores[t->core].turn == t)) {
             fail("queue holds a thread it is not for", head, at, t->state);
-        }
-        if (queue != QUEUE_NONE && t->core != core) {
-            fail("a core's queue holds a thread of another core", head, at, t->core);
         }
         struct obj_header *next = object_find(t->queue_next);
         if (next == NULL || next->type != CAP_THREAD ||
@@ -625,6 +657,54 @@ static void check_queue(paddr_t head, uint8_t state, paddr_t waiting_on, uint8_t
         }
         queued_threads++;
         at = t->queue_next;
+    } while (at != head);
+}
+
+/* The place at an address, if it is one of a live thread's, else NULL; a walk, as object_find is. */
+static const struct place *place_at(paddr_t at)
+{
+    for (struct obj_header *t = object_first(); t != NULL; t = object_next(t)) {
+        if (t->type != CAP_THREAD) {
+            continue;
+        }
+        const struct thread *th = (const struct thread *)t;
+        for (uint32_t i = 0; i < th->places; i++) {
+            if (v2p(thread_place(th, i)) == at) {
+                return thread_place(th, i);
+            }
+        }
+    }
+    return NULL;
+}
+
+/*
+ * A core's queue is a ring of places of live threads, each linked back to the one before,
+ * each owed that queue of that core, and so none of its thread's turn.
+ * The back links make the walk close at the oldest or fail.
+ */
+static void check_queue(paddr_t head, uint8_t queue, uint32_t core)
+{
+    if (head == 0) {
+        return;
+    }
+    paddr_t at = head;
+    do {
+        const struct place *p = place_at(at);
+        if (p == NULL) {
+            fail("a core's queue holds something that is not a place of a live thread", head, at, 0);
+        }
+        if (p->queue != queue || queue_owed(p) != queue) {
+            fail("queue holds a place it is not for", head, at, p->queue);
+        }
+        if (p->core != core) {
+            fail("a core's queue holds a place of another core", head, at, p->core);
+        }
+        const struct place *next = place_at(p->queue_next);
+        if (next == NULL || next->queue_prev != at) {
+            fail("queue is not linked back", head, at, p->queue_next);
+        }
+        queued_threads++;
+        at = p->queue_next;
     } while (at != head);
 }
 
@@ -669,10 +749,12 @@ static void check_core(uint32_t i)
     if ((int32_t)(sched_ticks - c->ticks) < 0 || (c == core_self() && c->ticks != sched_ticks)) {
         fail("a core counted other ticks than the machine", i, c->ticks, sched_ticks);
     }
-    if (c->turn != NULL && c->turn->stamp != c->ticks) {
-        fail("the ticks of a turn were not charged to its thread", v2p(c->turn), c->turn->stamp, c->ticks);
+    /* The turn's place on the core, while it has one, which a bind or a revoke during the turn may empty. */
+    const struct place *own = c->turn != NULL ? thread_place_on(c->turn, i) : NULL;
+    if (own != NULL && own->stamp != c->ticks) {
+        fail("the ticks of a turn were not charged to its thread", v2p(c->turn), own->stamp, c->ticks);
     }
-    /* A turn on lent time is paid by another live thread of the core, which is charged as the turn's thread would be. */
+    /* A turn on lent time is paid by another live thread named to the core, whose place there is charged as the turn's would be. */
     const struct thread *payer = c->payer;
     if (payer != NULL) {
         struct obj_header *o = object_find(v2p(payer));
@@ -682,8 +764,9 @@ static void check_core(uint32_t i)
         if (c->turn == NULL || payer == c->turn || payer->core != i) {
             fail("a turn's payer is not another thread of its core", i, v2p(payer), payer->core);
         }
-        if (payer->stamp != c->ticks) {
-            fail("the ticks of a turn were not charged to its payer", v2p(payer), payer->stamp, c->ticks);
+        const struct place *paid = thread_place_on(payer, i);
+        if (paid != NULL && paid->stamp != c->ticks) {
+            fail("the ticks of a turn were not charged to its payer", v2p(payer), paid->stamp, c->ticks);
         }
         /*
          * It pays from the wait in which it lent the turn's thread its time, the first of the thread's lenders,
@@ -734,9 +817,9 @@ static void check_core(uint32_t i)
     if (c->in_user && c->pmp_stale) {
         fail("a core runs user mode with regions its process no longer has", i, v2p(current), 0);
     }
-    check_queue(c->run_queue, THREAD_READY, 0, QUEUE_RUN, i);
-    check_queue(c->spare_queue, THREAD_READY, 0, QUEUE_SPARE, i);
-    check_queue(c->spent_queue, THREAD_READY, 0, QUEUE_SPENT, i);
+    check_queue(c->run_queue, QUEUE_RUN, i);
+    check_queue(c->spare_queue, QUEUE_SPARE, i);
+    check_queue(c->spent_queue, QUEUE_SPENT, i);
 }
 
 /*
@@ -782,17 +865,16 @@ static void check_scheduler(void)
     }
     uint32_t named = 0;
     for (uint32_t i = 0; i < MACHINE_UNITS; i++) {
-        if (unit_thread[i] == 0) {
+        if (unit_place[i] == 0) {
             continue;
         }
-        struct obj_header *o = object_find(unit_thread[i]);
-        if (o == NULL || o->type != CAP_THREAD) {
-            fail("a unit names something that is not a live thread", i, unit_thread[i], 0);
+        if (place_at(unit_place[i]) == NULL) {
+            fail("a unit names something that is not a place of a live thread", i, unit_place[i], 0);
         }
         named++;
     }
     if (named != units_seen) {
-        fail("a unit names a thread that does not earn it", named, units_seen, 0);
+        fail("a unit names a place that does not earn it", named, units_seen, 0);
     }
 }
 
@@ -831,15 +913,16 @@ static void check_wake(void)
         fail("the timer lets a tick pass while the turn runs on lent time", wake, v2p(core->turn), v2p(core->payer));
     }
     const struct thread *t = core->turn;
-    uint32_t balance = account_now(t);
+    /* A thread whose place here was emptied during its turn ends the turn at the next tick. */
+    const struct place *p = thread_place_on(t, core_index());
+    if (p == NULL) {
+        fail("the timer lets the tick pass that ends a turn without the core's time", wake, v2p(t), 0);
+    }
+    uint32_t balance = account_now(p);
     bool time = balance >= tick_parts();
-    bool alone = thread_spare(t) && core->spare_queue == 0;
+    bool alone = place_spare(p) && core->spare_queue == 0;
     if (core->run_queue != 0 || (!time && !alone)) {
         fail("the timer lets a tick pass that ends the turn", wake, v2p(t), balance);
-    }
-    /* A thread bound to another core's units during its turn here goes there at the next tick. */
-    if (t->time.type == CAP_BOUND && unit_core(t->time.a) != core_index()) {
-        fail("the timer lets the tick pass that moves the turn's thread to its core", wake, v2p(t), t->time.a);
     }
     /*
      * On the tick before the timer's the account still has a tick in it, unless it may go on alone on spare time:
@@ -847,10 +930,10 @@ static void check_wake(void)
      * and every tick after costs it a tick less the gain.
      */
     if (time && !alone) {
-        uint32_t next = balance - COUNT_PARTS * (timer_tick_counts() - core->turn_from) + tick_gain(t);
-        next = next < account_cap(t) ? next : account_cap(t);
-        if (next < tick_parts() || (uint64_t)(wake - 2) * (tick_parts() - tick_gain(t)) > next - tick_parts()) {
-            fail("the timer lets the tick pass that drains the turn's account", wake, balance, thread_units(t));
+        uint32_t next = balance - COUNT_PARTS * (timer_tick_counts() - core->turn_from) + tick_gain(p);
+        next = next < account_cap(p) ? next : account_cap(p);
+        if (next < tick_parts() || (uint64_t)(wake - 2) * (tick_parts() - tick_gain(p)) > next - tick_parts()) {
+            fail("the timer lets the tick pass that drains the turn's account", wake, balance, place_units(p));
         }
     }
     if (wake > core->nearest_release - sched_ticks) {
@@ -1423,7 +1506,7 @@ void selfcheck_run(void)
             check_captable((struct captable *)o);
             break;
         case CAP_NOTIFICATION:
-            check_queue(((struct notification *)o)->waiters, THREAD_WAITING, v2p(o), QUEUE_NONE, CORES);
+            check_waiters((struct notification *)o);
             break;
         case CAP_IRQ:
             check_irq((struct irq *)o);

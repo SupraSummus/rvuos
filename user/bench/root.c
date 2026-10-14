@@ -253,7 +253,7 @@ int main(void)
     must("a notification", rv_pool_alloc(pool.made, CAP_NOTIFICATION, ping_note, 0));
     must("a notification", rv_pool_alloc(pool.made, CAP_NOTIFICATION, pong_note, 0));
     must("a slot", slot_new(&self, &thread));
-    must("a thread", rv_pool_alloc(pool.made, CAP_THREAD, thread, BOOT_CAP_PROCESS));
+    must("a thread", rv_thread_alloc(pool.made, thread, BOOT_CAP_PROCESS, 1));
     must("configure the thread", rv_thread_configure(thread, (uint32_t)(uintptr_t)pong_thread,
                                                      (uint32_t)(uintptr_t)(pong_stack + sizeof(pong_stack)), 0));
     must("units", units_take(&self, UNITS, &first));
@@ -277,7 +277,7 @@ int main(void)
     measure("lock", round_lock);
     uint32_t holder;
     must("a slot", slot_new(&self, &holder));
-    must("a thread", rv_pool_alloc(pool.made, CAP_THREAD, holder, BOOT_CAP_PROCESS));
+    must("a thread", rv_thread_alloc(pool.made, holder, BOOT_CAP_PROCESS, 1));
     must("configure the thread", rv_thread_configure(holder, (uint32_t)(uintptr_t)holder_thread,
                                                      (uint32_t)(uintptr_t)(holder_stack + sizeof(holder_stack)), 0));
     must("units", units_take(&self, UNITS, &first));

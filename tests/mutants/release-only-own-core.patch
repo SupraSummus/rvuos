@@ -3,7 +3,6 @@ so a thread of another that waits for its account sits on the spent queue past t
 until its own core happens to count a tick; the release of every core lies ahead of the count.
 
 Caught-by: fuzz-smp2
-Report: a thread waits on another queue than its account says
 Report: the release is for a tick already past
 
 diff --git a/kernel/sched.c b/kernel/sched.c

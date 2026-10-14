@@ -111,7 +111,7 @@ until the maintainer decides otherwise.
    and its `mtval` reads zero; see "Boards".
 
 9. **Scheduling policy beyond units.**
-   Decided in part: units of time earned by one thread each, an account per thread they fill,
+   Decided in part: units of time earned by one thread's place each, an account per place they fill,
    and spare time only by `RIGHT_X`; see "Scheduling" and open decision 18.
    Working default for the rest: no priorities;
    units promise a thread their part of the processor, give or take the accounts,
@@ -397,14 +397,23 @@ until the maintainer decides otherwise.
     - **A controller of each core's own**, as ARM's NVIC and RP2350's Hazard3's are: the first core's alone enables a device line,
       and a call on another that arms or disarms one leaves the change for the first to make as it next takes the lock,
       interrupting it for that; the line the cores interrupt each other on is the kernel's, and no `Irq` binds it.
+    - **A thread on several cores.**
+      A thread is made with places, from one to `CORES`, decision 35, each holding the time of one core; see "Cores".
+      A bind fills the place for its units' core, or an empty one, `KERR_LIMIT` with none:
+      the program names the core, by its units, and never a place.
+      A place empties only as a revoke above its units takes them;
+      a bind of none without `RIGHT_X` keeps it, bound to nothing, so that its thread runs there on lent time alone, decision 27.
+      A ready thread waits on the queues of every core it holds time of, and a turn on one takes it off the others'.
+      Units of a core promise their part of it to a thread that holds time of several only while it runs on none of the others.
+      Weighed and left: a queue of spare time for the whole machine, any idle core taking a thread on spare time,
+      which is a policy in the kernel placing threads; here which cores a thread may run on is authority, held as units are.
 
     Open:
     - **Device lines.** The controller forwards every line to the first core,
       so a driver on another costs an interrupt between the cores for each of its interrupts.
-      A line could go to the core its `Irq`'s waiter runs on, which the bind or the arm would choose.
-    - **Spare time across cores.** A thread on spare time runs on its own core alone, however idle another is;
-      a queue of spare time for the whole machine would let any idle core take it, at the price of a thread moving with every turn.
-    Decide each with the first board or workload that needs it.
+      A line could go to the core its `Irq`'s waiter runs on, which the bind or the arm would choose;
+      a thread that holds time of several cores has no one core, so the arm's would be the one to take.
+    Decide it with the first board or workload that needs it.
 25. **Devices for drivers.**
     Decided: the boot grants a `Frame` over each device the board lists, from `BOOT_CAP_DEVICES` up,
     which the root task carves and lends as it does RAM; see "Boards".
@@ -447,6 +456,9 @@ until the maintainer decides otherwise.
     Open: lending across cores, by running the borrower on its lender's core;
     borrowing from more than one lender at once, or through a borrower that waits or lends in turn, walks that goal 4 rules out;
     whether a server should run on the time of the client it serves rather than of its oldest lender, decision 5;
+    whether time is a thing of its own, an account a thread's place on a core holds rather than one the place is, decision 35,
+    which a lender could hand over whole, as seL4 donates its scheduling contexts,
+    and with it whether a thread may hold two times of one core, its own and one lent, decision 24;
     and a lock fair to takers that lend nothing,
     which userspace can build with a bit that asks the giver to hand the lock on, as Linux's mutex has.
     Decide with the first workload that shares a lock between threads of unequal time, or a server between clients that pay unequally.
@@ -583,6 +595,10 @@ until the maintainer decides otherwise.
       `OP_THREAD_STOP` returns the state it found, `THREAD_WAS_*`, which commits the ABI to the three states;
       a supervisor needs it to know whether it may answer a wait, and the host build to know a thread stands at its call again,
       which it could tell from the pc instead, decision 32.
+    - **What a process is made with.**
+      `OP_POOL_ALLOC` of a `Process` would take its region slots, decision 35, where it takes none now.
+      A `Thread`'s took its places, in `a4`, and a bind fills a thread's place for a core rather than move the thread,
+      decision 24, each a change that broke what a program built before did.
     - **A version.**
       The root task's thread starts with `a0` zero, which could carry the ABI's version.
     Each is decided on its own merits, and made when it is.
@@ -662,3 +678,26 @@ until the maintainer decides otherwise.
     The kernel would have read and written user memory, which it does nowhere,
     held its lock on several cores for as long as a copy takes, which goal 4 would have had to bound,
     and needed the host build and the fuzzer to model the memory it copied.
+35. **A count of the hardware's is a limit, not a size.**
+    Decided: what an object holds once for each of a thing the hardware has several of
+    is sized by the object's creator, as a `CapTable`'s slots are,
+    and the hardware's count bounds what the creator may ask.
+    Built for a thread's places, not yet for a process's region slots; `TODO.md`.
+    A `Process` is made with the region slots it is to have, from one to what the board's protection unit allows,
+    and a `Thread` with the cores it may hold time of at once, from one to `CORES`, decision 24;
+    `OP_POOL_ALLOC` answers `KERR_INVALID_ARG` past either, and for none.
+    So an object takes what its creator asked for, which goal 3 reads as paying for what one makes,
+    a program reckons what its objects take from what it needs of them, the same on every board of its architecture,
+    and a board short of what it needs refuses it plainly.
+    Today a process has `PROCESS_REGION_SLOTS` slots and an image of `PMP_MAX_ENTRIES` entries whatever it installs,
+    so what it takes is the board's and the build's.
+    Weighed and left:
+    - **Sizes by the board's count**, today's: `OP_POOL_INFO` tells them, but only as the program runs,
+      and every object pays for what the board has rather than for what it uses.
+    - **An object for each binding**, an installed region or a thread's time on a core an object of its own:
+      sizes the same on every board, paid for as used,
+      but every binding then has two ends that may each go, a header and links of its own, and a pointer more on a switch.
+      A thing that is handed over whole is an object, and a place something is put in is a slot:
+      a region slot is a place, and so is a thread's place on a core,
+      while the time in that place may yet become a thing of its own, decision 27.
+    What a board keeps of a process besides, the ESP32-C6's CSRs, `BOARD_PROCESS_CSRS`, is still the board's.

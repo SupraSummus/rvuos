@@ -25,7 +25,7 @@
 
 /*
  * Every core's units, TIME_UNITS of each, numbered core by core:
- * unit u is a part of core u / TIME_UNITS, and a thread runs on the core its units lie on.
+ * unit u is a part of core u / TIME_UNITS, and a thread's place holds the time of the core its units lie on.
  */
 #define MACHINE_UNITS (CORES * TIME_UNITS)
 
@@ -35,22 +35,43 @@ static inline uint32_t unit_core(uint32_t unit)
 }
 
 /*
- * The thread that earns each unit of time, 0 for none.
- * The units are a fixed few, as the timer lines are, so the kernel finds every thread with units
+ * The place of a thread that earns each unit of time, 0 for none.
+ * The units are a fixed few, as the timer lines are, so the kernel finds every place with units
  * by looking at each of them and at nothing else; see DESIGN.md, "Scheduling".
  */
-extern paddr_t unit_thread[MACHINE_UNITS];
+extern paddr_t unit_place[MACHINE_UNITS];
 
-/* The units a thread earns, none while it is bound to none. */
-static inline uint32_t thread_units(const struct thread *t)
+/* The units a place earns, none while it is empty or holds none. */
+static inline uint32_t place_units(const struct place *p)
 {
-    return t->time.type == CAP_BOUND ? t->time.b : 0;
+    const struct cap *b = place_time(p);
+    return b->type == CAP_BOUND ? b->b : 0;
 }
 
-/* Whether a thread may run on spare time: bound through a Time capability with RIGHT_X. */
-static inline bool thread_spare(const struct thread *t)
+/* Whether a place may run its thread on spare time: bound through a Time capability with RIGHT_X. */
+static inline bool place_spare(const struct place *p)
 {
-    return t->time.type == CAP_BOUND && (t->time.rights & RIGHT_X) != 0;
+    const struct cap *b = place_time(p);
+    return b->type == CAP_BOUND && (b->rights & RIGHT_X) != 0;
+}
+
+/*
+ * The place of a thread that holds the time of a core, NULL for none: a look at each of its places,
+ * which are CORES at most and hold one core's time each, so it is the only one.
+ */
+static inline struct place *thread_place_on(const struct thread *t, uint32_t core)
+{
+    if (CORES == 1) {
+        return t->time[0].type == CAP_BOUND ? thread_place(t, 0) : NULL;
+    }
+    for (uint32_t i = 0; i < t->places; i++) {
+        LOOP_BOUND(CORES);
+        const struct cap *b = &t->time[i];
+        if (b->type == CAP_BOUND && unit_core(b->a) == core) {
+            return thread_place(t, i);
+        }
+    }
+    return NULL;
 }
 
 /* A tick in parts: what a tick of a turn with time costs, and what an account holds while its thread has time. */
@@ -59,29 +80,29 @@ static inline uint32_t tick_parts(void)
     return COUNT_PARTS * timer_tick_counts();
 }
 
-/* The parts a thread's account gains every tick, a tick's counts for each unit it earns. */
-static inline uint32_t tick_gain(const struct thread *t)
+/* The parts a place's account gains every tick, a tick's counts for each unit it earns. */
+static inline uint32_t tick_gain(const struct place *p)
 {
-    return thread_units(t) * timer_tick_counts();
+    return place_units(p) * timer_tick_counts();
 }
 
-/* The most a thread's account holds: a tenth of a second's worth of its units, none without. */
-static inline uint32_t account_cap(const struct thread *t)
+/* The most a place's account holds: a tenth of a second's worth of its units, none without. */
+static inline uint32_t account_cap(const struct place *p)
 {
     _Static_assert((uint64_t)TIME_UNITS * (ACCOUNT_TICKS + 1) * TICK_COUNTS_MAX <= UINT32_MAX,
                    "the cap and a tick's gain besides fit a word");
-    return tick_gain(t) * ACCOUNT_TICKS;
+    return tick_gain(p) * ACCOUNT_TICKS;
 }
 
 /*
- * The ready threads but the one whose turn it is wait on three queues,
- * each a ring through queue_next and queue_prev, oldest first, 0 when empty:
- * the run queue those with a tick in their account,
+ * The ready threads whose turn it is nowhere wait on three queues of each core they hold the time of, by their place there,
+ * each a ring of places through queue_next and queue_prev, oldest first, 0 when empty:
+ * the run queue those with a tick in their place's account,
  * the spare queue those without that may run on spare time,
  * and the spent queue those with units, and no spare time, that wait for their account to reach a tick.
  * The oldest on the run queue has the next turn, or when it is empty the oldest on the spare queue,
- * and a thread that becomes ready joins behind the newest of its queue.
- * A thread keeps the index of the one it waits on, QUEUE_NONE for none.
+ * and a thread that becomes ready joins behind the newest of its queue on each of its cores.
+ * A place keeps the index of the one it waits on, QUEUE_NONE for none, and the core.
  */
 enum { QUEUE_NONE, QUEUE_RUN, QUEUE_SPARE, QUEUE_SPENT, QUEUES };
 
@@ -116,7 +137,7 @@ struct core {
 
     /*
      * The thread whose account pays for the turn while the turn's thread runs on lent time, NULL while it pays itself:
-     * a thread of this core that lends the turn's thread its time while it waits; see OP_NOTIFY_LEND.
+     * a thread with a place on this core that lends the turn's thread its time while it waits; see OP_NOTIFY_LEND.
      * It is charged as the turn's thread would be, and counted to the core's count while it pays,
      * and it pays until the turn ends, or takes the turn over as the turn's thread wakes it.
      */
@@ -136,7 +157,7 @@ struct core {
      */
     uint32_t turn_from;
 
-    /* The heads of the three queues; see QUEUE_RUN. */
+    /* The heads of the three queues, each the oldest place on it; see QUEUE_RUN. */
     paddr_t run_queue;
     paddr_t spare_queue;
     paddr_t spent_queue;
@@ -323,16 +344,23 @@ void irq_drop(struct cap *signalled);
 void sched_ready(struct thread *t);
 
 /*
- * Bind a thread to count units from first, with rights, as a node below parent;
- * it leaves the units it earned, and keeps what its account held, up to what the new units hold at most.
- * No other thread earns any of the units; the caller has made sure.
- * A ready thread that is not running joins the back of the queue its account puts it on.
+ * The place of a thread a bind of the time of a core fills: the one that holds it already,
+ * else an empty one, else NULL, when the thread holds the time of as many cores as it has places.
  */
-void sched_bind(struct thread *t, uint32_t first, uint32_t count, uint8_t rights, struct cap *parent);
+struct place *sched_place_for(const struct thread *t, uint32_t core);
 
 /*
- * Clear a thread's units the tree has already let go of:
- * nobody earns them any more, its account is emptied, and a ready thread that is not running leaves its queue.
+ * Bind a thread's place, sched_place_for's, to count units from first, with rights, as a node below parent;
+ * it leaves the units it earned, and keeps what its account held, up to what the new units hold at most.
+ * A place bound to none without spare time holds the core's time all the same: its thread runs there on lent time alone.
+ * No other thread earns any of the units; the caller has made sure.
+ * A ready thread whose turn it is nowhere joins the back of the queue its account puts it on, on each of its cores.
+ */
+void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights, struct cap *parent);
+
+/*
+ * Clear a place's units the tree has already let go of:
+ * nobody earns them any more, its account is emptied, and the place leaves the queue it waited on.
  */
 void sched_unbind(struct cap *bound);
 
@@ -462,14 +490,19 @@ void sched_count(uint32_t ticks);
 uint32_t sched_wake(void);
 
 /*
- * Whether a core's turn runs on spare time: nobody pays for it, its thread having less than a tick and no lender paying,
+ * Whether a core's turn runs on spare time: nobody pays for it, its thread having less than a tick in its place there,
+ * or no place there at all, and no lender paying,
  * as was decided when the turn began or at the last tick, or since, by a bind or an unbind that emptied the account
  * or the destroy of its payer.
  * Inline, since core_notify asks it on the stack's deepest path; see DESIGN.md, "Bounded stack".
  */
 static inline bool sched_spare_turn(const struct core *c)
 {
-    return c->turn != NULL && c->payer == NULL && c->turn->balance < tick_parts();
+    if (c->turn == NULL || c->payer != NULL) {
+        return false;
+    }
+    const struct place *p = thread_place_on(c->turn, (uint32_t)(c - cores));
+    return p == NULL || p->balance < tick_parts();
 }
 
 /*

@@ -3,17 +3,17 @@ A thread unbound while it waited would still take turns;
 a thread names a queue only while its account and binding put it on one.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
-Report: a thread names a queue it is not for
+Report: a place names a queue it is not for
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -324,7 +324,7 @@ static void thread_settle(struct thread *t)
-     const struct thread *l = has_time(t->balance) ? NULL : thread_lender(t);
-     uint8_t queue = thread_queue(t, t->balance, l);
-     bool joined = queue != QUEUE_NONE && (queue != t->queue || core != was);
--    if (queue != t->queue || core != was) {
-+    if (queue != QUEUE_NONE && (queue != t->queue || core != was)) {
-         if (t->queue != QUEUE_NONE) {
-             ring_remove(queue_head(was, t->queue), t);
+@@ -336,7 +336,7 @@ static void place_settle(struct place *p)
+     const struct place *l = has_time(p->balance) ? NULL : place_lender(p);
+     uint8_t queue = place_queue(p, p->balance, l);
+     bool joined = queue != QUEUE_NONE && (queue != p->queue || core != was);
+-    if (queue != p->queue || core != was) {
++    if (queue != QUEUE_NONE && (queue != p->queue || core != was)) {
+         if (p->queue != QUEUE_NONE) {
+             place_unqueue(p);
          }

@@ -427,7 +427,7 @@ struct thread *host_boot(void)
     memset(host_ipi, 0, sizeof(host_ipi));
     memset(host_deferred, 0, sizeof(host_deferred));
 #endif
-    memset(unit_thread, 0, sizeof(unit_thread));
+    memset(unit_place, 0, sizeof(unit_place));
     armed_sources = 0;
     sched_ticks = 0;
     watchdog = (struct watchdog){ 0 };
@@ -457,7 +457,8 @@ struct thread *host_boot(void)
      * from the records both builds share; see rvuos/replay.h.
      */
     for (unsigned i = 0; i < REPLAY_PROLOGUE_COUNT; i++) {
-        int err = (int)host_syscall(&replay_prologue[i]);
+        struct replay_record r = replay_places(&replay_prologue[i], CORES);
+        int err = (int)host_syscall(&r);
         if (err != KERR_OK) {
             fprintf(stderr, "invariant violated: a fresh kernel refused prologue record %u with %d\n", i, err);
             host_violated();

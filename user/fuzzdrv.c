@@ -122,8 +122,11 @@ void replay_loop(uint32_t me)
 
 int main(void)
 {
+    /* The machine's cores, whose units BOOT_CAP_TIME holds, TIME_UNITS of each. */
+    uint32_t time[3];
+    uint32_t cores = rv_cap_info_of(BOOT_CAP_TIME, CAP_TIME, time) == KERR_OK ? time[1] / TIME_UNITS : 1;
     for (unsigned i = 0; i < REPLAY_PROLOGUE_COUNT; i++) {
-        struct replay_record r = replay_prologue[i];
+        struct replay_record r = replay_places(&replay_prologue[i], cores);
         if (r.op == OP_THREAD_CONFIGURE) {
             r.a1 = (uint32_t)&replay_loop;
         }

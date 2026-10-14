@@ -214,7 +214,7 @@ static uint32_t start_thread(struct self *s, struct thread *t, void (*f)(void *)
     uint32_t watch = osi.watcher ? osi.watcher->note : osi.d->own.watch;
     uint32_t bits = osi.watcher ? BIT_FAULT << (t - osi.threads) : NOTIFY_ALL_BITS;
     if ((status = slot_new(s, &t->cap)) != KERR_OK ||
-        (status = rv_pool_alloc(s->pool, CAP_THREAD, t->cap, s->process)) != KERR_OK ||
+        (status = rv_thread_alloc(s->pool, t->cap, s->process, 1)) != KERR_OK ||
         (status = rv_thread_watch(t->cap, watch, bits)) != KERR_OK ||
         (status = rv_thread_configure(t->cap, (uint32_t)(uintptr_t)start, t->stack_hi, (uint32_t)(uintptr_t)t)) !=
             KERR_OK ||

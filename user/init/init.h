@@ -144,7 +144,9 @@ _Static_assert(ROOT_UNITS + LOGGER_UNITS == HALF_UNITS, "the child's half follow
 
 /* Threads the root task adds on the child's half once the child is done, each counting as it spins. */
 #define SPINNERS 3u
-_Static_assert(SLOT_SPINNER + SPINNERS <= ROOT_TABLE_SLOTS, "the root task's slots fit its table");
+/* A thread with a place on each core, past the spinners. */
+#define SLOT_ROAMER (SLOT_SPINNER + SPINNERS)
+_Static_assert(SLOT_ROAMER + 1 <= ROOT_TABLE_SLOTS, "the root task's slots fit its table");
 #define SPINNER_STACK 0x100u
 #define SPIN_US 20000u
 #define CAPPED_US 80000u

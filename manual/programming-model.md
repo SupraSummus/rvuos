@@ -142,7 +142,7 @@ Programs are encouraged to keep the same convention.
 | `KernelPool` | `CAP_POOL` | the pool's descriptor, at its base | `OP_UNTYPED_RETYPE` |
 | `CapTable` | `CAP_CAPTABLE` | a table of `n` slots | `OP_POOL_ALLOC` |
 | `Process` | `CAP_PROCESS` | capabilities to its tables, region slots, a PMP image | `OP_POOL_ALLOC` |
-| `Thread` | `CAP_THREAD` | a register frame and a state | `OP_POOL_ALLOC` |
+| `Thread` | `CAP_THREAD` | a register frame, a state and its places | `OP_POOL_ALLOC` |
 | `Notification` | `CAP_NOTIFICATION` | one word of sticky bits | `OP_POOL_ALLOC` |
 | `IrqLine` | `CAP_IRQ_LINE` | none: the slot holds the first line and a count | boot, `OP_IRQ_CARVE` |
 | `Irq` | `CAP_IRQ` | one line bound to a notification, with a deadline on a timer line | `OP_IRQ_BIND` |
@@ -247,12 +247,12 @@ Today's sizes, as the kernel rounds them:
 | pool descriptor | 56 |
 | `CapTable` with `n` slots | 12 + 24 × n, rounded up to 8 |
 | `Process` | 336 (296 with `PMP_MAX_ENTRIES=8`), 344 on the ESP32-C6 |
-| `Thread` | 264 on RISC-V, 208 on ARM |
+| `Thread` with `k` places | 232 + 48 × k on RISC-V, 176 + 48 × k on ARM |
 | `Notification` | 16 |
 | `Irq` | 48 |
 
-A minimal child process, table of 10 slots, process, thread and two notifications,
-costs 944 bytes including the descriptor on RISC-V, 8 more on the ESP32-C6, and 888 on ARM.
+A minimal child process, table of 10 slots, process, thread of one place and two notifications,
+costs 960 bytes including the descriptor on RISC-V, 8 more on the ESP32-C6, and 904 on ARM.
 
 **Objects in different pools.**
 A process's tables, a thread's process and an `Irq`'s notification may each lie in any pool,
@@ -669,15 +669,23 @@ and moves `taken` only as far as its host says it has the bytes, so a halt write
 - Each core is divided into `TIME_UNITS` units of time, 64, each a sixty-fourth of it.
   The units of every core are numbered one core after the other:
   the first core's are 0 to 63, the second's 64 to 127, and so on.
-  The root task receives them all in `BOOT_CAP_TIME`, its own thread earning every one of the first core's,
+  The root task receives them all in `BOOT_CAP_TIME`, its own thread earning every one of the first core's in its first place,
   and hands them out with `OP_TIME_CARVE` and `OP_CAP_DERIVE` as it hands out memory.
   `OP_CAP_INFO` on `BOOT_CAP_TIME` tells its count, `TIME_UNITS` for each core,
   so a program learns how many cores there are from it.
-- A thread runs on the core its units are of, and on no other.
-  A bind's units must all be of one core; a bind to none puts the thread on spare time on the core of the first unit named.
-  A thread bound to another core's units while it runs finishes its turn where it runs and moves at the next tick.
-- `OP_TIME_BIND` binds a thread to some of a capability's units, or to none of them,
-  and the thread **earns** them.
+- A thread has **places**, as many as its creator asked for with `OP_POOL_ALLOC`, from one to the machine's cores,
+  each empty or holding the time of one core, never two of them one core's.
+  A thread runs on the cores its places hold the time of, and on no other.
+  A bind's units must all be of one core; a bind to none gives the thread spare time on the core of the first unit named.
+  A bind fills the place that holds that core's time, or an empty one, and fails with `KERR_LIMIT` with none;
+  a thread with one place moves to another core only once its place is emptied, by a revoke above its units;
+  a place bound to none without `RIGHT_X` holds its core's time all the same, and runs there on lent time alone.
+  A ready thread waits on the queues of every core it holds the time of, and the first core to take it runs it;
+  while it runs on one, the others do not see it, and it joins their queues again as its turn ends.
+  A thread whose place on a core is emptied while it runs there finishes its turn and leaves that core at the next tick.
+  `OP_CAP_INFO` on a thread tells its places and the cores they hold the time of.
+- `OP_TIME_BIND` binds a thread's place to some of a capability's units, or to none of them,
+  and the thread **earns** them there.
   A unit is earned by one thread at a time:
   a bind that names a unit another thread earns fails with `KERR_OVERLAP`,
   so copies of a `Time` capability may be held by many, and each unit still goes to one thread.
@@ -689,16 +697,18 @@ and moves `taken` only as far as its host says it has the bytes, so a halt write
   at most its units' part of its core and a full account,
   and the core sleeps in `wfi` for the rest if nothing else wants it.
   A thread bound to no units runs on spare time alone, or not at all without `RIGHT_X`.
-- Each thread has an **account** of time,
-  which gains a sixty-fourth of a tick for each unit the thread earns every tick
+- Each place of a thread has an **account** of time,
+  which gains a sixty-fourth of a tick for each unit the place earns every tick
   and holds at most 100 ticks' worth of them, a tenth of a second.
   A turn the thread began with time costs the account the time it ran, counted on the machine's counter,
   whether the tick ends it or the thread waits;
   a turn on spare time costs nothing.
-  A thread has **time** while its account holds at least a tick.
-  A new thread's account is empty, and the root task's thread's starts full.
-  Bound to other units, a thread keeps what its account held, up to what the new units hold;
-  unbound, it loses it.
+  A thread has **time** on a core while its place's account there holds at least a tick.
+  A new thread's accounts are empty, and the root task's thread's on the first core starts full.
+  Bound to other units, a place keeps what its account held, up to what the new units hold;
+  emptied, it loses it.
+  A thread's units on one core promise it their part of that core only while it runs on none of its other cores,
+  since a turn elsewhere puts it at the back of their queues; to every other thread they promise what they did.
 - Ready threads wait for the processor in three queues, which each core has.
   A thread with time waits on the run queue;
   one without time waits on the spare queue if it may run on spare time,
@@ -709,8 +719,9 @@ and moves `taken` only as far as its host says it has the bytes, so a halt write
   a thread with time that becomes ready while its core runs a turn on spare time takes the processor at once,
   as the call or the interrupt that made it ready returns,
   after the running thread has made again a call that stopped for an interrupt, if it stands at one.
-- A thread waiting with `OP_NOTIFY_LEND` lends the thread it names its account, section 5.12:
-  a borrower without time waits on the run queue while its lender has time, and the turns it takes so cost the lender's account.
+- A thread waiting with `OP_NOTIFY_LEND` lends the thread it names its accounts, section 5.12:
+  a borrower without time on a core waits on its run queue while its lender has time there,
+  and the turns it takes so cost the lender's account on that core.
 - The machine timer ticks at `TIMER_HZ`, 1 kHz on every board unless the build sets another rate, `make TIMER_HZ=`,
   which divides a second and the board's counter and is at least 650;
   `OP_CAP_INFO` on a `Clock` or a `Time` capability tells the tick, section 6.14, so a program need not assume one.
@@ -777,11 +788,11 @@ Revoking below `TIME` takes the child's units back, and its threads stop.
 A thread that waits may lend another thread its time meanwhile:
 `OP_NOTIFY_LEND` waits on a notification as `OP_NOTIFY_WAIT` does, and names the borrower
 through a capability to its thread with `RIGHT_X`, which lends it time and allows nothing else.
-A borrower without time of its own, section 5.11, runs on the account of the thread that has lent it time longest,
-and the turns it takes so cost that account;
+A borrower without time of its own on a core, section 5.11, runs there on the account of the thread that has lent it time longest,
+if that one holds the time of the core too, and the turns it takes so cost that account;
 a lender whose own time pays for its turn hands the rest of it to the borrower at once, if the borrower waits for a turn.
 A signal from the borrower that wakes the lender hands it the rest of the turn back.
-The time goes one step, and only within a core: a borrower that waits, or lends in turn, passes none of it on.
+The time goes one step, and only on a core both hold the time of: a borrower that waits, or lends in turn, passes none of it on.
 
 So a thread waiting for whoever holds a lock lends it its time, and so does a client waiting for its server's answer:
 a holder or a server with few units keeps a waiter with many no longer than its work takes.

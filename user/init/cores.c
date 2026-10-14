@@ -2,7 +2,7 @@
  * Cores; see DESIGN.md, "Cores".
  * BOOT_CAP_TIME holds the units of every core, TIME_UNITS of each, numbered core by core,
  * so its count, which its description tells, is TIME_UNITS for each core.
- * A thread runs on the core its units are of, and only there.
+ * A thread runs on the cores whose time its places hold, and only there.
  */
 
 #include <stdint.h>
@@ -14,14 +14,22 @@
 /*
  * The second core's threads: the ponger answers PINGS pings, each within WAKE_US,
  * the reader reads the word at read_at, and the lost thread counts until it is destroyed,
- * having first added ADDS to added an atomic add at a time, as this thread does beside it.
+ * having first added ADDS to added an atomic add at a time, as this thread does beside it;
+ * the roamer, with a place on each core, counts wherever it runs.
  * Their stacks lie below the dodger's.
  */
 #define PINGS 8u
 #define WAKE_US 500000u
 #define ADDS 20000u
 #define CORE_STACK(i) (SPINNERS + 1u + (i))
-static volatile uint32_t pongs, read_count, read_at, lost_spins, added;
+static volatile uint32_t pongs, read_count, read_at, lost_spins, added, roams;
+
+static void roamer_main(void)
+{
+    for (;;) {
+        roams++;
+    }
+}
 
 static void ponger_main(void)
 {
@@ -94,7 +102,7 @@ static uint32_t count_cores(void)
 
 static void second_core(uint32_t data_base, uint32_t data_size, uint32_t shared_base, uint32_t counter, uint32_t hz)
 {
-    uint32_t base, bits, status, was, cause, pc, addr, fault_status, state;
+    uint32_t base, bits, status, was, cause, pc, addr, fault_status, state, w[3];
     uint32_t counts = hz / 1000u * (SPIN_US / 1000u);
     uint32_t stack = data_base + data_size / 4;
 
@@ -134,7 +142,8 @@ static void second_core(uint32_t data_base, uint32_t data_size, uint32_t shared_
 
     /*
      * Alone on the second core it has the whole of it while this thread sleeps.
-     * Bound to an eighth of this core without spare time while it runs there, it finishes its turn there
+     * It has one place, so it takes the time of this core only once the other's is taken back,
+     * which it loses while it runs there: it finishes its turn there
      * and comes here, where once its account has drained it runs an eighth of the time.
      */
     was = spins[0];
@@ -142,6 +151,10 @@ static void second_core(uint32_t data_base, uint32_t data_size, uint32_t shared_
     uint32_t there = spins[0] - was;
     expect("derive the half without spare time to move it",
            rv_invoke(OP_CAP_DERIVE, BOOT_CAP_CAPTABLE, SLOT_CAPPED_TIME, SLOT_HALF_TIME, RIGHT_W));
+    expect("its one place holds the second core's time, so it takes no other",
+           rv_invoke(OP_TIME_BIND, SLOT_CAPPED_TIME, SLOT_SPINNER, 0, TIME_UNITS / 8) == KERR_LIMIT
+               ? KERR_OK : KERR_INVALID_ARG);
+    expect("take the second core's time back", rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_CORE_TIME, 0, 0));
     expect("move the spinner to an eighth of this core",
            rv_invoke(OP_TIME_BIND, SLOT_CAPPED_TIME, SLOT_SPINNER, 0, TIME_UNITS / 8));
     expect("let its account drain", sleep_us(CAPPED_US));
@@ -154,6 +167,26 @@ static void second_core(uint32_t data_base, uint32_t data_size, uint32_t shared_
     puts("root: move ok\n");
 
     /*
+     * A thread with a place on each core, each on spare time, made ready while this thread has the whole of this core
+     * and spins making no call, runs on the second core, which nobody else wants:
+     * it waits on the spare queues of both, and the idle one takes it.
+     */
+    expect("allocate a thread with a place on each core",
+           rv_thread_alloc(SLOT_POOL, SLOT_ROAMER, BOOT_CAP_PROCESS, 2));
+    expect("configure it",
+           rv_invoke(OP_THREAD_CONFIGURE, SLOT_ROAMER, (uint32_t)&roamer_main,
+                     stack - CORE_STACK(3) * SPINNER_STACK, 0));
+    expect("give it spare time here", rv_invoke(OP_TIME_BIND, BOOT_CAP_TIME, SLOT_ROAMER, 0, 0));
+    expect("and on the second core", rv_invoke(OP_TIME_BIND, SLOT_CORE_TIME, SLOT_ROAMER, 0, 0));
+    expect("it holds the time of both",
+           rv_cap_info_of(SLOT_ROAMER, CAP_THREAD, w) == KERR_OK && w[0] == 2 && w[1] == 3 ? KERR_OK : KERR_INVALID_ARG);
+    expect("start it", rv_invoke(OP_THREAD_RESUME, SLOT_ROAMER, 0, 0, 0));
+    expect("it runs on the second core while this thread spins here",
+           moved_while_spinning(&roams, 0, counter, counts) ? KERR_OK : KERR_INVALID_ARG);
+    expect("stop it", rv_thread_stop(SLOT_ROAMER, &state));
+    puts("root: places ok\n");
+
+    /*
      * The ponger runs on spare time on the second core and waits for each ping,
      * so that core idles in between, and a signal from this one has to wake it.
      * An idle core's timer wakes only for the timer lines armed there, and this thread's is armed here,
@@ -164,7 +197,7 @@ static void second_core(uint32_t data_base, uint32_t data_size, uint32_t shared_
      */
     expect("allocate what the ponger waits on",
            rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_NOTIFICATION, SLOT_PING, 0));
-    expect("allocate the ponger", rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_THREAD, SLOT_PONGER, BOOT_CAP_PROCESS));
+    expect("allocate the ponger", rv_thread_alloc(SLOT_POOL, SLOT_PONGER, BOOT_CAP_PROCESS, 1));
     expect("configure it",
            rv_invoke(OP_THREAD_CONFIGURE, SLOT_PONGER, (uint32_t)&ponger_main,
                      stack - CORE_STACK(0) * SPINNER_STACK, 0));
@@ -195,7 +228,7 @@ static void second_core(uint32_t data_base, uint32_t data_size, uint32_t shared_
      * It reads the second word, so that its fault does not pass for the prober's, which reads the first.
      */
     read_at = shared_base + 4;
-    expect("allocate the reader", rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_THREAD, SLOT_READER, BOOT_CAP_PROCESS));
+    expect("allocate the reader", rv_thread_alloc(SLOT_POOL, SLOT_READER, BOOT_CAP_PROCESS, 1));
     expect("configure it",
            rv_invoke(OP_THREAD_CONFIGURE, SLOT_READER, (uint32_t)&reader_main,
                      stack - CORE_STACK(1) * SPINNER_STACK, 0));
@@ -230,7 +263,7 @@ static void second_core(uint32_t data_base, uint32_t data_size, uint32_t shared_
            rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_CORE_TIME, 0, 0));
     expect("make a pool to destroy", rv_retype(SLOT_DOOMED_MEMORY, CAP_POOL, SLOT_DOOMED_POOL, &base));
     expect("allocate a thread in it",
-           rv_invoke(OP_POOL_ALLOC, SLOT_DOOMED_POOL, CAP_THREAD, SLOT_LOST, BOOT_CAP_PROCESS));
+           rv_thread_alloc(SLOT_DOOMED_POOL, SLOT_LOST, BOOT_CAP_PROCESS, 1));
     expect("configure it",
            rv_invoke(OP_THREAD_CONFIGURE, SLOT_LOST, (uint32_t)&lost_main, stack - CORE_STACK(2) * SPINNER_STACK, 0));
     expect("bind it to the whole of the second core",

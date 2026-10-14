@@ -7,12 +7,13 @@ Report: a turn's payer that waits is not the turn's first lender
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -626,7 +626,7 @@ void sched_lend(struct thread *t, struct notification *ntfn, struct thread *borr
-      * hands it the rest of the turn, which it goes on paying for: the turn neither ends nor is charged here.
-      */
+@@ -765,8 +765,7 @@ void sched_lend(struct thread *t, struct notification *ntfn, struct thread *borr
      struct core *core = core_self();
--    if (core->payer == NULL && has_time(t->balance) && thread_lender(borrower) == t && borrower->queue != QUEUE_NONE) {
-+    if (core->payer == NULL && has_time(t->balance) && borrower->queue != QUEUE_NONE) {
-         ring_remove(queue_head(core, borrower->queue), borrower);
-         borrower->queue = QUEUE_NONE;
+     struct place *tp = thread_place_on(t, core_index());
+     struct place *bp = thread_place_on(borrower, core_index());
+-    if (core->payer == NULL && tp != NULL && has_time(tp->balance) && bp != NULL && place_lender(bp) == tp &&
+-        bp->queue != QUEUE_NONE) {
++    if (core->payer == NULL && tp != NULL && has_time(tp->balance) && bp != NULL && bp->queue != QUEUE_NONE) {
+         place_unqueue(bp);
          core->turn = borrower;
+         core->payer = t;

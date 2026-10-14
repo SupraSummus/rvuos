@@ -30,7 +30,7 @@ static inline uint32_t rv_invoke(uint32_t op, uint32_t cap,
 
 /*
  * A call with all six argument registers set, as the replay driver makes a record's;
- * no operation reads a4 to a6 yet, and rv_invoke leaves them as they were.
+ * only an allocation of a thread reads a4, see rv_thread_alloc, none a5 or a6, and rv_invoke leaves them as they were.
  */
 static inline uint32_t rv_invoke6(uint32_t op, uint32_t cap, uint32_t a1, uint32_t a2, uint32_t a3,
                                   uint32_t a4, uint32_t a5, uint32_t a6)
@@ -90,6 +90,15 @@ static inline uint32_t rv_frame_carve(uint32_t frame_cap, uint32_t offset, uint3
 static inline uint32_t rv_pool_alloc(uint32_t pool_cap, uint32_t type, uint32_t dst, uint32_t arg)
 {
     return rv_invoke(OP_POOL_ALLOC, pool_cap, type, dst, arg);
+}
+
+/*
+ * OP_POOL_ALLOC of a thread in slot dst, to run in the process process_cap names,
+ * with places for the time of as many cores at once, one at least.
+ */
+static inline uint32_t rv_thread_alloc(uint32_t pool_cap, uint32_t dst, uint32_t process_cap, uint32_t places)
+{
+    return rv_invoke6(OP_POOL_ALLOC, pool_cap, CAP_THREAD, dst, process_cap, places, 0, 0);
 }
 
 /* OP_PROCESS_INSTALL: a frame in a region slot of the process, with rights at most the frame's. */
@@ -255,7 +264,10 @@ static inline uint32_t rv_untyped_info(uint32_t untyped_cap, uint32_t *base, uin
     return err;
 }
 
-/* OP_POOL_INFO: the bytes an object of a type takes of a pool, slots its count for a table, and the bytes left. */
+/*
+ * OP_POOL_INFO: the bytes an object of a type takes of a pool, and the bytes left;
+ * slots is its count of slots for a table, of places for a thread.
+ */
 static inline uint32_t rv_pool_info(uint32_t pool_cap, uint32_t type, uint32_t slots, uint32_t *bytes, uint32_t *left)
 {
     register uint32_t r_a0 __asm__(RV_A0) = pool_cap;

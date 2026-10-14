@@ -9,12 +9,12 @@ Report: queue is not linked back
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -51,7 +51,7 @@ static void ring_push(paddr_t *head, struct thread *t)
-         struct thread *newest = p2v(oldest->queue_prev);
-         t->queue_next = *head;
-         t->queue_prev = oldest->queue_prev;
--        newest->queue_next = self;
-+        (void)newest;
-         oldest->queue_prev = self;
+@@ -95,7 +95,7 @@ static void ring_push(paddr_t *head, paddr_t self, size_t off)
+         struct links *oldest = links_at(*head, off);
+         s->next = *head;
+         s->prev = oldest->prev;
+-        links_at(oldest->prev, off)->next = self;
++        (void)links_at;
+         oldest->prev = self;
      }
  }
