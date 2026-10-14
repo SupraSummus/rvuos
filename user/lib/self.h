@@ -34,6 +34,7 @@ struct block {
 #define SELF_SLOTS  128u /* the most slots of a table it keeps account of */
 #define SELF_BLOCKS 24u  /* the most free blocks it keeps */
 #define SELF_ROOM_UNIT 0x1000u /* what room for children's data is handed out in, see self_room */
+#define SELF_CORES  4u   /* the most cores it keeps account of the units of */
 
 struct self {
     /* Its capabilities, in its own table. */
@@ -44,14 +45,15 @@ struct self {
     uint32_t code;        /* the frame of the code its children run */
     uint32_t timer_lines; /* the timer lines it may hand out */
     uint32_t timer_line_count; /* how many, from the first */
-    uint32_t time;        /* the first core's units of time it may hand out */
+    uint32_t time;        /* the units of time it may hand out, of each core it has some of */
+    uint32_t time_first, time_count; /* the first of those, as the machine numbers units, and how many */
     uint32_t print;       /* the kernel's log, through Print, which its children are given too */
     /* What is in use, a bit each. */
     uint32_t slot_first, slot_end; /* the slots it hands out, from first up to end */
     uint32_t slots[SELF_SLOTS / 32];
     uint32_t regions;
     uint32_t bits;
-    uint32_t units[TIME_UNITS / 32];
+    uint32_t units[SELF_CORES * TIME_UNITS / 32]; /* a bit for each unit of time, from time_first */
     /* Free memory: Untypeds, each of a block, none overlapping. */
     struct block free[SELF_BLOCKS];
     uint32_t free_count;
@@ -83,7 +85,7 @@ struct self {
 /*
  * The root task's, from what the boot gave it: its slots past BOOT_CAP_COUNT, its regions past code and data,
  * the free RAM, and an inbox allocated from the boot pool.
- * It keeps units of the first core for itself, from the first, and hands out the rest.
+ * It keeps units of the first core for itself, from the first, and hands out the rest, of every core.
  */
 uint32_t self_root(struct self *s, uint32_t units);
 
@@ -144,9 +146,20 @@ uint32_t room_take(struct self *s, uint32_t size, struct block *b);
 /* The room's bytes back, once nothing is installed from them any more. */
 void room_give(struct self *s, const struct block *b);
 
-/* Units of the first core in a row, and back. */
-uint32_t units_take(struct self *s, uint32_t count, uint32_t *first);
+/*
+ * Count units of core in a row, *first the first as an offset in its time, ready to carve, and back;
+ * KERR_LIMIT when it has not as many of that core free, or none of that core at all.
+ */
+uint32_t units_take(struct self *s, uint32_t core, uint32_t count, uint32_t *first);
 void units_give(struct self *s, uint32_t first, uint32_t count);
+/*
+ * The offset in its time of a unit of core, for a bind of none there, spare time on that core;
+ * KERR_LIMIT when it has none of that core.
+ */
+uint32_t core_unit(struct self *s, uint32_t core, uint32_t *unit);
+/* The first core whose units it has, and how many cores its units reach: the places a thread of it needs to run on each. */
+uint32_t self_core(const struct self *s);
+uint32_t self_cores(const struct self *s);
 
 /*
  * Memory, as blocks halved out of the free ones: a block's size is a power of two and its base a multiple of it.
@@ -176,7 +189,7 @@ uint32_t mem_unused(const struct self *s);
  * The slots of free blocks are left out, since halving memory adds blocks that are never joined again.
  */
 struct self_tally {
-    uint32_t bytes, slots, regions, bits, room, units[TIME_UNITS / 32];
+    uint32_t bytes, slots, regions, bits, room, units[SELF_CORES * TIME_UNITS / 32];
 };
 struct self_tally self_tally(const struct self *s);
 

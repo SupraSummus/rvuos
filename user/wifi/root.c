@@ -173,7 +173,7 @@ static void driver_build(uint32_t free_base)
     } else {
         say(&kout, run_s != 0 ? "root: mode %s, for %u s\n" : "root: mode %s, for good\n", modes[p->mode], run_s);
     }
-    must("start the driver", child_start(&self, c, driver_main, DRV_UNITS));
+    must("start the driver", child_start(&self, c, driver_main, 0, DRV_UNITS));
 }
 
 /*

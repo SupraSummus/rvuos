@@ -208,8 +208,8 @@ static void channel(const char *name, uint32_t len, uint32_t size, uint32_t slot
     must("give ping the clock", child_give(&self, &ping, BOOT_CAP_CLOCK, RIGHT_R, &pp->clock));
     must("a channel", chan_new(&self, &link, size, slot));
     must("connect ping and echo", chan_connect(&self, &link, &ping, &pp->link, &echo, &ep->link));
-    must("start echo", child_start(&self, &echo, echo_main, UNITS));
-    must("start ping", child_start(&self, &ping, ping_main, UNITS));
+    must("start echo", child_start(&self, &echo, echo_main, 0, UNITS));
+    must("start ping", child_start(&self, &ping, ping_main, 0, UNITS));
     children_done(&ping, &echo);
     report(name, ROUNDS, pp->counts, pp->hz);
     must("the channel back", chan_free(&self, &link));
@@ -256,7 +256,7 @@ int main(void)
     must("a thread", rv_thread_alloc(pool.made, thread, BOOT_CAP_PROCESS, 1));
     must("configure the thread", rv_thread_configure(thread, (uint32_t)(uintptr_t)pong_thread,
                                                      (uint32_t)(uintptr_t)(pong_stack + sizeof(pong_stack)), 0));
-    must("units", units_take(&self, UNITS, &first));
+    must("units", units_take(&self, 0, UNITS, &first));
     must("a slot", slot_new(&self, &time));
     must("carve the units", rv_time_carve(self.time, first, UNITS, time));
     must("bind the units", rv_time_bind(time, thread, 0, UNITS));
@@ -280,7 +280,7 @@ int main(void)
     must("a thread", rv_thread_alloc(pool.made, holder, BOOT_CAP_PROCESS, 1));
     must("configure the thread", rv_thread_configure(holder, (uint32_t)(uintptr_t)holder_thread,
                                                      (uint32_t)(uintptr_t)(holder_stack + sizeof(holder_stack)), 0));
-    must("units", units_take(&self, UNITS, &first));
+    must("units", units_take(&self, 0, UNITS, &first));
     must("a slot", slot_new(&self, &time));
     must("carve the units", rv_time_carve(self.time, first, UNITS, time));
     must("bind the units", rv_time_bind(time, holder, 0, UNITS));
@@ -297,7 +297,7 @@ int main(void)
 
     must("room for the children's data", self_room(&self, ROOM_SIZE));
     must("build pong", child_new(&self, &pong, "pong", CHILD_TABLE, CHILD_DATA));
-    must("start pong", child_start(&self, &pong, pong_main, UNITS));
+    must("start pong", child_start(&self, &pong, pong_main, 0, UNITS));
     measure("processes", round_process);
 
     channel("channel", PACKET, LINK_SIZE, LINK_SLOT);
@@ -314,8 +314,8 @@ int main(void)
     must("give the lender the clock", child_give(&self, &lend, BOOT_CAP_CLOCK, RIGHT_R, &lp->clock));
     must("a lender's connection", bulk_new(&self, &bk, &lend, &lp->link, 1, &shape));
     must("connect the borrower", bulk_connect(&self, &bk, 0, &borrow, &bp->link));
-    must("start the borrower", child_start(&self, &borrow, borrow_main, UNITS));
-    must("start the lender", child_start(&self, &lend, lend_main, UNITS));
+    must("start the borrower", child_start(&self, &borrow, borrow_main, 0, UNITS));
+    must("start the lender", child_start(&self, &lend, lend_main, 0, UNITS));
     children_done(&lend, &borrow);
     report("bulk", ROUNDS, lp->counts, lp->hz);
     must("close the connection", bulk_close(&self, &bk, 0));
@@ -325,7 +325,7 @@ int main(void)
 
     struct child spin;
     must("build spin", child_new(&self, &spin, "spin", CHILD_TABLE, CHILD_DATA));
-    must("start spin", child_start(&self, &spin, spin_main, UNITS));
+    must("start spin", child_start(&self, &spin, spin_main, 0, UNITS));
     uint32_t hz, worst = 0;
     uint64_t begun = now(&hz), last = begun, t;
     do {

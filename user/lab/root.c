@@ -280,7 +280,7 @@ static void run(const struct scenario *sc)
         }
     }
     for (uint32_t i = 0; i < count; i++) {
-        must("start a member", child_start(&self, &kids[i], entries[sc->cast[i].role], sc->cast[i].units));
+        must("start a member", child_start(&self, &kids[i], entries[sc->cast[i].role], 0, sc->cast[i].units));
     }
 
     sleep_us(sc, count, WARM_US);

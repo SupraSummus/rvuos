@@ -84,7 +84,7 @@ void system_net_build(struct system *s, struct chan_end *driver_link, const uint
 
 void system_net_start(struct system *s)
 {
-    system_must(s, "start the network process", child_start(s->self, &s->network, net_main, NET_UNITS));
+    system_must(s, "start the network process", child_start(s->self, &s->network, net_main, 0, NET_UNITS));
     s->net_started = 1;
 }
 
@@ -107,7 +107,7 @@ static void client_build(struct system *s, uint32_t i)
         system_must(s, "give the clock the addresses", child_map(s->self, c, s->config, RIGHT_R, &region));
         ((struct clock_page *)c->page)->config = net_config((const struct net_page *)s->network.page);
     }
-    system_must(s, "start a client", child_start(s->self, c, kinds[i].entry, CLIENT_UNITS));
+    system_must(s, "start a client", child_start(s->self, c, kinds[i].entry, 0, CLIENT_UNITS));
     cl->down = 0;
 }
 

@@ -37,7 +37,7 @@ static uint32_t build(struct self *s, struct child *c, uint32_t table_slots, uin
     PASS(slot_new(s, &c->process));
     TRY(s, "a child's process", rv_pool_alloc(pool, CAP_PROCESS, c->process, c->table));
     PASS(slot_new(s, &c->thread));
-    TRY(s, "a child's thread", rv_thread_alloc(pool, c->thread, c->process, 1));
+    TRY(s, "a child's thread", rv_thread_alloc(pool, c->thread, c->process, self_cores(s)));
     PASS(slot_new(s, &c->inbox));
     TRY(s, "a child's inbox", rv_pool_alloc(pool, CAP_NOTIFICATION, c->inbox, 0));
     uint32_t timer;
@@ -149,8 +149,8 @@ static uint32_t give_carved(struct self *s, struct child *c, uint32_t carved, ui
     return slot_free(s, carved);
 }
 
-uint32_t child_give_own(struct self *s, struct child *c, uint32_t pool_size, uint32_t lines, uint32_t units,
-                        uint32_t slots, struct child_own *o)
+uint32_t child_give_own(struct self *s, struct child *c, uint32_t pool_size, uint32_t lines, uint32_t core,
+                        uint32_t units, uint32_t slots, struct child_own *o)
 {
     uint32_t carved;
     if (slots > c->table_slots - c->slots_given || lines > s->timer_line_count) {
@@ -171,8 +171,9 @@ uint32_t child_give_own(struct self *s, struct child *c, uint32_t pool_size, uin
     PASS(give_carved(s, c, carved, rv_irq_carve(s->timer_lines, s->timer_line_count - lines, lines, carved),
                      RIGHT_W, &o->timer_lines));
     o->timer_line_count = lines;
-    PASS(units_take(s, units, &c->own_unit));
+    PASS(units_take(s, core, units, &c->own_unit));
     c->own_units = units;
+    o->unit_first = s->time_first + c->own_unit;
     PASS(slot_new(s, &carved));
     PASS(give_carved(s, c, carved, rv_time_carve(s->time, c->own_unit, units, carved), RIGHT_W | RIGHT_X, &o->time));
     o->unit_count = units;
@@ -215,7 +216,8 @@ uint32_t child_bit(struct self *s, struct child *c, uint32_t *bit)
     return KERR_OK;
 }
 
-uint32_t child_start(struct self *s, struct child *c, void (*entry)(struct child_page *), uint32_t units)
+uint32_t child_start(struct self *s, struct child *c, void (*entry)(struct child_page *), uint32_t core,
+                     uint32_t units)
 {
     uint32_t time;
     TRY(s, "watch a child", rv_thread_watch(c->thread, s->inbox, c->bit_fault));
@@ -226,10 +228,13 @@ uint32_t child_start(struct self *s, struct child *c, void (*entry)(struct child
      * Its units, carved for the bind alone: the binding stays with the thread once the slot is deleted;
      * or none, bound through the parent's own capability, whose RIGHT_X lets it run on spare time.
      */
+    c->core = core;
     if (units == 0) {
-        TRY(s, "bind a child to no units", rv_time_bind(s->time, c->thread, 0, 0));
+        uint32_t unit;
+        PASS(core_unit(s, core, &unit));
+        TRY(s, "bind a child to no units", rv_time_bind(s->time, c->thread, unit, 0));
     } else {
-        PASS(units_take(s, units, &c->unit));
+        PASS(units_take(s, core, units, &c->unit));
         c->units = units;
         PASS(slot_new(s, &time));
         uint32_t status = rv_time_carve(s->time, c->unit, units, time);
@@ -240,6 +245,19 @@ uint32_t child_start(struct self *s, struct child *c, void (*entry)(struct child
         TRY(s, "bind a child to its units", status);
     }
     TRY(s, "start a child", rv_thread_resume(c->thread));
+    return KERR_OK;
+}
+
+uint32_t child_spare(struct self *s, struct child *c, uint32_t core)
+{
+    uint32_t unit;
+    /* A bind of none on the core child_start gave it would take its units there. */
+    if (core == c->core) {
+        s->what = "spare time of a core a child has no time of yet";
+        return KERR_INVALID_ARG;
+    }
+    PASS(core_unit(s, core, &unit));
+    TRY(s, "give a child spare time", rv_time_bind(s->time, c->thread, unit, 0));
     return KERR_OK;
 }
 
@@ -361,14 +379,13 @@ void child_self(struct self *s, const struct child_own *o)
     s->timer_lines = o->timer_lines;
     s->timer_line_count = o->timer_line_count;
     s->time = o->time;
+    s->time_first = o->unit_first;
+    s->time_count = o->unit_count;
     s->print = CHILD_LOG;
     s->slot_first = o->slot_first;
     s->slot_end = o->slot_end;
     s->regions = ~0u;
     s->bits = ~0u;
-    for (uint32_t i = o->unit_count; i < TIME_UNITS; i++) {
-        s->units[i / 32] |= 1u << (i % 32);
-    }
 }
 
 uint32_t child_sleep(uint32_t us)

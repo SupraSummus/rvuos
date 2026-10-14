@@ -250,6 +250,32 @@ static void say_round(void)
 }
 
 /*
+ * A child on the second core, where there is one: started on units of that core, and given spare time on the first,
+ * its thread holds the time of both; taken down, it gives back the second core's units with the rest.
+ */
+static void core_round(void)
+{
+    if (self_cores(&self) < 2) {
+        return;
+    }
+    struct self_tally before = tally();
+    uint32_t w[3];
+    must("build a child for the second core", child_new(&self, &answering, "second", CHILD_TABLE, CHILD_DATA));
+    must("start it on the second core", child_start(&self, &answering, answer_main, 1, CHILD_UNITS));
+    check(child_spare(&self, &answering, 1) == KERR_INVALID_ARG,
+          "spare time of the core a child has units of, which would take them, is refused");
+    must("give it spare time on the first core", child_spare(&self, &answering, 0));
+    while (answering.told != CHILD_RUNNING) {
+        step();
+    }
+    check(rv_cap_info_of(answering.thread, CAP_THREAD, w) == KERR_OK && w[0] == self_cores(&self) && w[1] == 0x3u,
+          "a child given the time of both cores holds the time of both");
+    must("take it down", child_free(&self, &answering));
+    check(same(tally(), before), "a child on the second core, taken down, gives back what it was given");
+    say(&out, "libtest: a child on the second core, with spare time on the first: ok\n");
+}
+
+/*
  * A child that answers its parent's checks and one that spins, each checked twice with a pause between:
  * the first check finds both well, since neither was asked before, and the second finds the one that spins.
  * Taken down, the one that spins leaves nothing behind, its units among what comes back.
@@ -259,8 +285,8 @@ static void check_round(void)
     struct self_tally before = tally();
     must("build a child that answers", child_new(&self, &answering, "answering", CHILD_TABLE, CHILD_DATA));
     must("build a child that spins", child_new(&self, &spinning, "spinning", CHILD_TABLE, CHILD_DATA));
-    must("start a child that answers", child_start(&self, &answering, answer_main, CHILD_UNITS));
-    must("start a child that spins", child_start(&self, &spinning, spin_main, CHILD_UNITS));
+    must("start a child that answers", child_start(&self, &answering, answer_main, 0, CHILD_UNITS));
+    must("start a child that spins", child_start(&self, &spinning, spin_main, 0, CHILD_UNITS));
     while (answering.told != CHILD_RUNNING || spinning.told != CHILD_RUNNING) {
         step();
     }
@@ -281,7 +307,7 @@ static void client_go(struct chan_hub *hub, uint32_t i, uint32_t seed)
     struct client_page *p = (struct client_page *)clients[i].page;
     p->seed = seed;
     must("connect a client", chan_hub_connect(&self, hub, i, &clients[i], &p->link));
-    must("start a client", child_start(&self, &clients[i], client_main, CHILD_UNITS));
+    must("start a client", child_start(&self, &clients[i], client_main, 0, CHILD_UNITS));
 }
 
 /*
@@ -298,7 +324,7 @@ static void hub_round(void)
     check(server.in_room, "a child built once there is room is built in it");
     struct server_page *ps = (struct server_page *)server.page;
     must("a hub", chan_hub_new(&self, &hub, &server, ps->ends, HUB_CLIENTS, HUB_CHAN_SIZE, PACKET_MAX));
-    must("start the server", child_start(&self, &server, server_main, CHILD_UNITS));
+    must("start the server", child_start(&self, &server, server_main, 0, CHILD_UNITS));
     client_go(&hub, 0, 0);
     client_go(&hub, 1, 1);
     while (clients[0].told != CLIENT_DONE || clients[1].told != CLIENT_DONE) {
@@ -373,7 +399,7 @@ static void lock_round(int named)
         }
     }
     for (uint32_t i = 0; i < LOCKERS; i++) {
-        must("start a locker", child_start(&self, &lockers[i], locker_main, CHILD_UNITS));
+        must("start a locker", child_start(&self, &lockers[i], locker_main, 0, CHILD_UNITS));
     }
     for (uint32_t i = 0; i < LOCKERS; i++) {
         while (lockers[i].told != LOCKER_DONE) {
@@ -451,7 +477,7 @@ static void event_round(void)
     must("give the setter the notification to signal", child_give(&self, &setter, note, RIGHT_W, &p->event.note));
     p->event.word = e.word;
     p->asked = (uint32_t)(uintptr_t)&v->asked;
-    must("start the setter", child_start(&self, &setter, setter_main, CHILD_UNITS));
+    must("start the setter", child_start(&self, &setter, setter_main, 0, CHILD_UNITS));
     uint32_t seen = 0;
     for (uint32_t n = 0; n < EVENT_SETS; n++) {
         v->asked = n + 1u;
@@ -515,15 +541,15 @@ static void snap_round(void)
                                                      (uint32_t)(uintptr_t)(snap_stack + sizeof(snap_stack)),
                                                      (uint32_t)(uintptr_t)r));
     must("a slot for the writer's units", slot_new(&self, &time));
-    int second_core = rv_time_carve(BOOT_CAP_TIME, TIME_UNITS, TIME_UNITS, time) == KERR_OK;
+    int second_core = self_cores(&self) > 1;
     if (!second_core) {
         units = CHILD_UNITS;
-        must("units for the writer", units_take(&self, units, &first));
-        must("carve the writer's units", rv_time_carve(self.time, first, units, time));
     }
+    must("units for the writer", units_take(&self, second_core ? 1 : 0, units, &first));
+    must("carve the writer's units", rv_time_carve(self.time, first, units, time));
     must("bind the writer", rv_time_bind(time, writer, 0, units));
     must("start the writer", rv_thread_resume(writer));
-    must("start the reader", child_start(&self, &snap_reader, snap_reader_main, CHILD_UNITS));
+    must("start the reader", child_start(&self, &snap_reader, snap_reader_main, 0, CHILD_UNITS));
     pause_for(SNAP_US);
     must("take the writer's units", rv_cap_revoke(self.table, time));
     pause_for(SNAP_STOP_US);
@@ -543,9 +569,7 @@ static void snap_round(void)
         r->reads, second_core ? "the second" : "the same", r->halfway, r->again);
     must("take the reader down", child_free(&self, &snap_reader));
     must("the writer's units back", slot_free(&self, time));
-    if (!second_core) {
-        units_give(&self, first, units);
-    }
+    units_give(&self, first, units);
     must("the writer back", slot_free(&self, writer));
     must("the snapshot back", slot_free(&self, shared.made));
     room_give(&self, &shared);
@@ -564,7 +588,7 @@ static void pass_round(void)
     for (uint32_t i = 0; i < 2; i++) {
         must("build a passer", child_new(&self, &passers[i], "passer", CHILD_TABLE, CHILD_DATA));
         ((struct passer_page *)passers[i].page)->buffer = buffer.base;
-        must("start a passer", child_start(&self, &passers[i], passer_main, CHILD_UNITS));
+        must("start a passer", child_start(&self, &passers[i], passer_main, 0, CHILD_UNITS));
     }
     for (uint32_t n = 0; n < PASSES; n++) {
         struct child *to = &passers[n % 2u];
@@ -613,7 +637,7 @@ static void borrower_go(struct bulk *bk, uint32_t i, uint32_t seed, uint32_t doe
     p->breach = does == BREACHES;
     p->flood = does == FLOODS;
     must("connect a borrower", bulk_connect(&self, bk, i, c, &p->link));
-    must("start a borrower", child_start(&self, c, borrower_main, CHILD_UNITS));
+    must("start a borrower", child_start(&self, c, borrower_main, 0, CHILD_UNITS));
 }
 
 /* Connection i closed and its borrower taken down, until the lender has let go of it. */
@@ -645,7 +669,7 @@ static void bulk_round(void)
         pl->seed[i] = 1u + i;
     }
     must("a lender's connections", bulk_new(&self, &bk, &lender, pl->ends, BULK_PEERS, &shape));
-    must("start the lender", child_start(&self, &lender, lender_main, CHILD_UNITS));
+    must("start the lender", child_start(&self, &lender, lender_main, 0, CHILD_UNITS));
     borrower_go(&bk, 0, pl->seed[0], BORROWS);
     borrower_go(&bk, 1, pl->seed[1], FORGES);
     while (borrowers[0].told != BORROWER_DONE || borrowers[1].told != BORROWER_DONE) {
@@ -717,10 +741,10 @@ static void own_round(void)
         must("build a builder", child_new(&self, &builder, "builder", BUILDER_TABLE, CHILD_DATA));
         struct builder_page *p = (struct builder_page *)builder.page;
         must("let a child build of its own",
-             child_give_own(&self, &builder, OWN_POOL, OWN_LINES, OWN_UNITS, OWN_SLOTS, &p->own));
+             child_give_own(&self, &builder, OWN_POOL, OWN_LINES, 0, OWN_UNITS, OWN_SLOTS, &p->own));
         may_fault = &builder;
         faulted = 0;
-        must("start a builder", child_start(&self, &builder, builder_main, CHILD_UNITS));
+        must("start a builder", child_start(&self, &builder, builder_main, 0, CHILD_UNITS));
         while (!(faulted & builder.bit_fault) || builder.told != BUILDER_BUILT) {
             step();
         }
@@ -746,8 +770,8 @@ static void move_round(void)
         must("build a mover", child_new(&self, &mover, "mover", MOVER_TABLE, CHILD_DATA));
         struct mover_page *p = (struct mover_page *)mover.page;
         must("let a child build of its own",
-             child_give_own(&self, &mover, OWN_POOL, OWN_LINES, OWN_UNITS, OWN_SLOTS, &p->own));
-        must("start a mover", child_start(&self, &mover, mover_main, CHILD_UNITS));
+             child_give_own(&self, &mover, OWN_POOL, OWN_LINES, 0, OWN_UNITS, OWN_SLOTS, &p->own));
+        must("start a mover", child_start(&self, &mover, mover_main, 0, CHILD_UNITS));
         while (mover.told != MOVER_MOVED) {
             step();
         }
@@ -789,8 +813,8 @@ int main(void)
     must("a channel", chan_new(&self, &link, LINK_SIZE, PACKET_MAX));
     check(link.a.slots < PACKETS, "the rings hold fewer packets than are sent, so that they fill");
     must("connect the peers", chan_connect(&self, &link, &a, &pa->link, &b, &pb->link));
-    must("start a peer", child_start(&self, &a, peer_main, CHILD_UNITS));
-    must("start a peer", child_start(&self, &b, peer_main, CHILD_UNITS));
+    must("start a peer", child_start(&self, &a, peer_main, 0, CHILD_UNITS));
+    must("start a peer", child_start(&self, &b, peer_main, 0, CHILD_UNITS));
     while (a.told != PEER_DONE || b.told != PEER_DONE) {
         step();
     }
@@ -810,7 +834,7 @@ int main(void)
         struct fault_page *pf = (struct fault_page *)faulty.page;
         check(pf->address == 0, "a child's data starts zeroed, whatever its block held");
         pf->address = root_data;
-        must("start the faulting child", child_start(&self, &faulty, fault_main, CHILD_UNITS));
+        must("start the faulting child", child_start(&self, &faulty, fault_main, 0, CHILD_UNITS));
         faulted = 0;
         while (!(faulted & faulty.bit_fault)) {
             step();
@@ -832,6 +856,7 @@ int main(void)
     must("take a peer down", child_free(&self, &b));
     must("free the channel", chan_free(&self, &link));
     check_round();
+    core_round();
     hub_round();
     lock_round(0);
     lock_round(1);
