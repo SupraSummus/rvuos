@@ -586,6 +586,8 @@ What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
 
 ## Code
 
+- `cap_lookup` copies the capability twice, into its own and then the caller's;
+  copying it once would spare about a dozen of every call's 450 instructions on QEMU virt, `make trap-profile`.
 - The four bytes little-endian, `le32`, is written three times, in `user/wifi/esp32c6/mac.c`, `main.c` and `user/wifi/wlan.c`;
   one in `user/lib/` would serve all three.
 
