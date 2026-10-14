@@ -527,15 +527,18 @@ void sched_accounts_fill(void)
  * and the others bring the release forward to the tick theirs does.
  * It looks at each unit of the core, a fixed few, as the tick looks at the timer lines,
  * and only at the tick nearest_release said an account would reach a tick.
+ * A thread's units are a run of one core's, each naming it, so the look steps over the rest of a thread's at once,
+ * and takes a step for each thread and each unit nobody earns.
  * Accounts count the machine's ticks, so the core that counts the tick looks, whichever core's release it is.
  */
 static void release(uint32_t c)
 {
     uint32_t first = c * TIME_UNITS;
     cores[c].nearest_release = sched_ticks + NEAREST_NONE;
-    for (uint32_t i = 0; i < TIME_UNITS; i++) {
+    for (uint32_t i = 0; i < TIME_UNITS;) {
         LOOP_BOUND(TIME_UNITS);
         struct thread *t = unit_first(first + i);
+        i += t != NULL ? t->time.b : 1;
         if (t != NULL && (t->queue == QUEUE_SPARE || t->queue == QUEUE_SPENT)) {
             thread_settle(t);
         }
