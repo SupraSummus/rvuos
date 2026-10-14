@@ -279,6 +279,7 @@ _Static_assert(sizeof(struct cap) == 24, "object layout");
 _Static_assert(sizeof(struct captable) == 12, "object layout");
 _Static_assert(sizeof(struct pool) == 56, "object layout");
 _Static_assert(sizeof(struct pmp_image) == 4 + 5 * PMP_MAX_ENTRIES, "object layout");
+_Static_assert(offsetof(struct pmp_image, cfg) % 4 == 0, "pmp_load reads cfg a word at a time");
 #ifdef BOARD_PROCESS_CSRS
 #define PROCESS_CSRS_SIZE (4 * BOARD_PROCESS_CSRS)
 #if CORES > 1

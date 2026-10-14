@@ -355,7 +355,7 @@ void pmp_set(unsigned idx, uint32_t addr, uint8_t cfg)
     pmp_cfg[idx] = cfg;
 }
 
-void pmp_clear(unsigned idx)
+static void pmp_clear(unsigned idx)
 {
     if (idx >= PMP_MAX_ENTRIES) {
         kpanic("pmp_clear index out of range");
@@ -365,6 +365,16 @@ void pmp_clear(unsigned idx)
     }
     pmp_addr[idx] = 0;
     pmp_cfg[idx] = 0;
+}
+
+void pmp_load(const uint32_t *addr, const uint8_t *cfg, unsigned count, unsigned off)
+{
+    for (unsigned i = 0; i < count; i++) {
+        pmp_set(i, addr[i], cfg[i]);
+    }
+    for (unsigned i = count; i < off; i++) {
+        pmp_clear(i);
+    }
 }
 
 void pmp_get(unsigned idx, uint32_t *addr, uint8_t *cfg)

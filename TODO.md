@@ -582,6 +582,11 @@ What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
 
 ## Code
 
+- `PMP_MAX_ENTRIES=8 make check` stops building `fuzz-rp2350`, whose eight writable and three hardwired entries need eleven,
+  though `README.md` says it runs everything; build that harness only with sixteen, or say so there.
+- A change of process writes only the PMP entries the two images use, measured under QEMU alone:
+  `make BOARD=rp2350 bench` and `BOARD=esp32c6` would say what it saves on silicon, open decision 5's cycles with it,
+  and `make BOARD=rp2350 test escape` is the only run of the fence's byte it keeps in `pmpcfg1`.
 - `cap_lookup` copies the capability twice, into its own and then the caller's;
   copying it once would spare about a dozen of every call's 450 instructions on QEMU virt, `make trap-profile`.
 - The four bytes little-endian, `le32`, is written three times, in `user/wifi/esp32c6/mac.c`, `main.c` and `user/wifi/wlan.c`;
@@ -621,12 +626,6 @@ What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
   until the root task is gone; open decision 20 in `DESIGN.md`.
   Grant the rest as further blocks, or lay the board out afresh,
   when a board's RAM gets tight.
-- A change of process writes every PMP entry the core has, sixteen on QEMU and the ESP32-C6,
-  each through a read, a change and a write of its `pmpcfg` register:
-  `make bench` measures the load at about 1,000 cycles a switch on the ESP32-C6 and 400 on Hazard3,
-  beside 800 to 900 for the rest of a switch.
-  Writing the image's four `pmpcfg` words whole, and `pmpaddr` only where an entry is in use, would save most of it;
-  mutants stand in `process.c` and `pmp.c`, and the records of `tests/bench/` would move.
 - `PROCESS_REGION_SLOTS` is fixed at 8, whatever the PMP budget;
   size it per process from the budget.
 - A process's PMP image has room for `PMP_MAX_ENTRIES` entries, sixteen, and fills `PROCESS_REGION_SLOTS` at most;

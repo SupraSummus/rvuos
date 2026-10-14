@@ -30,17 +30,16 @@ void process_fence_core(void)
     }
 }
 
+/*
+ * The image's entries, and off those of the image before it past them:
+ * the rest are off already, since only an image turns an entry below the fence on.
+ */
 void process_activate(struct process *proc)
 {
     const struct pmp_image *img = &proc->pmp;
-    for (unsigned i = 0; i < img->count; i++) {
-        LOOP_BOUND(PROCESS_REGION_SLOTS);
-        pmp_set(i, img->addr[i], img->cfg[i]);
-    }
-    for (unsigned i = img->count; i < pmp_entry_count; i++) {
-        LOOP_BOUND(PMP_MAX_ENTRIES);
-        pmp_clear(i);
-    }
+    struct core *core = core_self();
+    pmp_load(img->addr, img->cfg, img->count, core->pmp_loaded);
+    core->pmp_loaded = (uint8_t)img->count;
 }
 
 /*

@@ -95,7 +95,10 @@ Consequences that shape the design:
   `process_fence` writes it once at boot, and loading an image stops below it, so a switch costs nothing more.
   The datasheet suggests the same; ACCESSCTRL, the other way it names, shuts a peripheral to every process at once.
 - **Context switch cost is the PMP reload.**
-  Switching processes rewrites every `pmpaddr` and `pmpcfg` in use.
+  Switching processes writes the `pmpaddr` of each entry the image uses,
+  and the `pmpcfg` registers whole, up to the last entry it or the image before it used:
+  each core counts the entries its last image turned on, and the rest are off already.
+  The register that holds the fence's entry, or the first the core hardwires, keeps those bytes.
   Threads within one process share regions
   and switching between them touches no PMP state.
 - **Each hart has its own.**

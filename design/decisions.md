@@ -67,7 +67,8 @@ until the maintainer decides otherwise.
    `make bench` measures the round trip alone:
    about 4,500 cycles between two processes on RP2350's Hazard3 and 5,900 on the ESP32-C6,
    of which the four calls take 2,000 and 2,200,
-   and loading the other process's regions about 400 cycles a switch on Hazard3 and 1,000 on the ESP32-C6.
+   and loading the other process's regions about 400 cycles a switch on Hazard3 and 1,000 on the ESP32-C6,
+   while it wrote every entry the core has; it writes those the two images use now, not yet measured on either.
    `make lab` shows what an endpoint would carry besides the message, `user/lab/NOTES.md`:
    a client that waits lends its time to nobody, so it goes to spare time while it waits, not to its server,
    and a server cannot tell a client that pays for its asks from one that does not.
