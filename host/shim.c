@@ -246,10 +246,8 @@ uint32_t timer_counter_hz(void)
     return COUNTER_HZ;
 }
 
-uint32_t timer_tick_counts(void)
-{
-    return COUNTER_HZ / TIMER_HZ;
-}
+/* The host never starts the timer, so the tick is QEMU's board's from the start. */
+uint32_t tick_counts = COUNTER_HZ / TIMER_HZ;
 
 uint64_t timer_now(void)
 {

@@ -97,8 +97,13 @@ uint32_t timer_counter_hz(void);
  */
 uint64_t timer_now(void);
 
-/* The counter's counts per tick, at most TICK_COUNTS_MAX. */
-uint32_t timer_tick_counts(void);
+/* The counter's counts per tick, at most TICK_COUNTS_MAX; inline, since a switch reads it a dozen times and more. */
+extern uint32_t tick_counts;
+
+static inline uint32_t timer_tick_counts(void)
+{
+    return tick_counts;
+}
 
 /*
  * How far the counter is past the last counted tick, in counts, at most a tick's:

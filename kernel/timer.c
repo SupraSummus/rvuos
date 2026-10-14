@@ -13,7 +13,7 @@
 #include "work.h"
 
 /* The counter's counts per tick, the period timer_start takes. */
-static uint32_t tick_counts;
+uint32_t tick_counts;
 
 /* The compare value of the tick after the last counted one. */
 static uint64_t next_tick;
@@ -97,11 +97,6 @@ void timer_set(uint32_t ticks)
 uint32_t timer_counter_hz(void)
 {
     return tick_counts * TIMER_HZ;
-}
-
-uint32_t timer_tick_counts(void)
-{
-    return tick_counts;
 }
 
 uint64_t timer_now(void)
