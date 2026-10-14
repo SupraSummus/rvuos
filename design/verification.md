@@ -676,6 +676,17 @@ clang 18's misses clang 22's records by up to two fifths on the ARM boards.
 A change that moves a cost further writes the record anew with `make bench-refresh`, and its commit says what it cost.
 The last measure, the worst round trip beside a process that always wants the core, is the scheduler's; see open decision 9.
 
+**Where the cost goes** (`make trap-profile`).
+A round's cost says how much, not where, nor how much a measure weighs in a real program.
+`tools/trap-profile.py` logs every instruction the kernel runs under QEMU and splits the run into traps,
+each classed by what it ran: the operation, a wait or a signal, a switch, a load of regions, an idle core.
+Each class's share of the kernel's work is its cost times how often it came,
+so what to make cheaper is what weighs most in the program at hand:
+`TRAP_PROGRAM=bench` is a made-up mix, `init` the demo's, which its console's interrupts fill, and `lab` the laboratory's.
+A run repeats exactly, so `TRAP_SAVE` and `TRAP_AGAINST` say what a change moved, function by function,
+and `TRAP_ANNOTATE` breaks a function down by source line.
+It counts instructions, not cycles, which `make bench` measures on a board.
+
 **Hardware.**
 QEMU's PMP may differ from a real core in Smepmp behaviour,
 and it has a four-byte grain, so a coarser grain is never seen there.

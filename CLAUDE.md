@@ -42,6 +42,8 @@ QEMU's `-icount` keeps what they print the same however many run at once.
 It also holds what a system call and a switch cost, `make bench`, to the records in `tests/bench/` within a tenth;
 a change that moves a cost further, and means to, runs `make bench-refresh` with `BOARD=qemu`, `mps2-an385` and `mps2-an521`,
 and its commit says what it cost.
+A change meant to make a trap cheaper compares `make trap-profile` before and after, with `TRAP_SAVE` and `TRAP_AGAINST`,
+and its commit says which classes moved.
 It runs the laboratory, `make lab`, to its end, and holds its numbers to nothing;
 a change to how threads take turns, wait or wake compares them before and after, and its commit says what moved.
 It builds the tick's default rate alone,

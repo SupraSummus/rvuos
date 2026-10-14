@@ -33,6 +33,7 @@ make qemu-replay # replay the corpus on QEMU and compare traces with the host
 make arm-test   # boot the same demo under QEMU on a Cortex-M3, mps2-an385, and on one and two Cortex-M33s, mps2-an521
 make smp-test   # boot the demo on two harts of QEMU virt
 make bench      # what a system call and a switch cost, held to tests/bench/
+make trap-profile # what each kind of trap ran of the kernel and how often, TRAP_PROGRAM=bench, init or lab
 make lab        # servers and clients of user/lab/, scenario by scenario, and what their asks waited
 make check      # test, escape, lib-test, bench, lab, host-test, wifi-test, qemu-replay, arm-test and smp-test
 make mutants    # plant the bugs of tests/mutants/ and see which checks catch them

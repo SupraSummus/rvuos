@@ -79,6 +79,18 @@ bench-refresh: $(BUILD)/kernel-bench.$(IMAGE)
 	tests/bench.py --cc $(CC) --cpu-hz $(BENCH_CPU_HZ) --board $(notdir $(BUILD)) --record $(BENCH_RECORD) --refresh \
 		"$(BOOT_PREFIX) $<"
 
+# What each kind of trap ran of the kernel, function by function, and how often it came,
+# booting user/$(TRAP_PROGRAM)/ under QEMU; see tools/trap-profile.py.
+# TRAP_SAVE names a file to keep the profile in, and TRAP_AGAINST one kept before, to say what moved;
+# TRAP_ANNOTATE names a function to break down by its source lines.
+TRAP_PROGRAM ?= bench
+trap-profile: $(BUILD)/kernel-$(TRAP_PROGRAM).$(IMAGE)
+	@case "$(firstword $(BOOT_PREFIX))" in qemu-system-*) ;; \
+	 *) echo "trap-profile: QEMU's boards only, and $(BOARD) boots on silicon" >&2; exit 1;; esac
+	tools/trap-profile.py --nm $(NM) --objdump $(OBJDUMP) --symbolizer $(SYMBOLIZER) \
+		$(if $(TRAP_SAVE),--save $(TRAP_SAVE)) $(if $(TRAP_AGAINST),--against $(TRAP_AGAINST)) \
+		$(if $(TRAP_ANNOTATE),--annotate $(TRAP_ANNOTATE)) $< $(BOOT_PREFIX) $<
+
 # The laboratory, user/lab/: servers and clients, scenario by scenario, and how long their asks waited;
 # see user/lab/NOTES.md. make check runs it to its end and holds the numbers to nothing.
 lab: $(BUILD)/kernel-lab.$(IMAGE)
