@@ -261,7 +261,7 @@ mac-trace-test:
 # make starts them in the order named, so the longest come first:
 # the ARM demos take half a minute, their idle kernel polling through every sleep, see intr_wait in kernel/arch/arm/trap.c.
 CHECK_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
-CHECK_PARTS := arm-test-an521-smp2 arm-test-an521 arm-test-an385 smp-test lab qemu-replay test host-test \
+CHECK_PARTS := arm-test-an521-smp2 arm-test-an521 arm-test-an385 smp-test lab qemu-replay test host-test model-test \
                bench lib-test escape wifi-test keys-test txctl-test mac-replay-test decode-test contents mac-trace-test
 check:
 	$(MAKE) -j$(CHECK_JOBS) $(CHECK_PARTS)

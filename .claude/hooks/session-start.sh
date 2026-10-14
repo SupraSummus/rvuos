@@ -44,3 +44,15 @@ if ! links; then
 fi
 
 ln -sf "$bin"/{clang,clang++,ld.lld,lld,llvm-*} /usr/local/bin/
+
+# Lean, for the model in model/ that make model-test builds and holds the host build to:
+# elan, and the toolchain model/lean-toolchain names, which elan fetches on the first use of lake there.
+if ! command -v lake >/dev/null; then
+  if ! curl -fsSL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -o /tmp/elan-init.sh; then
+    echo "elan is out of reach, so this session has no Lean: make model-test cannot run" >&2
+    exit 0
+  fi
+  sh /tmp/elan-init.sh -y --default-toolchain none
+  ln -sf "$HOME"/.elan/bin/{elan,lake,lean} /usr/local/bin/
+fi
+(cd "$(dirname "$0")/../../model" && lake --version >/dev/null)

@@ -215,6 +215,8 @@ static void host_asan_report(const char *report)
 
 void host_violated(void)
 {
+    /* The step the report ends, which the model is to see too. */
+    model_end();
     /* The report may have gone to stdout; make sure it is seen. */
     fflush(stdout);
     if (host_isolated) {
@@ -515,6 +517,7 @@ static void host_trap(bool call)
     core_enter();
     sched_count(0);
     history_begin(call);
+    model_begin(call);
 #ifdef RVUOS_WORK
     work_begin();
 #endif
@@ -532,6 +535,7 @@ static void host_trap(bool call)
 #ifdef RVUOS_WORK
     work_end();
 #endif
+    model_end();
     history_end();
     host_interrupts();
 }

@@ -152,6 +152,9 @@ but an operation whose arguments change has the seeds that call it rewritten wit
 When the kernel's object model changes,
 update `kernel/selfcheck.c` with it;
 it is the executable form of the properties in `DESIGN.md`.
+A change to an operation the model in `model/` models, or to what `host/model.c` writes of the state,
+changes the model in the same commit, and `make model-test` holds the two to each other;
+see "The model" in `DESIGN.md`.
 An object bound to another, at creation or by a call, needs a line in `host/history.c` too.
 When a change adds or moves an invariant,
 run `make mutants` as well
@@ -173,7 +176,7 @@ so a change to what a second core does runs `make fuzz FUZZ_HARNESS=fuzz-smp2` f
 ## Environment
 
 In a cloud session, `.claude/hooks/session-start.sh` installs what `make check` needs;
-its clang 22 comes from apt.llvm.org, which the environment's network has to let in.
+its clang 22 comes from apt.llvm.org, and Lean from GitHub's releases, which the environment's network has to let in.
 If a tool is still missing, run the hook, or install the tool and add it to the hook;
 never skip the check.
 A check that could not run is reported as not run, never as passed.
