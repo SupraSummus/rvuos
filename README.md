@@ -28,6 +28,7 @@ make            # build/qemu/kernel-init.elf and build/qemu/kernel-fuzzdrv.elf
 make run        # boot under QEMU virt, RV32
 make test       # boot under QEMU and check the transcript
 make host-test  # replay the fuzz corpus on the host build with invariants
+make model-test # build the Lean model of model/, its proofs with it, and hold the host build's steps to it
 make fuzz       # fuzz the system call surface for FUZZ_TIME seconds in FUZZ_JOBS processes
 make qemu-replay # replay the corpus on QEMU and compare traces with the host
 make arm-test   # boot the same demo under QEMU on a Cortex-M3, mps2-an385, and on one and two Cortex-M33s, mps2-an521
@@ -35,7 +36,7 @@ make smp-test   # boot the demo on two harts of QEMU virt
 make bench      # what a system call and a switch cost, held to tests/bench/
 make trap-profile # what each kind of trap ran of the kernel and how often, TRAP_PROGRAM=bench, init or lab
 make lab        # servers and clients of user/lab/, scenario by scenario, and what their asks waited
-make check      # test, escape, lib-test, bench, lab, host-test, wifi-test, qemu-replay, arm-test and smp-test
+make check      # test, escape, lib-test, bench, lab, host-test, model-test, wifi-test, qemu-replay, arm-test and smp-test
 make mutants    # plant the bugs of tests/mutants/ and see which checks catch them
 make mutants-refresh # carry the patches of tests/mutants/ over to the kernel as it is
 ```
@@ -44,6 +45,7 @@ make mutants-refresh # carry the patches of tests/mutants/ over to the kernel as
 
 The host build needs clang with the sanitizer and libFuzzer runtimes,
 on Debian and Ubuntu the `libclang-rt-<version>-dev` package.
+The model needs Lean 4 through elan, which fetches the version `model/lean-toolchain` names.
 See `DESIGN.md`, "Properties" and "Verification",
 for what the tests check and why.
 

@@ -2,7 +2,7 @@
 # with a hardware shim and a libFuzzer harness.
 # See DESIGN.md, "Properties" and "Verification".
 
-.PHONY: host-harnesses host-test fuzz corpus-merge qemu-replay mutants mutants-refresh mutants-fuzz
+.PHONY: host-harnesses host-test model-test fuzz corpus-merge qemu-replay mutants mutants-refresh mutants-fuzz
 
 HOST_BUILD  := build/host$(PMP_VARIANT)$(TIMER_VARIANT)
 HOST_CORPUS := $(HOST_BUILD)/corpus
@@ -15,7 +15,7 @@ HOST_CFLAGS := -std=c11 -O1 -g -Wall -Wextra -Werror -Wshadow \
 HOST_KERNEL_SRC := kernel/cap.c kernel/core.c kernel/pool.c kernel/process.c kernel/sched.c \
                    kernel/syscall.c kernel/boot.c kernel/selfcheck.c kernel/klog.c \
                    kernel/arch/riscv/frame.c
-HOST_SRC        := host/shim.c host/history.c host/mutator.c host/fuzz.c
+HOST_SRC        := host/shim.c host/history.c host/model.c host/mutator.c host/fuzz.c
 # What the fuzzer's coverage leaves out: the self-check and the harness only look at what the kernel did,
 # and their walks over every object after every call would reward an input for the objects it leaves
 # and spend most of a run in comparisons traced for the fuzzer.
@@ -70,6 +70,16 @@ $(SEEDS): tests/seeds $(wildcard tests/seeds/*) tools/seed.py include/rvuos/abi.
 # Replay the seeds and the corpus once on every harness, self-check after every call.
 host-test: $(HOST_HARNESSES) $(SEEDS)
 	for h in $(HOST_HARNESSES); do $$h -runs=0 $(SEEDS) tests/corpus || exit 1; done
+
+# The model of the derivation tree in model/, its proofs checked as it builds,
+# and every step the seeds and the corpus make on the default machine held to it; see DESIGN.md, "The model".
+# Each input replays alone, so the trace is the same however libFuzzer orders them.
+LAKE        ?= lake
+MODEL_TRACE := $(HOST_BUILD)/model-trace
+model-test: $(HOST_BUILD)/fuzz $(SEEDS)
+	cd model && $(LAKE) build
+	$(HOST_BUILD)/fuzz -runs=0 -seed=1 --isolated --model-trace=$(MODEL_TRACE) $(SEEDS) tests/corpus >/dev/null
+	model/.lake/build/bin/model-check $(MODEL_TRACE)
 
 # Plant the bugs of tests/mutants/ in the kernel one at a time.
 # The link or the host replay must catch each,

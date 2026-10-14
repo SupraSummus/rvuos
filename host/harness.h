@@ -87,6 +87,15 @@ void host_units(unsigned out[UNITS]);
 void history_begin(bool call);
 void history_end(void);
 
+/*
+ * Around each call, or fault: write the state of the derivation tree before it and after it,
+ * for the model to check; see host/model.c. They do nothing until model_open names the file,
+ * and model_end nothing but once after each model_begin.
+ */
+void model_open(const char *path);
+void model_begin(bool call);
+void model_end(void);
+
 #ifdef RVUOS_WORK
 /* Around each call in the harness fuzz-work: count its loops, then check their claims. */
 void work_begin(void);

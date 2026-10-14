@@ -19,6 +19,8 @@
  * from RAM as at power-up, ending at its first invariant report,
  * and followed by HOST_INPUT_END, where tests/differential.py and tests/mutants.sh cut the output.
  * A crash still ends the run, and leaves its input without that line.
+ * With --model-trace=FILE every call and fault is written to FILE, the state of the derivation tree before and after,
+ * for the model to check; see host/model.c.
  */
 
 #include <stdint.h>
@@ -50,6 +52,8 @@ int LLVMFuzzerInitialize(int *argc, char ***argv)
             host_isolated = true;
         } else if (strcmp((*argv)[i], "--print") == 0) {
             host_print = true;
+        } else if (strncmp((*argv)[i], "--model-trace=", 14) == 0) {
+            model_open((*argv)[i] + 14);
         }
     }
     if (host_isolated) {

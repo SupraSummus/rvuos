@@ -703,3 +703,42 @@ The replay records are transport-agnostic
 and can be fed to the board once something loads them there;
 the replay driver's second stack is QEMU's address, see `rvuos/replay.h`,
 so it is not built for the board yet.
+
+## The model
+
+`model/` holds a model of the derivation tree in Lean 4,
+proofs about it,
+and `model-check`, which holds the host build to it.
+The model maps a state and an event to every outcome the kernel may reach.
+The state is what `host/model.c` writes of the kernel's memory:
+every object with its array of nodes, every filled node's words by its address,
+and each node's children in the order of their ring; no link, no scheduler, no PMP.
+It models the operations that touch nothing but the tree:
+`OP_CAP_COPY`, `OP_CAP_DERIVE`, `OP_CAP_MOVE`, `OP_CAP_DELETE`,
+`OP_CAP_REVOKE` until it meets a pool's own node,
+`OP_FRAME_CARVE`, `OP_UNTYPED_SPLIT` and `OP_UNTYPED_RETYPE` into a frame,
+and the refusals dispatch makes before any handler,
+but where an operation's own values decide what it reads.
+A call that may stop part way has an outcome for each place it may stop.
+Of the rest the model says nothing.
+
+`make model-test` builds the model, which checks its proofs,
+replays the seeds and the corpus with `--model-trace`, each input alone,
+and runs `model-check` over the trace:
+every step the model speaks of must reach one of its outcomes, state and registers alike,
+and every state must be a forest.
+An invariant report writes its step as the report found it, so the model sees that step too.
+The model is held to the kernel on the steps the corpus makes, not proved of it.
+Every mutant it catches, the self-check or `host/history.c` catches too;
+what it adds is a statement of the operations that proofs can be made about.
+
+What is proved is proved of the model:
+
+- `blockWord_reads_back` and `split_halves`, in `model/Rvuos/Block.lean`:
+  an Untyped's word reads back as its block,
+  and a split's halves read back as theirs, cover the block and do not overlap,
+  for every 32-bit word.
+  `bv_decide` checks its SAT proof with code Lean compiles, so these two trust Lean's compiler too.
+- `delete_revoke_shrink`, in `model/Rvuos/Shrink.lean`:
+  a delete or a revoke leaves no capability that was not there before, with the same words,
+  in every outcome, stopped part way or not.

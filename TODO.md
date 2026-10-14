@@ -567,6 +567,15 @@ what is left:
   A refresh calls such a patch stale;
   planting through the refresh's `carry` would make the two agree.
 
+- The model in `model/` stops at a pool:
+  a retype into a pool, an allocation, and a revoke through a pool's destroy are unmodelled,
+  and so is most of what the corpus revokes.
+  Mount, unmount, install, uninstall, the binds and the watch fill or clear nodes too.
+- `model-check` checks that every state is a forest; a proof that every modelled operation keeps one would replace the check.
+  Authority only flows is proved in the model of a delete and a revoke alone.
+- `model-check` sees only the corpus; run under `make fuzz` it would see every input the fuzzer tries,
+  and `make mutants` does not run it.
+
 ## System calls
 
 What open decision 31 in `DESIGN.md` asks for before the ABI is held still.

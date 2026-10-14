@@ -48,6 +48,7 @@ Contents:
 - [Bounded stack](design/bounds.md#bounded-stack)
 - [Properties](design/verification.md#properties)
 - [Verification](design/verification.md#verification)
+- [The model](design/verification.md#the-model)
 - [Open decisions](design/decisions.md#open-decisions)
 
 ## Goals
@@ -122,10 +123,12 @@ It is a program's choice like any other, and the kernel knows nothing of it.
 - POSIX compatibility.
   There is no `fork`, no file descriptors, no signals.
 - Binary compatibility with seL4, L4, or F9.
-- Formal verification.
+- Formal verification of the kernel's code.
   The design borrows from seL4 where it makes verification easier,
   because those choices also make the kernel simpler,
-  but verification itself is out of scope.
+  but a proof about the C is out of scope.
+  A model of part of the kernel proves properties of itself,
+  and the host build is held to it by trace; see "The model".
 - Code loaded into the kernel at run time.
   Machine mode is not subject to PMP,
   so a capability to load a module would be a capability to be the kernel,

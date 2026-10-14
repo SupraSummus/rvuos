@@ -1,0 +1,11 @@
+# The model of rvuos's derivation tree and the checker that holds the host build to it.
+# See DESIGN.md, "The model".
+name = "rvuos-model"
+defaultTargets = ["model-check"]
+
+[[lean_lib]]
+name = "Rvuos"
+
+[[lean_exe]]
+name = "model-check"
+root = "Main"
