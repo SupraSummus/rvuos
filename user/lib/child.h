@@ -56,8 +56,9 @@ struct child_own {
     uint32_t pool;                 /* a pool its objects come from */
     uint32_t timer_lines;          /* timer lines it may bind, carved, timer_line_count of them */
     uint32_t timer_line_count;
-    uint32_t time;                 /* units of the first core its threads earn, carved, unit_count of them */
+    uint32_t time;                 /* units of one core its threads earn, carved, unit_count of them */
     uint32_t unit_count;
+    uint32_t unit_first;           /* the first of them, as the machine numbers units, which names their core */
     uint32_t watch;                /* its parent's inbox, carved to the child's fault bit, to watch its threads with */
     uint32_t slot_first, slot_end; /* the slots of its table it hands out itself */
 };
@@ -97,7 +98,7 @@ struct child {
     uint32_t region;                        /* the parent's region its data is installed in, its room's if in_room */
     int in_room;                            /* its data is carved from the parent's room, not a block of its own */
     uint32_t bit_page, bit_fault;           /* its bits on the parent's inbox: a new state, and a fault */
-    uint32_t unit, units;                   /* the units of time it earns */
+    uint32_t core, unit, units;             /* the core child_start gave it the time of, and the units it earns there */
     struct block own;                       /* the pool it builds from itself, child_give_own, if any */
     uint32_t own_unit, own_units;           /* and the units its threads earn */
     /* What of the child's is handed out, a bit each or a count. */
@@ -129,15 +130,15 @@ uint32_t child_put_bits(struct self *s, struct child *c, uint32_t at, uint32_t n
 uint32_t child_code(struct self *s, struct child *c, uint32_t frame);
 /*
  * Lets the child build objects of its own, threads among them, as its parent builds its children:
- * a pool of pool_size bytes, the last lines of its parent's timer lines, units of the first core,
+ * a pool of pool_size bytes, the last lines of its parent's timer lines, units of core,
  * its own table, and the last slots of it, which the parent hands out no more,
  * and its parent's inbox carved to the child's fault bit, for the child to watch its threads with,
  * so that a fault of any of its threads is the child's to its parent.
  * Each goes into the child's next free slot, and *o says which, for the child's page;
  * child_free takes all of it back with the rest.
  */
-uint32_t child_give_own(struct self *s, struct child *c, uint32_t pool_size, uint32_t lines, uint32_t units,
-                        uint32_t slots, struct child_own *o);
+uint32_t child_give_own(struct self *s, struct child *c, uint32_t pool_size, uint32_t lines, uint32_t core,
+                        uint32_t units, uint32_t slots, struct child_own *o);
 /* A frame installed in the child's next free region, which *region says. */
 uint32_t child_map(struct self *s, struct child *c, uint32_t frame, uint32_t rights, uint32_t *region);
 /*
@@ -151,10 +152,18 @@ uint32_t child_region(struct self *s, struct child *c, uint32_t *region);
 uint32_t child_bit(struct self *s, struct child *c, uint32_t *bit);
 /*
  * Starts the child at entry, with a0 at its page, its stack at the top of its data,
- * earning units of the first core, or none and running on spare time alone,
+ * earning units of core, or none and running on that core's spare time alone,
  * and its faults signalling the parent's inbox with bit_fault.
+ * Its thread has a place for each core its parent has units of, see self_cores,
+ * so that its parent may give it the time of another too, as child_spare does.
  */
-uint32_t child_start(struct self *s, struct child *c, void (*entry)(struct child_page *), uint32_t units);
+uint32_t child_start(struct self *s, struct child *c, void (*entry)(struct child_page *), uint32_t core,
+                     uint32_t units);
+/*
+ * The child runs on core's spare time too, besides what child_start gave it,
+ * a core whose time it holds none of yet, so that it runs where its parent's other threads leave time.
+ */
+uint32_t child_spare(struct self *s, struct child *c, uint32_t core);
 /* Tells a running child the parent wrote into its page. */
 uint32_t child_tell(const struct child *c);
 /* 1 if the child's state changed since the last call, *state the new one. */

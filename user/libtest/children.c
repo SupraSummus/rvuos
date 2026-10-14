@@ -568,7 +568,7 @@ void builder_main(struct child_page *page)
         (status = rv_thread_configure(thread, (uint32_t)(uintptr_t)worker_main,
                                       (uint32_t)(uintptr_t)(p->stack + sizeof(p->stack)), (uint32_t)(uintptr_t)p)) !=
             KERR_OK ||
-        (status = units_take(&s, OWN_UNITS, &unit)) != KERR_OK || (status = slot_new(&s, &time)) != KERR_OK ||
+        (status = units_take(&s, self_core(&s), OWN_UNITS, &unit)) != KERR_OK || (status = slot_new(&s, &time)) != KERR_OK ||
         (status = rv_time_carve(s.time, unit, OWN_UNITS, time)) != KERR_OK ||
         (status = rv_time_bind(time, thread, 0, OWN_UNITS)) != KERR_OK || (status = slot_free(&s, time)) != KERR_OK) {
         child_fail(page, BUILDER_STEP_BUILD, status);
@@ -579,7 +579,7 @@ void builder_main(struct child_page *page)
     if (timer_bind(&s, s.pool, p->note, &line) != KERR_LIMIT) {
         child_fail(page, BUILDER_STEP_LIMIT, 2);
     }
-    if (units_take(&s, 1, &unit) != KERR_LIMIT) {
+    if (units_take(&s, self_core(&s), 1, &unit) != KERR_LIMIT) {
         child_fail(page, BUILDER_STEP_LIMIT, 3);
     }
     if ((status = rv_thread_resume(thread)) != KERR_OK) {

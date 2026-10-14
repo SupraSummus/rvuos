@@ -218,7 +218,7 @@ static uint32_t start_thread(struct self *s, struct thread *t, void (*f)(void *)
         (status = rv_thread_watch(t->cap, watch, bits)) != KERR_OK ||
         (status = rv_thread_configure(t->cap, (uint32_t)(uintptr_t)start, t->stack_hi, (uint32_t)(uintptr_t)t)) !=
             KERR_OK ||
-        (status = units_take(s, 1, &unit)) != KERR_OK || (status = slot_new(s, &time)) != KERR_OK) {
+        (status = units_take(s, self_core(s), 1, &unit)) != KERR_OK || (status = slot_new(s, &time)) != KERR_OK) {
         return status;
     }
     status = rv_time_carve(s->time, unit, 1, time);

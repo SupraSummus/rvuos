@@ -608,7 +608,7 @@ static void driver_build(void)
         }
     }
     must("what the driver builds of its own",
-         child_give_own(&self, c, DRV_OWN_POOL, DRV_OWN_LINES, DRV_OWN_UNITS, DRV_OWN_SLOTS, &p->own));
+         child_give_own(&self, c, DRV_OWN_POOL, DRV_OWN_LINES, 0, DRV_OWN_UNITS, DRV_OWN_SLOTS, &p->own));
     must("give the driver the clock", child_give(&self, c, BOOT_CAP_CLOCK, RIGHT_R, &p->clock));
     must("a slot", slot_new(&self, &lines));
     must("the modem's lines", rv_irq_carve(BOOT_CAP_IRQ_LINES, DRV_LINE_FIRST, DRV_LINES, lines));
@@ -845,7 +845,7 @@ int main(void)
          * watchdog halts the machine and writes it out. Fed every second by second() as long as the root turns. */
         must("the watchdog", rv_clock_watchdog(BOOT_CAP_CLOCK, 2000000u));
     }
-    must("start the driver", child_start(&self, &sys.driver, entry, DRV_UNITS));
+    must("start the driver", child_start(&self, &sys.driver, entry, 0, DRV_UNITS));
     must("count the seconds", rv_timer_period(tick, tick_bit, CHECK_US, &skipped));
     for (;;) {
         uint32_t bits = 0;

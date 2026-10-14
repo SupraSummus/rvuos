@@ -71,8 +71,8 @@ what is left:
   20 of the root task's 42 slots on QEMU once `user/libtest/` has given everything back.
   Keeping a split's parent while a half is taken would let two free halves join again,
   at a slot per split for as long as they are apart.
-- `struct self` hands out the first core's units alone, so children run on the first core,
-  and the Wi-Fi system holds all 64 of them: a fourth client would take some of another's.
+- The Wi-Fi system starts every child on the first core and holds all 64 of its units:
+  a fourth client would take some of another's, and the second core, where there is one, runs none of it.
 - A channel between two peers is connected once: a child taken down leaves the other end naming nothing,
   and the child built in its place needs a channel of its own, which the other end has to learn of.
   A hub's ends are connected again, with the server's word that it let go of the last client;

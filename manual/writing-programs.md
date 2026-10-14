@@ -220,6 +220,8 @@ Its table starts with `CHILD_INBOX`, `CHILD_PARENT`, `CHILD_TIMER`, `CHILD_SELF`
 its process with code and data in the first two regions, and its inbox with `CHILD_BIT_TIMER` and `CHILD_BIT_PARENT`.
 Past those the parent hands out the child's slots, regions and bits, and writes which into the page,
 so the type of a child's page is all the two agree on.
+`child_start` names the core it runs on and the units of it it earns, or none for that core's spare time alone;
+its thread has a place on each core its parent has units of, so `child_spare` gives it another core's spare time besides.
 A child writes its state into the page,
 and signals its parent through `CHILD_PARENT`, its parent's inbox carved to the child's own bit, section 5.7,
 so the parent knows who signalled and the child names every bit, `NOTIFY_ALL_BITS`, not knowing which.
@@ -241,7 +243,7 @@ Such an image keeps globals, in memory its parent maps for them, since no other 
 
 **A child that builds threads of its own**, as a driver of a library written for an operating system with tasks does,
 is given what to build them from by its parent, `child_give_own`:
-a pool, a few timer lines carved from the last of its parent's, units of the first core,
+a pool, a few timer lines carved from the last of its parent's, units of a core,
 a capability to its own table, and the last slots of that table, which the parent hands out no more.
 The child makes a `struct self` of them, `child_self`, and builds through `lib/self.h` as a root task does,
 but hands out no memory, regions or bits of its inbox, which stay its parent's, and builds no children.
@@ -314,7 +316,6 @@ The first faults if it touches the memory again,
 and the second, told after the first told its parent it was done, reads what it wrote with no fence, section 5.7.
 
 **What it does not do yet**, with the reasons in `TODO.md`:
-children run on the first core;
 a channel between two peers is connected once, as only a hub's ends are connected again;
 and halved memory is never joined again, so each free block holds a slot.
 
@@ -322,6 +323,7 @@ and halved memory is never joined again, so each free block holds a slot.
 Its root task reads bytes back out of free memory, has two children send each other packets through rings that fill,
 and builds, hears fault and takes down a child twice;
 it checks a child that answers and one that spins, and finds the second;
+where there is a second core, it starts a child there and gives it the first core's spare time besides;
 then, in room for children's data, it builds a server with a hub and a client on each end,
 and takes one client down and connects another in its place twice, each finding its channel zeroed;
 has three children add to a count they share under a lock, each sleeping now and then while it holds it;

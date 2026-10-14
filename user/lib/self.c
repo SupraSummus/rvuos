@@ -51,6 +51,11 @@ uint32_t self_root(struct self *s, uint32_t units)
     s->free[s->free_count++] = (struct block){ BOOT_CAP_FREE_RAM, 0, base, size };
     PASS(slot_new(s, &s->inbox));
     TRY(s, "an inbox", rv_pool_alloc(s->pool, CAP_NOTIFICATION, s->inbox, 0));
+    /* Every core's units, as many as it keeps account of, from the first core's: the units are numbered core by core. */
+    uint32_t time[3];
+    TRY(s, "the units of time", rv_cap_info_of(s->time, CAP_TIME, time));
+    s->time_first = time[0];
+    s->time_count = time[1] < SELF_CORES * TIME_UNITS ? time[1] : SELF_CORES * TIME_UNITS;
     TRY(s, "keep the root's units", rv_time_bind(s->time, BOOT_CAP_THREAD, 0, units));
     for (uint32_t i = 0; i < units; i++) {
         mark(s->units, i, 1);
@@ -268,9 +273,40 @@ void room_give(struct self *s, const struct block *b)
     s->room_used &= ~(low_bits(b->size / SELF_ROOM_UNIT) << i);
 }
 
-uint32_t units_take(struct self *s, uint32_t count, uint32_t *first)
+/* The core of the unit at an offset in its time. */
+static uint32_t unit_core(const struct self *s, uint32_t at)
 {
-    for (uint32_t at = 0; count > 0 && at + count <= TIME_UNITS; at++) {
+    return (s->time_first + at) / TIME_UNITS;
+}
+
+uint32_t self_core(const struct self *s)
+{
+    return unit_core(s, 0);
+}
+
+uint32_t self_cores(const struct self *s)
+{
+    return s->time_count != 0 ? unit_core(s, s->time_count - 1) - unit_core(s, 0) + 1 : 1;
+}
+
+uint32_t core_unit(struct self *s, uint32_t core, uint32_t *unit)
+{
+    for (uint32_t at = 0; at < s->time_count; at++) {
+        if (unit_core(s, at) == core) {
+            *unit = at;
+            return KERR_OK;
+        }
+    }
+    s->what = "units of time of the core";
+    return KERR_LIMIT;
+}
+
+uint32_t units_take(struct self *s, uint32_t core, uint32_t count, uint32_t *first)
+{
+    for (uint32_t at = 0; count > 0 && at + count <= s->time_count; at++) {
+        if (unit_core(s, at) != core || unit_core(s, at + count - 1) != core) {
+            continue;
+        }
         uint32_t n = 0;
         while (n < count && !taken(s->units, at + n)) {
             n++;
@@ -283,7 +319,7 @@ uint32_t units_take(struct self *s, uint32_t count, uint32_t *first)
             return KERR_OK;
         }
     }
-    s->what = "units of time in a row";
+    s->what = "units of time of the core in a row";
     return KERR_LIMIT;
 }
 
