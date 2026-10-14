@@ -1,20 +1,20 @@
-The loop that loads a process's regions into the PMP claims a bound of four,
-and a process holds up to eight regions,
-so the claim is false as soon as one holds five.
+The loop that binds a thread to its units claims a bound of two,
+and a thread may be bound to more units than that,
+so the claim is false as soon as one is.
 The code is the same, so only the counting harness catches it.
 
 Caught-by: fuzz-work
-Report: the loop at kernel/process.c ran N times on one entry, beyond its bound of N
+Report: the loop at kernel/sched.c ran N times on one entry, beyond its bound of N
 
-diff --git a/kernel/process.c b/kernel/process.c
---- a/kernel/process.c
-+++ b/kernel/process.c
-@@ -11,7 +11,7 @@ void process_activate(struct process *proc)
- {
-     const struct pmp_image *img = &proc->pmp;
-     for (unsigned i = 0; i < img->count; i++) {
--        LOOP_BOUND(PROCESS_REGION_SLOTS);
-+        LOOP_BOUND(4);
-         pmp_set(i, img->addr[i], img->cfg[i]);
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -417,7 +417,7 @@ void sched_bind(struct thread *t, uint32_t first, uint32_t count, uint8_t rights
+     t->time = (struct cap){ .type = CAP_BOUND, .rights = rights, .a = first, .b = count };
+     cap_attach(parent, &t->time);
+     for (uint32_t i = 0; i < count; i++) {
+-        LOOP_BOUND(TIME_UNITS);
++        LOOP_BOUND(2);
+         unit_thread[first + i] = v2p(t);
      }
-     for (unsigned i = img->count; i < pmp_entry_count; i++) {
+     /* What the account held stays, and settling holds it to what the new units hold at most. */

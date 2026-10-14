@@ -172,6 +172,26 @@ static void mpu_sync(void)
     __asm__ volatile("dsb\n\tisb" : : : "memory");
 }
 
+/* The kernel writes the regions only while the MPU is off, and mpu_thread's barrier makes them take. */
+static void pmp_clear(unsigned idx)
+{
+    SCS_REG(MPU_RNR) = idx;
+    SCS_REG(MPU_RASR) = 0;
+    SCS_REG(MPU_RBAR) = 0;
+}
+
+void pmp_load(const uint32_t *addr, const uint8_t *cfg, unsigned count, unsigned off)
+{
+    for (unsigned i = 0; i < count; i++) {
+        LOOP_BOUND(PMP_MAX_ENTRIES);
+        pmp_set(i, addr[i], cfg[i]);
+    }
+    for (unsigned i = count; i < off; i++) {
+        LOOP_BOUND(PMP_MAX_ENTRIES);
+        pmp_clear(i);
+    }
+}
+
 /* The MPU's regions, every one cleared, and the MPU off until the first thread runs; see mpu_thread. */
 static unsigned mpu_reset(void)
 {
@@ -206,14 +226,6 @@ void mpu_core_init(void)
     if (mpu_reset() < pmp_entry_count) {
         kpanic("a core has fewer MPU regions than the first");
     }
-}
-
-/* The kernel writes the regions only while the MPU is off, and mpu_thread's barrier makes them take. */
-void pmp_clear(unsigned idx)
-{
-    SCS_REG(MPU_RNR) = idx;
-    SCS_REG(MPU_RASR) = 0;
-    SCS_REG(MPU_RBAR) = 0;
 }
 
 void mpu_kernel(void)

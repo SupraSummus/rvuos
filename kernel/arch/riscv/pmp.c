@@ -96,6 +96,18 @@ static uint8_t pmpcfg_board(uint8_t cfg)
 #endif
 }
 
+/* pmpcfg_board for the four bytes of a register at once. */
+static uint32_t pmpcfg_board_word(uint32_t cfg)
+{
+#if PMP_CFG_RX_TRANSPOSED
+    const uint32_t r = 0x01010101u * PMP_R, x = 0x01010101u * PMP_X;
+    _Static_assert(PMP_X == PMP_R << 2, "R and X lie two bits apart");
+    return (cfg & ~(r | x)) | (cfg & r) << 2 | (cfg & x) >> 2;
+#else
+    return cfg;
+#endif
+}
+
 unsigned pmp_entry_count;
 unsigned pmp_entry_end;
 uint32_t pmp_grain;
@@ -173,10 +185,43 @@ void pmp_set(unsigned idx, uint32_t addr, uint8_t cfg)
     pmpcfg_set_byte(idx, pmpcfg_board(cfg));
 }
 
-void pmp_clear(unsigned idx)
+/*
+ * The image's addresses go straight to their CSRs, from the last down, through one jump;
+ * an entry turned off keeps its address, which matches nothing while its mode is OFF.
+ * Its configuration goes a register at a time, four entries in each:
+ * the image's bytes below count, zero up to off, and in the register that holds pmp_entry_count
+ * the bytes from it up read back and kept, so the fence and what the core hardwires stay as they were.
+ */
+void pmp_load(const uint32_t *addr, const uint8_t *cfg, unsigned count, unsigned off)
 {
-    pmpcfg_set_byte(idx, 0);
-    pmpaddr_write(idx, 0);
+    switch (count) {
+#define CASE(n) case n + 1: csr_write(pmpaddr##n, addr[n]); __attribute__((fallthrough));
+        CASE(15) CASE(14) CASE(13) CASE(12)
+        CASE(11) CASE(10) CASE(9)  CASE(8)
+        CASE(7)  CASE(6)  CASE(5)  CASE(4)
+        CASE(3)  CASE(2)  CASE(1)  CASE(0)
+#undef CASE
+    case 0:
+        break;
+    default:
+        kpanic("pmp_load count out of range");
+    }
+    const uint8_t *bytes = __builtin_assume_aligned(cfg, 4);
+    unsigned end = count > off ? count : off;
+    for (unsigned reg = 0; reg * 4 < end; reg++) {
+        LOOP_BOUND((PMP_MAX_ENTRIES + 3) / 4);
+        unsigned first = reg * 4;
+        /* The bytes of entries below count, and those of entries from pmp_entry_count up. */
+        uint32_t image = count >= first + 4 ? ~0u : count > first ? (1u << (8 * (count - first))) - 1 : 0;
+        uint32_t kept = pmp_entry_count >= first + 4 ? 0 : ~0u << (8 * (pmp_entry_count - first));
+        uint32_t v;
+        __builtin_memcpy(&v, bytes + first, 4);
+        v = pmpcfg_board_word(v) & image;
+        if (kept != 0) {
+            v |= pmpcfg_read(reg) & kept;
+        }
+        pmpcfg_write(reg, v);
+    }
 }
 
 void pmp_get(unsigned idx, uint32_t *addr, uint8_t *cfg)

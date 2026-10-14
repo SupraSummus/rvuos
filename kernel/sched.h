@@ -192,6 +192,9 @@ struct core {
     /* Whether the protection unit holds regions the running thread's process no longer has, to load again before it runs. */
     bool pmp_stale;
 
+    /* The entries of the protection unit the last image loaded here turned on; those past them are off. */
+    uint8_t pmp_loaded;
+
     /* Whether a core told this one of a change it must trap for, which it interrupts as it gives the lock up. */
     bool interrupt_owed;
 

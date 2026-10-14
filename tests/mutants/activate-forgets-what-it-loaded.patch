@@ -1,0 +1,18 @@
+Loading a process's image leaves the core's count of the entries it turned on as it was,
+so a load after it turns off none of them, and a process with fewer regions than the one before
+keeps the other's regions past its own.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: PMP CSRs grant rights the slots do not
+
+diff --git a/kernel/process.c b/kernel/process.c
+--- a/kernel/process.c
++++ b/kernel/process.c
+@@ -39,7 +39,6 @@ void process_activate(struct process *proc)
+     const struct pmp_image *img = &proc->pmp;
+     struct core *core = core_self();
+     pmp_load(img->addr, img->cfg, img->count, core->pmp_loaded);
+-    core->pmp_loaded = (uint8_t)img->count;
+ }
+ 
+ /*
