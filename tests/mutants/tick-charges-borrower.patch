@@ -7,12 +7,12 @@ Report: a tick did not cost the thread whose turn it was a tick less its units
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -753,7 +753,7 @@ void irq_drop(struct cap *signalled)
+@@ -809,7 +809,7 @@ void irq_drop(struct cap *signalled)
  static void tick_advance(uint32_t ticks)
  {
      struct core *core = core_self();
--    struct thread *payer = turn_payer(core);
-+    struct thread *payer = core->turn;
+-    struct place *paid = turn_place(core);
++    struct place *paid = core->turn != NULL ? thread_place_on(core->turn, core_index()) : NULL;
      uint32_t owed = sched_ticks + ticks - core->ticks;
      core->wake_stale = true;
      if (owed != 0) {

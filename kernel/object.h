@@ -52,7 +52,7 @@ struct obj_header {
  * an only child's is itself, and a root's and an empty slot's is 0.
  * A process's region slots are slots of this type too, CAP_INSTALLED, and leaves of the tree,
  * and so are its table slots, which hold CAP_CAPTABLE capabilities,
- * and a thread's process, CAP_HOSTED, its units, CAP_BOUND, and its watch, CAP_WATCHED,
+ * and a thread's process, CAP_HOSTED, its watch, CAP_WATCHED, and each of its places' units, CAP_BOUND,
  * and an Irq's notification, CAP_SIGNALLED,
  * and so is a pool's own node, CAP_RETYPED, in the pool's descriptor.
  * For CAP_TIME a is the first unit and b the count, as for CAP_IRQ_LINE.
@@ -60,7 +60,7 @@ struct obj_header {
 struct cap {
     uint8_t type;
     uint8_t rights;
-    uint8_t index;      /* an installed region's slot in its process; 0 elsewhere */
+    uint8_t index;      /* an installed region's slot in its process, a binding's place in its thread; 0 elsewhere */
     uint8_t pad;
     uint32_t a;
     uint32_t b;
@@ -80,9 +80,9 @@ struct cap {
  */
 #define CAP_RETYPED 0x81
 /*
- * The units of time a thread earns, in the thread: a is the first and b how many, none at all among them,
- * and the rights, spare time with RIGHT_X, are those of the Time capability the thread was bound through,
- * below which the node hangs. Kernel internal: never in a table.
+ * The units of time a thread earns in one of its places, in the thread: a is the first and b how many, none at all among them,
+ * the rights, spare time with RIGHT_X, are those of the Time capability the thread was bound through,
+ * below which the node hangs, and index is the place. Kernel internal: never in a table.
  */
 #define CAP_BOUND 0x82
 /*
@@ -197,15 +197,45 @@ _Static_assert(THREAD_WAS_STOPPED == THREAD_STOPPED && THREAD_WAS_READY == THREA
  */
 #define THREAD_FAULTED 0x2
 
+/*
+ * A thread's place on a core: what it earns there, its account, and where it waits on that core's queues.
+ * A thread has the places it was made with, each empty or holding the time of one core,
+ * its units there, none at all among them, with spare time or without,
+ * and never two the time of one core; see DESIGN.md, "Cores".
+ * The binding itself is the place's node in the thread, place_time, so that a thread's nodes are one array.
+ */
+struct place {
+    /*
+     * Its account at the tick stamp, in COUNT_PARTS parts of a count,
+     * at most ACCOUNT_TICKS ticks' counts of parts for each unit it earns, and so none while it earns none.
+     * It is brought up to the count only when the kernel looks at it,
+     * and the charges of a turn in the tick it was counted to are taken off it as that turn ends.
+     */
+    uint32_t balance;
+    uint32_t stamp;
+    /* Its core's queue while it waits on one, a ring of places. */
+    paddr_t queue_next;
+    paddr_t queue_prev;
+    paddr_t thread;     /* the thread it is a place of */
+    uint8_t queue;      /* the scheduler's queue it waits on, one of QUEUE_*, while its thread is READY and not running */
+    uint8_t core;       /* the core whose queue that is, while it waits on one */
+    uint8_t index;      /* its place among its thread's */
+    uint8_t pad;
+};
+
 /* A thread holds its process as a process holds its tables, so the two may lie in different pools. */
 struct thread {
     struct obj_header hdr;
     uint8_t state;
     uint8_t flags;
-    uint8_t queue;      /* the scheduler's queue it waits on, one of QUEUE_*, while READY and not running */
-    uint8_t core;       /* the core it runs and waits on, that of its units; see thread_settle */
+    /*
+     * The core whose turn it has or pays for, or had or paid for last;
+     * a turn there takes it off the queues of every core until the turn ends; see is_turn in sched.c.
+     */
+    uint8_t core;
+    uint8_t places;     /* how many places it has, from one to CORES */
     paddr_t waiting_on; /* the notification, while WAITING; 0 otherwise */
-    /* The notification's waiters while WAITING, the scheduler's queue while it waits on one. */
+    /* The notification's waiters while WAITING. */
     paddr_t queue_next;
     paddr_t queue_prev;
     /*
@@ -217,18 +247,14 @@ struct thread {
     paddr_t lend_prev;
     /* The threads that lend it their time, a ring, oldest first, 0 for none: the oldest is the one it borrows from. */
     paddr_t lenders;
+    struct trap_frame frame;
     struct cap proc;    /* CAP_HOSTED, or CAP_NONE once the process is taken */
-    struct cap time;    /* CAP_BOUND, or CAP_NONE while the thread is bound to no units */
     struct cap watch;   /* CAP_WATCHED, or CAP_NONE while nothing hears the thread's faults */
     /*
-     * Its account at the tick stamp, in COUNT_PARTS parts of a count,
-     * at most ACCOUNT_TICKS ticks' counts of parts for each unit it earns, and so none while it earns none.
-     * It is brought up to the count only when the kernel looks at it,
-     * and the charges of a turn in the tick it was counted to are taken off it as that turn ends.
+     * Each place's units, CAP_BOUND, or CAP_NONE while the place is empty, a node for each place,
+     * and after them the places themselves; see place_time and thread_place.
      */
-    uint32_t balance;
-    uint32_t stamp;
-    struct trap_frame frame;
+    struct cap time[];
 };
 
 /*
@@ -291,7 +317,8 @@ _Static_assert(offsetof(struct pmp_image, cfg) % 4 == 0, "pmp_load reads cfg a w
 _Static_assert(sizeof(struct process) ==
                    8 + 24 * (PROCESS_TABLES + PROCESS_REGION_SLOTS) + sizeof(struct pmp_image) + PROCESS_CSRS_SIZE,
                "object layout");
-_Static_assert(sizeof(struct thread) == 48 + 3 * sizeof(struct cap) + sizeof(struct trap_frame), "object layout");
+_Static_assert(sizeof(struct thread) == 40 + sizeof(struct trap_frame) + 2 * sizeof(struct cap), "object layout");
+_Static_assert(sizeof(struct place) == 24, "object layout");
 _Static_assert(sizeof(struct notification) == 16, "object layout");
 _Static_assert(sizeof(struct irq) == 20 + sizeof(struct cap), "object layout");
 
@@ -336,13 +363,59 @@ static inline struct pool *obj_pool(const struct obj_header *o) { return p2v(o->
 
 _Static_assert(offsetof(struct process, slots) == offsetof(struct process, tables) + sizeof(((struct process *)0)->tables),
                "a process's table slots and region slots are one array of nodes");
-_Static_assert(offsetof(struct thread, time) == offsetof(struct thread, proc) + sizeof(struct cap) &&
-                   offsetof(struct thread, watch) == offsetof(struct thread, time) + sizeof(struct cap),
-               "a thread's process, units and watch are one array of nodes");
+_Static_assert(offsetof(struct thread, watch) == offsetof(struct thread, proc) + sizeof(struct cap) &&
+                   offsetof(struct thread, time) == offsetof(struct thread, watch) + sizeof(struct cap),
+               "a thread's process, watch and places' units are one array of nodes");
+_Static_assert(CORES <= UINT8_MAX, "a thread counts its places in a byte");
+
+/* The bytes a thread of so many places takes: its nodes for each place's units, and the places after them. */
+static inline size_t thread_size(uint32_t places)
+{
+    return sizeof(struct thread) + places * (sizeof(struct cap) + sizeof(struct place));
+}
+/*
+ * How many places a thread has: one on a machine of one core, which the compiler then knows,
+ * so that the scheduler's every step pays nothing for places a core has no use for.
+ */
+static inline uint32_t thread_places(const struct thread *t)
+{
+    return CORES == 1 ? 1 : t->places;
+}
+/* A thread's place i, below its places. */
+static inline struct place *thread_place(const struct thread *t, uint32_t i)
+{
+    return (struct place *)(uintptr_t)&t->time[thread_places(t)] + i;
+}
+/* The thread a place is of, and its units, the place's node: on one core the node just before it. */
+static inline struct thread *place_thread(const struct place *p)
+{
+    if (CORES == 1) {
+        return (struct thread *)((char *)(uintptr_t)p - sizeof(struct cap) - offsetof(struct thread, time));
+    }
+    return p2v(p->thread);
+}
+static inline struct cap *place_time(const struct place *p)
+{
+    if (CORES == 1) {
+        return (struct cap *)(uintptr_t)p - 1;
+    }
+    return &place_thread(p)->time[p->index];
+}
+/* A thread pool_alloc zeroed takes its places: each knows the thread and which of its places it is. */
+static inline void thread_make_places(struct thread *t, uint32_t places)
+{
+    t->places = (uint8_t)places;
+    for (uint32_t i = 0; i < places; i++) {
+        LOOP_BOUND(CORES);
+        struct place *p = thread_place(t, i);
+        p->thread = v2p(t);
+        p->index = (uint8_t)i;
+    }
+}
 
 /*
  * The nodes of the derivation tree an object holds, as one array, and how many:
- * a table's slots, a process's table slots and region slots, a thread's process, units and watch,
+ * a table's slots, a process's table slots and region slots, a thread's process, watch and places' units,
  * an Irq's notification, a pool's own node.
  * Other objects hold none.
  */
@@ -356,7 +429,7 @@ static inline struct cap *obj_nodes(struct obj_header *o, uint32_t *count)
         *count = PROCESS_TABLES + PROCESS_REGION_SLOTS;
         return ((struct process *)o)->tables;
     case CAP_THREAD:
-        *count = 3;
+        *count = 2 + ((struct thread *)o)->places;
         return &((struct thread *)o)->proc;
     case CAP_IRQ:
         *count = 1;
@@ -390,10 +463,10 @@ static inline struct thread *hosted_thread(struct cap *n)
 {
     return (struct thread *)((char *)n - offsetof(struct thread, proc));
 }
-/* The thread whose units these are. */
+/* The thread whose place's units these are; the node knows its place, and so the thread it lies in. */
 static inline struct thread *bound_thread(struct cap *n)
 {
-    return (struct thread *)((char *)n - offsetof(struct thread, time));
+    return (struct thread *)((char *)(n - n->index) - offsetof(struct thread, time));
 }
 /*
  * The table a slot number of a thread's points into, see SLOT_TABLE_SHIFT,
@@ -450,6 +523,9 @@ static inline bool irq_due(const struct irq *i, uint32_t now)
 static inline uint32_t obj_align(uint32_t size) { return (size + OBJ_ALIGN - 1) & ~(uint32_t)(OBJ_ALIGN - 1); }
 
 /* The largest object, a table of the most slots; pool_alloc refuses a larger one. */
+_Static_assert(sizeof(struct thread) + CORES * (sizeof(struct cap) + sizeof(struct place)) <=
+                   sizeof(struct captable) + CAPTABLE_MAX_SLOTS * sizeof(struct cap),
+               "a thread of every core is no larger than the largest table");
 #define OBJ_MAX_SIZE (sizeof(struct captable) + CAPTABLE_MAX_SLOTS * sizeof(struct cap))
 
 /* Both are correct even if a range ends at the top of the address space. */
@@ -507,7 +583,7 @@ bool pool_fits(const struct pool *pool, size_t size);
 void *pool_alloc(struct pool *pool, uint8_t type, size_t size);
 
 /*
- * The bytes an object of a type takes, before rounding, slots its count for a table:
+ * The bytes an object of a type takes, before rounding, slots its count for a table and its places for a thread:
  * what an allocation asks of a pool and what OP_POOL_INFO tells, CAP_POOL's being the descriptor.
  * obj_size below keeps a switch of its own, so the self-check's tiling and the destroy hold the two to each other.
  */
@@ -521,7 +597,7 @@ static inline size_t obj_type_size(uint8_t type, uint32_t slots)
     case CAP_PROCESS:
         return sizeof(struct process);
     case CAP_THREAD:
-        return sizeof(struct thread);
+        return thread_size(slots);
     case CAP_NOTIFICATION:
         return sizeof(struct notification);
     case CAP_IRQ:
@@ -544,7 +620,7 @@ static inline size_t obj_size(const struct obj_header *obj)
     case CAP_PROCESS:
         return sizeof(struct process);
     case CAP_THREAD:
-        return sizeof(struct thread);
+        return thread_size(((const struct thread *)obj)->places);
     case CAP_NOTIFICATION:
         return sizeof(struct notification);
     case CAP_IRQ:

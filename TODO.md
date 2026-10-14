@@ -630,10 +630,16 @@ What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
   until the root task is gone; open decision 20 in `DESIGN.md`.
   Grant the rest as further blocks, or lay the board out afresh,
   when a board's RAM gets tight.
-- `PROCESS_REGION_SLOTS` is fixed at 8, whatever the PMP budget;
-  size it per process from the budget.
-- A process's PMP image has room for `PMP_MAX_ENTRIES` entries, sixteen, and fills `PROCESS_REGION_SLOTS` at most;
-  sized by the smaller, a process takes 40 bytes less, and the self-check bounds the image's count by it too.
+- A process has room for `PROCESS_REGION_SLOTS` regions, eight, and a PMP image of `PMP_MAX_ENTRIES` entries, sixteen,
+  whatever it installs and whatever the board's budget,
+  so what it takes is the board's and the build's, and a process that holds two regions pays for sixteen entries.
+  Open decision 35 in `DESIGN.md` makes the hardware's count a limit a process is refused by, never a size:
+  `OP_POOL_ALLOC` of a `Process` takes the number of its region slots, as a `CapTable`'s takes its slots,
+  from one to what the board's budget allows, `KERR_INVALID_ARG` past it and for none,
+  and sizes the slots and the image by it.
+  `OP_POOL_INFO` takes the count as it takes a table's,
+  the self-check bounds the image's count by it,
+  and the seeds that make a process are rewritten with the operation.
 - `pmp.h` names the protection unit's interface after PMP, and `kernel/arch/arm/mpu.c` implements it too;
   the image keeps PMP's encoding on both, but `pmp_set` and `pmp_entry_count` read as RISC-V's.
   Rename it with the next change to the image in `process.c`, where mutants stand,
@@ -711,6 +717,6 @@ the first five below are what does not keep to it yet, each a constant-time chan
   so a client that lends pays for whatever the server does until the server wakes it, other clients' asks among it.
   A server that ran on the time of the client it serves would have to name it, a call more for each ask;
   `make lab`'s `free-rider` and `lend-rider`, and open decisions 5 and 27.
-- A thread lends only on its own core.
-  Running the borrower on the lender's core for the turn, as Linux's proxy execution does, would lend across cores
+- A thread lends only on a core whose time both it and its borrower hold, a place each.
+  Running the borrower on the lender's core for the turn, as Linux's proxy execution does, would lend to a borrower without a place there
   and keep each core's time to its units; open decision 27.

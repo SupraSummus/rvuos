@@ -7,8 +7,8 @@ Report: a description differs from the capability it describes
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -344,7 +344,7 @@ static int pool_info(const struct pool *pool, uint32_t *arg)
-     if (type == CAP_CAPTABLE ? slots == 0 || slots > CAPTABLE_MAX_SLOTS : slots != 0) {
+@@ -334,7 +334,7 @@ static int pool_info(const struct pool *pool, uint32_t *arg)
+     if (most != 0 ? slots == 0 || slots > most : slots != 0) {
          return KERR_INVALID_ARG;
      }
 -    arg[1] = obj_align((uint32_t)obj_type_size((uint8_t)type, slots));

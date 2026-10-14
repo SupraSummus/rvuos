@@ -26,12 +26,14 @@ struct thread *boot_create_root(void)
 
     struct captable *table = pool_alloc(pool, CAP_CAPTABLE, obj_type_size(CAP_CAPTABLE, ROOT_TABLE_SLOTS));
     struct process *proc = pool_alloc(pool, CAP_PROCESS, obj_type_size(CAP_PROCESS, 0));
-    struct thread *thread = pool_alloc(pool, CAP_THREAD, obj_type_size(CAP_THREAD, 0));
+    struct thread *thread = pool_alloc(pool, CAP_THREAD, obj_type_size(CAP_THREAD, CORES));
     if (table == NULL || proc == NULL || thread == NULL) {
         kpanic("boot pool too small for the root task");
     }
 
     table->nslots = ROOT_TABLE_SLOTS;
+    /* A place on every core, so that the root thread may hold the time of each. */
+    thread_make_places(thread, CORES);
     thread->flags = 0;
     frame_start(&thread->frame, ENTRY_PC(USER_CODE_BASE), USER_DATA_BASE + USER_DATA_SIZE, 0);
 
@@ -134,11 +136,11 @@ struct thread *boot_create_root(void)
     }
 
     /*
-     * The root thread earns the whole of the first core, bound through the capability to every unit of it,
+     * The root thread earns the whole of the first core in its first place, bound through the capability to every unit,
      * which lets it run on spare time too, and starts with a full account.
      * It is the one the kernel drops into, so it is ready and on no queue: bound and filled while stopped.
      */
-    sched_bind(thread, 0, TIME_UNITS, RIGHT_W | RIGHT_X, &table->slots[BOOT_CAP_TIME]);
+    sched_bind(thread_place(thread, 0), 0, TIME_UNITS, RIGHT_W | RIGHT_X, &table->slots[BOOT_CAP_TIME]);
     sched_accounts_fill();
     thread->state = THREAD_READY;
 

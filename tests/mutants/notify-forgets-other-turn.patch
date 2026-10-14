@@ -3,17 +3,17 @@ whose timer stays deferred for a turn that should end at the next tick.
 
 Caught-by: fuzz-smp2
 Report: a turn on spare time runs while a thread with time waits
-Report: the timer is set past a tick an unmarked change brought forward
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -324,7 +324,7 @@ static void thread_settle(struct thread *t)
-     if (sooner) {
-         core->nearest_release = sched_ticks + fill;
+@@ -375,9 +375,6 @@ static void thread_settle(struct thread *t)
+         LOOP_BOUND(CORES);
+         place_settle(thread_place(t, i));
      }
--    if (joined || sooner || is_turn(t)) {
-+    if (joined || sooner) {
-         core_notify(core);
-     }
+-    if (is_turn(t)) {
+-        core_notify(&cores[t->core]);
+-    }
  }
+ 
+ /*

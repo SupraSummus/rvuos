@@ -3,19 +3,19 @@ It takes turns before the threads on spare time, and one held to its units is no
 a ready thread waits on the queue its account and binding say.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
-Report: a thread waits on another queue than its account says
+Report: a place waits on another queue than its account says
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -296,10 +296,7 @@ static uint8_t thread_queue(const struct thread *t, uint32_t balance, const stru
+@@ -313,10 +313,7 @@ static uint8_t place_queue(const struct place *p, uint32_t balance, const struct
      if (has_time(balance) || (l != NULL && has_time(account_now(l)))) {
          return QUEUE_RUN;
      }
--    if (thread_spare(t)) {
+-    if (place_spare(p)) {
 -        return QUEUE_SPARE;
 -    }
--    return thread_units(t) != 0 || (l != NULL && thread_units(l) != 0) ? QUEUE_SPENT : QUEUE_NONE;
+-    return place_units(p) != 0 || (l != NULL && place_units(l) != 0) ? QUEUE_SPENT : QUEUE_NONE;
 +    return QUEUE_RUN;
  }
  

@@ -276,6 +276,8 @@
  *   CAP_PROCESS   the slot of the CapTable capability the process will use, mounted in its table slot 0,
  *                 which needs RIGHT_W; the table may lie in any pool,
  *   CAP_THREAD    the slot of the Process capability the thread will run in,
+ *                 and a4 = its places, one for each core it may hold the time of at once, 1 to the machine's cores,
+ *                 else KERR_INVALID_ARG; see OP_TIME_BIND,
  *   CAP_NOTIFICATION  unused.
  * The object's capability is a child of the invoked Pool capability in the derivation tree,
  * so revoking below that capability takes it.
@@ -452,8 +454,8 @@
  * Notification (RIGHT_R): wait as OP_NOTIFY_WAIT does, lending a thread the caller's time meanwhile.
  * a1 = the slot of a Thread capability with RIGHT_X, the borrower; the caller itself fails with KERR_INVALID_ARG.
  * Returns a1 = the bits, at once if some bit is set, which lends nothing.
- * While it waits, a borrower without time of its own runs on the account of the thread that has lent it time longest,
- * if that one runs on the borrower's core,
+ * While it waits, a borrower without time of its own on a core runs there on the account of the thread
+ * that has lent it time longest, if that one holds the time of that core too,
  * and a caller whose own time pays for its turn hands the rest of the turn to the borrower,
  * if it is that one and the borrower waits for a turn.
  * A signal from the borrower that wakes the caller hands the rest of the turn back, see OP_NOTIFY_SIGNAL.
@@ -570,20 +572,22 @@
  */
 #define OP_TIME_CARVE 28
 /*
- * Time (RIGHT_W): bind a thread to units of the capability, which it then earns.
+ * Time (RIGHT_W): bind a thread's place to units of the capability, which it then earns there.
  * a1 = the slot of the Thread capability, which needs RIGHT_W,
  * a2 = the offset of the first unit, which must lie within the capability even for none,
  * a3 = how many units, zero for none.
- * Each unit earns the thread's account a part of a tick every tick, and a turn costs it a tick;
- * with RIGHT_X on the capability the thread also runs on spare time, for free.
- * The thread runs on the core its units are of, which for none is the first unit's;
- * the units must all be of one core, or the call fails with KERR_INVALID_ARG.
- * See DESIGN.md, "Scheduling".
+ * The units must all be of one core, or the call fails with KERR_INVALID_ARG: the core of the first unit, for none too.
+ * The bind fills the thread's place that holds that core's time, or an empty one,
+ * and fails with KERR_LIMIT when every place holds another core's; see OP_POOL_ALLOC.
+ * Each unit earns the place's account a part of a tick every tick, and a turn there costs it a tick;
+ * with RIGHT_X on the capability the thread also runs on that core's spare time, for free.
+ * None without RIGHT_X holds the core's time all the same: the thread runs there on lent time alone, see OP_NOTIFY_LEND.
+ * The thread runs on the cores its places hold the time of; see DESIGN.md, "Cores" and "Scheduling".
  * Fails with KERR_OVERLAP if another thread earns one of the units.
- * The thread leaves the units it earned before, and keeps what its account held, up to what the new units hold.
- * The binding is a child of the invoked capability, so revoking below that capability unbinds the thread:
- * it keeps its state and its account is emptied, and it does not run until it is bound again.
- * A thread unbound or moved while it runs, the caller itself among them, finishes the turn it had,
+ * The place leaves the units it earned before, and keeps what its account held, up to what the new units hold.
+ * The binding is a child of the invoked capability, so revoking below that capability empties the place:
+ * its account is emptied, and a thread whose places are all empty keeps its state and does not run until it is bound again.
+ * A thread whose place is emptied or bound anew while it runs there, the caller itself among them, finishes the turn it had,
  * but for a thread with time that waits for the core, which takes it once an unbind left the turn without time;
  * a turn on spare time ends as a thread with time becomes ready, see DESIGN.md, "Scheduling".
  */
@@ -609,7 +613,7 @@
  *   CAP_CAPTABLE      its number of slots, 0, 0
  *   CAP_PROCESS       how many of its region slots may be filled at once, 0, 0;
  *                     where that is fewer than PROCESS_REGION_SLOTS, an install past it fails with KERR_LIMIT
- *   CAP_THREAD        0, 0, 0
+ *   CAP_THREAD        its places, the cores whose time they hold, bit c for core c, and 0
  *   CAP_NOTIFICATION  the bits it may signal, see OP_NOTIFY_CARVE, 0, 0; never the bits that are set
  *   CAP_IRQ_LINE      the first line, the count, and 1 for timer lines, 0 for the log's and the controller's;
  *                     the cores' line, where there is one, reads as the controller's, and binding it fails with KERR_OVERLAP
@@ -632,7 +636,8 @@
  * Pool: what an object of a type would take of it. No right needed, as for OP_CAP_INFO.
  * a1 = the type: CAP_CAPTABLE, CAP_PROCESS, CAP_THREAD or CAP_NOTIFICATION, as OP_POOL_ALLOC makes them,
  *      CAP_IRQ, as OP_IRQ_BIND makes one of a pool, or CAP_POOL, the descriptor at the base of a pool's memory;
- * a2 = 0; a3 = the number of slots for CAP_CAPTABLE, 1 to 1024, and 0 for every other type.
+ * a2 = 0; a3 = the number of slots for CAP_CAPTABLE, 1 to 1024, of places for CAP_THREAD, 1 to the machine's cores,
+ * and 0 for every other type.
  * Anything else fails with KERR_INVALID_ARG and writes nothing.
  * Returns a1 = the bytes, a multiple of eight, as the pool counts them,
  * and a2 = the pool's room, as OP_CAP_INFO tells it; a3 and a4 are unchanged.
@@ -658,7 +663,7 @@
 #define BOOT_CAP_NULL      0
 #define BOOT_CAP_CAPTABLE  1 /* the root task's own table */
 #define BOOT_CAP_PROCESS   2 /* the root task's own process */
-#define BOOT_CAP_THREAD    3 /* the root task's only thread */
+#define BOOT_CAP_THREAD    3 /* the root task's only thread, with a place on every core */
 #define BOOT_CAP_POOL      4 /* the boot pool the root objects live in */
 #define BOOT_CAP_PRINT     5 /* Print: writing into the kernel's log */
 #define BOOT_CAP_CODE      6 /* Frame: the root task's code, read and execute */

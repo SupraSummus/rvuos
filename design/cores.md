@@ -46,17 +46,35 @@ On ARM a core that waits on another, for the lock or for a trap to begin, waits 
 as ARM's spin waits do; a hart spins.
 Finer locks would leave the self-check nothing to hold between two steps, and on a microcontroller's two cores buy little.
 
-**A thread runs on the core its units are of.**
+**A thread runs on the cores whose time its places hold.**
 `TIME_UNITS` is the units of each core, numbered core by core:
 unit `u` is a part of core `u / TIME_UNITS`.
 `BOOT_CAP_TIME` holds every core's, and the root thread earns the first core's.
-A bind takes units of one core, or none, at the first unit's core, for spare time there,
-and the thread waits on that core's queues and runs there and nowhere else.
-So which core a thread runs on is authority, held as units are, and no policy in the kernel places a thread.
-A thread bound to another core's units during its turn finishes the turn, which then ends at the next tick, and moves:
-`t->core` names the core it runs and waits on, and changes as the thread settles while it is no core's turn.
-Spare time is each core's own: a thread on spare time runs on its core when nobody there with time wants it.
-A program learns how many cores there are from `BOOT_CAP_TIME`'s count, which its description, `OP_CAP_INFO`, tells.
+A thread is made with places, from one to `CORES`, as a table is made with slots;
+the count is its creator's, so a thread takes the memory of the cores it is to use, and a core's count is only a limit;
+see open decision 35.
+Each place is empty, or holds the time of one core, and no two of a thread's hold one core's:
+its units there, or none, for spare time there, its binding, its account, and its place on that core's queues, `struct place`.
+A bind takes units of one core, or none, at the first unit's core, and fills the place that holds that core's time,
+or an empty one, `KERR_LIMIT` with none;
+a place bound to none without spare time holds the core's time all the same, and runs there on lent time alone.
+A place empties only as a revoke above its units takes them.
+So which cores a thread runs on is authority, held as units are, and no policy in the kernel places a thread.
+A ready thread whose turn it is nowhere waits on the queues of every core it holds the time of, by its place there,
+and the core that takes it first runs it:
+a turn that begins on one core takes its places on the others off their queues, `turn_take`,
+and the turn's end puts them back, a step for each place.
+`t->core` names the core whose turn it has or pays for, or had last, which `is_turn` reads.
+A thread made ready on several idle cores interrupts each, and those that find it gone idle again.
+Units of a core promise their part of it to every other thread as on one core;
+to a thread that holds the time of several they promise it only while it runs on none of the others,
+since a turn elsewhere puts its place at the back of their queues.
+A thread whose place is emptied during its turn finishes the turn, which then ends at the next tick.
+Spare time is each core's own: a thread runs on a core's spare time when nobody there with time wants it,
+and one with spare time on several takes whichever comes first.
+A program learns how many cores there are from `BOOT_CAP_TIME`'s count, which its description, `OP_CAP_INFO`, tells,
+and the cores a thread holds the time of from the thread's.
+On one core a thread has one place, which the compiler knows, so the places cost the scheduler's steps nothing there.
 
 **Time is the machine's, and each core counts up to it.**
 The tick count, the deadlines of the timer lines and every account count the machine's ticks,
@@ -135,7 +153,7 @@ A stop that marked a core reads the frame that core's trap took, which is final 
 and finds the loss there as the dropped trap would have: the thread stays stopped where it faulted,
 the log says so as for any fault, and `OP_THREAD_FAULT` tells the stacking fault, but nothing is signalled, as for any stop.
 The loss of a process keeps the rule out, as before: a thread without one never runs again.
-A thread that only loses its units runs on as it does on one core, to the end of its turn.
+A thread that only loses its units, a place emptied, runs on as it does on one core, to the end of its turn.
 
 **A core with nothing to run idles, outside any trap.**
 A trap that leaves nobody's turn on its core returns into `start.S`, which idles in `core_idle`

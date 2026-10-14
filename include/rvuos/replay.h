@@ -143,6 +143,8 @@ static inline int replay_leaves_alone(uint32_t at)
  * and the host leaves the zero, because the kernel stores
  * a thread's program counter without looking at it
  * and the host never fetches an instruction.
+ * Each thread has a place for every core the machine has, so that a record may give it the time of any:
+ * both builds fill an allocation of a thread's a4 with their count of cores, see replay_places.
  */
 static const struct replay_record replay_prologue[] = {
     { OP_PROCESS_INSTALL, 0, BOOT_CAP_PROCESS, REPLAY_REGION_SLOT, BOOT_CAP_INPUT, RIGHT_R, 0, 0, 0 },
@@ -195,7 +197,7 @@ static const struct replay_record replay_prologue[] = {
     REPLAY_COPY(REPLAY_CAP_PROCESS),
     REPLAY_COPY(REPLAY_CAP_THIRD),
     /*
-     * Every thread earns no unit and runs on spare time, so the three take turns as one queue
+     * Every thread earns no unit and runs on the first core's spare time, so the three take turns as one queue
      * and every unit is left for the records to bind.
      */
     { OP_TIME_BIND, 0, BOOT_CAP_TIME, BOOT_CAP_THREAD, 0, 0, 0, 0, 0 },
@@ -207,6 +209,16 @@ static const struct replay_record replay_prologue[] = {
 
 #define REPLAY_PROLOGUE_COUNT \
     (sizeof(replay_prologue) / sizeof(replay_prologue[0]))
+
+/* A prologue record as a build performs it on a machine of so many cores: an allocation of a thread takes a place each. */
+static inline struct replay_record replay_places(const struct replay_record *r, uint32_t cores)
+{
+    struct replay_record c = *r;
+    if (c.op == OP_POOL_ALLOC && c.a1 == CAP_THREAD) {
+        c.a4 = cores;
+    }
+    return c;
+}
 
 /*
  * Performed once the driver has copied the records out, still untraced.

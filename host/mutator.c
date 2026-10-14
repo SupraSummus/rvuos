@@ -181,12 +181,17 @@ static uint32_t tweak_arg(struct rng *r, uint32_t old, uint8_t *data, size_t cou
 }
 
 /*
- * a4 to a6, which no operation reads: mostly zero,
- * and one of them anything one time in sixteen, which a call must leave alone.
+ * a4 to a6, which no operation reads but an allocation of a thread a4: mostly zero,
+ * and one of them anything one time in sixteen, which a call must leave alone;
+ * a thread's a4 mostly a count of places the harness's cores allow, one at least.
  */
 static void draw_high(struct rng *r, struct replay_record *c, uint8_t *data, size_t count)
 {
     c->a4 = c->a5 = c->a6 = 0;
+    if (c->op == OP_POOL_ALLOC && c->a1 == CAP_THREAD && below(r, 8) != 0) {
+        c->a4 = 1 + (uint32_t)below(r, CORES);
+        return;
+    }
     if (below(r, 16) != 0) {
         return;
     }
@@ -450,6 +455,9 @@ static uint32_t draw_kind(struct rng *r, const struct shadow *s, const struct re
             return 0;
         }
     case ARG_SLOTS:
+        if (c->a1 == CAP_THREAD) {
+            return 1 + (uint32_t)below(r, CORES);
+        }
         if (c->a1 != CAP_CAPTABLE) {
             return 0;
         }

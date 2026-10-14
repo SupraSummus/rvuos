@@ -9,12 +9,12 @@ Report: the loop at kernel/sched.c ran N times on one entry, beyond its bound of
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -417,7 +417,7 @@ void sched_bind(struct thread *t, uint32_t first, uint32_t count, uint8_t rights
-     t->time = (struct cap){ .type = CAP_BOUND, .rights = rights, .a = first, .b = count };
-     cap_attach(parent, &t->time);
+@@ -513,7 +513,7 @@ void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights,
+     *b = (struct cap){ .type = CAP_BOUND, .rights = rights, .index = p->index, .a = first, .b = count };
+     cap_attach(parent, b);
      for (uint32_t i = 0; i < count; i++) {
 -        LOOP_BOUND(TIME_UNITS);
 +        LOOP_BOUND(2);
-         unit_thread[first + i] = v2p(t);
+         unit_place[first + i] = v2p(p);
      }
-     /* What the account held stays, and settling holds it to what the new units hold at most. */
+     /*

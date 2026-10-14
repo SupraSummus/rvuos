@@ -3,17 +3,17 @@ since it looks for borrowers only of threads on a queue, which a lender never is
 The borrower waits on another queue than its lender's account says.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
-Report: a thread waits on another queue than its account says
+Report: a place waits on another queue than its account says
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -505,7 +505,7 @@ static void release(uint32_t c)
-             thread_settle(t);
+@@ -636,7 +636,7 @@ static void release(uint32_t c)
+             place_settle(p);
          }
          /* A lender waits on no queue, and its account may give the borrower it lends to time. */
--        struct thread *h = t != NULL ? thread_borrower(t) : NULL;
-+        struct thread *h = t != NULL && t->queue != QUEUE_NONE ? thread_borrower(t) : NULL;
+-        struct place *h = p != NULL ? place_borrower(p) : NULL;
++        struct place *h = p != NULL && p->queue != QUEUE_NONE ? place_borrower(p) : NULL;
          if (h != NULL && (h->queue == QUEUE_SPARE || h->queue == QUEUE_SPENT)) {
-             thread_settle(h);
+             place_settle(h);
          }

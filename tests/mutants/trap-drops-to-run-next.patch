@@ -3,7 +3,7 @@ so a thread a call resumed between the stop and the trap is left ready on no que
 a ready thread that may run waits on its queue.
 
 Caught-by: fuzz-smp2
-Report: a ready thread that may run waits on no queue
+Report: a place of a ready thread that may run waits on no queue
 
 diff --git a/kernel/core.c b/kernel/core.c
 --- a/kernel/core.c

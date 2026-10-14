@@ -162,7 +162,7 @@ static __attribute__((noreturn)) void successor_main(void)
     expect("allocate the prober's watch",
            rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_NOTIFICATION, SLOT_PROBE_NTFN, 0));
     expect("allocate the prober",
-           rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_THREAD, SLOT_PROBER, BOOT_CAP_PROCESS));
+           rv_thread_alloc(SLOT_POOL, SLOT_PROBER, BOOT_CAP_PROCESS, 1));
     expect("configure it",
            rv_invoke(OP_THREAD_CONFIGURE, SLOT_PROBER, (uint32_t)&prober_main, data_base + data_size / 2, 0));
     expect("watch it", rv_invoke(OP_THREAD_WATCH, SLOT_PROBER, SLOT_PROBE_NTFN, BIT_FAULT, 0));
@@ -277,7 +277,7 @@ __attribute__((noreturn)) void hand_over(uint32_t sp)
     expect("allocate the successor's process",
            rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_PROCESS, SLOT_SUCC_PROCESS, SLOT_SUCC_TABLE));
     expect("allocate the successor's thread",
-           rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_THREAD, SLOT_SUCC_THREAD, SLOT_SUCC_PROCESS));
+           rv_thread_alloc(SLOT_POOL, SLOT_SUCC_THREAD, SLOT_SUCC_PROCESS, 1));
     expect("map the successor's code",
            rv_invoke(OP_PROCESS_INSTALL, SLOT_SUCC_PROCESS, 0, BOOT_CAP_CODE, RIGHT_R | RIGHT_X));
     expect("map the successor's data",

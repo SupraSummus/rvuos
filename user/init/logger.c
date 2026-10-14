@@ -136,7 +136,7 @@ void logger_start(uint32_t uart_base, uint32_t log_base, uint32_t sp)
     expect("bind the uart's line",
            rv_invoke(OP_IRQ_BIND, SLOT_UART_IRQ, BOOT_CAP_POOL, SLOT_LOG_NTFN, SLOT_UART_IRQ));
     expect("allocate the logger's thread",
-           rv_invoke(OP_POOL_ALLOC, BOOT_CAP_POOL, CAP_THREAD, SLOT_LOGGER, BOOT_CAP_PROCESS));
+           rv_thread_alloc(BOOT_CAP_POOL, SLOT_LOGGER, BOOT_CAP_PROCESS, 1));
     expect("configure the logger",
            rv_invoke(OP_THREAD_CONFIGURE, SLOT_LOGGER, (uint32_t)&logger_main, sp, 0));
     /*

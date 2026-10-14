@@ -126,6 +126,8 @@ if [ "$board_cores" -gt 1 ]; then
         || fail "a thread stopped on the second core ran on, or did not run again once resumed"
     grep -q 'root: move ok' "$text" \
         || fail "a thread moved from the second core to an eighth of the first ran more than that there, or not at all"
+    grep -q 'root: places ok' "$text" \
+        || fail "a thread with spare time on both cores did not run on the idle one, or did not hold the time of both"
     grep -q 'root: wake across cores ok' "$text" \
         || fail "a signal did not wake a thread that waited on the idle second core"
     grep -q 'root: shootdown ok' "$text" \

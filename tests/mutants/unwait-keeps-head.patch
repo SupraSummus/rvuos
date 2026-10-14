@@ -4,18 +4,18 @@ and the next switch run one that is already running;
 a queue holds only threads in the state it is for.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
-Report: queue holds a thread it is not for
+Report: queue holds a place it is not for
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -63,9 +63,6 @@ static void ring_remove(paddr_t *head, struct thread *t)
+@@ -108,9 +108,6 @@ static void ring_remove(paddr_t *head, paddr_t self, size_t off)
      } else {
-         ((struct thread *)p2v(t->queue_prev))->queue_next = t->queue_next;
-         ((struct thread *)p2v(t->queue_next))->queue_prev = t->queue_prev;
--        if (*head == v2p(t)) {
--            *head = t->queue_next;
+         links_at(s->prev, off)->next = s->next;
+         links_at(s->next, off)->prev = s->prev;
+-        if (*head == self) {
+-            *head = s->next;
 -        }
      }
-     t->queue_next = t->queue_prev = 0;
+     s->next = s->prev = 0;
  }

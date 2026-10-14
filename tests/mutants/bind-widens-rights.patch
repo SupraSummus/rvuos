@@ -8,12 +8,12 @@ Report: slot is not derived from its parent
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -578,7 +578,7 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
-             }
+@@ -766,7 +766,7 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
+             return KERR_LIMIT;
          }
-         /* The binding hangs below the invoked capability, so a revoke above it unbinds the thread. */
--        sched_bind(target, first, count, cap->rights, slot_node(t, slot));
-+        sched_bind(target, first, count, RIGHT_W | RIGHT_X, slot_node(t, slot));
+         /* The binding hangs below the invoked capability, so a revoke above it empties the place. */
+-        sched_bind(p, first, count, cap->rights, slot_node(t, slot));
++        sched_bind(p, first, count, RIGHT_W | RIGHT_X, slot_node(t, slot));
          return KERR_OK;
      }
      default:

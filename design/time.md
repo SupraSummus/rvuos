@@ -129,11 +129,12 @@ and each unit is earned by one thread at a time.
 Each core is `TIME_UNITS` units, a constant of the kernel as the timer lines are,
 numbered core by core across the machine,
 and the root task receives them all in `BOOT_CAP_TIME`, its thread earning every one of the first core's.
-A thread runs on the core its units are of, and only there; see "Cores".
+A thread earns units in a place, which holds the time of one core, and runs on the cores its places hold the time of; see "Cores".
+On one core a thread has one place, and what follows says "a thread's" of it.
 A `Time` capability names a range of units and no object, as an `IrqLine` names lines,
 and `OP_TIME_CARVE` takes a smaller range out of one.
-`OP_TIME_BIND` binds a thread to some of a capability's units, or to none,
-and moves it off the units it earned before.
+`OP_TIME_BIND` binds a thread's place for a core to some of a capability's units of it, or to none,
+and moves the place off the units it earned before.
 The kernel records which thread earns each unit and refuses a bind that names a unit another thread earns,
 so a capability may be copied, but each unit's time goes to one thread,
 and the time of the units nobody earns is spare.
@@ -158,8 +159,8 @@ It holds at most `ACCOUNT_TICKS` ticks' worth per unit, a tenth of a second's,
 so a thread that idled comes back with that much at most.
 The ESP32-C6 measures the counter's rate at boot, so the timer starts before the root thread's account is filled.
 A new thread's account is empty, and the root thread's starts full.
-A thread bound to other units keeps what its account held, up to what the new units hold,
-and an unbound one loses it, so no bind puts time into an account.
+A place bound to other units keeps what its account held, up to what the new units hold,
+and an emptied one loses it, so no bind puts time into an account.
 `OP_TEST_TRACE` fills every account as tracing begins, and a second one fills none;
 no call tells what one holds, which would be a clock.
 
@@ -183,9 +184,9 @@ A thread without `RIGHT_X` runs at most its units' part and a full account,
 and its core sleeps in `wfi` for the rest: that is how the root task caps a thread's time.
 
 **The queues are the policy: round-robin, time before spare time.**
-A ready thread that may run, and whose turn it is not, waits on one of three queues,
-each a ring of threads, oldest first, through the thread's own `queue_next` and `queue_prev`,
-which a waiting thread uses for its notification's waiters instead:
+A ready thread that may run, and whose turn it is nowhere, waits on one of three queues of each core it holds the time of,
+each a ring of places, oldest first, through the place's own `queue_next` and `queue_prev`,
+as a notification's waiters are a ring of threads through the thread's:
 the run queue while it has time, the spare queue without time if it may run on spare time,
 and the spent queue otherwise, where a thread with units waits for its account.
 The oldest thread on the run queue has the next turn, or with the run queue empty the oldest on the spare queue.
@@ -193,8 +194,8 @@ A thread that waits hands the rest of the tick to the next, and the tick ends th
 the thread goes to the back of the queue its account and binding now put it on.
 A thread that becomes ready, resumed, woken or bound, joins the back of its queue.
 Finding the next thread takes constant time however many objects exist,
-and the scheduler's state is the three queues, each thread's account and the tick it was counted to,
-the thread that earns each unit, the release, the running thread, and how far into the tick its turn is charged.
+and the scheduler's state is the three queues, each place's account and the tick it was counted to,
+the place that earns each unit, the release, the running thread, and how far into the tick its turn is charged.
 With every thread on spare time alone this is the plain round-robin over threads,
 which is how the replay driver runs; see "Verification".
 
@@ -210,7 +211,8 @@ and a signal of the turn's thread that wakes the payer hands it the rest of the 
 A payer stopped, or woken from another core or by an interrupt, pays on until the turn ends, at the next tick or the borrower's wait,
 since whether a turn is paid is decided as it begins and at each tick;
 resumed meanwhile, it joins its queue as the turn ends.
-A lender lends only on its own core, since its units are a part of that core and pay for no other's time.
+A lender lends only on a core whose time both it and its borrower hold, its place's account there,
+since units are a part of one core and pay for no other's time.
 
 **A turn is charged by the counter.**
 A change of turn reads how far into the tick the counter is

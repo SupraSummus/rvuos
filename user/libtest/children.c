@@ -563,7 +563,7 @@ void builder_main(struct child_page *page)
         (status = rv_pool_alloc(s.pool, CAP_NOTIFICATION, p->note, 0)) != KERR_OK ||
         (status = timer_bind(&s, s.pool, p->note, &p->timer)) != KERR_OK ||
         (status = slot_new(&s, &thread)) != KERR_OK ||
-        (status = rv_pool_alloc(s.pool, CAP_THREAD, thread, s.process)) != KERR_OK ||
+        (status = rv_thread_alloc(s.pool, thread, s.process, 1)) != KERR_OK ||
         (status = rv_thread_watch(thread, p->own.watch, NOTIFY_ALL_BITS)) != KERR_OK ||
         (status = rv_thread_configure(thread, (uint32_t)(uintptr_t)worker_main,
                                       (uint32_t)(uintptr_t)(p->stack + sizeof(p->stack)), (uint32_t)(uintptr_t)p)) !=

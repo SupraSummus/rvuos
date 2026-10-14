@@ -1,0 +1,21 @@
+A turn that begins on one core leaves the thread's places on the other cores on their queues.
+Another core would take the same thread while it runs here, and run it twice at once;
+a place of a thread whose turn it is anywhere waits on no queue.
+
+Caught-by: fuzz-smp2
+Report: a place of a thread whose turn it is waits on a queue
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -436,9 +436,7 @@ static void turn_take(struct thread *t)
+     for (uint32_t i = 0; i < thread_places(t); i++) {
+         LOOP_BOUND(CORES);
+         struct place *q = thread_place(t, i);
+-        if (q->queue != QUEUE_NONE) {
+-            place_unqueue(q);
+-        }
++        (void)q;
+     }
+ #endif
+ }

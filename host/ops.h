@@ -26,7 +26,7 @@ enum arg_kind {
     ARG_CAPTABLE,
     ARG_TYPE,         /* an object type: what a retype or an allocation makes */
     ARG_ALLOC,        /* what an allocation's type wants: a count of slots, a table's slot, a process's slot */
-    ARG_SLOTS,        /* for a table, a count of slots, and 0 for another type: what OP_POOL_INFO's a3 wants */
+    ARG_SLOTS,        /* for a table a count of slots, for a thread of places, and 0 for another type: OP_POOL_INFO's a3 */
     ARG_RIGHTS,
     ARG_REGION,       /* a region slot of the process */
     ARG_MOUNT,        /* a table slot of the process */

@@ -3,18 +3,19 @@ The two threads would both earn them, and the processor would be promised more t
 a unit is earned by the one thread it names, and every unit a thread is bound to names it.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
-Report: a unit a thread is bound to names another
+Report: a unit a place is bound to names another
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -624,9 +624,6 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
-         struct thread *target = (struct thread *)cap_object(&tc);
+@@ -756,9 +756,7 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
          for (uint32_t i = 0; i < count; i++) {
              LOOP_BOUND(TIME_UNITS);
--            if (unit_thread[first + i] != 0 && unit_thread[first + i] != v2p(target)) {
+             paddr_t at = unit_place[first + i];
+-            if (at != 0 && place_thread(p2v(at)) != target) {
 -                return KERR_OVERLAP;
 -            }
++            (void)at;
          }
-         /* The binding hangs below the invoked capability, so a revoke above it unbinds the thread. */
-         sched_bind(target, first, count, cap->rights, slot_node(t, slot));
+         /* The place of the core, or an empty one: none is a place too few. */
+         struct place *p = sched_place_for(target, unit_core(first));

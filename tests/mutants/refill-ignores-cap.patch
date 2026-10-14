@@ -3,18 +3,18 @@ A thread idle for long would come back with a burst that keeps every other threa
 no account holds more than its cap.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
-Report: thread's account holds more than its cap
+Report: a place's account holds more than its cap
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -165,8 +165,7 @@ static uint32_t count_of(const struct thread *t)
- static uint32_t account_now(const struct thread *t)
+@@ -196,8 +196,7 @@ static uint32_t count_of(const struct place *p)
+ static uint32_t account_now(const struct place *p)
  {
-     uint64_t balance = t->balance + (uint64_t)(count_of(t) - t->stamp) * tick_gain(t);
--    uint32_t cap = account_cap(t);
+     uint64_t balance = p->balance + (uint64_t)(count_of(p) - p->stamp) * tick_gain(p);
+-    uint32_t cap = account_cap(p);
 -    return balance > cap ? cap : (uint32_t)balance;
 +    return (uint32_t)balance;
  }
  
- /* Bring a thread's account up to the count; inline, since every switch calls it and clang stopped inlining it alone. */
+ /* Bring a place's account up to the count; inline, since every switch calls it and clang stopped inlining it alone. */

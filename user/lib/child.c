@@ -37,7 +37,7 @@ static uint32_t build(struct self *s, struct child *c, uint32_t table_slots, uin
     PASS(slot_new(s, &c->process));
     TRY(s, "a child's process", rv_pool_alloc(pool, CAP_PROCESS, c->process, c->table));
     PASS(slot_new(s, &c->thread));
-    TRY(s, "a child's thread", rv_pool_alloc(pool, CAP_THREAD, c->thread, c->process));
+    TRY(s, "a child's thread", rv_thread_alloc(pool, c->thread, c->process, 1));
     PASS(slot_new(s, &c->inbox));
     TRY(s, "a child's inbox", rv_pool_alloc(pool, CAP_NOTIFICATION, c->inbox, 0));
     uint32_t timer;

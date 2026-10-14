@@ -8,6 +8,7 @@ Chapters 10 and 11 of the user manual; [`MANUAL.md`](../MANUAL.md) has its conte
 |---|---|---|
 | region slots per process | 8, of which 7 may be filled on RP2350's Hazard3 | `PROCESS_REGION_SLOTS`; `OP_CAP_INFO` on a process |
 | table slots per process | 2 | `PROCESS_TABLES` |
+| places per thread | 1 to the machine's cores, as its creator asks | `OP_POOL_ALLOC`; `OP_CAP_INFO` on a thread |
 | PMP entries the kernel uses | 16, or `PMP_MAX_ENTRIES` | Makefile |
 | minimum PMP entries to boot | 4 | `kernel/main.c` |
 | slots per `CapTable` | 1 to 1024 | `CAPTABLE_MAX_SLOTS` |
@@ -44,13 +45,13 @@ These are documented gaps, not surprises;
   `DESIGN.md`, open decisions 9 and 10.
 - **No synchronous endpoints.**
   Shared memory and notifications carry everything; open decision 5.
-- **Lent time goes one step, on one core.**
+- **Lent time goes one step, on a core both hold.**
   A thread borrows from the thread that has lent it time longest,
-  never through a borrower that waits or lends in turn, nor from a lender of another core;
+  never through a borrower that waits or lends in turn, nor on a core whose time the lender does not hold;
   a lock that names its holder is fair only to takers that lend; open decision 27.
 - **One `Irq` per line**; open decision 11.
 - **Two cores at most**, on QEMU `virt`, mps2-an521 and RP2350;
-  the first core takes every device interrupt, and a thread on spare time runs on its own core alone;
+  the first core takes every device interrupt;
   `DESIGN.md`, open decision 24.
 - **ARM with no replay yet**, under QEMU and on RP2350's Cortex-M33; `TODO.md`.
 - **No boot from flash.**

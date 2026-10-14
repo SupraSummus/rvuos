@@ -4,17 +4,17 @@ a thread with units that waits without time reaches a tick no earlier than the r
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: a lender's account reaches a tick before the release
-Report: a thread's account reaches a tick before the release
+Report: a place's account reaches a tick before the release
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -345,7 +345,7 @@ static void thread_settle(struct thread *t)
+@@ -358,7 +358,7 @@ static void place_settle(struct place *p)
      }
      bool sooner = fill != NEAREST_NONE && tick_before(sched_ticks + fill, core->nearest_release);
      if (sooner) {
 -        core->nearest_release = sched_ticks + fill;
 +        (void)0;
      }
-     if (joined || sooner || is_turn(t)) {
+     if (joined || sooner) {
          core_notify(core);
