@@ -39,7 +39,7 @@ fail() {
 # The demo ends when the watchdog it stopped feeding halts the machine, with code 7,
 # after a fault that stopped one thread and not the machine.
 [ "$status" -eq 7 ] || fail "expected exit status 7 (the watchdog's halt), got $status"
-# RP2350's console is RAM of a fixed size, and its halt says how much did not fit, which would pass for a missing line.
+# The nRF52840's console is a ring in RAM its runner reads, and the runner says how much it lost, which would pass for a missing line.
 grep -q 'rvuos: the console lost' "$log" && fail "the console overflowed, and the lines past its end are lost"
 # The kernel has no console: its log reaches the UART through the root task's logger
 # while the machine runs, and the halt writes the whole log out after it, under this line.

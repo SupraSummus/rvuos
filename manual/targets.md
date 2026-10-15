@@ -183,8 +183,9 @@ The bootrom's BOOTSEL mode loads the image into SRAM over USB and reboots into i
 on the RISC-V cores or on the Arm ones, whichever the image is for;
 nothing is written to flash.
 The two have the same layout, lines and console; what differs is said below.
-The chip has no serial port on USB while the kernel runs,
-so the console is a block of RAM, and the halt sends it to the host over a USB serial port it makes then.
+The chip has no serial port of its own on USB,
+so the console is the USB controller, of which the root task makes a USB serial port,
+`user/board/rp2350/console.h`, and the halt makes another of it to send the host what no logger took.
 
 Memory map:
 
@@ -199,14 +200,14 @@ Memory map:
 | `0x20038000` | 4 KiB | input region, read only; nothing fills it yet |
 | `0x20039000` | 4 KiB | the boot pool |
 | `0x20040000` | 256 KiB | free RAM, granted to the root task as an Untyped with all rights |
-| `0x20080000` | 8 KiB | the console, SRAM8 and SRAM9, granted to the root task |
+| `0x50100000` | 128 KiB | the console: the USB controller's DPRAM, and its registers 64 KiB on, granted to the root task |
 
 Interrupt lines:
 
 | Line | What |
 |---|---|
 | 0 | the kernel log; TIMER0's IRQ 0 cannot be bound |
-| 1 to 51 | the system IRQs, numbered as in the datasheet; nothing raises the console's line, 46 |
+| 1 to 51 | the system IRQs, numbered as in the datasheet; the console's is 14, `USBCTRL_IRQ` |
 | 26 | SIO's doorbell; on the Cortex-M33 with `CORES=2` the kernel's, for its cores, and an `Irq` cannot be bound to it |
 
 The root task is granted a frame over each of these devices, from `BOOT_CAP_DEVICES` up,
@@ -223,8 +224,12 @@ and on the RISC-V cores opens every pin to Non-secure access, which is how user 
 Each is a device's registers and their atomic aliases, and none is a bus master.
 The ADC is not listed: its clock is not running, and it never leaves reset without one.
 
-The console's first word counts every byte written, and the bytes follow from offset 16;
-what does not fit is counted and dropped.
+The kernel takes the USB controller out of reset at boot and opens it to user mode in ACCESSCTRL,
+and starts its 48 MHz clock.
+`user/board/rp2350/console.h` makes a CDC-ACM port of it, "rvuos console", which `tools/rp2350-run.py` reads as the machine runs.
+It waits for the host to open the port before it sends,
+and the halt resets the controller to make its own port, "rvuos",
+so a program flushes its console before it halts, or what it had not sent by then is lost.
 A watchdog reboots the chip into BOOTSEL about seventeen seconds after boot,
 unless the kernel's watchdog is fed, section 5.8: each feed sets the chip's to a second past the kernel's deadline.
 
@@ -425,7 +430,7 @@ On RP2350, in BOOTSEL mode, as it is when plugged in with BOOTSEL held and again
 
 ```
 make BOARD=rp2350                              # build/rp2350/kernel-init.elf
-make BOARD=rp2350 run                          # load it into RAM and print the transcript the halt writes
+make BOARD=rp2350 run                          # load it into RAM and print its console, then what the halt writes
 make BOARD=rp2350 test escape                  # check the transcripts
 make BOARD=rp2350 ARCH=arm test escape         # the same on the Cortex-M33, from build/rp2350-arm/
 make BOARD=rp2350 CORES=2 test escape          # the same on both Hazard3 cores, which goes on to the second
@@ -494,7 +499,7 @@ Two things carry that log to the board's UART:
 
 So a line that appears before that marker was carried out from user mode,
 and a line after it was salvaged by the halt.
-On RP2350 both reach the host at the halt, the logger's from its console, in the same order.
+On RP2350 the halt's reach the host on a USB serial port of their own, after the console's has gone.
 
 The kernel prints three lines at boot:
 

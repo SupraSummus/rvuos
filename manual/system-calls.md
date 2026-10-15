@@ -643,7 +643,7 @@ and drops into user mode with:
 | 8 | `BOOT_CAP_FREE_RAM` | `Untyped`: the block of RAM the board sets aside for the root task | all |
 | 9 | `BOOT_CAP_INPUT` | `Frame`: test input the loader placed in RAM | read |
 | 10 | `BOOT_CAP_IRQ_LINES` | `IrqLine`: line 0 (the log) and every controller line | write |
-| 11 | `BOOT_CAP_UART` | `Frame`: the board's console registers, a 16550 on QEMU, the USB Serial/JTAG controller on the ESP32-C6, a block of RAM on RP2350 | read, write |
+| 11 | `BOOT_CAP_UART` | `Frame`: the board's console registers, a 16550 on QEMU, the USB Serial/JTAG controller on the ESP32-C6, the USB controller on RP2350 | read, write |
 | 12 | `BOOT_CAP_LOG` | `Frame`: the kernel log's header and ring | read, write |
 | 13 | `BOOT_CAP_TIMER_LINES` | `IrqLine`: every timer line, `TIMER_LINES` of them | write |
 | 14 | `BOOT_CAP_CLOCK` | `Clock`: the machine's time and its watchdog | all |

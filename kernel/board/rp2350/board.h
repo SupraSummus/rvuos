@@ -52,15 +52,15 @@
 #define PMP_GRAIN_MIN U32(32)
 
 /*
- * The console: a block of RAM, SRAM8 and SRAM9, that the root task writes its output into
- * and the kernel sends to the host over USB when it halts; see halt.c.
- * The chip has no USB serial port of its own, as the ESP32-C6 has,
- * and a driver for its USB controller would be the root task's to write.
- * The block lies above RAM_SIZE, so no Untyped covers it and it never becomes a pool.
- * user/board/rp2350/console.h says how the bytes lie in it.
+ * The console: the USB controller, its own RAM, the DPRAM, and 64 KiB past it its registers and their atomic aliases,
+ * of which the root task makes a USB serial port; see user/board/rp2350/console.h.
+ * The chip has no USB serial port of its own, as the ESP32-C6 has.
+ * The controller reaches nothing but its DPRAM, so it is no bus master.
+ * board.c takes it out of reset and opens it to user mode,
+ * and the halt resets it again to make a port of its own; see halt.c.
  */
-#define UART_BASE U32(0x20080000)
-#define UART_SIZE U32(0x2000)
+#define UART_BASE U32(0x50100000)
+#define UART_SIZE U32(0x00020000)
 
 /*
  * Hazard3's machine timer: the RISC-V platform timer in SIO, mtime and mtimecmp,

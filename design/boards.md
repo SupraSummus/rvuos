@@ -253,7 +253,8 @@ It is one board with two architectures:
 `ARCH` picks the cores, and the files that differ by them lie in `kernel/board/rp2350/<arch>/`.
 The bootrom's BOOTSEL mode takes the image's segments into SRAM over USB and reboots into them,
 on the cores the ELF is for, finding the image by the block `image.S` puts at `RAM_BASE`;
-`tools/rp2350-run.py` drives that, and reads the transcript the halt writes.
+`tools/rp2350-run.py` drives that, and reads the transcript from the root task's console as the machine runs,
+a USB serial port the root task makes of the chip's controller, then from the one the halt makes of it.
 Core 1 waits in the bootrom until a kernel built for both cores launches it through SIO's FIFOs, see "Cores".
 Each core reaches SIO on a bus of its own, and sees its own copy of some of it at the same address:
 on Hazard3 its `mtimecmp`, `CLINT_MTIMECMP_LOCAL` in `board.h`, which raises that core's timer interrupt,

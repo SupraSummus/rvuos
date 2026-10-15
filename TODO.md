@@ -256,10 +256,10 @@ what is left:
   which exist for the libraries and go through the one lock all the adapter's objects share;
   `lib/lock.h`'s would serve them alone.
 - The Pico 2 W's run lasts its `run=` whatever its checks found, or until a reset by hand,
-  since the host has no way to end it: its USB serial port, `kernel/board/rp2350/cdc.c`, is the halt's alone.
-  That port kept up while the run lasts would let the host end it there, in either mode,
-  where the network does not reach the lab's access point; closing the port already reboots the chip into BOOTSEL.
-  Whether the kernel keeps it, or the root task is given the USB controller as the ESP32-C6's is given its console, is open.
+  since the host has no way to end it: the Wi-Fi system's root task makes no console, so its one USB serial port is the halt's.
+  Its root task serving the console as the demo's logger does, `user/board/rp2350/console.h`,
+  and reading a word from the host there, which the console drops now, would let the host end it,
+  in either mode, where the network does not reach the lab's access point.
 - The ESP32-C6's kernel moves the CPU to the SPLL from whatever source it finds, but has only found the SPLL:
   the crystal, which a power-on leaves when the flash holds no bootloader, is untried.
 - The ESP32-C6's SAE takes a fifth of a second between the access point's commit and the station's confirm,
@@ -327,9 +327,15 @@ what is left:
   though it matches the region written; the specification reads them as ones.
   So the self-check's reading of the CSRs, which runs only under tracing and never on the board yet,
   would take every region there for eight bytes; `pmp_get` could set those bits, as it swaps R and X.
-- The logger drives no device here: its console is RAM, which only the halt carries out.
-  A root task with a driver for the USB controller would let the log out while the machine runs.
-  The demo on two cores fills about 7.7 KiB of its 8, so a few more lines overflow it, which `tests/run.sh` fails.
+- The bench's threads round costs more while the console's port is open,
+  though nothing the cores run touches the controller during a round,
+  and the same image with the controller left off the bus costs what it did.
+  What of the controller's work reaches the cores is unknown.
+- The USB serial port is written twice, the halt's in `kernel/board/rp2350/cdc.c` and the root task's in `user/board/rp2350/console.h`,
+  the same descriptors and endpoint 0 but for the product string;
+  one header both include, its registers by a base, would keep them one, if the kernel and user mode may share a source.
+- A program that drains the log by polling, `kernel_log_take`, says it has taken bytes once they are in its packet,
+  so a halt before the host has them loses them; the demo's logger says so only once the host has them.
 - The watchdog armed at boot resets CLOCKS without SYSCFG's `AUXCTRL` set,
   which the datasheet asks for when POWMAN runs from `clk_ref`, so a hang it rescues may corrupt POWMAN;
   the halt's reboot sets it, as the bootrom's does.

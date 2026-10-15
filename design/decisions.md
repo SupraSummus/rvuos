@@ -563,8 +563,7 @@ until the maintainer decides otherwise.
       The boot grants it on every board, so any root task may move time and fire lines no device raised.
       Granting it only to the test programs would close that, and refusing its calls untraced, `TODO.md`, most of it.
     - **The boot table.**
-      `BOOT_CAP_INPUT` is the test's input on every board,
-      and `BOOT_CAP_UART` is RP2350's block of RAM, where a console would be one of `BOOT_CAP_DEVICES`.
+      `BOOT_CAP_INPUT` is the test's input on every board.
     - **An `Irq` holds its line by no node**, `TODO.md`, so a revoke takes back a bound line no other way a lender takes back what it lent.
     - **What a fault tells is the architecture's.**
       `OP_THREAD_FAULT` returns `mcause` or the exception number,

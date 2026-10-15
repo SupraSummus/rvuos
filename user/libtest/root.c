@@ -66,6 +66,7 @@ static void drain(void)
 static __attribute__((noreturn)) void halt(uint32_t code)
 {
     drain();
+    console_flush();
     rv_halt(BOOT_CAP_HALT, code);
 }
 

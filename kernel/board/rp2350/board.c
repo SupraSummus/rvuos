@@ -3,7 +3,7 @@
  *
  * The kernel sets the clocks rather than trust the ones the bootrom left:
  * clk_ref from the 12 MHz crystal, clk_sys at 150 MHz from PLL_SYS,
- * and clk_usb at 48 MHz from PLL_USB for the halt, see halt.c;
+ * and clk_usb at 48 MHz from PLL_USB for the root task's console and the halt's, see halt.c;
  * the USB controller needs clk_sys above clk_usb, erratum RP2350-E12.
  * The tick generators divide clk_ref into microseconds
  * for Hazard3's mtime, for TIMER0's counter behind BOOT_CAP_CLOCK, and for the watchdog,
@@ -11,7 +11,7 @@
  * Register addresses are those of the pico-sdk's hardware_regs for RP2350.
  *
  * User mode reaches a peripheral only where ACCESSCTRL lets it in, and at reset it lets it into few.
- * TIMER0 is opened for the clock.
+ * TIMER0 is opened for the clock, and the USB controller for the console.
  * A process reaches it only through a frame besides, on either kind of core:
  * on Hazard3 the fence shuts the hardwired PMP entries that would leave every peripheral to user mode,
  * see process_fence, and on the Cortex-M33 a thread reaches only what its regions hold.
@@ -48,6 +48,7 @@
 #define RESET_PLL_SYS     (1u << 14)
 #define RESET_PLL_USB     (1u << 15)
 #define RESET_TIMER0      (1u << 23)
+#define RESET_USBCTRL     (1u << 28)
 /* The devices of board.h's DEVICE_RANGE_LIST. */
 #define RESET_DEVICE_RANGES (RESET_IO_BANK0 | RESET_PADS_BANK0 | RESET_PIO0 | RESET_PIO1 | RESET_PIO2)
 
@@ -104,6 +105,7 @@
 #define ACCESSCTRL_IO_BANK0 0x40060068u
 #define ACCESSCTRL_PADS_BANK0 0x40060070u
 #define ACCESSCTRL_TIMER0   0x40060098u
+#define ACCESSCTRL_USBCTRL  0x40060048u
 #define ACCESSCTRL_PASSWORD 0xacce0000u
 #define ACCESSCTRL_SU       (1u << 2)
 #define ACCESSCTRL_NSP      (1u << 1)
@@ -207,6 +209,9 @@ void board_init(void)
 
     unreset(RESET_TIMER0);
     open_to_user(ACCESSCTRL_TIMER0);
+    /* The console's, BOOT_CAP_UART: reset, whatever the bootrom's BOOTSEL left in it; see board.h. */
+    unreset(RESET_USBCTRL);
+    open_to_user(ACCESSCTRL_USBCTRL);
 
     /*
      * The devices the root task is granted, see board.h, out of reset and open to user mode.
@@ -223,9 +228,6 @@ void board_init(void)
     REG(ACCESSCTRL_GPIO_NSMASK0) = 0xffffffffu;
     REG(ACCESSCTRL_GPIO_NSMASK1) = 0x0000ffffu;
 #endif
-
-    /* The console starts empty, whatever the last image left in it; see halt.c. */
-    REG(UART_BASE) = 0;
 }
 
 /*

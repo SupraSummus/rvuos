@@ -8,12 +8,14 @@ The bootrom's PICOBOOT interface takes the ELF's segments into SRAM over USB,
 which this reads back and checks every command's status,
 and reboots into them, on the RISC-V cores or the Arm ones as the ELF's machine says,
 so nothing is written to flash.
-The kernel has no serial port while it runs; its halt makes one of the chip's USB controller,
-and writes out the root task's console and the kernel's log;
-see kernel/board/rp2350/halt.c.
+The chip has no serial port of its own on USB.
+A root task that writes its console makes one of the chip's USB controller, "rvuos console",
+see user/board/rp2350/console.h, and this prints what comes on it as the machine runs.
+The halt resets the controller, which takes that port away, and makes one of its own, "rvuos",
+on which it writes out what no logger took from the kernel's log; see kernel/board/rp2350/halt.c.
 The halt ends with "rvuos: halted with code <n>",
 and this exits with that code, as QEMU exits with the kernel's.
-Closing the port then reboots the chip into BOOTSEL for the next image.
+Closing the halt's port then reboots the chip into BOOTSEL for the next image.
 
 Data beside the image, such as the Wi-Fi system's firmware blob, goes with --ram address:file,
 into SRAM alone and never into flash, checked as the segments are;
@@ -41,8 +43,13 @@ except ImportError:
     sys.exit("tools/rp2350-run.py needs pyusb: pacman -S python-pyusb, or pip install pyusb")
 
 BOOTSEL = (0x2E8A, 0x000F)
-# The halt's serial port; see kernel/board/rp2350/cdc.c.
-HALT_PORT = (0x1209, 0x0001)
+# The serial ports, the root task's console's and the halt's, by their IDs and product strings;
+# see user/board/rp2350/console.h and kernel/board/rp2350/cdc.c.
+PORT_IDS = (0x1209, 0x0001)
+CONSOLE_PRODUCT = "rvuos console"
+HALT_PRODUCT = "rvuos"
+# How long this waits for an earlier image that still runs to halt, as a test's does, before it gives up on it.
+STILL_RUNS = 20.0
 
 # Where the bootrom looks for the image's block when it reboots into RAM, and how far;
 # see kernel/board/rp2350/board.h and image.S.
@@ -99,19 +106,40 @@ def usb_device(ids):
     return usb.core.find(idVendor=ids[0], idProduct=ids[1])
 
 
-def halt_port():
-    """The tty of the halt's serial port, or None while there is none."""
+def serial_port(product):
+    """The tty of the serial port with that product string, or None while there is none."""
     for dev in glob.glob("/sys/bus/usb/devices/*"):
         try:
             vid = int(open(f"{dev}/idVendor").read(), 16)
             pid = int(open(f"{dev}/idProduct").read(), 16)
+            name = open(f"{dev}/product").read().strip()
         except OSError:
             continue
-        if (vid, pid) == HALT_PORT:
+        if (vid, pid) == PORT_IDS and name == product:
             ttys = glob.glob(f"{dev}/{os.path.basename(dev)}:1.0/tty/tty*")
             if ttys:
                 return "/dev/" + os.path.basename(ttys[0])
     return None
+
+
+def halt_port():
+    return serial_port(HALT_PRODUCT)
+
+
+def console_port():
+    return serial_port(CONSOLE_PRODUCT)
+
+
+def the_halts():
+    """The halt's port with True, for whether it is the halt's, or None."""
+    port = halt_port()
+    return None if port is None else (port, True)
+
+
+def any_port():
+    """The halt's port or the console's, whichever there is, with whether it is the halt's."""
+    port = console_port()
+    return the_halts() or (None if port is None else (port, False))
 
 
 def wait_for(find, timeout):
@@ -125,7 +153,7 @@ def wait_for(find, timeout):
 
 
 def open_port(path):
-    """The halt's port, raw, opened: which raises DTR and so starts the halt writing."""
+    """A port, raw, opened: which raises DTR and so starts the console or the halt writing."""
     for _ in range(40):
         try:
             fd = os.open(path, os.O_RDWR | os.O_NOCTTY)
@@ -136,7 +164,7 @@ def open_port(path):
         sys.exit(f"cannot open {path}")
     tty.setraw(fd)
     attrs = termios.tcgetattr(fd)
-    attrs[2] |= termios.HUPCL | termios.CLOCAL  # closing drops DTR, which reboots the chip
+    attrs[2] |= termios.HUPCL | termios.CLOCAL  # closing drops DTR, which reboots the chip from the halt's port
     termios.tcsetattr(fd, termios.TCSANOW, attrs)
     return fd
 
@@ -146,6 +174,14 @@ def to_bootsel():
     dev = usb_device(BOOTSEL)
     if dev is not None:
         return dev
+    port = console_port()
+    if port is not None:
+        say(f"an earlier image still runs, its console on {port}; waiting for its halt")
+        if wait_for(lambda: halt_port() or usb_device(BOOTSEL), STILL_RUNS) is None:
+            sys.exit("an earlier image still runs and does not halt: reset the chip with BOOTSEL held")
+        dev = usb_device(BOOTSEL)
+        if dev is not None:
+            return dev
     port = halt_port()
     if port is not None:
         say(f"an earlier halt waits on {port}; letting it go")
@@ -257,32 +293,45 @@ def main():
 
     deadline = None if args.timeout is None else time.monotonic() + args.timeout
     load(args.image, [ram_file(spec) for spec in args.ram] + [ram_file(spec, b"\0") for spec in args.text])
-    say("booted; waiting for the halt's serial port")
-    port = wait_for(halt_port, 1e9 if deadline is None else deadline - time.monotonic())
-    if port is None:
-        sys.exit("timed out before the kernel halted")
-    fd = open_port(port)
+    say("booted; waiting for the console's serial port or the halt's")
+
+    def left():
+        return 1e9 if deadline is None else deadline - time.monotonic()
+
+    found = wait_for(any_port, left())
     pending = b""
-    while deadline is None or time.monotonic() < deadline:
-        ready, _, _ = select.select([fd], [], [], 0.05)
-        if not ready:
-            continue
-        try:
-            chunk = os.read(fd, 4096)
-        except OSError:
+    while found is not None:
+        port, is_halt = found
+        fd = open_port(port)
+        while deadline is None or time.monotonic() < deadline:
+            ready, _, _ = select.select([fd], [], [], 0.05)
+            if not ready:
+                continue
+            try:
+                chunk = os.read(fd, 4096)
+            except OSError:
+                break
+            if not chunk:
+                break
+            pending += chunk
+            while b"\n" in pending:
+                line, pending = pending.split(b"\n", 1)
+                sys.stdout.write(line.rstrip(b"\r").decode(errors="replace") + "\n")
+                sys.stdout.flush()
+                halted = HALTED.search(line)
+                if halted:
+                    os.close(fd)
+                    sys.exit(int(halted.group(1), 16))
+        os.close(fd)
+        if is_halt or (deadline is not None and time.monotonic() >= deadline):
             break
-        if not chunk:
-            break
-        pending += chunk
-        while b"\n" in pending:
-            line, pending = pending.split(b"\n", 1)
-            sys.stdout.write(line.rstrip(b"\r").decode(errors="replace") + "\n")
-            sys.stdout.flush()
-            halted = HALTED.search(line)
-            if halted:
-                os.close(fd)
-                sys.exit(int(halted.group(1), 16))
+        # The console went with the controller's reset, and the halt's port comes next;
+        # a line the console left half written goes on there, as the halt starts on a new line.
+        say("the console's port went; waiting for the halt's")
+        found = wait_for(the_halts, left())
     sys.stdout.write(pending.decode(errors="replace"))
+    if found is None:
+        sys.exit("timed out before the kernel halted")
     sys.exit("the port closed, or the time ran out, before the kernel halted")
 
 

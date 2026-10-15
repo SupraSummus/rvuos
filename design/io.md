@@ -169,9 +169,15 @@ then a line with the code a simulator would have exited with,
 so that the same transcript check runs on the board;
 a console no host reads is given up on rather than waited for.
 RP2350 has no serial port on USB, and its bootrom wipes RAM on entering BOOTSEL,
-so there the logger's console is a block of RAM,
-and the halt makes a USB CDC-ACM port of the chip's controller, `kernel/board/rp2350/cdc.c`,
-writes the block and then the dump to it, and reboots into BOOTSEL once the host has read them.
-It is the one USB stack in the kernel, and it runs only once the kernel has stopped.
+so there the root task makes a USB CDC-ACM port of the chip's controller, `user/board/rp2350/console.h`,
+which its logger serves on the controller's line while the machine runs,
+and the halt resets the controller and makes a port of its own of it, `kernel/board/rp2350/cdc.c`,
+writes the dump to it, and reboots into BOOTSEL once the host has read it.
+That is the one USB stack in the kernel, and it runs only once the kernel has stopped;
+it leaves the root task's port on the bus a moment first,
+since the host drops what its reader had not read when a device leaves.
+A packet the root task's port has sent is the host's only once the host has taken it,
+so that logger says it has taken from the log only what its port saw taken,
+and a halt while bytes are on their way writes them out again rather than lose them.
 The ring is just under 4 KiB, a burst's worth between two looks by a reader,
 and a reader that looks less often loses the oldest bytes and can tell.

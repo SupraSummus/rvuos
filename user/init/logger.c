@@ -9,6 +9,10 @@
  * see console.h.
  * Its own failure is the one thing it cannot report through the log,
  * so that goes to the UART by polling.
+ * A console that says CONSOLE_SERVE, RP2350's USB port, has its line served while the logger waits for the log too,
+ * since its host may ask at any time,
+ * and the logger says it has taken from the log only what console_drain saw reach the host,
+ * so that a halt or a stop while bytes are on their way writes them out again rather than lose them.
  */
 
 #include <stdint.h>
@@ -16,6 +20,10 @@
 #include "console.h"
 #include "init.h"
 #include "rvuos.h"
+
+#ifndef CONSOLE_SERVE
+#define CONSOLE_SERVE 0
+#endif
 
 /* The logger's notification: the log's bit and the UART's. */
 #define BIT_LOG  0x1u
@@ -90,12 +98,27 @@ static void logger_main(void)
         uint32_t bits;
         log_header->taken = taken;
         if (rv_irq_set(SLOT_LOG_IRQ, BIT_LOG) != KERR_OK ||
+#if CONSOLE_SERVE
+            rv_irq_set(SLOT_UART_IRQ, BIT_UART) != KERR_OK ||
+#endif
             rv_wait(SLOT_LOG_NTFN, &bits) != KERR_OK) {
             logger_fail("logger: cannot wait for the log\n");
         }
+#if CONSOLE_SERVE
+        if ((bits & ~(BIT_LOG | BIT_UART)) != 0 || bits == 0) {
+            logger_fail("logger: woken for something other than the log or the uart\n");
+        }
+        if (bits & BIT_UART) {
+            console_serve();
+        }
+        if ((bits & BIT_LOG) == 0) {
+            continue;
+        }
+#else
         if (bits != BIT_LOG) {
             logger_fail("logger: woken for something other than the log\n");
         }
+#endif
 
         uint32_t head = log_header->head;
         uint32_t size = log_header->size;
@@ -107,7 +130,11 @@ static void logger_main(void)
         for (; taken != head; taken++) {
             uart_put_line_ending((char)log_ring[taken % size]);
         }
+#if CONSOLE_SERVE
+        console_drain(uart_wait);
+#else
         console_flush();
+#endif
     }
 }
 

@@ -8,6 +8,10 @@
  * Endpoint 2 is the interrupt endpoint CDC's communication interface must have; it never sends.
  * It answers what Linux asks while it enumerates and opens the port, and stalls the rest.
  * It runs only in the halt, so its loops wait on the host for as long as that takes.
+ * The root task makes a port of the same controller while the machine runs, user/board/rp2350/console.h,
+ * with the same IDs and the product "rvuos console" where this one's is "rvuos";
+ * the reset here takes that one away, after the host has had time to read what it sent last,
+ * and the host is given time to see it go before this one connects.
  *
  * The controller keeps its endpoints' control words and buffers in its own RAM, the DPRAM,
  * and a buffer is the controller's from the moment its AVAIL bit is set.
@@ -86,6 +90,16 @@
  * the host echoes what comes back and turns CR into LF.
  */
 #define DTR_SETTLE_US 100000u
+
+/*
+ * When the root task's port was on the bus, how long the halt leaves it there before the reset,
+ * and how long the controller stays off the bus after it, in microseconds of the counter.
+ * The host hangs a port's tty up when its device leaves, and drops what its reader had not read yet,
+ * though the device saw it taken, so the first gives the reader time to read the last packets;
+ * the second has the host see that device leave before this one comes.
+ */
+#define LINGER_US 200000u
+#define GONE_US   200000u
 
 /* The standard requests and CDC's, by request type and request. */
 #define REQ(type, request) (((uint32_t)(type) << 8) | (request))
@@ -400,9 +414,16 @@ static void cdc_poll(void)
 
 void cdc_start(void)
 {
+    bool was_on_bus = (REG(USB_SIE_CTRL) & SIE_PULLUP_EN) != 0;
+    uint32_t halted_at = REG(COUNTER_ADDR);
+    while (was_on_bus && REG(COUNTER_ADDR) - halted_at < LINGER_US) {
+    }
     SET(RESETS_RESET) = RESET_USBCTRL;
     CLR(RESETS_RESET) = RESET_USBCTRL;
     while ((REG(RESETS_RESET_DONE) & RESET_USBCTRL) == 0) {
+    }
+    uint32_t reset_at = REG(COUNTER_ADDR);
+    while (was_on_bus && REG(COUNTER_ADDR) - reset_at < GONE_US) {
     }
     for (uint32_t off = 0; off < DPRAM_SIZE; off += 4) {
         REG(DPRAM + off) = 0;
