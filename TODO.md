@@ -71,6 +71,9 @@ what is left:
   20 of the root task's 42 slots on QEMU once `user/libtest/` has given everything back.
   Keeping a split's parent while a half is taken would let two free halves join again,
   at a slot per split for as long as they are apart.
+- `child_free` stops the child's thread before its pool is destroyed, a step at a time and the newest objects first,
+  but not the threads the child built of its own, `child_give_own`:
+  one woken as what it waits on goes before it would fault onto the parent's bit after the bit was handed out again.
 - The Wi-Fi system starts every child on the first core and holds all 64 of its units:
   a fourth client would take some of another's, and the second core, where there is one, runs none of it.
 - A channel between two peers is connected once: a child taken down leaves the other end naming nothing,

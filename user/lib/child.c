@@ -304,6 +304,12 @@ uint32_t child_free(struct self *s, struct child *c)
 {
     struct first f = { KERR_OK, 0 };
     /*
+     * Its thread stopped first: a pool's destroy is preempted, and takes the newest objects first,
+     * so the thread would otherwise outlive its inbox, run on with its wait refused, and fault on a bit handed out again.
+     */
+    uint32_t was;
+    rv_thread_stop(c->thread, &was); /* refused when the build failed before the thread */
+    /*
      * Its pool: its objects go with it, and so does every capability to them, wherever it lies;
      * its thread's binding to its units goes with the thread, and its timer line with the Irq.
      * Then what it built of its own, once its thread and process are gone,
