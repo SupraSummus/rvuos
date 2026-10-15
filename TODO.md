@@ -566,14 +566,10 @@ what is left:
   and so is most of what the corpus revokes.
   Mount, unmount, install, uninstall, the binds and the watch fill or clear nodes too.
   Its search, which follows only what the model names, stops there with it.
-- Of "Properties", the model states the forest and the nesting.
-  Others its state can say are next: the derivation rule of "Derivation", a node no more than its parent,
+- Of "Properties", the model states the forest, the nesting, and what the nesting needs of the derivation rule.
+  Others its state can say are next: the rest of the derivation rule of "Derivation", a node no more than its parent,
   and of "Authority confinement" what a table's node may name.
   Each goes through the stages "The model" lists, the search first.
-- The nesting is searched but not settled: no theorem says every step keeps it.
-  Alone it does not follow from step to step;
-  a carve and a split need what a node stands for to lie within its parent's, in 32 bits,
-  and nothing that may become kernel memory to lie below a frame, which the derivation rule says.
 - The search follows calls over memory alone, which the nesting needs;
   an invariant over other capabilities needs it to follow theirs.
 - `make mutants` does not run `model-check`,

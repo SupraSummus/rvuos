@@ -40,10 +40,30 @@ def nests (s : State) (x : Nat) (cx : Cap) (y : Nat) (cy : Cap) : Bool :=
       s.liesBelow x y || s.liesBelow y x || going cx || going cy
   | _, _ => true
 
+/-- Memory that may hold kernel objects, an Untyped or a pool's own node. -/
+def mayHold (c : Cap) : Bool := c.type == capUntyped || c.type == capRetyped
+
+/--
+What the nesting needs of "Derivation" to follow from step to step, as `kernel/selfcheck.c` checks it:
+a pool's own node names a pool, and a frame, a NAPOT block, ends within 32 bits;
+memory that may hold kernel objects lies right below an Untyped, if below anything,
+and below a node that names an object lies only a node that names one, as `derived_from` says,
+but for a pool's own node below another of its pool, which it lets through and nothing makes.
+-/
+def derivedOk (s : State) : Bool :=
+  s.caps.all (fun (_, c) =>
+    (c.type != capRetyped || (s.obj? c.a).map (·.type) == some capPool) &&
+    (c.type != capFrame || decide (c.a + c.b ≤ 2 ^ 32))) &&
+  s.kids.all fun (p, l) => l.all fun k =>
+    match s.cap? p, s.cap? k with
+    | some cp, some ck =>
+      (!mayHold ck || cp.type == capUntyped) && (!capHasObject cp.type || capHasObject ck.type)
+    | _, _ => true
+
 /-- `check_nesting`: every Untyped and every pool nests with every node that stands for memory. -/
 def nestingOk (s : State) : Bool :=
   s.caps.all fun (x, cx) =>
-    !(cx.type == capUntyped || cx.type == capRetyped) || s.caps.all fun (y, cy) => s.nests x cx y cy
+    !mayHold cx || s.caps.all fun (y, cy) => s.nests x cx y cy
 
 end State
 
