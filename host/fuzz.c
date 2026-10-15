@@ -20,7 +20,7 @@
  * and followed by HOST_INPUT_END, where tests/differential.py and tests/mutants.sh cut the output.
  * A crash still ends the run, and leaves its input without that line.
  * With --model-trace=FILE every call and fault is written to FILE, the state of the derivation tree before and after,
- * for the model to check; see host/model.c.
+ * and so is the state each input's records begin in, for the model to check and search from; see host/model.c.
  */
 
 #include <stdint.h>
@@ -90,6 +90,7 @@ static void replay(const uint8_t *data, size_t size)
         abort();
     }
 
+    model_start();
     if (size > REPLAY_MAX_RECORDS * sizeof(struct replay_record)) {
         size = REPLAY_MAX_RECORDS * sizeof(struct replay_record);
     }

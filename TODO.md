@@ -2,6 +2,26 @@
 
 Open work only; an item leaves this file in the commit that finishes it.
 
+## Known bugs
+
+- A root Untyped can be made free while its delete is half done, and then make what lies over its children:
+  two allocators over one block, so a frame may cover a pool.
+  A delete of a root makes roots of its children one by one and may stop between them,
+  and while it is stopped another thread may delete or revoke the children still below it,
+  after which `untyped_free` holds of the Untyped, its other children lying in its memory as roots.
+  `made_root` in `kernel/selfcheck.c` allows the overlap only while it made something, so the self-check refuses the state.
+  The model's search finds it, see "The model" in `DESIGN.md`, and `nesting_breaks` in `model/Rvuos/Nesting.lean` states it;
+  on the host build, after the prologue of `rvuos/replay.h`:
+
+  ```
+  actor 1 OP_TEST_PREEMPT slot BOOT_CAP_TEST a1 2
+  actor 1 OP_CAP_DELETE slot BOOT_CAP_CAPTABLE a1 BOOT_CAP_FREE_RAM
+  actor 2 OP_CAP_DELETE slot BOOT_CAP_CAPTABLE a1 REPLAY_CAP_RAM
+  ```
+
+  With the fix, a proof that every step keeps the nesting replaces `nesting_breaks`, which `model-check` asks for,
+  and the seed goes under `tests/seeds/`.
+
 ## Wi-Fi system
 
 `user/wifi/`, on a Pico 2 W: the driver brings the CYW43439's firmware up, scans,
@@ -563,8 +583,15 @@ what is left:
   a retype into a pool, an allocation, and a revoke through a pool's destroy are unmodelled,
   and so is most of what the corpus revokes.
   Mount, unmount, install, uninstall, the binds and the watch fill or clear nodes too.
-- `model-check` sees only the corpus; run under `make fuzz` it would see every input the fuzzer tries,
-  and `make mutants` does not run it.
+  Its search, which follows only what the model names, stops there with it.
+- Of "Properties", the model states the forest and the nesting.
+  Others its state can say are next: the derivation rule of "Derivation", a node no more than its parent,
+  and of "Authority confinement" what a table's node may name.
+  Each goes through the stages "The model" lists, the search first.
+- The search follows calls over memory alone, which the nesting needs;
+  an invariant over other capabilities needs it to follow theirs.
+- `make mutants` does not run `model-check`,
+  whose search could catch a mutant that breaks an invariant at a place no seed stops at.
 
 ## System calls
 

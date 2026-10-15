@@ -17,13 +17,15 @@ structure Cap where
   b : Nat
 deriving BEq, Repr, Inhabited, DecidableEq
 
-/-- An object: its address, type and pool, and the array of nodes it holds, from `obj_nodes`. -/
+/-- An object: its address, type and pool, the array of nodes it holds, from `obj_nodes`, and a pool its size. -/
 structure Obj where
   addr : Nat
   type : Nat
   pool : Nat
   nodes : Nat
   count : Nat
+  /-- A pool's size, which its own node stands for; 0 for any other object. -/
+  size : Nat
 deriving BEq, Repr, Inhabited, DecidableEq
 
 structure State where

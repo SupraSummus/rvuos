@@ -709,11 +709,13 @@ so it is not built for the board yet.
 ## The model
 
 `model/` holds a model of the derivation tree in Lean 4,
+the invariants of "Properties" its state can say,
 proofs about it,
-and `model-check`, which holds the host build to it.
+and `model-check`, which holds the host build to it and searches it.
 The model maps a state and an event to every outcome the kernel may reach.
 The state is what `host/model.c` writes of the kernel's memory:
-every object with its array of nodes, every filled node's words by its address,
+every object with its array of nodes, and a pool its size,
+every filled node's words by its address,
 and each node's children in the order of their ring; no link, no scheduler, no PMP.
 It models the operations that touch nothing but the tree:
 `OP_CAP_COPY`, `OP_CAP_DERIVE`, `OP_CAP_MOVE`, `OP_CAP_DELETE`,
@@ -724,15 +726,38 @@ but where an operation's own values decide what it reads.
 A call that may stop part way has an outcome for each place it may stop.
 Of the rest the model says nothing.
 
+The model is written from the kernel's code,
+so holding the one to the other finds a slip in either, never a mistake they share;
+a fuzzing run that held them on every input it tried found none, at a tenth of the fuzzer's speed,
+so the model runs on the corpus alone.
+What it adds is what no run can:
+every place a call may stop, all at once,
+and statements of every state, not only of the states a run reaches.
+A statement of a call is no statement of a state:
+`delete_revoke_shrink` and `step_flows` below hold of a step that breaks the nesting, which only takes away.
+So each invariant of "Properties" the model's state can say goes through three stages.
+
+1. It is stated from the self-check as a check of a state, in `invariants` of `model/Main.lean`:
+   `State.wellFormed` the forest of "Derivation", `State.nestingOk` the nesting of "Isolation".
+   `model-check` holds it to every traced state the self-check passed,
+   so a statement that says other than the kernel's check shows on the seeds and the corpus.
+2. It is searched:
+   from each state an input's records begin in, `model-check` follows the model `MODEL_SEARCH` calls deep, two by default,
+   and gives the seed of the first state that breaks it; see `model/Rvuos/Search.lean`.
+3. It is settled by a theorem: that every step keeps it,
+   or, for a bug the kernel has, `Breaks` of it, a state and a call `decide` checks, which `invariants` names and `TODO.md` lists.
+   A search that breaks an invariant fails the run unless `invariants` names such a theorem,
+   and so does one that no longer breaks an invariant it names one for:
+   the fix replaces the theorem with a proof that every step keeps the invariant,
+   which may first need the invariant to say more, as the theorem's state may be one the fix leaves unreachable.
+
 `make model-test` builds the model, which checks its proofs,
 replays the seeds and the corpus with `--model-trace`, each input alone,
-and runs `model-check` over the trace:
+and runs `model-check --search` over the trace:
 every step the model speaks of must reach one of its outcomes, state and registers alike,
-and every state must be a forest.
-An invariant report writes its step as the report found it, so the model sees that step too.
+every state must hold every invariant,
+and the search must break the invariants with a known bug and no other.
 The model is held to the kernel on the steps the corpus makes, not proved of it.
-Every mutant it catches, the self-check or `host/history.c` catches too;
-what it adds is a statement of the operations that proofs can be made about.
 
 What is proved is proved of the model:
 
@@ -754,3 +779,6 @@ What is proved is proved of the model:
   every outcome of every step the model names is a forest where the state before it was one,
   so a delete or a revoke leaves a forest wherever it stops;
   and `wellFormed_forest`: every state `model-check` passes as a forest is one.
+- `nesting_breaks`, in `model/Rvuos/Nesting.lean`:
+  a delete of the half still below a root Untyped whose delete stopped part way leaves it free,
+  with its other half, a root now, in its memory; see `TODO.md`.

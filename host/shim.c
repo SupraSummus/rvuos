@@ -216,6 +216,7 @@ static void host_asan_report(const char *report)
 void host_violated(void)
 {
     /* The step the report ends, which the model is to see too. */
+    model_report();
     model_end();
     /* The report may have gone to stdout; make sure it is seen. */
     fflush(stdout);
@@ -621,6 +622,11 @@ static void host_interrupts(void)
     }
     host_core = back;
 #endif
+}
+
+const struct thread *host_actor_thread(unsigned actor)
+{
+    return actor >= 1 && actor <= REPLAY_THREADS ? host_threads[actor] : NULL;
 }
 
 /* The actor number of a thread; 0 when it is not a driver thread, which never runs traced. */
