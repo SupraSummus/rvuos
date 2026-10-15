@@ -29,6 +29,8 @@
 #define BOOT_POOL_BASE U32(0x2001d000)
 #define FREE_RAM_BASE  U32(0x20020000)
 #define FREE_RAM_SIZE  U32(0x00020000)
+/* The derivation tree's nodes lie in RAM, all 248 KiB of it, which the window's 512 KiB cover; see struct cap. */
+#define NODE_WINDOW_BASE RAM_BASE
 
 /* A misaligned store is checked for writing throughout; see the ESP32-C6's board.h. */
 #define PMP_SPLIT_STORE_AS_READ 0

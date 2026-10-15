@@ -10,18 +10,18 @@ Report: frame with rights beyond the grant
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -72,8 +72,14 @@ static int op_captable(struct thread *t, uint32_t slot, const struct cap *cap,
+@@ -109,8 +109,14 @@ static int op_captable(struct thread *t, uint32_t slot, const struct cap *cap,
          if (err != KERR_OK) {
              return err;
          }
 -        src.rights &= (uint8_t)arg[3];
          struct cap *source = slot_node(t, arg[2]);
-+        uint32_t link = source->next;
-+        while (!(link & LINK_UP)) {
++        const struct cap *last = source;
++        while (!last->up) {
 +            LOOP_BOUND(CAPTABLE_MAX_SLOTS);
-+            link = ((struct cap *)p2v(link & ~LINK_UP))->next;
++            last = link_node(last->next);
 +        }
-+        struct cap *up = link == LINK_UP ? NULL : p2v(link & ~LINK_UP);
++        struct cap *up = last->next == 0 ? NULL : link_node(last->next);
 +        src.rights = (uint8_t)((op == OP_CAP_COPY && up != NULL ? up->rights : src.rights) & arg[3]);
          /* A copy stands beside its source in the tree, a derivation below it. */
          if (op == OP_CAP_COPY) {

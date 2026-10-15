@@ -44,10 +44,12 @@ struct obj_header {
  * and b is 0 but for CAP_NOTIFICATION, where it is the bits the capability may signal, never none;
  * see OP_NOTIFY_CARVE.
  *
- * child is the first slot derived from this one, by physical address, 0 if none.
- * next is the next sibling, or at the last sibling the parent with LINK_UP set,
- * which the four-byte alignment of slots leaves free;
- * a root's next is LINK_UP alone, an empty slot's is 0.
+ * The links are sixteen bits each: a node's offset from NODE_WINDOW_BASE in eight-byte steps,
+ * since every node lies in the window and on eight bytes, see layout.h;
+ * 0 names none, since the window's first word is never a node.
+ * child is the first slot derived from this one, 0 if none.
+ * next is the next sibling, or at the last sibling the parent with up set;
+ * a root's next is 0 with up set, an empty slot's is 0 with up clear.
  * prev is the previous sibling, and at the first sibling the last one,
  * so that a node leaves its ring without a walk;
  * an only child's is itself, and a root's and an empty slot's is 0.
@@ -59,18 +61,63 @@ struct obj_header {
  * For CAP_TIME a is the first unit and b the count, as for CAP_IRQ_LINE.
  */
 struct cap {
-    uint8_t type;
-    uint8_t rights;
-    uint8_t index;      /* an installed region's slot in its process, a binding's place in its thread; 0 elsewhere */
-    uint8_t pad;
     uint32_t a;
     uint32_t b;
-    uint32_t child;
-    uint32_t next;
-    uint32_t prev;
+    uint16_t child;
+    uint16_t next;
+    uint16_t prev;
+    uint8_t type;
+    uint8_t rights : 3;
+    uint8_t index : 4;  /* an installed region's slot in its process, a binding's place in its thread; 0 elsewhere */
+    uint8_t up : 1;     /* next names the parent, or with next 0 the node is a root */
 };
 
+/*
+ * A link as the word the self-check and the host read it as:
+ * the address of the node it names, with LINK_UP set on a next that links up, 0 for none.
+ */
 #define LINK_UP 0x1u
+
+/* Every node lies on eight bytes in the window, see layout.h. */
+#define NODE_ALIGN 8
+
+static inline bool node_window_holds(uint32_t base, uint32_t size)
+{
+    return base - NODE_WINDOW_BASE < NODE_WINDOW_SIZE && size <= NODE_WINDOW_SIZE - (base - NODE_WINDOW_BASE);
+}
+
+/*
+ * The link that names a node, which lies in the window, so no bits are lost:
+ * every pool does, as layout.h holds and the self-check sees.
+ */
+static inline uint16_t node_link(const struct cap *n)
+{
+    return (uint16_t)((v2p(n) - NODE_WINDOW_BASE) / NODE_ALIGN);
+}
+
+/* The node a link names, which is not 0. */
+static inline struct cap *link_node(uint16_t link)
+{
+    return p2v(NODE_WINDOW_BASE + (uint32_t)link * NODE_ALIGN);
+}
+
+/* A link's address, 0 for none. */
+static inline paddr_t link_addr(uint16_t link)
+{
+    return link != 0 ? NODE_WINDOW_BASE + (uint32_t)link * NODE_ALIGN : 0;
+}
+
+/* A node's next as a word: the address it names, LINK_UP set when it links up; LINK_UP alone for a root. */
+static inline uint32_t node_next_word(const struct cap *n)
+{
+    return link_addr(n->next) | n->up;
+}
+
+/* Whether a filled node is a root, which is in no ring. */
+static inline bool node_root(const struct cap *n)
+{
+    return n->up && n->next == 0;
+}
 
 /* A region installed in a process's region slot. Kernel internal: never in a table. */
 #define CAP_INSTALLED 0x80
@@ -110,6 +157,7 @@ _Static_assert(CAPTABLE_MAX_SLOTS <= 1u << SLOT_TABLE_SHIFT, "a slot number's in
 struct captable {
     struct obj_header hdr;
     uint32_t nslots;
+    uint32_t pad;       /* so that the slots lie on NODE_ALIGN */
     struct cap slots[];
 };
 
@@ -158,7 +206,7 @@ struct process {
 #ifdef BOARD_PROCESS_CSRS
     uint32_t csrs[BOARD_PROCESS_CSRS]; /* what the board keeps of the CSRs user mode writes, see board_user_csrs_switch */
 #endif
-    struct cap tables[PROCESS_TABLES]; /* CAP_CAPTABLE, or CAP_NONE while none is mounted */
+    _Alignas(NODE_ALIGN) struct cap tables[PROCESS_TABLES]; /* CAP_CAPTABLE, or CAP_NONE while none is mounted */
     struct cap slots[]; /* CAP_INSTALLED, or CAP_NONE when empty; the PMP image after them */
 };
 
@@ -301,9 +349,18 @@ struct irq {
 };
 
 _Static_assert(sizeof(struct obj_header) == 8, "object layout");
-_Static_assert(sizeof(struct cap) == 24, "object layout");
-_Static_assert(sizeof(struct captable) == 12, "object layout");
-_Static_assert(sizeof(struct pool) == 56, "object layout");
+_Static_assert(sizeof(struct cap) == 16, "object layout");
+_Static_assert(sizeof(struct captable) == 16, "object layout");
+_Static_assert(sizeof(struct pool) == 48, "object layout");
+/* Every node lies on NODE_ALIGN, since every object does; see OBJ_ALIGN. */
+_Static_assert(sizeof(struct cap) % NODE_ALIGN == 0 && offsetof(struct captable, slots) % NODE_ALIGN == 0 &&
+                   offsetof(struct pool, node) % NODE_ALIGN == 0 &&
+                   offsetof(struct process, tables) % NODE_ALIGN == 0 &&
+                   offsetof(struct thread, proc) % NODE_ALIGN == 0 && offsetof(struct irq, ntfn) % NODE_ALIGN == 0,
+               "nodes lie on NODE_ALIGN");
+_Static_assert(NODE_WINDOW_SIZE / NODE_ALIGN <= (uint32_t)UINT16_MAX + 1, "a link spans the window");
+/* A node's index holds a region slot's number and a place's. */
+_Static_assert(PROCESS_REGION_SLOTS_MAX <= 16 && CORES <= 16, "a node's index fits its four bits");
 #ifdef BOARD_PROCESS_CSRS
 #define PROCESS_CSRS_SIZE (4 * BOARD_PROCESS_CSRS)
 #if CORES > 1
@@ -312,7 +369,8 @@ _Static_assert(sizeof(struct pool) == 56, "object layout");
 #else
 #define PROCESS_CSRS_SIZE 0
 #endif
-_Static_assert(sizeof(struct process) == 12 + PROCESS_CSRS_SIZE + 24 * PROCESS_TABLES, "object layout");
+_Static_assert(sizeof(struct process) == ((12 + PROCESS_CSRS_SIZE + NODE_ALIGN - 1) & ~(NODE_ALIGN - 1)) + 16 * PROCESS_TABLES,
+               "object layout");
 _Static_assert(sizeof(struct thread) == 40 + sizeof(struct trap_frame) + 2 * sizeof(struct cap), "object layout");
 _Static_assert(sizeof(struct place) == 24, "object layout");
 _Static_assert(sizeof(struct notification) == 16, "object layout");
@@ -353,7 +411,7 @@ static inline uint32_t untyped_made(const struct cap *c)
     if (c->child == 0) {
         return 0;
     }
-    uint8_t type = ((const struct cap *)p2v(c->child))->type;
+    uint8_t type = link_node(c->child)->type;
     return type == CAP_RETYPED ? CAP_POOL : type == CAP_INSTALLED ? CAP_FRAME : type;
 }
 
@@ -536,6 +594,7 @@ static inline bool irq_due(const struct irq *i, uint32_t now)
 }
 
 #define OBJ_ALIGN 8
+_Static_assert(OBJ_ALIGN % NODE_ALIGN == 0, "an object lies on NODE_ALIGN, so its nodes do");
 
 /* A size as a pool counts it, rounded up to OBJ_ALIGN. */
 static inline uint32_t obj_align(uint32_t size) { return (size + OBJ_ALIGN - 1) & ~(uint32_t)(OBJ_ALIGN - 1); }

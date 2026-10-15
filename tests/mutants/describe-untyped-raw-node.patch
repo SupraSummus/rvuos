@@ -7,10 +7,10 @@ Report: a description differs from the capability it describes
 diff --git a/kernel/object.h b/kernel/object.h
 --- a/kernel/object.h
 +++ b/kernel/object.h
-@@ -323,7 +323,7 @@ static inline uint32_t untyped_made(const struct cap *c)
+@@ -409,7 +409,7 @@ static inline uint32_t untyped_made(const struct cap *c)
          return 0;
      }
-     uint8_t type = ((const struct cap *)p2v(c->child))->type;
+     uint8_t type = link_node(c->child)->type;
 -    return type == CAP_RETYPED ? CAP_POOL : type == CAP_INSTALLED ? CAP_FRAME : type;
 +    return type;
  }

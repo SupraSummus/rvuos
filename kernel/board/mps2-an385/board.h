@@ -11,7 +11,7 @@
  * The kernel owns [RAM_BASE, USER_CODE_BASE).
  * The root task's memory follows, one block holding its code, data and input regions
  * and the boot pool its kernel objects live in,
- * and the upper half of SSRAM1 is handed to the root task as free RAM.
+ * and the 256 KiB right above it are handed to the root task as free RAM, see FREE_RAM_BASE.
  * Each is a block aligned to its own size; what lies in none of them is left unused.
  * The layout is QEMU virt's, moved to where this board has its RAM.
  */
@@ -27,8 +27,10 @@
 #define INPUT_BASE     U32(0x00120000)
 #define INPUT_SIZE     U32(0x00010000)
 #define BOOT_POOL_BASE U32(0x00130000)
-#define FREE_RAM_BASE  U32(0x00200000)
-#define FREE_RAM_SIZE  U32(0x00200000)
+/* As on QEMU virt: the free RAM right above the root task's memory, in the window of the tree's nodes. */
+#define FREE_RAM_BASE  U32(0x00140000)
+#define FREE_RAM_SIZE  U32(0x00040000)
+#define NODE_WINDOW_BASE ROOT_RAM_BASE
 
 /* A misaligned store is checked for writing throughout; see the ESP32-C6's board.h. */
 #define PMP_SPLIT_STORE_AS_READ 0

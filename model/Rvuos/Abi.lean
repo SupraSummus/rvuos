@@ -58,8 +58,8 @@ abbrev opCount : Nat := 43
 /-! Slot numbers, `SLOT_TABLE_SHIFT` and `PROCESS_TABLES`. -/
 abbrev slotTableShift : Nat := 10
 abbrev processTables : Nat := 2
-/-- A node, `struct cap`, is 24 bytes. -/
-abbrev nodeSize : Nat := 24
+/-- A node, `struct cap`, is 16 bytes. -/
+abbrev nodeSize : Nat := 16
 
 /-- True if a capability of this type names a kernel object, `cap_has_object`. -/
 def capHasObject (t : Nat) : Bool :=

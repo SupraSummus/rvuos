@@ -127,6 +127,10 @@ static void check_pools(void)
         if (p->used < sizeof(*p) || p->used > p->size) {
             fail("pool used mark outside the pool", base, p->used, p->size);
         }
+        /* Its nodes are named by sixteen-bit links, which node_link would cut short outside the window; see layout.h. */
+        if (!node_window_holds(base, p->size)) {
+            fail("pool outside the window of the tree's nodes", base, p->size, NODE_WINDOW_BASE);
+        }
         if ((base | p->size) & (OBJ_ALIGN - 1)) {
             fail("pool is not aligned", base, p->size, 0);
         }
@@ -1080,7 +1084,7 @@ static void check_captable(const struct captable *table)
                 fail("untyped with rights beyond the grant", v2p(table), i, c->rights);
             }
             /* Only a delete of a root marks one going, and nothing gives a root a parent. */
-            if (c->b != 0 && (c->b != UNTYPED_GOING || c->next != LINK_UP)) {
+            if (c->b != 0 && (c->b != UNTYPED_GOING || !node_root(c))) {
                 fail("untyped going though not a root, or b neither zero nor going", v2p(table), i, c->b);
             }
             break;
@@ -1278,23 +1282,23 @@ static bool derived_from(const struct cap *c, const struct cap *p)
 static void check_node(const struct cap *n, uint32_t bound)
 {
     if (n->type == CAP_NONE) {
-        if (n->child != 0 || n->next != 0 || n->prev != 0) {
-            fail("empty slot keeps links", v2p(n), n->child, n->next);
+        if (n->child != 0 || n->next != 0 || n->prev != 0 || n->up) {
+            fail("empty slot keeps links", v2p(n), n->child, node_next_word(n));
         }
         return;
     }
-    if (n->next == 0 || (n->child & LINK_UP)) {
-        fail("filled slot has malformed links", v2p(n), n->child, n->next);
+    if (node_next_word(n) == 0) {
+        fail("filled slot has malformed links", v2p(n), n->child, node_next_word(n));
     }
     if (n->child != 0) {
-        const struct cap *c = live_node(n->child);
+        const struct cap *c = live_node(link_addr(n->child));
         if (c == NULL || c->type == CAP_NONE) {
             fail("child link to a slot that is not a live, filled one", v2p(n), n->child, 0);
         }
     }
 
     /* Along the ring to the parent, every sibling live and filled. */
-    uint32_t link = n->next;
+    uint32_t link = node_next_word(n);
     uint32_t steps = 0;
     while (!(link & LINK_UP)) {
         const struct cap *s = live_node(link);
@@ -1304,7 +1308,7 @@ static void check_node(const struct cap *n, uint32_t bound)
         if (++steps > bound) {
             fail("sibling ring does not close", v2p(n), link, 0);
         }
-        link = s->next;
+        link = node_next_word(s);
     }
     if (link == LINK_UP) {
         /* A root: roots have no ring, so nothing may lead here through siblings. */
@@ -1329,21 +1333,21 @@ static void check_node(const struct cap *n, uint32_t bound)
     }
     /* The parent's ring is this one: it comes round to the node. */
     steps = 0;
-    link = parent->child;
+    link = link_addr(parent->child);
     for (const struct cap *s = live_node(link); s != n; s = live_node(link)) {
         if ((link & LINK_UP) || s == NULL || ++steps > bound) {
             fail("parent's ring does not reach the slot", v2p(n), v2p(parent), link);
         }
-        link = s->next;
+        link = node_next_word(s);
     }
     /* The predecessor is the sibling whose next is this node; the first child's is the last. */
-    const struct cap *pred = live_node(n->prev);
-    if (pred == NULL || pred->type == CAP_NONE || (n->prev & LINK_UP)) {
+    const struct cap *pred = live_node(link_addr(n->prev));
+    if (pred == NULL || pred->type == CAP_NONE) {
         fail("predecessor link to a slot that is not a live, filled one", v2p(n), n->prev, 0);
     }
-    bool first = parent->child == v2p(n);
-    if (first ? pred->next != (v2p(parent) | LINK_UP) : pred->next != v2p(n)) {
-        fail("predecessor's next is not the slot", v2p(n), n->prev, pred->next);
+    bool first = link_addr(parent->child) == v2p(n);
+    if (first ? node_next_word(pred) != (v2p(parent) | LINK_UP) : node_next_word(pred) != v2p(n)) {
+        fail("predecessor's next is not the slot", v2p(n), n->prev, node_next_word(pred));
     }
 }
 
@@ -1383,9 +1387,9 @@ static uint32_t tree_bound;
 /* The node a node was derived from, or NULL at a root; check_node has vetted the rings. */
 static const struct cap *node_parent(const struct cap *n)
 {
-    uint32_t link = n->next;
+    uint32_t link = node_next_word(n);
     while (!(link & LINK_UP)) {
-        link = live_node(link)->next;
+        link = node_next_word(live_node(link));
     }
     return link == LINK_UP ? NULL : live_node(link);
 }

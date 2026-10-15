@@ -67,12 +67,6 @@ static void put(const char *fmt, ...)
     text_len += (size_t)n;
 }
 
-/* The node a link names, the tag stripped. */
-static const struct cap *node_at(uint32_t link)
-{
-    return p2v(link & ~LINK_UP);
-}
-
 static void put_state(void)
 {
     put("state\n");
@@ -99,13 +93,13 @@ static void put_state(void)
             /* The ring from the first child, until the last links up. */
             put("kids %u", (unsigned)v2p(c));
             /* A ring a bug left open ends where there are no more nodes to visit, for the model to refuse. */
-            const struct cap *k = node_at(c->child);
+            const struct cap *k = link_node(c->child);
             for (uint32_t n = 0; n < HOST_RAM_SIZE / sizeof(struct cap); n++) {
                 put(" %u", (unsigned)v2p(k));
-                if (k->next & LINK_UP) {
+                if (k->up) {
                     break;
                 }
-                k = node_at(k->next);
+                k = link_node(k->next);
             }
             put("\n");
         }

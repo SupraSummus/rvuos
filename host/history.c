@@ -279,20 +279,20 @@ static void record_node(const struct cap *c)
 /* The node a filled node hangs below, 0 for a root; the last sibling links up to it. */
 static uint32_t parent_of(const struct cap *c)
 {
-    while (!(c->next & LINK_UP)) {
-        c = p2v(c->next);
+    while (!c->up) {
+        c = link_node(c->next);
     }
-    return c->next & ~LINK_UP;
+    return link_addr(c->next);
 }
 
 /* The nodes below a node, first to last. */
 static void children_of(const struct cap *c, addr_array *out)
 {
     out->n = 0;
-    for (uint32_t at = c->child; at != 0;) {
+    for (uint32_t at = link_addr(c->child); at != 0;) {
         const struct cap *n = p2v(at);
         PUSH(*out, at);
-        at = (n->next & LINK_UP) ? 0 : n->next;
+        at = n->up ? 0 : link_addr(n->next);
     }
 }
 
@@ -467,7 +467,7 @@ static void describe_expect(void)
     case CAP_UNTYPED: {
         w[1] = untyped_base(c);
         w[2] = untyped_size(c);
-        uint8_t below = c->child != 0 ? ((const struct cap *)p2v(c->child))->type : CAP_NONE;
+        uint8_t below = c->child != 0 ? link_node(c->child)->type : CAP_NONE;
         w[3] = below == CAP_RETYPED ? CAP_POOL : below == CAP_INSTALLED ? CAP_FRAME : below;
         break;
     }

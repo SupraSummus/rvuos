@@ -12,25 +12,27 @@ Report: memory that may hold kernel objects overlaps a node not above or below i
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -119,23 +119,8 @@ void cap_move(struct cap *from, struct cap *to)
+@@ -130,25 +130,8 @@ void cap_move(struct cap *from, struct cap *to)
       * An only child is its own predecessor and successor, and a root is in no ring.
       */
      *to = *from;
--    if (from->next != LINK_UP) {
+-    if (!node_root(from)) {
 -        struct cap *pred = node(from->prev);
 -        if (pred == from) {
--            to->prev = v2p(to);
+-            to->prev = node_link(to);
 -        } else {
--            ring_next(from)->prev = v2p(to);
+-            ring_next(from)->prev = node_link(to);
 -        }
--        if (pred->next & LINK_UP) {
--            node(pred->next)->child = v2p(to);
+-        if (pred->up) {
+-            node(pred->next)->child = node_link(to);
 -        } else {
--            pred->next = v2p(to);
+-            pred->next = node_link(to);
 -        }
 -    }
 -    if (from->child != 0) {
--        node(node(from->child)->prev)->next = v2p(to) | LINK_UP;
+-        struct cap *last = node(node(from->child)->prev);
+-        last->next = node_link(to);
+-        last->up = 1;
 -    }
 -    *from = (struct cap){ 0 };
 +    attach_beside(from, to);
