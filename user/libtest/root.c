@@ -276,6 +276,27 @@ static void core_round(void)
 }
 
 /*
+ * What a parent gives a child it takes back by revoking below its own slot,
+ * here one derived for this child alone from a root, the clock, of which a copy would be a root too.
+ */
+static void give_round(void)
+{
+    struct self_tally before = tally();
+    uint32_t clock, at;
+    must("build a child to give to", child_new(&self, &answering, "given", CHILD_TABLE, CHILD_DATA));
+    must("a slot", slot_new(&self, &clock));
+    must("the clock, for the child alone", rv_cap_derive(self.table, clock, BOOT_CAP_CLOCK, RIGHT_R));
+    must("give the child the clock", child_give(&self, &answering, clock, RIGHT_R, &at));
+    must("take the clock back", rv_cap_revoke(self.table, clock));
+    check(rv_cap_revoke(answering.table, at) == KERR_INVALID_CAP,
+          "revoking below what a parent gave empties the child's slot");
+    must("the slot back", slot_free(&self, clock));
+    must("take the child down", child_free(&self, &answering));
+    check(same(tally(), before), "a child given a capability and taken down gives back what it was given");
+    say(&out, "libtest: what a parent gave a child, taken back: ok\n");
+}
+
+/*
  * A child that answers its parent's checks and one that spins, each checked twice with a pause between:
  * the first check finds both well, since neither was asked before, and the second finds the one that spins.
  * Taken down, the one that spins leaves nothing behind, its units among what comes back.
@@ -855,6 +876,7 @@ int main(void)
     must("take a peer down", child_free(&self, &a));
     must("take a peer down", child_free(&self, &b));
     must("free the channel", chan_free(&self, &link));
+    give_round();
     check_round();
     core_round();
     hub_round();

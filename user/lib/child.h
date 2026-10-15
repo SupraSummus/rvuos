@@ -17,6 +17,8 @@
  * so the bits a wait returns say who signalled, and a signaller names every bit, not knowing which.
  * Past the first slots, regions and bits below, the parent hands the child's out and says in the page which,
  * so the page's type is all the two agree on.
+ * Whatever the parent puts into the child's table it derives from a capability of its own, never copies,
+ * so revoking below its slot takes it back from every child it was given to, and from wherever they copied it.
  * A child may build threads of its own too, from what its parent lets it have, child_give_own,
  * through lib/self.h as a root task does, child_self.
  */
@@ -90,7 +92,7 @@ struct child_page {
  * A child, as its parent keeps it, in six slots: its four objects, and the Untypeds of its pool and data,
  * and a seventh, the Untyped of the pool it builds from itself, if it does.
  * What only building it needs, its pool, data frame, timer and units, is deleted once used;
- * what was copied, installed or bound from them stays, below the Untypeds and the boot's capabilities.
+ * what was derived, installed or bound from them stays, below the Untypeds and the boot's capabilities.
  */
 struct child {
     const char *name;
@@ -117,7 +119,10 @@ struct child {
  * A failure takes back what was made.
  */
 uint32_t child_new(struct self *s, struct child *c, const char *name, uint32_t table_slots, uint32_t data_size);
-/* A copy of the parent's slot, with rights at most, in the child's next free slot, which *at says. */
+/*
+ * The parent's slot, derived with rights at most into the child's next free slot, which *at says;
+ * to take it back from one child alone, the parent gives each a slot derived for it.
+ */
 uint32_t child_give(struct self *s, struct child *c, uint32_t slot, uint32_t rights, uint32_t *at);
 /* A notification of the parent's, to signal with RIGHT_W alone and only bits, in the child's next free slot. */
 uint32_t child_give_bits(struct self *s, struct child *c, uint32_t ntfn, uint32_t bits, uint32_t *at);
