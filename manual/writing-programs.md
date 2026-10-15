@@ -126,12 +126,14 @@ the library of section 8.4 takes them in one, and hands out the slots, regions a
 
 4. **Fill the child's table** with exactly the authority it should have,
    narrowing rights as you go.
+   Derive each rather than copy it, so that revoking below your slot takes it back, section 5.2:
+   a copy of `BOOT_CAP_PRINT` would be a root, which nothing takes back while the child's table lives.
 
    ```c
-   rv_invoke(OP_CAP_COPY, SLOT_CHILD_TABLE, CHILD_PRINT,  BOOT_CAP_PRINT, RIGHT_W);
-   rv_invoke(OP_CAP_COPY, SLOT_CHILD_TABLE, CHILD_SHARED, SLOT_SHARED,    RIGHT_R | RIGHT_W);
-   rv_invoke(OP_CAP_COPY, SLOT_CHILD_TABLE, CHILD_UP,     SLOT_UP,        RIGHT_W);
-   rv_invoke(OP_CAP_COPY, SLOT_CHILD_TABLE, CHILD_DOWN,   SLOT_DOWN,      RIGHT_R);
+   rv_invoke(OP_CAP_DERIVE, SLOT_CHILD_TABLE, CHILD_PRINT,  BOOT_CAP_PRINT, RIGHT_W);
+   rv_invoke(OP_CAP_DERIVE, SLOT_CHILD_TABLE, CHILD_SHARED, SLOT_SHARED,    RIGHT_R | RIGHT_W);
+   rv_invoke(OP_CAP_DERIVE, SLOT_CHILD_TABLE, CHILD_UP,     SLOT_UP,        RIGHT_W);
+   rv_invoke(OP_CAP_DERIVE, SLOT_CHILD_TABLE, CHILD_DOWN,   SLOT_DOWN,      RIGHT_R);
    ```
 
 5. **Configure, bind and start** the thread.
@@ -223,6 +225,7 @@ its process with `CHILD_REGIONS` region slots, eight, or the most a process may 
 code and data in the first two, and its inbox with `CHILD_BIT_TIMER` and `CHILD_BIT_PARENT`.
 Past those the parent hands out the child's slots, regions and bits, and writes which into the page,
 so the type of a child's page is all the two agree on.
+What it gives, `child_give`, it derives from a slot of its own, so revoking below that slot takes it back.
 `child_start` names the core it runs on and the units of it it earns, or none for that core's spare time alone;
 its thread has a place on each core its parent has units of, so `child_spare` gives it another core's spare time besides.
 A child writes its state into the page,

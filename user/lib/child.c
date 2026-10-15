@@ -2,14 +2,14 @@
 
 #include "lib/libc.h"
 
-/* A notification of the parent's, carved to bits, copied with RIGHT_W alone into slot dst of table. */
+/* A notification of the parent's, carved to bits, derived with RIGHT_W alone into slot dst of table. */
 static uint32_t give_bits(struct self *s, uint32_t table, uint32_t dst, uint32_t ntfn, uint32_t bits)
 {
     uint32_t carved;
     PASS(slot_new(s, &carved));
     uint32_t status = rv_notify_carve(ntfn, bits, carved);
     if (status == KERR_OK) {
-        status = rv_cap_copy(table, dst, carved, RIGHT_W);
+        status = rv_cap_derive(table, dst, carved, RIGHT_W);
     }
     PASS(slot_free(s, carved));
     TRY(s, "give a child bits of a notification", status);
@@ -43,7 +43,7 @@ static uint32_t build(struct self *s, struct child *c, uint32_t table_slots, uin
     TRY(s, "a child's inbox", rv_pool_alloc(pool, CAP_NOTIFICATION, c->inbox, 0));
     uint32_t timer;
     PASS(timer_bind(s, pool, c->inbox, &timer));
-    uint32_t status = rv_cap_copy(c->table, CHILD_TIMER, timer, RIGHT_W);
+    uint32_t status = rv_cap_derive(c->table, CHILD_TIMER, timer, RIGHT_W);
     PASS(slot_free(s, timer));
     TRY(s, "give a child its timer", status);
     PASS(slot_free(s, pool));
@@ -52,12 +52,12 @@ static uint32_t build(struct self *s, struct child *c, uint32_t table_slots, uin
     TRY(s, "install a child's code", rv_process_install(c->process, CHILD_REGION_CODE, s->code, RIGHT_R | RIGHT_X));
     TRY(s, "install a child's data",
         rv_process_install(c->process, CHILD_REGION_DATA, c->data.made, RIGHT_R | RIGHT_W));
-    TRY(s, "give a child its inbox", rv_cap_copy(c->table, CHILD_INBOX, c->inbox, RIGHT_R));
+    TRY(s, "give a child its inbox", rv_cap_derive(c->table, CHILD_INBOX, c->inbox, RIGHT_R));
     PASS(bit_new(s, &c->bit_page));
     PASS(bit_new(s, &c->bit_fault));
     PASS(give_bits(s, c->table, CHILD_PARENT, s->inbox, c->bit_page));
-    TRY(s, "give a child its process", rv_cap_copy(c->table, CHILD_SELF, c->process, RIGHT_W));
-    TRY(s, "give a child the log, to write", rv_cap_copy(c->table, CHILD_LOG, s->print, RIGHT_W));
+    TRY(s, "give a child its process", rv_cap_derive(c->table, CHILD_SELF, c->process, RIGHT_W));
+    TRY(s, "give a child the log, to write", rv_cap_derive(c->table, CHILD_LOG, s->print, RIGHT_W));
 
     if (c->in_room) {
         c->region = s->room_region;
@@ -93,7 +93,7 @@ uint32_t child_give(struct self *s, struct child *c, uint32_t slot, uint32_t rig
         s->what = "a free slot in a child's table";
         return KERR_LIMIT;
     }
-    TRY(s, "give a child a capability", rv_cap_copy(c->table, c->slots_given, slot, rights));
+    TRY(s, "give a child a capability", rv_cap_derive(c->table, c->slots_given, slot, rights));
     *at = c->slots_given++;
     return KERR_OK;
 }
