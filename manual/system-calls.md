@@ -178,6 +178,8 @@ and so does the `CapTable` capability the call is made through.
 `a1` = slot in the invoked table.
 Clears it; what hung below it now hangs below the slot's parent,
 or, when the slot is a root, each becomes a root, and the call may be made again, section 6.1.
+An Untyped whose delete as a root stopped part way makes nothing until it is gone (`KERR_NO_MEMORY`),
+even once nothing is left below it, since those already roots lie in its memory.
 Clearing an empty slot succeeds.
 Deleting a frame does not uninstall it anywhere,
 and deleting a `KernelPool` capability does not destroy the pool.
@@ -536,7 +538,7 @@ and in `a2` to `a4` what the capability names, by its type:
 | Type | `a2` | `a3` | `a4` |
 |---|---|---|---|
 | `Frame` | base | size | the smallest region in bytes, a power of two of at least 8 |
-| `Untyped` | base | size | 0 while it is free, else what lies first below it: `CAP_FRAME`, `CAP_UNTYPED` or `CAP_POOL`, section 5.4 |
+| `Untyped` | base | size | 0 while nothing lies below it, else what lies first there: `CAP_FRAME`, `CAP_UNTYPED` or `CAP_POOL`, section 5.4 |
 | `KernelPool` | size | the room: the bytes an allocation may still take, 0 while it is being destroyed | 1 while it is being destroyed, else 0 |
 | `CapTable` | its number of slots | 0 | 0 |
 | `Process` | its region slots, every one of which may be filled at once | the most a process may have on this machine, a PMP entry each, which `OP_POOL_ALLOC` holds `a4` to | 0 |

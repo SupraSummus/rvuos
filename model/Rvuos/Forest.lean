@@ -637,10 +637,10 @@ variable {m : Machine} {s : State}
 theorem capDelete_forest (hf : Forest s) {table : Obj} {r : List Nat} {outs : List Outcome}
     (h : capDelete s table r = .ok (some outs)) : ∀ o ∈ outs, Forest o.st := by
   intro o ho
-  rcases capDelete_ok h with rfl | ⟨n, ⟨p, hp, rfl⟩ | ⟨hp, rfl⟩⟩
+  rcases capDelete_ok h with rfl | ⟨n, ⟨p, hp, rfl⟩ | ⟨c, -, hp, rfl⟩⟩
   · rw [List.mem_singleton] at ho; subst ho; exact hf
   · rw [List.mem_singleton] at ho; subst ho; exact hf.detachErase ((hf.parent?_eq _ p).mp hp)
-  · rcases deleteRoot_forest _ r _ s [] o hf rfl ((hf.parent?_none _).mp hp) ho with h' | h'
+  · rcases deleteRoot_forest _ r _ _ [] o (hf.setCap n c.markGoing) rfl ((hf.parent?_none _).mp hp) ho with h' | h'
     · simp at h'
     · exact h'
 

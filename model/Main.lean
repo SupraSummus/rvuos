@@ -67,7 +67,7 @@ structure Invariant where
 /-- The properties of design/verification.md the model states. -/
 def invariants : List Invariant :=
   [⟨"forest", State.wellFormed, none⟩,
-   ⟨"nesting", State.nestingOk, some ⟨nesting_breaks⟩⟩]
+   ⟨"nesting", State.nestingOk, none⟩]
 
 /-- What a step left: the caller's registers, or what stood in for them. -/
 inductive Seen where
@@ -153,7 +153,7 @@ def searchAll (m : Machine) (starts : List Start) (depth : Nat) : IO Bool := do
     if !found && known then
       ok := false
       IO.eprintln s!"model-check: no state within {depth} calls breaks {inv.name}, which a theorem says a step does: \
-        once the kernel keeps it, a proof that every step keeps it replaces that theorem"
+        once the kernel keeps it, the theorem goes"
     else if !found then
       IO.println s!"model-check: no state within {depth} calls breaks {inv.name}"
   return ok

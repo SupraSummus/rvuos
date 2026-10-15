@@ -274,7 +274,14 @@ bool cap_delete(struct cap *n, bool preempt)
         clear_node(n);
         return true;
     }
-    /* Below a root there is no ring to hand the children to: each becomes a root, one step at a time. */
+    /*
+     * Below a root there is no ring to hand the children to: each becomes a root, one step at a time.
+     * An Untyped makes nothing more, as those already roots lie in its memory
+     * while another thread may take away those still below it.
+     */
+    if (n->type == CAP_UNTYPED) {
+        n->b = UNTYPED_GOING;
+    }
     while (n->child != 0) {
         LOOP_PAID(cap_delete, link, "a child below a root, which becomes a root itself");
         struct cap *c = node(n->child);

@@ -1079,6 +1079,10 @@ static void check_captable(const struct captable *table)
             if (c->rights & ~granted) {
                 fail("untyped with rights beyond the grant", v2p(table), i, c->rights);
             }
+            /* Only a delete of a root marks one going, and nothing gives a root a parent. */
+            if (c->b != 0 && (c->b != UNTYPED_GOING || c->next != LINK_UP)) {
+                fail("untyped going though not a root, or b neither zero nor going", v2p(table), i, c->b);
+            }
             break;
         }
         case CAP_IRQ_LINE:
@@ -1422,21 +1426,20 @@ static void check_tree(void)
 }
 
 /*
- * True if an Untyped is a root with something made of it below it.
- * A delete below a root makes roots of its children one by one,
- * which lie in its memory until it goes with the last of them;
+ * True if an Untyped's delete as a root has begun.
+ * It makes roots of its children one by one, which lie in its memory until it goes;
  * it makes nothing meanwhile, so nothing it could make meets them.
  */
-static bool made_root(const struct cap *u)
+static bool going(const struct cap *u)
 {
-    return u->type == CAP_UNTYPED && !untyped_free(u) && u->next == LINK_UP;
+    return u->type == CAP_UNTYPED && u->b == UNTYPED_GOING;
 }
 
 /*
  * Memory that may become kernel memory, an Untyped or a pool,
  * overlaps another node standing for memory only where one lies below the other,
- * or where one of them is a root Untyped that made something,
- * which a delete below it leaves while it makes roots of its children one by one.
+ * or where one of them is an Untyped whose delete as a root has begun,
+ * which makes roots of its children one by one.
  * So a frame, which never lies above or below a pool, overlaps none,
  * and neither does anything two siblings below one Untyped stand for:
  * an Untyped makes one thing of the whole of its memory, or two halves, and nothing while they are there.
@@ -1456,7 +1459,7 @@ static void check_nesting(void)
             if (y == x || !node_range(y, &ybase, &ysize) || !ranges_overlap(xbase, xsize, ybase, ysize)) {
                 continue;
             }
-            if (!lies_below(x, y) && !lies_below(y, x) && !made_root(x) && !made_root(y)) {
+            if (!lies_below(x, y) && !lies_below(y, x) && !going(x) && !going(y)) {
                 fail("memory that may hold kernel objects overlaps a node not above or below it",
                      v2p(x), v2p(y), ybase);
             }

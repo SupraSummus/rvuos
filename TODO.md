@@ -2,26 +2,6 @@
 
 Open work only; an item leaves this file in the commit that finishes it.
 
-## Known bugs
-
-- A root Untyped can be made free while its delete is half done, and then make what lies over its children:
-  two allocators over one block, so a frame may cover a pool.
-  A delete of a root makes roots of its children one by one and may stop between them,
-  and while it is stopped another thread may delete or revoke the children still below it,
-  after which `untyped_free` holds of the Untyped, its other children lying in its memory as roots.
-  `made_root` in `kernel/selfcheck.c` allows the overlap only while it made something, so the self-check refuses the state.
-  The model's search finds it, see "The model" in `DESIGN.md`, and `nesting_breaks` in `model/Rvuos/Nesting.lean` states it;
-  on the host build, after the prologue of `rvuos/replay.h`:
-
-  ```
-  actor 1 OP_TEST_PREEMPT slot BOOT_CAP_TEST a1 2
-  actor 1 OP_CAP_DELETE slot BOOT_CAP_CAPTABLE a1 BOOT_CAP_FREE_RAM
-  actor 2 OP_CAP_DELETE slot BOOT_CAP_CAPTABLE a1 REPLAY_CAP_RAM
-  ```
-
-  With the fix, a proof that every step keeps the nesting replaces `nesting_breaks`, which `model-check` asks for,
-  and the seed goes under `tests/seeds/`.
-
 ## Wi-Fi system
 
 `user/wifi/`, on a Pico 2 W: the driver brings the CYW43439's firmware up, scans,
@@ -588,6 +568,10 @@ what is left:
   Others its state can say are next: the derivation rule of "Derivation", a node no more than its parent,
   and of "Authority confinement" what a table's node may name.
   Each goes through the stages "The model" lists, the search first.
+- The nesting is searched but not settled: no theorem says every step keeps it.
+  Alone it does not follow from step to step;
+  a carve and a split need what a node stands for to lie within its parent's, in 32 bits,
+  and nothing that may become kernel memory to lie below a frame, which the derivation rule says.
 - The search follows calls over memory alone, which the nesting needs;
   an invariant over other capabilities needs it to follow theirs.
 - `make mutants` does not run `model-check`,

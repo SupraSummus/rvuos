@@ -122,6 +122,9 @@ def shapeCheck (op : Nat) (c : Cap) (r : List Nat) : Except Nat (Option Unit) :=
 /-- A finished call: status zero and the arguments as they came, but where a handler writes a result. -/
 def finish (st : State) (r : List Nat) : Outcome := ⟨st, .regs (kOk :: r.drop 1)⟩
 
+/-- `untyped_free`: nothing made of the Untyped at `u` is left below it, and its delete as a root has not begun. -/
+def untypedFree (u : Nat) (c : Cap) : Bool := (s.kidsOf u).isEmpty && c.b != untypedGoing
+
 /-- A node filled with words below a parent, or a root. -/
 def store (n : Nat) (c : Cap) (parent : Option Nat) : State := (s.setCap n c).attach parent n
 
@@ -166,7 +169,7 @@ def capCopy (t : Nat) (derive : Bool) (table : Obj) (r : List Nat) : Answer := d
   let (source, src) ← slotLookup m s t (reg r 2)
   let src := { src with rights := src.rights &&& (reg r 3 % 256) }
   if derive then
-    if src.type == capUntyped && !(s.kidsOf source).isEmpty then throw kNoMemory
+    if src.type == capUntyped && !untypedFree s source src then throw kNoMemory
     let dst ← capSlotFree s table (reg r 1)
     pure (some [finish (store s dst src (some source)) r])
   else
@@ -180,15 +183,16 @@ def capMove (t : Nat) (table : Obj) (r : List Nat) : Answer := do
   let dst ← capSlotFree s table (reg r 1)
   pure (some [finish (s.move source dst) r])
 
-/-- `OP_CAP_DELETE`: an empty slot is cleared already. -/
+/-- `OP_CAP_DELETE`: an empty slot is cleared already, and a root goes. -/
 def capDelete (table : Obj) (r : List Nat) : Answer :=
   if reg r 1 ≥ table.count then .error kInvalidCap
   else
     let n := nodeAt table (reg r 1)
-    if (s.cap? n).isNone then .ok (some [finish s r])
-    else match s.parent? n with
+    match s.cap? n with
+    | none => .ok (some [finish s r])
+    | some c => match s.parent? n with
       | some _ => .ok (some [finish ((s.detachAdopt n).eraseCap n) r])
-      | none => .ok (some (deleteRoot n r (s.kidsOf n) s []))
+      | none => .ok (some (deleteRoot n r (s.kidsOf n) (s.setCap n c.markGoing) []))
 
 /-- `OP_CAP_REVOKE`: below an Untyped that holds what the caller runs on, none. -/
 def capRevoke (t slot : Nat) (table : Obj) (r : List Nat) : Answer :=
@@ -227,7 +231,7 @@ def untypedRetype (t u : Nat) (c : Cap) (r : List Nat) : Answer := do
   if type == capPool && c.rights &&& (rightR ||| rightW) != (rightR ||| rightW) then throw kNoRights
   if type == capPool && (blockSize a).toNat < m.poolMin then throw kInvalidArg
   let dst ← slotVacant m s t (reg r 2)
-  if !(s.kidsOf u).isEmpty then throw kNoMemory
+  if !untypedFree s u c then throw kNoMemory
   if type == capPool then pure none
   else
     let st := store s dst ⟨capFrame, c.rights, 0, (blockBase a).toNat, (blockSize a).toNat⟩ (some u)
@@ -242,7 +246,7 @@ def untypedSplit (t u : Nat) (c : Cap) (r : List Nat) : Answer := do
   let lo ← slotVacant m s t (reg r 1)
   let hi ← slotVacant m s t (reg r 2)
   if lo == hi then throw kInvalidArg
-  if !(s.kidsOf u).isEmpty then throw kNoMemory
+  if !untypedFree s u c then throw kNoMemory
   let s1 := store s lo ⟨capUntyped, c.rights, 0, (blockWord base half).toNat, 0⟩ (some u)
   let s2 := store s1 hi ⟨capUntyped, c.rights, 0, (blockWord (base + half) half).toNat, 0⟩ (some u)
   pure (some [finish s2 r])
