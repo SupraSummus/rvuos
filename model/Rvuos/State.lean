@@ -118,18 +118,24 @@ def normal (s : State) : State :=
     caps := s.caps.mergeSort (fun x y => x.1 ≤ y.1)
     kids := (s.kids.filter (!·.2.isEmpty)).mergeSort (fun x y => x.1 ≤ y.1) }
 
-/-- The forest the trace claims: every child a filled node, in one list at most, and no node below itself. -/
+/-- Up from a node, a root within as many steps as `fuel`. -/
+def reachesRoot (s : State) (n : Nat) : Nat → Bool
+  | 0 => false
+  | fuel + 1 => match s.parent? n with
+    | none => true
+    | some p => s.reachesRoot p fuel
+
+/--
+The forest the trace claims: every child a filled node, in one list at most and there once,
+every node with a list filled and with one list at most, and no node below itself.
+`Forest` in `model/Rvuos/Forest.lean` says it of the lists, and `wellFormed_forest` that this checks it.
+-/
 def wellFormed (s : State) : Bool :=
   let all := s.kids.flatMap (·.2)
   let filled := all.all (fun k => (s.cap? k).isSome) && s.kids.all (fun p => (s.cap? p.1).isSome)
-  let once := all.length == all.eraseDups.length
+  let once := decide (s.kids.map (·.1)).Nodup && decide all.Nodup
   -- Up from each node, a root within as many steps as there are nodes.
-  let rec up (n : Nat) : Nat → Bool
-    | 0 => false
-    | f + 1 => match s.parent? n with
-      | none => true
-      | some p => up p f
-  filled && once && s.caps.all (fun c => up c.1 (s.caps.length + 1))
+  filled && once && s.caps.all (fun c => s.reachesRoot c.1 (s.caps.length + 1))
 
 end State
 

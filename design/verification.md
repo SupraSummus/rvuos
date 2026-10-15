@@ -744,3 +744,13 @@ What is proved is proved of the model:
 - `delete_revoke_shrink`, in `model/Rvuos/Shrink.lean`:
   a delete or a revoke leaves no capability that was not there before, with the same words,
   in every outcome, stopped part way or not.
+- `step_flows`, in `model/Rvuos/Flows.lean`:
+  authority only flows, in every outcome of every step the model names.
+  Every node a step fills or changes held the same words before,
+  or a node the caller reached through its tables covers it:
+  the same capability, or memory within a frame's or an Untyped's, with no more rights.
+  It leans on `split_within`, proved with `bv_decide`, so it trusts Lean's compiler too.
+- `step_forest`, in `model/Rvuos/Forest.lean`:
+  every outcome of every step the model names is a forest where the state before it was one,
+  so a delete or a revoke leaves a forest wherever it stops;
+  and `wellFormed_forest`: every state `model-check` passes as a forest is one.
