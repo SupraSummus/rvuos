@@ -21,9 +21,9 @@
 
 /*
  * The least block the root task takes, see take_untyped:
- * the sixth halving of the least free RAM a board gives, nRF52840's 128 KiB.
+ * the sixth halving of the least free RAM a board gives, nRF52840's 64 KiB.
  */
-#define CHUNK 0x800u
+#define CHUNK 0x400u
 
 /* Initialised data, which start.S copies from behind the code before main; see user/user.ld.S. */
 static volatile uint32_t initialised[2] = { MAGIC, ~MAGIC };

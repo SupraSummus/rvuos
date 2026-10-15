@@ -351,8 +351,7 @@ what is left:
 
 ## nRF52840
 
-- The library's test does not fit the root task's 32 KiB code region, so `make BOARD=nrf52840 lib-test` fails to link.
-  A kernel run from flash would leave its RAM to a larger region, and boot without the probe.
+- Boot without the probe, from flash, the image copied into RAM, where it runs now.
 - The idle kernel polls, since SysTick wakes `wfe` only under a debugger;
   a compare on a TIMER's CC register, raising its line, would let it sleep, as the item under "ARM" says for QEMU 11.
 - Code runs from RAM at its system-bus address; the alias at `0x00800000` fetches over the core's code bus,
@@ -594,7 +593,7 @@ What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
   without changing what a program that left something there does, as the unread of `a1` to `a3` now can.
   Holding them to zero, as `dispatch` does `a1` to `a3`, has every wrapper of `user/rvuos.h` set them:
   on ARM, where `r4` to `r6` are the callee's to keep, that is three moves and their saving at every call,
-  which grew the nRF52840's bench by 2.7 KiB, past its 32 KiB code region, and a call by a fortieth on the MPS2 boards.
+  which grew the nRF52840's bench by 2.7 KiB and a call by a fortieth on the MPS2 boards.
   A wrapper out of line on ARM would hold them at the price of a call within the call.
   The count of arguments a call sets, in the bits of `a7` above the code, would hold them at no price:
   a wrapper loads its code as a constant either way, and `dispatch` would take a register past the count as zero,

@@ -8,27 +8,29 @@
  *
  * Nothing is written to flash: tools/nrf52840-run.py loads the image into RAM over SWD and starts the core at _start,
  * which sets its own stack, and arch_init the vector table.
- * The console takes the first 8 KiB, see UART_BASE, and the kernel owns [RAM_BASE, USER_CODE_BASE).
- * The root task's memory follows, one block holding its code, data and input regions
- * and the boot pool its kernel objects live in,
- * and the upper half of RAM is handed to the root task as free RAM.
+ * The console takes the first 8 KiB, see UART_BASE, and the kernel owns [RAM_BASE, KLOG_BASE) and its log.
+ * The free RAM follows, the second quarter of RAM, handed to the root task,
+ * and the upper half is the root task's memory, one block holding its code, data and input regions
+ * and the boot pool its kernel objects live in, laid out as RP2350's.
  * Each is a block aligned to its own size; what lies in none of them is left unused.
- * The chip has half RP2350's RAM, so the root task's code, data and free RAM are each half its.
+ * The root task's code region is as large as every other board's, so that one program builds for all,
+ * and the free RAM is what that leaves.
  */
 #define RAM_BASE       U32(0x20002000)
 #define RAM_SIZE       U32(0x0003e000)
-#define ROOT_RAM_BASE  U32(0x20010000)
-#define ROOT_RAM_SIZE  U32(0x00010000)
-#define USER_CODE_BASE U32(0x20010000)
-#define USER_CODE_SIZE U32(0x00008000)
-#define USER_DATA_BASE U32(0x20018000)
-#define USER_DATA_SIZE U32(0x00004000)
+#define KLOG_BASE      U32(0x2000f000)
+#define FREE_RAM_BASE  U32(0x20010000)
+#define FREE_RAM_SIZE  U32(0x00010000)
+#define ROOT_RAM_BASE  U32(0x20020000)
+#define ROOT_RAM_SIZE  U32(0x00020000)
+#define USER_CODE_BASE U32(0x20020000)
+#define USER_CODE_SIZE U32(0x00010000)
+#define USER_DATA_BASE U32(0x20030000)
+#define USER_DATA_SIZE U32(0x00008000)
 /* Nothing loads replay input here yet; the region keeps the root task's grants the same. */
-#define INPUT_BASE     U32(0x2001c000)
+#define INPUT_BASE     U32(0x20038000)
 #define INPUT_SIZE     U32(0x00001000)
-#define BOOT_POOL_BASE U32(0x2001d000)
-#define FREE_RAM_BASE  U32(0x20020000)
-#define FREE_RAM_SIZE  U32(0x00020000)
+#define BOOT_POOL_BASE U32(0x20039000)
 
 /* A misaligned store is checked for writing throughout; see the ESP32-C6's board.h. */
 #define PMP_SPLIT_STORE_AS_READ 0

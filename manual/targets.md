@@ -264,12 +264,12 @@ Memory map:
 | `0x20000000` | 8 KiB | the console, granted to the root task |
 | `0x20002000` to `0x2000F000` | 52 KiB | kernel code, data and stack, the vector table first |
 | `0x2000F000` | 4 KiB | the kernel log: a 32-byte header and the ring |
-| `0x20010000` | 64 KiB | the root task's memory, granted to it as an Untyped with all rights, which has made the four ranges below and makes nothing more |
-| `0x20010000` | 32 KiB | root task code, read and execute |
-| `0x20018000` | 16 KiB | root task data and stack, read and write |
-| `0x2001C000` | 4 KiB | input region, read only; nothing fills it yet |
-| `0x2001D000` | 4 KiB | the boot pool |
-| `0x20020000` | 128 KiB | free RAM, granted to the root task as an Untyped with all rights |
+| `0x20010000` | 64 KiB | free RAM, granted to the root task as an Untyped with all rights |
+| `0x20020000` | 128 KiB | the root task's memory, granted to it as an Untyped with all rights, which has made the four ranges below and makes nothing more |
+| `0x20020000` | 64 KiB | root task code, read and execute |
+| `0x20030000` | 32 KiB | root task data and stack, read and write |
+| `0x20038000` | 4 KiB | input region, read only; nothing fills it yet |
+| `0x20039000` | 4 KiB | the boot pool |
 
 Interrupt lines:
 

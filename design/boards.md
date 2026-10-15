@@ -314,7 +314,8 @@ it resets the chip and holds the core before its first instruction, writes the i
 then turns halting debug off, so a thread's `bkpt` is a fault the kernel takes, as with no probe; nothing is written to flash.
 The chip reaches the host through its pins alone, so the console is a ring in RAM the runner reads over SWD as the core runs,
 and the halt only leaves its code where the runner looks, which then writes out the log as RP2350's halt does.
-Its 256 KiB of RAM leave the root task half RP2350's free RAM and a code region of 32 KiB.
+Its 256 KiB of RAM leave the root task a code region of 64 KiB, as on every other board, and a quarter of RAM free, 64 KiB;
+the kernel's log lies at the top of the kernel's quarter, not right below the root task's code, as the free RAM lies between.
 A TIMER's count is seen only by capturing it into a CC register,
 so TIMER1 and a PPI channel capture TIMER0's into one every microsecond, which a load reads, the kernel's and user mode's alike.
 Measured on a Fanstel BT840X, revision 1: eight MPU regions;

@@ -45,16 +45,23 @@ _Static_assert(ROOT_RAM_BASE <= USER_CODE_BASE && USER_CODE_BASE + USER_CODE_SIZ
  * The kernel's log, see klog.h: its header and a ring of KLOG_SIZE bytes,
  * one block at the top of the kernel's memory, right below the root task's code,
  * or a block lower where the log may not touch the code; see PMP_SPLIT_STORE_AS_READ in board.h.
+ * A board whose free RAM lies between the kernel and the root task's memory places it in board.h.
  */
 #define KLOG_REGION_SIZE U32(0x00001000)
 #define KLOG_SIZE        (KLOG_REGION_SIZE - RVUOS_LOG_HEADER)
+#ifndef KLOG_BASE
 #if PMP_SPLIT_STORE_AS_READ
 #define KLOG_BASE        (USER_CODE_BASE - 2 * KLOG_REGION_SIZE)
 #else
 #define KLOG_BASE        (USER_CODE_BASE - KLOG_REGION_SIZE)
 #endif
+#endif
 
 #ifndef __ASSEMBLER__
+_Static_assert(KLOG_BASE % KLOG_REGION_SIZE == 0 && KLOG_BASE + KLOG_REGION_SIZE <= ROOT_RAM_BASE &&
+                   KLOG_BASE + KLOG_REGION_SIZE <= FREE_RAM_BASE &&
+                   (!PMP_SPLIT_STORE_AS_READ || KLOG_BASE + KLOG_REGION_SIZE < USER_CODE_BASE),
+               "the kernel's log is a block of its own below what the root task is given, off its code where it must be");
 _Static_assert(!PMP_SPLIT_STORE_AS_READ || USER_DATA_BASE + USER_DATA_SIZE < INPUT_BASE,
                "the data region may not touch the input region");
 #endif
