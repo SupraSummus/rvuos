@@ -95,6 +95,12 @@ void history_end(void);
 void model_open(const char *path);
 void model_begin(bool call);
 void model_end(void);
+/* The step under way ends in an invariant report. */
+void model_report(void);
+/* The records of an input begin; see host/model.c. */
+void model_start(void);
+/* The driver's thread an actor number names, NULL for none. */
+const struct thread *host_actor_thread(unsigned actor);
 
 #ifdef RVUOS_WORK
 /* Around each call in the harness fuzz-work: count its loops, then check their claims. */

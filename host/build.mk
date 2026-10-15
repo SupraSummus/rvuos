@@ -72,14 +72,17 @@ host-test: $(HOST_HARNESSES) $(SEEDS)
 	for h in $(HOST_HARNESSES); do $$h -runs=0 $(SEEDS) tests/corpus || exit 1; done
 
 # The model of the derivation tree in model/, its proofs checked as it builds,
-# and every step the seeds and the corpus make on the default machine held to it; see DESIGN.md, "The model".
+# every step the seeds and the corpus make on the default machine held to it,
+# every state they reach held to the invariants it states,
+# and the model searched MODEL_SEARCH calls deep from where their records begin; see DESIGN.md, "The model".
 # Each input replays alone, so the trace is the same however libFuzzer orders them.
-LAKE        ?= lake
-MODEL_TRACE := $(HOST_BUILD)/model-trace
+LAKE         ?= lake
+MODEL_TRACE  := $(HOST_BUILD)/model-trace
+MODEL_SEARCH ?= 2
 model-test: $(HOST_BUILD)/fuzz $(SEEDS)
 	cd model && $(LAKE) build
 	$(HOST_BUILD)/fuzz -runs=0 -seed=1 --isolated --model-trace=$(MODEL_TRACE) $(SEEDS) tests/corpus >/dev/null
-	model/.lake/build/bin/model-check $(MODEL_TRACE)
+	model/.lake/build/bin/model-check --search=$(MODEL_SEARCH) $(MODEL_TRACE)
 
 # Plant the bugs of tests/mutants/ in the kernel one at a time.
 # The link or the host replay must catch each,

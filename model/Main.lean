@@ -1,7 +1,13 @@
 /-
-`model-check TRACE`: hold every step of a trace `host/model.c` wrote to the model.
+`model-check [--search=N] TRACE`: hold every step of a trace `host/model.c` wrote to the model,
+and every state in it to the invariants the model states; see "The model" in DESIGN.md.
 A step the model says nothing of is counted by its operation;
-a step whose outcome is none the model names, or a state that is no forest, fails the run.
+a step whose outcome is none the model names, or a state that breaks an invariant, fails the run,
+but for the state an invariant report found, which the kernel's self-check refused already.
+With `--search=N` it then searches the model, N calls deep, from each state the trace says an input's records began in,
+for a state that breaks an invariant, and gives the seed that reaches it;
+that fails the run unless a theorem says a step breaks the invariant, a bug `TODO.md` lists,
+and so does a search that no longer reaches a bug a theorem says is there, which a fix leaves behind.
 -/
 import Rvuos
 
@@ -41,8 +47,8 @@ partial def readState (r : Reader) : IO State := do
     match ws with
     | ["end"] => pure { objs := s.objs.reverse, caps := s.caps.reverse, kids := s.kids.reverse }
     | "obj" :: rest =>
-      let [a, t, p, n, c] ← nats rest | throw (IO.userError "model-check: obj takes five words")
-      go { s with objs := ⟨a, t, p, n, c⟩ :: s.objs }
+      let [a, t, p, n, c, z] ← nats rest | throw (IO.userError "model-check: obj takes six words")
+      go { s with objs := ⟨a, t, p, n, c, z⟩ :: s.objs }
     | "node" :: rest =>
       let [n, t, rt, i, a, b] ← nats rest | throw (IO.userError "model-check: node takes six words")
       go { s with caps := (n, ⟨t, rt, i, a, b⟩) :: s.caps }
@@ -52,6 +58,17 @@ partial def readState (r : Reader) : IO State := do
     | _ => throw (IO.userError s!"model-check: line {← r.line.get}: obj, node, kids or end expected")
   go ⟨[], [], []⟩
 
+structure Invariant where
+  name : String
+  holds : State → Bool
+  /-- That a step breaks it, a bug the kernel has. -/
+  breaks : Option (PLift (Breaks holds))
+
+/-- The properties of design/verification.md the model states. -/
+def invariants : List Invariant :=
+  [⟨"forest", State.wellFormed, none⟩,
+   ⟨"nesting", State.nestingOk, some ⟨nesting_breaks⟩⟩]
+
 /-- What a step left: the caller's registers, or what stood in for them. -/
 inductive Seen where
   | ret (r : List Nat)
@@ -59,13 +76,20 @@ inductive Seen where
   | fault
   | gone
 
-def readSeen (r : Reader) : IO Seen := do
-  match ← expect r "result" with
+def readSeen (r : Reader) (ws : List String) : IO Seen := do
+  match ws with
   | "ret" :: rest => pure (.ret (← nats rest))
   | ["again"] => pure .again
   | ["fault"] => pure .fault
   | ["gone"] => pure .gone
   | _ => throw (IO.userError s!"model-check: line {← r.line.get}: a result expected")
+
+/-- What a step left, and whether an invariant report ended it. -/
+def readResult (r : Reader) : IO (Bool × Seen) := do
+  let ws ← r.next
+  let (reported, ws) ← if ws == ["report"] then pure (true, ← r.next) else pure (false, ws)
+  if ws.head? != some "result" then throw (IO.userError s!"model-check: line {← r.line.get}: result expected")
+  pure (reported, ← readSeen r (ws.drop 1))
 
 def agrees (o : Outcome) (after : State) (seen : Seen) : Bool :=
   o.st.normal == after.normal &&
@@ -99,9 +123,46 @@ def diff (want got : State) : List String :=
   let objs := if w.objs == g.objs then [] else ["  the objects differ"]
   caps ++ kids ++ objs
 
+/-- The invariants a state breaks. -/
+def broken (s : State) : List Invariant := invariants.filter (!·.holds s)
+
+/-- A state the records of an input began in: the driver's threads that may run, by actor number, and the tree. -/
+structure Start where
+  actors : List (Nat × Nat)
+  st : State
+
+def pairs : List Nat → List (Nat × Nat)
+  | a :: b :: rest => (a, b) :: pairs rest
+  | _ => []
+
+/-- Search from each start for a state that breaks each invariant; true if those that break are the known ones. -/
+def searchAll (m : Machine) (starts : List Start) (depth : Nat) : IO Bool := do
+  let mut ok := true
+  for inv in invariants do
+    let known := inv.breaks.isSome
+    let say := if known then IO.println else IO.eprintln
+    let mut found := false
+    for st in starts do
+      let some n := Search.search m st.st st.actors depth (!inv.holds ·) | continue
+      found := true
+      ok := ok && known
+      say s!"model-check: {inv.name} breaks within {n.path.length} calls{if known then ", a known bug" else ""}; the seed:"
+      for l in Search.seed n.path do
+        say s!"  {l}"
+      break
+    if !found && known then
+      ok := false
+      IO.eprintln s!"model-check: no state within {depth} calls breaks {inv.name}, which a theorem says a step does: \
+        once the kernel keeps it, a proof that every step keeps it replaces that theorem"
+    else if !found then
+      IO.println s!"model-check: no state within {depth} calls breaks {inv.name}"
+  return ok
+
 def main (args : List String) : IO UInt32 := do
-  let [path] := args | do
-    IO.eprintln "usage: model-check TRACE"
+  let (opts, rest) := args.partition (·.startsWith "--")
+  let depth := opts.findSome? fun o => (o.dropPrefix? "--search=").bind (·.toString.toNat?)
+  let [path] := rest | do
+    IO.eprintln "usage: model-check [--search=N] TRACE"
     return 2
   let h ← IO.FS.Handle.mk path .read
   let r : Reader := ⟨h, ← IO.mkRef 0⟩
@@ -109,26 +170,42 @@ def main (args : List String) : IO UInt32 := do
   let mut checked := 0
   let mut failures := 0
   let mut unmodelled : List (Nat × Nat) := []
+  let mut starts : List Start := []
+  let mut startKeys : List UInt64 := []
+  let mut machine : Option Machine := none
   repeat
     let l ← h.getLine
     if l.isEmpty then break
     r.line.modify (· + 1)
     let ws := words l
     let stepLine ← r.line.get
+    if ws.head? == some "start" then
+      let st ← readState r
+      for inv in broken st do
+        IO.eprintln s!"model-check: line {stepLine}: the state the records begin in breaks {inv.name}"
+        failures := failures + 1
+      let actors := pairs (← nats (ws.drop 1))
+      let k := Search.key ⟨st, [], []⟩
+      if !startKeys.contains k then
+        startKeys := k :: startKeys
+        starts := starts ++ [⟨actors, st⟩]
+      continue
     let (kind, t) ← match ws with
       | ["step", k, t] => pure (k, ← nat! t)
-      | _ => throw (IO.userError s!"model-check: line {stepLine}: step expected")
+      | _ => throw (IO.userError s!"model-check: line {stepLine}: step or start expected")
     let [rmin, pmin, pto, tso, tpo] ← nats (← expect r "machine") | throw (IO.userError "model-check: machine takes five words")
     let m : Machine := ⟨rmin, pmin, pto, tso, tpo⟩
+    machine := some m
     let regs ← nats (← expect r "op")
     let op := regs.headD 0
     let before ← readState r
-    let seen ← readSeen r
+    let (reported, seen) ← readResult r
     let after ← readState r
     steps := steps + 1
-    for (s, which) in [(before, "before"), (after, "after")] do
-      if !s.wellFormed then
-        IO.eprintln s!"model-check: line {stepLine}: the state {which} the step is no forest"
+    -- A state the self-check passed holds every invariant, or the model states one otherwise than the kernel.
+    for (s, which) in (if reported then [(before, "before")] else [(before, "before"), (after, "after")]) do
+      for inv in broken s do
+        IO.eprintln s!"model-check: line {stepLine}: the state {which} the step breaks {inv.name}"
         failures := failures + 1
     let e : Event := if kind == "call" then .call t op (regs.drop 1) else .fault t
     match step m before e with
@@ -149,4 +226,7 @@ def main (args : List String) : IO UInt32 := do
   let ops := (unmodelled.mergeSort (fun x y => x.1 ≤ y.1)).map (fun (o, n) => s!"{o}:{n}")
   IO.println s!"model-check: {steps} steps, {checked} held to the model, {failures} failed"
   IO.println s!"model-check: unmodelled by operation: {String.intercalate " " ops}"
-  return if failures == 0 then 0 else 1
+  let mut searched := true
+  if let (some depth, some m) := (depth, machine) then
+    searched ← searchAll m starts depth
+  return if failures == 0 && searched then 0 else 1

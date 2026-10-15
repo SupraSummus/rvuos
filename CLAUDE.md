@@ -155,6 +155,7 @@ it is the executable form of the properties in `DESIGN.md`.
 A change to an operation the model in `model/` models, or to what `host/model.c` writes of the state,
 changes the model in the same commit, and `make model-test` holds the two to each other;
 see "The model" in `DESIGN.md`.
+A change to a check of the self-check that `invariants` in `model/Main.lean` states changes its statement with it.
 An object bound to another, at creation or by a call, needs a line in `host/history.c` too.
 When a change adds or moves an invariant,
 run `make mutants` as well

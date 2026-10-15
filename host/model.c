@@ -4,14 +4,18 @@
  *
  * Each trap is one step of the trace:
  * the event, the state before, what the caller's registers hold after, and the state after.
- * The state is every object with its nodes, every filled node by its address and its words,
+ * The state is every object with its nodes, and a pool its size,
+ * every filled node by its address and its words,
  * and every node's children in the order of their ring, first child first.
  * Links, pointers and the kernel's other state are left out:
  * the model says what a step does to the tree, and the checker holds the kernel to it;
  * see DESIGN.md, "The model".
  *
  * A step is written whole at its end, so a halt, which never returns from its call, writes none;
- * an invariant report ends it early, with the state the report found, see host_violated.
+ * an invariant report ends it early, with the state the report found and a line that says so, see host_violated.
+ *
+ * Where the records of an input begin, the trace says so with the state and the driver's threads that may run,
+ * for the model to search from; see model_start.
  */
 
 #include <stdarg.h>
@@ -29,6 +33,7 @@ static size_t text_len, text_cap;
 static const struct thread *model_caller;
 static bool model_pending;
 static bool model_call;
+static bool model_reported;
 static uint32_t model_pc;
 
 void model_open(const char *path)
@@ -74,8 +79,9 @@ static void put_state(void)
     for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
         uint32_t count;
         const struct cap *nodes = obj_nodes(o, &count);
-        put("obj %u %u %u %u %u\n", (unsigned)v2p(o), (unsigned)o->type, (unsigned)o->pool,
-            nodes != NULL ? (unsigned)v2p(nodes) : 0u, (unsigned)count);
+        put("obj %u %u %u %u %u %u\n", (unsigned)v2p(o), (unsigned)o->type, (unsigned)o->pool,
+            nodes != NULL ? (unsigned)v2p(nodes) : 0u, (unsigned)count,
+            o->type == CAP_POOL ? (unsigned)((const struct pool *)o)->size : 0u);
     }
     for (struct obj_header *o = object_first(); o != NULL; o = object_next(o)) {
         uint32_t count;
@@ -114,6 +120,7 @@ void model_begin(bool call)
     }
     text_len = 0;
     model_pending = true;
+    model_reported = false;
     model_call = call;
     model_caller = core_self()->current;
     const struct trap_frame *f = &model_caller->frame;
@@ -133,6 +140,9 @@ void model_end(void)
         return;
     }
     model_pending = false;
+    if (model_reported) {
+        put("report\n");
+    }
     /* A call that destroyed its caller's pool leaves no registers to read; holds_caller keeps a revoke from it. */
     if (object_find(v2p(model_caller)) != &model_caller->hdr) {
         put("result gone\n");
@@ -148,6 +158,34 @@ void model_end(void)
                 (unsigned)f->regs[REG_A2], (unsigned)f->regs[REG_A3], (unsigned)f->regs[REG_A4]);
         }
     }
+    put_state();
+    fwrite(text, 1, text_len, model_out);
+    fflush(model_out);
+}
+
+void model_report(void)
+{
+    model_reported = true;
+}
+
+/*
+ * The records begin: the driver's threads that may run, by actor number, and the state they find.
+ * A stopped thread runs only once a record resumes it, so the model does not search from its calls.
+ */
+void model_start(void)
+{
+    if (model_out == NULL) {
+        return;
+    }
+    text_len = 0;
+    put("start");
+    for (unsigned actor = 1; actor <= REPLAY_THREADS; actor++) {
+        const struct thread *t = host_actor_thread(actor);
+        if (t != NULL && t->state != THREAD_STOPPED) {
+            put(" %u %u", actor, (unsigned)v2p(t));
+        }
+    }
+    put("\n");
     put_state();
     fwrite(text, 1, text_len, model_out);
     fflush(model_out);

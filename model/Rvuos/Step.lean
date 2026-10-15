@@ -288,4 +288,8 @@ def step : Event → Option (List Outcome)
 
 end
 
+/-- A step breaks an invariant: from a forest that holds it, to an outcome that does not. -/
+def Breaks (inv : State → Bool) : Prop :=
+  ∃ m s e, s.wellFormed = true ∧ inv s = true ∧ ((step m s e).getD []).any (fun o => !inv o.st) = true
+
 end Rvuos
