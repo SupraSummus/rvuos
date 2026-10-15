@@ -739,7 +739,8 @@ as it only takes away.
 So each invariant of "Properties" the model's state can say goes through three stages.
 
 1. It is stated from the self-check as a check of a state, in `invariants` of `model/Main.lean`:
-   `State.wellFormed` the forest of "Derivation", `State.nestingOk` the nesting of "Isolation".
+   `State.wellFormed` the forest of "Derivation", `State.nestingOk` the nesting of "Isolation",
+   and `State.derivedOk` what the nesting needs of the rest of "Derivation" to follow from step to step.
    `model-check` holds it to every traced state the self-check passed,
    so a statement that says other than the kernel's check shows on the seeds and the corpus.
 2. It is searched:
@@ -781,3 +782,8 @@ What is proved is proved of the model:
   every outcome of every step the model names is a forest where the state before it was one,
   so a delete or a revoke leaves a forest wherever it stops;
   and `wellFormed_forest`: every state `model-check` passes as a forest is one.
+- `step_nested`, in `model/Rvuos/Nested.lean`:
+  every outcome of every step the model names keeps the nesting, wherever a delete or a revoke stops,
+  with what it needs of the derivation rule, `State.derivedOk`;
+  and `checked_nested`: every state `model-check` passes holds both.
+  Its lemmas of a split's halves are proved with `bv_decide`, so it trusts Lean's compiler too.

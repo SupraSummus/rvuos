@@ -67,6 +67,7 @@ structure Invariant where
 /-- The properties of design/verification.md the model states. -/
 def invariants : List Invariant :=
   [⟨"forest", State.wellFormed, none⟩,
+   ⟨"derivation", State.derivedOk, none⟩,
    ⟨"nesting", State.nestingOk, none⟩]
 
 /-- What a step left: the caller's registers, or what stood in for them. -/

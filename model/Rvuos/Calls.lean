@@ -1,6 +1,6 @@
 /-
 What each call the model names leaves when it goes through, said once for the proofs:
-`Shrink.lean`, `Flows.lean` and `Forest.lean` reason from these, not from the handlers' code.
+`Shrink.lean`, `Flows.lean`, `Forest.lean` and `Nested.lean` reason from these, not from the handlers' code.
 An operation the model comes to name adds its lemma here and its case to each of them.
 -/
 import Rvuos.Step
@@ -258,6 +258,46 @@ theorem untypedSplit_ok {t u : Nat} {c : Cap} {r : List Nat} {outs : List Outcom
     rename_i hnapot hne _
     simp [pure, Except.pure] at h hnapot hne
     exact ⟨lo, hi, slotVacant_empty hlo, slotVacant_empty hhi, hne, hnapot, h.symm⟩
+
+/-- A capability to an object found through a slot names an object of its type. -/
+theorem slotLookup_object {t slot n : Nat} {c : Cap} (h : slotLookup m s t slot = .ok (n, c))
+    (ho : capHasObject c.type = true) : (s.obj? c.a).map (·.type) = some c.type := by
+  unfold slotLookup at h
+  split at h
+  · rename_i o _
+    cases hl : capLookup s o (slotIndex slot) with
+    | error k => simp [hl] at h; contradiction
+    | ok c' =>
+      have h' : (nodeAt o (slotIndex slot), c') = (n, c) := by simpa [Functor.map, Except.map, hl] using h
+      obtain ⟨rfl, rfl⟩ := Prod.mk.inj h'
+      unfold capLookup at hl
+      repeat' split at hl
+      all_goals simp_all
+  · simp at h
+
+/-- A copy of an Untyped is refused, and a derive of one goes through only while it is free. -/
+theorem capCopy_untyped {t : Nat} {derive : Bool} {table : Obj} {r : List Nat} {outs : List Outcome}
+    {source : Nat} {src : Cap} (h : capCopy m s t derive table r = .ok (some outs))
+    (hl : slotLookup m s t (reg r 2) = .ok (source, src)) (ht : src.type = capUntyped) :
+    derive = true ∧ untypedFree s source src = true := by
+  unfold capCopy at h
+  simp only [hl, bind, Except.bind] at h
+  repeat' split at h
+  all_goals simp_all [throw, throwThe, MonadExceptOf.throw, untypedFree]
+
+theorem untypedRetype_free {t u : Nat} {c : Cap} {r : List Nat} {outs : List Outcome}
+    (h : untypedRetype m s t u c r = .ok (some outs)) : untypedFree s u c = true := by
+  unfold untypedRetype at h
+  simp only [bind, Except.bind] at h
+  repeat' split at h
+  all_goals simp_all [throw, throwThe, MonadExceptOf.throw]
+
+theorem untypedSplit_free {t u : Nat} {c : Cap} {r : List Nat} {outs : List Outcome}
+    (h : untypedSplit m s t u c r = .ok (some outs)) : untypedFree s u c = true := by
+  unfold untypedSplit at h
+  simp only [bind, Except.bind] at h
+  repeat' split at h
+  all_goals simp_all [throw, throwThe, MonadExceptOf.throw]
 
 /-! A step. -/
 
