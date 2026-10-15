@@ -3,7 +3,7 @@
 #include "lib/libc.h"
 
 _Static_assert(ROOT_TABLE_SLOTS <= SELF_SLOTS, "the root task's table is larger than a self keeps account of");
-_Static_assert(PROCESS_REGION_SLOTS <= 32, "regions are kept a bit each in a word");
+_Static_assert(PROCESS_REGION_SLOTS_MAX <= 32, "regions are kept a bit each in a word");
 
 static int taken(const uint32_t *map, uint32_t i)
 {
@@ -45,6 +45,7 @@ uint32_t self_root(struct self *s, uint32_t units)
     s->slot_first = BOOT_CAP_COUNT;
     s->slot_end = ROOT_TABLE_SLOTS;
     s->regions = 0x3u; /* the boot installs the code in the first and the data in the second */
+    TRY(s, "the root's region slots", rv_process_regions(s->process, &s->region_count, &s->region_most));
 
     uint32_t base, size, made;
     TRY(s, "the free RAM", rv_untyped_info(BOOT_CAP_FREE_RAM, &base, &size, &made));
@@ -144,7 +145,7 @@ uint32_t self_migrate(struct self *s, uint32_t pool, uint32_t slots)
 
 uint32_t region_install(struct self *s, uint32_t frame, uint32_t rights, uint32_t *region)
 {
-    PASS(take_lowest(s, &s->regions, PROCESS_REGION_SLOTS, region, "a free region"));
+    PASS(take_lowest(s, &s->regions, s->region_count, region, "a free region"));
     uint32_t status = rv_process_install(s->process, *region, frame, rights);
     if (status != KERR_OK) {
         s->regions &= ~(1u << *region);

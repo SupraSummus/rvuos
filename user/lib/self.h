@@ -52,6 +52,8 @@ struct self {
     uint32_t slot_first, slot_end; /* the slots it hands out, from first up to end */
     uint32_t slots[SELF_SLOTS / 32];
     uint32_t regions;
+    uint32_t region_count; /* its process's region slots, how many of regions count */
+    uint32_t region_most;  /* the most a process may have on this machine, for its children */
     uint32_t bits;
     uint32_t units[SELF_CORES * TIME_UNITS / 32]; /* a bit for each unit of time, from time_first */
     /* Free memory: Untypeds, each of a block, none overlapping. */

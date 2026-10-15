@@ -33,6 +33,8 @@ and every byte in a slot is accessible with the slot's rights.
 For the running process the same holds for the CSRs as the core holds them,
 the fence and the entries the core hardwires included,
 on the core the check runs on; another core's the next property holds.
+A process has one region slot at least and no more than the core has entries for,
+and its image no more entries than it has region slots, so an install never runs out of entries.
 On the ESP32-C6 no process has a region it may write ending where one it may only read begins;
 see "Region slots".
 

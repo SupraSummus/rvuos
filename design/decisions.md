@@ -585,8 +585,6 @@ until the maintainer decides otherwise.
       Decision 15's two open questions, a sealed table and one others may only put into, would each take a right,
       and `RIGHT_R` and `RIGHT_X` on a `CapTable` mean nothing yet;
       describing another process's slots through a table, decision 33, could give the first its meaning.
-    - **A limit the board does not keep.**
-      `PROCESS_REGION_SLOTS` is eight, and RP2350's Hazard3 grants a process seven; `TODO.md`.
     - **What lending promises.**
       `OP_NOTIFY_LEND` is an experiment, decision 27, and its text states the scheduler's steps;
       a stable ABI would promise that the borrower may run on the lender's time while it waits, and leave the rest to policy,
@@ -595,10 +593,10 @@ until the maintainer decides otherwise.
       `OP_THREAD_STOP` returns the state it found, `THREAD_WAS_*`, which commits the ABI to the three states;
       a supervisor needs it to know whether it may answer a wait, and the host build to know a thread stands at its call again,
       which it could tell from the pc instead, decision 32.
-    - **What a process is made with.**
-      `OP_POOL_ALLOC` of a `Process` would take its region slots, decision 35, where it takes none now.
-      A `Thread`'s took its places, in `a4`, and a bind fills a thread's place for a core rather than move the thread,
-      decision 24, each a change that broke what a program built before did.
+    - **What an object is made with.**
+      `OP_POOL_ALLOC` of a `Thread` took its places, in `a4`, and a bind fills a thread's place for a core rather than move the thread,
+      decision 24; of a `Process` it took its region slots, in `a4` too, decision 35;
+      each a change that broke what a program built before did.
     - **A version.**
       The root task's thread starts with `a0` zero, which could carry the ABI's version.
     Each is decided on its own merits, and made when it is.
@@ -682,17 +680,18 @@ until the maintainer decides otherwise.
     Decided: what an object holds once for each of a thing the hardware has several of
     is sized by the object's creator, as a `CapTable`'s slots are,
     and the hardware's count bounds what the creator may ask.
-    Built for a thread's places, not yet for a process's region slots; `TODO.md`.
     A `Process` is made with the region slots it is to have, from one to what the board's protection unit allows,
     and a `Thread` with the cores it may hold time of at once, from one to `CORES`, decision 24;
     `OP_POOL_ALLOC` answers `KERR_INVALID_ARG` past either, and for none.
     So an object takes what its creator asked for, which goal 3 reads as paying for what one makes,
     a program reckons what its objects take from what it needs of them, the same on every board of its architecture,
     and a board short of what it needs refuses it plainly.
-    Today a process has `PROCESS_REGION_SLOTS` slots and an image of `PMP_MAX_ENTRIES` entries whatever it installs,
-    so what it takes is the board's and the build's.
+    A process's PMP image has an entry for each of its region slots, so an install never runs out of entries,
+    and `OP_CAP_INFO` on any process tells the most a process may have, as a frame's tells the smallest region;
+    the root task's has `ROOT_REGION_SLOTS`, eight, or that most where it is fewer, as its table has `ROOT_TABLE_SLOTS`:
+    sixteen would not leave the two-core demo room in the 4 KiB boot pool.
     Weighed and left:
-    - **Sizes by the board's count**, today's: `OP_POOL_INFO` tells them, but only as the program runs,
+    - **Sizes by the board's count**, as a process had them first: `OP_POOL_INFO` tells them, but only as the program runs,
       and every object pays for what the board has rather than for what it uses.
     - **An object for each binding**, an installed region or a thread's time on a core an object of its own:
       sizes the same on every board, paid for as used,

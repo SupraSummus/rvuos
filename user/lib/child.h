@@ -42,6 +42,8 @@ enum {
     CHILD_REGION_CODE,
     CHILD_REGION_DATA,
 };
+/* The region slots a child's process is made with, or the most the machine allows where that is fewer. */
+#define CHILD_REGIONS 8u
 
 /* The first bits of every child's inbox. */
 #define CHILD_BIT_TIMER  0x1u /* the child arms its timer with it */
@@ -102,7 +104,7 @@ struct child {
     struct block own;                       /* the pool it builds from itself, child_give_own, if any */
     uint32_t own_unit, own_units;           /* and the units its threads earn */
     /* What of the child's is handed out, a bit each or a count. */
-    uint32_t table_slots, slots_given, regions, bits;
+    uint32_t table_slots, slots_given, regions, region_count, bits;
     /* The last state the parent saw. */
     uint32_t told;
 };

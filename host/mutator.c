@@ -31,6 +31,8 @@ size_t LLVMFuzzerCustomCrossOver(const uint8_t *data1, size_t size1,
                                  uint8_t *out, size_t max_out, unsigned seed);
 
 #define RECORD sizeof(struct replay_record)
+/* Region slots: a region is drawn below it, or at it, and a process made with one to it. */
+#define REGION_DRAW 8
 
 /* splitmix32; any seed will do. */
 struct rng {
@@ -181,13 +183,18 @@ static uint32_t tweak_arg(struct rng *r, uint32_t old, uint8_t *data, size_t cou
 }
 
 /*
- * a4 to a6, which no operation reads but an allocation of a thread a4: mostly zero,
+ * a4 to a6, which no operation reads but an allocation of a process or a thread a4: mostly zero,
  * and one of them anything one time in sixteen, which a call must leave alone;
- * a thread's a4 mostly a count of places the harness's cores allow, one at least.
+ * a process's a4 mostly a count of region slots, one at least, of the REGION_DRAW a region is drawn among,
+ * and a thread's a count of places the harness's cores allow, one at least.
  */
 static void draw_high(struct rng *r, struct replay_record *c, uint8_t *data, size_t count)
 {
     c->a4 = c->a5 = c->a6 = 0;
+    if (c->op == OP_POOL_ALLOC && c->a1 == CAP_PROCESS && below(r, 8) != 0) {
+        c->a4 = 1 + (uint32_t)below(r, REGION_DRAW);
+        return;
+    }
     if (c->op == OP_POOL_ALLOC && c->a1 == CAP_THREAD && below(r, 8) != 0) {
         c->a4 = 1 + (uint32_t)below(r, CORES);
         return;
@@ -455,6 +462,9 @@ static uint32_t draw_kind(struct rng *r, const struct shadow *s, const struct re
             return 0;
         }
     case ARG_SLOTS:
+        if (c->a1 == CAP_PROCESS) {
+            return 1 + (uint32_t)below(r, REGION_DRAW);
+        }
         if (c->a1 == CAP_THREAD) {
             return 1 + (uint32_t)below(r, CORES);
         }
@@ -465,7 +475,7 @@ static uint32_t draw_kind(struct rng *r, const struct shadow *s, const struct re
     case ARG_RIGHTS:
         return rights[below(r, sizeof(rights))];
     case ARG_REGION:
-        return (uint32_t)below(r, PROCESS_REGION_SLOTS + 1);
+        return (uint32_t)below(r, REGION_DRAW + 1);
     case ARG_MOUNT:
         return (uint32_t)below(r, PROCESS_TABLES + 1);
     case ARG_OFFSET:

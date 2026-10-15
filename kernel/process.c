@@ -36,31 +36,32 @@ void process_fence_core(void)
  */
 void process_activate(struct process *proc)
 {
-    const struct pmp_image *img = &proc->pmp;
     struct core *core = core_self();
-    pmp_load(img->addr, img->cfg, img->count, core->pmp_loaded);
-    core->pmp_loaded = (uint8_t)img->count;
+    pmp_load(process_pmp_addr(proc), process_pmp_cfg(proc), proc->pmp_count, core->pmp_loaded);
+    core->pmp_loaded = proc->pmp_count;
 }
 
 /*
  * Rebuild the PMP image from the region slots, and load it if the process is running.
  * Every region is a NAPOT block and costs one entry of its own,
- * so the image is the filled slots in slot order;
+ * so the image is the filled slots in slot order, and has room for them all;
  * installed regions do not overlap, so which entry matches first never matters.
  */
 static void rebuild_pmp(struct process *proc)
 {
-    struct pmp_image *img = &proc->pmp;
-    img->count = 0;
-    for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
-        LOOP_BOUND(PROCESS_REGION_SLOTS);
+    uint32_t *addr = process_pmp_addr(proc);
+    uint8_t *cfg = process_pmp_cfg(proc);
+    unsigned count = 0;
+    for (unsigned i = 0; i < proc->regions; i++) {
+        LOOP_BOUND(PMP_MAX_ENTRIES);
         const struct cap *s = &proc->slots[i];
         if (s->type != CAP_NONE) {
-            img->addr[img->count] = pmp_napot_addr(s->a, s->b);
-            img->cfg[img->count] = PMP_A_NAPOT | rights_to_pmp(s->rights);
-            img->count++;
+            addr[count] = pmp_napot_addr(s->a, s->b);
+            cfg[count] = PMP_A_NAPOT | rights_to_pmp(s->rights);
+            count++;
         }
     }
+    proc->pmp_count = (uint8_t)count;
     const struct thread *current = core_self()->current;
     if (current != NULL && thread_process(current) == proc) {
         process_activate(proc);
@@ -81,7 +82,7 @@ int process_install(struct process *proc, unsigned slot,
                     uint32_t base, uint32_t size, uint8_t rights, struct cap *parent)
 {
     /* No right would grant nothing; a frame is always a block. */
-    if (slot >= PROCESS_REGION_SLOTS || rights == 0 || !napot_block(base, size)) {
+    if (slot >= proc->regions || rights == 0 || !napot_block(base, size)) {
         return KERR_INVALID_ARG;
     }
     if (proc->slots[slot].type != CAP_NONE) {
@@ -90,10 +91,10 @@ int process_install(struct process *proc, unsigned slot,
     /*
      * No frame overlaps a pool, by the derivation tree: what one Untyped makes never overlaps,
      * so only the process's own regions are left to look at; see DESIGN.md, "Region slots".
+     * It has no more region slots than entries, and every region costs one, so the image always has room.
      */
-    unsigned installed = 0;
-    for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
-        LOOP_BOUND(PROCESS_REGION_SLOTS);
+    for (unsigned i = 0; i < proc->regions; i++) {
+        LOOP_BOUND(PMP_MAX_ENTRIES);
         const struct cap *s = &proc->slots[i];
         if (s->type != CAP_NONE) {
             if (ranges_overlap(base, size, s->a, s->b)) {
@@ -105,12 +106,7 @@ int process_install(struct process *proc, unsigned slot,
                 return KERR_OVERLAP;
             }
 #endif
-            installed++;
         }
-    }
-    /* One entry per region, so the count of regions is the whole budget. */
-    if (installed >= pmp_entry_count) {
-        return KERR_LIMIT;
     }
 
     proc->slots[slot] = (struct cap){
@@ -132,7 +128,7 @@ void process_drop(struct cap *installed)
 
 int process_uninstall(struct process *proc, unsigned slot)
 {
-    if (slot >= PROCESS_REGION_SLOTS) {
+    if (slot >= proc->regions) {
         return KERR_INVALID_ARG;
     }
     /* Leaves the tree as clearing a slot of a table does; process_drop then rebuilds the image. */

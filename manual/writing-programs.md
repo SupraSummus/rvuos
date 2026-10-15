@@ -41,6 +41,8 @@ and `user/lib/` what a program of several processes needs beside them, section 8
 | `rv_split(cap, lower, upper)` | `OP_UNTYPED_SPLIT` |
 | `rv_pool_alloc(pool, type, dst, arg)` | `OP_POOL_ALLOC` |
 | `rv_pool_info(pool, type, slots, &bytes, &left)` | `OP_POOL_INFO` |
+| `rv_process_alloc(pool, dst, table, regions)` | `OP_POOL_ALLOC` of a process with so many region slots |
+| `rv_process_regions(process, &regions, &most)` | `OP_CAP_INFO` of a process: its region slots and the most a process may have |
 | `rv_process_install(process, region, frame, rights)` | `OP_PROCESS_INSTALL` |
 | `rv_process_uninstall(process, region)` | `OP_PROCESS_UNINSTALL` |
 | `rv_process_mount(process, index, table)` | `OP_PROCESS_MOUNT` |
@@ -104,11 +106,11 @@ the library of section 8.4 takes them in one, and hands out the slots, regions a
    ```
 
 2. **Allocate** the child's objects from the pool,
-   table first, then the process that uses it, then a thread in it.
+   table first, then the process that uses it, with a region slot for each region it will have, then a thread in it.
 
    ```c
    rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_CAPTABLE, SLOT_CHILD_TABLE, CHILD_TABLE_SLOTS);
-   rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_PROCESS, SLOT_CHILD_PROCESS, SLOT_CHILD_TABLE);
+   rv_process_alloc(SLOT_POOL, SLOT_CHILD_PROCESS, SLOT_CHILD_TABLE, CHILD_REGION_SLOTS);
    rv_thread_alloc(SLOT_POOL, SLOT_CHILD_THREAD, SLOT_CHILD_PROCESS, 1);
    rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_NOTIFICATION, SLOT_UP, 0);
    rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_NOTIFICATION, SLOT_DOWN, 0);
@@ -217,7 +219,8 @@ A child keeps its state on its stack, in its main's frame, which never returns.
 which lies at the base of its data, one frame, with its stack at the top;
 its parent has the data installed too, and writes the rest of the page before the start.
 Its table starts with `CHILD_INBOX`, `CHILD_PARENT`, `CHILD_TIMER`, `CHILD_SELF` and `CHILD_LOG`,
-its process with code and data in the first two regions, and its inbox with `CHILD_BIT_TIMER` and `CHILD_BIT_PARENT`.
+its process with `CHILD_REGIONS` region slots, eight, or the most a process may have where that is fewer,
+code and data in the first two, and its inbox with `CHILD_BIT_TIMER` and `CHILD_BIT_PARENT`.
 Past those the parent hands out the child's slots, regions and bits, and writes which into the page,
 so the type of a child's page is all the two agree on.
 `child_start` names the core it runs on and the units of it it earns, or none for that core's spare time alone;

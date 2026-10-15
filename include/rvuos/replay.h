@@ -104,9 +104,9 @@ static inline int replay_leaves_alone(uint32_t at)
  * Region slots. The input is mapped only while the driver copies the records out,
  * so the records run in a process that maps what the driver needs from then on and nothing else.
  */
-#define REPLAY_REGION_SLOT 7
-#define REPLAY_UART_SLOT 5
-#define REPLAY_LOG_SLOT 6
+#define REPLAY_REGION_SLOT 6 /* the root task's, for the input */
+#define REPLAY_UART_SLOT 5   /* the second thread's process's */
+#define REPLAY_LOG_SLOT 6    /* the second thread's process's */
 
 /* Capability slots the setup fills, above the boot capabilities, in both tables. */
 #define REPLAY_CAP_NOTIFY  (BOOT_CAP_COUNT + 0)
@@ -143,8 +143,9 @@ static inline int replay_leaves_alone(uint32_t at)
  * and the host leaves the zero, because the kernel stores
  * a thread's program counter without looking at it
  * and the host never fetches an instruction.
- * Each thread has a place for every core the machine has, so that a record may give it the time of any:
- * both builds fill an allocation of a thread's a4 with their count of cores, see replay_places.
+ * Each thread has a place for every core the machine has, so that a record may give it the time of any,
+ * and the second thread's process as many region slots as the first's, the root task's:
+ * both builds fill an allocation's a4 with their count of cores or of the root's region slots, see replay_sized.
  */
 static const struct replay_record replay_prologue[] = {
     { OP_PROCESS_INSTALL, 0, BOOT_CAP_PROCESS, REPLAY_REGION_SLOT, BOOT_CAP_INPUT, RIGHT_R, 0, 0, 0 },
@@ -210,12 +211,18 @@ static const struct replay_record replay_prologue[] = {
 #define REPLAY_PROLOGUE_COUNT \
     (sizeof(replay_prologue) / sizeof(replay_prologue[0]))
 
-/* A prologue record as a build performs it on a machine of so many cores: an allocation of a thread takes a place each. */
-static inline struct replay_record replay_places(const struct replay_record *r, uint32_t cores)
+/*
+ * A prologue record as a build performs it on a machine of so many cores, whose root process has so many region slots:
+ * an allocation of a thread takes a place for each core, and one of a process the root's region slots.
+ */
+static inline struct replay_record replay_sized(const struct replay_record *r, uint32_t cores, uint32_t regions)
 {
     struct replay_record c = *r;
     if (c.op == OP_POOL_ALLOC && c.a1 == CAP_THREAD) {
         c.a4 = cores;
+    }
+    if (c.op == OP_POOL_ALLOC && c.a1 == CAP_PROCESS) {
+        c.a4 = regions;
     }
     return c;
 }

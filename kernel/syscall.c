@@ -330,7 +330,8 @@ static int pool_info(const struct pool *pool, uint32_t *arg)
         type != CAP_IRQ && type != CAP_POOL) {
         return KERR_INVALID_ARG;
     }
-    uint32_t most = type == CAP_CAPTABLE ? CAPTABLE_MAX_SLOTS : type == CAP_THREAD ? CORES : 0;
+    uint32_t most = type == CAP_CAPTABLE ? CAPTABLE_MAX_SLOTS : type == CAP_PROCESS ? pmp_entry_count
+                  : type == CAP_THREAD ? CORES : 0;
     if (most != 0 ? slots == 0 || slots > most : slots != 0) {
         return KERR_INVALID_ARG;
     }
@@ -377,10 +378,16 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
         if (terr != KERR_OK) {
             return terr;
         }
-        struct process *proc = pool_alloc(pool, CAP_PROCESS, obj_type_size(CAP_PROCESS, 0));
+        /* A region slot for each region it may have installed at once, one at least and an entry each at most. */
+        uint32_t regions = arg[4];
+        if (regions == 0 || regions > pmp_entry_count) {
+            return KERR_INVALID_ARG;
+        }
+        struct process *proc = pool_alloc(pool, CAP_PROCESS, obj_type_size(CAP_PROCESS, regions));
         if (proc == NULL) {
             return KERR_NO_MEMORY;
         }
+        proc->regions = (uint8_t)regions;
         /* Its first table hangs below the capability it was made with, so a revoke above that takes it. */
         proc->tables[0] = tc;
         cap_attach(slot_node(t, arg[3]), &proc->tables[0]);
@@ -922,8 +929,9 @@ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *a
         arg[2] = ((const struct captable *)cap_object(cap))->nslots;
         break;
     case CAP_PROCESS:
-        /* What process_install holds an install to: a slot each, and an entry each. */
-        arg[2] = pmp_entry_count < PROCESS_REGION_SLOTS ? pmp_entry_count : PROCESS_REGION_SLOTS;
+        /* Its region slots, and the most a process may have here, an entry each: what OP_POOL_ALLOC holds a4 to. */
+        arg[2] = ((const struct process *)cap_object(cap))->regions;
+        arg[3] = pmp_entry_count;
         break;
     case CAP_NOTIFICATION:
         /* The bits it may signal, never those that are set, which only a wait takes, with RIGHT_R. */

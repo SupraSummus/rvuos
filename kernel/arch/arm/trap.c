@@ -139,8 +139,8 @@ static bool stack_takes(const struct thread *t, uint32_t at)
     if (proc == NULL || !ram_contains(at, HW_FRAME)) {
         return false;
     }
-    for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
-        LOOP_BOUND(PROCESS_REGION_SLOTS);
+    for (unsigned i = 0; i < proc->regions; i++) {
+        LOOP_BOUND(PMP_MAX_ENTRIES);
         const struct cap *s = &proc->slots[i];
         if (s->type != CAP_NONE && (s->rights & (RIGHT_R | RIGHT_W)) == (RIGHT_R | RIGHT_W) &&
             at - s->a < s->b && s->b - (at - s->a) >= HW_FRAME) {

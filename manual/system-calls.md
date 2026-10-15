@@ -59,7 +59,7 @@ and so is a code that is no operation's on any capability, 0, 11, 27, or `OP_COU
 What an operation reads its description says; three read by their own values:
 `OP_POOL_ALLOC` of a notification no `a3`, `OP_THREAD_WATCH` with no bits no `a1`,
 and `OP_IRQ_SET` with no bits, or of a line that is no timer's, no `a2` or `a3`.
-`a4` is read only by `OP_POOL_ALLOC` of a thread, `a5` and `a6` by no operation, and none of them is checked yet.
+`a4` is read only by `OP_POOL_ALLOC` of a process or a thread, `a5` and `a6` by no operation, and none of them is checked yet.
 
 A call whose work grows with the derivation tree or with a pool can be interrupted and made again:
 `OP_CAP_REVOKE`, `OP_CAP_DELETE` of a root with capabilities below it,
@@ -86,7 +86,7 @@ and may fail, with what it already revoked staying revoked.
 | 5 | `KERR_NO_MEMORY` | the pool has no room for the object, or the Untyped has made something already |
 | 6 | `KERR_SLOT_IN_USE` | the destination slot already holds a capability, or the table slot a table |
 | 7 | `KERR_OVERLAP` | a region overlaps another installed in the same process, or on the ESP32-C6 touches one as `OP_PROCESS_INSTALL` says, or the line is already bound |
-| 8 | `KERR_LIMIT` | a fixed kernel limit was hit, such as the PMP entry count |
+| 8 | `KERR_LIMIT` | a fixed kernel limit was hit, such as a thread's places |
 | 9 | `KERR_STATE` | the object is not in a state that allows this |
 
 ### 6.3 Operations on `Print`, `Halt` and `Test`
@@ -234,12 +234,12 @@ A pool allocates, which needs `RIGHT_W` on it, and tells what an allocation woul
 it is destroyed by revoking below its Untyped, section 5.5.
 
 **`OP_POOL_ALLOC` (7).**
-`a1` = object type, `a2` = destination slot, `a3` = type-specific, and for a thread `a4` too:
+`a1` = object type, `a2` = destination slot, `a3` = type-specific, and for a process or a thread `a4` too:
 
 | `a1` | `a3` | Rule |
 |---|---|---|
 | `CAP_CAPTABLE` | number of slots, 1 to `CAPTABLE_MAX_SLOTS` (1024) | |
-| `CAP_PROCESS` | slot of the `CapTable` capability the process will use, with `RIGHT_W` | the table may lie in any pool; the process holds it in its first table slot, below that capability |
+| `CAP_PROCESS` | slot of the `CapTable` capability the process will use, with `RIGHT_W` | `a4` = its region slots, 1 to the most a process may have, which `OP_CAP_INFO` on any process tells, else `KERR_INVALID_ARG`; section 5.4; the table may lie in any pool; the process holds it in its first table slot, below that capability |
 | `CAP_THREAD` | slot of the `Process` capability the thread will run in, with `RIGHT_W` | `a4` = its places, the cores it may hold the time of at once, 1 to the machine's cores, else `KERR_INVALID_ARG`; section 5.11; the process may lie in any pool; the thread's hold on it hangs below that capability; the thread starts stopped |
 | `CAP_NOTIFICATION` | unused | |
 
@@ -252,8 +252,8 @@ The new capability carries all rights and hangs below the invoked `KernelPool` c
 No right needed.
 `a1` = the type: `CAP_CAPTABLE`, `CAP_PROCESS`, `CAP_THREAD` or `CAP_NOTIFICATION`, as `OP_POOL_ALLOC` makes them,
 `CAP_IRQ`, as `OP_IRQ_BIND` makes one of a pool, or `CAP_POOL` for the descriptor at the base of a pool;
-`a2` = 0; `a3` = the number of slots for `CAP_CAPTABLE`, 1 to 1024, of places for `CAP_THREAD`, 1 to the machine's cores,
-and 0 for the others.
+`a2` = 0; `a3` = the number of slots for `CAP_CAPTABLE`, 1 to 1024, of region slots for `CAP_PROCESS`, 1 to the most,
+of places for `CAP_THREAD`, 1 to the machine's cores, and 0 for the others.
 Anything else is `KERR_INVALID_ARG`, and nothing is written.
 Returns `a1` = the bytes the object takes, a multiple of 8, as the pool counts them,
 and `a2` = the bytes left, the pool's room as `OP_CAP_INFO` tells it, zero while the pool is being destroyed;
@@ -268,15 +268,15 @@ The sizes are the build's, its architecture's and its board's, and may change fr
 All four need `RIGHT_W` on the process.
 
 **`OP_PROCESS_INSTALL` (8).**
-`a1` = region slot index, below `PROCESS_REGION_SLOTS`,
+`a1` = region slot index, below the process's region slots, else `KERR_INVALID_ARG`,
 `a2` = slot of a frame in the caller's tables,
 `a3` = rights to install.
 The rights must be a non-empty subset of the frame's (`KERR_NO_RIGHTS`);
 write without read is `KERR_INVALID_ARG`, and so on ARM is execute without read;
 an occupied region slot is `KERR_SLOT_IN_USE`;
 overlap with another region in this process is `KERR_OVERLAP`,
-and so, on the ESP32-C6, is a writable region ending where a readable but not writable one begins;
-too few PMP entries is `KERR_LIMIT`.
+and so, on the ESP32-C6, is a writable region ending where a readable but not writable one begins.
+A process has no more region slots than the core has PMP entries for them, so every slot may be filled at once.
 The installed region hangs below the frame in the derivation tree,
 so `OP_CAP_REVOKE` on that capability's slot, or on any slot above it, uninstalls it.
 
@@ -539,7 +539,7 @@ and in `a2` to `a4` what the capability names, by its type:
 | `Untyped` | base | size | 0 while it is free, else what lies first below it: `CAP_FRAME`, `CAP_UNTYPED` or `CAP_POOL`, section 5.4 |
 | `KernelPool` | size | the room: the bytes an allocation may still take, 0 while it is being destroyed | 1 while it is being destroyed, else 0 |
 | `CapTable` | its number of slots | 0 | 0 |
-| `Process` | how many of its region slots may be filled at once; past it, where it is fewer than `PROCESS_REGION_SLOTS`, an install is `KERR_LIMIT` | 0 | 0 |
+| `Process` | its region slots, every one of which may be filled at once | the most a process may have on this machine, a PMP entry each, which `OP_POOL_ALLOC` holds `a4` to | 0 |
 | `Thread` | its places, section 5.11 | the cores whose time its places hold, bit `c` for core `c` | 0 |
 | `Notification` | the bits it may signal, never those set | 0 | 0 |
 | `IrqLine` | the first line | the count | 1 for timer lines, 0 for the log's and the controller's |
@@ -622,6 +622,7 @@ and drops into user mode with:
 - the program counter at the start of the code region, `0x80100000` on QEMU,
 - the stack pointer at the top of the data region, `0x80120000` on QEMU,
 - every other register at zero, `a0` among them, as `OP_THREAD_CONFIGURE` leaves a thread, section 6.8,
+- a process of `ROOT_REGION_SLOTS` region slots, eight, or the most a process may have where that is fewer,
 - region slot 0: the code region, read and execute,
 - region slot 1: the data region, read and write,
 - a capability table of `ROOT_TABLE_SLOTS`, 46 past `BOOT_CAP_COUNT` on every board and so 66 on QEMU, filled as below,

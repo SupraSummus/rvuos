@@ -373,7 +373,8 @@ static void check_rights_table(void)
 }
 
 /*
- * The bytes an object of a type takes of a pool, slots its count for a table and its places for a thread, by its structure;
+ * The bytes an object of a type takes of a pool, by its structure,
+ * slots its count for a table, its region slots for a process and its places for a thread;
  * 0 for no such object.
  */
 static uint32_t type_bytes(uint32_t type, uint32_t slots)
@@ -384,7 +385,10 @@ static uint32_t type_bytes(uint32_t type, uint32_t slots)
         size = slots != 0 && slots <= CAPTABLE_MAX_SLOTS ? sizeof(struct captable) + slots * sizeof(struct cap) : 0;
         break;
     case CAP_PROCESS:
-        size = sizeof(struct process);
+        /* A node and an entry's pmpaddr for each region slot, and its pmpcfg byte, the bytes rounded to a word. */
+        size = slots != 0 && slots <= pmp_entry_count ? sizeof(struct process) +
+                                                            slots * (sizeof(struct cap) + sizeof(uint32_t)) +
+                                                            (slots + 3) / 4 * 4 : 0;
         break;
     case CAP_THREAD:
         size = slots != 0 && slots <= CORES ? sizeof(struct thread) +
@@ -478,7 +482,8 @@ static void describe_expect(void)
         w[1] = ((const struct captable *)cap_object(c))->nslots;
         break;
     case CAP_PROCESS:
-        w[1] = pmp_entry_count < PROCESS_REGION_SLOTS ? pmp_entry_count : PROCESS_REGION_SLOTS;
+        w[1] = ((const struct process *)cap_object(c))->regions;
+        w[2] = pmp_entry_count;
         break;
     case CAP_THREAD: {
         const struct thread *t = (const struct thread *)cap_object(c);
@@ -536,7 +541,8 @@ static void record_describe(void)
         describe_takes = (call_args[0] | call_args[1] | call_args[2]) == 0;
     } else {
         describe_takes = type_bytes(call_args[0], call_args[2]) != 0 && call_args[1] == 0 &&
-                         (call_args[0] == CAP_CAPTABLE || call_args[0] == CAP_THREAD || call_args[2] == 0);
+                         (call_args[0] == CAP_CAPTABLE || call_args[0] == CAP_PROCESS || call_args[0] == CAP_THREAD ||
+                          call_args[2] == 0);
     }
     if (invoked) {
         describe_expect();
@@ -550,9 +556,10 @@ static void record_room(void)
     room_pool = NULL;
     struct cap pc = invoked_cap;
     if (call_op == OP_POOL_ALLOC && invoked_cap.type == CAP_POOL) {
-        /* A thread's places are its a4, a table's slots its a3. */
+        /* A process's region slots and a thread's places are their a4, a table's slots its a3. */
+        bool a4 = call_args[0] == CAP_PROCESS || call_args[0] == CAP_THREAD;
         room_need = call_args[0] == CAP_IRQ || call_args[0] == CAP_POOL ? 0
-                    : type_bytes(call_args[0], call_args[0] == CAP_THREAD ? call_args[3] : call_args[2]);
+                    : type_bytes(call_args[0], a4 ? call_args[3] : call_args[2]);
     } else if (call_op == OP_IRQ_BIND && invoked_cap.type == CAP_IRQ_LINE &&
                slot_lookup(caller, call_args[0], &pc) == KERR_OK && pc.type == CAP_POOL) {
         room_need = type_bytes(CAP_IRQ, 0);

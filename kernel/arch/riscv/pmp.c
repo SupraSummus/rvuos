@@ -214,9 +214,12 @@ void pmp_load(const uint32_t *addr, const uint8_t *cfg, unsigned count, unsigned
         /* The bytes of entries below count, and those of entries from pmp_entry_count up. */
         uint32_t image = count >= first + 4 ? ~0u : count > first ? (1u << (8 * (count - first))) - 1 : 0;
         uint32_t kept = pmp_entry_count >= first + 4 ? 0 : ~0u << (8 * (pmp_entry_count - first));
-        uint32_t v;
-        __builtin_memcpy(&v, bytes + first, 4);
-        v = pmpcfg_board_word(v) & image;
+        /* The image ends with its last word, so a register past it takes zeros alone. */
+        uint32_t v = 0;
+        if (image != 0) {
+            __builtin_memcpy(&v, bytes + first, 4);
+            v = pmpcfg_board_word(v) & image;
+        }
         if (kept != 0) {
             v |= pmpcfg_read(reg) & kept;
         }

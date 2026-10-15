@@ -8,7 +8,7 @@ Chapter 5 of the user manual; [`MANUAL.md`](../MANUAL.md) has its contents.
 
 A **process** is a protection domain:
 `PROCESS_TABLES` table slots, two today, which hold the capability tables it names capabilities in,
-`PROCESS_REGION_SLOTS` region slots, eight today,
+the region slots its creator asked for, one at least and no more than the core has PMP entries for them,
 and the threads that run in it.
 A **thread** is an execution context inside a process:
 a register frame and a state.
@@ -205,10 +205,11 @@ Rules for installing a frame into a process:
 
 PMP budget.
 Every installed region is one NAPOT entry, so `n` regions cost `n` entries.
-An install beyond the core's entries fails with `KERR_LIMIT`,
-which with eight region slots happens only on a core with fewer entries for regions,
-such as RP2350's Hazard3, with seven;
-`OP_CAP_INFO` on a process tells how many of its region slots may be filled at once.
+A process is made with its region slots, `a4` of `OP_POOL_ALLOC`,
+from one to the entries the core has for regions, section 10;
+more, or none, is `KERR_INVALID_ARG`, so every slot may be filled at once.
+`OP_CAP_INFO` on any process tells its region slots in `a2` and that most in `a3`.
+The root task's process has `ROOT_REGION_SLOTS`, eight, or the most where that is fewer.
 
 An access must lie entirely within one PMP entry.
 Two regions that touch share a boundary
@@ -242,17 +243,18 @@ A pool for a set of objects needs the descriptor and them,
 rounded up to a power of two of at least `POOL_MIN_SIZE`, since an Untyped is a block.
 Today's sizes, as the kernel rounds them:
 
-| Object | Bytes (16 PMP entries) |
+| Object | Bytes |
 |---|---|
 | pool descriptor | 56 |
 | `CapTable` with `n` slots | 12 + 24 × n, rounded up to 8 |
-| `Process` | 336 (296 with `PMP_MAX_ENTRIES=8`), 344 on the ESP32-C6 |
+| `Process` with `r` region slots | 60 + 28 × r + r rounded up to 4, rounded up to 8; 8 more on the ESP32-C6 |
 | `Thread` with `k` places | 232 + 48 × k on RISC-V, 176 + 48 × k on ARM |
 | `Notification` | 16 |
 | `Irq` | 48 |
 
-A minimal child process, table of 10 slots, process, thread of one place and two notifications,
-costs 960 bytes including the descriptor on RISC-V, 8 more on the ESP32-C6, and 904 on ARM.
+A minimal child process, table of 10 slots, process of two region slots, thread of one place and two notifications,
+costs 744 bytes including the descriptor on RISC-V, 8 more on the ESP32-C6, and 688 on ARM;
+each region slot more costs 28 bytes and a few for its entry's configuration.
 
 **Objects in different pools.**
 A process's tables, a thread's process and an `Irq`'s notification may each lie in any pool,
