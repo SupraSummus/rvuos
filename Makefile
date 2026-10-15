@@ -189,7 +189,7 @@ else
 $(error unknown BOARD '$(BOARD)'; the boards are qemu, esp32c6, rp2350, mps2-an385, mps2-an521 and nrf52840)
 endif
 
-.PHONY: all clean check arm-test arm-test-an385 arm-test-an521 arm-test-an521-smp2 smp-test contents mac-trace-test
+.PHONY: all clean check arm-test arm-test-an385 arm-test-an521 arm-test-an521-smp2 smp-test contents mac-trace-test loop-bounds-test
 
 # Pattern rules would delete the objects they chain through,
 # so every build compiled the kernel from scratch.
@@ -256,13 +256,17 @@ contents:
 mac-trace-test:
 	tests/mac-trace-test.py
 
+# tools/loop-bounds.py's jump tables, on hand-made functions with the ways around a bound check.
+loop-bounds-test:
+	tests/loop-bounds-test.py
+
 # The parts share nothing but what they build, so they run side by side, CHECK_JOBS at a time, a processor each by default;
 # -icount keeps what they print the same however many run at once.
 # make starts them in the order named, so the longest come first:
 # the ARM demos take half a minute, their idle kernel polling through every sleep, see intr_wait in kernel/arch/arm/trap.c.
 CHECK_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
 CHECK_PARTS := arm-test-an521-smp2 arm-test-an521 arm-test-an385 smp-test lab qemu-replay test host-test model-test \
-               bench lib-test escape wifi-test keys-test txctl-test mac-replay-test decode-test contents mac-trace-test
+               bench lib-test escape wifi-test keys-test txctl-test mac-replay-test decode-test contents mac-trace-test loop-bounds-test
 check:
 	$(MAKE) -j$(CHECK_JOBS) $(CHECK_PARTS)
 

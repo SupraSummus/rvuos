@@ -470,6 +470,8 @@ what is left:
 - `tools/loop-bounds.py` knows clang's jump tables by their shape;
   any other jump through a register may make up a loop, which fails the link, never passes it,
   as a table whose base clang keeps on the stack does.
+  The table's base and bound are read up the lines above it, by `defined`, not along the graph as its shift is,
+  so a write of either on another way into the check goes unseen.
 - That the count of armed sources leaves the log's line out is checked by reading `irq_set_bits`.
   Under tracing each call's line reaches the log before the self-check runs,
   so an `Irq` armed on the log's line has always signalled by then.
