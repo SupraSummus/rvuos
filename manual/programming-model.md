@@ -173,6 +173,8 @@ An Untyped is **free** while nothing made of it is left, and **made** while some
 `OP_CAP_INFO` says which in `a4`: what lies first below it, `CAP_FRAME`, `CAP_UNTYPED` or `CAP_POOL`, or 0 while it is free.
 That is the first of what lies there:
 once a delete handed up what lay below the deleted capability, several kinds may lie side by side.
+One whose delete stopped part way makes nothing until it is gone, even once `a4` says 0, section 6.4:
+what it made became roots, which lie in its memory.
 A free Untyped makes one thing of the whole of its memory:
 `OP_UNTYPED_SPLIT` its lower and its upper half, two Untypeds,
 `OP_UNTYPED_RETYPE` a frame or a pool,

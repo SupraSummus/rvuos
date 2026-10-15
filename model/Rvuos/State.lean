@@ -17,6 +17,12 @@ structure Cap where
   b : Nat
 deriving BEq, Repr, Inhabited, DecidableEq
 
+/-- `UNTYPED_GOING`: an Untyped's `b` once its delete as a root has begun, after which it makes nothing. -/
+abbrev untypedGoing : Nat := 1
+
+/-- A node a delete of it as a root has begun: an Untyped marked going, anything else as it was. -/
+def Cap.markGoing (c : Cap) : Cap := if c.type = capUntyped then { c with b := untypedGoing } else c
+
 /-- An object: its address, type and pool, the array of nodes it holds, from `obj_nodes`, and a pool its size. -/
 structure Obj where
   addr : Nat

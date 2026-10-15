@@ -164,18 +164,21 @@ theorem capMove_ok {t : Nat} {table : Obj} {r : List Nat} {outs : List Outcome}
       simp [hl, hf, bind, Except.bind, pure, Except.pure] at h
       exact ⟨source, src, dst, rfl, capSlotFree_empty hf, h.symm⟩
 
-/-- A delete of an empty slot changes nothing; of a node with a parent it detaches it; of a root it goes a child a step. -/
+/--
+A delete of an empty slot changes nothing; of a node with a parent it detaches it;
+of a root it marks it going and goes a child a step.
+-/
 theorem capDelete_ok {table : Obj} {r : List Nat} {outs : List Outcome} (h : capDelete s table r = .ok (some outs)) :
     outs = [finish s r] ∨ ∃ n,
       (∃ p, s.parent? n = some p ∧ outs = [finish ((s.detachAdopt n).eraseCap n) r]) ∨
-      (s.parent? n = none ∧ outs = deleteRoot n r (s.kidsOf n) s []) := by
+      (∃ c, s.cap? n = some c ∧ s.parent? n = none ∧ outs = deleteRoot n r (s.kidsOf n) (s.setCap n c.markGoing) []) := by
   unfold capDelete at h
   dsimp only at h
   repeat' split at h
   all_goals simp at h
   · exact Or.inl h.symm
   · rename_i p hp; exact Or.inr ⟨_, Or.inl ⟨p, hp, h.symm⟩⟩
-  · rename_i hp; exact Or.inr ⟨_, Or.inr ⟨hp, h.symm⟩⟩
+  · rename_i hc _ hp; exact Or.inr ⟨_, Or.inr ⟨_, hc, hp, h.symm⟩⟩
 
 theorem capRevoke_ok {t slot : Nat} {table : Obj} {r : List Nat} {outs : List Outcome}
     (h : capRevoke m s t slot table r = .ok (some outs)) : ∃ root fuel, revokeLoop m t slot root r fuel s [] = some outs := by

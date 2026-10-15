@@ -30,9 +30,13 @@ def Grants (h g : Cap) : Prop :=
    ((g.type = capFrame ∨ g.type = capUntyped) ∧ (h.type = g.type ∨ h.type = capUntyped) ∧
     ∀ x, g.holds x → h.holds x))
 
-/-- Every node `s'` fills, `s` filled with the same words, or a node the caller held covers. -/
+/--
+Every node `s'` fills, `s` filled with the same words, but an Untyped's `s'` marks going,
+or a node the caller held covers.
+-/
 def Flows (m : Machine) (s : State) (t : Nat) (s' : State) : Prop :=
-  ∀ n c, s'.cap? n = some c → s.cap? n = some c ∨ ∃ n₀ c₀, Held m s t n₀ ∧ s.cap? n₀ = some c₀ ∧ Grants c₀ c
+  ∀ n c, s'.cap? n = some c →
+    (∃ c₀, s.cap? n = some c₀ ∧ Kept c₀ c) ∨ ∃ n₀ c₀, Held m s t n₀ ∧ s.cap? n₀ = some c₀ ∧ Grants c₀ c
 
 theorem Grants.self (c : Cap) : Grants c c := ⟨Nat.and_self _, Or.inl rfl⟩
 
@@ -52,7 +56,7 @@ theorem flows_fill {m : Machine} {s s' : State} {t n n₀ : Nat} {c c₀ : Cap}
   rw [hs] at hk
   split at hk
   · simp at hk; subst hk; exact Or.inr ⟨n₀, c₀, held, h₀, g⟩
-  · exact Or.inl hk
+  · exact Or.inl ⟨_, hk, Or.inl rfl⟩
 
 theorem flows_store {m : Machine} {s : State} {t n n₀ : Nat} {c c₀ : Cap} {p : Option Nat}
     (held : Held m s t n₀) (h₀ : s.cap? n₀ = some c₀) (g : Grants c₀ c) : Flows m s t (store s n c p) :=
@@ -118,7 +122,7 @@ theorem capMove_flows {t : Nat} {table : Obj} {r : List Nat} {outs : List Outcom
   · simp at hk; subst hk; exact Or.inr ⟨source, _, held, hsrc, Grants.self _⟩
   · split at hk
     · simp at hk
-    · exact Or.inl hk
+    · exact Or.inl ⟨_, hk, Or.inl rfl⟩
 
 theorem opFrame_flows {t op node : Nat} {c : Cap} {r : List Nat} {outs : List Outcome}
     (held : Held m s t node) (hc : s.cap? node = some c) (hty : c.type = capFrame)
@@ -165,7 +169,7 @@ theorem untypedSplit_flows {t u : Nat} {c : Cap} {r : List Nat} {outs : List Out
   · simp at hk; subst hk; exact Or.inr ⟨u, c, held, hc, half _ fun x => (within x).2⟩
   · split at hk
     · simp at hk; subst hk; exact Or.inr ⟨u, c, held, hc, half _ fun x => (within x).1⟩
-    · exact Or.inl hk
+    · exact Or.inl ⟨_, hk, Or.inl rfl⟩
 
 end
 

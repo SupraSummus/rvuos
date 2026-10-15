@@ -8,8 +8,8 @@ Report: a call was preempted before it took anything away
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -225,6 +225,9 @@ bool cap_delete(struct cap *n, bool preempt)
-     /* Below a root there is no ring to hand the children to: each becomes a root, one step at a time. */
+@@ -284,6 +284,9 @@ bool cap_delete(struct cap *n, bool preempt)
+     }
      while (n->child != 0) {
          LOOP_PAID(cap_delete, link, "a child below a root, which becomes a root itself");
 +        if (cap_stop_here(preempt)) {

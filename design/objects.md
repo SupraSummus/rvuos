@@ -85,7 +85,8 @@ its two words are the base address and the size,
 and the rights are the memory permissions it may grant.
 An `Untyped` has none either:
 its first word is its block, base and size as NAPOT encodes them,
-its second is unused, since whether it is free the derivation tree says,
+its second is 0 but while its delete as a root goes, see below,
+since whether it is free the derivation tree says,
 and its rights are those of the frames made of it.
 Carving a frame, retyping an Untyped into a frame and splitting one into halves
 are therefore pure table operations that touch no kernel memory,
@@ -136,6 +137,10 @@ and `OP_UNTYPED_RETYPE` a `Frame` or a `KernelPool` of all of it,
 each below it in the derivation tree.
 What one Untyped makes therefore never overlaps,
 and it is free again, the whole of it, once nothing it made is left.
+A delete of a root Untyped is the exception:
+with no parent to hand them to, what lies below it becomes roots one at a time, and the delete may stop between two.
+Those already roots lie in its memory out of the tree's sight, while another thread may take the rest,
+so the delete first marks it going, in its second word, and a going Untyped makes nothing.
 From the retype on, a pool's memory belongs to the kernel.
 The kernel zeroes each object as it allocates it, not the whole block.
 

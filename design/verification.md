@@ -20,8 +20,8 @@ the log excepted: it holds no object and can never become a pool.
 Memory that may hold kernel objects, an Untyped or a pool,
 overlaps another node standing for memory, an Untyped, a pool, a frame or an installed region,
 only where one lies below the other,
-or where one of the two is a root Untyped that made something,
-which a delete below it leaves as it makes roots of its children one by one.
+or where one of the two is an Untyped whose delete as a root has begun,
+which makes roots of its children one by one and nothing else until it goes.
 So no frame overlaps a pool, and no Untyped makes a block over anything not below it.
 
 **PMP fidelity.**
@@ -734,7 +734,8 @@ What it adds is what no run can:
 every place a call may stop, all at once,
 and statements of every state, not only of the states a run reaches.
 A statement of a call is no statement of a state:
-`delete_revoke_shrink` and `step_flows` below hold of a step that breaks the nesting, which only takes away.
+`delete_revoke_shrink` and `step_flows` below would hold of a delete that left an Untyped free over what became roots,
+as it only takes away.
 So each invariant of "Properties" the model's state can say goes through three stages.
 
 1. It is stated from the self-check as a check of a state, in `invariants` of `model/Main.lean`:
@@ -747,9 +748,9 @@ So each invariant of "Properties" the model's state can say goes through three s
 3. It is settled by a theorem: that every step keeps it,
    or, for a bug the kernel has, `Breaks` of it, a state and a call `decide` checks, which `invariants` names and `TODO.md` lists.
    A search that breaks an invariant fails the run unless `invariants` names such a theorem,
-   and so does one that no longer breaks an invariant it names one for:
-   the fix replaces the theorem with a proof that every step keeps the invariant,
-   which may first need the invariant to say more, as the theorem's state may be one the fix leaves unreachable.
+   and so does one that no longer breaks an invariant it names one for, so the fix takes the theorem out.
+   A proof that every step keeps the invariant may first need the invariant to say more,
+   as a state that breaks it may be one no step reaches.
 
 `make model-test` builds the model, which checks its proofs,
 replays the seeds and the corpus with `--model-trace`, each input alone,
@@ -768,10 +769,11 @@ What is proved is proved of the model:
   `bv_decide` checks its SAT proof with code Lean compiles, so these two trust Lean's compiler too.
 - `delete_revoke_shrink`, in `model/Rvuos/Shrink.lean`:
   a delete or a revoke leaves no capability that was not there before, with the same words,
+  but for an Untyped a delete of it as a root marks going,
   in every outcome, stopped part way or not.
 - `step_flows`, in `model/Rvuos/Flows.lean`:
   authority only flows, in every outcome of every step the model names.
-  Every node a step fills or changes held the same words before,
+  Every node a step fills or changes held the same words before, but such an Untyped,
   or a node the caller reached through its tables covers it:
   the same capability, or memory within a frame's or an Untyped's, with no more rights.
   It leans on `split_within`, proved with `bv_decide`, so it trusts Lean's compiler too.
@@ -779,6 +781,3 @@ What is proved is proved of the model:
   every outcome of every step the model names is a forest where the state before it was one,
   so a delete or a revoke leaves a forest wherever it stops;
   and `wellFormed_forest`: every state `model-check` passes as a forest is one.
-- `nesting_breaks`, in `model/Rvuos/Nesting.lean`:
-  a delete of the half still below a root Untyped whose delete stopped part way leaves it free,
-  with its other half, a root now, in its memory; see `TODO.md`.

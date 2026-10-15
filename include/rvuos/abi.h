@@ -177,6 +177,8 @@
  * CapTable (RIGHT_W): clear a slot. a1 = slot.
  * What was derived from the slot is not cleared: it is adopted by the slot's parent,
  * or, when the slot is a root, each child becomes a root, which is restartable.
+ * An Untyped whose delete as a root has begun makes nothing more (KERR_NO_MEMORY),
+ * whatever leaves from below it: those that became roots lie in its memory until it goes.
  * Clearing an empty slot succeeds.
  */
 #define OP_CAP_DELETE 4
@@ -608,7 +610,7 @@
  * Returns a1 = the type, one of CAP_*, in the low byte and the rights in the byte above,
  * see CAP_INFO_TYPE and CAP_INFO_RIGHTS, and in a2, a3 and a4 by the type:
  *   CAP_FRAME         the base, the size, and the size of the smallest region, a power of two of at least 8
- *   CAP_UNTYPED       the base, the size, and 0 while it is free, else the type of what lies first below it:
+ *   CAP_UNTYPED       the base, the size, and 0 while nothing lies below it, else the type of what lies first there:
  *                     CAP_FRAME for a frame or a region installed from one, CAP_UNTYPED for a half or a derived Untyped,
  *                     and CAP_POOL for a pool, which lies there whether anything names it or not,
  *                     until a revoke below destroys it;

@@ -38,7 +38,8 @@ struct obj_header {
  * a is the base address or first line and b the size or count,
  * and there is no object.
  * For CAP_UNTYPED a is the block, its base and size in one word as NAPOT encodes them,
- * see untyped_base, and b is 0; there is no object either, and whether it is free the tree says.
+ * see untyped_base, and b is 0, or UNTYPED_GOING once its delete as a root has begun;
+ * there is no object either, and whether it is free the tree says, and b.
  * For every other type a is the object's physical address,
  * and b is 0 but for CAP_NOTIFICATION, where it is the bits the capability may signal, never none;
  * see OP_NOTIFY_CARVE.
@@ -337,10 +338,12 @@ static inline bool cap_has_object(uint8_t type)
 static inline uint32_t untyped_block(uint32_t base, uint32_t size) { return base | (size / 2 - 1); }
 static inline uint32_t untyped_size(const struct cap *c) { return (c->a ^ (c->a + 1)) + 1; }
 static inline uint32_t untyped_base(const struct cap *c) { return c->a & ~(untyped_size(c) - 1); }
-/* Whether an Untyped makes something: only while nothing made of it is left below it. */
-static inline bool untyped_free(const struct cap *c) { return c->child == 0; }
+/* An Untyped's b once its delete as a root has begun, see cap_delete. */
+#define UNTYPED_GOING 1u
+/* Whether an Untyped makes something: only while nothing made of it is left, below it or gone up as a root. */
+static inline bool untyped_free(const struct cap *c) { return c->child == 0 && c->b != UNTYPED_GOING; }
 /*
- * What an Untyped made, as OP_CAP_INFO tells it: 0 while it is free, else the type of the node first below it,
+ * What an Untyped made, as OP_CAP_INFO tells it: 0 while nothing lies below it, else the type of the node first there,
  * CAP_FRAME for a frame or a region installed from one, CAP_UNTYPED for a half or a derived Untyped,
  * and CAP_POOL for a pool's own node.
  * Nothing else lies below an Untyped, as the self-check's derivation rule holds.
