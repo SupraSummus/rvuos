@@ -130,11 +130,13 @@ def find_back(insns, i, want, keep, reach=8):
 
 
 def jump_table(image, sections, insns, i):
-    """The targets of the jr at insns[i] if it goes through a table clang laid out, else None.
+    """The table a jr at insns[i] goes through if clang laid it out, as (targets, shift), else None.
 
     The shape is a bound check on the index, then
     slli s, idx, 2; add t, s, base; lw r, 0(t); jr r, maybe with other instructions between,
     the base and the bound each from an li, or an lui or auipc pair, above.
+    Two switches on one index may share an slli above the bound check;
+    shift is then (insns index of the check, s, idx) for shifted_on_entry to prove, else None.
     """
     reg = insns[i][2].strip()
     j = find_back(insns, i, lambda m, a: m == "lw" and a[0] == reg, {reg})
@@ -150,11 +152,22 @@ def jump_table(image, sections, insns, i):
     _, _, add_ops = insns[k]
     sources = args_of(add_ops)[1:]
     l = find_back(insns, k, lambda m, a: m == "slli" and a[0] in sources and a[2] == "0x2", set())
-    if l is None:
-        return None
-    shifted, index = args_of(insns[l][2])[:2]
-    if any(writes(mn, o) == shifted for _, mn, o in insns[l + 1:k]):
-        return None
+    if l is not None:
+        shifted, index = args_of(insns[l][2])[:2]
+        if any(writes(mn, o) == shifted for _, mn, o in insns[l + 1:k]):
+            return None
+        hoisted = False
+    else:
+        # The base is the source the table's block writes, the shifted index the other.
+        l = k
+        while l > 0 and not BRANCH.match(insns[l - 1][1]):
+            l -= 1
+        written = {writes(mn, o) for _, mn, o in insns[l:k]}
+        if sum(s in written for s in sources) != 1:
+            return None
+        shifted = sources[1] if sources[0] in written else sources[0]
+        index = None
+        hoisted = True
     base_reg = sources[1] if sources[0] == shifted else sources[0]
     base = defined(insns, k, base_reg)
     # The bound check ends the block above: the branch just before the table's first instruction.
@@ -166,10 +179,12 @@ def jump_table(image, sections, insns, i):
     if m < 0:
         return None
     check, check_args = insns[m][1], args_of(insns[m][2])
-    if check == "bltu" and check_args[1] == index:
+    if check == "bltu" and (index is None or check_args[1] == index):
+        index = check_args[1]
         limit = defined(insns, m, check_args[0])  # bltu limit, idx: out of range above limit
         count = None if limit is None else limit + 1
-    elif check == "bgeu" and check_args[0] == index:
+    elif check == "bgeu" and (index is None or check_args[0] == index):
+        index = check_args[0]
         count = defined(insns, m, check_args[1])
     else:
         return None
@@ -177,8 +192,42 @@ def jump_table(image, sections, insns, i):
         return None
     for _, _, flags, addr, off, size, _, _ in sections:
         if flags & SHF_ALLOC and addr <= base and base + 4 * count <= addr + size:
-            return list(struct.unpack_from(f"<{count}I", image, off + base - addr))
+            targets = list(struct.unpack_from(f"<{count}I", image, off + base - addr))
+            return targets, ((m, shifted, index) if hoisted else None)
     return None
+
+
+def shifted_on_entry(blocks, insns, m, shifted, index):
+    """Whether on every way into insns[m] the last write of shifted is slli shifted, index, 2,
+    with no write of index and no call after it.
+    blocks may have more edges than the function, never fewer, so a proof on them holds of it.
+    """
+    at = {pc: n for n, (pc, _, _) in enumerate(insns)}
+    preds = {b: set() for b in blocks}
+    for b, blk in blocks.items():
+        for s in blk.succ:
+            preds[s].add(b)
+    starts = sorted(blocks)
+    entry = starts[0]
+    first = starts[bisect.bisect_right(starts, insns[m][0]) - 1]
+    seen = {first}
+    work = [(first, m)]  # a block, and the instruction a way leaves it at, exclusive
+    while work:
+        b, n = work.pop()
+        while n > at[b]:
+            n -= 1
+            _, mnem, ops = insns[n]
+            if mnem == "slli" and args_of(ops) == [shifted, index, "0x2"]:
+                break
+            if mnem in ("jal", "jalr") or writes(mnem, ops) in (shifted, index):
+                return False
+        else:
+            if b == entry or not preds[b]:
+                return False
+            for p in preds[b] - seen:
+                seen.add(p)
+                work.append((p, at.get(blocks[p].end, len(insns))))
+    return True
 
 
 def may_return(functions, ends, pointers):
@@ -282,7 +331,29 @@ def comes_round(blocks, header, body, marked):
 
 
 def blocks_of(fn_addr, fn_end, insns, pointers, returns, image, sections):
-    """The function's blocks by start address, and each block's successors."""
+    """The function's blocks by start address, and each block's successors.
+    A table whose index is shifted above its bound check is followed once the graph without it proves the shift.
+    """
+    tables, shifts = {}, {}
+    for i, (pc, mnem, ops) in enumerate(insns):
+        if mnem == "jr" and ops.strip() != "ra":
+            found = jump_table(image, sections, insns, i)
+            if found is not None and all(fn_addr <= t < fn_end for t in found[0]):
+                tables[pc] = found[0]
+                if found[1] is not None:
+                    shifts[pc] = found[1]
+    blocks = graph_of(fn_addr, fn_end, insns, pointers, returns,
+                      {pc: t for pc, t in tables.items() if pc not in shifts})
+    if shifts:
+        proved = {pc for pc, shift in shifts.items() if shifted_on_entry(blocks, insns, *shift)}
+        blocks = graph_of(fn_addr, fn_end, insns, pointers, returns,
+                          {pc: t for pc, t in tables.items() if pc not in shifts or pc in proved})
+    return blocks
+
+
+def graph_of(fn_addr, fn_end, insns, pointers, returns, tables):
+    """The function's blocks by start address, and each block's successors,
+    a jr going to its targets in tables, or else to every word of data that points into the function."""
     leaders = {fn_addr}
     jumps = {}
     leaving = set()
@@ -304,9 +375,8 @@ def blocks_of(fn_addr, fn_end, insns, pointers, returns, image, sections):
                 if target in returns:
                     leaving.add(pc)
         elif mnem == "jr":
-            table = None if ops.strip() == "ra" else jump_table(image, sections, insns, i)
-            if table is not None and all(fn_addr <= t < fn_end for t in table):
-                jumps[pc] = sorted(set(table))
+            if pc in tables:
+                jumps[pc] = sorted(set(tables[pc]))
             else:
                 jumps[pc] = [] if ops.strip() == "ra" else sorted(pointers.get(fn_addr, ()))
             if not jumps[pc]:
