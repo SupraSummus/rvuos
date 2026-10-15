@@ -126,19 +126,22 @@ int main(void)
                ? KERR_OK : KERR_INVALID_ARG);
     /*
      * A capability describes itself to whoever holds it, and with it what the machine allows its type:
-     * a process how many regions it may have installed at once, a frame the smallest region.
+     * a process its region slots and the most a process may have, a frame the smallest region.
      */
     uint32_t type, rights, w[3];
     expect("describe the root task's process",
-           rv_cap_info(BOOT_CAP_PROCESS, &type, &rights, w) == KERR_OK && type == CAP_PROCESS && rights == RIGHT_ALL
+           rv_cap_info(BOOT_CAP_PROCESS, &type, &rights, w) == KERR_OK && type == CAP_PROCESS && rights == RIGHT_ALL &&
+                   w[0] == (ROOT_REGION_SLOTS < w[1] ? ROOT_REGION_SLOTS : w[1])
                ? KERR_OK : KERR_INVALID_ARG);
-    uint32_t regions = w[0];
+    uint32_t regions = w[0], most_regions = w[1];
     expect("describe its data, as the frame's own operation does",
            rv_cap_info(BOOT_CAP_DATA, &type, &rights, w) == KERR_OK && type == CAP_FRAME &&
                    rights == (RIGHT_R | RIGHT_W) && w[0] == data_base && w[1] == data_size && w[2] == min_size
                ? KERR_OK : KERR_INVALID_ARG);
     puts("root: described: regions ");
     rv_put_hex(BOOT_CAP_PRINT, regions);
+    puts(" most ");
+    rv_put_hex(BOOT_CAP_PRINT, most_regions);
     puts(" smallest ");
     rv_put_hex(BOOT_CAP_PRINT, w[2]);
     puts("\n");
@@ -160,7 +163,7 @@ int main(void)
     expect("allocate the child's table",
            rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_CAPTABLE, SLOT_CHILD_TABLE, CHILD_TABLE_SLOTS));
     expect("allocate the child's process",
-           rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_PROCESS, SLOT_CHILD_PROCESS, SLOT_CHILD_TABLE));
+           rv_process_alloc(SLOT_POOL, SLOT_CHILD_PROCESS, SLOT_CHILD_TABLE, CHILD_REGION_SLOTS));
     expect("allocate the child's thread",
            rv_thread_alloc(SLOT_POOL, SLOT_CHILD_THREAD, SLOT_CHILD_PROCESS, 1));
     expect("allocate the upward notification",
@@ -415,8 +418,8 @@ int main(void)
            rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_CAPTABLE, SLOT_CHILD_TABLE, CHILD_TABLE_SLOTS));
     took(SLOT_POOL, &room, CAP_CAPTABLE, CHILD_TABLE_SLOTS);
     expect("a process of it",
-           rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_PROCESS, SLOT_CHILD_PROCESS, SLOT_CHILD_TABLE));
-    took(SLOT_POOL, &room, CAP_PROCESS, 0);
+           rv_process_alloc(SLOT_POOL, SLOT_CHILD_PROCESS, SLOT_CHILD_TABLE, CHILD_REGION_SLOTS));
+    took(SLOT_POOL, &room, CAP_PROCESS, CHILD_REGION_SLOTS);
     expect("a thread in it",
            rv_thread_alloc(SLOT_POOL, SLOT_CHILD_THREAD, SLOT_CHILD_PROCESS, 1));
     took(SLOT_POOL, &room, CAP_THREAD, 1);

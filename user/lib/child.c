@@ -25,6 +25,7 @@ static uint32_t build(struct self *s, struct child *c, uint32_t table_slots, uin
     c->table_slots = table_slots;
     c->slots_given = CHILD_FIRST;
     c->regions = (1u << CHILD_REGION_CODE) | (1u << CHILD_REGION_DATA);
+    c->region_count = CHILD_REGIONS < s->region_most ? CHILD_REGIONS : s->region_most;
     c->bits = CHILD_BIT_TIMER | CHILD_BIT_PARENT;
 
     c->in_room = s->room.made != 0;
@@ -35,7 +36,7 @@ static uint32_t build(struct self *s, struct child *c, uint32_t table_slots, uin
     PASS(slot_new(s, &c->table));
     TRY(s, "a child's table", rv_pool_alloc(pool, CAP_CAPTABLE, c->table, table_slots));
     PASS(slot_new(s, &c->process));
-    TRY(s, "a child's process", rv_pool_alloc(pool, CAP_PROCESS, c->process, c->table));
+    TRY(s, "a child's process", rv_process_alloc(pool, c->process, c->table, c->region_count));
     PASS(slot_new(s, &c->thread));
     TRY(s, "a child's thread", rv_thread_alloc(pool, c->thread, c->process, self_cores(s)));
     PASS(slot_new(s, &c->inbox));
@@ -183,7 +184,7 @@ uint32_t child_give_own(struct self *s, struct child *c, uint32_t pool_size, uin
 
 uint32_t child_map(struct self *s, struct child *c, uint32_t frame, uint32_t rights, uint32_t *region)
 {
-    PASS(take_lowest(s, &c->regions, PROCESS_REGION_SLOTS, region, "a free region of a child's"));
+    PASS(take_lowest(s, &c->regions, c->region_count, region, "a free region of a child's"));
     uint32_t status = rv_process_install(c->process, *region, frame, rights);
     if (status != KERR_OK) {
         c->regions &= ~(1u << *region);
@@ -194,7 +195,7 @@ uint32_t child_map(struct self *s, struct child *c, uint32_t frame, uint32_t rig
 
 uint32_t child_unmap(struct self *s, struct child *c, uint32_t region)
 {
-    if (region <= CHILD_REGION_DATA || region >= PROCESS_REGION_SLOTS || !(c->regions & (1u << region))) {
+    if (region <= CHILD_REGION_DATA || region >= c->region_count || !(c->regions & (1u << region))) {
         s->what = "a region of a child's the parent handed out";
         return KERR_INVALID_ARG;
     }
@@ -205,7 +206,7 @@ uint32_t child_unmap(struct self *s, struct child *c, uint32_t region)
 
 uint32_t child_region(struct self *s, struct child *c, uint32_t *region)
 {
-    return take_lowest(s, &c->regions, PROCESS_REGION_SLOTS, region, "a free region of a child's");
+    return take_lowest(s, &c->regions, c->region_count, region, "a free region of a child's");
 }
 
 uint32_t child_bit(struct self *s, struct child *c, uint32_t *bit)

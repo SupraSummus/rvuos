@@ -40,13 +40,13 @@ Consequences that shape the design:
   The privileged specification allows up to 16 entries in version 1.11
   and up to 64 in version 1.12.
   Real microcontrollers ship with 4 to 16.
-  A process therefore has a small fixed number of *region slots*,
-  not a page table.
+  A process therefore has a small number of *region slots*, as many as its creator asked for and the core has entries,
+  not a page table; see open decision 35.
 - **Every region is a NAPOT block.**
   A region's size is a power of two and its base a multiple of its size,
   which is what one NAPOT entry describes.
   A region costs one entry wherever it lies,
-  so an install fits while the process has fewer regions than the core has entries,
+  so a process with no more region slots than the core has entries always has an entry for each region it installs,
   and two regions are either disjoint or one contains the other.
   The price is rounding: a range that is not a power of two
   is rounded up or made of several blocks, one slot each.
@@ -66,7 +66,7 @@ Consequences that shape the design:
   Whether it may be installed depends on nothing but the process it goes into,
   since no frame overlaps a pool; see "Kernel pools and revocation".
   A frame's description, `OP_CAP_INFO`, returns the smallest region, since user mode cannot read the PMP CSRs,
-  and a process's how many regions it may have installed.
+  and a process's its region slots and the most a process may have, an entry each.
 - **An access must lie within one entry.**
   The lowest-numbered entry that matches any byte of an access decides,
   and it must match every byte or the access fails,

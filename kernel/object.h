@@ -139,27 +139,26 @@ static inline paddr_t pool_base(const struct pool *p) { return p->hdr.pool; }
 /* The bytes an allocation may still take of a pool, OP_CAP_INFO's room: none while it is being destroyed. */
 static inline uint32_t pool_room(const struct pool *p) { return p->dying ? 0 : p->size - p->used; }
 
-struct pmp_image {
-    unsigned count;
-    uint32_t addr[PMP_MAX_ENTRIES];
-    uint8_t cfg[PMP_MAX_ENTRIES];
-};
-
 /*
  * A process holds its tables by capabilities, not pointers:
  * nodes of the derivation tree, each below the capability the process was made with or the table mounted with,
  * which a revoke or the destroy of the table's pool clears.
  * The region slots follow the table slots, so obj_nodes hands both out as one array.
- * See DESIGN.md, "A process's tables".
+ * It has as many region slots as its creator asked for, from one to pmp_entry_count, see open decision 35,
+ * and after them the PMP image the region slots make, an entry each at most:
+ * the pmpaddr values, then the pmpcfg bytes, which lie on four bytes; see process_pmp_addr and process_pmp_cfg.
+ * See DESIGN.md, "A process's tables" and "Region slots".
  */
 struct process {
     struct obj_header hdr;
-    struct cap tables[PROCESS_TABLES]; /* CAP_CAPTABLE, or CAP_NONE while none is mounted */
-    struct cap slots[PROCESS_REGION_SLOTS]; /* CAP_INSTALLED, or CAP_NONE when empty */
-    struct pmp_image pmp;
+    uint8_t regions;    /* how many region slots it has, from one to pmp_entry_count */
+    uint8_t pmp_count;  /* the entries its PMP image holds, one for each filled region slot */
+    uint16_t pad;
 #ifdef BOARD_PROCESS_CSRS
     uint32_t csrs[BOARD_PROCESS_CSRS]; /* what the board keeps of the CSRs user mode writes, see board_user_csrs_switch */
 #endif
+    struct cap tables[PROCESS_TABLES]; /* CAP_CAPTABLE, or CAP_NONE while none is mounted */
+    struct cap slots[]; /* CAP_INSTALLED, or CAP_NONE when empty; the PMP image after them */
 };
 
 /*
@@ -304,8 +303,6 @@ _Static_assert(sizeof(struct obj_header) == 8, "object layout");
 _Static_assert(sizeof(struct cap) == 24, "object layout");
 _Static_assert(sizeof(struct captable) == 12, "object layout");
 _Static_assert(sizeof(struct pool) == 56, "object layout");
-_Static_assert(sizeof(struct pmp_image) == 4 + 5 * PMP_MAX_ENTRIES, "object layout");
-_Static_assert(offsetof(struct pmp_image, cfg) % 4 == 0, "pmp_load reads cfg a word at a time");
 #ifdef BOARD_PROCESS_CSRS
 #define PROCESS_CSRS_SIZE (4 * BOARD_PROCESS_CSRS)
 #if CORES > 1
@@ -314,9 +311,7 @@ _Static_assert(offsetof(struct pmp_image, cfg) % 4 == 0, "pmp_load reads cfg a w
 #else
 #define PROCESS_CSRS_SIZE 0
 #endif
-_Static_assert(sizeof(struct process) ==
-                   8 + 24 * (PROCESS_TABLES + PROCESS_REGION_SLOTS) + sizeof(struct pmp_image) + PROCESS_CSRS_SIZE,
-               "object layout");
+_Static_assert(sizeof(struct process) == 12 + PROCESS_CSRS_SIZE + 24 * PROCESS_TABLES, "object layout");
 _Static_assert(sizeof(struct thread) == 40 + sizeof(struct trap_frame) + 2 * sizeof(struct cap), "object layout");
 _Static_assert(sizeof(struct place) == 24, "object layout");
 _Static_assert(sizeof(struct notification) == 16, "object layout");
@@ -367,6 +362,26 @@ _Static_assert(offsetof(struct thread, watch) == offsetof(struct thread, proc) +
                    offsetof(struct thread, time) == offsetof(struct thread, watch) + sizeof(struct cap),
                "a thread's process, watch and places' units are one array of nodes");
 _Static_assert(CORES <= UINT8_MAX, "a thread counts its places in a byte");
+_Static_assert(PMP_MAX_ENTRIES <= PROCESS_REGION_SLOTS_MAX, "a process has the region slots the ABI says it may");
+
+/*
+ * The bytes a process of so many region slots takes: its nodes for them, and the PMP image after them,
+ * an entry for each, its pmpcfg bytes rounded up to a word, as pmp_load reads them.
+ */
+static inline size_t process_size(uint32_t regions)
+{
+    return sizeof(struct process) + regions * (sizeof(struct cap) + sizeof(uint32_t)) + ((regions + 3) & ~3u);
+}
+/* A process's PMP image: the pmpaddr value of each of its entries, past its region slots. */
+static inline uint32_t *process_pmp_addr(const struct process *p)
+{
+    return (uint32_t *)(uintptr_t)&p->slots[p->regions];
+}
+/* And the pmpcfg byte of each, past the pmpaddr values, on four bytes. */
+static inline uint8_t *process_pmp_cfg(const struct process *p)
+{
+    return (uint8_t *)(process_pmp_addr(p) + p->regions);
+}
 
 /* The bytes a thread of so many places takes: its nodes for each place's units, and the places after them. */
 static inline size_t thread_size(uint32_t places)
@@ -426,7 +441,7 @@ static inline struct cap *obj_nodes(struct obj_header *o, uint32_t *count)
         *count = ((struct captable *)o)->nslots;
         return ((struct captable *)o)->slots;
     case CAP_PROCESS:
-        *count = PROCESS_TABLES + PROCESS_REGION_SLOTS;
+        *count = PROCESS_TABLES + ((struct process *)o)->regions;
         return ((struct process *)o)->tables;
     case CAP_THREAD:
         *count = 2 + ((struct thread *)o)->places;
@@ -583,7 +598,8 @@ bool pool_fits(const struct pool *pool, size_t size);
 void *pool_alloc(struct pool *pool, uint8_t type, size_t size);
 
 /*
- * The bytes an object of a type takes, before rounding, slots its count for a table and its places for a thread:
+ * The bytes an object of a type takes, before rounding,
+ * slots its count for a table, its region slots for a process and its places for a thread:
  * what an allocation asks of a pool and what OP_POOL_INFO tells, CAP_POOL's being the descriptor.
  * obj_size below keeps a switch of its own, so the self-check's tiling and the destroy hold the two to each other.
  */
@@ -595,7 +611,7 @@ static inline size_t obj_type_size(uint8_t type, uint32_t slots)
     case CAP_CAPTABLE:
         return sizeof(struct captable) + slots * sizeof(struct cap);
     case CAP_PROCESS:
-        return sizeof(struct process);
+        return process_size(slots);
     case CAP_THREAD:
         return thread_size(slots);
     case CAP_NOTIFICATION:
@@ -618,7 +634,7 @@ static inline size_t obj_size(const struct obj_header *obj)
         return sizeof(*t) + t->nslots * sizeof(struct cap);
     }
     case CAP_PROCESS:
-        return sizeof(struct process);
+        return process_size(((const struct process *)obj)->regions);
     case CAP_THREAD:
         return thread_size(((const struct thread *)obj)->places);
     case CAP_NOTIFICATION:

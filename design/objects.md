@@ -430,7 +430,12 @@ Why two table slots and a fixed depth is open decision 15.
 
 ### Region slots
 
-A `Process` has a fixed array of eight region slots.
+A `Process` has the region slots its creator asked for with `OP_POOL_ALLOC`,
+from one to the entries the core has for them, which `OP_CAP_INFO` on any process tells;
+see open decision 35.
+The root task's has `ROOT_REGION_SLOTS`, eight, or fewer where the core has fewer entries.
+Its PMP image follows the slots in the object, an entry for each,
+so a process pays for the regions it may have, and an install never runs out of entries.
 Installing a `Frame` into a slot
 requires the frame
 and a `Process` capability with the write right.
@@ -771,7 +776,7 @@ gives each side the other's inbox carved to its bit,
 and uninstalls the blocks from the borrower when it closes the connection.
 The hardware holds every access to that, which is the kernel's word.
 Which buffer is whose at a moment is the two sides' protocol, which each keeps in memory the other cannot write.
-A region for each buffer would take one of a process's seven or eight regions, an install and a revoke a buffer,
+A region for each buffer would take one of a process's few region slots, an install and a revoke a buffer,
 and a buffer a power of two at a multiple of its size;
 so the kernel knows no buffer, as it knows no packet,
 and handing memory over for good remains the uninstall and install above.

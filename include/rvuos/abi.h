@@ -14,7 +14,7 @@
  *   a0      slot of the invoked capability in the caller's tables, see SLOT_TABLE_SHIFT
  *   a1..a3  operation arguments; one an operation does not read, and a bit of a rights mask past RIGHT_ALL,
  *           must be zero, else KERR_INVALID_ARG, so that it may mean something later;
- *           a4..a6 are reserved, and unread
+ *           a4 is read by OP_POOL_ALLOC of a process or a thread alone, and a5 and a6 are reserved, and unread
  * Registers on return:
  *   a0      status, one of KERR_*
  *   a1..a4  results, operation specific; unchanged unless documented
@@ -51,7 +51,7 @@
 #define KERR_NO_MEMORY    5 /* pool exhausted, or an Untyped with something made of it */
 #define KERR_SLOT_IN_USE  6 /* destination slot already holds a capability, or table slot a table */
 #define KERR_OVERLAP      7 /* region overlaps or, on the ESP32-C6, touches one installed in the same process; line already bound */
-#define KERR_LIMIT        8 /* a fixed kernel limit was hit, such as PMP entries */
+#define KERR_LIMIT        8 /* a fixed kernel limit was hit, such as a thread's places */
 #define KERR_STATE        9 /* the object is not in a state that allows this */
 
 /* Capability and object types. */
@@ -274,7 +274,10 @@
  * a3 = type specific:
  *   CAP_CAPTABLE  the number of slots,
  *   CAP_PROCESS   the slot of the CapTable capability the process will use, mounted in its table slot 0,
- *                 which needs RIGHT_W; the table may lie in any pool,
+ *                 which needs RIGHT_W; the table may lie in any pool;
+ *                 and a4 = its region slots, one for each region it may have installed at once,
+ *                 1 to the most the machine allows a process, which OP_CAP_INFO on any process tells,
+ *                 else KERR_INVALID_ARG; see OP_PROCESS_INSTALL,
  *   CAP_THREAD    the slot of the Process capability the thread will run in,
  *                 and a4 = its places, one for each core it may hold the time of at once, 1 to the machine's cores,
  *                 else KERR_INVALID_ARG; see OP_TIME_BIND,
@@ -293,8 +296,10 @@
 #define OP_POOL_ALLOC 7
 /*
  * Process (RIGHT_W): install a region into one of the process's region slots.
- * a1 = region slot index, a2 = Frame capability slot in the caller's tables,
- * a3 = rights to install, a subset of the frame's rights.
+ * a1 = region slot index, below the process's region slots, else KERR_INVALID_ARG,
+ * a2 = Frame capability slot in the caller's tables, a3 = rights to install, a subset of the frame's rights.
+ * A process has no more region slots than the machine has protection entries for it,
+ * so an install never runs out of entries; see OP_POOL_ALLOC.
  * RIGHT_W without RIGHT_R is rejected with KERR_INVALID_ARG,
  * because PMP reserves that encoding,
  * and so on ARM is RIGHT_X without RIGHT_R, since the MPU fetches only what it lets a thread read.
@@ -611,8 +616,8 @@
  *   CAP_POOL          its size, its room, the bytes an allocation may still take of it,
  *                     and 1 while it is being destroyed, when its room is 0, else 0
  *   CAP_CAPTABLE      its number of slots, 0, 0
- *   CAP_PROCESS       how many of its region slots may be filled at once, 0, 0;
- *                     where that is fewer than PROCESS_REGION_SLOTS, an install past it fails with KERR_LIMIT
+ *   CAP_PROCESS       its region slots, every one of which may be filled at once,
+ *                     the most a process may have on this machine, a protection entry each, see OP_POOL_ALLOC, and 0
  *   CAP_THREAD        its places, the cores whose time they hold, bit c for core c, and 0
  *   CAP_NOTIFICATION  the bits it may signal, see OP_NOTIFY_CARVE, 0, 0; never the bits that are set
  *   CAP_IRQ_LINE      the first line, the count, and 1 for timer lines, 0 for the log's and the controller's;
@@ -636,7 +641,8 @@
  * Pool: what an object of a type would take of it. No right needed, as for OP_CAP_INFO.
  * a1 = the type: CAP_CAPTABLE, CAP_PROCESS, CAP_THREAD or CAP_NOTIFICATION, as OP_POOL_ALLOC makes them,
  *      CAP_IRQ, as OP_IRQ_BIND makes one of a pool, or CAP_POOL, the descriptor at the base of a pool's memory;
- * a2 = 0; a3 = the number of slots for CAP_CAPTABLE, 1 to 1024, of places for CAP_THREAD, 1 to the machine's cores,
+ * a2 = 0; a3 = the number of slots for CAP_CAPTABLE, 1 to 1024, of region slots for CAP_PROCESS,
+ * 1 to the most the machine allows, see OP_CAP_INFO, of places for CAP_THREAD, 1 to the machine's cores,
  * and 0 for every other type.
  * Anything else fails with KERR_INVALID_ARG and writes nothing.
  * Returns a1 = the bytes, a multiple of eight, as the pool counts them,
@@ -756,9 +762,12 @@ struct replay_record {
 #endif
 
 /* Fixed limits visible to user programs. */
-#define PROCESS_REGION_SLOTS 8
+/* The most region slots a process has on any machine; OP_CAP_INFO on a process tells this machine's. */
+#define PROCESS_REGION_SLOTS_MAX 16
 #define PROCESS_TABLES 2 /* table slots per process, see SLOT_TABLE_SHIFT */
 #define ROOT_TABLE_SLOTS (BOOT_CAP_COUNT + 46) /* slots in the root task's table, 66 on QEMU */
+/* Region slots of the root task's process, or the most a process may have where that is fewer; see OP_CAP_INFO. */
+#define ROOT_REGION_SLOTS 8
 #define POOL_MIN_SIZE 64 /* the smallest Untyped OP_UNTYPED_RETYPE makes a pool of */
 #define TIMER_LINES 16 /* on the whole machine; see BOOT_CAP_TIMER_LINES */
 #define TIME_UNITS 64 /* of each core, numbered core by core; see BOOT_CAP_TIME */

@@ -102,6 +102,8 @@ enum {
 #define CHILD_DATA_SLOT 1
 #define CHILD_SHARED_SLOT 2
 #define CHILD_LEASE_SLOT 3
+#define CHILD_REGION_SLOTS 4 /* the child's process has a region slot for each of the four above */
+#define SUCC_REGION_SLOTS 3  /* the successor's, for its code, its data and ROOT_SHARED_SLOT */
 
 /* The protocol between the two processes. */
 #define BIT_REQUEST 0x1u

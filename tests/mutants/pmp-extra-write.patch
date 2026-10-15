@@ -8,12 +8,12 @@ Report: PMP image grants rights the slots do not
 diff --git a/kernel/process.c b/kernel/process.c
 --- a/kernel/process.c
 +++ b/kernel/process.c
-@@ -35,7 +35,7 @@ static void rebuild_pmp(struct process *proc)
+@@ -57,7 +57,7 @@
          const struct cap *s = &proc->slots[i];
          if (s->type != CAP_NONE) {
-             img->addr[img->count] = pmp_napot_addr(s->a, s->b);
--            img->cfg[img->count] = PMP_A_NAPOT | rights_to_pmp(s->rights);
-+            img->cfg[img->count] = PMP_A_NAPOT | rights_to_pmp(s->rights) | PMP_W;
-             img->count++;
+             addr[count] = pmp_napot_addr(s->a, s->b);
+-            cfg[count] = PMP_A_NAPOT | rights_to_pmp(s->rights);
++            cfg[count] = PMP_A_NAPOT | rights_to_pmp(s->rights) | PMP_W;
+             count++;
          }
      }

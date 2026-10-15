@@ -72,7 +72,7 @@ Lines make it a limit of authority rather than of who comes first:
 the root task receives them all in `BOOT_CAP_TIMER_LINES`,
 apart from the controller's so that no board's count shows,
 and hands them out and takes them back as it does memory.
-The count is a constant of the kernel, like the region slots,
+The count is a constant of the kernel, like the table slots of a process,
 while the `Irq`s bound to the lines live in their holders' pools.
 A program that needs more timers than it holds keeps its own deadlines
 and arms one line for the nearest.

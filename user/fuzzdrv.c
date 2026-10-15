@@ -125,8 +125,13 @@ int main(void)
     /* The machine's cores, whose units BOOT_CAP_TIME holds, TIME_UNITS of each. */
     uint32_t time[3];
     uint32_t cores = rv_cap_info_of(BOOT_CAP_TIME, CAP_TIME, time) == KERR_OK ? time[1] / TIME_UNITS : 1;
+    /* The root task's region slots, which the second thread's process has too. */
+    uint32_t regions, most;
+    if (rv_process_regions(BOOT_CAP_PROCESS, &regions, &most) != KERR_OK) {
+        regions = 0;
+    }
     for (unsigned i = 0; i < REPLAY_PROLOGUE_COUNT; i++) {
-        struct replay_record r = replay_places(&replay_prologue[i], cores);
+        struct replay_record r = replay_sized(&replay_prologue[i], cores, regions);
         if (r.op == OP_THREAD_CONFIGURE) {
             r.a1 = (uint32_t)&replay_loop;
         }

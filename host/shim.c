@@ -459,7 +459,7 @@ struct thread *host_boot(void)
      * from the records both builds share; see rvuos/replay.h.
      */
     for (unsigned i = 0; i < REPLAY_PROLOGUE_COUNT; i++) {
-        struct replay_record r = replay_places(&replay_prologue[i], CORES);
+        struct replay_record r = replay_sized(&replay_prologue[i], CORES, thread_process(root)->regions);
         int err = (int)host_syscall(&r);
         if (err != KERR_OK) {
             fprintf(stderr, "invariant violated: a fresh kernel refused prologue record %u with %d\n", i, err);
@@ -768,7 +768,7 @@ void host_units(unsigned out[UNITS])
 
 static bool mapped_with(const struct process *proc, uint32_t base, uint32_t size, uint8_t rights)
 {
-    for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
+    for (unsigned i = 0; i < proc->regions; i++) {
         const struct cap *s = &proc->slots[i];
         /* base within the slot first, or the remaining length below wraps. */
         if (s->type != CAP_NONE && base - s->a < s->b && size <= s->b - (base - s->a) &&

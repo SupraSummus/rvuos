@@ -8,16 +8,16 @@ Report: an object took other bytes than its type takes
 diff --git a/kernel/object.h b/kernel/object.h
 --- a/kernel/object.h
 +++ b/kernel/object.h
-@@ -511,7 +511,7 @@ static inline size_t obj_type_size(uint8_t type, uint32_t slots)
+@@ -609,7 +609,7 @@ static inline size_t obj_type_size(uint8_t type, uint32_t slots)
      case CAP_POOL:
          return sizeof(struct pool);
      case CAP_CAPTABLE:
 -        return sizeof(struct captable) + slots * sizeof(struct cap);
 +        return sizeof(struct captable) + (slots + 1) * sizeof(struct cap);
      case CAP_PROCESS:
-         return sizeof(struct process);
+         return process_size(slots);
      case CAP_THREAD:
-@@ -533,7 +533,7 @@ static inline size_t obj_size(const struct obj_header *obj)
+@@ -631,7 +631,7 @@ static inline size_t obj_size(const struct obj_header *obj)
          return sizeof(struct pool);
      case CAP_CAPTABLE: {
          const struct captable *t = (const struct captable *)obj;
@@ -25,4 +25,4 @@ diff --git a/kernel/object.h b/kernel/object.h
 +        return sizeof(*t) + (t->nslots + 1) * sizeof(struct cap);
      }
      case CAP_PROCESS:
-         return sizeof(struct process);
+         return process_size(((const struct process *)obj)->regions);

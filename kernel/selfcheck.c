@@ -36,22 +36,6 @@ static __attribute__((noreturn)) void fail(const char *msg, uint32_t a, uint32_t
     selfcheck_fail();
 }
 
-/* Shell sort; the arrays are small and no libc is assumed. */
-static void sort_u64(uint64_t *v, size_t n)
-{
-    for (size_t gap = n / 2; gap > 0; gap /= 2) {
-        for (size_t i = gap; i < n; i++) {
-            uint64_t x = v[i];
-            size_t j = i;
-            while (j >= gap && v[j - gap] > x) {
-                v[j] = v[j - gap];
-                j -= gap;
-            }
-            v[j] = x;
-        }
-    }
-}
-
 /*
  * Rights the root task received at boot for a range,
  * or zero if the range is not within a single granted range.
@@ -215,7 +199,7 @@ static uint8_t image_rights(const uint32_t *addr, const uint8_t *cfg, unsigned c
 
 static uint8_t slot_rights(const struct process *proc, uint64_t at)
 {
-    for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
+    for (unsigned i = 0; i < proc->regions; i++) {
         const struct cap *s = &proc->slots[i];
         if (s->type != CAP_NONE && at >= s->a && at < (uint64_t)s->a + s->b) {
             return rights_to_pmp(s->rights);
@@ -224,11 +208,23 @@ static uint8_t slot_rights(const struct process *proc, uint64_t at)
     return 0;
 }
 
+/* The slots and the image grant the same rights at an address, or the check fails. */
+static void check_rights_at(const struct process *proc, const uint32_t *addr, const uint8_t *cfg, unsigned count,
+                            bool csrs, uint64_t at)
+{
+    uint8_t want = slot_rights(proc, at);
+    uint8_t got = image_rights(addr, cfg, count, at);
+    if (want != got) {
+        fail(csrs ? "PMP CSRs grant rights the slots do not" : "PMP image grants rights the slots do not",
+             (uint32_t)at, got, want);
+    }
+}
+
 /*
  * The PMP image and the region slots describe the same function
  * from address to rights.
- * Both are piecewise constant, so comparing at every breakpoint
- * and between consecutive breakpoints is exact.
+ * Both are constant from each breakpoint, a region's or an entry's start or end, up to the next of either,
+ * so comparing at zero and at every breakpoint is exact.
  * `csrs` says whether the image was read back from the CSRs,
  * for the report only.
  */
@@ -245,45 +241,31 @@ static void check_pmp_image(const struct process *proc, const uint32_t *addr,
         }
     }
 
-    uint64_t points[2 * PROCESS_REGION_SLOTS + 2 * PMP_CSR_ENTRIES + 2];
-    size_t n = 0;
-    points[n++] = 0;
-    points[n++] = 0x100000000ull;
-    for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
-        if (proc->slots[i].type != CAP_NONE) {
-            points[n++] = proc->slots[i].a;
-            points[n++] = (uint64_t)proc->slots[i].a + proc->slots[i].b;
+    check_rights_at(proc, addr, cfg, count, csrs, 0);
+    for (unsigned i = 0; i < proc->regions; i++) {
+        const struct cap *s = &proc->slots[i];
+        if (s->type != CAP_NONE) {
+            check_rights_at(proc, addr, cfg, count, csrs, s->a);
+            check_rights_at(proc, addr, cfg, count, csrs, (uint64_t)s->a + s->b);
         }
     }
     for (unsigned i = 0; i < count; i++) {
         uint64_t base, size;
         pmp_napot_range(addr[i], &base, &size);
-        points[n++] = base;
-        points[n++] = base + size;
-    }
-    sort_u64(points, n);
-
-    for (size_t i = 0; i + 1 < n; i++) {
-        uint64_t a = points[i], b = points[i + 1];
-        if (a == b) {
-            continue;
-        }
-        uint64_t probes[2] = { a, a + (b - a) / 2 };
-        for (int k = 0; k < 2; k++) {
-            uint8_t want = slot_rights(proc, probes[k]);
-            uint8_t got = image_rights(addr, cfg, count, probes[k]);
-            if (want != got) {
-                fail(csrs ? "PMP CSRs grant rights the slots do not"
-                          : "PMP image grants rights the slots do not",
-                     (uint32_t)probes[k], got, want);
-            }
-        }
+        check_rights_at(proc, addr, cfg, count, csrs, base);
+        check_rights_at(proc, addr, cfg, count, csrs, base + size);
     }
 }
 
 static void check_process(const struct process *proc)
 {
-    for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
+    /* As many region slots as its creator asked for, and no more than entries, so an install never runs out of them. */
+    if (proc->regions == 0 || proc->regions > pmp_entry_count) {
+        fail("process has no region slot, or more than the hardware has entries", v2p(proc), proc->regions,
+             pmp_entry_count);
+        return;
+    }
+    for (unsigned i = 0; i < proc->regions; i++) {
         const struct cap *s = &proc->slots[i];
         if (s->type == CAP_NONE) {
             continue;
@@ -307,7 +289,7 @@ static void check_process(const struct process *proc)
                 fail("process maps a pool: isolation broken", v2p(proc), s->a, pool_base(p));
             }
         }
-        for (unsigned j = i + 1; j < PROCESS_REGION_SLOTS; j++) {
+        for (unsigned j = i + 1; j < proc->regions; j++) {
             const struct cap *t = &proc->slots[j];
             if (t->type != CAP_NONE && ranges_overlap(s->a, s->b, t->a, t->b)) {
                 fail("process has overlapping region slots", v2p(proc), i, j);
@@ -325,10 +307,11 @@ static void check_process(const struct process *proc)
         }
     }
 
-    if (proc->pmp.count > pmp_entry_count) {
-        fail("PMP image has more entries than the hardware", v2p(proc), proc->pmp.count, 0);
+    if (proc->pmp_count > proc->regions) {
+        fail("PMP image has more entries than the process has region slots", v2p(proc), proc->pmp_count,
+             proc->regions);
     }
-    check_pmp_image(proc, proc->pmp.addr, proc->pmp.cfg, proc->pmp.count, false);
+    check_pmp_image(proc, process_pmp_addr(proc), process_pmp_cfg(proc), proc->pmp_count, false);
 
     /*
      * The sweep clears a table slot with the table, in whatever pool; the tree check reads its links.

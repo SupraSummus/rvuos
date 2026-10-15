@@ -275,7 +275,7 @@ __attribute__((noreturn)) void hand_over(uint32_t sp)
     expect("allocate the successor's table",
            rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_CAPTABLE, SLOT_SUCC_TABLE, ROOT_TABLE_SLOTS));
     expect("allocate the successor's process",
-           rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_PROCESS, SLOT_SUCC_PROCESS, SLOT_SUCC_TABLE));
+           rv_process_alloc(SLOT_POOL, SLOT_SUCC_PROCESS, SLOT_SUCC_TABLE, SUCC_REGION_SLOTS));
     expect("allocate the successor's thread",
            rv_thread_alloc(SLOT_POOL, SLOT_SUCC_THREAD, SLOT_SUCC_PROCESS, 1));
     expect("map the successor's code",

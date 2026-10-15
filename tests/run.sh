@@ -66,10 +66,12 @@ grep -q "rvuos: $regions $entries grain $grain" "$text" \
     || fail "the protection unit's probe did not report $entries entries and a grain of $grain"
 grep -q 'the layout fits the smallest region: ok' "$text" \
     || fail "the root task did not see the smallest region"
-# Described, the root task's process says a region an entry, PROCESS_REGION_SLOTS at most,
+# Described, the root task's process says its region slots, ROOT_REGION_SLOTS or fewer,
+# and the most a process may have, an entry each,
 # and its data the smallest region, eight bytes or the grain where that is coarser.
 budget=$((max_entries < board_entries ? max_entries : board_entries))
-told=$(printf 'regions 0x%08x smallest 0x%08x' $((budget < 8 ? budget : 8)) $((board_grain > 8 ? board_grain : 8)))
+told=$(printf 'regions 0x%08x most 0x%08x smallest 0x%08x' $((budget < 8 ? budget : 8)) "$budget" \
+    $((board_grain > 8 ? board_grain : 8)))
 grep -q "root: described: $told" "$text" \
     || fail "the root task's process and data did not describe themselves as $told"
 grep -q 'hello from user mode' "$text" || fail "user mode did not run"

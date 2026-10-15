@@ -140,7 +140,7 @@ what is left:
   in PCR, PMU and the LP domain; what their reads should answer is open.
   `phymap` sees only constant addresses, so a register reached through a table or a loop shows first in a trace.
   The harness reaches three of the board's frames, the SAR ADC, the modem and the eFuse,
-  which with the tracer's own regions have to fit a process's eight region slots.
+  which with the tracer's own regions have to fit the root task's eight region slots, or a process of its own with more.
 - The kernel writes two lines of its own for every user fault, which any tracer's log drowns in,
   and the host's check symbolizes each;
   whether a thread that has a watch, `OP_THREAD_WATCH`, should still be logged is a decision of `DESIGN.md`'s.
@@ -309,7 +309,8 @@ what is left:
   What of the modem reaches memory before a driver programs it, and why there, is not known;
   with the units off, as they are, such an access lands.
 - The driver's process holds all eight regions, so anything more it needs takes a region from something it has.
-  A pager would lift that: a thread that, when another faults on a frame its process may have,
+  The C6 has sixteen entries, so a child made with more region slots than `CHILD_REGIONS`, which `child_new` could take, would lift that;
+  so would a pager: a thread that, when another faults on a frame its process may have,
   installs the frame in place of one it is not using and resumes the thread, which runs the access again.
   The kernel allows it as it is, but writes a report of every fault into the log, so it suits frames touched seldom.
 - Feed the replay corpus to the board.
@@ -508,15 +509,6 @@ what is left:
   More of them, each with its process, pool and Untyped as the second has,
   would give the derivation below the free RAM more branches;
   the prologue in `include/rvuos/replay.h` and `host_boot` grow with them.
-- No harness reaches `KERR_LIMIT` in `process_install`.
-  Since regions are NAPOT blocks, each costs one PMP entry,
-  and a process has eight region slots,
-  so a budget of eight, `fuzz-pmp8`'s, is never short:
-  the eighth install finds seven regions installed.
-  `fuzz-rp2350`'s seven are short for an eighth region, which no seed and no input of the corpus installs.
-  The replay driver's processes hold four regions each once set up,
-  so a harness with a budget of six would reach the limit on the third install
-  and still run the prologue.
 - Escape-attempt suite: one boot for the suite.
   `make escape` runs one root task per scenario, each expected to fault a specific way;
   see `user/escape-*.c` and `tests/escape.sh`.
@@ -639,19 +631,9 @@ What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
   until the root task is gone; open decision 20 in `DESIGN.md`.
   Grant the rest as further blocks, or lay the board out afresh,
   when a board's RAM gets tight.
-- A process has room for `PROCESS_REGION_SLOTS` regions, eight, and a PMP image of `PMP_MAX_ENTRIES` entries, sixteen,
-  whatever it installs and whatever the board's budget,
-  so what it takes is the board's and the build's, and a process that holds two regions pays for sixteen entries.
-  Open decision 35 in `DESIGN.md` makes the hardware's count a limit a process is refused by, never a size:
-  `OP_POOL_ALLOC` of a `Process` takes the number of its region slots, as a `CapTable`'s takes its slots,
-  from one to what the board's budget allows, `KERR_INVALID_ARG` past it and for none,
-  and sizes the slots and the image by it.
-  `OP_POOL_INFO` takes the count as it takes a table's,
-  the self-check bounds the image's count by it,
-  and the seeds that make a process are rewritten with the operation.
 - `pmp.h` names the protection unit's interface after PMP, and `kernel/arch/arm/mpu.c` implements it too;
   the image keeps PMP's encoding on both, but `pmp_set` and `pmp_entry_count` read as RISC-V's.
-  Rename it with the next change to the image in `process.c`, where mutants stand,
+  Rename it in a change of its own, with the mutants that stand on its names in `process.c`,
   and `kernel/arch/arm/armv7m.h` with it, which serves ARMv8-M too.
 
 ## Scheduling

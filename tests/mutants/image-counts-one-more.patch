@@ -1,0 +1,19 @@
+Rebuilding a process's PMP image counts one entry more than its filled region slots,
+which loads an entry past the image and, with every slot filled, more entries than the process has room for.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
+Report: PMP image grants rights the slots do not
+Report: PMP image has more entries than the process has region slots
+
+diff --git a/kernel/process.c b/kernel/process.c
+--- a/kernel/process.c
++++ b/kernel/process.c
+@@ -61,7 +61,7 @@
+             count++;
+         }
+     }
+-    proc->pmp_count = (uint8_t)count;
++    proc->pmp_count = (uint8_t)(count + 1);
+     const struct thread *current = core_self()->current;
+     if (current != NULL && thread_process(current) == proc) {
+         process_activate(proc);

@@ -1,0 +1,18 @@
+An install holds the slot to the most any process may have rather than the process's own,
+and writes a region past the slots into the PMP image that follows them.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: the kernel reached RAM outside its objects
+
+diff --git a/kernel/process.c b/kernel/process.c
+--- a/kernel/process.c
++++ b/kernel/process.c
+@@ -82,7 +82,7 @@
+                     uint32_t base, uint32_t size, uint8_t rights, struct cap *parent)
+ {
+     /* No right would grant nothing; a frame is always a block. */
+-    if (slot >= proc->regions || rights == 0 || !napot_block(base, size)) {
++    if (slot >= PROCESS_REGION_SLOTS_MAX || rights == 0 || !napot_block(base, size)) {
+         return KERR_INVALID_ARG;
+     }
+     if (proc->slots[slot].type != CAP_NONE) {

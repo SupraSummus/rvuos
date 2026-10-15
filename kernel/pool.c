@@ -62,7 +62,7 @@ static struct cap *held_node(struct obj_header *o, uint16_t *at)
     return NULL;
 }
 
-_Static_assert(CAPTABLE_MAX_SLOTS <= UINT16_MAX && PROCESS_TABLES + PROCESS_REGION_SLOTS <= CAPTABLE_MAX_SLOTS,
+_Static_assert(CAPTABLE_MAX_SLOTS <= UINT16_MAX && PROCESS_TABLES + PMP_MAX_ENTRIES <= CAPTABLE_MAX_SLOTS,
                "the sweep's slot fits its field");
 
 bool pool_destroy(struct pool *pool, bool preempt)

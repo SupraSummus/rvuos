@@ -6,7 +6,8 @@ Chapters 10 and 11 of the user manual; [`MANUAL.md`](../MANUAL.md) has its conte
 
 | Limit | Value | Where |
 |---|---|---|
-| region slots per process | 8, of which 7 may be filled on RP2350's Hazard3 | `PROCESS_REGION_SLOTS`; `OP_CAP_INFO` on a process |
+| region slots per process | 1 to the PMP entries the kernel uses, as its creator asks: 16 on QEMU and the ESP32-C6, 8 on the ARM boards, 7 on RP2350's Hazard3 | `OP_POOL_ALLOC`; `OP_CAP_INFO` on a process; `PROCESS_REGION_SLOTS_MAX` |
+| root task's region slots | 8, or fewer where the core has fewer entries | `ROOT_REGION_SLOTS` |
 | table slots per process | 2 | `PROCESS_TABLES` |
 | places per thread | 1 to the machine's cores, as its creator asks | `OP_POOL_ALLOC`; `OP_CAP_INFO` on a thread |
 | PMP entries the kernel uses | 16, or `PMP_MAX_ENTRIES` | Makefile |

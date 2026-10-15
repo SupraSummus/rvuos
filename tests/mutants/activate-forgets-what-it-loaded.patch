@@ -8,11 +8,11 @@ Report: PMP CSRs grant rights the slots do not
 diff --git a/kernel/process.c b/kernel/process.c
 --- a/kernel/process.c
 +++ b/kernel/process.c
-@@ -39,7 +39,6 @@ void process_activate(struct process *proc)
-     const struct pmp_image *img = &proc->pmp;
+@@ -38,7 +38,6 @@
+ {
      struct core *core = core_self();
-     pmp_load(img->addr, img->cfg, img->count, core->pmp_loaded);
--    core->pmp_loaded = (uint8_t)img->count;
+     pmp_load(process_pmp_addr(proc), process_pmp_cfg(proc), proc->pmp_count, core->pmp_loaded);
+-    core->pmp_loaded = proc->pmp_count;
  }
  
  /*

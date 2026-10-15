@@ -118,7 +118,7 @@ A program's `devices.h` says how many there are and names their slots, in the or
 and the two must agree.
 RP2350 lists the pins' functions and pads and the three PIO blocks, which the Wi-Fi system of `user/wifi/` drives;
 the ESP32-C6 lists the SAR ADC and the whole of its modem, in one frame,
-since a process's eight regions cannot hold the modem's blocks one by one,
+since a process's region slots, sixteen at most, cannot hold the modem's blocks one by one,
 where `tools/phymap.py` finds what ESP-IDF's PHY and Wi-Fi libraries reach, through the ROM's functions too,
 the eFuse's registers, read only, so that no program burns a fuse,
 a window onto flash, read and execute, for a program larger than its SRAM,
@@ -341,7 +341,7 @@ A program written against `rvuos.h` is the same source on both, never the same b
 
 **Why the MPU takes the model as it is.**
 A PMSAv7 region is a power of two of at least 32 bytes, aligned to its size, which is a NAPOT block,
-so every frame is one region as it is one PMP entry, and the image in `struct pmp_image` keeps PMP's encoding:
+so every frame is one region as it is one PMP entry, and a process's image keeps PMP's encoding:
 `kernel/arch/arm/mpu.c` implements `pmp.h`, entry i as region i, and reads a region back as the entry that made it,
 so the self-check of the image and of what the hardware holds is the same code on both.
 Had regions stayed TOR, open decision 8, ARMv7-M could not have held them.
@@ -397,7 +397,7 @@ so it reads memory the thread could write and nothing else;
 after a stacking fault the core wrote nothing, and the thread loses those eight registers,
 which keep what its last trap left, and a call whose stacking faulted is dropped, not taken for the next thread.
 The kernel writes the frame back only where the thread's process holds a region it may read and write, in RAM,
-a walk of the eight region slots;
+a walk of the process's region slots, `PMP_MAX_ENTRIES` at most;
 a device is left out, since the kernel's store is privileged and a device may let it do what it keeps from the thread.
 Where the frame cannot go, psp points at the kernel's own stack instead,
 the core's unstacking faults there with the thread's rights,

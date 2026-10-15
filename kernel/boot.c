@@ -25,13 +25,15 @@ struct thread *boot_create_root(void)
     struct pool *pool = pool_create(BOOT_POOL_BASE, BOOT_POOL_SIZE, NULL);
 
     struct captable *table = pool_alloc(pool, CAP_CAPTABLE, obj_type_size(CAP_CAPTABLE, ROOT_TABLE_SLOTS));
-    struct process *proc = pool_alloc(pool, CAP_PROCESS, obj_type_size(CAP_PROCESS, 0));
+    uint32_t regions = ROOT_REGION_SLOTS < pmp_entry_count ? ROOT_REGION_SLOTS : pmp_entry_count;
+    struct process *proc = pool_alloc(pool, CAP_PROCESS, obj_type_size(CAP_PROCESS, regions));
     struct thread *thread = pool_alloc(pool, CAP_THREAD, obj_type_size(CAP_THREAD, CORES));
     if (table == NULL || proc == NULL || thread == NULL) {
         kpanic("boot pool too small for the root task");
     }
 
     table->nslots = ROOT_TABLE_SLOTS;
+    proc->regions = (uint8_t)regions;
     /* A place on every core, so that the root thread may hold the time of each. */
     thread_make_places(thread, CORES);
     thread->flags = 0;

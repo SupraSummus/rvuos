@@ -103,7 +103,8 @@ void pmp_set(unsigned idx, uint32_t addr, uint8_t cfg);
  * Load an image: entries from zero up to count from addr and cfg,
  * and off those from count up to off, which an image before turned on; the entries past off are off already.
  * Nothing from pmp_entry_count up changes, the fence and the entries the core hardwires among them.
- * cfg lies on four bytes, as struct pmp_image keeps it, so a core whose bytes share a register reads it a word at a time.
+ * cfg lies on four bytes and is a word long for every four entries of count, as a process keeps it,
+ * so a core whose bytes share a register reads it a word at a time.
  */
 void pmp_load(const uint32_t *addr, const uint8_t *cfg, unsigned count, unsigned off);
 

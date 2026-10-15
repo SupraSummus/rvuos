@@ -7,11 +7,11 @@ Report: a description differs from the capability it describes
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -933,6 +933,7 @@ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *a
+@@ -927,6 +927,7 @@ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *a
      }
      case CAP_CAPTABLE:
          arg[2] = ((const struct captable *)cap_object(cap))->nslots;
 +        arg[3] = cap->a;
          break;
      case CAP_PROCESS:
-         /* What process_install holds an install to: a slot each, and an entry each. */
+         /* Its region slots, and the most a process may have here, an entry each: what OP_POOL_ALLOC holds a4 to. */

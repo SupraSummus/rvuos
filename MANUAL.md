@@ -119,12 +119,12 @@ What rvuos is not:
 ## 2. Features at a glance
 
 - **PMP isolation.**
-  Each process has a fixed number of region slots, eight today,
-  set by the kernel and not by the board.
+  Each process has the region slots its creator asked for,
+  one at least and no more than the core has PMP entries for them, which `OP_CAP_INFO` on a process tells,
+  so it pays for the regions it may have, and every slot may be filled at once.
   A region is installed with read, write and execute rights
   and the kernel rebuilds the process's PMP image on every change.
-  A region is a naturally aligned power-of-two block and costs one PMP entry,
-  so the core's entry count bounds how many slots can be filled; see section 5.4.
+  A region is a naturally aligned power-of-two block and costs one PMP entry; see section 5.4.
 - **Capabilities with rights.**
   A capability names a kernel object, a memory range, a range of interrupt lines
   or a range of the processor's units of time,

@@ -7,9 +7,9 @@ Caught-by: loop-bounds
 diff --git a/kernel/process.c b/kernel/process.c
 --- a/kernel/process.c
 +++ b/kernel/process.c
-@@ -58,6 +58,12 @@ int process_install(struct process *proc, unsigned slot,
-      * No frame overlaps a pool, by the derivation tree: what one Untyped makes never overlaps,
+@@ -93,6 +93,12 @@ int process_install(struct process *proc, unsigned slot,
       * so only the process's own regions are left to look at; see DESIGN.md, "Region slots".
+      * It has no more region slots than entries, and every region costs one, so the image always has room.
       */
 +    for (struct pool *p = pool_list; p != NULL; p = pool_next_pool(p)) {
 +        LOOP_WALK(pool_overlaps);
@@ -17,6 +17,6 @@ diff --git a/kernel/process.c b/kernel/process.c
 +            return KERR_OVERLAP;
 +        }
 +    }
-     unsigned installed = 0;
-     for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
-         LOOP_BOUND(PROCESS_REGION_SLOTS);
+     for (unsigned i = 0; i < proc->regions; i++) {
+         LOOP_BOUND(PMP_MAX_ENTRIES);
+         const struct cap *s = &proc->slots[i];

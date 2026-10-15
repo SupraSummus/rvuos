@@ -82,7 +82,7 @@ a `fence` after a load or an `lr` or `amo`, or on ARM a `dmb` or one of ARMv8-M'
 which is how it reads what the other core writes;
 what bounds it is the other core: a lock held a step of a walk at most, a trap that user mode takes at once,
 or on ARM a ticket of the lock another core takes between an exclusive load and store, once a trap at most.
-Other bounds rest on an invariant, as `i < img->count` does,
+Other bounds rest on an invariant, as `i < proc->regions` does,
 and a paid loop names its unit: a node, a link, an object or a waiter.
 The host harness `fuzz-work` counts both after every call:
 a bound per entry of its loop,

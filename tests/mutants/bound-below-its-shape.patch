@@ -1,19 +1,19 @@
-The loop that rebuilds a process's PMP image claims a bound of four,
-and its own condition runs it over all eight region slots.
+The loop over the timer lines as the tick advances claims a bound of four,
+and its own condition runs it over all sixteen.
 The code is the same; the link sees the claim is false from the loop's shape alone.
 
 Caught-by: loop-bounds fuzz-work
-Report: the loop at kernel/process.c ran N times on one entry, beyond its bound of N
+Report: the loop at kernel/sched.c ran N times on one entry, beyond its bound of N
 
-diff --git a/kernel/process.c b/kernel/process.c
---- a/kernel/process.c
-+++ b/kernel/process.c
-@@ -53,7 +53,7 @@ static void rebuild_pmp(struct process *proc)
-     struct pmp_image *img = &proc->pmp;
-     img->count = 0;
-     for (unsigned i = 0; i < PROCESS_REGION_SLOTS; i++) {
--        LOOP_BOUND(PROCESS_REGION_SLOTS);
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -818,7 +818,7 @@
+         cores[c].nearest_deadline = sched_ticks + NEAREST_NONE;
+     }
+     for (uint32_t i = 0; i < TIMER_LINES; i++) {
+-        LOOP_BOUND(TIMER_LINES);
 +        LOOP_BOUND(4);
-         const struct cap *s = &proc->slots[i];
-         if (s->type != CAP_NONE) {
-             img->addr[img->count] = pmp_napot_addr(s->a, s->b);
+         struct irq *irq = line_binding(IRQ_LINES + i);
+         if (irq == NULL || !irq_armed(irq)) {
+             continue;

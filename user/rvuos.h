@@ -30,7 +30,8 @@ static inline uint32_t rv_invoke(uint32_t op, uint32_t cap,
 
 /*
  * A call with all six argument registers set, as the replay driver makes a record's;
- * only an allocation of a thread reads a4, see rv_thread_alloc, none a5 or a6, and rv_invoke leaves them as they were.
+ * only an allocation of a process or a thread reads a4, see rv_process_alloc and rv_thread_alloc, none a5 or a6,
+ * and rv_invoke leaves them as they were.
  */
 static inline uint32_t rv_invoke6(uint32_t op, uint32_t cap, uint32_t a1, uint32_t a2, uint32_t a3,
                                   uint32_t a4, uint32_t a5, uint32_t a6)
@@ -99,6 +100,15 @@ static inline uint32_t rv_pool_alloc(uint32_t pool_cap, uint32_t type, uint32_t 
 static inline uint32_t rv_thread_alloc(uint32_t pool_cap, uint32_t dst, uint32_t process_cap, uint32_t places)
 {
     return rv_invoke6(OP_POOL_ALLOC, pool_cap, CAP_THREAD, dst, process_cap, places, 0, 0);
+}
+
+/*
+ * OP_POOL_ALLOC of a process in slot dst, mounting the table table_cap names in its table slot 0,
+ * with region slots for as many regions installed at once, one at least; see rv_process_regions.
+ */
+static inline uint32_t rv_process_alloc(uint32_t pool_cap, uint32_t dst, uint32_t table_cap, uint32_t regions)
+{
+    return rv_invoke6(OP_POOL_ALLOC, pool_cap, CAP_PROCESS, dst, table_cap, regions, 0, 0);
 }
 
 /* OP_PROCESS_INSTALL: a frame in a region slot of the process, with rights at most the frame's. */
@@ -232,6 +242,16 @@ static inline uint32_t rv_cap_info_of(uint32_t cap, uint32_t type, uint32_t w[3]
     uint32_t found, rights;
     uint32_t err = rv_cap_info(cap, &found, &rights, w);
     return err == KERR_OK && found != type ? (uint32_t)KERR_WRONG_TYPE : err;
+}
+
+/* A process's region slots, and the most a process may have on this machine, by OP_CAP_INFO. */
+static inline uint32_t rv_process_regions(uint32_t process_cap, uint32_t *regions, uint32_t *most)
+{
+    uint32_t w[3];
+    uint32_t err = rv_cap_info_of(process_cap, CAP_PROCESS, w);
+    *regions = w[0];
+    *most = w[1];
+    return err;
 }
 
 /* Where a frame points, by OP_CAP_INFO. */

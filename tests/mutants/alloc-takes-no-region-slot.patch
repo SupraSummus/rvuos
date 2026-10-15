@@ -1,0 +1,18 @@
+An allocation of a process takes none for its region slots,
+and makes a process no region can ever be installed in.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: process has no region slot, or more than the hardware has entries
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -380,7 +380,7 @@
+         }
+         /* A region slot for each region it may have installed at once, one at least and an entry each at most. */
+         uint32_t regions = arg[4];
+-        if (regions == 0 || regions > pmp_entry_count) {
++        if (regions > pmp_entry_count) {
+             return KERR_INVALID_ARG;
+         }
+         struct process *proc = pool_alloc(pool, CAP_PROCESS, obj_type_size(CAP_PROCESS, regions));
