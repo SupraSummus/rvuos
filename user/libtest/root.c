@@ -877,6 +877,9 @@ int main(void)
     must("take a peer down", child_free(&self, &a));
     must("take a peer down", child_free(&self, &b));
     must("free the channel", chan_free(&self, &link));
+    struct block all;
+    must("all of the free memory at once, every block of it back", mem_take(&self, self.whole.size, &all));
+    must("give it back", mem_give(&self, &all));
     give_round();
     check_round();
     core_round();

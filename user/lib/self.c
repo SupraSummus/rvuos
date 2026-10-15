@@ -49,7 +49,8 @@ uint32_t self_root(struct self *s, uint32_t units)
 
     uint32_t base, size, made;
     TRY(s, "the free RAM", rv_untyped_info(BOOT_CAP_FREE_RAM, &base, &size, &made));
-    s->free[s->free_count++] = (struct block){ BOOT_CAP_FREE_RAM, 0, base, size };
+    s->whole = (struct block){ BOOT_CAP_FREE_RAM, 0, base, size };
+    s->free[s->free_count++] = s->whole;
     PASS(slot_new(s, &s->inbox));
     TRY(s, "an inbox", rv_pool_alloc(s->pool, CAP_NOTIFICATION, s->inbox, 0));
     /* Every core's units, as many as it keeps account of, from the first core's: the units are numbered core by core. */

@@ -59,6 +59,7 @@ struct self {
     /* Free memory: Untypeds, each of a block, none overlapping. */
     struct block free[SELF_BLOCKS];
     uint32_t free_count;
+    struct block whole; /* the block they were all halved out of, see mem_take */
     /* Room for children's data, if it was asked for: a frame, the region it is installed in, and a bit for each unit in use. */
     struct block room;
     uint32_t room_region, room_used;
@@ -165,8 +166,8 @@ uint32_t self_cores(const struct self *s);
 
 /*
  * Memory, as blocks halved out of the free ones: a block's size is a power of two and its base a multiple of it.
- * The halves of a block are never joined again, since their parent is deleted to keep its slot,
- * so a block given back stays as small as it was taken.
+ * The halves of a block are not joined again, since their parent is deleted to keep its slot,
+ * but when no free block will do and every one is free, all of them are, back into the one they were halved out of.
  */
 /* An Untyped of size, from the smallest free block it fits, the lowest of those, at that block's base. */
 uint32_t mem_take(struct self *s, uint32_t size, struct block *b);
@@ -188,7 +189,7 @@ uint32_t mem_unused(const struct self *s);
 /*
  * What it holds, as the library counts it, to tell whether what it handed out came back:
  * free bytes, and slots, regions, bits, room and units in use.
- * The slots of free blocks are left out, since halving memory adds blocks that are never joined again.
+ * The slots of free blocks are left out, since halving memory adds blocks that are joined again only all at once.
  */
 struct self_tally {
     uint32_t bytes, slots, regions, bits, room, units[SELF_CORES * TIME_UNITS / 32];

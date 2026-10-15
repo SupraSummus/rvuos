@@ -168,7 +168,8 @@ and the system was written again on it; it joins the same network and answers th
   what is needed only to build it, its pool, its data's frame, its timer's `Irq` and its units, is deleted once used,
   which the derivation tree allows, since what hung below a deleted capability goes to its parent.
   A station's run ends with 26 of the 46 unused, and nothing gives a slot back by hand.
-  What the library cannot help is the free memory: halves never join again, so each free block holds a slot.
+  What the library cannot help is the free memory: halves join again only once all of them are back,
+  which a station's run never sees, so each free block holds a slot.
 - **Regions.** A child's page lies at the base of its data, so the page costs no region of its own:
   the network process holds three, the driver six of seven, with the link no longer in the window's place,
   and the root task six, a seventh for a moment.

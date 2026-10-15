@@ -66,11 +66,11 @@ Thread, IPv6 over 802.15.4 in a mesh, needs more of it, step by step:
 `user/wifi/NOTES.md` says what writing a program of several processes was like, and `user/lib/` is what came of it;
 what is left:
 
-- The library's blocks never join again: the parent of a split is deleted to keep its slot,
-  so free memory ends as blocks that each hold a slot,
-  20 of the root task's 42 slots on QEMU once `user/libtest/` has given everything back.
-  Keeping a split's parent while a half is taken would let two free halves join again,
-  at a slot per split for as long as they are apart.
+- The library's blocks join again only all at once, when no free block will do and every one is back,
+  so a program that keeps one block for good, as the Wi-Fi system its driver, ends with the halves it had, a slot each.
+  Keeping a split's parent while a half is taken would let two free halves join as they come back,
+  at a slot a level: over QEMU's 4 MiB that ran the library's test and the bench out of the root task's 46 slots.
+  A join in the kernel, open decision 20, would cost none.
 - `child_free` stops the child's thread before its pool is destroyed, a step at a time and the newest objects first,
   but not the threads the child built of its own, `child_give_own`:
   one woken as what it waits on goes before it would fault onto the parent's bit after the bit was handed out again.
