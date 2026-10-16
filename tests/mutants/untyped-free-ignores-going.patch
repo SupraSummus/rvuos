@@ -7,7 +7,7 @@ Report: untyped going though not a root, or b neither zero nor going
 diff --git a/kernel/object.h b/kernel/object.h
 --- a/kernel/object.h
 +++ b/kernel/object.h
-@@ -341,7 +341,7 @@ static inline uint32_t untyped_base(const struct cap *c) { return c->a & ~(untyp
+@@ -365,7 +365,7 @@ static inline uint32_t untyped_base(const struct cap *c) { return c->a & ~(untyp
  /* An Untyped's b once its delete as a root has begun, see cap_delete. */
  #define UNTYPED_GOING 1u
  /* Whether an Untyped makes something: only while nothing made of it is left, below it or gone up as a root. */
@@ -15,4 +15,4 @@ diff --git a/kernel/object.h b/kernel/object.h
 +static inline bool untyped_free(const struct cap *c) { return c->child == 0; }
  /*
   * What an Untyped made, as OP_CAP_INFO tells it: 0 while nothing lies below it, else the type of the node first there,
-  * CAP_FRAME for a frame or a region installed from one, CAP_UNTYPED for a half or a derived Untyped,
+  * CAP_FRAME for a frame, a region installed from one or a Route's end on one, CAP_UNTYPED for a half or a derived Untyped,

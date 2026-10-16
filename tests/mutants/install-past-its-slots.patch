@@ -7,7 +7,7 @@ Report: the kernel reached RAM outside its objects
 diff --git a/kernel/process.c b/kernel/process.c
 --- a/kernel/process.c
 +++ b/kernel/process.c
-@@ -82,7 +82,7 @@
+@@ -82,7 +82,7 @@ int process_install(struct process *proc, unsigned slot,
                      uint32_t base, uint32_t size, uint8_t rights, struct cap *parent)
  {
      /* No right would grant nothing; a frame is always a block. */

@@ -62,7 +62,8 @@ Both again with `CORES=2` are the only runs of two cores on silicon,
 which a change to how the cores lock, start or interrupt each other needs too.
 The same goes for `kernel/board/nrf52840/` and `user/board/nrf52840/`
 with an nRF52840 on an ST-Link connected, `make BOARD=nrf52840 test escape`,
-the only run of ARMv7-M on silicon, which a change to `kernel/arch/arm/` needs too.
+the only run of ARMv7-M on silicon, which a change to `kernel/arch/arm/` needs too;
+a change to `kernel/route.c` or a board's router runs `make BOARD=nrf52840 thread` as well, whose start checks a route.
 A change to `user/thread/` or to the ESP32-C6's `user/wifi/esp32c6/i154.c`, with both boards connected,
 runs `tools/thread-pair.sh`, IEEE 802.15.4's frames between them, which fails if either hears nothing of the other
 or nothing of either is acknowledged, and a change to how either sends runs it again with `STREAM=`,

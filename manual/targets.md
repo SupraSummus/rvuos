@@ -82,6 +82,9 @@ Interrupt lines:
 The kernel's tick on this board is 1 kHz, `TIMER_HZ` in `kernel/timer.h`, unless the build sets another rate,
 so one tick is one millisecond.
 QEMU's PMP has sixteen entries and a four-byte grain.
+`BOOT_CAP_ROUTES` names four channels of a router that wires nothing, as on the MPS2 boards and the host,
+so that a program's routes are bound, connected, armed and revoked here as on a board with a router;
+any word of a frame is an end, an event or a task alike.
 
 #### ESP32-C6
 
@@ -115,7 +118,7 @@ Interrupt lines:
 | 1 to 77 | the interrupt matrix's sources, numbered as in Espressif's `soc/interrupts.h`, plus one: the Wi-Fi MAC's source 0 is line 1, and the USB Serial/JTAG controller's is line 49 |
 
 The root task is granted a frame over each of these devices, from `BOOT_CAP_DEVICES` up,
-so `BOOT_CAP_COUNT` is 28 here and the root task's table has 74 slots.
+so `BOOT_CAP_COUNT` is 29 here and the root task's table has 75 slots; it has no router, so `BOOT_CAP_ROUTES` is empty.
 They are the SAR ADC and the whole modem,
 where `make BOARD=esp32c6 phymap` and `make BOARD=esp32c6 wifi-esp32c6-map` find what ESP-IDF's PHY and Wi-Fi libraries reach,
 the eFuse's registers, the window onto flash, the ROM, the random number generator's data register,
@@ -123,14 +126,14 @@ and the IO MUX and the GPIO matrix:
 
 | Slot | Constant | Range | Size | What | Rights |
 |---|---|---|---|---|---|
-| 20 | `BOOT_CAP_SARADC` | `0x6000E000` | 4 KiB | APB_SARADC, the SAR ADC and the temperature sensor | read, write |
-| 21 | `BOOT_CAP_MODEM` | `0x600A0000` | 64 KiB | the modem: its RF front end, basebands and MACs, MODEM_SYSCON and MODEM_LPCON, its clocks and resets, and the analog I2C master from `0x600AF800` | read, write |
-| 22 | `BOOT_CAP_EFUSE` | `0x600B0800` | 1 KiB | the eFuse's registers, the factory MAC address among them | read |
-| 23 | `BOOT_CAP_FLASH` | `0x42000000` | 1 MiB | the window onto flash, for a program larger than the SRAM | read, execute |
-| 24 | `BOOT_CAP_ROM` | `0x40000000` | 512 KiB | the ROM, whose functions ESP-IDF's libraries call | read, execute |
-| 25 | `BOOT_CAP_RNG` | `0x600B2808` | 8 bytes | LPPERI's RNG_DATA, the random number generator, whose entropy comes from the radio while it runs | read |
-| 26 | `BOOT_CAP_IO_MUX` | `0x60090000` | 4 KiB | the IO MUX, the pins' functions and pads | read, write |
-| 27 | `BOOT_CAP_GPIO` | `0x60091000` | 4 KiB | the GPIO matrix, the pins' routes, levels and interrupts | read, write |
+| 21 | `BOOT_CAP_SARADC` | `0x6000E000` | 4 KiB | APB_SARADC, the SAR ADC and the temperature sensor | read, write |
+| 22 | `BOOT_CAP_MODEM` | `0x600A0000` | 64 KiB | the modem: its RF front end, basebands and MACs, MODEM_SYSCON and MODEM_LPCON, its clocks and resets, and the analog I2C master from `0x600AF800` | read, write |
+| 23 | `BOOT_CAP_EFUSE` | `0x600B0800` | 1 KiB | the eFuse's registers, the factory MAC address among them | read |
+| 24 | `BOOT_CAP_FLASH` | `0x42000000` | 1 MiB | the window onto flash, for a program larger than the SRAM | read, execute |
+| 25 | `BOOT_CAP_ROM` | `0x40000000` | 512 KiB | the ROM, whose functions ESP-IDF's libraries call | read, execute |
+| 26 | `BOOT_CAP_RNG` | `0x600B2808` | 8 bytes | LPPERI's RNG_DATA, the random number generator, whose entropy comes from the radio while it runs | read |
+| 27 | `BOOT_CAP_IO_MUX` | `0x60090000` | 4 KiB | the IO MUX, the pins' functions and pads | read, write |
+| 28 | `BOOT_CAP_GPIO` | `0x60091000` | 4 KiB | the GPIO matrix, the pins' routes, levels and interrupts | read, write |
 
 The modem's two MACs, Wi-Fi's from `0x600A4000` and 802.15.4's at `0x600A3000`, are bus masters, and nothing confines them:
 a program that holds the modem's frame reaches all RAM, the kernel's too,
@@ -211,15 +214,15 @@ Interrupt lines:
 | 26 | SIO's doorbell; on the Cortex-M33 with `CORES=2` the kernel's, for its cores, and an `Irq` cannot be bound to it |
 
 The root task is granted a frame over each of these devices, from `BOOT_CAP_DEVICES` up,
-so `BOOT_CAP_COUNT` is 25 here and the root task's table has 71 slots;
+so `BOOT_CAP_COUNT` is 26 here and the root task's table has 72 slots, and `BOOT_CAP_ROUTES` is empty, since it has no router;
 the kernel takes each device out of reset at boot and opens it to user mode in ACCESSCTRL,
 and on the RISC-V cores opens every pin to Non-secure access, which is how user mode reaches the bus there:
 
 | Slot | Constant | Range | Size | What | Rights |
 |---|---|---|---|---|---|
-| 20 | `BOOT_CAP_IO_BANK0` | `0x40028000` | 16 KiB | IO_BANK0, the pins' functions, overrides and interrupts | read, write |
-| 21 | `BOOT_CAP_PADS_BANK0` | `0x40038000` | 16 KiB | PADS_BANK0, the pins' pads | read, write |
-| 22 to 24 | `BOOT_CAP_PIO0` to `BOOT_CAP_PIO2` | `0x50200000`, `0x50300000`, `0x50400000` | 16 KiB each | PIO0, PIO1 and PIO2 | read, write |
+| 21 | `BOOT_CAP_IO_BANK0` | `0x40028000` | 16 KiB | IO_BANK0, the pins' functions, overrides and interrupts | read, write |
+| 22 | `BOOT_CAP_PADS_BANK0` | `0x40038000` | 16 KiB | PADS_BANK0, the pins' pads | read, write |
+| 23 to 25 | `BOOT_CAP_PIO0` to `BOOT_CAP_PIO2` | `0x50200000`, `0x50300000`, `0x50400000` | 16 KiB each | PIO0, PIO1 and PIO2 | read, write |
 
 Each is a device's registers and their atomic aliases, and none is a bus master.
 The ADC is not listed: its clock is not running, and it never leaves reset without one.
@@ -278,14 +281,22 @@ Interrupt lines:
 | 0 | the kernel log; POWER_CLOCK cannot be bound |
 | 1 to 47 | the peripherals' lines, numbered by their IDs; nothing raises the console's line, 20, SWI0 |
 
-The root task is granted a frame over GPIO, one over the radio and one over TIMER2, from `BOOT_CAP_DEVICES` up,
-so `BOOT_CAP_COUNT` is 23 here and the root task's table has 69 slots:
+The root task is granted a frame over GPIO, one over the radio and one over each of TIMER2, TIMER3 and TIMER4,
+from `BOOT_CAP_DEVICES` up, so `BOOT_CAP_COUNT` is 26 here and the root task's table has 72 slots:
 
 | Slot | Constant | Range | Size | What | Rights |
 |---|---|---|---|---|---|
-| 20 | `BOOT_CAP_GPIO` | `0x50000000` | 4 KiB | GPIO, both ports, P0's registers and P1's at `0x50000300` | read, write |
-| 21 | `BOOT_CAP_RADIO` | `0x40001000` | 4 KiB | RADIO, the 2.4 GHz radio of Bluetooth LE and IEEE 802.15.4; its line is 1 | read, write |
-| 22 | `BOOT_CAP_TIMER2` | `0x4000A000` | 4 KiB | TIMER2, which times what is shorter than a tick, such as 802.15.4's backoffs; its line is 10 | read, write |
+| 21 | `BOOT_CAP_GPIO` | `0x50000000` | 4 KiB | GPIO, both ports, P0's registers and P1's at `0x50000300` | read, write |
+| 22 | `BOOT_CAP_RADIO` | `0x40001000` | 4 KiB | RADIO, the 2.4 GHz radio of Bluetooth LE and IEEE 802.15.4; its line is 1 | read, write |
+| 23 | `BOOT_CAP_TIMER2` | `0x4000A000` | 4 KiB | TIMER2, which times what is shorter than a tick, such as 802.15.4's backoffs; its line is 10 | read, write |
+| 24 | `BOOT_CAP_TIMER3` | `0x4001A000` | 4 KiB | TIMER3, for routes, such as an acknowledgement's turnaround; its line is 26 | read, write |
+| 25 | `BOOT_CAP_TIMER4` | `0x4001B000` | 4 KiB | TIMER4, for routes, such as a count of the frames received; its line is 27 | read, write |
+
+The router is the PPI, and `BOOT_CAP_ROUTES` names its channels 1 to 19; channel 0 is the kernel's counter's, below.
+An end is the offset of a register in its device's 4 KiB block, as the product specification gives it:
+a task, `ROUTE_TASK`, at 0x000 to 0x07C, an event, `ROUTE_EVENT`, at 0x100 to 0x17C,
+of a device between `0x40000000` and `0x4003FFFF`, and any other end fails;
+so `0x10C`, the radio's `EVENTS_END`, and `0x008`, a TIMER's `TASKS_COUNT`, of their frames, section 5.13.
 
 The radio is a bus master: its EasyDMA reads and writes a packet wherever its `PACKETPTR` points, the kernel's RAM too,
 so a program that holds its frame reaches all RAM,

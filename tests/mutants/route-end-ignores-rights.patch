@@ -1,0 +1,19 @@
+A Route's end connects through a frame without the right it needs.
+A frame its holder may only read would let it trigger a task, a write in all but name;
+each end is connected through a frame with the right to read for the event and to write for the task.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: route's end names no frame it may connect
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -805,7 +805,7 @@ static int op_route(struct thread *t, const struct cap *cap, uint32_t op, const
+         }
+         /* An event is heard, and a task done: the frame lets its holder read the one and write the other. */
+         struct cap fc;
+-        int err = slot_lookup_typed(t, arg[2], CAP_FRAME, end == ROUTE_EVENT ? RIGHT_R : RIGHT_W, &fc);
++        int err = slot_lookup_typed(t, arg[2], CAP_FRAME, 0, &fc);
+         if (err != KERR_OK) {
+             return err;
+         }

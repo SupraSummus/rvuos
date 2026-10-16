@@ -1,0 +1,18 @@
+A Route's destroy leaves its channel taken.
+The channel table would name a freed object, and the channel could never be bound again;
+the channel table names exactly the bound Routes.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: channel table names a route that is gone
+
+diff --git a/kernel/route.c b/kernel/route.c
+--- a/kernel/route.c
++++ b/kernel/route.c
+@@ -63,7 +63,6 @@ void route_forget(struct route *r)
+     if (r->armed) {
+         route_arm(r, false);
+     }
+-    channel_route[r->channel - ROUTE_FIRST] = 0;
+ }
+ 
+ #if ROUTER_FAKE

@@ -32,7 +32,7 @@ and a process with one table names its slots by their indices.
 A slot is empty or holds one capability:
 a type, a set of rights, and two words the kernel interprets by type.
 Userspace never sees a slot's links, nor the address of an object,
-but whoever holds a capability may ask what it is, with no right, `OP_CAP_INFO`, section 6.14:
+but whoever holds a capability may ask what it is, with no right, `OP_CAP_INFO`, section 6.15:
 its type, its rights and what it names, what a frame covers, say.
 
 Every system call is an invocation on the capability in one slot.
@@ -91,7 +91,7 @@ The tree grows in these ways:
 | `OP_CAP_DERIVE` | below the source |
 | `OP_CAP_COPY` | beside the source, under the source's parent; a copy of a root is a root; an Untyped is never copied |
 | `OP_CAP_MOVE` | where the source hung, which it leaves empty, with what hung below the source below it |
-| `OP_FRAME_CARVE`, `OP_IRQ_CARVE`, `OP_TIME_CARVE`, `OP_CLOCK_FRAME` | below the invoked capability |
+| `OP_FRAME_CARVE`, `OP_IRQ_CARVE`, `OP_TIME_CARVE`, `OP_ROUTE_CARVE`, `OP_CLOCK_FRAME` | below the invoked capability |
 | `OP_UNTYPED_RETYPE` of a frame, `OP_UNTYPED_SPLIT` | below the invoked Untyped |
 | `OP_UNTYPED_RETYPE` of a pool | below the pool's own node, which hangs below the invoked Untyped |
 | `OP_PROCESS_INSTALL` | the installed region hangs below the frame |
@@ -102,6 +102,8 @@ The tree grows in these ways:
 | `OP_IRQ_BIND` | below the `KernelPool` capability; the line goes with what was derived from it |
 | `OP_IRQ_BIND` | and the `Irq`'s hold on its notification below the `Notification` capability |
 | `OP_TIME_BIND` | the thread's hold on its units hangs below the invoked `Time` capability |
+| `OP_ROUTE_BIND` | below the `KernelPool` capability; the channel goes with what was derived from it |
+| `OP_ROUTE_END` | the `Route`'s hold on the end hangs below the `Frame` capability |
 | boot | nowhere, but for the root task's frames and the boot pool's block, below `BOOT_CAP_ROOT_RAM`, the boot pool's own node, below that block, and the capabilities to the boot pool and its objects, below that node |
 
 `OP_CAP_REVOKE` on a slot clears everything below it, in every table and every process:
@@ -109,7 +111,8 @@ derived capabilities, their copies, what was derived from those,
 every region installed from any of them,
 and every thread's units bound through any of them;
 a thread made through any of them loses its process and stops, section 5.6,
-and an `Irq` bound through any of them loses its notification and is disarmed, section 5.9.
+an `Irq` bound through any of them loses its notification and is disarmed, section 5.9,
+and a `Route` connected through any of them loses that end and is disarmed, section 5.13.
 Below an Untyped it destroys every pool made of it, section 5.5.
 The slot itself stays.
 Revoking a copy takes nothing from the original, and the other way round;
@@ -147,13 +150,15 @@ Programs are encouraged to keep the same convention.
 | `IrqLine` | `CAP_IRQ_LINE` | none: the slot holds the first line and a count | boot, `OP_IRQ_CARVE` |
 | `Irq` | `CAP_IRQ` | one line bound to a notification, with a deadline on a timer line | `OP_IRQ_BIND` |
 | `Time` | `CAP_TIME` | none: the slot holds the first unit and a count | boot, `OP_TIME_CARVE` |
+| `RouteLine` | `CAP_ROUTE_LINE` | none: the slot holds the first channel and a count | boot, `OP_ROUTE_CARVE` |
+| `Route` | `CAP_ROUTE` | one channel, its two ends and whether it is armed | `OP_ROUTE_BIND` |
 | `Print` | `CAP_PRINT` | none | boot |
 | `Halt` | `CAP_HALT` | none | boot |
 | `Test` | `CAP_TEST` | none | boot |
 | `Clock` | `CAP_CLOCK` | none: there is one counter | boot |
 
-`Untyped`, `Frame`, `IrqLine`, `Time`, `Print`, `Halt`, `Test` and `Clock` capabilities have no kernel object behind them.
-Carving a frame, a line range or a range of units, retyping an Untyped into a frame and splitting one,
+`Untyped`, `Frame`, `IrqLine`, `Time`, `RouteLine`, `Print`, `Halt`, `Test` and `Clock` capabilities have no kernel object behind them.
+Carving a frame, a range of lines, units or channels, retyping an Untyped into a frame and splitting one,
 are pure table operations
 that touch no kernel memory,
 which is why the root task can hand out memory, lines and time
@@ -728,7 +733,7 @@ and moves `taken` only as far as its host says it has the bytes, so a halt write
   and the turns it takes so cost the lender's account on that core.
 - The machine timer ticks at `TIMER_HZ`, 1 kHz on every board unless the build sets another rate, `make TIMER_HZ=`,
   which divides a second and the board's counter and is at least 650;
-  `OP_CAP_INFO` on a `Clock` or a `Time` capability tells the tick, section 6.14, so a program need not assume one.
+  `OP_CAP_INFO` on a `Clock` or a `Time` capability tells the tick, section 6.15, so a program need not assume one.
   A tick ends the running thread's turn:
   the thread goes to the back of its queue,
   and the thread that has waited longest on the run queue runs,
@@ -820,3 +825,35 @@ A stopped borrower keeps its lenders, whose time buys it nothing until it is res
 and a stopped lender lends nothing more: a stop takes it off its wait, and its borrower's ring of lenders.
 A stopped lender whose time pays for the borrower's turn pays to the end of that turn, at the next tick or the borrower's wait.
 A lock keeps nobody from the memory it guards: that is the regions' work.
+
+### 5.13 Routes
+
+Some chips wire an event of one device to a task of another in hardware, so that the one starts the other
+with no thread in between, within a cycle or two of the event:
+a timer's compare that starts a radio's sending, a radio's end of frame that counts in a timer.
+A deadline shorter than a thread's wait for its turn is met that way or not at all, since a driver in user mode
+runs only when its turn comes, section 5.11.
+The kernel lends the chip's channels as it lends interrupt lines.
+The root task receives every channel it lends in `BOOT_CAP_ROUTES`, a `RouteLine`, and carves single channels out with `OP_ROUTE_CARVE`;
+on a board without a router the slot is empty, and on QEMU's boards four channels wire nothing, for tests.
+
+`OP_ROUTE_BIND` turns a one-channel capability into a `Route` object in a pool of the driver's choosing,
+connected to nothing and disarmed, and consumes the invoked slot; a channel is bound at most once.
+`OP_ROUTE_END` connects the `Route`'s event and its task, each by a `Frame` capability over the device it lies in,
+with `RIGHT_R` for the event and `RIGHT_W` for the task, and the end's name within the frame, which the board gives, section 3.
+`OP_ROUTE_SET` arms the `Route`, once both ends are connected, and disarms it.
+A wire triggers only what the driver could trigger by writing the frames itself; it moves no data.
+
+```c
+/* TIMER4 counts every frame the radio ends: its COUNT task on the radio's END event */
+rv_invoke(OP_ROUTE_CARVE, BOOT_CAP_ROUTES, 0, 1, CHANNEL);
+rv_invoke(OP_ROUTE_BIND, CHANNEL, POOL, ROUTE, 0);
+rv_invoke(OP_ROUTE_END, ROUTE, ROUTE_EVENT, BOOT_CAP_RADIO, 0x10c); /* EVENTS_END */
+rv_invoke(OP_ROUTE_END, ROUTE, ROUTE_TASK, BOOT_CAP_TIMER4, 0x008); /* TASKS_COUNT */
+rv_invoke(OP_ROUTE_SET, ROUTE, 1, 0, 0);
+```
+
+A `Route` holds each end by a capability derived from the `Frame` capability it was connected through,
+so whoever lent the device takes the wire back by revoking below its frame, which disarms the `Route`;
+connecting an end it had disarms it, so it never wires a new end to the other's old partner.
+The destroy of the `Route`'s pool disarms it too, and frees the channel.

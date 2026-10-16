@@ -70,6 +70,8 @@
 #define CAP_TIME     12 /* a range of the processor's units of time; no kernel object behind it */
 #define CAP_HALT     13 /* halting the machine */
 #define CAP_TEST     14 /* driving the machine as a test does: tracing, ticking, interrupting, preempting */
+#define CAP_ROUTE_LINE 15 /* a range of the router's channels; no kernel object behind it */
+#define CAP_ROUTE    16 /* one channel, wiring an event of one device to a task of another */
 
 /*
  * Rights bits.
@@ -85,6 +87,8 @@
  * IrqLine: RIGHT_W to bind a line.
  * Irq: RIGHT_W to set or mask.
  * Time: RIGHT_W to bind a thread, RIGHT_X to let the threads bound through it run on spare time.
+ * RouteLine: RIGHT_W to bind a channel.
+ * Route: RIGHT_W to connect its ends and to arm it.
  * Print: RIGHT_W to write into the kernel's log.
  * Halt: RIGHT_W to halt the machine.
  * Test: RIGHT_W to drive the machine as a test does: trace, tick, interrupt, preempt.
@@ -629,6 +633,8 @@
  *                     and 1 on a timer line, else 0; never the bits it is armed with
  *   CAP_TIME          the first unit, the count, and the tick in microseconds, which an account counts in, see OP_TIME_BIND;
  *                     unit u is of core u / TIME_UNITS, so BOOT_CAP_TIME's count is TIME_UNITS for each core the kernel runs
+ *   CAP_ROUTE_LINE    the first channel, the count, and 0
+ *   CAP_ROUTE         its channel, the ends connected, bit ROUTE_EVENT and bit ROUTE_TASK, and 1 while armed, else 0
  *   CAP_CLOCK         the counter's rate in Hz, as OP_CLOCK_READ gives it, the tick in counts of the counter,
  *                     and the tick in microseconds: the quantum, which bounds a turn while tracing is off;
  *                     DESIGN.md, "Scheduling", says what the kernel's steps add to it
@@ -643,7 +649,8 @@
 /*
  * Pool: what an object of a type would take of it. No right needed, as for OP_CAP_INFO.
  * a1 = the type: CAP_CAPTABLE, CAP_PROCESS, CAP_THREAD or CAP_NOTIFICATION, as OP_POOL_ALLOC makes them,
- *      CAP_IRQ, as OP_IRQ_BIND makes one of a pool, or CAP_POOL, the descriptor at the base of a pool's memory;
+ *      CAP_IRQ, as OP_IRQ_BIND makes one of a pool, CAP_ROUTE, as OP_ROUTE_BIND does,
+ *      or CAP_POOL, the descriptor at the base of a pool's memory;
  * a2 = 0; a3 = the number of slots for CAP_CAPTABLE, 1 to 1024, of region slots for CAP_PROCESS,
  * 1 to the most the machine allows, see OP_CAP_INFO, of places for CAP_THREAD, 1 to the machine's cores,
  * and 0 for every other type.
@@ -660,10 +667,52 @@
 #define OP_POOL_INFO 42
 
 /*
+ * RouteLine: derive a smaller range of channels with the same rights.
+ * a1 = offset from the first channel, a2 = count, a3 = destination slot.
+ * Like OP_IRQ_CARVE, this is a table operation that touches no kernel memory,
+ * and the new capability is a child of the invoked one.
+ */
+#define OP_ROUTE_CARVE 43
+/*
+ * RouteLine (RIGHT_W): bind the one channel the capability names, as a Route object,
+ * which wires an event of one device to a task of another once both are connected and it is armed;
+ * see DESIGN.md, "Routes".
+ * a1 = the slot of the Pool capability the Route is allocated from, which needs RIGHT_W,
+ * a2 = destination slot for the Route capability, a3 = 0.
+ * As OP_IRQ_BIND, the bind consumes the invoked slot, and what was derived from it, so a2 may name it,
+ * and the Route capability is a child of the Pool capability.
+ * Fails with KERR_OVERLAP if a Route is already bound to the channel;
+ * the channel is free again once that Route's pool is destroyed.
+ * Fails with KERR_NO_MEMORY if the pool has no room for the Route, and with KERR_STATE while it is being destroyed.
+ * The new Route connects nothing and is disarmed.
+ */
+#define OP_ROUTE_BIND 44
+/*
+ * Route (RIGHT_W): connect one end of the route; connecting an end it had disarms it.
+ * a1 = ROUTE_EVENT or ROUTE_TASK, which end,
+ * a2 = the slot of a Frame capability over the device the end lies in,
+ *      which needs RIGHT_R for the event and RIGHT_W for the task,
+ * a3 = the end, as the board names an event or a task within that device's registers; see MANUAL.md, section 3.
+ * Fails with KERR_INVALID_ARG for an end the frame does not hold, or any end on a board without a router.
+ * The Route holds the frame by a capability derived from the one named, which a revoke above takes,
+ * as it takes the end, disarming the route; connecting the end again replaces it, and disarms the route too.
+ */
+#define OP_ROUTE_END 45
+#define ROUTE_EVENT 0
+#define ROUTE_TASK  1
+/*
+ * Route (RIGHT_W): arm the route, a1 = 1, which needs both its ends, else KERR_STATE,
+ * or disarm it, a1 = 0; anything else fails with KERR_INVALID_ARG.
+ * While it is armed the router triggers the task each time the event comes, with no processor in between;
+ * an event that came before the arm, or while the route was disarmed, triggers nothing.
+ */
+#define OP_ROUTE_SET 46
+
+/*
  * One above the highest operation code; the fuzzer's mutator draws below it.
  * Codes 11 and 27 are no operation's: they were OP_FRAME_INFO and OP_UNTYPED_INFO, which OP_CAP_INFO replaced.
  */
-#define OP_COUNT 43
+#define OP_COUNT 47
 
 /*
  * Capability slots the kernel fills in the root task's table at boot.
@@ -700,12 +749,17 @@
 #define BOOT_CAP_HALT      18 /* Halt: halting the machine */
 #define BOOT_CAP_TEST      19 /* Test: driving the machine as a test does */
 /*
+ * RouteLine: every channel of the board's router the kernel does not keep, with RIGHT_W;
+ * empty on a board without one. See DESIGN.md, "Routes".
+ */
+#define BOOT_CAP_ROUTES    20
+/*
  * Frames over the devices the board lists, BOOT_DEVICES of them, from this slot up in the board's order;
  * QEMU's lists none.
  * BOOT_DEVICES comes from the kernel's board.h, or a program's devices.h, which names each slot.
  */
-#define BOOT_CAP_DEVICES   20
-/* The root task's own slots start here; on QEMU it is 20. */
+#define BOOT_CAP_DEVICES   21
+/* The root task's own slots start here; on QEMU it is 21. */
 #define BOOT_CAP_COUNT     (BOOT_CAP_DEVICES + BOOT_DEVICES)
 
 /*
@@ -768,7 +822,7 @@ struct replay_record {
 /* The most region slots a process has on any machine; OP_CAP_INFO on a process tells this machine's. */
 #define PROCESS_REGION_SLOTS_MAX 16
 #define PROCESS_TABLES 2 /* table slots per process, see SLOT_TABLE_SHIFT */
-#define ROOT_TABLE_SLOTS (BOOT_CAP_COUNT + 46) /* slots in the root task's table, 66 on QEMU */
+#define ROOT_TABLE_SLOTS (BOOT_CAP_COUNT + 46) /* slots in the root task's table, 67 on QEMU */
 /* Region slots of the root task's process, or the most a process may have where that is fewer; see OP_CAP_INFO. */
 #define ROOT_REGION_SLOTS 8
 #define POOL_MIN_SIZE 64 /* the smallest Untyped OP_UNTYPED_RETYPE makes a pool of */

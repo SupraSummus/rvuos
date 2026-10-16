@@ -8,7 +8,7 @@ Report: the loop at kernel/sched.c ran N times on one entry, beyond its bound of
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -818,7 +818,7 @@
+@@ -819,7 +819,7 @@ static void tick_advance(uint32_t ticks)
          cores[c].nearest_deadline = sched_ticks + NEAREST_NONE;
      }
      for (uint32_t i = 0; i < TIMER_LINES; i++) {

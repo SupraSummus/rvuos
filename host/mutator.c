@@ -325,8 +325,8 @@ static void follow(struct shadow *s, const struct replay_record *c)
     uint32_t a[3] = { c->a1, c->a2, c->a3 };
     uint8_t made = info->makes != MAKES_A1 ? info->makes : c->a1 < 0x100 ? (uint8_t)c->a1 : CAP_NONE;
     uint8_t inv = s->names[t][c->slot];
-    /* A bind takes the invoked slot, which may receive the Irq. */
-    if (c->op == OP_IRQ_BIND) {
+    /* A bind takes the invoked slot, which may receive the Irq or the Route. */
+    if (c->op == OP_IRQ_BIND || c->op == OP_ROUTE_BIND) {
         put(s, t, c->slot, CAP_NONE, NOWHERE);
     }
     for (unsigned i = 0; i < 3; i++) {
@@ -368,7 +368,7 @@ static const struct shadow *shadow_start(void)
         [BOOT_CAP_INPUT] = CAP_FRAME, [BOOT_CAP_IRQ_LINES] = CAP_IRQ_LINE, [BOOT_CAP_UART] = CAP_FRAME,
         [BOOT_CAP_LOG] = CAP_FRAME, [BOOT_CAP_TIMER_LINES] = CAP_IRQ_LINE, [BOOT_CAP_CLOCK] = CAP_CLOCK,
         [BOOT_CAP_TIME] = CAP_TIME, [BOOT_CAP_ROOT_RAM] = CAP_UNTYPED, [BOOT_CAP_POOL_RAM] = CAP_UNTYPED,
-        [BOOT_CAP_HALT] = CAP_HALT, [BOOT_CAP_TEST] = CAP_TEST,
+        [BOOT_CAP_HALT] = CAP_HALT, [BOOT_CAP_TEST] = CAP_TEST, [BOOT_CAP_ROUTES] = CAP_ROUTE_LINE,
     };
     if (ready) {
         return &start;
@@ -418,7 +418,8 @@ static uint32_t draw_kind(struct rng *r, const struct shadow *s, const struct re
                           const struct op_info *info, unsigned i, uint8_t *data, size_t count)
 {
     static const uint8_t allocs[] = { CAP_CAPTABLE, CAP_PROCESS, CAP_THREAD, CAP_NOTIFICATION };
-    static const uint8_t sized[] = { CAP_CAPTABLE, CAP_PROCESS, CAP_THREAD, CAP_NOTIFICATION, CAP_IRQ, CAP_POOL };
+    static const uint8_t sized[] = { CAP_CAPTABLE, CAP_PROCESS, CAP_THREAD, CAP_NOTIFICATION, CAP_IRQ, CAP_ROUTE,
+                                     CAP_POOL };
     static const uint8_t rights[] = { RIGHT_ALL, RIGHT_R, RIGHT_R | RIGHT_W, RIGHT_R | RIGHT_X, RIGHT_W, RIGHT_X };
     static const uint32_t delays[] = { 0, 1, 100, 10000, 1000000 };
     unsigned t = table_of(c->actor);
@@ -496,6 +497,10 @@ static uint32_t draw_kind(struct rng *r, const struct shadow *s, const struct re
         return below(r, 8) == 0 ? 0 : 1 + (uint32_t)below(r, 16);
     case ARG_ADDRESS:
         return draw_address(r);
+    case ARG_END:
+        return below(r, 8) == 0 ? rnd(r) : (uint32_t)below(r, 2);
+    case ARG_NAME:
+        return below(r, 8) == 0 ? rnd(r) : 4u * (uint32_t)below(r, 64);
     default:
         return draw_arg(r, data, count);
     }

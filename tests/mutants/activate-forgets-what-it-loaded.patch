@@ -8,7 +8,7 @@ Report: PMP CSRs grant rights the slots do not
 diff --git a/kernel/process.c b/kernel/process.c
 --- a/kernel/process.c
 +++ b/kernel/process.c
-@@ -38,7 +38,6 @@
+@@ -38,7 +38,6 @@ void process_activate(struct process *proc)
  {
      struct core *core = core_self();
      pmp_load(process_pmp_addr(proc), process_pmp_cfg(proc), proc->pmp_count, core->pmp_loaded);

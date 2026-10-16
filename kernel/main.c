@@ -7,6 +7,7 @@
 #include "klog.h"
 #include "object.h"
 #include "pmp.h"
+#include "route.h"
 #include "sched.h"
 #include "timer.h"
 #include "trap.h"
@@ -48,6 +49,8 @@ void kmain(void)
      * Every device line starts masked and stays so until an Irq is armed on it.
      */
     irq_init();
+    /* Every channel the kernel lends wires nothing until a Route is armed on it, as every line is masked. */
+    route_init();
 #if CORES > 1
     /*
      * This core takes the others' interrupts from now on, which wake it and make it trap.

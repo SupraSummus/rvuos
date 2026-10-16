@@ -54,6 +54,7 @@
  * It wraps every 71 minutes, and the kernel counts the wraps for its tick and for OP_CLOCK_READ.
  */
 #define TIMER0_BASE  U32(0x40008000)
+#define TIMER1_BASE  U32(0x40009000)
 #define COUNTER_ADDR (TIMER0_BASE + U32(0x544))
 #define COUNTER_HZ   U32(1000000)
 
@@ -72,19 +73,23 @@
  * devices a driver in user mode needs:
  * GPIO, both ports' registers, P0's at 0x50000000 and P1's at 0x50000300, in one 4 KiB block, read and write;
  * RADIO, the 2.4 GHz radio of Bluetooth LE and IEEE 802.15.4, read and write;
- * and TIMER2, read and write, which times in microseconds what a driver waits for that is shorter than a tick,
- * such as IEEE 802.15.4's backoffs; without the PPI, which the kernel keeps, it raises its line and nothing more.
+ * TIMER2, read and write, which times in microseconds what a driver waits for that is shorter than a tick,
+ * such as IEEE 802.15.4's backoffs;
+ * and TIMER3 and TIMER4, read and write, which a route wires to the radio, an acknowledgement's turnaround
+ * and a count of the frames received, say; see the router below.
  * The radio is a bus master: its EasyDMA reads and writes a packet wherever PACKETPTR points, the kernel's RAM too,
  * so whoever holds its frame reaches all RAM, as the ESP32-C6's modem does,
  * and the root task gives it only to a driver it trusts as it trusts itself; see DESIGN.md, open decision 13.
  * user/board/nrf52840/devices.h names their slots.
  * TIMER0, TIMER1 and the PPI are the kernel's, for the counter, and lie in none.
  */
-#define BOOT_DEVICES 3
+#define BOOT_DEVICES 5
 #define DEVICE_RANGE_LIST                                       \
     { U32(0x50000000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
     { U32(0x40001000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
-    { U32(0x4000a000), U32(0x00001000), RIGHT_R | RIGHT_W },
+    { U32(0x4000a000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
+    { U32(0x4001a000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
+    { U32(0x4001b000), U32(0x00001000), RIGHT_R | RIGHT_W },
 
 /*
  * Interrupt line identifiers lie below IRQ_LINES; see irq.h.
@@ -92,5 +97,16 @@
  * Line 0, POWER_CLOCK, is shadowed by the kernel's log, see klog.h.
  */
 #define IRQ_LINES 48
+
+/*
+ * The router: the PPI, whose programmable channels 0 to 19 each trigger a task register on an event register,
+ * channel 0 the kernel's counter's, see timer.c; it lends 1 to 19.
+ * An end is a register's offset in its device's 4 KiB block, as the product specification gives it:
+ * a task at 0x000 to 0x07c, an event at 0x100 to 0x17c, on the APB's devices, 0x40000000 to 0x4003ffff;
+ * see route.c and DESIGN.md, "Routes".
+ */
+#define PPI_BASE       U32(0x4001f000)
+#define ROUTE_FIRST    1u
+#define ROUTE_CHANNELS 19u
 
 #endif

@@ -171,6 +171,8 @@ class Namer:
             return "|".join(n for bit, n in self.rights if v & bit)
         if kind == "ARG_FLAGS" and v == self.num["IRQ_SET_PERIOD"]:
             return "IRQ_SET_PERIOD"
+        if kind == "ARG_END" and op == "OP_ROUTE_END" and v in (self.num["ROUTE_EVENT"], self.num["ROUTE_TASK"]):
+            return "ROUTE_EVENT" if v == self.num["ROUTE_EVENT"] else "ROUTE_TASK"
         if kind == "ARG_BITS" and v == self.num["NOTIFY_ALL_BITS"]:
             return "NOTIFY_ALL_BITS"
         if kind == "ARG_OFFSET" and op == "OP_THREAD_READ_REG" and v == self.num["THREAD_REG_PC"]:

@@ -14,13 +14,14 @@ Chapters 10 and 11 of the user manual; [`MANUAL.md`](../MANUAL.md) has its conte
 | minimum PMP entries to boot | 4 | `kernel/main.c` |
 | slots per `CapTable` | 1 to 1024 | `CAPTABLE_MAX_SLOTS` |
 | a slot number | `SLOT_IN(table slot, index)`: the table slot from bit 10 up, the index below | `SLOT_TABLE_SHIFT` |
-| root task's table | 46 slots past the boot capabilities, 66 in all on QEMU | `ROOT_TABLE_SLOTS` |
+| root task's table | 46 slots past the boot capabilities, 67 in all on QEMU | `ROOT_TABLE_SLOTS` |
 | boot pool | 4 KiB | `BOOT_POOL_SIZE` in `kernel/layout.h` |
 | smallest pool | 64 bytes | `POOL_MIN_SIZE` |
 | object alignment | 8 bytes | `OBJ_ALIGN` |
 | an object's size | section 5.5 | `OP_POOL_INFO` |
 | notification bits | 32 | the word size |
 | timer lines | 16, on the whole machine | `TIMER_LINES` |
+| a router's channels | 19 on the nRF52840, 4 that wire nothing on QEMU's boards, none elsewhere | `OP_CAP_INFO` on `BOOT_CAP_ROUTES` |
 | units of time | 64 of each core | `TIME_UNITS` |
 | cores | 1, or 2 on QEMU `virt`, mps2-an521 and RP2350 with `CORES=2` | Makefile; `OP_CAP_INFO` on `BOOT_CAP_TIME`, its count over `TIME_UNITS` |
 | most of its units an account holds | 100 ticks' worth, 100 ms (`ACCOUNT_TICKS`) | `kernel/timer.h` |

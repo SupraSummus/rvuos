@@ -322,7 +322,8 @@ what is left:
   so would a pager: a thread that, when another faults on a frame its process may have,
   installs the frame in place of one it is not using and resumes the thread, which runs the access again.
   The kernel allows it as it is, but writes a report of every fault into the log, so it suits frames touched seldom.
-- Feed the replay corpus to the board, to a kernel built with `SELFCHECK=1`.
+- Feed the replay corpus to the board, to a kernel built with `SELFCHECK=1`;
+  the prologue copies `BOOT_CAP_ROUTES` to the second table, which fails where a board has no router and the slot is empty.
   Something has to put each input where `BOOT_CAP_INPUT` points,
   below the ROM's buffers or over USB once the kernel runs,
   and the replay driver's second stack has to follow the board's data region.
@@ -355,6 +356,10 @@ what is left:
 
 ## nRF52840
 
+- The acknowledgement of `user/thread/`'s link on routes, as decision 37 lays it out:
+  the radio's CRCOK to TIMER3's START and TIMER3's COMPARE to its TXEN, armed at BCMATCH,
+  and the radio's END to TIMER4's COUNT, which tells the driver how many frames ended.
+  Then the acknowledgement's time, measured as the C6 cannot, since it takes one at any wait.
 - Boot without the probe, from flash, the image copied into RAM, where it runs now.
 - The idle kernel polls, since SysTick wakes `wfe` only under a debugger;
   a compare on a TIMER's CC register, raising its line, would let it sleep, as the item under "ARM" says for QEMU 11.
@@ -594,6 +599,16 @@ what is left:
   an invariant over other capabilities needs it to follow theirs.
 - `make mutants` does not run `model-check`,
   whose search could catch a mutant that breaks an invariant at a place no seed stops at.
+
+## Routes
+
+- A router for the ESP32-C6, its ETM, whose events and tasks are numbers the board would map to their devices,
+  and for the nRF53 and nRF54, whose DPPI keeps the channels in each device's own registers; decision 37.
+- RP2350's DMA as a router, a channel paced by a device's DREQ writing a word to a register; decision 37.
+- Check a route in `make BOARD=nrf52840 test`, the demo, rather than at `user/thread/`'s start alone,
+  so that the board's ordinary check holds the router; QEMU's wires nothing, so only a board can.
+- Renumber the corpus past `BOOT_CAP_ROUTES`, whose slot moved the devices and the root task's own slots up one,
+  as the item under "Verification" on renumbering says.
 
 ## System calls
 

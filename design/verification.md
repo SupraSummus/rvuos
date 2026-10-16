@@ -46,19 +46,22 @@ with rights no greater than the root task received for it
 or a range of lines the interrupt controller has, the log's among them,
 with no more than the right to bind,
 or a range of the units of time there are, with no more than the rights to bind and to run on spare time,
+or a range of the channels the kernel lends, with no more than the right to bind,
 or `Print`, `Halt`, `Test` or the clock, which name no object,
 or a live kernel object of the capability's own type,
 which for a notification may signal some bit and for any other object carries no bits.
 Every process's table slot is empty or names a live table, with the right to write it,
 every thread's process slot is empty or names a live process,
 every thread's watch is empty or names a live notification,
-and every `Irq`'s notification slot is empty or names a live notification.
+every `Irq`'s notification slot is empty or names a live notification,
+and every `Route`'s end is empty or names a frame its router finds the end in.
 
 **Derivation.**
 The slots of every live table,
 the table slots and region slots of every live process,
 the process, units and watch of every live thread,
-the notification of every live `Irq`
+the notification of every live `Irq`,
+the ends of every live `Route`
 and the own node of every pool
 are the nodes of one forest.
 Every link of a filled node lands on a live, filled node;
@@ -72,11 +75,11 @@ and a capability to a pool or an object is never one, nor a thread's process or 
 A node is derived from its parent:
 the same object with no more rights, and for a notification no more bits to signal,
 a range within the parent's range with no more rights,
-a pool's own node on an Untyped, an installed region on a frame,
+a pool's own node on an Untyped, an installed region or a `Route`'s end on a frame,
 a thread's units on a capability to units that holds them, the first of them even for none,
 a thread's process or watch or an `Irq`'s notification on a capability to that object,
 the watch and the `Irq` with no more bits to signal, or on that object's pool or its pool's own node,
-the counter's block, or a region installed from it, below a clock with the right to read,
+the counter's block, or a region installed from it or a `Route`'s end on it, below a clock with the right to read,
 or a capability to a pool or an object below a capability to that pool or its own node.
 A revoke, a delete or a destroy stopped for an interrupt leaves such a forest too,
 since every step of theirs does; see "Bounded work".
@@ -88,7 +91,7 @@ each object records the pool it lies in and where the one before it lies,
 the newest is the one the descriptor names,
 and pools are pairwise disjoint.
 A pool half destroyed is a pool like any other, with fewer objects.
-The line table names exactly the bound `Irq`s,
+The line table names exactly the bound `Irq`s, the channel table exactly the bound `Route`s,
 and every installed region records its slot.
 
 **Thread state.**
@@ -156,6 +159,16 @@ an interrupt masks the line as it disarms the `Irq`,
 a set masks or unmasks it with the bits,
 and a destroy masks the lines of the `Irq`s it takes.
 The count of armed sources is exactly the `Irq`s armed on a device's line or a timer line.
+
+**Routes.**
+Every `Route` names a channel the kernel lends, and at most one is bound to any channel.
+Each end is a leaf of the derivation tree,
+connected through a frame with the right to read for the event and to write for the task,
+and names an end its board's router finds in that frame.
+A `Route` is armed only with both its ends,
+and the router connects a channel exactly while a `Route` armed on it is, from its event to its task,
+read back from the router itself:
+a set arms or disarms it, and a revoke above an end and the destroy of its pool disarm it.
 
 **Timer lines.**
 An `Irq` armed on a timer line has its deadline ahead of the tick count:

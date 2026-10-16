@@ -54,9 +54,9 @@ struct obj_header {
  * A process's region slots are slots of this type too, CAP_INSTALLED, and leaves of the tree,
  * and so are its table slots, which hold CAP_CAPTABLE capabilities,
  * and a thread's process, CAP_HOSTED, its watch, CAP_WATCHED, and each of its places' units, CAP_BOUND,
- * and an Irq's notification, CAP_SIGNALLED,
+ * and an Irq's notification, CAP_SIGNALLED, and a Route's ends, CAP_ROUTED,
  * and so is a pool's own node, CAP_RETYPED, in the pool's descriptor.
- * For CAP_TIME a is the first unit and b the count, as for CAP_IRQ_LINE.
+ * For CAP_TIME a is the first unit and b the count, as for CAP_IRQ_LINE, and so for CAP_ROUTE_LINE the channels.
  */
 struct cap {
     uint8_t type;
@@ -103,6 +103,12 @@ struct cap {
  * Kernel internal: never in a table.
  */
 #define CAP_WATCHED 0x85
+/*
+ * One of a Route's ends, in the Route: a is the base and b the size of the frame the end lies in,
+ * the rights and range of the Frame capability the end was connected through, below which the node hangs,
+ * and index is the end, ROUTE_EVENT or ROUTE_TASK. Kernel internal: never in a table.
+ */
+#define CAP_ROUTED 0x86
 
 #define CAPTABLE_MAX_SLOTS 1024
 _Static_assert(CAPTABLE_MAX_SLOTS <= 1u << SLOT_TABLE_SHIFT, "a slot number's index reaches every slot of a table");
@@ -300,6 +306,22 @@ struct irq {
     uint32_t deadline;  /* on a timer line, the tick count it fires at */
 };
 
+/*
+ * A Route wires an event of one device to a task of another through a channel of the board's router,
+ * with no processor in between: bound at creation to its channel, connected end by end, then armed.
+ * It holds each end's frame as an Irq holds its notification, so a revoke above either disarms it,
+ * and the router's channel is enabled exactly while it is armed; see DESIGN.md, "Routes".
+ * One Route per channel.
+ */
+struct route {
+    struct obj_header hdr;
+    struct cap ends[2]; /* CAP_ROUTED, the event's and the task's, or CAP_NONE while that end is not connected */
+    uint32_t names[2];  /* each end as the board names it within its frame, 0 while it is not connected */
+    uint16_t channel;
+    uint8_t armed;
+    uint8_t pad;
+};
+
 _Static_assert(sizeof(struct obj_header) == 8, "object layout");
 _Static_assert(sizeof(struct cap) == 24, "object layout");
 _Static_assert(sizeof(struct captable) == 12, "object layout");
@@ -317,17 +339,19 @@ _Static_assert(sizeof(struct thread) == 40 + sizeof(struct trap_frame) + 2 * siz
 _Static_assert(sizeof(struct place) == 24, "object layout");
 _Static_assert(sizeof(struct notification) == 16, "object layout");
 _Static_assert(sizeof(struct irq) == 20 + sizeof(struct cap), "object layout");
+_Static_assert(sizeof(struct route) == 20 + 2 * sizeof(struct cap), "object layout");
+_Static_assert(ROUTE_EVENT == 0 && ROUTE_TASK == 1, "a Route's ends are its two nodes, by end");
 
 /*
  * True if a capability of this type names a kernel object.
- * Frames, Untypeds, interrupt lines, units of time and the clock name hardware, and Print, Halt and Test nothing,
- * so they carry no address to check.
+ * Frames, Untypeds, interrupt lines, a router's channels, units of time and the clock name hardware,
+ * a Route's ends a frame, and Print, Halt and Test nothing, so they carry no address to check.
  */
 static inline bool cap_has_object(uint8_t type)
 {
     return type != CAP_NONE && type != CAP_FRAME && type != CAP_UNTYPED && type != CAP_IRQ_LINE &&
            type != CAP_PRINT && type != CAP_HALT && type != CAP_TEST && type != CAP_CLOCK && type != CAP_INSTALLED &&
-           type != CAP_TIME && type != CAP_BOUND;
+           type != CAP_TIME && type != CAP_BOUND && type != CAP_ROUTE_LINE && type != CAP_ROUTED;
 }
 
 /*
@@ -344,7 +368,7 @@ static inline uint32_t untyped_base(const struct cap *c) { return c->a & ~(untyp
 static inline bool untyped_free(const struct cap *c) { return c->child == 0 && c->b != UNTYPED_GOING; }
 /*
  * What an Untyped made, as OP_CAP_INFO tells it: 0 while nothing lies below it, else the type of the node first there,
- * CAP_FRAME for a frame or a region installed from one, CAP_UNTYPED for a half or a derived Untyped,
+ * CAP_FRAME for a frame, a region installed from one or a Route's end on one, CAP_UNTYPED for a half or a derived Untyped,
  * and CAP_POOL for a pool's own node.
  * Nothing else lies below an Untyped, as the self-check's derivation rule holds.
  */
@@ -354,7 +378,7 @@ static inline uint32_t untyped_made(const struct cap *c)
         return 0;
     }
     uint8_t type = ((const struct cap *)p2v(c->child))->type;
-    return type == CAP_RETYPED ? CAP_POOL : type == CAP_INSTALLED ? CAP_FRAME : type;
+    return type == CAP_RETYPED ? CAP_POOL : type == CAP_INSTALLED || type == CAP_ROUTED ? CAP_FRAME : type;
 }
 
 static inline struct pool *obj_pool(const struct obj_header *o) { return p2v(o->pool); }
@@ -434,7 +458,7 @@ static inline void thread_make_places(struct thread *t, uint32_t places)
 /*
  * The nodes of the derivation tree an object holds, as one array, and how many:
  * a table's slots, a process's table slots and region slots, a thread's process, watch and places' units,
- * an Irq's notification, a pool's own node.
+ * an Irq's notification, a Route's ends, a pool's own node.
  * Other objects hold none.
  */
 static inline struct cap *obj_nodes(struct obj_header *o, uint32_t *count)
@@ -452,6 +476,9 @@ static inline struct cap *obj_nodes(struct obj_header *o, uint32_t *count)
     case CAP_IRQ:
         *count = 1;
         return &((struct irq *)o)->ntfn;
+    case CAP_ROUTE:
+        *count = 2;
+        return ((struct route *)o)->ends;
     case CAP_POOL:
         *count = 1;
         return &((struct pool *)o)->node;
@@ -524,6 +551,12 @@ static inline struct notification *irq_notification(const struct irq *i)
 static inline struct irq *signalled_irq(struct cap *n)
 {
     return (struct irq *)((char *)n - offsetof(struct irq, ntfn));
+}
+
+/* The Route whose end this is; the node knows which end, and so where the Route begins. */
+static inline struct route *routed_route(struct cap *n)
+{
+    return (struct route *)((char *)(n - n->index) - offsetof(struct route, ends));
 }
 
 /* True if the Irq will signal; a controller's line is unmasked exactly then. */
@@ -621,6 +654,8 @@ static inline size_t obj_type_size(uint8_t type, uint32_t slots)
         return sizeof(struct notification);
     case CAP_IRQ:
         return sizeof(struct irq);
+    case CAP_ROUTE:
+        return sizeof(struct route);
     default:
         kpanic("size of an unknown type");
     }
@@ -644,6 +679,8 @@ static inline size_t obj_size(const struct obj_header *obj)
         return sizeof(struct notification);
     case CAP_IRQ:
         return sizeof(struct irq);
+    case CAP_ROUTE:
+        return sizeof(struct route);
     default:
         kpanic("object of unknown type in pool");
     }
@@ -768,6 +805,9 @@ struct cap cap_to_lines(uint32_t first, uint32_t count, uint8_t rights);
 
 /* Build a Time capability: count units from first. */
 struct cap cap_to_time(uint32_t first, uint32_t count, uint8_t rights);
+
+/* Build a capability to a router's channels: count from first. */
+struct cap cap_to_routes(uint32_t first, uint32_t count, uint8_t rights);
 
 /* The object behind a capability that names one. */
 static inline struct obj_header *cap_object(const struct cap *cap)

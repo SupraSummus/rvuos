@@ -25,6 +25,10 @@
  * as a node does that has more to do than its link, so that the link's thread waits for its turn when it wakes,
  * up to a tick; it runs no more than its units earn, with no spare time, and there is none by default.
  *
+ * Before all that it checks a route, DESIGN.md's "Routes", on the chip: TIMER3's compare counts in TIMER4,
+ * a hundred times in 10 ms, while the route is armed, and not at all once it is disarmed;
+ * it halts with HALT_ROUTE if not.
+ *
  * Build and run: make BOARD=nrf52840 thread, with the ESP32-C6 on i154= the same channel, see user/wifi/esp32c6/root.c;
  * tools/thread-pair.sh runs both.
  */
@@ -62,8 +66,33 @@
 #define LOAD_UNITS_MAX (TIME_UNITS / 2u)
 #define ROOT_UNITS     (TIME_UNITS - LOAD_UNITS_MAX)
 
-/* The halt's code when the exchange did not go both ways; a step that failed halts with 1. */
+/* The halt's code when the exchange did not go both ways, or the route did not count; a step that failed halts with 1. */
 #define HALT_SILENT 2u
+#define HALT_ROUTE  3u
+
+/*
+ * A TIMER's registers, as offsets from its base: TIMER3 compares every ROUTE_PERIOD_US, and TIMER4 counts.
+ * The route's event is TIMER3's EVENTS_COMPARE[0] and its task TIMER4's TASKS_COUNT, each the offset in its frame.
+ */
+#define TIMER_START       0x000u
+#define TIMER_STOP        0x004u
+#define TIMER_COUNT       0x008u
+#define TIMER_CLEAR       0x00cu
+#define TIMER_CAPTURE0    0x040u
+#define TIMER_COMPARE0    0x140u
+#define TIMER_SHORTS      0x200u
+#define TIMER_MODE        0x504u
+#define TIMER_BITMODE     0x508u
+#define TIMER_PRESCALER   0x510u
+#define TIMER_CC0         0x540u
+#define SHORT_COMPARE0_CLEAR 1u
+#define MODE_TIMER        0u
+#define MODE_COUNTER      1u
+#define BITMODE_32        3u
+#define PRESCALER_1MHZ    4u
+#define ROUTE_PERIOD_US   100u
+#define ROUTE_RUN_US      10000u
+#define ROUTE_COUNTS      (ROUTE_RUN_US / ROUTE_PERIOD_US)
 
 #define CHANNELS (RADIO_CHANNEL_LAST - RADIO_CHANNEL_FIRST + 1u)
 
@@ -402,6 +431,70 @@ static void load_start(uint32_t units)
     say(&cout, "thread: a load beside the link, earning %u units of %u\n", units, TIME_UNITS);
 }
 
+#define TREG(base, off) (*(volatile uint32_t *)((base) + (off)))
+
+static uint32_t timer4_count(void)
+{
+    TREG(TIMER4_BASE, TIMER_CAPTURE0) = 1;
+    return TREG(TIMER4_BASE, TIMER_CC0);
+}
+
+/* Waits us microseconds on the step's timer. */
+static void sleep_us(uint32_t us)
+{
+    must("set the step's timer", rv_timer_set(step_irq, step_bit, us));
+    wait_for(step_bit);
+}
+
+/*
+ * A route on the chip: TIMER3's compare, every ROUTE_PERIOD_US, wired to TIMER4's count.
+ * It counts about ROUTE_COUNTS in ROUTE_RUN_US armed, and nothing disarmed;
+ * the route stays bound, disarmed, and the TIMERs stop and are unmapped.
+ */
+static void route_check(void)
+{
+    uint32_t timer3, timer4, channel, route;
+    must("map TIMER3", region_install(&self, BOOT_CAP_TIMER3, RIGHT_R | RIGHT_W, &timer3));
+    must("map TIMER4", region_install(&self, BOOT_CAP_TIMER4, RIGHT_R | RIGHT_W, &timer4));
+    TREG(TIMER4_BASE, TIMER_MODE) = MODE_COUNTER;
+    TREG(TIMER4_BASE, TIMER_BITMODE) = BITMODE_32;
+    TREG(TIMER4_BASE, TIMER_CLEAR) = 1;
+    TREG(TIMER4_BASE, TIMER_START) = 1;
+    TREG(TIMER3_BASE, TIMER_MODE) = MODE_TIMER;
+    TREG(TIMER3_BASE, TIMER_BITMODE) = BITMODE_32;
+    TREG(TIMER3_BASE, TIMER_PRESCALER) = PRESCALER_1MHZ;
+    TREG(TIMER3_BASE, TIMER_CC0) = ROUTE_PERIOD_US;
+    TREG(TIMER3_BASE, TIMER_SHORTS) = SHORT_COMPARE0_CLEAR;
+    TREG(TIMER3_BASE, TIMER_CLEAR) = 1;
+
+    must("a slot for the channel", slot_new(&self, &channel));
+    must("a channel", rv_invoke(OP_ROUTE_CARVE, BOOT_CAP_ROUTES, 0, 1, channel));
+    must("a slot for the route", slot_new(&self, &route));
+    must("bind the route", rv_invoke(OP_ROUTE_BIND, channel, self.pool, route, 0));
+    must("the route's event", rv_invoke(OP_ROUTE_END, route, ROUTE_EVENT, BOOT_CAP_TIMER3, TIMER_COMPARE0));
+    must("the route's task", rv_invoke(OP_ROUTE_END, route, ROUTE_TASK, BOOT_CAP_TIMER4, TIMER_COUNT));
+    must("arm the route", rv_invoke(OP_ROUTE_SET, route, 1, 0, 0));
+    TREG(TIMER3_BASE, TIMER_START) = 1;
+    uint32_t start = timer4_count();
+    sleep_us(ROUTE_RUN_US);
+    uint32_t armed = timer4_count() - start;
+    must("disarm the route", rv_invoke(OP_ROUTE_SET, route, 0, 0, 0));
+    uint32_t stopped = timer4_count();
+    sleep_us(ROUTE_RUN_US / 2u);
+    uint32_t disarmed = timer4_count() - stopped;
+    TREG(TIMER3_BASE, TIMER_STOP) = 1;
+    TREG(TIMER4_BASE, TIMER_STOP) = 1;
+    must("unmap TIMER3", region_free(&self, timer3));
+    must("unmap TIMER4", region_free(&self, timer4));
+    say(&cout, "thread: a route counted %u compares of TIMER3 in TIMER4 in %u us armed, and %u disarmed\n", armed,
+        ROUTE_RUN_US, disarmed);
+    /* The sleep wakes a tick late at most, and the count only grows with it. */
+    if (armed < ROUTE_COUNTS * 9u / 10u || armed > ROUTE_COUNTS * 2u || disarmed != 0) {
+        say(&cout, "thread: the route did not count as it was armed\n");
+        rv_halt(BOOT_CAP_HALT, HALT_ROUTE);
+    }
+}
+
 int main(void);
 int main(void)
 {
@@ -430,6 +523,7 @@ int main(void)
     must("a timer for the steps", timer_new(&self, &step_irq));
     must("a bit for the stream", bit_new(&self, &stream_bit));
     must("a timer for the stream", timer_new(&self, &stream_irq));
+    route_check();
 
     uint64_t at;
     uint32_t hz, counter;

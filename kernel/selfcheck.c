@@ -19,6 +19,7 @@
 #include "klog.h"
 #include "object.h"
 #include "pmp.h"
+#include "route.h"
 #include "sched.h"
 #include "timer.h"
 
@@ -166,7 +167,7 @@ static void check_pools(void)
             }
             if (o->type != CAP_CAPTABLE && o->type != CAP_PROCESS &&
                 o->type != CAP_THREAD && o->type != CAP_NOTIFICATION &&
-                o->type != CAP_IRQ) {
+                o->type != CAP_IRQ && o->type != CAP_ROUTE) {
                 fail("object has an unexpected type", at, o->type, 0);
             }
             prev = at;
@@ -1037,6 +1038,77 @@ static void check_lines(void)
     }
 }
 
+/*
+ * A Route is bound to a channel the kernel lends, and holds each end as an Irq holds its notification:
+ * empty, or a leaf below a frame, connected through a capability with the right the end needs,
+ * the right to read for the event and to write for the task, and an end the board's router finds that frame to hold.
+ * It is armed only with both ends, and the router connects its channel exactly while it is armed,
+ * from the one end's word to the other's, read back from the router itself.
+ */
+static void check_route(const struct route *r)
+{
+    if (!route_channel(r->channel)) {
+        fail("route names a channel the kernel does not lend", v2p(r), r->channel, 0);
+    }
+    if (channel_binding(r->channel) != r) {
+        fail("route is missing from the channel table", v2p(r), r->channel, 0);
+    }
+    for (uint32_t end = ROUTE_EVENT; end <= ROUTE_TASK; end++) {
+        const struct cap *e = &r->ends[end];
+        if (e->type == CAP_NONE) {
+            if (r->names[end] != 0) {
+                fail("route keeps the name of an end it does not hold", v2p(r), end, r->names[end]);
+            }
+            continue;
+        }
+        uint8_t need = end == ROUTE_EVENT ? RIGHT_R : RIGHT_W;
+        uint32_t word;
+        if (e->type != CAP_ROUTED || e->index != end || (e->rights & need) == 0 || e->b == 0) {
+            fail("route's end names no frame it may connect", v2p(r), end, e->type);
+        }
+        if (e->child != 0) {
+            fail("something is derived from a route's end", v2p(r), end, e->child);
+        }
+        if (!router_end(end, e->a, e->b, r->names[end], &word)) {
+            fail("route's end is none the router finds in its frame", v2p(r), end, r->names[end]);
+        }
+    }
+    if (r->armed > 1 ||
+        (r->armed && (r->ends[ROUTE_EVENT].type == CAP_NONE || r->ends[ROUTE_TASK].type == CAP_NONE))) {
+        fail("route is armed without both its ends", v2p(r), r->armed, 0);
+    }
+    uint32_t event, task;
+    bool connected = router_connected(r->channel, &event, &task);
+    if (connected != (r->armed != 0)) {
+        fail(r->armed ? "armed route's channel is not connected" : "router connects a disarmed route's channel",
+             v2p(r), r->channel, 0);
+    }
+    if (connected && (event != route_word(r, ROUTE_EVENT) || task != route_word(r, ROUTE_TASK))) {
+        fail("router connects a route's channel to other ends than its own", v2p(r), event, task);
+    }
+}
+
+/*
+ * The channel table names only live Routes of their own channel, which with check_route's holding every Route to it
+ * makes it exactly the bound Routes, one to a channel; and the router connects no channel nothing is bound to.
+ */
+static void check_channels(void)
+{
+#if ROUTE_CHANNELS > 0
+    for (uint32_t c = ROUTE_FIRST; c < ROUTE_FIRST + ROUTE_CHANNELS; c++) {
+        const struct route *r = channel_binding(c);
+        const struct obj_header *o = r != NULL ? object_find(v2p(r)) : NULL;
+        uint32_t event, task;
+        if (r != NULL && (o != &r->hdr || o->type != CAP_ROUTE || r->channel != c)) {
+            fail("channel table names a route that is gone", c, v2p(r), 0);
+        }
+        if (r == NULL && router_connected(c, &event, &task)) {
+            fail("router connects a channel nothing is bound to", c, event, task);
+        }
+    }
+#endif
+}
+
 static void check_captable(const struct captable *table)
 {
     if (table->nslots == 0 || table->nslots > CAPTABLE_MAX_SLOTS) {
@@ -1094,6 +1166,15 @@ static void check_captable(const struct captable *table)
                 fail("line capability with rights beyond the grant", v2p(table), i, c->rights);
             }
             break;
+        case CAP_ROUTE_LINE:
+            /* The root task received every channel the kernel lends, with RIGHT_W; nothing widens that. */
+            if (c->b == 0 || !route_channel(c->a) || c->b > ROUTE_FIRST + ROUTE_CHANNELS - c->a) {
+                fail("route line capability outside the channels lent", v2p(table), i, c->a);
+            }
+            if (c->rights & ~RIGHT_W) {
+                fail("route line capability with rights beyond the grant", v2p(table), i, c->rights);
+            }
+            break;
         case CAP_TIME:
             /* The root task received every unit there is, with RIGHT_W and RIGHT_X; nothing widens that. */
             if (c->b == 0 || c->a >= MACHINE_UNITS || c->b > MACHINE_UNITS - c->a) {
@@ -1108,7 +1189,8 @@ static void check_captable(const struct captable *table)
         case CAP_PROCESS:
         case CAP_THREAD:
         case CAP_NOTIFICATION:
-        case CAP_IRQ: {
+        case CAP_IRQ:
+        case CAP_ROUTE: {
             /* A destroy sweeps the tables, so every object capability points at a live object. */
             struct obj_header *o = object_find(c->a);
             if (o == NULL || o->type != c->type) {
@@ -1131,8 +1213,8 @@ static void check_captable(const struct captable *table)
  *
  * Its nodes are the slots of every live table,
  * the table slots and region slots of every live process,
- * the process, units and watch of every live thread
- * and the notification of every live Irq,
+ * the process, units and watch of every live thread,
+ * the notification of every live Irq and the ends of every live Route,
  * linked by physical address and never checked on use,
  * so every link must land on a live node and the shape must be exactly a forest:
  * the children of a node form one ring that closes through the node,
@@ -1143,10 +1225,11 @@ static void check_captable(const struct captable *table)
  * A node is derived from its parent: the same object with no more rights,
  * and for a notification no more bits to signal,
  * a range within the parent's with no more rights,
- * or an object built on the parent's range, a pool on a region, an Irq on a line,
+ * or an object built on the parent's range, a pool on a region, an Irq or a Route on the pool it was allocated through,
+ * a Route's end on a frame,
  * a thread's process, a thread's watch or an Irq's notification on a capability to it,
  * a thread's units on the units it was bound through,
- * or the counter's block, or a region installed from it, below the clock.
+ * or the counter's block, or a region installed from it or a Route's end on it, below the clock.
  */
 
 /* The node a link names, if one of a live object; only the pool the address lies in is looked at. */
@@ -1185,6 +1268,7 @@ static bool node_range(const struct cap *n, uint32_t *base, uint32_t *size)
     switch (n->type) {
     case CAP_FRAME:
     case CAP_INSTALLED:
+    case CAP_ROUTED:
         *base = n->a;
         *size = n->b;
         return true;
@@ -1208,7 +1292,7 @@ static bool node_range(const struct cap *n, uint32_t *base, uint32_t *size)
 static bool is_object_type(uint8_t type)
 {
     return type == CAP_CAPTABLE || type == CAP_PROCESS || type == CAP_THREAD ||
-           type == CAP_NOTIFICATION || type == CAP_IRQ || type == CAP_HOSTED ||
+           type == CAP_NOTIFICATION || type == CAP_IRQ || type == CAP_ROUTE || type == CAP_HOSTED ||
            type == CAP_SIGNALLED || type == CAP_WATCHED;
 }
 
@@ -1222,7 +1306,7 @@ static bool derived_from(const struct cap *c, const struct cap *p)
      */
     if (p->type == CAP_UNTYPED) {
         if (c->type != CAP_UNTYPED && c->type != CAP_FRAME && c->type != CAP_INSTALLED &&
-            c->type != CAP_RETYPED) {
+            c->type != CAP_ROUTED && c->type != CAP_RETYPED) {
             return false;
         }
         node_range(c, &base, &size);
@@ -1230,7 +1314,7 @@ static bool derived_from(const struct cap *c, const struct cap *p)
         return (narrower || c->type == CAP_RETYPED) && range_within(base, size, pbase, psize);
     }
     if (c->type == p->type) {
-        if (c->type == CAP_FRAME || c->type == CAP_IRQ_LINE || c->type == CAP_TIME) {
+        if (c->type == CAP_FRAME || c->type == CAP_IRQ_LINE || c->type == CAP_TIME || c->type == CAP_ROUTE_LINE) {
             return narrower && range_within(c->a, c->b, p->a, p->b);
         }
         /* A notification's capability carries the bits it may signal, which narrow as rights do. */
@@ -1240,13 +1324,13 @@ static bool derived_from(const struct cap *c, const struct cap *p)
     }
     /*
      * A clock that reads gives out one frame, the counter's block, read only,
-     * and adopts what was carved or installed from it when a delete or a revoke takes it.
+     * and adopts what was carved, installed or connected from it when a delete or a revoke takes it.
      */
-    if ((c->type == CAP_FRAME || c->type == CAP_INSTALLED) && p->type == CAP_CLOCK) {
+    if ((c->type == CAP_FRAME || c->type == CAP_INSTALLED || c->type == CAP_ROUTED) && p->type == CAP_CLOCK) {
         const struct granted_range *g = &boot_granted[GRANT_COUNTER];
         return (p->rights & RIGHT_R) && !(c->rights & ~g->rights) && range_within(c->a, c->b, g->base, g->size);
     }
-    if (c->type == CAP_INSTALLED && p->type == CAP_FRAME) {
+    if ((c->type == CAP_INSTALLED || c->type == CAP_ROUTED) && p->type == CAP_FRAME) {
         return narrower && range_within(c->a, c->b, p->a, p->b);
     }
     /* A thread's units lie among those it was bound through, and the first of them does even for none. */
@@ -1497,6 +1581,9 @@ void selfcheck_run(void)
         case CAP_IRQ:
             check_irq((struct irq *)o);
             break;
+        case CAP_ROUTE:
+            check_route((struct route *)o);
+            break;
         default:
             break;
         }
@@ -1516,6 +1603,7 @@ void selfcheck_run(void)
         fail("the count of armed sources is wrong", armed_seen, armed_sources, 0);
     }
     check_lines();
+    check_channels();
     /* Every node has been vetted as a capability by now; the tree check reads only links. */
     check_tree();
     check_nesting();

@@ -22,11 +22,14 @@ abbrev capClock : Nat := 11
 abbrev capTime : Nat := 12
 abbrev capHalt : Nat := 13
 abbrev capTest : Nat := 14
+abbrev capRouteLine : Nat := 15
+abbrev capRoute : Nat := 16
 /-- The kernel's own nodes, never in a table; see `kernel/object.h`. -/
 abbrev capInstalled : Nat := 0x80
 abbrev capRetyped : Nat := 0x81
 abbrev capBound : Nat := 0x82
 abbrev capHosted : Nat := 0x83
+abbrev capRouted : Nat := 0x86
 
 /-! Statuses, `KERR_*`. -/
 abbrev kOk : Nat := 0
@@ -53,7 +56,7 @@ abbrev opCapRevoke : Nat := 23
 abbrev opCapDerive : Nat := 24
 abbrev opUntypedSplit : Nat := 30
 abbrev opCapInfo : Nat := 41
-abbrev opCount : Nat := 43
+abbrev opCount : Nat := 47
 
 /-! Slot numbers, `SLOT_TABLE_SHIFT` and `PROCESS_TABLES`. -/
 abbrev slotTableShift : Nat := 10
@@ -64,7 +67,8 @@ abbrev nodeSize : Nat := 24
 /-- True if a capability of this type names a kernel object, `cap_has_object`. -/
 def capHasObject (t : Nat) : Bool :=
   !(t == capNone || t == capFrame || t == capUntyped || t == capIrqLine || t == capPrint ||
-    t == capHalt || t == capTest || t == capClock || t == capInstalled || t == capTime || t == capBound)
+    t == capHalt || t == capTest || t == capClock || t == capInstalled || t == capTime || t == capBound ||
+    t == capRouteLine || t == capRouted)
 
 /-! What dispatch checks before a handler, `op_shapes` in `kernel/syscall.c`. -/
 abbrev shapeA1 : Nat := 0x1
@@ -120,6 +124,10 @@ def shapeOf : Nat → Shape
   | 37 => ⟨capClock, rightW, shapeA1⟩
   | 28 => ⟨capTime, 0, shapeA123⟩
   | 29 => ⟨capTime, rightW, shapeA123⟩
+  | 43 => ⟨capRouteLine, 0, shapeA123⟩
+  | 44 => ⟨capRouteLine, rightW, shapeA1 ||| shapeA2⟩
+  | 45 => ⟨capRoute, rightW, shapeA123⟩
+  | 46 => ⟨capRoute, rightW, shapeA1⟩
   | _ => ⟨capNone, 0, 0⟩
 
 end Rvuos

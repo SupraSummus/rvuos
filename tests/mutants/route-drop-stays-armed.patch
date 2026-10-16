@@ -1,0 +1,21 @@
+A Route whose end goes stays armed.
+The router would go on triggering a task of a device its holder no longer holds;
+a Route is armed only with both its ends.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: route is armed without both its ends
+Report: router connects a route's channel to other ends than its own
+
+diff --git a/kernel/route.c b/kernel/route.c
+--- a/kernel/route.c
++++ b/kernel/route.c
+@@ -51,9 +51,6 @@ void route_arm(struct route *r, bool on)
+ void route_drop(struct cap *routed)
+ {
+     struct route *r = routed_route(routed);
+-    if (r->armed) {
+-        route_arm(r, false);
+-    }
+     r->names[routed->index] = 0;
+     *routed = (struct cap){ 0 };
+ }

@@ -70,6 +70,15 @@
  */
 #define IRQ_LINES 96
 
+/*
+ * QEMU's virt machine has no router, and neither has the host, which shares this board:
+ * route.c's stands in, four channels that wire nothing,
+ * so that a Route is bound, connected, armed and revoked here as on a board with one; see DESIGN.md, "Routes".
+ */
+#define ROUTER_FAKE    1
+#define ROUTE_FIRST    0u
+#define ROUTE_CHANNELS 4u
+
 /* The mcause, and the mie and mip bit, of the core's interrupt from the controller. */
 #define IRQ_EXT_CAUSE 11
 

@@ -107,7 +107,7 @@ static uint32_t describe_want[4];
 static byte_array state, state_after;
 
 /*
- * An allocation from a pool, OP_POOL_ALLOC's or OP_IRQ_BIND's, of a type whose size its arguments say:
+ * An allocation from a pool, OP_POOL_ALLOC's, OP_IRQ_BIND's or OP_ROUTE_BIND's, of a type whose size its arguments say:
  * the pool, its bytes in use and whether it was dying as the attempt began, and the bytes the type takes.
  */
 static const struct pool *room_pool;
@@ -179,6 +179,7 @@ __attribute__((noreturn)) static void violated(const char *what)
  * An installed region grants what the frame it came from did, a thread's units those units,
  * a thread's process what a capability to it does,
  * a thread's watch and an Irq's notification that too, with the bits they may signal,
+ * a Route's end what the frame it was connected through did,
  * and an Untyped its block whatever it made.
  */
 static struct grant grant_of(const struct cap *c)
@@ -198,7 +199,7 @@ static struct grant grant_of(const struct cap *c)
     if (c->type == CAP_WATCHED) {
         return (struct grant){ CAP_NOTIFICATION, c->rights, c->a, c->b };
     }
-    return (struct grant){ c->type == CAP_INSTALLED ? CAP_FRAME : c->type, c->rights, c->a, c->b };
+    return (struct grant){ c->type == CAP_INSTALLED || c->type == CAP_ROUTED ? CAP_FRAME : c->type, c->rights, c->a, c->b };
 }
 
 static bool same_grant(struct grant x, struct grant y)
@@ -212,7 +213,8 @@ static bool same_grant(struct grant x, struct grant y)
  */
 static bool covered(struct grant g)
 {
-    bool range = g.type == CAP_FRAME || g.type == CAP_UNTYPED || g.type == CAP_IRQ_LINE || g.type == CAP_TIME;
+    bool range = g.type == CAP_FRAME || g.type == CAP_UNTYPED || g.type == CAP_IRQ_LINE || g.type == CAP_TIME ||
+                 g.type == CAP_ROUTE_LINE;
     for (size_t i = 0; i < held.n; i++) {
         const struct grant *h = &held.v[i];
         bool type = h->type == g.type || (g.type == CAP_FRAME && h->type == CAP_UNTYPED);
@@ -305,7 +307,7 @@ static void children_of(const struct cap *c, addr_array *out)
  */
 #define RIGHTS_IN_HANDLER 0
 #define RIGHTS_UNKNOWN 0xff
-_Static_assert(OP_COUNT == 43 && OP_POOL_INFO == OP_COUNT - 1, "a new operation needs its rights in rights_needed");
+_Static_assert(OP_COUNT == 47 && OP_ROUTE_SET == OP_COUNT - 1, "a new operation needs its rights in rights_needed");
 static uint8_t rights_needed(uint32_t op)
 {
     switch (op) {
@@ -329,6 +331,9 @@ static uint8_t rights_needed(uint32_t op)
     case OP_NOTIFY_SIGNAL:
     case OP_IRQ_BIND:
     case OP_IRQ_SET:
+    case OP_ROUTE_BIND:
+    case OP_ROUTE_END:
+    case OP_ROUTE_SET:
     case OP_TIME_BIND:
     case OP_PRINT:
     case OP_HALT:
@@ -348,6 +353,7 @@ static uint8_t rights_needed(uint32_t op)
     case OP_UNTYPED_SPLIT:
     case OP_IRQ_CARVE:
     case OP_TIME_CARVE:
+    case OP_ROUTE_CARVE:
     case OP_NOTIFY_CARVE:
         return RIGHTS_IN_HANDLER;
     /* A description grants nothing, so it needs no right. */
@@ -399,6 +405,9 @@ static uint32_t type_bytes(uint32_t type, uint32_t slots)
         break;
     case CAP_IRQ:
         size = sizeof(struct irq);
+        break;
+    case CAP_ROUTE:
+        size = sizeof(struct route);
         break;
     case CAP_POOL:
         size = sizeof(struct pool);
@@ -468,7 +477,7 @@ static void describe_expect(void)
         w[1] = untyped_base(c);
         w[2] = untyped_size(c);
         uint8_t below = c->child != 0 ? ((const struct cap *)p2v(c->child))->type : CAP_NONE;
-        w[3] = below == CAP_RETYPED ? CAP_POOL : below == CAP_INSTALLED ? CAP_FRAME : below;
+        w[3] = below == CAP_RETYPED ? CAP_POOL : below == CAP_INSTALLED || below == CAP_ROUTED ? CAP_FRAME : below;
         break;
     }
     case CAP_POOL: {
@@ -515,6 +524,18 @@ static void describe_expect(void)
         w[2] = c->b;
         w[3] = 1000000u / TIMER_HZ;
         break;
+    case CAP_ROUTE_LINE:
+        w[1] = c->a;
+        w[2] = c->b;
+        break;
+    case CAP_ROUTE: {
+        const struct route *r = (const struct route *)cap_object(c);
+        w[1] = r->channel;
+        w[2] = (r->ends[ROUTE_EVENT].type == CAP_ROUTED ? 1u << ROUTE_EVENT : 0) |
+               (r->ends[ROUTE_TASK].type == CAP_ROUTED ? 1u << ROUTE_TASK : 0);
+        w[3] = r->armed != 0;
+        break;
+    }
     case CAP_CLOCK:
         w[1] = COUNTER_HZ;
         w[2] = COUNTER_HZ / TIMER_HZ;
@@ -558,11 +579,14 @@ static void record_room(void)
     if (call_op == OP_POOL_ALLOC && invoked_cap.type == CAP_POOL) {
         /* A process's region slots and a thread's places are their a4, a table's slots its a3. */
         bool a4 = call_args[0] == CAP_PROCESS || call_args[0] == CAP_THREAD;
-        room_need = call_args[0] == CAP_IRQ || call_args[0] == CAP_POOL ? 0
+        room_need = call_args[0] == CAP_IRQ || call_args[0] == CAP_ROUTE || call_args[0] == CAP_POOL ? 0
                     : type_bytes(call_args[0], a4 ? call_args[3] : call_args[2]);
     } else if (call_op == OP_IRQ_BIND && invoked_cap.type == CAP_IRQ_LINE &&
                slot_lookup(caller, call_args[0], &pc) == KERR_OK && pc.type == CAP_POOL) {
         room_need = type_bytes(CAP_IRQ, 0);
+    } else if (call_op == OP_ROUTE_BIND && invoked_cap.type == CAP_ROUTE_LINE &&
+               slot_lookup(caller, call_args[0], &pc) == KERR_OK && pc.type == CAP_POOL) {
+        room_need = type_bytes(CAP_ROUTE, 0);
     } else {
         return;
     }
@@ -993,6 +1017,8 @@ static void check_built(const struct obj_header *o)
         const struct irq *irq = (const struct irq *)o;
         bound = covered((struct grant){ CAP_NOTIFICATION, RIGHT_W, irq->ntfn.a, irq->ntfn.b }) &&
                 covered((struct grant){ CAP_IRQ_LINE, RIGHT_W, irq->line, 1 });
+    } else if (o->type == CAP_ROUTE) {
+        bound = covered((struct grant){ CAP_ROUTE_LINE, RIGHT_W, ((const struct route *)o)->channel, 1 });
     }
     if (!bound) {
         violated("a call bound an object to something its caller could not use");
@@ -1023,6 +1049,9 @@ static void check_node(const struct cap *c)
     if (c->type == CAP_WATCHED &&
         !covered((struct grant){ CAP_THREAD, RIGHT_W, v2p(watched_thread((struct cap *)c)), 0 })) {
         violated("a call set the watch of a thread its caller could not control");
+    }
+    if (c->type == CAP_ROUTED && !covered((struct grant){ CAP_ROUTE, RIGHT_W, v2p(routed_route((struct cap *)c)), 0 })) {
+        violated("a call connected an end of a route its caller could not control");
     }
 }
 

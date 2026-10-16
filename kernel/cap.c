@@ -5,6 +5,7 @@
 
 #include "kernel.h"
 #include "object.h"
+#include "route.h"
 #include "sched.h"
 #include "trap.h"
 
@@ -162,7 +163,7 @@ int cap_store_beside(struct captable *table, uint32_t slot, const struct cap *ca
 /*
  * Empty a node the tree no longer names.
  * An installed region is unmapped as well, a thread's units unbound, a thread whose process goes stopped,
- * and an Irq whose notification goes disarmed.
+ * an Irq whose notification goes disarmed, and so is a Route whose end goes.
  */
 static void clear_node(struct cap *n)
 {
@@ -174,6 +175,8 @@ static void clear_node(struct cap *n)
         sched_unhost(n);
     } else if (n->type == CAP_SIGNALLED) {
         irq_drop(n);
+    } else if (n->type == CAP_ROUTED) {
+        route_drop(n);
     } else {
         *n = (struct cap){ 0 };
     }
@@ -355,6 +358,17 @@ struct cap cap_to_time(uint32_t first, uint32_t count, uint8_t rights)
 {
     struct cap c = {
         .type = CAP_TIME,
+        .rights = rights,
+        .a = first,
+        .b = count,
+    };
+    return c;
+}
+
+struct cap cap_to_routes(uint32_t first, uint32_t count, uint8_t rights)
+{
+    struct cap c = {
+        .type = CAP_ROUTE_LINE,
         .rights = rights,
         .a = first,
         .b = count,

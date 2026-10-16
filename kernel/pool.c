@@ -46,7 +46,7 @@ static void pool_unlink(struct pool *pool)
 /*
  * The next node an object holds, from its slot *at on, or NULL when it holds no more:
  * a table's slots, a process's table slots, from 0, and its region slots,
- * a thread's process, 0, and its units, and an Irq's notification.
+ * a thread's process, 0, and its units, an Irq's notification and a Route's ends.
  * *at moves to the slot found, so the scan does not look at a slot twice.
  */
 static struct cap *held_node(struct obj_header *o, uint16_t *at)

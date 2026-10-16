@@ -757,3 +757,22 @@ until the maintainer decides otherwise.
     Each promise goes into "Properties" as it is kept,
     checked by the self-check where it is state and by a measure on the board where it is time.
     Decide with the first workload whose deadline is shorter than a tick, or than the turns of its core.
+
+37. **Routes between devices.**
+    Decided: `RouteLine` and `Route`, as "Routes" says, the nRF52840's PPI the first router;
+    the other boards lend no channel, and QEMU's and the host's router wires nothing.
+    The first use is the acknowledgement of `user/thread/`'s link, which `TODO.md` lays out:
+    the radio's CRCOK starts a TIMER whose compare starts the radio sending,
+    so a frame received wrong is never acknowledged, and the driver need only wake within the frame.
+    Weighed:
+    - **Priorities alone**, decision 9's proposal, bound the driver's wait by the kernel's longest step, a tick and more today.
+    - **The radio's shortcuts alone** send an acknowledgement before the FCS is known, unless the driver wakes to stop it.
+    - **The PPI whole to one driver**: the kernel keeps channel 0, and the MPU cannot split the block.
+    - **One call to bind and connect** would take six arguments, and a call carries three.
+    Open:
+    - **The nRF53's and nRF54's DPPI** keeps each device's channel in the device's own registers, which its holder writes,
+      so a driver could listen on the kernel's channel; the kernel would keep none there, or refuse such a device.
+    - **The ESP32-C6's ETM** numbers its events and tasks; the board would map each number to its device.
+    - **RP2350** has no router, but a DMA channel paced by a device's DREQ writes a word to a register;
+      the channels are a bus master in one block, which the kernel would hold and confine through the DMA's own MPU.
+    - **Groups and forks**, arming several routes at once and a second task per event, as the PPI has.

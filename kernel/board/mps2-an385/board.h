@@ -72,4 +72,13 @@
  */
 #define IRQ_LINES 32
 
+/*
+ * The MPS2 boards have no router:
+ * route.c's stands in, four channels that wire nothing,
+ * so that a Route is bound, connected, armed and revoked here as on a board with one; see DESIGN.md, "Routes".
+ */
+#define ROUTER_FAKE    1
+#define ROUTE_FIRST    0u
+#define ROUTE_CHANNELS 4u
+
 #endif

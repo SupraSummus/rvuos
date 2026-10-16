@@ -112,6 +112,8 @@ there is one counter and one watchdog on the machine.
 | `Notification` | A word of sticky signal bits. The only way a thread can wait to be started again by a signal. |
 | `IrqLine` | A range of interrupt lines: the log's and the controller's, or the timer lines. Bound one at a time into an `Irq`. |
 | `Irq` | One line bound to a notification. Signals it when the line fires. |
+| `RouteLine` | A range of the router's channels. Bound one at a time into a `Route`. No object. |
+| `Route` | One channel wiring an event of one device to a task of another, armed or not. See "Routes". |
 | `Time` | A range of the processor's units of time. A thread runs only while bound to some, or to none with spare time. No object. |
 | `Print` | Writing into the kernel's log. No object. |
 | `Halt` | Halting the machine. No object. |
@@ -311,6 +313,7 @@ which is a slot of the same layout living in the `Process`,
 every process's table slots, which live there too,
 every thread's process, watch and each of its places' units, which live in the `Thread`,
 every `Irq`'s notification, which lives in the `Irq`,
+every `Route`'s ends, which live in the `Route`,
 and every pool's own node, which lives in its descriptor;
 see `kernel/object.h`.
 Roots are the boot capabilities but those made of the root task's memory,
@@ -330,10 +333,12 @@ the counter's frame below the clock it was derived through,
 a process's table slot below the `CapTable` capability the process was made with or the table was mounted with,
 a thread's process below the `Process` capability the thread was made with,
 a thread's watch below the `Notification` capability it was set with,
-and an `Irq`'s notification below the `Notification` capability the `Irq` was bound with.
+an `Irq`'s notification below the `Notification` capability the `Irq` was bound with,
+and a `Route`'s end below the `Frame` capability it was connected through.
 A pool's own node hangs below the Untyped, and the Pool capability the retype returns below that node.
 A capability to a new object hangs below the Pool capability it was allocated through,
-and so does the `Irq` capability of `OP_IRQ_BIND`, whose line goes with everything derived from it.
+and so do the `Irq` capability of `OP_IRQ_BIND` and the `Route` capability of `OP_ROUTE_BIND`,
+whose line or channel goes with everything derived from it.
 A copy stands beside its source, under the same parent,
 so a process can duplicate what it holds without making one copy the master of the other;
 beside a root it is a root.

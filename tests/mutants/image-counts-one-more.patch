@@ -8,7 +8,7 @@ Report: PMP image has more entries than the process has region slots
 diff --git a/kernel/process.c b/kernel/process.c
 --- a/kernel/process.c
 +++ b/kernel/process.c
-@@ -61,7 +61,7 @@
+@@ -61,7 +61,7 @@ static void rebuild_pmp(struct process *proc)
              count++;
          }
      }

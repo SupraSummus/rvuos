@@ -128,14 +128,23 @@ since the rest of LPPERI reaches the LP domain's clocks and resets,
 and the IO MUX and the GPIO matrix, the pins, which a program sets as its board wires them,
 as the Wi-Fi system's root task sets the XIAO's RF switch;
 the nRF52840 lists GPIO, both ports in one block, which `user/blink.c` drives, and its radio, which `user/thread/` drives,
-with TIMER2 for what is shorter than a tick, as the kernel's timer keeps TIMER0 and TIMER1;
+with TIMER2 for what is shorter than a tick, as the kernel's timer keeps TIMER0 and TIMER1,
+and TIMER3 and TIMER4, which routes wire to the radio;
 QEMU lists none, since its devices are the kernel's or the console, and the host build has no hardware;
 nor do the MPS2 boards yet.
-So on QEMU `BOOT_CAP_COUNT` is 20, the number the seeds and the corpus are written for.
+So on QEMU `BOOT_CAP_COUNT` is 21, the number the seeds and the corpus are written for.
 A device that is a bus master reaches whatever its driver points it at, so its frame is the machine's:
 the ESP32-C6's modem and the nRF52840's radio are those a board lists, each for a driver the root task trusts with all RAM; open decision 13.
 Nor does it list the devices the kernel drives itself, the timer under the tick and the watchdog:
 a program reaches those through the clock's operations, which every board can answer; see "The watchdog".
+
+**Routers.**
+A board with a router lends its channels from `ROUTE_FIRST`, `ROUTE_CHANNELS` of them, see "Routes",
+and gives `router_end`, which says what an end's name is in a frame, and the router's connect, disconnect and read back.
+The nRF52840's is the PPI, `kernel/board/nrf52840/route.c`: channels 1 to 19, channel 0 the counter's,
+an end the offset of a task, 0x000 to 0x07c, or an event, 0x100 to 0x17c, of a device of the APB.
+QEMU's boards have `ROUTER_FAKE`, four channels of `kernel/route.c` that wire nothing,
+which the host shares; the ESP32-C6 and RP2350 lend none yet, decision 37.
 
 **QEMU `virt`** is the development target and the one `make check` runs.
 QEMU loads the image and enters it in machine mode.

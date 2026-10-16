@@ -18,7 +18,6 @@
 
 #define REG(addr) (*(volatile uint32_t *)(addr))
 
-#define TIMER1_BASE 0x40009000u
 #define TIMER_TASKS_START       0x000u
 #define TIMER_TASKS_CAPTURE(n)  (0x040u + 4u * (n))
 #define TIMER_EVENTS_COMPARE(n) (0x140u + 4u * (n))

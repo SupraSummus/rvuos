@@ -7,6 +7,7 @@
 #include "kernel.h"
 #include "klog.h"
 #include "object.h"
+#include "route.h"
 #include "sched.h"
 
 struct granted_range boot_granted[GRANTED_RANGES];
@@ -113,9 +114,11 @@ struct thread *boot_create_root(void)
         [BOOT_CAP_TIME] = cap_to_time(0, MACHINE_UNITS, RIGHT_W | RIGHT_X),
         [BOOT_CAP_HALT] = { .type = CAP_HALT, .rights = RIGHT_ALL },
         [BOOT_CAP_TEST] = { .type = CAP_TEST, .rights = RIGHT_ALL },
+        /* Every channel the board's router lends, and nothing on a board without one. */
+        [BOOT_CAP_ROUTES] = ROUTE_CHANNELS != 0 ? cap_to_routes(ROUTE_FIRST, ROUTE_CHANNELS, RIGHT_W) : (struct cap){ 0 },
     };
     for (unsigned i = BOOT_CAP_NULL + 1; i < BOOT_CAP_DEVICES; i++) {
-        if (i == BOOT_CAP_ROOT_RAM || i == BOOT_CAP_POOL_RAM) {
+        if (i == BOOT_CAP_ROOT_RAM || i == BOOT_CAP_POOL_RAM || boot[i].type == CAP_NONE) {
             continue;
         }
         bool pooled = i == BOOT_CAP_CAPTABLE || i == BOOT_CAP_PROCESS || i == BOOT_CAP_THREAD ||

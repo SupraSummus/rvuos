@@ -45,7 +45,7 @@ A slot of the invoked table, as `OP_CAP_COPY`'s destination is, is its index the
 
 The kernel checks in this order:
 the slot resolves (`KERR_INVALID_CAP`),
-then `OP_CAP_INFO`, which every type takes with no right, looks at its arguments, section 6.14;
+then `OP_CAP_INFO`, which every type takes with no right, looks at its arguments, section 6.15;
 the capability's type takes the operation (`KERR_WRONG_TYPE`);
 the capability carries the right the operation needs, as each operation below says (`KERR_NO_RIGHTS`);
 every argument of `a1` to `a3` the operation does not read is zero,
@@ -55,7 +55,7 @@ then the operation's own checks.
 Operation codes are a single flat numbering across all types,
 so invoking an `Irq` operation on a `Frame` is `KERR_WRONG_TYPE`, whatever its rights,
 not `KERR_INVALID_ARG`,
-and so is a code that is no operation's on any capability, 0, 11, 27, or `OP_COUNT` and above, section 6.15.
+and so is a code that is no operation's on any capability, 0, 11, 27, or `OP_COUNT` and above, section 6.16.
 What an operation reads its description says; three read by their own values:
 `OP_POOL_ALLOC` of a notification no `a3`, `OP_THREAD_WATCH` with no bits no `a1`,
 and `OP_IRQ_SET` with no bits, or of a line that is no timer's, no `a2` or `a3`.
@@ -202,7 +202,7 @@ The call may be made again, section 6.1.
 
 ### 6.5 Operations on `Frame` and `Untyped`
 
-`OP_CAP_INFO` tells what a frame or an Untyped covers, section 6.14.
+`OP_CAP_INFO` tells what a frame or an Untyped covers, section 6.15.
 
 **`OP_FRAME_CARVE` (5).**
 No right needed.
@@ -254,7 +254,7 @@ The new capability carries all rights and hangs below the invoked `KernelPool` c
 **`OP_POOL_INFO` (42).**
 No right needed.
 `a1` = the type: `CAP_CAPTABLE`, `CAP_PROCESS`, `CAP_THREAD` or `CAP_NOTIFICATION`, as `OP_POOL_ALLOC` makes them,
-`CAP_IRQ`, as `OP_IRQ_BIND` makes one of a pool, or `CAP_POOL` for the descriptor at the base of a pool;
+`CAP_IRQ`, as `OP_IRQ_BIND` makes one of a pool, `CAP_ROUTE`, as `OP_ROUTE_BIND` does, or `CAP_POOL` for the descriptor at the base of a pool;
 `a2` = 0; `a3` = the number of slots for `CAP_CAPTABLE`, 1 to 1024, of region slots for `CAP_PROCESS`, 1 to the most,
 of places for `CAP_THREAD`, 1 to the machine's cores, and 0 for the others.
 Anything else is `KERR_INVALID_ARG`, and nothing is written.
@@ -528,7 +528,48 @@ a signal that wakes the thread paying for its turn, section 5.12,
 or a thread with time that becomes ready while the turn runs on spare time, section 5.11, takes the processor from it,
 and an unbind that empties the account leaves the rest of the turn on spare time.
 
-### 6.14 Describing a capability
+### 6.14 Operations on `RouteLine` and `Route`
+
+A `Route` wires an event of one device to a task of another, so the router triggers the task each time the event comes,
+with no thread in between, section 5.13.
+
+**`OP_ROUTE_CARVE` (43).**
+No right needed.
+`a1` = offset from the first channel, `a2` = count, `a3` = destination slot.
+A table operation like `OP_IRQ_CARVE`.
+
+**`OP_ROUTE_BIND` (44).**
+Needs `RIGHT_W`, and the capability must name exactly one channel (`KERR_INVALID_ARG`).
+`a1` = slot of the `KernelPool` capability to allocate the `Route` from, with `RIGHT_W`,
+`a2` = destination slot for the `Route` capability, which may be the invoked slot, and `a3` = 0.
+The invoked slot is cleared with everything below it,
+and the `Route` capability hangs below the `KernelPool` capability.
+`KERR_OVERLAP` if a `Route` is already bound to the channel,
+`KERR_NO_MEMORY` if the pool has no room for it,
+`KERR_STATE` while the pool is being destroyed,
+all checked before anything is revoked,
+and the revoke may make the call again, section 6.1.
+The new `Route` connects nothing and is disarmed;
+its channel is free again once the `Route`'s pool is destroyed.
+
+**`OP_ROUTE_END` (45).**
+Needs `RIGHT_W`.
+`a1` = the end, `ROUTE_EVENT` or `ROUTE_TASK` (`KERR_INVALID_ARG` otherwise),
+`a2` = slot of a `Frame` capability over the device the end lies in,
+with `RIGHT_R` for the event and `RIGHT_W` for the task,
+`a3` = the end within it, as the board names it, section 3:
+`KERR_INVALID_ARG` for an end the frame does not hold, and for every end on a board without a router.
+The `Route`'s hold on the frame hangs below the named capability, so revoking above it takes the end and disarms the `Route`.
+Connecting an end again replaces it and disarms the `Route`, which `OP_ROUTE_SET` arms again.
+
+**`OP_ROUTE_SET` (46).**
+Needs `RIGHT_W`.
+`a1` = 1 arms the `Route`, which needs both its ends (`KERR_STATE`), and `a1` = 0 disarms it;
+anything else is `KERR_INVALID_ARG`.
+While it is armed the router triggers the task each time the event comes;
+an event that came while it was disarmed triggers nothing.
+
+### 6.15 Describing a capability
 
 **`OP_CAP_INFO` (41).**
 Any capability, and no right needed.
@@ -548,6 +589,8 @@ and in `a2` to `a4` what the capability names, by its type:
 | `IrqLine` | the first line | the count | 1 for timer lines, 0 for the log's and the controller's |
 | `Irq` | its line | the bits it may signal, 0 once its notification was taken, never those it is armed with | 1 on a timer line, else 0 |
 | `Time` | the first unit | the count | the tick in microseconds |
+| `RouteLine` | the first channel | the count | 0 |
+| `Route` | its channel | the ends connected, bit `ROUTE_EVENT` and bit `ROUTE_TASK` | 1 while armed, else 0 |
 | `Clock` | the counter's rate in hertz, as `OP_CLOCK_READ`'s | the tick in counts of the counter | the tick in microseconds |
 | `Print`, `Halt`, `Test` | 0 | 0 | 0 |
 
@@ -566,7 +609,7 @@ and a pool's room is as the call found it; a call on another core may change eit
 A pool that nothing names any more shows as `CAP_POOL` below its Untyped, until a revoke below the Untyped destroys it;
 whether something outside the pool still holds its objects it does not tell.
 
-### 6.15 Operation codes in numeric order
+### 6.16 Operation codes in numeric order
 
 | Code | Operation | Type |
 |---|---|---|
@@ -612,8 +655,12 @@ whether something outside the pool still holds its objects it does not tell.
 | 40 | `OP_PROCESS_UNMOUNT` | `Process` |
 | 41 | `OP_CAP_INFO` | any |
 | 42 | `OP_POOL_INFO` | `KernelPool` |
+| 43 | `OP_ROUTE_CARVE` | `RouteLine` |
+| 44 | `OP_ROUTE_BIND` | `RouteLine` |
+| 45 | `OP_ROUTE_END` | `Route` |
+| 46 | `OP_ROUTE_SET` | `Route` |
 
-`OP_COUNT` is 43, one above the highest code.
+`OP_COUNT` is 47, one above the highest code.
 
 ## 7. What the root task starts with
 
@@ -628,7 +675,7 @@ and drops into user mode with:
 - a process of `ROOT_REGION_SLOTS` region slots, eight, or the most a process may have where that is fewer,
 - region slot 0: the code region, read and execute,
 - region slot 1: the data region, read and write,
-- a capability table of `ROOT_TABLE_SLOTS`, 46 past `BOOT_CAP_COUNT` on every board and so 66 on QEMU, filled as below,
+- a capability table of `ROOT_TABLE_SLOTS`, 46 past `BOOT_CAP_COUNT` on every board and so 67 on QEMU, filled as below,
   in table slot 0, and table slot 1 empty.
 
 | Slot | Constant | Capability | Rights |
@@ -653,10 +700,11 @@ and drops into user mode with:
 | 17 | `BOOT_CAP_POOL_RAM` | `Untyped`: the boot pool's block, below `BOOT_CAP_ROOT_RAM`, made into the boot pool | all |
 | 18 | `BOOT_CAP_HALT` | `Halt` | all |
 | 19 | `BOOT_CAP_TEST` | `Test` | all |
-| 20 on | `BOOT_CAP_DEVICES` | `Frame`s: one over each device the board lists, in its order, none on QEMU; section 3 | each the board's: read and write, but read only for the ESP32-C6's eFuse and read and execute for its window onto flash |
+| 20 | `BOOT_CAP_ROUTES` | `RouteLine`: every channel of the board's router the kernel lends, section 5.13; empty where there is none | write |
+| 21 on | `BOOT_CAP_DEVICES` | `Frame`s: one over each device the board lists, in its order, none on QEMU; section 3 | each the board's: read and write, but read only for the ESP32-C6's eFuse and read and execute for its window onto flash |
 
-`BOOT_CAP_COUNT` is 20 plus `BOOT_DEVICES`, the count in the board's `devices.h`, which `rvuos.h` includes:
-20 on QEMU and the MPS2 boards, 23 on the nRF52840, 25 on RP2350 and 28 on the ESP32-C6.
+`BOOT_CAP_COUNT` is 21 plus `BOOT_DEVICES`, the count in the board's `devices.h`, which `rvuos.h` includes:
+21 on QEMU and the MPS2 boards, 26 on the nRF52840, 26 on RP2350 and 29 on the ESP32-C6.
 A root task puts its own slots from there upwards.
 
 The root task's own table, process and thread take about 2.1 KiB of the boot pool,

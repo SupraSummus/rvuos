@@ -7,6 +7,7 @@
 #include "kernel.h"
 #include "klog.h"
 #include "object.h"
+#include "route.h"
 #include "sched.h"
 #include "timer.h"
 
@@ -324,14 +325,14 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
 
 /*
  * What an object of a type would take of a pool, and the room, see OP_POOL_INFO:
- * the types OP_POOL_ALLOC makes, the Irq OP_IRQ_BIND makes of a pool, and the descriptor.
+ * the types OP_POOL_ALLOC makes, the Irq OP_IRQ_BIND and the Route OP_ROUTE_BIND make of a pool, and the descriptor.
  */
 static int pool_info(const struct pool *pool, uint32_t *arg)
 {
     uint32_t type = arg[1];
     uint32_t slots = arg[3];
     if (type != CAP_CAPTABLE && type != CAP_PROCESS && type != CAP_THREAD && type != CAP_NOTIFICATION &&
-        type != CAP_IRQ && type != CAP_POOL) {
+        type != CAP_IRQ && type != CAP_ROUTE && type != CAP_POOL) {
         return KERR_INVALID_ARG;
     }
     uint32_t most = type == CAP_CAPTABLE ? CAPTABLE_MAX_SLOTS : type == CAP_PROCESS ? pmp_entry_count
@@ -657,7 +658,7 @@ static int op_notification(struct thread *t, uint32_t slot, const struct cap *ca
 }
 
 /*
- * A smaller range of the lines or units a capability names, with its rights, below it:
+ * A smaller range of the lines, units or channels a capability names, with its rights, below it:
  * a1 = offset from the first, a2 = count, a3 = destination slot.
  */
 static int carve_range(struct thread *t, uint32_t slot, const struct cap *cap, const uint32_t *arg)
@@ -733,6 +734,107 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
         struct cap ic = cap_to_object(&irq->hdr, RIGHT_ALL);
         return slot_store(t, arg[3], &ic, slot_node(t, arg[1]));
     }
+    default:
+        return KERR_WRONG_TYPE;
+    }
+}
+
+/* arg[1..] carry the arguments in; see DESIGN.md, "Routes". */
+static int op_route_line(struct thread *t, uint32_t slot, const struct cap *cap,
+                         uint32_t op, const uint32_t *arg)
+{
+    uint32_t channel = cap->a;
+
+    switch (op) {
+    case OP_ROUTE_CARVE:
+        return carve_range(t, slot, cap, arg);
+    case OP_ROUTE_BIND: {
+        /* One Route per channel, so a binding names one channel. */
+        if (cap->b != 1) {
+            return KERR_INVALID_ARG;
+        }
+        struct cap pc;
+        int err = slot_lookup_typed(t, arg[1], CAP_POOL, RIGHT_W, &pc);
+        if (err != KERR_OK) {
+            return err;
+        }
+        struct pool *pool = (struct pool *)cap_object(&pc);
+        if (pool->dying) {
+            return KERR_STATE;
+        }
+        if (channel_binding(channel) != NULL) {
+            return KERR_OVERLAP;
+        }
+        /* The invoked slot is cleared below, so it may receive the Route capability, under whichever number names it. */
+        if (slot_at(t, arg[2]) != slot_node(t, slot)) {
+            err = slot_vacant(t, arg[2]);
+            if (err != KERR_OK) {
+                return err;
+            }
+        }
+        /* Room is checked before the channel's derivation goes, since what a revoke took stays taken. */
+        if (!pool_fits(pool, obj_type_size(CAP_ROUTE, 0))) {
+            return KERR_NO_MEMORY;
+        }
+        if (!cap_revoke_below(slot_node(t, slot), slot, true)) {
+            return KERR_PREEMPTED;
+        }
+        struct route *r = pool_alloc(pool, CAP_ROUTE, obj_type_size(CAP_ROUTE, 0));
+        r->channel = (uint16_t)channel;
+        channel_route[channel - ROUTE_FIRST] = v2p(r);
+        /* The channel goes, a leaf now, and the Route hangs below the pool capability as any object does. */
+        cap_delete(slot_node(t, slot), false);
+        struct cap rc = cap_to_object(&r->hdr, RIGHT_ALL);
+        return slot_store(t, arg[2], &rc, slot_node(t, arg[1]));
+    }
+    default:
+        return KERR_WRONG_TYPE;
+    }
+}
+
+/* arg[1..] carry the arguments in. */
+static int op_route(struct thread *t, const struct cap *cap, uint32_t op, const uint32_t *arg)
+{
+    struct route *r = (struct route *)cap_object(cap);
+
+    switch (op) {
+    case OP_ROUTE_END: {
+        uint32_t end = arg[1];
+        if (end != ROUTE_EVENT && end != ROUTE_TASK) {
+            return KERR_INVALID_ARG;
+        }
+        /* An event is heard, and a task done: the frame lets its holder read the one and write the other. */
+        struct cap fc;
+        int err = slot_lookup_typed(t, arg[2], CAP_FRAME, end == ROUTE_EVENT ? RIGHT_R : RIGHT_W, &fc);
+        if (err != KERR_OK) {
+            return err;
+        }
+        uint32_t word;
+        if (!router_end(end, fc.a, fc.b, arg[3], &word)) {
+            return KERR_INVALID_ARG;
+        }
+        /*
+         * An end connected before is replaced; nothing is derived from it, so it goes in a step,
+         * and its going disarms the Route, so the router never wires the new end to the other's old partner.
+         */
+        if (r->ends[end].type != CAP_NONE) {
+            cap_delete(&r->ends[end], false);
+        }
+        /* It hangs below the capability it was connected through, so a revoke above that disarms the Route. */
+        r->ends[end] = (struct cap){ .type = CAP_ROUTED, .rights = fc.rights, .index = (uint8_t)end, .a = fc.a, .b = fc.b };
+        cap_attach(slot_at(t, arg[2]), &r->ends[end]);
+        r->names[end] = arg[3];
+        return KERR_OK;
+    }
+    case OP_ROUTE_SET:
+        if (arg[1] > 1) {
+            return KERR_INVALID_ARG;
+        }
+        if (arg[1] == 1 && (r->ends[ROUTE_EVENT].type == CAP_NONE || r->ends[ROUTE_TASK].type == CAP_NONE)) {
+            return KERR_STATE;
+        }
+        route_arm(r, arg[1] == 1);
+        return KERR_OK;
     default:
         return KERR_WRONG_TYPE;
     }
@@ -960,6 +1062,19 @@ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *a
         arg[3] = cap->b;
         arg[4] = TIMER_US_PER_TICK;
         break;
+    case CAP_ROUTE_LINE:
+        arg[2] = cap->a;
+        arg[3] = cap->b;
+        break;
+    case CAP_ROUTE: {
+        /* Which ends are connected and whether it is armed, never what the ends are. */
+        const struct route *r = (const struct route *)cap_object(cap);
+        arg[2] = r->channel;
+        arg[3] = (r->ends[ROUTE_EVENT].type != CAP_NONE ? 1u << ROUTE_EVENT : 0) |
+                 (r->ends[ROUTE_TASK].type != CAP_NONE ? 1u << ROUTE_TASK : 0);
+        arg[4] = r->armed;
+        break;
+    }
     case CAP_CLOCK:
         /* The rate and the tick, not the time, so no RIGHT_R. */
         arg[2] = timer_counter_hz();
@@ -1043,6 +1158,10 @@ static const struct op_shape op_shapes[OP_COUNT] = {
     [OP_CLOCK_WATCHDOG] = { CAP_CLOCK, RIGHT_W, SHAPE_A1 },
     [OP_TIME_CARVE] = { CAP_TIME, 0, SHAPE_A123 },
     [OP_TIME_BIND] = { CAP_TIME, RIGHT_W, SHAPE_A123 },
+    [OP_ROUTE_CARVE] = { CAP_ROUTE_LINE, 0, SHAPE_A123 },
+    [OP_ROUTE_BIND] = { CAP_ROUTE_LINE, RIGHT_W, SHAPE_A1 | SHAPE_A2 },
+    [OP_ROUTE_END] = { CAP_ROUTE, RIGHT_W, SHAPE_A123 },
+    [OP_ROUTE_SET] = { CAP_ROUTE, RIGHT_W, SHAPE_A1 },
 };
 
 /*
@@ -1155,6 +1274,12 @@ static int dispatch(struct thread *t, uint32_t op, uint32_t slot, uint32_t *arg)
         break;
     case CAP_TIME:
         err = op_time(t, slot, &cap, op, arg);
+        break;
+    case CAP_ROUTE_LINE:
+        err = op_route_line(t, slot, &cap, op, arg);
+        break;
+    case CAP_ROUTE:
+        err = op_route(t, &cap, op, arg);
         break;
     default:
         err = KERR_WRONG_TYPE;

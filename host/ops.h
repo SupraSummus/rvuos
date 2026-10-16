@@ -40,6 +40,8 @@ enum arg_kind {
     ARG_FLAGS,        /* OP_IRQ_SET's */
     ARG_STEPS,        /* OP_TEST_PREEMPT's */
     ARG_ADDRESS,      /* of a load or a store */
+    ARG_END,          /* a Route's end, ROUTE_EVENT or ROUTE_TASK, or OP_ROUTE_SET's on or off */
+    ARG_NAME,         /* an end within a frame, as the board names it */
 };
 
 /* The type a source slot holds, CAP_NONE for ARG_ANY. */
@@ -123,13 +125,17 @@ static const struct op_info op_table[OP_COUNT] = {
     OP(OP_PROCESS_UNMOUNT, CAP_PROCESS, 0, ARG_MOUNT, ARG_NONE, ARG_NONE),
     DESCRIBE(OP_CAP_INFO, ON_ANY, ARG_NONE, ARG_NONE, ARG_NONE),
     DESCRIBE(OP_POOL_INFO, CAP_POOL, ARG_TYPE, ARG_NONE, ARG_SLOTS),
+    OP(OP_ROUTE_CARVE, CAP_ROUTE_LINE, CAP_ROUTE_LINE, ARG_OFFSET, ARG_COUNT, ARG_DST),
+    OP(OP_ROUTE_BIND, CAP_ROUTE_LINE, CAP_ROUTE, ARG_POOL, ARG_DST, ARG_NONE),
+    OP(OP_ROUTE_END, CAP_ROUTE, 0, ARG_END, ARG_FRAME, ARG_NAME),
+    OP(OP_ROUTE_SET, CAP_ROUTE, 0, ARG_END, ARG_NONE, ARG_NONE),
 };
 
 #undef OP
 #undef DESCRIBE
 
 /* The assert sees only the highest code; LLVMFuzzerInitialize holds every code below it to an entry. */
-_Static_assert(OP_COUNT == 43 && OP_POOL_INFO == OP_COUNT - 1, "a new operation needs an entry in op_table");
+_Static_assert(OP_COUNT == 47 && OP_ROUTE_SET == OP_COUNT - 1, "a new operation needs an entry in op_table");
 
 /* A code below OP_COUNT that is no operation any more, see OP_COUNT, which the kernel refuses as any other. */
 static inline int op_retired(unsigned op)

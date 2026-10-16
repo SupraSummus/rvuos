@@ -1,4 +1,4 @@
-# rvuos design: interrupts and the kernel log
+# rvuos design: interrupts, routes and the kernel log
 
 Part of the design document; [`DESIGN.md`](../DESIGN.md) lists every section and the file that holds it.
 
@@ -78,6 +78,38 @@ and `user/init/logger.c` drives the transmitter from user mode on its interrupt.
 The kernel has no console to share it with.
 What the kernel has to say goes into its log,
 and the log raises a line of its own; see "The kernel log".
+
+## Routes
+
+**A route is a wire between two devices that no thread drives.**
+Some chips connect an event of one device to a task of another in hardware:
+the nRF52840's PPI, the nRF53's DPPI, the ESP32-C6's ETM.
+A deadline shorter than a driver's wait for its turn, the 192 us of an IEEE 802.15.4 acknowledgement,
+is met by such a wire or not at all; open decision 36.
+So the kernel lends the router's channels as it lends lines:
+a `RouteLine` names a range of them and no object, the root task receives every channel lent in `BOOT_CAP_ROUTES`,
+and `OP_ROUTE_CARVE` carves single ones out; a board without a router leaves the slot empty.
+
+**A `Route` is a channel bound, connected and armed.**
+`OP_ROUTE_BIND` makes a `Route` of one channel in a pool, as `OP_IRQ_BIND` makes an `Irq` of a line,
+consuming the channel and failing with `KERR_OVERLAP` while another `Route` holds it.
+`OP_ROUTE_END` connects its event or its task through a `Frame` capability and the end's name within it,
+an offset of a register on the nRF52840;
+the event needs `RIGHT_R` and the task `RIGHT_W`, so a wire does nothing its holder could not do with the two frames,
+only sooner, and the board refuses what the frame does not hold, RAM and the kernel's own devices.
+`OP_ROUTE_SET` arms it once both ends are connected, and disarms it.
+Connecting an end it had disarms it, so the router never wires one end to the other's old partner.
+
+**A `Route` holds its frames as an `Irq` holds its notification:**
+each end is a node, `CAP_ROUTED`, below the `Frame` capability it was connected through,
+so a revoke above it takes the end and disarms the `Route`, and a parent that takes a device back takes its wires.
+The destroy of the `Route`'s pool disarms it too and frees the channel.
+A word per channel records its `Route`, so nothing walks to find one,
+and armed and connected are one state, which the self-check reads back from the router channel by channel.
+
+**What stands in for a router.**
+QEMU's boards and the host have four channels of `kernel/route.c` that wire nothing and take any word of a frame for an end,
+so the fuzzer and the seeds run the operations as on silicon; decision 37 says what the other chips would take.
 
 ## The kernel log
 

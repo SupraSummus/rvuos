@@ -6,6 +6,7 @@
 #include "irq.h"
 #include "kernel.h"
 #include "object.h"
+#include "route.h"
 #include "sched.h"
 #include "timer.h"
 #include "trap.h"
@@ -952,6 +953,10 @@ bool sched_forget(struct obj_header *o, bool preempt)
     case CAP_IRQ:
         /* It was disarmed and its line masked as its notification was cleared; the line is free again. */
         line_irq[((struct irq *)o)->line] = 0;
+        break;
+    case CAP_ROUTE:
+        /* Its ends were cleared with the object's nodes, which disarmed it; the channel is free again. */
+        route_forget((struct route *)o);
         break;
     case CAP_THREAD: {
         struct thread *t = (struct thread *)o;

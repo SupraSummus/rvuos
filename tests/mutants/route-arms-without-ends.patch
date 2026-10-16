@@ -1,0 +1,19 @@
+A Route arms with one end.
+The router would wire an event to whatever its channel last named, or the other way round;
+a Route is armed only with both its ends.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: route is armed without both its ends
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -830,7 +830,7 @@ static int op_route(struct thread *t, const struct cap *cap, uint32_t op, const
+         if (arg[1] > 1) {
+             return KERR_INVALID_ARG;
+         }
+-        if (arg[1] == 1 && (r->ends[ROUTE_EVENT].type == CAP_NONE || r->ends[ROUTE_TASK].type == CAP_NONE)) {
++        if (arg[1] == 1 && r->ends[ROUTE_EVENT].type == CAP_NONE && r->ends[ROUTE_TASK].type == CAP_NONE) {
+             return KERR_STATE;
+         }
+         route_arm(r, arg[1] == 1);
