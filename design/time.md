@@ -286,7 +286,8 @@ C counts what the kernel charges to the task's turns too.
 What the accounts may hold, `ACCOUNT_TICKS`, is a tenth of a second whatever the tick, and at least `COUNT_PARTS` ticks and one,
 so a shorter tick shortens the wait and leaves this bound where it is; open decision 9.
 On several cores a driver on another core whose arms each interrupt the first, `TODO.md`, takes the kernel's share of the first core's turns too.
-No other latency is promised.
+No other latency is promised;
+what a real-time promise would take is open decision 36.
 A thread with no ready work spends nothing, so an idle holder of units costs the others nothing.
 
 **Why a fixed number of units.**
