@@ -120,12 +120,12 @@ until the maintainer decides otherwise.
    so the wait is the build's to set,
    against a switch every tick while threads compete, which nothing has measured yet;
    the work a thread gets is bounded by the others' accounts, which a shorter tick does not shorten, `TODO.md`.
-   Priorities with preemption on wake, bounded by the account as a budget, are what a wait below a tick would take;
+   Priorities with preemption on wake, bounded by the account as a budget, are what a wait below a tick would take,
+   and the proposal below says what they take besides;
    decide them when a workload needs one at a cost the switches allow.
    The earlier plan was fixed priorities on `Thread`,
    set by whoever holds the capability and capped by the setter's own,
-   round-robin within a priority, no priority inheritance;
-   with units they could be a right of the `Time` capability a thread is bound through, as spare time is.
+   round-robin within a priority, no priority inheritance.
    What priority inheritance does for priorities, a waiter that names whom it waits for does for accounts, decision 27:
    it lends that thread its time, one step, the oldest lender's.
    The alternative is a scheduler in userspace
@@ -145,6 +145,43 @@ until the maintainer decides otherwise.
    `make lab` shows the same for an ask with work behind it, and that units do not move it:
    beside a process that spins, twice the units for the client or for the server change its latency by less than a fiftieth,
    since a server woken by an ask waits on the run queue behind the spinner's turn; see `user/lab/NOTES.md`.
+   - **Proposal: priorities that preempt on wake.**
+     A thread with time at a higher level than its core's running thread
+     takes the processor as the trap that made it ready ends, a device's interrupt among them,
+     and from another core through the interrupt that core already sends.
+     That is today's rule for a turn on spare time, with two levels made `PRIORITIES`:
+     a run queue per level and a word of the queues that hold a place, so the next thread is a count of leading zeros away,
+     and turns on the tick within a level as now.
+     It is decided at the end of a trap, so the host replays it,
+     and the self-check's "a turn on spare time runs while a thread with time waits" becomes the same check by level.
+     It takes besides:
+     - **A budget.**
+       A thread has its level only while its account holds a tick,
+       so a spinner at the top takes at most its units' part and its account,
+       and what an account may hold, `ACCOUNT_TICKS`, becomes what a level may suffer from those above; decision 18.
+     - **A right.**
+       The level is a right of the `Time` capability a thread is bound through, a range a carve narrows,
+       as seL4's maximum controlled priority is.
+     - **Lent time at its payer's level**, so a lock's holder and a server run at their waiter's.
+       The payer is still the oldest lender, not the highest;
+       a ring of lenders per level would find the highest without a walk,
+       but a chain through a holder that waits in turn stays userspace's.
+     - **Wakes by level.**
+       A signal wakes the payer of the signalling core's turn, or else the oldest waiter;
+       the highest would cost each notification a pair of links per level, or a walk.
+     - **A short kernel step.**
+       The longest step the kernel takes without looking for an interrupt is the floor of every wait;
+       today zeroing a table takes longer than a tick at 10 kHz, and a pool destroy stops only for a pending interrupt, `TODO.md`.
+     - **Deadlines in counts.**
+       Timer lines fire on the tick grid, so a periodic thread at the top still starts up to a tick late.
+     - **Signals that preempt.**
+       A signal to a waiter of a higher level takes the processor from the signaller,
+       as today only a signal from a turn on spare time, or one waking the turn's payer, does,
+       so a signal and a wait in one call, `TODO.md`, would then save switches as well as traps.
+     It would promise the highest ready level a start within the kernel's longest step of the trap that made it ready,
+     and a lower level a response-time analysis over the units and accounts above it.
+     `contended-worst` is the number it should move.
+     The first step is the levels, their queues, the preemption and lent time's level, with the zeroing.
 
 10. **Yield.**
     Working default: none.
@@ -699,3 +736,24 @@ until the maintainer decides otherwise.
       a region slot is a place, and so is a thread's place on a core,
       while the time in that place may yet become a thing of its own, decision 27.
     What a board keeps of a process besides, the ESP32-C6's CSRs, `BOARD_PROCESS_CSRS`, is still the board's.
+
+36. **What real time takes.**
+    Working default: rvuos is not a real-time kernel and does not claim to be.
+    A program can be shown to meet its deadlines only from promises stated in time rather than in steps, and checked.
+    Kept: bounded work and a bounded stack, checked at every link;
+    time as authority, with a budget per thread; and faults kept to their thread.
+    Missing:
+    - **A wait below a tick** for the thread that needs it, with a bound on inversion: decision 9's proposal.
+    - **A short kernel step.**
+      The kernel takes no interrupt, so its longest step is the floor of every latency;
+      `TODO.md` lists those that are too long today.
+    - **Deadlines finer than the tick.**
+    - **Bounds in cycles.**
+      The loop bounds and call graph the link checks, with each instruction's cost on an in-order core,
+      would bound the longest step per board, checked at the link as the stack is.
+    - **The latency measured.**
+      `contended-worst` holds one wait to a record;
+      a test should hold the worst wait on each board to the bound the kernel states.
+    Each promise goes into "Properties" as it is kept,
+    checked by the self-check where it is state and by a measure on the board where it is time.
+    Decide with the first workload whose deadline is shorter than a tick, or than the turns of its core.
