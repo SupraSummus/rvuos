@@ -258,7 +258,7 @@ No right needed.
 `a2` = 0; `a3` = the number of slots for `CAP_CAPTABLE`, 1 to 1024, of region slots for `CAP_PROCESS`, 1 to the most,
 of places for `CAP_THREAD`, 1 to the machine's cores, and 0 for the others.
 Anything else is `KERR_INVALID_ARG`, and nothing is written.
-Returns `a1` = the bytes the object takes, a multiple of 8, as the pool counts them,
+Returns `a1` = the bytes the object takes, a multiple of 16, as the pool counts them,
 and `a2` = the bytes left, the pool's room as `OP_CAP_INFO` tells it, zero while the pool is being destroyed;
 `a3` and `a4` are unchanged.
 An allocation of the type that passes its other checks fails with `KERR_NO_MEMORY` exactly when `a1` is more than `a2`,
@@ -349,7 +349,8 @@ Units, account, process, watch and lenders stay, and nothing is signalled, the w
 **`OP_THREAD_WATCH` (31).**
 `a1` = slot of a `Notification` capability, which needs `RIGHT_W`, and may lie in any pool;
 `a2` = the bits the thread's faults signal there,
-of which only those the capability may signal are kept, `KERR_NO_RIGHTS` if none.
+of which only those the capability may signal are kept, `KERR_NO_RIGHTS` if none,
+and `KERR_INVALID_ARG` if those kept are not an aligned block, as a capability's bits are; section 5.7.
 Replaces the watch the thread had.
 `a2` = 0 clears the watch and ignores `a1`.
 See section 5.6.
@@ -422,7 +423,8 @@ No right needed.
 `a1` = bits, `a2` = destination slot.
 A capability to the same notification with the same rights,
 which may signal those of the bits the invoked one may, below it in the derivation tree;
-`KERR_INVALID_ARG` when none is left.
+`KERR_INVALID_ARG` when none is left, or when those left are not an aligned block:
+1, 2, 4, 8, 16 or 32 bits, starting at a multiple of their count.
 A table operation like `OP_FRAME_CARVE`; section 5.7.
 
 ### 6.10 Operations on `IrqLine`
@@ -707,8 +709,8 @@ and drops into user mode with:
 21 on QEMU and the MPS2 boards, 26 on the nRF52840, 26 on RP2350 and 29 on the ESP32-C6.
 A root task puts its own slots from there upwards.
 
-The root task's own table, process and thread take about 2.1 KiB of the boot pool,
-so roughly 1.9 KiB remain for objects the root task allocates from `BOOT_CAP_POOL`, a little less on RP2350.
+The root task's own table, process and thread take about 1.6 KiB of the boot pool,
+so roughly 2.4 KiB remain for objects the root task allocates from `BOOT_CAP_POOL`, a little less on RP2350 and the ESP32-C6.
 Anything larger goes into a pool the root task makes out of free RAM.
 The capabilities to the boot pool, its table, process and thread
 hang below the boot pool's own node, not below `BOOT_CAP_POOL`,

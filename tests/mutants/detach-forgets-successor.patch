@@ -8,11 +8,11 @@ Witness: fuzz actor-handoff
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -154,7 +154,6 @@ static void detach(struct cap *n, bool adopt)
-         splice_after(n, node(n->child), node(node(n->child)->prev));
+@@ -200,7 +200,6 @@ static void detach(struct cap *n, bool adopt)
+         splice_after(n, node(cap_child(n)), node(cap_prev(node(cap_child(n)))));
      }
-     struct cap *pred = node(n->prev);
--    ring_next(n)->prev = n->prev;
+     struct cap *pred = node(cap_prev(n));
+-    cap_set_prev(ring_next(n), cap_prev(n));
      /* n is first exactly when its predecessor links up: it is the last child then, or n itself. */
-     if (pred->next & LINK_UP) {
-         node(pred->next)->child = (n->next & LINK_UP) ? 0 : n->next;
+     if (cap_next(pred) & LINK_UP) {
+         cap_set_child(node(cap_next(pred)), (cap_next(n) & LINK_UP) ? 0 : cap_next(n));

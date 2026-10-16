@@ -8,12 +8,12 @@ Witness: fuzz actor-handoff
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -150,7 +150,7 @@ static void clear_node(struct cap *n)
+@@ -196,7 +196,7 @@ static void clear_node(struct cap *n)
  static void detach(struct cap *n, bool adopt)
  {
      /* The children go right after n, so n leaves the ring as a leaf would. */
--    if (adopt && n->child != 0) {
-+    if (adopt && 0 && n->child != 0) {
-         splice_after(n, node(n->child), node(node(n->child)->prev));
+-    if (adopt && cap_child(n) != 0) {
++    if (adopt && 0 && cap_child(n) != 0) {
+         splice_after(n, node(cap_child(n)), node(cap_prev(node(cap_child(n)))));
      }
-     struct cap *pred = node(n->prev);
+     struct cap *pred = node(cap_prev(n));

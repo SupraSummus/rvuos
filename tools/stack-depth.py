@@ -3,7 +3,10 @@
 
 The bound is the heaviest call chain, each function weighing its frame;
 DESIGN.md, "Bounded stack", says why that is the whole stack.
-The frames come from clang's -fstack-usage, and one of run-time size fails.
+The frames come from clang's -fstack-usage, and one of run-time size fails,
+as does a C function that sets sp from a register:
+clang calls a frame it realigns at run time static,
+as ARM's would be for a local that asks more than the stack's eight bytes.
 A function with no .su entry is assembly,
 weighing what its own instructions take off sp.
 The calls come from the disassembly.

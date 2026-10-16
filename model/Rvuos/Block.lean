@@ -1,7 +1,7 @@
 /-
 What the words of an Untyped mean, proved for every one of the 2^32 words.
-The kernel keeps a block, its base and its size, in one word, `untyped_block`,
-and reads it back with `untyped_base` and `untyped_size`;
+The kernel keeps a block, its base and its size, in one word, `block_word`,
+and reads it back with `block_base` and `block_size`, for an Untyped and a frame alike;
 `OP_UNTYPED_SPLIT` makes two halves of a block.
 `bv_decide` proves each statement over the 32-bit words with a SAT solver, and Lean checks its proof.
 -/

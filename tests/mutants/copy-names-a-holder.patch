@@ -1,0 +1,19 @@
+A copy or a derivation is marked as a node an object holds, its first child read as a holder.
+A revoke that clears it would call on an object that holds nothing;
+only an object holds a node that names a holder.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
+Report: a call bound a thread its caller could not control to units
+Witness: fuzz actor-handoff
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -114,6 +114,7 @@ static int op_captable(struct thread *t, uint32_t slot, const struct cap *cap,
+             return err;
+         }
+         src.rights &= (uint8_t)arg[3];
++        src.b |= B_HELD;
+         struct cap *source = slot_node(t, arg[2]);
+         /* A copy stands beside its source in the tree, a derivation below it. */
+         if (op == OP_CAP_COPY) {

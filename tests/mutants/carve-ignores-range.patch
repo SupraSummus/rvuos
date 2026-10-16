@@ -3,19 +3,20 @@ It would hand out lines or units the carver does not hold, or ones there are not
 a capability to lines or units names ones there are, within its parent's.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: route line capability outside the channels lent
 Report: time capability outside the units there are
 Witness: fuzz time-bind-checks
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -643,9 +643,6 @@ static int carve_range(struct thread *t, uint32_t slot, const struct cap *cap, c
+@@ -675,9 +675,6 @@ static int carve_range(struct thread *t, uint32_t slot, const struct cap *cap, c
  {
      uint32_t off = arg[1];
      uint32_t len = arg[2];
--    if (len == 0 || off > cap->b || len > cap->b - off) {
+-    if (len == 0 || off > range_count(cap) || len > range_count(cap) - off) {
 -        return KERR_INVALID_ARG;
 -    }
-     struct cap sub = { .type = cap->type, .rights = cap->rights, .a = cap->a + off, .b = len };
+     struct cap sub = { .type = cap->type, .rights = cap->rights, .a = range_word(range_first(cap) + off, len) };
      return slot_store(t, arg[3], &sub, slot_node(t, slot));
  }

@@ -8,8 +8,8 @@ Witness: fuzz watch-checks-rights
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -533,7 +533,7 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
-         uint32_t bits = arg[2];
+@@ -562,7 +562,7 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
+         uint32_t code = 0;
          struct cap nc;
          if (bits != 0) {
 -            int err = slot_lookup_typed(t, arg[1], CAP_NOTIFICATION, RIGHT_W, &nc);

@@ -9,11 +9,11 @@ Witness: fuzz actor-handoff
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -523,7 +523,7 @@ void sched_unbind(struct cap *bound)
-     struct thread *t = bound_thread(bound);
-     for (uint32_t i = 0; i < bound->b; i++) {
+@@ -527,7 +527,7 @@ void sched_unbind(struct cap *bound)
+     struct thread *t = p2v(cap_holder(bound));
+     for (uint32_t i = 0; i < range_count(bound); i++) {
          LOOP_BOUND(TIME_UNITS);
--        unit_place[bound->a + i] = 0;
+-        unit_place[range_first(bound) + i] = 0;
 +        (void)0;
      }
      *bound = (struct cap){ 0 };

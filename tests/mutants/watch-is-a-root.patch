@@ -8,10 +8,10 @@ Witness: fuzz fault-signals-watch
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -467,7 +467,7 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
-         if (bits != 0) {
+@@ -583,7 +583,7 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
              /* It hangs below the capability it was set with, so a revoke above that clears it. */
-             target->watch = (struct cap){ .type = CAP_WATCHED, .rights = nc.rights, .a = nc.a, .b = bits };
+             target->watch = (struct cap){ .type = CAP_NOTIFICATION, .rights = nc.rights };
+             notify_set(&target->watch, cap_addr(&nc), code);
 -            cap_attach(slot_node(t, arg[1]), &target->watch);
 +            cap_attach(NULL, &target->watch);
          }

@@ -8,13 +8,13 @@ Witness: fuzz delete-root-makes-nothing
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -279,9 +279,6 @@ bool cap_delete(struct cap *n, bool preempt)
+@@ -295,9 +295,6 @@ bool cap_delete(struct cap *n, bool preempt)
       * An Untyped makes nothing more, as those already roots lie in its memory
       * while another thread may take away those still below it.
       */
 -    if (n->type == CAP_UNTYPED) {
--        n->b = UNTYPED_GOING;
+-        untyped_set_going(n);
 -    }
-     while (n->child != 0) {
+     while (cap_child(n) != 0) {
          LOOP_PAID(cap_delete, link, "a child below a root, which becomes a root itself");
-         struct cap *c = node(n->child);
+         struct cap *c = node(cap_child(n));

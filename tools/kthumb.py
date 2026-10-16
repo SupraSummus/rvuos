@@ -441,6 +441,9 @@ def analyse(functions, end, frames, image, sections, owner, by_addr):
         measured = 0
         for pc, mnem, ops in insns:
             kind, _ = classify(mnem, ops)
+            if name in frames and mnem.split(".")[0] == "mov" and ops.startswith("sp,"):
+                raise Failure(f"{name} at {pc:#x} sets sp from a register, "
+                              "a frame realigned or sized at run time, which -fstack-usage calls static")
             t = target(ops) if kind in ("jump", "branch", "call") else None
             if t is not None:
                 home = owner(t)

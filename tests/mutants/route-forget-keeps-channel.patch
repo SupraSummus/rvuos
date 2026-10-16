@@ -4,6 +4,7 @@ the channel table names exactly the bound Routes.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: channel table names a route that is gone
+Witness: fuzz route-dies-with-pool
 
 diff --git a/kernel/route.c b/kernel/route.c
 --- a/kernel/route.c

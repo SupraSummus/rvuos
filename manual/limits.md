@@ -17,7 +17,7 @@ Chapters 10 and 11 of the user manual; [`MANUAL.md`](../MANUAL.md) has its conte
 | root task's table | 46 slots past the boot capabilities, 67 in all on QEMU | `ROOT_TABLE_SLOTS` |
 | boot pool | 4 KiB | `BOOT_POOL_SIZE` in `kernel/layout.h` |
 | smallest pool | 64 bytes | `POOL_MIN_SIZE` |
-| object alignment | 8 bytes | `OBJ_ALIGN` |
+| object alignment | 16 bytes | `OBJ_ALIGN` |
 | an object's size | section 5.5 | `OP_POOL_INFO` |
 | notification bits | 32 | the word size |
 | timer lines | 16, on the whole machine | `TIMER_LINES` |

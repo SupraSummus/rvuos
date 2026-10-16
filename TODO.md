@@ -85,8 +85,8 @@ what is left:
   A hub's ends are connected again, with the server's word that it let go of the last client;
   a peer could be given the same, which the driver and the network process have not needed, as neither is built again.
 - Every child's objects get a pool of `CHILD_POOL_SIZE`, 4 KiB, whatever its table,
-  where the ESP32-C6's clients fill 936 bytes and its network process 1128,
-  and the driver's own pool, `DRV_OWN_POOL`, is 8 KiB for 1544.
+  where the ESP32-C6's clients and its network process fill less than a third of it,
+  and the driver's own pool, `DRV_OWN_POOL`, is 8 KiB for under 2.
   Sized to fit, they would leave the ESP32-C6's root task 8 KiB more,
   and 14 with the driver's own, at a slot for each block that halving it leaves;
   `OP_POOL_INFO` tells what each object takes, so `user/lib/child.c` could size them by asking.

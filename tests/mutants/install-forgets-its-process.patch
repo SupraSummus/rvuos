@@ -1,0 +1,19 @@
+An installed region does not name its process.
+Clearing it would leave the process's PMP image as it was, the region a mere capability;
+an installed region names its process.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
+Report: installed region does not name its process
+Witness: fuzz actor-handoff
+
+diff --git a/kernel/process.c b/kernel/process.c
+--- a/kernel/process.c
++++ b/kernel/process.c
+@@ -110,7 +110,6 @@ int process_install(struct process *proc, unsigned slot,
+     }
+ 
+     proc->slots[slot] = cap_to_frame(base, size, rights);
+-    proc->slots[slot].b = held_word(v2p(proc), 0);
+     cap_attach(parent, &proc->slots[slot]);
+     rebuild_pmp(proc);
+     return KERR_OK;

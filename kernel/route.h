@@ -24,6 +24,7 @@
 #ifndef ROUTER_FAKE
 #define ROUTER_FAKE 0
 #endif
+_Static_assert(ROUTE_FIRST + ROUTE_CHANNELS <= UINT16_MAX, "a RouteLine capability names its range in two bytes each");
 
 struct cap;
 struct route;

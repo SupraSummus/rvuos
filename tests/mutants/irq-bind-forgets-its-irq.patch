@@ -1,0 +1,19 @@
+An Irq's notification keeps the second word of the capability it was bound with, and does not name the Irq.
+A revoke that clears it would leave the Irq armed and its line unmasked;
+an Irq's notification names its Irq.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: irq's notification does not name its irq
+Witness: fuzz bind-restarts
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -733,7 +733,6 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
+         struct irq *irq = pool_alloc(pool, CAP_IRQ, obj_type_size(CAP_IRQ, 0));
+         /* It hangs below the capability it was bound with, so a revoke above that disarms the Irq. */
+         irq->ntfn = nc;
+-        irq->ntfn.b = held_word(v2p(irq), nc.b);
+         cap_attach(slot_node(t, arg[2]), &irq->ntfn);
+         irq->line = first;
+         /* A period counts from the last deadline, and a line that never fired from its bind. */

@@ -84,6 +84,7 @@
  * Notification: RIGHT_W to signal, RIGHT_R to wait.
  *   Besides its rights a Notification capability carries the bits it may signal,
  *   every bit for a new one and fewer once carved, see OP_NOTIFY_CARVE; copying keeps them.
+ *   They are an aligned block: 1, 2, 4, 8, 16 or 32 bits, starting at a multiple of their count.
  * IrqLine: RIGHT_W to bind a line.
  * Irq: RIGHT_W to set or mask.
  * Time: RIGHT_W to bind a thread, RIGHT_X to let the threads bound through it run on spare time.
@@ -396,7 +397,8 @@
  * Thread (RIGHT_W): name what the thread's faults signal, its watch.
  * a1 = the slot of a Notification capability, which needs RIGHT_W and may lie in any pool,
  * a2 = the bits a fault signals there, of which only those the capability may signal are kept,
- * and a2 with none of them fails with KERR_NO_RIGHTS; a2 = 0 clears the watch and ignores a1.
+ * and a2 with none of them fails with KERR_NO_RIGHTS, and those kept not an aligned block, as a capability's bits are,
+ * with KERR_INVALID_ARG; a2 = 0 clears the watch and ignores a1.
  * A fault, an access fault, an illegal instruction, a misaligned access or a breakpoint,
  * stops the thread at the instruction that faulted, with its registers as they were,
  * and signals the bits as OP_NOTIFY_SIGNAL would; nothing else stops, the machine goes on.
@@ -482,7 +484,8 @@
 /*
  * Notification: derive a capability that may signal fewer bits, with the same rights.
  * a1 = the bits, of which those the invoked capability may signal are kept, a2 = destination slot.
- * Fails with KERR_INVALID_ARG when none is kept.
+ * Fails with KERR_INVALID_ARG when none is kept, or when those kept are not an aligned block:
+ * 1, 2, 4, 8, 16 or 32 bits, starting at a multiple of their count, which six bits of the slot name.
  * Like OP_FRAME_CARVE, this is a table operation that touches no kernel memory,
  * and the new capability is a child of the invoked one.
  * A client given its own bit this way cannot signal another's; see DESIGN.md, "Communication and synchronisation".
@@ -655,7 +658,7 @@
  * 1 to the most the machine allows, see OP_CAP_INFO, of places for CAP_THREAD, 1 to the machine's cores,
  * and 0 for every other type.
  * Anything else fails with KERR_INVALID_ARG and writes nothing.
- * Returns a1 = the bytes, a multiple of eight, as the pool counts them,
+ * Returns a1 = the bytes, a multiple of sixteen, as the pool counts them,
  * and a2 = the pool's room, as OP_CAP_INFO tells it; a3 and a4 are unchanged.
  * An allocation of the type that passes its other checks fails with KERR_NO_MEMORY exactly when a1 is more than a2,
  * and with KERR_STATE while the pool is being destroyed, whose room is 0,

@@ -4,6 +4,7 @@ a Route is armed only with both its ends.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: route is armed without both its ends
+Witness: fuzz route-arms-with-both-ends
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

@@ -13,25 +13,25 @@ Witness: fuzz actor-handoff
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -119,23 +119,8 @@ void cap_move(struct cap *from, struct cap *to)
+@@ -128,23 +128,8 @@ void cap_move(struct cap *from, struct cap *to)
       * An only child is its own predecessor and successor, and a root is in no ring.
       */
      *to = *from;
--    if (from->next != LINK_UP) {
--        struct cap *pred = node(from->prev);
+-    if (cap_next(from) != LINK_UP) {
+-        struct cap *pred = node(cap_prev(from));
 -        if (pred == from) {
--            to->prev = v2p(to);
+-            cap_set_prev(to, v2p(to));
 -        } else {
--            ring_next(from)->prev = v2p(to);
+-            cap_set_prev(ring_next(from), v2p(to));
 -        }
--        if (pred->next & LINK_UP) {
--            node(pred->next)->child = v2p(to);
+-        if (cap_next(pred) & LINK_UP) {
+-            cap_set_child(node(cap_next(pred)), v2p(to));
 -        } else {
--            pred->next = v2p(to);
+-            cap_set_next(pred, v2p(to));
 -        }
 -    }
--    if (from->child != 0) {
--        node(node(from->child)->prev)->next = v2p(to) | LINK_UP;
+-    if (cap_child(from) != 0) {
+-        cap_set_next(node(cap_prev(node(cap_child(from)))), v2p(to) | LINK_UP);
 -    }
 -    *from = (struct cap){ 0 };
 +    attach_beside(from, to);

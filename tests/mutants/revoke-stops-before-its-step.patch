@@ -9,13 +9,13 @@ Witness: fuzz bind-restarts
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -241,6 +241,9 @@ bool cap_revoke_below(struct cap *root, uint32_t through, bool preempt)
+@@ -249,6 +249,9 @@ bool cap_revoke_below(struct cap *root, uint32_t through, bool preempt)
       */
-     while (root->child != 0) {
+     while (cap_child(root) != 0) {
          LOOP_PAID(cap_revoke_below, node, "a node it clears");
 +        if (cap_stop_here(preempt)) {
 +            return false;
 +        }
-         struct cap *n = node(root->child);
-         if (n->type == CAP_RETYPED) {
-             if (!pool_destroy(node_pool(n), preempt)) {
+         struct cap *n = node(cap_child(root));
+         struct pool *pool = node_pool(n);
+         if (pool != NULL) {

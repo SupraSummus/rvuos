@@ -10,8 +10,8 @@ Witness: fuzz-work actor-handoff
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -513,7 +513,7 @@ void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights,
-     *b = (struct cap){ .type = CAP_BOUND, .rights = rights, .index = p->index, .a = first, .b = count };
+@@ -510,7 +510,7 @@ void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights,
+     b->b = held_word(v2p(place_thread(p)), 0);
      cap_attach(parent, b);
      for (uint32_t i = 0; i < count; i++) {
 -        LOOP_BOUND(TIME_UNITS);

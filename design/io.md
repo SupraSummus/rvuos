@@ -61,7 +61,7 @@ A revoke above the slot, or the destroy of the notification's pool, clears it,
 which disarms the `Irq` and masks its line.
 `OP_IRQ_SET` refuses an `Irq` without a notification,
 so it stays disarmed, its line bound, until its own pool goes.
-It costs twenty-four bytes per `Irq` and a test on every set;
+It costs sixteen bytes per `Irq` and a test on every set;
 before, an `Irq` had to lie in its notification's pool so a pointer could not dangle.
 
 **One `Irq` per line.**
@@ -101,7 +101,7 @@ only sooner, and the board refuses what the frame does not hold, RAM and the ker
 Connecting an end it had disarms it, so the router never wires one end to the other's old partner.
 
 **A `Route` holds its frames as an `Irq` holds its notification:**
-each end is a node, `CAP_ROUTED`, below the `Frame` capability it was connected through,
+each end is a node, a `Frame` that names the `Route`, below the `Frame` capability it was connected through,
 so a revoke above it takes the end and disarms the `Route`, and a parent that takes a device back takes its wires.
 The destroy of the `Route`'s pool disarms it too and frees the channel.
 A word per channel records its `Route`, so nothing walks to find one,

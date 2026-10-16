@@ -124,7 +124,10 @@ uint32_t child_new(struct self *s, struct child *c, const char *name, uint32_t t
  * to take it back from one child alone, the parent gives each a slot derived for it.
  */
 uint32_t child_give(struct self *s, struct child *c, uint32_t slot, uint32_t rights, uint32_t *at);
-/* A notification of the parent's, to signal with RIGHT_W alone and only bits, in the child's next free slot. */
+/*
+ * A notification of the parent's, to signal with RIGHT_W alone and only bits, in the child's next free slot.
+ * The bits are an aligned block, as OP_NOTIFY_CARVE takes them, which a single bit, as bit_new gives, always is.
+ */
 uint32_t child_give_bits(struct self *s, struct child *c, uint32_t ntfn, uint32_t bits, uint32_t *at);
 /* The child's next free slot, left empty, for the parent to fill later, as child_put_bits does. */
 uint32_t child_slot(struct self *s, struct child *c, uint32_t *at);

@@ -9,7 +9,7 @@ Witness: fuzz move-keeps-place
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -119,6 +119,11 @@ void cap_move(struct cap *from, struct cap *to)
+@@ -128,6 +128,11 @@ void cap_move(struct cap *from, struct cap *to)
       * An only child is its own predecessor and successor, and a root is in no ring.
       */
      *to = *from;
@@ -18,6 +18,6 @@ diff --git a/kernel/cap.c b/kernel/cap.c
 +        cap_delete(from, false);
 +        return;
 +    }
-     if (from->next != LINK_UP) {
-         struct cap *pred = node(from->prev);
+     if (cap_next(from) != LINK_UP) {
+         struct cap *pred = node(cap_prev(from));
          if (pred == from) {

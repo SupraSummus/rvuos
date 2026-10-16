@@ -7,11 +7,11 @@ Witness: fuzz describe-every-type
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -952,7 +952,7 @@ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *a
+@@ -963,7 +963,7 @@ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *a
          /* What the bind's capability may signal, zero once the notification was taken, and never what is armed. */
          const struct irq *irq = (const struct irq *)cap_object(cap);
          arg[2] = irq->line;
--        arg[3] = irq->ntfn.b;
+-        arg[3] = irq_notification(irq) != NULL ? notify_bits(&irq->ntfn) : 0;
 +        arg[3] = irq->bits;
          arg[4] = line_is_timer(irq->line);
          break;

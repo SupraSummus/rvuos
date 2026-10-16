@@ -9,11 +9,11 @@ Witness: fuzz notify-carve-bits
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -688,7 +688,6 @@ static int op_irq(const struct cap *cap, uint32_t op, uint32_t *arg)
+@@ -829,7 +829,6 @@ static int op_irq(const struct cap *cap, uint32_t op, uint32_t *arg)
          return KERR_STATE;
      }
      /* It signals on its binder's behalf, so only the bits the capability it was bound with may. */
--    bits &= irq->ntfn.b;
+-    bits &= notify_bits(&irq->ntfn);
      if (bits == 0 && arg[1] != 0) {
          return KERR_NO_RIGHTS;
      }

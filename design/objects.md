@@ -70,22 +70,30 @@ and a `KernelPool` capability with no right a pool's room, and so what its other
 
 #### Slot format
 
-A slot is twenty-four bytes: type, rights, an index, padding, two words of content,
-and three links of the derivation tree.
-The index is an installed region's slot in its process,
-so that uninstalling it finds the process without a walk.
-For object capabilities the first word of content is the object's address
-and the second is unused,
-but for a `Notification`, where it is the bits the capability may signal; see "Communication and synchronisation".
+A slot is sixteen bytes: two words of content and the three links of the derivation tree, 28 bits each.
+Every object lies on sixteen bytes, and every node it holds on sixteen within it,
+so a link is a node's address shifted down by four,
+and reaches a node anywhere in the address space, wherever a board's RAM lies:
+nothing ties a pool to a window.
+The links to the next and the previous node of the ring take the slot's last two words with the type and the rights,
+five bits and three, the previous one's straddling the two;
+the link to the first child lies in the second word of content, with the bit that marks a link up,
+since no capability needs that word whole once a frame and a range of lines, units or channels take one word.
+Five bits of type leave room for thirty-two, of which the ABI names seventeen,
+so the kernel has no types of its own: a node an object holds is a capability of the type it names, see below.
+For object capabilities the first word of content is the object's address.
+A `Notification` capability carries the bits it may signal too, see "Communication and synchronisation",
+which are therefore an aligned block of 1, 2, 4, 8, 16 or 32 bits, named in six bits:
+four below the notification's address, which lies on sixteen bytes, and two above the first child's link.
 A slot carries nothing that has to be checked against the object,
 because a destroy clears the slots naming what it takes;
 see "Kernel pools and revocation".
 A `Frame` has no object behind it:
-its two words are the base address and the size,
+its first word is its block, base and size as NAPOT encodes them, since every frame is a block,
 and the rights are the memory permissions it may grant.
 An `Untyped` has none either:
-its first word is its block, base and size as NAPOT encodes them,
-its second is 0 but while its delete as a root goes, see below,
+its first word is its block, as a frame's is,
+and its link to a previous node, which a root has no use for, says that its delete as a root goes, see below,
 since whether it is free the derivation tree says,
 and its rights are those of the frames made of it.
 Carving a frame, retyping an Untyped into a frame and splitting one into halves
@@ -93,11 +101,22 @@ are therefore pure table operations that touch no kernel memory,
 which is what lets the root task hand out memory
 before it has created a single pool.
 An `IrqLine` capability has the same shape for the same reason:
-its words are the first line and the count, there is no object,
+its first word is the first line and the count, sixteen bits each, there is no object,
 and the root task hands lines out as it hands out memory.
 A `Time` capability is the same again, with units of the processor's time for lines.
 A `Clock` capability, like `Print`, `Halt` and `Test`, has neither object nor content:
 there is one counter and one watchdog on the machine.
+
+A node an object holds, see "The derivation tree", has the layout of a capability of the type it names,
+and is a leaf but for a pool's own node, so it needs no link to a first child.
+Where the object must hear of the node's clearing, the node names it there instead, with a bit that says so:
+an installed region is a `Frame` that names its process,
+a thread's process a `Process` capability and each of its places' units a `Time` capability that name the thread,
+an `Irq`'s notification a `Notification` capability that names the `Irq`, with the bits it may signal,
+and a `Route`'s ends `Frame` capabilities that name the `Route`.
+So the object that hears of a node's clearing is found without a walk.
+A pool's own node is a `KernelPool` capability, told from a capability to the pool by lying in the descriptor it names;
+a thread's watch and a process's table slots are capabilities as a table holds them.
 
 ### Object types
 
@@ -192,7 +211,7 @@ until a revoke below the Untyped destroys it,
 as an object whose capabilities were revoked stays in its pool.
 The kernel keeps no per-pool state outside the pool
 but a list head that only the self-check and the host harness walk.
-Objects are bump-allocated behind the descriptor, eight-byte aligned,
+Objects are bump-allocated behind the descriptor, sixteen-byte aligned,
 and each records its pool and how far back the object before it lies.
 
 A pool tells its room.
@@ -360,8 +379,7 @@ see "Kernel pools and revocation".
 
 **The shape.**
 Three links per slot, first child, next and previous,
-where the last child's next points up to the parent with the low bit set,
-which the four-byte alignment of slots leaves free,
+where the last child's next points up to the parent with a bit of its own set, see "Slot format",
 and the first child's previous is the last child.
 The children of a node are then a ring that closes through the node.
 A node leaves its ring in constant time:
@@ -435,7 +453,7 @@ Each capability keeps its number and its place in the derivation tree, and is in
 So a process outgrows its table, or leaves memory it is to give back, without a successor;
 no other thread of it may make a call meanwhile.
 `self_migrate` in `user/lib/self.h` does it.
-It costs every process twenty-four bytes a table slot.
+It costs every process sixteen bytes a table slot.
 Why two table slots and a fixed depth is open decision 15.
 
 ### Region slots
@@ -499,7 +517,7 @@ so it stays stopped until its own pool goes.
 The running thread can lose its process only to a revoke it makes itself, see "Bounded work",
 and can be stopped only by itself.
 A thread another core runs can lose it, or be stopped, by any call, which makes that core trap first; see "Cores".
-It costs twenty bytes per thread and a test on every call and every switch;
+It costs twelve bytes per thread, a node where a pointer was, and a test on every call and every switch;
 before, a thread had to lie in its process's pool so a pointer could not dangle.
 
 A thread is stopped, ready or waiting.
@@ -567,7 +585,7 @@ and a thread without a watch stops at a fault all the same, and nobody hears.
 The node is out of the thread's reach:
 a watch named by a slot of the thread's own table would need no node,
 but the thread could then signal a fault it never made, or delete its watch.
-It costs twenty-four bytes per thread, one node more for a destroy to look at, and a signal per fault.
+It costs sixteen bytes per thread, one node more for a destroy to look at, and a signal per fault.
 
 **What the watcher does is policy.**
 The kernel stops the thread, signals its watch and does no more, since every answer is an operation already:
@@ -612,10 +630,12 @@ before the waiter got there is not lost.
 `RIGHT_W` may signal and `RIGHT_R` may wait,
 so a driver can be given the power to announce something
 without the power to consume the announcement.
-A capability also carries the bits it may signal, in the second word of its slot:
+A capability also carries the bits it may signal, an aligned block of 1, 2, 4, 8, 16 or 32 bits,
+which six bits of its slot name; see "Slot format":
 every bit for the one an allocation returns,
 and fewer for one `OP_NOTIFY_CARVE` made, below the one carved,
-as a carve of a frame is less memory below the frame.
+as a carve of a frame is less memory below the frame;
+a client's own bit is a block, and bits 0 and 2 together are none, which a carve refuses.
 A signal sets only the bits it names that its capability may signal,
 and one that names none of them is refused;
 an `Irq` or a watch signals through the capability it was bound or set with, and so only its bits too.

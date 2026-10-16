@@ -2,18 +2,18 @@ Whether an Untyped is free asks only whether something lies below it,
 so one whose delete as a root stopped makes things again over what became roots, or is derived.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
-Report: untyped going though not a root, or b neither zero nor going
+Report: memory that may hold kernel objects overlaps a node not above or below it
 Witness: fuzz delete-root-makes-nothing
 
 diff --git a/kernel/object.h b/kernel/object.h
 --- a/kernel/object.h
 +++ b/kernel/object.h
-@@ -365,7 +365,7 @@ static inline uint32_t untyped_base(const struct cap *c) { return c->a & ~(untyp
- /* An Untyped's b once its delete as a root has begun, see cap_delete. */
- #define UNTYPED_GOING 1u
+@@ -440,7 +440,7 @@ static inline void notify_set(struct cap *c, paddr_t obj, uint32_t code)
+ }
+ 
  /* Whether an Untyped makes something: only while nothing made of it is left, below it or gone up as a root. */
--static inline bool untyped_free(const struct cap *c) { return c->child == 0 && c->b != UNTYPED_GOING; }
-+static inline bool untyped_free(const struct cap *c) { return c->child == 0; }
+-static inline bool untyped_free(const struct cap *c) { return cap_child(c) == 0 && !untyped_going(c); }
++static inline bool untyped_free(const struct cap *c) { return cap_child(c) == 0; }
  /*
   * What an Untyped made, as OP_CAP_INFO tells it: 0 while nothing lies below it, else the type of the node first there,
   * CAP_FRAME for a frame, a region installed from one or a Route's end on one, CAP_UNTYPED for a half or a derived Untyped,
