@@ -19,9 +19,7 @@ so the kernel's own memory is unreachable,
 the log excepted: it holds no object and can never become a pool.
 Memory that may hold kernel objects, an Untyped or a pool,
 overlaps another node standing for memory, an Untyped, a pool, a frame or an installed region,
-only where one lies below the other,
-or where one of the two is an Untyped whose delete as a root has begun,
-which makes roots of its children one by one and nothing else until it goes.
+only where one lies below the other.
 So no frame overlaps a pool, and no Untyped makes a block over anything not below it.
 
 **PMP fidelity.**
@@ -61,14 +59,16 @@ the process, units and watch of every live thread,
 the notification of every live `Irq`
 and the own node of every pool
 are the nodes of one forest.
-Every link of a filled node lands on a live, filled node;
-an empty node has no links.
-The children of a node form one ring that closes through the node,
-every node on it linked up to that node,
-and every node's previous link names the sibling whose next is the node,
-the last sibling for the first;
-a root has no siblings and no previous link,
-and a capability to a pool or an object is never one, nor a thread's process or watch or an `Irq`'s notification.
+Every link of a filled node lands on a live, filled node that links back;
+an empty node has no links and is no original.
+The links make lists, each of which ends, and every filled node lies on one.
+The forest is read off them, see "The derivation tree" in `design/objects.md`:
+below an original lies what comes right after it in its list and it covers,
+and it covers nothing further on,
+so a node's parent is the nearest original before it that covers it.
+Every Untyped and every pool's own node is an original,
+and no table slot or region slot of a process is, nor a thread's process, units or watch, nor an `Irq`'s notification.
+A capability to a pool or an object is never a root, nor a thread's process or watch or an `Irq`'s notification.
 A node is derived from its parent:
 the same object with no more rights, and for a notification no more bits to signal,
 a range within the parent's range with no more rights,
@@ -722,8 +722,8 @@ and `model-check`, which holds the host build to it and searches it.
 The model maps a state and an event to every outcome the kernel may reach.
 The state is what `host/model.c` writes of the kernel's memory:
 every object with its array of nodes, and a pool its size,
-every filled node's words by its address,
-and each node's children in the order of their ring; no link, no scheduler, no PMP.
+every filled node's words by its address and whether it is an original,
+and each node's children in the order of their list; no link, no scheduler, no PMP.
 It models the operations that touch nothing but the tree:
 `OP_CAP_COPY`, `OP_CAP_DERIVE`, `OP_CAP_MOVE`, `OP_CAP_DELETE`,
 `OP_CAP_REVOKE` until it meets a pool's own node,
@@ -746,7 +746,7 @@ as it only takes away.
 So each invariant of "Properties" the model's state can say goes through three stages.
 
 1. It is stated from the self-check as a check of a state, in `invariants` of `model/Main.lean`:
-   `State.wellFormed` the forest of "Derivation", `State.nestingOk` the nesting of "Isolation",
+   `State.wellFormed` the forest of "Derivation", `State.origOk` its originals, `State.nestingOk` the nesting of "Isolation",
    and `State.derivedOk` what the nesting needs of the rest of "Derivation" to follow from step to step.
    `model-check` holds it to every traced state the self-check passed,
    so a statement that says other than the kernel's check shows on the seeds and the corpus.
@@ -777,13 +777,12 @@ What is proved is proved of the model:
   `bv_decide` checks its SAT proof with code Lean compiles, so these two trust Lean's compiler too.
 - `delete_revoke_shrink`, in `model/Rvuos/Shrink.lean`:
   a delete or a revoke leaves no capability that was not there before, with the same words,
-  but for an Untyped a delete of it as a root marks going,
   in every outcome, stopped part way or not.
 - `step_flows`, in `model/Rvuos/Flows.lean`:
   authority only flows, in every outcome of every step the model names.
-  Every node a step fills or changes held the same words before, but such an Untyped,
+  Every node a step fills or changes held the same words before,
   or a node the caller reached through its tables covers it:
-  the same capability, or memory within a frame's or an Untyped's, with no more rights.
+  the same capability, an original or not, or memory within a frame's or an Untyped's, with no more rights.
   It leans on `split_within`, proved with `bv_decide`, so it trusts Lean's compiler too.
 - `step_forest`, in `model/Rvuos/Forest.lean`:
   every outcome of every step the model names is a forest where the state before it was one,

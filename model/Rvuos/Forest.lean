@@ -551,44 +551,15 @@ theorem Forest.beside (h : Forest s) {n b : Nat} (c : Cap) (hn : s.cap? n = none
       simp only [State.kidsOf_setCap] at hx
       exact mem_insertAfter hx
 
-end
+/-- A copy, a derivation or a carve, below its source or beside it. -/
+theorem Forest.place (h : Forest s) {n src : Nat} (c : Cap) (above : Bool) (hn : s.cap? n = none)
+    (hp : (s.cap? src).isSome) : Forest (Rvuos.place s n src c above) := by
+  unfold Rvuos.place
+  split
+  · exact h.store c hn hp
+  · exact h.beside c hn
 
-/-- `cap_delete` of a root, a step a child: a forest at every step, the node a root with the list it is given. -/
-theorem deleteRoot_forest (n : Nat) (r : List Nat) (ks : List Nat) :
-    ∀ (s : State) (acc : List Outcome) (o : Outcome), Forest s → ks = s.kidsOf n → (∀ q, n ∉ s.kidsOf q) →
-      o ∈ deleteRoot n r ks s acc → o ∈ acc ∨ Forest o.st := by
-  induction ks with
-  | nil =>
-    intro s acc o h hks hroot ho
-    simp [deleteRoot] at ho
-    rcases ho with ho | ho
-    · exact Or.inl ho
-    · subst ho; exact Or.inr (h.eraseCap hroot hks.symm)
-  | cons x xs ih =>
-    intro s acc o h hks hroot ho
-    have hsub : ∀ y ∈ xs, y ∈ s.kidsOf n := fun y hy => hks ▸ List.mem_cons_of_mem _ hy
-    have hnd : xs.Nodup := by have := h.nodup n; rw [← hks] at this; exact (List.nodup_cons.mp this).2
-    have h' := h.shrink hnd hsub
-    have hroot' : ∀ q, n ∉ (s.setKids n xs).kidsOf q := by
-      intro q hq
-      rw [State.kidsOf_setKids] at hq
-      split at hq
-      · exact h.not_self (hsub n hq)
-      · exact hroot q hq
-    cases xs with
-    | nil =>
-      simp [deleteRoot] at ho
-      rcases ho with ho | ho
-      · exact Or.inl ho
-      · subst ho; exact Or.inr (h'.eraseCap hroot' (by simp [State.kidsOf_setKids]))
-    | cons k ks =>
-      simp only [deleteRoot] at ho
-      rcases ih _ _ o h' (by simp [State.kidsOf_setKids]) hroot' ho with h'' | h''
-      · simp at h''
-        rcases h'' with h'' | h''
-        · exact Or.inl h''
-        · subst h''; exact Or.inr h'
-      · exact Or.inr h''
+end
 
 /-- `cap_revoke_below`'s loop: a forest at every step. -/
 theorem revokeLoop_forest (m : Machine) (t slot root : Nat) (r : List Nat) :
@@ -640,9 +611,14 @@ theorem capDelete_forest (hf : Forest s) {table : Obj} {r : List Nat} {outs : Li
   rcases capDelete_ok h with rfl | ⟨n, ⟨p, hp, rfl⟩ | ⟨c, -, hp, rfl⟩⟩
   · rw [List.mem_singleton] at ho; subst ho; exact hf
   · rw [List.mem_singleton] at ho; subst ho; exact hf.detachErase ((hf.parent?_eq _ p).mp hp)
-  · rcases deleteRoot_forest _ r _ _ [] o (hf.setCap n c.markGoing) rfl ((hf.parent?_none _).mp hp) ho with h' | h'
-    · simp at h'
-    · exact h'
+  · rw [List.mem_singleton] at ho; subst ho
+    have hroot := (hf.parent?_none _).mp hp
+    refine (hf.shrink (n := n) (l := []) List.nodup_nil (by simp)).eraseCap (fun q => ?_)
+      (by simp [State.kidsOf_setKids])
+    rw [State.kidsOf_setKids]
+    split
+    · simp
+    · exact hroot q
 
 /-- Every modelled step keeps a forest: every outcome it names, from a forest, a call stopped part way among them. -/
 theorem step_forest (m : Machine) (s : State) (e : Event) (outs : List Outcome) (hf : Forest s)
@@ -654,10 +630,12 @@ theorem step_forest (m : Machine) (s : State) (e : Event) (outs : List Outcome) 
   · exact one hf ho
   rcases hh with ⟨_, -, hh⟩ | ⟨-, hh⟩ | ⟨-, hh⟩
   · rcases opCaptable_cases hh with ⟨-, hh⟩ | ⟨-, hh⟩ | ⟨-, hh⟩ | ⟨-, hh⟩ | ⟨-, hh⟩
-    · obtain ⟨_, _, _, -, hdst, rfl⟩ := capCopy_ok hh
-      exact one (hf.beside _ hdst) ho
-    · obtain ⟨_, _, _, hl, hdst, rfl⟩ := capCopy_ok hh
-      exact one (hf.store _ hdst (by simp [(slotLookup_held hl).2])) ho
+    all_goals try (
+      obtain ⟨_, _, _, hl, hdst, rfl⟩ := capCopy_ok hh
+      refine one ?_ ho
+      split
+      · exact hf.store _ hdst (by simp [(slotLookup_held hl).2])
+      · exact hf.place _ _ hdst (by simp [(slotLookup_held hl).2]))
     · obtain ⟨_, _, _, hl, hdst, rfl⟩ := capMove_ok hh
       exact one (hf.move (slotLookup_held hl).2 hdst) ho
     · exact capDelete_forest hf hh o ho
@@ -666,7 +644,7 @@ theorem step_forest (m : Machine) (s : State) (e : Event) (outs : List Outcome) 
       · simp at h'
       · exact h'
   · obtain ⟨_, -, -, -, hdst, rfl⟩ := opFrame_ok hh
-    exact one (hf.store _ hdst (by simp [hc])) ho
+    exact one (hf.place _ _ hdst (by simp [hc])) ho
   · rcases opUntyped_cases hh with ⟨-, hh⟩ | ⟨-, hh⟩
     · obtain ⟨_, _, hdst, rfl⟩ := untypedRetype_ok hh
       exact one (hf.store _ hdst (by simp [hc])) ho

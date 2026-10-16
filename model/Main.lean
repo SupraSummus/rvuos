@@ -50,8 +50,8 @@ partial def readState (r : Reader) : IO State := do
       let [a, t, p, n, c, z] ← nats rest | throw (IO.userError "model-check: obj takes six words")
       go { s with objs := ⟨a, t, p, n, c, z⟩ :: s.objs }
     | "node" :: rest =>
-      let [n, t, rt, i, a, b] ← nats rest | throw (IO.userError "model-check: node takes six words")
-      go { s with caps := (n, ⟨t, rt, i, a, b⟩) :: s.caps }
+      let [n, t, rt, i, a, b, o] ← nats rest | throw (IO.userError "model-check: node takes seven words")
+      go { s with caps := (n, ⟨t, rt, i, a, b, o != 0⟩) :: s.caps }
     | "kids" :: rest =>
       let (p :: ks) ← nats rest | throw (IO.userError "model-check: kids takes a parent")
       go { s with kids := (p, ks) :: s.kids }
@@ -68,7 +68,8 @@ structure Invariant where
 def invariants : List Invariant :=
   [⟨"forest", State.wellFormed, none⟩,
    ⟨"derivation", State.derivedOk, none⟩,
-   ⟨"nesting", State.nestingOk, none⟩]
+   ⟨"nesting", State.nestingOk, none⟩,
+   ⟨"originals", State.origOk, none⟩]
 
 /-- What a step left: the caller's registers, or what stood in for them. -/
 inductive Seen where

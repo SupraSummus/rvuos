@@ -5,8 +5,8 @@
  * Each trap is one step of the trace:
  * the event, the state before, what the caller's registers hold after, and the state after.
  * The state is every object with its nodes, and a pool its size,
- * every filled node by its address and its words,
- * and every node's children in the order of their ring, first child first.
+ * every filled node by its address, its words and whether it is an original,
+ * and every node's children in the order of their list, first child first.
  * Links, pointers and the kernel's other state are left out:
  * the model says what a step does to the tree, and the checker holds the kernel to it;
  * see DESIGN.md, "The model".
@@ -91,8 +91,8 @@ static void put_state(void)
             if (c->type == CAP_NONE) {
                 continue;
             }
-            put("node %u %u %u %u %u %u\n", (unsigned)v2p(c), (unsigned)c->type, (unsigned)c->rights,
-                (unsigned)c->index, (unsigned)c->a, (unsigned)c->b);
+            put("node %u %u %u %u %u %u %u\n", (unsigned)v2p(c), (unsigned)c->type, (unsigned)c->rights,
+                (unsigned)c->index, (unsigned)c->a, (unsigned)c->b, (unsigned)c->orig);
             if (node_first_below(c) == NULL) {
                 continue;
             }

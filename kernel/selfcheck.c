@@ -130,6 +130,10 @@ static void check_pools(void)
         if ((base | p->size) & (OBJ_ALIGN - 1)) {
             fail("pool is not aligned", base, p->size, 0);
         }
+        /* The pool's own node is an original, so that every capability to the pool and its objects lies below it. */
+        if (p->node.type == CAP_RETYPED && !p->node.orig) {
+            fail("pool's own node is no original", base, 0, 0);
+        }
         if (p->dying > 1 || (!p->dying && p->sweep != 0)) {
             fail("pool's destroy state is malformed", base, p->dying, p->sweep);
         }

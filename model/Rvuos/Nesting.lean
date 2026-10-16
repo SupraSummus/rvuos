@@ -1,8 +1,7 @@
 /-
 "Isolation" of design/verification.md, as `check_nesting` in `kernel/selfcheck.c` says it:
 memory that may hold kernel objects, an Untyped or a pool,
-overlaps another node standing for memory only where one lies below the other,
-or where one of the two is an Untyped whose delete as a root has begun.
+overlaps another node standing for memory only where one lies below the other.
 It is what keeps one block of memory from having two allocators.
 -/
 import Rvuos.Step
@@ -29,15 +28,12 @@ where
       | none => false
       | some p => p == a || go fuel p
 
-/-- `going`: an Untyped whose delete as a root has begun, which makes roots of its children one by one. -/
-def going (c : Cap) : Bool := c.type == capUntyped && c.b == untypedGoing
-
 /-- Two nodes the nesting allows to stand for the same memory. -/
 def nests (s : State) (x : Nat) (cx : Cap) (y : Nat) (cy : Cap) : Bool :=
   match s.range? cx, s.range? cy with
   | some (bx, zx), some (by_, zy) =>
     x == y || !(bx < by_ + zy && by_ < bx + zx) ||
-      s.liesBelow x y || s.liesBelow y x || going cx || going cy
+      s.liesBelow x y || s.liesBelow y x
   | _, _ => true
 
 /-- Memory that may hold kernel objects, an Untyped or a pool's own node. -/
@@ -59,6 +55,14 @@ def derivedOk (s : State) : Bool :=
     | some cp, some ck =>
       (!mayHold ck || cp.type == capUntyped) && (!capHasObject cp.type || capHasObject ck.type)
     | _, _ => true
+
+/--
+"Originals", as `kernel/selfcheck.c` checks them: every Untyped and every pool's own node is an original,
+and only an original has anything below it, which `node_below` holds the kernel's lists to.
+-/
+def origOk (s : State) : Bool :=
+  s.caps.all (fun (_, c) => (c.type != capUntyped && c.type != capRetyped) || c.orig) &&
+    s.kids.all fun (p, l) => l.isEmpty || ((s.cap? p).map (·.orig)).getD false
 
 /-- `check_nesting`: every Untyped and every pool nests with every node that stands for memory. -/
 def nestingOk (s : State) : Bool :=

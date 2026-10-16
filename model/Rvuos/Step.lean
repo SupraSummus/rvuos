@@ -122,11 +122,18 @@ def shapeCheck (op : Nat) (c : Cap) (r : List Nat) : Except Nat (Option Unit) :=
 /-- A finished call: status zero and the arguments as they came, but where a handler writes a result. -/
 def finish (st : State) (r : List Nat) : Outcome := ⟨st, .regs (kOk :: r.drop 1)⟩
 
-/-- `untyped_free`: nothing made of the Untyped at `u` is left below it, and its delete as a root has not begun. -/
-def untypedFree (u : Nat) (c : Cap) : Bool := (s.kidsOf u).isEmpty && c.b != untypedGoing
+/-- `untyped_free`: nothing made of the Untyped at `u` is left below it. -/
+def untypedFree (u : Nat) (_c : Cap) : Bool := (s.kidsOf u).isEmpty
 
 /-- A node filled with words below a parent, or a root. -/
 def store (n : Nat) (c : Cap) (parent : Option Nat) : State := (s.setCap n c).attach parent n
+
+/--
+A copy, a derivation or a carve of the node `source`, right after it in the kernel's list:
+below it when it is an original, `above`, and beside it, below its parent, when not.
+-/
+def place (n source : Nat) (c : Cap) (above : Bool) : State :=
+  if above then store s n c (some source) else (s.setCap n c).attachBeside source n
 
 end
 
@@ -153,29 +160,24 @@ def revokeLoop (m : Machine) (t slot root : Nat) (r : List Nat) :
           else if (s'.kidsOf root).isEmpty then revokeLoop m t slot root r fuel s' acc
           else revokeLoop m t slot root r fuel s' (acc ++ [⟨s', .again⟩])
 
-/-- `cap_delete` of a root: each child becomes a root, a step each, before the node goes. -/
-def deleteRoot (n : Nat) (r : List Nat) : List Nat → State → List Outcome → List Outcome
-  | [], s, acc => acc ++ [finish (s.eraseCap n) r]
-  | [_], s, acc => acc ++ [finish ((s.setKids n []).eraseCap n) r]
-  | _ :: k :: ks, s, acc =>
-    let s' := s.setKids n (k :: ks)
-    deleteRoot n r (k :: ks) s' (acc ++ [⟨s', .again⟩])
-
 section
 variable (m : Machine) (s : State)
 
-/-- `OP_CAP_COPY`, or `OP_CAP_DERIVE`: beside the source, or below it. -/
+/--
+`OP_CAP_COPY`, or `OP_CAP_DERIVE`: no original, placed by the source, see `place`;
+an Untyped is only derived, while it is free, an original below it.
+-/
 def capCopy (t : Nat) (derive : Bool) (table : Obj) (r : List Nat) : Answer := do
   let (source, src) ← slotLookup m s t (reg r 2)
-  let src := { src with rights := src.rights &&& (reg r 3 % 256) }
-  if derive then
-    if src.type == capUntyped && !untypedFree s source src then throw kNoMemory
+  let c := { src with rights := src.rights &&& (reg r 3 % 256), orig := false }
+  if src.type == capUntyped then
+    if !derive then throw kWrongType
+    if !untypedFree s source src then throw kNoMemory
     let dst ← capSlotFree s table (reg r 1)
-    pure (some [finish (store s dst src (some source)) r])
+    pure (some [finish (store s dst { c with orig := true } (some source)) r])
   else
-    if src.type == capUntyped then throw kWrongType
     let dst ← capSlotFree s table (reg r 1)
-    pure (some [finish ((s.setCap dst src).attachBeside source dst) r])
+    pure (some [finish (place s dst source c src.orig) r])
 
 /-- `OP_CAP_MOVE`. -/
 def capMove (t : Nat) (table : Obj) (r : List Nat) : Answer := do
@@ -183,16 +185,16 @@ def capMove (t : Nat) (table : Obj) (r : List Nat) : Answer := do
   let dst ← capSlotFree s table (reg r 1)
   pure (some [finish (s.move source dst) r])
 
-/-- `OP_CAP_DELETE`: an empty slot is cleared already, and a root goes. -/
+/-- `OP_CAP_DELETE`: an empty slot is cleared already; what was below the node goes to its parent, or is a root. -/
 def capDelete (table : Obj) (r : List Nat) : Answer :=
   if reg r 1 ≥ table.count then .error kInvalidCap
   else
     let n := nodeAt table (reg r 1)
     match s.cap? n with
     | none => .ok (some [finish s r])
-    | some c => match s.parent? n with
+    | some _ => match s.parent? n with
       | some _ => .ok (some [finish ((s.detachAdopt n).eraseCap n) r])
-      | none => .ok (some (deleteRoot n r (s.kidsOf n) (s.setCap n c.markGoing) []))
+      | none => .ok (some [finish ((s.setKids n []).eraseCap n) r])
 
 /-- `OP_CAP_REVOKE`: below an Untyped that holds what the caller runs on, none. -/
 def capRevoke (t slot : Nat) (table : Obj) (r : List Nat) : Answer :=
@@ -212,7 +214,7 @@ def opCaptable (t slot op : Nat) (table : Obj) (r : List Nat) : Answer :=
   else if op == opCapRevoke then capRevoke m s t slot table r
   else .ok none
 
-/-- A frame: a carve. -/
+/-- A frame: a carve, no original, placed by the frame, see `place`. -/
 def opFrame (t op node : Nat) (c : Cap) (r : List Nat) : Answer :=
   if op != opFrameCarve then .ok none
   else do
@@ -221,7 +223,7 @@ def opFrame (t op node : Nat) (c : Cap) (r : List Nat) : Answer :=
     let base := BitVec.ofNat 32 c.a + BitVec.ofNat 32 off
     if off ≥ c.b || len > c.b - off || !napot m.regionMin base (BitVec.ofNat 32 len) then throw kInvalidArg
     let dst ← slotVacant m s t (reg r 3)
-    pure (some [finish (store s dst ⟨capFrame, c.rights, 0, base.toNat, len⟩ (some node)) r])
+    pure (some [finish (place s dst node ⟨capFrame, c.rights, 0, base.toNat, len, false⟩ c.orig) r])
 
 /-- `OP_UNTYPED_RETYPE`, into a frame; into a pool it builds objects, which the model leaves out. -/
 def untypedRetype (t u : Nat) (c : Cap) (r : List Nat) : Answer := do
@@ -234,7 +236,7 @@ def untypedRetype (t u : Nat) (c : Cap) (r : List Nat) : Answer := do
   if !untypedFree s u c then throw kNoMemory
   if type == capPool then pure none
   else
-    let st := store s dst ⟨capFrame, c.rights, 0, (blockBase a).toNat, (blockSize a).toNat⟩ (some u)
+    let st := store s dst ⟨capFrame, c.rights, 0, (blockBase a).toNat, (blockSize a).toNat, true⟩ (some u)
     pure (some [⟨st, .regs [kOk, (blockBase a).toNat, reg r 2, reg r 3, reg r 4]⟩])
 
 /-- `OP_UNTYPED_SPLIT`: two halves below it, the lower first. -/
@@ -247,8 +249,8 @@ def untypedSplit (t u : Nat) (c : Cap) (r : List Nat) : Answer := do
   let hi ← slotVacant m s t (reg r 2)
   if lo == hi then throw kInvalidArg
   if !untypedFree s u c then throw kNoMemory
-  let s1 := store s lo ⟨capUntyped, c.rights, 0, (blockWord base half).toNat, 0⟩ (some u)
-  let s2 := store s1 hi ⟨capUntyped, c.rights, 0, (blockWord (base + half) half).toNat, 0⟩ (some u)
+  let s1 := store s lo ⟨capUntyped, c.rights, 0, (blockWord base half).toNat, 0, true⟩ (some u)
+  let s2 := store s1 hi ⟨capUntyped, c.rights, 0, (blockWord (base + half) half).toNat, 0, true⟩ (some u)
   pure (some [finish s2 r])
 
 /-- An Untyped: a split, and a retype. -/

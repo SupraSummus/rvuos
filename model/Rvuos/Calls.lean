@@ -125,12 +125,16 @@ theorem slotVacant_empty {t slot n : Nat} (h : slotVacant m s t slot = .ok n) : 
 
 /-! Each handler, when it goes through. -/
 
-/-- A copy fills an empty slot beside its source, a derive below it, with the rights the mask leaves. -/
+/--
+A copy or a derive fills an empty slot, no original, below its source where that is one and beside it where not,
+with the rights the mask leaves; a derived Untyped is an original below its source.
+-/
 theorem capCopy_ok {t : Nat} {derive : Bool} {table : Obj} {r : List Nat} {outs : List Outcome}
     (h : capCopy m s t derive table r = .ok (some outs)) :
     ∃ source src dst, slotLookup m s t (reg r 2) = .ok (source, src) ∧ s.cap? dst = none ∧
-      let c := { src with rights := src.rights &&& (reg r 3 % 256) }
-      outs = [finish (if derive then store s dst c (some source) else (s.setCap dst c).attachBeside source dst) r] := by
+      let c := { src with rights := src.rights &&& (reg r 3 % 256), orig := false }
+      outs = [finish (if src.type == capUntyped then store s dst { c with orig := true } (some source)
+        else place s dst source c src.orig) r] := by
   unfold capCopy at h
   cases hl : slotLookup m s t (reg r 2) with
   | error k => simp [hl, bind, Except.bind] at h
@@ -166,12 +170,12 @@ theorem capMove_ok {t : Nat} {table : Obj} {r : List Nat} {outs : List Outcome}
 
 /--
 A delete of an empty slot changes nothing; of a node with a parent it detaches it;
-of a root it marks it going and goes a child a step.
+of a root it makes roots of what lay below it.
 -/
 theorem capDelete_ok {table : Obj} {r : List Nat} {outs : List Outcome} (h : capDelete s table r = .ok (some outs)) :
     outs = [finish s r] ∨ ∃ n,
       (∃ p, s.parent? n = some p ∧ outs = [finish ((s.detachAdopt n).eraseCap n) r]) ∨
-      (∃ c, s.cap? n = some c ∧ s.parent? n = none ∧ outs = deleteRoot n r (s.kidsOf n) (s.setCap n c.markGoing) []) := by
+      (∃ c, s.cap? n = some c ∧ s.parent? n = none ∧ outs = [finish ((s.setKids n []).eraseCap n) r]) := by
   unfold capDelete at h
   dsimp only at h
   repeat' split at h
@@ -188,12 +192,12 @@ theorem capRevoke_ok {t slot : Nat} {table : Obj} {r : List Nat} {outs : List Ou
   all_goals simp at h
   exact ⟨_, _, h⟩
 
-/-- A carve fills an empty slot below the frame with a range within it. -/
+/-- A carve fills an empty slot with a range within the frame, no original, placed by the frame, see `place`. -/
 theorem opFrame_ok {t op node : Nat} {c : Cap} {r : List Nat} {outs : List Outcome}
     (h : opFrame m s t op node c r = .ok (some outs)) :
     ∃ dst, op = opFrameCarve ∧ reg r 1 < c.b ∧ reg r 2 ≤ c.b - reg r 1 ∧ s.cap? dst = none ∧
-      outs = [finish (store s dst ⟨capFrame, c.rights, 0, (BitVec.ofNat 32 c.a + BitVec.ofNat 32 (reg r 1)).toNat, reg r 2⟩
-        (some node)) r] := by
+      outs = [finish (place s dst node
+        ⟨capFrame, c.rights, 0, (BitVec.ofNat 32 c.a + BitVec.ofNat 32 (reg r 1)).toNat, reg r 2, false⟩ c.orig) r] := by
   unfold opFrame at h
   split at h
   · simp at h
@@ -214,8 +218,8 @@ theorem opFrame_ok {t op node : Nat} {c : Cap} {r : List Nat} {outs : List Outco
 theorem untypedRetype_ok {t u : Nat} {c : Cap} {r : List Nat} {outs : List Outcome}
     (h : untypedRetype m s t u c r = .ok (some outs)) :
     ∃ dst ret, s.cap? dst = none ∧ outs = [⟨store s dst
-      ⟨capFrame, c.rights, 0, (blockBase (BitVec.ofNat 32 c.a)).toNat, (blockSize (BitVec.ofNat 32 c.a)).toNat⟩ (some u),
-      ret⟩] := by
+      ⟨capFrame, c.rights, 0, (blockBase (BitVec.ofNat 32 c.a)).toNat, (blockSize (BitVec.ofNat 32 c.a)).toNat, true⟩
+      (some u), ret⟩] := by
   unfold untypedRetype at h
   simp only [bind, Except.bind] at h
   cases hv : slotVacant m s t (reg r 2) with
@@ -236,8 +240,8 @@ theorem untypedSplit_ok {t u : Nat} {c : Cap} {r : List Nat} {outs : List Outcom
     let base := blockBase (BitVec.ofNat 32 c.a)
     let half := blockSize (BitVec.ofNat 32 c.a) / 2
     ∃ lo hi, s.cap? lo = none ∧ s.cap? hi = none ∧ lo ≠ hi ∧ napot m.regionMin base half = true ∧
-      outs = [finish (store (store s lo ⟨capUntyped, c.rights, 0, (blockWord base half).toNat, 0⟩ (some u))
-        hi ⟨capUntyped, c.rights, 0, (blockWord (base + half) half).toNat, 0⟩ (some u)) r] := by
+      outs = [finish (store (store s lo ⟨capUntyped, c.rights, 0, (blockWord base half).toNat, 0, true⟩ (some u))
+        hi ⟨capUntyped, c.rights, 0, (blockWord (base + half) half).toNat, 0, true⟩ (some u)) r] := by
   unfold untypedSplit at h
   simp only [bind, Except.bind] at h
   cases hlo : slotVacant m s t (reg r 1) with

@@ -1,27 +1,23 @@
 /-
 The abstract state: what `host/model.c` writes of the kernel's memory.
 Objects, the filled nodes of the derivation tree by their addresses,
-and each node's children in the order of their ring.
+and each node's children in the order of their list, as `host/model.c` reads them off the kernel's.
 Links are left out: the tree is the children lists, and a node's parent is the one whose list holds it.
 -/
 import Rvuos.Abi
 
 namespace Rvuos
 
-/-- A node's words: a filled `struct cap` without its links. -/
+/-- A node's words: a filled `struct cap` without its links, and whether it is an original. -/
 structure Cap where
   type : Nat
   rights : Nat
   index : Nat
   a : Nat
   b : Nat
+  /-- An original: only one has anything below it; see "The derivation tree". -/
+  orig : Bool
 deriving BEq, Repr, Inhabited, DecidableEq
-
-/-- `UNTYPED_GOING`: an Untyped's `b` once its delete as a root has begun, after which it makes nothing. -/
-abbrev untypedGoing : Nat := 1
-
-/-- A node a delete of it as a root has begun: an Untyped marked going, anything else as it was. -/
-def Cap.markGoing (c : Cap) : Cap := if c.type = capUntyped then { c with b := untypedGoing } else c
 
 /-- An object: its address, type and pool, the array of nodes it holds, from `obj_nodes`, and a pool its size. -/
 structure Obj where
@@ -81,7 +77,7 @@ def setKids (s : State) (n : Nat) (l : List Nat) : State :=
   let rest := unkey s.kids n
   { s with kids := if l.isEmpty then rest else (n, l) :: rest }
 
-/-- `cap_attach`: at the front of the parent's ring, or a root without a parent. -/
+/-- `cap_attach` after an original: the first of its children, or a root without a parent. -/
 def attach (s : State) (parent : Option Nat) (n : Nat) : State :=
   match parent with
   | none => s
@@ -92,7 +88,7 @@ def insertAfter (x n : Nat) : List Nat → List Nat
   | [] => []
   | y :: ys => if y == x then y :: n :: ys else y :: insertAfter x n ys
 
-/-- `attach_beside`: right after a node in its parent's ring; beside a root, a root. -/
+/-- `cap_attach` after a node that is no original: right after it among its parent's children; beside a root, a root. -/
 def attachBeside (s : State) (beside n : Nat) : State :=
   match s.parent? beside with
   | none => s
@@ -114,7 +110,7 @@ def move (s : State) (src dst : Nat) : State :=
       | some p => s1.setKids p (replaceWith src [dst] (s.kidsOf p))
     (s2.setKids src []).setKids dst (s.kidsOf src)
 
-/-- `detach` with adopt: a node that has a parent leaves its ring, its children taking its place. -/
+/-- `unlink_node`: a node that has a parent leaves its parent's children, its own taking its place. -/
 def detachAdopt (s : State) (n : Nat) : State :=
   match s.parent? n with
   | none => s

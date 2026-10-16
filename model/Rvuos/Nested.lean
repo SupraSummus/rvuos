@@ -19,7 +19,7 @@ import Rvuos.Shrink
 
 namespace Rvuos
 
-open State (mayHold going)
+open State (mayHold)
 
 /-- `k` lies below `a`: up the lists from `k`, `a` at last. -/
 inductive Below (s : State) : Nat → Nat → Prop
@@ -35,7 +35,7 @@ def Overlap (s : State) (cx cy : Cap) : Prop :=
 /-- `nestingOk` with `Below` for `liesBelow`. -/
 def Nests (s : State) : Prop :=
   ∀ x y cx cy, s.cap? x = some cx → s.cap? y = some cy → mayHold cx = true → s.Overlap cx cy →
-    x = y ∨ Below s x y ∨ Below s y x ∨ going cx = true ∨ going cy = true
+    x = y ∨ Below s x y ∨ Below s y x
 
 end State
 
@@ -100,13 +100,11 @@ theorem nestingOk_nests (h : Forest s) (hn : s.nestingOk = true) : s.Nests := by
   obtain ⟨bx, zx, by_, zy, hrx, hry, h1, h2⟩ := ho
   simp only [State.nests, hrx, hry, Bool.or_eq_true, beq_iff_eq, Bool.not_eq_true', Bool.and_eq_false_iff,
     decide_eq_false_iff_not] at hxy
-  rcases hxy with ((((hxy | hxy) | hxy) | hxy) | hxy) | hxy
+  rcases hxy with ((hxy | hxy) | hxy) | hxy
   · exact Or.inl hxy
   · omega
   · exact Or.inr (Or.inl (liesBelow_below h hxy))
-  · exact Or.inr (Or.inr (Or.inl (liesBelow_below h hxy)))
-  · exact Or.inr (Or.inr (Or.inr (Or.inl hxy)))
-  · exact Or.inr (Or.inr (Or.inr (Or.inr hxy)))
+  · exact Or.inr (Or.inr (liesBelow_below h hxy))
 
 /-- Every state `State.derivedOk` passes `Derived` holds of. -/
 theorem derivedOk_derived (hd : s.derivedOk = true) : Derived s := by
@@ -190,90 +188,31 @@ theorem Below.first {x a : Nat} (hb : Below s x a) : ∃ q, x ∈ s.kidsOf q := 
 
 end
 
-/-! Words a delete or a revoke keeps. -/
-
-section
-variable {c₀ c : Cap}
-
-theorem Kept.type (h : Kept c₀ c) : c.type = c₀.type := by
-  rcases h with rfl | rfl
-  · rfl
-  · unfold Cap.markGoing; split <;> rfl
-
-theorem Kept.eq (h : Kept c₀ c) (ht : c₀.type ≠ capUntyped) : c = c₀ := by
-  rcases h with rfl | rfl
-  · rfl
-  · simp [Cap.markGoing, ht]
-
-theorem Kept.range (h : Kept c₀ c) (s : State) : s.range? c = s.range? c₀ := by
-  by_cases ht : c₀.type = capUntyped
-  · rcases h with rfl | rfl
-    · rfl
-    · simp (config := { decide := true }) [State.range?, Cap.markGoing, ht]
-  · rw [h.eq ht]
-
-theorem Kept.mayHold (h : Kept c₀ c) : mayHold c = mayHold c₀ := by simp [State.mayHold, h.type]
-
-theorem Kept.going (h : Kept c₀ c) (hg : going c₀ = true) : going c = true := by
-  rcases h with rfl | rfl
-  · exact hg
-  · simp only [State.going, Bool.and_eq_true, beq_iff_eq] at hg
-    simp [State.going, Cap.markGoing, hg.1]
-
-theorem Cap.going_markGoing (ht : c.type = capUntyped) : going c.markGoing = true := by
-  simp [State.going, Cap.markGoing, ht]
-
-end
-
 section
 variable {s s' : State}
 
 /--
-A change that fills no node, keeps each node's words or marks an Untyped going,
+A change that fills no node and keeps each node's words,
 and puts a node in a list only below where it lay,
-keeps the nesting where what lay below another and may meet it still does, or that other is going.
+keeps the nesting where what lay below another and may meet it still does.
 -/
 theorem Nested.shrink (h : Nested s) (hf' : Forest s') (hobjs : s'.objs = s.objs) (hs : Shrinks s s')
     (hedge : ∀ p k, k ∈ s'.kidsOf p → Below s k p)
     (hup : ∀ x y cx cy, s'.cap? x = some cx → s'.cap? y = some cy → (mayHold cx = true ∨ mayHold cy = true) →
-      s'.Overlap cx cy → Below s x y → Below s' x y ∨ going cy = true) : Nested s' := by
+      s'.Overlap cx cy → Below s x y → Below s' x y) : Nested s' := by
   have hobj : ∀ a, s'.obj? a = s.obj? a := fun a => by simp [State.obj?, hobjs]
   refine ⟨hf', ⟨fun n c hc ht => ?_, fun n c hc ht => ?_, fun p k cp ck hk hp hk' hm => ?_,
     fun p k cp ck hk hp hk' ho => ?_⟩, fun x y cx cy hx hy hm ho => ?_⟩
-  · obtain ⟨c₀, hc₀, hkc⟩ := hs n c hc
-    have := h.derived.pools n c₀ hc₀ (hkc.type ▸ ht)
-    rw [hobj]; rcases hkc with rfl | rfl
-    · exact this
-    · unfold Cap.markGoing; split <;> exact this
-  · obtain ⟨c₀, hc₀, hkc⟩ := hs n c hc
-    rw [hkc.eq (by rw [← hkc.type, ht]; decide)]
-    exact h.derived.fits n c₀ hc₀ (hkc.type ▸ ht)
-  · obtain ⟨cp₀, hp₀, hkp⟩ := hs p cp hp
-    obtain ⟨ck₀, hk₀, hkk⟩ := hs k ck hk'
-    obtain ⟨ca, ha, hat⟩ := h.derived.below_untyped h.forest (hedge p k hk) ck₀ hk₀ (hkk.mayHold ▸ hm)
-    rw [hp₀] at ha; cases ha
-    rw [hkp.type, hat]
-  · obtain ⟨cp₀, hp₀, hkp⟩ := hs p cp hp
-    obtain ⟨ck₀, hk₀, hkk⟩ := hs k ck hk'
-    obtain ⟨cx, hx, hxo⟩ := h.derived.below_object h.forest (hedge p k hk) cp₀ hp₀ (hkp.type ▸ ho)
-    rw [hk₀] at hx; cases hx
-    rw [hkk.type]; exact hxo
-  · obtain ⟨cx₀, hx₀, hkx⟩ := hs x cx hx
-    obtain ⟨cy₀, hy₀, hky⟩ := hs y cy hy
-    have ho₀ : s.Overlap cx₀ cy₀ := by
-      rw [State.overlap_objs hobjs] at ho
-      obtain ⟨bx, zx, by_, zy, hrx, hry, h1, h2⟩ := ho
-      exact ⟨bx, zx, by_, zy, hkx.range s ▸ hrx, hky.range s ▸ hry, h1, h2⟩
-    rcases h.nests x y cx₀ cy₀ hx₀ hy₀ (hkx.mayHold ▸ hm) ho₀ with e | hb | hb | hg | hg
+  · rw [hobj]; exact h.derived.pools n c (hs n c hc) ht
+  · exact h.derived.fits n c (hs n c hc) ht
+  · obtain ⟨ca, ha, hat⟩ := h.derived.below_untyped h.forest (hedge p k hk) ck (hs k ck hk') hm
+    rw [hs p cp hp] at ha; cases ha; exact hat
+  · obtain ⟨cx, hx, hxo⟩ := h.derived.below_object h.forest (hedge p k hk) cp (hs p cp hp) ho
+    rw [hs k ck hk'] at hx; cases hx; exact hxo
+  · rcases h.nests x y cx cy (hs x cx hx) (hs y cy hy) hm ((State.overlap_objs hobjs).mp ho) with e | hb | hb
     · exact Or.inl e
-    · rcases hup x y cx cy hx hy (Or.inl hm) ho hb with hb' | hg
-      · exact Or.inr (Or.inl hb')
-      · exact Or.inr (Or.inr (Or.inr (Or.inr hg)))
-    · rcases hup y x cy cx hy hx (Or.inr hm) ho.symm hb with hb' | hg
-      · exact Or.inr (Or.inr (Or.inl hb'))
-      · exact Or.inr (Or.inr (Or.inr (Or.inl hg)))
-    · exact Or.inr (Or.inr (Or.inr (Or.inl (hkx.going hg))))
-    · exact Or.inr (Or.inr (Or.inr (Or.inr (hky.going hg))))
+    · exact Or.inr (Or.inl (hup x y cx cy hx hy (Or.inl hm) ho hb))
+    · exact Or.inr (Or.inr (hup y x cy cx hy hx (Or.inr hm) ho.symm hb))
 
 theorem mem_replaceWith_of_mem {a x : Nat} {r l : List Nat} (h : x ∈ l) (hx : x ≠ a) : x ∈ State.replaceWith a r l := by
   induction l with
@@ -353,100 +292,49 @@ theorem Nested.detachErase (h : Nested s) {n p : Nat} (hp : n ∈ s.kidsOf p) :
     · exact .parent hk
   · have hxn : x ≠ n := by intro e; subst e; simp [State.cap?_eraseCap] at hx
     have hyn : y ≠ n := by intro e; subst e; simp [State.cap?_eraseCap] at hy
-    exact Or.inl ((below_detachErase hf hp hb hyn).1 hxn)
+    exact (below_detachErase hf hp hb hyn).1 hxn
 
 /-- A node in no list lies below nothing. -/
 theorem not_below_root (hroot : ∀ q, n ∉ s.kidsOf q) {a : Nat} (hb : Below s n a) : False := by
   obtain ⟨q, hq⟩ := hb.first; exact hroot q hq
 
-/-- A delete of a root takes a child from its list: what lay below another but the root still does. -/
-theorem Nested.dropKids (h : Nested s) {n : Nat} {l : List Nat} {cn : Cap} (hroot : ∀ q, n ∉ s.kidsOf q)
-    (hn : s.cap? n = some cn) (hgo : cn.type = capUntyped → going cn = true)
-    (hl : l.Nodup) (hsub : ∀ x ∈ l, x ∈ s.kidsOf n) : Nested (s.setKids n l) := by
-  have hf := h.forest
-  have hkids : ∀ q k, k ∈ s.kidsOf q → q ≠ n → k ∈ (s.setKids n l).kidsOf q := by
-    intro q k hk hq; rw [State.kidsOf_setKids]; simp [hq, hk]
-  have keep : ∀ x a, Below s x a → a ≠ n → Below (s.setKids n l) x a := by
-    intro x a hb
-    induction hb with
-    | parent hk => exact fun ha => .parent (hkids _ _ hk ha)
-    | @up k q a' hk hb ih =>
-      intro ha
-      have hq : q ≠ n := by intro e; subst e; exact not_below_root hroot hb
-      exact .up (hkids _ _ hk hq) (ih ha)
-  refine h.shrink (hf.shrink hl hsub) rfl (s.setKids_shrinks n l) (fun q k hk => ?_) (fun x y cx cy hx hy hm ho hb => ?_)
-  · rw [State.kidsOf_setKids] at hk
-    split at hk
-    · subst q; exact .parent (hsub k hk)
-    · exact .parent hk
-  · by_cases hyn : y = n
-    · subst hyn
-      rw [State.cap?_setKids, hn] at hy; injection hy with hy; subst hy
-      rw [State.cap?_setKids] at hx
-      by_cases hut : cn.type = capUntyped
-      · exact Or.inr (hgo hut)
-      · exfalso
-        rcases hm with hm | hm
-        · obtain ⟨ca, ha, hat⟩ := h.derived.below_untyped hf hb cx hx hm
-          rw [hn] at ha; injection ha with ha; subst ha; exact hut hat
-        · have hrt : cn.type = capRetyped := by
-            simp only [State.mayHold, Bool.or_eq_true, beq_iff_eq] at hm; exact hm.resolve_left hut
-          obtain ⟨bx, zx, _, _, hrx, _⟩ := ho
-          exact h.derived.not_below_pool hf hb hx hn hrt (Option.isSome_iff_exists.mpr ⟨_, hrx⟩)
-    · exact Or.inl (keep x y hb hyn)
-
 /-- The last step of a delete of a root: the root, in no list and with none, goes. -/
 theorem Nested.eraseRoot (h : Nested s) {n : Nat} (hroot : ∀ q, n ∉ s.kidsOf q) (hleaf : s.kidsOf n = []) :
     Nested (s.eraseCap n) :=
   h.shrink (h.forest.eraseCap hroot hleaf) rfl (s.eraseCap_shrinks n) (fun _ _ hk => .parent hk)
-    (fun _ _ _ _ _ _ _ _ hb => Or.inl (Below.mono (s := s) (s' := s.eraseCap n) (fun _ _ hk => hk) hb))
+    (fun _ _ _ _ _ _ _ _ hb => Below.mono (s := s) (s' := s.eraseCap n) (fun _ _ hk => hk) hb)
 
-/-- A delete of a root marks it going first. -/
-theorem Nested.markGoing (h : Nested s) {n : Nat} {c : Cap} (hc : s.cap? n = some c) :
-    Nested (s.setCap n c.markGoing) :=
-  h.shrink (h.forest.setCap n _) rfl (State.going_shrinks hc) (fun _ _ hk => .parent hk)
-    (fun _ _ _ _ _ _ _ _ hb => Or.inl (Below.mono (s := s) (s' := s.setCap n c.markGoing) (fun _ _ hk => hk) hb))
+/-- A delete of a root: what lay right below it becomes roots, and it goes; what lay below another still does. -/
+theorem Nested.deleteRoot (h : Nested s) {n : Nat} (hroot : ∀ q, n ∉ s.kidsOf q) :
+    Nested ((s.setKids n []).eraseCap n) := by
+  have hf := h.forest
+  have hf' : Forest ((s.setKids n []).eraseCap n) := by
+    refine (hf.shrink (n := n) (l := []) List.nodup_nil (by simp)).eraseCap (fun q => ?_)
+      (by simp [State.kidsOf_setKids])
+    rw [State.kidsOf_setKids]
+    split
+    · simp
+    · exact hroot q
+  have hkids : ∀ q, ((s.setKids n []).eraseCap n).kidsOf q = if q = n then [] else s.kidsOf q := by
+    intro q; rw [State.kidsOf_eraseCap, State.kidsOf_setKids]
+  have keep : ∀ x a, Below s x a → a ≠ n → Below ((s.setKids n []).eraseCap n) x a := by
+    intro x a hb
+    induction hb with
+    | parent hk => exact fun ha => .parent (by rw [hkids]; simp [ha, hk])
+    | @up k q a' hk hb ih =>
+      intro ha
+      have hq : q ≠ n := by intro e; subst e; exact not_below_root hroot hb
+      exact .up (by rw [hkids]; simp [hq, hk]) (ih ha)
+  refine h.shrink hf' rfl ((s.setKids_shrinks n []).trans (State.eraseCap_shrinks _ n)) (fun q k hk => ?_)
+    (fun x y cx cy hx hy _ _ hb => ?_)
+  · rw [hkids] at hk
+    split at hk
+    · simp at hk
+    · exact .parent hk
+  · have hyn : y ≠ n := by intro e; subst e; simp [State.cap?_eraseCap] at hy
+    exact keep x y hb hyn
 
 end
-
-/-- `cap_delete` of a root, a step a child: the nesting at every step, the root going if an Untyped. -/
-theorem deleteRoot_nested (n : Nat) (r : List Nat) (ks : List Nat) :
-    ∀ (s : State) (acc : List Outcome) (o : Outcome) (cn : Cap), Nested s → ks = s.kidsOf n → (∀ q, n ∉ s.kidsOf q) →
-      s.cap? n = some cn → (cn.type = capUntyped → going cn = true) →
-      o ∈ deleteRoot n r ks s acc → o ∈ acc ∨ Nested o.st := by
-  induction ks with
-  | nil =>
-    intro s acc o cn h hks hroot _ _ ho
-    simp [deleteRoot] at ho
-    rcases ho with ho | ho
-    · exact Or.inl ho
-    · subst ho; exact Or.inr (h.eraseRoot hroot hks.symm)
-  | cons x xs ih =>
-    intro s acc o cn h hks hroot hn hgo ho
-    have hsub : ∀ y ∈ xs, y ∈ s.kidsOf n := fun y hy => hks ▸ List.mem_cons_of_mem _ hy
-    have hnd : xs.Nodup := by have := h.forest.nodup n; rw [← hks] at this; exact (List.nodup_cons.mp this).2
-    have h' := h.dropKids hroot hn hgo hnd hsub
-    have hroot' : ∀ q, n ∉ (s.setKids n xs).kidsOf q := by
-      intro q hq
-      rw [State.kidsOf_setKids] at hq
-      split at hq
-      · exact h.forest.not_self (hsub n hq)
-      · exact hroot q hq
-    have hn' : (s.setKids n xs).cap? n = some cn := by rw [State.cap?_setKids, hn]
-    cases xs with
-    | nil =>
-      simp [deleteRoot] at ho
-      rcases ho with ho | ho
-      · exact Or.inl ho
-      · subst ho; exact Or.inr (h'.eraseRoot hroot' (by simp [State.kidsOf_setKids]))
-    | cons k ks =>
-      simp only [deleteRoot] at ho
-      rcases ih _ _ o cn h' (by simp [State.kidsOf_setKids]) hroot' hn' hgo ho with h'' | h''
-      · simp at h''
-        rcases h'' with h'' | h''
-        · exact Or.inl h''
-        · subst h''; exact Or.inr h'
-      · exact Or.inr h''
 
 /-- `cap_revoke_below`'s loop: the nesting at every step. -/
 theorem revokeLoop_nested (m : Machine) (t slot root : Nat) (r : List Nat) :
@@ -496,7 +384,7 @@ theorem kidsOf_store (s : State) (n p q : Nat) (c : Cap) :
   simp [store, State.attach, State.kidsOf_setKids, State.kidsOf_setCap]
 
 /--
-A node filled below a filled one that is not going:
+A node filled below a filled one:
 where it may meet memory that may hold kernel objects, its memory lies within that one's,
 and nothing below that one meets it.
 -/
@@ -504,7 +392,7 @@ theorem Nested.store (h : Nested s) {n p : Nat} {c cp : Cap} (hn : s.cap? n = no
     (hnot : c.type ≠ capRetyped) (hfit : c.type = capFrame → c.a + c.b ≤ 2 ^ 32)
     (hunder : mayHold c = true → cp.type = capUntyped)
     (hobj : capHasObject cp.type = true → capHasObject c.type = true)
-    (hwithin : ∀ cy, s.Overlap c cy → s.Overlap cp cy) (hgo : going cp = false)
+    (hwithin : ∀ cy, s.Overlap c cy → s.Overlap cp cy)
     (hbelow : ∀ x cx, Below s x p → s.cap? x = some cx → (mayHold cx = true ∨ mayHold c = true) → ¬ s.Overlap cx c) :
     Nested (store s n c (some p)) := by
   have hf := h.forest
@@ -547,27 +435,21 @@ theorem Nested.store (h : Nested s) {n p : Nat} {c cp : Cap} (hn : s.cap? n = no
     · exact Or.inl (hxn.trans hyn.symm)
     · simp only [hxn, hyn, ↓reduceIte, Option.some.injEq] at hx hy
       subst hx hxn
-      rcases h.nests p y cp cy hp hy (by simp [State.mayHold, hunder hm]) (hwithin cy ho) with e | hb | hb | hg | hg
+      rcases h.nests p y cp cy hp hy (by simp [State.mayHold, hunder hm]) (hwithin cy ho) with e | hb | hb
       · subst e; exact Or.inr (Or.inl (.parent hnp))
       · exact Or.inr (Or.inl (.up hnp (mono hb)))
       · exact absurd ho.symm (hbelow y cy hb hy (Or.inr hm))
-      · simp [hg] at hgo
-      · exact Or.inr (Or.inr (Or.inr (Or.inr hg)))
     · simp only [hxn, hyn, ↓reduceIte, Option.some.injEq] at hx hy
       subst hy hyn
-      rcases h.nests x p cx cp hx hp hm (hwithin cx ho.symm).symm with e | hb | hb | hg | hg
-      · subst e; exact Or.inr (Or.inr (Or.inl (.parent hnp)))
+      rcases h.nests x p cx cp hx hp hm (hwithin cx ho.symm).symm with e | hb | hb
+      · subst e; exact Or.inr (Or.inr (.parent hnp))
       · exact absurd ho (hbelow x cx hb hx (Or.inl hm))
-      · exact Or.inr (Or.inr (Or.inl (.up hnp (mono hb))))
-      · exact Or.inr (Or.inr (Or.inr (Or.inl hg)))
-      · simp [hg] at hgo
+      · exact Or.inr (Or.inr (.up hnp (mono hb)))
     · simp only [hxn, hyn, ↓reduceIte] at hx hy
-      rcases h.nests x y cx cy hx hy hm ho with e | hb | hb | hg | hg
+      rcases h.nests x y cx cy hx hy hm ho with e | hb | hb
       · exact Or.inl e
       · exact Or.inr (Or.inl (mono hb))
-      · exact Or.inr (Or.inr (Or.inl (mono hb)))
-      · exact Or.inr (Or.inr (Or.inr (Or.inl hg)))
-      · exact Or.inr (Or.inr (Or.inr (Or.inr hg)))
+      · exact Or.inr (Or.inr (mono hb))
 
 theorem mem_insertAfter_of_mem {b n x : Nat} {l : List Nat} (h : x ∈ l) : x ∈ State.insertAfter b n l := by
   induction l with
@@ -603,9 +485,12 @@ theorem kidsOf_beside (s : State) (n b q : Nat) (c : Cap) :
   rw [this]
   cases s.parent? b <;> simp [State.kidsOf_setKids, State.kidsOf_setCap]
 
-/-- A copy, which may hold no kernel object: a node filled beside a filled one with the same memory. -/
+/--
+A copy or a carve of what is no original, which may hold no kernel object:
+a node filled beside a filled one, whose memory lies within that one's.
+-/
 theorem Nested.beside (h : Nested s) {n b : Nat} {c cb : Cap} (hn : s.cap? n = none) (hb : s.cap? b = some cb)
-    (ht : c.type = cb.type) (hm : mayHold c = false) (hr : s.range? c = s.range? cb)
+    (ht : c.type = cb.type) (hm : mayHold c = false) (hwithin : ∀ cy, s.Overlap c cy → s.Overlap cb cy)
     (hfit : c.type = capFrame → c.a + c.b ≤ 2 ^ 32) : Nested ((s.setCap n c).attachBeside b n) := by
   have hf := h.forest
   obtain ⟨hroot, hleaf⟩ := hf.empty hn
@@ -670,27 +555,20 @@ theorem Nested.beside (h : Nested s) {n b : Nat} {c cb : Cap} (hn : s.cap? n = n
     by_cases hyn : y = n
     · simp only [hyn, ↓reduceIte, Option.some.injEq] at hy
       subst hy hyn
-      have hob : s.Overlap cx cb := by
-        obtain ⟨bx, zx, by_, zy, hrx, hry, h1, h2⟩ := ho'
-        exact ⟨bx, zx, by_, zy, hrx, hr ▸ hry, h1, h2⟩
-      rcases h.nests x b cx cb hx hb hmx hob with e | hb' | hb' | hg | hg
+      have hob : s.Overlap cx cb := (hwithin cx ho'.symm).symm
+      rcases h.nests x b cx cb hx hb hmx hob with e | hb' | hb'
       · subst e; rw [hx] at hb; cases hb; simp [hmx] at hmb
       · obtain ⟨ca, ha, hat⟩ := h.derived.below_untyped hf hb' cx hx hmx
         rw [hb] at ha; cases ha; simp [State.mayHold, hat] at hmb
-      · refine Or.inr (Or.inr (Or.inl ?_))
+      · refine Or.inr (Or.inr ?_)
         cases hb' with
         | parent hk => exact .parent (hnew _ hk)
         | up hk hb'' => exact .up (hnew _ hk) (hb''.mono mono)
-      · exact Or.inr (Or.inr (Or.inr (Or.inl hg)))
-      · simp only [State.going, Bool.and_eq_true, beq_iff_eq] at hg
-        simp [State.mayHold, hg.1] at hmb
     · simp only [hyn, ↓reduceIte] at hy
-      rcases h.nests x y cx cy hx hy hmx ho' with e | hb' | hb' | hg | hg
+      rcases h.nests x y cx cy hx hy hmx ho' with e | hb' | hb'
       · exact Or.inl e
       · exact Or.inr (Or.inl (hb'.mono mono))
-      · exact Or.inr (Or.inr (Or.inl (hb'.mono mono)))
-      · exact Or.inr (Or.inr (Or.inr (Or.inl hg)))
-      · exact Or.inr (Or.inr (Or.inr (Or.inr hg)))
+      · exact Or.inr (Or.inr (hb'.mono mono))
 
 theorem objs_move (s : State) (src dst : Nat) : (s.move src dst).objs = s.objs := by
   unfold State.move; split
@@ -765,12 +643,10 @@ theorem Nested.move (h : Nested s) {src dst : Nat} {c : Cap} (hsrc : s.cap? src 
     exact h.derived.objects q k cq ck hkq hq hk' ho
   · obtain ⟨x, hx0, rfl, hxd⟩ := hpre x' cx hx
     obtain ⟨y, hy0, rfl, hyd⟩ := hpre y' cy hy
-    rcases h.nests x y cx cy hx0 hy0 hm ((State.overlap_objs (objs_move s src dst)).mp ho) with e | hb | hb | hg | hg
+    rcases h.nests x y cx cy hx0 hy0 hm ((State.overlap_objs (objs_move s src dst)).mp ho) with e | hb | hb
     · exact Or.inl (by rw [e])
     · exact Or.inr (Or.inl (hbelow hb))
-    · exact Or.inr (Or.inr (Or.inl (hbelow hb)))
-    · exact Or.inr (Or.inr (Or.inr (Or.inl hg)))
-    · exact Or.inr (Or.inr (Or.inr (Or.inr hg)))
+    · exact Or.inr (Or.inr (hbelow hb))
 
 end
 
@@ -843,20 +719,11 @@ theorem State.Overlap.within {c c' cy : Cap} {b z b' z' : Nat} (hr : s.range? c 
   rw [hr'] at hrx; cases hrx
   exact ⟨b, z, by_, zy, hr, hry, by omega, by omega⟩
 
-theorem State.going_type {c : Cap} (h : going c = true) : c.type = capUntyped := by
-  simp only [State.going, Bool.and_eq_true, beq_iff_eq] at h; exact h.1
-
-theorem State.not_going {c : Cap} (h : c.type ≠ capUntyped) : going c = false := by
-  cases hg : going c
-  · rfl
-  · exact absurd (State.going_type hg) h
-
 theorem State.mayHold_frame {c : Cap} (h : c.type = capFrame) : mayHold c = false := by
   unfold State.mayHold; rw [h]; decide
 
-theorem untypedFree_facts {u : Nat} {c : Cap} (h : untypedFree s u c = true) : s.kidsOf u = [] ∧ going c = false := by
-  simp only [untypedFree, Bool.and_eq_true, List.isEmpty_iff, bne_iff_ne, ne_eq] at h
-  exact ⟨h.1, by simp [State.going, h.2]⟩
+theorem untypedFree_leaf {u : Nat} {c : Cap} (h : untypedFree s u c = true) : s.kidsOf u = [] := by
+  simpa [untypedFree, List.isEmpty_iff] using h
 
 theorem not_below_leaf {x u : Nat} (h : s.kidsOf u = []) (hb : Below s x u) : False := by
   obtain ⟨k, hk⟩ := hb.kid; simp [h] at hk
@@ -882,33 +749,34 @@ theorem capCopy_nested (h : Nested s) {t : Nat} {derive : Bool} {table : Obj} {r
     have := slotLookup_object hl (by rw [e]; decide)
     rw [h.derived.pools _ _ hsrc e, e] at this
     exact absurd (Option.some.inj this) (by decide)
-  cases derive <;> simp only [Bool.false_eq_true, ↓reduceIte, finish] at ho <;> refine one_nested ?_ ho
-  · have hnu : src.type ≠ capUntyped := fun e => by simpa using (capCopy_untyped hh hl e).1
-    exact h.beside hdst hsrc rfl (by simp [State.mayHold, hnu, hnr]) rfl (fun ht => h.derived.fits _ src hsrc ht)
-  · by_cases hu : src.type = capUntyped
-    · obtain ⟨hleaf, hgo⟩ := untypedFree_facts (capCopy_untyped hh hl hu).2
-      exact h.store hdst hsrc hnr (fun ht => h.derived.fits _ src hsrc ht) (fun _ => hu) id (fun _ ho => ho) hgo
-        (fun x _ hb => absurd hb (not_below_leaf hleaf ·))
-    · have hgo : going src = false := by simp [State.going, hu]
-      have hm : mayHold { src with rights := src.rights &&& (reg r 3 % 256) } = false := by
-        simp [State.mayHold, hu, hnr]
-      refine h.store hdst hsrc hnr (fun ht => h.derived.fits _ src hsrc ht) (fun e => by simp [hm] at e) id
-        (fun _ ho => ho) hgo (fun x cx hb hx hmx => ?_)
+  simp only [finish] at ho
+  refine one_nested ?_ ho
+  split
+  · rename_i hu'
+    have hu : src.type = capUntyped := by simpa using hu'
+    have hleaf := untypedFree_leaf (capCopy_untyped hh hl hu).2
+    exact h.store hdst hsrc hnr (fun ht => h.derived.fits _ src hsrc ht) (fun _ => hu) id (fun _ ho => ho)
+      (fun x _ hb => absurd hb (not_below_leaf hleaf ·))
+  · rename_i hu'
+    have hu : src.type ≠ capUntyped := by simpa using hu'
+    have hm : mayHold { src with rights := src.rights &&& (reg r 3 % 256), orig := false } = false := by
+      simp [State.mayHold, hu, hnr]
+    unfold Rvuos.place
+    split
+    · refine h.store hdst hsrc hnr (fun ht => h.derived.fits _ src hsrc ht) (fun e => by simp [hm] at e) id
+        (fun _ ho => ho) (fun x cx hb hx hmx => ?_)
       rw [hm] at hmx
       obtain ⟨ca, ha, hat⟩ := h.derived.below_untyped h.forest hb cx hx (by simpa using hmx)
       rw [hsrc] at ha; cases ha; exact absurd hat hu
+    · exact h.beside hdst hsrc rfl hm (fun _ ho => ho) (fun ht => h.derived.fits _ src hsrc ht)
 
 theorem capDelete_nested (h : Nested s) {table : Obj} {r : List Nat} {outs : List Outcome}
     (hh : capDelete s table r = .ok (some outs)) : ∀ o ∈ outs, Nested o.st := by
   intro o ho
-  rcases capDelete_ok hh with rfl | ⟨n, ⟨p, hp, rfl⟩ | ⟨c, hc, hp, rfl⟩⟩
+  rcases capDelete_ok hh with rfl | ⟨n, ⟨p, hp, rfl⟩ | ⟨_, -, hp, rfl⟩⟩
   · exact one_nested h ho
   · exact one_nested (h.detachErase ((h.forest.parent?_eq _ p).mp hp)) ho
-  · have hroot := (h.forest.parent?_none _).mp hp
-    rcases deleteRoot_nested _ r _ _ [] o c.markGoing (h.markGoing hc) rfl hroot (by simp [State.cap?_setCap])
-      (fun ht => Cap.going_markGoing (by rwa [Kept.type (Or.inr rfl)] at ht)) ho with h' | h'
-    · simp at h'
-    · exact h'
+  · exact one_nested (h.deleteRoot ((h.forest.parent?_none _).mp hp)) ho
 
 /-- A carve: a frame within the frame, below it. -/
 theorem opFrame_nested (h : Nested s) {t op node : Nat} {c : Cap} {r : List Nat} {outs : List Outcome}
@@ -921,16 +789,25 @@ theorem opFrame_nested (h : Nested s) {t op node : Nat} {c : Cap} {r : List Nat}
     rw [BitVec.toNat_add, BitVec.toNat_ofNat, BitVec.toNat_ofNat,
       Nat.mod_eq_of_lt (show c.a < 2 ^ 32 by omega), Nat.mod_eq_of_lt (show reg r 1 < 2 ^ 32 by omega)]
     exact Nat.mod_eq_of_lt (by omega)
-  refine one_nested (h.store hdst hc (show capFrame ≠ capRetyped by decide)
-    (fun _ => show (BitVec.ofNat 32 c.a + BitVec.ofNat 32 (reg r 1)).toNat + reg r 2 ≤ 2 ^ 32 by rw [hbase]; omega) (fun e => by rw [State.mayHold_frame rfl] at e; contradiction)
-    (fun e => by rw [hty] at e; simp [capHasObject] at e) (fun cy ho => ?_) (State.not_going (by rw [hty]; decide))
-    (fun x cx hb hx hm => ?_)) ho
-  · refine State.Overlap.within (State.range?_frame s hty) (State.range?_frame s rfl) (Or.inr ?_) ho
-    simp only [hbase]; omega
-  · rcases hm with hm | hm
-    · obtain ⟨ca, ha, hat⟩ := h.derived.below_untyped h.forest hb cx hx hm
+  let cf : Cap := ⟨capFrame, c.rights, 0, (BitVec.ofNat 32 c.a + BitVec.ofNat 32 (reg r 1)).toNat, reg r 2, false⟩
+  have hwithin : ∀ cy, s.Overlap cf cy → s.Overlap c cy := by
+    intro cy ho
+    refine State.Overlap.within (State.range?_frame s hty) (State.range?_frame s rfl) (Or.inr ?_) ho
+    simp only [cf, hbase]; omega
+  have hfit' : cf.type = capFrame → cf.a + cf.b ≤ 2 ^ 32 := fun _ =>
+    show (BitVec.ofNat 32 c.a + BitVec.ofNat 32 (reg r 1)).toNat + reg r 2 ≤ 2 ^ 32 by rw [hbase]; omega
+  have hm : mayHold cf = false := State.mayHold_frame rfl
+  simp only [finish] at ho
+  refine one_nested ?_ ho
+  unfold Rvuos.place
+  split
+  · refine h.store hdst hc (show capFrame ≠ capRetyped by decide) hfit' (fun e => by rw [hm] at e; contradiction)
+      (fun e => by rw [hty] at e; simp [capHasObject] at e) hwithin (fun x cx hb hx hmx => ?_)
+    rcases hmx with hmx | hmx
+    · obtain ⟨ca, ha, hat⟩ := h.derived.below_untyped h.forest hb cx hx hmx
       rw [hc] at ha; cases ha; rw [hty] at hat; exact absurd hat (by decide)
-    · rw [State.mayHold_frame rfl] at hm; contradiction
+    · rw [hm] at hmx; contradiction
+  · exact h.beside hdst hc hty.symm hm hwithin hfit'
 
 /-- A retype into a frame: a frame of the whole block, below the free Untyped. -/
 theorem untypedRetype_nested (h : Nested s) {t u : Nat} {c : Cap} {r : List Nat} {outs : List Outcome}
@@ -938,9 +815,9 @@ theorem untypedRetype_nested (h : Nested s) {t u : Nat} {c : Cap} {r : List Nat}
     (hh : untypedRetype m s t u c r = .ok (some outs)) : ∀ o ∈ outs, Nested o.st := by
   intro o ho
   obtain ⟨dst, ret, hdst, rfl⟩ := untypedRetype_ok hh
-  obtain ⟨hleaf, hgo⟩ := untypedFree_facts (untypedRetype_free hh)
+  have hleaf := untypedFree_leaf (untypedRetype_free hh)
   refine one_nested (h.store hdst hc (show capFrame ≠ capRetyped by decide) (fun _ => block_fits _) (fun e => by rw [State.mayHold_frame rfl] at e; contradiction)
-    (fun e => by rw [hty] at e; simp [capHasObject] at e) (fun cy ho => ?_) hgo
+    (fun e => by rw [hty] at e; simp [capHasObject] at e) (fun cy ho => ?_)
     (fun x _ hb => absurd hb (not_below_leaf hleaf ·))) ho
   exact State.Overlap.within (State.range?_untyped s hty) (State.range?_frame s rfl) (Or.inr ⟨Nat.le_refl _, Nat.le_refl _⟩) ho
 
@@ -950,12 +827,12 @@ theorem untypedSplit_nested (h : Nested s) {t u : Nat} {c : Cap} {r : List Nat} 
     (hh : untypedSplit m s t u c r = .ok (some outs)) : ∀ o ∈ outs, Nested o.st := by
   intro o ho
   obtain ⟨lo, hi, hlo, hhi, hne, hnapot, rfl⟩ := untypedSplit_ok hh
-  obtain ⟨hleaf, hgo⟩ := untypedFree_facts (untypedSplit_free hh)
+  have hleaf := untypedFree_leaf (untypedSplit_free hh)
   obtain ⟨pow, aligned⟩ := napot_split _ _ _ hnapot
   have hul : u ≠ lo := by intro e; subst e; simp [hc] at hlo
   let a := BitVec.ofNat 32 c.a
-  let cl : Cap := ⟨capUntyped, c.rights, 0, (blockWord (blockBase a) (blockSize a / 2)).toNat, 0⟩
-  let ch : Cap := ⟨capUntyped, c.rights, 0, (blockWord (blockBase a + blockSize a / 2) (blockSize a / 2)).toNat, 0⟩
+  let cl : Cap := ⟨capUntyped, c.rights, 0, (blockWord (blockBase a) (blockSize a / 2)).toNat, 0, true⟩
+  let ch : Cap := ⟨capUntyped, c.rights, 0, (blockWord (blockBase a + blockSize a / 2) (blockSize a / 2)).toNat, 0, true⟩
   have within : ∀ (st : State) (lower : Bool) (cw : Cap), cw = (if lower then cl else ch) →
       st.cap? u = some c → ∀ cy, st.Overlap cw cy → st.Overlap c cy := by
     intro st lower cw hcw _ cy ho
@@ -964,7 +841,7 @@ theorem untypedSplit_nested (h : Nested s) {t u : Nat} {c : Cap} {r : List Nat} 
       ?_ ho
     cases lower <;> simpa [hcw, cl, ch, a, BitVec.ofNat_toNat] using hw
   have h1 := h.store hlo hc (show capUntyped ≠ capRetyped by decide) (fun e => absurd e (show capUntyped ≠ capFrame by decide)) (fun _ => hty) (fun e => by rw [hty] at e; simp [capHasObject] at e)
-    (within s true cl rfl hc) hgo (fun x _ hb => absurd hb (not_below_leaf hleaf ·))
+    (within s true cl rfl hc) (fun x _ hb => absurd hb (not_below_leaf hleaf ·))
   have hc1 : (Rvuos.store s lo cl (some u)).cap? u = some c := by rw [cap?_store]; simp [hul, hc]
   have hhi1 : (Rvuos.store s lo cl (some u)).cap? hi = none := by rw [cap?_store]; simp [Ne.symm hne, hhi]
   -- Below the Untyped lies the lower half alone, and it does not meet the upper.
@@ -980,7 +857,7 @@ theorem untypedSplit_nested (h : Nested s) {t u : Nat} {c : Cap} {r : List Nat} 
       simp only [Ne.symm hul, ↓reduceIte] at hk
       exact absurd hk ((h.forest.empty hlo).2 ▸ List.not_mem_nil)
   have h2 := h1.store hhi1 hc1 (show capUntyped ≠ capRetyped by decide) (fun e => absurd e (show capUntyped ≠ capFrame by decide)) (fun _ => hty)
-    (fun e => by rw [hty] at e; simp [capHasObject] at e) (within _ false ch rfl hc1) hgo
+    (fun e => by rw [hty] at e; simp [capHasObject] at e) (within _ false ch rfl hc1)
     (fun x cx hb hx _ ho => ?_)
   · exact one_nested h2 ho
   · have := only x u hb rfl; subst this
