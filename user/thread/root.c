@@ -20,7 +20,10 @@
  * channel=, 11 to 26, the exchange's channel, 25 by default, where the C6 has to be too;
  * power=, the dBm it sends at, 0 by default, down to -40, the chip's least;
  * run=, the exchange's seconds, 30 by default; stream=, frames a second, none by default;
- * survey=0 leaves the survey of the channels out.
+ * survey=0 leaves the survey of the channels out;
+ * load=, units of the processor's 64 up to 32, has a thread beside the link's earn them and compute without end,
+ * as a node does that has more to do than its link, so that the link's thread waits for its turn when it wakes,
+ * up to a tick; it runs no more than its units earn, with no spare time, and there is none by default.
  *
  * Build and run: make BOARD=nrf52840 thread, with the ESP32-C6 on i154= the same channel, see user/wifi/esp32c6/root.c;
  * tools/thread-pair.sh runs both.
@@ -55,6 +58,10 @@
 #define PAYLOAD_MAX     32u
 #define US_PER_S        1000000u
 
+/* The root task keeps half the processor's units, so that load= may give the other half away. */
+#define LOAD_UNITS_MAX (TIME_UNITS / 2u)
+#define ROOT_UNITS     (TIME_UNITS - LOAD_UNITS_MAX)
+
 /* The halt's code when the exchange did not go both ways; a step that failed halts with 1. */
 #define HALT_SILENT 2u
 
@@ -64,6 +71,8 @@ static struct self self;
 static struct link link;
 static uint32_t radio_irq, radio_bit, timer_irq, timer_bit, end_irq, end_bit, step_irq, step_bit;
 static uint32_t stream_irq, stream_bit, pending;
+static uint8_t load_stack[256] __attribute__((aligned(16)));
+static volatile uint32_t load_rounds;
 
 static void console_write(void *to, const char *s, uint32_t n)
 {
@@ -102,7 +111,7 @@ static uint32_t wait_for(uint32_t want)
 
 /* What the configuration asks for. */
 struct config {
-    uint32_t channel, run_s, stream;
+    uint32_t channel, run_s, stream, load;
     int32_t power;
     bool survey;
 };
@@ -140,6 +149,8 @@ static void configure(struct config *c)
     c->stream = config_number(conf, size, "stream", 0);
     c->stream = c->stream > STREAM_MAX ? STREAM_MAX : c->stream;
     c->survey = config_number(conf, size, "survey", 1) != 0;
+    c->load = config_number(conf, size, "load", 0);
+    c->load = c->load > LOAD_UNITS_MAX ? LOAD_UNITS_MAX : c->load;
     must("uninstall the input", region_free(&self, region));
 }
 
@@ -280,6 +291,9 @@ static void summary(const struct tally *t, const struct config *c)
                "sent %u acknowledgements; %u frames with a bad FCS, %u stray acknowledgements, %u others, %u dropped\n",
         k->frames, k->tries, k->busy, k->acks_sent, k->bad_fcs, k->stray_acks, k->others, k->dropped);
     say(&cout, "thread: %u frames sent ended before the radio was set to receive after them\n", link.radio.late);
+    if (c->load != 0) {
+        say(&cout, "thread: the load counted %u rounds\n", load_rounds);
+    }
     for (uint32_t i = 0; i < LINK_NEIGHBORS; i++) {
         const struct link_neighbor *n = &link.neighbors[i];
         if (!n->used) {
@@ -360,12 +374,40 @@ static bool exchange(const struct config *c)
     return t.pings != 0 && t.pongs.ended[LINK_ACKED] != 0 && (c->stream == 0 || t.stream.ended[LINK_ACKED] != 0);
 }
 
+/* The load: it counts, and never waits. */
+static void load_thread(uint32_t arg)
+{
+    (void)arg;
+    for (;;) {
+        load_rounds++;
+    }
+}
+
+/* A thread that earns units of the first core without spare time, and computes. */
+static void load_start(uint32_t units)
+{
+    uint32_t thread, time, capped, first;
+    must("a slot for the load", slot_new(&self, &thread));
+    must("the load's thread", rv_thread_alloc(self.pool, thread, BOOT_CAP_PROCESS, 1));
+    must("configure the load", rv_thread_configure(thread, (uint32_t)(uintptr_t)load_thread,
+                                                   (uint32_t)(uintptr_t)(load_stack + sizeof(load_stack)), 0));
+    must("the load's units", units_take(&self, 0, units, &first));
+    must("a slot for the load's time", slot_new(&self, &time));
+    must("carve the load's units", rv_time_carve(self.time, first, units, time));
+    must("a slot for the load's time without spare", slot_new(&self, &capped));
+    must("the load's units without spare time",
+         rv_invoke(OP_CAP_DERIVE, BOOT_CAP_CAPTABLE, capped, time, RIGHT_W));
+    must("bind the load's units", rv_time_bind(capped, thread, 0, units));
+    must("start the load", rv_thread_resume(thread));
+    say(&cout, "thread: a load beside the link, earning %u units of %u\n", units, TIME_UNITS);
+}
+
 int main(void);
 int main(void)
 {
     uint32_t base, size, region;
     must("the console", rv_frame_info(BOOT_CAP_UART, &base, &size));
-    must("the root's own", self_root(&self, TIME_UNITS));
+    must("the root's own", self_root(&self, ROOT_UNITS));
     must("map the console", region_install(&self, BOOT_CAP_UART, RIGHT_R | RIGHT_W, &region));
     console_init(base);
     must("map the radio", region_install(&self, BOOT_CAP_RADIO, RIGHT_R | RIGHT_W, &region));
@@ -397,6 +439,9 @@ int main(void)
     say(&cout, "thread: the radio is on, set for IEEE 802.15.4\n");
     if (c.survey) {
         link_stir(&link, survey_energy());
+    }
+    if (c.load != 0) {
+        load_start(c.load);
     }
     bool both_ways = exchange(&c);
     say(&cout, both_ways ? "thread: done\n" : "thread: no ping heard, or nothing of ours acknowledged\n");

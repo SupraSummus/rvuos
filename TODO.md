@@ -44,9 +44,13 @@ Thread, IPv6 over 802.15.4 in a mesh, needs more of it, step by step:
 - The level the nRF52840's survey reports is the radio's own, 0 to 127;
   beside the C6's survey, which reads dBm, a level is the dBm above -94, to a few dB, but the two surveyed seconds apart.
   The assessment's threshold, -75 dBm, rests on that; the C6's frames at one moment would do as a known signal.
-- The nRF52840's radio starts its next reception as the driver wakes for the last frame,
-  so a frame that begins within that wake is lost; only an acknowledgement follows so closely, 192 us after its frame.
-  A shortcut from END to START, with the buffers' turn kept, would close it.
+- The nRF52840's radio receives the next frame by itself, but the driver learns of frames by events,
+  which say that one or more ended, not how many:
+  of two frames that end within one wake the second is lost, and both are taken as bad unless both were whole.
+  A count of END in a TIMER, through a route between the two devices, would tell, as would the frame received
+  after a send that ends before the driver woke, which is received again from scratch today.
+  The nRF52840 Product Specification was not at hand to say whether PHYEND comes on a frame received;
+  `radio_sending` assumes it may.
 - The nRF52840 acknowledges a frame two wakes past aTurnaroundTime rather than at it,
   as its driver learns of a frame's end only by waking for it, and its alarm comes a wake late.
   The C6 waits macAckWaitDuration, which holds that, but a receiver that waits less would not;

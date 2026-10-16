@@ -9,7 +9,7 @@
  * The radio raises its line for the one event the step at hand waits for;
  * the driver arms the line's Irq, waits on its notification and then asks what came,
  * so a step is started by one call and ended by another.
- * Only a disable, some microseconds, is waited for in the call that asks it.
+ * Only a disable or a ramp up, some microseconds, is waited for in the call that asks it.
  * Nothing here keeps a global: the radio's state is handed in.
  */
 
@@ -33,8 +33,13 @@
 #define RADIO_ENERGY_PERIOD_US 128u
 #define RADIO_LEVEL_DBM        (-94)
 
-/* The receive buffers, which take turns: a frame stays in its own while the radio receives the next into the other. */
-#define RADIO_RX_BUFFERS 2u
+/*
+ * The receive buffers, which take turns:
+ * the one a frame was last returned in, which stays as it is until the next call that returns one,
+ * the one the radio receives into, and the one after, which the radio starts receiving into by itself
+ * as soon as the frame before ends, without waiting for the driver.
+ */
+#define RADIO_RX_BUFFERS 3u
 
 struct radio {
     uint32_t base; /* the registers, mapped at their own address */
@@ -44,10 +49,12 @@ struct radio {
      * The radio writes it by DMA while it receives, so it is read only once a frame has ended.
      */
     uint8_t rx[RADIO_RX_BUFFERS][1u + RADIO_PSDU_MAX + 1u] __attribute__((aligned(4)));
-    uint32_t rx_next; /* the buffer the radio receives into next */
+    uint32_t rx_at; /* the buffer the radio receives into, and the next frame returned comes from */
     /* What it sends, the length first, which counts the FCS the radio appends. */
     uint8_t tx[1u + RADIO_PSDU_MAX] __attribute__((aligned(4)));
     uint32_t late; /* frames sent that ended before the driver woke to set the radio to receive after them */
+    bool doubt;    /* the next frame returned may carry another's verdict, see radio_received */
+    bool again;    /* the frame received after a send ended before receiving was set up, see radio_sending */
 };
 
 /* What a received frame was: its length without the FCS, its link quality, and whether its FCS was right. */
@@ -81,12 +88,19 @@ bool radio_energy_done(struct radio *r, uint32_t *level);
 /* Starts receiving on the channel, a frame at a time. */
 void radio_receive_start(struct radio *r);
 /*
- * After the line: whether a frame ended, and what it was.
- * The radio receives the next frame at once, into the other buffer,
- * so the frame stays as it is until the next call that returns one.
+ * After the line: whether a frame ended, and what it was;
+ * the frame stays as it is until the next call that returns one.
+ * The radio receives the next frame by itself as soon as one ends, into the buffer after,
+ * so how soon the driver wakes for a frame matters only once the next has ended too:
+ * the radio is one buffer ahead of the driver, and receives a third frame into the second's buffer.
+ * The second is lost then, and its verdict is the first's too, so a frame is told whole
+ * only if every frame that ended with it was; a whole one is now and then told otherwise, never the reverse.
  */
 bool radio_received(struct radio *r, struct radio_frame *f);
-/* Whether a frame is arriving: its length heard, its end not yet, which a send would cut off. */
+/*
+ * Whether a frame is arriving: its length heard, its end not yet, which a send would cut off.
+ * A frame whose length came before the call that returned the frame before it goes untold.
+ */
 bool radio_receiving(struct radio *r);
 
 /*

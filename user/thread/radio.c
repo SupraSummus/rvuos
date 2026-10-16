@@ -10,6 +10,11 @@
  *
  * A reception is told by CRCOK or CRCERROR, which only a received frame raises, rather than by END,
  * which a frame sent raises too, and clearing which after sending could clear an acknowledgement's.
+ *
+ * Receiving, the radio starts again by itself as a frame ends, END_START, into what PACKETPTR says then,
+ * which a START takes as it comes; so PACKETPTR says the buffer after the one being received into,
+ * written once the START into that one has come.
+ * END_START is set only while the radio receives, as a frame sent raises END too.
  */
 
 #include "radio.h"
@@ -52,6 +57,7 @@
 
 #define SHORT_READY_START     (1u << 0)
 #define SHORT_DISABLED_RXEN   (1u << 3)
+#define SHORT_END_START       (1u << 5)
 #define SHORT_RXREADY_CCASTART (1u << 11)
 #define SHORT_CCAIDLE_TXEN    (1u << 12)
 #define SHORT_CCABUSY_DISABLE (1u << 13)
@@ -91,16 +97,20 @@
 /* The link quality follows a frame of at least this many octets; it is not measured on a shorter one. */
 #define LQI_MIN_PSDU 3u
 
-/* A disable takes some microseconds; this bounds the wait well past them. */
+/* A disable, or a ramp up, 40 us, takes some microseconds; this bounds the wait well past them. */
 #define DISABLE_POLLS 100000u
+#define RAMP_POLLS    100000u
+
+/* Receiving: a START once ready, and again as each frame ends. */
+#define SHORTS_RX (SHORT_READY_START | SHORT_END_START)
 
 /* The powers the chip sends at, in dBm as TXPOWER takes them, most first; its byte is the dBm's two's complement. */
 static const int8_t powers[] = { 8, 7, 6, 5, 4, 3, 2, 0, -4, -8, -12, -16, -20, -40 };
 #define POWERS (sizeof(powers) / sizeof(powers[0]))
 
-void radio_off(struct radio *r)
+/* Off the air, waited for, whatever the radio did; its events but DISABLED are left as they are. */
+static void disable(struct radio *r)
 {
-    REG(r, INTENCLR) = ~0u;
     REG(r, SHORTS) = 0;
     if (REG(r, STATE) != STATE_DISABLED) {
         REG(r, EVENTS_DISABLED) = 0;
@@ -108,6 +118,14 @@ void radio_off(struct radio *r)
         for (uint32_t i = 0; i < DISABLE_POLLS && REG(r, EVENTS_DISABLED) == 0; i++) {
         }
     }
+}
+
+void radio_off(struct radio *r)
+{
+    REG(r, INTENCLR) = ~0u;
+    disable(r);
+    r->doubt = false;
+    r->again = false;
     REG(r, EVENTS_READY) = 0;
     REG(r, EVENTS_END) = 0;
     REG(r, EVENTS_DISABLED) = 0;
@@ -124,7 +142,7 @@ void radio_off(struct radio *r)
 void radio_init(struct radio *r, uint32_t base, uint32_t cca_level)
 {
     r->base = base;
-    r->rx_next = 0;
+    r->rx_at = 0;
     /* Off and on again resets the peripheral, its registers to what reset leaves. */
     REG(r, POWER) = 0;
     REG(r, POWER) = 1;
@@ -178,33 +196,79 @@ bool radio_energy_done(struct radio *r, uint32_t *level)
     return true;
 }
 
+/* The buffer after the one the radio receives into, for the START as that frame ends. */
+static void receive_ahead(struct radio *r)
+{
+    REG(r, PACKETPTR) = (uint32_t)(uintptr_t)r->rx[(r->rx_at + 1u) % RADIO_RX_BUFFERS];
+}
+
+/*
+ * Once the radio, ramping up to receive, is ready, and the START that ready makes has taken PACKETPTR,
+ * the buffer after; if it was ready before, it has started already.
+ */
+static void receive_ready(struct radio *r)
+{
+    for (uint32_t i = 0; i < RAMP_POLLS && REG(r, EVENTS_RXREADY) == 0; i++) {
+    }
+    receive_ahead(r);
+}
+
 void radio_receive_start(struct radio *r)
 {
     radio_off(r);
-    REG(r, PACKETPTR) = (uint32_t)(uintptr_t)r->rx[r->rx_next];
-    REG(r, SHORTS) = SHORT_READY_START;
+    REG(r, PACKETPTR) = (uint32_t)(uintptr_t)r->rx[r->rx_at];
+    REG(r, SHORTS) = SHORTS_RX;
     REG(r, INTENSET) = INT_CRCOK | INT_CRCERROR;
     REG(r, TASKS_RXEN) = 1;
+    receive_ready(r);
 }
 
 bool radio_received(struct radio *r, struct radio_frame *f)
 {
-    bool ok = REG(r, EVENTS_CRCOK) != 0;
-    if (!ok && REG(r, EVENTS_CRCERROR) == 0) {
+    /* Each event stands for every frame that ended since the last call, so one bad makes them all doubtful. */
+    bool ok = REG(r, EVENTS_CRCOK) != 0, bad = REG(r, EVENTS_CRCERROR) != 0;
+    if (!ok && !bad) {
         return false;
     }
-    REG(r, EVENTS_CRCOK) = 0;
-    REG(r, EVENTS_CRCERROR) = 0;
-    const uint8_t *rx = r->rx[r->rx_next];
-    /* The radio waits, ready, after a frame: it receives the next at once, into the other buffer. */
-    r->rx_next = (r->rx_next + 1u) % RADIO_RX_BUFFERS;
-    REG(r, PACKETPTR) = (uint32_t)(uintptr_t)r->rx[r->rx_next];
-    REG(r, EVENTS_FRAMESTART) = 0;
-    REG(r, TASKS_START) = 1;
+    const uint8_t *rx = r->rx[r->rx_at];
+    bool doubt = r->doubt;
+    r->rx_at = (r->rx_at + 1u) % RADIO_RX_BUFFERS;
+    REG(r, EVENTS_END) = 0;
+    if (r->again) {
+        /*
+         * The frame was the first after a send, and ended before radio_sending set END_START,
+         * so the radio is ready, or receives again into the frame's own buffer:
+         * it is stopped, what ended meanwhile forgotten, and started into the buffer after.
+         */
+        r->again = false;
+        disable(r);
+        REG(r, EVENTS_CRCOK) = 0;
+        REG(r, EVENTS_CRCERROR) = 0;
+        REG(r, EVENTS_FRAMESTART) = 0;
+        REG(r, EVENTS_RXREADY) = 0;
+        REG(r, PACKETPTR) = (uint32_t)(uintptr_t)r->rx[r->rx_at];
+        REG(r, SHORTS) = SHORTS_RX;
+        REG(r, TASKS_RXEN) = 1;
+        receive_ready(r);
+        r->doubt = false;
+    } else {
+        /*
+         * The radio receives into the buffer after already, and is told the one after that,
+         * which the frame the last call returned leaves free; then the events are cleared.
+         * A frame that ends between the two loses its events to the clear,
+         * and the next call would return it with the verdict of the frame after it;
+         * END, cleared before, tells of it, and the next frame returned is taken as bad.
+         */
+        receive_ahead(r);
+        REG(r, EVENTS_CRCOK) = 0;
+        REG(r, EVENTS_CRCERROR) = 0;
+        REG(r, EVENTS_FRAMESTART) = 0;
+        r->doubt = REG(r, EVENTS_END) != 0;
+    }
     uint32_t psdu = rx[0] & PHR_LENGTH;
     f->bytes = &rx[1];
     f->length = psdu >= RADIO_FCS ? psdu - RADIO_FCS : 0;
-    f->fcs_ok = ok;
+    f->fcs_ok = ok && !bad && !doubt;
     f->lqi = 0;
     if (psdu >= LQI_MIN_PSDU) {
         uint32_t lqi = rx[1u + f->length] * LQI_SCALE;
@@ -231,11 +295,13 @@ static void frame_put(struct radio *r, const uint8_t *frame, uint32_t length)
  * Once the radio has started sending, whatever it was told to do before: once the last bit is on the air, PHYEND,
  * it turns itself off, which is the line, and from off straight on to receiving, into the buffer next in turn.
  * The START that ready made took PACKETPTR as it was; from then the register is the next START's, the reception's.
+ * The assessment before sending was ready to receive too, so its ready is cleared for the reception's.
  */
 static void then_receive(struct radio *r)
 {
+    REG(r, EVENTS_RXREADY) = 0;
     REG(r, SHORTS) = SHORT_PHYEND_DISABLE | SHORT_DISABLED_RXEN | SHORT_RXREADY_START;
-    REG(r, PACKETPTR) = (uint32_t)(uintptr_t)r->rx[r->rx_next];
+    REG(r, PACKETPTR) = (uint32_t)(uintptr_t)r->rx[r->rx_at];
     REG(r, INTENCLR) = INT_TXREADY | INT_CCABUSY;
     REG(r, INTENSET) = INT_DISABLED;
 }
@@ -280,14 +346,27 @@ enum radio_send radio_sending(struct radio *r)
     }
     REG(r, EVENTS_DISABLED) = 0;
     REG(r, EVENTS_FRAMESTART) = 0;
-    /* Receiving from here on, and no later off turns the radio on again. */
-    REG(r, SHORTS) = SHORT_READY_START;
     REG(r, INTENCLR) = INT_DISABLED;
     REG(r, INTENSET) = INT_CRCOK | INT_CRCERROR;
     /* Off still, the frame ended before then_receive came, and the radio is turned to receiving here. */
     if (REG(r, STATE) == STATE_DISABLED) {
         r->late++;
         REG(r, TASKS_RXEN) = 1;
+    } else if (REG(r, EVENTS_CRCOK) != 0 || REG(r, EVENTS_CRCERROR) != 0) {
+        /*
+         * A frame was received already, with END_START not yet set,
+         * and PHYEND may have turned the radio off and on again into the frame's own buffer:
+         * the radio is left to radio_received, which the line has already come for, to start again.
+         */
+        r->again = true;
+        REG(r, SHORTS) = SHORT_READY_START;
+        return RADIO_SENT;
     }
+    /*
+     * Receiving from here on, and no later off turns the radio on again;
+     * the buffer after is told before END_START is set, so a frame ending meanwhile is not received over.
+     */
+    receive_ready(r);
+    REG(r, SHORTS) = SHORTS_RX;
     return RADIO_SENT;
 }
