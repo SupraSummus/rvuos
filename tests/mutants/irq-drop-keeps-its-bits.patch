@@ -1,0 +1,17 @@
+An Irq whose notification is taken keeps the bits it could signal, which a description of it then tells;
+an Irq without a notification may signal none.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: irq without a notification may signal
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -771,7 +771,6 @@ void irq_drop(struct cap *signalled)
+ {
+     struct irq *irq = signalled_irq(signalled);
+     irq_set_bits(irq, 0);
+-    irq->may = 0;
+     /* Only the controller's lines have a mask. */
+     if (line_on_controller(irq->line)) {
+         irq_enable(irq->line, false);

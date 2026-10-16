@@ -73,6 +73,53 @@ static const struct cap *after_node(const struct cap *n)
     return n->next != 0 ? link_node(n->next) : NULL;
 }
 
+/* The model's own types for the nodes an object holds, which the kernel types by what they name; see Rvuos/Abi.lean. */
+#define MODEL_INSTALLED 0x80
+#define MODEL_RETYPED 0x81
+#define MODEL_BOUND 0x82
+#define MODEL_HOSTED 0x83
+#define MODEL_SIGNALLED 0x84
+#define MODEL_WATCHED 0x85
+
+/*
+ * A node's words as the model reads them, node i of object o:
+ * a frame its base and size, a range of lines or units its first and count,
+ * and a node an object holds by a type of its own, with its place among the object's in index,
+ * a thread's units and an installed region theirs, and an Irq's notification the bits the Irq may signal.
+ */
+static void put_node(const struct obj_header *o, uint32_t i, const struct cap *c)
+{
+    unsigned type = c->type, index = 0, a = c->a, b = c->b;
+    switch (c->type) {
+    case CAP_FRAME:
+        a = block_base(c);
+        b = block_size(c);
+        break;
+    case CAP_IRQ_LINE:
+    case CAP_TIME:
+        a = range_first(c);
+        b = range_count(c);
+        break;
+    default:
+        break;
+    }
+    if (o->type == CAP_PROCESS && i >= PROCESS_TABLES) {
+        type = MODEL_INSTALLED;
+        index = i - PROCESS_TABLES;
+    } else if (o->type == CAP_THREAD) {
+        type = i == 0 ? MODEL_HOSTED : i == 1 ? MODEL_WATCHED : MODEL_BOUND;
+        index = i < 2 ? 0 : i - 2;
+        b = i == 0 ? 0 : b;
+    } else if (o->type == CAP_IRQ) {
+        type = MODEL_SIGNALLED;
+        b = ((const struct irq *)o)->may;
+    } else if (o->type == CAP_POOL) {
+        type = MODEL_RETYPED;
+        b = 0;
+    }
+    put("node %u %u %u %u %u %u %u\n", (unsigned)v2p(c), type, (unsigned)c->rights, index, a, b, (unsigned)c->orig);
+}
+
 static void put_state(void)
 {
     put("state\n");
@@ -91,8 +138,7 @@ static void put_state(void)
             if (c->type == CAP_NONE) {
                 continue;
             }
-            put("node %u %u %u %u %u %u %u\n", (unsigned)v2p(c), (unsigned)c->type, (unsigned)c->rights,
-                (unsigned)c->index, (unsigned)c->a, (unsigned)c->b, (unsigned)c->orig);
+            put_node(o, i, c);
             if (node_first_below(c) == NULL) {
                 continue;
             }

@@ -9,10 +9,10 @@ Report: capability to an object is a root
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -727,7 +727,7 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
-         struct irq *irq = pool_alloc(pool, CAP_IRQ, obj_type_size(CAP_IRQ, 0));
-         /* It hangs below the capability it was bound with, so a revoke above that disarms the Irq. */
-         irq->ntfn = (struct cap){ .type = CAP_SIGNALLED, .rights = nc.rights, .a = nc.a, .b = nc.b };
+@@ -742,7 +742,7 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
+          */
+         irq->ntfn = (struct cap){ .type = CAP_NOTIFICATION, .rights = nc.rights, .a = nc.a };
+         irq->may = nc.b;
 -        cap_attach(slot_node(t, arg[2]), &irq->ntfn);
 +        cap_attach(NULL, &irq->ntfn);
          irq->line = first;

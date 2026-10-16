@@ -89,7 +89,9 @@ the newest is the one the descriptor names,
 and pools are pairwise disjoint.
 A pool half destroyed is a pool like any other, with fewer objects.
 The line table names exactly the bound `Irq`s,
-and every installed region records its slot.
+and a node an object holds that the object hears the clearing of names the object:
+an installed region its process, a thread's process and units the thread, and a pool's own node the pool,
+while no capability of those types in a table names any, and an `Irq`'s notification alone has no bits of its own.
 
 **Thread state.**
 Every thread is stopped, ready, or waiting,
@@ -273,6 +275,15 @@ and above the same children, in their order.
 The tree's shape alone does not say so:
 a copy beside the source and a delete of it leave a whole tree too.
 
+**A carve takes what it names.**
+A carve that succeeds puts in the slot it names a capability of its source's type and rights,
+naming exactly what the call names of the source:
+a frame's block or a range of lines or units from the offset for the length,
+or the bits of the mask that a notification's source may signal.
+The tree's shape alone does not say so:
+a frame's block in one word is a block whatever the word holds,
+so a carve that made another block within its source would leave a whole tree.
+
 **A description is the capability's.**
 A describing call, `OP_CAP_INFO` on any slot and `OP_POOL_INFO` on a pool,
 succeeds on a filled slot whatever the capability's rights,
@@ -293,13 +304,13 @@ Any other status comes from a check before the room's and says nothing of it.
 The type is measured by the structures' own sizes, as `MANUAL.md` gives them, not by the kernel's `obj_type_size`,
 so an allocator and a walk that agree on a wrong size show too.
 
-These twelve relate the state before a call to the state after it,
+These thirteen relate the state before a call to the state after it,
 so the self-check, which sees one state, cannot check them,
 and it gains no check for the last two: a description changes no state,
 and the self-check's tiling holds the sizes the allocator takes, `obj_type_size`'s, to those the walk steps by, `obj_size`'s.
 `host/history.c` checks them around every call of the host build, the untraced prologue's too,
 and around every fault, which must change no more than a call that moves no time,
-but a move's place and a description only around a traced call,
+but a move's place, a carve's and a description only around a traced call,
 since they follow the tree's links and only the self-check vets them.
 It does not know what memory held before a call,
 so an object handed out unzeroed shows only by what it holds:
@@ -723,6 +734,8 @@ The model maps a state and an event to every outcome the kernel may reach.
 The state is what `host/model.c` writes of the kernel's memory:
 every object with its array of nodes, and a pool its size,
 every filled node's words by its address and whether it is an original,
+the words as the model reads them, a frame's its base and its size and a range's its first and its count,
+and a node an object holds with a type of the model's own, which the kernel gives none, see `host/model.c`,
 and each node's children in the order of their list; no link, no scheduler, no PMP.
 It models the operations that touch nothing but the tree:
 `OP_CAP_COPY`, `OP_CAP_DERIVE`, `OP_CAP_MOVE`, `OP_CAP_DELETE`,

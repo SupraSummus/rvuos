@@ -69,6 +69,11 @@ struct thread *boot_create_root(void)
     if (!napot_block(BOOT_POOL_BASE, BOOT_POOL_SIZE)) {
         kpanic("boot layout is not made of NAPOT blocks");
     }
+    /* The root task's own frames are blocks too, as every frame is, so that one word names each. */
+    if (!napot_block(USER_CODE_BASE, USER_CODE_SIZE) || !napot_block(USER_DATA_BASE, USER_DATA_SIZE) ||
+        !napot_block(INPUT_BASE, INPUT_SIZE)) {
+        kpanic("boot layout is not made of NAPOT blocks");
+    }
     struct cap ram = cap_to_untyped(ROOT_RAM_BASE, ROOT_RAM_SIZE, RIGHT_ALL);
     struct cap pool_ram = cap_to_untyped(BOOT_POOL_BASE, BOOT_POOL_SIZE, RIGHT_ALL);
     ram.orig = 1;
@@ -121,7 +126,7 @@ struct thread *boot_create_root(void)
      * before the capabilities to the table and the process, which cover them:
      * only a destroy of the boot pool takes the root task's table or process.
      */
-    thread->proc = (struct cap){ .type = CAP_HOSTED, .rights = RIGHT_ALL, .a = v2p(proc) };
+    thread->proc = (struct cap){ .type = CAP_PROCESS, .rights = RIGHT_ALL, .a = v2p(proc), .b = v2p(thread) };
     cap_attach(&pool->node, &thread->proc);
     proc->tables[0] = cap_to_object(&table->hdr, RIGHT_ALL);
     cap_attach(&pool->node, &proc->tables[0]);
@@ -131,9 +136,6 @@ struct thread *boot_create_root(void)
             continue;
         }
         bool own = i == BOOT_CAP_CODE || i == BOOT_CAP_DATA || i == BOOT_CAP_INPUT;
-        if (own && !napot_block(boot[i].a, boot[i].b)) {
-            kpanic("boot layout is not made of NAPOT blocks");
-        }
         boot[i].orig = 1;
         if (cap_store(table, i, &boot[i], own ? root_ram : NULL) != KERR_OK) {
             kpanic("cannot fill the root task's table");

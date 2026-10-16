@@ -1,9 +1,10 @@
 A carve that checks the block's size but not where it starts
-hands out a range no single NAPOT entry describes:
-a power of two at an offset that is not a multiple of it.
+asks for a range no single NAPOT entry describes, a power of two at an offset that is not a multiple of it,
+and hands out another block, since a frame's block in one word is a block whatever the word;
+a carve takes what it names.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
-Report: frame is not a NAPOT block
+Report: a carve made other than what it names of its source
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

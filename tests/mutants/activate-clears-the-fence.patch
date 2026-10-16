@@ -7,7 +7,7 @@ Report: PMP CSRs grant rights the slots do not
 diff --git a/kernel/process.c b/kernel/process.c
 --- a/kernel/process.c
 +++ b/kernel/process.c
-@@ -37,7 +37,7 @@
+@@ -37,7 +37,7 @@ void process_fence_core(void)
  void process_activate(struct process *proc)
  {
      struct core *core = core_self();

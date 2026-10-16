@@ -56,7 +56,7 @@ static void rebuild_pmp(struct process *proc)
         LOOP_BOUND(PMP_MAX_ENTRIES);
         const struct cap *s = &proc->slots[i];
         if (s->type != CAP_NONE) {
-            addr[count] = pmp_napot_addr(s->a, s->b);
+            addr[count] = pmp_napot_addr(block_base(s), block_size(s));
             cfg[count] = PMP_A_NAPOT | rights_to_pmp(s->rights);
             count++;
         }
@@ -97,21 +97,21 @@ int process_install(struct process *proc, unsigned slot,
         LOOP_BOUND(PMP_MAX_ENTRIES);
         const struct cap *s = &proc->slots[i];
         if (s->type != CAP_NONE) {
-            if (ranges_overlap(base, size, s->a, s->b)) {
+            if (ranges_overlap(base, size, block_base(s), block_size(s))) {
                 return KERR_OVERLAP;
             }
 #if PMP_SPLIT_STORE_AS_READ
-            if (store_reaches(base, size, rights, s->a, s->rights) ||
-                store_reaches(s->a, s->b, s->rights, base, rights)) {
+            if (store_reaches(base, size, rights, block_base(s), s->rights) ||
+                store_reaches(block_base(s), block_size(s), s->rights, base, rights)) {
                 return KERR_OVERLAP;
             }
 #endif
         }
     }
 
-    proc->slots[slot] = (struct cap){
-        .type = CAP_INSTALLED, .rights = rights, .index = (uint8_t)slot, .a = base, .b = size,
-    };
+    /* The frame as the process holds it: b names the process, as no frame in a table does. */
+    proc->slots[slot] = cap_to_frame(base, size, rights);
+    proc->slots[slot].b = v2p(proc);
     cap_attach(parent, &proc->slots[slot]);
     rebuild_pmp(proc);
     return KERR_OK;
@@ -119,9 +119,7 @@ int process_install(struct process *proc, unsigned slot,
 
 void process_drop(struct cap *installed)
 {
-    /* The slot knows its index, and so the process it lies in. */
-    struct cap *slots = installed - installed->index;
-    struct process *proc = (struct process *)((char *)slots - offsetof(struct process, slots));
+    struct process *proc = p2v(node_holder(installed));
     *installed = (struct cap){ 0 };
     rebuild_pmp(proc);
 }

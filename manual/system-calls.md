@@ -258,7 +258,7 @@ No right needed.
 `a2` = 0; `a3` = the number of slots for `CAP_CAPTABLE`, 1 to 1024, of region slots for `CAP_PROCESS`, 1 to the most,
 of places for `CAP_THREAD`, 1 to the machine's cores, and 0 for the others.
 Anything else is `KERR_INVALID_ARG`, and nothing is written.
-Returns `a1` = the bytes the object takes, a multiple of 8, as the pool counts them,
+Returns `a1` = the bytes the object takes, a multiple of 16, as the pool counts them,
 and `a2` = the bytes left, the pool's room as `OP_CAP_INFO` tells it, zero while the pool is being destroyed;
 `a3` and `a4` are unchanged.
 An allocation of the type that passes its other checks fails with `KERR_NO_MEMORY` exactly when `a1` is more than `a2`,
@@ -659,8 +659,8 @@ and drops into user mode with:
 20 on QEMU and the MPS2 boards, 23 on the nRF52840, 25 on RP2350 and 28 on the ESP32-C6.
 A root task puts its own slots from there upwards.
 
-The root task's own table, process and thread take about 2.1 KiB of the boot pool,
-so roughly 1.9 KiB remain for objects the root task allocates from `BOOT_CAP_POOL`, a little less on RP2350.
+The root task's own table, process and thread take about 1.6 KiB of the boot pool,
+so roughly 2.4 KiB remain for objects the root task allocates from `BOOT_CAP_POOL`, a little less on RP2350 and the ESP32-C6.
 Anything larger goes into a pool the root task makes out of free RAM.
 The capabilities to the boot pool, its table, process and thread
 hang below the boot pool's own node, not below `BOOT_CAP_POOL`,

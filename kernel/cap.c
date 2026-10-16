@@ -68,36 +68,34 @@ static bool range_within(uint32_t base, uint32_t size, uint32_t in, uint32_t ins
     return base >= in && base - in <= insize - size && size <= insize;
 }
 
-/* A node naming an object in a pool: a capability to one, or a thread's or an Irq's hold on one. */
+/* A node naming an object in a pool: a capability to one, or an object's hold on one. */
 static bool names_object(uint8_t type)
 {
     return type == CAP_POOL || type == CAP_CAPTABLE || type == CAP_PROCESS || type == CAP_THREAD ||
-           type == CAP_NOTIFICATION || type == CAP_IRQ || type == CAP_HOSTED || type == CAP_WATCHED ||
-           type == CAP_SIGNALLED;
+           type == CAP_NOTIFICATION || type == CAP_IRQ;
 }
 
-/* The memory a node names, if it names memory: its block, its range or its pool's, or the first byte of its object. */
+/* The memory a node names, if it names memory: its block, or the first byte of its object. */
 static bool node_memory(const struct cap *n, uint32_t *base, uint32_t *size)
 {
     switch (n->type) {
     case CAP_UNTYPED:
-        *base = untyped_base(n);
-        *size = untyped_size(n);
-        return true;
     case CAP_FRAME:
-    case CAP_INSTALLED:
-        *base = n->a;
-        *size = n->b;
-        return true;
-    case CAP_RETYPED:
-        *base = n->a;
-        *size = ((const struct pool *)p2v(n->a))->size;
+        *base = block_base(n);
+        *size = block_size(n);
         return true;
     default:
         *base = n->a;
         *size = 1;
         return names_object(n->type);
     }
+}
+
+/* True if a range of lines or units lies within another's: its first does, even for none. */
+static bool range_in(const struct cap *n, const struct cap *in)
+{
+    uint32_t off = range_first(n) - range_first(in);
+    return off < range_count(in) && range_count(n) <= range_count(in) - off;
 }
 
 bool node_below(const struct cap *above, const struct cap *n)
@@ -111,25 +109,24 @@ bool node_below(const struct cap *above, const struct cap *n)
         /* What it made, a half, a frame or a pool, and what lies below those, all of it in its memory. */
         node_memory(above, &abase, &asize);
         return node_memory(n, &base, &size) && range_within(base, size, abase, asize);
-    case CAP_RETYPED:
     case CAP_POOL:
-        /* The pool and its objects, and what names them. */
+        /* The pool's own node and its capability alike: the pool and its objects, and what names them. */
         abase = above->a;
         asize = ((const struct pool *)p2v(above->a))->size;
         return names_object(n->type) && range_contains(abase, asize, n->a);
     case CAP_FRAME:
-        return (n->type == CAP_FRAME || n->type == CAP_INSTALLED) && range_within(n->a, n->b, above->a, above->b);
+        /* What is carved or installed from it. */
+        return n->type == CAP_FRAME && range_within(block_base(n), block_size(n), block_base(above), block_size(above));
     case CAP_IRQ_LINE:
-        return n->type == CAP_IRQ_LINE && range_within(n->a, n->b, above->a, above->b);
+        return n->type == CAP_IRQ_LINE && range_in(n, above);
     case CAP_TIME:
-        /* A thread's units lie among those it was bound through, and the first of them does even for none. */
-        return (n->type == CAP_TIME || n->type == CAP_BOUND) && n->a - above->a < above->b &&
-               n->b <= above->b - (n->a - above->a);
+        /* A thread's units lie among those it was bound through. */
+        return n->type == CAP_TIME && range_in(n, above);
     case CAP_CLOCK: {
         /* The counter's block, which a clock gives out, and what is carved or installed from it. */
         const struct granted_range *g = &boot_granted[GRANT_COUNTER];
         return n->type == CAP_CLOCK ||
-               ((n->type == CAP_FRAME || n->type == CAP_INSTALLED) && range_within(n->a, n->b, g->base, g->size));
+               (n->type == CAP_FRAME && range_within(block_base(n), block_size(n), g->base, g->size));
     }
     case CAP_PRINT:
     case CAP_HALT:
@@ -193,19 +190,21 @@ int cap_store(struct captable *table, uint32_t slot, const struct cap *cap, stru
 /*
  * Empty a node the tree no longer names.
  * An installed region is unmapped as well, a thread's units unbound, a thread whose process goes stopped,
- * and an Irq whose notification goes disarmed.
+ * and an Irq whose notification goes disarmed: the nodes whose holder hears of their clearing.
  */
 static void clear_node(struct cap *n)
 {
-    if (n->type == CAP_INSTALLED) {
+    bool held = node_holder(n) != 0;
+    if (held && n->type == CAP_FRAME) {
         process_drop(n);
-    } else if (n->type == CAP_BOUND) {
+    } else if (held && n->type == CAP_TIME) {
         sched_unbind(n);
-    } else if (n->type == CAP_HOSTED) {
+    } else if (held && n->type == CAP_PROCESS) {
         sched_unhost(n);
-    } else if (n->type == CAP_SIGNALLED) {
+    } else if (irq_held(n)) {
         irq_drop(n);
     } else {
+        /* A pool's own node too, which a destroy clears last, once the pool is empty. */
         *n = (struct cap){ 0 };
     }
 }
@@ -251,8 +250,9 @@ bool cap_revoke_below(struct cap *root, uint32_t through, bool preempt)
     struct cap *n;
     while ((n = node_first_below(root)) != NULL) {
         LOOP_PAID(cap_revoke_below, node, "a node it clears");
-        if (n->type == CAP_RETYPED) {
-            if (!pool_destroy(node_pool(n), preempt)) {
+        struct pool *pool = node_pool(n);
+        if (pool != NULL) {
+            if (!pool_destroy(pool, preempt)) {
                 return false;
             }
         } else {
@@ -310,8 +310,8 @@ struct cap cap_to_frame(uint32_t base, uint32_t size, uint8_t rights)
     struct cap c = {
         .type = CAP_FRAME,
         .rights = rights,
-        .a = base,
-        .b = size,
+        .a = block_word(base, size),
+        .b = 0,
     };
     return c;
 }
@@ -321,7 +321,7 @@ struct cap cap_to_untyped(uint32_t base, uint32_t size, uint8_t rights)
     struct cap c = {
         .type = CAP_UNTYPED,
         .rights = rights,
-        .a = untyped_block(base, size),
+        .a = block_word(base, size),
         .b = 0,
     };
     return c;
@@ -332,8 +332,8 @@ struct cap cap_to_lines(uint32_t first, uint32_t count, uint8_t rights)
     struct cap c = {
         .type = CAP_IRQ_LINE,
         .rights = rights,
-        .a = first,
-        .b = count,
+        .a = range_word(first, count),
+        .b = 0,
     };
     return c;
 }
@@ -343,8 +343,8 @@ struct cap cap_to_time(uint32_t first, uint32_t count, uint8_t rights)
     struct cap c = {
         .type = CAP_TIME,
         .rights = rights,
-        .a = first,
-        .b = count,
+        .a = range_word(first, count),
+        .b = 0,
     };
     return c;
 }

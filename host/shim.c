@@ -774,7 +774,7 @@ static bool mapped_with(const struct process *proc, uint32_t base, uint32_t size
     for (unsigned i = 0; i < proc->regions; i++) {
         const struct cap *s = &proc->slots[i];
         /* base within the slot first, or the remaining length below wraps. */
-        if (s->type != CAP_NONE && base - s->a < s->b && size <= s->b - (base - s->a) &&
+        if (s->type != CAP_NONE && base - block_base(s) < block_size(s) && size <= block_size(s) - (base - block_base(s)) &&
             (s->rights & rights) == rights) {
             return true;
         }
@@ -890,18 +890,18 @@ static void host_run_on(void)
 }
 
 #if CORES > 1
-/* Whether a thread waits on a queue of the core, which holds only live threads, for its turn there. */
+/* Whether a thread waits on a queue of the core, which holds only places of live threads, for its turn there. */
 static bool host_queued(const struct core *core, const struct thread *t)
 {
     const paddr_t heads[] = { core->run_queue, core->spare_queue, core->spent_queue };
     for (unsigned q = 0; q < sizeof(heads) / sizeof(heads[0]); q++) {
         paddr_t at = heads[q];
         while (at != 0) {
-            const struct thread *w = p2v(at);
-            if (w == t) {
+            const struct place *p = p2v(at);
+            if (place_thread(p) == t) {
                 return true;
             }
-            at = w->queue_next == heads[q] ? 0 : w->queue_next;
+            at = p->queue_next == heads[q] ? 0 : p->queue_next;
         }
     }
     return false;

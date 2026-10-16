@@ -8,7 +8,7 @@ Report: slot is not derived from its parent
 diff --git a/kernel/process.c b/kernel/process.c
 --- a/kernel/process.c
 +++ b/kernel/process.c
-@@ -148,9 +148,6 @@ int process_mount(struct process *proc, uint32_t index, const struct cap *table,
+@@ -141,9 +141,6 @@ int process_mount(struct process *proc, uint32_t index, const struct cap *table,
      if (index >= PROCESS_TABLES) {
          return KERR_INVALID_ARG;
      }
@@ -17,4 +17,4 @@ diff --git a/kernel/process.c b/kernel/process.c
 -    }
      /* It hangs below the capability it was mounted with, as the first hangs below the one the process was made with. */
      proc->tables[index] = *table;
-     cap_attach(parent, &proc->tables[index]);
+     proc->tables[index].orig = 0;

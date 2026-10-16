@@ -61,7 +61,7 @@ A revoke above the slot, or the destroy of the notification's pool, clears it,
 which disarms the `Irq` and masks its line.
 `OP_IRQ_SET` refuses an `Irq` without a notification,
 so it stays disarmed, its line bound, until its own pool goes.
-It costs twenty-four bytes per `Irq` and a test on every set;
+It costs twenty bytes per `Irq`, the node and the bits it may signal, and a test on every set;
 before, an `Irq` had to lie in its notification's pool so a pointer could not dangle.
 
 **One `Irq` per line.**

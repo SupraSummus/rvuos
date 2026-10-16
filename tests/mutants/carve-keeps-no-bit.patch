@@ -7,9 +7,9 @@ Report: object capability whose bits are not its type's
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -612,9 +612,6 @@ static int op_notification(struct thread *t, uint32_t slot, const struct cap *ca
-         /* Fewer bits, as a carve of a frame is less memory: a table operation, below the invoked capability. */
+@@ -651,9 +651,6 @@ static int op_notification(struct thread *t, uint32_t slot, const struct cap *ca
          struct cap sub = *cap;
+         sub.orig = 0;
          sub.b &= arg[1];
 -        if (sub.b == 0) {
 -            return KERR_INVALID_ARG;

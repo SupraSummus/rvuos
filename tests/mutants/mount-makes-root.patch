@@ -8,10 +8,10 @@ Report: capability to an object is a root
 diff --git a/kernel/process.c b/kernel/process.c
 --- a/kernel/process.c
 +++ b/kernel/process.c
-@@ -153,7 +153,8 @@ int process_mount(struct process *proc, uint32_t index, const struct cap *table,
-     }
+@@ -147,7 +147,8 @@ int process_mount(struct process *proc, uint32_t index, const struct cap *table,
      /* It hangs below the capability it was mounted with, as the first hangs below the one the process was made with. */
      proc->tables[index] = *table;
+     proc->tables[index].orig = 0;
 -    cap_attach(parent, &proc->tables[index]);
 +    (void)parent;
 +    cap_attach(NULL, &proc->tables[index]);

@@ -1,0 +1,18 @@
+A thread's units do not name the thread.
+They are then units as a table holds them, so a revoke above them leaves the thread earning them;
+a place's units name their thread.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
+Report: a place's units are malformed
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -508,7 +508,6 @@ void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights,
+     }
+     /* The units as the thread holds them: b names the thread, as no Time capability in a table does. */
+     *b = cap_to_time(first, count, rights);
+-    b->b = v2p(place_thread(p));
+     cap_attach(parent, b);
+     for (uint32_t i = 0; i < count; i++) {
+         LOOP_BOUND(TIME_UNITS);

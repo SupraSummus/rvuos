@@ -17,7 +17,8 @@ struct pool *pool_create(paddr_t base, uint32_t size, struct cap *parent)
     *pool = (struct pool){ 0 };
     pool->hdr.type = CAP_POOL;
     pool->hdr.pool = base;
-    pool->node = (struct cap){ .type = CAP_RETYPED, .rights = RIGHT_ALL, .orig = 1, .a = base };
+    /* A capability to the pool that the pool holds, b naming it, as no Pool capability in a table does. */
+    pool->node = (struct cap){ .type = CAP_POOL, .rights = RIGHT_ALL, .orig = 1, .a = base, .b = base };
     cap_attach(parent, &pool->node);
     pool->size = size;
     pool->used = obj_align(sizeof(*pool));

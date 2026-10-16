@@ -8,11 +8,11 @@ Report: slot is not derived from its parent
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -747,7 +747,7 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
+@@ -779,7 +779,7 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
              return KERR_INVALID_ARG;
          }
          /* A place holds the time of one core, so the units it earns are of one. */
--        uint32_t first = cap->a + off;
+-        uint32_t first = range_first(cap) + off;
 +        uint32_t first = off;
          if (count != 0 && unit_core(first) != unit_core(first + count - 1)) {
              return KERR_INVALID_ARG;

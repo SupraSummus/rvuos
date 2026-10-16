@@ -8,10 +8,10 @@ Report: capability to an object is a root
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -390,7 +390,7 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
-         proc->regions = (uint8_t)regions;
+@@ -404,7 +404,7 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
          /* Its first table hangs below the capability it was made with, so a revoke above that takes it. */
          proc->tables[0] = tc;
+         proc->tables[0].orig = 0;
 -        cap_attach(slot_node(t, arg[3]), &proc->tables[0]);
 +        cap_attach(NULL, &proc->tables[0]);
          obj = &proc->hdr;

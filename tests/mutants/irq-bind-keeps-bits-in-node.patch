@@ -1,0 +1,19 @@
+An Irq holds its notification with the capability's bits in the second word, as a table holds one,
+so a revoke above it leaves the Irq armed;
+an Irq's notification has no bits of its own.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: irq's notification slot names no live notification
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -740,7 +740,7 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
+          * It hangs below the capability it was bound with, so a revoke above that disarms the Irq,
+          * with b 0, as no Notification capability has; the bits it may signal lie in the Irq.
+          */
+-        irq->ntfn = (struct cap){ .type = CAP_NOTIFICATION, .rights = nc.rights, .a = nc.a };
++        irq->ntfn = (struct cap){ .type = CAP_NOTIFICATION, .rights = nc.rights, .a = nc.a, .b = nc.b };
+         irq->may = nc.b;
+         cap_attach(slot_node(t, arg[2]), &irq->ntfn);
+         irq->line = first;

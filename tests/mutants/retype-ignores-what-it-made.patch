@@ -8,7 +8,7 @@ Report: memory that may hold kernel objects overlaps a node not above or below i
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -210,9 +210,6 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
+@@ -276,9 +276,6 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
              return err;
          }
          /* The whole of the memory, which nothing else lies in while nothing made of it is left. */
@@ -16,5 +16,5 @@ diff --git a/kernel/syscall.c b/kernel/syscall.c
 -            return KERR_NO_MEMORY;
 -        }
          struct cap c;
-         struct cap *parent = u;
+         struct cap *after = u;
          if (type == CAP_POOL) {

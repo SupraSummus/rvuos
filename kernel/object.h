@@ -33,53 +33,57 @@ struct obj_header {
 };
 
 /*
- * A capability slot, and a node of the derivation tree; see DESIGN.md, "The derivation tree".
- * For CAP_FRAME and CAP_IRQ_LINE the slot is self-contained:
- * a is the base address or first line and b the size or count,
- * and there is no object.
- * For CAP_UNTYPED a is the block, its base and size in one word as NAPOT encodes them,
- * see untyped_base, and b is 0;
- * there is no object either, and whether it is free the tree says.
+ * A capability slot, and a node of the derivation tree; see DESIGN.md, "The derivation tree" and "Slot format".
+ * For CAP_FRAME and CAP_UNTYPED a is the block, its base and size in one word as NAPOT encodes them,
+ * see block_base, and b is 0; there is no object, and whether an Untyped is free the tree says.
+ * For CAP_IRQ_LINE and CAP_TIME a is the range, its first line or unit and its count in one word,
+ * see range_first, and b is 0; there is no object either.
  * For every other type a is the object's physical address,
  * and b is 0 but for CAP_NOTIFICATION, where it is the bits the capability may signal, never none;
  * see OP_NOTIFY_CARVE.
  *
  * The tree is a list of nodes in pre-order, a node's descendants right after it, as seL4 keeps its own:
  * next and prev are the nodes after and before this one, 0 for none,
- * each its offset from RAM_BASE in four-byte steps, see node_link; an empty slot's are 0.
+ * each its address shifted down by four, see node_link; an empty slot's are 0.
+ * Every node lies on NODE_ALIGN, so a link reaches the whole address space,
+ * and the four bits below each link are the type, the rights and orig.
  * The list stores no parent: a node lies below an original before it,
  * orig set, whose words cover its own, and the nodes below one are those right after it that do; see node_below.
  * Only an allocation makes an original, of something nothing else names yet:
  * a pool's node and capability, an object's capability, a frame or an Untyped an Untyped made, and the boot's.
  * A copy, a derivation and a carve are not originals, and lie below the original nearest above their source.
- * A process's region slots are slots of this type too, CAP_INSTALLED, and leaves of the tree,
- * and so are its table slots, which hold CAP_CAPTABLE capabilities,
- * and a thread's process, CAP_HOSTED, its watch, CAP_WATCHED, and each of its places' units, CAP_BOUND,
- * and an Irq's notification, CAP_SIGNALLED,
- * and so is a pool's own node, CAP_RETYPED, in the pool's descriptor.
- * For CAP_TIME a is the first unit and b the count, as for CAP_IRQ_LINE.
+ *
+ * An object holds nodes outside a table too, each a capability of the type it names, and a leaf but for a pool's own:
+ * a process its table slots, CAP_CAPTABLE, and its region slots, CAP_FRAME,
+ * a thread its process, CAP_PROCESS, its watch, CAP_NOTIFICATION, and each place's units, CAP_TIME,
+ * an Irq its notification, CAP_NOTIFICATION, and a pool its own node, CAP_POOL, in its descriptor.
+ * Those whose clearing their holder hears of name the holder in b, see node_holder,
+ * as no capability of their type in a table does: a region slot, a thread's process and units and a pool's own node;
+ * an Irq's notification has b 0 instead, as no Notification capability has, and the bits it may signal lie in the Irq.
  */
 struct cap {
     uint32_t a;
     uint32_t b;
-    uint32_t next : NODE_LINK_BITS;
-    uint32_t type : 8;
-    uint32_t prev : NODE_LINK_BITS;
+    uint32_t type : 4;
+    uint32_t next : 28;
     uint32_t rights : 3;
-    uint32_t index : 4;     /* an installed region's slot in its process, a binding's place in its thread; 0 elsewhere */
     uint32_t orig : 1;      /* an original: what lies below it lies right after it in the list */
+    uint32_t prev : 28;
 };
 
-/* The link that names a node, which lies in the window from RAM_BASE; see layout.h. */
+/* Every node lies on sixteen bytes, its size, so that a link names it in 28 bits and leaves four to spare. */
+#define NODE_ALIGN 16
+
+/* The link that names a node, anywhere in the address space. */
 static inline uint32_t node_link(const struct cap *n)
 {
-    return (v2p(n) - RAM_BASE) / 4;
+    return v2p(n) / NODE_ALIGN;
 }
 
 /* The node a link names, which is not 0. */
 static inline struct cap *link_node(uint32_t link)
 {
-    return p2v(RAM_BASE + link * 4);
+    return p2v(link * NODE_ALIGN);
 }
 
 /*
@@ -89,37 +93,22 @@ static inline struct cap *link_node(uint32_t link)
  */
 bool node_below(const struct cap *above, const struct cap *n);
 
-/* A region installed in a process's region slot. Kernel internal: never in a table. */
-#define CAP_INSTALLED 0x80
 /*
- * A pool's own node, in its descriptor: what the retype made, below the Untyped.
- * Every capability to the pool and to its objects lies below it.
- * a is the pool's address, as for a capability to an object. Kernel internal: never in a table.
+ * The object that holds a node outside a table and hears of its clearing, by its address, or 0 for none:
+ * the process of a region slot, the thread of its process or of a place's units, the pool of its own node.
+ * A capability of those types in a table has b 0.
+ * The one other such node, an Irq's notification, is a CAP_NOTIFICATION with b 0; see irq_held.
  */
-#define CAP_RETYPED 0x81
-/*
- * The units of time a thread earns in one of its places, in the thread: a is the first and b how many, none at all among them,
- * the rights, spare time with RIGHT_X, are those of the Time capability the thread was bound through,
- * below which the node hangs, and index is the place. Kernel internal: never in a table.
- */
-#define CAP_BOUND 0x82
-/*
- * A thread's process, in the thread: a is the process, and the node hangs below
- * the Process capability the thread was made with. Kernel internal: never in a table.
- */
-#define CAP_HOSTED 0x83
-/*
- * An Irq's notification, in the Irq: a is the notification and b the bits the Irq may signal,
- * those of the Notification capability the Irq was bound with, below which the node hangs.
- * Kernel internal: never in a table.
- */
-#define CAP_SIGNALLED 0x84
-/*
- * A thread's watch, in the thread: a is the notification its faults signal and b the bits, never none,
- * which the Notification capability the watch was set with may signal, and the node hangs below it.
- * Kernel internal: never in a table.
- */
-#define CAP_WATCHED 0x85
+static inline paddr_t node_holder(const struct cap *n)
+{
+    return n->type == CAP_FRAME || n->type == CAP_TIME || n->type == CAP_PROCESS || n->type == CAP_POOL ? n->b : 0;
+}
+
+/* Whether a node is an Irq's notification, which only an Irq holds: no Notification capability has b 0. */
+static inline bool irq_held(const struct cap *n)
+{
+    return n->type == CAP_NOTIFICATION && n->b == 0;
+}
 
 #define CAPTABLE_MAX_SLOTS 1024
 _Static_assert(CAPTABLE_MAX_SLOTS <= 1u << SLOT_TABLE_SHIFT, "a slot number's index reaches every slot of a table");
@@ -127,7 +116,7 @@ _Static_assert(CAPTABLE_MAX_SLOTS <= 1u << SLOT_TABLE_SHIFT, "a slot number's in
 struct captable {
     struct obj_header hdr;
     uint32_t nslots;
-    struct cap slots[];
+    _Alignas(NODE_ALIGN) struct cap slots[];
 };
 
 /*
@@ -142,9 +131,10 @@ struct captable {
  */
 struct pool {
     struct obj_header hdr;
-    struct cap node;    /* CAP_RETYPED: below the Untyped the pool was retyped from */
     uint32_t size;
     uint32_t used;      /* bytes handed out, descriptor included */
+    /* CAP_POOL, b the pool itself: an original below the Untyped the pool was retyped from */
+    _Alignas(NODE_ALIGN) struct cap node;
     paddr_t last;       /* the newest object, the descriptor itself when there is none */
     paddr_t next;       /* list of pools, newest first, 0 at the end */
     paddr_t prev;       /* 0 at the head */
@@ -175,8 +165,9 @@ struct process {
 #ifdef BOARD_PROCESS_CSRS
     uint32_t csrs[BOARD_PROCESS_CSRS]; /* what the board keeps of the CSRs user mode writes, see board_user_csrs_switch */
 #endif
-    struct cap tables[PROCESS_TABLES]; /* CAP_CAPTABLE, or CAP_NONE while none is mounted */
-    struct cap slots[]; /* CAP_INSTALLED, or CAP_NONE when empty; the PMP image after them */
+    _Alignas(NODE_ALIGN) struct cap tables[PROCESS_TABLES]; /* CAP_CAPTABLE, or CAP_NONE while none is mounted */
+    /* CAP_FRAME, b the process, or CAP_NONE when empty; the PMP image after them */
+    struct cap slots[];
 };
 
 /*
@@ -265,10 +256,10 @@ struct thread {
     /* The threads that lend it their time, a ring, oldest first, 0 for none: the oldest is the one it borrows from. */
     paddr_t lenders;
     struct trap_frame frame;
-    struct cap proc;    /* CAP_HOSTED, or CAP_NONE once the process is taken */
-    struct cap watch;   /* CAP_WATCHED, or CAP_NONE while nothing hears the thread's faults */
+    _Alignas(NODE_ALIGN) struct cap proc; /* CAP_PROCESS, b the thread, or CAP_NONE once the process is taken */
+    struct cap watch;   /* CAP_NOTIFICATION, or CAP_NONE while nothing hears the thread's faults */
     /*
-     * Each place's units, CAP_BOUND, or CAP_NONE while the place is empty, a node for each place,
+     * Each place's units, CAP_TIME, b the thread, or CAP_NONE while the place is empty, a node for each place,
      * and after them the places themselves; see place_time and thread_place.
      */
     struct cap time[];
@@ -309,8 +300,11 @@ struct notification {
  */
 struct irq {
     struct obj_header hdr;
-    struct cap ntfn;    /* CAP_SIGNALLED, or CAP_NONE once the notification is taken */
     uint32_t bits;
+    /* The bits it may signal, the Notification capability's it was bound with, none once the notification is taken. */
+    uint32_t may;
+    /* CAP_NOTIFICATION, b 0, or CAP_NONE once the notification is taken */
+    _Alignas(NODE_ALIGN) struct cap ntfn;
     uint16_t line;
     uint8_t core;       /* on a timer line, the core that armed it, whose timer wakes for it */
     uint8_t pad;
@@ -318,10 +312,10 @@ struct irq {
 };
 
 _Static_assert(sizeof(struct obj_header) == 8, "object layout");
-_Static_assert(sizeof(struct cap) == 16, "object layout");
-_Static_assert(sizeof(struct captable) == 12, "object layout");
+_Static_assert(sizeof(struct cap) == NODE_ALIGN, "object layout");
+_Static_assert(CAP_TEST < 16, "a type fits its four bits");
+_Static_assert(sizeof(struct captable) == 16, "object layout");
 _Static_assert(sizeof(struct pool) == 48, "object layout");
-_Static_assert(PROCESS_REGION_SLOTS_MAX <= 16 && CORES <= 16, "a node's index fits its four bits");
 #ifdef BOARD_PROCESS_CSRS
 #define PROCESS_CSRS_SIZE (4 * BOARD_PROCESS_CSRS)
 #if CORES > 1
@@ -330,11 +324,19 @@ _Static_assert(PROCESS_REGION_SLOTS_MAX <= 16 && CORES <= 16, "a node's index fi
 #else
 #define PROCESS_CSRS_SIZE 0
 #endif
-_Static_assert(sizeof(struct process) == 12 + PROCESS_CSRS_SIZE + 16 * PROCESS_TABLES, "object layout");
-_Static_assert(sizeof(struct thread) == 40 + sizeof(struct trap_frame) + 2 * sizeof(struct cap), "object layout");
+/* What lies before a node, rounded up to where the node may lie. */
+#define NODE_ROUND(size) (((size) + NODE_ALIGN - 1) & ~(NODE_ALIGN - 1))
+_Static_assert(sizeof(struct process) == NODE_ROUND(12 + PROCESS_CSRS_SIZE) + 16 * PROCESS_TABLES, "object layout");
+_Static_assert(sizeof(struct thread) == NODE_ROUND(40 + sizeof(struct trap_frame)) + 2 * sizeof(struct cap),
+               "object layout");
 _Static_assert(sizeof(struct place) == 24, "object layout");
 _Static_assert(sizeof(struct notification) == 16, "object layout");
-_Static_assert(sizeof(struct irq) == 20 + sizeof(struct cap), "object layout");
+_Static_assert(sizeof(struct irq) == 48, "object layout");
+/* Every object lies on OBJ_ALIGN, below, and every node an object holds on NODE_ALIGN within it. */
+_Static_assert(offsetof(struct captable, slots) % NODE_ALIGN == 0 && offsetof(struct pool, node) % NODE_ALIGN == 0 &&
+                   offsetof(struct process, tables) % NODE_ALIGN == 0 && offsetof(struct thread, proc) % NODE_ALIGN == 0 &&
+                   offsetof(struct irq, ntfn) % NODE_ALIGN == 0,
+               "every node lies on NODE_ALIGN");
 
 /*
  * True if a capability of this type names a kernel object.
@@ -344,18 +346,26 @@ _Static_assert(sizeof(struct irq) == 20 + sizeof(struct cap), "object layout");
 static inline bool cap_has_object(uint8_t type)
 {
     return type != CAP_NONE && type != CAP_FRAME && type != CAP_UNTYPED && type != CAP_IRQ_LINE &&
-           type != CAP_PRINT && type != CAP_HALT && type != CAP_TEST && type != CAP_CLOCK && type != CAP_INSTALLED &&
-           type != CAP_TIME && type != CAP_BOUND;
+           type != CAP_PRINT && type != CAP_HALT && type != CAP_TEST && type != CAP_CLOCK && type != CAP_TIME;
 }
 
 /*
- * An Untyped's block in one word, as pmpaddr encodes NAPOT but in bytes:
+ * A frame's or an Untyped's block in one word, as pmpaddr encodes NAPOT but in bytes:
  * the base with the bits below half the size set.
  * Every block is at least eight bytes, so the word always ends in a one.
  */
-static inline uint32_t untyped_block(uint32_t base, uint32_t size) { return base | (size / 2 - 1); }
-static inline uint32_t untyped_size(const struct cap *c) { return (c->a ^ (c->a + 1)) + 1; }
-static inline uint32_t untyped_base(const struct cap *c) { return c->a & ~(untyped_size(c) - 1); }
+static inline uint32_t block_word(uint32_t base, uint32_t size) { return base | (size / 2 - 1); }
+static inline uint32_t block_size(const struct cap *c) { return (c->a ^ (c->a + 1)) + 1; }
+static inline uint32_t block_base(const struct cap *c) { return c->a & ~(block_size(c) - 1); }
+
+/*
+ * A range of interrupt lines or of units of time in one word: the first in the low half and the count in the high.
+ * Neither the machine's lines nor its units reach 0x10000, see sched.h and irq.h.
+ */
+static inline uint32_t range_word(uint32_t first, uint32_t count) { return first | count << 16; }
+static inline uint32_t range_first(const struct cap *c) { return c->a & 0xffffu; }
+static inline uint32_t range_count(const struct cap *c) { return c->a >> 16; }
+
 /* The first node below n, or NULL when nothing lies below it. */
 static inline struct cap *node_first_below(const struct cap *n)
 {
@@ -376,11 +386,7 @@ static inline bool untyped_free(const struct cap *c) { return node_first_below(c
 static inline uint32_t untyped_made(const struct cap *c)
 {
     const struct cap *first = node_first_below(c);
-    if (first == NULL) {
-        return 0;
-    }
-    uint8_t type = first->type;
-    return type == CAP_RETYPED ? CAP_POOL : type == CAP_INSTALLED ? CAP_FRAME : type;
+    return first != NULL ? first->type : 0;
 }
 
 static inline struct pool *obj_pool(const struct obj_header *o) { return p2v(o->pool); }
@@ -500,17 +506,12 @@ static inline struct captable *process_table(const struct process *p, uint32_t i
 /* The process a thread runs in, or NULL once it was taken. */
 static inline struct process *thread_process(const struct thread *t)
 {
-    return t->proc.type == CAP_HOSTED ? p2v(t->proc.a) : NULL;
+    return t->proc.type == CAP_PROCESS ? p2v(t->proc.a) : NULL;
 }
-/* The thread whose process this is. */
-static inline struct thread *hosted_thread(struct cap *n)
+/* The thread whose process this is, or whose place's units these are: the node's holder. */
+static inline struct thread *held_thread(const struct cap *n)
 {
-    return (struct thread *)((char *)n - offsetof(struct thread, proc));
-}
-/* The thread whose place's units these are; the node knows its place, and so the thread it lies in. */
-static inline struct thread *bound_thread(struct cap *n)
-{
-    return (struct thread *)((char *)(n - n->index) - offsetof(struct thread, time));
+    return p2v(n->b);
 }
 /*
  * The table a slot number of a thread's points into, see SLOT_TABLE_SHIFT,
@@ -534,22 +535,17 @@ static inline struct cap *slot_at(const struct thread *t, uint32_t slot)
 /* The notification a thread's faults signal, or NULL while it has no watch. */
 static inline struct notification *thread_watch(const struct thread *t)
 {
-    return t->watch.type == CAP_WATCHED ? p2v(t->watch.a) : NULL;
-}
-/* The thread whose watch this is. */
-static inline struct thread *watched_thread(struct cap *n)
-{
-    return (struct thread *)((char *)n - offsetof(struct thread, watch));
+    return t->watch.type == CAP_NOTIFICATION ? p2v(t->watch.a) : NULL;
 }
 /* The notification an Irq signals, or NULL once it was taken. */
 static inline struct notification *irq_notification(const struct irq *i)
 {
-    return i->ntfn.type == CAP_SIGNALLED ? p2v(i->ntfn.a) : NULL;
+    return i->ntfn.type == CAP_NOTIFICATION ? p2v(i->ntfn.a) : NULL;
 }
 /* The Irq whose notification this is. */
-static inline struct irq *signalled_irq(struct cap *n)
+static inline struct irq *signalled_irq(const struct cap *n)
 {
-    return (struct irq *)((char *)n - offsetof(struct irq, ntfn));
+    return (struct irq *)((uintptr_t)n - offsetof(struct irq, ntfn));
 }
 
 /* True if the Irq will signal; a controller's line is unmasked exactly then. */
@@ -561,7 +557,8 @@ static inline bool irq_due(const struct irq *i, uint32_t now)
     return (int32_t)(i->deadline - now) <= 0;
 }
 
-#define OBJ_ALIGN 8
+/* Every object lies on sixteen bytes, so that the nodes it holds do. */
+#define OBJ_ALIGN NODE_ALIGN
 
 /* A size as a pool counts it, rounded up to OBJ_ALIGN. */
 static inline uint32_t obj_align(uint32_t size) { return (size + OBJ_ALIGN - 1) & ~(uint32_t)(OBJ_ALIGN - 1); }
@@ -602,10 +599,10 @@ extern struct pool *pool_list;
  */
 struct pool *pool_create(paddr_t base, uint32_t size, struct cap *parent);
 
-/* The pool whose own node this is. */
-static inline struct pool *node_pool(struct cap *n)
+/* The pool whose own node this is, its holder, or NULL for any other node. */
+static inline struct pool *node_pool(const struct cap *n)
 {
-    return (struct pool *)((char *)n - offsetof(struct pool, node));
+    return n->type == CAP_POOL && n->b != 0 ? p2v(n->b) : NULL;
 }
 
 /*

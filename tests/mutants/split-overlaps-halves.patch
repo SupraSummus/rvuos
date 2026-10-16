@@ -1,18 +1,20 @@
 A split makes both halves the lower one,
 so the two claim the same memory, and the upper half is nobody's.
+The upper half goes right after the Untyped it was split from, before the lower one, and covers it,
+so the list reads the lower half as made of the upper, and the prologue's split of the upper half is refused.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
-Report: memory that may hold kernel objects overlaps a node not above or below it
+Report: a fresh kernel refused prologue record N with N
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -326,7 +326,7 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
+@@ -320,7 +320,7 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
          }
          /* Both slots are free and distinct, so neither store fails and the split is whole or not at all. */
          struct cap lower = cap_to_untyped(base, half, cap->rights);
 -        struct cap upper = cap_to_untyped(base + half, half, cap->rights);
 +        struct cap upper = cap_to_untyped(base, half, cap->rights);
+         lower.orig = 1;
+         upper.orig = 1;
          slot_store(t, arg[1], &lower, u);
-         return slot_store(t, arg[2], &upper, u);
-     }

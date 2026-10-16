@@ -7,7 +7,7 @@ Report: a description differs from the capability it describes
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -931,7 +931,7 @@
+@@ -956,7 +956,7 @@ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *a
      case CAP_PROCESS:
          /* Its region slots, and the most a process may have here, an entry each: what OP_POOL_ALLOC holds a4 to. */
          arg[2] = ((const struct process *)cap_object(cap))->regions;

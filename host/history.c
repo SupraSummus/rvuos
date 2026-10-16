@@ -1,7 +1,8 @@
 /*
  * The properties "Authority only flows", "A call is as good as its capability", "Memory crosses zeroed",
  * "The caller keeps what it runs on", "A dying pool only gives back", "A tick charges",
- * "A move keeps a node's place", "A thread lends by its own wait", "A thread stops by its holder, where it stood",
+ * "A move keeps a node's place", "A carve takes what it names",
+ * "A thread lends by its own wait", "A thread stops by its holder, where it stood",
  * "A description is the capability's" and "A pool's room is what an allocation may take" of DESIGN.md,
  * which relate the state before a call to the state after it.
  * host_trap runs history_begin before each call and history_end after it,
@@ -98,6 +99,14 @@ static uint32_t move_parent;
 static addr_array move_children, children_after;
 
 /*
+ * A traced carve that names a filled source: the source as it was, and what the call names of it,
+ * the offset and the length, or for a notification's bits the mask, and the slot the carve goes to.
+ */
+static bool carving;
+static struct cap carve_from;
+static uint32_t carve_off, carve_len, carve_dst;
+
+/*
  * A traced describing call, OP_CAP_INFO or OP_POOL_INFO on a pool or on a slot that names nothing:
  * whether it takes its arguments, what it should return in a1 to a4,
  * and what of the kernel's state it must leave, see record_state.
@@ -129,7 +138,7 @@ static uint32_t charged_balance;
 static const struct place *place_on(const struct thread *t, uint32_t core)
 {
     for (uint32_t i = 0; i < t->places; i++) {
-        if (t->time[i].type == CAP_BOUND && unit_core(t->time[i].a) == core) {
+        if (t->time[i].type == CAP_TIME && unit_core(range_first(&t->time[i])) == core) {
             return thread_place(t, i);
         }
     }
@@ -176,29 +185,29 @@ __attribute__((noreturn)) static void violated(const char *what)
 }
 
 /*
- * An installed region grants what the frame it came from did, a thread's units those units,
- * a thread's process what a capability to it does,
- * a thread's watch and an Irq's notification that too, with the bits they may signal,
- * and an Untyped its block whatever it made.
+ * A frame grants its block and an Untyped its block whatever it made, a range of lines or units that range,
+ * and a node an object holds what a capability of its type does:
+ * an installed region what the frame it came from did, a thread's units those units,
+ * a thread's process and a pool's own node what a capability to the process or the pool does, the holder they name aside,
+ * and a thread's watch and an Irq's notification what one to the notification does, with the bits they may signal.
  */
 static struct grant grant_of(const struct cap *c)
 {
-    if (c->type == CAP_UNTYPED) {
-        return (struct grant){ CAP_UNTYPED, c->rights, untyped_base(c), untyped_size(c) };
+    switch (c->type) {
+    case CAP_FRAME:
+    case CAP_UNTYPED:
+        return (struct grant){ c->type, c->rights, block_base(c), block_size(c) };
+    case CAP_IRQ_LINE:
+    case CAP_TIME:
+        return (struct grant){ c->type, c->rights, range_first(c), range_count(c) };
+    case CAP_PROCESS:
+    case CAP_POOL:
+        return (struct grant){ c->type, c->rights, c->a, 0 };
+    case CAP_NOTIFICATION:
+        return (struct grant){ c->type, c->rights, c->a, irq_held(c) ? signalled_irq(c)->may : c->b };
+    default:
+        return (struct grant){ c->type, c->rights, c->a, c->b };
     }
-    if (c->type == CAP_BOUND) {
-        return (struct grant){ CAP_TIME, c->rights, c->a, c->b };
-    }
-    if (c->type == CAP_HOSTED) {
-        return (struct grant){ CAP_PROCESS, c->rights, c->a, 0 };
-    }
-    if (c->type == CAP_SIGNALLED) {
-        return (struct grant){ CAP_NOTIFICATION, c->rights, c->a, c->b };
-    }
-    if (c->type == CAP_WATCHED) {
-        return (struct grant){ CAP_NOTIFICATION, c->rights, c->a, c->b };
-    }
-    return (struct grant){ c->type == CAP_INSTALLED ? CAP_FRAME : c->type, c->rights, c->a, c->b };
 }
 
 static bool same_grant(struct grant x, struct grant y)
@@ -258,19 +267,21 @@ __attribute__((no_sanitize("address"))) static bool zero(uint32_t base, uint32_t
     return any == 0;
 }
 
-static void each_node(const obj_array *a, void (*fn)(const struct cap *))
+/* Every node every object holds, with the object. */
+static void each_node(const obj_array *a, void (*fn)(const struct obj_header *, const struct cap *))
 {
     for (size_t i = 0; i < a->n; i++) {
         uint32_t count;
         const struct cap *held_nodes = obj_nodes(p2v(a->v[i].at), &count);
         for (uint32_t j = 0; j < count; j++) {
-            fn(&held_nodes[j]);
+            fn(p2v(a->v[i].at), &held_nodes[j]);
         }
     }
 }
 
-static void record_node(const struct cap *c)
+static void record_node(const struct obj_header *o, const struct cap *c)
 {
+    (void)o;
     if (c->type != CAP_NONE) {
         PUSH(nodes, ((struct node_rec){ v2p(c), grant_of(c) }));
     }
@@ -421,7 +432,7 @@ static uint32_t type_bytes(uint32_t type, uint32_t slots)
         size = 0;
         break;
     }
-    return (uint32_t)(size + 7) & ~7u;
+    return (uint32_t)(size + 15) & ~15u;
 }
 
 static void push_bytes(byte_array *out, const void *p, size_t n)
@@ -474,16 +485,16 @@ static void describe_expect(void)
     w[1] = w[2] = w[3] = 0;
     switch (c->type) {
     case CAP_FRAME:
-        w[1] = c->a;
-        w[2] = c->b;
+        w[1] = block_base(c);
+        w[2] = block_size(c);
         w[3] = pmp_grain < 8 ? 8 : pmp_grain;
         break;
     case CAP_UNTYPED: {
-        w[1] = untyped_base(c);
-        w[2] = untyped_size(c);
+        w[1] = block_base(c);
+        w[2] = block_size(c);
+        /* A frame or a region installed from one, a half or a derived Untyped, or a pool's own node. */
         const struct cap *first = node_first_below(c);
-        uint8_t below = first != NULL ? first->type : CAP_NONE;
-        w[3] = below == CAP_RETYPED ? CAP_POOL : below == CAP_INSTALLED ? CAP_FRAME : below;
+        w[3] = first != NULL ? first->type : CAP_NONE;
         break;
     }
     case CAP_POOL: {
@@ -504,8 +515,8 @@ static void describe_expect(void)
         const struct thread *t = (const struct thread *)cap_object(c);
         w[1] = t->places;
         for (uint32_t i = 0; i < t->places; i++) {
-            if (t->time[i].type == CAP_BOUND) {
-                w[2] |= 1u << (t->time[i].a / TIME_UNITS);
+            if (t->time[i].type == CAP_TIME) {
+                w[2] |= 1u << (range_first(&t->time[i]) / TIME_UNITS);
             }
         }
         break;
@@ -514,20 +525,20 @@ static void describe_expect(void)
         w[1] = c->b;
         break;
     case CAP_IRQ_LINE:
-        w[1] = c->a;
-        w[2] = c->b;
-        w[3] = c->a >= IRQ_LINES;
+        w[1] = range_first(c);
+        w[2] = range_count(c);
+        w[3] = range_first(c) >= IRQ_LINES;
         break;
     case CAP_IRQ: {
         const struct irq *irq = (const struct irq *)cap_object(c);
         w[1] = irq->line;
-        w[2] = irq->ntfn.type == CAP_SIGNALLED ? irq->ntfn.b : 0;
+        w[2] = irq->ntfn.type == CAP_NOTIFICATION ? irq->may : 0;
         w[3] = irq->line >= IRQ_LINES;
         break;
     }
     case CAP_TIME:
-        w[1] = c->a;
-        w[2] = c->b;
+        w[1] = range_first(c);
+        w[2] = range_count(c);
         w[3] = 1000000u / TIMER_HZ;
         break;
     case CAP_CLOCK:
@@ -816,6 +827,64 @@ static void check_move(void)
     }
 }
 
+/* Note a carve's source and what it names of it, as the kernel will resolve them. */
+static void record_carve(void)
+{
+    carving = false;
+    if (!debug_trace || !invoked) {
+        return;
+    }
+    switch (call_op) {
+    case OP_FRAME_CARVE:
+    case OP_IRQ_CARVE:
+    case OP_TIME_CARVE:
+        carve_off = call_args[0];
+        carve_len = call_args[1];
+        carve_dst = call_args[2];
+        break;
+    case OP_NOTIFY_CARVE:
+        carve_off = call_args[0];
+        carve_len = 0;
+        carve_dst = call_args[1];
+        break;
+    default:
+        return;
+    }
+    carving = true;
+    carve_from = invoked_cap;
+}
+
+/*
+ * A carve that succeeded put in the slot it names a capability of its source's type and rights
+ * naming exactly what it names of the source: the block or the range from the offset for the length,
+ * or the bits of the mask the source may signal.
+ * A frame's block in one word is a block whatever the word, so a carve of another block within the source shows only here.
+ */
+static void check_carve(void)
+{
+    if (!carving || caller->frame.pc == call_pc || caller->frame.regs[REG_A0] != KERR_OK) {
+        return;
+    }
+    const struct cap *s = &carve_from;
+    const struct cap *c = slot_at(caller, carve_dst);
+    bool named = c != NULL && c->type == s->type && c->rights == s->rights;
+    switch (s->type) {
+    case CAP_FRAME:
+        named = named && block_base(c) == block_base(s) + carve_off && block_size(c) == carve_len;
+        break;
+    case CAP_IRQ_LINE:
+    case CAP_TIME:
+        named = named && range_first(c) == range_first(s) + carve_off && range_count(c) == carve_len;
+        break;
+    default:
+        named = named && c->a == s->a && c->b == (s->b & carve_off);
+        break;
+    }
+    if (!named) {
+        violated("a carve made other than what it names of its source");
+    }
+}
+
 /* Every thread as it stands, sorted, compared after the call and never followed. */
 static void record_threads(void)
 {
@@ -952,6 +1021,7 @@ void history_begin(bool call)
     record_threads();
     record_move(call);
     record_call(call);
+    record_carve();
 
     ticks_before = sched_ticks;
     traced_before = debug_trace;
@@ -1006,7 +1076,7 @@ static void check_built(const struct obj_header *o)
         bound = covered((struct grant){ CAP_PROCESS, RIGHT_W, ((const struct thread *)o)->proc.a, 0 });
     } else if (o->type == CAP_IRQ) {
         const struct irq *irq = (const struct irq *)o;
-        bound = covered((struct grant){ CAP_NOTIFICATION, RIGHT_W, irq->ntfn.a, irq->ntfn.b }) &&
+        bound = covered((struct grant){ CAP_NOTIFICATION, RIGHT_W, irq->ntfn.a, irq->may }) &&
                 covered((struct grant){ CAP_IRQ_LINE, RIGHT_W, irq->line, 1 });
     }
     if (!bound) {
@@ -1014,7 +1084,7 @@ static void check_built(const struct obj_header *o)
     }
 }
 
-static void check_node(const struct cap *c)
+static void check_node(const struct obj_header *o, const struct cap *c)
 {
     if (c->type == CAP_NONE) {
         return;
@@ -1032,11 +1102,11 @@ static void check_node(const struct cap *c)
         violated("a call made a capability no capability of its caller covers");
     }
     /* A thread bound to units, or watched, by this call is one its caller could control. */
-    if (c->type == CAP_BOUND && !covered((struct grant){ CAP_THREAD, RIGHT_W, v2p(bound_thread((struct cap *)c)), 0 })) {
+    const struct thread *t = o->type == CAP_THREAD ? (const struct thread *)o : NULL;
+    if (t != NULL && c->type == CAP_TIME && !covered((struct grant){ CAP_THREAD, RIGHT_W, v2p(t), 0 })) {
         violated("a call bound a thread its caller could not control to units");
     }
-    if (c->type == CAP_WATCHED &&
-        !covered((struct grant){ CAP_THREAD, RIGHT_W, v2p(watched_thread((struct cap *)c)), 0 })) {
+    if (t != NULL && c == &t->watch && !covered((struct grant){ CAP_THREAD, RIGHT_W, v2p(t), 0 })) {
         violated("a call set the watch of a thread its caller could not control");
     }
 }
@@ -1052,6 +1122,7 @@ void history_end(void)
     each_node(&objects_after, check_node);
     check_mounts();
     check_move();
+    check_carve();
     check_call();
     check_order();
     check_lends();

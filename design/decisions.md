@@ -250,7 +250,7 @@ until the maintainer decides otherwise.
       grow without a move, but cost each lookup a walk as deep as the tree,
       and a rule for whether a number that ends at a table means the slot or the table, which seL4 passes a depth for.
     - **More table slots**, four, would let a process keep a table of its own beside a shared one and still move either.
-      Each costs every process twenty-four bytes and nothing asks for it yet;
+      Each costs every process sixteen bytes and nothing asks for it yet;
       the bits above the index leave room for them without changing what a number means.
 
     Open: a table slot carries the rights of the capability it was filled from, which has `RIGHT_W`, and they mean nothing more;
@@ -478,26 +478,32 @@ until the maintainer decides otherwise.
     Decide before the Wi-Fi system's image is handed to anyone.
 
 29. **How tightly a slot packs.**
-    Working default: twenty-four bytes, a word for each of the three links; see "Slot format".
-    Slots take most of a child's objects as `user/lib/` builds them, three fifths, and four fifths with a table of 64;
-    an empty slot takes as much as a filled one.
-    - **Sixteen bytes**, as seL4's on 32 bits, with sixteen-bit links:
-      a node's offset in eight-byte steps from the base of a 512 KiB window every pool lies in.
-      The ESP32-C6's and RP2350's RAM is that window; QEMU and MPS2 would keep 256 KiB of free RAM in it, not 4 and 2 MiB.
-      A retype makes no pool outside it, and a table's header grows to sixteen bytes, so its slots lie on eight.
-      A prototype, the branch `claude/elegant-planck-pjp8ch-slot16`, passes the checks its base passes
-      and makes most of the bench's operations a little cheaper, since a lookup copies less;
-      six mutants' patches no longer apply, two report otherwise,
-      and `lookup-reads-past-its-table` goes uncaught, since a table no longer ends on padding ASan poisons.
-    - **Twenty bytes** need no window, and leave no bit spare:
+    Working default: sixteen bytes, as seL4's on 32 bits, with the tree's two links of the list in pre-order;
+    see "Slot format".
+    Every node lies on sixteen bytes, so a link is its address in twenty-eight bits and reaches the whole address space,
+    and the four bits each link leaves hold the type, the rights and the original bit.
+    Two things pay for it: every object lies on sixteen bytes, and the type has four bits,
+    so the ABI's fifteen types leave room for one more, and the kernel's nodes inside objects have no types of their own,
+    each a capability of the type it names whose second word names its holder.
+    A frame's block and a range of lines or units take one word each, so that the second is free for the holder.
+    Slots took most of a child's objects as `user/lib/` builds them at twenty-four bytes, three fifths,
+    and four fifths with a table of 64; an empty slot takes as much as a filled one.
+    - **Twenty-four bytes**, a word for each of three links, a parent's among them, as the tree had before the list.
+    - **Sixteen bytes in a window**, the links offsets from a base: twenty-four bits in four-byte steps from `RAM_BASE`,
+      64 MiB, which leaves the type a byte and the installed region's slot or the binding's place four bits;
+      or, with three links, sixteen bits in eight-byte steps from a 512 KiB window,
+      in which QEMU and MPS2 would keep 256 KiB of free RAM, not 4 and 2 MiB,
+      the prototype on the branch `claude/elegant-planck-pjp8ch-slot16`.
+      A window ties every pool to where a board's RAM lies, and memory elsewhere could only ever be frames.
+    - **Twenty bytes** need no window with three links, and leave no bit spare:
       slots twenty bytes apart lie on four bytes, so three links take 90 bits,
       a notification's pointer and badge 61, and its type, rights and the link up the rest.
     - **seL4's other savings** are not ours:
-      its badge is 28 bits, its frames are pages,
-      and its tree has two links, which "The derivation tree" says why rvuos does not.
+      its badge is 28 bits and its frames are pages, so its words have room the type and the rights take here.
 
     A smaller slot frees memory only in pools sized to what they hold, and sizing them comes first:
-    it frees 8 KiB of the ESP32-C6's Wi-Fi system, where sixteen-byte slots would free 3 more; see `TODO.md`.
+    it frees 8 KiB of the ESP32-C6's Wi-Fi system at twenty-four-byte slots, of which sixteen-byte ones were reckoned to free 3 more;
+    see `TODO.md`.
     `OP_POOL_INFO` tells what each object takes as the pool counts it,
     so a program that sizes its pools by asking survives a smaller slot unchanged; `user/lib/` does not ask yet.
     Decide once the system calls settle.

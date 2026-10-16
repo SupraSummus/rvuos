@@ -68,13 +68,15 @@ and a `KernelPool` capability with no right a pool's room, and so what its other
 
 #### Slot format
 
-A slot is sixteen bytes: two words of content,
-two links of the derivation tree, twenty-four bits each,
-and the type, the rights, an index and whether the slot is an original, in the eight bits left.
-A link is a node's offset from `RAM_BASE` in four-byte steps,
-so every node lies in the 64 MiB from there, and every board's RAM does.
-The index is an installed region's slot in its process, or a binding's place in its thread,
-so that uninstalling it finds the process without a walk.
+A slot is sixteen bytes: two words of content and two links of the derivation tree,
+with the type, the rights and whether the slot is an original in the bits the links leave.
+Every object lies on sixteen bytes, and every node it holds on sixteen within it,
+so a link is a node's address shifted down by four, twenty-eight bits,
+and reaches a node anywhere in the address space, wherever a board's RAM lies:
+nothing ties a pool to a window.
+Each link leaves four bits, which hold the type below the one and the rights and the original bit below the other;
+so there are sixteen types at most, of which the ABI names fifteen,
+and the kernel has none of its own: a node an object holds is a capability of the type it names, see below.
 For object capabilities the first word of content is the object's address
 and the second is unused,
 but for a `Notification`, where it is the bits the capability may signal; see "Communication and synchronisation".
@@ -82,10 +84,11 @@ A slot carries nothing that has to be checked against the object,
 because a destroy clears the slots naming what it takes;
 see "Kernel pools and revocation".
 A `Frame` has no object behind it:
-its two words are the base address and the size,
+its first word is its block, base and size as NAPOT encodes them, since every frame is a block,
+its second is 0,
 and the rights are the memory permissions it may grant.
 An `Untyped` has none either:
-its first word is its block, base and size as NAPOT encodes them,
+its first word is its block, as a frame's is,
 its second is 0,
 since whether it is free the derivation tree says,
 and its rights are those of the frames made of it.
@@ -94,11 +97,22 @@ are therefore pure table operations that touch no kernel memory,
 which is what lets the root task hand out memory
 before it has created a single pool.
 An `IrqLine` capability has the same shape for the same reason:
-its words are the first line and the count, there is no object,
+its first word is the first line and the count, sixteen bits each, its second is 0, there is no object,
 and the root task hands lines out as it hands out memory.
 A `Time` capability is the same again, with units of the processor's time for lines.
 A `Clock` capability, like `Print`, `Halt` and `Test`, has neither object nor content:
 there is one counter and one watchdog on the machine.
+
+A node an object holds, see "The derivation tree", has the layout of a capability of the type it names,
+and the second word, which no such capability in a table uses, names the object
+where the object must hear of the node's clearing:
+an installed region is a `Frame` that names its process,
+a thread's process a `Process` capability and each of its places' units a `Time` capability that name the thread,
+and a pool's own node a `KernelPool` capability that names the pool.
+So the process an installed region is cleared from, and the thread units are unbound from, are found without a walk.
+An `Irq`'s notification is a `Notification` capability whose second word is 0, as no other's is,
+and the `Irq` keeps the bits it may signal;
+a thread's watch and a process's table slots are capabilities as a table holds them.
 
 ### Object types
 
@@ -188,7 +202,7 @@ until a revoke below the Untyped destroys it,
 as an object whose capabilities were revoked stays in its pool.
 The kernel keeps no per-pool state outside the pool
 but a list head that only the self-check and the host harness walk.
-Objects are bump-allocated behind the descriptor, eight-byte aligned,
+Objects are bump-allocated behind the descriptor, sixteen-byte aligned,
 and each records its pool and how far back the object before it lies.
 
 A pool tells its room.
@@ -316,7 +330,7 @@ its frames and the boot pool's block, which hang below `BOOT_CAP_ROOT_RAM`,
 the boot pool's own node, which hangs below that block,
 and those to the boot pool and its objects, which hang below that node,
 as the root task's first table slot and its thread's process do.
-A capability to a pool or an object is never a root,
+A capability to a pool or an object is never a root, but for a pool's own node once a root Untyped above it went,
 and neither is a thread's process or watch or an `Irq`'s notification.
 
 **Originals.**
@@ -415,7 +429,7 @@ Each capability keeps its number and its place in the derivation tree, and is in
 So a process outgrows its table, or leaves memory it is to give back, without a successor;
 no other thread of it may make a call meanwhile.
 `self_migrate` in `user/lib/self.h` does it.
-It costs every process twenty-four bytes a table slot.
+It costs every process sixteen bytes a table slot.
 Why two table slots and a fixed depth is open decision 15.
 
 ### Region slots
@@ -479,7 +493,7 @@ so it stays stopped until its own pool goes.
 The running thread can lose its process only to a revoke it makes itself, see "Bounded work",
 and can be stopped only by itself.
 A thread another core runs can lose it, or be stopped, by any call, which makes that core trap first; see "Cores".
-It costs twenty bytes per thread and a test on every call and every switch;
+It costs twelve bytes per thread, a node where a pointer was, and a test on every call and every switch;
 before, a thread had to lie in its process's pool so a pointer could not dangle.
 
 A thread is stopped, ready or waiting.
@@ -547,7 +561,7 @@ and a thread without a watch stops at a fault all the same, and nobody hears.
 The node is out of the thread's reach:
 a watch named by a slot of the thread's own table would need no node,
 but the thread could then signal a fault it never made, or delete its watch.
-It costs twenty-four bytes per thread, one node more for a destroy to look at, and a signal per fault.
+It costs sixteen bytes per thread, one node more for a destroy to look at, and a signal per fault.
 
 **What the watcher does is policy.**
 The kernel stops the thread, signals its watch and does no more, since every answer is an operation already:

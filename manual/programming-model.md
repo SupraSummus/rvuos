@@ -235,7 +235,7 @@ no frame covers it, since what one Untyped makes never overlaps.
 The kernel zeroes each object as it allocates it,
 so what the process left in the memory never becomes part of an object.
 
-Objects are bump-allocated from a pool, eight-byte aligned,
+Objects are bump-allocated from a pool, sixteen-byte aligned,
 and never freed individually.
 Sizes depend on the architecture, the board and the build, and the kernel may change them,
 so a program asks the pool: `OP_POOL_INFO` tells what an object of a type takes, as the pool counts it,
@@ -247,16 +247,16 @@ Today's sizes, as the kernel rounds them:
 
 | Object | Bytes |
 |---|---|
-| pool descriptor | 56 |
-| `CapTable` with `n` slots | 12 + 24 × n, rounded up to 8 |
-| `Process` with `r` region slots | 60 + 28 × r + r rounded up to 4, rounded up to 8; 8 more on the ESP32-C6 |
-| `Thread` with `k` places | 232 + 48 × k on RISC-V, 176 + 48 × k on ARM |
+| pool descriptor | 48 |
+| `CapTable` with `n` slots | 16 + 16 × n |
+| `Process` with `r` region slots | 48 + 20 × r + r rounded up to 4, rounded up to 16; 16 more on the ESP32-C6 |
+| `Thread` with `k` places | 224 + 40 × k on RISC-V, 160 + 40 × k on ARM, rounded up to 16 |
 | `Notification` | 16 |
 | `Irq` | 48 |
 
 A minimal child process, table of 10 slots, process of two region slots, thread of one place and two notifications,
-costs 744 bytes including the descriptor on RISC-V, 8 more on the ESP32-C6, and 688 on ARM;
-each region slot more costs 28 bytes and a few for its entry's configuration.
+costs 624 bytes including the descriptor on RISC-V, 16 more on the ESP32-C6, and 560 on ARM;
+each region slot more costs 20 bytes and a few for its entry's configuration.
 
 **Objects in different pools.**
 A process's tables, a thread's process and an `Irq`'s notification may each lie in any pool,

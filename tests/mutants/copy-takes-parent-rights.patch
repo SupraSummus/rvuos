@@ -10,7 +10,7 @@ Report: frame with rights beyond the grant
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -72,8 +72,14 @@ static int op_captable(struct thread *t, uint32_t slot, const struct cap *cap,
+@@ -113,8 +113,14 @@ static int op_captable(struct thread *t, uint32_t slot, const struct cap *cap,
          if (err != KERR_OK) {
              return err;
          }
@@ -23,6 +23,6 @@ diff --git a/kernel/syscall.c b/kernel/syscall.c
 +        }
 +        struct cap *up = link == LINK_UP ? NULL : p2v(link & ~LINK_UP);
 +        src.rights = (uint8_t)((op == OP_CAP_COPY && up != NULL ? up->rights : src.rights) & arg[3]);
-         /* A copy stands beside its source in the tree, a derivation below it. */
-         if (op == OP_CAP_COPY) {
-             /* A copy of an Untyped would be a second allocator over the same memory. */
+         /*
+          * A copy and a derivation alike go right after the source and are no originals:
+          * below the source when it is an original, beside it when it is not; see DESIGN.md, "The derivation tree".

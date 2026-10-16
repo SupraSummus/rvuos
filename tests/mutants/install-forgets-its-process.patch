@@ -1,0 +1,18 @@
+An installed region does not name its process.
+It is then a frame as a table holds one, so clearing it leaves the region in the process's PMP image;
+an installed region names its process.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: installed region does not name its process
+
+diff --git a/kernel/process.c b/kernel/process.c
+--- a/kernel/process.c
++++ b/kernel/process.c
+@@ -111,7 +111,6 @@ int process_install(struct process *proc, unsigned slot,
+ 
+     /* The frame as the process holds it: b names the process, as no frame in a table does. */
+     proc->slots[slot] = cap_to_frame(base, size, rights);
+-    proc->slots[slot].b = v2p(proc);
+     cap_attach(parent, &proc->slots[slot]);
+     rebuild_pmp(proc);
+     return KERR_OK;

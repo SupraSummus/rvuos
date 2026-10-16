@@ -1,0 +1,19 @@
+A pool's own node does not name the pool.
+It is then a capability to the pool as a table holds one, so a revoke below the Untyped takes the node and leaves the pool;
+a pool's own node names its pool.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: pool's own node is malformed
+
+diff --git a/kernel/pool.c b/kernel/pool.c
+--- a/kernel/pool.c
++++ b/kernel/pool.c
+@@ -18,7 +18,7 @@ struct pool *pool_create(paddr_t base, uint32_t size, struct cap *parent)
+     pool->hdr.type = CAP_POOL;
+     pool->hdr.pool = base;
+     /* A capability to the pool that the pool holds, b naming it, as no Pool capability in a table does. */
+-    pool->node = (struct cap){ .type = CAP_POOL, .rights = RIGHT_ALL, .orig = 1, .a = base, .b = base };
++    pool->node = (struct cap){ .type = CAP_POOL, .rights = RIGHT_ALL, .orig = 1, .a = base };
+     cap_attach(parent, &pool->node);
+     pool->size = size;
+     pool->used = obj_align(sizeof(*pool));

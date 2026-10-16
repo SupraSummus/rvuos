@@ -648,7 +648,7 @@
  * 1 to the most the machine allows, see OP_CAP_INFO, of places for CAP_THREAD, 1 to the machine's cores,
  * and 0 for every other type.
  * Anything else fails with KERR_INVALID_ARG and writes nothing.
- * Returns a1 = the bytes, a multiple of eight, as the pool counts them,
+ * Returns a1 = the bytes, a multiple of sixteen, as the pool counts them,
  * and a2 = the pool's room, as OP_CAP_INFO tells it; a3 and a4 are unchanged.
  * An allocation of the type that passes its other checks fails with KERR_NO_MEMORY exactly when a1 is more than a2,
  * and with KERR_STATE while the pool is being destroyed, whose room is 0,
