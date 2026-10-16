@@ -144,8 +144,8 @@ The kernel is compiled with `-ffunction-sections`,
 so the linker drops dead functions,
 and a C function the tool sees no call to is a call it could not read,
 which fails the link too.
-The deepest chain runs through the self-check that `OP_TEST_TRACE` turns on,
-and the stack is sized just above it;
+The deepest chain runs through the boot's creation of the root task, with the self-check or without it,
+and the stack is sized above it;
 the check, not headroom, is what keeps it from overflowing.
 Nothing guards the stack at run time but on ARMv8-M, whose `MSPLIM` faults a push below it, a kernel fault that halts;
 elsewhere an overflow would silently overwrite `.bss` below it, since PMP does not bind machine mode.

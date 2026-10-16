@@ -525,6 +525,13 @@ and fails an input whose transcript ends in an invariant report or a kernel pani
 even where the two agree.
 The host's transcript takes in what `host/history.c` reports,
 and one that crashes the host fails.
+
+The replay is the only program that traces,
+so only QEMU virt's kernel has the self-check and the tracing, `SELFCHECK=1`,
+and every other board's leaves them out, the largest part of the kernel.
+There `OP_TEST_TRACE` fails with `KERR_WRONG_TYPE` and `debug_trace` is a constant false,
+so what the compiler drops is only what a kernel not tracing never runs,
+and a board runs the sources the replay checks.
 The host has no instruction fetch to fault,
 so it makes a driver thread fault as soon as it runs
 without its code or its data mapped with the needed rights,

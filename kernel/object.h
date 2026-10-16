@@ -809,8 +809,15 @@ void fault_dispatch(struct thread *t);
 /* Run every invariant in DESIGN.md, "Properties". Calls selfcheck_fail() on the first violation. */
 void selfcheck_run(void);
 
-/* Set by OP_TEST_TRACE: print each system call and run the self-check after it. */
+/*
+ * Set by OP_TEST_TRACE: print each system call and run the self-check after it.
+ * Without the self-check, SELFCHECK=0, the call is refused, and the tracing compiles away.
+ */
+#if SELFCHECK
 extern bool debug_trace;
+#else
+static const bool debug_trace = false;
+#endif
 
 /* Walk one pool's objects, the descriptor excluded. Returns NULL at the end. */
 struct obj_header *pool_first(struct pool *pool);

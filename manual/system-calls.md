@@ -115,6 +115,7 @@ Turns tracing and self-checking on; see section 9.
 Every thread's account is filled, section 5.11.
 Cannot be turned off again,
 and once tracing is on the call changes nothing.
+A kernel built without the self-check, section 9, fails it with `KERR_WRONG_TYPE`.
 
 **`OP_TEST_TICK` (17)**, on `Test`.
 Does what the timer tick does, on request:

@@ -318,7 +318,7 @@ what is left:
   so would a pager: a thread that, when another faults on a frame its process may have,
   installs the frame in place of one it is not using and resumes the thread, which runs the access again.
   The kernel allows it as it is, but writes a report of every fault into the log, so it suits frames touched seldom.
-- Feed the replay corpus to the board.
+- Feed the replay corpus to the board, to a kernel built with `SELFCHECK=1`.
   Something has to put each input where `BOOT_CAP_INPUT` points,
   below the ROM's buffers or over USB once the kernel runs,
   and the replay driver's second stack has to follow the board's data region.
@@ -328,7 +328,7 @@ what is left:
 - Hazard3's `mtval` reads zero, so a fault report names no address there.
 - Hazard3 reads a NAPOT address's bits below the grain as zeros, the fence's as `0x1ffffffc`,
   though it matches the region written; the specification reads them as ones.
-  So the self-check's reading of the CSRs, which runs only under tracing and never on the board yet,
+  So the self-check's reading of the CSRs, which runs only under tracing and is built into the board's kernel only with `SELFCHECK=1`,
   would take every region there for eight bytes; `pmp_get` could set those bits, as it swaps R and X.
 - The bench's threads round costs more while the console's port is open,
   though nothing the cores run touches the controller during a round,
@@ -639,8 +639,8 @@ What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
 - `pmp_init` stops counting at the first hardwired entry.
   A core with writable entries above a hardwired one loses them;
   have the image skip such entries if one turns up.
-- `selfcheck.c` is always compiled in; make it a build-time option
-  before any board with little RAM.
+- A kernel without the self-check keeps `OP_TEST_TICK`, `OP_TEST_IRQ` and `OP_TEST_PREEMPT`,
+  which only the replay calls, and `cap_stop_here`'s countdown for the last; `SELFCHECK=0` could drop them too.
 - The root task is granted one block of free RAM,
   so what lies between the blocks is unused:
   about 2.8 MiB on QEMU, where it does not matter, and 28 KiB on the ESP32-C6.

@@ -57,7 +57,15 @@ endif
 # A rate other than the default builds in a directory of its own, the host harnesses' too, as a budget does.
 TIMER_HZ ?= 1000
 TIMER_VARIANT := $(if $(filter-out 1000,$(TIMER_HZ)),-hz$(TIMER_HZ))
-VARIANT := $(PMP_VARIANT)$(if $(filter-out 1,$(CORES)),-smp$(CORES))$(TIMER_VARIANT)
+# The self-check and the tracing that runs it, which only QEMU virt's replay uses; see DESIGN.md, "Verification".
+# A value other than the board's builds in a directory of its own, as a budget does; the host harnesses always have them.
+SELFCHECK_DEFAULT := $(if $(filter qemu,$(BOARD)),1,0)
+SELFCHECK ?= $(SELFCHECK_DEFAULT)
+ifneq ($(filter-out 0 1,$(SELFCHECK)),)
+$(error SELFCHECK=$(SELFCHECK); it is 1, the self-check built in, or 0)
+endif
+SELFCHECK_VARIANT := $(if $(filter-out $(SELFCHECK_DEFAULT),$(SELFCHECK)),$(if $(filter 1,$(SELFCHECK)),-selfcheck,-noselfcheck))
+VARIANT := $(PMP_VARIANT)$(if $(filter-out 1,$(CORES)),-smp$(CORES))$(TIMER_VARIANT)$(SELFCHECK_VARIANT)
 
 # The board's architecture, which only RP2350 lets the command line change;
 # the other one builds in a directory of its own, as a budget does.
@@ -81,7 +89,7 @@ endif
 CFLAGS    := $(ARCHFLAGS) -std=c11 -ffreestanding -fno-builtin -fno-pic -fno-common \
              -nostdlib -O2 -g -Wall -Wextra -Werror -Wundef -Wshadow \
              -Wstrict-prototypes -Wmissing-prototypes -Iinclude \
-             -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -DCORES=$(CORES) -DTIMER_HZ=$(TIMER_HZ)
+             -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -DCORES=$(CORES) -DTIMER_HZ=$(TIMER_HZ) -DSELFCHECK=$(SELFCHECK)
 ASFLAGS   := $(ARCHFLAGS) -g -Iinclude -DCORES=$(CORES)
 LDFLAGS   := $(ARCHFLAGS) -nostdlib -static -fuse-ld=lld -Wl,--gc-sections -Wl,--no-dynamic-linker
 
@@ -229,12 +237,14 @@ include kernel/build.mk user/build.mk user/wifi/build.mk user/phyblob/build.mk u
 # The same demo on ARM, under QEMU, on ARMv7-M and on ARMv8-M, and on mps2-an521's two cores,
 # the escape suite and the benchmark on each version's one core, and the library's test on each and on both cores;
 # see DESIGN.md, "Architectures" and "Cores".
+# Nothing traces on ARM, so the self-check is only linked there, to keep SELFCHECK=1 passing its link's checks.
 # Each board is a target of its own, so that `make check` boots them side by side.
 # tests/mutants.sh leaves it out, as it leaves ARM out, which the host build does not compile.
 arm-test: arm-test-an385 arm-test-an521 arm-test-an521-smp2
 
 arm-test-an385:
 	$(MAKE) BOARD=mps2-an385 test escape lib-test bench
+	$(MAKE) BOARD=mps2-an385 SELFCHECK=1 kernel
 
 arm-test-an521:
 	$(MAKE) BOARD=mps2-an521 test escape lib-test bench

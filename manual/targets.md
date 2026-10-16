@@ -405,6 +405,8 @@ make check       # test, escape, lib-test, bench, lab, host-test, wifi-test, qem
 `PMP_MAX_ENTRIES=8 make check` runs everything with a smaller PMP budget.
 Images go under `build/<board>/`, the host build under `build/host/`;
 a smaller budget adds `-pmp<n>` to both.
+`SELFCHECK=1` builds a board's kernel with the self-check and the tracing, section 9, which only QEMU `virt`'s has otherwise,
+and `SELFCHECK=0` QEMU `virt`'s without them, under `-selfcheck` and `-noselfcheck`.
 `make CORES=2` builds the kernel for two harts of QEMU `virt`, under `build/qemu-smp2/`,
 and `make CORES=2 run` boots it with `-smp 2`;
 `make BOARD=mps2-an521 CORES=2` builds it for that board's two cores, under `build/mps2-an521-smp2/`,

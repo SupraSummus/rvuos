@@ -1,7 +1,10 @@
 # The kernel, checked at its link, and the images, each the kernel with a root task of user/build.mk's.
 
-KERNEL_SRC_C := $(wildcard kernel/*.c kernel/arch/$(ARCH)/*.c kernel/board/$(BOARD)/*.c \
-                          kernel/board/$(BOARD)/$(ARCH)/*.c $(addsuffix /*.c,$(call FAMILY_DIRS,kernel)))
+# Without the self-check its source is left out, not left to the linker,
+# which keeps a dropped function's lines at address 0, where mps2-an385's code starts and tools/loop-bounds.py reads them.
+KERNEL_SRC_C := $(filter-out $(if $(filter 0,$(SELFCHECK)),kernel/selfcheck.c), \
+                  $(wildcard kernel/*.c kernel/arch/$(ARCH)/*.c kernel/board/$(BOARD)/*.c \
+                             kernel/board/$(BOARD)/$(ARCH)/*.c $(addsuffix /*.c,$(call FAMILY_DIRS,kernel))))
 KERNEL_SRC_S := $(wildcard kernel/*.S kernel/arch/$(ARCH)/*.S kernel/board/$(BOARD)/*.S)
 KERNEL_OBJ   := $(patsubst %.c,$(BUILD)/%.o,$(KERNEL_SRC_C)) \
                 $(patsubst %.S,$(BUILD)/%.o,$(filter-out %.ld.S,$(KERNEL_SRC_S)))
@@ -48,6 +51,10 @@ $(BUILD)/kernel.elf: $(KERNEL_OBJ) $(KERNEL_READ) $(BUILD)/kernel/kernel.ld \
 		--sources "$(KERNEL_READ)" --design design/bounds.md $@.tmp $(KERNEL_SU) || ok=no; \
 	[ $$ok = yes ]
 	mv $@.tmp $@
+
+# The kernel alone, checked at its link.
+.PHONY: kernel
+kernel: $(BUILD)/kernel.elf
 
 # An image is the checked kernel with a root task,
 # and must hold that kernel byte for byte outside .user_code.
