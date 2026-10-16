@@ -126,6 +126,15 @@ static void frame_take(struct trap_frame *f)
     /* A call leaves pc past its svc; the rest of the kernel wants it at the call, as RISC-V has mepc. */
     if (f->exception == EXC_SVCALL) {
         f->pc -= CALL_SIZE;
+    } else if (SCS_REG(SHCSR) & SHCSR_SVCALLPENDED) {
+        /*
+         * The thread's svc ran, and another exception was taken before its SVCall:
+         * a fault, which a lower number puts first, or a SysTick, which the nRF52840's Cortex-M4 was seen to put first.
+         * Left pending, the call would be taken for whichever thread runs next, with that thread's registers.
+         * Nothing of it was done, so the thread is put back at its svc and makes it again when it next runs.
+         */
+        SCS_REG(SHCSR) &= ~SHCSR_SVCALLPENDED;
+        f->pc -= CALL_SIZE;
     }
 }
 

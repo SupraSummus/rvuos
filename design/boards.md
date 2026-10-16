@@ -386,6 +386,15 @@ which kmain pends and lets in with interrupts, as another core does as it starts
 A call is `svc`, two bytes, with the operation in `r12`, since Thumb code keeps `r7` as its frame pointer;
 `trap.c` moves the pc back onto the `svc`, so the rest of the kernel sees a call as on RISC-V,
 resumes past it and restarts at it.
+A call may be pending as another exception is taken.
+Of exceptions of one priority the architecture takes the lowest number first,
+so a fault, an imprecise BusFault of a store before the `svc` among them, before the call by rule,
+and the call before the tick and the lines;
+yet the nRF52840's Cortex-M4 was seen to take a SysTick with the thread's SVCall pending and its pc past the `svc`.
+Either way the trap may hand the core to another thread, for which the SVCall would then be taken, with its registers,
+while the caller went on as if its call had returned what it handed it.
+So a trap that finds a call pending puts its thread back at the `svc`, the call cleared, and the thread makes it again;
+nothing of the call was done, so making it again is making it once.
 A thread's pc is taken as a branch takes it, bit 0 for Thumb, so a function pointer is a valid entry,
 and the root task starts at `ENTRY_PC(USER_CODE_BASE)`.
 

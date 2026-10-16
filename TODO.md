@@ -372,6 +372,12 @@ what is left:
   Report it to QEMU, or make the compare a board timer on an NVIC line where one is free.
   Under QEMU 11 that would also let the MPS2 boards sleep through what their idle kernel now polls,
   most of each ARM demo's half minute, the longest part of `make check`.
+- Nothing checks that a call overtaken by an interrupt, `trap.c`'s pending SVCall, is made once and by its caller.
+  The window is a few cycles of a call's, and a board runs off one crystal, so a demo of two threads that call
+  takes the same turns every run: 200 ms of it never met one on the nRF52840, 5 s met one to five.
+  The Thread exchange met it in one boot of about ten, its radio's interrupts coming when they will;
+  a check needs such a source, or a kernel that pends the SVCall itself under a test capability.
+  Whether RP2350's Cortex-M33 lets an interrupt overtake a call too is unmeasured; a fault overtakes one on any core.
 - The Cortex-M33 has no `DISDEFWBUF`, so a bus fault on a thread's store may come imprecise,
   after the kernel has changed threads, and stop the thread that runs next;
   a device region is nGnRnE there, and whether that makes the fault precise is unmeasured.
