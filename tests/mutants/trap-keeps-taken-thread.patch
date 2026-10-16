@@ -5,6 +5,7 @@ so the core keeps the turn of a thread that is not ready, and would make the cal
 Caught-by: fuzz-smp2
 Report: a traced core has its turn for a thread the host cannot follow
 Report: the running thread is not runnable
+Witness: fuzz-smp2 cores-resume-before-trap
 
 diff --git a/kernel/core.c b/kernel/core.c
 --- a/kernel/core.c

@@ -3,6 +3,7 @@ a walk the table of "Bounded work" no longer lists.
 No frame overlaps a pool, so the walk refuses nothing, and only the loop check catches it.
 
 Caught-by: loop-bounds
+Witness: loop-bounds
 
 diff --git a/kernel/process.c b/kernel/process.c
 --- a/kernel/process.c

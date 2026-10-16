@@ -3,6 +3,7 @@ so that thread waits for the core's next trap, a tick at most, behind a turn nob
 
 Caught-by: fuzz-smp2
 Report: a turn on spare time runs while a thread with time waits
+Witness: fuzz-smp2 cores-spare-ends-at-rebind
 
 diff --git a/kernel/core.c b/kernel/core.c
 --- a/kernel/core.c

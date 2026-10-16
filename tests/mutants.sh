@@ -14,6 +14,7 @@
 #
 #   Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 #   Report: the count of armed sources is wrong
+#   Witness: fuzz cores-timer-across
 #
 # Caught-by is exactly the checks that catch it, in the order they run:
 # stack-depth loop-bounds fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay.
@@ -34,13 +35,20 @@
 # A mutant that does not apply or does not build is broken, not caught,
 # and so is one that fails a host harness without an invariant report.
 #
+# Witness is one check that catches the mutant alone:
+# a host harness and a seed on it, giving one of the header's reports,
+# or, for a mutant no seed catches, the tool that refuses the link.
+# Where it does not catch, the run says the first seed on the first harness that does.
+# With -q only the witnesses run, each building only its harness or the link:
+# that says each mutant is still caught, not that the rest of the header holds.
+#
 # The unmutated tree is built once and must pass host-test.
 # Each mutant runs in a copy of it with the timestamps kept,
 # so make recompiles only what the patch touches.
 # The mutants run in parallel, one per processor or -j of them,
 # and each replays on one QEMU up to the first input that fails.
 #
-# Usage: tests/mutants.sh [-j jobs] [name...]      logs go under build/mutants/
+# Usage: tests/mutants.sh [-q] [-j jobs] [name...]      logs go under build/mutants/
 
 set -eu
 
@@ -58,6 +66,12 @@ run() {
 # What the mutant's header lines of one name say, a line for each.
 header() {
     sed -n "/^diff --git/q; s/^$1: *//p" "$patch"
+}
+
+# The invariant report in a harness's output on one seed, with the numbers taken out.
+report() {
+    grep -o 'invariant violated: .*' "$1" 2>/dev/null | head -1 | sed 's/^invariant violated: //;
+        s/ 0x[0-9a-f]\{8\}//g; s/:[0-9][0-9]*//g; s/\<[0-9][0-9]*\>/N/g'
 }
 
 broken() {
@@ -86,14 +100,15 @@ replay() {
     for seed in "$tree"/build/seeds/*; do
         part=$out.$n
         n=$((n + 1))
-        line=$(grep -o 'invariant violated: .*' "$part" 2>/dev/null | head -1 | sed 's/^invariant violated: //;
-            s/ 0x[0-9a-f]\{8\}//g; s/:[0-9][0-9]*//g; s/\<[0-9][0-9]*\>/N/g')
+        line=$(report "$part")
         if [ -z "$line" ]; then
             grep -q "$input_end\$" "$part" 2>/dev/null && continue
             broken "$1 fails seed ${seed##*/} without an invariant report" "$(tail -5 "$part" 2>/dev/null)"
             return 1
         fi
         reports="$reports$line
+"
+        witnesses="$witnesses$1 ${seed##*/}
 "
         hit=yes
     done
@@ -123,8 +138,13 @@ mutant() {
         broken "does not apply" "$(cat "$out")"
         return
     fi
+    if [ -n "$quick" ]; then
+        witness
+        return
+    fi
     caught=""
     reports=""
+    witnesses=""
     linked=yes
     if ! run all; then
         linked=no
@@ -149,12 +169,20 @@ mutant() {
     fi
     caught=${caught# }
     reports=$(printf '%s' "$reports" | sort -u)
+    # The header's witness if it catches the mutant, else the first seed that does, or the first tool.
+    named=$(header Witness)
+    found=$(printf '%s' "$witnesses" | head -1)
+    [ -n "$found" ] || found=${caught%% *}
+    case $named in
+    *" "*) if printf '%s' "$witnesses" | grep -qxF -- "$named"; then found=$named; fi ;;
+    stack-depth | loop-bounds) case " $caught " in *" $named "*) found=$named ;; esac ;;
+    esac
 
     want=$(header Caught-by)
     [ -n "$qemu" ] || want=$(echo "$want" | sed 's/ *\<test\>//; s/ *qemu-replay//; s/^ //')
     if [ -z "$reports" ] && [ "$linked" = yes ]; then
         result=missed
-    elif [ "$want" = "$caught" ] && [ "$(header Report | sort -u)" = "$reports" ]; then
+    elif [ "$want" = "$caught" ] && [ "$(header Report | sort -u)" = "$reports" ] && [ "$named" = "$found" ]; then
         echo caught >"$work/result/$name"
         echo "mutant $name: $caught"
         return
@@ -163,24 +191,76 @@ mutant() {
     fi
     echo $result >"$work/result/$name"
     printf 'mutant %s: the header says\n%s\nand the checks say\n%s\n' "$name" \
-        "$(echo "  Caught-by: $want"; header Report | sed 's/^/  Report: /')" \
-        "$(echo "  Caught-by: $caught"; [ -z "$reports" ] || echo "$reports" | sed 's/^/  Report: /')"
+        "$(echo "  Caught-by: $want"; header Report | sed 's/^/  Report: /'; echo "  Witness: $named")" \
+        "$(echo "  Caught-by: $caught"; [ -z "$reports" ] || echo "$reports" | sed 's/^/  Report: /'
+            echo "  Witness: $found")"
+}
+
+# Run only the mutant's witness: the link for a tool, else the one harness on the one seed.
+witness() {
+    named=$(header Witness)
+    case $named in
+    stack-depth | loop-bounds)
+        if run all; then
+            result=missed
+        elif grep -q "^$named: " "$logs/$name.all.log"; then
+            result=caught
+        else
+            broken "does not build" "$(tail -5 "$logs/$name.all.log")"
+            return
+        fi
+        ;;
+    ?*" "?*)
+        h=${named%% *}
+        (cd "$tree" && make -s "build/host/$h" && "build/host/$h" --verbose --isolated "build/seeds/${named#* }") \
+            >"$out" 2>&1 || true
+        line=$(report "$out")
+        if [ -n "$line" ] && header Report | grep -qxF -- "$line"; then
+            result=caught
+        elif [ -n "$line" ]; then
+            echo differs >"$work/result/$name"
+            printf 'mutant %s: the witness %s reports\n  Report: %s\nwhich the header does not list\n' \
+                "$name" "$named" "$line"
+            return
+        elif grep -q "$input_end\$" "$out"; then
+            result=missed
+        else
+            broken "the witness $named fails without an invariant report" "$(tail -5 "$out")"
+            return
+        fi
+        ;;
+    *)
+        broken "names no witness" "  Witness: $named"
+        return
+        ;;
+    esac
+    echo $result >"$work/result/$name"
+    if [ $result = caught ]; then
+        echo "mutant $name: $named"
+    else
+        echo "mutant $name: the witness $named does not catch it"
+    fi
 }
 
 # xargs calls the script back once per mutant, with the state in the environment.
 if [ "${1-}" = --mutant ]; then
     work=$MUTANTS_WORK
     qemu=$MUTANTS_QEMU
+    quick=$MUTANTS_QUICK
     mutant "$2"
     rm -rf "$tree"
     exit 0
 fi
 
 jobs=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
-if [ "${1-}" = -j ]; then
-    jobs=$2
-    shift 2
-fi
+quick=""
+while :; do
+    case ${1-} in
+    -j) jobs=$2; shift 2 ;;
+    -q) quick=yes; shift ;;
+    *) break ;;
+    esac
+done
 
 [ $# -gt 0 ] || set -- "$root"/tests/mutants/*.patch
 names=""
@@ -198,7 +278,7 @@ trap 'rm -rf "$work"' EXIT
 mkdir -p "$logs" "$work/base" "$work/result"
 
 qemu=$(command -v qemu-system-riscv32 || true)
-[ -n "$qemu" ] || echo "qemu-system-riscv32 not found: test and qemu-replay are left out" >&2
+[ -n "$qemu" ] || [ -n "$quick" ] || echo "qemu-system-riscv32 not found: test and qemu-replay are left out" >&2
 
 cp -r "$root/kernel" "$root/host" "$root/include" "$root/user" "$root/Makefile" "$root/tests" \
     "$root/tools" "$root/design" "$work/base/"
@@ -207,7 +287,7 @@ if ! (cd "$work/base" && make -s -j"$jobs" all host-test) >"$logs/unmutated.log"
     exit 1
 fi
 
-export MUTANTS_WORK="$work" MUTANTS_QEMU="$qemu"
+export MUTANTS_WORK="$work" MUTANTS_QEMU="$qemu" MUTANTS_QUICK="$quick"
 printf '%s\n' $names | xargs -P "$jobs" -I{} "$0" --mutant {}
 
 broken=""
@@ -228,7 +308,11 @@ if [ -n "$broken" ]; then
     status=1
 fi
 if [ -n "$missed" ]; then
-    echo "mutants neither the link nor a seed catches:$missed" >&2
+    if [ -n "$quick" ]; then
+        echo "mutants whose witness does not catch them:$missed" >&2
+    else
+        echo "mutants neither the link nor a seed catches:$missed" >&2
+    fi
     status=1
 fi
 if [ -n "$differs" ]; then

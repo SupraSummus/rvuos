@@ -4,6 +4,7 @@ a unit is earned by the one thread it names, and every unit a thread is bound to
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a unit a place is bound to names another
+Witness: fuzz time-bind-checks
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

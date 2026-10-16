@@ -4,6 +4,7 @@ the thread whose turn it is has its account up to the count.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: the ticks of a turn were not charged to its thread
+Witness: fuzz actor-handoff
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c

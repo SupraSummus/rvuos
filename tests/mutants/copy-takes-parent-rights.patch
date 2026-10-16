@@ -6,6 +6,7 @@ Authority only flows, so the copy is covered by nothing its caller held.
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a call made a capability no capability of its caller covers
 Report: frame with rights beyond the grant
+Witness: fuzz clock-region-reads-only
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

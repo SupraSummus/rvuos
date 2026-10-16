@@ -5,6 +5,7 @@ a turn costs the counts it ran, so under tracing a call that moves no time costs
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a tick did not cost the thread whose turn it was a tick less its units
 Report: a traced call that moved no time charged the thread whose turn it was
+Witness: fuzz lend-hands-turn
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c

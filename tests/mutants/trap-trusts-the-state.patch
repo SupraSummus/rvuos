@@ -5,6 +5,7 @@ a traced core has its turn only for a thread the host follows, but while its tra
 
 Caught-by: fuzz-smp2
 Report: a traced core has its turn for a thread the host cannot follow
+Witness: fuzz-smp2 cores-resume-before-trap
 
 diff --git a/kernel/core.c b/kernel/core.c
 --- a/kernel/core.c

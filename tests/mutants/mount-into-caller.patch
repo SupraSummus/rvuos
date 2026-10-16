@@ -3,6 +3,7 @@ so a capability to one process changes what another names.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a call mounted a table in a process its caller could not control
+Witness: fuzz mount-in-another-process
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

@@ -3,6 +3,7 @@ so a thread that has time waits for the tick behind one that runs on what nobody
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a turn on spare time runs while a thread with time waits
+Witness: fuzz spare-turn-ends-at-wake
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c

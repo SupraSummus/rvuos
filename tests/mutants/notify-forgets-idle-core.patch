@@ -3,6 +3,7 @@ the core sleeps on with a thread waiting for its turn there, until something els
 
 Caught-by: fuzz-smp2
 Report: a thread waits for a turn on a core that idles
+Witness: fuzz-smp2 cores-moved-by-other
 
 diff --git a/kernel/core.c b/kernel/core.c
 --- a/kernel/core.c

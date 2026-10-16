@@ -3,6 +3,7 @@ no result of a describing call is an object capability's address.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a description differs from the capability it describes
+Witness: fuzz describe-every-type
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

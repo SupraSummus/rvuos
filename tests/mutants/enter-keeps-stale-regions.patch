@@ -3,6 +3,7 @@ so the trap runs, and the self-check reads the protection unit, with regions the
 
 Caught-by: fuzz-smp2
 Report: the core's regions wait to be loaded again
+Witness: fuzz-smp2 cores-region-taken
 
 diff --git a/kernel/core.c b/kernel/core.c
 --- a/kernel/core.c

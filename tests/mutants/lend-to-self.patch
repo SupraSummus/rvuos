@@ -3,6 +3,7 @@ A thread lends to a thread that is not another.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a thread lends to something that is not another live thread
+Witness: fuzz lend-refused
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

@@ -4,6 +4,7 @@ the mark goes with the turn it was set for.
 
 Caught-by: fuzz-smp2
 Report: a core is to drop a trap it is not taking
+Witness: fuzz-smp2 cores-stopped-thread-destroyed
 
 diff --git a/kernel/core.c b/kernel/core.c
 --- a/kernel/core.c

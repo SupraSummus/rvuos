@@ -2,6 +2,7 @@ OP_POOL_INFO tells the bytes in use as the room.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: a description differs from the capability it describes
+Witness: fuzz pool-info-dying
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

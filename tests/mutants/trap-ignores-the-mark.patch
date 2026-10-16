@@ -4,6 +4,7 @@ a core is marked only while it has trapped for the turn the mark was set for.
 
 Caught-by: fuzz-smp2
 Report: a core is to drop a trap it is not taking
+Witness: fuzz-smp2 cores-resume-before-trap
 
 diff --git a/kernel/core.c b/kernel/core.c
 --- a/kernel/core.c

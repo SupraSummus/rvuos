@@ -3,6 +3,7 @@ the tick that reaches the deadline halts the machine.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: the machine runs past the watchdog's deadline
+Witness: fuzz watchdog-halts
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c

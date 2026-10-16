@@ -4,6 +4,7 @@ The borrower waits on another queue than its lender's account says.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a place waits on another queue than its account says
+Witness: fuzz lend-lender-earns
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c

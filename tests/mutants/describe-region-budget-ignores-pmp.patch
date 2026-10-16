@@ -3,6 +3,7 @@ where the PMP has fewer entries for them, as RP2350's Hazard3 has seven.
 
 Caught-by: fuzz-rp2350
 Report: a description differs from the capability it describes
+Witness: fuzz-rp2350 describe-every-type
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

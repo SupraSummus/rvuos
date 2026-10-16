@@ -3,6 +3,7 @@ a notification's capability may signal some bit.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: object capability whose bits are not its type's
+Witness: fuzz notify-carve-bits
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

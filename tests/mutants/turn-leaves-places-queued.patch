@@ -4,6 +4,7 @@ a place of a thread whose turn it is anywhere waits on no queue.
 
 Caught-by: fuzz-smp2
 Report: a place of a thread whose turn it is waits on a queue
+Witness: fuzz-smp2 cores-actor-waits-release
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c

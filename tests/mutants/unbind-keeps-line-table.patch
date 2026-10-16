@@ -4,6 +4,7 @@ the line table records exactly the Irqs that are bound.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: line table names an irq that is gone
+Witness: fuzz irq-dies-with-pool
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c

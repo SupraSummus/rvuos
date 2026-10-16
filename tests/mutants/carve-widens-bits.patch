@@ -4,6 +4,7 @@ a node is derived from its parent, a notification's capability with no more bits
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: slot is not derived from its parent
+Witness: fuzz notify-carve-bits
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

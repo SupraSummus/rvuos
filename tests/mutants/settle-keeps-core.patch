@@ -3,6 +3,7 @@ where its thread takes the time of a core it holds none of; a queued place waits
 
 Caught-by: fuzz-smp2
 Report: a place waits on another core than its units are of
+Witness: fuzz-smp2 cores-actor-waits-release
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
