@@ -289,15 +289,14 @@ int main(void)
 
     /*
      * Derivation.
-     * A capability derived from another is revoked with it,
-     * wherever it went and whatever was installed from it,
-     * while a copy made beside the original stays;
+     * A capability derived from an original, or copied from it, lies below it and is revoked with it,
+     * wherever it went and whatever was installed from it;
      * see DESIGN.md, "The derivation tree".
      * Whether the child's mapping is gone shows in the child's region slot,
      * which takes a region again once it is empty.
      */
     take_frame(SLOT_LEASE, &lease_base, &lease_size);
-    expect("copy it beside itself",
+    expect("copy it",
            rv_invoke(OP_CAP_COPY, BOOT_CAP_CAPTABLE, SLOT_LEASE_COPY, SLOT_LEASE, RIGHT_ALL));
     expect("derive it into the child's table",
            rv_invoke(OP_CAP_DERIVE, SLOT_CHILD_TABLE, CHILD_LEASE, SLOT_LEASE, RIGHT_R | RIGHT_W));
@@ -311,10 +310,10 @@ int main(void)
     expect("revoke below the lease",
            rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_LEASE, 0, 0));
     expect("the lease itself stays", rv_frame_info(SLOT_LEASE, &lease_base, &lease_size));
-    expect("the copy beside it stays", rv_frame_info(SLOT_LEASE_COPY, &lease_base, &lease_size));
+    expect("the copy below it went too",
+           rv_frame_info(SLOT_LEASE_COPY, &lease_base, &lease_size) == KERR_INVALID_CAP ? KERR_OK : KERR_INVALID_ARG);
     expect("the child's mapping is gone",
-           rv_invoke(OP_PROCESS_INSTALL, SLOT_CHILD_PROCESS, CHILD_LEASE_SLOT, SLOT_LEASE_COPY,
-                     RIGHT_R));
+           rv_invoke(OP_PROCESS_INSTALL, SLOT_CHILD_PROCESS, CHILD_LEASE_SLOT, SLOT_LEASE, RIGHT_R));
     expect("unmap it again",
            rv_invoke(OP_PROCESS_UNINSTALL, SLOT_CHILD_PROCESS, CHILD_LEASE_SLOT, 0, 0));
     expect("ask the child to look at the lease", rv_signal(SLOT_DOWN, BIT_LEASE));

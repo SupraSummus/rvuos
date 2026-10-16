@@ -18,15 +18,13 @@ Capabilities can be copied, derived or moved into another process's table
 by a process that holds both the source capability
 and a capability to the destination table,
 the first two optionally with reduced rights.
-Copy and derive differ in one thing:
-what a later revoke of the source takes.
-A copy stands beside its source and is as good as it;
-a derivation stands below it and goes when the source is revoked below;
+Copy and derive do the same but for an Untyped, which is derived and never copied:
+the new capability lies below the source when the source is an original, and beside it when not,
+and it is no original itself;
 see "The derivation tree".
 A move leaves no source behind:
 the capability goes to the destination with its place in the tree,
-so it takes back what the source could,
-which a copy, standing beside the source, cannot.
+so it takes back what the source could.
 
 A process needs no capability to write its own tables.
 Every operation that produces a capability
@@ -70,9 +68,12 @@ and a `KernelPool` capability with no right a pool's room, and so what its other
 
 #### Slot format
 
-A slot is twenty-four bytes: type, rights, an index, padding, two words of content,
-and three links of the derivation tree.
-The index is an installed region's slot in its process,
+A slot is sixteen bytes: two words of content,
+two links of the derivation tree, twenty-four bits each,
+and the type, the rights, an index and whether the slot is an original, in the eight bits left.
+A link is a node's offset from `RAM_BASE` in four-byte steps,
+so every node lies in the 64 MiB from there, and every board's RAM does.
+The index is an installed region's slot in its process, or a binding's place in its thread,
 so that uninstalling it finds the process without a walk.
 For object capabilities the first word of content is the object's address
 and the second is unused,
@@ -85,7 +86,7 @@ its two words are the base address and the size,
 and the rights are the memory permissions it may grant.
 An `Untyped` has none either:
 its first word is its block, base and size as NAPOT encodes them,
-its second is 0 but while its delete as a root goes, see below,
+its second is 0,
 since whether it is free the derivation tree says,
 and its rights are those of the frames made of it.
 Carving a frame, retyping an Untyped into a frame and splitting one into halves
@@ -137,10 +138,7 @@ and `OP_UNTYPED_RETYPE` a `Frame` or a `KernelPool` of all of it,
 each below it in the derivation tree.
 What one Untyped makes therefore never overlaps,
 and it is free again, the whole of it, once nothing it made is left.
-A delete of a root Untyped is the exception:
-with no parent to hand them to, what lies below it becomes roots one at a time, and the delete may stop between two.
-Those already roots lie in its memory out of the tree's sight, while another thread may take the rest,
-so the delete first marks it going, in its second word, and a going Untyped makes nothing.
+A delete of a root Untyped makes roots of what lies below it at once, in constant time, as any delete does.
 From the retype on, a pool's memory belongs to the kernel.
 The kernel zeroes each object as it allocates it, not the whole block.
 
@@ -182,7 +180,7 @@ the node the retype made, below the Untyped.
 The Pool capability the retype returns hangs below that node,
 and so does every capability to the pool and to its objects,
 because an object's capability hangs below the Pool capability it was allocated through;
-a copy stands beside its source and a derivation below it, so none leaves the subtree.
+a copy and a derivation lie below their source or beside it, so none leaves the subtree.
 The node lies in the pool, out of every process's reach,
 so a process may delete its Pool capability and the memory stays accounted for:
 the pool then lies below the Untyped, reachable through nothing,
@@ -302,7 +300,7 @@ Pools alone cannot do what seL4's derivation tree can:
 take back one frame from a child, and everything the child did with it,
 while the child goes on living.
 A derivation tree over slots does that,
-and rvuos keeps one in the shape that costs the least.
+and rvuos keeps it as seL4 does, a list in pre-order with two links per slot.
 
 **What is a node.**
 Every filled slot of every capability table,
@@ -321,86 +319,73 @@ as the root task's first table slot and its thread's process do.
 A capability to a pool or an object is never a root,
 and neither is a thread's process or watch or an `Irq`'s notification.
 
+**Originals.**
+A slot is an original or not, a bit of it.
+Only an original has anything below it,
+and only an allocation makes one, of something no other node names yet:
+a split's halves, a derived Untyped and a retype's frame or pool below the Untyped,
+the pool's capability below the pool's own node,
+an object's capability below the Pool capability it was allocated through,
+and the boot capabilities.
+A copy, a derivation, a carve, an installed region,
+a process's table slot, a thread's process, watch and units and an `Irq`'s notification are none.
+
 **What hangs below what.**
-A carve hangs below the frame or line it was carved from,
-a retype and a split below the Untyped they were made of,
-a derivation below its source,
-an installed region below the frame it was installed from,
-the counter's frame below the clock it was derived through,
-a process's table slot below the `CapTable` capability the process was made with or the table was mounted with,
-a thread's process below the `Process` capability the thread was made with,
-a thread's watch below the `Notification` capability it was set with,
-and an `Irq`'s notification below the `Notification` capability the `Irq` was bound with.
-A pool's own node hangs below the Untyped, and the Pool capability the retype returns below that node.
-A capability to a new object hangs below the Pool capability it was allocated through,
-and so does the `Irq` capability of `OP_IRQ_BIND`, whose line goes with everything derived from it.
-A copy stands beside its source, under the same parent,
-so a process can duplicate what it holds without making one copy the master of the other;
-beside a root it is a root.
-A move puts the node where its source stood, and the source's children below it.
-So every capability to a pool or to one of its objects lies below the pool's own node,
-which is what lets a destroy find them all without a sweep.
+The tree stores no parent: a node lies below the nearest original before it in its list
+whose words cover its own, see `node_below`.
+An original covers what lies within what it names:
+an Untyped what is made of its memory and every object in it,
+a pool's node and its capability the pool's objects and what names them,
+a frame or a range of lines or units what lies within its range,
+a clock the counter's block, and a capability to an object what names the object.
+A new node goes right after its source,
+so it lies below the source when the source is an original and covers it,
+and beside the source, below the source's parent, when the source is no original.
+So a copy or a derivation of an original lies below it, and one of anything else beside it;
+a carve of a frame, a line range or units, or of a notification's bits, likewise.
+An original is made of what nothing names yet, so right after its source it comes to cover nothing that lay there.
+The boot capabilities to the boot pool's objects come before `BOOT_CAP_POOL`,
+which covers them, so that a revoke below it takes what was allocated through it and not those.
 
 **What the operations do to it.**
-`OP_CAP_REVOKE` clears everything below a slot and leaves the slot.
-`OP_CAP_DELETE`, `OP_PROCESS_UNINSTALL` and `OP_PROCESS_UNMOUNT` clear one node
-and hand what was below it to its parent,
-so deleting one's own copy of a grant does not take the grant back.
+`OP_CAP_REVOKE` clears everything below a slot and leaves the slot: nothing, when it is no original.
+`OP_CAP_DELETE`, `OP_PROCESS_UNINSTALL` and `OP_PROCESS_UNMOUNT` clear one node,
+and what lay below it stays in its place in the list,
+so it lies below the node's parent, or is a root where the node was one.
 `OP_CAP_MOVE` puts a slot's node in another slot and changes nothing else.
-`OP_PROCESS_MOUNT` adds a leaf below the `CapTable` capability it names.
 A revoke below an Untyped destroys the pools it meets,
 and a pool destroy revokes below the pool's own node,
 then clears every slot the pool held as a delete does;
 see "Kernel pools and revocation".
 
 **The shape.**
-Three links per slot, first child, next and previous,
-where the last child's next points up to the parent with the low bit set,
-which the four-byte alignment of slots leaves free,
-and the first child's previous is the last child.
-The children of a node are then a ring that closes through the node.
-A node leaves its ring in constant time:
-its predecessor is one link away,
-and it is the first child exactly when that predecessor links up to the parent.
-Three links at most name a node from outside it:
-its predecessor's next, or its parent's first child when it is first,
-its successor's previous, and the link up from its last child.
-So a move copies the node and rewrites those three, in constant time.
-A delete puts the node's children right after it, through the first and the last,
-and then takes the node out as a leaf.
-A revoke is deletes of the first child, one after another,
-each handing its children up to the front of the ring,
-until the node it revokes below has none:
+Two links per slot, the node before and the node after,
+the nodes below an original right after it.
+A node leaves its list in constant time, a delete of a root too,
+and what lay below it lies below what lay above it with no link changed.
+A move copies the node and rewrites the two links that name it.
+A revoke clears the node right after the slot while the slot covers it,
+what lay below that node staying where it was:
 a step per node, with no stack,
 the tree whole between any two steps,
-and the next step always at the node's first child.
-A pool's own node is the one first child a revoke does not delete at once:
-it stays first while the pool is destroyed below it, a step at a time,
+and the next step always at the node right after the slot.
+A pool's own node is the one a revoke does not clear at once:
+it stays right after the slot while the pool is destroyed below it, a step at a time,
 and goes last.
-No operation walks a ring.
-seL4 keeps its tree as a list in pre-order, two links per slot and a word less,
-and stores no depth:
-whether the next slot lies below one is read off the two capabilities,
-their contents and a flag or two.
-rvuos cannot read it off,
-since a copy and a derivation of the same region can be the same bits;
-which one a slot is lives only in the links.
-A parent link instead of the previous one would move for every child a delete hands up.
+No operation walks a list but a revoke and a destroy, which pay for each step.
+The tree is whole when an original covers, after it, only the nodes right after it until the first it does not cover;
+then what a delete hands up lies below the parent and nothing else, and the self-check holds every list to it.
 
 **What it does not do.**
 Revoking the capabilities to an object does not free the object;
 the pool does that, and a pool whose capabilities were revoked or deleted
 stays until the Untyped it lies below is revoked.
 A root has no parent to revoke it from.
-A capability copied beside its source can be taken back only from their common parent,
-which is the point of copying rather than deriving.
-An earlier sketch by the same author,
-`os4cm4` in the LANoT repository,
-put three links next to the object pointer in a sixteen-byte slot
-and never got as far as maintaining them;
-what made this one tractable was making installed regions nodes,
-so that a revoke unmaps by derivation and never by address range,
-and giving each pool a node of its own that everything about the pool lies below.
+A slot that is no original takes back nothing:
+what was derived from it lies beside it, below the original it came from,
+so only an allocation makes a point to revoke at, and a carve does not.
+A process that holds a capability it was given cannot give it on and take it back again;
+the holder of the original can, all of it at once.
 
 ### A process's tables
 

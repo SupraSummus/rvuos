@@ -17,7 +17,7 @@ struct pool *pool_create(paddr_t base, uint32_t size, struct cap *parent)
     *pool = (struct pool){ 0 };
     pool->hdr.type = CAP_POOL;
     pool->hdr.pool = base;
-    pool->node = (struct cap){ .type = CAP_RETYPED, .rights = RIGHT_ALL, .a = base };
+    pool->node = (struct cap){ .type = CAP_RETYPED, .rights = RIGHT_ALL, .orig = 1, .a = base };
     cap_attach(parent, &pool->node);
     pool->size = size;
     pool->used = obj_align(sizeof(*pool));
@@ -99,7 +99,8 @@ bool pool_destroy(struct pool *pool, bool preempt)
         struct cap *n;
         while ((n = held_node(o, &pool->sweep)) != NULL) {
             LOOP_PAID(pool_destroy, node, "a node the object holds");
-            if (!cap_delete(n, preempt) || cap_stop_here(preempt)) {
+            cap_delete(n);
+            if (cap_stop_here(preempt)) {
                 return false;
             }
         }
@@ -122,7 +123,7 @@ bool pool_destroy(struct pool *pool, bool preempt)
     }
 
     /* Nothing below may stop: the pool is empty, and its memory goes back to the Untyped. */
-    cap_delete(&pool->node, false);
+    cap_delete(&pool->node);
     pool_unlink(pool);
     CALL_BOUND(sizeof(struct pool));
     memset(pool, 0, sizeof(*pool));

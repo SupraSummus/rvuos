@@ -149,8 +149,8 @@ and tracks derivations in a capability derivation tree
 so that revoking a parent destroys every child.
 That tree is most of seL4's complexity.
 rvuos keeps the "kernel never allocates" principle
-and keeps a derivation tree, in a simpler shape:
-three links per slot, no bookkeeping per object,
+and keeps a derivation tree in seL4's own shape, a list in pre-order with two links per slot:
+no bookkeeping per object,
 and a revoke that walks only what it takes;
 see "The derivation tree".
 Kernel memory comes back at pool granularity,

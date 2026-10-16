@@ -32,6 +32,15 @@
 /* The boot pool, where the kernel builds the root task's objects. */
 #define BOOT_POOL_SIZE U32(0x00001000)
 
+/*
+ * A link of the derivation tree names a node by its offset from RAM_BASE in four-byte steps, see struct cap,
+ * so every node lies in the 64 MiB from there.
+ * Every node lies in a pool, every pool in an Untyped's memory, and every Untyped in the root task's memory
+ * or the free RAM, each of which the window holds; the first word of RAM is the kernel's, so a link of 0 names none.
+ */
+#define NODE_LINK_BITS 24
+#define NODE_WINDOW_SIZE (U32(4) << NODE_LINK_BITS)
+
 #ifndef __ASSEMBLER__
 /* The root task's memory holds its code, data and input regions and the boot pool, in that order. */
 _Static_assert(ROOT_RAM_BASE <= USER_CODE_BASE && USER_CODE_BASE + USER_CODE_SIZE <= USER_DATA_BASE &&
@@ -39,6 +48,9 @@ _Static_assert(ROOT_RAM_BASE <= USER_CODE_BASE && USER_CODE_BASE + USER_CODE_SIZ
                    BOOT_POOL_BASE % BOOT_POOL_SIZE == 0 &&
                    BOOT_POOL_BASE + BOOT_POOL_SIZE <= ROOT_RAM_BASE + ROOT_RAM_SIZE,
                "the root task's regions and the boot pool lie apart in its memory");
+_Static_assert(ROOT_RAM_BASE > RAM_BASE && ROOT_RAM_BASE - RAM_BASE <= NODE_WINDOW_SIZE - ROOT_RAM_SIZE &&
+                   FREE_RAM_BASE > RAM_BASE && FREE_RAM_BASE - RAM_BASE <= NODE_WINDOW_SIZE - FREE_RAM_SIZE,
+               "every Untyped the boot grants lies in the window the tree's links reach");
 #endif
 
 /*

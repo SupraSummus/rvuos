@@ -115,20 +115,25 @@ static int op_captable(struct thread *t, uint32_t slot, const struct cap *cap,
         }
         src.rights &= (uint8_t)arg[3];
         struct cap *source = slot_node(t, arg[2]);
-        /* A copy stands beside its source in the tree, a derivation below it. */
-        if (op == OP_CAP_COPY) {
+        /*
+         * A copy and a derivation alike go right after the source and are no originals:
+         * below the source when it is an original, beside it when it is not; see DESIGN.md, "The derivation tree".
+         */
+        src.orig = 0;
+        if (src.type == CAP_UNTYPED) {
             /* A copy of an Untyped would be a second allocator over the same memory. */
-            if (src.type == CAP_UNTYPED) {
+            if (op == OP_CAP_COPY) {
                 return KERR_WRONG_TYPE;
             }
-            return cap_store_beside(table, arg[1], &src, source);
-        }
-        /*
-         * A derived Untyped is the whole of the memory, which only a free one has to give,
-         * and the source makes nothing more while it lives, as for anything else it made.
-         */
-        if (src.type == CAP_UNTYPED && !untyped_free(source)) {
-            return KERR_NO_MEMORY;
+            /*
+             * A derived Untyped is the whole of the memory, which only a free one has to give,
+             * and the source makes nothing more while it lives, as for anything else it made.
+             * It is an original, below the source, so that what it makes lies below it.
+             */
+            if (!untyped_free(source)) {
+                return KERR_NO_MEMORY;
+            }
+            src.orig = 1;
         }
         return cap_store(table, arg[1], &src, source);
     }
@@ -275,7 +280,7 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
             return KERR_NO_MEMORY;
         }
         struct cap c;
-        struct cap *parent = u;
+        struct cap *after = u;
         if (type == CAP_POOL) {
             /*
              * The pool's own node hangs below the Untyped and the capability below it,
@@ -284,12 +289,14 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
              */
             struct pool *pool = pool_create(base, size, u);
             c = cap_to_object(&pool->hdr, RIGHT_ALL);
-            parent = &pool->node;
+            after = &pool->node;
         } else {
             c = cap_to_frame(base, size, cap->rights);
         }
+        /* What a retype makes is new, so nothing comes to lie below it but what is made of it. */
+        c.orig = 1;
         arg[1] = base;
-        return slot_store(t, arg[2], &c, parent);
+        return slot_store(t, arg[2], &c, after);
     }
     case OP_UNTYPED_SPLIT: {
         /* Each half is a block, so that a frame made of it is one NAPOT entry. */
@@ -314,6 +321,8 @@ static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
         /* Both slots are free and distinct, so neither store fails and the split is whole or not at all. */
         struct cap lower = cap_to_untyped(base, half, cap->rights);
         struct cap upper = cap_to_untyped(base + half, half, cap->rights);
+        lower.orig = 1;
+        upper.orig = 1;
         slot_store(t, arg[1], &lower, u);
         return slot_store(t, arg[2], &upper, u);
     }
@@ -394,6 +403,7 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
         proc->regions = (uint8_t)regions;
         /* Its first table hangs below the capability it was made with, so a revoke above that takes it. */
         proc->tables[0] = tc;
+        proc->tables[0].orig = 0;
         cap_attach(slot_node(t, arg[3]), &proc->tables[0]);
         obj = &proc->hdr;
         break;
@@ -448,8 +458,9 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
         return KERR_INVALID_ARG;
     }
 
-    /* A new object hangs below the capability it was allocated through, and so below the pool's node. */
+    /* A new object hangs below the capability it was allocated through, and so below the pool's node, an original. */
     struct cap c = cap_to_object(obj, RIGHT_ALL);
+    c.orig = 1;
     return slot_store(t, dst, &c, slot_node(t, slot));
 }
 
@@ -571,7 +582,7 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
         }
         /* The watch is a leaf, so it leaves the tree in a step. */
         if (target->watch.type != CAP_NONE) {
-            cap_delete(&target->watch, false);
+            cap_delete(&target->watch);
         }
         if (bits != 0) {
             /* It hangs below the capability it was set with, so a revoke above that clears it. */
@@ -635,6 +646,7 @@ static int op_notification(struct thread *t, uint32_t slot, const struct cap *ca
     case OP_NOTIFY_CARVE: {
         /* Fewer bits, as a carve of a frame is less memory: a table operation, below the invoked capability. */
         struct cap sub = *cap;
+        sub.orig = 0;
         sub.b &= arg[1];
         if (sub.b == 0) {
             return KERR_INVALID_ARG;
@@ -728,9 +740,10 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
         irq->deadline = sched_ticks;
         line_irq[first] = v2p(irq);
         /* The line goes, a leaf now, and the Irq hangs below the pool capability as any object does. */
-        cap_delete(slot_node(t, slot), false);
+        cap_delete(slot_node(t, slot));
         /* Its bits are zero, so it is disarmed, and its line stays masked as every line does until a set. */
         struct cap ic = cap_to_object(&irq->hdr, RIGHT_ALL);
+        ic.orig = 1;
         return slot_store(t, arg[3], &ic, slot_node(t, arg[1]));
     }
     default:

@@ -83,12 +83,11 @@ which is how it reads what the other core writes;
 what bounds it is the other core: a lock held a step of a walk at most, a trap that user mode takes at once,
 or on ARM a ticket of the lock another core takes between an exclusive load and store, once a trap at most.
 Other bounds rest on an invariant, as `i < proc->regions` does,
-and a paid loop names its unit: a node, a link, an object or a waiter.
+and a paid loop names its unit: a node, an object or a waiter.
 The host harness `fuzz-work` counts both after every call:
 a bound per entry of its loop,
 and paid steps at most twice what the call took away of that unit, plus one;
-twice since a delete below a root makes a root of a node, a link each,
-and a pool destroy may then clear that node as one its tables hold.
+twice since a pool destroy may clear a node its revoke left as one its tables hold.
 It also fails a paid loop that takes two steps without asking `intr_pending` between them,
 so a walk that is paid for is a walk that is preempted,
 and a `memset` or `memcpy` longer than the `CALL_BOUND` before it.
@@ -96,7 +95,7 @@ It finds a false claim only where the corpus reaches.
 The host answers every `intr_pending` with yes, the worst case,
 so each preemptible call stops after its first step, is made again,
 and the self-check runs between any two steps;
-every host harness requires a stopped call to have taken a node, a link, an object or a waiter away,
+every host harness requires a stopped call to have taken a node, an object or a waiter away,
 and to leave its caller running, its slot number still naming the capability it made the call through,
 so that it can make the call again.
 

@@ -133,7 +133,7 @@ int process_uninstall(struct process *proc, unsigned slot)
     }
     /* Leaves the tree as clearing a slot of a table does; process_drop then rebuilds the image. */
     if (proc->slots[slot].type != CAP_NONE) {
-        cap_delete(&proc->slots[slot], false);
+        cap_delete(&proc->slots[slot]);
     }
     return KERR_OK;
 }
@@ -148,6 +148,7 @@ int process_mount(struct process *proc, uint32_t index, const struct cap *table,
     }
     /* It hangs below the capability it was mounted with, as the first hangs below the one the process was made with. */
     proc->tables[index] = *table;
+    proc->tables[index].orig = 0;
     cap_attach(parent, &proc->tables[index]);
     return KERR_OK;
 }
@@ -159,7 +160,7 @@ int process_unmount(struct process *proc, uint32_t index)
     }
     /* Nothing is derived from a table slot, so it leaves the tree as a leaf, and the table stays where it is. */
     if (proc->tables[index].type != CAP_NONE) {
-        cap_delete(&proc->tables[index], false);
+        cap_delete(&proc->tables[index]);
     }
     return KERR_OK;
 }

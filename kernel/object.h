@@ -38,19 +38,20 @@ struct obj_header {
  * a is the base address or first line and b the size or count,
  * and there is no object.
  * For CAP_UNTYPED a is the block, its base and size in one word as NAPOT encodes them,
- * see untyped_base, and b is 0, or UNTYPED_GOING once its delete as a root has begun;
- * there is no object either, and whether it is free the tree says, and b.
+ * see untyped_base, and b is 0;
+ * there is no object either, and whether it is free the tree says.
  * For every other type a is the object's physical address,
  * and b is 0 but for CAP_NOTIFICATION, where it is the bits the capability may signal, never none;
  * see OP_NOTIFY_CARVE.
  *
- * child is the first slot derived from this one, by physical address, 0 if none.
- * next is the next sibling, or at the last sibling the parent with LINK_UP set,
- * which the four-byte alignment of slots leaves free;
- * a root's next is LINK_UP alone, an empty slot's is 0.
- * prev is the previous sibling, and at the first sibling the last one,
- * so that a node leaves its ring without a walk;
- * an only child's is itself, and a root's and an empty slot's is 0.
+ * The tree is a list of nodes in pre-order, a node's descendants right after it, as seL4 keeps its own:
+ * next and prev are the nodes after and before this one, 0 for none,
+ * each its offset from RAM_BASE in four-byte steps, see node_link; an empty slot's are 0.
+ * The list stores no parent: a node lies below an original before it,
+ * orig set, whose words cover its own, and the nodes below one are those right after it that do; see node_below.
+ * Only an allocation makes an original, of something nothing else names yet:
+ * a pool's node and capability, an object's capability, a frame or an Untyped an Untyped made, and the boot's.
+ * A copy, a derivation and a carve are not originals, and lie below the original nearest above their source.
  * A process's region slots are slots of this type too, CAP_INSTALLED, and leaves of the tree,
  * and so are its table slots, which hold CAP_CAPTABLE capabilities,
  * and a thread's process, CAP_HOSTED, its watch, CAP_WATCHED, and each of its places' units, CAP_BOUND,
@@ -59,18 +60,34 @@ struct obj_header {
  * For CAP_TIME a is the first unit and b the count, as for CAP_IRQ_LINE.
  */
 struct cap {
-    uint8_t type;
-    uint8_t rights;
-    uint8_t index;      /* an installed region's slot in its process, a binding's place in its thread; 0 elsewhere */
-    uint8_t pad;
     uint32_t a;
     uint32_t b;
-    uint32_t child;
-    uint32_t next;
-    uint32_t prev;
+    uint32_t next : NODE_LINK_BITS;
+    uint32_t type : 8;
+    uint32_t prev : NODE_LINK_BITS;
+    uint32_t rights : 3;
+    uint32_t index : 4;     /* an installed region's slot in its process, a binding's place in its thread; 0 elsewhere */
+    uint32_t orig : 1;      /* an original: what lies below it lies right after it in the list */
 };
 
-#define LINK_UP 0x1u
+/* The link that names a node, which lies in the window from RAM_BASE; see layout.h. */
+static inline uint32_t node_link(const struct cap *n)
+{
+    return (v2p(n) - RAM_BASE) / 4;
+}
+
+/* The node a link names, which is not 0. */
+static inline struct cap *link_node(uint32_t link)
+{
+    return p2v(RAM_BASE + link * 4);
+}
+
+/*
+ * True if n lies below the node above, wherever n follows it in their list: above is an original
+ * and covers n, what n names lying within what it names; see DESIGN.md, "The derivation tree".
+ * It holds of every node right after above that lies below it, and of none after the first that does not.
+ */
+bool node_below(const struct cap *above, const struct cap *n);
 
 /* A region installed in a process's region slot. Kernel internal: never in a table. */
 #define CAP_INSTALLED 0x80
@@ -301,9 +318,10 @@ struct irq {
 };
 
 _Static_assert(sizeof(struct obj_header) == 8, "object layout");
-_Static_assert(sizeof(struct cap) == 24, "object layout");
+_Static_assert(sizeof(struct cap) == 16, "object layout");
 _Static_assert(sizeof(struct captable) == 12, "object layout");
-_Static_assert(sizeof(struct pool) == 56, "object layout");
+_Static_assert(sizeof(struct pool) == 48, "object layout");
+_Static_assert(PROCESS_REGION_SLOTS_MAX <= 16 && CORES <= 16, "a node's index fits its four bits");
 #ifdef BOARD_PROCESS_CSRS
 #define PROCESS_CSRS_SIZE (4 * BOARD_PROCESS_CSRS)
 #if CORES > 1
@@ -312,7 +330,7 @@ _Static_assert(sizeof(struct pool) == 56, "object layout");
 #else
 #define PROCESS_CSRS_SIZE 0
 #endif
-_Static_assert(sizeof(struct process) == 12 + PROCESS_CSRS_SIZE + 24 * PROCESS_TABLES, "object layout");
+_Static_assert(sizeof(struct process) == 12 + PROCESS_CSRS_SIZE + 16 * PROCESS_TABLES, "object layout");
 _Static_assert(sizeof(struct thread) == 40 + sizeof(struct trap_frame) + 2 * sizeof(struct cap), "object layout");
 _Static_assert(sizeof(struct place) == 24, "object layout");
 _Static_assert(sizeof(struct notification) == 16, "object layout");
@@ -338,22 +356,30 @@ static inline bool cap_has_object(uint8_t type)
 static inline uint32_t untyped_block(uint32_t base, uint32_t size) { return base | (size / 2 - 1); }
 static inline uint32_t untyped_size(const struct cap *c) { return (c->a ^ (c->a + 1)) + 1; }
 static inline uint32_t untyped_base(const struct cap *c) { return c->a & ~(untyped_size(c) - 1); }
-/* An Untyped's b once its delete as a root has begun, see cap_delete. */
-#define UNTYPED_GOING 1u
-/* Whether an Untyped makes something: only while nothing made of it is left, below it or gone up as a root. */
-static inline bool untyped_free(const struct cap *c) { return c->child == 0 && c->b != UNTYPED_GOING; }
+/* The first node below n, or NULL when nothing lies below it. */
+static inline struct cap *node_first_below(const struct cap *n)
+{
+    if (n->next == 0) {
+        return NULL;
+    }
+    struct cap *first = link_node(n->next);
+    return node_below(n, first) ? first : NULL;
+}
+/* Whether an Untyped makes something: only while nothing made of it is left below it. */
+static inline bool untyped_free(const struct cap *c) { return node_first_below(c) == NULL; }
 /*
  * What an Untyped made, as OP_CAP_INFO tells it: 0 while nothing lies below it, else the type of the node first there,
  * CAP_FRAME for a frame or a region installed from one, CAP_UNTYPED for a half or a derived Untyped,
  * and CAP_POOL for a pool's own node.
- * Nothing else lies below an Untyped, as the self-check's derivation rule holds.
+ * Nothing else lies first below an Untyped, as the self-check's derivation rule holds.
  */
 static inline uint32_t untyped_made(const struct cap *c)
 {
-    if (c->child == 0) {
+    const struct cap *first = node_first_below(c);
+    if (first == NULL) {
         return 0;
     }
-    uint8_t type = ((const struct cap *)p2v(c->child))->type;
+    uint8_t type = first->type;
     return type == CAP_RETYPED ? CAP_POOL : type == CAP_INSTALLED ? CAP_FRAME : type;
 }
 
@@ -666,14 +692,11 @@ int cap_lookup_typed(struct captable *table, uint32_t slot,
 int cap_slot_free(const struct captable *table, uint32_t slot);
 
 /*
- * Store into an empty slot as a child of parent, or as a root when parent is NULL;
+ * Store into an empty slot right after a node, as cap_attach puts it, or as a root when after is NULL;
  * fails as cap_slot_free does.
- * The links the caller's copy carries are ignored.
+ * The links the caller's copy carries are ignored, and whether it is an original is the caller's to say.
  */
-int cap_store(struct captable *table, uint32_t slot, const struct cap *cap, struct cap *parent);
-
-/* Store into an empty slot as a sibling of beside: derived from the same parent. */
-int cap_store_beside(struct captable *table, uint32_t slot, const struct cap *cap, struct cap *beside);
+int cap_store(struct captable *table, uint32_t slot, const struct cap *cap, struct cap *after);
 
 /*
  * cap_lookup, cap_lookup_typed, cap_slot_free and cap_store for a slot number of a thread's,
@@ -696,18 +719,23 @@ static inline int slot_vacant(const struct thread *t, uint32_t slot)
     const struct captable *table = slot_table(t, slot);
     return table != NULL ? cap_slot_free(table, slot_index(slot)) : KERR_INVALID_CAP;
 }
-static inline int slot_store(const struct thread *t, uint32_t slot, const struct cap *cap, struct cap *parent)
+static inline int slot_store(const struct thread *t, uint32_t slot, const struct cap *cap, struct cap *after)
 {
     struct captable *table = slot_table(t, slot);
-    return table != NULL ? cap_store(table, slot_index(slot), cap, parent) : KERR_INVALID_CAP;
+    return table != NULL ? cap_store(table, slot_index(slot), cap, after) : KERR_INVALID_CAP;
 }
 
-/* Make an already filled node, an installed region, a child of parent, or a root when parent is NULL. */
-void cap_attach(struct cap *parent, struct cap *node);
+/*
+ * Put an already filled node, an installed region, right after a node of the tree, or alone when after is NULL, a root.
+ * It lies below the original nearest above it there whose words cover its own, see node_below,
+ * so right after its source it lies below the source when the source is an original, and beside it when not.
+ * An original must name what nothing else does yet, so that nothing after it comes to lie below it.
+ */
+void cap_attach(struct cap *after, struct cap *node);
 
 /*
  * Move a filled slot of a table into an empty one, from and to distinct:
- * the new node has the parent, the siblings and the children the old one had,
+ * the new node has the place in the list the old one had, so it lies where the old one did,
  * and the old one is left empty. Constant time.
  */
 void cap_move(struct cap *from, struct cap *to);
@@ -715,21 +743,20 @@ void cap_move(struct cap *from, struct cap *to);
 
 /*
  * Clear a slot. KERR_INVALID_CAP if out of range.
- * What was derived from it is adopted by its parent; clearing an empty slot does nothing.
- * Preemptible as cap_delete is: KERR_PREEMPTED when it stopped.
+ * What was derived from it stays where it was, below its parent; clearing an empty slot does nothing.
  */
 int cap_clear(struct captable *table, uint32_t slot);
 
 /*
- * Clear a node; what was derived from it is adopted by its parent,
- * or, when the node is a root, each child becomes a root, a step per child.
- * With preempt it may stop between two steps for a pending interrupt and return false,
- * the tree whole and the rest of the work still in it; see DESIGN.md, "Bounded work".
+ * Clear a node, in constant time, root or not:
+ * what lay below it stays in its place in the list, and so lies below its parent, or is a root where it had none.
  */
-bool cap_delete(struct cap *node, bool preempt);
+void cap_delete(struct cap *node);
 
 /*
- * Clear every node below one, leaving the node itself; preemptible as cap_delete is.
+ * Clear every node below one, leaving the node itself, a step a node;
+ * with preempt it may stop between two steps for a pending interrupt and return false,
+ * the tree whole and the rest of the work still in it; see DESIGN.md, "Bounded work".
  * A pool's own node below it is a pool to destroy, which pool_destroy does.
  * It ends early, and true, once through, the running thread's slot number the call was made through,
  * no longer names a filled slot: the revoke took the thread's process, the table the number points into,
@@ -740,7 +767,7 @@ bool cap_revoke_below(struct cap *node, uint32_t through, bool preempt);
 
 /*
  * One step of a revoke below a pool's own node, where no other pool's node lies:
- * clear the first node below root, whose children take its place.
+ * clear the node right after root while it lies below root, what lay below it staying there.
  * False when nothing is left.
  */
 bool cap_revoke_step(struct cap *root);

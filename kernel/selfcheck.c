@@ -270,8 +270,8 @@ static void check_process(const struct process *proc)
         if (s->type == CAP_NONE) {
             continue;
         }
-        /* A region slot holds an installed region and nothing else; the tree check reads its links. */
-        if (s->type != CAP_INSTALLED || s->rights == 0 || (s->rights & ~RIGHT_ALL)) {
+        /* A region slot holds an installed region and nothing else, no original; the tree check reads its links. */
+        if (s->type != CAP_INSTALLED || s->rights == 0 || (s->rights & ~RIGHT_ALL) || s->orig) {
             fail("region slot holds something other than an installed region", v2p(proc), i, s->type);
         }
         if (s->index != i) {
@@ -323,6 +323,9 @@ static void check_process(const struct process *proc)
             struct obj_header *t = object_find(tc->a);
             if (tc->type != CAP_CAPTABLE || t == NULL || t->type != CAP_CAPTABLE) {
                 fail("process's table slot names no live table", v2p(proc), i, tc->a);
+            }
+            if (tc->orig) {
+                fail("process's table slot is an original", v2p(proc), i, tc->a);
             }
             if (!(tc->rights & RIGHT_W)) {
                 fail("process's table slot without the right to write the table", v2p(proc), i, tc->rights);
@@ -475,8 +478,9 @@ static void check_place(const struct thread *t, uint32_t i, uint32_t *held)
         }
         *held |= core;
     }
-    if (b->type != CAP_NONE && b->child != 0) {
-        fail("something is derived from a place's units", v2p(t), b->child, 0);
+    /* Only an original has anything below it. */
+    if (b->type != CAP_NONE && b->orig) {
+        fail("a place's units are an original", v2p(t), i, b->a);
     }
     for (uint32_t u = 0; b->type != CAP_NONE && u < b->b; u++) {
         if (unit_place[b->a + u] != v2p(p)) {
@@ -531,8 +535,8 @@ static void check_thread(const struct thread *t)
         if (h->type != CAP_HOSTED || p == NULL || p->type != CAP_PROCESS || h->b != 0 || h->index != 0) {
             fail("thread's process slot names no live process", v2p(t), h->type, h->a);
         }
-        if (h->child != 0) {
-            fail("something is derived from a thread's process", v2p(t), h->child, 0);
+        if (h->orig) {
+            fail("a thread's process is an original", v2p(t), h->a, 0);
         }
     } else if (t->state != THREAD_STOPPED) {
         fail("thread without a process is not stopped", v2p(t), t->state, 0);
@@ -566,8 +570,8 @@ static void check_thread(const struct thread *t)
             w->b == 0 || w->index != 0) {
             fail("thread's watch names no live notification", v2p(t), w->type, w->a);
         }
-        if (w->child != 0) {
-            fail("something is derived from a thread's watch", v2p(t), w->child, 0);
+        if (w->orig) {
+            fail("a thread's watch is an original", v2p(t), w->a, 0);
         }
     }
     check_lenders(t);
@@ -945,8 +949,8 @@ static void check_irq(const struct irq *i)
             s->b == 0 || s->index != 0) {
             fail("irq's notification slot names no live notification", v2p(i), s->type, s->a);
         }
-        if (s->child != 0) {
-            fail("something is derived from an irq's notification", v2p(i), s->child, 0);
+        if (s->orig) {
+            fail("an irq's notification is an original", v2p(i), s->a, 0);
         }
         if (i->bits & ~s->b) {
             fail("irq is armed with bits its notification capability may not signal", v2p(i), i->bits, s->b);
@@ -1079,9 +1083,9 @@ static void check_captable(const struct captable *table)
             if (c->rights & ~granted) {
                 fail("untyped with rights beyond the grant", v2p(table), i, c->rights);
             }
-            /* Only a delete of a root marks one going, and nothing gives a root a parent. */
-            if (c->b != 0 && (c->b != UNTYPED_GOING || c->next != LINK_UP)) {
-                fail("untyped going though not a root, or b neither zero nor going", v2p(table), i, c->b);
+            /* Every Untyped is an original, what it makes lying right after it, and carries nothing in b. */
+            if (c->b != 0 || !c->orig) {
+                fail("untyped with a second word, or no original", v2p(table), i, c->b);
             }
             break;
         }
@@ -1131,15 +1135,16 @@ static void check_captable(const struct captable *table)
  *
  * Its nodes are the slots of every live table,
  * the table slots and region slots of every live process,
- * the process, units and watch of every live thread
- * and the notification of every live Irq,
- * linked by physical address and never checked on use,
- * so every link must land on a live node and the shape must be exactly a forest:
- * the children of a node form one ring that closes through the node,
- * each predecessor link is a next link turned round,
- * and from every node the links up reach a root.
- * A destroy that left a link into freed memory, a delete that broke a ring,
- * or a revoke that stopped short all show up here.
+ * the process, units and watch of every live thread,
+ * the notification of every live Irq and every pool's own node,
+ * linked by their offsets from RAM_BASE and never checked on use,
+ * so every link must land on a live node and the lists must be exactly lists:
+ * each previous link a next link turned round, and every list ending.
+ * The tree over a list is read off it as the kernel reads it, see node_below:
+ * the nodes below an original are those right after it that it covers, and it covers none further on,
+ * so a node's parent is the nearest original before it that covers it.
+ * A destroy that left a link into freed memory, a delete that broke a list,
+ * a revoke that stopped short, or a node put where it does not belong all show up here.
  * A node is derived from its parent: the same object with no more rights,
  * and for a notification no more bits to signal,
  * a range within the parent's with no more rights,
@@ -1152,7 +1157,7 @@ static void check_captable(const struct captable *table)
 /* The node a link names, if one of a live object; only the pool the address lies in is looked at. */
 static const struct cap *live_node(uint32_t link)
 {
-    paddr_t at = link & ~LINK_UP;
+    paddr_t at = RAM_BASE + link * 4;
     for (struct pool *p = pool_list; p != NULL; p = pool_next_pool(p)) {
         if (!range_contains(pool_base(p), p->used, at)) {
             continue;
@@ -1274,76 +1279,26 @@ static bool derived_from(const struct cap *c, const struct cap *p)
     return false;
 }
 
-/* One node's links; bound is more than the nodes there are, so a walk that long is a cycle. */
-static void check_node(const struct cap *n, uint32_t bound)
+/* One node's links: each lands on a live, filled node that links back. */
+static void check_links(const struct cap *n)
 {
     if (n->type == CAP_NONE) {
-        if (n->child != 0 || n->next != 0 || n->prev != 0) {
-            fail("empty slot keeps links", v2p(n), n->child, n->next);
+        if (n->next != 0 || n->prev != 0 || n->orig) {
+            fail("empty slot keeps links", v2p(n), n->next, n->prev);
         }
         return;
     }
-    if (n->next == 0 || (n->child & LINK_UP)) {
-        fail("filled slot has malformed links", v2p(n), n->child, n->next);
-    }
-    if (n->child != 0) {
-        const struct cap *c = live_node(n->child);
-        if (c == NULL || c->type == CAP_NONE) {
-            fail("child link to a slot that is not a live, filled one", v2p(n), n->child, 0);
+    if (n->next != 0) {
+        const struct cap *s = live_node(n->next);
+        if (s == NULL || s->type == CAP_NONE || s->prev != node_link(n)) {
+            fail("next link to a slot that is not a live, filled one linking back", v2p(n), n->next, 0);
         }
     }
-
-    /* Along the ring to the parent, every sibling live and filled. */
-    uint32_t link = n->next;
-    uint32_t steps = 0;
-    while (!(link & LINK_UP)) {
-        const struct cap *s = live_node(link);
-        if (s == NULL || s->type == CAP_NONE) {
-            fail("link to a slot that is not a live, filled one", v2p(n), link, 0);
+    if (n->prev != 0) {
+        const struct cap *s = live_node(n->prev);
+        if (s == NULL || s->type == CAP_NONE || s->next != node_link(n)) {
+            fail("previous link to a slot that is not a live, filled one linking back", v2p(n), n->prev, 0);
         }
-        if (++steps > bound) {
-            fail("sibling ring does not close", v2p(n), link, 0);
-        }
-        link = s->next;
-    }
-    if (link == LINK_UP) {
-        /* A root: roots have no ring, so nothing may lead here through siblings. */
-        if (steps != 0) {
-            fail("sibling ring closes on no parent", v2p(n), 0, 0);
-        }
-        if (n->prev != 0) {
-            fail("root has a predecessor", v2p(n), n->prev, 0);
-        }
-        /* Every capability to a pool or its objects lies below the pool's own node. */
-        if (n->type == CAP_POOL || is_object_type(n->type)) {
-            fail("capability to an object is a root", v2p(n), n->type, n->a);
-        }
-        return;
-    }
-    const struct cap *parent = live_node(link);
-    if (parent == NULL || parent->type == CAP_NONE) {
-        fail("link up to a slot that is not a live, filled one", v2p(n), link, 0);
-    }
-    if (!derived_from(n, parent)) {
-        fail("slot is not derived from its parent", v2p(n), v2p(parent), 0);
-    }
-    /* The parent's ring is this one: it comes round to the node. */
-    steps = 0;
-    link = parent->child;
-    for (const struct cap *s = live_node(link); s != n; s = live_node(link)) {
-        if ((link & LINK_UP) || s == NULL || ++steps > bound) {
-            fail("parent's ring does not reach the slot", v2p(n), v2p(parent), link);
-        }
-        link = s->next;
-    }
-    /* The predecessor is the sibling whose next is this node; the first child's is the last. */
-    const struct cap *pred = live_node(n->prev);
-    if (pred == NULL || pred->type == CAP_NONE || (n->prev & LINK_UP)) {
-        fail("predecessor link to a slot that is not a live, filled one", v2p(n), n->prev, 0);
-    }
-    bool first = parent->child == v2p(n);
-    if (first ? pred->next != (v2p(parent) | LINK_UP) : pred->next != v2p(n)) {
-        fail("predecessor's next is not the slot", v2p(n), n->prev, pred->next);
     }
 }
 
@@ -1377,25 +1332,45 @@ static const struct cap *node_next(struct node_iter *it)
     return NULL;
 }
 
-/* The nodes there are, and one more; a walk up that long has gone round a cycle. */
+/* The nodes there are, and one more; a walk along a list that long has gone round a cycle. */
 static uint32_t tree_bound;
 
-/* The node a node was derived from, or NULL at a root; check_node has vetted the rings. */
-static const struct cap *node_parent(const struct cap *n)
+/* The node after n in its list, or NULL at its end; check_links has vetted the links. */
+static const struct cap *list_next(const struct cap *n)
 {
-    uint32_t link = n->next;
-    while (!(link & LINK_UP)) {
-        link = live_node(link)->next;
-    }
-    return link == LINK_UP ? NULL : live_node(link);
+    return n->next != 0 ? live_node(n->next) : NULL;
 }
 
-static bool lies_below(const struct cap *n, const struct cap *ancestor)
+static const struct cap *list_prev(const struct cap *n)
+{
+    return n->prev != 0 ? live_node(n->prev) : NULL;
+}
+
+/* The node n lies right below: the nearest original before it that covers it, or NULL for a root. */
+static const struct cap *node_parent(const struct cap *n)
 {
     uint32_t steps = 0;
-    for (const struct cap *p = node_parent(n); p != NULL; p = node_parent(p)) {
+    for (const struct cap *p = list_prev(n); p != NULL; p = list_prev(p)) {
         if (++steps > tree_bound) {
-            fail("the links up do not reach a root", v2p(n), 0, 0);
+            fail("a list does not begin", v2p(n), 0, 0);
+        }
+        if (node_below(p, n)) {
+            return p;
+        }
+    }
+    return NULL;
+}
+
+/* True if n lies below ancestor: after it in its list and covered by it, so within what lies right after it. */
+static bool lies_below(const struct cap *n, const struct cap *ancestor)
+{
+    if (!node_below(ancestor, n)) {
+        return false;
+    }
+    uint32_t steps = 0;
+    for (const struct cap *p = list_prev(n); p != NULL; p = list_prev(p)) {
+        if (++steps > tree_bound) {
+            fail("a list does not begin", v2p(n), 0, 0);
         }
         if (p == ancestor) {
             return true;
@@ -1407,39 +1382,76 @@ static bool lies_below(const struct cap *n, const struct cap *ancestor)
 static void check_tree(void)
 {
     tree_bound = 1;
+    uint32_t filled = 0;
     struct node_iter it;
     node_enter(&it, object_first());
-    while (node_next(&it) != NULL) {
+    for (const struct cap *n = node_next(&it); n != NULL; n = node_next(&it)) {
         tree_bound++;
+        filled += n->type != CAP_NONE;
     }
     node_enter(&it, object_first());
     for (const struct cap *n = node_next(&it); n != NULL; n = node_next(&it)) {
-        check_node(n, tree_bound);
+        check_links(n);
     }
-    /* A forest: from every node the links up reach a root. */
+    /* Lists: from each first node the links lead to an end, and every filled node lies on one. */
+    uint32_t listed = 0;
     node_enter(&it, object_first());
     for (const struct cap *n = node_next(&it); n != NULL; n = node_next(&it)) {
-        if (n->type != CAP_NONE) {
-            lies_below(n, NULL);
+        if (n->type == CAP_NONE || n->prev != 0) {
+            continue;
+        }
+        for (const struct cap *x = n; x != NULL; x = list_next(x)) {
+            if (++listed > filled) {
+                fail("a list does not end", v2p(n), 0, 0);
+            }
+        }
+    }
+    if (listed != filled) {
+        fail("a filled node lies on no list", listed, filled, 0);
+    }
+    /*
+     * Below an original lies what comes right after it and it covers, and it covers nothing further on:
+     * a node it covers past the first it does not would stay when a revoke below it takes the rest,
+     * and would come to lie below it when a delete takes what lies between.
+     * So a delete hands what lay below the node it takes to the node's parent and to nothing else,
+     * the nearest original before it that covers it.
+     */
+    node_enter(&it, object_first());
+    for (const struct cap *p = node_next(&it); p != NULL; p = node_next(&it)) {
+        if (p->type == CAP_NONE || !p->orig) {
+            continue;
+        }
+        bool within = true;
+        for (const struct cap *x = list_next(p); x != NULL; x = list_next(x)) {
+            if (node_below(p, x)) {
+                if (!within) {
+                    fail("a node an original covers lies past what lies below it", v2p(p), v2p(x), 0);
+                }
+            } else {
+                within = false;
+            }
+        }
+    }
+    /* Every node is derived from its parent, and a capability to a pool or an object is never a root. */
+    node_enter(&it, object_first());
+    for (const struct cap *n = node_next(&it); n != NULL; n = node_next(&it)) {
+        if (n->type == CAP_NONE) {
+            continue;
+        }
+        const struct cap *parent = node_parent(n);
+        if (parent == NULL) {
+            if (n->type == CAP_POOL || is_object_type(n->type)) {
+                fail("capability to an object is a root", v2p(n), n->type, n->a);
+            }
+        } else if (!derived_from(n, parent)) {
+            fail("slot is not derived from its parent", v2p(n), v2p(parent), 0);
         }
     }
 }
 
 /*
- * True if an Untyped's delete as a root has begun.
- * It makes roots of its children one by one, which lie in its memory until it goes;
- * it makes nothing meanwhile, so nothing it could make meets them.
- */
-static bool going(const struct cap *u)
-{
-    return u->type == CAP_UNTYPED && u->b == UNTYPED_GOING;
-}
-
-/*
  * Memory that may become kernel memory, an Untyped or a pool,
- * overlaps another node standing for memory only where one lies below the other,
- * or where one of them is an Untyped whose delete as a root has begun,
- * which makes roots of its children one by one.
+ * overlaps another node standing for memory only where one lies below the other.
  * So a frame, which never lies above or below a pool, overlaps none,
  * and neither does anything two siblings below one Untyped stand for:
  * an Untyped makes one thing of the whole of its memory, or two halves, and nothing while they are there.
@@ -1459,7 +1471,7 @@ static void check_nesting(void)
             if (y == x || !node_range(y, &ybase, &ysize) || !ranges_overlap(xbase, xsize, ybase, ysize)) {
                 continue;
             }
-            if (!lies_below(x, y) && !lies_below(y, x) && !going(x) && !going(y)) {
+            if (!lies_below(x, y) && !lies_below(y, x)) {
                 fail("memory that may hold kernel objects overlaps a node not above or below it",
                      v2p(x), v2p(y), ybase);
             }

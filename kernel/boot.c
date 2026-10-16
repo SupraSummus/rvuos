@@ -71,6 +71,8 @@ struct thread *boot_create_root(void)
     }
     struct cap ram = cap_to_untyped(ROOT_RAM_BASE, ROOT_RAM_SIZE, RIGHT_ALL);
     struct cap pool_ram = cap_to_untyped(BOOT_POOL_BASE, BOOT_POOL_SIZE, RIGHT_ALL);
+    ram.orig = 1;
+    pool_ram.orig = 1;
     struct cap *root_ram = &table->slots[BOOT_CAP_ROOT_RAM];
     if (cap_store(table, BOOT_CAP_ROOT_RAM, &ram, NULL) != KERR_OK ||
         cap_store(table, BOOT_CAP_POOL_RAM, &pool_ram, root_ram) != KERR_OK) {
@@ -79,19 +81,12 @@ struct thread *boot_create_root(void)
     cap_attach(&table->slots[BOOT_CAP_POOL_RAM], &pool->node);
 
     /*
-     * Below the pool's node, as every capability to an object of the pool is,
-     * so that only a destroy of the boot pool takes the root task's table or process.
-     */
-    proc->tables[0] = cap_to_object(&table->hdr, RIGHT_ALL);
-    cap_attach(&pool->node, &proc->tables[0]);
-    thread->proc = (struct cap){ .type = CAP_HOSTED, .rights = RIGHT_ALL, .a = v2p(proc) };
-    cap_attach(&pool->node, &thread->proc);
-
-    /*
-     * The boot capabilities are the roots of the derivation tree,
+     * The boot capabilities are the roots of the derivation tree, and originals,
      * but for the frames and the block made of the root task's memory, which hang below it,
-     * and those to the boot pool and its objects, which hang below the pool's node;
-     * revoking below BOOT_CAP_POOL takes what was allocated through it and not these.
+     * and those to the boot pool and its objects, which hang below the pool's node.
+     * BOOT_CAP_POOL covers every object of the pool, so it goes first, to lie last below the pool's node:
+     * revoking below it takes what was allocated through it, which lies right after it, and not these,
+     * which lie before it.
      */
     struct cap boot[BOOT_CAP_DEVICES] = {
         [BOOT_CAP_CAPTABLE] = cap_to_object(&table->hdr, RIGHT_ALL),
@@ -114,17 +109,33 @@ struct thread *boot_create_root(void)
         [BOOT_CAP_HALT] = { .type = CAP_HALT, .rights = RIGHT_ALL },
         [BOOT_CAP_TEST] = { .type = CAP_TEST, .rights = RIGHT_ALL },
     };
+    static const uint8_t pooled[] = { BOOT_CAP_POOL, BOOT_CAP_CAPTABLE, BOOT_CAP_PROCESS, BOOT_CAP_THREAD };
+    for (unsigned k = 0; k < sizeof(pooled); k++) {
+        boot[pooled[k]].orig = 1;
+        if (cap_store(table, pooled[k], &boot[pooled[k]], &pool->node) != KERR_OK) {
+            kpanic("cannot fill the root task's table");
+        }
+    }
+    /*
+     * Below the pool's node, as every capability to an object of the pool is, and right after it,
+     * before the capabilities to the table and the process, which cover them:
+     * only a destroy of the boot pool takes the root task's table or process.
+     */
+    thread->proc = (struct cap){ .type = CAP_HOSTED, .rights = RIGHT_ALL, .a = v2p(proc) };
+    cap_attach(&pool->node, &thread->proc);
+    proc->tables[0] = cap_to_object(&table->hdr, RIGHT_ALL);
+    cap_attach(&pool->node, &proc->tables[0]);
     for (unsigned i = BOOT_CAP_NULL + 1; i < BOOT_CAP_DEVICES; i++) {
-        if (i == BOOT_CAP_ROOT_RAM || i == BOOT_CAP_POOL_RAM) {
+        if (i == BOOT_CAP_ROOT_RAM || i == BOOT_CAP_POOL_RAM || i == BOOT_CAP_POOL || i == BOOT_CAP_CAPTABLE ||
+            i == BOOT_CAP_PROCESS || i == BOOT_CAP_THREAD) {
             continue;
         }
-        bool pooled = i == BOOT_CAP_CAPTABLE || i == BOOT_CAP_PROCESS || i == BOOT_CAP_THREAD ||
-                      i == BOOT_CAP_POOL;
         bool own = i == BOOT_CAP_CODE || i == BOOT_CAP_DATA || i == BOOT_CAP_INPUT;
         if (own && !napot_block(boot[i].a, boot[i].b)) {
             kpanic("boot layout is not made of NAPOT blocks");
         }
-        if (cap_store(table, i, &boot[i], pooled ? &pool->node : own ? root_ram : NULL) != KERR_OK) {
+        boot[i].orig = 1;
+        if (cap_store(table, i, &boot[i], own ? root_ram : NULL) != KERR_OK) {
             kpanic("cannot fill the root task's table");
         }
     }
@@ -132,6 +143,7 @@ struct thread *boot_create_root(void)
     for (unsigned i = BOOT_CAP_DEVICES; i < BOOT_CAP_COUNT; i++) {
         const struct granted_range *g = &boot_granted[GRANT_DEVICES + i - BOOT_CAP_DEVICES];
         struct cap frame = cap_to_frame(g->base, g->size, g->rights);
+        frame.orig = 1;
         if (cap_store(table, i, &frame, NULL) != KERR_OK) {
             kpanic("cannot fill the root task's table");
         }

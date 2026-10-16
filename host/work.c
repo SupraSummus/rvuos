@@ -13,8 +13,7 @@
  * a bounded loop ran no more than its bound on any one entry,
  * the steps of the loops paid for in each unit are at most twice
  * what the call took away of it, plus what a call may make of it on the way,
- * twice, since a delete below a root makes a root of a node, a link each,
- * and a pool destroy may then clear that node as one its tables hold.
+ * twice, since a pool destroy may clear a node its revoke left as one its tables hold.
  * What there is of each unit is counted over every object by host_units.
  *
  * Two claims are checked as they are made.
@@ -42,7 +41,7 @@
  */
 #define WORK_SLACK 1
 
-static const char *const unit_names[UNITS] = { "node", "link", "object", "waiter" };
+static const char *const unit_names[UNITS] = { "node", "object", "waiter" };
 
 struct work_frame {
     const struct work_site *site[WORK_OPEN];

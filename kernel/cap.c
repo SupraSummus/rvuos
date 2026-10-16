@@ -56,105 +56,136 @@ int cap_slot_free(const struct captable *table, uint32_t slot)
     return KERR_OK;
 }
 
-/* The node a link names, the tag stripped. */
+/* The node a link names, which is not 0. */
 static inline struct cap *node(uint32_t link)
 {
-    return p2v(link & ~LINK_UP);
+    return link_node(link);
 }
 
-/* The sibling after a node that has a parent, the first one after the last. */
-static struct cap *ring_next(const struct cap *n)
+/* True if [base, base + size) lies within [in, in + insize). */
+static bool range_within(uint32_t base, uint32_t size, uint32_t in, uint32_t insize)
 {
-    return (n->next & LINK_UP) ? node(node(n->next)->child) : node(n->next);
+    return base >= in && base - in <= insize - size && size <= insize;
 }
 
-void cap_attach(struct cap *parent, struct cap *n)
+/* A node naming an object in a pool: a capability to one, or a thread's or an Irq's hold on one. */
+static bool names_object(uint8_t type)
 {
-    n->child = 0;
-    if (parent == NULL) {
-        n->next = LINK_UP;
-        n->prev = 0;
+    return type == CAP_POOL || type == CAP_CAPTABLE || type == CAP_PROCESS || type == CAP_THREAD ||
+           type == CAP_NOTIFICATION || type == CAP_IRQ || type == CAP_HOSTED || type == CAP_WATCHED ||
+           type == CAP_SIGNALLED;
+}
+
+/* The memory a node names, if it names memory: its block, its range or its pool's, or the first byte of its object. */
+static bool node_memory(const struct cap *n, uint32_t *base, uint32_t *size)
+{
+    switch (n->type) {
+    case CAP_UNTYPED:
+        *base = untyped_base(n);
+        *size = untyped_size(n);
+        return true;
+    case CAP_FRAME:
+    case CAP_INSTALLED:
+        *base = n->a;
+        *size = n->b;
+        return true;
+    case CAP_RETYPED:
+        *base = n->a;
+        *size = ((const struct pool *)p2v(n->a))->size;
+        return true;
+    default:
+        *base = n->a;
+        *size = 1;
+        return names_object(n->type);
+    }
+}
+
+bool node_below(const struct cap *above, const struct cap *n)
+{
+    if (!above->orig) {
+        return false;
+    }
+    uint32_t base, size, abase, asize;
+    switch (above->type) {
+    case CAP_UNTYPED:
+        /* What it made, a half, a frame or a pool, and what lies below those, all of it in its memory. */
+        node_memory(above, &abase, &asize);
+        return node_memory(n, &base, &size) && range_within(base, size, abase, asize);
+    case CAP_RETYPED:
+    case CAP_POOL:
+        /* The pool and its objects, and what names them. */
+        abase = above->a;
+        asize = ((const struct pool *)p2v(above->a))->size;
+        return names_object(n->type) && range_contains(abase, asize, n->a);
+    case CAP_FRAME:
+        return (n->type == CAP_FRAME || n->type == CAP_INSTALLED) && range_within(n->a, n->b, above->a, above->b);
+    case CAP_IRQ_LINE:
+        return n->type == CAP_IRQ_LINE && range_within(n->a, n->b, above->a, above->b);
+    case CAP_TIME:
+        /* A thread's units lie among those it was bound through, and the first of them does even for none. */
+        return (n->type == CAP_TIME || n->type == CAP_BOUND) && n->a - above->a < above->b &&
+               n->b <= above->b - (n->a - above->a);
+    case CAP_CLOCK: {
+        /* The counter's block, which a clock gives out, and what is carved or installed from it. */
+        const struct granted_range *g = &boot_granted[GRANT_COUNTER];
+        return n->type == CAP_CLOCK ||
+               ((n->type == CAP_FRAME || n->type == CAP_INSTALLED) && range_within(n->a, n->b, g->base, g->size));
+    }
+    case CAP_PRINT:
+    case CAP_HALT:
+    case CAP_TEST:
+        return n->type == above->type;
+    default:
+        /* A capability to an object: what names the same object. */
+        return names_object(n->type) && n->a == above->a;
+    }
+}
+
+void cap_attach(struct cap *after, struct cap *n)
+{
+    n->prev = 0;
+    n->next = 0;
+    if (after == NULL) {
         return;
     }
-    /* At the front of the ring; the last child keeps the link up to the parent. */
-    if (parent->child == 0) {
-        n->next = v2p(parent) | LINK_UP;
-        n->prev = v2p(n);
-    } else {
-        struct cap *first = node(parent->child);
-        n->next = parent->child;
-        n->prev = first->prev;
-        first->prev = v2p(n);
+    n->prev = node_link(after);
+    n->next = after->next;
+    if (after->next != 0) {
+        node(after->next)->prev = node_link(n);
     }
-    parent->child = v2p(n);
+    after->next = node_link(n);
 }
 
-/* Put the siblings first to last right after beside, which has a parent, in its ring. */
-static void splice_after(struct cap *beside, struct cap *first, struct cap *last)
+/* Take a node out of its list; what lay below it stays where it was, below what lay above it. */
+static void unlink_node(struct cap *n)
 {
-    ring_next(beside)->prev = v2p(last);
-    last->next = beside->next;
-    first->prev = v2p(beside);
-    beside->next = v2p(first);
-}
-
-/* Right after beside in its ring, so under the same parent. Roots have no ring: beside a root, a root. */
-static void attach_beside(struct cap *beside, struct cap *n)
-{
-    n->child = 0;
-    if (beside->next == LINK_UP) {
-        n->next = LINK_UP;
-        n->prev = 0;
-        return;
+    if (n->prev != 0) {
+        node(n->prev)->next = n->next;
     }
-    splice_after(beside, n, n);
+    if (n->next != 0) {
+        node(n->next)->prev = n->prev;
+    }
 }
 
 void cap_move(struct cap *from, struct cap *to)
 {
-    /*
-     * Three links at most name a node from outside it:
-     * its predecessor's next, or its parent's child when it is first,
-     * the previous link of the sibling after it, the first one when it is last,
-     * and the link up from its last child.
-     * An only child is its own predecessor and successor, and a root is in no ring.
-     */
+    /* Two links name a node from outside it: its predecessor's next and its successor's previous. */
     *to = *from;
-    if (from->next != LINK_UP) {
-        struct cap *pred = node(from->prev);
-        if (pred == from) {
-            to->prev = v2p(to);
-        } else {
-            ring_next(from)->prev = v2p(to);
-        }
-        if (pred->next & LINK_UP) {
-            node(pred->next)->child = v2p(to);
-        } else {
-            pred->next = v2p(to);
-        }
+    if (to->prev != 0) {
+        node(to->prev)->next = node_link(to);
     }
-    if (from->child != 0) {
-        node(node(from->child)->prev)->next = v2p(to) | LINK_UP;
+    if (to->next != 0) {
+        node(to->next)->prev = node_link(to);
     }
     *from = (struct cap){ 0 };
 }
 
-int cap_store(struct captable *table, uint32_t slot, const struct cap *cap, struct cap *parent)
+int cap_store(struct captable *table, uint32_t slot, const struct cap *cap, struct cap *after)
 {
     int err = cap_slot_free(table, slot);
     if (err == KERR_OK) {
         table->slots[slot] = *cap;
-        cap_attach(parent, &table->slots[slot]);
-    }
-    return err;
-}
-
-int cap_store_beside(struct captable *table, uint32_t slot, const struct cap *cap, struct cap *beside)
-{
-    int err = cap_slot_free(table, slot);
-    if (err == KERR_OK) {
-        table->slots[slot] = *cap;
-        attach_beside(beside, &table->slots[slot]);
+        cap_attach(after, &table->slots[slot]);
     }
     return err;
 }
@@ -179,28 +210,6 @@ static void clear_node(struct cap *n)
     }
 }
 
-/*
- * Take a node that has a parent out of its parent's ring.
- * With adopt, what was derived from it takes its place in the ring,
- * so its parent's ring keeps the whole of the derivation below;
- * without, the node's children stay below it.
- */
-static void detach(struct cap *n, bool adopt)
-{
-    /* The children go right after n, so n leaves the ring as a leaf would. */
-    if (adopt && n->child != 0) {
-        splice_after(n, node(n->child), node(node(n->child)->prev));
-    }
-    struct cap *pred = node(n->prev);
-    ring_next(n)->prev = n->prev;
-    /* n is first exactly when its predecessor links up: it is the last child then, or n itself. */
-    if (pred->next & LINK_UP) {
-        node(pred->next)->child = (n->next & LINK_UP) ? 0 : n->next;
-    } else {
-        pred->next = n->next;
-    }
-}
-
 uint32_t preempt_countdown;
 
 bool cap_stop_here(bool preempt)
@@ -219,11 +228,11 @@ bool cap_stop_here(bool preempt)
 
 bool cap_revoke_step(struct cap *root)
 {
-    if (root->child == 0) {
+    struct cap *n = node_first_below(root);
+    if (n == NULL) {
         return false;
     }
-    struct cap *n = node(root->child);
-    detach(n, true);
+    unlink_node(n);
     clear_node(n);
     return true;
 }
@@ -231,23 +240,23 @@ bool cap_revoke_step(struct cap *root)
 bool cap_revoke_below(struct cap *root, uint32_t through, bool preempt)
 {
     /*
-     * The first child goes and its children take its place at the front of the ring,
+     * The node right after the root goes while it lies below the root, and what lay below it stays there,
      * so every step clears one node in constant time,
      * the tree is whole between any two steps,
-     * and the next node to clear is always the root's first child:
+     * and the next node to clear is always the one right after the root:
      * a walk that stops keeps its progress in the tree and nowhere else.
      * A pool's own node is the one exception: the pool goes before its node does,
-     * and the node stays first until then, so the next step is at it again.
+     * and the node stays right after the root until then, so the next step is at it again.
      */
-    while (root->child != 0) {
+    struct cap *n;
+    while ((n = node_first_below(root)) != NULL) {
         LOOP_PAID(cap_revoke_below, node, "a node it clears");
-        struct cap *n = node(root->child);
         if (n->type == CAP_RETYPED) {
             if (!pool_destroy(node_pool(n), preempt)) {
                 return false;
             }
         } else {
-            detach(n, true);
+            unlink_node(n);
             clear_node(n);
         }
         /*
@@ -260,40 +269,18 @@ bool cap_revoke_below(struct cap *root, uint32_t through, bool preempt)
         if (at == NULL || at->type == CAP_NONE) {
             return true;
         }
-        if (root->child != 0 && cap_stop_here(preempt)) {
+        if (node_first_below(root) != NULL && cap_stop_here(preempt)) {
             return false;
         }
     }
     return true;
 }
 
-bool cap_delete(struct cap *n, bool preempt)
+void cap_delete(struct cap *n)
 {
-    if (n->next != LINK_UP) {
-        detach(n, true);
-        clear_node(n);
-        return true;
-    }
-    /*
-     * Below a root there is no ring to hand the children to: each becomes a root, one step at a time.
-     * An Untyped makes nothing more, as those already roots lie in its memory
-     * while another thread may take away those still below it.
-     */
-    if (n->type == CAP_UNTYPED) {
-        n->b = UNTYPED_GOING;
-    }
-    while (n->child != 0) {
-        LOOP_PAID(cap_delete, link, "a child below a root, which becomes a root itself");
-        struct cap *c = node(n->child);
-        detach(c, false);
-        c->next = LINK_UP;
-        c->prev = 0;
-        if (n->child != 0 && cap_stop_here(preempt)) {
-            return false;
-        }
-    }
+    /* What lay below it lies below what lay above it, or is a root where nothing did: no walk, roots or not. */
+    unlink_node(n);
     clear_node(n);
-    return true;
 }
 
 int cap_clear(struct captable *table, uint32_t slot)
@@ -301,8 +288,8 @@ int cap_clear(struct captable *table, uint32_t slot)
     if (slot >= table->nslots) {
         return KERR_INVALID_CAP;
     }
-    if (table->slots[slot].type != CAP_NONE && !cap_delete(&table->slots[slot], true)) {
-        return KERR_PREEMPTED;
+    if (table->slots[slot].type != CAP_NONE) {
+        cap_delete(&table->slots[slot]);
     }
     return KERR_OK;
 }

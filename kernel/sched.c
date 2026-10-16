@@ -504,7 +504,7 @@ void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights,
     account_refill(p);
     uint32_t kept = p->balance;
     if (b->type != CAP_NONE) {
-        cap_delete(b, false);
+        cap_delete(b);
     }
     *b = (struct cap){ .type = CAP_BOUND, .rights = rights, .index = p->index, .a = first, .b = count };
     cap_attach(parent, b);

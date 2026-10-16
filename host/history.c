@@ -276,23 +276,37 @@ static void record_node(const struct cap *c)
     }
 }
 
-/* The node a filled node hangs below, 0 for a root; the last sibling links up to it. */
+/* The node a filled node lies right below, the nearest original before it that covers it, 0 for a root. */
 static uint32_t parent_of(const struct cap *c)
 {
-    while (!(c->next & LINK_UP)) {
-        c = p2v(c->next);
+    for (uint32_t at = c->prev; at != 0;) {
+        const struct cap *p = link_node(at);
+        if (node_below(p, c)) {
+            return v2p(p);
+        }
+        at = p->prev;
     }
-    return c->next & ~LINK_UP;
+    return 0;
 }
 
-/* The nodes below a node, first to last. */
+/* The node after n in its list, or NULL at its end. */
+static const struct cap *after_node(const struct cap *n)
+{
+    return n->next != 0 ? link_node(n->next) : NULL;
+}
+
+/* The nodes right below a node, first to last: those after it that it covers, but what lies below each. */
 static void children_of(const struct cap *c, addr_array *out)
 {
     out->n = 0;
-    for (uint32_t at = c->child; at != 0;) {
-        const struct cap *n = p2v(at);
-        PUSH(*out, at);
-        at = (n->next & LINK_UP) ? 0 : n->next;
+    const struct cap *n = after_node(c);
+    while (n != NULL && node_below(c, n)) {
+        PUSH(*out, v2p(n));
+        const struct cap *m = after_node(n);
+        while (m != NULL && node_below(n, m)) {
+            m = after_node(m);
+        }
+        n = m;
     }
 }
 
@@ -467,7 +481,8 @@ static void describe_expect(void)
     case CAP_UNTYPED: {
         w[1] = untyped_base(c);
         w[2] = untyped_size(c);
-        uint8_t below = c->child != 0 ? ((const struct cap *)p2v(c->child))->type : CAP_NONE;
+        const struct cap *first = node_first_below(c);
+        uint8_t below = first != NULL ? first->type : CAP_NONE;
         w[3] = below == CAP_RETYPED ? CAP_POOL : below == CAP_INSTALLED ? CAP_FRAME : below;
         break;
     }

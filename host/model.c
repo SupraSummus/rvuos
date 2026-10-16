@@ -67,10 +67,10 @@ static void put(const char *fmt, ...)
     text_len += (size_t)n;
 }
 
-/* The node a link names, the tag stripped. */
-static const struct cap *node_at(uint32_t link)
+/* The node after n in its list, or NULL at its end. */
+static const struct cap *after_node(const struct cap *n)
 {
-    return p2v(link & ~LINK_UP);
+    return n->next != 0 ? link_node(n->next) : NULL;
 }
 
 static void put_state(void)
@@ -93,19 +93,18 @@ static void put_state(void)
             }
             put("node %u %u %u %u %u %u\n", (unsigned)v2p(c), (unsigned)c->type, (unsigned)c->rights,
                 (unsigned)c->index, (unsigned)c->a, (unsigned)c->b);
-            if (c->child == 0) {
+            if (node_first_below(c) == NULL) {
                 continue;
             }
-            /* The ring from the first child, until the last links up. */
+            /* The nodes right below it, first to last: those after it it covers, but what lies below each. */
             put("kids %u", (unsigned)v2p(c));
-            /* A ring a bug left open ends where there are no more nodes to visit, for the model to refuse. */
-            const struct cap *k = node_at(c->child);
-            for (uint32_t n = 0; n < HOST_RAM_SIZE / sizeof(struct cap); n++) {
+            for (const struct cap *k = after_node(c); k != NULL && node_below(c, k);) {
                 put(" %u", (unsigned)v2p(k));
-                if (k->next & LINK_UP) {
-                    break;
+                const struct cap *m = after_node(k);
+                while (m != NULL && node_below(k, m)) {
+                    m = after_node(m);
                 }
-                k = node_at(k->next);
+                k = m;
             }
             put("\n");
         }
