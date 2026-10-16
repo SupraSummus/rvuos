@@ -18,9 +18,9 @@ Capabilities can be copied, derived or moved into another process's table
 by a process that holds both the source capability
 and a capability to the destination table,
 the first two optionally with reduced rights.
-Copy and derive do the same but for an Untyped, which is derived and never copied:
+Copy and derive do the same but for an Untyped, which is derived, only while free, and never copied:
 the new capability lies below the source when the source is an original, and beside it when not,
-and it is no original itself;
+and it is no original itself but for a derived Untyped, which is one;
 see "The derivation tree".
 A move leaves no source behind:
 the capability goes to the destination with its place in the tree,
@@ -341,7 +341,7 @@ a split's halves, a derived Untyped and a retype's frame or pool below the Untyp
 the pool's capability below the pool's own node,
 an object's capability below the Pool capability it was allocated through,
 and the boot capabilities.
-A copy, a derivation, a carve, an installed region,
+A copy, a derivation of anything but an Untyped, a carve, an installed region,
 a process's table slot, a thread's process, watch and units and an `Irq`'s notification are none.
 
 **What hangs below what.**

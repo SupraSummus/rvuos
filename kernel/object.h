@@ -51,7 +51,7 @@ struct obj_header {
  * orig set, whose words cover its own, and the nodes below one are those right after it that do; see node_below.
  * Only an allocation makes an original, of something nothing else names yet:
  * a pool's node and capability, an object's capability, a frame or an Untyped an Untyped made, and the boot's.
- * A copy, a derivation and a carve are not originals, and lie below the original nearest above their source.
+ * A copy, a carve and a derivation not of an Untyped are no originals, and lie below the original nearest above their source.
  *
  * An object holds nodes outside a table too, each a capability of the type it names, and a leaf but for a pool's own:
  * a process its table slots, CAP_CAPTABLE, and its region slots, CAP_FRAME,

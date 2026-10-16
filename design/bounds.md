@@ -14,7 +14,7 @@ and every tick and every interrupt, other processes' included,
 gets that much slower.
 
 **The exception is destruction.**
-A revoke, a pool destroy, and a delete below a root
+A revoke and a pool destroy
 take as long as what they touch.
 That is kept to the subtree below the caller's own capability,
 never the whole machine.
@@ -24,7 +24,7 @@ so over a run its steps are bounded by the calls before it.
 What it costs is latency, and preemption is the answer to that.
 
 **Preemption.**
-A revoke, a delete below a root, a pool destroy, and the revoke that begins a bind
+A revoke, a pool destroy, and the revoke that begins a bind
 take one step per capability, object or waiter in constant time
 and ask `intr_pending` between two steps.
 If the tick or a device interrupt is pending, or another core waits for the kernel's lock, the walk stops,

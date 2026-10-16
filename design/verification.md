@@ -78,7 +78,7 @@ a thread's process or watch or an `Irq`'s notification on a capability to that o
 the watch and the `Irq` with no more bits to signal, or on that object's pool or its pool's own node,
 the counter's block, or a region installed from it, below a clock with the right to read,
 or a capability to a pool or an object below a capability to that pool or its own node.
-A revoke, a delete or a destroy stopped for an interrupt leaves such a forest too,
+A revoke or a destroy stopped for an interrupt leaves such a forest too,
 since every step of theirs does; see "Bounded work".
 
 **Structural soundness.**
