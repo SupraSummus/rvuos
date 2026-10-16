@@ -223,7 +223,10 @@ def fixed(insns, i, reg, image, sections):
 def formed(insns, image, sections):
     """Every address the function forms from constants, for the call graph's taken addresses:
     a movw, alone and with each movt of its register after it, an adr and a literal load,
-    as RISC-V forms one with lui or auipc, conditional ones as well, each with bit 0 taken off.
+    as RISC-V forms one with lui or auipc, conditional ones as well,
+    each that has bit 0 set, with bit 0 taken off: a call through a register to an address without it
+    leaves the Thumb state, which an M-profile core does not have, and faults,
+    so an even number such as a size, 0x600c of OBJ_MAX_SIZE once, is no function's address however it reads.
     A movt completes the movw that is the nearest write of its register above it alone,
     where neither is conditional, nothing branches to the movt or to what lies between,
     and the function jumps through no register,
@@ -270,7 +273,7 @@ def formed(insns, image, sections):
             else:
                 out.add(v)
     out.update(v for i, v in alone.items() if i not in completed)
-    return out | {v & ~1 for v in out}
+    return {v & ~1 for v in out if v & 1}
 
 
 def may_read(insn, reg):

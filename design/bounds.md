@@ -130,7 +130,9 @@ A walk that would recurse walks with no stack, as `cap_revoke_below` does.
 A call through a pointer counts as a call to every function whose address is taken.
 An address is taken where the code forms it from constants or the kernel's data holds it;
 on ARM the literals among the code count too, the words the assembler marks as data with `$d`,
-but not the instructions, two halfwords of which once read as `core_idle`'s address.
+but not the instructions, two halfwords of which once read as `core_idle`'s address,
+and only a value with bit 0 set, the Thumb state, since a call through a register to an even address faults:
+a size of 0x600c, `OBJ_MAX_SIZE`, once read as `trap_start`'s address on mps2-an385, whose kernel lies low.
 
 **The check.**
 The kernel's link runs `tools/stack-depth.py`,

@@ -130,8 +130,8 @@ def in_ranges(ranges, start, end) -> bool:
 def data_words(image: bytes, sections):
     """Every aligned word of the kernel's own data.
     On ARM the code holds data too, the literals a function loads, and a code address carries bit 0,
-    so there every word of the code's literals counts as well, and each word with bit 0 taken off beside it;
-    an instruction is not one, though two halfwords of Thumb may read as a function's address."""
+    so there every word of the code's literals counts as well, and only a word with bit 0 set, with bit 0 taken off,
+    since a call to an even address faults; an instruction is not one, though two halfwords of Thumb may read as a function's address."""
     thumb = arch(image) == "arm"
     literals = literal_ranges(image, sections) if thumb else []
     for name, kind, flags, addr, off, size, _, _ in sections:
@@ -142,8 +142,9 @@ def data_words(image: bytes, sections):
                 if flags & SHF_EXECINSTR and not in_ranges(literals, addr + i, addr + i + 4):
                     continue
                 word = struct.unpack_from("<I", image, off + i)[0]
-                yield word
-                if thumb and word & 1:
+                if not thumb:
+                    yield word
+                elif word & 1:
                     yield word & ~1
 
 

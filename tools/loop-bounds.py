@@ -639,7 +639,7 @@ def main() -> int:
         pointers = {}
         for w in data_words(image, sections):
             i = bisect.bisect_right(starts, w) - 1
-            if i >= 0 and w < ends[starts[i]] and not (thumb and w & 1):
+            if i >= 0 and w < ends[starts[i]]:
                 pointers.setdefault(starts[i], set()).add(w)
         returns = (kthumb.may_return if thumb else may_return)(functions, ends, pointers)
         insns_of = {a: insns for a, _, insns in functions}
