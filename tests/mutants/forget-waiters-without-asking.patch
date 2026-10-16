@@ -5,6 +5,7 @@ It wakes the same threads with the same status, so only the counting harness cat
 
 Caught-by: fuzz-work
 Report: the paid loop at kernel/sched.c took a second step without asking intr_pending
+Witness: fuzz-work destroy-wakes-waiters
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c

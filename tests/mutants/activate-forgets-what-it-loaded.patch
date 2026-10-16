@@ -4,6 +4,7 @@ keeps the other's regions past its own.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: PMP CSRs grant rights the slots do not
+Witness: fuzz cores-region-taken
 
 diff --git a/kernel/process.c b/kernel/process.c
 --- a/kernel/process.c

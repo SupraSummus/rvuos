@@ -3,6 +3,7 @@ a frame thirty-two times what it needs,
 and checking the PMP overflows the kernel's stack.
 
 Caught-by: stack-depth
+Witness: stack-depth
 
 diff --git a/kernel/selfcheck.c b/kernel/selfcheck.c
 --- a/kernel/selfcheck.c

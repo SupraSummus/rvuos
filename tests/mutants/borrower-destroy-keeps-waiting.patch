@@ -3,6 +3,7 @@ The walk takes no waiter away, so its steps are paid for by nothing, and the len
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a call was preempted before it took anything away
+Witness: fuzz lend-borrower-dies
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c

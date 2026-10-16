@@ -4,6 +4,7 @@ and a revoke or a destroy that comes to it clears the new table instead.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: slot is not derived from its parent
+Witness: fuzz mount-checks
 
 diff --git a/kernel/process.c b/kernel/process.c
 --- a/kernel/process.c

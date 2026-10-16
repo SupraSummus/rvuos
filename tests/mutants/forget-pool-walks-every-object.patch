@@ -5,6 +5,7 @@ It forgets and zeroes the same objects, so only the counting harness catches it.
 
 Caught-by: fuzz-work
 Report: the paid loop at kernel/pool.c took a second step without asking intr_pending
+Witness: fuzz-work cores-stopped-thread-destroyed
 
 diff --git a/kernel/pool.c b/kernel/pool.c
 --- a/kernel/pool.c

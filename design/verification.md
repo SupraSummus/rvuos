@@ -412,6 +412,11 @@ and the run fails where the checks disagree:
 a check that stops catching a mutant shows, and so does one that starts to,
 or a seed that catches it by another invariant than the one it plants.
 The list of checks is also what shows a minimisation that lost something.
+The header names a witness too, one seed on one harness that catches the mutant,
+or the tool that refuses its link where no seed does,
+and the run checks it as it checks the list.
+`tests/mutants.sh -q` runs the witnesses alone, in a tenth of the time:
+it says that every mutant is still caught, not that the list still holds.
 The QEMU checks are in the list too, so that their strength is known,
 but a mutant only they catch counts as missed:
 `make test` runs one scenario with the self-check off

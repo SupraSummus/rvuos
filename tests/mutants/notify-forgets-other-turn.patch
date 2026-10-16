@@ -3,6 +3,7 @@ whose timer stays deferred for a turn that should end at the next tick.
 
 Caught-by: fuzz-smp2
 Report: a turn on spare time runs while a thread with time waits
+Witness: fuzz-smp2 cores-spare-ends-at-rebind
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c

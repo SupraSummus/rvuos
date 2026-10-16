@@ -4,6 +4,7 @@ a core whose turn another core stopped drops the trap it takes next.
 
 Caught-by: fuzz-smp2
 Report: a core would take a trap as the thread another core stopped
+Witness: fuzz-smp2 cores-resume-before-trap
 
 diff --git a/kernel/core.c b/kernel/core.c
 --- a/kernel/core.c

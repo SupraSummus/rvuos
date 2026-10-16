@@ -3,6 +3,7 @@ A thread lends its time through a capability that does not allow it.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a thread came to lend its time but by its own wait, through a capability with the right to lend
+Witness: fuzz lend-refused
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

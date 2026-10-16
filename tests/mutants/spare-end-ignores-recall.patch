@@ -3,6 +3,7 @@ so another thread runs before the call is made again.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a call stopped where its caller cannot make it again
+Witness: fuzz spare-turn-waits-for-recall
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c

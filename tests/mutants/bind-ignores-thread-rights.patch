@@ -4,6 +4,7 @@ a call binds only a thread its caller could control.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a call bound a thread its caller could not control to units
+Witness: fuzz time-bind-checks
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

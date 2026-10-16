@@ -4,6 +4,7 @@ a thread stops by its holder.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: a thread stopped that no stop named, nor its own fault nor the loss of its process
+Witness: fuzz cores-resume-before-trap
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

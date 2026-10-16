@@ -3,6 +3,7 @@ so it is on no queue while another thread runs, and would run on at the instruct
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: thread runs with a fault to tell
+Witness: fuzz actor-handoff
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

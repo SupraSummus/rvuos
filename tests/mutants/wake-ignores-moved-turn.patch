@@ -4,6 +4,7 @@ for as long as the timer is deferred.
 
 Caught-by: fuzz-smp2
 Report: the timer lets the tick pass that drains the turn's account
+Witness: fuzz-smp2 cores-release-across
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c

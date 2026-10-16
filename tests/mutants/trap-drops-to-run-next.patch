@@ -4,6 +4,7 @@ a ready thread that may run waits on its queue.
 
 Caught-by: fuzz-smp2
 Report: a place of a ready thread that may run waits on no queue
+Witness: fuzz-smp2 cores-resume-before-trap
 
 diff --git a/kernel/core.c b/kernel/core.c
 --- a/kernel/core.c

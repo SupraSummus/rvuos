@@ -3,6 +3,7 @@ A thread that runs again still pays for its borrower's turns.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a thread that does not wait lends
+Witness: fuzz lend-hands-turn
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c

@@ -3,6 +3,7 @@ a refused call fails at the first check it fails, the unread arguments' among th
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a refused call did not fail at the first check it fails
+Witness: fuzz unread-arguments-zero
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

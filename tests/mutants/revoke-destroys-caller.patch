@@ -4,6 +4,7 @@ destroys the pool it runs from, itself with it, and the call returns into a fram
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a call began to destroy the pool its caller, its process or one of its tables lives in
+Witness: fuzz destroy-spares-caller
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

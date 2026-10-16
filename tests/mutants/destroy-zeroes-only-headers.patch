@@ -5,6 +5,7 @@ Memory crosses zeroed.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: memory left the kernel with an object not zeroed
+Witness: fuzz cores-stopped-thread-destroyed
 
 diff --git a/kernel/pool.c b/kernel/pool.c
 --- a/kernel/pool.c

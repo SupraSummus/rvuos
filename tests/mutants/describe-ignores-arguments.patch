@@ -3,6 +3,7 @@ so a later kernel could not give one a meaning without changing what a program t
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a describing call took an argument it does not take
+Witness: fuzz describe-every-type
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

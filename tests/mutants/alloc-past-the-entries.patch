@@ -3,6 +3,7 @@ so on RP2350's Hazard3, with seven, a process may have more regions installed th
 
 Caught-by: fuzz-rp2350
 Report: process has no region slot, or more than the hardware has entries
+Witness: fuzz-rp2350 process-region-slots
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

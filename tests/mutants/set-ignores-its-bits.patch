@@ -4,6 +4,7 @@ an Irq is armed with no bit its notification capability may not signal.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: irq is armed with bits its notification capability may not signal
+Witness: fuzz notify-carve-bits
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

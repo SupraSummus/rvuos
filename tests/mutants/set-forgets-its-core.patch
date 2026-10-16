@@ -4,6 +4,7 @@ a timer line wakes the core that armed it.
 
 Caught-by: fuzz-smp2
 Report: armed timer line comes due before the timer wakes for it
+Witness: fuzz-smp2 cores-timer-across
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c

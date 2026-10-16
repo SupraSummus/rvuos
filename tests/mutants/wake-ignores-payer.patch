@@ -3,6 +3,7 @@ It lets pass the ticks at which another thread may pay for the turn, or none.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: the timer lets a tick pass while the turn runs on lent time
+Witness: fuzz lend-hands-turn
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c

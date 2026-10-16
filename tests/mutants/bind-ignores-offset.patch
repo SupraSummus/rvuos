@@ -4,6 +4,7 @@ a thread's units lie within the capability it was bound through.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: slot is not derived from its parent
+Witness: fuzz time-bind-checks
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

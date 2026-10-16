@@ -7,6 +7,7 @@ Report: parent's ring does not reach the slot
 Report: predecessor's next is not the slot
 Report: sibling ring does not close
 Report: slot is not derived from its parent
+Witness: fuzz actor-handoff
 
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c

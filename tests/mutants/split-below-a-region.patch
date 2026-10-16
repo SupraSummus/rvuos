@@ -3,6 +3,7 @@ so an Untyped smaller than the smallest region makes a frame no PMP entry descri
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: untyped outside granted memory, or not a block
+Witness: fuzz split-stops-at-a-region
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

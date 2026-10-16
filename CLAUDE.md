@@ -165,7 +165,9 @@ When a change edits code a mutant touches or stands next to,
 run `make mutants-refresh`, then `make mutants` if it moved any,
 and fix by hand only the patches it calls stale.
 The full run takes minutes, so while working run only the mutants a change touches,
-`tests/mutants.sh -j 4 name...`;
+`tests/mutants.sh -j 4 name...`,
+or every mutant's witness alone, `tests/mutants.sh -q`,
+which says whether each is still caught but not by what;
 a change to the seeds, the corpus or the checks moves every mutant's reports,
 so it needs one full run before it is committed.
 A change to `host/mutator.c` or to the flags `make fuzz` runs with

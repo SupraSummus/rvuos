@@ -4,6 +4,7 @@ a waiter stands at the call it waited in.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: a stop left a waiting thread elsewhere than at the call it waited in
+Witness: fuzz cores-waiter-stopped
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c

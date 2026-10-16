@@ -3,6 +3,7 @@ A turn's payer is the turn's own thread.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a turn's payer is not another thread of its core
+Witness: fuzz lend-hands-turn
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c

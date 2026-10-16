@@ -3,6 +3,7 @@ so a borrower lent read and write gets execute as well.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: slot is not derived from its parent
+Witness: fuzz lent-untyped-stays-narrow
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

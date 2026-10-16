@@ -3,6 +3,7 @@ so one whose delete as a root stopped makes things again over what became roots,
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: untyped going though not a root, or b neither zero nor going
+Witness: fuzz delete-root-makes-nothing
 
 diff --git a/kernel/object.h b/kernel/object.h
 --- a/kernel/object.h
