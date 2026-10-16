@@ -413,6 +413,8 @@ and its line comes once the call is made again and finishes.
 After every traced call the kernel runs the self-check,
 the executable form of the properties in `DESIGN.md`,
 and halts with code 3 on the first violation.
+Only QEMU `virt`'s kernel has the self-check and the tracing, unless the build sets `SELFCHECK=1`;
+every other board's is the smaller without them, and refuses `OP_TEST_TRACE` with `KERR_WRONG_TYPE`.
 While tracing is on the tick preempts nobody and moves no time;
 only `OP_TEST_TICK` does,
 so that the host build can reproduce the transcript.

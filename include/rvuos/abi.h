@@ -126,6 +126,7 @@
  * so that the host build starts from the same accounts.
  * It cannot be turned off again, so a traced program cannot hide,
  * and once it is on the call changes nothing.
+ * A kernel built without the self-check, every board's but QEMU virt's by default, fails it with KERR_WRONG_TYPE.
  */
 #define OP_TEST_TRACE 10
 /*

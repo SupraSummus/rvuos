@@ -7,7 +7,7 @@ Report: a traced call that moved no time charged the thread whose turn it was
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -78,10 +78,8 @@ static int op_test(uint32_t op, const uint32_t *arg)
+@@ -79,10 +79,8 @@ static int op_test(uint32_t op, const uint32_t *arg)
           * The host boots with full accounts, and the target has run a while before its first traced call.
           * Once tracing is on the call changes nothing, or it would fill an account at will.
           */
@@ -18,5 +18,5 @@ diff --git a/kernel/syscall.c b/kernel/syscall.c
 +        debug_trace = true;
 +        sched_accounts_fill();
          return KERR_OK;
+ #endif
      case OP_TEST_TICK:
-         /* The caller's status is written to its own frame, whoever runs next. */

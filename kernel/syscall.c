@@ -10,7 +10,9 @@
 #include "sched.h"
 #include "timer.h"
 
+#if SELFCHECK
 bool debug_trace;
+#endif
 
 /* The slot itself, as a node of the derivation tree, once slot_lookup has vetted the number. */
 static struct cap *slot_node(struct thread *t, uint32_t slot)
@@ -68,6 +70,7 @@ static int op_halt(const uint32_t *arg)
 static int op_test(uint32_t op, const uint32_t *arg)
 {
     switch (op) {
+#if SELFCHECK
     case OP_TEST_TRACE:
         /*
          * The host boots with full accounts, and the target has run a while before its first traced call.
@@ -78,6 +81,7 @@ static int op_test(uint32_t op, const uint32_t *arg)
             sched_accounts_fill();
         }
         return KERR_OK;
+#endif
     case OP_TEST_TICK:
         /* The caller's status is written to its own frame, whoever runs next. */
         sched_tick(1);

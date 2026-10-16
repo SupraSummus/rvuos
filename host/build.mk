@@ -9,7 +9,8 @@ HOST_CORPUS := $(HOST_BUILD)/corpus
 # The seeds are text under tests/seeds, by the names of the ABI's headers, built into records here; see tools/seed.py.
 SEEDS       := build/seeds
 HOST_CFLAGS := -std=c11 -O1 -g -Wall -Wextra -Werror -Wshadow \
-               -DRVUOS_HOST -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -DCORES=1 -DTIMER_HZ=$(TIMER_HZ) -Ikernel -Ikernel/arch/riscv \
+               -DRVUOS_HOST -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -DCORES=1 -DTIMER_HZ=$(TIMER_HZ) -DSELFCHECK=1 \
+               -Ikernel -Ikernel/arch/riscv \
                -Ikernel/board/qemu -Ihost -Iinclude
 
 HOST_KERNEL_SRC := kernel/cap.c kernel/core.c kernel/pool.c kernel/process.c kernel/sched.c \
@@ -155,6 +156,7 @@ corpus-merge: $(HOST_MACHINES) $(SEEDS)
 # REPLAY_FAIL_FAST=1 stops it at the first input that fails, as `make mutants` has it.
 qemu-replay: $(BUILD)/kernel-fuzzdrv.elf $(HOST_BUILD)/fuzz $(SEEDS)
 	@[ "$(BOARD)" = qemu ] || { echo "qemu-replay runs on BOARD=qemu"; exit 1; }
+	@[ $(SELFCHECK) = 1 ] || { echo "qemu-replay traces, which a kernel built with SELFCHECK=0 refuses"; exit 1; }
 	tests/differential.py --qemu "$(QEMU) $(QEMUFLAGS)" $(if $(REPLAY_JOBS),--jobs $(REPLAY_JOBS)) \
 		$(if $(REPLAY_FAIL_FAST),--fail-fast) \
 		--kernel $(BUILD)/kernel-fuzzdrv.elf --host $(HOST_BUILD)/fuzz $(SEEDS) tests/corpus
