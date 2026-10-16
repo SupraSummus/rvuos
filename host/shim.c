@@ -893,18 +893,18 @@ static void host_run_on(void)
 }
 
 #if CORES > 1
-/* Whether a thread waits on a queue of the core, which holds only live threads, for its turn there. */
+/* Whether a thread waits on a queue of the core, a ring of places of live threads, for its turn there. */
 static bool host_queued(const struct core *core, const struct thread *t)
 {
     const paddr_t heads[] = { core->run_queue, core->spare_queue, core->spent_queue };
     for (unsigned q = 0; q < sizeof(heads) / sizeof(heads[0]); q++) {
         paddr_t at = heads[q];
         while (at != 0) {
-            const struct thread *w = p2v(at);
-            if (w == t) {
+            const struct place *p = p2v(at);
+            if (place_thread(p) == t) {
                 return true;
             }
-            at = w->queue_next == heads[q] ? 0 : w->queue_next;
+            at = p->queue_next == heads[q] ? 0 : p->queue_next;
         }
     }
     return false;
