@@ -8,7 +8,7 @@ Witness: stack-depth
 diff --git a/kernel/selfcheck.c b/kernel/selfcheck.c
 --- a/kernel/selfcheck.c
 +++ b/kernel/selfcheck.c
-@@ -1628,7 +1628,7 @@ void selfcheck_run(void)
+@@ -1547,7 +1547,7 @@ void selfcheck_run(void)
              fail("the core's regions wait to be loaded again", v2p(current), 0, 0);
          }
          /* The CSRs, hardwired entries included, must grant exactly what the current process's slots do. */

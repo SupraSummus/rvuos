@@ -4,6 +4,7 @@ each end is connected through a frame with the right to read for the event and t
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: route's end names no frame it may connect
+Witness: fuzz route-arms-with-both-ends
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c

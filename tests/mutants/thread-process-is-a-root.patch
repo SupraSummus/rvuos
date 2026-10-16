@@ -10,10 +10,10 @@ Witness: fuzz actor-handoff
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -405,7 +405,7 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
-         thread_make_places(nt, places);
+@@ -417,7 +417,7 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
          /* It hangs below the capability it was made with, so a revoke above that stops the thread. */
-         nt->proc = (struct cap){ .type = CAP_HOSTED, .rights = pc.rights, .a = pc.a };
+         nt->proc = (struct cap){ .type = CAP_PROCESS, .rights = pc.rights, .a = cap_addr(&pc) };
+         nt->proc.b = held_word(v2p(nt), 0);
 -        cap_attach(slot_node(t, arg[3]), &nt->proc);
 +        cap_attach(NULL, &nt->proc);
          nt->state = THREAD_STOPPED;

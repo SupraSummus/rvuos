@@ -8,7 +8,7 @@ Witness: fuzz pool-runs-out
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -385,7 +385,7 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
+@@ -384,7 +384,7 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
          }
          /* A region slot for each region it may have installed at once, one at least and an entry each at most. */
          uint32_t regions = arg[4];

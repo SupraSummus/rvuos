@@ -752,7 +752,7 @@ static void count_node(const struct cap *c, unsigned out[UNITS])
 {
     if (c->type != CAP_NONE) {
         out[UNIT_NODE]++;
-        if (c->next != LINK_UP) {
+        if (cap_next(c) != LINK_UP) {
             out[UNIT_LINK]++;
         }
     }
@@ -779,8 +779,8 @@ static bool mapped_with(const struct process *proc, uint32_t base, uint32_t size
     for (unsigned i = 0; i < proc->regions; i++) {
         const struct cap *s = &proc->slots[i];
         /* base within the slot first, or the remaining length below wraps. */
-        if (s->type != CAP_NONE && base - s->a < s->b && size <= s->b - (base - s->a) &&
-            (s->rights & rights) == rights) {
+        uint32_t at = block_base(s), len = block_size(s);
+        if (s->type != CAP_NONE && base - at < len && size <= len - (base - at) && (s->rights & rights) == rights) {
             return true;
         }
     }

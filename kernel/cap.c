@@ -66,46 +66,54 @@ static inline struct cap *node(uint32_t link)
 /* The sibling after a node that has a parent, the first one after the last. */
 static struct cap *ring_next(const struct cap *n)
 {
-    return (n->next & LINK_UP) ? node(node(n->next)->child) : node(n->next);
+    return (cap_next(n) & LINK_UP) ? node(cap_child(node(cap_next(n)))) : node(cap_next(n));
+}
+
+/* A node new to the tree has no child yet; a held one names its holder there instead, and never has one. */
+static void make_childless(struct cap *n)
+{
+    if (!cap_held(n)) {
+        cap_set_child(n, 0);
+    }
 }
 
 void cap_attach(struct cap *parent, struct cap *n)
 {
-    n->child = 0;
+    make_childless(n);
     if (parent == NULL) {
-        n->next = LINK_UP;
-        n->prev = 0;
+        cap_set_next(n, LINK_UP);
+        cap_set_prev(n, 0);
         return;
     }
     /* At the front of the ring; the last child keeps the link up to the parent. */
-    if (parent->child == 0) {
-        n->next = v2p(parent) | LINK_UP;
-        n->prev = v2p(n);
+    if (cap_child(parent) == 0) {
+        cap_set_next(n, v2p(parent) | LINK_UP);
+        cap_set_prev(n, v2p(n));
     } else {
-        struct cap *first = node(parent->child);
-        n->next = parent->child;
-        n->prev = first->prev;
-        first->prev = v2p(n);
+        struct cap *first = node(cap_child(parent));
+        cap_set_next(n, cap_child(parent));
+        cap_set_prev(n, cap_prev(first));
+        cap_set_prev(first, v2p(n));
     }
-    parent->child = v2p(n);
+    cap_set_child(parent, v2p(n));
 }
 
 /* Put the siblings first to last right after beside, which has a parent, in its ring. */
 static void splice_after(struct cap *beside, struct cap *first, struct cap *last)
 {
-    ring_next(beside)->prev = v2p(last);
-    last->next = beside->next;
-    first->prev = v2p(beside);
-    beside->next = v2p(first);
+    cap_set_prev(ring_next(beside), v2p(last));
+    cap_set_next(last, cap_next(beside));
+    cap_set_prev(first, v2p(beside));
+    cap_set_next(beside, v2p(first));
 }
 
 /* Right after beside in its ring, so under the same parent. Roots have no ring: beside a root, a root. */
 static void attach_beside(struct cap *beside, struct cap *n)
 {
-    n->child = 0;
-    if (beside->next == LINK_UP) {
-        n->next = LINK_UP;
-        n->prev = 0;
+    make_childless(n);
+    if (cap_next(beside) == LINK_UP) {
+        cap_set_next(n, LINK_UP);
+        cap_set_prev(n, 0);
         return;
     }
     splice_after(beside, n, n);
@@ -121,21 +129,21 @@ void cap_move(struct cap *from, struct cap *to)
      * An only child is its own predecessor and successor, and a root is in no ring.
      */
     *to = *from;
-    if (from->next != LINK_UP) {
-        struct cap *pred = node(from->prev);
+    if (cap_next(from) != LINK_UP) {
+        struct cap *pred = node(cap_prev(from));
         if (pred == from) {
-            to->prev = v2p(to);
+            cap_set_prev(to, v2p(to));
         } else {
-            ring_next(from)->prev = v2p(to);
+            cap_set_prev(ring_next(from), v2p(to));
         }
-        if (pred->next & LINK_UP) {
-            node(pred->next)->child = v2p(to);
+        if (cap_next(pred) & LINK_UP) {
+            cap_set_child(node(cap_next(pred)), v2p(to));
         } else {
-            pred->next = v2p(to);
+            cap_set_next(pred, v2p(to));
         }
     }
-    if (from->child != 0) {
-        node(node(from->child)->prev)->next = v2p(to) | LINK_UP;
+    if (cap_child(from) != 0) {
+        cap_set_next(node(cap_prev(node(cap_child(from)))), v2p(to) | LINK_UP);
     }
     *from = (struct cap){ 0 };
 }
@@ -163,22 +171,26 @@ int cap_store_beside(struct captable *table, uint32_t slot, const struct cap *ca
 /*
  * Empty a node the tree no longer names.
  * An installed region is unmapped as well, a thread's units unbound, a thread whose process goes stopped,
- * an Irq whose notification goes disarmed, and so is a Route whose end goes.
+ * an Irq whose notification goes disarmed, and a Route whose end goes too:
+ * the nodes whose holder hears of their clearing.
  */
 static void clear_node(struct cap *n)
 {
-    if (n->type == CAP_INSTALLED) {
-        process_drop(n);
-    } else if (n->type == CAP_BOUND) {
-        sched_unbind(n);
-    } else if (n->type == CAP_HOSTED) {
-        sched_unhost(n);
-    } else if (n->type == CAP_SIGNALLED) {
-        irq_drop(n);
-    } else if (n->type == CAP_ROUTED) {
-        route_drop(n);
-    } else {
+    if (!cap_held(n)) {
         *n = (struct cap){ 0 };
+    } else if (n->type == CAP_FRAME) {
+        /* A region of a process, or an end of a Route: the holder says which. */
+        if (((struct obj_header *)p2v(cap_holder(n)))->type == CAP_ROUTE) {
+            route_drop(n);
+        } else {
+            process_drop(n);
+        }
+    } else if (n->type == CAP_TIME) {
+        sched_unbind(n);
+    } else if (n->type == CAP_PROCESS) {
+        sched_unhost(n);
+    } else {
+        irq_drop(n);
     }
 }
 
@@ -191,16 +203,16 @@ static void clear_node(struct cap *n)
 static void detach(struct cap *n, bool adopt)
 {
     /* The children go right after n, so n leaves the ring as a leaf would. */
-    if (adopt && n->child != 0) {
-        splice_after(n, node(n->child), node(node(n->child)->prev));
+    if (adopt && cap_child(n) != 0) {
+        splice_after(n, node(cap_child(n)), node(cap_prev(node(cap_child(n)))));
     }
-    struct cap *pred = node(n->prev);
-    ring_next(n)->prev = n->prev;
+    struct cap *pred = node(cap_prev(n));
+    cap_set_prev(ring_next(n), cap_prev(n));
     /* n is first exactly when its predecessor links up: it is the last child then, or n itself. */
-    if (pred->next & LINK_UP) {
-        node(pred->next)->child = (n->next & LINK_UP) ? 0 : n->next;
+    if (cap_next(pred) & LINK_UP) {
+        cap_set_child(node(cap_next(pred)), (cap_next(n) & LINK_UP) ? 0 : cap_next(n));
     } else {
-        pred->next = n->next;
+        cap_set_next(pred, cap_next(n));
     }
 }
 
@@ -222,10 +234,10 @@ bool cap_stop_here(bool preempt)
 
 bool cap_revoke_step(struct cap *root)
 {
-    if (root->child == 0) {
+    if (cap_child(root) == 0) {
         return false;
     }
-    struct cap *n = node(root->child);
+    struct cap *n = node(cap_child(root));
     detach(n, true);
     clear_node(n);
     return true;
@@ -242,11 +254,12 @@ bool cap_revoke_below(struct cap *root, uint32_t through, bool preempt)
      * A pool's own node is the one exception: the pool goes before its node does,
      * and the node stays first until then, so the next step is at it again.
      */
-    while (root->child != 0) {
+    while (cap_child(root) != 0) {
         LOOP_PAID(cap_revoke_below, node, "a node it clears");
-        struct cap *n = node(root->child);
-        if (n->type == CAP_RETYPED) {
-            if (!pool_destroy(node_pool(n), preempt)) {
+        struct cap *n = node(cap_child(root));
+        struct pool *pool = node_pool(n);
+        if (pool != NULL) {
+            if (!pool_destroy(pool, preempt)) {
                 return false;
             }
         } else {
@@ -263,7 +276,7 @@ bool cap_revoke_below(struct cap *root, uint32_t through, bool preempt)
         if (at == NULL || at->type == CAP_NONE) {
             return true;
         }
-        if (root->child != 0 && cap_stop_here(preempt)) {
+        if (cap_child(root) != 0 && cap_stop_here(preempt)) {
             return false;
         }
     }
@@ -272,7 +285,7 @@ bool cap_revoke_below(struct cap *root, uint32_t through, bool preempt)
 
 bool cap_delete(struct cap *n, bool preempt)
 {
-    if (n->next != LINK_UP) {
+    if (cap_next(n) != LINK_UP) {
         detach(n, true);
         clear_node(n);
         return true;
@@ -283,15 +296,15 @@ bool cap_delete(struct cap *n, bool preempt)
      * while another thread may take away those still below it.
      */
     if (n->type == CAP_UNTYPED) {
-        n->b = UNTYPED_GOING;
+        untyped_set_going(n);
     }
-    while (n->child != 0) {
+    while (cap_child(n) != 0) {
         LOOP_PAID(cap_delete, link, "a child below a root, which becomes a root itself");
-        struct cap *c = node(n->child);
+        struct cap *c = node(cap_child(n));
         detach(c, false);
-        c->next = LINK_UP;
-        c->prev = 0;
-        if (n->child != 0 && cap_stop_here(preempt)) {
+        cap_set_next(c, LINK_UP);
+        cap_set_prev(c, 0);
+        if (cap_child(n) != 0 && cap_stop_here(preempt)) {
             return false;
         }
     }
@@ -312,12 +325,10 @@ int cap_clear(struct captable *table, uint32_t slot)
 
 struct cap cap_to_object(struct obj_header *obj, uint8_t rights)
 {
-    struct cap c = {
-        .type = obj->type,
-        .rights = rights,
-        .a = v2p(obj),
-        .b = obj->type == CAP_NOTIFICATION ? NOTIFY_ALL_BITS : 0,
-    };
+    struct cap c = { .type = obj->type, .rights = rights, .a = v2p(obj) };
+    if (obj->type == CAP_NOTIFICATION) {
+        notify_set(&c, v2p(obj), NOTIFY_CODE_ALL);
+    }
     return c;
 }
 
@@ -326,8 +337,7 @@ struct cap cap_to_frame(uint32_t base, uint32_t size, uint8_t rights)
     struct cap c = {
         .type = CAP_FRAME,
         .rights = rights,
-        .a = base,
-        .b = size,
+        .a = block_word(base, size),
     };
     return c;
 }
@@ -337,8 +347,7 @@ struct cap cap_to_untyped(uint32_t base, uint32_t size, uint8_t rights)
     struct cap c = {
         .type = CAP_UNTYPED,
         .rights = rights,
-        .a = untyped_block(base, size),
-        .b = 0,
+        .a = block_word(base, size),
     };
     return c;
 }
@@ -348,8 +357,7 @@ struct cap cap_to_lines(uint32_t first, uint32_t count, uint8_t rights)
     struct cap c = {
         .type = CAP_IRQ_LINE,
         .rights = rights,
-        .a = first,
-        .b = count,
+        .a = range_word(first, count),
     };
     return c;
 }
@@ -359,8 +367,7 @@ struct cap cap_to_time(uint32_t first, uint32_t count, uint8_t rights)
     struct cap c = {
         .type = CAP_TIME,
         .rights = rights,
-        .a = first,
-        .b = count,
+        .a = range_word(first, count),
     };
     return c;
 }
@@ -370,8 +377,7 @@ struct cap cap_to_routes(uint32_t first, uint32_t count, uint8_t rights)
     struct cap c = {
         .type = CAP_ROUTE_LINE,
         .rights = rights,
-        .a = first,
-        .b = count,
+        .a = range_word(first, count),
     };
     return c;
 }

@@ -33,7 +33,7 @@ void route_init(void)
 uint32_t route_word(const struct route *r, uint32_t end)
 {
     uint32_t word = 0;
-    router_end(end, r->ends[end].a, r->ends[end].b, r->names[end], &word);
+    router_end(end, block_base(&r->ends[end]), block_size(&r->ends[end]), r->names[end], &word);
     return word;
 }
 
@@ -50,11 +50,11 @@ void route_arm(struct route *r, bool on)
 
 void route_drop(struct cap *routed)
 {
-    struct route *r = routed_route(routed);
+    struct route *r = p2v(cap_holder(routed));
     if (r->armed) {
         route_arm(r, false);
     }
-    r->names[routed->index] = 0;
+    r->names[routed - r->ends] = 0;
     *routed = (struct cap){ 0 };
 }
 

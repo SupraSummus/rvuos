@@ -10,8 +10,8 @@ Witness: fuzz irq-dies-with-pool
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -367,9 +367,6 @@ void irq_drop(struct cap *signalled)
-     struct irq *irq = signalled_irq(signalled);
+@@ -771,9 +771,6 @@ void irq_drop(struct cap *signalled)
+     struct irq *irq = p2v(cap_holder(signalled));
      irq_set_bits(irq, 0);
      /* Only the controller's lines have a mask. */
 -    if (line_on_controller(irq->line)) {

@@ -125,7 +125,10 @@ a constant of the image.
 
 **The rule.**
 The kernel does not recurse and has no frame of run-time size:
-no variable-length array, no `alloca`.
+no variable-length array, no `alloca`,
+and no local that asks more alignment than the stack has,
+which ARM's stack, on eight bytes, would have realigned at run time;
+so a node asks its sixteen bytes in the objects that hold it, not in its type.
 A walk that would recurse walks with no stack, as `cap_revoke_below` does.
 A call through a pointer counts as a call to every function whose address is taken.
 An address is taken where the code forms it from constants or the kernel's data holds it;
@@ -138,6 +141,8 @@ a size of 0x600c, `OBJ_MAX_SIZE`, once read as `trap_start`'s address on mps2-an
 The kernel's link runs `tools/stack-depth.py`,
 which reads the frames from `-fstack-usage` and the calls from the disassembly,
 fails on a broken rule or a bound above `KERNEL_STACK_SIZE`,
+a C function that sets `sp` from a register among the broken rules,
+since `-fstack-usage` calls a frame static that the function realigns,
 and prints the bound and its chain.
 Both tools read the kernel linked alone, once for all its images.
 An image adds its root task in `.user_code`, which neither tool reads,

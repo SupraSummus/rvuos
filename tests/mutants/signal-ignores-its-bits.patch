@@ -9,11 +9,11 @@ Witness: fuzz notify-carve-bits
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -495,7 +495,7 @@ static int op_notification(struct thread *t, uint32_t slot, const struct cap *ca
+@@ -629,7 +629,7 @@ static int op_notification(struct thread *t, uint32_t slot, const struct cap *ca
              return KERR_INVALID_ARG;
          }
          /* The capability says which bits it may signal, so a wait's bits say who signalled. */
--        uint32_t bits = arg[1] & cap->b;
+-        uint32_t bits = arg[1] & notify_bits(cap);
 +        uint32_t bits = arg[1];
          if (bits == 0) {
              return KERR_NO_RIGHTS;

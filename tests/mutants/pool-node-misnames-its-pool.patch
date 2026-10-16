@@ -1,0 +1,20 @@
+A pool's own node names what lies past the descriptor, so it is no longer told from a capability to a pool,
+and a revoke below the Untyped clears it as a capability instead of destroying the pool;
+a pool's own node names its pool.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
+Report: a call made a capability no capability of its caller covers
+Witness: fuzz actor-handoff
+
+diff --git a/kernel/pool.c b/kernel/pool.c
+--- a/kernel/pool.c
++++ b/kernel/pool.c
+@@ -17,7 +17,7 @@ struct pool *pool_create(paddr_t base, uint32_t size, struct cap *parent)
+     *pool = (struct pool){ 0 };
+     pool->hdr.type = CAP_POOL;
+     pool->hdr.pool = base;
+-    pool->node = (struct cap){ .type = CAP_POOL, .rights = RIGHT_ALL, .a = base };
++    pool->node = (struct cap){ .type = CAP_POOL, .rights = RIGHT_ALL, .a = base + OBJ_ALIGN };
+     cap_attach(parent, &pool->node);
+     pool->size = size;
+     pool->used = obj_align(sizeof(*pool));

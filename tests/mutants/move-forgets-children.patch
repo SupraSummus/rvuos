@@ -8,12 +8,12 @@ Witness: fuzz actor-handoff
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -132,9 +132,6 @@ void cap_move(struct cap *from, struct cap *to)
-             pred->next = v2p(to);
+@@ -141,9 +141,6 @@ void cap_move(struct cap *from, struct cap *to)
+             cap_set_next(pred, v2p(to));
          }
      }
--    if (from->child != 0) {
--        node(node(from->child)->prev)->next = v2p(to) | LINK_UP;
+-    if (cap_child(from) != 0) {
+-        cap_set_next(node(cap_prev(node(cap_child(from)))), v2p(to) | LINK_UP);
 -    }
      *from = (struct cap){ 0 };
  }

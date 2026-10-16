@@ -1,0 +1,18 @@
+A Route's end connected without its Route's name in it is a frame like any in a table:
+its clearing empties it and nothing more, so a revoke above it leaves the Route armed on a frame gone.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: route's end does not name its route
+Witness: fuzz route-arms-with-both-ends
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -834,7 +834,6 @@ static int op_route(struct thread *t, const struct cap *cap, uint32_t op, const
+         }
+         /* It hangs below the capability it was connected through, so a revoke above that disarms the Route. */
+         r->ends[end] = (struct cap){ .type = CAP_FRAME, .rights = fc.rights, .a = fc.a };
+-        r->ends[end].b = held_word(v2p(r), 0);
+         cap_attach(slot_at(t, arg[2]), &r->ends[end]);
+         r->names[end] = arg[3];
+         return KERR_OK;

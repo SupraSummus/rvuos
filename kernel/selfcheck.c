@@ -121,8 +121,8 @@ static void check_pools(void)
             fail("pool list is not linked back", base, p->prev, before);
         }
         before = base;
-        /* The pool's own node; the tree check reads its links. */
-        if (p->node.type != CAP_RETYPED || p->node.a != base || p->node.b != 0 || p->node.index != 0) {
+        /* The pool's own node names the pool and hears of nothing; the tree check reads its links. */
+        if (p->node.type != CAP_POOL || p->node.a != base || cap_held(&p->node) || p->node.rights != RIGHT_ALL) {
             fail("pool's own node is malformed", base, p->node.type, p->node.a);
         }
         if (p->used < sizeof(*p) || p->used > p->size) {
@@ -202,7 +202,7 @@ static uint8_t slot_rights(const struct process *proc, uint64_t at)
 {
     for (unsigned i = 0; i < proc->regions; i++) {
         const struct cap *s = &proc->slots[i];
-        if (s->type != CAP_NONE && at >= s->a && at < (uint64_t)s->a + s->b) {
+        if (s->type != CAP_NONE && at >= block_base(s) && at < (uint64_t)block_base(s) + block_size(s)) {
             return rights_to_pmp(s->rights);
         }
     }
@@ -246,8 +246,8 @@ static void check_pmp_image(const struct process *proc, const uint32_t *addr,
     for (unsigned i = 0; i < proc->regions; i++) {
         const struct cap *s = &proc->slots[i];
         if (s->type != CAP_NONE) {
-            check_rights_at(proc, addr, cfg, count, csrs, s->a);
-            check_rights_at(proc, addr, cfg, count, csrs, (uint64_t)s->a + s->b);
+            check_rights_at(proc, addr, cfg, count, csrs, block_base(s));
+            check_rights_at(proc, addr, cfg, count, csrs, (uint64_t)block_base(s) + block_size(s));
         }
     }
     for (unsigned i = 0; i < count; i++) {
@@ -272,34 +272,36 @@ static void check_process(const struct process *proc)
             continue;
         }
         /* A region slot holds an installed region and nothing else; the tree check reads its links. */
-        if (s->type != CAP_INSTALLED || s->rights == 0 || (s->rights & ~RIGHT_ALL)) {
+        if (s->type != CAP_FRAME || s->rights == 0 || (s->rights & ~RIGHT_ALL)) {
             fail("region slot holds something other than an installed region", v2p(proc), i, s->type);
         }
-        if (s->index != i) {
-            fail("installed region does not know its slot", v2p(proc), i, s->index);
+        /* The process hears of its clearing, by its name in the slot. */
+        if (!cap_held(s) || cap_holder(s) != v2p(proc)) {
+            fail("installed region does not name its process", v2p(proc), i, s->b);
         }
-        uint8_t granted = granted_rights(s->a, s->b);
-        if (s->b == 0 || granted == 0) {
-            fail("process maps memory outside what was granted", v2p(proc), s->a, s->b);
+        uint32_t base = block_base(s), size = block_size(s);
+        uint8_t granted = granted_rights(base, size);
+        if (!napot_block(base, size) || granted == 0) {
+            fail("process maps memory outside what was granted", v2p(proc), base, size);
         }
         if (s->rights & ~granted) {
-            fail("process maps memory with rights beyond the grant", v2p(proc), s->a, s->rights);
+            fail("process maps memory with rights beyond the grant", v2p(proc), base, s->rights);
         }
         for (struct pool *p = pool_list; p != NULL; p = pool_next_pool(p)) {
-            if (ranges_overlap(s->a, s->b, pool_base(p), p->size)) {
-                fail("process maps a pool: isolation broken", v2p(proc), s->a, pool_base(p));
+            if (ranges_overlap(base, size, pool_base(p), p->size)) {
+                fail("process maps a pool: isolation broken", v2p(proc), base, pool_base(p));
             }
         }
         for (unsigned j = i + 1; j < proc->regions; j++) {
             const struct cap *t = &proc->slots[j];
-            if (t->type != CAP_NONE && ranges_overlap(s->a, s->b, t->a, t->b)) {
+            if (t->type != CAP_NONE && ranges_overlap(base, size, block_base(t), block_size(t))) {
                 fail("process has overlapping region slots", v2p(proc), i, j);
             }
 #if PMP_SPLIT_STORE_AS_READ
             /* See PMP_SPLIT_STORE_AS_READ in board.h. */
             if (t->type != CAP_NONE) {
-                const struct cap *lower = s->a < t->a ? s : t, *upper = s->a < t->a ? t : s;
-                if ((uint64_t)lower->a + lower->b == upper->a && (lower->rights & RIGHT_W) &&
+                const struct cap *lower = base < block_base(t) ? s : t, *upper = base < block_base(t) ? t : s;
+                if ((uint64_t)block_base(lower) + block_size(lower) == block_base(upper) && (lower->rights & RIGHT_W) &&
                     (upper->rights & RIGHT_R) && !(upper->rights & RIGHT_W)) {
                     fail("process may write right below a region it may only read", v2p(proc), i, j);
                 }
@@ -321,9 +323,12 @@ static void check_process(const struct process *proc)
     for (unsigned i = 0; i < PROCESS_TABLES; i++) {
         const struct cap *tc = &proc->tables[i];
         if (tc->type != CAP_NONE) {
-            struct obj_header *t = object_find(tc->a);
-            if (tc->type != CAP_CAPTABLE || t == NULL || t->type != CAP_CAPTABLE) {
+            struct obj_header *t = object_find(cap_addr(tc));
+            if (tc->type != CAP_CAPTABLE || t == NULL || t->type != CAP_CAPTABLE || cap_held(tc)) {
                 fail("process's table slot names no live table", v2p(proc), i, tc->a);
+            }
+            if (cap_child(tc) != 0) {
+                fail("something is derived from a process's table slot", v2p(proc), i, cap_child(tc));
             }
             if (!(tc->rights & RIGHT_W)) {
                 fail("process's table slot without the right to write the table", v2p(proc), i, tc->rights);
@@ -358,7 +363,7 @@ static uint32_t count_of(const struct place *p)
 {
     const struct thread *t = place_thread(p);
     const struct cap *b = place_time(p);
-    return is_turn(t) && b->type == CAP_BOUND && unit_core(b->a) == t->core ? cores[t->core].ticks : sched_ticks;
+    return is_turn(t) && b->type == CAP_TIME && unit_core(range_first(b)) == t->core ? cores[t->core].ticks : sched_ticks;
 }
 
 /* A place's account at the count, its stamp's balance and its tick's gain every tick since, held to the cap. */
@@ -378,10 +383,10 @@ static const struct place *lender_of(const struct place *p)
 {
     const struct thread *t = place_thread(p);
     const struct cap *b = place_time(p);
-    if (t->lenders == 0 || b->type != CAP_BOUND) {
+    if (t->lenders == 0 || b->type != CAP_TIME) {
         return NULL;
     }
-    return thread_place_on(p2v(t->lenders), unit_core(b->a));
+    return thread_place_on(p2v(t->lenders), unit_core(range_first(b)));
 }
 
 /*
@@ -392,7 +397,7 @@ static const struct place *lender_of(const struct place *p)
 static uint8_t queue_owed(const struct place *p)
 {
     const struct thread *t = place_thread(p);
-    if (t->state != THREAD_READY || is_turn(t) || place_time(p)->type != CAP_BOUND) {
+    if (t->state != THREAD_READY || is_turn(t) || place_time(p)->type != CAP_TIME) {
         return QUEUE_NONE;
     }
     const struct place *l = lender_of(p);
@@ -461,27 +466,25 @@ static void check_place(const struct thread *t, uint32_t i, uint32_t *held)
     if (p->thread != v2p(t) || p->index != i) {
         fail("a place does not know its thread", v2p(t), i, p->thread);
     }
+    uint32_t first = range_first(b), count = range_count(b);
     if (b->type != CAP_NONE &&
-        (b->type != CAP_BOUND || (b->rights & RIGHT_W) == 0 || (b->rights & ~(RIGHT_W | RIGHT_X)) != 0 ||
-         b->a >= MACHINE_UNITS || b->b > MACHINE_UNITS - b->a || b->index != i)) {
+        (b->type != CAP_TIME || (b->rights & RIGHT_W) == 0 || (b->rights & ~(RIGHT_W | RIGHT_X)) != 0 ||
+         first >= MACHINE_UNITS || count > MACHINE_UNITS - first || !cap_held(b) || cap_holder(b) != v2p(t))) {
         fail("a place's units are malformed", v2p(t), i, b->a);
     }
-    if (b->type != CAP_NONE && b->b != 0 && unit_core(b->a) != unit_core(b->a + b->b - 1)) {
-        fail("a place's units are of two cores", v2p(t), b->a, b->b);
+    if (b->type != CAP_NONE && count != 0 && unit_core(first) != unit_core(first + count - 1)) {
+        fail("a place's units are of two cores", v2p(t), first, count);
     }
     if (b->type != CAP_NONE) {
-        uint32_t core = 1u << unit_core(b->a);
+        uint32_t core = 1u << unit_core(first);
         if (*held & core) {
-            fail("two places of a thread hold the time of one core", v2p(t), i, b->a);
+            fail("two places of a thread hold the time of one core", v2p(t), i, first);
         }
         *held |= core;
     }
-    if (b->type != CAP_NONE && b->child != 0) {
-        fail("something is derived from a place's units", v2p(t), b->child, 0);
-    }
-    for (uint32_t u = 0; b->type != CAP_NONE && u < b->b; u++) {
-        if (unit_place[b->a + u] != v2p(p)) {
-            fail("a unit a place is bound to names another", v2p(t), b->a + u, unit_place[b->a + u]);
+    for (uint32_t u = 0; b->type != CAP_NONE && u < count; u++) {
+        if (unit_place[first + u] != v2p(p)) {
+            fail("a unit a place is bound to names another", v2p(t), first + u, unit_place[first + u]);
         }
     }
     units_seen += place_units(p);
@@ -505,8 +508,8 @@ static void check_place(const struct thread *t, uint32_t i, uint32_t *held)
                                       : "a place waits on another queue than its account says",
              v2p(t), p->queue, owed);
     }
-    if (owed != QUEUE_NONE && p->core != unit_core(b->a)) {
-        fail("a place waits on another core than its units are of", v2p(t), p->core, b->a);
+    if (owed != QUEUE_NONE && p->core != unit_core(first)) {
+        fail("a place waits on another core than its units are of", v2p(t), p->core, first);
     }
     if (owed != QUEUE_NONE) {
         owed_threads++;
@@ -528,12 +531,9 @@ static void check_thread(const struct thread *t)
      */
     const struct cap *h = &t->proc;
     if (h->type != CAP_NONE) {
-        struct obj_header *p = object_find(h->a);
-        if (h->type != CAP_HOSTED || p == NULL || p->type != CAP_PROCESS || h->b != 0 || h->index != 0) {
+        struct obj_header *p = object_find(cap_addr(h));
+        if (h->type != CAP_PROCESS || p == NULL || p->type != CAP_PROCESS || !cap_held(h) || cap_holder(h) != v2p(t)) {
             fail("thread's process slot names no live process", v2p(t), h->type, h->a);
-        }
-        if (h->child != 0) {
-            fail("something is derived from a thread's process", v2p(t), h->child, 0);
         }
     } else if (t->state != THREAD_STOPPED) {
         fail("thread without a process is not stopped", v2p(t), t->state, 0);
@@ -562,13 +562,13 @@ static void check_thread(const struct thread *t)
      */
     const struct cap *w = &t->watch;
     if (w->type != CAP_NONE) {
-        struct obj_header *n = object_find(w->a);
-        if (w->type != CAP_WATCHED || n == NULL || n->type != CAP_NOTIFICATION || (w->rights & RIGHT_W) == 0 ||
-            w->b == 0 || w->index != 0) {
+        struct obj_header *n = object_find(cap_addr(w));
+        if (w->type != CAP_NOTIFICATION || n == NULL || n->type != CAP_NOTIFICATION || (w->rights & RIGHT_W) == 0 ||
+            cap_held(w)) {
             fail("thread's watch names no live notification", v2p(t), w->type, w->a);
         }
-        if (w->child != 0) {
-            fail("something is derived from a thread's watch", v2p(t), w->child, 0);
+        if (cap_child(w) != 0) {
+            fail("something is derived from a thread's watch", v2p(t), cap_child(w), 0);
         }
     }
     check_lenders(t);
@@ -941,16 +941,16 @@ static void check_irq(const struct irq *i)
      */
     const struct cap *s = &i->ntfn;
     if (s->type != CAP_NONE) {
-        struct obj_header *n = object_find(s->a);
-        if (s->type != CAP_SIGNALLED || n == NULL || n->type != CAP_NOTIFICATION || (s->rights & RIGHT_W) == 0 ||
-            s->b == 0 || s->index != 0) {
+        struct obj_header *n = object_find(cap_addr(s));
+        if (s->type != CAP_NOTIFICATION || n == NULL || n->type != CAP_NOTIFICATION || (s->rights & RIGHT_W) == 0) {
             fail("irq's notification slot names no live notification", v2p(i), s->type, s->a);
         }
-        if (s->child != 0) {
-            fail("something is derived from an irq's notification", v2p(i), s->child, 0);
+        /* The Irq hears of its clearing, by its name in the slot. */
+        if (!cap_held(s) || cap_holder(s) != v2p(i)) {
+            fail("irq's notification does not name its irq", v2p(i), s->b, 0);
         }
-        if (i->bits & ~s->b) {
-            fail("irq is armed with bits its notification capability may not signal", v2p(i), i->bits, s->b);
+        if (i->bits & ~notify_bits(s)) {
+            fail("irq is armed with bits its notification capability may not signal", v2p(i), i->bits, notify_bits(s));
         }
     } else if (irq_armed(i)) {
         fail("irq without a notification is armed", v2p(i), i->bits, 0);
@@ -1063,13 +1063,14 @@ static void check_route(const struct route *r)
         }
         uint8_t need = end == ROUTE_EVENT ? RIGHT_R : RIGHT_W;
         uint32_t word;
-        if (e->type != CAP_ROUTED || e->index != end || (e->rights & need) == 0 || e->b == 0) {
+        if (e->type != CAP_FRAME || (e->rights & need) == 0) {
             fail("route's end names no frame it may connect", v2p(r), end, e->type);
         }
-        if (e->child != 0) {
-            fail("something is derived from a route's end", v2p(r), end, e->child);
+        /* The Route hears of its clearing, by its name in the end. */
+        if (!cap_held(e) || cap_holder(e) != v2p(r)) {
+            fail("route's end does not name its route", v2p(r), end, e->b);
         }
-        if (!router_end(end, e->a, e->b, r->names[end], &word)) {
+        if (!router_end(end, block_base(e), block_size(e), r->names[end], &word)) {
             fail("route's end is none the router finds in its frame", v2p(r), end, r->names[end]);
         }
     }
@@ -1129,21 +1130,21 @@ static void check_captable(const struct captable *table)
         case CAP_CLOCK:
             break;
         case CAP_FRAME: {
-            uint8_t granted = granted_rights(c->a, c->b);
-            if (c->b == 0 || granted == 0) {
+            uint8_t granted = granted_rights(block_base(c), block_size(c));
+            if (granted == 0) {
                 fail("frame outside granted memory", v2p(table), i, c->a);
             }
             if (c->rights & ~granted) {
                 fail("frame with rights beyond the grant", v2p(table), i, c->rights);
             }
-            if (!napot_block(c->a, c->b)) {
+            if (!napot_block(block_base(c), block_size(c))) {
                 fail("frame is not a NAPOT block", v2p(table), i, c->a);
             }
             break;
         }
         case CAP_UNTYPED: {
             /* The block word ends in a one for every block of at least eight bytes. */
-            uint32_t base = untyped_base(c), size = untyped_size(c);
+            uint32_t base = block_base(c), size = block_size(c);
             uint8_t granted = (c->a & 1) ? granted_rights(base, size) : 0;
             if (granted == 0 || !napot_block(base, size)) {
                 fail("untyped outside granted memory, or not a block", v2p(table), i, c->a);
@@ -1151,15 +1152,11 @@ static void check_captable(const struct captable *table)
             if (c->rights & ~granted) {
                 fail("untyped with rights beyond the grant", v2p(table), i, c->rights);
             }
-            /* Only a delete of a root marks one going, and nothing gives a root a parent. */
-            if (c->b != 0 && (c->b != UNTYPED_GOING || c->next != LINK_UP)) {
-                fail("untyped going though not a root, or b neither zero nor going", v2p(table), i, c->b);
-            }
             break;
         }
         case CAP_IRQ_LINE:
             /* The root task received every line there is, with RIGHT_W; nothing widens that. */
-            if (c->b == 0 || c->a >= LINES || c->b > LINES - c->a) {
+            if (range_count(c) == 0 || range_first(c) >= LINES || range_count(c) > LINES - range_first(c)) {
                 fail("line capability outside the lines there are", v2p(table), i, c->a);
             }
             if (c->rights & ~RIGHT_W) {
@@ -1168,7 +1165,8 @@ static void check_captable(const struct captable *table)
             break;
         case CAP_ROUTE_LINE:
             /* The root task received every channel the kernel lends, with RIGHT_W; nothing widens that. */
-            if (c->b == 0 || !route_channel(c->a) || c->b > ROUTE_FIRST + ROUTE_CHANNELS - c->a) {
+            if (range_count(c) == 0 || !route_channel(range_first(c)) ||
+                range_count(c) > ROUTE_FIRST + ROUTE_CHANNELS - range_first(c)) {
                 fail("route line capability outside the channels lent", v2p(table), i, c->a);
             }
             if (c->rights & ~RIGHT_W) {
@@ -1177,7 +1175,8 @@ static void check_captable(const struct captable *table)
             break;
         case CAP_TIME:
             /* The root task received every unit there is, with RIGHT_W and RIGHT_X; nothing widens that. */
-            if (c->b == 0 || c->a >= MACHINE_UNITS || c->b > MACHINE_UNITS - c->a) {
+            if (range_count(c) == 0 || range_first(c) >= MACHINE_UNITS ||
+                range_count(c) > MACHINE_UNITS - range_first(c)) {
                 fail("time capability outside the units there are", v2p(table), i, c->a);
             }
             if (c->rights & ~(RIGHT_W | RIGHT_X)) {
@@ -1192,18 +1191,18 @@ static void check_captable(const struct captable *table)
         case CAP_IRQ:
         case CAP_ROUTE: {
             /* A destroy sweeps the tables, so every object capability points at a live object. */
-            struct obj_header *o = object_find(c->a);
+            struct obj_header *o = object_find(cap_addr(c));
             if (o == NULL || o->type != c->type) {
                 fail("dangling object capability", v2p(table), i, c->a);
-            }
-            /* A notification's capability may signal some bit, and no other carries any. */
-            if ((c->b == 0) != (c->type != CAP_NOTIFICATION)) {
-                fail("object capability whose bits are not its type's", v2p(table), i, c->b);
             }
             break;
         }
         default:
             fail("capability of unknown type", v2p(table), i, c->type);
+        }
+        /* Only an object holds a node that names a holder; one in a table is a capability, and its holder hears nothing. */
+        if (cap_held(c)) {
+            fail("a capability in a table names a holder", v2p(table), i, c->b);
         }
     }
 }
@@ -1267,18 +1266,17 @@ static bool node_range(const struct cap *n, uint32_t *base, uint32_t *size)
 {
     switch (n->type) {
     case CAP_FRAME:
-    case CAP_INSTALLED:
-    case CAP_ROUTED:
-        *base = n->a;
-        *size = n->b;
-        return true;
     case CAP_UNTYPED:
-        *base = untyped_base(n);
-        *size = untyped_size(n);
+        *base = block_base(n);
+        *size = block_size(n);
         return true;
-    case CAP_RETYPED:
-        *base = n->a;
-        *size = ((const struct pool *)p2v(n->a))->size;
+    case CAP_POOL:
+        /* A pool's own node stands for the pool's memory; a capability to the pool does not. */
+        if (node_pool(n) == NULL) {
+            return false;
+        }
+        *base = cap_addr(n);
+        *size = node_pool(n)->size;
         return true;
     default:
         return false;
@@ -1291,9 +1289,8 @@ static bool node_range(const struct cap *n, uint32_t *base, uint32_t *size)
  */
 static bool is_object_type(uint8_t type)
 {
-    return type == CAP_CAPTABLE || type == CAP_PROCESS || type == CAP_THREAD ||
-           type == CAP_NOTIFICATION || type == CAP_IRQ || type == CAP_ROUTE || type == CAP_HOSTED ||
-           type == CAP_SIGNALLED || type == CAP_WATCHED;
+    return type == CAP_CAPTABLE || type == CAP_PROCESS || type == CAP_THREAD || type == CAP_NOTIFICATION ||
+           type == CAP_IRQ || type == CAP_ROUTE;
 }
 
 static bool derived_from(const struct cap *c, const struct cap *p)
@@ -1305,80 +1302,96 @@ static bool derived_from(const struct cap *c, const struct cap *p)
      * from something it made that went; a pool's own node carries rights of its own.
      */
     if (p->type == CAP_UNTYPED) {
-        if (c->type != CAP_UNTYPED && c->type != CAP_FRAME && c->type != CAP_INSTALLED &&
-            c->type != CAP_ROUTED && c->type != CAP_RETYPED) {
+        bool pool = node_pool(c) != NULL;
+        if (c->type != CAP_UNTYPED && c->type != CAP_FRAME && !pool) {
             return false;
         }
         node_range(c, &base, &size);
         node_range(p, &pbase, &psize);
-        return (narrower || c->type == CAP_RETYPED) && range_within(base, size, pbase, psize);
+        return (narrower || pool) && range_within(base, size, pbase, psize);
     }
+    /*
+     * A node an object holds is of the type of the capability it hangs below:
+     * a region of a frame's, a thread's units of a Time capability's, a thread's process of a Process capability's,
+     * and a thread's watch and an Irq's notification of a Notification capability's.
+     * A capability to a pool hangs below the pool's own node, which carries rights of its own.
+     */
     if (c->type == p->type) {
-        if (c->type == CAP_FRAME || c->type == CAP_IRQ_LINE || c->type == CAP_TIME || c->type == CAP_ROUTE_LINE) {
-            return narrower && range_within(c->a, c->b, p->a, p->b);
+        if (c->type == CAP_FRAME) {
+            return narrower && range_within(block_base(c), block_size(c), block_base(p), block_size(p));
+        }
+        /* A thread's units lie among those it was bound through, and the first of them does even for none. */
+        if (c->type == CAP_TIME && cap_held(c)) {
+            uint32_t off = range_first(c) - range_first(p);
+            return narrower && off < range_count(p) && range_count(c) <= range_count(p) - off;
+        }
+        if (c->type == CAP_IRQ_LINE || c->type == CAP_TIME || c->type == CAP_ROUTE_LINE) {
+            return narrower && range_within(range_first(c), range_count(c), range_first(p), range_count(p));
         }
         /* A notification's capability carries the bits it may signal, which narrow as rights do. */
-        return narrower && (c->type == CAP_PRINT || c->type == CAP_HALT || c->type == CAP_TEST || c->type == CAP_CLOCK ||
-                            c->a == p->a) &&
-               (c->type != CAP_NOTIFICATION || !(c->b & ~p->b));
+        return (narrower || node_pool(p) != NULL) &&
+               (c->type == CAP_PRINT || c->type == CAP_HALT || c->type == CAP_TEST || c->type == CAP_CLOCK ||
+                cap_addr(c) == cap_addr(p)) &&
+               (c->type != CAP_NOTIFICATION || !(notify_bits(c) & ~notify_bits(p)));
     }
     /*
      * A clock that reads gives out one frame, the counter's block, read only,
      * and adopts what was carved, installed or connected from it when a delete or a revoke takes it.
      */
-    if ((c->type == CAP_FRAME || c->type == CAP_INSTALLED || c->type == CAP_ROUTED) && p->type == CAP_CLOCK) {
+    if (c->type == CAP_FRAME && p->type == CAP_CLOCK) {
         const struct granted_range *g = &boot_granted[GRANT_COUNTER];
-        return (p->rights & RIGHT_R) && !(c->rights & ~g->rights) && range_within(c->a, c->b, g->base, g->size);
+        return (p->rights & RIGHT_R) && !(c->rights & ~g->rights) &&
+               range_within(block_base(c), block_size(c), g->base, g->size);
     }
-    if ((c->type == CAP_INSTALLED || c->type == CAP_ROUTED) && p->type == CAP_FRAME) {
-        return narrower && range_within(c->a, c->b, p->a, p->b);
-    }
-    /* A thread's units lie among those it was bound through, and the first of them does even for none. */
-    if (c->type == CAP_BOUND && p->type == CAP_TIME) {
-        return narrower && c->a - p->a < p->b && c->b <= p->b - (c->a - p->a);
-    }
-    /*
-     * A thread's process is the process it was made with, its watch the notification it was set with,
-     * and an Irq's notification the one it was bound to, each signalling only bits that capability may.
-     */
-    if (c->type == CAP_HOSTED && p->type == CAP_PROCESS) {
-        return narrower && c->a == p->a;
-    }
-    if ((c->type == CAP_WATCHED || c->type == CAP_SIGNALLED) && p->type == CAP_NOTIFICATION) {
-        return narrower && c->a == p->a && !(c->b & ~p->b);
-    }
-    /* Below a pool's node lies every capability to the pool and to its objects. */
-    if (p->type == CAP_RETYPED || p->type == CAP_POOL) {
-        if (c->type == CAP_POOL) {
-            return c->a == p->a;
-        }
-        /* Objects built in a pool carry rights of their own. */
-        return is_object_type(c->type) && cap_object(c)->pool == p->a;
+    /* Below a pool's node, and below its capability, lies every capability to the pool's objects, which carry rights of their own. */
+    if (p->type == CAP_POOL) {
+        return is_object_type(c->type) && cap_object(c)->pool == cap_addr(p);
     }
     return false;
+}
+
+/*
+ * A filled node's words carry nothing its type has no use for:
+ * the bits below an object's address only on a Notification capability, which keeps part of its code there,
+ * past B_LINK only B_HELD, B_UP, and a notification's code;
+ * and a notification's code names a block of bits, as the one code of six bits that names none does not.
+ */
+static void check_words(const struct cap *n)
+{
+    uint32_t spare = B_HELD | B_UP | (n->type == CAP_NOTIFICATION ? 0x3u << 28 : 0);
+    if ((n->b & ~(B_LINK | spare)) != 0 ||
+        (cap_has_object(n->type) && n->type != CAP_NOTIFICATION && (n->a & (NODE_ALIGN - 1)) != 0) ||
+        (!cap_has_object(n->type) && n->type != CAP_FRAME && n->type != CAP_UNTYPED && n->type != CAP_IRQ_LINE &&
+         n->type != CAP_TIME && n->type != CAP_ROUTE_LINE && n->a != 0)) {
+        fail("a node carries bits its type has no use for", v2p(n), n->a, n->b);
+    }
+    if (n->type == CAP_NOTIFICATION && notify_code(n) == 63) {
+        fail("a notification's capability names no block of bits", v2p(n), n->a, n->b);
+    }
 }
 
 /* One node's links; bound is more than the nodes there are, so a walk that long is a cycle. */
 static void check_node(const struct cap *n, uint32_t bound)
 {
     if (n->type == CAP_NONE) {
-        if (n->child != 0 || n->next != 0 || n->prev != 0) {
-            fail("empty slot keeps links", v2p(n), n->child, n->next);
+        if (n->b != 0 || cap_next(n) != 0 || cap_prev(n) != 0) {
+            fail("empty slot keeps links", v2p(n), cap_child(n), cap_next(n));
         }
         return;
     }
-    if (n->next == 0 || (n->child & LINK_UP)) {
-        fail("filled slot has malformed links", v2p(n), n->child, n->next);
+    if (cap_next(n) == 0) {
+        fail("filled slot has malformed links", v2p(n), cap_child(n), cap_next(n));
     }
-    if (n->child != 0) {
-        const struct cap *c = live_node(n->child);
+    check_words(n);
+    if (cap_child(n) != 0) {
+        const struct cap *c = live_node(cap_child(n));
         if (c == NULL || c->type == CAP_NONE) {
-            fail("child link to a slot that is not a live, filled one", v2p(n), n->child, 0);
+            fail("child link to a slot that is not a live, filled one", v2p(n), cap_child(n), 0);
         }
     }
 
     /* Along the ring to the parent, every sibling live and filled. */
-    uint32_t link = n->next;
+    uint32_t link = cap_next(n);
     uint32_t steps = 0;
     while (!(link & LINK_UP)) {
         const struct cap *s = live_node(link);
@@ -1388,18 +1401,19 @@ static void check_node(const struct cap *n, uint32_t bound)
         if (++steps > bound) {
             fail("sibling ring does not close", v2p(n), link, 0);
         }
-        link = s->next;
+        link = cap_next(s);
     }
     if (link == LINK_UP) {
         /* A root: roots have no ring, so nothing may lead here through siblings. */
         if (steps != 0) {
             fail("sibling ring closes on no parent", v2p(n), 0, 0);
         }
-        if (n->prev != 0) {
-            fail("root has a predecessor", v2p(n), n->prev, 0);
+        /* Only a delete of an Untyped as a root marks it going, in the prev a root has no use for. */
+        if (cap_prev(n) != 0 && !(n->type == CAP_UNTYPED && cap_prev(n) == NODE_ALIGN)) {
+            fail("root has a predecessor", v2p(n), cap_prev(n), 0);
         }
-        /* Every capability to a pool or its objects lies below the pool's own node. */
-        if (n->type == CAP_POOL || is_object_type(n->type)) {
+        /* Every capability to a pool or its objects lies below the pool's own node, which may be a root itself. */
+        if ((n->type == CAP_POOL && node_pool(n) == NULL) || is_object_type(n->type)) {
             fail("capability to an object is a root", v2p(n), n->type, n->a);
         }
         return;
@@ -1413,21 +1427,21 @@ static void check_node(const struct cap *n, uint32_t bound)
     }
     /* The parent's ring is this one: it comes round to the node. */
     steps = 0;
-    link = parent->child;
+    link = cap_child(parent);
     for (const struct cap *s = live_node(link); s != n; s = live_node(link)) {
         if ((link & LINK_UP) || s == NULL || ++steps > bound) {
             fail("parent's ring does not reach the slot", v2p(n), v2p(parent), link);
         }
-        link = s->next;
+        link = cap_next(s);
     }
     /* The predecessor is the sibling whose next is this node; the first child's is the last. */
-    const struct cap *pred = live_node(n->prev);
-    if (pred == NULL || pred->type == CAP_NONE || (n->prev & LINK_UP)) {
-        fail("predecessor link to a slot that is not a live, filled one", v2p(n), n->prev, 0);
+    const struct cap *pred = live_node(cap_prev(n));
+    if (pred == NULL || pred->type == CAP_NONE) {
+        fail("predecessor link to a slot that is not a live, filled one", v2p(n), cap_prev(n), 0);
     }
-    bool first = parent->child == v2p(n);
-    if (first ? pred->next != (v2p(parent) | LINK_UP) : pred->next != v2p(n)) {
-        fail("predecessor's next is not the slot", v2p(n), n->prev, pred->next);
+    bool first = cap_child(parent) == v2p(n);
+    if (first ? cap_next(pred) != (v2p(parent) | LINK_UP) : cap_next(pred) != v2p(n)) {
+        fail("predecessor's next is not the slot", v2p(n), cap_prev(n), cap_next(pred));
     }
 }
 
@@ -1467,9 +1481,9 @@ static uint32_t tree_bound;
 /* The node a node was derived from, or NULL at a root; check_node has vetted the rings. */
 static const struct cap *node_parent(const struct cap *n)
 {
-    uint32_t link = n->next;
+    uint32_t link = cap_next(n);
     while (!(link & LINK_UP)) {
-        link = live_node(link)->next;
+        link = cap_next(live_node(link));
     }
     return link == LINK_UP ? NULL : live_node(link);
 }
@@ -1516,7 +1530,7 @@ static void check_tree(void)
  */
 static bool going(const struct cap *u)
 {
-    return u->type == CAP_UNTYPED && u->b == UNTYPED_GOING;
+    return untyped_going(u);
 }
 
 /*
@@ -1534,7 +1548,7 @@ static void check_nesting(void)
     node_enter(&it, object_first());
     for (const struct cap *x = node_next(&it); x != NULL; x = node_next(&it)) {
         uint32_t xbase, xsize;
-        if ((x->type != CAP_UNTYPED && x->type != CAP_RETYPED) || !node_range(x, &xbase, &xsize)) {
+        if ((x->type != CAP_UNTYPED && node_pool(x) == NULL) || !node_range(x, &xbase, &xsize)) {
             continue;
         }
         node_enter(&jt, object_first());

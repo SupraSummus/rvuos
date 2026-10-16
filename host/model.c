@@ -73,6 +73,79 @@ static const struct cap *node_at(uint32_t link)
     return p2v(link & ~LINK_UP);
 }
 
+/*
+ * The model's own types for the nodes an object holds, which the kernel tells by B_HELD and by where they lie;
+ * see capInstalled in model/Rvuos/Abi.lean.
+ */
+enum {
+    MODEL_INSTALLED = 0x80,
+    MODEL_RETYPED = 0x81,
+    MODEL_BOUND = 0x82,
+    MODEL_HOSTED = 0x83,
+    MODEL_SIGNALLED = 0x84,
+    MODEL_WATCHED = 0x85,
+    MODEL_ROUTED = 0x86,
+};
+
+/*
+ * A filled node as the model reads it: its type, rights, index, and words,
+ * a frame's base and size and a range's first and count in two words,
+ * a Notification capability's bits in the second, an Untyped's going there,
+ * and a node an object holds by the model's type for it, with its index among its holder's slots or places.
+ */
+static void put_node(const struct obj_header *o, const struct cap *c)
+{
+    uint32_t type = c->type, index = 0, a = 0, b = 0;
+    switch (c->type) {
+    case CAP_FRAME:
+    case CAP_UNTYPED:
+        a = c->type == CAP_UNTYPED ? c->a : block_base(c);
+        b = c->type == CAP_UNTYPED ? untyped_going(c) : block_size(c);
+        if (cap_held(c) && o->type == CAP_ROUTE) {
+            type = MODEL_ROUTED;
+            index = (uint32_t)(c - ((const struct route *)o)->ends);
+        } else if (cap_held(c)) {
+            type = MODEL_INSTALLED;
+            index = (uint32_t)(c - ((const struct process *)o)->slots);
+        }
+        break;
+    case CAP_IRQ_LINE:
+    case CAP_TIME:
+    case CAP_ROUTE_LINE:
+        a = range_first(c);
+        b = range_count(c);
+        if (cap_held(c)) {
+            type = MODEL_BOUND;
+            index = (uint32_t)(c - ((const struct thread *)o)->time);
+        }
+        break;
+    case CAP_NOTIFICATION:
+        a = cap_addr(c);
+        b = notify_bits(c);
+        if (cap_held(c)) {
+            type = MODEL_SIGNALLED;
+        } else if (o->type == CAP_THREAD) {
+            type = MODEL_WATCHED;
+        }
+        break;
+    case CAP_PRINT:
+    case CAP_HALT:
+    case CAP_TEST:
+    case CAP_CLOCK:
+        break;
+    default:
+        a = cap_addr(c);
+        if (c->type == CAP_PROCESS && cap_held(c)) {
+            type = MODEL_HOSTED;
+        } else if (node_pool(c) != NULL) {
+            type = MODEL_RETYPED;
+        }
+        break;
+    }
+    put("node %u %u %u %u %u %u\n", (unsigned)v2p(c), (unsigned)type, (unsigned)c->rights, (unsigned)index,
+        (unsigned)a, (unsigned)b);
+}
+
 static void put_state(void)
 {
     put("state\n");
@@ -91,21 +164,20 @@ static void put_state(void)
             if (c->type == CAP_NONE) {
                 continue;
             }
-            put("node %u %u %u %u %u %u\n", (unsigned)v2p(c), (unsigned)c->type, (unsigned)c->rights,
-                (unsigned)c->index, (unsigned)c->a, (unsigned)c->b);
-            if (c->child == 0) {
+            put_node(o, c);
+            if (cap_child(c) == 0) {
                 continue;
             }
             /* The ring from the first child, until the last links up. */
             put("kids %u", (unsigned)v2p(c));
             /* A ring a bug left open ends where there are no more nodes to visit, for the model to refuse. */
-            const struct cap *k = node_at(c->child);
+            const struct cap *k = node_at(cap_child(c));
             for (uint32_t n = 0; n < HOST_RAM_SIZE / sizeof(struct cap); n++) {
                 put(" %u", (unsigned)v2p(k));
-                if (k->next & LINK_UP) {
+                if (cap_next(k) & LINK_UP) {
                     break;
                 }
-                k = node_at(k->next);
+                k = node_at(cap_next(k));
             }
             put("\n");
         }

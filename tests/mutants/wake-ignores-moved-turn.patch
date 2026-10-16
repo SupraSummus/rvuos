@@ -14,7 +14,7 @@ diff --git a/kernel/sched.c b/kernel/sched.c
      }
      /* A thread that lost the time of this core during its turn here, its place emptied, ends the turn at the next tick. */
 -    const struct place *p = thread_place_on(turn, core_index());
-+    const struct place *p = turn->time[0].type == CAP_BOUND ? thread_place(turn, 0) : NULL;
++    const struct place *p = turn->time[0].type == CAP_TIME ? thread_place(turn, 0) : NULL;
      if (core->run_queue != 0 || p == NULL) {
          return 1;
      }

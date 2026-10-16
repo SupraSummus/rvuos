@@ -236,6 +236,9 @@ def analyse(functions, end, frames, image, sections):
         high = {}  # register -> the value an lui or auipc left in it
         for pc, mnem, ops in insns:
             args = [a.strip() for a in ops.split(",")] if ops else []
+            if name in frames and mnem in ("mv", "and", "andi") and args[0] == "sp":
+                raise Failure(f"{name} at {pc:#x} sets sp from a register, "
+                              "a frame realigned or sized at run time, which -fstack-usage calls static")
             m = TARGET.search(ops)
             if m:
                 target = int(m.group(1), 16)

@@ -17,7 +17,8 @@ structure Cap where
   b : Nat
 deriving BEq, Repr, Inhabited, DecidableEq
 
-/-- `UNTYPED_GOING`: an Untyped's `b` once its delete as a root has begun, after which it makes nothing. -/
+/-- An Untyped's `b` once its delete as a root has begun, after which it makes nothing:
+the kernel's `B_GOING`, as `host/model.c` writes it. -/
 abbrev untypedGoing : Nat := 1
 
 /-- A node a delete of it as a root has begun: an Untyped marked going, anything else as it was. -/
@@ -149,13 +150,13 @@ end State
 
 /-! The words of an Untyped and a frame, in the 32 bits the kernel computes them in. -/
 
-/-- `untyped_size`: the block's size from its word. -/
+/-- `block_size`: the block's size from its word. -/
 def blockSize (a : BitVec 32) : BitVec 32 := (a ^^^ (a + 1)) + 1
 
-/-- `untyped_base`. -/
+/-- `block_base`. -/
 def blockBase (a : BitVec 32) : BitVec 32 := a &&& ~~~(blockSize a - 1)
 
-/-- `untyped_block`: a block in one word, the bits below half its size set. -/
+/-- `block_word`: a block in one word, the bits below half its size set. -/
 def blockWord (base size : BitVec 32) : BitVec 32 := base ||| (size / 2 - 1)
 
 /-- `napot_block`: a power of two no smaller than the smallest region, aligned to itself. -/

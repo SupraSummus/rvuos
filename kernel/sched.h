@@ -28,6 +28,7 @@
  * unit u is a part of core u / TIME_UNITS, and a thread's place holds the time of the core its units lie on.
  */
 #define MACHINE_UNITS (CORES * TIME_UNITS)
+_Static_assert(MACHINE_UNITS <= UINT16_MAX, "a Time capability names its first unit and its count in two bytes each");
 
 static inline uint32_t unit_core(uint32_t unit)
 {
@@ -45,14 +46,14 @@ extern paddr_t unit_place[MACHINE_UNITS];
 static inline uint32_t place_units(const struct place *p)
 {
     const struct cap *b = place_time(p);
-    return b->type == CAP_BOUND ? b->b : 0;
+    return b->type == CAP_TIME ? range_count(b) : 0;
 }
 
 /* Whether a place may run its thread on spare time: bound through a Time capability with RIGHT_X. */
 static inline bool place_spare(const struct place *p)
 {
     const struct cap *b = place_time(p);
-    return b->type == CAP_BOUND && (b->rights & RIGHT_X) != 0;
+    return b->type == CAP_TIME && (b->rights & RIGHT_X) != 0;
 }
 
 /*
@@ -62,12 +63,12 @@ static inline bool place_spare(const struct place *p)
 static inline struct place *thread_place_on(const struct thread *t, uint32_t core)
 {
     if (CORES == 1) {
-        return t->time[0].type == CAP_BOUND ? thread_place(t, 0) : NULL;
+        return t->time[0].type == CAP_TIME ? thread_place(t, 0) : NULL;
     }
     for (uint32_t i = 0; i < t->places; i++) {
         LOOP_BOUND(CORES);
         const struct cap *b = &t->time[i];
-        if (b->type == CAP_BOUND && unit_core(b->a) == core) {
+        if (b->type == CAP_TIME && unit_core(range_first(b)) == core) {
             return thread_place(t, i);
         }
     }

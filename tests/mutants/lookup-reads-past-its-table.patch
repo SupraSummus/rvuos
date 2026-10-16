@@ -1,13 +1,15 @@
 A lookup takes the slot just past a table as one of its slots.
-The first bytes it reads are the table's padding, which pool_alloc zeroed,
-so the slot reads as empty and the call fails as it should:
+A table's slots end on sixteen bytes, so what it reads is the next object or the pool's free memory,
+and a slot that reads as empty fails the call as it should:
 nothing the kernel does shows the read,
 which reaches outside the table all the same.
-The seed slot-past-table names that slot, as the capability a call invokes and as a copy's source.
+The seed slot-past-table names that slot of a table the newest object of its pool, past which the pool is free,
+as the capability a call invokes and as a copy's source.
 Memory safety.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: the kernel reached RAM outside its objects
+Report: the kernel reached outside RAM
 Witness: fuzz slot-past-table
 
 diff --git a/kernel/cap.c b/kernel/cap.c

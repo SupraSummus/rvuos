@@ -8,10 +8,10 @@ Witness: fuzz describe-every-type
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -941,6 +941,7 @@ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *a
+@@ -952,6 +952,7 @@ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *a
      case CAP_NOTIFICATION:
          /* The bits it may signal, never those that are set, which only a wait takes, with RIGHT_R. */
-         arg[2] = cap->b;
+         arg[2] = notify_bits(cap);
 +        arg[3] = ((const struct notification *)cap_object(cap))->bits;
          break;
      case CAP_IRQ_LINE:

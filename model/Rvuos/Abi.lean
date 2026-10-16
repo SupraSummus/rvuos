@@ -24,7 +24,7 @@ abbrev capHalt : Nat := 13
 abbrev capTest : Nat := 14
 abbrev capRouteLine : Nat := 15
 abbrev capRoute : Nat := 16
-/-- The kernel's own nodes, never in a table; see `kernel/object.h`. -/
+/-- The nodes an object holds, by types of the model's own, never in a table; see `put_node` in `host/model.c`. -/
 abbrev capInstalled : Nat := 0x80
 abbrev capRetyped : Nat := 0x81
 abbrev capBound : Nat := 0x82
@@ -61,8 +61,8 @@ abbrev opCount : Nat := 47
 /-! Slot numbers, `SLOT_TABLE_SHIFT` and `PROCESS_TABLES`. -/
 abbrev slotTableShift : Nat := 10
 abbrev processTables : Nat := 2
-/-- A node, `struct cap`, is 24 bytes. -/
-abbrev nodeSize : Nat := 24
+/-- A node, `struct cap`, is 16 bytes. -/
+abbrev nodeSize : Nat := 16
 
 /-- True if a capability of this type names a kernel object, `cap_has_object`. -/
 def capHasObject (t : Nat) : Bool :=

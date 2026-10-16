@@ -9,13 +9,13 @@ Witness: fuzz delete-root-makes-nothing
 diff --git a/kernel/cap.c b/kernel/cap.c
 --- a/kernel/cap.c
 +++ b/kernel/cap.c
-@@ -284,6 +284,9 @@ bool cap_delete(struct cap *n, bool preempt)
+@@ -293,6 +293,9 @@ bool cap_delete(struct cap *n, bool preempt)
      }
-     while (n->child != 0) {
+     while (cap_child(n) != 0) {
          LOOP_PAID(cap_delete, link, "a child below a root, which becomes a root itself");
 +        if (cap_stop_here(preempt)) {
 +            return false;
 +        }
-         struct cap *c = node(n->child);
+         struct cap *c = node(cap_child(n));
          detach(c, false);
-         c->next = LINK_UP;
+         cap_set_next(c, LINK_UP);

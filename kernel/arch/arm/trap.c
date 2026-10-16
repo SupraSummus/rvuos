@@ -152,7 +152,7 @@ static bool stack_takes(const struct thread *t, uint32_t at)
         LOOP_BOUND(PMP_MAX_ENTRIES);
         const struct cap *s = &proc->slots[i];
         if (s->type != CAP_NONE && (s->rights & (RIGHT_R | RIGHT_W)) == (RIGHT_R | RIGHT_W) &&
-            at - s->a < s->b && s->b - (at - s->a) >= HW_FRAME) {
+            at - block_base(s) < block_size(s) && block_size(s) - (at - block_base(s)) >= HW_FRAME) {
             return true;
         }
     }

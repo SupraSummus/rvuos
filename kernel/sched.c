@@ -182,7 +182,7 @@ static struct place *turn_place(const struct core *core)
 static uint32_t place_core(const struct place *p)
 {
     const struct cap *b = place_time(p);
-    return b->type == CAP_BOUND ? unit_core(b->a) : p->core;
+    return b->type == CAP_TIME ? unit_core(range_first(b)) : p->core;
 }
 
 /*
@@ -193,7 +193,7 @@ static uint32_t count_of(const struct place *p)
 {
     const struct thread *t = place_thread(p);
     const struct cap *b = place_time(p);
-    return is_turn(t) && b->type == CAP_BOUND && unit_core(b->a) == t->core ? cores[t->core].ticks : sched_ticks;
+    return is_turn(t) && b->type == CAP_TIME && unit_core(range_first(b)) == t->core ? cores[t->core].ticks : sched_ticks;
 }
 
 /* A place's account at the count: it gains its tick's parts every tick since its stamp, up to its cap. */
@@ -284,10 +284,10 @@ static struct place *place_lender(const struct place *p)
 {
     const struct thread *t = place_thread(p);
     const struct cap *b = place_time(p);
-    if (t->lenders == 0 || b->type != CAP_BOUND) {
+    if (t->lenders == 0 || b->type != CAP_TIME) {
         return NULL;
     }
-    return thread_place_on(p2v(t->lenders), unit_core(b->a));
+    return thread_place_on(p2v(t->lenders), unit_core(range_first(b)));
 }
 
 /* The borrower's place a lender's place lends its time to, if it is that one's: the inverse of place_lender, or NULL. */
@@ -295,11 +295,11 @@ static struct place *place_borrower(const struct place *l)
 {
     const struct thread *lt = place_thread(l);
     const struct cap *b = place_time(l);
-    if (lt->lend_to == 0 || b->type != CAP_BOUND) {
+    if (lt->lend_to == 0 || b->type != CAP_TIME) {
         return NULL;
     }
     const struct thread *h = p2v(lt->lend_to);
-    return h->lenders == v2p(lt) ? thread_place_on(h, unit_core(b->a)) : NULL;
+    return h->lenders == v2p(lt) ? thread_place_on(h, unit_core(range_first(b))) : NULL;
 }
 
 /*
@@ -311,7 +311,7 @@ static struct place *place_borrower(const struct place *l)
 static uint8_t place_queue(const struct place *p, uint32_t balance, const struct place *l)
 {
     const struct thread *t = place_thread(p);
-    if (t->state != THREAD_READY || is_turn(t) || place_time(p)->type != CAP_BOUND) {
+    if (t->state != THREAD_READY || is_turn(t) || place_time(p)->type != CAP_TIME) {
         return QUEUE_NONE;
     }
     if (has_time(balance) || (l != NULL && has_time(account_now(l)))) {
@@ -489,7 +489,7 @@ struct place *sched_place_for(const struct thread *t, uint32_t core)
     for (uint32_t i = 0; i < thread_places(t); i++) {
         LOOP_BOUND(CORES);
         const struct cap *b = &t->time[i];
-        if (b->type == CAP_BOUND && unit_core(b->a) == core) {
+        if (b->type == CAP_TIME && unit_core(range_first(b)) == core) {
             return thread_place(t, i);
         }
         if (b->type == CAP_NONE && empty == NULL) {
@@ -507,7 +507,8 @@ void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights,
     if (b->type != CAP_NONE) {
         cap_delete(b, false);
     }
-    *b = (struct cap){ .type = CAP_BOUND, .rights = rights, .index = p->index, .a = first, .b = count };
+    *b = cap_to_time(first, count, rights);
+    b->b = held_word(v2p(place_thread(p)), 0);
     cap_attach(parent, b);
     for (uint32_t i = 0; i < count; i++) {
         LOOP_BOUND(TIME_UNITS);
@@ -524,10 +525,10 @@ void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights,
 
 void sched_unbind(struct cap *bound)
 {
-    struct thread *t = bound_thread(bound);
-    for (uint32_t i = 0; i < bound->b; i++) {
+    struct thread *t = p2v(cap_holder(bound));
+    for (uint32_t i = 0; i < range_count(bound); i++) {
         LOOP_BOUND(TIME_UNITS);
-        unit_place[bound->a + i] = 0;
+        unit_place[range_first(bound) + i] = 0;
     }
     *bound = (struct cap){ 0 };
     /* An empty place holds nothing, so settling empties its account as it takes the place off its queue. */
@@ -557,7 +558,7 @@ static bool thread_stop(struct thread *t)
  */
 void sched_unhost(struct cap *hosted)
 {
-    struct thread *t = hosted_thread(hosted);
+    struct thread *t = p2v(cap_holder(hosted));
     /* switch_to would find the running thread with no process to save the CSRs it keeps into, so they go now. */
     if (core_self()->current == t) {
         board_user_csrs_switch(thread_process(t), NULL);
@@ -592,7 +593,7 @@ uint32_t sched_stop(struct thread *t)
 static struct place *unit_first(uint32_t unit)
 {
     struct place *p = unit_place[unit] != 0 ? p2v(unit_place[unit]) : NULL;
-    return p != NULL && place_time(p)->a == unit ? p : NULL;
+    return p != NULL && range_first(place_time(p)) == unit ? p : NULL;
 }
 
 /*
@@ -768,7 +769,7 @@ void irq_signal(struct irq *irq)
 
 void irq_drop(struct cap *signalled)
 {
-    struct irq *irq = signalled_irq(signalled);
+    struct irq *irq = p2v(cap_holder(signalled));
     irq_set_bits(irq, 0);
     /* Only the controller's lines have a mask. */
     if (line_on_controller(irq->line)) {

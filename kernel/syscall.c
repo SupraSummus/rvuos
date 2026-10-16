@@ -155,7 +155,7 @@ static int op_captable(struct thread *t, uint32_t slot, const struct cap *cap,
             return err;
         }
         /* Below an Untyped the pools go too. */
-        if (c.type == CAP_UNTYPED && holds_caller(t, table, untyped_base(&c), untyped_size(&c))) {
+        if (c.type == CAP_UNTYPED && holds_caller(t, table, block_base(&c), block_size(&c))) {
             return KERR_STATE;
         }
         return cap_revoke_below(&table->slots[arg[1]], slot, true) ? KERR_OK : KERR_PREEMPTED;
@@ -220,8 +220,8 @@ static int op_clock(struct thread *t, uint32_t slot, uint32_t op, uint32_t *arg)
 static int op_frame(struct thread *t, uint32_t slot, const struct cap *cap,
                     uint32_t op, uint32_t *arg)
 {
-    uint32_t base = cap->a;
-    uint32_t size = cap->b;
+    uint32_t base = block_base(cap);
+    uint32_t size = block_size(cap);
 
     switch (op) {
     case OP_FRAME_CARVE: {
@@ -243,8 +243,8 @@ static int op_frame(struct thread *t, uint32_t slot, const struct cap *cap,
 static int op_untyped(struct thread *t, uint32_t slot, const struct cap *cap,
                       uint32_t op, uint32_t *arg)
 {
-    uint32_t base = untyped_base(cap);
-    uint32_t size = untyped_size(cap);
+    uint32_t base = block_base(cap);
+    uint32_t size = block_size(cap);
     struct cap *u = slot_node(t, slot);
 
     switch (op) {
@@ -416,7 +416,8 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
         }
         thread_make_places(nt, places);
         /* It hangs below the capability it was made with, so a revoke above that stops the thread. */
-        nt->proc = (struct cap){ .type = CAP_HOSTED, .rights = pc.rights, .a = pc.a };
+        nt->proc = (struct cap){ .type = CAP_PROCESS, .rights = pc.rights, .a = cap_addr(&pc) };
+        nt->proc.b = held_word(v2p(nt), 0);
         cap_attach(slot_node(t, arg[3]), &nt->proc);
         nt->state = THREAD_STOPPED;
         /* Until it is configured while tracing is off, the host cannot follow it. */
@@ -478,7 +479,7 @@ static int op_process(struct thread *t, const struct cap *cap,
         if (EXECUTE_NEEDS_READ && (rights & RIGHT_X) && !(rights & RIGHT_R)) {
             return KERR_INVALID_ARG;
         }
-        return process_install(proc, arg[1], region.a, region.b, rights, slot_node(t, arg[2]));
+        return process_install(proc, arg[1], block_base(&region), block_size(&region), rights, slot_node(t, arg[2]));
     }
     case OP_PROCESS_UNINSTALL:
         return process_uninstall(proc, arg[1]);
@@ -559,15 +560,20 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
     case OP_THREAD_WATCH: {
         /* The watch signals on its setter's behalf, so the setter must be able to, and only the bits it may. */
         uint32_t bits = arg[2];
+        uint32_t code = 0;
         struct cap nc;
         if (bits != 0) {
             int err = slot_lookup_typed(t, arg[1], CAP_NOTIFICATION, RIGHT_W, &nc);
             if (err != KERR_OK) {
                 return err;
             }
-            bits &= nc.b;
+            bits &= notify_bits(&nc);
             if (bits == 0) {
                 return KERR_NO_RIGHTS;
+            }
+            /* The watch is a capability, whose bits are a block. */
+            if (!notify_block(bits, &code)) {
+                return KERR_INVALID_ARG;
             }
         }
         /* The watch is a leaf, so it leaves the tree in a step. */
@@ -576,7 +582,8 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
         }
         if (bits != 0) {
             /* It hangs below the capability it was set with, so a revoke above that clears it. */
-            target->watch = (struct cap){ .type = CAP_WATCHED, .rights = nc.rights, .a = nc.a, .b = bits };
+            target->watch = (struct cap){ .type = CAP_NOTIFICATION, .rights = nc.rights };
+            notify_set(&target->watch, cap_addr(&nc), code);
             cap_attach(slot_node(t, arg[1]), &target->watch);
         }
         return KERR_OK;
@@ -623,7 +630,7 @@ static int op_notification(struct thread *t, uint32_t slot, const struct cap *ca
             return KERR_INVALID_ARG;
         }
         /* The capability says which bits it may signal, so a wait's bits say who signalled. */
-        uint32_t bits = arg[1] & cap->b;
+        uint32_t bits = arg[1] & notify_bits(cap);
         if (bits == 0) {
             return KERR_NO_RIGHTS;
         }
@@ -634,12 +641,16 @@ static int op_notification(struct thread *t, uint32_t slot, const struct cap *ca
         return KERR_OK;
     }
     case OP_NOTIFY_CARVE: {
-        /* Fewer bits, as a carve of a frame is less memory: a table operation, below the invoked capability. */
-        struct cap sub = *cap;
-        sub.b &= arg[1];
-        if (sub.b == 0) {
+        /*
+         * Fewer bits, as a carve of a frame is less memory: a table operation, below the invoked capability.
+         * They are a block, as every Notification capability's are, so that six bits of the slot say which.
+         */
+        uint32_t code;
+        if (!notify_block(arg[1] & notify_bits(cap), &code)) {
             return KERR_INVALID_ARG;
         }
+        struct cap sub = *cap;
+        notify_set(&sub, cap_addr(cap), code);
         return slot_store(t, arg[2], &sub, slot_node(t, slot));
     }
     case OP_NOTIFY_WAIT:
@@ -665,10 +676,10 @@ static int carve_range(struct thread *t, uint32_t slot, const struct cap *cap, c
 {
     uint32_t off = arg[1];
     uint32_t len = arg[2];
-    if (len == 0 || off > cap->b || len > cap->b - off) {
+    if (len == 0 || off > range_count(cap) || len > range_count(cap) - off) {
         return KERR_INVALID_ARG;
     }
-    struct cap sub = { .type = cap->type, .rights = cap->rights, .a = cap->a + off, .b = len };
+    struct cap sub = { .type = cap->type, .rights = cap->rights, .a = range_word(range_first(cap) + off, len) };
     return slot_store(t, arg[3], &sub, slot_node(t, slot));
 }
 
@@ -676,8 +687,8 @@ static int carve_range(struct thread *t, uint32_t slot, const struct cap *cap, c
 static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
                        uint32_t op, const uint32_t *arg)
 {
-    uint32_t first = cap->a;
-    uint32_t count = cap->b;
+    uint32_t first = range_first(cap);
+    uint32_t count = range_count(cap);
 
     switch (op) {
     case OP_IRQ_CARVE:
@@ -722,7 +733,8 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
         }
         struct irq *irq = pool_alloc(pool, CAP_IRQ, obj_type_size(CAP_IRQ, 0));
         /* It hangs below the capability it was bound with, so a revoke above that disarms the Irq. */
-        irq->ntfn = (struct cap){ .type = CAP_SIGNALLED, .rights = nc.rights, .a = nc.a, .b = nc.b };
+        irq->ntfn = nc;
+        irq->ntfn.b = held_word(v2p(irq), nc.b);
         cap_attach(slot_node(t, arg[2]), &irq->ntfn);
         irq->line = first;
         /* A period counts from the last deadline, and a line that never fired from its bind. */
@@ -743,14 +755,14 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
 static int op_route_line(struct thread *t, uint32_t slot, const struct cap *cap,
                          uint32_t op, const uint32_t *arg)
 {
-    uint32_t channel = cap->a;
+    uint32_t channel = range_first(cap);
 
     switch (op) {
     case OP_ROUTE_CARVE:
         return carve_range(t, slot, cap, arg);
     case OP_ROUTE_BIND: {
         /* One Route per channel, so a binding names one channel. */
-        if (cap->b != 1) {
+        if (range_count(cap) != 1) {
             return KERR_INVALID_ARG;
         }
         struct cap pc;
@@ -810,7 +822,7 @@ static int op_route(struct thread *t, const struct cap *cap, uint32_t op, const 
             return err;
         }
         uint32_t word;
-        if (!router_end(end, fc.a, fc.b, arg[3], &word)) {
+        if (!router_end(end, block_base(&fc), block_size(&fc), arg[3], &word)) {
             return KERR_INVALID_ARG;
         }
         /*
@@ -821,7 +833,8 @@ static int op_route(struct thread *t, const struct cap *cap, uint32_t op, const 
             cap_delete(&r->ends[end], false);
         }
         /* It hangs below the capability it was connected through, so a revoke above that disarms the Route. */
-        r->ends[end] = (struct cap){ .type = CAP_ROUTED, .rights = fc.rights, .index = (uint8_t)end, .a = fc.a, .b = fc.b };
+        r->ends[end] = (struct cap){ .type = CAP_FRAME, .rights = fc.rights, .a = fc.a };
+        r->ends[end].b = held_word(v2p(r), 0);
         cap_attach(slot_at(t, arg[2]), &r->ends[end]);
         r->names[end] = arg[3];
         return KERR_OK;
@@ -856,11 +869,11 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
         /* The first unit lies within the capability even for none, so that the binding lies below it. */
         uint32_t off = arg[2];
         uint32_t count = arg[3];
-        if (off >= cap->b || count > cap->b - off) {
+        if (off >= range_count(cap) || count > range_count(cap) - off) {
             return KERR_INVALID_ARG;
         }
         /* A place holds the time of one core, so the units it earns are of one. */
-        uint32_t first = cap->a + off;
+        uint32_t first = range_first(cap) + off;
         if (count != 0 && unit_core(first) != unit_core(first + count - 1)) {
             return KERR_INVALID_ARG;
         }
@@ -919,7 +932,7 @@ static int op_irq(const struct cap *cap, uint32_t op, uint32_t *arg)
         return KERR_STATE;
     }
     /* It signals on its binder's behalf, so only the bits the capability it was bound with may. */
-    bits &= irq->ntfn.b;
+    bits &= notify_bits(&irq->ntfn);
     if (bits == 0 && arg[1] != 0) {
         return KERR_NO_RIGHTS;
     }
@@ -1015,13 +1028,13 @@ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *a
     arg[4] = 0;
     switch (cap->type) {
     case CAP_FRAME:
-        arg[2] = cap->a;
-        arg[3] = cap->b;
+        arg[2] = block_base(cap);
+        arg[3] = block_size(cap);
         arg[4] = region_min_size();
         break;
     case CAP_UNTYPED:
-        arg[2] = untyped_base(cap);
-        arg[3] = untyped_size(cap);
+        arg[2] = block_base(cap);
+        arg[3] = block_size(cap);
         arg[4] = untyped_made(cap);
         break;
     case CAP_POOL: {
@@ -1041,30 +1054,30 @@ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *a
         break;
     case CAP_NOTIFICATION:
         /* The bits it may signal, never those that are set, which only a wait takes, with RIGHT_R. */
-        arg[2] = cap->b;
+        arg[2] = notify_bits(cap);
         break;
     case CAP_IRQ_LINE:
         /* Carving narrows within one grant, so a range is all timer lines or none. */
-        arg[2] = cap->a;
-        arg[3] = cap->b;
-        arg[4] = line_is_timer(cap->a);
+        arg[2] = range_first(cap);
+        arg[3] = range_count(cap);
+        arg[4] = line_is_timer(range_first(cap));
         break;
     case CAP_IRQ: {
         /* What the bind's capability may signal, zero once the notification was taken, and never what is armed. */
         const struct irq *irq = (const struct irq *)cap_object(cap);
         arg[2] = irq->line;
-        arg[3] = irq->ntfn.b;
+        arg[3] = irq_notification(irq) != NULL ? notify_bits(&irq->ntfn) : 0;
         arg[4] = line_is_timer(irq->line);
         break;
     }
     case CAP_TIME:
-        arg[2] = cap->a;
-        arg[3] = cap->b;
+        arg[2] = range_first(cap);
+        arg[3] = range_count(cap);
         arg[4] = TIMER_US_PER_TICK;
         break;
     case CAP_ROUTE_LINE:
-        arg[2] = cap->a;
-        arg[3] = cap->b;
+        arg[2] = range_first(cap);
+        arg[3] = range_count(cap);
         break;
     case CAP_ROUTE: {
         /* Which ends are connected and whether it is armed, never what the ends are. */
@@ -1087,8 +1100,8 @@ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *a
         arg[2] = th->places;
         for (uint32_t i = 0; i < th->places; i++) {
             LOOP_BOUND(CORES);
-            if (th->time[i].type == CAP_BOUND) {
-                arg[3] |= 1u << unit_core(th->time[i].a);
+            if (th->time[i].type == CAP_TIME) {
+                arg[3] |= 1u << unit_core(range_first(&th->time[i]));
             }
         }
         break;
@@ -1380,7 +1393,7 @@ void fault_dispatch(struct thread *t)
     core_self()->trace_wake_bits = 0;
     struct notification *watch = thread_watch(t);
     if (watch != NULL) {
-        sched_signal(watch, t->watch.b);
+        sched_signal(watch, notify_bits(&t->watch));
     }
     if (debug_trace) {
         trace_wake();

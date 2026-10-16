@@ -12,7 +12,7 @@ diff --git a/kernel/process.c b/kernel/process.c
 @@ -57,7 +57,7 @@ static void rebuild_pmp(struct process *proc)
          const struct cap *s = &proc->slots[i];
          if (s->type != CAP_NONE) {
-             addr[count] = pmp_napot_addr(s->a, s->b);
+             addr[count] = pmp_napot_addr(block_base(s), block_size(s));
 -            cfg[count] = PMP_A_NAPOT | rights_to_pmp(s->rights);
 +            cfg[count] = PMP_A_NAPOT | rights_to_pmp(s->rights) | PMP_W;
              count++;
