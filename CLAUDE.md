@@ -41,67 +41,85 @@ It boots QEMU, replays the fuzz corpus on the host build,
 and compares host and QEMU transcripts.
 It runs its parts side by side, a processor each, and `make CHECK_JOBS=1 check` one after another;
 QEMU's `-icount` keeps what they print the same however many run at once.
+
 It also holds what a system call and a switch cost, `make bench`, to the records in `tests/bench/` within a tenth;
 a change that moves a cost further, and means to, runs `make bench-refresh` with `BOARD=qemu`, `mps2-an385` and `mps2-an521`,
 and its commit says what it cost.
 A change meant to make a trap cheaper compares `make trap-profile` before and after, with `TRAP_SAVE` and `TRAP_AGAINST`,
 and its commit says which classes moved.
+
 It runs the laboratory, `make lab`, to its end, and holds its numbers to nothing;
 a change to how threads take turns, wait or wake compares them before and after, and its commit says what moved.
+
 It builds the tick's default rate alone,
 so a change to how the kernel counts ticks, or to a timing check of the demo, runs `make TIMER_HZ=10000 test` too.
-When a change touches `kernel/board/esp32c6/`, `user/board/esp32c6/`,
-or anything the demo or the escape suite exercises, and an ESP32-C6 is connected,
-run `make BOARD=esp32c6 test escape` as well;
-it loads the demo into the chip's RAM and checks the same transcript,
-then boots each escape scenario, the only check of the board's install rule.
-The same goes for `kernel/board/rp2350/` and `user/board/rp2350/`
-with an RP2350 connected in BOOTSEL mode, `make BOARD=rp2350 test escape`,
-the only check of its PMP quirks,
-and `make BOARD=rp2350 ARCH=arm test escape`, the only run of PMSAv8 and of the Cortex-M33 on silicon,
-which a change to `kernel/arch/arm/` needs too.
-Both again with `CORES=2` are the only runs of two cores on silicon,
-which a change to how the cores lock, start or interrupt each other needs too.
-The same goes for `kernel/board/nrf52840/` and `user/board/nrf52840/`
-with an nRF52840 on an ST-Link connected, `make BOARD=nrf52840 test escape`,
-the only run of ARMv7-M on silicon, which a change to `kernel/arch/arm/` needs too;
-a change to `kernel/route.c` or a board's router runs `make BOARD=nrf52840 thread` as well, whose start checks a route.
+
+### On a board
+
+`make check` runs on QEMU and the host alone.
+With a board connected, a change to what its row names runs the row's command too,
+and a change to anything the demo or the escape suite exercises runs the board's `test escape`.
+
+| Board | A change to | Runs | The only check of |
+|---|---|---|---|
+| ESP32-C6 | `kernel/board/esp32c6/`, `user/board/esp32c6/` | `make BOARD=esp32c6 test escape` | the board's install rule |
+| RP2350 in BOOTSEL mode | `kernel/board/rp2350/`, `user/board/rp2350/` | `make BOARD=rp2350 test escape` | its PMP quirks |
+| RP2350 in BOOTSEL mode | the same, `kernel/arch/arm/` | `make BOARD=rp2350 ARCH=arm test escape` | PMSAv8 and the Cortex-M33 on silicon |
+| RP2350 in BOOTSEL mode | the same, how the cores lock, start or interrupt each other | both again with `CORES=2` | two cores on silicon |
+| nRF52840 on an ST-Link | `kernel/board/nrf52840/`, `user/board/nrf52840/`, `kernel/arch/arm/` | `make BOARD=nrf52840 test escape` | ARMv7-M on silicon |
+
+A change to `kernel/route.c` or a board's router runs `make BOARD=nrf52840 thread` as well, whose start checks a route.
+
 A change to `user/thread/` or to the ESP32-C6's `user/wifi/esp32c6/i154.c`, with both boards connected,
 runs `tools/thread-pair.sh`, IEEE 802.15.4's frames between them, which fails if either hears nothing of the other
 or nothing of either is acknowledged, and a change to how either sends runs it again with `STREAM=`,
 as only a stream has the two contend for the channel;
 a traced Wi-Fi run of the C6 after it waits for a plain Wi-Fi run first, see the driver's `NOTES.md`.
+
 `make check` runs the test of `user/lib/` under QEMU alone,
 so a change to the library with a board connected runs `make BOARD=<board> lib-test` there too, on each kind of core,
 and on the RP2350 with `CORES=2` as well, where a snapshot of `user/lib/seqlock.h` is written on one core while read on the other.
-Of the Wi-Fi system it runs only what makes no system call, the IP stack and the clients' sockets, on the host;
+
+Of the Wi-Fi system `make check` runs only what makes no system call, the IP stack and the clients' sockets, on the host;
 a change to `user/wifi/` with a Pico 2 W connected runs `make BOARD=rp2350 wifi` too,
 and `WIFI_CONFIG` names a network to join from a file git does not track,
 `local/wifi.conf` on the maintainer's machine, never from one it does.
-`make check` builds no PHY harness either, so a change to `user/phyblob/`, `user/phytrace.h` or the ESP32-C6's device ranges
+A change to `user/wifi/esp32c6/`, `kernel/board/esp32c6/`, `user/tracer/` or `tools/mac-trace.py`
+follows the ESP32-C6's Wi-Fi driver's own rules as well, in `user/wifi/esp32c6/CLAUDE.md`.
+
+`make check` builds no PHY harness, so a change to `user/phyblob/`, `user/phytrace.h` or the ESP32-C6's device ranges
 runs `make BOARD=esp32c6 phymap`, which builds the harness and lists what it reaches that no frame covers;
 `make BOARD=esp32c6 wifi-esp32c6-map` lists the same for the Wi-Fi driver,
 which a change to its device ranges or `phy.c` runs too.
-A change to `user/wifi/esp32c6/`, `kernel/board/esp32c6/`, `user/tracer/` or `tools/mac-trace.py`
-follows the ESP32-C6's Wi-Fi driver's own rules as well, in `user/wifi/esp32c6/CLAUDE.md`.
+
+### Updated together
+
 A new kernel global needs a reset in `host_boot` too,
 since the host boots once per input in one process.
+
 A new `BOOT_CAP_*` or `REPLAY_CAP_*` slot, a device QEMU's board lists, or an operation whose arguments change,
 changes what the corpus means, see `TODO.md`.
 The seeds name their slots and operations, so a renumbering only rebuilds them,
 but an operation whose arguments change has the seeds that call it rewritten with it.
+
 When the kernel's object model changes,
 update `kernel/selfcheck.c` with it;
 it is the executable form of the properties in `DESIGN.md`.
+
 A change to an operation the model in `model/` models, or to what `host/model.c` writes of the state,
 changes the model in the same commit, and `make model-test` holds the two to each other;
 see "The model" in `DESIGN.md`.
 A change to a check of the self-check that `invariants` in `model/Main.lean` states changes its statement with it.
+
 An object bound to another, at creation or by a call, needs a line in `host/history.c` too.
+
+### Mutants and the fuzzer
+
 When a change adds or moves an invariant,
 run `make mutants` as well
 and plant a mutant for the new one as a patch under `tests/mutants/`,
 with the header lines the run prints for it.
+
 When a change edits code a mutant touches or stands next to,
 run `make mutants-refresh`, then `make mutants` if it moved any,
 and fix by hand only the patches it calls stale.
@@ -111,9 +129,11 @@ or every mutant's witness alone, `tests/mutants.sh -q`,
 which says whether each is still caught but not by what;
 a change to the seeds, the corpus or the checks moves every mutant's reports,
 so it needs one full run before it is committed.
+
 A change to `host/mutator.c` or to the flags `make fuzz` runs with
 is measured with `make mutants-fuzz`, from the corpus and from nothing, before and after, over a few seeds,
 and the commit says what it found.
+
 `make fuzz` follows the default machine's coverage alone,
 so a change to what a second core does runs `make fuzz FUZZ_HARNESS=fuzz-smp2` for a few minutes too.
 
