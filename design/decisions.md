@@ -113,75 +113,112 @@ until the maintainer decides otherwise.
 9. **Scheduling policy beyond units.**
    Decided in part: units of time earned by one thread's place each, an account per place they fill,
    and spare time only by `RIGHT_X`; see "Scheduling" and open decision 18.
-   Working default for the rest: no priorities;
+   Working default for the rest: threads with time take turns oldest first, a tick each,
+   and only a turn on spare time gives the processor up to a thread made ready;
    units promise a thread their part of the processor, give or take the accounts,
-   and a thread with time a turn within a tick for each other thread with units of its core, and no more; see "Scheduling".
+   and a thread with time a turn within a tick for each other thread with units of its core,
+   besides the kernel's steps, of which a pool destroy's may be long; see "Scheduling".
    The tick is the quantum and the build's, `TIMER_HZ`, which a program reads from a clock's description, decision 33,
-   so the wait is the build's to set,
-   against a switch every tick while threads compete, which nothing has measured yet;
+   so the wait is the build's to set, against a switch every tick while threads compete:
+   a tick that hands the core to another thread costs about a thousand instructions under QEMU, a hundredth of its time at 10 kHz,
+   and a chip at 150 MHz, which runs at most a seventh as many instructions a second, at least seven times that share, unmeasured;
    the work a thread gets is bounded by the others' accounts, which a shorter tick does not shorten, `TODO.md`.
-   Priorities with preemption on wake, bounded by the account as a budget, are what a wait below a tick would take,
-   and the proposal below says what they take besides;
-   decide them when a workload needs one at a cost the switches allow.
-   The earlier plan was fixed priorities on `Thread`,
-   set by whoever holds the capability and capped by the setter's own,
-   round-robin within a priority, no priority inheritance.
-   What priority inheritance does for priorities, a waiter that names whom it waits for does for accounts, decision 27:
-   it lends that thread its time, one step, the oldest lender's.
-   The alternative is a scheduler in userspace
-   that decides which threads are runnable at all.
-   It stops a thread by taking back the units it lent it and starts it by binding it again,
-   or with `OP_THREAD_STOP` and `OP_THREAD_RESUME`, which also take a waiting thread off its notification and back to its wait, decision 32,
-   and has a tick of its own in a timer line, the shape every device interrupt takes.
-   What it cannot do is choose between two runnable threads
-   for less than a system call per switch.
-   A period per thread, as seL4's scheduling contexts have, would bound latency more tightly,
-   at the price of a queue of refills sorted by time.
-   Decide when a workload needs one thread to run before another,
-   and taking turns measurably fails it.
-   `make bench`'s `contended-worst` is what taking turns costs a round trip between two processes:
+   What the order lacks is any knowledge of how soon a thread must run,
+   so units buy a part of the processor and not a place in the queue.
+   `make lab` shows it: beside a process that spins, a small ask waits about a tick at the median and nearly two at p90,
+   and twice the units for the client or for the server change that by less than a fiftieth,
+   since a server woken by an ask waits on the run queue behind the spinner's turn; see `user/lab/NOTES.md`.
+   `make bench`'s `contended-worst` is the same wait for a pair that wants the whole core:
    beside a process that spins, the worst round waits for its turns, about 263,000 cycles on RP2350,
    where the round alone costs about 4,500.
-   `make lab` shows the same for an ask with work behind it, and that units do not move it:
-   beside a process that spins, twice the units for the client or for the server change its latency by less than a fiftieth,
-   since a server woken by an ask waits on the run queue behind the spinner's turn; see `user/lab/NOTES.md`.
-   - **Proposal: priorities that preempt on wake.**
+   No order held to the accounts takes that below a tick, since the pair wants more than its units' part, and its accounts run dry within the window;
+   the lab's small ask is what an order moves.
+   What priority inheritance does for priorities, a waiter that names whom it waits for does for accounts, decision 27:
+   it lends that thread its time, one step, the oldest lender's.
+   Each option below orders the run queue and says when a thread made ready takes the processor from a turn with time,
+   as today one takes it from a turn on spare time;
+   each is decided at the end of a trap, so the host replays it.
+   - **Levels: priorities that preempt on wake.**
      A thread with time at a higher level than its core's running thread
      takes the processor as the trap that made it ready ends, a device's interrupt among them,
      and from another core through the interrupt that core already sends.
      That is today's rule for a turn on spare time, with two levels made `PRIORITIES`:
      a run queue per level and a word of the queues that hold a place, so the next thread is a count of leading zeros away,
      and turns on the tick within a level as now.
-     It is decided at the end of a trap, so the host replays it,
-     and the self-check's "a turn on spare time runs while a thread with time waits" becomes the same check by level.
+     The self-check's "a turn on spare time runs while a thread with time waits" becomes the same check by level.
      It takes besides:
      - **A budget.**
        A thread has its level only while its account holds a tick,
        so a spinner at the top takes at most its units' part and its account,
-       and what an account may hold, `ACCOUNT_TICKS`, becomes what a level may suffer from those above; decision 18.
+       and what an account may hold, `ACCOUNT_TICKS`, a tenth of a second's, becomes what a level may suffer from those above; decision 18.
      - **A right.**
        The level is a right of the `Time` capability a thread is bound through, a range a carve narrows,
        as seL4's maximum controlled priority is.
-     - **Lent time at its payer's level**, so a lock's holder and a server run at their waiter's.
-       The payer is still the oldest lender, not the highest;
+     - **Lent time at its payer's level**, so a lock's holder and a server run at the level of the waiter that lent first,
+       not of the highest:
        a ring of lenders per level would find the highest without a walk,
        but a chain through a holder that waits in turn stays userspace's.
      - **Wakes by level.**
        A signal wakes the payer of the signalling core's turn, or else the oldest waiter;
        the highest would cost each notification a pair of links per level, or a walk.
-     - **A short kernel step.**
-       The longest step the kernel takes without looking for an interrupt is the floor of every wait;
-       today zeroing a table takes longer than a tick at 10 kHz, and a pool destroy stops only for a pending interrupt, `TODO.md`.
-     - **Deadlines in counts.**
-       Timer lines fire on the tick grid, so a periodic thread at the top still starts up to a tick late.
      - **Signals that preempt.**
        A signal to a waiter of a higher level takes the processor from the signaller,
        as today only a signal from a turn on spare time, or one waking the turn's payer, does,
        so a signal and a wait in one call, `TODO.md`, would then save switches as well as traps.
-     It would promise the highest ready level a start within the kernel's longest step of the trap that made it ready,
-     and a lower level a response-time analysis over the units and accounts above it.
-     `contended-worst` is the number it should move.
-     The first step is the levels, their queues, the preemption and lent time's level, with the zeroing.
+     It would promise a thread alone at the highest ready level of its core
+     a start within the kernel's longest step of the trap that made it ready, decision 36;
+     beside others of its level it waits a tick for each, as today,
+     and through a lock or a server at its first lender's level, which a level between delays by what its accounts hold.
+     A lower level gets a response-time analysis over the units and accounts above it,
+     in which the accounts, a tenth of a second's worth of every unit above, outweigh the turns.
+     A level is a claim on the threads below it, not an amount of time,
+     so what it is worth depends on what the root task gave every other thread, as no unit's worth does.
+   - **Deadlines from the accounts.**
+     The run queue is taken earliest deadline first,
+     a place's deadline the tick its account reaches its cap if its thread does not run,
+     and a thread made ready with a deadline before the turn's takes the processor.
+     The deadline is what a place keeps, its account, the tick it was counted to and its units, read another way, and needs no field:
+     it stays put while the thread waits, as its account gains the same every tick, until the account is full and the deadline is the count,
+     and it moves later as the thread runs, by `COUNT_PARTS` / u ticks for each tick paid with u units.
+     So a thread that ran less than its units' part has the nearer deadline, and one that wants the core all along the furthest:
+     units buy a place in the queue as well as a part of the processor, with no level and no right besides.
+     Earliest deadline first meets every deadline whenever any order does, which on one processor is while the demands add up to its time,
+     as the units of a core already do, being its whole time, each earned by one place;
+     so it could promise a thread under its units' part a start without an analysis of the others,
+     though what it promises within the tick grid is not worked out.
+     The run queue holds at most `TIME_UNITS` places of a core, each earning a unit or borrowing from a waiting lender that earns one,
+     so finding the earliest is a bounded look;
+     deadlines lie within `ACCOUNT_TICKS` of the count, so a ring per stretch of them and a word of the rings that hold a place,
+     as the levels have, would make it a count of leading zeros, a place's stretch in its spare byte.
+     Lent time runs at the payer's deadline, with the inversion through the first lender that levels have.
+     What goes is equal turns among threads with time:
+     what a thread with units leaves unused goes to the nearest deadline, so by units rather than by thread,
+     and a server on its own few units serves a busy client more slowly beside a process that spins than taking turns did,
+     unless the client lends it its time.
+     Every account fills from empty in a tenth of a second, whatever its units,
+     so a deadline says how far below its part a thread ran, not how soon it must run;
+     a cap per place, near the threshold per thread that open decision 18 weighs, would be the knob that trades a thread's start for its bursts.
+   - **The turn handed to the woken thread.**
+     A thread that waits hands the rest of its turn to the thread it just woke rather than to the oldest, `TODO.md`:
+     no change to the ABI or to the order, and a server answers within the turn of the client that asked,
+     but a thread woken by an interrupt, or by a thread that goes on running, still waits for the turns ahead.
+   - **A scheduler in userspace**, which decides which threads are runnable at all.
+     It stops a thread by unbinding it from its units and starts it by binding it again,
+     or with `OP_THREAD_STOP` and `OP_THREAD_RESUME`, which also take a waiting thread off its notification and back to its wait, decision 32,
+     and has a tick of its own in a timer line, the shape every device interrupt takes.
+     What it cannot do is choose between two runnable threads for less than a system call per switch.
+   - **A period per thread**, as seL4's scheduling contexts have, bounds what a thread takes in each period, not when it starts:
+     seL4 starts threads by priority.
+     It needs no queue of refills sorted by time here, which seL4 needs for contexts made of memory:
+     the places with units of a core are `TIME_UNITS` at most, and the release already finds the nearest refill by a look at them.
+     A period is a cap per place, the account's size, and under deadlines from the accounts the cap's fill time is the period.
+   The earlier plan was fixed priorities on `Thread`,
+   set by whoever holds the capability and capped by the setter's own,
+   round-robin within a priority, no priority inheritance.
+   Decide with the first workload whose thread under its units' part must start sooner than the turns of its core allow;
+   `make lab`'s `hog` measures it, and the levels and the deadlines are the two to weigh.
+   The first step of either is the order, its queues and the preemption, with lent time at the payer's,
+   and a kernel step shorter than the start it promises, decision 36.
 
 10. **Yield.**
     Working default: none.
@@ -742,21 +779,35 @@ until the maintainer decides otherwise.
     A program can be shown to meet its deadlines only from promises stated in time rather than in steps, and checked.
     Kept: bounded work and a bounded stack, checked at every link;
     time as authority, with a budget per thread; and faults kept to their thread.
-    Missing:
-    - **A wait below a tick** for the thread that needs it, with a bound on inversion: decision 9's proposal.
-    - **A short kernel step.**
-      The kernel takes no interrupt, so its longest step is the floor of every latency;
-      `TODO.md` lists those that are too long today.
-    - **Deadlines finer than the tick.**
+    What a thread made ready waits for before it runs is a sum, and each term is too long or unstated today:
+    - **The threads ahead of it**: every other thread with time of its core, a tick each.
+      Putting it first is open decision 9's, by a level or by the deadline its account gives;
+      either leaves an inversion through a lock or a server, whose holder runs at its first lender's level or deadline,
+      bounded by the accounts of what runs between, a tenth of a second's worth of their units.
+    - **The kernel's longest step.**
+      The kernel takes no interrupt, so the longest step it takes without looking for one is the floor of every latency,
+      and on several cores the lock adds a step of each other core.
+      The longest today zeroes a table of `CAPTABLE_MAX_SLOTS` slots a byte a store,
+      longer than a tick at 10 kHz on every chip, though not under QEMU, which runs an instruction a nanosecond,
+      and a pool destroy stops only for a pending interrupt, so a thread its walk wakes waits for the rest of it; `TODO.md`.
+    - **The tick grid.**
+      A timer line fires at the first tick that surely lies past its delay, up to two ticks after the delay is due,
+      and a period is a whole number of ticks.
+      Deadlines in the counter's counts would set the timer between ticks for the nearest line.
+    - **The trap that makes it ready and the switch**, about a thousand instructions under QEMU.
+    The promise needs checking besides:
     - **Bounds in cycles.**
-      The loop bounds and call graph the link checks, with each instruction's cost on an in-order core,
+      The loop bounds and call graph the link checks, with each instruction's cost on an in-order core running from RAM,
       would bound the longest step per board, checked at the link as the stack is.
     - **The latency measured.**
-      `contended-worst` holds one wait to a record;
-      a test should hold the worst wait on each board to the bound the kernel states.
+      `contended-worst` holds to a record the wait of a pair that wants the whole core, which no order held to the accounts takes below a tick;
+      a test should hold the wait of a thread under its units' part, as `make lab`'s `hog` measures it,
+      to the bound the kernel states, on each board.
     Each promise goes into "Properties" as it is kept,
     checked by the self-check where it is state and by a measure on the board where it is time.
-    Decide with the first workload whose deadline is shorter than a tick, or than the turns of its core.
+    The first workload whose deadline is shorter than a tick has come, the 192 us of an IEEE 802.15.4 acknowledgement,
+    and a route meets it in hardware, decision 37, as no thread could while the kernel's longest step is longer.
+    Decide with the next, one no wire can meet: a thread that must start sooner than the turns of its core allow.
 
 37. **Routes between devices.**
     Decided: `RouteLine` and `Route`, as "Routes" says, the nRF52840's PPI the first router;
