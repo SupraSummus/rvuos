@@ -37,6 +37,16 @@
 /* The word before the baseband's block, 0x600a08fc, which btbb_init writes; what it is is not known. */
 #define BB_INIT_18FC 0x600a08fcu
 
+/*
+ * The 802.15.4 MAC's block, whose transmit-on delay words ieee802154_txon_delay_set writes.
+ * i154.c reaches the same block for its own registers; the base is named in both until they are gathered, see TODO.md.
+ */
+#define I154_BASE 0x600a3000u
+#define I154_104 (I154_BASE + 0x104u)
+#define I154_10C (I154_BASE + 0x10cu)
+#define I154_110 (I154_BASE + 0x110u)
+#define I154_114 (I154_BASE + 0x114u)
+
 /* The archive's functions the bring-up still calls, of libbtbb.a until the driver's own replace them. */
 extern void bt_bb_v2_rx_set(uint32_t value);
 extern void bt_bb_v2_version(void);
@@ -153,4 +163,17 @@ void bt_bb_tx_cca_period(uint32_t first, uint32_t second)
 {
     wr(BB_B8, (rd(BB_B8) & 0x800fffffu) | (((first - second - 5u) << 23) & 0x7f800000u));
     wr(BB_B8, (rd(BB_B8) & 0xfff001ffu) | ((((first - 5u) << 12) - 0x200u) & 0xffe00u));
+}
+
+/*
+ * The libraries' ieee802154_txon_delay_set, written out: four read-modify-writes on the 802.15.4 MAC's words 0x104,
+ * 0x110 and 0x114, each given its constant in the low ten or eleven bits, then 0x10c's low six cleared.
+ * Their name says the transmit-on delay of IEEE 802.15.4; the fields' meaning is not known.
+ */
+void ieee802154_txon_delay_set(void)
+{
+    wr(I154_104, (rd(I154_104) & 0xfffffc00u) | 0x23u);
+    wr(I154_110, (rd(I154_110) & 0xfffff800u) | 0x32u);
+    wr(I154_114, (rd(I154_114) & 0xfffffc00u) | 0x7fu);
+    wr(I154_10C, rd(I154_10C) & 0xffffffc0u);
 }

@@ -1,4 +1,4 @@
-# bt_bb_v2_init_cmplx bt_bb_v2_tx_set set_gauss_coeff_1m set_gauss_coeff_2m bt_bb_set_le_tx_on_delay bt_bb_set_zb_tx_on_delay bt_bb_tx_cca_period after trace: baseband before trace: mac, in a run of the image sha256 509b4a054c1323cb088051aefc3578f9d7a258658c25e97ab42c818045470e82
+# bt_bb_v2_init_cmplx bt_bb_v2_tx_set set_gauss_coeff_1m set_gauss_coeff_2m bt_bb_set_le_tx_on_delay bt_bb_set_zb_tx_on_delay bt_bb_tx_cca_period ieee802154_txon_delay_set after trace: baseband before trace: mac, in a run of the image sha256 509b4a054c1323cb088051aefc3578f9d7a258658c25e97ab42c818045470e82
 R4 0x600a2018 0x16101000
 W4 0x600a2018 0x16102800
 R4 0x600a2018 0x16102800
@@ -55,5 +55,13 @@ R4 0x600a20b8 0x0b850188
 W4 0x600a20b8 0x0b82af88
 R4 0x600a2010 0x78000300
 W4 0x600a2010 0x18000300
+R4 0x600a3104 0x00000050
+W4 0x600a3104 0x00000023
+R4 0x600a3110 0x00000080
+W4 0x600a3110 0x00000032
+R4 0x600a3114 0x00000052
+W4 0x600a3114 0x0000007f
+R4 0x600a310c 0x0000001d
+W4 0x600a310c 0x00000000
 R4 0x600a200c 0x0199a1a8
 W4 0x600a200c 0x0199a128
