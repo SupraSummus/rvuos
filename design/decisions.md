@@ -846,6 +846,10 @@ until the maintainer decides otherwise.
       an urgent client may pay for the end of a request its server was serving for another,
       waits for no more than that, at its own deadline, and pays for it from its own account and fuel.
       That is Lamastra, Lipari and Abeni's bandwidth inheritance, without its walk, as the chain is bounded.
+      A prototype took the first step of it, lent time through a first lender with no time of its own, three lenders on:
+      a client that lends to a gate of no units, which lends to a store of no units, beside a process that spins,
+      was answered as fast as alone, where lent time that went one step left the store on spare time;
+      the lenders' ring in deadline order is not built.
     - **What a thread made ready waits for**, decision 36, becomes its work over its part and its window, the kernel's longest step, and the trap and the switch:
       a driver that must answer a frame within a window holds units enough that the answer's cost over its part fits the window, and no window of its own.
     Weighed and left:
