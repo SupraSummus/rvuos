@@ -1,6 +1,7 @@
 /*
  * The ESP32-C6's BT baseband, the driver's own: Espressif's libbtbb.a is being taken from it one function at a time,
  * as the Wi-Fi libraries were, see user/wifi/esp32c6/NOTES.md.
+ * The archive transcribed is esp32-wifi-lib's, its bt_bb_v2.o reporting "libbtbb version: e4897a5, Jul 14 2026, 10:37:04".
  * Each function below is written from the disassembly of the archive's bt_bb_v2.o, and the 802.15.4 trace window and a
  * host replay hold it; what is not the driver's yet stays linked from libbtbb.a, and build.mk's WIFI_ESP_BTBB_OWN
  * weakens the taken two so that the library's own calls reach these.
@@ -123,7 +124,6 @@
 #define WIFI_BB_CD0 (WIFI_BB0_BASE + 0x0cd0u)
 
 /* The archive's functions the bring-up still calls, of libbtbb.a until the driver's own replace them. */
-extern void bt_bb_v2_version(void);
 /* The archive's functions bt_bb_v2_rx_set calls, theirs until the driver's own replace them. */
 extern void bt_agc_gain_offset(uint32_t value);
 extern void bt_agc_rssi_thresh(void);
@@ -166,12 +166,13 @@ void bt_agc_restart_set(void);
 /*
  * The libraries' bt_bb_v2_init_cmplx, written out: the mode's transmit and receive set, the Gaussian filter's two
  * coefficient groups, three of their register writes, the transmit-on delays and the CCA period, the 802.15.4 MAC's
- * transmit-on delay, the BER word's bit 7 cleared, and their version printed when the argument asks.
- * It is the driver's own now, and the calls it makes go over to the driver's own bodies one at a time;
- * the archive's own bt_bb_v2_init_cmplx is left uncalled and uncalled-for once every one of them has.
+ * transmit-on delay, and the BER word's bit 7 cleared.
+ * It is the driver's own now; their last call, bt_bb_v2_version, a print alone, is left out here, the driver's own log
+ * serving where the archive's went, and it leaves with the archive.
+ * The archive's own bt_bb_v2_init_cmplx is left uncalled and uncalled-for once every one of them has.
  * Their body asked the adapter's env_is_chip for one field, which the board answers true, so the chip's path is this.
  */
-void btbb_init(int print_version)
+void btbb_init(void)
 {
     bt_bb_v2_tx_set(0);
     bt_bb_v2_rx_set(4);
@@ -184,9 +185,6 @@ void btbb_init(int print_version)
     bt_bb_set_zb_tx_on_delay(0x1du);
     ieee802154_txon_delay_set();
     wr(BB_0C, rd(BB_0C) & ~0x80u);
-    if (print_version) {
-        bt_bb_v2_version();
-    }
 }
 
 /*

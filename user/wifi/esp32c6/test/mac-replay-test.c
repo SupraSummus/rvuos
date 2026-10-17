@@ -191,7 +191,7 @@ static void run_config(void)
 /* The baseband's bring-up, as i154.c's radio_up calls it but for the version line, which is no device access. */
 static void run_bb(void)
 {
-    btbb_init(0);
+    btbb_init();
 }
 
 static const struct {

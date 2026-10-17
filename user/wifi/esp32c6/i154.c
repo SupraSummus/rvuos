@@ -515,7 +515,7 @@ static void radio_up(struct drv *d)
     drv_wifi_clock_enable();
     drv_phy_on();
     osi_trace("baseband", 0, 0);
-    btbb_init(1);
+    btbb_init();
     osi_trace("mac", 0, 0);
     mac_init(d->mac);
 }

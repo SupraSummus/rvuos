@@ -10,7 +10,7 @@
 
 #include <stdint.h>
 
-void btbb_init(int print_version);
+void btbb_init(void);
 const int8_t *bt_bb_get_tx_pwr_table(uint8_t *length);
 void ieee802154_txon_delay_set(void);
 
