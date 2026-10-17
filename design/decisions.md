@@ -823,14 +823,19 @@ until the maintainer decides otherwise.
     - **Spare time stays below**: a place with `RIGHT_X` whose account is dry runs, oldest first, while no thread with time wants the core,
       and spends nothing, so a thread that used the idle core is not punished for it when the others come back.
     - **A process spends fuel.**
-      A `Fuel` object, made in a pool, holds an amount of the counter's counts,
-      and a process is bound to one, by a node as it holds its tables, and runs only while that fuel holds some:
-      every count a turn runs, on the account, on spare time or lent, comes off the fuel of the process whose account pays for it.
-      Fuel is moved and never made: `OP_FUEL_MOVE` takes an amount from one fuel into another, the boot binds the root task to the one fuel without bound,
-      and a fuel that runs dry signals a notification bit its holder set on it, as an `Irq` does, its threads waiting until it is topped up.
+      A process holds fuel, an amount of the counter's counts, in the word its first node's block leaves spare,
+      and every count a turn runs, on the account, on spare time or lent, comes off the fuel of the process whose account pays for it,
+      charged where the turn is, as it closes and at each tick.
+      Fuel is moved and never made: an operation on a process moves fuel from the caller's process to it or back,
+      and the root task's process is the one without bound, which gives without spending.
+      A thread whose process's fuel runs dry stops as a fault stops it, so its watcher hears, and a resume once its fuel is topped up runs it on;
+      a lender whose fuel runs dry stops lending, its wait ending with an error, so the borrower runs on its own or another's.
       So a parent bounds a child's power by the units it hands out without `RIGHT_X`, and its energy by the fuel it moves into the child's,
-      and takes either back by revoking.
+      and takes either back.
       A count of fuel is what the core spends running a count; what a device spends is its driver's to charge, below.
+      A prototype stopped a child with an eighth of the core and no spare time eight times the fuel's length after it started,
+      and one with spare time after about the fuel's length, each having done the same work,
+      and charged a server's work on a client's lent time to the client.
     - **Lent time goes on, at the earliest deadline.**
       A waiter lends the account it runs on, its own or one lent to it,
       so a client's account pays for its server and for the driver the server waits on, up to `LEND_DEPTH` borrowers on, a step each time the kernel looks.
@@ -858,6 +863,8 @@ until the maintainer decides otherwise.
     - **Threads that migrate**, as LRPC's and Composite's calls do: the client's own thread runs the server's code, so its time follows with no lending,
       but every server is then reentrant, with a stack for each caller inside it, and a call is the IPC decision 5 has done without.
     - **Reserves and taps**, Cinder's energy graph: a rate between any two reserves, so a flow through a tree of them, a walk at every refill.
+    - **Fuel of its own type**, an object in a pool that several processes are bound to:
+      a domain of several processes under one bound, for a node in each and a type, where a process is the domain the kernel already has.
     Open:
     - **The tick under tracing**: deadlines in counts, and the host's clock the counts the records move.
     - **The window's grain**, ticks or counts, and a shortest one against what a switch costs each board.
