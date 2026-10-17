@@ -42,9 +42,30 @@
 #define I154_110 (I154_BASE + 0x110u)
 #define I154_114 (I154_BASE + 0x114u)
 
+/* The AGC's words, which bt_agc_recorrect_set writes, at their modem offsets; what each field is is not known. */
+#define AGC_2868 (MODEM_BASE + 0x2868u)
+#define AGC_286C (MODEM_BASE + 0x286cu)
+#define AGC_28B0 (MODEM_BASE + 0x28b0u)
+#define AGC_28B4 (MODEM_BASE + 0x28b4u)
+#define AGC_28BC (MODEM_BASE + 0x28bcu)
+
 /* The archive's functions the bring-up still calls, of libbtbb.a until the driver's own replace them. */
-extern void bt_bb_v2_rx_set(uint32_t value);
 extern void bt_bb_v2_version(void);
+/* The archive's functions bt_bb_v2_rx_set calls, theirs until the driver's own replace them. */
+extern void bt_bb_rx_set(uint32_t value);
+extern void bt_set_rx_comp(int first, int second, int third, int fourth, int fifth);
+extern void bt_agc_gain_offset(uint32_t value);
+extern void bt_agc_gain_set(void);
+extern void bt_agc_rssi_thresh(void);
+extern void bt_agc_target_set(void);
+extern void bt_agc_restart_set(void);
+extern void bt_agc_detect_set(void);
+extern void bt_bb_rx_correlator_set(void);
+extern void bt_bb_rx_dpo_set(void);
+extern void bt_bb_rx_filter_sel(void);
+extern void zb_rx_core_set(void);
+extern void zb_rx_v0_0_set(void);
+extern void zb_rx_auto_sel(void);
 /* The archive's byte the LE transmit-on delay is scaled from, theirs until its cca functions are the driver's too. */
 extern uint8_t bt_bb_cca_en;
 /* The ROM's, which fills the power table entry by entry; its three arguments' roles are not known. */
@@ -57,6 +78,8 @@ void set_gauss_coeff_2m(void);
 void bt_bb_set_le_tx_on_delay(uint32_t delay);
 void bt_bb_set_zb_tx_on_delay(uint32_t delay);
 void bt_bb_tx_cca_period(uint32_t first, uint32_t second);
+void bt_bb_v2_rx_set(uint32_t value);
+void bt_agc_recorrect_set(void);
 
 /*
  * The libraries' bt_bb_v2_init_cmplx, written out: the mode's transmit and receive set, the Gaussian filter's two
@@ -193,4 +216,50 @@ const int8_t *bt_bb_get_tx_pwr_table(uint8_t *length)
         *p++ = (int8_t)get_data_sat(i, 0x14, -0xf);
     }
     return bt_bb_pwr_table;
+}
+
+/*
+ * The libraries' bt_bb_v2_rx_set, written out: the receive set with the bring-up's argument, then the receive
+ * compensation's five numbers, the AGC gain offset 0x50, and then the AGC's, the correlator's, the DPO's and the
+ * filter's groups and zb_rx_core_set, zb_rx_v0_0_set and zb_rx_auto_sel, each called with no argument.
+ * Its own body writes no register, so neither the trace nor the replay holds it, and it is build.mk's
+ * WIFI_ESP_BTBB_BARE; its calls go over to the driver's own bodies one at a time, as btbb_init's do.
+ */
+void bt_bb_v2_rx_set(uint32_t value)
+{
+    bt_bb_rx_set(value);
+    bt_set_rx_comp(0xc, -0x2, -0x6, -0x6, 0x0);
+    bt_agc_gain_offset(0x50);
+    bt_agc_gain_set();
+    bt_agc_rssi_thresh();
+    bt_agc_target_set();
+    bt_agc_restart_set();
+    bt_agc_recorrect_set();
+    bt_agc_detect_set();
+    bt_bb_rx_correlator_set();
+    bt_bb_rx_dpo_set();
+    bt_bb_rx_filter_sel();
+    zb_rx_core_set();
+    zb_rx_v0_0_set();
+    zb_rx_auto_sel();
+}
+
+/*
+ * The libraries' bt_agc_recorrect_set, written out: twelve read-modify-writes on the AGC's five words, each a constant
+ * beside the bits kept, the last 0x600a286c's top byte given 0x0f. What the fields are is not known.
+ */
+void bt_agc_recorrect_set(void)
+{
+    wr(AGC_28B4, rd(AGC_28B4) | 0x100u);
+    wr(AGC_28B4, (rd(AGC_28B4) & 0xffffc1ffu) | 0x1400u);
+    wr(AGC_28BC, rd(AGC_28BC) | 0xa0u);
+    wr(AGC_2868, rd(AGC_2868) | 0x2000u);
+    wr(AGC_28BC, rd(AGC_28BC) & ~0x140u);
+    wr(AGC_2868, rd(AGC_2868) | 0x20u);
+    wr(AGC_2868, rd(AGC_2868) | 0x1800u);
+    wr(AGC_2868, (rd(AGC_2868) & ~0x7c0u) | 0x280u);
+    wr(AGC_28B0, (rd(AGC_28B0) & 0xffffc1ffu) | 0x1400u);
+    wr(AGC_28B0, (rd(AGC_28B0) & ~0x1f0u) | 0xa0u);
+    wr(AGC_2868, (rd(AGC_2868) & ~0x1fu) | 0xau);
+    wr(AGC_286C, (rd(AGC_286C) & 0x00ffffffu) | 0x0f000000u);
 }
