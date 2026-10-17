@@ -340,6 +340,9 @@ static void place_settle(struct place *p)
     const struct place *l = has_time(p->balance) ? NULL : place_lender(p);
     uint8_t queue = place_queue(p, p->balance, l);
     bool joined = queue != QUEUE_NONE && (queue != p->queue || core != was);
+#if SCHED_DEADLINE
+    core->run_joined |= joined && queue == QUEUE_RUN;
+#endif
     if (queue != p->queue || core != was) {
         if (p->queue != QUEUE_NONE) {
             place_unqueue(p);
@@ -447,6 +450,67 @@ static void turn_take(struct thread *t)
 #endif
 }
 
+#if SCHED_DEADLINE
+/*
+ * An experiment of open decision 9, built with make SCHED=deadline:
+ * the run queue is taken earliest deadline first rather than oldest first,
+ * a place's deadline the tick its account reaches its cap if its thread does not run,
+ * or its lender's while it runs on lent time.
+ * A thread that waits keeps its deadline, since its account gains a tick's gain every tick, until the account is full;
+ * one that runs moves it later, by COUNT_PARTS / units ticks for each tick it pays for.
+ * So a thread that ran less than its units' part has the nearer deadline,
+ * and one that wants the core all along the furthest.
+ * The units of a core are its whole time at most, which is all the test earliest deadline first needs.
+ * The search walks the run queue, where every place earns a unit or borrows from a waiting lender that earns one,
+ * so it takes TIME_UNITS steps at most; a queue per stretch of deadlines would take none.
+ */
+
+/* The tick an account at balance, counted to the tick at, reaches its place's cap; NEAREST_NONE ahead without units. */
+static uint32_t deadline_of(const struct place *p, uint32_t balance, uint32_t at)
+{
+    uint32_t gain = tick_gain(p);
+    if (gain == 0) {
+        return sched_ticks + NEAREST_NONE;
+    }
+    uint32_t cap = account_cap(p);
+    return at + (cap > balance ? (cap - balance + gain - 1) / gain : 0);
+}
+
+/* A queued place's deadline: its own account's while it has time, else its lender's. */
+static uint32_t place_deadline(const struct place *p)
+{
+    uint32_t balance = account_now(p);
+    if (has_time(balance)) {
+        return deadline_of(p, balance, sched_ticks);
+    }
+    const struct place *l = place_lender(p);
+    return l != NULL ? deadline_of(l, account_now(l), sched_ticks) : sched_ticks + NEAREST_NONE;
+}
+
+/* The place on a core's run queue with the earliest deadline, the oldest of those tied, and that deadline. */
+static struct place *run_earliest(const struct core *core, uint32_t *deadline)
+{
+    paddr_t at = core->run_queue;
+    struct place *best = NULL;
+    uint32_t best_at = 0;
+    for (uint32_t i = 0; i < TIME_UNITS; i++) {
+        LOOP_BOUND(TIME_UNITS);
+        struct place *p = p2v(at);
+        uint32_t d = place_deadline(p);
+        if (best == NULL || tick_before(d, best_at)) {
+            best = p;
+            best_at = d;
+        }
+        at = p->queue_next;
+        if (at == core->run_queue) {
+            break;
+        }
+    }
+    *deadline = best_at;
+    return best;
+}
+#endif
+
 /*
  * The thread of the oldest place with time, or with none of the oldest that may run on spare time,
  * taken off its queues with the place's account brought up to the count: its turn begins offset counts into the tick,
@@ -463,6 +527,13 @@ static struct thread *next_turn(uint32_t offset)
         return NULL;
     }
     struct place *p = p2v(*head);
+#if SCHED_DEADLINE
+    core->run_joined = false;
+    if (core->run_queue != 0) {
+        uint32_t deadline;
+        p = run_earliest(core, &deadline);
+    }
+#endif
     struct thread *t = place_thread(p);
     place_unqueue(p);
     turn_take(t);
@@ -1150,15 +1221,41 @@ void sched_tick(uint32_t ticks)
     sched_turn_end();
 }
 
+#if SCHED_DEADLINE
+/*
+ * Whether a place that joined the run queue since the core last looked has a deadline before the turn's payer,
+ * whose account is charged to the counter first: then it takes the processor, as from a turn on spare time.
+ */
+static bool deadline_due(struct core *core)
+{
+    struct place *p = turn_place(core);
+    if (!core->run_joined || p == NULL) {
+        return false;
+    }
+    core->run_joined = false;
+    uint32_t mine = deadline_of(p, p->balance - turn_owes(p, clock_offset()), core->ticks);
+    uint32_t theirs;
+    run_earliest(core, &theirs);
+    return tick_before(theirs, mine);
+}
+#else
+static bool deadline_due(struct core *core)
+{
+    (void)core;
+    return false;
+}
+#endif
+
 /*
  * A turn on spare time is one no thread with time wants, so it ends as soon as one waits on the core's run queue,
  * unless the running thread stands at a call that stopped for an interrupt, which it makes again first.
+ * Under SCHED_DEADLINE so does a turn with time that a thread with an earlier deadline joined the run queue during.
  * The end of a call and of every trap ask it, so a wake by a call, an interrupt or another core takes the processor at once;
  * see DESIGN.md, "Scheduling".
  */
 static void spare_end(struct core *core)
 {
-    if (core->run_queue != 0 && !core->recall && sched_spare_turn(core)) {
+    if (core->run_queue != 0 && !core->recall && (sched_spare_turn(core) || deadline_due(core))) {
         sched_turn_end();
     }
 }

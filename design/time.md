@@ -198,6 +198,8 @@ and the scheduler's state is the three queues, each place's account and the tick
 the place that earns each unit, the release, the running thread, and how far into the tick its turn is charged.
 With every thread on spare time alone this is the plain round-robin over threads,
 which is how the replay driver runs; see "Verification".
+A build with `make SCHED=deadline` takes the run queue in another order, an experiment of open decision 9,
+and keeps none of what this section promises of turns.
 
 **A waiter may lend its time to a thread it names**, with `OP_NOTIFY_LEND`; see "Communication and synchronisation".
 A borrower without time of its own has the run queue while its lender's account holds a tick,
@@ -258,7 +260,7 @@ and on several cores one such step of each other core, which the lock waits for,
 and the trap that ends the last turn ahead, which counts the tick, its timer lines and the releases.
 While that longest step is shorter than a tick, they add to the wait once;
 a longer one may cost each turn ahead as much again,
-and the longest today, zeroing a table of `CAPTABLE_MAX_SLOTS` slots a byte a store, is longer than a tick at 10 kHz on every board, `TODO.md`.
+and the longest today, zeroing a table of `CAPTABLE_MAX_SLOTS` slots a byte a store, is longer than a tick at 10 kHz on every chip, `TODO.md`.
 A thread made ready from another core waits besides for the rest of that core's trap, the interrupt between them, and the lock.
 A timer line's thread starts within those k ticks and steps of its deadline, so a periodic line keeps its deadlines and its thread starts within as much of each;
 a device's driver within them of the trap that took its interrupt.

@@ -694,7 +694,7 @@ the first five below are what does not keep to it yet, each a constant-time chan
   or owes another core an interrupt, would bound that by a tick;
   the transcripts would not move, as the host stops at every step.
 - `pool_alloc` zeroes an object a byte a store with interrupts off,
-  and a table of `CAPTABLE_MAX_SLOTS` slots is 24,596 stores, longer than a tick at 10 kHz on every board,
+  and a table of `CAPTABLE_MAX_SLOTS` slots is 16,400 stores, longer than a tick at 10 kHz on every chip,
   where the wait's bound needs the kernel's longest step shorter than a tick.
   Zeroing a word a store, or a table in steps that stop, and measuring the longest step on each board,
   would say how short a tick each board can take.
