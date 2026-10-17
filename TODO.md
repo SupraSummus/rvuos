@@ -591,12 +591,16 @@ what is left:
   and so is most of what the corpus revokes.
   Mount, unmount, install, uninstall, the binds and the watch fill or clear nodes too.
   Its search, which follows only what the model names, stops there with it.
-- Of "Properties", the model states the forest, the nesting, and what the nesting needs of the derivation rule.
-  Others its state can say are next: the rest of the derivation rule of "Derivation", a node no more than its parent,
+- Of "Properties", the model states the forest, the nesting, and the derivation rule each node is derived from its parent by.
+  Others its state can say are next: of "Derivation", which nodes are never roots,
   and of "Authority confinement" what a table's node may name.
   Each goes through the stages "The model" lists, the search first.
 - The search follows calls over memory alone, which the nesting needs;
   an invariant over other capabilities needs it to follow theirs.
+- `State.derivedOk` says again part of what `State.parentsOk` says, the rule each node is derived from its parent by.
+  `step_nested` could take that part from `Parented`,
+  and `derivedOk` keep what the rule does not say: a pool's own node names a pool, a frame ends within 32 bits,
+  and a pool's own node lies right below an Untyped, if below anything.
 - `make mutants` does not run `model-check`,
   whose search could catch a mutant that breaks an invariant at a place no seed stops at.
 

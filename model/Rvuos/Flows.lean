@@ -178,7 +178,7 @@ theorem step_flows (m : Machine) (s : State) (e : Event) (outs : List Outcome)
     (h : step m s e = some outs) : ∀ o ∈ outs, Flows m s e.thread o.st := by
   rcases step_cases h with ⟨_, rfl⟩ | ⟨t, op, r, slot, node, c, rfl, held, hc, hh⟩
   · intro o ho; simp at ho; subst ho; exact (Shrinks.refl s).flows
-  rcases hh with ⟨_, -, hh⟩ | ⟨hty, hh⟩ | ⟨hty, hh⟩
+  rcases hh with ⟨_, -, -, -, hh⟩ | ⟨hty, hh⟩ | ⟨hty, hh⟩
   · rcases opCaptable_cases hh with ⟨-, hh⟩ | ⟨-, hh⟩ | ⟨-, hh⟩ | ⟨-, hh⟩ | ⟨-, hh⟩
     · exact capCopy_flows hh
     · exact capCopy_flows hh

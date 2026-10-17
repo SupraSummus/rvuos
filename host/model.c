@@ -14,7 +14,7 @@
  * A step is written whole at its end, so a halt, which never returns from its call, writes none;
  * an invariant report ends it early, with the state the report found and a line that says so, see host_violated.
  *
- * Where the records of an input begin, the trace says so with the state and the driver's threads that may run,
+ * Where the records of an input begin, the trace says so with the machine, the state and the driver's threads that may run,
  * for the model to search from; see model_start.
  */
 
@@ -185,6 +185,18 @@ static void put_state(void)
     put("end\n");
 }
 
+/*
+ * What the machine fixes: the smallest region, the smallest pool, where a process's tables, a table's slots
+ * and a thread's process lie, and the counter's block, its base, size and rights, which a clock gives out.
+ */
+static void put_machine(void)
+{
+    const struct granted_range *g = &boot_granted[GRANT_COUNTER];
+    put("machine %u %u %u %u %u %u %u %u\n", (unsigned)region_min_size(), (unsigned)POOL_MIN_SIZE,
+        (unsigned)offsetof(struct process, tables), (unsigned)offsetof(struct captable, slots),
+        (unsigned)offsetof(struct thread, proc), (unsigned)g->base, (unsigned)g->size, (unsigned)g->rights);
+}
+
 void model_begin(bool call)
 {
     if (model_out == NULL) {
@@ -198,9 +210,7 @@ void model_begin(bool call)
     const struct trap_frame *f = &model_caller->frame;
     model_pc = f->pc;
     put("step %s %u\n", call ? "call" : "fault", (unsigned)v2p(model_caller));
-    put("machine %u %u %u %u %u\n", (unsigned)region_min_size(), (unsigned)POOL_MIN_SIZE,
-        (unsigned)offsetof(struct process, tables), (unsigned)offsetof(struct captable, slots),
-        (unsigned)offsetof(struct thread, proc));
+    put_machine();
     put("op %u %u %u %u %u %u\n", (unsigned)f->regs[REG_A7], (unsigned)f->regs[REG_A0], (unsigned)f->regs[REG_A1],
         (unsigned)f->regs[REG_A2], (unsigned)f->regs[REG_A3], (unsigned)f->regs[REG_A4]);
     put_state();
@@ -258,6 +268,7 @@ void model_start(void)
         }
     }
     put("\n");
+    put_machine();
     put_state();
     fwrite(text, 1, text_len, model_out);
     fflush(model_out);

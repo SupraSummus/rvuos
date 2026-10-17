@@ -41,7 +41,7 @@ structure State where
   kids : List (Nat × List Nat)
 deriving BEq, Repr, Inhabited
 
-/-- What the machine fixes, which `host/model.c` writes with every step. -/
+/-- What the machine fixes, which `host/model.c` writes with every step and where the records begin. -/
 structure Machine where
   /-- `region_min_size()`, the smallest block a frame may be. -/
   regionMin : Nat
@@ -51,6 +51,10 @@ structure Machine where
   procTablesOff : Nat
   tableSlotsOff : Nat
   threadProcOff : Nat
+  /-- `boot_granted[GRANT_COUNTER]`: the counter's block, its base, size and rights, which a clock gives out. -/
+  counterBase : Nat
+  counterSize : Nat
+  counterRights : Nat
 deriving Repr, Inhabited
 
 /-- The value at a key of an association list, the first if there are more. -/
