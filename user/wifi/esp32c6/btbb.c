@@ -83,6 +83,13 @@
 #define AGC_289C (MODEM_BASE + 0x289cu)
 #define AGC_2888 (MODEM_BASE + 0x2888u)
 #define AGC_288C (MODEM_BASE + 0x288cu)
+#define AGC_2884 (MODEM_BASE + 0x2884u)
+#define AGC_28DC (MODEM_BASE + 0x28dcu)
+#define AGC_28E0 (MODEM_BASE + 0x28e0u)
+#define AGC_28E4 (MODEM_BASE + 0x28e4u)
+#define AGC_28E8 (MODEM_BASE + 0x28e8u)
+#define AGC_28EC (MODEM_BASE + 0x28ecu)
+#define AGC_28F0 (MODEM_BASE + 0x28f0u)
 #define AGC_28C8 (MODEM_BASE + 0x28c8u)
 #define AGC_28D0 (MODEM_BASE + 0x28d0u)
 #define AGC_28D4 (MODEM_BASE + 0x28d4u)
@@ -120,7 +127,6 @@ extern void bt_bb_v2_version(void);
 /* The archive's functions bt_bb_v2_rx_set calls, theirs until the driver's own replace them. */
 extern void bt_agc_gain_offset(uint32_t value);
 extern void bt_agc_rssi_thresh(void);
-extern void bt_agc_restart_set(void);
 extern void bt_bb_rx_filter_sel(void);
 extern void zb_rx_core_set(void);
 extern void zb_rx_auto_sel(void);
@@ -155,6 +161,7 @@ void bt_bb_rx_set(uint32_t value);
 void bt_agc_v2_set(void);
 void bt_bb_rx_correlator_set(void);
 void bt_bb_rx_dpo_set(void);
+void bt_agc_restart_set(void);
 
 /*
  * The libraries' bt_bb_v2_init_cmplx, written out: the mode's transmit and receive set, the Gaussian filter's two
@@ -613,4 +620,40 @@ void bt_bb_rx_dpo_set(void)
     wr(AGC_28F4, rd(AGC_28F4) & 0xbfffffffu);
     wr(AGC_28F4, rd(AGC_28F4) & 0x7fffffffu);
     wr(AGC_28F4, rd(AGC_28F4) & 0xdfffffffu);
+}
+
+/*
+ * The libraries' bt_agc_restart_set, written out: twenty-seven read-modify-writes on the AGC's 0x2884, 0x2888, 0x28bc,
+ * 0x28dc, 0x28e0, 0x28e4, 0x28e8, 0x28ec and 0x28f0, each a constant beside the bits kept, five of them a
+ * negative-andi mask. Their name says an AGC restart; the fields are not known.
+ */
+void bt_agc_restart_set(void)
+{
+    wr(AGC_2888, rd(AGC_2888) & 0xefffffffu);
+    wr(AGC_28BC, rd(AGC_28BC) | 0x80000000u);
+    wr(AGC_2884, rd(AGC_2884) | 0x00800000u);
+    wr(AGC_2884, (rd(AGC_2884) & 0x00ffffffu) | 0xf4000000u);
+    wr(AGC_28E0, (rd(AGC_28E0) & 0x00ffffffu) | 0x14000000u);
+    wr(AGC_28E0, (rd(AGC_28E0) & 0xff00ffffu) | 0x00140000u);
+    wr(AGC_28E0, (rd(AGC_28E0) & 0xffff00ffu) | 0x1400u);
+    wr(AGC_28E4, (rd(AGC_28E4) & 0xff00ffffu) | 0xec0000u);
+    wr(AGC_28E4, (rd(AGC_28E4) & 0xffff00ffu) | 0xec00u);
+    wr(AGC_28E4, (rd(AGC_28E4) & ~0xffu) | 0xecu);
+    wr(AGC_28E0, (rd(AGC_28E0) & ~0xffu) | 0x14u);
+    wr(AGC_28E8, (rd(AGC_28E8) & 0x00ffffffu) | 0xec000000u);
+    wr(AGC_28EC, (rd(AGC_28EC) & 0x00ffffffu) | 0x5a000000u);
+    wr(AGC_28EC, (rd(AGC_28EC) & 0xffff00ffu) | 0xa600u);
+    wr(AGC_28F0, (rd(AGC_28F0) & 0x00ffffffu) | 0xa0000000u);
+    wr(AGC_28E4, (rd(AGC_28E4) & 0x00ffffffu) | 0x19000000u);
+    wr(AGC_28E8, (rd(AGC_28E8) & 0xff00ffffu) | 0xe70000u);
+    wr(AGC_28EC, (rd(AGC_28EC) & 0xff00ffffu) | 0x2d0000u);
+    wr(AGC_28EC, (rd(AGC_28EC) & ~0xffu) | 0xd3u);
+    wr(AGC_28F0, (rd(AGC_28F0) & 0xff00ffffu) | 0xa60000u);
+    wr(AGC_28DC, (rd(AGC_28DC) & ~0x700u) | 0x600u);
+    wr(AGC_28DC, (rd(AGC_28DC) & 0xffffc7ffu) | 0x3000u);
+    wr(AGC_28DC, (rd(AGC_28DC) & ~0xe0u) | 0xc0u);
+    wr(AGC_28DC, (rd(AGC_28DC) & ~0x1cu) | 0x18u);
+    wr(AGC_28DC, (rd(AGC_28DC) & 0xfffe3fffu) | 0x18000u);
+    wr(AGC_28E8, (rd(AGC_28E8) & 0xffff03ffu) | 0xc00u);
+    wr(AGC_28DC, rd(AGC_28DC) | 0x10000000u);
 }

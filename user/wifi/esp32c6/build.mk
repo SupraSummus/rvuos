@@ -206,7 +206,7 @@ WIFI_ESP_BTBB_OWN := bt_bb_v2_tx_set set_gauss_coeff_1m set_gauss_coeff_2m \
                      ieee802154_txon_delay_set bt_agc_recorrect_set bt_agc_rssi_thresh bt_agc_gain_offset \
                      bt_bb_rx_filter_sel zb_rx_auto_sel zb_rx_core_set bt_set_rx_comp \
                      bt_agc_gain_max bt_agc_gain_set zb_rx_v0_0_set bt_agc_target_set bt_agc_detect_set \
-                     bt_bb_rx_set bt_agc_v2_set bt_bb_rx_correlator_set bt_bb_rx_dpo_set
+                     bt_bb_rx_set bt_agc_v2_set bt_bb_rx_correlator_set bt_bb_rx_dpo_set bt_agc_restart_set
 WIFI_ESP_BTBB_BARE := bt_bb_get_tx_pwr_table bt_bb_v2_rx_set
 
 $(BUILD)/$(WIFI_ESP)/libbtbb.a: $(WIFI_ESP_INIT) $(WIFI_ESP)/build.mk
