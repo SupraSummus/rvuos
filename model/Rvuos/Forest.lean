@@ -652,7 +652,7 @@ theorem step_forest (m : Machine) (s : State) (e : Event) (outs : List Outcome) 
     intro x k hx ho; rw [List.mem_singleton] at ho; subst ho; exact hx
   rcases step_cases h with ⟨_, rfl⟩ | ⟨t, op, r, slot, node, c, rfl, -, hc, hh⟩
   · exact one hf ho
-  rcases hh with ⟨_, -, hh⟩ | ⟨-, hh⟩ | ⟨-, hh⟩
+  rcases hh with ⟨_, -, -, -, hh⟩ | ⟨-, hh⟩ | ⟨-, hh⟩
   · rcases opCaptable_cases hh with ⟨-, hh⟩ | ⟨-, hh⟩ | ⟨-, hh⟩ | ⟨-, hh⟩ | ⟨-, hh⟩
     · obtain ⟨_, _, _, -, hdst, rfl⟩ := capCopy_ok hh
       exact one (hf.beside _ hdst) ho

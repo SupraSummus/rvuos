@@ -758,6 +758,8 @@ a frame's base and size and a range's first and count in two words,
 a `Notification` capability's bits whole, an Untyped's going in its second word,
 and a node an object holds by a type of the model's own, with its index among its holder's slots or places,
 and each node's children in the order of their ring; no link, no scheduler, no PMP.
+With it comes what the machine fixes: the smallest region and pool, where a process's tables, a table's slots and a thread's process lie,
+and the counter's block, which a clock gives out.
 It models the operations that touch nothing but the tree:
 `OP_CAP_COPY`, `OP_CAP_DERIVE`, `OP_CAP_MOVE`, `OP_CAP_DELETE`,
 `OP_CAP_REVOKE` until it meets a pool's own node,
@@ -781,7 +783,9 @@ So each invariant of "Properties" the model's state can say goes through three s
 
 1. It is stated from the self-check as a check of a state, in `invariants` of `model/Main.lean`:
    `State.wellFormed` the forest of "Derivation", `State.nestingOk` the nesting of "Isolation",
-   and `State.derivedOk` what the nesting needs of the rest of "Derivation" to follow from step to step.
+   `State.derivedOk` what the nesting needs of the rest of "Derivation" to follow from step to step,
+   and `State.parentsOk` the rule of "Derivation" each node is derived from its parent by, `derived_from`,
+   with what a copy and a delete need of it to follow: a table holds the ABI's types alone, none of the nodes an object holds.
    `model-check` holds it to every traced state the self-check passed,
    so a statement that says other than the kernel's check shows on the seeds and the corpus.
 2. It is searched:
@@ -828,3 +832,10 @@ What is proved is proved of the model:
   with what it needs of the derivation rule, `State.derivedOk`;
   and `checked_nested`: every state `model-check` passes holds both.
   Its lemmas of a split's halves are proved with `bv_decide`, so it trusts Lean's compiler too.
+- `step_parented`, in `model/Rvuos/Parented.lean`:
+  every outcome of every step the model names keeps every node derived from its parent, wherever a delete or a revoke stops,
+  where the smallest region is two bytes or more, which `model-check` holds every machine to;
+  and `checked_parented`: every state `model-check` passes holds it.
+  So what a capability gave out stays below it, with no more rights, memory or bits, until a revoke of it takes it.
+  `step_checked` puts it with `step_nested`: the four invariants hold together from step to step.
+  It trusts Lean's compiler as `step_nested` does.

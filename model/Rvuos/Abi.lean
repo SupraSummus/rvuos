@@ -29,6 +29,8 @@ abbrev capInstalled : Nat := 0x80
 abbrev capRetyped : Nat := 0x81
 abbrev capBound : Nat := 0x82
 abbrev capHosted : Nat := 0x83
+abbrev capSignalled : Nat := 0x84
+abbrev capWatched : Nat := 0x85
 abbrev capRouted : Nat := 0x86
 
 /-! Statuses, `KERR_*`. -/

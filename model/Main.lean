@@ -60,15 +60,16 @@ partial def readState (r : Reader) : IO State := do
 
 structure Invariant where
   name : String
-  holds : State → Bool
+  holds : Machine → State → Bool
   /-- That a step breaks it, a bug the kernel has. -/
   breaks : Option (PLift (Breaks holds))
 
 /-- The properties of design/verification.md the model states. -/
 def invariants : List Invariant :=
-  [⟨"forest", State.wellFormed, none⟩,
-   ⟨"derivation", State.derivedOk, none⟩,
-   ⟨"nesting", State.nestingOk, none⟩]
+  [⟨"forest", fun _ => State.wellFormed, none⟩,
+   ⟨"derivation", fun _ => State.derivedOk, none⟩,
+   ⟨"nesting", fun _ => State.nestingOk, none⟩,
+   ⟨"parents", State.parentsOk, none⟩]
 
 /-- What a step left: the caller's registers, or what stood in for them. -/
 inductive Seen where
@@ -125,7 +126,15 @@ def diff (want got : State) : List String :=
   caps ++ kids ++ objs
 
 /-- The invariants a state breaks. -/
-def broken (s : State) : List Invariant := invariants.filter (!·.holds s)
+def broken (m : Machine) (s : State) : List Invariant := invariants.filter (!·.holds m s)
+
+/-- The machine's line, its smallest region two bytes or more, as `step_parented` takes it. -/
+def readMachine (r : Reader) : IO Machine := do
+  let [rmin, pmin, pto, tso, tpo, cb, cz, cr] ← nats (← expect r "machine")
+    | throw (IO.userError "model-check: machine takes eight words")
+  if rmin < 2 then
+    throw (IO.userError s!"model-check: line {← r.line.get}: a smallest region of {rmin} bytes, which the proofs do not cover")
+  pure ⟨rmin, pmin, pto, tso, tpo, cb, cz, cr⟩
 
 /-- A state the records of an input began in: the driver's threads that may run, by actor number, and the tree. -/
 structure Start where
@@ -144,7 +153,7 @@ def searchAll (m : Machine) (starts : List Start) (depth : Nat) : IO Bool := do
     let say := if known then IO.println else IO.eprintln
     let mut found := false
     for st in starts do
-      let some n := Search.search m st.st st.actors depth (!inv.holds ·) | continue
+      let some n := Search.search m st.st st.actors depth (!inv.holds m ·) | continue
       found := true
       ok := ok && known
       say s!"model-check: {inv.name} breaks within {n.path.length} calls{if known then ", a known bug" else ""}; the seed:"
@@ -181,8 +190,10 @@ def main (args : List String) : IO UInt32 := do
     let ws := words l
     let stepLine ← r.line.get
     if ws.head? == some "start" then
+      let m ← readMachine r
+      machine := some m
       let st ← readState r
-      for inv in broken st do
+      for inv in broken m st do
         IO.eprintln s!"model-check: line {stepLine}: the state the records begin in breaks {inv.name}"
         failures := failures + 1
       let actors := pairs (← nats (ws.drop 1))
@@ -194,8 +205,7 @@ def main (args : List String) : IO UInt32 := do
     let (kind, t) ← match ws with
       | ["step", k, t] => pure (k, ← nat! t)
       | _ => throw (IO.userError s!"model-check: line {stepLine}: step or start expected")
-    let [rmin, pmin, pto, tso, tpo] ← nats (← expect r "machine") | throw (IO.userError "model-check: machine takes five words")
-    let m : Machine := ⟨rmin, pmin, pto, tso, tpo⟩
+    let m ← readMachine r
     machine := some m
     let regs ← nats (← expect r "op")
     let op := regs.headD 0
@@ -205,7 +215,7 @@ def main (args : List String) : IO UInt32 := do
     steps := steps + 1
     -- A state the self-check passed holds every invariant, or the model states one otherwise than the kernel.
     for (s, which) in (if reported then [(before, "before")] else [(before, "before"), (after, "after")]) do
-      for inv in broken s do
+      for inv in broken m s do
         IO.eprintln s!"model-check: line {stepLine}: the state {which} the step breaks {inv.name}"
         failures := failures + 1
     let e : Event := if kind == "call" then .call t op (regs.drop 1) else .fault t

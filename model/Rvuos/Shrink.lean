@@ -147,7 +147,7 @@ theorem delete_revoke_shrink (m : Machine) (s : State) (t op : Nat) (r : List Na
   -- Only a table takes a delete or a revoke.
   have ne : ∀ op', op' ≠ opCapDelete → op' ≠ opCapRevoke → op ≠ op' := by
     rintro op' h₁ h₂ rfl; rcases hop with h | h <;> contradiction
-  rcases hh with ⟨_, -, hh⟩ | ⟨-, hh⟩ | ⟨-, hh⟩
+  rcases hh with ⟨_, -, -, -, hh⟩ | ⟨-, hh⟩ | ⟨-, hh⟩
   · rcases opCaptable_cases hh with ⟨e, -⟩ | ⟨e, -⟩ | ⟨e, -⟩ | ⟨-, hh⟩ | ⟨-, hh⟩
     any_goals exact absurd e (ne _ (by decide) (by decide))
     · exact capDelete_shrinks hh

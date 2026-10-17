@@ -275,6 +275,13 @@ theorem slotLookup_object {t slot n : Nat} {c : Cap} (h : slotLookup m s t slot 
       all_goals simp_all
   · simp at h
 
+/-- A capability to an object a lookup finds names an object of its type. -/
+theorem capLookup_object {o : Obj} {idx : Nat} {c : Cap} (h : capLookup s o idx = .ok c)
+    (ho : capHasObject c.type = true) : (s.obj? c.a).map (·.type) = some c.type := by
+  unfold capLookup at h
+  repeat' split at h
+  all_goals simp_all
+
 /-- A copy of an Untyped is refused, and a derive of one goes through only while it is free. -/
 theorem capCopy_untyped {t : Nat} {derive : Bool} {table : Obj} {r : List Nat} {outs : List Outcome}
     {source : Nat} {src : Cap} (h : capCopy m s t derive table r = .ok (some outs))
@@ -301,11 +308,12 @@ theorem untypedSplit_free {t u : Nat} {c : Cap} {r : List Nat} {outs : List Outc
 
 /-! A step. -/
 
-/-- A step leaves the state as it was, or goes through a handler on a node the caller holds. -/
+/-- A step leaves the state as it was, or goes through a handler on a node the caller holds, a table's on a live table. -/
 theorem step_cases {e : Event} {outs : List Outcome} (h : step m s e = some outs) :
     (∃ k, outs = [⟨s, k⟩]) ∨
     ∃ t op r slot node c, e = .call t op r ∧ Held m s t node ∧ s.cap? node = some c ∧
-      ((∃ named, c.type = capCaptable ∧ opCaptable m s t slot op named r = .ok (some outs)) ∨
+      ((∃ named, c.type = capCaptable ∧ named ∈ s.objs ∧ named.type = capCaptable ∧
+          opCaptable m s t slot op named r = .ok (some outs)) ∨
        (c.type = capFrame ∧ opFrame m s t op node c r = .ok (some outs)) ∨
        (c.type = capUntyped ∧ opUntyped m s t op node c r = .ok (some outs))) := by
   cases e with
@@ -333,7 +341,11 @@ theorem step_cases {e : Event} {outs : List Outcome} (h : step m s e = some outs
     split at hans
     · rename_i hty
       split at hans
-      · exact Or.inl ⟨_, by simpa using hty, hans⟩
+      · rename_i named hnamed
+        have hty' : c.type = capCaptable := by simpa using hty
+        have hobj := capLookup_object hc (by rw [hty']; decide)
+        rw [hnamed, hty'] at hobj
+        exact Or.inl ⟨_, hty', List.mem_of_find?_eq_some hnamed, by simpa using hobj, hans⟩
       · simp at hans
     · split at hans
       · rename_i hty; exact Or.inr (Or.inl ⟨by simpa using hty, hans⟩)

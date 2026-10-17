@@ -1000,7 +1000,7 @@ theorem step_nested (m : Machine) (s : State) (e : Event) (outs : List Outcome) 
   intro o ho
   rcases step_cases hs with ⟨_, rfl⟩ | ⟨t, op, r, slot, node, c, rfl, -, hc, hh⟩
   · exact one_nested h ho
-  rcases hh with ⟨_, -, hh⟩ | ⟨hty, hh⟩ | ⟨hty, hh⟩
+  rcases hh with ⟨_, -, -, -, hh⟩ | ⟨hty, hh⟩ | ⟨hty, hh⟩
   · rcases opCaptable_cases hh with ⟨-, hh⟩ | ⟨-, hh⟩ | ⟨-, hh⟩ | ⟨-, hh⟩ | ⟨-, hh⟩
     · exact capCopy_nested h hh o ho
     · exact capCopy_nested h hh o ho
