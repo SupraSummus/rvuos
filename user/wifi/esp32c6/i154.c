@@ -117,6 +117,7 @@
 #define TX_ABORT_CCA_BUSY          25u
 
 #define ED_CCA_THRESHOLD (0xffu << 0)
+/* Bit 13, ESP-IDF's IEEE802154_ED_SAMPLE_AVG, which its ieee802154_mac_init sets; see NOTES.md. */
 #define ED_SAMPLE_AVG    (1u << 13)
 #define ED_CCA_MODE      (3u << 14)
 #define ED_CCA_MODE_ED   (1u << 14)

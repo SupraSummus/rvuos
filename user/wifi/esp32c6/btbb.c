@@ -20,6 +20,9 @@
  * BB_08 and BB_0C are written by bt_bb_v2_tx_set, BB_18 by bt_bb_v2_tx_set too, BB_10's high byte by
  * bt_bb_set_zb_tx_on_delay and its bits 5 to 12 by bt_bb_set_le_tx_on_delay, BB_B8 by bt_bb_tx_cca_period,
  * and BB_E0 to BB_F4 are the Gaussian filter's coefficients, written by set_gauss_coeff_1m and _2m.
+ * The fields the archive's ble_tx_config_check names, from its own strings, see NOTES.md's table:
+ * BB_10's bits 5 to 12 are bb_tx_on_delay, BB_18's bits 3 to 7 tx_ramp_delay and 19 to 23 tx_rampup_delay,
+ * and BB_B8's bits 12 to 19 tx_cca_end_ts and 23 to 30 tx_cca_start_ts.
  */
 #define BB_00 (BT_BB_BASE + 0x000u)
 #define BB_08 (BT_BB_BASE + 0x008u)
@@ -56,14 +59,20 @@
 #define BB_F4 (BT_BB_BASE + 0x0f4u)
 /* The baseband's word 0x14, which btbb_init writes; what it is is not known. */
 #define BB_INIT_14 (BT_BB_BASE + 0x014u)
-/* The word before the baseband's block, 0x600a08fc, which btbb_init writes; what it is is not known. */
+/*
+ * The word before the baseband's block, 0x600a08fc, whose bits 0 to 7 are rf_on_bt_delay and 8 to 15 pa_on_bt_delay,
+ * from ble_tx_config_check's strings, see NOTES.md's table; btbb_init writes 0xc800, the pa_on_bt_delay 0xc8.
+ */
 #define BB_INIT_18FC 0x600a08fcu
 
-/* The 802.15.4 MAC's transmit-on delay words, which ieee802154_txon_delay_set writes; the block is devices.h's. */
-#define I154_104 (I154_BASE + 0x104u)
-#define I154_10C (I154_BASE + 0x10cu)
-#define I154_110 (I154_BASE + 0x110u)
-#define I154_114 (I154_BASE + 0x114u)
+/*
+ * The 802.15.4 MAC's delays, ESP-IDF's IEEE802154_TXON_DELAY_REG and its neighbours TXOFF, RXON and TXRX_SWITCH,
+ * see NOTES.md's table; ieee802154_txon_delay_set writes the four below.
+ */
+#define I154_TXON_DELAY_REG (I154_BASE + 0x104u)
+#define I154_TXOFF_DELAY_REG (I154_BASE + 0x10cu)
+#define I154_RXON_DELAY_REG (I154_BASE + 0x110u)
+#define I154_TXRX_SWITCH_DELAY_REG (I154_BASE + 0x114u)
 
 /*
  * The AGC's words, which bt_agc_recorrect_set, bt_agc_rssi_thresh and bt_agc_gain_offset write, at their modem offsets;
@@ -262,16 +271,16 @@ void bt_bb_tx_cca_period(uint32_t first, uint32_t second)
 }
 
 /*
- * The libraries' ieee802154_txon_delay_set, written out: four read-modify-writes on the 802.15.4 MAC's words 0x104,
- * 0x110 and 0x114, each given its constant in the low ten or eleven bits, then 0x10c's low six cleared.
- * Their name says the transmit-on delay of IEEE 802.15.4; the fields' meaning is not known.
+ * The libraries' ieee802154_txon_delay_set, written out: four read-modify-writes on the 802.15.4 MAC's delays,
+ * TXON_DELAY and TXRX_SWITCH_DELAY given 0x23 and 0x7f in their low ten bits and RXON_DELAY 0x32 in its low eleven,
+ * then TXOFF_DELAY's low six cleared, their names ESP-IDF's, see NOTES.md's table.
  */
 void ieee802154_txon_delay_set(void)
 {
-    wr(I154_104, (rd(I154_104) & 0xfffffc00u) | 0x23u);
-    wr(I154_110, (rd(I154_110) & 0xfffff800u) | 0x32u);
-    wr(I154_114, (rd(I154_114) & 0xfffffc00u) | 0x7fu);
-    wr(I154_10C, rd(I154_10C) & 0xffffffc0u);
+    wr(I154_TXON_DELAY_REG, (rd(I154_TXON_DELAY_REG) & 0xfffffc00u) | 0x23u);
+    wr(I154_RXON_DELAY_REG, (rd(I154_RXON_DELAY_REG) & 0xfffff800u) | 0x32u);
+    wr(I154_TXRX_SWITCH_DELAY_REG, (rd(I154_TXRX_SWITCH_DELAY_REG) & 0xfffffc00u) | 0x7fu);
+    wr(I154_TXOFF_DELAY_REG, rd(I154_TXOFF_DELAY_REG) & 0xffffffc0u);
 }
 
 /*
