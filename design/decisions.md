@@ -785,94 +785,81 @@ until the maintainer decides otherwise.
     How soon a thread must run: the accounts' cap is the same tenth of a second for every unit, so a unit says how much and never how soon.
     How much a process may spend in all: units fill accounts for ever, and spare time is free, though a core that runs spends energy that one asleep in `wfi` does not.
     On whose behalf a thread runs: lending carries it one step, so a driver that a server waits on for a client runs on the server's time, not the client's.
-    So a thread's account gives it a deadline, a process is bound to fuel, and lent time goes on through the borrower:
-    - **A thread's deadline is the tick its account would be full again, and its window after that.**
-      The account stays as it is: its units earn it, a turn spends it, and it holds a tenth of a second's worth at most,
-      which bounds a thread's bursts, and without `RIGHT_X` the power it draws.
-      The tick it would be full again is the thread's virtual time:
-      it stays put while the thread waits, as the account gains the same every tick, until the account is full and it is the count,
-      and it runs at `COUNT_PARTS` / u ticks for each tick the thread pays for with u units.
-      The window, a power of two of ticks or none, set at the bind in the byte a place's layout leaves spare, is how late the thread may be;
-      none by default.
-      So the deadline is what a place keeps, read another way, and the window the one thing added.
+    So a thread's account gives it a deadline, a process holds fuel, and lent time goes on through the borrower:
+    - **A thread's deadline is the tick its account would be full again, plus its window.**
+      The account stays as it is: its units earn it, a turn spends it, and it holds a tenth of a second's worth at most.
+      That cap bounds a thread's bursts, and without `RIGHT_X` it bounds the power the thread draws.
+      The tick at which the account would be full again is the thread's virtual time.
+      While the thread waits, that tick stays put, because the account gains one tick's worth of its units every tick;
+      once the account is full, that tick moves with `sched_ticks`.
+      While the thread runs and pays for its turn with u units, that tick moves forward by `COUNT_PARTS` / u ticks per tick of work.
+      The window is a power of two of ticks, or zero by default, set at `OP_TIME_BIND` and kept in the spare byte of `struct place`.
+      So the deadline is the existing account read another way, plus one byte for the window.
     - **The order is earliest deadline first.**
-      A core runs the ready thread with the earliest deadline,
-      and a thread made ready with a deadline before the turn's takes the processor as the trap ends,
-      as a thread with time takes it from a turn on spare time today.
-      Work of c made ready while the account is full ends within c over the thread's part of the core, and its window, after it,
-      whatever the others do, since the units of a core add up to its time, which is all earliest deadline first needs:
-      Zhang's virtual clock, served by Goyal's start times, which EEVDF refines.
-      So a thread's promise is its own, and a parent states it by the units and the window it gives,
-      where a level is worth what the root task gave every other thread; decision 9.
-      A thread that ran less than its part goes first, and one that wants the core all along goes last;
-      a burst the account allows goes on at later and later deadlines instead of stopping, so a lock's holder finishes its hold.
-      The window grants nothing, since a longer one only puts its own thread later, so the thread's binder chooses it freely.
-      The run queue holds at most `TIME_UNITS` places of a core, each earning a unit or borrowing from a waiting lender that earns one,
-      so finding the earliest is a bounded look,
-      and a tree over the units by deadline, each place named by its first unit as `unit_place` names it, would make it a step per level, six for 64.
-      A prototype with the look, beside the scheduler that takes turns, showed it in `make lab`:
-      a small ask beside a process that spins is answered as fast as alone, through a gate too,
-      while a server on few units serves a bulk client more slowly, as time nobody uses goes by units rather than by thread.
-    - **No quantum, and no tick.**
-      A turn ends when a thread with an earlier deadline is made ready, its thread waits,
-      its deadline passes the earliest waiting one, or its account runs dry,
-      and each of these but the first is a count the kernel knows as the turn begins,
-      so the timer is set for the nearest of them, a timer line's deadline and the watchdog, in the counter's counts,
-      and `TIMER_HZ` goes; a deadline is no longer rounded to a tick, decision 36.
-      Tracing keeps a tick only as the unit its records move time by.
-    - **Spare time stays below**: a place with `RIGHT_X` whose account is dry runs, oldest first, while no thread with time wants the core,
-      and spends nothing, so a thread that used the idle core is not punished for it when the others come back.
+      A core runs the ready thread with the earliest deadline.
+      When a thread becomes ready, or its deadline moves earlier, with a deadline before the running turn's,
+      it takes the processor at the end of the trap, just as a thread with time preempts a turn on spare time today.
+      Because the units on a core add up to the whole core, earliest deadline first needs no separate admission check:
+      a job of cost c, made ready while the account is full, finishes within c divided by the thread's share of the core, plus its window,
+      whatever other threads do (Zhang's virtual clock, served by Goyal's start times, which EEVDF refines).
+      A parent states a thread's promise through the units and the window it gives that thread alone,
+      whereas a fixed priority level depends on what the root task gave every other thread; decision 9.
+      A thread that has used less than its share goes first, and one that spins goes last.
+      When a thread bursts, its account lets it keep running at later and later deadlines instead of stopping mid-work, so a lock holder finishes its critical section.
+      A longer window only delays the thread itself, so the caller that binds the thread may choose any window freely.
+      The run queue holds at most `TIME_UNITS` places on a core, so a linear scan is bounded;
+      a tournament tree over the 64 units would find the earliest deadline in 6 steps.
+      In `make lab`, the prototype answered a small ask beside a spinner as fast as when running alone, including through a gate.
+      In `bulk-hog` at 1 kHz, a server with 8 units beside a spinner with 32 gets one tick in five (matching their 8:32 unit ratio) rather than one in two as under round-robin,
+      so an unpaid bulk request waits for four of the spinner's ticks (4 ms at 1 kHz, 400 µs at 10 kHz).
+    - **Turns end on a wake, at a tick, or when the account or fuel runs dry.**
+      A woken thread with an earlier deadline preempts at the end of the trap,
+      while two competing threads whose deadlines cross during a turn switch at the next tick.
+      Timer lines, an account draining, and fuel running out can still set the hardware timer to the exact counter count within a tick,
+      so sleeps and budgets are not rounded to `TIMER_HZ`, decision 36.
+    - **Spare time stays below.**
+      A place with `RIGHT_X` whose account is empty runs in round-robin order while no thread with time wants the core.
+      Running on spare time spends nothing from the account, so a thread that used idle time is not penalized when other threads wake.
     - **A process spends fuel.**
-      A process holds fuel, an amount of the counter's counts, in the word its first node's block leaves spare,
-      and every count a turn runs, on the account, on spare time or lent, comes off the fuel of the process whose account pays for it,
-      charged where the turn is, as it closes and at each tick.
-      Fuel is moved and never made: an operation on a process moves fuel from the caller's process to it or back,
-      and the root task's process is the one without bound, which gives without spending.
-      A thread whose process's fuel runs dry stops as a fault stops it, so its watcher hears, and a resume once its fuel is topped up runs it on;
-      a lender whose fuel runs dry stops lending, its wait ending with an error, so the borrower runs on its own or another's.
-      So a parent bounds a child's power by the units it hands out without `RIGHT_X`, and its energy by the fuel it moves into the child's,
-      and takes either back.
-      A count of fuel is what the core spends running a count; what a device spends is its driver's to charge, below.
-      A prototype stopped a child with an eighth of the core and no spare time eight times the fuel's length after it started,
-      and one with spare time after about the fuel's length, each having done the same work,
-      and charged a server's work on a client's lent time to the client.
-    - **Lent time goes on, at the earliest deadline.**
-      A waiter lends the account it runs on, its own or one lent to it,
-      so a client's account pays for its server and for the driver the server waits on, up to `LEND_DEPTH` borrowers on, a step each time the kernel looks.
-      A borrower runs at the earliest deadline among its own account and its lenders',
-      who are ringed in deadline order as each lends, a walk over those with time, at most `TIME_UNITS`, since each runs on an account of its own;
-      a waiting lender's deadline moves only as a borrower spends its account, and it moves along the ring then.
-      The promises are the accounts', and a borrower is only what an account pays for, so a lend changes no promise but the lender's:
-      an urgent client may pay for the end of a request its server was serving for another,
-      waits for no more than that, at its own deadline, and pays for it from its own account and fuel.
-      That is Lamastra, Lipari and Abeni's bandwidth inheritance, without its walk, as the chain is bounded.
-      A prototype took the first step of it, lent time through a first lender with no time of its own, three lenders on:
-      a client that lends to a gate of no units, which lends to a store of no units, beside a process that spins,
-      was answered as fast as alone, where lent time that went one step left the store on spare time;
-      the lenders' ring in deadline order is not built.
-    - **What a thread made ready waits for**, decision 36, becomes its work over its part and its window, the kernel's longest step, and the trap and the switch:
-      a driver that must answer a frame within a window holds units enough that the answer's cost over its part fits the window, and no window of its own.
+      A process holds fuel in the spare word of its first node's block: a count of clock counts, or `FUEL_UNBOUNDED` when unlimited.
+      Every count a turn runs — on the thread's own account, on spare time, or on lent time — is deducted from the fuel of the process paying for the turn,
+      charged when the turn closes and at each tick.
+      Fuel is moved and never created: `OP_PROCESS_FUEL` moves fuel between the caller's process and the target process,
+      and the root task starts with `FUEL_UNBOUNDED`, which gives fuel without spending its own.
+      A thread whose process has zero fuel cannot run.
+      When a charge drains a process's fuel to zero, a thread paying for its own turn stops as on a fault (signalling its watch),
+      and a waiting lender stops lending; topping up the fuel and resuming the thread lets it run again.
+      Thus a parent bounds a child's power by giving it units without `RIGHT_X`, and bounds its total energy by giving it a fixed amount of fuel.
+      In the prototype (`make FUEL=1 fuel-test`), a child with 1/8 of the core and no spare time stopped after 8x the fuel's duration,
+      a child with spare time stopped after 1x the fuel's duration (both completing the same number of loop iterations),
+      and work done by a server on lent time was paid from the client's fuel.
+    - **Lent time passes through a chain, at the earliest deadline.**
+      A waiting thread lends the account and window it runs on — whether its own or one lent to it — to the thread it waits on, up to `LEND_DEPTH` steps deep.
+      A borrower runs with the earliest deadline among its own account and its lenders' accounts.
+      Keeping each borrower's ring of lenders sorted by deadline lets the most urgent waiting client pay for the server (Lamastra, Lipari and Abeni's bandwidth inheritance, bounded by `LEND_DEPTH`).
+      In the prototype (`make SCHED=edf`), lending through a chain of three (`ui` -> `gate` -> `store`, where neither server has units of its own)
+      answered the client beside a spinner as fast as when running alone (34 µs median at 10 kHz), whereas one-step lending left `store` on spare time.
+      Handing the active turn forward and back across intermediate lenders while keeping `core->payer` at the root of the chain, and sorting the lenders' ring by deadline, are not built yet.
+    - **What a ready thread waits for** (decision 36) is bounded by its work divided by its share, plus its window, plus the kernel's longest non-preemptible step and switch cost.
+      A driver that must answer a frame within a window W needs enough units that its work divided by its share fits within W, with window 0.
     Weighed and left:
-    - **Constant bandwidth servers**, Abeni and Buttazzo's, which Linux's `SCHED_DEADLINE` runs: a budget per period, refilled at the period's deadline,
-      the deadline the order's.
-      A prototype built them first, with the period a place's: the period ties how soon a thread runs to how much it may do at once,
-      so a short one chops a lock's hold into periods, and a long one makes its thread wait a long one.
-      On the tick grid, every budget a tick at least, a thread with few units had a long period, and answered slower than taking turns;
-      with budgets that end within a tick, the small ask beside the spinner was answered in about a quarter of taking turns' time,
-      but the lockers waited longer.
-    - **Levels**, decision 9: a claim on the threads below, with a promise for the top alone.
-    - **The deadline without the window**, the tick the account would be full alone:
-      the order of threads under their part is how far under it each is, which says nothing of how soon one must run.
-    - **A period with priorities**, seL4's scheduling contexts: the budget and the period, and the order still a level.
-    - **Threads that migrate**, as LRPC's and Composite's calls do: the client's own thread runs the server's code, so its time follows with no lending,
-      but every server is then reentrant, with a stack for each caller inside it, and a call is the IPC decision 5 has done without.
-    - **Reserves and taps**, Cinder's energy graph: a rate between any two reserves, so a flow through a tree of them, a walk at every refill.
-    - **Fuel of its own type**, an object in a pool that several processes are bound to:
-      a domain of several processes under one bound, for a node in each and a type, where a process is the domain the kernel already has.
+    - **Constant bandwidth servers** (Abeni and Buttazzo, Linux `SCHED_DEADLINE`): a budget Q per period P, refilled at the deadline.
+      A prototype built this first, with P stored on the place.
+      Because P ties latency (how soon a thread runs) to burst size (how much it may do at once),
+      a short P chops lock holds into pieces, while a long P gives poor latency.
+    - **Fixed priority levels** (decision 9): gives a latency bound only to the highest level; lower levels depend on the behavior of every thread above them.
+    - **Deadline without a window** (just the tick the account would be full): orders threads by how far below their share they are, but cannot express a looser deadline for batch work.
+    - **Periods with fixed priorities** (seL4 scheduling contexts): separates budget and period, but keeps fixed-priority ordering.
+    - **Migrating threads** (LRPC, Composite): the client thread executes across domain boundaries so its time follows automatically,
+      but every server must be reentrant and manage multiple stacks, and synchronous IPC is a non-goal (decision 5).
+    - **Reserves and taps** (Cinder): a graph of energy flows between reserves, which requires walking the graph on every refill.
+    - **A separate `Fuel` kernel object**: lets multiple processes share one energy budget, at the cost of a new object type and a capability node per process, when a `Process` is already the kernel's unit of isolation.
+    - **Fluid EDF with no quantum** (preempting at the exact counter count when the running deadline crosses a waiting one):
+      two threads with equal deadlines would preempt each other on every counter tick, and 32-bit timestamps in raw counter counts wrap within minutes.
     Open:
-    - **The tick under tracing**: deadlines in counts, and the host's clock the counts the records move.
-    - **The window's grain**, ticks or counts, and a shortest one against what a switch costs each board.
-    - **Time nobody uses**, by units or by thread: a server on few units serves its clients slower than taking turns did, unless they lend it theirs.
-    - **A device's energy**: whether a driver takes what its device spent for a client from the fuel of the account it runs on, which the client lent it.
-    - **Waking costs too**: whether the stall charges a wake's energy to the fuel of whoever armed the line that ended it.
-    - **Lending across cores**, as decision 27 leaves it.
+    - **Sub-tick timer lines and fuel drain**: arming the hardware timer for the exact count within a tick while keeping accounts on the tick grid, and how tracing records sub-tick wakes.
+    - **Window grain**: ticks versus counter counts, and the minimum allowed window relative to each board's context-switch cost.
+    - **Stopping a lender when its fuel runs dry**: whether its `OP_NOTIFY_LEND` returns `KERR_LIMIT` (as in the prototype) or rewinds `pc` and stops the thread (as `OP_THREAD_STOP` does) so resuming after a refill retries the lend transparently.
+    - **Device energy**: letting a trusted driver deduct device energy from the fuel of the account paying for its turn.
+    - **Wake energy**: charging the energy of waking from `wfi` to the fuel of the process that armed the timer line.
+    - **Lending across cores** (decision 27).
