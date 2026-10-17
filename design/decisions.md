@@ -111,18 +111,23 @@ until the maintainer decides otherwise.
    and its `mtval` reads zero; see "Boards".
 
 9. **Scheduling policy beyond units.**
-   Decided in part: units of time earned by one thread's place each, an account per place they fill,
+   Decision: earliest deadline first on the run queue, round-robin on spare time.
+   Units of time are earned by one thread's place each, an account per place they fill,
    and spare time only by `RIGHT_X`; see "Scheduling" and open decision 18.
-   Working default for the rest: no priorities;
-   units promise a thread their part of the processor, give or take the accounts,
-   and a thread with time a turn within a tick for each other thread with units of its core, and no more; see "Scheduling".
-   The tick is the quantum and the build's, `TIMER_HZ`, which a program reads from a clock's description, decision 33,
-   so the wait is the build's to set,
-   against a switch every tick while threads compete, which nothing has measured yet;
-   the work a thread gets is bounded by the others' accounts, which a shorter tick does not shorten, `TODO.md`.
-   Priorities with preemption on wake, bounded by the account as a budget, are what a wait below a tick would take,
-   and the proposal below says what they take besides;
-   decide them when a workload needs one at a cost the switches allow.
+   The run queue is ordered by deadline:
+   a place's deadline is the tick its account would be full again if its thread did not run, and a window after it (none or 2^(k-1) ticks, passed to `OP_TIME_BIND`),
+   which stays put while the thread waits and runs at `COUNT_PARTS / units` ticks for each tick it pays for.
+   The thread with the earliest deadline on the run queue has the next turn,
+   and a place that joins the run queue with a deadline before that of the turn's payer takes the processor as the trap ends,
+   as from a turn on spare time.
+   Lent time goes on through a first lender with no time of its own, `LEND_DEPTH` lenders on.
+   Finding the next thread walks the run queue, at most `TIME_UNITS` places.
+   The accounts, the spent queue, the release and spare time are as they were.
+   `make lab` shows that an interactive thread or a server woken by an ask gets the processor within tens of microseconds instead of waiting for a compute hog's turn,
+   at a modest cost of walking the run queue (about 7% on switches); see `user/lab/NOTES.md`.
+   Earlier proposals considered fixed priorities or priorities that preempt on wake (below),
+   or a scheduler in userspace;
+   taking turns by deadline achieves responsiveness without priority inversion or extra priority machinery.
    The earlier plan was fixed priorities on `Thread`,
    set by whoever holds the capability and capped by the setter's own,
    round-robin within a priority, no priority inheritance.

@@ -8,17 +8,13 @@ Witness: fuzz lend-hands-turn
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -855,13 +855,9 @@ void sched_turn_back(void)
+@@ -826,9 +826,6 @@ void sched_turn_back(void)
          LOOP_BOUND(LEND_DEPTH);
          lender = p2v(lender->lend_to);
      }
 -    if (lender == core->payer) {
 -        core->payer = NULL;
 -    }
- #else
--    core->payer = NULL;
- #endif
      core->turn = lender;
      lender->core = (uint8_t)core_index();
      thread_settle(was);
-     thread_settle(lender);

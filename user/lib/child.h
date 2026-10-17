@@ -171,8 +171,7 @@ uint32_t child_start(struct self *s, struct child *c, void (*entry)(struct child
                      uint32_t units);
 /*
  * child_start with the window of its time: 0 for none, else 2 to window_exp - 1 ticks,
- * that its deadlines lie after the tick its account would be full again,
- * in a kernel built with make SCHED=edf, an experiment of the order open decision 9 weighs; other kernels have no windows, and it is ignored.
+ * that its deadlines lie after the tick its account would be full again.
  */
 uint32_t child_start_reserve(struct self *s, struct child *c, void (*entry)(struct child_page *), uint32_t core,
                              uint32_t units, uint32_t window_exp);

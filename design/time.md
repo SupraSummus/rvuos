@@ -147,6 +147,7 @@ A thread that loses its units while it runs finishes the turn it had, unless a t
 so only a wait, the tick, a fault, a revoke that takes its own process, a stop of itself,
 a stop or a revoke on another core, which makes its core trap first,
 a signal that wakes the thread paying for its turn,
+a thread that joins the run queue with an earlier deadline than the turn's payer,
 or a thread with time that becomes ready while the turn runs on spare time takes the processor from a running thread.
 A call stopped for an interrupt is made again when its thread next runs:
 at once, unless the interrupt was the tick and ended the turn.
@@ -183,25 +184,28 @@ The boot grant has `RIGHT_X`, so a thread bound through it to no units runs when
 A thread without `RIGHT_X` runs at most its units' part and a full account,
 and its core sleeps in `wfi` for the rest: that is how the root task caps a thread's time.
 
-**The queues are the policy: round-robin, time before spare time.**
+**The queues are the policy: earliest deadline first, time before spare time.**
 A ready thread that may run, and whose turn it is nowhere, waits on one of three queues of each core it holds the time of,
-each a ring of places, oldest first, through the place's own `queue_next` and `queue_prev`,
+each a ring of places through the place's own `queue_next` and `queue_prev`,
 as a notification's waiters are a ring of threads through the thread's:
 the run queue while it has time, the spare queue without time if it may run on spare time,
 and the spent queue otherwise, where a thread with units waits for its account.
-The oldest thread on the run queue has the next turn, or with the run queue empty the oldest on the spare queue.
+The thread with the earliest deadline on the run queue has the next turn, or with the run queue empty the oldest on the spare queue.
+A place's deadline is the tick its account would be full again if its thread did not run, and a window its binder chose after it,
+none or 2^(k-1) ticks, which `OP_TIME_BIND` takes in the capability;
+a thread that waits keeps its deadline, as its account gains the same every tick, until the account is full,
+and one that runs moves it later by `COUNT_PARTS / units` ticks for each tick it pays for.
+A thread that joins the run queue with a deadline before that of the turn's payer takes the processor as the trap ends,
+as from a turn on spare time.
 A thread that waits hands the rest of the tick to the next, and the tick ends the turn:
 the thread goes to the back of the queue its account and binding now put it on.
 A thread that becomes ready, resumed, woken or bound, joins the back of its queue.
-Finding the next thread takes constant time however many objects exist,
+Finding the next thread walks the run queue, at most `TIME_UNITS` places,
 and the scheduler's state is the three queues, each place's account and the tick it was counted to,
 the place that earns each unit, the release, the running thread, and how far into the tick its turn is charged.
 With every thread on spare time alone this is the plain round-robin over threads,
 which is how the replay driver runs; see "Verification".
-A build with `make SCHED=edf` takes the run queue in another order, an experiment of the order open decision 9 weighs:
-earliest deadline first, a thread's deadline the tick its account would be full again and a window its binder chose after it,
-and lent time goes on through a first lender with no time of its own, `LEND_DEPTH` lenders on;
-it keeps none of what this section promises of turns.
+Lent time goes on through a first lender with no time of its own, `LEND_DEPTH` lenders on.
 
 **A waiter may lend its time to a thread it names**, with `OP_NOTIFY_LEND`; see "Communication and synchronisation".
 A borrower without time of its own has the run queue while its lender's account holds a tick,

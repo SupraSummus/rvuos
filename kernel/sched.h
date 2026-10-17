@@ -87,7 +87,6 @@ static inline uint32_t tick_gain(const struct place *p)
     return place_units(p) * timer_tick_counts();
 }
 
-#if SCHED_EDF
 /* The most a window's exponent may be, a window of 2^15 ticks. */
 #define WINDOW_EXP_MAX 16u
 /*
@@ -95,7 +94,6 @@ static inline uint32_t tick_gain(const struct place *p)
  * so a client's account pays for its server and for the driver its server waits on.
  */
 #define LEND_DEPTH 3u
-#endif
 
 /* The most a place's account holds: a tenth of a second's worth of its units, none without. */
 static inline uint32_t account_cap(const struct place *p)
@@ -211,10 +209,8 @@ struct core {
      */
     bool recall;
 
-#if SCHED_EDF
     /* Whether a place joined the run queue since the core last looked for a deadline before the turn's; see spare_end. */
     bool run_joined;
-#endif
 
     /* The bits the last wake handed over, zero if none; for the trace. */
     uint32_t trace_wake_bits;
@@ -371,7 +367,7 @@ struct place *sched_place_for(const struct thread *t, uint32_t core);
  * A place bound to none without spare time holds the core's time all the same: its thread runs there on lent time alone.
  * No other thread earns any of the units; the caller has made sure.
  * A ready thread whose turn it is nowhere joins the back of the queue its account puts it on, on each of its cores.
- * Under SCHED_EDF the place's window is none for a window_exp of 0, else 2 to window_exp - 1 ticks.
+ * The place's window is none for a window_exp of 0, else 2 to window_exp - 1 ticks.
  */
 void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights, struct cap *parent, uint32_t window_exp);
 

@@ -760,9 +760,7 @@ and moves `taken` only as far as its host says it has the bytes, so a halt write
   `DESIGN.md`, "Scheduling", gives the bounds and what a periodic task needs of its units.
   A thread a process adds earns only units split off the process's own, or runs on spare time:
   it takes nothing another thread earns.
-  Spare time goes round by thread, so more threads there get more of it.
-  A kernel built with `make SCHED=edf`, an experiment of open decision 9 in `DESIGN.md`,
-  takes the run queue in another order, and keeps none of these promises of turns.
+  The run queue is taken earliest deadline first: a thread's deadline is the tick its account would be full again and its window after it.
 - A system call is never interrupted:
   machine mode runs with interrupts off from the trap to the return.
   On several cores one call runs at a time, whichever core makes it, and another core's call waits for it.

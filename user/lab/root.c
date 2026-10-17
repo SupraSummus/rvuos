@@ -34,7 +34,7 @@
 #define BIG    80000u
 #define HOLD   60000u
 #define PERIOD 3000u  /* a periodic member's, in microseconds: three ticks */
-#define LONG_WINDOW 7 /* a window of 2^6 ticks, under make SCHED=edf, against none */
+#define LONG_WINDOW 7 /* a window of 2^6 ticks, against none */
 #define JITTER 80000u /* the most a periodic member works before each ask */
 
 enum role { NONE, STORE, GATE, UI, BULK, HOG, LOCKER };
@@ -59,7 +59,7 @@ struct member {
     uint8_t lends; /* a client's: it lends the member it asks its time while it waits for an answer */
     uint8_t lock;  /* a locker's lock_kind */
     uint32_t cost, period_us, gap;
-    uint8_t window_exp; /* its window, 2 to this less one ticks, under make SCHED=edf; 0 for none */
+    uint8_t window_exp; /* its window, 2 to this less one ticks; 0 for none */
 };
 
 struct scenario {

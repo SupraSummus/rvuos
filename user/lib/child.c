@@ -246,13 +246,8 @@ uint32_t child_start_reserve(struct self *s, struct child *c, void (*entry)(stru
         PASS(slot_new(s, &time));
         uint32_t status = rv_time_carve(s->time, c->unit, units, time);
         if (status == KERR_OK) {
-#if SCHED_EDF
-            /* The experiment's window rides above the count; see OP_TIME_BIND in kernel/syscall.c. */
+            /* The window rides above the count; see OP_TIME_BIND in kernel/syscall.c. */
             status = rv_time_bind(time, c->thread, 0, units | window_exp << 8);
-#else
-            (void)window_exp;
-            status = rv_time_bind(time, c->thread, 0, units);
-#endif
         }
         PASS(slot_free(s, time));
         TRY(s, "bind a child to its units", status);
