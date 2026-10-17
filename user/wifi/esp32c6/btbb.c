@@ -25,6 +25,13 @@
 #define BB_0C (BT_BB_BASE + 0x00cu)
 #define BB_10 (BT_BB_BASE + 0x010u)
 #define BB_18 (BT_BB_BASE + 0x018u)
+#define BB_20 (BT_BB_BASE + 0x020u)
+#define BB_24 (BT_BB_BASE + 0x024u)
+#define BB_28 (BT_BB_BASE + 0x028u)
+#define BB_2C (BT_BB_BASE + 0x02cu)
+#define BB_30 (BT_BB_BASE + 0x030u)
+#define BB_34 (BT_BB_BASE + 0x034u)
+#define BB_38 (BT_BB_BASE + 0x038u)
 #define BB_4C (BT_BB_BASE + 0x04cu)
 #define BB_50 (BT_BB_BASE + 0x050u)
 #define BB_54 (BT_BB_BASE + 0x054u)
@@ -79,6 +86,7 @@
 #define AGC_28C8 (MODEM_BASE + 0x28c8u)
 #define AGC_28D0 (MODEM_BASE + 0x28d0u)
 #define AGC_28D4 (MODEM_BASE + 0x28d4u)
+#define AGC_28F4 (MODEM_BASE + 0x28f4u)
 #define AGC_28A8 (MODEM_BASE + 0x28a8u)
 #define AGC_28C0 (MODEM_BASE + 0x28c0u)
 #define AGC_28C4 (MODEM_BASE + 0x28c4u)
@@ -113,7 +121,6 @@ extern void bt_bb_v2_version(void);
 extern void bt_agc_gain_offset(uint32_t value);
 extern void bt_agc_rssi_thresh(void);
 extern void bt_agc_restart_set(void);
-extern void bt_bb_rx_dpo_set(void);
 extern void bt_bb_rx_filter_sel(void);
 extern void zb_rx_core_set(void);
 extern void zb_rx_auto_sel(void);
@@ -147,6 +154,7 @@ void bt_agc_detect_set(void);
 void bt_bb_rx_set(uint32_t value);
 void bt_agc_v2_set(void);
 void bt_bb_rx_correlator_set(void);
+void bt_bb_rx_dpo_set(void);
 
 /*
  * The libraries' bt_bb_v2_init_cmplx, written out: the mode's transmit and receive set, the Gaussian filter's two
@@ -577,4 +585,32 @@ void bt_bb_rx_correlator_set(void)
     wr(BB_F8, (rd(BB_F8) & 0xfff807ffu) | 0x4f000u);
     wr(BB_F8, (rd(BB_F8) & 0x81ffffffu) | 0x2000000u);
     wr(BB_68, rd(BB_68) | 0x10u);
+}
+
+/*
+ * The libraries' bt_bb_rx_dpo_set, written out: twenty read-modify-writes on the baseband's 0x20, 0x24, 0x28, 0x2c, 0x30,
+ * 0x34 and 0x38 and on the AGC's 0x28f4, each a constant beside the bits kept, five of them a negative-andi mask.
+ */
+void bt_bb_rx_dpo_set(void)
+{
+    wr(BB_38, (rd(BB_38) & ~0x780u) | 0x300u);
+    wr(BB_24, (rd(BB_24) & 0x87ffffffu) | 0x30000000u);
+    wr(BB_34, (rd(BB_34) & 0x0fffffffu) | 0x70000000u);
+    wr(BB_34, (rd(BB_34) & 0xf0ffffffu) | 0x7000000u);
+    wr(BB_20, (rd(BB_20) & 0xfffc3fffu) | 0x18000u);
+    wr(BB_20, (rd(BB_20) & 0xffffc3ffu) | 0x1c00u);
+    wr(BB_34, (rd(BB_34) & 0xff0fffffu) | 0x700000u);
+    wr(BB_34, (rd(BB_34) & 0xfff0ffffu) | 0x70000u);
+    wr(BB_20, (rd(BB_20) & ~0x3fu) | 0x6u);
+    wr(BB_24, rd(BB_24) & 0xfbffffffu);
+    wr(BB_28, rd(BB_28) & ~0x30u);
+    wr(BB_2C, (rd(BB_2C) & 0xfffff00fu) | 0xdc0u);
+    wr(BB_28, rd(BB_28) & ~0xcu);
+    wr(BB_2C, (rd(BB_2C) & ~0x6u) | 0x4u);
+    wr(BB_30, (rd(BB_30) & ~0x3fu) | 0x3u);
+    wr(AGC_28F4, (rd(AGC_28F4) & 0xfff00fffu) | 0xa000u);
+    wr(AGC_28F4, (rd(AGC_28F4) & 0xe01fffffu) | 0x5000000u);
+    wr(AGC_28F4, rd(AGC_28F4) & 0xbfffffffu);
+    wr(AGC_28F4, rd(AGC_28F4) & 0x7fffffffu);
+    wr(AGC_28F4, rd(AGC_28F4) & 0xdfffffffu);
 }
