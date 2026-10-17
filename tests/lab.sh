@@ -12,7 +12,7 @@ log=$(mktemp)
 trap 'rm -f "$log"' EXIT
 
 set +e
-timeout 120 sh -c "$boot_cmd" > "$log" 2>&1
+timeout 120 sh -c "$boot_cmd" < /dev/null > "$log" 2>&1
 status=$?
 set -e
 

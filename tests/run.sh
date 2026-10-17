@@ -26,7 +26,7 @@ set +e
 # On the MPS2 boards it takes half a minute, the idle kernel polling through every sleep, beside the rest of `make check`.
 seconds=60
 [ "$board_arch" = arm ] && seconds=120
-timeout $seconds sh -c "$boot_cmd" > "$log" 2>&1
+timeout $seconds sh -c "$boot_cmd" < /dev/null > "$log" 2>&1
 status=$?
 set -e
 
