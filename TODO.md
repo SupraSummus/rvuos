@@ -125,11 +125,6 @@ what is left:
 
 ## ESP32-C6
 
-- The ESP32-C6's IEEE 802.15.4 baseband is Espressif's closed `libbtbb.a`, which the driver takes one function at a
-  time as it took `pp` and `net80211`, from the archive's `bt_bb_v2.o`: `bt_bb_v2_init_cmplx` and the 27 functions it
-  reaches, the power table's `get_data_sat` staying the ROM's.
-  It is held to a `trace=1` window of the 802.15.4 bring-up and to a host replay, and the archive goes from the link
-  when the last of it is the driver's; what stays RF, the PHY's calibration among it, stays `libphy.a`'s.
 - Boot from flash, and with it whether the ROM can load the image
   straight from offset 0 or Espressif's second-stage bootloader must run first,
   and whether execute-in-place goes through a cache the kernel must control.

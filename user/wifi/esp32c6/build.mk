@@ -10,9 +10,9 @@ WIFI_ESP      := user/wifi/esp32c6
 WIFI_ESP_INIT := $(BUILD)/$(WIFI_ESP)/phy_init_data.c
 WIFI_ESP_OBJ  := $(patsubst %.c,$(BUILD)/%.o,$(filter-out $(WIFI_ESP)/root.c,$(wildcard $(WIFI_ESP)/*.c))) \
                  $(BUILD)/$(WIFI_ESP)/phy_init_data.o $(BUILD)/$(WIFI_ESP)/esp_wifi_regulatory.o
-# The closed libraries the driver links: the Wi-Fi's two, the PHY's, and the BT baseband's, which IEEE 802.15.4 runs on;
-# glue.c stands for what libcore.a held.
-WIFI_ESP_LIBS := $(addprefix $(PHYBLOB_CACHE)/,libnet80211.a libpp.a) $(BUILD)/$(WIFI_ESP)/libbtbb.a $(BUILD)/$(WIFI_ESP)/libphy.a
+# The closed libraries the driver links: the Wi-Fi's two and the PHY's; glue.c stands for what libcore.a held.
+# The BT baseband, libbtbb.a, was taken whole, see btbb.c; its archive is linked no more.
+WIFI_ESP_LIBS := $(addprefix $(PHYBLOB_CACHE)/,libnet80211.a libpp.a) $(BUILD)/$(WIFI_ESP)/libphy.a
 WIFI_ESP_ROM  := $(addprefix $(PHYBLOB_CACHE)/,esp32c6.rom.ld esp32c6.rom.pp.ld \
                  esp32c6.rom.net80211.ld esp32c6.rom.phy.ld esp32c6.rom.libgcc.ld esp32c6.rom.libc.ld)
 # The driver goes where the window onto flash starts, and the configuration to the input region,
@@ -197,21 +197,6 @@ WIFI_ESP_PHY_OWN := phy_get_xtal_freq tsens_read_init_new pwdet_reg_init_new ope
 $(BUILD)/$(WIFI_ESP)/libphy.a: $(WIFI_ESP_INIT) $(WIFI_ESP)/build.mk
 	$(OBJCOPY) $(addprefix --weaken-symbol=,$(WIFI_ESP_PHY_OWN)) $(PHYBLOB_CACHE)/libphy.a $@
 
-# libbtbb.a's functions the driver's own take, weakened in a copy, so that btbb.c's and i154.c's take their place;
-# the copy is made again when this file, which names them, changes.
-# WIFI_ESP_BTBB_OWN's make device accesses, so the host replay names them too; WIFI_ESP_BTBB_BARE's make none,
-# so only the weakening names them, and the trace and the replay hold nothing of them.
-WIFI_ESP_BTBB_OWN := bt_bb_v2_tx_set set_gauss_coeff_1m set_gauss_coeff_2m \
-                     bt_bb_set_le_tx_on_delay bt_bb_set_zb_tx_on_delay bt_bb_tx_cca_period \
-                     ieee802154_txon_delay_set bt_agc_recorrect_set bt_agc_rssi_thresh bt_agc_gain_offset \
-                     bt_bb_rx_filter_sel zb_rx_auto_sel zb_rx_core_set bt_set_rx_comp \
-                     bt_agc_gain_max bt_agc_gain_set zb_rx_v0_0_set bt_agc_target_set bt_agc_detect_set \
-                     bt_bb_rx_set bt_agc_v2_set bt_bb_rx_correlator_set bt_bb_rx_dpo_set bt_agc_restart_set
-WIFI_ESP_BTBB_BARE := bt_bb_get_tx_pwr_table bt_bb_v2_rx_set
-
-$(BUILD)/$(WIFI_ESP)/libbtbb.a: $(WIFI_ESP_INIT) $(WIFI_ESP)/build.mk
-	$(OBJCOPY) $(addprefix --weaken-symbol=,$(WIFI_ESP_BTBB_OWN) $(WIFI_ESP_BTBB_BARE)) $(PHYBLOB_CACHE)/libbtbb.a $@
-
 $(BUILD)/$(WIFI_ESP)/phy_init_data.o: $(WIFI_ESP_INIT)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -223,7 +208,7 @@ $(BUILD)/$(WIFI_ESP)/esp_wifi_regulatory.o: $(WIFI_ESP_INIT)
 # of the foreign code calls an allocator: hostap.c, supp.c and ec.c for hostap's and Mbed TLS's, osi.c for the libraries'.
 WIFI_ESP_HEAP := $(addprefix $(BUILD)/$(WIFI_ESP)/,ec.o heap.o hostap.o osi.o supp.o)
 
-$(BUILD)/wifi-drv.elf: $(WIFI_ESP_OBJ) $(LIB_OBJ) $(BUILD)/$(WIFI_ESP)/flash.ld $(BUILD)/$(WIFI_ESP)/libbtbb.a $(BUILD)/$(WIFI_ESP)/libphy.a
+$(BUILD)/wifi-drv.elf: $(WIFI_ESP_OBJ) $(LIB_OBJ) $(BUILD)/$(WIFI_ESP)/flash.ld $(BUILD)/$(WIFI_ESP)/libphy.a
 	@! $(NM) -u $(filter-out $(WIFI_ESP_HEAP),$(filter $(BUILD)/$(WIFI_ESP)/%,$(WIFI_ESP_OBJ))) | grep -E ' (osi_(m|c|re)alloc|os_(m|z)alloc|malloc|calloc)$$' \
 		|| { echo "$@: the driver's own code calls an allocator" >&2; exit 1; }
 	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/$(WIFI_ESP)/flash.ld $(foreach s,$(WIFI_ESP_ROM),-Wl,-T,$(s)) \
@@ -359,29 +344,11 @@ wifi-esp32c6-replay:
 	$(error the driver runs on an ESP32-C6: make BOARD=esp32c6 wifi-esp32c6-replay)
 endif
 
-# The accesses of libbtbb.a's bt_bb_v2_init_cmplx mac-replay-test's bb cases hold btbb.c to, taken again from
-# WIFI_TRACE_LOG, a trace=1 run with i154= of an image whose baseband was still libbtbb.a's, BTBB_REPLAY_ELF and
-# BTBB_REPLAY_IMAGE naming that image: btbb.c's functions take the library's names, so no later image runs theirs.
-# Between the window's trace: lines baseband and mac, as i154.c's radio_up writes them, since mac_init calls
-# ieee802154_txon_delay_set again; the functions are WIFI_ESP_BTBB_OWN's and bt_bb_v2_init_cmplx's own,
-# the rest, still the library's on the board, doing nothing on the host, see test/btbb-host.c.
-# BTBB_REPLAY_FILE names the file, bb by default; bb-other is the same window from the modem's other state,
-# whose values differ where a write keeps what a read gave, so a constant written there fails one of the two.
-BTBB_REPLAY_ELF   ?= $(BUILD)/wifi-drv.elf
-BTBB_REPLAY_IMAGE ?= $(BUILD)/wifi-drv.bin
-BTBB_REPLAY_FILE  ?= bb
-.PHONY: wifi-esp32c6-bb-replay
-ifeq ($(BOARD),esp32c6)
-wifi-esp32c6-bb-replay: $(PHYBLOB_ROM_ELF)
-	tools/mac-trace.py replay --elf $(BTBB_REPLAY_ELF) --rom $(PHYBLOB_ROM_ELF) --image $(BTBB_REPLAY_IMAGE) \
-		$(addprefix --function ,bt_bb_v2_init_cmplx $(WIFI_ESP_BTBB_OWN)) \
-		--after baseband --before mac $(WIFI_TRACE_LOG) > $(BUILD)/$(BTBB_REPLAY_FILE).txt
-	mkdir -p $(BTBB_REPLAY_DIR)
-	mv $(BUILD)/$(BTBB_REPLAY_FILE).txt $(BTBB_REPLAY_DIR)/
-else
-wifi-esp32c6-bb-replay:
-	$(error the driver runs on an ESP32-C6: make BOARD=esp32c6 wifi-esp32c6-bb-replay)
-endif
+# test/replay/bb.txt and bb-other.txt are mac-replay-test's hold on btbb.c: the whole window of libbtbb.a e4897a5's
+# bt_bb_v2_init_cmplx, between i154.c's radio_up trace: lines baseband and mac, taken once from a trace=1 i154= run of an
+# image whose baseband was still the library's, build/esp32c6/i154/base.elf and base.bin, the driver as of 7dbd462's
+# tree, and its lib2.log and lib1.log, the modem's two states. The library is linked no more, so the files are frozen;
+# the make target that took them, wifi-esp32c6-bb-replay, is in git history.
 
 # Every check of a step of the own start, as CLAUDE.md names them, in their order, on the board, each verdict told;
 # see tools/esp32c6-gate.py.

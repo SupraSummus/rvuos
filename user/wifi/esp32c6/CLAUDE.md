@@ -47,11 +47,9 @@ each read answered and each write held by the libraries' accesses `user/wifi/esp
 a step that takes a group over adds it there, and `make BOARD=esp32c6 wifi-esp32c6-replay` takes the file again
 from a `trace=1 libstart=1` log of the build at hand, so that a wrong mask shows before the board does.
 It runs `btbb.c`'s baseband bring-up there too, against `bb.txt` and `bb-other.txt`,
-the same window of `libbtbb.a`'s from two states the modem was left in, since its registers outlive a reset;
-a function `btbb.c` takes over joins `WIFI_ESP_BTBB_OWN`, or `WIFI_ESP_BTBB_BARE`, when it reaches no device and so is
-held by a check its commit records, and `make BOARD=esp32c6 wifi-esp32c6-bb-replay` takes both files again
-from `trace=1 i154=` logs of an image whose baseband was still the library's, which `BTBB_REPLAY_ELF` and `BTBB_REPLAY_IMAGE` name,
-as no later image runs the library's functions a step replaced.
+the whole window of `libbtbb.a`'s `bt_bb_v2_init_cmplx` from the two states the modem was left in,
+since its registers outlive a reset, taken once from `trace=1 i154=` logs of an image whose baseband was still the
+library's; the library is linked no more, so the two files are frozen.
 
 `make BOARD=esp32c6 wifi-esp32c6-attrib` attributes every access of a traced log to its library and function,
 and `WIFI_TRACE_SEGMENTS=1` splits that log into the segments between the `trace: ` lines' requests.

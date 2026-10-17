@@ -4,11 +4,11 @@
  * It comes up as ESP-IDF's esp_ieee802154_enable brings it, components/ieee802154/:
  * the modem's clocks of 802.15.4 and of the BT baseband it shares, as modem_clock_impl.c enables them,
  * the PHY on, calibrated by libphy.a as for Wi-Fi, but without Wi-Fi's part of it, phy.c's drv_phy_on,
- * the baseband by the driver's own btbb_init, Espressif's bt_bb_v2_init_cmplx taken from libbtbb.a one function at a
- * time, and the MAC reset and set as ieee802154_mac_init sets it,
- * its delay before sending again the archive's ieee802154_txon_delay_set, until the driver's own replaces it.
+ * the baseband by the driver's own btbb_init, Espressif's bt_bb_v2_init_cmplx taken from libbtbb.a whole,
+ * and the MAC reset and set as ieee802154_mac_init sets it,
+ * its delay before sending again ieee802154_txon_delay_set, the archive's, the driver's own too.
  * Everything RF is the libraries': the channel and the power are numbers the MAC hands them,
- * the power an index into the archive's own table, until the driver's own replaces it.
+ * the power an index into the power table, the archive's, the driver's own too.
  * The MAC does the rest in hardware: it sends a frame, with a clear channel assessment first,
  * receives one through its address filter, acknowledges one that asks, and waits for the acknowledgement of its own.
  * It assesses once and waits once, so the backoffs and retries of 802.15.4's CSMA-CA are the driver's, mac154.h's,
@@ -504,7 +504,7 @@ static void tell(const struct radio *r)
 }
 
 /*
- * The radio up: the modem's clocks and the PHY, the baseband by bt_bb_v2_init_cmplx and the MAC set after it,
+ * The radio up: the modem's clocks and the PHY, the baseband by btbb_init and the MAC set after it,
  * which the exchange and the trace window both make, in one place so that the two cannot drift apart.
  * The osi_trace markers frame the bring-up for the trace window alone, since osi_trace does nothing without one.
  */
@@ -585,8 +585,8 @@ void i154_run(struct drv *d, struct self *own)
 
 /*
  * The trace window of the 802.15.4 radio: the bring-up that precedes the exchange and nothing else,
- * so that every device access is its own; the library's bt_bb_v2_init_cmplx's among them, which the driver's own
- * bt_bb_* take one function at a time and are held to, see user/wifi/esp32c6/NOTES.md.
+ * so that every device access is its own; the baseband's bring-up, the driver's own btbb_init and its functions, is held
+ * to the archive's by test/replay/bb.txt and bb-other.txt, see user/wifi/esp32c6/NOTES.md.
  * With trace=1 the root task maps no device, so each access faults to the watcher and the root carries it out and logs it;
  * with trace=2 the devices are mapped and the same window runs with no fault, and the configuration's snap= addresses
  * are read back at its end, so that tools/mac-trace.py compare holds the two runs' final state.

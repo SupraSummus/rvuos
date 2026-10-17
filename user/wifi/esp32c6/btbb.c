@@ -1,10 +1,10 @@
 /*
- * The ESP32-C6's BT baseband, the driver's own: Espressif's libbtbb.a is being taken from it one function at a time,
- * as the Wi-Fi libraries were, see user/wifi/esp32c6/NOTES.md.
+ * The ESP32-C6's BT baseband, the driver's own: Espressif's libbtbb.a was taken into it whole, one function at a time,
+ * as the Wi-Fi libraries were, see user/wifi/esp32c6/NOTES.md; every step is in git history, and the archive is linked
+ * no more.
  * The archive transcribed is esp32-wifi-lib's, its bt_bb_v2.o reporting "libbtbb version: e4897a5, Jul 14 2026, 10:37:04".
- * Each function below is written from the disassembly of the archive's bt_bb_v2.o, and the 802.15.4 trace window and a
- * host replay hold it; what is not the driver's yet stays linked from libbtbb.a, and build.mk's WIFI_ESP_BTBB_OWN
- * weakens the taken two so that the library's own calls reach these.
+ * Every function below is written from the disassembly of that archive's bt_bb_v2.o, and the 802.15.4 trace window and a
+ * host replay hold it, against test/replay/bb.txt and bb-other.txt.
  * The baseband is shared with Wi-Fi's radio, but the only bring-up of it here is IEEE 802.15.4's, i154.c's.
  * Its words are reached through devregs.h's rd and wr, so that the bring-up's replay can answer them on the host;
  * what each one is is not known, so one that only these functions reach carries the offset it was reached at.
@@ -123,21 +123,17 @@
 /* The Wi-Fi baseband's word 0xcd0, which bt_agc_gain_set sets a bit field of; what it is is not known. */
 #define WIFI_BB_CD0 (WIFI_BB0_BASE + 0x0cd0u)
 
-/* The archive's functions the bring-up still calls, of libbtbb.a until the driver's own replace them. */
-/* The archive's functions bt_bb_v2_rx_set calls, theirs until the driver's own replace them. */
-extern void bt_agc_gain_offset(uint32_t value);
-extern void bt_agc_rssi_thresh(void);
-extern void bt_bb_rx_filter_sel(void);
-extern void zb_rx_core_set(void);
-extern void zb_rx_auto_sel(void);
-/* The archive's byte the LE transmit-on delay is scaled from, theirs until its cca functions are the driver's too. */
-extern uint8_t bt_bb_cca_en;
-/* libphy's calibration data, of which bt_agc_gain_set reads one byte; theirs, as the PHY is libphy's. */
+/*
+ * The archive's byte the LE transmit-on delay is scaled from. bt_bb_tx_cca_en alone set it, and the bring-up never calls
+ * that, so it is a constant zero here, as every traced run found it.
+ */
+static const uint8_t bt_bb_cca_en = 0;
+/* libphy's calibration data, of which bt_agc_gain_set reads one byte; libphy's still, as the PHY is. */
 extern const uint8_t phy_param[];
 /* The ROM's, which fills the power table entry by entry; its three arguments' roles are not known. */
 extern int get_data_sat(int, int, int);
 
-/* The archive's functions the driver's own take, declared where they are defined below, for the prototype. */
+/* The baseband's functions, declared where they are defined below, for the prototype. */
 void bt_bb_v2_tx_set(uint32_t mode);
 void set_gauss_coeff_1m(void);
 void set_gauss_coeff_2m(void);
@@ -168,8 +164,8 @@ void bt_agc_restart_set(void);
  * coefficient groups, three of their register writes, the transmit-on delays and the CCA period, the 802.15.4 MAC's
  * transmit-on delay, and the BER word's bit 7 cleared.
  * It is the driver's own now; their last call, bt_bb_v2_version, a print alone, is left out here, the driver's own log
- * serving where the archive's went, and it leaves with the archive.
- * The archive's own bt_bb_v2_init_cmplx is left uncalled and uncalled-for once every one of them has.
+ * serving where that line went.
+ * The archive's own bt_bb_v2_init_cmplx, whose place this takes, is linked no more.
  * Their body asked the adapter's env_is_chip for one field, which the board answers true, so the chip's path is this.
  */
 void btbb_init(void)
@@ -302,8 +298,8 @@ const int8_t *bt_bb_get_tx_pwr_table(uint8_t *length)
  * The libraries' bt_bb_v2_rx_set, written out: the receive set with the bring-up's argument, then the receive
  * compensation's five numbers, the AGC gain offset 0x50, and then the AGC's, the correlator's, the DPO's and the
  * filter's groups and zb_rx_core_set, zb_rx_v0_0_set and zb_rx_auto_sel, each called with no argument.
- * Its own body writes no register, so neither the trace nor the replay holds it, and it is build.mk's
- * WIFI_ESP_BTBB_BARE; its calls go over to the driver's own bodies one at a time, as btbb_init's do.
+ * Its own body writes no register, so the trace and the replay hold no access of its own; the functions it calls are the
+ * driver's too now.
  */
 void bt_bb_v2_rx_set(uint32_t value)
 {

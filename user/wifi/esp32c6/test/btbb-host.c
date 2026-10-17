@@ -1,26 +1,8 @@
 /*
- * libbtbb.a's functions under bt_bb_v2_init_cmplx, for mac-replay-test's bb case on the host:
- * each does nothing, weakly, so that btbb.c's own takes its place as it is written,
- * and the ones still libbtbb.a's on the board make no access here, as bb.txt holds none of theirs.
- * A function becomes the driver's own by its name leaving BTBB_REPLAY_LIB in build.mk, not this file:
- * btbb.c's strong definition wins at the link either way.
+ * What mac-replay-test's bb cases need besides btbb.c on the host: the ROM's get_data_sat and libphy's phy_param, which
+ * the driver's own baseband asks and the host answers here. The library's functions the bring-up took are btbb.c's own
+ * now, so none of them is stubbed, and libbtbb.a is linked no more.
  */
-
-#define LIB(name)                                                                                                       \
-    __attribute__((weak)) void name(void)                                                                              \
-    {                                                                                                                  \
-    }
-
-LIB(set_gauss_coeff_2m)
-LIB(set_gauss_coeff_1m)
-LIB(ieee802154_txon_delay_set)
-LIB(bt_bb_v2_tx_set)
-LIB(bt_bb_tx_cca_period)
-LIB(bt_bb_set_zb_tx_on_delay)
-LIB(bt_bb_set_le_tx_on_delay)
-
-/* libbtbb.a's, in its .bss, which bt_bb_tx_cca_en alone sets and the driver never calls, so zero as on the board. */
-__attribute__((weak)) unsigned char bt_bb_cca_en;
 
 /* The ROM's get_data_sat, which bt_bb_get_tx_pwr_table asks; the replay never calls it, as btbb_init does not call it. */
 __attribute__((weak)) int get_data_sat(int index, int span, int bias)
@@ -37,4 +19,3 @@ __attribute__((weak)) int get_data_sat(int index, int span, int bias)
  * two masks cuts the byte above the seventh bit.
  */
 __attribute__((weak)) const unsigned char phy_param[0x121] = { [0x120] = 0x47 };
-

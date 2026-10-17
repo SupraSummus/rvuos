@@ -3,11 +3,12 @@
  * The case's file under test/replay/ lists their accesses in a run of their start, in order,
  * as tools/mac-trace.py's replay takes them from its trace:
  * rd() answers each read with the value theirs had, and wr() holds each write to theirs, address and value.
- * The calls the sequences still make into the libraries do nothing here, as replay leaves out their accesses.
+ * The calls a sequence still makes into the libraries -- config's alone, now that btbb.c is whole -- do nothing here,
+ * as replay leaves out their accesses.
  * Each case is a sequence of the driver's own and the file of theirs it is held to, named alike;
  * config is mac_config, the driver's own start's whole MAC configuration, so its order is that case's;
- * bb is btbb_init of btbb.c, the 802.15.4 baseband's bring-up in place of libbtbb.a's bt_bb_v2_init_cmplx,
- * whose functions not yet the driver's own do nothing here, test/btbb-host.c's, their accesses left out of bb.txt.
+ * bb is btbb_init of btbb.c, the 802.15.4 baseband's bring-up in place of libbtbb.a's bt_bb_v2_init_cmplx, which the
+ * driver took whole; test/btbb-host.c gives the ROM's get_data_sat and libphy's phy_param alone.
  * A case named CASE=FILE runs CASE against FILE.txt instead, as bb=bb-other does: the same window from another state
  * of the modem, so that a write the libraries made of what they read and the own code makes a constant fails one.
  * make BOARD=esp32c6 wifi-esp32c6-replay takes the file again; see user/wifi/esp32c6/build.mk.
