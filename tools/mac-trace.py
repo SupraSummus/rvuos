@@ -765,6 +765,8 @@ def replay(args):
     and --through by one's last, for a bound whose next function ran before too;
     --outside leaves out what a function the own code still calls did, from its first access to its last,
     its callees among it, when one of them is a named function too.
+    --after and --before bound them by the window's trace: lines instead, the first of the name each,
+    for a function called again outside the stretch held, such as one its caller's caller calls too.
     A log short anywhere is refused, as is a function no access names, and a cycle, which the replay does not unroll.
     """
     if args.image:
@@ -774,6 +776,22 @@ def replay(args):
         sys.exit("mac-trace: %s is short in %d places, so a function's accesses may be missing"
                  % (args.log, len(damaged)))
     _, function = classifier(args, {r[1] for r in acc})
+
+    def mark(name):
+        """The index of the first record after the first trace: line of this name, which no cycle may straddle."""
+        req = next((r for r, _thread, what in trace_landmarks(args.log) if what == name), None)
+        if req is None:
+            sys.exit("mac-trace: no trace: line %s in %s" % (name, args.log))
+        served = 0
+        for i, r in enumerate(acc):
+            if served == req:
+                return i
+            served += r[6]
+            if served > req:
+                sys.exit("mac-trace: the trace: line %s falls inside the cycle of record %d" % (name, r[0]))
+        return len(acc)
+
+    acc = acc[mark(args.after) if args.after else 0:mark(args.before) if args.before else len(acc)]
 
     def places(name):
         found = [i for i, r in enumerate(acc) if function.get(r[1]) == name]
@@ -802,7 +820,9 @@ def replay(args):
             m = FLASHED.search(line)
             if m:
                 sha = m.group(1)
-    bounds = ((" from %s" % args.from_ if args.from_ else "") + (" up to %s" % args.to if args.to else "")
+    bounds = ((" after trace: %s" % args.after if args.after else "")
+              + (" before trace: %s" % args.before if args.before else "")
+              + (" from %s" % args.from_ if args.from_ else "") + (" up to %s" % args.to if args.to else "")
               + (" through %s" % args.through if args.through else "")
               + "".join(" outside %s" % name for name in args.outside))
     print("# %s%s, in a run of the image sha256 %s" % (" ".join(args.function), bounds, sha or "unknown"))
@@ -921,6 +941,8 @@ def main():
     end.add_argument("--through", metavar="NAME", help="stop after this function's last access")
     p.add_argument("--outside", action="append", default=[], metavar="NAME",
                    help="leave out this function's first access to its last, its callees' with it; repeatable")
+    p.add_argument("--after", metavar="MARK", help="start after the window's first trace: line of this name")
+    p.add_argument("--before", metavar="MARK", help="stop at the window's first trace: line of this name")
     p.add_argument("log")
     p.set_defaults(run=replay)
 

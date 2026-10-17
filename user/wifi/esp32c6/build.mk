@@ -116,9 +116,14 @@ $(ESP_HOST)/txctl-test.o: $(WIFI_ESP)/test/txctl-test.c $(WIFI_ESP)/txctl.h
 MAC_REPLAY_TEST     := $(ESP_HOST)/mac-replay-test
 MAC_REPLAY_DIR      ?= $(WIFI_ESP)/test/replay
 MAC_REPLAY_EXPECTED := $(WIFI_ESP)/test/replay-expected.txt
-MAC_REPLAY_TEST_OBJ := $(ESP_HOST)/macstart.o $(ESP_HOST)/mac-replay-test.o
+# The baseband's files apart, so that the Wi-Fi gate, which takes config.txt into a directory of its own, holds it alone.
+BTBB_REPLAY_DIR     ?= $(WIFI_ESP)/test/replay
+MAC_REPLAY_TEST_OBJ := $(ESP_HOST)/macstart.o $(ESP_HOST)/btbb.o $(ESP_HOST)/btbb-host.o $(ESP_HOST)/mac-replay-test.o
 $(ESP_HOST)/macstart.o: $(WIFI_ESP)/macstart.c $(WIFI_ESP)/mac.h $(WIFI_ESP)/macregs.h
-$(ESP_HOST)/mac-replay-test.o: $(WIFI_ESP)/test/mac-replay-test.c $(WIFI_ESP)/mac.h $(WIFI_ESP)/macregs.h
+$(ESP_HOST)/btbb.o: $(WIFI_ESP)/btbb.c $(WIFI_ESP)/btbb.h $(WIFI_ESP)/macregs.h
+$(ESP_HOST)/btbb-host.o: $(WIFI_ESP)/test/btbb-host.c
+$(ESP_HOST)/mac-replay-test.o: $(WIFI_ESP)/test/mac-replay-test.c $(WIFI_ESP)/mac.h $(WIFI_ESP)/macregs.h \
+                               $(WIFI_ESP)/btbb.h
 $(MAC_REPLAY_TEST_OBJ): ESP_HOST_INC += -DMAC_HOST
 
 $(ESP_HOST)/hostap/%.o: $(WIFI_ESP_INIT)
@@ -180,7 +185,9 @@ txctl-test: $(TXCTL_TEST)
 	$(TXCTL_TEST)
 
 mac-replay-test: $(MAC_REPLAY_TEST)
-	$(MAC_REPLAY_TEST) $(MAC_REPLAY_DIR) $(MAC_REPLAY_EXPECTED)
+	$(MAC_REPLAY_TEST) $(MAC_REPLAY_DIR) config $(MAC_REPLAY_EXPECTED)
+	$(MAC_REPLAY_TEST) $(BTBB_REPLAY_DIR) bb
+	$(MAC_REPLAY_TEST) $(BTBB_REPLAY_DIR) bb=bb-other
 	tests/mac-replay-test.py $(MAC_REPLAY_TEST) $(WIFI_ESP)/test/replay $(MAC_REPLAY_EXPECTED)
 
 # libphy.a's functions that reach PCR, the PMU or the LP domain, weakened in a copy, so that the driver's own,
@@ -342,6 +349,30 @@ wifi-esp32c6-replay: $(BUILD)/wifi-drv.elf $(BUILD)/wifi-drv.bin $(PHYBLOB_ROM_E
 else
 wifi-esp32c6-replay:
 	$(error the driver runs on an ESP32-C6: make BOARD=esp32c6 wifi-esp32c6-replay)
+endif
+
+# The accesses of libbtbb.a's bt_bb_v2_init_cmplx mac-replay-test's bb cases hold btbb.c to, taken again from
+# WIFI_TRACE_LOG, a trace=1 run with i154= of an image whose baseband was still libbtbb.a's, BTBB_REPLAY_ELF and
+# BTBB_REPLAY_IMAGE naming that image: btbb.c's functions take the library's names, so no later image runs theirs.
+# Between the window's trace: lines baseband and mac, as i154.c's radio_up writes them, since mac_init calls
+# ieee802154_txon_delay_set again; the functions are WIFI_ESP_BTBB_OWN's and bt_bb_v2_init_cmplx's own,
+# the rest, still the library's on the board, doing nothing on the host, see test/btbb-host.c.
+# BTBB_REPLAY_FILE names the file, bb by default; bb-other is the same window from the modem's other state,
+# whose values differ where a write keeps what a read gave, so a constant written there fails one of the two.
+BTBB_REPLAY_ELF   ?= $(BUILD)/wifi-drv.elf
+BTBB_REPLAY_IMAGE ?= $(BUILD)/wifi-drv.bin
+BTBB_REPLAY_FILE  ?= bb
+.PHONY: wifi-esp32c6-bb-replay
+ifeq ($(BOARD),esp32c6)
+wifi-esp32c6-bb-replay: $(PHYBLOB_ROM_ELF)
+	tools/mac-trace.py replay --elf $(BTBB_REPLAY_ELF) --rom $(PHYBLOB_ROM_ELF) --image $(BTBB_REPLAY_IMAGE) \
+		$(addprefix --function ,bt_bb_v2_init_cmplx $(WIFI_ESP_BTBB_OWN)) \
+		--after baseband --before mac $(WIFI_TRACE_LOG) > $(BUILD)/$(BTBB_REPLAY_FILE).txt
+	mkdir -p $(BTBB_REPLAY_DIR)
+	mv $(BUILD)/$(BTBB_REPLAY_FILE).txt $(BTBB_REPLAY_DIR)/
+else
+wifi-esp32c6-bb-replay:
+	$(error the driver runs on an ESP32-C6: make BOARD=esp32c6 wifi-esp32c6-bb-replay)
 endif
 
 # Every check of a step of the own start, as CLAUDE.md names them, in their order, on the board, each verdict told;

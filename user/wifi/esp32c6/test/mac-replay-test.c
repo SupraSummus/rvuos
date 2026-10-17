@@ -4,7 +4,12 @@
  * as tools/mac-trace.py's replay takes them from its trace:
  * rd() answers each read with the value theirs had, and wr() holds each write to theirs, address and value.
  * The calls the sequences still make into the libraries do nothing here, as replay leaves out their accesses.
- * mac_config is the driver's own start's whole MAC configuration, so its order is this case's.
+ * Each case is a sequence of the driver's own and the file of theirs it is held to, named alike;
+ * config is mac_config, the driver's own start's whole MAC configuration, so its order is that case's;
+ * bb is btbb_init of btbb.c, the 802.15.4 baseband's bring-up in place of libbtbb.a's bt_bb_v2_init_cmplx,
+ * whose functions not yet the driver's own do nothing here, test/btbb-host.c's, their accesses left out of bb.txt.
+ * A case named CASE=FILE runs CASE against FILE.txt instead, as bb=bb-other does: the same window from another state
+ * of the modem, so that a write the libraries made of what they read and the own code makes a constant fails one.
  * make BOARD=esp32c6 wifi-esp32c6-replay takes the file again; see user/wifi/esp32c6/build.mk.
  * The accesses of theirs the own start leaves out by design are places in test/replay-expected.txt, in
  * test/diff-expected.txt's form: where an access of ours is not theirs, a place that their accesses from there match,
@@ -16,6 +21,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "btbb.h"
 #include "mac.h"
 #include "macregs.h"
 
@@ -33,7 +39,7 @@ static struct place {
     int met;
 } places[PLACES];
 static unsigned nplaces;
-static const char *const running = "config";
+static const char *running; /* the case, as the file names it */
 static int wrong; /* the case's first wrong access is told, and the rest of it does nothing */
 
 static void tell(char op, uint32_t a, uint32_t v)
@@ -169,7 +175,7 @@ static int host_coex_pti_get(uint32_t event, uint8_t *pti)
  * The libraries' hal_init, which mac_config in macstart.c runs, as main.c's own start calls it:
  * one case, so that a change to that order fails here rather than on the board alone.
  */
-static void run(void)
+static void run_config(void)
 {
     /* The receive base, the list the MAC fills first: their start's is their control block, which the trace holds as
        their write to RX_BASE and no more, so the own start is given it, and that write is held by its place. */
@@ -181,6 +187,20 @@ static void run(void)
     }
     mac_config(host_slowclk_cal_get, host_coex_pti_get, rx_base);
 }
+
+/* The baseband's bring-up, as i154.c's radio_up calls it but for the version line, which is no device access. */
+static void run_bb(void)
+{
+    btbb_init(0);
+}
+
+static const struct {
+    const char *name;
+    void (*run)(void);
+} cases[] = {
+    {"config", run_config},
+    {"bb", run_bb},
+};
 
 /*
  * The places of the expected file: a reason on "#" lines, then the libraries' accesses, each "-R4 0xaddress 0xvalue"
@@ -265,13 +285,28 @@ static void load(const char *dir, const char *file)
 
 int main(int argc, char **argv)
 {
-    if (argc != 2 && argc != 3) {
-        printf("usage: mac-replay-test DIR [EXPECTED]\n");
+    void (*run)(void) = 0;
+    if (argc == 3 || argc == 4) {
+        const char *file = strchr(argv[2], '=');
+        size_t n = file ? (size_t)(file - argv[2]) : strlen(argv[2]);
+        for (unsigned i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+            if (strlen(cases[i].name) == n && strncmp(argv[2], cases[i].name, n) == 0) {
+                running = file ? file + 1 : cases[i].name;
+                run = cases[i].run;
+            }
+        }
+    }
+    if (!run) {
+        printf("usage: mac-replay-test DIR CASE[=FILE] [EXPECTED], CASE one of");
+        for (unsigned i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+            printf(" %s", cases[i].name);
+        }
+        printf("\n");
         return 2;
     }
     load(argv[1], running);
-    if (argc == 3) {
-        expect(argv[2]);
+    if (argc == 4) {
+        expect(argv[3]);
     }
     run();
     while (!wrong && next != count && step_over()) {
@@ -283,7 +318,7 @@ int main(int argc, char **argv)
     }
     for (unsigned p = 0; p < nplaces; p++) {
         if (!places[p].met) {
-            printf("mac-replay-test: %s:%u: the place left out by design is not where theirs runs\n", argv[2],
+            printf("mac-replay-test: %s:%u: the place left out by design is not where theirs runs\n", argv[3],
                    places[p].line);
             wrong = 1;
         }
@@ -292,7 +327,7 @@ int main(int argc, char **argv)
         printf("mac-replay-test: the case failed\n");
         return 1;
     }
-    printf("mac-replay-test: ok, %u accesses", count);
+    printf("mac-replay-test: %s: ok, %u accesses", running, count);
     if (nplaces != 0) {
         printf(", %u of them left out by design in %u place%s", lefts, nplaces, nplaces == 1 ? "" : "s");
     }

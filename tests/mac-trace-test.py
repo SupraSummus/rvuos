@@ -15,7 +15,8 @@ a folded library's run named by its library;
 a place where the own run differs from the first base as another base does is the run's, a note, and no more;
 the bits MOMENT names stay out of compare's and diff's verdict, the rest of their word in;
 replay takes the named functions' own accesses alone, between the functions --from and --to name,
-or up to the last access of the one --through names, and none within a function --outside names;
+or up to the last access of the one --through names, and none within a function --outside names,
+or between the trace: lines --after and --before name, refusing a line inside a cycle;
 and seq holds a run's MAC accesses on the start's thread to a gated run's, value by value, the moment's bits apart.
 The ELF and the libraries are not read: every pc is given to one library, and to the function FUNCTIONS names.
 """
@@ -99,7 +100,8 @@ def seq(gated, own, thread=1):
 
 
 def replay(trace, *function, **kw):
-    args = dict(log=trace, function=list(function), from_=None, to=None, through=None, outside=[], image=None)
+    args = dict(log=trace, function=list(function), from_=None, to=None, through=None, outside=[], image=None,
+                after=None, before=None)
     args.update(kw)
     return run(mt.replay, **args)
 
@@ -337,6 +339,25 @@ def test_replay_takes_one_function(f):
     assert out.splitlines() == ["# f g through g, in a run of the image sha256 unknown",
                                 "R4 0x%08x 0x00000001" % A, "R4 0x%08x 0x00000007" % B,
                                 "W4 0x%08x 0x00000002" % A, "W4 0x%08x 0x00000008" % B], out
+
+
+def test_replay_between_marks(f):
+    # f runs inside the window's stretch and again after it, as ieee802154_txon_delay_set does after the baseband.
+    marked = f("marked", log((1, "W", A, 1), (1, "W", B, 2), (1, "W", A, 3), (1, "W", A, 4),
+                             "   1.000 trace: req 1 t1 baseband 0 0", "   1.000 trace: req 3 t1 mac 0 0"))
+    status, out = replay(marked, "f", after="baseband", before="mac")
+    assert out.splitlines() == ["# f after trace: baseband before trace: mac, in a run of the image sha256 unknown",
+                                "W4 0x%08x 0x00000002" % B, "W4 0x%08x 0x00000003" % A], out
+    for name, text, kw, why in [
+            ("unmarked", log((1, "W", A, 1)), dict(after="baseband"), "no trace: line baseband"),
+            ("cut", log((1, "W", A, 1), ("cycle", 3, 1), (1, "W", B, 1), "   1.000 trace: req 2 t1 mac 0 0"),
+             dict(before="mac"), "inside the cycle")]:
+        try:
+            replay(f(name, text), "f", **kw)
+        except SystemExit as e:
+            assert why in str(e), e
+        else:
+            raise AssertionError("replay took the %s log" % name)
 
 
 def test_replay_refuses(f):
