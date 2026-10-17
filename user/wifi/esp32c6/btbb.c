@@ -47,6 +47,7 @@
  * The AGC's words, which bt_agc_recorrect_set, bt_agc_rssi_thresh and bt_agc_gain_offset write, at their modem offsets;
  * what each field is is not known.
  */
+#define AGC_2844 (MODEM_BASE + 0x2844u)
 #define AGC_2848 (MODEM_BASE + 0x2848u)
 #define AGC_2868 (MODEM_BASE + 0x2868u)
 #define AGC_286C (MODEM_BASE + 0x286cu)
@@ -56,14 +57,17 @@
 #define AGC_28B4 (MODEM_BASE + 0x28b4u)
 #define AGC_28B8 (MODEM_BASE + 0x28b8u)
 #define AGC_28BC (MODEM_BASE + 0x28bcu)
-/* The ZB receive's word, which zb_rx_auto_sel writes, at its modem offset. */
+/* The ZB receive's words, which zb_rx_auto_sel and zb_rx_core_set write, at their modem offsets. */
+#define ZB_2C04 (MODEM_BASE + 0x2c04u)
+#define ZB_2C08 (MODEM_BASE + 0x2c08u)
+#define ZB_2C20 (MODEM_BASE + 0x2c20u)
+#define ZB_2C24 (MODEM_BASE + 0x2c24u)
 #define ZB_2C48 (MODEM_BASE + 0x2c48u)
 
 /* The archive's functions the bring-up still calls, of libbtbb.a until the driver's own replace them. */
 extern void bt_bb_v2_version(void);
 /* The archive's functions bt_bb_v2_rx_set calls, theirs until the driver's own replace them. */
 extern void bt_bb_rx_set(uint32_t value);
-extern void bt_set_rx_comp(int first, int second, int third, int fourth, int fifth);
 extern void bt_agc_gain_offset(uint32_t value);
 extern void bt_agc_gain_set(void);
 extern void bt_agc_rssi_thresh(void);
@@ -94,6 +98,8 @@ void bt_agc_rssi_thresh(void);
 void bt_agc_gain_offset(uint32_t value);
 void bt_bb_rx_filter_sel(void);
 void zb_rx_auto_sel(void);
+void zb_rx_core_set(void);
+void bt_set_rx_comp(uint32_t first, uint32_t second, uint32_t third, uint32_t fourth, uint32_t fifth);
 
 /*
  * The libraries' bt_bb_v2_init_cmplx, written out: the mode's transmit and receive set, the Gaussian filter's two
@@ -323,4 +329,33 @@ void zb_rx_auto_sel(void)
 {
     wr(ZB_2C48, rd(ZB_2C48) & ~0x80000000u);
     wr(ZB_2C48, (rd(ZB_2C48) & 0xc03fffffu) | 0x28400000u);
+}
+
+/*
+ * The libraries' zb_rx_core_set, written out: six read-modify-writes on the ZB receive's words 0x2c04, 0x2c08, 0x2c20
+ * and 0x2c24, each a constant beside the bits kept, two of them an 8-bit field kept first. What they are is not known.
+ */
+void zb_rx_core_set(void)
+{
+    wr(ZB_2C04, (rd(ZB_2C04) & 0xffffu) | 0x0bb80000u);
+    wr(ZB_2C08, (rd(ZB_2C08) & 0xffffu) | 0x17700000u);
+    wr(ZB_2C08, (rd(ZB_2C08) & 0xffff0000u) | 0xbb8u);
+    wr(ZB_2C04, (rd(ZB_2C04) & ~0x3fcu) | 0x284u);
+    wr(ZB_2C20, (rd(ZB_2C20) & 0xffu) | 0x07a12000u);
+    wr(ZB_2C24, (rd(ZB_2C24) & 0xffu) | 0xf85edf00u);
+}
+
+/*
+ * The libraries' bt_set_rx_comp, written out: five read-modify-writes on the AGC's word 0x2844 -- the first argument's
+ * low 7 bits into its bits 7 to 13 and then into its low 7, the fourth's low 5 into bits 24 to 28, the third's low 5
+ * into bits 19 to 23, and the second's low 5 into bits 14 to 18. Their body takes a fifth and does not use it.
+ */
+void bt_set_rx_comp(uint32_t first, uint32_t second, uint32_t third, uint32_t fourth, uint32_t fifth)
+{
+    (void)fifth;
+    wr(AGC_2844, (rd(AGC_2844) & 0xffffc07fu) | ((first & 0x7fu) << 7));
+    wr(AGC_2844, (rd(AGC_2844) & ~0x7fu) | (first & 0x7fu));
+    wr(AGC_2844, (rd(AGC_2844) & 0xe0ffffffu) | ((fourth << 24) & 0x1f000000u));
+    wr(AGC_2844, (rd(AGC_2844) & 0xff07ffffu) | ((third << 19) & 0x00f80000u));
+    wr(AGC_2844, (rd(AGC_2844) & 0xfff83fffu) | ((second << 14) & 0x0007c000u));
 }
