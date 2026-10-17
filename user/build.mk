@@ -15,7 +15,7 @@ else
 ESCAPE_PROGRAMS += escape-load-scs escape-stack-call escape-unstack
 endif
 
-.PHONY: run test escape lib-test bench bench-refresh lab
+.PHONY: run test escape lib-test bench bench-refresh lab fuel-test
 
 $(BUILD)/user-%.elf: $(BUILD)/user/%.o $(USER_COMMON) $(BUILD)/user/user.ld
 	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/user/user.ld $< $(USER_COMMON) -o $@
@@ -51,7 +51,7 @@ escape: $(foreach p,$(ESCAPE_PROGRAMS),$(BUILD)/kernel-$(p).$(IMAGE))
 # Every process runs code from the one image but only the root task with its data,
 # so no other object may keep a global, which the link checks, the library's among them.
 LIB_OBJ       := $(patsubst %.c,$(BUILD)/%.o,$(wildcard user/lib/*.c))
-PROGRAMS      := wifi libtest bench lab thread
+PROGRAMS      := wifi libtest bench lab thread $(if $(filter 1,$(FUEL)),fuel)
 program_root   = $(BUILD)/user/$(1)/root.o
 program_others = $(patsubst %.c,$(BUILD)/%.o,$(filter-out user/$(1)/root.c,$(wildcard user/$(1)/*.c)))
 define program
@@ -90,6 +90,10 @@ trap-profile: $(BUILD)/kernel-$(TRAP_PROGRAM).$(IMAGE)
 	tools/trap-profile.py --nm $(NM) --objdump $(OBJDUMP) --symbolizer $(SYMBOLIZER) \
 		$(if $(TRAP_SAVE),--save $(TRAP_SAVE)) $(if $(TRAP_AGAINST),--against $(TRAP_AGAINST)) \
 		$(if $(TRAP_ANNOTATE),--annotate $(TRAP_ANNOTATE)) $< $(BOOT_PREFIX) $<
+
+# The fuel prototype's test, user/fuel/, for a kernel built with make FUEL=1; see FUEL in kernel/sched.c.
+fuel-test: $(BUILD)/kernel-fuel.$(IMAGE)
+	tests/fuel.sh "$(BOOT_PREFIX) $<"
 
 # The laboratory, user/lab/: servers and clients, scenario by scenario, and how long their asks waited;
 # see user/lab/NOTES.md. make check runs it to its end and holds the numbers to nothing.

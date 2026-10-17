@@ -198,6 +198,9 @@ and the scheduler's state is the three queues, each place's account and the tick
 the place that earns each unit, the release, the running thread, and how far into the tick its turn is charged.
 With every thread on spare time alone this is the plain round-robin over threads,
 which is how the replay driver runs; see "Verification".
+A kernel built with `make FUEL=1` bounds a process by fuel besides, an experiment of open decision 36:
+an amount of the counter's counts that every count its threads run takes from, on their time, on spare time or lent,
+which `OP_PROCESS_FUEL` moves from a parent's process to a child's, and without which its threads stop as a fault stops them.
 
 **A waiter may lend its time to a thread it names**, with `OP_NOTIFY_LEND`; see "Communication and synchronisation".
 A borrower without time of its own has the run queue while its lender's account holds a tick,

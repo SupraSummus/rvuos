@@ -172,7 +172,13 @@ struct process {
     struct obj_header hdr;
     uint8_t regions;    /* how many region slots it has, from one to pmp_entry_count */
     uint8_t pmp_count;  /* the entries its PMP image holds, one for each filled region slot */
+#if FUEL
+    uint8_t fuel_bound; /* whether its fuel bounds it, see OP_PROCESS_FUEL; a process is made without */
+    uint8_t pad;
+    uint32_t fuel;      /* the counts its threads may run, while fuel_bound: in the word its first node's block leaves */
+#else
     uint16_t pad;
+#endif
 #ifdef BOARD_PROCESS_CSRS
     uint32_t csrs[BOARD_PROCESS_CSRS]; /* what the board keeps of the CSRs user mode writes, see board_user_csrs_switch */
 #endif
@@ -352,7 +358,8 @@ _Static_assert(sizeof(struct pool) == 48, "object layout");
 #else
 #define PROCESS_CSRS_SIZE 0
 #endif
-_Static_assert(sizeof(struct process) == NODE_ROUND(12 + PROCESS_CSRS_SIZE) + 16 * PROCESS_TABLES, "object layout");
+_Static_assert(sizeof(struct process) == NODE_ROUND(12 + (FUEL ? 4 : 0) + PROCESS_CSRS_SIZE) + 16 * PROCESS_TABLES,
+               "object layout");
 _Static_assert(sizeof(struct thread) == NODE_ROUND(40 + sizeof(struct trap_frame)) + 2 * sizeof(struct cap),
                "object layout");
 _Static_assert(sizeof(struct place) == 24, "object layout");

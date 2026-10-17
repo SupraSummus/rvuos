@@ -712,10 +712,33 @@
 #define OP_ROUTE_SET 46
 
 /*
+ * Process (RIGHT_W), in a kernel built with make FUEL=1 alone, an experiment of open decision 36:
+ * the process's fuel, an amount of the clock's counts, which every count its threads run, or a borrower runs on their time,
+ * takes from, and without which they do not run.
+ * A process is made without bound. a1 = FUEL_READ tells what is left, FUEL_GIVE moves a2 counts from the caller's process
+ * to this one, bounding it if it had no bound, and FUEL_TAKE moves up to a2 counts back; a1 returns what is left, or
+ * FUEL_UNBOUNDED. A caller whose process has no bound gives without spending. A give past what the caller's process holds
+ * fails with KERR_LIMIT, and a take from a process without bound with KERR_STATE.
+ * A thread that runs with its process's fuel dry stops as a fault stops it, its watch hearing, and the fuel left, 0,
+ * tells the watcher why; a resume once the fuel is topped up runs it on;
+ * a lender whose fuel runs dry while a borrower runs on it stops lending, its wait ending with KERR_LIMIT.
+ * Other kernels fail it with KERR_WRONG_TYPE.
+ */
+#define OP_PROCESS_FUEL 47
+#define FUEL_READ       0
+#define FUEL_GIVE       1
+#define FUEL_TAKE       2
+#define FUEL_UNBOUNDED  0xffffffffu
+
+/*
  * One above the highest operation code; the fuzzer's mutator draws below it.
  * Codes 11 and 27 are no operation's: they were OP_FRAME_INFO and OP_UNTYPED_INFO, which OP_CAP_INFO replaced.
  */
+#if defined(FUEL) && FUEL
+#define OP_COUNT 48
+#else
 #define OP_COUNT 47
+#endif
 
 /*
  * Capability slots the kernel fills in the root task's table at boot.

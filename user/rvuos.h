@@ -391,6 +391,25 @@ static inline uint32_t rv_wait(uint32_t ntfn_cap, uint32_t *bits)
     return r_a0;
 }
 
+/*
+ * OP_PROCESS_FUEL, in a kernel built with make FUEL=1: mode FUEL_READ, FUEL_GIVE or FUEL_TAKE of amount counts,
+ * and *left what the process has left, or FUEL_UNBOUNDED.
+ */
+static inline uint32_t rv_process_fuel(uint32_t process_cap, uint32_t mode, uint32_t amount, uint32_t *left)
+{
+    register uint32_t r_a0 __asm__(RV_A0) = process_cap;
+    register uint32_t r_a1 __asm__(RV_A1) = mode;
+    register uint32_t r_a2 __asm__(RV_A2) = amount;
+    register uint32_t r_a3 __asm__(RV_A3) = 0;
+    register uint32_t r_a7 __asm__(RV_A7) = OP_PROCESS_FUEL;
+    __asm__ volatile(RV_CALL
+                     : "+r"(r_a0), "+r"(r_a1), "+r"(r_a2), "+r"(r_a3)
+                     : "r"(r_a7)
+                     : "memory", RV_A4, RV_A5, RV_A6);
+    *left = r_a1;
+    return r_a0;
+}
+
 /* OP_NOTIFY_LEND: as rv_wait, lending the thread of thread_cap, which has RIGHT_X, the caller's time meanwhile. */
 static inline uint32_t rv_lend(uint32_t ntfn_cap, uint32_t thread_cap, uint32_t *bits)
 {

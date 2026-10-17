@@ -57,6 +57,13 @@ endif
 # A rate other than the default builds in a directory of its own, the host harnesses' too, as a budget does.
 TIMER_HZ ?= 1000
 TIMER_VARIANT := $(if $(filter-out 1000,$(TIMER_HZ)),-hz$(TIMER_HZ))
+# Fuel, an experiment of open decision 36: a process bounded to an amount of the counter's counts, which every count its
+# threads run, or a borrower runs on their time, takes from; see FUEL in kernel/sched.c. 1 builds it in, in a directory of its own.
+FUEL ?= 0
+ifneq ($(filter-out 0 1,$(FUEL)),)
+$(error FUEL=$(FUEL); it is 1, fuel built in, or 0)
+endif
+FUEL_VARIANT := $(if $(filter 1,$(FUEL)),-fuel)
 # The self-check and the tracing that runs it, which only QEMU virt's replay uses; see DESIGN.md, "Verification".
 # A value other than the board's builds in a directory of its own, as a budget does; the host harnesses always have them.
 SELFCHECK_DEFAULT := $(if $(filter qemu,$(BOARD)),1,0)
@@ -65,7 +72,7 @@ ifneq ($(filter-out 0 1,$(SELFCHECK)),)
 $(error SELFCHECK=$(SELFCHECK); it is 1, the self-check built in, or 0)
 endif
 SELFCHECK_VARIANT := $(if $(filter-out $(SELFCHECK_DEFAULT),$(SELFCHECK)),$(if $(filter 1,$(SELFCHECK)),-selfcheck,-noselfcheck))
-VARIANT := $(PMP_VARIANT)$(if $(filter-out 1,$(CORES)),-smp$(CORES))$(TIMER_VARIANT)$(SELFCHECK_VARIANT)
+VARIANT := $(PMP_VARIANT)$(if $(filter-out 1,$(CORES)),-smp$(CORES))$(TIMER_VARIANT)$(FUEL_VARIANT)$(SELFCHECK_VARIANT)
 
 # The board's architecture, which only RP2350 lets the command line change;
 # the other one builds in a directory of its own, as a budget does.
@@ -89,7 +96,7 @@ endif
 CFLAGS    := $(ARCHFLAGS) -std=c11 -ffreestanding -fno-builtin -fno-pic -fno-common \
              -nostdlib -O2 -g -Wall -Wextra -Werror -Wundef -Wshadow \
              -Wstrict-prototypes -Wmissing-prototypes -Iinclude \
-             -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -DCORES=$(CORES) -DTIMER_HZ=$(TIMER_HZ) -DSELFCHECK=$(SELFCHECK)
+             -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -DCORES=$(CORES) -DTIMER_HZ=$(TIMER_HZ) -DFUEL=$(FUEL) -DSELFCHECK=$(SELFCHECK)
 ASFLAGS   := $(ARCHFLAGS) -g -Iinclude -DCORES=$(CORES)
 LDFLAGS   := $(ARCHFLAGS) -nostdlib -static -fuse-ld=lld -Wl,--gc-sections -Wl,--no-dynamic-linker
 
@@ -277,6 +284,8 @@ loop-bounds-test:
 CHECK_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
 CHECK_PARTS := arm-test-an521-smp2 arm-test-an521 arm-test-an385 smp-test lab qemu-replay test host-test model-test \
                bench lib-test escape wifi-test keys-test txctl-test mac-replay-test decode-test contents mac-trace-test loop-bounds-test
+# A kernel built with fuel has its test besides.
+CHECK_PARTS += $(if $(filter 1,$(FUEL)),fuel-test)
 check:
 	$(MAKE) -j$(CHECK_JOBS) $(CHECK_PARTS)
 

@@ -406,10 +406,73 @@ static uint32_t clock_offset(void)
     return debug_trace ? 0 : timer_offset();
 }
 
+#if FUEL
+/*
+ * Fuel, an experiment of open decision 36, built with make FUEL=1:
+ * a process bounded by fuel pays a count of it for each count its threads' turns run, on their time, on spare time,
+ * or lent to a borrower, where those turns are charged, as a turn closes and at each tick,
+ * to the process of the turn's payer, whose time the turn spends.
+ * A charge that leaves it dry marks the core, and the trap's end stops the thread or ends the lend; see fuel_out.
+ */
+static void fuel_charge(uint32_t counts)
+{
+    struct core *core = core_self();
+    struct thread *payer = turn_payer(core);
+    struct process *proc = payer != NULL ? thread_process(payer) : NULL;
+    if (proc == NULL || !proc->fuel_bound || counts == 0) {
+        return;
+    }
+    proc->fuel = counts < proc->fuel ? proc->fuel - counts : 0;
+    if (proc->fuel == 0) {
+        core->fuel_dry = true;
+    }
+}
+
+/*
+ * The turn's payer's fuel ran dry. A thread that pays for its own turn stops as a fault stops it, and its watch hears;
+ * a lender stops lending, its wait ending with KERR_LIMIT, and the turn ends, so the borrower runs on its own or another's.
+ */
+static void fuel_out(struct core *core)
+{
+    struct thread *payer = turn_payer(core);
+    struct process *proc = payer != NULL ? thread_process(payer) : NULL;
+    if (proc == NULL || !proc->fuel_bound || proc->fuel != 0) {
+        return;
+    }
+    if (core->payer == NULL) {
+        kputs("out of fuel\n");
+        fault_dispatch(payer);
+        return;
+    }
+    unwait(payer);
+    payer->frame.regs[REG_A0] = KERR_LIMIT;
+    payer->frame.regs[REG_A1] = 0;
+    payer->state = THREAD_READY;
+    sched_turn_end();
+}
+
+/* The turn's payer's process runs dry at most the ticks its fuel lasts on from the count, and one more. */
+static uint32_t fuel_wake(uint32_t ticks)
+{
+    struct core *core = core_self();
+    struct thread *payer = turn_payer(core);
+    struct process *proc = payer != NULL ? thread_process(payer) : NULL;
+    if (proc == NULL || !proc->fuel_bound) {
+        return ticks;
+    }
+    uint32_t lasts = proc->fuel / timer_tick_counts() + 1;
+    return lasts < ticks ? lasts : ticks;
+}
+#endif
+
 /* The turn ends where the counter is: charge its place, if any, and return how far into the tick that is. */
 static uint32_t turn_close(void)
 {
     uint32_t offset = clock_offset();
+#if FUEL
+    uint32_t from = core_self()->turn_from;
+    fuel_charge(offset > from ? offset - from : 0);
+#endif
     struct place *p = turn_place(core_self());
     if (p != NULL) {
         p->balance -= turn_owes(p, offset);
@@ -796,6 +859,9 @@ static void tick_advance(uint32_t ticks)
     uint32_t owed = sched_ticks + ticks - core->ticks;
     core->wake_stale = true;
     if (owed != 0) {
+#if FUEL
+        fuel_charge(timer_tick_counts() - core->turn_from + (owed - 1) * timer_tick_counts());
+#endif
         if (paid != NULL) {
             account_refill(paid);
             paid->balance = turn_next(paid);
@@ -1185,6 +1251,13 @@ void sched_count(uint32_t ticks)
 uint32_t sched_wake(void)
 {
     struct core *core = core_self();
+#if FUEL
+    /* Before the turn's end, which would leave the dry turn behind. */
+    if (core->fuel_dry) {
+        core->fuel_dry = false;
+        fuel_out(core);
+    }
+#endif
     /* Under tracing only a record ends a turn, so a count before tracing began ends none. */
     if (core->turn_due) {
         core->turn_due = false;
@@ -1199,6 +1272,9 @@ uint32_t sched_wake(void)
     }
     core->wake_stale = false;
     uint32_t ticks = sched_wake_ticks();
+#if FUEL
+    ticks = fuel_wake(ticks);
+#endif
     core->wake_tick = sched_ticks + ticks;
     return ticks;
 }
