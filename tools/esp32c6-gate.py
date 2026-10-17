@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A step of the ESP32-C6's own bring-up through the checks CLAUDE.md names, on the board, one after another.
+"""A step of the ESP32-C6's own bring-up through the checks user/wifi/esp32c6/CLAUDE.md names, on the board, one after another.
 
   tools/esp32c6-gate.py [--join CONF]... [--probe SSID] [--snap CONF] [--no-check] [--dry-run]
 

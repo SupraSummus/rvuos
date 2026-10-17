@@ -644,7 +644,7 @@ What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
   one in `user/lib/` would serve all three.
 
 - The runs that check the ESP32-C6's `mac.c` and the station's own code are `WIFI_CONFIG` variants run by hand,
-  named in `CLAUDE.md`; a target that runs them all, `make BOARD=esp32c6 wifi-esp32c6-mac`, would hold them in one place.
+  named in `user/wifi/esp32c6/CLAUDE.md`; a target that runs them all, `make BOARD=esp32c6 wifi-esp32c6-mac`, would hold them in one place.
 - The replay driver drains the log by polling after each record,
   so the host models it with one store into the header per event.
   A logger thread in the driver would make traced calls the host would have to follow.
