@@ -773,16 +773,18 @@ static void check_core(uint32_t i)
          * and once woken until the turn ends.
          */
 #if SCHED_EDF
-        /* Or the first lender of a first lender, LEND_DEPTH on at most. */
-        bool reached = false;
-        const struct thread *by = c->turn;
-        for (uint32_t d = 0; d < LEND_DEPTH && by != NULL && by->lenders != 0 && !reached; d++) {
+        /* Or through a chain of first lenders, LEND_DEPTH at most, until one in the chain wakes or stops. */
+        const struct thread *by = payer;
+        for (uint32_t d = 0; d < LEND_DEPTH && by->state == THREAD_WAITING && by != c->turn; d++) {
             LOOP_BOUND(LEND_DEPTH);
-            reached = by->lenders == v2p(payer);
-            by = p2v(by->lenders);
+            const struct thread *next = by->lend_to != 0 ? p2v(by->lend_to) : NULL;
+            if (next == NULL || next->lenders != v2p(by)) {
+                fail("a turn's payer that waits is not the turn's first lender", i, v2p(payer), by->lend_to);
+            }
+            by = next;
         }
-        if (payer->state == THREAD_WAITING && !reached) {
-            fail("a turn's payer that waits is not the turn's first lender", i, v2p(payer), payer->lend_to);
+        if (by->state == THREAD_WAITING) {
+            fail("a turn's payer that waits is not the turn's first lender", i, v2p(payer), by->lend_to);
         }
 #else
         if (payer->state == THREAD_WAITING && (c->turn == NULL || c->turn->lenders != v2p(payer))) {

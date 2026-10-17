@@ -8,13 +8,19 @@ Witness: fuzz lend-two-lenders
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -765,8 +765,7 @@ void sched_lend(struct thread *t, struct notification *ntfn, struct thread *borr
+@@ -915,13 +915,12 @@ void sched_lend(struct thread *t, struct notification *ntfn, struct thread *borr
      struct core *core = core_self();
-     struct place *tp = thread_place_on(t, core_index());
+     struct thread *payer = turn_payer(core);
+     struct place *tp = payer != NULL ? thread_place_on(payer, core_index()) : NULL;
      struct place *bp = thread_place_on(borrower, core_index());
+ #if !SCHED_EDF
 -    if (core->payer == NULL && tp != NULL && has_time(tp->balance) && bp != NULL && place_lender(bp) == tp &&
 -        bp->queue != QUEUE_NONE) {
 +    if (core->payer == NULL && tp != NULL && has_time(tp->balance) && bp != NULL && bp->queue != QUEUE_NONE) {
+ #else
+-    if (tp != NULL && has_time(tp->balance) && bp != NULL && place_lender(bp) == tp && bp->queue != QUEUE_NONE) {
++    if (tp != NULL && has_time(tp->balance) && bp != NULL && bp->queue != QUEUE_NONE) {
+ #endif
          place_unqueue(bp);
          core->turn = borrower;
-         core->payer = t;
+         core->payer = payer;

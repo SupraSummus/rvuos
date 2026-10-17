@@ -9,9 +9,10 @@ Witness: fuzz cores-resume-before-trap
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -343,7 +343,7 @@ static void place_settle(struct place *p)
- #if SCHED_EDF
-     core->run_joined |= joined && queue == QUEUE_RUN;
+@@ -361,7 +361,7 @@ static void place_settle(struct place *p)
+         core->run_joined = true;
+         joined = true;
+     }
  #endif
 -    if (queue != p->queue || core != was) {
 +    if (queue != QUEUE_NONE && (queue != p->queue || core != was)) {
