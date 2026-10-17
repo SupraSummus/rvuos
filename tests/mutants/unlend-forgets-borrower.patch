@@ -8,12 +8,15 @@ Witness: fuzz lend-lender-woken
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -609,9 +609,7 @@ static __attribute__((noinline)) void unlend(struct thread *t)
+@@ -609,12 +609,7 @@ static __attribute__((noinline)) void unlend(struct thread *t)
      struct thread *h = p2v(t->lend_to);
      bool first = h->lenders == v2p(t);
      lend_remove(h, t);
 -    if (first) {
 -        thread_settle(h);
+-#if SCHED_EDF
+-        borrowers_settle(h);
+-#endif
 -    }
 +    (void)first;
  }
