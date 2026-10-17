@@ -386,7 +386,23 @@ static const struct place *lender_of(const struct place *p)
     if (t->lenders == 0 || b->type != CAP_TIME) {
         return NULL;
     }
+#if SCHED_EDF
+    /* Through first lenders with no time of their own, LEND_DEPTH of them at most. */
+    uint32_t core = unit_core(range_first(b));
+    const struct place *l = thread_place_on(p2v(t->lenders), core);
+    for (uint32_t i = 1; i < LEND_DEPTH && l != NULL && account_now(l) < tick_parts(); i++) {
+        LOOP_BOUND(LEND_DEPTH);
+        const struct thread *lt = place_thread(l);
+        const struct place *next = lt->lenders != 0 ? thread_place_on(p2v(lt->lenders), core) : NULL;
+        if (next == NULL) {
+            break;
+        }
+        l = next;
+    }
+    return l;
+#else
     return thread_place_on(p2v(t->lenders), unit_core(range_first(b)));
+#endif
 }
 
 /*
@@ -756,9 +772,23 @@ static void check_core(uint32_t i)
          * It pays from the wait in which it lent the turn's thread its time, the first of the thread's lenders,
          * and once woken until the turn ends.
          */
+#if SCHED_EDF
+        /* Or the first lender of a first lender, LEND_DEPTH on at most. */
+        bool reached = false;
+        const struct thread *by = c->turn;
+        for (uint32_t d = 0; d < LEND_DEPTH && by != NULL && by->lenders != 0 && !reached; d++) {
+            LOOP_BOUND(LEND_DEPTH);
+            reached = by->lenders == v2p(payer);
+            by = p2v(by->lenders);
+        }
+        if (payer->state == THREAD_WAITING && !reached) {
+            fail("a turn's payer that waits is not the turn's first lender", i, v2p(payer), payer->lend_to);
+        }
+#else
         if (payer->state == THREAD_WAITING && (c->turn == NULL || c->turn->lenders != v2p(payer))) {
             fail("a turn's payer that waits is not the turn's first lender", i, v2p(payer), payer->lend_to);
         }
+#endif
     }
     /*
      * A core whose turn's thread another core stopped drops the trap it takes next, whatever the thread is by then:

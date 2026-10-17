@@ -166,7 +166,8 @@ void gate_main(struct child_page *c)
 {
     struct lab_page *p = (struct lab_page *)c;
     for (;;) {
-        if (wait_inbox() & CHILD_BIT_PARENT) {
+        /* A gate given its server's thread lends it its time while it waits, what it borrows from its clients among it. */
+        if (wait_server(p) & CHILD_BIT_PARENT) {
             ends_changed(p);
         }
         for (int more = 1; more;) {

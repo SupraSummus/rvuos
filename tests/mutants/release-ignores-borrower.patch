@@ -9,12 +9,12 @@ Witness: fuzz lend-lender-earns
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -636,7 +636,7 @@ static void release(uint32_t c)
+@@ -759,7 +759,7 @@ static void release(uint32_t c)
              place_settle(p);
          }
          /* A lender waits on no queue, and its account may give the borrower it lends to time. */
 -        struct place *h = p != NULL ? place_borrower(p) : NULL;
 +        struct place *h = p != NULL && p->queue != QUEUE_NONE ? place_borrower(p) : NULL;
-         if (h != NULL && (h->queue == QUEUE_SPARE || h->queue == QUEUE_SPENT)) {
-             place_settle(h);
-         }
+ #if SCHED_EDF
+         /* And the borrowers that one lends it on to. */
+         for (uint32_t d = 0; d < LEND_DEPTH && h != NULL; d++) {

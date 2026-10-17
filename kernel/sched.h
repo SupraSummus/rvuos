@@ -90,6 +90,11 @@ static inline uint32_t tick_gain(const struct place *p)
 #if SCHED_EDF
 /* The most a window's exponent may be, a window of 2^15 ticks. */
 #define WINDOW_EXP_MAX 16u
+/*
+ * How many lenders lent time goes through: a borrower's first lender with no time of its own lends what it borrows,
+ * so a client's account pays for its server and for the driver its server waits on.
+ */
+#define LEND_DEPTH 3u
 #endif
 
 /* The most a place's account holds: a tenth of a second's worth of its units, none without. */

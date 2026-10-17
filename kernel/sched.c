@@ -287,7 +287,23 @@ static struct place *place_lender(const struct place *p)
     if (t->lenders == 0 || b->type != CAP_TIME) {
         return NULL;
     }
+#if SCHED_EDF
+    /* A first lender with no time of its own lends what it borrows, LEND_DEPTH lenders on at most. */
+    uint32_t core = unit_core(range_first(b));
+    struct place *l = thread_place_on(p2v(t->lenders), core);
+    for (uint32_t i = 1; i < LEND_DEPTH && l != NULL && !has_time(account_now(l)); i++) {
+        LOOP_BOUND(LEND_DEPTH);
+        const struct thread *lt = place_thread(l);
+        struct place *next = lt->lenders != 0 ? thread_place_on(p2v(lt->lenders), core) : NULL;
+        if (next == NULL) {
+            break;
+        }
+        l = next;
+    }
+    return l;
+#else
     return thread_place_on(p2v(t->lenders), unit_core(range_first(b)));
+#endif
 }
 
 /* The borrower's place a lender's place lends its time to, if it is that one's: the inverse of place_lender, or NULL. */
@@ -394,13 +410,33 @@ static void thread_settle(struct thread *t)
  * and settling it is one step for each of its places.
  * A thread that becomes ready, or whose turn ends, lends nothing, and its borrower's turn its caller settles.
  */
+#if SCHED_EDF
+/* Settle the borrowers whose lent time a thread's accounts give, the one it lends to first and on, LEND_DEPTH of them. */
+static void borrowers_settle(struct thread *t)
+{
+    for (uint32_t i = 0; i < LEND_DEPTH; i++) {
+        LOOP_BOUND(LEND_DEPTH);
+        struct thread *h = t->lend_to != 0 ? p2v(t->lend_to) : NULL;
+        if (h == NULL || h->lenders != v2p(t)) {
+            return;
+        }
+        thread_settle(h);
+        t = h;
+    }
+}
+#endif
+
 static void lender_settle(struct thread *t)
 {
     thread_settle(t);
+#if SCHED_EDF
+    borrowers_settle(t);
+#else
     struct thread *h = t->lend_to != 0 ? p2v(t->lend_to) : NULL;
     if (h != NULL && h->lenders == v2p(t)) {
         thread_settle(h);
     }
+#endif
 }
 
 /* How far into the tick the counter is; nowhere under tracing, where the clock is the tick count alone. */
@@ -724,9 +760,20 @@ static void release(uint32_t c)
         }
         /* A lender waits on no queue, and its account may give the borrower it lends to time. */
         struct place *h = p != NULL ? place_borrower(p) : NULL;
+#if SCHED_EDF
+        /* And the borrowers that one lends it on to. */
+        for (uint32_t d = 0; d < LEND_DEPTH && h != NULL; d++) {
+            LOOP_BOUND(LEND_DEPTH);
+            if (h->queue == QUEUE_SPARE || h->queue == QUEUE_SPENT) {
+                place_settle(h);
+            }
+            h = place_borrower(h);
+        }
+#else
         if (h != NULL && (h->queue == QUEUE_SPARE || h->queue == QUEUE_SPENT)) {
             place_settle(h);
         }
+#endif
     }
 }
 
@@ -813,6 +860,9 @@ static __attribute__((noinline)) void unlend(struct thread *t)
     lend_remove(h, t);
     if (first) {
         thread_settle(h);
+#if SCHED_EDF
+        borrowers_settle(h);
+#endif
     }
 }
 
@@ -822,6 +872,9 @@ void sched_lend(struct thread *t, struct notification *ntfn, struct thread *borr
     lend_push(borrower, t);
     if (borrower->lenders == v2p(t)) {
         thread_settle(borrower);
+#if SCHED_EDF
+        borrowers_settle(borrower);
+#endif
     }
     /*
      * A lender whose turn its own time pays for, and that now lends first to a borrower waiting for a turn on its core,

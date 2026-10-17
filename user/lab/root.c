@@ -77,6 +77,7 @@ struct scenario {
 #define LENDING_UI(units, asks)                       { "ui", UI, units, asks, 0, 1, 0, SMALL, PERIOD, 0, 0 }
 #define QUICK(kind)                                   SHARER("quick", kind, 16, SMALL, PERIOD, 0)
 #define SLOW(kind)                                    SHARER("slow", kind, 2, HOLD, 0, HOLD)
+#define PAID_GATE                                     { "gate", GATE, 0, 1, 0, 1, 0, 0, 0, 0, 0 }
 #define BATCH_HOG                                     { "hog", HOG, HOG_UNITS, 0, 0, 0, 0, 0, 0, 0, LONG_WINDOW }
 #define LAX_STORE                                     { "store", STORE, 8, 0, 0, 0, 0, 0, 0, 0, LONG_WINDOW }
 
@@ -104,6 +105,8 @@ static const struct scenario scenarios[] = {
     { "bulk-batch", { STORE_OF(8), UI_OF(8, 1), CLIENT("bulk", BULK, 8, 1, BIG, 0), BATCH_HOG } },
     { "lock-batch", { QUICK(NOTE), SLOW(NOTE), BATCH_HOG } },
     { "lend-batch", { QUICK(LEND), SLOW(LEND), BATCH_HOG } },
+    { "net", { STORE_OF(0), PAID_GATE, LENDING_UI(8, 2), HOGGING } },
+    { "net-unpaid", { STORE_OF(0), SERVER("gate", GATE, 0, 1), UI_OF(8, 2), HOGGING } },
 };
 
 static struct self self;

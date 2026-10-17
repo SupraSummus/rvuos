@@ -29,6 +29,8 @@ The root task keeps 8 units, the units nobody earns are spare time, and every me
 A kernel built with `make SCHED=edf` takes turns by deadline, the tick a thread's account would be full again and its window after;
 the scenarios ending `-batch` give the hog a window of 64 ticks, and `lax-server` gives the store one,
 and under the default scheduler they run as the scenarios they are named after.
+In `net` a ui that lends asks a gate that lends, of no units, which passes the ask to a store of no units, beside the hog,
+so only lent time that goes on through the gate answers it; `net-unpaid` is the same chain lending nothing.
 
 ## What it showed
 

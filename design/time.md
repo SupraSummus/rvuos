@@ -199,7 +199,8 @@ the place that earns each unit, the release, the running thread, and how far int
 With every thread on spare time alone this is the plain round-robin over threads,
 which is how the replay driver runs; see "Verification".
 A build with `make SCHED=edf` takes the run queue in another order, an experiment of the order open decision 9 weighs:
-earliest deadline first, a thread's deadline the tick its account would be full again and a window its binder chose after it;
+earliest deadline first, a thread's deadline the tick its account would be full again and a window its binder chose after it,
+and lent time goes on through a first lender with no time of its own, `LEND_DEPTH` lenders on;
 it keeps none of what this section promises of turns.
 
 **A waiter may lend its time to a thread it names**, with `OP_NOTIFY_LEND`; see "Communication and synchronisation".
