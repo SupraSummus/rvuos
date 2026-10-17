@@ -20,12 +20,21 @@
  * bt_bb_set_zb_tx_on_delay and its bits 5 to 12 by bt_bb_set_le_tx_on_delay, BB_B8 by bt_bb_tx_cca_period,
  * and BB_E0 to BB_F4 are the Gaussian filter's coefficients, written by set_gauss_coeff_1m and _2m.
  */
+#define BB_00 (BT_BB_BASE + 0x000u)
 #define BB_08 (BT_BB_BASE + 0x008u)
 #define BB_0C (BT_BB_BASE + 0x00cu)
 #define BB_10 (BT_BB_BASE + 0x010u)
 #define BB_18 (BT_BB_BASE + 0x018u)
+#define BB_4C (BT_BB_BASE + 0x04cu)
+#define BB_50 (BT_BB_BASE + 0x050u)
+#define BB_54 (BT_BB_BASE + 0x054u)
+#define BB_58 (BT_BB_BASE + 0x058u)
 #define BB_B8 (BT_BB_BASE + 0x0b8u)
+#define BB_BC (BT_BB_BASE + 0x0bcu)
+#define BB_C0 (BT_BB_BASE + 0x0c0u)
 #define BB_FC (BT_BB_BASE + 0x0fcu)
+/* The word 0x600a4c24, in the HAL's block, which bt_bb_rx_set clears a bit of; what it is is not known. */
+#define MODEM_4C24 (MODEM_BASE + 0x4c24u)
 #define BB_E0 (BT_BB_BASE + 0x0e0u)
 #define BB_E4 (BT_BB_BASE + 0x0e4u)
 #define BB_E8 (BT_BB_BASE + 0x0e8u)
@@ -48,13 +57,23 @@
  * what each field is is not known.
  */
 #define AGC_2840 (MODEM_BASE + 0x2840u)
+#define AGC_2800 (MODEM_BASE + 0x2800u)
+#define AGC_2824 (MODEM_BASE + 0x2824u)
+#define AGC_2828 (MODEM_BASE + 0x2828u)
+#define AGC_282C (MODEM_BASE + 0x282cu)
 #define AGC_2844 (MODEM_BASE + 0x2844u)
+#define AGC_284C (MODEM_BASE + 0x284cu)
 #define AGC_2848 (MODEM_BASE + 0x2848u)
 #define AGC_2850 (MODEM_BASE + 0x2850u)
 #define AGC_2854 (MODEM_BASE + 0x2854u)
 #define AGC_2894 (MODEM_BASE + 0x2894u)
 #define AGC_2898 (MODEM_BASE + 0x2898u)
 #define AGC_289C (MODEM_BASE + 0x289cu)
+#define AGC_2888 (MODEM_BASE + 0x2888u)
+#define AGC_288C (MODEM_BASE + 0x288cu)
+#define AGC_28C8 (MODEM_BASE + 0x28c8u)
+#define AGC_28D0 (MODEM_BASE + 0x28d0u)
+#define AGC_28D4 (MODEM_BASE + 0x28d4u)
 #define AGC_28A8 (MODEM_BASE + 0x28a8u)
 #define AGC_28C0 (MODEM_BASE + 0x28c0u)
 #define AGC_28C4 (MODEM_BASE + 0x28c4u)
@@ -67,6 +86,7 @@
 #define AGC_28B8 (MODEM_BASE + 0x28b8u)
 #define AGC_28BC (MODEM_BASE + 0x28bcu)
 /* The ZB receive's words, which zb_rx_auto_sel, zb_rx_core_set and zb_rx_v0_0_set write, at their modem offsets. */
+#define ZB_2C00 (MODEM_BASE + 0x2c00u)
 #define ZB_2C04 (MODEM_BASE + 0x2c04u)
 #define ZB_2C08 (MODEM_BASE + 0x2c08u)
 #define ZB_2C0C (MODEM_BASE + 0x2c0cu)
@@ -85,7 +105,6 @@
 /* The archive's functions the bring-up still calls, of libbtbb.a until the driver's own replace them. */
 extern void bt_bb_v2_version(void);
 /* The archive's functions bt_bb_v2_rx_set calls, theirs until the driver's own replace them. */
-extern void bt_bb_rx_set(uint32_t value);
 extern void bt_agc_gain_offset(uint32_t value);
 extern void bt_agc_rssi_thresh(void);
 extern void bt_agc_restart_set(void);
@@ -121,6 +140,8 @@ void bt_agc_gain_set(void);
 void zb_rx_v0_0_set(void);
 void bt_agc_target_set(void);
 void bt_agc_detect_set(void);
+void bt_bb_rx_set(uint32_t value);
+void bt_agc_v2_set(void);
 
 /*
  * The libraries' bt_bb_v2_init_cmplx, written out: the mode's transmit and receive set, the Gaussian filter's two
@@ -467,4 +488,61 @@ void bt_agc_detect_set(void)
     wr(AGC_28C4, (rd(AGC_28C4) & 0x00ffffffu) | 0x9c000000u);
     wr(AGC_28C4, (rd(AGC_28C4) & 0xff0fffffu) | 0xa00000u);
     wr(AGC_28C4, (rd(AGC_28C4) & 0xfff07fffu) | 0x78000u);
+}
+
+/*
+ * The libraries' bt_agc_v2_set, written out: the baseband's 0x58 bits 3 and 2 set, the AGC's 0x2854 bit 0 set, then
+ * sixteen read-modify-writes on the AGC's 0x2824, 0x2828, 0x282c, 0x28a0, 0x28c8, 0x28d0 and 0x28d4, each a constant
+ * beside the bits kept. What they are is not known.
+ */
+void bt_agc_v2_set(void)
+{
+    wr(BB_58, rd(BB_58) | 0x8u);
+    wr(BB_58, rd(BB_58) | 0x4u);
+    wr(AGC_2854, rd(AGC_2854) | 0x1u);
+    wr(AGC_282C, (rd(AGC_282C) & 0xfffff01fu) | 0x140u);
+    wr(AGC_2828, (rd(AGC_2828) & 0xffe03fffu) | 0x2c000u);
+    wr(AGC_2828, (rd(AGC_2828) & ~0x7fu) | 0x2du);
+    wr(AGC_2828, (rd(AGC_2828) & 0xf01fffffu) | 0x5a00000u);
+    wr(AGC_28C8, (rd(AGC_28C8) & 0x803fffffu) | 0x7d800000u);
+    wr(AGC_28C8, (rd(AGC_28C8) & 0xffc01fffu) | 0x34c000u);
+    wr(AGC_28D0, (rd(AGC_28D0) & 0x1ffffffu) | 0x3c000000u);
+    wr(AGC_28D0, (rd(AGC_28D0) & 0xfe03ffffu) | 0x500000u);
+    wr(AGC_28D0, (rd(AGC_28D0) & 0xfffc07ffu) | 0x5000u);
+    wr(AGC_28D0, (rd(AGC_28D0) & ~0x7f0u) | 0xa0u);
+    wr(AGC_28D4, (rd(AGC_28D4) & 0x1ffffffu) | 0x14000000u);
+    wr(AGC_28A0, rd(AGC_28A0) & ~0xffu);
+    wr(AGC_28A0, (rd(AGC_28A0) & 0xffff00ffu) | 0x5a00u);
+    wr(AGC_2824, (rd(AGC_2824) & 0xf01fffffu) | 0x1400000u);
+}
+
+/*
+ * The libraries' bt_bb_rx_set, written out: the baseband's 0x50's low eleven bits cleared, 0x8's bits 23 to 28 given
+ * the argument's low six, 0xc's low twelve given 0x199a000, the HAL's 0x4c24 bit 31 cleared, 0x4c bit 2 set,
+ * then bt_agc_v2_set, and then the rest: the AGC's 0x2888 bit 29 cleared and bit 18 set, the baseband's 0xbc bit 31
+ * set, 0xc0's low two cleared, 0x54's bit 5 cleared and bits 2 and 4 set, 0x00 bit 0 set, the AGC's 0x2800 bits 17 to
+ * 19 and 10 to 12 set, 0x284c bit 26 cleared and 0x288c bit 29 cleared, and the ZB receive's 0x2c00's low twelve given
+ * 0x199a000, 0x2c04's bit 11 cleared and 0x2c0c's bit 8 cleared.
+ */
+void bt_bb_rx_set(uint32_t value)
+{
+    wr(BB_50, rd(BB_50) & ~0x7ffu);
+    wr(BB_08, (rd(BB_08) & 0xe07fffffu) | ((value << 23) & 0x1f800000u));
+    wr(BB_0C, (rd(BB_0C) & 0xfffu) | 0x199a000u);
+    wr(MODEM_4C24, rd(MODEM_4C24) & 0x7fffffffu);
+    wr(BB_4C, rd(BB_4C) | 0x4u);
+    bt_agc_v2_set();
+    wr(AGC_2888, rd(AGC_2888) & 0xdfffffffu);
+    wr(AGC_2888, rd(AGC_2888) | 0x40000u);
+    wr(BB_BC, rd(BB_BC) | 0x80000000u);
+    wr(BB_C0, rd(BB_C0) & ~0x2u);
+    wr(AGC_2800, rd(AGC_2800) | 0xe0000u);
+    wr(AGC_2800, rd(AGC_2800) | 0x1c00u);
+    wr(AGC_284C, rd(AGC_284C) & 0xfbffffffu);
+    wr(AGC_288C, rd(AGC_288C) & 0xdfffffffu);
+    wr(BB_54, (rd(BB_54) & ~0x1fu) | 0x14u);
+    wr(BB_00, rd(BB_00) | 0x1u);
+    wr(ZB_2C0C, rd(ZB_2C0C) & ~0x100u);
+    wr(ZB_2C00, (rd(ZB_2C00) & 0xfffu) | 0x199a000u);
+    wr(ZB_2C04, rd(ZB_2C04) & 0xfffff7ffu);
 }
