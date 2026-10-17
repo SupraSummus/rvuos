@@ -41,6 +41,15 @@ LIB(bt_bb_set_le_tx_on_delay)
 /* libbtbb.a's, in its .bss, which bt_bb_tx_cca_en alone sets and the driver never calls, so zero as on the board. */
 __attribute__((weak)) unsigned char bt_bb_cca_en;
 
+/* The ROM's get_data_sat, which bt_bb_get_tx_pwr_table asks; the replay never calls it, as btbb_init does not call it. */
+__attribute__((weak)) int get_data_sat(int index, int span, int bias)
+{
+    (void)index;
+    (void)span;
+    (void)bias;
+    return 0;
+}
+
 /* libphy.a's, which prints the baseband's version when btbb_init is asked to. */
 __attribute__((weak)) int phy_printf(const char *format, ...)
 {

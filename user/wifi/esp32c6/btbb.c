@@ -52,6 +52,8 @@ extern void bt_bb_v2_rx_set(uint32_t value);
 extern void bt_bb_v2_version(void);
 /* The archive's byte the LE transmit-on delay is scaled from, theirs until its cca functions are the driver's too. */
 extern uint8_t bt_bb_cca_en;
+/* The ROM's, which fills the power table entry by entry; its three arguments' roles are not known. */
+extern int get_data_sat(int, int, int);
 
 /* The archive's functions the driver's own take, declared where they are defined below, for the prototype. */
 void bt_bb_v2_tx_set(uint32_t mode);
@@ -176,4 +178,24 @@ void ieee802154_txon_delay_set(void)
     wr(I154_110, (rd(I154_110) & 0xfffff800u) | 0x32u);
     wr(I154_114, (rd(I154_114) & 0xfffffc00u) | 0x7fu);
     wr(I154_10C, rd(I154_10C) & 0xffffffc0u);
+}
+
+/*
+ * The table bt_bb_get_tx_pwr_table fills and returns, 16 entries.
+ */
+static int8_t bt_bb_pwr_table[16];
+
+/*
+ * The libraries' bt_bb_get_tx_pwr_table, written out: 16 into the length's byte, then 16 times the ROM's get_data_sat
+ * with the running index -0x18 to 0x18 by three, 0x14 and -0xf, its byte stored entry by entry, and the table returned.
+ * It reaches no device, so the trace and the host replay hold none of it.
+ */
+const int8_t *bt_bb_get_tx_pwr_table(uint8_t *length)
+{
+    int8_t *p = bt_bb_pwr_table;
+    *length = 0x10u;
+    for (int i = -0x18; i != 0x18; i += 3) {
+        *p++ = (int8_t)get_data_sat(i, 0x14, -0xf);
+    }
+    return bt_bb_pwr_table;
 }

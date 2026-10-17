@@ -199,12 +199,15 @@ $(BUILD)/$(WIFI_ESP)/libphy.a: $(WIFI_ESP_INIT) $(WIFI_ESP)/build.mk
 
 # libbtbb.a's functions the driver's own take, weakened in a copy, so that btbb.c's and i154.c's take their place;
 # the copy is made again when this file, which names them, changes.
+# WIFI_ESP_BTBB_OWN's make device accesses, so the host replay names them too; WIFI_ESP_BTBB_BARE's make none,
+# so only the weakening names them, and the trace and the replay hold nothing of them.
 WIFI_ESP_BTBB_OWN := bt_bb_v2_tx_set set_gauss_coeff_1m set_gauss_coeff_2m \
                      bt_bb_set_le_tx_on_delay bt_bb_set_zb_tx_on_delay bt_bb_tx_cca_period \
                      ieee802154_txon_delay_set
+WIFI_ESP_BTBB_BARE := bt_bb_get_tx_pwr_table
 
 $(BUILD)/$(WIFI_ESP)/libbtbb.a: $(WIFI_ESP_INIT) $(WIFI_ESP)/build.mk
-	$(OBJCOPY) $(addprefix --weaken-symbol=,$(WIFI_ESP_BTBB_OWN)) $(PHYBLOB_CACHE)/libbtbb.a $@
+	$(OBJCOPY) $(addprefix --weaken-symbol=,$(WIFI_ESP_BTBB_OWN) $(WIFI_ESP_BTBB_BARE)) $(PHYBLOB_CACHE)/libbtbb.a $@
 
 $(BUILD)/$(WIFI_ESP)/phy_init_data.o: $(WIFI_ESP_INIT)
 	$(CC) $(CFLAGS) -c $< -o $@
