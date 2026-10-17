@@ -52,6 +52,9 @@
 #define AGC_2848 (MODEM_BASE + 0x2848u)
 #define AGC_2850 (MODEM_BASE + 0x2850u)
 #define AGC_2854 (MODEM_BASE + 0x2854u)
+#define AGC_2894 (MODEM_BASE + 0x2894u)
+#define AGC_2898 (MODEM_BASE + 0x2898u)
+#define AGC_289C (MODEM_BASE + 0x289cu)
 #define AGC_2868 (MODEM_BASE + 0x2868u)
 #define AGC_286C (MODEM_BASE + 0x286cu)
 #define AGC_28A0 (MODEM_BASE + 0x28a0u)
@@ -82,7 +85,6 @@ extern void bt_bb_v2_version(void);
 extern void bt_bb_rx_set(uint32_t value);
 extern void bt_agc_gain_offset(uint32_t value);
 extern void bt_agc_rssi_thresh(void);
-extern void bt_agc_target_set(void);
 extern void bt_agc_restart_set(void);
 extern void bt_agc_detect_set(void);
 extern void bt_bb_rx_correlator_set(void);
@@ -115,6 +117,7 @@ void bt_set_rx_comp(uint32_t first, uint32_t second, uint32_t third, uint32_t fo
 void bt_agc_gain_max(uint32_t value);
 void bt_agc_gain_set(void);
 void zb_rx_v0_0_set(void);
+void bt_agc_target_set(void);
 
 /*
  * The libraries' bt_bb_v2_init_cmplx, written out: the mode's transmit and receive set, the Gaussian filter's two
@@ -416,4 +419,26 @@ void zb_rx_v0_0_set(void)
     wr(ZB_2C30, (rd(ZB_2C30) & 0xffu) | 0xf85edf00u);
     wr(ZB_2C14, rd(ZB_2C14) & ~0x2u);
     wr(ZB_2C0C, rd(ZB_2C0C) | 0x200u);
+}
+
+/*
+ * The libraries' bt_agc_target_set, written out: thirteen read-modify-writes on the AGC's words 0x2840, 0x2894, 0x2898,
+ * 0x289c, 0x28b0 and 0x28b4, each a constant beside the bits kept. Their name says an AGC target; the fields are not
+ * known.
+ */
+void bt_agc_target_set(void)
+{
+    wr(AGC_2898, (rd(AGC_2898) & ~0x1ffu) | 0x1ceu);
+    wr(AGC_289C, (rd(AGC_289C) & ~0x1ffu) | 0x1ceu);
+    wr(AGC_28B0, (rd(AGC_28B0) & 0x7fffffu) | 0xe7000000u);
+    wr(AGC_28B0, (rd(AGC_28B0) & 0xff803fffu) | 0x738000u);
+    wr(AGC_2840, (rd(AGC_2840) & 0xffc01fffu) | 0x39c000u);
+    wr(AGC_289C, (rd(AGC_289C) & 0xfffc01ffu) | 0x39c00u);
+    wr(AGC_2898, (rd(AGC_2898) & 0xffff81ffu) | 0x1800u);
+    wr(AGC_289C, (rd(AGC_289C) & 0xff03ffffu) | 0x300000u);
+    wr(AGC_2840, (rd(AGC_2840) & 0xffffe3ffu) | 0x800u);
+    wr(AGC_2894, (rd(AGC_2894) & 0xff803fffu) | 0x738000u);
+    wr(AGC_2894, (rd(AGC_2894) & 0x7fffffu) | 0xe7000000u);
+    wr(AGC_28B4, (rd(AGC_28B4) & 0x7fffffu) | 0xe7000000u);
+    wr(AGC_28B4, (rd(AGC_28B4) & 0xff803fffu) | 0x738000u);
 }

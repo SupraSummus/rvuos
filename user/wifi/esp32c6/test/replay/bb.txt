@@ -1,4 +1,4 @@
-# bt_bb_v2_init_cmplx bt_bb_v2_tx_set set_gauss_coeff_1m set_gauss_coeff_2m bt_bb_set_le_tx_on_delay bt_bb_set_zb_tx_on_delay bt_bb_tx_cca_period ieee802154_txon_delay_set bt_agc_recorrect_set bt_agc_rssi_thresh bt_agc_gain_offset bt_bb_rx_filter_sel zb_rx_auto_sel zb_rx_core_set bt_set_rx_comp bt_agc_gain_max bt_agc_gain_set zb_rx_v0_0_set after trace: baseband before trace: mac, in a run of the image sha256 509b4a054c1323cb088051aefc3578f9d7a258658c25e97ab42c818045470e82
+# bt_bb_v2_init_cmplx bt_bb_v2_tx_set set_gauss_coeff_1m set_gauss_coeff_2m bt_bb_set_le_tx_on_delay bt_bb_set_zb_tx_on_delay bt_bb_tx_cca_period ieee802154_txon_delay_set bt_agc_recorrect_set bt_agc_rssi_thresh bt_agc_gain_offset bt_bb_rx_filter_sel zb_rx_auto_sel zb_rx_core_set bt_set_rx_comp bt_agc_gain_max bt_agc_gain_set zb_rx_v0_0_set bt_agc_target_set after trace: baseband before trace: mac, in a run of the image sha256 509b4a054c1323cb088051aefc3578f9d7a258658c25e97ab42c818045470e82
 R4 0x600a2018 0x1610280a
 W4 0x600a2018 0x1610280a
 R4 0x600a2018 0x1610280a
@@ -43,6 +43,32 @@ R4 0x600a28ac 0x44380000
 W4 0x600a28ac 0x44380000
 R4 0x600a28b8 0x00088740
 W4 0x600a28b8 0x00088740
+R4 0x600a2898 0x000019ce
+W4 0x600a2898 0x000019ce
+R4 0x600a289c 0x00339dce
+W4 0x600a289c 0x00339dce
+R4 0x600a28b0 0xe77394a0
+W4 0x600a28b0 0xe77394a0
+R4 0x600a28b0 0xe77394a0
+W4 0x600a28b0 0xe77394a0
+R4 0x600a2840 0x3039c9c7
+W4 0x600a2840 0x3039c9c7
+R4 0x600a289c 0x00339dce
+W4 0x600a289c 0x00339dce
+R4 0x600a2898 0x000019ce
+W4 0x600a2898 0x000019ce
+R4 0x600a289c 0x00339dce
+W4 0x600a289c 0x00339dce
+R4 0x600a2840 0x3039c9c7
+W4 0x600a2840 0x3039c9c7
+R4 0x600a2894 0xe773be61
+W4 0x600a2894 0xe773be61
+R4 0x600a2894 0xe773be61
+W4 0x600a2894 0xe773be61
+R4 0x600a28b4 0xe77395a6
+W4 0x600a28b4 0xe77395a6
+R4 0x600a28b4 0xe77395a6
+W4 0x600a28b4 0xe77395a6
 R4 0x600a28b4 0xe77395a6
 W4 0x600a28b4 0xe77395a6
 R4 0x600a28b4 0xe77395a6
