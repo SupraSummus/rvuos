@@ -29,10 +29,15 @@
 #define BB_50 (BT_BB_BASE + 0x050u)
 #define BB_54 (BT_BB_BASE + 0x054u)
 #define BB_58 (BT_BB_BASE + 0x058u)
+#define BB_60 (BT_BB_BASE + 0x060u)
+#define BB_64 (BT_BB_BASE + 0x064u)
+#define BB_68 (BT_BB_BASE + 0x068u)
 #define BB_B8 (BT_BB_BASE + 0x0b8u)
 #define BB_BC (BT_BB_BASE + 0x0bcu)
 #define BB_C0 (BT_BB_BASE + 0x0c0u)
 #define BB_FC (BT_BB_BASE + 0x0fcu)
+#define BB_F8 (BT_BB_BASE + 0x0f8u)
+#define BB_100 (BT_BB_BASE + 0x100u)
 /* The word 0x600a4c24, in the HAL's block, which bt_bb_rx_set clears a bit of; what it is is not known. */
 #define MODEM_4C24 (MODEM_BASE + 0x4c24u)
 #define BB_E0 (BT_BB_BASE + 0x0e0u)
@@ -108,7 +113,6 @@ extern void bt_bb_v2_version(void);
 extern void bt_agc_gain_offset(uint32_t value);
 extern void bt_agc_rssi_thresh(void);
 extern void bt_agc_restart_set(void);
-extern void bt_bb_rx_correlator_set(void);
 extern void bt_bb_rx_dpo_set(void);
 extern void bt_bb_rx_filter_sel(void);
 extern void zb_rx_core_set(void);
@@ -142,6 +146,7 @@ void bt_agc_target_set(void);
 void bt_agc_detect_set(void);
 void bt_bb_rx_set(uint32_t value);
 void bt_agc_v2_set(void);
+void bt_bb_rx_correlator_set(void);
 
 /*
  * The libraries' bt_bb_v2_init_cmplx, written out: the mode's transmit and receive set, the Gaussian filter's two
@@ -545,4 +550,31 @@ void bt_bb_rx_set(uint32_t value)
     wr(ZB_2C0C, rd(ZB_2C0C) & ~0x100u);
     wr(ZB_2C00, (rd(ZB_2C00) & 0xfffu) | 0x199a000u);
     wr(ZB_2C04, rd(ZB_2C04) & 0xfffff7ffu);
+}
+
+/*
+ * The libraries' bt_bb_rx_correlator_set, written out: eighteen read-modify-writes on the baseband's 0x60, 0x64, 0x68,
+ * 0xf8, 0xfc and 0x100, each a constant beside the bits kept, four of them a negative-andi mask. What they are is not
+ * known.
+ */
+void bt_bb_rx_correlator_set(void)
+{
+    wr(BB_64, (rd(BB_64) & 0xfc0fffffu) | 0x300000u);
+    wr(BB_64, (rd(BB_64) & 0xffffc0ffu) | 0x900u);
+    wr(BB_FC, (rd(BB_FC) & 0x81ffffffu) | 0x12000000u);
+    wr(BB_64, (rd(BB_64) & ~0xfcu) | 0x8u);
+    wr(BB_68, (rd(BB_68) & 0x3ffffffu) | 0x10000000u);
+    wr(BB_68, (rd(BB_68) & ~0x7e0u) | 0x60u);
+    wr(BB_68, (rd(BB_68) & 0xfc0fffffu) | 0xd00000u);
+    wr(BB_68, (rd(BB_68) & 0xfff00fffu) | 0x9b000u);
+    wr(BB_68, rd(BB_68) | 0x800u);
+    wr(BB_60, (rd(BB_60) & 0x3ffffffu) | 0x10000000u);
+    wr(BB_100, (rd(BB_100) & 0xff3fffffu) | 0x400000u);
+    wr(BB_100, rd(BB_100) & 0xf3ffffffu);
+    wr(BB_64, (rd(BB_64) & 0xfff03fffu) | 0x10000u);
+    wr(BB_F8, (rd(BB_F8) & 0xfe07ffffu) | 0x100000u);
+    wr(BB_F8, (rd(BB_F8) & ~0x7e0u) | 0x60u);
+    wr(BB_F8, (rd(BB_F8) & 0xfff807ffu) | 0x4f000u);
+    wr(BB_F8, (rd(BB_F8) & 0x81ffffffu) | 0x2000000u);
+    wr(BB_68, rd(BB_68) | 0x10u);
 }
