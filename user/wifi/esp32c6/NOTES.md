@@ -556,6 +556,12 @@ It needs the BT baseband's `libbtbb.a`, whose `.bss` is linked into every image,
 so Wi-Fi's runs see the driver's RAM 24 bytes further on:
 a traced start held to one from before differs only in the address the receive list is written at.
 
+The bring-up has a trace window of its own, `trace=1` with `i154=`: the driver runs the radio's bring-up and nothing
+else, before its survey and the exchange, and with the root task mapping no device every access faults to the watcher,
+which carries it out and logs it, as Wi-Fi's window's does; `trace=2` runs the same window with the devices mapped.
+It is what the driver's own baseband, `btbb.c`, is held to as Espressif's `libbtbb.a` is taken from it one function
+at a time, the archive's `bt_bb_v2.o` its source.
+
 A run of 802.15.4 leaves the modem in a state the runner's reset does not clear:
 a traced Wi-Fi start straight after one read `0x600A4400` at its third access as `0xc1c93734`,
 where runs after a Wi-Fi run read `0xc1cb3754`, as the gate's did.

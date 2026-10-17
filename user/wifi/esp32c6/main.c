@@ -595,6 +595,9 @@ static __attribute__((noreturn)) void trace_run(void)
  */
 static __attribute__((noreturn)) void run(struct drv *d)
 {
+    if (d->trace && d->i154) {
+        i154_trace_run(d);
+    }
     if (d->trace) {
         trace_run();
     }
