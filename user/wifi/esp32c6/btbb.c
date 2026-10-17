@@ -17,12 +17,15 @@
 /* The baseband's block. */
 #define BTBB_BASE 0x600a2000u
 /*
- * BB_08 and BB_0C are written by bt_bb_v2_tx_set, BB_18 by bt_bb_v2_tx_set too, and BB_E0 to BB_F4 are the Gaussian
- * filter's coefficients, written by set_gauss_coeff_1m and _2m.
+ * BB_08 and BB_0C are written by bt_bb_v2_tx_set, BB_18 by bt_bb_v2_tx_set too, BB_10's high byte by
+ * bt_bb_set_zb_tx_on_delay and its bits 5 to 12 by bt_bb_set_le_tx_on_delay, BB_B8 by bt_bb_tx_cca_period,
+ * and BB_E0 to BB_F4 are the Gaussian filter's coefficients, written by set_gauss_coeff_1m and _2m.
  */
 #define BB_08 (BTBB_BASE + 0x008u)
 #define BB_0C (BTBB_BASE + 0x00cu)
+#define BB_10 (BTBB_BASE + 0x010u)
 #define BB_18 (BTBB_BASE + 0x018u)
+#define BB_B8 (BTBB_BASE + 0x0b8u)
 #define BB_E0 (BTBB_BASE + 0x0e0u)
 #define BB_E4 (BTBB_BASE + 0x0e4u)
 #define BB_E8 (BTBB_BASE + 0x0e8u)
@@ -36,9 +39,6 @@
 
 /* The archive's functions the bring-up still calls, of libbtbb.a until the driver's own replace them. */
 extern void bt_bb_v2_rx_set(uint32_t value);
-extern void bt_bb_set_le_tx_on_delay(uint32_t delay);
-extern void bt_bb_set_zb_tx_on_delay(uint32_t delay);
-extern void bt_bb_tx_cca_period(uint32_t first, uint32_t second);
 extern void bt_bb_v2_version(void);
 /* The archive's byte the LE transmit-on delay is scaled from, theirs until its cca functions are the driver's too. */
 extern uint8_t bt_bb_cca_en;
@@ -47,6 +47,9 @@ extern uint8_t bt_bb_cca_en;
 void bt_bb_v2_tx_set(uint32_t mode);
 void set_gauss_coeff_1m(void);
 void set_gauss_coeff_2m(void);
+void bt_bb_set_le_tx_on_delay(uint32_t delay);
+void bt_bb_set_zb_tx_on_delay(uint32_t delay);
+void bt_bb_tx_cca_period(uint32_t first, uint32_t second);
 
 /*
  * The libraries' bt_bb_v2_init_cmplx, written out: the mode's transmit and receive set, the Gaussian filter's two
@@ -119,4 +122,35 @@ void set_gauss_coeff_2m(void)
     wr(BB_F4, (rd(BB_F4) & 0x3fffffu) | 0x96000000u);
     wr(BB_F4, (rd(BB_F4) & 0xffc007ffu) | 0x2d3800u);
     wr(BB_F4, (rd(BB_F4) & 0xfffff800u) | 0x78fu);
+}
+
+/*
+ * The libraries' bt_bb_set_le_tx_on_delay, written out: BB_10's bits 2 to 12 given ((delay << 5) - 0xa0) masked to
+ * bits 5 to 12, the other bits kept. Their name says the transmit-on delay of the LE mode; what the field is is not known.
+ */
+void bt_bb_set_le_tx_on_delay(uint32_t delay)
+{
+    wr(BB_10, (rd(BB_10) & 0xffffe003u) | (((delay << 5) - 0xa0u) & 0x1fe0u));
+}
+
+/*
+ * The libraries' bt_bb_set_zb_tx_on_delay, written out: BB_10's bits 24 to 31 given delay less five, its bits 0 to 20
+ * kept. Their name says the transmit-on delay of the ZB (IEEE 802.15.4) mode; the same word as the LE delay's,
+ * whose bits 21 to 23 this clears.
+ */
+void bt_bb_set_zb_tx_on_delay(uint32_t delay)
+{
+    wr(BB_10, (rd(BB_10) & 0x001fffffu) | (((delay - 5u) & 0xffu) << 24));
+}
+
+/*
+ * The libraries' bt_bb_tx_cca_period, written out: BB_B8's bits 23 to 30 given first less second less five,
+ * then its bits 9 to 19 given ((first - 5) << 12) - 0x200, the other bits kept.
+ * Their body reads the word back between the two writes, as written below.
+ * Their name says the transmit CCA period; the two arguments' roles are not known.
+ */
+void bt_bb_tx_cca_period(uint32_t first, uint32_t second)
+{
+    wr(BB_B8, (rd(BB_B8) & 0x800fffffu) | (((first - second - 5u) << 23) & 0x7f800000u));
+    wr(BB_B8, (rd(BB_B8) & 0xfff001ffu) | ((((first - 5u) << 12) - 0x200u) & 0xffe00u));
 }

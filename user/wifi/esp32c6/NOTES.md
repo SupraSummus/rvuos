@@ -566,6 +566,9 @@ with `snap=` names in the configuration, `tools/mac-trace.py compare` holds the 
 A run of 802.15.4 leaves the modem in a state the runner's reset does not clear:
 a traced Wi-Fi start straight after one read `0x600A4400` at its third access as `0xc1c93734`,
 where runs after a Wi-Fi run read `0xc1cb3754`, as the gate's did.
+The baseband's own registers survive it too, so a traced run's reads of them answer what the image before left there,
+which a Wi-Fi run does not put back: a traced run's board values are held by the last write to each address,
+and the full sequence, reads and all, by the host replay over the recorded base.
 A traced run, or a gate, goes after a Wi-Fi run.
 
 ## The driver's memory, and whom it trusts
