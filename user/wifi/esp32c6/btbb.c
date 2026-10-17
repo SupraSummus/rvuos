@@ -12,36 +12,31 @@
 #include <stdint.h>
 
 #include "btbb.h"
+#include "devices.h"
 #include "devregs.h"
 
-/* The baseband's block. */
-#define BTBB_BASE 0x600a2000u
 /*
  * BB_08 and BB_0C are written by bt_bb_v2_tx_set, BB_18 by bt_bb_v2_tx_set too, BB_10's high byte by
  * bt_bb_set_zb_tx_on_delay and its bits 5 to 12 by bt_bb_set_le_tx_on_delay, BB_B8 by bt_bb_tx_cca_period,
  * and BB_E0 to BB_F4 are the Gaussian filter's coefficients, written by set_gauss_coeff_1m and _2m.
  */
-#define BB_08 (BTBB_BASE + 0x008u)
-#define BB_0C (BTBB_BASE + 0x00cu)
-#define BB_10 (BTBB_BASE + 0x010u)
-#define BB_18 (BTBB_BASE + 0x018u)
-#define BB_B8 (BTBB_BASE + 0x0b8u)
-#define BB_E0 (BTBB_BASE + 0x0e0u)
-#define BB_E4 (BTBB_BASE + 0x0e4u)
-#define BB_E8 (BTBB_BASE + 0x0e8u)
-#define BB_EC (BTBB_BASE + 0x0ecu)
-#define BB_F0 (BTBB_BASE + 0x0f0u)
-#define BB_F4 (BTBB_BASE + 0x0f4u)
+#define BB_08 (BT_BB_BASE + 0x008u)
+#define BB_0C (BT_BB_BASE + 0x00cu)
+#define BB_10 (BT_BB_BASE + 0x010u)
+#define BB_18 (BT_BB_BASE + 0x018u)
+#define BB_B8 (BT_BB_BASE + 0x0b8u)
+#define BB_E0 (BT_BB_BASE + 0x0e0u)
+#define BB_E4 (BT_BB_BASE + 0x0e4u)
+#define BB_E8 (BT_BB_BASE + 0x0e8u)
+#define BB_EC (BT_BB_BASE + 0x0ecu)
+#define BB_F0 (BT_BB_BASE + 0x0f0u)
+#define BB_F4 (BT_BB_BASE + 0x0f4u)
 /* The baseband's word 0x14, which btbb_init writes; what it is is not known. */
-#define BB_INIT_14 (BTBB_BASE + 0x014u)
+#define BB_INIT_14 (BT_BB_BASE + 0x014u)
 /* The word before the baseband's block, 0x600a08fc, which btbb_init writes; what it is is not known. */
 #define BB_INIT_18FC 0x600a08fcu
 
-/*
- * The 802.15.4 MAC's block, whose transmit-on delay words ieee802154_txon_delay_set writes.
- * i154.c reaches the same block for its own registers; the base is named in both until they are gathered, see TODO.md.
- */
-#define I154_BASE 0x600a3000u
+/* The 802.15.4 MAC's transmit-on delay words, which ieee802154_txon_delay_set writes; the block is devices.h's. */
 #define I154_104 (I154_BASE + 0x104u)
 #define I154_10C (I154_BASE + 0x10cu)
 #define I154_110 (I154_BASE + 0x110u)

@@ -48,8 +48,7 @@
 #define RST_ZBMAC            (1u << 24)
 #define CLK_COEX_EN          (1u << 1)
 
-/* The MAC's registers. */
-#define I154_BASE (MODEM_BASE + 0x3000u)
+/* The MAC's registers, in the block devices.h names I154_BASE, the IEEE 802.15.4 MAC's. */
 #define I154(off) REG(I154_BASE + (off))
 #define COMMAND         0x000u
 #define CTRL_CFG        0x004u

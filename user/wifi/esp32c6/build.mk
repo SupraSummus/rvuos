@@ -120,11 +120,11 @@ MAC_REPLAY_EXPECTED := $(WIFI_ESP)/test/replay-expected.txt
 BTBB_REPLAY_DIR     ?= $(WIFI_ESP)/test/replay
 MAC_REPLAY_TEST_OBJ := $(ESP_HOST)/macstart.o $(ESP_HOST)/btbb.o $(ESP_HOST)/btbb-host.o $(ESP_HOST)/mac-replay-test.o
 $(ESP_HOST)/macstart.o: $(WIFI_ESP)/macstart.c $(WIFI_ESP)/mac.h $(WIFI_ESP)/macregs.h
-$(ESP_HOST)/btbb.o: $(WIFI_ESP)/btbb.c $(WIFI_ESP)/btbb.h $(WIFI_ESP)/macregs.h
+$(ESP_HOST)/btbb.o: $(WIFI_ESP)/btbb.c $(WIFI_ESP)/btbb.h $(WIFI_ESP)/macregs.h user/board/esp32c6/devices.h
 $(ESP_HOST)/btbb-host.o: $(WIFI_ESP)/test/btbb-host.c
 $(ESP_HOST)/mac-replay-test.o: $(WIFI_ESP)/test/mac-replay-test.c $(WIFI_ESP)/mac.h $(WIFI_ESP)/macregs.h \
                                $(WIFI_ESP)/btbb.h
-$(MAC_REPLAY_TEST_OBJ): ESP_HOST_INC += -DMAC_HOST
+$(MAC_REPLAY_TEST_OBJ): ESP_HOST_INC += -DMAC_HOST -Iuser/board/esp32c6
 
 $(ESP_HOST)/hostap/%.o: $(WIFI_ESP_INIT)
 	@mkdir -p $(dir $@)
