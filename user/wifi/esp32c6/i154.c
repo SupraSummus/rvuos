@@ -4,10 +4,11 @@
  * It comes up as ESP-IDF's esp_ieee802154_enable brings it, components/ieee802154/:
  * the modem's clocks of 802.15.4 and of the BT baseband it shares, as modem_clock_impl.c enables them,
  * the PHY on, calibrated by libphy.a as for Wi-Fi, but without Wi-Fi's part of it, phy.c's drv_phy_on,
- * the baseband by libbtbb.a's bt_bb_v2_init_cmplx, and the MAC reset and set as ieee802154_mac_init sets it,
- * its delay before sending again libbtbb.a's, ieee802154_txon_delay_set.
+ * the baseband by the driver's own btbb_init, Espressif's bt_bb_v2_init_cmplx taken from libbtbb.a one function at a
+ * time, and the MAC reset and set as ieee802154_mac_init sets it,
+ * its delay before sending again the archive's ieee802154_txon_delay_set, until the driver's own replaces it.
  * Everything RF is the libraries': the channel and the power are numbers the MAC hands them,
- * the power an index into libbtbb.a's own table.
+ * the power an index into the archive's own table, until the driver's own replaces it.
  * The MAC does the rest in hardware: it sends a frame, with a clear channel assessment first,
  * receives one through its address filter, acknowledges one that asks, and waits for the acknowledgement of its own.
  * It assesses once and waits once, so the backoffs and retries of 802.15.4's CSMA-CA are the driver's, mac154.h's,
@@ -25,6 +26,7 @@
 #include <stdint.h>
 
 #include "i154.h"
+#include "btbb.h"
 #include "lib/child.h"
 #include "lib/libc.h"
 #include "osi.h"
@@ -152,11 +154,6 @@
 #define PAYLOAD_MAX  32u
 #define US_PER_S     1000000u
 
-
-/* libbtbb.a's. */
-void bt_bb_v2_init_cmplx(int print_version);
-const int8_t *bt_bb_get_tx_pwr_table(uint8_t *length);
-void ieee802154_txon_delay_set(void);
 
 /* The bits the radio's notification is signalled with. */
 #define BIT_RADIO   0x1u
@@ -519,7 +516,7 @@ static void radio_up(struct drv *d)
     drv_wifi_clock_enable();
     drv_phy_on();
     osi_trace("baseband", 0, 0);
-    bt_bb_v2_init_cmplx(1);
+    btbb_init(1);
     osi_trace("mac", 0, 0);
     mac_init(d->mac);
 }
@@ -592,7 +589,8 @@ void i154_run(struct drv *d, struct self *own)
  * so that every device access is its own; the library's bt_bb_v2_init_cmplx's among them, which the driver's own
  * bt_bb_* take one function at a time and are held to, see user/wifi/esp32c6/NOTES.md.
  * With trace=1 the root task maps no device, so each access faults to the watcher and the root carries it out and logs it;
- * with trace=2 the devices are mapped and the same window runs with no fault, the baseline the traced run is held to.
+ * with trace=2 the devices are mapped and the same window runs with no fault, and the configuration's snap= addresses
+ * are read back at its end, so that tools/mac-trace.py compare holds the two runs' final state.
  * It ends with DRV_TRACED, as the Wi-Fi window does.
  */
 __attribute__((noreturn)) void i154_trace_run(struct drv *d)

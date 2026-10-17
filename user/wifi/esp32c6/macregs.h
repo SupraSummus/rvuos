@@ -10,6 +10,8 @@
 
 #include <stdint.h>
 
+#include "devregs.h"
+
 #define MAC_BASE 0x600a4000u
 
 #define RX_CTRL        (MAC_BASE + 0x080u)
@@ -98,23 +100,6 @@
 #define TX_RESP(s)     (TX_PPDU(s) + 0x34u) /* the response's rate, and the antennas of hal_attenna_init */
 #define TX_DONE(s)     (TX_PPDU(s) + 0x60u) /* how the frame sent last ended, which hal_mac_get_txq_complete reads */
 
-/*
- * A register read and write, volatile, as the driver makes them; on the host, for the bring-up's replay,
- * test/mac-replay-test.c gives its own, which answers from the libraries' recorded accesses.
- */
-#ifndef MAC_HOST
-static inline uint32_t rd(uint32_t a)
-{
-    return *(volatile uint32_t *)a;
-}
-
-static inline void wr(uint32_t a, uint32_t v)
-{
-    *(volatile uint32_t *)a = v;
-}
-#else
-uint32_t rd(uint32_t a);
-void wr(uint32_t a, uint32_t v);
-#endif
+/* The MAC's and the HAL's register words end here; devregs.h's rd and wr reach them and the baseband's alike. */
 
 #endif

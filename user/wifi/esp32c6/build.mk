@@ -12,7 +12,7 @@ WIFI_ESP_OBJ  := $(patsubst %.c,$(BUILD)/%.o,$(filter-out $(WIFI_ESP)/root.c,$(w
                  $(BUILD)/$(WIFI_ESP)/phy_init_data.o $(BUILD)/$(WIFI_ESP)/esp_wifi_regulatory.o
 # The closed libraries the driver links: the Wi-Fi's two, the PHY's, and the BT baseband's, which IEEE 802.15.4 runs on;
 # glue.c stands for what libcore.a held.
-WIFI_ESP_LIBS := $(addprefix $(PHYBLOB_CACHE)/,libnet80211.a libpp.a libbtbb.a) $(BUILD)/$(WIFI_ESP)/libphy.a
+WIFI_ESP_LIBS := $(addprefix $(PHYBLOB_CACHE)/,libnet80211.a libpp.a) $(BUILD)/$(WIFI_ESP)/libbtbb.a $(BUILD)/$(WIFI_ESP)/libphy.a
 WIFI_ESP_ROM  := $(addprefix $(PHYBLOB_CACHE)/,esp32c6.rom.ld esp32c6.rom.pp.ld \
                  esp32c6.rom.net80211.ld esp32c6.rom.phy.ld esp32c6.rom.libgcc.ld esp32c6.rom.libc.ld)
 # The driver goes where the window onto flash starts, and the configuration to the input region,
@@ -190,6 +190,13 @@ WIFI_ESP_PHY_OWN := phy_get_xtal_freq tsens_read_init_new pwdet_reg_init_new ope
 $(BUILD)/$(WIFI_ESP)/libphy.a: $(WIFI_ESP_INIT) $(WIFI_ESP)/build.mk
 	$(OBJCOPY) $(addprefix --weaken-symbol=,$(WIFI_ESP_PHY_OWN)) $(PHYBLOB_CACHE)/libphy.a $@
 
+# libbtbb.a's functions the driver's own take, weakened in a copy, so that btbb.c's and i154.c's take their place;
+# the copy is made again when this file, which names them, changes.
+WIFI_ESP_BTBB_OWN := bt_bb_v2_tx_set set_gauss_coeff_1m set_gauss_coeff_2m
+
+$(BUILD)/$(WIFI_ESP)/libbtbb.a: $(WIFI_ESP_INIT) $(WIFI_ESP)/build.mk
+	$(OBJCOPY) $(addprefix --weaken-symbol=,$(WIFI_ESP_BTBB_OWN)) $(PHYBLOB_CACHE)/libbtbb.a $@
+
 $(BUILD)/$(WIFI_ESP)/phy_init_data.o: $(WIFI_ESP_INIT)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -201,7 +208,7 @@ $(BUILD)/$(WIFI_ESP)/esp_wifi_regulatory.o: $(WIFI_ESP_INIT)
 # of the foreign code calls an allocator: hostap.c, supp.c and ec.c for hostap's and Mbed TLS's, osi.c for the libraries'.
 WIFI_ESP_HEAP := $(addprefix $(BUILD)/$(WIFI_ESP)/,ec.o heap.o hostap.o osi.o supp.o)
 
-$(BUILD)/wifi-drv.elf: $(WIFI_ESP_OBJ) $(LIB_OBJ) $(BUILD)/$(WIFI_ESP)/flash.ld $(BUILD)/$(WIFI_ESP)/libphy.a
+$(BUILD)/wifi-drv.elf: $(WIFI_ESP_OBJ) $(LIB_OBJ) $(BUILD)/$(WIFI_ESP)/flash.ld $(BUILD)/$(WIFI_ESP)/libbtbb.a $(BUILD)/$(WIFI_ESP)/libphy.a
 	@! $(NM) -u $(filter-out $(WIFI_ESP_HEAP),$(filter $(BUILD)/$(WIFI_ESP)/%,$(WIFI_ESP_OBJ))) | grep -E ' (osi_(m|c|re)alloc|os_(m|z)alloc|malloc|calloc)$$' \
 		|| { echo "$@: the driver's own code calls an allocator" >&2; exit 1; }
 	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/$(WIFI_ESP)/flash.ld $(foreach s,$(WIFI_ESP_ROM),-Wl,-T,$(s)) \
