@@ -201,6 +201,11 @@ struct core {
      */
     bool recall;
 
+#if FUEL
+    /* Whether a charge left the fuel of the turn's payer's process dry, which the trap's end deals with; see fuel_out. */
+    bool fuel_dry;
+#endif
+
     /* The bits the last wake handed over, zero if none; for the trace. */
     uint32_t trace_wake_bits;
 

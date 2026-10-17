@@ -307,6 +307,19 @@ and the numbers that pointed into it name nothing, `KERR_INVALID_CAP`, from the 
 Clearing an empty table slot succeeds.
 With `OP_PROCESS_MOUNT` and `OP_CAP_MOVE` a process moves to another table, section 5.2.
 
+**`OP_PROCESS_FUEL` (47)**, in a kernel built with `make FUEL=1` alone, an experiment of open decision 36 in `DESIGN.md`;
+every other kernel answers `KERR_WRONG_TYPE`.
+A process's fuel is an amount of the clock's counts, which every count its threads run takes from,
+on their own time, on spare time, or lent to a borrower, and a process is made without bound.
+`a1` = `FUEL_READ`, `FUEL_GIVE` or `FUEL_TAKE`, else `KERR_INVALID_ARG`, and `a2` = an amount of counts.
+`FUEL_GIVE` moves the amount from the caller's process to this one, bounding it if it had no bound,
+and fails with `KERR_LIMIT` past what the caller's process holds; a caller whose process has no bound gives without spending.
+`FUEL_TAKE` moves up to the amount back, and fails with `KERR_STATE` on a process without bound.
+Returns in `a1` what is left, or `FUEL_UNBOUNDED`.
+A thread that runs with its process's fuel dry stops at the next tick at most, as a fault stops it, and its watch hears;
+the fuel left, 0, tells its watcher why, and a resume once the fuel is topped up runs it on.
+A lender whose fuel runs dry while its borrower runs on its time stops lending: its wait ends with `KERR_LIMIT`.
+
 ### 6.8 Operations on `Thread`
 
 All need `RIGHT_W` on the thread,
@@ -661,8 +674,9 @@ whether something outside the pool still holds its objects it does not tell.
 | 44 | `OP_ROUTE_BIND` | `RouteLine` |
 | 45 | `OP_ROUTE_END` | `Route` |
 | 46 | `OP_ROUTE_SET` | `Route` |
+| 47 | `OP_PROCESS_FUEL`, `make FUEL=1` alone | `Process` |
 
-`OP_COUNT` is 47, one above the highest code.
+`OP_COUNT` is 47, one above the highest code, and 48 in a kernel built with `make FUEL=1`.
 
 ## 7. What the root task starts with
 

@@ -10,8 +10,8 @@ Witness: fuzz lend-hands-turn
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -408,7 +408,7 @@ static uint32_t turn_close(void)
-     uint32_t offset = clock_offset();
+@@ -475,7 +475,7 @@ static uint32_t turn_close(void)
+ #endif
      struct place *p = turn_place(core_self());
      if (p != NULL) {
 -        p->balance -= turn_owes(p, offset);
