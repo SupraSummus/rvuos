@@ -35,7 +35,6 @@ __attribute__((section(".header"), used)) const struct drv_header drv_image = { 
 struct drv *drv_self;
 static struct thread *first_thread; /* the driver's first, which alone waits on its inbox */
 static struct self own;
-static struct osi_funcs *funcs;
 static struct event_group events; /* the adapter's, a bit for each Wi-Fi event below 32 */
 static struct lock say_lock;
 static uint32_t say_word;
@@ -96,10 +95,10 @@ void drv_event(const char *base, int32_t id, const void *data, size_t size)
 {
     (void)data;
     drv_say("event: %s %d, %u bytes\n", base, (int)id, (unsigned)size);
-    if (!streq(base, "WIFI_EVENT") || (uint32_t)id >= 32 || funcs == 0) {
+    if (!streq(base, "WIFI_EVENT") || (uint32_t)id >= 32) {
         return;
     }
-    funcs->event_group_set_bits(&events, 1u << id);
+    osi_event_set_bits(&events, 1u << id);
 }
 
 /* The radio off, which the libraries turn on in esp_wifi_start: the PHY is closed once nothing uses it. */
@@ -139,36 +138,14 @@ void drv_must(const char *step, esp_err_t e)
 
 static void await(const char *what, int32_t id, uint32_t ms)
 {
-    uint32_t bits = funcs->event_group_wait_bits(&events, 1u << id, 1, 1, ms);
+    uint32_t bits = osi_event_wait_bits(&events, 1u << id, 1, 1, ms);
     drv_must(what, bits & (1u << id) ? ESP_OK : ESP_FAIL);
 }
 
 /*
- * ESP-IDF's WIFI_INIT_CONFIG_DEFAULT, with fewer buffers, as the driver's block of RAM is small, and none of its features,
- * as the libraries' station never joins.
- * The driver receives into a list of its own, see mac.c, so the libraries' static buffers, the MAC's list until then,
- * lie idle: it leaves them two, ESP-IDF's least, so that the heap holds what SAE takes.
+ * ESP-IDF's WIFI_INIT_CONFIG_DEFAULT and its crypto table, which the libraries took through esp_wifi_init_internal,
+ * are gone with them: the driver's own start needs neither.
  */
-static void config(struct init_config *c)
-{
-    memset(c, 0, sizeof(*c));
-    c->osi_funcs = funcs;
-    drv_crypto_funcs(&c->crypto_funcs);
-    c->static_rx_buf_num = 2;
-    c->dynamic_rx_buf_num = 16;
-    c->tx_buf_type = 1;
-    c->dynamic_tx_buf_num = 16;
-    c->rx_mgmt_buf_num = 5;
-    c->ampdu_rx_enable = 1;
-    c->ampdu_tx_enable = 1;
-    c->rx_ba_win = 6;
-    c->beacon_max_len = 752;
-    c->mgmt_sbuf_num = 32;
-    c->espnow_max_encrypt_num = 7;
-    c->tx_hetb_queue_num = 3;
-    c->wifi_task_stack_size = 6656;
-    c->magic = INIT_CONFIG_MAGIC;
-}
 
 /* What mac.c counted while it received, into the log. */
 void drv_mac_told(const char *who)
@@ -460,11 +437,10 @@ static __attribute__((noreturn)) void attend(struct drv *d)
 }
 
 /*
- * The driver's own esp_wifi_start, the libraries' wifi_start_process written out for the station, which the driver
- * brings up alone: the hardware bring-up's calls and the station's start, with none of the libraries' state, so the
- * window's sequence is held to the libraries' by tools/mac-trace.py's diff. Their init, their mode and their state --
- * their ieee80211_set_hmac_stop, wifi_mode_set, _do_wifi_start's bookkeeping, ieee80211_update_phy_country, their
- * control block's interface masks and started state -- are not made: their station never runs. Their
+ * The driver's own esp_wifi_start, the libraries' wifi_start_process written out for the station: the hardware
+ * bring-up's calls and the station's start, with none of the libraries' state. Their init, their mode and their
+ * state -- their ieee80211_set_hmac_stop, wifi_mode_set, _do_wifi_start's bookkeeping, ieee80211_update_phy_country,
+ * their control block's interface masks and started state -- are not made: their station never runs. Their
  * adc2_wifi_acquire, a weak stub in their ieee80211_ioctl.o that returns 0, is left out. See NOTES.md.
  */
 
@@ -475,7 +451,7 @@ static __attribute__((noreturn)) void attend(struct drv *d)
  */
 static void drv_reset_mac(void)
 {
-    funcs->wifi_reset_mac();
+    drv_wifi_reset_mac();
     mac_rx_off();
 }
 
@@ -487,10 +463,9 @@ static void drv_reset_mac(void)
  */
 static void drv_hw_start(void)
 {
-    funcs->wifi_pm_sleep_lock_acquire();
-    funcs->wifi_clock_enable();
-    funcs->phy_enable();
-    funcs->coex_enable();
+    drv_wifi_clock_enable();
+    drv_phy_enable();
+    osi_coex_enable();
     drv_reset_mac();
     mac_tx_block_clear();              /* the libraries' ic_mac_init: their hal_mac_init's tx-block clear */
     mac_home_channel();                /* the libraries' chm_init: the channel manager's start, the driver's own */
@@ -504,21 +479,19 @@ static void drv_hw_start(void)
      */
     uint32_t rx_base;
     drv_must_mac("the MAC's receive list", mac_rx_prepare(&rx_base));
-    mac_config(funcs->slowclk_cal_get, funcs->coex_pti_get, rx_base);
-    funcs->set_intr(0, 2 /* the modem's power */, 1, 1);
-    funcs->set_intr(0, 0 /* the MAC */, 1, 1);
-    funcs->set_isr(1, (void *)mac_rx_isr, 0);
-    funcs->ints_on(1u << 1);
+    mac_config(osi_slowclk_cal, osi_coex_pti, rx_base);
+    osi_intr_set(0, 2 /* the modem's power */, 1, 1);
+    osi_intr_set(0, 0 /* the MAC */, 1, 1);
+    osi_isr_set(1, mac_rx_isr, 0);
+    osi_ints_on(1u << 1);
     mac_default_policy(drv_self->mac); /* the libraries' chip_enable: their default receive policy */
     mac_rx_on();                       /* and their ic_enable_rx */
-    funcs->wifi_bb_sleep_retention_attach();
-    funcs->wifi_mac_sleep_retention_attach();
 }
 
 /* The STA_START their wifi_station_start posts, through the adapter, which logs it and sets the group's bit. */
 static void sta_start_post(void)
 {
-    funcs->event_post("WIFI_EVENT", WIFI_EVENT_STA_START, 0, 0, 0);
+    osi_event_post("WIFI_EVENT", WIFI_EVENT_STA_START, 0, 0);
 }
 
 static int drv_wifi_start(void)
@@ -539,46 +512,24 @@ static int drv_wifi_start(void)
 }
 
 /*
- * The libraries' start or the driver's own, so that a traced run of each, of the same image, can be held together by
- * tools/mac-trace.py's diff. The libraries' start leaves the MAC on their receive list and handler, which the
- * driver's receive no longer moves it off, so it is a traced window's alone, which ends before any frame is taken.
- */
-static int bringup_start(void)
-{
-    if (drv_self->lib_start && !drv_self->trace) {
-        drv_say("driver: libstart=1 is for a traced window alone; the driver's receive is its own from its start\n");
-        return ESP_FAIL;
-    }
-    return drv_self->lib_start ? esp_wifi_start() : drv_wifi_start();
-}
-
-/*
- * The trace window: only the libraries' bring-up and stop, and nothing else, so that every device access is its own.
+ * The trace window: only the driver's bring-up and stop, and nothing else, so that every device access is its own.
  * With trace=1 the driver maps no device, so each access faults to the watcher and the root task carries it out and logs it;
  * with trace=2 the driver maps them as in a plain run, so the same window runs with no fault, the step 2 baseline.
  * It ends with DRV_TRACED once mac_stop returns.
  */
 static __attribute__((noreturn)) void trace_run(void)
 {
-    static struct init_config c;
     uint64_t began = osi_now_us();
     drv_say("driver: the trace window starts, %u bytes of heap free\n", (unsigned)osi_heap_free());
     osi_trace_init(128);
     osi_trace("window", 0, 0);
-    if (drv_self->lib_start) {
-        /* Their start wants their init and their mode first; the driver's own wants neither. */
-        config(&c);
-        drv_must("esp_wifi_init_internal", esp_wifi_init_internal(&c));
-        osi_trace("mode", 0, 0);
-        drv_must("station mode", esp_wifi_set_mode(WIFI_MODE_STA));
-    }
     osi_trace("start", 0, 0);
-    drv_must("esp_wifi_start", bringup_start());
+    drv_must("the driver's start", drv_wifi_start());
     started = 1;
-    /* The trace slows the libraries down, so the wait is given the whole run rather than five seconds. */
+    /* The trace slows the run down, so the wait is given the whole run rather than five seconds. */
     await("the station started", WIFI_EVENT_STA_START, 120000);
     drv_say("driver: init to the station started took %u ms\n", (unsigned)((osi_now_us() - began) / 1000u));
-    drv_say("driver: stopping the libraries\n");
+    drv_say("driver: stopping\n");
     osi_trace("stop", 0, 0);
     mac_stop();
     started = 0;
@@ -610,7 +561,7 @@ static __attribute__((noreturn)) void run(struct drv *d)
     if (d->debug & DRV_DEBUG_WPA) {
         drv_wpa_debug();
     }
-    drv_must("esp_wifi_start", bringup_start());
+    drv_must("the driver's start", drv_wifi_start());
     started = 1;
     await("the station started", WIFI_EVENT_STA_START, 5000);
     child_report(&d->c, DRV_UP);
@@ -659,9 +610,9 @@ void drv_main(struct child_page *page)
         child_stop(&d->c, CHILD_FAILED);
     }
     sta_link_init(note);
-    funcs = osi_init(d, &own);
-    /* This thread calls the libraries too, so it is one of the adapter's, on the stack the root task gave it. */
-    if (funcs == 0 || (first_thread = osi_adopt("driver", (uintptr_t)page, (uintptr_t)page + DRV_DATA_SIZE)) == 0) {
+    /* This thread calls the adapter too, so it is one of its threads, on the stack the root task gave it. */
+    if (!osi_init(d, &own) ||
+        (first_thread = osi_adopt("driver", (uintptr_t)page, (uintptr_t)page + DRV_DATA_SIZE)) == 0) {
         child_stop(&d->c, CHILD_FAILED);
     }
     run(d);

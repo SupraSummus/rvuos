@@ -1,19 +1,18 @@
 /*
  * The bring-up's register sequences of macstart.c, run on the host against what the libraries' own did.
  * The case's file under test/replay/ lists their accesses in a run of their start, in order,
- * as tools/mac-trace.py's replay takes them from its trace:
+ * as tools/mac-trace.py's replay once took them from its trace:
  * rd() answers each read with the value theirs had, and wr() holds each write to theirs, address and value.
- * The calls a sequence still makes into the libraries -- config's alone, now that btbb.c is whole -- do nothing here,
- * as replay leaves out their accesses.
  * Each case is a sequence of the driver's own and the file of theirs it is held to, named alike;
  * config is mac_config, the driver's own start's whole MAC configuration, so its order is that case's;
  * bb is btbb_init of btbb.c, the 802.15.4 baseband's bring-up in place of libbtbb.a's bt_bb_v2_init_cmplx, which the
  * driver took whole; test/btbb-host.c gives the ROM's get_data_sat and libphy's phy_param alone.
  * A case named CASE=FILE runs CASE against FILE.txt instead, as bb=bb-other does: the same window from another state
  * of the modem, so that a write the libraries made of what they read and the own code makes a constant fails one.
- * make BOARD=esp32c6 wifi-esp32c6-replay takes the file again; see user/wifi/esp32c6/build.mk.
- * The accesses of theirs the own start leaves out by design are places in test/replay-expected.txt, in
- * test/diff-expected.txt's form: where an access of ours is not theirs, a place that their accesses from there match,
+ * The files are frozen: the libraries are linked no more, so no run can take them again, and the make target that
+ * once did, wifi-esp32c6-replay, is in git history; see user/wifi/esp32c6/build.mk.
+ * The accesses of theirs the own start leaves out by design are places in test/replay-expected.txt:
+ * where an access of ours is not theirs, a place that their accesses from there match,
  * in order and exactly, is stepped over whole, and each place must be stepped over once.
  */
 

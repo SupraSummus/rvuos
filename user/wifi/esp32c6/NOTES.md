@@ -414,8 +414,8 @@ What the power save saves the log tells as the RF's time off, not as the chip's 
 Once the own station joined both kinds of network, the libraries' station went:
 their scan, join and data path in `main.c`, `wpa.c`, which bound the supplicant to them,
 and the options that chose a path, `rx=own`, `tx=own` and `sta=own`, with the knobs only their station read.
-What the libraries still do is bring the MAC up and stop it, and a little through `mac.c`;
-`make BOARD=esp32c6 wifi-esp32c6-refs` counts it, and each step that drops a call can say how far it went.
+What the libraries did was bring the MAC up and stop it, and a little through `mac.c`;
+`make BOARD=esp32c6 wifi-esp32c6-refs` counted it, and each step that dropped a call could say how far it went.
 They are given no supplicant now.
 Their station's start and stop look for its table and go on without one;
 some of their handling of a received management frame reads it unchecked,
@@ -427,7 +427,7 @@ as wpa_supplicant passes over a BSS whose security does not match,
 where it took the strongest and failed if that one offered nothing it took.
 The comparison the libraries gave, the same run on either path, went with them; the history keeps the runs that held it.
 
-What `mac.c` still asked of the libraries came next, read in their code as the receiving and the sending were.
+What `mac.c` asked of the libraries came next, read in their code as the receiving and the sending were.
 The station-mode receive policy their association programs is three small functions of `pp`,
 read-modify-writes of interface 0's words, which `mac_receive` now makes itself.
 Their promiscuous mode is more: a virtual interface for the sniffer, their own bookkeeping, and under it
@@ -435,133 +435,58 @@ Their promiscuous mode is more: a virtual interface for the sniffer, their own b
 A read of the MAC's words before and after their calls, with their station started, showed the filter word alone changing,
 so `mac_sniffer` writes what their hal writes and nothing of their bookkeeping;
 a scan without it hears nothing, not even an interrupt.
-What is left of theirs is the bring-up, and the lmac's block, whose state byte the sending clears for their way out.
+What was left of theirs was the bring-up, which the next section takes.
 
-## The libraries' bring-up, the driver's own
+## The own start
 
-The bring-up the libraries still do is being taken from them, from the last entry point,
-so that each step's state is read no more by what remains.
-Those entry points are `esp_wifi_init_internal`, `esp_wifi_set_mode`, `esp_wifi_start` and `esp_wifi_stop`,
-the four bring-up symbols the driver asks of the flash libraries, with their two of the log.
-The stop is the driver's own now, `mac.c`'s `mac_stop`: it turns interface 0's receive off,
-makes its addresses invalid, holds the MAC still, sets the coex PTI back,
-and calls `drv_phy_disable`, which stays `libphy`'s.
-`make BOARD=esp32c6 wifi-esp32c6-refs` fell from net80211 6 and pp 1 to net80211 5 and pp 0,
-the last reference being `our_instances_ptr`, which the library's stop alone read.
+The start `esp_wifi_start` once was is the driver's own: `drv_wifi_start` runs their `wifi_start_process` written out for the station, and `mac_stop`, their `esp_wifi_stop`.
+Their `esp_wifi_init_internal` and `esp_wifi_set_mode` are called no more, and net80211 and pp are out of the link.
+`make BOARD=esp32c6 wifi-esp32c6-refs` counts the driver's own calls of `libphy` alone, the RF it keeps.
 
-The oracle is the trace window: `trace=1` has the tracer fault on the device accesses and records,
-on the same request counter, the driver's own steps and the calls the libraries make into `osi.c`;
-`trace=2` runs the same window with the devices mapped and nothing faulting.
-`tools/mac-trace.py` attributes each access to its library and function,
-and with `--segments` splits the log at the `trace: req` lines, so the adapter calls frame each group of accesses;
-`snapshot` and `compare` hold the window's end against two dry runs;
-and the ordinary runs, scan, `listen=`, `probe=`, the WPA3 join and `sae=0`, hold what the window cannot show.
+Its calls, in order: `drv_wifi_clock_enable`;
+`drv_phy_enable`, libphy's calibration, most of a traced window, which stays libphy's;
+`osi_coex_enable`;
+their `wifi_reset_mac`, the reset pulse, then `mac_tx_block_clear` and `mac_home_channel`;
+`mac_config`, the MAC's configuration, which `macstart.c` writes out group by group -- their `mac_txrx_init`, `hal_init` and `hal_he_init`: the RX filter, the RX buffers, the TX power and rate tables, the antenna table, the cipher and the PTI, with libphy brought in for the channel and the gain -- along with `osi_slowclk_cal`, their `hal_timer_update_by_rtc` and the PTI;
+then `osi_intr_set`, `osi_isr_set` and `osi_ints_on`, the handler, the address, the RX enable and the STA TSF;
+and `osi_event_post` STA_START.
+`mac_station_start` makes their `wifi_mode_set` and `_do_wifi_start` after that:
+the low-rate disable, the STA's TSF, interface 0's address and its access point's, its receive policy with its own flags set and its queue policy left clear, the receive enable, and the cipher's entry clear.
+None of net80211's own state is written, and the runs hold that: the scan, `listen=`, `listen=` with `probe=`, and the joins.
 
-The start is next. Its adapter calls, in order, are the frame the own `esp_wifi_start` must build;
-they are not device accesses, so the trace shows the call beside the accesses it made:
-`wifi_clock_enable`, the driver's clock enable;
-`phy_enable`, libphy's calibration, most of the window, which stays `libphy`'s;
-`coex_enable` and `wifi_reset_mac`, the MAC's reset pulse, then `hal_mac_init` sets the pm-txblock bits;
-the MAC config, pp's `mac_txrx_init`, `hal_init` and `hal_he_init`, the RX filter, the RX buffers,
-the TX power and rate tables, the antenna table, the cipher and the PTI,
-with pp calling phy for the channel and the gain;
-`slowclk_cal_get`, `hal_timer_update_by_rtc` and the PTI;
-`set_intr`, `set_isr` and `ints_on`, the interrupt handler, the address, the RX enable and the STA TSF;
-and `event_post` STA_START, where the start reports.
+The trace window is the oracle:
+`trace=1` has the tracer fault on every device access and records, on the same request counter, the start's own steps and its calls into `osi.c`, and `trace=2` runs the same window with the devices mapped and nothing faulting.
+`tools/mac-trace.py` attributes each access to its library and function, `--segments` splits the log at the `trace: req` lines, and `snapshot` and `compare` hold the window's end against the start's own dry runs.
 
-The start's last call, their `ieee80211_update_phy_country`, came just after the event:
-written out, it was their `hal_init_tx_pwr`, which fills their power table, the one their association reads,
-and writes the power registers again by `hal_init_tb_power` and `hal_init_imrsp_power`, with the values the start
-wrote, reading libphy's `rate_to_index`, with no timer armed.
-Their association never runs, so the driver's start leaves it out; the diff names the place.
-Whether the HE, beamforming and antenna groups can be left out is the own start's to find as it runs,
-each dropped on its own and held to the snapshot and the runs.
+Left out of their start:
+their association's call, `ieee80211_update_phy_country`, which wrote the power registers again through `hal_init_tx_pwr`, is not made, since their association never runs;
+`mac_config`'s receive policy for interface 1 is not made either, since the driver never brings that interface up, and three traced runs without it took no interrupt in the window, whose accesses `test/replay-expected.txt` names;
+their `chm_init`'s channel-manager state is not written, only its frame, `mac_home_channel`, which programs channel 1 of the 2.4 GHz band, 2412 MHz, through their `chm_phy_change_channel` -- the MAC held, the PHY tuned, its width word's bit 8 cleared, the MAC released;
+and their `pm_noise_check_enable` and `pm_disconnected_start` go as well, the first's byte read only by their `pm_noise_check`, a path the own station does not run, and the second's PM state read by no path the driver runs.
+The ordinary runs hold all of it, the joins among them.
 
-Most of the start's HAL functions write registers alone, their objects carrying no relocation to any library's data,
-so the own start can call them as they are, given the right arguments, and take them over one at a time.
-`mac_rxbuf_init`, which reads the interface's control block, waits for the init to be the driver's too.
-The MAC's configuration, their `hal_init`, is the driver's own sequence now:
-the register writes it makes about HAL_CFG, HAL_HOLD and HAL_MISC and its receive-policy words are `macstart.c`'s,
-and the groups between them go over one at a time,
-each named with `osi_trace`, so that a traced run's segments show its accesses.
-A step's diff holds the device accesses; the writes a step makes to the libraries' own memory are not in the trace, so only the runs hold those.
-Of the start's calls, one that only writes the libraries' own memory -- their pm or their control block -- is left a call, or goes, never transcribed:
-taking it over moves no device work to the driver, and would carry their structures' layout into its code;
-it goes when the runs show its state is not wanted, as `wifi_mode_set`'s and `_do_wifi_start`'s,
-or when what it writes is there already, as `ieee80211_set_hmac_stop`'s zero.
-A write to their memory that a transcribed body brings -- their wdev's flag, the masks by their control block -- is named where it is written,
-and goes whole when the reader of that state is the driver's own.
+The receive base's write stays and points at the driver's own list, `mac.c`'s.
+Read in the write's place, before it, the word held 0x00800000 in three own runs, after their `wifi_reset_mac`;
+how the MAC makes an address of it is not known, and read as their 0x4086e138 is, without bit 30, it would be 0x40800000, `__ram_start`, the kernel's `_start`.
 
-A MAC register is named for the library function that reaches it, by constant address in their code or in the trace;
-one that only the start's own group reaches, or several with no one role, carries the offset it was reached at.
-One address has one name, in `macregs.h` when two files share it.
-
-`mac_config`'s receive policy for interface 1 was not inert while the libraries' receive interrupt was installed --
-left out, that interrupt ran in the window where it did not with it -- so it stayed then.
-With the driver's own interrupt the MAC's from its start, three traced runs without it took no interrupt in the
-window, so it goes: the driver never brings that interface up, and `test/replay-expected.txt` names its accesses.
-The receive base's write stays as well, and points at the driver's own list, `mac.c`'s, where it pointed at their
-control block until their receive went.
-Read in the write's place, before it, the word held 0x00800000 in three own runs, after their `wifi_reset_mac`.
-How the MAC makes an address of it is not known;
-read back as their 0x4086e138 is, as 0x0086e138, without bit 30, it would be 0x40800000, `__ram_start`, the kernel's
-`_start`.
-
-Of the start's calls after the hardware's, their `wifi_mode_set` and `_do_wifi_start` are the driver's own now:
-`mac_station_start` makes their hardware accesses in their order -- the low-rate disable, the STA's TSF,
-interface 0's address and its access point's, its receive policy with its own flags set and its queue policy left
-clear, the receive enable, and the cipher's own entry clear -- and posts their STA_START through the adapter.
-None of net80211's own state -- the control block's vif words and `ieee80211_sta.o`'s static -- is written,
-and the ordinary runs hold it: the scan, `listen=`, `listen=` with `probe=`, and the gate's three joins,
-with no library line reaching the driver after the start.
-So the state these two calls set is not wanted.
-
-Their `chm_init`, the channel manager's start, is the driver's own too: their channel manager picks the station's
-home channel -- channel 1 of the 2.4 GHz band, 2412 MHz -- and `mac_home_channel`, in `mac.c`, programs it through
-their `chm_phy_change_channel`'s frame: the MAC held, the PHY tuned, its width word's bit 8 cleared for the 0 their
-call passes, and the MAC released.
-Their PM bookkeeping around the frame and the channel manager's own state -- its 14-entry channel table,
-the control block's home- and current-channel words, and the home-channel event -- are not written;
-the diff holds the channel, the runs the rest.
-So the state these calls set is not wanted.
-
-Nor is their init's: the driver's own start makes no `esp_wifi_init_internal` and no `esp_wifi_set_mode`,
-and reads and writes none of what they leave -- their configuration's mode, their control block's interface masks
-and started state, their MAC sleep flag.
-Their init's device work, before their start, is the Wi-Fi clocks enabled through the adapter, which the start's own
-enable does, and their task's disables of the TBTT and beacon-miss interrupts and wakeups;
-the compare across images holds the final state without them, and the diff names the one read that differs.
-`libstart=1`, the comparison's, still runs their init, their mode and their start.
-
-Their `pm_noise_check_enable` and `pm_disconnected_start` go as well:
-their `pm_noise_check_enable`'s byte is read only by their `pm_noise_check`, which their `pm_tbtt_process` alone
-calls, a path the own station does not run;
-their `pm_disconnected_start`'s PM state no path the driver runs reads, and what it reaches beyond pp is their
-coex, which `osi.c` stubs out, and a sleep-delay timer it leaves done.
-The ordinary runs hold both, the joins among them.
-
-## What stands only while the libraries run
-
-Some of the driver's choices are made for the libraries that still run beside it, not for the MAC,
-and each goes, or is looked at again, when what it answers to goes:
-- The comparison's tools -- `libstart=1`, the diff, the compare across images and their expected files -- go once
-  no call of theirs is left in the start, as `TODO.md` says.
+A MAC register is named for the library function that reaches it;
+one that only the start's own group reaches, or several with no one role, carries the offset it was reached at, and one address has one name, `macregs.h`'s when two files share it.
 
 ## IEEE 802.15.4 beside Wi-Fi
 
 `i154=` brings the chip's 802.15.4 radio up instead of Wi-Fi's, as ESP-IDF's open driver does; `i154.c` says how.
 Its MAC is a whole one in hardware, unlike Wi-Fi's, but for CSMA-CA's backoffs and the retries,
 `mac154.h`'s, as the nRF52840's link has them, which the driver times on the MAC's own timer0.
-It needs the BT baseband's `libbtbb.a`, whose `.bss` is linked into every image,
-so Wi-Fi's runs see the driver's RAM 24 bytes further on:
-a traced start held to one from before differs only in the address the receive list is written at.
+It needs the BT baseband, now the driver's own `btbb.c` in place of `libbtbb.a`; the baseband's data still lies in the
+driver's RAM, so Wi-Fi's runs see their own data further on, and a traced start held to one from before the data was
+there differed only in the address the receive list is written at.
 
 The bring-up has a trace window of its own, `trace=1` with `i154=`: the driver runs the radio's bring-up and nothing
 else, before its survey and the exchange, and with the root task mapping no device every access faults to the watcher,
 which carries it out and logs it, as Wi-Fi's window's does; `trace=2` runs the same window with the devices mapped.
-It is what the driver's own baseband, `btbb.c`, is held to as Espressif's `libbtbb.a` is taken from it one function
-at a time, the archive's `bt_bb_v2.o` its source: the traced run's device accesses are held to the archive's, and,
-with `snap=` names in the configuration, `tools/mac-trace.py compare` holds the two runs' final state.
+It was what the driver's own baseband, `btbb.c`, was held to as Espressif's `libbtbb.a` was taken from it one function
+at a time, the archive's `bt_bb_v2.o` its source: the traced run's device accesses were held to the archive's, and,
+with `snap=` names in the configuration, `tools/mac-trace.py compare` held the two runs' final state.
 
 A run of 802.15.4 leaves the modem in a state the runner's reset does not clear:
 a traced Wi-Fi start straight after one read `0x600A4400` at its third access as `0xc1c93734`,
@@ -742,8 +667,7 @@ The MAC's list and its sending's frame, the queues and locks, and every thread's
 are declared where they are used, so the image says what the driver needs and a run cannot fail for want of it;
 `osi.h`'s objects are ready zeroed, but for a timer, which names its function, and a queue, which `OSI_QUEUE` declares with its slots.
 The heap is left to the code that is not the driver's and is written around one:
-hostap's supplicant and Mbed TLS as a station joins, about 12 KB at the most under WPA3 and 6 KB under WPA2,
-and the libraries in a traced window of their start, about 28 KB; the two never run in one run.
+hostap's supplicant and Mbed TLS as a station joins, about 12 KB at the most under WPA3 and 6 KB under WPA2.
 `libphy.a` takes nothing from it in the driver's own start, as a heap that named each block's caller found.
 The link fails if any other of the driver's objects calls an allocator, `WIFI_ESP_HEAP` in `build.mk`.
 
