@@ -220,6 +220,12 @@ uint32_t child_bit(struct self *s, struct child *c, uint32_t *bit)
 uint32_t child_start(struct self *s, struct child *c, void (*entry)(struct child_page *), uint32_t core,
                      uint32_t units)
 {
+    return child_start_reserve(s, c, entry, core, units, 0);
+}
+
+uint32_t child_start_reserve(struct self *s, struct child *c, void (*entry)(struct child_page *), uint32_t core,
+                             uint32_t units, uint32_t window_exp)
+{
     uint32_t time;
     TRY(s, "watch a child", rv_thread_watch(c->thread, s->inbox, c->bit_fault));
     TRY(s, "configure a child",
@@ -240,7 +246,13 @@ uint32_t child_start(struct self *s, struct child *c, void (*entry)(struct child
         PASS(slot_new(s, &time));
         uint32_t status = rv_time_carve(s->time, c->unit, units, time);
         if (status == KERR_OK) {
+#if SCHED_EDF
+            /* The experiment's window rides above the count; see OP_TIME_BIND in kernel/syscall.c. */
+            status = rv_time_bind(time, c->thread, 0, units | window_exp << 8);
+#else
+            (void)window_exp;
             status = rv_time_bind(time, c->thread, 0, units);
+#endif
         }
         PASS(slot_free(s, time));
         TRY(s, "bind a child to its units", status);

@@ -170,6 +170,13 @@ uint32_t child_bit(struct self *s, struct child *c, uint32_t *bit);
 uint32_t child_start(struct self *s, struct child *c, void (*entry)(struct child_page *), uint32_t core,
                      uint32_t units);
 /*
+ * child_start with the window of its time: 0 for none, else 2 to window_exp - 1 ticks,
+ * that its deadlines lie after the tick its account would be full again,
+ * in a kernel built with make SCHED=edf, an experiment of the order open decision 9 weighs; other kernels have no windows, and it is ignored.
+ */
+uint32_t child_start_reserve(struct self *s, struct child *c, void (*entry)(struct child_page *), uint32_t core,
+                             uint32_t units, uint32_t window_exp);
+/*
  * The child runs on core's spare time too, besides what child_start gave it,
  * a core whose time it holds none of yet, so that it runs where its parent's other threads leave time.
  */

@@ -26,6 +26,10 @@ so scenarios are compared within one run.
 
 The root task keeps 8 units, the units nobody earns are spare time, and every member may run on it.
 
+A kernel built with `make SCHED=edf` takes turns by deadline, the tick a thread's account would be full again and its window after;
+the scenarios ending `-batch` give the hog a window of 64 ticks, and `lax-server` gives the store one,
+and under the default scheduler they run as the scenarios they are named after.
+
 ## What it showed
 
 `make lab` prints the numbers, which a run under QEMU repeats exactly;

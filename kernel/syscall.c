@@ -869,6 +869,15 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
         /* The first unit lies within the capability even for none, so that the binding lies below it. */
         uint32_t off = arg[2];
         uint32_t count = arg[3];
+        uint32_t window_exp = 0;
+#if SCHED_EDF
+        /* An experiment's: the window's exponent rides above the count, which TIME_UNITS keeps below 2^8. */
+        window_exp = count >> 8;
+        count &= 0xffu;
+        if (window_exp > WINDOW_EXP_MAX) {
+            return KERR_INVALID_ARG;
+        }
+#endif
         if (off >= range_count(cap) || count > range_count(cap) - off) {
             return KERR_INVALID_ARG;
         }
@@ -892,7 +901,7 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
             return KERR_LIMIT;
         }
         /* The binding hangs below the invoked capability, so a revoke above it empties the place. */
-        sched_bind(p, first, count, cap->rights, slot_node(t, slot));
+        sched_bind(p, first, count, cap->rights, slot_node(t, slot), window_exp);
         return KERR_OK;
     }
     default:

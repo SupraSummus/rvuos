@@ -340,6 +340,9 @@ static void place_settle(struct place *p)
     const struct place *l = has_time(p->balance) ? NULL : place_lender(p);
     uint8_t queue = place_queue(p, p->balance, l);
     bool joined = queue != QUEUE_NONE && (queue != p->queue || core != was);
+#if SCHED_EDF
+    core->run_joined |= joined && queue == QUEUE_RUN;
+#endif
     if (queue != p->queue || core != was) {
         if (p->queue != QUEUE_NONE) {
             place_unqueue(p);
@@ -447,6 +450,73 @@ static void turn_take(struct thread *t)
 #endif
 }
 
+#if SCHED_EDF
+/*
+ * An experiment of the order open decision 9 weighs, built with make SCHED=edf:
+ * the run queue is taken earliest deadline first rather than oldest first,
+ * a place's deadline the tick its account would be full again if its thread did not run, and its window after that.
+ * A thread that waits keeps its deadline, as its account gains the same every tick, until the account is full,
+ * and one that runs moves it later by COUNT_PARTS / units ticks for each tick it pays for:
+ * the tick its account would be full is its virtual time, which runs at the inverse of its share as it runs.
+ * So a thread that ran less than its units' part has the nearer deadline, and one that wants the core all along the furthest,
+ * and work of c made ready while the account is full ends c / its share and its window after, whatever the others do,
+ * since the units of a core add up to its time, which is all earliest deadline first needs.
+ * The window is the place's to choose: a longer one only puts its own work later.
+ * The search walks the run queue, TIME_UNITS places at most, since each earns a unit or borrows from a lender that does.
+ */
+
+/* A place's window, in ticks. */
+static uint32_t place_window(const struct place *p)
+{
+    return p->pad != 0 ? 1u << (p->pad - 1u) : 0;
+}
+
+/* The deadline of a place whose account at balance was counted to the tick at; NEAREST_NONE ahead without units. */
+static uint32_t deadline_of(const struct place *p, uint32_t balance, uint32_t at)
+{
+    uint32_t gain = tick_gain(p);
+    if (gain == 0) {
+        return sched_ticks + NEAREST_NONE;
+    }
+    uint32_t cap = account_cap(p);
+    return at + (cap > balance ? (cap - balance + gain - 1) / gain : 0) + place_window(p);
+}
+
+/* A queued place's deadline: its own account's while it has time, else its lender's. */
+static uint32_t place_deadline(const struct place *p)
+{
+    uint32_t balance = account_now(p);
+    if (has_time(balance)) {
+        return deadline_of(p, balance, sched_ticks);
+    }
+    const struct place *l = place_lender(p);
+    return l != NULL ? deadline_of(l, account_now(l), sched_ticks) : sched_ticks + NEAREST_NONE;
+}
+
+/* The place on a core's run queue with the earliest deadline, the oldest of those tied, and that deadline. */
+static struct place *run_earliest(const struct core *core, uint32_t *deadline)
+{
+    paddr_t at = core->run_queue;
+    struct place *best = NULL;
+    uint32_t best_at = 0;
+    for (uint32_t i = 0; i < TIME_UNITS; i++) {
+        LOOP_BOUND(TIME_UNITS);
+        struct place *p = p2v(at);
+        uint32_t d = place_deadline(p);
+        if (best == NULL || tick_before(d, best_at)) {
+            best = p;
+            best_at = d;
+        }
+        at = p->queue_next;
+        if (at == core->run_queue) {
+            break;
+        }
+    }
+    *deadline = best_at;
+    return best;
+}
+#endif
+
 /*
  * The thread of the oldest place with time, or with none of the oldest that may run on spare time,
  * taken off its queues with the place's account brought up to the count: its turn begins offset counts into the tick,
@@ -463,6 +533,13 @@ static struct thread *next_turn(uint32_t offset)
         return NULL;
     }
     struct place *p = p2v(*head);
+#if SCHED_EDF
+    core->run_joined = false;
+    if (core->run_queue != 0) {
+        uint32_t deadline;
+        p = run_earliest(core, &deadline);
+    }
+#endif
     struct thread *t = place_thread(p);
     place_unqueue(p);
     turn_take(t);
@@ -499,8 +576,13 @@ struct place *sched_place_for(const struct thread *t, uint32_t core)
     return empty;
 }
 
-void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights, struct cap *parent)
+void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights, struct cap *parent, uint32_t window_exp)
 {
+#if SCHED_EDF
+    p->pad = (uint8_t)window_exp;
+#else
+    (void)window_exp;
+#endif
     struct cap *b = place_time(p);
     account_refill(p);
     uint32_t kept = p->balance;
@@ -1150,15 +1232,41 @@ void sched_tick(uint32_t ticks)
     sched_turn_end();
 }
 
+#if SCHED_EDF
+/*
+ * Whether a place that joined the run queue since the core last looked has a deadline before that of the turn's payer,
+ * whose account is charged to the counter first: then it takes the processor, as from a turn on spare time.
+ */
+static bool deadline_due(struct core *core)
+{
+    struct place *p = turn_place(core);
+    if (!core->run_joined || p == NULL) {
+        return false;
+    }
+    core->run_joined = false;
+    uint32_t mine = deadline_of(p, p->balance - turn_owes(p, clock_offset()), core->ticks);
+    uint32_t theirs;
+    run_earliest(core, &theirs);
+    return tick_before(theirs, mine);
+}
+#else
+static bool deadline_due(struct core *core)
+{
+    (void)core;
+    return false;
+}
+#endif
+
 /*
  * A turn on spare time is one no thread with time wants, so it ends as soon as one waits on the core's run queue,
  * unless the running thread stands at a call that stopped for an interrupt, which it makes again first.
+ * Under SCHED_EDF so does a turn with time that a thread with an earlier deadline joined the run queue during.
  * The end of a call and of every trap ask it, so a wake by a call, an interrupt or another core takes the processor at once;
  * see DESIGN.md, "Scheduling".
  */
 static void spare_end(struct core *core)
 {
-    if (core->run_queue != 0 && !core->recall && sched_spare_turn(core)) {
+    if (core->run_queue != 0 && !core->recall && (sched_spare_turn(core) || deadline_due(core))) {
         sched_turn_end();
     }
 }

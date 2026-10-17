@@ -148,7 +148,7 @@ struct thread *boot_create_root(void)
      * which lets it run on spare time too, and starts with a full account.
      * It is the one the kernel drops into, so it is ready and on no queue: bound and filled while stopped.
      */
-    sched_bind(thread_place(thread, 0), 0, TIME_UNITS, RIGHT_W | RIGHT_X, &table->slots[BOOT_CAP_TIME]);
+    sched_bind(thread_place(thread, 0), 0, TIME_UNITS, RIGHT_W | RIGHT_X, &table->slots[BOOT_CAP_TIME], 0);
     sched_accounts_fill();
     thread->state = THREAD_READY;
 

@@ -34,6 +34,7 @@
 #define BIG    80000u
 #define HOLD   60000u
 #define PERIOD 3000u  /* a periodic member's, in microseconds: three ticks */
+#define LONG_WINDOW 7 /* a window of 2^6 ticks, under make SCHED=edf, against none */
 #define JITTER 80000u /* the most a periodic member works before each ask */
 
 enum role { NONE, STORE, GATE, UI, BULK, HOG, LOCKER };
@@ -58,6 +59,7 @@ struct member {
     uint8_t lends; /* a client's: it lends the member it asks its time while it waits for an answer */
     uint8_t lock;  /* a locker's lock_kind */
     uint32_t cost, period_us, gap;
+    uint8_t window_exp; /* its window, 2 to this less one ticks, under make SCHED=edf; 0 for none */
 };
 
 struct scenario {
@@ -65,16 +67,18 @@ struct scenario {
     struct member cast[CAST_MAX]; /* up to the first without a role */
 };
 
-#define SERVER(name, role, units, asks)               { name, role, units, asks, 0, 0, 0, 0, 0, 0 }
-#define CLIENT(name, role, units, asks, cost, period) { name, role, units, asks, 0, 0, 0, cost, period, 0 }
-#define LIBRARY                                       { "ui", UI, 8, 0, 1, 0, 0, SMALL, PERIOD, 0 }
-#define SHARER(name, kind, units, hold, period, gap)  { name, LOCKER, units, 0, 0, 0, kind, hold, period, gap }
-#define HOGGING                                       { "hog", HOG, HOG_UNITS, 0, 0, 0, 0, 0, 0, 0 }
+#define SERVER(name, role, units, asks)               { name, role, units, asks, 0, 0, 0, 0, 0, 0, 0 }
+#define CLIENT(name, role, units, asks, cost, period) { name, role, units, asks, 0, 0, 0, cost, period, 0, 0 }
+#define LIBRARY                                       { "ui", UI, 8, 0, 1, 0, 0, SMALL, PERIOD, 0, 0 }
+#define SHARER(name, kind, units, hold, period, gap)  { name, LOCKER, units, 0, 0, 0, kind, hold, period, gap, 0 }
+#define HOGGING                                       { "hog", HOG, HOG_UNITS, 0, 0, 0, 0, 0, 0, 0, 0 }
 #define STORE_OF(units)                               SERVER("store", STORE, units, 0)
 #define UI_OF(units, asks)                            CLIENT("ui", UI, units, asks, SMALL, PERIOD)
-#define LENDING_UI(units, asks)                       { "ui", UI, units, asks, 0, 1, 0, SMALL, PERIOD, 0 }
+#define LENDING_UI(units, asks)                       { "ui", UI, units, asks, 0, 1, 0, SMALL, PERIOD, 0, 0 }
 #define QUICK(kind)                                   SHARER("quick", kind, 16, SMALL, PERIOD, 0)
 #define SLOW(kind)                                    SHARER("slow", kind, 2, HOLD, 0, HOLD)
+#define BATCH_HOG                                     { "hog", HOG, HOG_UNITS, 0, 0, 0, 0, 0, 0, 0, LONG_WINDOW }
+#define LAX_STORE                                     { "store", STORE, 8, 0, 0, 0, 0, 0, 0, 0, LONG_WINDOW }
 
 static const struct scenario scenarios[] = {
     { "alone", { STORE_OF(8), UI_OF(8, 1) } },
@@ -94,6 +98,12 @@ static const struct scenario scenarios[] = {
     { "lock-hog", { QUICK(NOTE), SLOW(NOTE), HOGGING } },
     { "lend", { QUICK(LEND), SLOW(LEND) } },
     { "lend-hog", { QUICK(LEND), SLOW(LEND), HOGGING } },
+    { "hog-batch", { STORE_OF(8), UI_OF(8, 1), BATCH_HOG } },
+    { "lax-server", { LAX_STORE, UI_OF(8, 1), HOGGING } },
+    { "chain-batch", { STORE_OF(8), SERVER("gate", GATE, 8, 1), UI_OF(8, 2), BATCH_HOG } },
+    { "bulk-batch", { STORE_OF(8), UI_OF(8, 1), CLIENT("bulk", BULK, 8, 1, BIG, 0), BATCH_HOG } },
+    { "lock-batch", { QUICK(NOTE), SLOW(NOTE), BATCH_HOG } },
+    { "lend-batch", { QUICK(LEND), SLOW(LEND), BATCH_HOG } },
 };
 
 static struct self self;
@@ -280,7 +290,8 @@ static void run(const struct scenario *sc)
         }
     }
     for (uint32_t i = 0; i < count; i++) {
-        must("start a member", child_start(&self, &kids[i], entries[sc->cast[i].role], 0, sc->cast[i].units));
+        must("start a member", child_start_reserve(&self, &kids[i], entries[sc->cast[i].role], 0, sc->cast[i].units,
+                                                   sc->cast[i].window_exp));
     }
 
     sleep_us(sc, count, WARM_US);
