@@ -14,8 +14,8 @@
 
 /*
  * The libraries' hal_init's own register writes, around the groups of its MAC configuration that it calls:
- * their HAL_CFG start and the wait for it, and HAL_HOLD and INT_CLEAR cleared.
- * Then, after the groups, HAL_HOLD, HAL_WORD and RX_WORD as their hal_init leaves them.
+ * their HAL_CFG start and the wait for it, and MAC_ENABLE and INT_CLEAR cleared.
+ * Then, after the groups, MAC_ENABLE, HAL_WORD and RX_WORD as their hal_init leaves them.
  * The driver's own start makes these, and mac_config below runs them and the groups in the libraries' order.
  */
 void mac_config_start(void)
@@ -23,7 +23,7 @@ void mac_config_start(void)
     wr(HAL_CFG, rd(HAL_CFG) | 2u);
     while (!(rd(HAL_CFG) & 1u)) {
     }
-    wr(HAL_HOLD, 0);
+    wr(MAC_ENABLE, 0);
     wr(INT_CLEAR, 0xffffffffu);
 }
 
@@ -620,7 +620,7 @@ void mac_low_rate_disable(void)
 
 void mac_config_finish(void)
 {
-    wr(HAL_HOLD, 0x19a879e0u);
+    wr(MAC_ENABLE, 0x19a879e0u);
     wr(HAL_WORD, rd(HAL_WORD) | 0x10000000u);
     wr(RX_WORD, (rd(RX_WORD) & 0xffffff00u) | 1u);
     wr(RX_WORD, (rd(RX_WORD) & 0xffff00ffu) | 0x100u);
@@ -639,20 +639,24 @@ void mac_rx_reload_hw_beacon(void)
  * The libraries' hal_timer_update_by_rtc, written out: 0x600ad030's bit 27 set, or cleared for a which of zero,
  * which the driver's call, always 1, never takes; and 0x600ad070's low 18 bits given the hz the call passed,
  * the slow clock's period in Q13.19 microseconds, which the adapter's slowclk_cal_get gives.
- * The 18-bit mask is the disassembly's: it keeps a Q13.19 value's fraction alone, so what the field holds is not
- * known.
- * Nor is what the timer is, beyond their name, in the block mac.c's TSF_CTRL and PWR_STATUS sit.
+ * The library's pwr_hal_set_lpclk_cycle_time writes the same low 18 bits, so that field is the low-power clock's
+ * cycle; the word's upper bits no library function seen writes.
+ * Bit 27 is their pwr_hal_set_lpclk_sync_enable's and -disable's, the low-power clock's sync, which their
+ * hal_timer_update_by_rtc sets with it; the rest of the word is their modem-state and TSF fields, which the driver's
+ * start does not write.
  */
 #define TIMER_30 0x600ad030u
-#define TIMER_70 0x600ad070u
+#define LPCLK_SYNC 0x08000000u       /* bit 27, their pwr_hal_set_lpclk_sync_enable's */
+#define LPCLK_CYCLE 0x600ad070u      /* their pwr_hal_set_lpclk_cycle_time's, in its low 18 bits */
+#define LPCLK_CYCLE_MASK 0x0003ffffu /* the low 18 bits, a Q13.19 period */
 
 void mac_timer_update_by_rtc(uint32_t which, uint32_t hz)
 {
     if (which != 0) {
-        wr(TIMER_30, rd(TIMER_30) | 0x08000000u);
-        wr(TIMER_70, (rd(TIMER_70) & 0xfffc0000u) | (hz & 0x3ffffu));
+        wr(TIMER_30, rd(TIMER_30) | LPCLK_SYNC);
+        wr(LPCLK_CYCLE, (rd(LPCLK_CYCLE) & ~LPCLK_CYCLE_MASK) | (hz & LPCLK_CYCLE_MASK));
     } else {
-        wr(TIMER_30, rd(TIMER_30) & ~0x08000000u);
+        wr(TIMER_30, rd(TIMER_30) & ~LPCLK_SYNC);
     }
 }
 
@@ -806,7 +810,7 @@ static const uint8_t ofdma_pti_events[12] = {1, 3, 3, 3, 1, 1, 1, 1, 3, 3, 0xau,
 
 /*
  * The libraries' hal_init, the MAC's configuration, written out whole:
- * its own register writes about HAL_CFG and HAL_HOLD and its receive-policy words, and its groups in its order,
+ * its own register writes about HAL_CFG and MAC_ENABLE and its receive-policy words, and its groups in its order,
  * each named through osi_trace so that a traced run's segments show its accesses. See NOTES.md.
  * The driver's start and the host's replay both call this, so neither keeps the order of its own;
  * the two adapter values it needs, the slow clock's period and the coex PTI bytes, come through the pointers.

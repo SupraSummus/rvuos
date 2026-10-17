@@ -1037,7 +1037,7 @@ void mac_stop(void)
     wr(PTI_RX, 0);
     wr(PTI_DEFAULT, rd(PTI_DEFAULT) & ~0xfu);
     wr(HAL_CTRL, rd(HAL_CTRL) | 1u);
-    wr(HAL_HOLD, 0);
+    wr(MAC_ENABLE, 0);
     wr(INT_CLEAR, 0xffffffffu);
     wr(HAL_CFG, rd(HAL_CFG) | 2u);
     drv_phy_disable();
