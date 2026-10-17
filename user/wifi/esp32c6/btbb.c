@@ -47,8 +47,11 @@
  * The AGC's words, which bt_agc_recorrect_set, bt_agc_rssi_thresh and bt_agc_gain_offset write, at their modem offsets;
  * what each field is is not known.
  */
+#define AGC_2840 (MODEM_BASE + 0x2840u)
 #define AGC_2844 (MODEM_BASE + 0x2844u)
 #define AGC_2848 (MODEM_BASE + 0x2848u)
+#define AGC_2850 (MODEM_BASE + 0x2850u)
+#define AGC_2854 (MODEM_BASE + 0x2854u)
 #define AGC_2868 (MODEM_BASE + 0x2868u)
 #define AGC_286C (MODEM_BASE + 0x286cu)
 #define AGC_28A0 (MODEM_BASE + 0x28a0u)
@@ -57,19 +60,27 @@
 #define AGC_28B4 (MODEM_BASE + 0x28b4u)
 #define AGC_28B8 (MODEM_BASE + 0x28b8u)
 #define AGC_28BC (MODEM_BASE + 0x28bcu)
-/* The ZB receive's words, which zb_rx_auto_sel and zb_rx_core_set write, at their modem offsets. */
+/* The ZB receive's words, which zb_rx_auto_sel, zb_rx_core_set and zb_rx_v0_0_set write, at their modem offsets. */
 #define ZB_2C04 (MODEM_BASE + 0x2c04u)
 #define ZB_2C08 (MODEM_BASE + 0x2c08u)
+#define ZB_2C0C (MODEM_BASE + 0x2c0cu)
+#define ZB_2C10 (MODEM_BASE + 0x2c10u)
+#define ZB_2C14 (MODEM_BASE + 0x2c14u)
+#define ZB_2C18 (MODEM_BASE + 0x2c18u)
 #define ZB_2C20 (MODEM_BASE + 0x2c20u)
 #define ZB_2C24 (MODEM_BASE + 0x2c24u)
+#define ZB_2C2C (MODEM_BASE + 0x2c2cu)
+#define ZB_2C30 (MODEM_BASE + 0x2c30u)
+#define ZB_2C34 (MODEM_BASE + 0x2c34u)
 #define ZB_2C48 (MODEM_BASE + 0x2c48u)
+/* The Wi-Fi baseband's word 0xcd0, which bt_agc_gain_set sets a bit field of; what it is is not known. */
+#define WIFI_BB_CD0 (WIFI_BB0_BASE + 0x0cd0u)
 
 /* The archive's functions the bring-up still calls, of libbtbb.a until the driver's own replace them. */
 extern void bt_bb_v2_version(void);
 /* The archive's functions bt_bb_v2_rx_set calls, theirs until the driver's own replace them. */
 extern void bt_bb_rx_set(uint32_t value);
 extern void bt_agc_gain_offset(uint32_t value);
-extern void bt_agc_gain_set(void);
 extern void bt_agc_rssi_thresh(void);
 extern void bt_agc_target_set(void);
 extern void bt_agc_restart_set(void);
@@ -78,10 +89,11 @@ extern void bt_bb_rx_correlator_set(void);
 extern void bt_bb_rx_dpo_set(void);
 extern void bt_bb_rx_filter_sel(void);
 extern void zb_rx_core_set(void);
-extern void zb_rx_v0_0_set(void);
 extern void zb_rx_auto_sel(void);
 /* The archive's byte the LE transmit-on delay is scaled from, theirs until its cca functions are the driver's too. */
 extern uint8_t bt_bb_cca_en;
+/* libphy's calibration data, of which bt_agc_gain_set reads one byte; theirs, as the PHY is libphy's. */
+extern const uint8_t phy_param[];
 /* The ROM's, which fills the power table entry by entry; its three arguments' roles are not known. */
 extern int get_data_sat(int, int, int);
 
@@ -100,6 +112,9 @@ void bt_bb_rx_filter_sel(void);
 void zb_rx_auto_sel(void);
 void zb_rx_core_set(void);
 void bt_set_rx_comp(uint32_t first, uint32_t second, uint32_t third, uint32_t fourth, uint32_t fifth);
+void bt_agc_gain_max(uint32_t value);
+void bt_agc_gain_set(void);
+void zb_rx_v0_0_set(void);
 
 /*
  * The libraries' bt_bb_v2_init_cmplx, written out: the mode's transmit and receive set, the Gaussian filter's two
@@ -358,4 +373,47 @@ void bt_set_rx_comp(uint32_t first, uint32_t second, uint32_t third, uint32_t fo
     wr(AGC_2844, (rd(AGC_2844) & 0xe0ffffffu) | ((fourth << 24) & 0x1f000000u));
     wr(AGC_2844, (rd(AGC_2844) & 0xff07ffffu) | ((third << 19) & 0x00f80000u));
     wr(AGC_2844, (rd(AGC_2844) & 0xfff83fffu) | ((second << 14) & 0x0007c000u));
+}
+
+/*
+ * The libraries' bt_agc_gain_max, written out: the argument's low 7 bits into 0x2850's bits 14 to 20, beside the bits
+ * kept, and the same low 7 into 0x2840's bits 0 to 6 after those are cleared. What they are is not known.
+ */
+void bt_agc_gain_max(uint32_t value)
+{
+    wr(AGC_2850, (rd(AGC_2850) & 0xffe03fffu) | ((value << 14) & 0x001fc000u));
+    wr(AGC_2840, (rd(AGC_2840) & ~0x7fu) | (value & 0x7fu));
+}
+
+/*
+ * The libraries' bt_agc_gain_set, written out: the Wi-Fi baseband's 0x7cd0 given 0xf000b, then libphy's phy_param's
+ * byte 0x120 handed to bt_agc_gain_max, then three read-modify-writes on the AGC's 0x2854 -- bit 0 set, bits 2 to 8
+ * given 0xc8, and bit 0 set again.
+ */
+void bt_agc_gain_set(void)
+{
+    wr(WIFI_BB_CD0, rd(WIFI_BB_CD0) | 0xf000bu);
+    bt_agc_gain_max(phy_param[0x120]);
+    wr(AGC_2854, rd(AGC_2854) | 0x1u);
+    wr(AGC_2854, (rd(AGC_2854) & ~0x1fcu) | 0xc8u);
+    wr(AGC_2854, rd(AGC_2854) | 0x1u);
+}
+
+/*
+ * The libraries' zb_rx_v0_0_set, written out: eleven read-modify-writes on the ZB receive's words 0x2c0c, 0x2c10,
+ * 0x2c14, 0x2c18, 0x2c2c, 0x2c30 and 0x2c34, each a constant beside the bits kept, three of them an 8-bit field first.
+ */
+void zb_rx_v0_0_set(void)
+{
+    wr(ZB_2C10, (rd(ZB_2C10) & 0x1fffffu) | 0xf4200000u);
+    wr(ZB_2C0C, (rd(ZB_2C0C) & 0xffe003ffu) | 0x001ebc00u);
+    wr(ZB_2C18, (rd(ZB_2C18) & ~0x7ffu) | 0x7afu);
+    wr(ZB_2C10, (rd(ZB_2C10) & 0xffe01fffu) | 0x0014c000u);
+    wr(ZB_2C34, rd(ZB_2C34) & 0x7ffffeffu);
+    wr(ZB_2C34, (rd(ZB_2C34) & 0x800fffffu) | 0x7e100000u);
+    wr(ZB_2C34, (rd(ZB_2C34) & 0xfff001ffu) | 0x000fda00u);
+    wr(ZB_2C2C, (rd(ZB_2C2C) & 0xffu) | 0x07a12000u);
+    wr(ZB_2C30, (rd(ZB_2C30) & 0xffu) | 0xf85edf00u);
+    wr(ZB_2C14, rd(ZB_2C14) & ~0x2u);
+    wr(ZB_2C0C, rd(ZB_2C0C) | 0x200u);
 }

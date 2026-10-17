@@ -16,15 +16,12 @@ LIB(set_gauss_coeff_1m)
 LIB(ieee802154_txon_delay_set)
 LIB(bt_bb_v2_version)
 LIB(bt_bb_v2_tx_set)
-LIB(zb_rx_v0_0_set)
 LIB(bt_bb_rx_set)
 LIB(bt_agc_v2_set)
 LIB(bt_bb_rx_dpo_set)
 LIB(bt_bb_rx_correlator_set)
 LIB(bt_agc_target_set)
 LIB(bt_agc_restart_set)
-LIB(bt_agc_gain_set)
-LIB(bt_agc_gain_max)
 LIB(bt_agc_detect_set)
 LIB(bt_bb_tx_cca_period)
 LIB(bt_bb_set_zb_tx_on_delay)
@@ -41,6 +38,13 @@ __attribute__((weak)) int get_data_sat(int index, int span, int bias)
     (void)bias;
     return 0;
 }
+
+/*
+ * libphy's calibration data, of which bt_agc_gain_set reads the byte at 0x120. It is libphy's datum, not a constant of
+ * the archive's: this is the value the board's log shows, 0x47, which is all that shows, since each of bt_agc_gain_max's
+ * two masks cuts the byte above the seventh bit.
+ */
+__attribute__((weak)) const unsigned char phy_param[0x121] = { [0x120] = 0x47 };
 
 /* libphy.a's, which prints the baseband's version when btbb_init is asked to. */
 __attribute__((weak)) int phy_printf(const char *format, ...)
