@@ -1,4 +1,4 @@
-# bt_bb_v2_init_cmplx bt_bb_v2_tx_set set_gauss_coeff_1m set_gauss_coeff_2m bt_bb_set_le_tx_on_delay bt_bb_set_zb_tx_on_delay bt_bb_tx_cca_period ieee802154_txon_delay_set bt_agc_recorrect_set after trace: baseband before trace: mac, in a run of the image sha256 509b4a054c1323cb088051aefc3578f9d7a258658c25e97ab42c818045470e82
+# bt_bb_v2_init_cmplx bt_bb_v2_tx_set set_gauss_coeff_1m set_gauss_coeff_2m bt_bb_set_le_tx_on_delay bt_bb_set_zb_tx_on_delay bt_bb_tx_cca_period ieee802154_txon_delay_set bt_agc_recorrect_set bt_agc_rssi_thresh bt_agc_gain_offset bt_bb_rx_filter_sel zb_rx_auto_sel after trace: baseband before trace: mac, in a run of the image sha256 509b4a054c1323cb088051aefc3578f9d7a258658c25e97ab42c818045470e82
 R4 0x600a2018 0x1610280a
 W4 0x600a2018 0x1610280a
 R4 0x600a2018 0x1610280a
@@ -7,6 +7,20 @@ R4 0x600a2008 0x02000000
 W4 0x600a2008 0x02000000
 R4 0x600a200c 0x0199a128
 W4 0x600a200c 0x0199a128
+R4 0x600a2848 0x50500000
+W4 0x600a2848 0x50500000
+R4 0x600a2848 0x50500000
+W4 0x600a2848 0x50500000
+R4 0x600a2868 0x50503aaa
+W4 0x600a2868 0x50503aaa
+R4 0x600a2868 0x50503aaa
+W4 0x600a2868 0x50503aaa
+R4 0x600a28a0 0x249c5a00
+W4 0x600a28a0 0x249c5a00
+R4 0x600a28ac 0x44380000
+W4 0x600a28ac 0x44380000
+R4 0x600a28b8 0x00088740
+W4 0x600a28b8 0x00088740
 R4 0x600a28b4 0xe77395a6
 W4 0x600a28b4 0xe77395a6
 R4 0x600a28b4 0xe77395a6
@@ -31,6 +45,20 @@ R4 0x600a2868 0x50503aaa
 W4 0x600a2868 0x50503aaa
 R4 0x600a286c 0x0f000000
 W4 0x600a286c 0x0f000000
+R4 0x600a20fc 0x92210000
+W4 0x600a20fc 0x92210000
+R4 0x600a20fc 0x92210000
+W4 0x600a20fc 0x92210000
+R4 0x600a20fc 0x92210000
+W4 0x600a20fc 0x92210000
+R4 0x600a20fc 0x92210000
+W4 0x600a20fc 0x92210000
+R4 0x600a20fc 0x92210000
+W4 0x600a20fc 0x92210000
+R4 0x600a2c48 0x28600000
+W4 0x600a2c48 0x28600000
+R4 0x600a2c48 0x28600000
+W4 0x600a2c48 0x28600000
 R4 0x600a20e0 0x000428b8
 W4 0x600a20e0 0x000428b8
 R4 0x600a20e0 0x000428b8

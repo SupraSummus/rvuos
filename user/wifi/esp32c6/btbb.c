@@ -25,6 +25,7 @@
 #define BB_10 (BT_BB_BASE + 0x010u)
 #define BB_18 (BT_BB_BASE + 0x018u)
 #define BB_B8 (BT_BB_BASE + 0x0b8u)
+#define BB_FC (BT_BB_BASE + 0x0fcu)
 #define BB_E0 (BT_BB_BASE + 0x0e0u)
 #define BB_E4 (BT_BB_BASE + 0x0e4u)
 #define BB_E8 (BT_BB_BASE + 0x0e8u)
@@ -42,12 +43,21 @@
 #define I154_110 (I154_BASE + 0x110u)
 #define I154_114 (I154_BASE + 0x114u)
 
-/* The AGC's words, which bt_agc_recorrect_set writes, at their modem offsets; what each field is is not known. */
+/*
+ * The AGC's words, which bt_agc_recorrect_set, bt_agc_rssi_thresh and bt_agc_gain_offset write, at their modem offsets;
+ * what each field is is not known.
+ */
+#define AGC_2848 (MODEM_BASE + 0x2848u)
 #define AGC_2868 (MODEM_BASE + 0x2868u)
 #define AGC_286C (MODEM_BASE + 0x286cu)
+#define AGC_28A0 (MODEM_BASE + 0x28a0u)
+#define AGC_28AC (MODEM_BASE + 0x28acu)
 #define AGC_28B0 (MODEM_BASE + 0x28b0u)
 #define AGC_28B4 (MODEM_BASE + 0x28b4u)
+#define AGC_28B8 (MODEM_BASE + 0x28b8u)
 #define AGC_28BC (MODEM_BASE + 0x28bcu)
+/* The ZB receive's word, which zb_rx_auto_sel writes, at its modem offset. */
+#define ZB_2C48 (MODEM_BASE + 0x2c48u)
 
 /* The archive's functions the bring-up still calls, of libbtbb.a until the driver's own replace them. */
 extern void bt_bb_v2_version(void);
@@ -80,6 +90,10 @@ void bt_bb_set_zb_tx_on_delay(uint32_t delay);
 void bt_bb_tx_cca_period(uint32_t first, uint32_t second);
 void bt_bb_v2_rx_set(uint32_t value);
 void bt_agc_recorrect_set(void);
+void bt_agc_rssi_thresh(void);
+void bt_agc_gain_offset(uint32_t value);
+void bt_bb_rx_filter_sel(void);
+void zb_rx_auto_sel(void);
 
 /*
  * The libraries' bt_bb_v2_init_cmplx, written out: the mode's transmit and receive set, the Gaussian filter's two
@@ -262,4 +276,51 @@ void bt_agc_recorrect_set(void)
     wr(AGC_28B0, (rd(AGC_28B0) & ~0x1f0u) | 0xa0u);
     wr(AGC_2868, (rd(AGC_2868) & ~0x1fu) | 0xau);
     wr(AGC_286C, (rd(AGC_286C) & 0x00ffffffu) | 0x0f000000u);
+}
+
+/*
+ * The libraries' bt_agc_rssi_thresh, written out: three read-modify-writes on the AGC's words 0x28a0, 0x28ac and
+ * 0x28b8, each its constant beside the bits kept. Their name says an RSSI threshold; the fields are not known.
+ */
+void bt_agc_rssi_thresh(void)
+{
+    wr(AGC_28A0, (rd(AGC_28A0) & 0xff00ffffu) | 0x009c0000u);
+    wr(AGC_28AC, (rd(AGC_28AC) & 0x807fffffu) | 0x44000000u);
+    wr(AGC_28B8, (rd(AGC_28B8) & 0xfff00fffu) | 0x00088000u);
+}
+
+/*
+ * The libraries' bt_agc_gain_offset, written out: on 0x2848 and then on 0x2868, the argument's low 16 bits into the
+ * word's bits 16 to 31 and its low 8 into bits 24 to 31, the bits below kept, each word read again between the two.
+ */
+void bt_agc_gain_offset(uint32_t value)
+{
+    wr(AGC_2848, (rd(AGC_2848) & 0xff00ffffu) | (value << 16));
+    wr(AGC_2848, (rd(AGC_2848) & 0x00ffffffu) | (value << 24));
+    wr(AGC_2868, (rd(AGC_2868) & 0x00ffffffu) | (value << 24));
+    wr(AGC_2868, (rd(AGC_2868) & 0xff00ffffu) | (value << 16));
+}
+
+/*
+ * The libraries' bt_bb_rx_filter_sel, written out: five read-modify-writes on the baseband's 0xfc, each a mask
+ * beside the bits kept, two of them a constant too. Their name says which receive filter is chosen; the fields are
+ * not known.
+ */
+void bt_bb_rx_filter_sel(void)
+{
+    wr(BB_FC, rd(BB_FC) & 0xfe7fffffu);
+    wr(BB_FC, (rd(BB_FC) & 0xff9fffffu) | 0x00200000u);
+    wr(BB_FC, rd(BB_FC) & 0xffe7ffffu);
+    wr(BB_FC, rd(BB_FC) & 0xfff9ffffu);
+    wr(BB_FC, (rd(BB_FC) & 0xfffe7fffu) | 0x00010000u);
+}
+
+/*
+ * The libraries' zb_rx_auto_sel, written out: 0x2c48's bit 31 cleared, then the bits under 0xc03fffff kept and
+ * 0x28400000 or'd. What the fields are is not known.
+ */
+void zb_rx_auto_sel(void)
+{
+    wr(ZB_2C48, rd(ZB_2C48) & ~0x80000000u);
+    wr(ZB_2C48, (rd(ZB_2C48) & 0xc03fffffu) | 0x28400000u);
 }
