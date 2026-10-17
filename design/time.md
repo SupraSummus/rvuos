@@ -198,6 +198,8 @@ and the scheduler's state is the three queues, each place's account and the tick
 the place that earns each unit, the release, the running thread, and how far into the tick its turn is charged.
 With every thread on spare time alone this is the plain round-robin over threads,
 which is how the replay driver runs; see "Verification".
+A build with `make SCHED=deadline` takes the run queue in another order, an experiment of open decision 9,
+and keeps none of what this section promises of turns.
 
 **A waiter may lend its time to a thread it names**, with `OP_NOTIFY_LEND`; see "Communication and synchronisation".
 A borrower without time of its own has the run queue while its lender's account holds a tick,

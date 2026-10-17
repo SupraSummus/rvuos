@@ -198,6 +198,10 @@ until the maintainer decides otherwise.
      Every account fills from empty in a tenth of a second, whatever its units,
      so a deadline says how far below its part a thread ran, not how soon it must run;
      a cap per place, near the threshold per thread that open decision 18 weighs, would be the knob that trades a thread's start for its bursts.
+     `make SCHED=deadline` builds it, an experiment that looks along the run queue at every change of turn:
+     in `make lab` the small ask beside the spinner is answered as fast as alone at the median and p90, with no change of units,
+     beside a bulk client too it waits four and a half times as long at the median, as the server's own units serve both,
+     and `make bench`'s rounds that switch cost up to a fourteenth more.
    - **The turn handed to the woken thread.**
      A thread that waits hands the rest of its turn to the thread it just woke rather than to the oldest, `TODO.md`:
      no change to the ABI or to the order, and a server answers within the turn of the client that asked,

@@ -201,6 +201,11 @@ struct core {
      */
     bool recall;
 
+#if SCHED_DEADLINE
+    /* Whether a place joined the run queue since the core last looked for a deadline before the turn's; see spare_end. */
+    bool run_joined;
+#endif
+
     /* The bits the last wake handed over, zero if none; for the trace. */
     uint32_t trace_wake_bits;
 

@@ -761,6 +761,8 @@ and moves `taken` only as far as its host says it has the bytes, so a halt write
   A thread a process adds earns only units split off the process's own, or runs on spare time:
   it takes nothing another thread earns.
   Spare time goes round by thread, so more threads there get more of it.
+  A kernel built with `make SCHED=deadline`, an experiment of open decision 9 in `DESIGN.md`,
+  takes the run queue in another order, and keeps none of these promises of turns.
 - A system call is never interrupted:
   machine mode runs with interrupts off from the trap to the return.
   On several cores one call runs at a time, whichever core makes it, and another core's call waits for it.
