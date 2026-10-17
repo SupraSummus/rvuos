@@ -73,7 +73,7 @@ as only a stream has the two contend for the channel;
 a traced Wi-Fi run of the C6 after it waits for a plain Wi-Fi run first, see the driver's `NOTES.md`.
 `make check` runs the test of `user/lib/` under QEMU alone,
 so a change to the library with a board connected runs `make BOARD=<board> lib-test` there too, on each kind of core,
-and on the RP2350 with `CORES=2` as well, where a snapshot of `lib/seqlock.h` is written on one core while read on the other.
+and on the RP2350 with `CORES=2` as well, where a snapshot of `user/lib/seqlock.h` is written on one core while read on the other.
 Of the Wi-Fi system it runs only what makes no system call, the IP stack and the clients' sockets, on the host;
 a change to `user/wifi/` with a Pico 2 W connected runs `make BOARD=rp2350 wifi` too,
 and `WIFI_CONFIG` names a network to join from a file git does not track,
@@ -105,7 +105,7 @@ the bits whose value is the moment's -- a count over the window, a measurement, 
 `tests/mac-trace-test.py`, a part of `make check`, holds what the tool lets pass and what it stops;
 a change to what it compares changes that test with it.
 `make mac-replay-test`, a part of `make check` too, runs the own start's register sequences of `macstart.c` on the host,
-each read answered and each write held by the libraries' accesses `test/replay/` holds;
+each read answered and each write held by the libraries' accesses `user/wifi/esp32c6/test/replay/` holds;
 a step that takes a group over adds it there, and `make BOARD=esp32c6 wifi-esp32c6-replay` takes the file again
 from a `trace=1 libstart=1` log of the build at hand, so that a wrong mask shows before the board does.
 `make BOARD=esp32c6 wifi-esp32c6-attrib` attributes every access of a traced log to its library and function,
