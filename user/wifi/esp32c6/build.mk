@@ -10,11 +10,12 @@ WIFI_ESP      := user/wifi/esp32c6
 WIFI_ESP_INIT := $(BUILD)/$(WIFI_ESP)/phy_init_data.c
 WIFI_ESP_OBJ  := $(patsubst %.c,$(BUILD)/%.o,$(filter-out $(WIFI_ESP)/root.c,$(wildcard $(WIFI_ESP)/*.c))) \
                  $(BUILD)/$(WIFI_ESP)/phy_init_data.o $(BUILD)/$(WIFI_ESP)/esp_wifi_regulatory.o
-# The closed libraries the driver links: the Wi-Fi's two, the PHY's, and the BT baseband's, which IEEE 802.15.4 runs on;
-# glue.c stands for what libcore.a held.
-WIFI_ESP_LIBS := $(addprefix $(PHYBLOB_CACHE)/,libnet80211.a libpp.a libbtbb.a) $(BUILD)/$(WIFI_ESP)/libphy.a
-WIFI_ESP_ROM  := $(addprefix $(PHYBLOB_CACHE)/,esp32c6.rom.ld esp32c6.rom.pp.ld \
-                 esp32c6.rom.net80211.ld esp32c6.rom.phy.ld esp32c6.rom.libgcc.ld esp32c6.rom.libc.ld)
+# The closed libraries the driver links: the PHY's alone, which keeps the RF; glue.c stands for what libcore.a held.
+# The BT baseband, libbtbb.a, was taken whole, see btbb.c, and the Wi-Fi's net80211 and pp with it: the driver's own
+# MAC and start stand in their place, so their archives are linked no more.
+WIFI_ESP_LIBS := $(BUILD)/$(WIFI_ESP)/libphy.a
+WIFI_ESP_ROM  := $(addprefix $(PHYBLOB_CACHE)/,esp32c6.rom.ld esp32c6.rom.phy.ld \
+                 esp32c6.rom.libgcc.ld esp32c6.rom.libc.ld)
 # The driver goes where the window onto flash starts, and the configuration to the input region,
 # both as the board's headers place them.
 WIFI_ESP_AT   := $(call board_hex,FLASH_WINDOW_FLASH,user/board/esp32c6/devices.h)
@@ -71,8 +72,8 @@ $(BUILD)/mbedtls/%.o: $(wildcard $(WIFI_ESP)/mbedtls/*.h $(WIFI_ESP)/mbedtls/lib
 	$(CC) $(ARCHFLAGS) -std=c11 -ffreestanding -fno-builtin -fno-pic -fno-common -nostdlibinc -O2 -g \
 		-ffunction-sections -fdata-sections -w $(MBEDTLS_INC) -c $(MBEDTLS)/$*.c -o $@
 
-$(addprefix $(BUILD)/$(WIFI_ESP)/,supp.o wpa.o hostap.o crypto.o ec.o mgmt.o ccmp.o): CFLAGS += $(HOSTAP_INC)
-$(addprefix $(BUILD)/$(WIFI_ESP)/,supp.o wpa.o hostap.o crypto.o ec.o mgmt.o ccmp.o): $(WIFI_ESP_INIT)
+$(addprefix $(BUILD)/$(WIFI_ESP)/,supp.o hostap.o ec.o mgmt.o ccmp.o): CFLAGS += $(HOSTAP_INC)
+$(addprefix $(BUILD)/$(WIFI_ESP)/,supp.o hostap.o ec.o mgmt.o ccmp.o): $(WIFI_ESP_INIT)
 $(BUILD)/$(WIFI_ESP)/ec.o: CFLAGS += $(MBEDTLS_INC)
 
 # The driver's files that work with hostap's, on the host under the sanitizers, with hostap's own system functions:
@@ -110,16 +111,21 @@ TXCTL_TEST      := $(ESP_HOST)/txctl-test
 TXCTL_TEST_OBJ  := $(ESP_HOST)/txctl.o $(ESP_HOST)/txctl-test.o
 $(ESP_HOST)/txctl.o: $(WIFI_ESP)/txctl.c $(WIFI_ESP)/txctl.h
 $(ESP_HOST)/txctl-test.o: $(WIFI_ESP)/test/txctl-test.c $(WIFI_ESP)/txctl.h
-# The bring-up's register sequences of macstart.c, held to what the libraries' own did in a run of their start,
-# the files of test/replay/, which wifi-esp32c6-replay below takes again;
-# they fetch nothing, so make check runs them.
+# The bring-up's register sequences of macstart.c, held to the files of test/replay/, taken once from a run of the
+# libraries' start; they fetch nothing, so make check runs them. The libraries are linked no more, so the files are
+# frozen, as bb.txt is below; the make target that took them, wifi-esp32c6-replay, is in git history.
 MAC_REPLAY_TEST     := $(ESP_HOST)/mac-replay-test
 MAC_REPLAY_DIR      ?= $(WIFI_ESP)/test/replay
 MAC_REPLAY_EXPECTED := $(WIFI_ESP)/test/replay-expected.txt
-MAC_REPLAY_TEST_OBJ := $(ESP_HOST)/macstart.o $(ESP_HOST)/mac-replay-test.o
+# The baseband's files apart, so that the Wi-Fi gate, which takes config.txt into a directory of its own, holds it alone.
+BTBB_REPLAY_DIR     ?= $(WIFI_ESP)/test/replay
+MAC_REPLAY_TEST_OBJ := $(ESP_HOST)/macstart.o $(ESP_HOST)/btbb.o $(ESP_HOST)/btbb-host.o $(ESP_HOST)/mac-replay-test.o
 $(ESP_HOST)/macstart.o: $(WIFI_ESP)/macstart.c $(WIFI_ESP)/mac.h $(WIFI_ESP)/macregs.h
-$(ESP_HOST)/mac-replay-test.o: $(WIFI_ESP)/test/mac-replay-test.c $(WIFI_ESP)/mac.h $(WIFI_ESP)/macregs.h
-$(MAC_REPLAY_TEST_OBJ): ESP_HOST_INC += -DMAC_HOST
+$(ESP_HOST)/btbb.o: $(WIFI_ESP)/btbb.c $(WIFI_ESP)/btbb.h $(WIFI_ESP)/macregs.h user/board/esp32c6/devices.h
+$(ESP_HOST)/btbb-host.o: $(WIFI_ESP)/test/btbb-host.c
+$(ESP_HOST)/mac-replay-test.o: $(WIFI_ESP)/test/mac-replay-test.c $(WIFI_ESP)/mac.h $(WIFI_ESP)/macregs.h \
+                               $(WIFI_ESP)/btbb.h
+$(MAC_REPLAY_TEST_OBJ): ESP_HOST_INC += -DMAC_HOST -Iuser/board/esp32c6
 
 $(ESP_HOST)/hostap/%.o: $(WIFI_ESP_INIT)
 	@mkdir -p $(dir $@)
@@ -180,7 +186,9 @@ txctl-test: $(TXCTL_TEST)
 	$(TXCTL_TEST)
 
 mac-replay-test: $(MAC_REPLAY_TEST)
-	$(MAC_REPLAY_TEST) $(MAC_REPLAY_DIR) $(MAC_REPLAY_EXPECTED)
+	$(MAC_REPLAY_TEST) $(MAC_REPLAY_DIR) config $(MAC_REPLAY_EXPECTED)
+	$(MAC_REPLAY_TEST) $(BTBB_REPLAY_DIR) bb
+	$(MAC_REPLAY_TEST) $(BTBB_REPLAY_DIR) bb=bb-other
 	tests/mac-replay-test.py $(MAC_REPLAY_TEST) $(WIFI_ESP)/test/replay $(MAC_REPLAY_EXPECTED)
 
 # libphy.a's functions that reach PCR, the PMU or the LP domain, weakened in a copy, so that the driver's own,
@@ -264,16 +272,15 @@ wifi-esp32c6-map:
 	$(error the driver runs on an ESP32-C6: make BOARD=esp32c6 wifi-esp32c6-map)
 endif
 
-# What the driver's own objects reach of the closed libraries directly, net80211's, pp's and the PHY's,
+# What the driver's own objects reach of the closed library it still links, the PHY's,
 # each with the ROM's half of it, see tools/esp-refs.py:
-# the counts a commit that drops a call into net80211 or pp gives in its message, before and after, as CLAUDE.md asks.
+# the count a commit that drops a call into it gives in its message, before and after, as CLAUDE.md asks.
+# net80211 and pp are gone; their counts read 0 at the commit that took them out, see the commit message.
 WIFI_ESP_OWN := $(filter $(BUILD)/$(WIFI_ESP)/%,$(WIFI_ESP_OBJ))
 .PHONY: wifi-esp32c6-refs
 ifeq ($(BOARD),esp32c6)
 wifi-esp32c6-refs: $(WIFI_ESP_OWN) $(BUILD)/$(WIFI_ESP)/libphy.a
 	tools/esp-refs.py --nm $(NM) \
-		--lib net80211=$(PHYBLOB_CACHE)/libnet80211.a:$(PHYBLOB_CACHE)/esp32c6.rom.net80211.ld \
-		--lib pp=$(PHYBLOB_CACHE)/libpp.a:$(PHYBLOB_CACHE)/esp32c6.rom.pp.ld \
 		--lib phy=$(BUILD)/$(WIFI_ESP)/libphy.a:$(PHYBLOB_CACHE)/esp32c6.rom.phy.ld $(WIFI_ESP_OWN)
 else
 wifi-esp32c6-refs:
@@ -281,9 +288,9 @@ wifi-esp32c6-refs:
 endif
 
 # The library and function each device access of a trace log belongs to, see tools/mac-trace.py:
-# what of the log the own bring-up has to reproduce, and what is libphy's calibration and stays.
+# what of the log the own bring-up wrote, and what is libphy's calibration.
 # The log has to be the one the attributed image ran, which the rule holds by the log's own flashed-image hash.
-# WIFI_TRACE_ONLY=pp holds pp's part alone, and refuses a log short beside pp; a loss is a fault, not the channel.
+# WIFI_TRACE_ONLY=phy holds libphy's part alone, and refuses a log short beside it; a loss is a fault, not the channel.
 # WIFI_TRACE_SEGMENTS=1 splits the log by the trace: lines' request numbers, the calls framing each segment; a
 # short log is refused, since a loss shifts every boundary past it. WIFI_TRACE_TOP names that many functions
 # under each segment (0 names all); the default is 8.
@@ -292,8 +299,6 @@ WIFI_TRACE_LOG ?= $(BUILD)/wifi-run.log
 ifeq ($(BOARD),esp32c6)
 wifi-esp32c6-attrib: $(BUILD)/wifi-drv.elf $(BUILD)/wifi-drv.bin $(PHYBLOB_ROM_ELF)
 	tools/mac-trace.py attrib --elf $(BUILD)/wifi-drv.elf --rom $(PHYBLOB_ROM_ELF) --image $(BUILD)/wifi-drv.bin \
-		--lib net80211=$(PHYBLOB_CACHE)/libnet80211.a:$(PHYBLOB_CACHE)/esp32c6.rom.net80211.ld \
-		--lib pp=$(PHYBLOB_CACHE)/libpp.a:$(PHYBLOB_CACHE)/esp32c6.rom.pp.ld \
 		--lib phy=$(BUILD)/$(WIFI_ESP)/libphy.a:$(PHYBLOB_CACHE)/esp32c6.rom.phy.ld \
 		$(addprefix --own ,$(WIFI_ESP_OBJ) $(LIB_OBJ)) \
 		$(if $(WIFI_TRACE_ONLY),--only $(WIFI_TRACE_ONLY),) $(if $(WIFI_TRACE_SEGMENTS),--segments,) \
@@ -303,39 +308,15 @@ wifi-esp32c6-attrib:
 	$(error the driver runs on an ESP32-C6: make BOARD=esp32c6 wifi-esp32c6-attrib)
 endif
 
-# The libraries' accesses mac-replay-test holds macstart.c to, taken again from WIFI_TRACE_LOG,
-# a trace=1 libstart=1 run of the build at hand:
-# their hal_init, all the driver's own now, so one file holds the sequences as mac_config runs them, with their coex PTI.
-# MAC_REPLAY_DIR, the test's file by default, takes it elsewhere, as the gate does to hold the file to the run.
-# A group the driver takes over joins MAC_REPLAY_FUNCTIONS, the end being MAC_REPLAY_THROUGH;
-# a function the driver still calls that calls a named one in its turn goes into MAC_REPLAY_OUT, none now;
-# see test/mac-replay-test.c, whose one case calls mac_config.
-MAC_REPLAY_FUNCTIONS := hal_init mac_txrx_init hal_mac_rx_set_policy mac_rxbuf_init hal_he_init \
-                        hal_he_set_ersu hal_he_set_bbrxhung_time hal_he_set_co_hosted_bss \
-                        hal_he_set_ack_rate hal_he_set_mac_delay \
-                        hal_he_set_bcast_ru hal_he_set_uora_parameter \
-                        hal_he_clr_multi_bssid hal_mac_set_rxq_policy hal_mac_set_bssid hal_mac_set_addr \
-                        hal_init_bf hal_he_set_bf_report_rate hal_init_tb_tx hal_set_tx_min_pwr \
-                        hal_init_tb_power hal_init_imrsp_power \
-                        mac_last_rxbuf_init hal_mac_disable_low_rate hal_crypto_init hal_attenna_init \
-                        hal_mac_set_rxbuf_reload_use_hw_beacon_enable hal_timer_update_by_rtc \
-                        hal_coex_pti_init hal_set_rx_active_pti hal_set_rx_ack_pti hal_set_wifi_default_pti \
-                        hal_set_tb_pti hal_set_beamf_pti hal_set_beamf_mt_pti hal_set_ofdma_sequence_pti
-MAC_REPLAY_THROUGH   := hal_set_ofdma_sequence_pti
-MAC_REPLAY_OUT       :=
-MAC_REPLAY_TAKE      = tools/mac-trace.py replay --elf $(BUILD)/wifi-drv.elf --rom $(PHYBLOB_ROM_ELF) \
-                        --image $(BUILD)/wifi-drv.bin
-.PHONY: wifi-esp32c6-replay
-ifeq ($(BOARD),esp32c6)
-wifi-esp32c6-replay: $(BUILD)/wifi-drv.elf $(BUILD)/wifi-drv.bin $(PHYBLOB_ROM_ELF)
-	$(MAC_REPLAY_TAKE) $(addprefix --function ,$(MAC_REPLAY_FUNCTIONS)) --through $(MAC_REPLAY_THROUGH) \
-		$(addprefix --outside ,$(MAC_REPLAY_OUT)) $(WIFI_TRACE_LOG) > $(BUILD)/config.txt
-	mkdir -p $(MAC_REPLAY_DIR)
-	mv $(BUILD)/config.txt $(MAC_REPLAY_DIR)/
-else
-wifi-esp32c6-replay:
-	$(error the driver runs on an ESP32-C6: make BOARD=esp32c6 wifi-esp32c6-replay)
-endif
+# test/replay/bb.txt and bb-other.txt are mac-replay-test's hold on btbb.c: the whole window of libbtbb.a e4897a5's
+# bt_bb_v2_init_cmplx, between i154.c's radio_up trace: lines baseband and mac, taken once from a trace=1 i154= run of an
+# image whose baseband was still the library's, build/esp32c6/i154/base.elf and base.bin, the driver as of 7dbd462's
+# tree, and its lib2.log and lib1.log, the modem's two states. The library is linked no more, so the files are frozen;
+# the make target that took them, wifi-esp32c6-bb-replay, is in git history.
+#
+# test/replay/config.txt is the same for mac_config of macstart.c: the MAC's bring-up groups as the libraries' hal_init
+# once wrote them, a step at a time taken into the driver's own. net80211 and pp are linked no more, so it is frozen
+# too; wifi-esp32c6-replay, which took it from a trace=1 libstart=1 run, is in git history.
 
 # Every check of a step of the own start, as CLAUDE.md names them, in their order, on the board, each verdict told;
 # see tools/esp32c6-gate.py.
@@ -348,33 +329,6 @@ wifi-esp32c6-gate:
 else
 wifi-esp32c6-gate:
 	$(error the driver runs on an ESP32-C6: make BOARD=esp32c6 wifi-esp32c6-gate)
-endif
-
-# The first access the own run differs at, thread by thread, the bases naming the volatile words: the own start's
-# bring-up runs on the thread that called it where the libraries posted it to the wifi task, so --join compares one
-# stream, and libphy's calibration folds to one marker a run. WIFI_TRACE_BASE names the libraries' start's logs (two
-# or more) and WIFI_TRACE_OWN the own start's; the rule knows the ELF, the ROM and the libraries, so CLAUDE.md names
-# it and not the whole command. See tools/mac-trace.py.
-# WIFI_TRACE_EXPECT names the places the own start differs in by design, each with its reason,
-# which pass alone and exactly;
-# WIFI_TRACE_EXPECT_NEW=1 prints a place that does not, as such a file holds it.
-WIFI_TRACE_BASE ?=
-WIFI_TRACE_OWN ?=
-WIFI_TRACE_EXPECT ?= $(wildcard $(WIFI_ESP)/test/diff-expected.txt)
-.PHONY: wifi-esp32c6-diff
-ifeq ($(BOARD),esp32c6)
-wifi-esp32c6-diff: $(BUILD)/wifi-drv.elf $(BUILD)/wifi-drv.bin $(PHYBLOB_ROM_ELF)
-	tools/mac-trace.py diff --from start --to stop --join --collapse phy \
-		--elf $(BUILD)/wifi-drv.elf --rom $(PHYBLOB_ROM_ELF) --image $(BUILD)/wifi-drv.bin \
-		--lib net80211=$(PHYBLOB_CACHE)/libnet80211.a:$(PHYBLOB_CACHE)/esp32c6.rom.net80211.ld \
-		--lib pp=$(PHYBLOB_CACHE)/libpp.a:$(PHYBLOB_CACHE)/esp32c6.rom.pp.ld \
-		--lib phy=$(BUILD)/$(WIFI_ESP)/libphy.a:$(PHYBLOB_CACHE)/esp32c6.rom.phy.ld \
-		$(addprefix --own ,$(WIFI_ESP_OBJ) $(LIB_OBJ)) \
-		$(if $(WIFI_TRACE_EXPECT),--expect $(WIFI_TRACE_EXPECT),) $(if $(WIFI_TRACE_EXPECT_NEW),--as-expected,) \
-		$(WIFI_TRACE_BASE) $(WIFI_TRACE_OWN)
-else
-wifi-esp32c6-diff:
-	$(error the driver runs on an ESP32-C6: make BOARD=esp32c6 wifi-esp32c6-diff)
 endif
 
 # The own start's accesses to the MAC in a trace=1 run of the build at hand, WIFI_TRACE_OWN, held to the gated run's,

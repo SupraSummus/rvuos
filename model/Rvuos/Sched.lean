@@ -1,7 +1,7 @@
 /-
 The real-time scheduler model for rvuos: virtual time deadlines,
 sub-tick crossing timer with hysteresis, and delay guarantees.
-See Decision 38 in design/decisions.md and the busy-period derivation in talk/edf-budget.md.
+See decision 39 in design/decisions.md and the busy-period derivation in design/time.md, "Scheduling".
 
 The core has a total capacity of U = 64 units (TIME_UNITS).
 A target place T is queued at count t0 with units uT (1 ≤ uT ≤ 64),

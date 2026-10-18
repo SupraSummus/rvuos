@@ -12,4 +12,7 @@
 
 __attribute__((noreturn)) void i154_run(struct drv *d, struct self *own);
 
+/* The 802.15.4 bring-up alone, as a trace window; see i154.c. */
+__attribute__((noreturn)) void i154_trace_run(struct drv *d);
+
 #endif

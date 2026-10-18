@@ -32,7 +32,7 @@ def run(binary, recorded, at, put, expected):
             f.writelines(lines[:at] + ["%s4 0x%08x 0x%08x\n" % a for a in put] + lines[at:])
         with open(os.path.join(d, "expected.txt"), "w") as f:
             f.write(expected)
-        r = subprocess.run([binary, d, os.path.join(d, "expected.txt")], capture_output=True, text=True)
+        r = subprocess.run([binary, d, "config", os.path.join(d, "expected.txt")], capture_output=True, text=True)
     return r.returncode, r.stdout.strip().splitlines()[-1]
 
 
