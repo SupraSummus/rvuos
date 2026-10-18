@@ -1,14 +1,14 @@
 A turn on spare time runs on while a thread with time waits for the core,
 so a thread that has time waits for the tick behind one that runs on what nobody wanted.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: a turn on spare time runs while a thread with time waits
 Witness: fuzz spare-turn-ends-at-wake
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -1267,7 +1267,6 @@ static bool deadline_due(struct core *core)
+@@ -1407,7 +1407,6 @@ uint32_t sched_crossing_counts(void)
  static void spare_end(struct core *core)
  {
      if (core->run_queue != 0 && !core->recall && (sched_spare_turn(core) || deadline_due(core))) {

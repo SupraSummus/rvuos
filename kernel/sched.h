@@ -63,6 +63,24 @@ static inline uint32_t place_window(const struct place *p)
 }
 
 /*
+ * The most counts a window puts on a deadline.
+ * Deadlines are compared modulo 2^32, so each must lie within 2^31 counts of the count,
+ * and an account puts at most ACCOUNT_TICKS ticks' counts on one besides.
+ * On a counter at the processor's clock, as the ESP32-C6's, 2^15 ticks are more than that,
+ * so a longer window orders as this one: sooner for its own thread, and for no other.
+ */
+#define WINDOW_COUNTS_MAX (1u << 30)
+_Static_assert((uint64_t)TICK_COUNTS_MAX * ACCOUNT_TICKS + WINDOW_COUNTS_MAX < (1ull << 31),
+               "a deadline lies within 2^31 counts of the count");
+
+/* A place's window in counts of the counter, at most WINDOW_COUNTS_MAX. */
+static inline uint32_t place_window_counts(const struct place *p)
+{
+    uint64_t w = (uint64_t)place_window(p) * timer_tick_counts();
+    return w > WINDOW_COUNTS_MAX ? WINDOW_COUNTS_MAX : (uint32_t)w;
+}
+
+/*
  * The place of a thread that holds the time of a core, NULL for none: a look at each of its places,
  * which are CORES at most and hold one core's time each, so it is the only one.
  */

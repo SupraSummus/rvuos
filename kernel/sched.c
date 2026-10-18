@@ -361,8 +361,7 @@ static uint32_t deadline_of(const struct place *p, uint32_t balance, uint32_t at
     }
     uint32_t cap = account_cap(p);
     uint32_t def = balance >= cap ? 0 : (cap - balance + u - 1) / u;
-    uint64_t w = (uint64_t)place_window(p) * timer_tick_counts();
-    return at + def + (uint32_t)w;
+    return at + def + place_window_counts(p);
 }
 
 /* A queued place's deadline: its own account's while it has time, else its lender's. */

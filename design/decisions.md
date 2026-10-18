@@ -844,6 +844,12 @@ until the maintainer decides otherwise.
     and it holds a tenth of a second's worth at most.
     The window is none or a power of two of ticks up to 2^15,
     given in `a4` of `OP_TIME_BIND` and kept in the place's spare byte.
+    Deadlines are 32 bits of counts compared modulo 2^32, so each must lie within 2^31 counts of the count,
+    and a window puts at most 2^30 counts on one:
+    on a counter at the processor's clock, as the ESP32-C6's, 2^14 ticks at 1 kHz are more than 2^31,
+    and such a window read as a deadline already past, which put batch work first.
+    Held at 2^30, a longer window brings its own thread sooner and no other later.
+    A bind that refused it would have had a program learn its board's counter first.
     A place's deadline is computed once, as it joins the run queue,
     and kept in a field of its own, in counts of the counter,
     while its `stamp` stays the tick its account was counted to.
@@ -898,12 +904,6 @@ until the maintainer decides otherwise.
       at the price of the tick's switches, decision 9.
       The one workload below a tick so far, an 802.15.4 acknowledgement, a route met, decision 37.
       Decide with the first workload whose window is shorter than a tick and no route can meet.
-    - **Deadlines that wrap.**
-      A deadline is 32 bits of counts, compared modulo 2^32, so it holds only while it lies within 2^31 counts of the count;
-      a window of 2^14 ticks or more at 1 kHz is longer than that on a counter at the processor's clock, as the ESP32-C6's,
-      so it would read as a deadline already past, and 2^15 ticks are cut short besides.
-      Either the bind refuses a window longer than the board's counter allows, which a program would then need to know,
-      or the kernel holds a deadline at most 2^30 counts ahead, so that windows longer than that order alike.
     - **The kernel's longest step**, B, bounded in cycles at each board's link and made shorter; decision 36 and `TODO.md`.
     - **The earliest deadline without a walk.**
       Finding it walks the run queue, `TIME_UNITS` places at most, twice on a crossing,

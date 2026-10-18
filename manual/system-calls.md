@@ -514,6 +514,8 @@ Needs `RIGHT_W`.
 `a4` = the deadline window in ticks:
 zero for none, or a power of two up to 2^15 (32768),
 `KERR_INVALID_ARG` otherwise.
+A window longer than 2^30 counts of the core's counter, as 2^14 ticks and more are at 1 kHz on a counter of 160 MHz,
+orders as 2^30 counts: its thread may run sooner than it asked, never later.
 The units must all be of one core, `KERR_INVALID_ARG` otherwise, the first unit's with none: the core the bind is of.
 It fills the thread's place that holds that core's time, or an empty one, section 5.11,
 and fails with `KERR_LIMIT` when every place holds another core's;

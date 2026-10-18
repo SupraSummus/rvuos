@@ -591,7 +591,8 @@
  * a1 = the slot of the Thread capability, which needs RIGHT_W,
  * a2 = the offset of the first unit, which must lie within the capability even for none,
  * a3 = how many units, zero for none,
- * a4 = the deadline window in ticks (0 or a power of two up to 2^15, else KERR_INVALID_ARG).
+ * a4 = the deadline window in ticks (0 or a power of two up to 2^15, else KERR_INVALID_ARG),
+ * which orders as 2^30 counts of the counter where it is longer.
  * The units must all be of one core, or the call fails with KERR_INVALID_ARG: the core of the first unit, for none too.
  * The bind fills the thread's place that holds that core's time, or an empty one,
  * and fails with KERR_LIMIT when every place holds another core's; see OP_POOL_ALLOC.

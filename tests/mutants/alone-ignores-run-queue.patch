@@ -9,7 +9,7 @@ Witness: fuzz lend-lender-woken
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -891,7 +891,7 @@ uint32_t sched_wake_ticks(void)
+@@ -1063,7 +1063,7 @@ uint32_t sched_wake_ticks(void)
      }
      /* A thread that lost the time of this core during its turn here, its place emptied, ends the turn at the next tick. */
      const struct place *p = thread_place_on(turn, core_index());
@@ -17,4 +17,4 @@ diff --git a/kernel/sched.c b/kernel/sched.c
 +    if (p == NULL) {
          return 1;
      }
-     uint32_t balance = account_now(p);
+     uint32_t balance = p->balance - turn_owes(p, clock_offset());

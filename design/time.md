@@ -198,7 +198,11 @@ Each field of `struct place` maintains a single meaning and time base across all
 `stamp` records the macro-tick count (`core->ticks` or `sched_ticks`) from when the unit account was last refilled,
 while `deadline` holds the 32-bit hardware count virtual deadline relative to kernel boot (`timer_sched_now()`).
 When a place joins `QUEUE_RUN`, its dynamic deadline is computed once and stored in `p->deadline`:
-`d = timer_sched_now() + def + w`, where `def = (cap - balance + u - 1) / u` counts and `w = window * tick_counts`.
+`d = timer_sched_now() + def + w`, where `def = (cap - balance + u - 1) / u` counts and `w = window * tick_counts`,
+held at 2^30 counts, `WINDOW_COUNTS_MAX`:
+deadlines are compared modulo 2^32, so each must lie within 2^31 counts of the count,
+and on a counter at the processor's clock, as the ESP32-C6's, 2^15 ticks are more than that.
+A longer window orders as 2^30 counts, which brings its own thread sooner and no other later.
 While waiting on the run queue, this deadline stands still; `run_earliest` reads it directly in O(1) without recomputing.
 While running, each count of work costs 64 parts, advancing the running turn's virtual deadline by `64 / u` counts per count of work:
 `d(t) = d(0) + (64 * elapsed) / u`.

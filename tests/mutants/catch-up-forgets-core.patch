@@ -9,8 +9,8 @@ Witness: fuzz actor-handoff
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -829,7 +829,6 @@ static void tick_advance(uint32_t ticks)
-             paid->stamp += owed;
+@@ -994,7 +994,6 @@ static void tick_advance(uint32_t ticks)
+             paid->stamp = core->ticks + owed;
          }
          core->turn_from = 0;
 -        core->ticks += owed;

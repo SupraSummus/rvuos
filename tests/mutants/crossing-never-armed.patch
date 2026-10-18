@@ -10,7 +10,7 @@ Witness: fuzz lend-borrower-queued
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -1366,6 +1366,7 @@
+@@ -1365,6 +1365,7 @@ static bool deadline_due(struct core *core)
   */
  uint32_t sched_crossing_counts_on(const struct core *core, uint32_t offset)
  {

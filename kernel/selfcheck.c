@@ -716,7 +716,7 @@ static void check_queue(paddr_t head, uint8_t queue, uint32_t core)
             uint32_t u = place_units(p);
             uint32_t cap = account_cap(p);
             uint32_t def = p->balance >= cap ? 0 : (cap - p->balance + u - 1) / u;
-            uint64_t w = (uint64_t)place_window(p) * timer_tick_counts();
+            uint64_t w = place_window_counts(p);
             uint32_t N = 0;
             uint32_t first_unit = core * TIME_UNITS;
             for (uint32_t i = 0; i < TIME_UNITS; ) {

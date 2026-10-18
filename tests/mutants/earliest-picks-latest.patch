@@ -8,7 +8,7 @@ Witness: fuzz time-edf-order
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -545,7 +545,7 @@ __attribute__((noinline)) static struct place *run_earliest(const struct core *c
+@@ -550,7 +550,7 @@ __attribute__((noinline)) struct place *run_earliest(const struct core *core, ui
          LOOP_BOUND(TIME_UNITS);
          struct place *p = p2v(at);
          uint32_t d = p->deadline;
