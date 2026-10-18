@@ -224,7 +224,7 @@ uint32_t child_start(struct self *s, struct child *c, void (*entry)(struct child
 }
 
 uint32_t child_start_reserve(struct self *s, struct child *c, void (*entry)(struct child_page *), uint32_t core,
-                             uint32_t units, uint32_t window_exp)
+                             uint32_t units, uint32_t window_ticks)
 {
     uint32_t time;
     TRY(s, "watch a child", rv_thread_watch(c->thread, s->inbox, c->bit_fault));
@@ -239,15 +239,14 @@ uint32_t child_start_reserve(struct self *s, struct child *c, void (*entry)(stru
     if (units == 0) {
         uint32_t unit;
         PASS(core_unit(s, core, &unit));
-        TRY(s, "bind a child to no units", rv_time_bind(s->time, c->thread, unit, 0));
+        TRY(s, "bind a child to no units", rv_time_bind(s->time, c->thread, unit, 0, 0));
     } else {
         PASS(units_take(s, core, units, &c->unit));
         c->units = units;
         PASS(slot_new(s, &time));
         uint32_t status = rv_time_carve(s->time, c->unit, units, time);
         if (status == KERR_OK) {
-            /* The window rides above the count; see OP_TIME_BIND in kernel/syscall.c. */
-            status = rv_time_bind(time, c->thread, 0, units | window_exp << 8);
+            status = rv_time_bind(time, c->thread, 0, units, window_ticks);
         }
         PASS(slot_free(s, time));
         TRY(s, "bind a child to its units", status);
@@ -265,7 +264,7 @@ uint32_t child_spare(struct self *s, struct child *c, uint32_t core)
         return KERR_INVALID_ARG;
     }
     PASS(core_unit(s, core, &unit));
-    TRY(s, "give a child spare time", rv_time_bind(s->time, c->thread, unit, 0));
+    TRY(s, "give a child spare time", rv_time_bind(s->time, c->thread, unit, 0, 0));
     return KERR_OK;
 }
 

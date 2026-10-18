@@ -191,12 +191,63 @@ as a notification's waiters are a ring of threads through the thread's:
 the run queue while it has time, the spare queue without time if it may run on spare time,
 and the spent queue otherwise, where a thread with units waits for its account.
 The thread with the earliest deadline on the run queue has the next turn, or with the run queue empty the oldest on the spare queue.
-A place's deadline is the tick its account would be full again if its thread did not run, and a window its binder chose after it,
-none or 2^(k-1) ticks, which `OP_TIME_BIND` takes in the capability;
-a thread that waits keeps its deadline, as its account gains the same every tick, until the account is full,
-and one that runs moves it later by `COUNT_PARTS / units` ticks for each tick it pays for.
+A place's deadline is anchored to its count stamp at queue entry: the tick its account would be full again if it did not run, plus a delay window chosen at binding:
+none (zero) or a power of two up to 2^15 ticks, passed in register `a4` to `OP_TIME_BIND`.
+While waiting on the run queue, the place's count stamp is frozen so its deadline stands still,
+rather than floating forward with the tick count;
+once it runs, each tick it pays for moves its stamp to the current tick and debits its account, advancing its deadline accordingly.
 A thread that joins the run queue with a deadline before that of the turn's payer takes the processor as the trap ends,
 as from a turn on spare time.
+
+**The delay guarantee.**
+A place with `u` units (`u > 0`), delay window `w`, and deficit `def` ticks short of cap
+(where `def = 0` when the account has reached `account_cap`),
+queued on the run queue at tick `t0`,
+is guaranteed to acquire its next turn by a tick `X` satisfying:
+
+`X <= t0 + 1 + (TIME_UNITS - u) + ceil((1 - u / TIME_UNITS) * (def + w))`
+
+When its account is full (`def = 0`), this simplifies to:
+
+`X <= t0 + 1 + (TIME_UNITS - u) + ceil((1 - u / TIME_UNITS) * w)`
+
+and for an interactive thread without a window (`w = 0`):
+
+`X <= t0 + 1 + (TIME_UNITS - u)`
+
+The bound is derived from the busy period leading up to the turn:
+- **Integer tick granularity:** A running turn can finish at most 1 tick before preemption takes effect.
+- **Preemption on wake:** A thread joining with an earlier deadline than the running turn's payer preempts at the end of the trap (`deadline_due`).
+- **Tie-breaking:** Ties in deadline are resolved in FIFO queue order (`run_earliest`),
+  so at most `N_ahead <= TIME_UNITS - u` tied places can precede it, each running at most 1 tick before its deadline advances.
+- **Competitor rate limit:** Only threads with deadlines at or before `D = t0 + def + w` can run before this place.
+  Consider the busy period starting at tick `tau <= t0`,
+  the most recent tick when the core was idle, on spare time, or running a thread with a deadline after `D`.
+  All competing places running before `t0 + W` arrived at or after `tau` with initial deadlines at or after `tau`.
+  Each tick executed by a competitor with `ui` units advances its deadline by `TIME_UNITS / ui` ticks,
+  so competitors combined (holding at most `TIME_UNITS - u` units) can run at most `((TIME_UNITS - u) / TIME_UNITS) * (D - tau)` ticks before their deadlines exceed `D`.
+  The busy period duration satisfies `(t0 + W) - tau <= 1 + N_ahead + ((TIME_UNITS - u) / TIME_UNITS) * (D - tau)`.
+  Writing `delta = t0 - tau >= 0` and `D - tau = delta + def + w`,
+  subtracting `delta` yields `W <= 1 + N_ahead - (u / TIME_UNITS) * delta + (1 - u / TIME_UNITS) * (def + w)`.
+  Because `u >= 1` and `delta >= 0`, any backlog from before `t0` shrinks during `delta`,
+  and the worst case occurs at `delta = 0`.
+- **Lent time:** A borrower without time runs on its lender's place and units (`place_lender`),
+  so the guarantee holds through the lender's account.
+
+**What the guarantee does not promise.**
+Admission control is enforced by units alone:
+`OP_TIME_BIND` refuses any unit already earned by another thread's place,
+so the sum of units on a core never exceeds `TIME_UNITS` and the scheduler's plan is always feasible.
+The tick `X` is when the thread receives the processor,
+not when it finishes its job;
+translating an application deadline (such as a device driver having to respond within a given time) into units and window is the programmer's concern,
+as the kernel knows nothing of userspace work lengths.
+Overload is confined to the offender:
+a thread that attempts to run beyond its budget drains its account and waits on `QUEUE_SPENT`,
+leaving other threads' guarantees undisturbed.
+Finally, spare time (`RIGHT_X` without units) carries no delay guarantee and may starve indefinitely under load;
+that is by design.
+
 A thread that waits hands the rest of the tick to the next, and the tick ends the turn:
 the thread goes to the back of the queue its account and binding now put it on.
 A thread that becomes ready, resumed, woken or bound, joins the back of its queue.

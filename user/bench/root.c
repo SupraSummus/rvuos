@@ -259,7 +259,7 @@ int main(void)
     must("units", units_take(&self, 0, UNITS, &first));
     must("a slot", slot_new(&self, &time));
     must("carve the units", rv_time_carve(self.time, first, UNITS, time));
-    must("bind the units", rv_time_bind(time, thread, 0, UNITS));
+    must("bind the units", rv_time_bind(time, thread, 0, UNITS, 0));
     must("start the thread", rv_thread_resume(thread));
     measure("threads", round_thread);
 
@@ -283,7 +283,7 @@ int main(void)
     must("units", units_take(&self, 0, UNITS, &first));
     must("a slot", slot_new(&self, &time));
     must("carve the units", rv_time_carve(self.time, first, UNITS, time));
-    must("bind the units", rv_time_bind(time, holder, 0, UNITS));
+    must("bind the units", rv_time_bind(time, holder, 0, UNITS, 0));
     must("start the thread", rv_thread_resume(holder));
     measure("lock-wait", round_lock_wait);
     /* The root task's table holds the holder's thread with every right, RIGHT_X among them. */

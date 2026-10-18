@@ -34,7 +34,7 @@
 #define BIG    80000u
 #define HOLD   60000u
 #define PERIOD 3000u  /* a periodic member's, in microseconds: three ticks */
-#define LONG_WINDOW 7 /* a window of 2^6 ticks, against none */
+#define LONG_WINDOW 64u /* a window of 64 ticks, against none */
 #define JITTER 80000u /* the most a periodic member works before each ask */
 
 enum role { NONE, STORE, GATE, UI, BULK, HOG, LOCKER };
@@ -59,7 +59,7 @@ struct member {
     uint8_t lends; /* a client's: it lends the member it asks its time while it waits for an answer */
     uint8_t lock;  /* a locker's lock_kind */
     uint32_t cost, period_us, gap;
-    uint8_t window_exp; /* its window, 2 to this less one ticks; 0 for none */
+    uint32_t window_ticks; /* its window in ticks; 0 for none */
 };
 
 struct scenario {
@@ -294,7 +294,7 @@ static void run(const struct scenario *sc)
     }
     for (uint32_t i = 0; i < count; i++) {
         must("start a member", child_start_reserve(&self, &kids[i], entries[sc->cast[i].role], 0, sc->cast[i].units,
-                                                   sc->cast[i].window_exp));
+                                                   sc->cast[i].window_ticks));
     }
 
     sleep_us(sc, count, WARM_US);

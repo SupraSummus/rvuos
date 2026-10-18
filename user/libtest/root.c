@@ -569,7 +569,7 @@ static void snap_round(void)
     }
     must("units for the writer", units_take(&self, second_core ? 1 : 0, units, &first));
     must("carve the writer's units", rv_time_carve(self.time, first, units, time));
-    must("bind the writer", rv_time_bind(time, writer, 0, units));
+    must("bind the writer", rv_time_bind(time, writer, 0, units, 0));
     must("start the writer", rv_thread_resume(writer));
     must("start the reader", child_start(&self, &snap_reader, snap_reader_main, 0, CHILD_UNITS));
     pause_for(SNAP_US);

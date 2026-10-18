@@ -869,12 +869,11 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
         /* The first unit lies within the capability even for none, so that the binding lies below it. */
         uint32_t off = arg[2];
         uint32_t count = arg[3];
-        /* The window's exponent rides above the count, which TIME_UNITS keeps below 2^8. */
-        uint32_t window_exp = count >> 8;
-        count &= 0xffu;
-        if (window_exp > WINDOW_EXP_MAX) {
+        uint32_t window_ticks = arg[4];
+        if (window_ticks > (1u << 15) || (window_ticks & (window_ticks - 1)) != 0) {
             return KERR_INVALID_ARG;
         }
+        uint32_t window_exp = window_ticks != 0 ? (uint32_t)__builtin_ctz(window_ticks) + 1u : 0;
         if (off >= range_count(cap) || count > range_count(cap) - off) {
             return KERR_INVALID_ARG;
         }

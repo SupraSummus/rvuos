@@ -115,8 +115,13 @@ until the maintainer decides otherwise.
    Units of time are earned by one thread's place each, an account per place they fill,
    and spare time only by `RIGHT_X`; see "Scheduling" and open decision 18.
    The run queue is ordered by deadline:
-   a place's deadline is the tick its account would be full again if its thread did not run, and a window after it (none or 2^(k-1) ticks, passed to `OP_TIME_BIND`),
-   which stays put while the thread waits and runs at `COUNT_PARTS / units` ticks for each tick it pays for.
+   a place's deadline is anchored to its count stamp at queue entry, adding its account deficit and an optional delay window
+   (none or a power of two up to 2^15 ticks, passed in `a4` to `OP_TIME_BIND`).
+   While waiting on the run queue, the deadline stands still, providing a hard real-time delay guarantee:
+   a place with `u` units, deficit `def`, and window `w` entering the run queue at `t0`
+   runs by tick `X <= t0 + 1 + (TIME_UNITS - u) + ceil((1 - u / TIME_UNITS) * (def + w))`.
+   For an interactive thread with a full account and `w = 0`,
+   delay is bounded by `1 + (TIME_UNITS - u)` ticks regardless of other threads' windows.
    The thread with the earliest deadline on the run queue has the next turn,
    and a place that joins the run queue with a deadline before that of the turn's payer takes the processor as the trap ends,
    as from a turn on spare time.

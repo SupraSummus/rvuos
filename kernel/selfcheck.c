@@ -699,6 +699,18 @@ static void check_queue(paddr_t head, uint8_t queue, uint32_t core)
         if (next == NULL || next->queue_prev != at) {
             fail("queue is not linked back", head, at, p->queue_next);
         }
+        if (queue == QUEUE_RUN && place_units(p) != 0) {
+            uint32_t u = place_units(p);
+            uint32_t w = place_window(p);
+            uint32_t gain = tick_gain(p);
+            uint32_t def = (gain == 0 || p->balance / gain >= ACCOUNT_TICKS) ? 0 : ACCOUNT_TICKS - p->balance / gain;
+            uint32_t others = TIME_UNITS - u;
+            uint32_t max_wait = 1 + others + (others * (def + w) + TIME_UNITS - 1) / TIME_UNITS;
+            uint32_t waited = sched_ticks - p->stamp;
+            if (waited > max_wait) {
+                fail("a place on the run queue waited longer than its guarantee", v2p(p), waited, max_wait);
+            }
+        }
         queued_threads++;
         at = p->queue_next;
     } while (at != head);

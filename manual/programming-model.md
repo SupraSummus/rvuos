@@ -786,7 +786,7 @@ Its own thread earns every unit at boot, so it leaves the six first,
 then carves them and lends them without spare time:
 
 ```c
-rv_invoke(OP_TIME_BIND, BOOT_CAP_TIME, BOOT_CAP_THREAD, 0, 58);
+rv_time_bind(BOOT_CAP_TIME, BOOT_CAP_THREAD, 0, 58, 0);
 rv_invoke(OP_TIME_CARVE, BOOT_CAP_TIME, 58, 6, TIME);
 rv_invoke(OP_CAP_DERIVE, CHILD_TABLE, CHILD_TIME, TIME, RIGHT_W);
 ```

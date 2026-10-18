@@ -110,8 +110,8 @@ void units_demo(uint32_t data_base, uint32_t data_size, uint32_t counter, uint32
                rv_invoke(OP_THREAD_CONFIGURE, SLOT_SPINNER + i, (uint32_t)&spinner_main,
                          data_base + data_size / 4 - i * SPINNER_STACK, i));
         expect("bind it",
-               i == 0 ? rv_invoke(OP_TIME_BIND, SLOT_CAPPED_TIME, SLOT_SPINNER, 0, TIME_UNITS / 4)
-                      : rv_invoke(OP_TIME_BIND, SLOT_HALF_TIME, SLOT_SPINNER + i, 0, 0));
+               i == 0 ? rv_time_bind(SLOT_CAPPED_TIME, SLOT_SPINNER, 0, TIME_UNITS / 4, 0)
+                      : rv_time_bind(SLOT_HALF_TIME, SLOT_SPINNER + i, 0, 0, 0));
         expect("start it", rv_invoke(OP_THREAD_RESUME, SLOT_SPINNER + i, 0, 0, 0));
     }
     expect("let them spin", sleep_us(UNITS_US));
@@ -134,7 +134,7 @@ void units_demo(uint32_t data_base, uint32_t data_size, uint32_t counter, uint32
     /* Bound again, a thread goes on where it stopped: the first spinner, on spare time alone. */
     uint32_t first_spun = spins[0];
     expect("bind a spinner again",
-           rv_invoke(OP_TIME_BIND, SLOT_HALF_TIME, SLOT_SPINNER, 0, 0));
+           rv_time_bind(SLOT_HALF_TIME, SLOT_SPINNER, 0, 0, 0));
     expect("sleep while it spins", sleep_us(SLEEP_US));
     expect("take its units back again",
            rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_HALF_TIME, 0, 0));
@@ -153,11 +153,11 @@ void units_demo(uint32_t data_base, uint32_t data_size, uint32_t counter, uint32
            rv_invoke(OP_CAP_DERIVE, BOOT_CAP_CAPTABLE, SLOT_CAPPED_TIME, SLOT_HALF_TIME, RIGHT_W));
     first_spun = spins[0];
     expect("bind the spinner to an eighth without spare time",
-           rv_invoke(OP_TIME_BIND, SLOT_CAPPED_TIME, SLOT_SPINNER, 0, TIME_UNITS / 8));
+           rv_time_bind(SLOT_CAPPED_TIME, SLOT_SPINNER, 0, TIME_UNITS / 8, 0));
     expect("sleep while it earns its time", sleep_us(CAPPED_US));
     uint32_t capped = spins[0] - first_spun;
     expect("give it spare time",
-           rv_invoke(OP_TIME_BIND, SLOT_HALF_TIME, SLOT_SPINNER, 0, TIME_UNITS / 8));
+           rv_time_bind(SLOT_HALF_TIME, SLOT_SPINNER, 0, TIME_UNITS / 8, 0));
     first_spun = spins[0];
     expect("sleep while it runs on spare time", sleep_us(CAPPED_US / 2));
     uint32_t spare = spins[0] - first_spun;
@@ -188,7 +188,7 @@ void units_demo(uint32_t data_base, uint32_t data_size, uint32_t counter, uint32
     expect("derive the half without spare time once more",
            rv_invoke(OP_CAP_DERIVE, BOOT_CAP_CAPTABLE, SLOT_CAPPED_TIME, SLOT_HALF_TIME, RIGHT_W));
     expect("bind the dodger to an eighth without spare time",
-           rv_invoke(OP_TIME_BIND, SLOT_CAPPED_TIME, SLOT_DODGER, 0, TIME_UNITS / 8));
+           rv_time_bind(SLOT_CAPPED_TIME, SLOT_DODGER, 0, TIME_UNITS / 8, 0));
     expect("start it", rv_invoke(OP_THREAD_RESUME, SLOT_DODGER, 0, 0, 0));
     expect("sleep while it dodges the ticks", sleep_us(DODGE_US));
     /* Stopped before its rounds are counted, and its timer line cancelled, so that nothing wakes it again. */

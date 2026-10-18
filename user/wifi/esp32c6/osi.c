@@ -223,7 +223,7 @@ static uint32_t start_thread(struct self *s, struct thread *t, void (*f)(void *)
     }
     status = rv_time_carve(s->time, unit, 1, time);
     if (status == KERR_OK) {
-        status = rv_time_bind(time, t->cap, 0, 1);
+        status = rv_time_bind(time, t->cap, 0, 1, 0);
     }
     slot_free(s, time);
     return status;

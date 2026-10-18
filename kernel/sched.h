@@ -56,6 +56,12 @@ static inline bool place_spare(const struct place *p)
     return b->type == CAP_TIME && (b->rights & RIGHT_X) != 0;
 }
 
+/* A place's window, in ticks. */
+static inline uint32_t place_window(const struct place *p)
+{
+    return p->pad != 0 ? 1u << (p->pad - 1u) : 0;
+}
+
 /*
  * The place of a thread that holds the time of a core, NULL for none: a look at each of its places,
  * which are CORES at most and hold one core's time each, so it is the only one.

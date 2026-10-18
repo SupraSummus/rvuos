@@ -426,7 +426,7 @@ static void load_start(uint32_t units)
     must("a slot for the load's time without spare", slot_new(&self, &capped));
     must("the load's units without spare time",
          rv_invoke(OP_CAP_DERIVE, BOOT_CAP_CAPTABLE, capped, time, RIGHT_W));
-    must("bind the load's units", rv_time_bind(capped, thread, 0, units));
+    must("bind the load's units", rv_time_bind(capped, thread, 0, units, 0));
     must("start the load", rv_thread_resume(thread));
     say(&cout, "thread: a load beside the link, earning %u units of %u\n", units, TIME_UNITS);
 }

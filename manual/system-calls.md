@@ -510,7 +510,10 @@ Needs `RIGHT_W`.
 `a1` = slot of the `Thread` capability, with `RIGHT_W`,
 `a2` = the first unit, as an offset from the capability's first
 (`KERR_INVALID_ARG` past the last, even for none),
-`a3` = how many units (`KERR_INVALID_ARG` past the last), zero for none.
+`a3` = how many units (`KERR_INVALID_ARG` past the last), zero for none,
+`a4` = the deadline window in ticks:
+zero for none, or a power of two up to 2^15 (32768),
+`KERR_INVALID_ARG` otherwise.
 The units must all be of one core, `KERR_INVALID_ARG` otherwise, the first unit's with none: the core the bind is of.
 It fills the thread's place that holds that core's time, or an empty one, section 5.11,
 and fails with `KERR_LIMIT` when every place holds another core's;

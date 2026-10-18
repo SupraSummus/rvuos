@@ -349,7 +349,9 @@ static uint8_t place_queue(const struct place *p, uint32_t balance, const struct
 static void place_settle(struct place *p)
 {
     core_self()->wake_stale = true;
-    account_refill(p);
+    if (p->queue != QUEUE_RUN) {
+        account_refill(p);
+    }
     struct core *was = &cores[p->core];
     struct core *core = &cores[place_core(p)];
     const struct place *l = has_time(p->balance) ? NULL : place_lender(p);
@@ -490,16 +492,11 @@ static void turn_take(struct thread *t)
  * The search walks the run queue, TIME_UNITS places at most, since each earns a unit or borrows from a lender that does.
  */
 
-/* A place's window, in ticks. */
-static uint32_t place_window(const struct place *p)
-{
-    return p->pad != 0 ? 1u << (p->pad - 1u) : 0;
-}
 
 /*
  * The deadline of a place whose account at balance was counted to the tick at; NEAREST_NONE ahead without units.
  * At the tick at the account is ACCOUNT_TICKS - balance / gain ticks short of full,
- * and each tick since brings that one tick closer, down to sched_ticks once the account is full.
+ * and the window follows once the account is full.
  */
 static uint32_t deadline_of(const struct place *p, uint32_t balance, uint32_t at)
 {
@@ -507,9 +504,8 @@ static uint32_t deadline_of(const struct place *p, uint32_t balance, uint32_t at
     if (gain == 0) {
         return sched_ticks + NEAREST_NONE;
     }
-    uint32_t left = ACCOUNT_TICKS - balance / gain;
-    uint32_t elapsed = sched_ticks - at;
-    return sched_ticks + (left > elapsed ? left - elapsed : 0) + place_window(p);
+    uint32_t left = balance / gain >= ACCOUNT_TICKS ? 0 : ACCOUNT_TICKS - balance / gain;
+    return at + left + place_window(p);
 }
 
 /* A queued place's deadline: its own account's while it has time, else its lender's. */

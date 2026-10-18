@@ -204,7 +204,7 @@ int main(void)
     expect("carve the child half the processor",
            rv_invoke(OP_TIME_CARVE, BOOT_CAP_TIME, HALF_UNITS, HALF_UNITS, SLOT_HALF_TIME));
     expect("bind the child to it",
-           rv_invoke(OP_TIME_BIND, SLOT_HALF_TIME, SLOT_CHILD_THREAD, 0, HALF_UNITS));
+           rv_time_bind(SLOT_HALF_TIME, SLOT_CHILD_THREAD, 0, HALF_UNITS, 0));
     expect("start the child",
            rv_invoke(OP_THREAD_RESUME, SLOT_CHILD_THREAD, 0, 0, 0));
 

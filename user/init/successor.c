@@ -121,7 +121,7 @@ static __attribute__((noreturn)) void successor_main(void)
     puts("successor: started\n");
     expect("successor: the user-mode csrs set back", csrs_are_reset() ? KERR_OK : KERR_INVALID_ARG);
     expect("stop the root task's thread for good",
-           rv_invoke(OP_TIME_BIND, SLOT_FREEZE_TIME, BOOT_CAP_THREAD, 0, 0));
+           rv_time_bind(SLOT_FREEZE_TIME, BOOT_CAP_THREAD, 0, 0, 0));
     /*
      * The successor lives in a pool of the child's memory, so nothing keeps it from destroying the boot pool,
      * by a revoke below the block it was made of, which leaves the code both run where it is.
@@ -133,7 +133,7 @@ static __attribute__((noreturn)) void successor_main(void)
                ? KERR_OK : KERR_INVALID_ARG);
     /* The units the root task and the logger earned came free with them. */
     expect("earn the whole processor",
-           rv_invoke(OP_TIME_BIND, BOOT_CAP_TIME, SLOT_SUCC_THREAD, 0, TIME_UNITS));
+           rv_time_bind(BOOT_CAP_TIME, SLOT_SUCC_THREAD, 0, TIME_UNITS, 0));
     /* Its account starts empty, and earning the whole core stays near a tick while it runs; see TODO.md. */
     expect("let its account fill", sleep_us(FILL_US));
     /* The destroy emptied the root task's own slots; the successor's objects take them. */
@@ -166,7 +166,7 @@ static __attribute__((noreturn)) void successor_main(void)
     expect("configure it",
            rv_invoke(OP_THREAD_CONFIGURE, SLOT_PROBER, (uint32_t)&prober_main, data_base + data_size / 2, 0));
     expect("watch it", rv_invoke(OP_THREAD_WATCH, SLOT_PROBER, SLOT_PROBE_NTFN, BIT_FAULT, 0));
-    expect("bind it to spare time", rv_invoke(OP_TIME_BIND, BOOT_CAP_TIME, SLOT_PROBER, 0, 0));
+    expect("bind it to spare time", rv_time_bind(BOOT_CAP_TIME, SLOT_PROBER, 0, 0, 0));
     /* A new thread's frame is zero, which a cause would be too. */
     expect("a thread that never ran has no fault to tell",
            rv_thread_fault(SLOT_PROBER, &ignored, &ignored, &ignored, &ignored) == KERR_STATE
@@ -270,7 +270,7 @@ __attribute__((noreturn)) void hand_over(uint32_t sp)
                ? KERR_OK : KERR_INVALID_ARG);
     expect("derive every unit without spare time",
            rv_invoke(OP_CAP_DERIVE, BOOT_CAP_CAPTABLE, SLOT_FREEZE_TIME, BOOT_CAP_TIME, RIGHT_W));
-    expect("stop the logger", rv_invoke(OP_TIME_BIND, SLOT_FREEZE_TIME, SLOT_LOGGER, 0, 0));
+    expect("stop the logger", rv_time_bind(SLOT_FREEZE_TIME, SLOT_LOGGER, 0, 0, 0));
 
     expect("allocate the successor's table",
            rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_CAPTABLE, SLOT_SUCC_TABLE, ROOT_TABLE_SLOTS));
@@ -288,7 +288,7 @@ __attribute__((noreturn)) void hand_over(uint32_t sp)
      * On spare time, so it runs once this thread waits, as long as this thread has time until then;
      * spinning drained its account, so it sleeps for it to fill first.
      */
-    expect("bind the successor", rv_invoke(OP_TIME_BIND, BOOT_CAP_TIME, SLOT_SUCC_THREAD, 0, 0));
+    expect("bind the successor", rv_time_bind(BOOT_CAP_TIME, SLOT_SUCC_THREAD, 0, 0, 0));
     expect("let this thread's account fill", sleep_us(FILL_US));
     expect("start the successor", rv_invoke(OP_THREAD_RESUME, SLOT_SUCC_THREAD, 0, 0, 0));
     expect("allocate what to wait on",
