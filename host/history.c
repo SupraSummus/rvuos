@@ -145,10 +145,23 @@ static const struct place *place_on(const struct thread *t, uint32_t core)
     return NULL;
 }
 
+static bool is_turn(const struct place *p)
+{
+    const struct thread *t = place_thread(p);
+    return t != NULL && p->core < CORES && (cores[p->core].turn == t || cores[p->core].payer == t);
+}
+
 /* A place's account at the count, as its stamp and its units make it, held to the cap. */
 static uint32_t account_at_count(const struct place *p)
 {
-    uint64_t balance = p->balance + (uint64_t)(sched_ticks - p->stamp) * tick_gain(p);
+    if (p->queue == QUEUE_RUN || is_turn(p)) {
+        return p->balance;
+    }
+    uint32_t passed = sched_ticks - p->stamp;
+    if (passed >= ACCOUNT_TICKS) {
+        return account_cap(p);
+    }
+    uint64_t balance = p->balance + (uint64_t)passed * tick_gain(p);
     return balance > account_cap(p) ? account_cap(p) : (uint32_t)balance;
 }
 

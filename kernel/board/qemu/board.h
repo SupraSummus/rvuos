@@ -57,6 +57,15 @@
 #define COUNTER_HZ   U32(10000000)
 
 /*
+ * The counts a turn runs before a crossing preempts it: one turn switch and the trap's way back to user
+ * mode, with room to spare (decision 38, "Scheduling"). The switch and that way are at most 4096 instructions
+ * on either architecture -- the two `run_earliest` walks, at `TIME_UNITS` places each, are the bulk of it,
+ * and the parts are summed in `design/time.md` -- and this counter takes 100 instructions to the count,
+ * so 4096/100 rounds up to 41.
+ */
+#define CROSS_QUANTUM U32(41)
+
+/*
  * The devices the boot grants as frames from BOOT_CAP_DEVICES up: none.
  * QEMU's devices are the kernel's or the console, and the host build, which shares this board, has no hardware.
  */

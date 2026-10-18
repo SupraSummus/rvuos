@@ -58,6 +58,13 @@
 #define COUNTER_ADDR (TIMER0_BASE + U32(0x544))
 #define COUNTER_HZ   U32(1000000)
 
+/*
+ * The counts a turn runs before a crossing preempts it: a switch and the trap's way back to user mode,
+ * at most 4096 instructions (summed in `design/time.md`). SysTick runs 64 of the processor's
+ * counts to one of this counter's, so 4096/64 is 64.
+ */
+#define CROSS_QUANTUM U32(64)
+
 /* SysTick runs on the processor's clock, 64 MHz; see kernel/arch/arm/systick.c. */
 #define SYSTICK_PER_COUNT 64
 

@@ -96,6 +96,13 @@
 #define COUNTER_HZ   U32(1000000)
 
 /*
+ * The counts a turn runs before a crossing preempts it: a switch and the trap's way back to user mode,
+ * at most 4096 instructions (summed in `design/time.md`). SysTick runs 150 of the processor's
+ * counts to one of this counter's, so 4096/150 rounds up to 28.
+ */
+#define CROSS_QUANTUM U32(28)
+
+/*
  * The Cortex-M33's: SysTick runs on the processor's clock, clk_sys, 150 MHz from the crystal the counter's
  * microseconds come from too, so 150 of its counts make one of the counter's; see kernel/arch/arm/systick.c.
  */

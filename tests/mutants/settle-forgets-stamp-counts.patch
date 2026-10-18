@@ -1,0 +1,20 @@
+A place that joins the run queue keeps its old deadline rather than taking its account's count.
+The self-check finds the stored deadline is not the formula at the place's stamp.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
+Report: a place's deadline does not match its formula at its stamp
+Witness: fuzz time-edf-order
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -401,9 +401,6 @@ static void place_settle(struct place *p)
+             ring_push(queue_head(core, queue), v2p(p), QUEUED);
+         }
+         p->queue = queue;
+-        if (queue == QUEUE_RUN) {
+-            p->deadline = place_deadline_at(p, (uint32_t)((uint64_t)p->stamp * timer_tick_counts()));
+-        }
+     }
+     /* Neither account holds a tick there, or the place would have the run queue. */
+     uint32_t fill = NEAREST_NONE;

@@ -76,6 +76,13 @@
 #define COUNTER_ADDR U32(0x20001c08)
 
 /*
+ * The counts a turn runs before a crossing preempts it: a switch and the trap's way back to user mode,
+ * at most 4096 instructions (summed in `design/time.md`). This counter is the processor's clock,
+ * one of its counts to an instruction, so 4096 needs all of 4096.
+ */
+#define CROSS_QUANTUM U32(4096)
+
+/*
  * The window onto flash: FLASH_WINDOW_SIZE bytes of it from FLASH_WINDOW_FLASH,
  * which board.c maps through the cache at FLASH_WINDOW_BASE,
  * for a program too large for SRAM, such as the Wi-Fi system's driver, to run from.

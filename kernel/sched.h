@@ -101,6 +101,17 @@ static inline uint32_t tick_gain(const struct place *p)
  */
 #define LEND_DEPTH 3u
 
+/*
+ * An upper bound on the longest non-preemptible kernel step in counter counts.
+ * Without link-time bounds on each board's steps in cycles (issue #124), untraced
+ * self-check bounds B coarsely (OBJ_MAX_SIZE = 16416 bytes zeroed in byte-wise loops)
+ * to avoid false positives during kernel steps. Because this coarse bound (6.6 ms at
+ * 10 MHz) is too loose to catch sub-tick crossing failures, sub-tick preemption
+ * correctness is witnessed by the preemption test in user mode (user/init/units.c).
+ * Under tracing the clock does not advance during kernel steps, so B is zero.
+ */
+#define KERNEL_STEP_MAX_COUNTS 66000u
+
 /* The most a place's account holds: a tenth of a second's worth of its units, none without. */
 static inline uint32_t account_cap(const struct place *p)
 {
@@ -123,7 +134,7 @@ enum { QUEUE_NONE, QUEUE_RUN, QUEUE_SPARE, QUEUE_SPENT, QUEUES };
 
 /*
  * How many Irqs are armed on a device's line or a timer line,
- * the sources that can make a thread runnable while none is; see sched_run_next.
+ * the sources that can make a thread runnable while none is; see sched_turn_end.
  * Every write of an Irq's bits goes through irq_set_bits, which keeps it.
  */
 extern uint32_t armed_sources;
@@ -217,6 +228,12 @@ struct core {
 
     /* Whether a place joined the run queue since the core last looked for a deadline before the turn's; see spare_end. */
     bool run_joined;
+
+    /*
+     * Whether a sub-tick crossing interrupt fired while the turn was running,
+     * set by timer_trap_tick and checked in spare_end to end the turn.
+     */
+    bool run_crossed;
 
     /* The bits the last wake handed over, zero if none; for the trace. */
     uint32_t trace_wake_bits;
@@ -447,16 +464,8 @@ bool sched_signal(struct notification *ntfn, uint32_t bits);
 void sched_turn_back(void);
 
 /*
- * The running thread waits, or stopped, by a fault, a stop of itself or the loss of its process.
- * Charge it for the counts its turn ran,
- * and hand the processor to the next ready thread, or leave the core to idle once the trap is over,
- * or stop the machine.
- */
-void sched_run_next(void);
-
-/*
  * The end of a call whose thread may not run on, or after which a thread waits on the run queue:
- * the processor goes to the next thread as sched_run_next has it,
+ * the processor goes to the next thread as sched_turn_end has it,
  * or the turn ends if it runs on spare time and a thread with time waits; see spare_end in sched.c.
  * Out of line, and the one call at the end of a call, so that the call's frame stays as it was
  * on the stack's deepest path; see DESIGN.md, "Bounded stack".
@@ -488,7 +497,9 @@ void sched_tick(uint32_t ticks);
  * The turn ends: the thread whose turn it was is charged for it
  * and goes to the back of the queue its account puts it on, if it may run, and the next thread has its turn.
  * One that lost its units during its turn goes nowhere, and without it the queues may be empty.
- * The tick ends a turn so, and so does a trap another core marked to be dropped, see core_trapped.
+ * The tick ends a turn so, and so does a trap another core marked to be dropped, see core_trapped,
+ * and so does a thread that waits, or stopped, by a fault, a stop of itself or the loss of its process,
+ * which gives the processor to the next ready thread, leaves the core to idle once the trap is over, or stops the machine.
  */
 void sched_turn_end(void);
 
@@ -507,6 +518,12 @@ void sched_count(uint32_t ticks);
  * Every trap calls it on its way back, and the host after every call, so that the self-check can hold it.
  */
 uint32_t sched_wake(void);
+
+/* The counter count at which the core's current turn began. */
+static inline uint32_t turn_stamp(const struct core *core)
+{
+    return (uint32_t)((uint64_t)core->ticks * timer_tick_counts() + core->turn_from);
+}
 
 /*
  * Whether a core's turn runs on spare time: nobody pays for it, its thread having less than a tick in its place there,
@@ -532,6 +549,20 @@ static inline bool sched_spare_turn(const struct core *c)
  * See DESIGN.md, "Scheduling".
  */
 uint32_t sched_wake_ticks(void);
+
+/*
+ * The counts from the count the caller reads to the moment the running turn's deadline crosses
+ * the earliest waiting deadline on the run queue, or zero if no crossing is to be armed before the next tick.
+ * Every crossing lies at least CROSS_QUANTUM counts out, the turn switch and the way back to user mode,
+ * so a turn runs its quantum before it is preempted, and a waiting deadline already at or before
+ * the turn's gets that quantum at once, taking the core then and not at the next tick.
+ * The caller adds the counts to the count it reads as it programs the compare, so the compare lies
+ * in the future however much the walk to it cost.
+ */
+uint32_t sched_crossing_counts(void);
+
+/* The crossing count of a given core and count into its tick, a pure read of state: the self-check holds it. */
+uint32_t sched_crossing_counts_on(const struct core *core, uint32_t offset);
 
 /*
  * A device interrupt on a line: the Irq armed on it masks the line,
@@ -573,5 +604,20 @@ extern paddr_t line_irq[];
 
 /* The Irq bound to a line, or NULL; there is at most one. */
 struct irq *line_binding(uint32_t line);
+
+/* A queued place's deadline at anchor time at. */
+uint32_t place_deadline_at(const struct place *p, uint32_t at);
+
+/* The place on a core's run queue with the earliest deadline, and that deadline; the self-check reads it. */
+struct place *run_earliest(const struct core *core, uint32_t *deadline);
+
+/* The place a core's turn is charged to, the payer's or the turn's, or NULL; the self-check reads it. */
+struct place *turn_place(const struct core *core);
+
+/* The deadline of the turn's place p on a given core, offset counts into its tick; the self-check holds it. */
+uint32_t turn_deadline_on(const struct core *core, const struct place *p, uint32_t offset);
+
+/* The ticks to the one that drains the turn's place p's account; the self-check holds the timer to it. */
+uint32_t turn_drain(const struct place *p);
 
 #endif

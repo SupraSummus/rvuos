@@ -696,8 +696,8 @@ the first five below are what does not keep to it yet, each a constant-time chan
 - `pool_alloc` zeroes an object a byte a store with interrupts off,
   and a table of `CAPTABLE_MAX_SLOTS` slots is 24,596 stores, longer than a tick at 10 kHz on every board,
   where the wait's bound needs the kernel's longest step shorter than a tick.
-  Zeroing a word a store, or a table in steps that stop, and measuring the longest step on each board,
-  would say how short a tick each board can take.
+  Zeroing a word a store, or a table in steps that stop, and bounding each board's longest step B in cycles at link time,
+  is needed to state B in the capacity rule of decision 38 (`design/time.md`) per board rather than by the coarse 66,000 counts.
 - On ARM and RP2350's Hazard3 an `OP_IRQ_SET` on a core other than the first interrupts the first core each time,
   so a driver there that arms its line in a loop takes what it likes of the first core's turns, which its threads pay for.
   Interrupting it only as `core_notify` does, or routing a line to its waiter's core, open decision 24, would bound it.

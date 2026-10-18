@@ -4,15 +4,15 @@ no account holds more than its cap.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a place's account holds more than its cap
-Witness: fuzz actor-handoff
+Witness: fuzz lend-lender-unbound
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -196,8 +196,7 @@ static uint32_t count_of(const struct place *p)
- static uint32_t account_now(const struct place *p)
- {
-     uint64_t balance = p->balance + (uint64_t)(count_of(p) - p->stamp) * tick_gain(p);
+@@ -204,8 +204,7 @@ static uint32_t account_now(const struct place *p)
+         return account_cap(p);
+     }
+     uint64_t balance = p->balance + (uint64_t)passed * tick_gain(p);
 -    uint32_t cap = account_cap(p);
 -    return balance > cap ? cap : (uint32_t)balance;
 +    return (uint32_t)balance;

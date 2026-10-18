@@ -739,7 +739,7 @@ and moves `taken` only as far as its host says it has the bytes, so a halt write
   `OP_CAP_INFO` on a `Clock` or a `Time` capability tells the tick, section 6.15, so a program need not assume one.
   A tick ends the running thread's turn:
   the thread goes to the back of its queue,
-  and the thread that has waited longest on the run queue runs,
+  and the thread with the earliest deadline on the run queue runs (with equal deadlines resolved in order of arrival),
   or, if the run queue is empty, the one that has waited longest on the spare queue.
   A thread that waits, or that a stop takes off the processor, hands the rest of the tick to the next,
   which pays for no more than it runs of it.

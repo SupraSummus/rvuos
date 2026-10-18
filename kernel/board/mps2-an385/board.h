@@ -53,6 +53,13 @@
 #define COUNTER_ADDR (FPGAIO_BASE + U32(0x18))
 #define COUNTER_HZ   U32(25000000)
 
+/*
+ * The counts a turn runs before a crossing preempts it: a switch and the trap's way back to user mode,
+ * at most 4096 instructions (summed in `design/time.md`). This ARM counter takes 40 instructions to the count
+ * under QEMU's -icount, so 4096/40 rounds up to 103.
+ */
+#define CROSS_QUANTUM U32(103)
+
 /* SysTick runs on the processor's clock, which is the system clock too; see kernel/arch/arm/systick.c. */
 #define SYSTICK_PER_COUNT 1
 

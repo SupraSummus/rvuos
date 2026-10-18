@@ -369,7 +369,14 @@ static uint32_t count_of(const struct place *p)
 /* A place's account at the count, its stamp's balance and its tick's gain every tick since, held to the cap. */
 static uint32_t account_now(const struct place *p)
 {
-    uint64_t balance = p->balance + (uint64_t)(count_of(p) - p->stamp) * tick_gain(p);
+    if (p->queue == QUEUE_RUN || is_turn(place_thread(p))) {
+        return p->balance;
+    }
+    uint32_t passed = count_of(p) - p->stamp;
+    if (passed >= ACCOUNT_TICKS) {
+        return account_cap(p);
+    }
+    uint64_t balance = p->balance + (uint64_t)passed * tick_gain(p);
     uint32_t cap = account_cap(p);
     return balance > cap ? cap : (uint32_t)balance;
 }
@@ -505,6 +512,12 @@ static void check_place(const struct thread *t, uint32_t i, uint32_t *held)
     }
     if ((int32_t)(count_of(p) - p->stamp) < 0) {
         fail("a place's account is stamped ahead of the count", v2p(t), p->stamp, count_of(p));
+    }
+    if (p->queue == QUEUE_RUN) {
+        uint32_t anchor = (uint32_t)((uint64_t)p->stamp * timer_tick_counts());
+        if (p->deadline != place_deadline_at(p, anchor)) {
+            fail("a place's deadline does not match its formula at its stamp", v2p(t), p->deadline, place_deadline_at(p, anchor));
+        }
     }
     if (p->core >= CORES) {
         fail("a place names a core there is not", v2p(t), i, p->core);
@@ -701,12 +714,27 @@ static void check_queue(paddr_t head, uint8_t queue, uint32_t core)
         }
         if (queue == QUEUE_RUN && place_units(p) != 0) {
             uint32_t u = place_units(p);
-            uint32_t w = place_window(p);
-            uint32_t gain = tick_gain(p);
-            uint32_t def = (gain == 0 || p->balance / gain >= ACCOUNT_TICKS) ? 0 : ACCOUNT_TICKS - p->balance / gain;
+            uint32_t cap = account_cap(p);
+            uint32_t def = p->balance >= cap ? 0 : (cap - p->balance + u - 1) / u;
+            uint64_t w = (uint64_t)place_window(p) * timer_tick_counts();
+            uint32_t N = 0;
+            uint32_t first_unit = core * TIME_UNITS;
+            for (uint32_t i = 0; i < TIME_UNITS; ) {
+                paddr_t pa = unit_place[first_unit + i];
+                const struct place *other = pa != 0 ? place_at(pa) : NULL;
+                uint32_t u_other = (other != NULL && range_first(place_time(other)) == first_unit + i) ? place_units(other) : 0;
+                if (other != NULL && other != p && u_other != 0) {
+                    N++;
+                }
+                i += u_other != 0 ? u_other : 1;
+            }
+            uint32_t qmin = CROSS_QUANTUM;
+            uint32_t B = debug_trace ? 0 : KERNEL_STEP_MAX_COUNTS;
             uint32_t others = TIME_UNITS - u;
-            uint32_t max_wait = 1 + others + (others * (def + w) + TIME_UNITS - 1) / TIME_UNITS;
-            uint32_t waited = sched_ticks - p->stamp;
+            uint64_t sum = (uint64_t)others * ((uint64_t)def + w);
+            uint32_t max_wait = B + N * qmin + (uint32_t)((sum + TIME_UNITS - 1) / TIME_UNITS);
+            uint32_t entry = (uint32_t)((uint64_t)p->stamp * timer_tick_counts());
+            uint32_t waited = (uint32_t)timer_sched_now() - entry;
             if (waited > max_wait) {
                 fail("a place on the run queue waited longer than its guarantee", v2p(p), waited, max_wait);
             }
@@ -730,6 +758,49 @@ static bool nothing_runs(void)
         }
     }
     return debug_trace || armed_sources == 0;
+}
+
+/*
+ * A crossing is armed on a core whose turn has time of its own and may not go on alone, when a thread waits on its run queue:
+ * at zero the turn's place may run its quantum and a switch and no more, so the crossing lies CROSS_QUANTUM counts at least,
+ * and the turn's place reaches the earliest waiting deadline within a rounding count of the arm minus that quantum.
+ * check_wake holds the tick's timer; this holds the sub-tick crossing, which is state on the host too, whatever the arming is.
+ */
+static void check_crossing(const struct core *c, uint32_t i)
+{
+    if (c->turn == NULL || c->run_queue == 0) {
+        return;
+    }
+    const struct place *p = turn_place(c);
+    if (p == NULL || sched_spare_turn(c) || place_units(p) == 0 || p->balance < tick_parts()) {
+        return;
+    }
+    uint32_t x = sched_crossing_counts_on(c, 0);
+    if (x < CROSS_QUANTUM) {
+        fail("a crossing is armed nearer than the switch it covers", x, CROSS_QUANTUM, i);
+    }
+    uint32_t theirs;
+    run_earliest(c, &theirs);
+    uint32_t mine = turn_deadline_on(c, p, 0);
+    if (!((int32_t)(mine - theirs) < 0)) {
+        if (x != CROSS_QUANTUM) {
+            fail("a crossing is armed past the wait the turn's place already reached", x, mine, theirs);
+        }
+        return;
+    }
+    uint32_t m = x - CROSS_QUANTUM;
+    /* Beyond a tick the turn's account would go below zero in the reads below; the tick's timer answers first. */
+    if (m + 1 > timer_tick_counts()) {
+        return;
+    }
+    uint32_t caught = turn_deadline_on(c, p, m + 1);
+    if ((int32_t)(caught - theirs) < 0) {
+        fail("a crossing lets the turn run past the wait", caught, theirs, x);
+    }
+    uint32_t before = turn_deadline_on(c, p, m > 0 ? m - 1 : 0);
+    if (!((int32_t)(before - theirs) < 0)) {
+        fail("a crossing is armed before the turn's place reaches the wait", before, theirs, x);
+    }
 }
 
 /*
@@ -838,6 +909,7 @@ static void check_core(uint32_t i)
     check_queue(c->run_queue, QUEUE_RUN, i);
     check_queue(c->spare_queue, QUEUE_SPARE, i);
     check_queue(c->spent_queue, QUEUE_SPENT, i);
+    check_crossing(c, i);
 }
 
 /*
@@ -939,6 +1011,19 @@ static void check_wake(void)
     uint32_t balance = account_now(p);
     bool time = balance >= tick_parts();
     bool alone = place_spare(p) && core->spare_queue == 0;
+    /*
+     * A turn that may go on alone on spare time changes nothing that runs, so the timer is set for the outer
+     * wake, the nearest deadline or release, and not for the tick its own account would drain.
+     * The place it reads must be the turn's on this core, whose account is the time it is charged;
+     * the check holds it to the wake the place on this core gives, whatever another core's place holds.
+     */
+    uint32_t outer = core->nearest_deadline - sched_ticks;
+    if ((int32_t)(core->nearest_release - core->nearest_deadline) < 0) {
+        outer = core->nearest_release - sched_ticks;
+    }
+    if (alone && wake != outer) {
+        fail("the timer wakes other than the deadline for a turn alone on spare time", wake, outer, 0);
+    }
     if (core->run_queue != 0 || (!time && !alone)) {
         fail("the timer lets a tick pass that ends the turn", wake, v2p(t), balance);
     }
@@ -959,6 +1044,17 @@ static void check_wake(void)
     }
     if (wake > core->nearest_deadline - sched_ticks) {
         fail("the timer lets the nearest deadline pass", wake, core->nearest_deadline, sched_ticks);
+    }
+    /*
+     * The wake is the first tick the turn's place drains at, or the outer one, whichever is nearer: not another.
+     * After the bounds above, so a wake past the release is still reported as the release and not as a drain.
+     */
+    if (time && !alone) {
+        uint32_t drain = turn_drain(p);
+        uint32_t expected = drain < outer ? drain : outer;
+        if (wake != expected) {
+            fail("the timer is set for another tick than the turn's place drains at", wake, expected, 0);
+        }
     }
 }
 

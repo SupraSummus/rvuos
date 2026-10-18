@@ -1403,7 +1403,7 @@ void fault_dispatch(struct thread *t)
     if (debug_trace) {
         trace_wake();
     }
-    sched_run_next();
+    sched_turn_end();
     if (debug_trace) {
         selfcheck_run();
     }

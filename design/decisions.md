@@ -788,19 +788,24 @@ until the maintainer decides otherwise.
     - **Groups and forks**, arming several routes at once and a second task per event, as the PPI has.
 
 38. **Time as deadlines from the accounts, a window, and sub-tick crossing timers.**
-    Proposed: one mechanism for how much of a core a thread may take and how soon it runs,
+    Decided: one mechanism for how much of a core a thread may take and how soon it runs,
     in place of taking turns on the macro tick;
     it answers open decisions 9 and 18 together, and most of 36.
-    Working default: none of it, see "Scheduling".
     A thread's deadline is the counter count at which its account would be full again, plus its window.
     The account stays as it is: its units earn it, a turn spends it,
     and it holds a tenth of a second's worth at most.
     The count at which the account would be full again is the thread's virtual time.
-    While the thread waits on a run queue, that count stays put,
-    because the account gains one count's worth of its units every count;
-    once full, it moves with the clock.
-    While the thread runs and pays for its turn with u units,
-    that count moves forward by 64 / u counts per count of work.
+    Every field of `struct place` has a single meaning and single time base in all states:
+    `stamp` returns to its single role of anchoring unit account refills in macro-ticks (`core->ticks` or `sched_ticks`).
+    The EDF deadline is stored in its own dedicated field, `uint32_t deadline`, computed in hardware counter counts
+    relative to kernel boot (`timer_sched_now()`) when entering `QUEUE_RUN`.
+    This expands `struct place` from 24 to 28 bytes (+4 bytes per place, 256 bytes per 64-place core),
+    justified because it cleanly separates the time domains (macro-ticks vs hardware clock counts),
+    preserves exact equality invariants in self-check (`own->stamp == c->ticks`, `paid->stamp == c->ticks`),
+    and allows `run_earliest` to read `p->deadline` directly in O(1) without recomputing `deadline_of` during queue scans.
+    While the thread waits on a run queue, that deadline stays put;
+    while the thread runs and pays for its turn with u units,
+    its dynamic turn deadline moves forward by 64 / u counts per count of work.
     The window is a power of two of ticks, or zero by default,
     set in a4 at `OP_TIME_BIND` and kept in the spare byte of `struct place`.
     The order is earliest deadline first:
@@ -808,19 +813,32 @@ until the maintainer decides otherwise.
     When a thread becomes ready with a deadline before the running turn's,
     it preempts at the end of the trap.
     When the running turn's deadline crosses the earliest waiting deadline,
-    the hardware timer preempts, with a minimal hysteresis quantum (Q_min)
-    preventing rapid alternation between close deadlines.
+    the hardware timer preempts, with a hysteresis quantum `CROSS_QUANTUM`:
+    a per-board count of the counter (beside `COUNTER_HZ`) that covers one turn switch
+    and the kernel's way back to user mode from the comparator write, with room to spare,
+    so every turn runs its quantum before a crossing preempts it, and a crossing costs a switch, not a count.
+    A waiting deadline already at or before the turn's takes the core at that quantum too, not at the next tick;
+    equal deadlines likewise let the running turn have its quantum before the waiting one is served.
     Because the units on a core add up to the whole core (64),
     earliest deadline first needs no separate admission check:
     a job of cost c, made ready while the account is full, finishes within
-    (64 * c) / u + (64 - u) * (def + w) / 64 + N * Q_min + B,
+    (64 * c) / u + (64 - u) * (def + w) / 64 + N * CROSS_QUANTUM + B,
     whatever other threads do (Zhang's virtual clock, served by Goyal's start times, which EEVDF refines).
     A ready thread's wait before acquiring the core is bounded by:
-    waited <= B + N * Q_min + ((64 - u) * (def + w) + 63) / 64, with Q_min >= 1
-    covering the fractional crossing count of a turn crossing mid-count.
+    waited <= B + N * CROSS_QUANTUM + ((64 - u) * (def + w) + 63) / 64.
     The start bound is proved inductively in Lean 4 (`model/Rvuos/Sched.lean`)
     both from arrival t0 and for a busy period beginning at tau <= t0;
     the finish bound is derived analytically from the completion busy period up to D' = dT + 64 * c / u.
+    The bound is a capacity rule, not a count promised for one workload:
+    a place of c counts of work in a window D, with u units and a full account,
+    meets D when 64*c/u + N*CROSS_QUANTUM + B <= D,
+    so a core holds N such places beside it at most, where
+    N <= min((D - 64*c/u - B) / CROSS_QUANTUM, (64 - u)/u),
+    the second term the units' admission bound and the first the time's.
+    `CROSS_QUANTUM` covers a switch, at most 4096 instructions, summed part by part in `time.md`;
+    an example of drivers of 10 us of work in a 100 us window, and what that window holds at two frequencies,
+    is in `time.md`.
+    Link-time bounding of the longest kernel step B in cycles remains open in `TODO.md`.
     Weighed and left:
     - **Constant bandwidth servers** (Abeni and Buttazzo, Linux `SCHED_DEADLINE`):
       a budget Q per period P, refilled at the deadline.

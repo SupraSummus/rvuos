@@ -191,57 +191,103 @@ as a notification's waiters are a ring of threads through the thread's:
 the run queue while it has time, the spare queue without time if it may run on spare time,
 and the spent queue otherwise, where a thread with units waits for its account.
 The thread with the earliest deadline on the run queue has the next turn, or with the run queue empty the oldest on the spare queue.
-A place's deadline is anchored to its count stamp at queue entry: the tick its account would be full again if it did not run, plus a delay window chosen at binding:
+A place's deadline is anchored in counter counts at queue entry (`timer_now()`): the count its account would be full again if it did not run, plus a delay window chosen at binding:
 none (zero) or a power of two up to 2^15 ticks, passed in register `a4` to `OP_TIME_BIND`.
-While waiting on the run queue, the place's count stamp is frozen so its deadline stands still,
-rather than floating forward with the tick count;
-once it runs, each tick it pays for moves its stamp to the current tick and debits its account, advancing its deadline accordingly.
-A thread that joins the run queue with a deadline before that of the turn's payer takes the processor as the trap ends,
-as from a turn on spare time.
+Each field of `struct place` maintains a single meaning and time base across all states (28 bytes layout):
+`stamp` records the macro-tick count (`core->ticks` or `sched_ticks`) from when the unit account was last refilled,
+while `deadline` holds the 32-bit hardware count virtual deadline relative to kernel boot (`timer_sched_now()`).
+When a place joins `QUEUE_RUN`, its dynamic deadline is computed once and stored in `p->deadline`:
+`d = timer_sched_now() + def + w`, where `def = (cap - balance + u - 1) / u` counts and `w = window * tick_counts`.
+While waiting on the run queue, this deadline stands still; `run_earliest` reads it directly in O(1) without recomputing.
+While running, each count of work costs 64 parts, advancing the running turn's virtual deadline by `64 / u` counts per count of work:
+`d(t) = d(0) + (64 * elapsed) / u`.
+When a thread joins the run queue with a deadline before that of the turn's payer, it takes the processor as the trap ends.
+When the running turn's deadline crosses the earliest waiting deadline on the run queue,
+the hardware timer compare is armed at that crossing plus `CROSS_QUANTUM` counts (`sched_crossing_counts`),
+preempting the running turn via timer interrupt.
+`CROSS_QUANTUM` is a per-board count of the counter, beside `COUNTER_HZ`, that covers one turn switch
+and the kernel's way back to user mode from the comparator write, with room to spare;
+so every turn runs at least that quantum before a crossing preempts it, and a crossing costs a switch, not a count.
+A waiting deadline already at or before the turn's is served at that quantum from the write, not at the next tick,
+so equal or inverted deadlines do not leave the turn holding the core to the tick.
+The count is a pure read of the scheduler's state (`sched_crossing_counts_on`), so the kernel's self-check holds
+the timer to it on the host, where no crossing is armed; `timer_set` alone arms the compare,
+on hardware and under QEMU, where a crossing is a real timer interrupt and the traces would move.
 
-**The delay guarantee.**
-A place with `u` units (`u > 0`), delay window `w`, and deficit `def` ticks short of cap
+**The delay and completion guarantee.**
+A place with `u` units (`u > 0`), delay window `w`, and deficit `def` counts short of cap
 (where `def = 0` when the account has reached `account_cap`),
-queued on the run queue at tick `t0`,
-is guaranteed to acquire its next turn by a tick `X` satisfying:
+queued on the run queue at count `t0`,
+is guaranteed to acquire the processor by count `X` satisfying:
 
-`X <= t0 + 1 + (TIME_UNITS - u) + ceil((1 - u / TIME_UNITS) * (def + w))`
+`X <= t0 + B + N * CROSS_QUANTUM + ceil((64 - u) * (def + w) / 64)`
 
-When its account is full (`def = 0`), this simplifies to:
+where `N` is the number of other places with units on the core (`N <= 64 - u`),
+`CROSS_QUANTUM` the per-board counts above, and `B` is the longest non-preemptible kernel step.
+When its account is full (`def = 0`) and `w = 0`:
 
-`X <= t0 + 1 + (TIME_UNITS - u) + ceil((1 - u / TIME_UNITS) * w)`
+`X <= t0 + B + N * CROSS_QUANTUM`
 
-and for an interactive thread without a window (`w = 0`):
+A job of cost `c` counts made ready at `t0` finishes its execution by count `t_finish` satisfying:
 
-`X <= t0 + 1 + (TIME_UNITS - u)`
+`t_finish <= t0 + ceil(64 * c / u) + ceil((64 - u) * (def + w) / 64) + N * CROSS_QUANTUM + B`
 
-The bound is derived from the busy period leading up to the turn:
-- **Integer tick granularity:** A running turn can finish at most 1 tick before preemption takes effect.
-- **Preemption on wake:** A thread joining with an earlier deadline than the running turn's payer preempts at the end of the trap (`deadline_due`).
-- **Tie-breaking:** Ties in deadline are resolved in FIFO queue order (`run_earliest`),
-  so at most `N_ahead <= TIME_UNITS - u` tied places can precede it, each running at most 1 tick before its deadline advances.
-- **Competitor rate limit:** Only threads with deadlines at or before `D = t0 + def + w` can run before this place.
-  Consider the busy period starting at tick `tau <= t0`,
-  the most recent tick when the core was idle, on spare time, or running a thread with a deadline after `D`.
-  All competing places running before `t0 + W` arrived at or after `tau` with initial deadlines at or after `tau`.
-  Each tick executed by a competitor with `ui` units advances its deadline by `TIME_UNITS / ui` ticks,
-  so competitors combined (holding at most `TIME_UNITS - u` units) can run at most `((TIME_UNITS - u) / TIME_UNITS) * (D - tau)` ticks before their deadlines exceed `D`.
-  The busy period duration satisfies `(t0 + W) - tau <= 1 + N_ahead + ((TIME_UNITS - u) / TIME_UNITS) * (D - tau)`.
-  Writing `delta = t0 - tau >= 0` and `D - tau = delta + def + w`,
-  subtracting `delta` yields `W <= 1 + N_ahead - (u / TIME_UNITS) * delta + (1 - u / TIME_UNITS) * (def + w)`.
-  Because `u >= 1` and `delta >= 0`, any backlog from before `t0` shrinks during `delta`,
-  and the worst case occurs at `delta = 0`.
-- **Lent time:** A borrower without time runs on its lender's place and units (`place_lender`),
-  so the guarantee holds through the lender's account.
+The start bound is proved inductively in Lean 4 (`model/Rvuos/Sched.lean`)
+both from arrival `t0` and across any busy period beginning at `tau <= t0`.
+The completion bound is derived from the busy period up to `D' = d_T + 64 * c / u`.
+
+**What a core holds.**
+The bound is a capacity rule, not a count promised for one workload.
+A place with `u` units and work of `c` counts, ready with a full account (`def = 0`, `w = 0`),
+finishes by `t_finish <= t0 + ceil(64 * c / u) + N * CROSS_QUANTUM + B`,
+where `N` is the number of other places with units on the core (`N <= 64 - u`), `B` the longest kernel step,
+and `CROSS_QUANTUM` one crossing switch.
+It meets a window `D` when `ceil(64 * c / u) + N * CROSS_QUANTUM + B <= D`, so the core holds, beside it,
+
+`N <= min((D - ceil(64 * c / u) - B) / CROSS_QUANTUM, (64 - u) / u)`
+
+places, the second term the units' admission bound and the first the time's.
+The window, the work, the units and the core's frequency set the count; nothing is promised of itself.
+
+For a core holding equal drivers that each need `c = 10 us` of work in a window `D = 100 us`:
+with `N + 1` of them of `u = 64 / (N + 1)` units each, `64 * c / u = 10 (N + 1)`,
+so the worst finishes by `10 (N + 1) + N * CROSS_QUANTUM + B`, and the window holds while
+`10 + (10 + CROSS_QUANTUM / us) * N <= 100 - B`.
+At 240 MHz `CROSS_QUANTUM` is 4096 cycles, `17.1 us`, so `27.1 * N <= 90 - B` and `N = 3`:
+four drivers of `u = 16` units. At 20 MHz the same switch is `204.8 us`, `N = 0`: one driver.
+
+Bounding the longest kernel step `B` in cycles at link time remains an open item in `TODO.md`.
+In the kernel self-check, the same bound is checked with `qmin = CROSS_QUANTUM`, `N` the run queue's places with units,
+and `B` bounded coarsely by `KERNEL_STEP_MAX_COUNTS = 66000u` (zeroing the largest kernel object, `CAPTABLE_MAX_SLOTS = 1024`, 16 KiB).
+
+**How `CROSS_QUANTUM` is bounded, part by part.**
+The path it covers is one turn switch and the trap's way back to user mode from the comparator write.
+Each part's dynamic worst case is its code at most once plus the extra rounds of each loop it runs,
+the loops bounded in `kernel/work.h` (`run_earliest` at `TIME_UNITS` places, `place_lender` at `LEND_DEPTH`,
+`thread_settle` at `CORES`, `pmp_load` at the protection unit's entries).
+The instruction counts are read from the three boards' disassembly; the two `run_earliest` walks,
+one in the crossing check and one in `next_turn`, dominate.
+
+| Part | RISC-V (instructions) | ARM (instructions) |
+|---|---:|---:|
+| `run_earliest`, 64 places × 16 / 15 | 1024 | 960 |
+| `run_earliest` again, in `next_turn` | 1024 | 960 |
+| `next_turn` without that walk | 302 | 280 |
+| `place_settle`, its two settlers | 820 | 838 |
+| `place_lender` | 134 | 135 |
+| `sched_turn_end`, `payer_drop`, `thread_settle` | 152 | 115 |
+| `sched_wake`, `spare_end`, `sched_wake_ticks` | 240 | 225 |
+| `switch_to`, `process_activate`, `pmp_load` | 205 | 243 |
+| the trap's way back to user mode (frame restore, `mret`/exception return) | 128 | 128 |
+| **sum** | **4029** | **3884** |
+
+Both sums lie under **4096 instructions**, the bound `CROSS_QUANTUM` is sized from; the per-board value divides it
+by the instructions one counter count spans (100, 40, 50 on the QEMU boards; the processor-to-counter ratio elsewhere).
 
 **What the guarantee does not promise.**
 Admission control is enforced by units alone:
 `OP_TIME_BIND` refuses any unit already earned by another thread's place,
-so the sum of units on a core never exceeds `TIME_UNITS` and the scheduler's plan is always feasible.
-The tick `X` is when the thread receives the processor,
-not when it finishes its job;
-translating an application deadline (such as a device driver having to respond within a given time) into units and window is the programmer's concern,
-as the kernel knows nothing of userspace work lengths.
+so the sum of units on a core never exceeds `TIME_UNITS` (64) and the scheduler's plan is always feasible.
 Overload is confined to the offender:
 a thread that attempts to run beyond its budget drains its account and waits on `QUEUE_SPENT`,
 leaving other threads' guarantees undisturbed.

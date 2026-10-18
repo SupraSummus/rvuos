@@ -27,7 +27,10 @@ namespace Rvuos
 /-- Total units per core. -/
 def timeUnits : Nat := 64
 
-/-- The Start Bound: maximum counts place T waits before acquiring the processor. -/
+/-- The Start Bound: maximum counts place T waits before acquiring the processor.
+    `qmin` is the kernel's crossing quantum, `CROSS_QUANTUM`: a per-board count of the counter
+    that covers one turn switch and the kernel's way back to user mode from the comparator write,
+    so a crossing costs a switch, not a count. The proof needs only `qmin ≥ 1`. -/
 def maxWait (uT defT wT N qmin B : Nat) : Nat :=
   B + N * qmin + ((timeUnits - uT) * (defT + wT) + (timeUnits - 1)) / timeUnits
 
@@ -38,6 +41,8 @@ structure Competitor where
   u : Nat
   v : Nat
   active : Bool
+  /- The counts this competitor may still run past the crossing before it is preempted,
+     at most the kernel's `CROSS_QUANTUM`; its turn costs a switch, not a bare count. -/
   qmin_rem : Nat
   crossed : Bool
 deriving Repr, Inhabited

@@ -87,6 +87,15 @@ uint32_t timer_count(void)
 void timer_set(uint32_t ticks)
 {
     uint64_t at = timer_deferred(next_tick, ticks, tick_counts);
+    /* The crossing is armed on hardware and QEMU only; the self-check reads its count on the host. */
+    uint32_t cross = debug_trace ? 0 : sched_crossing_counts();
+    if (cross != 0) {
+        /* The count is read here, so the compare lies cross counts ahead of where the counter is now. */
+        uint64_t target = counter_read() + cross;
+        if (target < at) {
+            at = target;
+        }
+    }
     uint64_t *held = &compare[core_index()];
     if (at != *held) {
         *held = at;
@@ -102,6 +111,11 @@ uint32_t timer_counter_hz(void)
 uint64_t timer_now(void)
 {
     return debug_trace ? (uint64_t)sched_ticks * tick_counts : counter_read();
+}
+
+uint64_t timer_sched_now(void)
+{
+    return (uint64_t)sched_ticks * tick_counts + (debug_trace ? 0 : timer_offset());
 }
 
 /* next_tick lies a period past the last counted tick, which the counter has reached. */
@@ -134,6 +148,10 @@ void timer_trap_tick(void)
     if (debug_trace) {
         timer_count();
         timer_set(1);
+    } else {
+        struct core *core = core_self();
+        core->wake_stale = true;
+        core->run_crossed = true;
     }
 }
 
@@ -148,8 +166,8 @@ void timer_trap_leave(bool traced)
     const struct core *core = core_self();
     if (core->turn_due || core->wake_stale) {
         uint32_t wake = sched_wake();
-        if (!debug_trace && wake != 0) {
-            timer_set(wake);
+        if (!debug_trace) {
+            timer_set(wake != 0 ? wake : core->wake_tick > core->ticks ? core->wake_tick - core->ticks : 1);
         }
     }
     if (debug_trace && !traced) {

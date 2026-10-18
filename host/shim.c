@@ -258,6 +258,11 @@ uint64_t timer_now(void)
     return (uint64_t)sched_ticks * timer_tick_counts();
 }
 
+uint64_t timer_sched_now(void)
+{
+    return (uint64_t)sched_ticks * timer_tick_counts();
+}
+
 /* QEMU's board has no watchdog of its own. */
 void board_watchdog(uint32_t us)
 {

@@ -1,0 +1,20 @@
+The crossing count is always zero, so no crossing is ever armed:
+a thread whose deadline the running turn's reaches waits for the core's next macro tick,
+not the moment between ticks the deadline crosses at.
+The self-check's crossing equality still holds only while the count is the one the state gives.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
+Report: a crossing is armed nearer than the switch it covers
+Witness: fuzz lend-borrower-queued
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -1366,6 +1366,7 @@
+  */
+ uint32_t sched_crossing_counts_on(const struct core *core, uint32_t offset)
+ {
++    return 0;
+     if (core->turn == NULL || core->run_queue == 0) {
+         return 0;
+     }

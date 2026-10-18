@@ -9,10 +9,10 @@ Witness: fuzz actor-handoff
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -462,7 +462,6 @@ static struct thread *next_turn(uint32_t offset)
-     struct thread *t = place_thread(p);
-     place_unqueue(p);
+@@ -596,7 +596,6 @@ static struct thread *next_turn(uint32_t offset)
      turn_take(t);
+     /* A new turn may cross the run queue's earliest deadline at another count: the timer is set again as the trap leaves. */
+     core->wake_stale = true;
 -    account_refill(p);
      struct place *l = has_time(p->balance) ? NULL : place_lender(p);
      if (l != NULL && has_time(account_now(l))) {

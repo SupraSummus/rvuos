@@ -12,13 +12,14 @@ volatile uint32_t spins[SPINNERS];
 #define DODGE_US 80000u
 static uint32_t dodge_counter, dodge_counts;
 static volatile uint32_t dodges;
+static volatile uint32_t probe_latency;
+static volatile uint32_t probe_ran;
 
 /* The spinners: each counts in the word its argument names and never waits. */
 static void spinner_main(uint32_t i)
 {
-    for (;;) {
+    for (;;)
         spins[i]++;
-    }
 }
 
 /*
@@ -39,6 +40,22 @@ static void dodger_main(void)
         while (*low - start < dodge_counts) {
         }
         dodges++;
+    }
+}
+
+/*
+ * The probe: placed on QUEUE_RUN alongside a running spinner with an earlier
+ * initial deadline. When the spinner's deadline crosses the probe's deadline,
+ * crossing preemption switches to the probe, which records the counter, signals root,
+ * and loops until root revokes units.
+ */
+static void probe_main(void)
+{
+    const volatile uint32_t *low = (const volatile uint32_t *)dodge_counter;
+    probe_latency = *low;
+    probe_ran = 1;
+    rv_signal(SLOT_DODGER_NTFN, 1);
+    for (;;) {
     }
 }
 
@@ -213,4 +230,81 @@ void units_demo(uint32_t data_base, uint32_t data_size, uint32_t counter, uint32
     expect("the only thread to run spun through the ticks",
            4 * traps < SPIN_US / tick_us ? KERR_OK : KERR_INVALID_ARG);
     puts("root: tickless ok\n");
+
+    /*
+     * Sub-tick preemption by deadline crossing; see DESIGN.md, "Scheduling".
+     *
+     * Theoretical derivation of wait times:
+     * Synchronize to a macro tick boundary so a full tick (~tick_counts counts) lies ahead.
+     * The spinner runs with u_C = 7 units and window w_C = 0 (deadline d_C = t_0).
+     * The probe waits on QUEUE_RUN with u_P = 7 units and window w_P = 1 tick (deadline d_P = t_0 + tick_counts).
+     * Both places have full accounts (def = 0).
+     *
+     * Because d_C < d_P, the spinner runs first. As it executes Delta t counts, its virtual
+     * deadline advances at rate (64 / u_C) * Delta t = (64 / 7) * Delta t.
+     * The spinner's deadline crosses the probe's deadline when:
+     *   t_0 + (64 / 7) * Delta t_cross = t_0 + tick_counts
+     *   Delta t_cross = (7 / 64) * tick_counts (~109 us at 10 MHz CLINT / 25 MHz MPS2).
+     *
+     * With the hardware crossing timer armed at t_0 + Delta t_cross:
+     *   The crossing timer preempts the spinner sub-tick, giving:
+     *     waited_with_crossing <= (7 / 64) * tick_counts + B <= 0.11 * tick_counts + B.
+     *     On QEMU (tick_counts = 10000, B <= 2000): waited <= 3100 counts (~310 us).
+     *
+     * Without the crossing timer (e.g. crossing-never-armed):
+     *   No sub-tick interrupt occurs; the spinner occupies the core for the entire remainder
+     *   of the macro tick until next_tick:
+     *     waited_without_crossing >= tick_counts - overhead (~10000 counts = 1000 us).
+     *
+     * Setting the threshold to tick_counts / 2 (5000 counts = 500 us) strictly separates the two:
+     *   waited_with_crossing <= 3100 < tick_counts / 2 < 9500 <= waited_without_crossing.
+     */
+    probe_latency = 0;
+    probe_ran = 0;
+    uint32_t was;
+    expect("stop the probe thread", rv_thread_stop(SLOT_DODGER, &was));
+    expect("stop the spinner thread", rv_thread_stop(SLOT_SPINNER, &was));
+    expect("reconfigure the probe thread",
+           rv_invoke(OP_THREAD_CONFIGURE, SLOT_DODGER, (uint32_t)&probe_main,
+                     data_base + data_size / 4 - SPINNERS * SPINNER_STACK, 0));
+    expect("reconfigure the spinner thread",
+           rv_invoke(OP_THREAD_CONFIGURE, SLOT_SPINNER, (uint32_t)&spinner_main,
+                     data_base + data_size / 4 - SPINNER_STACK, 0));
+
+    expect("bind probe with 1-tick window",
+           rv_time_bind(SLOT_HALF_TIME, SLOT_DODGER, 7, 7, 1));
+    expect("bind spinner without window",
+           rv_time_bind(SLOT_HALF_TIME, SLOT_SPINNER, 0, 7, 0));
+
+    /* Sleep while both threads are stopped so their accounts fill to cap. */
+    expect("let both accounts fill", sleep_us(15000));
+
+    /* Synchronize to the start of a macro tick using a 0-delay timer line. */
+    expect("arm timer for next tick", rv_timer_set(SLOT_DODGER_TIMER, BIT_TIMER, 0));
+    uint32_t bits;
+    expect("wait for tick boundary", rv_wait(SLOT_DODGER_NTFN, &bits));
+    expect("cancel sync timer", rv_timer_set(SLOT_DODGER_TIMER, 0, 0));
+
+    /* At the start of the tick, place spinner and probe on QUEUE_RUN. */
+    expect("resume the spinner thread",
+           rv_invoke(OP_THREAD_RESUME, SLOT_SPINNER, 0, 0, 0));
+    expect("resume the probe thread",
+           rv_invoke(OP_THREAD_RESUME, SLOT_DODGER, 0, 0, 0));
+
+    /* Arm timeout so failure reports instead of hanging indefinitely. */
+    expect("arm timeout timer", rv_timer_set(SLOT_DODGER_TIMER, BIT_TIMER, 50000u));
+    const volatile uint32_t *low = (const volatile uint32_t *)counter;
+    uint32_t t_start = *low;
+
+    /* Root blocks, yielding the core to the spinner (d_C < d_P). */
+    expect("wait for probe to preempt spinner and signal",
+           rv_wait(SLOT_DODGER_NTFN, &bits));
+    expect("cancel timeout timer", rv_timer_set(SLOT_DODGER_TIMER, 0, 0));
+    expect("take units back",
+           rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_HALF_TIME, 0, 0));
+    expect("the probe thread ran", probe_ran != 0 ? KERR_OK : KERR_INVALID_ARG);
+    uint32_t waited = probe_latency - t_start;
+    expect("subtick crossing preempted before half a tick",
+           waited < tick_counts / 2 ? KERR_OK : KERR_INVALID_ARG);
+    puts("root: subtick ok\n");
 }

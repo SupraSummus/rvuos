@@ -29,6 +29,6 @@ diff --git a/kernel/sched.c b/kernel/sched.c
      struct core *core = core_self();
 -    if (core->current->state != THREAD_READY) {
 +    if (core->current->state != THREAD_READY || thread_place_on(core->current, core_index()) == NULL) {
-         sched_run_next();
+         sched_turn_end();
      } else {
          spare_end(core);

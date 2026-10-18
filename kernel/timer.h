@@ -97,6 +97,13 @@ uint32_t timer_counter_hz(void);
  */
 uint64_t timer_now(void);
 
+/*
+ * The kernel's time base for place stamps and deadlines:
+ * under tracing, sched_ticks * tick_counts;
+ * without tracing, counter_read() minus the counter at boot.
+ */
+uint64_t timer_sched_now(void);
+
 /* The counter's counts per tick, at most TICK_COUNTS_MAX; inline, since a switch reads it a dozen times and more. */
 extern uint32_t tick_counts;
 

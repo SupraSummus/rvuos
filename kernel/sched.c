@@ -172,7 +172,7 @@ static struct thread *turn_payer(const struct core *core)
 }
 
 /* The place a core's turn is charged to: the payer's place on the core, NULL with no turn, or no such place. */
-static struct place *turn_place(const struct core *core)
+struct place *turn_place(const struct core *core)
 {
     const struct thread *payer = turn_payer(core);
     return payer != NULL ? thread_place_on(payer, (uint32_t)(core - cores)) : NULL;
@@ -199,7 +199,11 @@ static uint32_t count_of(const struct place *p)
 /* A place's account at the count: it gains its tick's parts every tick since its stamp, up to its cap. */
 static uint32_t account_now(const struct place *p)
 {
-    uint64_t balance = p->balance + (uint64_t)(count_of(p) - p->stamp) * tick_gain(p);
+    uint32_t passed = count_of(p) - p->stamp;
+    if (passed >= ACCOUNT_TICKS) {
+        return account_cap(p);
+    }
+    uint64_t balance = p->balance + (uint64_t)passed * tick_gain(p);
     uint32_t cap = account_cap(p);
     return balance > cap ? cap : (uint32_t)balance;
 }
@@ -247,10 +251,15 @@ static uint32_t account_after(uint32_t balance, uint32_t units, uint32_t ticks)
  * a count's parts for each count from turn_from, if it had time as the turn began, and nothing on spare time.
  * A turn with time began with a tick in the account and owes at most the rest of the tick, so the account covers it.
  */
+static uint32_t turn_owes_on(const struct core *core, const struct place *p, uint32_t offset)
+{
+    uint32_t from = core->turn_from;
+    return offset > from && p != NULL && has_time(p->balance) ? COUNT_PARTS * (offset - from) : 0;
+}
+
 static uint32_t turn_owes(const struct place *p, uint32_t offset)
 {
-    uint32_t from = core_self()->turn_from;
-    return offset > from && p != NULL && has_time(p->balance) ? COUNT_PARTS * (offset - from) : 0;
+    return turn_owes_on(core_self(), p, offset);
 }
 
 /* The account of the turn's place, p, at the next tick: it pays for the rest of this one and earns the gain. */
@@ -264,8 +273,9 @@ static uint32_t turn_next(const struct place *p)
  * The ticks from the count to the one that drains the account of the turn's place, p, which has time:
  * the first to leave it less than a tick; NEAREST_NONE for none, with the whole processor.
  * After the next tick every tick costs the account a tick less the gain.
+ * The self-check holds the timer to it; see check_wake in kernel/selfcheck.c.
  */
-static uint32_t turn_drain(const struct place *p)
+uint32_t turn_drain(const struct place *p)
 {
     uint32_t next = turn_next(p);
     if (!has_time(next)) {
@@ -339,6 +349,33 @@ static uint8_t place_queue(const struct place *p, uint32_t balance, const struct
 }
 
 /*
+ * The deadline of a place whose account at balance was stamped at count at; NEAREST_NONE ahead without units.
+ * At count at the account is (cap - balance) / u counts short of full,
+ * and the window follows once the account is full.
+ */
+static uint32_t deadline_of(const struct place *p, uint32_t balance, uint32_t at)
+{
+    uint32_t u = place_units(p);
+    if (u == 0) {
+        return at + NEAREST_NONE;
+    }
+    uint32_t cap = account_cap(p);
+    uint32_t def = balance >= cap ? 0 : (cap - balance + u - 1) / u;
+    uint64_t w = (uint64_t)place_window(p) * timer_tick_counts();
+    return at + def + (uint32_t)w;
+}
+
+/* A queued place's deadline: its own account's while it has time, else its lender's. */
+uint32_t place_deadline_at(const struct place *p, uint32_t at)
+{
+    if (has_time(p->balance) || (place_units(p) != 0 && has_time(account_now(p)))) {
+        return deadline_of(p, p->balance, at);
+    }
+    const struct place *l = place_lender(p);
+    return l != NULL ? deadline_of(l, l->balance, at) : at + NEAREST_NONE;
+}
+
+/*
  * Bring a place's account up to the count and move the place to the queue it now waits on,
  * or take it off the one it was on.
  * A place waits on the queues of the core whose time it holds, so one emptied leaves its queue.
@@ -370,6 +407,9 @@ static void place_settle(struct place *p)
             ring_push(queue_head(core, queue), v2p(p), QUEUED);
         }
         p->queue = queue;
+        if (queue == QUEUE_RUN) {
+            p->deadline = place_deadline_at(p, (uint32_t)((uint64_t)p->stamp * timer_tick_counts()));
+        }
     }
     /* Neither account holds a tick there, or the place would have the run queue. */
     uint32_t fill = NEAREST_NONE;
@@ -456,6 +496,10 @@ static void payer_drop(void)
     struct thread *payer = core->payer;
     core->payer = NULL;
     if (payer != NULL) {
+        for (uint32_t i = 0; i < thread_places(payer); i++) {
+            LOOP_BOUND(CORES);
+            thread_place(payer, i)->stamp = count_of(thread_place(payer, i));
+        }
         thread_settle(payer);
     }
 }
@@ -494,32 +538,11 @@ static void turn_take(struct thread *t)
 
 
 /*
- * The deadline of a place whose account at balance was counted to the tick at; NEAREST_NONE ahead without units.
- * At the tick at the account is ACCOUNT_TICKS - balance / gain ticks short of full,
- * and the window follows once the account is full.
+ * The place on a core's run queue with the earliest deadline, the oldest of those tied, and that deadline.
+ * `noinline`: without it clang merges this loop into its callers' code and `tools/loop-bounds.py`
+ * reads the merged loop as one of no source loop, failing the link on ARM.
  */
-static uint32_t deadline_of(const struct place *p, uint32_t balance, uint32_t at)
-{
-    uint32_t gain = tick_gain(p);
-    if (gain == 0) {
-        return sched_ticks + NEAREST_NONE;
-    }
-    uint32_t left = balance / gain >= ACCOUNT_TICKS ? 0 : ACCOUNT_TICKS - balance / gain;
-    return at + left + place_window(p);
-}
-
-/* A queued place's deadline: its own account's while it has time, else its lender's. */
-static uint32_t place_deadline(const struct place *p)
-{
-    if (has_time(p->balance) || (place_units(p) != 0 && has_time(account_now(p)))) {
-        return deadline_of(p, p->balance, p->stamp);
-    }
-    const struct place *l = place_lender(p);
-    return l != NULL ? deadline_of(l, l->balance, l->stamp) : sched_ticks + NEAREST_NONE;
-}
-
-/* The place on a core's run queue with the earliest deadline, the oldest of those tied, and that deadline. */
-static struct place *run_earliest(const struct core *core, uint32_t *deadline)
+__attribute__((noinline)) struct place *run_earliest(const struct core *core, uint32_t *deadline)
 {
     paddr_t at = core->run_queue;
     struct place *best = NULL;
@@ -527,7 +550,7 @@ static struct place *run_earliest(const struct core *core, uint32_t *deadline)
     for (uint32_t i = 0; i < TIME_UNITS; i++) {
         LOOP_BOUND(TIME_UNITS);
         struct place *p = p2v(at);
-        uint32_t d = place_deadline(p);
+        uint32_t d = p->deadline;
         if (best == NULL || tick_before(d, best_at)) {
             best = p;
             best_at = d;
@@ -539,6 +562,21 @@ static struct place *run_earliest(const struct core *core, uint32_t *deadline)
     }
     *deadline = best_at;
     return best;
+}
+
+/*
+ * The deadline of the turn's place p on this core, offset counts into the tick:
+ * its account holds its balance at the tick's start, less what the turn owes since it began.
+ */
+uint32_t turn_deadline_on(const struct core *core, const struct place *p, uint32_t offset)
+{
+    uint32_t at = (uint32_t)((uint64_t)core->ticks * timer_tick_counts());
+    return deadline_of(p, p->balance - turn_owes_on(core, p, offset), at);
+}
+
+static uint32_t turn_deadline(const struct place *p, uint32_t offset)
+{
+    return turn_deadline_on(core_self(), p, offset);
 }
 
 /*
@@ -554,6 +592,7 @@ static struct thread *next_turn(uint32_t offset)
     struct core *core = core_self();
     core->turn_from = offset;
     core->run_joined = false;
+    core->run_crossed = false;
     struct place *p;
     if (core->run_queue != 0) {
         uint32_t deadline;
@@ -566,6 +605,8 @@ static struct thread *next_turn(uint32_t offset)
     struct thread *t = place_thread(p);
     place_unqueue(p);
     turn_take(t);
+    /* A new turn may cross the run queue's earliest deadline at another count: the timer is set again as the trap leaves. */
+    core->wake_stale = true;
     account_refill(p);
     struct place *l = has_time(p->balance) ? NULL : place_lender(p);
     if (l != NULL && has_time(account_now(l))) {
@@ -619,7 +660,8 @@ void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights,
      * What the account held stays, and settling holds it to what the new units hold at most.
      * It counts from now, on the count the binding puts it on: an empty place's was the machine's.
      */
-    p->balance = kept;
+    uint32_t cap = account_cap(p);
+    p->balance = kept > cap ? cap : kept;
     p->stamp = count_of(p);
     lender_settle(place_thread(p));
 }
@@ -759,6 +801,10 @@ void sched_start(struct thread *t)
     struct core *core = core_self();
     core->current = core->turn = t;
     core->turn_from = clock_offset();
+    struct place *p = thread_place_on(t, core_index());
+    if (p != NULL) {
+        p->stamp = count_of(p);
+    }
     /* The boot sets the timer for the first tick. */
     core->wake_tick = sched_ticks + 1;
 }
@@ -827,6 +873,17 @@ void sched_turn_back(void)
     }
     core->turn = lender;
     lender->core = (uint8_t)core_index();
+    if (was != NULL) {
+        for (uint32_t i = 0; i < thread_places(was); i++) {
+            LOOP_BOUND(CORES);
+            thread_place(was, i)->stamp = count_of(thread_place(was, i));
+        }
+    }
+    core->turn_from = clock_offset();
+    struct place *lp = thread_place_on(lender, core_index());
+    if (lp != NULL) {
+        account_refill(lp);
+    }
     thread_settle(was);
     thread_settle(lender);
     switch_to(lender);
@@ -882,6 +939,12 @@ void sched_lend(struct thread *t, struct notification *ntfn, struct thread *borr
         core->payer = payer;
         turn_take(borrower);
         account_refill(bp);
+        if (payer != t) {
+            struct place *own = thread_place_on(t, core_index());
+            if (own != NULL) {
+                own->stamp = count_of(own);
+            }
+        }
         switch_to(borrower);
     }
 }
@@ -929,7 +992,7 @@ static void tick_advance(uint32_t ticks)
             if (owed > 1) {
                 paid->balance = account_after(paid->balance, place_units(paid), owed - 1);
             }
-            paid->stamp += owed;
+            paid->stamp = core->ticks + owed;
         }
         core->turn_from = 0;
         core->ticks += owed;
@@ -1004,7 +1067,7 @@ uint32_t sched_wake_ticks(void)
     if (core->run_queue != 0 || p == NULL) {
         return 1;
     }
-    uint32_t balance = account_now(p);
+    uint32_t balance = p->balance - turn_owes(p, clock_offset());
     bool alone = place_spare(p) && core->spare_queue == 0;
     if (!has_time(balance)) {
         return alone ? wake : 1;
@@ -1249,14 +1312,6 @@ void sched_idle(void)
     } while (!sched_idle_wake(ticks, device));
 }
 
-void sched_run_next(void)
-{
-    uint32_t offset = turn_close();
-    payer_drop();
-    core_self()->turn = next_turn(offset);
-    run_turn();
-}
-
 void sched_turn_end(void)
 {
     struct core *core = core_self();
@@ -1265,6 +1320,10 @@ void sched_turn_end(void)
     core->turn = NULL;
     payer_drop();
     if (was != NULL) {
+        for (uint32_t i = 0; i < thread_places(was); i++) {
+            LOOP_BOUND(CORES);
+            thread_place(was, i)->stamp = count_of(thread_place(was, i));
+        }
         thread_settle(was);
     }
     core->turn = next_turn(offset);
@@ -1278,20 +1337,65 @@ void sched_tick(uint32_t ticks)
 }
 
 /*
- * Whether a place that joined the run queue since the core last looked has a deadline before that of the turn's payer,
+ * Whether a place that joined the run queue has a deadline before that of the turn's payer,
  * whose account is charged to the counter first: then it takes the processor, as from a turn on spare time.
  */
 static bool deadline_due(struct core *core)
 {
     struct place *p = turn_place(core);
-    if (!core->run_joined || p == NULL) {
+    if (p == NULL || !(core->run_joined || core->run_crossed)) {
         return false;
     }
     core->run_joined = false;
-    uint32_t mine = deadline_of(p, p->balance - turn_owes(p, clock_offset()), core->ticks);
+    core->run_crossed = false;
     uint32_t theirs;
     run_earliest(core, &theirs);
-    return tick_before(theirs, mine);
+    return tick_before(theirs, turn_deadline(p, clock_offset()));
+}
+
+/*
+ * The counts from the count to the moment the running turn's deadline crosses the earliest waiting
+ * deadline on the run queue, or 0 when no crossing is to be armed before the next macro tick:
+ * nobody waits, the turn is spare, or it earns no units.
+ * Every crossing is at least CROSS_QUANTUM counts out, the turn switch and the way back to user mode,
+ * so the turn runs its quantum before it is preempted and the alternation costs a switch, not a count.
+ * The caller adds the counts to the count it reads as it programs the compare, so the compare never
+ * lands in the past however long the walk to it took.
+ * A pure function of a core and a count into its tick, so the self-check can read it on the host too;
+ * the guard that keeps the arming off the host is in timer_set, not here.
+ */
+uint32_t sched_crossing_counts_on(const struct core *core, uint32_t offset)
+{
+    if (core->turn == NULL || core->run_queue == 0) {
+        return 0;
+    }
+    struct place *p = turn_place(core);
+    if (p == NULL || sched_spare_turn(core)) {
+        return 0;
+    }
+    uint32_t u = place_units(p);
+    if (u == 0) {
+        return 0;
+    }
+    uint32_t theirs;
+    run_earliest(core, &theirs);
+    uint32_t mine = turn_deadline_on(core, p, offset);
+    /*
+     * The waiting place's deadline is not later than the turn's: it should have the core within the
+     * minimal quantum, not wait for the next tick. The turn's own deadline may have just reached it
+     * through the counts the turn owes since the switch, whose anchor and the queued place's disagree
+     * by a rounding count or two; the comparator then fires at the count the caller reads, at once.
+     */
+    if (!tick_before(mine, theirs)) {
+        return CROSS_QUANTUM;
+    }
+    uint32_t diff = theirs - mine;
+    return (uint32_t)(((uint64_t)diff * u) / TIME_UNITS + CROSS_QUANTUM);
+}
+
+uint32_t sched_crossing_counts(void)
+{
+    return sched_crossing_counts_on(core_self(), clock_offset());
 }
 
 /*
@@ -1312,7 +1416,7 @@ void sched_call_end(void)
 {
     struct core *core = core_self();
     if (core->current->state != THREAD_READY) {
-        sched_run_next();
+        sched_turn_end();
     } else {
         spare_end(core);
     }
