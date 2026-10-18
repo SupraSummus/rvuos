@@ -129,13 +129,17 @@ static const struct op_info op_table[OP_COUNT] = {
     OP(OP_ROUTE_BIND, CAP_ROUTE_LINE, CAP_ROUTE, ARG_POOL, ARG_DST, ARG_NONE),
     OP(OP_ROUTE_END, CAP_ROUTE, 0, ARG_END, ARG_FRAME, ARG_NAME),
     OP(OP_ROUTE_SET, CAP_ROUTE, 0, ARG_END, ARG_NONE, ARG_NONE),
+#if FUEL
+    OP(OP_PROCESS_FUEL, CAP_PROCESS, 0, ARG_WORD, ARG_WORD, ARG_NONE),
+#endif
 };
 
 #undef OP
 #undef DESCRIBE
 
 /* The assert sees only the highest code; LLVMFuzzerInitialize holds every code below it to an entry. */
-_Static_assert(OP_COUNT == 47 && OP_ROUTE_SET == OP_COUNT - 1, "a new operation needs an entry in op_table");
+_Static_assert(OP_COUNT == 47 + FUEL && (FUEL ? OP_PROCESS_FUEL : OP_ROUTE_SET) == OP_COUNT - 1,
+               "a new operation needs an entry in op_table");
 
 /* A code below OP_COUNT that is no operation any more, see OP_COUNT, which the kernel refuses as any other. */
 static inline int op_retired(unsigned op)

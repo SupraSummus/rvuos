@@ -455,8 +455,54 @@ static int op_pool(struct thread *t, uint32_t slot, const struct cap *cap,
     return slot_store(t, dst, &c, slot_node(t, slot));
 }
 
+#if FUEL
+/*
+ * OP_PROCESS_FUEL: what is left of a process's fuel, and fuel moved to it from the caller's process or back.
+ * A process without bound gives without spending and takes in nothing; see rvuos/abi.h.
+ */
+static int process_fuel(struct process *from, struct process *proc, uint32_t *arg)
+{
+    uint32_t amount = arg[2];
+    switch (arg[1]) {
+    case FUEL_READ:
+        break;
+    case FUEL_GIVE:
+        if (proc == from) {
+            break;
+        }
+        if (from->fuel_bound) {
+            if (from->fuel < amount) {
+                return KERR_LIMIT;
+            }
+            from->fuel -= amount;
+        }
+        if (!proc->fuel_bound) {
+            proc->fuel_bound = 1;
+            proc->fuel = 0;
+        }
+        proc->fuel = amount < FUEL_UNBOUNDED - proc->fuel ? proc->fuel + amount : FUEL_UNBOUNDED - 1;
+        break;
+    case FUEL_TAKE: {
+        if (!proc->fuel_bound) {
+            return KERR_STATE;
+        }
+        uint32_t taken = amount < proc->fuel ? amount : proc->fuel;
+        proc->fuel -= taken;
+        if (from->fuel_bound && proc != from) {
+            from->fuel = taken < FUEL_UNBOUNDED - from->fuel ? from->fuel + taken : FUEL_UNBOUNDED - 1;
+        }
+        break;
+    }
+    default:
+        return KERR_INVALID_ARG;
+    }
+    arg[1] = proc->fuel_bound ? proc->fuel : FUEL_UNBOUNDED;
+    return KERR_OK;
+}
+#endif
+
 static int op_process(struct thread *t, const struct cap *cap,
-                      uint32_t op, const uint32_t *arg)
+                      uint32_t op, uint32_t *arg)
 {
     struct process *proc = (struct process *)cap_object(cap);
 
@@ -493,6 +539,10 @@ static int op_process(struct thread *t, const struct cap *cap,
     }
     case OP_PROCESS_UNMOUNT:
         return process_unmount(proc, arg[1]);
+#if FUEL
+    case OP_PROCESS_FUEL:
+        return process_fuel(thread_process(t), proc, arg);
+#endif
     default:
         return KERR_WRONG_TYPE;
     }
@@ -1174,6 +1224,9 @@ static const struct op_shape op_shapes[OP_COUNT] = {
     [OP_ROUTE_CARVE] = { CAP_ROUTE_LINE, 0, SHAPE_A123 },
     [OP_ROUTE_BIND] = { CAP_ROUTE_LINE, RIGHT_W, SHAPE_A1 | SHAPE_A2 },
     [OP_ROUTE_END] = { CAP_ROUTE, RIGHT_W, SHAPE_A123 },
+#if FUEL
+    [OP_PROCESS_FUEL] = { CAP_PROCESS, RIGHT_W, SHAPE_A1 | SHAPE_A2 },
+#endif
     [OP_ROUTE_SET] = { CAP_ROUTE, RIGHT_W, SHAPE_A1 },
 };
 

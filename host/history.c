@@ -318,7 +318,8 @@ static void children_of(const struct cap *c, addr_array *out)
  */
 #define RIGHTS_IN_HANDLER 0
 #define RIGHTS_UNKNOWN 0xff
-_Static_assert(OP_COUNT == 47 && OP_ROUTE_SET == OP_COUNT - 1, "a new operation needs its rights in rights_needed");
+_Static_assert(OP_COUNT == 47 + FUEL && (FUEL ? OP_PROCESS_FUEL : OP_ROUTE_SET) == OP_COUNT - 1,
+               "a new operation needs its rights in rights_needed");
 static uint8_t rights_needed(uint32_t op)
 {
     switch (op) {
@@ -353,6 +354,9 @@ static uint8_t rights_needed(uint32_t op)
     case OP_TEST_IRQ:
     case OP_TEST_PREEMPT:
     case OP_CLOCK_WATCHDOG:
+#if FUEL
+    case OP_PROCESS_FUEL:
+#endif
         return RIGHT_W;
     case OP_NOTIFY_WAIT:
     case OP_NOTIFY_LEND:
