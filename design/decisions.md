@@ -115,62 +115,78 @@ until the maintainer decides otherwise.
    decision 39 says what a deadline is and what it promises.
    Units of time are earned by one thread's place each, an account per place they fill,
    and spare time only by `RIGHT_X`; see "Scheduling" and open decision 18.
-   Before, the oldest thread on the run queue had the next turn, and turns went round on the tick.
-   Beside a process that spins, a round trip between two processes waited for the spinner's turns,
-   about 263,000 cycles on RP2350 where the round alone costs about 4,500, `make bench`'s `contended-worst`;
-   `make lab` showed the same for an ask with work behind it,
-   and that twice the units for the client or for the server moved its latency by less than a fiftieth,
-   since a server woken by an ask waited on the run queue behind the spinner's turn.
+   Before, threads with time took turns oldest first, a tick each,
+   and only a turn on spare time gave the processor up to a thread made ready.
+   That order knew nothing of how soon a thread must run,
+   so units bought a part of the processor and not a place in the queue.
+   `make lab` showed it: beside a process that spins, a small ask waited about a tick at the median and nearly two at p90,
+   and twice the units for the client or for the server changed that by less than a fiftieth,
+   since a server woken by an ask waited on the run queue behind the spinner's turn; see `user/lab/NOTES.md`.
+   `make bench`'s `contended-worst` was the same wait for a pair that wants the whole core:
+   beside a process that spins, the worst round waited for its turns, about 263,000 cycles on RP2350,
+   where the round alone costs about 4,500.
+   A tick that hands the core to another thread costs about 1,130 instructions under QEMU, 1,210 across processes,
+   a hundredth of its time at 10 kHz,
+   and a chip at 150 MHz, which runs at most a seventh as many instructions a second, at least seven times that share, unmeasured;
+   so a shorter tick alone buys a shorter wait at that price.
    What priority inheritance does for priorities, a waiter that names whom it waits for does for accounts, decision 27:
    it lends that thread its time, the oldest lender's, and on through lenders with no time of their own, decision 39.
+   Each option below orders the run queue and says when a thread made ready takes the processor from a turn with time;
+   each is decided at the end of a trap, so the host replays it.
    Weighed and left, beside what decision 39 weighs:
-   - **Fixed priorities on `Thread`**, the first plan:
-     set by whoever holds the capability and capped by the setter's own,
-     round-robin within a priority, no priority inheritance.
-   - **A scheduler in userspace** that decides which threads are runnable at all.
-     It stops a thread by taking back the units it lent it and starts it by binding it again,
-     or with `OP_THREAD_STOP` and `OP_THREAD_RESUME`, which also take a waiting thread off its notification and back to its wait, decision 32,
-     and has a tick of its own in a timer line, the shape every device interrupt takes.
-     What it cannot do is choose between two runnable threads
-     for less than a system call per switch.
-     It stays open to a program over the deadlines, as it was over the turns.
-   - **A period per thread**, as seL4's scheduling contexts have,
-     at the price of a queue of refills sorted by time, which decision 38 weighs.
-   - **Priorities that preempt on wake**, proposed before decision 39.
+   - **Levels: priorities that preempt on wake.**
      A thread with time at a higher level than its core's running thread
      takes the processor as the trap that made it ready ends, a device's interrupt among them,
      and from another core through the interrupt that core already sends.
      That is the rule for a turn on spare time, with two levels made `PRIORITIES`:
      a run queue per level and a word of the queues that hold a place, so the next thread is a count of leading zeros away,
      and turns on the tick within a level.
+     The self-check's "a turn on spare time runs while a thread with time waits" becomes the same check by level.
      It takes besides:
      - **A budget.**
        A thread has its level only while its account holds a tick,
        so a spinner at the top takes at most its units' part and its account,
-       and what an account may hold, `ACCOUNT_TICKS`, becomes what a level may suffer from those above; decision 18.
+       and what an account may hold, `ACCOUNT_TICKS`, a tenth of a second's, becomes what a level may suffer from those above; decision 18.
      - **A right.**
        The level is a right of the `Time` capability a thread is bound through, a range a carve narrows,
        as seL4's maximum controlled priority is.
-     - **Lent time at its payer's level**, so a lock's holder and a server run at their waiter's.
-       The payer is still the oldest lender, not the highest;
+     - **Lent time at its payer's level**, so a lock's holder and a server run at the level of the waiter that lent first,
+       not of the highest:
        a ring of lenders per level would find the highest without a walk,
        but a chain through a holder that waits in turn stays userspace's.
      - **Wakes by level.**
        A signal wakes the payer of the signalling core's turn, or else the oldest waiter;
        the highest would cost each notification a pair of links per level, or a walk.
-     - **A short kernel step.**
-       The longest step the kernel takes without looking for an interrupt is the floor of every wait;
-       zeroing a table takes longer than a tick at 10 kHz, and a pool destroy stops only for a pending interrupt, `TODO.md`.
-     - **Deadlines in counts.**
-       Timer lines fire on the tick grid, so a periodic thread at the top still starts up to a tick late.
      - **Signals that preempt.**
        A signal to a waiter of a higher level takes the processor from the signaller,
        as only a signal from a turn on spare time, or one waking the turn's payer, does,
        so a signal and a wait in one call, `TODO.md`, would then save switches as well as traps.
-     It would promise the highest ready level a start within the kernel's longest step of the trap that made it ready,
-     and a lower level a response-time analysis over the units and accounts above it.
-     A level is a promise relative to every thread above it,
-     where a deadline from the account is a promise of each thread's own; decision 39.
+     It would promise a thread alone at the highest ready level of its core
+     a start within the kernel's longest step of the trap that made it ready, decision 36;
+     beside others of its level it waits a tick for each,
+     and through a lock or a server at its first lender's level, which a level between delays by what its accounts hold.
+     A lower level gets a response-time analysis over the units and accounts above it,
+     in which the accounts, a tenth of a second's worth of every unit above, outweigh the turns.
+     A level is a claim on the threads below it, not an amount of time,
+     so what it is worth depends on what the root task gave every other thread, as no unit's worth does.
+   - **The turn handed to the woken thread.**
+     A thread that waits hands the rest of its turn to the thread it just woke rather than to the oldest, `TODO.md`:
+     no change to the ABI or to the order, and a server answers within the turn of the client that asked,
+     but a thread woken by an interrupt, or by a thread that goes on running, still waits for the turns ahead.
+   - **A scheduler in userspace**, which decides which threads are runnable at all.
+     It stops a thread by unbinding it from its units and starts it by binding it again,
+     or with `OP_THREAD_STOP` and `OP_THREAD_RESUME`, which also take a waiting thread off its notification and back to its wait, decision 32,
+     and has a tick of its own in a timer line, the shape every device interrupt takes.
+     What it cannot do is choose between two runnable threads for less than a system call per switch.
+     It stays open to a program over the deadlines, as it was over the turns.
+   - **A period per thread**, as seL4's scheduling contexts have, bounds what a thread takes in each period, not when it starts:
+     seL4 starts threads by priority.
+     It needs no queue of refills sorted by time here, which seL4 needs for contexts made of memory:
+     the places with units of a core are `TIME_UNITS` at most, and the release already finds the nearest refill by a look at them.
+     A period is a cap per place, the account's size, and under deadlines from the accounts the cap's fill time is the period.
+   - **Fixed priorities on `Thread`**, the first plan:
+     set by whoever holds the capability and capped by the setter's own,
+     round-robin within a priority, no priority inheritance.
 
 10. **Yield.**
     Working default: none.
@@ -778,7 +794,7 @@ until the maintainer decides otherwise.
     It is the door to what the kernel cannot keep in order otherwise:
     things with no bound but memory, sorted by a key with no bound but its width,
     as timers made of pools' memory and sorted by deadline would be, rather than `TIMER_LINES` lines,
-    or a queue of refills sorted by time, which decision 9's period per thread needs.
+    or a queue of refills sorted by time, which a period per thread would need were scheduling contexts made of memory, decision 9.
     Ordering by comparison does no better than that logarithm.
     The price:
     - **What one process makes is no longer free to the others.**
@@ -866,11 +882,35 @@ until the maintainer decides otherwise.
       a bound for the highest level alone, each level below subject to every thread above it.
     - **A crossing without a quantum**:
       threads whose deadlines are equal or near would take the core from each other at every count.
+    - **The deadline without a window**, the count at which the account would be full alone:
+      it orders threads by how far below their part they ran, but cannot let batch work wait longer.
+    - **A period with fixed priorities**, as seL4's scheduling contexts:
+      the budget and the period apart, but the order still by level.
+    - **Migrating threads**, as LRPC's and Composite's:
+      a client's thread runs on into the server, so its time follows it,
+      but every server must be reentrant and keep a stack per client, and a call that waits for its answer is no goal, decision 5.
+    - **Reserves and taps**, as Cinder's: a graph of energy flowing between reserves, which every refill would walk.
     Open:
+    - **Crossings or the tick.**
+      Without crossings a turn ends at a wake, a wait or the tick, the deadline needs no field of its own,
+      and a switch costs about 7% more than turns taken in order did, against about a fifth with them;
+      the bound is then in ticks, and at 10 kHz the lab's ask beside a spinner was answered as fast,
+      at the price of the tick's switches, decision 9.
+      The one workload below a tick so far, an 802.15.4 acknowledgement, a route met, decision 37.
+      Decide with the first workload whose window is shorter than a tick and no route can meet.
+    - **Deadlines that wrap.**
+      A deadline is 32 bits of counts, compared modulo 2^32, so it holds only while it lies within 2^31 counts of the count;
+      a window of 2^14 ticks or more at 1 kHz is longer than that on a counter at the processor's clock, as the ESP32-C6's,
+      so it would read as a deadline already past, and 2^15 ticks are cut short besides.
+      Either the bind refuses a window longer than the board's counter allows, which a program would then need to know,
+      or the kernel holds a deadline at most 2^30 counts ahead, so that windows longer than that order alike.
     - **The kernel's longest step**, B, bounded in cycles at each board's link and made shorter; decision 36 and `TODO.md`.
     - **The earliest deadline without a walk.**
       Finding it walks the run queue, `TIME_UNITS` places at most, twice on a crossing,
       which is most of `CROSS_QUANTUM`.
+      A tournament tree over the 64 units would find it in six steps,
+      and a ring per stretch of deadlines with a word of the rings that hold a place, as the levels have, in a count of leading zeros;
+      either has a depth fixed with `TIME_UNITS`, not decision 38's.
     - **Time nobody earns** goes by deadline, so by units rather than by thread as it did before;
       `make lab`'s `bulk-hog` waits longer for it.
     - **Timer lines, an account running dry and the watchdog** still keep to the tick.
@@ -878,3 +918,6 @@ until the maintainer decides otherwise.
       so that the earliest pays.
     - **Fuel**: counts of a process's own, moved and never created, which every count it runs takes from,
       so that units bound its power and fuel its energy.
+      A fuel of its own per process, or a `Fuel` object several processes share at the price of a new type;
+      a lender whose fuel runs dry has its lend end with `KERR_LIMIT`, or stops so that a refill takes the lend up again;
+      and what a device spends, and a wake from `wfi`, charged to whom.

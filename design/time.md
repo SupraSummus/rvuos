@@ -364,7 +364,7 @@ and on several cores one such step of each other core, which the lock waits for,
 and the trap that ends the last turn ahead, which counts the tick, its timer lines and the releases.
 While that longest step is shorter than a tick, they add to the wait once;
 a longer one may cost each turn ahead as much again,
-and the longest today, zeroing a table of `CAPTABLE_MAX_SLOTS` slots a byte a store, is longer than a tick at 10 kHz on every board, `TODO.md`.
+and the longest today, zeroing a table of `CAPTABLE_MAX_SLOTS` slots a byte a store, is longer than a tick at 10 kHz on every chip, `TODO.md`.
 A thread made ready from another core waits besides for the rest of that core's trap, the interrupt between them, and the lock.
 A timer line's thread starts within those k ticks and steps of its deadline, so a periodic line keeps its deadlines and its thread starts within as much of each;
 a device's driver within them of the trap that took its interrupt.
