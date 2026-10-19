@@ -66,6 +66,7 @@ the host's tick count would have to start where QEMU's does.
 The tick has to find the due timers without looking at the others.
 Timers as objects in pools would have it walk every pool, which goal 4 rules out;
 a sorted queue moves that walk to the set, and a wheel to the bucket that comes due.
+A queue sorted in a balanced tree, as deep as the RAM allows, is open decision 38.
 A limit per process, thread or pool bounds nothing, since anyone can make more of those.
 A limit on the whole machine does: the tick looks at the `TIMER_LINES` lines and nothing else.
 Lines make it a limit of authority rather than of who comes first:

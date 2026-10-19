@@ -388,7 +388,6 @@ static void configure(struct drv *p)
                (config_has(conf, size, "debug", "rekey") ? DRV_DEBUG_REKEY : 0) |
                (config_has(conf, size, "debug", "ps") ? DRV_DEBUG_PS : 0);
     p->lib_log = config_number(conf, size, "lib", 0);
-    p->lib_start = (uint8_t)(config_number(conf, size, "libstart", 0) != 0);
     p->no_pmf = config_number(conf, size, "pmf", 1) == 0;
     p->no_sae = config_number(conf, size, "sae", 1) == 0;
     p->ht = config_number(conf, size, "ht", 0) != 0;

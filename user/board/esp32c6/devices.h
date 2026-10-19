@@ -24,6 +24,7 @@
 #define SARADC_BASE       0x6000E000u
 #define MODEM_BASE        0x600A0000u
 #define BT_BB_BASE        0x600A2000u
+#define I154_BASE         0x600A3000u /* the IEEE 802.15.4 MAC */
 #define WIFI_BB0_BASE     0x600A7000u
 #define WIFI_BB1_BASE     0x600A8000u
 #define MODEM_SYSCON_BASE 0x600A9800u

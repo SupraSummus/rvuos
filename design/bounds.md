@@ -12,6 +12,7 @@ It does not grow with how many objects, pools or capabilities exist.
 Otherwise a process with one small pool allocates thousands of minimal objects,
 and every tick and every interrupt, other processes' included,
 gets that much slower.
+A bound that grows as the logarithm of memory, as a balanced tree's depth does, is open decision 38.
 
 **The exception is destruction.**
 A revoke, a pool destroy, and a delete below a root
