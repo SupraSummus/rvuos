@@ -864,6 +864,14 @@ until the maintainer decides otherwise.
     - **A calendar**, units with fixed places in a cycle: latency becomes the spacing of a thread's units, and bursts go.
     - **A constant bandwidth server per place**: its period ties how soon a thread runs to how much it may do at once.
     Open:
+    - **How much a filling account delays a request.**
+      The virtual time lies up to a tenth of a second ahead, an account's fill, against at most a few ticks for a quantum,
+      so a driver whose account is not full when its interrupt comes is due after a thread whose account is, whatever their quanta;
+      and an account starts empty at a bind.
+      `make lab` shows it on the AN521, about 150 ms after a bind.
+      A bind that starts the account full, or a virtual time held to a request ahead of the count as a thread wakes,
+      would each change what the account promises the others.
+    - **Time below a tick's worth**: a thread has time only while its account holds a tick, whatever its quantum.
     - **The kernel's longest step**, which a request's promise rests on; decision 36 and `TODO.md`.
     - **The earliest deadline without a walk** of the run queue, `TIME_UNITS` places at most.
     - **Lending across cores**, decision 27, and a borrower's lenders kept in the order of their deadlines.

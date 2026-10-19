@@ -34,7 +34,9 @@
 #define BIG    80000u
 #define HOLD   60000u
 #define PERIOD 3000u  /* a periodic member's, in microseconds: three ticks */
+#define BURST_PERIOD 7000u /* a burst's, prime to a periodic member's */
 #define LONG_QUANTUM 64000u /* a request of 64 ticks, in microseconds, against a tick's */
+#define SHORT_QUANTUM 32u   /* a request of about a small ask's work, in microseconds */
 #define JITTER 80000u /* the most a periodic member works before each ask */
 
 enum role { NONE, STORE, GATE, UI, BULK, HOG, LOCKER };
@@ -80,6 +82,11 @@ struct scenario {
 #define PAID_GATE                                     { "gate", GATE, 0, 1, 0, 1, 0, 0, 0, 0, 0 }
 #define BATCH_HOG                                     { "hog", HOG, HOG_UNITS, 0, 0, 0, 0, 0, 0, 0, LONG_QUANTUM }
 #define LAX_STORE                                     { "store", STORE, 8, 0, 0, 0, 0, 0, 0, 0, LONG_QUANTUM }
+#define BURST                                         { "burst", UI, HOG_UNITS, 0, 1, 0, 0, BIG, BURST_PERIOD, 0, 0 }
+#define DRIVER(name, units, quantum)                  { name, STORE, units, 0, 0, 0, 0, 0, 0, 0, quantum }
+#define DRIVEN(name, units, asks, quantum)            { name, UI, units, asks, 0, 0, 0, SMALL, PERIOD, 0, quantum }
+#define DRIVERS(quantum, load) \
+    { DRIVER("store", 4, quantum), DRIVEN("ui", 8, 1, quantum), DRIVER("dev", 4, quantum), DRIVEN("irq", 8, 3, quantum), load }
 
 static const struct scenario scenarios[] = {
     { "alone", { STORE_OF(8), UI_OF(8, 1) } },
@@ -107,6 +114,10 @@ static const struct scenario scenarios[] = {
     { "lend-batch", { QUICK(LEND), SLOW(LEND), BATCH_HOG } },
     { "net", { STORE_OF(0), PAID_GATE, LENDING_UI(8, 2), HOGGING } },
     { "net-unpaid", { STORE_OF(0), SERVER("gate", GATE, 0, 1), UI_OF(8, 2), HOGGING } },
+    { "drivers", DRIVERS(SHORT_QUANTUM, BURST) },
+    { "drivers-tick", DRIVERS(0, BURST) },
+    { "drivers-hog", DRIVERS(SHORT_QUANTUM, HOGGING) },
+    { "drivers-tick-hog", DRIVERS(0, HOGGING) },
 };
 
 static struct self self;

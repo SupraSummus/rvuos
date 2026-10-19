@@ -21,6 +21,10 @@ so scenarios are compared within one run.
   slow, with 2, holds it long and works as long between holds.
   The lock is the one of `lib/lock.h` in `lock` and `lock-hog`,
   and its lock that names the holder in `lend` and `lend-hog`, so that a taker that waits lends the holder its time.
+- **burst**, a process that every seven ticks works about half a tick of its own, earning 32 units,
+  so that its account stays full and its requests are due as soon as anyone's.
+- **drivers** are two pairs of a ui and a store, each pair an interrupt and the driver that answers it, beside the burst,
+  all with requests of 32 µs; `drivers-tick` is the same with requests of a tick, and the `-hog` ones are beside the hog instead.
 - **lend-server** and **lend-rider** are `poor-server` and `free-rider` with a ui that lends the store its time
   while it waits for an answer.
 
@@ -36,6 +40,22 @@ so only lent time that goes on through the gate answers it; `net-unpaid` is the 
 `make lab` prints the numbers, which a run under QEMU repeats exactly;
 the commits that changed the lab or how threads take turns say what they were.
 A tick is a millisecond, and every shape below held on QEMU `virt` and on its ARM boards alike.
+
+**Short requests shorten a driver's wait, while its account is full.**
+With requests of 32 µs rather than a tick, the drivers' worst answer fell, to a fifth at best, or held,
+beside the burst and beside the hog, on QEMU `virt` and its ARM boards, but for the AN521 beside the burst.
+On the ARM boards their median halved too, and their p90 came to a few small asks,
+where with requests of a tick one pair's was about a fifth of a tick and the other's a small ask.
+On the AN521 beside the burst the worst rose instead, to about two fifths of a tick, both pairs at once.
+By the accounts' arithmetic, which no trace has checked yet, that one is not the quantum's:
+a request is due a quantum past the count at which its account would be full,
+and accounts start empty at a bind and take a tenth of a second to fill,
+so 126 ms into the window the ui, its account still filling, would be due several ticks later than the burst, whose account was full,
+and the answer would wait for the ui's turn behind the burst's.
+In `hog` the one slow answer, about half a tick, is the first of the window, while the ui's account still fills.
+
+The paragraphs below were seen while threads with time took turns in order, before decision 39,
+and the commits since say how each moved.
 
 **Units do not buy latency.**
 Beside the hog a small ask waits about a tick at the median and nearly two at p90,
