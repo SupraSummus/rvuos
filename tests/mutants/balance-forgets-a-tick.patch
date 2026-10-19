@@ -12,8 +12,8 @@ Witness: fuzz lend-lender-earns
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -210,7 +210,7 @@ static inline void account_refill(struct place *p)
- /* Whether an account holds a turn's worth, a tick: then the thread has time, and takes turns with those that have. */
+@@ -220,7 +220,7 @@ static inline void account_refill(struct place *p)
+ /* Whether an account holds a turn's worth, a tick: then the thread has time, and waits on the run queue. */
  static bool has_time(uint32_t balance)
  {
 -    return balance >= tick_parts();

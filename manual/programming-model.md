@@ -565,7 +565,7 @@ The rate is the board's, 10 MHz on QEMU, the CPU clock on the ESP32-C6 and 1 MHz
 so a program takes it from `OP_CLOCK_READ`.
 `OP_CAP_INFO` on the clock tells the rate too, with no right, since it is not the time,
 and the tick, in counts of the counter and in microseconds:
-the quantum, which a program's own timing analysis works in, section 5.11.
+the longest turn while another thread waits and the quantum unless a binding asks for another, which a program's own timing analysis works in, section 5.11.
 The time is the machine's, not the thread's: it includes other threads' slices.
 Revoking below a `Clock` capability uninstalls every region derived through it.
 `rdtime` traps on every board.
@@ -737,30 +737,30 @@ and moves `taken` only as far as its host says it has the bytes, so a halt write
 - The machine timer ticks at `TIMER_HZ`, 1 kHz on every board unless the build sets another rate, `make TIMER_HZ=`,
   which divides a second and the board's counter and is at least 650;
   `OP_CAP_INFO` on a `Clock` or a `Time` capability tells the tick, section 6.15, so a program need not assume one.
-  A tick ends the running thread's turn:
-  the thread goes to the back of its queue,
-  and the thread that has waited longest on the run queue runs,
+  A thread runs in requests, a tick long unless its binding asked for another quantum, section 6.13:
+  a request is due when the thread's account, having paid for it, would be full again,
+  and the thread whose request is due first on the run queue runs,
   or, if the run queue is empty, the one that has waited longest on the spare queue.
+  A thread made ready whose request is due before the running thread's takes the processor at once,
+  and as the running thread's request ends, one due before its next goes first.
+  A tick ends the running thread's turn while another thread waits, and it goes back to its queue with its request.
   A thread that waits, or that a stop takes off the processor, hands the rest of the tick to the next,
-  which pays for no more than it runs of it.
+  which pays for no more than it runs of it, and gives up the rest of its request.
   A tick that would hand the processor back to the thread that had it takes no interrupt:
   the kernel counts and charges it at its next trap all the same,
   so a thread alone on the processor is interrupted only at a timer line's deadline,
   where another thread's account reaches a tick,
   or where its own account drains, if it may not go on on spare time.
-- So threads with work and time take equal turns, and then threads on spare time do.
+- So a thread with `u` units and a full account, made ready with work of at most its quantum `q`,
+  is done within `TIME_UNITS * q / u` counts of the counter whatever the other threads do,
+  besides the kernel's longest step and the switches, while tracing is off and the thread keeps its binding.
+  A shorter quantum brings its requests nearer and costs the thread a switch for each while another thread waits;
+  a longer one puts them behind shorter ones.
   A thread with work all along gets its units' part of the processor,
-  give or take a tenth of a second's worth of the accounts.
-  A thread with time waits for its turn at most a tick for each other thread with units of its core,
-  since only such a thread has time there, or lends it, and a turn on spare time ends as the thread becomes ready;
-  so the build's tick, `TIMER_HZ`, sets that wait,
-  while tracing is off, nobody drives the machine with `OP_TEST_TICK` or `OP_TEST_PREEMPT`, and the thread keeps its binding.
-  Its work is bounded by its units, not by its turns: a turn that begins mid-tick lasts to the next tick,
-  and over any stretch the others run at most what their accounts held and what their units earn;
-  `DESIGN.md`, "Scheduling", gives the bounds and what a periodic task needs of its units.
+  give or take a tenth of a second's worth of the accounts;
+  `DESIGN.md`, "Scheduling", says what a request promises and what a periodic task needs of its units.
   A thread a process adds earns only units split off the process's own, or runs on spare time:
   it takes nothing another thread earns.
-  The run queue is taken earliest deadline first: a thread's deadline is the tick its account would be full again and its window after it.
 - A system call is never interrupted:
   machine mode runs with interrupts off from the trap to the return.
   On several cores one call runs at a time, whichever core makes it, and another core's call waits for it.

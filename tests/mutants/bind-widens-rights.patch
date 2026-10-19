@@ -13,8 +13,8 @@ diff --git a/kernel/syscall.c b/kernel/syscall.c
              return KERR_LIMIT;
          }
          /* The binding hangs below the invoked capability, so a revoke above it empties the place. */
--        sched_bind(p, first, count, cap->rights, slot_node(t, slot), window_exp);
-+        sched_bind(p, first, count, RIGHT_W | RIGHT_X, slot_node(t, slot), window_exp);
+-        sched_bind(p, first, count, cap->rights, slot_node(t, slot), quantum);
++        sched_bind(p, first, count, RIGHT_W | RIGHT_X, slot_node(t, slot), quantum);
          return KERR_OK;
      }
      default:

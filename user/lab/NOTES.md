@@ -26,8 +26,8 @@ so scenarios are compared within one run.
 
 The root task keeps 8 units, the units nobody earns are spare time, and every member may run on it.
 
-Turns are taken by deadline, the tick a thread's account would be full again and its window after;
-the scenarios ending `-batch` give the hog a window of 64 ticks, and `lax-server` gives the store one.
+Threads run in requests, a tick long unless a member asks for another quantum, the one whose request is due first first;
+the scenarios ending `-batch` give the hog requests of 64 ticks, and `lax-server` gives the store such requests.
 In `net` a ui that lends asks a gate that lends, of no units, which passes the ask to a store of no units, beside the hog,
 so only lent time that goes on through the gate answers it; `net-unpaid` is the same chain lending nothing.
 

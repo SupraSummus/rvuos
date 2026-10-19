@@ -34,7 +34,7 @@
 #define BIG    80000u
 #define HOLD   60000u
 #define PERIOD 3000u  /* a periodic member's, in microseconds: three ticks */
-#define LONG_WINDOW 64u /* a window of 64 ticks, against none */
+#define LONG_QUANTUM 64000u /* a request of 64 ticks, in microseconds, against a tick's */
 #define JITTER 80000u /* the most a periodic member works before each ask */
 
 enum role { NONE, STORE, GATE, UI, BULK, HOG, LOCKER };
@@ -59,7 +59,7 @@ struct member {
     uint8_t lends; /* a client's: it lends the member it asks its time while it waits for an answer */
     uint8_t lock;  /* a locker's lock_kind */
     uint32_t cost, period_us, gap;
-    uint32_t window_ticks; /* its window in ticks; 0 for none */
+    uint32_t quantum_us; /* how long its requests are; 0 for a tick */
 };
 
 struct scenario {
@@ -78,8 +78,8 @@ struct scenario {
 #define QUICK(kind)                                   SHARER("quick", kind, 16, SMALL, PERIOD, 0)
 #define SLOW(kind)                                    SHARER("slow", kind, 2, HOLD, 0, HOLD)
 #define PAID_GATE                                     { "gate", GATE, 0, 1, 0, 1, 0, 0, 0, 0, 0 }
-#define BATCH_HOG                                     { "hog", HOG, HOG_UNITS, 0, 0, 0, 0, 0, 0, 0, LONG_WINDOW }
-#define LAX_STORE                                     { "store", STORE, 8, 0, 0, 0, 0, 0, 0, 0, LONG_WINDOW }
+#define BATCH_HOG                                     { "hog", HOG, HOG_UNITS, 0, 0, 0, 0, 0, 0, 0, LONG_QUANTUM }
+#define LAX_STORE                                     { "store", STORE, 8, 0, 0, 0, 0, 0, 0, 0, LONG_QUANTUM }
 
 static const struct scenario scenarios[] = {
     { "alone", { STORE_OF(8), UI_OF(8, 1) } },
@@ -204,6 +204,19 @@ static void report(const char *scenario, const char *member, const struct lab_st
         percentile(kept, 90) / per_us, st->worst / per_us);
 }
 
+/* A quantum of at least us microseconds, in counts of the clock: a power of two, as OP_TIME_BIND takes; 0 for a tick. */
+static uint32_t quantum_of(uint32_t us)
+{
+    uint64_t t;
+    uint32_t hz, counter;
+    must("read the clock", rv_clock_read(BOOT_CAP_CLOCK, &t, &hz, &counter));
+    uint32_t counts = us * (hz >= 1000000u ? hz / 1000000u : 1u), quantum = us != 0 ? 1u : 0u;
+    while (quantum != 0 && quantum < counts && quantum < 1u << QUANTUM_MAX) {
+        quantum <<= 1;
+    }
+    return quantum;
+}
+
 /* The lock the lockers share: its word in a frame of its own, and a notification from a pool of its own. */
 struct shared_lock {
     struct block frame, pool;
@@ -293,8 +306,8 @@ static void run(const struct scenario *sc)
         }
     }
     for (uint32_t i = 0; i < count; i++) {
-        must("start a member", child_start_reserve(&self, &kids[i], entries[sc->cast[i].role], 0, sc->cast[i].units,
-                                                   sc->cast[i].window_ticks));
+        must("start a member", child_start_quantum(&self, &kids[i], entries[sc->cast[i].role], 0, sc->cast[i].units,
+                                                   quantum_of(sc->cast[i].quantum_us)));
     }
 
     sleep_us(sc, count, WARM_US);

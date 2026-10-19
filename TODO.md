@@ -596,7 +596,7 @@ what is left:
 
 What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
 
-- `a4` to `a6` are read by no operation and checked by none, so none can be given a meaning later
+- `a5` and `a6` are read by no operation and checked by none, nor `a4` by any but `OP_TIME_BIND`, so none can be given a meaning later
   without changing what a program that left something there does, as the unread of `a1` to `a3` now can.
   Holding them to zero, as `dispatch` does `a1` to `a3`, has every wrapper of `user/rvuos.h` set them:
   on ARM, where `r4` to `r6` are the callee's to keep, that is three moves and their saving at every call,
@@ -697,7 +697,7 @@ the first five below are what does not keep to it yet, each a constant-time chan
   A turn of a few ticks, or of what the thread's account holds, would skip them while threads compete too,
   and give turns the length the scheduler chooses: `sched_wake_ticks` would return the turn's end instead of one.
   It changes what `OP_TEST_TICK` means to the replay, which passes records with it,
-  and what the demo's "root: units ok" measures; decide it with open decision 9.
+  and what the demo's "root: units ok" measures; decision 39's requests, whose end the timer already marks, could end a turn in place of the tick.
 - Threads with time take equal turns,
   so a thread with more units gets its larger part only by running on
   after the others have spent their accounts.

@@ -8,7 +8,7 @@ Witness: fuzz spare-turn-waits-for-recall
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -1266,7 +1266,7 @@ static bool deadline_due(struct core *core)
+@@ -1373,7 +1373,7 @@ uint32_t sched_request_counts(uint32_t offset)
   */
  static void spare_end(struct core *core)
  {

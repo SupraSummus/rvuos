@@ -56,10 +56,10 @@ static inline bool place_spare(const struct place *p)
     return b->type == CAP_TIME && (b->rights & RIGHT_X) != 0;
 }
 
-/* A place's window, in ticks. */
-static inline uint32_t place_window(const struct place *p)
+/* How long a place's requests are, in counts: a tick unless its binding asked for another; see sched.c, "Requests". */
+static inline uint32_t place_quantum(const struct place *p)
 {
-    return p->pad != 0 ? 1u << (p->pad - 1u) : 0;
+    return p->quantum != 0 ? 1u << (p->quantum - 1u) : timer_tick_counts();
 }
 
 /*
@@ -93,8 +93,12 @@ static inline uint32_t tick_gain(const struct place *p)
     return place_units(p) * timer_tick_counts();
 }
 
-/* The most a window's exponent may be, a window of 2^15 ticks. */
-#define WINDOW_EXP_MAX 16u
+/*
+ * Deadlines are compared modulo 2^32, so each lies within 2^31 counts of the count:
+ * a request puts at most TIME_UNITS counts on its virtual time for each count of it, and an account ACCOUNT_TICKS ticks' counts.
+ */
+_Static_assert(((uint64_t)TIME_UNITS << QUANTUM_MAX) + (uint64_t)TICK_COUNTS_MAX * ACCOUNT_TICKS < (1ull << 31),
+               "a deadline lies within 2^31 counts of the count");
 /*
  * How many lenders lent time goes through: a borrower's first lender with no time of its own lends what it borrows,
  * so a client's account pays for its server and for the driver its server waits on.
@@ -217,6 +221,9 @@ struct core {
 
     /* Whether a place joined the run queue since the core last looked for a deadline before the turn's; see spare_end. */
     bool run_joined;
+
+    /* Whether the timer interrupted the turn, maybe at its request's end, since the core last looked. */
+    bool request_ended;
 
     /* The bits the last wake handed over, zero if none; for the trace. */
     uint32_t trace_wake_bits;
@@ -373,9 +380,9 @@ struct place *sched_place_for(const struct thread *t, uint32_t core);
  * A place bound to none without spare time holds the core's time all the same: its thread runs there on lent time alone.
  * No other thread earns any of the units; the caller has made sure.
  * A ready thread whose turn it is nowhere joins the back of the queue its account puts it on, on each of its cores.
- * The place's window is none for a window_exp of 0, else 2 to window_exp - 1 ticks.
+ * Its requests are quantum counts long, a power of two, or a tick for 0, and the first starts now.
  */
-void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights, struct cap *parent, uint32_t window_exp);
+void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights, struct cap *parent, uint32_t quantum);
 
 /*
  * Clear a place's units the tree has already let go of:
@@ -532,6 +539,15 @@ static inline bool sched_spare_turn(const struct core *c)
  * See DESIGN.md, "Scheduling".
  */
 uint32_t sched_wake_ticks(void);
+
+/*
+ * The counts from offset into the tick to the end of the turn's request, if that falls before the next tick
+ * while another thread waits to run, at least one; 0 for none. The timer marks it; see sched.c, "Requests".
+ */
+uint32_t sched_request_counts(uint32_t offset);
+
+/* The turn's virtual time on a core, offset counts into its tick, its payer's place p charged for the turn so far. */
+uint32_t turn_vtime(const struct core *core, const struct place *p, uint32_t offset);
 
 /*
  * A device interrupt on a line: the Irq armed on it masks the line,

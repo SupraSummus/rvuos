@@ -591,7 +591,8 @@
  * a1 = the slot of the Thread capability, which needs RIGHT_W,
  * a2 = the offset of the first unit, which must lie within the capability even for none,
  * a3 = how many units, zero for none,
- * a4 = the deadline window in ticks (0 or a power of two up to 2^15, else KERR_INVALID_ARG).
+ * a4 = the quantum, how many counts of the counter a request lasts: 0 for a tick, else a power of two up to 2^QUANTUM_MAX,
+ *      else KERR_INVALID_ARG; the shorter the quantum, the sooner each request is due, see DESIGN.md, "Scheduling".
  * The units must all be of one core, or the call fails with KERR_INVALID_ARG: the core of the first unit, for none too.
  * The bind fills the thread's place that holds that core's time, or an empty one,
  * and fails with KERR_LIMIT when every place holds another core's; see OP_POOL_ALLOC.
@@ -608,6 +609,7 @@
  * a turn on spare time ends as a thread with time becomes ready, see DESIGN.md, "Scheduling".
  */
 #define OP_TIME_BIND 29
+#define QUANTUM_MAX 24u /* the longest quantum OP_TIME_BIND takes, 2^QUANTUM_MAX counts */
 
 /*
  * Any capability: describe it. a1 = the page, 0, the only one so far, and a2 = a3 = 0;

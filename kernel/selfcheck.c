@@ -699,16 +699,15 @@ static void check_queue(paddr_t head, uint8_t queue, uint32_t core)
         if (next == NULL || next->queue_prev != at) {
             fail("queue is not linked back", head, at, p->queue_next);
         }
-        if (queue == QUEUE_RUN && place_units(p) != 0) {
+        /*
+         * A request on its own time is due a quantum at most ahead of the virtual time it went on from,
+         * which the account as it was settled gives: the stamp, and how far it was from full.
+         */
+        if (queue == QUEUE_RUN && p->balance >= tick_parts()) {
             uint32_t u = place_units(p);
-            uint32_t w = place_window(p);
-            uint32_t gain = tick_gain(p);
-            uint32_t def = (gain == 0 || p->balance / gain >= ACCOUNT_TICKS) ? 0 : ACCOUNT_TICKS - p->balance / gain;
-            uint32_t others = TIME_UNITS - u;
-            uint32_t max_wait = 1 + others + (others * (def + w) + TIME_UNITS - 1) / TIME_UNITS;
-            uint32_t waited = sched_ticks - p->stamp;
-            if (waited > max_wait) {
-                fail("a place on the run queue waited longer than its guarantee", v2p(p), waited, max_wait);
+            uint32_t vt = (uint32_t)((uint64_t)p->stamp * timer_tick_counts()) + (account_cap(p) - p->balance) / u;
+            if ((int32_t)(p->deadline - vt) > (int32_t)(COUNT_PARTS * place_quantum(p) / u)) {
+                fail("a request is due further ahead than its quantum", v2p(p), p->deadline, vt);
             }
         }
         queued_threads++;
@@ -816,8 +815,8 @@ static void check_core(uint32_t i)
      * unless its thread stands at a call stopped for an interrupt, which it makes again first;
      * on another core that runs user mode it ends as that core traps, which whoever made the thread ready owes it.
      */
-    if (!c->recall && c->run_queue != 0 && sched_spare_turn(c) &&
-        (c == core_self() || (c->in_user && !c->interrupt_owed))) {
+    bool told = !c->recall && c->run_queue != 0 && (c == core_self() || (c->in_user && !c->interrupt_owed));
+    if (told && sched_spare_turn(c)) {
         fail("a turn on spare time runs while a thread with time waits", i, v2p(c->turn), c->run_queue);
     }
     if (debug_trace && c->turn_from != 0) {
@@ -836,6 +835,18 @@ static void check_core(uint32_t i)
         fail("a core runs user mode with regions its process no longer has", i, v2p(current), 0);
     }
     check_queue(c->run_queue, QUEUE_RUN, i);
+    /* A turn with time whose request is due after one on the run queue ends as a turn on spare time does: earliest deadline first. */
+    if (told && !sched_spare_turn(c) && own != NULL) {
+        paddr_t at = c->run_queue;
+        do {
+            LOOP_BOUND(TIME_UNITS);
+            const struct place *p = place_at(at);
+            if ((int32_t)(p->deadline - own->deadline) < 0) {
+                fail("a thread waits with a deadline before the turn's request", i, v2p(p), own->deadline);
+            }
+            at = p->queue_next;
+        } while (at != c->run_queue);
+    }
     check_queue(c->spare_queue, QUEUE_SPARE, i);
     check_queue(c->spent_queue, QUEUE_SPENT, i);
 }

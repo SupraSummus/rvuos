@@ -203,11 +203,14 @@ static inline uint32_t rv_time_carve(uint32_t time_cap, uint32_t offset, uint32_
     return rv_invoke(OP_TIME_CARVE, time_cap, offset, count, dst);
 }
 
-/* OP_TIME_BIND: a thread bound to count units of the capability from offset, which it then earns, with deadline window in ticks. */
+/*
+ * OP_TIME_BIND: a thread bound to count units of the capability from offset, which it then earns,
+ * in requests of quantum counts: 0 for a tick, else a power of two up to 2^QUANTUM_MAX.
+ */
 static inline uint32_t rv_time_bind(uint32_t time_cap, uint32_t thread_cap, uint32_t offset, uint32_t count,
-                                    uint32_t window_ticks)
+                                    uint32_t quantum)
 {
-    return rv_invoke6(OP_TIME_BIND, time_cap, thread_cap, offset, count, window_ticks, 0, 0);
+    return rv_invoke6(OP_TIME_BIND, time_cap, thread_cap, offset, count, quantum, 0, 0);
 }
 
 /*

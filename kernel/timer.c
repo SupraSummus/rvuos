@@ -87,6 +87,11 @@ uint32_t timer_count(void)
 void timer_set(uint32_t ticks)
 {
     uint64_t at = timer_deferred(next_tick, ticks, tick_counts);
+    /* The end of the turn's request, if it falls first; under tracing the tick marks it. */
+    uint32_t end = debug_trace ? 0 : sched_request_counts(timer_offset());
+    if (end != 0 && counter_read() + end < at) {
+        at = counter_read() + end;
+    }
     uint64_t *held = &compare[core_index()];
     if (at != *held) {
         *held = at;
@@ -128,12 +133,19 @@ bool timer_trap_enter(bool pending)
     return traced;
 }
 
-/* Counted as the trap began, and the turn ends as it leaves; under tracing it is only moved on. */
+/*
+ * Counted as the trap began, and the turn ends as it leaves; under tracing it is only moved on.
+ * Untraced, the interrupt may mark the end of the turn's request instead, and the timer is set again.
+ */
 void timer_trap_tick(void)
 {
     if (debug_trace) {
         timer_count();
         timer_set(1);
+    } else {
+        struct core *core = core_self();
+        core->request_ended = true;
+        core->wake_stale = true;
     }
 }
 

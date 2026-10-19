@@ -1,0 +1,19 @@
+A thread made ready with a deadline before the turn's request waits for the tick rather than taking the processor.
+The earliest deadline would not run first, and a driver woken by its interrupt would wait for the turn of a spinner.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
+Report: a thread waits with a deadline before the turn's request
+Witness: fuzz request-wake-preempt
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -1342,7 +1342,7 @@ static bool deadline_due(struct core *core)
+         return false;
+     }
+     request_renew(own, p, turn_vtime(core, p, clock_offset()));
+-    return tick_before(run_earliest(core)->deadline, own->deadline);
++    return false;
+ }
+ 
+ uint32_t sched_request_counts(uint32_t offset)

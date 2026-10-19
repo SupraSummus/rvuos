@@ -169,12 +169,9 @@ uint32_t child_bit(struct self *s, struct child *c, uint32_t *bit);
  */
 uint32_t child_start(struct self *s, struct child *c, void (*entry)(struct child_page *), uint32_t core,
                      uint32_t units);
-/*
- * child_start with the window of its time: 0 for none, else a power of two in ticks up to 2^15,
- * that its deadlines lie after the tick its account would be full again.
- */
-uint32_t child_start_reserve(struct self *s, struct child *c, void (*entry)(struct child_page *), uint32_t core,
-                             uint32_t units, uint32_t window_ticks);
+/* child_start in requests of quantum counts, as OP_TIME_BIND takes them: 0 for a tick, else a power of two. */
+uint32_t child_start_quantum(struct self *s, struct child *c, void (*entry)(struct child_page *), uint32_t core,
+                             uint32_t units, uint32_t quantum);
 /*
  * The child runs on core's spare time too, besides what child_start gave it,
  * a core whose time it holds none of yet, so that it runs where its parent's other threads leave time.

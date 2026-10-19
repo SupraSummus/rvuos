@@ -178,6 +178,12 @@ static struct place *turn_place(const struct core *core)
     return payer != NULL ? thread_place_on(payer, (uint32_t)(core - cores)) : NULL;
 }
 
+/* The turn's own place on its core, which holds its request: on lent time too, as its payer's is another. */
+static struct place *turn_own(const struct core *core)
+{
+    return core->turn != NULL ? thread_place_on(core->turn, (uint32_t)(core - cores)) : NULL;
+}
+
 /* The core whose time a place holds, which it waits on the queues of; its last while it is empty. */
 static uint32_t place_core(const struct place *p)
 {
@@ -211,7 +217,7 @@ static inline void account_refill(struct place *p)
     p->stamp = count_of(p);
 }
 
-/* Whether an account holds a turn's worth, a tick: then the thread has time, and takes turns with those that have. */
+/* Whether an account holds a turn's worth, a tick: then the thread has time, and waits on the run queue. */
 static bool has_time(uint32_t balance)
 {
     return balance >= tick_parts();
@@ -247,10 +253,15 @@ static uint32_t account_after(uint32_t balance, uint32_t units, uint32_t ticks)
  * a count's parts for each count from turn_from, if it had time as the turn began, and nothing on spare time.
  * A turn with time began with a tick in the account and owes at most the rest of the tick, so the account covers it.
  */
+static uint32_t turn_owes_on(const struct core *core, const struct place *p, uint32_t offset)
+{
+    uint32_t from = core->turn_from;
+    return offset > from && p != NULL && has_time(p->balance) ? COUNT_PARTS * (offset - from) : 0;
+}
+
 static uint32_t turn_owes(const struct place *p, uint32_t offset)
 {
-    uint32_t from = core_self()->turn_from;
-    return offset > from && p != NULL && has_time(p->balance) ? COUNT_PARTS * (offset - from) : 0;
+    return turn_owes_on(core_self(), p, offset);
 }
 
 /* The account of the turn's place, p, at the next tick: it pays for the rest of this one and earns the gain. */
@@ -339,6 +350,80 @@ static uint8_t place_queue(const struct place *p, uint32_t balance, const struct
 }
 
 /*
+ * Requests.
+ * A thread runs in requests of its place's quantum, a tick unless its binding asked for another,
+ * and the run queue is taken earliest deadline first.
+ * A place's virtual time is the count at which its account would be full again if its thread did not run:
+ * it stands while the thread waits, until the account is full, and moves on TIME_UNITS / units counts
+ * for each count the thread runs.
+ * A request is due when the account, having paid for it, would be full again:
+ * TIME_UNITS / units counts for each count of its quantum past the virtual time it starts at.
+ * So a short quantum, or more units, brings a request nearer, and each request puts the next further.
+ * A request starts as its thread is made ready or bound, and the next as one is over,
+ * its virtual time having reached its deadline; a thread that waits gives up the rest of its request.
+ * Its deadline stands for the whole request, so the order changes only as a thread is made ready,
+ * which takes the core from a turn whose request is due later, and as the turn's request is over,
+ * which the timer marks if that falls before the tick while another thread waits.
+ * Work of c, at most a quantum, made ready while the account is full, is done by its deadline whatever the others do,
+ * since the units of a core add up to its time, which is all earliest deadline first needs.
+ * A place on lent time runs its lender's requests, at the lender's units.
+ */
+
+/*
+ * The count a place's virtual time stands at; the place has units.
+ * Its account gains a tick's counts for each unit every tick, so it is full at the count its stamp says, or already.
+ */
+static uint32_t vtime(const struct place *p)
+{
+    uint32_t full = p->stamp * timer_tick_counts() + (account_cap(p) - p->balance) / place_units(p);
+    uint32_t now = count_of(p) * timer_tick_counts();
+    return tick_before(now, full) ? full : now;
+}
+
+uint32_t turn_vtime(const struct core *core, const struct place *p, uint32_t offset)
+{
+    return core->ticks * timer_tick_counts() + (account_cap(p) - (p->balance - turn_owes_on(core, p, offset))) / place_units(p);
+}
+
+/* The counts of virtual time a request of the place's quantum takes; the place has units. */
+static uint32_t request_length(const struct place *p)
+{
+    return COUNT_PARTS * place_quantum(p) / place_units(p);
+}
+
+/*
+ * Whether a request due at deadline goes on at virtual time vt: it lies at most a request ahead.
+ * One over lies at or behind vt, and so does one from long ago, however the count wrapped since.
+ */
+static bool request_open(const struct place *payer, uint32_t deadline, uint32_t vt)
+{
+    return deadline - vt - 1 < request_length(payer);
+}
+
+/* A place goes on with its request, or starts the next at its payer's virtual time vt if that one is over. */
+static void request_renew(struct place *p, const struct place *payer, uint32_t vt)
+{
+    if (!request_open(payer, p->deadline, vt)) {
+        p->deadline = vt + request_length(payer);
+    }
+}
+
+/* The place whose account a place's thread runs on there: the place while it has time, else its lender, or NULL. */
+static struct place *request_payer(struct place *p)
+{
+    return has_time(p->balance) || (place_units(p) != 0 && has_time(account_now(p))) ? p : place_lender(p);
+}
+
+/* A request starts for a place's thread, on the time its payer gives it. */
+static void request_start(struct place *p)
+{
+    const struct place *payer = request_payer(p);
+    if (payer != NULL && place_units(payer) != 0) {
+        p->deadline = vtime(payer) + request_length(payer);
+    }
+}
+
+/*
  * Bring a place's account up to the count and move the place to the queue it now waits on,
  * or take it off the one it was on.
  * A place waits on the queues of the core whose time it holds, so one emptied leaves its queue.
@@ -349,18 +434,12 @@ static uint8_t place_queue(const struct place *p, uint32_t balance, const struct
 static void place_settle(struct place *p)
 {
     core_self()->wake_stale = true;
-    if (p->queue != QUEUE_RUN) {
-        account_refill(p);
-    }
+    account_refill(p);
     struct core *was = &cores[p->core];
     struct core *core = &cores[place_core(p)];
     const struct place *l = has_time(p->balance) ? NULL : place_lender(p);
     uint8_t queue = place_queue(p, p->balance, l);
     bool joined = queue != QUEUE_NONE && (queue != p->queue || core != was);
-    if (queue == QUEUE_RUN) {
-        core->run_joined = true;
-        joined = true;
-    }
     if (queue != p->queue || core != was) {
         if (p->queue != QUEUE_NONE) {
             place_unqueue(p);
@@ -370,6 +449,18 @@ static void place_settle(struct place *p)
             ring_push(queue_head(core, queue), v2p(p), QUEUED);
         }
         p->queue = queue;
+    }
+    /*
+     * A place that joins the run queue goes on with its request, or starts the next, on whichever account pays for it now;
+     * one that waits there keeps its request, which only running ends.
+     */
+    if (queue == QUEUE_RUN) {
+        const struct place *payer = l != NULL ? l : p;
+        if (joined && place_units(payer) != 0) {
+            request_renew(p, payer, vtime(payer));
+        }
+        core->run_joined = true;
+        joined = true;
     }
     /* Neither account holds a tick there, or the place would have the run queue. */
     uint32_t fill = NEAREST_NONE;
@@ -479,65 +570,18 @@ static void turn_take(struct thread *t)
 #endif
 }
 
-/*
- * The run queue is taken earliest deadline first rather than oldest first,
- * a place's deadline the tick its account would be full again if its thread did not run, and its window after that.
- * A thread that waits keeps its deadline, as its account gains the same every tick, until the account is full,
- * and one that runs moves it later by COUNT_PARTS / units ticks for each tick it pays for:
- * the tick its account would be full is its virtual time, which runs at the inverse of its share as it runs.
- * So a thread that ran less than its units' part has the nearer deadline, and one that wants the core all along the furthest,
- * and work of c made ready while the account is full ends c / its share and its window after, whatever the others do,
- * since the units of a core add up to its time, which is all earliest deadline first needs.
- * The window is the place's to choose: a longer one only puts its own work later.
- * The search walks the run queue, TIME_UNITS places at most, since each earns a unit or borrows from a lender that does.
- */
-
-
-/*
- * The deadline of a place whose account at balance was counted to the tick at; NEAREST_NONE ahead without units.
- * At the tick at the account is ACCOUNT_TICKS - balance / gain ticks short of full,
- * and the window follows once the account is full.
- */
-static uint32_t deadline_of(const struct place *p, uint32_t balance, uint32_t at)
+/* The place on a core's run queue, which has one, with the earliest deadline, the oldest of those tied. */
+static struct place *run_earliest(const struct core *core)
 {
-    uint32_t gain = tick_gain(p);
-    if (gain == 0) {
-        return sched_ticks + NEAREST_NONE;
-    }
-    uint32_t left = balance / gain >= ACCOUNT_TICKS ? 0 : ACCOUNT_TICKS - balance / gain;
-    return at + left + place_window(p);
-}
-
-/* A queued place's deadline: its own account's while it has time, else its lender's. */
-static uint32_t place_deadline(const struct place *p)
-{
-    if (has_time(p->balance) || (place_units(p) != 0 && has_time(account_now(p)))) {
-        return deadline_of(p, p->balance, p->stamp);
-    }
-    const struct place *l = place_lender(p);
-    return l != NULL ? deadline_of(l, l->balance, l->stamp) : sched_ticks + NEAREST_NONE;
-}
-
-/* The place on a core's run queue with the earliest deadline, the oldest of those tied, and that deadline. */
-static struct place *run_earliest(const struct core *core, uint32_t *deadline)
-{
-    paddr_t at = core->run_queue;
-    struct place *best = NULL;
-    uint32_t best_at = 0;
-    for (uint32_t i = 0; i < TIME_UNITS; i++) {
+    struct place *best = p2v(core->run_queue);
+    for (paddr_t at = best->queue_next; at != core->run_queue;) {
         LOOP_BOUND(TIME_UNITS);
         struct place *p = p2v(at);
-        uint32_t d = place_deadline(p);
-        if (best == NULL || tick_before(d, best_at)) {
+        if (tick_before(p->deadline, best->deadline)) {
             best = p;
-            best_at = d;
         }
         at = p->queue_next;
-        if (at == core->run_queue) {
-            break;
-        }
     }
-    *deadline = best_at;
     return best;
 }
 
@@ -553,11 +597,10 @@ static struct thread *next_turn(uint32_t offset)
 {
     struct core *core = core_self();
     core->turn_from = offset;
-    core->run_joined = false;
+    core->run_joined = core->request_ended = false;
     struct place *p;
     if (core->run_queue != 0) {
-        uint32_t deadline;
-        p = run_earliest(core, &deadline);
+        p = run_earliest(core);
     } else if (core->spare_queue != 0) {
         p = p2v(core->spare_queue);
     } else {
@@ -577,9 +620,14 @@ static struct thread *next_turn(uint32_t offset)
     return t;
 }
 
+/* A thread made ready starts a request on each of its cores. */
 void sched_ready(struct thread *t)
 {
     t->state = THREAD_READY;
+    for (uint32_t i = 0; i < thread_places(t); i++) {
+        LOOP_BOUND(CORES);
+        request_start(thread_place(t, i));
+    }
     thread_settle(t);
 }
 
@@ -599,9 +647,9 @@ struct place *sched_place_for(const struct thread *t, uint32_t core)
     return empty;
 }
 
-void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights, struct cap *parent, uint32_t window_exp)
+void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights, struct cap *parent, uint32_t quantum)
 {
-    p->pad = (uint8_t)window_exp;
+    p->quantum = quantum != 0 ? (uint8_t)(__builtin_ctz(quantum) + 1u) : 0;
     struct cap *b = place_time(p);
     account_refill(p);
     uint32_t kept = p->balance;
@@ -621,6 +669,7 @@ void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights,
      */
     p->balance = kept;
     p->stamp = count_of(p);
+    request_start(p);
     lender_settle(place_thread(p));
 }
 
@@ -870,7 +919,8 @@ void sched_lend(struct thread *t, struct notification *ntfn, struct thread *borr
     }
     /*
      * A lender whose turn its own time or its payer's pays for, and that now lends first to a borrower waiting for a turn
-     * on its core, hands it the rest of the turn, which the payer goes on paying for: the turn neither ends nor is charged here.
+     * on its core, hands it the rest of the turn and of its request, which the payer goes on paying for:
+     * the turn neither ends nor is charged here.
      */
     struct core *core = core_self();
     struct thread *payer = turn_payer(core);
@@ -878,6 +928,7 @@ void sched_lend(struct thread *t, struct notification *ntfn, struct thread *borr
     struct place *bp = thread_place_on(borrower, core_index());
     if (tp != NULL && has_time(tp->balance) && bp != NULL && place_lender(bp) == tp && bp->queue != QUEUE_NONE) {
         place_unqueue(bp);
+        bp->deadline = turn_own(core)->deadline;
         core->turn = borrower;
         core->payer = payer;
         turn_take(borrower);
@@ -1278,20 +1329,36 @@ void sched_tick(uint32_t ticks)
 }
 
 /*
- * Whether a place that joined the run queue since the core last looked has a deadline before that of the turn's payer,
- * whose account is charged to the counter first: then it takes the processor, as from a turn on spare time.
+ * Whether a thread waits on the run queue with a deadline before the turn's request,
+ * once a place joined it or the timer marked the request's end: then it takes the processor, as from a turn on spare time.
+ * The turn's request, over at the turn's virtual time, gives way to the next first,
+ * which a join looks for too, since no timer marks it while nobody waits.
  */
 static bool deadline_due(struct core *core)
 {
-    struct place *p = turn_place(core);
-    if (!core->run_joined || p == NULL) {
+    bool marked = core->run_joined || core->request_ended;
+    core->run_joined = core->request_ended = false;
+    struct place *p = turn_place(core), *own = turn_own(core);
+    if (!marked || core->run_queue == 0 || p == NULL || own == NULL || place_units(p) == 0) {
         return false;
     }
-    core->run_joined = false;
-    uint32_t mine = deadline_of(p, p->balance - turn_owes(p, clock_offset()), core->ticks);
-    uint32_t theirs;
-    run_earliest(core, &theirs);
-    return tick_before(theirs, mine);
+    request_renew(own, p, turn_vtime(core, p, clock_offset()));
+    return tick_before(run_earliest(core)->deadline, own->deadline);
+}
+
+uint32_t sched_request_counts(uint32_t offset)
+{
+    struct core *core = core_self();
+    struct place *p = turn_place(core), *own = turn_own(core);
+    if (core->run_queue == 0 || p == NULL || own == NULL || sched_spare_turn(core) || place_units(p) == 0) {
+        return 0;
+    }
+    uint32_t vt = turn_vtime(core, p, offset);
+    if (!request_open(p, own->deadline, vt)) {
+        return 1;
+    }
+    uint32_t counts = ((own->deadline - vt) * place_units(p) + COUNT_PARTS - 1) / COUNT_PARTS;
+    return offset + counts < timer_tick_counts() ? counts : 0;
 }
 
 /*

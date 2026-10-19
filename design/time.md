@@ -142,13 +142,13 @@ and the time of the units nobody earns is spare.
 The binding is a node of the derivation tree held in the thread, below the capability it was bound through,
 so revoking above that capability unbinds the thread, as it unmaps a region installed from a frame.
 A thread with no units and no spare time keeps its state and does not run:
-that is how a scheduler in userspace stops and starts a thread, open decision 9,
+that is how a scheduler in userspace stops and starts a thread, decision 9,
 or with `OP_THREAD_STOP`, which also takes a waiting thread off its notification.
 A thread that loses its units while it runs finishes the turn it had, unless a thread with time waits for it, below,
 so only a wait, the tick, a fault, a revoke that takes its own process, a stop of itself,
 a stop or a revoke on another core, which makes its core trap first,
 a signal that wakes the thread paying for its turn,
-a thread that joins the run queue with an earlier deadline than the turn's payer,
+a thread made ready whose request is due before the turn's, the end of the turn's request while another's is due first,
 or a thread with time that becomes ready while the turn runs on spare time takes the processor from a running thread.
 A call stopped for an interrupt is made again when its thread next runs:
 at once, unless the interrupt was the tick and ended the turn.
@@ -191,69 +191,40 @@ each a ring of places through the place's own `queue_next` and `queue_prev`,
 as a notification's waiters are a ring of threads through the thread's:
 the run queue while it has time, the spare queue without time if it may run on spare time,
 and the spent queue otherwise, where a thread with units waits for its account.
-The thread with the earliest deadline on the run queue has the next turn, or with the run queue empty the oldest on the spare queue.
-A place's deadline is anchored to its count stamp at queue entry: the tick its account would be full again if it did not run, plus a delay window chosen at binding:
-none (zero) or a power of two up to 2^15 ticks, passed in register `a4` to `OP_TIME_BIND`.
-While waiting on the run queue, the place's count stamp is frozen so its deadline stands still,
-rather than floating forward with the tick count;
-once it runs, each tick it pays for moves its stamp to the current tick and debits its account, advancing its deadline accordingly.
-A thread that joins the run queue with a deadline before that of the turn's payer takes the processor as the trap ends,
-as from a turn on spare time.
+The thread whose request is due first on the run queue has the next turn, the oldest of those tied,
+or with the run queue empty the oldest on the spare queue.
 
-**The delay guarantee.**
-A place with `u` units (`u > 0`), delay window `w`, and deficit `def` ticks short of cap
-(where `def = 0` when the account has reached `account_cap`),
-queued on the run queue at tick `t0`,
-is guaranteed to acquire its next turn by a tick `X` satisfying:
+**A thread runs in requests.**
+A place's quantum, chosen at `OP_TIME_BIND`, is how long a request is: a tick, or a power of two of counts.
+Its virtual time is the count at which its account would be full again if its thread did not run:
+it stands while the thread waits, until the account is full, and moves on `TIME_UNITS / u` counts for each count the thread runs on `u` units.
+A request is due when the account, having paid for it, would be full again:
+`TIME_UNITS / u` counts for each count of the quantum past the virtual time it starts at.
+A request starts as its thread is made ready or bound, and the next as one is over;
+a thread that waits gives up the rest of its request.
+Its deadline stands while the request lasts, so the order changes only as a thread is made ready,
+which takes the processor from a turn whose request is due later as the trap ends,
+and as the turn's request is over, which the timer marks if that falls before the tick while another thread waits.
+A thread on lent time runs its lender's requests, at the lender's units.
+Spare time is the far end of the same order: a thread without a tick in its account has no request due,
+so it runs only while nobody's is, the oldest first.
 
-`X <= t0 + 1 + (TIME_UNITS - u) + ceil((1 - u / TIME_UNITS) * (def + w))`
+**What a request promises.**
+The units of a core add up to its time, which is all earliest deadline first needs to meet every deadline:
+work of `c` counts, at most the quantum `q`, made ready at `t0` while the account is full, is done by `t0 + TIME_UNITS * q / u`,
+whatever the other threads do, besides the kernel's longest step and the switches.
+A shorter quantum, or more units, brings that nearer;
+a longer one puts the thread's requests behind shorter ones and costs it nothing of its units.
+So a driver that must answer within `D` of its interrupt asks for a quantum of its work and `TIME_UNITS * c / D` units at least.
+A short quantum costs its thread switches: while another thread waits, the timer ends each of its requests.
+A thread that wants more than its units drains its account and waits on the spent queue, or runs on spare time,
+and delays no other thread's requests.
 
-When its account is full (`def = 0`), this simplifies to:
-
-`X <= t0 + 1 + (TIME_UNITS - u) + ceil((1 - u / TIME_UNITS) * w)`
-
-and for an interactive thread without a window (`w = 0`):
-
-`X <= t0 + 1 + (TIME_UNITS - u)`
-
-The bound is derived from the busy period leading up to the turn:
-- **Integer tick granularity:** A running turn can finish at most 1 tick before preemption takes effect.
-- **Preemption on wake:** A thread joining with an earlier deadline than the running turn's payer preempts at the end of the trap (`deadline_due`).
-- **Tie-breaking:** Ties in deadline are resolved in FIFO queue order (`run_earliest`),
-  so at most `N_ahead <= TIME_UNITS - u` tied places can precede it, each running at most 1 tick before its deadline advances.
-- **Competitor rate limit:** Only threads with deadlines at or before `D = t0 + def + w` can run before this place.
-  Consider the busy period starting at tick `tau <= t0`,
-  the most recent tick when the core was idle, on spare time, or running a thread with a deadline after `D`.
-  All competing places running before `t0 + W` arrived at or after `tau` with initial deadlines at or after `tau`.
-  Each tick executed by a competitor with `ui` units advances its deadline by `TIME_UNITS / ui` ticks,
-  so competitors combined (holding at most `TIME_UNITS - u` units) can run at most `((TIME_UNITS - u) / TIME_UNITS) * (D - tau)` ticks before their deadlines exceed `D`.
-  The busy period duration satisfies `(t0 + W) - tau <= 1 + N_ahead + ((TIME_UNITS - u) / TIME_UNITS) * (D - tau)`.
-  Writing `delta = t0 - tau >= 0` and `D - tau = delta + def + w`,
-  subtracting `delta` yields `W <= 1 + N_ahead - (u / TIME_UNITS) * delta + (1 - u / TIME_UNITS) * (def + w)`.
-  Because `u >= 1` and `delta >= 0`, any backlog from before `t0` shrinks during `delta`,
-  and the worst case occurs at `delta = 0`.
-- **Lent time:** A borrower without time runs on its lender's place and units (`place_lender`),
-  so the guarantee holds through the lender's account.
-
-**What the guarantee does not promise.**
-Admission control is enforced by units alone:
-`OP_TIME_BIND` refuses any unit already earned by another thread's place,
-so the sum of units on a core never exceeds `TIME_UNITS` and the scheduler's plan is always feasible.
-The tick `X` is when the thread receives the processor,
-not when it finishes its job;
-translating an application deadline (such as a device driver having to respond within a given time) into units and window is the programmer's concern,
-as the kernel knows nothing of userspace work lengths.
-Overload is confined to the offender:
-a thread that attempts to run beyond its budget drains its account and waits on `QUEUE_SPENT`,
-leaving other threads' guarantees undisturbed.
-Finally, spare time (`RIGHT_X` without units) carries no delay guarantee and may starve indefinitely under load;
-that is by design.
-
-A thread that waits hands the rest of the tick to the next, and the tick ends the turn:
-the thread goes to the back of the queue its account and binding now put it on.
-A thread that becomes ready, resumed, woken or bound, joins the back of its queue.
+A thread that waits hands the rest of the tick to the next, and the tick ends the turn while another thread waits:
+the thread goes back to the queue its account and binding now put it on, its request going on.
+A thread that becomes ready, resumed, woken or bound, joins its queue with a new request.
 Finding the next thread walks the run queue, at most `TIME_UNITS` places,
-and the scheduler's state is the three queues, each place's account and the tick it was counted to,
+and the scheduler's state is the three queues, each place's account, the tick it was counted to and its request's deadline,
 the place that earns each unit, the release, the running thread, and how far into the tick its turn is charged.
 With every thread on spare time alone this is the plain round-robin over threads,
 which is how the replay driver runs; see "Verification".
@@ -293,7 +264,7 @@ So a thread that waits just before every tick pays for its time all the same,
 and one whose turn begins late in a tick pays only for the rest of it.
 
 **What it promises.**
-Threads with time take equal turns, and then threads on spare time do.
+Threads with time run by their requests' deadlines, and then threads on spare time take equal turns.
 A thread that wants the processor all along gets its units' part of it,
 give or take a tenth of a second's worth of the accounts, and without spare time no more.
 A thread a process adds earns only units split off the process's own, or runs on spare time,
@@ -302,23 +273,22 @@ Spare time goes round by thread, so more threads there get more of it:
 it is the time nobody earned, and a thread that needs a part of the processor is given units.
 A borrower on lent time has the turns its lender would have had, charged to the lender.
 
-**How long a thread with time waits for its turn** is bounded by the tick, the quantum, and by the kernel's steps:
-at most a tick for each other thread with units of its core, k ticks with k of them, so fewer than `TIME_UNITS`.
-Each thread on the run queue ahead of it has time of its own, and so units,
-or the time of the one thread that lends to it first, which waits and so takes no turn itself;
-a thread that joins later, wakes or is bound goes behind it,
-handing a turn to a borrower, or back to its lender, uses only the turn in progress,
+**How long a thread with time waits for its turn** is bounded by its request and by the kernel's steps:
+made ready with a full account, it has run its quantum by `TIME_UNITS * q / u` counts later, as above,
+and with its account short of full later by the counts its units take to fill it.
+Only requests due before its own run first, each paid by units of the core,
+or by the one thread that lends to their thread first, which waits and so runs no request itself;
+handing a turn to a borrower, or back to its lender, hands on the request in progress,
 and a turn on spare time ends as the thread becomes ready.
 A tick more is owed only to a turn no unit of the core pays for that does not end so:
 a thread bound to another core's units during its turn, which finishes it,
 and a call stopped for an interrupt, which its thread makes again first.
-The build sets the tick, `TIMER_HZ`, and with it the bound, against the switches a shorter tick costs while threads compete.
+The binding sets the quantum, and with it the bound, against the switches a shorter quantum costs while threads compete.
 On top come the kernel's steps: the longest it takes without looking for an interrupt,
 and on several cores one such step of each other core, which the lock waits for,
-and the trap that ends the last turn ahead, which counts the tick, its timer lines and the releases.
-While that longest step is shorter than a tick, they add to the wait once;
-a longer one may cost each turn ahead as much again,
-and the longest today, zeroing a table of `CAPTABLE_MAX_SLOTS` slots a byte a store, is longer than a tick at 10 kHz on every board, `TODO.md`.
+and the trap that ends the last request ahead, which counts the tick, its timer lines and the releases.
+They add to the wait once, and once more for each request ahead whose end falls in such a step;
+the longest today, zeroing a table of `CAPTABLE_MAX_SLOTS` slots a byte a store, is longer than a tick at 10 kHz on every board, `TODO.md`.
 A thread made ready from another core waits besides for the rest of that core's trap, the interrupt between them, and the lock.
 A timer line's thread starts within those k ticks and steps of its deadline, so a periodic line keeps its deadlines and its thread starts within as much of each;
 a device's driver within them of the trap that took its interrupt.
@@ -336,15 +306,15 @@ which is its units' part and no more.
 Over any stretch the other threads of its core run at most what their accounts held as it began and what their units earn during it,
 so a thread with u units that wants the processor all along gets at least u sixty-fourths of the stretch,
 less those accounts, a tenth of a second's worth of the other units at most, a tick, and the kernel's steps.
-Those accounts, not the tick, are what bound how long work takes beside threads that save up their time:
-at worst (64 - u) / u tenths of a second for a thread with u units, whatever the work.
+Requests bound it closer: work of `c` counts begun with a full account is done within `TIME_UNITS * c / u` counts,
+rounded up to whole requests, whatever the other threads saved up.
 A periodic task of cost C and period T has time at every release
 when its units earn the cost, u T / `COUNT_PARTS` ticks at least C,
 when its account holds the cost and a tick, u `ACCOUNT_TICKS` / `COUNT_PARTS` ticks at least C and one,
 and when its account held that much at the first release, its units bound long enough before;
 C counts what the kernel charges to the task's turns too.
 What the accounts may hold, `ACCOUNT_TICKS`, is a tenth of a second whatever the tick, and at least `COUNT_PARTS` ticks and one,
-so a shorter tick shortens the wait and leaves this bound where it is; open decision 9.
+so a shorter tick leaves this bound where it is; decision 9.
 On several cores a driver on another core whose arms each interrupt the first, `TODO.md`, takes the kernel's share of the first core's turns too.
 No other latency is promised;
 what a real-time promise would take is open decision 36.
@@ -433,12 +403,11 @@ The price is a few loads on every trap: on QEMU a tenth of the cheapest system c
 a sixth while the counter is read.
 
 **Nothing more lives in the kernel.**
-Round-robin on a tick is the least policy that makes
-a spinning thread harmless and a woken thread eventually run,
+Earliest deadline first over requests is the least policy that makes
+a spinning thread harmless and a woken thread run by a deadline its own units and quantum set,
 units each earned by one thread are the least that make a thread cost nobody but whoever gave it units,
 and an account per thread is the least that caps its time without keeping the others busy.
-Fixed priorities were the intended end state of this section
-and are now open decision 9.
+Priorities, a period per thread and a calendar were weighed against it; see decisions 9 and 39.
 
 ## The watchdog
 

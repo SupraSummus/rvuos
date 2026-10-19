@@ -235,10 +235,11 @@ struct place {
     paddr_t queue_next;
     paddr_t queue_prev;
     paddr_t thread;     /* the thread it is a place of */
+    uint32_t deadline;  /* the count its thread's request on the core is due by; see sched.c, "Requests" */
     uint8_t queue;      /* the scheduler's queue it waits on, one of QUEUE_*, while its thread is READY and not running */
     uint8_t core;       /* the core whose queue that is, while it waits on one */
     uint8_t index;      /* its place among its thread's */
-    uint8_t pad;
+    uint8_t quantum;    /* how long a request is: 0 for a tick, else 2 to the quantum - 1 counts */
 };
 
 /* A thread holds its process as a process holds its tables, so the two may lie in different pools. */
@@ -355,7 +356,7 @@ _Static_assert(sizeof(struct pool) == 48, "object layout");
 _Static_assert(sizeof(struct process) == NODE_ROUND(12 + PROCESS_CSRS_SIZE) + 16 * PROCESS_TABLES, "object layout");
 _Static_assert(sizeof(struct thread) == NODE_ROUND(40 + sizeof(struct trap_frame)) + 2 * sizeof(struct cap),
                "object layout");
-_Static_assert(sizeof(struct place) == 24, "object layout");
+_Static_assert(sizeof(struct place) == 28, "object layout");
 _Static_assert(sizeof(struct notification) == 16, "object layout");
 _Static_assert(sizeof(struct irq) == 48, "object layout");
 _Static_assert(sizeof(struct route) == 64, "object layout");

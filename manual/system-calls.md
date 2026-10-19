@@ -59,7 +59,7 @@ and so is a code that is no operation's on any capability, 0, 11, 27, or `OP_COU
 What an operation reads its description says; three read by their own values:
 `OP_POOL_ALLOC` of a notification no `a3`, `OP_THREAD_WATCH` with no bits no `a1`,
 and `OP_IRQ_SET` with no bits, or of a line that is no timer's, no `a2` or `a3`.
-`a4` is read only by `OP_POOL_ALLOC` of a process or a thread, `a5` and `a6` by no operation, and none of them is checked yet.
+`a4` is read only by `OP_POOL_ALLOC` of a process or a thread and by `OP_TIME_BIND`, `a5` and `a6` by no operation, and none of them is checked where unread.
 
 A call whose work grows with the derivation tree or with a pool can be interrupted and made again:
 `OP_CAP_REVOKE`, `OP_CAP_DELETE` of a root with capabilities below it,
@@ -511,9 +511,8 @@ Needs `RIGHT_W`.
 `a2` = the first unit, as an offset from the capability's first
 (`KERR_INVALID_ARG` past the last, even for none),
 `a3` = how many units (`KERR_INVALID_ARG` past the last), zero for none,
-`a4` = the deadline window in ticks:
-zero for none, or a power of two up to 2^15 (32768),
-`KERR_INVALID_ARG` otherwise.
+`a4` = the quantum, how long the thread's requests on the core are, in counts of the counter:
+zero for a tick, or a power of two up to 2^24, `QUANTUM_MAX`, `KERR_INVALID_ARG` otherwise; section 5.8.
 The units must all be of one core, `KERR_INVALID_ARG` otherwise, the first unit's with none: the core the bind is of.
 It fills the thread's place that holds that core's time, or an empty one, section 5.11,
 and fails with `KERR_LIMIT` when every place holds another core's;
@@ -608,7 +607,7 @@ though an Untyped's base may be where a pool made of it keeps its descriptor;
 nor the bits a notification holds, nor the time, which only `RIGHT_R` reads.
 Unit `u` of a `Time` capability is of core `u / TIME_UNITS`,
 so `BOOT_CAP_TIME`'s count is `TIME_UNITS` for each core the kernel runs, section 5.11.
-The tick is the quantum, which bounds a turn while tracing is off, section 5.11.
+The tick bounds a turn while another thread waits and tracing is off, and is the quantum of a binding that asks for none, section 5.11.
 What lies below an Untyped is as the call found it, one kind of what may be a mixture once a delete handed things up, section 5.4,
 and a pool's room is as the call found it; a call on another core may change either at once.
 A pool that nothing names any more shows as `CAP_POOL` below its Untyped, until a revoke below the Untyped destroys it;

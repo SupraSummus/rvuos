@@ -10,10 +10,10 @@ Witness: fuzz actor-handoff
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -515,7 +515,6 @@ void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights,
-      */
+@@ -671,7 +671,6 @@ void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights,
      p->balance = kept;
      p->stamp = count_of(p);
+     request_start(p);
 -    lender_settle(place_thread(p));
  }
  

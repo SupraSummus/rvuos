@@ -869,11 +869,10 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
         /* The first unit lies within the capability even for none, so that the binding lies below it. */
         uint32_t off = arg[2];
         uint32_t count = arg[3];
-        uint32_t window_ticks = arg[4];
-        if (window_ticks > (1u << 15) || (window_ticks & (window_ticks - 1)) != 0) {
+        uint32_t quantum = arg[4];
+        if (quantum > (1u << QUANTUM_MAX) || (quantum & (quantum - 1)) != 0) {
             return KERR_INVALID_ARG;
         }
-        uint32_t window_exp = window_ticks != 0 ? (uint32_t)__builtin_ctz(window_ticks) + 1u : 0;
         if (off >= range_count(cap) || count > range_count(cap) - off) {
             return KERR_INVALID_ARG;
         }
@@ -897,7 +896,7 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
             return KERR_LIMIT;
         }
         /* The binding hangs below the invoked capability, so a revoke above it empties the place. */
-        sched_bind(p, first, count, cap->rights, slot_node(t, slot), window_exp);
+        sched_bind(p, first, count, cap->rights, slot_node(t, slot), quantum);
         return KERR_OK;
     }
     default:
