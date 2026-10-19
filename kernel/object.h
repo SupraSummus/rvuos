@@ -239,7 +239,7 @@ struct place {
     uint8_t queue;      /* the scheduler's queue it waits on, one of QUEUE_*, while its thread is READY and not running */
     uint8_t core;       /* the core whose queue that is, while it waits on one */
     uint8_t index;      /* its place among its thread's */
-    uint8_t quantum;    /* how long a request is: 0 for a tick, else 2 to the quantum - 1 counts */
+    uint8_t span;       /* how far past its virtual time a request is due: 0 for a tick's work, else 2 to the span - 1 counts */
 };
 
 /* A thread holds its process as a process holds its tables, so the two may lie in different pools. */

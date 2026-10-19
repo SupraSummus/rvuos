@@ -402,6 +402,9 @@ and otherwise, today, the one that has waited longest.
 
 **`OP_NOTIFY_WAIT` (15).**
 Needs `RIGHT_R`.
+`a1` = the span: how soon the request the wake begins is due, in counts of the counter past the thread's virtual time,
+on every core whose time it holds, a power of two up to 2^30, `SPAN_MAX`, `KERR_INVALID_ARG` otherwise;
+zero keeps the span the thread had, its binding's or its last wait's, and a span given holds until another, section 5.11.
 Blocks until some bit is set, then returns `a1` = the bits and clears them.
 Returns `KERR_INVALID_CAP` with no bits
 if the notification's pool is destroyed while the thread waits.
@@ -410,6 +413,7 @@ A stop leaves the waiter at this call, which a resume makes again; `OP_THREAD_ST
 **`OP_NOTIFY_LEND` (38).**
 Needs `RIGHT_R`.
 `a1` = slot of a `Thread` capability with `RIGHT_X`, the borrower; the caller itself is `KERR_INVALID_ARG`.
+`a2` = the span, as `OP_NOTIFY_WAIT`'s `a1`, which the borrower's requests on the caller's time are due within too.
 Waits as `OP_NOTIFY_WAIT` does, and returns at once, lending nothing, if some bit is set.
 While it waits, a borrower without time of its own on a core runs there on the account of the thread that has lent it time longest,
 if that one holds the time of that core too,
@@ -511,8 +515,9 @@ Needs `RIGHT_W`.
 `a2` = the first unit, as an offset from the capability's first
 (`KERR_INVALID_ARG` past the last, even for none),
 `a3` = how many units (`KERR_INVALID_ARG` past the last), zero for none,
-`a4` = the quantum, how long the thread's requests on the core are, in counts of the counter:
-zero for a tick, or a power of two up to 2^24, `QUANTUM_MAX`, `KERR_INVALID_ARG` otherwise; section 5.8.
+`a4` = the span, how soon each of the thread's requests on the core is due, in counts of the counter past its virtual time,
+until a wait gives another: zero for a tick's work at its units, or a power of two up to 2^30, `SPAN_MAX`,
+`KERR_INVALID_ARG` otherwise; section 5.11.
 The units must all be of one core, `KERR_INVALID_ARG` otherwise, the first unit's with none: the core the bind is of.
 It fills the thread's place that holds that core's time, or an empty one, section 5.11,
 and fails with `KERR_LIMIT` when every place holds another core's;
@@ -607,7 +612,7 @@ though an Untyped's base may be where a pool made of it keeps its descriptor;
 nor the bits a notification holds, nor the time, which only `RIGHT_R` reads.
 Unit `u` of a `Time` capability is of core `u / TIME_UNITS`,
 so `BOOT_CAP_TIME`'s count is `TIME_UNITS` for each core the kernel runs, section 5.11.
-The tick bounds a turn while another thread waits and tracing is off, and is the quantum of a binding that asks for none, section 5.11.
+The tick bounds a turn while another thread waits and tracing is off, and is the work of a request no span was given for, section 5.11.
 What lies below an Untyped is as the call found it, one kind of what may be a mixture once a delete handed things up, section 5.4,
 and a pool's room is as the call found it; a call on another core may change either at once.
 A pool that nothing names any more shows as `CAP_POOL` below its Untyped, until a revoke below the Untyped destroys it;

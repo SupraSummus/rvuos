@@ -27,8 +27,8 @@ Chapters 10 and 11 of the user manual; [`MANUAL.md`](../MANUAL.md) has its conte
 | most of its units an account holds | 100 ticks' worth, 100 ms (`ACCOUNT_TICKS`) | `kernel/timer.h` |
 | timer delay or period per call | 2^32 - 1 µs | `OP_IRQ_SET` |
 | watchdog's delay | 10 s | `WATCHDOG_US_MAX` |
-| tick, the longest turn while another thread waits, and the default quantum | 1 ms (`TIMER_HZ` 1000) unless the build sets another rate, `make TIMER_HZ=` | `kernel/timer.h`, Makefile; `OP_CAP_INFO` on a `Clock` or a `Time` capability |
-| quantum | a tick, or a power of two of counts up to 2^24 | `QUANTUM_MAX`; `OP_TIME_BIND` |
+| tick, the longest turn while another thread waits, and the work of a request no span was given for | 1 ms (`TIMER_HZ` 1000) unless the build sets another rate, `make TIMER_HZ=` | `kernel/timer.h`, Makefile; `OP_CAP_INFO` on a `Clock` or a `Time` capability |
+| span, how soon a request is due | a tick's work at the thread's units, or a power of two of counts up to 2^30 | `SPAN_MAX`; `OP_TIME_BIND`, `OP_NOTIFY_WAIT`, `OP_NOTIFY_LEND` |
 | interrupt lines | 96 on QEMU, 77 on the ESP32-C6, 52 on RP2350, 32 on mps2-an385, 48 on mps2-an521, line 0 the log's | `IRQ_LINES` |
 | smallest region | 8 bytes, or the PMP grain if coarser, 32 bytes on ARM | `region_min_size` in `kernel/pmp.h`; `OP_CAP_INFO` on any frame |
 | kernel log ring | 4 KiB less a 32-byte header | `KLOG_SIZE` |

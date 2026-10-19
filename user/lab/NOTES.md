@@ -23,15 +23,19 @@ so scenarios are compared within one run.
   and its lock that names the holder in `lend` and `lend-hog`, so that a taker that waits lends the holder its time.
 - **burst**, a process that every seven ticks works about half a tick of its own, earning 32 units,
   so that its account stays full and its requests are due as soon as anyone's.
-- **drivers** are two pairs of a ui and a store, each pair an interrupt and the driver that answers it, beside the burst,
-  all with requests of 32 µs; `drivers-tick` is the same with requests of a tick, and the `-hog` ones are beside the hog instead.
+- **drivers** are two pairs of a ui and a store, each pair an interrupt and the driver that answers it, beside the burst:
+  each store waits for its asks within a millisecond and each ui for its answers within half of one,
+  which is as soon as requests of 32 µs of work at their units were due;
+  `drivers-tick` is the same with the spans a tick's work gives, and the `-hog` ones are beside the hog instead.
 - **lend-server** and **lend-rider** are `poor-server` and `free-rider` with a ui that lends the store its time
   while it waits for an answer.
 
 The root task keeps 8 units, the units nobody earns are spare time, and every member may run on it.
 
-Threads run in requests, a tick long unless a member asks for another quantum, the one whose request is due first first;
-the scenarios ending `-batch` give the hog requests of 64 ticks, and `lax-server` gives the store such requests.
+Threads run in requests, the one whose request is due first first,
+each due within the span a member's wait gives, or a tick's work at its units for none;
+the scenarios ending `-batch` bind the hog, which never waits, to requests due a quarter of a second on,
+and `lax-server`'s store waits within a second, as 64 ticks' work at their units would be.
 In `net` a ui that lends asks a gate that lends, of no units, which passes the ask to a store of no units, beside the hog,
 so only lent time that goes on through the gate answers it; `net-unpaid` is the same chain lending nothing.
 
@@ -47,8 +51,8 @@ beside the burst and beside the hog, on QEMU `virt` and its ARM boards, but for 
 On the ARM boards their median halved too, and their p90 came to a few small asks,
 where with requests of a tick one pair's was about a fifth of a tick and the other's a small ask.
 On the AN521 beside the burst the worst rose instead, to about two fifths of a tick, both pairs at once.
-By the accounts' arithmetic, which no trace has checked yet, that one is not the quantum's:
-a request is due a quantum past the count at which its account would be full,
+By the accounts' arithmetic, which no trace has checked yet, that one is not the span's:
+a request is due a span past the count at which its account would be full,
 and accounts start empty at a bind and take a tenth of a second to fill,
 so 126 ms into the window the ui, its account still filling, would be due several ticks later than the burst, whose account was full,
 and the answer would wait for the ui's turn behind the burst's.

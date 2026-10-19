@@ -56,10 +56,25 @@ static inline bool place_spare(const struct place *p)
     return b->type == CAP_TIME && (b->rights & RIGHT_X) != 0;
 }
 
-/* How long a place's requests are, in counts: a tick unless its binding asked for another; see sched.c, "Requests". */
-static inline uint32_t place_quantum(const struct place *p)
+/*
+ * How far past its virtual time a place's request is due, in counts: the span its binding or its thread's last wait gave,
+ * or else a tick's work at its units; the place has units. See sched.c, "Requests".
+ */
+static inline uint32_t place_span(const struct place *p)
 {
-    return p->quantum != 0 ? 1u << (p->quantum - 1u) : timer_tick_counts();
+    return p->span != 0 ? 1u << (p->span - 1u) : COUNT_PARTS * timer_tick_counts() / place_units(p);
+}
+
+/* What a place keeps of a span OP_TIME_BIND or a wait takes, a power of two up to 2^SPAN_MAX or 0; see place_span. */
+static inline uint8_t span_code(uint32_t span)
+{
+    return span != 0 ? (uint8_t)(__builtin_ctz(span) + 1u) : 0;
+}
+
+/* Whether a call may give a span: 0, or a power of two up to 2^SPAN_MAX. */
+static inline bool span_valid(uint32_t span)
+{
+    return span <= 1u << SPAN_MAX && (span & (span - 1u)) == 0;
 }
 
 /*
@@ -95,9 +110,11 @@ static inline uint32_t tick_gain(const struct place *p)
 
 /*
  * Deadlines are compared modulo 2^32, so each lies within 2^31 counts of the count:
- * a request puts at most TIME_UNITS counts on its virtual time for each count of it, and an account ACCOUNT_TICKS ticks' counts.
+ * a request lies a span past its virtual time, 2^SPAN_MAX counts or a tick's work at one unit at most,
+ * and the virtual time an account's fill, ACCOUNT_TICKS ticks' counts, past the count.
  */
-_Static_assert(((uint64_t)TIME_UNITS << QUANTUM_MAX) + (uint64_t)TICK_COUNTS_MAX * ACCOUNT_TICKS < (1ull << 31),
+_Static_assert((1ull << SPAN_MAX) + (uint64_t)COUNT_PARTS * TICK_COUNTS_MAX + (uint64_t)TICK_COUNTS_MAX * ACCOUNT_TICKS <
+                   (1ull << 31),
                "a deadline lies within 2^31 counts of the count");
 /*
  * How many lenders lent time goes through: a borrower's first lender with no time of its own lends what it borrows,
@@ -380,9 +397,15 @@ struct place *sched_place_for(const struct thread *t, uint32_t core);
  * A place bound to none without spare time holds the core's time all the same: its thread runs there on lent time alone.
  * No other thread earns any of the units; the caller has made sure.
  * A ready thread whose turn it is nowhere joins the back of the queue its account puts it on, on each of its cores.
- * Its requests are quantum counts long, a power of two, or a tick for 0, and the first starts now.
+ * Its requests are due span counts past its virtual time, a power of two, or a tick's work for 0, and the first starts now.
  */
-void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights, struct cap *parent, uint32_t quantum);
+void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights, struct cap *parent, uint32_t span);
+
+/*
+ * A thread that waits gives the span its requests are due within on each of its cores, from the one its wake begins on,
+ * a power of two up to 2^SPAN_MAX. See sched.c, "Requests".
+ */
+void sched_span(struct thread *t, uint32_t span);
 
 /*
  * Clear a place's units the tree has already let go of:

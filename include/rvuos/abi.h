@@ -458,6 +458,11 @@
 #define OP_NOTIFY_SIGNAL 14
 /*
  * Notification (RIGHT_R): take the bits that are set.
+ * a1 = the span of the request the wake begins: the counts of the counter past the thread's virtual time it is due,
+ * on each core whose time it holds, as OP_TIME_BIND's a4 is, a power of two up to 2^SPAN_MAX, else KERR_INVALID_ARG;
+ * 0 keeps the span its binding or its last wait gave. It holds for the requests after that one too, until another.
+ * So a thread says at each wait how soon what wakes it must be done:
+ * woken while its account is full, it runs units / TIME_UNITS of the span within the span; see DESIGN.md, "Scheduling".
  * Returns a1 = the bits, which is never zero, and clears them.
  * Blocks until some bit is set;
  * the bits are sticky, so a signal that arrives first is not lost.
@@ -467,6 +472,8 @@
 /*
  * Notification (RIGHT_R): wait as OP_NOTIFY_WAIT does, lending a thread the caller's time meanwhile.
  * a1 = the slot of a Thread capability with RIGHT_X, the borrower; the caller itself fails with KERR_INVALID_ARG.
+ * a2 = the span, as OP_NOTIFY_WAIT's a1, which the borrower's requests on the caller's time take too,
+ * so a client says how soon its server must answer.
  * Returns a1 = the bits, at once if some bit is set, which lends nothing.
  * While it waits, a borrower without time of its own on a core runs there on the account of the thread
  * that has lent it time longest, if that one holds the time of that core too,
@@ -591,8 +598,9 @@
  * a1 = the slot of the Thread capability, which needs RIGHT_W,
  * a2 = the offset of the first unit, which must lie within the capability even for none,
  * a3 = how many units, zero for none,
- * a4 = the quantum, how many counts of the counter a request lasts: 0 for a tick, else a power of two up to 2^QUANTUM_MAX,
- *      else KERR_INVALID_ARG; the shorter the quantum, the sooner each request is due, see DESIGN.md, "Scheduling".
+ * a4 = the span, how many counts of the counter past its virtual time each of the thread's requests there is due:
+ *      0 for a tick's work at its units, else a power of two up to 2^SPAN_MAX, else KERR_INVALID_ARG,
+ *      until a wait gives another, see OP_NOTIFY_WAIT and DESIGN.md, "Scheduling".
  * The units must all be of one core, or the call fails with KERR_INVALID_ARG: the core of the first unit, for none too.
  * The bind fills the thread's place that holds that core's time, or an empty one,
  * and fails with KERR_LIMIT when every place holds another core's; see OP_POOL_ALLOC.
@@ -609,7 +617,7 @@
  * a turn on spare time ends as a thread with time becomes ready, see DESIGN.md, "Scheduling".
  */
 #define OP_TIME_BIND 29
-#define QUANTUM_MAX 24u /* the longest quantum OP_TIME_BIND takes, 2^QUANTUM_MAX counts */
+#define SPAN_MAX 30u /* the longest span OP_TIME_BIND, OP_NOTIFY_WAIT and OP_NOTIFY_LEND take, 2^SPAN_MAX counts */
 
 /*
  * Any capability: describe it. a1 = the page, 0, the only one so far, and a2 = a3 = 0;

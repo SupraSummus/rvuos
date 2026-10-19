@@ -835,43 +835,63 @@ until the maintainer decides otherwise.
     Decide with the first thing the kernel must keep in order across processes
     that neither a key with few values nor a fixed count serves.
 
-39. **Time in requests, due by the accounts.**
+39. **Time in requests, due within the span a wait gives.**
     Decided: one mechanism for how much of a core a thread may take and how soon it runs.
-    A thread runs in requests of its place's quantum, a tick or a power of two of counts that `OP_TIME_BIND` takes,
-    and the run queue is taken earliest deadline first.
-    A request is due when the account, having paid for it, would be full again:
-    `TIME_UNITS / u` counts for each count of the quantum past the thread's virtual time,
-    the count at which its account would be full again if it did not run.
+    How much is the units, a capability a parent gives;
+    how soon is the span, a power of two of counts that a thread gives as it waits, `OP_NOTIFY_WAIT` or `OP_NOTIFY_LEND`,
+    and its binding, `OP_TIME_BIND`, for a thread that never waits, or a tick's work at its units for none.
+    The run queue is taken earliest deadline first, over requests.
+    A request is due its span past the thread's virtual time,
+    the count at which its account would be full again if it did not run,
+    which moves on `TIME_UNITS / u` counts for each count the thread runs,
+    so a request is over once the thread has run its units' part of the span.
     The deadline stands while the request lasts, and the next request starts as one is over or as the thread is made ready,
     so the order changes only at those two events:
     a thread made ready takes the core in that trap from a turn whose request is due later,
     and the end of the turn's request, which the timer marks within the tick only while another thread waits, lets the next due go first.
-    The units of a core add up to its time, so a request made while its account is full is done within `TIME_UNITS * q / u` counts,
+    The units of a core add up to its time, so a thread woken while its account is full has run `u * s / TIME_UNITS` counts within its span `s`,
     whatever the others do, besides the kernel's longest step and the switches.
-    A driver that must answer within `D` asks for a quantum of its work `c` and `TIME_UNITS * c / D` units at least;
-    a thread that overruns its quantum puts its next request later, so it misses its own deadline and no other's.
-    The quantum is not a resource that runs out: a longer one puts a thread's requests behind shorter ones,
-    and a shorter one costs its thread a switch for each request while another waits.
+    A driver that must do work of `c` within `D` of its interrupt waits within a span `s` of `D` at most and is given `TIME_UNITS * c / s` units;
+    a thread that overruns puts its next request later, so it misses its own deadline and no other's.
+    A span is not a resource and costs nobody else, so a wait needs no right to give one:
+    a short span makes its requests as short, and costs its thread a switch for each while another waits,
+    and a long one puts its requests behind shorter ones.
+    So the span belongs to what wakes the thread, and a thread gives each of its waits its own:
+    a driver its interrupt a short one and its housekeeping a long one,
+    and a client that lends its server the span it waits within, so the server answers each client within the client's.
     Spare time is the far end of the same order: a thread without a tick in its account has no request due.
-    A thread on lent time runs its lender's requests, and lent time goes on through a lender with no time of its own,
-    `LEND_DEPTH` lenders on, so a client's account pays for its server and for the driver that one waits on.
+    A thread on lent time runs its lender's requests, at the lender's units and within the lender's span,
+    and lent time goes on through a lender with no time of its own, `LEND_DEPTH` lenders on, so a client's account pays for its server and for the driver that one waits on.
     Weighed and left:
+    - **A quantum on the binding**, the work of a request rather than its span, `OP_TIME_BIND`'s `a4` before:
+      the same requests, since a quantum `q` at `u` units is a span of `TIME_UNITS * q / u`,
+      but the thread had one for all it waits for, said in work at the units its parent gave it,
+      where it knows how soon it must answer and not what share that is;
+      a parent that gave it other units moved its deadlines.
+      `make lab`'s `drivers` scenarios, the spans of their waits set to what their quanta were, decide alike.
+    - **A span and the work besides**, both at the wait: the work a span holds is what the units buy,
+      so a second number only says whether the units suffice, which the thread can work out for itself.
     - **A deadline that moves with the virtual time as the thread runs**, and a timer where it crosses the next one:
       two threads that both want the core take it from each other at every crossing,
       which under QEMU cost each a fifth of its throughput.
-    - **A window added to the deadline**: it delays only its own thread, and nothing prices it.
+    - **A window added to the deadline**: it delays only its own thread, and nothing prices it; a long span does as much.
     - **Priorities that preempt on wake**, decision 9's proposal: a promise relative to every thread above.
-    - **A calendar**, units with fixed places in a cycle: latency becomes the spacing of a thread's units, and bursts go.
+    - **A calendar**, units with fixed places in a cycle: latency becomes the spacing of a thread's units, and bursts go;
+      units numbered by their bits reversed would space a block of them evenly,
+      but an interrupt waits for its thread's place, and filling the places nobody uses earliest deadline first is this mechanism again.
     - **A constant bandwidth server per place**: its period ties how soon a thread runs to how much it may do at once.
     Open:
     - **How much a filling account delays a request.**
-      The virtual time lies up to a tenth of a second ahead, an account's fill, against at most a few ticks for a quantum,
-      so a driver whose account is not full when its interrupt comes is due after a thread whose account is, whatever their quanta;
+      The virtual time lies up to a tenth of a second ahead, an account's fill, against a span of a few ticks at most,
+      so a driver whose account is not full when its interrupt comes is due after a thread whose account is, whatever their spans;
       and an account starts empty at a bind.
       `make lab` shows it on the AN521, about 150 ms after a bind.
-      A bind that starts the account full, or a virtual time held to a request ahead of the count as a thread wakes,
-      would each change what the account promises the others.
-    - **Time below a tick's worth**: a thread has time only while its account holds a tick, whatever its quantum.
+      A bind that starts the virtual time at the count while the account starts empty would need a word of its own per place,
+      and keeps what the account promises the others, since an empty account holds the thread to its units;
+      a virtual time held to a span ahead of the count as a thread wakes would forgive a thread that overran, which it does not.
+    - **Time below a tick's worth**: a thread has time only while its account holds a tick, whatever its span.
+    - **Spans that are not powers of two**: a driver's span is the longest power of two its deadline holds,
+      which asks up to twice the units; a few bits of mantissa beside the exponent would ask an eighth more at most.
     - **The kernel's longest step**, which a request's promise rests on; decision 36 and `TODO.md`.
     - **The earliest deadline without a walk** of the run queue, `TIME_UNITS` places at most.
     - **Lending across cores**, decision 27, and a borrower's lenders kept in the order of their deadlines.

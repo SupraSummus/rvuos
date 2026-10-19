@@ -700,14 +700,14 @@ static void check_queue(paddr_t head, uint8_t queue, uint32_t core)
             fail("queue is not linked back", head, at, p->queue_next);
         }
         /*
-         * A request on its own time is due a quantum at most ahead of the virtual time it went on from,
+         * A request on its own time is due a span at most ahead of the virtual time it went on from,
          * which the account as it was settled gives: the stamp, and how far it was from full.
          */
         if (queue == QUEUE_RUN && p->balance >= tick_parts()) {
             uint32_t u = place_units(p);
             uint32_t vt = (uint32_t)((uint64_t)p->stamp * timer_tick_counts()) + (account_cap(p) - p->balance) / u;
-            if ((int32_t)(p->deadline - vt) > (int32_t)(COUNT_PARTS * place_quantum(p) / u)) {
-                fail("a request is due further ahead than its quantum", v2p(p), p->deadline, vt);
+            if ((int32_t)(p->deadline - vt) > (int32_t)place_span(p)) {
+                fail("a request is due further ahead than its span", v2p(p), p->deadline, vt);
             }
         }
         queued_threads++;

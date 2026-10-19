@@ -1,7 +1,7 @@
 The scheduler picks the latest deadline on the run queue rather than the earliest.
 A thread with an earlier deadline starves on the run queue while threads with later deadlines run.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: a thread waits with a deadline before the turn's request
 Witness: fuzz time-edf-order
 

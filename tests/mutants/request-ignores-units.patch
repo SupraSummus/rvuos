@@ -1,20 +1,20 @@
-A request takes its quantum's counts of virtual time whatever the units, rather than TIME_UNITS / units counts for each.
-A thread with many units would wait as long for its turn as one with a single unit,
-and a request would lie further ahead of its virtual time than its quantum at its share.
+A place's virtual time takes what its account lacks for counts, whatever the units, rather than TIME_UNITS / units counts for each.
+A thread with many units would be due as late as one with a single unit,
+and a request would lie further ahead of its virtual time than its span.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
-Report: a request is due further ahead than its quantum
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a request is due further ahead than its span
 Witness: fuzz lend-lender-woken
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -389,7 +389,7 @@ uint32_t turn_vtime(const struct core *core, const struct place *p, uint32_t off
- /* The counts of virtual time a request of the place's quantum takes; the place has units. */
- static uint32_t request_length(const struct place *p)
+@@ -377,7 +377,7 @@ static uint8_t place_queue(const struct place *p, uint32_t balance, const struct
+  */
+ static uint32_t vtime(const struct place *p)
  {
--    return COUNT_PARTS * place_quantum(p) / place_units(p);
-+    return COUNT_PARTS * place_quantum(p);
+-    uint32_t full = p->stamp * timer_tick_counts() + (account_cap(p) - p->balance) / place_units(p);
++    uint32_t full = p->stamp * timer_tick_counts() + (account_cap(p) - p->balance);
+     uint32_t now = count_of(p) * timer_tick_counts();
+     return tick_before(now, full) ? full : now;
  }
- 
- /*

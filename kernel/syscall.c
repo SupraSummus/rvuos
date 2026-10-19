@@ -609,6 +609,12 @@ static __attribute__((noinline)) int op_lend(struct thread *t, struct notificati
     if (borrower == t) {
         return KERR_INVALID_ARG;
     }
+    if (arg[2] != 0) {
+        if (!span_valid(arg[2])) {
+            return KERR_INVALID_ARG;
+        }
+        sched_span(t, arg[2]);
+    }
     if (ntfn->bits != 0) {
         arg[1] = ntfn->bits;
         ntfn->bits = 0;
@@ -654,6 +660,13 @@ static int op_notification(struct thread *t, uint32_t slot, const struct cap *ca
         return slot_store(t, arg[2], &sub, slot_node(t, slot));
     }
     case OP_NOTIFY_WAIT:
+        /* The span is the waiter's own, which costs nobody else; see sched.c, "Requests". */
+        if (arg[1] != 0) {
+            if (!span_valid(arg[1])) {
+                return KERR_INVALID_ARG;
+            }
+            sched_span(t, arg[1]);
+        }
         if (ntfn->bits != 0) {
             arg[1] = ntfn->bits;
             ntfn->bits = 0;
@@ -869,8 +882,8 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
         /* The first unit lies within the capability even for none, so that the binding lies below it. */
         uint32_t off = arg[2];
         uint32_t count = arg[3];
-        uint32_t quantum = arg[4];
-        if (quantum > (1u << QUANTUM_MAX) || (quantum & (quantum - 1)) != 0) {
+        uint32_t span = arg[4];
+        if (!span_valid(span)) {
             return KERR_INVALID_ARG;
         }
         if (off >= range_count(cap) || count > range_count(cap) - off) {
@@ -896,7 +909,7 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
             return KERR_LIMIT;
         }
         /* The binding hangs below the invoked capability, so a revoke above it empties the place. */
-        sched_bind(p, first, count, cap->rights, slot_node(t, slot), quantum);
+        sched_bind(p, first, count, cap->rights, slot_node(t, slot), span);
         return KERR_OK;
     }
     default:
@@ -1164,8 +1177,8 @@ static const struct op_shape op_shapes[OP_COUNT] = {
     [OP_THREAD_READ_REG] = { CAP_THREAD, RIGHT_W, SHAPE_A1 },
     [OP_THREAD_WRITE_REG] = { CAP_THREAD, RIGHT_W, SHAPE_A1 | SHAPE_A2 },
     [OP_NOTIFY_SIGNAL] = { CAP_NOTIFICATION, RIGHT_W, SHAPE_A1 },
-    [OP_NOTIFY_WAIT] = { CAP_NOTIFICATION, RIGHT_R, 0 },
-    [OP_NOTIFY_LEND] = { CAP_NOTIFICATION, RIGHT_R, SHAPE_A1 },
+    [OP_NOTIFY_WAIT] = { CAP_NOTIFICATION, RIGHT_R, SHAPE_A1 },
+    [OP_NOTIFY_LEND] = { CAP_NOTIFICATION, RIGHT_R, SHAPE_A1 | SHAPE_A2 },
     [OP_NOTIFY_CARVE] = { CAP_NOTIFICATION, 0, SHAPE_A1 | SHAPE_A2 },
     [OP_IRQ_CARVE] = { CAP_IRQ_LINE, 0, SHAPE_A123 },
     [OP_IRQ_BIND] = { CAP_IRQ_LINE, RIGHT_W, SHAPE_A123 },

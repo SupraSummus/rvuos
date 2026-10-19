@@ -35,8 +35,10 @@
 #define HOLD   60000u
 #define PERIOD 3000u  /* a periodic member's, in microseconds: three ticks */
 #define BURST_PERIOD 7000u /* a burst's, prime to a periodic member's */
-#define LONG_QUANTUM 64000u /* a request of 64 ticks, in microseconds, against a tick's */
-#define SHORT_QUANTUM 32u   /* a request of about a small ask's work, in microseconds */
+#define BATCH_SPAN 250000u  /* the hog's requests due a quarter of a second on, in microseconds: 64 ticks' work at its units */
+#define LAX_SPAN   1000000u /* a store's due a second on, 64 ticks' work at its 8 units */
+#define DRIVER_SPAN 1000u   /* a driver answers within a millisecond, as 32 us of work at 4 units would be */
+#define DRIVEN_SPAN 500u    /* and takes the answer within half of one, as 32 us at 8 units would be */
 #define JITTER 80000u /* the most a periodic member works before each ask */
 
 enum role { NONE, STORE, GATE, UI, BULK, HOG, LOCKER };
@@ -61,7 +63,7 @@ struct member {
     uint8_t lends; /* a client's: it lends the member it asks its time while it waits for an answer */
     uint8_t lock;  /* a locker's lock_kind */
     uint32_t cost, period_us, gap;
-    uint32_t quantum_us; /* how long its requests are; 0 for a tick */
+    uint32_t span_us; /* within how long of a wake its requests are due, which its waits say; 0 for a tick's work */
 };
 
 struct scenario {
@@ -80,13 +82,14 @@ struct scenario {
 #define QUICK(kind)                                   SHARER("quick", kind, 16, SMALL, PERIOD, 0)
 #define SLOW(kind)                                    SHARER("slow", kind, 2, HOLD, 0, HOLD)
 #define PAID_GATE                                     { "gate", GATE, 0, 1, 0, 1, 0, 0, 0, 0, 0 }
-#define BATCH_HOG                                     { "hog", HOG, HOG_UNITS, 0, 0, 0, 0, 0, 0, 0, LONG_QUANTUM }
-#define LAX_STORE                                     { "store", STORE, 8, 0, 0, 0, 0, 0, 0, 0, LONG_QUANTUM }
+#define BATCH_HOG                                     { "hog", HOG, HOG_UNITS, 0, 0, 0, 0, 0, 0, 0, BATCH_SPAN }
+#define LAX_STORE                                     { "store", STORE, 8, 0, 0, 0, 0, 0, 0, 0, LAX_SPAN }
 #define BURST                                         { "burst", UI, HOG_UNITS, 0, 1, 0, 0, BIG, BURST_PERIOD, 0, 0 }
-#define DRIVER(name, units, quantum)                  { name, STORE, units, 0, 0, 0, 0, 0, 0, 0, quantum }
-#define DRIVEN(name, units, asks, quantum)            { name, UI, units, asks, 0, 0, 0, SMALL, PERIOD, 0, quantum }
-#define DRIVERS(quantum, load) \
-    { DRIVER("store", 4, quantum), DRIVEN("ui", 8, 1, quantum), DRIVER("dev", 4, quantum), DRIVEN("irq", 8, 3, quantum), load }
+#define DRIVER(name, units, span)                     { name, STORE, units, 0, 0, 0, 0, 0, 0, 0, span }
+#define DRIVEN(name, units, asks, span)               { name, UI, units, asks, 0, 0, 0, SMALL, PERIOD, 0, span }
+#define DRIVERS(driver, driven, load)                                                                   \
+    { DRIVER("store", 4, driver), DRIVEN("ui", 8, 1, driven), DRIVER("dev", 4, driver), DRIVEN("irq", 8, 3, driven), \
+      load }
 
 static const struct scenario scenarios[] = {
     { "alone", { STORE_OF(8), UI_OF(8, 1) } },
@@ -114,10 +117,10 @@ static const struct scenario scenarios[] = {
     { "lend-batch", { QUICK(LEND), SLOW(LEND), BATCH_HOG } },
     { "net", { STORE_OF(0), PAID_GATE, LENDING_UI(8, 2), HOGGING } },
     { "net-unpaid", { STORE_OF(0), SERVER("gate", GATE, 0, 1), UI_OF(8, 2), HOGGING } },
-    { "drivers", DRIVERS(SHORT_QUANTUM, BURST) },
-    { "drivers-tick", DRIVERS(0, BURST) },
-    { "drivers-hog", DRIVERS(SHORT_QUANTUM, HOGGING) },
-    { "drivers-tick-hog", DRIVERS(0, HOGGING) },
+    { "drivers", DRIVERS(DRIVER_SPAN, DRIVEN_SPAN, BURST) },
+    { "drivers-tick", DRIVERS(0, 0, BURST) },
+    { "drivers-hog", DRIVERS(DRIVER_SPAN, DRIVEN_SPAN, HOGGING) },
+    { "drivers-tick-hog", DRIVERS(0, 0, HOGGING) },
 };
 
 static struct self self;
@@ -215,17 +218,20 @@ static void report(const char *scenario, const char *member, const struct lab_st
         percentile(kept, 90) / per_us, st->worst / per_us);
 }
 
-/* A quantum of at least us microseconds, in counts of the clock: a power of two, as OP_TIME_BIND takes; 0 for a tick. */
-static uint32_t quantum_of(uint32_t us)
+/*
+ * A span of at most us microseconds, in counts of the clock: the longest power of two within it, as a wait takes,
+ * so that a request due within the span is due within us; 0 for none.
+ */
+static uint32_t span_of(uint32_t us)
 {
     uint64_t t;
     uint32_t hz, counter;
     must("read the clock", rv_clock_read(BOOT_CAP_CLOCK, &t, &hz, &counter));
-    uint32_t counts = us * (hz >= 1000000u ? hz / 1000000u : 1u), quantum = us != 0 ? 1u : 0u;
-    while (quantum != 0 && quantum < counts && quantum < 1u << QUANTUM_MAX) {
-        quantum <<= 1;
+    uint32_t counts = us * (hz >= 1000000u ? hz / 1000000u : 1u), span = counts != 0 ? 1u : 0u;
+    while (span != 0 && span <= counts / 2u && span < 1u << SPAN_MAX) {
+        span <<= 1;
     }
-    return quantum;
+    return span;
 }
 
 /* The lock the lockers share: its word in a frame of its own, and a notification from a pool of its own. */
@@ -290,6 +296,8 @@ static void run(const struct scenario *sc)
         p->jitter = m->period_us != 0 ? JITTER : 0;
         p->gap = m->gap;
         p->local = m->local;
+        /* A member says at each wait how soon what wakes it is due; the hog, which never waits, says it at its bind. */
+        p->span = m->role != HOG ? span_of(m->span_us) : 0;
         connected[i] = 0;
     }
     for (uint32_t i = 0; i < count; i++) {
@@ -317,8 +325,9 @@ static void run(const struct scenario *sc)
         }
     }
     for (uint32_t i = 0; i < count; i++) {
-        must("start a member", child_start_quantum(&self, &kids[i], entries[sc->cast[i].role], 0, sc->cast[i].units,
-                                                   quantum_of(sc->cast[i].quantum_us)));
+        const struct member *m = &sc->cast[i];
+        must("start a member", child_start_span(&self, &kids[i], entries[m->role], 0, m->units,
+                                                m->role == HOG ? span_of(m->span_us) : 0));
     }
 
     sleep_us(sc, count, WARM_US);

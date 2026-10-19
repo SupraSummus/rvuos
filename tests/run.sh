@@ -113,6 +113,10 @@ grep -q 'root: charge ok' "$text" \
     || fail "a thread that sleeps across every tick ran past its units"
 grep -q 'root: tickless ok' "$text" \
     || fail "the timer interrupted the only thread to run at ticks that changed nothing"
+grep -q 'root: requests ok' "$text" \
+    || fail "a request due before the turn's next waited for the tick rather than the end of the turn's request"
+grep -q 'root: spans ok' "$text" \
+    || fail "a thread woken within the span its wait gave waited for a turn due later"
 grep -q 'the idle line stays quiet: ok' "$text" \
     || fail "an armed line nothing raises signalled"
 grep -q 'root: irq ok' "$text" \

@@ -351,22 +351,24 @@ static uint8_t place_queue(const struct place *p, uint32_t balance, const struct
 
 /*
  * Requests.
- * A thread runs in requests of its place's quantum, a tick unless its binding asked for another,
- * and the run queue is taken earliest deadline first.
+ * A thread runs in requests, and the run queue is taken earliest deadline first.
  * A place's virtual time is the count at which its account would be full again if its thread did not run:
  * it stands while the thread waits, until the account is full, and moves on TIME_UNITS / units counts
  * for each count the thread runs.
- * A request is due when the account, having paid for it, would be full again:
- * TIME_UNITS / units counts for each count of its quantum past the virtual time it starts at.
- * So a short quantum, or more units, brings a request nearer, and each request puts the next further.
- * A request starts as its thread is made ready or bound, and the next as one is over,
- * its virtual time having reached its deadline; a thread that waits gives up the rest of its request.
+ * A request is due its place's span past the virtual time it starts at,
+ * the span its thread's last wait gave, or its binding, or a tick's work at its units;
+ * and it is over once the thread has run units / TIME_UNITS counts for each count of the span,
+ * its virtual time having reached its deadline.
+ * So a short span brings a request nearer and makes it shorter, and each request puts the next further.
+ * A request starts as its thread is made ready or bound, and the next as one is over;
+ * a thread that waits gives up the rest of its request.
  * Its deadline stands for the whole request, so the order changes only as a thread is made ready,
  * which takes the core from a turn whose request is due later, and as the turn's request is over,
  * which the timer marks if that falls before the tick while another thread waits.
- * Work of c, at most a quantum, made ready while the account is full, is done by its deadline whatever the others do,
- * since the units of a core add up to its time, which is all earliest deadline first needs.
- * A place on lent time runs its lender's requests, at the lender's units.
+ * A wake while the account is full is answered within its span, with units / TIME_UNITS of it, whatever the others do,
+ * since the units of a core add up to its time, which is all earliest deadline first needs;
+ * and whatever span a thread gives, its requests take that part of their spans and no more, so no span costs another thread.
+ * A place on lent time runs its lender's requests, at the lender's units and the lender's span.
  */
 
 /*
@@ -385,10 +387,10 @@ uint32_t turn_vtime(const struct core *core, const struct place *p, uint32_t off
     return core->ticks * timer_tick_counts() + (account_cap(p) - (p->balance - turn_owes_on(core, p, offset))) / place_units(p);
 }
 
-/* The counts of virtual time a request of the place's quantum takes; the place has units. */
+/* The counts of virtual time a request of the place takes, its span; the place has units. */
 static uint32_t request_length(const struct place *p)
 {
-    return COUNT_PARTS * place_quantum(p) / place_units(p);
+    return place_span(p);
 }
 
 /*
@@ -647,9 +649,9 @@ struct place *sched_place_for(const struct thread *t, uint32_t core)
     return empty;
 }
 
-void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights, struct cap *parent, uint32_t quantum)
+void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights, struct cap *parent, uint32_t span)
 {
-    p->quantum = quantum != 0 ? (uint8_t)(__builtin_ctz(quantum) + 1u) : 0;
+    p->span = span_code(span);
     struct cap *b = place_time(p);
     account_refill(p);
     uint32_t kept = p->balance;
@@ -671,6 +673,14 @@ void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights,
     p->stamp = count_of(p);
     request_start(p);
     lender_settle(place_thread(p));
+}
+
+void sched_span(struct thread *t, uint32_t span)
+{
+    for (uint32_t i = 0; i < thread_places(t); i++) {
+        LOOP_BOUND(CORES);
+        thread_place(t, i)->span = span_code(span);
+    }
 }
 
 void sched_unbind(struct cap *bound)

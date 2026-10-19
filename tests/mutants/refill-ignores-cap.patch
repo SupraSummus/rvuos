@@ -2,7 +2,7 @@ An account gains its units every tick without a limit.
 A thread idle for long would come back with a burst that keeps every other thread waiting;
 no account holds more than its cap.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: a place's account holds more than its cap
 Witness: fuzz actor-handoff
 

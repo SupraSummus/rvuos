@@ -195,28 +195,45 @@ The thread whose request is due first on the run queue has the next turn, the ol
 or with the run queue empty the oldest on the spare queue.
 
 **A thread runs in requests.**
-A place's quantum, chosen at `OP_TIME_BIND`, is how long a request is: a tick, or a power of two of counts.
+A request is due its place's span past the virtual time it starts at:
+the span the thread's last wait gave, `OP_NOTIFY_WAIT` or `OP_NOTIFY_LEND`, or else its binding's, `OP_TIME_BIND`,
+a power of two of counts, or a tick's work at its units for none.
 Its virtual time is the count at which its account would be full again if its thread did not run:
-it stands while the thread waits, until the account is full, and moves on `TIME_UNITS / u` counts for each count the thread runs on `u` units.
-A request is due when the account, having paid for it, would be full again:
-`TIME_UNITS / u` counts for each count of the quantum past the virtual time it starts at.
+it stands while the thread waits, until the account is full, and moves on `TIME_UNITS / u` counts for each count the thread runs on `u` units,
+so a request is over once the thread has run `u / TIME_UNITS` counts for each count of its span.
 A request starts as its thread is made ready or bound, and the next as one is over;
 a thread that waits gives up the rest of its request.
 Its deadline stands while the request lasts, so the order changes only as a thread is made ready,
 which takes the processor from a turn whose request is due later as the trap ends,
 and as the turn's request is over, which the timer marks if that falls before the tick while another thread waits.
-A thread on lent time runs its lender's requests, at the lender's units.
+A thread on lent time runs its lender's requests, at the lender's units and within the lender's span.
 Spare time is the far end of the same order: a thread without a tick in its account has no request due,
 so it runs only while nobody's is, the oldest first.
 
 **What a request promises.**
 The units of a core add up to its time, which is all earliest deadline first needs to meet every deadline:
-work of `c` counts, at most the quantum `q`, made ready at `t0` while the account is full, is done by `t0 + TIME_UNITS * q / u`,
+a thread with `u` units made ready at `t0` while its account is full, its span `s`,
+has run `u * s / TIME_UNITS` counts by `t0 + s`, or waits again before,
 whatever the other threads do, besides the kernel's longest step and the switches.
-A shorter quantum, or more units, brings that nearer;
-a longer one puts the thread's requests behind shorter ones and costs it nothing of its units.
-So a driver that must answer within `D` of its interrupt asks for a quantum of its work and `TIME_UNITS * c / D` units at least.
-A short quantum costs its thread switches: while another thread waits, the timer ends each of its requests.
+So a driver that must do work of `c` within `D` of its interrupt waits within a span of `D` at most,
+the longest power of two of counts that `D` holds, and needs `TIME_UNITS * c / s` units at least.
+A span costs nobody but its thread:
+a short one makes its requests as short, so that its thread takes no more than its units' part of any span,
+and a long one puts its requests behind shorter ones and costs it nothing of its units.
+A short span costs its thread switches: while another thread waits, the timer ends each of its requests.
+Its account's fill is what the promise asks besides, so a wake comes at most a span after the last for it to hold each time.
+
+**Why the span is the wait's.**
+How soon a thread must answer belongs to what it answers, so a thread says it as it waits:
+a driver gives its interrupt a short span and its housekeeping timer a long one, at one wait each,
+and a client that lends gives its server the span it gives itself, so a server answers each client within the client's.
+The span takes nothing from anyone, so it needs no capability, as units do;
+a wait that gives none keeps the span its thread had, and a thread that never waits has its binding's.
+The binding's span came first, as a quantum, the work of a request rather than its span:
+a quantum `q` at `u` units is a span of `TIME_UNITS * q / u`,
+so a span is the same request said in time, which the thread knows, rather than in work at the units its parent gave it.
+A wait that gives a span the request in progress cannot hold to ends that request as the core next looks,
+and the next starts at the thread's virtual time, so no span brings a request before what its units have paid for.
 A thread that wants more than its units drains its account and waits on the spent queue, or runs on spare time,
 and delays no other thread's requests.
 
@@ -274,7 +291,7 @@ it is the time nobody earned, and a thread that needs a part of the processor is
 A borrower on lent time has the turns its lender would have had, charged to the lender.
 
 **How long a thread with time waits for its turn** is bounded by its request and by the kernel's steps:
-made ready with a full account, it has run its quantum by `TIME_UNITS * q / u` counts later, as above,
+made ready with a full account, it has run `u * s / TIME_UNITS` counts by a span `s` later, as above,
 and with its account short of full later by the counts its units take to fill it.
 Only requests due before its own run first, each paid by units of the core,
 or by the one thread that lends to their thread first, which waits and so runs no request itself;
@@ -283,7 +300,7 @@ and a turn on spare time ends as the thread becomes ready.
 A tick more is owed only to a turn no unit of the core pays for that does not end so:
 a thread bound to another core's units during its turn, which finishes it,
 and a call stopped for an interrupt, which its thread makes again first.
-The binding sets the quantum, and with it the bound, against the switches a shorter quantum costs while threads compete.
+The thread's span sets the bound, against the switches a shorter span costs it while threads compete.
 On top come the kernel's steps: the longest it takes without looking for an interrupt,
 and on several cores one such step of each other core, which the lock waits for,
 and the trap that ends the last request ahead, which counts the tick, its timer lines and the releases.
@@ -404,7 +421,7 @@ a sixth while the counter is read.
 
 **Nothing more lives in the kernel.**
 Earliest deadline first over requests is the least policy that makes
-a spinning thread harmless and a woken thread run by a deadline its own units and quantum set,
+a spinning thread harmless and a woken thread run by the span its own wait sets, within its units,
 units each earned by one thread are the least that make a thread cost nobody but whoever gave it units,
 and an account per thread is the least that caps its time without keeping the others busy.
 Priorities, a period per thread and a calendar were weighed against it; see decisions 9 and 39.

@@ -51,6 +51,7 @@ struct lab_page {
     struct chan_end up;             /* to its server, for a client and the gate */
     struct chan_end ends[LAB_ENDS]; /* from its clients, for a server */
     uint32_t lend_to;               /* a client's: its server's thread, RIGHT_X, lent its time while it waits; 0 for none */
+    uint32_t span;                  /* the span its waits give, in counts of the clock: 0 for its binding's */
     struct lock lock;               /* a locker's, unless it takes the one below */
     struct named_lock named;        /* a locker's that names its holder, whose takers lend it their time; word 0 for none */
     struct lab_stats st;

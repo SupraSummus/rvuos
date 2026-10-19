@@ -205,12 +205,13 @@ static inline uint32_t rv_time_carve(uint32_t time_cap, uint32_t offset, uint32_
 
 /*
  * OP_TIME_BIND: a thread bound to count units of the capability from offset, which it then earns,
- * in requests of quantum counts: 0 for a tick, else a power of two up to 2^QUANTUM_MAX.
+ * its requests due span counts past its virtual time until a wait gives another: 0 for a tick's work at its units,
+ * else a power of two up to 2^SPAN_MAX.
  */
 static inline uint32_t rv_time_bind(uint32_t time_cap, uint32_t thread_cap, uint32_t offset, uint32_t count,
-                                    uint32_t quantum)
+                                    uint32_t span)
 {
-    return rv_invoke6(OP_TIME_BIND, time_cap, thread_cap, offset, count, quantum, 0, 0);
+    return rv_invoke6(OP_TIME_BIND, time_cap, thread_cap, offset, count, span, 0, 0);
 }
 
 /*
@@ -379,11 +380,14 @@ static inline uint32_t rv_notify_carve(uint32_t ntfn_cap, uint32_t bits, uint32_
     return rv_invoke(OP_NOTIFY_CARVE, ntfn_cap, bits, dst, 0);
 }
 
-/* OP_NOTIFY_WAIT: block until some bit is set, then take them all. */
-static inline uint32_t rv_wait(uint32_t ntfn_cap, uint32_t *bits)
+/*
+ * OP_NOTIFY_WAIT: block until some bit is set, then take them all,
+ * the request the wake begins due within span counts of the counter: a power of two, or 0 to keep the span it had.
+ */
+static inline uint32_t rv_wait_within(uint32_t ntfn_cap, uint32_t span, uint32_t *bits)
 {
     register uint32_t r_a0 __asm__(RV_A0) = ntfn_cap;
-    register uint32_t r_a1 __asm__(RV_A1) = 0;
+    register uint32_t r_a1 __asm__(RV_A1) = span;
     register uint32_t r_a2 __asm__(RV_A2) = 0;
     register uint32_t r_a3 __asm__(RV_A3) = 0;
     register uint32_t r_a7 __asm__(RV_A7) = OP_NOTIFY_WAIT;
@@ -395,12 +399,21 @@ static inline uint32_t rv_wait(uint32_t ntfn_cap, uint32_t *bits)
     return r_a0;
 }
 
-/* OP_NOTIFY_LEND: as rv_wait, lending the thread of thread_cap, which has RIGHT_X, the caller's time meanwhile. */
-static inline uint32_t rv_lend(uint32_t ntfn_cap, uint32_t thread_cap, uint32_t *bits)
+/* OP_NOTIFY_WAIT: block until some bit is set, then take them all. */
+static inline uint32_t rv_wait(uint32_t ntfn_cap, uint32_t *bits)
+{
+    return rv_wait_within(ntfn_cap, 0, bits);
+}
+
+/*
+ * OP_NOTIFY_LEND: as rv_wait_within, lending the thread of thread_cap, which has RIGHT_X, the caller's time meanwhile,
+ * whose requests on it are due within span as the caller's are.
+ */
+static inline uint32_t rv_lend_within(uint32_t ntfn_cap, uint32_t thread_cap, uint32_t span, uint32_t *bits)
 {
     register uint32_t r_a0 __asm__(RV_A0) = ntfn_cap;
     register uint32_t r_a1 __asm__(RV_A1) = thread_cap;
-    register uint32_t r_a2 __asm__(RV_A2) = 0;
+    register uint32_t r_a2 __asm__(RV_A2) = span;
     register uint32_t r_a3 __asm__(RV_A3) = 0;
     register uint32_t r_a7 __asm__(RV_A7) = OP_NOTIFY_LEND;
     __asm__ volatile(RV_CALL
@@ -409,6 +422,12 @@ static inline uint32_t rv_lend(uint32_t ntfn_cap, uint32_t thread_cap, uint32_t 
                      : "memory", RV_A4, RV_A5, RV_A6);
     *bits = r_a1;
     return r_a0;
+}
+
+/* OP_NOTIFY_LEND: as rv_wait, lending the thread of thread_cap, which has RIGHT_X, the caller's time meanwhile. */
+static inline uint32_t rv_lend(uint32_t ntfn_cap, uint32_t thread_cap, uint32_t *bits)
+{
+    return rv_lend_within(ntfn_cap, thread_cap, 0, bits);
 }
 
 /*

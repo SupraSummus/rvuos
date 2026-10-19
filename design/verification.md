@@ -275,6 +275,10 @@ A thread comes to lend its time to another only by its own lending wait,
 through a capability to that thread with the right to lend;
 no other call, and no fault, makes one thread lend to another.
 
+**A wait says how soon.**
+A wait or a lending wait that goes through, returning or blocking, leaves its caller's requests on every core
+due within the span it gave, and as they were if it gave none.
+
 **A thread stops by its holder, where it stood.**
 A thread ready or waiting before a call and stopped after it is the caller of a fault, one whose process the call took,
 or the thread the call's `OP_THREAD_STOP` named, through a capability with the right to control it.

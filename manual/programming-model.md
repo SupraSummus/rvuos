@@ -565,7 +565,7 @@ The rate is the board's, 10 MHz on QEMU, the CPU clock on the ESP32-C6 and 1 MHz
 so a program takes it from `OP_CLOCK_READ`.
 `OP_CAP_INFO` on the clock tells the rate too, with no right, since it is not the time,
 and the tick, in counts of the counter and in microseconds:
-the longest turn while another thread waits and the quantum unless a binding asks for another, which a program's own timing analysis works in, section 5.11.
+the longest turn while another thread waits and the work of a request no span was given for, which a program's own timing analysis works in, section 5.11.
 The time is the machine's, not the thread's: it includes other threads' slices.
 Revoking below a `Clock` capability uninstalls every region derived through it.
 `rdtime` traps on every board.
@@ -737,9 +737,11 @@ and moves `taken` only as far as its host says it has the bytes, so a halt write
 - The machine timer ticks at `TIMER_HZ`, 1 kHz on every board unless the build sets another rate, `make TIMER_HZ=`,
   which divides a second and the board's counter and is at least 650;
   `OP_CAP_INFO` on a `Clock` or a `Time` capability tells the tick, section 6.15, so a program need not assume one.
-  A thread runs in requests, a tick long unless its binding asked for another quantum, section 6.13:
-  a request is due when the thread's account, having paid for it, would be full again,
-  and the thread whose request is due first on the run queue runs,
+  A thread runs in requests, each due a span past the thread's virtual time:
+  the span its last wait gave, `OP_NOTIFY_WAIT` or `OP_NOTIFY_LEND`, or its binding's, `OP_TIME_BIND`, sections 6.9 and 6.13,
+  or a tick's work at its units for none.
+  Its virtual time is where its account would be full again, and a request is over once the thread has run its units' part of the span.
+  The thread whose request is due first on the run queue runs,
   or, if the run queue is empty, the one that has waited longest on the spare queue.
   A thread made ready whose request is due before the running thread's takes the processor at once,
   and as the running thread's request ends, one due before its next goes first.
@@ -751,11 +753,13 @@ and moves `taken` only as far as its host says it has the bytes, so a halt write
   so a thread alone on the processor is interrupted only at a timer line's deadline,
   where another thread's account reaches a tick,
   or where its own account drains, if it may not go on on spare time.
-- So a thread with `u` units and a full account, made ready with work of at most its quantum `q`,
-  is done within `TIME_UNITS * q / u` counts of the counter whatever the other threads do,
+- So a thread with `u` units and a full account, woken within a span `s`,
+  has run `u * s / TIME_UNITS` counts of the counter within `s` of its wake, or waits again before, whatever the other threads do,
   besides the kernel's longest step and the switches, while tracing is off and the thread keeps its binding.
-  A shorter quantum brings its requests nearer and costs the thread a switch for each while another thread waits;
-  a longer one puts them behind shorter ones.
+  A driver that must do work of `c` within `D` of its interrupt waits within the longest power of two of counts that `D` holds,
+  `s`, and is given `TIME_UNITS * c / s` units at least.
+  A shorter span brings its requests nearer and makes them shorter, and costs the thread a switch for each while another thread waits;
+  a longer one puts them behind shorter ones. A span costs no other thread anything, so a wait needs no right to give one.
   A thread with work all along gets its units' part of the processor,
   give or take a tenth of a second's worth of the accounts;
   `DESIGN.md`, "Scheduling", says what a request promises and what a periodic task needs of its units.
