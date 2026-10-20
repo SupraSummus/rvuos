@@ -646,8 +646,9 @@ What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
 - `pmp_init` stops counting at the first hardwired entry.
   A core with writable entries above a hardwired one loses them;
   have the image skip such entries if one turns up.
-- A kernel without the self-check keeps `OP_TEST_TICK`, `OP_TEST_IRQ` and `OP_TEST_PREEMPT`,
-  which only the replay calls, and `cap_stop_here`'s countdown for the last; `SELFCHECK=0` could drop them too.
+- A kernel without the self-check keeps `OP_TEST_IRQ`, which only the replay calls,
+  and `OP_TEST_TICK` and `OP_TEST_PREEMPT`, which fail there as tracing cannot be on,
+  and `cap_stop_here`'s countdown for the last; `SELFCHECK=0` could drop them too.
 - The root task is granted one block of free RAM,
   so what lies between the blocks is unused:
   about 2.8 MiB on QEMU, where it does not matter, and 28 KiB on the ESP32-C6.
@@ -663,7 +664,7 @@ What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
 ## Scheduling
 
 What the wait for a turn and the work a thread gets are bound by is in `DESIGN.md`, "Scheduling";
-the first five below are what does not keep to it yet, each a constant-time change:
+what does not keep to it yet comes first below, each a constant-time change, up to the bind's:
 
 - A pool destroy stops only for a pending interrupt, `cap_stop_here`,
   so a thread with time its walk wakes waits for the rest of the walk while the core's timer lies past the next tick,
@@ -679,9 +680,6 @@ the first five below are what does not keep to it yet, each a constant-time chan
 - On ARM and RP2350's Hazard3 an `OP_IRQ_SET` on a core other than the first interrupts the first core each time,
   so a driver there that arms its line in a loop takes what it likes of the first core's turns, which its threads pay for.
   Interrupting it only as `core_notify` does, or routing a line to its waiter's core, open decision 24, would bound it.
-- `OP_TEST_TICK` and a stop `OP_TEST_PREEMPT` armed move the tick count without time passing,
-  and untraced the count stays ahead of the counter for good, so every deadline set before fires early, the watchdog's among them.
-  Only the replay driver calls them, under tracing, so refusing them untraced with `KERR_STATE` would cost nothing.
 - A bind of a ready thread, even to more units of its core, puts it at the back of its queue,
   since the old binding goes through `sched_unbind`'s settle; keeping its place would keep its wait.
 - A thread whose account holds little more than a tick loses its time when its turn ends a few counts past a tick,
