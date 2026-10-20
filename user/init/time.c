@@ -1,5 +1,5 @@
 /*
- * Time: a timer line the root task sleeps on, timed on the clock, and a period kept on it.
+ * Time: a timer line the root task sleeps on, timed on the clock, a period kept on it, and a tick it may not ask for.
  * The child waits for the root task and the logger waits on the log,
  * which nothing but a running thread can feed,
  * so while this thread sleeps nothing is runnable
@@ -106,6 +106,11 @@ void time_demo(uint32_t *hz_out, uint32_t *counter_out)
                    && elapsed < (uint64_t)hz * ((PERIODS + 1) * PERIOD_US)
                ? KERR_OK : KERR_INVALID_ARG);
     puts("root: period ok\n");
+
+    /* Untraced only time moves the tick, so neither a tick nor a stop may be asked for. */
+    expect("ask for a tick untraced, refused",
+           rv_test_tick(BOOT_CAP_TEST) == KERR_STATE && rv_test_preempt(BOOT_CAP_TEST, 1) == KERR_STATE
+               ? KERR_OK : KERR_INVALID_ARG);
 
     *hz_out = hz;
     *counter_out = counter;
