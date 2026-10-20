@@ -54,11 +54,11 @@ static uint32_t now(const struct lab_page *p)
     return (uint32_t)t;
 }
 
-/* An ask that went at the clock's low word t was answered now. */
-static void record(struct lab_page *p, uint32_t t)
+/* Keeps a sample of counts, if the window is open. */
+static void keep(struct lab_page *p, uint32_t counts)
 {
     struct lab_stats *st = &p->st;
-    uint32_t counts = now(p) - t, n = st->n;
+    uint32_t n = st->n;
     if (__atomic_load_n(&p->phase, __ATOMIC_ACQUIRE) != LAB_MEASURE) {
         return;
     }
@@ -69,6 +69,12 @@ static void record(struct lab_page *p, uint32_t t)
         st->worst = counts;
     }
     __atomic_store_n(&st->n, n + 1u, __ATOMIC_RELEASE);
+}
+
+/* An ask that went at the clock's low word t was answered now. */
+static void record(struct lab_page *p, uint32_t t)
+{
+    keep(p, now(p) - t);
 }
 
 /* Copies a packet of len bytes into a struct of size, zeroing what it does not reach. */
@@ -272,6 +278,42 @@ void locker_main(struct child_page *c)
         sink = lab_work(p->cost, seq);
         give_lock(p);
         sink = lab_work(p->gap, seq);
+    }
+    (void)sink;
+}
+
+/*
+ * A driver whose work an interrupt starts: its timer line stands in for a device's, firing every period.
+ * A timer line fires on a tick, so wake k is due k periods after the first wake's tick;
+ * each wake keeps how much later than the earliest so far it started, those periods taken off.
+ * root.c starts it alone, so that its first wakes are as early as any.
+ */
+void driver_main(struct child_page *c)
+{
+    struct lab_page *p = (struct lab_page *)c;
+    uint64_t t;
+    uint32_t hz, counter, skipped;
+    if (rv_clock_read(p->clock, &t, &hz, &counter) != KERR_OK) {
+        rv_breakpoint();
+    }
+    /* The period in counts, by whole milliseconds, as a period of whole ticks is, so that it does not overflow. */
+    uint32_t period = p->period_us / 1000u * (hz / 1000u);
+    uint32_t pending = 0, origin = 0, k = 0;
+    volatile uint32_t sink = 0;
+    rv_timer_period(CHILD_TIMER, CHILD_BIT_TIMER, p->period_us, &skipped);
+    for (;;) {
+        while (!(pending & CHILD_BIT_TIMER)) {
+            pending |= wait_inbox();
+        }
+        pending &= ~CHILD_BIT_TIMER;
+        uint32_t start = now(p) - k * period;
+        if (k == 0 || (int32_t)(start - origin) < 0) {
+            origin = start;
+        }
+        keep(p, start - origin);
+        rv_timer_period(CHILD_TIMER, CHILD_BIT_TIMER, p->period_us, &skipped);
+        k += 1u + skipped;
+        sink = lab_work(p->cost, k);
     }
     (void)sink;
 }

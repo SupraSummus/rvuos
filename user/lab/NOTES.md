@@ -23,6 +23,9 @@ so scenarios are compared within one run.
   and its lock that names the holder in `lend` and `lend-hog`, so that a taker that waits lends the holder its time.
 - **lend-server** and **lend-rider** are `poor-server` and `free-rider` with a ui that lends the store its time
   while it waits for an answer.
+- **driver**, woken every three ticks by its timer line, standing in for a device's, to do about 25 µs of work.
+  It says how much later than its earliest each wake started, the earliest found alone, before the rest of the cast starts.
+  `driver-hogs` puts a second hog beside it, **hog2**, with 16 units.
 
 The root task keeps 8 units, the units nobody earns are spare time, and every member may run on it.
 
@@ -64,6 +67,15 @@ In `bulk`, with no hog, the ui waits for the big ask the store is on, ten times 
 That is the store's own order, which no kernel would change.
 
 **A second hop cost no more than the first** beside the hog; why is not worked out yet.
+
+**A driver its timer line wakes starts at its tick, behind the threads with time already waiting.**
+Beside the hog, `driver-hog`, it started as early as alone every time:
+the tick signals the lines before it ends the hog's turn, so the driver joins the run queue ahead of the hog.
+Beside a second hog, `driver-hogs`, it waited a whole tick at worst, for the hog with time on the queue ahead of it,
+and on spare time alone, `driver-spare`, a tick at p90, whenever the hog had time.
+A timer line fires only on a tick, where the hog's turn ends anyway, so this is a device's interrupt at its best:
+one that comes between ticks would wait for the rest of the hog's turn.
+No board the lab runs on lists a device whose interrupt it could time, so the lab does not show that yet.
 
 **A lock waits for its holder's turns.**
 Quick earns eight times slow's units, and still waits a third of a tick at p90 for slow to give the lock back,
