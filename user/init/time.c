@@ -107,10 +107,7 @@ void time_demo(uint32_t *hz_out, uint32_t *counter_out)
                ? KERR_OK : KERR_INVALID_ARG);
     puts("root: period ok\n");
 
-    /*
-     * Untraced only time moves the tick:
-     * one asked for, or a stop's, would leave the count ahead of the counter, and every deadline to fire early.
-     */
+    /* Untraced only time moves the tick, so neither a tick nor a stop may be asked for. */
     expect("ask for a tick untraced, refused",
            rv_test_tick(BOOT_CAP_TEST) == KERR_STATE && rv_test_preempt(BOOT_CAP_TEST, 1) == KERR_STATE
                ? KERR_OK : KERR_INVALID_ARG);

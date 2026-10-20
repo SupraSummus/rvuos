@@ -70,6 +70,14 @@ static int op_halt(const uint32_t *arg)
 /* Driving the machine as a test does: tracing, ticking, interrupting and preempting. */
 static int op_test(uint32_t op, const uint32_t *arg)
 {
+    /*
+     * Untraced, only time and the devices drive the machine:
+     * a tick no time brought would leave the count ahead of the counter for good,
+     * and every deadline set before would fire early, the watchdog's among them.
+     */
+    if (!debug_trace && op != OP_TEST_TRACE) {
+        return KERR_STATE;
+    }
     switch (op) {
 #if SELFCHECK
     case OP_TEST_TRACE:
@@ -84,13 +92,6 @@ static int op_test(uint32_t op, const uint32_t *arg)
         return KERR_OK;
 #endif
     case OP_TEST_TICK:
-        /*
-         * Untraced, a tick that no time brought would leave the count ahead of the counter for good,
-         * and every deadline set before would fire early, the watchdog's among them.
-         */
-        if (!debug_trace) {
-            return KERR_STATE;
-        }
         /* The caller's status is written to its own frame, whoever runs next. */
         sched_tick(1);
         return KERR_OK;
@@ -101,10 +102,6 @@ static int op_test(uint32_t op, const uint32_t *arg)
         }
         return sched_interrupt(arg[1]) ? KERR_OK : KERR_STATE;
     case OP_TEST_PREEMPT:
-        /* The stop does what OP_TEST_TICK does, so it moves the count as that would. */
-        if (!debug_trace) {
-            return KERR_STATE;
-        }
         preempt_countdown = arg[1];
         return KERR_OK;
     default:

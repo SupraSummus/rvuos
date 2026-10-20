@@ -125,14 +125,13 @@ the caller's turn ends as section 5.11 says,
 and the caller stays ready.
 Works while tracing is on, unlike the tick itself,
 and fails with `KERR_STATE` while it is off,
-where a tick no time brought would leave every deadline to fire early;
-so a kernel built without the self-check, section 9, always fails it.
+since a tick no time brought would have every deadline fire early.
 
 **`OP_TEST_IRQ` (22)**, on `Test`.
 `a1` = a line.
 Does what a device interrupt on that line does:
 the `Irq` armed on it masks the line and signals its bits.
-`KERR_STATE` when nothing is armed on the line;
+`KERR_STATE` while tracing is off or nothing is armed on the line;
 `KERR_INVALID_ARG` for a line the controller does not have, line 0 included.
 
 **`OP_TEST_PREEMPT` (32)**, on `Test`.

@@ -646,9 +646,8 @@ What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
 - `pmp_init` stops counting at the first hardwired entry.
   A core with writable entries above a hardwired one loses them;
   have the image skip such entries if one turns up.
-- A kernel without the self-check keeps `OP_TEST_IRQ`, which only the replay calls,
-  and `OP_TEST_TICK` and `OP_TEST_PREEMPT`, which fail there as tracing cannot be on,
-  and `cap_stop_here`'s countdown for the last; `SELFCHECK=0` could drop them too.
+- A kernel without the self-check keeps `cap_stop_here`'s countdown,
+  which only `OP_TEST_PREEMPT` arms, under tracing; `SELFCHECK=0` could drop it too.
 - The root task is granted one block of free RAM,
   so what lies between the blocks is unused:
   about 2.8 MiB on QEMU, where it does not matter, and 28 KiB on the ESP32-C6.
