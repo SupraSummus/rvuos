@@ -202,7 +202,13 @@ WIFI_ESP_PHY_OWN := phy_get_xtal_freq tsens_read_init_new pwdet_reg_init_new ope
                     noise_floor_auto_set_new bt_filter_reg_new pbus_clear_reg phy_i2c_init2 filter_dcap_set \
                     freq_get_i2c_data freq_i2c_write_set_new freq_i2c_mem_write_new freq_i2c_data_write_new \
                     rx_11b_opt tx_paon_set_new agc_reg_init_new bb_reg_init_new btbb_wifi_bb_cfg2 phy_reg_init \
-                    phy_wakeup_init
+                    phy_wakeup_init read_rf_freq_mem_new pll_cap_mem_update_new phy_rfpll_cap_correct_new \
+                    phy_rfpll_cap_init_cal_new phy_wait_freq_set_busy_new phy_en_hw_set_freq_new \
+                    phy_dis_hw_set_freq_new phy_rfpll_cap_track_new ram_temp_to_power txpwr_cal_track \
+                    bt_track_tx_power wifi_track_tx_power tx_i2c_track gen_rx_gain_table_new \
+                    phy_force_rx_gain_trig set_rx_gain_cal_dc_new ram_iq_est_enable dc_iq_est_new \
+                    rxdc_est_min_new pbus_rx_dco_cal_1step_new rx_pbus_reset set_rx_gain_table \
+                    txdc_cal_pwdet txdc_cal_pwdet_init
 
 $(BUILD)/$(WIFI_ESP)/libphy.a: $(WIFI_ESP_INIT) $(WIFI_ESP)/build.mk
 	$(OBJCOPY) $(addprefix --weaken-symbol=,$(WIFI_ESP_PHY_OWN)) $(PHYBLOB_CACHE)/libphy.a $@

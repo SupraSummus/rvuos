@@ -114,6 +114,32 @@ void agc_reg_init_new(uint32_t param1, uint32_t param2);
 void bb_reg_init_new(void);
 void btbb_wifi_bb_cfg2(void);
 void phy_reg_init(void);
+/* The leaves of libphy's phy_param_track_tot the driver's own, taken over with its disassembly. */
+uint32_t read_rf_freq_mem_new(uint32_t addr, uint32_t field);
+void pll_cap_mem_update_new(int32_t delta);
+int32_t phy_rfpll_cap_correct_new(uint32_t verbose);
+int32_t phy_rfpll_cap_init_cal_new(void);
+uint32_t phy_wait_freq_set_busy_new(void);
+void phy_en_hw_set_freq_new(void);
+void phy_dis_hw_set_freq_new(void);
+void phy_rfpll_cap_track_new(uint32_t verbose);
+int32_t ram_temp_to_power(int32_t temp, int32_t base, uint32_t bt);
+void txpwr_cal_track(uint32_t en_bt, uint32_t threshold, uint32_t verbose);
+void bt_track_tx_power(uint32_t threshold, uint32_t verbose);
+void wifi_track_tx_power(uint32_t threshold, uint32_t verbose);
+void tx_i2c_track(void);
+uint32_t gen_rx_gain_table_new(uint32_t *out, uint8_t limit, const uint16_t *gains, const int8_t *a,
+                               const int8_t *b, uint8_t count, uint32_t verbose);
+void phy_force_rx_gain_trig(void);
+void set_rx_gain_cal_dc_new(uint32_t mode, uint32_t flag, int16_t *pairs, int16_t *out_a, int16_t *out_b);
+void ram_iq_est_enable(uint32_t a0, uint32_t n);
+void dc_iq_est_new(uint32_t a0, uint32_t a1, int32_t out[3], uint32_t a3);
+void rxdc_est_min_new(uint32_t a0, uint32_t a1, int32_t out[3], uint32_t a3);
+void pbus_rx_dco_cal_1step_new(uint32_t a0, uint32_t mode, uint32_t div, int16_t dc[2], uint8_t *flag);
+void rx_pbus_reset(uint32_t on);
+void set_rx_gain_table(uint32_t p1, uint32_t p2);
+void txdc_cal_pwdet(uint16_t *dc, uint32_t verbose);
+void txdc_cal_pwdet_init(uint32_t a0, uint32_t a1);
 /* The ROM's own, which this file calls as the library does when taking its functions over. */
 void phy_bbpll_cal(uint32_t enable);
 void freq_module_resetn(void);
@@ -351,10 +377,11 @@ static void phy_dis_hw_set_freq_reg(void)
 }
 
 /*
- * libphy's phy_wait_freq_set_busy: wait, up to 0x3e8 of the MAC's microseconds, for the frequency setting to settle;
- * past that the ROM resets the frequency module, as the library does, whose print of the timeout is left out.
+ * libphy's phy_wait_freq_set_busy_new [0x42001ef8]: wait, up to 0x3e8 of the MAC's microseconds,
+ * for the frequency setting to settle; past that the ROM resets the frequency module, as the library does,
+ * whose print of the timeout is left out.
  */
-static uint32_t phy_wait_freq_set_busy(void)
+uint32_t phy_wait_freq_set_busy_new(void)
 {
     uint32_t start = REG(MAC_TSF_CLOCK);
     uint32_t waited = 0;
@@ -372,7 +399,7 @@ static uint32_t phy_wait_freq_set_busy(void)
 /* libphy's phy_dis_hw_set_freq_1: the wait for the frequency setting, then its enable. */
 static void phy_dis_hw_set_freq_1(void)
 {
-    phy_wait_freq_set_busy();
+    phy_wait_freq_set_busy_new();
     phy_dis_hw_set_freq_reg();
 }
 
@@ -889,6 +916,8 @@ void pbus_debugmode(void);
 void pbus_workmode(void);
 void set_rxclk_en(uint32_t on);
 void set_txclk_en(uint32_t on);
+/* The ROM's channel into the analog front end, which the receive DC calibration sets. */
+void chip_v7_set_chan_ana(uint32_t chan);
 
 #define PHY_PARAM_RFRX_A 0x14e /* the receive gains and the words the packed entry takes */
 #define PHY_PARAM_RFRX_B 0x16e
@@ -1832,7 +1861,7 @@ void phy_wakeup_init(void)
     set_chan_reg(1u);
     set_rx_comp_new();
     enable_agc();
-    phy_wait_freq_set_busy();
+    phy_wait_freq_set_busy_new();
     phy_en_hw_set_freq();
     phy_bbpll_cal(0);
     force_txrx_off(0);
@@ -1842,5 +1871,1096 @@ void phy_wakeup_init(void)
     REG(MODEM_SYSCON_CLK_CONF1) = clk_conf1;
     if (phy_param[PHY_PARAM_WIFI_BB_ENABLE] != 0u) {
         phy_wifi_enable_set(0);
+    }
+}
+
+/* The frequency setting's trigger and its answered word, which read_rf_freq_mem_new uses, unnamed in any header. */
+#define FE_FREQ_SET_TRIG (MODEM_BASE + 0xC4u)
+#define FE_FREQ_SET_DATA (MODEM_BASE + 0xE4u)
+
+/*
+ * libphy's read_rf_freq_mem_new [0x42002174]: the sub-address at the setting's bits 4 to 11 and a two-bit
+ * field at its own, then its trigger pulsed and the word it answered read.
+ */
+uint32_t read_rf_freq_mem_new(uint32_t addr, uint32_t field)
+{
+    REG(FE_FREQ_SET_CONF) = (REG(FE_FREQ_SET_CONF) & 0xffffc00fu) | ((addr << 4) & 0x3ff0u);
+    REG(FE_FREQ_SET_CONF4) = (REG(FE_FREQ_SET_CONF4) & ~0x3u) | (field & 0x3u);
+    REG(FE_FREQ_SET_TRIG) |= 0x1u;
+    REG(FE_FREQ_SET_TRIG) &= ~0x1u;
+    return REG(FE_FREQ_SET_DATA);
+}
+
+/* The ROM's get_freq_mem_addr: the block, host, index and flag of a frequency memory word, answering its address. */
+uint32_t get_freq_mem_addr(uint32_t block, uint32_t host, uint32_t index, uint32_t flag);
+
+/*
+ * libphy's pll_cap_mem_update_new [0x4200238c]: the 0x55 capacitance words of the frequency memory's block,
+ * each read back through read_rf_freq_mem_new and corrected by the argument delta, written again;
+ * then the frequency setting's sub-band word from the current channel's frequency less 2400 MHz.
+ */
+void pll_cap_mem_update_new(int32_t delta)
+{
+    uint32_t ret = get_freq_mem_param(2u);
+    uint32_t high = (ret >> 16) & 0xffu;
+    uint32_t mid = (ret >> 8) & 0xffu;
+
+    for (uint32_t k = 0; k < 0x55u; k++) {
+        uint32_t addr = get_freq_mem_addr(high, mid, k, 0u);
+        uint32_t v = read_rf_freq_mem_new(addr, 2u);
+        uint32_t t = ((((v >> 4) & 0x100u) | (v & 0xffu)) + (uint32_t)delta) & 0xffffu;
+        uint32_t w = (t & 0xffu) | (v & 0xef00u) | ((uint32_t)((int32_t)(int16_t)t >> 8) << 12);
+
+        freq_i2c_mem_write_new(addr, w, 3u);
+    }
+    uint32_t freq = chan_to_freq(phy_param16(0x11cu));
+    uint32_t sub = (uint32_t)(int32_t)(int16_t)(0xfffff6a0u + freq);
+
+    REG(FE_FREQ_SET_CONF) = (REG(FE_FREQ_SET_CONF) & 0xffffc00fu) | ((sub << 7) & 0x3ff0u);
+}
+
+/*
+ * libphy's phy_rfpll_cap_correct_new [0x420057b2]: the capacitance's own calibration, and, when it moved,
+ * the memory rewritten through pll_cap_mem_update_new; its argument is only the library's print, left out.
+ */
+int32_t phy_rfpll_cap_correct_new(uint32_t verbose)
+{
+    int32_t delta = phy_rfpll_cap_init_cal_new();
+
+    (void)verbose;
+    if (delta != 0) {
+        pll_cap_mem_update_new(delta);
+    }
+    return delta;
+}
+
+/* The ROM's two capacitance words of the RF PLL: its locked value written and read back. */
+int32_t read_pll_cap(void);
+void write_pll_cap(int32_t cap);
+/* The ROM's abs_temp: the magnitude of a temperature difference. */
+int32_t abs_temp(int32_t temp);
+
+/*
+ * libphy's phy_rfpll_cap_init_cal_new [0x420056ac]: the RF PLL's capacitance searched from its locked value,
+ * ten steps below and ten above, each written and its lock status read from the analog block 0x62, host 1,
+ * register 0xc; the settings that lock twice in a run are the calibration, and their mean is written back.
+ * The mean less the locked value is answered, as a signed halfword.
+ */
+int32_t phy_rfpll_cap_init_cal_new(void)
+{
+    int32_t cap = read_pll_cap();
+    uint32_t sum = 0, count = 0, lock = 0;
+    int pass = 0;
+    int32_t mean;
+
+    rom_i2c_write_masked(0x62, 1, 0x0b, 6, 6, 1);
+restart:
+    for (uint32_t step = 0; step < 10u; step++) {
+        uint32_t cap_v = (uint32_t)((pass == 0 ? cap - (int32_t)step : cap + 1 + (int32_t)step)) & 0xffffu;
+        uint32_t status;
+
+        write_pll_cap((int16_t)cap_v);
+        ets_delay_us(5);
+        status = ((uint32_t)rom_i2c_read(0x62, 1, 0x0c) >> 2) & 3u;
+        if (status == 0u) {
+            sum = (sum + cap_v) & 0xffffu;
+            count = (count + 1u) & 0xffu;
+        } else if (pass == 0 && status == 1u) {
+            if (++lock == 2u) {
+                break;
+            }
+            lock = 1;
+        } else if (pass == 1 && status == 2u) {
+            if (++lock == 2u) {
+                goto finish;
+            }
+            lock = 1;
+        }
+    }
+    if (pass == 0) {
+        pass = 1;
+        lock = 0;
+        goto restart;
+    }
+finish:
+    mean = cap;
+    if (count != 0u) {
+        mean = (int32_t)(sum / count);
+    }
+    write_pll_cap((int16_t)mean);
+    return (int16_t)(mean - cap);
+}
+
+/* libphy's phy_en_hw_set_freq_new [0x42001ee2]: the frequency setting's bits 27 and 28 cleared. */
+void phy_en_hw_set_freq_new(void)
+{
+    REG(FE_FREQ_SET_CONF) &= 0xe7ffffffu;
+}
+
+/*
+ * libphy's phy_dis_hw_set_freq_new [0x42001f48]: the frequency setting's bit 28 set over bits 27 and 28
+ * cleared, a 2 us wait, the wait for it to settle, and 0x14 us more where it did not settle at once.
+ */
+void phy_dis_hw_set_freq_new(void)
+{
+    REG(FE_FREQ_SET_CONF) = (REG(FE_FREQ_SET_CONF) & 0xe7ffffffu) | 0x10000000u;
+    ets_delay_us(2);
+    if (phy_wait_freq_set_busy_new() != 0u) {
+        ets_delay_us(0x14);
+    }
+}
+
+/* phy_param's bytes and halfwords the capacitance tracking keeps. */
+#define PHY_PARAM_TEMP        0x09
+#define PHY_PARAM_CAP_TEMP    0x130
+#define PHY_PARAM_CAP_BUSY    0x19C
+#define PHY_PARAM_TEMP_STEP_EN 0x1A5
+#define PHY_PARAM_TEMP_STEP   0x1A6
+
+/*
+ * libphy's phy_rfpll_cap_track_new [0x42007b22]: while the temperature has moved more than its step since the
+ * last correction, and no correction is under way, the frequency setting is held, the capacitance calibrated,
+ * the temperature kept, and the setting released. Its argument is only the library's print, left out.
+ */
+void phy_rfpll_cap_track_new(uint32_t verbose)
+{
+    int32_t step = (phy_param[PHY_PARAM_TEMP_STEP_EN] & 1u) != 0u ? (int32_t)phy_param[PHY_PARAM_TEMP_STEP] : 0xf;
+    int16_t temp = (int16_t)phy_param16(0x00u);
+    int16_t last = (int16_t)phy_param16(PHY_PARAM_CAP_TEMP);
+
+    (void)verbose;
+    if (abs_temp((int32_t)temp - (int32_t)last) < step) {
+        return;
+    }
+    if (phy_param[PHY_PARAM_CAP_BUSY] != 0u) {
+        return;
+    }
+    phy_param[PHY_PARAM_CAP_BUSY] = 1;
+    phy_dis_hw_set_freq_new();
+    phy_rfpll_cap_correct_new(phy_param[PHY_PARAM_TEMP]);
+    phy_param[PHY_PARAM_CAP_TEMP] = (uint8_t)temp;
+    phy_param[PHY_PARAM_CAP_TEMP + 1u] = (uint8_t)((uint16_t)temp >> 8);
+    phy_en_hw_set_freq_new();
+    phy_param[PHY_PARAM_CAP_BUSY] = 0;
+}
+
+/*
+ * libphy's ram_temp_to_power [0x4200846e]: the temperature's movement over the tracked one, a quarter of it
+ * for Bluetooth above it, a fifth below it, and for Wi-Fi a sixth above and a fourth below, all in a signed byte.
+ */
+int32_t ram_temp_to_power(int32_t temp, int32_t base, uint32_t bt)
+{
+    int32_t d = (int16_t)(temp - base);
+
+    if (bt != 0u) {
+        return d > 0 ? (int8_t)(d >> 2) : (int8_t)(d / 5);
+    }
+    return d > 0 ? (int8_t)(d / 6) : (int8_t)(d / 4);
+}
+
+/* phy_param's bytes the transmit power tracking keeps. */
+#define PHY_PARAM_TRACK_TEMP   0x12E
+#define PHY_PARAM_TRACK_TEMP_AT 0x04
+#define PHY_PARAM_TRACK_WIFI   0x123
+#define PHY_PARAM_TRACK_BT     0x124
+#define PHY_PARAM_TRACK_POWER  0x122
+#define PHY_PARAM_TRACK_FLAG   0x1A0
+
+/* The ROM's get_data_sat, which the tracking's temperature is held by. */
+int32_t get_data_sat(int32_t index, int32_t bias, int32_t span);
+/* The library's Bluetooth transmit gain, still its own here; a later package takes it over. */
+void bt_set_tx_gain(uint32_t a0);
+
+/*
+ * libphy's txpwr_cal_track [0x42007c46]: the transmit power the temperature asks for, from the sensor's
+ * halfword and the tracked one, held between the ROM's bounds, moved by ram_temp_to_power where it has
+ * moved enough, and written into phy_param and the front end with phy_bbpll_cal around it -- Bluetooth's
+ * gain or Wi-Fi's; the library's print is left out.
+ */
+void txpwr_cal_track(uint32_t en_bt, uint32_t threshold, uint32_t verbose)
+{
+    int16_t temp = (int16_t)phy_param16(0x00u);
+    int16_t last = (int16_t)phy_param16(PHY_PARAM_TRACK_TEMP);
+    int32_t step = abs_temp((int32_t)temp - (int32_t)last) > 7 ? 4 : 2;
+    int32_t power;
+    int8_t cur;
+
+    (void)verbose;
+    if (phy_param[PHY_PARAM_TRACK_FLAG] != 0u) {
+        step = 10;
+    }
+    power = (int16_t)get_data_sat((int32_t)temp, en_bt != 0u ? 0x69 : 0x50, -0x3c);
+    if (abs_temp(power - (int16_t)phy_param16(PHY_PARAM_TRACK_TEMP_AT)) >= step) {
+        power = ram_temp_to_power(power, last, en_bt);
+    } else {
+        power = (int8_t)phy_param[PHY_PARAM_TRACK_POWER];
+    }
+    if (threshold == 0u) {
+        return;
+    }
+    cur = en_bt != 0u ? (int8_t)phy_param[PHY_PARAM_TRACK_BT] : (int8_t)phy_param[PHY_PARAM_TRACK_WIFI];
+    if ((int32_t)cur == power) {
+        return;
+    }
+    phy_bbpll_cal(1);
+    phy_param[PHY_PARAM_TRACK_POWER] = (uint8_t)power;
+    phy_param[PHY_PARAM_TRACK_TEMP_AT] = (uint8_t)temp;
+    phy_param[PHY_PARAM_TRACK_TEMP_AT + 1u] = (uint8_t)((uint16_t)temp >> 8);
+    if (en_bt != 0u) {
+        phy_param[PHY_PARAM_TRACK_BT] = (uint8_t)power;
+        bt_set_tx_gain(0);
+    } else {
+        phy_param[PHY_PARAM_TRACK_WIFI] = (uint8_t)power;
+        wifi_set_tx_gain(phy_param16(0x11cu), 0u);
+    }
+    phy_bbpll_cal(0);
+}
+
+/* libphy's bt_track_tx_power [0x42007f72]: the tracking with Bluetooth's own temperature step. */
+void bt_track_tx_power(uint32_t threshold, uint32_t verbose)
+{
+    txpwr_cal_track(1u, threshold, verbose);
+}
+
+/* libphy's wifi_track_tx_power [0x42007f80]: the tracking for Wi-Fi, whose step is the caller's. */
+void wifi_track_tx_power(uint32_t threshold, uint32_t verbose)
+{
+    txpwr_cal_track(0u, threshold, verbose);
+}
+
+/* phy_param's byte the transmit I2C tracking keeps: which of the three ranges it last set. */
+#define PHY_PARAM_TX_I2C 0x4D
+
+/*
+ * libphy's tx_i2c_track [0x42007d88]: the analog block 0x6b, host 1, set for the temperature's range --
+ * 1 above freezing's of the sensor, 2 above 0x36, 0 between them -- four masked writes each, with the
+ * seventh register's value asking whether the channel is above 12, and the range kept in phy_param 0x4d.
+ */
+void tx_i2c_track(void)
+{
+    if ((int16_t)phy_param16(0x00u) <= 0 && phy_param[PHY_PARAM_TX_I2C] != 1u) {
+        rom_i2c_write_masked(0x6b, 1, 3, 3, 0, 0xa);
+        rom_i2c_write_masked(0x6b, 1, 3, 7, 4, 0x3);
+        rom_i2c_write_masked(0x6b, 1, 7, 3, 0, 0x5);
+        rom_i2c_write_masked(0x6b, 1, 4, 7, 4, 0x6);
+        phy_param[PHY_PARAM_TX_I2C] = 1;
+    }
+    if ((int16_t)phy_param16(0x00u) > 0x36 && phy_param[PHY_PARAM_TX_I2C] != 2u) {
+        rom_i2c_write_masked(0x6b, 1, 3, 3, 0, 0xb);
+        rom_i2c_write_masked(0x6b, 1, 3, 7, 4, 0x4);
+        rom_i2c_write_masked(0x6b, 1, 7, 3, 0, phy_param16(0x11cu) > 0xcu ? 0x5 : 0x7);
+        rom_i2c_write_masked(0x6b, 1, 4, 7, 4, 0xa);
+        phy_param[PHY_PARAM_TX_I2C] = 2;
+    }
+    if ((uint16_t)((int16_t)phy_param16(0x00u) - 1) > 0x35u || phy_param[PHY_PARAM_TX_I2C] == 0u) {
+        return;
+    }
+    rom_i2c_write_masked(0x6b, 1, 3, 3, 0, 0xb);
+    rom_i2c_write_masked(0x6b, 1, 3, 7, 4, 0x3);
+    rom_i2c_write_masked(0x6b, 1, 7, 3, 0, phy_param16(0x11cu) > 0xcu ? 0x5 : 0x8);
+    rom_i2c_write_masked(0x6b, 1, 4, 7, 4, 0xa);
+    phy_param[PHY_PARAM_TX_I2C] = 0;
+}
+
+/* The receive gain table's groups of six: the gain each of the seven entries stands for, past its sixth step. */
+static const uint16_t rx_gain_group[7] = { 0, 0x20, 0x30, 0x38, 0x3c, 0x3e, 0x3f };
+
+/*
+ * libphy's gen_rx_gain_table_new [0x42007140]: the rows of a receive-gain table, one per step of the gain
+ * code the caller asks for, each the row's own gain shifted left twelve, the group's gain at the step's
+ * sixth, and the step within that sixth in the low bits -- the three added, not orred, and the group's
+ * gain truncated to sixteen bits after its own shift. The code starts at the second table's first byte
+ * and rises by one per row until it passes the caller's limit or the table's 0x55 rows are full, which it
+ * answers; while the two tables' bytes at the current index add to it, the index moves past that run and
+ * the code takes the second table's byte there. Its print of each row and its tail is left out.
+ */
+uint32_t gen_rx_gain_table_new(uint32_t *out, uint8_t limit, const uint16_t *gains, const int8_t *a,
+                               const int8_t *b, uint8_t count, uint32_t verbose)
+{
+    int32_t last = (int32_t)count - 1;
+    uint8_t cur = (uint8_t)b[0];
+    uint8_t i = 0;
+    uint8_t j = 0;
+
+    (void)verbose;
+    for (;;) {
+        if ((int32_t)a[j] + (int32_t)b[j] == (int32_t)cur && (int32_t)j < last) {
+            do {
+                j = (uint8_t)(j + 1u);
+            } while (a[j] == 0 && (int32_t)j < last);
+            cur = (uint8_t)b[j];
+        }
+        out[i] = ((uint32_t)gains[j] << 12) +
+                 ((((uint32_t)rx_gain_group[(uint32_t)cur / 6u] << 4) & 0xffffu) + (uint32_t)(cur % 6u));
+        if (limit < cur) {
+            return i;
+        }
+        cur = (uint8_t)(cur + 1u);
+        i = (uint8_t)(i + 1u);
+        if (i == 0x55u) {
+            return 0x55u;
+        }
+    }
+}
+
+/*
+ * The receive gain table's DC offset, which set_rx_gain_table runs before it writes its rows: the analog
+ * and pbus leaves of libphy's set_rx_gain_cal_dc_new and the search under it, the driver's own here.
+ * Each is held to the library's off the board, by phy-ab.py; build.mk weakens the library's set_rx_gain_cal_dc_new
+ * and phy_force_rx_gain_trig, the two the library calls from elsewhere too.
+ */
+
+/* The ROM's table slots this subtree drives the front end and the pbus through, past the ones already named. */
+#define ROMFUNC_BB_BSS_CBW40       4  /* rom_bb_bss_cbw40: a0, whether the baseband's channel is 40 MHz wide */
+#define ROMFUNC_PBUS_RD           30  /* rom_pbus_rd: a pbus address and a place in its word, answers the bits */
+#define ROMFUNC_PBUS_SET_RXGAIN   31  /* rom_pbus_set_rxgain: a0, the receiver's gain into the pbus */
+#define ROMFUNC_PBUS_XPD_RX_OFF   32  /* rom_pbus_xpd_rx_off: the receiver powered down */
+#define ROMFUNC_PBUS_XPD_TX_OFF   34  /* rom_pbus_xpd_tx_off: the transmitter powered down */
+#define ROMFUNC_START_TX_TONE_STEP 38 /* rom_start_tx_tone_step: a0 to a5, a tone at a frequency, step and scale */
+#define ROMFUNC_IQ_EST_DISABLE    41  /* rom_iq_est_disable: the IQ estimate's accumulation stopped */
+
+/* The modem's IQ estimate, its DC accumulators and receive-gain SAR, and the trigger that starts them. */
+#define MODEM_RX_IQ_EST0      (MODEM_BASE + 0x470u)
+#define MODEM_RX_IQ_EST1      (MODEM_BASE + 0x474u)
+#define MODEM_IQ_EST_I        (MODEM_BASE + 0x488u) /* the estimate's in-phase accumulator */
+#define MODEM_IQ_EST_Q        (MODEM_BASE + 0x48Cu) /* its quadrature accumulator */
+#define MODEM_IQ_EST_MAG      (MODEM_BASE + 0x490u) /* and its magnitude */
+#define MODEM_RX_GAIN_SAR     (MODEM_BASE + 0x4A0u)
+#define MODEM_RX_GAIN_TRIG_EN (MODEM_BASE + 0x904u) /* bit 0: the trigger is the hardware's */
+#define WIFI_BB_RX_GAIN_TRIG  (MODEM_BASE + 0x702Cu) /* the word set_rx_comp_new's first store also writes */
+#define WIFI_BB_GAIN_SAR      (MODEM_BASE + 0x708Cu)
+
+/* The ROM's linear_to_db: a linear power's decibels. */
+int linear_to_db(int32_t value, int32_t offset);
+
+/* The ROM's pbus readers and forcers, which the library reaches through its table, as its slots take them. */
+static uint32_t rom_pbus_rd(uint32_t addr, uint32_t shift)
+{
+    return ((uint32_t (*)(uint32_t, uint32_t))phy_get_romfuncs()[ROMFUNC_PBUS_RD])(addr, shift);
+}
+
+static void rom_pbus_force_test(uint32_t a0, uint32_t a1, uint32_t a2)
+{
+    ((void (*)(uint32_t, uint32_t, uint32_t))phy_get_romfuncs()[ROMFUNC_PBUS_FORCE_TEST])(a0, a1, a2);
+}
+
+static void rom_pbus_set_rxgain(uint32_t gain)
+{
+    ((void (*)(uint32_t))phy_get_romfuncs()[ROMFUNC_PBUS_SET_RXGAIN])(gain);
+}
+
+static void rom_pbus_xpd_rx_off(void)
+{
+    ((void (*)(void))phy_get_romfuncs()[ROMFUNC_PBUS_XPD_RX_OFF])();
+}
+
+static void rom_pbus_xpd_tx_off(void)
+{
+    ((void (*)(void))phy_get_romfuncs()[ROMFUNC_PBUS_XPD_TX_OFF])();
+}
+
+static void rom_iq_est_disable(void)
+{
+    ((void (*)(void))phy_get_romfuncs()[ROMFUNC_IQ_EST_DISABLE])();
+}
+
+/* phy_param's words the receive DC calibration keeps: the trigger's count, a halfword, and its flag. */
+#define PHY_PARAM_IQ_EST_COUNT 0x1A2
+#define PHY_PARAM_IQ_EST_FLAG  0x1A4
+
+/*
+ * libphy's phy_force_rx_gain_trig [0x42005b5a]: where the modem lets the hardware trigger the receive gain,
+ * the baseband's word's hold below bit 18 set to 0x46000, then its bit 11 pulsed with a 1 us wait.
+ */
+void phy_force_rx_gain_trig(void)
+{
+    if ((REG(MODEM_RX_GAIN_TRIG_EN) & 1u) == 0u) {
+        return;
+    }
+    REG(WIFI_BB_RX_GAIN_TRIG) = (REG(WIFI_BB_RX_GAIN_TRIG) & 0xffffffu) | 0x46000000u;
+    REG(WIFI_BB_RX_GAIN_TRIG) |= 0x800000u;
+    ets_delay_us(1);
+    REG(WIFI_BB_RX_GAIN_TRIG) &= ~0x800000u;
+}
+
+/*
+ * libphy's ram_iq_est_enable [0x42005bac]: the IQ estimate's two words armed, its count from the argument's
+ * three low bits, the trigger started, and the count of the SAR readings taken until the modem answers
+ * past 0x45, kept in phy_param where the first reading counted; its first argument is unused.
+ */
+void ram_iq_est_enable(uint32_t a0, uint32_t n)
+{
+    uint32_t v;
+    uint16_t count = 0;
+    uint32_t wrote = 0;
+
+    (void)a0;
+    v = REG(MODEM_RX_IQ_EST0);
+    REG(MODEM_RX_IQ_EST0) = (v & 0xf3ffffffu) | 0x4000000u;
+    v = REG(MODEM_RX_IQ_EST1);
+    REG(MODEM_RX_IQ_EST1) = (v & 0xffe7ffffu) | 0x100000u;
+    v = REG(MODEM_RX_IQ_EST1);
+    REG(MODEM_RX_IQ_EST1) = ((n << 2) & 0x1fffcu) | (v & 0xfffe0003u);
+    REG(MODEM_RX_IQ_EST1) = REG(MODEM_RX_IQ_EST1) | 1u;
+    phy_param[PHY_PARAM_IQ_EST_COUNT] = 0;
+    phy_param[PHY_PARAM_IQ_EST_COUNT + 1u] = 0;
+    ets_delay_us(1);
+    REG(MODEM_RX_IQ_EST1) = REG(MODEM_RX_IQ_EST1) | 2u;
+    phy_force_rx_gain_trig();
+    count = phy_param16(PHY_PARAM_IQ_EST_COUNT);
+    for (;;) {
+        if ((REG(MODEM_RX_GAIN_SAR) & 0x10000u) != 0u) {
+            if (wrote != 0u) {
+                phy_param[PHY_PARAM_IQ_EST_COUNT] = (uint8_t)count;
+                phy_param[PHY_PARAM_IQ_EST_COUNT + 1u] = (uint8_t)(count >> 8);
+            }
+            return;
+        }
+        if (((REG(WIFI_BB_GAIN_SAR) >> 12) & 0x7fu) <= 0x45u) {
+            count = (uint16_t)(count + 1u);
+            wrote = 1;
+        }
+    }
+}
+
+/*
+ * libphy's dc_iq_est_new [0x42005c82]: the estimate taken, its accumulators shifted -- by 4 where the fourth
+ * argument is set, 6 otherwise -- and divided by one more than the second argument, their squares' sum
+ * taken from the magnitude's eight times, held at zero, turned to decibels and rounded, and the estimate
+ * disabled. The third argument takes the two accumulators and the decibels.
+ */
+void dc_iq_est_new(uint32_t a0, uint32_t a1, int32_t out[3], uint32_t a3)
+{
+    uint32_t shift = a3 != 0u ? 4u : 6u;
+    int32_t div = (int32_t)a1 + 1;
+    int32_t i, q, sq, v;
+
+    ram_iq_est_enable(a0, a1);
+    i = ((int32_t)REG(MODEM_IQ_EST_I) >> shift) / div;
+    out[0] = i;
+    q = ((int32_t)REG(MODEM_IQ_EST_Q) >> shift) / div;
+    out[1] = q;
+    /* The squares wrap as the machine's words do, and the shifts are the machine's own. */
+    sq = (int32_t)((uint32_t)i * (uint32_t)i + (uint32_t)q * (uint32_t)q);
+    if (a3 != 0u) {
+        sq >>= 4;
+    }
+    v = (int32_t)((uint32_t)((int32_t)REG(MODEM_IQ_EST_MAG) / div) * 8u - (uint32_t)sq);
+    if (v < 0) {
+        v = 0;
+    }
+    out[2] = (int32_t)(((uint32_t)linear_to_db(v, 0) + 8u) >> 4);
+    rom_iq_est_disable();
+}
+
+/*
+ * libphy's rxdc_est_min_new [0x4200641a]: the estimate repeated until it settles, the decibels of its best
+ * kept in the third argument with the two accumulators, at most eight times; it gives up with 0x38 where
+ * the decibels stay within 0x23 to 0x2f past two rounds. The second argument is unused.
+ */
+void rxdc_est_min_new(uint32_t a0, uint32_t a1, int32_t out[3], uint32_t a3)
+{
+    int32_t est[3] = { 0, 0, 0 };
+    int32_t best = 0x64;
+    uint32_t pass = 0;
+
+    (void)a1;
+    for (;;) {
+        dc_iq_est_new(1u, a0, est, a3);
+        if (est[2] < best && (phy_param16(PHY_PARAM_IQ_EST_COUNT) == 0u || phy_param[PHY_PARAM_IQ_EST_FLAG] == 1u)) {
+            out[2] = est[2];
+            best = est[2];
+            out[0] = est[0];
+            out[1] = est[1];
+        }
+        if (best > 0x2f) {
+            /* fall through to another round */
+        } else if (pass >= 2u || best <= 0x23) {
+            return;
+        }
+        pass = (pass + 1u) & 0xffu;
+        if (pass == 8u) {
+            out[2] = 0x38;
+            return;
+        }
+    }
+}
+
+/* What a DC word is held to: nothing below, 0x1ff above. */
+static int16_t rx_dc_clamp(int32_t v)
+{
+    if (v < 0) {
+        return 0;
+    }
+    if (v > 0x1ff) {
+        return 0x1ff;
+    }
+    return (int16_t)v;
+}
+
+/*
+ * libphy's pbus_rx_dco_cal_1step_new [0x420064b6]: the receive DC offset's one step. The pbus is forced
+ * at the caller's two words, the offset estimated, and the two words moved by the estimate's low bits,
+ * up to the second argument's bound rounds; the first argument is the caller's mode through the estimates
+ * and their clamp, the third the divisor, the fourth's two halfwords are the offset in and out, and the
+ * fifth takes one once the round settles. Six pbus readings the library prints are taken but their print
+ * is left out.
+ */
+void pbus_rx_dco_cal_1step_new(uint32_t a0, uint32_t mode, uint32_t div, int16_t dc[2], uint8_t *flag)
+{
+    int32_t e0[3] = { 0, 0, 0 }, e1[3] = { 0, 0, 0 }, e2[3] = { 0, 0, 0 };
+    uint32_t bits = (uint32_t)(uint8_t)rom_pbus_rd(1u, 2u);
+    uint32_t pop = 0;
+    uint32_t s3, s4, s10, bound, outer = 0;
+    int16_t s6 = dc[0], s9 = dc[1];
+    int16_t s6_0 = dc[0], s9_0 = dc[1];
+    uint32_t chase = (phy_param16(0x10u) >> 3) & 1u;
+    int32_t s11 = 0;
+    int32_t v1, v2;
+
+    for (uint32_t k = 0; k < 6u; k++) {
+        pop = (pop + ((bits >> k) & 1u)) & 0xffu;
+    }
+    if (mode == 1u) {
+        s3 = (pop >= 2u ? pop : 2u) - 1u;
+        bound = 8u;
+    } else {
+        s3 = a0 != 0u ? 0x18u : 4u;
+        bound = 0xcu;
+    }
+    *flag = 0;
+    s10 = mode == 1u ? 2u : 1u;
+
+loop:
+    rom_pbus_force_test(2u, s10, (uint16_t)s6);
+    dc[0] = s6;
+    dc[1] = s9;
+    rom_pbus_force_test(3u, s10, (uint16_t)dc[1]);
+    if (mode != 1u) {
+        rom_pbus_force_test(1u, 2u, 0u);
+        ets_delay_us(0xa);
+        rxdc_est_min_new(div, 1u, e1, 1u);
+        rom_pbus_force_test(1u, 2u, 0x20u);
+        ets_delay_us(0xa);
+        rxdc_est_min_new(div, 1u, e2, 1u);
+        e0[0] = e2[0] - e1[0];
+        e0[1] = e2[1] - e1[1];
+        s11 = e2[2];
+        if (e1[2] > s11) {
+            s11 = e1[2];
+        }
+        s4 = a0 != 0u ? 5u : 2u;
+    } else {
+        ets_delay_us(0xa);
+        rxdc_est_min_new(div, 1u, e0, 0u);
+        s4 = ((pop >= 2u ? pop : 2u) - 2u) & 0xffu;
+        s11 = e0[2];
+    }
+    v1 = abs_temp(e0[0]) >= (int32_t)s3 ? (int16_t)(e0[0] >> s4) : 0;
+    v2 = abs_temp(e0[1]) >= (int32_t)s3 ? (int16_t)(e0[1] >> s4) : 0;
+    if (v1 == 0) {
+        if (abs_temp(e1[0]) > 0x31) {
+            v1 = (int16_t)(e1[0] >> s4);
+        } else if (e0[0] > 0) {
+            v1 = 1;
+        } else {
+            v1 = e0[0] != 0 ? -1 : 0;
+        }
+    }
+    if (v2 == 0) {
+        if (abs_temp(e1[1]) > 0x31) {
+            v2 = (int16_t)(e1[1] >> s4);
+        } else if (e0[1] > 0) {
+            v2 = 1;
+        } else {
+            v2 = e0[1] != 0 ? -1 : 0;
+        }
+    }
+    if (mode != 1u) {
+        if (s11 > 0x2c) {
+            v1 = 0;
+            v2 = 0;
+        }
+        if (mode == 2u) {
+            v1 = get_data_sat(v1, 5, -5);
+            v2 = get_data_sat(v2, 5, -5);
+        }
+    }
+    if (chase != 0u) {
+        (void)rom_pbus_rd(0u, 1u);
+        (void)rom_pbus_rd(1u, 2u);
+        (void)rom_pbus_rd(2u, 1u);
+        (void)rom_pbus_rd(3u, 1u);
+        (void)rom_pbus_rd(2u, 2u);
+        (void)rom_pbus_rd(3u, 2u);
+    }
+    if ((int32_t)s3 >= abs_temp(e0[0]) && (int32_t)s3 >= abs_temp(e0[1]) && s11 <= 0x2d) {
+        *flag = 1;
+        goto finish;
+    }
+    if ((int32_t)s3 < abs_temp(e0[0])) {
+        s6 = (int16_t)(s6 - v1);
+    }
+    if ((int32_t)s3 < abs_temp(e0[1])) {
+        s9 = (int16_t)(s9 - v2);
+    }
+    s6 = rx_dc_clamp(s6);
+    s9 = rx_dc_clamp(s9);
+    outer = (uint8_t)(outer + 1u);
+    if ((uint8_t)outer < bound) {
+        goto loop;
+    }
+    if (*flag != 0u || mode == 1u) {
+        goto finish;
+    }
+    dc[0] = s6_0;
+    dc[1] = s9_0;
+finish:
+    dc[0] = rx_dc_clamp(dc[0]);
+    dc[1] = rx_dc_clamp(dc[1]);
+    rom_pbus_force_test(2u, s10, (uint16_t)dc[0]);
+    rom_pbus_force_test(3u, s10, (uint16_t)dc[1]);
+}
+
+/* libphy's rx_pbus_reset [0x4200484e]: the receiver forced through the ROM's three test windows. */
+void rx_pbus_reset(uint32_t on)
+{
+    rom_pbus_force_test(1u, 1u, 0u);
+    rom_pbus_force_test(1u, 1u, on != 0u ? 0x1cbu : 0x1c9u);
+    rom_pbus_force_test(1u, 1u, on != 0u ? 0x18bu : 0x189u);
+}
+
+/* The receive DC calibration's tables, its read of the DC offset out of phy_param, and libphy's own sizes. */
+void set_rx_gain_cal_dc_new(uint32_t mode, uint32_t flag, int16_t *pairs, int16_t *out_a, int16_t *out_b);
+
+/*
+ * libphy's set_rx_gain_cal_dc_new [0x42006d38]: the receive gain table's DC offset search, over the mode's
+ * channels or a single 0xe, the pbus and the analog I2C set up, and one step of pbus_rx_dco_cal_1step_new
+ * for each of the mode's steps; the strongest pbus readings among them, 0x100 each where the mode asks,
+ * and the settled offsets are written into the first and fourth tables' pairs and the third's, which the
+ * caller's gains table then reads. A flag set takes the alternate first pass, whose second channel's
+ * offsets it answers in the fifth argument. The library's print is left out.
+ */
+void set_rx_gain_cal_dc_new(uint32_t mode, uint32_t flag, int16_t *pairs, int16_t *out_a, int16_t *out_b)
+{
+    static const uint16_t sel_tab[8] = { 0x40, 0x41, 0x43, 0x6b, 0x77, 0x79, 0x7b, 0x7f };
+    static const uint16_t code_tab[7] = { 0x41, 0x43, 0x6b, 0x77, 0x79, 0x7b, 0x7f };
+    static const uint16_t chan_tab[7] = { 0x1, 0x3, 0x5, 0x7, 0x9, 0xb, 0xd };
+    int16_t dc0[2] = { 0x100, 0x100 };
+    int16_t dc1[2] = { 0x100, 0x100 };
+    uint8_t done = 0;
+    uint32_t inner = mode == 1u ? 1u : (flag == 0u ? 8u : 7u);
+    uint32_t outer = mode == 1u ? 7u : 1u;
+    uint32_t pbus_a1 = mode == 1u ? 2u : 0u;
+    int16_t *dst_b = out_b;
+
+    for (uint32_t o = 0; o < outer; o++) {
+        chip_v7_set_chan_ana(mode != 0u ? chan_tab[o % 7u] : 0xeu);
+        pbus_debugmode();
+        rom_pbus_xpd_tx_off();
+        rom_pbus_xpd_rx_off();
+        ((void (*)(uint32_t))phy_get_romfuncs()[ROMFUNC_PBUS_XPD_RX_ON])(0u);
+        set_rxclk_en(1u);
+        set_txclk_en(1u);
+        if (flag != 0u) {
+            rom_i2c_write_masked(0x67, 1, 3, 2, 2, 0);
+        } else if (mode == 0u) {
+            if (o == 0u) {
+                rom_pbus_set_rxgain(0x43000u);
+                rx_pbus_reset(0u);
+                rom_pbus_force_test(2u, 2u, 0x100u);
+                rom_pbus_force_test(3u, 2u, 0x100u);
+                pbus_rx_dco_cal_1step_new(0u, 0u, 0x800u, dc0, &done);
+                pbus_rx_dco_cal_1step_new(0u, 1u, 0x800u, dc1, &done);
+                out_a[0] = dc1[0];
+                out_a[1] = dc1[1];
+            }
+        } else {
+            dc0[0] = pairs[4];
+            dc0[1] = pairs[5];
+        }
+        for (uint32_t k = 0; k < inner; k++) {
+            uint32_t code = flag != 0u ? code_tab[k] : (mode != 0u ? 0x7fu : sel_tab[k]);
+
+            rom_pbus_set_rxgain(code << 12);
+            rx_pbus_reset(flag);
+            if (flag != 0u) {
+                rom_pbus_force_test(2u, 2u, 0x100u);
+                rom_pbus_force_test(3u, 2u, 0x100u);
+            } else {
+                rom_pbus_force_test(2u, 2u, (uint16_t)out_a[0]);
+                rom_pbus_force_test(3u, 2u, (uint16_t)out_a[1]);
+            }
+            pbus_rx_dco_cal_1step_new(flag, pbus_a1, 0x800u, dc0, &done);
+            if (mode != 0u) {
+                dst_b[0] = dc0[0];
+                dst_b[1] = dc0[1];
+            } else {
+                pairs[k * 2u] = dc0[0];
+                pairs[k * 2u + 1u] = dc0[1];
+            }
+        }
+        if (flag != 0u) {
+            rom_i2c_write_masked(0x67, 1, 3, 2, 2, 1);
+        }
+        set_rxclk_en(0u);
+        set_txclk_en(0u);
+        rom_pbus_xpd_rx_off();
+        pbus_workmode();
+        dst_b += 2;
+    }
+}
+
+/* The ROM's receive-gain adjustments set_rx_gain_table makes after the rows: a baseband gain offset and the
+ * receiver's IQ correction. */
+void bt_gain_offset(uint32_t offset);
+void iq_corr_enable(void);
+
+/* phy_param's word and halfwords the gain table keeps, and the two rows its tables are built into. */
+#define PHY_PARAM_A4      0xA4   /* bit 7 the DC calibration done, bit 9 the rows built */
+#define PHY_PARAM_RX_N1   0x121
+#define PHY_PARAM_RX_N2   0x120
+#define PHY_PARAM_RX_DC_T 0x198  /* the temperature the rows were built at */
+
+static uint32_t phy_param32(uint32_t off)
+{
+    uint32_t v;
+
+    __builtin_memcpy(&v, phy_param + off, sizeof(v));
+    return v;
+}
+
+static void phy_param32_set(uint32_t off, uint32_t v)
+{
+    __builtin_memcpy(phy_param + off, &v, sizeof(v));
+}
+
+/*
+ * libphy's set_rx_gain_table [0x420077b8]: the receive gain table's rows built and written. Unless
+ * phy_param 0xa4's bit 9 says they are done, and unless its bit 7 says the DC calibration is, the
+ * offset is calibrated for both tables; then two gen_rx_gain_table_new runs build the rows -- one to
+ * 0x21, one to 0x1c -- each written by wr_rx_gain_mem with the opposite table's DC offsets, the
+ * counts kept in phy_param, and the temperature the rows were built at remembered. The baseband's
+ * gain offset and the receiver's IQ correction are set either way. The library's prints are left out.
+ */
+void set_rx_gain_table(uint32_t p1, uint32_t p2)
+{
+    static const uint16_t gains1[8] = { 0x40, 0x41, 0x43, 0x6b, 0x77, 0x79, 0x7b, 0x7f };
+    static const uint16_t gains2[7] = { 0x41, 0x43, 0x6b, 0x77, 0x79, 0x7b, 0x7f };
+    static const int8_t a1[8] = { 0x0b, 0x0a, 0x06, 0x06, 0x06, 0x06, 0x08, 0x00 };
+    static const int8_t b1[8] = { 0x03, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08 };
+    static const int8_t a2[7] = { 0x0b, 0x0e, 0x06, 0x05, 0x06, 0x08, 0x00 };
+    static const int8_t b2[7] = { 0x00, 0x00, 0x08, 0x08, 0x08, 0x08, 0x08 };
+    uint32_t out[0x55];
+    uint32_t a4;
+    uint32_t verbose;
+    uint32_t n;
+
+    (void)p1;
+    (void)p2;
+    a4 = phy_param32(PHY_PARAM_A4);
+    if ((a4 & 0x200u) == 0u) {
+        uint32_t cal = phy_param16(0x10u);
+
+        if ((a4 & 0x80u) == 0u) {
+            set_rx_gain_cal_dc_new(0u, 1u, (int16_t *)(void *)(phy_param + 0x132u),
+                                   (int16_t *)(void *)(phy_param + 0x132u), (int16_t *)(void *)(phy_param + 0x132u));
+            set_rx_gain_cal_dc_new(0u, 0u, (int16_t *)(void *)(phy_param + 0x14eu),
+                                   (int16_t *)(void *)(phy_param + 0x16eu), (int16_t *)(void *)(phy_param + 0x172u));
+            set_rx_gain_cal_dc_new(1u, 0u, (int16_t *)(void *)(phy_param + 0x14eu),
+                                   (int16_t *)(void *)(phy_param + 0x16eu), (int16_t *)(void *)(phy_param + 0x172u));
+            phy_param32_set(PHY_PARAM_A4, a4 | 0x80u);
+        }
+        verbose = (cal >> 8) & 1u;
+        n = gen_rx_gain_table_new(out, 0x21u, gains1, a1, b1, 8u, verbose);
+        if (n > 0x4fu) {
+            n = 0x4fu;
+        }
+        phy_param[PHY_PARAM_RX_N1] = (uint8_t)n;
+        wr_rx_gain_mem(0u, (uint8_t)(phy_param[PHY_PARAM_RX_N1] + 1u), out,
+                       (const uint16_t *)(const void *)(phy_param + 0x14eu),
+                       (const uint16_t *)(const void *)(phy_param + 0x16eu),
+                       (const uint16_t *)(const void *)(phy_param + 0x172u), 0xeu, 0u);
+        n = gen_rx_gain_table_new(out, 0x1cu, gains2, a2, b2, 7u, verbose);
+        if (n > 0x4fu) {
+            n = 0x4fu;
+        }
+        phy_param[PHY_PARAM_RX_N2] = (uint8_t)n;
+        wr_rx_gain_mem(1u, (uint8_t)(phy_param[PHY_PARAM_RX_N2] + 1u), out,
+                       (const uint16_t *)(const void *)(phy_param + 0x132u),
+                       (const uint16_t *)(const void *)(phy_param + 0x16eu),
+                       (const uint16_t *)(const void *)(phy_param + 0x132u), 0xeu, 0u);
+        phy_param32_set(PHY_PARAM_A4, phy_param32(PHY_PARAM_A4) | 0x200u);
+        phy_param[PHY_PARAM_RX_DC_T] = (uint8_t)phy_param16(0x00u);
+        phy_param[PHY_PARAM_RX_DC_T + 1u] = (uint8_t)(phy_param16(0x00u) >> 8);
+    }
+    REG(WIFI_BB_RX_GAIN_TRIG) = (((uint32_t)phy_param[PHY_PARAM_RX_N1] << 8) & 0x7f00u) |
+                                (REG(WIFI_BB_RX_GAIN_TRIG) & 0xffff80ffu);
+    n = phy_param[PHY_PARAM_RX_N1];
+    if (n > 0x4cu) {
+        n = 0x4cu;
+    }
+    REG(MODEM_BASE + 0x713Cu) = ((n & 0xffu) << 18) | (REG(MODEM_BASE + 0x713Cu) & 0xfe03ffffu);
+    bt_gain_offset(0x50u);
+    iq_corr_enable();
+}
+
+/*
+ * The transmitter's DC offset calibration, which the library's second tracking block and its bring-up both run:
+ * the power detector's readings of a tone at several offsets of the front end's DCO word, and the search that
+ * settles them. The leaves are the ROM's, called as the library's does.
+ */
+uint32_t get_tone_sar_dout(uint32_t a0);
+uint32_t index_to_txbbgain(uint32_t index);
+void pbus_set_dco(void *dco);
+
+/* The ROM's own, reached through the table as libphy's does: the power detector's clocks and the transmitter's. */
+#define ROMFUNC_EN_PWDET        7 /* rom_en_pwdet: the power detector's clocks turned on */
+#define ROMFUNC_PBUS_XPD_TX_ON 35 /* rom_pbus_xpd_tx_on: the transmitter powered, its channel and a value */
+
+static void rom_en_pwdet(uint32_t a0)
+{
+    ((void (*)(uint32_t))phy_get_romfuncs()[ROMFUNC_EN_PWDET])(a0);
+}
+
+static void rom_pbus_xpd_tx_on(uint32_t a0, uint32_t a1)
+{
+    ((void (*)(uint32_t, uint32_t))phy_get_romfuncs()[ROMFUNC_PBUS_XPD_TX_ON])(a0, a1);
+}
+
+static void rom_start_tx_tone_step(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, uint32_t a5)
+{
+    ((void (*)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t))
+     phy_get_romfuncs()[ROMFUNC_START_TX_TONE_STEP])(a0, a1, a2, a3, a4, a5);
+}
+
+/* phy_param's halfwords the calibration keeps: the two pairs it settles, and the four it starts them from. */
+#define PHY_PARAM_TXDC_PAIR0 0x18E
+#define PHY_PARAM_TXDC_PAIR1 0x190
+#define PHY_PARAM_TXDC_PAIR2 0x192
+#define PHY_PARAM_TXDC_PAIR3 0x194
+#define PHY_PARAM_TXDC_SRC0  0xA8
+#define PHY_PARAM_TXDC_SRC1  0xAA
+#define PHY_PARAM_TXDC_SRC2  0xB0
+#define PHY_PARAM_TXDC_SRC3  0xB2
+
+static void phy_param16_set(uint32_t off, uint16_t v)
+{
+    phy_param[off] = (uint8_t)v;
+    phy_param[off + 1u] = (uint8_t)(v >> 8);
+}
+
+/*
+ * libphy's txdc_cal_pwdet [0x420084d8]: the transmit DC offset of the caller's halfword pair, one element at a
+ * time. Each element is first bracketed by the power detector's reading of a tone with the DCO word above and
+ * below it, the offsets stepping down by five until the two readings meet within 0x14; the offsets are then
+ * swept in a run of up to 0x32 steps, the least reading kept, the run starting again from the other side, and
+ * the reading after the first run's last step marks where the sweep stops; the run is smoothed to its neighbours
+ * and the settled words averaged with the bracketing offsets. The second element starts from the pair the
+ * caller wrote in. The library's prints of every step are left out. The first argument's buffer takes the pair.
+ */
+void txdc_cal_pwdet(uint16_t *dc, uint32_t verbose)
+{
+    uint16_t local[110];
+    uint8_t codes[2];
+    uint16_t *p = dc;
+    uint32_t hi, lo, pass, grp, n, i, k, r, m;
+
+    (void)verbose;
+    local[0] = dc[0];
+    local[1] = dc[1];
+    local[2] = 0x100;
+    local[3] = 0x100;
+
+    i = 0;
+    for (;;) {
+        /* The bracketing: a reading with the DCO word raised, one lowered, until they meet. */
+        pass = 2u;
+        hi = 0xau;
+        lo = 0xau;
+        for (;;) {
+            uint32_t a, b;
+
+            local[i] = (uint16_t)(p[0] + (int16_t)hi);
+            pbus_set_dco(local);
+            ets_delay_us(0xau);
+            a = get_tone_sar_dout(2u);
+            local[i] = (uint16_t)(p[0] - (int16_t)lo);
+            pbus_set_dco(local);
+            ets_delay_us(0xau);
+            b = get_tone_sar_dout(2u);
+            if (b + 0x14u < a) {
+                hi = (hi - 5u) & 0xffu;
+            } else {
+                if (b <= a + 0x14u) {
+                    break;
+                }
+                lo = (lo - 5u) & 0xffu;
+            }
+            if (pass == 1u) {
+                break;
+            }
+            pass = 1u;
+        }
+
+        /* The sweep: the offsets of one side then the other, each step's reading kept. */
+        {
+            uint8_t *c = codes;
+
+            grp = 0u;
+            n = 0u;
+            for (;;) {
+                k = 0u;
+                m = 0xffffu;
+                for (;;) {
+                    int16_t off = (int16_t)((int16_t)hi + (int16_t)k);
+
+                    if (grp != 0u) {
+                        off = (int16_t)(-((int16_t)lo + (int16_t)k));
+                    }
+                    local[i] = (uint16_t)(p[0] + off);
+                    pbus_set_dco(local);
+                    ets_delay_us(0xau);
+                    r = get_tone_sar_dout(2u);
+                    local[n + 4u] = (uint16_t)r;
+                    n = (n + 1u) & 0xffu;
+                    if (r < m) {
+                        m = r;
+                    }
+                    *c = (uint8_t)k;
+                    if (!(k < 6u || r <= m + 0x1eu)) {
+                        break;
+                    }
+                    k++;
+                    if (k == 0x32u) {
+                        break;
+                    }
+                }
+                c++;
+                if (grp != 0u) {
+                    break;
+                }
+                grp = 1u;
+            }
+        }
+
+        /* Each reading held to its neighbours, but those flanking the first run's last step to the run itself. */
+        {
+            uint32_t t6 = codes[0];
+
+            for (k = 0u; k < n; k++) {
+                if (k == 0u || t6 + 1u == k) {
+                    if (local[k + 5u] < local[k + 4u]) {
+                        local[k + 4u] = local[k + 5u];
+                    }
+                } else if (local[k + 4u] < local[k + 3u]) {
+                    local[k + 4u] = local[k + 3u];
+                }
+            }
+
+            /* The two offsets the element settles to, moved by the smoothed run and averaged. */
+            {
+                uint32_t r0 = local[4];
+                uint32_t rt = local[t6 + 5u];
+                uint32_t t3 = (uint32_t)abs_temp((int32_t)(r0 - rt));
+                uint32_t t4;
+                int32_t hv, lv;
+
+                if ((t3 & 0xffffu) < 0x14u) {
+                    t3 = 0x14u;
+                }
+                t3 &= 0xffu;
+                t4 = (r0 < rt ? r0 : rt) & 0xffffu;
+                hv = (int16_t)((int32_t)p[0] + (int16_t)hi);
+                lv = (int16_t)((int32_t)p[0] - (int16_t)lo);
+                for (k = 0u; k < n; k++) {
+                    if ((uint32_t)local[k + 4u] <= t3 + t4) {
+                        if (t6 < k) {
+                            lv = (int16_t)((int32_t)p[0] + (int32_t)(t6 + 1u) - (int32_t)lo - (int32_t)k);
+                        } else {
+                            hv = (int16_t)((int32_t)p[0] + (int32_t)hi + (int32_t)k);
+                        }
+                    }
+                }
+                local[i] = (uint16_t)(((hv + lv + 1) / 2) + 1);
+            }
+        }
+
+        p++;
+        if (i == 1u) {
+            dc[0] = local[0];
+            dc[1] = local[1];
+            pbus_set_dco(local);
+            return;
+        }
+        i = 1u;
+    }
+}
+
+/*
+ * libphy's txdc_cal_pwdet_init [0x4200884a]: both pairs of the transmit DC offset settled and kept in phy_param.
+ * The power detector and the pbus are brought up, and each pair is calibrated twice: the first over four runs,
+ * their average kept, the second in one run. The first argument is written over before it is read, so what the
+ * library's callers pass there does nothing; the second, clear, leaves the power detector's two words as they
+ * were found on its way out. The library's prints are left out.
+ */
+void txdc_cal_pwdet_init(uint32_t a0, uint32_t a1)
+{
+    uint32_t prev0, prev3;
+    uint32_t flag;
+    uint16_t dc[2];
+
+    (void)a0;
+    phy_param16_set(PHY_PARAM_TXDC_PAIR0, phy_param16(PHY_PARAM_TXDC_SRC0));
+    phy_param16_set(PHY_PARAM_TXDC_PAIR1, phy_param16(PHY_PARAM_TXDC_SRC1));
+    phy_param16_set(PHY_PARAM_TXDC_PAIR2, phy_param16(PHY_PARAM_TXDC_SRC2));
+    phy_param16_set(PHY_PARAM_TXDC_PAIR3, phy_param16(PHY_PARAM_TXDC_SRC3));
+    flag = (phy_param16(0x10u) >> 4) & 1u;
+
+    prev3 = REG(FE_PWDET_CONF3);
+    prev0 = REG(FE_PWDET_CONF0);
+    REG(FE_PWDET_CONF3) = (REG(FE_PWDET_CONF3) & 0xffffff00u) | 0xf0u;
+    REG(FE_PWDET_CONF0) = (REG(FE_PWDET_CONF0) & 0xfffff00fu) | 0x780u;
+
+    set_txclk_en(1u);
+    rom_en_pwdet(1u);
+    pbus_debugmode();
+    rom_pbus_xpd_tx_off();
+    rom_pbus_xpd_rx_off();
+    rom_start_tx_tone_step(1u, 0x200u, 0x78u, 0u, 0u, 0u);
+    ets_delay_us(1u);
+    rom_pbus_xpd_tx_on(0x3fu, 0u);
+
+    for (uint32_t i = 0u; i < 2u; i++) {
+        dc[0] = phy_param16(PHY_PARAM_TXDC_PAIR0 + i * 4u);
+        dc[1] = phy_param16(PHY_PARAM_TXDC_PAIR1 + i * 4u);
+        rom_pbus_force_test(1u, 2u, index_to_txbbgain(i));
+        if (i == 0u) {
+            uint32_t acc_i = 0u, acc_q = 0u;
+
+            for (uint32_t k = 0u; k < 4u; k++) {
+                txdc_cal_pwdet(dc, flag);
+                acc_i = (acc_i + dc[0]) & 0xffffu;
+                acc_q = (acc_q + dc[1]) & 0xffffu;
+            }
+            phy_param16_set(PHY_PARAM_TXDC_PAIR0, (uint16_t)(((int32_t)acc_i + 2) >> 2));
+            phy_param16_set(PHY_PARAM_TXDC_PAIR1, (uint16_t)(((int32_t)acc_q + 2) >> 2));
+        } else {
+            txdc_cal_pwdet(dc, flag);
+            phy_param16_set(PHY_PARAM_TXDC_PAIR2, dc[0]);
+            phy_param16_set(PHY_PARAM_TXDC_PAIR3, dc[1]);
+        }
+    }
+
+    if (a1 == 0u) {
+        uint16_t dco[4] = { 0x100, 0x100, 0x100, 0x100 };
+
+        pbus_set_dco(dco);
+        rom_pbus_xpd_tx_off();
+        rom_start_tx_tone_step(0u, 0x80u, 0x78u, 0u, 0u, 0u);
+        pbus_workmode();
+        set_txclk_en(0u);
+        REG(FE_PWDET_CONF3) = (REG(FE_PWDET_CONF3) & 0xffffff00u) | (prev3 & 0xffu);
+        REG(FE_PWDET_CONF0) = (prev0 & 0xff0u) | (REG(FE_PWDET_CONF0) & 0xfffff00fu);
     }
 }
