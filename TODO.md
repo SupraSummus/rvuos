@@ -665,12 +665,6 @@ What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
 What the wait for a turn and the work a thread gets are bound by is in `DESIGN.md`, "Scheduling";
 what does not keep to it yet comes first below, each a constant-time change, up to the bind's:
 
-- A pool destroy stops only for a pending interrupt, `cap_stop_here`,
-  so a thread with time its walk wakes waits for the rest of the walk while the core's timer lies past the next tick,
-  and on another core for all of it, since the interrupt between cores goes out as the lock is given up.
-  Stopping also where the trap made ready a thread the core's timer does not allow for,
-  or owes another core an interrupt, would bound that by a tick;
-  the transcripts would not move, as the host stops at every step.
 - `pool_alloc` and a pool destroy zero an object whole with interrupts off,
   and a table of `CAPTABLE_MAX_SLOTS` slots takes longer than a tick at 10 kHz on the nRF52840 and near one on the other boards,
   where the wait's bound needs the kernel's longest step shorter than a tick.
