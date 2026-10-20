@@ -917,7 +917,7 @@ until the maintainer decides otherwise.
     - **The turn handed on a lend**: a lender hands its turn to the borrower only if the borrower runs on the lender's time,
       which the self-check does not hold, since what a turn runs on is decided as it begins and at each tick and may have changed since.
     - **The look at the units** costs a lend and the wake of a borrower up to `TIME_UNITS` steps,
-      about a tenth of a lock that lends on QEMU, where most of the units nobody earns;
+      about an eighth of a lock that lends on QEMU, where most of the units nobody earns;
       a word per core of the units of places that lend would take it to the lenders alone.
     - **Fuel**, a process's energy beside the power its units bound.
     - **Timer lines, an account running dry and the watchdog** still keep to the tick.

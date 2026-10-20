@@ -423,10 +423,14 @@ static const struct thread *lender_at(const struct thread *h, paddr_t at)
     return o != NULL && o->type == CAP_THREAD && ((const struct thread *)o)->lend_to == v2p(h) ? (const struct thread *)o : NULL;
 }
 
-/* The one after a lender on its borrower's ring, 0 once the ring closes. */
+/*
+ * The one after a lender on its borrower's ring, 0 once the ring closes, or where the next is not linked back to it,
+ * so that the walk ends on a ring check_lenders has yet to hold, as its own does.
+ */
 static paddr_t lender_after(const struct thread *h, const struct thread *l)
 {
-    return l->lend_next != h->lenders ? l->lend_next : 0;
+    const struct thread *next = l->lend_next != h->lenders ? lender_at(h, l->lend_next) : NULL;
+    return next != NULL && next->lend_prev == v2p(l) ? v2p(next) : 0;
 }
 
 /*

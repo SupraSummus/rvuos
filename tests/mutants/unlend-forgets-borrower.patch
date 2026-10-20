@@ -9,8 +9,12 @@ Witness: fuzz bind-turn-later
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -959,4 +959,2 @@ static __attribute__((noinline)) void un
+@@ -967,8 +967,6 @@ static __attribute__((noinline)) void unlend(struct thread *t)
+ {
+     struct thread *h = p2v(t->lend_to);
      lend_remove(h, t);
 -    thread_settle(h);
 -    borrowers_settle(h);
  }
+ 
+ void sched_lend(struct thread *t, struct notification *ntfn, struct thread *borrower)

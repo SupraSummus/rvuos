@@ -10,8 +10,12 @@ Witness: fuzz bind-turn-later
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -373,3 +373,3 @@ static inline void payer_consider(struct
+@@ -372,7 +372,7 @@ static inline void payer_consider(struct payer_look *look, struct place *q, bool
+         return;
+     }
      uint32_t balance = has_time(q->balance) ? q->balance : account_now(q);
 -    if (!has_time(balance)) {
 +    if (balance == 0) {
          uint32_t fill = account_fill(q, balance);
+         look->fill = fill < look->fill ? fill : look->fill;
+         return;

@@ -9,8 +9,12 @@ Witness: fuzz bind-turn-later
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -437,3 +437,3 @@ static uint8_t place_queue(const struct
+@@ -436,7 +436,7 @@ static uint8_t place_queue(const struct place *p, const struct payer_look *look)
+     if (t->state != THREAD_READY || is_turn(t) || place_time(p)->type != CAP_TIME) {
+         return QUEUE_NONE;
      }
 -    if (look->best != NULL) {
 +    if (has_time(p->balance)) {
          return QUEUE_RUN;
+     }
+     if (place_spare(p)) {

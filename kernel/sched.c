@@ -332,7 +332,8 @@ static struct place *unit_first(uint32_t unit)
  * A wake while the account is full is answered within its span, with units / TIME_UNITS of it, whatever the others do,
  * since the units of a core add up to its time, which is all earliest deadline first needs;
  * and whatever span a thread gives, its requests take that part of their spans and no more, so no span costs another thread.
- * A place on lent time runs its lender's requests, at the lender's units and the lender's span.
+ * A place runs the requests of the account due first of those it may run on, its own or one a lender lends it, see place_payer;
+ * on lent time, at the lender's units and the lender's span.
  */
 
 /*
@@ -836,12 +837,21 @@ static void release(uint32_t c)
         if (p == NULL) {
             continue;
         }
-        /* One on the run queue that has lenders may have a request due sooner on its own account now. */
-        if (p->queue == QUEUE_SPARE || p->queue == QUEUE_SPENT || (p->queue == QUEUE_RUN && place_thread(p)->lenders != 0)) {
+        /*
+         * An account that came to hold a tick since it was counted is the one change a release makes to what a thread may run on:
+         * it may give time to a place without, or a request due sooner to a borrower on the run queue.
+         * No other account that a borrower may run on moves it, so each is looked at once for each account that reaches a tick.
+         */
+        bool reached = !has_time(p->balance) && has_time(account_now(p));
+        if (p->queue == QUEUE_SPARE || p->queue == QUEUE_SPENT || (p->queue == QUEUE_RUN && reached && place_thread(p)->lenders != 0)) {
             place_settle(p);
         }
-        /* A lender waits on no queue, and its account may give the borrowers it lends to, and on, time or a sooner request. */
+        /* A lender waits on no queue, and the borrowers it lends to, and on, may run on its account now. */
         const struct thread *x = place_thread(p);
+        if (x->lend_to == 0 || !reached) {
+            continue;
+        }
+        account_refill(p);
         for (uint32_t d = 0; d < LEND_DEPTH && x->lend_to != 0; d++) {
             LOOP_BOUND(LEND_DEPTH);
             x = p2v(x->lend_to);
@@ -968,8 +978,8 @@ void sched_lend(struct thread *t, struct notification *ntfn, struct thread *borr
     thread_settle(borrower);
     borrowers_settle(borrower);
     /*
-     * A lender whose turn its own time or its payer's pays for, which the borrower waiting for a turn on its core
-     * now runs on, being due first of what it may, hands it the rest of the turn and of its request, which the payer goes on paying for:
+     * A lender whose turn its own time or its payer's pays for hands the rest of the turn and of its request
+     * to a borrower that waits for a turn on its core and now runs on that time, which the payer goes on paying for:
      * the turn neither ends nor is charged here.
      */
     struct core *core = core_self();

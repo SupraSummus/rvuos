@@ -8,8 +8,12 @@ Witness: fuzz lend-payer-goes
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -1099,3 +1099,3 @@ uint32_t sched_wake_ticks(void)
+@@ -1107,7 +1107,7 @@ uint32_t sched_wake_ticks(void)
+         return wake;
+     }
      /* Each tick decides afresh who pays for a turn on lent time, or one others lend to, and whether it has any. */
 -    if (core->payer != NULL || turn->lenders != 0) {
 +    if (turn->lenders != 0) {
          return 1;
+     }
+     /* A thread that lost the time of this core during its turn here, its place emptied, ends the turn at the next tick. */

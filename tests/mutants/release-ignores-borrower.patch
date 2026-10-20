@@ -9,8 +9,12 @@ Witness: fuzz lend-lender-earns
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -844,3 +844,3 @@ static void release(uint32_t c)
-         const struct thread *x = place_thread(p);
+@@ -852,7 +852,7 @@ static void release(uint32_t c)
+             continue;
+         }
+         account_refill(p);
 -        for (uint32_t d = 0; d < LEND_DEPTH && x->lend_to != 0; d++) {
 +        for (uint32_t d = 0; d < LEND_DEPTH && x->lend_to != 0 && p->queue != QUEUE_NONE; d++) {
              LOOP_BOUND(LEND_DEPTH);
+             x = p2v(x->lend_to);
+             struct place *h = thread_place_on(x, c);

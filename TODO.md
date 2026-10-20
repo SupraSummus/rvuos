@@ -728,8 +728,9 @@ the first five below are what does not keep to it yet, each a constant-time chan
   try it against `make lab`'s `hog`, `rich-ui`, `rich-server` and `chain`.
   A waiter that lends does hand its turn so, and has it back with the signal that wakes it:
   `lend-server` against `poor-server`, `lend-hog` against `lock-hog`.
-- A server runs on the time of the client that has lent it time longest, not of the client whose ask it serves,
-  so a client that lends pays for whatever the server does until the server wakes it, other clients' asks among it.
+- A server runs on the time of its waiter due first, not of the client whose ask it serves,
+  so a client that lends pays for whatever the server does until the server wakes it, other clients' asks among it,
+  which `make lab`'s `lend-two` shows running its account dry.
   A server that ran on the time of the client it serves would have to name it, a call more for each ask;
   `make lab`'s `free-rider` and `lend-rider`, and open decisions 5 and 27.
 - A thread lends only on a core whose time both it and its borrower hold, a place each.
