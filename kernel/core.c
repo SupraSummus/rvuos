@@ -247,3 +247,20 @@ void core_notify(struct core *c)
     (void)c;
 #endif
 }
+
+bool core_notice_owed(void)
+{
+    const struct core *core = core_self();
+    if (core->run_queue != 0 && core->wake_tick - core->ticks > 1) {
+        return true;
+    }
+#if CORES > 1
+    for (uint32_t i = 0; i < CORES; i++) {
+        LOOP_BOUND(CORES);
+        if (cores[i].interrupt_owed) {
+            return true;
+        }
+    }
+#endif
+    return false;
+}

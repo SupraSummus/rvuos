@@ -29,9 +29,6 @@ typedef int32_t esp_err_t;
 void ets_delay_us(uint32_t us);
 void ets_update_cpu_frequency(uint32_t ticks_per_us);
 
-/* libphy's own log level, wifi_log_level_t, which the driver's osi_log_level takes. */
-#define WIFI_LOG_INFO 3
-
 /*
  * What the MAC writes before each frame it receives, the 92 bytes of esp_wifi_rxctrl_t
  * of ESP-IDF's esp_wifi_he_types.h for the C6's MAC, version 2, of which these bytes are read.

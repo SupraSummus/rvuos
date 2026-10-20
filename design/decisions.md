@@ -191,7 +191,7 @@ until the maintainer decides otherwise.
 
 10. **Yield.**
     Working default: none.
-    `OP_TEST_TICK` is the tick on request,
+    `OP_TEST_TICK` is the tick on request, under tracing alone,
     so a yield would be that under a name that invites spinning,
     and a spinning thread is always runnable and keeps the machine from `wfi`,
     while a waiting thread says what it waits for.
@@ -605,9 +605,6 @@ until the maintainer decides otherwise.
       and a revoke that ends early because it took the caller's own table returns `KERR_OK`, done or not.
     - **What a halt does.**
       Nothing resets the machine, and what a halt does is the board's.
-    - **`Test` on every board.**
-      The boot grants it on every board, so any root task may move time and fire lines no device raised.
-      Granting it only to the test programs would close that, and refusing its calls untraced, `TODO.md`, most of it.
     - **The boot table.**
       `BOOT_CAP_INPUT` is the test's input on every board.
     - **An `Irq` holds its line by no node**, `TODO.md`, so a revoke takes back a bound line no other way a lender takes back what it lent.

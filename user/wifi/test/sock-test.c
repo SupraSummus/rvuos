@@ -27,14 +27,13 @@ static int failures;
 
 /* What the stack sent last, and how many. */
 static uint8_t frame[NET_FRAME_MAX];
-static uint32_t frame_len, frames;
+static uint32_t frames;
 
 static void capture(struct net *n, uint8_t *f, uint32_t len)
 {
     (void)n;
     sent_from(f);
     memcpy(frame, f, len);
-    frame_len = len;
     frames++;
 }
 

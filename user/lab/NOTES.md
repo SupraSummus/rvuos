@@ -19,8 +19,9 @@ so scenarios are compared within one run.
 - **quick** and **slow**, sharing a lock:
   quick, with 16 units, takes it every period for a little work;
   slow, with 2, holds it long and works as long between holds.
-  The lock is the one of `lib/lock.h` in `lock` and `lock-hog`,
-  and its lock that names the holder in `lend` and `lend-hog`, so that a taker that waits lends the holder its time.
+  The lock is the one of `lib/lock.h` in `lock`, `lock-hog` and `lock2-hog`,
+  and its lock that names the holder in `lend`, `lend-hog` and `lend2-hog`, so that a taker that waits lends the holder its time.
+  In `lock2-hog` and `lend2-hog` **quick2** takes it too, as quick does, with the 6 units the hog leaves.
 - **burst**, a process that every seven ticks works about half a tick of its own, earning 32 units,
   so that its account stays full and its requests are due as soon as anyone's.
 - **drivers** are two pairs of a ui and a store, each pair an interrupt and the driver that answers it, beside the burst:
@@ -33,6 +34,9 @@ so scenarios are compared within one run.
   and a ui that lends and waits within half a millisecond, beside the hog; `lend-two-rich` gives the ui 16 units for 8.
   **lend-lax-server** is `lax-server` with a ui that lends,
   and **lend-lax** has quick lend to a slow of 8 units that waits within a second and holds a tick and a half.
+- **driver**, woken every three ticks by its timer line, standing in for a device's, to do about 25 µs of work.
+  It says how much later than its earliest each wake started, the earliest found alone, before the rest of the cast starts.
+  `driver-hogs` puts a second hog beside it, **hog2**, with 16 units.
 
 The root task keeps 8 units, the units nobody earns are spare time, and every member may run on it.
 
@@ -110,6 +114,15 @@ That is the store's own order, which no kernel would change.
 
 **A second hop cost no more than the first** beside the hog; why is not worked out yet.
 
+**A driver its timer line wakes starts at its tick, behind the threads with time already waiting.**
+Beside the hog, `driver-hog`, it started as early as alone every time:
+the tick signals the lines before it ends the hog's turn, so the driver joins the run queue ahead of the hog.
+Beside a second hog, `driver-hogs`, it waited a whole tick at worst, for the hog with time on the queue ahead of it,
+and on spare time alone, `driver-spare`, a tick at p90, whenever the hog had time.
+A timer line fires only on a tick, where the hog's turn ends anyway, so this is a device's interrupt at its best:
+one that comes between ticks would wait for the rest of the hog's turn.
+No board the lab runs on lists a device whose interrupt it could time, so the lab does not show that yet.
+
 **A lock waits for its holder's turns.**
 Quick earns eight times slow's units, and still waits a third of a tick at p90 for slow to give the lock back,
 nearly two ticks beside the hog.
@@ -126,6 +139,12 @@ and slow's give, which signals quick, hands quick the rest of the turn back, so 
 Slow takes the lock about as often as on the plain lock, and the time it ran so was quick's to spend.
 It is where units buy latency, because quick names whom it waits for.
 Without the hog, `lend`, quick waits a seventh of the plain lock's p90 or less, as the turn back puts quick first.
+
+**Two takers that lend never wait at once.**
+In `lend2-hog` quick waits as in `lend-hog`, and quick2 a third of a tick at most,
+where on the plain lock, `lock2-hog`, both wait a tick or more at p90.
+Quick's wait hands slow its turn and slow's give hands it back, so the hold ends before quick2 runs.
+Only a hold that outlasts a tick would let quick2 wait while quick lends.
 
 **A mutex in the kernel got the same from the lending, and a convoy from the ownership.**
 The kernel's mutex of open decision 27, which the lending wait replaced, handed itself to the waiter that waited longest:
