@@ -555,6 +555,11 @@ static __attribute__((noreturn)) void run(struct drv *d)
     if (d->i154) {
         i154_run(d, &own);
     }
+#ifdef I154_LISTEN
+    if (d->i154_listen) {
+        i154_listen_run(d, &own);
+    }
+#endif
     drv_say("driver: %u bytes of heap free\n", (unsigned)osi_heap_free());
     if (d->debug & DRV_DEBUG_WPA) {
         drv_wpa_debug();

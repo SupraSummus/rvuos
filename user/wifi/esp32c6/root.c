@@ -401,6 +401,10 @@ static void configure(struct drv *p)
     p->i154 = (uint8_t)(channel >= 11 && channel <= 26 ? channel : 0);
     uint32_t stream = config_number(conf, size, "i154stream", 0);
     p->i154_stream = (uint8_t)(stream <= 200u ? stream : 200u);
+#ifdef I154_LISTEN
+    uint32_t listen154 = config_number(conf, size, "i154listen", 0);
+    p->i154_listen = (uint8_t)(listen154 >= 11 && listen154 <= 26 ? listen154 : 0);
+#endif
     p->trace = config_number(conf, size, "trace", 0); /* 1: the root serves each access; 2: the window with no fault */
     trace_wanted = p->trace != 0;
     trace_serving = p->trace == 1;
@@ -611,7 +615,11 @@ static void driver_build(void)
     must("the modem's lines", rv_irq_carve(BOOT_CAP_IRQ_LINES, DRV_LINE_FIRST, DRV_LINES, lines));
     must("give the driver the modem's lines", child_give(&self, c, lines, RIGHT_W, &p->lines));
     must("the lines' slot back", slot_free(&self, lines));
-    if (p->i154) {
+    if (p->i154
+#ifdef I154_LISTEN
+        || p->i154_listen
+#endif
+    ) {
         must("a slot", slot_new(&self, &lines));
         must("the 802.15.4 MAC's line", rv_irq_carve(BOOT_CAP_IRQ_LINES, DRV_LINE_I154, 1, lines));
         must("give the driver the 802.15.4 MAC's line", child_give(&self, c, lines, RIGHT_W, &p->i154_line));
@@ -831,6 +839,12 @@ int main(void)
         say(&kout, run_s != 0 ? "root: IEEE 802.15.4 on channel %u, for %u s\n"
                               : "root: IEEE 802.15.4 on channel %u, for good\n",
             (uint32_t)dp->i154, run_s);
+#ifdef I154_LISTEN
+    } else if (dp->i154_listen) {
+        say(&kout, run_s != 0 ? "root: 802.15.4 listening on channel %u, for %u s\n"
+                              : "root: 802.15.4 listening on channel %u, for good\n",
+            (uint32_t)dp->i154_listen, run_s);
+#endif
     } else if (dp->listen) {
         say(&kout, run_s != 0 ? "root: listening on channel %u, for %u s\n" : "root: listening on channel %u, for good\n",
             (uint32_t)dp->listen, run_s);

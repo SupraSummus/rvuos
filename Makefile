@@ -65,7 +65,11 @@ ifneq ($(filter-out 0 1,$(SELFCHECK)),)
 $(error SELFCHECK=$(SELFCHECK); it is 1, the self-check built in, or 0)
 endif
 SELFCHECK_VARIANT := $(if $(filter-out $(SELFCHECK_DEFAULT),$(SELFCHECK)),$(if $(filter 1,$(SELFCHECK)),-selfcheck,-noselfcheck))
-VARIANT := $(PMP_VARIANT)$(if $(filter-out 1,$(CORES)),-smp$(CORES))$(TIMER_VARIANT)$(SELFCHECK_VARIANT)
+# The ESP32-C6's 802.15.4 listener, an experiment of its own, behind C6_LISTEN=1; see user/wifi/esp32c6/i154.c.
+# A directory of its own, so that without it the C6's images are exactly as they would be without the listener.
+C6_LISTEN ?=
+C6_LISTEN_VARIANT := $(if $(filter-out 0,$(C6_LISTEN)),-c6listen)
+VARIANT := $(PMP_VARIANT)$(if $(filter-out 1,$(CORES)),-smp$(CORES))$(TIMER_VARIANT)$(SELFCHECK_VARIANT)$(C6_LISTEN_VARIANT)
 
 # The board's architecture, which only RP2350 lets the command line change;
 # the other one builds in a directory of its own, as a budget does.
@@ -89,7 +93,8 @@ endif
 CFLAGS    := $(ARCHFLAGS) -std=c11 -ffreestanding -fno-builtin -fno-pic -fno-common \
              -nostdlib -O2 -g -Wall -Wextra -Werror -Wundef -Wshadow \
              -Wstrict-prototypes -Wmissing-prototypes -Iinclude \
-             -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -DCORES=$(CORES) -DTIMER_HZ=$(TIMER_HZ) -DSELFCHECK=$(SELFCHECK)
+             -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -DCORES=$(CORES) -DTIMER_HZ=$(TIMER_HZ) -DSELFCHECK=$(SELFCHECK) \
+             $(if $(filter-out 0,$(C6_LISTEN)),-DI154_LISTEN=1)
 ASFLAGS   := $(ARCHFLAGS) -g -Iinclude -DCORES=$(CORES)
 LDFLAGS   := $(ARCHFLAGS) -nostdlib -static -fuse-ld=lld -Wl,--gc-sections -Wl,--no-dynamic-linker
 

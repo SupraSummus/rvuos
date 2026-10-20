@@ -12,6 +12,11 @@
 
 __attribute__((noreturn)) void i154_run(struct drv *d, struct self *own);
 
+/* The listener: the radio up on one channel, promiscuous, every frame and every failed reception told; see i154.c. */
+#ifdef I154_LISTEN
+__attribute__((noreturn)) void i154_listen_run(struct drv *d, struct self *own);
+#endif
+
 /* The 802.15.4 bring-up alone, as a trace window; see i154.c. */
 __attribute__((noreturn)) void i154_trace_run(struct drv *d);
 
