@@ -171,7 +171,7 @@ until the maintainer decides otherwise.
        the highest would cost each notification a pair of links per level, or a walk.
      - **A short kernel step.**
        The longest step the kernel takes without looking for an interrupt is the floor of every wait;
-       today zeroing a table takes about a tick at 10 kHz, and a pool destroy stops only for a pending interrupt, `TODO.md`.
+       today zeroing a table takes about a tick at 10 kHz, `TODO.md`.
      - **Deadlines in counts.**
        Timer lines fire on the tick grid, so a periodic thread at the top still starts up to a tick late.
      - **Signals that preempt.**
