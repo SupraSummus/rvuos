@@ -116,9 +116,9 @@ what is left:
   would want a close that tells it first and waits for its word, as the lender's.
 - A hub keeps a slot of its parent's for each client connected, its channel's carve, which `chan_hub_close` revokes;
   `lib/bulk.h` deletes its carves once installed and uninstalls them at a close, which would spare a hub's parent those slots too.
-- `user/lab/` does not show yet a client of several threads asking at once, a driver whose work an interrupt starts,
-  two cores, a client that makes its ring look full, or one that gives up on an answer.
-  Nor several takers lending to one holder, or a holder that waits on a second lock.
+- `user/lab/` does not show yet a client of several threads asking at once, a driver woken between ticks,
+  as a device's interrupt would wake it, two cores, a client that makes its ring look full, or one that gives up on an answer.
+  Nor several takers lending to one holder at once, which takes a hold longer than a tick, or a holder that waits on a second lock.
   Nor a thin server, which only passes data on while its clients do the work,
   to tell what moving work into the client saves and what the hop still costs.
   Why its `chain`'s second hop costs no more than the first is not worked out.
@@ -646,8 +646,8 @@ What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
 - `pmp_init` stops counting at the first hardwired entry.
   A core with writable entries above a hardwired one loses them;
   have the image skip such entries if one turns up.
-- A kernel without the self-check keeps `OP_TEST_TICK`, `OP_TEST_IRQ` and `OP_TEST_PREEMPT`,
-  which only the replay calls, and `cap_stop_here`'s countdown for the last; `SELFCHECK=0` could drop them too.
+- A kernel without the self-check keeps `cap_stop_here`'s countdown,
+  which only `OP_TEST_PREEMPT` arms, under tracing; `SELFCHECK=0` could drop it too.
 - The root task is granted one block of free RAM,
   so what lies between the blocks is unused:
   about 2.8 MiB on QEMU, where it does not matter, and 28 KiB on the ESP32-C6.
@@ -663,25 +663,16 @@ What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
 ## Scheduling
 
 What the wait for a turn and the work a thread gets are bound by is in `DESIGN.md`, "Scheduling";
-the first five below are what does not keep to it yet, each a constant-time change:
+what does not keep to it yet comes first below, each a constant-time change, up to the bind's:
 
-- A pool destroy stops only for a pending interrupt, `cap_stop_here`,
-  so a thread with time its walk wakes waits for the rest of the walk while the core's timer lies past the next tick,
-  and on another core for all of it, since the interrupt between cores goes out as the lock is given up.
-  Stopping also where the trap made ready a thread the core's timer does not allow for,
-  or owes another core an interrupt, would bound that by a tick;
-  the transcripts would not move, as the host stops at every step.
-- `pool_alloc` zeroes an object a byte a store with interrupts off,
-  and a table of `CAPTABLE_MAX_SLOTS` slots is 24,596 stores, longer than a tick at 10 kHz on every board,
+- `pool_alloc` and a pool destroy zero an object whole with interrupts off,
+  and a table of `CAPTABLE_MAX_SLOTS` slots takes longer than a tick at 10 kHz on the nRF52840 and near one on the other boards,
   where the wait's bound needs the kernel's longest step shorter than a tick.
-  Zeroing a word a store, or a table in steps that stop, and measuring the longest step on each board,
+  Zeroing a table in steps that stop, and measuring the longest step on each board,
   would say how short a tick each board can take.
 - On ARM and RP2350's Hazard3 an `OP_IRQ_SET` on a core other than the first interrupts the first core each time,
   so a driver there that arms its line in a loop takes what it likes of the first core's turns, which its threads pay for.
   Interrupting it only as `core_notify` does, or routing a line to its waiter's core, open decision 24, would bound it.
-- `OP_TEST_TICK` and a stop `OP_TEST_PREEMPT` armed move the tick count without time passing,
-  and untraced the count stays ahead of the counter for good, so every deadline set before fires early, the watchdog's among them.
-  Only the replay driver calls them, under tracing, so refusing them untraced with `KERR_STATE` would cost nothing.
 - A bind of a ready thread, even to more units of its core, puts it at the back of its queue,
   since the old binding goes through `sched_unbind`'s settle; keeping its place would keep its wait.
 - A thread whose account holds little more than a tick loses its time when its turn ends a few counts past a tick,

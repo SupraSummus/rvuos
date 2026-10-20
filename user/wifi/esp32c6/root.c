@@ -357,8 +357,7 @@ static void snap_parse(const char *conf, uint32_t len)
  * What to do, from the text the loader may have left in the input region: lines of ssid= and pass=,
  * the network to join, and with no ssid, a scan; bssid=, which of the network's access points to join;
  * and run=, how many seconds the run lasts, 0 for good.
- * debug= names what the driver tells besides its steps, any of frames, wpa, rekey and ps, see drv.h,
- * and lib= the libraries' log level, 4 for debug and 5 for verbose;
+ * debug= names what the driver tells besides its steps, any of frames, wpa, rekey and ps, see drv.h;
  * pmf=0 joins without protecting management frames, and sae=0 without WPA3's SAE;
  * qos=0 associates without QoS, amsdu=0 sends no A-MSDU, and ht=1 asks for HT, which carried less at the access
  * point here, see NOTES.md;
@@ -387,7 +386,6 @@ static void configure(struct drv *p)
                (config_has(conf, size, "debug", "wpa") ? DRV_DEBUG_WPA : 0) |
                (config_has(conf, size, "debug", "rekey") ? DRV_DEBUG_REKEY : 0) |
                (config_has(conf, size, "debug", "ps") ? DRV_DEBUG_PS : 0);
-    p->lib_log = config_number(conf, size, "lib", 0);
     p->no_pmf = config_number(conf, size, "pmf", 1) == 0;
     p->no_sae = config_number(conf, size, "sae", 1) == 0;
     p->ht = config_number(conf, size, "ht", 0) != 0;

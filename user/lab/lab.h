@@ -31,7 +31,7 @@ struct answer {
 /* What the root task says of the run, in each page. */
 enum { LAB_WARM, LAB_MEASURE, LAB_OVER };
 
-/* How long each ask a client made in the window took to be answered, in counts of the clock. */
+/* How long each ask a client made in the window took to be answered, or how late a driver started, in counts of the clock. */
 struct lab_stats {
     volatile uint32_t n; /* sample[i] is written before n passes i */
     volatile uint32_t worst;
@@ -44,7 +44,7 @@ struct lab_page {
     uint32_t clock; /* the slot of the clock, RIGHT_R */
     volatile uint32_t phase;
     uint32_t cost;      /* iterations of work for each ask, or for each hold of the lock */
-    uint32_t period_us; /* how often a client asks or takes the lock; 0 for as often as it can */
+    uint32_t period_us; /* how often a client asks or takes the lock, or a driver's line fires; 0 for as often as it can */
     uint32_t jitter;    /* the most a periodic client works before each ask, drawn afresh each period */
     uint32_t gap;       /* a locker's work between holds */
     uint32_t local;     /* a client that does the work itself, as a library would, and asks nobody */
@@ -68,5 +68,6 @@ void ui_main(struct child_page *page);
 void bulk_main(struct child_page *page);
 void hog_main(struct child_page *page);
 void locker_main(struct child_page *page);
+void driver_main(struct child_page *page);
 
 #endif

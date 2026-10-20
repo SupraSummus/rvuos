@@ -123,13 +123,15 @@ time moves by one tick, charged to the caller if it had time as its turn began, 
 every thread whose account reached a tick has time again,
 the caller's turn ends as section 5.11 says,
 and the caller stays ready.
-Works while tracing is on, unlike the tick itself.
+Works while tracing is on, unlike the tick itself,
+and fails with `KERR_STATE` while it is off,
+since a tick no time brought would have every deadline fire early.
 
 **`OP_TEST_IRQ` (22)**, on `Test`.
 `a1` = a line.
 Does what a device interrupt on that line does:
 the `Irq` armed on it masks the line and signals its bits.
-`KERR_STATE` when nothing is armed on the line;
+`KERR_STATE` while tracing is off or nothing is armed on the line;
 `KERR_INVALID_ARG` for a line the controller does not have, line 0 included.
 
 **`OP_TEST_PREEMPT` (32)**, on `Test`.
@@ -141,7 +143,8 @@ so another thread may run before the caller makes its call again.
 Every such place counts, in whichever thread's call;
 a call that finishes first leaves the rest of n to the next one.
 Zero disarms it, and a second call counts n anew.
-Works while tracing is on, when the tick stops no call.
+Works while tracing is on, when the tick stops no call,
+and fails with `KERR_STATE` while it is off, as `OP_TEST_TICK` does.
 
 ### 6.4 Operations on `CapTable`
 

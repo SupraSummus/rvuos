@@ -8,7 +8,7 @@ Witness: fuzz-smp2 cores-actor-waits-release
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -332,7 +332,8 @@ static void place_settle(struct place *p)
+@@ -432,7 +432,8 @@ static void place_settle(struct place *p)
      core_self()->wake_stale = true;
      account_refill(p);
      struct core *was = &cores[p->core];
