@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""Pack the CYW43439's firmware, CLM and NVRAM into the blob the Wi-Fi system loads.
+"""Pack the CYW43439's firmware, CLM and NVRAM into the blob the Wi-Fi system loads, and with --bt its Bluetooth patch.
 
 The files are Infineon's, under its Permissive Binary License, as embassy carries them
 in its cyw43-firmware directory; nothing of them is kept in this repository.
 This fetches them from one commit of embassy into a cache, checks each against its SHA-256,
 and lays them out as user/wifi/wifi.h's struct blob_header says:
 a header of 64 bytes, then the firmware, the CLM and the NVRAM, each at a multiple of four, zero padded.
+With --bt the Bluetooth core's patch follows the NVRAM, for user/wifi/bt.c (WIFI_BT=1), and the header says where;
+without it those two words are zero.
 tools/rp2350-run.py --ram places the blob at the start of free RAM, where the root task looks for it.
 
-Usage: tools/cyw43-blob.py --cache DIR --out FILE
+Usage: tools/cyw43-blob.py --cache DIR --out FILE [--bt]
 """
 
 import argparse
@@ -26,6 +28,7 @@ FILES = {
     "nvram_rp2040.bin": "4904bdbb0c937bd0ac2eb2a1d62f2da4dd90e32082384e02874e8d671b0f330d",
     "LICENSE-permissive-binary-license-1.0.txt": None,
 }
+BT_PATCH = ("43439A0_btfw.bin", "ce1992c1a6a16ae51bc012439486e9fb212623eca92d9e82a8090c2acf7ef1df")
 MAGIC = 0x33345943  # "CY43"
 HEADER = 64
 
@@ -55,6 +58,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--cache", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--bt", action="store_true", help="append the Bluetooth core's patch")
     args = ap.parse_args()
 
     files = {name: fetch(args.cache, name, digest) for name, digest in FILES.items()}
@@ -62,9 +66,12 @@ def main():
     fw_off = HEADER
     clm_off = fw_off + len(pad4(fw))
     nvram_off = clm_off + len(pad4(clm))
-    size = nvram_off + len(pad4(nvram))
-    header = struct.pack("<8I", MAGIC, size, fw_off, len(fw), clm_off, len(clm), nvram_off, len(nvram))
-    blob = header.ljust(HEADER, b"\0") + pad4(fw) + pad4(clm) + pad4(nvram)
+    bt_off = nvram_off + len(pad4(nvram))
+    bt = fetch(args.cache, *BT_PATCH) if args.bt else b""
+    size = bt_off + len(pad4(bt))
+    header = struct.pack("<10I", MAGIC, size, fw_off, len(fw), clm_off, len(clm), nvram_off, len(nvram),
+                         bt_off if bt else 0, len(bt))
+    blob = header.ljust(HEADER, b"\0") + pad4(fw) + pad4(clm) + pad4(nvram) + pad4(bt)
     assert len(blob) == size
     with open(args.out + ".tmp", "wb") as f:
         f.write(blob)

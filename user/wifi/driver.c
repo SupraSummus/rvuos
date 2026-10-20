@@ -19,6 +19,10 @@
 #include "wifi.h"
 #include "wlan.h"
 
+#ifdef WIFI_BT
+#include "bt.h"
+#endif
+
 #define NO_FRAME 0xffffffffu
 
 struct drv {
@@ -355,6 +359,19 @@ static void boot(struct drv *d)
     say(&d->out, "drv: up, mac %M\n", s->mac);
 }
 
+#ifdef WIFI_BT
+/* The Bluetooth probe's two ties to the driver: the root task's check, and the firmware blob. */
+static void bt_answer(void *context)
+{
+    child_answer((struct child_page *)context);
+}
+
+static const uint8_t *bt_blob(void *context, uint32_t off, uint32_t *left)
+{
+    return blob_at((struct drv *)context, off, left);
+}
+#endif
+
 __attribute__((noreturn)) void driver_main(struct child_page *page)
 {
     struct drv_page *s = (struct drv_page *)page;
@@ -369,6 +386,14 @@ __attribute__((noreturn)) void driver_main(struct child_page *page)
     d->wlan.on_data = on_data;
 
     boot(d);
+#ifdef WIFI_BT
+    struct bt_io io = { .chip = &d->chip, .out = &d->out, .answer = bt_answer, .answer_context = &d->page->c,
+        .blob = bt_blob, .blob_context = d, .channel = s->bt_channel, .poke = s->bt_poke, .poke_at = s->bt_poke_at,
+        .mem = s->bt_mem, .mem_at = s->bt_mem_at };
+    if (bt_run(&io) != 0) {
+        stop(d, CHILD_FAILED);
+    }
+#endif
     report(d, DRV_UP);
     int32_t err;
     switch (s->mode) {

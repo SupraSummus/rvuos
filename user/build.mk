@@ -53,7 +53,9 @@ escape: $(foreach p,$(ESCAPE_PROGRAMS),$(BUILD)/kernel-$(p).$(IMAGE))
 LIB_OBJ       := $(patsubst %.c,$(BUILD)/%.o,$(wildcard user/lib/*.c))
 PROGRAMS      := wifi libtest bench lab thread
 program_root   = $(BUILD)/user/$(1)/root.o
-program_others = $(patsubst %.c,$(BUILD)/%.o,$(filter-out user/$(1)/root.c,$(wildcard user/$(1)/*.c)))
+# A program's sources: every .c and .S beside its root task, but not the root task itself.
+program_others = $(patsubst %.c,$(BUILD)/%.o,$(patsubst %.S,$(BUILD)/%.o,\
+                   $(filter-out user/$(1)/root.c,$(wildcard user/$(1)/*.c user/$(1)/*.S))))
 define program
 $(BUILD)/user-$(1).elf: $(call program_root,$(1)) $(call program_others,$(1)) $(LIB_OBJ) $(USER_COMMON) \
                         $(BUILD)/user/user.ld tools/no-globals.py

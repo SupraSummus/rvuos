@@ -136,6 +136,13 @@ static void configure(struct drv_page *s)
     config_value(conf, size, "ssid", s->ssid, sizeof(s->ssid));
     config_value(conf, size, "pass", s->pass, sizeof(s->pass));
     s->channel = config_number(conf, size, "channel", 1);
+#ifdef WIFI_BT
+    s->bt_channel = config_number(conf, size, "bt_channel", 19);
+    s->bt_poke = config_hex(conf, size, "bt_poke", 0);
+    s->bt_poke_at = config_hex(conf, size, "bt_poke_at", 0);
+    s->bt_mem = config_hex(conf, size, "bt_mem", 0);
+    s->bt_mem_at = config_hex(conf, size, "bt_mem_at", 0);
+#endif
     s->bssid_set = (uint8_t)config_mac(conf, size, "bssid", s->bssid);
     s->dhcp_log = (uint8_t)config_has(conf, size, "debug", "dhcp");
     s->no_sae = config_number(conf, size, "sae", 1) == 0;

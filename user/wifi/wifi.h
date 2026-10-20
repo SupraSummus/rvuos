@@ -36,7 +36,8 @@
 
 /*
  * The firmware blob, as tools/cyw43-blob.py lays it out, which the loader places at the start of free RAM:
- * the header, then the firmware, the CLM and the NVRAM, each at a multiple of four.
+ * the header, then the firmware, the CLM and the NVRAM, each at a multiple of four,
+ * and with --bt the Bluetooth core's patch after them, which only WIFI_BT's bt.c reads.
  */
 #define BLOB_MAGIC 0x33345943u /* "CY43" */
 struct blob_header {
@@ -45,6 +46,7 @@ struct blob_header {
     uint32_t fw_offset, fw_size;
     uint32_t clm_offset, clm_size;
     uint32_t nvram_offset, nvram_size;
+    uint32_t bt_offset, bt_size; /* 0 and 0 without the patch */
 };
 #define BLOB_FRAMES 8u /* the most frames it is lent in */
 
@@ -97,6 +99,11 @@ struct drv_page {
     uint32_t blob_size[BLOB_FRAMES];
     uint32_t window;
     uint32_t mode, channel;
+#ifdef WIFI_BT
+    uint32_t bt_channel; /* the Bluetooth probe's transmitter test channel, 0..39; see bt.h */
+    uint32_t bt_poke, bt_poke_at; /* a word our code on the core writes at bt_poke_at on every call, 0 for none */
+    uint32_t bt_mem, bt_mem_at; /* a word the host writes into the core's RAM before the test, 0 for none */
+#endif
     char ssid[33];
     char pass[65];
     uint8_t bssid[6]; /* the access point to join, if bssid_set */

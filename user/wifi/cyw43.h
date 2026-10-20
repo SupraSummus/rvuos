@@ -56,6 +56,9 @@ int cyw43_start(struct cyw43 *chip, const uint8_t *nvram, uint32_t len);
 
 uint32_t cyw43_bp_read32(struct cyw43 *chip, uint32_t addr);
 uint16_t cyw43_bp_read16(struct cyw43 *chip, uint32_t addr);
+#ifdef WIFI_BT
+void cyw43_bp_write32(struct cyw43 *chip, uint32_t addr, uint32_t val); /* for bt.c */
+#endif
 
 /* Function 2, the firmware's packets: the bus status, which says whether one waits and how long it is. */
 #define CYW43_STATUS_F2_PKT_AVAILABLE 0x00000100u

@@ -405,3 +405,11 @@ void cyw43_wlan_write(struct cyw43 *c, uint32_t *words, uint32_t len)
     words[0] = cmd_word(1, FUNC_WLAN, 0, len);
     c->status = gspi_write(&c->bus, words, 1u + (len + 3u) / 4u);
 }
+
+#ifdef WIFI_BT
+/* A word to the backplane, for user/wifi/bt.c's bring-up of the Bluetooth core. */
+void cyw43_bp_write32(struct cyw43 *c, uint32_t addr, uint32_t val)
+{
+    bp_write32(c, addr, val);
+}
+#endif

@@ -42,6 +42,34 @@ static inline uint32_t config_number(const char *conf, uint32_t len, const char 
     return n;
 }
 
+#ifdef WIFI_BT
+/* A "key=value" line's value as a number, "0x" and hex digits; the default if the line is absent. */
+static inline uint32_t config_hex(const char *conf, uint32_t len, const char *key, uint32_t dflt)
+{
+    char value[12];
+    value[0] = '\0';
+    config_value(conf, len, key, value, sizeof(value));
+    if (value[0] != '0' || (value[1] != 'x' && value[1] != 'X')) {
+        return dflt;
+    }
+    uint32_t n = 0, i = 2;
+    for (; value[i] != '\0'; i++) {
+        uint32_t d;
+        if (value[i] >= '0' && value[i] <= '9') {
+            d = (uint32_t)(value[i] - '0');
+        } else if (value[i] >= 'a' && value[i] <= 'f') {
+            d = (uint32_t)(value[i] - 'a') + 10u;
+        } else if (value[i] >= 'A' && value[i] <= 'F') {
+            d = (uint32_t)(value[i] - 'A') + 10u;
+        } else {
+            break;
+        }
+        n = n * 16u + d;
+    }
+    return i > 2 ? n : dflt;
+}
+#endif
+
 /* Whether a "key=value" line's value, words apart by commas, holds word. */
 static inline int config_has(const char *conf, uint32_t len, const char *key, const char *word)
 {
