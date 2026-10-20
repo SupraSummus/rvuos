@@ -9,11 +9,11 @@ Witness: fuzz actor-handoff
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -329,7 +329,6 @@ static uint8_t place_queue(const struct place *p, uint32_t balance, const struct
+@@ -348,7 +348,6 @@ static uint8_t place_queue(const struct place *p, uint32_t balance, const struct
   */
  static void place_settle(struct place *p)
  {
 -    core_self()->wake_stale = true;
-     account_refill(p);
-     struct core *was = &cores[p->core];
-     struct core *core = &cores[place_core(p)];
+     if (p->queue != QUEUE_RUN) {
+         account_refill(p);
+     }

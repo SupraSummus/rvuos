@@ -12,6 +12,7 @@ It does not grow with how many objects, pools or capabilities exist.
 Otherwise a process with one small pool allocates thousands of minimal objects,
 and every tick and every interrupt, other processes' included,
 gets that much slower.
+A bound that grows as the logarithm of memory, as a balanced tree's depth does, is open decision 38.
 
 **The exception is destruction.**
 A revoke, a pool destroy, and a delete below a root
@@ -28,6 +29,9 @@ A revoke, a delete below a root, a pool destroy, and the revoke that begins a bi
 take one step per capability, object or waiter in constant time
 and ask `intr_pending` between two steps.
 If the tick or a device interrupt is pending, or another core waits for the kernel's lock, the walk stops,
+and so it does where its step made ready a thread with time while the core's timer lies past the next tick,
+or owes another core an interrupt, which goes out only as the lock is given up:
+a pool destroy that wakes a waiter would otherwise hold it for the rest of the walk.
 `syscall_dispatch` puts the thread back on its `ecall` with its registers as they were,
 the `mret` takes the interrupt through `mtvec` as in any user code, as the exception return does on ARM,
 and the thread makes the same call again when it next runs, as in seL4.

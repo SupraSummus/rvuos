@@ -1,22 +1,24 @@
 /*
- * The OS functions Espressif's Wi-Fi libraries call, on rvuos: struct osi_funcs of esp.h.
+ * The OS the driver's own start runs on, on rvuos. Espressif's libraries, which once called
+ * it, are linked no more; what remains serves the driver's own threads, locks, queues, timers and interrupts.
  *
- * The libraries expect a FreeRTOS: tasks, semaphores, mutexes, queues, event groups and timers,
+ * They are made to a FreeRTOS's shape: tasks, semaphores, mutexes, queues, event groups and timers,
  * an interrupt that preempts the tasks, and critical sections that hold it off.
  * Here every task is a thread of the driver's process, with a stack of its own,
  * a notification of its own it waits on, and a timer line that signals it there,
  * all built from the driver's own account, lib/child.h's child_self;
  * the driver's first thread, which the root task started, joins them, osi_adopt;
- * each finds its own record in tp, which nothing else the driver runs uses, the libraries and the ROM included;
- * the interrupt is a thread that waits for the MAC's line and calls the handler the libraries set,
+ * each finds its own record in tp, which nothing else the driver runs uses, libphy and the ROM included;
+ * the interrupt is a thread that waits for the MAC's line and calls the handler set for it,
  * and a critical section holds a lock that thread takes too.
  * A watcher, a thread of the adapter's, tells the faults of the others; the root task watches the watcher.
- * The objects lie where their user declares them, the libraries' in the heap, under one lock,
+ * The objects lie where their user declares them, under one lock,
  * and a thread that waits on one leaves it a link in the object's list;
  * whoever changes the object wakes the first, or every, thread on it, which looks again.
  * A tick is a millisecond.
  */
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "drv.h"
@@ -58,11 +60,6 @@ struct thread {
     struct thread *next; /* on an object's list of waiters */
     int woken;
     const char *name;
-};
-
-struct semphr {
-    struct waiters w;
-    uint32_t count, max;
 };
 
 static struct {
@@ -540,7 +537,7 @@ static void isr_main(void *arg)
     }
 }
 
-static void set_intr(int32_t cpu, uint32_t source, uint32_t n, int32_t prio)
+void osi_intr_set(int32_t cpu, uint32_t source, uint32_t n, int32_t prio)
 {
     (void)cpu;
     (void)prio;
@@ -551,16 +548,11 @@ static void set_intr(int32_t cpu, uint32_t source, uint32_t n, int32_t prio)
     }
 }
 
-static void clear_intr(uint32_t source, uint32_t n)
+void osi_isr_set(uint32_t n, void (*f)(void *), void *arg)
 {
-    osi_trace("clear_intr", source, n);
-}
-
-static void set_isr(int32_t n, void *f, void *arg)
-{
-    osi_trace("set_isr", (uint32_t)n, 0);
-    if ((uint32_t)n < INTRS) {
-        osi.intr[n].f = (void (*)(void *))f;
+    osi_trace("set_isr", n, 0);
+    if (n < INTRS) {
+        osi.intr[n].f = f;
         osi.intr[n].arg = arg;
     }
 }
@@ -569,7 +561,7 @@ static void set_isr(int32_t n, void *f, void *arg)
  * The line of a source is the source plus one, see kernel/board/esp32c6/irq.c,
  * carved from the modem's lines the root task gave the driver, which start at DRV_LINE_FIRST.
  */
-static void ints_on(uint32_t mask)
+void osi_ints_on(uint32_t mask)
 {
     osi_trace("ints_on", mask, 0);
     struct self *s = osi.s;
@@ -598,108 +590,9 @@ static void ints_on(uint32_t mask)
     }
 }
 
-static void ints_off(uint32_t mask)
-{
-    osi_trace("ints_off", mask, 0);
-    for (uint32_t n = 0; n < INTRS; n++) {
-        if ((mask & (1u << n)) && osi.intr[n].irq) {
-            osi.intr_on &= ~(1u << n);
-            rv_irq_set(osi.intr[n].irq, 0);
-        }
-    }
-}
 
-static bool is_from_isr(void)
-{
-    return self() == osi.isr;
-}
+/* --- Mutexes. --- */
 
-static void *spin_lock_create(void)
-{
-    return &osi.crit;
-}
-
-static void spin_lock_delete(void *lock)
-{
-    (void)lock;
-}
-
-static void task_yield_from_isr(void)
-{
-}
-
-/* --- Semaphores and mutexes. --- */
-
-static void *semphr_create(uint32_t max, uint32_t init)
-{
-    struct semphr *m = osi_calloc(1, sizeof(*m));
-    if (m) {
-        m->max = max;
-        m->count = init;
-    }
-    return m;
-}
-
-static void semphr_delete(void *semphr)
-{
-    osi_free(semphr);
-}
-
-static int32_t semphr_take(void *semphr, uint32_t ticks)
-{
-    struct semphr *m = semphr;
-    uint64_t deadline = deadline_of(ticks);
-    lock_take(&osi.big);
-    while (m->count == 0 && wait_on(&m->w, deadline)) {
-    }
-    int ok = m->count > 0;
-    if (ok) {
-        m->count--;
-    }
-    lock_give(&osi.big);
-    return ok;
-}
-
-static int32_t semphr_give(void *semphr)
-{
-    struct semphr *m = semphr;
-    lock_take(&osi.big);
-    int ok = m->count < m->max;
-    if (ok) {
-        m->count++;
-        wake(&m->w, 0);
-    }
-    lock_give(&osi.big);
-    return ok;
-}
-
-static void *wifi_thread_semphr_get(void)
-{
-    struct thread *t = self();
-    if (t->semphr == 0) {
-        t->semphr = semphr_create(1, 0);
-    }
-    return t->semphr;
-}
-
-static void *mutex_new(int recursive)
-{
-    struct mutex *m = osi_calloc(1, sizeof(*m));
-    if (m) {
-        m->recursive = recursive;
-    }
-    return m;
-}
-
-static void *mutex_create(void)
-{
-    return mutex_new(0);
-}
-
-static void *recursive_mutex_create(void)
-{
-    return mutex_new(1);
-}
 
 static int32_t mutex_lock(void *mutex)
 {
@@ -739,47 +632,6 @@ void osi_mutex_give(struct mutex *m)
 
 /* --- Queues. --- */
 
-static void *queue_create(uint32_t len, uint32_t item_size)
-{
-    struct queue *q = osi_calloc(1, sizeof(*q) + len * item_size);
-    if (q) {
-        q->len = len;
-        q->item_size = item_size;
-        q->items = (uint8_t *)(q + 1);
-    }
-    return q;
-}
-
-/* ESP-IDF's wifi_static_queue_t: the libraries find the queue in its first word. */
-struct static_queue {
-    void *handle;
-    void *storage;
-};
-
-static void *wifi_create_queue(int len, int item_size)
-{
-    struct static_queue *q = osi_calloc(1, sizeof(*q));
-    if (q && (q->handle = queue_create((uint32_t)len, (uint32_t)item_size)) == 0) {
-        osi_free(q);
-        q = 0;
-    }
-    return q;
-}
-
-static void wifi_delete_queue(void *queue)
-{
-    struct static_queue *q = queue;
-    if (q) {
-        osi_free(q->handle);
-        osi_free(q);
-    }
-}
-
-static void queue_delete(void *queue)
-{
-    osi_free(queue);
-}
-
 static int32_t queue_put(void *queue, const void *item, uint32_t ticks, int front)
 {
     struct queue *q = queue;
@@ -804,21 +656,6 @@ static int32_t queue_put(void *queue, const void *item, uint32_t ticks, int fron
     return ok;
 }
 
-static int32_t queue_send(void *queue, void *item, uint32_t ticks)
-{
-    return queue_put(queue, item, ticks, 0);
-}
-
-static int32_t queue_send_from_isr(void *queue, void *item, void *hptw)
-{
-    (void)hptw;
-    return queue_put(queue, item, 0, 0);
-}
-
-static int32_t queue_send_to_front(void *queue, void *item, uint32_t ticks)
-{
-    return queue_put(queue, item, ticks, 1);
-}
 
 static int32_t queue_recv(void *queue, void *item, uint32_t ticks)
 {
@@ -838,10 +675,6 @@ static int32_t queue_recv(void *queue, void *item, uint32_t ticks)
     return ok;
 }
 
-static uint32_t queue_msg_waiting(void *queue)
-{
-    return ((struct queue *)queue)->count;
-}
 
 int osi_queue_put(struct queue *q, const void *item, uint32_t ms)
 {
@@ -855,19 +688,8 @@ int osi_queue_get(struct queue *q, void *item, uint32_t ms)
 
 /* --- Event groups. --- */
 
-static void *event_group_create(void)
+uint32_t osi_event_set_bits(struct event_group *e, uint32_t bits)
 {
-    return osi_calloc(1, sizeof(struct event_group));
-}
-
-static void event_group_delete(void *event)
-{
-    osi_free(event);
-}
-
-static uint32_t event_group_set_bits(void *event, uint32_t bits)
-{
-    struct event_group *e = event;
     lock_take(&osi.big);
     e->bits |= bits;
     uint32_t now = e->bits;
@@ -876,19 +698,8 @@ static uint32_t event_group_set_bits(void *event, uint32_t bits)
     return now;
 }
 
-static uint32_t event_group_clear_bits(void *event, uint32_t bits)
+uint32_t osi_event_wait_bits(struct event_group *e, uint32_t bits, int clear, int all, uint32_t ticks)
 {
-    struct event_group *e = event;
-    lock_take(&osi.big);
-    uint32_t was = e->bits;
-    e->bits &= ~bits;
-    lock_give(&osi.big);
-    return was;
-}
-
-static uint32_t event_group_wait_bits(void *event, uint32_t bits, int clear, int all, uint32_t ticks)
-{
-    struct event_group *e = event;
     uint64_t deadline = deadline_of(ticks);
     lock_take(&osi.big);
     for (;;) {
@@ -911,43 +722,6 @@ static uint32_t event_group_wait_bits(void *event, uint32_t bits, int clear, int
 
 /* --- Tasks. --- */
 
-static int32_t task_create(void *f, const char *name, uint32_t stack, void *arg, uint32_t prio, void *handle)
-{
-    (void)prio;
-    osi_trace("task", stack, 0); /* the name is in the log line below */
-    drv_say("osi: task %s, %u bytes of stack\n", name, (unsigned)stack);
-    stack = (stack + 15u) & ~15u;
-    uint8_t *mem = osi_malloc(stack);
-    struct thread *t = mem ? osi_thread((void (*)(void *))f, arg, name, mem, stack) : 0;
-    if (mem == 0) {
-        drv_failed("a task's stack", KERR_NO_MEMORY);
-    } else if (t == 0) {
-        osi_free(mem);
-    }
-    if (handle) {
-        *(void **)handle = t;
-    }
-    return t != 0;
-}
-
-static int32_t task_create_pinned_to_core(void *f, const char *name, uint32_t stack, void *arg, uint32_t prio,
-                                          void *handle, uint32_t core)
-{
-    (void)core;
-    return task_create(f, name, stack, arg, prio, handle);
-}
-
-static void task_delete(void *handle)
-{
-    struct thread *t = handle ? handle : self();
-    if (t == self()) {
-        for (;;) {
-            uint32_t bits;
-            rv_wait(t->note, &bits);
-        }
-    }
-    drv_say("osi: a task deleted another, %s, which goes on\n", t->name);
-}
 
 static void task_delay(uint32_t ticks)
 {
@@ -962,20 +736,6 @@ void osi_delay_ms(uint32_t ms)
     task_delay(ms);
 }
 
-static int32_t task_ms_to_tick(uint32_t ms)
-{
-    return (int32_t)ms;
-}
-
-static void *task_get_current_task(void)
-{
-    return self();
-}
-
-static int32_t task_get_max_priority(void)
-{
-    return 25;
-}
 
 /* --- Timers, run by a thread of their own as ESP-IDF's esp_timer task runs them. --- */
 
@@ -1007,16 +767,6 @@ static void timer_disarm(void *timer)
     lock_give(&osi.big);
 }
 
-static void timer_setfn(void *timer, void *f, void *arg)
-{
-    struct ets_timer *t = timer;
-    lock_take(&osi.big);
-    timer_unlink(t);
-    t->f = (void (*)(void *))f;
-    t->arg = arg;
-    t->period = 0;
-    lock_give(&osi.big);
-}
 
 static void timer_arm_us(void *timer, uint32_t us, bool repeat)
 {
@@ -1033,15 +783,6 @@ static void timer_arm_us(void *timer, uint32_t us, bool repeat)
     lock_give(&osi.big);
 }
 
-static void timer_arm(void *timer, uint32_t ms, bool repeat)
-{
-    timer_arm_us(timer, ms * 1000u, repeat);
-}
-
-static void timer_done(void *timer)
-{
-    timer_disarm(timer);
-}
 
 /* A timer of the driver's own, which the timer thread runs as it runs the libraries'. */
 void osi_timer_arm_us(struct ets_timer *t, uint32_t us)
@@ -1088,28 +829,10 @@ static void timers_main(void *arg)
     }
 }
 
-/* --- Memory, see heap.c. --- */
-
-static uint32_t get_free_heap_size(void)
-{
-    return osi_heap_free();
-}
-
-static void *zalloc(size_t size)
-{
-    return osi_calloc(1, size);
-}
-
 /* --- The rest. --- */
 
-static bool env_is_chip(void)
+int32_t osi_event_post(const char *base, int32_t id, const void *data, size_t size)
 {
-    return true;
-}
-
-static int32_t event_post(const char *base, int32_t id, void *data, size_t size, uint32_t ticks)
-{
-    (void)ticks;
     osi_trace("event_post", (uint32_t)id, size);
     drv_event(base, id, data, size);
     return 0;
@@ -1139,110 +862,22 @@ void drv_random(uint8_t *buf, size_t len)
     }
 }
 
-static uint32_t osi_rand(void)
-{
-    uint32_t v;
-    drv_random((uint8_t *)&v, sizeof(v));
-    return v;
-}
-
-static unsigned long osi_random(void)
-{
-    return osi_rand();
-}
-
-static int get_random(uint8_t *buf, size_t len)
-{
-    drv_random(buf, len);
-    return 0;
-}
-
-static int get_time(void *t)
-{
-    uint64_t us = osi_now_us();
-    uint32_t *tv = t; /* struct timeval of 64-bit seconds and 32-bit microseconds, as newlib lays it out */
-    tv[0] = (uint32_t)(us / 1000000u);
-    tv[1] = 0;
-    tv[2] = (uint32_t)(us % 1000000u);
-    return 0;
-}
-
-static int64_t timer_get_time(void)
-{
-    return (int64_t)osi_now_us();
-}
 
 /* The slow clock's period in microseconds, as Q13.19: about 136 kHz, the RC oscillator's; not measured. */
-static uint32_t slowclk_cal_get(void)
+uint32_t osi_slowclk_cal(void)
 {
     uint32_t hz = 3855000u;
     osi_trace("slowclk", hz, 0);
     return hz;
 }
 
-static int read_mac(uint8_t *mac, unsigned int type)
-{
-    osi_trace("read_mac", type, 0);
-    memcpy(mac, osi.d->mac, 6);
-    mac[5] += (uint8_t)type; /* ESP-IDF derives the soft-AP's and the rest from the station's this way */
-    return 0;
-}
 
-/* The libraries' lines that reach the log, at ESP_LOG_INFO and below unless the configuration asks for more. */
-static unsigned int log_level = 3;
-
-void osi_log_level(unsigned int level)
-{
-    log_level = level;
-}
-
-/* The libraries write a line in pieces, the first of which carries ESP-IDF's level, time and tag. */
-static void esp_log_writev(unsigned int level, const char *tag, const char *fmt, va_list args)
-{
-    (void)tag;
-    if (level <= log_level) {
-        drv_vsay(0, fmt, args);
-    }
-}
-
-static void esp_log_write(unsigned int level, const char *tag, const char *fmt, ...)
-{
-    va_list args;
-    va_start(args, fmt);
-    esp_log_writev(level, tag, fmt, args);
-    va_end(args);
-}
-
-static uint32_t log_timestamp(void)
-{
-    return (uint32_t)(osi_now_us() / 1000u);
-}
-
-static void nothing(void)
-{
-}
-
-static int zero(void)
-{
-    return 0;
-}
-
-static int coex_log_init(void)
-{
-    osi_trace("coex_init", 0, 0);
-    return 0;
-}
-
-static int coex_log_enable(void)
+int osi_coex_enable(void)
 {
     osi_trace("coex_enable", 0, 0);
     return 0;
 }
 
-static int nvs_none(void)
-{
-    return 0x1102; /* ESP_ERR_NVS_NOT_FOUND */
-}
 
 /*
  * The two coex stubs that have an output. ESP-IDF's adapter without coexistence returns success and writes
@@ -1260,169 +895,14 @@ static const uint8_t coex_pti_tab[49] = {
     0x0f,
 };
 
-static int coex_pti_get(uint32_t event, uint8_t *pti)
+int osi_coex_pti(uint32_t event, uint8_t *pti)
 {
     *pti = event < sizeof(coex_pti_tab) ? coex_pti_tab[event] : 0;
     return 0;
 }
 
-static int coex_event_duration_get(uint32_t event, uint32_t *duration)
-{
-    /* esp-coex-lib's coex_core_event_duration_get: a duration in microseconds per event, and -1 for the rest. */
-    switch (event) {
-    case 4:    *duration = 25000; return 0;
-    case 7:    *duration = 20000; return 0;
-    case 9:    *duration = 5000;  return 0;
-    case 0x2d: *duration = 25000; return 0;
-    case 0x2e: *duration = 50000; return 0;
-    default:   *duration = 0;     return -1;
-    }
-}
 
-static void *null(void)
-{
-    return 0;
-}
-
-static bool no(void)
-{
-    return false;
-}
-
-/* A stub of another type than its field's, which takes and returns no more than the field's type does. */
-#define STUB(field, f) .field = (__typeof__(((struct osi_funcs *)0)->field))(void (*)(void))(f)
-
-static const struct osi_funcs funcs = {
-    .version = OSI_VERSION,
-    .env_is_chip = env_is_chip,
-    .set_intr = set_intr,
-    .clear_intr = clear_intr,
-    .set_isr = set_isr,
-    .ints_on = ints_on,
-    .ints_off = ints_off,
-    .is_from_isr = is_from_isr,
-    .spin_lock_create = spin_lock_create,
-    .spin_lock_delete = spin_lock_delete,
-    .wifi_int_disable = int_disable,
-    .wifi_int_restore = int_restore,
-    .task_yield_from_isr = task_yield_from_isr,
-    .semphr_create = semphr_create,
-    .semphr_delete = semphr_delete,
-    .semphr_take = semphr_take,
-    .semphr_give = semphr_give,
-    .wifi_thread_semphr_get = wifi_thread_semphr_get,
-    .mutex_create = mutex_create,
-    .recursive_mutex_create = recursive_mutex_create,
-    .mutex_delete = osi_free,
-    .mutex_lock = mutex_lock,
-    .mutex_unlock = mutex_unlock,
-    .queue_create = queue_create,
-    .queue_delete = queue_delete,
-    .queue_send = queue_send,
-    .queue_send_from_isr = queue_send_from_isr,
-    .queue_send_to_back = queue_send,
-    .queue_send_to_front = queue_send_to_front,
-    .queue_recv = queue_recv,
-    .queue_msg_waiting = queue_msg_waiting,
-    .event_group_create = event_group_create,
-    .event_group_delete = event_group_delete,
-    .event_group_set_bits = event_group_set_bits,
-    .event_group_clear_bits = event_group_clear_bits,
-    .event_group_wait_bits = event_group_wait_bits,
-    .task_create_pinned_to_core = task_create_pinned_to_core,
-    .task_create = task_create,
-    .task_delete = task_delete,
-    .task_delay = task_delay,
-    .task_ms_to_tick = task_ms_to_tick,
-    .task_get_current_task = task_get_current_task,
-    .task_get_max_priority = task_get_max_priority,
-    .malloc = osi_malloc,
-    .free = osi_free,
-    .event_post = event_post,
-    .get_free_heap_size = get_free_heap_size,
-    .rand = osi_rand,
-    .dport_access_stall_other_cpu_start_wrap = nothing,
-    .dport_access_stall_other_cpu_end_wrap = nothing,
-    .wifi_pm_sleep_lock_acquire = nothing,
-    .wifi_pm_sleep_lock_release = nothing,
-    .phy_disable = drv_phy_disable,
-    .phy_enable = drv_phy_enable,
-    STUB(phy_update_country_info, zero),
-    .read_mac = read_mac,
-    .timer_arm = timer_arm,
-    .timer_disarm = timer_disarm,
-    .timer_done = timer_done,
-    .timer_setfn = timer_setfn,
-    .timer_arm_us = timer_arm_us,
-    .wifi_reset_mac = drv_wifi_reset_mac,
-    .wifi_clock_enable = drv_wifi_clock_enable,
-    .wifi_clock_disable = nothing,
-    .wifi_rtc_enable_iso = nothing,
-    .wifi_rtc_disable_iso = nothing,
-    .esp_timer_get_time = timer_get_time,
-    STUB(nvs_set_i8, nvs_none),
-    STUB(nvs_get_i8, nvs_none),
-    STUB(nvs_set_u8, nvs_none),
-    STUB(nvs_get_u8, nvs_none),
-    STUB(nvs_set_u16, nvs_none),
-    STUB(nvs_get_u16, nvs_none),
-    STUB(nvs_open, nvs_none),
-    STUB(nvs_close, nothing),
-    STUB(nvs_commit, nvs_none),
-    STUB(nvs_set_blob, nvs_none),
-    STUB(nvs_get_blob, nvs_none),
-    STUB(nvs_erase_key, nvs_none),
-    .get_random = get_random,
-    .get_time = get_time,
-    .random = osi_random,
-    .slowclk_cal_get = slowclk_cal_get,
-    .log_write = esp_log_write,
-    .log_writev = esp_log_writev,
-    .log_timestamp = log_timestamp,
-    .malloc_internal = osi_malloc,
-    .realloc_internal = osi_realloc,
-    .calloc_internal = osi_calloc,
-    .zalloc_internal = zalloc,
-    .wifi_malloc = osi_malloc,
-    .wifi_realloc = osi_realloc,
-    .wifi_calloc = osi_calloc,
-    .wifi_zalloc = zalloc,
-    .wifi_create_queue = wifi_create_queue,
-    .wifi_delete_queue = wifi_delete_queue,
-    .coex_init = coex_log_init,
-    .coex_deinit = nothing,
-    .coex_enable = coex_log_enable,
-    .coex_disable = nothing,
-    STUB(coex_status_get, zero),
-    STUB(coex_condition_set, nothing),
-    STUB(coex_wifi_request, zero),
-    STUB(coex_wifi_release, zero),
-    STUB(coex_wifi_channel_set, zero),
-    .coex_event_duration_get = coex_event_duration_get,
-    .coex_pti_get = coex_pti_get,
-    STUB(coex_schm_status_bit_clear, nothing),
-    STUB(coex_schm_status_bit_set, nothing),
-    STUB(coex_schm_interval_set, zero),
-    STUB(coex_schm_interval_get, zero),
-    STUB(coex_schm_curr_period_get, zero),
-    .coex_schm_curr_phase_get = null,
-    .coex_schm_process_restart = zero,
-    STUB(coex_schm_register_cb, zero),
-    STUB(coex_register_start_cb, zero),
-    STUB(regdma_link_set_write_wait_content, nothing),
-    STUB(sleep_retention_find_link_by_id, null),
-    STUB(coex_schm_flexible_period_set, zero),
-    STUB(coex_schm_flexible_period_get, zero),
-    STUB(coex_schm_get_phase_by_idx, null),
-    .wifi_disable_ac_ax = no,
-    STUB(wifi_bb_sleep_retention_attach, zero),
-    STUB(wifi_bb_sleep_retention_detach, zero),
-    STUB(wifi_mac_sleep_retention_attach, zero),
-    STUB(wifi_mac_sleep_retention_detach, zero),
-    .magic = OSI_MAGIC,
-};
-
-struct osi_funcs *osi_init(struct drv *d, struct self *s)
+int osi_init(struct drv *d, struct self *s)
 {
     osi.d = d;
     osi.s = s;
@@ -1450,5 +930,5 @@ struct osi_funcs *osi_init(struct drv *d, struct self *s)
     osi.watcher = osi_thread(watcher_main, 0, "watcher", watcher_stack, sizeof(watcher_stack));
     osi.isr = osi_thread(isr_main, 0, "isr", isr_stack, sizeof(isr_stack));
     osi.timers = osi_thread(timers_main, 0, "timers", timers_stack, sizeof(timers_stack));
-    return osi.watcher && osi.isr && osi.timers ? (struct osi_funcs *)&funcs : 0;
+    return osi.watcher && osi.isr && osi.timers ? 1 : 0;
 }

@@ -200,8 +200,7 @@ void mac_receive(uint16_t aid)
  * The default receive policy the libraries' wifi_set_rx_policy(0) writes at the bring-up, before anything is joined,
  * as the driver's own writes on interface 0's words alone, the station's: its address from the factory MAC, left
  * invalid, the bssid's flag clear, and its receive policy cleared, the queueing off. The libraries' writes for
- * interface 1, the soft AP's, which the driver never brings up, are left out; test/diff-expected.txt holds the
- * places that leaves and test/compare-expected.txt the word, interface 1's address.
+ * interface 1, the soft AP's, which the driver never brings up, are left out.
  */
 void mac_default_policy(const uint8_t mac[6])
 {
@@ -1038,7 +1037,7 @@ void mac_stop(void)
     wr(PTI_RX, 0);
     wr(PTI_DEFAULT, rd(PTI_DEFAULT) & ~0xfu);
     wr(HAL_CTRL, rd(HAL_CTRL) | 1u);
-    wr(HAL_HOLD, 0);
+    wr(MAC_ENABLE, 0);
     wr(INT_CLEAR, 0xffffffffu);
     wr(HAL_CFG, rd(HAL_CFG) | 2u);
     drv_phy_disable();

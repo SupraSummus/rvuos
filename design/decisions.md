@@ -146,7 +146,7 @@ until the maintainer decides otherwise.
    What it cannot do is choose between two runnable threads
    for less than a system call per switch.
    A period per thread, as seL4's scheduling contexts have, would bound latency more tightly,
-   at the price of a queue of refills sorted by time.
+   at the price of a queue of refills sorted by time, which decision 38 weighs.
    Decide when a workload needs one thread to run before another,
    and taking turns measurably fails it.
    `make bench`'s `contended-worst` is what taking turns costs a round trip between two processes:
@@ -181,7 +181,7 @@ until the maintainer decides otherwise.
        the highest would cost each notification a pair of links per level, or a walk.
      - **A short kernel step.**
        The longest step the kernel takes without looking for an interrupt is the floor of every wait;
-       today zeroing a table takes longer than a tick at 10 kHz, and a pool destroy stops only for a pending interrupt, `TODO.md`.
+       today zeroing a table takes about a tick at 10 kHz, `TODO.md`.
      - **Deadlines in counts.**
        Timer lines fire on the tick grid, so a periodic thread at the top still starts up to a tick late.
      - **Signals that preempt.**
@@ -195,7 +195,7 @@ until the maintainer decides otherwise.
 
 10. **Yield.**
     Working default: none.
-    `OP_TEST_TICK` is the tick on request,
+    `OP_TEST_TICK` is the tick on request, under tracing alone,
     so a yield would be that under a name that invites spinning,
     and a spinning thread is always runnable and keeps the machine from `wfi`,
     while a waiting thread says what it waits for.
@@ -606,9 +606,6 @@ until the maintainer decides otherwise.
       and a revoke that ends early because it took the caller's own table returns `KERR_OK`, done or not.
     - **What a halt does.**
       Nothing resets the machine, and what a halt does is the board's.
-    - **`Test` on every board.**
-      The boot grants it on every board, so any root task may move time and fire lines no device raised.
-      Granting it only to the test programs would close that, and refusing its calls untraced, `TODO.md`, most of it.
     - **The boot table.**
       `BOOT_CAP_INPUT` is the test's input on every board.
     - **An `Irq` holds its line by no node**, `TODO.md`, so a revoke takes back a bound line no other way a lender takes back what it lent.
@@ -786,3 +783,56 @@ until the maintainer decides otherwise.
     - **RP2350** has no router, but a DMA channel paced by a device's DREQ writes a word to a register;
       the channels are a bus master in one block, which the kernel would hold and confine through the DMA's own MPU.
     - **Groups and forks**, arming several routes at once and a second task per event, as the PPI has.
+
+38. **Work that grows as the logarithm of memory.**
+    Working default: none.
+    Destruction aside, which is paid for and preempted,
+    what a system call, a tick or an interrupt costs does not grow with how many objects exist;
+    see "Bounded work".
+    Open: a walk as deep as a balanced tree over every object of some kind.
+    Their count is bounded by the memory they live in,
+    so the tree's depth by the logarithm of the RAM,
+    which is a constant of the machine as the PMP entries are.
+    It is the door to what the kernel cannot keep in order otherwise:
+    things with no bound but memory, sorted by a key with no bound but its width,
+    as timers made of pools' memory and sorted by deadline would be, rather than `TIMER_LINES` lines,
+    or a queue of refills sorted by time, which decision 9's period per thread needs.
+    Ordering by comparison does no better than that logarithm.
+    The price:
+    - **What one process makes is no longer free to the others.**
+      Each doubling of the objects a tick orders costs it a step,
+      and a balanced tree as deep as a board's RAM allows would cost, by estimate, about what the cheapest system call does.
+    - **The kernel's longest step grows by as much**,
+      since a walk down a tree is not one a call can stop and take on again,
+      and that step is the floor of every latency, decision 36,
+      and of the wait for the kernel's lock on several cores.
+    - **The door orders, but it does not bound what falls due together.**
+      A tree finds the first timer due in its depth,
+      but a tick must fire every timer due, and nothing but memory bounds how many share a deadline;
+      the same holds for refills.
+      Firing one takes away what arming it made, so that walk is paid for,
+      but it needs a way to stop and go on that a tick, unlike a call, does not have yet.
+    Before the door, the two ways that keep the bound flat:
+    - **A key with few values.**
+      Levels of priority, the highest found by counting leading zeros in words of bits,
+      first come first served within a level,
+      as seL4's 256 priorities are with two levels of such words.
+      That suits a choice of one, as the next thread to run is,
+      but not timers, which a wheel over a bounded horizon would only gather into the bucket that comes due; see "Time".
+    - **A count the kernel fixes, and the order in userspace.**
+      A program with more timers than it holds lines keeps its own deadlines and arms one line for the nearest;
+      see "Time".
+      The tree lies in the memory of the process that needs it, and costs its time alone.
+    If the door is taken:
+    - **The depth is bounded on every call, not on average**:
+      a tree that stays balanced, its links in the objects it orders,
+      never a splay tree or a pairing heap, since a tick cannot borrow from the calls after it.
+    - **The walk keeps "Bounded stack"**: no recursion, no frame of run-time size.
+    - **An annotation in `kernel/work.h` names the depth** against the board's RAM.
+      `tools/loop-bounds.py` requires it as it requires every bound,
+      but the bound rests on the balance, an invariant, as `i < proc->regions` does, which the link does not check.
+    - **The self-check checks the balance**, since the bound rests on it,
+      and `fuzz-work` counts the steps, though only of trees as deep as the corpus builds.
+    - **Goal 4 and "Bounded work" say so** in the same commit.
+    Decide with the first thing the kernel must keep in order across processes
+    that neither a key with few values nor a fixed count serves.

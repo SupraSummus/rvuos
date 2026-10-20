@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-"""Read a trace log of user/wifi/esp32c6/: the snapshot list, the compare of two runs against the traced one, and
-the library and function each device access belongs to.
+"""Read a trace log of user/wifi/esp32c6/: the snapshot list, the compare of a run's final state against its dry
+runs, and the library and function each device access belongs to.
 
   snapshot LOG              the aligned whole-word addresses the run read, as the snap= lines a later run reads back
   compare DRY... TRACED     the traced run's final state against the dry runs', nonzero on a divergence
-  diff BASE... OWN          every place the own run differs, the bases naming the volatile words
   attrib [--only NAME] [--segments] LOG  the library and function each access is in, see below
-  replay --function NAME... LOG          the named functions' own accesses, which the host replays the own code on
   seq GATED OWN             the own start's MAC accesses against a gated run's, one by one
 
 The root task of root.c owns what this parses, see its trace_line and trace_dump. A log is meant to be whole: the
@@ -14,13 +12,12 @@ writer no longer loses the odd line, so a short log is a fault to report, and ea
 one, and wrongs its answer only where the loss lies beside what it reports. `attrib --segments` refuses a short log,
 whose loss would shift every segment past it.
 
-Usage: tools/mac-trace.py {snapshot,compare,diff,attrib,replay,seq} ... ; each subcommand has its own --help.
+Usage: tools/mac-trace.py {snapshot,compare,attrib,seq} ... ; each subcommand has its own --help.
 """
 
 import argparse
 import bisect
 import collections
-import difflib
 import glob
 import hashlib
 import re
@@ -47,8 +44,6 @@ SEQ = re.compile(r"\[(\d+)\]")
 # A driver step or an adapter call in trace=1: "trace: req N tX name a0 a1"; see osi.c's osi_trace. It prints them
 # from the driver's child log, so their lines reach the file delayed, out of request order, and one can be cut.
 TRACE_REQ = re.compile(r"trace:\s*req\s+(\d+)\s+t(\d+)\s+(\S+)\s+(\S+)\s+(\S+)")
-# A thread's role, the dump's line before the entries: "trace: thread N role"; see osi.c's osi_trace_dump.
-ROLE = re.compile(r"trace: thread (\d+) (\S+)")
 # A snapshot line: "snap 0xaddr = 0xvalue", and its block's header, "snapshot of N addresses"; see root.c's trace_dump.
 SNAP = re.compile(r"snap (0x[0-9a-fA-F]+) = (0x[0-9a-fA-F]+)")
 SNAPHDR = re.compile(r"snapshot of (\d+) addresses")
@@ -59,7 +54,7 @@ PLACED = re.compile(r"^\s*(?:PROVIDE\s*\(\s*)?([A-Za-z_][A-Za-z0-9_.$]*)\s*=\s*0
 # The bits of a word whose value is the moment's, not the code's, each with its mask and reason:
 # a count of events over the window, which the traced window, taking longer, makes larger,
 # a measurement such as the chip's temperature, or a status the hardware keeps.
-# `compare` and `diff` read those bits apart from the verdict and hold the rest.
+# `compare` reads those bits apart from the verdict and holds the rest.
 # A word is here for its reason -- never because two runs disagreed on it.
 MOMENT = {
     0x600A708C: (0xFFFFFFFF, "the frames the air carries over the window, more of them while the window is traced"),
@@ -79,7 +74,7 @@ def steady(address, value):
     return value & ~MOMENT[address][0] if address in MOMENT else value
 
 
-# The MAC's words, its registers and its timer block: what the own start writes and the libraries' start did.
+# The MAC's words, its registers and its timer block: what the own start writes.
 # libphy's words lie outside them, its calibration's loops turning as the time does.
 MAC_WORDS = ((0x600A4000, 0x600A6000), (0x600AD000, 0x600AE000))
 
@@ -219,41 +214,12 @@ def snapshot(args):
           file=sys.stderr)
 
 
-def compare_expectations(path):
-    """The words the own start's final state differs in by design, {address: (value, mask, reason)}:
-    each is its reason on "#" lines, then "0xaddress 0xvalue/0xmask", the bits the traced run holds where the dry
-    runs hold others, the mask the whole word if left out; a blank line ends a reason, and a "#" line after a word
-    begins the next.
-    """
-    out, reason, worded = {}, [], False
-    with open(path) as f:
-        for n, line in enumerate(f, 1):
-            line = line.strip()
-            if line.startswith("#"):
-                if worded:
-                    reason, worded = [], False  # a reason after a word begins the next place
-                reason.append(line[1:].strip())
-            elif not line:
-                reason, worded = [], False
-            else:
-                worded = True
-                m = COMPARE_EXPECTED.match(line)
-                if not m:
-                    sys.exit("mac-trace: %s:%d: not a word of a place: %s" % (path, n, line))
-                if not reason:
-                    sys.exit("mac-trace: %s:%d: a word with no reason" % (path, n))
-                out[int(m.group(1), 16)] = (int(m.group(2), 16), int(m.group(3) or "0xffffffff", 16), " ".join(reason))
-    return out
-
-
 def compare(args):
     """The words the dry runs differ in, then the traced run's divergences from them; the count of those.
 
     A word any pair of the dry runs differs in is volatile, so that a word which varies run to run but which two of
     them happen to agree on is still set aside; two dry runs are the least. The bits MOMENT names are read apart
     from the verdict, since their value is the moment's; see its reasons. The rest of such a word is held.
-    A word --expect names differs by design: it passes only as the file says, the traced run's bits under the mask
-    as given where the dry runs' are not and the rest as theirs, and an expected word that does not differ fails too.
     """
     dry = [snapshots(p) for p in args.dry]
     traced = snapshots(args.traced)
@@ -262,66 +228,19 @@ def compare(args):
             sys.exit("mac-trace: the runs' snapshots name different addresses")
     volatile = sorted({a for i in range(len(dry)) for j in range(i + 1, len(dry)) for a in dry[i]
                        if steady(a, dry[i][a]) != steady(a, dry[j][a])})
-    expect = compare_expectations(args.expect) if args.expect else {}
-    for a in expect:
-        if a not in dry[0]:
-            sys.exit("mac-trace: %s names 0x%08x, which the snapshots do not read" % (args.expect, a))
     moment = sorted(a for a in dry[0] if a not in volatile and a in MOMENT
                     and any(d[a] != traced[a] for d in dry) and steady(a, traced[a]) == steady(a, dry[0][a]))
     divergent = sorted(a for a in dry[0]
-                       if a not in volatile and a not in expect and steady(a, traced[a]) != steady(a, dry[0][a]))
-    met, unmet = [], []
-    for a, (value, mask, _reason) in sorted(expect.items()):
-        t, d = steady(a, traced[a]), steady(a, dry[0][a])
-        held = a not in volatile and t & mask == value and d & mask != value and t & ~mask == d & ~mask
-        (met if held else unmet).append(a)
-    print("mac-trace: %d addresses; %d volatile between the dry runs; %d of the moment, not compared; %d divergences%s"
-          % (len(dry[0]), len(volatile), len(moment), len(divergent),
-             "; %d by design, %d not as expected" % (len(met), len(unmet)) if expect else ""))
+                       if a not in volatile and steady(a, traced[a]) != steady(a, dry[0][a]))
+    print("mac-trace: %d addresses; %d volatile between the dry runs; %d of the moment, not compared; %d divergences"
+          % (len(dry[0]), len(volatile), len(moment), len(divergent)))
     for a in volatile:
         print("  volatile  0x%08x  dry %s" % (a, " / ".join("0x%08x" % d[a] for d in dry)))
     for a in moment:
         print("  moment    0x%08x  dry 0x%08x / traced 0x%08x  (%s)" % (a, dry[0][a], traced[a], MOMENT[a][1]))
-    for a in met:
-        print("  by design 0x%08x  dry 0x%08x / traced 0x%08x  (%s)" % (a, dry[0][a], traced[a], expect[a][2]))
-    for a in unmet:
-        value, mask, reason = expect[a]
-        print("  not as expected 0x%08x  dry 0x%08x / traced 0x%08x, expected 0x%08x/0x%08x%s  (%s)"
-              % (a, dry[0][a], traced[a], value, mask, ", volatile" if a in volatile else "", reason))
     for a in divergent:
         print("  divergent 0x%08x  dry 0x%08x / traced 0x%08x" % (a, dry[0][a], traced[a]))
-    return 1 if divergent or unmet else 0
-
-
-def by_thread(acc, lo, hi, library, fold, join=False, apart=frozenset()):
-    """The accesses in (lo, hi], split by thread, each unbroken run of a folded library turned into one marker.
-
-    A record a cycle printed once stands for `turns` accesses, and one crossing the range's edge keeps its share,
-    as `attrib`'s segments do. Each thread's accesses are kept apart, since another thread's (the interrupt's)
-    interleave asynchronously; a run of a library named in `fold` (libphy's calibration, whose count and values are
-    the time's) becomes a single ("*", name, ...) marker. With `join`, every thread's accesses but those `apart`
-    names go into one stream, for a run whose own start makes the bring-up on the thread that called it where the
-    libraries posted it to another. Returns {thread: [element, ...]}, an element being (op, width, address, value,
-    turns) or a marker.
-    `library` is None when nothing folds.
-    """
-    out = collections.defaultdict(list)
-    cum = 0
-    for _seq, pc, op, width, address, value, turns, thread in acc:
-        first, last = cum + 1, cum + turns
-        cum = last
-        a, b = max(first, lo + 1), min(last, hi)
-        if a > b:
-            continue
-        seq = out[0 if join and thread not in apart else thread]
-        if fold:
-            lib = library(pc)
-            if lib in fold:
-                if not seq or seq[-1][0] != "*" or seq[-1][1] != lib:
-                    seq.append(("*", lib, 0, 0, 0))
-                continue
-        seq.append((op, width, address, value, b - a + 1))
-    return out
+    return 1 if divergent else 0
 
 
 def phase(path, name):
@@ -342,243 +261,6 @@ def cut_marker(path, name):
     return None
 
 
-def align(base, own, volatile):
-    """Where two record lists differ, aligned, and the polling notes in what they share.
-
-    Two records agree when their operation, width and address agree, and their values agree unless the address is
-    volatile; the turns a cycle printed a record for are left out, so a polling loop that turned a different number
-    of times (its count is the time's) aligns, and is a note. The lists are aligned as a whole, so a difference does
-    not hide what comes after it: a step that writes one word its own way is one block, and the rest is still held.
-    Returns (blocks, notes): a block is (base from, base to, own from, own to), half-open; a note is (base, own).
-    """
-    def key(e):
-        return e[:2] if e[0] == "*" else (e[0], e[1], e[2], None if e[2] in volatile else steady(e[2], e[3]))
-
-    matcher = difflib.SequenceMatcher(None, [key(e) for e in base], [key(e) for e in own], autojunk=False)
-    blocks, notes = [], []
-    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-        if tag != "equal":
-            blocks.append((i1, i2, j1, j2))
-        else:
-            notes += [(i1 + k, j1 + k) for k in range(i2 - i1) if base[i1 + k][4] != own[j1 + k][4]]
-    return blocks, notes
-
-
-def unpaired(x, y, volatile):
-    """The records of x, and of y, that their alignment leaves without a partner."""
-    blocks, _notes = align(x, y, volatile)
-    return ({i for i1, i2, _j1, _j2 in blocks for i in range(i1, i2)},
-            {j for _i1, _i2, j1, j2 in blocks for j in range(j1, j2)})
-
-
-# The records of a differing block shown on each side; the rest are counted.
-SHOWN = 8
-
-
-def span(lo, hi):
-    """A half-open range of records, counted from one, as a diff line names it."""
-    if hi == lo:
-        return "nothing, before record %d" % (lo + 1)
-    return "record %d" % (lo + 1) if hi == lo + 1 else "records %d-%d" % (lo + 1, hi)
-
-
-# A place of an expectation file: "-R4 0xaddress 0xvalue" an access of the libraries' side, "+..." one of the own side;
-# "0xvalue/0xmask" holds the value's masked bits alone, as a word that carries the chip's own address needs.
-EXPECTED = re.compile(r"^([-+])([RW])(\d) (0x[0-9a-fA-F]+) (0x[0-9a-fA-F]+)(?:/(0x[0-9a-fA-F]+))?$")
-# A folded run of a place, "-(name)" or "+(name)": an unbroken run of the library --collapse names, which a marker stands for.
-EXPECTED_FOLD = re.compile(r"^([-+])\((\w+)\)$")
-# A word of compare's expectation file: "0xaddress 0xvalue/0xmask", the traced run's masked bits.
-COMPARE_EXPECTED = re.compile(r"^(0x[0-9a-fA-F]+) (0x[0-9a-fA-F]+)(?:/(0x[0-9a-fA-F]+))?$")
-
-
-def expectations(path):
-    """The places the own start differs from the libraries' by design, [(reason, base, own)]:
-    each place is its reason on "#" lines, then its accesses, "-" the libraries' and "+" the own start's;
-    a blank line ends it.
-    """
-    out, reason, sides = [], [], {"-": [], "+": []}
-
-    def end():
-        if sides["-"] or sides["+"]:
-            if not reason:
-                sys.exit("mac-trace: %s: a place with no reason" % path)
-            out.append((" ".join(reason), sides["-"], sides["+"]))
-        reason.clear()
-        sides["-"], sides["+"] = [], []
-
-    with open(path) as f:
-        for n, line in enumerate(f, 1):
-            line = line.strip()
-            if line.startswith("#"):
-                if sides["-"] or sides["+"]:
-                    end()
-                reason.append(line[1:].strip())
-            elif not line:
-                end()
-            elif EXPECTED_FOLD.match(line):
-                m = EXPECTED_FOLD.match(line)
-                sides[m.group(1)].append(("*", m.group(2)))
-            else:
-                m = EXPECTED.match(line)
-                if not m:
-                    sys.exit("mac-trace: %s:%d: not an access of a place: %s" % (path, n, line))
-                sides[m.group(1)].append((m.group(2), int(m.group(3)), int(m.group(4), 16), int(m.group(5), 16),
-                                          int(m.group(6) or "0xffffffff", 16)))
-    end()
-    return out
-
-
-def same(want, got, volatile):
-    """Whether a side of a place holds the accesses an expectation names, a volatile word's value aside,
-    and a folded run where it names one."""
-    return len(want) == len(got) and all(
-        (g[0], g[1]) == w if w[0] == "*" else
-        g[0] != "*" and (w[0], w[1], w[2]) == g[:3] and (w[2] in volatile or g[3] & w[4] == w[3])
-        for w, g in zip(want, got))
-
-
-def element(e):
-    """A record or a folded marker, as a diff line reads it."""
-    if e[0] == "*":
-        return "(%s)" % e[1]
-    return "%c%d 0x%08x = 0x%08x x%d" % (e[0], e[1], e[2], e[3], e[4])
-
-
-def diff(args):
-    """Every place the own run differs, thread by thread, the bases naming the volatile words.
-
-    The base runs are of the same image, so a word any pair of them reads differently is volatile and its value is
-    set aside; two bases are the least, and more are given when a word that varies run to run agrees between two by
-    chance. The own run is held to the first base; where it differs from it as another base does -- a receive the air
-    brought into one run's window and not into another's -- that place is the run's, not the own start's, and is a
-    note. Each thread is compared on its own, since the interrupt's accesses
-    interleave asynchronously; a thread whose every access is an interrupt handler's is compared as a multiset and
-    reported apart, not as a failure. The range comes from the trace: lines named by --from and --to (the whole
-    window by default), resolved in each log, so a run whose own start adds or drops an access is aligned by its
-    phase markers, not by request number. A library named by --collapse folds into one marker per run (libphy's
-    calibration, whose count and values are the time's). With --join every thread is one stream, for a run whose own
-    start makes the bring-up on the thread that called it where the libraries posted it to another, the interrupt's
-    and the timers' kept apart all the same. A polling loop
-    whose cycle turned a different number of times is a note, never a difference. The streams are aligned as a
-    whole, so every block where they differ is shown, not the first alone. A short log is refused,
-    and with --image a log that did not flash that file, since the names come from the ELF of the build at hand.
-    """
-    paths = args.base + [args.own_log]
-    if args.image:
-        for path in paths:
-            flashed_from(path, args.image)
-    logs = [scan(p) for p in paths]
-    for path, (_acc, bad) in zip(paths, logs):
-        if bad:
-            sys.exit("mac-trace: %s is short in %d places" % (path, len(bad)))
-    fold = set(args.collapse)
-    library, _function = classifier(args, {r[1] for acc, _bad in logs for r in acc})
-
-    def bounds(path):
-        lo = phase(path, args.from_) if args.from_ else 0
-        hi = phase(path, args.to) if args.to else None
-        if (args.from_ and lo is None) or (args.to and hi is None):
-            name = args.from_ if lo is None else args.to
-            cut = cut_marker(path, name)
-            if cut:
-                sys.exit("mac-trace: %s lost the front of its trace: line named %s, \"%s\"; the stream lost bytes, "
-                         "so run it again" % (path, name, cut))
-            sys.exit("mac-trace: %s has no trace: line named %s" % (path, name))
-        return lo, hi if hi is not None else 1 << 62
-
-    # A thread the driver's role lines name as the interrupt's or a timer's has its accesses placed by the
-    # hardware's timing, so its stream is compared as a multiset and apart, not positionally, --join or not.
-    async_t = set()
-    for path in paths:
-        async_t |= {t for t, role in roles(path).items() if role in ("isr", "timers")}
-
-    def take(acc, path):
-        lo, hi = bounds(path)
-        return by_thread(acc, lo, hi, library, fold, args.join, async_t)
-
-    bases = [take(logs[i][0], paths[i]) for i in range(len(args.base))]
-    own = take(logs[-1][0], args.own_log)
-
-    volatile = set()
-    for t in sorted({t for b in bases for t in b}):
-        seqs = [b.get(t, []) for b in bases]
-        for i in range(len(seqs)):
-            for j in range(i + 1, len(seqs)):
-                a, c = seqs[i], seqs[j]
-                for k in range(min(len(a), len(c))):
-                    if a[k][:3] != c[k][:3]:
-                        print("mac-trace: thread %d: two bases differ in shape at record %d" % (t, k + 1))
-                        break
-                    if steady(a[k][2], a[k][3]) != steady(c[k][2], c[k][3]):
-                        volatile.add(a[k][2])
-
-    expect = expectations(args.expect) if args.expect else []
-    met = [False] * len(expect)
-    bad = 0
-    for t in sorted({t for b in bases for t in b} | set(own)):
-        a, o = bases[0].get(t, []), own.get(t, [])
-        if t in async_t:
-            extra = collections.Counter(a) - collections.Counter(o)
-            missing = collections.Counter(o) - collections.Counter(a)
-            if extra or missing:
-                print("mac-trace: thread %d is an interrupt's, whose accesses the hardware's timing places:" % t)
-                for e, n in extra.items():
-                    print("  base has x%d  %s" % (n, element(e)))
-                for e, n in missing.items():
-                    print("  own has x%d  %s" % (n, element(e)))
-            continue
-        blocks, notes = align(a, o, volatile)
-        for i, j in notes:
-            print("  t%d polling %5d  0x%08x  x%d vs x%d" % (t, i + 1, a[i][2], a[i][4], o[j][4]))
-        unexpected = []
-        for i1, i2, j1, j2 in blocks:
-            k = next((k for k, (_, eb, eo) in enumerate(expect)
-                      if not met[k] and same(eb, a[i1:i2], volatile) and same(eo, o[j1:j2], volatile)), None)
-            if k is None:
-                unexpected.append((i1, i2, j1, j2))
-            else:
-                met[k] = True
-                print("  t%d expected, base %s, own %s: %s" % (t, span(i1, i2), span(j1, j2), expect[k][0]))
-        blocks = []
-        shared = [(n, unpaired(a, c, volatile)[0], unpaired(c, o, volatile)[1])
-                  for n, c in enumerate((b.get(t, []) for b in bases[1:]), 2)] if unexpected else []
-        for i1, i2, j1, j2 in unexpected:
-            n = next((n for n, base_alone, own_alone in shared
-                      if all(i in base_alone for i in range(i1, i2)) and not any(j in own_alone for j in range(j1, j2))),
-                     None)
-            if n is None:
-                blocks.append((i1, i2, j1, j2))
-            else:
-                print("  t%d as base %d has it, base %s, own %s" % (t, n, span(i1, i2), span(j1, j2)))
-        if blocks:
-            bad = 1
-            print("mac-trace: thread %d: base %d records, own %d; they differ in %d place%s:"
-                  % (t, len(a), len(o), len(blocks), "" if len(blocks) == 1 else "s"))
-        for i1, i2, j1, j2 in blocks:
-            print("  base %s, own %s:" % (span(i1, i2), span(j1, j2)))
-            for side, recs, lo, hi in (("base", a, i1, i2), ("own ", o, j1, j2)):
-                for k in range(lo, min(hi, lo + SHOWN)):
-                    print("    %s %5d  %s" % (side, k + 1, element(recs[k])))
-                if hi - lo > SHOWN:
-                    print("    %s ... and %d more" % (side, hi - lo - SHOWN))
-            if args.as_expected:
-                print("# the reason")
-                for mark, recs, lo, hi in (("-", a, i1, i2), ("+", o, j1, j2)):
-                    for e in recs[lo:hi]:
-                        print("%s%c%d 0x%08x 0x%08x" % (mark, e[0], e[1], e[2], e[3]) if e[0] != "*"
-                              else "%s(%s)" % (mark, e[1]))
-                print()
-    for k, (reason, _, _) in enumerate(expect):
-        if not met[k]:
-            bad = 1
-            print("mac-trace: an expected place did not come: %s" % reason)
-    if bad:
-        return 1
-    print("mac-trace: every thread agrees, by operation, width and address, and by value, %d volatile words aside%s"
-          % (len(volatile), ", %d expected places met" % len(expect) if expect else ""))
-    return 0
-
-
 def trace_landmarks(path):
     """The trace=1 driver steps and adapter calls, (req, thread, name), in request order.
 
@@ -593,17 +275,6 @@ def trace_landmarks(path):
             if m:
                 out.append((int(m.group(1)), int(m.group(2)), m.group(3)))
     out.sort(key=lambda t: t[0])
-    return out
-
-
-def roles(path):
-    """{thread: role} from the dump's "trace: thread N role" lines, which osi.c's osi_trace_dump owns."""
-    out = {}
-    with open(path, errors="replace") as f:
-        for line in f:
-            m = ROLE.search(line)
-            if m:
-                out[int(m.group(1))] = m.group(2)
     return out
 
 
@@ -755,62 +426,6 @@ def attrib(args):
                     print("    %-46s w%d 0x%08x" % (function.get(pc, "?"), width, address))
 
 
-def replay(args):
-    """The accesses the named functions made, in the log's order, as the host's replay of the own code reads them.
-
-    One line each, "R4 0xaddress 0xvalue" or "W4 ...",
-    after a "#" line naming the functions, the bounds and the log's image;
-    what the functions' callees did is left out, as the own code calls those.
-    --from and --to bound them by other functions' first accesses, so that a caller's calls are told from another's,
-    and --through by one's last, for a bound whose next function ran before too;
-    --outside leaves out what a function the own code still calls did, from its first access to its last,
-    its callees among it, when one of them is a named function too.
-    A log short anywhere is refused, as is a function no access names, and a cycle, which the replay does not unroll.
-    """
-    if args.image:
-        flashed_from(args.log, args.image)
-    acc, damaged = scan(args.log)
-    if damaged:
-        sys.exit("mac-trace: %s is short in %d places, so a function's accesses may be missing"
-                 % (args.log, len(damaged)))
-    _, function = classifier(args, {r[1] for r in acc})
-
-    def places(name):
-        found = [i for i, r in enumerate(acc) if function.get(r[1]) == name]
-        if not found:
-            sys.exit("mac-trace: no access of %s in %s" % (name, args.log))
-        return found
-
-    lo = places(args.from_)[0] if args.from_ else 0
-    hi = places(args.to)[0] if args.to else places(args.through)[-1] + 1 if args.through else len(acc)
-    acc = acc[lo:hi]
-    for name in args.outside:
-        inside = places(name)
-        acc = acc[:inside[0]] + acc[inside[-1] + 1:]
-    wanted = set(args.function)
-    mine = [r for r in acc if function.get(r[1]) in wanted]
-    missing = wanted - {function[r[1]] for r in mine}
-    if missing:
-        sys.exit("mac-trace: no access of %s in %s" % (", ".join(sorted(missing)), args.log))
-    cycled = [r for r in mine if r[6] > 1]
-    if cycled:
-        sys.exit("mac-trace: record %d of %s is in a cycle, which the replay does not unroll"
-                 % (cycled[0][0], function[cycled[0][1]]))
-    sha = None
-    with open(args.log, errors="replace") as f:
-        for line in f:
-            m = FLASHED.search(line)
-            if m:
-                sha = m.group(1)
-    bounds = ((" from %s" % args.from_ if args.from_ else "") + (" up to %s" % args.to if args.to else "")
-              + (" through %s" % args.through if args.through else "")
-              + "".join(" outside %s" % name for name in args.outside))
-    print("# %s%s, in a run of the image sha256 %s" % (" ".join(args.function), bounds, sha or "unknown"))
-    for _seq, _pc, op, width, address, value, _turns, _thread in mine:
-        print("%s%d 0x%08x 0x%08x" % (op, width, address, value))
-    return 0
-
-
 def seq(args):
     """The own start's accesses to the MAC on its thread against a run the gate held, one by one.
 
@@ -863,32 +478,9 @@ def main():
     p.set_defaults(run=snapshot)
 
     p = sub.add_parser("compare", help="the traced run's final state against the dry runs'")
-    p.add_argument("--expect", metavar="FILE", help="the words the traced run differs in by design, each with its reason")
     p.add_argument("dry", nargs="+", metavar="DRY", help="two or more dry runs; a word any pair differs in is volatile")
     p.add_argument("traced")
     p.set_defaults(run=compare)
-
-    p = sub.add_parser("diff", help="every place the own run differs, the bases naming the volatile words")
-    p.add_argument("--from", dest="from_", metavar="NAME", help="start at the request of this trace: line")
-    p.add_argument("--to", dest="to", metavar="NAME", help="stop before the request of this trace: line")
-    p.add_argument("--join", action="store_true",
-                   help="compare every thread as one stream (a run whose own start makes the bring-up on one thread)")
-    p.add_argument("--collapse", action="append", default=[], metavar="NAME",
-                   help="a library whose runs fold into one marker, repeatable; the libraries below are then needed")
-    p.add_argument("--elf", required=True, help="the driver's ELF, for the image's code")
-    p.add_argument("--rom", required=True, help="the ROM's ELF, for the ROM's code")
-    p.add_argument("--lib", action="append", default=[], metavar="NAME=ARCHIVE[:ROM.ld]",
-                   help="a library, by the archive that defines it and the ROM script that places the rest")
-    p.add_argument("--own", action="append", default=[], metavar="OBJ",
-                   help="the driver's own objects, by path or glob; the owner not any library's")
-    p.add_argument("--image", metavar="FILE", help="refuse a log, base or own, unless it flashed this file")
-    p.add_argument("--expect", metavar="FILE",
-                   help="the places the own start differs by design, each with its reason; one that does not come fails")
-    p.add_argument("--as-expected", action="store_true",
-                   help="print each unexpected place whole, as an expectation file holds it, its reason to write")
-    p.add_argument("base", nargs="+", metavar="BASE", help="two or more runs of the image; a word any pair differs in is volatile")
-    p.add_argument("own_log", metavar="OWN", help="the own run's log")
-    p.set_defaults(run=diff)
 
     p = sub.add_parser("attrib", help="the library and function each access is in")
     p.add_argument("--elf", required=True, help="the driver's ELF, for the image's code")
@@ -904,25 +496,6 @@ def main():
     p.add_argument("--top", type=int, default=8, metavar="N", help="functions to name under a segment, 0 for all")
     p.add_argument("log")
     p.set_defaults(run=attrib)
-
-    p = sub.add_parser("replay", help="the named functions' accesses, for the host's replay of the own code")
-    p.add_argument("--elf", required=True, help="the driver's ELF, for the image's code")
-    p.add_argument("--rom", required=True, help="the ROM's ELF, for the ROM's code")
-    p.add_argument("--lib", action="append", default=[], metavar="NAME=ARCHIVE[:ROM.ld]",
-                   help="a library, by the archive that defines it and the ROM script that places the rest")
-    p.add_argument("--own", action="append", default=[], metavar="OBJ",
-                   help="the driver's own objects, by path or glob; the owner not any library's")
-    p.add_argument("--image", metavar="FILE", help="refuse unless the log flashed this file, by its sha256")
-    p.add_argument("--function", action="append", required=True, metavar="NAME",
-                   help="a function whose own accesses to take, repeatable; its callees' are left out")
-    p.add_argument("--from", dest="from_", metavar="NAME", help="start at this function's first access")
-    end = p.add_mutually_exclusive_group()
-    end.add_argument("--to", metavar="NAME", help="stop before this function's first access")
-    end.add_argument("--through", metavar="NAME", help="stop after this function's last access")
-    p.add_argument("--outside", action="append", default=[], metavar="NAME",
-                   help="leave out this function's first access to its last, its callees' with it; repeatable")
-    p.add_argument("log")
-    p.set_defaults(run=replay)
 
     p = sub.add_parser("seq", help="the own start's MAC accesses against a gated run's, for a step that keeps them")
     p.add_argument("--thread", type=int, metavar="N", help="the start's thread, if the gated log names none")

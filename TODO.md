@@ -116,9 +116,9 @@ what is left:
   would want a close that tells it first and waits for its word, as the lender's.
 - A hub keeps a slot of its parent's for each client connected, its channel's carve, which `chan_hub_close` revokes;
   `lib/bulk.h` deletes its carves once installed and uninstalls them at a close, which would spare a hub's parent those slots too.
-- `user/lab/` does not show yet a client of several threads asking at once, a driver whose work an interrupt starts,
-  two cores, a client that makes its ring look full, or one that gives up on an answer.
-  Nor several takers lending to one holder, or a holder that waits on a second lock.
+- `user/lab/` does not show yet a client of several threads asking at once, a driver woken between ticks,
+  as a device's interrupt would wake it, two cores, a client that makes its ring look full, or one that gives up on an answer.
+  Nor several takers lending to one holder at once, which takes a hold longer than a tick, or a holder that waits on a second lock.
   Nor a thin server, which only passes data on while its clients do the work,
   to tell what moving work into the client saves and what the hop still costs.
   Why its `chain`'s second hop costs no more than the first is not worked out.
@@ -160,7 +160,7 @@ what is left:
   and would take the root task's own filter away.
 - Whether the rare whole stops of the trace stream can still happen, now that the console writer is fixed,
   wants a longer series; write each stop down with its sequence number and time.
-  On 2026-10-09 a `trace=1 libstart=1` run stopped after its window's last record, 73573, at 28.07 s,
+  On 2026-10-09 a `trace=1` run stopped after its window's last record, 73573, at 28.07 s,
   short of its halt line, and waited for it 24 minutes;
   `tools/esp32c6-gate.py` now stops a board's run after 180 s and makes a traced one again.
   Both that stop and the next came at a gate's fourth or fifth traced run,
@@ -173,14 +173,11 @@ what is left:
   in the USB Serial/JTAG FIFO, written while the packet before is still in it, or on the host.
   `tools/mac-trace.py` refuses such a log, and `tools/esp32c6-gate.py` makes the run again
   and writes each loss into `build/esp32c6/gate/losses.txt`, the series to read the cause from.
-- A driver of the ESP32-C6's Wi-Fi that leaves Espressif's libraries the PHY alone, `libphy.a`:
-  `pp` and `net80211` give way to the driver's own MAC and station, and `osi.c` shrinks to what `libphy.a` calls.
-  The station is the driver's own already, on hostap; `user/wifi/esp32c6/NOTES.md` says why.
+- Open work of the ESP32-C6's own MAC and station:
+  The station is the driver's own, on hostap; `user/wifi/esp32c6/NOTES.md` says why.
   It receives, scans and sends by `mac.c`, authenticates, by SAE where the access point offers WPA3's personal
   and by open system under WPA2's, associates, runs the supplicant's 4-way handshake over a link of its own, see `supp.h`,
   installs the keys it derives in the MAC's own cipher and in the station, and serves the link.
-  What the driver still calls of `pp` and `net80211`, `make BOARD=esp32c6 wifi-esp32c6-refs` lists:
-  the bring-up, and through `mac.c` their lmac's control block.
   The receiving is the MAC's: its own station address and the access point's are set before the authentication,
   the libraries' channel sniffer is left, and the MAC decrypts each protected frame, leaving its CCMP header
   for the replay check, so the receiving runs no software CCMP; `ccmp_decrypt` stays for `ccmp-test` alone.
@@ -198,25 +195,6 @@ what is left:
   its group key interval, shortened for a run with the maintainer's leave, would do.
   The station's protected management frames — the leave policy and the SA Query — want a file of their own beside
   `sta.c`, which has grown to hold them.
-  The MAC's bring-up is being taken from the libraries, from the last entry point.
-  The stop is the driver's own (`mac_stop`), and the start is being taken over: the driver's own `esp_wifi_start` runs
-  the libraries' bring-up's body itself, and the HAL's functions go over one at a time.
-  The method, the order and the groups are in `user/wifi/esp32c6/NOTES.md`.
-  `libstart=1` in `WIFI_CONFIG` runs the libraries' start instead of the driver's own, for a traced comparison of
-  the two from one image, in a traced window alone, the driver's receive being its own from its start;
-  it goes when the own start is proven and no comparison is wanted.
-  The four bring-up symbols and the two of the log that the driver once asked of the flash libraries are taken one
-  by one, over `libphy`, `mac.c` and `macstart.c`; `make BOARD=esp32c6 wifi-esp32c6-refs` counts what is left of `pp`
-  and `net80211`.
-  The MAC's configuration, their `hal_init`, is the driver's own, every group transcribed into `macstart.c`'s
-  `mac_config`.
-  A link without the two archives leaves only what the driver's own code names: `libphy.a` and the ROM reach nothing
-  of theirs.
-  What is left is the `libstart=1` comparison's, `esp_wifi_init_internal`, `esp_wifi_set_mode` and `esp_wifi_start`,
-  the driver's own start calling none of theirs.
-  The comparison's tools -- `libstart=1`, the diff, the compare across images and their expected files -- go with
-  them, and the archives with the tools, `osi.c` shrinking to what `libphy.a` calls;
-  `seq` and the compare of the own start's dry runs, which hold the own start to itself, stay.
   Gathering the driver's address macros into `macregs.h`, ordered by address, would show a word two files name
   beside its twin.
   A write that does nothing can be left out, on a role rather than on the bit.
@@ -236,8 +214,8 @@ what is left:
 - The ESP32-C6's Wi-Fi root task has 8 KiB of memory and 9 slots left once its clients run,
   so another client needs room found first, in the driver's block or a smaller `CLIENT_CHAN_SIZE`.
 - The ESP32-C6's link carries about what OFDM's 54 Mb/s can, up in A-MSDUs of two frames and down in single frames,
-  see `user/wifi/esp32c6/NOTES.md`; more wants HT's rates, which only the libraries' code knows yet,
-  to be read as `mac.c`'s sending and receiving were.
+  see `user/wifi/esp32c6/NOTES.md`; more wants HT's rates, whose code was `pp`'s -- its archive is in the esp-fetch
+  cache -- to be read as `mac.c`'s sending and receiving were.
   Up, OFDM's frame holds 4095 bytes; an HT frame at MCS 7 would carry an A-MSDU of 7935 where the access point takes one.
   `pp`'s `hal_mac_tx_set_ppdu`, `mac_tx_set_plcp0` to `2`, `mac_tx_set_htsig` and `mac_tx_set_len`
   write the slot's words for one, which `mac.c` writes for OFDM's.
@@ -260,7 +238,7 @@ what is left:
   four slots of `LINK_SLOT`, drops a burst of more; eight would take 32 KiB, which the root task's memory,
   see below, has no room for yet.
 - The ESP32-C6's driver locks its own sending and keys, `tx_lock` and `key_lock`, with the adapter's mutexes,
-  which exist for the libraries and go through the one lock all the adapter's objects share;
+  which go through the one lock all the adapter's objects share;
   `lib/lock.h`'s would serve them alone.
 - The Pico 2 W's run lasts its `run=` whatever its checks found, or until a reset by hand,
   since the host has no way to end it: the Wi-Fi system's root task makes no console, so its one USB serial port is the halt's.
@@ -644,7 +622,7 @@ What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
   one in `user/lib/` would serve all three.
 
 - The runs that check the ESP32-C6's `mac.c` and the station's own code are `WIFI_CONFIG` variants run by hand,
-  named in `CLAUDE.md`; a target that runs them all, `make BOARD=esp32c6 wifi-esp32c6-mac`, would hold them in one place.
+  named in `user/wifi/esp32c6/CLAUDE.md`; a target that runs them all, `make BOARD=esp32c6 wifi-esp32c6-mac`, would hold them in one place.
 - The replay driver drains the log by polling after each record,
   so the host models it with one store into the header per event.
   A logger thread in the driver would make traced calls the host would have to follow.
@@ -668,8 +646,8 @@ What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
 - `pmp_init` stops counting at the first hardwired entry.
   A core with writable entries above a hardwired one loses them;
   have the image skip such entries if one turns up.
-- A kernel without the self-check keeps `OP_TEST_TICK`, `OP_TEST_IRQ` and `OP_TEST_PREEMPT`,
-  which only the replay calls, and `cap_stop_here`'s countdown for the last; `SELFCHECK=0` could drop them too.
+- A kernel without the self-check keeps `cap_stop_here`'s countdown,
+  which only `OP_TEST_PREEMPT` arms, under tracing; `SELFCHECK=0` could drop it too.
 - The root task is granted one block of free RAM,
   so what lies between the blocks is unused:
   about 2.8 MiB on QEMU, where it does not matter, and 28 KiB on the ESP32-C6.
@@ -685,25 +663,16 @@ What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
 ## Scheduling
 
 What the wait for a turn and the work a thread gets are bound by is in `DESIGN.md`, "Scheduling";
-the first five below are what does not keep to it yet, each a constant-time change:
+what does not keep to it yet comes first below, each a constant-time change, up to the bind's:
 
-- A pool destroy stops only for a pending interrupt, `cap_stop_here`,
-  so a thread with time its walk wakes waits for the rest of the walk while the core's timer lies past the next tick,
-  and on another core for all of it, since the interrupt between cores goes out as the lock is given up.
-  Stopping also where the trap made ready a thread the core's timer does not allow for,
-  or owes another core an interrupt, would bound that by a tick;
-  the transcripts would not move, as the host stops at every step.
-- `pool_alloc` zeroes an object a byte a store with interrupts off,
-  and a table of `CAPTABLE_MAX_SLOTS` slots is 24,596 stores, longer than a tick at 10 kHz on every board,
+- `pool_alloc` and a pool destroy zero an object whole with interrupts off,
+  and a table of `CAPTABLE_MAX_SLOTS` slots takes longer than a tick at 10 kHz on the nRF52840 and near one on the other boards,
   where the wait's bound needs the kernel's longest step shorter than a tick.
-  Zeroing a word a store, or a table in steps that stop, and measuring the longest step on each board,
+  Zeroing a table in steps that stop, and measuring the longest step on each board,
   would say how short a tick each board can take.
 - On ARM and RP2350's Hazard3 an `OP_IRQ_SET` on a core other than the first interrupts the first core each time,
   so a driver there that arms its line in a loop takes what it likes of the first core's turns, which its threads pay for.
   Interrupting it only as `core_notify` does, or routing a line to its waiter's core, open decision 24, would bound it.
-- `OP_TEST_TICK` and a stop `OP_TEST_PREEMPT` armed move the tick count without time passing,
-  and untraced the count stays ahead of the counter for good, so every deadline set before fires early, the watchdog's among them.
-  Only the replay driver calls them, under tracing, so refusing them untraced with `KERR_STATE` would cost nothing.
 - A bind of a ready thread, even to more units of its core, puts it at the back of its queue,
   since the old binding goes through `sched_unbind`'s settle; keeping its place would keep its wait.
 - A thread whose account holds little more than a tick loses its time when its turn ends a few counts past a tick,

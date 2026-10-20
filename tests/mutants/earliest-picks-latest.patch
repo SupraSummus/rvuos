@@ -9,7 +9,6 @@ diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
 @@ -528,7 +528,7 @@ static struct place *run_earliest(const struct core *core, uint32_t *deadline)
-     for (uint32_t i = 0; i < TIME_UNITS; i++) {
          LOOP_BOUND(TIME_UNITS);
          struct place *p = p2v(at);
          uint32_t d = place_deadline(p);

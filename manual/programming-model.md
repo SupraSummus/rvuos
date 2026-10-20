@@ -754,7 +754,7 @@ and moves `taken` only as far as its host says it has the bytes, so a halt write
   A thread with time waits for its turn at most a tick for each other thread with units of its core,
   since only such a thread has time there, or lends it, and a turn on spare time ends as the thread becomes ready;
   so the build's tick, `TIMER_HZ`, sets that wait,
-  while tracing is off, nobody drives the machine with `OP_TEST_TICK` or `OP_TEST_PREEMPT`, and the thread keeps its binding.
+  while tracing is off and the thread keeps its binding.
   Its work is bounded by its units, not by its turns: a turn that begins mid-tick lasts to the next tick,
   and over any stretch the others run at most what their accounts held and what their units earn;
   `DESIGN.md`, "Scheduling", gives the bounds and what a periodic task needs of its units.

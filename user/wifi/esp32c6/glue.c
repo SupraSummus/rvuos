@@ -1,6 +1,6 @@
 /*
- * What Espressif's Wi-Fi libraries take from the rest of ESP-IDF and its C library, by name:
- * a little of libc, formatted text for their logs, and data ESP-IDF's open code defines.
+ * What the driver's own code and Espressif's libphy.a take from the rest of ESP-IDF and its C library, by name:
+ * a little of libc, and formatted text for the logs.
  */
 
 #include <stdarg.h>
@@ -11,35 +11,9 @@
 
 /* --- libc, beside user/lib/libc.c's. --- */
 
-char *strcpy(char *dst, const char *src);
-char *strncpy(char *dst, const char *src, size_t n);
 int strncmp(const char *a, const char *b, size_t n);
-void free(void *p);
-int putchar(int c);
-int puts(const char *s);
 int sprintf(char *buf, const char *fmt, ...);
 int snprintf(char *buf, size_t size, const char *fmt, ...);
-double floor(double x);
-
-char *strcpy(char *dst, const char *src)
-{
-    char *d = dst;
-    while ((*d++ = *src++) != 0) {
-    }
-    return dst;
-}
-
-char *strncpy(char *dst, const char *src, size_t n)
-{
-    size_t i = 0;
-    for (; i < n && src[i]; i++) {
-        dst[i] = src[i];
-    }
-    for (; i < n; i++) {
-        dst[i] = 0;
-    }
-    return dst;
-}
 
 int strncmp(const char *a, const char *b, size_t n)
 {
@@ -51,22 +25,8 @@ int strncmp(const char *a, const char *b, size_t n)
     return 0;
 }
 
-void free(void *p)
-{
-    osi_free(p);
-}
-
-double floor(double x)
-{
-    if (x >= 9007199254740992.0 || x <= -9007199254740992.0) {
-        return x;
-    }
-    double t = (double)(long long)x;
-    return t > x ? t - 1.0 : t;
-}
-
 /*
- * printf's conversions, enough for the libraries' logs:
+ * printf's conversions, enough for the logs:
  * flags - 0 and space, a width and a precision, given or *, the lengths hh h l ll z,
  * and d i u x X o p s c %.
  */
@@ -231,7 +191,7 @@ int snprintf(char *buf, size_t size, const char *fmt, ...)
     return n;
 }
 
-/* The libraries format into buffers they sized themselves. */
+/* libphy formats into buffers it sized itself. */
 int sprintf(char *buf, const char *fmt, ...)
 {
     va_list args;
@@ -241,23 +201,8 @@ int sprintf(char *buf, const char *fmt, ...)
     return n;
 }
 
-int putchar(int c)
-{
-    char s[2] = { (char)c, 0 };
-    drv_say("%s", s);
-    return c;
-}
+/* --- The log's entry, ESP-IDF's lib_printf.c: libphy alone logs. --- */
 
-int puts(const char *s)
-{
-    drv_say("%s\n", s);
-    return 0;
-}
-
-/* --- The logs' entries, ESP-IDF's lib_printf.c. --- */
-
-int pp_printf(const char *fmt, ...);
-int net80211_printf(const char *fmt, ...);
 int phy_printf(const char *fmt, ...);
 
 #define LIB_PRINTF(name, tag)                                                                                          \
@@ -269,60 +214,7 @@ int phy_printf(const char *fmt, ...);
         va_end(args);                                                                                                  \
         return 0;                                                                                                      \
     }
-LIB_PRINTF(pp_printf, "pp")
-LIB_PRINTF(net80211_printf, "net80211")
 LIB_PRINTF(phy_printf, "phy")
-
-/* --- The rest, by name. --- */
-
-/* ESP_EVENT_DEFINE_BASE(WIFI_EVENT), which every Wi-Fi event names. */
-const char *const WIFI_EVENT = "WIFI_EVENT";
-
-/* ESP-IDF's ftm_load_calibration.c, with FTM off, as the driver leaves it: no feature bit asks for it. */
-uint32_t est_PHY_INIT_FTM_COMP_20_20U_MHZ, est_PHY_RESP_FTM_COMP_20_20U_MHZ;
-uint32_t est_PHY_INIT_FTM_COMP_20_20D_MHZ, est_PHY_RESP_FTM_COMP_20_20D_MHZ;
-uint32_t est_PHY_INIT_FTM_COMP_20_20U_MHZ_DIS, est_PHY_INIT_FTM_COMP_20_20D_MHZ_DIS;
-uint32_t est_PHY_RESP_FTM_COMP_20_20U_MHZ_DIS, est_PHY_RESP_FTM_COMP_20_20D_MHZ_DIS;
-uint32_t est_PHY_INIT_FTM_COMP_40_40U_MHZ, est_PHY_RESP_FTM_COMP_40_40U_MHZ;
-uint32_t est_PHY_INIT_FTM_COMP_40_40D_MHZ, est_PHY_RESP_FTM_COMP_40_40D_MHZ;
-uint32_t est_PHY_INIT_FTM_COMP_20_40U_MHZ, est_PHY_RESP_FTM_COMP_20_40U_MHZ;
-uint32_t est_PHY_INIT_FTM_COMP_20_40D_MHZ, est_PHY_RESP_FTM_COMP_20_40D_MHZ;
-uint32_t est_PHY_INIT_FTM_COMP_20_40U_MHZ_DIS, est_PHY_RESP_FTM_COMP_20_40U_MHZ_DIS;
-uint32_t est_PHY_INIT_FTM_COMP_20_40D_MHZ_DIS, est_PHY_RESP_FTM_COMP_20_40D_MHZ_DIS;
-uint32_t est_PHY_INIT_FTM_COMP_40_40U_MHZ_DIS, est_PHY_RESP_FTM_COMP_40_40U_MHZ_DIS;
-uint32_t est_PHY_INIT_FTM_COMP_40_40D_MHZ_DIS, est_PHY_RESP_FTM_COMP_40_40D_MHZ_DIS;
-
-/* What ESP-NOW and mesh read, neither of which the driver starts: Espressif's OUI, and ESP-IDF's default of 10 s. */
-uint8_t g_espnow_user_oui[3] = { 0x18, 0xfe, 0x34 };
-uint32_t mesh_sta_auth_expire_time = 10000000;
-
-/*
- * What the libraries took from Espressif's libcore.a, its misc_nvs.o, as it is with ESP-IDF's NVS off:
- * a zeroed record of 0x3c bytes, where they keep what NVS would store,
- * and their log's level and modules, which esp_wifi_internal_set_log_level and _set_log_mod set.
- */
-int misc_nvs_init(void);
-int misc_nvs_deinit(void);
-
-uint32_t g_log_level;
-uint32_t g_log_mod[6];
-void *g_misc_nvs;
-static uint32_t misc_nvs[16];
-
-int misc_nvs_init(void)
-{
-    if (g_misc_nvs == 0) {
-        memset(misc_nvs, 0, sizeof(misc_nvs));
-        g_misc_nvs = misc_nvs;
-    }
-    return 0;
-}
-
-int misc_nvs_deinit(void)
-{
-    g_misc_nvs = 0;
-    return 0;
-}
 
 /* The ESP32-C6's crystal is 40 MHz. */
 int rtc_clk_xtal_freq_get(void);

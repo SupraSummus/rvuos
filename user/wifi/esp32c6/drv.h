@@ -111,9 +111,6 @@ struct drv {
     uint8_t ps;           /* sleep between beacons once joined, the radio off while the link is idle; see sta.c */
     uint8_t blast;        /* seconds the station sends a datagram to its port 9 back to its sender, as fast as the MAC
                              lets it: a test of the sending alone, once a run; see sta.c */
-    uint32_t lib_log;     /* libphy's log level, ESP-IDF's wifi_log_level_t, or 0 for its INFO */
-    uint8_t lib_start;    /* 1: bring the MAC up by the libraries' esp_wifi_start, 0 by the driver's own, to compare;
-                             a traced window's alone, since the driver's receive is its own from its start */
     uint8_t listen;       /* the channel to hear, 1 to 13, or 0 */
     char probe[33];       /* the network to probe for while listening, or empty */
     uint8_t i154;         /* the channel of IEEE 802.15.4 to exchange frames on, 11 to 26, instead of Wi-Fi, or 0 */

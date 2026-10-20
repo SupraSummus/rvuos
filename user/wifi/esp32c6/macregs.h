@@ -10,6 +10,8 @@
 
 #include <stdint.h>
 
+#include "devregs.h"
+
 #define MAC_BASE 0x600a4000u
 
 #define RX_CTRL        (MAC_BASE + 0x080u)
@@ -29,7 +31,9 @@
 #define KEY_CFG_CCMP 0x30103u
 
 #define HAL_CTRL 0x600a4308u /* hal_deinit's four; what they are is pp's, and no driver code reads them */
-#define HAL_HOLD 0x600a4c40u
+/* The MAC's enable mask: 0 is it disabled, a set bit lets that function run; their hal_enable_mac writes it, their
+   hal_disable_mac writes 0, and their hal_init leaves 0x19a879e0. */
+#define MAC_ENABLE 0x600a4c40u
 #define INT_CLEAR 0x600a4c4cu /* the MAC's interrupt clear, which their hal_mac_interrupt_clr_event writes */
 #define HAL_CFG  0x600a4ddcu
 #define HAL_WORD 0x600a4c8cu /* whose set bits, and RX_WORD's, the libraries' hal_init sets too; the bits' meaning is not known */
@@ -98,23 +102,6 @@
 #define TX_RESP(s)     (TX_PPDU(s) + 0x34u) /* the response's rate, and the antennas of hal_attenna_init */
 #define TX_DONE(s)     (TX_PPDU(s) + 0x60u) /* how the frame sent last ended, which hal_mac_get_txq_complete reads */
 
-/*
- * A register read and write, volatile, as the driver makes them; on the host, for the bring-up's replay,
- * test/mac-replay-test.c gives its own, which answers from the libraries' recorded accesses.
- */
-#ifndef MAC_HOST
-static inline uint32_t rd(uint32_t a)
-{
-    return *(volatile uint32_t *)a;
-}
-
-static inline void wr(uint32_t a, uint32_t v)
-{
-    *(volatile uint32_t *)a = v;
-}
-#else
-uint32_t rd(uint32_t a);
-void wr(uint32_t a, uint32_t v);
-#endif
+/* The MAC's and the HAL's register words end here; devregs.h's rd and wr reach them and the baseband's alike. */
 
 #endif

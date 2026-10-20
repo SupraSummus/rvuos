@@ -3,7 +3,6 @@ so a signal from another core puts the thread where its units are not; each core
 
 Caught-by: fuzz-smp2
 Report: a core's queue holds a place of another core
-Report: the kernel reached outside RAM
 Witness: fuzz-smp2 cores-actor-waits-release
 
 diff --git a/kernel/sched.c b/kernel/sched.c

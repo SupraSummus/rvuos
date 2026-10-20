@@ -4,10 +4,11 @@
  * It comes up as ESP-IDF's esp_ieee802154_enable brings it, components/ieee802154/:
  * the modem's clocks of 802.15.4 and of the BT baseband it shares, as modem_clock_impl.c enables them,
  * the PHY on, calibrated by libphy.a as for Wi-Fi, but without Wi-Fi's part of it, phy.c's drv_phy_on,
- * the baseband by libbtbb.a's bt_bb_v2_init_cmplx, and the MAC reset and set as ieee802154_mac_init sets it,
- * its delay before sending again libbtbb.a's, ieee802154_txon_delay_set.
+ * the baseband by the driver's own btbb_init, Espressif's bt_bb_v2_init_cmplx taken from libbtbb.a whole,
+ * and the MAC reset and set as ieee802154_mac_init sets it,
+ * its delay before sending again ieee802154_txon_delay_set, the archive's, the driver's own too.
  * Everything RF is the libraries': the channel and the power are numbers the MAC hands them,
- * the power an index into libbtbb.a's own table.
+ * the power an index into the power table, the archive's, the driver's own too.
  * The MAC does the rest in hardware: it sends a frame, with a clear channel assessment first,
  * receives one through its address filter, acknowledges one that asks, and waits for the acknowledgement of its own.
  * It assesses once and waits once, so the backoffs and retries of 802.15.4's CSMA-CA are the driver's, mac154.h's,
@@ -25,6 +26,7 @@
 #include <stdint.h>
 
 #include "i154.h"
+#include "btbb.h"
 #include "lib/child.h"
 #include "lib/libc.h"
 #include "osi.h"
@@ -46,8 +48,7 @@
 #define RST_ZBMAC            (1u << 24)
 #define CLK_COEX_EN          (1u << 1)
 
-/* The MAC's registers. */
-#define I154_BASE (MODEM_BASE + 0x3000u)
+/* The MAC's registers, in the block devices.h names I154_BASE, the IEEE 802.15.4 MAC's. */
 #define I154(off) REG(I154_BASE + (off))
 #define COMMAND         0x000u
 #define CTRL_CFG        0x004u
@@ -116,6 +117,7 @@
 #define TX_ABORT_CCA_BUSY          25u
 
 #define ED_CCA_THRESHOLD (0xffu << 0)
+/* Bit 13, ESP-IDF's IEEE802154_ED_SAMPLE_AVG, which its ieee802154_mac_init sets; see NOTES.md. */
 #define ED_SAMPLE_AVG    (1u << 13)
 #define ED_CCA_MODE      (3u << 14)
 #define ED_CCA_MODE_ED   (1u << 14)
@@ -152,11 +154,6 @@
 #define PAYLOAD_MAX  32u
 #define US_PER_S     1000000u
 
-
-/* libbtbb.a's. */
-void bt_bb_v2_init_cmplx(int print_version);
-const int8_t *bt_bb_get_tx_pwr_table(uint8_t *length);
-void ieee802154_txon_delay_set(void);
 
 /* The bits the radio's notification is signalled with. */
 #define BIT_RADIO   0x1u
@@ -268,11 +265,17 @@ static void mac_init(const uint8_t *mac)
     I154(ACK_TIMEOUT) = (I154(ACK_TIMEOUT) & ~ACK_TIMEOUT_MASK) | MAC154_ACK_WAIT_SYMBOLS;
 }
 
-/* The MAC stopped, whatever it did, and the events of that cleared, as ESP-IDF's stop_current_operation. */
-static void stop(struct radio *r)
+/* The MAC held and the events of that cleared, as its stop and the trace window's end both make it. */
+static void radio_hold(void)
 {
     I154(COMMAND) = CMD_STOP;
     I154(EVENT_STATUS) = I154(EVENT_STATUS);
+}
+
+/* The MAC stopped, whatever it did, and the events of that cleared, as ESP-IDF's stop_current_operation. */
+static void stop(struct radio *r)
+{
+    radio_hold();
     r->state = IDLE;
 }
 
@@ -501,6 +504,23 @@ static void tell(const struct radio *r)
             (unsigned)I154(RX_FILTER_FAIL_CNT));
 }
 
+/*
+ * The radio up: the modem's clocks and the PHY, the baseband by btbb_init and the MAC set after it,
+ * which the exchange and the trace window both make, in one place so that the two cannot drift apart.
+ * The osi_trace markers frame the bring-up for the trace window alone, since osi_trace does nothing without one.
+ */
+static void radio_up(struct drv *d)
+{
+    clocks_on();
+    /* The Wi-Fi power block's slow clock, which the PHY's calibration waits on, as for Wi-Fi. */
+    drv_wifi_clock_enable();
+    drv_phy_on();
+    osi_trace("baseband", 0, 0);
+    btbb_init();
+    osi_trace("mac", 0, 0);
+    mac_init(d->mac);
+}
+
 void i154_run(struct drv *d, struct self *own)
 {
     static struct radio radio;
@@ -513,12 +533,7 @@ void i154_run(struct drv *d, struct self *own)
     must("bind the radio's line", rv_irq_bind(r->irq, own->pool, r->note, r->irq));
     must("the radio's timer", timer_bind(own, own->pool, r->note, &r->timer));
 
-    clocks_on();
-    /* The Wi-Fi power block's slow clock, which the PHY's calibration waits on, as for Wi-Fi. */
-    drv_wifi_clock_enable();
-    drv_phy_on();
-    bt_bb_v2_init_cmplx(1);
-    mac_init(d->mac);
+    radio_up(d);
     drv_say("i154: up; short address %04x in PAN %04x, power index %u, acknowledgement timeout %u symbols\n",
             MAC154_ADDR_C6, MAC154_PAN_RVUOS, (unsigned)I154(TX_POWER), (unsigned)I154(ACK_TIMEOUT));
     must("arm the radio's line", rv_irq_set(r->irq, BIT_RADIO));
@@ -567,4 +582,30 @@ void i154_run(struct drv *d, struct self *own)
     drv_must("a frame of the nRF52840's heard", r->heard != 0 ? ESP_OK : ESP_FAIL);
     drv_must("a frame acknowledged by the nRF52840", r->acked != 0 ? ESP_OK : ESP_FAIL);
     child_stop(&d->c, DRV_LEFT);
+}
+
+/*
+ * The trace window of the 802.15.4 radio: the bring-up that precedes the exchange and nothing else,
+ * so that every device access is its own; the baseband's bring-up, the driver's own btbb_init and its functions, is held
+ * to the archive's by test/replay/bb.txt and bb-other.txt, see user/wifi/esp32c6/NOTES.md.
+ * With trace=1 the root task maps no device, so each access faults to the watcher and the root carries it out and logs it;
+ * with trace=2 the devices are mapped and the same window runs with no fault, and the configuration's snap= addresses
+ * are read back at its end, so that tools/mac-trace.py compare holds the two runs' final state.
+ * It ends with DRV_TRACED, as the Wi-Fi window does.
+ */
+__attribute__((noreturn)) void i154_trace_run(struct drv *d)
+{
+    drv_say("driver: the 802.15.4 trace window starts, %u bytes of heap free\n", (unsigned)osi_heap_free());
+    osi_trace_init(128);
+    osi_trace("window", 0, 0);
+    osi_trace("start", 0, 0);
+    radio_up(d);
+    osi_trace("stop", 0, 0);
+    radio_hold();
+    drv_phy_off();
+    osi_trace("done", 0, 0);
+    osi_trace_dump();
+    drv_say("driver: the window is done; the tracer served %u faults, %u interrupts\n", osi_faults_served(),
+            osi_interrupts());
+    drv_stop(DRV_TRACED);
 }
