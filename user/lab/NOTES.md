@@ -19,8 +19,9 @@ so scenarios are compared within one run.
 - **quick** and **slow**, sharing a lock:
   quick, with 16 units, takes it every period for a little work;
   slow, with 2, holds it long and works as long between holds.
-  The lock is the one of `lib/lock.h` in `lock` and `lock-hog`,
-  and its lock that names the holder in `lend` and `lend-hog`, so that a taker that waits lends the holder its time.
+  The lock is the one of `lib/lock.h` in `lock`, `lock-hog` and `lock2-hog`,
+  and its lock that names the holder in `lend`, `lend-hog` and `lend2-hog`, so that a taker that waits lends the holder its time.
+  In `lock2-hog` and `lend2-hog` **quick2** takes it too, as quick does, with the 6 units the hog leaves.
 - **lend-server** and **lend-rider** are `poor-server` and `free-rider` with a ui that lends the store its time
   while it waits for an answer.
 - **driver**, woken every three ticks by its timer line, standing in for a device's, to do about 25 µs of work.
@@ -93,6 +94,12 @@ and slow's give, which signals quick, hands quick the rest of the turn back, so 
 Slow takes the lock about as often as on the plain lock, and the time it ran so was quick's to spend.
 It is where units buy latency, because quick names whom it waits for.
 Without the hog, `lend`, quick waits a seventh of the plain lock's p90 or less, as the turn back puts quick first.
+
+**Two takers that lend never wait at once.**
+In `lend2-hog` quick waits as in `lend-hog`, and quick2 a third of a tick at most,
+where on the plain lock, `lock2-hog`, both wait a tick or more at p90.
+Quick's wait hands slow its turn and slow's give hands it back, so the hold ends before quick2 runs.
+Only a hold that outlasts a tick would let quick2 wait while quick lends.
 
 **A mutex in the kernel got the same from the lending, and a convoy from the ownership.**
 The kernel's mutex of open decision 27, which the lending wait replaced, handed itself to the waiter that waited longest:

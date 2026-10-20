@@ -78,6 +78,7 @@ struct scenario {
 #define LENDING_UI(units, asks)                       { "ui", UI, units, asks, 0, 1, 0, SMALL, PERIOD, 0 }
 #define QUICK(kind)                                   SHARER("quick", kind, 16, SMALL, PERIOD, 0)
 #define SLOW(kind)                                    SHARER("slow", kind, 2, HOLD, 0, HOLD)
+#define QUICK2(kind)                                  SHARER("quick2", kind, 6, SMALL, PERIOD, 0)
 #define DRIVER_OF(units)                              { "driver", DRIVER, units, 0, 0, 0, 0, SMALL, PERIOD, 0 }
 
 static const struct scenario scenarios[] = {
@@ -98,6 +99,8 @@ static const struct scenario scenarios[] = {
     { "lock-hog", { QUICK(NOTE), SLOW(NOTE), HOGGING } },
     { "lend", { QUICK(LEND), SLOW(LEND) } },
     { "lend-hog", { QUICK(LEND), SLOW(LEND), HOGGING } },
+    { "lock2-hog", { QUICK(NOTE), QUICK2(NOTE), SLOW(NOTE), HOGGING } },
+    { "lend2-hog", { QUICK(LEND), QUICK2(LEND), SLOW(LEND), HOGGING } },
     { "driver", { DRIVER_OF(8) } },
     { "driver-hog", { DRIVER_OF(8), HOGGING } },
     { "driver-spare", { DRIVER_OF(0), HOGGING } },
