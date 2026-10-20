@@ -235,7 +235,7 @@ and the interface is what they need to say and no more:
 | a control loop | work `c` every period `P` | the same, its event a timer line's, `IRQ_SET_PERIOD` |
 | batch work | a part of the processor over time, however late | units alone, and a long span or a tick's work |
 | best effort | the time nobody wants | spare time, `RIGHT_X` |
-| a server for its clients | its client's time | lent time, with the client's units and span |
+| a server for its clients | its client's time | lent time, with the units and span of the client due first |
 | a parent over a child it does not trust | at most so much power, and so much energy | units without `RIGHT_X`, and fuel, decision 39 |
 
 Since time reaches a thread as an interrupt, a periodic task is an answer to an event too,
@@ -265,15 +265,21 @@ and the scheduler's state is the three queues, each place's account, the tick it
 the place that earns each unit, the release, the running thread, and how far into the tick its turn is charged.
 With every thread on spare time alone this is the plain round-robin over threads,
 which is how the replay driver runs; see "Verification".
-Lent time goes on through a first lender with no time of its own, `LEND_DEPTH` lenders on.
+Lent time goes on through a lender that lends in turn, `LEND_DEPTH` lends on.
 
 **A waiter may lend its time to a thread it names**, with `OP_NOTIFY_LEND`; see "Communication and synchronisation".
-A borrower without time of its own has the run queue while its lender's account holds a tick,
-or the spent queue while the lender's units will fill it, and the release looks at the lender's account as at its own.
-Its lender is the thread that has lent it time longest, the first on its ring of lenders.
+Of the accounts it may run on, its own and those of the threads that lend to it, or lend to one that does, `LEND_DEPTH` lends on,
+a thread runs on the one with a tick whose request would be due first, its own of those tied.
+So a borrower has the run queue while any of them holds a tick, and the spent queue while the units of one will fill it,
+and the release looks at each of them as at its own, for one that would bring its request sooner too.
+A lender's request is due its span past its virtual time, as any is, and the span is the one its wait gave,
+so the waiter that must be answered soonest pays for its borrower, and so does one whose request would be due before the borrower's own.
+Every account a lender lends is a place with units of the core, and every such place earns one of its units,
+so the kernel finds the one due first by a look at the core's `TIME_UNITS` units, as the release does, and not by a walk of the lenders,
+whom nothing but memory bounds; a thread nobody lends to takes no look.
 Such a turn is charged to the lender, the turn's payer, as it would be to the turn's thread,
-and each tick decides afresh who pays, so a turn on lent time takes every tick.
-A lender whose own time pays for its turn, and that the borrower now borrows from,
+and each tick decides afresh who pays, so a turn on lent time, or of a thread others lend to, takes every tick.
+A lender whose own time pays for its turn, and that the borrower now runs on,
 hands the rest of the turn to the borrower as it begins to wait, if the borrower waits for a turn;
 and a signal of the turn's thread that wakes the payer hands it the rest of the turn back.
 A payer stopped, or woken from another core or by an interrupt, pays on until the turn ends, at the next tick or the borrower's wait,
@@ -309,12 +315,16 @@ so it takes nothing another thread earns, and a child gets time only through uni
 Spare time goes round by thread, so more threads there get more of it:
 it is the time nobody earned, and a thread that needs a part of the processor is given units.
 A borrower on lent time has the turns its lender would have had, charged to the lender.
+A waiter that lends with a full account so waits for its borrower no longer than its own units and span would have it wait for work of its own as large,
+the work its borrower does for others meanwhile among it, while its account holds that work:
+what bounds a lock's holder, or a server, for its most urgent waiter is that waiter's time and the work it waits behind,
+not the time of whoever lent first, nor of the borrower.
 
 **How long a thread with time waits for its turn** is bounded by its request and by the kernel's steps:
 made ready with a full account, it has run `u * s / TIME_UNITS` counts by a span `s` later, as above,
 and with its account short of full later by the counts its units take to fill it.
 Only requests due before its own run first, each paid by units of the core,
-or by the one thread that lends to their thread first, which waits and so runs no request itself;
+or by the thread whose time their thread runs on, which waits and so runs no request itself;
 handing a turn to a borrower, or back to its lender, hands on the request in progress,
 and a turn on spare time ends as the thread becomes ready.
 A tick more is owed only to a turn no unit of the core pays for that does not end so:

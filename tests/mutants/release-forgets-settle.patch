@@ -10,12 +10,12 @@ Witness: fuzz lend-lender-woken
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -633,7 +633,7 @@ static void release(uint32_t c)
-         struct place *p = unit_first(first + i);
-         i += p != NULL ? place_units(p) : 1;
-         if (p != NULL && (p->queue == QUEUE_SPARE || p->queue == QUEUE_SPENT)) {
+@@ -838,7 +838,7 @@ static void release(uint32_t c)
+         }
+         /* One on the run queue that has lenders may have a request due sooner on its own account now. */
+         if (p->queue == QUEUE_SPARE || p->queue == QUEUE_SPENT || (p->queue == QUEUE_RUN && place_thread(p)->lenders != 0)) {
 -            place_settle(p);
 +            (void)p;
          }
-         /* A lender waits on no queue, and its account may give the borrower it lends to time. */
-         struct place *h = p != NULL ? place_borrower(p) : NULL;
+         /* A lender waits on no queue, and its account may give the borrowers it lends to, and on, time or a sooner request. */
+         const struct thread *x = place_thread(p);

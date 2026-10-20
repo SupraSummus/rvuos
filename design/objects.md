@@ -706,10 +706,11 @@ and a thread its scheduler stopped by unbinding it does not run on lent time; op
 The lock of `user/lib/lock.h` that names its holder writes the holder's name into the word as it takes it,
 so a hold nobody else wants makes no call, and a taker that finds it held lends the thread of that name its time.
 A client lends its server's thread its time while it waits for the answer, which open decision 5 asks for.
-The time goes one step, from the thread that has lent the borrower time longest, and only within a core:
-a borrower keeps its lenders on a ring, oldest first, so it finds its lender without a walk.
-Priority inheritance takes the most of every waiter, and goes on through a holder that waits in turn,
-walks that goal 4 rules out.
+The time comes from whichever waiter's request would be due first, through borrowers that lend in turn, `LEND_DEPTH` lends on,
+and only within a core, which is bandwidth inheritance, priority inheritance for deadlines:
+a borrower keeps its lenders on a ring, but every account a lender lends is a place with units of the core,
+so the kernel finds the one due first by a look at the core's units, a constant of the machine,
+and not by a walk of the ring, which nothing but memory bounds.
 
 **A signal hands a lender its turn back.**
 A signal wakes the thread whose time pays for the signaller's turn first, if it waits there,

@@ -29,6 +29,10 @@ so scenarios are compared within one run.
   `drivers-tick` is the same with the spans a tick's work gives, and the `-hog` ones are beside the hog instead.
 - **lend-server** and **lend-rider** are `poor-server` and `free-rider` with a ui that lends the store its time
   while it waits for an answer.
+- **lend-two** shares a store of no units between a bulk that lends and waits within a second
+  and a ui that lends and waits within half a millisecond, beside the hog; `lend-two-rich` gives the ui 16 units for 8.
+  **lend-lax-server** is `lax-server` with a ui that lends,
+  and **lend-lax** has quick lend to a slow of 8 units that waits within a second and holds a tick and a half.
 
 The root task keeps 8 units, the units nobody earns are spare time, and every member may run on it.
 
@@ -58,6 +62,17 @@ and accounts start empty at a bind and take a tenth of a second to fill,
 so 126 ms into the window the ui, its account still filling, would be due several ticks later than the burst, whose account was full,
 and the answer would wait for the ui's turn behind the burst's.
 In `hog` the one slow answer, about half a tick, is the first of the window, while the ui's account still fills.
+
+**The waiter due first pays, for whatever it waits behind.**
+A borrower runs on whichever of its own account and its lenders' is due first.
+In `lend-two-rich` the ui's p90 and worst fell to the bulk's ask in progress, which a FIFO store answers first,
+where the bulk's span, which the ui does not set, had held them to a few of the hog's turns.
+In `lend-two` the ui's units did not cover the bulk's asks it paid for:
+its account ran dry, and it waited longer than before, at the median for the bulk's ask in progress,
+while the bulk got more answers.
+`lend-lax` showed the same for a lock whose holder waits lax and holds past the tick:
+quick's worst fell to less than half, its p90 by a tenth.
+`lend-lax-server` changed nothing: a lender hands its turn to the store it wakes, which answers within the turn.
 
 The paragraphs below were seen while threads with time took turns in order, before decision 39,
 and the commits since say how each moved.

@@ -10,8 +10,8 @@ Witness: fuzz lend-lender-earns
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -358,7 +358,7 @@ static void place_settle(struct place *p)
-     }
+@@ -522,7 +522,7 @@ static void place_settle(struct place *p)
+     uint32_t fill = queue != QUEUE_NONE ? look.fill : NEAREST_NONE;
      bool sooner = fill != NEAREST_NONE && tick_before(sched_ticks + fill, core->nearest_release);
      if (sooner) {
 -        core->nearest_release = sched_ticks + fill;

@@ -130,7 +130,8 @@ until the maintainer decides otherwise.
    and a chip at 150 MHz, which runs at most a seventh as many instructions a second, at least seven times that share, unmeasured;
    so a shorter tick alone buys a shorter wait at that price.
    What priority inheritance does for priorities, a waiter that names whom it waits for does for accounts, decision 27:
-   it lends that thread its time, the oldest lender's, and on through lenders with no time of their own, decision 39.
+   it lends that thread its time, and the thread runs on whichever of its own and its lenders' is due first,
+   on through lenders that lend in turn, decision 39.
    Each option below orders the run queue and says when a thread made ready takes the processor from a turn with time;
    each is decided at the end of a trap, so the host replays it.
    Weighed and left, beside what decision 39 weighs:
@@ -497,9 +498,10 @@ until the maintainer decides otherwise.
     The same wait lends a server its client's time, decision 5.
     What went with the mutex: a hand-over in order to waiters that lend nothing, which beside a busy process is the convoy,
     and the mutexes a destroyed holder gave its oldest waiters, which were not told; a lender is told now.
+    A borrower runs on whichever of its own account and its lenders' is due first, through borrowers that lend in turn, decision 39,
+    found by a look at the core's units rather than a walk of its lenders.
     Open: lending across cores, by running the borrower on its lender's core;
-    borrowing from more than one lender at once, or through a borrower that waits or lends in turn, walks that goal 4 rules out;
-    whether a server should run on the time of the client it serves rather than of its oldest lender, decision 5;
+    whether a server should run on the time of the client it serves rather than of its most urgent waiter, decision 5;
     whether time is a thing of its own, an account a thread's place on a core holds rather than one the place is, decision 35,
     which a lender could hand over whole, as seL4 donates its scheduling contexts,
     and with it whether a thread may hold two times of one core, its own and one lent, decision 24;
@@ -863,7 +865,13 @@ until the maintainer decides otherwise.
     and a client that lends its server the span it waits within, so the server answers each client within the client's.
     Spare time is the far end of the same order: a thread without a tick in its account has no request due.
     A thread on lent time runs its lender's requests, at the lender's units and within the lender's span,
-    and lent time goes on through a lender with no time of its own, `LEND_DEPTH` lenders on, so a client's account pays for its server and for the driver that one waits on.
+    and lent time goes on through a lender that lends in turn, `LEND_DEPTH` lends on, so a client's account pays for its server and for the driver that one waits on.
+    Of its own account and those its lenders lend it, a thread runs on the one with a tick whose request would be due first,
+    so a server or a lock's holder runs at the urgency of its most urgent waiter, and on that waiter's account:
+    a waiter waits for its borrower as for work of its own of the same size, the work its borrower does for others meanwhile among it,
+    while its account holds that work.
+    Every account a lender lends is a place with units, so the one due first is a look at the core's units, `TIME_UNITS` steps,
+    and only for a thread others lend to.
     Weighed and left:
     - **A quantum on the binding**, the work of a request rather than its span, `OP_TIME_BIND`'s `a4` before:
       the same requests, since a quantum `q` at `u` units is a span of `TIME_UNITS * q / u`,
@@ -878,6 +886,12 @@ until the maintainer decides otherwise.
       which under QEMU cost each a fifth of its throughput.
     - **A window added to the deadline**: it delays only its own thread, and nothing prices it; a long span does as much.
     - **Priorities that preempt on wake**, decision 9's proposal: a promise relative to every thread above.
+    - **The oldest lender pays**, and a borrower with time of its own pays itself, as before:
+      a waiter's wait then rested on the span of whoever lent first, or of the borrower, which it does not set.
+      `make lab`'s `lend-two` and `lend-two-rich`, a ui that must be answered within half a millisecond and a bulk that lends within a second, sharing a store of no units,
+      showed it: the ui waited at p90 for a few of the hog's turns, which the ui paying cut to the bulk's ask in progress
+      while its units bought that ask, and made worse once they did not, its account spent on the bulk's asks ahead of its own.
+      `lend-lax`, a holder that waits within a second and holds past the tick, showed the same for a lock.
     - **A calendar**, units with fixed places in a cycle: latency becomes the spacing of a thread's units, and bursts go;
       units numbered by their bits reversed would space a block of them evenly,
       but an interrupt waits for its thread's place, and filling the places nobody uses earliest deadline first is this mechanism again.
@@ -896,6 +910,14 @@ until the maintainer decides otherwise.
       which asks up to twice the units; a few bits of mantissa beside the exponent would ask an eighth more at most.
     - **The kernel's longest step**, which a request's promise rests on; decision 36 and `TODO.md`.
     - **The earliest deadline without a walk** of the run queue, `TIME_UNITS` places at most.
-    - **Lending across cores**, decision 27, and a borrower's lenders kept in the order of their deadlines.
+    - **Lending across cores**, decision 27.
+    - **The waiter pays for what it waits behind.**
+      A server that answers its clients in turn spends its most urgent waiter's account on the asks ahead of that one's,
+      so a client that pays wants units for them too, or a server that answers by urgency, which is userspace's to build.
+    - **The turn handed on a lend**: a lender hands its turn to the borrower only if the borrower runs on the lender's time,
+      which the self-check does not hold, since what a turn runs on is decided as it begins and at each tick and may have changed since.
+    - **The look at the units** costs a lend and the wake of a borrower up to `TIME_UNITS` steps,
+      about a tenth of a lock that lends on QEMU, where most of the units nobody earns;
+      a word per core of the units of places that lend would take it to the lenders alone.
     - **Fuel**, a process's energy beside the power its units bound.
     - **Timer lines, an account running dry and the watchdog** still keep to the tick.

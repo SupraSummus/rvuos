@@ -9,11 +9,11 @@ Witness: fuzz actor-handoff
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -462,7 +462,6 @@ static struct thread *next_turn(uint32_t offset)
+@@ -654,7 +654,6 @@ static struct thread *next_turn(uint32_t offset)
      struct thread *t = place_thread(p);
      place_unqueue(p);
      turn_take(t);
 -    account_refill(p);
-     struct place *l = has_time(p->balance) ? NULL : place_lender(p);
-     if (l != NULL && has_time(account_now(l))) {
+     struct place *l = place_payer(p).best;
+     if (l != NULL && l != p) {
          struct thread *lt = place_thread(l);

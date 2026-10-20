@@ -1,4 +1,4 @@
-A release that gives a lender time but leaves the borrower it lends to where it waited,
+A release that gives a lender time but leaves the borrowers it lends to where they waited,
 since it looks for borrowers only of threads on a queue, which a lender never is.
 The borrower waits on another queue than its lender's account says.
 
@@ -9,12 +9,8 @@ Witness: fuzz lend-lender-earns
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -746,7 +746,7 @@ static void release(uint32_t c)
-             place_settle(p);
-         }
-         /* A lender waits on no queue, and its account may give the borrower it lends to time. */
--        struct place *h = p != NULL ? place_borrower(p) : NULL;
-+        struct place *h = p != NULL && p->queue != QUEUE_NONE ? place_borrower(p) : NULL;
-         /* And the borrowers that one lends it on to. */
-         for (uint32_t d = 0; d < LEND_DEPTH && h != NULL; d++) {
+@@ -844,3 +844,3 @@ static void release(uint32_t c)
+         const struct thread *x = place_thread(p);
+-        for (uint32_t d = 0; d < LEND_DEPTH && x->lend_to != 0; d++) {
++        for (uint32_t d = 0; d < LEND_DEPTH && x->lend_to != 0 && p->queue != QUEUE_NONE; d++) {
              LOOP_BOUND(LEND_DEPTH);

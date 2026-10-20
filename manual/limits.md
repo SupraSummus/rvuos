@@ -48,10 +48,11 @@ These are documented gaps, not surprises;
   `DESIGN.md`, open decisions 9 and 10.
 - **No synchronous endpoints.**
   Shared memory and notifications carry everything; open decision 5.
-- **Lent time goes one step, on a core both hold.**
-  A thread borrows from the thread that has lent it time longest,
-  never through a borrower that waits or lends in turn, nor on a core whose time the lender does not hold;
-  a lock that names its holder is fair only to takers that lend; open decision 27.
+- **Lent time goes `LEND_DEPTH` lends on, on a core both hold.**
+  A thread runs on whichever of its own account and its lenders' would have its request due first,
+  through borrowers that lend in turn three lends deep at most, never on a core whose time the lender does not hold;
+  a waiter so pays for whatever its borrower does meanwhile, the work of others it waits behind among it;
+  a lock that names its holder is fair only to takers that lend; open decisions 27 and 39.
 - **One `Irq` per line**; open decision 11.
 - **Two cores at most**, on QEMU `virt`, mps2-an521 and RP2350;
   the first core takes every device interrupt;

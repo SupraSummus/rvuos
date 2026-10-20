@@ -8,12 +8,12 @@ Witness: fuzz lend-span-own-time
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -458,8 +458,6 @@ static void place_settle(struct place *p)
-             uint32_t vt = vtime(payer);
-             if (joined) {
-                 request_renew(p, payer, vt);
--            } else if ((int32_t)(p->deadline - vt) > (int32_t)place_span(payer)) {
--                p->deadline = vt + place_span(payer);
-             }
+@@ -509,8 +509,6 @@ static void place_settle(struct place *p)
+         uint32_t vt = vtime(payer);
+         if (joined) {
+             request_renew(p, payer, vt);
+-        } else if ((int32_t)(p->deadline - vt) > (int32_t)place_span(payer)) {
+-            p->deadline = vt + place_span(payer);
          }
          core->run_stale = true;
+         joined = true;
