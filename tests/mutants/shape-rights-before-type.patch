@@ -8,10 +8,10 @@ Witness: fuzz unread-arguments-zero
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -1045,12 +1045,12 @@ static uint8_t shape_reads(uint32_t op, const struct cap *cap, const uint32_t *a
+@@ -1229,12 +1229,12 @@ static uint8_t shape_reads(uint32_t op, const struct cap *cap, const uint32_t *a
  static int shape_check(uint32_t op, const struct cap *cap, const uint32_t *arg)
  {
-     const struct op_shape *shape = op < OP_COUNT ? &op_shapes[op] : NULL;
+     const struct op_shape *shape = op < OP_SHAPES ? &op_shapes[op] : NULL;
 +    if (shape != NULL && (cap->rights & shape->right) != shape->right) {
 +        return KERR_NO_RIGHTS;
 +    }

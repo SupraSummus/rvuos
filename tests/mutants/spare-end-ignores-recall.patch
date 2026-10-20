@@ -8,10 +8,10 @@ Witness: fuzz spare-turn-waits-for-recall
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -1068,7 +1068,7 @@ void sched_tick(uint32_t ticks)
-  */
- static void spare_end(struct core *core)
- {
+@@ -1326,7 +1326,7 @@ static void spare_end(struct core *core)
+         return;
+     }
+ #endif
 -    if (core->run_queue != 0 && !core->recall && sched_spare_turn(core)) {
 +    if (core->run_queue != 0 && sched_spare_turn(core)) {
          sched_turn_end();

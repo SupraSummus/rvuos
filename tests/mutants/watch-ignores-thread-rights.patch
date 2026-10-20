@@ -8,7 +8,7 @@ Witness: fuzz watch-checks-rights
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -1003,7 +1003,7 @@ static const struct op_shape op_shapes[OP_COUNT] = {
+@@ -1179,7 +1179,7 @@ static const struct op_shape op_shapes[OP_SHAPES] = {
      [OP_THREAD_CONFIGURE] = { CAP_THREAD, RIGHT_W, SHAPE_A123 },
      [OP_THREAD_RESUME] = { CAP_THREAD, RIGHT_W, 0 },
      [OP_THREAD_STOP] = { CAP_THREAD, RIGHT_W, 0 },

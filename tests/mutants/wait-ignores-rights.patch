@@ -9,7 +9,7 @@ Witness: fuzz notify-carve-bits
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -1008,7 +1008,7 @@ static const struct op_shape op_shapes[OP_COUNT] = {
+@@ -1184,7 +1184,7 @@ static const struct op_shape op_shapes[OP_SHAPES] = {
      [OP_THREAD_READ_REG] = { CAP_THREAD, RIGHT_W, SHAPE_A1 },
      [OP_THREAD_WRITE_REG] = { CAP_THREAD, RIGHT_W, SHAPE_A1 | SHAPE_A2 },
      [OP_NOTIFY_SIGNAL] = { CAP_NOTIFICATION, RIGHT_W, SHAPE_A1 },

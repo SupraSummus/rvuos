@@ -4,12 +4,12 @@
 
 .PHONY: host-harnesses host-test model-test fuzz corpus-merge qemu-replay mutants mutants-refresh mutants-fuzz
 
-HOST_BUILD  := build/host$(PMP_VARIANT)$(TIMER_VARIANT)
+HOST_BUILD  := build/host$(PMP_VARIANT)$(TIMER_VARIANT)$(SCHED_VARIANT)
 HOST_CORPUS := $(HOST_BUILD)/corpus
 # The seeds are text under tests/seeds, by the names of the ABI's headers, built into records here; see tools/seed.py.
 SEEDS       := build/seeds
 HOST_CFLAGS := -std=c11 -O1 -g -Wall -Wextra -Werror -Wshadow \
-               -DRVUOS_HOST -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -DCORES=1 -DTIMER_HZ=$(TIMER_HZ) -DSELFCHECK=1 \
+               -DRVUOS_HOST -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -DCORES=1 -DTIMER_HZ=$(TIMER_HZ) -DSCHED_USER=$(SCHED_USER) -DSELFCHECK=1 \
                -Ikernel -Ikernel/arch/riscv \
                -Ikernel/board/qemu -Ihost -Iinclude
 

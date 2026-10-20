@@ -863,7 +863,7 @@ static int op_route(struct thread *t, const struct cap *cap, uint32_t op, const 
 
 /* arg[1..] carry the arguments in. */
 static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
-                   uint32_t op, const uint32_t *arg)
+                   uint32_t op, uint32_t *arg)
 {
     switch (op) {
     case OP_TIME_CARVE:
@@ -903,6 +903,17 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
         sched_bind(p, first, count, cap->rights, slot_node(t, slot));
         return KERR_OK;
     }
+#if SCHED_USER
+    case OP_TIME_SCHEDULE:
+    case OP_TIME_DUE: {
+        /* Whoever chooses a core's turns holds every unit of it. */
+        uint32_t first = core_index() * TIME_UNITS;
+        if (first < range_first(cap) || first + TIME_UNITS > range_first(cap) + range_count(cap)) {
+            return KERR_INVALID_ARG;
+        }
+        return op == OP_TIME_DUE ? sched_due(first, arg[1], arg) : sched_schedule(t, first, arg[1], arg[2], arg);
+    }
+#endif
     default:
         return KERR_WRONG_TYPE;
     }
@@ -1139,7 +1150,12 @@ struct op_shape {
     uint8_t right;
     uint8_t reads;
 };
-static const struct op_shape op_shapes[OP_COUNT] = {
+#if SCHED_USER
+#define OP_SHAPES (OP_TIME_DUE + 1)
+#else
+#define OP_SHAPES OP_COUNT
+#endif
+static const struct op_shape op_shapes[OP_SHAPES] = {
     [OP_PRINT] = { CAP_PRINT, RIGHT_W, SHAPE_A123 },
     [OP_HALT] = { CAP_HALT, RIGHT_W, SHAPE_A1 },
     [OP_TEST_TRACE] = { CAP_TEST, RIGHT_W, 0 },
@@ -1179,6 +1195,10 @@ static const struct op_shape op_shapes[OP_COUNT] = {
     [OP_CLOCK_WATCHDOG] = { CAP_CLOCK, RIGHT_W, SHAPE_A1 },
     [OP_TIME_CARVE] = { CAP_TIME, 0, SHAPE_A123 },
     [OP_TIME_BIND] = { CAP_TIME, RIGHT_W, SHAPE_A123 },
+#if SCHED_USER
+    [OP_TIME_SCHEDULE] = { CAP_TIME, RIGHT_W, SHAPE_A1 | SHAPE_A2 },
+    [OP_TIME_DUE] = { CAP_TIME, RIGHT_W, SHAPE_A1 },
+#endif
     [OP_ROUTE_CARVE] = { CAP_ROUTE_LINE, 0, SHAPE_A123 },
     [OP_ROUTE_BIND] = { CAP_ROUTE_LINE, RIGHT_W, SHAPE_A1 | SHAPE_A2 },
     [OP_ROUTE_END] = { CAP_ROUTE, RIGHT_W, SHAPE_A123 },
@@ -1208,7 +1228,7 @@ static uint8_t shape_reads(uint32_t op, const struct cap *cap, const uint32_t *a
 
 static int shape_check(uint32_t op, const struct cap *cap, const uint32_t *arg)
 {
-    const struct op_shape *shape = op < OP_COUNT ? &op_shapes[op] : NULL;
+    const struct op_shape *shape = op < OP_SHAPES ? &op_shapes[op] : NULL;
     if (shape == NULL || shape->type != cap->type) {
         return KERR_WRONG_TYPE;
     }

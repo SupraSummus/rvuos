@@ -87,6 +87,13 @@ uint32_t timer_count(void)
 void timer_set(uint32_t ticks)
 {
     uint64_t at = timer_deferred(next_tick, ticks, tick_counts);
+#if SCHED_USER
+    /* The limit of a turn the core's scheduler chose, if it falls first. */
+    uint32_t end = sched_limit_counts(timer_offset());
+    if (end != 0 && counter_read() + end < at) {
+        at = counter_read() + end;
+    }
+#endif
     uint64_t *held = &compare[core_index()];
     if (at != *held) {
         *held = at;
@@ -128,13 +135,23 @@ bool timer_trap_enter(bool pending)
     return traced;
 }
 
-/* Counted as the trap began, and the turn ends as it leaves; under tracing it is only moved on. */
+/*
+ * Counted as the trap began, and the turn ends as it leaves; under tracing it is only moved on.
+ * Under SCHED=user the interrupt may mark the limit of a turn the core's scheduler chose instead.
+ */
 void timer_trap_tick(void)
 {
     if (debug_trace) {
         timer_count();
         timer_set(1);
     }
+#if SCHED_USER
+    else {
+        struct core *core = core_self();
+        core->limit_hit = true;
+        core->wake_stale = true;
+    }
+#endif
 }
 
 /*

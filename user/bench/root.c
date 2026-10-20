@@ -26,6 +26,7 @@
 
 #include "bench.h"
 #include "console.h"
+#include "lib/edf.h"
 #include "lib/libc.h"
 #include "lib/lock.h"
 #include "lib/log.h"
@@ -238,6 +239,19 @@ int main(void)
     must("install the console", region_install(&self, BOOT_CAP_UART, RIGHT_R | RIGHT_W, &region));
     console_init(base);
     must("the kernel's log", kernel_log_open(&self, &klog));
+#if SCHED_USER
+    /* Every turn goes through the scheduler of SCHED=user, a child of its own on spare time, whose slots want a larger table. */
+    struct block tables;
+    must("a pool for a larger table", mem_take(&self, 0x1000u, &tables));
+    must("make the pool", mem_make(&self, &tables, CAP_POOL));
+    must("a larger table", self_migrate(&self, tables.made, SELF_SLOTS));
+    struct child chooser;
+    must("build the scheduler", child_new(&self, &chooser, "sched", CHILD_TABLE, CHILD_DATA));
+    struct edf_page *ep = (struct edf_page *)chooser.page;
+    must("give the scheduler the clock", child_give(&self, &chooser, BOOT_CAP_CLOCK, RIGHT_R, &ep->clock));
+    must("give the scheduler the units", child_give(&self, &chooser, self.time, RIGHT_W, &ep->time));
+    must("start the scheduler", child_start(&self, &chooser, edf_main, 0, 0));
+#endif
 
     struct block pool;
     must("a pool", mem_take(&self, POOL_SIZE, &pool));

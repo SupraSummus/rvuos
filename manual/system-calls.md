@@ -533,6 +533,15 @@ a signal that wakes the thread paying for its turn, section 5.12,
 or a thread with time that becomes ready while the turn runs on spare time, section 5.11, takes the processor from it,
 and an unbind that empties the account leaves the rest of the turn on spare time.
 
+**`OP_TIME_SCHEDULE` (47) and `OP_TIME_DUE` (48), an experiment's.**
+Only a kernel built with `make SCHED=user` has them, and `OP_COUNT` does not count them;
+`include/rvuos/schedule.h` says what they take and return.
+Both need `RIGHT_W` on a `Time` capability over every unit of the caller's core, and fail with `KERR_STATE` under tracing.
+`OP_TIME_SCHEDULE` makes the caller its core's scheduler,
+which chooses each turn of the run queue by an account's first unit and waits for the next choice;
+`OP_TIME_DUE` tells an account's virtual time and units.
+`lib/edf.h` is such a scheduler.
+
 ### 6.14 Operations on `RouteLine` and `Route`
 
 A `Route` wires an event of one device to a task of another, so the router triggers the task each time the event comes,

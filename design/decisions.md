@@ -135,6 +135,21 @@ until the maintainer decides otherwise.
    and has a tick of its own in a timer line, the shape every device interrupt takes.
    What it cannot do is choose between two runnable threads
    for less than a system call per switch.
+   - **Experiment: the order chosen in userspace**, `make SCHED=user`; see "Scheduling".
+     The kernel keeps the units, the accounts, the queues and lent time, and asks a scheduler thread of each core for the order alone:
+     at every choice the scheduler is told which accounts have a ready thread and the virtual time of the one that ran,
+     and names the next with a limit, so the kernel knows nothing of deadlines.
+     `lib/edf.h` orders requests earliest deadline first, each due a span past its account's virtual time,
+     as an experiment of the same order in the kernel did, and answered `make lab` as that one did,
+     a microsecond or two later for each hop, at 1 kHz and at 10 kHz.
+     Each choice costs a switch to the scheduler and back:
+     a round trip between threads costs about two thirds more than turns taken in order, where the order in the kernel cost about a seventh,
+     and a channel's round between processes no more than the order in the kernel's.
+     What it buys: the kernel holds no policy beyond the accounts, and any order, levels or deadlines or a table, is a program.
+     Open: whether a wake should take the processor without asking the scheduler, by a word of urgency it set beforehand,
+     which would spare a wake the hop and keep the order its;
+     what the scheduler's own time costs and who pays it, nobody now;
+     several cores, each with a scheduler of its own; and the scheduler of a child, which needs a way to hand it a share of the order.
    A period per thread, as seL4's scheduling contexts have, would bound latency more tightly,
    at the price of a queue of refills sorted by time, which decision 38 weighs.
    Decide when a workload needs one thread to run before another,

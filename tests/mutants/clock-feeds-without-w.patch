@@ -8,7 +8,7 @@ Witness: fuzz watchdog-halts
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -1155,7 +1155,7 @@ static const struct op_shape op_shapes[OP_COUNT] = {
+@@ -1192,7 +1192,7 @@ static const struct op_shape op_shapes[OP_SHAPES] = {
      [OP_IRQ_SET] = { CAP_IRQ, RIGHT_W, SHAPE_A123 | SHAPE_VARIES },
      [OP_CLOCK_READ] = { CAP_CLOCK, RIGHT_R, 0 },
      [OP_CLOCK_FRAME] = { CAP_CLOCK, RIGHT_R, SHAPE_A1 },
@@ -16,4 +16,4 @@ diff --git a/kernel/syscall.c b/kernel/syscall.c
 +    [OP_CLOCK_WATCHDOG] = { CAP_CLOCK, 0, SHAPE_A1 },
      [OP_TIME_CARVE] = { CAP_TIME, 0, SHAPE_A123 },
      [OP_TIME_BIND] = { CAP_TIME, RIGHT_W, SHAPE_A123 },
-     [OP_ROUTE_CARVE] = { CAP_ROUTE_LINE, 0, SHAPE_A123 },
+ #if SCHED_USER

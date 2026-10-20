@@ -209,6 +209,53 @@ static inline uint32_t rv_time_bind(uint32_t time_cap, uint32_t thread_cap, uint
     return rv_invoke(OP_TIME_BIND, time_cap, thread_cap, offset, count);
 }
 
+#if SCHED_USER
+/* What OP_TIME_SCHEDULE answers with, the core's next choice. */
+struct sched_choice {
+    uint32_t ready[2]; /* the ready mask, a bit for each account of the core by its first unit there */
+    uint32_t vtime;    /* the virtual time of the account the last turn chosen ran on */
+    uint32_t now;      /* the count */
+};
+
+/* OP_TIME_SCHEDULE: the turn to the account of unit, for at most limit counts, and the next choice into *c. */
+static inline uint32_t rv_time_schedule(uint32_t time_cap, uint32_t unit, uint32_t limit, struct sched_choice *c)
+{
+    register uint32_t r_a0 __asm__(RV_A0) = time_cap;
+    register uint32_t r_a1 __asm__(RV_A1) = unit;
+    register uint32_t r_a2 __asm__(RV_A2) = limit;
+    register uint32_t r_a3 __asm__(RV_A3) = 0;
+    register uint32_t r_a4 __asm__(RV_A4);
+    register uint32_t r_a7 __asm__(RV_A7) = OP_TIME_SCHEDULE;
+    __asm__ volatile(RV_CALL
+                     : "+r"(r_a0), "+r"(r_a1), "+r"(r_a2), "+r"(r_a3), "=r"(r_a4)
+                     : "r"(r_a7)
+                     : "memory", RV_A5, RV_A6);
+    c->ready[0] = r_a1;
+    c->ready[1] = r_a2;
+    c->vtime = r_a3;
+    c->now = r_a4;
+    return r_a0;
+}
+
+/* OP_TIME_DUE: the virtual time and the units of the account of unit, and the count. */
+static inline uint32_t rv_time_due(uint32_t time_cap, uint32_t unit, uint32_t *vtime, uint32_t *units, uint32_t *now)
+{
+    register uint32_t r_a0 __asm__(RV_A0) = time_cap;
+    register uint32_t r_a1 __asm__(RV_A1) = unit;
+    register uint32_t r_a2 __asm__(RV_A2) = 0;
+    register uint32_t r_a3 __asm__(RV_A3) = 0;
+    register uint32_t r_a7 __asm__(RV_A7) = OP_TIME_DUE;
+    __asm__ volatile(RV_CALL
+                     : "+r"(r_a0), "+r"(r_a1), "+r"(r_a2), "+r"(r_a3)
+                     : "r"(r_a7)
+                     : "memory", RV_A4, RV_A5, RV_A6);
+    *vtime = r_a1;
+    *units = r_a2;
+    *now = r_a3;
+    return r_a0;
+}
+#endif
+
 /*
  * OP_CAP_INFO: what a capability is, *type one of CAP_* and *rights its rights,
  * and in w the three words its type tells, see rvuos/abi.h. Page 0, the only one.

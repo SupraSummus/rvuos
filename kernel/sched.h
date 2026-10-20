@@ -227,6 +227,21 @@ struct core {
      * Only another core sets it, under the lock, and it goes with the turn it was set for.
      */
     bool drop_trap;
+
+#if SCHED_USER
+    /*
+     * An experiment's, SCHED=user: the core's scheduler, NULL while the run queue takes its turns in order,
+     * and what it was told; see "A scheduler of the core's" in sched.c.
+     */
+    struct thread *sched;
+    bool sched_waits; /* it stands in OP_TIME_SCHEDULE, for the core's next choice */
+    bool sched_told;  /* a place joined the run queue since it last chose */
+    bool sched_idle;  /* it chose no turn, so only a place that joins the run queue asks it again */
+    bool limited;     /* the turn it chose ends at limit_end, or at the next tick */
+    bool limit_hit;   /* the timer interrupted between ticks, maybe at the limit */
+    uint32_t ran;       /* the first unit, of the core's, of the account of the last turn it chose, or SCHED_NONE */
+    uint32_t limit_end; /* the count the turn it chose may run to */
+#endif
 };
 
 extern struct core cores[CORES];
@@ -523,6 +538,23 @@ static inline bool sched_spare_turn(const struct core *c)
  * See DESIGN.md, "Scheduling".
  */
 uint32_t sched_wake_ticks(void);
+
+#if SCHED_USER
+/*
+ * OP_TIME_SCHEDULE by t on its core, whose units begin at first: the turn to the account of unit, of the core's, or none,
+ * for at most limit counts; arg[1..4] carry the results of a call that fails. See "A scheduler of the core's" in sched.c.
+ */
+int sched_schedule(struct thread *t, uint32_t first, uint32_t unit, uint32_t limit, uint32_t *arg);
+
+/* OP_TIME_DUE of the account of unit, of the core whose units begin at first: its results into arg[1..3]. */
+int sched_due(uint32_t first, uint32_t unit, uint32_t *arg);
+
+/*
+ * The counts from offset into the tick to the end of the turn the core's scheduler limited, if that falls before the next tick,
+ * at least one; 0 for none. The timer marks it.
+ */
+uint32_t sched_limit_counts(uint32_t offset);
+#endif
 
 /*
  * A device interrupt on a line: the Irq armed on it masks the line,

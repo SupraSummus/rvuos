@@ -242,6 +242,12 @@ void core_notify(struct core *c)
                              (c->wake_tick - c->ticks > 1 || (c->run_queue != 0 && sched_spare_turn(c)))))) {
         c->interrupt_owed = true;
     }
+#if SCHED_USER
+    /* A place that joined its run queue asks its scheduler at once. */
+    if (c != core_self() && c->sched != NULL && c->sched_told && __atomic_load_n(&c->in_user, __ATOMIC_ACQUIRE)) {
+        c->interrupt_owed = true;
+    }
+#endif
 #else
     (void)c;
 #endif

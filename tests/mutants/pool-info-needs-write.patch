@@ -8,7 +8,7 @@ Witness: fuzz pool-info-dying
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -995,7 +995,7 @@ static const struct op_shape op_shapes[OP_COUNT] = {
+@@ -1171,7 +1171,7 @@ static const struct op_shape op_shapes[OP_SHAPES] = {
      [OP_UNTYPED_RETYPE] = { CAP_UNTYPED, 0, SHAPE_A1 | SHAPE_A2 },
      [OP_UNTYPED_SPLIT] = { CAP_UNTYPED, 0, SHAPE_A1 | SHAPE_A2 },
      [OP_POOL_ALLOC] = { CAP_POOL, RIGHT_W, SHAPE_A123 | SHAPE_VARIES },
