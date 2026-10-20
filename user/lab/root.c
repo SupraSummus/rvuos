@@ -35,6 +35,7 @@
 #define SMALL  4000u
 #define BIG    80000u
 #define HOLD   60000u
+#define LONG_HOLD 240000u /* a tick and a half, so that a hold goes on past the tick */
 #define PERIOD 3000u  /* a periodic member's, in microseconds: three ticks */
 #define BURST_PERIOD 7000u /* a burst's, prime to a periodic member's */
 #define BATCH_SPAN 250000u  /* the hog's requests due within a quarter of a second, in microseconds, behind everyone's */
@@ -87,6 +88,9 @@ struct scenario {
 #define PAID_GATE                                     { "gate", GATE, 0, 1, 0, 1, 0, 0, 0, 0, 0 }
 #define BATCH_HOG                                     { "hog", HOG, HOG_UNITS, 0, 0, 0, 0, 0, 0, 0, BATCH_SPAN }
 #define LAX_STORE                                     { "store", STORE, 8, 0, 0, 0, 0, 0, 0, 0, LAX_SPAN }
+#define LAX_BULK                                      { "bulk", BULK, 8, 1, 0, 1, 0, BIG, 0, 0, LAX_SPAN }
+#define HASTY_UI(units)                               { "ui", UI, units, 1, 0, 1, 0, SMALL, PERIOD, 0, DRIVEN_SPAN }
+#define LAX_SLOW                                      { "slow", LOCKER, 8, 0, 0, 0, LEND, LONG_HOLD, 0, LONG_HOLD, LAX_SPAN }
 #define BURST                                         { "burst", UI, HOG_UNITS, 0, 1, 0, 0, BIG, BURST_PERIOD, 0, 0 }
 #define DRIVER_STORE(name, units, span)               { name, STORE, units, 0, 0, 0, 0, 0, 0, 0, span }
 #define DRIVEN(name, units, asks, span)               { name, UI, units, asks, 0, 0, 0, SMALL, PERIOD, 0, span }
@@ -120,6 +124,10 @@ static const struct scenario scenarios[] = {
     { "bulk-batch", { STORE_OF(8), UI_OF(8, 1), CLIENT("bulk", BULK, 8, 1, BIG, 0), BATCH_HOG } },
     { "lock-batch", { QUICK(NOTE), SLOW(NOTE), BATCH_HOG } },
     { "lend-batch", { QUICK(LEND), SLOW(LEND), BATCH_HOG } },
+    { "lend-lax-server", { LAX_STORE, LENDING_UI(8, 1), HOGGING } },
+    { "lend-two", { STORE_OF(0), LAX_BULK, HASTY_UI(8), HOGGING } },
+    { "lend-two-rich", { STORE_OF(0), LAX_BULK, HASTY_UI(16), HOGGING } },
+    { "lend-lax", { QUICK(LEND), LAX_SLOW, HOGGING } },
     { "net", { STORE_OF(0), PAID_GATE, LENDING_UI(8, 2), HOGGING } },
     { "net-unpaid", { STORE_OF(0), SERVER("gate", GATE, 0, 1), UI_OF(8, 2), HOGGING } },
     { "drivers", DRIVERS(DRIVER_SPAN, DRIVEN_SPAN, BURST) },
@@ -287,6 +295,12 @@ static void lock_free(struct shared_lock *l)
     must("the lock's pool back", mem_give(&self, &l->pool));
 }
 
+/* Whether a member gives its span at its bind: the hog, which never waits, and a locker, whose lock's waits give none. */
+static bool binds_span(const struct member *m)
+{
+    return m->role == HOG || m->role == LOCKER;
+}
+
 /* Starts the members that are drivers, or those that are not; returns how many it started. */
 static uint32_t start(const struct scenario *sc, uint32_t count, int drivers)
 {
@@ -294,7 +308,7 @@ static uint32_t start(const struct scenario *sc, uint32_t count, int drivers)
     for (uint32_t i = 0; i < count; i++) {
         const struct member *m = &sc->cast[i];
         if ((m->role == DRIVER) == drivers) {
-            uint32_t span = m->role == HOG ? span_of(m->span_us) : 0;
+            uint32_t span = binds_span(m) ? span_of(m->span_us) : 0;
             must("start a member", child_start_span(&self, &kids[i], entries[m->role], 0, m->units, span));
             started++;
         }
@@ -318,8 +332,8 @@ static void run(const struct scenario *sc)
         p->jitter = m->period_us != 0 ? JITTER : 0;
         p->gap = m->gap;
         p->local = m->local;
-        /* A member says at each wait how soon what wakes it is due; the hog, which never waits, says it at its bind. */
-        p->span = m->role != HOG ? span_of(m->span_us) : 0;
+        /* A member says at each wait how soon what wakes it is due; the hog and the lockers, whose waits say none, at its bind. */
+        p->span = !binds_span(m) ? span_of(m->span_us) : 0;
         connected[i] = 0;
     }
     for (uint32_t i = 0; i < count; i++) {

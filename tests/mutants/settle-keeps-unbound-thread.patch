@@ -9,9 +9,9 @@ Witness: fuzz cores-resume-before-trap
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -437,7 +437,7 @@ static void place_settle(struct place *p)
-     const struct place *l = has_time(p->balance) ? NULL : place_lender(p);
-     uint8_t queue = place_queue(p, p->balance, l);
+@@ -488,7 +488,7 @@ static void place_settle(struct place *p)
+     struct payer_look look = place_payer(p);
+     uint8_t queue = place_queue(p, &look);
      bool joined = queue != QUEUE_NONE && (queue != p->queue || core != was);
 -    if (queue != p->queue || core != was) {
 +    if (queue != QUEUE_NONE && (queue != p->queue || core != was)) {

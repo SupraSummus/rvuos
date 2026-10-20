@@ -479,12 +479,12 @@
  * a2 = the span, as OP_NOTIFY_WAIT's a1, which the borrower's requests on the caller's time take too,
  * so a client says how soon its server must answer.
  * Returns a1 = the bits, at once if some bit is set, which lends nothing.
- * While it waits, a borrower without time of its own on a core runs there on the account of the thread
- * that has lent it time longest, if that one holds the time of that core too,
+ * While it waits, the borrower runs on a core on whichever account it may run on there would have its request due first:
+ * its own, the caller's, another lender's, or one lent to a lender that lends in turn, LEND_DEPTH lends on,
+ * each holding the time of that core and a tick,
  * and a caller whose own time pays for its turn hands the rest of the turn to the borrower,
- * if it is that one and the borrower waits for a turn.
+ * if the borrower now runs on that time and waits for a turn.
  * A signal from the borrower that wakes the caller hands the rest of the turn back, see OP_NOTIFY_SIGNAL.
- * The time goes one step, to the borrower, never on to whatever the borrower waits for or lends to.
  * A caller whose borrower is destroyed wakes with KERR_INVALID_CAP and no bits, as one whose notification is.
  * A stop takes the caller off its notification and its borrower's lenders and leaves it at this call,
  * which a resume makes again, looking the borrower up afresh; see OP_THREAD_STOP.

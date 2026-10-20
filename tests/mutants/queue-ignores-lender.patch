@@ -2,19 +2,19 @@ A borrower that runs on lent time is queued as if it had only its own.
 A thread waits on another queue than its lender's account says.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a place of a ready thread that may run waits on no queue
 Report: a place waits on another queue than its account says
-Report: the release is for a tick already past
-Witness: fuzz lend-hands-turn
+Witness: fuzz bind-turn-later
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -326,7 +326,7 @@ static uint8_t place_queue(const struct place *p, uint32_t balance, const struct
+@@ -436,7 +436,7 @@ static uint8_t place_queue(const struct place *p, const struct payer_look *look)
      if (t->state != THREAD_READY || is_turn(t) || place_time(p)->type != CAP_TIME) {
          return QUEUE_NONE;
      }
--    if (has_time(balance) || (l != NULL && (has_time(l->balance) || has_time(account_now(l))))) {
-+    if (has_time(balance)) {
+-    if (look->best != NULL) {
++    if (has_time(p->balance)) {
          return QUEUE_RUN;
      }
      if (place_spare(p)) {

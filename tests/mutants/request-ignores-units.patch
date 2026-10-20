@@ -4,12 +4,13 @@ and a request would lie further ahead of its virtual time than its span.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a request is due further ahead than its span
+Report: a request waits due later than a lender's would be
 Witness: fuzz lend-lender-woken
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -377,7 +377,7 @@ static uint8_t place_queue(const struct place *p, uint32_t balance, const struct
+@@ -341,7 +341,7 @@ static struct place *unit_first(uint32_t unit)
   */
  static uint32_t vtime(const struct place *p)
  {

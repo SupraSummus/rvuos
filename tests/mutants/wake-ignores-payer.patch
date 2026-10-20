@@ -3,18 +3,17 @@ It lets pass the ticks at which another thread may pay for the turn, or none.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: the timer lets a tick pass while the turn runs on lent time
-Witness: fuzz lend-hands-turn
+Witness: fuzz lend-payer-goes
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -893,9 +893,6 @@ uint32_t sched_wake_ticks(void)
+@@ -1107,7 +1107,7 @@ uint32_t sched_wake_ticks(void)
          return wake;
      }
-     /* Each tick decides afresh who pays for a turn on lent time, and whether it has any. */
--    if (core->payer != NULL) {
--        return 1;
--    }
+     /* Each tick decides afresh who pays for a turn on lent time, or one others lend to, and whether it has any. */
+-    if (core->payer != NULL || turn->lenders != 0) {
++    if (turn->lenders != 0) {
+         return 1;
+     }
      /* A thread that lost the time of this core during its turn here, its place emptied, ends the turn at the next tick. */
-     const struct place *p = thread_place_on(turn, core_index());
-     if (core->run_queue != 0 || p == NULL) {

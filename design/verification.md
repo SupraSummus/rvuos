@@ -111,15 +111,17 @@ and a notification's queue holds exactly the threads waiting on it.
 A thread lends its time only while it waits, to another live thread, on whose ring of lenders it lies;
 a thread's ring holds exactly the threads that lend to it, each linked back to the one before.
 A place of a ready thread whose turn it is nowhere waits on exactly one of its core's queues and names it:
-the run queue while it has time, or its lender's place on that core has, else the spare queue with spare time,
-else the spent queue if it or its lender's place has units;
+the run queue while it has time, or a lender's place on that core has, else the spare queue with spare time,
+else the spent queue if it or a lender's place has units, a lender's on through those that lend in turn;
 every other place names none and is linked into none, a place of a thread whose turn it is anywhere among them,
 and the queues hold exactly the places that name them.
 The queues a place waits on are those of the core whose time it holds;
 a thread's places hold the time of one core each, and know the thread and which of its places they are.
 While a thread runs it is its core's turn, and a core whose turn it is runs that thread;
 a turn's payer, while it has one, is another live thread of that core, and waits on no queue,
-and while it waits it is the first lender of the turn's thread.
+and while it waits it lends to the turn's thread, or to one that lends on to it.
+A place on the run queue has a request due no later than one on the account it may run on that is due first,
+its own or a lender's, so a lender that must be answered sooner brings its borrower's request forward.
 The thread the kernel is running is one it could run:
 it is a live object and it is ready,
 though it may have lost its units during its turn, which it finishes.

@@ -374,37 +374,104 @@ static uint32_t account_now(const struct place *p)
     return balance > cap ? cap : (uint32_t)balance;
 }
 
+static void check_release(const struct place *p, const struct place *a, const char *what);
+
 /*
- * The place a borrower's place runs on the time of while it has none:
- * that of the thread that has lent it time longest, if that one holds the time of the place's core.
- * check_lenders has vetted the ring.
+ * What a place's thread may run on, of its own account and those its lenders lend it:
+ * whether one has units, whether one holds a tick, and the earliest a request on one of those would be due.
+ * With check, each with units and without a tick is held to reach one no earlier than the release.
  */
-static const struct place *lender_of(const struct place *p)
+struct may_run {
+    const struct place *p;
+    bool check, units, time;
+    uint32_t due;
+};
+
+/* The count a place's virtual time stands at, the count its account would be full at, or the count once it is. */
+static uint32_t vtime_of(const struct place *q)
 {
-    const struct thread *t = place_thread(p);
-    const struct cap *b = place_time(p);
-    if (t->lenders == 0 || b->type != CAP_TIME) {
-        return NULL;
+    uint32_t full = (uint32_t)((uint64_t)q->stamp * timer_tick_counts()) + (account_cap(q) - q->balance) / place_units(q);
+    uint32_t now = count_of(q) * timer_tick_counts();
+    return (int32_t)(now - full) < 0 ? full : now;
+}
+
+static void may_run_on(struct may_run *m, const struct place *q)
+{
+    if (q == NULL || place_units(q) == 0) {
+        return;
     }
-    /* Through first lenders with no time of their own, LEND_DEPTH of them at most. */
-    uint32_t core = unit_core(range_first(b));
-    const struct place *l = thread_place_on(p2v(t->lenders), core);
-    for (uint32_t i = 1; i < LEND_DEPTH && l != NULL && account_now(l) < tick_parts(); i++) {
-        LOOP_BOUND(LEND_DEPTH);
-        const struct thread *lt = place_thread(l);
-        const struct place *next = lt->lenders != 0 ? thread_place_on(p2v(lt->lenders), core) : NULL;
-        if (next == NULL) {
-            break;
+    m->units = true;
+    if (account_now(q) >= tick_parts()) {
+        uint32_t due = vtime_of(q) + place_span(q);
+        if (!m->time || (int32_t)(due - m->due) < 0) {
+            m->due = due;
         }
-        l = next;
+        m->time = true;
+    } else if (m->check) {
+        check_release(m->p, q, q == m->p ? "a place's account reaches a tick before the release"
+                                         : "a lender's account reaches a tick before the release");
     }
-    return l;
+}
+
+/*
+ * The lender of a borrower's ring at at, NULL for none or for something that does not lend to it;
+ * check_lenders holds the rings themselves.
+ */
+static const struct thread *lender_at(const struct thread *h, paddr_t at)
+{
+    const struct obj_header *o = at != 0 ? object_find(at) : NULL;
+    return o != NULL && o->type == CAP_THREAD && ((const struct thread *)o)->lend_to == v2p(h) ? (const struct thread *)o : NULL;
+}
+
+/*
+ * The one after a lender on its borrower's ring, 0 once the ring closes, or where the next is not linked back to it,
+ * so that the walk ends on a ring check_lenders has yet to hold, as its own does.
+ */
+static paddr_t lender_after(const struct thread *h, const struct thread *l)
+{
+    const struct thread *next = l->lend_next != h->lenders ? lender_at(h, l->lend_next) : NULL;
+    return next != NULL && next->lend_prev == v2p(l) ? v2p(next) : 0;
+}
+
+/*
+ * The accounts a place's thread may run on: its own, and those of the threads that lend to it, or lend to one that does,
+ * LEND_DEPTH lends on, each thread on the way holding the time of the place's core; by the rings, as the kernel looks at the units.
+ */
+static struct may_run may_run(const struct place *p, bool check)
+{
+    struct may_run m = { p, check, false, false, 0 };
+    const struct cap *b = place_time(p);
+    if (b->type != CAP_TIME) {
+        return m;
+    }
+    uint32_t core = unit_core(range_first(b));
+    may_run_on(&m, p);
+    _Static_assert(LEND_DEPTH == 3, "three rings deep");
+    const struct thread *h0 = place_thread(p), *h1, *h2, *h3;
+    for (paddr_t a1 = h0->lenders; (h1 = lender_at(h0, a1)) != NULL; a1 = lender_after(h0, h1)) {
+        const struct place *p1 = thread_place_on(h1, core);
+        if (p1 == NULL) {
+            continue;
+        }
+        may_run_on(&m, p1);
+        for (paddr_t a2 = h1->lenders; (h2 = lender_at(h1, a2)) != NULL; a2 = lender_after(h1, h2)) {
+            const struct place *p2 = thread_place_on(h2, core);
+            if (p2 == NULL) {
+                continue;
+            }
+            may_run_on(&m, p2);
+            for (paddr_t a3 = h2->lenders; (h3 = lender_at(h2, a3)) != NULL; a3 = lender_after(h2, h3)) {
+                may_run_on(&m, thread_place_on(h3, core));
+            }
+        }
+    }
+    return m;
 }
 
 /*
  * The queue a place belongs on: none unless its thread is ready, the place is bound, and its thread's turn is nowhere;
- * the run queue with a tick in its account or its lender's, else the spare queue with spare time,
- * else the spent queue with units of its own or its lender's, and none without.
+ * the run queue with a tick in its account or a lender's, else the spare queue with spare time,
+ * else the spent queue with units of its own or a lender's, and none without.
  */
 static uint8_t queue_owed(const struct place *p)
 {
@@ -412,14 +479,14 @@ static uint8_t queue_owed(const struct place *p)
     if (t->state != THREAD_READY || is_turn(t) || place_time(p)->type != CAP_TIME) {
         return QUEUE_NONE;
     }
-    const struct place *l = lender_of(p);
-    if (account_now(p) >= tick_parts() || (l != NULL && account_now(l) >= tick_parts())) {
+    struct may_run m = may_run(p, false);
+    if (m.time) {
         return QUEUE_RUN;
     }
     if (place_spare(p)) {
         return QUEUE_SPARE;
     }
-    return place_units(p) != 0 || (l != NULL && place_units(l) != 0) ? QUEUE_SPENT : QUEUE_NONE;
+    return m.units ? QUEUE_SPENT : QUEUE_NONE;
 }
 
 /*
@@ -450,7 +517,7 @@ static void check_lenders(const struct thread *t)
     } while (at != t->lenders);
 }
 
-/* An account that gives p time once it holds a tick, its own or its lender's, reaches one no earlier than the release. */
+/* An account that gives p time once it holds a tick, its own or a lender's, reaches one no earlier than the release. */
 static void check_release(const struct place *p, const struct place *a, const char *what)
 {
     if (a == NULL || place_units(a) == 0) {
@@ -528,10 +595,12 @@ static void check_place(const struct thread *t, uint32_t i, uint32_t *held)
     } else if (p->queue_next != 0 || p->queue_prev != 0) {
         fail("a place on no queue is linked into one", v2p(t), i, p->queue_next);
     }
-    /* One that waits without time has it again at the release, by its own account or its lender's, which waits on no queue. */
-    if (owed == QUEUE_SPARE || owed == QUEUE_SPENT) {
-        check_release(p, p, "a place's account reaches a tick before the release");
-        check_release(p, lender_of(p), "a lender's account reaches a tick before the release");
+    /*
+     * One that waits without time has it again at the release, by its own account or a lender's, which waits on no queue,
+     * and one with lenders on the run queue is looked at again there too, since an account that comes to hold a tick may make its request due sooner.
+     */
+    if (owed == QUEUE_SPARE || owed == QUEUE_SPENT || (owed == QUEUE_RUN && t->lenders != 0)) {
+        may_run(p, true);
     }
 }
 
@@ -710,6 +779,11 @@ static void check_queue(paddr_t head, uint8_t queue, uint32_t core)
                 fail("a request is due further ahead than its span", v2p(p), p->deadline, vt);
             }
         }
+        /* Whatever it runs on, its request is due no later than one on the account it may run on that is due first. */
+        struct may_run m = queue == QUEUE_RUN ? may_run(p, false) : (struct may_run){ 0 };
+        if (m.time && (int32_t)(p->deadline - m.due) > 0) {
+            fail("a request waits due later than a lender's would be", v2p(p), p->deadline, m.due);
+        }
         queued_threads++;
         at = p->queue_next;
     } while (at != head);
@@ -776,21 +850,19 @@ static void check_core(uint32_t i)
             fail("the ticks of a turn were not charged to its payer", v2p(payer), paid->stamp, c->ticks);
         }
         /*
-         * It pays from the wait in which it lent the turn's thread its time, the first of the thread's lenders,
-         * and once woken until the turn ends.
+         * It pays from the wait in which it lent the turn's thread its time, or lent it to one that lends it on,
+         * LEND_DEPTH lends at most, and once it or one on the way is woken until the turn ends.
          */
-        /* Or through a chain of first lenders, LEND_DEPTH at most, until one in the chain wakes or stops. */
         const struct thread *by = payer;
         for (uint32_t d = 0; d < LEND_DEPTH && by->state == THREAD_WAITING && by != c->turn; d++) {
             LOOP_BOUND(LEND_DEPTH);
-            const struct thread *next = by->lend_to != 0 ? p2v(by->lend_to) : NULL;
-            if (next == NULL || next->lenders != v2p(by)) {
-                fail("a turn's payer that waits is not the turn's first lender", i, v2p(payer), by->lend_to);
+            if (by->lend_to == 0) {
+                fail("a turn's payer that waits does not lend to the turn's thread", i, v2p(payer), 0);
             }
-            by = next;
+            by = p2v(by->lend_to);
         }
         if (by->state == THREAD_WAITING) {
-            fail("a turn's payer that waits is not the turn's first lender", i, v2p(payer), by->lend_to);
+            fail("a turn's payer that waits does not lend to the turn's thread", i, v2p(payer), by->lend_to);
         }
     }
     /*
@@ -937,8 +1009,8 @@ static void check_wake(void)
         }
         return;
     }
-    /* Each tick decides afresh who pays for a turn on lent time. */
-    if (core->payer != NULL) {
+    /* Each tick decides afresh who pays for a turn on lent time, or one others lend to. */
+    if (core->payer != NULL || core->turn->lenders != 0) {
         fail("the timer lets a tick pass while the turn runs on lent time", wake, v2p(core->turn), v2p(core->payer));
     }
     const struct thread *t = core->turn;

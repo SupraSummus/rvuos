@@ -418,10 +418,11 @@ Needs `RIGHT_R`.
 `a1` = slot of a `Thread` capability with `RIGHT_X`, the borrower; the caller itself is `KERR_INVALID_ARG`.
 `a2` = the span, as `OP_NOTIFY_WAIT`'s `a1`, which the borrower's requests on the caller's time are due within too.
 Waits as `OP_NOTIFY_WAIT` does, and returns at once, lending nothing, if some bit is set.
-While it waits, a borrower without time of its own on a core runs there on the account of the thread that has lent it time longest,
-if that one holds the time of that core too,
+While it waits, the borrower runs on a core on whichever account it may run on there would have its request due first:
+its own, the caller's, another lender's, or one lent to a lender that lends in turn, `LEND_DEPTH` lends on,
+each holding the time of that core and a tick;
 and a caller whose own time pays for its turn hands the rest of the turn to the borrower,
-if it is that one and the borrower waits for a turn; section 5.12.
+if the borrower now runs on that time and waits for a turn; section 5.12.
 Returns `KERR_INVALID_CAP` with no bits if the notification's pool, or the borrower's, is destroyed while it waits.
 A stop leaves the waiter at this call, lending nothing, which a resume makes again; `OP_THREAD_STOP`.
 

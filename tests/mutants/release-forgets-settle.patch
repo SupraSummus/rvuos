@@ -5,17 +5,18 @@ a thread with units that waits without time reaches a tick no earlier than the r
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: a place waits on another queue than its account says
 Report: a place's account reaches a tick before the release
+Report: a request waits due later than a lender's would be
 Witness: fuzz lend-lender-woken
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -633,7 +633,7 @@ static void release(uint32_t c)
-         struct place *p = unit_first(first + i);
-         i += p != NULL ? place_units(p) : 1;
-         if (p != NULL && (p->queue == QUEUE_SPARE || p->queue == QUEUE_SPENT)) {
+@@ -844,7 +844,7 @@ static void release(uint32_t c)
+          */
+         bool reached = !has_time(p->balance) && has_time(account_now(p));
+         if (p->queue == QUEUE_SPARE || p->queue == QUEUE_SPENT || (p->queue == QUEUE_RUN && reached && place_thread(p)->lenders != 0)) {
 -            place_settle(p);
 +            (void)p;
          }
-         /* A lender waits on no queue, and its account may give the borrower it lends to time. */
-         struct place *h = p != NULL ? place_borrower(p) : NULL;
+         /* A lender waits on no queue, and the borrowers it lends to, and on, may run on its account now. */
+         const struct thread *x = place_thread(p);

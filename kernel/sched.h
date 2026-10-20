@@ -118,7 +118,7 @@ _Static_assert((1ull << SPAN_MAX) + (uint64_t)COUNT_PARTS * TICK_COUNTS_MAX + (u
                    (1ull << 31),
                "a deadline lies within 2^31 counts of the count");
 /*
- * How many lenders lent time goes through: a borrower's first lender with no time of its own lends what it borrows,
+ * How many lends lent time goes through: a borrower that lends in turn lends on what it may run on,
  * so a client's account pays for its server and for the driver its server waits on.
  */
 #define LEND_DEPTH 3u
@@ -603,7 +603,7 @@ void sched_wait(struct thread *t, struct notification *ntfn);
 /*
  * The running thread waits on a notification, as sched_wait has it,
  * and lends another thread its time meanwhile, behind the threads that lend it already.
- * If its own time pays for its turn, it is now the borrower's first lender, and the borrower waits for a turn on its core,
+ * If its own time pays for its turn, the borrower now runs on that time, and the borrower waits for a turn on its core,
  * it hands the borrower the rest of the turn; see OP_NOTIFY_LEND.
  */
 void sched_lend(struct thread *t, struct notification *ntfn, struct thread *borrower);

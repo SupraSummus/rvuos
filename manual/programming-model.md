@@ -732,8 +732,8 @@ and moves `taken` only as far as its host says it has the bytes, so a halt write
   as the call or the interrupt that made it ready returns,
   after the running thread has made again a call that stopped for an interrupt, if it stands at one.
 - A thread waiting with `OP_NOTIFY_LEND` lends the thread it names its accounts, section 5.12:
-  a borrower without time on a core waits on its run queue while its lender has time there,
-  and the turns it takes so cost the lender's account on that core.
+  a borrower waits on a core's run queue while it or a lender has time there,
+  at the deadline of whichever of those would be due first, and the turns it takes so cost that account.
 - The machine timer ticks at `TIMER_HZ`, 1 kHz on every board unless the build sets another rate, `make TIMER_HZ=`,
   which divides a second and the board's counter and is at least 650;
   `OP_CAP_INFO` on a `Clock` or a `Time` capability tells the tick, section 6.15, so a program need not assume one.
@@ -805,11 +805,17 @@ Revoking below `TIME` takes the child's units back, and its threads stop.
 A thread that waits may lend another thread its time meanwhile:
 `OP_NOTIFY_LEND` waits on a notification as `OP_NOTIFY_WAIT` does, and names the borrower
 through a capability to its thread with `RIGHT_X`, which lends it time and allows nothing else.
-A borrower without time of its own on a core, section 5.11, runs there on the account of the thread that has lent it time longest,
-if that one holds the time of the core too, and the turns it takes so cost that account;
-a lender whose own time pays for its turn hands the rest of it to the borrower at once, if the borrower waits for a turn.
+A borrower runs on a core, section 5.11, on whichever account it may run on there would have its request due first:
+its own, or a lender's, each due the span its thread's wait gave past its virtual time,
+and the turns it takes so cost that account.
+A borrower that lends in turn lends on what it may run on, `LEND_DEPTH` lends deep, so a client pays for its server and for the driver that one waits on,
+and only on a core both hold the time of.
+A lender whose own time pays for its turn hands the rest of it to the borrower at once, if the borrower waits for a turn and now runs on that time.
 A signal from the borrower that wakes the lender hands it the rest of the turn back.
-The time goes one step, and only on a core both hold the time of: a borrower that waits, or lends in turn, passes none of it on.
+
+So the most urgent of a borrower's waiters pays for it, whatever the borrower does meanwhile:
+a server that answers its clients in turn spends the time of the one that waits on the asks of those ahead of it,
+and a waiter that wants its answer sooner than its units buy that work waits for its account.
 
 So a thread waiting for whoever holds a lock lends it its time, and so does a client waiting for its server's answer:
 a holder or a server with few units keeps a waiter with many no longer than its work takes.
