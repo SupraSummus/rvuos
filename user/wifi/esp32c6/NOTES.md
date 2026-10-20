@@ -776,3 +776,98 @@ about 4,800 cycles a kilobyte here.
 Reading in place across the boundary would want the MAC's list to hold the link's own buffers,
 a block the root task's free memory cannot spare yet,
 and sending in place would want the MAC to read a frame from a chain of descriptors, which is untried; see `TODO.md`.
+
+## Taking the PHY from `libphy.a`
+
+`libphy.a` is taken a function at a time,
+each the driver's own in `phy.c` and held against the library's before the library's symbol is weakened
+in the copy `build.mk` makes, until nothing of it is linked.
+The driver keeps to 2.4 GHz channels 1 to 13 and never above the power `libphy.a` sets for a channel and rate.
+
+The first is `phy_wifi_enable_set`: one read-modify-write of bit 1 of `MODEM_SYSCON_WIFI_BB_CFG`, 0x600A981C,
+`lui 0x600aa; lw -0x7e4(a4); ori 2` or `andi ~2; sw`, and nothing else,
+so the driver's own and the library's are equal by their disassembly alone.
+The library's own `phy_wakeup_init_` and `bb_init` call it with 0 under `phy_param[0x19e]`,
+and after the weakening they call the driver's.
+`phy_bbpll_en_usb`, which the driver called once before its calibration, is an empty return on this chip,
+so its call went rather than a replacement.
+`make BOARD=esp32c6 wifi-esp32c6-refs` counts the driver's own calls of the library, 17 before and 15 after.
+
+Next, the temperature sensor's power: `phy_set_tsens_power`, bit 22, `APB_SARADC_TSENS_PU`,
+of `APB_SARADC_APB_TSENS_CTRL_REG`, 0x6000E058, one read-modify-write from the argument's low bit,
+and `phy_xpd_tsens`, which the library's writes as: while `phy_param`'s byte 0x19D is clear,
+`phy_set_tsens_power(0)`, then set the flag.
+Both are their disassemblies' own, with nothing else in them;
+a scan on the board read the calibration and left the radio off at a clean halt,
+and the count is 15 before and 13 after.
+
+Next the ROM's own two, batched into one board run.
+`phy_disable_low_rate`, which `mac_low_rate_disable` called, is `phy.c`'s `drv_phy_low_rate_disable`:
+three stores, 0x600A8060's bit 10, then its bit 11, then 0x600A807C's bit 11, each a read-modify-write.
+Its masks come from the ROM's instructions run by a script, not read by eye,
+after the first reading took `lui 0xfffff; addi 0x7ff` for a `~0x7ff` that it is not.
+`get_data_sat`, which the baseband's power table asked, is `btbb.c`'s `data_sat`:
+span where span is below index, else index, or bias where index lies below it, so index held between them.
+A scan and a join on the board each ended at a clean halt, and the count is 13 before and 11 after.
+
+Then `phy_get_max_pwr`, the first whose result depends on the calibration: the driver's own `rate_to_index`,
+`wifi_get_target_power_new`, `get_chan_target_power_new` and `get_target_pwr` in `phy.c`, and the ROM's
+`get_rate_fcc_index` written out there too, held to the library's in one run for every channel 1 to 13 and every
+rate the driver's table is read at, 0 to 0x1b: 364 pairs, none different and none above the library's.
+The library's `rate_to_index` runs past its own 0x12-byte table above rate 0x1f, reading its stack, and those
+entries reached no register: `mac_init_tx_pwr` keeps the 0x1a entries its readers ask for, and our
+`phy_get_max_pwr` refuses a rate above 0x1f. The count is 11 before and 10 after.
+
+Then `wait_i2c_sdm_stable`, which `open_i2c_xpd_new` calls: our own reads the analog I2C's block 0x63, host 1,
+register 0 through the ROM's table until it answers 0x5b, or until the MAC's microsecond counter at 0x600AD000
+has moved more than 0x270f, as libphy's disassembly does. The count is 10 before and 9 after.
+
+Then `phy_close_rf`, which `drv_phy_off` calls: the library's `phy_close_rf_` written out, and the driver's own.
+While the temperature sensor still has its power it reads the temperature through the ROM's table,
+its DAC code naming one of the library's five entries and the ROM's `code_to_temp` turning the sensor's code,
+with the DAC corrected where the temperature lies outside its entry's range;
+a print the library makes when the front end's setting does not settle is left out, a print not being a device write.
+Then, only once the library's bring-up has marked the PHY up, it brings the front end's frequency setting down,
+forces the TX and RX off, takes the RF down through the driver's own `phy_xpd_rf`, calibrates the RF PLL with the ROM,
+resets the analog bias, and marks the RF off, all outside the library's critical section,
+which on this chip is a pair of empty returns.
+An analog I2C log of the library's window and the driver's, taken once each the same way, is the same eight entries
+to one hash; the temperature fell in its entry's range, so the correction's write was not exercised.
+Off the board, `phy-ab.py` runs both functions from one state in an emulator and compares their device accesses:
+the same for 12 seeds and for each of the four combinations of the sensor read's and the PHY-up flag's branches.
+It found two differences the board had not reached -- the frequency setting's enable is bit 26, not bit 30,
+and the sensor table's offset byte is a signed load, its 0xfe and 0xff being -2 and -1 -- both fixed.
+The PMU's word 0x600b0154 is ignored, the one the driver's `phy_xpd_rf` leaves to the kernel.
+The count is 9 before and 12 after: the library's own call went, and the driver's own now names four of the ROM's,
+which the ROM holds, not the library. Of the library's own symbols alone it is 7 before and 6 after.
+
+Then the channel, the widest tree: the library's `phy_change_channel` and `chip_v7_set_chan`, `set_chanfreq` between them,
+and the leaves of `chip_v7_set_chan_misc` the driver's own in `phy.c` --
+`set_freq_i2c` and `phy_i2c_master_mem_txcap`, `wifi_get_tx_tab` with the two transmit-gain tables it builds,
+`wifi_set_tx_gain` and its gain-memory write, `set_tx_gain_mem`, `phy_set_most_tpw`, `chan14_mic_cfg`,
+`wr_rx_gain_mem` with the receive-gain index `rfrx_gain_index_new`, `set_rx_comp_new` and `write_gain_mem_new`.
+The driver's own channel is refused outside 2.4 GHz channels 1 to 13 by a fault in `chip_v7_set_chan`,
+after the frequency is turned into a channel, and the library's tracking functions' current channel lies inside them.
+Off the board, `phy-ab.py` held `chip_v7_set_chan` to the library's for channels 1 to 13, twenty states,
+both second arguments, each gain-run length and the 11p and channel-14 branches: 2080 calls, every access the same;
+it found two differences the reading had missed -- `write_gain_mem_new` adds its 0x80000 rather than ors it,
+and the eighth length byte of `wr_rx_gain_mem` is the zero the library's stack holds past the seven -- both fixed.
+On the board a scan and a join ended clean, and the count is 12 before and 20 after, of the library's own 6 before and 4 after.
+
+Then the wakeup, which `drv_phy_on` calls when the PHY was calibrated before, as the station's power save turns
+the RF on and off: the library's `phy_wakeup_init_` written out, and the twenty leaves it runs through --
+`i2c_clk_sel`, `i2c_bbpll_set`, `reg_set_new`, `freq_reg_init`, `bias_reg_set`, `pbus_clear_reg`, `phy_i2c_init2`,
+`filter_dcap_set`, the frequency chain `freq_i2c_mem_write_new`, `freq_get_i2c_data` and `freq_i2c_write_set_new`
+under `freq_i2c_data_write_new`, and `phy_reg_init` with `rx_11b_opt`, `tx_paon_set_new`, `agc_reg_init_new`,
+`bb_reg_init_new`, `btbb_wifi_bb_cfg2`, `noise_floor_auto_set_new` and `bt_filter_reg_new`.
+It powers the baseband PLL and the analog bias, brings the front end, the baseband and the frequency setting up,
+clears the RF-off and sensor flags in `phy_param`, and clears Wi-Fi's baseband where `phy_param` 0x19e asks;
+the library runs it inside the ROM's I2C critical section, which the driver's own leaves out.
+Four device words the library's own leaves write are left to the kernel's `board_init`, as the earlier steps left them:
+PCR's 0x60096130 from `phy_get_xtal_freq`, the PMU's 0x600b00cc and 0x600b0154 from `open_i2c_xpd_new`,
+and LP_AON's 0x600b1054 from `pwdet_reg_init_new`; `phy-ab.py` ignores those four and the wakeup is the same
+as the library's for twelve states.
+On the board a scan heard four access points, and a join with `ps=1` turned the RF off and on seventeen times
+through the driver's own `phy_close_rf` and `phy_wakeup_init`, answered the echo and five pings, and halted clean;
+the count is 20 before and 35 after -- the ROM's own PHY functions the driver's new code names --
+of the library's own symbols 4 before and 3 after.

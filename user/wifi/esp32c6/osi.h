@@ -125,6 +125,7 @@ void drv_phy_off(void);
 void drv_phy_enable(void); /* the PHY and Wi-Fi's part of it */
 void drv_phy_disable(void);
 void drv_phy_channel(uint32_t channel);
+void drv_phy_low_rate_disable(void); /* the ROM's phy_disable_low_rate, the driver's own */
 /* The PHY kept to the temperature, once a second while the station is joined; see phy.c. */
 void drv_phy_track(void);
 void drv_wifi_clock_enable(void);

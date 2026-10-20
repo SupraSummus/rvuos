@@ -6,7 +6,7 @@
  * Each case is a sequence of the driver's own and the file of theirs it is held to, named alike;
  * config is mac_config, the driver's own start's whole MAC configuration, so its order is that case's;
  * bb is btbb_init of btbb.c, the 802.15.4 baseband's bring-up in place of libbtbb.a's bt_bb_v2_init_cmplx, which the
- * driver took whole; test/btbb-host.c gives the ROM's get_data_sat and libphy's phy_param alone.
+ * driver took whole; test/btbb-host.c gives libphy's phy_param alone.
  * A case named CASE=FILE runs CASE against FILE.txt instead, as bb=bb-other does: the same window from another state
  * of the modem, so that a write the libraries made of what they read and the own code makes a constant fails one.
  * The files are frozen: the libraries are linked no more, so no run can take them again, and the make target that
@@ -129,8 +129,8 @@ void phy_get_max_pwr(uint32_t index, uint8_t out[2])
     out[1] = 0;
 }
 
-/* The ROM's, which the low-rate group calls; its own accesses are the ROM's and stay out of the replay. */
-void phy_disable_low_rate(void)
+/* The low-rate group's first write, whose two words the recorded run's ROM made and the fixture leaves out. */
+void drv_phy_low_rate_disable(void)
 {
 }
 

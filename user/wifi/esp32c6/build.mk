@@ -191,9 +191,18 @@ mac-replay-test: $(MAC_REPLAY_TEST)
 	$(MAC_REPLAY_TEST) $(BTBB_REPLAY_DIR) bb=bb-other
 	tests/mac-replay-test.py $(MAC_REPLAY_TEST) $(WIFI_ESP)/test/replay $(MAC_REPLAY_EXPECTED)
 
-# libphy.a's functions that reach PCR, the PMU or the LP domain, weakened in a copy, so that the driver's own,
-# in phy.c, take their place; the copy is made again when this file, which names them, changes.
-WIFI_ESP_PHY_OWN := phy_get_xtal_freq tsens_read_init_new pwdet_reg_init_new open_i2c_xpd_new phy_xpd_rf
+# libphy.a's functions the driver's own, in phy.c, replace: weakened in a copy, so that the driver's take their
+# place; the copy is made again when this file, which names them, changes.
+WIFI_ESP_PHY_OWN := phy_get_xtal_freq tsens_read_init_new pwdet_reg_init_new open_i2c_xpd_new phy_xpd_rf \
+                    phy_wifi_enable_set phy_set_tsens_power phy_xpd_tsens phy_get_max_pwr wait_i2c_sdm_stable \
+                    phy_close_rf set_rx_comp_new write_gain_mem_new phy_i2c_master_mem_txcap set_freq_i2c \
+                    wifi_get_tx_tab wifi_set_tx_gain phy_set_most_tpw chan14_mic_cfg wr_rx_gain_mem \
+                    chip_v7_set_chan phy_change_channel \
+                    i2c_clk_sel i2c_bbpll_set reg_set_new freq_reg_init bias_reg_set \
+                    noise_floor_auto_set_new bt_filter_reg_new pbus_clear_reg phy_i2c_init2 filter_dcap_set \
+                    freq_get_i2c_data freq_i2c_write_set_new freq_i2c_mem_write_new freq_i2c_data_write_new \
+                    rx_11b_opt tx_paon_set_new agc_reg_init_new bb_reg_init_new btbb_wifi_bb_cfg2 phy_reg_init \
+                    phy_wakeup_init
 
 $(BUILD)/$(WIFI_ESP)/libphy.a: $(WIFI_ESP_INIT) $(WIFI_ESP)/build.mk
 	$(OBJCOPY) $(addprefix --weaken-symbol=,$(WIFI_ESP_PHY_OWN)) $(PHYBLOB_CACHE)/libphy.a $@

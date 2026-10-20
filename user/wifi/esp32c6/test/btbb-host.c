@@ -1,17 +1,8 @@
 /*
- * What mac-replay-test's bb cases need besides btbb.c on the host: the ROM's get_data_sat and libphy's phy_param, which
- * the driver's own baseband asks and the host answers here. The library's functions the bring-up took are btbb.c's own
- * now, so none of them is stubbed, and libbtbb.a is linked no more.
+ * What mac-replay-test's bb cases need besides btbb.c on the host: libphy's phy_param, which the driver's own
+ * baseband asks and the host answers here. The library's functions the bring-up took are btbb.c's own now,
+ * the ROM's get_data_sat among them, so none of them is stubbed, and libbtbb.a is linked no more.
  */
-
-/* The ROM's get_data_sat, which bt_bb_get_tx_pwr_table asks; the replay never calls it, as btbb_init does not call it. */
-__attribute__((weak)) int get_data_sat(int index, int span, int bias)
-{
-    (void)index;
-    (void)span;
-    (void)bias;
-    return 0;
-}
 
 /*
  * libphy's calibration data, of which bt_agc_gain_set reads the byte at 0x120. It is libphy's datum, not a constant of

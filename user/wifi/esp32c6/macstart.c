@@ -113,8 +113,8 @@ static void mac_he_set_ack_rate(uint32_t rate)
     }
 }
 
-/* The ROM's low-rate toggle, which the driver's start still calls, as their rate group does. */
-extern void phy_disable_low_rate(void);
+/* phy.c's own of the ROM's phy_disable_low_rate, which the low-rate group below calls first; also in osi.h. */
+extern void drv_phy_low_rate_disable(void);
 
 void mac_queues_init(void)
 {
@@ -454,19 +454,19 @@ static void mac_set_tx_min_pwr(int pwr)
 
 /*
  * The libraries' hal_init_tx_pwr, written out: their power table, one two-byte entry for each of their 43 rates,
- * filled by their phy_get_max_pwr, and then their hal_init_tb_power and hal_init_imrsp_power, both below.
- * The table is the driver's own; the one their net80211 paths read is theirs, filled by their hal_init_tx_pwr at
- * the end of the driver's start, so the two hold the same values.
- * phy_get_max_pwr stays a libphy call, and the host replay stubs it with the values of the recorded run.
+ * which their phy_get_max_pwr filled, and then their hal_init_tb_power and hal_init_imrsp_power, both below.
+ * The driver's table keeps only the 0x1a entries its readers ask for, 0 to 0x19: the libraries' entries above
+ * came of a rate_to_index that read past their own table and reached no register.
+ * phy_get_max_pwr is the driver's own now, and the host replay stubs it with the values of the recorded run.
  */
-static uint8_t mac_pwr_table[0x2b * 2u];
+static uint8_t mac_pwr_table[0x1a * 2u];
 
 extern void phy_get_max_pwr(uint32_t index, uint8_t out[2]);
 
-/* The libraries' hal_get_tx_pwr, written out: a table entry, the rates above 0x19 read ten back. */
+/* The libraries' hal_get_tx_pwr, written out: a table entry; the rates above 0x19 they read ten back are unasked. */
 static uint8_t mac_get_tx_pwr(uint32_t index)
 {
-    return mac_pwr_table[2u * (index > 0x19u ? index - 0xau : index)];
+    return mac_pwr_table[2u * index];
 }
 
 /*
@@ -523,7 +523,7 @@ static void mac_init_imrsp_power(void)
 
 static void mac_init_tx_pwr(void)
 {
-    for (uint32_t i = 0; i < 0x2bu; i++) {
+    for (uint32_t i = 0; i < 0x1au; i++) {
         phy_get_max_pwr(i, &mac_pwr_table[2u * i]);
     }
     mac_init_tb_power();
@@ -604,13 +604,14 @@ void mac_rx_match_init(void)
 }
 
 /*
- * The libraries' hal_mac_disable_low_rate, written out: the ROM's phy_disable_low_rate first, then their four
- * low-rate registers, 0x90a0b and 0x50100 written twice each, and their hal_he_set_bbrxhung_time(0).
+ * The libraries' hal_mac_disable_low_rate, written out: the ROM's phy_disable_low_rate first,
+ * for which the driver's own drv_phy_low_rate_disable takes its place,
+ * then their four low-rate registers, 0x90a0b and 0x50100 written twice each, and their hal_he_set_bbrxhung_time(0).
  * Their hal_mac_rate_autoack_init, which hal_init calls just before it, is an empty return; the driver's start drops it.
  */
 void mac_low_rate_disable(void)
 {
-    phy_disable_low_rate();
+    drv_phy_low_rate_disable();
     wr(RATE_CTS0, 0x90a0bu);
     wr(RATE_CTS1, 0x50100u);
     wr(RATE_ACK0, 0x90a0bu);

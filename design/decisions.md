@@ -503,7 +503,11 @@ until the maintainer decides otherwise.
     Working default: the driver's own MAC and bring-up are written from what `libpp.a` and `libnet80211.a` do to the device --
     the registers, the values and their order, read by disassembly and by the trace window, see `user/wifi/esp32c6/NOTES.md` --
     and none of their code is copied;
-    `libphy.a` stays, linked as Espressif ships it.
+    `libphy.a` is being taken the same way, a function at a time,
+    each the driver's own in `phy.c` and held against the library's before the library's is weakened to its place,
+    until nothing of it is linked.
+    Its 2.4 GHz channels are 1 to 13, and its power never rises above what `libphy.a` sets for a channel and rate,
+    EN 300 328's 20 dBm EIRP.
     Those libraries are esp32-wifi-lib's and esp-phy-lib's, whose READMEs give the binaries ESP-IDF's license,
     the Apache License 2.0, as its "Object" form.
     The station runs on hostap, under the BSD license, and its SAE on Mbed TLS, under Apache 2.0 or the GPL at the taker's choice;

@@ -139,8 +139,6 @@
 static const uint8_t bt_bb_cca_en = 0;
 /* libphy's calibration data, of which bt_agc_gain_set reads one byte; libphy's still, as the PHY is. */
 extern const uint8_t phy_param[];
-/* The ROM's, which fills the power table entry by entry; its three arguments' roles are not known. */
-extern int get_data_sat(int, int, int);
 
 /* The baseband's functions, declared where they are defined below, for the prototype. */
 void bt_bb_v2_tx_set(uint32_t mode);
@@ -289,7 +287,24 @@ void ieee802154_txon_delay_set(void)
 static int8_t bt_bb_pwr_table[16];
 
 /*
- * The libraries' bt_bb_get_tx_pwr_table, written out: 16 into the length's byte, then 16 times the ROM's get_data_sat
+ * The ROM's get_data_sat, written out: while span is at least index, take index, and bias where index lies below it,
+ * so the result is index held between bias and span. It reaches no device;
+ * the library's disassembly: blt when span is below index returns span,
+ * else index, or bias where index is below it.
+ */
+static int data_sat(int index, int span, int bias)
+{
+    if (span >= index) {
+        span = index;
+        if (index < bias) {
+            span = bias;
+        }
+    }
+    return span;
+}
+
+/*
+ * The libraries' bt_bb_get_tx_pwr_table, written out: 16 into the length's byte, then 16 times data_sat
  * with the running index -0x18 to 0x18 by three, 0x14 and -0xf, its byte stored entry by entry, and the table returned.
  * It reaches no device, so the trace and the host replay hold none of it.
  */
@@ -298,7 +313,7 @@ const int8_t *bt_bb_get_tx_pwr_table(uint8_t *length)
     int8_t *p = bt_bb_pwr_table;
     *length = 0x10u;
     for (int i = -0x18; i != 0x18; i += 3) {
-        *p++ = (int8_t)get_data_sat(i, 0x14, -0xf);
+        *p++ = (int8_t)data_sat(i, 0x14, -0xf);
     }
     return bt_bb_pwr_table;
 }
