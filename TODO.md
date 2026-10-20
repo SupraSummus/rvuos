@@ -116,8 +116,8 @@ what is left:
   would want a close that tells it first and waits for its word, as the lender's.
 - A hub keeps a slot of its parent's for each client connected, its channel's carve, which `chan_hub_close` revokes;
   `lib/bulk.h` deletes its carves once installed and uninstalls them at a close, which would spare a hub's parent those slots too.
-- `user/lab/` does not show yet a client of several threads asking at once, a driver whose work an interrupt starts,
-  two cores, a client that makes its ring look full, or one that gives up on an answer.
+- `user/lab/` does not show yet a client of several threads asking at once, a driver woken between ticks,
+  as a device's interrupt would wake it, two cores, a client that makes its ring look full, or one that gives up on an answer.
   Nor several takers lending to one holder, or a holder that waits on a second lock.
   Nor a thin server, which only passes data on while its clients do the work,
   to tell what moving work into the client saves and what the hop still costs.

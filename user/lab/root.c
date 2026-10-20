@@ -8,7 +8,8 @@
  *   lab: <scenario> <member> n=<answers> median=<us> p90=<us> worst=<us>
  *
  * the median and p90 of the first LAB_SAMPLES answers and the worst of all; a locker's answers are its takes,
- * of the lock of lib/lock.h, or of its lock that names the holder, whose takers lend the holder their time.
+ * of the lock of lib/lock.h, or of its lock that names the holder, whose takers lend the holder their time,
+ * and a driver's are how much later than its earliest each wake started.
  * Then it takes the cast down and checks that it got back what it handed out;
  * the run ends with "lab: done" and halt code 0.
  */
@@ -26,6 +27,7 @@
 #define ROOM_SIZE   0x10000u /* the cast's data, from one room, since Hazard3 gives the root task seven regions */
 #define POOL_SIZE   0x1000u
 #define LOCK_FRAME  0x400u
+#define CALM_US     (4u * PERIOD) /* the drivers alone, before the rest of the cast starts */
 #define WARM_US     20000u
 #define WINDOW_US   200000u
 
@@ -36,7 +38,7 @@
 #define PERIOD 3000u  /* a periodic member's, in microseconds: three ticks */
 #define JITTER 80000u /* the most a periodic member works before each ask */
 
-enum role { NONE, STORE, GATE, UI, BULK, HOG, LOCKER };
+enum role { NONE, STORE, GATE, UI, BULK, HOG, LOCKER, DRIVER };
 
 /* What lockers share: the lock of lib/lock.h, or its lock that names the holder, whose takers lend it their time. */
 enum lock_kind { NOTE, LEND };
@@ -44,6 +46,7 @@ enum lock_kind { NOTE, LEND };
 static void (*const entries[])(struct child_page *) = {
     [STORE] = store_main, [GATE] = gate_main, [UI] = ui_main,
     [BULK] = bulk_main,   [HOG] = hog_main,   [LOCKER] = locker_main,
+    [DRIVER] = driver_main,
 };
 
 #define CAST_MAX 5u
@@ -75,6 +78,7 @@ struct scenario {
 #define LENDING_UI(units, asks)                       { "ui", UI, units, asks, 0, 1, 0, SMALL, PERIOD, 0 }
 #define QUICK(kind)                                   SHARER("quick", kind, 16, SMALL, PERIOD, 0)
 #define SLOW(kind)                                    SHARER("slow", kind, 2, HOLD, 0, HOLD)
+#define DRIVER_OF(units)                              { "driver", DRIVER, units, 0, 0, 0, 0, SMALL, PERIOD, 0 }
 
 static const struct scenario scenarios[] = {
     { "alone", { STORE_OF(8), UI_OF(8, 1) } },
@@ -94,6 +98,10 @@ static const struct scenario scenarios[] = {
     { "lock-hog", { QUICK(NOTE), SLOW(NOTE), HOGGING } },
     { "lend", { QUICK(LEND), SLOW(LEND) } },
     { "lend-hog", { QUICK(LEND), SLOW(LEND), HOGGING } },
+    { "driver", { DRIVER_OF(8) } },
+    { "driver-hog", { DRIVER_OF(8), HOGGING } },
+    { "driver-spare", { DRIVER_OF(0), HOGGING } },
+    { "driver-hogs", { DRIVER_OF(8), HOGGING, { "hog2", HOG, 16, 0, 0, 0, 0, 0, 0, 0 } } },
 };
 
 static struct self self;
@@ -237,6 +245,20 @@ static void lock_free(struct shared_lock *l)
     must("the lock's pool back", mem_give(&self, &l->pool));
 }
 
+/* Starts the members that are drivers, or those that are not; returns how many it started. */
+static uint32_t start(const struct scenario *sc, uint32_t count, int drivers)
+{
+    uint32_t started = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        const struct member *m = &sc->cast[i];
+        if ((m->role == DRIVER) == drivers) {
+            must("start a member", child_start(&self, &kids[i], entries[m->role], 0, m->units));
+            started++;
+        }
+    }
+    return started;
+}
+
 static void run(const struct scenario *sc)
 {
     uint32_t count = 0;
@@ -279,9 +301,11 @@ static void run(const struct scenario *sc)
             lock_give_to(&lock, sc, count, i);
         }
     }
-    for (uint32_t i = 0; i < count; i++) {
-        must("start a member", child_start(&self, &kids[i], entries[sc->cast[i].role], 0, sc->cast[i].units));
+    /* The drivers first, alone for a while, so that each finds its earliest start; then the rest. */
+    if (start(sc, count, 1) != 0) {
+        sleep_us(sc, count, CALM_US);
     }
+    start(sc, count, 0);
 
     sleep_us(sc, count, WARM_US);
     set_phase(count, LAB_MEASURE);
@@ -289,8 +313,8 @@ static void run(const struct scenario *sc)
     set_phase(count, LAB_OVER);
     for (uint32_t i = 0; i < count; i++) {
         const struct member *m = &sc->cast[i];
-        /* The clients, and the lockers: one that wants the lock in time, and one whose holds the other waits out. */
-        if (m->role == UI || m->role == BULK || m->role == LOCKER) {
+        /* Whoever waits for something: the clients, the lockers and the drivers. */
+        if (m->role == UI || m->role == BULK || m->role == LOCKER || m->role == DRIVER) {
             report(sc->name, m->name, &page_of(i)->st);
         }
     }
