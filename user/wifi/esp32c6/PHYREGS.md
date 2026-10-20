@@ -60,7 +60,12 @@ and says which.
 ### Transmit
 
 - MMIO `FEDATA` 0x600A0400: `FEDATA_GAIN_CHAN` 0x410 (the transmit gain channel), `FEDATA_REG_SET1/2/3`
-  0x44C/0x46C/0x450, and the transmit DC calibration word 0x418 (below, under corrections).
+  0x44C/0x46C/0x450, `FEDATA_TX_TONE0` 0x420 (the transmit tone generator's first word), and the transmit DC
+  calibration word 0x418 (below, under corrections). `FEDATA_TX_TONE0` is the ROM's `ram_start_tx_tone_step`'s
+  and `ram_stop_tx_tone`'s own word, and `txiq_get_mis_pwr` writes its measurement into it (**known**, the ROM's
+  function names; no header names it). `FEDATA_REG_SET3`'s bits 13 and 14 are the TXIQ calibration's
+  `FEDATA_REG_SET3_TXCAL` (raised before it runs and left raised) and `FEDATA_REG_SET3_TXIQ_DONE` (lowered while
+  it runs and raised at its end) -- `rfcal_txiq_new`'s loop is the only source (**inferred**).
 - MMIO `FECTRL` 0x600A0800: the gain memory `FECTRL_GAIN_MEM_CONF`/`_MEM0`/`_MEM1`/`_MEM2`
   0x8C8/0x8CC/0x8D0/0x8D4, `FECTRL_REG_SET0`/`_SET4` 0x8F8/0x8FC, `FECTRL_TXRX_OFF` 0x910,
   `FECTRL_RX_GAIN_TRIG_EN` 0x904.
@@ -74,7 +79,8 @@ and says which.
 - `phy_param`: `TXIQ` 0xD0/0xD2, `LB_TXIQ` 0xE6, `TXDC` 0xA8..0xAE, `BT_TXIQ` 0x102,
   `BT_TXDC` 0x104..0x10A, `wifi_init_power` 0x52, `wifi_cal_power` 0xF7, `wifi_pwctrl_atten`
   0xF1..0xF3, `wifi_cal_atten` 0xF4..0xF6, `bt_cal_power` 0xFE, `bt_cal_atten` 0xF8..0xFA
-  (**known** labels).
+  (**known** labels), and `PHY_PARAM_TXCAL_TEMP` 0x48, the temperature the transmit calibration block last ran
+  at (**inferred** from `phy_cal_param_track`; no label names it).
 - pbus: `rftx` (4,1), (4,2), (5,1); `dco` (2,1), (3,1), (2,2), (3,2).
 
 ### Receive
@@ -100,6 +106,11 @@ and says which.
   sources `TXDC` 0xA8/0xAA, and 0xB0/0xB2 beside them (an open question).
 - MMIO: the transmit DC calibration word `FEDATA_TXDC_CTRL` 0x600A0418 (`FEDATA`) -- meaning **unknown**,
   its bits set out in the table below.
+- The transmit IQ calibration's own: the front end's `FEDATA_REG_SET3` bits 13 and 14 (above, under
+  transmit), the tone generator's `FEDATA_TX_TONE0` 0x600A0420, and `phy_param`'s `TXIQ` 0xD0 (the forward
+  pair) and `LB_TXIQ` 0xE6 (the loopback pair), beside the two start bytes `PHY_PARAM_TXIQ_TEMP` 0x18 and
+  `PHY_PARAM_TXIQ_ATTEN` 0x2B (**inferred** from `txiq_cal_init_new` / `rfcal_txiq_new`; the two start bytes
+  are **unknown**, no label naming them).
 - The receive DC calibration's words: `FECTRL` `FECTRL_RX_GAIN_TRIG_EN` 0x904, `FEDATA`
   `FEDATA_RX_IQ_EST0/1` 0x470/0x474 and `FEDATA_IQ_EST_I/Q/MAG` 0x488/0x48C/0x490, `FEDATA_RX_GAIN_SAR`
   0x4A0 (**inferred** from `set_rx_gain_cal_dc_new`'s loop).
@@ -131,10 +142,31 @@ walks each loop.
 - `set_rx_gain_cal_dc_new` / `dc_iq_est_new`: the receive path's DC offset is read through the modem's
   IQ estimate (`ram_iq_est_enable` -> `FEDATA_IQ_EST_I/Q/MAG`), so the receive DC path is baseband ->
   IQ estimate.
+- `txdc_cal_new`: a tone on the transmit side, the two DCO words forced into the pbus windows (2,1) and
+  (3,1), and each step decided by the front end's calibration word `FEDATA_TXDC_CTRL` -- its bits 29 and
+  28 move one offset each, its bit 22 is waited for; the settled pair goes to the caller's
+  `pbus_set_dco` buffer. So the transmit DC path is DCO -> the front end's calibration word -> back.
 - `set_tx_gain_mem` takes `&phy_param[0xD0]`, and 0xD0/0xD2 is `TXIQ` in `phy_cal_print`: the transmit
   IQ correction goes into the transmit gain memory beside the gain entries. Whether the library reads
   past 0xD2 is not known here -- the label is a halfword pair, the gain memory's own length is a
   question.
+- `txiq_cover_new` / `rfcal_txiq_new` / `txiq_cal_init_new`: a tone on the transmit side, its power read
+  back through the SAR ADC -- `txiq_get_mis_pwr`, and the attenuation through `get_power_atten` -- over
+  seven rounds; each round's mismatch moves the correction pair, held between -0x1f and 0x1f (its second
+  byte between -0x3f and 0x3f), the forward pair is packed into `TXIQ` 0xD0 and the loopback pair into
+  `LB_TXIQ` 0xE6, and the correction is marked done in `param_flag` bit 14. So the transmit IQ path is the
+  tone generator -> the SAR ADC -> the correction pair -> `phy_param`.
+- `phy_cal_param_track`, which the library's `phy_param_track_tot` runs once a second: the temperature each
+  calibration block last ran at is held against the current one, from `phy_param` 0x198 for the receive rows
+  and 0x48 for the transmit calibration, and a block whose temperature has moved past its step (0x1e and
+  0x28, or the byte at 0x1A6 where bit 1 of 0x1A5 is set) is rerun: the rows or the IQ and transmit-DC
+  calibrations. So the two blocks are tied to the temperature beside them, and `phy_track_temp_debug` can
+  widen the step.
+- `phy_param_track_tot`, the whole tracking, run once a second: inside the ROM's critical section, and only
+  while the RF-off and sensor-power flags are clear, the RFPLL capacitance runs where 0x0A is set, Bluetooth's
+  transmit power where the caller asks, and Wi-Fi's -- the I2C track, the transmit power, and the parameter
+  calibration where 0x19A is clear -- and the sensor's temperature is read last, so the corrections are tied to
+  the temperature each is checked against.
 
 ## Sources
 
@@ -244,7 +276,19 @@ Source: `phy_cal_print`'s and `phy_tx_gain_print`'s disassembly and strings.
 | MODEM+0x418 | 0, 1 | `FEDATA_TXDC_CTRL` start bits | set before each step's wait | `txdc_cal_new`'s disassembly | unknown / inferred |
 | MODEM+0x418 | 22 | `FEDATA_TXDC_CTRL_READY` | the wait ends when it is set | the same | inferred |
 | MODEM+0x418 | 29 | `FEDATA_TXDC_CTRL_STEP2` | set: the window-2 offset steps down, else up | the same | inferred |
-| MODEM+0x418 | 16 | `FEDATA_TXDC_CTRL_STEP3` | set: the window-3 offset steps down, else up | the same | inferred |
+| MODEM+0x418 | 28 | `FEDATA_TXDC_CTRL_STEP3` | set: the window-3 offset steps down, else up; the loop reads it as `lui 0x10000`, the upper immediate, not bit 16 | the same | inferred |
+| MODEM+0x420 | | `FEDATA_TX_TONE0` | the transmit tone generator's first word, written by `ram_start_tx_tone_step`/`ram_stop_tx_tone` and by `txiq_get_mis_pwr`'s measurement | the ROM's function names | known |
+| MODEM+0x450 | 13 | `FEDATA_REG_SET3_TXCAL` | raised before the TXIQ calibration runs and left raised | `rfcal_txiq_new`'s disassembly | inferred |
+| MODEM+0x450 | 14 | `FEDATA_REG_SET3_TXIQ_DONE` | lowered while the TXIQ calibration runs and raised at its end | the same | inferred |
+| phy_param+0x18 | | `PHY_PARAM_TXIQ_TEMP` | the byte `txiq_cal_init_new` starts the forward pair from, a signed temperature | no label names it | unknown |
+| phy_param+0x2B | | `PHY_PARAM_TXIQ_ATTEN` | the byte the TXIQ and TX power calibrations take `0x40` (or `0x38`) minus; unsigned | no label names it | unknown |
+| phy_param+0x48 | | `PHY_PARAM_TXCAL_TEMP` | the temperature the transmit calibration block last ran at, which the tracking reruns it by | `phy_cal_param_track`'s disassembly | inferred |
+| phy_param+0x11F | | `PHY_PARAM_CHANNEL_SECOND` | the byte beside the channel, the retune's second argument | `chip_v7_set_chan`'s and `phy_cal_param_track`'s disassembly | inferred |
+| phy_param+0x1A5 | 1 | `PHY_PARAM_TRACK_TEMP_DEBUG` | set: the byte below is the tracking's temperature step, else the block's own | `phy_track_temp_debug` writes it | known |
+| phy_param+0x1A6 | | `PHY_PARAM_TRACK_TEMP_DEBUG_TH` | the step `phy_param` 0x1A5 bit 1 selects | the same | known |
+| phy_param+0x0A | | `PHY_PARAM_CAP_TRACK` | where set, the whole tracking runs the RFPLL capacitance tracking | the tracking's gate; `phy_force_freq_set` sets it | inferred |
+| phy_param+0x0B | | `PHY_PARAM_BT_TRACK` | passed to Bluetooth's transmit-power tracking, whose zero means it does nothing | the tracking's call | inferred |
+| phy_param+0x19A | | `PHY_PARAM_TRACK_SKIP` | where set, the parameter calibration is left out | the same | inferred |
 
 ## Open questions
 
@@ -252,5 +296,9 @@ Source: `phy_cal_print`'s and `phy_tx_gain_print`'s disassembly and strings.
   power detector's calibration, meaning not known.
 - `PHY_PARAM_TXDC` 0xB0/0xB2: written by `txdc_cal_pwdet_init` beside the printed `TXDC` pair at
   0xA8/0xAA, but not part of `phy_cal_print`'s `TXDC`; what they are is not known.
+- `phy_param` 0x18 and 0x2B: read by the TXIQ calibration (`txiq_cal_init_new`; 0x2B by
+  `tx_pwctrl_init_cal_new` too), no label naming either; what they hold is not known.
+- `FEDATA_REG_SET3` 0x600A0450's bits 13 and 14: moved by `rfcal_txiq_new` around its work, no header
+  naming them; what they gate is not known.
 - Analog I2C 0x6A: `libphy` uses host 1, IDF's `regi2c_bias.h` says host 0. Recorded, not resolved.
 - `I2C_ANA_MST_TXCAP` 0x600AFC04: in none of `phy_reg_check`'s windows.

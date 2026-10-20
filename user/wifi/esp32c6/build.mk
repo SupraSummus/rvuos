@@ -208,7 +208,9 @@ WIFI_ESP_PHY_OWN := phy_get_xtal_freq tsens_read_init_new pwdet_reg_init_new ope
                     bt_track_tx_power wifi_track_tx_power tx_i2c_track gen_rx_gain_table_new \
                     phy_force_rx_gain_trig set_rx_gain_cal_dc_new ram_iq_est_enable dc_iq_est_new \
                     rxdc_est_min_new pbus_rx_dco_cal_1step_new rx_pbus_reset set_rx_gain_table \
-                    txdc_cal_pwdet txdc_cal_pwdet_init
+                    txdc_cal_pwdet txdc_cal_pwdet_init txdc_cal_new \
+                    txiq_cover_new rfcal_txiq_new txiq_cal_init_new phy_cal_param_track force_txrx_off \
+                    phy_param_track_tot
 
 $(BUILD)/$(WIFI_ESP)/libphy.a: $(WIFI_ESP_INIT) $(WIFI_ESP)/build.mk
 	$(OBJCOPY) $(addprefix --weaken-symbol=,$(WIFI_ESP_PHY_OWN)) $(PHYBLOB_CACHE)/libphy.a $@

@@ -872,3 +872,67 @@ On the board a scan heard four access points, and a join with `ps=1` turned the 
 through the driver's own `phy_close_rf` and `phy_wakeup_init`, answered the echo and five pings, and halted clean;
 the count is 20 before and 35 after -- the ROM's own PHY functions the driver's new code names --
 of the library's own symbols 4 before and 3 after.
+
+Then the transmitter's IQ correction, which the library's bring-up and its second tracking block both run:
+the library's `txiq_cal_init_new` and the two halves under it, `rfcal_txiq_new` and `txiq_cover_new`, the
+driver's own, with the five ROM leaves they call -- `txiq_set_reg`, `txiq_get_mis_pwr`, `get_power_atten`,
+`txcal_work_mode`, and the tone through `get_tone_sar_dout`.
+Each half raises its bit in the front end's word `FEDATA_REG_SET3`, lowers its done bit, puts the transmitter
+into the mode its last argument names -- a pbus register forced where the loopback is not used, the loopback on
+and the transmit DC pair settled where it is -- and measures a tone's power through `txiq_get_mis_pwr` at the
+attenuation and the temperature it is given.
+Over seven rounds each round's mismatch moves the correction pair, held between -0x1f and 0x1f and its second
+byte between -0x3f and 0x3f; the forward pair is packed into `phy_param`'s `TXIQ` at 0xd0, the loopback pair
+into `LB_TXIQ` at 0xe6, and `param_flag`'s bit 14 marks the correction done, so the second call does nothing.
+The tone generator's word at 0x600a0420 is kept and put back around each half, and the two start bytes
+`phy_param` 0x18 and 0x2b are read as they are, no label naming either.
+Off the board, `phy-ab.py` held all three to the library's, the tone's reads given in turn by `--seq` so the
+branches that turn on a measurement are exercised: `txiq_cover_new` the same for every sequence tried, with
+seven different sequences giving seven different pairs, `rfcal_txiq_new` the same for each of its three modes
+and clear and negative temperatures, and `txiq_cal_init_new` the same for the whole correction, its done bit
+clear and set.
+It found two differences the reading had missed -- the tone generator's word is at 0x600a0420, the front end's
+window offset 0x20 and not the modem's, and the pair's first byte is packed into the caller's halfword with the
+mask 0x1f80, from `lui 0x2; addi -0x80`, not 0x180 -- both fixed.
+The count is 47 before and 51 after -- the four new ROM leaves the driver's own names -- and of the library's
+own symbols 4, as it was before.
+
+Then the tracking that reruns what has drifted: the library's `phy_cal_param_track`, the driver's own, which
+the library's `phy_param_track_tot` calls once a second while the station is joined.
+Two temperatures are held against the current one, the receive rows' at `phy_param` 0x198 and the transmit
+calibration's at 0x48, each against its own step -- 0x1e and 0x28, or the byte at 0x1a6 where bit 1 of 0x1a5
+is set, which `phy_track_temp_debug` writes.
+A block whose temperature has moved past its step brings the frequency setting down, forces TX and RX off and
+clears the pbus; the first then wipes the receive rows' flags, rebuilds the rows and retunes the channel,
+disables the baseband around it and puts its enable bit back as it was; the second takes the baseband down,
+runs the IQ and transmit-DC calibrations and the transmit gains, and puts the baseband back.
+Either way it releases TX and RX, brings the setting up and sets the block's temperature byte to the current
+one; the library's prints, under its first argument, are left out.
+`force_txrx_off`, which this tree reached in the library, is the driver's own here -- a global in `phy.c`,
+called as before -- so `build.mk` weakens the library's with it.
+Off the board, `phy-ab.py` held it to the library's for both blocks taken and skipped, the debug threshold
+both ways, channels 1 to 13 with both second arguments, and the parameter flags: 23 runs, every access the
+same.
+It found three differences the reading had missed -- the row flags' mask clears bits 7 and 9, so `-0x281` is
+`& ~0x280` and not `& ~0x281`; the two temperatures are signed halfwords, so each is sign-extended before the
+subtraction; and the row flags' write, from an earlier step, puts the flag into the word as it then is rather
+than as it was read at the function's start -- all three fixed.
+The map's line for the PMU words left to the kernel went with a dead library function the linker had kept
+beside the library's `force_txrx_off`, which this step weakens; the only entry outside the frames is the
+LP_WDT word, as before.
+The count is 51 before and after -- no new named leaf -- of the library's own symbols 4 either way.
+
+Then the whole tracking, the library's `phy_param_track_tot`, the driver's own, which `drv_phy_track` runs once a
+second while the station is joined: inside the ROM's critical section, and only while the RF-off and the
+sensor's power flags are clear, the RFPLL capacitance where `phy_param` 0x0a is set, Bluetooth's transmit power
+where the caller asks, and Wi-Fi's -- the I2C track and the transmit power, and the parameter calibration where
+0x19a is clear -- and the sensor's temperature is read last. The library's prints are left out.
+Off the board, `phy-ab.py` held it to the library's for both arguments, each gate off, and the temperatures near
+and far: 12 runs, every access the same.
+The count is 51 before and 50 after -- the library's own `phy_param_track_tot` went -- of the library's own
+symbols 4 before and 3 after.
+
+On the board, a join with `ps=1` and forty-five seconds joined the access point on channel 9, answered the echo
+and five pings, slept three times and turned the RF off and on thirty times through the driver's own
+`phy_close_rf` and `phy_wakeup_init`, ran the tracking eight times through the driver's own `phy_param_track_tot`
+-- the whole of the step above on the radio -- and halted clean.
