@@ -872,15 +872,6 @@ uint32_t osi_slowclk_cal(void)
 }
 
 
-/* The libraries' lines that reach the log, at ESP_LOG_INFO and below unless the configuration asks for more. */
-static unsigned int log_level = 3;
-
-void osi_log_level(unsigned int level)
-{
-    log_level = level;
-}
-
-
 int osi_coex_enable(void)
 {
     osi_trace("coex_enable", 0, 0);
