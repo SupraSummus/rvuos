@@ -9,7 +9,7 @@ which writes the driver into the flash at `0x210000` if it changed and scans,
 or, with `WIFI_CONFIG` naming a network as the repository's `CLAUDE.md` says for the Pico 2 W, joins it,
 and `tools/wifi-run.py` checks it from the host as it checks the Pico 2 W's, but for the logger, before it ends the run.
 The log comes as the run goes, each line timed, and stays in `build/esp32c6/wifi-run.log`;
-the configuration's `debug=` and `lib=`, see `user/wifi/esp32c6/root.c`, have the driver tell more,
+the configuration's `debug=`, see `user/wifi/esp32c6/root.c`, has the driver tell more,
 and a fault of one of its threads comes with its stack and the names of its functions.
 
 A change to `user/wifi/esp32c6/mac.c` or `macstart.c` runs it again with `listen=` in `WIFI_CONFIG`,

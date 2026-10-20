@@ -229,7 +229,7 @@ bool cap_stop_here(bool preempt)
         core_self()->preempt_stopped = true;
         return true;
     }
-    return pending;
+    return pending || core_notice_owed();
 }
 
 bool cap_revoke_step(struct cap *root)

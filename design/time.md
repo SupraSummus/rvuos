@@ -288,16 +288,14 @@ On top come the kernel's steps: the longest it takes without looking for an inte
 and on several cores one such step of each other core, which the lock waits for,
 and the trap that ends the last request ahead, which counts the tick, its timer lines and the releases.
 They add to the wait once, and once more for each request ahead whose end falls in such a step;
-the longest today, zeroing a table of `CAPTABLE_MAX_SLOTS` slots a byte a store, is longer than a tick at 10 kHz on every board, `TODO.md`.
+the longest today, zeroing a table of `CAPTABLE_MAX_SLOTS` slots, is longer than a tick at 10 kHz on the nRF52840 and near one on the other boards, `TODO.md`.
 A thread made ready from another core waits besides for the rest of that core's trap, the interrupt between them, and the lock.
 A timer line's thread starts within those k ticks and steps of its deadline, so a periodic line keeps its deadlines and its thread starts within as much of each;
 a device's driver within them of the trap that took its interrupt.
 It all holds while tracing is off, since tracing stops the tick ending a turn,
-while nobody drives the machine with `OP_TEST_TICK` or `OP_TEST_PREEMPT`, which move the count without time passing,
 and while the thread keeps its binding: a bind, even to more units, puts it at the back of its queue.
-A pool destroy is the exception, `TODO.md`:
-it runs to its end unless an interrupt is pending, so a thread its walk wakes waits for the rest of the walk
-while the core's timer lies further than the next tick, and on several cores for all of it.
+A walk that wakes the thread, a pool destroy's, stops at its next step for the timer to be set and another core to be told,
+so it holds the thread no longer than the tick does; see "Bounded work".
 
 **How much work a thread gets** is bounded by its units, not by its turns.
 A turn that begins mid-tick lasts only to the next tick,

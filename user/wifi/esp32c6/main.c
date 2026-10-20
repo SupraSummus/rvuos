@@ -556,8 +556,6 @@ static __attribute__((noreturn)) void run(struct drv *d)
         i154_run(d, &own);
     }
     drv_say("driver: %u bytes of heap free\n", (unsigned)osi_heap_free());
-    /* libphy's own lines at INFO, or at the level the configuration asks for. */
-    osi_log_level(d->lib_log ? d->lib_log : WIFI_LOG_INFO);
     if (d->debug & DRV_DEBUG_WPA) {
         drv_wpa_debug();
     }

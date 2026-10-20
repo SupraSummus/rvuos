@@ -142,14 +142,16 @@
  * the next thread has its turn, and the caller stays ready.
  * Works while tracing is on, unlike the tick itself;
  * see DESIGN.md, "Verification".
+ * Fails with KERR_STATE while tracing is off,
+ * since a tick no time brought would have every deadline fire early.
  */
 #define OP_TEST_TICK 17
 /*
  * Test (RIGHT_W): what a device interrupt does, on request. a1 = the line.
  * The Irq armed on the line masks it and signals its bits,
  * exactly as the interrupt would; the controller is not consulted.
- * Fails with KERR_STATE when nothing is armed on the line,
- * which is when the controller would not raise it either,
+ * Fails with KERR_STATE while tracing is off, as OP_TEST_TICK does,
+ * or when nothing is armed on the line, which is when the controller would not raise it either,
  * and with KERR_INVALID_ARG for a line the controller does not have,
  * LOG_IRQ_LINE among them: the log's level is the log's, not a record's,
  * and so are the timer lines, which only OP_TEST_TICK moves.
@@ -164,6 +166,7 @@
  * so another thread may run before the caller makes its call again. Zero disarms it.
  * It is how a replay has a thread run while another's call is half done,
  * since under tracing the tick stops no call; see DESIGN.md, "Verification".
+ * Fails with KERR_STATE while tracing is off, as OP_TEST_TICK does.
  */
 #define OP_TEST_PREEMPT 32
 
