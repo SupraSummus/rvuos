@@ -369,6 +369,15 @@ void core_notify(struct core *c);
 void core_interrupt_later(struct core *c);
 
 /*
+ * Whether this trap made a change only its end makes known, which a walk stops for:
+ * a thread with time ready here while the timer lies past the next tick,
+ * or another core owed an interrupt, see core_notify.
+ * The trap's end sets the timer and sends the interrupts, so the call made again does not stop for the same change.
+ * Unlike core_notify's, a turn on spare time is no reason: a stopped call is made again first, see recall in struct core.
+ */
+bool core_notice_owed(void);
+
+/*
  * The board's, only with more than one core: let the other cores interrupt this one, in user mode and in wfi,
  * interrupt another core, and take this core's interrupt back.
  */

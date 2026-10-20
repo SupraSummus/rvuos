@@ -70,6 +70,14 @@ static int op_halt(const uint32_t *arg)
 /* Driving the machine as a test does: tracing, ticking, interrupting and preempting. */
 static int op_test(uint32_t op, const uint32_t *arg)
 {
+    /*
+     * Untraced, only time and the devices drive the machine:
+     * a tick no time brought would leave the count ahead of the counter for good,
+     * and every deadline set before would fire early, the watchdog's among them.
+     */
+    if (!debug_trace && op != OP_TEST_TRACE) {
+        return KERR_STATE;
+    }
     switch (op) {
 #if SELFCHECK
     case OP_TEST_TRACE:

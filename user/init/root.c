@@ -4,7 +4,7 @@
  * a part at a time, in the order main runs them:
  *   logger.c     a thread that carries the kernel's log to the UART
  *   root.c       memory, a second process running child.c, a message, preemption, revocation, derivation, cascade
- *   time.c       the timer, the clock and a period
+ *   time.c       the timer, the clock, a period, and a tick asked for untraced
  *   units.c      units of the processor, spare time, charging, and a spin no tick interrupts
  *   root.c       an Irq on a line nothing drives
  *   cores.c      the second core, on a machine of several
