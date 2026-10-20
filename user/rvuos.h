@@ -380,6 +380,13 @@ static inline uint32_t rv_notify_carve(uint32_t ntfn_cap, uint32_t bits, uint32_
     return rv_invoke(OP_NOTIFY_CARVE, ntfn_cap, bits, dst, 0);
 }
 
+/* The longest span a call takes within counts of the counter: a power of two up to 2^SPAN_MAX, or 0 for none. */
+static inline uint32_t rv_span(uint32_t counts)
+{
+    uint32_t span = counts != 0 ? 1u << (31 - __builtin_clz(counts)) : 0;
+    return span < 1u << SPAN_MAX ? span : 1u << SPAN_MAX;
+}
+
 /*
  * OP_NOTIFY_WAIT: block until some bit is set, then take them all,
  * the request the wake begins due within span counts of the counter: a power of two, or 0 to keep the span it had.

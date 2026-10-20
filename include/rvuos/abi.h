@@ -460,7 +460,8 @@
  * Notification (RIGHT_R): take the bits that are set.
  * a1 = the span of the request the wake begins: the counts of the counter past the thread's virtual time it is due,
  * on each core whose time it holds, as OP_TIME_BIND's a4 is, a power of two up to 2^SPAN_MAX, else KERR_INVALID_ARG;
- * 0 keeps the span its binding or its last wait gave. It holds for the requests after that one too, until another.
+ * 0 keeps the span its binding or its last wait gave.
+ * A span holds for the requests after that one too, until another.
  * So a thread says at each wait how soon what wakes it must be done:
  * woken while its account is full, it runs units / TIME_UNITS of the span within the span; see DESIGN.md, "Scheduling".
  * Returns a1 = the bits, which is never zero, and clears them.

@@ -235,11 +235,12 @@ void core_notify(struct core *c)
     /*
      * A core in the kernel looks at its timer and its turn before it leaves, and one whose timer comes within a tick then;
      * an idle one waits for an interrupt, and so does one that runs on with its timer set further,
-     * or on spare time while a thread with time waits on its run queue, which takes the core at once.
+     * or whose run queue or turn changed while a thread waits there, which takes the core at once
+     * if the turn is on spare time or its request is due before the turn's.
      */
     if (c != core_self() &&
         (c->turn == NULL || (__atomic_load_n(&c->in_user, __ATOMIC_ACQUIRE) &&
-                             (c->wake_tick - c->ticks > 1 || (c->run_queue != 0 && sched_spare_turn(c)))))) {
+                             (c->wake_tick - c->ticks > 1 || (c->run_queue != 0 && c->run_stale))))) {
         c->interrupt_owed = true;
     }
 #else

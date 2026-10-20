@@ -8,12 +8,12 @@ Witness: fuzz-smp2 cores-moved-by-other
 diff --git a/kernel/core.c b/kernel/core.c
 --- a/kernel/core.c
 +++ b/kernel/core.c
-@@ -238,7 +238,7 @@ void core_notify(struct core *c)
-      * or on spare time while a thread with time waits on its run queue, which takes the core at once.
+@@ -239,7 +239,7 @@ void core_notify(struct core *c)
+      * if the turn is on spare time or its request is due before the turn's.
       */
      if (c != core_self() &&
 -        (c->turn == NULL || (__atomic_load_n(&c->in_user, __ATOMIC_ACQUIRE) &&
 +        ((__atomic_load_n(&c->in_user, __ATOMIC_ACQUIRE) &&
-                              (c->wake_tick - c->ticks > 1 || (c->run_queue != 0 && sched_spare_turn(c)))))) {
+                              (c->wake_tick - c->ticks > 1 || (c->run_queue != 0 && c->run_stale))))) {
          c->interrupt_owed = true;
      }

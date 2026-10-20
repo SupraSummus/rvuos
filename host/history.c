@@ -942,15 +942,17 @@ static void check_stops(void)
 
 /*
  * A wait or a lend that went through, returned or blocked, leaves its caller's requests due within the span it gave,
- * on every core whose time it holds, and one that gave none leaves them as they were; see sched.c, "Requests".
+ * on every core whose time it holds, and one that gave none, or was refused, leaves them as they were;
+ * see sched.c, "Requests".
  */
 static void check_spans(void)
 {
-    if (!invoked || (call_op != OP_NOTIFY_WAIT && call_op != OP_NOTIFY_LEND) || caller->frame.pc == call_pc ||
-        (caller->state != THREAD_WAITING && caller->frame.regs[REG_A0] != KERR_OK)) {
+    if (!call_made || caller == NULL || (call_op != OP_NOTIFY_WAIT && call_op != OP_NOTIFY_LEND) ||
+        caller->frame.pc == call_pc) {
         return;
     }
-    uint32_t span = call_args[call_op == OP_NOTIFY_WAIT ? 0 : 1];
+    bool through = invoked && (caller->state == THREAD_WAITING || caller->frame.regs[REG_A0] == KERR_OK);
+    uint32_t span = through ? call_args[call_op == OP_NOTIFY_WAIT ? 0 : 1] : 0;
     for (uint32_t i = 0; i < thread_places(caller); i++) {
         if (thread_place(caller, i)->span != (span != 0 ? span_code(span) : caller_spans[i])) {
             violated("a wait left its caller's requests due within another span than it gave");

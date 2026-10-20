@@ -58,7 +58,8 @@ static inline bool place_spare(const struct place *p)
 
 /*
  * How far past its virtual time a place's request is due, in counts: the span its binding or its thread's last wait gave,
- * or else a tick's work at its units; the place has units. See sched.c, "Requests".
+ * or else a tick's work at its units; the place has units.
+ * See sched.c, "Requests".
  */
 static inline uint32_t place_span(const struct place *p)
 {
@@ -236,8 +237,11 @@ struct core {
      */
     bool recall;
 
-    /* Whether a place joined the run queue since the core last looked for a deadline before the turn's; see spare_end. */
-    bool run_joined;
+    /*
+     * Whether a place joined the run queue, or the thread whose turn it is or pays for changed,
+     * since the core last looked for a deadline before the turn's; see spare_end.
+     */
+    bool run_stale;
 
     /* Whether the timer interrupted the turn, maybe at its request's end, since the core last looked. */
     bool request_ended;
@@ -403,7 +407,8 @@ void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights,
 
 /*
  * A thread that waits gives the span its requests are due within on each of its cores, from the one its wake begins on,
- * a power of two up to 2^SPAN_MAX. See sched.c, "Requests".
+ * a power of two up to 2^SPAN_MAX.
+ * See sched.c, "Requests".
  */
 void sched_span(struct thread *t, uint32_t span);
 

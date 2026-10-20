@@ -34,8 +34,9 @@ The root task keeps 8 units, the units nobody earns are spare time, and every me
 
 Threads run in requests, the one whose request is due first first,
 each due within the span a member's wait gives, or a tick's work at its units for none;
-the scenarios ending `-batch` bind the hog, which never waits, to requests due a quarter of a second on,
-and `lax-server`'s store waits within a second, as 64 ticks' work at their units would be.
+the scenarios ending `-batch` bind the hog, which never waits, to requests due within a quarter of a second,
+and `lax-server`'s store waits within a second,
+which on every QEMU board are the spans the quanta of 64 ticks made, rounded up to a power of two of counts at their units.
 In `net` a ui that lends asks a gate that lends, of no units, which passes the ask to a store of no units, beside the hog,
 so only lent time that goes on through the gate answers it; `net-unpaid` is the same chain lending nothing.
 

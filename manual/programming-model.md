@@ -759,7 +759,8 @@ and moves `taken` only as far as its host says it has the bytes, so a halt write
   A driver that must do work of `c` within `D` of its interrupt waits within the longest power of two of counts that `D` holds,
   `s`, and is given `TIME_UNITS * c / s` units at least.
   A shorter span brings its requests nearer and makes them shorter, and costs the thread a switch for each while another thread waits;
-  a longer one puts them behind shorter ones. A span costs no other thread anything, so a wait needs no right to give one.
+  a longer one puts them behind shorter ones.
+  A span costs no other thread anything, so a wait needs no right to give one.
   A thread with work all along gets its units' part of the processor,
   give or take a tenth of a second's worth of the accounts;
   `DESIGN.md`, "Scheduling", says what a request promises and what a periodic task needs of its units.

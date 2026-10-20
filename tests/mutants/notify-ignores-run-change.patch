@@ -1,0 +1,19 @@
+A core in user mode is not interrupted when another core changes its run queue or its turn, unless its timer is far.
+A thread with time made ready there would wait behind a turn on spare time, or one due later, for that core's next tick.
+
+Caught-by: fuzz-smp2
+Report: a turn on spare time runs while a thread with time waits
+Witness: fuzz-smp2 cores-join-interrupts
+
+diff --git a/kernel/core.c b/kernel/core.c
+--- a/kernel/core.c
++++ b/kernel/core.c
+@@ -240,7 +240,7 @@ void core_notify(struct core *c)
+      */
+     if (c != core_self() &&
+         (c->turn == NULL || (__atomic_load_n(&c->in_user, __ATOMIC_ACQUIRE) &&
+-                             (c->wake_tick - c->ticks > 1 || (c->run_queue != 0 && c->run_stale))))) {
++                             (c->wake_tick - c->ticks > 1)))) {
+         c->interrupt_owed = true;
+     }
+ #else

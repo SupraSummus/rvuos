@@ -55,13 +55,18 @@ static void probe_main(void)
     }
 }
 
-/* The probe again, as a driver: it waits for its wake within probe_span, then does as probe_main does. */
+/*
+ * The probe again, as a driver: it waits for its wake within probe_span, then does as probe_main does.
+ * A timer bit the requests left pending comes first, and it waits again.
+ */
 static void waiting_probe_main(void)
 {
-    uint32_t bits;
-    if (rv_wait_within(SLOT_DODGER_NTFN, probe_span, &bits) != KERR_OK || bits != BIT_WAKE) {
-        puts("probe: cannot wait\n");
-        rv_halt(BOOT_CAP_HALT, 1);
+    uint32_t bits = 0;
+    while (!(bits & BIT_WAKE)) {
+        if (rv_wait_within(SLOT_DODGER_NTFN, probe_span, &bits) != KERR_OK) {
+            puts("probe: cannot wait\n");
+            rv_halt(BOOT_CAP_HALT, 1);
+        }
     }
     probe_main();
 }
@@ -247,10 +252,7 @@ void units_demo(uint32_t data_base, uint32_t data_size, uint32_t counter, uint32
      * so it runs as that second request ends, which the timer marks within the tick,
      * where a turn would otherwise last to the tick.
      */
-    uint32_t span = 1, was;
-    while (2 * span <= tick_counts / 2) {
-        span <<= 1;
-    }
+    uint32_t span = rv_span(tick_counts / 2), was;
     expect("stop the spinner", rv_thread_stop(SLOT_SPINNER, &was));
     expect("stop the dodger", rv_thread_stop(SLOT_DODGER, &was));
     expect("make it the probe",
@@ -282,11 +284,7 @@ void units_demo(uint32_t data_base, uint32_t data_size, uint32_t counter, uint32
      * so the probe runs at once, taking the processor from it in that call,
      * where with the binding's span it would wait for the spin to end.
      */
-    uint32_t short_span = 1;
-    while (2 * short_span <= tick_counts / 8) {
-        short_span <<= 1;
-    }
-    probe_span = short_span;
+    probe_span = rv_span(tick_counts / 8);
     probe_at = 0;
     expect("stop the probe", rv_thread_stop(SLOT_DODGER, &was));
     expect("make it a waiting probe",

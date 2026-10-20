@@ -1,0 +1,20 @@
+A lend gives its span before it looks the borrower up, so a lend refused still changes how soon its caller is due.
+A call refused is a call that did nothing.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a wait left its caller's requests due within another span than it gave
+Witness: fuzz lend-span-refused
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -601,6 +601,9 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
+ static __attribute__((noinline)) int op_lend(struct thread *t, struct notification *ntfn, uint32_t *arg)
+ {
+     struct cap bc;
++    if (span_valid(arg[2]) && arg[2] != 0) {
++        sched_span(t, arg[2]);
++    }
+     int err = slot_lookup_typed(t, arg[1], CAP_THREAD, RIGHT_X, &bc);
+     if (err != KERR_OK) {
+         return err;

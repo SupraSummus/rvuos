@@ -174,7 +174,9 @@ A thread with less than a tick has no time until its account reaches a tick agai
 Spare time is the turns no thread with time wants, so a turn on spare time ends as soon as one wants it:
 a thread with time that becomes ready, woken, resumed, bound or given time again at a tick,
 takes the processor as the trap that made it ready ends,
-and a core that runs a turn on spare time is interrupted for one another core made ready there.
+and a core that runs a turn on spare time is interrupted for one another core made ready there,
+as a core in user mode is for any thread another core puts on its run queue, whose request may be due before the turn's,
+and for any change another core makes to the thread whose turn it has or that pays for it.
 A turn left without time, by a bind, an unbind or its payer's destroy, is spare from then on,
 and another core that runs it is interrupted the same way.
 Only a call stopped for an interrupt goes first: its thread makes it again, and the turn ends as the call does,
@@ -222,6 +224,24 @@ a short one makes its requests as short, so that its thread takes no more than i
 and a long one puts its requests behind shorter ones and costs it nothing of its units.
 A short span costs its thread switches: while another thread waits, the timer ends each of its requests.
 Its account's fill is what the promise asks besides, so a wake comes at most a span after the last for it to hold each time.
+
+**What programs ask of time.**
+Six kinds of program ask the processor for something different,
+and the interface is what they need to say and no more:
+
+| Who | Asks for | Which is |
+|---|---|---|
+| a driver, a server that answers | work `c` done within `D` of an event | an answer to an event: units and a span at the wait |
+| a control loop | work `c` every period `P` | the same, its event a timer line's, `IRQ_SET_PERIOD` |
+| batch work | a part of the processor over time, however late | units alone, and a long span or a tick's work |
+| best effort | the time nobody wants | spare time, `RIGHT_X` |
+| a server for its clients | its client's time | lent time, with the client's units and span |
+| a parent over a child it does not trust | at most so much power, and so much energy | units without `RIGHT_X`, and fuel, decision 39 |
+
+Since time reaches a thread as an interrupt, a periodic task is an answer to an event too,
+so only an answer asks for anything but a part of the processor, and it asks for one number besides: how soon.
+How often the event may come is not the kernel's to know:
+the account holds a thread to its units whatever the rate, so a thread whose events come faster than its span waits behind its own.
 
 **Why the span is the wait's.**
 How soon a thread must answer belongs to what it answers, so a thread says it as it waits:

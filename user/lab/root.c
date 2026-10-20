@@ -35,8 +35,8 @@
 #define HOLD   60000u
 #define PERIOD 3000u  /* a periodic member's, in microseconds: three ticks */
 #define BURST_PERIOD 7000u /* a burst's, prime to a periodic member's */
-#define BATCH_SPAN 250000u  /* the hog's requests due a quarter of a second on, in microseconds: 64 ticks' work at its units */
-#define LAX_SPAN   1000000u /* a store's due a second on, 64 ticks' work at its 8 units */
+#define BATCH_SPAN 250000u  /* the hog's requests due within a quarter of a second, in microseconds, behind everyone's */
+#define LAX_SPAN   1000000u /* a store that answers within a second */
 #define DRIVER_SPAN 1000u   /* a driver answers within a millisecond, as 32 us of work at 4 units would be */
 #define DRIVEN_SPAN 500u    /* and takes the answer within half of one, as 32 us at 8 units would be */
 #define JITTER 80000u /* the most a periodic member works before each ask */
@@ -227,11 +227,7 @@ static uint32_t span_of(uint32_t us)
     uint64_t t;
     uint32_t hz, counter;
     must("read the clock", rv_clock_read(BOOT_CAP_CLOCK, &t, &hz, &counter));
-    uint32_t counts = us * (hz >= 1000000u ? hz / 1000000u : 1u), span = counts != 0 ? 1u : 0u;
-    while (span != 0 && span <= counts / 2u && span < 1u << SPAN_MAX) {
-        span <<= 1;
-    }
-    return span;
+    return rv_span(us * (hz >= 1000000u ? hz / 1000000u : 1u));
 }
 
 /* The lock the lockers share: its word in a frame of its own, and a notification from a pool of its own. */

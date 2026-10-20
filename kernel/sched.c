@@ -387,26 +387,20 @@ uint32_t turn_vtime(const struct core *core, const struct place *p, uint32_t off
     return core->ticks * timer_tick_counts() + (account_cap(p) - (p->balance - turn_owes_on(core, p, offset))) / place_units(p);
 }
 
-/* The counts of virtual time a request of the place takes, its span; the place has units. */
-static uint32_t request_length(const struct place *p)
-{
-    return place_span(p);
-}
-
 /*
  * Whether a request due at deadline goes on at virtual time vt: it lies at most a request ahead.
  * One over lies at or behind vt, and so does one from long ago, however the count wrapped since.
  */
 static bool request_open(const struct place *payer, uint32_t deadline, uint32_t vt)
 {
-    return deadline - vt - 1 < request_length(payer);
+    return deadline - vt - 1 < place_span(payer);
 }
 
 /* A place goes on with its request, or starts the next at its payer's virtual time vt if that one is over. */
 static void request_renew(struct place *p, const struct place *payer, uint32_t vt)
 {
     if (!request_open(payer, p->deadline, vt)) {
-        p->deadline = vt + request_length(payer);
+        p->deadline = vt + place_span(payer);
     }
 }
 
@@ -421,7 +415,7 @@ static void request_start(struct place *p)
 {
     const struct place *payer = request_payer(p);
     if (payer != NULL && place_units(payer) != 0) {
-        p->deadline = vtime(payer) + request_length(payer);
+        p->deadline = vtime(payer) + place_span(payer);
     }
 }
 
@@ -454,14 +448,21 @@ static void place_settle(struct place *p)
     }
     /*
      * A place that joins the run queue goes on with its request, or starts the next, on whichever account pays for it now;
-     * one that waits there keeps its request, which only running ends.
+     * one that waits there keeps its request, which only running ends,
+     * but for one due further than a span of the account that pays for it now, made on another's time,
+     * which starts afresh there as a place that joined would.
      */
     if (queue == QUEUE_RUN) {
         const struct place *payer = l != NULL ? l : p;
-        if (joined && place_units(payer) != 0) {
-            request_renew(p, payer, vtime(payer));
+        if (place_units(payer) != 0) {
+            uint32_t vt = vtime(payer);
+            if (joined) {
+                request_renew(p, payer, vt);
+            } else if ((int32_t)(p->deadline - vt) > (int32_t)place_span(payer)) {
+                p->deadline = vt + place_span(payer);
+            }
         }
-        core->run_joined = true;
+        core->run_stale = true;
         joined = true;
     }
     /* Neither account holds a tick there, or the place would have the run queue. */
@@ -493,7 +494,9 @@ static void thread_settle(struct thread *t)
         LOOP_BOUND(CORES);
         place_settle(thread_place(t, i));
     }
+    /* What the turn runs on, and the request it runs, may have changed, so its core looks at its run queue again. */
     if (is_turn(t)) {
+        cores[t->core].run_stale = true;
         core_notify(&cores[t->core]);
     }
 }
@@ -599,7 +602,7 @@ static struct thread *next_turn(uint32_t offset)
 {
     struct core *core = core_self();
     core->turn_from = offset;
-    core->run_joined = core->request_ended = false;
+    core->run_stale = core->request_ended = false;
     struct place *p;
     if (core->run_queue != 0) {
         p = run_earliest(core);
@@ -1340,14 +1343,15 @@ void sched_tick(uint32_t ticks)
 
 /*
  * Whether a thread waits on the run queue with a deadline before the turn's request,
- * once a place joined it or the timer marked the request's end: then it takes the processor, as from a turn on spare time.
+ * once a place joined it, the turn's thread changed, or the timer marked the request's end:
+ * then it takes the processor, as from a turn on spare time.
  * The turn's request, over at the turn's virtual time, gives way to the next first,
  * which a join looks for too, since no timer marks it while nobody waits.
  */
 static bool deadline_due(struct core *core)
 {
-    bool marked = core->run_joined || core->request_ended;
-    core->run_joined = core->request_ended = false;
+    bool marked = core->run_stale || core->request_ended;
+    core->run_stale = core->request_ended = false;
     struct place *p = turn_place(core), *own = turn_own(core);
     if (!marked || core->run_queue == 0 || p == NULL || own == NULL || place_units(p) == 0) {
         return false;
@@ -1367,7 +1371,9 @@ uint32_t sched_request_counts(uint32_t offset)
     if (!request_open(p, own->deadline, vt)) {
         return 1;
     }
-    uint32_t counts = ((own->deadline - vt) * place_units(p) + COUNT_PARTS - 1) / COUNT_PARTS;
+    /* A span of 2^SPAN_MAX counts at every unit of the core is 2^36 parts. */
+    uint64_t parts = (uint64_t)(own->deadline - vt) * place_units(p);
+    uint32_t counts = (uint32_t)((parts + COUNT_PARTS - 1) / COUNT_PARTS);
     return offset + counts < timer_tick_counts() ? counts : 0;
 }
 

@@ -433,7 +433,9 @@ until the maintainer decides otherwise.
       the call interrupts that core and waits until its trap has begun, and the core loads its regions again
       as it takes the lock, or hands its taken thread's turn on.
     - **Wakes.** A core that changes what another runs marks the other's timer stale,
-      and interrupts it when it idles, runs on with its timer set past the next tick, or runs a turn on spare time a thread with time now waits for.
+      and interrupts it when it idles, runs on with its timer set past the next tick, runs a turn on spare time a thread with time now waits for,
+      or has a thread join its run queue, or its turn's thread or payer change, while a thread waits there,
+      which takes the core if the turn is on spare time or that thread's request is due before the turn's.
     - **The units.** `TIME_UNITS` of each core, so that which core a thread runs on is held as its units are;
       a program learns how many cores there are from `BOOT_CAP_TIME`'s count, which its description tells.
     - **A controller of each core's own**, as ARM's NVIC and RP2350's Hazard3's are: the first core's alone enables a device line,

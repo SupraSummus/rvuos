@@ -3,6 +3,7 @@ The borrower waits on another queue than its own account, or its next lender's, 
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a place names a queue it is not for
+Report: a place waits on another queue than its account says
 Witness: fuzz lend-lender-woken
 
 diff --git a/kernel/sched.c b/kernel/sched.c
