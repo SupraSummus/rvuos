@@ -180,7 +180,6 @@ static uint32_t enabled;
 #define PHY_PARAM_TSENS_XPD 0x19D
 
 /* The temperature the sensor's read keeps, a halfword at phy_param's start. */
-#define PHY_PARAM_TEMPERATURE 0x00
 /* The temperature sensor's DAC index, which the read keeps and the library's rf_init reads. */
 #define PHY_PARAM_TSENS_INDEX 0x16
 /* The library's mark that the RF is off: its wakeup clears it, phy_close_rf sets it, and its tracking skips while set. */
@@ -190,12 +189,35 @@ static uint32_t enabled;
 /* The library's mark whether Wi-Fi's baseband is up, under which its wakeup clears the baseband at its end. */
 #define PHY_PARAM_WIFI_BB_ENABLE 0x19e
 
+/* phy_param's fields, Espressif's labels from libphy's phy_cal_print and phy_tx_gain_print; PHYREGS.md. */
+#define PHY_PARAM_TEMP_CODE         0x00  /* temp_code: the temperature the sensor's read keeps */
+#define PHY_PARAM_TEMP_CODE_INIT    0x12E /* temp_code_init */
+#define PHY_PARAM_PARAM_FLAG        0xA4  /* param_flag: bit 7 the receive DC calibration, 9 the rows, 14 the TXIQ */
+#define PHY_PARAM_WIFI_INIT_POWER   0x52  /* wifi_init_power: the per-rate table, 0x12 of them */
+#define PHY_PARAM_WIFI_PWCTRL_ATTEN 0xF1  /* wifi_pwctrl_atten 0xF1..0xF3, the table rom_set_chan_cal_interp reads */
+#define PHY_PARAM_WIFI_CAL_POWER    0xF7  /* wifi_cal_power */
+#define PHY_PARAM_WIFI_CORRECT_POWER 0x123 /* wifi_correct_power: the channel's corrected power */
+#define PHY_PARAM_BT_CORRECT_POWER  0x124 /* bt_correct_power */
+#define PHY_PARAM_RXDC_RFRX_WIFI    0x14E /* RXDC_RFRX_WIFI: the receive gains and the packed entry's words */
+#define PHY_PARAM_RXDC_CHAN_WIFI    0x172 /* RXDC_CHAN_WIFI */
+#define PHY_PARAM_RX_SAT            0x1A4 /* rx_sat; the estimate's loop lets a result through where it is 1 */
+#define PHY_PARAM_TXIQ              0xD0  /* TXIQ, the halfword pair set_tx_gain_mem takes with the gain entries */
+#define PHY_PARAM_TXDC              0xA8  /* TXDC: 0xA8, 0xAA, 0xAC, 0xAE */
+#define PHY_PARAM_TXDC_CAL_PWDET    0x18E /* txdc_cal_pwdet: the settled pairs at +0, +2, +4 and +6 */
+#define PHY_PARAM_CHANNEL           0x11C /* the halfword chip_v7_set_chan writes the last channel to */
+
+/* phy_param's `rc_dout` and `RXIQ` fields, Espressif's labels from libphy's phy_cal_print. */
+#define PHY_PARAM_RC_DOUT      0xE8 /* one byte */
+#define PHY_PARAM_RC_DOUT_WIFI 0xE9 /* four bytes from here, rc_dout: wifi */
+#define PHY_PARAM_RC_DOUT_BT   0xED /* four bytes from here, rc_dout: bt */
+#define PHY_PARAM_RXIQ         0xD4 /* the receive IQ mismatch, a halfword pair */
+
 /* Registers of the front end's power detector, unnamed in any header, and of the SAR ADC. */
-#define FE_PWDET_CONF0           (MODEM_BASE + 0x810u) /* the front end's block is the modem's first */
-#define FE_PWDET_CONF1           (MODEM_BASE + 0x814u)
-#define FE_PWDET_CONF2           (MODEM_BASE + 0x818u)
-#define FE_PWDET_CONF3           (MODEM_BASE + 0x81Cu)
-#define FE_PWDET_CONF4           (MODEM_BASE + 0x820u)
+#define FECTRL_PWDET_CONF0           (MODEM_BASE + 0x810u) /* the front end's block is the modem's first */
+#define FECTRL_PWDET_CONF1           (MODEM_BASE + 0x814u)
+#define FECTRL_PWDET_CONF2           (MODEM_BASE + 0x818u)
+#define FECTRL_PWDET_CONF3           (MODEM_BASE + 0x81Cu)
+#define FECTRL_PWDET_CONF4           (MODEM_BASE + 0x820u)
 #define APB_SARADC_CTRL          (SARADC_BASE + 0x00u)
 #define APB_SARADC2_PWDET_DRV    (1u << 29)
 #define APB_SARADC_TSENS_CTRL    (SARADC_BASE + 0x58u)
@@ -220,14 +242,26 @@ void tsens_read_init_new(void)
 /* Leaves out the SAR ADC's capacitance in LP_AON. */
 void pwdet_reg_init_new(void)
 {
-    REG(FE_PWDET_CONF2) = 0x0F0F0FFFu;
-    REG(FE_PWDET_CONF3) = 0x00FF0F64u;
-    REG(FE_PWDET_CONF0) = (REG(FE_PWDET_CONF0) & ~0x00000FF0u) | 0x00000500u;
-    REG(FE_PWDET_CONF4) = 0x0000AAAAu;
-    REG(FE_PWDET_CONF0) = (REG(FE_PWDET_CONF0) & ~0x00700000u) | 0x00200000u;
-    REG(FE_PWDET_CONF1) = (REG(FE_PWDET_CONF1) & ~0x000000FFu) | 0x00000008u;
+    REG(FECTRL_PWDET_CONF2) = 0x0F0F0FFFu;
+    REG(FECTRL_PWDET_CONF3) = 0x00FF0F64u;
+    REG(FECTRL_PWDET_CONF0) = (REG(FECTRL_PWDET_CONF0) & ~0x00000FF0u) | 0x00000500u;
+    REG(FECTRL_PWDET_CONF4) = 0x0000AAAAu;
+    REG(FECTRL_PWDET_CONF0) = (REG(FECTRL_PWDET_CONF0) & ~0x00700000u) | 0x00200000u;
+    REG(FECTRL_PWDET_CONF1) = (REG(FECTRL_PWDET_CONF1) & ~0x000000FFu) | 0x00000008u;
     REG(APB_SARADC_CTRL) |= APB_SARADC2_PWDET_DRV;
 }
+
+/* The analog I2C's blocks, libphy's phy_i2c_check's names beside the IDF register headers under
+ * build/esp/idf-esp32c6-regi2c/. The host is per call; 0x6A's is host 1 here where regi2c_bias.h says 0. */
+#define I2C_RFPLL          0x62 /* i2c_rfpll */
+#define I2C_RFPLL_SDM      0x63 /* i2c_rfpll_sdm */
+#define I2C_BBPLL          0x66 /* i2c_bbpll; regi2c_bbpll.h I2C_BBPLL 0x66, host 0 */
+#define I2C_BBTOP          0x67 /* i2c_bbtop */
+#define I2C_PERIF          0x69 /* i2c_perif; regi2c_saradc.h's SAR ADC block */
+#define I2C_BIAS           0x6A /* i2c_bias; regi2c_bias.h I2C_BIAS 0x6A, whose host there is 0 */
+#define I2C_TXRF           0x6B /* i2c_txrf */
+#define I2C_HOST_MST       1    /* the host libphy reads the master's blocks at */
+#define I2C_HOST_SELF      0    /* and the host it reads the others at */
 
 /*
  * Our own of libphy's wait_i2c_sdm_stable, which open_i2c_xpd_new below calls, taken from its disassembly:
@@ -246,7 +280,7 @@ void wait_i2c_sdm_stable(void)
         if (REG(MAC_TSF_CLOCK) - start > I2C_SDM_SETTLE_MAX) {
             break;
         }
-        if (((int (*)(uint8_t, uint8_t, uint8_t))phy_get_romfuncs()[ROMFUNC_I2C_READ_REG])(0x63, 1, 0) ==
+        if (((int (*)(uint8_t, uint8_t, uint8_t))phy_get_romfuncs()[ROMFUNC_I2C_READ_REG])(I2C_RFPLL_SDM, I2C_HOST_MST, 0) ==
             I2C_SDM_SETTLED) {
             break;
         }
@@ -275,7 +309,7 @@ void phy_xpd_rf(void)
     disable_agc();
     REG(MODEM_SYSCON_WIFI_BB_CFG) &= ~0x2u;
     ets_delay_us(1);
-    ((void (*)(uint8_t, uint8_t, uint8_t, uint8_t))phy_get_romfuncs()[ROMFUNC_I2C_WRITE_REG])(0x67, 1, 2, 6);
+    ((void (*)(uint8_t, uint8_t, uint8_t, uint8_t))phy_get_romfuncs()[ROMFUNC_I2C_WRITE_REG])(I2C_BBTOP, I2C_HOST_MST, 2, 6);
 }
 
 /*
@@ -284,9 +318,9 @@ void phy_xpd_rf(void)
  */
 static void pwdet_sar2_init(void)
 {
-    REG(FE_PWDET_CONF1) |= 0x00003000u;
-    REG(FE_PWDET_CONF1) &= ~0x00000200u;
-    REG(FE_PWDET_CONF4) = 0x0000016Au;
+    REG(FECTRL_PWDET_CONF1) |= 0x00003000u;
+    REG(FECTRL_PWDET_CONF1) &= ~0x00000200u;
+    REG(FECTRL_PWDET_CONF4) = 0x0000016Au;
 }
 
 /* The factory MAC address as the eFuse holds it, last byte first, which the root task read for the driver. */
@@ -325,13 +359,13 @@ void drv_phy_on(void)
 }
 
 /* The front end's registers of the frequency setting and of the forced TX/RX state, MODEM_BASE's FE block. */
-#define FE_FREQ_SET_CONF    (MODEM_BASE + 0xC0u)
-#define FE_FREQ_SET_STATUS  (MODEM_BASE + 0xCCu)
-#define FE_FREQ_SET_ENABLE  0x04000000u /* the setting's enable, its bit 26 */
-#define FE_FREQ_SET_BUSY    (1u << 8)   /* clear once the setting has settled */
-#define FE_FREQ_SET_WAIT_US 0x3e8u      /* of the MAC's microsecond counter, the wait's bound */
-#define FE_TXRX_OFF         (MODEM_BASE + 0x910u)
-#define FE_TXRX_FORCE_MASK  0xfffff0ffu /* bits 8 to 11, the forcing's, which each step keeps off */
+#define FECOEX_FREQ_SET_CONF    (MODEM_BASE + 0xC0u)
+#define FECOEX_FREQ_SET_STATUS  (MODEM_BASE + 0xCCu)
+#define FECOEX_FREQ_SET_ENABLE  0x04000000u /* the setting's enable, its bit 26 */
+#define FECOEX_FREQ_SET_BUSY    (1u << 8)   /* clear once the setting has settled */
+#define FECOEX_FREQ_SET_WAIT_US 0x3e8u      /* of the MAC's microsecond counter, the wait's bound */
+#define FECTRL_TXRX_OFF         (MODEM_BASE + 0x910u)
+#define FECTRL_TXRX_FORCE_MASK  0xfffff0ffu /* bits 8 to 11, the forcing's, which each step keeps off */
 
 /* The ROM's rom_i2c_writeReg_Mask, block, host, register, msb, lsb, data, through its table's slot. */
 static void rom_i2c_write_masked(uint8_t block, uint8_t host, uint8_t reg, uint8_t msb, uint8_t lsb, uint8_t data)
@@ -355,16 +389,16 @@ static uint8_t rom_i2c_read(uint8_t block, uint8_t host, uint8_t reg)
 /* libphy's force_txrx_off: the front end's TX and RX forced off, its bits 8 to 11, in two steps with a 1 us wait. */
 static void force_txrx_off(uint32_t on)
 {
-    uint32_t v = REG(FE_TXRX_OFF) & FE_TXRX_FORCE_MASK;
+    uint32_t v = REG(FECTRL_TXRX_OFF) & FECTRL_TXRX_FORCE_MASK;
 
     if (on != 0u) {
-        REG(FE_TXRX_OFF) = v | 0x800u;
+        REG(FECTRL_TXRX_OFF) = v | 0x800u;
         ets_delay_us(1);
-        REG(FE_TXRX_OFF) = (REG(FE_TXRX_OFF) & FE_TXRX_FORCE_MASK) | 0xa00u;
+        REG(FECTRL_TXRX_OFF) = (REG(FECTRL_TXRX_OFF) & FECTRL_TXRX_FORCE_MASK) | 0xa00u;
     } else {
-        REG(FE_TXRX_OFF) = v | 0x200u;
+        REG(FECTRL_TXRX_OFF) = v | 0x200u;
         ets_delay_us(1);
-        REG(FE_TXRX_OFF) = REG(FE_TXRX_OFF) & FE_TXRX_FORCE_MASK;
+        REG(FECTRL_TXRX_OFF) = REG(FECTRL_TXRX_OFF) & FECTRL_TXRX_FORCE_MASK;
     }
     ets_delay_us(1);
 }
@@ -372,7 +406,7 @@ static void force_txrx_off(uint32_t on)
 /* libphy's phy_dis_hw_set_freq_reg: the frequency setting's enable, then a 2 us wait. */
 static void phy_dis_hw_set_freq_reg(void)
 {
-    REG(FE_FREQ_SET_CONF) |= FE_FREQ_SET_ENABLE;
+    REG(FECOEX_FREQ_SET_CONF) |= FECOEX_FREQ_SET_ENABLE;
     ets_delay_us(2);
 }
 
@@ -386,9 +420,9 @@ uint32_t phy_wait_freq_set_busy_new(void)
     uint32_t start = REG(MAC_TSF_CLOCK);
     uint32_t waited = 0;
 
-    while ((REG(FE_FREQ_SET_STATUS) & FE_FREQ_SET_BUSY) == 0u) {
+    while ((REG(FECOEX_FREQ_SET_STATUS) & FECOEX_FREQ_SET_BUSY) == 0u) {
         waited = 1;
-        if (REG(MAC_TSF_CLOCK) - start > FE_FREQ_SET_WAIT_US) {
+        if (REG(MAC_TSF_CLOCK) - start > FECOEX_FREQ_SET_WAIT_US) {
             freq_module_resetn();
             break;
         }
@@ -406,9 +440,9 @@ static void phy_dis_hw_set_freq_1(void)
 /* libphy's bias_reg_reset: three masked writes to the analog bias block 0x6a, host 1. */
 static void bias_reg_reset(void)
 {
-    rom_i2c_write_masked(0x6a, 1, 0, 3, 0, 7);
-    rom_i2c_write_masked(0x6a, 1, 1, 3, 0, 7);
-    rom_i2c_write_masked(0x6a, 1, 0, 7, 4, 7);
+    rom_i2c_write_masked(I2C_BIAS, I2C_HOST_MST, 0, 3, 0, 7);
+    rom_i2c_write_masked(I2C_BIAS, I2C_HOST_MST, 1, 3, 0, 7);
+    rom_i2c_write_masked(I2C_BIAS, I2C_HOST_MST, 0, 7, 4, 7);
 }
 
 /*
@@ -471,7 +505,7 @@ static uint32_t tsens_dac_cal_new(int temp, uint32_t index)
     } else {
         dac = 0xbu;
     }
-    rom_i2c_write_masked(0x69, 0, 6, 3, 0, (uint8_t)dac);
+    rom_i2c_write_masked(I2C_PERIF, I2C_HOST_SELF, 6, 3, 0, (uint8_t)dac);
     return dac;
 }
 
@@ -484,7 +518,7 @@ static uint32_t tsens_dac_cal_new(int temp, uint32_t index)
 static void tsens_temp_read_new(void)
 {
     uint32_t dac =
-        (uint32_t)((int (*)(uint8_t, uint8_t, uint8_t))phy_get_romfuncs()[ROMFUNC_I2C_READ_REG])(0x69, 0, 6) & 0xfu;
+        (uint32_t)((int (*)(uint8_t, uint8_t, uint8_t))phy_get_romfuncs()[ROMFUNC_I2C_READ_REG])(I2C_PERIF, I2C_HOST_SELF, 6) & 0xfu;
     uint32_t index = tsens_dac_to_index(dac);
     uint32_t code;
     int temp;
@@ -493,8 +527,8 @@ static void tsens_temp_read_new(void)
     code = tsens_code_read();
     temp = code_to_temp(code, index < 5u ? tsens_attribute[index].offset : 0);
     tsens_dac_cal_new(temp, index);
-    phy_param[PHY_PARAM_TEMPERATURE] = (uint8_t)temp;
-    phy_param[PHY_PARAM_TEMPERATURE + 1u] = (uint8_t)((uint32_t)temp >> 8);
+    phy_param[PHY_PARAM_TEMP_CODE] = (uint8_t)temp;
+    phy_param[PHY_PARAM_TEMP_CODE + 1u] = (uint8_t)((uint32_t)temp >> 8);
 }
 
 /*
@@ -618,27 +652,29 @@ void drv_phy_channel(uint32_t channel)
  */
 
 /* libphy's set_rx_comp_new [0x42004bdc]: two read-modify-writes of the baseband's receive compensation. */
-#define WIFI_BB_RX_COMP0 (MODEM_BASE + 0x702Cu)
-#define WIFI_BB_RX_COMP1 (MODEM_BASE + 0x70A0u)
+/* The baseband's word 0x702C, one address with several fields: set_rx_comp_new writes its low byte below,
+ * phy_force_rx_gain_trig and set_rx_gain_table its higher bits; libphy also calls it AGC_2 there. One name. */
+#define AGC_2 (MODEM_BASE + 0x702Cu)
+#define AGC_RX_COMP1 (MODEM_BASE + 0x70A0u)
 
 void set_rx_comp_new(void)
 {
-    REG(WIFI_BB_RX_COMP0) = (REG(WIFI_BB_RX_COMP0) & ~0xffu) | 0xe9u;
-    REG(WIFI_BB_RX_COMP1) = (REG(WIFI_BB_RX_COMP1) & 0x00ffffffu) | 0xe9000000u;
+    REG(AGC_2) = (REG(AGC_2) & ~0xffu) | 0xe9u;
+    REG(AGC_RX_COMP1) = (REG(AGC_RX_COMP1) & 0x00ffffffu) | 0xe9000000u;
 }
 
 /* libphy's write_gain_mem_new [0x42005004]: three words of the front end's gain memory, then its fourth. */
-#define FE_GAIN_MEM0     (MODEM_BASE + 0x8CCu)
-#define FE_GAIN_MEM1     (MODEM_BASE + 0x8D0u)
-#define FE_GAIN_MEM2     (MODEM_BASE + 0x8D4u)
-#define FE_GAIN_MEM_CONF (MODEM_BASE + 0x8C8u)
+#define FECTRL_GAIN_MEM0     (MODEM_BASE + 0x8CCu)
+#define FECTRL_GAIN_MEM1     (MODEM_BASE + 0x8D0u)
+#define FECTRL_GAIN_MEM2     (MODEM_BASE + 0x8D4u)
+#define FECTRL_GAIN_MEM_CONF (MODEM_BASE + 0x8C8u)
 
 void write_gain_mem_new(uint32_t a, uint32_t b, uint32_t c, uint32_t d)
 {
-    REG(FE_GAIN_MEM0) = a;
-    REG(FE_GAIN_MEM1) = b;
-    REG(FE_GAIN_MEM2) = c;
-    REG(FE_GAIN_MEM_CONF) = (REG(FE_GAIN_MEM_CONF) & 0xfff00000u) | ((d << 11) + 0x80000u);
+    REG(FECTRL_GAIN_MEM0) = a;
+    REG(FECTRL_GAIN_MEM1) = b;
+    REG(FECTRL_GAIN_MEM2) = c;
+    REG(FECTRL_GAIN_MEM_CONF) = (REG(FECTRL_GAIN_MEM_CONF) & 0xfff00000u) | ((d << 11) + 0x80000u);
 }
 
 /*
@@ -650,7 +686,7 @@ void write_gain_mem_new(uint32_t a, uint32_t b, uint32_t c, uint32_t d)
 void phy_i2c_master_mem_txcap(void)
 {
     uint32_t v =
-        (uint32_t)((int (*)(uint8_t, uint8_t, uint8_t))phy_get_romfuncs()[ROMFUNC_I2C_READ_REG])(0x6b, 1, 2);
+        (uint32_t)((int (*)(uint8_t, uint8_t, uint8_t))phy_get_romfuncs()[ROMFUNC_I2C_READ_REG])(I2C_TXRF, I2C_HOST_MST, 2);
 
     REG(I2C_ANA_MST_TXCAP) = (v << 16) | 0x26bu;
 }
@@ -665,8 +701,8 @@ void set_freq_i2c(uint32_t freq)
     uint32_t data;
 
     tsens_temp_read_new();
-    temp = (int16_t)((uint16_t)phy_param[PHY_PARAM_TEMPERATURE] |
-                     ((uint16_t)phy_param[PHY_PARAM_TEMPERATURE + 1u] << 8));
+    temp = (int16_t)((uint16_t)phy_param[PHY_PARAM_TEMP_CODE] |
+                     ((uint16_t)phy_param[PHY_PARAM_TEMP_CODE + 1u] << 8));
     if (temp > 54) {
         data = 7u;
     } else if (temp < 0) {
@@ -677,7 +713,7 @@ void set_freq_i2c(uint32_t freq)
     if (freq > 0x9a6u) {
         data = 5u;
     }
-    rom_i2c_write_masked(0x6b, 1, 7, 3, 0, (uint8_t)data);
+    rom_i2c_write_masked(I2C_TXRF, I2C_HOST_MST, 7, 3, 0, (uint8_t)data);
 }
 
 /*
@@ -688,9 +724,6 @@ void set_freq_i2c(uint32_t freq)
  */
 #define PHY_PARAM_MOST_TPW     0x06 /* the byte phy_set_most_tpw keeps */
 #define PHY_PARAM_TX_GAIN_B    0x08
-#define PHY_PARAM_TX_GAIN_TAB  0xf1 /* the calibration table rom_set_chan_cal_interp interpolates */
-#define PHY_PARAM_TX_GAIN_IDX  0xf7
-#define PHY_PARAM_TX_GAIN_CHAN 0x123
 
 static const uint16_t tx_gain_tab[16] = { 63, 63, 47, 39, 31, 23, 14, 13, 12, 7, 5, 3, 2, 1, 0, 0 };
 static const int16_t tx_gain_offset[16] = { 34,  26,  20,  15,  9,  0,   -16, -22,
@@ -775,8 +808,8 @@ static void wifi_get_tx_gain_new(uint32_t chan, const uint8_t *cal, int p3, int 
  */
 void wifi_get_tx_tab(uint32_t chan, uint8_t *out8, uint16_t *out9, uint16_t *out10, uint32_t power)
 {
-    wifi_get_tx_gain_new(chan, &phy_param[PHY_PARAM_TX_GAIN_TAB], (int)(int8_t)phy_param[PHY_PARAM_TX_GAIN_IDX],
-                         (int)(int8_t)(uint8_t)(phy_param[PHY_PARAM_TX_GAIN_CHAN] - phy_param[PHY_PARAM_TX_GAIN_B]),
+    wifi_get_tx_gain_new(chan, &phy_param[PHY_PARAM_WIFI_PWCTRL_ATTEN], (int)(int8_t)phy_param[PHY_PARAM_WIFI_CAL_POWER],
+                         (int)(int8_t)(uint8_t)(phy_param[PHY_PARAM_WIFI_CORRECT_POWER] - phy_param[PHY_PARAM_TX_GAIN_B]),
                          tx_gain_tab, tx_gain_mid, tx_gain_offset, out8, out9, out10, (uint8_t)power);
 }
 
@@ -787,9 +820,8 @@ static uint16_t phy_param16(uint32_t off)
 }
 
 /* The front end's gain memory channel, and its table base in phy_param, which set_tx_gain_mem reads. */
-#define FE_GAIN_CHAN       (MODEM_BASE + 0x410u)
+#define FEDATA_GAIN_CHAN       (MODEM_BASE + 0x410u)
 #define PHY_PARAM_TX_GAIN_OFF 0x07 /* nonzero leaves set_tx_gain_mem out */
-#define PHY_PARAM_GAIN_TABLE  0xd0
 
 /* The ROM's two gain lookups: a baseband gain's index, from the Wi-Fi and the Bluetooth tables. */
 uint32_t txbbgain_to_index(uint32_t gain);
@@ -802,7 +834,7 @@ uint32_t bt_bb_to_index(uint32_t gain);
 static void set_tx_gain_mem(uint32_t p1, uint32_t p2, const uint16_t *p3, const uint16_t *p4,
                             const uint8_t *p5, const uint8_t *p6, const uint8_t *p7)
 {
-    uint32_t base = ((p1 != 0u ? 0x20u : 0u) + (REG(FE_GAIN_CHAN) >> 24)) & 0xffu;
+    uint32_t base = ((p1 != 0u ? 0x20u : 0u) + (REG(FEDATA_GAIN_CHAN) >> 24)) & 0xffu;
     uint32_t table = (uint32_t)(p7[0] | ((uint16_t)p7[1] << 8));
 
     force_txrx_off(1);
@@ -856,7 +888,7 @@ void wifi_set_tx_gain(uint32_t chan, uint32_t power)
 
     wifi_get_tx_tab(chan, out8, out9, out10, power);
     if (phy_param[PHY_PARAM_TX_GAIN_OFF] == 0u) {
-        set_tx_gain_mem(0, 0x20u, out10, out9, out8, cfg, &phy_param[PHY_PARAM_GAIN_TABLE]);
+        set_tx_gain_mem(0, 0x20u, out10, out9, out8, cfg, &phy_param[PHY_PARAM_TXIQ]);
     }
 }
 
@@ -868,22 +900,22 @@ void wifi_set_tx_gain(uint32_t chan, uint32_t power)
 void phy_set_most_tpw(uint8_t tpw)
 {
     phy_param[PHY_PARAM_MOST_TPW] = tpw;
-    wifi_set_tx_gain((uint32_t)phy_param16(0x11cu), 0u); /* phy_param's channel, the halfword chip_v7_set_chan writes */
+    wifi_set_tx_gain((uint32_t)phy_param16(PHY_PARAM_CHANNEL), 0u); /* phy_param's channel, the halfword chip_v7_set_chan writes */
 }
 
 /*
  * libphy's chan14_mic_cfg [0x42000550]: channel 14's microphone configuration, the baseband's bits 13 and 14,
  * and the byte phy_param keeps with each: 0x24 for channel 14 and 0x06 otherwise.
  */
-#define WIFI_BB_CHAN14 (MODEM_BASE + 0x7400u)
+#define BBTX_CHAN14 (MODEM_BASE + 0x7400u) /* channel 14's bits 13-14; the library also names this word INIT_0 */
 
 void chan14_mic_cfg(uint32_t on)
 {
     if (on == 1u) {
-        REG(WIFI_BB_CHAN14) = (REG(WIFI_BB_CHAN14) & ~0x6000u) | 0x2000u;
+        REG(BBTX_CHAN14) = (REG(BBTX_CHAN14) & ~0x6000u) | 0x2000u;
         phy_set_most_tpw((uint8_t)(int8_t)phy_param[PHY_PARAM_CHAN14_TPW]);
     } else {
-        REG(WIFI_BB_CHAN14) |= 0x6000u;
+        REG(BBTX_CHAN14) |= 0x6000u;
         phy_set_most_tpw((uint8_t)(int8_t)phy_param[PHY_PARAM_MOST_TPW]);
     }
 }
@@ -919,9 +951,7 @@ void set_txclk_en(uint32_t on);
 /* The ROM's channel into the analog front end, which the receive DC calibration sets. */
 void chip_v7_set_chan_ana(uint32_t chan);
 
-#define PHY_PARAM_RFRX_A 0x14e /* the receive gains and the words the packed entry takes */
 #define PHY_PARAM_RFRX_B 0x16e
-#define PHY_PARAM_RFRX_C 0x172
 
 /*
  * libphy's wr_rx_gain_mem [0x4200730c]: the receive gains of a run of subbands,
@@ -990,7 +1020,7 @@ void wr_rx_gain_mem(uint32_t p1, uint32_t p2, const uint32_t *p3, const uint16_t
         if (p1 == 0u) {
             w0 = p5[0];
             w1 = p5[1];
-            w2 = phy_param16(0xd4u);
+            w2 = phy_param16(PHY_PARAM_RXIQ);
         } else {
             w0 = 0x100;
             w1 = 0x100;
@@ -1014,16 +1044,16 @@ void wr_rx_gain_mem(uint32_t p1, uint32_t p2, const uint32_t *p3, const uint16_t
  * 0x600A8060 bit 10, then 0x600A8060 bit 11, then 0x600A807C bit 11 (disassembly 0x400031B6).
  * mac_low_rate_disable calls this in the ROM's place.
  */
-#define WIFI_BB_LOW_RATE0      (MODEM_BASE + 0x8060u)
-#define WIFI_BB_LOW_RATE1      (MODEM_BASE + 0x807Cu)
-#define WIFI_BB_LOW_RATE_BIT10 (1u << 10)
-#define WIFI_BB_LOW_RATE_BIT11 (1u << 11)
+#define BRX_LOW_RATE0      (MODEM_BASE + 0x8060u)
+#define BRX_LOW_RATE1      (MODEM_BASE + 0x807Cu)
+#define BRX_LOW_RATE_BIT10 (1u << 10)
+#define BRX_LOW_RATE_BIT11 (1u << 11)
 
 void drv_phy_low_rate_disable(void)
 {
-    REG(WIFI_BB_LOW_RATE0) &= ~WIFI_BB_LOW_RATE_BIT10;
-    REG(WIFI_BB_LOW_RATE0) &= ~WIFI_BB_LOW_RATE_BIT11;
-    REG(WIFI_BB_LOW_RATE1) &= ~WIFI_BB_LOW_RATE_BIT11;
+    REG(BRX_LOW_RATE0) &= ~BRX_LOW_RATE_BIT10;
+    REG(BRX_LOW_RATE0) &= ~BRX_LOW_RATE_BIT11;
+    REG(BRX_LOW_RATE1) &= ~BRX_LOW_RATE_BIT11;
 }
 
 /*
@@ -1033,11 +1063,9 @@ void drv_phy_low_rate_disable(void)
  */
 #define PHY_PARAM_TX_CAP   0x6    /* the cap every rate's power is held to, signed */
 #define PHY_PARAM_SUBBAND  0x50   /* above 9 the second byte is the first's own, not the table's */
-#define PHY_PARAM_TARGET   0x52   /* get_chan_target_power_new's per-rate limits, 0x12 of them */
 #define PHY_PARAM_FCC_CHAN 0x66   /* 1 asks for the four band limits of rate_fcc_index below */
 #define PHY_PARAM_FCC_A    0x70   /* rate_fcc_index's first table, read at chan-1, chan+0xd and chan+0x1b */
 #define PHY_PARAM_FCC_B    0x67   /* its second, one more limit */
-#define PHY_PARAM_CHANNEL  0x11c  /* the halfword chip_v7_set_chan writes the last channel to */
 
 /* The four band limits libphy holds before the ROM's get_rate_fcc_index replaces them: its rodata's 0x54545454. */
 #define PHY_TARGET_LIMITS 0x54545454u
@@ -1084,7 +1112,7 @@ static uint32_t rate_to_index(uint32_t rate)
     if (rate <= 7u) {
         return (rate >> 1) & 1u;
     }
-    if ((REG(WIFI_BB_LOW_RATE0) & WIFI_BB_LOW_RATE_BIT10) != 0u) {
+    if ((REG(BRX_LOW_RATE0) & BRX_LOW_RATE_BIT10) != 0u) {
         return 0u;
     }
     if (rate <= 0xfu) {
@@ -1143,7 +1171,7 @@ static void get_chan_target_power(uint32_t chan, int cap, uint8_t *out,
 static void wifi_get_target_power(uint32_t chan, uint8_t *out)
 {
     get_chan_target_power(chan, (int8_t)phy_param[PHY_PARAM_TX_CAP], out,
-                          &phy_param[PHY_PARAM_TARGET], phy_param[PHY_PARAM_FCC_CHAN],
+                          &phy_param[PHY_PARAM_WIFI_INIT_POWER], phy_param[PHY_PARAM_FCC_CHAN],
                           &phy_param[PHY_PARAM_FCC_A], &phy_param[PHY_PARAM_FCC_B]);
 }
 
@@ -1244,7 +1272,7 @@ static void chip_v7_set_chan_misc(uint32_t channel)
  * Its first argument clear writes the two bytes phy_param keeps, and set writes a value from the calibration;
  * both set the baseband's configuration and the analog block 0x67, host 1, registers 4 to 0xf.
  */
-#define WIFI_BB_11P (MODEM_BASE + 0x7030u)
+#define AGC_11P (MODEM_BASE + 0x7030u)
 
 static void phy_11p_set(uint32_t p1, uint32_t p2)
 {
@@ -1252,35 +1280,35 @@ static void phy_11p_set(uint32_t p1, uint32_t p2)
     phy_param[0x29] = (uint8_t)p2;
     if (p1 == 0u) {
         REG(MODEM_SYSCON_WIFI_BB_CFG) &= ~0x1cu;
-        REG(WIFI_BB_11P) |= 0x20u;
-        rom_i2c_write(0x67, 1, 4, phy_param[0xe9]);
-        rom_i2c_write(0x67, 1, 5, phy_param[0xe9]);
-        rom_i2c_write(0x67, 1, 6, phy_param[0xea]);
-        rom_i2c_write(0x67, 1, 7, phy_param[0xea]);
-        rom_i2c_write(0x67, 1, 0xc, phy_param[0xe9]);
-        rom_i2c_write(0x67, 1, 0xd, phy_param[0xe9]);
-        rom_i2c_write(0x67, 1, 0xe, phy_param[0xea]);
-        rom_i2c_write(0x67, 1, 0xf, phy_param[0xea]);
+        REG(AGC_11P) |= 0x20u;
+        rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 4, phy_param[PHY_PARAM_RC_DOUT_WIFI]);
+        rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 5, phy_param[PHY_PARAM_RC_DOUT_WIFI]);
+        rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 6, phy_param[PHY_PARAM_RC_DOUT_WIFI + 1u]);
+        rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 7, phy_param[PHY_PARAM_RC_DOUT_WIFI + 1u]);
+        rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 0xc, phy_param[PHY_PARAM_RC_DOUT_WIFI]);
+        rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 0xd, phy_param[PHY_PARAM_RC_DOUT_WIFI]);
+        rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 0xe, phy_param[PHY_PARAM_RC_DOUT_WIFI + 1u]);
+        rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 0xf, phy_param[PHY_PARAM_RC_DOUT_WIFI + 1u]);
     } else {
         uint32_t k = p2 == 0u ? 4u : 5u;
         uint32_t div = p2 == 0u ? 100u : 0x32u;
-        int32_t v = (int32_t)(((uint32_t)(phy_param[0xe8] + 0x38u) * 0x67u) / div) - 8;
+        int32_t v = (int32_t)(((uint32_t)(phy_param[PHY_PARAM_RC_DOUT] + 0x38u) * 0x67u) / div) - 8;
         uint8_t d;
 
         REG(MODEM_SYSCON_WIFI_BB_CFG) = (REG(MODEM_SYSCON_WIFI_BB_CFG) & ~0x1cu) | (k << 2);
-        REG(WIFI_BB_11P) &= ~0x20u;
+        REG(AGC_11P) &= ~0x20u;
         if (v > 0x3f) {
             v = 0x3f;
         }
         d = (uint8_t)v;
-        rom_i2c_write(0x67, 1, 4, d);
-        rom_i2c_write(0x67, 1, 5, d);
-        rom_i2c_write(0x67, 1, 6, d);
-        rom_i2c_write(0x67, 1, 7, d);
-        rom_i2c_write(0x67, 1, 0xc, d);
-        rom_i2c_write(0x67, 1, 0xd, d);
-        rom_i2c_write(0x67, 1, 0xe, d);
-        rom_i2c_write(0x67, 1, 0xf, d);
+        rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 4, d);
+        rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 5, d);
+        rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 6, d);
+        rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 7, d);
+        rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 0xc, d);
+        rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 0xd, d);
+        rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 0xe, d);
+        rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 0xf, d);
     }
 }
 
@@ -1313,7 +1341,7 @@ void chip_v7_set_chan(uint32_t chan, uint32_t second)
     }
     phy_param[0x11f] = (uint8_t)second;
     phy_param[0x11e] = second != 0u ? 1u : 0u;
-    phy_param[0x11c] = (uint8_t)ch;
+    phy_param[PHY_PARAM_CHANNEL] = (uint8_t)ch;
     phy_param[0x11d] = (uint8_t)(ch >> 8);
     disable_agc();
     force_txrx_off(1);
@@ -1353,9 +1381,9 @@ void phy_change_channel(uint32_t mhz, uint32_t a1, uint32_t a2, uint32_t width)
  */
 
 /* The analog I2C master's three clock words in MODEM_LPCON, which i2c_clk_sel below sets. */
-#define MODEM_LPCON_I2C_CLK0 (MODEM_LPCON_BASE + 0x824u)
-#define MODEM_LPCON_I2C_CLK1 (MODEM_LPCON_BASE + 0x828u)
-#define MODEM_LPCON_I2C_CLK2 (MODEM_LPCON_BASE + 0x82Cu)
+#define I2C_MST_CLK0 (MODEM_LPCON_BASE + 0x824u)
+#define I2C_MST_CLK1 (MODEM_LPCON_BASE + 0x828u)
+#define I2C_MST_CLK2 (MODEM_LPCON_BASE + 0x82Cu)
 
 /*
  * libphy's i2c_clk_sel [0x42002678]: each of the three words takes the selector's bits, two read-modify-writes
@@ -1367,15 +1395,14 @@ void i2c_clk_sel(uint32_t sel)
     uint32_t lo = (sel >> 1) & 0x3fu;
 
     for (uint32_t i = 0; i < 3u; i++) {
-        uint32_t reg = MODEM_LPCON_I2C_CLK0 + i * 4u;
+        uint32_t reg = I2C_MST_CLK0 + i * 4u;
 
         REG(reg) = (REG(reg) & ~0x7c0u) | hi;
         REG(reg) = (REG(reg) & ~0x3fu) | lo;
     }
 }
 
-/* The analog block and register i2c_bbpll_set keeps the byte it reads. */
-#define I2C_BBPLL_BLOCK       0x66
+/* The register i2c_bbpll_set keeps the byte it reads of block I2C_BBPLL. */
 #define PHY_PARAM_BBPLL_BYTE  0x4a
 
 /*
@@ -1385,33 +1412,33 @@ void i2c_clk_sel(uint32_t sel)
 void i2c_bbpll_set(int on)
 {
     if (on != 0) {
-        rom_i2c_write_masked(I2C_BBPLL_BLOCK, 0, 4, 3, 2, 2);
-        phy_param[PHY_PARAM_BBPLL_BYTE] = rom_i2c_read(I2C_BBPLL_BLOCK, 0, 4);
+        rom_i2c_write_masked(I2C_BBPLL, I2C_HOST_SELF, 4, 3, 2, 2);
+        phy_param[PHY_PARAM_BBPLL_BYTE] = rom_i2c_read(I2C_BBPLL, I2C_HOST_SELF, 4);
     } else {
-        rom_i2c_write(I2C_BBPLL_BLOCK, 0, 4, phy_param[PHY_PARAM_BBPLL_BYTE]);
+        rom_i2c_write(I2C_BBPLL, I2C_HOST_SELF, 4, phy_param[PHY_PARAM_BBPLL_BYTE]);
     }
 }
 
 /* The front end's and the baseband's words the library's reg_set_new writes, unnamed in any header. */
-#define FE_REG_SET0     (MODEM_BASE + 0x8F8u)
-#define FE_REG_SET1     (MODEM_BASE + 0x44Cu)
-#define FE_REG_SET2     (MODEM_BASE + 0x46Cu)
-#define FE_REG_SET3     (MODEM_BASE + 0x450u)
-#define WIFI_BB_REG_SET (MODEM_BASE + 0x7428u)
+#define FECTRL_REG_SET0     (MODEM_BASE + 0x8F8u)
+#define FEDATA_REG_SET1     (MODEM_BASE + 0x44Cu)
+#define FEDATA_REG_SET2     (MODEM_BASE + 0x46Cu)
+#define FEDATA_REG_SET3     (MODEM_BASE + 0x450u)
+#define BBTX_REG_SET (MODEM_BASE + 0x7428u)
 
 /* libphy's reg_set_new [0x420030ea]: five read-modify-writes bringing the front end and the baseband up. */
 void reg_set_new(void)
 {
-    REG(FE_REG_SET0) = (REG(FE_REG_SET0) & ~0xffu) | 4u;
-    REG(FE_REG_SET1) |= 0x08000000u;
-    REG(FE_REG_SET2) &= ~0x20000000u;
-    REG(FE_REG_SET3) |= 0x80008000u;
-    REG(WIFI_BB_REG_SET) = (REG(WIFI_BB_REG_SET) & ~0x3f00u) | 0x1500u;
+    REG(FECTRL_REG_SET0) = (REG(FECTRL_REG_SET0) & ~0xffu) | 4u;
+    REG(FEDATA_REG_SET1) |= 0x08000000u;
+    REG(FEDATA_REG_SET2) &= ~0x20000000u;
+    REG(FEDATA_REG_SET3) |= 0x80008000u;
+    REG(BBTX_REG_SET) = (REG(BBTX_REG_SET) & ~0x3f00u) | 0x1500u;
 }
 
 /* The frequency module's own two words the library's freq_reg_init writes, unnamed in any header. */
-#define FE_FREQ_SET_CONF2 (MODEM_BASE + 0xC8u)
-#define FE_FREQ_SET_CONF4 (MODEM_BASE + 0xD4u)
+#define FECOEX_FREQ_SET_CONF2 (MODEM_BASE + 0xC8u)
+#define FECOEX_FREQ_SET_CONF4 (MODEM_BASE + 0xD4u)
 
 /* phy_param's byte the library's freq_reg_init reads for its default. */
 #define PHY_PARAM_FREQ_SEL 0x19b
@@ -1423,17 +1450,17 @@ void reg_set_new(void)
  */
 void freq_reg_init(uint32_t param1, uint32_t param2)
 {
-    REG(FE_FREQ_SET_CONF) &= 0x5bffbfffu;
-    REG(FE_FREQ_SET_CONF) |= 0x02000000u;
+    REG(FECOEX_FREQ_SET_CONF) &= 0x5bffbfffu;
+    REG(FECOEX_FREQ_SET_CONF) |= 0x02000000u;
     if (phy_param[PHY_PARAM_FREQ_SEL] != 0u) {
         param1 = 0u;
         param2 = 2u;
     }
-    REG(FE_FREQ_SET_CONF) = (REG(FE_FREQ_SET_CONF) & 0xfe01ffffu) |
+    REG(FECOEX_FREQ_SET_CONF) = (REG(FECOEX_FREQ_SET_CONF) & 0xfe01ffffu) |
                             ((((param2 << 4) | param1) << 17) & 0x01fe0000u);
-    REG(FE_FREQ_SET_CONF4) = (REG(FE_FREQ_SET_CONF4) & 0xfffff87fu) | 0x300u;
-    REG(FE_FREQ_SET_CONF2) = 0x19800249u;
-    REG(FE_FREQ_SET_STATUS) = 0x25824e50u;
+    REG(FECOEX_FREQ_SET_CONF4) = (REG(FECOEX_FREQ_SET_CONF4) & 0xfffff87fu) | 0x300u;
+    REG(FECOEX_FREQ_SET_CONF2) = 0x19800249u;
+    REG(FECOEX_FREQ_SET_STATUS) = 0x25824e50u;
 }
 
 /*
@@ -1443,30 +1470,30 @@ void freq_reg_init(uint32_t param1, uint32_t param2)
 void bias_reg_set(int on)
 {
     (void)on;
-    rom_i2c_write_masked(0x6a, 1, 0, 3, 0, 0x0f);
-    rom_i2c_write_masked(0x6a, 1, 1, 3, 0, 0x0c);
-    rom_i2c_write_masked(0x6a, 1, 0, 7, 4, 0x0c);
+    rom_i2c_write_masked(I2C_BIAS, I2C_HOST_MST, 0, 3, 0, 0x0f);
+    rom_i2c_write_masked(I2C_BIAS, I2C_HOST_MST, 1, 3, 0, 0x0c);
+    rom_i2c_write_masked(I2C_BIAS, I2C_HOST_MST, 0, 7, 4, 0x0c);
 }
 
 /* The baseband's noise-floor word, which the library's noise_floor_auto_set_new sets. */
-#define WIFI_BB_NOISE_FLOOR (MODEM_BASE + 0x7018u)
+#define AGC_NOISE_FLOOR (MODEM_BASE + 0x7018u)
 
 /* libphy's noise_floor_auto_set_new [0x42004f46]: two bits of the baseband's noise-floor word, set in order. */
 void noise_floor_auto_set_new(void)
 {
-    REG(WIFI_BB_NOISE_FLOOR) |= 0x00800000u;
-    REG(WIFI_BB_NOISE_FLOOR) |= 0x10000000u;
+    REG(AGC_NOISE_FLOOR) |= 0x00800000u;
+    REG(AGC_NOISE_FLOOR) |= 0x10000000u;
 }
 
 /* The front end's Bluetooth filter word, which the library's bt_filter_reg_new sets. */
-#define FE_BT_FILTER (MODEM_BASE + 0x900u)
+#define FECTRL_BT_FILTER (MODEM_BASE + 0x900u)
 
 /* libphy's bt_filter_reg_new [0x42004f60]: three read-modify-writes of the front end's filter word. */
 void bt_filter_reg_new(void)
 {
-    REG(FE_BT_FILTER) |= 0x02000000u;
-    REG(FE_BT_FILTER) &= 0xffbfffffu;
-    REG(FE_BT_FILTER) &= 0xfe7fffffu;
+    REG(FECTRL_BT_FILTER) |= 0x02000000u;
+    REG(FECTRL_BT_FILTER) &= 0xffbfffffu;
+    REG(FECTRL_BT_FILTER) &= 0xfe7fffffu;
 }
 
 /* The ROM's i2c_paral_write_num: six seven-byte entries written through the analog I2C in parallel. */
@@ -1498,7 +1525,7 @@ void pbus_clear_reg(void)
 }
 
 /* The analog I2C master's parallel-write word in MODEM_LPCON, which the library's phy_i2c_init2 sets. */
-#define MODEM_LPCON_I2C_MST0 (MODEM_LPCON_BASE + 0x820u)
+#define I2C_MST_MST0 (MODEM_LPCON_BASE + 0x820u)
 
 /*
  * libphy's phy_i2c_init2 [0x4200296e]: six entries the analog I2C writes in parallel -- 0x6b everywhere,
@@ -1517,9 +1544,9 @@ void phy_i2c_init2(void)
 
     ((void (*)(void))phy_get_romfuncs()[ROMFUNC_I2C_ENTER_CRITICAL])();
     mask = ((uint32_t (*)(uint32_t))phy_get_romfuncs()[ROMFUNC_I2C_MST0_MASK])(0x6bu);
-    REG(MODEM_LPCON_I2C_MST0) = (REG(MODEM_LPCON_I2C_MST0) & 0xfffe000fu) | (mask & 0xfff0u);
+    REG(I2C_MST_MST0) = (REG(I2C_MST_MST0) & 0xfffe000fu) | (mask & 0xfff0u);
     i2c_paral_write_num(e0, e1, e2, e3, e4, e5, 7u, 0u);
-    REG(MODEM_LPCON_I2C_MST0) = (REG(MODEM_LPCON_I2C_MST0) & 0xfffe000fu) | 0x1f00u;
+    REG(I2C_MST_MST0) = (REG(I2C_MST_MST0) & 0xfffe000fu) | 0x1f00u;
     ((void (*)(void))phy_get_romfuncs()[ROMFUNC_I2C_EXIT_CRITICAL])();
 }
 
@@ -1530,24 +1557,24 @@ void phy_i2c_init2(void)
  */
 void filter_dcap_set(void)
 {
-    rom_i2c_write(0x67, 1, 0x14, phy_param[0xed]);
-    rom_i2c_write(0x67, 1, 0x15, phy_param[0xed]);
-    rom_i2c_write(0x67, 1, 0x16, phy_param[0xee]);
-    rom_i2c_write(0x67, 1, 0x17, phy_param[0xee]);
-    rom_i2c_write(0x67, 1, 0x18, phy_param[0xed]);
-    rom_i2c_write(0x67, 1, 0x19, phy_param[0xed]);
-    rom_i2c_write(0x67, 1, 0x1c, phy_param[0xf0]);
-    rom_i2c_write(0x67, 1, 0x1d, phy_param[0xf0]);
-    rom_i2c_write(0x67, 1, 0x1e, (uint8_t)(phy_param[0xf0] | 0x40u));
-    rom_i2c_write(0x67, 1, 0x1f, phy_param[0xf0]);
-    rom_i2c_write(0x67, 1, 0x04, phy_param[0xe9]);
-    rom_i2c_write(0x67, 1, 0x05, phy_param[0xe9]);
-    rom_i2c_write(0x67, 1, 0x06, phy_param[0xea]);
-    rom_i2c_write(0x67, 1, 0x07, phy_param[0xea]);
-    rom_i2c_write(0x67, 1, 0x0c, phy_param[0xe9]);
-    rom_i2c_write(0x67, 1, 0x0d, phy_param[0xe9]);
-    rom_i2c_write(0x67, 1, 0x0e, phy_param[0xea]);
-    rom_i2c_write(0x67, 1, 0x0f, phy_param[0xea]);
+    rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 0x14, phy_param[PHY_PARAM_RC_DOUT_BT]);
+    rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 0x15, phy_param[PHY_PARAM_RC_DOUT_BT]);
+    rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 0x16, phy_param[PHY_PARAM_RC_DOUT_BT + 1u]);
+    rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 0x17, phy_param[PHY_PARAM_RC_DOUT_BT + 1u]);
+    rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 0x18, phy_param[PHY_PARAM_RC_DOUT_BT]);
+    rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 0x19, phy_param[PHY_PARAM_RC_DOUT_BT]);
+    rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 0x1c, phy_param[PHY_PARAM_RC_DOUT_BT + 3u]);
+    rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 0x1d, phy_param[PHY_PARAM_RC_DOUT_BT + 3u]);
+    rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 0x1e, (uint8_t)(phy_param[PHY_PARAM_RC_DOUT_BT + 3u] | 0x40u));
+    rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 0x1f, phy_param[PHY_PARAM_RC_DOUT_BT + 3u]);
+    rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 0x04, phy_param[PHY_PARAM_RC_DOUT_WIFI]);
+    rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 0x05, phy_param[PHY_PARAM_RC_DOUT_WIFI]);
+    rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 0x06, phy_param[PHY_PARAM_RC_DOUT_WIFI + 1u]);
+    rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 0x07, phy_param[PHY_PARAM_RC_DOUT_WIFI + 1u]);
+    rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 0x0c, phy_param[PHY_PARAM_RC_DOUT_WIFI]);
+    rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 0x0d, phy_param[PHY_PARAM_RC_DOUT_WIFI]);
+    rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 0x0e, phy_param[PHY_PARAM_RC_DOUT_WIFI + 1u]);
+    rom_i2c_write(I2C_BBTOP, I2C_HOST_MST, 0x0f, phy_param[PHY_PARAM_RC_DOUT_WIFI + 1u]);
 }
 
 /* The ROM's frequency-memory lookups the library's frequency chain runs. */
@@ -1555,7 +1582,7 @@ void freq_i2c_num_addr(void *buf, uint32_t count);
 uint32_t get_freq_mem_param(uint32_t index);
 
 /* The frequency module's memory-write word, which the library's freq_i2c_mem_write_new writes. */
-#define FE_FREQ_SET_MEM (MODEM_BASE + 0xD0u)
+#define FECOEX_FREQ_SET_MEM (MODEM_BASE + 0xD0u)
 
 /*
  * libphy's freq_i2c_mem_write_new [0x420021ba]: the sub-address at the frequency setting's bits 4 to 11,
@@ -1563,10 +1590,10 @@ uint32_t get_freq_mem_param(uint32_t index);
  */
 void freq_i2c_mem_write_new(uint32_t addr, uint32_t data, uint32_t len)
 {
-    REG(FE_FREQ_SET_CONF) = (REG(FE_FREQ_SET_CONF) & 0xffffc00fu) | ((addr << 4) & 0x3ff0u);
-    REG(FE_FREQ_SET_MEM) = (len << 24) | data;
-    REG(FE_FREQ_SET_CONF) |= 0x8000u;
-    REG(FE_FREQ_SET_CONF) &= ~0x8000u;
+    REG(FECOEX_FREQ_SET_CONF) = (REG(FECOEX_FREQ_SET_CONF) & 0xffffc00fu) | ((addr << 4) & 0x3ff0u);
+    REG(FECOEX_FREQ_SET_MEM) = (len << 24) | data;
+    REG(FECOEX_FREQ_SET_CONF) |= 0x8000u;
+    REG(FECOEX_FREQ_SET_CONF) &= ~0x8000u;
 }
 
 /*
@@ -1579,10 +1606,10 @@ void freq_get_i2c_data(uint8_t *b0, uint8_t *b1, uint8_t *b2, uint32_t *b3, uint
     uint32_t s7, s3, s6, dat;
     uint8_t a5 = 0x20u, a4 = 0x10u, a6 = 0x00u;
 
-    rom_i2c_write_masked(0x62, 1, 0x0b, 6, 6, 1);
-    s6 = rom_i2c_read(0x62, 1, 0x0b);
-    uint32_t v2 = rom_i2c_read(0x63, 1, 0);
-    uint32_t v3 = rom_i2c_read(0x67, 1, 3);
+    rom_i2c_write_masked(I2C_RFPLL, I2C_HOST_MST, 0x0b, 6, 6, 1);
+    s6 = rom_i2c_read(I2C_RFPLL, I2C_HOST_MST, 0x0b);
+    uint32_t v2 = rom_i2c_read(I2C_RFPLL_SDM, I2C_HOST_MST, 0);
+    uint32_t v3 = rom_i2c_read(I2C_BBTOP, I2C_HOST_MST, 3);
 
     s7 = v2 & ~0x08u;
     s3 = (v2 | 0x08u) & 0xffu;
@@ -1678,10 +1705,10 @@ void set_pbus_reg(void);
 void phy_en_hw_set_freq(void);
 
 /* The baseband's and the front end's bring-up words, unnamed in any header, named for the leaf that writes them. */
-#define WIFI_BB_11B_0 (MODEM_BASE + 0x7044u)
-#define WIFI_BB_11B_1 (MODEM_BASE + 0x7124u)
-#define WIFI_BB_11B_2 (MODEM_BASE + 0x7104u)
-#define WIFI_BB_11B_3 (MODEM_BASE + 0x8004u)
+#define AGC_11B_0 (MODEM_BASE + 0x7044u)
+#define AGC_11B_1 (MODEM_BASE + 0x7124u)
+#define AGC_11B_2 (MODEM_BASE + 0x7104u)
+#define BRX_11B_3 (MODEM_BASE + 0x8004u)
 
 /*
  * libphy's rx_11b_opt [0x42004aa4]: the two long-range 11b settings of the baseband and the front end,
@@ -1691,45 +1718,44 @@ void phy_en_hw_set_freq(void);
 void rx_11b_opt(uint32_t on)
 {
     if (on != 0u) {
-        REG(WIFI_BB_11B_0) |= 0x003f0000u;
-        REG(WIFI_BB_11B_0) = (REG(WIFI_BB_11B_0) & 0xffffc0ffu) | 0x2100u;
-        REG(WIFI_BB_11B_1) = (REG(WIFI_BB_11B_1) & 0xffff03ffu) | 0x8400u;
-        REG(WIFI_BB_11B_1) = (REG(WIFI_BB_11B_1) & ~0x0fu) | 0x3u;
-        REG(WIFI_BB_11B_3) = (REG(WIFI_BB_11B_3) & 0xffff0fffu) | 0x9000u;
+        REG(AGC_11B_0) |= 0x003f0000u;
+        REG(AGC_11B_0) = (REG(AGC_11B_0) & 0xffffc0ffu) | 0x2100u;
+        REG(AGC_11B_1) = (REG(AGC_11B_1) & 0xffff03ffu) | 0x8400u;
+        REG(AGC_11B_1) = (REG(AGC_11B_1) & ~0x0fu) | 0x3u;
+        REG(BRX_11B_3) = (REG(BRX_11B_3) & 0xffff0fffu) | 0x9000u;
     } else {
-        REG(WIFI_BB_11B_0) = (REG(WIFI_BB_11B_0) & 0xffc0ffffu) | 0x003e0000u;
-        REG(WIFI_BB_11B_0) = (REG(WIFI_BB_11B_0) & 0xffffc0ffu) | 0x1800u;
-        REG(WIFI_BB_11B_1) = (REG(WIFI_BB_11B_1) & 0xffff03ffu) | 0x6000u;
-        REG(WIFI_BB_11B_1) = (REG(WIFI_BB_11B_1) & ~0x0fu) | 0x4u;
-        REG(WIFI_BB_11B_3) = (REG(WIFI_BB_11B_3) & 0xffff0fffu) | 0x6000u;
+        REG(AGC_11B_0) = (REG(AGC_11B_0) & 0xffc0ffffu) | 0x003e0000u;
+        REG(AGC_11B_0) = (REG(AGC_11B_0) & 0xffffc0ffu) | 0x1800u;
+        REG(AGC_11B_1) = (REG(AGC_11B_1) & 0xffff03ffu) | 0x6000u;
+        REG(AGC_11B_1) = (REG(AGC_11B_1) & ~0x0fu) | 0x4u;
+        REG(BRX_11B_3) = (REG(BRX_11B_3) & 0xffff0fffu) | 0x6000u;
     }
-    REG(WIFI_BB_11B_2) = (REG(WIFI_BB_11B_2) & 0xfffffe00u) | 0x1c8u;
+    REG(AGC_11B_2) = (REG(AGC_11B_2) & 0xfffffe00u) | 0x1c8u;
 }
 
 /* The front end's and the baseband's words the library's tx_paon_set_new writes. */
-#define WIFI_BB_PAON_0 (MODEM_BASE + 0x7C00u)
-#define WIFI_BB_PAON_1 (MODEM_BASE + 0x7C6Cu)
-#define WIFI_BB_PAON_2 (MODEM_BASE + 0x7C30u)
-#define FE_REG_SET4    (MODEM_BASE + 0x8FCu)
+#define BB_PAON_0 (MODEM_BASE + 0x7C00u)
+#define BB_PAON_1 (MODEM_BASE + 0x7C6Cu)
+#define BB_PAON_2 (MODEM_BASE + 0x7C30u)
+#define FECTRL_REG_SET4    (MODEM_BASE + 0x8FCu)
 
 /* libphy's tx_paon_set_new [0x42004b68]: the transmit PA's settings in six read-modify-writes. */
 void tx_paon_set_new(void)
 {
-    REG(WIFI_BB_PAON_0) = (REG(WIFI_BB_PAON_0) & 0xffe007ffu) | 0x0000a000u;
-    REG(FE_REG_SET0) = (REG(FE_REG_SET0) & 0xffff00ffu) | 0x00005000u;
-    REG(WIFI_BB_PAON_1) = 0x0140c81eu;
-    REG(WIFI_BB_PAON_2) = (REG(WIFI_BB_PAON_2) & ~0x3ffu) | 0x1eu;
-    REG(FE_REG_SET4) = (REG(FE_REG_SET4) & 0x0000ffffu) | 0x0a0e0000u;
-    REG(FE_REG_SET4) = (REG(FE_REG_SET4) & 0xffff00ffu) | 0x0000c800u;
+    REG(BB_PAON_0) = (REG(BB_PAON_0) & 0xffe007ffu) | 0x0000a000u;
+    REG(FECTRL_REG_SET0) = (REG(FECTRL_REG_SET0) & 0xffff00ffu) | 0x00005000u;
+    REG(BB_PAON_1) = 0x0140c81eu;
+    REG(BB_PAON_2) = (REG(BB_PAON_2) & ~0x3ffu) | 0x1eu;
+    REG(FECTRL_REG_SET4) = (REG(FECTRL_REG_SET4) & 0x0000ffffu) | 0x0a0e0000u;
+    REG(FECTRL_REG_SET4) = (REG(FECTRL_REG_SET4) & 0xffff00ffu) | 0x0000c800u;
 }
 
 /* The baseband's and the front end's words the library's agc_reg_init_new writes. */
-#define WIFI_BB_AGC_0 (MODEM_BASE + 0x713Cu)
-#define WIFI_BB_AGC_1 (MODEM_BASE + 0x7094u)
-#define WIFI_BB_AGC_2 (MODEM_BASE + 0x702Cu)
-#define WIFI_BB_AGC_3 (MODEM_BASE + 0x7128u)
-#define WIFI_BB_AGC_4 (MODEM_BASE + 0x7068u)
-#define FE_AGC_0      (MODEM_BASE + 0x958u)
+#define AGC_0 (MODEM_BASE + 0x713Cu)
+#define AGC_1 (MODEM_BASE + 0x7094u)
+#define AGC_3 (MODEM_BASE + 0x7128u)
+#define AGC_4 (MODEM_BASE + 0x7068u)
+#define FECTRL_AGC_0      (MODEM_BASE + 0x958u)
 
 /*
  * libphy's agc_reg_init_new [0x42004c04]: the automatic gain control's settings from the two calibration
@@ -1739,37 +1765,36 @@ void agc_reg_init_new(uint32_t param1, uint32_t param2)
 {
     uint32_t n = param1 - 1u;
 
-    REG(WIFI_BB_AGC_0) = (REG(WIFI_BB_AGC_0) & 0xfe03ffffu) | ((n << 18) & 0x01fc0000u);
-    REG(WIFI_BB_AGC_1) = (REG(WIFI_BB_AGC_1) & ~0x1fcu) | ((n << 2) & 0x1fcu);
-    REG(WIFI_BB_AGC_2) = (REG(WIFI_BB_AGC_2) & 0xffff80ffu) | ((param1 << 8) & 0x7f00u);
-    REG(FE_AGC_0) = (REG(FE_AGC_0) & 0xfffff00fu) | (param1 << 4);
-    REG(FE_AGC_0) = (REG(FE_AGC_0) & 0xfff00fffu) | (((param2 + 0x50u) << 12) & 0x000ff000u);
-    REG(WIFI_BB_AGC_2) = (REG(WIFI_BB_AGC_2) & 0x00ffffffu) | 0x32000000u;
-    REG(WIFI_BB_AGC_2) |= 0x00800000u;
-    REG(WIFI_BB_AGC_2) &= 0xff7fffffu;
-    REG(WIFI_BB_AGC_3) = (REG(WIFI_BB_AGC_3) & 0x00ffffffu) | 0xd2000000u;
-    REG(WIFI_BB_AGC_4) = 0x404u;
+    REG(AGC_0) = (REG(AGC_0) & 0xfe03ffffu) | ((n << 18) & 0x01fc0000u);
+    REG(AGC_1) = (REG(AGC_1) & ~0x1fcu) | ((n << 2) & 0x1fcu);
+    REG(AGC_2) = (REG(AGC_2) & 0xffff80ffu) | ((param1 << 8) & 0x7f00u);
+    REG(FECTRL_AGC_0) = (REG(FECTRL_AGC_0) & 0xfffff00fu) | (param1 << 4);
+    REG(FECTRL_AGC_0) = (REG(FECTRL_AGC_0) & 0xfff00fffu) | (((param2 + 0x50u) << 12) & 0x000ff000u);
+    REG(AGC_2) = (REG(AGC_2) & 0x00ffffffu) | 0x32000000u;
+    REG(AGC_2) |= 0x00800000u;
+    REG(AGC_2) &= 0xff7fffffu;
+    REG(AGC_3) = (REG(AGC_3) & 0x00ffffffu) | 0xd2000000u;
+    REG(AGC_4) = 0x404u;
 }
 
 /* The baseband's and the front end's words the library's bb_reg_init_new writes. */
-#define WIFI_BB_INIT_0  (MODEM_BASE + 0x7400u)
-#define WIFI_BB_INIT_1  (MODEM_BASE + 0x7848u)
-#define WIFI_BB_INIT_2  (MODEM_BASE + 0x7808u)
-#define WIFI_BB_INIT_3  (MODEM_BASE + 0x78DCu)
-#define WIFI_BB_INIT_4  (MODEM_BASE + 0x78E4u)
-#define WIFI_BB_INIT_5  (MODEM_BASE + 0x790Cu)
-#define WIFI_BB_INIT_6  (MODEM_BASE + 0x7CA8u)
-#define WIFI_BB_INIT_7  (MODEM_BASE + 0x7980u)
-#define WIFI_BB_INIT_8  (MODEM_BASE + 0x7890u)
-#define WIFI_BB_INIT_9  (MODEM_BASE + 0x7A28u)
-#define WIFI_BB_INIT_10 (MODEM_BASE + 0x7424u)
-#define WIFI_BB_INIT_11 (MODEM_BASE + 0x7CD0u)
-#define WIFI_BB_INIT_12 (MODEM_BASE + 0x7438u)
+#define NRX_INIT_1  (MODEM_BASE + 0x7848u)
+#define NRX_INIT_2  (MODEM_BASE + 0x7808u)
+#define NRX_INIT_3  (MODEM_BASE + 0x78DCu)
+#define NRX_INIT_4  (MODEM_BASE + 0x78E4u)
+#define NRX_INIT_5  (MODEM_BASE + 0x790Cu)
+#define BB_INIT_6  (MODEM_BASE + 0x7CA8u)
+#define NRX_INIT_7  (MODEM_BASE + 0x7980u)
+#define NRX_INIT_8  (MODEM_BASE + 0x7890u)
+#define NRX_INIT_9  (MODEM_BASE + 0x7A28u)
+#define BBTX_INIT_10 (MODEM_BASE + 0x7424u)
+#define BB_INIT_11 (MODEM_BASE + 0x7CD0u)
+#define BBTX_INIT_12 (MODEM_BASE + 0x7438u)
 
 /* libphy's btbb_wifi_bb_cfg2 [0x42004cd0]: two nibbles of the baseband's 0x7cd0 set. */
 void btbb_wifi_bb_cfg2(void)
 {
-    REG(WIFI_BB_INIT_11) |= 0x000f000bu;
+    REG(BB_INIT_11) |= 0x000f000bu;
 }
 
 /*
@@ -1778,25 +1803,25 @@ void btbb_wifi_bb_cfg2(void)
  */
 void bb_reg_init_new(void)
 {
-    REG(WIFI_BB_INIT_0) |= 0x6000u;
-    REG(WIFI_BB_INIT_1) = (REG(WIFI_BB_INIT_1) & 0xff000000u) | 0x000433afu;
-    REG(WIFI_BB_INIT_1) = (REG(WIFI_BB_INIT_1) & 0xe0ffffffu) | 0x17000000u;
-    REG(WIFI_BB_INIT_2) = (REG(WIFI_BB_INIT_2) & 0xffffc07fu) | 0x3000u;
-    REG(WIFI_BB_INIT_3) = (REG(WIFI_BB_INIT_3) & 0xffffc07fu) | 0x100u;
-    REG(WIFI_BB_INIT_4) = REG(WIFI_BB_INIT_4) & 0xffbfffffu;
-    REG(WIFI_BB_PAON_2) = REG(WIFI_BB_PAON_2) & 0xfff00fffu;
-    REG(WIFI_BB_INIT_5) = REG(WIFI_BB_INIT_5) & 0xfffff7ffu;
-    REG(WIFI_BB_INIT_6) |= 0x00100000u;
-    REG(WIFI_BB_INIT_7) = REG(WIFI_BB_INIT_7) & 0xfdffffffu;
-    REG(WIFI_BB_INIT_8) = REG(WIFI_BB_INIT_8) & 0xfdffffffu;
-    REG(WIFI_BB_INIT_8) |= 0x01000000u;
-    REG(WIFI_BB_INIT_9) = REG(WIFI_BB_INIT_9) & 0xffbfffffu;
-    REG(WIFI_BB_INIT_10) = (REG(WIFI_BB_INIT_10) & 0xe01fffffu) | 0x01000000u;
-    REG(WIFI_BB_INIT_11) |= 0x000f000fu;
-    REG(WIFI_BB_PAON_0) |= 0x200u;
+    REG(BBTX_CHAN14) |= 0x6000u;
+    REG(NRX_INIT_1) = (REG(NRX_INIT_1) & 0xff000000u) | 0x000433afu;
+    REG(NRX_INIT_1) = (REG(NRX_INIT_1) & 0xe0ffffffu) | 0x17000000u;
+    REG(NRX_INIT_2) = (REG(NRX_INIT_2) & 0xffffc07fu) | 0x3000u;
+    REG(NRX_INIT_3) = (REG(NRX_INIT_3) & 0xffffc07fu) | 0x100u;
+    REG(NRX_INIT_4) = REG(NRX_INIT_4) & 0xffbfffffu;
+    REG(BB_PAON_2) = REG(BB_PAON_2) & 0xfff00fffu;
+    REG(NRX_INIT_5) = REG(NRX_INIT_5) & 0xfffff7ffu;
+    REG(BB_INIT_6) |= 0x00100000u;
+    REG(NRX_INIT_7) = REG(NRX_INIT_7) & 0xfdffffffu;
+    REG(NRX_INIT_8) = REG(NRX_INIT_8) & 0xfdffffffu;
+    REG(NRX_INIT_8) |= 0x01000000u;
+    REG(NRX_INIT_9) = REG(NRX_INIT_9) & 0xffbfffffu;
+    REG(BBTX_INIT_10) = (REG(BBTX_INIT_10) & 0xe01fffffu) | 0x01000000u;
+    REG(BB_INIT_11) |= 0x000f000fu;
+    REG(BB_PAON_0) |= 0x200u;
     REG(MODEM_SYSCON_WIFI_BB_CFG) |= 0x800u;
-    REG(WIFI_BB_INIT_12) = REG(WIFI_BB_INIT_12) & ~0xc0u;
-    REG(WIFI_BB_INIT_12) = REG(WIFI_BB_INIT_12) & ~0x100u;
+    REG(BBTX_INIT_12) = REG(BBTX_INIT_12) & ~0xc0u;
+    REG(BBTX_INIT_12) = REG(BBTX_INIT_12) & ~0x100u;
     btbb_wifi_bb_cfg2();
 }
 
@@ -1838,7 +1863,7 @@ void phy_wakeup_init(void)
     bias_reg_set(1);
     clk_conf1 = REG(MODEM_SYSCON_CLK_CONF1);
     REG(MODEM_SYSCON_CLK_CONF1) |= 0x404u;
-    REG(FE_FREQ_SET_CONF) = (REG(FE_FREQ_SET_CONF) & 0xe7ffffffu) | 0x10000000u;
+    REG(FECOEX_FREQ_SET_CONF) = (REG(FECOEX_FREQ_SET_CONF) & 0xe7ffffffu) | 0x10000000u;
     phy_set_tsens_power(true);
     phy_get_xtal_freq();
     open_i2c_xpd_new(false);
@@ -1855,7 +1880,7 @@ void phy_wakeup_init(void)
     phy_i2c_init2();
     freq_i2c_data_write_new();
     filter_dcap_set();
-    write_chan_freq(phy_param[0x11c]);
+    write_chan_freq(phy_param[PHY_PARAM_CHANNEL]);
     set_pbus_reg();
     phy_reg_init();
     set_chan_reg(1u);
@@ -1867,7 +1892,7 @@ void phy_wakeup_init(void)
     force_txrx_off(0);
     phy_param[PHY_PARAM_RF_OFF] = 0;
     phy_param[PHY_PARAM_TSENS_XPD] = 0;
-    REG(FE_FREQ_SET_CONF) &= 0xe7ffffffu;
+    REG(FECOEX_FREQ_SET_CONF) &= 0xe7ffffffu;
     REG(MODEM_SYSCON_CLK_CONF1) = clk_conf1;
     if (phy_param[PHY_PARAM_WIFI_BB_ENABLE] != 0u) {
         phy_wifi_enable_set(0);
@@ -1875,8 +1900,8 @@ void phy_wakeup_init(void)
 }
 
 /* The frequency setting's trigger and its answered word, which read_rf_freq_mem_new uses, unnamed in any header. */
-#define FE_FREQ_SET_TRIG (MODEM_BASE + 0xC4u)
-#define FE_FREQ_SET_DATA (MODEM_BASE + 0xE4u)
+#define FECOEX_FREQ_SET_TRIG (MODEM_BASE + 0xC4u)
+#define FECOEX_FREQ_SET_DATA (MODEM_BASE + 0xE4u)
 
 /*
  * libphy's read_rf_freq_mem_new [0x42002174]: the sub-address at the setting's bits 4 to 11 and a two-bit
@@ -1884,11 +1909,11 @@ void phy_wakeup_init(void)
  */
 uint32_t read_rf_freq_mem_new(uint32_t addr, uint32_t field)
 {
-    REG(FE_FREQ_SET_CONF) = (REG(FE_FREQ_SET_CONF) & 0xffffc00fu) | ((addr << 4) & 0x3ff0u);
-    REG(FE_FREQ_SET_CONF4) = (REG(FE_FREQ_SET_CONF4) & ~0x3u) | (field & 0x3u);
-    REG(FE_FREQ_SET_TRIG) |= 0x1u;
-    REG(FE_FREQ_SET_TRIG) &= ~0x1u;
-    return REG(FE_FREQ_SET_DATA);
+    REG(FECOEX_FREQ_SET_CONF) = (REG(FECOEX_FREQ_SET_CONF) & 0xffffc00fu) | ((addr << 4) & 0x3ff0u);
+    REG(FECOEX_FREQ_SET_CONF4) = (REG(FECOEX_FREQ_SET_CONF4) & ~0x3u) | (field & 0x3u);
+    REG(FECOEX_FREQ_SET_TRIG) |= 0x1u;
+    REG(FECOEX_FREQ_SET_TRIG) &= ~0x1u;
+    return REG(FECOEX_FREQ_SET_DATA);
 }
 
 /* The ROM's get_freq_mem_addr: the block, host, index and flag of a frequency memory word, answering its address. */
@@ -1913,10 +1938,10 @@ void pll_cap_mem_update_new(int32_t delta)
 
         freq_i2c_mem_write_new(addr, w, 3u);
     }
-    uint32_t freq = chan_to_freq(phy_param16(0x11cu));
+    uint32_t freq = chan_to_freq(phy_param16(PHY_PARAM_CHANNEL));
     uint32_t sub = (uint32_t)(int32_t)(int16_t)(0xfffff6a0u + freq);
 
-    REG(FE_FREQ_SET_CONF) = (REG(FE_FREQ_SET_CONF) & 0xffffc00fu) | ((sub << 7) & 0x3ff0u);
+    REG(FECOEX_FREQ_SET_CONF) = (REG(FECOEX_FREQ_SET_CONF) & 0xffffc00fu) | ((sub << 7) & 0x3ff0u);
 }
 
 /*
@@ -1953,7 +1978,7 @@ int32_t phy_rfpll_cap_init_cal_new(void)
     int pass = 0;
     int32_t mean;
 
-    rom_i2c_write_masked(0x62, 1, 0x0b, 6, 6, 1);
+    rom_i2c_write_masked(I2C_RFPLL, I2C_HOST_MST, 0x0b, 6, 6, 1);
 restart:
     for (uint32_t step = 0; step < 10u; step++) {
         uint32_t cap_v = (uint32_t)((pass == 0 ? cap - (int32_t)step : cap + 1 + (int32_t)step)) & 0xffffu;
@@ -1961,7 +1986,7 @@ restart:
 
         write_pll_cap((int16_t)cap_v);
         ets_delay_us(5);
-        status = ((uint32_t)rom_i2c_read(0x62, 1, 0x0c) >> 2) & 3u;
+        status = ((uint32_t)rom_i2c_read(I2C_RFPLL, I2C_HOST_MST, 0x0c) >> 2) & 3u;
         if (status == 0u) {
             sum = (sum + cap_v) & 0xffffu;
             count = (count + 1u) & 0xffu;
@@ -1994,7 +2019,7 @@ finish:
 /* libphy's phy_en_hw_set_freq_new [0x42001ee2]: the frequency setting's bits 27 and 28 cleared. */
 void phy_en_hw_set_freq_new(void)
 {
-    REG(FE_FREQ_SET_CONF) &= 0xe7ffffffu;
+    REG(FECOEX_FREQ_SET_CONF) &= 0xe7ffffffu;
 }
 
 /*
@@ -2003,7 +2028,7 @@ void phy_en_hw_set_freq_new(void)
  */
 void phy_dis_hw_set_freq_new(void)
 {
-    REG(FE_FREQ_SET_CONF) = (REG(FE_FREQ_SET_CONF) & 0xe7ffffffu) | 0x10000000u;
+    REG(FECOEX_FREQ_SET_CONF) = (REG(FECOEX_FREQ_SET_CONF) & 0xe7ffffffu) | 0x10000000u;
     ets_delay_us(2);
     if (phy_wait_freq_set_busy_new() != 0u) {
         ets_delay_us(0x14);
@@ -2059,10 +2084,7 @@ int32_t ram_temp_to_power(int32_t temp, int32_t base, uint32_t bt)
 }
 
 /* phy_param's bytes the transmit power tracking keeps. */
-#define PHY_PARAM_TRACK_TEMP   0x12E
 #define PHY_PARAM_TRACK_TEMP_AT 0x04
-#define PHY_PARAM_TRACK_WIFI   0x123
-#define PHY_PARAM_TRACK_BT     0x124
 #define PHY_PARAM_TRACK_POWER  0x122
 #define PHY_PARAM_TRACK_FLAG   0x1A0
 
@@ -2080,7 +2102,7 @@ void bt_set_tx_gain(uint32_t a0);
 void txpwr_cal_track(uint32_t en_bt, uint32_t threshold, uint32_t verbose)
 {
     int16_t temp = (int16_t)phy_param16(0x00u);
-    int16_t last = (int16_t)phy_param16(PHY_PARAM_TRACK_TEMP);
+    int16_t last = (int16_t)phy_param16(PHY_PARAM_TEMP_CODE_INIT);
     int32_t step = abs_temp((int32_t)temp - (int32_t)last) > 7 ? 4 : 2;
     int32_t power;
     int8_t cur;
@@ -2098,7 +2120,7 @@ void txpwr_cal_track(uint32_t en_bt, uint32_t threshold, uint32_t verbose)
     if (threshold == 0u) {
         return;
     }
-    cur = en_bt != 0u ? (int8_t)phy_param[PHY_PARAM_TRACK_BT] : (int8_t)phy_param[PHY_PARAM_TRACK_WIFI];
+    cur = en_bt != 0u ? (int8_t)phy_param[PHY_PARAM_BT_CORRECT_POWER] : (int8_t)phy_param[PHY_PARAM_WIFI_CORRECT_POWER];
     if ((int32_t)cur == power) {
         return;
     }
@@ -2107,11 +2129,11 @@ void txpwr_cal_track(uint32_t en_bt, uint32_t threshold, uint32_t verbose)
     phy_param[PHY_PARAM_TRACK_TEMP_AT] = (uint8_t)temp;
     phy_param[PHY_PARAM_TRACK_TEMP_AT + 1u] = (uint8_t)((uint16_t)temp >> 8);
     if (en_bt != 0u) {
-        phy_param[PHY_PARAM_TRACK_BT] = (uint8_t)power;
+        phy_param[PHY_PARAM_BT_CORRECT_POWER] = (uint8_t)power;
         bt_set_tx_gain(0);
     } else {
-        phy_param[PHY_PARAM_TRACK_WIFI] = (uint8_t)power;
-        wifi_set_tx_gain(phy_param16(0x11cu), 0u);
+        phy_param[PHY_PARAM_WIFI_CORRECT_POWER] = (uint8_t)power;
+        wifi_set_tx_gain(phy_param16(PHY_PARAM_CHANNEL), 0u);
     }
     phy_bbpll_cal(0);
 }
@@ -2139,26 +2161,26 @@ void wifi_track_tx_power(uint32_t threshold, uint32_t verbose)
 void tx_i2c_track(void)
 {
     if ((int16_t)phy_param16(0x00u) <= 0 && phy_param[PHY_PARAM_TX_I2C] != 1u) {
-        rom_i2c_write_masked(0x6b, 1, 3, 3, 0, 0xa);
-        rom_i2c_write_masked(0x6b, 1, 3, 7, 4, 0x3);
-        rom_i2c_write_masked(0x6b, 1, 7, 3, 0, 0x5);
-        rom_i2c_write_masked(0x6b, 1, 4, 7, 4, 0x6);
+        rom_i2c_write_masked(I2C_TXRF, I2C_HOST_MST, 3, 3, 0, 0xa);
+        rom_i2c_write_masked(I2C_TXRF, I2C_HOST_MST, 3, 7, 4, 0x3);
+        rom_i2c_write_masked(I2C_TXRF, I2C_HOST_MST, 7, 3, 0, 0x5);
+        rom_i2c_write_masked(I2C_TXRF, I2C_HOST_MST, 4, 7, 4, 0x6);
         phy_param[PHY_PARAM_TX_I2C] = 1;
     }
     if ((int16_t)phy_param16(0x00u) > 0x36 && phy_param[PHY_PARAM_TX_I2C] != 2u) {
-        rom_i2c_write_masked(0x6b, 1, 3, 3, 0, 0xb);
-        rom_i2c_write_masked(0x6b, 1, 3, 7, 4, 0x4);
-        rom_i2c_write_masked(0x6b, 1, 7, 3, 0, phy_param16(0x11cu) > 0xcu ? 0x5 : 0x7);
-        rom_i2c_write_masked(0x6b, 1, 4, 7, 4, 0xa);
+        rom_i2c_write_masked(I2C_TXRF, I2C_HOST_MST, 3, 3, 0, 0xb);
+        rom_i2c_write_masked(I2C_TXRF, I2C_HOST_MST, 3, 7, 4, 0x4);
+        rom_i2c_write_masked(I2C_TXRF, I2C_HOST_MST, 7, 3, 0, phy_param16(PHY_PARAM_CHANNEL) > 0xcu ? 0x5 : 0x7);
+        rom_i2c_write_masked(I2C_TXRF, I2C_HOST_MST, 4, 7, 4, 0xa);
         phy_param[PHY_PARAM_TX_I2C] = 2;
     }
     if ((uint16_t)((int16_t)phy_param16(0x00u) - 1) > 0x35u || phy_param[PHY_PARAM_TX_I2C] == 0u) {
         return;
     }
-    rom_i2c_write_masked(0x6b, 1, 3, 3, 0, 0xb);
-    rom_i2c_write_masked(0x6b, 1, 3, 7, 4, 0x3);
-    rom_i2c_write_masked(0x6b, 1, 7, 3, 0, phy_param16(0x11cu) > 0xcu ? 0x5 : 0x8);
-    rom_i2c_write_masked(0x6b, 1, 4, 7, 4, 0xa);
+    rom_i2c_write_masked(I2C_TXRF, I2C_HOST_MST, 3, 3, 0, 0xb);
+    rom_i2c_write_masked(I2C_TXRF, I2C_HOST_MST, 3, 7, 4, 0x3);
+    rom_i2c_write_masked(I2C_TXRF, I2C_HOST_MST, 7, 3, 0, phy_param16(PHY_PARAM_CHANNEL) > 0xcu ? 0x5 : 0x8);
+    rom_i2c_write_masked(I2C_TXRF, I2C_HOST_MST, 4, 7, 4, 0xa);
     phy_param[PHY_PARAM_TX_I2C] = 0;
 }
 
@@ -2220,15 +2242,14 @@ uint32_t gen_rx_gain_table_new(uint32_t *out, uint8_t limit, const uint16_t *gai
 #define ROMFUNC_IQ_EST_DISABLE    41  /* rom_iq_est_disable: the IQ estimate's accumulation stopped */
 
 /* The modem's IQ estimate, its DC accumulators and receive-gain SAR, and the trigger that starts them. */
-#define MODEM_RX_IQ_EST0      (MODEM_BASE + 0x470u)
-#define MODEM_RX_IQ_EST1      (MODEM_BASE + 0x474u)
-#define MODEM_IQ_EST_I        (MODEM_BASE + 0x488u) /* the estimate's in-phase accumulator */
-#define MODEM_IQ_EST_Q        (MODEM_BASE + 0x48Cu) /* its quadrature accumulator */
-#define MODEM_IQ_EST_MAG      (MODEM_BASE + 0x490u) /* and its magnitude */
-#define MODEM_RX_GAIN_SAR     (MODEM_BASE + 0x4A0u)
-#define MODEM_RX_GAIN_TRIG_EN (MODEM_BASE + 0x904u) /* bit 0: the trigger is the hardware's */
-#define WIFI_BB_RX_GAIN_TRIG  (MODEM_BASE + 0x702Cu) /* the word set_rx_comp_new's first store also writes */
-#define WIFI_BB_GAIN_SAR      (MODEM_BASE + 0x708Cu)
+#define FEDATA_RX_IQ_EST0      (MODEM_BASE + 0x470u)
+#define FEDATA_RX_IQ_EST1      (MODEM_BASE + 0x474u)
+#define FEDATA_IQ_EST_I        (MODEM_BASE + 0x488u) /* the estimate's in-phase accumulator */
+#define FEDATA_IQ_EST_Q        (MODEM_BASE + 0x48Cu) /* its quadrature accumulator */
+#define FEDATA_IQ_EST_MAG      (MODEM_BASE + 0x490u) /* and its magnitude */
+#define FEDATA_RX_GAIN_SAR     (MODEM_BASE + 0x4A0u)
+#define FECTRL_RX_GAIN_TRIG_EN (MODEM_BASE + 0x904u) /* bit 0: the trigger is the hardware's */
+#define AGC_GAIN_SAR      (MODEM_BASE + 0x708Cu)
 
 /* The ROM's linear_to_db: a linear power's decibels. */
 int linear_to_db(int32_t value, int32_t offset);
@@ -2266,7 +2287,6 @@ static void rom_iq_est_disable(void)
 
 /* phy_param's words the receive DC calibration keeps: the trigger's count, a halfword, and its flag. */
 #define PHY_PARAM_IQ_EST_COUNT 0x1A2
-#define PHY_PARAM_IQ_EST_FLAG  0x1A4
 
 /*
  * libphy's phy_force_rx_gain_trig [0x42005b5a]: where the modem lets the hardware trigger the receive gain,
@@ -2274,13 +2294,13 @@ static void rom_iq_est_disable(void)
  */
 void phy_force_rx_gain_trig(void)
 {
-    if ((REG(MODEM_RX_GAIN_TRIG_EN) & 1u) == 0u) {
+    if ((REG(FECTRL_RX_GAIN_TRIG_EN) & 1u) == 0u) {
         return;
     }
-    REG(WIFI_BB_RX_GAIN_TRIG) = (REG(WIFI_BB_RX_GAIN_TRIG) & 0xffffffu) | 0x46000000u;
-    REG(WIFI_BB_RX_GAIN_TRIG) |= 0x800000u;
+    REG(AGC_2) = (REG(AGC_2) & 0xffffffu) | 0x46000000u;
+    REG(AGC_2) |= 0x800000u;
     ets_delay_us(1);
-    REG(WIFI_BB_RX_GAIN_TRIG) &= ~0x800000u;
+    REG(AGC_2) &= ~0x800000u;
 }
 
 /*
@@ -2295,28 +2315,28 @@ void ram_iq_est_enable(uint32_t a0, uint32_t n)
     uint32_t wrote = 0;
 
     (void)a0;
-    v = REG(MODEM_RX_IQ_EST0);
-    REG(MODEM_RX_IQ_EST0) = (v & 0xf3ffffffu) | 0x4000000u;
-    v = REG(MODEM_RX_IQ_EST1);
-    REG(MODEM_RX_IQ_EST1) = (v & 0xffe7ffffu) | 0x100000u;
-    v = REG(MODEM_RX_IQ_EST1);
-    REG(MODEM_RX_IQ_EST1) = ((n << 2) & 0x1fffcu) | (v & 0xfffe0003u);
-    REG(MODEM_RX_IQ_EST1) = REG(MODEM_RX_IQ_EST1) | 1u;
+    v = REG(FEDATA_RX_IQ_EST0);
+    REG(FEDATA_RX_IQ_EST0) = (v & 0xf3ffffffu) | 0x4000000u;
+    v = REG(FEDATA_RX_IQ_EST1);
+    REG(FEDATA_RX_IQ_EST1) = (v & 0xffe7ffffu) | 0x100000u;
+    v = REG(FEDATA_RX_IQ_EST1);
+    REG(FEDATA_RX_IQ_EST1) = ((n << 2) & 0x1fffcu) | (v & 0xfffe0003u);
+    REG(FEDATA_RX_IQ_EST1) = REG(FEDATA_RX_IQ_EST1) | 1u;
     phy_param[PHY_PARAM_IQ_EST_COUNT] = 0;
     phy_param[PHY_PARAM_IQ_EST_COUNT + 1u] = 0;
     ets_delay_us(1);
-    REG(MODEM_RX_IQ_EST1) = REG(MODEM_RX_IQ_EST1) | 2u;
+    REG(FEDATA_RX_IQ_EST1) = REG(FEDATA_RX_IQ_EST1) | 2u;
     phy_force_rx_gain_trig();
     count = phy_param16(PHY_PARAM_IQ_EST_COUNT);
     for (;;) {
-        if ((REG(MODEM_RX_GAIN_SAR) & 0x10000u) != 0u) {
+        if ((REG(FEDATA_RX_GAIN_SAR) & 0x10000u) != 0u) {
             if (wrote != 0u) {
                 phy_param[PHY_PARAM_IQ_EST_COUNT] = (uint8_t)count;
                 phy_param[PHY_PARAM_IQ_EST_COUNT + 1u] = (uint8_t)(count >> 8);
             }
             return;
         }
-        if (((REG(WIFI_BB_GAIN_SAR) >> 12) & 0x7fu) <= 0x45u) {
+        if (((REG(AGC_GAIN_SAR) >> 12) & 0x7fu) <= 0x45u) {
             count = (uint16_t)(count + 1u);
             wrote = 1;
         }
@@ -2336,16 +2356,16 @@ void dc_iq_est_new(uint32_t a0, uint32_t a1, int32_t out[3], uint32_t a3)
     int32_t i, q, sq, v;
 
     ram_iq_est_enable(a0, a1);
-    i = ((int32_t)REG(MODEM_IQ_EST_I) >> shift) / div;
+    i = ((int32_t)REG(FEDATA_IQ_EST_I) >> shift) / div;
     out[0] = i;
-    q = ((int32_t)REG(MODEM_IQ_EST_Q) >> shift) / div;
+    q = ((int32_t)REG(FEDATA_IQ_EST_Q) >> shift) / div;
     out[1] = q;
     /* The squares wrap as the machine's words do, and the shifts are the machine's own. */
     sq = (int32_t)((uint32_t)i * (uint32_t)i + (uint32_t)q * (uint32_t)q);
     if (a3 != 0u) {
         sq >>= 4;
     }
-    v = (int32_t)((uint32_t)((int32_t)REG(MODEM_IQ_EST_MAG) / div) * 8u - (uint32_t)sq);
+    v = (int32_t)((uint32_t)((int32_t)REG(FEDATA_IQ_EST_MAG) / div) * 8u - (uint32_t)sq);
     if (v < 0) {
         v = 0;
     }
@@ -2367,7 +2387,7 @@ void rxdc_est_min_new(uint32_t a0, uint32_t a1, int32_t out[3], uint32_t a3)
     (void)a1;
     for (;;) {
         dc_iq_est_new(1u, a0, est, a3);
-        if (est[2] < best && (phy_param16(PHY_PARAM_IQ_EST_COUNT) == 0u || phy_param[PHY_PARAM_IQ_EST_FLAG] == 1u)) {
+        if (est[2] < best && (phy_param16(PHY_PARAM_IQ_EST_COUNT) == 0u || phy_param[PHY_PARAM_RX_SAT] == 1u)) {
             out[2] = est[2];
             best = est[2];
             out[0] = est[0];
@@ -2563,7 +2583,7 @@ void set_rx_gain_cal_dc_new(uint32_t mode, uint32_t flag, int16_t *pairs, int16_
         set_rxclk_en(1u);
         set_txclk_en(1u);
         if (flag != 0u) {
-            rom_i2c_write_masked(0x67, 1, 3, 2, 2, 0);
+            rom_i2c_write_masked(I2C_BBTOP, I2C_HOST_MST, 3, 2, 2, 0);
         } else if (mode == 0u) {
             if (o == 0u) {
                 rom_pbus_set_rxgain(0x43000u);
@@ -2601,7 +2621,7 @@ void set_rx_gain_cal_dc_new(uint32_t mode, uint32_t flag, int16_t *pairs, int16_
             }
         }
         if (flag != 0u) {
-            rom_i2c_write_masked(0x67, 1, 3, 2, 2, 1);
+            rom_i2c_write_masked(I2C_BBTOP, I2C_HOST_MST, 3, 2, 2, 1);
         }
         set_rxclk_en(0u);
         set_txclk_en(0u);
@@ -2617,7 +2637,6 @@ void bt_gain_offset(uint32_t offset);
 void iq_corr_enable(void);
 
 /* phy_param's word and halfwords the gain table keeps, and the two rows its tables are built into. */
-#define PHY_PARAM_A4      0xA4   /* bit 7 the DC calibration done, bit 9 the rows built */
 #define PHY_PARAM_RX_N1   0x121
 #define PHY_PARAM_RX_N2   0x120
 #define PHY_PARAM_RX_DC_T 0x198  /* the temperature the rows were built at */
@@ -2658,7 +2677,7 @@ void set_rx_gain_table(uint32_t p1, uint32_t p2)
 
     (void)p1;
     (void)p2;
-    a4 = phy_param32(PHY_PARAM_A4);
+    a4 = phy_param32(PHY_PARAM_PARAM_FLAG);
     if ((a4 & 0x200u) == 0u) {
         uint32_t cal = phy_param16(0x10u);
 
@@ -2669,7 +2688,7 @@ void set_rx_gain_table(uint32_t p1, uint32_t p2)
                                    (int16_t *)(void *)(phy_param + 0x16eu), (int16_t *)(void *)(phy_param + 0x172u));
             set_rx_gain_cal_dc_new(1u, 0u, (int16_t *)(void *)(phy_param + 0x14eu),
                                    (int16_t *)(void *)(phy_param + 0x16eu), (int16_t *)(void *)(phy_param + 0x172u));
-            phy_param32_set(PHY_PARAM_A4, a4 | 0x80u);
+            phy_param32_set(PHY_PARAM_PARAM_FLAG, a4 | 0x80u);
         }
         verbose = (cal >> 8) & 1u;
         n = gen_rx_gain_table_new(out, 0x21u, gains1, a1, b1, 8u, verbose);
@@ -2690,12 +2709,12 @@ void set_rx_gain_table(uint32_t p1, uint32_t p2)
                        (const uint16_t *)(const void *)(phy_param + 0x132u),
                        (const uint16_t *)(const void *)(phy_param + 0x16eu),
                        (const uint16_t *)(const void *)(phy_param + 0x132u), 0xeu, 0u);
-        phy_param32_set(PHY_PARAM_A4, phy_param32(PHY_PARAM_A4) | 0x200u);
+        phy_param32_set(PHY_PARAM_PARAM_FLAG, phy_param32(PHY_PARAM_PARAM_FLAG) | 0x200u);
         phy_param[PHY_PARAM_RX_DC_T] = (uint8_t)phy_param16(0x00u);
         phy_param[PHY_PARAM_RX_DC_T + 1u] = (uint8_t)(phy_param16(0x00u) >> 8);
     }
-    REG(WIFI_BB_RX_GAIN_TRIG) = (((uint32_t)phy_param[PHY_PARAM_RX_N1] << 8) & 0x7f00u) |
-                                (REG(WIFI_BB_RX_GAIN_TRIG) & 0xffff80ffu);
+    REG(AGC_2) = (((uint32_t)phy_param[PHY_PARAM_RX_N1] << 8) & 0x7f00u) |
+                                (REG(AGC_2) & 0xffff80ffu);
     n = phy_param[PHY_PARAM_RX_N1];
     if (n > 0x4cu) {
         n = 0x4cu;
@@ -2735,12 +2754,6 @@ static void rom_start_tx_tone_step(uint32_t a0, uint32_t a1, uint32_t a2, uint32
 }
 
 /* phy_param's halfwords the calibration keeps: the two pairs it settles, and the four it starts them from. */
-#define PHY_PARAM_TXDC_PAIR0 0x18E
-#define PHY_PARAM_TXDC_PAIR1 0x190
-#define PHY_PARAM_TXDC_PAIR2 0x192
-#define PHY_PARAM_TXDC_PAIR3 0x194
-#define PHY_PARAM_TXDC_SRC0  0xA8
-#define PHY_PARAM_TXDC_SRC1  0xAA
 #define PHY_PARAM_TXDC_SRC2  0xB0
 #define PHY_PARAM_TXDC_SRC3  0xB2
 
@@ -2911,16 +2924,16 @@ void txdc_cal_pwdet_init(uint32_t a0, uint32_t a1)
     uint16_t dc[2];
 
     (void)a0;
-    phy_param16_set(PHY_PARAM_TXDC_PAIR0, phy_param16(PHY_PARAM_TXDC_SRC0));
-    phy_param16_set(PHY_PARAM_TXDC_PAIR1, phy_param16(PHY_PARAM_TXDC_SRC1));
-    phy_param16_set(PHY_PARAM_TXDC_PAIR2, phy_param16(PHY_PARAM_TXDC_SRC2));
-    phy_param16_set(PHY_PARAM_TXDC_PAIR3, phy_param16(PHY_PARAM_TXDC_SRC3));
+    phy_param16_set(PHY_PARAM_TXDC_CAL_PWDET, phy_param16(PHY_PARAM_TXDC));
+    phy_param16_set((PHY_PARAM_TXDC_CAL_PWDET + 2u), phy_param16((PHY_PARAM_TXDC + 2u)));
+    phy_param16_set((PHY_PARAM_TXDC_CAL_PWDET + 4u), phy_param16(PHY_PARAM_TXDC_SRC2));
+    phy_param16_set((PHY_PARAM_TXDC_CAL_PWDET + 6u), phy_param16(PHY_PARAM_TXDC_SRC3));
     flag = (phy_param16(0x10u) >> 4) & 1u;
 
-    prev3 = REG(FE_PWDET_CONF3);
-    prev0 = REG(FE_PWDET_CONF0);
-    REG(FE_PWDET_CONF3) = (REG(FE_PWDET_CONF3) & 0xffffff00u) | 0xf0u;
-    REG(FE_PWDET_CONF0) = (REG(FE_PWDET_CONF0) & 0xfffff00fu) | 0x780u;
+    prev3 = REG(FECTRL_PWDET_CONF3);
+    prev0 = REG(FECTRL_PWDET_CONF0);
+    REG(FECTRL_PWDET_CONF3) = (REG(FECTRL_PWDET_CONF3) & 0xffffff00u) | 0xf0u;
+    REG(FECTRL_PWDET_CONF0) = (REG(FECTRL_PWDET_CONF0) & 0xfffff00fu) | 0x780u;
 
     set_txclk_en(1u);
     rom_en_pwdet(1u);
@@ -2932,8 +2945,8 @@ void txdc_cal_pwdet_init(uint32_t a0, uint32_t a1)
     rom_pbus_xpd_tx_on(0x3fu, 0u);
 
     for (uint32_t i = 0u; i < 2u; i++) {
-        dc[0] = phy_param16(PHY_PARAM_TXDC_PAIR0 + i * 4u);
-        dc[1] = phy_param16(PHY_PARAM_TXDC_PAIR1 + i * 4u);
+        dc[0] = phy_param16(PHY_PARAM_TXDC_CAL_PWDET + i * 4u);
+        dc[1] = phy_param16((PHY_PARAM_TXDC_CAL_PWDET + 2u) + i * 4u);
         rom_pbus_force_test(1u, 2u, index_to_txbbgain(i));
         if (i == 0u) {
             uint32_t acc_i = 0u, acc_q = 0u;
@@ -2943,12 +2956,12 @@ void txdc_cal_pwdet_init(uint32_t a0, uint32_t a1)
                 acc_i = (acc_i + dc[0]) & 0xffffu;
                 acc_q = (acc_q + dc[1]) & 0xffffu;
             }
-            phy_param16_set(PHY_PARAM_TXDC_PAIR0, (uint16_t)(((int32_t)acc_i + 2) >> 2));
-            phy_param16_set(PHY_PARAM_TXDC_PAIR1, (uint16_t)(((int32_t)acc_q + 2) >> 2));
+            phy_param16_set(PHY_PARAM_TXDC_CAL_PWDET, (uint16_t)(((int32_t)acc_i + 2) >> 2));
+            phy_param16_set((PHY_PARAM_TXDC_CAL_PWDET + 2u), (uint16_t)(((int32_t)acc_q + 2) >> 2));
         } else {
             txdc_cal_pwdet(dc, flag);
-            phy_param16_set(PHY_PARAM_TXDC_PAIR2, dc[0]);
-            phy_param16_set(PHY_PARAM_TXDC_PAIR3, dc[1]);
+            phy_param16_set((PHY_PARAM_TXDC_CAL_PWDET + 4u), dc[0]);
+            phy_param16_set((PHY_PARAM_TXDC_CAL_PWDET + 6u), dc[1]);
         }
     }
 
@@ -2960,7 +2973,7 @@ void txdc_cal_pwdet_init(uint32_t a0, uint32_t a1)
         rom_start_tx_tone_step(0u, 0x80u, 0x78u, 0u, 0u, 0u);
         pbus_workmode();
         set_txclk_en(0u);
-        REG(FE_PWDET_CONF3) = (REG(FE_PWDET_CONF3) & 0xffffff00u) | (prev3 & 0xffu);
-        REG(FE_PWDET_CONF0) = (prev0 & 0xff0u) | (REG(FE_PWDET_CONF0) & 0xfffff00fu);
+        REG(FECTRL_PWDET_CONF3) = (REG(FECTRL_PWDET_CONF3) & 0xffffff00u) | (prev3 & 0xffu);
+        REG(FECTRL_PWDET_CONF0) = (prev0 & 0xff0u) | (REG(FECTRL_PWDET_CONF0) & 0xfffff00fu);
     }
 }

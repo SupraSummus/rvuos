@@ -783,6 +783,7 @@ and sending in place would want the MAC to read a frame from a chain of descript
 each the driver's own in `phy.c` and held against the library's before the library's symbol is weakened
 in the copy `build.mk` makes, until nothing of it is linked.
 The driver keeps to 2.4 GHz channels 1 to 13 and never above the power `libphy.a` sets for a channel and rate.
+The registers and `phy_param` fields each step touches are named in `PHYREGS.md`, with their source and how sure it is.
 
 The first is `phy_wifi_enable_set`: one read-modify-write of bit 1 of `MODEM_SYSCON_WIFI_BB_CFG`, 0x600A981C,
 `lui 0x600aa; lw -0x7e4(a4); ori 2` or `andi ~2; sw`, and nothing else,
