@@ -118,7 +118,7 @@ what is left:
   `lib/bulk.h` deletes its carves once installed and uninstalls them at a close, which would spare a hub's parent those slots too.
 - `user/lab/` does not show yet a client of several threads asking at once, a driver woken between ticks,
   as a device's interrupt would wake it, two cores, a client that makes its ring look full, or one that gives up on an answer.
-  Nor several takers lending to one holder, or a holder that waits on a second lock.
+  Nor several takers lending to one holder at once, which takes a hold longer than a tick, or a holder that waits on a second lock.
   Nor a thin server, which only passes data on while its clients do the work,
   to tell what moving work into the client saves and what the hop still costs.
   Why its `chain`'s second hop costs no more than the first is not worked out.
