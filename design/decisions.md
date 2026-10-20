@@ -185,7 +185,7 @@ until the maintainer decides otherwise.
 
 10. **Yield.**
     Working default: none.
-    `OP_TEST_TICK` is the tick on request,
+    `OP_TEST_TICK` is the tick on request, under tracing alone,
     so a yield would be that under a name that invites spinning,
     and a spinning thread is always runnable and keeps the machine from `wfi`,
     while a waiting thread says what it waits for.

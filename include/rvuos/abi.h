@@ -142,6 +142,9 @@
  * the next thread has its turn, and the caller stays ready.
  * Works while tracing is on, unlike the tick itself;
  * see DESIGN.md, "Verification".
+ * Fails with KERR_STATE while tracing is off,
+ * where a tick no time brought would leave every deadline to fire early,
+ * and so always in a kernel built without the self-check.
  */
 #define OP_TEST_TICK 17
 /*
@@ -164,6 +167,7 @@
  * so another thread may run before the caller makes its call again. Zero disarms it.
  * It is how a replay has a thread run while another's call is half done,
  * since under tracing the tick stops no call; see DESIGN.md, "Verification".
+ * Fails with KERR_STATE while tracing is off, as OP_TEST_TICK does.
  */
 #define OP_TEST_PREEMPT 32
 

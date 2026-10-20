@@ -264,7 +264,6 @@ A thread made ready from another core waits besides for the rest of that core's 
 A timer line's thread starts within those k ticks and steps of its deadline, so a periodic line keeps its deadlines and its thread starts within as much of each;
 a device's driver within them of the trap that took its interrupt.
 It all holds while tracing is off, since tracing stops the tick ending a turn,
-while nobody drives the machine with `OP_TEST_TICK` or `OP_TEST_PREEMPT`, which move the count without time passing,
 and while the thread keeps its binding: a bind, even to more units, puts it at the back of its queue.
 A pool destroy is the exception, `TODO.md`:
 it runs to its end unless an interrupt is pending, so a thread its walk wakes waits for the rest of the walk
