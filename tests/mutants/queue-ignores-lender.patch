@@ -9,10 +9,10 @@ Witness: fuzz lend-hands-turn
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -313,7 +313,7 @@ static uint8_t place_queue(const struct place *p, uint32_t balance, const struct
-     if (t->state != THREAD_READY || is_turn(t) || place_time(p)->type != CAP_TIME) {
+@@ -319,7 +319,7 @@ static uint8_t place_queue(const struct place *p, uint32_t balance, const struct
          return QUEUE_NONE;
      }
+ #endif
 -    if (has_time(balance) || (l != NULL && has_time(account_now(l)))) {
 +    if (has_time(balance)) {
          return QUEUE_RUN;

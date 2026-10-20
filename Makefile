@@ -57,6 +57,16 @@ endif
 # A rate other than the default builds in a directory of its own, the host harnesses' too, as a budget does.
 TIMER_HZ ?= 1000
 TIMER_VARIANT := $(if $(filter-out 1000,$(TIMER_HZ)),-hz$(TIMER_HZ))
+# How the threads with time take their turns, an experiment of the order open decision 9 weighs:
+#   fifo  the oldest first, a tick each, the default; see DESIGN.md, "Scheduling"
+#   user  in the order a scheduler thread of the core chooses, which OP_TIME_SCHEDULE gives it; see SCHED_USER in kernel/sched.c
+# A way other than the default builds in a directory of its own, the host harnesses' too, as a rate does.
+SCHED ?= fifo
+ifeq ($(filter fifo user,$(SCHED)),)
+$(error SCHED=$(SCHED); it is fifo, the default, or user)
+endif
+SCHED_VARIANT := $(if $(filter user,$(SCHED)),-user)
+SCHED_USER := $(if $(filter user,$(SCHED)),1,0)
 # The self-check and the tracing that runs it, which only QEMU virt's replay uses; see DESIGN.md, "Verification".
 # A value other than the board's builds in a directory of its own, as a budget does; the host harnesses always have them.
 SELFCHECK_DEFAULT := $(if $(filter qemu,$(BOARD)),1,0)
@@ -73,7 +83,7 @@ WIFI_BT_VARIANT := $(if $(filter-out 0,$(WIFI_BT)),-bt)
 # A directory of its own, so that without it the C6's images are exactly as they would be without the listener.
 C6_LISTEN ?=
 C6_LISTEN_VARIANT := $(if $(filter-out 0,$(C6_LISTEN)),-c6listen)
-VARIANT := $(PMP_VARIANT)$(if $(filter-out 1,$(CORES)),-smp$(CORES))$(TIMER_VARIANT)$(SELFCHECK_VARIANT)$(WIFI_BT_VARIANT)$(C6_LISTEN_VARIANT)
+VARIANT := $(PMP_VARIANT)$(if $(filter-out 1,$(CORES)),-smp$(CORES))$(TIMER_VARIANT)$(SCHED_VARIANT)$(SELFCHECK_VARIANT)$(WIFI_BT_VARIANT)$(C6_LISTEN_VARIANT)
 
 # The board's architecture, which only RP2350 lets the command line change;
 # the other one builds in a directory of its own, as a budget does.
@@ -97,7 +107,7 @@ endif
 CFLAGS    := $(ARCHFLAGS) -std=c11 -ffreestanding -fno-builtin -fno-pic -fno-common \
              -nostdlib -O2 -g -Wall -Wextra -Werror -Wundef -Wshadow \
              -Wstrict-prototypes -Wmissing-prototypes -Iinclude \
-             -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -DCORES=$(CORES) -DTIMER_HZ=$(TIMER_HZ) -DSELFCHECK=$(SELFCHECK) \
+             -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -DCORES=$(CORES) -DTIMER_HZ=$(TIMER_HZ) -DSCHED_USER=$(SCHED_USER) -DSELFCHECK=$(SELFCHECK) \
              $(if $(filter-out 0,$(WIFI_BT)),-DWIFI_BT=1) $(if $(filter-out 0,$(C6_LISTEN)),-DI154_LISTEN=1)
 ASFLAGS   := $(ARCHFLAGS) -g -Iinclude -DCORES=$(CORES) $(if $(filter-out 0,$(WIFI_BT)),-DWIFI_BT=1)
 LDFLAGS   := $(ARCHFLAGS) -nostdlib -static -fuse-ld=lld -Wl,--gc-sections -Wl,--no-dynamic-linker

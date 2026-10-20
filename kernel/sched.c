@@ -314,6 +314,11 @@ static uint8_t place_queue(const struct place *p, uint32_t balance, const struct
     if (t->state != THREAD_READY || is_turn(t) || place_time(p)->type != CAP_TIME) {
         return QUEUE_NONE;
     }
+#if SCHED_USER
+    if (t->flags & THREAD_SCHEDULES) {
+        return QUEUE_NONE;
+    }
+#endif
     if (has_time(balance) || (l != NULL && has_time(account_now(l)))) {
         return QUEUE_RUN;
     }
@@ -350,6 +355,9 @@ static void place_settle(struct place *p)
         }
         p->queue = queue;
     }
+#if SCHED_USER
+    core->sched_told |= joined && queue == QUEUE_RUN;
+#endif
     /* Neither account holds a tick there, or the place would have the run queue. */
     uint32_t fill = NEAREST_NONE;
     if (queue == QUEUE_SPARE || queue == QUEUE_SPENT) {
@@ -448,21 +456,14 @@ static void turn_take(struct thread *t)
 }
 
 /*
- * The thread of the oldest place with time, or with none of the oldest that may run on spare time,
- * taken off its queues with the place's account brought up to the count: its turn begins offset counts into the tick,
- * and every count of it is charged to that place from there,
+ * The thread of a place waiting on a queue, whose turn begins:
+ * taken off its queues with the place's account brought up to the count,
+ * and every count of the turn is charged to that place from turn_from,
  * or to its lender's place while it has no time and its lender has, which pays for the turn from then on.
- * NULL when neither queue has one.
  */
-static struct thread *next_turn(uint32_t offset)
+static struct thread *place_turn(struct place *p)
 {
     struct core *core = core_self();
-    core->turn_from = offset;
-    paddr_t *head = core->run_queue != 0 ? &core->run_queue : &core->spare_queue;
-    if (*head == 0) {
-        return NULL;
-    }
-    struct place *p = p2v(*head);
     struct thread *t = place_thread(p);
     place_unqueue(p);
     turn_take(t);
@@ -475,6 +476,136 @@ static struct thread *next_turn(uint32_t offset)
         account_refill(l);
     }
     return t;
+}
+
+#if SCHED_USER
+/*
+ * A scheduler of the core's, an experiment's, built with SCHED=user; see OP_TIME_SCHEDULE.
+ * A thread that calls OP_TIME_SCHEDULE becomes its core's scheduler,
+ * and the places on the run queue then take their turns in the order it chooses rather than oldest first.
+ * It chooses an account, a place with units named by its first unit,
+ * and the kernel runs the thread the account pays for, the place's own or its borrower's, as next_turn would,
+ * with the queues, the accounts, the release and lent time as they were.
+ * It is asked whenever the core must choose: as a turn it chose ends, by a wait, a tick, its limit or a fault,
+ * and as a place joins the run queue while another turn runs, which ends that turn so;
+ * it runs first, on spare time, and waits on no queue.
+ * While it chooses none the spare queue takes its turns in order,
+ * and while it cannot run, stopped or faulted, so does the run queue.
+ * Each place on the run queue runs on an account of its own or of its first lender, and no two on one,
+ * so the run queue holds TIME_UNITS places at most.
+ */
+static struct place *unit_first(uint32_t unit);
+
+/* Whether the core's scheduler stands ready to choose, or is choosing: then it decides every turn of the run queue. */
+static bool sched_rules(const struct core *core)
+{
+    return core->sched != NULL && core->sched->state == THREAD_READY;
+}
+
+/* The count as the core counts it, in counts of the counter: a tick's for each tick, and the offset into this one. */
+static uint32_t core_count(const struct core *core)
+{
+    return core->ticks * timer_tick_counts() + clock_offset();
+}
+
+/* The count at which a place's account would be full again if its thread did not run, or the count if it is. It has units. */
+static uint32_t vtime(const struct place *p)
+{
+    uint32_t full = p->stamp * timer_tick_counts() + (account_cap(p) - p->balance) / place_units(p);
+    uint32_t now = count_of(p) * timer_tick_counts() + clock_offset();
+    return tick_before(now, full) ? full : now;
+}
+
+/* The account a place on the run queue runs on: its own while it has time, else its lender's. */
+static struct place *queued_payer(struct place *p)
+{
+    return has_time(account_now(p)) ? p : place_lender(p);
+}
+
+/* The ready mask into arg[1] and arg[2]: a bit for each account the run queue's places run on, of the core whose units begin at first. */
+static void ready_mask(const struct core *core, uint32_t first, uint32_t *arg)
+{
+    _Static_assert(TIME_UNITS == 64, "the ready mask is two words");
+    arg[1] = arg[2] = 0;
+    paddr_t at = core->run_queue;
+    for (uint32_t i = 0; at != 0 && (i == 0 || at != core->run_queue); i++) {
+        LOOP_BOUND(TIME_UNITS);
+        struct place *p = p2v(at);
+        const struct place *payer = queued_payer(p);
+        if (payer != NULL && place_units(payer) != 0) {
+            uint32_t u = range_first(place_time(payer)) - first;
+            arg[1 + u / 32] |= 1u << (u % 32);
+        }
+        at = p->queue_next;
+    }
+}
+
+/* The scheduler's call returns with the core's next choice to make, and its turn begins. */
+static struct thread *sched_answer(struct core *core)
+{
+    struct thread *s = core->sched;
+    uint32_t first = core_index() * TIME_UNITS, arg[5];
+    ready_mask(core, first, arg);
+    const struct place *ran = core->ran != SCHED_NONE ? unit_first(first + core->ran) : NULL;
+    s->frame.regs[REG_A0] = KERR_OK;
+    s->frame.regs[REG_A1] = arg[1];
+    s->frame.regs[REG_A2] = arg[2];
+    s->frame.regs[REG_A3] = ran != NULL ? vtime(ran) : 0;
+    s->frame.regs[REG_A4] = core_count(core);
+    core->sched_waits = core->sched_told = false;
+    core->ran = SCHED_NONE;
+    turn_take(s);
+    return s;
+}
+
+/*
+ * A scheduler stops, or is destroyed: its cores take their turns in order again,
+ * and one that stood in its call makes it again if resumed, as a waiter does.
+ */
+static void sched_resign(struct thread *t)
+{
+    t->flags &= ~(uint8_t)THREAD_SCHEDULES;
+    for (uint32_t c = 0; c < CORES; c++) {
+        LOOP_BOUND(CORES);
+        if (cores[c].sched == t) {
+            if (cores[c].sched_waits) {
+                t->frame.pc -= CALL_SIZE;
+            }
+            cores[c].sched = NULL;
+            cores[c].sched_waits = cores[c].limited = false;
+        }
+    }
+}
+#endif
+
+/*
+ * The thread of the oldest place with time, or with none of the oldest that may run on spare time,
+ * whose turn begins offset counts into the tick; see place_turn.
+ * NULL when neither queue has one.
+ * Under a scheduler of the core's it is the scheduler's turn whenever the core must choose, and the spare queue's else.
+ */
+static struct thread *next_turn(uint32_t offset)
+{
+    struct core *core = core_self();
+    core->turn_from = offset;
+    paddr_t *head = core->run_queue != 0 ? &core->run_queue : &core->spare_queue;
+#if SCHED_USER
+    core->limited = false;
+    if (sched_rules(core)) {
+        if (!core->sched_waits) {
+            turn_take(core->sched);
+            return core->sched;
+        }
+        if (core->run_queue != 0 && (core->sched_told || !core->sched_idle)) {
+            return sched_answer(core);
+        }
+        head = &core->spare_queue;
+    }
+#endif
+    if (*head == 0) {
+        return NULL;
+    }
+    return place_turn(p2v(*head));
 }
 
 void sched_ready(struct thread *t)
@@ -543,6 +674,11 @@ void sched_unbind(struct cap *bound)
  */
 static bool thread_stop(struct thread *t)
 {
+#if SCHED_USER
+    if (t->flags & THREAD_SCHEDULES) {
+        sched_resign(t);
+    }
+#endif
     if (t->state == THREAD_WAITING) {
         unwait(t);
         t->frame.pc -= CALL_SIZE;
@@ -736,6 +872,10 @@ static __attribute__((noinline)) void unlend(struct thread *t)
 
 void sched_lend(struct thread *t, struct notification *ntfn, struct thread *borrower)
 {
+#if SCHED_USER
+    /* A borrower handed the turn below joined the run queue only to leave it, which asks the scheduler nothing. */
+    bool told = core_self()->sched_told;
+#endif
     sched_wait(t, ntfn);
     lend_push(borrower, t);
     if (borrower->lenders == v2p(t)) {
@@ -755,6 +895,9 @@ void sched_lend(struct thread *t, struct notification *ntfn, struct thread *borr
         core->payer = t;
         turn_take(borrower);
         account_refill(bp);
+#if SCHED_USER
+        core->sched_told = told;
+#endif
         switch_to(borrower);
     }
 }
@@ -868,13 +1011,24 @@ uint32_t sched_wake_ticks(void)
     if (turn == NULL) {
         return wake;
     }
+#if SCHED_USER
+    /* No tick ends the scheduler's turn, and only its limit ends one it chose for the places it left on the run queue. */
+    bool chosen = sched_rules(core);
+    if (chosen && turn == core->sched) {
+        return wake;
+    }
+#endif
     /* Each tick decides afresh who pays for a turn on lent time, and whether it has any. */
     if (core->payer != NULL) {
         return 1;
     }
     /* A thread that lost the time of this core during its turn here, its place emptied, ends the turn at the next tick. */
     const struct place *p = thread_place_on(turn, core_index());
+#if SCHED_USER
+    if ((chosen ? core->limited : core->run_queue != 0) || p == NULL) {
+#else
     if (core->run_queue != 0 || p == NULL) {
+#endif
         return 1;
     }
     uint32_t balance = account_now(p);
@@ -989,6 +1143,11 @@ bool sched_forget(struct obj_header *o, bool preempt)
                 return false;
             }
         }
+#if SCHED_USER
+        if (t->flags & THREAD_SCHEDULES) {
+            sched_resign(t);
+        }
+#endif
         core_thread_gone(t);
         break;
     }
@@ -1158,6 +1317,15 @@ void sched_tick(uint32_t ticks)
  */
 static void spare_end(struct core *core)
 {
+#if SCHED_USER
+    /* Under a scheduler of the core's a place that joined the run queue ends any turn but the scheduler's, for it to choose. */
+    if (sched_rules(core)) {
+        if (core->sched_waits && core->sched_told && core->run_queue != 0 && !core->recall && core->turn != core->sched) {
+            sched_turn_end();
+        }
+        return;
+    }
+#endif
     if (core->run_queue != 0 && !core->recall && sched_spare_turn(core)) {
         sched_turn_end();
     }
@@ -1192,6 +1360,15 @@ uint32_t sched_wake(void)
             sched_turn_end();
         }
     }
+#if SCHED_USER
+    /* The timer interrupted between ticks, at the limit of a turn the scheduler chose or before it. */
+    if (core->limit_hit) {
+        core->limit_hit = false;
+        if (core->limited && !debug_trace && !tick_before(core_count(core), core->limit_end)) {
+            sched_turn_end();
+        }
+    }
+#endif
     /* An interrupt, or another core, may have made a thread with time ready while the turn runs on spare time. */
     spare_end(core);
     if (!core->wake_stale) {
@@ -1202,3 +1379,84 @@ uint32_t sched_wake(void)
     core->wake_tick = sched_ticks + ticks;
     return ticks;
 }
+
+#if SCHED_USER
+int sched_schedule(struct thread *t, uint32_t first, uint32_t unit, uint32_t limit, uint32_t *arg)
+{
+    struct core *core = core_self();
+    if (debug_trace) {
+        return KERR_STATE;
+    }
+    if (core->sched != NULL && core->sched != t) {
+        return KERR_OVERLAP;
+    }
+    if (unit >= TIME_UNITS && unit != SCHED_NONE) {
+        return KERR_INVALID_ARG;
+    }
+    /* The place of the account, if a ready thread runs on it: the place's own, or its borrower's on its time. */
+    struct place *q = NULL;
+    if (unit != SCHED_NONE) {
+        struct place *p = unit_first(first + unit);
+        struct place *h = p != NULL ? place_borrower(p) : NULL;
+        if (p != NULL && p->queue == QUEUE_RUN && queued_payer(p) == p) {
+            q = p;
+        } else if (h != NULL && h->queue == QUEUE_RUN && queued_payer(h) == p) {
+            q = h;
+        } else {
+            ready_mask(core, first, arg);
+            arg[3] = 0;
+            arg[4] = core_count(core);
+            return KERR_STATE;
+        }
+    }
+    core->sched = t;
+    t->flags |= THREAD_SCHEDULES;
+    core->sched_waits = true;
+    core->sched_idle = q == NULL;
+    core->ran = q != NULL ? unit : SCHED_NONE;
+    /* Its turn ends, on no queue, and the chosen one begins where it was charged to. */
+    uint32_t offset = turn_close();
+    core->turn = NULL;
+    payer_drop();
+    thread_settle(t);
+    if (q == NULL) {
+        core->turn = next_turn(offset);
+    } else {
+        core->turn_from = offset;
+        core->turn = place_turn(q);
+        core->limited = limit != 0;
+        core->limit_end = core_count(core) + limit;
+    }
+    run_turn();
+    return KERR_BLOCKED;
+}
+
+int sched_due(uint32_t first, uint32_t unit, uint32_t *arg)
+{
+    if (debug_trace) {
+        return KERR_STATE;
+    }
+    const struct place *p = unit < TIME_UNITS ? unit_first(first + unit) : NULL;
+    if (p == NULL) {
+        return KERR_INVALID_ARG;
+    }
+    arg[1] = vtime(p);
+    arg[2] = place_units(p);
+    arg[3] = core_count(core_self());
+    return KERR_OK;
+}
+
+uint32_t sched_limit_counts(uint32_t offset)
+{
+    const struct core *core = core_self();
+    if (!core->limited || debug_trace) {
+        return 0;
+    }
+    uint32_t tick = timer_tick_counts();
+    int32_t left = (int32_t)(core->limit_end - (core->ticks * tick + offset));
+    if (left <= 0) {
+        return 1;
+    }
+    return offset + (uint32_t)left < tick ? (uint32_t)left : 0;
+}
+#endif

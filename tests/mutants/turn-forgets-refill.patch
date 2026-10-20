@@ -9,7 +9,7 @@ Witness: fuzz actor-handoff
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -462,7 +462,6 @@ static struct thread *next_turn(uint32_t offset)
+@@ -467,7 +467,6 @@ static struct thread *place_turn(struct place *p)
      struct thread *t = place_thread(p);
      place_unqueue(p);
      turn_take(t);

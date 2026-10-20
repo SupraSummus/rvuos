@@ -9,7 +9,7 @@ Witness: fuzz lend-lender-earns
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -766,7 +766,7 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
+@@ -900,7 +900,7 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
              return KERR_LIMIT;
          }
          /* The binding hangs below the invoked capability, so a revoke above it empties the place. */
@@ -17,4 +17,4 @@ diff --git a/kernel/syscall.c b/kernel/syscall.c
 +        sched_bind(p, first, count, RIGHT_W | RIGHT_X, slot_node(t, slot));
          return KERR_OK;
      }
-     default:
+ #if SCHED_USER

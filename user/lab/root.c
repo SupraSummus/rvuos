@@ -16,6 +16,7 @@
 
 #include "console.h"
 #include "lab.h"
+#include "lib/edf.h"
 #include "lib/libc.h"
 #include "lib/log.h"
 #include "lib/say.h"
@@ -116,6 +117,9 @@ static struct chan_hub hubs[CAST_MAX];
 static uint32_t connected[CAST_MAX]; /* the clients of each member's hub, 0 for no hub */
 static uint32_t end_of[CAST_MAX];    /* the end of its server's hub a client is connected to */
 static uint32_t sorted[LAB_SAMPLES];
+#if SCHED_USER
+static struct child chooser; /* the scheduler of SCHED=user, which chooses every turn of the first core while a scenario runs */
+#endif
 
 static void console_byte(char c)
 {
@@ -165,6 +169,12 @@ static void sleep_us(const struct scenario *sc, uint32_t count, uint32_t us)
                 halt(1);
             }
         }
+#if SCHED_USER
+        if ((bits & chooser.bit_fault) || (child_poll(&chooser, &state) && state == CHILD_FAILED)) {
+            say(&out, "lab: %s: the scheduler faulted or failed\n", sc->name);
+            halt(1);
+        }
+#endif
         if (bits & timer_bit) {
             return;
         }
@@ -262,8 +272,23 @@ static uint32_t start(const struct scenario *sc, uint32_t count, int drivers)
     return started;
 }
 
+#if SCHED_USER
+/* The scheduler, a child of its own on spare time, given the first core's units to choose their turns. */
+static void chooser_start(void)
+{
+    must("build the scheduler", child_new(&self, &chooser, "sched", CHILD_TABLE, CHILD_DATA));
+    struct edf_page *p = (struct edf_page *)chooser.page;
+    must("give the scheduler the clock", child_give(&self, &chooser, BOOT_CAP_CLOCK, RIGHT_R, &p->clock));
+    must("give the scheduler the units", child_give(&self, &chooser, self.time, RIGHT_W, &p->time));
+    must("start the scheduler", child_start(&self, &chooser, edf_main, 0, 0));
+}
+#endif
+
 static void run(const struct scenario *sc)
 {
+#if SCHED_USER
+    chooser_start();
+#endif
     uint32_t count = 0;
     while (count < CAST_MAX && sc->cast[count].role != NONE) {
         count++;
@@ -348,6 +373,9 @@ static void run(const struct scenario *sc)
     if (lock.note != 0) {
         lock_free(&lock);
     }
+#if SCHED_USER
+    must("take the scheduler down", child_free(&self, &chooser));
+#endif
 }
 
 int main(void)

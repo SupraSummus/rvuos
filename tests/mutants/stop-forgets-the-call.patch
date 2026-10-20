@@ -9,8 +9,8 @@ Witness: fuzz cores-waiter-stopped
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -454,7 +454,6 @@ static bool thread_stop(struct thread *t)
- {
+@@ -681,7 +681,6 @@ static bool thread_stop(struct thread *t)
+ #endif
      if (t->state == THREAD_WAITING) {
          unwait(t);
 -        t->frame.pc -= CALL_SIZE;

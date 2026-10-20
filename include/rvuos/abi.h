@@ -611,6 +611,11 @@
  */
 #define OP_TIME_BIND 29
 
+#if SCHED_USER
+/* OP_TIME_SCHEDULE and OP_TIME_DUE, an experiment's, apart so that the seeds and the corpus never meet them. */
+#include "rvuos/schedule.h"
+#endif
+
 /*
  * Any capability: describe it. a1 = the page, 0, the only one so far, and a2 = a3 = 0;
  * anything else fails with KERR_INVALID_ARG and writes nothing.

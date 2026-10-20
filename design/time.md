@@ -379,6 +379,18 @@ and an account per thread is the least that caps its time without keeping the ot
 Fixed priorities were the intended end state of this section
 and are now open decision 9.
 
+**An experiment: the order chosen in userspace.**
+A kernel built with `make SCHED=user` lets a thread choose its core's turns, with `OP_TIME_SCHEDULE`.
+The kernel keeps the units, the accounts, the queues, the release and lent time as above,
+and leaves the scheduler only the order of the run queue:
+it chooses an account by its first unit, and the kernel runs the thread that account pays for.
+The scheduler is asked whenever the core must choose, as a turn it chose ends and as a place joins the run queue,
+which ends any other turn; it runs first, on spare time, and waits on no queue.
+It may limit a turn it chose to an end before the next tick, which the timer marks.
+Under tracing the calls fail, so the replay and the self-check see turns taken in order alone.
+`lib/edf.h` orders requests earliest deadline first, each due a span past its account's virtual time,
+the count at which the account would be full again; decision 9 says what it showed.
+
 ## The watchdog
 
 **It halts a machine that stopped working.**

@@ -29,6 +29,8 @@ so scenarios are compared within one run.
   `driver-hogs` puts a second hog beside it, **hog2**, with 16 units.
 
 The root task keeps 8 units, the units nobody earns are spare time, and every member may run on it.
+Under `make SCHED=user` each scenario also starts **sched**, a child on spare time that runs `lib/edf.h`
+and chooses every turn of the core with `OP_TIME_SCHEDULE`; the rest of the cast is the same.
 
 ## What it showed
 

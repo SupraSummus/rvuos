@@ -214,6 +214,10 @@ _Static_assert(THREAD_WAS_STOPPED == THREAD_STOPPED && THREAD_WAS_READY == THREA
  * A new thread's frame is zero, which is a cause too, so only this tells the two apart.
  */
 #define THREAD_FAULTED 0x2
+#if SCHED_USER
+/* Its core's scheduler, SCHED=user's: it waits on no queue, and runs whenever the core must choose; see OP_TIME_SCHEDULE. */
+#define THREAD_SCHEDULES 0x4
+#endif
 
 /*
  * A thread's place on a core: what it earns there, its account, and where it waits on that core's queues.

@@ -16,4 +16,4 @@ diff --git a/kernel/core.c b/kernel/core.c
 +                             (c->wake_tick - c->ticks > 1 || (false && c->run_queue != 0 && sched_spare_turn(c)))))) {
          c->interrupt_owed = true;
      }
- #else
+ #if SCHED_USER
