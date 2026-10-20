@@ -671,10 +671,10 @@ the first five below are what does not keep to it yet, each a constant-time chan
   Stopping also where the trap made ready a thread the core's timer does not allow for,
   or owes another core an interrupt, would bound that by a tick;
   the transcripts would not move, as the host stops at every step.
-- `pool_alloc` zeroes an object a byte a store with interrupts off,
-  and a table of `CAPTABLE_MAX_SLOTS` slots is 24,596 stores, longer than a tick at 10 kHz on every board,
+- `pool_alloc` and a pool destroy zero an object whole with interrupts off,
+  and a table of `CAPTABLE_MAX_SLOTS` slots takes longer than a tick at 10 kHz on the nRF52840 and near one on the other boards,
   where the wait's bound needs the kernel's longest step shorter than a tick.
-  Zeroing a word a store, or a table in steps that stop, and measuring the longest step on each board,
+  Zeroing a table in steps that stop, and measuring the longest step on each board,
   would say how short a tick each board can take.
 - On ARM and RP2350's Hazard3 an `OP_IRQ_SET` on a core other than the first interrupts the first core each time,
   so a driver there that arms its line in a loop takes what it likes of the first core's turns, which its threads pay for.
