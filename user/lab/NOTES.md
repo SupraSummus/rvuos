@@ -5,6 +5,8 @@ to weigh ways of modelling communication between processes against one workload 
 `make lab` prints how long each scenario's clients waited, and holds the numbers to nothing.
 Under QEMU a run repeats exactly, but a small change to a role moves an answer by a request here and there,
 so scenarios are compared within one run.
+The work is counted in iterations sized for QEMU, which on a board take several times as long,
+so there every scenario runs past its period, and a board's runs compare only with its own.
 
 ## The cast
 

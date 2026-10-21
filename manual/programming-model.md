@@ -760,6 +760,13 @@ and moves `taken` only as far as its host says it has the bytes, so a halt write
   `DESIGN.md`, "Scheduling", says what a request promises and what a periodic task needs of its units.
   A thread a process adds earns only units split off the process's own, or runs on spare time:
   it takes nothing another thread earns.
+- A thread given fewer units than its work needs is not refused: it is served a request at a time,
+  and while another thread with time wants the core, each request after the first waits about a span,
+  which spare time hides while the core is otherwise idle.
+  The switch to a thread is charged to it, and one unit at the default span is a request about as long as that switch:
+  2048 cycles at the ESP32-C6's 160 MHz, 1200 at the RP2350's 150 MHz, near half of `make bench`'s `threads` round.
+  So a thread on an event's way earns the units for its work and its switch,
+  that work measured while no other thread takes the core from it, since a cycle counter a process's threads share counts them all.
 - A system call is never interrupted:
   machine mode runs with interrupts off from the trap to the return.
   On several cores one call runs at a time, whichever core makes it, and another core's call waits for it.
