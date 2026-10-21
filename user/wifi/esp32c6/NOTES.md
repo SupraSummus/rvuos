@@ -1291,9 +1291,11 @@ blob into `phy_param` and clears the flag. `rf_init` and `bb_init` run, `get_tem
 `param_flag`'s bits 5 and 20, and, unless the blob was recovered in mode 1, the restored block is held against the
 chip, saved back and its negated sum rewritten. Where `phy_param` 0xA1 asks, `chip_v7_set_chan_offset` runs; the
 baseband PLL is taken down, the RF PLL's SDM register read through the ROM's table, the chip marked up, the
-frequency setting enabled, the front end's forcing released and the Wi-Fi clock put back as it was found. What sets
-`phy_param` 0x4E, and which fields the 23 dBm setting changes, is not known; they are in `PHYREGS.md` with the open
-questions.
+frequency setting enabled, the front end's forcing released and the Wi-Fi clock put back as it was found. Nothing
+calls `phy_set_23dbm_en` and libphy's `phy_param` starts with 0 at 0x4E, so the 23 dBm branch never runs on the
+board and the transmit power stays within the library's; the driver transcribes `phy_set_23dbm` word for word and
+leaves the gate as it is, and the off-board comparison covers the branch by forcing 0x4E in the model. They are in
+`PHYREGS.md` with the open questions.
 Off the board, `phy-ab.py` held the whole function to the library's for the same 22 runs, the log identical to the
 reference, `phy_param` compared in full beside the accesses and the blob; the mode-1 recovery path was reached with
 a blob whose checksum and `param_flag` words were written to stand, and the gates `phy_param` 0x25, 0x4E and 0xA1
@@ -1303,3 +1305,73 @@ library's `register_chipv7_phy` gone and `phy_set_23dbm`, which the driver's own
 library's own symbols 6 either way. The map drops from 1032 to 1026 functions reached (the library's head and the
 functions only it reached are gone): FE 89 to 86 and WIFI_MAC_TSF 16 to 14, with the ranges, addresses and the
 writes outside the frames unchanged; `phymap` is unchanged.
+
+Then the transmit power control, package 11:
+the library's `rfcal_pwrctrl_new`, `tx_pwctrl_init_cal_new`, `tx_pwctrl_init_new`, `bt_tx_pwctrl_init_new`
+and `phy_set_23dbm`, the driver's own.
+`tx_pwctrl_init_new` and `bt_tx_pwctrl_init_new` run the calibration for Wi-Fi and Bluetooth, each gated and
+marked by a bit of `param_flag` 0xA4 -- Wi-Fi's bit 20 and Bluetooth's bit 15 -- and returning at once where
+it is set; each tunes the frequency, writes the transmit capacitor's table and hands the side's three fields
+-- `wifi_pwctrl_atten` 0xF1, `wifi_cal_power` 0xF7 and `wifi_cal_atten` 0xF4 for Wi-Fi, `bt_pwctrl_atten`
+0xFB, `bt_cal_power` 0xFE and `bt_cal_atten` 0xF8 for Bluetooth -- to `tx_pwctrl_init_cal_new`.
+That walks the channels 1, 6 and 11 and, for each, runs `rfcal_pwrctrl_new`, which starts a tone and searches
+its step between 0 and 0x64 over up to ten rounds, the power detector's read through the ROM's `get_power_db`
+at `phy_param` 0x0E's halfword forming the error against the source byte, with a running temperature in
+`PHY_PARAM_TXIQ_TEMP` 0x18 and a running accumulator over the source bytes; each round's step less the side's
+span is the attenuation left in the caller's buffer and copied to the attenuation field beside it.
+Bluetooth's, before its walk, saves and forces the analog I2C's block 0x67 registers 0x1C, 0x1D, 0x1E's
+bits 5..0 and 0x1F, forces the pbus's windows from `phy_param` 0x13 and 0x14, sets its transmit DC pair and
+clears `BT_TXIQ` 0x100.
+`phy_set_23dbm` is the library's 23 dBm setting, transcribed word for word: where its gate, `phy_param` 0x4E,
+is set, it puts 0x5c into the init data's bytes 2 and 3 and into `phy_param`'s byte 6, and the gate is left
+exactly as the library leaves it.
+Nothing calls `phy_set_23dbm_en` and libphy's `phy_param` starts with zero at 0x4E, so on the board the branch
+never runs and the transmit power stays within the library's, under the 20 dBm EIRP limit; the off-board
+comparison covers it by forcing 0x4E in the model, which transmits nothing.
+Off the board, `phy-ab.py` held each of the five to the library's: `rfcal_pwrctrl_new` for one and several
+source bytes and their walking accumulator, `tx_pwctrl_init_cal_new` for Wi-Fi and Bluetooth by seeds,
+`tx_pwctrl_init_new` and `bt_tx_pwctrl_init_new` for their gates both ways by seeds, and `phy_set_23dbm` for
+its gate both ways, every access, `phy_param` and the output buffers the same.
+Four mutations were told apart: the search's accumulator mask, the calibration's step byte, Bluetooth's first
+forced I2C byte and the 23 dBm setting's 0x5c.
+The whole of `register_chipv7_phy`, the driver's own since package 10b and now calling the driver's own five,
+is the same as the library's for the same 22 runs, the log identical to the reference, and `phy_param` is
+compared in full beside the accesses.
+The power limit `phy_get_max_pwr` over the same 364 pairs of channels 1 to 13 and rates 0 to 0x1b is the
+same as the library's, none above.
+The count is 69 before and 70 after -- the ROM's `get_power_db`, `pwdet_ref_code` and `bt_bb_to_index`, which
+the driver's own now names -- of the library's own symbols 6 before and 4 after: `phy_set_23dbm` and
+`tx_pwctrl_init_new` gone.
+The map loses one indirect call, 170 to 169, and `phymap` is unchanged.
+
+Then the transmit gains' Bluetooth side, package 12:
+the library's `bt_get_tx_gain_new`, `bt_get_tx_tab`, `bt_set_tx_gain` and `bt_tx_gain_init`, the driver's own --
+beside the Wi-Fi side's `wifi_get_tx_tab`/`wifi_set_tx_gain` and the leaves the two share, `get_tx_gain_value_new`
+and `set_tx_gain_mem`, already the driver's since packages 2b1/2b2.
+`bt_get_tx_gain_new` walks sixteen subbands: a running byte from -0x60 stepping by four times the caller's
+second byte, each held to [-0x3c, 0x50] through the ROM's `get_data_sat`, and the value is that plus the
+caller's difference; `get_tx_gain_value_new` finds the subband and the three gains over the two fourteen-word
+tables -- the library's rodata at 0x4200AE64 and 0x4200AE80, the middle buffer the library's own fourteen zero
+words -- and the third, less the calibration byte, is held to [-0x3c, 0x18] and becomes the subband's byte.
+`bt_get_tx_tab` builds the three buffers from `bt_correct_power` 0x124 less the gain byte 0x08 and `bt_cal_power`
+0xFE, and `bt_set_tx_gain` writes them into the front end with `set_tx_gain_mem`, its `BT_TXDC` table at 0x104
+and `TXIQ` 0xD0. `bt_tx_gain_init` tunes to 0x985, writes the transmit capacitor's table for index 6, runs
+Bluetooth's transmit DC and power calibrations, and sets the gains for zero.
+Off the board, `phy-ab.py` held the Bluetooth side to the library's: `bt_get_tx_tab` over seeds and with its
+power fields poked both ways, its three buffers compared (it makes no device access of its own), `bt_set_tx_gain`
+over seeds, the gain-memory writes the same at 93 events each, and `bt_tx_gain_init` with each of its two gates
+clear and set and a tone walked, 110 to 1360 events, every access, `phy_param` and the buffers the same; the
+Wi-Fi chain's `wifi_get_tx_tab` and `wifi_set_tx_gain` guard the shared leaves.
+Four mutations were told apart: `bt_get_tx_gain_new`'s step multiplier, the gain byte, `bt_tx_gain_init`'s
+frequency and `bt_set_tx_gain`'s `BT_TXDC`/`TXIQ` tables swapped.
+`MAC_TX_MIN_PWR` 0x600a4400, the check package 11 left here: none of the transmit power functions -- the gains'
+or Wi-Fi's `wifi_set_tx_gain` -- touches the word in any run, so the whole transmit power path the driver took
+over writes only `phy_param`, the analog I2C and the front end.
+The whole of `register_chipv7_phy` is the same as the library's for the same 22 runs, the log identical to the
+reference and `phy_param` compared in full, and the same again with `--state phy_param`: the Bluetooth gains'
+bring-up runs inside it.
+The count is 70 before and 68 after, of the library's own symbols 4 before and 2 after: `bt_set_tx_gain` and
+`bt_tx_gain_init` gone, `g_phyFuns` and `phy_param` left for the end of the step.
+The map drops from 1026 to 1024 functions reached -- the library's `phy_tx_gain.o`, no longer linked now that
+its gains are the driver's own, taking `wifi_get_target_power_new` and `get_chan_target_power_new` -- FE 86 to
+85, the ranges, addresses and writes outside the frames unchanged; `phymap` is unchanged.

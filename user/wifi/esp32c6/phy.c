@@ -195,9 +195,15 @@ void pwdet_code_cal(void);              /* the ROM's */
 void i2cmst_reg_init(void);             /* the ROM's */
 void fe_reg_init(void);                 /* the ROM's */
 void tx_pwctrl_bg_init(void);           /* the ROM's */
-void tx_pwctrl_init_new(uint32_t a0);
+void tx_pwctrl_init_new(uint32_t a0);                /* package 11's */
+void rfcal_pwrctrl_new(uint32_t tone, const uint8_t *src, uint32_t count, int32_t span,
+                       uint8_t *dst, int32_t offset, int32_t temp, uint32_t verbose); /* package 11's */
+void tx_pwctrl_init_cal_new(uint32_t bt, uint8_t *pwctrl, uint8_t *cal_power, uint8_t *cal_atten);
+void bt_tx_pwctrl_init_new(void);                    /* package 11's */
+void bt_get_tx_tab(uint16_t *tab_out, uint16_t *mid_out, uint8_t *diff_out, uint32_t verbose); /* package 12's */
+void bt_set_tx_gain(uint32_t a0);                    /* package 12's */
 void bt_tx_gain_init(void);
-void phy_set_23dbm(esp_phy_init_data_t *init_data); /* the library's 23 dBm setting, package 11's */
+void phy_set_23dbm(esp_phy_init_data_t *init_data);  /* package 11's */
 void phy_i2c_init1(void);
 void phy_i2c_master_cmd_mem_init(void);
 void rf_init(void);
@@ -2630,9 +2636,6 @@ int32_t ram_temp_to_power(int32_t temp, int32_t base, uint32_t bt)
 /* phy_param's bytes the transmit power tracking keeps. */
 #define PHY_PARAM_TRACK_POWER  0x122
 #define PHY_PARAM_TRACK_FLAG   0x1A0
-
-/* The library's Bluetooth transmit gain, still its own here; a later package takes it over. */
-void bt_set_tx_gain(uint32_t a0);
 
 /*
  * libphy's txpwr_cal_track [0x42007c46]: the transmit power the temperature asks for, from the sensor's
@@ -5499,4 +5502,403 @@ int register_chipv7_phy(const esp_phy_init_data_t *init_data, esp_phy_calibratio
     force_txrx_off(0u);
     REG(MODEM_SYSCON_CLK_CONF1) = clk_conf1;
     return ret;
+}
+
+/*
+ * libphy's rfcal_pwrctrl_new [0x42009288], tx_pwctrl_init_cal_new [0x42009750], tx_pwctrl_init_new
+ * [0x420098d8], bt_tx_pwctrl_init_new [0x42009978] and phy_set_23dbm [0x4200042a], the driver's own,
+ * step 5's package 11: the transmit power control. Each is held to the library's off the board, by
+ * phy-ab.py, and build.mk weakens the library's five.
+ * The power the package writes is never above the library's: phy_set_23dbm is transcribed word for word
+ * and its gate, phy_param 0x4e, is left exactly as the library leaves it -- nothing calls phy_set_23dbm_en
+ * and libphy's phy_param starts with zero there, so on the board the 23 dBm branch does not run and the
+ * transmit power stays within the library's. Forcing the gate is a model-only exercise, in phy-ab.
+ */
+
+/* The two ROM leaves this package names and calls as the library's does. */
+void pwdet_ref_code(uint32_t code);   /* the ROM's: the power detector's reference code */
+int32_t get_power_db(int32_t offset); /* the ROM's: the power detector's decibels less the offset */
+
+/* The ROM's table slots this package reaches past the ones already named. */
+#define ROMFUNC_SET_TXCAP_REG 25 /* rom_set_txcap_reg: a six-byte table and an index, the pair written to the analog I2C */
+
+static void table_set_txcap_reg(const uint8_t *tab, uint32_t index)
+{
+    ((void (*)(const uint8_t *, uint32_t))phy_get_romfuncs()[ROMFUNC_SET_TXCAP_REG])(tab, index);
+}
+
+static void table_stop_tx_tone(void)
+{
+    ((void (*)(uint32_t))phy_get_romfuncs()[ROMFUNC_STOP_TX_TONE])(1u);
+}
+
+/* phy_param's fields package 11 writes or reads; the labelled ones carry Espressif's names, the rest none. */
+#define PHY_PARAM_RFCAL_OFFSET   0x0e  /* read as a halfword and handed to the power detector's read; no label */
+#define PHY_PARAM_RFCAL_PRINT    0x10  /* its low bit asks the library for a print, left out */
+#define PHY_PARAM_WIFI_CAL_ATTEN 0xf4  /* wifi_cal_atten 0xf4..0xf6 */
+#define PHY_PARAM_BT_PWCTRL      0xfb  /* bt_pwctrl_atten 0xfb..0xfd */
+#define PHY_PARAM_BT_CAL_POWER   0xfe  /* bt_cal_power */
+#define PHY_PARAM_BT_CAL_ATTEN   0xf8  /* bt_cal_atten 0xf8..0xfa */
+#define PHY_PARAM_CAL_CHANNEL    0x11c /* the halfword tx_pwctrl_init_new leaves the calibration's channel in */
+
+/* The three channels the transmit power calibration walks, libphy's own table at 0x4200ae1c. */
+static const uint8_t pwr_cal_chans[3] = { 1, 6, 11 };
+
+/*
+ * libphy's rfcal_pwrctrl_new [0x42009288]: the transmit power calibration's search over the source bytes,
+ * from the highest down. A tone is started at a step held to [0, 0x64], its power read twice through the
+ * ROM's get_power_db at the caller's offset and turned into the error against the byte, and the error --
+ * held to [-0x18, 0x18] -- walks the step and an accumulator: where it is outside a 4-wide band the
+ * accumulator takes the error's low bits a quarter of the error back, and then the widened error, and so
+ * on up to ten rounds, and the round's step less the span is the byte the caller's destination gets, held
+ * at -0x18 from below. The library's print, under its last argument, is left out. The first argument is
+ * the tone's frequency, the second the source bytes, the third their count, the fourth the span, the
+ * fifth the destination, the sixth the power detector's offset and the seventh the temperature.
+ */
+void rfcal_pwrctrl_new(uint32_t tone, const uint8_t *src, uint32_t count, int32_t span,
+                       uint8_t *dst, int32_t offset, int32_t temp, uint32_t verbose)
+{
+    int32_t last = (int32_t)count - 1;
+    int32_t idx = (int8_t)last;
+    int16_t acc = 0;
+
+    (void)verbose;
+    if ((int8_t)idx < 0) {
+        table_stop_tx_tone();
+        return;
+    }
+    while ((int8_t)idx >= 0) {
+        int32_t byte = (int32_t)src[idx];
+        int32_t s2 = byte;
+        int32_t s9 = 0;
+        int32_t s7 = 2;
+
+        if (idx < last) {
+            acc = (int16_t)((int32_t)acc + (int32_t)src[idx + 1] - byte);
+        }
+        for (;;) {
+            int32_t s5 = (int16_t)(temp - (int8_t)(-(int32_t)acc));
+            uint32_t s0 = (uint32_t)s5;
+            int32_t pwr;
+            int32_t t3;
+
+            if (s5 < 0) {
+                s0 = 0u;
+            }
+            if ((int32_t)(int16_t)(uint16_t)s0 > 0x64) {
+                s0 = 0x64u;
+            }
+            rom_start_tx_tone_step(1u, tone, s0 & 0xffu, 0u, 0u, 0u);
+            pwr = (int16_t)((int16_t)get_power_db(offset) + (int16_t)get_power_db(offset));
+            pwr = (pwr + 4) >> 3;
+            if (pwr < 0) {
+                pwr = 0;
+            }
+            t3 = pwr - s2;
+            if (t3 > 0x18) {
+                t3 = 0x18;
+            } else if (t3 < -0x18) {
+                t3 = -0x18;
+            }
+            if (t3 != 0) {
+                if (t3 == -1 && s7 == 1) {
+                    goto rfcal_store;
+                }
+            } else if (s9 != 0) {
+                goto rfcal_store;
+            }
+            if (s7 == 0) {
+                goto rfcal_store;
+            }
+            if (s5 > 0) {
+                if (s5 <= 0x63) {
+                    goto rfcal_step;
+                }
+                if (t3 > 0) {
+                    s0 = 0x64u;
+                    goto rfcal_store;
+                }
+            } else {
+                if (t3 >= 0) {
+                    goto rfcal_step;
+                }
+                s0 = 0u;
+                goto rfcal_store;
+            }
+          rfcal_step:
+            {
+                uint32_t h = (uint32_t)t3 & 0xffffu;
+                uint32_t t1 = (h + (uint32_t)(int32_t)acc) & 0xffffu;
+
+                if (((h + 2u) & 0xffffu) > 4u) {
+                    t1 = (t1 - (uint32_t)(t3 >> 2)) & 0xffffu;
+                }
+                acc = (int16_t)t1;
+            }
+            s9++;
+            s7 = t3;
+            if (s9 != 0xa) {
+                continue;
+            }
+          rfcal_store:
+            {
+                int32_t v = (int8_t)((int32_t)s0 - span);
+
+                if (v < -0x18) {
+                    v = -0x18;
+                }
+                dst[idx] = (uint8_t)v;
+            }
+            break;
+        }
+        idx--;
+    }
+    table_stop_tx_tone();
+}
+
+/*
+ * libphy's tx_pwctrl_init_cal_new [0x42009750]: the transmit power calibration for one side -- Wi-Fi where
+ * its first argument is clear, Bluetooth where it is set. The three bytes at the second argument's buffer
+ * are walked for the three channels 1, 6 and 11; each is tuned to, the transmit capacitor's table written
+ * for it where Wi-Fi -- Bluetooth's is written once, index 6 -- and the search of rfcal_pwrctrl_new run into
+ * the fourth argument's buffer at the side's own tone, span and thresholds, its result copied to the second
+ * buffer and the running temperature (phy_param 0x18) advanced by the span. The first copy is then held to
+ * a band: inside it the calibration's power (the third argument) is the stack byte 0x38 less phy_param
+ * 0x2b, outside it the ROM's get_data_sat widens it and the first copy and all three of the second are
+ * moved by the widening. phy_param 0x1a1 is raised around the walk. The library's print is left out.
+ */
+void tx_pwctrl_init_cal_new(uint32_t bt, uint8_t *pwctrl, uint8_t *cal_power, uint8_t *cal_atten)
+{
+    uint8_t step_byte = (uint8_t)(0x38 - (int32_t)phy_param[PHY_PARAM_TXIQ_ATTEN]);
+    uint32_t tone;
+    uint32_t lo;
+    uint32_t hi;
+    uint32_t span;
+    uint32_t i;
+
+    if (bt != 0u) {
+        tone = phy_param[3]; /* Bluetooth's tone frequency, no label naming the byte */
+        lo = 0x14;
+        hi = 0x28;
+        span = 0x12;
+        table_set_txcap_reg(&phy_param[0xdcu], 6u);
+    } else {
+        tone = 0x80u;
+        lo = 0x12;
+        hi = 0x22;
+        span = 0x28;
+    }
+    phy_param[PHY_PARAM_PWDET_TONE] = 1u;
+    for (i = 0u; i != 3u; i++) {
+        uint32_t chan = pwr_cal_chans[i];
+        int8_t v;
+
+        set_channel_rfpll_freq(chan, phy_param[PHY_PARAM_XTAL], 0);
+        if (bt == 0u) {
+            table_set_txcap_reg(&phy_param[0xdcu], chan);
+        }
+        rfcal_pwrctrl_new(tone, &step_byte, 1u, (int32_t)span, &cal_atten[i],
+                          (int32_t)phy_param16(PHY_PARAM_RFCAL_OFFSET),
+                          (int32_t)(int8_t)phy_param[PHY_PARAM_TXIQ_TEMP],
+                          (uint32_t)(phy_param16(PHY_PARAM_RFCAL_PRINT) & 1u));
+        v = (int8_t)cal_atten[i];
+        pwctrl[i] = (uint8_t)v;
+        phy_param[PHY_PARAM_TXIQ_TEMP] = (uint8_t)((int32_t)v + (int32_t)span);
+    }
+    if ((int32_t)(int8_t)pwctrl[0] > 0x0b && (int32_t)(int8_t)pwctrl[0] <= (int32_t)hi) {
+        cal_power[0] = step_byte;
+    } else {
+        uint8_t d = (uint8_t)get_data_sat((int32_t)(int8_t)((int8_t)pwctrl[0] - (int8_t)lo), 0x28, -0x28);
+
+        cal_power[0] = (uint8_t)((uint32_t)step_byte + d);
+        pwctrl[0] = (uint8_t)((uint32_t)pwctrl[0] - d);
+        pwctrl[1] = (uint8_t)((uint32_t)pwctrl[1] - d);
+        pwctrl[2] = (uint8_t)((uint32_t)pwctrl[2] - d);
+    }
+    phy_param[PHY_PARAM_PWDET_TONE] = 0u;
+}
+
+/*
+ * libphy's tx_pwctrl_init_new [0x420098d8]: Wi-Fi's transmit power calibration. Where param_flag -- phy_param's
+ * word 0xA4 -- has its bit 20 set the calibration has run and it returns at once; else the transmitter's
+ * calibration debug mode is entered, the frequency tuned to channel 1, the transmit capacitor's table written
+ * for index 1, the power detector's reference code 0x50 taken, tx_pwctrl_init_cal_new run for Wi-Fi into
+ * wifi_pwctrl_atten at 0xf1, wifi_cal_power at 0xf7 and wifi_cal_atten at 0xf4, the calibration's work mode
+ * entered, the bit set and phy_param 0x11c's halfword left at 0xb. The caller's argument the library ignores too.
+ */
+void tx_pwctrl_init_new(uint32_t a0)
+{
+    (void)a0;
+    if ((phy_param32(PHY_PARAM_PARAM_FLAG) & 0x100000u) != 0u) {
+        return;
+    }
+    rom_txcal_debuge_mode();
+    set_channel_rfpll_freq(1u, phy_param[PHY_PARAM_XTAL], 0);
+    table_set_txcap_reg(&phy_param[0xdcu], 1u);
+    pwdet_ref_code(0x50u);
+    tx_pwctrl_init_cal_new(0u, &phy_param[PHY_PARAM_WIFI_PWCTRL_ATTEN], &phy_param[PHY_PARAM_WIFI_CAL_POWER],
+                           &phy_param[PHY_PARAM_WIFI_CAL_ATTEN]);
+    txcal_work_mode();
+    phy_param32_set(PHY_PARAM_PARAM_FLAG, phy_param32(PHY_PARAM_PARAM_FLAG) | 0x100000u);
+    phy_param16_set(PHY_PARAM_CAL_CHANNEL, 0xbu);
+}
+
+/*
+ * libphy's bt_tx_pwctrl_init_new [0x42009978]: Bluetooth's transmit power calibration. Where param_flag's
+ * bit 15 is set it has run and it returns at once; else the analog I2C's block 0x67 registers 0x1c and
+ * 0x1e's bits 5..0 are saved and forced, the transmitter's calibration debug mode entered, the pbus's
+ * windows forced -- phy_param 0x13's byte plus 0x1c0 into (5,1), the transmitter's bit 1 into (1,1) and
+ * phy_param 0x14's byte shifted three into (4,2) -- Bluetooth's transmit DC pair set from the pbus,
+ * tx_pwctrl_init_cal_new run for Bluetooth into bt_pwctrl_atten at 0xfb, bt_cal_power at 0xfe and
+ * bt_cal_atten at 0xf8 with BT_TXIQ 0x100 cleared beside it, the saved analog bytes put back, the work mode
+ * entered and the bit set.
+ */
+void bt_tx_pwctrl_init_new(void)
+{
+    uint32_t saved;
+    uint32_t r1c;
+    uint32_t r1e;
+
+    if ((phy_param32(PHY_PARAM_PARAM_FLAG) & 0x8000u) != 0u) {
+        return;
+    }
+    saved = phy_param[0x13u];
+    r1c = rom_i2c_read(0x67u, 1u, 0x1cu);
+    r1e = rom_i2c_read_masked(0x67u, 1u, 0x1eu, 5u, 0u);
+    rom_i2c_write(0x67u, 1u, 0x1cu, 2u);
+    rom_i2c_write(0x67u, 1u, 0x1du, 2u);
+    rom_i2c_write_masked(0x67u, 1u, 0x1eu, 5u, 0u, 2u);
+    rom_i2c_write_masked(0x67u, 1u, 0x1fu, 5u, 0u, 2u);
+    rom_txcal_debuge_mode();
+    rom_pbus_force_test(5u, 1u, saved + 0x1c0u);
+    rom_pbus_force_test(1u, 2u, 0u);
+    rom_pbus_force_test(1u, 1u, (rom_pbus_rd(1u, 1u) | 2u) & 0xffffu);
+    rom_pbus_force_test(4u, 2u, (uint32_t)phy_param[0x14u] << 3);
+    pbus_set_dco(&phy_param[0x104u + ((uint32_t)bt_bb_to_index(0u) & 0xffu) * 8u]);
+    tx_pwctrl_init_cal_new(1u, &phy_param[PHY_PARAM_BT_PWCTRL], &phy_param[PHY_PARAM_BT_CAL_POWER],
+                           &phy_param[PHY_PARAM_BT_CAL_ATTEN]);
+    phy_param16_set(0x100u, 0u);
+    rom_i2c_write(0x67u, 1u, 0x1cu, r1c);
+    rom_i2c_write(0x67u, 1u, 0x1du, r1c);
+    rom_i2c_write_masked(0x67u, 1u, 0x1eu, 5u, 0u, r1e);
+    rom_i2c_write_masked(0x67u, 1u, 0x1fu, 5u, 0u, r1e);
+    txcal_work_mode();
+    phy_param32_set(PHY_PARAM_PARAM_FLAG, phy_param32(PHY_PARAM_PARAM_FLAG) | 0x8000u);
+}
+
+/*
+ * libphy's phy_set_23dbm [0x4200042a]: where its gate, phy_param 0x4e, is set, 0x5c -- a quarter of 23 dBm
+ * in the init data's own unit -- is put into the init data's bytes 2 and 3 and into phy_param's byte 6. The
+ * gate is left exactly as the library leaves it; nothing calls phy_set_23dbm_en and libphy's phy_param
+ * starts with zero at 0x4e, so on the board the branch never runs and the transmit power stays within the
+ * library's, under the 20 dBm EIRP limit.
+ */
+void phy_set_23dbm(esp_phy_init_data_t *init_data)
+{
+    if (phy_param[PHY_PARAM_23DBM_EN] == 0u) {
+        return;
+    }
+    init_data->params[2] = 0x5cu;
+    init_data->params[3] = 0x5cu;
+    phy_param[0x6u] = 0x5cu;
+}
+
+/*
+ * Package 12: the transmit gains' Bluetooth side. The Wi-Fi side of the chain -- wifi_get_tx_tab,
+ * wifi_get_tx_gain_new, get_tx_gain_value_new and set_tx_gain_mem -- is the driver's own since packages
+ * 2b1/2b2, above. These four are libphy's, taken over with their disassembly; get_tx_gain_value_new and
+ * set_tx_gain_mem are the same leaves the Wi-Fi side already uses.
+ */
+
+/* The Bluetooth gain tables, libphy's rodata at 0x4200ae64 and 0x4200ae80, and the middle buffer
+ * bt_get_tx_gain_new walks, the library's own fourteen zero words. */
+static const uint16_t bt_tx_gain_tab[14] = { 63, 47, 31, 23, 15, 13, 7, 5, 3, 2, 1, 0, 0, 0 };
+static const int16_t bt_tx_gain_offset[14] = { 27, 20, 9, 0, -12, -22, -35, -45, -56, -68, -81, -105, -105, -105 };
+static const uint16_t bt_tx_gain_mid[14] = { 0 };
+
+/*
+ * libphy's bt_get_tx_gain_new [0x42009dea]: Bluetooth's walk over sixteen subbands. A running byte starts
+ * at the caller's first byte and steps by four times the second, each held to [-0x3c, 0x50] through the
+ * ROM's get_data_sat, and the value is that plus the caller's difference of its first two arguments;
+ * get_tx_gain_value_new finds the subband and its three gains. The first gain is the caller's first
+ * buffer's halfword, the second the second's, and the third, less the caller's calibration byte 0x01, is
+ * held to [-0x3c, 0x18] and becomes the caller's byte. The library's print, under its last argument, is
+ * left out. The caller's argument order is the library's own, its first buffer reaching here on the stack.
+ */
+static void bt_get_tx_gain_new(const uint8_t *cal, int32_t p1, int32_t p2, const uint16_t *tab0,
+                               const uint16_t *tab1, const int16_t *tab2, uint8_t *outbytes, uint16_t *outwords1,
+                               uint16_t *outwords0, int8_t start, int8_t step, uint32_t verbose)
+{
+    int32_t diff = p2 - p1;
+    uint16_t run = (uint16_t)(int16_t)start;
+    uint16_t bump = (uint16_t)((int32_t)step * 4);
+    uint32_t carry = 0;
+
+    (void)verbose;
+    for (uint32_t i = 0; i < 16u; i++) {
+        int16_t v = (int16_t)get_data_sat((int32_t)(int16_t)run, 0x50, -0x3c);
+        uint16_t out0, out1;
+        int16_t out2;
+        int8_t cal1 = (int8_t)cal[1];
+        int16_t d;
+
+        carry = get_tx_gain_value_new(carry, (int16_t)(diff + (int32_t)v), &out0, &out1, &out2, tab0, tab1, tab2,
+                                      0x0eu, (int16_t)(-cal1), 0x0cu);
+        outwords0[i] = out0;
+        outwords1[i] = out1;
+        d = (int16_t)(out2 - (int16_t)cal1);
+        if (d > 0x18) {
+            d = 0x18;
+        }
+        if (d < -0x3c) {
+            d = -0x3c;
+        }
+        outbytes[i] = (uint8_t)d;
+        run = (uint16_t)(run + bump);
+    }
+}
+
+/*
+ * libphy's bt_get_tx_tab [0x4200a1c2]: Bluetooth's channel tab -- the gain tables above and where the
+ * power lies, from phy_param's corrected power less its byte 0x08 and its calibrated power -- into the
+ * caller's three buffers: sixteen words each of the first two, sixteen bytes of the third. The caller's
+ * own flag is the library's print, left out.
+ */
+void bt_get_tx_tab(uint16_t *tab_out, uint16_t *mid_out, uint8_t *diff_out, uint32_t verbose)
+{
+    bt_get_tx_gain_new(&phy_param[PHY_PARAM_BT_PWCTRL], (int32_t)(int8_t)phy_param[PHY_PARAM_BT_CAL_POWER],
+                       (int32_t)(int8_t)(uint8_t)(phy_param[PHY_PARAM_BT_CORRECT_POWER] -
+                                                  phy_param[PHY_PARAM_TX_GAIN_B]),
+                       bt_tx_gain_tab, bt_tx_gain_mid, bt_tx_gain_offset, diff_out, mid_out, tab_out, -0x60, 3,
+                       verbose);
+}
+
+/*
+ * libphy's bt_set_tx_gain [0x4200a256]: Bluetooth's transmit gains, built by bt_get_tx_tab and written
+ * into the front end by set_tx_gain_mem -- sixteen subbands, the BT_TXDC table at phy_param 0x104 and TXIQ
+ * at 0xd0; the caller's argument is bt_get_tx_tab's own flag.
+ */
+void bt_set_tx_gain(uint32_t a0)
+{
+    uint16_t tab_out[16];
+    uint16_t mid_out[16];
+    uint8_t diff_out[16];
+
+    bt_get_tx_tab(tab_out, mid_out, diff_out, a0);
+    set_tx_gain_mem(1u, 0x10u, tab_out, mid_out, diff_out, &phy_param[PHY_PARAM_BT_TXDC],
+                    &phy_param[PHY_PARAM_TXIQ]);
+}
+
+/*
+ * libphy's bt_tx_gain_init [0x4200a292]: Bluetooth's transmit gains brought up -- the frequency tuned to
+ * 0x985, the transmit capacitor's table written for index 6, Bluetooth's transmit DC and power
+ * calibrations run, and the gains set for argument zero.
+ */
+void bt_tx_gain_init(void)
+{
+    set_channel_rfpll_freq(0x985u, phy_param[PHY_PARAM_XTAL], 0);
+    table_set_txcap_reg(&phy_param[0xdcu], 6u);
+    bt_txdc_cal_new();
+    bt_tx_pwctrl_init_new();
+    bt_set_tx_gain(0u);
 }

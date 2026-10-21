@@ -85,6 +85,27 @@ and says which.
   0xF1..0xF3, `wifi_cal_atten` 0xF4..0xF6, `bt_cal_power` 0xFE, `bt_cal_atten` 0xF8..0xFA
   (**known** labels), and `PHY_PARAM_TXCAL_TEMP` 0x48, the temperature the transmit calibration block last ran
   at (**inferred** from `phy_cal_param_track`; no label names it).
+- The transmit power control: `tx_pwctrl_init_new` and `bt_tx_pwctrl_init_new` run the calibration for Wi-Fi
+  and Bluetooth; each is gated and marked in `PARAM_FLAG` -- Wi-Fi's bit 20 and Bluetooth's bit 15 -- and
+  returns at once where its bit is set. `tx_pwctrl_init_cal_new` walks the channels 1, 6 and 11, and
+  `rfcal_pwrctrl_new` searches each channel's attenuation: it starts a tone and, from the power detector's
+  read through the ROM's `get_power_db` at `phy_param` 0x0E's halfword, forms the error against the source
+  byte and walks a step between 0 and 0x64 over up to ten rounds. The three results of a side go to its
+  `wifi_cal_atten` 0xF4..0xF6 and `bt_cal_atten` 0xF8..0xFA, its `wifi_pwctrl_atten` 0xF1..0xF3 and
+  `bt_pwctrl_atten` 0xFB..0xFD, and its `wifi_cal_power` 0xF7 and `bt_cal_power` 0xFE, and the running
+  temperature is kept in `PHY_PARAM_TXIQ_TEMP` 0x18. The bytes `phy_param` 0x0E, 0x13 and 0x14 have no label
+  and what they hold is not known; Bluetooth's calibration also forces the analog I2C's block 0x67 registers
+  0x1C, 0x1D, 0x1E's bits 5..0 and 0x1F, whose meaning is likewise not known.
+- The transmit gain memory's two chains: the Wi-Fi side is `wifi_get_tx_tab`/`wifi_get_tx_gain_new` and the
+  Bluetooth side `bt_get_tx_tab`/`bt_get_tx_gain_new`, both over `get_tx_gain_value_new`'s search, and both
+  writing `set_tx_gain_mem`'s eight-byte entries into the front end's gain memory through
+  `write_gain_mem_new` (`FECTRL_GAIN_MEM0/1/2` 0x8CC/0x8D0/0x8D4 and `FECTRL_GAIN_MEM_CONF` 0x8C8). The
+  entries come from the table the caller passes -- the Wi-Fi chain a local one, the Bluetooth chain
+  `phy_param`'s `BT_TXDC` 0x104 -- beside `TXIQ` 0xD0, and the channel is the front end's `FEDATA_GAIN_CHAN`
+  0x410. Sixteen subbands on each side, over the search's sixteen (Wi-Fi) and fourteen (Bluetooth) entries;
+  the tables are the library's rodata at 0x4200ADBC/0x4200ADDC and 0x4200AE64/0x4200AE80. `bt_tx_gain_init`
+  tunes to 0x985, writes the transmit capacitor's table for index 6, and runs the Bluetooth DC and power
+  calibrations first. Names and roles **inferred** from the two chains' disassembly.
 - The transmit capacitor calibration: `tx_cap_init_loop` retunes to each of the channels 1, 6 and 11 through the
   ROM's `set_channel_rfpll_freq`, sets the analog I2C's `i2c_txrf` 0x6B register 2 bits 3..0 to 1 and its bits
   7..4 to 5, and runs a tone at 0x80; `rfcal_txcap_loop` then walks bits 3..0 from 7 down to 0 and bits 7..4 from
@@ -116,7 +137,9 @@ and says which.
   5 (the frequency memory built), 7 (receive DC done), 9 (receive rows built),
   10 (the receive IQ calibration done, which `rxiq_cal_init` sets and returns at once on),
   12 (the Bluetooth transmit DC calibration done, which `bt_txdc_cal_new` sets and returns at once on),
-  14 (TXIQ done), 23 (the RC calibration run);
+  14 (TXIQ done), 15 (the Bluetooth transmit power calibration done, which `bt_tx_pwctrl_init_new` sets and
+  returns at once on), 20 (the Wi-Fi transmit power calibration done, which `tx_pwctrl_init_new` sets and
+  returns at once on), 23 (the RC calibration run);
   the transmit DC calibration's settled pairs `TXDC_CAL_PWDET` +0/+2/+4/+6 at 0x18E..0x194, its printed
   sources `TXDC` 0xA8/0xAA, and 0xB0/0xB2 beside them (an open question).
 - MMIO: the transmit DC calibration word `FEDATA_TXDC_CTRL` 0x600A0418 (`FEDATA`) -- meaning **unknown**,
@@ -221,6 +244,13 @@ walks each loop.
   IQ correction goes into the transmit gain memory beside the gain entries. Whether the library reads
   past 0xD2 is not known here -- the label is a halfword pair, the gain memory's own length is a
   question.
+- `bt_get_tx_tab` / `bt_set_tx_gain` / `bt_tx_gain_init`: Bluetooth's channel tab is built from
+  `bt_correct_power` 0x124 less the gain byte 0x08 and `bt_cal_power` 0xFE, its sixteen subbands found by
+  `get_tx_gain_value_new` over the two fourteen-word tables, and written into the front end's gain memory by
+  the same `set_tx_gain_mem`/`write_gain_mem_new` the Wi-Fi path uses, with the `BT_TXDC` table at 0x104 and
+  `TXIQ` 0xD0. `bt_tx_gain_init` first tunes to 0x985, writes the transmit capacitor's table for index 6 and
+  runs `bt_txdc_cal_new` and `bt_tx_pwctrl_init_new`, then sets the gains for zero. So the Bluetooth gain path
+  is the corrected power -> the search over the tables -> the gain memory, beside the Wi-Fi one.
 - `txiq_cover_new` / `rfcal_txiq_new` / `txiq_cal_init_new`: a tone on the transmit side, its power read
   back through the SAR ADC -- `txiq_get_mis_pwr`, and the attenuation through `get_power_atten` -- over
   seven rounds; each round's mismatch moves the correction pair, held between -0x1f and 0x1f (its second
@@ -402,6 +432,7 @@ field's read stands before the string it belongs to.
 | 0x1A4 | u8 | `rx_sat` |
 | 0x52 | s8 | `wifi_init_power` |
 | 0x123 | s8 | `wifi_correct_power` |
+| 0x124 | s8 | `bt_correct_power` |
 | 0x11C | u16 | the channel |
 
 Source: `phy_cal_print`'s and `phy_tx_gain_print`'s disassembly and strings.
@@ -463,6 +494,10 @@ Source: these functions' disassembly, and `phy_cal_print`'s labels for the field
 | phy_param+0x18 | | `PHY_PARAM_TXIQ_TEMP` | the byte `txiq_cal_init_new` starts the forward pair from, a signed temperature | no label names it | unknown |
 | phy_param+0x2B | | `PHY_PARAM_TXIQ_ATTEN` | the byte the TXIQ and TX power calibrations take `0x40` (or `0x38`) minus; unsigned | no label names it | unknown |
 | phy_param+0x48 | | `PHY_PARAM_TXCAL_TEMP` | the temperature the transmit calibration block last ran at, which the tracking reruns it by | `phy_cal_param_track`'s disassembly | inferred |
+| phy_param+0x0E | u16 | `PHY_PARAM_RFCAL_OFFSET` | the halfword the transmit power calibration hands the ROM's `get_power_db` as the detector's offset; no label names it | `rfcal_pwrctrl_new`'s disassembly | unknown |
+| phy_param+0x10 | 0 | the transmit power calibration's print bit | `rfcal_pwrctrl_new`'s last argument, which the library prints under; the whole driver leaves the PHY prints out | the same | unknown |
+| phy_param+0xA4 (`param_flag`) | 15 | `param_flag`'s Bluetooth transmit power bit | where set, `bt_tx_pwctrl_init_new` has run and returns at once, and it sets it | `bt_tx_pwctrl_init_new`'s disassembly | inferred |
+| phy_param+0xA4 (`param_flag`) | 20 | `param_flag`'s Wi-Fi transmit power bit | where set, `tx_pwctrl_init_new` has run and returns at once, and it sets it | `tx_pwctrl_init_new`'s disassembly | inferred |
 | phy_param+0x04 | | `PHY_PARAM_TRACK_TEMP_AT` | the temperature the transmit power tracking last ran at, which `get_temp_init_new` starts from `temp_code_init` | `txpwr_cal_track`'s and `get_temp_init_new`'s disassembly | inferred |
 | phy_param+0x130 | | `PHY_PARAM_CAP_TEMP` | the temperature the RFPLL capacitance tracking last ran at, which `get_temp_init_new` starts from `temp_code` | `phy_rfpll_cap_track_new`'s and `get_temp_init_new`'s disassembly | inferred |
 | phy_param+0x11F | | `PHY_PARAM_CHANNEL_SECOND` | the byte beside the channel, the retune's second argument | `chip_v7_set_chan`'s and `phy_cal_param_track`'s disassembly | inferred |
@@ -473,7 +508,11 @@ Source: these functions' disassembly, and `phy_cal_print`'s labels for the field
 | phy_param+0x19A | | `PHY_PARAM_TRACK_SKIP` | where set, the parameter calibration is left out | the same | inferred |
 | phy_param+0xA4 | 23 | `param_flag`'s RC bit | where set, `rc_cal_new` has run and returns at once | `rc_cal_new`'s disassembly | inferred |
 | phy_param+0xA4 | 12 | `param_flag`'s BT transmit DC bit | where set, `bt_txdc_cal_new` has run and returns at once, and it sets it at the end | `bt_txdc_cal_new`'s disassembly | inferred |
-| phy_param+0x14 | | the Bluetooth transmit DC calibration's force byte | `bt_txdc_cal_new` shifts it three into the pbus's window 4 place 2; no label names it | `bt_txdc_cal_new`'s disassembly | unknown |
+| phy_param+0x08 | s8 | `PHY_PARAM_TX_GAIN_B` | the gain byte the two chains take the corrected power less, `bt_correct_power` 0x124 for Bluetooth and `wifi_correct_power` 0x123 for Wi-Fi; no libphy label names it | `bt_get_tx_tab`'s and `wifi_get_tx_tab`'s disassembly | unknown |
+| libphy rodata 0x4200AE64, 0x4200AE80 | | the Bluetooth gain tables | `bt_get_tx_tab`'s two fourteen-word tables -- the subband gains and their power offsets -- which the library's `phy_tx_gain_print` prints as `bt_bbgain`/`bt_diggain`/`bt_pagain`; no label names the tables themselves | `bt_get_tx_tab`'s disassembly | unknown |
+| phy_param+0x14 | | the Bluetooth transmit DC calibration's force byte | `bt_txdc_cal_new` shifts it three into the pbus's window 4 place 2, as `bt_tx_pwctrl_init_new` also does; no label names it | `bt_txdc_cal_new`'s and `bt_tx_pwctrl_init_new`'s disassembly | unknown |
+| phy_param+0x13 | | the Bluetooth power calibration's pbus force byte | `bt_tx_pwctrl_init_new` adds 0x1c0 and forces it into the pbus's window 5 place 1; no label names it | `bt_tx_pwctrl_init_new`'s disassembly | unknown |
+| i2c 0x67, host 1, regs 0x1C, 0x1D, 0x1E bits 5..0, 0x1F | | | saved and forced by `bt_tx_pwctrl_init_new` around its walk; no label names them | the same | unknown |
 | phy_param+0x10 | 7 | the transmit capacitor scan's print bit | passed to `rfcal_txcap_loop`'s first argument, which prints where set, left out; bit 3 of the same halfword reaches `set_rx_gain_cal_iq_new`'s receive DC | `tx_cap_init_loop`'s and `set_rx_gain_cal_iq_new`'s disassembly | unknown |
 | i2c_txrf 0x6B, host 1, reg 0x02 | 3..0 | `I2C_TXRF_DCAP_STG1` | the transmit capacitor's first field, set to 1 before the scan and its best value written after; `phy_param`'s `DCAP_STG1` at 0xDC/0xDE/0xE0 | `tx_cap_init_loop`'s and `rfcal_txcap_loop`'s disassembly | unknown |
 | i2c_txrf 0x6B, host 1, reg 0x02 | 7..4 | `I2C_TXRF_DCAP_STG2` | the transmit capacitor's second field, set to 5 before the scan and its best value written after; `phy_param`'s `DCAP_STG2` at 0xDD/0xDF/0xE1 | the same | unknown |
@@ -513,7 +552,7 @@ Source: these functions' disassembly, and `phy_cal_print`'s labels for the field
 | phy_param+0xA2 | s8 | `PHY_PARAM_CHAN_OFFSET` | the offset `chip_v7_set_chan_offset` adds in eighths where 0xA1 is set; no label names it | the same | unknown |
 | phy_param+0x120, 0x121 | u8 x2 | `PHY_PARAM_RX_N2`, `PHY_PARAM_RX_N1` | the receive gain table's two counts: `phy_rx_table_init` writes 0x4f to both through the halfword 0x4f4f, and `set_rx_gain_table` overwrites each with its own row count | `phy_rx_table_init`'s and `set_rx_gain_table`'s disassembly | inferred |
 | phy_param+0x25 | | `PHY_PARAM_PHY_UP` | the library's mark that its bring-up has run: `register_chipv7_phy` reads it as the fresh-chip gate and sets it at its end, and `phy_close_rf`'s work waits on it | `register_chipv7_phy`'s and `phy_close_rf`'s disassembly | inferred |
-| phy_param+0x4E | | `PHY_PARAM_23DBM_EN` | where set, `register_chipv7_phy` applies `phy_set_23dbm`; `phy_set_23dbm_en` writes it, and nothing the recorded run saw on the board sets it | `register_chipv7_phy`'s and `phy_set_23dbm_en`'s disassembly | unknown |
+| phy_param+0x4E | | `PHY_PARAM_23DBM_EN` | where set, `register_chipv7_phy` applies `phy_set_23dbm`; `phy_set_23dbm_en` writes it, and on the board it is never set -- nothing calls `phy_set_23dbm_en`, and libphy's `phy_param` starts with 0 there | `register_chipv7_phy`'s and `phy_set_23dbm_en`'s disassembly, and the library's `phy_param` `.data` | inferred |
 | phy_param+0xA4 (`param_flag`) | 5, 7, 9, 16 | the blob recovery's cleared bits | in mode 1, a blob that stands has `param_flag` cleared of these -- the mask 0xfffefd5f -- after the blob is restored | `register_chipv7_phy`'s disassembly | inferred |
 | phy_param+0xA4 (`param_flag`) | 5, 20 | `get_temp_init_new`'s two gates, inverted | the head passes `~bit 5` as the cap argument and `~bit 20` as the txcal argument; bit 20 is set by no step of the walk | the same | inferred |
 
@@ -540,9 +579,17 @@ Source: these functions' disassembly, and `phy_cal_print`'s labels for the field
   runs and whether 0xA2, a signed byte, is added in eighths. What the gate and the offset mean, and where either
   is set -- nothing in the library writes 0xA1 or 0xA2, and in the recorded board run 0xA1 was 0, so
   `chip_v7_set_chan_offset` did not run there -- is not known.
+- `phy_param` 0x0E's halfword: read by the transmit power calibration and handed to the ROM's `get_power_db`
+  as the detector's offset; no label names it, and what it holds is not known. The analog I2C's block 0x67
+  registers 0x1C, 0x1D, 0x1E's bits 5..0 and 0x1F, which `bt_tx_pwctrl_init_new` saves and forces around its
+  walk, likewise have no label and their meaning is not known.
 - `MAC_TX_MIN_PWR` 0x600a4400's bits 4..9 and bit 17: the minimum power and the HE group's bit, both from
   `macstart.c` and not otherwise understood; why the PHY's channel setting writes the same transmit power's word
-  is not known. Package 11 to 12, the transmit power's, must check whether any of its functions writes the word too.
+  is not known. Neither package 11's five functions nor package 12's transmit gains write the word -- none of
+  their off-board runs reaches 0x600a4400 -- so the check the note asked for is answered: the whole transmit
+  power path the driver took over writes only `phy_param`'s fields, the analog I2C and the front end, never the
+  MAC's word. The channel's two offset bits are the only part the PHY writes, in `mac_tx_chan_offset_new`, and
+  that is package 6's.
 - `AGC_RFRX_SAT` 0x705C, `AGC_4` 0x7068 and the estimate's four words `FEDATA_RX_IQ_EST2..5` 0x478..0x484: no
   label names any. `rfrx_sat_rst` moves the first's high bits and raises its bit 11 or 10 and writes the second
   with 0x404, and `phy_check_rx_sat` reads the receive gain's SAR field (bits 12..18 of 0x708C) against 0x45 and
@@ -569,8 +616,12 @@ Source: these functions' disassembly, and `phy_cal_print`'s labels for the field
   `TXDC` 0xA8/0xAA (the only labelled pair) and to 0xB0/0xB2 is not known.
 - `phy_param` 0x4E, the library's `phy_set_23dbm_en`'s byte: where set, `register_chipv7_phy` applies
   `phy_set_23dbm`, which puts 0x5c (92) into the init data's bytes 2 and 3 and into `phy_param`'s byte 6 -- a
-  quarter of 23 dBm in the init data's own unit, hence the name. What sets the gate on the board is not known;
-  package 11 to 12, the transmit power's, must read it and confirm the branch runs as the library's.
+  quarter of 23 dBm in the init data's own unit, hence the name. On the board it is never set: nothing calls
+  `phy_set_23dbm_en`, and libphy's `phy_param` `.data` starts with 0 at 0x4E, so with the driver's
+  `phy_init_data` the branch never runs and the transmit power stays within the library's -- the 20 dBm EIRP
+  limit holds. The driver transcribes `phy_set_23dbm` and `phy_set_23dbm_en` word for word and leaves the gate
+  as it is; the off-board comparison covers the branch by forcing 0x4E in the model, which transmits nothing.
+  Which fields the setting changes, past bytes 2, 3 and 6, is not known.
 - `param_flag`'s bits 5, 16 and 20: the head clears bit 5 (beside 7, 9 and 16) when it recovers a blob in mode 1,
   and passes `~bit 5` and `~bit 20` to `get_temp_init_new`; bit 20 is set by no step of the walk, so that argument
   is always set there. What the three bits mean is not known.

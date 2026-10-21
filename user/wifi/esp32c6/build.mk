@@ -198,7 +198,8 @@ WIFI_ESP_PHY_OWN := phy_get_xtal_freq tsens_read_init_new tsens_dac_to_index tse
                     pwdet_reg_init_new open_i2c_xpd_new phy_xpd_rf \
                     phy_wifi_enable_set phy_set_tsens_power phy_xpd_tsens phy_get_max_pwr wait_i2c_sdm_stable \
                     phy_close_rf set_rx_comp_new write_gain_mem_new phy_i2c_master_mem_txcap set_freq_i2c \
-                    wifi_get_tx_tab wifi_set_tx_gain phy_set_most_tpw chan14_mic_cfg wr_rx_gain_mem \
+                    wifi_get_tx_tab wifi_set_tx_gain bt_get_tx_tab bt_set_tx_gain bt_tx_gain_init \
+                    phy_set_most_tpw chan14_mic_cfg wr_rx_gain_mem \
                     chip_v7_set_chan chip_v7_set_chan_offset phy_change_channel \
                     mac_tx_chan_offset_new phy_rx_table_init \
                     i2c_clk_sel i2c_bbpll_set reg_set_new freq_reg_init bias_reg_set \
@@ -217,6 +218,7 @@ WIFI_ESP_PHY_OWN := phy_get_xtal_freq tsens_read_init_new tsens_dac_to_index tse
                     tx_cap_init_loop rfcal_txcap_loop \
                     txdc_cal_init_new bt_txdc_cal_new set_lb_txiq_new \
                     register_chipv7_phy_init_param register_chipv7_phy \
+                    rfcal_pwrctrl_new tx_pwctrl_init_new tx_pwctrl_init_cal_new bt_tx_pwctrl_init_new phy_set_23dbm \
                     rxdc_est_min_new pbus_rx_dco_cal_1step_new rx_pbus_reset set_rx_gain_table \
                     txdc_cal_pwdet txdc_cal_pwdet_init txdc_cal_new \
                     txiq_cover_new rfcal_txiq_new txiq_cal_init_new phy_cal_param_track force_txrx_off \
