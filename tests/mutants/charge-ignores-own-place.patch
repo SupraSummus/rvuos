@@ -3,13 +3,13 @@ so the lender pays nothing for what the borrower ran before, and runs it free;
 a turn is charged as the units it runs on change, its own place's too.
 
 Caught-by: fuzz-smp2
-Report: a traced call that moved no time charged the thread whose turn it was
+Report: a place counted overruns otherwise than as a charge reached a request's end
 Witness: fuzz-smp2 cores-lend-borrower-unbound
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -624,7 +624,7 @@ static void place_charge(struct place *p
+@@ -643,7 +643,7 @@ static void place_charge(struct place *p)
  {
      const struct thread *t = place_thread(p);
      struct core *core = &cores[t->core];

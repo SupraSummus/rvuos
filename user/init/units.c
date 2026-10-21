@@ -71,6 +71,51 @@ static void waiting_probe_main(void)
 }
 
 /*
+ * The driver: each wake it works for driver_work counts of the counter, as a driver serving its device would,
+ * counts the wake, and sleeps a period. A bit the probe left pending wakes it once more, which changes nothing.
+ */
+#define DRIVER_PERIOD_US 2000u
+#define DRIVER_US 40000u
+static volatile uint32_t driver_work, driver_wakes;
+static void driver_main(void)
+{
+    const volatile uint32_t *low = (const volatile uint32_t *)dodge_counter;
+    for (;;) {
+        uint32_t start = *low, bits;
+        while (*low - start < driver_work) {
+        }
+        driver_wakes++;
+        if (rv_timer_set(SLOT_DODGER_TIMER, BIT_TIMER, DRIVER_PERIOD_US) != KERR_OK ||
+            rv_wait(SLOT_DODGER_NTFN, &bits) != KERR_OK) {
+            puts("driver: cannot sleep\n");
+            rv_halt(BOOT_CAP_HALT, 1);
+        }
+    }
+}
+
+/* Run the driver on units of the half without spare time for DRIVER_US; say its wakes and overruns meanwhile. */
+static void drive(uint32_t units, uint32_t *wakes, uint32_t *overruns)
+{
+    uint32_t before, after, w0 = driver_wakes;
+    expect("read the driver's overruns", rv_thread_overruns(SLOT_DODGER, &before));
+    expect("derive the half without spare time for it",
+           rv_invoke(OP_CAP_DERIVE, BOOT_CAP_CAPTABLE, SLOT_CAPPED_TIME, SLOT_HALF_TIME, RIGHT_W));
+    expect("bind the driver", rv_time_bind(SLOT_CAPPED_TIME, SLOT_DODGER, 0, units, 0));
+    expect("let it drive", sleep_us(DRIVER_US));
+    expect("take its units back", rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_HALF_TIME, 0, 0));
+    expect("read them again", rv_thread_overruns(SLOT_DODGER, &after));
+    *wakes = driver_wakes - w0;
+    *overruns = after - before;
+    puts("root: driver on units ");
+    rv_put_hex(BOOT_CAP_PRINT, units);
+    puts(": wakes ");
+    rv_put_hex(BOOT_CAP_PRINT, *wakes);
+    puts(" overruns ");
+    rv_put_hex(BOOT_CAP_PRINT, *overruns);
+    puts("\n");
+}
+
+/*
  * Wait on the notification until the probe's bit comes, or counts of the counter have passed since start:
  * a timer bit the dodger left pending may come first, which a wait takes at once. Returns the bits taken.
  */
@@ -325,4 +370,26 @@ void units_demo(uint32_t data_base, uint32_t data_size, uint32_t counter, uint32
     expect("the probe ran within its span of the wake, before the spin ended",
            (bits & BIT_PROBE) != 0 && probe_at - start < probe_span ? KERR_OK : KERR_INVALID_ARG);
     puts("root: spans ok\n");
+
+    /*
+     * Overruns; see OP_THREAD_OVERRUNS.
+     * The driver works an eighth of the default span at each wake, its requests due within that span, and sleeps.
+     * On the half its request is half the span, which the work and the switch to it fit in, so it runs none out;
+     * on four units its request is a sixteenth, which the work runs out at every wake, however idle the processor.
+     */
+    driver_work = default_span / 8u;
+    expect("stop the probe", rv_thread_stop(SLOT_DODGER, &was));
+    expect("make it the driver",
+           rv_invoke(OP_THREAD_CONFIGURE, SLOT_DODGER, (uint32_t)&driver_main,
+                     data_base + data_size / 4 - SPINNERS * SPINNER_STACK, 0));
+    expect("start it", rv_invoke(OP_THREAD_RESUME, SLOT_DODGER, 0, 0, 0));
+    uint32_t wakes, overruns;
+    drive(HALF_UNITS, &wakes, &overruns);
+    expect("on enough units the driver ran no request out", wakes != 0 && overruns == 0 ? KERR_OK : KERR_INVALID_ARG);
+    drive(4, &wakes, &overruns);
+    expect("on too few it ran one out at each wake",
+           wakes != 0 && overruns >= wakes ? KERR_OK : KERR_INVALID_ARG);
+    expect("stop the driver", rv_thread_stop(SLOT_DODGER, &was));
+    expect("cancel its timer", rv_timer_set(SLOT_DODGER_TIMER, 0, 0));
+    puts("root: overruns ok\n");
 }

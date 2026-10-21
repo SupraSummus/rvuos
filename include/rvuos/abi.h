@@ -81,6 +81,7 @@
  * Pool: RIGHT_W to allocate objects.
  * Process, Thread: RIGHT_W to control the object.
  * Thread: RIGHT_X to lend it time, see OP_NOTIFY_LEND, which a capability with RIGHT_X alone allows and nothing else.
+ *   RIGHT_R to read its overruns, see OP_THREAD_OVERRUNS, which RIGHT_R alone allows and nothing else.
  * Notification: RIGHT_W to signal, RIGHT_R to wait.
  *   Besides its rights a Notification capability carries the bits it may signal,
  *   every bit for a new one and fewer once carved, see OP_NOTIFY_CARVE; copying keeps them.
@@ -732,10 +733,20 @@
 #define OP_ROUTE_SET 46
 
 /*
+ * Thread (RIGHT_R): how many of the thread's requests it ran to the end of without waiting, see OP_TIME_BIND.
+ * a1, a2 and a3 are zero, else KERR_INVALID_ARG.
+ * Returns a1 = that count, of every core the thread holds the time of, modulo 2^32: a reader takes differences.
+ * A thread whose units fit its work waits within every request and runs none out, whatever the other threads do.
+ * A request runs out as the kernel charges the turn past its end, at the timer while another thread wants the core,
+ * else at the thread's next wait or change of turn; one on lent time counts as the borrower's.
+ */
+#define OP_THREAD_OVERRUNS 47
+
+/*
  * One above the highest operation code; the fuzzer's mutator draws below it.
  * Codes 11 and 27 are no operation's: they were OP_FRAME_INFO and OP_UNTYPED_INFO, which OP_CAP_INFO replaced.
  */
-#define OP_COUNT 47
+#define OP_COUNT 48
 
 /*
  * Capability slots the kernel fills in the root task's table at boot.

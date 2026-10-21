@@ -1,6 +1,6 @@
 /*
  * The properties "Authority only flows", "A call is as good as its capability", "Memory crosses zeroed",
- * "The caller keeps what it runs on", "A dying pool only gives back", "A step charges",
+ * "The caller keeps what it runs on", "A dying pool only gives back", "A step charges", "A charge counts overruns",
  * "A move keeps a node's place", "A carve takes what it names",
  * "A thread lends by its own wait", "A thread stops by its holder, where it stood",
  * "A description is the capability's" and "A pool's room is what an allocation may take" of DESIGN.md,
@@ -54,6 +54,7 @@ struct thread_rec {
     uint32_t deadline[CORES];   /* each place's request's deadline */
     uint8_t span[CORES];        /* each place's span, the request's mark among its bits */
     struct grant time[CORES];   /* the units each place held */
+    uint32_t overruns[CORES];   /* how many requests each place ran out; see check_overruns */
 };
 
 /* Each unit's virtual time before the call: its place's while a place earns it, else what it was left at. */
@@ -142,6 +143,7 @@ static bool traced_before;
 static const struct thread *charged, *charged_turn;
 static const struct place *charged_place, *charged_own_place;
 static const struct place *paying[CORES]; /* the place paying for each core's turn, which a bind charges on any core */
+static const struct place *turns_own[CORES]; /* the own place of each core's turn, which holds its request */
 static struct cap charged_units, charged_own_units;
 static uint64_t charged_vt, charged_from;
 static uint32_t charged_room, charged_span;
@@ -346,7 +348,7 @@ static void children_of(const struct cap *c, addr_array *out)
  */
 #define RIGHTS_IN_HANDLER 0
 #define RIGHTS_UNKNOWN 0xff
-_Static_assert(OP_COUNT == 47 && OP_ROUTE_SET == OP_COUNT - 1, "a new operation needs its rights in rights_needed");
+_Static_assert(OP_COUNT == 48 && OP_THREAD_OVERRUNS == OP_COUNT - 1, "a new operation needs its rights in rights_needed");
 static uint8_t rights_needed(uint32_t op)
 {
     switch (op) {
@@ -386,6 +388,7 @@ static uint8_t rights_needed(uint32_t op)
     case OP_NOTIFY_LEND:
     case OP_CLOCK_READ:
     case OP_CLOCK_FRAME:
+    case OP_THREAD_OVERRUNS:
         return RIGHT_R;
     case OP_FRAME_CARVE:
     case OP_UNTYPED_RETYPE:
@@ -879,7 +882,7 @@ static void record_threads(void)
             continue;
         }
         const struct thread *t = (const struct thread *)o;
-        struct thread_rec r = { objects.v[i].at, t->lend_to, t->state, t->frame.pc, { 0 }, { 0 }, { 0 }, { 0 }, { { 0 } } };
+        struct thread_rec r = { objects.v[i].at, t->lend_to, t->state, t->frame.pc, { 0 }, { 0 }, { 0 }, { 0 }, { { 0 } }, { 0 } };
         memcpy(r.regs, t->frame.regs, sizeof(r.regs));
         for (uint32_t k = 0; k < thread_places(t); k++) {
             const struct place *p = thread_place(t, k);
@@ -887,6 +890,7 @@ static void record_threads(void)
             r.deadline[k] = p->deadline;
             r.span[k] = p->span;
             r.time[k] = grant_of(place_time(p));
+            r.overruns[k] = p->overruns;
         }
         PUSH(threads, r);
     }
@@ -1039,6 +1043,46 @@ static void check_vtimes(void)
 }
 
 /*
+ * A charge that reaches the end of a request counts an overrun in the place that holds it, and nothing else does.
+ * So a traced call counts one for the turn of its core exactly when it charges the turn to that end, as charged_up_to has it:
+ * at a step, or on several cores for the counts another core's step moved the clock.
+ * It may count one for another core's turn, which a bind charges, and for a turn whose units, or payer's, it took,
+ * or that a preempted call's step charged twice, which check_vtimes leaves inexact too.
+ */
+static void check_overruns(void)
+{
+    if (!traced_before || !debug_trace) {
+        return;
+    }
+    bool kept = charged_own_place != NULL && is_object(&objects_after, v2p(charged_turn)) &&
+                same_grant(grant_of(place_time(charged_own_place)), grant_of(&charged_own_units)) &&
+                charged_place != NULL && is_object(&objects_after, v2p(charged)) &&
+                same_grant(grant_of(place_time(charged_place)), grant_of(&charged_units));
+    bool exact = kept && (sched_trace_clock == clock_before || call_op == OP_TEST_TICK);
+    bool ran_out = charged_open && core_self()->turn_from != charged_from &&
+                   charged_up_to(sched_trace_clock) >= charged_vt + charged_room;
+    for (size_t i = 0; i < objects_after.n; i++) {
+        const struct obj_header *o = p2v(objects_after.v[i].at);
+        if (o->type != CAP_THREAD) {
+            continue;
+        }
+        const struct thread *t = (const struct thread *)o;
+        const struct thread_rec *was = thread_before(objects_after.v[i].at);
+        for (uint32_t k = 0; k < thread_places(t); k++) {
+            const struct place *p = thread_place(t, k);
+            uint32_t more = p->overruns - (was != NULL ? was->overruns[k] : 0);
+            bool own = p == charged_own_place, loose = own ? charged_open && !exact : false;
+            for (uint32_t c = 0; c < CORES; c++) {
+                loose |= c != core_index() && p == turns_own[c];
+            }
+            if (more != (own && exact && ran_out ? 1u : 0u) && !(loose && more <= 1)) {
+                violated("a place counted overruns otherwise than as a charge reached a request's end");
+            }
+        }
+    }
+}
+
+/*
  * A wait or a lend that went through, returned or blocked, leaves its caller's requests due within the span it gave,
  * on every core whose time it holds, and one that gave none, or was refused, leaves them as they were;
  * see sched.c, "Requests".
@@ -1158,6 +1202,7 @@ void history_begin(bool call)
     for (uint32_t c = 0; c < CORES; c++) {
         const struct thread *payer = cores[c].payer != NULL ? cores[c].payer : cores[c].turn;
         paying[c] = payer != NULL ? place_on(payer, c) : NULL;
+        turns_own[c] = cores[c].turn != NULL ? place_on(cores[c].turn, c) : NULL;
     }
     charged_place = charged != NULL ? place_on(charged, core_index()) : NULL;
     charged_units = charged_place != NULL ? *place_time(charged_place) : (struct cap){ 0 };
@@ -1276,6 +1321,7 @@ void history_end(void)
     check_lends();
     check_spans();
     check_vtimes();
+    check_overruns();
     check_stops();
     check_describe();
     check_room();

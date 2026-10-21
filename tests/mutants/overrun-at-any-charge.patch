@@ -1,0 +1,19 @@
+Every charge of a request still open counts an overrun, not only the one that reaches its end.
+A thread charged twice within one request, as at a bind or a wait's span, would count overruns it never ran.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
+Report: a place counted overruns otherwise than as a charge reached a request's end
+Witness: fuzz lend-chain-of-two
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -383,7 +383,7 @@ static uint64_t turn_vtime(const struct core *core, const struct place *p, uint6
+         return p->vt;
+     }
+     uint64_t cost = units_divide((now - core->turn_from) * TIME_UNITS + units - 1, units);
+-    if (room != 0 && cost >= room) {
++    if (room != 0) {
+         own->overruns++;
+     }
+     return cost < bound - p->vt ? p->vt + cost : bound;

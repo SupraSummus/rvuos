@@ -9,7 +9,7 @@ Witness: fuzz-smp2 cores-lend-charges-first
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -928,7 +928,7 @@ void sched_lend(struct thread *t, struct notification *ntfn, struct thread *borr
+@@ -936,7 +936,7 @@ void sched_lend(struct thread *t, struct notification *ntfn, struct thread *borr
       * The turn is charged first: the borrower may start a request on the units that pay for it,
       * which brings their virtual time up to the clock, and counts it ran before that are its to pay as they stood.
       */

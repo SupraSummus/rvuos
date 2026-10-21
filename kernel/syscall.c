@@ -541,6 +541,13 @@ static int op_thread(struct thread *t, const struct cap *cap, uint32_t op, uint3
         }
         frame_fault(&target->frame, &arg[1]);
         return KERR_OK;
+    case OP_THREAD_OVERRUNS:
+        arg[1] = 0;
+        for (uint32_t i = 0; i < thread_places(target); i++) {
+            LOOP_BOUND(CORES);
+            arg[1] += thread_place(target, i)->overruns;
+        }
+        return KERR_OK;
     case OP_THREAD_READ_REG:
         /* A stopped thread's frame is still until it runs; any other's is the scheduler's or the call's. */
         if (target->state != THREAD_STOPPED) {
@@ -1014,7 +1021,8 @@ static void trace_call(uint32_t op, uint32_t slot, const uint32_t *arg, int stat
 
 /*
  * The results of a describing call, after its line, so that the replay compares its answers as well:
- * OP_CAP_INFO's four words and OP_POOL_INFO's two, as a3 and a4 are what its caller left there.
+ * OP_CAP_INFO's four words, OP_POOL_INFO's two, as a3 and a4 are what its caller left there,
+ * and OP_THREAD_OVERRUNS's one, beside the zero its a2 must be.
  * Out of line, and only under tracing, so that the call's own path saves no more registers for it.
  */
 static __attribute__((noinline)) void trace_info(uint32_t op, const uint32_t *arg)
@@ -1173,6 +1181,7 @@ static const struct op_shape op_shapes[OP_COUNT] = {
     [OP_THREAD_STOP] = { CAP_THREAD, RIGHT_W, 0 },
     [OP_THREAD_WATCH] = { CAP_THREAD, RIGHT_W, SHAPE_A1 | SHAPE_A2 | SHAPE_VARIES },
     [OP_THREAD_FAULT] = { CAP_THREAD, RIGHT_W, 0 },
+    [OP_THREAD_OVERRUNS] = { CAP_THREAD, RIGHT_R, 0 },
     [OP_THREAD_READ_REG] = { CAP_THREAD, RIGHT_W, SHAPE_A1 },
     [OP_THREAD_WRITE_REG] = { CAP_THREAD, RIGHT_W, SHAPE_A1 | SHAPE_A2 },
     [OP_NOTIFY_SIGNAL] = { CAP_NOTIFICATION, RIGHT_W, SHAPE_A1 },
@@ -1360,7 +1369,7 @@ void syscall_dispatch(struct thread *t)
 
     if (traced) {
         trace_call(op, in[0], in, err);
-        if ((op == OP_CAP_INFO || op == OP_POOL_INFO) && err == KERR_OK) {
+        if ((op == OP_CAP_INFO || op == OP_POOL_INFO || op == OP_THREAD_OVERRUNS) && err == KERR_OK) {
             trace_info(op, arg);
         }
         trace_wake();

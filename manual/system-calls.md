@@ -312,9 +312,10 @@ With `OP_PROCESS_MOUNT` and `OP_CAP_MOVE` a process moves to another table, sect
 
 ### 6.8 Operations on `Thread`
 
-All need `RIGHT_W` on the thread,
+All but `OP_THREAD_OVERRUNS` need `RIGHT_W` on the thread,
 and `OP_THREAD_CONFIGURE`, `OP_THREAD_RESUME`, `OP_THREAD_READ_REG` and `OP_THREAD_WRITE_REG` a stopped thread (`KERR_STATE`),
 which `OP_THREAD_STOP` makes of any.
+`OP_THREAD_OVERRUNS` needs `RIGHT_R`, which allows nothing else.
 `RIGHT_X` on a thread allows nothing here: it lends the thread time, `OP_NOTIFY_LEND`.
 
 **`OP_THREAD_CONFIGURE` (12).**
@@ -376,6 +377,15 @@ A status with `MSTKERR` or `STKERR` says the core could not stack the thread's r
 so `r0` to `r3`, `r12`, `lr`, the pc and `xpsr` hold what its last trap left.
 `KERR_STATE` unless the thread is stopped where it faulted:
 a resume or a configure since, or no fault at all, leaves nothing to tell.
+
+**`OP_THREAD_OVERRUNS` (47).**
+`a1`, `a2` and `a3` = 0, else `KERR_INVALID_ARG`.
+Returns `a1` = how many of the thread's requests it ran to the end of without waiting, section 5.11,
+on every core it holds the time of, modulo 2^32: a reader takes differences.
+A thread whose units fit its work runs none out, whatever the other threads do.
+A request runs out as the kernel charges the turn past its end:
+at the timer while another thread wants the core, else at the thread's next wait or change of turn.
+One on lent time counts as the borrower's.
 
 **`OP_THREAD_READ_REG` (34).**
 `a1` = the register: `x0` to `x31` on RISC-V, where `x0` reads zero, `r0` to `r14` on ARM,
@@ -669,8 +679,9 @@ whether something outside the pool still holds its objects it does not tell.
 | 44 | `OP_ROUTE_BIND` | `RouteLine` |
 | 45 | `OP_ROUTE_END` | `Route` |
 | 46 | `OP_ROUTE_SET` | `Route` |
+| 47 | `OP_THREAD_OVERRUNS` | `Thread` |
 
-`OP_COUNT` is 47, one above the highest code.
+`OP_COUNT` is 48, one above the highest code.
 
 ## 7. What the root task starts with
 

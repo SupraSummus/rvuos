@@ -241,6 +241,7 @@ struct place {
     paddr_t queue_prev;
     paddr_t thread;     /* the thread it is a place of */
     uint32_t deadline;  /* the count its thread's request on the core is due by, modulo 2^32; see sched.c, "Requests" */
+    uint32_t overruns;  /* the requests it held that its thread ran to the end of without waiting; see OP_THREAD_OVERRUNS */
     uint8_t queue;      /* the scheduler's queue it waits on, one of QUEUE_*, while its thread is READY and not running */
     uint8_t core;       /* the core whose queue that is, while it waits on one */
     uint8_t index;      /* its place among its thread's */
@@ -366,7 +367,7 @@ _Static_assert(sizeof(struct pool) == 48, "object layout");
 _Static_assert(sizeof(struct process) == NODE_ROUND(12 + PROCESS_CSRS_SIZE) + 16 * PROCESS_TABLES, "object layout");
 _Static_assert(sizeof(struct thread) == NODE_ROUND(40 + sizeof(struct trap_frame)) + 2 * sizeof(struct cap),
                "object layout");
-_Static_assert(sizeof(struct place) == 28, "object layout");
+_Static_assert(sizeof(struct place) == 32, "object layout");
 _Static_assert(sizeof(struct notification) == 16, "object layout");
 _Static_assert(sizeof(struct irq) == 48, "object layout");
 _Static_assert(sizeof(struct route) == 64, "object layout");

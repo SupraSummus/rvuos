@@ -167,6 +167,22 @@ static inline uint32_t rv_thread_stop(uint32_t thread_cap, uint32_t *was)
     return r_a0;
 }
 
+/* OP_THREAD_OVERRUNS: how many of the thread's requests it ran to the end of without waiting, modulo 2^32. */
+static inline uint32_t rv_thread_overruns(uint32_t thread_cap, uint32_t *overruns)
+{
+    register uint32_t r_a0 __asm__(RV_A0) = thread_cap;
+    register uint32_t r_a1 __asm__(RV_A1) = 0;
+    register uint32_t r_a2 __asm__(RV_A2) = 0;
+    register uint32_t r_a3 __asm__(RV_A3) = 0;
+    register uint32_t r_a7 __asm__(RV_A7) = OP_THREAD_OVERRUNS;
+    __asm__ volatile(RV_CALL
+                     : "+r"(r_a0), "+r"(r_a1)
+                     : "r"(r_a2), "r"(r_a3), "r"(r_a7)
+                     : "memory", RV_A4, RV_A5, RV_A6);
+    *overruns = r_a1;
+    return r_a0;
+}
+
 /* OP_THREAD_WATCH: the bits the thread's faults signal on a notification; bits = 0 clears the watch. */
 static inline uint32_t rv_thread_watch(uint32_t thread_cap, uint32_t ntfn_cap, uint32_t bits)
 {

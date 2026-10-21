@@ -1,0 +1,13 @@
+# The root runs on spare time alone, and thread 2 on one unit at a span of 2^16 counts, a request of 2^10 counts of running,
+# which a step it runs, a millisecond, runs out. That leaves its virtual time more than a span past the clock,
+# so it runs on spare time, in no request, until the clock comes within a span of it a step later: two of its three steps.
+actor 1 OP_TIME_BIND slot BOOT_CAP_TIME a1 REPLAY_CAP_THREAD a2 16 a3 1 a4 0x10000
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 1 OP_THREAD_OVERRUNS slot REPLAY_CAP_THREAD
+# RIGHT_R alone reads them; RIGHT_W alone may not.
+actor 1 OP_CAP_COPY slot BOOT_CAP_CAPTABLE a1 REPLAY_CAP_FREE a2 REPLAY_CAP_THREAD a3 RIGHT_R
+actor 1 OP_CAP_COPY slot BOOT_CAP_CAPTABLE a1 REPLAY_CAP_FREE+1 a2 REPLAY_CAP_THREAD a3 RIGHT_W
+actor 1 OP_THREAD_OVERRUNS slot REPLAY_CAP_FREE
+actor 1 OP_THREAD_OVERRUNS slot REPLAY_CAP_FREE+1

@@ -117,6 +117,8 @@ grep -q 'root: requests ok' "$text" \
     || fail "a request due before the turn's next waited past the end of the turn's request"
 grep -q 'root: spans ok' "$text" \
     || fail "a thread woken within the span its wait gave waited for a turn due later"
+grep -q 'root: overruns ok' "$text" \
+    || fail "a driver on units enough for its work ran a request out, or one on too few did not"
 grep -q 'root: lend chain ok' "$text" \
     || fail "the end of a chain of lenders did not run on its head's time, or ran without it"
 grep -q 'the idle line stays quiet: ok' "$text" \

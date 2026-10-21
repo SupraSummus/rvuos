@@ -263,6 +263,10 @@ the thread the turn is charged to, its payer while it runs on lent time, pays `T
 for each count the turn ran, up to the end of its request, once the call charges the turn, which it need not;
 a request it starts after brings its virtual time up to the clock, and nothing else moves it.
 
+**A charge counts overruns.**
+A thread's count of overruns moves only as a charge reaches the end of a request it holds.
+Under tracing that is exactly where `charged_up_to` says the call's charge of the turn reaches it.
+
 **A thread lends by its own wait.**
 A thread comes to lend its time to another only by its own lending wait,
 through a capability to that thread with the right to lend;

@@ -362,23 +362,30 @@ static uint64_t units_divide(uint64_t n, uint32_t units)
  * and past that, or with none open, for a turn on its own units' place, on spare time, up to a span past the count:
  * a thread that runs on spare time falls no further behind the threads that wait,
  * and runs at most a span ahead of the count for it, which its next request starts from.
+ * A charge that reaches the end of the request open on it counts an overrun in the turn's own place, which holds the request.
  */
 static uint64_t turn_vtime(const struct core *core, const struct place *p, uint64_t now)
 {
-    const struct place *own = turn_own(core);
+    struct place *own = turn_own(core);
     uint32_t units = place_units(p);
     if (own == NULL || units == 0 || now <= core->turn_from) {
         return p->vt;
     }
     uint64_t bound = p == own ? now + place_span(p) : p->vt;
+    /* What is left of the request open on p, from one count to its span, so 0 for none. */
+    uint32_t room = 0;
     if (request_open(p, own)) {
-        uint64_t end = p->vt + (uint32_t)(own->deadline - (uint32_t)p->vt);
+        room = own->deadline - (uint32_t)p->vt;
+        uint64_t end = p->vt + room;
         bound = end > bound ? end : bound;
     }
     if (p->vt >= bound) {
         return p->vt;
     }
     uint64_t cost = units_divide((now - core->turn_from) * TIME_UNITS + units - 1, units);
+    if (room != 0 && cost >= room) {
+        own->overruns++;
+    }
     return cost < bound - p->vt ? p->vt + cost : bound;
 }
 

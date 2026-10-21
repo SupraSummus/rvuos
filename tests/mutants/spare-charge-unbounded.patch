@@ -10,12 +10,12 @@ Witness: fuzz bind-turn-later
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -370,7 +370,7 @@ static uint64_t turn_vtime(const struct core *core, const struct place *p, uint6
+@@ -372,7 +372,7 @@ static uint64_t turn_vtime(const struct core *core, const struct place *p, uint6
      if (own == NULL || units == 0 || now <= core->turn_from) {
          return p->vt;
      }
 -    uint64_t bound = p == own ? now + place_span(p) : p->vt;
 +    uint64_t bound = p == own ? COUNT_NEVER : p->vt;
+     /* What is left of the request open on p, from one count to its span, so 0 for none. */
+     uint32_t room = 0;
      if (request_open(p, own)) {
-         uint64_t end = p->vt + (uint32_t)(own->deadline - (uint32_t)p->vt);
-         bound = end > bound ? end : bound;

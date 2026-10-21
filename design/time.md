@@ -248,6 +248,18 @@ so a thread whose account was full would be due before every thread whose was no
 A thread whose bursts outrun its units waits for them, by its own span at most,
 and one that needs a burst is given the units for it, or spare time.
 
+**The kernel counts a thread's overruns.**
+Whether a thread's units fit its work is what the promise above rests on, and only the thread knows its work,
+so `OP_THREAD_OVERRUNS` tells it, or a watcher holding the thread with `RIGHT_R`,
+how many of its requests it ran to the end of without waiting.
+A thread whose units fit its work waits within every request, so a count that grows says they do not.
+It counts requests, not switches: a switch the thread did not ask for may be a thread due first, which is the order working,
+and a thread alone on spare time runs its requests out with no switch at all, until the core is busy.
+The charge that reaches a request's end counts it, in the place holding the request, so a borrower counts what it runs on lent time.
+The count wraps rather than saturating, so that every reader takes differences of its own and none resets it;
+it needs reading once in 2^32 requests, each at least a trap.
+`RIGHT_R` guards it since a count that grows as a thread spins is a clock; see "Reading the time".
+
 **A bind keeps the virtual time, and so do the units.**
 A place bound to other units keeps its virtual time, and takes the latest of its own and the units':
 each unit keeps the virtual time of the place that earned it last, `unit_vt`, as the place leaves it,

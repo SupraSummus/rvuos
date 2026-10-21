@@ -9,7 +9,7 @@ Witness: fuzz-smp2 cores-lend-span-charges
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -663,9 +663,6 @@ void sched_bind(struct place *p, uint32_
+@@ -682,9 +682,6 @@ void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights,
  void sched_span(struct thread *t, uint32_t span)
  {
      bool turn = is_turn(t);

@@ -69,7 +69,7 @@ Rights are three bits:
 
 | Bit | Value | Frame, Untyped | Other types |
 |---|---|---|---|
-| `RIGHT_R` | 1 | read | `Notification`: wait |
+| `RIGHT_R` | 1 | read | `Notification`: wait; `Thread`: read its overruns |
 | `RIGHT_W` | 2 | write | control the object: allocate, install, configure, signal, set, bind, copy or move into a table; `Print`: write into the log; `Halt`: halt the machine; `Test`: drive it as a test does |
 | `RIGHT_X` | 4 | execute | `Time`: the threads bound through it run on spare time |
 
@@ -769,6 +769,8 @@ and moves `taken` only as far as its host says it has the bytes, so a halt write
   A request shorter than that switch runs nothing of its own.
   So a thread on an event's way earns the units for its work and its switch,
   that work measured while no other thread takes the core from it, since a cycle counter a process's threads share counts them all.
+- `OP_THREAD_OVERRUNS`, with `RIGHT_R` on a thread, tells how many of its requests it ran to the end of without waiting.
+  A thread whose units fit its work runs none out, whatever the other threads do, so a count that grows says they do not.
 - A system call is never interrupted:
   machine mode runs with interrupts off from the trap to the return.
   On several cores one call runs at a time, whichever core makes it, and another core's call waits for it.

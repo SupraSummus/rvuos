@@ -58,7 +58,7 @@ abbrev opCapRevoke : Nat := 23
 abbrev opCapDerive : Nat := 24
 abbrev opUntypedSplit : Nat := 30
 abbrev opCapInfo : Nat := 41
-abbrev opCount : Nat := 47
+abbrev opCount : Nat := 48
 
 /-! Slot numbers, `SLOT_TABLE_SHIFT` and `PROCESS_TABLES`. -/
 abbrev slotTableShift : Nat := 10
@@ -114,6 +114,7 @@ def shapeOf : Nat → Shape
   | 33 => ⟨capThread, rightW, 0⟩
   | 34 => ⟨capThread, rightW, shapeA1⟩
   | 35 => ⟨capThread, rightW, shapeA1 ||| shapeA2⟩
+  | 47 => ⟨capThread, rightR, 0⟩
   | 14 => ⟨capNotification, rightW, shapeA1⟩
   | 15 => ⟨capNotification, rightR, shapeA1⟩
   | 38 => ⟨capNotification, rightR, shapeA1 ||| shapeA2⟩
