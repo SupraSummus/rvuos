@@ -219,8 +219,8 @@ void mac_rx_base_init(uint32_t base)
  * power tables, ER SU, the transmitting minimum power, the broadcast RU, the UORA contention window, multi-BSSID and
  * the co-hosted BSS mask -- and each call keeps the argument their start passed.
  * Of the words it writes itself, the two that read as something are their table at 0x600a55f0, cleared, and the
- * transmitting minimum power's own word, 0x600a4400, whose bits 4 to 9 their minimum-power call sets to -11 and
- * where this group ors bit 17; three more name their library function, COLOR_BITMAP, COLOR_ISR and BEACON_CRC,
+ * transmit minimum power's word, `MAC_TX_MIN_PWR` 0x600a4400, whose bits 4 to 9 their minimum-power call sets to -11
+ * and where this group ors bit 17; three more name their library function, COLOR_BITMAP, COLOR_ISR and BEACON_CRC,
  * and the rest carry the offset they were reached at, since which bit is which is not known.
  */
 #define HE_CTRL     0x600a4c80u /* cleared before the calls and set after them, whatever it gates */
@@ -230,7 +230,6 @@ void mac_rx_base_init(uint32_t base)
 #define HE_HAL_C88  0x600a4c88u
 #define HE_HAL_CBC  0x600a4cbcu
 #define BEACON_CRC (MAC_BASE + 0x2d4u) /* what their pwr_hal_set_beacon_filter_frame_crc_state sets, the ROM's */
-#define HE_TX_MIN   (MAC_BASE + 0x400u)
 #define HE_TABLE    0x600a55f0u /* their table, cleared */
 #define HE_TABLE_END 0x600a57d0u
 
@@ -444,12 +443,12 @@ static void mac_init_tb_tx(void)
 }
 
 /*
- * The libraries' hal_set_tx_min_pwr, written out: HE_TX_MIN's bits 4 to 9 given the argument's low six bits raised
- * by four, -11 for the start's call giving 0x350.
+ * The libraries' hal_set_tx_min_pwr, written out: MAC_TX_MIN_PWR's bits 4 to 9 given the argument's low six bits
+ * raised by four, -11 for the start's call giving 0x350.
  */
 static void mac_set_tx_min_pwr(int pwr)
 {
-    wr(HE_TX_MIN, (rd(HE_TX_MIN) & ~0x3f0u) | (((uint32_t)pwr << 4) & 0x3f0u));
+    wr(MAC_TX_MIN_PWR, (rd(MAC_TX_MIN_PWR) & ~0x3f0u) | (((uint32_t)pwr << 4) & 0x3f0u));
 }
 
 /*
@@ -560,7 +559,7 @@ void mac_he_init(void)
     uint8_t uora = 0x2b;
     mac_he_set_bcast_ru(0x7fd, 0, 0);
     mac_he_set_uora_parameter(&uora);
-    wr(HE_TX_MIN, rd(HE_TX_MIN) | 0x20000u);
+    wr(MAC_TX_MIN_PWR, rd(MAC_TX_MIN_PWR) | 0x20000u); /* the HE group's bit 17 */
     wr(MAC_CONF(0), rd(MAC_CONF(0)) & ~0x100u);
     wr(MAC_CONF(0), rd(MAC_CONF(0)) & ~0x20000u);
     mac_he_clr_multi_bssid();

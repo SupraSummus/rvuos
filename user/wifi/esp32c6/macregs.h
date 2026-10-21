@@ -64,6 +64,17 @@
 #define BSSID_HI_POLICY     0x40000000u         /* cleared by the policy, beside BSSID_FLAG, which it sets */
 
 /*
+ * The transmit minimum power's word, 0x600a4400, which the PHY and the MAC share:
+ * the libraries' hal_set_tx_min_pwr gives bits 4 to 9 the minimum power, -11 in their start,
+ * and their HE group ors bit 17 in, both in macstart.c;
+ * the PHY's mac_tx_chan_offset_new gives bits 0 to 1 the channel's offset, 2 for channel 2 and 1 for channel 3.
+ * Bits 4 to 9 are inferred from macstart.c and bits 0 to 1 from mac_tx_chan_offset_new's disassembly,
+ * whose ROM counterpart mac_tx_chan_offset [0x40004dbe] also sets bit 0 for channel 2.
+ * What the word's other bits are is not known.
+ */
+#define MAC_TX_MIN_PWR (MAC_BASE + 0x400u)
+
+/*
  * The HE words macstart.c's mac_he_init and mac.c's station both write.
  * MAC_CONF's and HE_MULTI_BSSID's come in two instances, 0xc apart, with the same fields:
  * their hal_he_set_bss_color and hal_he_bssid_deinit take the instance's index, 0 or 1, and write MAC_CONF(i),

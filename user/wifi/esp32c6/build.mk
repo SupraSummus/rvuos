@@ -193,16 +193,20 @@ mac-replay-test: $(MAC_REPLAY_TEST)
 
 # libphy.a's functions the driver's own, in phy.c, replace: weakened in a copy, so that the driver's take their
 # place; the copy is made again when this file, which names them, changes.
-WIFI_ESP_PHY_OWN := phy_get_xtal_freq tsens_read_init_new pwdet_reg_init_new open_i2c_xpd_new phy_xpd_rf \
+WIFI_ESP_PHY_OWN := phy_get_xtal_freq tsens_read_init_new tsens_dac_to_index tsens_dac_cal_new \
+                    ram_tsens_temp_read_new phy_get_tsens_value tsens_temp_read_new get_temp_init_new \
+                    pwdet_reg_init_new open_i2c_xpd_new phy_xpd_rf \
                     phy_wifi_enable_set phy_set_tsens_power phy_xpd_tsens phy_get_max_pwr wait_i2c_sdm_stable \
                     phy_close_rf set_rx_comp_new write_gain_mem_new phy_i2c_master_mem_txcap set_freq_i2c \
                     wifi_get_tx_tab wifi_set_tx_gain phy_set_most_tpw chan14_mic_cfg wr_rx_gain_mem \
-                    chip_v7_set_chan phy_change_channel \
+                    chip_v7_set_chan chip_v7_set_chan_offset phy_change_channel \
+                    mac_tx_chan_offset_new phy_rx_table_init \
                     i2c_clk_sel i2c_bbpll_set reg_set_new freq_reg_init bias_reg_set \
                     noise_floor_auto_set_new bt_filter_reg_new pbus_clear_reg phy_i2c_init2 filter_dcap_set \
                     freq_get_i2c_data freq_i2c_write_set_new freq_i2c_mem_write_new freq_i2c_data_write_new \
                     rx_11b_opt tx_paon_set_new agc_reg_init_new bb_reg_init_new btbb_wifi_bb_cfg2 phy_reg_init \
-                    phy_wakeup_init read_rf_freq_mem_new pll_cap_mem_update_new phy_rfpll_cap_correct_new \
+                    phy_wakeup_init rf_init bb_init phy_i2c_init1 phy_i2c_master_cmd_mem_init \
+                    read_rf_freq_mem_new pll_cap_mem_update_new phy_rfpll_cap_correct_new \
                     phy_rfpll_cap_init_cal_new phy_wait_freq_set_busy_new phy_en_hw_set_freq_new \
                     phy_dis_hw_set_freq_new phy_rfpll_cap_track_new ram_temp_to_power txpwr_cal_track \
                     bt_track_tx_power wifi_track_tx_power tx_i2c_track gen_rx_gain_table_new \
@@ -210,7 +214,21 @@ WIFI_ESP_PHY_OWN := phy_get_xtal_freq tsens_read_init_new pwdet_reg_init_new ope
                     rxdc_est_min_new pbus_rx_dco_cal_1step_new rx_pbus_reset set_rx_gain_table \
                     txdc_cal_pwdet txdc_cal_pwdet_init txdc_cal_new \
                     txiq_cover_new rfcal_txiq_new txiq_cal_init_new phy_cal_param_track force_txrx_off \
-                    phy_param_track_tot
+                    phy_param_track_tot \
+                    phy_get_rf_cal_version phy_get_mac_addr get_iq_value phy_set_mac_data \
+                    phy_rfcal_data_sub rf_cal_data_recovery rf_cal_data_backup \
+                    phy_rfcal_data_check phy_rfcal_data_check_value \
+                    rc_cal_init rc_cal_new i2c_rc_cal_set \
+                    wr_rf_freq_mem_new save_pbus_reg write_pbus_mem set_pbus_mem rfpll_chgp_cal \
+                    get_rf_freq_init_new set_chan_freq_hw_init \
+                    phy_get_romfunc_addr \
+                    ram_set_chan_cal_interp ram_bb_bss_cbw40 ram_set_chan_freq_sw_start \
+                    ram_get_i2c_read_mask ram_get_i2c_mst0_mask ram_get_i2c_hostid \
+                    ram_chip_i2c_readReg_org ram_pbus_force_mode ram_pbus_rd_addr ram_pbus_rd_shift \
+                    ram_pbus_xpd_rx_on ram_pbus_xpd_tx_on ram_set_loopback_gain ram_txcal_debuge_mode \
+                    ram_pwdet_tone_start ram_pwdet_wait_idle ram_read_sar_dout \
+                    ram_start_tx_tone_step ram_stop_tx_tone ram_rfpll_set_freq ram_bb_gain_index \
+                    phy_i2c_enter_critical phy_i2c_exit_critical
 
 $(BUILD)/$(WIFI_ESP)/libphy.a: $(WIFI_ESP_INIT) $(WIFI_ESP)/build.mk
 	$(OBJCOPY) $(addprefix --weaken-symbol=,$(WIFI_ESP_PHY_OWN)) $(PHYBLOB_CACHE)/libphy.a $@
