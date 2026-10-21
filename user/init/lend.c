@@ -33,7 +33,8 @@ static void link_main(uint32_t i)
 /*
  * Lent time goes on through a chain of lenders, a first lender with no time for its borrower lending what it borrows;
  * see DESIGN.md, "Scheduling".
- * The links start on spare time, so each can make its lend, and then lose it:
+ * The links start on spare time, so each can make its lend, and then lose it;
+ * they start from the end, so that the next is there whenever spare time runs one:
  * the head earns an eighth of the processor without spare time and the rest earn nothing,
  * so the end of the chain runs only on the head's time, fifteen lenders up, an eighth of each span,
  * each time the release finds that time come again through the chain, and stops once the head earns none.
@@ -48,7 +49,7 @@ void lend_demo(uint32_t data_base, uint32_t data_size)
     expect("allocate what the lenders wait on",
            rv_pool_alloc(SLOT_POOL, CAP_NOTIFICATION, SLOT_IN(CHAIN_TABLE, CHAIN_NTFN), 0));
     uint32_t stacks = data_base + data_size / 4 - (SPINNERS + 1) * SPINNER_STACK;
-    for (uint32_t i = 0; i < CHAIN; i++) {
+    for (uint32_t i = CHAIN; i-- > 0;) {
         uint32_t link = SLOT_IN(CHAIN_TABLE, LINK(i));
         expect("allocate a link", rv_thread_alloc(SLOT_POOL, link, BOOT_CAP_PROCESS, 1));
         expect("configure it", rv_invoke(OP_THREAD_CONFIGURE, link, (uint32_t)&link_main, stacks - i * LINK_STACK, i));
