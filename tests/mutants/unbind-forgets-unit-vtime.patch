@@ -1,0 +1,19 @@
+An unbind leaves its units' time where it was before the place earned them.
+A thread that ran ahead of its units would shed it by an unbind and a bind of the same units;
+no unbind puts back a unit's time.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a call put a unit's virtual time back
+Witness: fuzz lend-lender-unbound
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -677,7 +677,6 @@ void sched_unbind(struct cap *bound)
+     for (uint32_t i = 0; i < range_count(bound); i++) {
+         LOOP_BOUND(TIME_UNITS);
+         unit_place[range_first(bound) + i] = 0;
+-        unit_vt[range_first(bound) + i] = p->vt;
+     }
+     *bound = (struct cap){ 0 };
+     /* An empty place holds no time, so settling takes it off its queue. */

@@ -69,7 +69,7 @@
 #define CAP_CLOCK    11 /* the machine's time, the counter's frame, and its watchdog */
 #define CAP_TIME     12 /* a range of the processor's units of time; no kernel object behind it */
 #define CAP_HALT     13 /* halting the machine */
-#define CAP_TEST     14 /* driving the machine as a test does: tracing, ticking, interrupting, preempting */
+#define CAP_TEST     14 /* driving the machine as a test does: tracing, moving the clock, interrupting, preempting */
 #define CAP_ROUTE_LINE 15 /* a range of the router's channels; no kernel object behind it */
 #define CAP_ROUTE    16 /* one channel, wiring an event of one device to a task of another */
 
@@ -92,7 +92,7 @@
  * Route: RIGHT_W to connect its ends and to arm it.
  * Print: RIGHT_W to write into the kernel's log.
  * Halt: RIGHT_W to halt the machine.
- * Test: RIGHT_W to drive the machine as a test does: trace, tick, interrupt, preempt.
+ * Test: RIGHT_W to drive the machine as a test does: trace, move the clock, interrupt, preempt.
  *   Three types, so that a child that only prints holds nothing that halts or drives the machine,
  *   and a supervisor that may halt nothing that drives it.
  * Clock: RIGHT_R to read the time, and the counter through a frame,
@@ -124,26 +124,26 @@
  * From then on the kernel prints every system call with its status,
  * and the results of a describing one, see OP_CAP_INFO,
  * and runs the invariant checker after each one.
- * The timer tick stops preempting,
+ * The timer stops preempting, and the clock moves only by OP_TEST_TICK from where the counter was,
  * because a transcript the host build must reproduce
  * cannot contain a switch that lands between two instructions.
- * Every thread's account is filled, see OP_TIME_BIND,
- * so that the host build starts from the same accounts.
+ * Every virtual time is brought to the clock, see OP_TIME_BIND,
+ * so that the host build starts from the same.
  * It cannot be turned off again, so a traced program cannot hide,
  * and once it is on the call changes nothing.
  * A kernel built without the self-check, every board's but QEMU virt's by default, fails it with KERR_WRONG_TYPE.
  */
 #define OP_TEST_TRACE 10
 /*
- * Test (RIGHT_W): what the timer tick does, on request.
- * Time moves by one tick, charged to the caller while it has time,
- * every timer line that is due signals, a thread whose account reached a tick has time again,
- * and the caller's turn ends: it goes to the back of the queue its account puts it on,
+ * Test (RIGHT_W): what the timer does, on request, a step of the clock on.
+ * The clock moves a millisecond of the counter's counts, charged to the caller as it ran,
+ * every timer line that is due signals, a thread whose virtual time came has time again,
+ * and the caller's turn ends: it goes to the back of the queue its virtual time puts it on,
  * the next thread has its turn, and the caller stays ready.
- * Works while tracing is on, unlike the tick itself;
+ * Works while tracing is on, unlike the timer itself;
  * see DESIGN.md, "Verification".
  * Fails with KERR_STATE while tracing is off,
- * since a tick no time brought would have every deadline fire early.
+ * since a step no time brought would have every deadline fire early.
  */
 #define OP_TEST_TICK 17
 /*
@@ -160,12 +160,12 @@
  */
 #define OP_TEST_IRQ 22
 /*
- * Test (RIGHT_W): a tick landing within a restartable call, on request. a1 = n.
+ * Test (RIGHT_W): a step of the clock landing within a restartable call, on request. a1 = n.
  * The n-th place from now at which any restartable call could stop between two steps, it stops,
  * interrupt pending or not, and does what OP_TEST_TICK does,
  * so another thread may run before the caller makes its call again. Zero disarms it.
  * It is how a replay has a thread run while another's call is half done,
- * since under tracing the tick stops no call; see DESIGN.md, "Verification".
+ * since under tracing the timer stops no call; see DESIGN.md, "Verification".
  * Fails with KERR_STATE while tracing is off, as OP_TEST_TICK does.
  */
 #define OP_TEST_PREEMPT 32
@@ -383,10 +383,10 @@
  * and takes the bits signalled meanwhile unless another waiter took them,
  * or a watcher answers it, writing a0, a1 and the pc past the call with OP_THREAD_WRITE_REG.
  * The caller may stop itself, through a capability to its own thread; once resumed, it goes on past its call.
- * The thread keeps its process, its watch, its units and its account, which goes on filling, as at a fault,
+ * The thread keeps its process, its watch, its units and its virtual time, as at a fault,
  * and the threads that lend it their time go on waiting, lending it nothing while it is stopped.
  * A turn it pays for, lent to another thread, runs on, charged to it, until it ends,
- * at the next tick or as that thread waits, as one whose payer another core or an interrupt woke does.
+ * at its request's end or as that thread waits, as one whose payer another core or an interrupt woke does.
  * It signals nothing, the watch included: a stop by another thread is known to the one that made it,
  * and a thread that stops itself says so first by its own means.
  * See DESIGN.md, "Threads".
@@ -461,6 +461,13 @@
 #define OP_NOTIFY_SIGNAL 14
 /*
  * Notification (RIGHT_R): take the bits that are set.
+ * a1 = the span of the request the wake begins: the counts of the counter past the thread's virtual time it is due,
+ * on each core whose time it holds, as OP_TIME_BIND's a4 is, a power of two up to 2^SPAN_MAX, else KERR_INVALID_ARG;
+ * 0 keeps the span its binding or its last wait gave.
+ * A span holds for the requests after that one too, until another.
+ * So a thread says at each wait how soon what wakes it must be done:
+ * woken while its virtual time is at or behind the clock, it runs units / TIME_UNITS of the span within the span;
+ * see DESIGN.md, "Scheduling".
  * Returns a1 = the bits, which is never zero, and clears them.
  * Blocks until some bit is set;
  * the bits are sticky, so a signal that arrives first is not lost.
@@ -470,13 +477,16 @@
 /*
  * Notification (RIGHT_R): wait as OP_NOTIFY_WAIT does, lending a thread the caller's time meanwhile.
  * a1 = the slot of a Thread capability with RIGHT_X, the borrower; the caller itself fails with KERR_INVALID_ARG.
+ * a2 = the span, as OP_NOTIFY_WAIT's a1, which the borrower's requests on the caller's time take too,
+ * so a client says how soon its server must answer.
  * Returns a1 = the bits, at once if some bit is set, which lends nothing.
- * While it waits, a borrower without time of its own on a core runs there on the account of the thread
+ * While it waits, a borrower without time of its own on a core runs there on the units of the thread
  * that has lent it time longest, if that one holds the time of that core too,
  * and a caller whose own time pays for its turn hands the rest of the turn to the borrower,
  * if it is that one and the borrower waits for a turn.
  * A signal from the borrower that wakes the caller hands the rest of the turn back, see OP_NOTIFY_SIGNAL.
- * The time goes one step, to the borrower, never on to whatever the borrower waits for or lends to.
+ * A borrower that lends in turn, without time for its own borrower, passes on what it borrows, through up to 3 lenders,
+ * on a core every one of them holds the time of.
  * A caller whose borrower is destroyed wakes with KERR_INVALID_CAP and no bits, as one whose notification is.
  * A stop takes the caller off its notification and its borrower's lenders and leaves it at this call,
  * which a resume makes again, looking the borrower up afresh; see OP_THREAD_STOP.
@@ -537,13 +547,13 @@
  * a1 = 0 masks the line and takes back no signal that already happened.
  * LOG_IRQ_LINE is level: a set that arms it while the log holds bytes
  * the reader has not taken signals at once.
- * A timer line fires once the delay has passed, no earlier,
- * at the kernel's first tick after it, whatever the tick's period is;
- * a delay of zero fires at the next tick.
+ * A timer line fires once the delay has passed, no earlier:
+ * the delay is rounded up to whole counts of the counter, and the line fires at the first count past the call by that many,
+ * as the timer the kernel sets for it interrupts; a delay of zero fires at the next count.
  * A longer delay than 32 bits of microseconds is several calls.
- * With IRQ_SET_PERIOD the delay is a period, rounded up to whole ticks and not zero,
+ * With IRQ_SET_PERIOD the delay is a period, rounded up to whole counts and not zero,
  * counted from the line's last deadline, or its bind, rather than from the call:
- * the line fires at the first tick after the call
+ * the line fires at the first count after the call
  * that lies a whole number of periods from that deadline.
  * Returns a1 = the periods skipped, those that had passed by the call.
  * Any other a3, or a zero period, fails with KERR_INVALID_ARG; a1 = 0 ignores a2 and a3.
@@ -557,8 +567,8 @@
  * Clock (RIGHT_R): read the machine's time, 64 bits counting up from boot at a fixed rate.
  * Returns a1 = the low word, a2 = the high word, a3 = the rate in Hz, measured at boot on the ESP32-C6,
  * and a4 = the address of the counter's low 32 bits, which OP_CLOCK_FRAME shows.
- * Under tracing the time is the tick count's; see DESIGN.md, "Verification".
- * The rate and the tick, the quantum, are OP_CAP_INFO's too, which needs no right.
+ * Under tracing the time is the record's, which only OP_TEST_TICK moves; see DESIGN.md, "Verification".
+ * The rate and the default span are OP_CAP_INFO's too, which needs no right.
  */
 #define OP_CLOCK_READ 25
 /*
@@ -574,7 +584,7 @@
  * Clock (RIGHT_W): the watchdog. a1 = microseconds, more than zero and at most WATCHDOG_US_MAX,
  * else KERR_INVALID_ARG.
  * The machine halts with code 7 unless the watchdog is fed again within a1 microseconds:
- * at the first tick that surely lies past them, as a timer line fires; see OP_IRQ_SET.
+ * at the first count past the call by at least that many, as a timer line fires; see OP_IRQ_SET.
  * The first call arms it, and nothing disarms it; each call sets the time anew, nearer or further.
  * There is one watchdog on the machine, which every capability with RIGHT_W to the clock feeds.
  * See DESIGN.md, "The watchdog".
@@ -593,23 +603,31 @@
  * Time (RIGHT_W): bind a thread's place to units of the capability, which it then earns there.
  * a1 = the slot of the Thread capability, which needs RIGHT_W,
  * a2 = the offset of the first unit, which must lie within the capability even for none,
- * a3 = how many units, zero for none.
+ * a3 = how many units, zero for none,
+ * a4 = the span, how many counts of the counter past its virtual time each of the thread's requests there is due:
+ *      0 for the default span, the longest power of two within a millisecond, which OP_CAP_INFO on a Clock tells,
+ *      else a power of two up to 2^SPAN_MAX, else KERR_INVALID_ARG,
+ *      until a wait gives another, see OP_NOTIFY_WAIT and DESIGN.md, "Scheduling".
  * The units must all be of one core, or the call fails with KERR_INVALID_ARG: the core of the first unit, for none too.
  * The bind fills the thread's place that holds that core's time, or an empty one,
  * and fails with KERR_LIMIT when every place holds another core's; see OP_POOL_ALLOC.
- * Each unit earns the place's account a part of a tick every tick, and a turn there costs it a tick;
+ * Each count the thread runs there on u units moves the place's virtual time on TIME_UNITS / u counts,
+ * running on spare time moves it too, up to a span ahead of the clock,
+ * and a request starts only once the virtual time lies at most a span ahead of the clock;
  * with RIGHT_X on the capability the thread also runs on that core's spare time, for free.
  * None without RIGHT_X holds the core's time all the same: the thread runs there on lent time alone, see OP_NOTIFY_LEND.
  * The thread runs on the cores its places hold the time of; see DESIGN.md, "Cores" and "Scheduling".
  * Fails with KERR_OVERLAP if another thread earns one of the units.
- * The place leaves the units it earned before, and keeps what its account held, up to what the new units hold.
+ * The place leaves the units it earned before, which keep its virtual time, and takes the latest of its own and the new units',
+ * so that no bind forgives what a thread ran ahead of its units; its request starts afresh.
  * The binding is a child of the invoked capability, so revoking below that capability empties the place:
- * its account is emptied, and a thread whose places are all empty keeps its state and does not run until it is bound again.
- * A thread whose place is emptied or bound anew while it runs there, the caller itself among them, finishes the turn it had,
- * but for a thread with time that waits for the core, which takes it once an unbind left the turn without time;
+ * a thread whose places are all empty keeps its state and does not run until it is bound again.
+ * A thread whose place is emptied or bound anew while it runs there, the caller itself among them, goes on
+ * while it has time or spare time, and gives the processor up as the trap ends otherwise;
  * a turn on spare time ends as a thread with time becomes ready, see DESIGN.md, "Scheduling".
  */
 #define OP_TIME_BIND 29
+#define SPAN_MAX 29u /* the longest span OP_TIME_BIND, OP_NOTIFY_WAIT and OP_NOTIFY_LEND take, 2^SPAN_MAX counts */
 
 /*
  * Any capability: describe it. a1 = the page, 0, the only one so far, and a2 = a3 = 0;
@@ -637,13 +655,12 @@
  *                     the cores' line, where there is one, reads as the controller's, and binding it fails with KERR_OVERLAP
  *   CAP_IRQ           its line, the bits it may signal, 0 once its notification was taken, see OP_IRQ_BIND,
  *                     and 1 on a timer line, else 0; never the bits it is armed with
- *   CAP_TIME          the first unit, the count, and the tick in microseconds, which an account counts in, see OP_TIME_BIND;
+ *   CAP_TIME          the first unit, the count, and 0;
  *                     unit u is of core u / TIME_UNITS, so BOOT_CAP_TIME's count is TIME_UNITS for each core the kernel runs
  *   CAP_ROUTE_LINE    the first channel, the count, and 0
  *   CAP_ROUTE         its channel, the ends connected, bit ROUTE_EVENT and bit ROUTE_TASK, and 1 while armed, else 0
- *   CAP_CLOCK         the counter's rate in Hz, as OP_CLOCK_READ gives it, the tick in counts of the counter,
- *                     and the tick in microseconds: the quantum, which bounds a turn while tracing is off;
- *                     DESIGN.md, "Scheduling", says what the kernel's steps add to it
+ *   CAP_CLOCK         the counter's rate in Hz, as OP_CLOCK_READ gives it, the default span in counts of the counter,
+ *                     the longest power of two within a millisecond, see OP_TIME_BIND, and 0
  *   CAP_PRINT, CAP_HALT and CAP_TEST  0, 0, 0
  * No result is an object capability's address or a link of the derivation tree,
  * though an Untyped's base may be where a pool made of it keeps its descriptor.

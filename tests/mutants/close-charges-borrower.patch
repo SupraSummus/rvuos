@@ -1,0 +1,22 @@
+A turn on lent time is charged to the borrower whose turn it is rather than to the lender that pays for it.
+The borrower would spend its own units on lent time, and the lender run free;
+a turn is charged to its payer.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a step moved the virtual time of a place that paid for no turn and started no request
+Report: a step of the clock did not charge the thread whose turn it was its units' part
+Report: a traced call that moved no time charged the thread whose turn it was
+Witness: fuzz lend-hands-turn
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -495,7 +495,7 @@ static void lender_settle(struct thread *t)
+ static uint64_t turn_charge(struct core *core)
+ {
+     uint64_t now = timer_now();
+-    struct place *p = turn_place(core);
++    struct place *p = turn_own(core);
+     if (p != NULL) {
+         p->vt = turn_vtime(core, p, now);
+     }

@@ -74,20 +74,19 @@ bool frame_lost(const struct trap_frame *frame);
 __attribute__((noreturn)) void kernel_trap_panic(void);
 
 /*
- * Stall until the wake-th tick, one being the next, or a device interrupt is pending,
- * with the ticks before it deferred rather than taken; see timer_defer.
- * The tick is acknowledged here and *ticks receives the ticks that passed, zero if none;
- * device interrupts stay in the controller for sched_claim_interrupts to claim,
+ * Stall until the counter reaches at, COUNT_NEVER for never, or a device interrupt is pending,
+ * with the timer set for at, where it stays however the stall ends, until the trap's end sets it for what runs.
+ * Device interrupts stay in the controller for sched_claim_interrupts to claim,
  * and the result says whether one is there.
  * This is what the kernel does when no thread can run
  * but an armed Irq, on a timer line or a device's, will make one runnable, or another core will; see DESIGN.md, "Scheduling".
  * The core gives the kernel's lock up while it waits, and wakes for another core's interrupt too, which is taken back here.
  * The host build has no clock and no devices and gets here only with more than one core, at once.
  */
-bool intr_wait(uint32_t wake, uint32_t *ticks);
+bool intr_wait(uint64_t at);
 
 /*
- * Whether the tick or a device interrupt is pending, which the kernel runs with interrupts held off to leave,
+ * Whether the timer or a device interrupt is pending, which the kernel runs with interrupts held off to leave,
  * or another core waits for the kernel's lock.
  * A preemptible walk asks between two steps; see DESIGN.md, "Bounded work".
  * The host build always answers yes.

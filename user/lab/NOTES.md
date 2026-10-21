@@ -3,7 +3,7 @@
 `user/lab/` is a made-up system of servers and clients,
 to weigh ways of modelling communication between processes against one workload rather than argue them.
 `make lab` prints how long each scenario's clients waited, and holds the numbers to nothing.
-Under QEMU a run repeats exactly, but a small change to a role moves an answer by a tick here and there,
+Under QEMU a run repeats exactly, but a small change to a role moves an answer by a request here and there,
 so scenarios are compared within one run.
 
 ## The cast
@@ -11,10 +11,10 @@ so scenarios are compared within one run.
 - **store**, a server whose answer costs the work the ask names, serving one ask from each client in turn,
   as the Wi-Fi system's network process does.
 - **gate**, a server in the middle, passing asks on to the store, as the network process does to the radio's driver.
-- **ui**, a client that every three ticks works up to half a tick of its own, drawn afresh, then asks for about 25 µs of work;
-  the draw puts its asks anywhere in a tick, as events fall.
+- **ui**, a client that every three milliseconds works up to half a millisecond of its own, drawn afresh, then asks for about 25 µs of work;
+  the draw puts its asks anywhere in another thread's request, as events fall.
   `local` does the work itself, as a library linked into it would.
-- **bulk**, a client that asks for half a tick of work, one ask after another.
+- **bulk**, a client that asks for half a millisecond of work, one ask after another.
 - **hog**, a process that wants the core all the time, earning 32 of its 64 units wherever it runs.
 - **quick** and **slow**, sharing a lock:
   quick, with 16 units, takes it every period for a little work;
@@ -22,92 +22,84 @@ so scenarios are compared within one run.
   The lock is the one of `lib/lock.h` in `lock`, `lock-hog` and `lock2-hog`,
   and its lock that names the holder in `lend`, `lend-hog` and `lend2-hog`, so that a taker that waits lends the holder its time.
   In `lock2-hog` and `lend2-hog` **quick2** takes it too, as quick does, with the 6 units the hog leaves.
+- **burst**, a process that every seven milliseconds works about half a millisecond of its own, earning 32 units,
+  so that it runs within its units and its requests are due as soon as anyone's.
+- **drivers** are two pairs of a ui and a store, each pair an interrupt and the driver that answers it, beside the burst:
+  each store waits for its asks within a millisecond and each ui for its answers within half of one,
+  which is as soon as requests of 32 µs of work at their units are due;
+  `drivers-tick` is the same with the default span, given no span, and the `-hog` ones are beside the hog instead.
 - **lend-server** and **lend-rider** are `poor-server` and `free-rider` with a ui that lends the store its time
   while it waits for an answer.
-- **driver**, woken every three ticks by its timer line, standing in for a device's, to do about 25 µs of work.
+- **driver**, woken every three milliseconds by its timer line, standing in for a device's, to do about 25 µs of work.
   It says how much later than its earliest each wake started, the earliest found alone, before the rest of the cast starts.
   `driver-hogs` puts a second hog beside it, **hog2**, with 16 units.
 
 The root task keeps 8 units, the units nobody earns are spare time, and every member may run on it.
 
+Threads run in requests, the one whose request is due first first,
+each due within the span a member's wait gives, or the default span, the longest power of two of counts within a millisecond, for none;
+the scenarios ending `-batch` bind the hog, which never waits, to requests due within a quarter of a second,
+and `lax-server`'s store waits within a second, each the longest power of two of counts within it.
+In `net` a ui that lends asks a gate that lends, of no units, which passes the ask to a store of no units, beside the hog,
+so only lent time that goes on through the gate answers it; `net-unpaid` is the same chain lending nothing.
+
 ## What it showed
 
 `make lab` prints the numbers, which a run under QEMU repeats exactly;
 the commits that changed the lab or how threads take turns say what they were.
-A tick is a millisecond, and every shape below held on QEMU `virt` and on its ARM boards alike.
 
-**Units do not buy latency.**
-Beside the hog a small ask waits about a tick at the median and nearly two at p90,
-and twice the units for the client, `rich-ui`, or for the server, `rich-server`, change neither.
-The client that waits hands the rest of the tick to whoever is next on the run queue,
-and the server, woken by the ask, joins the queue behind the hog.
-Units buy a part of the processor, not a place in that queue.
+**A thread within its units is due first; one past them waits for them.**
+A thread that wants the core all along runs about a span ahead of the clock,
+so its requests are due after those of a thread that wakes with a span no longer than its own:
+beside the hog the median answer is as fast as alone, in `hog`, `chain` and `net`.
+The p90 is about one of the hog's requests:
+the ui's draws, up to half a millisecond of work at 8 units, outrun its units, and it waits for them as any thread does,
+for its asks in `hog` and for its own work in `local-hog`.
+With twice the units, `rich-ui`, it stays within them, and its p90 is as alone.
+Units buy latency for a thread that stays within them.
 
-**A library does not wait.**
-`local-hog` takes as long as `local`.
-The hop to a server costs a few microseconds alone and about a tick beside the hog.
+**Spare time keeps no urgency.**
+Where every member wants more than its units, `poor-server`, `bulk-hog`, `free-rider`, `lax-server`,
+a thread that ran on spare time is a span ahead, so nobody is due before the others for long,
+and the waits are a millisecond or two.
 
-**The client's time does not reach its server, unless it lends it.**
-With no units the store runs on spare time alone, `poor-server`,
-and its client waits about a tick at the median and nearly two at p90 though it earns a quarter of the core:
-the store runs only on turns no thread with time wants, and beside the hog those come when the hog's account runs dry.
-A client that lends the store its time while it waits, `lend-server`, is answered as fast as `alone`:
+**The client's time reaches its server only lent.**
+With no units the store runs on spare time alone, `poor-server`, and its client waits about the hog's request at the median.
+A client that lends the store its time while it waits, `lend-server`, is answered as fast as alone at the median:
 its wait hands the store the rest of its turn, and the answer's signal hands the turn back.
 
-**Who asks is not who pays.**
-In `free-rider` a client that earns nothing has its big asks answered, about a sixth of the core,
-out of the store's units and spare time, and the ui, which earns its own, waits two thirds longer than beside the hog alone.
+**A lender pays for whatever its borrower does.**
+In `lend-rider` the ui lends to a store that is mostly on the bulk's big asks,
+so the ui pays for the rest of the ask in progress and waits for it, about a big ask at the median.
 The store cannot tell an ask that brings time from one that does not.
-A ui that lends, `lend-rider`, is answered as fast as `alone`, and the bulk waits about a tenth longer at the median:
-the store answers the ui first, on the ui's time, and the answer hands the ui its turn back.
-A lender pays for whatever its borrower does until the borrower wakes it, so a ui that asked while the store was on a big ask
-would pay for the rest of that ask; the run's draws did not put one there.
 
 **A small ask waits behind big ones.**
 In `bulk`, with no hog, the ui waits for the big ask the store is on, ten times as long as alone.
 That is the store's own order, which no kernel would change.
 
-**A second hop cost no more than the first** beside the hog; why is not worked out yet.
+**A second hop costs no more than the first** beside the hog, `chain` against `hog`.
 
-**A driver its timer line wakes starts at its tick, behind the threads with time already waiting.**
-Beside the hog, `driver-hog`, it started as early as alone every time:
-the tick signals the lines before it ends the hog's turn, so the driver joins the run queue ahead of the hog.
-Beside a second hog, `driver-hogs`, it waited a whole tick at worst, for the hog with time on the queue ahead of it,
-and on spare time alone, `driver-spare`, a tick at p90, whenever the hog had time.
-A timer line fires only on a tick, where the hog's turn ends anyway, so this is a device's interrupt at its best:
-one that comes between ticks would wait for the rest of the hog's turn.
-No board the lab runs on lists a device whose interrupt it could time, so the lab does not show that yet.
+**A lock's holder past its units holds the lock at its units' pace.**
+Slow, at 2 units, works as long between holds as it holds, far more than its units' part,
+so beside the hog quick waits for slow's units even at the median, `lock-hog`.
+A taker that lends, `lend-hog`, pays for the hold with its own time and takes about a third off that wait;
+a holder that holds longer than its units pay for needs more of them.
+Without the hog, quick's p90 is a little longer when it lends, `lend` against `lock`; why is not worked out yet.
 
-**A lock waits for its holder's turns.**
-Quick earns eight times slow's units, and still waits a third of a tick at p90 for slow to give the lock back,
-nearly two ticks beside the hog.
-The kernel does not know who holds the lock, so quick's units cannot help slow finish,
-and a give wakes quick without handing it the lock, so slow may take it again before quick's turn comes,
-while slow has time of its own:
-once slow has spent it and runs on spare time, the give that wakes quick, which has time, hands quick the processor at once.
-
-**A taker that lends its time takes its holder's wait away.**
-On the lock that names its holder, `lend-hog`, quick waits under a fifth of a tick at p90 beside the hog,
-about what is left of slow's hold:
-quick's wait hands slow the rest of quick's turn at once, slow runs on quick's account,
-and slow's give, which signals quick, hands quick the rest of the turn back, so quick takes the lock before slow can again.
-Slow takes the lock about as often as on the plain lock, and the time it ran so was quick's to spend.
-It is where units buy latency, because quick names whom it waits for.
-Without the hog, `lend`, quick waits a seventh of the plain lock's p90 or less, as the turn back puts quick first.
-
-**Two takers that lend never wait at once.**
-In `lend2-hog` quick waits as in `lend-hog`, and quick2 a third of a tick at most,
-where on the plain lock, `lock2-hog`, both wait a tick or more at p90.
-Quick's wait hands slow its turn and slow's give hands it back, so the hold ends before quick2 runs.
-Only a hold that outlasts a tick would let quick2 wait while quick lends.
+**A driver waits for a request due before its own.**
+In `drivers` the spans are no shorter than the default,
+so a wake during the burst's request is due after it and waits for its rest, up to about half a millisecond;
+a driver that must answer sooner gives a shorter span.
+A driver its timer line wakes starts at its deadline beside one hog or two, `driver-hog` and `driver-hogs`,
+and on spare time alone, `driver-spare`, waits for the hog's request in progress, the same each time.
 
 **A mutex in the kernel got the same from the lending, and a convoy from the ownership.**
 The kernel's mutex of open decision 27, which the lending wait replaced, handed itself to the waiter that waited longest:
 that helped without the hog, but beside it the mutex went to quick, which waited behind the hog's turn holding it,
-and slow, wanting it again, waited for quick, over a tick at the median both.
-With its waiters lending, it waited as `lend-hog` does now, at two calls for a hold nobody else wanted.
+and slow, wanting it again, waited for quick, over a millisecond at the median both.
+With its waiters lending, it waited as `lend-hog` did, at two calls for a hold nobody else wanted.
+It was measured under the tick of decision 18, before decision 39.
 
 **What it costs**, `make bench`: a hold nobody else wants is no call on either lock of `lib/lock.h`,
 where the kernel's mutex made two.
-One the waiter waits for costs a little less when it lends, since the turn goes to the holder and back without a queue,
-and the lending's checks cost every switch a few per cent.
+One the waiter waits for costs about a seventh more when it lends, `lock-lend` against `lock-wait`.

@@ -23,7 +23,7 @@
  * survey=0 leaves the survey of the channels out;
  * load=, units of the processor's 64 up to 32, has a thread beside the link's earn them and compute without end,
  * as a node does that has more to do than its link, so that the link's thread waits for its turn when it wakes,
- * up to a tick; it runs no more than its units earn, with no spare time, and there is none by default.
+ * up to a request of its; it runs no more than its units earn, with no spare time, and there is none by default.
  *
  * Before all that it checks a route, DESIGN.md's "Routes", on the chip: TIMER3's compare counts in TIMER4,
  * a hundred times in 10 ms, while the route is armed, and not at all once it is disarmed;
@@ -426,7 +426,7 @@ static void load_start(uint32_t units)
     must("a slot for the load's time without spare", slot_new(&self, &capped));
     must("the load's units without spare time",
          rv_invoke(OP_CAP_DERIVE, BOOT_CAP_CAPTABLE, capped, time, RIGHT_W));
-    must("bind the load's units", rv_time_bind(capped, thread, 0, units));
+    must("bind the load's units", rv_time_bind(capped, thread, 0, units, 0));
     must("start the load", rv_thread_resume(thread));
     say(&cout, "thread: a load beside the link, earning %u units of %u\n", units, TIME_UNITS);
 }
@@ -488,7 +488,7 @@ static void route_check(void)
     must("unmap TIMER4", region_free(&self, timer4));
     say(&cout, "thread: a route counted %u compares of TIMER3 in TIMER4 in %u us armed, and %u disarmed\n", armed,
         ROUTE_RUN_US, disarmed);
-    /* The sleep wakes a tick late at most, and the count only grows with it. */
+    /* The sleep wakes a little late at most, and the count only grows with it. */
     if (armed < ROUTE_COUNTS * 9u / 10u || armed > ROUTE_COUNTS * 2u || disarmed != 0) {
         say(&cout, "thread: the route did not count as it was armed\n");
         rv_halt(BOOT_CAP_HALT, HALT_ROUTE);
@@ -504,7 +504,7 @@ int main(void)
     must("map the console", region_install(&self, BOOT_CAP_UART, RIGHT_R | RIGHT_W, &region));
     console_init(base);
     must("map the radio", region_install(&self, BOOT_CAP_RADIO, RIGHT_R | RIGHT_W, &region));
-    /* The TIMER the link times what is shorter than a tick by. */
+    /* The TIMER the link times what is shorter than a kernel's step by. */
     must("map the TIMER", region_install(&self, BOOT_CAP_TIMER2, RIGHT_R | RIGHT_W, &region));
     struct config c;
     configure(&c);

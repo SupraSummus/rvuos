@@ -1,0 +1,21 @@
+A bind takes the place's own virtual time and not the latest of it and its new units'.
+A thread that ran ahead of its units would shed it by giving them to another thread of its process, and the other run at once;
+no bind puts back a unit's time.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a call put a unit's virtual time back
+Witness: fuzz units-keep-vtime
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -644,9 +644,6 @@ void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights,
+     for (uint32_t i = 0; i < count; i++) {
+         LOOP_BOUND(TIME_UNITS);
+         unit_place[first + i] = v2p(p);
+-        if (unit_vt[first + i] > p->vt) {
+-            p->vt = unit_vt[first + i];
+-        }
+     }
+     lender_settle(place_thread(p));
+ }

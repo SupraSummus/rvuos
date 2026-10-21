@@ -1,0 +1,20 @@
+A borrower whose own time came again while it waited on its lender's runs on its own units, its request on the lender's in progress forgotten;
+a request in progress goes on, on the units it was made on, while it is open there.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a thread waits with a deadline before the turn's request
+Witness: fuzz lend-request-goes-on
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -316,9 +316,6 @@ static uint8_t place_queue(const struct place *p, const struct place *l, uint64_
+  */
+ static struct place *request_payer(struct place *p, struct place *l, uint64_t now)
+ {
+-    if (l != NULL && place_units(l) != 0 && request_open(l, p)) {
+-        return l;
+-    }
+     if (has_time(p, p, now)) {
+         return p;
+     }

@@ -36,7 +36,7 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
         /* mepc points at the interrupted instruction, which resumes as it was. */
         switch (cause & ~MCAUSE_INTERRUPT) {
         case IRQ_M_TIMER:
-            timer_trap_tick();
+            timer_trap_fired();
             break;
         case IRQ_EXT_CAUSE:
             /*
@@ -97,15 +97,15 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
  * whether or not machine mode would take it,
  * and the kernel runs with MIE clear, so the interrupt is polled rather than taken.
  * A core may also treat wfi as a no-op, which the loop tolerates.
- * The timer is set for the tick asked for and stays there however the stall ends,
+ * The timer is set for the count asked for and stays there however the stall ends,
  * until the trap's end sets it for the thread that runs.
  */
-bool intr_wait(uint32_t wake, uint32_t *ticks)
+bool intr_wait(uint64_t at)
 {
     const uint32_t mip_ext = 1u << IRQ_EXT_CAUSE;
     /* Another core wakes this one with its software interrupt, which only a core of several enables. */
     const uint32_t mip_wake = MIP_MTIP | mip_ext | (CORES > 1 ? MIP_MSIP : 0);
-    timer_set(wake);
+    timer_set(at);
     core_stall_begin();
     uint32_t ip;
     while (((ip = csr_read(mip)) & mip_wake) == 0) {
@@ -119,7 +119,6 @@ bool intr_wait(uint32_t wake, uint32_t *ticks)
         ipi_clear();
     }
 #endif
-    *ticks = timer_count();
     return (ip & mip_ext) != 0;
 }
 
@@ -134,7 +133,7 @@ bool intr_pending(void)
  * machine interrupts are taken in user mode whatever MIE holds,
  * but for RP2350's Hazard3, which takes none there while it is clear, erratum RP2350-E7.
  * A trap from user mode saves MIE into MPIE, so every later mret sets it again.
- * So the tick runs from the first instruction.
+ * So the timer runs from the first instruction.
  */
 void trap_start(struct trap_frame *frame)
 {

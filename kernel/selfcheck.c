@@ -355,23 +355,22 @@ static bool is_turn(const struct thread *t)
 }
 
 /*
- * The count a place's account is counted to:
- * the count of the core whose turn its thread has or pays for while it holds that core's time,
- * which lags the machine's while that core has not trapped since another counted, and the machine's otherwise.
+ * Whether p's thread has a request open on payer's units: one made on them, own or lent,
+ * whose deadline lies at most a span of payer's ahead of payer's virtual time.
  */
-static uint32_t count_of(const struct place *p)
+static bool request_on(const struct place *payer, const struct place *p)
 {
-    const struct thread *t = place_thread(p);
-    const struct cap *b = place_time(p);
-    return is_turn(t) && b->type == CAP_TIME && unit_core(range_first(b)) == t->core ? cores[t->core].ticks : sched_ticks;
+    uint32_t made = PLACE_REQUEST | (payer != p ? PLACE_LENT : 0);
+    return (p->span & (PLACE_REQUEST | PLACE_LENT)) == made && p->deadline - (uint32_t)payer->vt - 1 < place_span(payer);
 }
 
-/* A place's account at the count, its stamp's balance and its tick's gain every tick since, held to the cap. */
-static uint32_t account_now(const struct place *p)
+/*
+ * Whether payer's units give p's thread time: it has units, and a request open on them
+ * or a virtual time at most a span of payer's past the clock.
+ */
+static bool time_on(const struct place *payer, const struct place *p)
 {
-    uint64_t balance = p->balance + (uint64_t)(count_of(p) - p->stamp) * tick_gain(p);
-    uint32_t cap = account_cap(p);
-    return balance > cap ? cap : (uint32_t)balance;
+    return place_units(payer) != 0 && (request_on(payer, p) || payer->vt <= timer_now() + place_span(payer));
 }
 
 /*
@@ -386,12 +385,24 @@ static const struct place *lender_of(const struct place *p)
     if (t->lenders == 0 || b->type != CAP_TIME) {
         return NULL;
     }
-    return thread_place_on(p2v(t->lenders), unit_core(range_first(b)));
+    /* Through first lenders with no time for it, LEND_DEPTH of them at most. */
+    uint32_t core = unit_core(range_first(b));
+    const struct place *l = thread_place_on(p2v(t->lenders), core);
+    for (uint32_t i = 1; i < LEND_DEPTH && l != NULL && !time_on(l, p); i++) {
+        LOOP_BOUND(LEND_DEPTH);
+        const struct thread *lt = place_thread(l);
+        const struct place *next = lt->lenders != 0 ? thread_place_on(p2v(lt->lenders), core) : NULL;
+        if (next == NULL) {
+            break;
+        }
+        l = next;
+    }
+    return l;
 }
 
 /*
  * The queue a place belongs on: none unless its thread is ready, the place is bound, and its thread's turn is nowhere;
- * the run queue with a tick in its account or its lender's, else the spare queue with spare time,
+ * the run queue with time on its own units or its lender's, else the spare queue with spare time,
  * else the spent queue with units of its own or its lender's, and none without.
  */
 static uint8_t queue_owed(const struct place *p)
@@ -401,7 +412,7 @@ static uint8_t queue_owed(const struct place *p)
         return QUEUE_NONE;
     }
     const struct place *l = lender_of(p);
-    if (account_now(p) >= tick_parts() || (l != NULL && account_now(l) >= tick_parts())) {
+    if (time_on(p, p) || (l != NULL && time_on(l, p))) {
         return QUEUE_RUN;
     }
     if (place_spare(p)) {
@@ -438,25 +449,27 @@ static void check_lenders(const struct thread *t)
     } while (at != t->lenders);
 }
 
-/* An account that gives p time once it holds a tick, its own or its lender's, reaches one no earlier than the release. */
+/*
+ * A virtual time that gives p time once it lies within a span of the clock, its own or its lender's,
+ * does so no earlier than the release.
+ */
 static void check_release(const struct place *p, const struct place *a, const char *what)
 {
     if (a == NULL || place_units(a) == 0) {
         return;
     }
-    uint32_t missing = tick_parts() - account_now(a);
-    uint32_t at = sched_ticks + (missing + tick_gain(a) - 1) / tick_gain(a);
-    uint32_t release = cores[p->core].nearest_release;
-    if ((int32_t)(at - release) < 0) {
-        fail(what, v2p(p), at, release);
+    uint64_t release = cores[p->core].nearest_release;
+    if (a->vt - place_span(a) < release) {
+        fail(what, v2p(p), (uint32_t)a->vt, (uint32_t)release);
     }
 }
 
 /*
  * A place knows its thread and which of its places it is, its units are a leaf of the tree, which the tree check reads,
  * bound through a capability with the right to bind, whose rights they carry, units of one core, which it alone earns,
- * and its account holds at most its cap and was last counted no later than the count.
- * It waits on the queue of its core its account says, and on none while its thread's turn is anywhere.
+ * and its virtual time lies at most two of the longest spans ahead of the clock,
+ * since a request starts at most a span past the clock.
+ * It waits on the queue of its core its virtual time says, and on none while its thread's turn is anywhere.
  * The cores whose time it holds go into *held, which must not hold its core already.
  */
 static void check_place(const struct thread *t, uint32_t i, uint32_t *held)
@@ -488,11 +501,9 @@ static void check_place(const struct thread *t, uint32_t i, uint32_t *held)
         }
     }
     units_seen += place_units(p);
-    if (p->balance > account_cap(p)) {
-        fail("a place's account holds more than its cap", v2p(t), p->balance, place_units(p));
-    }
-    if ((int32_t)(count_of(p) - p->stamp) < 0) {
-        fail("a place's account is stamped ahead of the count", v2p(t), p->stamp, count_of(p));
+    if (p->vt > timer_now() + (2ull << SPAN_MAX)) {
+        fail("a place's virtual time lies further ahead of the clock than two spans", v2p(t), (uint32_t)p->vt,
+             (uint32_t)timer_now());
     }
     if (p->core >= CORES) {
         fail("a place names a core there is not", v2p(t), i, p->core);
@@ -505,7 +516,7 @@ static void check_place(const struct thread *t, uint32_t i, uint32_t *held)
     if (p->queue != owed) {
         fail(owed == QUEUE_NONE ? "a place names a queue it is not for"
              : p->queue == QUEUE_NONE ? "a place of a ready thread that may run waits on no queue"
-                                      : "a place waits on another queue than its account says",
+                                      : "a place waits on another queue than its virtual time says",
              v2p(t), p->queue, owed);
     }
     if (owed != QUEUE_NONE && p->core != unit_core(first)) {
@@ -516,10 +527,10 @@ static void check_place(const struct thread *t, uint32_t i, uint32_t *held)
     } else if (p->queue_next != 0 || p->queue_prev != 0) {
         fail("a place on no queue is linked into one", v2p(t), i, p->queue_next);
     }
-    /* One that waits without time has it again at the release, by its own account or its lender's, which waits on no queue. */
+    /* One that waits without time has it again at the release, by its own virtual time or its lender's, which waits on no queue. */
     if (owed == QUEUE_SPARE || owed == QUEUE_SPENT) {
-        check_release(p, p, "a place's account reaches a tick before the release");
-        check_release(p, lender_of(p), "a lender's account reaches a tick before the release");
+        check_release(p, p, "a place's virtual time comes before the release");
+        check_release(p, lender_of(p), "a lender's virtual time comes before the release");
     }
 }
 
@@ -687,6 +698,18 @@ static void check_queue(paddr_t head, uint8_t queue, uint32_t core)
         if (next == NULL || next->queue_prev != at) {
             fail("queue is not linked back", head, at, p->queue_next);
         }
+        /*
+         * A place on the run queue has its request open on the units that pay for it:
+         * those it was made on while it is open and they are units, else its own while they give it time, else its lender's.
+         */
+        if (queue == QUEUE_RUN) {
+            const struct place *l = lender_of(p);
+            const struct place *payer = l != NULL && place_units(l) != 0 && request_on(l, p) ? l : time_on(p, p) ? p : l;
+            if (payer == NULL || !request_on(payer, p)) {
+                fail("a place waits on the run queue with no request open on its payer", v2p(p), p->deadline,
+                     payer != NULL ? (uint32_t)payer->vt : 0);
+            }
+        }
         queued_threads++;
         at = p->queue_next;
     } while (at != head);
@@ -695,7 +718,7 @@ static void check_queue(paddr_t head, uint8_t queue, uint32_t core)
 /*
  * Whether nothing could ever run again, which the kernel stops the machine for rather than let a core idle:
  * no core has a turn or a thread on its run or spare queue, nor untraced on its spent queue,
- * and no Irq is armed on a line, or tracing is on, where nobody is left to tick.
+ * and no Irq is armed on a line, or tracing is on, where nobody is left to move the clock.
  */
 static bool nothing_runs(void)
 {
@@ -729,15 +752,13 @@ static void check_core(uint32_t i)
     if (c->turn == NULL && nothing_runs()) {
         fail("a core idles where nothing can run again", i, 0, 0);
     }
-    /* The core counts up to the machine's count as its traps begin, and charges its turn to the tick it counted. */
-    if ((int32_t)(sched_ticks - c->ticks) < 0 || (c == core_self() && c->ticks != sched_ticks)) {
-        fail("a core counted other ticks than the machine", i, c->ticks, sched_ticks);
+    /* A turn is charged up to a count the clock has reached, and began no later. */
+    uint64_t now = timer_now();
+    if (c->turn != NULL && (c->turn_from > now || c->turn_began > now)) {
+        fail("a turn is charged from a count the clock has not reached", i, (uint32_t)c->turn_from, (uint32_t)now);
     }
     /* The turn's place on the core, while it has one, which a bind or a revoke during the turn may empty. */
     const struct place *own = c->turn != NULL ? thread_place_on(c->turn, i) : NULL;
-    if (own != NULL && own->stamp != c->ticks) {
-        fail("the ticks of a turn were not charged to its thread", v2p(c->turn), own->stamp, c->ticks);
-    }
     /* A turn on lent time is paid by another live thread named to the core, whose place there is charged as the turn's would be. */
     const struct thread *payer = c->payer;
     if (payer != NULL) {
@@ -748,16 +769,22 @@ static void check_core(uint32_t i)
         if (c->turn == NULL || payer == c->turn || payer->core != i) {
             fail("a turn's payer is not another thread of its core", i, v2p(payer), payer->core);
         }
-        const struct place *paid = thread_place_on(payer, i);
-        if (paid != NULL && paid->stamp != c->ticks) {
-            fail("the ticks of a turn were not charged to its payer", v2p(payer), paid->stamp, c->ticks);
-        }
         /*
          * It pays from the wait in which it lent the turn's thread its time, the first of the thread's lenders,
          * and once woken until the turn ends.
          */
-        if (payer->state == THREAD_WAITING && (c->turn == NULL || c->turn->lenders != v2p(payer))) {
-            fail("a turn's payer that waits is not the turn's first lender", i, v2p(payer), payer->lend_to);
+        /* Or through a chain of first lenders, LEND_DEPTH at most, until one in the chain wakes or stops. */
+        const struct thread *by = payer;
+        for (uint32_t d = 0; d < LEND_DEPTH && by->state == THREAD_WAITING && by != c->turn; d++) {
+            LOOP_BOUND(LEND_DEPTH);
+            const struct thread *next = by->lend_to != 0 ? p2v(by->lend_to) : NULL;
+            if (next == NULL || next->lenders != v2p(by)) {
+                fail("a turn's payer that waits is not the turn's first lender", i, v2p(payer), by->lend_to);
+            }
+            by = next;
+        }
+        if (by->state == THREAD_WAITING) {
+            fail("a turn's payer that waits is not the turn's first lender", i, v2p(payer), by->lend_to);
         }
     }
     /*
@@ -782,18 +809,25 @@ static void check_core(uint32_t i)
      * unless its thread stands at a call stopped for an interrupt, which it makes again first;
      * on another core that runs user mode it ends as that core traps, which whoever made the thread ready owes it.
      */
-    if (!c->recall && c->run_queue != 0 && sched_spare_turn(c) &&
-        (c == core_self() || (c->in_user && !c->interrupt_owed))) {
+    bool told = !c->recall && c->run_queue != 0 && (c == core_self() || (c->in_user && !c->interrupt_owed));
+    if (told && sched_spare_turn(c)) {
         fail("a turn on spare time runs while a thread with time waits", i, v2p(c->turn), c->run_queue);
     }
-    if (debug_trace && c->turn_from != 0) {
-        fail("a traced turn is charged from within a tick", i, c->turn_from, 0);
+    /*
+     * A turn its own units give time runs a request on them: it starts the next as the core looks at a turn marked,
+     * which the start of a turn, a change to its thread and a wait's span do, and as its request ends.
+     * Under tracing on one core only its own records move the clock, so no time comes while nobody looks;
+     * on several another core's step moves it under a turn on spare time, which goes on so until its core looks.
+     */
+    if (CORES == 1 && debug_trace && c->payer == NULL && own != NULL && place_units(own) != 0 && !c->run_stale &&
+        time_on(own, own) && !request_on(own, own)) {
+        fail("a turn its own units give time runs no request on them", i, v2p(c->turn), own->deadline);
     }
-    if ((int32_t)(c->nearest_release - sched_ticks) <= 0) {
-        fail("the release is for a tick already past", c->nearest_release, sched_ticks, i);
+    if (c->nearest_release <= now) {
+        fail("the release is for a count already past", (uint32_t)c->nearest_release, (uint32_t)now, i);
     }
-    if ((int32_t)(c->nearest_deadline - sched_ticks) <= 0) {
-        fail("the timer wakes for a deadline already past", c->nearest_deadline, sched_ticks, i);
+    if (c->nearest_deadline <= now) {
+        fail("the timer wakes for a deadline already past", (uint32_t)c->nearest_deadline, (uint32_t)now, i);
     }
     if (c->in_user && (c->turn == NULL || current->state != THREAD_READY)) {
         fail("a core runs user mode for a thread that may not run", i, current != NULL ? v2p(current) : 0, 0);
@@ -802,12 +836,24 @@ static void check_core(uint32_t i)
         fail("a core runs user mode with regions its process no longer has", i, v2p(current), 0);
     }
     check_queue(c->run_queue, QUEUE_RUN, i);
+    /* A turn with time whose request is due after one on the run queue ends as a turn on spare time does: earliest deadline first. */
+    if (told && !sched_spare_turn(c) && own != NULL) {
+        paddr_t at = c->run_queue;
+        do {
+            LOOP_BOUND(TIME_UNITS);
+            const struct place *p = place_at(at);
+            if ((int32_t)(p->deadline - own->deadline) < 0) {
+                fail("a thread waits with a deadline before the turn's request", i, v2p(p), own->deadline);
+            }
+            at = p->queue_next;
+        } while (at != c->run_queue);
+    }
     check_queue(c->spare_queue, QUEUE_SPARE, i);
     check_queue(c->spent_queue, QUEUE_SPENT, i);
 }
 
 /*
- * An armed watchdog lies ahead of the count, since the tick that reaches it halts the machine,
+ * An armed watchdog lies ahead of the clock, since the timer that reaches it halts the machine,
  * and no further than the longest delay a feed sets;
  * the core that fed it wakes for it, as for a timer line it armed.
  */
@@ -816,19 +862,20 @@ static void check_watchdog(void)
     if (!watchdog.armed) {
         return;
     }
-    uint32_t ahead = watchdog.deadline - sched_ticks;
-    if ((int32_t)ahead <= 0) {
-        fail("the machine runs past the watchdog's deadline", watchdog.deadline, sched_ticks, 0);
+    uint64_t now = timer_now();
+    if (watchdog.deadline <= now) {
+        fail("the machine runs past the watchdog's deadline", (uint32_t)watchdog.deadline, (uint32_t)now, 0);
     }
-    if (ahead > WATCHDOG_US_MAX / TIMER_US_PER_TICK + 1) {
-        fail("the watchdog is set further than the longest delay", watchdog.deadline, sched_ticks, 0);
+    if (watchdog.deadline - now > timer_us_counts(WATCHDOG_US_MAX) + 1) {
+        fail("the watchdog is set further than the longest delay", (uint32_t)watchdog.deadline, (uint32_t)now, 0);
     }
     if (watchdog.core >= CORES) {
         fail("the watchdog names a core there is not", watchdog.core, 0, 0);
     }
-    uint32_t nearest = cores[watchdog.core].nearest_deadline;
-    if ((int32_t)(watchdog.deadline - nearest) < 0) {
-        fail("the watchdog comes due before the timer wakes for it", watchdog.deadline, nearest, watchdog.core);
+    uint64_t nearest = cores[watchdog.core].nearest_deadline;
+    if (watchdog.deadline < nearest) {
+        fail("the watchdog comes due before the timer wakes for it", (uint32_t)watchdog.deadline, (uint32_t)nearest,
+             watchdog.core);
     }
 }
 
@@ -836,9 +883,8 @@ static void check_watchdog(void)
  * Each unit names the live thread that earns it, or none, and check_thread has held every thread's units to the table,
  * so as many units named as units bound leaves no unit naming a thread that does not earn it.
  * Each core's queues hold the threads that name them and it, and check_thread counted those owed a place on one.
- * A core whose turn it is runs the thread, and its account is counted up to the core's count;
- * under tracing the clock is the tick count alone, so the turn owes nothing from before the tick.
- * The release and the nearest deadline lie ahead of the count.
+ * A core whose turn it is runs the thread, charged up to a count the clock has reached.
+ * The release and the nearest deadline lie ahead of the clock.
  */
 static void check_scheduler(void)
 {
@@ -863,68 +909,42 @@ static void check_scheduler(void)
 }
 
 /*
- * The timer interrupts only at a tick that could change what runs, and a trap counts the others.
- * The nearest deadline it wakes for is its core's, which check_core holds ahead of the count
- * and check_irq to every timer line armed there.
- * While a thread runs, every tick the timer lets pass would hand the processor back to that thread:
- * nobody is on the run queue, and it has time, or may run on spare time with nobody on the spare queue;
- * and none of them is the release, the nearest deadline,
- * or, while it could not go on alone on spare time, the tick that leaves its account less than a tick.
- * The tick the timer was last set for is one of those, a later one only after a change that marked it stale.
+ * The timer interrupts only at a count that could change what runs:
+ * unless a change since marked it stale, the count it was last set for comes no later than any of them,
+ * the release, the nearest deadline, which check_core holds ahead of the clock and check_irq to every timer line armed there,
+ * the end of the turn's request unless its thread may go on alone on spare time,
+ * and a span into a turn on spare time while another waits for spare time.
  * check_scheduler has made sure that it is the running thread's turn.
  * Only this core's timer is checked: another sets its own as its trap ends, told by whoever changed what it runs.
  */
 static void check_wake(void)
 {
     const struct core *core = core_self();
-    if (core->turn == NULL) {
+    if (core->wake_stale) {
         return;
     }
-    uint32_t wake = sched_wake_ticks();
-    /* Unless a change since marked it stale, the tick the timer was set for still comes no later. */
-    int32_t set = (int32_t)(core->wake_tick - sched_ticks);
-    if (!core->wake_stale && (set < 1 || set > (int32_t)wake)) {
-        fail("the timer is set past a tick an unmarked change brought forward", core->wake_tick, sched_ticks, wake);
+    uint64_t at = core->wake_at;
+    if (at > core->nearest_release) {
+        fail("the timer lets the release pass", (uint32_t)at, (uint32_t)core->nearest_release, 0);
     }
-    if (wake <= 1) {
-        if (wake == 0) {
-            fail("the timer wakes for a tick already counted", 0, 0, 0);
-        }
-        return;
-    }
-    /* Each tick decides afresh who pays for a turn on lent time. */
-    if (core->payer != NULL) {
-        fail("the timer lets a tick pass while the turn runs on lent time", wake, v2p(core->turn), v2p(core->payer));
+    if (at > core->nearest_deadline) {
+        fail("the timer lets the nearest deadline pass", (uint32_t)at, (uint32_t)core->nearest_deadline, 0);
     }
     const struct thread *t = core->turn;
-    /* A thread whose place here was emptied during its turn ends the turn at the next tick. */
-    const struct place *p = thread_place_on(t, core_index());
-    if (p == NULL) {
-        fail("the timer lets the tick pass that ends a turn without the core's time", wake, v2p(t), 0);
+    const struct place *own = t != NULL ? thread_place_on(t, core_index()) : NULL;
+    if (own == NULL) {
+        return;
     }
-    uint32_t balance = account_now(p);
-    bool time = balance >= tick_parts();
-    bool alone = place_spare(p) && core->spare_queue == 0;
-    if (core->run_queue != 0 || (!time && !alone)) {
-        fail("the timer lets a tick pass that ends the turn", wake, v2p(t), balance);
-    }
-    /*
-     * On the tick before the timer's the account still has a tick in it, unless it may go on alone on spare time:
-     * the next tick it pays for the rest of this one, from turn_from, and gains its units, up to its cap,
-     * and every tick after costs it a tick less the gain.
-     */
-    if (time && !alone) {
-        uint32_t next = balance - COUNT_PARTS * (timer_tick_counts() - core->turn_from) + tick_gain(p);
-        next = next < account_cap(p) ? next : account_cap(p);
-        if (next < tick_parts() || (uint64_t)(wake - 2) * (tick_parts() - tick_gain(p)) > next - tick_parts()) {
-            fail("the timer lets the tick pass that drains the turn's account", wake, balance, place_units(p));
+    const struct place *p = core->payer != NULL ? thread_place_on(core->payer, core_index()) : own;
+    if (p != NULL && place_units(p) != 0 && request_on(p, own)) {
+        uint32_t room = own->deadline - (uint32_t)p->vt;
+        uint64_t end = core->turn_from + ((uint64_t)room * place_units(p) + TIME_UNITS - 1) / TIME_UNITS;
+        bool alone = core->payer == NULL && place_spare(own) && core->run_queue == 0 && core->spare_queue == 0;
+        if (!alone && at > end) {
+            fail("the timer lets the end of the turn's request pass", (uint32_t)at, (uint32_t)end, v2p(t));
         }
-    }
-    if (wake > core->nearest_release - sched_ticks) {
-        fail("the timer lets the release pass", wake, core->nearest_release, sched_ticks);
-    }
-    if (wake > core->nearest_deadline - sched_ticks) {
-        fail("the timer lets the nearest deadline pass", wake, core->nearest_deadline, sched_ticks);
+    } else if (core->spare_queue != 0 && at > core->turn_began + place_span(own)) {
+        fail("the timer lets a turn on spare time run past its span while another waits", (uint32_t)at, v2p(t), 0);
     }
 }
 
@@ -961,18 +981,19 @@ static void check_irq(const struct irq *i)
     if (line_is_cores(i->line)) {
         fail("irq is bound to the cores' line", v2p(i), i->line, 0);
     }
-    /* The tick fires every due timer line, so one still armed lies ahead. */
-    if (line_is_timer(i->line) && irq_armed(i) && irq_due(i, sched_ticks)) {
-        fail("armed timer line is due", v2p(i), i->deadline, sched_ticks);
+    /* The timer fires every due timer line, so one still armed lies ahead. */
+    if (line_is_timer(i->line) && irq_armed(i) && irq_due(i, timer_now())) {
+        fail("armed timer line is due", v2p(i), (uint32_t)i->deadline, (uint32_t)timer_now());
     }
     /* The core that armed it wakes for the nearest deadline armed there, which this one's comes no earlier than. */
     if (line_is_timer(i->line) && irq_armed(i)) {
         if (i->core >= CORES) {
             fail("armed timer line names a core there is not", v2p(i), i->core, 0);
         }
-        uint32_t nearest = cores[i->core].nearest_deadline;
-        if ((int32_t)(i->deadline - nearest) < 0) {
-            fail("armed timer line comes due before the timer wakes for it", v2p(i), i->deadline, nearest);
+        uint64_t nearest = cores[i->core].nearest_deadline;
+        if (i->deadline < nearest) {
+            fail("armed timer line comes due before the timer wakes for it", v2p(i), (uint32_t)i->deadline,
+                 (uint32_t)nearest);
         }
     }
     /*

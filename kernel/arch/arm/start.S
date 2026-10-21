@@ -100,7 +100,7 @@ trap_vectors:
     .globl _start
     .type _start, %function
 _start:
-    /* Nothing preempts the kernel while it starts, the first tick included; trap_start lets them in. */
+    /* Nothing preempts the kernel while it starts, the timer included; trap_start lets them in. */
     cpsid   i
 #if CORES > 1
     /*

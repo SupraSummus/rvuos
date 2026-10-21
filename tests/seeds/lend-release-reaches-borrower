@@ -1,0 +1,10 @@
+# Found by the fuzzer: the third lends thread 2 its time and earns units while it waits,
+# so the release, which looks at the third's units, gives thread 2 time as the third's virtual time comes.
+actor 1 OP_POOL_ALLOC slot BOOT_CAP_POOL a1 CAP_NOTIFICATION a2 REPLAY_CAP_FREE+3 a3 0
+actor 3 OP_NOTIFY_LEND slot REPLAY_CAP_FREE+3 a1 REPLAY_CAP_THREAD a2 0
+actor 1 OP_TIME_BIND slot BOOT_CAP_TIME a1 BOOT_CAP_THREAD a2 0 a3 32 a4 0x100000
+actor 1 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 1 OP_TIME_BIND slot BOOT_CAP_TIME a1 REPLAY_CAP_THIRD a2 32 a3 8
+actor 1 OP_THREAD_RESUME slot REPLAY_CAP_THIRD
+actor 1 OP_TIME_BIND slot BOOT_CAP_TIME a1 BOOT_CAP_THREAD a2 0 a3 16
+actor 1 OP_TEST_TICK slot BOOT_CAP_TEST

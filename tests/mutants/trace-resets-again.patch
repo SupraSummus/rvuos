@@ -1,0 +1,22 @@
+A second OP_TEST_TRACE brings every virtual time to the clock again,
+so a thread with Test forgives itself what it ran ahead at will.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a call put a unit's virtual time back
+Witness: fuzz time-runs-ahead
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -88,9 +88,9 @@ static int op_test(uint32_t op, const uint32_t *arg)
+          */
+         if (!debug_trace) {
+             sched_trace_clock = counter_read();
+-            debug_trace = true;
+-            sched_vtimes_reset();
+         }
++        debug_trace = true;
++        sched_vtimes_reset();
+         return KERR_OK;
+ #endif
+     case OP_TEST_TICK:

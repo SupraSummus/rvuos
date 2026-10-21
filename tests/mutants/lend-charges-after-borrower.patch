@@ -1,0 +1,20 @@
+A lender's turn is charged after its borrower joins the run queue with a request on the lender's units,
+which brought their virtual time up to the clock first, so the counts the turn ran before are charged on top,
+and the borrower's request is over as it starts; a turn is charged at what it ran on, as it stood.
+
+Caught-by: fuzz-smp2
+Report: a place waits on the run queue with no request open on its payer
+Witness: fuzz-smp2 cores-lend-charges-first
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -928,7 +928,7 @@ void sched_lend(struct thread *t, struct notification *ntfn, struct thread *borr
+      * The turn is charged first: the borrower may start a request on the units that pay for it,
+      * which brings their virtual time up to the clock, and counts it ran before that are its to pay as they stood.
+      */
+-    uint64_t now = turn_close();
++    uint64_t now = timer_now();
+     sched_wait(t, ntfn);
+     lend_push(borrower, t);
+     if (borrower->lenders == v2p(t)) {

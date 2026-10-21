@@ -3,17 +3,17 @@ the core sleeps on with a thread waiting for its turn there, until something els
 
 Caught-by: fuzz-smp2
 Report: a thread waits for a turn on a core that idles
-Witness: fuzz-smp2 cores-moved-by-other
+Witness: fuzz-smp2 cores-actor-waits-release
 
 diff --git a/kernel/core.c b/kernel/core.c
 --- a/kernel/core.c
 +++ b/kernel/core.c
 @@ -238,7 +238,7 @@ void core_notify(struct core *c)
-      * or on spare time while a thread with time waits on its run queue, which takes the core at once.
+      * whose timer may be set past the change, or whose run queue or turn changed, which takes the core at once
+      * if the turn is on spare time or its request is due before the turn's.
       */
-     if (c != core_self() &&
--        (c->turn == NULL || (__atomic_load_n(&c->in_user, __ATOMIC_ACQUIRE) &&
-+        ((__atomic_load_n(&c->in_user, __ATOMIC_ACQUIRE) &&
-                              (c->wake_tick - c->ticks > 1 || (c->run_queue != 0 && sched_spare_turn(c)))))) {
+-    if (c != core_self() && (c->turn == NULL || __atomic_load_n(&c->in_user, __ATOMIC_ACQUIRE))) {
++    if (c != core_self() && (__atomic_load_n(&c->in_user, __ATOMIC_ACQUIRE))) {
          c->interrupt_owed = true;
      }
+ #else

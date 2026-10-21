@@ -1,0 +1,20 @@
+A turn on lent time whose thread's place there goes is not charged first,
+so the lender pays nothing for what the borrower ran before, and runs it free;
+a turn is charged as the units it runs on change, its own place's too.
+
+Caught-by: fuzz-smp2
+Report: a traced call that moved no time charged the thread whose turn it was
+Witness: fuzz-smp2 cores-lend-borrower-unbound
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -618,7 +618,7 @@ static void place_charge(struct place *p)
+ {
+     const struct thread *t = place_thread(p);
+     struct core *core = &cores[t->core];
+-    if (is_turn(t) && (turn_place(core) == p || turn_own(core) == p)) {
++    if (is_turn(t) && turn_place(core) == p) {
+         turn_charge(core);
+     }
+ }

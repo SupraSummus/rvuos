@@ -1,4 +1,4 @@
-The loop over the timer lines as the tick advances claims a bound of four,
+The loop over the timer lines as the timer looks at them claims a bound of four,
 and its own condition runs it over all sixteen.
 The code is the same; the link sees the claim is false from the loop's shape alone.
 
@@ -9,8 +9,8 @@ Witness: fuzz-work actor-handoff
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -819,7 +819,7 @@ static void tick_advance(uint32_t ticks)
-         cores[c].nearest_deadline = sched_ticks + NEAREST_NONE;
+@@ -979,7 +979,7 @@ void sched_time(uint64_t now)
+         cores[c].nearest_deadline = COUNT_NEVER;
      }
      for (uint32_t i = 0; i < TIMER_LINES; i++) {
 -        LOOP_BOUND(TIMER_LINES);

@@ -1,0 +1,22 @@
+A request starts at the place's virtual time however far behind the clock it lies.
+A thread that waited long would come back with a burst of requests due before everyone else's, and keep every other thread waiting;
+a request starts no earlier than the clock, so a thread that waits saves nothing.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
+Report: a request started elsewhere than at the later of its virtual time and the clock, within a span of it
+Witness: fuzz bind-turn-later
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -334,9 +334,7 @@ static void request_renew(struct place *p, struct place *payer, uint64_t now)
+     if (request_open(payer, p)) {
+         return;
+     }
+-    if (payer->vt < now) {
+-        payer->vt = now;
+-    }
++    (void)now;
+     p->deadline = (uint32_t)payer->vt + place_span(payer);
+     p->span = (uint8_t)((p->span & PLACE_SPAN) | PLACE_REQUEST | (payer != p ? PLACE_LENT : 0));
+ }

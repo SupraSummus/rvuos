@@ -1,6 +1,6 @@
 A notification that goes wakes every thread waiting on it before it asks
 whether an interrupt is pending, and asks only once the queue is empty,
-so a destroy takes as long as there are waiters before the tick is heard.
+so a destroy takes as long as there are waiters before the timer is heard.
 It wakes the same threads with the same status, so only the counting harness catches it.
 
 Caught-by: fuzz-work

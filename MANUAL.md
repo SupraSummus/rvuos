@@ -166,11 +166,11 @@ What rvuos is not:
   and a thread runs on the units it is bound to, each earned by one thread at a time,
   or on spare time, which nobody earned, if its capability allows,
   on the core those units are of.
-  Its account fills at its units' rate and its turns cost it the time they ran, on the machine's counter,
+  Its turns move its virtual time on by what they ran at its units' rate, on the machine's counter, and a wait forgives none of it,
   so a process that makes more threads or children gets no more of the processor than its units,
   and a thread held to its units gets no more, however idle the processor is otherwise.
 - **Timers as signals.**
-  A timer line is an interrupt line the tick raises once a delay has passed.
+  A timer line is an interrupt line the timer raises once a delay has passed.
   Sleeping is arming a timer line and waiting;
   a period counts from the last deadline, so a periodic task does not drift.
 - **A clock as a capability.**

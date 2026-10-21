@@ -123,7 +123,7 @@ enum {
 #define BIT_PING    0x1u    /* what the ponger waits for, on its own notification */
 #define MAGIC 0x5eaf00du
 
-/* Long enough to need a few ticks at the longest tick a build may have, a 650th of a second. */
+/* Long enough to span several requests of the default span, about a millisecond. */
 #define SLEEP_US 10000u
 
 /* Whose turn it is in the handshake that uses no notification. */

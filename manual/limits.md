@@ -24,10 +24,11 @@ Chapters 10 and 11 of the user manual; [`MANUAL.md`](../MANUAL.md) has its conte
 | a router's channels | 19 on the nRF52840, 4 that wire nothing on QEMU's boards, none elsewhere | `OP_CAP_INFO` on `BOOT_CAP_ROUTES` |
 | units of time | 64 of each core | `TIME_UNITS` |
 | cores | 1, or 2 on QEMU `virt`, mps2-an521 and RP2350 with `CORES=2` | Makefile; `OP_CAP_INFO` on `BOOT_CAP_TIME`, its count over `TIME_UNITS` |
-| most of its units an account holds | 100 ticks' worth, 100 ms (`ACCOUNT_TICKS`) | `kernel/timer.h` |
 | timer delay or period per call | 2^32 - 1 µs | `OP_IRQ_SET` |
 | watchdog's delay | 10 s | `WATCHDOG_US_MAX` |
-| tick, the quantum | 1 ms (`TIMER_HZ` 1000) unless the build sets another rate, `make TIMER_HZ=` | `kernel/timer.h`, Makefile; `OP_CAP_INFO` on a `Clock` or a `Time` capability |
+| default span, how soon a request is due that no wait or bind gave a span for, and a turn on spare time while another waits | the longest power of two of counts within a millisecond | `timer_default_span` in `kernel/timer.h`; `OP_CAP_INFO` on a `Clock` |
+| span, how soon a request is due | the default span, or a power of two of counts up to 2^29 | `SPAN_MAX`; `OP_TIME_BIND`, `OP_NOTIFY_WAIT`, `OP_NOTIFY_LEND` |
+| a step of the clock under tracing, `OP_TEST_TICK` | a millisecond of the counter's counts | `timer_step_counts` in `kernel/timer.h` |
 | interrupt lines | 96 on QEMU, 77 on the ESP32-C6, 52 on RP2350, 32 on mps2-an385, 48 on mps2-an521, line 0 the log's | `IRQ_LINES` |
 | smallest region | 8 bytes, or the PMP grain if coarser, 32 bytes on ARM | `region_min_size` in `kernel/pmp.h`; `OP_CAP_INFO` on any frame |
 | kernel log ring | 4 KiB less a 32-byte header | `KLOG_SIZE` |
@@ -41,15 +42,16 @@ These are documented gaps, not surprises;
 - **A watcher on ARM cannot set the flags**, nor step a thread past an instruction inside an IT block;
   `DESIGN.md`, open decision 23.
 - **No priorities and no yield.**
-  Round-robin on a tick, threads with time before threads on spare time,
-  is the whole policy, and units promise their part of the processor and a turn within 64 ticks, no more,
+  Earliest deadline first over requests, threads with time before threads on spare time,
+  is the whole policy, and units promise their part of each span of the processor, no more,
   but for the time a waiter lends the thread it names;
   `DESIGN.md`, open decisions 9 and 10.
 - **No synchronous endpoints.**
   Shared memory and notifications carry everything; open decision 5.
-- **Lent time goes one step, on a core both hold.**
+- **Lent time goes through up to 3 lenders, on a core all of them hold.**
   A thread borrows from the thread that has lent it time longest,
-  never through a borrower that waits or lends in turn, nor on a core whose time the lender does not hold;
+  and, while that one has no time for it, from that one's own first lender, and on;
+  never through a borrower that waits without lending, nor on a core whose time a lender does not hold;
   a lock that names its holder is fair only to takers that lend; open decision 27.
 - **One `Irq` per line**; open decision 11.
 - **Two cores at most**, on QEMU `virt`, mps2-an521 and RP2350;

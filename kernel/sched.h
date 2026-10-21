@@ -9,19 +9,12 @@
 #include "timer.h"
 
 /*
- * Threads' turns and the cores they take them on: the units, the accounts and the queues,
+ * Threads' turns and the cores they take them on: the units, the virtual times and the queues,
  * what each core has of its own, and the calls of sched.c and core.c.
  * See DESIGN.md, "Scheduling" and "Cores".
  */
 
 /* sched.c */
-
-/*
- * A count of the counter in the parts an account counts:
- * a unit earns one every count, a tick's counts of them every tick,
- * and a count of a turn on the thread's time costs this many.
- */
-#define COUNT_PARTS TIME_UNITS
 
 /*
  * Every core's units, TIME_UNITS of each, numbered core by core:
@@ -42,6 +35,16 @@ static inline uint32_t unit_core(uint32_t unit)
  */
 extern paddr_t unit_place[MACHINE_UNITS];
 
+/*
+ * The virtual time each unit nobody earns was left at by the place that earned it last, 0 for none:
+ * a bind takes the latest of its units', so that no thread sheds what it ran ahead of its units
+ * by handing them to another.
+ */
+extern uint64_t unit_vt[MACHINE_UNITS];
+
+/* A count no clock reaches: the time of an event that never comes. */
+#define COUNT_NEVER UINT64_MAX
+
 /* The units a place earns, none while it is empty or holds none. */
 static inline uint32_t place_units(const struct place *p)
 {
@@ -54,6 +57,47 @@ static inline bool place_spare(const struct place *p)
 {
     const struct cap *b = place_time(p);
     return b->type == CAP_TIME && (b->rights & RIGHT_X) != 0;
+}
+
+/*
+ * How far past its virtual time a place's request is due, in counts: the span its binding or its thread's last wait gave,
+ * or else the default span, the longest power of two of counts within a millisecond.
+ * It is also how long a turn on spare time lasts while another thread waits for one.
+ * See sched.c, "Requests".
+ */
+#define PLACE_SPAN 0x3fu
+static inline uint32_t place_span(const struct place *p)
+{
+    uint32_t code = p->span & PLACE_SPAN;
+    return code != 0 ? 1u << (code - 1u) : timer_default_span();
+}
+
+/*
+ * The span byte's top bit says whether the place's thread has a request there, see sched.c, "Requests":
+ * one that waits gives up the rest of its request, and one bound starts afresh, so the bit is cleared as each does.
+ * The bit below it says the request was made on a lender's units, not the place's own,
+ * so that a request is open only on the units it was made on, though its deadline lies within the other's span too.
+ */
+#define PLACE_REQUEST 0x80u
+#define PLACE_LENT 0x40u
+
+/* Whether p's thread has a request open on payer's units, p's own or its lender's: made on them, and not yet over. */
+static inline bool request_open(const struct place *payer, const struct place *p)
+{
+    uint32_t made = PLACE_REQUEST | (payer != p ? PLACE_LENT : 0);
+    return (p->span & (PLACE_REQUEST | PLACE_LENT)) == made && p->deadline - (uint32_t)payer->vt - 1 < place_span(payer);
+}
+
+/* What a place keeps of a span OP_TIME_BIND or a wait takes, a power of two up to 2^SPAN_MAX or 0; see place_span. */
+static inline uint8_t span_code(uint32_t span)
+{
+    return span != 0 ? (uint8_t)(__builtin_ctz(span) + 1u) : 0;
+}
+
+/* Whether a call may give a span: 0, or a power of two up to 2^SPAN_MAX. */
+static inline bool span_valid(uint32_t span)
+{
+    return span <= 1u << SPAN_MAX && (span & (span - 1u)) == 0;
 }
 
 /*
@@ -75,33 +119,25 @@ static inline struct place *thread_place_on(const struct thread *t, uint32_t cor
     return NULL;
 }
 
-/* A tick in parts: what a tick of a turn with time costs, and what an account holds while its thread has time. */
-static inline uint32_t tick_parts(void)
-{
-    return COUNT_PARTS * timer_tick_counts();
-}
-
-/* The parts a place's account gains every tick, a tick's counts for each unit it earns. */
-static inline uint32_t tick_gain(const struct place *p)
-{
-    return place_units(p) * timer_tick_counts();
-}
-
-/* The most a place's account holds: a tenth of a second's worth of its units, none without. */
-static inline uint32_t account_cap(const struct place *p)
-{
-    _Static_assert((uint64_t)TIME_UNITS * (ACCOUNT_TICKS + 1) * TICK_COUNTS_MAX <= UINT32_MAX,
-                   "the cap and a tick's gain besides fit a word");
-    return tick_gain(p) * ACCOUNT_TICKS;
-}
+/*
+ * Deadlines are compared modulo 2^32, so each lies within 2^31 counts of the others on its run queue:
+ * a request lies a span past the virtual time it starts at, which lies at most a span past the count,
+ * and one past due lies behind the count by less than a span, which the order meets.
+ */
+_Static_assert(3ull << SPAN_MAX < 1ull << 31, "a deadline lies within 2^31 counts of the others");
+/*
+ * How many lenders lent time goes through: a borrower's first lender with no time of its own lends what it borrows,
+ * so a client's account pays for its server and for the driver its server waits on.
+ */
+#define LEND_DEPTH 3u
 
 /*
  * The ready threads whose turn it is nowhere wait on three queues of each core they hold the time of, by their place there,
  * each a ring of places through queue_next and queue_prev, oldest first, 0 when empty:
- * the run queue those with a tick in their place's account,
+ * the run queue those with time, a request open on their units or their lender's,
  * the spare queue those without that may run on spare time,
- * and the spent queue those with units, and no spare time, that wait for their account to reach a tick.
- * The oldest on the run queue has the next turn, or when it is empty the oldest on the spare queue,
+ * and the spent queue those with units, and no spare time, that wait for their virtual time to come.
+ * The one due first on the run queue has the next turn, or when it is empty the oldest on the spare queue,
  * and a thread that becomes ready joins behind the newest of its queue on each of its cores.
  * A place keeps the index of the one it waits on, QUEUE_NONE for none, and the core.
  */
@@ -115,15 +151,9 @@ enum { QUEUE_NONE, QUEUE_RUN, QUEUE_SPARE, QUEUE_SPENT, QUEUES };
 extern uint32_t armed_sources;
 
 /*
- * How far ahead of the count a core's nearest deadline or release lies while it has none,
- * as far as a signed difference reaches.
- */
-#define NEAREST_NONE 0x7fffffffu
-
-/*
  * What each core has of its own: its thread, its turn, its queues, its release, its nearest deadline, its timer,
  * the call it is in, what it tells the others, and what another core's stop left its trap to drop.
- * The units, the tick count and the lines are the machine's.
+ * The units, the clock and the lines are the machine's.
  * Every core's is the others' to read and change under the kernel's lock, in_user aside; see DESIGN.md, "Cores".
  */
 struct core {
@@ -137,26 +167,17 @@ struct core {
     struct thread *turn;
 
     /*
-     * The thread whose account pays for the turn while the turn's thread runs on lent time, NULL while it pays itself:
+     * The thread whose units pay for the turn while the turn's thread runs on lent time, NULL while it pays itself:
      * a thread with a place on this core that lends the turn's thread its time while it waits; see OP_NOTIFY_LEND.
-     * It is charged as the turn's thread would be, and counted to the core's count while it pays,
-     * and it pays until the turn ends, or takes the turn over as the turn's thread wakes it.
+     * It is charged as the turn's thread would be, and pays until the turn ends, or takes the turn over as the turn's thread wakes it.
      */
     struct thread *payer;
 
-    /*
-     * The machine's tick the core has counted to, and charged its turn to:
-     * a trap on the core counts up to the machine's count as it begins,
-     * so it lags while the core runs on without trapping, and another core counted the ticks since.
-     */
-    uint32_t ticks;
+    /* The count the turn has been charged to, from which its payer owes what it runs; see turn_close in sched.c. */
+    uint64_t turn_from;
 
-    /*
-     * How far into the tick the turn has been charged, in counts, at most a tick's:
-     * the turn's thread owes the counts from here to where the counter is.
-     * Under tracing the clock is the tick count alone, so it is always zero.
-     */
-    uint32_t turn_from;
+    /* The count the turn began at, which a turn on spare time lasts a span from while another waits for one. */
+    uint64_t turn_began;
 
     /* The heads of the three queues, each the oldest place on it; see QUEUE_RUN. */
     paddr_t run_queue;
@@ -164,34 +185,34 @@ struct core {
     paddr_t spent_queue;
 
     /*
-     * The tick the kernel next looks at the threads with units that wait without time,
-     * to give those with a tick time again:
-     * the nearest tick one of their accounts reaches a tick, or NEAREST_NONE ticks ahead of the count with none.
+     * The count the kernel next looks at the places with units of the core that wait without time,
+     * to give those whose virtual time has come within a span of the clock time again:
+     * the earliest such count, or COUNT_NEVER while nobody waits on the spare and spent queues.
      * A thread brings it forward as it waits without time, and the look makes it exact again,
-     * so it may lie before the nearest such tick but never after one, and always ahead of the count.
+     * so it may lie before the earliest such count but never after one, and always ahead of the count.
      */
-    uint32_t nearest_release;
+    uint64_t nearest_release;
 
     /*
-     * The tick the core's timer has to interrupt at for the timer lines armed on it, see struct irq,
+     * The count the core's timer has to interrupt at for the timer lines armed on it, see struct irq,
      * and for the watchdog if it fed it last:
-     * the nearest deadline of these, or NEAREST_NONE ticks ahead of the count with none.
-     * An arm brings it forward, and a tick, which looks at every line, makes every core's exact again,
+     * the nearest deadline of these, or COUNT_NEVER with none.
+     * An arm brings it forward, and the timer's look at every line makes every core's exact again,
      * so it may lie before the nearest such deadline but never after one, and always ahead of the count.
      */
-    uint32_t nearest_deadline;
+    uint64_t nearest_deadline;
 
     /*
-     * The tick the timer is set for, whether a change since may call for another,
-     * and whether a trap's count has reached it, which ends the turn as that trap returns.
-     * Settling a thread, binding or unbinding one, a switch, a tick, an arm and the stall mark it stale.
-     * The marks of a switch and a bind only let the timer be set further sooner, so no check misses them.
+     * The count the timer is set for, sched_wake's, and whether a change since may call for another.
+     * Settling a thread, binding or unbinding one, a switch, the timer, an arm and the stall mark it stale.
      */
-    uint32_t wake_tick;
+    uint64_t wake_at;
     bool wake_stale;
+
+    /* Whether the timer found the turn's request over, or its span on spare time run, which ends the turn as the trap returns. */
     bool turn_due;
 
-    /* Whether a walk stopped where OP_TEST_PREEMPT armed it, which the call's dispatch turns into a tick. */
+    /* Whether a walk stopped where OP_TEST_PREEMPT armed it, which the call's dispatch turns into a record's step of time. */
     bool preempt_stopped;
 
     /*
@@ -200,6 +221,12 @@ struct core {
      * and cleared as a call ends without stopping, or another thread runs; see spare_end in sched.c.
      */
     bool recall;
+
+    /*
+     * Whether a place joined the run queue, or the thread whose turn it is or pays for changed,
+     * since the core last looked for a deadline before the turn's; see spare_end.
+     */
+    bool run_stale;
 
     /* The bits the last wake handed over, zero if none; for the trace. */
     uint32_t trace_wake_bits;
@@ -295,9 +322,9 @@ bool core_thread_stopped(const struct thread *t);
 void core_thread_gone(const struct thread *t);
 
 /*
- * The thread a trap from user mode is for, once the trap has the lock and has counted its ticks:
+ * The thread a trap from user mode is for, once the trap has the lock and has looked at the timer:
  * the core's running thread, or NULL if another core stopped or destroyed it while the trap waited for the lock,
- * when what it trapped for is dropped and the turn ends as at a tick; see DESIGN.md, "Cores".
+ * when what it trapped for is dropped and the turn ends; see DESIGN.md, "Cores".
  * The stopping core marked the trap, and the mark decides, not the state:
  * another call may have resumed the thread in between, and it then joins its queue as the turn ends.
  */
@@ -305,7 +332,7 @@ struct thread *core_trapped(void);
 
 /*
  * A thread became ready on a core, or brought its release forward:
- * the core sets its timer again, and is interrupted for it unless it does so within a tick,
+ * the core sets its timer again, and is interrupted for it if it runs user mode or idles,
  * once this core gives the lock up, so that it does not wait for the lock as it wakes.
  */
 void core_notify(struct core *c);
@@ -318,7 +345,7 @@ void core_interrupt_later(struct core *c);
 
 /*
  * Whether this trap made a change only its end makes known, which a walk stops for:
- * a thread with time ready here while the timer lies past the next tick,
+ * a thread with time ready here, whose request may be due before the turn's,
  * or another core owed an interrupt, see core_notify.
  * The trap's end sets the timer and sends the interrupts, so the call made again does not stop for the same change.
  * Unlike core_notify's, a turn on spare time is no reason: a stopped call is made again first, see recall in struct core.
@@ -350,7 +377,7 @@ void irq_signal(struct irq *irq);
  */
 void irq_drop(struct cap *signalled);
 
-/* Make a stopped or woken thread ready: it joins the back of the queue its account puts it on, if it may run. */
+/* Make a stopped or woken thread ready: it joins the back of the queue its virtual time puts it on, if it may run. */
 void sched_ready(struct thread *t);
 
 /*
@@ -361,16 +388,24 @@ struct place *sched_place_for(const struct thread *t, uint32_t core);
 
 /*
  * Bind a thread's place, sched_place_for's, to count units from first, with rights, as a node below parent;
- * it leaves the units it earned, and keeps what its account held, up to what the new units hold at most.
+ * it leaves the units it earned, which keep its virtual time, and takes the latest of its own and the new units'.
  * A place bound to none without spare time holds the core's time all the same: its thread runs there on lent time alone.
  * No other thread earns any of the units; the caller has made sure.
- * A ready thread whose turn it is nowhere joins the back of the queue its account puts it on, on each of its cores.
+ * A ready thread whose turn it is nowhere joins the back of the queue its virtual time puts it on, on each of its cores.
+ * Its requests are due span counts past its virtual time, a power of two, or the default span for 0, and the first starts now.
  */
-void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights, struct cap *parent);
+void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights, struct cap *parent, uint32_t span);
+
+/*
+ * A thread that waits gives the span its requests are due within on each of its cores, from the one its wake begins on,
+ * a power of two up to 2^SPAN_MAX.
+ * See sched.c, "Requests".
+ */
+void sched_span(struct thread *t, uint32_t span);
 
 /*
  * Clear a place's units the tree has already let go of:
- * nobody earns them any more, its account is emptied, and the place leaves the queue it waited on.
+ * nobody earns them any more, they keep the place's virtual time, and the place leaves the queue it waited on.
  */
 void sched_unbind(struct cap *bound);
 
@@ -392,37 +427,36 @@ void sched_unhost(struct cap *hosted);
 uint32_t sched_stop(struct thread *t);
 
 /*
- * Fill the account of every thread with units, and put each on the queue that puts it on.
+ * Bring every virtual time to the count, the places' and the units' nobody earns,
+ * as if every thread had waited a while, and put each place on the queue that puts it on.
  * The boot calls it once the root thread is bound, and OP_TEST_TRACE does.
  */
-void sched_accounts_fill(void);
+void sched_vtimes_reset(void);
 
 /* Start running a thread with nothing else run before it; the boot's. */
 void sched_start(struct thread *t);
 
 /*
- * Ticks so far, on the whole machine.
- * Only a trap's count of the ticks, the stall's and OP_TEST_TICK move it,
- * and the deadlines of timer lines are counted in it.
- * Each core counts up to it as its traps begin; see struct core.
+ * The clock under tracing, where time moves only by record: OP_TEST_TICK moves it a step, timer_step_counts.
+ * See timer_now.
  */
-extern uint32_t sched_ticks;
+extern uint64_t sched_trace_clock;
 
 /*
  * The machine's watchdog, which OP_CLOCK_WATCHDOG arms and feeds:
- * once armed, the tick count reaching its deadline halts the machine.
+ * once armed, the clock reaching its deadline halts the machine.
  * The core that fed it last wakes for its deadline, as for a timer line it armed; see struct core.
  * See DESIGN.md, "The watchdog".
  */
 struct watchdog {
     bool armed;
     uint8_t core;
-    uint32_t deadline;
+    uint64_t deadline;
 };
 extern struct watchdog watchdog;
 
-/* Arm the watchdog, or move its deadline, to a tick ahead of the count, and have this core wake for it. */
-void sched_watchdog(uint32_t deadline);
+/* Arm the watchdog, or move its deadline, to a count ahead of the clock, and have this core wake for it. */
+void sched_watchdog(uint64_t deadline);
 
 /*
  * Set bits on a notification and wake a thread waiting on it, if any:
@@ -459,70 +493,68 @@ void sched_call_end(void);
  * or stop the machine once nothing can ever run again.
  * The architecture's core_idle calls it as a trap ends with nobody's turn, and as a core starts.
  * Each wait is the two halves below, which the host calls for a core of several on their own:
- * sleep stops the machine if nothing can ever run again, else returns the ticks to the one to wait for;
- * wake takes what the wait counted and the interrupts it found, and gives a thread its turn, if one may have it.
+ * sleep stops the machine if nothing can ever run again, else returns the count to wait until, COUNT_NEVER for none;
+ * wake takes the interrupts the wait found, and gives a thread its turn, if one may have it.
  */
 void sched_idle(void);
-uint32_t sched_idle_sleep(void);
-bool sched_idle_wake(uint32_t ticks, bool device);
+uint64_t sched_idle_sleep(void);
+bool sched_idle_wake(bool device);
 
 /*
- * The timer tick: charge the ticks that passed to the thread whose turn it is, count them,
- * fire every timer line that is due, give time again to the threads whose account reached a tick,
- * and end the running thread's turn: it is charged for the counts it ran past the tick,
- * goes to the back of the queue its account puts it on, and the next thread has its turn.
- * OP_TEST_TICK calls it; the interrupt does the same through sched_count and sched_wake.
+ * OP_TEST_TICK, under tracing: the clock moves a step, timer_step_counts, the timer does what is due by then,
+ * see sched_time, and the running thread's turn ends: it goes to the back of the queue its virtual time puts it on,
+ * and the next thread has its turn.
  */
-void sched_tick(uint32_t ticks);
+void sched_tick(void);
 
 /*
  * The turn ends: the thread whose turn it was is charged for it
- * and goes to the back of the queue its account puts it on, if it may run, and the next thread has its turn.
+ * and goes to the back of the queue its virtual time puts it on, if it may run, and the next thread has its turn.
  * One that lost its units during its turn goes nowhere, and without it the queues may be empty.
- * The tick ends a turn so, and so does a trap another core marked to be dropped, see core_trapped.
+ * The timer ends a turn so, and so does a trap another core marked to be dropped, see core_trapped.
  */
 void sched_turn_end(void);
 
 /*
- * The ticks a trap found passed since the last counted one, which the timer did not interrupt for:
- * charge and count them as sched_tick does, with those other cores counted since this one last did,
- * and note whether they reached wake_tick.
- * Every trap calls it on entry, with none under tracing, so the count is current before anything reads it.
+ * The timer, at the count now: fire every timer line that is due, halt the machine if the watchdog is,
+ * give time again to the places of every core whose virtual time came,
+ * and end the turn if its request is over, or if it ran a span on spare time while another waits for spare time.
+ * A trap from user mode calls it as it begins, once the clock reached what the timer was set for, untraced,
+ * and so does the stall, and OP_TEST_TICK.
  */
-void sched_count(uint32_t ticks);
+void sched_time(uint64_t now);
 
 /*
- * The trap is over: end the turn if its count reached wake_tick, untraced,
- * and if wake_tick is stale return the ticks from the count to the next the timer has to interrupt at,
- * one being the next, which becomes wake_tick; zero if the timer is right as it is.
+ * The trap is over: end a turn that may not run on, and the turn on spare time a thread with time waits for,
+ * and say whether the timer is to be set again, to *at, since a change marked it stale.
  * Every trap calls it on its way back, and the host after every call, so that the self-check can hold it.
  */
-uint32_t sched_wake(void);
+bool sched_wake(uint64_t *at);
 
 /*
- * Whether a core's turn runs on spare time: nobody pays for it, its thread having less than a tick in its place there,
- * or no place there at all, and no lender paying,
- * as was decided when the turn began or at the last tick, or since, by a bind or an unbind that emptied the account
- * or the destroy of its payer.
- * Inline, since core_notify asks it on the stack's deepest path; see DESIGN.md, "Bounded stack".
+ * Whether a core's turn runs on spare time: nobody pays for it,
+ * the units of its payer, its own or a lender's, having no request of its thread open on them, or there being none,
+ * as the payer's virtual time stood when it was last charged.
  */
 static inline bool sched_spare_turn(const struct core *c)
 {
-    if (c->turn == NULL || c->payer != NULL) {
+    if (c->turn == NULL) {
         return false;
     }
-    const struct place *p = thread_place_on(c->turn, (uint32_t)(c - cores));
-    return p == NULL || p->balance < tick_parts();
+    uint32_t core = (uint32_t)(c - cores);
+    const struct place *own = thread_place_on(c->turn, core);
+    const struct place *p = c->payer != NULL ? thread_place_on(c->payer, core) : own;
+    return p == NULL || own == NULL || place_units(p) == 0 || !request_open(p, own);
 }
 
 /*
- * The ticks from the count to the first that could change what runs, at least one:
- * the next while a thread other than the running one could have the next turn,
- * else the nearest of the deadline, the release, and the tick the running thread's account drains
- * while that ends its turn.
+ * The count the timer is to interrupt at, the first that could change what runs, COUNT_NEVER for none:
+ * the nearest deadline and release of the core,
+ * the end of the turn's request unless its thread may go on alone on spare time,
+ * and a span into a turn on spare time while another waits for spare time.
  * See DESIGN.md, "Scheduling".
  */
-uint32_t sched_wake_ticks(void);
+uint64_t sched_next_wake(void);
 
 /*
  * A device interrupt on a line: the Irq armed on it masks the line,

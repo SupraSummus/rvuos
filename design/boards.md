@@ -26,7 +26,7 @@ The kernel:
    the machine's counter as a `Clock`,
    every line of the interrupt controller with the log's line before them,
    and every unit of the processor's time, with its own thread earning them all,
-6. programs the tick, masks every interrupt line,
+6. starts the timer, masks every interrupt line,
    starts the other cores, which idle until a thread is bound to their units, see "Cores",
    and drops to user mode into the root task.
 
@@ -102,7 +102,7 @@ which `kernel/layout.h` and both linker scripts read,
 whether it transposes R and X in `pmpcfg`, `PMP_CFG_RX_TRANSPOSED`,
 and the finest grain it may have, `PMP_GRAIN_MIN`;
 `board.c`, what the board needs before anything else and the CSRs it sets back for each process;
-`timer.c`, which starts the timer, and on ARM has the counter the tick compares with;
+`timer.c`, which starts the timer, and on ARM has the counter the timer compares with;
 `irq.c`, but on ARM, where the NVIC is the architecture's, and `halt.c`;
 `console.h`, the device behind `BOOT_CAP_UART` as the root task drives it;
 `devices.h`, the slots of the devices the boot grants, as many as `board.h` lists;
@@ -128,14 +128,14 @@ since the rest of LPPERI reaches the LP domain's clocks and resets,
 and the IO MUX and the GPIO matrix, the pins, which a program sets as its board wires them,
 as the Wi-Fi system's root task sets the XIAO's RF switch;
 the nRF52840 lists GPIO, both ports in one block, which `user/blink.c` drives, and its radio, which `user/thread/` drives,
-with TIMER2 for what is shorter than a tick, as the kernel's timer keeps TIMER0 and TIMER1,
+with TIMER2 for what is shorter than a kernel's step, as the kernel's timer keeps TIMER0 and TIMER1,
 and TIMER3 and TIMER4, which routes wire to the radio;
 QEMU lists none, since its devices are the kernel's or the console, and the host build has no hardware;
 nor do the MPS2 boards yet.
 So on QEMU `BOOT_CAP_COUNT` is 21, the number the seeds and the corpus are written for.
 A device that is a bus master reaches whatever its driver points it at, so its frame is the machine's:
 the ESP32-C6's modem and the nRF52840's radio are those a board lists, each for a driver the root task trusts with all RAM; open decision 13.
-Nor does it list the devices the kernel drives itself, the timer under the tick and the watchdog:
+Nor does it list the devices the kernel drives itself, the timer and the watchdog:
 a program reaches those through the clock's operations, which every board can answer; see "The watchdog".
 
 **Routers.**
@@ -224,7 +224,7 @@ The layout is QEMU virt's, moved to SSRAM1 at 0;
 the console is UART0 of the CMSDK, whose transmitter latches its interrupt as each byte leaves.
 The clock's counter is the FPGA's `COUNTER`, 32 bits at 25 MHz with the prescaler above it,
 so it wraps every 171 seconds;
-the kernel counts the wraps for its tick and for `OP_CLOCK_READ`, see `kernel/board/mps2/timer.c`.
+the kernel counts the wraps for its timer and for `OP_CLOCK_READ`, see `kernel/board/mps2/timer.c`.
 Measured under QEMU 8.2: eight MPU regions and a bkpt taken as a HardFault, DebugMonitor or not.
 QEMU 8.2's `wfe` only yields to another core; from QEMU 11.0 it sleeps until an event,
 and only an external line becoming pending is one there, not SysTick, as it is on RP2350's Cortex-M33.
@@ -343,7 +343,7 @@ the MPU and the Security state are where they differ.
 The kernel's objects, its capabilities and every operation are the same on both,
 and so is `user/init/`, which runs the same demo to the same transcript.
 What differs is what a trap is, which registers carry a call, how a region is written to the hardware,
-and which counter and compare the tick is made of;
+and which counter and compare the timer is made of;
 `arch.h` says the first two to the rest of the kernel,
 the architecture's `start.S` and `trap.c` take the trap,
 its `frame.c` starts a thread, reports a fault and reads and writes a stopped thread's registers,
@@ -398,7 +398,7 @@ resumes past it and restarts at it.
 A call may be pending as another exception is taken.
 Of exceptions of one priority the architecture takes the lowest number first,
 so a fault, an imprecise BusFault of a store before the `svc` among them, before the call by rule,
-and the call before the tick and the lines;
+and the call before the timer and the lines;
 yet the nRF52840's Cortex-M4 was seen to take a SysTick with the thread's SVCall pending and its pc past the `svc`.
 Either way the trap may hand the core to another thread, for which the SVCall would then be taken, with its registers,
 while the caller went on as if its call had returned what it handed it.
@@ -425,7 +425,7 @@ and the thread stops with its frame as it was, as any fault stops it.
 So a sp that points anywhere costs its thread a fault and nothing more,
 and a thread's sp must always leave 32 bytes below it in memory it may write, as a thread's stack does.
 
-**The tick and the controller.**
+**The timer and the controller.**
 SysTick, which every Cortex-M has, is the compare: a 24-bit down-counter,
 set for what is left before the compare and set again each time it fires until the counter reaches it,
 `kernel/arch/arm/systick.c`;

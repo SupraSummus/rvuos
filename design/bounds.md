@@ -5,12 +5,12 @@ Part of the design document; [`DESIGN.md`](../DESIGN.md) lists every section and
 ## Bounded work
 
 **The rule.**
-The work of a system call, a tick or an interrupt
+The work of a system call, the timer or an interrupt
 is bounded by constants of the machine and the kernel:
 PMP entries, interrupt lines, timer lines, units of time, region slots, the size of an object.
 It does not grow with how many objects, pools or capabilities exist.
 Otherwise a process with one small pool allocates thousands of minimal objects,
-and every tick and every interrupt, other processes' included,
+and every timer and every interrupt, other processes' included,
 gets that much slower.
 A bound that grows as the logarithm of memory, as a balanced tree's depth does, is open decision 38.
 
@@ -28,8 +28,8 @@ What it costs is latency, and preemption is the answer to that.
 A revoke, a delete below a root, a pool destroy, and the revoke that begins a bind
 take one step per capability, object or waiter in constant time
 and ask `intr_pending` between two steps.
-If the tick or a device interrupt is pending, or another core waits for the kernel's lock, the walk stops,
-and so it does where its step made ready a thread with time while the core's timer lies past the next tick,
+If the timer or a device interrupt is pending, or another core waits for the kernel's lock, the walk stops,
+and so it does where its step made ready a thread with time, whose request may be due before the turn's,
 or owes another core an interrupt, which goes out only as the lock is given up:
 a pool destroy that wakes a waiter would otherwise hold it for the rest of the walk.
 `syscall_dispatch` puts the thread back on its `ecall` with its registers as they were,

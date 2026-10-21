@@ -59,12 +59,12 @@ and so is a code that is no operation's on any capability, 0, 11, 27, or `OP_COU
 What an operation reads its description says; three read by their own values:
 `OP_POOL_ALLOC` of a notification no `a3`, `OP_THREAD_WATCH` with no bits no `a1`,
 and `OP_IRQ_SET` with no bits, or of a line that is no timer's, no `a2` or `a3`.
-`a4` is read only by `OP_POOL_ALLOC` of a process or a thread, `a5` and `a6` by no operation, and none of them is checked yet.
+`a4` is read only by `OP_POOL_ALLOC` of a process or a thread and by `OP_TIME_BIND`, `a5` and `a6` by no operation, and none of them is checked where unread.
 
 A call whose work grows with the derivation tree or with a pool can be interrupted and made again:
 `OP_CAP_REVOKE`, `OP_CAP_DELETE` of a root with capabilities below it,
 and `OP_IRQ_BIND`.
-When the tick or a device interrupt comes due while such a call works,
+When the timer or a device interrupt comes due while such a call works,
 the kernel stops it between two capabilities or two objects
 and resumes the thread at its `ecall`, or its `svc`, with every register as it was,
 so the thread makes the same call again when it next runs,
@@ -112,20 +112,20 @@ Does not return.
 
 **`OP_TEST_TRACE` (10)**, on `Test`.
 Turns tracing and self-checking on; see section 9.
-Every thread's account is filled, section 5.11.
+The clock goes on from the counter, moved only by `OP_TEST_TICK` from then on, and every virtual time is brought to it, section 5.11.
 Cannot be turned off again,
 and once tracing is on the call changes nothing.
 A kernel built without the self-check, section 9, fails it with `KERR_WRONG_TYPE`.
 
 **`OP_TEST_TICK` (17)**, on `Test`.
-Does what the timer tick does, on request:
-time moves by one tick, charged to the caller if it had time as its turn began, every due timer line fires,
-every thread whose account reached a tick has time again,
+Does what the timer does, on request, a step of the clock on:
+the clock moves a millisecond of the counter's counts, charged to the caller as it ran, section 5.11, every due timer line fires,
+every thread whose virtual time came has time again,
 the caller's turn ends as section 5.11 says,
 and the caller stays ready.
-Works while tracing is on, unlike the tick itself,
+Works while tracing is on, unlike the timer itself,
 and fails with `KERR_STATE` while it is off,
-since a tick no time brought would have every deadline fire early.
+since a step no time brought would have every deadline fire early.
 
 **`OP_TEST_IRQ` (22)**, on `Test`.
 `a1` = a line.
@@ -138,12 +138,12 @@ the `Irq` armed on it masks the line and signals its bits.
 `a1` = n.
 The n-th place from now at which a restartable call could stop between two steps, it stops,
 whether or not an interrupt is pending, and `OP_TEST_TICK` is done there:
-time moves by one tick, and the caller's turn ends with the caller ready at its `ecall`,
+the clock moves a step, and the caller's turn ends with the caller ready at its `ecall`,
 so another thread may run before the caller makes its call again.
 Every such place counts, in whichever thread's call;
 a call that finishes first leaves the rest of n to the next one.
 Zero disarms it, and a second call counts n anew.
-Works while tracing is on, when the tick stops no call,
+Works while tracing is on, when the timer stops no call,
 and fails with `KERR_STATE` while it is off, as `OP_TEST_TICK` does.
 
 ### 6.4 Operations on `CapTable`
@@ -347,7 +347,7 @@ and a watcher may answer the wait instead, writing `a0`, `a1` and the pc past th
 On ARM a thread whose core could not stack its registers as it trapped for the stop has lost them, section 5.6:
 the stop leaves it stopped where it faulted, `OP_THREAD_FAULT` telling the stacking fault.
 The caller may stop itself, through a capability to its own thread, and goes on past the call once resumed.
-Units, account, process, watch and lenders stay, and nothing is signalled, the watch included; section 5.6.
+Units, virtual time, process, watch and lenders stay, and nothing is signalled, the watch included; section 5.6.
 
 **`OP_THREAD_WATCH` (31).**
 `a1` = slot of a `Notification` capability, which needs `RIGHT_W`, and may lie in any pool;
@@ -405,6 +405,9 @@ and otherwise, today, the one that has waited longest.
 
 **`OP_NOTIFY_WAIT` (15).**
 Needs `RIGHT_R`.
+`a1` = the span: how soon the request the wake begins is due, in counts of the counter past the thread's virtual time,
+on every core whose time it holds, a power of two up to 2^29, `SPAN_MAX`, `KERR_INVALID_ARG` otherwise;
+zero keeps the span the thread had, its binding's or its last wait's, and a span given holds until another, section 5.11.
 Blocks until some bit is set, then returns `a1` = the bits and clears them.
 Returns `KERR_INVALID_CAP` with no bits
 if the notification's pool is destroyed while the thread waits.
@@ -413,8 +416,9 @@ A stop leaves the waiter at this call, which a resume makes again; `OP_THREAD_ST
 **`OP_NOTIFY_LEND` (38).**
 Needs `RIGHT_R`.
 `a1` = slot of a `Thread` capability with `RIGHT_X`, the borrower; the caller itself is `KERR_INVALID_ARG`.
+`a2` = the span, as `OP_NOTIFY_WAIT`'s `a1`, which the borrower's requests on the caller's time are due within too.
 Waits as `OP_NOTIFY_WAIT` does, and returns at once, lending nothing, if some bit is set.
-While it waits, a borrower without time of its own on a core runs there on the account of the thread that has lent it time longest,
+While it waits, a borrower without time of its own on a core runs there on the units of the thread that has lent it time longest,
 if that one holds the time of that core too,
 and a caller whose own time pays for its turn hands the rest of the turn to the borrower,
 if it is that one and the borrower waits for a turn; section 5.12.
@@ -463,8 +467,8 @@ Needs `RIGHT_W`.
 `KERR_NO_RIGHTS` if none; unmasks the line.
 `a1` = 0 masks the line; it takes back no signal that already happened.
 On the log's line, arming while bytes are untaken signals at once.
-On a timer line, `a2` = the delay in microseconds, and the line fires
-at the first tick that surely lies past it, section 5.8;
+On a timer line, `a2` = the delay in microseconds, rounded up to whole counts of the counter, and the line fires
+at the first count past the call by that many, section 5.8;
 elsewhere `a2` is unused.
 A delay longer than 32 bits of microseconds, about 71 minutes, is several calls.
 On a timer line, `a3` = 0 or `IRQ_SET_PERIOD`, and unused elsewhere.
@@ -483,7 +487,7 @@ Returns the time, the counter's counts since boot, in `a1` (low word) and `a2` (
 `a3` = the counter's rate in hertz, which does not change while the machine runs,
 and `a4` = the address of the counter's low 32 bits, which `OP_CLOCK_FRAME` shows.
 The time is 64 bits on every board, whatever the width of the board's counter.
-Under tracing it is the counts of the ticks so far, section 9.
+Under tracing it is the record's clock, which only `OP_TEST_TICK` moves, section 9.
 
 **`OP_CLOCK_FRAME` (26).**
 `a1` = destination slot in the caller's tables.
@@ -497,7 +501,7 @@ On a PMP grain coarser than eight bytes the frame holds the registers beside the
 `a1` = microseconds, more than zero and at most `WATCHDOG_US_MAX`, ten seconds (`KERR_INVALID_ARG`).
 Arms the machine's watchdog, or moves its deadline, nearer or further:
 the machine halts with code 7 unless the call comes again within `a1` microseconds,
-at the first tick that surely lies past them, as a timer line fires, section 5.8.
+at the first count past the call by at least that many, as a timer line fires, section 5.8.
 Nothing disarms it, and every capability to the clock with `RIGHT_W` feeds the same one.
 Until it is first armed nothing halts the machine for want of feeding, RP2350's own watchdog aside, section 3.
 
@@ -513,7 +517,10 @@ Needs `RIGHT_W`.
 `a1` = slot of the `Thread` capability, with `RIGHT_W`,
 `a2` = the first unit, as an offset from the capability's first
 (`KERR_INVALID_ARG` past the last, even for none),
-`a3` = how many units (`KERR_INVALID_ARG` past the last), zero for none.
+`a3` = how many units (`KERR_INVALID_ARG` past the last), zero for none,
+`a4` = the span, how soon each of the thread's requests on the core is due, in counts of the counter past its virtual time,
+until a wait gives another: zero for the default span, the longest power of two of counts within a millisecond, or a power of two up to 2^29, `SPAN_MAX`,
+`KERR_INVALID_ARG` otherwise; section 5.11.
 The units must all be of one core, `KERR_INVALID_ARG` otherwise, the first unit's with none: the core the bind is of.
 It fills the thread's place that holds that core's time, or an empty one, section 5.11,
 and fails with `KERR_LIMIT` when every place holds another core's;
@@ -522,16 +529,14 @@ Fails with `KERR_OVERLAP` if another thread earns one of the units.
 The place leaves the units it earned, whoever bound it to them,
 and earns these; with `RIGHT_X` on the invoked capability the thread runs on that core's spare time too.
 None without `RIGHT_X` holds the core's time all the same: the thread runs there on lent time alone, section 5.12.
-Its account keeps what it held, up to what the new units hold at most,
-and a ready thread joins the back of the queue its account puts it on, section 5.11.
+The units it leaves keep its virtual time, and it takes the latest of its own and the new units',
+so no bind forgives what a thread ran ahead of its units;
+its request starts afresh, and a ready thread joins the back of the queue its virtual time puts it on, section 5.11.
 Its hold on the units hangs below the invoked capability,
 so revoking below that capability empties the place:
-its account is emptied, and a thread whose places are all empty keeps its state and does not run until it is bound again.
-A thread whose place is emptied or bound anew while it runs there, the caller itself for one, finishes the turn it had:
-only a wait, the tick, a fault, section 5.6, a revoke that takes its own process, section 6.4,
-a signal that wakes the thread paying for its turn, section 5.12,
-or a thread with time that becomes ready while the turn runs on spare time, section 5.11, takes the processor from it,
-and an unbind that empties the account leaves the rest of the turn on spare time.
+a thread whose places are all empty keeps its state and does not run until it is bound again.
+A thread whose place is emptied or bound anew while it runs there, the caller itself for one, goes on while it has time or spare time,
+and gives the processor up as the trap ends otherwise.
 
 ### 6.14 Operations on `RouteLine` and `Route`
 
@@ -593,10 +598,10 @@ and in `a2` to `a4` what the capability names, by its type:
 | `Notification` | the bits it may signal, never those set | 0 | 0 |
 | `IrqLine` | the first line | the count | 1 for timer lines, 0 for the log's and the controller's |
 | `Irq` | its line | the bits it may signal, 0 once its notification was taken, never those it is armed with | 1 on a timer line, else 0 |
-| `Time` | the first unit | the count | the tick in microseconds |
+| `Time` | the first unit | the count | 0 |
 | `RouteLine` | the first channel | the count | 0 |
 | `Route` | its channel | the ends connected, bit `ROUTE_EVENT` and bit `ROUTE_TASK` | 1 while armed, else 0 |
-| `Clock` | the counter's rate in hertz, as `OP_CLOCK_READ`'s | the tick in counts of the counter | the tick in microseconds |
+| `Clock` | the counter's rate in hertz, as `OP_CLOCK_READ`'s | the default span in counts of the counter, section 5.11 | 0 |
 | `Print`, `Halt`, `Test` | 0 | 0 | 0 |
 
 Describing grants nothing:
@@ -608,7 +613,7 @@ though an Untyped's base may be where a pool made of it keeps its descriptor;
 nor the bits a notification holds, nor the time, which only `RIGHT_R` reads.
 Unit `u` of a `Time` capability is of core `u / TIME_UNITS`,
 so `BOOT_CAP_TIME`'s count is `TIME_UNITS` for each core the kernel runs, section 5.11.
-The tick is the quantum, which bounds a turn while tracing is off, section 5.11.
+The default span is how soon a request is due that no wait or bind gave a span for, and how long a turn on spare time lasts while another waits for one, section 5.11.
 What lies below an Untyped is as the call found it, one kind of what may be a mixture once a delete handed things up, section 5.4,
 and a pool's room is as the call found it; a call on another core may change either at once.
 A pool that nothing names any more shows as `CAP_POOL` below its Untyped, until a revoke below the Untyped destroys it;

@@ -1,0 +1,20 @@
+A turn that starts its next request as its core looks at it again leaves the timer as it was set.
+The timer would let the new request's end pass, and a thread without spare time run on past what its units paid for;
+a request's end is the timer's to mark.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: the timer lets the end of the turn's request pass
+Witness: fuzz lend-lender-goes-renews
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -1356,8 +1356,6 @@ static __attribute__((noinline)) bool deadline_due(struct core *core)
+             return core->run_queue != 0;
+         }
+         request_renew(own, p, now);
+-        /* Its end is the timer's to mark. */
+-        core->wake_stale = true;
+     }
+     return core->run_queue != 0 && due_before(run_earliest(core)->deadline, own->deadline);
+ }

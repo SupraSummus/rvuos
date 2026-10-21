@@ -128,26 +128,22 @@ Consequences that shape the design:
 The machine timer, `mtime` and `mtimecmp`, is the kernel's clock
 and the kernel handles it directly.
 Userspace sees it only through the timer lines,
-whose deadlines are counted in ticks; see "Time".
+whose deadlines are counted in the counter's counts; see "Time".
 Where the registers live, what starts the counter and how fast it counts are the board's business:
 `board.h` names the two registers,
-and `timer.c`, per board as `irq.c` is, starts the counter and says how many counts make a tick.
-The tick is the same on every board and lives once in `kernel/timer.c`,
+and `timer.c`, per board as `irq.c` is, starts the counter and says how fast it counts.
+The timer is the same on every board and lives once in `kernel/timer.c`,
 on a counter and a compare below it,
 which `kernel/arch/riscv/clint.c` makes of `mtime` and `mtimecmp` on every RISC-V board.
-The kernel counts ticks on the counter rather than on interrupts:
-every trap counts the whole periods `mtime` has passed since the last tick it counted,
-so the tick count keeps pace with the counter however late or seldom the interrupt is taken,
-and a long system call costs one late tick and not a burst of them.
-`mtimecmp` is set only for the first tick that could change what runs; see "Scheduling".
-The counter also says how far into the tick a change of turn falls, which is what a turn is charged by.
+There is no tick: `mtimecmp` is set only for the first count that could change what runs; see "Scheduling",
+and the counter says what a turn ran, which is what a turn is charged by.
 QEMU `virt` counts at 10 MHz in a SiFive CLINT,
 which has an `mtimecmp` for each hart, one after the other, and a word for each hart's software interrupt,
 which one hart raises to make another trap or wake; see "Cores".
 The ESP32-C6 has a CLINT of Espressif's,
 whose counter and interrupt stay off until a control word starts them,
 and which counts at the CPU clock, 160 MHz, which the kernel sets at boot, see "Boards",
-then measures one tick of it against the 16 MHz system timer rather than trust the dividers.
+then measures a millisecond of it against the 16 MHz system timer rather than trust the dividers.
 RP2350's is the RISC-V platform timer in the Secure bank of SIO,
 counting the microseconds a tick generator divides from the crystal.
 

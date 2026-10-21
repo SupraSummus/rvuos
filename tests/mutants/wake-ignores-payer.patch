@@ -1,20 +1,19 @@
-The timer is set as if the turn on lent time were the thread's own.
-It lets pass the ticks at which another thread may pay for the turn, or none.
+The timer is set for the end of the turn's request as if the turn on lent time were paid by its own units.
+It lets pass the count at which the lender's units have paid for the request, and the borrower runs on unpaid.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
-Report: the timer lets a tick pass while the turn runs on lent time
-Witness: fuzz lend-hands-turn
+Report: the timer lets the end of the turn's request pass
+Witness: fuzz lend-payer-goes
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -893,9 +893,6 @@ uint32_t sched_wake_ticks(void)
-         return wake;
+@@ -385,7 +385,7 @@ static uint64_t turn_vtime(const struct core *core, const struct place *p, uint6
+ /* The count the turn's request is over at, as its payer's units pay for the rest of it; COUNT_NEVER with none open. */
+ static uint64_t turn_request_end(const struct core *core)
+ {
+-    const struct place *p = turn_place(core), *own = turn_own(core);
++    const struct place *p = turn_own(core), *own = turn_own(core);
+     if (p == NULL || own == NULL || place_units(p) == 0 || !request_open(p, own)) {
+         return COUNT_NEVER;
      }
-     /* Each tick decides afresh who pays for a turn on lent time, and whether it has any. */
--    if (core->payer != NULL) {
--        return 1;
--    }
-     /* A thread that lost the time of this core during its turn here, its place emptied, ends the turn at the next tick. */
-     const struct place *p = thread_place_on(turn, core_index());
-     if (core->run_queue != 0 || p == NULL) {

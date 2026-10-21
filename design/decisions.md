@@ -111,81 +111,85 @@ until the maintainer decides otherwise.
    and its `mtval` reads zero; see "Boards".
 
 9. **Scheduling policy beyond units.**
-   Decided in part: units of time earned by one thread's place each, an account per place they fill,
+   Decided: earliest deadline first over requests on the run queue, round-robin on spare time;
+   decision 39 says what a request is and what it promises.
+   Units of time are earned by one thread's place each, a virtual time per place they move,
    and spare time only by `RIGHT_X`; see "Scheduling" and open decision 18.
-   Working default for the rest: no priorities;
-   units promise a thread their part of the processor, give or take the accounts,
-   and a thread with time a turn within a tick for each other thread with units of its core, and no more; see "Scheduling".
-   The tick is the quantum and the build's, `TIMER_HZ`, which a program reads from a clock's description, decision 33,
-   so the wait is the build's to set,
-   against a switch every tick while threads compete, which nothing has measured yet;
-   the work a thread gets is bounded by the others' accounts, which a shorter tick does not shorten, `TODO.md`.
-   Priorities with preemption on wake, bounded by the account as a budget, are what a wait below a tick would take,
-   and the proposal below says what they take besides;
-   decide them when a workload needs one at a cost the switches allow.
-   The earlier plan was fixed priorities on `Thread`,
-   set by whoever holds the capability and capped by the setter's own,
-   round-robin within a priority, no priority inheritance.
-   What priority inheritance does for priorities, a waiter that names whom it waits for does for accounts, decision 27:
-   it lends that thread its time, one step, the oldest lender's.
-   The alternative is a scheduler in userspace
-   that decides which threads are runnable at all.
-   It stops a thread by taking back the units it lent it and starts it by binding it again,
-   or with `OP_THREAD_STOP` and `OP_THREAD_RESUME`, which also take a waiting thread off its notification and back to its wait, decision 32,
-   and has a tick of its own in a timer line, the shape every device interrupt takes.
-   What it cannot do is choose between two runnable threads
-   for less than a system call per switch.
-   A period per thread, as seL4's scheduling contexts have, would bound latency more tightly,
-   at the price of a queue of refills sorted by time, which decision 38 weighs.
-   Decide when a workload needs one thread to run before another,
-   and taking turns measurably fails it.
-   `make bench`'s `contended-worst` is what taking turns costs a round trip between two processes:
-   beside a process that spins, the worst round waits for its turns, about 263,000 cycles on RP2350,
+   Before, threads with time took turns oldest first, a tick each, when the kernel had a tick,
+   and only a turn on spare time gave the processor up to a thread made ready.
+   That order knew nothing of how soon a thread must run,
+   so units bought a part of the processor and not a place in the queue.
+   `make lab` showed it: beside a process that spins, a small ask waited about a tick at the median and nearly two at p90,
+   and twice the units for the client or for the server changed that by less than a fiftieth,
+   since a server woken by an ask waited on the run queue behind the spinner's turn; see `user/lab/NOTES.md`.
+   `make bench`'s `contended-worst` was the same wait for a pair that wants the whole core:
+   beside a process that spins, the worst round waited for its turns, about 263,000 cycles on RP2350,
    where the round alone costs about 4,500.
-   `make lab` shows the same for an ask with work behind it, and that units do not move it:
-   beside a process that spins, twice the units for the client or for the server change its latency by less than a fiftieth,
-   since a server woken by an ask waits on the run queue behind the spinner's turn; see `user/lab/NOTES.md`.
-   - **Proposal: priorities that preempt on wake.**
+   A tick that hands the core to another thread costs about 1,130 instructions under QEMU, 1,210 across processes,
+   a hundredth of its time at 10 kHz,
+   and a chip at 150 MHz, which runs at most a seventh as many instructions a second, at least seven times that share, unmeasured;
+   so a shorter tick alone buys a shorter wait at that price.
+   What priority inheritance does for priorities, a waiter that names whom it waits for does for units, decision 27:
+   it lends that thread its time, the oldest lender's, and on through lenders with no time of their own, decision 39.
+   Each option below orders the run queue and says when a thread made ready takes the processor from a turn with time;
+   each is decided at the end of a trap, so the host replays it.
+   Weighed and left, beside what decision 39 weighs:
+   - **Levels: priorities that preempt on wake.**
      A thread with time at a higher level than its core's running thread
      takes the processor as the trap that made it ready ends, a device's interrupt among them,
      and from another core through the interrupt that core already sends.
-     That is today's rule for a turn on spare time, with two levels made `PRIORITIES`:
+     That is the rule for a turn on spare time, with two levels made `PRIORITIES`:
      a run queue per level and a word of the queues that hold a place, so the next thread is a count of leading zeros away,
-     and turns on the tick within a level as now.
-     It is decided at the end of a trap, so the host replays it,
-     and the self-check's "a turn on spare time runs while a thread with time waits" becomes the same check by level.
+     and turns on the tick within a level.
+     The self-check's "a turn on spare time runs while a thread with time waits" becomes the same check by level.
      It takes besides:
      - **A budget.**
-       A thread has its level only while its account holds a tick,
-       so a spinner at the top takes at most its units' part and its account,
-       and what an account may hold, `ACCOUNT_TICKS`, becomes what a level may suffer from those above; decision 18.
+       A thread has its level only while its units give it time,
+       so a spinner at the top takes at most its units' part and what it may run ahead,
+       and that becomes what a level may suffer from those above; decision 18.
      - **A right.**
        The level is a right of the `Time` capability a thread is bound through, a range a carve narrows,
        as seL4's maximum controlled priority is.
-     - **Lent time at its payer's level**, so a lock's holder and a server run at their waiter's.
-       The payer is still the oldest lender, not the highest;
+     - **Lent time at its payer's level**, so a lock's holder and a server run at the level of the waiter that lent first,
+       not of the highest:
        a ring of lenders per level would find the highest without a walk,
        but a chain through a holder that waits in turn stays userspace's.
      - **Wakes by level.**
        A signal wakes the payer of the signalling core's turn, or else the oldest waiter;
        the highest would cost each notification a pair of links per level, or a walk.
-     - **A short kernel step.**
-       The longest step the kernel takes without looking for an interrupt is the floor of every wait;
-       today zeroing a table takes about a tick at 10 kHz, `TODO.md`.
-     - **Deadlines in counts.**
-       Timer lines fire on the tick grid, so a periodic thread at the top still starts up to a tick late.
      - **Signals that preempt.**
        A signal to a waiter of a higher level takes the processor from the signaller,
-       as today only a signal from a turn on spare time, or one waking the turn's payer, does,
+       as only a signal from a turn on spare time, or one waking the turn's payer, does,
        so a signal and a wait in one call, `TODO.md`, would then save switches as well as traps.
-     It would promise the highest ready level a start within the kernel's longest step of the trap that made it ready,
-     and a lower level a response-time analysis over the units and accounts above it.
-     `contended-worst` is the number it should move.
-     The first step is the levels, their queues, the preemption and lent time's level, with the zeroing.
+     It would promise a thread alone at the highest ready level of its core
+     a start within the kernel's longest step of the trap that made it ready, decision 36;
+     beside others of its level it waits a turn for each,
+     and through a lock or a server at its first lender's level, which a level between delays by what it may run ahead.
+     A lower level gets a response-time analysis over the units above it and what each may run ahead.
+     A level is a claim on the threads below it, not an amount of time,
+     so what it is worth depends on what the root task gave every other thread, as no unit's worth does.
+   - **The turn handed to the woken thread.**
+     A thread that waits hands the rest of its turn to the thread it just woke rather than to the oldest:
+     no change to the ABI or to the order, and a server answers within the turn of the client that asked,
+     but a thread woken by an interrupt, or by a thread that goes on running, still waits for the turns ahead.
+   - **A scheduler in userspace**, which decides which threads are runnable at all.
+     It stops a thread by unbinding it from its units and starts it by binding it again,
+     or with `OP_THREAD_STOP` and `OP_THREAD_RESUME`, which also take a waiting thread off its notification and back to its wait, decision 32,
+     and has a clock of its own in a timer line, the shape every device interrupt takes.
+     What it cannot do is choose between two runnable threads for less than a system call per switch.
+     It stays open to a program over the deadlines, as it was over the turns.
+   - **A period per thread**, as seL4's scheduling contexts have, bounds what a thread takes in each period, not when it starts:
+     seL4 starts threads by priority.
+     It needs no queue of refills sorted by time here, which seL4 needs for contexts made of memory:
+     the places with units of a core are `TIME_UNITS` at most, and the release already finds the nearest refill by a look at them.
+     A period is how far a place may run ahead, and with a span per request that is the span.
+   - **Fixed priorities on `Thread`**, the first plan:
+     set by whoever holds the capability and capped by the setter's own,
+     round-robin within a priority, no priority inheritance.
 
 10. **Yield.**
     Working default: none.
-    `OP_TEST_TICK` is the tick on request, under tracing alone,
+    `OP_TEST_TICK` is a step of the clock on request, under tracing alone,
     so a yield would be that under a name that invites spinning,
     and a spinning thread is always runnable and keeps the machine from `wfi`,
     while a waiting thread says what it waits for.
@@ -194,7 +198,7 @@ until the maintainer decides otherwise.
     after a short spin on `lr`/`sc` only where the holder may run on another core,
     and polling a device ends with an `Irq`.
     A sleep bounded from above, "no longer than", was considered as the same operation;
-    it would have to round the delay down and end in a spin of up to one tick.
+    it would have to end in a spin of up to the kernel's step that fires the timer.
     Revisit when a workload measures the cost of a slice burnt
     behind a preempted lock holder.
 
@@ -297,7 +301,7 @@ until the maintainer decides otherwise.
 
 16. **Drift of a periodic timer.**
     Decided: `IRQ_SET_PERIOD` counts a timer line's next deadline from its last one,
-    and the tick keeps pace with the counter; see "Time".
+    in the counter's own counts; see "Time".
     Before, a periodic task drifted by each wake's lateness,
     and each tick was set a period after its handling, a few percent slow under QEMU.
 
@@ -320,24 +324,31 @@ until the maintainer decides otherwise.
       to a holder with `RIGHT_W`, as a stopped thread's registers are, since they tell when the thread ran.
     Decide with the first program that needs it.
 
-18. **What a thread's account counts, and when it has time.**
-    Working default: the counts a turn ran, time again at a tick, and spare time free.
-    The account counts in parts of a count, charged at each change of turn and at each tick,
-    but a turn ends on the tick grid, which it never outruns, since it began with a tick in the account;
-    under tracing the clock is the tick count, so the host, whose clock is the ticks the records move, decides as QEMU does.
-    Time again at a tick, a turn's worth, bounds how long a thread with units waits for its account:
-    held to an eighth, a thread runs a tick in every eight.
-    The shares had time again only once their account was full,
-    which kept a capped share's idle time in one stretch,
-    13 ticks of running and about a hundred idle at an eighth,
-    where a tick in every eight wakes an otherwise idle core 125 times a second.
-    Spare time costs nothing, so an account never goes below zero.
-    Before, a tick cost whoever it found running a whole tick, so a thread that waited just before every tick paid nothing.
-    The alternatives are time while the account holds anything, with turns that end mid-tick where it drains,
-    which would wake the core several times a tick for a thread held to its units;
-    a higher threshold, per thread, that trades latency for idle stretches;
-    and spare time charged as a debt.
-    Decide when a board's sleep states, or a workload's latency, make the difference measurable.
+18. **What a thread's virtual time counts, and when it has time.**
+    Decided: the counts a turn ran, `TIME_UNITS / u` of virtual time each, on its units and on spare time alike,
+    spare time moving it at most a span ahead of the clock, and time again once it lies within a span of the clock;
+    see "Scheduling" and decision 39.
+    A thread may so run a span of its own ahead of its units, and no further:
+    the span it gives is how far it may borrow from its future, and how far behind the threads that wait a busy thread falls.
+    Spare time costs nothing of the units, but it moves the virtual time, so a thread that runs on it is due after one that waited.
+    Before, a thread had an account, a balance of parts of counts its units filled a tick at a time,
+    up to `ACCOUNT_TICKS`, a tenth of a second's worth, and time while it held a tick;
+    spare time cost nothing and moved nothing.
+    The account was the virtual time in two words, and its cap the one constant:
+    a thread with one unit had to hold a tick, so the cap was at least `TIME_UNITS` ticks,
+    which let a busy thread run that far ahead, behind every thread that waited, but also made a thread just bound wait as long,
+    and a driver that had run a burst due behind every thread whose account was full, whatever their spans.
+    Weighed and left:
+    - **Time only once the virtual time is at or behind the clock**, a request ahead at most:
+      no thread could run ahead of its units by more than a request,
+      but a busy thread then started its next request level with a thread that woke, and was due first as often as not;
+      `make lab` showed the thread that woke waiting a busy thread's request at the median beside a spinner, 169 µs where it had waited 28.
+    - **Spare time that moves nothing**: a busy thread on spare time fell behind the clock while it ran there,
+      and its next request on its units started level with a woken thread's; the same scenario's p90 stayed at a busy thread's request.
+    - **Credit for waiting**, a woken thread's virtual time a span behind the clock:
+      a woken thread would be due at once, but every other thread's promise would lose a request of each thread that slept,
+      a batch thread's long one among them.
+    Decide again when a workload needs bursts longer than a request at full speed beside threads that compete.
 
 19. **A right to destroy a pool.**
     Decided: there is none; the holder of a pool's Untyped destroys it, and a Pool capability only allocates.
@@ -428,7 +439,9 @@ until the maintainer decides otherwise.
       the call interrupts that core and waits until its trap has begun, and the core loads its regions again
       as it takes the lock, or hands its taken thread's turn on.
     - **Wakes.** A core that changes what another runs marks the other's timer stale,
-      and interrupts it when it idles, runs on with its timer set past the next tick, or runs a turn on spare time a thread with time now waits for.
+      and interrupts it when it idles or runs user mode, its timer set past the change, runs a turn on spare time a thread with time now waits for,
+      or has a thread join its run queue, or its turn's thread or payer change, while a thread waits there,
+      which takes the core if the turn is on spare time or that thread's request is due before the turn's.
     - **The units.** `TIME_UNITS` of each core, so that which core a thread runs on is held as its units are;
       a program learns how many cores there are from `BOOT_CAP_TIME`'s count, which its description tells.
     - **A controller of each core's own**, as ARM's NVIC and RP2350's Hazard3's are: the first core's alone enables a device line,
@@ -463,7 +476,7 @@ until the maintainer decides otherwise.
     Rights on `Debug` that split its frames from its halt would have left one capability reaching every listed device,
     where a frame per device lends each on its own.
 26. **The watchdog in the kernel.**
-    Working default: the kernel keeps a deadline on its own tick, which `OP_CLOCK_WATCHDOG` feeds, and halts at it;
+    Working default: the kernel keeps a deadline on its own timer, which `OP_CLOCK_WATCHDOG` feeds, and halts at it;
     see "The watchdog".
     A watchdog is a device, every other of which is a driver's, and userspace could do the same:
     a supervisor with a timer line halts the machine through `Halt` when nobody fed it in time,
@@ -493,7 +506,7 @@ until the maintainer decides otherwise.
     Open: lending across cores, by running the borrower on its lender's core;
     borrowing from more than one lender at once, or through a borrower that waits or lends in turn, walks that goal 4 rules out;
     whether a server should run on the time of the client it serves rather than of its oldest lender, decision 5;
-    whether time is a thing of its own, an account a thread's place on a core holds rather than one the place is, decision 35,
+    whether time is a thing of its own, a virtual time a thread's place on a core holds rather than one the place is, decision 35,
     which a lender could hand over whole, as seL4 donates its scheduling contexts,
     and with it whether a thread may hold two times of one core, its own and one lent, decision 24;
     and a lock fair to takers that lend nothing,
@@ -571,7 +584,7 @@ until the maintainer decides otherwise.
     their codes, 11 and 27, are no operation's.
     The next had the replay's record carry all six arguments the registers do, twenty-eight bytes,
     and the fuzzer's inputs keep 128 records at most, its `-max_len` 3584;
-    `a4` to `a6` stay unread and unchecked, `TODO.md` says why.
+    `a5` and `a6` stay unread and unchecked, and `a4` but by `OP_TIME_BIND`, `TODO.md` says why.
     The rest below would break a binary built against today's ABI, and each goes in a change of its own:
     the seeds name what they call, `tools/seed.py`,
     so a change rebuilds them and rewrites only those that call an operation whose arguments it changes.
@@ -644,7 +657,7 @@ until the maintainer decides otherwise.
     see "Threads" and "Cores".
     A waiting thread leaves its notification and its borrower's ring of lenders and stands at the call it waited in,
     which a resume makes again; the loss of a process stops a waiter the same way, so one rule holds for every stop.
-    It keeps its process, watch, units, account and lenders, and nothing is signalled.
+    It keeps its process, watch, units, virtual time and lenders, and nothing is signalled.
     A stop of a thread another core runs marks that core's trap to be dropped, whatever the thread is by then,
     and on ARM finds a frame that trap could not stack, which it reports as the fault it is.
     Weighed and left:
@@ -660,8 +673,8 @@ until the maintainer decides otherwise.
     - **Ending a paid turn at once.**
       A stopped lender whose time pays for another thread's turn could stop paying as it stops,
       charged up to now, the turn's thread paying for itself from there;
-      it would charge another core's turn from this one, against the counter that core counted to,
-      and break "whether a turn is paid is decided as it begins and at each tick",
+      it would charge another core's turn from this one, against the count that core charged it to,
+      and break "whether a turn is paid is decided as it begins and as its request ends",
       so it pays to the end of the turn, as a payer another core's signal woke does.
     - **A narrower right.**
       `RIGHT_R` on a thread means nothing yet, and could allow a stop alone,
@@ -677,9 +690,9 @@ until the maintainer decides otherwise.
     Each takes constant time, a load past the slot at most, changes nothing,
     and returns no object's address, no bits a notification holds and not the time.
     The machine's constants come from the capability they belong to:
-    the smallest region from a frame, the tick from a clock or a capability to units, the cores from `BOOT_CAP_TIME`'s count,
+    the smallest region from a frame, the default span from a clock, the cores from `BOOT_CAP_TIME`'s count,
     and the regions a process may have installed from the process,
-    so a program given no clock learns no tick, as one given no units learns no cores.
+    so a program given no clock learns no rate, as one given no units learns no cores.
     The results follow the call's line under tracing, so the replay holds QEMU's answers to the host's.
     - **Pages.**
       `OP_CAP_INFO`'s `a1` is a page, and only page 0 is told, so a later kernel can tell more without a new code:
@@ -743,13 +756,13 @@ until the maintainer decides otherwise.
     Working default: rvuos is not a real-time kernel and does not claim to be.
     A program can be shown to meet its deadlines only from promises stated in time rather than in steps, and checked.
     Kept: bounded work and a bounded stack, checked at every link;
-    time as authority, with a budget per thread; and faults kept to their thread.
+    time as authority, with a budget per thread; faults kept to their thread;
+    and a wait as short as its span for the thread that asks for short requests, through lent time too,
+    and timer lines and requests to the count of the counter, with no tick: decision 39.
     Missing:
-    - **A wait below a tick** for the thread that needs it, with a bound on inversion: decision 9's proposal.
     - **A short kernel step.**
       The kernel takes no interrupt, so its longest step is the floor of every latency;
       `TODO.md` lists those that are too long today.
-    - **Deadlines finer than the tick.**
     - **Bounds in cycles.**
       The loop bounds and call graph the link checks, with each instruction's cost on an in-order core,
       would bound the longest step per board, checked at the link as the stack is.
@@ -758,7 +771,7 @@ until the maintainer decides otherwise.
       a test should hold the worst wait on each board to the bound the kernel states.
     Each promise goes into "Properties" as it is kept,
     checked by the self-check where it is state and by a measure on the board where it is time.
-    Decide with the first workload whose deadline is shorter than a tick, or than the turns of its core.
+    Decide with the first workload whose deadline is shorter than the kernel's longest step, or than the requests of its core.
 
 37. **Routes between devices.**
     Decided: `RouteLine` and `Route`, as "Routes" says, the nRF52840's PPI the first router;
@@ -767,7 +780,7 @@ until the maintainer decides otherwise.
     the radio's CRCOK starts a TIMER whose compare starts the radio sending,
     so a frame received wrong is never acknowledged, and the driver need only wake within the frame.
     Weighed:
-    - **Priorities alone**, decision 9's proposal, bound the driver's wait by the kernel's longest step, a tick and more today.
+    - **Priorities alone**, decision 9's proposal, bound the driver's wait by the kernel's longest step, a millisecond and more then.
     - **The radio's shortcuts alone** send an acknowledgement before the FCS is known, unless the driver wakes to stop it.
     - **The PPI whole to one driver**: the kernel keeps channel 0, and the MPU cannot split the block.
     - **One call to bind and connect** would take six arguments, and a call carries three.
@@ -782,7 +795,7 @@ until the maintainer decides otherwise.
 38. **Work that grows as the logarithm of memory.**
     Working default: none.
     Destruction aside, which is paid for and preempted,
-    what a system call, a tick or an interrupt costs does not grow with how many objects exist;
+    what a system call, the timer or an interrupt costs does not grow with how many objects exist;
     see "Bounded work".
     Open: a walk as deep as a balanced tree over every object of some kind.
     Their count is bounded by the memory they live in,
@@ -791,11 +804,11 @@ until the maintainer decides otherwise.
     It is the door to what the kernel cannot keep in order otherwise:
     things with no bound but memory, sorted by a key with no bound but its width,
     as timers made of pools' memory and sorted by deadline would be, rather than `TIMER_LINES` lines,
-    or a queue of refills sorted by time, which decision 9's period per thread needs.
+    or a queue of refills sorted by time, which a period per thread would need were scheduling contexts made of memory, decision 9.
     Ordering by comparison does no better than that logarithm.
     The price:
     - **What one process makes is no longer free to the others.**
-      Each doubling of the objects a tick orders costs it a step,
+      Each doubling of the objects the timer orders costs it a step,
       and a balanced tree as deep as a board's RAM allows would cost, by estimate, about what the cheapest system call does.
     - **The kernel's longest step grows by as much**,
       since a walk down a tree is not one a call can stop and take on again,
@@ -803,10 +816,10 @@ until the maintainer decides otherwise.
       and of the wait for the kernel's lock on several cores.
     - **The door orders, but it does not bound what falls due together.**
       A tree finds the first timer due in its depth,
-      but a tick must fire every timer due, and nothing but memory bounds how many share a deadline;
+      but the timer must fire every timer due, and nothing but memory bounds how many share a deadline;
       the same holds for refills.
       Firing one takes away what arming it made, so that walk is paid for,
-      but it needs a way to stop and go on that a tick, unlike a call, does not have yet.
+      but it needs a way to stop and go on that the timer, unlike a call, does not have yet.
     Before the door, the two ways that keep the bound flat:
     - **A key with few values.**
       Levels of priority, the highest found by counting leading zeros in words of bits,
@@ -821,7 +834,7 @@ until the maintainer decides otherwise.
     If the door is taken:
     - **The depth is bounded on every call, not on average**:
       a tree that stays balanced, its links in the objects it orders,
-      never a splay tree or a pairing heap, since a tick cannot borrow from the calls after it.
+      never a splay tree or a pairing heap, since the timer cannot borrow from the calls after it.
     - **The walk keeps "Bounded stack"**: no recursion, no frame of run-time size.
     - **An annotation in `kernel/work.h` names the depth** against the board's RAM.
       `tools/loop-bounds.py` requires it as it requires every bound,
@@ -831,3 +844,78 @@ until the maintainer decides otherwise.
     - **Goal 4 and "Bounded work" say so** in the same commit.
     Decide with the first thing the kernel must keep in order across processes
     that neither a key with few values nor a fixed count serves.
+
+39. **Time in requests, due within the span a wait gives, on one virtual time and no tick.**
+    Decided: one mechanism for how much of a core a thread may take and how soon it runs.
+    How much is the units, a capability a parent gives;
+    how soon is the span, a power of two of counts that a thread gives as it waits, `OP_NOTIFY_WAIT` or `OP_NOTIFY_LEND`,
+    and its binding, `OP_TIME_BIND`, for a thread that never waits, or the default span, the longest power of two within a millisecond, for none.
+    A place has one word of scheduling state that is time, its virtual time:
+    the count of the clock its units have paid for up to, which moves on `TIME_UNITS / u` counts for each count the thread runs,
+    on its units or, up to a span ahead of the clock, on spare time.
+    The run queue is taken earliest deadline first, over requests.
+    A request is due its span past the virtual time it starts at, the latest of the virtual time and the clock,
+    and starts only while the virtual time lies at most a span ahead of the clock,
+    so a request is the thread's units' part of its span, and a thread runs at most a span and a request ahead of its units.
+    The deadline stands while the request lasts, and the next request starts as one is over or as the thread is made ready,
+    so the order changes only at those two events:
+    a thread made ready takes the core in that trap from a turn whose request is due later,
+    and the end of the turn's request, which the timer marks while another thread waits, lets the next due go first.
+    There is no tick: the timer is set for the first count that could change what runs,
+    a request's end, a release, a timer line's deadline or the watchdog's, or a span into a turn on spare time while another waits,
+    and a thread alone on the core is not interrupted at all.
+    The units of a core add up to its time, so a thread woken while its virtual time is at or behind the clock
+    has run `u * s / TIME_UNITS` counts within its span `s`,
+    whatever the others do, besides the kernel's longest step and the switches.
+    A driver that must do work of `c` within `D` of its interrupt waits within a span `s` of `D` at most and is given `TIME_UNITS * c / s` units;
+    a thread that overruns puts its next request later, so it misses its own deadline and no other's.
+    A span is not a resource and costs nobody else, so a wait needs no right to give one:
+    a short span makes its requests as short, and costs its thread a switch for each while another waits,
+    and a long one puts its requests behind shorter ones.
+    So the span belongs to what wakes the thread, and a thread gives each of its waits its own:
+    a driver its interrupt a short one and its housekeeping a long one,
+    and a client that lends its server the span it waits within, so the server answers each client within the client's.
+    The span is also how far a thread may run ahead: a thread that wants the core all along runs about a span ahead,
+    so its requests are due after those of a thread that wakes with a span no longer than its own.
+    Spare time is the far end of the same order: a thread with no request open and its virtual time further ahead has none due.
+    A thread on lent time runs its lender's requests, at the lender's units and within the lender's span,
+    and lent time goes on through a lender with no time of its own, `LEND_DEPTH` lenders on, so a client's units pay for its server and for the driver that one waits on.
+    A bind keeps the virtual time, and the units a place leaves keep it too, so a bind starts no thread ahead of what its units paid for nor behind,
+    and units nobody earned since boot start a thread at the clock.
+    Weighed and left:
+    - **An account**, a balance its units filled a tick at a time up to a tenth of a second's worth, time while it held a tick,
+      the virtual time the count at which it would be full: one quantity in two words and a cap,
+      and the cap, at least `TIME_UNITS` ticks so that one unit could hold a tick, let the virtual time lie that far ahead,
+      so a driver whose account was not full was due after every thread whose was, whatever their spans,
+      and a thread just bound, its account empty, waited a tenth of a second; decision 18.
+      The account let a burst run that far ahead at full speed, which hid bursts beyond a thread's units: `make lab`'s clients that overrun their units now wait for it.
+    - **A tick**, a thousand a second unless the build said otherwise, which ended a turn while another thread waited,
+      charged and filled the accounts, and was the timer lines' grain:
+      requests made the quantum the thread's own, a timer line's deadline needs only a count, and the virtual time needs no unit,
+      so it went, with the counts a trap made of the ticks that passed, and the rules that held something to the next tick.
+    - **A quantum on the binding**, the work of a request rather than its span, `OP_TIME_BIND`'s `a4` before:
+      the same requests, since a quantum `q` at `u` units is a span of `TIME_UNITS * q / u`,
+      but the thread had one for all it waits for, said in work at the units its parent gave it,
+      where it knows how soon it must answer and not what share that is;
+      a parent that gave it other units moved its deadlines.
+    - **A span and the work besides**, both at the wait: the work a span holds is what the units buy,
+      so a second number only says whether the units suffice, which the thread can work out for itself.
+    - **A deadline that moves with the virtual time as the thread runs**, and a timer where it crosses the next one:
+      two threads that both want the core take it from each other at every crossing,
+      which under QEMU cost each a fifth of its throughput.
+    - **A window added to the deadline**: it delays only its own thread, and nothing prices it; a long span does as much.
+    - **Priorities that preempt on wake**, decision 9's proposal: a promise relative to every thread above.
+    - **A calendar**, units with fixed places in a cycle: latency becomes the spacing of a thread's units, and bursts go;
+      units numbered by their bits reversed would space a block of them evenly,
+      but an interrupt waits for its thread's place, and filling the places nobody uses earliest deadline first is this mechanism again.
+    - **A constant bandwidth server per place**: its period ties how soon a thread runs to how much it may do at once.
+      The span is that period, but said at each wait, so it ties them only for what one wake asks.
+    Open:
+    - **Spans that are not powers of two**: a driver's span is the longest power of two its deadline holds,
+      which asks up to twice the units; a few bits of mantissa beside the exponent would ask an eighth more at most.
+    - **Bursts longer than a request at full speed** beside threads that compete:
+      a thread runs at most a span ahead, so a longer burst waits for its units, or takes a longer span and is due later for it.
+    - **The kernel's longest step**, which a request's promise rests on; decision 36 and `TODO.md`.
+    - **The earliest deadline without a walk** of the run queue, `TIME_UNITS` places at most.
+    - **Lending across cores**, decision 27, and a borrower's lenders kept in the order of their deadlines.
+    - **Fuel**, a process's energy beside the power its units bound.

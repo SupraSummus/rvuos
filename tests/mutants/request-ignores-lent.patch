@@ -1,0 +1,20 @@
+A request is open on whichever units its deadline lies within a span of, not only on those it was made on.
+A borrower would carry a request made on its own units, with a short span, onto its lender's, and be due earlier than the lender could be;
+a request is open only on the units it was made on.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a request started elsewhere than at the later of its virtual time and the clock, within a span of it
+Witness: fuzz lend-request-made-on-own
+
+diff --git a/kernel/sched.h b/kernel/sched.h
+--- a/kernel/sched.h
++++ b/kernel/sched.h
+@@ -85,7 +85,7 @@ static inline uint32_t place_span(const struct place *p)
+ static inline bool request_open(const struct place *payer, const struct place *p)
+ {
+     uint32_t made = PLACE_REQUEST | (payer != p ? PLACE_LENT : 0);
+-    return (p->span & (PLACE_REQUEST | PLACE_LENT)) == made && p->deadline - (uint32_t)payer->vt - 1 < place_span(payer);
++    return (p->span & PLACE_REQUEST) != 0 && made != 0 && p->deadline - (uint32_t)payer->vt - 1 < place_span(payer);
+ }
+ 
+ /* What a place keeps of a span OP_TIME_BIND or a wait takes, a power of two up to 2^SPAN_MAX or 0; see place_span. */

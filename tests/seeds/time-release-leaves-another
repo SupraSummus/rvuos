@@ -1,0 +1,9 @@
+# Found by the fuzzer: thread 2 runs ahead of its one unit at a span of 2^16 beside the third on spare time,
+# so a release leaves another release to come.
+actor 1 OP_TIME_CARVE slot BOOT_CAP_TIME a1 48 a2 1 a3 REPLAY_CAP_FREE+15
+actor 1 OP_CAP_DERIVE slot BOOT_CAP_CAPTABLE a1 REPLAY_CAP_FREE+16 a2 REPLAY_CAP_FREE+15 a3 RIGHT_W
+actor 1 OP_THREAD_RESUME slot REPLAY_CAP_THIRD
+actor 1 OP_TIME_BIND slot REPLAY_CAP_FREE+16 a1 REPLAY_CAP_THREAD a2 0 a3 1 a4 0x10000
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST

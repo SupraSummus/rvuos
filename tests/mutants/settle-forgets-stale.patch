@@ -1,19 +1,19 @@
 Settling a thread leaves the timer where it was.
-A thread alone on the processor that loses its units would run on to a tick set for it alone;
-the timer is set past a tick only while no change since has brought that tick forward.
+A thread alone on the processor that loses its units would run on to a count the timer was set to for it alone;
+the timer is set past a count only while no change since has brought that count forward.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
-Report: the timer is set past a tick an unmarked change brought forward
+Report: the timer lets a turn on spare time run past its span while another waits
 Witness: fuzz actor-handoff
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -329,7 +329,6 @@ static uint8_t place_queue(const struct place *p, uint32_t balance, const struct
+@@ -402,7 +402,6 @@ static uint64_t turn_request_end(const struct core *core)
   */
  static void place_settle(struct place *p)
  {
 -    core_self()->wake_stale = true;
-     account_refill(p);
+     uint64_t now = timer_now();
      struct core *was = &cores[p->core];
      struct core *core = &cores[place_core(p)];

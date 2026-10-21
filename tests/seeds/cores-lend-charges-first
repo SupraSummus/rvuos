@@ -1,0 +1,26 @@
+# Found by the fuzzer: the third, at its turn, lends thread 2 its time while thread 2 waits for a turn on the first core,
+# so thread 2 starts a request on the third's units, at the clock, after the third's turn is charged.
+actor 1 OP_CAP_DERIVE slot BOOT_CAP_CAPTABLE a1 REPLAY_CAP_HALF a2 BOOT_CAP_TIME a3 RIGHT_W
+actor 1 OP_TIME_BIND slot REPLAY_CAP_HALF a1 REPLAY_CAP_THREAD a2 64 a3 1 a4 0x10000
+actor 1 OP_THREAD_RESUME slot REPLAY_CAP_THIRD
+actor 1 OP_POOL_ALLOC slot BOOT_CAP_POOL a1 CAP_NOTIFICATION a2 REPLAY_CAP_FREE+3 a3 0
+actor 1 OP_CAP_COPY slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE+3 a2 REPLAY_CAP_FREE+3 a3 RIGHT_ALL
+actor 1 OP_TIME_BIND slot BOOT_CAP_TIME a1 BOOT_CAP_THREAD a2 0 a3 16
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 1 OP_TIME_BIND slot BOOT_CAP_TIME a1 REPLAY_CAP_THIRD a2 16 a3 32
+actor 1 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 1 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 1 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 1 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 1 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_NOTIFY_LEND slot REPLAY_CAP_FREE+3 a1 REPLAY_CAP_THREAD a2 0

@@ -1,0 +1,21 @@
+A thread that runs on spare time past its request costs its virtual time nothing.
+It would come back from a long run on spare time as far behind as a thread that waited, and be due as early;
+a turn on its own units' place moves its virtual time on past its request too, up to a span past the clock.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a step of the clock did not charge the thread whose turn it was its units' part
+Report: a traced call that moved no time charged the thread whose turn it was
+Witness: fuzz bind-turn-later
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -370,7 +370,7 @@ static uint64_t turn_vtime(const struct core *core, const struct place *p, uint6
+     if (own == NULL || units == 0 || now <= core->turn_from) {
+         return p->vt;
+     }
+-    uint64_t bound = p == own ? now + place_span(p) : p->vt;
++    uint64_t bound = p->vt;
+     if (request_open(p, own)) {
+         uint64_t end = p->vt + (uint32_t)(own->deadline - (uint32_t)p->vt);
+         bound = end > bound ? end : bound;

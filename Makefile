@@ -53,10 +53,6 @@ ifeq ($(filter qemu mps2-an521 rp2350,$(BOARD)),)
 $(error BOARD=$(BOARD) runs one core; only qemu, mps2-an521 and rp2350 take CORES=$(CORES))
 endif
 endif
-# The tick's rate, which is the quantum: the longest turn a thread takes while another could run; see DESIGN.md, "Scheduling".
-# A rate other than the default builds in a directory of its own, the host harnesses' too, as a budget does.
-TIMER_HZ ?= 1000
-TIMER_VARIANT := $(if $(filter-out 1000,$(TIMER_HZ)),-hz$(TIMER_HZ))
 # The self-check and the tracing that runs it, which only QEMU virt's replay uses; see DESIGN.md, "Verification".
 # A value other than the board's builds in a directory of its own, as a budget does; the host harnesses always have them.
 SELFCHECK_DEFAULT := $(if $(filter qemu,$(BOARD)),1,0)
@@ -73,7 +69,7 @@ WIFI_BT_VARIANT := $(if $(filter-out 0,$(WIFI_BT)),-bt)
 # A directory of its own, so that without it the C6's images are exactly as they would be without the listener.
 C6_LISTEN ?=
 C6_LISTEN_VARIANT := $(if $(filter-out 0,$(C6_LISTEN)),-c6listen)
-VARIANT := $(PMP_VARIANT)$(if $(filter-out 1,$(CORES)),-smp$(CORES))$(TIMER_VARIANT)$(SELFCHECK_VARIANT)$(WIFI_BT_VARIANT)$(C6_LISTEN_VARIANT)
+VARIANT := $(PMP_VARIANT)$(if $(filter-out 1,$(CORES)),-smp$(CORES))$(SELFCHECK_VARIANT)$(WIFI_BT_VARIANT)$(C6_LISTEN_VARIANT)
 
 # The board's architecture, which only RP2350 lets the command line change;
 # the other one builds in a directory of its own, as a budget does.
@@ -97,7 +93,7 @@ endif
 CFLAGS    := $(ARCHFLAGS) -std=c11 -ffreestanding -fno-builtin -fno-pic -fno-common \
              -nostdlib -O2 -g -Wall -Wextra -Werror -Wundef -Wshadow \
              -Wstrict-prototypes -Wmissing-prototypes -Iinclude \
-             -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -DCORES=$(CORES) -DTIMER_HZ=$(TIMER_HZ) -DSELFCHECK=$(SELFCHECK) \
+             -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -DCORES=$(CORES) -DSELFCHECK=$(SELFCHECK) \
              $(if $(filter-out 0,$(WIFI_BT)),-DWIFI_BT=1) $(if $(filter-out 0,$(C6_LISTEN)),-DI154_LISTEN=1)
 ASFLAGS   := $(ARCHFLAGS) -g -Iinclude -DCORES=$(CORES) $(if $(filter-out 0,$(WIFI_BT)),-DWIFI_BT=1)
 LDFLAGS   := $(ARCHFLAGS) -nostdlib -static -fuse-ld=lld -Wl,--gc-sections -Wl,--no-dynamic-linker

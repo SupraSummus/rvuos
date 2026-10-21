@@ -1,6 +1,6 @@
 /*
- * The tick of timer.h, on the counter and compare of the architecture or the board;
- * see DESIGN.md, "Timer".
+ * The clock and the timer of timer.h, on the counter and compare of the architecture or the board;
+ * see DESIGN.md, "Time".
  */
 
 #include <stdint.h>
@@ -12,81 +12,82 @@
 #include "timer.h"
 #include "work.h"
 
-/* The counter's counts per tick, the period timer_start takes. */
-uint32_t tick_counts;
+/* The counter's rate, and that rate in counts per microsecond, a whole part and a fraction of 2^32, rounded up. */
+static uint32_t counter_hz;
+static uint32_t us_whole;
+static uint32_t us_frac;
 
-/* The compare value of the tick after the last counted one. */
-static uint64_t next_tick;
+uint32_t timer_step;
+uint32_t timer_span;
 
-/* What each core's compare holds, so that setting it for the tick it holds writes nothing. */
+/* What each core's compare holds, so that setting it for the count it holds writes nothing. */
 static uint64_t compare[CORES];
 
-void timer_start(uint32_t period)
+void timer_start(uint32_t hz)
 {
-    /* The ESP32-C6 measures its tick, and a counter this fast would overflow the accounts. */
-    if (period > TICK_COUNTS_MAX) {
-        kpanic("the counter is too fast for the accounts to count a tick of it");
+    counter_hz = hz;
+    us_whole = hz / 1000000u;
+    /* The fraction by long division, a bit at a time: the remainder stays below twice the divisor. */
+    uint32_t rest = hz % 1000000u, frac = 0;
+    for (uint32_t i = 0; i < 32; i++) {
+        LOOP_BOUND(32);
+        rest <<= 1;
+        frac <<= 1;
+        if (rest >= 1000000u) {
+            rest -= 1000000u;
+            frac |= 1;
+        }
     }
-    tick_counts = period;
-    next_tick = counter_read() + period;
-    compare[0] = next_tick;
-    counter_compare(compare[0]);
+    if (rest != 0 && ++frac == 0) {
+        us_whole++;
+    }
+    us_frac = frac;
+    timer_step = hz / 1000u != 0 ? hz / 1000u : 1;
+    timer_span = 1u << (31 - __builtin_clz(timer_step));
+    compare[0] = COUNT_NEVER;
+    counter_compare(COUNT_NEVER);
     counter_compare_enable();
 }
 
-/* Another core's compare, which waits until the core first sets it, on the grid the first core's started. */
+/* Another core's compare, set for no count until the core first sets it. */
 void timer_core_start(void)
 {
-    compare[core_index()] = ~0ull;
-    counter_compare(~0ull);
+    compare[core_index()] = COUNT_NEVER;
+    counter_compare(COUNT_NEVER);
     counter_compare_enable();
 }
 
-/*
- * The tick after *next, the compare value the counter has reached:
- * the first a whole number of periods on that lies ahead of now,
- * so the tick count keeps pace with the counter however late the interrupt is taken,
- * and a tick held off costs one late interrupt, not a burst of them.
- * Returns the periods passed, zero if *next still lies ahead, as when a trap comes between two ticks.
- * A tick held off for 2^32 counts, as a debugger's stop may, starts the grid again from now.
- */
-static uint32_t timer_next(uint64_t *next, uint64_t now, uint32_t period)
+uint64_t timer_us_counts(uint32_t us)
 {
-    if (now < *next) {
-        return 0;
-    }
-    uint64_t late = now - *next;
-    if ((late >> 32) != 0) {
-        *next = now + period;
-        return 1;
-    }
-    uint32_t passed = (uint32_t)late / period + 1;
-    *next += (uint64_t)passed * period;
-    return passed;
+    return (uint64_t)us * us_whole + (((uint64_t)us * us_frac + 0xffffffffu) >> 32);
 }
 
-/*
- * The compare value for the ticks-th tick after the one before next, one being next itself.
- * It lies at most 2^31 counts past next, so that timer_next counts the interrupt taken there
- * without starting the grid again; a longer wait wakes there and sets it again.
- */
-static uint64_t timer_deferred(uint64_t next, uint32_t ticks, uint32_t period)
+/* The long division of timer_periods, carried a word of the dividend at a time, a bit a step. */
+static __attribute__((noinline)) uint64_t periods_word(uint32_t word, uint64_t period, uint64_t *remainder)
 {
-    uint64_t skip = ticks - 1;
-    if (skip * period > 0x80000000u) {
-        skip = 0x80000000u / period;
+    uint64_t quotient = 0, rest = *remainder;
+    for (uint32_t i = 0; i < 32; i++) {
+        LOOP_BOUND(32);
+        uint64_t r = rest << 1 | ((word >> (31 - i)) & 1);
+        uint32_t fits = r >= period;
+        rest = fits ? r - period : r;
+        quotient = quotient << 1 | fits;
     }
-    return next + skip * period;
+    *remainder = rest;
+    return quotient;
 }
 
-uint32_t timer_count(void)
+uint64_t timer_periods(uint64_t stretch, uint64_t period, uint64_t *rest)
 {
-    return timer_next(&next_tick, counter_read(), tick_counts);
+    uint64_t remainder = 0;
+    uint64_t high = periods_word((uint32_t)(stretch >> 32), period, &remainder);
+    uint64_t low = periods_word((uint32_t)stretch, period, &remainder);
+    *rest = remainder;
+    return high << 32 | low;
 }
 
-void timer_set(uint32_t ticks)
+void timer_set(uint64_t at)
 {
-    uint64_t at = timer_deferred(next_tick, ticks, tick_counts);
     uint64_t *held = &compare[core_index()];
     if (at != *held) {
         *held = at;
@@ -96,63 +97,49 @@ void timer_set(uint32_t ticks)
 
 uint32_t timer_counter_hz(void)
 {
-    return tick_counts * TIMER_HZ;
+    return counter_hz;
 }
 
 uint64_t timer_now(void)
 {
-    return debug_trace ? (uint64_t)sched_ticks * tick_counts : counter_read();
-}
-
-/* next_tick lies a period past the last counted tick, which the counter has reached. */
-uint32_t timer_offset(void)
-{
-    uint64_t past = counter_read() - (next_tick - tick_counts);
-    return past < tick_counts ? (uint32_t)past : tick_counts;
+    return debug_trace ? sched_trace_clock : counter_read();
 }
 
 /*
- * The timer interrupts only at a tick that could change what runs,
- * so the ticks it let pass are counted first, before anything reads the count or an account,
- * and with them those other cores counted since this one last did.
- * While it is set for the next tick, a tick has passed only if its interrupt is pending,
- * so the counter is read only then or while it is set further:
- * every core's compare lies on the one grid, so no other core counted a tick this one's did not reach.
+ * The timer interrupts only at a count that could change what runs, and what is due by then is done first,
+ * before the trap reads a virtual time or a deadline: an interrupt pending while the trap began is done here,
+ * whatever the trap came for.
  * Under tracing time moves only by record; see DESIGN.md, "Verification".
  */
 bool timer_trap_enter(bool pending)
 {
     bool traced = debug_trace;
-    const struct core *core = core_self();
-    sched_count(!traced && (pending || core->wake_tick - core->ticks > 1) ? timer_count() : 0);
+    if (!traced && pending) {
+        sched_time(counter_read());
+    }
     return traced;
 }
 
-/* Counted as the trap began, and the turn ends as it leaves; under tracing it is only moved on. */
-void timer_trap_tick(void)
+/* Done as the trap began; under tracing the timer is only quieted, since only a record moves time. */
+void timer_trap_fired(void)
 {
     if (debug_trace) {
-        timer_count();
-        timer_set(1);
+        timer_set(COUNT_NEVER);
     }
 }
 
 /*
- * A trap whose count reached the tick the timer was set for ends the turn,
- * and the timer is set for the first tick that could change what runs next,
+ * The timer is set for the first count that could change what runs next,
  * unless nothing that could has changed.
- * The trap that turns tracing on leaves it on the next tick, as the traced interrupt does.
+ * The trap that turns tracing on quiets it, as the traced interrupt does.
  */
 void timer_trap_leave(bool traced)
 {
-    const struct core *core = core_self();
-    if (core->turn_due || core->wake_stale) {
-        uint32_t wake = sched_wake();
-        if (!debug_trace && wake != 0) {
-            timer_set(wake);
-        }
+    uint64_t at;
+    if (sched_wake(&at) && !debug_trace) {
+        timer_set(at);
     }
     if (debug_trace && !traced) {
-        timer_set(1);
+        timer_set(COUNT_NEVER);
     }
 }

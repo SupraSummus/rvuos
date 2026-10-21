@@ -8,7 +8,7 @@
  * Each neighbour's frames are counted, and from them ETX, the transmissions a frame to it takes.
  *
  * The driver's thread waits on the radio's line and on the TIMER's line and hands the link the bits that came;
- * the backoffs, the turnaround and the wait for an acknowledgement, all shorter than the kernel's tick, are alarm.c's.
+ * the backoffs, the turnaround and the wait for an acknowledgement, all shorter than a kernel's step, are alarm.c's.
  * Nothing here keeps a global: the link's state is handed in.
  */
 

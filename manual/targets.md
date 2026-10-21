@@ -79,8 +79,7 @@ Interrupt lines:
 | 0 | the kernel log (no controller behind it) |
 | 1 to 95 | the PLIC's sources; the UART is line 10 |
 
-The kernel's tick on this board is 1 kHz, `TIMER_HZ` in `kernel/timer.h`, unless the build sets another rate,
-so one tick is one millisecond.
+The kernel has no tick: the CLINT's compare is set for the first count that could change what runs.
 QEMU's PMP has sixteen entries and a four-byte grain.
 `BOOT_CAP_ROUTES` names four channels of a router that wires nothing, as on the MPS2 boards and the host,
 so that a program's routes are bound, connected, armed and revoked here as on a board with a router;
@@ -156,7 +155,7 @@ in the USB Serial/JTAG controller's case in its `INT_ENA` register.
 The CPU runs at 160 MHz, which the kernel sets at boot, and the clock counts its cycles;
 `OP_CLOCK_READ` gives the rate the kernel measured against the chip's 16 MHz system timer,
 and the boot's log gives it too, with the rate the kernel found: `rvuos: cpu clock <hz> hz, found at <hz> hz`.
-The tick is 1 kHz here too.
+The compare is the CLINT's here too, set as on QEMU.
 The PMP has sixteen entries and a four-byte grain.
 Keep memory accesses aligned, as clang does unless told otherwise.
 A misaligned load followed at once by a store into a region with other rights faults,
@@ -236,14 +235,14 @@ so a program flushes its console before it halts, or what it had not sent by the
 A watchdog reboots the chip into BOOTSEL about seventeen seconds after boot,
 unless the kernel's watchdog is fed, section 5.8: each feed sets the chip's to a second past the kernel's deadline.
 
-On the RISC-V cores the tick is 1 kHz, on the microseconds of the RISC-V platform timer.
+On the RISC-V cores the timer is the RISC-V platform timer's compare, on its microseconds.
 The PMP holds seven regions, none smaller than 32 bytes:
 the core has eight entries, and the kernel spends one shutting the three it hardwires open to user mode.
 A fault reports `mtval` as zero, and a misaligned access raises a misaligned exception.
 A program reaches a peripheral only through a frame, as it reaches RAM,
 and only where the chip's ACCESSCTRL lets user mode in too: TIMER0, for the clock, is the one opened.
 
-On the Cortex-M33 the tick is 1 kHz too, on TIMER0's counter, the one `BOOT_CAP_CLOCK` names.
+On the Cortex-M33 the timer is SysTick against TIMER0's counter, the one `BOOT_CAP_CLOCK` names.
 The MPU has eight regions, none smaller than 32 bytes, and a fault is reported as on `mps2-an385`.
 A program reaches a peripheral only through a frame, as it reaches RAM.
 
@@ -288,7 +287,7 @@ from `BOOT_CAP_DEVICES` up, so `BOOT_CAP_COUNT` is 26 here and the root task's t
 |---|---|---|---|---|---|
 | 21 | `BOOT_CAP_GPIO` | `0x50000000` | 4 KiB | GPIO, both ports, P0's registers and P1's at `0x50000300` | read, write |
 | 22 | `BOOT_CAP_RADIO` | `0x40001000` | 4 KiB | RADIO, the 2.4 GHz radio of Bluetooth LE and IEEE 802.15.4; its line is 1 | read, write |
-| 23 | `BOOT_CAP_TIMER2` | `0x4000A000` | 4 KiB | TIMER2, which times what is shorter than a tick, such as 802.15.4's backoffs; its line is 10 | read, write |
+| 23 | `BOOT_CAP_TIMER2` | `0x4000A000` | 4 KiB | TIMER2, which times what is shorter than a kernel's step, such as 802.15.4's backoffs; its line is 10 | read, write |
 | 24 | `BOOT_CAP_TIMER3` | `0x4001A000` | 4 KiB | TIMER3, for routes, such as an acknowledgement's turnaround; its line is 26 | read, write |
 | 25 | `BOOT_CAP_TIMER4` | `0x4001B000` | 4 KiB | TIMER4, for routes, such as a count of the frames received; its line is 27 | read, write |
 
@@ -304,7 +303,7 @@ and the root task gives it only to a driver it trusts as it trusts itself, as th
 
 The console's first word counts every byte written, and byte n lies at offset 16 plus n modulo 8176,
 so it is a ring, and the runner says how much it lost when it fell a whole ring behind.
-The tick is 1 kHz, on the counter, with SysTick for the compare.
+The timer is the counter, with SysTick for the compare.
 The counter is TIMER0's, which TIMER1 and a PPI channel capture into `CC[1]` every microsecond;
 it is 32 bits wide and wraps every 71 minutes, and `OP_CLOCK_READ` counts the wraps.
 The MPU has eight regions, none smaller than 32 bytes, and a fault is reported as on `mps2-an385`,
@@ -338,7 +337,7 @@ Interrupt lines:
 | 0 | the kernel log; UART0's receiver cannot be bound |
 | 1 to 31 | the NVIC's lines; UART0's transmitter is line 1 |
 
-The tick is 1 kHz, on the FPGA's counter, with SysTick for the compare.
+The timer is the FPGA's counter, with SysTick for the compare.
 The MPU has eight regions, none smaller than 32 bytes.
 The counter is 32 bits wide and wraps every 171 seconds; `OP_CLOCK_READ` counts the wraps.
 UART0's transmitter holds one byte and raises its line as that byte leaves, latched until the driver clears it.
@@ -374,7 +373,7 @@ Interrupt lines:
 | 1 to 47 | the NVIC's first lines, the SSE-200's 31 and the board's first 16; UART0's combined line, its transmitter's among it, is 42 |
 | 6 | MHU0's; with `CORES=2` the kernel's, for its cores, and an `Irq` cannot be bound to it |
 
-The tick is 1 kHz, on the FPGA's counter, with SysTick for the compare.
+The timer is the FPGA's counter, with SysTick for the compare.
 The MPU has eight regions, none smaller than 32 bytes.
 The counter is 32 bits wide and wraps every 214 seconds; `OP_CLOCK_READ` counts the wraps.
 The SSE-200 refuses user mode every device unless its Secure Privilege Control block lets it through,

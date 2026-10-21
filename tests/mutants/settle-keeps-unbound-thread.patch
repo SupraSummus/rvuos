@@ -1,6 +1,6 @@
 A thread that may no longer run stays on the queue it waited on.
 A thread unbound while it waited would still take turns;
-a thread names a queue only while its account and binding put it on one.
+a thread names a queue only while its virtual time and binding put it on one.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: a place names a queue it is not for
@@ -9,9 +9,9 @@ Witness: fuzz cores-resume-before-trap
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -336,7 +336,7 @@ static void place_settle(struct place *p)
-     const struct place *l = has_time(p->balance) ? NULL : place_lender(p);
-     uint8_t queue = place_queue(p, p->balance, l);
+@@ -409,7 +409,7 @@ static void place_settle(struct place *p)
+     struct place *l = place_lender(p, now);
+     uint8_t queue = place_queue(p, l, now);
      bool joined = queue != QUEUE_NONE && (queue != p->queue || core != was);
 -    if (queue != p->queue || core != was) {
 +    if (queue != QUEUE_NONE && (queue != p->queue || core != was)) {

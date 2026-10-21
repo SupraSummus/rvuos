@@ -1,9 +1,9 @@
 /*
- * Time: a timer line the root task sleeps on, timed on the clock, a period kept on it, and a tick it may not ask for.
+ * Time: a timer line the root task sleeps on, timed on the clock, a period kept on it, and a step it may not ask for.
  * The child waits for the root task and the logger waits on the log,
  * which nothing but a running thread can feed,
  * so while this thread sleeps nothing is runnable
- * and the kernel has to wait for the tick rather than stop.
+ * and the kernel has to wait for the timer rather than stop.
  */
 
 #include <stdint.h>
@@ -88,10 +88,10 @@ void time_demo(uint32_t *hz_out, uint32_t *counter_out)
 
     /*
      * A period counts from the deadline before, not from the wake,
-     * and the tick keeps pace with the counter,
+     * on the counter's own counts,
      * so after the first wake sets the phase, PERIODS more take PERIODS periods on the clock,
      * give or take a wake's lateness.
-     * A loop of sleeps would take a tick more per period.
+     * A loop of sleeps would take a wake's lateness more per period.
      */
     expect("set the phase", period_wait(PERIOD_US));
     start = rv_counter_low(counter);
@@ -107,8 +107,8 @@ void time_demo(uint32_t *hz_out, uint32_t *counter_out)
                ? KERR_OK : KERR_INVALID_ARG);
     puts("root: period ok\n");
 
-    /* Untraced only time moves the tick, so neither a tick nor a stop may be asked for. */
-    expect("ask for a tick untraced, refused",
+    /* Untraced only time moves the clock, so neither a step nor a stop may be asked for. */
+    expect("ask for a step of the clock untraced, refused",
            rv_test_tick(BOOT_CAP_TEST) == KERR_STATE && rv_test_preempt(BOOT_CAP_TEST, 1) == KERR_STATE
                ? KERR_OK : KERR_INVALID_ARG);
 

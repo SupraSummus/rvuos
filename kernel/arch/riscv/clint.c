@@ -1,4 +1,4 @@
-/* The counter and compare under the tick, on the CLINT of clint.h. */
+/* The counter and compare under the timer, on the CLINT of clint.h. */
 
 #include <stdint.h>
 

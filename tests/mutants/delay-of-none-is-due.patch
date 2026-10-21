@@ -1,0 +1,21 @@
+A delay forgets the count the call landed in:
+a delay of zero arms a timer line for the count already reached, and every deadline comes a count early.
+The timer fires every due timer line,
+so an Irq armed on one has its deadline ahead of the count.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: armed timer line is due
+Witness: fuzz cores-timer-across
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -181,7 +181,7 @@ static int op_captable(struct thread *t, uint32_t slot, const struct cap *cap,
+  */
+ static uint64_t delay_deadline(uint32_t us)
+ {
+-    return timer_now() + timer_us_counts(us) + 1;
++    return timer_now() + timer_us_counts(us);
+ }
+ 
+ /*

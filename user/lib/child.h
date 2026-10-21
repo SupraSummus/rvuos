@@ -170,6 +170,12 @@ uint32_t child_bit(struct self *s, struct child *c, uint32_t *bit);
 uint32_t child_start(struct self *s, struct child *c, void (*entry)(struct child_page *), uint32_t core,
                      uint32_t units);
 /*
+ * child_start with its requests due span counts past its virtual time, as OP_TIME_BIND takes it,
+ * until a wait gives another: 0 for the default span, else a power of two.
+ */
+uint32_t child_start_span(struct self *s, struct child *c, void (*entry)(struct child_page *), uint32_t core,
+                          uint32_t units, uint32_t span);
+/*
  * The child runs on core's spare time too, besides what child_start gave it,
  * a core whose time it holds none of yet, so that it runs where its parent's other threads leave time.
  */

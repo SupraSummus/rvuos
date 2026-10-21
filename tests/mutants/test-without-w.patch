@@ -1,4 +1,4 @@
-A Test capability with any right, or none, traces the machine, ticks it, fires its interrupts or preempts a call,
+A Test capability with any right, or none, traces the machine, steps its clock, fires its interrupts or preempts a call,
 so a Test narrowed to RIGHT_R still drives it;
 a call goes through only a capability with the rights its operation needs.
 

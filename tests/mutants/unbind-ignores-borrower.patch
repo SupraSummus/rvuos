@@ -1,17 +1,17 @@
 An unbind that settles a waiting lender but not the borrower it lends to.
-The borrower keeps the queue the lender's old account gave it.
+The borrower keeps the queue the lender's old units gave it.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
-Report: a place names a queue it is not for
-Witness: fuzz lend-lender-unbound
+Report: a place waits on another queue than its virtual time says
+Witness: fuzz lend-revoke-takes-lender
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -534,7 +534,7 @@ void sched_unbind(struct cap *bound)
+@@ -677,7 +677,7 @@ void sched_unbind(struct cap *bound)
      }
      *bound = (struct cap){ 0 };
-     /* An empty place holds nothing, so settling empties its account as it takes the place off its queue. */
+     /* An empty place holds no time, so settling takes it off its queue. */
 -    lender_settle(t);
 +    thread_settle(t);
  }

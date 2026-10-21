@@ -236,42 +236,35 @@ void selfcheck_fail(void)
     host_violated();
 }
 
-bool intr_wait(uint32_t wake, uint32_t *ticks)
+bool intr_wait(uint64_t at)
 {
-    (void)wake;
-    (void)ticks;
+    (void)at;
     /* Reached only untraced with an Irq armed, which the harness never sets up; a core of several idles with sched_idle_sleep. */
     kpanic("the host build has no clock and no devices to wait for");
 }
 
-/* The host is QEMU's board, whose counter runs at a rate fixed in board.h. */
-uint32_t timer_counter_hz(void)
+/*
+ * The host is QEMU's board, whose counter runs at a rate fixed in board.h, which host_boot starts kernel/timer.c with;
+ * but the host has no counter, so untraced its clock stands at zero, and under tracing it is the record's.
+ */
+uint64_t counter_read(void)
 {
-    return COUNTER_HZ;
+    return 0;
 }
 
-/* The host never starts the timer, so the tick is QEMU's board's from the start. */
-uint32_t tick_counts = COUNTER_HZ / TIMER_HZ;
-
-uint64_t timer_now(void)
+void counter_compare(uint64_t at)
 {
-    return (uint64_t)sched_ticks * timer_tick_counts();
+    (void)at;
+}
+
+void counter_compare_enable(void)
+{
 }
 
 /* QEMU's board has no watchdog of its own. */
 void board_watchdog(uint32_t us)
 {
     (void)us;
-}
-
-/*
- * The host's clock is the tick count, and the scheduler asks where the counter is only untraced.
- * Half way into the tick stands for wherever QEMU's is when the replay driver turns tracing on,
- * so that OP_TEST_TRACE has an offset to clear.
- */
-uint32_t timer_offset(void)
-{
-    return timer_tick_counts() / 2;
 }
 
 /* The worst case: every preemptible call stops after its first step. */
@@ -423,7 +416,7 @@ struct thread *host_boot(void)
     pool_list = NULL;
     memset(line_irq, 0, LINES * sizeof(line_irq[0]));
     for (unsigned c = 0; c < CORES; c++) {
-        cores[c] = (struct core){ .nearest_release = NEAREST_NONE, .nearest_deadline = NEAREST_NONE };
+        cores[c] = (struct core){ .nearest_release = COUNT_NEVER, .nearest_deadline = COUNT_NEVER, .wake_at = COUNT_NEVER };
     }
 #if CORES > 1
     kernel_lock = (struct kernel_lock){ 0 };
@@ -432,8 +425,10 @@ struct thread *host_boot(void)
     memset(host_deferred, 0, sizeof(host_deferred));
 #endif
     memset(unit_place, 0, sizeof(unit_place));
+    memset(unit_vt, 0, sizeof(unit_vt));
     armed_sources = 0;
-    sched_ticks = 0;
+    sched_trace_clock = 0;
+    timer_start(COUNTER_HZ);
     watchdog = (struct watchdog){ 0 };
     debug_trace = false;
     preempt_countdown = 0;
@@ -516,9 +511,7 @@ static void host_leave(void)
  */
 static void host_trap(bool call)
 {
-    /* What another core counted since this one last trapped, as timer_trap_enter counts it before the call. */
     core_enter();
-    sched_count(0);
     history_begin(call);
     model_begin(call);
 #ifdef RVUOS_WORK
@@ -529,7 +522,8 @@ static void host_trap(bool call)
     } else {
         fault_dispatch(core_self()->current);
     }
-    sched_wake();
+    uint64_t at;
+    sched_wake(&at);
     host_leave();
     /* The report was made as the kernel reached poisoned RAM; see host_asan_report. */
     if (poison_reached) {
@@ -558,15 +552,16 @@ static void host_core_trap(void)
     if (core->turn == NULL) {
         core_stall_end();
         ipi_clear();
-        if (sched_idle_wake(0, false)) {
-            sched_wake();
+        uint64_t at;
+        if (sched_idle_wake(false)) {
+            sched_wake(&at);
         }
     } else {
         core_enter();
-        sched_count(0);
         ipi_clear();
         core_trapped();
-        sched_wake();
+        uint64_t at;
+        sched_wake(&at);
     }
     if (debug_trace) {
         selfcheck_run();
@@ -668,7 +663,8 @@ static void host_call(bool record)
     }
     bool stopped;
     do {
-        uint32_t pc = f->pc, ticks = sched_ticks;
+        uint32_t pc = f->pc;
+        uint64_t clock = sched_trace_clock;
         unsigned before[UNITS];
         host_units(before);
         host_trap(true);
@@ -680,8 +676,8 @@ static void host_call(bool record)
             took |= after[u] < before[u];
         }
         stopped = f->pc == pc;
-        /* Under tracing only OP_TEST_TICK moves time, and the tick an armed stop lands. */
-        bool armed = debug_trace && sched_ticks != ticks && op != OP_TEST_TICK;
+        /* Under tracing only OP_TEST_TICK moves time, and the step of the clock an armed stop lands. */
+        bool armed = debug_trace && sched_trace_clock != clock && op != OP_TEST_TICK;
         if (stopped && !took) {
             fprintf(stderr, "invariant violated: a call was preempted before it took anything away\n");
             host_violated();

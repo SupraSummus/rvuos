@@ -69,7 +69,7 @@ static void lost_main(void)
 
 /*
  * Spin, making no call, until *word moves on from was or counts of the counter pass; whether it moved.
- * The timer is set for the next tick first, and its bit taken after,
+ * The timer is set to fire at once first, and its bit taken after,
  * so that a machine that runs its cores in turns, as QEMU does, turns to the other core by then:
  * QEMU runs one core until the next deadline of any timer, or until it waits.
  * The counter is read before the word, so a word that has not moved had not by then either,
@@ -78,7 +78,7 @@ static void lost_main(void)
 static int moved_while_spinning(const volatile uint32_t *word, uint32_t was, uint32_t counter, uint32_t counts)
 {
     const volatile uint32_t *low = (const volatile uint32_t *)counter;
-    expect("set the timer for the next tick", rv_timer_set(SLOT_TIMER, BIT_TIMER, 0));
+    expect("set the timer to fire at once", rv_timer_set(SLOT_TIMER, BIT_TIMER, 0));
     uint32_t start = *low;
     uint32_t passed;
     int moved;
@@ -121,7 +121,7 @@ static void second_core(uint32_t data_base, uint32_t data_size, uint32_t shared_
            rv_invoke(OP_TIME_CARVE, BOOT_CAP_TIME, TIME_UNITS, TIME_UNITS, SLOT_CORE_TIME));
     was = spins[0];
     expect("bind a spinner to the whole of the second core",
-           rv_invoke(OP_TIME_BIND, SLOT_CORE_TIME, SLOT_SPINNER, 0, TIME_UNITS));
+           rv_time_bind(SLOT_CORE_TIME, SLOT_SPINNER, 0, TIME_UNITS, 0));
     expect("it spins while this thread spins, making no call",
            moved_while_spinning(&spins[0], was, counter, counts) ? KERR_OK : KERR_INVALID_ARG);
     puts("root: second core ok\n");
@@ -144,7 +144,7 @@ static void second_core(uint32_t data_base, uint32_t data_size, uint32_t shared_
      * Alone on the second core it has the whole of it while this thread sleeps.
      * It has one place, so it takes the time of this core only once the other's is taken back,
      * which it loses while it runs there: it finishes its turn there
-     * and comes here, where once its account has drained it runs an eighth of the time.
+     * and comes here, where it runs an eighth of the time, after what it ran ahead of its units there.
      */
     was = spins[0];
     expect("sleep while it spins there", sleep_us(CAPPED_US));
@@ -152,12 +152,12 @@ static void second_core(uint32_t data_base, uint32_t data_size, uint32_t shared_
     expect("derive the half without spare time to move it",
            rv_invoke(OP_CAP_DERIVE, BOOT_CAP_CAPTABLE, SLOT_CAPPED_TIME, SLOT_HALF_TIME, RIGHT_W));
     expect("its one place holds the second core's time, so it takes no other",
-           rv_invoke(OP_TIME_BIND, SLOT_CAPPED_TIME, SLOT_SPINNER, 0, TIME_UNITS / 8) == KERR_LIMIT
+           rv_time_bind(SLOT_CAPPED_TIME, SLOT_SPINNER, 0, TIME_UNITS / 8, 0) == KERR_LIMIT
                ? KERR_OK : KERR_INVALID_ARG);
     expect("take the second core's time back", rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_CORE_TIME, 0, 0));
     expect("move the spinner to an eighth of this core",
-           rv_invoke(OP_TIME_BIND, SLOT_CAPPED_TIME, SLOT_SPINNER, 0, TIME_UNITS / 8));
-    expect("let its account drain", sleep_us(CAPPED_US));
+           rv_time_bind(SLOT_CAPPED_TIME, SLOT_SPINNER, 0, TIME_UNITS / 8, 0));
+    expect("let it settle to its units", sleep_us(CAPPED_US));
     was = spins[0];
     expect("sleep while it spins here", sleep_us(CAPPED_US));
     uint32_t here = spins[0] - was;
@@ -176,8 +176,8 @@ static void second_core(uint32_t data_base, uint32_t data_size, uint32_t shared_
     expect("configure it",
            rv_invoke(OP_THREAD_CONFIGURE, SLOT_ROAMER, (uint32_t)&roamer_main,
                      stack - CORE_STACK(3) * SPINNER_STACK, 0));
-    expect("give it spare time here", rv_invoke(OP_TIME_BIND, BOOT_CAP_TIME, SLOT_ROAMER, 0, 0));
-    expect("and on the second core", rv_invoke(OP_TIME_BIND, SLOT_CORE_TIME, SLOT_ROAMER, 0, 0));
+    expect("give it spare time here", rv_time_bind(BOOT_CAP_TIME, SLOT_ROAMER, 0, 0, 0));
+    expect("and on the second core", rv_time_bind(SLOT_CORE_TIME, SLOT_ROAMER, 0, 0, 0));
     expect("it holds the time of both",
            rv_cap_info_of(SLOT_ROAMER, CAP_THREAD, w) == KERR_OK && w[0] == 2 && w[1] == 3 ? KERR_OK : KERR_INVALID_ARG);
     expect("start it", rv_invoke(OP_THREAD_RESUME, SLOT_ROAMER, 0, 0, 0));
@@ -201,7 +201,7 @@ static void second_core(uint32_t data_base, uint32_t data_size, uint32_t shared_
     expect("configure it",
            rv_invoke(OP_THREAD_CONFIGURE, SLOT_PONGER, (uint32_t)&ponger_main,
                      stack - CORE_STACK(0) * SPINNER_STACK, 0));
-    expect("bind it to spare time on the second core", rv_invoke(OP_TIME_BIND, SLOT_CORE_TIME, SLOT_PONGER, 0, 0));
+    expect("bind it to spare time on the second core", rv_time_bind(SLOT_CORE_TIME, SLOT_PONGER, 0, 0, 0));
     expect("start it", rv_invoke(OP_THREAD_RESUME, SLOT_PONGER, 0, 0, 0));
     status = KERR_OK;
     for (uint32_t i = 0; i < PINGS && status == KERR_OK; i++) {
@@ -235,7 +235,7 @@ static void second_core(uint32_t data_base, uint32_t data_size, uint32_t shared_
     expect("watch it on the timer's notification",
            rv_invoke(OP_THREAD_WATCH, SLOT_READER, SLOT_TIMER_NTFN, BIT_FAULT, 0));
     expect("bind it to the whole of the second core",
-           rv_invoke(OP_TIME_BIND, SLOT_CORE_TIME, SLOT_READER, 0, TIME_UNITS));
+           rv_time_bind(SLOT_CORE_TIME, SLOT_READER, 0, TIME_UNITS, 0));
     expect("start it", rv_invoke(OP_THREAD_RESUME, SLOT_READER, 0, 0, 0));
     expect("it reads while this thread spins",
            moved_while_spinning(&read_count, 0, counter, counts) ? KERR_OK : KERR_INVALID_ARG);
@@ -267,7 +267,7 @@ static void second_core(uint32_t data_base, uint32_t data_size, uint32_t shared_
     expect("configure it",
            rv_invoke(OP_THREAD_CONFIGURE, SLOT_LOST, (uint32_t)&lost_main, stack - CORE_STACK(2) * SPINNER_STACK, 0));
     expect("bind it to the whole of the second core",
-           rv_invoke(OP_TIME_BIND, SLOT_CORE_TIME, SLOT_LOST, 0, TIME_UNITS));
+           rv_time_bind(SLOT_CORE_TIME, SLOT_LOST, 0, TIME_UNITS, 0));
     expect("start it", rv_invoke(OP_THREAD_RESUME, SLOT_LOST, 0, 0, 0));
     add_atomically();
     expect("it counts while this thread spins",
@@ -281,7 +281,7 @@ static void second_core(uint32_t data_base, uint32_t data_size, uint32_t shared_
            !moved_while_spinning(&lost_spins, lost_spins, counter, counts) ? KERR_OK : KERR_INVALID_ARG);
     was = spins[0];
     expect("give the second core to a spinner",
-           rv_invoke(OP_TIME_BIND, SLOT_CORE_TIME, SLOT_SPINNER, 0, TIME_UNITS));
+           rv_time_bind(SLOT_CORE_TIME, SLOT_SPINNER, 0, TIME_UNITS, 0));
     expect("the core runs it", moved_while_spinning(&spins[0], was, counter, counts) ? KERR_OK : KERR_INVALID_ARG);
     expect("take the second core's units back again",
            rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_CORE_TIME, 0, 0));

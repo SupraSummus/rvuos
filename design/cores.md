@@ -11,7 +11,7 @@ and RP2350, which `make BOARD=rp2350 CORES=2` builds for both cores of either ki
 What a core has of its own is `struct core` in `kernel/sched.h`:
 its thread, its turn, its three queues, its release, its nearest deadline, its timer, the call it is in,
 and what it tells the others.
-The objects, the derivation tree, the units, the tick count, the timer lines and the device lines are the machine's.
+The objects, the derivation tree, the units, the clock, the timer lines and the device lines are the machine's.
 With one core there is no lock, and no other core to interrupt or wait for.
 
 **One lock around the kernel.**
@@ -54,7 +54,7 @@ A thread is made with places, from one to `CORES`, as a table is made with slots
 the count is its creator's, so a thread takes the memory of the cores it is to use, and a core's count is only a limit;
 see open decision 35.
 Each place is empty, or holds the time of one core, and no two of a thread's hold one core's:
-its units there, or none, for spare time there, its binding, its account, and its place on that core's queues, `struct place`.
+its units there, or none, for spare time there, its binding, its virtual time, and its place on that core's queues, `struct place`.
 A bind takes units of one core, or none, at the first unit's core, and fills the place that holds that core's time,
 or an empty one, `KERR_LIMIT` with none;
 a place bound to none without spare time holds the core's time all the same, and runs there on lent time alone.
@@ -69,24 +69,20 @@ A thread made ready on several idle cores interrupts each, and those that find i
 Units of a core promise their part of it to every other thread as on one core;
 to a thread that holds the time of several they promise it only while it runs on none of the others,
 since a turn elsewhere puts its place at the back of their queues.
-A thread whose place is emptied during its turn finishes the turn, which then ends at the next tick.
+A thread whose place is emptied during its turn ends the turn as the trap that emptied it does, unless it may run on there on spare time.
 Spare time is each core's own: a thread runs on a core's spare time when nobody there with time wants it,
 and one with spare time on several takes whichever comes first.
 A program learns how many cores there are from `BOOT_CAP_TIME`'s count, which its description, `OP_CAP_INFO`, tells,
 and the cores a thread holds the time of from the thread's.
 On one core a thread has one place, which the compiler knows, so the places cost the scheduler's steps nothing there.
 
-**Time is the machine's, and each core counts up to it.**
-The tick count, the deadlines of the timer lines and every account count the machine's ticks,
-on the one counter every core reads, on one grid.
-A trap counts the ticks the counter passed, as it does on one core,
-and with them those other cores counted since this one last did,
-charging its turn for all of them as the tick would have.
-So a core's turn is charged to the tick the core counted, `ticks` in `struct core`,
-which lags while the core runs on without trapping, and which only the core's own traps move.
-Whichever core counts a tick fires the timer lines that are due,
-and looks at the release of every core whose release it reached, a fixed few units each,
-so every core's queues agree with the accounts, whichever core counted.
+**Time is the machine's, one clock every core reads.**
+The deadlines of the timer lines and every virtual time count the one counter every core reads.
+A core's turn is charged up to the count the core last read, `turn_from` in `struct core`, as on one core.
+Whichever core's timer comes first fires the timer lines that are due,
+and looks at the release of every core whose release the clock reached, a fixed few units each,
+so every core's queues agree with the virtual times, whichever core looked;
+under tracing one core's step of the clock does what each core's timer would.
 
 **A timer line wakes the core that armed it.**
 The arm notes in the `Irq` which core made it,
@@ -94,9 +90,9 @@ and each core keeps the nearest deadline of the lines armed on it, as it keeps i
 so an idle core with no line of its own sleeps through the others'.
 The arm's core learns of the deadline without an interrupt between the cores,
 which the timer lines kept on one core, as the device lines are, would cost at every arm from another.
-Whichever core counts a tick puts every core's nearest deadline right again,
+Whichever core's timer looks at the lines puts every core's nearest deadline right again,
 which only moves it later, so no core is told;
-the core that armed a line another core fired first may then wake for it, a trap that counts nothing.
+the core that armed a line another core fired first may then wake for it, a trap that finds nothing due.
 
 **A core tells another by interrupting it.**
 A core that puts a thread on another core's queue, brings another core's release forward,
@@ -105,9 +101,9 @@ marks that core's timer stale, and the other core sets its timer again before it
 It interrupts the other core for it, with the software interrupt of QEMU `virt`'s CLINT or of RP2350's SIO on Hazard3,
 or on the Cortex-M33 on a line of each core's NVIC,
 through MHU0 on mps2-an521, the SSE-200's message handling unit, and through SIO's doorbells on RP2350,
-when that core idles, or runs user mode with its timer set past the next tick,
-or runs a turn on spare time that a thread with time now waits for on its run queue, which takes it at once;
-one whose timer comes within a tick, or that runs the kernel, finds the mark itself.
+when that core idles or runs user mode, since its timer may be set past the change,
+and a turn on spare time that a thread with time now waits for on its run queue gives the core up at once;
+one that runs the kernel finds the mark itself.
 The interrupt is sent once the lock is given up, `interrupt_owed` in `struct core` until then,
 so that the other core does not trap only to wait for the lock the sender still holds.
 
@@ -127,7 +123,7 @@ and as it takes the lock loads its regions again, or finds its thread taken and 
 A trap whose thread another core stopped or destroyed while the trap waited for the lock is dropped:
 the interrupt it entered on is still taken, a call is not made and its pc stays at it, and a fault is not reported,
 since a thread that runs again makes the call, or faults, again.
-`core_trapped` says whether it is, and ends the turn if so, as a tick does, for every architecture's trap and for the host's.
+`core_trapped` says whether it is, and ends the turn if so, as the timer does, for every architecture's trap and for the host's.
 
 **The stopping core marks the trap, and the mark decides.**
 A stopped thread can be resumed, so its state cannot say what a trap is for:
@@ -138,9 +134,9 @@ on registers a watcher may have written meanwhile, with `OP_THREAD_WRITE_REG` or
 So the stopping core marks each other core whose turn the thread has, `drop_trap` in `struct core`,
 and the trap that next takes the lock there drops what it was for whatever the thread is by then.
 A thread resumed in between is the turn of that core still, so it waits on no queue, and runs nowhere, until the trap;
-the trap ends the turn as a tick does, `sched_turn_end`, which puts it at the back of its queue,
+the trap ends the turn as the timer does, `sched_turn_end`, which puts it at the back of its queue,
 where handing the processor on as a wait does would leave it ready on no queue for good.
-The turn is over, so an end the trap's count found due is moot, and the thread stands at no call it is to make again first:
+The turn is over, so an end the timer found due is moot, and the thread stands at no call it is to make again first:
 the drop clears both, as the stall does.
 A mark goes with the turn it was set for: a destroy of the thread clears it with the turn,
 and the trap that finds no thread drops what it was for all the same.

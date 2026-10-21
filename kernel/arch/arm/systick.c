@@ -1,5 +1,5 @@
 /*
- * The compare under the tick, on SysTick, which every Cortex-M has;
+ * The compare under the timer, on SysTick, which every Cortex-M has;
  * the counter it compares with is the board's, counter_read in its timer.c.
  *
  * SysTick is a 24-bit down-counter with a reload, not a compare,
@@ -17,8 +17,8 @@
 #include "scs.h"
 #include "timer.h"
 
-_Static_assert(SYSTICK_PER_COUNT >= 1 && SYST_MAX / SYSTICK_PER_COUNT >= COUNTER_HZ / TIMER_HZ,
-               "one reload of SysTick lasts at least a tick of the counter");
+_Static_assert(SYSTICK_PER_COUNT >= 1 && SYST_MAX / SYSTICK_PER_COUNT >= COUNTER_HZ / 1000u,
+               "one reload of SysTick lasts at least a millisecond of the counter");
 
 /* Each core's compare, which its own SysTick serves; every core sets its own before it reads it. */
 static uint64_t compare[CORES];

@@ -4,8 +4,8 @@
  * a part at a time, in the order main runs them:
  *   logger.c     a thread that carries the kernel's log to the UART
  *   root.c       memory, a second process running child.c, a message, preemption, revocation, derivation, cascade
- *   time.c       the timer, the clock, a period, and a tick asked for untraced
- *   units.c      units of the processor, spare time, charging, and a spin no tick interrupts
+ *   time.c       the timer, the clock, a period, and a step of the clock asked for untraced
+ *   units.c      units of the processor, spare time, charging, and a spin no timer interrupts
  *   root.c       an Irq on a line nothing drives
  *   cores.c      the second core, on a machine of several
  *   successor.c  the handover, a fault, and the watchdog, whose halt ends the demo
@@ -198,13 +198,13 @@ int main(void)
     /*
      * The child earns the other half of the processor, carved out of the boot grant
      * so that revoking below it stops the child alone.
-     * Its account starts empty and fills in two ticks, and then this thread and the child both have time:
-     * while both want the processor, they take turns.
+     * Its virtual time starts at the clock, and then this thread and the child both have time:
+     * while both want the processor, they take turns by the deadlines of their requests.
      */
     expect("carve the child half the processor",
            rv_invoke(OP_TIME_CARVE, BOOT_CAP_TIME, HALF_UNITS, HALF_UNITS, SLOT_HALF_TIME));
     expect("bind the child to it",
-           rv_invoke(OP_TIME_BIND, SLOT_HALF_TIME, SLOT_CHILD_THREAD, 0, HALF_UNITS));
+           rv_time_bind(SLOT_HALF_TIME, SLOT_CHILD_THREAD, 0, HALF_UNITS, 0));
     expect("start the child",
            rv_invoke(OP_THREAD_RESUME, SLOT_CHILD_THREAD, 0, 0, 0));
 
@@ -225,7 +225,7 @@ int main(void)
     /*
      * Preemption.
      * Each side spins on a word only the other writes and neither waits,
-     * so only the tick gets them past this.
+     * so only the timer at the end of a request gets them past this.
      */
     uint32_t count = counter_start();
     shared[SHARED_TURN] = TURN_CHILD;

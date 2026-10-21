@@ -51,7 +51,7 @@
  * A TIMER's count is read only by capturing it into a CC register,
  * so TIMER1 raises an event every microsecond and a PPI channel captures TIMER0's count into CC[1] at each,
  * which user mode then reads as a counter; see timer.c.
- * It wraps every 71 minutes, and the kernel counts the wraps for its tick and for OP_CLOCK_READ.
+ * It wraps every 71 minutes, and the kernel counts the wraps for its timer and for OP_CLOCK_READ.
  */
 #define TIMER0_BASE  U32(0x40008000)
 #define TIMER1_BASE  U32(0x40009000)
@@ -73,7 +73,7 @@
  * devices a driver in user mode needs:
  * GPIO, both ports' registers, P0's at 0x50000000 and P1's at 0x50000300, in one 4 KiB block, read and write;
  * RADIO, the 2.4 GHz radio of Bluetooth LE and IEEE 802.15.4, read and write;
- * TIMER2, read and write, which times in microseconds what a driver waits for that is shorter than a tick,
+ * TIMER2, read and write, which times in microseconds what a driver waits for too briefly for a timer line,
  * such as IEEE 802.15.4's backoffs;
  * and TIMER3 and TIMER4, read and write, which a route wires to the radio, an acknowledgement's turnaround
  * and a count of the frames received, say; see the router below.

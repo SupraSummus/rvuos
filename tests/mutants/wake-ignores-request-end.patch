@@ -1,0 +1,21 @@
+The timer lets the count pass at which the running thread's request is over.
+A thread alone on the processor without spare time would run on past what its units paid for,
+and one beside a thread with time would keep it waiting;
+the end of the turn's request is a count the timer lets pass only while the turn is alone and may run on spare time.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
+Report: the timer lets the end of the turn's request pass
+Witness: fuzz bind-turn-later
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -1046,7 +1046,7 @@ uint64_t sched_next_wake(void)
+     if (end != COUNT_NEVER) {
+         /* Alone on its own time with spare time to go on with, the turn's request changes nothing that runs as it ends. */
+         bool alone = core->payer == NULL && place_spare(own) && core->run_queue == 0 && core->spare_queue == 0;
+-        if (!alone && end < at) {
++        if (false && !alone && end < at) {
+             at = end;
+         }
+     } else if (core->spare_queue != 0 && core->turn_began + place_span(own) < at) {

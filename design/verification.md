@@ -126,19 +126,16 @@ though it may have lost its units during its turn, which it finishes.
 A preempted thread stays ready and joins its queue,
 so it runs again while it keeps its units or its spare time.
 
-**Units and accounts.**
+**Units and virtual times.**
 Each of every core's `TIME_UNITS` units names the one thread bound to it, or none,
 and a thread's units are all of one core.
-Every account holds at most `ACCOUNT_TICKS` ticks' gain for each unit, and so nothing without units,
-and was last counted no later than the count;
-a thread has time exactly while its account holds a tick.
-The thread whose turn it is, and the thread that pays for it, have their accounts counted up to the count their core reached,
-since every tick of the turn is charged to the payer as it passes and earns the turn's thread its units,
-and under tracing, where the clock is the tick count, it owes nothing from before the tick.
-A core counts no tick the machine did not, and the one a call runs on has counted every one.
-A thread with units that waits without time reaches a tick no earlier than its core's release,
+Every place's virtual time lies at most the longest span ahead of the clock, since a request starts no later than the clock;
+a thread has time exactly while it has a request open on its units, or its lender's, or their virtual time has come.
+A place on the run queue has its request open on the units that pay for it.
+A turn is charged up to a count the clock has reached, and began no later.
+A thread with units that waits without time has its virtual time come no earlier than its core's release,
 and so does the lender of a borrower that waits for lent time,
-and every core's release lies ahead of the count.
+and every core's release lies ahead of the clock.
 
 **Cores.**
 A core's thread is a live thread or none, and a core whose turn it is runs it.
@@ -176,25 +173,21 @@ read back from the router itself:
 a set arms or disarms it, and a revoke above an end and the destroy of its pool disarm it.
 
 **Timer lines.**
-An `Irq` armed on a timer line has its deadline ahead of the tick count:
-the tick fires every timer line that is due,
+An `Irq` armed on a timer line has its deadline ahead of the clock:
+the timer fires every timer line that is due,
 and a line that fires disarms its `Irq`.
-Each core's nearest deadline lies ahead of the count
+Each core's nearest deadline lies ahead of the clock
 and no later than the deadline of any `Irq` armed on a timer line from that core.
 
 **The watchdog.**
-An armed watchdog has its deadline ahead of the tick count, since the tick that reaches it halts the machine,
+An armed watchdog has its deadline ahead of the clock, since the timer that reaches it halts the machine,
 and no further ahead than the longest delay a feed may name.
 The core that fed it last has its nearest deadline no later than the watchdog's.
 
 **The timer.**
-While a thread runs on lent time the timer lets no tick pass,
-and while one runs on its own, every tick the timer lets pass would hand the processor back to it:
-nobody is on the run queue, and it has time,
-or may run on spare time with nobody on the spare queue,
-and none of those ticks is the release, the core's nearest deadline,
-or, unless it may go on alone on spare time, the tick at which its account leaves it less than a tick.
-The tick the timer was last set for lies ahead of the count and no later than that first tick,
+The count the timer was last set for comes no later than the release, the core's nearest deadline,
+the end of the turn's request unless its thread may go on alone on spare time,
+and a span into a turn on spare time while another waits for spare time,
 unless a change since marked it stale.
 
 **The log.**
@@ -264,16 +257,20 @@ No call builds an object in a pool whose destroy has begun,
 so every step of the destroy takes something away and the destroy ends,
 whatever other threads do between its steps.
 
-**A tick charges.**
-Under tracing, where the clock is the tick count,
-a tick costs the thread the turn is charged to, its payer while it runs on lent time, a whole tick while its account holds one,
-and earns it its units, as every tick does;
-a call that moves no time costs it nothing.
+**A step charges.**
+Under tracing, where the clock is the record's,
+the thread the turn is charged to, its payer while it runs on lent time, pays `TIME_UNITS / u` counts of virtual time
+for each count the turn ran, up to the end of its request, once the call charges the turn, which it need not;
+a request it starts after brings its virtual time up to the clock, and nothing else moves it.
 
 **A thread lends by its own wait.**
 A thread comes to lend its time to another only by its own lending wait,
 through a capability to that thread with the right to lend;
 no other call, and no fault, makes one thread lend to another.
+
+**A wait says how soon.**
+A wait or a lending wait that goes through, returning or blocking, leaves its caller's requests on every core
+due within the span it gave, and as they were if it gave none.
 
 **A thread stops by its holder, where it stood.**
 A thread ready or waiting before a call and stopped after it is the caller of a fault, one whose process the call took,
@@ -308,7 +305,7 @@ It returns the type, the rights and what `include/rvuos/abi.h` says the type tel
 no object's address among them,
 and it changes no node, no object, no pool's descriptor and no table's header.
 What the tail of every call and its trace line may move is left out:
-a thread's state, queues, account and frame, a notification's bits and waiters, an `Irq`'s bits.
+a thread's state, queues, virtual time and frame, a notification's bits and waiters, an `Irq`'s bits.
 
 **A pool's room is what an allocation may take.**
 An allocation from a pool, `OP_POOL_ALLOC`'s or `OP_IRQ_BIND`'s, fails for want of room
@@ -363,9 +360,9 @@ and the input ends as the call returns.
 An input is a sequence of events the kernel receives,
 not the behaviour of one process:
 each record is a system call with the thread that makes it,
-and the tick is a record too, `OP_TEST_TICK`,
-which moves time by one tick and fires the timer lines due,
-so the host has a clock that ticks when the input says;
+and a step of the clock is a record too, `OP_TEST_TICK`,
+which moves time by a millisecond of the counter's counts and fires the timer lines due,
+so the host has a clock that moves when the input says;
 a device interrupt is a record as well, `OP_TEST_IRQ`,
 which does to an armed `Irq` what the controller would,
 so the host has devices that fire when the input says.
@@ -594,53 +591,47 @@ the kernel stops the machine with `untraced thread`.
 That is a constraint verification puts on the kernel,
 and it costs nothing outside trace mode.
 
-The tick is the other such constraint.
+The timer is the other such constraint.
 A preemption lands between two instructions,
 and the host runs records rather than instructions,
 so it cannot say where one would land.
-While tracing is on, the tick therefore preempts nobody
-and moves no time: timer lines fire only through `OP_TEST_TICK`,
-and so do accounts get charged and fill, and the watchdog halt.
-`OP_TEST_TRACE` fills every account,
-so the host, which boots with them full, starts from the same accounts as QEMU,
-where the driver ran untraced for a while before and a tick may have come.
-The clock that charges a turn is then the tick count alone, on both builds:
-a turn with time pays a tick at each `OP_TEST_TICK` and nothing at a wait.
-`OP_CLOCK_READ` tells the same clock, the counts of the ticks so far, which the host, with no counter, tells too.
-The fill clears what the running thread owed from within the tick,
-and the host stands its counter half way into the tick while untraced, so that there is something to clear.
+While tracing is on, the timer therefore preempts nobody
+and moves no time: the clock moves only through `OP_TEST_TICK`, a millisecond of the counter's counts a step,
+and so do timer lines fire, virtual times come, and the watchdog halt; each step ends the turn, as a tick once did.
+`OP_TEST_TRACE` starts the clock where the counter was and brings every virtual time to it,
+so the host, which boots with them at its clock, starts from the same virtual times relative to the clock as QEMU,
+where the driver ran untraced for a while before.
+The clock that charges a turn is then the record's alone, on both builds:
+a turn with time pays its units' part of what it ran at each `OP_TEST_TICK`, and nothing at a wait.
+`OP_CLOCK_READ` tells the same clock, which the host, with no counter, tells too.
 The charge at a change of turn is checked by the demo in `user/init/units.c`,
-by a thread held to an eighth that sleeps across every tick;
+by a thread held to an eighth that waits between every round of its work;
 see `TODO.md` for what nothing checks.
-The interrupt is still taken and acknowledged on QEMU,
-so the replay exercises the interrupt entry and return,
+The interrupt is quieted under tracing on QEMU, its compare set for no count,
 but a switch happens only when a thread waits
-or when a record asks for the tick through `OP_TEST_TICK`.
-A traced run in which every thread waits, or waits for an account to fill, therefore stops
+or when a record moves the clock through `OP_TEST_TICK`.
+A traced run in which every thread waits, or waits for its virtual time to come, therefore stops
 even with a timer line armed, since no record is left to fire it,
 and the host build, which has no clock, agrees.
-A tick pending in a revoke stops it on QEMU as anywhere,
+A timer pending in a revoke stops it on QEMU as anywhere,
 but a stopped call is not traced, only the attempt that finishes,
-so where the tick lands leaves the transcript alone,
+so where the timer lands leaves the transcript alone,
 and the host may stop every such call without a line of its own.
 The stall in `wfi` for an armed timer line is checked by the demo in `user/init/time.c`,
 and so are periods that keep pace with the clock,
-bounded on both sides, which a stall that miscounted the ticks it skipped would break;
-the host never stalls, so nothing else checks the deferral.
+bounded on both sides;
+the host never stalls, so nothing else checks the stall's timer.
 The demo ends in the watchdog's halt, untraced, on every board, after feeding it across sleeps longer than it waits;
 that the stall wakes for the watchdog on time rests on the core's nearest deadline, which only the self-check holds.
-The ticks the timer lets pass while a thread runs are checked by the demo as well,
+That a thread alone is not interrupted is checked by the demo as well,
 by a thread that spins alone and counts the gaps a trap leaves between two reads of the counter.
-The host sets no timer and counts no ticks at a trap,
-but the self-check holds the tick the kernel would set the timer for to "The timer" in "Properties",
-so a tick let pass that ends the turn, drains an account or fires a line shows on the host too;
+The host sets no timer, but the self-check holds the count the kernel would set the timer for to "The timer" in "Properties",
+so a timer that would let a request's end, a release or a line pass shows on the host too;
 and the host does after every call what a trap does on its way back,
-so a change that brings that tick forward without marking it stale shows there as well.
-Under tracing no trap counts ticks, and the timer is left on every tick,
-which the traced interrupt only moves on.
+so a change that brings that count forward without marking it stale shows there as well.
 The demo also holds a spinning thread to an eighth of the processor with nothing else to run,
-so the kernel stalls for its account to reach a tick, and then lets it run on spare time;
-the host replays accounts being spent and filled, but never that stall.
+so the kernel stalls for its virtual time to come, and then lets it run on spare time;
+the host replays virtual times running ahead and coming, but never that stall.
 A device interrupt is delivered under tracing as it is otherwise,
 because a line left claimed would storm
 and one masked without its `Irq` disarmed would break an invariant;
@@ -649,9 +640,9 @@ so none arrives during a replay, and `OP_TEST_IRQ` fires them by name.
 The path from the controller to the `Irq` is checked by the demo in `user/init/logger.c`,
 whose logger drives the UART's transmitter on its interrupt.
 The kernel loses nothing by that:
-it runs with interrupts off, so a tick lands only in user mode,
+it runs with interrupts off, so a timer lands only in user mode,
 and every such landing is the same to it, a ready thread whose frame is saved.
-A tick landing within a restartable call is a record too, `OP_TEST_PREEMPT`:
+A timer landing within a restartable call is a record too, `OP_TEST_PREEMPT`:
 it arms a stop at the n-th place from now at which a call could stop between two steps,
 counted whether an interrupt is pending or not, so both builds stop at the same place,
 and does there what `OP_TEST_TICK` does, so another thread may run while the call is half done.
@@ -665,10 +656,10 @@ and the wait made again prints its line on both builds.
 What the demo in `user/init/` alone still checks
 is the interrupt landing between two instructions.
 The replay driver starts its second thread after turning tracing on,
-so that no tick runs it before the records it takes are in place.
+so that no timer runs it before the records it takes are in place.
 Preemption itself is checked by the demo in `user/init/root.c`:
 the two processes take turns through a shared word and no notification,
-which nothing but the tick can get them past.
+which nothing but the timer at the end of a request can get them past.
 
 **Cores.**
 The harness `fuzz-smp2` builds the kernel for two cores and runs them in turns, one trap at a time, as the lock has them:
@@ -693,7 +684,7 @@ that no core idles while a thread waits for a turn on it.
 The seeds named `cores-` bind a driver thread to the second core's units and take things from it there,
 `cores-thread-stopped`, `cores-waiter-stopped`, `cores-resume-before-trap`, `cores-resumed-thread-runs`
 and `cores-stopped-thread-destroyed` among them, which stop it there,
-or arm a timer line there that a tick the first core counts fires;
+or arm a timer line there that a step of the clock on the first core fires;
 the other seeds and the corpus run on the first core alone, as on one.
 `make smp-test` boots the demo on two harts of QEMU `virt`,
 the only check of the lock, the software interrupt, the idle and the start of the second hart,

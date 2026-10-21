@@ -1,0 +1,3 @@
+# The root revokes the boot grant, its own units among them, in a call of its own, which it finishes before it waits for time.
+actor 1 OP_TIME_BIND slot BOOT_CAP_TIME a1 BOOT_CAP_THREAD a2 0 a3 8
+actor 1 OP_CAP_REVOKE slot BOOT_CAP_CAPTABLE a1 BOOT_CAP_TIME

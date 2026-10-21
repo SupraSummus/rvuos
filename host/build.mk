@@ -4,17 +4,17 @@
 
 .PHONY: host-harnesses host-test model-test fuzz corpus-merge qemu-replay mutants mutants-refresh mutants-fuzz
 
-HOST_BUILD  := build/host$(PMP_VARIANT)$(TIMER_VARIANT)
+HOST_BUILD  := build/host$(PMP_VARIANT)
 HOST_CORPUS := $(HOST_BUILD)/corpus
 # The seeds are text under tests/seeds, by the names of the ABI's headers, built into records here; see tools/seed.py.
 SEEDS       := build/seeds
 HOST_CFLAGS := -std=c11 -O1 -g -Wall -Wextra -Werror -Wshadow \
-               -DRVUOS_HOST -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -DCORES=1 -DTIMER_HZ=$(TIMER_HZ) -DSELFCHECK=1 \
+               -DRVUOS_HOST -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -DCORES=1 -DSELFCHECK=1 \
                -Ikernel -Ikernel/arch/riscv \
                -Ikernel/board/qemu -Ihost -Iinclude
 
 HOST_KERNEL_SRC := kernel/cap.c kernel/core.c kernel/pool.c kernel/process.c kernel/sched.c \
-                   kernel/syscall.c kernel/boot.c kernel/selfcheck.c kernel/klog.c kernel/route.c \
+                   kernel/syscall.c kernel/boot.c kernel/selfcheck.c kernel/klog.c kernel/route.c kernel/timer.c \
                    kernel/arch/riscv/frame.c
 HOST_SRC        := host/shim.c host/history.c host/model.c host/mutator.c host/fuzz.c
 # What the fuzzer's coverage leaves out: the self-check and the harness only look at what the kernel did,
