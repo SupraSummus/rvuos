@@ -51,6 +51,19 @@ struct drv_header {
 #define DRV_LINE_I154 13u
 
 /*
+ * The units of each of the adapter's threads, of the driver's own, which the root task gives it as their sum.
+ * The interrupt's thread and the station's are on every frame's way, and a frame's work takes each of them
+ * more than one unit's request at the default span, about a switch on the C6, and less than four units':
+ * with fewer, each frame waits a span for every request past the first while another thread wants the core;
+ * see MANUAL.md, section 5.11.
+ * The watcher and the timers' thread are on no frame's way and run on spare time.
+ */
+#define DRV_UNITS_WATCHER 1u
+#define DRV_UNITS_ISR     4u
+#define DRV_UNITS_TIMERS  1u
+#define DRV_UNITS_STATION 4u
+
+/*
  * What the driver tells besides its steps, from the configuration's debug=, see root.c:
  * a line for each frame to and from the link, and each frame the station reads,
  * and hostap's supplicant at its debug level.

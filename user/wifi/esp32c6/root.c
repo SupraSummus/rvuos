@@ -46,13 +46,13 @@
 
 /*
  * The driver's table, the most a child has, of which the slots past what the root task gives it are its own,
- * and its own pool, timer lines and units, for the adapter's threads, which take a unit and a line each.
+ * and its own pool, timer lines and units, for the adapter's threads, which take a line each and drv.h's units.
  */
 #define DRV_TABLE       CHILD_TABLE_MAX
 #define DRV_OWN_SLOTS   40u
 #define DRV_OWN_POOL    0x2000u
 #define DRV_OWN_LINES   8u
-#define DRV_OWN_UNITS   8u
+#define DRV_OWN_UNITS   (DRV_UNITS_WATCHER + DRV_UNITS_ISR + DRV_UNITS_TIMERS + DRV_UNITS_STATION)
 #define ROOM_SIZE       0x8000u /* the network process's data and its clients', the driver's being a block of its own */
 
 /*

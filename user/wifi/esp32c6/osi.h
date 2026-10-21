@@ -69,8 +69,12 @@ struct ets_timer {
 
 /* The adapter's start: its locks, its heap, and the watcher, interrupt and timer threads; 0 if one would not start. */
 int osi_init(struct drv *d, struct self *s);
-/* A thread more, which starts at f with arg on the stack of size bytes at stack, 16-aligned, kept for good. */
-struct thread *osi_thread(void (*f)(void *), void *arg, const char *name, uint8_t *stack, uint32_t size);
+/*
+ * A thread more, which starts at f with arg on the stack of size bytes at stack, 16-aligned, kept for good,
+ * earning units of the driver's own, with spare time.
+ */
+struct thread *osi_thread(void (*f)(void *), void *arg, const char *name, uint8_t *stack, uint32_t size,
+                          uint32_t units);
 struct thread *osi_adopt(const char *name, uintptr_t stack_lo, uintptr_t stack_hi);
 uint32_t osi_stack_used(const struct thread *t);
 struct thread *osi_self(void);

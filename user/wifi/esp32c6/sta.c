@@ -2090,5 +2090,5 @@ const char *sta_start(struct drv *d)
         return "the supplicant";
     }
     static uint8_t stack[STA_STACK] __attribute__((aligned(16)));
-    return osi_thread(sta_main, d, "station", stack, sizeof(stack)) ? 0 : "the station's thread";
+    return osi_thread(sta_main, d, "station", stack, sizeof(stack), DRV_UNITS_STATION) ? 0 : "the station's thread";
 }

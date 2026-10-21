@@ -200,7 +200,7 @@ static uint32_t thread_new(struct self *s, struct thread *t, const char *name, u
  * so that its fault is the driver's.
  */
 static uint32_t start_thread(struct self *s, struct thread *t, void (*f)(void *), void *arg, const char *name,
-                             uint8_t *mem, uint32_t stack)
+                             uint8_t *mem, uint32_t stack, uint32_t units)
 {
     uint32_t unit, time, status;
     if ((status = thread_new(s, t, name, (uintptr_t)mem, (uintptr_t)mem + stack)) != KERR_OK) {
@@ -215,19 +215,20 @@ static uint32_t start_thread(struct self *s, struct thread *t, void (*f)(void *)
         (status = rv_thread_watch(t->cap, watch, bits)) != KERR_OK ||
         (status = rv_thread_configure(t->cap, (uint32_t)(uintptr_t)start, t->stack_hi, (uint32_t)(uintptr_t)t)) !=
             KERR_OK ||
-        (status = units_take(s, self_core(s), 1, &unit)) != KERR_OK || (status = slot_new(s, &time)) != KERR_OK) {
+        (status = units_take(s, self_core(s), units, &unit)) != KERR_OK || (status = slot_new(s, &time)) != KERR_OK) {
         return status;
     }
-    status = rv_time_carve(s->time, unit, 1, time);
+    status = rv_time_carve(s->time, unit, units, time);
     if (status == KERR_OK) {
-        status = rv_time_bind(time, t->cap, 0, 1, 0);
+        status = rv_time_bind(time, t->cap, 0, units, 0);
     }
     slot_free(s, time);
     return status;
 }
 
 /* The process's account of its slots and units is the big lock's too, since threads share it. */
-struct thread *osi_thread(void (*f)(void *), void *arg, const char *name, uint8_t *stack, uint32_t size)
+struct thread *osi_thread(void (*f)(void *), void *arg, const char *name, uint8_t *stack, uint32_t size,
+                          uint32_t units)
 {
     struct self *s = osi.s;
     size &= ~15u;
@@ -235,7 +236,7 @@ struct thread *osi_thread(void (*f)(void *), void *arg, const char *name, uint8_
     lock_take(&osi.big);
     uint32_t i = osi.thread_count;
     struct thread *t = i < THREADS ? &osi.threads[i] : 0;
-    uint32_t status = t ? start_thread(s, t, f, arg, name, stack, size) : KERR_LIMIT;
+    uint32_t status = t ? start_thread(s, t, f, arg, name, stack, size, units) : KERR_LIMIT;
     if (status == KERR_OK) {
         osi.thread_count = i + 1;
         status = rv_thread_resume(t->cap);
@@ -927,8 +928,8 @@ int osi_init(struct drv *d, struct self *s)
     static uint8_t watcher_stack[1536] __attribute__((aligned(16)));
     static uint8_t isr_stack[3072] __attribute__((aligned(16)));
     static uint8_t timers_stack[3072] __attribute__((aligned(16)));
-    osi.watcher = osi_thread(watcher_main, 0, "watcher", watcher_stack, sizeof(watcher_stack));
-    osi.isr = osi_thread(isr_main, 0, "isr", isr_stack, sizeof(isr_stack));
-    osi.timers = osi_thread(timers_main, 0, "timers", timers_stack, sizeof(timers_stack));
+    osi.watcher = osi_thread(watcher_main, 0, "watcher", watcher_stack, sizeof(watcher_stack), DRV_UNITS_WATCHER);
+    osi.isr = osi_thread(isr_main, 0, "isr", isr_stack, sizeof(isr_stack), DRV_UNITS_ISR);
+    osi.timers = osi_thread(timers_main, 0, "timers", timers_stack, sizeof(timers_stack), DRV_UNITS_TIMERS);
     return osi.watcher && osi.isr && osi.timers ? 1 : 0;
 }
