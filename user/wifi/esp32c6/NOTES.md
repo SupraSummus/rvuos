@@ -1122,3 +1122,184 @@ reference.
 The count is 72 before and 71 after -- the ROM's `phy_freq_correct`, which the driver's own now names, against the
 library's `phy_rx_table_init` and `mac_tx_chan_offset_new` -- of the library's own symbols 13 before and 11 after.
 The map gains one function in FE and one in WIFI_MAC and one indirect call; `phymap` is unchanged.
+
+Then the receive IQ mismatch and the saturation checks, package 7a:
+the library's `rfrx_sat_rst`, `phy_check_rx_sat`, `dc_iq_est_high` and `rxiq_get_mis_new`, the driver's own.
+`rfrx_sat_rst` writes the front end's `AGC_4` 0x7068 with 0x404 and moves `AGC_RFRX_SAT` 0x705C's bits 31, 30, 28,
+24 and 19 with its argument -- raised with it, cleared without -- raises its bit 11 or 10 and clears its bits
+0..18. `phy_check_rx_sat` brings the pbus to its debug mode, powers the receiver through the ROM's
+`ram_pbus_xpd_rx_on`, hands the ROM's `pbus_set_dco` the DCO pair 0x01000100, 0x01000100 -- the library keeps the
+four halfwords 0x0100 -- raises the receive gain's trigger, waits five microseconds and reads the receive gain's
+SAR `AGC_GAIN_SAR` 0x708C a hundred times, its field at bits 12..18 counted where it is 0x45 or below; where any
+counted, `phy_param`'s `rx_sat` 0x1A4 is set, and the pbus's work mode is put back. `dc_iq_est_high` and
+`rxiq_get_mis_new` take the estimate through the ROM's `rom_iq_est_enable` (the table's slot 40): the four words
+`FEDATA_RX_IQ_EST2..5` 0x478..0x484 are shifted by the gain less two and the two pairs' sum and difference crossed
+into the receive IQ mismatch's two bytes, and the accumulators `FEDATA_IQ_EST_I/Q/MAG` are turned into decibels.
+The names stay by register: 0x478 to 0x484, 0x705C and 0x7068 have no label, and what they mean is not known;
+they are in `PHYREGS.md` with the open questions.
+The first `pbus_set_dco` told the package's bug apart: with the pair written the other way round, 0x00010001, the
+front end's word differed at bit 14 alone. Off the board, `phy-ab.py` held each to the library's: `rfrx_sat_rst`
+with the argument clear and set, `phy_check_rx_sat` for seeds and with the SAR field either side of 0x45,
+`dc_iq_est_high` over gains and divisors, and `rxiq_get_mis_new` over gains 0 to 8 -- 9 runs, every access,
+`phy_param` and the output buffers the same. Three mutations were told apart: the SAR field's 0x45 at `phy_param`
+0x1A4, one of `rfrx_sat_rst`'s high bits at the write to 0x705C, and `rxiq_get_mis_new`'s shift at its two output
+bytes. Its third argument asks the library for its own print of the mismatch; the whole driver leaves the PHY
+prints out, so the covered path is that argument clear. The whole of `register_chipv7_phy`, still the library's and
+now calling the driver's own four, is the same as the library's for the same 22 runs, the log identical to the
+reference.
+The count is 71 before and 69 after -- the driver's own `phy_check_rx_sat` and `rfrx_sat_rst` no longer reached by
+name -- of the library's own symbols 11 before and 9 after; `dc_iq_est_high` and `rxiq_get_mis_new` the library
+calls alone, so they leave the count in place. The map gains one function in FE and one in WIFI_BB; `phymap` is
+unchanged.
+
+Then the receive IQ mismatch's correction, package 7b:
+the library's `rxiq_cover_mg_mp_new`, `rfcal_rxiq_new` and `get_rfcal_rxiq_data_new`, the driver's own.
+`rxiq_cover_mg_mp_new` runs the correction over two rounds: each hands the ROM's `rxiq_set_reg` the running pair --
+the high byte then the low -- takes its answer, asks `rxiq_get_mis_new` for the mismatch, and folds the answer and
+the two bytes into the pair; the second round's pair is held to the ROM's `get_data_sat` bounds (0x1f and 0x3f),
+handed back to `rxiq_set_reg`, and left in the caller's two bytes. `rfcal_rxiq_new` raises `FEDATA_REG_SET3`'s bit
+29 and lowers its bit 30, starts a tone through the table's `ram_start_tx_tone_step`, takes the correction, stops
+the tone, and writes the pair out. `get_rfcal_rxiq_data_new` repeats that up to four times, accumulating the two
+bytes as signed halves, stopping early once a reading is within one of the last on both -- the last two averaged --
+else summing the four and dividing by four; the pair is again held to the bounds and packed high byte first into
+the answer's halfword. The names stay by register: `FEDATA_REG_SET3`'s bits 29 and 30 and its two correction fields
+have no label, and what they correct is not known; they are in `PHYREGS.md` with the open questions.
+Off the board, `phy-ab.py` held each to the library's: `rxiq_cover_mg_mp_new` over gains 0 to 8, `rfcal_rxiq_new`
+over gains and tone arguments, and `get_rfcal_rxiq_data_new` over tone arguments with the readings converging
+early and with the estimate walked so all four are summed -- 8 runs, every access and the output buffers the same.
+Three mutations were told apart: one gain in `rxiq_cover_mg_mp_new` at the estimate's word, one of
+`rfcal_rxiq_new`'s `FEDATA_REG_SET3` bits at the write to 0x450, and the four readings' count in
+`get_rfcal_rxiq_data_new` at the reading with the estimate walked, the answer and the event count both moved. Its
+third argument asks the library for its own print, which the whole driver leaves out, so the covered path is that
+argument clear. The whole of `register_chipv7_phy`, still the library's and now calling the driver's own seven of
+the receive IQ's, is the same as the library's for the same 22 runs, the log identical to the reference.
+The count is 69 before and 70 after -- the ROM's `rxiq_set_reg`, which the driver's own now names -- of the
+library's own symbols 9 before and 9 after: the library calls the three alone, so they leave the count in place.
+The map gains two functions in FE; `phymap` is unchanged.
+
+Then the receive IQ calibration's gain search and the block that runs it, package 7c:
+the library's `set_rx_gain_cal_iq_new` [0x4200699a] and `rxiq_cal_init` [0x420075c8], the driver's own.
+`set_rx_gain_cal_iq_new` saves the analog block 0x67's register 3 bits 2..2 where its first argument asks, sets the
+loopback gain and the loopback transmit IQ pair `phy_param` 0xD0, runs the ROM's `pbus_rx_dco_cal`, then steps the
+receive gain a sixteenth at a time over two passes -- the estimate's `FEDATA_IQ_EST_MAG` shifted seven decides, below
+0x1000 the gain falls and above 0x20000 it rises and the loopback side is dropped, the pbus's receive DC taken again
+each step and the gain held between 0 and 0x78 -- and hands the second pass's gain and the tone to
+`get_rfcal_rxiq_data_new`, whose halfword lands in the caller's buffer, before the saved analog bits go back.
+`rxiq_cal_init` returns at once where `param_flag` 0xA4's bit 10 is set, else sets the channel's analog side to 6
+through the ROM's `chip_v7_set_chan_ana`, writes the six-byte table at `phy_param` 0xDC through the ROM's
+`rom_set_txcap_reg`, rises `FECTRL_TXRX_OFF` 0x600A0910's bits 14 and 15 -- the disassembly's `lui 0x4` and `lui 0x8`,
+not bits 2 and 3 -- enters the pbus's debug mode, powers the receiver and the loopback, and where its first argument
+is set reads the pbus's word and raises its bit 1. Around the gain search it rises `FEDATA_REG_SET3`'s bit 29 and
+bit 13 and lowers bit 30 and bit 14, repacks the four halfwords 0xD4..0xDA through `(v >> 1 & 0x1F80) | (v & 0x7F)`,
+and where its third argument is clear clears `FECTRL_TXRX_OFF`'s bit 15, lowers the loopback, powers the transmitter
+down through the table's slot 34 `rom_pbus_xpd_tx_off` -- not slot 32, `rom_pbus_xpd_rx_off`, which its name misled
+the first reading to -- and restores the pbus's work mode, rising `FEDATA_REG_SET3`'s bit 30 and bit 14 and lowering
+bit 29; then it sets `param_flag`'s bit 10.
+The first run of seed 4 told the block's bug apart: the driver cleared `FEDATA_REG_SET3`'s bit 18, `0xfffbffff`,
+where the library clears bit 14, `0xffffbfff`, and the write to 0x450 differed.
+The names stay by register: `FECTRL_TXRX_OFF`'s bits 14 and 15 and `FEDATA_REG_SET3`'s bits 13, 14, 29 and 30 have
+no label, and what they gate is not known; they are in `PHYREGS.md` with the open questions.
+Off the board, `phy-ab.py` held each to the library's: `set_rx_gain_cal_iq_new` with its first argument clear and
+set, two tones and seeds 1 and 5, and `rxiq_cal_init` for its first and third arguments clear and set by seed 1 and
+by seed 4, the seed that reaches the bit-14 write, with `phy_param` 0xA4 zeroed, its early return with bit 10 set,
+and the output buffers -- 5 runs, every access and `phy_param` the same. Three mutations were told apart: one of
+`rxiq_cal_init`'s `FEDATA_REG_SET3` bits at the write to 0x450, one of `set_rx_gain_cal_iq_new`'s gain steps at the
+estimate's word, and the early return's bit at `phy_param` 0xA4. The whole of `register_chipv7_phy`, still the
+library's and now calling the driver's own nine of the receive IQ's, is the same as the library's for the same 22
+runs, the log identical to the reference.
+The count is 70 before and 71 after -- the ROM's `chip_v7_set_chan_ana`, which the driver's own `rxiq_cal_init` now
+names -- of the library's own symbols 9 before and 9 after. The map is unchanged; `phymap` is unchanged.
+
+Then the transmit capacitor calibration, package 8:
+the library's `tx_cap_init_loop` [0x42009578] and `rfcal_txcap_loop` [0x4200946c], the driver's own.
+`tx_cap_init_loop` calibrates over the three channels 1, 6 and 11 -- the frequency retuned to each by the ROM's
+`set_channel_rfpll_freq` -- and for each raises `FECTRL_TXRX_OFF`'s bits 14 and 15, enters the pbus's debug mode,
+powers the receiver, raises the loopback's clocks, sets the gain, takes the pbus's receive DC with the pair
+0x01000100, and sets the analog I2C's `i2c_txrf` 0x6B register 2's low nibble to 1 and its high nibble to 5. A
+tone at 0x80 is then started and its gain stepped by 0x18 while the estimate's third word sits at 31 or below and
+down while it sits above 46, twice at most, before `rfcal_txcap_loop` runs into the byte `phy_param` 0xDC holds for
+the channel -- 0xDC, 0xDE and 0xE0, so the three channels' `DCAP_STG1` pairs; the tone stopped, the loopback
+dropped, the transmitter powered down, the pbus's work mode put back and `FECTRL_TXRX_OFF`'s two bits cleared.
+`rfcal_txcap_loop` scans one byte at a time: the first pass walks `i2c_txrf` 0x6B register 2's bits 3..0 from 7
+down to 0 and the second its bits 7..4 from 13 down to 1 by twos, each value written, the estimate's magnitude read
+back through `dc_iq_est_high`, the largest kept and written at the pass's end, the caller's byte advanced -- so
+0xDC's pair then 0xDE's -- and the second pass run for that byte. The names stay by register: `i2c_txrf`
+register 2's two fields, `phy_param`'s `DCAP_STG` pairs and halfword 0x10 bit 7 (the library's print argument) have
+no label, and what the capacitor's fields correct is not known; they are in `PHYREGS.md` with the open questions.
+Off the board, `phy-ab.py` held each to the library's: `tx_cap_init_loop` for seeds and with `phy_param` 0x51's
+byte, its halfword 0x10 bit 7 set and the estimate forced and walked through `--seq`, and `rfcal_txcap_loop` for
+seeds and with the estimate forced and walked -- 13 runs, every access, `phy_param` and the `--out` buffers the
+same. Three mutations were told apart: `rfcal_txcap_loop`'s second pass's first value (13 to 11) at its write, its
+bits 7..4 field at its write, and `tx_cap_init_loop`'s upward gain step (0x18 to 0x10) at the tone. The whole of
+`register_chipv7_phy`, still the library's and now calling the driver's own nine of the receive IQ's and its
+transmit capacitor calibration, is the same as the library's for the same 22 runs, the log identical to the
+reference.
+The count is 71 before and 71 after -- the ROM's `dc_iq_est`, which the driver's own now names, against the
+library's `tx_cap_init_loop`, which it no longer reaches -- of the library's own symbols 9 before and 8 after. The
+map gains one function in FE, and `phymap` loses one reached function (1033 to 1032, 141 to 140 of the ROM);
+WIFI_BB, WIFI_MAC and the pointer calls are unchanged.
+
+Then the transmit DC calibration's two bring-ups and the loopback transmit IQ set, package 9:
+the library's `txdc_cal_init_new` [0x42008d1e], `bt_txdc_cal_new` [0x42008c7a] and `set_lb_txiq_new` [0x42006962],
+the driver's own. `txdc_cal_init_new` enters the pbus's debug mode, powers the transmitter with the caller's
+second and third arguments, and where its fourth is set reads the pbus's word and raises its bit 1 first; then
+five gains -- `index_to_txbbgain`'s -- are forced into the pbus's window 1 place 2 and one transmit DC pair
+settled each into the caller's twenty halfwords by `txdc_cal_new`, the receiver powered down and the pbus's work
+mode put back. `bt_txdc_cal_new` does the same for Bluetooth's pair where `param_flag`'s bit 12 is clear: the
+transmitter powered with channel 0xf, the receiver's pbus window 4 place 2 forced from `phy_param`'s unlabelled
+byte 0x14 shifted three, the pair settled into `BT_TXDC` 0x104 by `txdc_cal_new`, and the bit set. `set_lb_txiq_new`
+splits its argument's packed pair through `get_iq_value` and hands the first byte signed and the second less four,
+signed, to the ROM's `txiq_set_reg`'s forward and loopback halves. The names stay by register: `param_flag`'s bit
+12 and `phy_param`'s byte 0x14 have no label, and how the five pairs relate to `TXDC` 0xA8/0xAA is not known; they
+are in `PHYREGS.md` with the open questions. The library's print flag, `phy_param`'s halfword 0x10 bit 4 here, is
+left out.
+Off the board, `phy-ab.py` held each to the library's: `set_lb_txiq_new` over four packed pairs, `txdc_cal_init_new`
+for its second and third arguments and its fourth both ways along with the print bit, and `bt_txdc_cal_new` with its
+gate clear and set by three seeds -- 9 runs, every access, `phy_param` and the `--out` buffers the same. Three
+mutations were told apart: `set_lb_txiq_new`'s second byte's four at its `txiq_set_reg` write, `txdc_cal_init_new`'s
+pair stride at the caller's buffer, and `bt_txdc_cal_new`'s marking bit in `param_flag`. The whole of
+`register_chipv7_phy`, still the library's and now calling the driver's own transmit DC bring-ups and loopback set
+beside its nine receive IQ's, is the same as the library's for the same 22 runs, the log identical to the
+reference.
+The count is 71 before and 69 after -- the library's `txdc_cal_init_new` and `set_lb_txiq_new`, which the driver's
+own no longer reaches -- of the library's own symbols 8 before and 6 after. The map and `phymap` are unchanged.
+
+Then the head's init-parameter spread, package 10a:
+the library's `register_chipv7_phy_init_param` [0x420037aa], the driver's own.
+It copies the caller's init data -- the 0x4c bytes it uses of the 0x80 -- into `phy_param`: its byte 0 to 0x50, its
+bytes 2..0x13 to 0x52..0x63, its byte 0x18 to 0x66, its bytes 0x43..0x4b to 0x67..0x6f, its bytes 0x19..0x26 to
+0x70..0x7d, its bytes 0x27..0x34 to 0x7e..0x8b and its bytes 0x35..0x42 to 0x8c..0x99, leaving 0x51, 0x64 and 0x65
+as it found them. The mapping is in `PHYREGS.md`.
+Off the board, `phy-ab.py` held it to the library's over seeds and with the init data filled, `phy_param` compared
+in full. Three mutations were told apart: its first byte's source, the eighteen-byte copy's count and the last
+copy's start. The whole of `register_chipv7_phy`, still the library's and now calling the driver's own spread, is
+the same as the library's for the same 22 runs, the log identical to the reference.
+The count is 69 before and 69 after -- the function is the library's own leaf, which the driver's own now defines in
+its place -- of the library's own symbols 6 either way. The map and `phymap` are unchanged.
+
+Then the head itself, package 10b:
+the library's `register_chipv7_phy` [0x42003ea0], the driver's own, with `phy_param` and `g_phyFuns` left the
+library's until the step's end.
+It hands the ROM the PHY table (`phy_get_romfunc_addr`), raises MODEM_SYSCON's Wi-Fi and modem clocks (`CLK_CONF1`
+0x404), clears the baseband's bit 1, forces the front end's transmit and receive off, resets the frequency module
+and re-enables the frequency setting, and, where `phy_param` 0x4E asks, applies the library's `phy_set_23dbm` to the
+built-in default init data it builds there. On a fresh chip (`phy_param` 0x25 clear) it spreads the caller's init
+data -- or the built-in default where the caller brings none -- into `phy_param`, and checks the saved calibration
+blob: in mode 1 a blob that stands is recovered and `param_flag`'s bits 5, 7, 9 and 16 cleared (the mask
+0xfffefd5f), one that will not do clears the whole flag and moves the mode to 2, and any other mode restores the
+blob into `phy_param` and clears the flag. `rf_init` and `bb_init` run, `get_temp_init_new`'s two gates come from
+`param_flag`'s bits 5 and 20, and, unless the blob was recovered in mode 1, the restored block is held against the
+chip, saved back and its negated sum rewritten. Where `phy_param` 0xA1 asks, `chip_v7_set_chan_offset` runs; the
+baseband PLL is taken down, the RF PLL's SDM register read through the ROM's table, the chip marked up, the
+frequency setting enabled, the front end's forcing released and the Wi-Fi clock put back as it was found. What sets
+`phy_param` 0x4E, and which fields the 23 dBm setting changes, is not known; they are in `PHYREGS.md` with the open
+questions.
+Off the board, `phy-ab.py` held the whole function to the library's for the same 22 runs, the log identical to the
+reference, `phy_param` compared in full beside the accesses and the blob; the mode-1 recovery path was reached with
+a blob whose checksum and `param_flag` words were written to stand, and the gates `phy_param` 0x25, 0x4E and 0xA1
+were forced both ways. Four mutations were told apart: the Wi-Fi clock's 0x404, the recovery's flag mask at its bit
+0, the chip-up byte `phy_param` 0x25, and the mode-1 backup gate. The count is 69 before and 69 after -- the
+library's `register_chipv7_phy` gone and `phy_set_23dbm`, which the driver's own head now reaches, come -- of the
+library's own symbols 6 either way. The map drops from 1032 to 1026 functions reached (the library's head and the
+functions only it reached are gone): FE 89 to 86 and WIFI_MAC_TSF 16 to 14, with the ranges, addresses and the
+writes outside the frames unchanged; `phymap` is unchanged.

@@ -85,6 +85,13 @@ and says which.
   0xF1..0xF3, `wifi_cal_atten` 0xF4..0xF6, `bt_cal_power` 0xFE, `bt_cal_atten` 0xF8..0xFA
   (**known** labels), and `PHY_PARAM_TXCAL_TEMP` 0x48, the temperature the transmit calibration block last ran
   at (**inferred** from `phy_cal_param_track`; no label names it).
+- The transmit capacitor calibration: `tx_cap_init_loop` retunes to each of the channels 1, 6 and 11 through the
+  ROM's `set_channel_rfpll_freq`, sets the analog I2C's `i2c_txrf` 0x6B register 2 bits 3..0 to 1 and its bits
+  7..4 to 5, and runs a tone at 0x80; `rfcal_txcap_loop` then walks bits 3..0 from 7 down to 0 and bits 7..4 from
+  13 down to 1 by twos, keeping the value whose estimate magnitude (through `dc_iq_est_high`, from
+  `FEDATA_IQ_EST_*`) is largest and writing it back, and the two values go to `phy_param`'s `DCAP_STG1`/`DCAP_STG2`
+  at 0xDC/0xDE/0xE0 and 0xDD/0xDF/0xE1, one pair a channel. The fields and what they correct have no label,
+  meaning **unknown**; the library's print argument is `phy_param`'s halfword 0x10 bit 7, also unlabelled.
 - pbus: `rftx` (4,1), (4,2), (5,1); `dco` (2,1), (3,1), (2,2), (3,2).
 
 ### Receive
@@ -107,11 +114,20 @@ and says which.
 
 - `phy_param`: `PARAM_FLAG` 0xA4's bits 3 (the baseband bring-up's calibrations done, which `bb_init` sets),
   5 (the frequency memory built), 7 (receive DC done), 9 (receive rows built),
+  10 (the receive IQ calibration done, which `rxiq_cal_init` sets and returns at once on),
+  12 (the Bluetooth transmit DC calibration done, which `bt_txdc_cal_new` sets and returns at once on),
   14 (TXIQ done), 23 (the RC calibration run);
   the transmit DC calibration's settled pairs `TXDC_CAL_PWDET` +0/+2/+4/+6 at 0x18E..0x194, its printed
   sources `TXDC` 0xA8/0xAA, and 0xB0/0xB2 beside them (an open question).
 - MMIO: the transmit DC calibration word `FEDATA_TXDC_CTRL` 0x600A0418 (`FEDATA`) -- meaning **unknown**,
   its bits set out in the table below.
+- The transmit DC calibration's two bring-ups: `txdc_cal_init_new` enters the pbus's debug mode, powers the
+  transmitter with the caller's second and third arguments, forces five gains (`index_to_txbbgain`) into the
+  pbus's window 1 place 2 and settles one DC pair each into the caller's twenty halfwords at `phy_param` 0xA8
+  to 0xCF; `bt_txdc_cal_new` does the same for Bluetooth's pair into `phy_param`'s `BT_TXDC` 0x104, its pbus
+  window 4 place 2 forced from `phy_param`'s unlabelled byte 0x14 shifted three, gated and marked in
+  `param_flag` bit 12. `set_lb_txiq_new` splits its argument through `get_iq_value` and hands the forward and
+  loopback halves to the ROM's `txiq_set_reg`, the second byte less four.
 - The transmit IQ calibration's own: the front end's `FEDATA_REG_SET3` bits 13 and 14 (above, under
   transmit), the tone generator's `FEDATA_TX_TONE0` 0x600A0420, and `phy_param`'s `TXIQ` 0xD0 (the forward
   pair) and `LB_TXIQ` 0xE6 (the loopback pair), beside the two start bytes `PHY_PARAM_TXIQ_TEMP` 0x18 and
@@ -120,6 +136,31 @@ and says which.
 - The receive DC calibration's words: `FECTRL` `FECTRL_RX_GAIN_TRIG_EN` 0x904, `FEDATA`
   `FEDATA_RX_IQ_EST0/1` 0x470/0x474 and `FEDATA_IQ_EST_I/Q/MAG` 0x488/0x48C/0x490, `FEDATA_RX_GAIN_SAR`
   0x4A0 (**inferred** from `set_rx_gain_cal_dc_new`'s loop).
+- The receive IQ mismatch and the saturation checks: `rfrx_sat_rst` writes the front end's `AGC_4` 0x7068 with
+  0x404 and moves `AGC_RFRX_SAT` 0x705C's bits 31, 30, 28, 24 and 19 with its argument -- raised with it,
+  cleared without -- raises its bit 11 or 10 and clears its bits 0..18; `phy_check_rx_sat` reads the receive
+  gain's `AGC_GAIN_SAR` 0x708C, its field at bits 12..18, a hundred times against 0x45; and `rxiq_get_mis_new`
+  reads the estimate's four words `FEDATA_RX_IQ_EST2..5` 0x478..0x484. `AGC_RFRX_SAT`, `AGC_4` and the four
+  (like the rest of `rfrx_sat_rst`'s and `phy_check_rx_sat`'s work) have no label, meaning **unknown**.
+- The receive IQ mismatch's correction: `rxiq_cover_mg_mp_new` hands the ROM's `rxiq_set_reg` the correction pair
+  and folds the mismatch back, over two rounds; `rfcal_rxiq_new` raises `FEDATA_REG_SET3`'s bit 29 and lowers its
+  bit 30 around a tone and the correction; and `get_rfcal_rxiq_data_new` repeats the reading up to four times and
+  averages. The ROM's `rxiq_set_reg` [0x40005214] holds the high byte to `[-0x1f, 0x1f]` and the low to
+  `[-0x3f, 0x3f]` (through the ROM's `get_data_sat`) and writes it into `FEDATA_REG_SET3`'s high field (mask
+  0x3f0000, bits 12..15 and 17..23 cleared) or low field (mask 0x1fc00, bits 14..20 cleared). Bits 29 and 30
+  (and what each field corrects) have no label, meaning **unknown**.
+- The receive IQ calibration's block: `set_rx_gain_cal_iq_new` sets the loopback gain and the loopback transmit
+  IQ pair, runs the ROM's `pbus_rx_dco_cal`, then steps the receive gain a sixteenth at a time while the
+  estimate's `FEDATA_IQ_EST_MAG` decides -- below 0x1000 the gain falls, above 0x20000 it rises and the loopback
+  side is dropped -- and hands the second pass's gain to `get_rfcal_rxiq_data_new`. `rxiq_cal_init` sets the
+  channel's analog side to 6 through the ROM's `chip_v7_set_chan_ana`, writes the six-byte table at `phy_param`
+  0xDC through the ROM's `rom_set_txcap_reg`, rises `FECTRL_TXRX_OFF` 0x600A0910's bits 14 and 15, runs the gain
+  search into `phy_param` 0xD4, repacks the four halfwords 0xD4..0xDA through `(v >> 1 & 0x1F80) | (v & 0x7F)`,
+  and, where its third argument is clear, clears `FECTRL_TXRX_OFF`'s bit 15, powers the transmitter down and
+  restores the pbus's work mode. Around the search it rises `FEDATA_REG_SET3`'s bit 29 and bit 13 and lowers
+  bit 30 and bit 14, and at the end lowers bit 29 and rises bit 30 and bit 14, so the block mirrors
+  `rfcal_rxiq_new`'s bits 29 and 30. `FECTRL_TXRX_OFF`'s two bits and the four `FEDATA_REG_SET3` bits have no
+  label, meaning **unknown**.
 
 ### Sensors
 
@@ -153,10 +194,29 @@ walks each loop.
 - `set_rx_gain_cal_dc_new` / `dc_iq_est_new`: the receive path's DC offset is read through the modem's
   IQ estimate (`ram_iq_est_enable` -> `FEDATA_IQ_EST_I/Q/MAG`), so the receive DC path is baseband ->
   IQ estimate.
+- `rfrx_sat_rst` / `phy_check_rx_sat`: the front end's receive-saturation word is reset, the receiver powered
+  through the ROM's `ram_pbus_xpd_rx_on`, the pbus's DCO pair forced through the ROM's `pbus_set_dco`, and
+  the receive gain's SAR `AGC_GAIN_SAR` read a hundred times; where its field at bits 12..18 sits at 0x45 or
+  below, `phy_param`'s `rx_sat` 0x1A4 is set. So the saturation check is the receive gain's SAR against a level.
+- `rxiq_get_mis_new` / `dc_iq_est_high`: the same estimate's words -- `rxiq_get_mis_new`'s four
+  `FEDATA_RX_IQ_EST2..5` and `dc_iq_est_high`'s `FEDATA_IQ_EST_I/Q/MAG` -- taken with the estimate armed
+  through the ROM's `rom_iq_est_enable` (the table's slot 40); the four are shifted by the gain less two and
+  the two pairs' sum and difference crossed into the receive IQ mismatch's two bytes. So the receive IQ
+  mismatch is the estimate's own words.
+- `rxiq_cover_mg_mp_new` / `rfcal_rxiq_new` / `get_rfcal_rxiq_data_new`: a tone on the transmit side, the
+  receive IQ mismatch read through `rxiq_get_mis_new`, each round's pair handed to the front end's
+  `FEDATA_REG_SET3` through the ROM's `rxiq_set_reg` and the mismatch folded back, over two rounds; the reading
+  is repeated up to four times and averaged, or two within one of each other averaged at once. So the receive IQ
+  correction is the estimate's mismatch -> `rxiq_set_reg` -> `FEDATA_REG_SET3`, beside the tone.
 - `txdc_cal_new`: a tone on the transmit side, the two DCO words forced into the pbus windows (2,1) and
   (3,1), and each step decided by the front end's calibration word `FEDATA_TXDC_CTRL` -- its bits 29 and
   28 move one offset each, its bit 22 is waited for; the settled pair goes to the caller's
   `pbus_set_dco` buffer. So the transmit DC path is DCO -> the front end's calibration word -> back.
+- `txdc_cal_init_new` / `bt_txdc_cal_new`: the pbus's debug mode entered, the transmitter powered, then five (or
+  Bluetooth's one) gains forced into the pbus's force words and a transmit DC pair settled through `txdc_cal_new`
+  each; `set_lb_txiq_new` sets the loopback transmit IQ pair through the ROM's `txiq_set_reg`. So the transmit DC
+  bring-up is the pbus's force words -> `txdc_cal_new` -> the DCO pair, and the loopback IQ set is `get_iq_value`
+  -> `txiq_set_reg`.
 - `set_tx_gain_mem` takes `&phy_param[0xD0]`, and 0xD0/0xD2 is `TXIQ` in `phy_cal_print`: the transmit
   IQ correction goes into the transmit gain memory beside the gain entries. Whether the library reads
   past 0xD2 is not known here -- the label is a halfword pair, the gain memory's own length is a
@@ -167,6 +227,11 @@ walks each loop.
   byte between -0x3f and 0x3f), the forward pair is packed into `TXIQ` 0xD0 and the loopback pair into
   `LB_TXIQ` 0xE6, and the correction is marked done in `param_flag` bit 14. So the transmit IQ path is the
   tone generator -> the SAR ADC -> the correction pair -> `phy_param`.
+- `tx_cap_init_loop` / `rfcal_txcap_loop`: for each of the channels 1, 6 and 11, a tone at 0x80 is started and
+  the estimate's magnitude read back, and the transmit capacitor's two analog I2C fields (`i2c_txrf` 0x6B
+  register 2's bits 3..0 and 7..4) are walked until each field's largest-magnitude value is found; each
+  channel's pair lands in `phy_param`'s `DCAP_STG1`/`DCAP_STG2`. So the transmit capacitor path is the tone ->
+  the estimate -> the transmit block's DAC -> `phy_param`.
 - `phy_cal_param_track`, which the library's `phy_param_track_tot` runs once a second: the temperature each
   calibration block last ran at is held against the current one, from `phy_param` 0x198 for the receive rows
   and 0x48 for the transmit calibration, and a block whose temperature has moved past its step (0x1e and
@@ -219,6 +284,22 @@ walks each loop.
   bias and PLL -> the analog I2C -> the RF PLL's charge pump -> the command memory, and the baseband path is
   the transmit DC and IQ, the power detector, the receive IQ and the gain tables, each around the frequency
   setting.
+
+- `register_chipv7_phy`, the head the driver's own now: it hands the ROM the PHY table (`phy_get_romfunc_addr`),
+  raises MODEM_SYSCON's Wi-Fi and modem clocks (`CLK_CONF1` 0x404), clears the baseband's bit 1, forces the front
+  end's transmit and receive off, resets the frequency module and re-enables the frequency setting, and, where
+  `phy_param` 0x4E is set, applies the library's `phy_set_23dbm` to its built-in default init data. On a fresh chip
+  (`phy_param` 0x25 clear) it spreads the init data into `phy_param` (the caller's, or the built-in default where
+  the caller brings none), then checks the saved calibration blob (`phy_rfcal_data_check`): a blob that stands is
+  recovered in mode 1 and `param_flag`'s bits 5, 7, 9 and 16 cleared, one that will not do clears the whole flag
+  and moves the mode to 2, and any other mode restores the blob into `phy_param` and clears the flag. `rf_init` and
+  `bb_init` run, `get_temp_init_new`'s two gates come from `param_flag`'s bits 5 and 20, and, unless the blob was
+  recovered in mode 1, the restored block is held against the chip (`phy_rfcal_data_check_value`), saved back
+  (`rf_cal_data_backup`) and its negated sum rewritten. Where `phy_param` 0xA1 asks, `chip_v7_set_chan_offset`
+  runs; the baseband PLL is taken down, the RF PLL's SDM register is read through the ROM's table, the chip is
+  marked up (`phy_param` 0x25), the frequency setting is enabled and the front end's forcing released, and the Wi-Fi
+  clock is put back as it was found. So the head is the frame around the bring-up and the calibration, and its one
+  mark, `phy_param` 0x25, is what the first-on path and the wake-up path are told apart by.
 
 - `phy_get_romfunc_addr` and the twenty-three slot fillers: the ROM's table at 0x4087f954, which the ROM's own calls reach through `phy_get_romfuncs()` and the library's through `g_phyFuns`. libphy fills twenty-three of its slots with its own functions; the driver's own fills the same twenty-three with the driver's, taken over from the library's with their disassembly. Three of them are the ROM's own byte for byte -- `ram_set_chan_cal_interp`, `ram_set_chan_freq_sw_start` and `ram_chip_i2c_readReg_org`, so the driver's calls the ROM's -- and the rest are written out, their two mask tables among them. The fillers the ROM reaches commonly are the analog I2C's, `ram_get_i2c_read_mask` and `ram_get_i2c_mst0_mask` and `ram_get_i2c_hostid` and `ram_chip_i2c_readReg_org`, and the pbus's and the power detector's. So the table is the seam between the ROM's calls and the driver's code.
 
@@ -325,6 +406,24 @@ field's read stands before the string it belongs to.
 
 Source: `phy_cal_print`'s and `phy_tx_gain_print`'s disassembly and strings.
 
+### The init data's spread into `phy_param`
+
+`libphy`'s `register_chipv7_phy_init_param` copies the caller's init data -- the 0x4c bytes it uses of the 0x80 --
+into `phy_param` at these offsets, in this order; the bytes 0x51, 0x64 and 0x65 it leaves as it found them.
+
+| `phy_param` | from the init data |
+|---|---|
+| 0x50 | its byte 0 |
+| 0x52..0x63 | its bytes 2..0x13 (eighteen) |
+| 0x66 | its byte 0x18 |
+| 0x67..0x6f | its bytes 0x43..0x4b (nine) |
+| 0x70..0x7d | its bytes 0x19..0x26 (fourteen) |
+| 0x7e..0x8b | its bytes 0x27..0x34 (fourteen) |
+| 0x8c..0x99 | its bytes 0x35..0x42 (fourteen) |
+
+Source: `register_chipv7_phy_init_param`'s disassembly. `phy_param` 0x51, skipped here, is the crystal's byte,
+set by `phy_get_xtal_freq`; the init data's byte 0 is the calibration version the saved blob's head carries.
+
 ### The calibration's saved blob
 
 `libphy`'s `register_chipv7_phy` carries a calibration in and out as its `cal_data`, the blob the driver's own
@@ -353,6 +452,14 @@ Source: these functions' disassembly, and `phy_cal_print`'s labels for the field
 | MODEM+0x420 | | `FEDATA_TX_TONE0` | the transmit tone generator's first word, written by `ram_start_tx_tone_step`/`ram_stop_tx_tone` and by `txiq_get_mis_pwr`'s measurement | the ROM's function names | known |
 | MODEM+0x450 | 13 | `FEDATA_REG_SET3_TXCAL` | raised before the TXIQ calibration runs and left raised | `rfcal_txiq_new`'s disassembly | inferred |
 | MODEM+0x450 | 14 | `FEDATA_REG_SET3_TXIQ_DONE` | lowered while the TXIQ calibration runs and raised at its end | the same | inferred |
+| MODEM+0x450 | 29, 30 | the receive IQ calibration's bits | `rfcal_rxiq_new` raises bit 29 and lowers bit 30 around the receive IQ mismatch's correction, and `rxiq_cal_init` does the same around its gain search, rising bit 13 and lowering bit 14 beside them and reversing all four at its end; no label names them | `rfcal_rxiq_new`'s and `rxiq_cal_init`'s disassembly | unknown |
+| FECTRL 0x910 | 14, 15 | `FECTRL_TXRX_OFF`'s receive IQ calibration bits | `rxiq_cal_init` rises both around its work and, where its third argument is clear, clears bit 15; no label names them | `rxiq_cal_init`'s disassembly | unknown |
+| phy_param+0xA4 | 10 | `param_flag`'s receive IQ bit | where set, `rxiq_cal_init` has run and returns at once, and it sets it at the end | `rxiq_cal_init`'s disassembly | inferred |
+| MODEM+0x450 | 16..21, 10..16 | the receive IQ correction's two fields | the ROM's `rxiq_set_reg` writes the correction's high byte into bits 16..21 (mask 0x3f0000, bits 12..15 and 17..23 cleared) and its low byte into bits 10..16 (mask 0x1fc00, bits 14..20 cleared); the field masks are the ROM's, meaning not known | the ROM's `rxiq_set_reg` [0x40005214] | unknown |
+| MODEM+0x478..0x484 | | `FEDATA_RX_IQ_EST2..5` | the estimate's four words `rxiq_get_mis_new` reads and crosses into the receive IQ mismatch; no label names them | `rxiq_get_mis_new`'s disassembly | unknown |
+| MODEM+0x705C | 31, 30, 28, 24, 19, 11, 10, 0..18 | `AGC_RFRX_SAT` | the receive saturation's word: `rfrx_sat_rst` raises bits 31, 30, 28, 24 and 19 with its argument and clears them where it is clear, raises bit 11 or bit 10, and clears bits 0..18; no label names it | `rfrx_sat_rst`'s disassembly | unknown |
+| MODEM+0x7068 | | `AGC_4` | written 0x404 outright by `rfrx_sat_rst` before `AGC_RFRX_SAT`; no label names it | the same | unknown |
+| the ROM's table 0x4087f954 slot 40 (0xA0) | | `rom_iq_est_enable` | the ROM's estimate arming, which `dc_iq_est_high` and `rxiq_get_mis_new` reach through it; the driver's table filling does not touch the slot | the ROM's names and the two readers' disassembly | known |
 | phy_param+0x18 | | `PHY_PARAM_TXIQ_TEMP` | the byte `txiq_cal_init_new` starts the forward pair from, a signed temperature | no label names it | unknown |
 | phy_param+0x2B | | `PHY_PARAM_TXIQ_ATTEN` | the byte the TXIQ and TX power calibrations take `0x40` (or `0x38`) minus; unsigned | no label names it | unknown |
 | phy_param+0x48 | | `PHY_PARAM_TXCAL_TEMP` | the temperature the transmit calibration block last ran at, which the tracking reruns it by | `phy_cal_param_track`'s disassembly | inferred |
@@ -365,6 +472,11 @@ Source: these functions' disassembly, and `phy_cal_print`'s labels for the field
 | phy_param+0x0B | | `PHY_PARAM_BT_TRACK` | passed to Bluetooth's transmit-power tracking, whose zero means it does nothing | the tracking's call | inferred |
 | phy_param+0x19A | | `PHY_PARAM_TRACK_SKIP` | where set, the parameter calibration is left out | the same | inferred |
 | phy_param+0xA4 | 23 | `param_flag`'s RC bit | where set, `rc_cal_new` has run and returns at once | `rc_cal_new`'s disassembly | inferred |
+| phy_param+0xA4 | 12 | `param_flag`'s BT transmit DC bit | where set, `bt_txdc_cal_new` has run and returns at once, and it sets it at the end | `bt_txdc_cal_new`'s disassembly | inferred |
+| phy_param+0x14 | | the Bluetooth transmit DC calibration's force byte | `bt_txdc_cal_new` shifts it three into the pbus's window 4 place 2; no label names it | `bt_txdc_cal_new`'s disassembly | unknown |
+| phy_param+0x10 | 7 | the transmit capacitor scan's print bit | passed to `rfcal_txcap_loop`'s first argument, which prints where set, left out; bit 3 of the same halfword reaches `set_rx_gain_cal_iq_new`'s receive DC | `tx_cap_init_loop`'s and `set_rx_gain_cal_iq_new`'s disassembly | unknown |
+| i2c_txrf 0x6B, host 1, reg 0x02 | 3..0 | `I2C_TXRF_DCAP_STG1` | the transmit capacitor's first field, set to 1 before the scan and its best value written after; `phy_param`'s `DCAP_STG1` at 0xDC/0xDE/0xE0 | `tx_cap_init_loop`'s and `rfcal_txcap_loop`'s disassembly | unknown |
+| i2c_txrf 0x6B, host 1, reg 0x02 | 7..4 | `I2C_TXRF_DCAP_STG2` | the transmit capacitor's second field, set to 5 before the scan and its best value written after; `phy_param`'s `DCAP_STG2` at 0xDD/0xDF/0xE1 | the same | unknown |
 | i2c_txrf 0x6B, host 1, reg 0x0B | 5..4 | `I2C_TXRF_RC_CAL_0B` | the RC calibration's first field, `i2c_rc_cal_set`'s 3 and `i2c_rc_set_reg`'s second argument | the same | unknown |
 | i2c_txrf 0x6B, host 1, reg 0x08 | 7..3 | `I2C_TXRF_RC_CAL_08` | the second, 1 and the third argument | the same | unknown |
 | i2c_txrf 0x6B, host 1, reg 0x0D | 5..2 | `I2C_TXRF_RC_CAL_0D` | the third, 9 and the first argument | the same | unknown |
@@ -400,6 +512,10 @@ Source: these functions' disassembly, and `phy_cal_print`'s labels for the field
 | phy_param+0xA1 | | `PHY_PARAM_CHAN_OFFSET_EN` | where set, `chip_v7_set_chan_offset` adds `phy_param` 0xA2's signed byte in eighths, and the library's `register_chipv7_phy` calls it at all; no label names it | `chip_v7_set_chan_offset`'s and `register_chipv7_phy`'s disassembly | unknown |
 | phy_param+0xA2 | s8 | `PHY_PARAM_CHAN_OFFSET` | the offset `chip_v7_set_chan_offset` adds in eighths where 0xA1 is set; no label names it | the same | unknown |
 | phy_param+0x120, 0x121 | u8 x2 | `PHY_PARAM_RX_N2`, `PHY_PARAM_RX_N1` | the receive gain table's two counts: `phy_rx_table_init` writes 0x4f to both through the halfword 0x4f4f, and `set_rx_gain_table` overwrites each with its own row count | `phy_rx_table_init`'s and `set_rx_gain_table`'s disassembly | inferred |
+| phy_param+0x25 | | `PHY_PARAM_PHY_UP` | the library's mark that its bring-up has run: `register_chipv7_phy` reads it as the fresh-chip gate and sets it at its end, and `phy_close_rf`'s work waits on it | `register_chipv7_phy`'s and `phy_close_rf`'s disassembly | inferred |
+| phy_param+0x4E | | `PHY_PARAM_23DBM_EN` | where set, `register_chipv7_phy` applies `phy_set_23dbm`; `phy_set_23dbm_en` writes it, and nothing the recorded run saw on the board sets it | `register_chipv7_phy`'s and `phy_set_23dbm_en`'s disassembly | unknown |
+| phy_param+0xA4 (`param_flag`) | 5, 7, 9, 16 | the blob recovery's cleared bits | in mode 1, a blob that stands has `param_flag` cleared of these -- the mask 0xfffefd5f -- after the blob is restored | `register_chipv7_phy`'s disassembly | inferred |
+| phy_param+0xA4 (`param_flag`) | 5, 20 | `get_temp_init_new`'s two gates, inverted | the head passes `~bit 5` as the cap argument and `~bit 20` as the txcal argument; bit 20 is set by no step of the walk | the same | inferred |
 
 ## Open questions
 
@@ -427,3 +543,36 @@ Source: these functions' disassembly, and `phy_cal_print`'s labels for the field
 - `MAC_TX_MIN_PWR` 0x600a4400's bits 4..9 and bit 17: the minimum power and the HE group's bit, both from
   `macstart.c` and not otherwise understood; why the PHY's channel setting writes the same transmit power's word
   is not known. Package 11 to 12, the transmit power's, must check whether any of its functions writes the word too.
+- `AGC_RFRX_SAT` 0x705C, `AGC_4` 0x7068 and the estimate's four words `FEDATA_RX_IQ_EST2..5` 0x478..0x484: no
+  label names any. `rfrx_sat_rst` moves the first's high bits and raises its bit 11 or 10 and writes the second
+  with 0x404, and `phy_check_rx_sat` reads the receive gain's SAR field (bits 12..18 of 0x708C) against 0x45 and
+  sets `rx_sat`; what the word, the `0x404` and the four estimate words mean -- and where `rx_sat` is read
+  besides the estimate's loop -- is not known. The library's `rxiq_get_mis_new` prints the mismatch where its
+  third argument is set; the whole driver leaves the PHY prints out, so the covered path is that argument clear.
+- `FEDATA_REG_SET3` 0x600A0450's bits 29 and 30 and its two receive IQ correction fields: `rfcal_rxiq_new` and
+  `rxiq_cal_init` move bits 29 and 30 around the receive IQ calibration, and the ROM's `rxiq_set_reg` writes the
+  correction's high and low bytes into bits 16..21 and 10..16; no header names them, and what they gate or correct
+  is not known. The library's `get_rfcal_rxiq_data_new` prints each reading where its third argument is set, left
+  out as above.
+- `FECTRL_TXRX_OFF` 0x600A0910's bits 14 and 15, and `FEDATA_REG_SET3`'s bits 13 and 14 beside the receive IQ
+  calibration's 29 and 30: `rxiq_cal_init` rises the two `FECTRL_TXRX_OFF` bits around the block and clears bit 15
+  where its third argument is clear, and moves the `FEDATA_REG_SET3` pair around the search, the same two bits
+  `rfcal_txiq_new` names `FEDATA_REG_SET3_TXCAL` and `FEDATA_REG_SET3_TXIQ_DONE`; no header names any of them, and
+  whether the two calibrations share the pair or it gates the front end's transmit-receive switch is not known.
+- `i2c_txrf` 0x6B register 2's bits 3..0 and 7..4, `phy_param`'s `DCAP_STG1`/`DCAP_STG2` at 0xDC/0xDE/0xE0 and
+  0xDD/0xDF/0xE1, and `phy_param`'s halfword 0x10 bit 7: `tx_cap_init_loop` and `rfcal_txcap_loop` scan the
+  register for the value whose estimate magnitude is largest and keep each channel's pair in `phy_param`, and the
+  halfword's bit chooses whether the library prints; no header names any, and what the capacitor's fields correct
+  is not known.
+- `phy_param`'s byte 0x14, which `bt_txdc_cal_new` shifts three into the pbus's window 4 place 2, and the twenty
+  halfwords `txdc_cal_init_new` settles at 0xA8: no label names the byte, and how the five pairs there relate to
+  `TXDC` 0xA8/0xAA (the only labelled pair) and to 0xB0/0xB2 is not known.
+- `phy_param` 0x4E, the library's `phy_set_23dbm_en`'s byte: where set, `register_chipv7_phy` applies
+  `phy_set_23dbm`, which puts 0x5c (92) into the init data's bytes 2 and 3 and into `phy_param`'s byte 6 -- a
+  quarter of 23 dBm in the init data's own unit, hence the name. What sets the gate on the board is not known;
+  package 11 to 12, the transmit power's, must read it and confirm the branch runs as the library's.
+- `param_flag`'s bits 5, 16 and 20: the head clears bit 5 (beside 7, 9 and 16) when it recovers a blob in mode 1,
+  and passes `~bit 5` and `~bit 20` to `get_temp_init_new`; bit 20 is set by no step of the walk, so that argument
+  is always set there. What the three bits mean is not known.
+- `register_chipv7_phy`'s last device access, the ROM's `rom_i2c_readReg` on the RF PLL's SDM block 0x63, host 1,
+  register 0, whose answer it discards: why it is read there, after the baseband PLL is taken down, is not known.

@@ -211,6 +211,12 @@ WIFI_ESP_PHY_OWN := phy_get_xtal_freq tsens_read_init_new tsens_dac_to_index tse
                     phy_dis_hw_set_freq_new phy_rfpll_cap_track_new ram_temp_to_power txpwr_cal_track \
                     bt_track_tx_power wifi_track_tx_power tx_i2c_track gen_rx_gain_table_new \
                     phy_force_rx_gain_trig set_rx_gain_cal_dc_new ram_iq_est_enable dc_iq_est_new \
+                    dc_iq_est_high rxiq_get_mis_new rfrx_sat_rst phy_check_rx_sat \
+                    rxiq_cover_mg_mp_new rfcal_rxiq_new get_rfcal_rxiq_data_new \
+                    set_rx_gain_cal_iq_new rxiq_cal_init \
+                    tx_cap_init_loop rfcal_txcap_loop \
+                    txdc_cal_init_new bt_txdc_cal_new set_lb_txiq_new \
+                    register_chipv7_phy_init_param register_chipv7_phy \
                     rxdc_est_min_new pbus_rx_dco_cal_1step_new rx_pbus_reset set_rx_gain_table \
                     txdc_cal_pwdet txdc_cal_pwdet_init txdc_cal_new \
                     txiq_cover_new rfcal_txiq_new txiq_cal_init_new phy_cal_param_track force_txrx_off \

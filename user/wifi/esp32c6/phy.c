@@ -153,6 +153,29 @@ void set_rx_gain_table(uint32_t p1, uint32_t p2);
 /* The receive table and the transmit channel's offset, the driver's own this step (package 6). */
 void phy_rx_table_init(void);
 void mac_tx_chan_offset_new(uint32_t chan);
+/* The receive IQ's mismatch and the saturation checks, the driver's own this step (package 7a). */
+void rfrx_sat_rst(uint32_t on);
+void phy_check_rx_sat(void);
+void dc_iq_est_high(uint32_t a0, uint32_t a1, int32_t out[3]);
+void rxiq_get_mis_new(uint32_t gain, uint8_t out[2], uint32_t verbose);
+/* The receive IQ's mismatch correction, the driver's own this step (package 7b). */
+void rxiq_cover_mg_mp_new(uint32_t gain, uint8_t *out1, uint8_t *out2, uint32_t verbose);
+void rfcal_rxiq_new(uint32_t a0, uint32_t a1, uint32_t a2, uint8_t *out, uint32_t verbose);
+int32_t get_rfcal_rxiq_data_new(int32_t a0, int32_t a1, uint32_t verbose);
+/* The receive IQ calibration's gain search and its block, the driver's own this step (package 7c). */
+void set_rx_gain_cal_iq_new(uint32_t save_i2c, uint32_t tone, uint32_t out, uint32_t verbose);
+void rxiq_cal_init(uint32_t a0, void *p1, uint32_t a2);
+/* The transmit capacitor calibration's three channels and the scan of one byte's two fields, the driver's own
+ * this step (package 8). */
+void tx_cap_init_loop(void);
+void rfcal_txcap_loop(uint32_t verbose, uint8_t *out);
+/* The transmit DC calibration's bring-up, Bluetooth's and the loopback transmit IQ set, the driver's own this
+ * step (package 9). */
+void txdc_cal_init_new(uint16_t *dco, uint32_t a1, uint32_t a2, uint32_t a3);
+void bt_txdc_cal_new(void);
+void set_lb_txiq_new(uint32_t a0);
+/* The head's init-parameter spread, the driver's own this step (package 10a). */
+void register_chipv7_phy_init_param(const esp_phy_init_data_t *init_data);
 void phy_cal_param_track(uint32_t verbose);
 void phy_param_track_tot(uint32_t en_wifi, uint32_t en_ble_154);
 void force_txrx_off(uint32_t on);
@@ -172,13 +195,9 @@ void pwdet_code_cal(void);              /* the ROM's */
 void i2cmst_reg_init(void);             /* the ROM's */
 void fe_reg_init(void);                 /* the ROM's */
 void tx_pwctrl_bg_init(void);           /* the ROM's */
-void txdc_cal_init_new(uint16_t *dco, uint32_t a1, uint32_t a2, uint32_t a3);
-void tx_cap_init_loop(void);
 void tx_pwctrl_init_new(uint32_t a0);
 void bt_tx_gain_init(void);
-void rxiq_cal_init(uint32_t a0, void *p1, uint32_t a2);
-void rfrx_sat_rst(uint32_t a0);
-void phy_check_rx_sat(void);
+void phy_set_23dbm(esp_phy_init_data_t *init_data); /* the library's 23 dBm setting, package 11's */
 void phy_i2c_init1(void);
 void phy_i2c_master_cmd_mem_init(void);
 void rf_init(void);
@@ -258,6 +277,9 @@ static uint32_t enabled;
 #define PHY_PARAM_RF_OFF 0x17
 /* The library's mark that its bring-up has run, set at register_chipv7_phy's end; phy_close_rf's work waits on it. */
 #define PHY_PARAM_PHY_UP 0x25
+/* The library's byte that decides whether its 23 dBm setting applies; its phy_set_23dbm_en writes it, its
+ * phy_set_23dbm reads it. What sets it on the board is not known. */
+#define PHY_PARAM_23DBM_EN 0x4e
 /* The library's mark whether Wi-Fi's baseband is up, under which its wakeup clears the baseband at its end. */
 #define PHY_PARAM_WIFI_BB_ENABLE 0x19e
 
@@ -2758,6 +2780,7 @@ uint32_t gen_rx_gain_table_new(uint32_t *out, uint8_t limit, const uint16_t *gai
 #define ROMFUNC_PBUS_XPD_RX_OFF   32  /* rom_pbus_xpd_rx_off: the receiver powered down */
 #define ROMFUNC_PBUS_XPD_TX_OFF   34  /* rom_pbus_xpd_tx_off: the transmitter powered down */
 #define ROMFUNC_START_TX_TONE_STEP 38 /* rom_start_tx_tone_step: a0 to a5, a tone at a frequency, step and scale */
+#define ROMFUNC_STOP_TX_TONE       39 /* rom_stop_tx_tone: the tone started above stopped */
 #define ROMFUNC_IQ_EST_DISABLE    41  /* rom_iq_est_disable: the IQ estimate's accumulation stopped */
 
 /* The modem's IQ estimate, its DC accumulators and receive-gain SAR, and the trigger that starts them. */
@@ -3349,6 +3372,250 @@ void phy_rx_table_init(void)
     }
     phy_reg_init();
     enable_agc();
+}
+
+/*
+ * The receive IQ's mismatch and the saturation checks, the driver's own this step (package 7a). Each is
+ * held to the library's with phy-ab.py, and build.mk then weakens the library's in its copy.
+ */
+
+/* The estimate's four words rxiq_get_mis_new reads, beside the two ram_iq_est_enable arms; no label
+ * names them and what each holds is not known. */
+#define FEDATA_RX_IQ_EST2 (MODEM_BASE + 0x478u)
+#define FEDATA_RX_IQ_EST3 (MODEM_BASE + 0x47Cu)
+#define FEDATA_RX_IQ_EST4 (MODEM_BASE + 0x480u)
+#define FEDATA_RX_IQ_EST5 (MODEM_BASE + 0x484u)
+
+/* The baseband's word rfrx_sat_rst moves, which no label names; what it holds is not known. */
+#define AGC_RFRX_SAT (MODEM_BASE + 0x705Cu)
+
+/* The ROM's rom_iq_est_enable, the table's slot 40, which the two readers below reach through it; its
+ * first argument is not read. */
+#define ROMFUNC_IQ_EST_ENABLE 40
+
+static void rom_iq_est_enable(uint32_t a0, uint32_t n)
+{
+    ((void (*)(uint32_t, uint32_t))phy_get_romfuncs()[ROMFUNC_IQ_EST_ENABLE])(a0, n);
+}
+
+/* The ROM's ram_pbus_xpd_rx_on, the table's slot 33, which phy_check_rx_sat reaches through it. */
+void ram_pbus_xpd_rx_on(uint32_t arg);
+
+/*
+ * libphy's rfrx_sat_rst [0x4200543c]: AGC_4 written 0x404 outright, then AGC_RFRX_SAT's bits 31, 30, 28,
+ * 24 and 19 set where the argument is set and cleared where it is clear, its bits 0 to 18 cleared, and
+ * bit 11 -- where the argument is set -- or bit 10 raised.
+ */
+void rfrx_sat_rst(uint32_t on)
+{
+    uint32_t v;
+
+    REG(AGC_4) = 0x404u;
+    v = REG(AGC_RFRX_SAT);
+    if (on != 0u) {
+        REG(AGC_RFRX_SAT) = v | 0xd1080000u;
+        v = REG(AGC_RFRX_SAT);
+        REG(AGC_RFRX_SAT) = (v & 0xfff80000u) | 0x800u;
+    } else {
+        REG(AGC_RFRX_SAT) = v & 0x2ef7ffffu;
+        v = REG(AGC_RFRX_SAT);
+        REG(AGC_RFRX_SAT) = (v & 0xfff80000u) | 0x400u;
+    }
+}
+
+/*
+ * libphy's phy_check_rx_sat [0x420070b4]: the pbus's debug mode, the receiver powered and its DCO pair
+ * 0x01000100, 0x01000100 handed to the ROM -- the four halfwords 0x0100 -- the receive gain's trigger
+ * raised, five microseconds, then a hundred readings of the receive gain's SAR, the ones at 0x45 and below
+ * counted; where any counted, phy_param's rx_sat is set. The pbus's work mode is put back.
+ */
+void phy_check_rx_sat(void)
+{
+    uint32_t dco[2] = { 0x01000100u, 0x01000100u };
+    uint16_t count = 0;
+
+    pbus_debugmode();
+    ram_pbus_xpd_rx_on(0u);
+    pbus_set_dco(dco);
+    phy_force_rx_gain_trig();
+    ets_delay_us(5);
+    for (uint16_t i = 0; i < 0x64u; i++) {
+        if (((REG(AGC_GAIN_SAR) >> 12) & 0x7fu) <= 0x45u) {
+            count = (uint16_t)(count + 1u);
+        }
+    }
+    if (count != 0u) {
+        phy_param[PHY_PARAM_RX_SAT] = 1u;
+    }
+    pbus_workmode();
+}
+
+/*
+ * libphy's dc_iq_est_high [0x42005d18]: the IQ estimate armed through the ROM, its two accumulators
+ * shifted six and divided by one more than the second argument, the magnitude's quotient eight times less
+ * their squares' sum held at zero, turned to decibels and raised by eight into the third argument's third
+ * word; the estimate then disabled. The first argument reaches only the ROM's arming, which does not read
+ * it.
+ */
+void dc_iq_est_high(uint32_t a0, uint32_t a1, int32_t out[3])
+{
+    int32_t div = (int32_t)a1 + 1;
+    int32_t i, q, sq, v;
+
+    rom_iq_est_enable(a0, a1);
+    i = ((int32_t)REG(FEDATA_IQ_EST_I) >> 6) / div;
+    out[0] = i;
+    q = ((int32_t)REG(FEDATA_IQ_EST_Q) >> 6) / div;
+    out[1] = q;
+    /* The squares wrap as the machine's words do. */
+    sq = (int32_t)((uint32_t)i * (uint32_t)i + (uint32_t)q * (uint32_t)q);
+    v = (int32_t)((uint32_t)((int32_t)REG(FEDATA_IQ_EST_MAG) / div) * 8u - (uint32_t)sq);
+    if (v < 0) {
+        v = 0;
+    }
+    out[2] = linear_to_db(v, 0) + 8;
+    rom_iq_est_disable();
+}
+
+/*
+ * libphy's rxiq_get_mis_new [0x42005d98]: the receive IQ mismatch from the estimate's four words. The
+ * estimate is armed through the ROM with the count one shifted by the first argument's gain, the four
+ * words shifted by the gain less two, and the two pairs' sum and difference crossed into a 64-bit divisor
+ * -- the second pair's squares' sum, one where that is zero -- and two 64-bit numerators, each shifted,
+ * divided and its low byte halved after one is added; the two bytes are the caller's. The third argument
+ * asks for the library's print, which is left out.
+ */
+void rxiq_get_mis_new(uint32_t gain, uint8_t out[2], uint32_t verbose)
+{
+    int32_t w0, w1, w2, w3;
+    int32_t x1, y1, x2, y2;
+    uint32_t sh = (gain - 2u) & 31u;
+    int64_t num, den;
+    int8_t r0, r1;
+
+    rom_iq_est_enable(1u, (1u << gain) & 0xffffu);
+    w0 = (int32_t)REG(FEDATA_RX_IQ_EST2);
+    w1 = (int32_t)REG(FEDATA_RX_IQ_EST5);
+    w2 = (int32_t)REG(FEDATA_RX_IQ_EST4);
+    w3 = (int32_t)REG(FEDATA_RX_IQ_EST3);
+    w0 >>= sh;
+    w1 >>= sh;
+    w2 >>= sh;
+    w3 >>= sh;
+    x1 = w0 - w1;
+    y1 = w2 + w3;
+    x2 = w0 + w1;
+    y2 = w3 - w2;
+    den = (int64_t)x2 * x2 + (int64_t)y2 * y2;
+    if (den == 0) {
+        den = 1;
+    }
+    num = ((int64_t)x2 * x1 - (int64_t)y2 * y1) << 9;
+    r0 = (int8_t)(int32_t)(num / den);
+    num = ((int64_t)x2 * y1 + (int64_t)y2 * x1) << 10;
+    r1 = (int8_t)(int32_t)(num / den);
+    out[0] = (uint8_t)((r0 + 1) >> 1);
+    out[1] = (uint8_t)((r1 + 1) >> 1);
+    (void)verbose;
+    rom_iq_est_disable();
+}
+
+/*
+ * libphy's rxiq_cover_mg_mp_new [0x42005ef6]: the receive IQ mismatch's correction, over two rounds. Each
+ * round hands the ROM's rxiq_set_reg the running pair -- the first the high correction, the second the low --
+ * takes its answer, asks rxiq_get_mis_new for the estimate's mismatch, and folds the answer and the two bytes
+ * into the pair; the second round's pair is held to the ROM's get_data_sat bounds, 0x1f and 0x3f, handed back
+ * to rxiq_set_reg, and left in the caller's two bytes. The fourth argument asks rxiq_get_mis_new for the
+ * library's print, which is left out.
+ */
+
+/* The ROM's rxiq_set_reg: one byte of the receive IQ correction into the front end's FEDATA_REG_SET3 word --
+ * the high byte's field where the second argument is set, the low byte's otherwise -- its value held to 0x1f
+ * or 0x3f and answered. */
+int32_t rxiq_set_reg(int32_t value, int32_t high);
+
+void rxiq_cover_mg_mp_new(uint32_t gain, uint8_t *out1, uint8_t *out2, uint32_t verbose)
+{
+    uint8_t buf[2];
+    int32_t v1 = 0, v2 = 0, hi, lo;
+    uint32_t round = 2u;
+
+    for (;;) {
+        hi = rxiq_set_reg(v1, 1);
+        v2 = rxiq_set_reg(v2, 0);
+        rxiq_get_mis_new(gain, buf, verbose);
+        v1 = (int8_t)((int8_t)buf[0] + hi);
+        v2 = (int8_t)(v2 - (int8_t)buf[1]);
+        if (round != 1u) {
+            round = 1u;
+            continue;
+        }
+        hi = get_data_sat(v1, 0x1f, -0x1f);
+        lo = get_data_sat(v2, 0x3f, -0x3f);
+        rxiq_set_reg(hi, 1);
+        rxiq_set_reg(lo, 0);
+        *out1 = (uint8_t)hi;
+        *out2 = (uint8_t)lo;
+        break;
+    }
+}
+
+/*
+ * libphy's rfcal_rxiq_new [0x42005fba]: the front end's FEDATA_REG_SET3 word has bit 29 raised and bit 30
+ * lowered, the ROM's tone started through the table -- 1, the caller's second and third arguments and zeros --
+ * the mismatch correction taken from rxiq_cover_mg_mp_new with the first argument, the tone stopped, and the
+ * pair written to the caller's two bytes. The last argument is rxiq_cover_mg_mp_new's verbose one; the
+ * caller's second and third reach the tone alone.
+ */
+void rfcal_rxiq_new(uint32_t a0, uint32_t a1, uint32_t a2, uint8_t *out, uint32_t verbose)
+{
+    uint8_t buf[2];
+
+    REG(FEDATA_REG_SET3) |= 0x20000000u;
+    REG(FEDATA_REG_SET3) &= ~0x40000000u;
+    ((void (*)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t))phy_get_romfuncs()[ROMFUNC_START_TX_TONE_STEP])(
+        1u, a1, a2, 0u, 0u, 0u);
+    rxiq_cover_mg_mp_new(a0, &buf[0], &buf[1], verbose);
+    ((void (*)(uint32_t))phy_get_romfuncs()[ROMFUNC_STOP_TX_TONE])(1u);
+    out[0] = buf[0];
+    out[1] = buf[1];
+}
+
+/*
+ * libphy's get_rfcal_rxiq_data_new [0x42006042]: the mismatch correction read up to four times through
+ * rfcal_rxiq_new, its high and low bytes accumulated as signed halves, stopping early once a reading's two
+ * bytes are within one of the last -- the last two then averaged -- else the four summed and divided by four,
+ * two added first. The pair is held to the ROM's get_data_sat bounds (0x1f and 0x3f) and packed high byte
+ * first into the answer's halfword. The third argument asks rfcal_rxiq_new for the library's print, which is
+ * left out.
+ */
+int32_t get_rfcal_rxiq_data_new(int32_t a0, int32_t a1, uint32_t verbose)
+{
+    uint8_t buf[2];
+    int32_t sum1 = 0, sum2 = 0, last1 = 0, last2 = 0, n = 0, v1 = 0, v2 = 0;
+    int32_t p1, p2;
+
+    for (;;) {
+        rfcal_rxiq_new(0xeu, (uint32_t)a0, (uint32_t)a1, buf, verbose);
+        if (n != 0 && abs_temp(last1 - (int8_t)buf[0]) <= 1 && abs_temp(last2 - (int8_t)buf[1]) <= 1) {
+            v1 = (int8_t)((last1 + (int8_t)buf[0] + 1) >> 1);
+            v2 = (last2 + (int8_t)buf[1] + 1) >> 1;
+            break;
+        }
+        last1 = (int8_t)buf[0];
+        last2 = (int8_t)buf[1];
+        n++;
+        sum1 = (int16_t)(sum1 + last1);
+        sum2 = (int16_t)(sum2 + last2);
+        if (n == 4) {
+            v1 = (int8_t)((sum1 + 2) >> 2);
+            v2 = (sum2 + 2) >> 2;
+            break;
+        }
+    }
+    p1 = get_data_sat(v1, 0x1f, -0x1f);
+    p2 = get_data_sat(v2, 0x3f, -0x3f);
+    return (int32_t)(uint16_t)(((int8_t)p1 << 8) | (uint8_t)p2);
 }
 
 /*
@@ -4779,4 +5046,457 @@ void phy_i2c_enter_critical(void)
 
 void phy_i2c_exit_critical(void)
 {
+}
+
+/*
+ * libphy's set_rx_gain_cal_iq_new [0x4200699a] and rxiq_cal_init [0x420075c8], the driver's own, step 5's
+ * package 7c: the receive IQ calibration's gain search and the block that runs it. Each is held to the
+ * library's off the board, by phy-ab.py, and build.mk then weakens the library's two.
+ */
+
+/* The ROM's pbus_rx_dco_cal [0x400062a2]: one receive DC estimation with the pbus forced; the first argument,
+ * a buffer, and three more. The library's rxiq_cal_init reaches it while the estimate's blocks stay its own. */
+void pbus_rx_dco_cal(uint32_t a0, void *a1, uint32_t a2, uint32_t a3, uint32_t a4);
+
+/* The ROM's rom_set_txcap_reg, the table's slot 25: a six-byte table and an index, the pair written to the
+ * analog I2C's block 0x6b. */
+#define ROMFUNC_SET_TXCAP_REG 25
+
+/*
+ * libphy's set_rx_gain_cal_iq_new [0x4200699a]: the receive IQ calibration's gain search. Where the first
+ * argument is set, the analog I2C's block 0x67 register 3 bits 2..2 is read and cleared and put back at the
+ * end. The loopback gain, the loopback transmit IQ and the pbus's receive DC are set, then over two passes the
+ * receive gain is stepped a sixteenth at a time -- the estimate's magnitude, the front end's
+ * FEDATA_IQ_EST_MAG shifted seven, deciding the step: below 0x1000 the gain falls, above 0x20000 it rises and
+ * the loopback side is dropped -- the pbus's receive DC taken again each step and the gain held between 0 and
+ * 0x78. The second pass's gain and the second argument go to get_rfcal_rxiq_data_new, whose halfword is the
+ * caller's third argument's. The fourth argument asks the library for its prints, which are left out. The
+ * first argument to the tone is the caller's second, and phy_param's halfword 0x10 bit 3 reaches the pbus's
+ * receive DC as its fifth; neither is labelled.
+ */
+void set_rx_gain_cal_iq_new(uint32_t save_i2c, uint32_t tone, uint32_t out, uint32_t verbose)
+{
+    uint16_t *outp = (uint16_t *)(uintptr_t)out;
+    uint32_t dco[2] = { 0x01000100u, 0x01000100u };
+    int32_t bit = (int32_t)((phy_param16(0x10u) >> 3) & 1u);
+    uint32_t saved = 0u;
+    int32_t mag, gain = 0x30, lb = 0x20;
+    uint32_t pass = 2u;
+
+    (void)verbose;
+    if (save_i2c != 0u) {
+        saved = ((uint32_t (*)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t))phy_get_romfuncs()[ROMFUNC_I2C_READ_MASK])(
+            0x67u, 1u, 3u, 2u, 2u);
+        ((void (*)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t))phy_get_romfuncs()[ROMFUNC_I2C_WRITE_MASK])(
+            0x67u, 1u, 3u, 2u, 2u, 0u);
+    }
+    dco[0] = 0x01000100u;
+    ram_set_loopback_gain(0u, 0x43u, 0x20u);
+    set_lb_txiq_new(phy_param16(0xd0u));
+    pbus_rx_dco_cal(0xfa0u, dco, 0xau, 0u, (uint32_t)bit);
+
+    for (;;) {
+        ((void (*)(uint32_t, uint32_t, uint32_t))phy_get_romfuncs()[ROMFUNC_PBUS_FORCE_TEST])(1u, 1u, 0u);
+        ((void (*)(uint32_t, uint32_t, uint32_t))phy_get_romfuncs()[ROMFUNC_PBUS_FORCE_TEST])(1u, 1u, 0x1f9u);
+        ((void (*)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t))phy_get_romfuncs()[ROMFUNC_START_TX_TONE_STEP])(
+            1u, tone, (uint32_t)gain & 0xffu, 0u, 0u, 0u);
+        ((void (*)(uint32_t, uint32_t))phy_get_romfuncs()[ROMFUNC_IQ_EST_ENABLE])(1u, 0x3ffu);
+        mag = (int32_t)REG(FEDATA_IQ_EST_MAG) >> 7;
+        rom_iq_est_disable();
+        ((void (*)(uint32_t))phy_get_romfuncs()[ROMFUNC_STOP_TX_TONE])(1u);
+        if (mag > 0x20000) {
+            if (lb != 0) {
+                lb = 0;
+                goto adjust;
+            }
+            gain += 0x18;
+            goto clamp;
+        }
+        if (mag >= 0x1000) {
+            break;
+        }
+        gain -= 0x18;
+    clamp:
+        gain = (int16_t)gain;
+    adjust:
+        ram_set_loopback_gain(0u, 0x43u, (uint32_t)lb);
+        pbus_rx_dco_cal(0xfa0u, dco, 0xau, 0u, (uint32_t)bit);
+        gain = gain > 0x78 ? 0x78 : gain;
+        gain = (int16_t)gain < 0 ? 0 : gain;
+        gain = (int16_t)gain;
+        if (pass != 1u) {
+            pass = 1u;
+            continue;
+        }
+        break;
+    }
+    *outp = (uint16_t)get_rfcal_rxiq_data_new((int32_t)tone, (int32_t)(uint8_t)gain, verbose);
+    if (save_i2c != 0u) {
+        ((void (*)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t))phy_get_romfuncs()[ROMFUNC_I2C_WRITE_MASK])(
+            0x67u, 1u, 3u, 2u, 2u, saved);
+    }
+}
+
+/*
+ * libphy's rxiq_cal_init [0x420075c8]: the receive IQ calibration. Where phy_param's word 0xA4 has bit 10 set
+ * -- the calibration done -- it returns at once; else the channel's analog side is set to 6, the six-byte
+ * table at phy_param 0xDC is written through the ROM's rom_set_txcap_reg, the front end's FECTRL_TXRX_OFF word
+ * has bits 14 and 15 raised -- and bit 15 cleared later -- the pbus's debug mode is entered, the receiver powered
+ * and the loopback's clocks raised; where the first argument is set, the pbus's word is read and its bit 1 set.
+ * FEDATA_REG_SET3 has bit 29 raised, bit 13 raised, bit 30 lowered and bit 14 lowered, then the gain search of
+ * set_rx_gain_cal_iq_new runs into phy_param 0xD4 with the tone 0x80, and the four halfwords at 0xD4..0xDA are
+ * repacked -- the bits 8..13 moved down one and the bits 0..6 kept. Where the third argument is clear, bit 30
+ * is raised, bit 14 raised, bit 29 lowered, FECTRL_TXRX_OFF's bit 15 cleared, the loopback's clocks lowered,
+ * the transmitter powered down and the pbus's work mode put back. Then phy_param's bit 10 is set. The second
+ * argument is unused, as the library's is when the driver calls it. No label names the bits.
+ */
+void rxiq_cal_init(uint32_t a0, void *p1, uint32_t a2)
+{
+    int32_t skip_cleanup = (int32_t)a2;
+    uint32_t i;
+
+    (void)p1;
+    if ((phy_param32(0xa4u) & 0x400u) != 0u) {
+        return;
+    }
+    chip_v7_set_chan_ana(6u);
+    ((void (*)(const uint8_t *, uint32_t))phy_get_romfuncs()[ROMFUNC_SET_TXCAP_REG])(&phy_param[0xdcu], 6u);
+    REG(FECTRL_TXRX_OFF) |= 0x4000u;
+    REG(FECTRL_TXRX_OFF) |= 0x8000u;
+    pbus_debugmode();
+    ((void (*)(uint32_t))phy_get_romfuncs()[ROMFUNC_PBUS_XPD_RX_ON])(0u);
+    rom_loopback_mode_en(1u);
+    if (a0 != 0u) {
+        uint32_t v = ((uint32_t (*)(uint32_t, uint32_t))phy_get_romfuncs()[ROMFUNC_PBUS_RD])(1u, 1u);
+        ((void (*)(uint32_t, uint32_t, uint32_t))phy_get_romfuncs()[ROMFUNC_PBUS_FORCE_TEST])(1u, 1u, (v | 2u) & 0xffffu);
+    }
+    REG(FEDATA_REG_SET3) |= 0x20000000u;
+    REG(FEDATA_REG_SET3) |= 0x2000u;
+    REG(FEDATA_REG_SET3) &= 0xbfffffffu;
+    REG(FEDATA_REG_SET3) &= 0xffffbfffu;
+    set_rx_gain_cal_iq_new(0u, 0x80u, (uint32_t)(uintptr_t)&phy_param[0xd4u], 0u);
+    for (i = 0u; i != 4u; i++) {
+        uint16_t v = phy_param16(0xd4u + i * 2u);
+        phy_param16_set(0xd4u + i * 2u, (uint16_t)(((uint32_t)(v >> 1) & 0x1f80u) | ((uint32_t)v & 0x7fu)));
+    }
+    if (skip_cleanup == 0) {
+        REG(FEDATA_REG_SET3) |= 0x40000000u;
+        REG(FEDATA_REG_SET3) |= 0x4000u;
+        REG(FEDATA_REG_SET3) &= 0xdfffffffu;
+        REG(FECTRL_TXRX_OFF) &= 0xffff7fffu;
+        rom_loopback_mode_en(0u);
+        rom_pbus_xpd_tx_off();
+        pbus_workmode();
+    }
+    phy_param32_set(0xa4u, phy_param32(0xa4u) | 0x400u);
+}
+
+/*
+ * libphy's tx_cap_init_loop [0x42009578] and rfcal_txcap_loop [0x4200946c], the driver's own, step 5's package
+ * 8: the transmit capacitor calibration over three channels and the scan of one byte's two analog fields.
+ * Each is held to the library's off the board, by phy-ab.py, and build.mk then weakens the library's two.
+ */
+
+/* The ROM's dc_iq_est [0x40005dfa]: the estimate armed, its two accumulators shifted six and divided by one
+ * more than the second argument, the magnitude's quotient eight times less their squares' sum held at zero,
+ * turned to decibels and shifted four into the third argument's third word; the estimate then disabled. The
+ * library's dc_iq_est_new with its fourth argument clear is the same read, and the library's loop here reaches
+ * the ROM's function directly. */
+void dc_iq_est(uint32_t a0, uint32_t a1, int32_t out[3]);
+
+/*
+ * libphy's rfcal_txcap_loop [0x4200946c]: one byte of the transmit capacitor's DAC scanned. The first pass
+ * walks the analog I2C's block 0x6b register 2 bits 3..0 from 7 down to 0, and the second pass bits 7..4 from
+ * 13 down to 1 by twos; each value is written, the estimate's magnitude read back through dc_iq_est_high, and
+ * the largest kept -- its value written back at the pass's end -- the caller's byte advanced and the second
+ * pass run for that next byte. The first argument asks the library for its prints, which are left out; here it
+ * is phy_param's halfword 0x10 bit 7, which the block's caller passes and no label names.
+ */
+void rfcal_txcap_loop(uint32_t verbose, uint8_t *out)
+{
+    int32_t phase = 0;
+    int8_t scan = 7;
+    uint32_t step = 1u;
+    int32_t best;
+    int32_t est[3];
+
+    (void)verbose;
+    for (;;) {
+        *out = (uint8_t)scan;
+        best = 0;
+        for (;;) {
+            ((void (*)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t))phy_get_romfuncs()[ROMFUNC_I2C_WRITE_MASK])(
+                0x6bu, 1u, 2u, phase != 0 ? 7u : 3u, phase != 0 ? 4u : 0u, (uint32_t)(uint8_t)scan);
+            dc_iq_est_high(1u, 0x800u, est);
+            if (best < (int16_t)est[2]) {
+                best = (int16_t)est[2];
+                *out = (uint8_t)scan;
+            }
+            scan = (int8_t)((uint8_t)scan - (uint8_t)step);
+            if (scan < 0) {
+                break;
+            }
+        }
+        ((void (*)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t))phy_get_romfuncs()[ROMFUNC_I2C_WRITE_MASK])(
+            0x6bu, 1u, 2u, phase != 0 ? 7u : 3u, phase != 0 ? 4u : 0u, (uint32_t)*out);
+        out++;
+        if (phase == 0) {
+            phase = 1;
+            scan = 0xd;
+            step = 2u;
+            continue;
+        }
+        return;
+    }
+}
+
+/*
+ * libphy's tx_cap_init_loop [0x42009578]: the transmit capacitor calibration over the three channels 1, 6 and
+ * 11. For each: the frequency retuned to the channel, the front end's FECTRL_TXRX_OFF word's bits 14 and 15
+ * raised, the pbus brought to its debug mode, the receiver powered, the loopback's clocks raised, the loopback
+ * gain set, the pbus's receive DC taken with the pair 0x01000100, and the analog I2C's block 0x6b register 2's
+ * low nibble set to 1 and its high nibble to 5. Then a tone at 0x80, its gain stepped by 0x18 while the
+ * estimate's third word sits at 31 or below and down while it sits above 46, twice at most; the tone stopped and
+ * rfcal_txcap_loop run into the byte phy_param 0xdc holds for the channel -- 0xdc, 0xde and 0xe0. The pbus's
+ * work mode comes back, the loopback is dropped, the transmitter powered down and FECTRL_TXRX_OFF's bits 14 and
+ * 15 cleared. The library passes phy_param's halfword 0x10 bit 7 to rfcal_txcap_loop as its print argument, left
+ * out as elsewhere; the bit is not labelled.
+ */
+void tx_cap_init_loop(void)
+{
+    static const uint8_t chans[3] = { 1u, 6u, 11u };
+    uint32_t dco[2] = { 0x01000100u, 0x01000100u };
+    int32_t est[3];
+    int32_t verbose = (int32_t)((phy_param16(0x10u) >> 7) & 1u);
+    uint8_t *out = &phy_param[PHY_PARAM_DCAP_STG];
+    uint32_t i;
+
+    for (i = 0u; i != 3u; i++) {
+        uint8_t gain = 0x3cu;
+        uint32_t pass = 2u;
+
+        set_channel_rfpll_freq(chans[i], phy_param[PHY_PARAM_XTAL], 0);
+        REG(FECTRL_TXRX_OFF) |= 0x4000u;
+        REG(FECTRL_TXRX_OFF) |= 0x8000u;
+        pbus_debugmode();
+        ((void (*)(uint32_t))phy_get_romfuncs()[ROMFUNC_PBUS_XPD_RX_ON])(0u);
+        rom_loopback_mode_en(1u);
+        ram_set_loopback_gain(0u, 0x43u, 0x20u);
+        pbus_rx_dco_cal(0x800u, dco, 0xau, 0u, 0u);
+        ((void (*)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t))phy_get_romfuncs()[ROMFUNC_I2C_WRITE_MASK])(
+            0x6bu, 1u, 2u, 3u, 0u, 1u);
+        ((void (*)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t))phy_get_romfuncs()[ROMFUNC_I2C_WRITE_MASK])(
+            0x6bu, 1u, 2u, 7u, 4u, 5u);
+        for (;;) {
+            ((void (*)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t))phy_get_romfuncs()[ROMFUNC_START_TX_TONE_STEP])(
+                1u, 0x80u, (uint32_t)gain, 0u, 0u, 0u);
+            dc_iq_est(1u, 0x800u, est);
+            if (est[2] > 46) {
+                gain = (uint8_t)(gain + 0x18u);
+            } else if (est[2] > 31) {
+                break;
+            } else {
+                gain = (uint8_t)(gain - 0x18u);
+            }
+            if (pass != 1u) {
+                pass = 1u;
+                continue;
+            }
+            break;
+        }
+        rfcal_txcap_loop((uint32_t)verbose, out);
+        ((void (*)(uint32_t))phy_get_romfuncs()[ROMFUNC_STOP_TX_TONE])(1u);
+        out += 2u;
+        rom_loopback_mode_en(0u);
+        rom_pbus_xpd_tx_off();
+        pbus_workmode();
+        REG(FECTRL_TXRX_OFF) &= 0xffffbfffu;
+        REG(FECTRL_TXRX_OFF) &= 0xffff7fffu;
+    }
+}
+
+/*
+ * libphy's txdc_cal_init_new [0x42008d1e], bt_txdc_cal_new [0x42008c7a] and set_lb_txiq_new [0x42006962], the
+ * driver's own, step 5's package 9: the transmit DC calibration's bring-up, Bluetooth's and the loopback
+ * transmit IQ set. Each is held to the library's off the board, by phy-ab.py, and build.mk then weakens the
+ * library's three.
+ */
+
+/*
+ * libphy's set_lb_txiq_new [0x42006962]: the argument's packed pair split through get_iq_value, its first byte,
+ * signed, and its second less four, signed, handed to txiq_set_reg's forward and loopback halves.
+ */
+void set_lb_txiq_new(uint32_t a0)
+{
+    uint8_t out[2];
+
+    get_iq_value(out, (uint16_t)a0);
+    (void)txiq_set_reg((int8_t)out[0], 1);
+    (void)txiq_set_reg((int8_t)(uint8_t)(out[1] - 4u), 0);
+}
+
+/*
+ * libphy's txdc_cal_init_new [0x42008d1e]: the front end's transmit DC offsets brought up -- the pbus's debug
+ * mode entered and the transmitter powered with the caller's second and third arguments -- then five gains, from
+ * index_to_txbbgain, forced into the pbus's window 1 place 2 and one transmit DC pair settled each into the
+ * caller's buffer (four halfwords a pair, so twenty), the receiver powered down and the pbus's work mode put
+ * back. Where the fourth argument is set, the pbus's word is read and its bit 1 set first. The library's print
+ * flag is phy_param's halfword 0x10 bit 4, and its prints are left out.
+ */
+void txdc_cal_init_new(uint16_t *dco, uint32_t a1, uint32_t a2, uint32_t a3)
+{
+    uint32_t i;
+
+    pbus_debugmode();
+    rom_pbus_xpd_tx_on(a1, a2);
+    if (a3 != 0u) {
+        rom_pbus_force_test(1u, 1u, (rom_pbus_rd(1u, 1u) | 2u) & 0xffffu);
+    }
+    for (i = 0u; i < 5u; i++) {
+        rom_pbus_force_test(1u, 2u, index_to_txbbgain(i));
+        txdc_cal_new(dco + 4u * i);
+    }
+    ram_pbus_xpd_rx_on(0u);
+    pbus_workmode();
+}
+
+/*
+ * libphy's bt_txdc_cal_new [0x42008c7a]: where phy_param's word 0xA4 bit 12 is clear, the front end's Bluetooth
+ * transmit DC pair settled -- the pbus's debug mode entered, the transmitter powered with channel 0xf and the
+ * receiver's pbus window 4 place 2 forced from phy_param's byte 0x14 shifted three, the pair settled into
+ * phy_param 0x104, the receiver powered down, the pbus's work mode put back and the bit set. No label names the
+ * bit or the byte.
+ */
+void bt_txdc_cal_new(void)
+{
+    if ((phy_param32(0xa4u) & 0x1000u) != 0u) {
+        return;
+    }
+    pbus_debugmode();
+    rom_pbus_xpd_tx_on(0xfu, 0u);
+    rom_pbus_force_test(1u, 1u, (rom_pbus_rd(1u, 1u) | 2u) & 0xffffu);
+    rom_pbus_force_test(4u, 2u, (uint32_t)phy_param[0x14u] << 3);
+    txdc_cal_new((uint16_t *)(void *)&phy_param[0x104u]);
+    ram_pbus_xpd_rx_on(0u);
+    pbus_workmode();
+    phy_param32_set(0xa4u, phy_param32(0xa4u) | 0x1000u);
+}
+
+/*
+ * libphy's register_chipv7_phy_init_param [0x420037aa]: the caller's init data spread into phy_param -- the
+ * byte 0x50 from its first, the eighteen from 0x52 from its 2nd, the byte 0x66 from its 0x18th, the fourteen
+ * from 0x70 from its 0x19th, the fourteen from 0x7e from its 0x27th, the fourteen from 0x8c from its 0x35th,
+ * and the nine from 0x67 from its 0x43rd. The bytes 0x51, 0x64 and 0x65 are left as they were found.
+ */
+void register_chipv7_phy_init_param(const esp_phy_init_data_t *init_data)
+{
+    const uint8_t *init = init_data->params;
+    uint32_t i;
+
+    phy_param[0x50u] = init[0];
+    for (i = 0u; i < 0x12u; i++) {
+        phy_param[0x52u + i] = init[2u + i];
+    }
+    phy_param[0x66u] = init[0x18u];
+    for (i = 0u; i < 14u; i++) {
+        phy_param[0x70u + i] = init[0x19u + i];
+    }
+    for (i = 0u; i < 14u; i++) {
+        phy_param[0x7eu + i] = init[0x27u + i];
+    }
+    for (i = 0u; i < 14u; i++) {
+        phy_param[0x8cu + i] = init[0x35u + i];
+    }
+    for (i = 0u; i < 9u; i++) {
+        phy_param[0x67u + i] = init[0x43u + i];
+    }
+}
+
+/*
+ * libphy's register_chipv7_phy [0x42003ea0]: the PHY's full bring-up and calibration, the driver's own this
+ * step (package 10b), and the head the library's own has kept until now. It hands the ROM its PHY functions,
+ * raises the Wi-Fi and modem APB clocks (0x404 of MODEM_SYSCON_CLK_CONF1, its own bit 10 named and bit 2 not),
+ * clears the baseband's bit 1, forces the front end's transmit and receive off, resets the frequency module,
+ * and where phy_param 0x4e asks applies the library's 23 dBm setting to the default init data built here.
+ * On a fresh chip -- phy_param 0x25 clear -- it spreads the caller's init data, or the library's compiled-in
+ * default built here when the caller brings none, into phy_param, and checks the saved calibration blob: in
+ * mode 1 a blob that stands is recovered and the flag's bits 5, 7, 9 and 16 are cleared, one that will not do
+ * clears the whole flag and moves the mode to 2, and any other mode restores the blob into phy_param and then
+ * clears the flag. rf_init and bb_init run, the temperature init's two gates come from the flag's bits 5 and
+ * 20, and, where the blob was not recovered in mode 1, the restored block is held against the chip, saved
+ * back and its negated sum rewritten. Where phy_param 0xa1 asks, the channel's offset is set; the baseband
+ * PLL is taken down, the RF PLL's SDM register read through the ROM's table, the chip marked up, the
+ * frequency setting enabled, the front end's forcing released and the Wi-Fi clock put back as it was found.
+ * The return is the blob check's number, zero where the blob stands.
+ */
+int register_chipv7_phy(const esp_phy_init_data_t *init_data, esp_phy_calibration_data_t *cal, int mode)
+{
+    /* The library's compiled-in default init data, built whether or not the caller brings its own. */
+    esp_phy_init_data_t def = { { 0x0a, 0x00, 0x54, 0x54, 0x50, 0x50, 0x50, 0x4c, 0x4c, 0x4c, 0x4c, 0x48,
+                                  0x44, 0x3c, 0x3c, 0x3c, 0x4c, 0x4c, 0x4c, 0x48 } };
+    uint8_t buf[0x66];
+    uint32_t version;
+    uint32_t flag;
+    uint32_t clk_conf1;
+    int ret = 0;
+
+    phy_get_romfunc_addr();
+    clk_conf1 = REG(MODEM_SYSCON_CLK_CONF1);
+    REG(MODEM_SYSCON_CLK_CONF1) |= 0x404u;
+    REG(MODEM_SYSCON_WIFI_BB_CFG) &= ~0x2u;
+    force_txrx_off(1u);
+    freq_module_resetn();
+    phy_dis_hw_set_freq_reg();
+    i2c_master_reset();
+
+    if (phy_param[PHY_PARAM_23DBM_EN] != 0u) {
+        phy_set_23dbm(&def);
+    }
+    if (phy_param[PHY_PARAM_PHY_UP] == 0u) {
+        register_chipv7_phy_init_param(init_data != NULL ? init_data : &def);
+    }
+    phy_get_xtal_freq();
+    version = phy_get_rf_cal_version();
+
+    if (phy_param[PHY_PARAM_PHY_UP] == 0u) {
+        ret = (int)phy_rfcal_data_check(1u, (uint8_t *)cal, (const uint8_t *)init_data, version);
+        if (mode == 1) {
+            if (ret == 0) {
+                rf_cal_data_recovery((const uint8_t *)cal);
+                phy_param32_set(PHY_PARAM_PARAM_FLAG, phy_param32(PHY_PARAM_PARAM_FLAG) & 0xfffefd5fu);
+            } else {
+                mode = 2;
+                phy_param32_set(PHY_PARAM_PARAM_FLAG, 0u);
+            }
+        } else {
+            if (ret == 0) {
+                phy_rfcal_data_check_value((uint8_t *)cal, buf, 0u);
+            }
+            phy_param32_set(PHY_PARAM_PARAM_FLAG, 0u);
+        }
+    }
+
+    flag = phy_param32(PHY_PARAM_PARAM_FLAG);
+    rf_init();
+    bb_init();
+    get_temp_init_new(((flag >> 5) & 1u) ^ 1u, ((flag >> 20) & 1u) ^ 1u);
+
+    if (phy_param[PHY_PARAM_PHY_UP] == 0u && mode != 1) {
+        if (ret == 0) {
+            ret = phy_rfcal_data_check_value((uint8_t *)cal, buf, 1u) != 0u;
+        }
+        rf_cal_data_backup((uint8_t *)cal);
+        version = phy_get_rf_cal_version();
+        phy_rfcal_data_check(0u, (uint8_t *)cal, (const uint8_t *)init_data, version);
+    }
+    if (phy_param[PHY_PARAM_PHY_UP] == 0u && phy_param[PHY_PARAM_CHAN_OFFSET_EN] != 0u) {
+        chip_v7_set_chan_offset(0u);
+    }
+    phy_bbpll_cal(0u);
+    (void)rom_i2c_read(I2C_RFPLL_SDM, I2C_HOST_MST, 0u);
+    phy_param[PHY_PARAM_PHY_UP] = 1u;
+    phy_en_hw_set_freq();
+    force_txrx_off(0u);
+    REG(MODEM_SYSCON_CLK_CONF1) = clk_conf1;
+    return ret;
 }
