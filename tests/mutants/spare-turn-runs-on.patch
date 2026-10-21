@@ -8,7 +8,7 @@ Witness: fuzz lend-lender-earns
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -1373,7 +1373,7 @@ static __attribute__((noinline)) void spare_look(struct core *core)
+@@ -1385,7 +1385,7 @@ static __attribute__((noinline)) void sp
  {
      bool marked = core->run_stale;
      core->run_stale = false;

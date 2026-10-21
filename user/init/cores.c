@@ -21,6 +21,7 @@
 #define PINGS 8u
 #define WAKE_US 500000u
 #define ADDS 20000u
+#define CORE_SPIN_US 200000u
 #define CORE_STACK(i) (SPINNERS + 1u + (i))
 static volatile uint32_t pongs, read_count, read_at, lost_spins, added, roams;
 
@@ -71,7 +72,9 @@ static void lost_main(void)
  * Spin, making no call, until *word moves on from was or counts of the counter pass; whether it moved.
  * The timer is set to fire at once first, and its bit taken after,
  * so that a machine that runs its cores in turns, as QEMU does, turns to the other core by then:
- * QEMU runs one core until the next deadline of any timer, or until it waits.
+ * QEMU runs one core until the next deadline of any timer, or until it waits,
+ * and a thread alone on spare time sets the timer for nothing, so the other core may have few turns:
+ * the spin lasts CORE_SPIN_US at most, long enough for them, and ends as soon as the word moves.
  * The counter is read before the word, so a word that has not moved had not by then either,
  * however long a trap or the other core's turn came between the two.
  */
@@ -103,7 +106,7 @@ static uint32_t count_cores(void)
 static void second_core(uint32_t data_base, uint32_t data_size, uint32_t shared_base, uint32_t counter, uint32_t hz)
 {
     uint32_t base, bits, status, was, cause, pc, addr, fault_status, state, w[3];
-    uint32_t counts = hz / 1000u * (SPIN_US / 1000u);
+    uint32_t counts = hz / 1000u * (CORE_SPIN_US / 1000u);
     uint32_t stack = data_base + data_size / 4;
 
 #ifdef CORES_IRQ

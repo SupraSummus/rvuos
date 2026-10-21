@@ -1,0 +1,31 @@
+# A chain of two lenders: thread 2 lends the third its time, and the root, the only one of them with units, lends thread 2 its,
+# so the third runs on the root's time through thread 2, at the root's span of 2^16 counts,
+# until the root's virtual time runs ahead of the clock, then on spare time, and on the root's again once the release gives it time.
+actor 1 OP_POOL_ALLOC slot BOOT_CAP_POOL a1 CAP_NOTIFICATION a2 REPLAY_CAP_FREE+3 a3 0
+actor 1 OP_CAP_COPY slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE+3 a2 REPLAY_CAP_FREE+3 a3 RIGHT_ALL
+actor 1 OP_CAP_DERIVE slot BOOT_CAP_CAPTABLE a1 REPLAY_CAP_HALF a2 BOOT_CAP_TIME a3 RIGHT_W
+actor 1 OP_THREAD_RESUME slot REPLAY_CAP_THIRD
+actor 2 OP_NOTIFY_LEND slot REPLAY_CAP_FREE+3 a1 REPLAY_CAP_THIRD a2 0
+actor 1 OP_TIME_BIND slot REPLAY_CAP_HALF a1 REPLAY_CAP_THREAD a2 0 a3 0
+actor 1 OP_TIME_BIND slot BOOT_CAP_TIME a1 REPLAY_CAP_THIRD a2 0 a3 0
+actor 1 OP_TIME_BIND slot BOOT_CAP_TIME a1 BOOT_CAP_THREAD a2 0 a3 32
+actor 1 OP_NOTIFY_LEND slot REPLAY_CAP_FREE+3 a1 REPLAY_CAP_THREAD a2 0x10000
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_PRINT slot BOOT_CAP_PRINT a1 0x61 a2 0 a3 0

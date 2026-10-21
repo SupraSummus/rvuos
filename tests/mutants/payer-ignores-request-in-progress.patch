@@ -8,7 +8,7 @@ Witness: fuzz lend-request-goes-on
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -316,9 +316,6 @@ static uint8_t place_queue(const struct place *p, const struct place *l, uint64_
+@@ -323,9 +323,6 @@ static uint8_t place_queue(const struct place *p, const struct place *l, uint64_
   */
  static struct place *request_payer(struct place *p, struct place *l, uint64_t now)
  {

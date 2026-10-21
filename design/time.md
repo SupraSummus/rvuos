@@ -284,7 +284,6 @@ the place that earns each unit and the virtual time each unit nobody earns was l
 the release, the running thread, and the count its turn is charged from.
 With every thread on spare time alone this is the plain round-robin over threads,
 which is how the replay driver runs; see "Verification".
-Lent time goes on through a first lender with no time of its own, `LEND_DEPTH` lenders on.
 
 **A waiter may lend its time to a thread it names**, with `OP_NOTIFY_LEND`; see "Communication and synchronisation".
 A borrower without time of its own has the run queue while its lender's units give it time,
@@ -305,6 +304,10 @@ since whether a turn is paid is decided as it begins and as its request ends;
 resumed meanwhile, it joins its queue as the turn ends.
 A lender lends only on a core whose time both it and its borrower hold, its place's virtual time there,
 since units are a part of one core and pay for no other's time.
+A first lender with no time for its borrower lends on what it borrows, up to `LEND_DEPTH`, 64, lenders up.
+Every lender waits, so of a chain only the thread at its end may wait for a turn, and what settles a chain settles that end:
+the release looks down from a waiting lender to the end, and the end's settle looks up for the first lender with time,
+`TIME_UNITS` times twice `LEND_DEPTH` steps at a release at most.
 
 **What it promises.**
 Threads with time run by their requests' deadlines, and then threads on spare time take turns.

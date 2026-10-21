@@ -20,4 +20,4 @@ diff --git a/kernel/sched.c b/kernel/sched.c
 -    }
  }
  
- /* Settle the borrowers whose lent time a thread's units give, the one it lends to first and on, LEND_DEPTH of them. */
+ /*

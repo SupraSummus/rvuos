@@ -126,10 +126,12 @@ static inline struct place *thread_place_on(const struct thread *t, uint32_t cor
  */
 _Static_assert(3ull << SPAN_MAX < 1ull << 31, "a deadline lies within 2^31 counts of the others");
 /*
- * How many lenders lent time goes through: a borrower's first lender with no time of its own lends what it borrows,
- * so a client's account pays for its server and for the driver its server waits on.
+ * How many lenders lent time goes through: a borrower's first lender with no time for it lends what it borrows,
+ * so a client's units pay for its server, for what that one waits on, and on down a chain of this many.
+ * Every lender of a chain waits, so only the thread at its end may wait for a turn,
+ * and what settles a chain settles that end alone.
  */
-#define LEND_DEPTH 3u
+#define LEND_DEPTH 64u
 
 /*
  * The ready threads whose turn it is nowhere wait on three queues of each core they hold the time of, by their place there,

@@ -1,7 +1,7 @@
 An unmount empties the table slot without taking its node out of the ring below the CapTable capability,
 so the ring leads into a slot that is empty, and a revoke that comes to it clears nothing.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: child link to a slot that is not a live, filled one
 Report: link to a slot that is not a live, filled one
 Report: parent's ring does not reach the slot

@@ -879,7 +879,7 @@ until the maintainer decides otherwise.
     so its requests are due after those of a thread that wakes with a span no longer than its own.
     Spare time is the far end of the same order: a thread with no request open and its virtual time further ahead has none due.
     A thread on lent time runs its lender's requests, at the lender's units and within the lender's span,
-    and lent time goes on through a lender with no time of its own, `LEND_DEPTH` lenders on, so a client's units pay for its server and for the driver that one waits on.
+    and lent time goes on through a lender with no time of its own, up to `LEND_DEPTH`, 64, lenders on, so a client's units pay for its server and for the driver that one waits on, and on down a chain of servers.
     A bind keeps the virtual time, and the units a place leaves keep it too, so a bind starts no thread ahead of what its units paid for nor behind,
     and units nobody earned since boot start a thread at the clock.
     Weighed and left:
@@ -904,6 +904,15 @@ until the maintainer decides otherwise.
       two threads that both want the core take it from each other at every crossing,
       which under QEMU cost each a fifth of its throughput.
     - **A window added to the deadline**: it delays only its own thread, and nothing prices it; a long span does as much.
+    - **A saving of up to a span**, a request starting a span behind the clock at most where the thread waited:
+      a burst after a wait would be due at once, but a place could then ask its units' part of two spans within one,
+      and with a core's units all given the requests of the others would miss their deadlines by as much;
+      the promise that no span costs another thread holds only without it.
+    - **The head of a chain pays**, the lender at its top, with the chain's two ends kept in each other's threads:
+      a lender's release would reach the chain's end in one step, where it walks the chain now,
+      but a chain also joins as a first lender wakes and the next one of the ring becomes first, which nothing can refuse,
+      so no bound on a chain's length could be kept, and the lenders between would pay nothing though they had units;
+      the walk bounded by `LEND_DEPTH` holds instead, `TIME_UNITS` times twice `LEND_DEPTH` steps at a release at worst.
     - **Priorities that preempt on wake**, decision 9's proposal: a promise relative to every thread above.
     - **A calendar**, units with fixed places in a cycle: latency becomes the spacing of a thread's units, and bursts go;
       units numbered by their bits reversed would space a block of them evenly,

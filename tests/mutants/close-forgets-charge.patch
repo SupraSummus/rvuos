@@ -10,7 +10,8 @@ Witness: fuzz bind-turn-later
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -491,7 +491,7 @@ static uint64_t turn_charge(struct core *core)
+@@ -496,9 +496,9 @@ static uint64_t turn_charge(struct core *core)
+ {
      uint64_t now = timer_now();
      struct place *p = turn_place(core);
      if (p != NULL) {
@@ -19,3 +20,4 @@ diff --git a/kernel/sched.c b/kernel/sched.c
      }
      core->turn_from = now;
      return now;
+ }

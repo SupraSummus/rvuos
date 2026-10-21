@@ -804,7 +804,7 @@ if that one holds the time of the core too, and the turns it takes so move that 
 a lender whose own time pays for its turn hands the rest of it to the borrower at once, if the borrower waits for a turn.
 A signal from the borrower that wakes the lender hands it the rest of the turn back.
 A borrower that lends in turn, having no time for its own borrower, passes on what it borrows,
-so a client's time pays for its server and for whatever that server waits on, through up to 3 lenders,
+so a client's time pays for its server and for whatever that server waits on, through up to 64 lenders,
 and only on a core every one of them holds the time of.
 
 So a thread waiting for whoever holds a lock lends it its time, and so does a client waiting for its server's answer:

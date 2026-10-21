@@ -2,7 +2,7 @@ A turn on lent time is charged to the borrower whose turn it is rather than to t
 The borrower would spend its own units on lent time, and the lender run free;
 a turn is charged to its payer.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: a step moved the virtual time of a place that paid for no turn and started no request
 Report: a step of the clock did not charge the thread whose turn it was its units' part
 Report: a traced call that moved no time charged the thread whose turn it was
