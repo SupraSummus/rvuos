@@ -503,9 +503,10 @@ until the maintainer decides otherwise.
     Working default: the driver's own MAC and bring-up are written from what `libpp.a` and `libnet80211.a` do to the device --
     the registers, the values and their order, read by disassembly and by the trace window, see `user/wifi/esp32c6/NOTES.md` --
     and none of their code is copied;
-    `libphy.a` is being taken the same way, a function at a time,
-    each the driver's own in `phy.c` and held against the library's before the library's is weakened to its place,
-    until nothing of it is linked.
+    `libphy.a` was taken the same way, a function at a time,
+    each the driver's own in `phy.c` and held against the library's before the library's was weakened to its place,
+    and none of it is linked now; the library stays only as the side the tools read --
+    `phy-run.elf`, `wifi-esp32c6-refs` and `wifi-esp32c6-attrib` -- not in the image.
     Its 2.4 GHz channels are 1 to 13, and its power never rises above what `libphy.a` sets for a channel and rate,
     EN 300 328's 20 dBm EIRP.
     Those libraries are esp32-wifi-lib's and esp-phy-lib's, whose READMEs give the binaries ESP-IDF's license,
@@ -515,7 +516,7 @@ until the maintainer decides otherwise.
     esp32c6-open-mac, which sends a beacon from the C6, states no license, so nothing is taken from it.
     Open: what the Apache License asks of a driver written from an Object form's behaviour --
     nothing, as for facts about a device, or a notice --
-    and what an image that links `libphy.a`, and the libraries until they go, must carry beside it.
+    and what an image that no longer links `libphy.a` or the libraries it once linked must carry beside it.
     Decide before the Wi-Fi system's image is handed to anyone.
 
 29. **How tightly a slot packs.**

@@ -216,7 +216,30 @@ void freq_module_resetn(void);
 uint32_t tsens_code_read(void);
 int code_to_temp(uint32_t code, int offset);
 extern const esp_phy_init_data_t phy_init_data;
-extern uint8_t phy_param[];
+
+/*
+ * libphy.a's last two objects, the driver's own from this commit: its phy_init.o held the PHY's parameter
+ * block, `phy_param`, 0x1a8 bytes of .data, and the pointer `g_phyFuns` below to the ROM's table of PHY
+ * functions, four zeroed bytes of .bss. Both are the driver's now, and libphy.a is linked no more.
+ *
+ * The initial bytes are libphy's own, byte for byte: phy_init.o's .data.phy_param, of which only the ones
+ * named below are non-zero -- in particular 0x4e, the 23 dBm gate, is left zero, as libphy's own started.
+ * register_chipv7_phy hands the ROM the block's address through the ROM's phy_param_addr, whose own data
+ * word `phy_param_rom` (the ROM's RAM at 0x4087fce8) then holds it, so every ROM function reads and writes
+ * the driver's block; the four-byte alignment is libphy's, kept for the halfword and word fields in it.
+ */
+uint8_t phy_param[0x1a8] __attribute__((aligned(4))) = {
+    [0x02] = 0xbf, [0x03] = 0x20,
+    [0x06] = 0x54,
+    [0x0a] = 0x01, [0x0b] = 0x01,
+    [0x0e] = 0x6a, [0x0f] = 0x01,
+    [0x12] = 0x16, [0x13] = 0x17,
+    [0x14] = 0x01, [0x15] = 0x40,
+    [0x16] = 0x02,
+    [0x18] = 0x50,
+    [0x24] = 0x30,
+    [0x1a0] = 0x01,
+};
 
 /* The RF calibration's saved blob, the driver's own; the definitions and the layout are at the file's end. */
 uint32_t phy_get_rf_cal_version(void);
@@ -4574,12 +4597,12 @@ void i2c_rc_cal_set(uint32_t first, uint32_t second)
 
 /*
  * The ROM's table of its PHY functions, which the ROM's own calls reach through `phy_get_romfuncs()`.
- * libphy's own `phy_get_romfunc_addr` [0x4200340c] hands the ROM the address of the library's `phy_param`
- * and fills twenty-three of the table's forty-four slots with the library's own functions, so that the ROM's
- * calls land in the library; it keeps the table's pointer in the library's `g_phyFuns`, which the library's
- * functions read. The driver's own `phy_get_romfunc_addr` does the same with the driver's `phy_param`, and
- * names the twenty-three functions that fill the slots -- the same set the library fills, at the same slots.
- * The driver's own twenty-three are below, and the slots point at those.
+ * libphy's own `phy_get_romfunc_addr` [0x4200340c] handed the ROM the address of the library's `phy_param`
+ * and filled twenty-three of the table's forty-four slots with the library's own functions, so that the ROM's
+ * calls landed in the library; it kept the table's pointer in the library's `g_phyFuns`, which the library's
+ * functions read. The driver's own `phy_get_romfunc_addr` does the same with the driver's own `phy_param` and
+ * `g_phyFuns` above, and names the twenty-three functions that fill the slots -- the same set the library
+ * filled, at the same slots. The driver's own twenty-three are below, and the slots point at those.
  *
  * The offsets are the table's, a slot every four bytes, as the library's `phy_get_romfunc_addr` stores them:
  * 0x08, 0x10, 0x14, 0x24, 0x28, 0x2c, 0x30, 0x34, 0x38, 0x3c, 0x40, 0x44, 0x48, 0x68, 0x6c, 0x70, 0x84,
@@ -4589,8 +4612,11 @@ void i2c_rc_cal_set(uint32_t first, uint32_t second)
 /* The ROM's phy_param_addr: the address of the ROM code's `phy_param`, which its own functions read. */
 void phy_param_addr(void *param);
 
-/* The ROM's table of PHY functions, as `phy_get_romfuncs()` returns it; the library's functions read it too. */
-extern romfunc *g_phyFuns;
+/*
+ * libphy.a's `g_phyFuns`, the driver's own now, as `phy_param` above is: phy_get_romfunc_addr sets it to the
+ * ROM's table, `phy_get_romfuncs()`'s answer, and fills the table's slots through it; nothing else reads it.
+ */
+romfunc *g_phyFuns;
 
 /* The twenty-three the library fills the table's slots with, the driver's own; the definitions are below. */
 int32_t ram_set_chan_cal_interp(const int8_t *tab, uint32_t chan);

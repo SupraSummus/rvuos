@@ -81,5 +81,5 @@ a change to `ec.c`, `mgmt.c`, `ccmp.c` or `user/wifi/esp32c6/mbedtls/` runs them
 ### Calls into Espressif's libraries
 
 `make BOARD=esp32c6 wifi-esp32c6-refs` counts what the driver's own code calls of Espressif's `libphy.a`, the closed
-library it still links; `net80211` and `pp` are gone, and a change that drops such a call gives the count before and
-after in its commit.
+library the driver no longer links: it links none of the closed libraries now, and the count is zero; a change that
+adds such a call gives the count before and after in its commit.

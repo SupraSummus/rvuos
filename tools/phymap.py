@@ -230,6 +230,10 @@ class Map:
 
         for at, op, args in body:
             o = [a.strip() for a in args.split(",")] if args else []
+            if o and o[-1].endswith(">") and " <" in o[-1]:
+                # objdump's "<symbol>" beside an operand -- jalr ra <sym> when the offset is zero -- is a
+                # comment, not part of the operand.
+                o[-1] = o[-1][:o[-1].index(" <")].rstrip()
             if op == "lui":
                 assign(o[0], (int(o[1], 0) << 12) & 0xffffffff)
             elif op == "auipc":

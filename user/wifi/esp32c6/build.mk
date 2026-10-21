@@ -1,5 +1,5 @@
 # The Wi-Fi system on an ESP32-C6, see user/wifi/esp32c6/drv.h: a root task,
-# the driver around Espressif's closed libraries, a child that runs an image of its own from the window onto flash,
+# the driver, its PHY the driver's own and the ROM's, a child that runs an image of its own from the window onto flash,
 # which the loader writes at FLASH_WINDOW_FLASH before the kernel boots, if the flash holds something else there,
 # and the network process of user/wifi/ and its clients, children that run the root task's image, so they keep no global.
 # tools/wifi-run.py prints the log as the root task writes it to the console, each line with its time,
@@ -10,10 +10,11 @@ WIFI_ESP      := user/wifi/esp32c6
 WIFI_ESP_INIT := $(BUILD)/$(WIFI_ESP)/phy_init_data.c
 WIFI_ESP_OBJ  := $(patsubst %.c,$(BUILD)/%.o,$(filter-out $(WIFI_ESP)/root.c,$(wildcard $(WIFI_ESP)/*.c))) \
                  $(BUILD)/$(WIFI_ESP)/phy_init_data.o $(BUILD)/$(WIFI_ESP)/esp_wifi_regulatory.o
-# The closed libraries the driver links: the PHY's alone, which keeps the RF; glue.c stands for what libcore.a held.
-# The BT baseband, libbtbb.a, was taken whole, see btbb.c, and the Wi-Fi's net80211 and pp with it: the driver's own
-# MAC and start stand in their place, so their archives are linked no more.
-WIFI_ESP_LIBS := $(BUILD)/$(WIFI_ESP)/libphy.a
+# The closed libraries the driver links: none. The PHY's was the last: its functions are the driver's own and its
+# two objects, phy_param and g_phyFuns, are in phy.c, so libphy.a is out of the link. The BT baseband, libbtbb.a, was
+# taken whole, see btbb.c, and the Wi-Fi's net80211 and pp with it: the driver's own MAC and start stand in their
+# place. glue.c stands for what libcore.a held.
+WIFI_ESP_LIBS :=
 WIFI_ESP_ROM  := $(addprefix $(PHYBLOB_CACHE)/,esp32c6.rom.ld esp32c6.rom.phy.ld \
                  esp32c6.rom.libgcc.ld esp32c6.rom.libc.ld)
 # The driver goes where the window onto flash starts, and the configuration to the input region,
@@ -191,8 +192,9 @@ mac-replay-test: $(MAC_REPLAY_TEST)
 	$(MAC_REPLAY_TEST) $(BTBB_REPLAY_DIR) bb=bb-other
 	tests/mac-replay-test.py $(MAC_REPLAY_TEST) $(WIFI_ESP)/test/replay $(MAC_REPLAY_EXPECTED)
 
-# libphy.a's functions the driver's own, in phy.c, replace: weakened in a copy, so that the driver's take their
-# place; the copy is made again when this file, which names them, changes.
+# libphy.a's functions the driver's own, in phy.c, replace: left out of the link now that the archive is, but still
+# weakened in a copy, which wifi-esp32c6-refs and wifi-esp32c6-attrib read as the library's half; the copy is made
+# again when this file, which names them, changes.
 WIFI_ESP_PHY_OWN := phy_get_xtal_freq tsens_read_init_new tsens_dac_to_index tsens_dac_cal_new \
                     ram_tsens_temp_read_new phy_get_tsens_value tsens_temp_read_new get_temp_init_new \
                     pwdet_reg_init_new open_i2c_xpd_new phy_xpd_rf \
@@ -249,10 +251,11 @@ $(BUILD)/$(WIFI_ESP)/esp_wifi_regulatory.o: $(WIFI_ESP_INIT)
 		-c $(PHYBLOB_CACHE)/esp_wifi_regulatory.c -o $@
 
 # The driver's own code takes no memory as it runs, see osi.h, so the link fails if an object but the glue
-# of the foreign code calls an allocator: hostap.c, supp.c and ec.c for hostap's and Mbed TLS's, osi.c for the libraries'.
+# of the foreign code calls an allocator: hostap.c, supp.c and ec.c for hostap's and Mbed TLS's, osi.c for
+# the adapter's traced run, and heap.c for the allocator itself.
 WIFI_ESP_HEAP := $(addprefix $(BUILD)/$(WIFI_ESP)/,ec.o heap.o hostap.o osi.o supp.o)
 
-$(BUILD)/wifi-drv.elf: $(WIFI_ESP_OBJ) $(LIB_OBJ) $(BUILD)/$(WIFI_ESP)/flash.ld $(BUILD)/$(WIFI_ESP)/libphy.a
+$(BUILD)/wifi-drv.elf: $(WIFI_ESP_OBJ) $(LIB_OBJ) $(BUILD)/$(WIFI_ESP)/flash.ld
 	@! $(NM) -u $(filter-out $(WIFI_ESP_HEAP),$(filter $(BUILD)/$(WIFI_ESP)/%,$(WIFI_ESP_OBJ))) | grep -E ' (osi_(m|c|re)alloc|os_(m|z)alloc|malloc|calloc)$$' \
 		|| { echo "$@: the driver's own code calls an allocator" >&2; exit 1; }
 	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/$(WIFI_ESP)/flash.ld $(foreach s,$(WIFI_ESP_ROM),-Wl,-T,$(s)) \
@@ -340,7 +343,7 @@ endif
 WIFI_TRACE_LOG ?= $(BUILD)/wifi-run.log
 .PHONY: wifi-esp32c6-attrib
 ifeq ($(BOARD),esp32c6)
-wifi-esp32c6-attrib: $(BUILD)/wifi-drv.elf $(BUILD)/wifi-drv.bin $(PHYBLOB_ROM_ELF)
+wifi-esp32c6-attrib: $(BUILD)/wifi-drv.elf $(BUILD)/wifi-drv.bin $(PHYBLOB_ROM_ELF) $(BUILD)/$(WIFI_ESP)/libphy.a
 	tools/mac-trace.py attrib --elf $(BUILD)/wifi-drv.elf --rom $(PHYBLOB_ROM_ELF) --image $(BUILD)/wifi-drv.bin \
 		--lib phy=$(BUILD)/$(WIFI_ESP)/libphy.a:$(PHYBLOB_CACHE)/esp32c6.rom.phy.ld \
 		$(addprefix --own ,$(WIFI_ESP_OBJ) $(LIB_OBJ)) \

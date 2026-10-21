@@ -8,8 +8,8 @@
  * The driver is an image of its own, too large for the SRAM:
  * its code and constants run from the window onto flash, BOOT_CAP_FLASH, at FLASH_WINDOW_BASE,
  * which esptool writes at FLASH_WINDOW_FLASH, and its data lies at a fixed block of RAM, DRV_RAM_BASE,
- * since the libraries' data is linked where it lies.
- * The block's top holds the ROM's own data, which the ROM's Wi-Fi and PHY functions the libraries call keep there:
+ * since the ROM's own data lies at the block's top.
+ * The block's top holds the ROM's own data, which the ROM's Wi-Fi and PHY functions keep there:
  * the driver places nothing in it, and the block is installed whole.
  * The image starts with a header, which says where its entry is;
  * the linker script, flash.ld.S, reads this file for the layout.
