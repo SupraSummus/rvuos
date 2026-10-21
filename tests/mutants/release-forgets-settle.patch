@@ -9,12 +9,12 @@ Witness: fuzz lend-request-made-on-own
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -782,7 +782,7 @@ static void release(uint32_t c)
+@@ -805,7 +805,7 @@ static void release(uint32_t c)
          struct place *p = unit_first(first + i);
          i += p != NULL ? place_units(p) : 1;
          if (p != NULL && (p->queue == QUEUE_SPARE || p->queue == QUEUE_SPENT)) {
 -            place_settle(p);
 +            (void)p;
          }
-         /* A lender waits on no queue, and its units may give the borrower it lends to time. */
-         struct place *h = p != NULL ? place_borrower(p) : NULL;
+         /*
+          * A lender waits on no queue, and its units may give time to the end of the chain of borrowers it lends to,

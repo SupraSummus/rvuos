@@ -7,7 +7,8 @@ Part of the design document; [`DESIGN.md`](../DESIGN.md) lists every section and
 **The rule.**
 The work of a system call, the timer or an interrupt
 is bounded by constants of the machine and the kernel:
-PMP entries, interrupt lines, timer lines, units of time, region slots, the size of an object.
+PMP entries, interrupt lines, timer lines, units of time, region slots, the size of an object,
+and the lenders a chain of lent time goes through.
 It does not grow with how many objects, pools or capabilities exist.
 Otherwise a process with one small pool allocates thousands of minimal objects,
 and every timer and every interrupt, other processes' included,

@@ -1,7 +1,7 @@
 A borrower that runs on lent time is queued as if it had only its own.
 A thread waits on another queue than its lender's virtual time says.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: a place waits on another queue than its virtual time says
 Report: the release is for a count already past
 Witness: fuzz lend-lender-earns

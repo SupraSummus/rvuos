@@ -1,7 +1,7 @@
 A bind that settles a waiting lender but not the borrower it lends to.
 The borrower keeps the queue the lender's old units gave it.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: a lender's virtual time comes before the release
 Report: a place of a ready thread that may run waits on no queue
 Witness: fuzz lend-lender-earns

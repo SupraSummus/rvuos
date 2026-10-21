@@ -1,7 +1,7 @@
 A lending wait that names the borrower in the lender but leaves it off the borrower's ring.
 The borrower cannot find its lender, nor its destroy wake it.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: a lender is missing from its borrower's ring
 Witness: fuzz lend-borrower-dies
 

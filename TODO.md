@@ -545,6 +545,9 @@ what is left:
 - The host moves time a millisecond at a time, and under tracing every turn begins at such a step and ends at the next,
   so a request's end within a turn, which the timer marks, and the timer's count, `sched_next_wake`,
   run only in the demo, whose bounds are loose, and in the self-check's hold on what the timer is set for.
+- The replay driver's three threads make a chain of two lenders at most,
+  so the walks along a deeper chain, `borrowers_settle`'s and the release's, only the demo's chain of 16 reaches,
+  and no mutant plants them.
 - Once a record binds a driver thread to units, and so to time the others do not have,
   passing a record round may come back before it visited every runnable thread,
   and a record for a thread that could run is performed by another.

@@ -351,6 +351,7 @@ int main(void)
     uint32_t hz, counter;
     time_demo(&hz, &counter);
     units_demo(data_base, data_size, counter, hz);
+    lend_demo(data_base, data_size);
 
     /* The child is done, and goes with its pool. */
     expect("destroy the child's pool",

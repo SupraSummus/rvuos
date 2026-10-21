@@ -464,17 +464,23 @@ static void thread_settle(struct thread *t)
     }
 }
 
-/* Settle the borrowers whose lent time a thread's units give, the one it lends to first and on, LEND_DEPTH of them. */
+/*
+ * Settle the borrower a thread's units give lent time to: the end of the chain of borrowers it lends to first and on,
+ * LEND_DEPTH of them at most, since every one between lends, and so waits on no queue.
+ */
 static void borrowers_settle(struct thread *t)
 {
+    struct thread *end = NULL;
     for (uint32_t i = 0; i < LEND_DEPTH; i++) {
         LOOP_BOUND(LEND_DEPTH);
         struct thread *h = t->lend_to != 0 ? p2v(t->lend_to) : NULL;
         if (h == NULL || h->lenders != v2p(t)) {
-            return;
+            break;
         }
-        thread_settle(h);
-        t = h;
+        end = t = h;
+    }
+    if (end != NULL) {
+        thread_settle(end);
     }
 }
 
@@ -790,15 +796,21 @@ static void release(uint32_t c)
         if (p != NULL && (p->queue == QUEUE_SPARE || p->queue == QUEUE_SPENT)) {
             place_settle(p);
         }
-        /* A lender waits on no queue, and its units may give the borrower it lends to time. */
+        /*
+         * A lender waits on no queue, and its units may give time to the end of the chain of borrowers it lends to,
+         * which alone of the chain may wait for a turn, every one between lending on.
+         */
         struct place *h = p != NULL ? place_borrower(p) : NULL;
-        /* And the borrowers that one lends it on to. */
-        for (uint32_t d = 0; d < LEND_DEPTH && h != NULL; d++) {
+        for (uint32_t d = 1; d < LEND_DEPTH && h != NULL; d++) {
             LOOP_BOUND(LEND_DEPTH);
-            if (h->queue == QUEUE_SPARE || h->queue == QUEUE_SPENT) {
-                place_settle(h);
+            struct place *next = place_borrower(h);
+            if (next == NULL) {
+                break;
             }
-            h = place_borrower(h);
+            h = next;
+        }
+        if (h != NULL && (h->queue == QUEUE_SPARE || h->queue == QUEUE_SPENT)) {
+            place_settle(h);
         }
     }
 }

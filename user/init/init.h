@@ -179,6 +179,7 @@ void time_demo(uint32_t *hz, uint32_t *counter);
 
 /* units.c: run threads on units of the processor and on spare time, their stacks below the first quarter of the data. */
 void units_demo(uint32_t data_base, uint32_t data_size, uint32_t counter, uint32_t hz);
+void lend_demo(uint32_t data_base, uint32_t data_size);
 
 /* cores.c: count the cores, and on a machine of several run threads on the second. */
 void cores_demo(uint32_t data_base, uint32_t data_size, uint32_t shared_base, uint32_t counter, uint32_t hz);

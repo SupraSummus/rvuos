@@ -48,7 +48,7 @@ These are documented gaps, not surprises;
   `DESIGN.md`, open decisions 9 and 10.
 - **No synchronous endpoints.**
   Shared memory and notifications carry everything; open decision 5.
-- **Lent time goes through up to 3 lenders, on a core all of them hold.**
+- **Lent time goes through up to 64 lenders, on a core all of them hold.**
   A thread borrows from the thread that has lent it time longest,
   and, while that one has no time for it, from that one's own first lender, and on;
   never through a borrower that waits without lending, nor on a core whose time a lender does not hold;

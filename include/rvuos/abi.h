@@ -485,7 +485,7 @@
  * and a caller whose own time pays for its turn hands the rest of the turn to the borrower,
  * if it is that one and the borrower waits for a turn.
  * A signal from the borrower that wakes the caller hands the rest of the turn back, see OP_NOTIFY_SIGNAL.
- * A borrower that lends in turn, without time for its own borrower, passes on what it borrows, through up to 3 lenders,
+ * A borrower that lends in turn, without time for its own borrower, passes on what it borrows, through up to 64 lenders,
  * on a core every one of them holds the time of.
  * A caller whose borrower is destroyed wakes with KERR_INVALID_CAP and no bits, as one whose notification is.
  * A stop takes the caller off its notification and its borrower's lenders and leaves it at this call,

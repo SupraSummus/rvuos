@@ -708,7 +708,7 @@ so a hold nobody else wants makes no call, and a taker that finds it held lends 
 A client lends its server's thread its time while it waits for the answer, which open decision 5 asks for.
 The time comes from the thread that has lent the borrower time longest, and only within a core:
 a borrower keeps its lenders on a ring, oldest first, so it finds its lender without a walk.
-A first lender with no time for its borrower passes on what it borrows, up to `LEND_DEPTH`, 3, lenders up.
+A first lender with no time for its borrower passes on what it borrows, up to `LEND_DEPTH`, 64, lenders up.
 Priority inheritance takes the most of every waiter, a walk over all of them that goal 4 rules out;
 lent time follows first lenders alone, so its walk is bounded by `LEND_DEPTH`.
 
