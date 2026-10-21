@@ -170,6 +170,8 @@ uint32_t sleep_us(uint32_t us);
 
 /* logger.c: start the logger on a stack at sp, which carries the kernel's log to the UART from then on. */
 void logger_start(uint32_t uart_base, uint32_t log_base, uint32_t sp);
+/* logger.c: wait until the logger has carried out everything said so far; see there. */
+uint32_t logger_finish(void);
 
 /* child.c */
 void child_main(void);

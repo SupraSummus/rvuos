@@ -658,13 +658,8 @@ what does not keep to it yet comes first below, each a constant-time change, up 
   which every span's promise must leave room for.
   Zeroing a table in steps that stop, and measuring the longest step on each board,
   would say how short a span each board can keep.
-- A turn is charged from the count `next_turn` chose it at, so the rest of the switch is the incoming thread's,
-  and a request no longer than a switch runs next to nothing of its own:
-  on the RP2350's two cores the demo's probe, a request of 8 counts of the 1 MHz counter, runs only at its release,
-  and `make BOARD=rp2350 CORES=2 test` fails at "the probe ran within its span of the wake", on both archs.
-  Charging a turn from the return of the trap that switched to it passes it, and charges as now under tracing,
-  but `make bench`'s `threads`, two threads past their units, costs a tenth to a fifth more, its root task released by the timer more often.
-  Take that and refresh the records, or give the probe the units for its switch.
+- `make BOARD=rp2350 CORES=2 test` failed at "the probe ran within its span of the wake" on both archs,
+  the probe's request shorter than the switch to it; the probe now earns the half, not yet run there.
 - On ARM and RP2350's Hazard3 an `OP_IRQ_SET` on a core other than the first interrupts the first core each time,
   so a driver there that arms its line in a loop takes what it likes of the first core's turns, which its threads pay for.
   Interrupting it only as `core_notify` does, or routing a line to its waiter's core, open decision 24, would bound it.

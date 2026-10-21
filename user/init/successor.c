@@ -267,7 +267,11 @@ __attribute__((noreturn)) void hand_over(uint32_t sp)
                ? KERR_OK : KERR_INVALID_ARG);
     expect("derive every unit without spare time",
            rv_invoke(OP_CAP_DERIVE, BOOT_CAP_CAPTABLE, SLOT_FREEZE_TIME, BOOT_CAP_TIME, RIGHT_W));
-    expect("stop the logger", rv_time_bind(SLOT_FREEZE_TIME, SLOT_LOGGER, 0, 0, 0));
+    /* Nothing is said between the two, so the logger stops having carried out every line. */
+    uint32_t finished = logger_finish();
+    uint32_t stopped = rv_time_bind(SLOT_FREEZE_TIME, SLOT_LOGGER, 0, 0, 0);
+    expect("let the logger finish", finished);
+    expect("stop the logger", stopped);
 
     expect("allocate the successor's table",
            rv_invoke(OP_POOL_ALLOC, SLOT_POOL, CAP_CAPTABLE, SLOT_SUCC_TABLE, ROOT_TABLE_SLOTS));
@@ -281,24 +285,26 @@ __attribute__((noreturn)) void hand_over(uint32_t sp)
            rv_invoke(OP_PROCESS_INSTALL, SLOT_SUCC_PROCESS, 1, BOOT_CAP_DATA, RIGHT_R | RIGHT_W));
     expect("configure the successor",
            rv_invoke(OP_THREAD_CONFIGURE, SLOT_SUCC_THREAD, (uint32_t)&successor_main, sp, 0));
-    /*
-     * On spare time, so it runs once this thread waits, as long as this thread has time until then;
-     * spinning put its virtual time ahead of the clock, so it sleeps for the clock to catch up first.
-     */
     expect("bind the successor", rv_time_bind(BOOT_CAP_TIME, SLOT_SUCC_THREAD, 0, 0, 0));
-    expect("let this thread's virtual time come to the clock", sleep_us(FILL_US));
-    expect("start the successor", rv_invoke(OP_THREAD_RESUME, SLOT_SUCC_THREAD, 0, 0, 0));
     expect("allocate what to wait on",
            rv_invoke(OP_POOL_ALLOC, BOOT_CAP_POOL, CAP_NOTIFICATION, SLOT_EXIT_NTFN, 0));
     expect("mark the user-mode csrs", csrs_mark() ? KERR_OK : KERR_INVALID_ARG);
 
-    /* From here on this thread holds no Print capability and says nothing; the empty slots fail. */
+    /*
+     * From here on this thread holds no Print capability and says nothing; the empty slots fail.
+     * It starts the successor only once everything is moved,
+     * so the successor finds every slot filled whenever it runs, however long this thread's time lasts;
+     * it keeps a copy of the successor's thread for that, which goes with the boot pool.
+     */
     for (uint32_t slot = BOOT_CAP_NULL + 1; slot < ROOT_TABLE_SLOTS; slot++) {
-        if (slot != SLOT_SUCC_TABLE && slot != SLOT_EXIT_NTFN) {
+        if (slot == SLOT_SUCC_THREAD) {
+            rv_invoke(OP_CAP_COPY, SLOT_SUCC_TABLE, slot, slot, RIGHT_ALL);
+        } else if (slot != SLOT_SUCC_TABLE && slot != SLOT_EXIT_NTFN) {
             rv_invoke(OP_CAP_MOVE, SLOT_SUCC_TABLE, slot, slot, 0);
         }
     }
     rv_invoke(OP_CAP_MOVE, SLOT_SUCC_TABLE, SLOT_SUCC_TABLE, SLOT_SUCC_TABLE, 0);
+    rv_invoke(OP_THREAD_RESUME, SLOT_SUCC_THREAD, 0, 0, 0);
     for (;;) {
         rv_wait(SLOT_EXIT_NTFN, &bits);
     }

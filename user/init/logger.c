@@ -138,6 +138,20 @@ static void logger_main(void)
     }
 }
 
+/*
+ * Wait until the logger has taken all the log holds, a millisecond at a time.
+ * Stopped in the middle of a batch, it would leave bytes it wrote but had not yet said it took, which the halt writes again.
+ */
+#define FINISH_US 1000u
+uint32_t logger_finish(void)
+{
+    uint32_t status = KERR_OK;
+    while (status == KERR_OK && log_header->taken != log_header->head) {
+        status = sleep_us(FINISH_US);
+    }
+    return status;
+}
+
 /* Its objects come from the boot pool, and its thread runs in this process. */
 void logger_start(uint32_t uart_base, uint32_t log_base, uint32_t sp)
 {

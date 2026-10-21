@@ -764,7 +764,9 @@ and moves `taken` only as far as its host says it has the bytes, so a halt write
   and while another thread with time wants the core, each request after the first waits about a span,
   which spare time hides while the core is otherwise idle.
   The switch to a thread is charged to it, and one unit at the default span is a request about as long as that switch:
-  2048 cycles at the ESP32-C6's 160 MHz, 1200 at the RP2350's 150 MHz, near half of `make bench`'s `threads` round.
+  2048 cycles at the ESP32-C6's 160 MHz, 1200 at the RP2350's 150 MHz, near half of `make bench`'s `threads` round,
+  and 512 at the nRF52840's 64 MHz, about a sixth of the switch there.
+  A request shorter than that switch runs nothing of its own.
   So a thread on an event's way earns the units for its work and its switch,
   that work measured while no other thread takes the core from it, since a cycle counter a process's threads share counts them all.
 - A system call is never interrupted:

@@ -252,9 +252,9 @@ void units_demo(uint32_t data_base, uint32_t data_size, uint32_t counter, uint32
      * so a thread that spins while every other thread waits runs without a trap,
      * since it may go on with spare time whatever its requests come to,
      * where a timer at the end of each would end its turn only to hand it back.
-     * It sleeps first so that the logger carries everything out and waits, and prints nothing as it spins.
+     * It lets the logger carry everything out first, and prints nothing as it spins.
      */
-    uint32_t status = sleep_us(SLEEP_US);
+    uint32_t status = logger_finish();
     uint32_t traps = spin_traps(counter, hz, SPIN_US / 1000u);
     expect("let the logger finish", status);
     expect("the only thread to run spun with hardly a trap",
@@ -266,9 +266,9 @@ void units_demo(uint32_t data_base, uint32_t data_size, uint32_t counter, uint32
      * A spinner and the probe start together, their virtual times come to the clock, with nearly equal units.
      * The spinner's requests are due within half a millisecond or less, each an eighth of its span's work at its 8 units,
      * so its first is due first and it runs;
-     * the probe's are due within twice as long, after the spinner's first,
-     * so it runs as that first request ends, which the timer marks,
-     * as the spinner's virtual time then lies a span ahead and the spinner waits on spare time for it.
+     * the probe's are due within twice as long, and it starts first, so its first is due before the spinner's second:
+     * it runs as the spinner's first request ends, which the timer marks.
+     * This thread says nothing until it waits, so that no print spends its own request, due before the probe's.
      */
     uint32_t span = rv_span(ms_counts / 2), was;
     expect("stop the spinner", rv_thread_stop(SLOT_SPINNER, &was));
@@ -279,13 +279,17 @@ void units_demo(uint32_t data_base, uint32_t data_size, uint32_t counter, uint32
     expect("bind the spinner to 8 units in requests due within half a millisecond",
            rv_time_bind(SLOT_HALF_TIME, SLOT_SPINNER, 0, 8, span));
     expect("bind the probe to 9 in requests due within twice that", rv_time_bind(SLOT_HALF_TIME, SLOT_DODGER, 8, 9, 2 * span));
-    expect("let their virtual times come to the clock", sleep_us(CATCH_US));
+    uint32_t caught = sleep_us(CATCH_US);
     const volatile uint32_t *low = (const volatile uint32_t *)counter;
     uint32_t start = *low;
-    expect("start the spinner", rv_invoke(OP_THREAD_RESUME, SLOT_SPINNER, 0, 0, 0));
-    expect("start the probe", rv_invoke(OP_THREAD_RESUME, SLOT_DODGER, 0, 0, 0));
-    expect("wait for it, a millisecond at most", rv_timer_set(SLOT_DODGER_TIMER, BIT_TIMER, 1000u));
+    uint32_t armed = rv_timer_set(SLOT_DODGER_TIMER, BIT_TIMER, 1000u);
+    uint32_t probe_started = rv_invoke(OP_THREAD_RESUME, SLOT_DODGER, 0, 0, 0);
+    uint32_t spinner_started = rv_invoke(OP_THREAD_RESUME, SLOT_SPINNER, 0, 0, 0);
     uint32_t bits = wait_probe(SLOT_DODGER_NTFN, counter, start, ms_counts);
+    expect("let their virtual times come to the clock", caught);
+    expect("wait for the probe, a millisecond at most", armed);
+    expect("start the probe", probe_started);
+    expect("start the spinner", spinner_started);
     expect("cancel the timer", rv_timer_set(SLOT_DODGER_TIMER, 0, 0));
     expect("take their units back", rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_HALF_TIME, 0, 0));
     expect("the probe ran as the spinner's first request ended, within half a millisecond",
@@ -294,19 +298,20 @@ void units_demo(uint32_t data_base, uint32_t data_size, uint32_t counter, uint32
 
     /*
      * Spans at the wait.
-     * The probe, bound to 8 units with the default span, waits
-     * and says its wake is due within an eighth of a millisecond.
+     * The probe, bound to the half with the default span, waits
+     * and says its wake is due within a quarter of a millisecond, a request of half that, longer than the switch to it.
      * This thread wakes it and spins on for half a millisecond, its own request due within the default span,
      * so the probe runs at once, taking the processor from it in that call,
-     * where with the binding's span it would wait for the spin to end.
+     * where with the binding's span it would be due after this thread's request and wait for it to end.
      */
-    probe_span = rv_span(ms_counts / 8);
+    probe_span = rv_span(ms_counts / 4);
     probe_at = 0;
     expect("stop the probe", rv_thread_stop(SLOT_DODGER, &was));
     expect("make it a waiting probe",
            rv_invoke(OP_THREAD_CONFIGURE, SLOT_DODGER, (uint32_t)&waiting_probe_main,
                      data_base + data_size / 4 - SPINNERS * SPINNER_STACK, 0));
-    expect("bind the probe to 8 units with the default span", rv_time_bind(SLOT_HALF_TIME, SLOT_DODGER, 0, 8, 0));
+    expect("bind the probe to the half with the default span",
+           rv_time_bind(SLOT_HALF_TIME, SLOT_DODGER, 0, HALF_UNITS, 0));
     expect("start it, to wait", rv_invoke(OP_THREAD_RESUME, SLOT_DODGER, 0, 0, 0));
     expect("let its virtual time come to the clock", sleep_us(CATCH_US));
     start = *low;
@@ -318,6 +323,6 @@ void units_demo(uint32_t data_base, uint32_t data_size, uint32_t counter, uint32
     expect("cancel the timer", rv_timer_set(SLOT_DODGER_TIMER, 0, 0));
     expect("take its units back", rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_HALF_TIME, 0, 0));
     expect("the probe ran within its span of the wake, before the spin ended",
-           (bits & BIT_PROBE) != 0 && probe_at - start < ms_counts / 4 ? KERR_OK : KERR_INVALID_ARG);
+           (bits & BIT_PROBE) != 0 && probe_at - start < probe_span ? KERR_OK : KERR_INVALID_ARG);
     puts("root: spans ok\n");
 }
