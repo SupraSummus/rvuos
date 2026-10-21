@@ -11,7 +11,7 @@ without an MMU, and for ARMv7-M and ARMv8-M ones with an MPU; see "Architectures
 Read `DESIGN.md` before changing anything in the kernel,
 and the chapters in `design/` the change touches.
 No new walk over every object, pool or table
-goes on the path of a system call, a tick or an interrupt;
+goes on the path of a system call, the timer or an interrupt;
 see goal 4 in `DESIGN.md`.
 Every loop a trap can run says what bounds it with an annotation from `kernel/work.h`,
 and every link checks it, see "Bounded work" in `DESIGN.md`.
@@ -50,9 +50,6 @@ and its commit says which classes moved.
 
 It runs the laboratory, `make lab`, to its end, and holds its numbers to nothing;
 a change to how threads take turns, wait or wake compares them before and after, and its commit says what moved.
-
-It builds the tick's default rate alone,
-so a change to how the kernel counts ticks, or to a timing check of the demo, runs `make TIMER_HZ=10000 test` too.
 
 ### On a board
 

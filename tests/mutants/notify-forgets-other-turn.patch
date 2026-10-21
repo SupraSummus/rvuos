@@ -1,20 +1,23 @@
-A change to the thread whose turn another core has, as a bind to units of another core, does not tell that core,
-whose timer stays deferred for a turn that should end at the next tick.
+A change to the thread whose turn a core has, or that pays for it, as a bind to units of another core, does not tell that core,
+which neither looks at its run queue again nor, if it is another, is interrupted for it.
 
-Caught-by: fuzz-smp2
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a turn its own units give time runs no request on them
 Report: a turn on spare time runs while a thread with time waits
-Witness: fuzz-smp2 cores-spare-ends-at-rebind
+Witness: fuzz bind-turn-later
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -375,9 +375,6 @@ static void thread_settle(struct thread *t)
+@@ -494,11 +494,6 @@ static void thread_settle(struct thread *t)
          LOOP_BOUND(CORES);
          place_settle(thread_place(t, i));
      }
+-    /* What the turn runs on, and the request it runs, may have changed, so its core looks at its run queue again. */
 -    if (is_turn(t)) {
+-        cores[t->core].run_stale = true;
 -        core_notify(&cores[t->core]);
 -    }
  }
  
- /*
+ /* Settle the borrowers whose lent time a thread's units give, the one it lends to first and on, LEND_DEPTH of them. */

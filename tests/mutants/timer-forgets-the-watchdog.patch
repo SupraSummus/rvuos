@@ -1,0 +1,22 @@
+The timer makes every core's nearest deadline exact again from the timer lines alone,
+so the core that fed the watchdog no longer wakes for it after the first interrupt;
+its nearest deadline is no later than the watchdog's.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: the watchdog comes due before the timer wakes for it
+Witness: fuzz watchdog-halts
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -1000,10 +1000,6 @@ void sched_time(uint64_t now)
+             kputs("watchdog: not fed in time\n");
+             khalt(7);
+         }
+-        struct core *fed = &cores[watchdog.core];
+-        if (watchdog.deadline < fed->nearest_deadline) {
+-            fed->nearest_deadline = watchdog.deadline;
+-        }
+     }
+     for (uint32_t c = 0; c < CORES; c++) {
+         LOOP_BOUND(CORES);

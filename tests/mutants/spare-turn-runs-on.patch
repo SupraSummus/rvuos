@@ -1,18 +1,19 @@
 A turn on spare time runs on while a thread with time waits for the core,
-so a thread that has time waits for the tick behind one that runs on what nobody wanted.
+so a thread that has time waits for the timer behind one that runs on what nobody wanted.
 
-Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
 Report: a turn on spare time runs while a thread with time waits
-Witness: fuzz spare-turn-ends-at-wake
+Witness: fuzz lend-lender-earns
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -1069,7 +1069,6 @@ void sched_tick(uint32_t ticks)
- static void spare_end(struct core *core)
+@@ -1373,7 +1373,7 @@ static __attribute__((noinline)) void spare_look(struct core *core)
  {
-     if (core->run_queue != 0 && !core->recall && sched_spare_turn(core)) {
--        sched_turn_end();
+     bool marked = core->run_stale;
+     core->run_stale = false;
+-    if ((marked && deadline_due(core)) || (core->run_queue != 0 && sched_spare_turn(core)) ||
++    if ((marked && deadline_due(core)) ||
+         (marked && !turn_may_run(core))) {
+         sched_turn_end();
      }
- }
- 

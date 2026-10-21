@@ -1,0 +1,30 @@
+# The root earns 48 units at the default span and thread 2 one unit, without spare time, at a span of 2^16 counts,
+# longer than a step of the clock.
+actor 1 OP_TIME_BIND slot BOOT_CAP_TIME a1 BOOT_CAP_THREAD a2 0 a3 48
+actor 1 OP_TIME_CARVE slot BOOT_CAP_TIME a1 48 a2 1 a3 REPLAY_CAP_FREE+15
+actor 1 OP_CAP_DERIVE slot BOOT_CAP_CAPTABLE a1 REPLAY_CAP_FREE+16 a2 REPLAY_CAP_FREE+15 a3 RIGHT_W
+actor 1 OP_TIME_BIND slot REPLAY_CAP_FREE+16 a1 REPLAY_CAP_THREAD a2 0 a3 1 a4 0x10000
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+# The root binds thread 2 afresh while it waits on the run queue.
+actor 1 OP_TIME_BIND slot REPLAY_CAP_FREE+16 a1 REPLAY_CAP_THREAD a2 0 a3 1 a4 0x10000
+# The root gives its units up, so thread 2 runs alone, its requests ahead of the clock, until it has no time,
+# and waits on the spent queue for its release while the root runs on spare time.
+actor 1 OP_TIME_BIND slot BOOT_CAP_TIME a1 BOOT_CAP_THREAD a2 0 a3 0
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+# A second trace forgives nothing it ran ahead.
+actor 2 OP_TEST_TRACE slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 1 OP_PRINT slot BOOT_CAP_PRINT a1 0x61 a2 0 a3 0

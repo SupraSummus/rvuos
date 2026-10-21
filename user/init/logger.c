@@ -172,8 +172,8 @@ void logger_start(uint32_t uart_base, uint32_t log_base, uint32_t sp)
      * both are bound through the boot grant, and so run on spare time too.
      */
     expect("keep part of the processor",
-           rv_invoke(OP_TIME_BIND, BOOT_CAP_TIME, BOOT_CAP_THREAD, 0, ROOT_UNITS));
+           rv_time_bind(BOOT_CAP_TIME, BOOT_CAP_THREAD, 0, ROOT_UNITS, 0));
     expect("give the logger units of its own",
-           rv_invoke(OP_TIME_BIND, BOOT_CAP_TIME, SLOT_LOGGER, ROOT_UNITS, LOGGER_UNITS));
+           rv_time_bind(BOOT_CAP_TIME, SLOT_LOGGER, ROOT_UNITS, LOGGER_UNITS, 0));
     expect("start the logger", rv_invoke(OP_THREAD_RESUME, SLOT_LOGGER, 0, 0, 0));
 }

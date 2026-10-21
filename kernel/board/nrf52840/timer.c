@@ -1,5 +1,5 @@
 /*
- * The counter under the tick on nRF52840: TIMER0, counting microseconds in 32 bits.
+ * The counter under the timer on nRF52840: TIMER0, counting microseconds in 32 bits.
  *
  * A TIMER keeps its count to itself; a CAPTURE task copies it into a CC register, which is all a read sees.
  * So TIMER1 raises its COMPARE[0] event every microsecond, clearing itself at each,
@@ -35,8 +35,6 @@
 
 _Static_assert(COUNTER_ADDR == TIMER0_BASE + TIMER_CC(1), "the counter is TIMER0's CC[1]");
 _Static_assert(COUNTER_HZ == 1000000u, "the timers count microseconds");
-_Static_assert(COUNTER_HZ % TIMER_HZ == 0, "the tick divides the counter's second");
-_Static_assert(COUNTER_HZ / TIMER_HZ <= TICK_COUNTS_MAX, "an account counts a tick of the counter");
 
 /* The count's bits from 31 up, at least as far as any read has seen them. */
 static uint32_t counter_upper;
@@ -62,5 +60,5 @@ void timer_init(void)
     REG(PPI_CHENSET) = 1u;
     REG(TIMER0_BASE + TIMER_TASKS_START) = 1;
     REG(TIMER1_BASE + TIMER_TASKS_START) = 1;
-    timer_start(COUNTER_HZ / TIMER_HZ);
+    timer_start(COUNTER_HZ);
 }

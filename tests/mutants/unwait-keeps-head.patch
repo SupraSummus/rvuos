@@ -4,6 +4,7 @@ and the next switch run one that is already running;
 a queue holds only threads in the state it is for.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
+Report: a turn on spare time runs while a thread with time waits
 Report: queue holds a place it is not for
 Witness: fuzz actor-handoff
 

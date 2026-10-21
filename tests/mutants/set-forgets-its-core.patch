@@ -1,5 +1,5 @@
 An arm leaves the Irq naming the core that armed it before, or the first,
-so once a tick looks at the lines that core's timer wakes for the deadline and the arming core's does not;
+so once the timer looks at the lines that core's timer wakes for the deadline and the arming core's does not;
 a timer line wakes the core that armed it.
 
 Caught-by: fuzz-smp2

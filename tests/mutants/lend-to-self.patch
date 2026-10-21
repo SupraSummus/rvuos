@@ -8,13 +8,13 @@ Witness: fuzz lend-refused
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -546,9 +546,6 @@ static __attribute__((noinline)) int op_lend(struct thread *t, struct notificati
+@@ -606,9 +606,6 @@ static __attribute__((noinline)) int op_lend(struct thread *t, struct notificati
          return err;
      }
      struct thread *borrower = (struct thread *)cap_object(&bc);
 -    if (borrower == t) {
 -        return KERR_INVALID_ARG;
 -    }
-     if (ntfn->bits != 0) {
-         arg[1] = ntfn->bits;
-         ntfn->bits = 0;
+     if (arg[2] != 0) {
+         if (!span_valid(arg[2])) {
+             return KERR_INVALID_ARG;

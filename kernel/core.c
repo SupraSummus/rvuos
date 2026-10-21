@@ -209,7 +209,7 @@ struct thread *core_trapped(void)
     /*
      * The turn is over, as the stall has it: an end the trap's count found due is moot,
      * and the thread stands at no call it is to make again first, whatever a watcher did to it meanwhile.
-     * One resumed since goes to the back of its queue, as at a tick.
+     * One resumed since goes to the back of its queue, as at the end of any turn.
      */
     core->turn_due = false;
     core->recall = false;
@@ -233,13 +233,12 @@ void core_notify(struct core *c)
 #if CORES > 1
     c->wake_stale = true;
     /*
-     * A core in the kernel looks at its timer and its turn before it leaves, and one whose timer comes within a tick then;
-     * an idle one waits for an interrupt, and so does one that runs on with its timer set further,
-     * or on spare time while a thread with time waits on its run queue, which takes the core at once.
+     * A core in the kernel looks at its timer and its turn before it leaves;
+     * an idle one waits for an interrupt, and so does one that runs user mode,
+     * whose timer may be set past the change, or whose run queue or turn changed, which takes the core at once
+     * if the turn is on spare time or its request is due before the turn's.
      */
-    if (c != core_self() &&
-        (c->turn == NULL || (__atomic_load_n(&c->in_user, __ATOMIC_ACQUIRE) &&
-                             (c->wake_tick - c->ticks > 1 || (c->run_queue != 0 && sched_spare_turn(c)))))) {
+    if (c != core_self() && (c->turn == NULL || __atomic_load_n(&c->in_user, __ATOMIC_ACQUIRE))) {
         c->interrupt_owed = true;
     }
 #else
@@ -250,7 +249,7 @@ void core_notify(struct core *c)
 bool core_notice_owed(void)
 {
     const struct core *core = core_self();
-    if (core->run_queue != 0 && core->wake_tick - core->ticks > 1) {
+    if (core->run_queue != 0 && core->run_stale) {
         return true;
     }
 #if CORES > 1

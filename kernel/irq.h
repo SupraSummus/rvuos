@@ -17,7 +17,7 @@
 /*
  * The controller's line identifiers lie below IRQ_LINES, which the board's board.h sets.
  * Line 0 is the kernel's log, see klog.h, whatever the controller has there.
- * The TIMER_LINES timer lines follow from IRQ_LINES, and the tick raises them;
+ * The TIMER_LINES timer lines follow from IRQ_LINES, and the timer raises them;
  * see DESIGN.md, "Time".
  * The functions below are called only with a line on the controller.
  */

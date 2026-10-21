@@ -1,0 +1,20 @@
+A turn whose request a change closed, a bind or a wait's span, goes on without one while nobody waits,
+so its own units give it time it runs as on spare time, and the next thread to wait takes the core from it whatever its deadline;
+a turn its own units give time runs a request on them.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
+Report: a turn its own units give time runs no request on them
+Witness: fuzz bind-turn-later
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -1335,7 +1335,7 @@ void sched_tick(void)
+ static __attribute__((noinline)) bool deadline_due(struct core *core)
+ {
+     struct place *p = turn_place(core), *own = turn_own(core);
+-    if (p == NULL || own == NULL || place_units(p) == 0 || (core->run_queue == 0 && request_open(p, own))) {
++    if (p == NULL || own == NULL || place_units(p) == 0 || core->run_queue == 0) {
+         return false;
+     }
+     uint64_t now = turn_close();

@@ -1,6 +1,6 @@
 /*
  * The properties "Authority only flows", "A call is as good as its capability", "Memory crosses zeroed",
- * "The caller keeps what it runs on", "A dying pool only gives back", "A tick charges",
+ * "The caller keeps what it runs on", "A dying pool only gives back", "A step charges",
  * "A move keeps a node's place", "A carve takes what it names",
  * "A thread lends by its own wait", "A thread stops by its holder, where it stood",
  * "A description is the capability's" and "A pool's room is what an allocation may take" of DESIGN.md,
@@ -50,7 +50,14 @@ struct thread_rec {
     uint8_t state;
     uint32_t pc;
     uint32_t regs[THREAD_REGS];
+    uint64_t vt[CORES];         /* each place's virtual time */
+    uint32_t deadline[CORES];   /* each place's request's deadline */
+    uint8_t span[CORES];        /* each place's span, the request's mark among its bits */
+    struct grant time[CORES];   /* the units each place held */
 };
+
+/* Each unit's virtual time before the call: its place's while a place earns it, else what it was left at. */
+static uint64_t unit_time_before[MACHINE_UNITS];
 
 /* Growing arrays, kept from call to call. */
 #define ARRAY(T) struct { T *v; size_t n, cap; }
@@ -84,6 +91,7 @@ static int invoked_status; /* what the slot's lookup returned */
 static struct cap invoked_cap;
 static uint32_t call_op, call_pc;
 static uint32_t call_args[4]; /* a1 to a4 */
+static uint8_t caller_spans[CORES]; /* the span of each of the caller's places, as the call began */
 
 /*
  * A traced carve that names a filled source: the source as it was, and what the call names of it,
@@ -95,6 +103,7 @@ static uint32_t carve_off, carve_len, carve_dst;
 static const struct notification *signalled;
 static uint32_t signalled_bits;
 static const struct thread *signalled_waiter, *signalled_payer;
+static const struct thread *bind_target; /* the thread an OP_TIME_BIND names, which a rebind to the same units charges */
 
 /*
  * A traced OP_CAP_MOVE that names a filled source and a destination slot:
@@ -124,15 +133,19 @@ static uint32_t room_used, room_size, room_need;
 static bool room_dying;
 
 /*
- * The count before the call, whether it was traced, and the thread the turn was charged to, NULL for none,
- * the turn's own or its payer, with its units and its account.
+ * The clock before the call, whether it was traced, and the thread the turn was charged to, NULL for none,
+ * the turn's own or its payer, with its units, its virtual time, and what that comes to once charged up to a count;
+ * see charged_up_to.
  */
-static uint32_t ticks_before;
+static uint64_t clock_before;
 static bool traced_before;
-static const struct thread *charged;
-static const struct place *charged_place;
-static struct cap charged_units;
-static uint32_t charged_balance;
+static const struct thread *charged, *charged_turn;
+static const struct place *charged_place, *charged_own_place;
+static const struct place *paying[CORES]; /* the place paying for each core's turn, which a bind charges on any core */
+static struct cap charged_units, charged_own_units;
+static uint64_t charged_vt, charged_from;
+static uint32_t charged_room, charged_span;
+static bool charged_open, charged_own;
 
 /* The place of a thread that holds a core's time, as thread_place_on finds it, outside the frames fuzz-work follows. */
 static const struct place *place_on(const struct thread *t, uint32_t core)
@@ -145,11 +158,26 @@ static const struct place *place_on(const struct thread *t, uint32_t core)
     return NULL;
 }
 
-/* A place's account at the count, as its stamp and its units make it, held to the cap. */
-static uint32_t account_at_count(const struct place *p)
+/*
+ * The virtual time of the place the turn was charged to, charged up to the count now as the call began:
+ * TIME_UNITS / units counts for each count since the turn was last charged, rounded up,
+ * up to the end of the request open on it, and past that, on the turn's own place, up to a span past the count.
+ */
+static uint64_t charged_up_to(uint64_t now)
 {
-    uint64_t balance = p->balance + (uint64_t)(sched_ticks - p->stamp) * tick_gain(p);
-    return balance > account_cap(p) ? account_cap(p) : (uint32_t)balance;
+    uint32_t units = range_count(&charged_units);
+    if (units == 0 || now <= charged_from) {
+        return charged_vt;
+    }
+    uint64_t bound = charged_own ? now + charged_span : charged_vt;
+    if (charged_open && charged_vt + charged_room > bound) {
+        bound = charged_vt + charged_room;
+    }
+    if (charged_vt >= bound) {
+        return charged_vt;
+    }
+    uint64_t cost = ((now - charged_from) * TIME_UNITS + units - 1) / units;
+    return cost < bound - charged_vt ? charged_vt + cost : bound;
 }
 
 /*
@@ -441,7 +469,7 @@ static void push_bytes(byte_array *out, const void *p, size_t n)
  * What a describing call leaves as it was, every object in order:
  * the nodes it holds, a pool's descriptor and a table's header.
  * What the tail of any call and its trace line may move is left out:
- * a thread's state, queues, account and frame, a notification's bits and waiters,
+ * a thread's state, queues, virtual times and frame, a notification's bits and waiters,
  * and an Irq's bits, which the log's line may signal as the line is written.
  */
 static void record_state(const obj_array *a, byte_array *out)
@@ -532,7 +560,6 @@ static void describe_expect(void)
     case CAP_TIME:
         w[1] = range_first(c);
         w[2] = range_count(c);
-        w[3] = 1000000u / TIMER_HZ;
         break;
     case CAP_ROUTE_LINE:
         w[1] = range_first(c);
@@ -547,9 +574,9 @@ static void describe_expect(void)
         break;
     }
     case CAP_CLOCK:
+        /* The rate, and the longest power of two of counts within a millisecond, the default span. */
         w[1] = COUNTER_HZ;
-        w[2] = COUNTER_HZ / TIMER_HZ;
-        w[3] = 1000000u / TIMER_HZ;
+        w[2] = 1u << (31 - __builtin_clz(COUNTER_HZ / 1000u));
         break;
     default:
         break;
@@ -616,6 +643,7 @@ static void record_call(bool call)
     invoked = describing = false;
     room_pool = NULL;
     signalled = NULL;
+    bind_target = NULL;
     if (!call || caller == NULL) {
         return;
     }
@@ -630,6 +658,11 @@ static void record_call(bool call)
     record_describe();
     if (invoked) {
         record_room();
+    }
+    struct cap target;
+    if (invoked && call_op == OP_TIME_BIND && slot_lookup(caller, call_args[0], &target) == KERR_OK &&
+        target.type == CAP_THREAD) {
+        bind_target = (const struct thread *)cap_object(&target);
     }
     if (!invoked || call_op != OP_NOTIFY_SIGNAL || invoked_cap.type != CAP_NOTIFICATION) {
         return;
@@ -846,10 +879,23 @@ static void record_threads(void)
             continue;
         }
         const struct thread *t = (const struct thread *)o;
-        struct thread_rec r = { objects.v[i].at, t->lend_to, t->state, t->frame.pc, { 0 } };
+        struct thread_rec r = { objects.v[i].at, t->lend_to, t->state, t->frame.pc, { 0 }, { 0 }, { 0 }, { 0 }, { { 0 } } };
         memcpy(r.regs, t->frame.regs, sizeof(r.regs));
+        for (uint32_t k = 0; k < thread_places(t); k++) {
+            const struct place *p = thread_place(t, k);
+            r.vt[k] = p->vt;
+            r.deadline[k] = p->deadline;
+            r.span[k] = p->span;
+            r.time[k] = grant_of(place_time(p));
+        }
         PUSH(threads, r);
     }
+}
+
+/* A unit's virtual time: its place's while a place earns it, else what the place that earned it last left it at. */
+static uint64_t unit_time(uint32_t u)
+{
+    return unit_place[u] != 0 ? ((const struct place *)p2v(unit_place[u]))->vt : unit_vt[u];
 }
 
 /* The record of the thread at at before the call, or NULL for one the call built. */
@@ -939,6 +985,79 @@ static void check_stops(void)
     }
 }
 
+/*
+ * Under tracing a virtual time only moves on: no traced call puts a place's back,
+ * nor a unit's, which is its place's while a place earns it and what it was left at otherwise,
+ * so neither a bind, nor an unbind, nor a destroy forgives what a thread ran ahead of its units.
+ * A step moves a place's virtual time only by charging a turn it pays for, on any core,
+ * by bringing it up to the clock as a request starts, or by a bind, which charges it first, even to the same units.
+ * A request that starts on a thread's own units starts at the later of its virtual time and the clock,
+ * once that lies at most a span past the clock, and is due a span past that; see sched.c, "Requests".
+ */
+static void check_vtimes(void)
+{
+    if (!traced_before || !debug_trace) {
+        return;
+    }
+    for (uint32_t u = 0; u < MACHINE_UNITS; u++) {
+        if (unit_time(u) < unit_time_before[u]) {
+            violated("a call put a unit's virtual time back");
+        }
+    }
+    uint64_t clock = sched_trace_clock;
+    for (size_t i = 0; i < objects_after.n; i++) {
+        const struct obj_header *o = p2v(objects_after.v[i].at);
+        const struct thread_rec *was = o->type == CAP_THREAD ? thread_before(objects_after.v[i].at) : NULL;
+        if (was == NULL) {
+            continue;
+        }
+        const struct thread *t = (const struct thread *)o;
+        for (uint32_t k = 0; k < thread_places(t); k++) {
+            const struct place *p = thread_place(t, k);
+            if (p->vt < was->vt[k]) {
+                violated("a call put a place's virtual time back");
+            }
+            bool bound = !same_grant(grant_of(place_time(p)), was->time[k]) || t == bind_target;
+            bool paid = false;
+            for (uint32_t c = 0; c < CORES; c++) {
+                paid |= p == paying[c];
+            }
+            if (p->vt != was->vt[k] && !paid && p->vt != clock && !bound) {
+                violated("a step moved the virtual time of a place that paid for no turn and started no request");
+            }
+            bool started = (p->span & PLACE_REQUEST) != 0 &&
+                           ((was->span[k] & PLACE_REQUEST) == 0 || p->deadline != was->deadline[k]);
+            if (!started || place_units(p) == 0 || !request_open(p, p)) {
+                continue;
+            }
+            uint32_t span = place_span(p);
+            if (p->vt < clock || p->vt > clock + span || p->deadline != (uint32_t)p->vt + span) {
+                violated("a request started elsewhere than at the later of its virtual time and the clock, within a span of it");
+            }
+        }
+    }
+}
+
+/*
+ * A wait or a lend that went through, returned or blocked, leaves its caller's requests due within the span it gave,
+ * on every core whose time it holds, and one that gave none, or was refused, leaves them as they were;
+ * see sched.c, "Requests".
+ */
+static void check_spans(void)
+{
+    if (!call_made || caller == NULL || (call_op != OP_NOTIFY_WAIT && call_op != OP_NOTIFY_LEND) ||
+        caller->frame.pc == call_pc) {
+        return;
+    }
+    bool through = invoked && (caller->state == THREAD_WAITING || caller->frame.regs[REG_A0] == KERR_OK);
+    uint32_t span = through ? call_args[call_op == OP_NOTIFY_WAIT ? 0 : 1] : 0;
+    for (uint32_t i = 0; i < thread_places(caller); i++) {
+        if ((thread_place(caller, i)->span & PLACE_SPAN) != (span != 0 ? span_code(span) : caller_spans[i] & PLACE_SPAN)) {
+            violated("a wait left its caller's requests due within another span than it gave");
+        }
+    }
+}
+
 /* Note a carve's source and what it names of it, as the kernel will resolve them. */
 static void record_carve(void)
 {
@@ -1018,6 +1137,9 @@ void history_begin(bool call)
         }
     }
     caller_dying = caller != NULL ? dying_under(caller, caller_process, caller_tables) : 0;
+    for (uint32_t i = 0; caller != NULL && i < thread_places(caller); i++) {
+        caller_spans[i] = thread_place(caller, i)->span;
+    }
 
     record_objects(&objects);
     each_node(&objects, record_node);
@@ -1027,12 +1149,28 @@ void history_begin(bool call)
     record_call(call);
     record_carve();
 
-    ticks_before = sched_ticks;
+    clock_before = sched_trace_clock;
     traced_before = debug_trace;
+    for (uint32_t u = 0; u < MACHINE_UNITS; u++) {
+        unit_time_before[u] = unit_time(u);
+    }
     charged = core_self()->payer != NULL ? core_self()->payer : core_self()->turn;
+    for (uint32_t c = 0; c < CORES; c++) {
+        const struct thread *payer = cores[c].payer != NULL ? cores[c].payer : cores[c].turn;
+        paying[c] = payer != NULL ? place_on(payer, c) : NULL;
+    }
     charged_place = charged != NULL ? place_on(charged, core_index()) : NULL;
     charged_units = charged_place != NULL ? *place_time(charged_place) : (struct cap){ 0 };
-    charged_balance = charged_place != NULL ? account_at_count(charged_place) : 0;
+    const struct place *own = core_self()->turn != NULL ? place_on(core_self()->turn, core_index()) : NULL;
+    charged_vt = charged_place != NULL ? charged_place->vt : 0;
+    charged_from = core_self()->turn_from;
+    charged_open = charged_place != NULL && own != NULL && range_count(&charged_units) != 0 && request_open(charged_place, own);
+    charged_room = charged_open ? own->deadline - (uint32_t)charged_vt : 0;
+    charged_own = charged_place != NULL && charged_place == own;
+    charged_turn = core_self()->turn;
+    charged_own_place = own;
+    charged_own_units = own != NULL ? *place_time(own) : (struct cap){ 0 };
+    charged_span = charged_place != NULL ? place_span(charged_place) : 0;
 }
 
 /*
@@ -1136,25 +1274,33 @@ void history_end(void)
     check_call();
     check_order();
     check_lends();
+    check_spans();
+    check_vtimes();
     check_stops();
     check_describe();
     check_room();
 
     /*
-     * Only OP_TEST_TICK moves time here, and only under tracing, where the clock is the tick count:
-     * a tick costs the thread the turn is charged to a whole tick while it holds one, and earns it its units,
-     * as every tick does, and a call that moves no time costs it nothing.
-     * The caller keeps what it runs on, but a payer that lent it time may go with a pool the call destroyed.
+     * Only OP_TEST_TICK moves time here, and only under tracing, where the clock is the record's:
+     * the thread the turn is charged to pays TIME_UNITS / units counts of virtual time for each count it ran,
+     * up to the end of its request, and past it, on its own units, up to a span past the clock,
+     * as the call charges the turn, which moves the count the turn is charged from, and not otherwise:
+     * a call on one core that ends no turn charges nothing for the counts another core's step moved the clock;
+     * a request it starts after brings its virtual time up to the clock, and nothing else moves it.
+     * The caller keeps what it runs on, but a payer that lent it time may go with a pool the call destroyed,
+     * and a turn whose thread lost its place on the core is charged up to then and no more,
+     * which a step that also moved the clock, as a preempted call's does, may have done before the clock moved or after.
      */
-    if (charged_place != NULL && traced_before && sched_ticks - ticks_before <= 1 &&
-        is_object(&objects_after, v2p(charged)) && same_grant(grant_of(place_time(charged_place)), grant_of(&charged_units))) {
-        uint32_t gain = tick_gain(charged_place);
-        uint32_t want = sched_ticks == ticks_before ? charged_balance
-                        : charged_balance >= tick_parts() ? charged_balance - tick_parts() + gain
-                                                          : charged_balance + gain;
-        if (account_at_count(charged_place) != want) {
-            violated(sched_ticks == ticks_before ? "a traced call that moved no time charged the thread whose turn it was"
-                                                 : "a tick did not cost the thread whose turn it was a tick less its units");
+    bool own_kept = charged_own_place != NULL && is_object(&objects_after, v2p(charged_turn)) &&
+                    same_grant(grant_of(place_time(charged_own_place)), grant_of(&charged_own_units));
+    if (charged_place != NULL && traced_before && sched_trace_clock - clock_before <= timer_step_counts() &&
+        is_object(&objects_after, v2p(charged)) && same_grant(grant_of(place_time(charged_place)), grant_of(&charged_units)) &&
+        (own_kept || sched_trace_clock == clock_before)) {
+        uint64_t want = core_self()->turn_from != charged_from ? charged_up_to(sched_trace_clock) : charged_vt;
+        uint64_t vt = charged_place->vt;
+        if (vt != want && vt != (want > sched_trace_clock ? want : sched_trace_clock)) {
+            violated(sched_trace_clock == clock_before ? "a traced call that moved no time charged the thread whose turn it was"
+                                                       : "a step of the clock did not charge the thread whose turn it was its units' part");
         }
     }
 

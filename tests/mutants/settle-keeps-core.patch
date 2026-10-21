@@ -3,18 +3,18 @@ where its thread takes the time of a core it holds none of; a queued place waits
 
 Caught-by: fuzz-smp2
 Report: a place waits on another core than its units are of
-Witness: fuzz-smp2 cores-actor-waits-release
+Witness: fuzz-smp2 cores-join-interrupts
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -332,7 +332,8 @@ static void place_settle(struct place *p)
+@@ -405,7 +405,8 @@ static void place_settle(struct place *p)
      core_self()->wake_stale = true;
-     account_refill(p);
+     uint64_t now = timer_now();
      struct core *was = &cores[p->core];
 -    struct core *core = &cores[place_core(p)];
 +    struct core *core = &cores[p->core];
 +    (void)place_core;
-     const struct place *l = has_time(p->balance) ? NULL : place_lender(p);
-     uint8_t queue = place_queue(p, p->balance, l);
+     struct place *l = place_lender(p, now);
+     uint8_t queue = place_queue(p, l, now);
      bool joined = queue != QUEUE_NONE && (queue != p->queue || core != was);

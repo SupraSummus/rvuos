@@ -2,7 +2,7 @@
  * What nRF52840 needs before the kernel starts: its crystal.
  *
  * The chip resets onto its internal 64 MHz oscillator, which may be off by a percent and a half;
- * the 32 MHz crystal every board carries for the radio makes the clock and the tick exact.
+ * the 32 MHz crystal every board carries for the radio makes the clock and the timer exact.
  * The counter under them is started in timer.c.
  * Register addresses are those of the nRF52840 Product Specification.
  */

@@ -320,7 +320,7 @@ the echo set spinning by `hang` answers again 1.4 to 1.9 s later.
 
 **The watchdog is left the root task's own loop.**
 The root task feeds it after each check, so it halts the machine, with the log written out,
-only if the root task's loop or the kernel's tick stops; the children's hangs the root task handles itself.
+only if the root task's loop or the kernel's timer stops; the children's hangs the root task handles itself.
 That is what open decision 26 needed to see: the kernel's watchdog watches what a userspace supervisor could not watch itself.
 
 **Units ran out before slots or regions.**

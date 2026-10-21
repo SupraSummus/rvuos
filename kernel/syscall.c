@@ -67,12 +67,12 @@ static int op_halt(const uint32_t *arg)
     khalt((int)arg[1]);
 }
 
-/* Driving the machine as a test does: tracing, ticking, interrupting and preempting. */
+/* Driving the machine as a test does: tracing, moving the clock, interrupting and preempting. */
 static int op_test(uint32_t op, const uint32_t *arg)
 {
     /*
      * Untraced, only time and the devices drive the machine:
-     * a tick no time brought would leave the count ahead of the counter for good,
+     * a step of the clock no time brought would leave it ahead of the counter for good,
      * and every deadline set before would fire early, the watchdog's among them.
      */
     if (!debug_trace && op != OP_TEST_TRACE) {
@@ -82,18 +82,20 @@ static int op_test(uint32_t op, const uint32_t *arg)
 #if SELFCHECK
     case OP_TEST_TRACE:
         /*
-         * The host boots with full accounts, and the target has run a while before its first traced call.
-         * Once tracing is on the call changes nothing, or it would fill an account at will.
+         * The host boots with every virtual time at the count, and the target has run a while before its first traced call,
+         * so the clock goes on from the counter, by record now, and every virtual time is brought to it.
+         * Once tracing is on the call changes nothing, or it would forgive a thread at will.
          */
         if (!debug_trace) {
+            sched_trace_clock = counter_read();
             debug_trace = true;
-            sched_accounts_fill();
+            sched_vtimes_reset();
         }
         return KERR_OK;
 #endif
     case OP_TEST_TICK:
         /* The caller's status is written to its own frame, whoever runs next. */
-        sched_tick(1);
+        sched_tick();
         return KERR_OK;
     case OP_TEST_IRQ:
         /* The log's line is not a device's: its level is the log's, and no record fires it. */
@@ -173,21 +175,13 @@ static int op_captable(struct thread *t, uint32_t slot, const struct cap *cap,
     }
 }
 
-/* A delay in whole ticks, rounded up. */
-static uint32_t delay_ticks(uint32_t us)
-{
-    return us / TIMER_US_PER_TICK + (us % TIMER_US_PER_TICK != 0);
-}
-
 /*
- * The deadline of a delay of whole ticks, a timer line's or the watchdog's:
- * the call lands anywhere within the current tick, so the delay plus one is the first tick that surely lies past it.
- * The count wraps and deadlines compare with a signed difference,
- * which is exact while a delay stays far below half the count's range.
+ * The deadline of a delay in microseconds, a timer line's or the watchdog's:
+ * the first count past the clock by at least that much, so even a delay of none lies ahead of it.
  */
-static uint32_t delay_deadline(uint32_t ticks)
+static uint64_t delay_deadline(uint32_t us)
 {
-    return sched_ticks + ticks + 1;
+    return timer_now() + timer_us_counts(us) + 1;
 }
 
 /*
@@ -215,7 +209,7 @@ static int op_clock(struct thread *t, uint32_t slot, uint32_t op, uint32_t *arg)
         if (us == 0 || us > WATCHDOG_US_MAX) {
             return KERR_INVALID_ARG;
         }
-        sched_watchdog(delay_deadline(delay_ticks(us)));
+        sched_watchdog(delay_deadline(us));
         board_watchdog(us);
         return KERR_OK;
     }
@@ -617,6 +611,12 @@ static __attribute__((noinline)) int op_lend(struct thread *t, struct notificati
     if (borrower == t) {
         return KERR_INVALID_ARG;
     }
+    if (arg[2] != 0) {
+        if (!span_valid(arg[2])) {
+            return KERR_INVALID_ARG;
+        }
+        sched_span(t, arg[2]);
+    }
     if (ntfn->bits != 0) {
         arg[1] = ntfn->bits;
         ntfn->bits = 0;
@@ -662,6 +662,13 @@ static int op_notification(struct thread *t, uint32_t slot, const struct cap *ca
         return slot_store(t, arg[2], &sub, slot_node(t, slot));
     }
     case OP_NOTIFY_WAIT:
+        /* The span is the waiter's own, which costs nobody else; see sched.c, "Requests". */
+        if (arg[1] != 0) {
+            if (!span_valid(arg[1])) {
+                return KERR_INVALID_ARG;
+            }
+            sched_span(t, arg[1]);
+        }
         if (ntfn->bits != 0) {
             arg[1] = ntfn->bits;
             ntfn->bits = 0;
@@ -746,7 +753,7 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
         cap_attach(slot_node(t, arg[2]), &irq->ntfn);
         irq->line = first;
         /* A period counts from the last deadline, and a line that never fired from its bind. */
-        irq->deadline = sched_ticks;
+        irq->deadline = timer_now();
         line_irq[first] = v2p(irq);
         /* The line goes, a leaf now, and the Irq hangs below the pool capability as any object does. */
         cap_delete(slot_node(t, slot), false);
@@ -877,6 +884,10 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
         /* The first unit lies within the capability even for none, so that the binding lies below it. */
         uint32_t off = arg[2];
         uint32_t count = arg[3];
+        uint32_t span = arg[4];
+        if (!span_valid(span)) {
+            return KERR_INVALID_ARG;
+        }
         if (off >= range_count(cap) || count > range_count(cap) - off) {
             return KERR_INVALID_ARG;
         }
@@ -900,7 +911,7 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
             return KERR_LIMIT;
         }
         /* The binding hangs below the invoked capability, so a revoke above it empties the place. */
-        sched_bind(p, first, count, cap->rights, slot_node(t, slot));
+        sched_bind(p, first, count, cap->rights, slot_node(t, slot), span);
         return KERR_OK;
     }
     default:
@@ -909,20 +920,20 @@ static int op_time(struct thread *t, uint32_t slot, const struct cap *cap,
 }
 
 /*
- * A period on a timer line: the deadline moves to the first tick after the count
- * a whole number of periods from the deadline before; returns the periods skipped.
- * A deadline more than half the count's range old passes for one ahead,
- * and the new one is within a period all the same. See DESIGN.md, "Time".
+ * A period on a timer line, in counts: the deadline moves to the first count after now
+ * a whole number of periods from the deadline before; returns the periods skipped, as many as a word holds.
+ * A deadline ahead stays, unless it lies more than a period ahead, when it comes within one. See DESIGN.md, "Time".
  */
-static uint32_t timer_period(struct irq *irq, uint32_t period)
+static uint32_t timer_period(struct irq *irq, uint64_t period)
 {
-    uint32_t now = sched_ticks;
+    uint64_t now = timer_now(), rest;
     if (irq_due(irq, now)) {
-        uint32_t behind = now - irq->deadline;
-        irq->deadline = now + period - behind % period;
-        return behind / period;
+        uint64_t skipped = timer_periods(now - irq->deadline, period, &rest);
+        irq->deadline = now + period - rest;
+        return skipped > UINT32_MAX ? UINT32_MAX : (uint32_t)skipped;
     }
-    irq->deadline = now + (irq->deadline - now - 1) % period + 1;
+    timer_periods(irq->deadline - now - 1, period, &rest);
+    irq->deadline = now + rest + 1;
     return 0;
 }
 
@@ -945,15 +956,14 @@ static int op_irq(const struct cap *cap, uint32_t op, uint32_t *arg)
         return KERR_NO_RIGHTS;
     }
     if (line_is_timer(irq->line) && bits != 0) {
-        uint32_t ticks = delay_ticks(arg[2]);
         bool period = arg[3] == IRQ_SET_PERIOD;
-        if (arg[3] > IRQ_SET_PERIOD || (period && ticks == 0)) {
+        if (arg[3] > IRQ_SET_PERIOD || (period && arg[2] == 0)) {
             return KERR_INVALID_ARG;
         }
         if (period) {
-            arg[1] = timer_period(irq, ticks);
+            arg[1] = timer_period(irq, timer_us_counts(arg[2]));
         } else {
-            irq->deadline = delay_deadline(ticks);
+            irq->deadline = delay_deadline(arg[2]);
         }
     }
     /* Armed and unmasked are one state, here and in sched_interrupt. */
@@ -1081,7 +1091,6 @@ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *a
     case CAP_TIME:
         arg[2] = range_first(cap);
         arg[3] = range_count(cap);
-        arg[4] = TIMER_US_PER_TICK;
         break;
     case CAP_ROUTE_LINE:
         arg[2] = range_first(cap);
@@ -1097,10 +1106,9 @@ static __attribute__((noinline)) int cap_info(const struct cap *cap, uint32_t *a
         break;
     }
     case CAP_CLOCK:
-        /* The rate and the tick, not the time, so no RIGHT_R. */
+        /* The rate and the default span, not the time, so no RIGHT_R. */
         arg[2] = timer_counter_hz();
-        arg[3] = timer_tick_counts();
-        arg[4] = TIMER_US_PER_TICK;
+        arg[3] = timer_default_span();
         break;
     case CAP_THREAD: {
         /* How many places it has, and the cores whose time they hold, a bit each. */
@@ -1168,8 +1176,8 @@ static const struct op_shape op_shapes[OP_COUNT] = {
     [OP_THREAD_READ_REG] = { CAP_THREAD, RIGHT_W, SHAPE_A1 },
     [OP_THREAD_WRITE_REG] = { CAP_THREAD, RIGHT_W, SHAPE_A1 | SHAPE_A2 },
     [OP_NOTIFY_SIGNAL] = { CAP_NOTIFICATION, RIGHT_W, SHAPE_A1 },
-    [OP_NOTIFY_WAIT] = { CAP_NOTIFICATION, RIGHT_R, 0 },
-    [OP_NOTIFY_LEND] = { CAP_NOTIFICATION, RIGHT_R, SHAPE_A1 },
+    [OP_NOTIFY_WAIT] = { CAP_NOTIFICATION, RIGHT_R, SHAPE_A1 },
+    [OP_NOTIFY_LEND] = { CAP_NOTIFICATION, RIGHT_R, SHAPE_A1 | SHAPE_A2 },
     [OP_NOTIFY_CARVE] = { CAP_NOTIFICATION, 0, SHAPE_A1 | SHAPE_A2 },
     [OP_IRQ_CARVE] = { CAP_IRQ_LINE, 0, SHAPE_A123 },
     [OP_IRQ_BIND] = { CAP_IRQ_LINE, RIGHT_W, SHAPE_A123 },
@@ -1358,7 +1366,7 @@ void syscall_dispatch(struct thread *t)
         trace_wake();
     }
     /*
-     * The stop OP_TEST_PREEMPT armed is where the tick lands, as OP_TEST_TICK does it:
+     * The stop OP_TEST_PREEMPT armed is where a step of the clock lands, as OP_TEST_TICK does it:
      * the caller stays at its call instruction, ready, and the next thread has its turn.
      * Whatever the call's attempt woke is left untraced, as a stopped attempt's always is.
      */
@@ -1368,7 +1376,7 @@ void syscall_dispatch(struct thread *t)
             kputs("trace: preempt\n");
         }
         core->trace_wake_bits = 0;
-        sched_tick(1);
+        sched_tick();
         if (debug_trace) {
             trace_wake();
         }
@@ -1376,8 +1384,8 @@ void syscall_dispatch(struct thread *t)
     /*
      * A thread that waits gives the processor up, and so does one whose process the call took, or that stopped itself,
      * unless it handed its turn to the thread it lends its time to, which runs now.
-     * One that lost its units finishes its turn, as a preempted call is made again before the tick switches,
-     * unless that left the turn on spare time, which a thread with time the call made ready takes at once.
+     * One that lost its time without spare time gives it up as the trap ends, after a preempted call is made again,
+     * and a turn left on spare time a thread with time the call made ready takes at once.
      */
     if (core->current->state != THREAD_READY || core->run_queue != 0) {
         sched_call_end();

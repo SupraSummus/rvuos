@@ -47,7 +47,7 @@ static uint32_t drained;
  * The next record to perform.
  * While tracing is on only an ecall can take the processor away,
  * and a thread makes none between reading the cursor and writing it back,
- * except the tick that passes a record on, after which it reads again;
+ * except the step of the clock that passes a record on, after which it reads again;
  * so no atomic is needed. See rvuos/replay.h.
  */
 static uint32_t cursor;

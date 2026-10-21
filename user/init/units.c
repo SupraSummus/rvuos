@@ -8,10 +8,11 @@
 #define UNITS_US 40000u
 volatile uint32_t spins[SPINNERS];
 
-/* A thread that spins through most of each tick and sleeps across its end, counting its rounds. */
+/* A thread that does a round of work and waits briefly between, counting what it did. */
 #define DODGE_US 80000u
-static uint32_t dodge_counter, dodge_counts;
-static volatile uint32_t dodges;
+#define DODGE_ROUND 1000u
+static volatile uint32_t dodged;
+static uint32_t dodge_counter;
 
 /* The spinners: each counts in the word its argument names and never waits. */
 static void spinner_main(uint32_t i)
@@ -22,12 +23,11 @@ static void spinner_main(uint32_t i)
 }
 
 /*
- * The dodger: it sleeps until the next tick, spins for dodge_counts of the counter, and counts a round.
- * A timer line set for no delay fires at the next tick, so the dodger is never running when a tick comes.
+ * The dodger: it sleeps for no time, then counts DODGE_ROUND steps as a spinner does.
+ * A timer line set for no delay fires at once, so the dodger waits only for as long as the kernel takes to wake it.
  */
 static void dodger_main(void)
 {
-    const volatile uint32_t *low = (const volatile uint32_t *)dodge_counter;
     for (;;) {
         uint32_t bits;
         if (rv_timer_set(SLOT_DODGER_TIMER, BIT_TIMER, 0) != KERR_OK ||
@@ -35,11 +35,54 @@ static void dodger_main(void)
             puts("dodger: cannot sleep\n");
             rv_halt(BOOT_CAP_HALT, 1);
         }
-        uint32_t start = *low;
-        while (*low - start < dodge_counts) {
+        for (uint32_t i = 0; i < DODGE_ROUND; i++) {
+            dodged++;
         }
-        dodges++;
     }
+}
+
+/* The probe: it notes the count it first ran at, tells the root task, and spins. */
+#define BIT_PROBE 0x1u
+#define BIT_WAKE  0x2u
+#define CATCH_US 10000u /* longer than a virtual time lies ahead of the clock, a span at most */
+static volatile uint32_t probe_at, probe_span;
+static void probe_main(void)
+{
+    probe_at = *(const volatile uint32_t *)dodge_counter;
+    rv_signal(SLOT_DODGER_NTFN, BIT_PROBE);
+    for (;;) {
+    }
+}
+
+/*
+ * The probe again, as a driver: it waits for its wake within probe_span, then does as probe_main does.
+ * A timer bit the requests left pending comes first, and it waits again.
+ */
+static void waiting_probe_main(void)
+{
+    uint32_t bits = 0;
+    while (!(bits & BIT_WAKE)) {
+        if (rv_wait_within(SLOT_DODGER_NTFN, probe_span, &bits) != KERR_OK) {
+            puts("probe: cannot wait\n");
+            rv_halt(BOOT_CAP_HALT, 1);
+        }
+    }
+    probe_main();
+}
+
+/*
+ * Wait on the notification until the probe's bit comes, or counts of the counter have passed since start:
+ * a timer bit the dodger left pending may come first, which a wait takes at once. Returns the bits taken.
+ */
+static uint32_t wait_probe(uint32_t ntfn, uint32_t counter, uint32_t start, uint32_t counts)
+{
+    const volatile uint32_t *low = (const volatile uint32_t *)counter;
+    uint32_t bits = 0, got;
+    do {
+        expect("wait", rv_wait(ntfn, &got));
+        bits |= got;
+    } while (!(bits & BIT_PROBE) && *low - start < counts);
+    return bits;
 }
 
 static uint32_t spun(void)
@@ -84,18 +127,22 @@ static uint32_t spin_traps(uint32_t counter, uint32_t hz, uint32_t ms)
 
 void units_demo(uint32_t data_base, uint32_t data_size, uint32_t counter, uint32_t hz)
 {
-    /* The tick is the build's, and the clock tells it, in counts of the counter and in microseconds, with no right. */
+    /*
+     * The clock tells its rate with no right, and the default span, the longest power of two of counts within a millisecond,
+     * which a request is due within when no wait gave another.
+     */
     uint32_t type, rights, clock[3];
     expect("describe the clock", rv_cap_info(BOOT_CAP_CLOCK, &type, &rights, clock));
-    expect("it tells the rate a read does, and a tick of it",
-           type == CAP_CLOCK && clock[0] == hz && clock[2] != 0 && clock[1] * (1000000u / clock[2]) == hz
+    uint32_t ms_counts = hz / 1000u, default_span = clock[1];
+    expect("it tells the rate a read does, and the default span",
+           type == CAP_CLOCK && clock[0] == hz && (default_span & (default_span - 1)) == 0 && default_span <= ms_counts &&
+                   2 * default_span > ms_counts
                ? KERR_OK : KERR_INVALID_ARG);
-    uint32_t tick_counts = clock[1], tick_us = clock[2];
 
     /*
      * The child is done, and its half goes to three spinners: the first earns a quarter of the processor
      * without spare time, and the other two earn nothing and run on spare time alone.
-     * While this thread sleeps, the first runs about one tick in four, however many threads run on the rest,
+     * While this thread sleeps, the first runs about a quarter of each span, however many threads run on the rest,
      * and no more, so the other two spin about three times as far together.
      * The derived capability lies below the half, so revoking below the half stops all three.
      */
@@ -110,12 +157,12 @@ void units_demo(uint32_t data_base, uint32_t data_size, uint32_t counter, uint32
                rv_invoke(OP_THREAD_CONFIGURE, SLOT_SPINNER + i, (uint32_t)&spinner_main,
                          data_base + data_size / 4 - i * SPINNER_STACK, i));
         expect("bind it",
-               i == 0 ? rv_invoke(OP_TIME_BIND, SLOT_CAPPED_TIME, SLOT_SPINNER, 0, TIME_UNITS / 4)
-                      : rv_invoke(OP_TIME_BIND, SLOT_HALF_TIME, SLOT_SPINNER + i, 0, 0));
+               i == 0 ? rv_time_bind(SLOT_CAPPED_TIME, SLOT_SPINNER, 0, TIME_UNITS / 4, 0)
+                      : rv_time_bind(SLOT_HALF_TIME, SLOT_SPINNER + i, 0, 0, 0));
         expect("start it", rv_invoke(OP_THREAD_RESUME, SLOT_SPINNER + i, 0, 0, 0));
     }
     expect("let them spin", sleep_us(UNITS_US));
-    /* Stopped before they are counted, since the tick would give them more turns meanwhile. */
+    /* Stopped before they are counted, since they would have more turns meanwhile. */
     expect("take the spinners' units back",
            rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_HALF_TIME, 0, 0));
     uint32_t root_spun = spun(), earned = spins[0], others = spins[1] + spins[2];
@@ -134,7 +181,7 @@ void units_demo(uint32_t data_base, uint32_t data_size, uint32_t counter, uint32
     /* Bound again, a thread goes on where it stopped: the first spinner, on spare time alone. */
     uint32_t first_spun = spins[0];
     expect("bind a spinner again",
-           rv_invoke(OP_TIME_BIND, SLOT_HALF_TIME, SLOT_SPINNER, 0, 0));
+           rv_time_bind(SLOT_HALF_TIME, SLOT_SPINNER, 0, 0, 0));
     expect("sleep while it spins", sleep_us(SLEEP_US));
     expect("take its units back again",
            rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_HALF_TIME, 0, 0));
@@ -145,19 +192,19 @@ void units_demo(uint32_t data_base, uint32_t data_size, uint32_t counter, uint32
     /*
      * Spare time; see DESIGN.md, "Scheduling".
      * Without spare time a thread runs no more than its units earn, however idle the processor is otherwise.
-     * With an eighth and an account that starts empty, the spinner runs about one tick in eight of the sleep,
-     * 10 of its 81 at a millisecond's tick, and the processor idles the rest;
+     * With an eighth the spinner runs an eighth of each span of the sleep, waiting the rest for its virtual time,
+     * and the processor idles meanwhile;
      * with spare time it runs all of the next sleep, half as long, since nothing else wants the processor.
      */
     expect("derive the half without spare time again",
            rv_invoke(OP_CAP_DERIVE, BOOT_CAP_CAPTABLE, SLOT_CAPPED_TIME, SLOT_HALF_TIME, RIGHT_W));
     first_spun = spins[0];
     expect("bind the spinner to an eighth without spare time",
-           rv_invoke(OP_TIME_BIND, SLOT_CAPPED_TIME, SLOT_SPINNER, 0, TIME_UNITS / 8));
+           rv_time_bind(SLOT_CAPPED_TIME, SLOT_SPINNER, 0, TIME_UNITS / 8, 0));
     expect("sleep while it earns its time", sleep_us(CAPPED_US));
     uint32_t capped = spins[0] - first_spun;
     expect("give it spare time",
-           rv_invoke(OP_TIME_BIND, SLOT_HALF_TIME, SLOT_SPINNER, 0, TIME_UNITS / 8));
+           rv_time_bind(SLOT_HALF_TIME, SLOT_SPINNER, 0, TIME_UNITS / 8, 0));
     first_spun = spins[0];
     expect("sleep while it runs on spare time", sleep_us(CAPPED_US / 2));
     uint32_t spare = spins[0] - first_spun;
@@ -169,13 +216,13 @@ void units_demo(uint32_t data_base, uint32_t data_size, uint32_t counter, uint32
 
     /*
      * Charging; see DESIGN.md, "Scheduling".
-     * A turn costs the counts it ran, so a thread cannot dodge the charge by sleeping across every tick.
-     * The dodger earns an eighth without spare time and spins nine tenths of each tick it runs:
-     * it runs a round in about eight ticks of the sleep, ten in its 81 at a millisecond's tick,
-     * where a charge of whoever the tick found running let it run in nearly every tick.
+     * A turn costs the counts it ran, and a wait forgives none of them, so a thread cannot dodge the charge by waiting:
+     * a request starts only once its virtual time has come to the clock.
+     * The dodger earns an eighth without spare time, as the spinner did, and waits briefly between rounds of counting:
+     * it counts no faster than the spinner did, less what its waits cost it,
+     * where a wait that brought its virtual time back to the clock would let it count about eight times as fast.
      */
     dodge_counter = counter;
-    dodge_counts = tick_counts * 9u / 10u;
     expect("carve a second timer line",
            rv_invoke(OP_IRQ_CARVE, BOOT_CAP_TIMER_LINES, 1, 1, SLOT_DODGER_TIMER));
     expect("bind it for the dodger",
@@ -188,29 +235,89 @@ void units_demo(uint32_t data_base, uint32_t data_size, uint32_t counter, uint32
     expect("derive the half without spare time once more",
            rv_invoke(OP_CAP_DERIVE, BOOT_CAP_CAPTABLE, SLOT_CAPPED_TIME, SLOT_HALF_TIME, RIGHT_W));
     expect("bind the dodger to an eighth without spare time",
-           rv_invoke(OP_TIME_BIND, SLOT_CAPPED_TIME, SLOT_DODGER, 0, TIME_UNITS / 8));
+           rv_time_bind(SLOT_CAPPED_TIME, SLOT_DODGER, 0, TIME_UNITS / 8, 0));
     expect("start it", rv_invoke(OP_THREAD_RESUME, SLOT_DODGER, 0, 0, 0));
-    expect("sleep while it dodges the ticks", sleep_us(DODGE_US));
+    expect("sleep while it dodges the charge", sleep_us(DODGE_US));
     /* Stopped before its rounds are counted, and its timer line cancelled, so that nothing wakes it again. */
     expect("take its units back",
            rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_HALF_TIME, 0, 0));
     expect("cancel its timer", rv_timer_set(SLOT_DODGER_TIMER, 0, 0));
-    expect("it paid for the time it ran, though no tick found it running",
-           dodges != 0 && 4 * dodges < DODGE_US / tick_us ? KERR_OK : KERR_INVALID_ARG);
+    expect("it paid for the time it ran, though it waited between",
+           dodged != 0 && (uint64_t)dodged * CAPPED_US < 2ull * capped * DODGE_US ? KERR_OK : KERR_INVALID_ARG);
     puts("root: charge ok\n");
 
     /*
-     * The tick; see DESIGN.md, "Scheduling".
-     * The timer interrupts only at a tick that could change what runs,
+     * No tick; see DESIGN.md, "Scheduling".
+     * The timer interrupts only at a count that could change what runs,
      * so a thread that spins while every other thread waits runs without a trap,
-     * since it may go on with spare time whatever its account holds,
-     * where a timer at every tick would end its turn only to hand it back.
+     * since it may go on with spare time whatever its requests come to,
+     * where a timer at the end of each would end its turn only to hand it back.
      * It sleeps first so that the logger carries everything out and waits, and prints nothing as it spins.
      */
     uint32_t status = sleep_us(SLEEP_US);
     uint32_t traps = spin_traps(counter, hz, SPIN_US / 1000u);
     expect("let the logger finish", status);
-    expect("the only thread to run spun through the ticks",
-           4 * traps < SPIN_US / tick_us ? KERR_OK : KERR_INVALID_ARG);
+    expect("the only thread to run spun with hardly a trap",
+           4 * traps < SPIN_US / 1000u ? KERR_OK : KERR_INVALID_ARG);
     puts("root: tickless ok\n");
+
+    /*
+     * Requests; see DESIGN.md, "Scheduling".
+     * A spinner and the probe start together, their virtual times come to the clock, with nearly equal units.
+     * The spinner's requests are due within half a millisecond or less, each an eighth of its span's work at its 8 units,
+     * so its first is due first and it runs;
+     * the probe's are due within twice as long, after the spinner's first,
+     * so it runs as that first request ends, which the timer marks,
+     * as the spinner's virtual time then lies a span ahead and the spinner waits on spare time for it.
+     */
+    uint32_t span = rv_span(ms_counts / 2), was;
+    expect("stop the spinner", rv_thread_stop(SLOT_SPINNER, &was));
+    expect("stop the dodger", rv_thread_stop(SLOT_DODGER, &was));
+    expect("make it the probe",
+           rv_invoke(OP_THREAD_CONFIGURE, SLOT_DODGER, (uint32_t)&probe_main,
+                     data_base + data_size / 4 - SPINNERS * SPINNER_STACK, 0));
+    expect("bind the spinner to 8 units in requests due within half a millisecond",
+           rv_time_bind(SLOT_HALF_TIME, SLOT_SPINNER, 0, 8, span));
+    expect("bind the probe to 9 in requests due within twice that", rv_time_bind(SLOT_HALF_TIME, SLOT_DODGER, 8, 9, 2 * span));
+    expect("let their virtual times come to the clock", sleep_us(CATCH_US));
+    const volatile uint32_t *low = (const volatile uint32_t *)counter;
+    uint32_t start = *low;
+    expect("start the spinner", rv_invoke(OP_THREAD_RESUME, SLOT_SPINNER, 0, 0, 0));
+    expect("start the probe", rv_invoke(OP_THREAD_RESUME, SLOT_DODGER, 0, 0, 0));
+    expect("wait for it, a millisecond at most", rv_timer_set(SLOT_DODGER_TIMER, BIT_TIMER, 1000u));
+    uint32_t bits = wait_probe(SLOT_DODGER_NTFN, counter, start, ms_counts);
+    expect("cancel the timer", rv_timer_set(SLOT_DODGER_TIMER, 0, 0));
+    expect("take their units back", rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_HALF_TIME, 0, 0));
+    expect("the probe ran as the spinner's first request ended, within half a millisecond",
+           (bits & BIT_PROBE) != 0 && probe_at - start < ms_counts / 2 ? KERR_OK : KERR_INVALID_ARG);
+    puts("root: requests ok\n");
+
+    /*
+     * Spans at the wait.
+     * The probe, bound to 8 units with the default span, waits
+     * and says its wake is due within an eighth of a millisecond.
+     * This thread wakes it and spins on for half a millisecond, its own request due within the default span,
+     * so the probe runs at once, taking the processor from it in that call,
+     * where with the binding's span it would wait for the spin to end.
+     */
+    probe_span = rv_span(ms_counts / 8);
+    probe_at = 0;
+    expect("stop the probe", rv_thread_stop(SLOT_DODGER, &was));
+    expect("make it a waiting probe",
+           rv_invoke(OP_THREAD_CONFIGURE, SLOT_DODGER, (uint32_t)&waiting_probe_main,
+                     data_base + data_size / 4 - SPINNERS * SPINNER_STACK, 0));
+    expect("bind the probe to 8 units with the default span", rv_time_bind(SLOT_HALF_TIME, SLOT_DODGER, 0, 8, 0));
+    expect("start it, to wait", rv_invoke(OP_THREAD_RESUME, SLOT_DODGER, 0, 0, 0));
+    expect("let its virtual time come to the clock", sleep_us(CATCH_US));
+    start = *low;
+    expect("wake the probe", rv_signal(SLOT_DODGER_NTFN, BIT_WAKE));
+    while (*low - start < ms_counts / 2) {
+    }
+    expect("wait for it, a millisecond at most", rv_timer_set(SLOT_DODGER_TIMER, BIT_TIMER, 1000u));
+    bits = wait_probe(SLOT_DODGER_NTFN, counter, start, ms_counts);
+    expect("cancel the timer", rv_timer_set(SLOT_DODGER_TIMER, 0, 0));
+    expect("take its units back", rv_invoke(OP_CAP_REVOKE, BOOT_CAP_CAPTABLE, SLOT_HALF_TIME, 0, 0));
+    expect("the probe ran within its span of the wake, before the spin ended",
+           (bits & BIT_PROBE) != 0 && probe_at - start < ms_counts / 4 ? KERR_OK : KERR_INVALID_ARG);
+    puts("root: spans ok\n");
 }

@@ -79,7 +79,7 @@ grep -q 'root: message ok' "$text" || fail "the child's message did not arrive"
 grep -q 'child: reply ok' "$text" || fail "the root task's answer did not arrive"
 grep -q 'child: may not halt ok' "$text" || fail "a child given the log to write could halt the machine"
 grep -q 'root: preemption ok' "$text" \
-    || fail "the tick did not take the processor from a spinning thread"
+    || fail "the timer did not take the processor from a spinning thread"
 grep -q "the counter counts on across the child's turns: ok" "$text" \
     || fail "the performance counter the root task started did not count on across another process's turns"
 grep -q 'root: revocation ok' "$text" \
@@ -110,9 +110,13 @@ grep -q 'root: rebind ok' "$text" \
 grep -q 'root: spare ok' "$text" \
     || fail "a thread without spare time ran past its units, or one with it did not run on spare time"
 grep -q 'root: charge ok' "$text" \
-    || fail "a thread that sleeps across every tick ran past its units"
+    || fail "a thread that waits between its rounds ran past its units"
 grep -q 'root: tickless ok' "$text" \
-    || fail "the timer interrupted the only thread to run at ticks that changed nothing"
+    || fail "the timer interrupted the only thread to run at counts that changed nothing"
+grep -q 'root: requests ok' "$text" \
+    || fail "a request due before the turn's next waited past the end of the turn's request"
+grep -q 'root: spans ok' "$text" \
+    || fail "a thread woken within the span its wait gave waited for a turn due later"
 grep -q 'the idle line stays quiet: ok' "$text" \
     || fail "an armed line nothing raises signalled"
 grep -q 'root: irq ok' "$text" \

@@ -7,54 +7,26 @@
 #include "rvuos/abi.h"
 
 /*
- * The timer, which provides the scheduling tick.
- * The kernel handles it directly; see DESIGN.md, "Scheduling".
+ * The clock and the timer: the counter's counts since boot, and a compare on it
+ * that the kernel sets for the first count that could change what runs.
+ * The kernel handles it directly; see DESIGN.md, "Time" and "Scheduling".
  */
 
-/*
- * Ticks per second, the build's, TIMER_HZ=, and a thousand unless it says otherwise.
- * A tick is the quantum, the longest turn a thread takes while another could run,
- * so it bounds how long a thread with time waits for its turn, and it is the grain of the timer lines;
- * see DESIGN.md, "Scheduling".
- * It divides a second and the board's counter, and an account holds more than COUNT_PARTS ticks, so it is 650 or more.
- */
-#ifndef TIMER_HZ
-#define TIMER_HZ 1000
-#endif
-
-/* Microseconds per tick; the delay OP_IRQ_SET takes on a timer line is rounded up to whole ticks. */
-#define TIMER_US_PER_TICK (1000000u / TIMER_HZ)
-_Static_assert(TIMER_US_PER_TICK * TIMER_HZ == 1000000u, "the tick divides a second");
-
-/*
- * The ticks of its units a thread's account holds at most, a tenth of a second's:
- * an account gains a tick's counts of parts for each unit every tick and holds that many ticks of them.
- * See DESIGN.md, "Scheduling".
- */
-#define ACCOUNT_TICKS (TIMER_HZ / 10)
-
-/*
- * The most counts a tick may take, so that an account fits a word:
- * it holds ACCOUNT_TICKS ticks of every unit there is, and a tick's gain on top before the cap cuts it back,
- * in parts of a count, TIME_UNITS of them to a count; see COUNT_PARTS.
- */
-#define TICK_COUNTS_MAX (0xffffffffu / (TIME_UNITS * (ACCOUNT_TICKS + 1)))
-
-/* The board's timer.c: start the counter and program the first tick, through timer_start. */
+/* The board's timer.c: start the counter and the compare, through timer_start with the counter's rate. */
 void timer_init(void);
 
 /*
- * Tick every period counts of the counter, the first a period from now,
- * and enable the timer interrupt; timer_counter_hz is period times TIMER_HZ from then on.
+ * The counter counts hz a second from now on: the timer takes the rate,
+ * and enables its interrupt with the compare set for no count; timer_counter_hz is hz from then on.
  * In kernel/timer.c, on the three functions below.
  */
-void timer_start(uint32_t period);
+void timer_start(uint32_t hz);
 
-/* A core other than the first starts its compare, on the grid timer_start began, waiting until it is set. */
+/* A core other than the first starts its compare, set for no count until it is set. */
 void timer_core_start(void);
 
 /*
- * The hardware below the tick, the architecture's or the board's:
+ * The hardware below the timer, the architecture's or the board's:
  * the machine's counter, 64 bits counting up from boot,
  * and a compare on it, whose interrupt is pending while the counter has reached it.
  * kernel/arch/riscv/clint.c has them on a CLINT.
@@ -63,53 +35,56 @@ uint64_t counter_read(void);
 void counter_compare(uint64_t at);
 void counter_compare_enable(void);
 
-/*
- * Count the ticks that passed since the last counted one:
- * at least one when the timer interrupt is pending, and zero if the next is still ahead.
- * The interrupt stays where timer_set put it.
- */
-uint32_t timer_count(void);
+/* Set this core's timer to interrupt once the counter reaches at, COUNT_NEVER for never. */
+void timer_set(uint64_t at);
 
 /*
- * Set the timer interrupt for the ticks-th tick after the last counted one, one being the next,
- * but at most 2^31 counts past the next; timer_count counts the ticks between when it comes.
- * The kernel sets it for the first tick that could change what runs,
- * and counts the others whenever it next traps; see DESIGN.md, "Scheduling".
- */
-void timer_set(uint32_t ticks);
-
-/*
- * What every trap does with the tick, around what it came for, on either architecture:
- * enter counts the ticks that passed, pending saying whether the timer's interrupt is, and returns
- * whether tracing was on; tick is the timer's own interrupt; leave sets the timer for what runs next.
+ * What every trap does with the timer, around what it came for, on either architecture:
+ * enter does what is due once the counter reached what the timer was set for, pending saying whether its interrupt is,
+ * and returns whether tracing was on; fired is the timer's own interrupt; leave sets the timer for what runs next.
  */
 bool timer_trap_enter(bool pending);
-void timer_trap_tick(void);
+void timer_trap_fired(void);
 void timer_trap_leave(bool traced);
 
-/* The rate of the counter the tick is made of, COUNTER_ADDR, in Hz; see OP_CLOCK_READ. */
+/* The rate of the counter, COUNTER_ADDR, in Hz; see OP_CLOCK_READ. */
 uint32_t timer_counter_hz(void);
 
 /*
  * The machine's time, in counts of the counter from boot, which OP_CLOCK_READ tells:
- * the counter's, or under tracing, where time moves only by record, the counts of the ticks so far,
+ * the counter's, or under tracing, where time moves only by record, sched_trace_clock,
  * which the host build, with no counter, tells as well.
  */
 uint64_t timer_now(void);
 
-/* The counter's counts per tick, at most TICK_COUNTS_MAX; inline, since a switch reads it a dozen times and more. */
-extern uint32_t tick_counts;
-
-static inline uint32_t timer_tick_counts(void)
-{
-    return tick_counts;
-}
+/*
+ * The counts of a delay in microseconds, rounded up, so that a delay of them lies no earlier than the one asked for.
+ * The counter's rate in counts per microsecond is kept as a fixed-point number, rounded up, so this multiplies only.
+ */
+uint64_t timer_us_counts(uint32_t us);
 
 /*
- * How far the counter is past the last counted tick, in counts, at most a tick's:
- * a tick that passed and is not counted yet counts as the end of the one before.
- * The scheduler charges a turn by it; see DESIGN.md, "Scheduling".
+ * How many whole periods of counts a stretch of counts holds, and in *rest what is left over; period is not zero.
+ * A division the kernel makes only for a timer line's period, a bit at a time, since it divides no wider than a word.
  */
-uint32_t timer_offset(void);
+uint64_t timer_periods(uint64_t stretch, uint64_t period, uint64_t *rest);
+
+/*
+ * The counts a record moves the clock by under tracing, OP_TEST_TICK's step: a millisecond's.
+ * And the default span, the longest power of two of counts within a millisecond: see place_span.
+ * Both the counter's rate gives, so they stay as they were set at boot; inline, since a switch reads the span.
+ */
+extern uint32_t timer_step;
+extern uint32_t timer_span;
+
+static inline uint32_t timer_step_counts(void)
+{
+    return timer_step;
+}
+
+static inline uint32_t timer_default_span(void)
+{
+    return timer_span;
+}
 
 #endif

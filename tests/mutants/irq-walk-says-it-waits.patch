@@ -1,6 +1,6 @@
 An interrupt looks for the pool of its Irq among every pool,
 and the walk says it waits on the hardware, which it never touches,
-so a machine with many pools takes that long for every interrupt and the tick.
+so a machine with many pools takes that long for every interrupt and the timer's.
 It finds the same Irq, so only the loop check catches it.
 
 Caught-by: loop-bounds

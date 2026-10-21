@@ -1,0 +1,18 @@
+A wait leaves its thread's requests due within the span they had, whatever span it gives.
+A driver that says at its wait how soon its interrupt must be answered would be answered as late as its binding says.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
+Report: a wait left its caller's requests due within another span than it gave
+Witness: fuzz request-wait-span
+
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -665,7 +665,6 @@ static int op_notification(struct thread *t, uint32_t slot, const struct cap *ca
+             if (!span_valid(arg[1])) {
+                 return KERR_INVALID_ARG;
+             }
+-            sched_span(t, arg[1]);
+         }
+         if (ntfn->bits != 0) {
+             arg[1] = ntfn->bits;

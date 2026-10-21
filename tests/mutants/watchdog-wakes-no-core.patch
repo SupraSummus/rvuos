@@ -9,8 +9,8 @@ Witness: fuzz watchdog-halts
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -60,7 +60,6 @@ void irq_set_bits(struct irq *irq, uint32_t bits)
- void sched_watchdog(uint32_t deadline)
+@@ -63,7 +63,6 @@ void irq_set_bits(struct irq *irq, uint32_t bits)
+ void sched_watchdog(uint64_t deadline)
  {
      watchdog = (struct watchdog){ .armed = true, .core = (uint8_t)core_index(), .deadline = deadline };
 -    wake_for(deadline);

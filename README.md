@@ -88,15 +88,15 @@ the machine goes on, and a notification its creator chose hears of it,
 so a supervisor can resume the thread, start it afresh or let it go;
 `DESIGN.md`, "Faults", says why that is a signal and not a message.
 
-The machine timer ticks and the kernel preempts on it,
-taking the threads with time in turn and then those on spare time;
+There is no tick: the kernel sets the timer for the end of the running request or the next deadline,
+taking the threads with time by their requests' deadlines and then those on spare time;
 the processor is a fixed number of units of time, handed out as capabilities,
 and a thread earns the units it is bound to, each earned by one thread at a time,
 so a process that makes more threads or children gets no more of the processor than its units.
 That is all the scheduling policy the kernel has, but for the time a waiter lends the thread it names,
 and `DESIGN.md`, "Scheduling", says why.
 
-There is no sleep: a timer line is an interrupt line the tick raises
+There is no sleep: a timer line is an interrupt line the timer raises
 once a delay has passed, so a thread sleeps by waiting on the notification it signals,
 and a wait with a timeout is the same wait with one more bit;
 the machine has a fixed few of them, handed out like any other line,

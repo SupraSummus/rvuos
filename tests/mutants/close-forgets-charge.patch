@@ -1,0 +1,21 @@
+A turn that ends costs its thread nothing.
+A thread running all along would never spend its units, and keep its requests due as early as a thread that waited;
+every count of a turn on units moves its payer's virtual time on TIME_UNITS / units counts.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
+Report: a step of the clock did not charge the thread whose turn it was its units' part
+Report: a traced call that moved no time charged the thread whose turn it was
+Witness: fuzz bind-turn-later
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -491,7 +491,7 @@ static uint64_t turn_charge(struct core *core)
+     uint64_t now = timer_now();
+     struct place *p = turn_place(core);
+     if (p != NULL) {
+-        p->vt = turn_vtime(core, p, now);
++        p->vt = turn_vtime(core, p, core->turn_from);
+     }
+     core->turn_from = now;
+     return now;

@@ -1,0 +1,19 @@
+Settling the thread whose turn it is, or which pays for it, leaves its core unmarked.
+A bind, an unbind or a lender handed the turn back gives the turn a request due later, or leaves it on spare time,
+and nothing compares it with a thread due sooner on the run queue before the timer.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-work qemu-replay
+Report: a turn its own units give time runs no request on them
+Witness: fuzz bind-turn-later
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -496,7 +496,6 @@ static void thread_settle(struct thread *t)
+     }
+     /* What the turn runs on, and the request it runs, may have changed, so its core looks at its run queue again. */
+     if (is_turn(t)) {
+-        cores[t->core].run_stale = true;
+         core_notify(&cores[t->core]);
+     }
+ }

@@ -1,0 +1,10 @@
+# Found by the fuzzer: thread 2 runs ahead of its unit of the second core at a span of 2^16 while the root earns every unit of the first,
+# so the first core's steps of the clock release thread 2 there.
+actor 1 OP_CAP_DERIVE slot BOOT_CAP_CAPTABLE a1 REPLAY_CAP_HALF a2 BOOT_CAP_TIME a3 RIGHT_W
+actor 1 OP_TIME_BIND slot REPLAY_CAP_HALF a1 REPLAY_CAP_THREAD a2 64 a3 1 a4 0x10000
+actor 1 OP_TIME_BIND slot BOOT_CAP_TIME a1 BOOT_CAP_THREAD a2 0 a3 64
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST

@@ -145,11 +145,11 @@ struct thread *boot_create_root(void)
 
     /*
      * The root thread earns the whole of the first core in its first place, bound through the capability to every unit,
-     * which lets it run on spare time too, and starts with a full account.
+     * which lets it run on spare time too, and starts with its virtual time at the count.
      * It is the one the kernel drops into, so it is ready and on no queue: bound and filled while stopped.
      */
-    sched_bind(thread_place(thread, 0), 0, TIME_UNITS, RIGHT_W | RIGHT_X, &table->slots[BOOT_CAP_TIME]);
-    sched_accounts_fill();
+    sched_bind(thread_place(thread, 0), 0, TIME_UNITS, RIGHT_W | RIGHT_X, &table->slots[BOOT_CAP_TIME], 0);
+    sched_vtimes_reset();
     thread->state = THREAD_READY;
 
     /* The root task's own mappings derive from its frames, as every mapping does. */

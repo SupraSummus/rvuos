@@ -8,12 +8,12 @@ Witness: fuzz spare-turn-waits-for-recall
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -1068,7 +1068,7 @@ void sched_tick(uint32_t ticks)
-  */
+@@ -1380,7 +1380,7 @@ static __attribute__((noinline)) void spare_look(struct core *core)
+ /* Out of line past the common case, a turn nothing marked with nobody waiting, so that saves no registers. */
  static void spare_end(struct core *core)
  {
--    if (core->run_queue != 0 && !core->recall && sched_spare_turn(core)) {
-+    if (core->run_queue != 0 && sched_spare_turn(core)) {
-         sched_turn_end();
+-    if (!core->recall && core->turn != NULL && (core->run_stale || core->run_queue != 0)) {
++    if (core->turn != NULL && (core->run_stale || core->run_queue != 0)) {
+         spare_look(core);
      }
  }

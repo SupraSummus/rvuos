@@ -1,0 +1,21 @@
+A place has time only while its virtual time is at or behind the clock.
+A thread that ran a count ahead of its units would wait a span for them where it should start its next request;
+a place has time while its virtual time lies at most a span ahead of the clock.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
+Report: a place waits on another queue than its virtual time says
+Report: a turn its own units give time runs no request on them
+Witness: fuzz bind-turn-later
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -220,7 +220,7 @@ static uint32_t place_core(const struct place *p)
+  */
+ static bool has_time(const struct place *payer, const struct place *p, uint64_t now)
+ {
+-    return place_units(payer) != 0 && (request_open(payer, p) || payer->vt <= now + place_span(payer));
++    return place_units(payer) != 0 && (request_open(payer, p) || payer->vt <= now);
+ }
+ 
+ /* The count a place's units give it time again at, with no request open: its virtual time less its span. */

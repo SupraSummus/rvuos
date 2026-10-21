@@ -10,10 +10,10 @@ Witness: fuzz cores-timer-across
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -38,7 +38,6 @@ static void wake_for(uint32_t deadline)
+@@ -41,7 +41,6 @@ static void wake_for(uint64_t deadline)
  {
      struct core *core = core_self();
-     if (tick_before(deadline, core->nearest_deadline)) {
+     if (deadline < core->nearest_deadline) {
 -        core->nearest_deadline = deadline;
          core->wake_stale = true;
      }

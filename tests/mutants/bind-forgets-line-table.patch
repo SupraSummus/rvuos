@@ -9,10 +9,10 @@ Witness: fuzz bind-restarts
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -532,7 +532,6 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
+@@ -754,7 +754,6 @@ static int op_irq_line(struct thread *t, uint32_t slot, const struct cap *cap,
          irq->line = first;
          /* A period counts from the last deadline, and a line that never fired from its bind. */
-         irq->deadline = sched_ticks;
+         irq->deadline = timer_now();
 -        line_irq[first] = v2p(irq);
          /* The line goes, a leaf now, and the Irq hangs below the pool capability as any object does. */
          cap_delete(slot_node(t, slot), false);

@@ -1,0 +1,19 @@
+The turn handed back to its lender is charged only later, as the lender's own,
+so what the borrower ran on the lender's request is charged past that request's end, up to a span past the clock;
+a turn is charged at what it ran on, as it stood.
+
+Caught-by: fuzz-smp2
+Report: a traced call that moved no time charged the thread whose turn it was
+Witness: fuzz-smp2 cores-turn-back-charges
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -877,7 +877,6 @@ static void switch_to(struct thread *next);
+ void sched_turn_back(void)
+ {
+     struct core *core = core_self();
+-    turn_close();
+     struct thread *was = core->turn;
+     struct thread *lender = core->payer;
+     for (uint32_t i = 1; i < LEND_DEPTH && lender->lend_to != 0; i++) {

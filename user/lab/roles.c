@@ -21,23 +21,27 @@ uint32_t lab_draw(uint32_t seed)
     return x ^ (x >> 13);
 }
 
-static uint32_t wait_inbox(void)
+/* Waits for something in its inbox, which is due within its span once it comes. */
+static uint32_t wait_inbox(const struct lab_page *p)
 {
     uint32_t bits = 0;
-    if (rv_wait(CHILD_INBOX, &bits) != KERR_OK) {
+    if (rv_wait_within(CHILD_INBOX, p->span, &bits) != KERR_OK) {
         rv_breakpoint();
     }
     return bits;
 }
 
-/* Waits for its server as wait_inbox does, lending the server its time meanwhile if given the server's thread. */
+/*
+ * Waits for its server as wait_inbox does, lending the server its time meanwhile if given the server's thread,
+ * so the server's work for it is due within its span too.
+ */
 static uint32_t wait_server(const struct lab_page *p)
 {
     uint32_t bits = 0;
     if (p->lend_to == 0) {
-        return wait_inbox();
+        return wait_inbox(p);
     }
-    if (rv_lend(CHILD_INBOX, p->lend_to, &bits) != KERR_OK) {
+    if (rv_lend_within(CHILD_INBOX, p->lend_to, p->span, &bits) != KERR_OK) {
         rv_breakpoint();
     }
     return bits;
@@ -93,7 +97,7 @@ static uint32_t next_period(const struct lab_page *p, uint32_t *pending, uint32_
 {
     uint32_t skipped;
     while (!(*pending & CHILD_BIT_TIMER)) {
-        *pending |= wait_inbox();
+        *pending |= wait_inbox(p);
     }
     *pending &= ~CHILD_BIT_TIMER;
     rv_timer_period(CHILD_TIMER, CHILD_BIT_TIMER, p->period_us, &skipped);
@@ -140,7 +144,7 @@ void store_main(struct child_page *c)
 {
     struct lab_page *p = (struct lab_page *)c;
     for (;;) {
-        if (wait_inbox() & CHILD_BIT_PARENT) {
+        if (wait_inbox(p) & CHILD_BIT_PARENT) {
             ends_changed(p);
         }
         for (int more = 1; more;) {
@@ -172,7 +176,8 @@ void gate_main(struct child_page *c)
 {
     struct lab_page *p = (struct lab_page *)c;
     for (;;) {
-        if (wait_inbox() & CHILD_BIT_PARENT) {
+        /* A gate given its server's thread lends it its time while it waits, what it borrows from its clients among it. */
+        if (wait_server(p) & CHILD_BIT_PARENT) {
             ends_changed(p);
         }
         for (int more = 1; more;) {
@@ -303,7 +308,7 @@ void driver_main(struct child_page *c)
     rv_timer_period(CHILD_TIMER, CHILD_BIT_TIMER, p->period_us, &skipped);
     for (;;) {
         while (!(pending & CHILD_BIT_TIMER)) {
-            pending |= wait_inbox();
+            pending |= wait_inbox(p);
         }
         pending &= ~CHILD_BIT_TIMER;
         uint32_t start = now(p) - k * period;

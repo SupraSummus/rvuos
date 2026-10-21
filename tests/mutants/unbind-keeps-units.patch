@@ -9,12 +9,12 @@ Witness: fuzz actor-handoff
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -527,7 +527,7 @@ void sched_unbind(struct cap *bound)
-     struct thread *t = p2v(cap_holder(bound));
+@@ -672,7 +672,7 @@ void sched_unbind(struct cap *bound)
+     place_charge(p);
      for (uint32_t i = 0; i < range_count(bound); i++) {
          LOOP_BOUND(TIME_UNITS);
 -        unit_place[range_first(bound) + i] = 0;
 +        (void)0;
+         unit_vt[range_first(bound) + i] = p->vt;
      }
      *bound = (struct cap){ 0 };
-     /* An empty place holds nothing, so settling empties its account as it takes the place off its queue. */

@@ -408,18 +408,18 @@ four words for `OP_CAP_INFO` and two for `OP_POOL_INFO`, section 6.15,
 and `trace: wake <bits>` after a call that woke a waiter,
 or after the `user fault` of a thread whose watch woke one.
 A call stopped where `OP_TEST_PREEMPT` armed prints `trace: preempt` instead of its line,
-followed by what the tick woke,
+followed by what the step of the clock woke,
 and its line comes once the call is made again and finishes.
 After every traced call the kernel runs the self-check,
 the executable form of the properties in `DESIGN.md`,
 and halts with code 3 on the first violation.
 Only QEMU `virt`'s kernel has the self-check and the tracing, unless the build sets `SELFCHECK=1`;
 every other board's is the smaller without them, and refuses `OP_TEST_TRACE` with `KERR_WRONG_TYPE`.
-While tracing is on the tick preempts nobody and moves no time;
-only `OP_TEST_TICK` does,
+While tracing is on the timer preempts nobody and moves no time;
+only `OP_TEST_TICK` does, a millisecond of the counter's counts a step,
 so that the host build can reproduce the transcript.
-The clock that charges turns is then the tick count alone:
-a turn with time pays a whole tick at each `OP_TEST_TICK` and nothing at a wait.
+The clock that charges turns is then the record's alone:
+a turn with time pays its units' part of each step it ran at each `OP_TEST_TICK`, and nothing at a wait.
 A thread whose program counter was set while tracing was on,
 or any of whose registers `OP_THREAD_WRITE_REG` wrote then,
 cannot be run under tracing; the kernel halts with code 6 instead.
@@ -436,7 +436,7 @@ every capability names a live object of its own type or an in-bounds frame, Unty
 and every capability to a pool or an object lies below the pool's own node,
 pools tile their memory exactly,
 every waiting thread names a live notification,
-every ready thread but the running one that may run is on the queue its account says,
+every ready thread but the running one that may run is on the queue its virtual time says,
 and each unit of time is earned by the thread bound to it and by no other,
 every `Irq` names a live notification, or none and is disarmed,
 every thread's watch names a live notification, through a capability that could signal it,
@@ -448,7 +448,7 @@ and the controller forwards exactly the lines an `Irq` is armed on.
 and says what a round of each costs in the core's cycles, or under QEMU, whose clock counts instructions there, in instructions.
 On QEMU's boards, where a run repeats exactly, it holds each cost to the board's record in `tests/bench/` within a tenth either way,
 and `make bench-refresh` writes the record from a run.
-The worst round beside a busy process waits for that process's turns, so the tick sets it, and its cycles grow with the clock.
+The worst round beside a busy process waits for that process's requests, so its span sets it, and its cycles grow with the clock.
 
 **The laboratory.**
 `make lab` boots `user/lab/`, a made-up system of servers and clients built from the library,

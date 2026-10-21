@@ -361,10 +361,12 @@ static void answer(struct lender_page *p, uint32_t i, struct asking *a)
         for (uint32_t k = 0; k < ans.len; k++) {
             ans.room[ans.off + k] = bulk_byte(p->seed[i], n, k);
         }
+        /* Counted before it is lent, since the borrower it wakes may read it and say so before the lender runs again. */
+        p->answered[i]++;
         if (!lend(p, i, &ans)) {
+            p->answered[i]--;
             return;
         }
-        p->answered[i]++;
         bulk_put(e, req.buf);
     }
 }
@@ -386,6 +388,12 @@ void lender_main(struct child_page *page)
                 asking[i] = (struct asking){ .count = 0 };
                 if (gen & 1u) {
                     ask(p, i);
+                } else {
+                    /*
+                     * Let go of: nothing touches it until the next change is seen,
+                     * since the parent may connect a borrower to it as soon as it hears, before this loop looks again.
+                     */
+                    continue;
                 }
             }
             more |= take_back(p, i, &asking[i]);
@@ -570,7 +578,7 @@ void builder_main(struct child_page *page)
             KERR_OK ||
         (status = units_take(&s, self_core(&s), OWN_UNITS, &unit)) != KERR_OK || (status = slot_new(&s, &time)) != KERR_OK ||
         (status = rv_time_carve(s.time, unit, OWN_UNITS, time)) != KERR_OK ||
-        (status = rv_time_bind(time, thread, 0, OWN_UNITS)) != KERR_OK || (status = slot_free(&s, time)) != KERR_OK) {
+        (status = rv_time_bind(time, thread, 0, OWN_UNITS, 0)) != KERR_OK || (status = slot_free(&s, time)) != KERR_OK) {
         child_fail(page, BUILDER_STEP_BUILD, status);
     }
     if (timer_bind(&s, s.pool, p->note, &line) != KERR_OK) {

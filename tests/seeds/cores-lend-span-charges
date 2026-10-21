@@ -1,0 +1,10 @@
+# Found by the fuzzer: the third lends with a span of 2^26 while its turn runs,
+# charged first for what it ran at the span it ran with.
+actor 1 OP_POOL_ALLOC slot BOOT_CAP_POOL a1 CAP_NOTIFICATION a2 REPLAY_CAP_FREE+3 a3 0
+actor 1 OP_CAP_COPY slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE+3 a2 REPLAY_CAP_FREE+3 a3 RIGHT_ALL
+actor 3 REPLAY_OP_STORE a1 0x80543fe4 a2 0x4
+actor 1 OP_THREAD_RESUME slot REPLAY_CAP_THIRD
+actor 1 OP_TIME_BIND slot BOOT_CAP_TIME a1 REPLAY_CAP_THREAD a2 64 a3 0
+actor 1 OP_TIME_BIND slot BOOT_CAP_TIME a1 REPLAY_CAP_THIRD a2 48 a3 16
+actor 1 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_NOTIFY_LEND slot REPLAY_CAP_FREE+3 a1 REPLAY_CAP_THREAD a2 0x4000000

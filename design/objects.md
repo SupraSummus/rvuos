@@ -64,7 +64,7 @@ Describing grants no authority: it changes nothing and returns nothing a call ta
 only the capability's own words, the constants of the machine its type's operations depend on,
 and the accounting its holder needs, a pool's room and what an Untyped made.
 It does tell what nothing told before:
-a clock with no right reads the counter's rate and the tick, though not the time,
+a clock with no right reads the counter's rate and the default span, though not the time,
 an Untyped's holder the kind of what lies first below it,
 and a `KernelPool` capability with no right a pool's room, and so what its other holders allocate; open decision 33.
 
@@ -136,7 +136,7 @@ a thread's watch and a process's table slots are capabilities as a table holds t
 | `Time` | A range of the processor's units of time. A thread runs only while bound to some, or to none with spare time. No object. |
 | `Print` | Writing into the kernel's log. No object. |
 | `Halt` | Halting the machine. No object. |
-| `Test` | Driving the machine as a test does: tracing, ticking, interrupting, preempting. No object. |
+| `Test` | Driving the machine as a test does: tracing, moving the clock, interrupting, preempting. No object. |
 | `Clock` | The machine's time, read with `RIGHT_R`, also through the counter's frame, and its watchdog, fed with `RIGHT_W`. No object. |
 
 Every object's size follows from its type,
@@ -539,7 +539,7 @@ A ready one leaves its queue, and one another core runs makes that core trap fir
 A waiting one leaves its notification's waiters, and its borrower's ring of lenders,
 and stands at the call it waited in, its pc back by the call's size, every register as the call found it,
 since a call that blocks writes none.
-It keeps its process, its watch, its places' units and accounts, and its own lenders, whose time buys nothing while it is stopped;
+It keeps its process, its watch, its places' units and virtual times, and its own lenders, whose time buys nothing while it is stopped;
 a turn it pays for, lent to another thread, runs on to its end, charged to it.
 Nothing is signalled, the watch included: a stop is always asked for, and the watch hears what nobody asked for.
 The loss of a process stops a thread the same way, a waiter standing at its call too, so one rule holds for every stop.
@@ -651,7 +651,7 @@ which are enough for a lock or a ring buffer in shared memory.
 What atomics cannot do is stop a thread:
 on one hart a spinlock is a deadlock while nothing preempts
 and a burnt time slice once something does.
-Between threads on two cores a short spin is sound, but a holder the tick preempted still costs the spinner its turn.
+Between threads on two cores a short spin is sound, but a holder the timer preempted still costs the spinner its turn.
 So the one service userspace cannot build for itself
 is "stop running me until someone says otherwise",
 and a notification is that service and nothing else.
@@ -700,16 +700,17 @@ A futex's kernel finds a holder in the word, but this kernel reads no user memor
 and lends a thread, named by a capability to it with `RIGHT_X`, the caller's time meanwhile; "Scheduling" says how.
 `RIGHT_X` on a thread lends it time and does nothing else, so a holder of a lock, or a server, hands its waiters that right alone.
 A name that is wrong costs the waiter the time it lends, and gives nobody any power,
-since what a lender spends is its own account.
+since what a lender spends is its own units' time.
 Lent time does let the borrower run past its own units, which is why it takes a right the borrower's owner hands out,
 and a thread its scheduler stopped by unbinding it does not run on lent time; open decision 9.
 The lock of `user/lib/lock.h` that names its holder writes the holder's name into the word as it takes it,
 so a hold nobody else wants makes no call, and a taker that finds it held lends the thread of that name its time.
 A client lends its server's thread its time while it waits for the answer, which open decision 5 asks for.
-The time goes one step, from the thread that has lent the borrower time longest, and only within a core:
+The time comes from the thread that has lent the borrower time longest, and only within a core:
 a borrower keeps its lenders on a ring, oldest first, so it finds its lender without a walk.
-Priority inheritance takes the most of every waiter, and goes on through a holder that waits in turn,
-walks that goal 4 rules out.
+A first lender with no time for its borrower passes on what it borrows, up to `LEND_DEPTH`, 3, lenders up.
+Priority inheritance takes the most of every waiter, a walk over all of them that goal 4 rules out;
+lent time follows first lenders alone, so its walk is bounded by `LEND_DEPTH`.
 
 **A signal hands a lender its turn back.**
 A signal wakes the thread whose time pays for the signaller's turn first, if it waits there,
@@ -771,7 +772,7 @@ The Wi-Fi system's network process serves its clients through a hub, see `user/w
 **State one process publishes to many**, a link's state or a setting, needs no ask at all.
 `user/lib/seqlock.h` keeps two copies of it and a count that sends readers to the one not being written,
 so neither side makes a call or waits for the other, and readers, which write nothing, may hold it read only.
-Linux's seqlock keeps one copy, which suits a writer the tick cannot take, as Linux's are,
+Linux's seqlock keeps one copy, which suits a writer the timer cannot take, as Linux's are,
 but a reader of a writer in user mode stopped halfway could only spin until the writer's next turn.
 With two, a write fills the copy readers are not sent to before it sends them there,
 so a writer stopped, faulted or taken down halfway costs its readers nothing, nor does one that starts again.

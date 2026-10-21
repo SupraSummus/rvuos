@@ -1,20 +1,20 @@
-The core that counts a tick gives time again only to the threads of its own core,
-so a thread of another that waits for its account sits on the spent queue past the tick it has time again,
-until its own core happens to count a tick; the release of every core lies ahead of the count.
+The core whose timer interrupts gives time again only to the threads of its own core,
+so a thread of another that waits for its units sits on the spent queue past the count it has time again,
+until its own core happens to look; the release of every core lies ahead of the count.
 
 Caught-by: fuzz-smp2
-Report: the release is for a tick already past
-Witness: fuzz-smp2 cores-release-across
+Report: a place waits on another queue than its virtual time says
+Witness: fuzz-smp2 cores-release-from-other
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -501,7 +501,7 @@ static void tick_advance(uint32_t ticks)
+@@ -1007,7 +1007,7 @@ void sched_time(uint64_t now)
      }
      for (uint32_t c = 0; c < CORES; c++) {
          LOOP_BOUND(CORES);
--        if (!tick_before(sched_ticks, cores[c].nearest_release)) {
-+        if (c == core_index() && !tick_before(sched_ticks, cores[c].nearest_release)) {
+-        if (now >= cores[c].nearest_release) {
++        if (c == core_index() && now >= cores[c].nearest_release) {
              release(c);
          }
      }

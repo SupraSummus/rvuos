@@ -38,7 +38,7 @@ void event_init(const struct event *e);
 /* Sets the event, and wakes the waiter if it may be waiting. */
 void event_set(const struct event *e);
 /*
- * Waits until the event is set, but no longer than us microseconds, which end at the kernel's first tick after them:
+ * Waits until the event is set, but no longer than us microseconds, and the kernel's step that fires the timer after them:
  * 1 if it was set, which takes the set, or 0. A wait whose call fails returns at once, as one the deadline ended.
  */
 int event_wait(const struct event *e, uint32_t us);

@@ -1,18 +1,18 @@
 A thread that loses its units in a call gives the processor up at once, not at the end of its turn.
 A revoke that unbinds its caller and stops for an interrupt would switch threads in the middle of the call,
 which the host, making the call again at once, does not;
-a call stopped for an interrupt is made again at once unless the tick ended the turn.
+a call stopped for an interrupt is made again at once unless the timer ended the turn.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
 Report: a call stopped where its caller cannot make it again
-Witness: fuzz time-revoke-stops-caller
+Witness: fuzz time-revoke-own-units
 
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -1221,7 +1221,8 @@ void syscall_dispatch(struct thread *t)
-      * One that lost its units finishes its turn, as a preempted call is made again before the tick switches,
-      * unless that left the turn on spare time, which a thread with time the call made ready takes at once.
+@@ -1387,7 +1387,8 @@ void syscall_dispatch(struct thread *t)
+      * One that lost its time without spare time gives it up as the trap ends, after a preempted call is made again,
+      * and a turn left on spare time a thread with time the call made ready takes at once.
       */
 -    if (core->current->state != THREAD_READY || core->run_queue != 0) {
 +    if (core->current->state != THREAD_READY || thread_place_on(core->current, core_index()) == NULL ||

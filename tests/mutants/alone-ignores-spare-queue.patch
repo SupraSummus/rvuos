@@ -1,20 +1,20 @@
-A thread on spare time counts as alone while others wait on the spare queue.
-The timer would let the ticks pass that end the turn, and the threads on spare time would wait for this one to stop;
-every tick the timer lets pass hands the processor back to the running thread.
+A thread that may run on spare time counts as alone while others wait on the spare queue.
+The timer would let its request end pass, and the threads on spare time would wait for this one to stop;
+a turn's request end is a count the timer lets pass only while nobody waits for the core.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
-Report: the timer lets a tick pass that ends the turn
-Witness: fuzz actor-handoff
+Report: the timer lets the end of the turn's request pass
+Witness: fuzz lend-request-made-on-own
 
 diff --git a/kernel/sched.c b/kernel/sched.c
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -895,7 +895,7 @@ uint32_t sched_wake_ticks(void)
-         return 1;
-     }
-     uint32_t balance = account_now(p);
--    bool alone = place_spare(p) && core->spare_queue == 0;
-+    bool alone = place_spare(p);
-     if (!has_time(balance)) {
-         return alone ? wake : 1;
-     }
+@@ -1045,7 +1045,7 @@ uint64_t sched_next_wake(void)
+     uint64_t end = turn_request_end(core);
+     if (end != COUNT_NEVER) {
+         /* Alone on its own time with spare time to go on with, the turn's request changes nothing that runs as it ends. */
+-        bool alone = core->payer == NULL && place_spare(own) && core->run_queue == 0 && core->spare_queue == 0;
++        bool alone = core->payer == NULL && place_spare(own) && core->run_queue == 0;
+         if (!alone && end < at) {
+             at = end;
+         }

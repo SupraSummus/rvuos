@@ -4,7 +4,7 @@ Part of the design document; [`DESIGN.md`](../DESIGN.md) lists every section and
 
 ## Interrupts
 
-**An interrupt is a signal, as a tick is.**
+**An interrupt is a signal, as the timer is.**
 The kernel owns the trap vector and the interrupt controller,
 and no driver code runs in machine mode.
 A driver holds an `IrqLine` capability naming one line,
@@ -23,7 +23,7 @@ armed with bits and a delay, disarmed by signalling,
 so a driver that gives the device one bit and a timer line another
 has a wait with a timeout for the same two calls; see "Time".
 The machine timer is the one interrupt the kernel keeps for itself,
-because the tick is its own; see "Scheduling".
+because the timer is its own; see "Scheduling".
 
 **Armed and unmasked are one state.**
 The controller forwards a line exactly while an `Irq` is armed on it,
@@ -69,7 +69,7 @@ Sharing a line between drivers is open decision 11;
 what the kernel does today is refuse the second binding.
 The kernel records the bound `Irq` of each line in a table of its own,
 a word per line of the controller and per timer line,
-so an interrupt or the tick finds its `Irq` without a walk.
+so an interrupt or the timer finds its `Irq` without a walk.
 
 **No driver in the kernel.**
 The UART is the first device, and it is userspace's alone:
@@ -129,7 +129,7 @@ so a program's output and the kernel's keep their order.
 
 **Writing is a capability of its own.**
 A `Print` capability writes into the log, a `Halt` one halts the machine,
-and a `Test` one traces, ticks, interrupts or preempts it,
+and a `Test` one traces, moves the clock of, interrupts or preempts it,
 so a child given `Print` prints, its lines among the kernel's and its own faults' reports,
 and can stop nothing.
 One capability for all of it would leave a child printing into a ring its parent copies out,
@@ -177,7 +177,7 @@ with the head for the level and no enable bit to write.
 **Two things the log's line is not.**
 It is not a source that can wake the machine:
 only the kernel raises it, and the kernel runs only when a thread,
-the tick or a device makes it,
+the timer or a device makes it,
 so a kernel with nothing runnable and only the log's `Irq` armed
 stops with `no runnable thread` rather than stall in `wfi`.
 And it is not a line a replay can fire by name:

@@ -27,5 +27,5 @@ grep -q 'rvuos: the console lost' "$log" && fail "the console overflowed, and th
 grep -q 'lab: done' "$log" || fail "the run did not finish"
 # What the scenarios measured, as a table, in microseconds.
 grep '^lab: .* n=' "$log" | sed 's/^lab: //; s/[a-z0-9]*=//g' |
-    awk 'BEGIN { print "scenario     member      n  median     p90   worst" }
-         { printf "%-12s %-6s %5s %7s %7s %7s\n", $1, $2, $3, $4, $5, $6 }'
+    awk 'BEGIN { print "scenario         member      n  median     p90   worst" }
+         { printf "%-16s %-6s %5s %7s %7s %7s\n", $1, $2, $3, $4, $5, $6 }'

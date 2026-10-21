@@ -203,10 +203,15 @@ static inline uint32_t rv_time_carve(uint32_t time_cap, uint32_t offset, uint32_
     return rv_invoke(OP_TIME_CARVE, time_cap, offset, count, dst);
 }
 
-/* OP_TIME_BIND: a thread bound to count units of the capability from offset, which it then earns. */
-static inline uint32_t rv_time_bind(uint32_t time_cap, uint32_t thread_cap, uint32_t offset, uint32_t count)
+/*
+ * OP_TIME_BIND: a thread bound to count units of the capability from offset, which it then earns,
+ * its requests due span counts past its virtual time until a wait gives another: 0 for the default span,
+ * else a power of two up to 2^SPAN_MAX.
+ */
+static inline uint32_t rv_time_bind(uint32_t time_cap, uint32_t thread_cap, uint32_t offset, uint32_t count,
+                                    uint32_t span)
 {
-    return rv_invoke(OP_TIME_BIND, time_cap, thread_cap, offset, count);
+    return rv_invoke6(OP_TIME_BIND, time_cap, thread_cap, offset, count, span, 0, 0);
 }
 
 /*
@@ -375,11 +380,21 @@ static inline uint32_t rv_notify_carve(uint32_t ntfn_cap, uint32_t bits, uint32_
     return rv_invoke(OP_NOTIFY_CARVE, ntfn_cap, bits, dst, 0);
 }
 
-/* OP_NOTIFY_WAIT: block until some bit is set, then take them all. */
-static inline uint32_t rv_wait(uint32_t ntfn_cap, uint32_t *bits)
+/* The longest span a call takes within counts of the counter: a power of two up to 2^SPAN_MAX, or 0 for none. */
+static inline uint32_t rv_span(uint32_t counts)
+{
+    uint32_t span = counts != 0 ? 1u << (31 - __builtin_clz(counts)) : 0;
+    return span < 1u << SPAN_MAX ? span : 1u << SPAN_MAX;
+}
+
+/*
+ * OP_NOTIFY_WAIT: block until some bit is set, then take them all,
+ * the request the wake begins due within span counts of the counter: a power of two, or 0 to keep the span it had.
+ */
+static inline uint32_t rv_wait_within(uint32_t ntfn_cap, uint32_t span, uint32_t *bits)
 {
     register uint32_t r_a0 __asm__(RV_A0) = ntfn_cap;
-    register uint32_t r_a1 __asm__(RV_A1) = 0;
+    register uint32_t r_a1 __asm__(RV_A1) = span;
     register uint32_t r_a2 __asm__(RV_A2) = 0;
     register uint32_t r_a3 __asm__(RV_A3) = 0;
     register uint32_t r_a7 __asm__(RV_A7) = OP_NOTIFY_WAIT;
@@ -391,12 +406,21 @@ static inline uint32_t rv_wait(uint32_t ntfn_cap, uint32_t *bits)
     return r_a0;
 }
 
-/* OP_NOTIFY_LEND: as rv_wait, lending the thread of thread_cap, which has RIGHT_X, the caller's time meanwhile. */
-static inline uint32_t rv_lend(uint32_t ntfn_cap, uint32_t thread_cap, uint32_t *bits)
+/* OP_NOTIFY_WAIT: block until some bit is set, then take them all. */
+static inline uint32_t rv_wait(uint32_t ntfn_cap, uint32_t *bits)
+{
+    return rv_wait_within(ntfn_cap, 0, bits);
+}
+
+/*
+ * OP_NOTIFY_LEND: as rv_wait_within, lending the thread of thread_cap, which has RIGHT_X, the caller's time meanwhile,
+ * whose requests on it are due within span as the caller's are.
+ */
+static inline uint32_t rv_lend_within(uint32_t ntfn_cap, uint32_t thread_cap, uint32_t span, uint32_t *bits)
 {
     register uint32_t r_a0 __asm__(RV_A0) = ntfn_cap;
     register uint32_t r_a1 __asm__(RV_A1) = thread_cap;
-    register uint32_t r_a2 __asm__(RV_A2) = 0;
+    register uint32_t r_a2 __asm__(RV_A2) = span;
     register uint32_t r_a3 __asm__(RV_A3) = 0;
     register uint32_t r_a7 __asm__(RV_A7) = OP_NOTIFY_LEND;
     __asm__ volatile(RV_CALL
@@ -407,9 +431,15 @@ static inline uint32_t rv_lend(uint32_t ntfn_cap, uint32_t thread_cap, uint32_t 
     return r_a0;
 }
 
+/* OP_NOTIFY_LEND: as rv_wait, lending the thread of thread_cap, which has RIGHT_X, the caller's time meanwhile. */
+static inline uint32_t rv_lend(uint32_t ntfn_cap, uint32_t thread_cap, uint32_t *bits)
+{
+    return rv_lend_within(ntfn_cap, thread_cap, 0, bits);
+}
+
 /*
  * OP_IRQ_SET on a timer line: signal bits on the Irq's notification once us microseconds have passed,
- * no earlier and at the kernel's first tick after that. bits = 0 cancels.
+ * no earlier, as soon as the kernel's timer comes after that. bits = 0 cancels.
  */
 static inline uint32_t rv_timer_set(uint32_t timer_irq_cap, uint32_t bits, uint32_t us)
 {
@@ -418,7 +448,7 @@ static inline uint32_t rv_timer_set(uint32_t timer_irq_cap, uint32_t bits, uint3
 
 /*
  * OP_IRQ_SET on a timer line with IRQ_SET_PERIOD: signal bits a whole number of periods
- * after the line's last deadline, at the first such tick still ahead.
+ * after the line's last deadline, at the first such count still ahead.
  * *skipped receives the periods that had passed by the call.
  */
 static inline uint32_t rv_timer_period(uint32_t timer_irq_cap, uint32_t bits, uint32_t us,

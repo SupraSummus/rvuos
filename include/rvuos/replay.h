@@ -246,7 +246,7 @@ static const struct replay_record replay_after_input[] = {
 
 /*
  * Performed by both builds once tracing is on, as the first traced record.
- * Tracing turns the tick's preemption off,
+ * Tracing turns the timer's preemption off,
  * so from then on the second thread runs only when the first one blocks,
  * which is after the records are in place.
  */

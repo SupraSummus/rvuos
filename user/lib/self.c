@@ -58,7 +58,7 @@ uint32_t self_root(struct self *s, uint32_t units)
     TRY(s, "the units of time", rv_cap_info_of(s->time, CAP_TIME, time));
     s->time_first = time[0];
     s->time_count = time[1] < SELF_CORES * TIME_UNITS ? time[1] : SELF_CORES * TIME_UNITS;
-    TRY(s, "keep the root's units", rv_time_bind(s->time, BOOT_CAP_THREAD, 0, units));
+    TRY(s, "keep the root's units", rv_time_bind(s->time, BOOT_CAP_THREAD, 0, units, 0));
     for (uint32_t i = 0; i < units; i++) {
         mark(s->units, i, 1);
     }

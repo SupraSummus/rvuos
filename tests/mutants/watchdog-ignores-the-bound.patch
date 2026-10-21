@@ -8,7 +8,7 @@ Witness: fuzz watchdog-halts
 diff --git a/kernel/syscall.c b/kernel/syscall.c
 --- a/kernel/syscall.c
 +++ b/kernel/syscall.c
-@@ -198,7 +198,7 @@ static int op_clock(struct thread *t, uint32_t slot, uint32_t op, uint32_t *arg)
+@@ -206,7 +206,7 @@ static int op_clock(struct thread *t, uint32_t slot, uint32_t op, uint32_t *arg)
      }
      case OP_CLOCK_WATCHDOG: {
          uint32_t us = arg[1];
@@ -16,4 +16,4 @@ diff --git a/kernel/syscall.c b/kernel/syscall.c
 +        if (us == 0) {
              return KERR_INVALID_ARG;
          }
-         sched_watchdog(delay_deadline(delay_ticks(us)));
+         sched_watchdog(delay_deadline(us));

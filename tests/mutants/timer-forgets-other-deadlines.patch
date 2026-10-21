@@ -1,0 +1,20 @@
+The timer puts its own core's nearest deadline right and leaves the other cores' as they were,
+so a core whose line another core's timer fired wakes for a deadline already past;
+each core's nearest deadline lies ahead of the count.
+
+Caught-by: fuzz-smp2
+Report: the timer wakes for a deadline already past
+Witness: fuzz-smp2 cores-timer-across
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -980,7 +980,7 @@ void sched_time(uint64_t now)
+     core->wake_stale = true;
+     for (uint32_t c = 0; c < CORES; c++) {
+         LOOP_BOUND(CORES);
+-        cores[c].nearest_deadline = COUNT_NEVER;
++        core->nearest_deadline = COUNT_NEVER;
+     }
+     for (uint32_t i = 0; i < TIMER_LINES; i++) {
+         LOOP_BOUND(TIMER_LINES);

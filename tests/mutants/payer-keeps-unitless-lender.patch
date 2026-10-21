@@ -1,0 +1,20 @@
+A request made on a lender's units goes on on them after the lender has none,
+so the borrower keeps its lent deadline and takes the core before threads with time, with nobody paying;
+a request is open only on units.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a turn on spare time runs while a thread with time waits
+Witness: fuzz lend-lender-loses-units
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -323,7 +323,7 @@ static uint8_t place_queue(const struct place *p, const struct place *l, uint64_
+  */
+ static struct place *request_payer(struct place *p, struct place *l, uint64_t now)
+ {
+-    if (l != NULL && place_units(l) != 0 && request_open(l, p)) {
++    if (l != NULL && request_open(l, p)) {
+         return l;
+     }
+     if (has_time(p, p, now)) {

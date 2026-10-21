@@ -30,7 +30,7 @@ _Static_assert(CLINT_MTIME == CLINT_BASE + 0x08u && CLINT_MTIMECMP == CLINT_BASE
                "board.h names this CLINT's registers");
 /* The copy of mtime user mode reads, 0x400 bytes up among the user timer's registers. */
 #define CLINT_UTIME    (CLINT_BASE + 0x408u)
-_Static_assert(CLINT_UTIME == COUNTER_ADDR, "the clock names the counter the tick is made of");
+_Static_assert(CLINT_UTIME == COUNTER_ADDR, "the clock names the counter the timer compares with");
 #define TIMECTL_COUNTER_EN  (1u << 0)
 #define TIMECTL_TIMERINT_EN (1u << 1)
 
@@ -64,12 +64,12 @@ static uint64_t systimer_read(void)
     return ((uint64_t)REG(SYSTIMER_UNIT0_HI) << 32) | REG(SYSTIMER_UNIT0_LO);
 }
 
-/* One tick of the system timer, counted in mtime: the tick's length at the CPU clock. */
-static uint32_t tick_measure(void)
+/* A millisecond of the system timer, counted in mtime: a millisecond's length at the CPU clock. */
+static uint32_t ms_measure(void)
 {
     uint64_t start = systimer_read();
     uint64_t mtime_start = counter_read();
-    while (systimer_read() - start < SYSTIMER_HZ / TIMER_HZ) {
+    while (systimer_read() - start < SYSTIMER_HZ / 1000u) {
     }
     return (uint32_t)(counter_read() - mtime_start);
 }
@@ -84,20 +84,20 @@ static void cpu_clock_set(void)
 }
 
 /*
- * The rate timer_counter_hz returns is measured over one tick, after the clock is set,
- * so it is as exact as the loop in tick_measure.
+ * The rate timer_counter_hz returns is measured over a millisecond, after the clock is set,
+ * so it is as exact as the loop in ms_measure.
  */
 void timer_init(void)
 {
     clint_hold();
     REG(CLINT_TIMECTL) = TIMECTL_COUNTER_EN | TIMECTL_TIMERINT_EN;
 
-    uint32_t found = tick_measure();
+    uint32_t found = ms_measure();
     cpu_clock_set();
-    timer_start(tick_measure());
+    timer_start(ms_measure() * 1000u);
     kputs("rvuos: cpu clock ");
     kput_hex(timer_counter_hz());
     kputs(" hz, found at ");
-    kput_hex(found * TIMER_HZ);
+    kput_hex(found * 1000u);
     kputs(" hz\n");
 }

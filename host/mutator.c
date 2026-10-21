@@ -501,6 +501,8 @@ static uint32_t draw_kind(struct rng *r, const struct shadow *s, const struct re
         return below(r, 8) == 0 ? rnd(r) : (uint32_t)below(r, 2);
     case ARG_NAME:
         return below(r, 8) == 0 ? rnd(r) : 4u * (uint32_t)below(r, 64);
+    case ARG_SPAN:
+        return below(r, 2) ? 0 : 1u << below(r, SPAN_MAX + 1);
     default:
         return draw_arg(r, data, count);
     }

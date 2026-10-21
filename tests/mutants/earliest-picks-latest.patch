@@ -1,0 +1,19 @@
+The scheduler picks the latest deadline on the run queue rather than the earliest.
+A thread with an earlier deadline starves on the run queue while threads with later deadlines run.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
+Report: a thread waits with a deadline before the turn's request
+Witness: fuzz bind-turn-later
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -541,7 +541,7 @@ static struct place *run_earliest(const struct core *core)
+     for (paddr_t at = best->queue_next; at != core->run_queue;) {
+         LOOP_BOUND(TIME_UNITS);
+         struct place *p = p2v(at);
+-        if (due_before(p->deadline, best->deadline)) {
++        if (!due_before(p->deadline, best->deadline)) {
+             best = p;
+         }
+         at = p->queue_next;

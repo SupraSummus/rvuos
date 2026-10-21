@@ -2,7 +2,7 @@
 #define RVUOS_THREAD_ALARM_H
 
 /*
- * Alarms in microseconds, finer than the kernel's tick, on a TIMER of the nRF52840's that the kernel leaves free,
+ * Alarms in microseconds, nearer than the kernel's timer lines keep, on a TIMER of the nRF52840's that the kernel leaves free,
  * as a driver in user mode drives it: alarm.c.
  * The TIMER counts microseconds, 32 bits, from when alarm_init starts it, and wraps every 71 minutes;
  * each of its compare registers but the last is an alarm, which raises the TIMER's line once its count comes.

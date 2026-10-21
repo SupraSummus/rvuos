@@ -33,9 +33,9 @@ void kmain(void)
     }
 
     /*
-     * An account counts in the counter's counts, which the ESP32-C6 measures here,
-     * so the timer starts before the root thread's account is filled.
-     * The kernel runs with interrupts held off, so its first tick waits for user mode.
+     * Spans and delays count in the counter's counts, whose rate the ESP32-C6 measures here,
+     * so the timer starts before the root thread is bound.
+     * The kernel runs with interrupts held off, so its first timer interrupt waits for user mode.
      */
     timer_init();
     struct thread *root = boot_create_root();
@@ -45,7 +45,7 @@ void kmain(void)
 
     kputs("rvuos: entering user mode\n");
     /*
-     * The tick runs from the root task's first instruction, see trap_start.
+     * The timer runs from the root task's first instruction, see trap_start.
      * Every device line starts masked and stays so until an Irq is armed on it.
      */
     irq_init();

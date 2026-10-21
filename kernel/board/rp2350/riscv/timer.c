@@ -17,12 +17,10 @@
 #define MTIME_EN       1u /* and not FULLSPEED: count the ticks, not clk_sys */
 
 _Static_assert(COUNTER_HZ == 1000000u, "the ticks come every microsecond");
-_Static_assert(COUNTER_HZ % TIMER_HZ == 0, "the tick divides the counter's second");
-_Static_assert(COUNTER_HZ / TIMER_HZ <= TICK_COUNTS_MAX, "an account counts a tick of the counter");
 
 void timer_init(void)
 {
     clint_hold();
     *(volatile uint32_t *)SIO_MTIME_CTRL = MTIME_EN;
-    timer_start(COUNTER_HZ / TIMER_HZ);
+    timer_start(COUNTER_HZ);
 }

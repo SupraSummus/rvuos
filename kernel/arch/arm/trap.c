@@ -214,14 +214,14 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
     struct core *core = core_self();
     bool lost = (frame->cfsr & CFSR_STACKING) != 0;
 
-    /* SysTick's own pending bit is dropped as it is taken, so the counter says whether the tick is due. */
+    /* SysTick's own pending bit is dropped as it is taken, so the counter says whether the timer is due. */
     bool traced = timer_trap_enter(counter_due());
 
     uint32_t exception = frame->exception;
     bool interrupt = exception >= EXC_IRQ0 || exception == EXC_SYSTICK;
     if (exception == EXC_SYSTICK) {
         counter_tick();
-        timer_trap_tick();
+        timer_trap_fired();
     } else if (interrupt && line_is_cores(exception - EXC_IRQ0)) {
         /* Another core asked this one to trap: to stop its thread, load its regions or set its timer again. */
         ipi_clear();
@@ -278,14 +278,14 @@ struct trap_frame *trap_handler(struct trap_frame *frame)
  * Every exception has the priority the kernel runs at, so none is taken while it runs, and wfi would not wake:
  * wfe does, since SEVONPEND makes a line becoming pending an event, taken or not.
  * A core may also treat wfe as a no-op, which the loop tolerates.
- * Where SysTick becoming pending is no event, as in QEMU's model of the MPS2 boards, wfe would sleep through the tick,
+ * Where SysTick becoming pending is no event, as in QEMU's model of the MPS2 boards, wfe would sleep through the timer,
  * so the loop polls on yield instead, a no-op on silicon, on which QEMU gives another core its turn.
- * The timer is set for the tick asked for and stays there however the stall ends,
+ * The timer is set for the count asked for and stays there however the stall ends,
  * until the trap's end sets it for the thread that runs.
  */
-bool intr_wait(uint32_t wake, uint32_t *ticks)
+bool intr_wait(uint64_t at)
 {
-    timer_set(wake);
+    timer_set(at);
     core_stall_begin();
     bool device;
     while (!(device = nvic_pending()) && !counter_due() && !nvic_ipi_pending()) {
@@ -310,7 +310,6 @@ bool intr_wait(uint32_t wake, uint32_t *ticks)
         ipi_clear();
     }
 #endif
-    *ticks = timer_count();
     return device;
 }
 
@@ -323,7 +322,7 @@ bool intr_pending(void)
  * PendSV is the way out of thread mode, where kmain runs with interrupts held off since reset:
  * pended, then let in, it enters boot_entry in start.S, which drops thread mode's privilege
  * and returns into the root thread, whose trap from then on leaves the main stack empty.
- * So the tick runs from the root task's first instruction.
+ * So the timer runs from the root task's first instruction.
  */
 void trap_start(struct trap_frame *frame)
 {

@@ -1,0 +1,21 @@
+A place that leaves the spare or spent queue drops the core's release while another still waits on the other.
+The kernel would not look for that one, and it would wait past the count its virtual time came within a span of;
+a core owes no release only while nobody waits on its spare and spent queues.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work test qemu-replay
+Report: a lender's virtual time comes before the release
+Report: a place's virtual time comes before the release
+Witness: fuzz lend-own-time-comes
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -159,7 +159,7 @@ static void place_unqueue(struct place *p)
+     struct core *core = &cores[p->core];
+     ring_remove(queue_head(core, p->queue), v2p(p), QUEUED);
+     p->queue = QUEUE_NONE;
+-    if (core->spare_queue == 0 && core->spent_queue == 0) {
++    if (core->spare_queue == 0 || core->spent_queue == 0) {
+         core->nearest_release = COUNT_NEVER;
+     }
+ }

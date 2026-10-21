@@ -1,0 +1,21 @@
+A wait's span applies before the caller's turn is charged,
+so what it ran is charged at the new span, which may let it run further ahead than the span it ran with;
+a turn is charged at what it ran on, as it stood.
+
+Caught-by: fuzz-smp2
+Report: a traced call that moved no time charged the thread whose turn it was
+Witness: fuzz-smp2 cores-lend-span-charges
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -657,9 +657,6 @@ void sched_bind(struct place *p, uint32_t first, uint32_t count, uint8_t rights,
+ void sched_span(struct thread *t, uint32_t span)
+ {
+     bool turn = is_turn(t);
+-    if (turn) {
+-        turn_close();
+-    }
+     for (uint32_t i = 0; i < thread_places(t); i++) {
+         LOOP_BOUND(CORES);
+         struct place *p = thread_place(t, i);

@@ -18,7 +18,7 @@
  * seqlock-write: a snapshot of 32 bytes published through lib/seqlock.h, nobody reading, no call.
  * seqlock-read: the same snapshot copied out whole, nobody writing, no call.
  * contended-worst: the worst round of processes beside a third process that always wants the core,
- * over a tenth of a second; it waits for that process's turns, so the tick sets it.
+ * over a tenth of a second; it waits for that process's requests, so their span sets it.
  *
  * Each measure is a line of its rounds, the clock's counts over them and the clock's rate,
  * and the run ends with "bench: done" and halt code 0.
@@ -259,7 +259,7 @@ int main(void)
     must("units", units_take(&self, 0, UNITS, &first));
     must("a slot", slot_new(&self, &time));
     must("carve the units", rv_time_carve(self.time, first, UNITS, time));
-    must("bind the units", rv_time_bind(time, thread, 0, UNITS));
+    must("bind the units", rv_time_bind(time, thread, 0, UNITS, 0));
     must("start the thread", rv_thread_resume(thread));
     measure("threads", round_thread);
 
@@ -283,7 +283,7 @@ int main(void)
     must("units", units_take(&self, 0, UNITS, &first));
     must("a slot", slot_new(&self, &time));
     must("carve the units", rv_time_carve(self.time, first, UNITS, time));
-    must("bind the units", rv_time_bind(time, holder, 0, UNITS));
+    must("bind the units", rv_time_bind(time, holder, 0, UNITS, 0));
     must("start the thread", rv_thread_resume(holder));
     measure("lock-wait", round_lock_wait);
     /* The root task's table holds the holder's thread with every right, RIGHT_X among them. */

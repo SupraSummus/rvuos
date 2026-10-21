@@ -1,0 +1,20 @@
+A place already on the run queue keeps its request though it is no longer open on the units that pay for it now,
+its lender's time given way to its own, or its own having paid for it;
+a place waits on the run queue with its request open on its payer.
+
+Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
+Report: a place waits on the run queue with no request open on its payer
+Witness: fuzz lend-own-time-comes
+
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -423,7 +423,7 @@ static void place_settle(struct place *p)
+      * A place on the run queue goes on with its request on the units it was made on while it is open there,
+      * or starts the next on whichever units pay for it now, as a place that joined would.
+      */
+-    if (queue == QUEUE_RUN) {
++    if (queue == QUEUE_RUN && joined) {
+         request_renew(p, request_payer(p, l, now), now);
+         core->run_stale = true;
+         joined = true;

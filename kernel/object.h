@@ -25,6 +25,13 @@
  * and the two allocate identically.
  * The static asserts below pin the sizes.
  */
+
+/*
+ * A count of the clock, the counter's counts since boot, which never wraps;
+ * objects keep it at a word's alignment, so that it adds no padding to them.
+ */
+typedef uint64_t count_t __attribute__((aligned(4)));
+
 struct obj_header {
     uint8_t type;       /* CAP_* */
     uint8_t pad;
@@ -182,7 +189,7 @@ struct process {
 
 /*
  * Thread states.
- * A ready thread other than the running one is on the queue its account puts it on, if it may run,
+ * A ready thread other than the running one is on the queue its virtual time puts it on, if it may run,
  * and a waiting one on its notification's waiters,
  * so the kernel finds the next thread to run without a walk;
  * see DESIGN.md, "Scheduling".
@@ -216,7 +223,7 @@ _Static_assert(THREAD_WAS_STOPPED == THREAD_STOPPED && THREAD_WAS_READY == THREA
 #define THREAD_FAULTED 0x2
 
 /*
- * A thread's place on a core: what it earns there, its account, and where it waits on that core's queues.
+ * A thread's place on a core: what it earns there, its virtual time, and where it waits on that core's queues.
  * A thread has the places it was made with, each empty or holding the time of one core,
  * its units there, none at all among them, with spare time or without,
  * and never two the time of one core; see DESIGN.md, "Cores".
@@ -224,21 +231,25 @@ _Static_assert(THREAD_WAS_STOPPED == THREAD_STOPPED && THREAD_WAS_READY == THREA
  */
 struct place {
     /*
-     * Its account at the tick stamp, in COUNT_PARTS parts of a count,
-     * at most ACCOUNT_TICKS ticks' counts of parts for each unit it earns, and so none while it earns none.
-     * It is brought up to the count only when the kernel looks at it,
-     * and the charges of a turn in the tick it was counted to are taken off it as that turn ends.
+     * Its virtual time, the count of the clock its units have paid for up to:
+     * each count its thread runs on them moves it on TIME_UNITS / units counts,
+     * and a request starts no earlier than the count, so it stands at most a request ahead; see sched.c, "Requests".
      */
-    uint32_t balance;
-    uint32_t stamp;
+    count_t vt;
     /* Its core's queue while it waits on one, a ring of places. */
     paddr_t queue_next;
     paddr_t queue_prev;
     paddr_t thread;     /* the thread it is a place of */
+    uint32_t deadline;  /* the count its thread's request on the core is due by, modulo 2^32; see sched.c, "Requests" */
     uint8_t queue;      /* the scheduler's queue it waits on, one of QUEUE_*, while its thread is READY and not running */
     uint8_t core;       /* the core whose queue that is, while it waits on one */
     uint8_t index;      /* its place among its thread's */
-    uint8_t pad;
+    /*
+     * How far past its virtual time a request is due, in its low six bits: 0 for the default span, else 2 to them - 1 counts;
+     * in its top bit whether its thread has a request there, and in the bit below whether that was made on lent time;
+     * see place_span, PLACE_REQUEST and PLACE_LENT in sched.h.
+     */
+    uint8_t span;
 };
 
 /* A thread holds its process as a process holds its tables, so the two may lie in different pools. */
@@ -304,8 +315,8 @@ struct notification {
  * One Irq per line; see DESIGN.md, "Interrupts".
  * Line LOG_IRQ_LINE is the kernel's log, which klog.c raises and masks
  * with no controller behind it; see DESIGN.md, "The kernel log".
- * The timer lines have no controller either: the tick raises one
- * once the tick count reaches its deadline, which the set that armed it wrote,
+ * The timer lines have no controller either: the timer raises one
+ * once the counter reaches its deadline, which the set that armed it wrote,
  * so time reaches userspace as an interrupt like any other; see DESIGN.md, "Time".
  */
 struct irq {
@@ -316,7 +327,7 @@ struct irq {
     uint8_t pad;
     /* CAP_NOTIFICATION held by the Irq, with the bits it may signal, or CAP_NONE once the notification is taken */
     struct cap ntfn NODE_ALIGNED;
-    uint32_t deadline;  /* on a timer line, the tick count it fires at */
+    count_t deadline;   /* on a timer line, the count of the clock it fires at */
 };
 
 /* A size rounded up to NODE_ALIGN, as the nodes after it lie. */
@@ -355,7 +366,7 @@ _Static_assert(sizeof(struct pool) == 48, "object layout");
 _Static_assert(sizeof(struct process) == NODE_ROUND(12 + PROCESS_CSRS_SIZE) + 16 * PROCESS_TABLES, "object layout");
 _Static_assert(sizeof(struct thread) == NODE_ROUND(40 + sizeof(struct trap_frame)) + 2 * sizeof(struct cap),
                "object layout");
-_Static_assert(sizeof(struct place) == 24, "object layout");
+_Static_assert(sizeof(struct place) == 28, "object layout");
 _Static_assert(sizeof(struct notification) == 16, "object layout");
 _Static_assert(sizeof(struct irq) == 48, "object layout");
 _Static_assert(sizeof(struct route) == 64, "object layout");
@@ -611,10 +622,10 @@ static inline struct notification *irq_notification(const struct irq *i)
 /* True if the Irq will signal; a controller's line is unmasked exactly then. */
 static inline bool irq_armed(const struct irq *i) { return i->bits != 0; }
 
-/* True if an Irq on a timer line has its deadline at or before the tick count now. */
-static inline bool irq_due(const struct irq *i, uint32_t now)
+/* True if an Irq on a timer line has its deadline at or before the count now. */
+static inline bool irq_due(const struct irq *i, uint64_t now)
 {
-    return (int32_t)(i->deadline - now) <= 0;
+    return i->deadline <= now;
 }
 
 /* Objects lie on NODE_ALIGN, so that the nodes they hold do. */

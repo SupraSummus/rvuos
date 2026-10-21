@@ -372,7 +372,7 @@ so a creator that keeps a child's thread from its watch gives it none, and the c
 - The caller may stop itself, through a capability to its own thread, and goes on past the call once resumed;
   with nothing else left to run, the machine halts with `no runnable thread`.
 
-The thread keeps its process, its watch, its units and its account, which goes on filling, as at a fault,
+The thread keeps its process, its watch, its units and its virtual time, as at a fault,
 and the threads that lend it their time go on waiting, lending it nothing while it is stopped.
 A stop is no fault: it signals nothing, the watch included, and leaves `OP_THREAD_FAULT` nothing to tell.
 On ARM alone, a thread whose core could not stack its registers as it trapped for the stop has lost them,
@@ -449,7 +449,7 @@ A round trip is therefore four system calls:
 signal, wait on one side; wait, signal on the other.
 
 A trap breaks the thread's reservation,
-so an `sc.w` fails whenever a system call, the tick or an interrupt came between it and its `lr.w`;
+so an `sc.w` fails whenever a system call, the timer or an interrupt came between it and its `lr.w`;
 a loop around the pair tries again, and never succeeds with a system call inside it.
 
 **A signal orders memory.**
@@ -490,15 +490,13 @@ A program that needs more timers than it holds keeps its own deadlines
 and arms one line for the nearest.
 
 The contract is a **lower bound**.
-The kernel fires at the first tick that surely lies past the delay:
-the delay rounded up to whole ticks, plus one.
-With a millisecond tick, as every board has unless the build sets another rate,
-a delay of zero fires at the next tick,
-and a delay of 10 000 µs fires on the eleventh tick after the call,
-between 10 and 11 ms later.
+The delay is rounded up to whole counts of the counter,
+and the line fires at the first count past the call by that many: the kernel sets its timer for it.
+A delay of zero fires at once, as the timer the call sets comes,
+and a delay of 10 000 µs fires 10 ms after the call and a count, and the kernel's step that takes the interrupt.
 No upper bound is promised, because the woken thread is ready, not running,
 and waits for its turn,
-and for its account to reach a tick if it has spent it and has no spare time, section 5.11.
+and for its virtual time to come if it ran ahead of its units and has no spare time, section 5.11.
 
 Sleeping:
 
@@ -517,14 +515,14 @@ and look at which bits came back.
 A timer line fires once, so a periodic task arms it again each time it wakes.
 With `IRQ_SET_PERIOD` in `a3` the delay is a period counted from the line's last deadline,
 or from its bind, not from the call, so the task keeps its period whatever each wake costs:
-the line fires at the first tick after the call
+the line fires at the first count after the call
 that lies a whole number of periods from that deadline.
-The call returns in `a1` how many such ticks had already passed,
+The call returns in `a1` how many such counts had already passed,
 the periods a task that woke late has skipped;
 it can do their work at once, count them as overruns, or ignore them.
 Setting it again before the line fired leaves the deadline where it was.
-The period is rounded up to whole ticks and may not be zero.
-Ticks keep pace with the clock's counter, so periods do too.
+The period is rounded up to whole counts and may not be zero,
+and periods are counted on the clock's counter, so they keep pace with it.
 
 ```c
 uint32_t skipped;
@@ -564,8 +562,8 @@ uint32_t counts = rv_counter_low(counter) - at;
 The rate is the board's, 10 MHz on QEMU, the CPU clock on the ESP32-C6 and 1 MHz on RP2350,
 so a program takes it from `OP_CLOCK_READ`.
 `OP_CAP_INFO` on the clock tells the rate too, with no right, since it is not the time,
-and the tick, in counts of the counter and in microseconds:
-the quantum, which a program's own timing analysis works in, section 5.11.
+and the default span, in counts of the counter, the longest power of two within a millisecond:
+how soon a request is due that no wait or bind gave a span for, which a program's own timing analysis works in, section 5.11.
 The time is the machine's, not the thread's: it includes other threads' slices.
 Revoking below a `Clock` capability uninstalls every region derived through it.
 `rdtime` traps on every board.
@@ -694,7 +692,7 @@ and moves `taken` only as far as its host says it has the bytes, so a halt write
   a place bound to none without `RIGHT_X` holds its core's time all the same, and runs there on lent time alone.
   A ready thread waits on the queues of every core it holds the time of, and the first core to take it runs it;
   while it runs on one, the others do not see it, and it joins their queues again as its turn ends.
-  A thread whose place on a core is emptied while it runs there finishes its turn and leaves that core at the next tick.
+  A thread whose place on a core is emptied while it runs there leaves that core as the trap ends, unless it may run on there on spare time.
   `OP_CAP_INFO` on a thread tells its places and the cores they hold the time of.
 - `OP_TIME_BIND` binds a thread's place to some of a capability's units, or to none of them,
   and the thread **earns** them there.
@@ -703,90 +701,91 @@ and moves `taken` only as far as its host says it has the bytes, so a halt write
   so copies of a `Time` capability may be held by many, and each unit still goes to one thread.
   The time of the units nobody earns is spare.
 - A thread bound through a capability with `RIGHT_X` also runs on **spare time**:
-  turns no thread with time wants, which cost its account nothing.
+  turns no thread with time wants, which cost it nothing.
   The boot grant has `RIGHT_X`.
-  A thread bound through a capability without it runs on its account alone,
-  at most its units' part of its core and a full account,
+  A thread bound through a capability without it runs on its units alone,
+  at most its units' part of each span of its core and a request,
   and the core sleeps in `wfi` for the rest if nothing else wants it.
   A thread bound to no units runs on spare time alone, or not at all without `RIGHT_X`.
-- Each place of a thread has an **account** of time,
-  which gains a sixty-fourth of a tick for each unit the place earns every tick
-  and holds at most 100 ticks' worth of them, a tenth of a second.
-  A turn the thread began with time costs the account the time it ran, counted on the machine's counter,
-  whether the tick ends it or the thread waits;
-  a turn on spare time costs nothing.
-  A thread has **time** on a core while its place's account there holds at least a tick.
-  A new thread's accounts are empty, and the root task's thread's on the first core starts full.
-  Bound to other units, a place keeps what its account held, up to what the new units hold;
-  emptied, it loses it.
+- Each place of a thread has a **virtual time**, a count of the clock its units have paid for its running up to:
+  each count the thread runs on `u` units moves it on `TIME_UNITS / u` counts, counted on the machine's counter,
+  whether the timer ends the turn or the thread waits;
+  a turn on spare time costs nothing of its units, though it moves the virtual time on too, up to a span ahead of the clock.
+  A thread that runs its units' part keeps its virtual time at the clock, and one that runs more puts it ahead.
+  A bind keeps a place's virtual time, and the units it leaves keep it too,
+  so a place bound to other units takes the latest of its own and theirs; units nobody earned since boot keep none.
   A thread's units on one core promise it their part of that core only while it runs on none of its other cores,
   since a turn elsewhere puts it at the back of their queues; to every other thread they promise what they did.
+- A thread runs in **requests**, each due a span past the virtual time it starts at:
+  the span its last wait gave, `OP_NOTIFY_WAIT` or `OP_NOTIFY_LEND`, or its binding's, `OP_TIME_BIND`, sections 6.9 and 6.13,
+  or the default span for none, the longest power of two of counts within a millisecond, which `OP_CAP_INFO` on a `Clock` tells, section 6.15.
+  A request is over once the thread has run its units' part of the span, its virtual time having reached the deadline.
+  A request starts as the thread is made ready or bound, and the next as one is over,
+  at the latest of its virtual time and the clock, and only once its virtual time lies at most a span ahead of the clock.
+  A thread has **time** on a core while it has a request open there or its virtual time lies within a span of the clock.
+  So a thread that wants the core all along runs about a span ahead, and is due after a thread that wakes with a span no longer.
+  A thread that waits gives up the rest of its request, and saves nothing for later by waiting.
 - Ready threads wait for the processor in three queues, which each core has.
   A thread with time waits on the run queue;
   one without time waits on the spare queue if it may run on spare time,
-  and for its account to reach a tick if not.
+  and for its virtual time to come within a span of the clock if not.
   A thread that becomes ready, whether resumed, woken, bound or preempted,
   joins the back of its queue.
+  The thread whose request is due first on the run queue runs,
+  or, if the run queue is empty, the one that has waited longest on the spare queue,
+  which runs for its span while another waits for spare time.
+  A thread made ready whose request is due before the running thread's takes the processor at once,
+  and as the running thread's request ends, the timer takes the processor from it if another is due first,
+  or if its units give it no next request yet.
   A turn on spare time is one no thread with time wants, so it ends as soon as one wants it:
   a thread with time that becomes ready while its core runs a turn on spare time takes the processor at once,
   as the call or the interrupt that made it ready returns,
   after the running thread has made again a call that stopped for an interrupt, if it stands at one.
-- A thread waiting with `OP_NOTIFY_LEND` lends the thread it names its accounts, section 5.12:
-  a borrower without time on a core waits on its run queue while its lender has time there,
-  and the turns it takes so cost the lender's account on that core.
-- The machine timer ticks at `TIMER_HZ`, 1 kHz on every board unless the build sets another rate, `make TIMER_HZ=`,
-  which divides a second and the board's counter and is at least 650;
-  `OP_CAP_INFO` on a `Clock` or a `Time` capability tells the tick, section 6.15, so a program need not assume one.
-  A tick ends the running thread's turn:
-  the thread goes to the back of its queue,
-  and the thread that has waited longest on the run queue runs,
-  or, if the run queue is empty, the one that has waited longest on the spare queue.
-  A thread that waits, or that a stop takes off the processor, hands the rest of the tick to the next,
-  which pays for no more than it runs of it.
-  A tick that would hand the processor back to the thread that had it takes no interrupt:
-  the kernel counts and charges it at its next trap all the same,
-  so a thread alone on the processor is interrupted only at a timer line's deadline,
-  where another thread's account reaches a tick,
-  or where its own account drains, if it may not go on on spare time.
-- So threads with work and time take equal turns, and then threads on spare time do.
-  A thread with work all along gets its units' part of the processor,
-  give or take a tenth of a second's worth of the accounts.
-  A thread with time waits for its turn at most a tick for each other thread with units of its core,
-  since only such a thread has time there, or lends it, and a turn on spare time ends as the thread becomes ready;
-  so the build's tick, `TIMER_HZ`, sets that wait,
-  while tracing is off and the thread keeps its binding.
-  Its work is bounded by its units, not by its turns: a turn that begins mid-tick lasts to the next tick,
-  and over any stretch the others run at most what their accounts held and what their units earn;
-  `DESIGN.md`, "Scheduling", gives the bounds and what a periodic task needs of its units.
+- A thread waiting with `OP_NOTIFY_LEND` lends the thread it names its units, section 5.12:
+  a borrower without time on a core waits on its run queue while its lender's units give it time there,
+  and the turns it takes so move the lender's virtual time on that core.
+- There is no tick: the kernel sets each core's timer for the first count that could change what runs,
+  a timer line's deadline, a virtual time that comes, or the end of the running request while it matters,
+  so a thread alone on the processor is not interrupted at all.
+- So a thread with `u` units whose virtual time is at or behind the clock, woken within a span `s`,
+  has run `u * s / TIME_UNITS` counts of the counter within `s` of its wake, or waits again before, whatever the other threads do,
+  besides the kernel's longest step and the switches, while tracing is off and the thread keeps its binding.
+  A thread that ran ahead of its units is later by what it ran ahead, a request at most.
+  A driver that must do work of `c` within `D` of its interrupt waits within the longest power of two of counts that `D` holds,
+  `s`, and is given `TIME_UNITS * c / s` units at least.
+  A shorter span brings its requests nearer and makes them shorter, and costs the thread a switch for each while another thread waits;
+  a longer one puts them behind shorter ones.
+  A span costs no other thread anything, so a wait needs no right to give one.
+  A thread with work all along gets its units' part of the processor, give or take a request;
+  `DESIGN.md`, "Scheduling", says what a request promises and what a periodic task needs of its units.
   A thread a process adds earns only units split off the process's own, or runs on spare time:
   it takes nothing another thread earns.
-  Spare time goes round by thread, so more threads there get more of it.
 - A system call is never interrupted:
   machine mode runs with interrupts off from the trap to the return.
   On several cores one call runs at a time, whichever core makes it, and another core's call waits for it.
 - When nothing is runnable and an `Irq` is armed on a timer line or a device's line,
-  or a thread waits for its account to reach a tick,
-  the kernel stalls in `wfi` until the nearest timer line's deadline, the account that reaches a tick or the interrupt arrives,
-  and takes no tick in between.
+  or a thread waits for its virtual time to come,
+  the kernel stalls in `wfi` until the nearest timer line's deadline, the virtual time that comes or the interrupt arrives,
+  and takes no interrupt in between.
   On several cores a core with nothing to run waits so while another runs, which wakes it when it gives it a thread.
   When no core runs a thread and there is none of these, it prints `no runnable thread` and halts with code 5,
   watchdog or not.
 
 There are no priorities and no yield.
-A spinning thread cannot starve the others, because the tick preempts it,
-but it burns its turns and its account, and keeps the machine out of `wfi`
+A spinning thread cannot starve the others, because the end of its request preempts it while another is due first,
+but it burns its turns and puts its virtual time ahead, and keeps the machine out of `wfi`
 unless it is held to its units;
 a thread that waits costs nothing until it is signalled.
 
-A turn is charged by the counter, not by the tick that ends it,
-so a thread that waits just before every tick pays for the time it ran all the same.
+A turn is charged by the counter, and a wait forgives none of it,
+so a thread that waits between bursts pays for the time it ran all the same.
 
 To hold a process to about a tenth of the processor, the root task gives it six units without `RIGHT_X`.
 Its own thread earns every unit at boot, so it leaves the six first,
 then carves them and lends them without spare time:
 
 ```c
-rv_invoke(OP_TIME_BIND, BOOT_CAP_TIME, BOOT_CAP_THREAD, 0, 58);
+rv_time_bind(BOOT_CAP_TIME, BOOT_CAP_THREAD, 0, 58, 0);
 rv_invoke(OP_TIME_CARVE, BOOT_CAP_TIME, 58, 6, TIME);
 rv_invoke(OP_CAP_DERIVE, CHILD_TABLE, CHILD_TIME, TIME, RIGHT_W);
 ```
@@ -800,11 +799,13 @@ Revoking below `TIME` takes the child's units back, and its threads stop.
 A thread that waits may lend another thread its time meanwhile:
 `OP_NOTIFY_LEND` waits on a notification as `OP_NOTIFY_WAIT` does, and names the borrower
 through a capability to its thread with `RIGHT_X`, which lends it time and allows nothing else.
-A borrower without time of its own on a core, section 5.11, runs there on the account of the thread that has lent it time longest,
-if that one holds the time of the core too, and the turns it takes so cost that account;
+A borrower without time of its own on a core, section 5.11, runs there on the units of the thread that has lent it time longest,
+if that one holds the time of the core too, and the turns it takes so move that thread's virtual time;
 a lender whose own time pays for its turn hands the rest of it to the borrower at once, if the borrower waits for a turn.
 A signal from the borrower that wakes the lender hands it the rest of the turn back.
-The time goes one step, and only on a core both hold the time of: a borrower that waits, or lends in turn, passes none of it on.
+A borrower that lends in turn, having no time for its own borrower, passes on what it borrows,
+so a client's time pays for its server and for whatever that server waits on, through up to 3 lenders,
+and only on a core every one of them holds the time of.
 
 So a thread waiting for whoever holds a lock lends it its time, and so does a client waiting for its server's answer:
 a holder or a server with few units keeps a waiter with many no longer than its work takes.
@@ -826,7 +827,7 @@ A holder that faults keeps the lock, stopped, and its watcher hears it, section 
 and so does a holder stopped with `OP_THREAD_STOP`, which nobody hears: takers that lend to it wait on.
 A stopped borrower keeps its lenders, whose time buys it nothing until it is resumed,
 and a stopped lender lends nothing more: a stop takes it off its wait, and its borrower's ring of lenders.
-A stopped lender whose time pays for the borrower's turn pays to the end of that turn, at the next tick or the borrower's wait.
+A stopped lender whose time pays for the borrower's turn pays to the end of that turn, at its request's end or the borrower's wait.
 A lock keeps nobody from the memory it guards: that is the regions' work.
 
 ### 5.13 Routes

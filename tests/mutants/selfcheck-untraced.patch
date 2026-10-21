@@ -1,18 +1,18 @@
-The self-check runs on every tick, traced or not,
-so the one walk the loop check takes on trust is on the tick's path.
+The self-check runs on every interrupt of the timer, traced or not,
+so the one walk the loop check takes on trust is on the timer's path.
 It checks the same, so only the loop check's guard on the cut catches it.
 
 Caught-by: loop-bounds
 Witness: loop-bounds
 
-diff --git a/kernel/sched.c b/kernel/sched.c
---- a/kernel/sched.c
-+++ b/kernel/sched.c
-@@ -1063,6 +1063,7 @@ void sched_turn_end(void)
- 
- void sched_tick(uint32_t ticks)
+diff --git a/kernel/timer.c b/kernel/timer.c
+--- a/kernel/timer.c
++++ b/kernel/timer.c
+@@ -115,6 +115,7 @@ bool timer_trap_enter(bool pending)
  {
-+    selfcheck_run();
-     tick_advance(ticks);
-     sched_turn_end();
- }
+     bool traced = debug_trace;
+     if (!traced && pending) {
++        selfcheck_run();
+         sched_time(counter_read());
+     }
+     return traced;

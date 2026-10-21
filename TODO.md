@@ -116,12 +116,13 @@ what is left:
   would want a close that tells it first and waits for its word, as the lender's.
 - A hub keeps a slot of its parent's for each client connected, its channel's carve, which `chan_hub_close` revokes;
   `lib/bulk.h` deletes its carves once installed and uninstalls them at a close, which would spare a hub's parent those slots too.
-- `user/lab/` does not show yet a client of several threads asking at once, a driver woken between ticks,
+- `user/lab/` does not show yet a client of several threads asking at once, a driver woken in the middle of a busy thread's request,
   as a device's interrupt would wake it, two cores, a client that makes its ring look full, or one that gives up on an answer.
-  Nor several takers lending to one holder at once, which takes a hold longer than a tick, or a holder that waits on a second lock.
+  Nor several takers lending to one holder at once, which takes a hold longer than a request, or a holder that waits on a second lock.
   Nor a thin server, which only passes data on while its clients do the work,
   to tell what moving work into the client saves and what the hop still costs.
-  Why its `chain`'s second hop costs no more than the first is not worked out.
+  Why its `chain`'s second hop costs no more than the first is not worked out,
+  nor why, without the hog, a taker that lends waits longer at p90 than one that does not, `lend` against `lock`.
 
 ## ESP32-C6
 
@@ -132,7 +133,7 @@ what is left:
 - Try user mode on the rest of the user-level CSR space, here and on QEMU;
   only the CSRs the TRM lists and `0x800` to `0x802` were tried.
   `utval`, `0x043`, reads zero from user mode but was not written, so the kernel does not set it back.
-- The counter rate is measured over one tick at boot,
+- The counter rate is measured over a millisecond at boot,
   so it is only as exact as the polling loop in `timer_init`; a longer measurement would do better.
 - A device interrupt wakes its driver but does not run it;
   the driver waits for its turn like a thread a timer line woke.
@@ -534,18 +535,16 @@ what is left:
   and `tests/differential.py` still carry QEMU's addresses of their own.
 - A preemptible call that takes its caller's own code or data mapping,
   a revoke below the frame or the Untyped they came from,
-  and that stops for a tick on QEMU leaves its thread to fault on the `ecall` it would make again,
+  and that stops for the timer on QEMU leaves its thread to fault on the `ecall` it would make again,
   while the host, which makes a stopped call again at once, finishes it and traces one line more.
   The corpus has no such input; the fuzzer made one within minutes,
   which `make qemu-replay` fails by that line.
 - A call that stops without putting its thread back on the `ecall`
   the host takes as finished, and no host check sees it unless `OP_TEST_PREEMPT` armed the stop;
   `make qemu-replay` does, by the trace line the host then lacks.
-- The host moves time a tick at a time, and under tracing every turn begins at a tick,
-  so what a turn begun within a tick pays at the tick, `turn_next`,
-  and the ticks a trap counts at once, `account_after`, run only in the demo, whose bounds are loose.
-  A demo thread held to its units that always takes over half way into the tick
-  would run its units' part only if it paid for no more than that half.
+- The host moves time a millisecond at a time, and under tracing every turn begins at such a step and ends at the next,
+  so a request's end within a turn, which the timer marks, and the timer's count, `sched_next_wake`,
+  run only in the demo, whose bounds are loose, and in the self-check's hold on what the timer is set for.
 - Once a record binds a driver thread to units, and so to time the others do not have,
   passing a record round may come back before it visited every runnable thread,
   and a record for a thread that could run is performed by another.
@@ -597,7 +596,7 @@ what is left:
 
 What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
 
-- `a4` to `a6` are read by no operation and checked by none, so none can be given a meaning later
+- `a5` and `a6` are read by no operation and checked by none, nor `a4` by any but `OP_TIME_BIND`, so none can be given a meaning later
   without changing what a program that left something there does, as the unread of `a1` to `a3` now can.
   Holding them to zero, as `dispatch` does `a1` to `a3`, has every wrapper of `user/rvuos.h` set them:
   on ARM, where `r4` to `r6` are the callee's to keep, that is three moves and their saving at every call,
@@ -667,56 +666,28 @@ What the wait for a turn and the work a thread gets are bound by is in `DESIGN.m
 what does not keep to it yet comes first below, each a constant-time change, up to the bind's:
 
 - `pool_alloc` and a pool destroy zero an object whole with interrupts off,
-  and a table of `CAPTABLE_MAX_SLOTS` slots takes longer than a tick at 10 kHz on the nRF52840 and near one on the other boards,
-  where the wait's bound needs the kernel's longest step shorter than a tick.
+  and a table of `CAPTABLE_MAX_SLOTS` slots takes about a tenth of a millisecond on the nRF52840 and less on the other boards,
+  which every span's promise must leave room for.
   Zeroing a table in steps that stop, and measuring the longest step on each board,
-  would say how short a tick each board can take.
+  would say how short a span each board can keep.
 - On ARM and RP2350's Hazard3 an `OP_IRQ_SET` on a core other than the first interrupts the first core each time,
   so a driver there that arms its line in a loop takes what it likes of the first core's turns, which its threads pay for.
   Interrupting it only as `core_notify` does, or routing a line to its waiter's core, open decision 24, would bound it.
 - A bind of a ready thread, even to more units of its core, puts it at the back of its queue,
   since the old binding goes through `sched_unbind`'s settle; keeping its place would keep its wait.
-- A thread whose account holds little more than a tick loses its time when its turn ends a few counts past a tick,
-  as a trap that counts the tick late ends it, and spends the rest of that tick on spare time, or waiting without it.
-  One that earns its whole core keeps its account where it is while it runs,
-  so one bound with an empty account stays there; the demo's successor sleeps first.
-  Time judged against what the rest of the tick costs, as `turn_owes` charges it, rather than a whole tick,
-  would keep its turn, and change nothing under tracing, where every turn begins at a tick.
-- A turn is one tick while another thread could run, so the timer skips ticks only for a thread alone,
-  and a turn that begins mid-tick gets only the rest of one,
-  so threads that wait just before every tick can leave a thread with time the end of each,
-  and its work is bounded by its units, `DESIGN.md`, "Scheduling", where turns of a whole quantum would bound it by its turns too.
-  A turn of a few ticks, or of what the thread's account holds, would skip them while threads compete too,
-  and give turns the length the scheduler chooses: `sched_wake_ticks` would return the turn's end instead of one.
-  It changes what `OP_TEST_TICK` means to the replay, which passes records with it,
-  and what the demo's "root: units ok" measures; decide it with open decision 9.
-- Threads with time take equal turns,
-  so a thread with more units gets its larger part only by running on
-  after the others have spent their accounts.
-  A turn of as many ticks as the thread's units weigh would spread that over time;
-  decide with the first workload that wants it, and with the turn counted from the switch below.
-- A trap reads the counter on entry whenever the timer is set past the next tick,
-  which QEMU counts at a sixth of the cheapest system call.
-  Counting only where the count or an account is read, the timer lines' calls and a change of turn among them,
-  which reads the counter already to charge the turn, would spare it,
-  at the price of a rule every such place has to keep.
-- Threads cannot spend one account together, and spare time goes round by thread,
+- A switch reads the clock wherever a virtual time or a request is looked at, several times in a call that settles threads;
+  reading it once a trap, and passing the count on, would spare a few dozen instructions of `make bench`'s `threads`.
+- Threads cannot spend one virtual time together, and spare time goes round by thread,
   so a group of threads shares a part of the processor only by splitting units, a sixty-fourth at least each.
-  An account several threads are bound to would bring the share back; decide with the first workload that wants one.
-- An account holds at most a tenth of a second's worth of its units.
-  More lets an idle thread bring back a longer burst, which the others then wait out;
-  less holds a thread nearer its units over short stretches;
-  decide when a workload measures the difference.
-  It bounds the work a thread gets beside threads that save up their time, (64 - u) / u tenths of a second at worst, whatever the tick;
-  a cap in ticks, `COUNT_PARTS` and one at the least, or one the granter sets with the units, would shorten that with the tick.
+  A virtual time several threads are bound to would bring the share back; decide with the first workload that wants one.
 - A fault hands the rest of the turn to the next thread as a wait does, though its watch's signal wakes the watcher
   whose time pays for the turn, if it lends the thread its time: that watcher waits on the run queue for its own turn.
   Handing it the rest of the turn, as a signal from the borrower does, would not;
   a thread that reports and then stops itself, `OP_THREAD_STOP`, has the report's signal hand it back already.
 - A thread that waits hands the rest of its turn to the next on the run queue,
-  so a server woken by an ask waits for the turn ahead of it, a tick beside a busy process, whatever units either side earns;
+  so a server woken by an ask waits for the request ahead of it beside a busy process, if that one is due first;
   see `user/lab/NOTES.md`.
-  Handing it to the thread the waiter just woke, and the answer's back, might take that tick out with no change to the ABI;
+  Handing it to the thread the waiter just woke, and the answer's back, might take that wait out with no change to the ABI;
   try it against `make lab`'s `hog`, `rich-ui`, `rich-server` and `chain`.
   A waiter that lends does hand its turn so, and has it back with the signal that wakes it:
   `lend-server` against `poor-server`, `lend-hog` against `lock-hog`.

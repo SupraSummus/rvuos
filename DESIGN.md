@@ -77,7 +77,7 @@ It has four goals, in priority order.
    A process that creates many kernel objects pays for them
    with its own memory.
 4. **Bounded work.**
-   A system call, a tick or an interrupt costs what constants of the machine allow,
+   A system call, the timer or an interrupt costs what constants of the machine allow,
    however many objects anyone has created,
    destruction aside, which is paid for and preempted; see "Bounded work".
    On several cores the wait for the kernel's lock is bounded the same way, by a step of each other core.

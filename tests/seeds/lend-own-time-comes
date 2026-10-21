@@ -1,0 +1,32 @@
+# Thread 2 earns one unit without spare time at a span of 2^16 counts and runs alone until it has no time.
+actor 1 OP_POOL_ALLOC slot BOOT_CAP_POOL a1 CAP_NOTIFICATION a2 REPLAY_CAP_FREE+3 a3 0
+actor 1 OP_CAP_COPY slot REPLAY_CAP_TABLE a1 REPLAY_CAP_FREE+3 a2 REPLAY_CAP_FREE+3 a3 RIGHT_ALL
+actor 1 OP_TIME_CARVE slot BOOT_CAP_TIME a1 48 a2 1 a3 REPLAY_CAP_FREE+15
+actor 1 OP_CAP_DERIVE slot BOOT_CAP_CAPTABLE a1 REPLAY_CAP_FREE+16 a2 REPLAY_CAP_FREE+15 a3 RIGHT_W
+actor 1 OP_TIME_BIND slot REPLAY_CAP_FREE+16 a1 REPLAY_CAP_THREAD a2 0 a3 1 a4 0x10000
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+# The root earns units at a span of 2^20 counts, and lends thread 2 its time, which thread 2 runs on, charged to the root.
+actor 1 OP_TIME_BIND slot BOOT_CAP_TIME a1 BOOT_CAP_THREAD a2 0 a3 32 a4 0x100000
+actor 1 OP_TIME_BIND slot BOOT_CAP_TIME a1 REPLAY_CAP_THIRD a2 32 a3 8
+actor 1 OP_NOTIFY_LEND slot REPLAY_CAP_FREE+3 a1 REPLAY_CAP_THREAD a2 0
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+# The third, at the default span, runs before thread 2's requests on the root's time, until thread 2's own time comes again.
+actor 2 OP_THREAD_RESUME slot REPLAY_CAP_THIRD
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 3 OP_TEST_TICK slot BOOT_CAP_TEST
+# The third wakes the root while thread 2 waits on the run queue on the root's time with its own come again.
+actor 3 OP_NOTIFY_SIGNAL slot REPLAY_CAP_FREE+3 a1 0x1
+actor 2 OP_TEST_TICK slot BOOT_CAP_TEST
+actor 1 OP_PRINT slot BOOT_CAP_PRINT a1 0x61 a2 0 a3 0

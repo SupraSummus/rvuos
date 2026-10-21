@@ -115,8 +115,8 @@ def shapeOf : Nat → Shape
   | 34 => ⟨capThread, rightW, shapeA1⟩
   | 35 => ⟨capThread, rightW, shapeA1 ||| shapeA2⟩
   | 14 => ⟨capNotification, rightW, shapeA1⟩
-  | 15 => ⟨capNotification, rightR, 0⟩
-  | 38 => ⟨capNotification, rightR, shapeA1⟩
+  | 15 => ⟨capNotification, rightR, shapeA1⟩
+  | 38 => ⟨capNotification, rightR, shapeA1 ||| shapeA2⟩
   | 36 => ⟨capNotification, 0, shapeA1 ||| shapeA2⟩
   | 19 => ⟨capIrqLine, 0, shapeA123⟩
   | 20 => ⟨capIrqLine, rightW, shapeA123⟩
