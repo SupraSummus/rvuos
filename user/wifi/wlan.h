@@ -73,6 +73,7 @@ int32_t wlan_ioctl(struct wlan *w, uint32_t kind, uint32_t cmd, const void *data
 int32_t wlan_set_u32(struct wlan *w, uint32_t cmd, uint32_t value);
 int32_t wlan_set_var(struct wlan *w, const char *name, const void *value, uint32_t len);
 int32_t wlan_set_var_u32(struct wlan *w, const char *name, uint32_t value);
+/* A variable's value; -1 where the name or len is longer than the request's 64 bytes, as for no answer. */
 int32_t wlan_get_var(struct wlan *w, const char *name, void *out, uint32_t len);
 
 /* The firmware's setup after boot: the CLM, the country, the events, up. mac gets the chip's address. */

@@ -117,6 +117,46 @@ A scan of the driver's own followed, passive as the libraries' now is too:
 the radio retuned through `libphy.a` alone, as the libraries retune it, and each beacon read by hostap's parser,
 which `make mgmt-test` runs on the host, under the sanitizers, against every cut of a beacon.
 
+## Frames to the group and beacons lost, and where
+
+At the MikroTik wAP ax here the station missed many of the access point's frames to the group,
+above all the one sent right after a frame with More Data set,
+and ESP-IDF's own stack missed them alike, so esp-idf #16096, with its sketch on the branch `esp32c6-group-loss`,
+put the loss in Espressif's libraries or the chip.
+It lay in neither.
+Another station of that access point, a smart plug with an Espressif chip,
+acknowledged the access point's frames to the group, which in 802.11 no station acknowledges.
+Its acknowledgement starts a SIFS after the frame's end, as does the access point's next frame of the run.
+The two overlap, and the ESP32-C6, which heard the plug a little louder than the access point,
+took the acknowledgement and lost the frame, while a Pico 2 W at the same access point heard them all.
+With the plug off, the frame after More Data went missing no more often, for its length, than a beacon did.
+
+The beacons the station missed there, more in some hours than in others, were the place's too.
+A Pico 2 W beside the ESP32-C6, joined to the same access point, missed most of the same beacons,
+far more of them than two independent receivers would share,
+and ESP-IDF's own stack, run in turns with the driver, missed as many as the driver.
+At a beacon it missed, the ESP32-C6 received nothing, not even a broken frame.
+So a loss is the driver's only where a receiver beside it hears what the driver misses.
+
+How it was found; the probe was not kept:
+
+- **The time of each frame.**
+  The receive header's word at byte 12 is the reception's time in microseconds,
+  about 35 µs after the preamble began: an acknowledgement a SIFS after a frame's end reads 45 µs after it.
+- **The control frames.**
+  `SNIFF_CTRL_TYPES`'s mask set, and `SNIFF_CTRL_NONE` cleared in `SNIFF_CTRL0` and `SNIFF_CTRL1`,
+  pass them all, acknowledgements among them, where `mac_sniffer` passes none.
+- **The broken frames.**
+  `SNIFF_MISC`'s bits 17 and 18 cleared pass them, see `mac.c`; their headers are mostly noise.
+- **The witness.**
+  The Pico 2 W's firmware counts, in its `counters` variable, the TBTTs in word 46
+  and the beacons of its own BSS received in word 86.
+  Read every 20 ms or so, they tell each beacon interval heard or not,
+  though a beacon is often counted in the next interval, so only a lasting deficit is a miss.
+  The group frames after DTIM beacons, word 83, align the Pico 2 W's intervals with the ESP32-C6's frames.
+  Its monitor mode, `WLC_SET_MONITOR` with `mpc` 0, stops after some 30 frames,
+  and its `tsf` variable is not supported.
+
 ## The MAC's sending, the driver's own
 
 Reading what the libraries wrote to a slot to send a frame let the sending be the driver's own:

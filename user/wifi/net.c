@@ -264,8 +264,8 @@ void net_udp_unbind(struct net *n, uint16_t port)
  * DHCP: a discover, or a request for the offer taken, broadcast from 0.0.0.0.
  * The broadcast flag stays clear, so the answer comes to our MAC address,
  * which ip_input takes before we have an address:
- * an access point sends that until it is acknowledged, a broadcast only once,
- * and the ESP32-C6 misses many broadcasts; see TODO.md.
+ * an access point sends that until it is acknowledged, a broadcast only once, which a collision loses;
+ * see user/wifi/esp32c6/NOTES.md, "Frames to the group and beacons lost, and where".
  */
 static void dhcp_send(struct net *n, uint32_t type)
 {

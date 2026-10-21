@@ -271,25 +271,10 @@ what is left:
   and even then the RF's analog buses stay powered in the PMU, `PMU_RF_PWC`'s bits 28 to 31,
   which the kernel's `board_init` sets and the driver's `phy_xpd_rf` leaves alone.
   The kernel's halt could power the modem down, once what of the PMU does it is measured.
-- At a MikroTik wAP ax here the ESP32-C6 misses frames to the group that the access point sends 10 µs after another,
-  in its run after a DTIM beacon: of those after a frame with More Data set,
-  from a third to nearly all in runs of half a minute, none in some short ones, and not even as broken frames.
-  ESP-IDF's own stack misses them alike, and a Pico 2 W at the same access point at the same time heard them all:
-  the loss lies in Espressif's libraries or the chip, reported in esp-idf #16096 with a sketch on the branch `esp32c6-group-loss`.
-  `net.c` asks DHCP for unicast answers for it, but an ARP request for the station is a broadcast still,
-  so a host may wait seconds to reach it.
-  There the ping of `make BOARD=esp32c6 wifi-esp32c6` fails now and then:
+- At the MikroTik wAP ax here the ping of `make BOARD=esp32c6 wifi-esp32c6` fails now and then:
   the station answers every request, the host hears fewer than four of five, and where the answers go is not known.
   The sending once copied a frame over the one the MAC still read, which lost answers just so;
   whether that was all of it wants a longer series.
-  The Pico 2 W's `debug=dhcp` and `bssid=` measure it.
-  The own receive, through the MAC without the libraries, misses them too:
-  `listen=` counts the access point's frames to the group and whether the next by number is heard after each,
-  and at the access point here heard at about -77 dBm it missed the next after every frame with More Data,
-  at the one heard at about -56 dBm after none.
-  So the loss lies not in the libraries' receive but in the chip, or in what the PHY -- now the driver's own, with the
-  same writes `libphy.a` made -- and the MAC's configuration, the same in the own start as in theirs, set; esp-idf
-  #16096 can be told so.
 - The ESP32-C6's station refuses an open network: it takes an access point whose beacon has an RSN element,
   and a passphrase.
 - With the APM units confining the modem to the driver's block, as measured for open decision 13,

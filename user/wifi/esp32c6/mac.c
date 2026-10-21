@@ -218,6 +218,9 @@ void mac_default_policy(const uint8_t mac[6])
  * the driver writes them so too.
  * Read before and after the libraries' calls, with their station started, SNIFF alone changed: the others held
  * those values already.
+ * Bits 17 and 18 of the miscellaneous word keep broken frames from the list:
+ * their hal_sniffer_set_promis_misc_pkt clears bit 17 for its filter of miscellaneous frames, and 18 too for FCS failures.
+ * Both clear, the MAC hands over frames ending in state 0x41, which frame() counts as broken.
  */
 #define SNIFF                 (MAC_BASE + 0x0e4u)
 #define SNIFF_ALL             0x00020000u
