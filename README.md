@@ -19,7 +19,7 @@ and `CLAUDE.md` for repository conventions.
 
 ## Building and running
 
-Requirements: clang 22 and lld with RISC-V and ARM support,
+Requirements: clang 23 and lld with RISC-V and ARM support,
 llvm-objcopy, llvm-objdump and llvm-symbolizer, Python 3, GNU make, qemu-system-riscv32 and qemu-system-arm.
 No separate cross toolchain is needed.
 

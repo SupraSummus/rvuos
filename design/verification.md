@@ -708,7 +708,8 @@ Under QEMU's `-icount` the clock counts instructions and a run repeats exactly,
 so on QEMU's three boards `tests/bench.py` holds each cost to the board's record in `tests/bench/` within a tenth either way,
 narrow enough for a step added to every call.
 The band holds for one clang's code alone, the version the record names:
-clang 18's misses clang 22's records by up to two fifths on the ARM boards.
+clang 18's missed clang 22's records by up to two fifths on the ARM boards,
+though clang 22's kept within clang 23's.
 A change that moves a cost further writes the record anew with `make bench-refresh`, and its commit says what it cost.
 The last measure, the worst round trip beside a process that always wants the core, is the scheduler's; see open decision 9.
 

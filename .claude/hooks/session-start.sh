@@ -1,7 +1,7 @@
 #!/bin/bash
 # Install what `make check` needs in a Claude Code cloud session:
-# QEMU for RISC-V and for ARM, and clang 22 with lld, LLVM's tools and the fuzzer and sanitizer runtimes.
-# The records of `tests/bench/` hold for the clang that wrote them, 22, and Ubuntu's is older,
+# QEMU for RISC-V and for ARM, and clang 23 with lld, LLVM's tools and the fuzzer and sanitizer runtimes.
+# The records of `tests/bench/` hold for the clang that wrote them, 23, and Ubuntu's is older,
 # so clang comes from apt.llvm.org and its tools are linked into /usr/local/bin, ahead of /usr/bin.
 # It installs only what is missing, so a cached container starts at once.
 set -euo pipefail
@@ -19,7 +19,7 @@ if [ ${#qemu[@]} -gt 0 ]; then
   apt-get install -y -q --no-install-recommends "${qemu[@]}"
 fi
 
-LLVM=22
+LLVM=23
 bin=/usr/lib/llvm-$LLVM/bin
 key=/etc/apt/keyrings/apt.llvm.org.asc
 
