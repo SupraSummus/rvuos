@@ -139,12 +139,13 @@ void drv_wifi_reset_mac(void);
 void drv_wpa_debug(void);
 
 /*
- * main.c: the driver's page, text to the kernel's log, its events,
+ * radio.c: the program's page, text to the kernel's log, its events, each Wi-Fi event below 32 a bit of drv_events,
  * and a step that failed, the first of which the page keeps for the root task.
- * A step that must succeed, the driver's own start's or mac.c's, stops the calling thread if it fails, CHILD_FAILED;
- * drv_stop stops any of the driver's threads.
+ * A step that must succeed, the program's own or mac.c's, stops the calling thread if it fails, CHILD_FAILED,
+ * the radio turned off first; drv_stop stops any of the program's threads.
  */
 extern struct drv *drv_self;
+extern struct event_group drv_events;
 void drv_say(const char *fmt, ...);
 void drv_failed(const char *step, uint32_t detail);
 void drv_vsay(const char *tag, const char *fmt, va_list args);
@@ -152,7 +153,15 @@ void drv_event(const char *base, int32_t id, const void *data, size_t size);
 void drv_must(const char *step, esp_err_t e);
 void drv_must_mac(const char *step, const char *failed);
 __attribute__((noreturn)) void drv_stop(uint32_t state);
+
+/*
+ * The program's own, which each program defines: its run, on the first thread once the adapter is up, with what it
+ * may build of its own, and the radio turned off, which a step that fails does before it stops the thread.
+ */
+__attribute__((noreturn)) void drv_run(struct drv *d, struct self *own);
 void drv_radio_off(void);
+
+/* The Wi-Fi station's main.c: what mac.c counted, and a line about an Ethernet frame for debug=frames. */
 void drv_mac_told(const char *who);
 void drv_trace(const char *way, const uint8_t *f, uint32_t len);
 

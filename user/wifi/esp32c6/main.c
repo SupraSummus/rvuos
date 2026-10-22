@@ -1,11 +1,8 @@
 /*
- * The driver's entry and its first thread: Espressif's libraries brought up in station mode, which brings the MAC up,
+ * The Wi-Fi station's program, its run on the radio's first thread, see radio.c: the MAC and the PHY brought up,
  * then a channel heard, a scan, or the station's own thread, which joins the network the page names; see drv.h.
  * Or, with a channel of IEEE 802.15.4's named, that radio instead of Wi-Fi's, i154.c.
  *
- * The root task starts the driver as a child at drv_main, with a0 at its page and its stack in the child's data.
- * The thread fills the image's data, makes its account of what it may build of its own,
- * starts the adapter's threads, and joins them as one of theirs, since it calls the libraries too.
  * Once the station runs, the thread attends to the root task, and hands the station what the network process
  * puts into the link; the station puts what it receives into the link the other way.
  */
@@ -25,81 +22,7 @@
 #include "rvuos.h"
 #include "sta.h"
 
-void drv_main(struct child_page *page);
-
-/* The image's own layout, from its linker script, which esptool writes into the window onto flash. */
-extern uint8_t drv_data_load[], drv_data_start[], drv_data_end[], drv_bss_start[], drv_bss_end[];
-
-__attribute__((section(".header"), used)) const struct drv_header drv_image = { DRV_MAGIC, drv_main };
-
-struct drv *drv_self;
-static struct thread *first_thread; /* the driver's first, which alone waits on its inbox */
-static struct self own;
-static struct event_group events; /* the adapter's, a bit for each Wi-Fi event below 32 */
-static struct lock say_lock;
-static uint32_t say_word;
 static int started; /* whether esp_wifi_start ran, so that the radio is to be turned off */
-
-void drv_vsay(const char *tag, const char *fmt, va_list args)
-{
-    char line[160];
-    uint32_t n = 0;
-    if (tag) {
-        for (; tag[n] && n < 24; n++) {
-            line[n] = tag[n];
-        }
-        line[n++] = ':';
-        line[n++] = ' ';
-    }
-    vsnprintf(line + n, sizeof(line) - n, fmt, args);
-    lock_take(&say_lock);
-    rv_puts(CHILD_LOG, line);
-    lock_give(&say_lock);
-}
-
-void drv_say(const char *fmt, ...)
-{
-    va_list args;
-    va_start(args, fmt);
-    drv_vsay(0, fmt, args);
-    va_end(args);
-}
-
-/* The first failure's step into the page, which the root task zeroed, so the name stays terminated. */
-static void failed_at(struct drv *d, const char *step, uint32_t detail)
-{
-    if (d->failed[0] == 0) {
-        for (uint32_t i = 0; i + 1 < sizeof(d->failed) && step[i]; i++) {
-            d->failed[i] = step[i];
-        }
-        d->c.detail = detail;
-    }
-}
-
-void drv_failed(const char *step, uint32_t detail)
-{
-    failed_at(drv_self, step, detail);
-    drv_say("driver: %s failed: %d (0x%x)\n", step, (int)detail, (unsigned)detail);
-}
-
-static int streq(const char *a, const char *b)
-{
-    while (*a && *a == *b) {
-        a++;
-        b++;
-    }
-    return *a == *b;
-}
-
-void drv_event(const char *base, int32_t id, const void *data, size_t size)
-{
-    (void)data;
-    drv_say("event: %s %d, %u bytes\n", base, (int)id, (unsigned)size);
-    if (!streq(base, "WIFI_EVENT") || (uint32_t)id >= 32) {
-        return;
-    }
-    osi_event_set_bits(&events, 1u << id);
-}
 
 /* The radio off, which the libraries turn on in esp_wifi_start: the PHY is closed once nothing uses it. */
 void drv_radio_off(void)
@@ -110,35 +33,9 @@ void drv_radio_off(void)
     }
 }
 
-/*
- * The state reported, and the calling thread stopped for good: the first in its inbox, as child_stop stops it,
- * any other in a wait of the adapter's, so that it takes no wake of the first's.
- */
-void drv_stop(uint32_t state)
-{
-    if (osi_self() == first_thread) {
-        child_stop(&drv_self->c, state);
-    }
-    child_report(&drv_self->c, state);
-    for (;;) {
-        osi_delay_ms(OSI_FOREVER);
-    }
-}
-
-/* A step of the libraries' that must succeed; one that fails stops the calling thread, and the page says which. */
-void drv_must(const char *step, esp_err_t e)
-{
-    if (e != ESP_OK) {
-        drv_failed(step, (uint32_t)e);
-        drv_radio_off();
-        drv_stop(CHILD_FAILED);
-    }
-    drv_say("driver: %s\n", step);
-}
-
 static void await(const char *what, int32_t id, uint32_t ms)
 {
-    uint32_t bits = osi_event_wait_bits(&events, 1u << id, 1, 1, ms);
+    uint32_t bits = osi_event_wait_bits(&drv_events, 1u << id, 1, 1, ms);
     drv_must(what, bits & (1u << id) ? ESP_OK : ESP_FAIL);
 }
 
@@ -187,12 +84,6 @@ void drv_mac_told(const char *who)
                     (unsigned)(c->sum / c->n), (unsigned)c->most);
         }
     }
-}
-
-/* A step of mac.c's that must succeed: 0, or the step that failed, which stops the driver as drv_must does. */
-void drv_must_mac(const char *step, const char *failed)
-{
-    drv_must(failed ? failed : step, failed ? ESP_FAIL : ESP_OK);
 }
 
 /*
@@ -544,8 +435,15 @@ static __attribute__((noreturn)) void trace_run(void)
  * The station brought up by the driver's own start, which brings the MAC and the PHY up, libphy's calibration among
  * it; the libraries are not initialised, and run nothing.
  */
-static __attribute__((noreturn)) void run(struct drv *d)
+void drv_run(struct drv *d, struct self *own)
 {
+    uint32_t note, status;
+    if ((status = slot_new(own, &note)) != KERR_OK ||
+        (status = rv_pool_alloc(own->pool, CAP_NOTIFICATION, note, 0)) != KERR_OK) {
+        drv_failed("the link's lock", status);
+        drv_stop(CHILD_FAILED);
+    }
+    sta_link_init(note);
     if (d->trace && d->i154) {
         i154_trace_run(d);
     }
@@ -553,11 +451,11 @@ static __attribute__((noreturn)) void run(struct drv *d)
         trace_run();
     }
     if (d->i154) {
-        i154_run(d, &own);
+        i154_run(d, own);
     }
 #ifdef I154_LISTEN
     if (d->i154_listen) {
-        i154_listen_run(d, &own);
+        i154_listen_run(d, own);
     }
 #endif
     drv_say("driver: %u bytes of heap free\n", (unsigned)osi_heap_free());
@@ -568,7 +466,7 @@ static __attribute__((noreturn)) void run(struct drv *d)
     started = 1;
     await("the station started", WIFI_EVENT_STA_START, 5000);
     child_report(&d->c, DRV_UP);
-    drv_must_mac("the MAC's sending", mac_tx_init(&own));
+    drv_must_mac("the MAC's sending", mac_tx_init(own));
     if (d->ssid[0] == 0 && d->listen) {
         listen(d);
     }
@@ -580,43 +478,4 @@ static __attribute__((noreturn)) void run(struct drv *d)
     }
     drv_must_mac("the station's thread", sta_start(d));
     attend(d);
-}
-
-void drv_main(struct child_page *page)
-{
-    struct drv *d = (struct drv *)page;
-    /*
-     * The ROM's ets_delay_us counts the core's cycles in the user-mode performance counter, 0x802,
-     * which rvuos leaves stopped in a new process and keeps with it after,
-     * at the rate of the clock the ROM found, which the clock's own replaces; see manual/targets.md.
-     */
-    __asm__ volatile("csrw 0x800, %0\n\tcsrw 0x801, %0" : : "r"(1));
-    uint64_t now;
-    uint32_t hz, counter;
-    rv_clock_read(d->clock, &now, &hz, &counter);
-    ets_update_cpu_frequency(hz / 1000000u);
-    memcpy(drv_data_start, drv_data_load, (size_t)(drv_data_end - drv_data_start));
-    memset(drv_bss_start, 0, (size_t)(drv_bss_end - drv_bss_start));
-    drv_self = d;
-    child_self(&own, &d->own);
-    uint32_t note, status;
-    if ((status = slot_new(&own, &note)) != KERR_OK ||
-        (status = rv_pool_alloc(own.pool, CAP_NOTIFICATION, note, 0)) != KERR_OK) {
-        failed_at(d, "the log's lock", status);
-        child_stop(&d->c, CHILD_FAILED);
-    }
-    say_lock = (struct lock){ (uint32_t)(uintptr_t)&say_word, note };
-    lock_init(&say_lock);
-    if ((status = slot_new(&own, &note)) != KERR_OK ||
-        (status = rv_pool_alloc(own.pool, CAP_NOTIFICATION, note, 0)) != KERR_OK) {
-        failed_at(d, "the link's lock", status);
-        child_stop(&d->c, CHILD_FAILED);
-    }
-    sta_link_init(note);
-    /* This thread calls the adapter too, so it is one of its threads, on the stack the root task gave it. */
-    if (!osi_init(d, &own) ||
-        (first_thread = osi_adopt("driver", (uintptr_t)page, (uintptr_t)page + DRV_DATA_SIZE)) == 0) {
-        child_stop(&d->c, CHILD_FAILED);
-    }
-    run(d);
 }
