@@ -65,11 +65,7 @@ SELFCHECK_VARIANT := $(if $(filter-out $(SELFCHECK_DEFAULT),$(SELFCHECK)),$(if $
 # Asked for with WIFI_BT=1, and built in a directory of its own, as a budget does, since no object depends on the flag.
 WIFI_BT ?=
 WIFI_BT_VARIANT := $(if $(filter-out 0,$(WIFI_BT)),-bt)
-# The ESP32-C6's 802.15.4 listener, an experiment of its own, behind C6_LISTEN=1; see user/radio/esp32c6/i154.c.
-# A directory of its own, so that without it the C6's images are exactly as they would be without the listener.
-C6_LISTEN ?=
-C6_LISTEN_VARIANT := $(if $(filter-out 0,$(C6_LISTEN)),-c6listen)
-VARIANT := $(PMP_VARIANT)$(if $(filter-out 1,$(CORES)),-smp$(CORES))$(SELFCHECK_VARIANT)$(WIFI_BT_VARIANT)$(C6_LISTEN_VARIANT)
+VARIANT := $(PMP_VARIANT)$(if $(filter-out 1,$(CORES)),-smp$(CORES))$(SELFCHECK_VARIANT)$(WIFI_BT_VARIANT)
 
 # The board's architecture, which only RP2350 lets the command line change;
 # the other one builds in a directory of its own, as a budget does.
@@ -94,7 +90,7 @@ CFLAGS    := $(ARCHFLAGS) -std=c11 -ffreestanding -fno-builtin -fno-pic -fno-com
              -nostdlib -O2 -g -Wall -Wextra -Werror -Wundef -Wshadow \
              -Wstrict-prototypes -Wmissing-prototypes -Iinclude \
              -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -DCORES=$(CORES) -DSELFCHECK=$(SELFCHECK) \
-             $(if $(filter-out 0,$(WIFI_BT)),-DWIFI_BT=1) $(if $(filter-out 0,$(C6_LISTEN)),-DI154_LISTEN=1)
+             $(if $(filter-out 0,$(WIFI_BT)),-DWIFI_BT=1)
 ASFLAGS   := $(ARCHFLAGS) -g -Iinclude -DCORES=$(CORES) $(if $(filter-out 0,$(WIFI_BT)),-DWIFI_BT=1)
 LDFLAGS   := $(ARCHFLAGS) -nostdlib -static -fuse-ld=lld -Wl,--gc-sections -Wl,--no-dynamic-linker
 

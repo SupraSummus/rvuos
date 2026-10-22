@@ -599,14 +599,16 @@ readers, and `macstart.c`'s own transcription gives the fields:
 
 ## IEEE 802.15.4 beside Wi-Fi
 
-`i154=` brings the chip's 802.15.4 radio up instead of Wi-Fi's, as ESP-IDF's open driver does; `i154.c` says how.
+The radio's program `prog/i154.c` brings the chip's 802.15.4 radio up instead of Wi-Fi's, as ESP-IDF's open driver does;
+`i154.c` says how. It was `i154=` of the station's image until the radio's programs were apart from the station,
+and the listener, `prog/i154listen.c`, `C6_LISTEN=1`'s build of it.
 Its MAC is a whole one in hardware, unlike Wi-Fi's, but for CSMA-CA's backoffs and the retries,
 `mac154.h`'s, as the nRF52840's link has them, which the driver times on the MAC's own timer0.
 It needs the BT baseband, now the driver's own `btbb.c` in place of `libbtbb.a`; the baseband's data still lies in the
 driver's RAM, so Wi-Fi's runs see their own data further on, and a traced start held to one from before the data was
 there differed only in the address the receive list is written at.
 
-The bring-up has a trace window of its own, `trace=1` with `i154=`: the driver runs the radio's bring-up and nothing
+The bring-up has a trace window of its own, `trace=1` given `prog/i154.c`: the program runs the radio's bring-up and nothing
 else, before its survey and the exchange, and with the root task mapping no device every access faults to the watcher,
 which carries it out and logs it, as Wi-Fi's window's does; `trace=2` runs the same window with the devices mapped.
 It was what the driver's own baseband, `btbb.c`, was held to as Espressif's `libbtbb.a` was taken from it one function

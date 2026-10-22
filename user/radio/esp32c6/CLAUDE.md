@@ -19,3 +19,10 @@ A change to `dump.c`, `dump.h` or `prog/sampler.c` runs the sampler with `channe
 with the nRF52840's frames as the signal of known frequency, as the station's `NOTES.md`, "The dump engine", says,
 and `tools/dump-spectrum.py` must find them in the captures of their seconds, at the offset of their channel,
 and in none before them.
+
+### The 802.15.4 programs
+
+A change to `i154.c` runs `tools/thread-pair.sh`, as the repository's `CLAUDE.md` says,
+and `prog/i154listen.c` on channel 12 with the nRF52840 sending there, as for the sampler,
+which must hear its frames whole, and with `dump=`, `dumpbt=1`, `dumplane=14` and `dumpsource=0`
+take a capture every second of the run and still answer the root task.

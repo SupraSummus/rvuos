@@ -1,5 +1,7 @@
 /*
- * The root task of the Wi-Fi system on an ESP32-C6: the driver of drv.h and the network process of wifi.h,
+ * The root task of the ESP32-C6's radio programs: it runs the program in the window onto flash as its child,
+ * the driver of drv.h, with what the program's header asks for, and ends the run when the program does.
+ * For the Wi-Fi station it is the Wi-Fi system's root task besides: the driver and the network process of wifi.h,
  * each a child of its own, joined by the link, and the network process's clients, as on the Pico 2 W; see system.h.
  *
  * It reads the factory MAC address from the eFuse and what to do from the input region,
@@ -391,9 +393,7 @@ static void snap_parse(const char *conf, uint32_t len)
  * a test of the sending alone.
  * listen=, a channel, with no ssid has the driver hear that channel without joining, and tell what it heard;
  * probe=, with listen=, has it ask for that network on the channel, and count the answers; see drv.h.
- * i154=, a channel of IEEE 802.15.4's, 11 to 26, has the driver bring that radio up instead of Wi-Fi's,
- * and exchange frames there with the nRF52840's user/thread/ until the run is over; see i154.h;
- * i154stream=, up to 200, has it send the nRF52840 that many frames a second besides.
+ * Another program reads its own keys from the configuration the page holds; see its file in prog/.
  * antenna=ufl has the XIAO's RF switch pick its U.FL connector rather than the antenna on the board,
  * and antenna=none leaves the pins alone, on a board without that switch.
  * The passphrase lives in the driver's page and memory, never in an image.
@@ -429,14 +429,6 @@ static void configure(struct drv *p)
     uint32_t channel = config_number(conf, size, "listen", 0);
     p->listen = (uint8_t)(channel <= 13 ? channel : 0);
     config_value(conf, size, "probe", p->probe, sizeof(p->probe));
-    channel = config_number(conf, size, "i154", 0);
-    p->i154 = (uint8_t)(channel >= 11 && channel <= 26 ? channel : 0);
-    uint32_t stream = config_number(conf, size, "i154stream", 0);
-    p->i154_stream = (uint8_t)(stream <= 200u ? stream : 200u);
-#ifdef I154_LISTEN
-    uint32_t listen154 = config_number(conf, size, "i154listen", 0);
-    p->i154_listen = (uint8_t)(listen154 >= 11 && listen154 <= 26 ? listen154 : 0);
-#endif
     p->trace = config_number(conf, size, "trace", 0); /* 1: the root serves each access; 2: the window with no fault */
     trace_wanted = p->trace != 0;
     trace_serving = p->trace == 1;
@@ -448,10 +440,6 @@ static void configure(struct drv *p)
     if (p->ssid[0] && !(program.needs & DRV_NEED_NET)) {
         say(&kout, "root: %s joins no network; %s is not joined\n", program_name, p->ssid);
         p->ssid[0] = 0;
-    }
-    if (p->i154 && !(program.needs & DRV_NEED_I154)) {
-        say(&kout, "root: %s has no 802.15.4; i154=%u is left out\n", program_name, (uint32_t)p->i154);
-        p->i154 = 0;
     }
     must("uninstall the input", region_free(&self, region));
 }
@@ -663,11 +651,7 @@ static void driver_build(void)
     must("the modem's lines", rv_irq_carve(BOOT_CAP_IRQ_LINES, DRV_LINE_FIRST, DRV_LINES, lines));
     must("give the driver the modem's lines", child_give(&self, c, lines, RIGHT_W, &p->lines));
     must("the lines' slot back", slot_free(&self, lines));
-    if ((program.needs & DRV_NEED_I154) && (p->i154
-#ifdef I154_LISTEN
-                                             || p->i154_listen
-#endif
-                                             )) {
+    if (program.needs & DRV_NEED_I154) {
         must("a slot", slot_new(&self, &lines));
         must("the 802.15.4 MAC's line", rv_irq_carve(BOOT_CAP_IRQ_LINES, DRV_LINE_I154, 1, lines));
         must("give the driver the 802.15.4 MAC's line", child_give(&self, c, lines, RIGHT_W, &p->i154_line));
@@ -715,7 +699,8 @@ static void driver_state(uint32_t state)
     } else if (state == DRV_LISTENING) {
         say(&kout, "root: the driver listens on channel %u\n", p->channel);
     } else if (state == DRV_LEFT) {
-        say(&kout, "root: the driver left the network\n");
+        say(&kout, (program.needs & DRV_NEED_NET) ? "root: the driver left the network\n" : "root: %s is over\n",
+            program_name);
         system_halt(0);
     } else if (state == DRV_TRACED) {
         trace_dump();
@@ -888,16 +873,6 @@ int main(void)
     } else if (dp->ssid[0]) {
         system_net_build(&sys, &dp->link, mac);
         say(&kout, run_s != 0 ? "root: joining %s, for %u s\n" : "root: joining %s, for good\n", dp->ssid, run_s);
-    } else if (dp->i154) {
-        say(&kout, run_s != 0 ? "root: IEEE 802.15.4 on channel %u, for %u s\n"
-                              : "root: IEEE 802.15.4 on channel %u, for good\n",
-            (uint32_t)dp->i154, run_s);
-#ifdef I154_LISTEN
-    } else if (dp->i154_listen) {
-        say(&kout, run_s != 0 ? "root: 802.15.4 listening on channel %u, for %u s\n"
-                              : "root: 802.15.4 listening on channel %u, for good\n",
-            (uint32_t)dp->i154_listen, run_s);
-#endif
     } else if (dp->listen && (program.needs & DRV_NEED_NET)) {
         say(&kout, run_s != 0 ? "root: listening on channel %u, for %u s\n" : "root: listening on channel %u, for good\n",
             (uint32_t)dp->listen, run_s);

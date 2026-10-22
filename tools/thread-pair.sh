@@ -1,5 +1,6 @@
 #!/bin/sh
-# IEEE 802.15.4 between the two boards, user/thread/: the ESP32-C6 with i154= on a channel, 25 unless CHANNEL names one,
+# IEEE 802.15.4 between the two boards, user/thread/: the ESP32-C6's user/radio/esp32c6/prog/i154.c on a channel,
+# 25 unless CHANNEL names one,
 # and the nRF52840 once the C6's log says its driver listens.
 # Each side fails if it heard nothing of the other, or none of its own frames was acknowledged.
 # The nRF52840's exchange lasts RUN seconds, 30 unless named, and the C6's run 15 more, as it starts some seconds before.
@@ -17,7 +18,7 @@ if [ -z "$port" ]; then
     exit 1
 fi
 make BOARD=nrf52840 build/nrf52840/kernel-thread.elf >/dev/null || exit 1
-make BOARD=esp32c6 build/esp32c6/kernel-wifi-esp32c6.bin build/esp32c6/wifi-drv.bin >/dev/null || exit 1
+make BOARD=esp32c6 build/esp32c6/kernel-wifi-esp32c6.bin build/esp32c6/radio-i154.bin >/dev/null || exit 1
 channel=${CHANNEL:-25}
 run=${RUN:-30}
 stream=${STREAM:-0}
@@ -26,12 +27,12 @@ c6_stream=$(( stream > 0 ? 1000 / (period_ms + 1) : 0 ))
 conf=$(mktemp)
 nrf_conf=$(mktemp)
 log=build/thread-pair-c6.log
-printf 'i154=%s\ni154stream=%s\nrun=%s\n' "$channel" "$c6_stream" $((run + 15)) > "$conf"
+printf 'channel=%s\nstream=%s\nrun=%s\n' "$channel" "$c6_stream" $((run + 15)) > "$conf"
 printf 'channel=%s\nstream=%s\nrun=%s\n' "$channel" "$stream" "$run" > "$nrf_conf"
 if [ -n "${THREAD_CONFIG:-}" ]; then
     cat "$THREAD_CONFIG" >> "$nrf_conf"
 fi
-make BOARD=esp32c6 PORT="$port" wifi-esp32c6 WIFI_CONFIG="$conf" > "$log" 2>&1 &
+make BOARD=esp32c6 PORT="$port" radio PROG=i154 RADIO_CONFIG="$conf" > "$log" 2>&1 &
 c6=$!
 until grep -q "root: the driver listens" "$log"; do
     if ! kill -0 "$c6" 2>/dev/null; then

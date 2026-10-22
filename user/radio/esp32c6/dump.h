@@ -1,5 +1,5 @@
-#ifndef RVUOS_WIFI_DUMP_H
-#define RVUOS_WIFI_DUMP_H
+#ifndef RVUOS_RADIO_DUMP_H
+#define RVUOS_RADIO_DUMP_H
 
 /*
  * The modem's dump engine, which copies what the receiver hears into a bank of SRAM, a word a sample,

@@ -46,11 +46,15 @@
 /* A word no capture writes, and the four past a capture's, which no capture of its length may touch. */
 #define MARK  0xa5a0055au
 #define GUARD 0x5a5aa5a5u
-/* How long a capture is waited for, in reads of its word: at 16 MHz the longest takes 2 ms, a few thousand reads. */
-#define DUMP_POLLS 2000000u
+/*
+ * How long a capture is waited for: at 16 MHz the longest takes 2 ms, and a source that waits for what the receiver
+ * hears has finished within milliseconds; the program answers the root task's checks once a second, so a capture that
+ * never finishes must give up long before that.
+ */
+#define DUMP_WAIT_US 100000u
 /* dumphex='s lines a burst, about 1.5 KiB of the log's 4, and the pause after each, for the root task to take them. */
 #define HEX_BURST    16u
-#define HEX_PAUSE_MS 20u
+#define HEX_PAUSE_MS 10u
 
 static volatile uint32_t *const bank = (volatile uint32_t *)(uintptr_t)DUMP_BANK_BASE;
 static uint32_t captures;
@@ -129,7 +133,8 @@ static uint32_t capture(const struct dump_conf *c, uint32_t source)
         REG(DUMP_CTRL) = ctrl | CTRL_ENABLE;
     }
     uint32_t polls = 0;
-    while ((REG(DUMP_CTRL) & CTRL_DONE) == 0 && polls < DUMP_POLLS) { /* bounded by DUMP_POLLS */
+    uint64_t start = osi_now_us();
+    while ((REG(DUMP_CTRL) & CTRL_DONE) == 0 && osi_now_us() - start < DUMP_WAIT_US) { /* bounded by DUMP_WAIT_US */
         polls++;
     }
     REG(DUMP_CTRL) = 0;

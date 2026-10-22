@@ -1,7 +1,6 @@
 /*
  * The Wi-Fi station's program, its run on the radio's first thread, see radio.c: the MAC and the PHY brought up,
  * then a channel heard, a scan, or the station's own thread, which joins the network the page names; see drv.h.
- * Or, with a channel of IEEE 802.15.4's named, that radio instead of Wi-Fi's, i154.c.
  *
  * Once the station runs, the thread attends to the root task, and hands the station what the network process
  * puts into the link; the station puts what it receives into the link the other way.
@@ -12,7 +11,6 @@
 
 #include "drv.h"
 #include "esp.h"
-#include "i154.h"
 #include "lib/libc.h"
 #include "lib/lock.h"
 #include "mac.h"
@@ -22,7 +20,7 @@
 #include "rvuos.h"
 #include "sta.h"
 
-DRV_PROGRAM("the Wi-Fi station", DRV_NEED_RNG | DRV_NEED_NET | DRV_NEED_I154);
+DRV_PROGRAM("the Wi-Fi station", DRV_NEED_RNG | DRV_NEED_NET);
 
 static int started; /* whether esp_wifi_start ran, so that the radio is to be turned off */
 
@@ -403,20 +401,9 @@ void drv_run(struct drv *d, struct self *own)
         drv_stop(CHILD_FAILED);
     }
     sta_link_init(note);
-    if (d->trace && d->i154) {
-        i154_trace_run(d);
-    }
     if (d->trace) {
         trace_run();
     }
-    if (d->i154) {
-        i154_run(d, own);
-    }
-#ifdef I154_LISTEN
-    if (d->i154_listen) {
-        i154_listen_run(d, own);
-    }
-#endif
     drv_say("driver: %u bytes of heap free\n", (unsigned)osi_heap_free());
     if (d->debug & DRV_DEBUG_WPA) {
         drv_wpa_debug();

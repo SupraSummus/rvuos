@@ -1,5 +1,5 @@
-#ifndef RVUOS_WIFI_MACREGS_H
-#define RVUOS_WIFI_MACREGS_H
+#ifndef RVUOS_RADIO_MACREGS_H
+#define RVUOS_RADIO_MACREGS_H
 
 /*
  * The MAC's and the HAL's registers, and how the driver reaches them,

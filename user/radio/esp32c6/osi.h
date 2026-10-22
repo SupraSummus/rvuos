@@ -1,5 +1,5 @@
-#ifndef RVUOS_WIFI_OSI_H
-#define RVUOS_WIFI_OSI_H
+#ifndef RVUOS_RADIO_OSI_H
+#define RVUOS_RADIO_OSI_H
 
 /* The driver's pieces that meet in the adapter, and that reach each other. */
 

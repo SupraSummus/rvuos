@@ -1,5 +1,5 @@
-#ifndef RVUOS_WIFI_DRV_H
-#define RVUOS_WIFI_DRV_H
+#ifndef RVUOS_RADIO_DRV_H
+#define RVUOS_RADIO_DRV_H
 
 /*
  * A program of the ESP32-C6's radio, a child of the root task, and its page, which is all the two agree on;
@@ -43,7 +43,7 @@
  * What a program needs of the machine beyond its image's own, in its header's needs.
  * DRV_NEED_RNG: the random number generator, read only, which drv_random reads, as the MAC's backoffs do.
  * DRV_NEED_NET: the link to the network process, which the root task builds with its clients if a network is named.
- * DRV_NEED_I154: the 802.15.4 MAC's interrupt line, if the page names a channel of 802.15.4's.
+ * DRV_NEED_I154: the 802.15.4 MAC's interrupt line, i154_line.
  * DRV_NEED_DUMP: the dump engine's bank, mapped into the program, and HP_SYSTEM, which gives the bank to the engine;
  * the root task takes the bank before anything else, so it needs the smaller block of RAM.
  */
@@ -120,7 +120,7 @@ extern char drv_ram_start[], drv_ram_size[];
 
 /*
  * The driver's page.
- * The driver reports the states of wifi.h's enum drv_state, DRV_UP once the libraries have brought the MAC up.
+ * The Wi-Fi station reports the states of wifi.h's enum drv_state, DRV_UP once the libraries have brought the MAC up.
  * With no network named it scans, passively, reports DRV_SCANNED, and turns the radio off.
  * With one, its station, a thread of its own, sta.c's, scans for it, authenticates, associates,
  * and runs the supplicant's handshakes, WPA3's personal by SAE where the access point offers it,
@@ -136,8 +136,8 @@ extern char drv_ram_start[], drv_ram_size[];
  * it leaves as when joined.
  * Listening, with a network to probe for, it asks for it once a second, a few times, as a station that scans asks,
  * and counts the answers to its own address; a run that heard none fails.
- * With a channel of IEEE 802.15.4's named, i154, it brings that radio up instead of Wi-Fi's, see i154.h,
- * reports DRV_LISTENING once it exchanges frames on the channel, and leaves as when listening.
+ * Another program reports the states its file says, DRV_LISTENING once its radio hears its channel, and DRV_LEFT,
+ * leaving when the root task asks; its own keys of the configuration it reads from conf.
  */
 struct drv {
     struct child_page c;
@@ -171,12 +171,7 @@ struct drv {
                              lets it: a test of the sending alone, once a run; see sta.c */
     uint8_t listen;       /* the channel to hear, 1 to 13, or 0 */
     char probe[33];       /* the network to probe for while listening, or empty */
-    uint8_t i154;         /* the channel of IEEE 802.15.4 to exchange frames on, 11 to 26, instead of Wi-Fi, or 0 */
-    uint32_t i154_line;   /* the 802.15.4 MAC's line, DRV_LINE_I154, given with i154 */
-    uint8_t i154_stream;  /* frames a second the driver sends the nRF52840 besides its pings, with i154, or 0 */
-#ifdef I154_LISTEN
-    uint8_t i154_listen;  /* the channel of IEEE 802.15.4 to listen on, promiscuously, 11 to 26, or 0; see i154.h */
-#endif
+    uint32_t i154_line;   /* the 802.15.4 MAC's line, DRV_LINE_I154, to a program that needs it, DRV_NEED_I154 */
     struct bulk_end link; /* which the driver lends the network process, connected before the start */
     /* From the root task, while it runs. */
     volatile uint32_t leave; /* the run is over: leave the network, and report DRV_LEFT */

@@ -1,5 +1,5 @@
-#ifndef RVUOS_WIFI_TXCTL_H
-#define RVUOS_WIFI_TXCTL_H
+#ifndef RVUOS_RADIO_TXCTL_H
+#define RVUOS_RADIO_TXCTL_H
 
 /*
  * The sending's choices for each try of a frame, which mac.c carries out: its rate, and the backoff before it.

@@ -45,7 +45,7 @@ void drv_run(struct drv *d, struct self *own)
     dump_configure(d->conf, d->conf_len, &conf);
     uint32_t channel = config_number(d->conf, d->conf_len, "channel", 1);
     drv_must("a channel of 1 to 13", channel >= 1 && channel <= 13 ? ESP_OK : ESP_FAIL);
-    drv_must("the Wi-Fi side's lanes, dumpbt= being the 802.15.4 listener's", conf.bt == 0 ? ESP_OK : ESP_FAIL);
+    drv_must("no dumpbt=, the BLE side being i154listen's", conf.bt == 0 ? ESP_OK : ESP_FAIL);
     mac_up(d->mac);
     up = 1;
     mac_sniffer(1);

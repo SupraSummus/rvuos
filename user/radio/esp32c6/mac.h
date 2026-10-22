@@ -1,5 +1,5 @@
-#ifndef RVUOS_WIFI_MAC_H
-#define RVUOS_WIFI_MAC_H
+#ifndef RVUOS_RADIO_MAC_H
+#define RVUOS_RADIO_MAC_H
 
 /*
  * The Wi-Fi MAC driven by the driver's own code rather than by Espressif's libraries,

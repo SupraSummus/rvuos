@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#ifndef RVUOS_WIFI_ESP_H
-#define RVUOS_WIFI_ESP_H
+#ifndef RVUOS_RADIO_ESP_H
+#define RVUOS_RADIO_ESP_H
 
 /*
  * What the driver takes from ESP-IDF's declarations, as ESP-IDF 4d59230d has them in esp_wifi.h,

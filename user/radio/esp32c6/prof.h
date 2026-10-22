@@ -1,5 +1,5 @@
-#ifndef RVUOS_WIFI_PROF_H
-#define RVUOS_WIFI_PROF_H
+#ifndef RVUOS_RADIO_PROF_H
+#define RVUOS_RADIO_PROF_H
 
 /*
  * What the driver's work costs, measured as it runs, for the log: each section's count, its total and its most,

@@ -129,8 +129,8 @@
 #define COEX_PTI_NONE 0x33u
 
 /* The channel's register, in MHz from 2402, ESP-IDF's ieee802154_channel_to_freq. */
-#define CHANNEL_FIRST 11u
-#define CHANNEL_LAST  26u
+#define CHANNEL_FIRST I154_CHANNEL_FIRST
+#define CHANNEL_LAST  I154_CHANNEL_LAST
 #define FREQ(c)       (((c) - CHANNEL_FIRST) * 5u + 3u)
 
 /*
@@ -174,6 +174,7 @@ struct radio {
     enum sending sending;
     struct mac154_csma csma;
     bool ping_due, stream_due;
+    uint32_t tick_us; /* the period the timer ticks at, which a wait of energy's arms again too, or 0 before it ticks */
     /* The frames, a length octet first, as the MAC's DMA reads and writes them. */
     uint8_t rx[1u + 127u + 1u] __attribute__((aligned(4)));
     uint8_t tx[1u + 127u] __attribute__((aligned(4)));
@@ -182,10 +183,8 @@ struct radio {
     uint8_t last_seq;
     /* What happened, for the log. */
     uint32_t pings, streamed, tries, acked, no_ack, busy, blocked, tx_aborted;
-    uint32_t heard, repeats, heard_other, acks_sent, rx_aborted;
-#ifdef I154_LISTEN
+    uint32_t heard, repeats, heard_other, acks_sent, rx_aborted, ed_lost;
     int8_t ed_max; /* the most the channel showed while listening; see the listener below */
-#endif
     int32_t rssi_sum;
     uint32_t rssi_count;
 };
@@ -289,7 +288,13 @@ static void receive(struct radio *r)
     r->state = RX;
 }
 
-/* The most energy on channel over symbols, in dBm. */
+/*
+ * The most energy on channel over symbols, in dBm.
+ * A detection that never ends, as some did once the dump engine had taken a capture on the BLE side,
+ * is given up a millisecond past its time, at a tick, which the wait arms again as the loop would, and the MAC stopped.
+ */
+#define ENERGY_SLACK_US 1000u
+
 static int8_t energy(struct radio *r, uint32_t channel, uint32_t symbols)
 {
     stop(r);
@@ -297,11 +302,19 @@ static int8_t energy(struct radio *r, uint32_t channel, uint32_t symbols)
     I154(ED_DURATION) = (I154(ED_DURATION) & ~ED_DURATION_MASK) | symbols;
     r->state = ED;
     I154(COMMAND) = CMD_ED_START;
+    uint64_t until = osi_now_us() + symbols * 16u + ENERGY_SLACK_US;
     while (r->state == ED) {
         uint32_t bits;
         rv_wait(r->note, &bits);
+        if ((bits & BIT_TICK) && r->tick_us != 0) {
+            uint32_t skipped;
+            must("the radio's timer", rv_timer_period(r->timer, BIT_TICK, r->tick_us, &skipped));
+        }
         if ((bits & BIT_RADIO) && (events_take(r) & EV_ED_DONE)) {
             r->state = IDLE;
+        } else if (osi_now_us() > until) {
+            r->ed_lost++;
+            stop(r);
         }
     }
     return ED_RSS(I154(ED_CFG));
@@ -524,11 +537,11 @@ static void radio_up(struct drv *d)
     mac_init(d->mac);
 }
 
-void i154_run(struct drv *d, struct self *own)
+void i154_run(struct drv *d, struct self *own, uint32_t channel, uint32_t stream)
 {
     static struct radio radio;
     struct radio *r = &radio;
-    drv_say("i154: bringing IEEE 802.15.4 up, channel %u\n", (unsigned)d->i154);
+    drv_say("i154: bringing IEEE 802.15.4 up, channel %u\n", (unsigned)channel);
     must("a slot for the radio's notification", slot_new(own, &r->note));
     must("the radio's notification", rv_pool_alloc(own->pool, CAP_NOTIFICATION, r->note, 0));
     must("a slot for the radio's line", slot_new(own, &r->irq));
@@ -542,12 +555,12 @@ void i154_run(struct drv *d, struct self *own)
     must("arm the radio's line", rv_irq_set(r->irq, BIT_RADIO));
     survey(r);
 
-    I154(CHANNEL) = FREQ(d->i154);
+    I154(CHANNEL) = FREQ(channel);
     receive(r);
-    d->channel = d->i154;
+    d->channel = channel;
     child_report(&d->c, DRV_LISTENING);
     /* The timer ticks at the stream's period, or at the pings' without one. */
-    uint32_t tick_us = d->i154_stream ? US_PER_S / d->i154_stream : PING_US, skipped;
+    uint32_t tick_us = stream ? US_PER_S / stream : PING_US, skipped;
     uint64_t pinged_at = osi_now_us(), told_at = pinged_at;
     must("the radio's timer", rv_timer_period(r->timer, BIT_TICK, tick_us, &skipped));
     for (;;) {
@@ -562,7 +575,7 @@ void i154_run(struct drv *d, struct self *own)
         }
         if (bits & BIT_TICK) {
             must("the radio's timer", rv_timer_period(r->timer, BIT_TICK, tick_us, &skipped));
-            r->stream_due = d->i154_stream != 0;
+            r->stream_due = stream != 0;
         }
         uint64_t now = osi_now_us();
         if (now - pinged_at >= PING_US) {
@@ -588,7 +601,6 @@ void i154_run(struct drv *d, struct self *own)
     child_stop(&d->c, DRV_LEFT);
 }
 
-#ifdef I154_LISTEN
 /*
  * The listener: the radio up on one channel, promiscuous, so it takes what it hears without the address filter's
  * say, and every reception told -- the whole ones and the failed ones too, whose count the MAC keeps -- with the
@@ -625,11 +637,11 @@ static void listen_frame(struct radio *r, bool whole, uint32_t reason)
     }
 }
 
-__attribute__((noreturn)) void i154_listen_run(struct drv *d, struct self *own)
+__attribute__((noreturn)) void i154_listen_run(struct drv *d, struct self *own, uint32_t channel, void (*second)(void))
 {
     static struct radio radio;
     struct radio *r = &radio;
-    drv_say("i154: bringing IEEE 802.15.4 up to listen on channel %u\n", (unsigned)d->i154_listen);
+    drv_say("i154: bringing IEEE 802.15.4 up to listen on channel %u\n", (unsigned)channel);
     must("a slot for the radio's notification", slot_new(own, &r->note));
     must("the radio's notification", rv_pool_alloc(own->pool, CAP_NOTIFICATION, r->note, 0));
     must("a slot for the radio's line", slot_new(own, &r->irq));
@@ -638,7 +650,7 @@ __attribute__((noreturn)) void i154_listen_run(struct drv *d, struct self *own)
     must("the radio's timer", timer_bind(own, own->pool, r->note, &r->timer));
 
     radio_up(d);
-    I154(CHANNEL) = FREQ(d->i154_listen);
+    I154(CHANNEL) = FREQ(channel);
     /* Promiscuous, and no acknowledgement of our own: a listener does not answer what it hears. */
     I154(CTRL_CFG) = (I154(CTRL_CFG) & ~(CFG_AUTO_ACK_TX | CFG_AUTO_ACK_RX | CFG_COORDINATOR | CFG_MULTIPAN_MASK)) |
                      CFG_PROMISCUOUS;
@@ -646,13 +658,13 @@ __attribute__((noreturn)) void i154_listen_run(struct drv *d, struct self *own)
     I154(RX_ABORT_EN) = 0xffffffffu;
     must("arm the radio's line", rv_irq_set(r->irq, BIT_RADIO));
     I154(ED_CFG) &= ~ED_SAMPLE_AVG;
-    int8_t dbm = energy(r, d->i154_listen, ENERGY_SYMBOLS);
+    int8_t dbm = energy(r, channel, ENERGY_SYMBOLS);
     r->ed_max = dbm;
     receive(r);
-    d->channel = d->i154_listen;
+    d->channel = channel;
     child_report(&d->c, DRV_LISTENING);
-    drv_say("listen: ready, channel %u (%u MHz), energy %d dBm\n", (unsigned)d->i154_listen,
-            (unsigned)(2405u + 5u * (d->i154_listen - CHANNEL_FIRST)), dbm);
+    drv_say("listen: ready, channel %u (%u MHz), energy %d dBm\n", (unsigned)channel,
+            (unsigned)(2405u + 5u * (channel - CHANNEL_FIRST)), dbm);
 
     /*
      * A tick, so that a quiet channel leaves the driver answering the root task all the same, and so that the
@@ -661,8 +673,9 @@ __attribute__((noreturn)) void i154_listen_run(struct drv *d, struct self *own)
      * greatest-of mode the survey uses, and the greatest of the run is what the counts are told beside.
      */
     uint32_t tick_us = 2000u, skipped;
+    r->tick_us = tick_us;
     must("the radio's timer", rv_timer_period(r->timer, BIT_TICK, tick_us, &skipped));
-    uint64_t told_at = osi_now_us();
+    uint64_t told_at = osi_now_us(), second_at = told_at;
     for (;;) {
         uint32_t bits;
         child_answer(&d->c);
@@ -673,7 +686,7 @@ __attribute__((noreturn)) void i154_listen_run(struct drv *d, struct self *own)
         if (bits & BIT_TICK) {
             must("the radio's timer", rv_timer_period(r->timer, BIT_TICK, tick_us, &skipped));
             /* A short sample, and the greatest of the run kept; the receiver takes over again after it. */
-            int8_t e = energy(r, d->i154_listen, 8u);
+            int8_t e = energy(r, channel, 8u);
             if (e > r->ed_max) {
                 r->ed_max = e;
             }
@@ -696,11 +709,15 @@ __attribute__((noreturn)) void i154_listen_run(struct drv *d, struct self *own)
             }
         }
         uint64_t now = osi_now_us();
+        if (second && now - second_at >= US_PER_S) {
+            second_at = now;
+            second();
+        }
         if (now - told_at >= LISTEN_TELL_US) {
             told_at = now;
-            drv_say("listen: heard %u, %u failed; crc errors %u, filtered %u; energy at most %d dBm\n",
+            drv_say("listen: heard %u, %u failed; crc errors %u, filtered %u; energy at most %d dBm, %u detections lost\n",
                     (unsigned)r->heard, (unsigned)r->rx_aborted, (unsigned)I154(CRC_ERROR_CNT),
-                    (unsigned)I154(RX_FILTER_FAIL_CNT), r->ed_max);
+                    (unsigned)I154(RX_FILTER_FAIL_CNT), r->ed_max, (unsigned)r->ed_lost);
         }
     }
     stop(r);
@@ -709,12 +726,11 @@ __attribute__((noreturn)) void i154_listen_run(struct drv *d, struct self *own)
     drv_say("driver: the listener is off; heard %u whole, %u failed\n", (unsigned)r->heard, (unsigned)r->rx_aborted);
     child_stop(&d->c, DRV_LEFT);
 }
-#endif /* I154_LISTEN */
 
 /*
  * The trace window of the 802.15.4 radio: the bring-up that precedes the exchange and nothing else,
  * so that every device access is its own; the baseband's bring-up, the driver's own btbb_init and its functions, is held
- * to the archive's by test/replay/bb.txt and bb-other.txt, see user/wifi/esp32c6/NOTES.md.
+ * to the archive's by test/replay/bb.txt and bb-other.txt, see the station's NOTES.md.
  * With trace=1 the root task maps no device, so each access faults to the watcher and the root carries it out and logs it;
  * with trace=2 the devices are mapped and the same window runs with no fault, and the configuration's snap= addresses
  * are read back at its end, so that tools/mac-trace.py compare holds the two runs' final state.

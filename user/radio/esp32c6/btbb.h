@@ -1,5 +1,5 @@
-#ifndef RVUOS_WIFI_BTBB_H
-#define RVUOS_WIFI_BTBB_H
+#ifndef RVUOS_RADIO_BTBB_H
+#define RVUOS_RADIO_BTBB_H
 
 /*
  * The ESP32-C6's BT baseband, which Wi-Fi's and IEEE 802.15.4's radios share, at 0x600a2000.

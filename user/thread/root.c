@@ -9,7 +9,7 @@
  * a frame that asks, and it answers each with a pong of its own, which the link sends after CSMA-CA,
  * and sends again until the C6 acknowledges it.
  * With stream= it also sends the C6 that many frames a second, which contend with the pings and pongs for the channel;
- * frames of the C6's own stream, i154stream= on its side, it only counts.
+ * frames of the C6's own stream, stream= of its program's, it only counts.
  * Of other frames it counts only how many came, and reads nothing else of them.
  * It halts once the exchange's time is up, with HALT_SILENT if no ping was heard or no pong acknowledged,
  * or, with stream=, no frame of the stream acknowledged, and tells what the link did, for the C6 as a neighbour:
@@ -29,7 +29,7 @@
  * a hundred times in 10 ms, while the route is armed, and not at all once it is disarmed;
  * it halts with HALT_ROUTE if not.
  *
- * Build and run: make BOARD=nrf52840 thread, with the ESP32-C6 on i154= the same channel, see user/radio/esp32c6/root.c;
+ * Build and run: make BOARD=nrf52840 thread, with the ESP32-C6's user/radio/esp32c6/prog/i154.c on the same channel;
  * tools/thread-pair.sh runs both.
  */
 

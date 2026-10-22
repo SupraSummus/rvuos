@@ -79,7 +79,8 @@ $(BUILD)/$(RADIO_ESP)/esp_wifi_regulatory.o: $(RADIO_ESP_INIT)
 	$(CC) $(CFLAGS) -Wno-unterminated-string-initialization -I$(RADIO_ESP)/shim \
 		-c $(PHYBLOB_CACHE)/esp_wifi_regulatory.c -o $@
 
-# The root task of every program, root.c, and what it shares with the Pico 2 W's, the network process, its clients, and the root task's half of both, system.c,
+# The root task of every program, root.c, and what it shares with the Pico 2 W's:
+# the network process, its clients, and the root task's half of both, system.c,
 # which it builds when the program is the Wi-Fi station and a network is named.
 # The logger is linked, though this root task never builds it.
 RADIO_ESP_NET  := $(addprefix $(BUILD)/user/wifi/,netproc.o net.o sock.o system.o client.o echo.o clock.o sntp.o logger.o)

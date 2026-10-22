@@ -1,5 +1,5 @@
-#ifndef RVUOS_WIFI_DEVREGS_H
-#define RVUOS_WIFI_DEVREGS_H
+#ifndef RVUOS_RADIO_DEVREGS_H
+#define RVUOS_RADIO_DEVREGS_H
 
 /*
  * A device register's read and write, reached the one way by the driver's bring-up:

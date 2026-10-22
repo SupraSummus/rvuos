@@ -36,7 +36,8 @@ and the logger carries the kernel's log to a host on port 7070 while the run las
 ## Thread
 
 `user/thread/`, on an nRF52840, drives its radio in IEEE 802.15.4's mode, surveys the channels,
-and exchanges frames with the ESP32-C6's driver on `i154=`, each acknowledging the other's; `tools/thread-pair.sh` runs both.
+and exchanges frames with the ESP32-C6's radio program `user/radio/esp32c6/prog/i154.c`, each acknowledging the other's;
+`tools/thread-pair.sh` runs both.
 Both send after CSMA-CA, `mac154.h`'s, and again until acknowledged;
 the nRF52840's link, `link.c`, counts each neighbour's ETX.
 Thread, IPv6 over 802.15.4 in a mesh, needs more of it, step by step:
@@ -292,10 +293,14 @@ what is left:
   Something has to put each input where `BOOT_CAP_INPUT` points,
   below the ROM's buffers or over USB once the kernel runs,
   and the replay driver's second stack has to follow the board's data region.
+- The radio's root task still reads the station's keys of the configuration, `ssid=` to `probe=`, into the page,
+  though the page holds the configuration whole now: the station could read its own, as the other programs do,
+  and the root task keep only what it acts on, `ssid=` for the network process, `run=`, `trace=` and `antenna=`.
+  Its image keeps the station's name, `kernel-wifi-esp32c6`, which the tools that boot it name too.
 - The sampler, `user/radio/esp32c6/prog/sampler.c`, see the station's `NOTES.md`, "The dump engine", and its open
   questions there: what wakes the engine's sources 3, 4, 6 to 9 and 11 to 14, which never finished on a listening channel;
   what lanes other than 0 to 3 and 14 to 17 carry;
-  the BLE side, which needs the 802.15.4 listener's receiver, a program of its own's still;
+  the BLE side's captures, `prog/i154listen.c`'s, after which an energy detection now and then never ends, see `i154.c`;
   and a capture that does not stop, which ESP-SDR runs as a ring over two banks the engine and the CPU take turns at,
   where the radio's programs have one bank free; the diagnostic bus would need no bank, but its selector is not found.
 
@@ -602,6 +607,14 @@ What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
   `a7` past the code is refused today, so the bits are free until the ABI is held still, and not after;
   the replay's record would carry the count with the code.
 - The breaking changes decision 31 lists, each in a change of its own.
+- A wake lost for good: `OP_NOTIFY_WAIT` takes every bit, and a line, a periodic timer's too, fires once until armed
+  again, so a wait nested in a loop on the same notification can take the bit the loop arms on, and the source stops,
+  silently. The ESP32-C6's 802.15.4 listener went deaf so, and stopped answering the root task's checks, which come on
+  another notification; `i154.c` now arms its tick in the nested wait too.
+  Ways out, cheapest first: a waiter in `user/lib/` that keeps the bits a nested wait took;
+  a program's lines and timers bound to its inbox's notification, so that one wait sees every source;
+  `OP_NOTIFY_WAIT` given a mask, an operation whose arguments change;
+  a periodic line the kernel arms again itself, a change to how lines fire.
 
 ## Code
 
