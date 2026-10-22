@@ -22,6 +22,8 @@
 #include "rvuos.h"
 #include "sta.h"
 
+DRV_PROGRAM("the Wi-Fi station", DRV_NEED_RNG | DRV_NEED_NET | DRV_NEED_I154);
+
 static int started; /* whether esp_wifi_start ran, so that the radio is to be turned off */
 
 /* The radio off, which the libraries turn on in esp_wifi_start: the PHY is closed once nothing uses it. */
@@ -257,6 +259,7 @@ static __attribute__((noreturn)) void listen(struct drv *d)
         drv_say("driver: probing for %s on channel %u from %02x:%02x:%02x:%02x:%02x:%02x\n", d->probe,
                 (unsigned)d->listen, d->mac[0], d->mac[1], d->mac[2], d->mac[3], d->mac[4], d->mac[5]);
     }
+    d->channel = d->listen;
     child_report(&d->c, DRV_LISTENING);
     struct hear first = heard_so_far(), then = first;
     uint64_t start = osi_now_us(), told = start;
@@ -335,50 +338,6 @@ static __attribute__((noreturn)) void attend(struct drv *d)
  * adc2_wifi_acquire, a weak stub in their ieee80211_ioctl.o that returns 0, is left out. See NOTES.md.
  */
 
-/*
- * The libraries' wifi_reset_mac, written out: their reset pulse through the adapter and the MAC's receive off, which
- * their hal_mac_rx_disable does. Their wdev's flag that its last RX descriptor was reset, which their receive alone
- * reads, is not set: their receive never runs.
- */
-static void drv_reset_mac(void)
-{
-    drv_wifi_reset_mac();
-    mac_rx_off();
-}
-
-/*
- * The libraries' wifi_hw_start, the hardware bring-up they run once before their task brings the interface up,
- * written out for the station's fresh start from a stopped radio. Their guards on their control block's interface
- * masks, and the masks they set, are their state, and their MAC sleep flag, which their init leaves clear, would
- * have the RTC's isolation turned off: neither is made. See NOTES.md.
- */
-static void drv_hw_start(void)
-{
-    drv_wifi_clock_enable();
-    drv_phy_enable();
-    osi_coex_enable();
-    drv_reset_mac();
-    mac_tx_block_clear();              /* the libraries' ic_mac_init: their hal_mac_init's tx-block clear */
-    mac_home_channel();                /* the libraries' chm_init: the channel manager's start, the driver's own */
-    /*
-     * The libraries' ic_set_interrupt_handler, written out:
-     * their hal_init, the MAC's configuration, which mac_config in macstart.c writes out whole,
-     * then the two interrupt sources the adapter routes, their handler and the line armed.
-     * Their set_intr passes the core the Wi-Fi task runs on, which the adapter ignores; the driver passes none.
-     * The receive list and the handler are the driver's own, mac.c's, in place of their wDev_ProcessFiq and the
-     * control block their mac_rxbuf_init points the MAC at.
-     */
-    uint32_t rx_base;
-    drv_must_mac("the MAC's receive list", mac_rx_prepare(&rx_base));
-    mac_config(osi_slowclk_cal, osi_coex_pti, rx_base);
-    osi_intr_set(0, 2 /* the modem's power */, 1, 1);
-    osi_intr_set(0, 0 /* the MAC */, 1, 1);
-    osi_isr_set(1, mac_rx_isr, 0);
-    osi_ints_on(1u << 1);
-    mac_default_policy(drv_self->mac); /* the libraries' chip_enable: their default receive policy */
-    mac_rx_on();                       /* and their ic_enable_rx */
-}
-
 /* The STA_START their wifi_station_start posts, through the adapter, which logs it and sets the group's bit. */
 static void sta_start_post(void)
 {
@@ -387,7 +346,7 @@ static void sta_start_post(void)
 
 static int drv_wifi_start(void)
 {
-    drv_hw_start();
+    mac_up(drv_self->mac);
     /*
      * The libraries' wifi_mode_set and _do_wifi_start, the driver's own now: the station's start's hardware
      * accesses and the STA_START event, with none of net80211's own state. See macstart.c and NOTES.md.

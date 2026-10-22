@@ -82,7 +82,8 @@ a change to `user/wifi/` with a Pico 2 W connected runs `make BOARD=rp2350 wifi`
 and `WIFI_CONFIG` names a network to join from a file git does not track,
 `local/wifi.conf` on the maintainer's machine, never from one it does.
 A change to `user/wifi/esp32c6/`, `user/radio/esp32c6/`, `kernel/board/esp32c6/`, `user/tracer/` or `tools/mac-trace.py`
-follows the ESP32-C6's Wi-Fi driver's own rules as well, in `user/wifi/esp32c6/CLAUDE.md`.
+follows the ESP32-C6's Wi-Fi driver's own rules as well, in `user/wifi/esp32c6/CLAUDE.md`,
+and a change to `user/radio/esp32c6/` the radio's programs' too, in `user/radio/esp32c6/CLAUDE.md`.
 
 `make check` builds no PHY harness, so a change to `user/phyblob/`, `user/phytrace.h` or the ESP32-C6's device ranges
 runs `make BOARD=esp32c6 phymap`, which builds the harness and lists what it reaches that no frame covers;

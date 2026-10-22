@@ -1445,14 +1445,16 @@ for the factory's RF tests, which Espressif's RF test library, `librftest.a`'s `
 ESPARGOS's ESP-SDR found it and drives it on ten of Espressif's chips;
 its firmware is GPL-3.0, so this driver takes facts from its description, never its code,
 and reads `adctrig` in the ESP32-C6's `librftest.a` of `esp-phy-lib` itself, as it read `libphy.a`.
-The sampler, `dump.h` and `dump.c`, is the root task's, behind `C6_SDR=1`.
+The engine is the radio's, `user/radio/esp32c6/dump.h` and `dump.c`, and the sampler a program of the radio's,
+`prog/sampler.c`, which the root task gives the bank and HP_SYSTEM as its header asks;
+it was the root task's own at first, behind a build of its own, until the radio's programs were apart from the station.
 
-To run it, a configuration file in `local/`, which git does not track, holds `listen=`, a channel of Wi-Fi's,
-or `i154listen=`, one of 802.15.4's, which also needs `C6_LISTEN=1`, with `run=` and the keys `dump.h` lists:
+To run it, a configuration file in `local/`, which git does not track, holds `channel=`, a channel of Wi-Fi's,
+with `run=` and the keys `dump.h` lists:
 
-    printf 'listen=1\nrun=30\ndump=4096\ndumpsource=15\ndumprate=3\ndumphex=4096\n' > local/sdr.conf
-    make BOARD=esp32c6 C6_SDR=1 wifi-esp32c6 WIFI_CONFIG=local/sdr.conf PORT=/dev/serial/by-id/usb-Espressif_...
-    tools/dump-spectrum.py build/esp32c6-c6sdr/wifi-run.log 16e6
+    printf 'channel=1\nrun=30\ndump=4096\ndumpsource=15\ndumprate=3\ndumphex=4096\n' > local/sampler.conf
+    make BOARD=esp32c6 radio PROG=sampler RADIO_CONFIG=local/sampler.conf PORT=/dev/serial/by-id/usb-Espressif_...
+    tools/dump-spectrum.py build/esp32c6/radio-run.log 16e6
 
 A signal of known frequency comes from the nRF52840, once the C6's log says its driver listens:
 `make BOARD=nrf52840 thread THREAD_CONFIG=` a file of `channel=12`, `stream=100` and `run=10`
@@ -1500,9 +1502,10 @@ What the board answered, the driver listening on Wi-Fi's channel 1:
   and the C6 capturing source 15 at the clock divided by 5. The frames stood 30 dB over the floor
   2 MHz below the middle, in the captures of those 10 s and in none before or after,
   so the divider gives 16 MS/s, and with bits 0 to 9 taken as I they would have stood 2 MHz above.
-  A line 4 MHz below the middle stands in every capture, 10 to 15 dB over the floor, the board's own.
+  A line 4 MHz above the middle stands in most captures, 10 to 15 dB over the floor, the board's own;
+  these notes had it below once, read with I and Q the other way round.
 
-The BLE side, the driver listening for IEEE 802.15.4 on channel 12, `C6_LISTEN=1` with `C6_SDR=1`:
+The BLE side, the driver listening for IEEE 802.15.4 on channel 12, as the root task's sampler of then had it:
 
 - With `0x600A20B4`'s bit 0 set, lanes 14 to 17 and source 0, the engine waits and never finishes,
   though the 802.15.4 MAC heard hundreds of the nRF52840's frames meanwhile.

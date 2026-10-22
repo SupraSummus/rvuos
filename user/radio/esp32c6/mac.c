@@ -1045,3 +1045,48 @@ void mac_stop(void)
     wr(HAL_CFG, rd(HAL_CFG) | 2u);
     drv_phy_disable();
 }
+
+/*
+ * The libraries' wifi_reset_mac, written out: their reset pulse through the adapter and the MAC's receive off, which
+ * their hal_mac_rx_disable does. Their wdev's flag that its last RX descriptor was reset, which their receive alone
+ * reads, is not set: their receive never runs.
+ */
+static void reset(void)
+{
+    drv_wifi_reset_mac();
+    mac_rx_off();
+}
+
+/*
+ * The libraries' wifi_hw_start, the hardware bring-up they run once before their task brings the interface up,
+ * written out for a fresh start from a stopped radio, the station's and any program's that hears Wi-Fi's channels.
+ * Their guards on their control block's interface masks, and the masks they set, are their state, and their MAC sleep
+ * flag, which their init leaves clear, would have the RTC's isolation turned off: neither is made. See the station's
+ * NOTES.md.
+ */
+void mac_up(const uint8_t sta[6])
+{
+    drv_wifi_clock_enable();
+    drv_phy_enable();
+    osi_coex_enable();
+    reset();
+    mac_tx_block_clear();              /* the libraries' ic_mac_init: their hal_mac_init's tx-block clear */
+    mac_home_channel();                /* the libraries' chm_init: the channel manager's start, the driver's own */
+    /*
+     * The libraries' ic_set_interrupt_handler, written out:
+     * their hal_init, the MAC's configuration, which mac_config in macstart.c writes out whole,
+     * then the two interrupt sources the adapter routes, their handler and the line armed.
+     * Their set_intr passes the core the Wi-Fi task runs on, which the adapter ignores; the driver passes none.
+     * The receive list and the handler are the driver's own, mac.c's, in place of their wDev_ProcessFiq and the
+     * control block their mac_rxbuf_init points the MAC at.
+     */
+    uint32_t rx_base;
+    drv_must_mac("the MAC's receive list", mac_rx_prepare(&rx_base));
+    mac_config(osi_slowclk_cal, osi_coex_pti, rx_base);
+    osi_intr_set(0, 2 /* the modem's power */, 1, 1);
+    osi_intr_set(0, 0 /* the MAC */, 1, 1);
+    osi_isr_set(1, mac_rx_isr, 0);
+    osi_ints_on(1u << 1);
+    mac_default_policy(sta);           /* the libraries' chip_enable: their default receive policy */
+    mac_rx_on();                       /* and their ic_enable_rx */
+}

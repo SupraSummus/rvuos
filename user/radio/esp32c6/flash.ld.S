@@ -1,14 +1,16 @@
 /*
- * The Wi-Fi driver's image, see drv.h: code and constants in the window onto flash, from its header on,
- * and data, the zeroed data and the heap in the driver's block of RAM, short of the ROM's data at its top.
+ * A radio program's image, see drv.h: code and constants in the window onto flash, from its header on,
+ * and data, the zeroed data and the heap in the program's block of RAM, short of the ROM's data at its top.
  * .data's image follows the constants in flash, where the entry copies it from.
+ * The block is the station's unless the build names another, DRV_RAM_BASE and DRV_RAM_SIZE;
+ * the header tells the root task which, drv_ram_start and drv_ram_size.
  */
 
 #include "drv.h"
 
 MEMORY
 {
-    flash (rx) : ORIGIN = 0x42000000, LENGTH = 0x00100000
+    flash (rx) : ORIGIN = 0x42000000, LENGTH = DRV_IMAGE_MAX
     ram (rw)   : ORIGIN = DRV_RAM_BASE, LENGTH = DRV_HEAP_END - DRV_RAM_BASE
 }
 
@@ -42,5 +44,7 @@ SECTIONS
     } > ram
     drv_heap_start = .;
     drv_heap_end = DRV_HEAP_END;
+    drv_ram_start = DRV_RAM_BASE;
+    drv_ram_size = DRV_RAM_SIZE;
     /DISCARD/ : { *(.comment .note .note.* .riscv.attributes .eh_frame*) }
 }

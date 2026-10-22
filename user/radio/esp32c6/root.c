@@ -31,9 +31,6 @@
 
 #include "console.h"
 #include "drv.h"
-#ifdef C6_SDR
-#include "dump.h"
-#endif
 #include "lib/libc.h"
 #include "lib/log.h"
 #include "lib/say.h"
@@ -97,11 +94,9 @@ static struct system sys = {
     .clients_wanted = CLIENT_BIT(CLIENT_ECHO) | CLIENT_BIT(CLIENT_CLOCK),
 };
 static struct block drv_ram;
-#ifdef C6_SDR
-/* The dump engine's bank, and the ROM's data, a block of the driver's own in this build; see drv.h and dump.h. */
-static struct block dump_bank, drv_rom_ram;
-static struct dump_conf dump_conf;
-#endif
+static struct block dump_bank; /* the dump engine's, for a program that needs it; see drv.h and dump.h */
+static struct drv_header program; /* the header of the program in the window onto flash */
+static char program_name[32];
 static int leaving;
 static uint8_t mac[6];
 static uint32_t tick_bit, seconds, run_s = RUN_S;
@@ -295,18 +290,40 @@ static void rf_switch(void)
                                       : "root: the RF switch picks the antenna on the board\n");
 }
 
-/* The driver's entry, from the header its image starts with, read through the window onto flash for the moment. */
-static void (*drv_entry(void))(struct child_page *)
+/*
+ * The program's header, which its image starts with, and its name, read through the window onto flash for the moment.
+ * Its block of RAM must lie in the free RAM's upper half and end where the ROM's data does, at the half's end,
+ * and a program that needs the dump engine's bank must leave as much again of the upper half for the children's
+ * memory, since the bank takes the lower half; see drv.h.
+ */
+static void program_read(void)
 {
     uint32_t region;
     must("install the window onto flash", region_install(&self, BOOT_CAP_FLASH, RIGHT_R, &region));
-    struct drv_header h = *(const struct drv_header *)FLASH_WINDOW_BASE;
+    program = *(const struct drv_header *)FLASH_WINDOW_BASE;
+    uint32_t name = (uint32_t)(uintptr_t)program.name;
+    if (program.magic == DRV_MAGIC && name >= FLASH_WINDOW_BASE && name < FLASH_WINDOW_BASE + DRV_IMAGE_MAX) {
+        const char *n = program.name;
+        uint32_t i = 0;
+        for (; i + 1 < sizeof(program_name) && name + i < FLASH_WINDOW_BASE + DRV_IMAGE_MAX && n[i]; i++) {
+            program_name[i] = n[i];
+        }
+        program_name[i] = 0;
+    }
     must("uninstall the window onto flash", region_free(&self, region));
-    if (h.magic != DRV_MAGIC) {
-        say(&kout, "root: no driver in the window onto flash: %x where %x belongs\n", h.magic, DRV_MAGIC);
+    if (program.magic != DRV_MAGIC) {
+        say(&kout, "root: no program in the window onto flash: %x where %x belongs\n", program.magic, DRV_MAGIC);
         system_halt(SYSTEM_BROKEN);
     }
-    return h.entry;
+    uint32_t end = program.ram_base + program.ram_size;
+    if (program.ram_size == 0 || (program.ram_size & (program.ram_size - 1)) != 0 ||
+        (program.ram_base & (program.ram_size - 1)) != 0 || (uint32_t)program.ram_base < (uint32_t)(DUMP_BANK_BASE + DUMP_BANK_SIZE) ||
+        end != DRV_ROM_RAM_END ||
+        ((program.needs & DRV_NEED_DUMP) && program.ram_base < (uint32_t)(DUMP_BANK_BASE + DUMP_BANK_SIZE) + program.ram_size)) {
+        say(&kout, "root: %s's block of RAM, %x and %x bytes, is not one the root task can give it\n", program_name,
+            program.ram_base, program.ram_size);
+        system_halt(SYSTEM_BROKEN);
+    }
 }
 
 /* One hexadecimal number at s, into *out; returns whether it read one, leaving *end past it. */
@@ -387,6 +404,13 @@ static void configure(struct drv *p)
     must("input", rv_frame_info(BOOT_CAP_INPUT, &base, &size));
     must("install the input", region_install(&self, BOOT_CAP_INPUT, RIGHT_R, &region));
     const char *conf = (const char *)(uintptr_t)base;
+    /* The configuration whole for the program, which reads its own keys, as far as the page holds it. */
+    uint32_t len = 0;
+    while (len < size && len < DRV_CONF_SIZE && conf[len] != 0) {
+        p->conf[len] = conf[len];
+        len++;
+    }
+    p->conf_len = len;
     config_value(conf, size, "ssid", p->ssid, sizeof(p->ssid));
     config_value(conf, size, "pass", p->pass, sizeof(p->pass));
     p->bssid_set = (uint8_t)config_mac(conf, size, "bssid", p->bssid);
@@ -421,14 +445,14 @@ static void configure(struct drv *p)
               : config_has(conf, size, "antenna", "none") ? ANTENNA_NONE
                                                            : ANTENNA_BOARD;
     snap_parse(conf, size);
-#ifdef C6_SDR
-    dump_configure(conf, size, &dump_conf);
-    if (p->ssid[0]) {
-        /* The children's memory lies in what the bank leaves, which has no room for the network process. */
-        say(&kout, "root: the sampler's build joins no network; %s is not joined\n", p->ssid);
+    if (p->ssid[0] && !(program.needs & DRV_NEED_NET)) {
+        say(&kout, "root: %s joins no network; %s is not joined\n", program_name, p->ssid);
         p->ssid[0] = 0;
     }
-#endif
+    if (p->i154 && !(program.needs & DRV_NEED_I154)) {
+        say(&kout, "root: %s has no 802.15.4; i154=%u is left out\n", program_name, (uint32_t)p->i154);
+        p->i154 = 0;
+    }
     must("uninstall the input", region_free(&self, region));
 }
 
@@ -602,7 +626,8 @@ static void trace_dump(void)
 
 /*
  * The driver, not started: its image's code, its block of RAM, the ROM, the modem, the SAR ADC,
- * the random number generator, what it builds its threads from, the clock and the modem's lines.
+ * what it builds its threads from, the clock and the modem's lines, and what its header says it needs:
+ * the random number generator, the 802.15.4 MAC's line, the dump engine's bank and HP_SYSTEM.
  * The block of RAM is the driver's alone: the root task never installs it.
  */
 static void driver_build(void)
@@ -617,16 +642,19 @@ static void driver_build(void)
     must("a frame of the driver's RAM", mem_make(&self, &drv_ram, CAP_FRAME));
     must("give the driver its RAM", child_map(&self, c, drv_ram.made, RIGHT_R | RIGHT_W, &region));
     must("give the driver the ROM", child_map(&self, c, BOOT_CAP_ROM, RIGHT_R | RIGHT_X, &region));
-#ifdef C6_SDR
-    must("a frame of the ROM's data", mem_make(&self, &drv_rom_ram, CAP_FRAME));
-    must("give the driver the ROM's data", child_map(&self, c, drv_rom_ram.made, RIGHT_R | RIGHT_W, &region));
-#endif
     if (p->trace == 1) {
         trace_give(c);
     } else {
         for (uint32_t i = 0; i < sizeof(trace_frames) / sizeof(trace_frames[0]); i++) {
-            must(trace_frames[i].name, child_map(&self, c, trace_frames[i].cap, trace_frames[i].rights, &region));
+            if (trace_frames[i].cap != BOOT_CAP_RNG || (program.needs & DRV_NEED_RNG)) {
+                must(trace_frames[i].name, child_map(&self, c, trace_frames[i].cap, trace_frames[i].rights, &region));
+            }
         }
+    }
+    if (program.needs & DRV_NEED_DUMP) {
+        must("a frame of the dump's bank", mem_make(&self, &dump_bank, CAP_FRAME));
+        must("give the driver the dump's bank", child_map(&self, c, dump_bank.made, RIGHT_R | RIGHT_W, &region));
+        must("give the driver HP_SYSTEM", child_map(&self, c, BOOT_CAP_HP_SYSTEM, RIGHT_R | RIGHT_W, &region));
     }
     must("what the driver builds of its own",
          child_give_own(&self, c, DRV_OWN_POOL, DRV_OWN_LINES, 0, DRV_OWN_UNITS, DRV_OWN_SLOTS, &p->own));
@@ -635,11 +663,11 @@ static void driver_build(void)
     must("the modem's lines", rv_irq_carve(BOOT_CAP_IRQ_LINES, DRV_LINE_FIRST, DRV_LINES, lines));
     must("give the driver the modem's lines", child_give(&self, c, lines, RIGHT_W, &p->lines));
     must("the lines' slot back", slot_free(&self, lines));
-    if (p->i154
+    if ((program.needs & DRV_NEED_I154) && (p->i154
 #ifdef I154_LISTEN
-        || p->i154_listen
+                                             || p->i154_listen
 #endif
-    ) {
+                                             )) {
         must("a slot", slot_new(&self, &lines));
         must("the 802.15.4 MAC's line", rv_irq_carve(BOOT_CAP_IRQ_LINES, DRV_LINE_I154, 1, lines));
         must("give the driver the 802.15.4 MAC's line", child_give(&self, c, lines, RIGHT_W, &p->i154_line));
@@ -685,12 +713,7 @@ static void driver_state(uint32_t state)
             p->joined.channel, (uint32_t)p->authmode);
         system_net_start(&sys);
     } else if (state == DRV_LISTENING) {
-#ifdef I154_LISTEN
-        uint32_t heard = p->i154 ? p->i154 : p->i154_listen ? p->i154_listen : p->listen;
-#else
-        uint32_t heard = p->i154 ? p->i154 : p->listen;
-#endif
-        say(&kout, "root: the driver listens on channel %u\n", heard);
+        say(&kout, "root: the driver listens on channel %u\n", p->channel);
     } else if (state == DRV_LEFT) {
         say(&kout, "root: the driver left the network\n");
         system_halt(0);
@@ -759,11 +782,6 @@ static void second(void)
         say(&kout, "root: the driver has not joined after %u s\n", UP_S);
         halt(SYSTEM_LATE);
     }
-#ifdef C6_SDR
-    if (sys.driver.told == DRV_LISTENING) {
-        dump_take(&dump_conf);
-    }
-#endif
     if (seconds == run_s) {
         say(&kout, "root: the run is over after %u s\n", run_s);
         run_over();
@@ -839,18 +857,16 @@ int main(void)
     console_open();
     must("a bit for the seconds", bit_new(&self, &tick_bit));
     must("a timer", timer_new(&self, &tick));
-#ifdef C6_SDR
-    /* The dump's bank before all, the whole of the free RAM's lower half, so that nothing else lies there. */
-    must("the dump's bank", mem_take_at(&self, DUMP_BANK_BASE, DUMP_BANK_SIZE, &dump_bank));
-#endif
+    program_read();
+    if (program.needs & DRV_NEED_DUMP) {
+        /* The dump's bank before all, the whole of the free RAM's lower half, so that nothing else lies there. */
+        must("the dump's bank", mem_take_at(&self, DUMP_BANK_BASE, DUMP_BANK_SIZE, &dump_bank));
+    }
     /* The driver's block first, before anything else is taken from free RAM, which might take part of it. */
-    must("the driver's RAM", mem_take_at(&self, DRV_RAM_BASE, DRV_RAM_SIZE, &drv_ram));
-#ifdef C6_SDR
-    must("the ROM's data", mem_take_at(&self, DRV_ROM_RAM_BASE, DRV_ROM_RAM_SIZE, &drv_rom_ram));
-#endif
+    must("the driver's RAM", mem_take_at(&self, program.ram_base, program.ram_size, &drv_ram));
     read_mac();
     say(&kout, "root: wifi system, MAC address %M\n", mac);
-    void (*entry)(struct child_page *) = drv_entry();
+    say(&kout, "root: the program is %s\n", program_name);
 
     /* The driver's data a block of its own, built before the room is, which is the other children's. */
     driver_build();
@@ -860,15 +876,10 @@ int main(void)
          * with trace=2 the root serves nothing, but reads the frames back there for the snapshot. */
         trace_map();
     }
-#ifdef C6_SDR
-    /* After rf_switch too; the sampler's build builds no network process, so it makes no room either. */
-    dump_open(&self, &kout, &cout, &dump_bank, log_to_console, must);
-#else
-    if (!trace_wanted) {
-        /* A trace builds no network process nor clients, so it needs no room for their data. */
+    if (!trace_wanted && (program.needs & DRV_NEED_NET)) {
+        /* A trace builds no network process nor clients, nor a program without the network, so neither makes room. */
         must("room for the children's data", self_room(&self, ROOM_SIZE));
     }
-#endif
     struct drv *dp = (struct drv *)sys.driver.page;
     if (dp->trace) {
         say(&kout, run_s != 0 ? "root: tracing the libraries' bring-up, for %u s\n"
@@ -887,9 +898,11 @@ int main(void)
                               : "root: 802.15.4 listening on channel %u, for good\n",
             (uint32_t)dp->i154_listen, run_s);
 #endif
-    } else if (dp->listen) {
+    } else if (dp->listen && (program.needs & DRV_NEED_NET)) {
         say(&kout, run_s != 0 ? "root: listening on channel %u, for %u s\n" : "root: listening on channel %u, for good\n",
             (uint32_t)dp->listen, run_s);
+    } else if (!(program.needs & DRV_NEED_NET)) {
+        say(&kout, run_s != 0 ? "root: running %s, for %u s\n" : "root: running %s, for good\n", program_name, run_s);
     } else {
         say(&kout, "root: scanning\n");
     }
@@ -898,7 +911,7 @@ int main(void)
          * watchdog halts the machine and writes it out. Fed every second by second() as long as the root turns. */
         must("the watchdog", rv_clock_watchdog(BOOT_CAP_CLOCK, 2000000u));
     }
-    must("start the driver", child_start(&self, &sys.driver, entry, 0, DRV_UNITS));
+    must("start the driver", child_start(&self, &sys.driver, program.entry, 0, DRV_UNITS));
     must("count the seconds", rv_timer_period(tick, tick_bit, CHECK_US, &skipped));
     for (;;) {
         uint32_t bits = 0;

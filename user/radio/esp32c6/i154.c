@@ -544,6 +544,7 @@ void i154_run(struct drv *d, struct self *own)
 
     I154(CHANNEL) = FREQ(d->i154);
     receive(r);
+    d->channel = d->i154;
     child_report(&d->c, DRV_LISTENING);
     /* The timer ticks at the stream's period, or at the pings' without one. */
     uint32_t tick_us = d->i154_stream ? US_PER_S / d->i154_stream : PING_US, skipped;
@@ -648,6 +649,7 @@ __attribute__((noreturn)) void i154_listen_run(struct drv *d, struct self *own)
     int8_t dbm = energy(r, d->i154_listen, ENERGY_SYMBOLS);
     r->ed_max = dbm;
     receive(r);
+    d->channel = d->i154_listen;
     child_report(&d->c, DRV_LISTENING);
     drv_say("listen: ready, channel %u (%u MHz), energy %d dBm\n", (unsigned)d->i154_listen,
             (unsigned)(2405u + 5u * (d->i154_listen - CHANNEL_FIRST)), dbm);

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""What the ESP32-C6's sampler captured, from a run's log: user/radio/esp32c6/dump.h, dumphex=.
+"""What the ESP32-C6's sampler captured, from a run's log: user/radio/esp32c6/prog/sampler.c and dump.h, dumphex=.
 
 Usage: tools/dump-spectrum.py LOG RATE_HZ [NFFT]
 
-For each capture the log holds whole, its time in the run, its spread and its offset,
+For each capture the log holds whole, its lines following on from word 0, its time in the run, its spread and its offset,
 the gain codes and the AGC's bits it holds, its spectrum from -RATE/2 to +RATE/2 in sixteen bands,
 each band's strongest bin in dB over the median, the three strongest bins,
 and its power in sixteen stretches of time, in dB.
@@ -45,19 +45,26 @@ def main():
     nfft = int(sys.argv[3]) if len(sys.argv) > 3 else 256
     if nfft < 16 or nfft & (nfft - 1):
         sys.exit("dump-spectrum: NFFT is a power of two, 16 or more")
-    captures, times = {}, {}
+    captures, times, broken = {}, {}, set()
     with open(log, errors="replace") as f:
         for line in f:
             m = LINE.search(line)
             if m:
                 c = int(m.group(2))
-                captures.setdefault(c, []).extend(int(x, 16) for x in m.group(4).split())
+                words = captures.setdefault(c, [])
+                # A line lost from the kernel's log leaves the next one's index past the words so far.
+                if int(m.group(3)) != len(words):
+                    broken.add(c)
+                words.extend(int(x, 16) for x in m.group(4).split())
                 times.setdefault(c, m.group(1))
     if not captures:
         sys.exit("dump-spectrum: no dumphex lines in " + log)
     window = [0.5 - 0.5 * math.cos(2 * math.pi * i / nfft) for i in range(nfft)]
     for c in sorted(captures):
         words = captures[c]
+        if c in broken:
+            print(f"capture {c}: a line of its words is missing from the log")
+            continue
         if len(words) < nfft:
             print(f"capture {c}: {len(words)} words, fewer than NFFT")
             continue

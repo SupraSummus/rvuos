@@ -2,44 +2,55 @@
 #define RVUOS_WIFI_DRV_H
 
 /*
- * The Wi-Fi driver of the ESP32-C6, a child of the root task, and its page, which is all the two agree on:
- * a station of its own, which Espressif's closed libraries, around an adapter of rvuos's, bring the MAC up for.
+ * A program of the ESP32-C6's radio, a child of the root task, and its page, which is all the two agree on;
+ * the Wi-Fi station of user/wifi/esp32c6/ is one, and the programs of prog/ the others, see README.md.
+ * A program is called the driver in the root task's log and in this file, as the station was the only one.
  *
- * The driver is an image of its own, too large for the SRAM:
+ * A program is an image of its own, too large for the SRAM:
  * its code and constants run from the window onto flash, BOOT_CAP_FLASH, at FLASH_WINDOW_BASE,
  * which esptool writes at FLASH_WINDOW_FLASH, and its data lies at a fixed block of RAM, DRV_RAM_BASE,
- * since the ROM's own data lies at the block's top.
- * The block's top holds the ROM's own data, which the ROM's Wi-Fi and PHY functions keep there:
- * the driver places nothing in it, and the block is installed whole.
- * The image starts with a header, which says where its entry is;
- * the linker script, flash.ld.S, reads this file for the layout.
+ * whose top holds the ROM's own data, from DRV_ROM_RAM_BASE, which the ROM's Wi-Fi and PHY functions keep there:
+ * the program places nothing in it, and the block is installed whole.
+ * The station's block is the free RAM's upper half, 128 KiB, its heap what hostap and Mbed TLS want;
+ * another program's is the upper half's upper half, 64 KiB, so that the lower half, a bank of its own,
+ * may be the dump engine's, see dump.h, and the root task makes the children's memory of what lies between.
+ * The linker script, flash.ld.S, reads this file for the layout, and the build names the smaller block for a program.
  *
- * The root task builds the driver as a child that runs this image, lib/child.h's child_code,
+ * The image starts with a header, which says where its entry is, what of the machine the program needs,
+ * and where its block of RAM lies, which the root task reads before it takes any memory.
+ * The root task builds the program as a child that runs this image, lib/child.h's child_code,
  * with its page and its first thread's stack in the child's data, DRV_DATA_SIZE bytes.
- * The libraries want tasks, which the adapter runs as threads the driver builds of its own, child_give_own.
- * Its eight regions are all in use: the image in the code region, its data, its block of RAM,
- * the ROM, the modem, the SAR ADC, the random number generator, and the link to the network process.
+ * Its threads are the adapter's, which it builds of its own, child_give_own.
+ * Of its eight regions the image takes the code region, its data, its block of RAM, the ROM, the modem and the SAR ADC,
+ * and the program's needs the rest: the random number generator, or the link to the network process,
+ * or the dump engine's bank and HP_SYSTEM, which take the two.
  */
 
+#define DRV_ROM_RAM_BASE 0x4087c000 /* the ROM's data, to the block's end, which is the free RAM's */
+#define DRV_ROM_RAM_END  0x40880000
+#define DUMP_BANK_BASE   0x40840000 /* the free RAM's lower half, a bank of SRAM of its own */
+#define DUMP_BANK_SIZE   0x00020000
+#define DRV_IMAGE_MAX    0x00100000 /* the window onto flash, which the image's code and constants lie in */
+#ifndef DRV_RAM_BASE
 #define DRV_RAM_BASE     0x40860000
-#define DRV_ROM_RAM_BASE 0x4087c000 /* the ROM's data, to the block's end */
-#ifndef C6_SDR
 #define DRV_RAM_SIZE     0x00020000
-#define DRV_HEAP_END     DRV_ROM_RAM_BASE
-#else
-/*
- * With the sampler, see dump.h, the free RAM's lower half is the dump engine's bank, and nothing else may lie there,
- * so the children's memory moves into the upper half: the driver's block is its lower quarter, 64 KiB,
- * the ROM's data a block of its own at the top, in the region the link to the network process has otherwise,
- * since such a run builds no network process, and the root task makes the children's memory of what lies between.
- * The heap is what the image's data leaves of the 64 KiB; the driver's own code takes none, see build.mk.
- */
-#define DRV_RAM_SIZE     0x00010000
-#define DRV_HEAP_END     (DRV_RAM_BASE + DRV_RAM_SIZE)
-#define DRV_ROM_RAM_SIZE 0x00004000
 #endif
+#define DRV_HEAP_END     DRV_ROM_RAM_BASE
 
 #define DRV_MAGIC 0x49464957u /* "WIFI" */
+
+/*
+ * What a program needs of the machine beyond its image's own, in its header's needs.
+ * DRV_NEED_RNG: the random number generator, read only, which drv_random reads, as the MAC's backoffs do.
+ * DRV_NEED_NET: the link to the network process, which the root task builds with its clients if a network is named.
+ * DRV_NEED_I154: the 802.15.4 MAC's interrupt line, if the page names a channel of 802.15.4's.
+ * DRV_NEED_DUMP: the dump engine's bank, mapped into the program, and HP_SYSTEM, which gives the bank to the engine;
+ * the root task takes the bank before anything else, so it needs the smaller block of RAM.
+ */
+#define DRV_NEED_RNG  0x1u
+#define DRV_NEED_NET  0x2u
+#define DRV_NEED_I154 0x4u
+#define DRV_NEED_DUMP 0x8u
 
 #ifndef __ASSEMBLER__
 #include <stdint.h>
@@ -48,11 +59,29 @@
 #include "wifi/wifi.h"
 
 #define DRV_DATA_SIZE 0x4000u
+#define DRV_CONF_SIZE 512u /* the most of the configuration the root task copies into the page */
 
 struct drv_header {
     uint32_t magic;
     void (*entry)(struct child_page *page);
+    uint32_t needs;          /* DRV_NEED_ bits */
+    uint32_t ram_base;       /* the program's block of RAM, the linker script's */
+    uint32_t ram_size;
+    const char *name;        /* in the window onto flash, which the root task reads */
 };
+
+/* The radio's entry, radio.c's, which each program's header names. */
+void drv_main(struct child_page *page);
+
+/* The block of RAM the linker script placed the image's data in, see flash.ld.S. */
+extern char drv_ram_start[], drv_ram_size[];
+
+/* A program's header, at the start of its image: its name and needs. */
+#define DRV_PROGRAM(program_name, program_needs)                                                                   \
+    __attribute__((section(".header"), used)) const struct drv_header drv_image = {                               \
+        DRV_MAGIC, drv_main, (program_needs), (uint32_t)(uintptr_t)drv_ram_start,                                  \
+        (uint32_t)(uintptr_t)drv_ram_size, (program_name)                                                         \
+    }
 
 /*
  * The modem's interrupt lines, which the root task carves for the driver:
@@ -116,6 +145,8 @@ struct drv {
     struct child_own own; /* what the driver builds its threads from */
     uint32_t clock;       /* the clock, to read */
     uint32_t lines;       /* the modem's interrupt lines, DRV_LINES of them from DRV_LINE_FIRST */
+    char conf[DRV_CONF_SIZE]; /* the configuration as the input region holds it, its first bytes, for the program */
+    uint32_t conf_len;
     /*
      * The trace: the driver maps no device, so every access the libraries' bring-up makes faults to its watcher,
      * which the root task carries out and logs; see user/tracer/trace.h and root.c.
@@ -152,6 +183,7 @@ struct drv {
 
     /* From the driver. */
     char failed[32]; /* the step that failed */
+    uint32_t channel; /* the channel it listens on, which the root task tells once it reports DRV_LISTENING */
     volatile uint32_t net_count;
     struct drv_net nets[DRV_NETS]; /* what a scan heard */
     struct drv_net joined;         /* the access point joined */

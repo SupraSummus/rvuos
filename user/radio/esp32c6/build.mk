@@ -6,9 +6,8 @@
 # tools/esp-fetch.py --wifi fetches the PHY's init data and the ROM's linker scripts, never into the tree.
 RADIO_ESP      := user/radio/esp32c6
 RADIO_ESP_INIT := $(BUILD)/$(RADIO_ESP)/phy_init_data.c
-# The radio's own files every program links, and the objects of what is fetched;
-# root.c is the root task's own image's, and the sampler's dump.c the root's too.
-RADIO_ESP_SRC  := $(filter-out $(RADIO_ESP)/root.c $(RADIO_ESP)/dump.c,$(wildcard $(RADIO_ESP)/*.c))
+# The radio's own files every program links, and the objects of what is fetched; root.c is the root task's image's.
+RADIO_ESP_SRC  := $(filter-out $(RADIO_ESP)/root.c,$(wildcard $(RADIO_ESP)/*.c))
 RADIO_ESP_DATA := $(BUILD)/$(RADIO_ESP)/phy_init_data.o $(BUILD)/$(RADIO_ESP)/esp_wifi_regulatory.o
 RADIO_ESP_ROM  := $(addprefix $(PHYBLOB_CACHE)/,esp32c6.rom.ld esp32c6.rom.phy.ld \
                   esp32c6.rom.libgcc.ld esp32c6.rom.libc.ld)
@@ -80,17 +79,57 @@ $(BUILD)/$(RADIO_ESP)/esp_wifi_regulatory.o: $(RADIO_ESP_INIT)
 	$(CC) $(CFLAGS) -Wno-unterminated-string-initialization -I$(RADIO_ESP)/shim \
 		-c $(PHYBLOB_CACHE)/esp_wifi_regulatory.c -o $@
 
-# The root task of every program: root.c, and with C6_SDR=1 the sampler of dump.h, which only that build links;
-# and what it shares with the Pico 2 W's, the network process, its clients, and the root task's half of both, system.c,
+# The root task of every program, root.c, and what it shares with the Pico 2 W's, the network process, its clients, and the root task's half of both, system.c,
 # which it builds when the program is the Wi-Fi station and a network is named.
 # The logger is linked, though this root task never builds it.
 RADIO_ESP_NET  := $(addprefix $(BUILD)/user/wifi/,netproc.o net.o sock.o system.o client.o echo.o clock.o sntp.o logger.o)
-RADIO_ESP_ROOT := $(BUILD)/$(RADIO_ESP)/root.o $(if $(filter-out 0,$(C6_SDR)),$(BUILD)/$(RADIO_ESP)/dump.o)
+RADIO_ESP_ROOT := $(BUILD)/$(RADIO_ESP)/root.o
 $(BUILD)/user-wifi-esp32c6.elf: $(RADIO_ESP_ROOT) $(RADIO_ESP_NET) $(LIB_OBJ) $(USER_COMMON) \
                                 $(BUILD)/user/tracer/trace.o $(BUILD)/user/user.ld tools/no-globals.py
 	tools/no-globals.py $(RADIO_ESP_NET) $(LIB_OBJ) $(BUILD)/user/tracer/trace.o
 	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/user/user.ld $(RADIO_ESP_ROOT) $(RADIO_ESP_NET) $(LIB_OBJ) \
 		$(BUILD)/user/tracer/trace.o $(USER_COMMON) -o $@
+
+# The programs of prog/, a file each, each an image of its own, radio-<name>.bin, with the radio's files,
+# in the smaller block of RAM, which leaves the free RAM's lower half to the dump engine; see drv.h.
+# A program's own code takes no memory as it runs, so the link fails if one of its objects but the adapter's and the
+# allocator's calls an allocator, as the station's does.
+RADIO_PROGS     := $(basename $(notdir $(wildcard $(RADIO_ESP)/prog/*.c)))
+RADIO_PROG_OBJ  := $(patsubst %.c,$(BUILD)/%.o,$(RADIO_ESP_SRC)) $(RADIO_ESP_DATA) \
+                   $(BUILD)/user/tracer/trace.o $(BUILD)/user/tracer/watch.o
+RADIO_PROG_HEAP := $(addprefix $(BUILD)/$(RADIO_ESP)/,heap.o osi.o)
+$(BUILD)/$(RADIO_ESP)/prog/%.o: CFLAGS += -I$(RADIO_ESP)
+
+$(BUILD)/$(RADIO_ESP)/flash-prog.ld: $(RADIO_ESP)/flash.ld.S
+	@mkdir -p $(dir $@)
+	$(CC) $(ARCHFLAGS) -E -P -x assembler-with-cpp $(KERNEL_INC) -Iinclude -DDRV_RAM_BASE=0x40870000 \
+		-DDRV_RAM_SIZE=0x00010000 -MMD -MP -MT $@ $< -o $@
+
+$(BUILD)/radio-%.elf: $(BUILD)/$(RADIO_ESP)/prog/%.o $(RADIO_PROG_OBJ) $(LIB_OBJ) $(BUILD)/$(RADIO_ESP)/flash-prog.ld
+	@! $(NM) -u $(filter-out $(RADIO_PROG_HEAP),$(filter $(BUILD)/$(RADIO_ESP)/%,$(RADIO_PROG_OBJ)) $<) \
+		| grep -E ' (osi_(m|c|re)alloc|os_(m|z)alloc|malloc|calloc)$$' \
+		|| { echo "$@: the program's own code calls an allocator" >&2; exit 1; }
+	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/$(RADIO_ESP)/flash-prog.ld $(foreach s,$(RADIO_ESP_ROM),-Wl,-T,$(s)) \
+		$< $(RADIO_PROG_OBJ) $(LIB_OBJ) -o $@
+
+$(BUILD)/radio-%.bin: $(BUILD)/radio-%.elf
+	$(OBJCOPY) -O binary $< $@
+
+# A program's run: the root task's image, the program written at the window onto flash if it changed, and its
+# configuration, RADIO_CONFIG, in the input region; the log comes as the run goes, as the station's does,
+# and stays in build/esp32c6/radio-run.log.
+.PHONY: radio
+ifeq ($(BOARD),esp32c6)
+radio: $(BUILD)/kernel-wifi-esp32c6.bin $(if $(PROG),$(BUILD)/radio-$(PROG).bin)
+	$(if $(filter $(PROG),$(RADIO_PROGS)),,$(error name a program of $(RADIO_ESP)/prog/: PROG=$(RADIO_PROGS)))
+	tools/wifi-run.py --console --save $(BUILD)/radio-run.log \
+		$(foreach e,$(BUILD)/radio-$(PROG).elf $(BUILD)/kernel-wifi-esp32c6.elf $(PHYBLOB_ROM_ELF),--symbols $(e)) -- \
+		$(ESPTOOL_PYTHON) tools/esp32c6-run.py --port $(PORT) --flash $(RADIO_ESP_AT):$(BUILD)/radio-$(PROG).bin \
+		--text $(RADIO_ESP_INPUT_AT):$(or $(RADIO_CONFIG),/dev/null) $(BUILD)/kernel-wifi-esp32c6.bin
+else
+radio:
+	$(error the radio's programs run on an ESP32-C6: make BOARD=esp32c6 radio PROG=name)
+endif
 
 # The radio's files on the host under the sanitizers, which fetch nothing, so make check runs them.
 # The sending's choices of txctl.c, each try's rate and backoff.

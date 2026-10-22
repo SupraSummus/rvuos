@@ -123,6 +123,12 @@ void mac_rx_on(void);
  */
 void mac_config(uint32_t (*slowclk_cal_get)(void), int (*coex_pti_get)(uint32_t event, uint8_t *pti), uint32_t rx_base);
 void mac_station_start(const uint8_t sta[6], void (*sta_start)(void));
+/*
+ * The MAC and the PHY up from a stopped radio, the libraries' wifi_hw_start written out: the clocks, the PHY, the
+ * coexistence, the MAC reset and configured with mac_config, its interrupts armed, its receive policy for the address
+ * sta, and its receiving on; the station's start, and any program that hears Wi-Fi's channels, run it first.
+ */
+void mac_up(const uint8_t sta[6]);
 void mac_config_start(void);
 void mac_rx_policy_word(uint32_t iface);
 void mac_config_finish(void);

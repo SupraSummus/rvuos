@@ -1,0 +1,21 @@
+# The ESP32-C6's radio: conventions
+
+These rules add to the repository's `CLAUDE.md` and to the Wi-Fi station's, `user/wifi/esp32c6/CLAUDE.md`,
+whose checks a change to the radio's shared files runs, as the station links them all.
+
+## Before committing
+
+A change to the radio's shared files with an ESP32-C6 connected runs, besides the station's checks,
+each program of `prog/` that calls what changed, with `make BOARD=esp32c6 radio PROG=name RADIO_CONFIG=file`;
+a change to the root task, `root.c`, or to the page and the header of `drv.h`, runs every program.
+
+A new program is a file of `prog/` that names itself and what it needs with `DRV_PROGRAM`,
+and defines `drv_run` and `drv_radio_off`, see `osi.h`; its configuration's keys are its own, read from the page,
+and its run ends when the root task asks it to leave.
+
+### The sampler
+
+A change to `dump.c`, `dump.h` or `prog/sampler.c` runs the sampler with `channel=1`,
+with the nRF52840's frames as the signal of known frequency, as the station's `NOTES.md`, "The dump engine", says,
+and `tools/dump-spectrum.py` must find them in the captures of their seconds, at the offset of their channel,
+and in none before them.

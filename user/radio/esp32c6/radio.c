@@ -18,12 +18,8 @@
 #include "osi.h"
 #include "rvuos.h"
 
-void drv_main(struct child_page *page);
-
 /* The image's own layout, from its linker script, which esptool writes into the window onto flash. */
 extern uint8_t drv_data_load[], drv_data_start[], drv_data_end[], drv_bss_start[], drv_bss_end[];
-
-__attribute__((section(".header"), used)) const struct drv_header drv_image = { DRV_MAGIC, drv_main };
 
 struct drv *drv_self;
 struct event_group drv_events;

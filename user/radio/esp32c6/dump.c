@@ -1,6 +1,6 @@
 /*
- * The sampler, see dump.h: the modem's dump engine, driven as Espressif's adctrig drives it, but for its gains,
- * which the driver's PHY leaves to the AGC, and the frames and tones some of its modes send, which a sampler never does.
+ * The modem's dump engine, see dump.h, driven as Espressif's adctrig drives it, but for its gains,
+ * which the radio's PHY leaves to the AGC, and the frames and tones some of its modes send, which a sampler never does.
  */
 
 #include "dump.h"
@@ -8,7 +8,7 @@
 #include <stdint.h>
 
 #include "devices.h"
-#include "rvuos.h"
+#include "osi.h"
 #include "wifi/conf.h"
 
 #define REG(a) (*(volatile uint32_t *)(uintptr_t)(a))
@@ -48,9 +48,10 @@
 #define GUARD 0x5a5aa5a5u
 /* How long a capture is waited for, in reads of its word: at 16 MHz the longest takes 2 ms, a few thousand reads. */
 #define DUMP_POLLS 2000000u
+/* dumphex='s lines a burst, about 1.5 KiB of the log's 4, and the pause after each, for the root task to take them. */
+#define HEX_BURST    16u
+#define HEX_PAUSE_MS 20u
 
-static const struct out *out, *bulk;
-static void (*drain)(void);
 static volatile uint32_t *const bank = (volatile uint32_t *)(uintptr_t)DUMP_BANK_BASE;
 static uint32_t captures;
 
@@ -72,19 +73,6 @@ void dump_configure(const char *conf, uint32_t size, struct dump_conf *c)
     if (c->hex > DUMP_HEX_MAX) {
         c->hex = DUMP_HEX_MAX;
     }
-}
-
-void dump_open(struct self *s, const struct out *o, const struct out *raw, struct block *b, void (*d)(void),
-               void (*must)(const char *what, uint32_t status))
-{
-    uint32_t region;
-    out = o;
-    bulk = raw;
-    drain = d;
-    must("a frame of the dump's bank", mem_make(s, b, CAP_FRAME));
-    must("install the dump's bank", region_install(s, b->made, RIGHT_R | RIGHT_W, &region));
-    must("install the modem", region_install(s, BOOT_CAP_MODEM, RIGHT_R | RIGHT_W, &region));
-    must("install HP_SYSTEM", region_install(s, BOOT_CAP_HP_SYSTEM, RIGHT_R | RIGHT_W, &region));
 }
 
 /* A 10-bit two's complement field of a word, from bit at. */
@@ -190,19 +178,20 @@ void dump_take(struct dump_conf *c)
         guards += bank[n + k] == (GUARD ^ k);
     }
     int32_t d = written ? (int32_t)written : 1;
-    say(out, "dump: capture %u source %u lane %u%s rate %u: %u of %u written, guards %u of 4, %u polls\n", captures,
+    drv_say("dump: capture %u source %u lane %u%s rate %u: %u of %u written, guards %u of 4, %u polls\n", captures,
         source, c->lane, c->bt ? " bt" : "", c->rate, written, n, guards, polls);
-    say(out, "dump: I mean %d rms %u range %d to %d; Q mean %d rms %u range %d to %d\n", sum_i / d,
+    drv_say("dump: I mean %d rms %u range %d to %d; Q mean %d rms %u range %d to %d\n", sum_i / d,
         isqrt(sq_i / (uint32_t)d * 4u), min_i, max_i, sum_q / d, isqrt(sq_q / (uint32_t)d * 4u), min_q, max_q);
-    say(out, "dump: gain %u to %u, AGC bits or %x and %x, words that change %u\n", gain_min, gain_max, agc_or,
+    drv_say("dump: gain %u to %u, AGC bits or %x and %x, words that change %u\n", gain_min, gain_max, agc_or,
         agc_and, changes);
     if (c->hex) {
         uint32_t words = c->hex < n ? c->hex : n;
-        /* The log first, so that the words follow the lines before them; then the words straight to the console. */
-        drain();
-        for (uint32_t k = 0; k < words; k += 8u) {
-            say(bulk, "dumphex: %u %u %x %x %x %x %x %x %x %x\n", captures, k, bank[k], bank[k + 1u], bank[k + 2u],
-                bank[k + 3u], bank[k + 4u], bank[k + 5u], bank[k + 6u], bank[k + 7u]);
+        for (uint32_t k = 0, lines = 0; k < words; k += 8u) { /* bounded by words, DUMP_HEX_MAX at most */
+            if (lines++ % HEX_BURST == 0) {
+                osi_delay_ms(HEX_PAUSE_MS);
+            }
+            drv_say("dumphex: %u %u %x %x %x %x %x %x %x %x\n", captures, k, bank[k], bank[k + 1u], bank[k + 2u],
+                    bank[k + 3u], bank[k + 4u], bank[k + 5u], bank[k + 6u], bank[k + 7u]);
         }
     }
     captures++;
