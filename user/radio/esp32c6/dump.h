@@ -34,7 +34,7 @@ struct dump_conf {
 };
 
 #define DUMP_SAMPLES_MAX (DUMP_BANK_SIZE / 4u - 4u) /* four words past a capture tell whether it overran */
-#define DUMP_HEX_MAX     4096u
+#define DUMP_HEX_MAX     8192u /* 0.64 s of the log's pace, so that a program still answers each second */
 
 void dump_configure(const char *conf, uint32_t size, struct dump_conf *c);
 
@@ -45,5 +45,16 @@ void dump_configure(const char *conf, uint32_t size, struct dump_conf *c);
  * word's index, and tools/dump-spectrum.py refuses a capture whose lines do not follow on.
  */
 void dump_take(struct dump_conf *c);
+
+/*
+ * The engine writing round a ring of DUMP_RING words from the bank's first, as ESP-SDR found it does,
+ * from dumpsource= at dumprate=, from dump_ring_start until dump_ring_stop, the bank the engine's meanwhile.
+ * dump_ring_index reads the word it writes next, and bit 14 once the ring has come round;
+ * dump_ring_stop tells the ring's newest dumphex= words, the oldest first, as dump_take tells a capture.
+ */
+#define DUMP_RING 16384u
+void dump_ring_start(const struct dump_conf *c);
+uint32_t dump_ring_index(void);
+void dump_ring_stop(const struct dump_conf *c);
 
 #endif

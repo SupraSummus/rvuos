@@ -416,6 +416,11 @@ static void collect(void)
     }
 }
 
+uint32_t mac_rx_last(void)
+{
+    return rd(RX_LAST);
+}
+
 /* The MAC's interrupt, in place of the libraries' wDev_ProcessFiq: its causes read and cleared, as that does. */
 void mac_rx_isr(void *arg)
 {

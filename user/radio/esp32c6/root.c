@@ -448,7 +448,7 @@ static void configure(struct drv *p)
 static void trace_give(struct child *c)
 {
     struct drv *p = (struct drv *)c->page;
-    must("give the driver its first thread", child_give(&self, c, c->thread, RIGHT_W, &p->own_thread));
+    must("give the driver its first thread", child_give(&self, c, c->thread, RIGHT_W | RIGHT_R, &p->own_thread));
     must("a slot for the trace's answer", slot_new(&self, &trace_note));
     must("the trace's answer", rv_pool_alloc(self.pool, CAP_NOTIFICATION, trace_note, 0));
     must("give the driver the trace's answer", child_give(&self, c, trace_note, RIGHT_R, &p->trace_note));
@@ -633,6 +633,8 @@ static void driver_build(void)
     if (p->trace == 1) {
         trace_give(c);
     } else {
+        must("give the driver its first thread's overruns",
+             child_give(&self, c, c->thread, RIGHT_R, &p->own_thread));
         for (uint32_t i = 0; i < sizeof(trace_frames) / sizeof(trace_frames[0]); i++) {
             if (trace_frames[i].cap != BOOT_CAP_RNG || (program.needs & DRV_NEED_RNG)) {
                 must(trace_frames[i].name, child_map(&self, c, trace_frames[i].cap, trace_frames[i].rights, &region));

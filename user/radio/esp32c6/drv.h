@@ -152,7 +152,8 @@ struct drv {
      * which the root task carries out and logs; see user/tracer/trace.h and root.c.
      */
     uint32_t trace;      /* 1: trace the bring-up, and stop, instead of joining, scanning or listening */
-    uint32_t own_thread; /* the slot of the driver's first thread, for the watcher to serve its faults */
+    uint32_t own_thread; /* the driver's first thread: RIGHT_R to read its overruns, and in a trace RIGHT_W too,
+                          * for the watcher to serve its faults */
     uint32_t trace_note; /* the slot of the notification the root task answers a trace request on */
     struct trace_share share; /* the request, and the counters the watcher and the root task keep */
     uint8_t mac[6];       /* the factory MAC address, which the root task read from eFuse */

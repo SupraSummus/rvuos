@@ -96,6 +96,8 @@ void mac_rx_isr(void *arg);
  */
 const char *mac_rx_take(mac_heard_fn *heard);
 void mac_rx_give_back(void);
+/* The last descriptor the MAC filled, which changes as a frame ends in one: a program that waits for a frame polls it. */
+uint32_t mac_rx_last(void);
 
 /*
  * The MAC's receive off for the bring-up, in place of the libraries' hal_mac_rx_disable: RX_CTRL's enable and its

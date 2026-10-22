@@ -175,6 +175,12 @@ what is left:
   in the USB Serial/JTAG FIFO, written while the packet before is still in it, or on the host.
   `tools/mac-trace.py` refuses such a log, and `tools/esp32c6-gate.py` makes the run again
   and writes each loss into `build/esp32c6/gate/losses.txt`, the series to read the cause from.
+- The dump engine's ring, `user/radio/esp32c6/prog/ring.c`, stops when a thread that polls the MAC sees a frame end,
+  and in some runs that thread lost the core about every 0.8 ms, for up to 0.7 ms, so the stop came late;
+  the modem's ETM, or the MAC's interrupt thread, could stop the engine as the frame ends, see `hw/dump.md`, "The ring".
+- The radio's `osi_now_us` asks the kernel, `OP_CLOCK_READ`, about 8 us a read;
+  a loop that reads it often, as the dump engine's waits do, would read the counter through `OP_CLOCK_FRAME` with a load,
+  at the cost of a region.
 - Open work of the ESP32-C6's own MAC and station:
   The station is the driver's own, on hostap; `user/wifi/esp32c6/NOTES.md` says why.
   It receives, scans and sends by `mac.c`, authenticates, by SAE where the access point offers WPA3's personal

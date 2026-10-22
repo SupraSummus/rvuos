@@ -20,6 +20,10 @@ with the nRF52840's frames as the signal of known frequency, as `hw/dump.md` say
 and `tools/dump-spectrum.py` must find them in the captures of their seconds, at the offset of their channel,
 and in none before them.
 
+A change to the ring's functions in `dump.c` or to `prog/ring.c` runs the ring with `channel=1`, `dumprate=3` and `dumphex=8192`:
+each ring must stop on a frame, and the frames' ends must stand in its words, the AGC's gain going back to 78
+a few tens of microseconds before the stop, as `hw/dump.md`, "The ring", says.
+
 ### The 802.15.4 programs
 
 A change to `i154.c` runs `tools/thread-pair.sh`, as the repository's `CLAUDE.md` says,
@@ -30,7 +34,8 @@ take a capture every second of the run and still answer the root task.
 ### The scan
 
 A change to `drv_phy_tune` in `phy.c`, to `prog/scan.c` or to `tools/dump-spectrum.py`'s `--scan` runs the scan
-from 2395 to 2425 MHz with `divided=2` and the nRF52840 sending on channel 12 in the middle of the run, as `hw/phy.md`, "Off the channels' grid", says,
+from 2405 to 2415 MHz with `divided=2` for 50 s and the nRF52840 sending on channel 12 for 20 s in the middle of the run,
+as `hw/phy.md`, "Off the channels' grid", says,
 and `tools/dump-spectrum.py LOG 80e6 256 --scan 2410` must find the frames, each way, in several captures of its seconds
 and in at most one before them, as 2410 MHz is BLE's channel 3 and within Wi-Fi's channel 1, whose senders the scan hears too.
 A change to `drv_phy_rx_gain` or `drv_phy_rx_filter` runs it with `gain=` and `gainstep=`, and with `filter=` and `filterstep=`,

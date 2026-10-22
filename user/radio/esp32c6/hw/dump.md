@@ -61,9 +61,9 @@ What the board answered, the driver listening on Wi-Fi's channel 1:
   hears; 3, 4, 6 to 9 and 11 to 14 did not finish in 150 ms of a channel with only beacons and traffic on it.
   With `dumpsweep=1`, 4096 samples at 80 MS/s, five captures of each in 70 s, as a hypothesis from them:
   source 0 starts as the AGC takes its first step on a packet, the gain already down from 78 to about 56 at the first sample
-  and its next step, to about 42, 336 to 340 samples on, in four of five, 262 at times in another run;
-  in that run, on the nRF52840's frames,
-  the gain at 72, in six of the ten captures of their seconds; nothing from before the first step is in it.
+  and its next step, to about 42, 336 to 340 samples on, in four of five, 262 at times in another run,
+  where it started on the nRF52840's frames too, the gain at 72, in six of the ten captures of their seconds;
+  nothing from before the first step is in it.
   Sources 1 and 10 start once the AGC has settled, the gain 35 to 43 throughout, in three of four each;
   2 starts a microsecond before the gain goes back to 78, in two of five;
   5's show nothing of the gain's, `adctrig` setting a byte of the Wi-Fi MAC's for it.
@@ -108,6 +108,26 @@ moved it more than its default does. What chooses the bus's signals is not found
 `0x600A9020` was a poor guess: the register map, see `README.md`, reads it as the block's date word, `0x02202221`,
 the last of its sixteen words, which repeat every 64 bytes from `0x600A9000` to `0x600A9400`.
 
+## The ring
+
+`0x600A9004` with bit 17 set as well, and 16384 in the samples' field, has the engine write round and round
+the bank's first 16384 words, 64 KiB, until the word is cleared, as ESP-SDR found;
+`dump_ring_start` and `dump_ring_stop` in `dump.c` drive it, and `prog/ring.c` stops it as the Wi-Fi MAC ends a frame, its `RX_LAST` moving.
+Measured with `prog/ring.c` on channel 1:
+
+- The engine wrote all 16384 words and none past them, the rest of the bank marked; it does not stop by itself.
+- `0x600A9008` read while it runs holds the word written next in bits 0 to 13: at 16 MS/s it moved 1603 in 100 us
+  and read 1789 at a stop with 1790 written. Its bit 14 is set once the ring has come round, at every stop after that,
+  and stays set. It reads 0 once the engine stops, so the ring's newest word is the one before the index read last;
+  its bits 15 and 16 are the source's.
+- At 16 MS/s, a ring of 1 ms, stopped as the MAC ends a frame, the program polling every 0.4 us:
+  the AGC let the gain go, to 60 and then to 78, 36.1 to 36.5 us before the stop in 41 of 48 rings, and at most 42.4,
+  so the MAC names a frame about 36 us after the AGC lets go.
+- A thread that polls may lose the core. In two runs it ran out of its time about once every 0.8 ms of polling,
+  `OP_THREAD_OVERRUNS` read around it, and was away for up to 0.7 ms, as the ring's index read at every poll shows,
+  and stops came up to 213 us after the frame's end; in two runs an hour later, the same build in one of them,
+  it ran out once a ring and was away at most 29 us. What wanted the core in the first is not known.
+
 Open questions of the sampler, beside `TODO.md`'s:
 
 - What source 5 waits for, and whether 1, 2 and 10 start on the AGC's steps as their few captures suggest.
@@ -121,8 +141,6 @@ Open questions of the sampler, beside `TODO.md`'s:
 ESP-SDR's description and firmware, GPL-3.0, name these for the ESP32-C6; they are facts to try, not yet the board's.
 Its tuning, its gain and its filter are `phy.md`'s, "Off the channels' grid" and "The receiver's gain and filter".
 
-- A ring: `0x600A9004` with bits 14 and 17 set as well has the engine write round and round,
-  its write index in `0x600A9008`'s bits 0 to 16, in a ring of 16384 words, 64 KiB.
 - The bank, in `SRAM_USAGE`'s bits 9 to 11 for banks 1 to 3;
   moving the engine from one bank to another while it runs splits the stream into pieces with nothing lost between them,
   so that the CPU reads one bank while the engine fills the other: a stream that does not stop wants two banks,

@@ -110,13 +110,13 @@ Measured with `prog/scan.c`:
 - Lines every 20 MHz, at 2400, 2480, 2500, 2520 and 2540 MHz, 10 to 40 dB over the floor, at every tuning;
   the board's own clocks, as a hypothesis, the 40 MHz crystal's and its halves'.
   At 16 MS/s a step of 10 MHz shows them folded, 6 MHz from its middle, see `dump.md`.
-- The control, in one run: the scan from 2395 to 2425 MHz with `divided=2`, each step taken both ways,
-  the PLL at 2892 MHz for 2410 divided, for 40 s, and the nRF52840 sending IEEE 802.15.4 frames
-  on 2410 MHz for ten of those seconds, `make BOARD=nrf52840 thread` with `channel=12`, `stream=100` and `run=10`,
+- The control, in one run: the scan from 2405 to 2415 MHz with `divided=2`, each step taken both ways,
+  the PLL at 2892 MHz for 2410 divided, for 50 s, and the nRF52840 sending IEEE 802.15.4 frames
+  on 2410 MHz for twenty of those seconds, `make BOARD=nrf52840 thread` with `channel=12`, `stream=100` and `run=20`,
   which fails at its end, as the C6 acknowledges none.
-  `tools/dump-spectrum.py LOG 80e6 256 --scan 2410` found the level there 25 to 30 dB over the floor
-  in two or three captures of those seconds each way, a capture of 13 us catching a frame now and then,
-  and once before them, as narrow, another sender's: 2410 MHz is BLE's channel 3.
+  `tools/dump-spectrum.py LOG 80e6 256 --scan 2410` found the level there 13 to 31 dB over the floor
+  in 9 of the direct way's 26 captures of 13 us in those seconds and 12 of the divided way's 27,
+  and in none before or after them; 2410 MHz is BLE's channel 3, where another sender stood once in an earlier run.
   At 16 MS/s, in bins of 62.5 kHz, the two ways put the frames' middle within 50 kHz of each other, their band the same,
   so the ratio is 5/6 to that, 2 x 10^-5.
 
