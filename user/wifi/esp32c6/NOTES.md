@@ -3,6 +3,8 @@
 `user/wifi/esp32c6/` is the Wi-Fi system's driver on the ESP32-C6:
 Espressif's closed libraries around an adapter at first,
 then step by step a MAC, a station and a bring-up of its own, toward leaving the libraries the PHY alone.
+The radio's half of it, the root task, the adapter, the PHY, the basebands and the MACs, which programs other than the station
+use too, is in `user/radio/esp32c6/` now; these notes name its files by their names alone.
 These notes say what each step took and what it found, in the order the steps were made;
 what writing the Wi-Fi system as a program of several processes was like, on the Pico 2 W first,
 is in `user/wifi/NOTES.md`.

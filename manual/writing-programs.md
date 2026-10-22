@@ -375,7 +375,7 @@ A station joins by WPA3's SAE where the access point offers it and by WPA2's pas
 and leaves the network once its run is over;
 an access point offers both, and `sae=0` has either keep to WPA2.
 The chip's firmware runs SAE itself, and the driver gives it the passphrase.
-On an ESP32-C6 the same network process runs beside a driver of another kind, `user/wifi/esp32c6/`,
+On an ESP32-C6 the same network process runs beside a driver of another kind, `user/wifi/esp32c6/` over the radio of `user/radio/esp32c6/`,
 a child that runs an image of its own from the window onto flash:
 a station of its own, on hostap's supplicant, over the MAC that Espressif's closed Wi-Fi libraries bring up,
 which run around an adapter that builds the threads they want as tasks from what its root task gave it, section 8.4.
@@ -388,7 +388,7 @@ by WPA3's SAE where the access point offers it and by WPA2's passphrase otherwis
 where the network process takes an address by DHCP and answers ping and UDP port 7777, and its clients theirs;
 `tools/wifi-run.py` checks them from the host as it checks the Pico 2 W's, and ends the run, which otherwise lasts `run=` seconds.
 `debug=frames,wpa`, `lib=`, `pmf=0` and `sae=0` have the driver tell more or join otherwise,
-as `user/wifi/esp32c6/root.c` says, and a thread of the driver's that faults is told with its stack, its functions named.
+as `user/radio/esp32c6/root.c` says, and a thread of the driver's that faults is told with its stack, its functions named.
 A program of several processes lies in a directory of its own, `user/<program>/`, its root task in `root.c`,
 and `PROGRAMS` in `user/build.mk` links each with the library.
 `user/wifi/NOTES.md` says what writing it was like, before the library and after.

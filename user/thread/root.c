@@ -5,7 +5,7 @@
  * It detects the energy on each channel from 11 to 26 for a while, a few rounds, and says the most each saw,
  * since Wi-Fi and everything else at 2.4 GHz share them, and a network does best on a quiet one.
  * Then it exchanges frames on one channel with the ESP32-C6, whose driver sends a ping every half second,
- * see user/wifi/esp32c6/i154.c: its link, link.c, acknowledges each ping, as 802.15.4 has a receiver acknowledge
+ * see user/radio/esp32c6/i154.c: its link, link.c, acknowledges each ping, as 802.15.4 has a receiver acknowledge
  * a frame that asks, and it answers each with a pong of its own, which the link sends after CSMA-CA,
  * and sends again until the C6 acknowledges it.
  * With stream= it also sends the C6 that many frames a second, which contend with the pings and pongs for the channel;
@@ -29,7 +29,7 @@
  * a hundred times in 10 ms, while the route is armed, and not at all once it is disarmed;
  * it halts with HALT_ROUTE if not.
  *
- * Build and run: make BOARD=nrf52840 thread, with the ESP32-C6 on i154= the same channel, see user/wifi/esp32c6/root.c;
+ * Build and run: make BOARD=nrf52840 thread, with the ESP32-C6 on i154= the same channel, see user/radio/esp32c6/root.c;
  * tools/thread-pair.sh runs both.
  */
 

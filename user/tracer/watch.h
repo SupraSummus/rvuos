@@ -2,7 +2,7 @@
 #define RVUOS_USER_TRACER_WATCH_H
 
 /*
- * A served fault: what the watcher of user/wifi/esp32c6/osi.c decodes from a stopped thread,
+ * A served fault: what the watcher of user/radio/esp32c6/osi.c decodes from a stopped thread,
  * and what it leaves behind once the root task has carried the access out; see user/tracer/trace.h.
  * The watcher takes no lock and puts nothing on the heap in this path,
  * since a thread it serves may hold one of the adapter's, and a fault keeps the lock with the thread.

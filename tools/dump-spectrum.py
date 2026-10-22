@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""What the ESP32-C6's sampler captured, from a run's log: user/wifi/esp32c6/dump.h, dumphex=.
+"""What the ESP32-C6's sampler captured, from a run's log: user/radio/esp32c6/dump.h, dumphex=.
 
 Usage: tools/dump-spectrum.py LOG RATE_HZ [NFFT]
 

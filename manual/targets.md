@@ -144,7 +144,7 @@ PCR, PMU and the LP domain are not listed.
 The kernel takes the SAR ADC out of the reset the ROM leaves it in and turns its clocks on.
 It also powers the radio's analog I2C buses and sets the power detector's capacitance, in the PMU and LP_AON,
 as ESP-IDF's PHY library would;
-a PHY driver leaves out its own writes there, as `user/wifi/esp32c6/phy.c` does.
+a PHY driver leaves out its own writes there, as `user/radio/esp32c6/phy.c` does.
 The pins are as the ROM leaves them, for a program to set as its board wires them.
 On the XIAO ESP32-C6, GPIO3 low powers the RF switch between the chip and its two antennas,
 and GPIO14 picks the antenna on the board, low, or the U.FL connector, high, as the Wi-Fi system's root task sets them.

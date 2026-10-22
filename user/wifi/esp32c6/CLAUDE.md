@@ -4,15 +4,15 @@ These rules add to the repository's `CLAUDE.md`, which names the changes they ap
 
 ## Before committing
 
-A change to `user/wifi/esp32c6/` or `kernel/board/esp32c6/` with an ESP32-C6 connected runs `make BOARD=esp32c6 wifi-esp32c6`,
+A change to `user/wifi/esp32c6/`, `user/radio/esp32c6/` or `kernel/board/esp32c6/` with an ESP32-C6 connected runs `make BOARD=esp32c6 wifi-esp32c6`,
 which writes the driver into the flash at `0x210000` if it changed and scans,
 or, with `WIFI_CONFIG` naming a network as the repository's `CLAUDE.md` says for the Pico 2 W, joins it,
 and `tools/wifi-run.py` checks it from the host as it checks the Pico 2 W's, but for the logger, before it ends the run.
 The log comes as the run goes, each line timed, and stays in `build/esp32c6/wifi-run.log`;
-the configuration's `debug=`, see `user/wifi/esp32c6/root.c`, has the driver tell more,
+the configuration's `debug=`, see `user/radio/esp32c6/root.c`, has the driver tell more,
 and a fault of one of its threads comes with its stack and the names of its functions.
 
-A change to `user/wifi/esp32c6/mac.c` or `macstart.c` runs it again with `listen=` in `WIFI_CONFIG`,
+A change to `user/radio/esp32c6/mac.c` or `macstart.c` runs it again with `listen=` in `WIFI_CONFIG`,
 which fails if the driver hears nothing, again with `listen=` and `probe=`,
 which fails if a probe is not sent or not answered, and again with neither, the driver's scan.
 
@@ -30,7 +30,7 @@ a change to its BLE side runs it with `C6_LISTEN=1` and `i154listen=` too.
 
 ### The trace
 
-A change to `user/tracer/` or to the trace in `user/wifi/esp32c6/` runs it with `trace=1` in `WIFI_CONFIG`,
+A change to `user/tracer/` or to the trace in `user/radio/esp32c6/` runs it with `trace=1` in `WIFI_CONFIG`,
 which has the root task carry out and log every device access of the driver's bring-up,
 and again with `trace=2`, the same window with the driver mapping its frames and nothing faulting;
 the two runs must agree on the driver's lines, its events and its code, and the stream comes as `build/esp32c6/wifi-run.log`.
@@ -50,7 +50,7 @@ the bits whose value is the moment's -- a count over the window, a measurement, 
 a change to what it compares changes that test with it.
 
 `make mac-replay-test`, a part of `make check` too, runs the own start's register sequences of `macstart.c` on the host,
-each read answered and each write held by the libraries' accesses `user/wifi/esp32c6/test/replay/` holds,
+each read answered and each write held by the libraries' accesses `user/radio/esp32c6/test/replay/` holds,
 taken once from a run of the libraries' start; net80211 and pp are linked no more, so the files are frozen, and the make
 target that once took them, `wifi-esp32c6-replay`, is in git history.
 It runs `btbb.c`'s baseband bring-up there too, against `bb.txt` and `bb-other.txt`,

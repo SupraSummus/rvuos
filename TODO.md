@@ -611,7 +611,7 @@ What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
   and `make BOARD=rp2350 test escape` is the only run of the fence's byte it keeps in `pmpcfg1`.
 - `cap_lookup` copies the capability twice, into its own and then the caller's;
   copying it once would spare about a dozen of every call's 450 instructions on QEMU virt, `make trap-profile`.
-- The four bytes little-endian, `le32`, is written three times, in `user/wifi/esp32c6/mac.c`, `main.c` and `user/wifi/wlan.c`;
+- The four bytes little-endian, `le32`, is written three times, in `user/radio/esp32c6/mac.c`, `main.c` and `user/wifi/wlan.c`;
   one in `user/lib/` would serve all three.
 
 - The runs that check the ESP32-C6's `mac.c` and the station's own code are `WIFI_CONFIG` variants run by hand,

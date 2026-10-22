@@ -65,12 +65,12 @@ SELFCHECK_VARIANT := $(if $(filter-out $(SELFCHECK_DEFAULT),$(SELFCHECK)),$(if $
 # Asked for with WIFI_BT=1, and built in a directory of its own, as a budget does, since no object depends on the flag.
 WIFI_BT ?=
 WIFI_BT_VARIANT := $(if $(filter-out 0,$(WIFI_BT)),-bt)
-# The ESP32-C6's 802.15.4 listener, an experiment of its own, behind C6_LISTEN=1; see user/wifi/esp32c6/i154.c.
+# The ESP32-C6's 802.15.4 listener, an experiment of its own, behind C6_LISTEN=1; see user/radio/esp32c6/i154.c.
 # A directory of its own, so that without it the C6's images are exactly as they would be without the listener.
 C6_LISTEN ?=
 C6_LISTEN_VARIANT := $(if $(filter-out 0,$(C6_LISTEN)),-c6listen)
 # The ESP32-C6's sampler, the modem's dump engine filling a bank of SRAM with what the receiver hears, behind C6_SDR=1;
-# see user/wifi/esp32c6/dump.h. The bank is the free RAM's lower half, so the driver's block and the children's memory
+# see user/radio/esp32c6/dump.h. The bank is the free RAM's lower half, so the driver's block and the children's memory
 # move into the upper half, which only a run without the network process has room for: a directory of its own.
 C6_SDR ?=
 C6_SDR_VARIANT := $(if $(filter-out 0,$(C6_SDR)),-c6sdr)
@@ -235,11 +235,12 @@ $(BUILD)/%.ld: %.ld.S
 #   user/build.mk               the demo, the escape suite and the programs of several processes, and their runs
 #   user/wifi/build.mk          the Wi-Fi system on a Pico 2 W, and the tests of its network process on the host
 #   user/phyblob/build.mk       the PHY harness on an ESP32-C6
-#   user/wifi/esp32c6/build.mk  the Wi-Fi system on an ESP32-C6, its driver with hostap and Mbed TLS
+#   user/radio/esp32c6/build.mk the ESP32-C6's radio: the root task, the PHY, the basebands and the MACs every program links
+#   user/wifi/esp32c6/build.mk  the Wi-Fi system on an ESP32-C6, its station with hostap and Mbed TLS
 #   user/tracer/build.mk        the fault tracer's decoder, tested on the host
 #   user/thread/build.mk        Thread on IEEE 802.15.4, on an nRF52840
 #   host/build.mk               the kernel on the host: the fuzzer's harnesses, the mutants and the replay under QEMU
-include kernel/build.mk user/build.mk user/wifi/build.mk user/phyblob/build.mk user/wifi/esp32c6/build.mk user/tracer/build.mk user/thread/build.mk \
+include kernel/build.mk user/build.mk user/wifi/build.mk user/phyblob/build.mk user/radio/esp32c6/build.mk user/wifi/esp32c6/build.mk user/tracer/build.mk user/thread/build.mk \
         host/build.mk
 
 # The headers each object and linker script was made from, as the compiler listed them.

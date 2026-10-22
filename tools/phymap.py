@@ -17,7 +17,7 @@ nor a call through a pointer other than the table's slots; the report counts tho
 With --from it follows from the functions it names instead, each given by its symbol;
 with --all it follows from every function of the image,
 for an image that reaches much of its code only through pointers,
-as the Wi-Fi driver of user/wifi/esp32c6/ reaches libphy's functions and their interrupt's handler;
+as the Wi-Fi driver of user/wifi/esp32c6/ and user/radio/esp32c6/ reaches libphy's functions and their interrupt's handler;
 the linker kept only functions something names, so this is what the image may reach.
 Code past the end of its function's symbol is reported apart, as the name plus an offset:
 such is a library function weakened so that one of the driver's takes its place,

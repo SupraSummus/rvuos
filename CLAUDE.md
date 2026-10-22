@@ -67,7 +67,7 @@ and a change to anything the demo or the escape suite exercises runs the board's
 
 A change to `kernel/route.c` or a board's router runs `make BOARD=nrf52840 thread` as well, whose start checks a route.
 
-A change to `user/thread/` or to the ESP32-C6's `user/wifi/esp32c6/i154.c`, with both boards connected,
+A change to `user/thread/` or to the ESP32-C6's `user/radio/esp32c6/i154.c`, with both boards connected,
 runs `tools/thread-pair.sh`, IEEE 802.15.4's frames between them, which fails if either hears nothing of the other
 or nothing of either is acknowledged, and a change to how either sends runs it again with `STREAM=`,
 as only a stream has the two contend for the channel;
@@ -81,7 +81,7 @@ Of the Wi-Fi system `make check` runs only what makes no system call, the IP sta
 a change to `user/wifi/` with a Pico 2 W connected runs `make BOARD=rp2350 wifi` too,
 and `WIFI_CONFIG` names a network to join from a file git does not track,
 `local/wifi.conf` on the maintainer's machine, never from one it does.
-A change to `user/wifi/esp32c6/`, `kernel/board/esp32c6/`, `user/tracer/` or `tools/mac-trace.py`
+A change to `user/wifi/esp32c6/`, `user/radio/esp32c6/`, `kernel/board/esp32c6/`, `user/tracer/` or `tools/mac-trace.py`
 follows the ESP32-C6's Wi-Fi driver's own rules as well, in `user/wifi/esp32c6/CLAUDE.md`.
 
 `make check` builds no PHY harness, so a change to `user/phyblob/`, `user/phytrace.h` or the ESP32-C6's device ranges

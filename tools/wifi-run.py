@@ -7,7 +7,7 @@ and once the log says the clients answer, checks the status port, the echo, the 
 the echo built again after a fault and after a hang, and ping.
 With --console, as `make BOARD=esp32c6 wifi-esp32c6` runs it, the command's output is the log
 and its input reaches the root task: once the log says the clients answer, this checks the same, but for the logger,
-which that system does not run, then ends the run with "end", see user/wifi/esp32c6/root.c.
+which that system does not run, then ends the run with "end", see user/radio/esp32c6/root.c.
 Each step follows a line of the log or the command's end, never a time.
 
 Each line goes out with its seconds since the start, into --save's file too;
