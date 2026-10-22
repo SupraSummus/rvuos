@@ -64,8 +64,16 @@ What the board answered, the driver listening on Wi-Fi's channel 1:
   and the C6 capturing source 15 at the clock divided by 5. The frames stood 30 dB over the floor
   2 MHz below the middle, in the captures of those 10 s and in none before or after,
   so the divider gives 16 MS/s, and with bits 0 to 9 taken as I they would have stood 2 MHz above.
-  A line 4 MHz above the middle stands in most captures, 10 to 15 dB over the floor, the board's own;
-  these notes had it below once, read with I and Q the other way round.
+  A line 4 MHz above the middle stands in most captures, 10 to 15 dB over the floor:
+  2400 MHz, folded in, as the next shows.
+- The divided clock keeps samples with no filter of its own: what lies past half the rate folds into the band,
+  with only the analog filter before it, `phy.md`, "The receiver's gain and filter".
+  Measured with `prog/scan.c` from 2390 to 2430 MHz in steps of 4 MHz, the nRF52840's frames on 2410 MHz,
+  once at 80 MS/s and once at 16: at 16, the frames 12 MHz from the middle stood 4 MHz from it on the other side,
+  7 dB below those within the band, where at 80 the analog filter took 10 dB off them,
+  and in a run of steps of 10 MHz those 10 MHz off stood 6 MHz off on the other side, at the level of those in the middle.
+  So below the full clock a capture holds what is a rate away from the middle as if it were there,
+  and the scan takes its captures at 80 MS/s.
 
 The BLE side, the driver listening for IEEE 802.15.4 on channel 12, as the root task's sampler of then had it:
 
@@ -99,7 +107,7 @@ Open questions of the sampler, beside `TODO.md`'s:
 - The BLE side's rate: its captures take as long as Wi-Fi's at the full clock, yet hold a band of 5 MHz;
   whether its words are the BLE receiver's own samples held or made again at 80 MHz is not known,
   nor whether `0x600A210C`'s fields other than bit 7 matter.
-- The line 4 MHz from the middle on Wi-Fi's side, and the one 1 MHz from it on the BLE side.
+- The line 1 MHz from the middle on the BLE side.
 
 ## What ESP-SDR found that is not tried here
 

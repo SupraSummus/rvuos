@@ -5942,25 +5942,32 @@ void bt_tx_gain_init(void)
  * restart_cal, and its end waited for here, as the ROM's wait_rfpll_cal_end waits but for its print on a failure.
  * The word is the library's phy_rfpll_set_freq_offset's, N = f / (3 x the crystal) in units of 2^-20, less 32,
  * but from kilohertz, exactly, where the library's adds an offset in steps of 9 units, about 1.03 kHz.
+ * Divided, the PLL runs at 6/5 of the frequency and the receiver's LO divides it by as much,
+ * block 0x62's register 16 bit 3, which ESP-SDR found, set before the PLL calibrates.
  */
 void write_rfpll_sdm(const uint8_t out[4]);
 void restart_cal(void);
 
 #define I2C_RFPLL_CAL_DONE_REG  7  /* block 0x62's, its bit 1 set once the PLL's calibration has ended */
 #define I2C_RFPLL_BAND_REG      12 /* block 0x62's, bits 2 and 3: 0 locked, 1 the capacitance too low, 2 too high */
+#define I2C_RFPLL_LO_REG        16 /* block 0x62's, bit 3 set: the receiver's LO the PLL's frequency x 5/6 */
+#define I2C_RFPLL_LO_DIVIDED    3
 #define RFPLL_CAL_TRIES         100u
 #define RFPLL_CAL_STEP_US       20u
 
-uint32_t drv_phy_tune(uint32_t khz, int32_t *cap)
+uint32_t drv_phy_tune(uint32_t khz, uint32_t divided, int32_t *cap)
 {
     uint32_t crystal = phy_param[PHY_PARAM_XTAL] == 1u ? 26000u : phy_param[PHY_PARAM_XTAL] == 2u ? 32000u : 40000u;
-    uint32_t r = (uint32_t)(((uint64_t)khz << 20) / (3u * crystal)) + 0xff000000u;
+    uint32_t fifths = divided ? 6u : 5u; /* the PLL's frequency over the LO's, in fifths */
+    uint32_t r = (uint32_t)(((uint64_t)khz * fifths << 20) / (15u * crystal)) + 0xff000000u;
     uint8_t out[4] = { (uint8_t)(r & 7u), (uint8_t)(r >> 3), (uint8_t)(r >> 11), (uint8_t)(r >> 19) };
     uint32_t ended = 0;
 
     phy_param[PHY_PARAM_CAP_TRACK] = 0;
     phy_dis_hw_set_freq_1();
     rom_i2c_write_masked(I2C_RFPLL, I2C_HOST_MST, 0x0b, 6, 6, 0);
+    rom_i2c_write_masked(I2C_RFPLL, I2C_HOST_MST, I2C_RFPLL_LO_REG, I2C_RFPLL_LO_DIVIDED, I2C_RFPLL_LO_DIVIDED,
+                         divided ? 1u : 0u);
     write_rfpll_sdm(out);
     restart_cal();
     for (uint32_t i = 0; i < RFPLL_CAL_TRIES && !ended; i++) { /* bounded by RFPLL_CAL_TRIES */
@@ -5972,9 +5979,13 @@ uint32_t drv_phy_tune(uint32_t khz, int32_t *cap)
            rom_i2c_read_masked(I2C_RFPLL, I2C_HOST_MST, I2C_RFPLL_BAND_REG, 3, 2);
 }
 
-/* The hardware's frequency setting back, and the capacitance's tracking, as phy_force_freq_set(0) puts them. */
+/*
+ * The LO undivided, the hardware's frequency setting back, and the capacitance's tracking,
+ * as phy_force_freq_set(0) puts them.
+ */
 void drv_phy_tune_release(void)
 {
+    rom_i2c_write_masked(I2C_RFPLL, I2C_HOST_MST, I2C_RFPLL_LO_REG, I2C_RFPLL_LO_DIVIDED, I2C_RFPLL_LO_DIVIDED, 0);
     phy_en_hw_set_freq();
     phy_param[PHY_PARAM_CAP_TRACK] = 1;
 }

@@ -137,12 +137,15 @@ void drv_wifi_reset_mac(void);
 /* An analog I2C block's register through the ROM's rom_i2c_readReg; the PHY's bring-up powers the bus. */
 uint8_t drv_phy_i2c_read(uint8_t block, uint8_t host, uint8_t reg);
 /*
- * The RF PLL tuned to khz, off the channels' grid too, from 1920 MHz up, and its capacitance told;
- * 0 once it locked, or DRV_TUNE_UNCALIBRATED if its calibration never ended, or'd with its band's state,
- * 1 its capacitance too low or 2 too high. The hardware's frequency setting stays off until drv_phy_tune_release.
+ * The RF PLL tuned to khz, off the channels' grid too, and its capacitance told;
+ * divided, the PLL runs at 6/5 of khz and the receiver's LO divides it by as much, which reaches below its band,
+ * from DRV_TUNE_DIRECT_LOWEST_KHZ down. 0 once it locked, or DRV_TUNE_UNCALIBRATED if its calibration never ended,
+ * or'd with its band's state, 1 its capacitance too low or 2 too high.
+ * The hardware's frequency setting stays off until drv_phy_tune_release.
  */
-#define DRV_TUNE_UNCALIBRATED 0x10u
-uint32_t drv_phy_tune(uint32_t khz, int32_t *cap);
+#define DRV_TUNE_UNCALIBRATED      0x10u
+#define DRV_TUNE_DIRECT_LOWEST_KHZ 2210000u /* ESP-SDR's; the band was right from 2180 MHz on the board */
+uint32_t drv_phy_tune(uint32_t khz, uint32_t divided, int32_t *cap);
 void drv_phy_tune_release(void);
 /* The receiver's gain index held, or left to the AGC again; the highest index the gain table holds. */
 void drv_phy_rx_gain(uint32_t force, uint32_t index);

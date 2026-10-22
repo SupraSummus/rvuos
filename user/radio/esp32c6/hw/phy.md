@@ -90,21 +90,35 @@ block 0x62's register 0x0B bit 6 cleared, then the ROM's steps (known, their dis
 - Block 0x62's register 12, bits 2 and 3, as `rfpll_cap_correct_new` reads them: 0 the PLL in its band,
   1 and 2 the capacitance to step up or down.
 
+Divided, which ESP-SDR found too, block 0x62's register 16 bit 3 set, 0 after the bring-up,
+the receiver's LO is the PLL's frequency x 5/6, so the PLL tuned to 6/5 of a frequency hears it;
+`drv_phy_tune` sets the bit before the PLL calibrates, and its caller divides below 2210 MHz, ESP-SDR's bound.
+
 Measured with `prog/scan.c`:
 
 - The word holds nothing below 1920 MHz, 60 MHz x 32.
   The band was right from 2180 to 2920 MHz, the capacitance falling from near its most, 351, to 0 across it;
   below, the capacitance stood at its most and the band said too low, above at 0 and too high, the VCO's range,
-  as a hypothesis, which ESP-SDR's divider of 5/6 is to widen downwards, untried:
-  block 0x62, host 1, register 16, bit 3, for 1842 to 2209 MHz. Around 2000 MHz the state follows no order.
-- A signal of the world's: from 2480 to 2720 MHz the steps of 2670 to 2690 MHz alone stood over the floor
-  in every pass, a block LTE's base stations send in without a pause, so the tuned receiver hears at 2.68 GHz.
-- The control, in one run: the scan from 2395 to 2425 MHz for 40 s and the nRF52840 sending IEEE 802.15.4 frames
+  as a hypothesis. Around 2000 MHz, direct, the state follows no order.
+- Divided, the PLL was in its band from 1810 MHz, at 2172, to 2200 MHz and beyond,
+  the capacitance at a frequency divided the same as at 6/5 of it direct.
+  The bit set after the calibration instead, a step direct that followed one divided heard nothing,
+  and one divided after one direct heard 10 dB less, so the PLL calibrates with the LO it will feed.
+- Signals of the world's, at 80 MS/s: divided, from 1870 to 1880 MHz, its edge at 1879.7, LTE's band 3 downlink,
+  and from 2100 to 2170 band 1's, the AGC backing off at 2160; direct, from 2670 to 2690 MHz,
+  in every pass, a block LTE's base stations send in without a pause.
+- Lines every 20 MHz, at 2400, 2480, 2500, 2520 and 2540 MHz, 10 to 40 dB over the floor, at every tuning;
+  the board's own clocks, as a hypothesis, the 40 MHz crystal's and its halves'.
+  At 16 MS/s a step of 10 MHz shows them folded, 6 MHz from its middle, see `dump.md`.
+- The control, in one run: the scan from 2395 to 2425 MHz with `divided=2`, each step taken both ways,
+  the PLL at 2892 MHz for 2410 divided, for 40 s, and the nRF52840 sending IEEE 802.15.4 frames
   on 2410 MHz for ten of those seconds, `make BOARD=nrf52840 thread` with `channel=12`, `stream=100` and `run=10`,
   which fails at its end, as the C6 acknowledges none.
-  `tools/dump-spectrum.py LOG 16e6 256 --scan 2410` found the level there 20 dB over the floor
-  in a few captures of those seconds, a capture of 64 us catching a frame now and then,
-  and in one of three runs once before them too, as narrow, another sender's: 2410 MHz is BLE's channel 3.
+  `tools/dump-spectrum.py LOG 80e6 256 --scan 2410` found the level there 25 to 30 dB over the floor
+  in two or three captures of those seconds each way, a capture of 13 us catching a frame now and then,
+  and once before them, as narrow, another sender's: 2410 MHz is BLE's channel 3.
+  At 16 MS/s, in bins of 62.5 kHz, the two ways put the frames' middle within 50 kHz of each other, their band the same,
+  so the ratio is 5/6 to that, 2 x 10^-5.
 
 ### The receiver's gain and filter
 
@@ -123,6 +137,9 @@ Measured with `prog/scan.c`:
   Measured with `filter=0`, `filterstep=9`, the gain held at 79 and the engine at 80 MHz:
   the noise's band 10 dB down narrows with the code, from 80 MHz at 0, unfiltered, through 24 MHz at 27 to 13 MHz at 63,
   its level in the middle the same at every code.
+  At 27, the nRF52840's frames on 2410 MHz with the receiver tuned 4 MHz apart from 2390 to 2430 at 80 MS/s:
+  flat to 8 MHz from the middle, 10 dB down at 12, 25 at 16 and 38 at 20, either side;
+  at the middle itself the frames stood 15 dB lower, the receiver taking out what lies about zero.
 
 ### BBPLL
 
