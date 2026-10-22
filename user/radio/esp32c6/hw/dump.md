@@ -59,7 +59,14 @@ What the board answered, the driver listening on Wi-Fi's channel 1:
 - Source 15 starts at once. Sources 0, 1, 2, 5 and 10 finish only after milliseconds,
   each capture with the gain index moving and the AGC's bits stepping, so they wait for something the receiver
   hears; 3, 4, 6 to 9 and 11 to 14 did not finish in 150 ms of a channel with only beacons and traffic on it.
-  Source 0 caught the AGC's same round of steps every 1340 samples at the full clock.
+  With `dumpsweep=1`, 4096 samples at 80 MS/s, five captures of each in 70 s, as a hypothesis from them:
+  source 0 starts as the AGC takes its first step on a packet, the gain already down from 78 to about 56 at the first sample
+  and its next step, to about 42, 336 to 340 samples on, in four of five, 262 at times in another run;
+  in that run, on the nRF52840's frames,
+  the gain at 72, in six of the ten captures of their seconds; nothing from before the first step is in it.
+  Sources 1 and 10 start once the AGC has settled, the gain 35 to 43 throughout, in three of four each;
+  2 starts a microsecond before the gain goes back to 78, in two of five;
+  5's show nothing of the gain's, `adctrig` setting a byte of the Wi-Fi MAC's for it.
 - The control: the nRF52840 sending IEEE 802.15.4 frames on channel 12, 2410 MHz, for 10 s of the run,
   and the C6 capturing source 15 at the clock divided by 5. The frames stood 30 dB over the floor
   2 MHz below the middle, in the captures of those 10 s and in none before or after,
@@ -103,7 +110,7 @@ the last of its sixteen words, which repeat every 64 bytes from `0x600A9000` to 
 
 Open questions of the sampler, beside `TODO.md`'s:
 
-- What sources 0, 1, 2, 5 and 10 wait for, and whether a capture of theirs holds the moment before it.
+- What source 5 waits for, and whether 1, 2 and 10 start on the AGC's steps as their few captures suggest.
 - The BLE side's rate: its captures take as long as Wi-Fi's at the full clock, yet hold a band of 5 MHz;
   whether its words are the BLE receiver's own samples held or made again at 80 MHz is not known,
   nor whether `0x600A210C`'s fields other than bit 7 matter.

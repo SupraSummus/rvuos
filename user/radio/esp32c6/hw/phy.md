@@ -126,7 +126,8 @@ Measured with `prog/scan.c`:
   and bit 23 set holds the receiver there, the AGC choosing no more; bits 8 to 14 the gain table's last index,
   which `set_rx_gain_table` writes, 79 on the board. `drv_phy_rx_gain` in `phy.c` holds it.
 - The dump engine's word carries the index in bits 20 to 26: held, every word read the index held.
-  Its bit 27 is set now and then, a gain of 207 being 79 with it; the bit's meaning is not known.
+  Its bit 27 is set for one sample at a time, a gain of 207 being 79 with it,
+  and 32 samples later, at 80 MS/s, the gain is back at 78, the idle one, in all 34 seen: the AGC's restart, as a hypothesis.
   The AGC rests at 78 and 79 while nothing is heard, the table's top.
 - The index is not the gain in order, measured with `gain=0` and `gainstep=4` on an LTE block's signal:
   below 60 the signal stayed under the converter's step, in no order, and from 64 to 76 it rose about 15 dB,
