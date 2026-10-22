@@ -136,6 +136,19 @@ void drv_wifi_clock_enable(void);
 void drv_wifi_reset_mac(void);
 /* An analog I2C block's register through the ROM's rom_i2c_readReg; the PHY's bring-up powers the bus. */
 uint8_t drv_phy_i2c_read(uint8_t block, uint8_t host, uint8_t reg);
+/*
+ * The RF PLL tuned to khz, off the channels' grid too, from 1920 MHz up, and its capacitance told;
+ * 0 once it locked, or DRV_TUNE_UNCALIBRATED if its calibration never ended, or'd with its band's state,
+ * 1 its capacitance too low or 2 too high. The hardware's frequency setting stays off until drv_phy_tune_release.
+ */
+#define DRV_TUNE_UNCALIBRATED 0x10u
+uint32_t drv_phy_tune(uint32_t khz, int32_t *cap);
+void drv_phy_tune_release(void);
+/* The receiver's gain index held, or left to the AGC again; the highest index the gain table holds. */
+void drv_phy_rx_gain(uint32_t force, uint32_t index);
+uint32_t drv_phy_rx_gain_last(void);
+/* The receive's analog filter's code, 0 to 63, 0 the widest; the code it replaced, the RC calibration's at first. */
+uint32_t drv_phy_rx_filter(uint32_t code);
 
 /* hostap.c: hostap's lines at its debug level too, from here on. */
 void drv_wpa_debug(void);

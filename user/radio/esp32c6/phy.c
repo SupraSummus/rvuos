@@ -5933,3 +5933,77 @@ void bt_tx_gain_init(void)
     bt_tx_pwctrl_init_new();
     bt_set_tx_gain(0u);
 }
+
+/*
+ * The RF PLL tuned off the channels' grid, the radio's own, after libphy's phy_force_freq_set [phy_rfpll.o],
+ * which ESP-SDR found tunes the ESP32-C6 anywhere its PLL locks; see hw/phy.md, "Off the channels' grid".
+ * The hardware's own frequency setting is taken off, and the capacitance's tracking with it,
+ * the synthesizer's word written through the ROM's write_rfpll_sdm, the PLL's calibration restarted through its
+ * restart_cal, and its end waited for here, as the ROM's wait_rfpll_cal_end waits but for its print on a failure.
+ * The word is the library's phy_rfpll_set_freq_offset's, N = f / (3 x the crystal) in units of 2^-20, less 32,
+ * but from kilohertz, exactly, where the library's adds an offset in steps of 9 units, about 1.03 kHz.
+ */
+void write_rfpll_sdm(const uint8_t out[4]);
+void restart_cal(void);
+
+#define I2C_RFPLL_CAL_DONE_REG  7  /* block 0x62's, its bit 1 set once the PLL's calibration has ended */
+#define I2C_RFPLL_BAND_REG      12 /* block 0x62's, bits 2 and 3: 0 locked, 1 the capacitance too low, 2 too high */
+#define RFPLL_CAL_TRIES         100u
+#define RFPLL_CAL_STEP_US       20u
+
+uint32_t drv_phy_tune(uint32_t khz, int32_t *cap)
+{
+    uint32_t crystal = phy_param[PHY_PARAM_XTAL] == 1u ? 26000u : phy_param[PHY_PARAM_XTAL] == 2u ? 32000u : 40000u;
+    uint32_t r = (uint32_t)(((uint64_t)khz << 20) / (3u * crystal)) + 0xff000000u;
+    uint8_t out[4] = { (uint8_t)(r & 7u), (uint8_t)(r >> 3), (uint8_t)(r >> 11), (uint8_t)(r >> 19) };
+    uint32_t ended = 0;
+
+    phy_param[PHY_PARAM_CAP_TRACK] = 0;
+    phy_dis_hw_set_freq_1();
+    rom_i2c_write_masked(I2C_RFPLL, I2C_HOST_MST, 0x0b, 6, 6, 0);
+    write_rfpll_sdm(out);
+    restart_cal();
+    for (uint32_t i = 0; i < RFPLL_CAL_TRIES && !ended; i++) { /* bounded by RFPLL_CAL_TRIES */
+        ets_delay_us(RFPLL_CAL_STEP_US);
+        ended = rom_i2c_read_masked(I2C_RFPLL, I2C_HOST_MST, I2C_RFPLL_CAL_DONE_REG, 1, 1);
+    }
+    *cap = (int16_t)read_pll_cap();
+    return (ended ? 0u : DRV_TUNE_UNCALIBRATED) |
+           rom_i2c_read_masked(I2C_RFPLL, I2C_HOST_MST, I2C_RFPLL_BAND_REG, 3, 2);
+}
+
+/* The hardware's frequency setting back, and the capacitance's tracking, as phy_force_freq_set(0) puts them. */
+void drv_phy_tune_release(void)
+{
+    phy_en_hw_set_freq();
+    phy_param[PHY_PARAM_CAP_TRACK] = 1;
+}
+
+/*
+ * The receiver's gain held, as libphy's phy_force_rx_gain [phy_reg.o] holds it: AGC_2's bits 24 to 31 the gain's index,
+ * and its bit 23 set, which keeps it there; cleared, the AGC chooses again. The index goes up to the gain table's
+ * last, AGC_2's bits 8 to 14, which set_rx_gain_table writes; see hw/phy.md, "The receiver's gain and filter".
+ */
+#define AGC_2_GAIN_SHIFT 24u
+#define AGC_2_GAIN_FORCE (1u << 23)
+#define AGC_2_GAIN_LAST_SHIFT 8u
+
+void drv_phy_rx_gain(uint32_t force, uint32_t index)
+{
+    REG(AGC_2) = (REG(AGC_2) & ~(0xffu << AGC_2_GAIN_SHIFT)) | index << AGC_2_GAIN_SHIFT;
+    REG(AGC_2) = (REG(AGC_2) & ~AGC_2_GAIN_FORCE) | (force ? AGC_2_GAIN_FORCE : 0u);
+}
+
+uint32_t drv_phy_rx_gain_last(void)
+{
+    return (REG(AGC_2) >> AGC_2_GAIN_LAST_SHIFT) & 0x7fu;
+}
+
+/* The receive's analog filter, block 0x67's registers 4 and 5, bits 0 to 5, which ESP-SDR found, 0 the widest. */
+uint32_t drv_phy_rx_filter(uint32_t code)
+{
+    uint32_t was = rom_i2c_read_masked(I2C_BBTOP, I2C_HOST_MST, 4, 5, 0);
+    rom_i2c_write_masked(I2C_BBTOP, I2C_HOST_MST, 4, 5, 0, (uint8_t)code);
+    rom_i2c_write_masked(I2C_BBTOP, I2C_HOST_MST, 5, 5, 0, (uint8_t)code);
+    return was;
+}

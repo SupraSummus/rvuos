@@ -27,6 +27,16 @@ and `prog/i154listen.c` on channel 12 with the nRF52840 sending there, as for th
 which must hear its frames whole, and with `dump=`, `dumpbt=1`, `dumplane=14` and `dumpsource=0`
 take a capture every second of the run and still answer the root task.
 
+### The scan
+
+A change to `drv_phy_tune` in `phy.c`, to `prog/scan.c` or to `tools/dump-spectrum.py`'s `--scan` runs the scan
+from 2395 to 2425 MHz with the nRF52840 sending on channel 12 in the middle of the run, as `hw/phy.md`, "Off the channels' grid", says,
+and `tools/dump-spectrum.py LOG 16e6 256 --scan 2410` must find the frames in several captures of its seconds
+and in at most one before them, as 2410 MHz is BLE's channel 3 and within Wi-Fi's channel 1, whose senders the scan hears too.
+A change to `drv_phy_rx_gain` or `drv_phy_rx_filter` runs it with `gain=` and `gainstep=`, and with `filter=` and `filterstep=`,
+as `hw/phy.md`, "The receiver's gain and filter", says: every word's gain must be the one held,
+and the noise's band must narrow as the filter's code rises.
+
 ### The register map
 
 A change to `prog/regmap.c` or `tools/regmap.py` runs the map with `channel=1`, and `tools/regmap.py` must put its four passes together.

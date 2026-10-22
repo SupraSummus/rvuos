@@ -43,7 +43,8 @@ The words, as `adctrig` writes them and the board answered:
 
 A capture writes from the bank's first word, as many words as it takes,
 each two 10-bit two's complement samples, bits 10 to 19 the in-phase and 0 to 9 the quadrature,
-then the receiver's gain index in bits 20 to 27, and in 28 to 31 what moves with the AGC's steps.
+then the receiver's gain in bits 20 to 27, on Wi-Fi's side its index in 20 to 26, see `phy.md`,
+and in 28 to 31 what moves with the AGC's steps.
 Which of the two is I was told by a signal of known frequency, below;
 ESP-SDR's description names them both ways.
 
@@ -102,7 +103,8 @@ Open questions of the sampler, beside `TODO.md`'s:
 
 ## What ESP-SDR found that is not tried here
 
-ESP-SDR's description and firmware, GPL-3.0, name these for the ESP32-C6; they are facts to try, not yet the board's:
+ESP-SDR's description and firmware, GPL-3.0, name these for the ESP32-C6; they are facts to try, not yet the board's.
+Its tuning, its gain and its filter are `phy.md`'s, "Off the channels' grid" and "The receiver's gain and filter".
 
 - A ring: `0x600A9004` with bits 14 and 17 set as well has the engine write round and round,
   its write index in `0x600A9008`'s bits 0 to 16, in a ring of 16384 words, 64 KiB.
@@ -111,9 +113,3 @@ ESP-SDR's description and firmware, GPL-3.0, name these for the ESP32-C6; they a
   so that the CPU reads one bank while the engine fills the other: a stream that does not stop wants two banks,
   where the radio's programs have one.
 - The clocks it forces on: `0x600A9804` written all ones, `0x600A9814` 0x7FFFF and `0x600A980C` all ones.
-- Off the channels' grid: the PHY calibrated on a channel, then retuned to a frequency in MHz and kHz,
-  as `libphy`'s `phy_set_freq` does; see `phy.md`, "The channel's words, measured".
-- The LO's divider of 5/6, analog I2C block 0x62, host 1, register 16, bit 3, for 1842 to 2209 MHz;
-  ESP-SDR's C6 received from 1950 to 2850 MHz, and the RF PLL's lock in register 12's bits 2 and 3.
-- The receive's analog filter, block 0x67, host 1, registers 4 and 5, bits 0 to 5, 0 the widest,
-  and a manual gain, `libphy`'s `force_rx_gain(manual, code, 0)`, up to the calibrated index in `0x600A702C`'s bits 8 to 14.

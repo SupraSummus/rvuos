@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """What the ESP32-C6's sampler captured, from a run's log: user/radio/esp32c6/prog/sampler.c and dump.h, dumphex=.
 
-Usage: tools/dump-spectrum.py LOG RATE_HZ [NFFT]
+Usage: tools/dump-spectrum.py LOG RATE_HZ [NFFT] [--scan [MHZ]]
 
 For each capture the log holds whole, its lines following on from word 0, its time in the run, its spread and its offset,
 the gain codes and the AGC's bits it holds, its spectrum from -RATE/2 to +RATE/2 in sixteen bands,
@@ -10,6 +10,12 @@ and its power in sixteen stretches of time, in dB.
 The in-phase sample is bits 10 to 19 and the quadrature bits 0 to 9, as a signal of known frequency told;
 see user/radio/esp32c6/hw/dump.md. RATE_HZ is the engine's clock divided: 80e6, 40e6, 26.67e6 or 16e6.
 Plain Python, no numpy: a capture is a few thousand samples.
+
+With --scan, the captures of user/radio/esp32c6/prog/scan.c, each after the line naming its step's frequency:
+each step's own band, half a step either side of the frequency it was tuned to, the 100 kHz about its middle left out,
+as dB over the scan's floor, the median of every step's median, its strongest in any pass and its median over the passes,
+with the PLL's state, its capacitance and the gains; then the strongest frequencies of the whole scan;
+and with MHZ, the level there in every capture whose band holds it, in the order of the run, to tell when a signal was.
 """
 
 import cmath
@@ -18,6 +24,9 @@ import re
 import sys
 
 LINE = re.compile(r"^\s*([\d.]+) dumphex: (\d+) (\d+) (.*)$")
+HEX = re.compile(r"[0-9a-f]{1,8}")
+CAPTURE = re.compile(r"^\s*[\d.]+ dump: capture (\d+) ")
+STEP = re.compile(r"^\s*[\d.]+ scan: pass (\d+) at (\d+) kHz, PLL (\w+), capacitance (-?\d+)")
 
 
 def s10(v):
@@ -38,49 +47,74 @@ def db(v):
     return 10 * math.log10(v + 1e-9)
 
 
-def main():
-    if len(sys.argv) < 3:
-        sys.exit(__doc__)
-    log, rate = sys.argv[1], float(sys.argv[2])
-    nfft = int(sys.argv[3]) if len(sys.argv) > 3 else 256
-    if nfft < 16 or nfft & (nfft - 1):
-        sys.exit("dump-spectrum: NFFT is a power of two, 16 or more")
-    captures, times, broken = {}, {}, set()
+def read(log):
+    """Each capture's words, its time, whether a line of it is missing, and the scan's step it was taken at."""
+    captures, times, broken, steps = {}, {}, set(), {}
+    step = None
     with open(log, errors="replace") as f:
         for line in f:
+            m = STEP.search(line)
+            if m:
+                step = (int(m.group(1)), int(m.group(2)), int(m.group(3), 16), int(m.group(4)))
+                continue
+            m = CAPTURE.search(line)
+            if m and step is not None:
+                steps[int(m.group(1))] = step
+                step = None
+                continue
             m = LINE.search(line)
             if m:
                 c = int(m.group(2))
                 words = captures.setdefault(c, [])
-                # A line lost from the kernel's log leaves the next one's index past the words so far.
-                if int(m.group(3)) != len(words):
+                # A line lost from the kernel's log leaves the next one's index past the words so far,
+                # and a line cut short there runs into the next one's text.
+                fields = m.group(4).split()
+                if int(m.group(3)) != len(words) or len(fields) != 8 or not all(HEX.fullmatch(x) for x in fields):
                     broken.add(c)
-                words.extend(int(x, 16) for x in m.group(4).split())
+                    continue
+                words.extend(int(x, 16) for x in fields)
                 times.setdefault(c, m.group(1))
     if not captures:
         sys.exit("dump-spectrum: no dumphex lines in " + log)
+    return captures, times, broken, steps
+
+
+def samples(words):
+    i_s = [s10(w >> 10) for w in words]
+    q_s = [s10(w) for w in words]
+    mi, mq = sum(i_s) / len(i_s), sum(q_s) / len(q_s)
+    return [complex(i - mi, q - mq) for i, q in zip(i_s, q_s)], mi, mq
+
+
+def spectrum(z, nfft):
+    """The power from -rate/2 to +rate/2, in dB, averaged over half-overlapping windowed stretches."""
     window = [0.5 - 0.5 * math.cos(2 * math.pi * i / nfft) for i in range(nfft)]
+    acc = [0.0] * nfft
+    segments = 0
+    for start in range(0, len(z) - nfft + 1, nfft // 2):
+        s = fft([z[start + k] * window[k] for k in range(nfft)])
+        for k in range(nfft):
+            acc[k] += abs(s[k]) ** 2
+        segments += 1
+    return [db(acc[(k + nfft // 2) % nfft] / segments) for k in range(nfft)]
+
+
+def captures_of(log, nfft):
+    captures, times, broken, steps = read(log)
     for c in sorted(captures):
         words = captures[c]
         if c in broken:
             print(f"capture {c}: a line of its words is missing from the log")
-            continue
-        if len(words) < nfft:
+        elif len(words) < nfft:
             print(f"capture {c}: {len(words)} words, fewer than NFFT")
-            continue
-        i_s = [s10(w >> 10) for w in words]
-        q_s = [s10(w) for w in words]
-        mi, mq = sum(i_s) / len(i_s), sum(q_s) / len(q_s)
-        z = [complex(i - mi, q - mq) for i, q in zip(i_s, q_s)]
-        acc = [0.0] * nfft
-        segments = 0
-        for start in range(0, len(z) - nfft + 1, nfft // 2):
-            spectrum = fft([z[start + k] * window[k] for k in range(nfft)])
-            for k in range(nfft):
-                acc[k] += abs(spectrum[k]) ** 2
-            segments += 1
-        # From -rate/2 to +rate/2.
-        level = [db(acc[(k + nfft // 2) % nfft] / segments) for k in range(nfft)]
+        else:
+            yield c, words, times[c], steps.get(c)
+
+
+def one_by_one(log, rate, nfft):
+    for c, words, t, _ in captures_of(log, nfft):
+        z, mi, mq = samples(words)
+        level = spectrum(z, nfft)
         floor = sorted(level)[nfft // 2]
         per = nfft // 16
         bands = " ".join(f"{max(level[b * per:(b + 1) * per]) - floor:3.0f}" for b in range(16))
@@ -93,11 +127,83 @@ def main():
         agc = sorted({w >> 28 for w in words})
         rms = math.sqrt(sum(abs(v) ** 2 for v in z) / len(z))
         more = "+" if len(gains) > 3 else ""
-        print(f"t {times[c]} capture {c}: rms {rms:6.1f}, offset I {mi:6.1f} Q {mq:6.1f}, "
+        print(f"t {t} capture {c}: rms {rms:6.1f}, offset I {mi:6.1f} Q {mq:6.1f}, "
               f"gain {gains[:3]}{more}, AGC bits {agc}")
         print(f"   spectrum, -fs/2 to +fs/2, dB over the median: {bands}")
         print(f"   strongest: {peaks_text}")
         print(f"   power in time, dB: {in_time}")
+
+
+def scan(log, rate, nfft, at_mhz):
+    bin_khz = rate / nfft / 1e3
+    taken = [x for x in captures_of(log, nfft) if x[3] is not None]
+    if not taken:
+        sys.exit("dump-spectrum: no capture of the scan's steps in " + log)
+    freqs = sorted({x[3][1] for x in taken})
+    step_khz = min((b - a for a, b in zip(freqs, freqs[1:])), default=rate / 2e3)
+    half = min(step_khz / 2, rate / 2e3)
+    # Each step's bins, by their frequency in kHz, a list of levels, one a pass.
+    by_step, notes, at_levels = {}, {}, []
+    for c, words, t, (pss, khz, state, cap) in taken:
+        z, _, _ = samples(words)
+        level = spectrum(z, nfft)
+        bins = {}
+        for k in range(nfft):
+            off = (k - nfft // 2) * bin_khz
+            if abs(off) <= half and abs(off) >= 100:
+                bins[khz + off] = level[k]
+        by_step.setdefault(khz, []).append(bins)
+        note = notes.setdefault(khz, [set(), set(), set()])
+        note[0].add(state)
+        note[1].add(cap)
+        note[2].update((w >> 20) & 0xFF for w in words)
+        if at_mhz is not None and abs(at_mhz * 1e3 - khz) <= half:
+            k = round((at_mhz * 1e3 - khz) / bin_khz) + nfft // 2
+            near = level[max(k - 2, 0):k + 3]
+            at_levels.append((t, pss, khz, max(near)))
+    medians = [sorted(b.values())[len(b) // 2] for bs in by_step.values() for b in bs if b]
+    floor = sorted(medians)[len(medians) // 2]
+    print(f"{len(taken)} captures of {len(freqs)} steps, {step_khz / 1e3:g} MHz apart, "
+          f"a bin {bin_khz:.1f} kHz; dB over the scan's floor")
+    print(f"{'step MHz':>10} {'passes':>6} {'PLL':>4} {'capacitance':>12} {'gains':>10} {'strongest':>9} {'median':>7}")
+    strongest = {}
+    for khz in freqs:
+        bs = by_step[khz]
+        best = {f: max(b.get(f, -999) for b in bs) for f in bs[0]}
+        med = {f: sorted(b.get(f, -999) for b in bs)[len(bs) // 2] for f in bs[0]}
+        state, caps, gains = notes[khz]
+        top = max(best.values()) - floor if best else 0
+        middle = sorted(med.values())[len(med) // 2] - floor if med else 0
+        print(f"{khz / 1e3:10.3f} {len(bs):6} {','.join(f'{s:x}' for s in sorted(state)):>4} "
+              f"{','.join(str(x) for x in sorted(caps)):>12} {min(gains)}-{max(gains):<6} {top:9.0f} {middle:7.0f}")
+        for f, v in best.items():
+            strongest[f] = v
+    print("strongest of the scan:")
+    shown = []
+    for f in sorted(strongest, key=lambda f: -strongest[f]):
+        if all(abs(f - g) > 500 for g in shown):
+            shown.append(f)
+            print(f"   {f / 1e3:10.3f} MHz {strongest[f] - floor:4.0f} dB")
+        if len(shown) == 10:
+            break
+    if at_mhz is not None:
+        print(f"at {at_mhz} MHz, the strongest of five bins, dB over the floor, in the order of the run:")
+        for t, pss, khz, v in at_levels:
+            print(f"   t {t} pass {pss} step {khz / 1e3:.3f} MHz: {v - floor:4.0f}")
+
+
+def main():
+    args = [a for a in sys.argv[1:] if a != "--scan"]
+    if len(args) < 2:
+        sys.exit(__doc__)
+    log, rate = args[0], float(args[1])
+    nfft = int(args[2]) if len(args) > 2 else 256
+    if nfft < 16 or nfft & (nfft - 1):
+        sys.exit("dump-spectrum: NFFT is a power of two, 16 or more")
+    if "--scan" in sys.argv:
+        scan(log, rate, nfft, float(args[3]) if len(args) > 3 else None)
+    else:
+        one_by_one(log, rate, nfft)
 
 
 if __name__ == "__main__":

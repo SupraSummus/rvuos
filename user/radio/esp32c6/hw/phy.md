@@ -60,25 +60,69 @@ and says which.
 
 ### The channel's words, measured
 
-`prog/regmap.c`, see `README.md`, read the modem and the analog blocks on channels 1, 6, 8 and 13, 2412 to 2472 MHz.
+`prog/regmap.c`, see `README.md`, read the modem and the analog blocks on channels 1, 6, 8 and 13.
 What the channel sets:
 
-- `FECOEX_FREQ_SET_TRIG`, 0x600A00C4, holds (f - 2400 MHz) x 258: 0xC18, 0x254A, 0x2F5E and 0x4890,
-  the last two foretold from the first two; whether it is one number or the MHz in bits 8 up and twice them below
-  is not told by channels, whose offsets are all below 128 MHz. The name `TRIG` is the driver's, from the loop that writes it.
-- `FECOEX_FREQ_SET_CONF`, 0x600A00C0, holds f - 2400 MHz in its bits 7 to 13: 12, 37, 47 and 72.
-- The RF PLL's synthesizer, analog block 0x63, `i2c_rfpll_sdm`, host 1:
-  f = 60 MHz x (32 + N),
+- `FECOEX_FREQ_SET_TRIG`, 0x600A00C4: (f - 2400 MHz) x 258, the last two channels' values foretold from the first two.
+  The frequency memory holds two words for each MHz from 2400 to 2484, `get_rf_freq_init_new`'s 0x55 entries,
+  so the word is, as a hypothesis, the MHz's index in bits 8 up and its first word's address below.
+  The name `TRIG` is the driver's, from the loop that writes it.
+- `FECOEX_FREQ_SET_CONF`, 0x600A00C0, bits 7 to 13: f - 2400 MHz.
+- The RF PLL's synthesizer, block 0x63, `i2c_rfpll_sdm`, host 1: f = 60 MHz x (32 + N),
   N its register 3 plus a fraction of 19 bits, register 4 the high eight, 5 the next eight and 6's bits 0 to 2 the low three,
   exact on the four channels. `libphy`'s `ram_rfpll_set_freq` says why (known, its disassembly):
   it divides the frequency by three times the crystal's, 120 MHz, in units of 2^-20, and takes 2^24 off, the 32.
-  The I2C master's command memory, `phy.c`'s frequency memory, writes registers 6 to 3 of the block, as the channel moves.
-- The RF PLL's block 0x62, registers 1 and 5, both the same byte, falling as the frequency rises:
-  0xC8, 0xBC, 0xB7 and 0xAA; the capacitance the RF PLL's tracking keeps, inferred.
-- The transmit block 0x6B, register 2, 0x71 on channel 1 and 0x51 on 6, 8 and 13; why is not known.
-- Of the modem's words, `nrx` 0x600A7848 alone: its low 16 bits 0x3ED5, 0x33AE, 0x2F49 and 0x2473,
-  about 112 less a MHz, though not quite in a line; what it holds is not known.
-  Others moved between runs as much as with the channel, the temperature's, as a hypothesis.
+- Block 0x62, registers 1 and 5, one byte in both, falling as the frequency rises: the PLL's capacitance, inferred.
+- Block 0x6B, register 2: 0x71 on channel 1 and 0x51 on the others; why is not known.
+- `nrx` 0x600A7848's low 16 bits fall about 112 a MHz, not quite in a line; what it holds is not known.
+  Other words moved between runs as much as with the channel, the temperature's, as a hypothesis.
+
+### Off the channels' grid
+
+`drv_phy_tune` in `phy.c` tunes the RF PLL to any frequency in kHz, as `libphy`'s `phy_force_freq_set` does,
+which ESP-SDR found: the hardware's frequency setting and the capacitance's tracking off,
+block 0x62's register 0x0B bit 6 cleared, then the ROM's steps (known, their disassembly):
+
+- `write_rfpll_sdm` clears block 0x63's register 0 bit 3, writes registers 3 to 6, and sets the bit again.
+- `restart_cal` clears block 0x62's register 0 bits 6 and 5, then sets bit 5 and bit 6.
+- `wait_rfpll_cal_end` waits for block 0x62's register 7 bit 1, 20 us at a time, a hundred times at the most,
+  and prints on a failure, which a program cannot, so `phy.c` waits itself.
+- Block 0x62's register 12, bits 2 and 3, as `rfpll_cap_correct_new` reads them: 0 the PLL in its band,
+  1 and 2 the capacitance to step up or down.
+
+Measured with `prog/scan.c`:
+
+- The word holds nothing below 1920 MHz, 60 MHz x 32.
+  The band was right from 2180 to 2920 MHz, the capacitance falling from near its most, 351, to 0 across it;
+  below, the capacitance stood at its most and the band said too low, above at 0 and too high, the VCO's range,
+  as a hypothesis, which ESP-SDR's divider of 5/6 is to widen downwards, untried:
+  block 0x62, host 1, register 16, bit 3, for 1842 to 2209 MHz. Around 2000 MHz the state follows no order.
+- A signal of the world's: from 2480 to 2720 MHz the steps of 2670 to 2690 MHz alone stood over the floor
+  in every pass, a block LTE's base stations send in without a pause, so the tuned receiver hears at 2.68 GHz.
+- The control, in one run: the scan from 2395 to 2425 MHz for 40 s and the nRF52840 sending IEEE 802.15.4 frames
+  on 2410 MHz for ten of those seconds, `make BOARD=nrf52840 thread` with `channel=12`, `stream=100` and `run=10`,
+  which fails at its end, as the C6 acknowledges none.
+  `tools/dump-spectrum.py LOG 16e6 256 --scan 2410` found the level there 20 dB over the floor
+  in a few captures of those seconds, a capture of 64 us catching a frame now and then,
+  and in one of three runs once before them too, as narrow, another sender's: 2410 MHz is BLE's channel 3.
+
+### The receiver's gain and filter
+
+- `AGC_2`, 0x600A702C (known, `libphy`'s `phy_force_rx_gain`): bits 24 to 31 a gain's index,
+  and bit 23 set holds the receiver there, the AGC choosing no more; bits 8 to 14 the gain table's last index,
+  which `set_rx_gain_table` writes, 79 on the board. `drv_phy_rx_gain` in `phy.c` holds it.
+- The dump engine's word carries the index in bits 20 to 26: held, every word read the index held.
+  Its bit 27 is set now and then, a gain of 207 being 79 with it; the bit's meaning is not known.
+  The AGC rests at 78 and 79 while nothing is heard, the table's top.
+- The index is not the gain in order, measured with `gain=0` and `gainstep=4` on an LTE block's signal:
+  below 60 the signal stayed under the converter's step, in no order, and from 64 to 76 it rose about 15 dB,
+  unevenly, to the converter's end at 76. The table's entries are, as a hypothesis, sets of the front end's steps,
+  `phy.c`'s `gen_rx_gain_table_new`, whose order is not their sum's. Without a signal the noise rises over the step at 64.
+- The analog filter, block 0x67, `i2c_bbtop`, host 1, registers 4 and 5, bits 0 to 5, ESP-SDR's:
+  the RC calibration writes 27 on the board, and `drv_phy_rx_filter` sets them.
+  Measured with `filter=0`, `filterstep=9`, the gain held at 79 and the engine at 80 MHz:
+  the noise's band 10 dB down narrows with the code, from 80 MHz at 0, unfiltered, through 24 MHz at 27 to 13 MHz at 63,
+  its level in the middle the same at every code.
 
 ### BBPLL
 
