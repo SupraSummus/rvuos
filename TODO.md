@@ -655,11 +655,6 @@ What open decision 31 in `DESIGN.md` asks for before the ABI is held still.
 
 ## Scheduling
 
-- `make bench`'s contended-worst moves past its tenth with where the instructions fall, not with what a change costs:
-  a `nop` in `sched_run_next` moved it -19% on mps2-an385 and +4.5% on mps2-an521.
-  It is the worst round beside a process that always wants the core, so it is a multiple of that process's requests;
-  held to the request it should not pass, or counted in requests, it would hold what it means to.
-
 What the wait for a turn and the work a thread gets are bound by is in `DESIGN.md`, "Scheduling";
 what does not keep to it yet comes first below, each a constant-time change, up to the bind's:
 

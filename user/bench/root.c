@@ -18,7 +18,9 @@
  * seqlock-write: a snapshot of 32 bytes published through lib/seqlock.h, nobody reading, no call.
  * seqlock-read: the same snapshot copied out whole, nobody writing, no call.
  * contended-worst: the worst round of processes beside a third process that always wants the core,
- * over a tenth of a second; it waits for that process's requests, so their span sets it.
+ * over a tenth of a second once the pair has settled beside it:
+ * each span the pair runs its units' part and waits out the rest, so the span sets the wait.
+ * Before that, the worst round depends on how far ahead of the clock the earlier measures left the pair.
  *
  * Each measure is a line of its rounds, the clock's counts over them and the clock's rate,
  * and the run ends with "bench: done" and halt code 0.
@@ -35,6 +37,7 @@
 #define ROUNDS      1000u
 #define WARM_UP     10u
 #define WINDOWS     10u /* contended-worst's window: a second over this */
+#define SETTLE      4u  /* contended-worst's spans beside the spinner before its window */
 #define ROOT_UNITS  16u
 #define UNITS       8u  /* each other thread's */
 #define CHILD_TABLE 16u
@@ -326,7 +329,11 @@ int main(void)
     struct child spin;
     must("build spin", child_new(&self, &spin, "spin", CHILD_TABLE, CHILD_DATA));
     must("start spin", child_start(&self, &spin, spin_main, 0, UNITS));
-    uint32_t hz, worst = 0;
+    uint32_t hz, worst = 0, clock[3];
+    must("describe the clock", rv_cap_info_of(BOOT_CAP_CLOCK, CAP_CLOCK, clock));
+    uint64_t settled = now(&hz) + (uint64_t)SETTLE * clock[1];
+    while (now(&hz) < settled)
+        round_process();
     uint64_t begun = now(&hz), last = begun, t;
     do {
         round_process();
