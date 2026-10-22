@@ -4,7 +4,7 @@
 /*
  * The modem's dump engine, which copies what the receiver hears into a bank of SRAM, a word a sample,
  * up to 80 million a second, as Espressif's RF test library's adctrig drives it for the factory's tests;
- * ESPARGOS's ESP-SDR found it first, and the station's NOTES.md, "The dump engine", says what is known of it and whence.
+ * ESPARGOS's ESP-SDR found it first, and hw/dump.md says what is known of it and whence.
  * A program that needs it, DRV_NEED_DUMP, has the bank, the modem and HP_SYSTEM mapped; prog/sampler.c is one.
  *
  * HP_SYSTEM's SRAM_USAGE hands the engine one of the four 128 KiB banks of SRAM, and the CPU loses the bank

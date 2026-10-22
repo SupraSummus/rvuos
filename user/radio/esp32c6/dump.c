@@ -15,7 +15,7 @@
 
 /*
  * The engine's words, in the modem's frame at 0x600A9000, a block no header of Espressif's names,
- * and the words beside it that a capture needs; NOTES.md, "The dump engine", says whence each is known.
+ * and the words beside it that a capture needs; hw/dump.md says whence each is known.
  */
 #define DUMP_CTRL       (MODEM_BASE + 0x9004u)
 #define CTRL_RATE_SHIFT 15u           /* bits 15 and 16, the 80 MHz clock divided by 1, 2, 3 or 5 */

@@ -10,8 +10,8 @@ and the modem's dump engine, `dump.c`.
 
 A program is an image of its own that runs as the root task's child from the window onto flash.
 The Wi-Fi station of `user/wifi/esp32c6/` is one;
-its `NOTES.md` tells how the radio's code came to be its own, step by step,
-and `PHYREGS.md` beside it what the PHY's registers are known to be.
+its `NOTES.md` tells how the radio's code came to be its own, step by step.
+What is known of the hardware, block by block, is in `hw/`, whose `README.md` maps the modem's frame.
 
 The other programs are the files of `prog/`, each an image of its own, and each runs with
 `make BOARD=esp32c6 radio PROG=name RADIO_CONFIG=file`, the file's keys the program's own:
@@ -21,6 +21,7 @@ The other programs are the files of `prog/`, each an image of its own, and each 
 | `sampler` | what the receiver hears on a Wi-Fi channel, a capture a second through the modem's dump engine |
 | `i154` | IEEE 802.15.4's frames exchanged with the nRF52840's `user/thread/`, which `tools/thread-pair.sh` runs |
 | `i154listen` | everything heard on an 802.15.4 channel, and the BLE baseband's side of the dump engine beside it |
+| `regmap` | every word of the modem's frame and the analog I2C's registers, cold, up, a moment later and on another channel, which `tools/regmap.py` reads |
 
 The root task reads what a program needs from its image's header, `DRV_PROGRAM` in `drv.h`,
 and gives it that and nothing more; `CLAUDE.md` here says what a change to a program runs.

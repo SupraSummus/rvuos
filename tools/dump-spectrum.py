@@ -8,7 +8,7 @@ the gain codes and the AGC's bits it holds, its spectrum from -RATE/2 to +RATE/2
 each band's strongest bin in dB over the median, the three strongest bins,
 and its power in sixteen stretches of time, in dB.
 The in-phase sample is bits 10 to 19 and the quadrature bits 0 to 9, as a signal of known frequency told;
-see NOTES.md, "The dump engine". RATE_HZ is the engine's clock divided: 80e6, 40e6, 26.67e6 or 16e6.
+see user/radio/esp32c6/hw/dump.md. RATE_HZ is the engine's clock divided: 80e6, 40e6, 26.67e6 or 16e6.
 Plain Python, no numpy: a capture is a few thousand samples.
 """
 

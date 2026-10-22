@@ -16,7 +16,7 @@ and its run ends when the root task asks it to leave.
 ### The sampler
 
 A change to `dump.c`, `dump.h` or `prog/sampler.c` runs the sampler with `channel=1`,
-with the nRF52840's frames as the signal of known frequency, as the station's `NOTES.md`, "The dump engine", says,
+with the nRF52840's frames as the signal of known frequency, as `hw/dump.md` says,
 and `tools/dump-spectrum.py` must find them in the captures of their seconds, at the offset of their channel,
 and in none before them.
 
@@ -26,3 +26,13 @@ A change to `i154.c` runs `tools/thread-pair.sh`, as the repository's `CLAUDE.md
 and `prog/i154listen.c` on channel 12 with the nRF52840 sending there, as for the sampler,
 which must hear its frames whole, and with `dump=`, `dumpbt=1`, `dumplane=14` and `dumpsource=0`
 take a capture every second of the run and still answer the root task.
+
+### The register map
+
+A change to `prog/regmap.c` or `tools/regmap.py` runs the map with `channel=1`, and `tools/regmap.py` must put its four passes together.
+
+## The hardware's files
+
+A fact of `hw/` says where it comes from and how sure it is, as `hw/README.md` says;
+one a run measured names the program and its keys, and its numbers go in the commit, as the repository's `CLAUDE.md` says,
+the file keeping what they showed.

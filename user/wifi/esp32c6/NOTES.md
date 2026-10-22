@@ -4,7 +4,8 @@
 Espressif's closed libraries around an adapter at first,
 then step by step a MAC, a station and a bring-up of its own, toward leaving the libraries the PHY alone.
 The radio's half of it, the root task, the adapter, the PHY, the basebands and the MACs, which programs other than the station
-use too, is in `user/radio/esp32c6/` now; these notes name its files by their names alone.
+use too, is in `user/radio/esp32c6/` now; these notes name its files by their names alone,
+and what is known of the radio's hardware is in its `hw/`.
 These notes say what each step took and what it found, in the order the steps were made;
 what writing the Wi-Fi system as a program of several processes was like, on the Pico 2 W first,
 is in `user/wifi/NOTES.md`.
@@ -508,284 +509,14 @@ and their `pm_noise_check_enable` and `pm_disconnected_start` go as well, the fi
 The ordinary runs hold all of it, the joins among them.
 
 The receive base's write stays and points at the driver's own list, `mac.c`'s.
-Read in the write's place, before it, the word held 0x00800000 in three own runs, after their `wifi_reset_mac`;
-how the MAC makes an address of it is not known, and read as their 0x4086e138 is, without bit 30, it would be 0x40800000, `__ram_start`, the kernel's `_start`.
-
-A MAC register is named for the library function that reaches it;
-one that only the start's own group reaches, or several with no one role, carries the offset it was reached at, and one address has one name, `macregs.h`'s when two files share it.
-### The MAC words named only by their offset
-
-Some of the words the own start writes are named by nothing but the address they were reached at.
-Their writers and readers were found by scanning `libpp.a`, `libnet80211.a` and the ROM's ELF for the constant address, each a load or store whose address a register's constant gives.
-The scan cannot follow a read through a base and an offset it does not know, so "no reader" below means none found, not that none exists.
-A writer's bits are its `andi`, `ori`, `and` and `lui` constants, computed, and a field is named only where a writer's name covers it.
-No word below is reached by a ROM function in the scan; every access is in `libpp.a`.
-
-Their `mac_txrx_init`, which `macstart.c`'s `mac_queues_init` writes out:
-
-| word | address | their writer, beyond it | their reader | what is known |
-|---|---|---|---|---|
-| `TXRX_MAC_110` | 0x600a4110 | -- | -- | nothing |
-| `TXRX_MAC_114` | 0x600a4114 | -- | -- | nothing |
-| `TXRX_HAL_C20` | 0x600a4c20 | -- | -- | nothing |
-| `TXRX_HAL_C24` | 0x600a4c24 | -- | -- | nothing |
-| `TXRX_HAL_C60` | 0x600a4c60 | -- | -- | nothing |
-| `TXRX_HAL_C98` | 0x600a4c98 | `hal_he_init` | -- | nothing |
-| `TXRX_HAL_C9C` | 0x600a4c9c | -- | -- | nothing |
-| `TXRX_HAL_CA4` | 0x600a4ca4 | -- | -- | nothing |
-| `HAL_CTRL` | 0x600a4308 | `hal_deinit`, `esp_test_clr_hw_statistics` | -- | bit 0 the hardware statistics, which `esp_test_clr_hw_statistics` clears and sets and `hal_deinit` sets; bit 1 `mac_txrx_init`'s |
-| `HAL_WORD` | 0x600a4c8c | `hal_init` | `dbg_read_bsr_info` | nothing; a debug dump reads it |
-
-Their `hal_init` and `hal_deinit`, which `mac_config_start` writes out:
-
-| word | address | their writer | their reader | what is known |
-|---|---|---|---|---|
-| `HAL_CFG` | 0x600a4ddc | `hal_init`, `hal_deinit` | -- | the handshake `mac_config_start` polls for bit 0 |
-| `MAC_ENABLE` | 0x600a4c40 | `hal_init`, `hal_enable_mac`, `hal_disable_mac`, `hal_deinit`, `hal_enable/disable_sta_beacon_filter`, `hal_sniffer_rx_set_promis` | `print_isr_regs` | the MAC's enable mask: 0 is it disabled and a set bit lets that function run, so `hal_enable_mac` writes its argument and `hal_disable_mac` 0, `hal_init` leaves 0x19a879e0, and the driver's start and stop write 0; bit 2 the sniffer's promiscuous mode, bit 15 the station's beacon filter |
-
-Their `mac_rxbuf_init`, which `mac_rx_base_init` writes out:
-
-| word | address | their writer | their reader | what is known |
-|---|---|---|---|---|
-| `RXBUF_MAC_7C` | 0x600a407c | `mac_rxbuf_init` | -- | nothing |
-
-Their `hal_he_init`, which `mac_he_init` writes out:
-
-| word | address | their writer | their reader | what is known |
-|---|---|---|---|---|
-| `HE_CTRL` | 0x600a4c80 | `hal_he_init`, `hal_he_bsr_init`, `hal_he_set_default_pe`, `hal_he_set_ul_mu` | `dbg_read_ax_diag`, `dbg_read_bsr_info`, `dbg_read_rx_misc` | bits 0-2 the default packet extension (`hal_he_set_default_pe`, from its argument), bits 3-11 `hal_he_init`'s, bit 27 the buffer status report (`hal_he_bsr_init`), bits 30-31 uplink multi-user (`hal_he_set_ul_mu`) |
-| `HE_MAC_10C` | 0x600a410c | `hal_he_init` | `dbg_read_rx_misc` | nothing; a debug dump reads it |
-| `HE_HAL_C88` | 0x600a4c88 | `hal_he_init` | -- | nothing |
-| `HE_HAL_CBC` | 0x600a4cbc | `hal_he_init` | -- | nothing |
-
-Their `hal_init_bf`, which `mac_init_bf` writes out:
-
-| word | address | their writer | their reader | what is known |
-|---|---|---|---|---|
-| `HE_HAL_C78` | 0x600a4c78 | `hal_init_bf`, `esp_test_set_csi_dump_cfg`, `dbg_disable_report_cbf` | `esp_test_get_csi_dump_cfg`, `dbg_read_rx_misc` | `esp_test_set_csi_dump_cfg` clears bits 0-7 and sets bits 1-8 from its argument, the CSI dump configuration; `hal_init_bf` writes 0x20 into bits 0-7 and 0x71 into bits 8-15, which overlap it, 5 into bits 16-18, sets bit 19, and clears bits 21 and 23; `dbg_disable_report_cbf` clears bit 20 |
-| `HE_HAL_DE0` | 0x600a4de0 | `hal_init_bf` | -- | nothing |
-| `HE_HAL_7128` | 0x600a7128 | `hal_init_bf` | -- | nothing |
-| `HE_MAC_470` | 0x600a4470 | `hal_init_bf` | -- | nothing |
-| `HE_MAC_474` | 0x600a4474 | `hal_init_bf` | -- | nothing |
-
-Their `hal_timer_update_by_rtc`, which `mac_timer_update_by_rtc` writes out:
-
-| word | address | their writer | their reader | what is known |
-|---|---|---|---|---|
-| `TIMER_30` | 0x600ad030 | `hal_timer_update_by_rtc`, `pwr_hal_set_lpclk_sync_enable`, `pwr_hal_set_lpclk_sync_disable`, `pwr_hal_set_modem_state_interface`, `pwr_hal_set_modem_state_rxend_exit_code`, `tsf_hal_map_tbtt_target_to_rx_frame`, `tsf_hal_unmap_tbtt_target_to_rx_frame` | -- | bit 16-17 the modem state's rxend exit code, bits 18-19 the modem state interface, bit 27 the low-power clock's sync, bit 28 the TBTT target to RX frame |
-| `LPCLK_CYCLE` | 0x600ad070 | `hal_timer_update_by_rtc`, `pwr_hal_set_lpclk_cycle_time` | -- | bits 0-17 the low-power clock's cycle, which both write as a Q13.19 period |
-
-Their names come from a library function, but their fields are not known; the same scan gives their writers and
-readers, and `macstart.c`'s own transcription gives the fields:
-
-| word | address | their writers (fields) | their readers | what is known |
-|---|---|---|---|---|
-| `BBRXHUNG_TIME` | 0x600a4c1c | `hal_he_set_bbrxhung_time` (bits 0-11), `mac_txrx_init` (bits 30-31) | -- | their name says a receive-hung timeout, bits 0-11; the field's scale is not known |
-| `HE_MAC_DELAY0` | 0x600a4c54 | `hal_he_set_mac_delay` (bits 10-19, 21-29) | `dbg_read_wdevdelay` | one of the delay pair their mac-delay body writes; its two `env_is_chip` paths write different values, and the driver's the chip's |
-| `HE_MAC_DELAY1` | 0x600a4c58 | `hal_he_set_mac_delay` (bits 0-9, 10-19, 21-29) | `dbg_read_wdevdelay` | as `HE_MAC_DELAY0` |
-| `HE_TB_TX` | 0x600a4df8 | `hal_init_tb_tx` (bits 14, 15) | `esp_test_get_hw_tb_statistics` | the trigger-based TX word; the reader names it a TB statistics source |
-| `HE_TB_POWER0` | 0x600a4430 | `hal_init_tb_power` (bits 0-5, 8-13, 16-21, 24-29) | -- | four 6-bit power indices, from their power table |
-| `HE_TB_POWER1` | 0x600a4434 | `hal_init_tb_power` (the same four) | -- | as `HE_TB_POWER0` |
-| `HE_TB_POWER2` | 0x600a4438 | `hal_init_tb_power` (the same four, the last two from libphy's `phy_get_max_pwr`) | -- | as `HE_TB_POWER0` |
-| `OFDMA_PTI_W0` | 0x600a4dd0 | `hal_set_tb_pti`, `hal_set_beamf_pti` | `hal_set_ofdma_sequence_pti` | a coex PTI word, which their sequence function reads; the fields' layout is not known |
-| `OFDMA_PTI_W1` | 0x600a4dd4 | `hal_set_beamf_pti`, `hal_set_beamf_mt_pti` | `hal_set_ofdma_sequence_pti` | as `OFDMA_PTI_W0` |
-| `ANTENNA_MAC_2CC` | 0x600a42cc | `hal_attenna_init` (bits 0-2, bit 5) | -- | their antenna init's other word; what it holds is not known |
-| `HE_ERSU` | 0x600a4c7c | `hal_he_set_ersu` (bit 10), `hal_he_bsr_init` (bits 0, 4-8, 15), `hal_he_bsr_ctrl` (bit 15), `hal_he_set_bsr_acihigh_comp_method`, `dbg_tb_ignore_cca_enable` (bit 12) | `dbg_read_bsr_info`, `dbg_read_rx_misc`, `hal_he_get_bsr_acihigh_comp_method` | bit 10 their extended-range single-user, bits 0 and 4-8 the buffer status report's, bit 12 their test's "ignore CCA"; the rest is not known |
-| `HE_UORA` | 0x600a4c84 | `hal_he_set_uora_parameter` (bits 18-24, 25-31) | -- | uplink-OFDMA random access: 2^OCWmin - 1 and 2^OCWmax - 1, from their start's byte; the word's other bits are not known |
-| `HE_BF_REPORT_RATE` | 0x600a4458 | `hal_he_set_bf_report_rate` (bits 0-6, 7-13, 14-20, 21-27) | `dbg_read_bfr_rate` | four 7-bit report-rate fields, their name and the reader's |
-| `RX_POLICY` | 0x600a40d8 | `hal_init` (bits 0, 2, 7, 9 set; bits 6, 10, 13 cleared), the driver's own `mac_receive` (bits 4, 6, 10 cleared; bits 1, 8 set) | -- | their `hal_mac_rx_set_policy(0, 1, 1, 1)` clears bits 4, 6 and 10 and their `hal_mac_set_rxq_policy(0, 1)` sets bits 1 and 8; the scan cannot follow those two, which reach the word through its interface's number |
-
-`mac.c` names every word of the first group's kind that it writes, so none of its own is above.
+What it held before, and what is known of the MAC's words, is in `user/radio/esp32c6/hw/wifi-mac.md`.
 
 ## IEEE 802.15.4 beside Wi-Fi
 
-The radio's program `prog/i154.c` brings the chip's 802.15.4 radio up instead of Wi-Fi's, as ESP-IDF's open driver does;
-`i154.c` says how. It was `i154=` of the station's image until the radio's programs were apart from the station,
-and the listener, `prog/i154listen.c`, `C6_LISTEN=1`'s build of it.
-Its MAC is a whole one in hardware, unlike Wi-Fi's, but for CSMA-CA's backoffs and the retries,
-`mac154.h`'s, as the nRF52840's link has them, which the driver times on the MAC's own timer0.
-It needs the BT baseband, now the driver's own `btbb.c` in place of `libbtbb.a`; the baseband's data still lies in the
-driver's RAM, so Wi-Fi's runs see their own data further on, and a traced start held to one from before the data was
-there differed only in the address the receive list is written at.
-
-The bring-up has a trace window of its own, `trace=1` given `prog/i154.c`: the program runs the radio's bring-up and nothing
-else, before its survey and the exchange, and with the root task mapping no device every access faults to the watcher,
-which carries it out and logs it, as Wi-Fi's window's does; `trace=2` runs the same window with the devices mapped.
-It was what the driver's own baseband, `btbb.c`, was held to as Espressif's `libbtbb.a` was taken from it one function
-at a time, the archive's `bt_bb_v2.o` its source: the traced run's device accesses were held to the archive's, and,
-with `snap=` names in the configuration, `tools/mac-trace.py compare` held the two runs' final state.
-
-A run of 802.15.4 leaves the modem in a state the runner's reset does not clear:
-a traced Wi-Fi start straight after one read `0x600A4400` at its third access as `0xc1c93734`,
-where runs after a Wi-Fi run read `0xc1cb3754`, as the gate's did.
-The baseband's own registers survive it too, so a traced run's reads of them answer what the image before left there,
-which a Wi-Fi run does not put back: a traced run's board values are held by the last write to each address,
-and the full sequence, reads and all, by the host replay over the recorded base.
-A traced run, or a gate, goes after a Wi-Fi run.
-
-## The 802.15.4 MAC's registers, named
-
-ESP-IDF 5.5 (Arduino esp32 3.3.11) names the whole 0x600a3000 block in
-`soc/esp32c6/register/soc/ieee802154_reg.h`, SPDX Apache-2.0, a copy of whose headers sits in
-`build/esp/idf-esp32c6-3.3.11/`.
-i154.c's names to the header's; a row says what the driver writes or reads there, its source
-the header unless it names another. A word whose role the header does not give keeps the offset it was reached at.
-
-| i154.c | ESP-IDF | the driver | field |
-|---|---|---|---|
-| COMMAND 0x000 | COMMAND_REG | the MAC's command, a byte | opcode, low 8; the values are the driver's CMD_*, named in the header's sibling ieee802154_ll.h, not its register header |
-| CTRL_CFG 0x004 | CTRL_CFG_REG | the receive's filter and the acknowledgements | bit 0 our AUTO_ACK_TX = HW_AUTO_ACK_TX_EN, bit 3 our AUTO_ACK_RX = HW_AUTO_ACK_RX_EN, bit 6 our COORDINATOR = PAN_COORDINATOR, bit 7 our PROMISCUOUS = PROMISCUOUS_MODE, bits 28 to 31 our MULTIPAN = MAC_INF0..3_ENABLE |
-| INF0_SHORT_ADDR 0x008 | INF0_SHORT_ADDR_REG | the node's short address | MAC_INF0_SHORT_ADDR, low 16 |
-| INF0_PAN_ID 0x00c | INF0_PAN_ID_REG | the PAN | MAC_INF0_PAN_ID, low 16 |
-| INF0_EXT_ADDR0/1 0x010, 0x014 | INF0_EXTEND_ADDR0/1_REG | the node's extended address | the whole word each |
-| CHANNEL 0x048 | CHANNEL_REG | the radio's frequency | HOP, low 7; the driver writes 2402's MHz offset, i154.c's FREQ, from IEEE 802.15.4's channel numbering |
-| TX_POWER 0x04c | TX_POWER_REG | libbtbb's power-table index | TX_POWER, low 5 |
-| ED_DURATION 0x050 | ED_SCAN_DURATION_REG | how long the energy detection samples | ED_SCAN_DURATION, low 24, the driver's count of 16 us symbols, i154.c; bits 24 to 27 ED_SCAN_WAIT_DLY |
-| ED_CFG 0x054 | ED_SCAN_CFG_REG | the assessment's threshold and the last sample | CCA_ED_THRESHOLD bits 0 to 7, ED_SAMPLE_RATE bits 11 to 12, ED_SAMPLE_MODE bit 13, i154.c's ED_SAMPLE_AVG, see below, CCA_MODE bits 14 to 15, ED_RSS bits 16 to 23 read, CCA_BUSY bit 24 read |
-| ACK_TIMEOUT 0x05c | ACK_TIMEOUT_REG | how long an acknowledgement is waited for | ACK_TIMEOUT, low 16, the driver's 54 symbols, macAckWaitDuration, IEEE 802.15.4's and mac154.h's |
-| EVENT_EN 0x060 | EVENT_EN_REG | which events raise the line | EVENT_EN, low 13 |
-| EVENT_STATUS 0x064 | EVENT_STATUS_REG | the events since the last, written back to clear | EVENT_STATUS, low 13 |
-| RX_ABORT_EN 0x068 | RX_ABORT_INTR_CTRL_REG | the receive aborts that raise the line | one bit a reason |
-| COEX_PTI 0x070 | COEX_PTI_REG | the coexistence priority, 3 with no coexistence | COEX_PTI bits 0 to 3, COEX_ACK_PTI bits 4 to 7, CLOSE_RF_SEL bit 8 |
-| TX_ABORT_EN 0x078 | TX_ABORT_INTERRUPT_CONTROL_REG | the sending aborts that raise the line | one bit a reason |
-| RX_STATUS 0x080 | RX_STATUS_REG | the receive's state and its last failure | RX_STATE bits 16 to 18, the driver's SFD test; RX_ABORT_STATUS bits 4 to 8; FILTER_FAIL_STATUS bits 0 to 3 |
-| TX_STATUS 0x084 | TX_STATUS_REG | the sending's state and its abort's reason | TX_STATE bits 0 to 3, TX_ABORT_STATUS bits 4 to 8, the driver's ABORT_REASON; TX_SEC_ERROR_CODE bits 16 to 19 |
-| TXDMA_ADDR 0x0d0 | TXDMA_ADDR_REG | the frame to send | |
-| RXDMA_ADDR 0x0e0 | RXDMA_ADDR_REG | where a received frame is written | |
-| TIMER0_THRESHOLD 0x0a8 | TIME0_THRESHOLD_REG | the backoff's microseconds | TIMER0_THRESHOLD, whole |
-| CRC_ERROR_CNT 0x148 | CRC_ERROR_CNT_REG | frames whose FCS was bad | read |
-| RX_FILTER_FAIL_CNT 0x154 | RX_FILTER_FAIL_CNT_REG | frames the address filter refused | read |
-| — 0x100 | PAON_DELAY_REG | unused by the driver; the name beside TXON_DELAY for a PA-on delay, the MAC's; the baseband's pa_on_bt_delay is another word, 0x600a08fc, no claim the two are alike | PAON_DELAY, low 10 |
-| btbb.c 0x104 | TXON_DELAY_REG | the transmit-on delay | TXON_DELAY, low 10; ieee802154_txon_delay_set writes 0x23 |
-| btbb.c 0x10c | TXOFF_DELAY_REG | the transmit-off delay | TXOFF_DELAY, low 6; the same function clears it |
-| btbb.c 0x110 | RXON_DELAY_REG | the receive-on delay | RXON_DELAY, low 11; it writes 0x32 |
-| btbb.c 0x114 | TXRX_SWITCH_DELAY_REG | the transmit/receive switch's delay | TXRX_SWITCH_DELAY, low 10; it writes 0x7f |
-
-### The energy scan's sample mode, bit 13
-
-ESP-IDF's two headers name `ED_CFG`'s bit 13 differently. Its register header,
-`soc/esp32c6/register/soc/ieee802154_reg.h`, gives bits 11 to 12 to `ED_SAMPLE_MODE` and bit 13 to
-`DIS_ED_POWER_SEL`; its structure header, `ieee802154_struct.h`, the one the HAL writes through, gives bits 11 to 12
-to `ed_sample_rate` (the samples each microsecond) and bit 13 to `ed_sample_mode`, the choice between the most and the
-average sample, after `cca_threshold`:8, `reserved8`:3 and `ed_sample_rate`:2.
-IDF's driver settles which it is: `ieee802154_mac_init`, in `components/ieee802154/driver/esp_ieee802154_dev.c`, calls
-`ieee802154_ll_set_ed_sample_mode(IEEE802154_ED_SAMPLE_AVG)`, and `ieee802154_ll_set_ed_sample_mode` in
-`components/esp_hal_ieee802154/include/hal/ieee802154_common_ll.h` writes `ed_cfg.ed_sample_mode`, bit 13. So bit 13 is
-the sample mode's average, not the register header's `DIS_ED_POWER_SEL`; i154.c's `ED_SAMPLE_AVG`, bit 13, is IDF's
-own choice, and it is not renamed. IDF leaves the sample mode at the average; i154.c clears it for the survey and
-sets it again. Both headers are from ESP-IDF 5.5 (Arduino esp32 3.3.11).
-
-### Where i154.c differs from ESP-IDF's driver
-
-The register table above names the fields; these are places i154.c uses a word otherwise, or with another value, or in
-another order than ESP-IDF's driver does, each with its source, no more:
-- The events: `ieee802154_mac_init` enables every event and then clears `TIMER0_OVERFLOW` (`EVENT_EN`'s bit 8) unless
-  `CONFIG_IEEE802154_TEST`; i154.c enables every event including bit 8, its CSMA-CA backoff timed by timer0.
-- The sample mode: the same init sets `ED_SAMPLE_AVG` and leaves it; i154.c clears it in `survey()` and sets it again.
-- The statistics: the init clears the counters through `ERROR_CNT_CLEAR_REG`, 0x180; i154.c never writes it, and reads
-  `CRC_ERROR_CNT` and `RX_FILTER_FAIL_CNT` at the end of its run.
-- The address filter: IDF's PIB starts with promiscuous true; i154.c clears `PROMISCUOUS_MODE` so the PAN and the
-  short address filter what the MAC takes.
-- The acknowledgements: IDF's PIB starts with `enhance_ack_tx` true; i154.c clears `AUTO_ENHACK`.
-- The interfaces: IDF sets the multipan enables its `CONFIG_IEEE802154_INTERFACE_NUM` names and the pending mode;
-  i154.c sets `MAC_INF0_ENABLE` alone.
-- The CCA: IDF's mode and threshold are its Kconfig's `CONFIG_IEEE802154_CCA_MODE` and `CONFIG_IEEE802154_CCA_THRESHOLD`;
-  i154.c sets `CCA_MODE_ED` and -75 dBm.
-- The acknowledgement timeout: IDF defines `ieee802154_ll_set_ack_timeout` and never calls it; i154.c writes
-  `MAC154_ACK_WAIT_SYMBOLS`, 54 symbols.
-- The energy scan's length: IDF's `ieee802154_energy_detect` takes its duration from the caller; i154.c writes
-  `ENERGY_SYMBOLS`, 6250, 100 ms. Both set the assessment's duration to 8 symbols, IDF's `CCA_DETECTION_TIME` and
-  i154.c's `CCA_SYMBOLS`.
-- Timer0: IDF fires it against a clock time for `transmit_at` and for a 200 ms wait on a received acknowledgement;
-  i154.c writes `TIMER0_THRESHOLD` with a backoff in microseconds and starts it with `TIMER0_START`.
-Both set the channel the same way, `(channel - 11) * 5 + 3`, IDF's `ieee802154_channel_to_freq` and i154.c's `FREQ`,
-and the TX power through the same table and the same nearest-below index.
-
-## The baseband's words, what is known
-
-The 0x600a2000 block the IDF register header does not name, only dividing it in btbb_retention_reg.h.
-Its fields come from weaker sources, strongest first: the field names ble_tx_config_check prints, which its own
-disassembly pairs with each read, checked there; then a getter's own cut, or a setter's write whose bits its
-disassembly gives and whose name the function's; then the archive's function names alone, which name a group and not a
-field; constants are leads, called hypotheses.
-The archive is libbtbb e4897a5.
-
-Its disassembly wants llvm-objdump with --mattr=+m, or every divide by 80 vanishes as unknown, as ble_tx_config_check's two did.
-
-| address | field | what the driver knows | source |
-|---|---|---|---|
-| 0x600a08fc bits 0..7 | rf_on_bt_delay | a delay; the print divides the byte by 80, hypothesis: 80 MHz ticks, the print in us | ble_tx_config_check .LC3, its disassembly (divu by 80) |
-| 0x600a08fc bits 8..15 | pa_on_bt_delay | a delay, divided by 80 in the print, the same hypothesis; btbb_init sets it 0xc8, 2.5 us by it | ble_tx_config_check .LC4 |
-| 0x600a1650 bits 0..7 | lc_tx_on_delay | a delay; constant_DC_time is this less bb_tx_on_delay, tx_ramp_delay and tx_rampup_delay, and a check fails when it is 9 or less | ble_tx_config_check .LC7 and .LC8 |
-| 0x600a2010 bits 5..12 | bb_tx_on_delay | the BB transmit-on delay; bt_bb_set_le_tx_on_delay writes it, bt_bb_get_le_tx_on_delay reads it and adds 5 | ble_tx_config_check .LC2, and the setter's and getter's names |
-| 0x600a2010 bits 24..31 | zb_tx_on_delay | the ZB transmit-on delay, a field of its own beside bb_tx_on_delay's; bt_bb_set_zb_tx_on_delay writes it, bt_bb_get_zb_tx_on_delay reads it and adds 5 | the setter's and getter's names |
-| 0x600a2018 bits 3..7 | tx_ramp_delay | a delay | ble_tx_config_check .LC5 |
-| 0x600a2018 bits 19..23 | tx_rampup_delay | a delay | ble_tx_config_check .LC6 |
-| 0x600a20b8 bits 12..19 | tx_cca_end_ts | the CCA window's end, as the print reads it; bt_bb_tx_cca_period writes bits 9 to 19 there, eleven, so the setter's field and the print's do not agree yet: it writes (first - 5) * 8 - 1 in bit 9's units, hypothesis a finer field the print shows divided by 8 | the setter's disassembly and ble_tx_config_check .LC1, kept apart |
-| 0x600a20b8 bits 23..30 | tx_cca_start_ts | the CCA window's start; bt_bb_tx_cca_period writes bits 23 to 30 there too, so the two agree | ble_tx_config_check .LC0, and the setter |
-
-The archive's other functions, the getters and the setters outside the bring-up,
-each field the bits its own disassembly cuts, its name from the function's:
-
-| address | field | what the driver knows | source |
-|---|---|---|---|
-| 0x600a20b0 whole | cur_rx_info | the receive's info word, cut by nothing | bt_bb_get_cur_rx_info's name |
-| 0x600a20b0 bits 0..7, signed | channel_pwr | the same word's low byte, sign-extended; hypothesis RSSI in dBm, the only signed level here | bt_get_channel_pwr's name and its sign extension |
-| 0x600a20d4 bit 20 | cca fifo reset | written 1 to reset the fifo | bt_bb_tx_cca_fifo_reset's disassembly |
-| 0x600a20d4 bits 25..28 | cca fifo count | how many entries wait | bt_bb_tx_cca_fifo_count's disassembly |
-| 0x600a20d4 bit 29 | cca fifo empty | | bt_bb_tx_cca_fifo_empty's disassembly |
-| 0x600a20d4 bit 30 | cca fifo full | | bt_bb_tx_cca_fifo_full's disassembly |
-| 0x600a20d8 whole | cca fifo read | the front entry, one word a read | bt_bb_tx_cca_fifo_read's disassembly |
-| 0x600a2064 bits 20..25 | corr thresh LE, argument 0 | bt_bb_set_corr_thresh_le writes its first argument there; bt_bb_rx_correlator_set writes 3 there | the two disassemblies |
-| 0x600a2064 bits 14..19 | corr thresh LE, argument 1 | the same setter writes its second there; bt_bb_rx_correlator_set writes 4 there | the same |
-| 0x600a2060 bits 26..31 | corr thresh LE, argument 2 | the same setter writes its third there; bt_bb_rx_correlator_set writes 4 there, bit 28 | the same |
-| 0x600a20f8 bits 5..10 | corr thresh LE, argument 1 | the same setter writes its second there; bt_bb_rx_correlator_set writes 3 there | the same |
-| 0x600a20f8 bits 19..24 | corr thresh LE, argument 1 | the same setter writes its second there; bt_bb_rx_correlator_set writes 2 there, and bit 25 beside it | the same |
-| 0x600a28a0 bits 16..23 | rx_sense | the receive sense; bt_bb_set_rx_sense writes its third argument there when its first is nonzero and its second is 1 or less; bt_agc_rssi_thresh writes 0x9c there | bt_bb_set_rx_sense and bt_agc_rssi_thresh |
-| 0x600a2004 bits 8..9 | channel_pwr's enable | cleared by bt_get_channel_pwr_unset | its name |
-| 0x600a00c0 bit 25, bits 4..10 | channel_pwr's own word | bt_get_channel_pwr_set sets bit 25, clears bit 15 and writes its argument, 7 bits, in bits 4 to 10; unset clears bit 25; a MODEM word, not the baseband's | the two names |
-| 0x600a207c bits 28..31 and 22..23 | bbmac_idle_for_swrst's state | a predicate: the function returns 1 when these, 0x600a1550's low 4, 0x600a3088's low 4 and 0x600a2c38's low 3 are all idle | the function's name and its read of each |
-| 0x600a20dc bit 31, bits 15..30, bits 13..14 | wdt | bt_bb_wdt_init(a0, a1) sets bit 31, a0 in bits 15 to 30 and a1 in bits 13 to 14; hypothesis the timeout and a prescaler, a0 16 bits and a1 2 | the function's name and its two arguments' widths |
-
-The blocks of words each group writes, computed from the archive's disassembly and, for `bt_bb_rx_set`, whose call to
-`bt_agc_v2_set` hides the words after it, from `btbb.c`, which the replay holds to the archive:
-
-| group | the words it writes |
-|---|---|
-| bt_bb_v2_tx_set | 0x600a2008, 0x600a200c, 0x600a2018 |
-| set_gauss_coeff_1m | 0x600a20e0, 0x600a20e4, 0x600a20e8, 0x600a20ec |
-| set_gauss_coeff_2m | 0x600a20f0, 0x600a20f4 |
-| bt_bb_set_le_tx_on_delay, bt_bb_set_zb_tx_on_delay | 0x600a2010 |
-| bt_bb_tx_cca_period | 0x600a20b8 |
-| ieee802154_txon_delay_set | 0x600a3104, 0x600a310c, 0x600a3110, 0x600a3114 |
-| bt_bb_v2_rx_set | none of its own; it calls the groups below |
-| bt_bb_rx_set | 0x600a2000, 0x600a2008, 0x600a200c, 0x600a204c, 0x600a2050, 0x600a2054, 0x600a20bc, 0x600a20c0, 0x600a2800, 0x600a284c, 0x600a2888, 0x600a288c, 0x600a2c00, 0x600a2c04, 0x600a2c0c, 0x600a4c24, and bt_agc_v2_set |
-| bt_agc_v2_set | 0x600a2058, 0x600a2824, 0x600a2828, 0x600a282c, 0x600a2854, 0x600a28a0, 0x600a28c8, 0x600a28d0, 0x600a28d4 |
-| bt_bb_rx_correlator_set | 0x600a2060, 0x600a2064, 0x600a2068, 0x600a20f8, 0x600a20fc, 0x600a2100 |
-| bt_bb_rx_dpo_set | 0x600a2020, 0x600a2024, 0x600a2028, 0x600a202c, 0x600a2030, 0x600a2034, 0x600a2038, 0x600a28f4 |
-| bt_agc_restart_set | 0x600a2884, 0x600a2888, 0x600a28bc, 0x600a28dc, 0x600a28e0, 0x600a28e4, 0x600a28e8, 0x600a28ec, 0x600a28f0 |
-| bt_agc_target_set | 0x600a2840, 0x600a2894, 0x600a2898, 0x600a289c, 0x600a28b0, 0x600a28b4 |
-| bt_agc_detect_set | 0x600a28a0, 0x600a28a8, 0x600a28ac, 0x600a28b8, 0x600a28c0, 0x600a28c4 |
-| bt_agc_recorrect_set | 0x600a2868, 0x600a286c, 0x600a28b0, 0x600a28b4, 0x600a28bc |
-| bt_agc_rssi_thresh | 0x600a28a0, 0x600a28ac, 0x600a28b8 |
-| bt_agc_gain_offset | 0x600a2848, 0x600a2868 |
-| bt_agc_gain_max | 0x600a2840, 0x600a2850 |
-| bt_agc_gain_set | 0x600a2854, 0x600a7cd0, and bt_agc_gain_max |
-| bt_bb_rx_filter_sel | 0x600a20fc |
-| bt_set_rx_comp | 0x600a2844 |
-| zb_rx_core_set | 0x600a2c04, 0x600a2c08, 0x600a2c20, 0x600a2c24 |
-| zb_rx_v0_0_set | 0x600a2c0c, 0x600a2c10, 0x600a2c14, 0x600a2c18, 0x600a2c2c, 0x600a2c30, 0x600a2c34 |
-| zb_rx_auto_sel | 0x600a2c48 |
-
-The constants a read gives a number that says something, each a lead and a hypothesis, computed from the disassembly:
-
-| constant | where | hypothesis |
-|---|---|---|
-| 0x7a120, 500000 | zb_rx_core_set's 0x600a2c20 bits 8 to 26 and zb_rx_v0_0_set's 0x600a2c2c bits 8 to 26 | 500000, a count or a duration |
-| 0xf85edf, -500001 | zb_rx_core_set's 0x600a2c24 bits 8 to 31 and zb_rx_v0_0_set's 0x600a2c30 bits 8 to 31 | the negative beside the 500000, a range about ±500000; -500001 as a signed 24-bit, one from -500000, so the magnitude is the lead |
-| 0xbb8, 3000 | zb_rx_core_set's 0x600a2c04 bits 16 to 31 and 0x600a2c08 bits 0 to 15 | 3000, a duration or a count |
-| 0x1770, 6000 | zb_rx_core_set's 0x600a2c08 bits 16 to 31 | 6000, twice the 3000 or a second count |
-| 0x199a, 6554 | bt_bb_rx_set's 0x600a200c bits 12 to 27 and 0x600a2c00 bits 12 to 27 | 0.1 in Q16, 6554 of 65536 |
+The radio's program `prog/i154.c` brings the chip's 802.15.4 radio up instead of Wi-Fi's, as ESP-IDF's open driver does,
+and needs the BT baseband, now the radio's own `btbb.c` in place of `libbtbb.a`.
+Its MAC, its registers, its trace window and the state a run of it leaves are in `user/radio/esp32c6/hw/i154.md`,
+and the baseband's words in `hw/btbb.md` beside it.
 
 ## The driver's memory, and whom it trusts
 
@@ -827,7 +558,7 @@ and sending in place would want the MAC to read a frame from a chain of descript
 each the driver's own in `phy.c` and held against the library's before the library's symbol is weakened
 in the copy `build.mk` makes, until nothing of it is linked.
 The driver keeps to 2.4 GHz channels 1 to 13 and never above the power `libphy.a` sets for a channel and rate.
-The registers and `phy_param` fields each step touches are named in `PHYREGS.md`, with their source and how sure it is.
+The registers and `phy_param` fields each step touches are named in `user/radio/esp32c6/hw/phy.md`, with their source and how sure it is.
 
 ### The head, the ROM's table and `phy_param`
 
@@ -882,7 +613,7 @@ the library's `register_chipv7_phy_init_param` [0x420037aa], the driver's own.
 It copies the caller's init data -- the 0x4c bytes it uses of the 0x80 -- into `phy_param`: its byte 0 to 0x50, its
 bytes 2..0x13 to 0x52..0x63, its byte 0x18 to 0x66, its bytes 0x43..0x4b to 0x67..0x6f, its bytes 0x19..0x26 to
 0x70..0x7d, its bytes 0x27..0x34 to 0x7e..0x8b and its bytes 0x35..0x42 to 0x8c..0x99, leaving 0x51, 0x64 and 0x65
-as it found them. The mapping is in `PHYREGS.md`.
+as it found them. The mapping is in `hw/phy.md`.
 Off the board, `phy-ab.py` held it to the library's over seeds and with the init data filled, `phy_param` compared
 in full. The mutations told apart: its first byte's source, the eighteen-byte copy's count and the last
 copy's start. The whole of `register_chipv7_phy`, still the library's and now calling the driver's own spread, is
@@ -1072,7 +803,7 @@ ROM's `phy_freq_correct` and `set_channel_rfpll_freq`; the library's `register_c
 0xA2 and the driver's `phy_init_data` leaves 0xA1 zero, so the recorded run did not reach it -- and its check is
 the off-board comparison with the gate forced both ways. The library runs it inside the ROM's critical section, the
 same pair of empty returns left out as elsewhere. The names stay by register and `phy_param` offset for 0x20, 0xA1
-and 0xA2, which have no label and whose meaning is not known, in `PHYREGS.md` with the open questions.
+and 0xA2, which have no label and whose meaning is not known, in `hw/phy.md` with the open questions.
 Off the board, `phy-ab.py` held each to the library's: `mac_tx_chan_offset_new` over channels 0 to 5 and with the
 word's other bits set, `chip_v7_set_chan_offset` over channels 1 to 13 with the gate clear and set, 0xA2 from -1
 up to 127, and the boundary channels, and `phy_rx_table_init` for seeds and both `param_flag` states with
@@ -1098,7 +829,7 @@ counted, `phy_param`'s `rx_sat` 0x1A4 is set, and the pbus's work mode is put ba
 `FEDATA_RX_IQ_EST2..5` 0x478..0x484 are shifted by the gain less two and the two pairs' sum and difference crossed
 into the receive IQ mismatch's two bytes, and the accumulators `FEDATA_IQ_EST_I/Q/MAG` are turned into decibels.
 The names stay by register: 0x478 to 0x484, 0x705C and 0x7068 have no label, and what they mean is not known;
-they are in `PHYREGS.md` with the open questions.
+they are in `hw/phy.md` with the open questions.
 The first `pbus_set_dco` told the step's bug apart: with the pair written the other way round, 0x00010001, the
 front end's word differed at bit 14 alone. Off the board, `phy-ab.py` held each to the library's: `rfrx_sat_rst`
 with the argument clear and set, `phy_check_rx_sat` for seeds and with the SAR field either side of 0x45,
@@ -1124,7 +855,7 @@ the tone, and writes the pair out. `get_rfcal_rxiq_data_new` repeats that up to 
 bytes as signed halves, stopping early once a reading is within one of the last on both -- the last two averaged --
 else summing the four and dividing by four; the pair is again held to the bounds and packed high byte first into
 the answer's halfword. The names stay by register: `FEDATA_REG_SET3`'s bits 29 and 30 and its two correction fields
-have no label, and what they correct is not known; they are in `PHYREGS.md` with the open questions.
+have no label, and what they correct is not known; they are in `hw/phy.md` with the open questions.
 Off the board, `phy-ab.py` held each to the library's: `rxiq_cover_mg_mp_new` over gains 0 to 8, `rfcal_rxiq_new`
 over gains and tone arguments, and `get_rfcal_rxiq_data_new` over tone arguments with the readings converging
 early and with the estimate walked so all four are summed, every access and the output buffers the same.
@@ -1158,7 +889,7 @@ bit 29; then it sets `param_flag`'s bit 10.
 The first run of seed 4 told the block's bug apart: the driver cleared `FEDATA_REG_SET3`'s bit 18, `0xfffbffff`,
 where the library clears bit 14, `0xffffbfff`, and the write to 0x450 differed.
 The names stay by register: `FECTRL_TXRX_OFF`'s bits 14 and 15 and `FEDATA_REG_SET3`'s bits 13, 14, 29 and 30 have
-no label, and what they gate is not known; they are in `PHYREGS.md` with the open questions.
+no label, and what they gate is not known; they are in `hw/phy.md` with the open questions.
 Off the board, `phy-ab.py` held each to the library's: `set_rx_gain_cal_iq_new` with its first argument clear and
 set, two tones and seeds 1 and 5, and `rxiq_cal_init` for its first and third arguments clear and set by seed 1 and
 by seed 4, the seed that reaches the bit-14 write, with `phy_param` 0xA4 zeroed, its early return with bit 10 set,
@@ -1185,7 +916,7 @@ down to 0 and the second its bits 7..4 from 13 down to 1 by twos, each value wri
 back through `dc_iq_est_high`, the largest kept and written at the pass's end, the caller's byte advanced -- so
 0xDC's pair then 0xDE's -- and the second pass run for that byte. The names stay by register: `i2c_txrf`
 register 2's two fields, `phy_param`'s `DCAP_STG` pairs and halfword 0x10 bit 7 (the library's print argument) have
-no label, and what the capacitor's fields correct is not known; they are in `PHYREGS.md` with the open questions.
+no label, and what the capacitor's fields correct is not known; they are in `hw/phy.md` with the open questions.
 Off the board, `phy-ab.py` held each to the library's: `tx_cap_init_loop` for seeds and with `phy_param` 0x51's
 byte, its halfword 0x10 bit 7 set and the estimate forced and walked through `--seq`, and `rfcal_txcap_loop` for
 seeds and with the estimate forced and walked, every access, `phy_param` and the `--out` buffers the
@@ -1210,7 +941,7 @@ byte 0x14 shifted three, the pair settled into `BT_TXDC` 0x104 by `txdc_cal_new`
 splits its argument's packed pair through `get_iq_value` and hands the first byte signed and the second less four,
 signed, to the ROM's `txiq_set_reg`'s forward and loopback halves. The names stay by register: `param_flag`'s bit
 12 and `phy_param`'s byte 0x14 have no label, and how the five pairs relate to `TXDC` 0xA8/0xAA is not known; they
-are in `PHYREGS.md` with the open questions. The library's print flag, `phy_param`'s halfword 0x10 bit 4 here, is
+are in `hw/phy.md` with the open questions. The library's print flag, `phy_param`'s halfword 0x10 bit 4 here, is
 left out.
 Off the board, `phy-ab.py` held each to the library's: `set_lb_txiq_new` over four packed pairs, `txdc_cal_init_new`
 for its second and third arguments and its fourth both ways along with the print bit, and `bt_txdc_cal_new` with its
@@ -1326,7 +1057,7 @@ receive IQ pairs going through `get_iq_value`'s unpacking first, which the blob'
 driver takes it here although it is the receive IQ's.
 The front end's `esp_phy_efuse_get_mac`, which the driver reads the factory MAC through, is kept a call rather
 than inlined: `phy_get_mac_addr` reverses its bytes, and the off-board control replaces both the driver's read
-and the library's with a stub, which a folded-away call would escape. The blob's layout is in `PHYREGS.md`.
+and the library's with a stub, which a folded-away call would escape. The blob's layout is in `hw/phy.md`.
 Off the board, `phy-ab.py` held the whole of `register_chipv7_phy` -- still the library's, calling the driver's
 own blob by then -- to the library's from one state over the seeds, the tone sequences, the calibration modes
 and the gates: every access, `phy_param`, the calibration data and the return the same.
@@ -1428,7 +1159,7 @@ exactly as the library leaves it.
 Nothing calls `phy_set_23dbm_en` and libphy's `phy_param` starts with zero at 0x4E, so on the board the branch
 never runs and the transmit power stays within the library's, under the 20 dBm EIRP limit; the off-board
 comparison covers it by forcing 0x4E in the model, which transmits nothing.
-They are in `PHYREGS.md` with the open questions.
+They are in `hw/phy.md` with the open questions.
 
 ### Deliberate differences and open questions
 
@@ -1437,105 +1168,9 @@ entry past its table -- `low` and `high` both 256, `dac` 0 -- answering 0 for a 
 correcting otherwise; the driver's own corrects for that index too, so the two differ for that one input, which
 no sensor code through the ROM's `code_to_temp` reaches, and the comparison leaves it out.
 The registers and `phy_param` fields whose names or meanings are not known, with the open questions, are
-in `PHYREGS.md`.
+in `hw/phy.md`.
 
 ## The dump engine
 
-The modem holds a block at `0x600A9000`, inside the modem's frame, that no header of Espressif's names:
-an engine that copies what the receiver hears into a bank of SRAM, one 32-bit word a sample,
-for the factory's RF tests, which Espressif's RF test library, `librftest.a`'s `adctrig`, drives.
-ESPARGOS's ESP-SDR found it and drives it on ten of Espressif's chips;
-its firmware is GPL-3.0, so this driver takes facts from its description, never its code,
-and reads `adctrig` in the ESP32-C6's `librftest.a` of `esp-phy-lib` itself, as it read `libphy.a`.
-The engine is the radio's, `user/radio/esp32c6/dump.h` and `dump.c`, and the sampler a program of the radio's,
-`prog/sampler.c`, which the root task gives the bank and HP_SYSTEM as its header asks;
-it was the root task's own at first, behind a build of its own, until the radio's programs were apart from the station.
-
-To run it, a configuration file in `local/`, which git does not track, holds `channel=`, a channel of Wi-Fi's,
-with `run=` and the keys `dump.h` lists:
-
-    printf 'channel=1\nrun=30\ndump=4096\ndumpsource=15\ndumprate=3\ndumphex=4096\n' > local/sampler.conf
-    make BOARD=esp32c6 radio PROG=sampler RADIO_CONFIG=local/sampler.conf PORT=/dev/serial/by-id/usb-Espressif_...
-    tools/dump-spectrum.py build/esp32c6/radio-run.log 16e6
-
-A signal of known frequency comes from the nRF52840, once the C6's log says its driver listens:
-`make BOARD=nrf52840 thread THREAD_CONFIG=` a file of `channel=12`, `stream=100` and `run=10`
-sends 802.15.4 frames on 2410 MHz for ten seconds, which fails at its end, as the C6 acknowledges none.
-The captures of those seconds, and only those, hold them; see the control below.
-
-The words, as `adctrig` writes them and the board answered:
-
-| Word | Bits | What | Source |
-|---|---|---|---|
-| `0x600A9004` | 0 to 14 | the samples a capture takes | `adctrig` writes its first argument plus one |
-| | 15, 16 | the 80 MHz clock divided by 1, 2, 3 or 5 | ESP-SDR; 3 gave 16 MS/s on the board, measured below |
-| | 17 | cleared before a capture | `adctrig` |
-| | 18 | set once the samples are written | `adctrig` waits on it; ESP-SDR writes it before a capture, to clear it |
-| | 19 | written 1 and then 0, the capture starts | `adctrig`, for its first mode alone |
-| | 31 | the engine on | `adctrig` |
-| `0x600A9008` | 15 to 18 | the source, see below | `adctrig`'s modes write 15, 1, 0, 1, 2, 3, 4, 5, and 0 for BLE |
-| `0x600A9014` | 0 to 23 | four lanes of six bits, which signal each part of the word is | `adctrig`: 0 to 3 for Wi-Fi's receiver, 14 to 17 for BLE's; bit 24 cleared |
-| `0x600A20B4` | 0 | set, the BLE baseband's side; cleared, Wi-Fi's | `adctrig`'s eighth mode sets it, the others clear it |
-| `0x600A210C` | 7, 8 to 11, 14, 15, 28 to 31 | the BLE side's set-up, and in bit 7 its start; see below | `adctrig`'s eighth mode |
-| `0x600A4E30` | 8, 0 to 7 | set, and a byte, for source 5 | `adctrig`'s seventh mode; a word of the Wi-Fi MAC's |
-| MODEM_SYSCON `CLK_CONF` `0x600A9804` | 31 | `CLK_DATA_DUMP_EN`, the engine's clock | ESP-IDF's `modem_syscon_reg.h`; `libphy.a`'s `phy_get_adc_rand` sets it too |
-| HP_SYSTEM `SRAM_USAGE` `0x60095004` | 8 to 11 | a bit a 128 KiB bank of SRAM, set the engine's | ESP-IDF's `hp_system_reg.h`; `adctrig` sets bit 10, the bank at `0x40840000` |
-| | 16 | `MAC_DUMP_ALLOC`, the bank's upper 64 KiB | ESP-IDF's `hp_system_reg.h` |
-
-A capture writes from the bank's first word, as many words as it takes,
-each two 10-bit two's complement samples, bits 10 to 19 the in-phase and 0 to 9 the quadrature,
-then the receiver's gain index in bits 20 to 27, and in 28 to 31 what moves with the AGC's steps.
-Which of the two is I was told by a signal of known frequency, below;
-ESP-SDR's description names them both ways.
-
-What the board answered, the driver listening on Wi-Fi's channel 1:
-
-- A capture of 4096 samples from source 15 at the full clock is done in about 51 us, and writes every word
-  and nothing past them; the AGC idle, the gain index stays 78, the samples sit well off zero,
-  and their spread is a noise of about 20 counts.
-- While the engine holds the bank, the CPU loses it: a read of the bank's last word, which no capture reaches,
-  gave another word of the bank, and a write there was gone once the bank was the CPU's again.
-  So a bank given to the engine must hold nothing a trap or another process may touch, see `dump.h`.
-- Source 15 starts at once. Sources 0, 1, 2, 5 and 10 finish only after milliseconds,
-  each capture with the gain index moving and the AGC's bits stepping, so they wait for something the receiver
-  hears; 3, 4, 6 to 9 and 11 to 14 did not finish in 150 ms of a channel with only beacons and traffic on it.
-  Source 0 caught the AGC's same round of steps every 1340 samples at the full clock.
-- The control: the nRF52840 sending IEEE 802.15.4 frames on channel 12, 2410 MHz, for 10 s of the run,
-  and the C6 capturing source 15 at the clock divided by 5. The frames stood 30 dB over the floor
-  2 MHz below the middle, in the captures of those 10 s and in none before or after,
-  so the divider gives 16 MS/s, and with bits 0 to 9 taken as I they would have stood 2 MHz above.
-  A line 4 MHz above the middle stands in most captures, 10 to 15 dB over the floor, the board's own;
-  these notes had it below once, read with I and Q the other way round.
-
-The BLE side, the driver listening for IEEE 802.15.4 on channel 12, as the root task's sampler of then had it:
-
-- With `0x600A20B4`'s bit 0 set, lanes 14 to 17 and source 0, the engine waits and never finishes,
-  though the 802.15.4 MAC heard hundreds of the nRF52840's frames meanwhile.
-  With `adctrig`'s eighth mode's start written too, `0x600A210C`'s bits 28 to 31 set to 4,
-  its bits 8 to 11 and 14 and 15 cleared, and then its bit 7 set, each capture finishes in the same 51 us
-  as Wi-Fi's at the full clock, and the 802.15.4 MAC goes on hearing frames beside it.
-  The BLE receiver's own start, `ble_rx_start`, is left out, since the 802.15.4 MAC's receiving is on.
-- Its words hold the same two 10-bit samples, but a gain code of the BLE side's own, 151 idle and 130 under a frame,
-  and 4 in bits 28 to 31 while idle.
-- Taken at 80 MS/s, nearly all of a capture's power lies within 2.5 MHz of the middle and the rest is flat:
-  the side gives what its receiver's filters have passed, not the ADC's own.
-  The nRF52840's frames, on the very channel the C6 listens on, stand 2 MHz below the middle,
-  so the receiver, it seems, hears on an intermediate frequency of 2 MHz, which the capture is taken before;
-  a line about 1 MHz below the middle stands 45 dB over the floor while the channel is quiet, whence not known.
-
-The diagnostic bus: `IO_MUX_MODEM_DIAG_EN`, `0x600900BC`, lets the modem's 32 `MODEM_DIAG` bits into the GPIO matrix,
-and pins nothing on the XIAO drives, each an output with its input on, read them back in `GPIO_IN` with no wire;
-commit f63a3ab7 had the sampler do so, and the next took it out again, for what it found:
-listening on channel 1 the bus reads `0x01221111`, its bits 16 to 22 moving now and then as the receiver hears something,
-the receiver's slow state, not its samples; the dump engine running changes nothing there,
-and no value of `WIFI_BB_CFG`'s four-bit fields from bit 12, nor of the dump block's word `0x600A9020`, `0x02202221`,
-moved it more than its default does. What chooses the bus's signals is not found.
-The dump block answers again from `0x600A9040`: its words repeat every 64 bytes.
-
-Open questions of the sampler, beside `TODO.md`'s:
-
-- What sources 0, 1, 2, 5 and 10 wait for, and whether a capture of theirs holds the moment before it.
-- The BLE side's rate: its captures take as long as Wi-Fi's at the full clock, yet hold a band of 5 MHz;
-  whether its words are the BLE receiver's own samples held or made again at 80 MHz is not known,
-  nor whether `0x600A210C`'s fields other than bit 7 matter.
-- The line 4 MHz from the middle on Wi-Fi's side, and the one 1 MHz from it on the BLE side.
+The modem's dump engine, which copies what the receiver hears into a bank of SRAM, is the radio's,
+and `prog/sampler.c` a program of the radio's; what it found, and how to run it, is in `user/radio/esp32c6/hw/dump.md`.

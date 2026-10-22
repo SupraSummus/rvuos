@@ -1,5 +1,8 @@
 # The PHY's registers and `phy_param` fields, as the driver understands them
 
+The PHY's history, how `phy.c` took it from `libphy.a` a function at a time, is in the station's `NOTES.md`;
+the modem's frame as a whole, and how sure each fact is, in `README.md` beside this file.
+
 The driver takes the PHY from `libphy.a` a function at a time, and names what it touches so the meaning
 is in the code, not in a number. This file is that naming, laid out by hardware block, since that is the
 map the driver is working towards: a block's registers, the analog I2C blocks it is reached through, the
@@ -54,6 +57,28 @@ and says which.
 - `phy_param`: `PHY_PARAM_CAP_TEMP` 0x130, `PHY_PARAM_CAP_BUSY` 0x19C, the frequency-select byte
   0x19B (**inferred** from the RFPLL-capacitance tracking loop), and `PHY_PARAM_I2C_RFPLL_0F` 0x196, the
   block 0x62's register 0x0f read back (**inferred** from `rfpll_chgp_cal` and `rf_init`).
+
+### The channel's words, measured
+
+`prog/regmap.c`, see `README.md`, read the modem and the analog blocks on channels 1, 6, 8 and 13, 2412 to 2472 MHz.
+What the channel sets:
+
+- `FECOEX_FREQ_SET_TRIG`, 0x600A00C4, holds (f - 2400 MHz) x 258: 0xC18, 0x254A, 0x2F5E and 0x4890,
+  the last two foretold from the first two; whether it is one number or the MHz in bits 8 up and twice them below
+  is not told by channels, whose offsets are all below 128 MHz. The name `TRIG` is the driver's, from the loop that writes it.
+- `FECOEX_FREQ_SET_CONF`, 0x600A00C0, holds f - 2400 MHz in its bits 7 to 13: 12, 37, 47 and 72.
+- The RF PLL's synthesizer, analog block 0x63, `i2c_rfpll_sdm`, host 1:
+  f = 60 MHz x (32 + N),
+  N its register 3 plus a fraction of 19 bits, register 4 the high eight, 5 the next eight and 6's bits 0 to 2 the low three,
+  exact on the four channels. `libphy`'s `ram_rfpll_set_freq` says why (known, its disassembly):
+  it divides the frequency by three times the crystal's, 120 MHz, in units of 2^-20, and takes 2^24 off, the 32.
+  The I2C master's command memory, `phy.c`'s frequency memory, writes registers 6 to 3 of the block, as the channel moves.
+- The RF PLL's block 0x62, registers 1 and 5, both the same byte, falling as the frequency rises:
+  0xC8, 0xBC, 0xB7 and 0xAA; the capacitance the RF PLL's tracking keeps, inferred.
+- The transmit block 0x6B, register 2, 0x71 on channel 1 and 0x51 on 6, 8 and 13; why is not known.
+- Of the modem's words, `nrx` 0x600A7848 alone: its low 16 bits 0x3ED5, 0x33AE, 0x2F49 and 0x2473,
+  about 112 less a MHz, though not quite in a line; what it holds is not known.
+  Others moved between runs as much as with the channel, the temperature's, as a hypothesis.
 
 ### BBPLL
 

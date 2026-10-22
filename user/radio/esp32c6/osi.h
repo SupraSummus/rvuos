@@ -134,6 +134,8 @@ void drv_phy_low_rate_disable(void); /* the ROM's phy_disable_low_rate, the driv
 void drv_phy_track(void);
 void drv_wifi_clock_enable(void);
 void drv_wifi_reset_mac(void);
+/* An analog I2C block's register through the ROM's rom_i2c_readReg; the PHY's bring-up powers the bus. */
+uint8_t drv_phy_i2c_read(uint8_t block, uint8_t host, uint8_t reg);
 
 /* hostap.c: hostap's lines at its debug level too, from here on. */
 void drv_wpa_debug(void);

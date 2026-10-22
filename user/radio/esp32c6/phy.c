@@ -312,7 +312,7 @@ static uint32_t enabled;
 /* The library's mark whether Wi-Fi's baseband is up, under which its wakeup clears the baseband at its end. */
 #define PHY_PARAM_WIFI_BB_ENABLE 0x19e
 
-/* phy_param's fields, Espressif's labels from libphy's phy_cal_print and phy_tx_gain_print; PHYREGS.md. */
+/* phy_param's fields, Espressif's labels from libphy's phy_cal_print and phy_tx_gain_print; hw/phy.md. */
 #define PHY_PARAM_TEMP_CODE         0x00  /* temp_code: the temperature the sensor's read keeps */
 #define PHY_PARAM_TXCAL_TEMP        0x48  /* the temperature the transmit calibration block last ran at */
 #define PHY_PARAM_TEMP_CODE_INIT    0x12E /* temp_code_init */
@@ -533,6 +533,11 @@ static void rom_i2c_write(uint8_t block, uint8_t host, uint8_t reg, uint8_t data
 static uint8_t rom_i2c_read(uint8_t block, uint8_t host, uint8_t reg)
 {
     return (uint8_t)((int (*)(uint8_t, uint8_t, uint8_t))phy_get_romfuncs()[ROMFUNC_I2C_READ_REG])(block, host, reg);
+}
+
+uint8_t drv_phy_i2c_read(uint8_t block, uint8_t host, uint8_t reg)
+{
+    return rom_i2c_read(block, host, reg);
 }
 
 /* The ROM's rom_i2c_readReg_Mask, block, host, register, msb, lsb, through its table's slot. */
@@ -4275,7 +4280,7 @@ void phy_param_track_tot(uint32_t en_wifi, uint32_t en_ble_154)
  * driver fills it on the first calibration and holds it across a restart. Its head is the version
  * (phy_get_rf_cal_version) and the factory MAC; from CAL_PHY_PARAM it holds phy_param[0..0x1A8) as
  * phy_rfcal_data_sub copies it, and its last word is the negated sum of every word before it, which
- * phy_rfcal_data_check writes or checks. The fields' names are phy_cal_print's labels (PHYREGS.md).
+ * phy_rfcal_data_check writes or checks. The fields' names are phy_cal_print's labels (hw/phy.md).
  */
 #define CAL_VERSION         0x00  /* four bytes: the calibration's version, 0x159 */
 #define CAL_MAC             0x04  /* the factory MAC and two bytes of nothing */

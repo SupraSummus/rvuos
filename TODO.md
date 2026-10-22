@@ -297,7 +297,7 @@ what is left:
   though the page holds the configuration whole now: the station could read its own, as the other programs do,
   and the root task keep only what it acts on, `ssid=` for the network process, `run=`, `trace=` and `antenna=`.
   Its image keeps the station's name, `kernel-wifi-esp32c6`, which the tools that boot it name too.
-- The sampler, `user/radio/esp32c6/prog/sampler.c`, see the station's `NOTES.md`, "The dump engine", and its open
+- The sampler, `user/radio/esp32c6/prog/sampler.c`, see `user/radio/esp32c6/hw/dump.md` and its open
   questions there: what wakes the engine's sources 3, 4, 6 to 9 and 11 to 14, which never finished on a listening channel;
   what lanes other than 0 to 3 and 14 to 17 carry;
   the BLE side's captures, `prog/i154listen.c`'s, after which an energy detection now and then never ends, see `i154.c`;

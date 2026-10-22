@@ -3,7 +3,7 @@
  * reception told, and the energy on the channel sampled all the while; see i154.c.
  * With dump=, a capture a second through the modem's dump engine besides, as dump.h's keys ask:
  * dumpbt=1, dumplane=14 and dumpsource=0 take the BLE baseband's side, which hears what the 802.15.4 receiver does;
- * the station's NOTES.md, "The dump engine", says what it found.
+ * hw/dump.md says what it found.
  * It sends nothing, not even an acknowledgement.
  */
 
