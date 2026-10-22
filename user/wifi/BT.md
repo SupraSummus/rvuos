@@ -13,7 +13,16 @@ Without `WIFI_BT` the Wi-Fi system is as it would be without this file, and noth
 and its blob, `build/cyw43/blob-bt.bin`, carries the core's patch after the NVRAM:
 `tools/cyw43-blob.py --bt` fetches it beside the firmware, from the same commit of embassy, and the header says where it lies.
 `bt.c` brings the core up with our code on it, checks that the code answers and what the core's timer and a write into the modem cost,
-and runs the LE transmitter test, 37 bytes of PRBS9, on one channel for about a second.
+and runs the LE transmitter test, 37 bytes of PRBS9, on one channel, twice:
+a fifth of a second for the self-check, which needs our code's point to come round,
+and, two seconds after it, `BT_SETTLE`, about a second for the observer.
+For its first second or so after the core comes up, the firmware passes the point for every packet it sends,
+and our code there makes each packet late, so that the observer hears none of them, or only some;
+after that it passes the point once, as it sets the modem up, and the observer hears all but a few in a thousand.
+Why it settles so is not known.
+While a millisecond's sleep took nearer two, the test began after that second;
+once the scheduler without a tick gave the host its millisecond, it began inside it, and the observer heard nothing.
+A poke made once, at the settled test's one pass, moves the carrier as one made on every pass did.
 
 The configuration, the file `WIFI_CONFIG` names, may carry:
 
@@ -57,7 +66,8 @@ One word differs, the access address the firmware itself programs into the modem
   so the assembler encodes the call as an address, where a bare number would become a branch by that offset.
 - The point is reached as the firmware programs the modem for a transmission:
   our code runs hundreds of times in a burst as the transmitter test starts,
-  and not while the controller idles, nor while the test sends.
+  and not while the controller idles;
+  once the firmware has settled, see above, not while the test sends either.
 - Our code leaves the core's registers as it found them, since the code it returns into is the firmware's, mid-flow.
 - Some of what the firmware programs the modem with it reads out of RAM as the test starts, the access address at `0x20315c` among them,
   so a word the host writes there before the test the firmware itself writes into the modem, last;
@@ -77,10 +87,11 @@ The host fills it and our code on the core serves it.
 - Our code serves a command only when `magic` is `MB_ARMED`, and clears it and `cmd` when done,
   so the rubbish a boot leaves in RAM is never acted on.
   `runs` counts every call of the point, whether or not a command waits.
-- Since the point runs only as the modem is set up, the host arms its calls right after the test starts.
+- Since the settled point runs only as the modem is set up, the host arms its calls right after the test starts.
 - The poke is the one thing our code does on every call:
   it writes the value into the register the mailbox names, right after the point's own write, so ours is the last one in.
-  The firmware writes the modem's words itself on each call, so a one-time write of them is overwritten and says nothing.
+  The firmware writes the modem's words itself as it reaches the point,
+  so a write of them the host made before is overwritten and says nothing.
   The register is the switch, zero, as the mailbox comes up, meaning no poke.
 - The timer is the firmware's own: its microsecond delay, `fn 0x7130`, spins on a free-running counter at `0x0032a004`,
   which counts down, and reading it is passive.
@@ -135,7 +146,7 @@ Dug out of the ROM and a dump of the core's memory off the board, with a disasse
   leaves channel 19 the part before the write (784 of the test's 3189 packets) and gives channel 18 the rest (1909),
   where without the write channel 18 hears nothing.
   Writing `0xa6` back returns the carrier to channel 19.
-  Our own code cannot make such a write while the test sends, since its point is reached only as the modem is set up.
+  Our own code cannot make such a write while the settled test sends, since its point is then reached only as the modem is set up.
 - The word is whole megahertz, and every writer of it writes whole megahertz;
   no finer word for the carrier was found in the image.
 - The test's setup also writes `0x318b6c`, `0x01002340`, a configuration of the modem's path and mode
@@ -160,6 +171,7 @@ Dug out of the ROM and a dump of the core's memory off the board, with a disasse
   and the newest such patch found, `CYW4343A2_001.003.016.0065`, also a Raspberry Pi build, against `001.003.016.0031` here,
   loads and reports the same LE feature mask, its 2M bit clear.
   That is a hint, not a proof about the silicon: a 2 Msym/s mode would be a clock, not a table, and our own code runs on the core.
+- Why the firmware, for its first second or so, passes the point for every packet, and then settles.
 - Whether the carrier can be set finer than a megahertz, and how fast a write of it settles;
   the observer counts whole packets, so "at once" above means within a packet's time, not within a chip's.
 - What the firmware keeps in the RAM beside the patch, and so where more of our code could go;

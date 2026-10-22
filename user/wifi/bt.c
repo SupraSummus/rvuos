@@ -47,11 +47,23 @@
 #define BT_FREQ    0x003186a4u /* the carrier: 0x80 | (f - 2402 MHz) */
 #define BT_AA      0x00318b70u /* the transmitter test's access address */
 
+/* How long the observer's test waits for the firmware to settle, in ms; see the test in bt_run. */
+#define BT_SETTLE 2000u
+
 /* A word of the core's memory: its first read lags in the 0x19 window, so prime and take the next. */
 static uint32_t bt_rd(struct bt_io *io, uint32_t addr)
 {
     (void)cyw43_bp_read32(io->chip, BT_BASE + addr);
     return cyw43_bp_read32(io->chip, BT_BASE + addr);
+}
+
+/* Waits ms milliseconds a millisecond at a time, answering the root task's check on each. */
+static void bt_turns(struct bt_io *io, uint32_t ms)
+{
+    for (uint32_t t = 0; t < ms; t++) { /* bounded: by ms, which the callers fix */
+        io->answer(io->answer_context);
+        io->chip->sleep(io->chip, 1000);
+    }
 }
 
 /* Asks the code on the core to run cmd with its two arguments; 0 and the result, or -1 if it never ran. */
@@ -338,19 +350,30 @@ int bt_run(struct bt_io *io)
      * or sends, so the mailbox is served right after the test starts. An observer on that channel, a BLE adapter in
      * its receiver test, hears the test with the firmware's access address and nothing with another.
      */
+    /*
+     * The test runs twice.
+     * For its first second or so after the core comes up, the firmware passes the point for every packet it sends,
+     * and our code there makes each packet late:
+     * the observer hears none of them, or only some.
+     * It hears all of them once the firmware has settled into passing the point once, as it sets the modem up,
+     * and leaving the packets to the hardware.
+     * Why it settles so is not known;
+     * how long it takes was measured, between 1 and 1.5 s after LE Read Local Supported Features's answer.
+     * So the first run is the self-check's, which needs the point to come round,
+     * and the second, BT_SETTLE ms later, the observer's.
+     */
     const uint8_t dtm[3] = { (uint8_t)io->channel, 0x25u, 0x00u };
-    say(io->out, "bt: transmitter test on channel %u\n", io->channel);
+    say(io->out, "bt: transmitter test on channel %u, for our code\n", io->channel);
     bt_cmd(io, &b, 0x201eu, dtm, 3);
-    for (uint32_t t = 0; t < 200u; t++) { /* bounded: 200, just enough for the point to come round */
-        io->answer(io->answer_context);
-        io->chip->sleep(io->chip, 1000);
-    }
+    bt_turns(io, 200); /* just enough for the point to come round */
     bt_selfcheck(io);
-    for (uint32_t t = 0; t < 700u; t++) { /* bounded: 700, the rest of the transmission for the observer */
-        io->answer(io->answer_context);
-        io->chip->sleep(io->chip, 1000);
-    }
     bt_cmd(io, &b, 0x201fu, 0, 0); /* LE Test End */
+    bt_events(io, &b, 200);
+    bt_turns(io, BT_SETTLE);
+    say(io->out, "bt: transmitter test on channel %u, for the observer\n", io->channel);
+    bt_cmd(io, &b, 0x201eu, dtm, 3);
+    bt_turns(io, 900);
+    bt_cmd(io, &b, 0x201fu, 0, 0);
     bt_events(io, &b, 200);
     say(io->out, "bt: test over, runs %x\n", bt_rd(io, BT_MBOX + MB_RUNS));
     return 0;
