@@ -17,6 +17,10 @@ The halt ends with "rvuos: halted with code <n>",
 and this exits with that code, as QEMU exits with the kernel's.
 Closing the halt's port then reboots the chip into BOOTSEL for the next image.
 
+With --stdin, what comes on this program's input goes to the console's port as it comes,
+for a root task that reads its console, such as the Wi-Fi system's bridge, user/wifi/bridge.h;
+a program on the host can so drive the board through this one's input and output.
+
 Data beside the image, such as the Wi-Fi system's firmware blob, goes with --ram address:file,
 into SRAM alone and never into flash, checked as the segments are;
 --text address:file writes a text, such as a configuration, with a NUL after it,
@@ -288,6 +292,8 @@ def main():
                         help="also write a file's bytes into SRAM at an address")
     parser.add_argument("--text", action="append", default=[], metavar="ADDRESS:FILE",
                         help="also write a text file into SRAM at an address, a NUL after it")
+    parser.add_argument("--stdin", action="store_true",
+                        help="send what comes on the input to the console's port")
     parser.add_argument("image")
     args = parser.parse_args()
 
@@ -299,13 +305,20 @@ def main():
         return 1e9 if deadline is None else deadline - time.monotonic()
 
     found = wait_for(any_port, left())
-    pending = b""
+    pending, forward = b"", args.stdin
     while found is not None:
         port, is_halt = found
         fd = open_port(port)
         while deadline is None or time.monotonic() < deadline:
-            ready, _, _ = select.select([fd], [], [], 0.05)
-            if not ready:
+            watched = [fd] + ([sys.stdin] if forward and not is_halt else [])
+            ready, _, _ = select.select(watched, [], [], 0.05)
+            if sys.stdin in ready:
+                typed = os.read(sys.stdin.fileno(), 4096)
+                if typed:
+                    os.write(fd, typed)
+                else:
+                    forward = False
+            if fd not in ready:
                 continue
             try:
                 chunk = os.read(fd, 4096)

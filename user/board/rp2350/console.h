@@ -13,6 +13,9 @@
  * The logger, from console_start, waits on the line, and serves it while it has nothing to send too,
  * CONSOLE_SERVE, see user/init/logger.c.
  * Each board's console.h offers the same functions, for user/init/ and user/fuzzdrv.c.
+ * What the host sends a program that listens, from console_listen, reads with console_get, a packet at a time:
+ * the endpoint takes the host's next packet only once the last is read, so the host waits, never loses a byte.
+ * Without a listener the console drops what the host sends, since a host kept waiting cannot close.
  *
  * Nothing raises the spare line, SPAREIRQ_IRQ_1, which only software can force.
  * On the Cortex-M33 SIO's doorbell line, 26, is the kernel's once it runs on both cores;
@@ -189,6 +192,11 @@ static struct {
     uint32_t ep1_pid;
     bool ep1_busy;
     uint32_t ep1_out_pid;
+    bool listening;       /* a program reads what the host sends: an OUT packet is kept until read */
+    bool in_held;         /* the endpoint holds a packet the program has not read all of */
+    uint8_t in[USB_PACKET];
+    uint32_t in_len;
+    uint32_t in_at;
     uint8_t line_coding[7];
     uint8_t reply[2];
     uint8_t packet[USB_PACKET];
@@ -236,12 +244,32 @@ static inline void usb_ep0_receive(void)
     console_usb.ep0_pid ^= 1;
 }
 
-/* Take whatever the host writes, and drop it: nothing here reads, but a host kept waiting cannot close. */
+/* Ready the OUT endpoint for the host's next packet. */
 static inline void usb_ep1_receive(void)
 {
     usb_buf_ctrl_write(USB_BUF_CTRL_OUT(1),
                        USB_PACKET | (console_usb.ep1_out_pid ? USB_BUF_DATA1 : 0) | USB_BUF_AVAIL);
     console_usb.ep1_out_pid ^= 1;
+}
+
+/*
+ * A packet from the host: kept for console_get if a program listens, and the endpoint left unready until it is read;
+ * dropped otherwise, the endpoint readied at once.
+ */
+static inline void usb_ep1_take(void)
+{
+    if (!console_usb.listening) {
+        usb_ep1_receive();
+        return;
+    }
+    uint32_t len = *usb_word(USB_BUF_CTRL_OUT(1)) & 0x3ffu;
+    len = len < USB_PACKET ? len : USB_PACKET;
+    for (uint32_t i = 0; i < len; i++) {
+        console_usb.in[i] = *usb_byte(USB_EP1_OUT_BUF + i);
+    }
+    console_usb.in_len = len;
+    console_usb.in_at = 0;
+    console_usb.in_held = true;
 }
 
 static inline void usb_reply(const uint8_t *data, uint32_t len, uint32_t asked)
@@ -338,6 +366,7 @@ static inline void usb_setup(void)
         console_usb.ep1_pid = 0;
         console_usb.ep1_busy = false;
         console_usb.ep1_out_pid = 0;
+        console_usb.in_held = false;
         if (console_usb.configured) {
             usb_ep1_receive();
         }
@@ -406,6 +435,7 @@ static inline void usb_bus_reset(void)
     console_usb.stage = USB_EP0_IDLE;
     console_usb.ep1_busy = false;
     console_usb.ep1_pid = 0;
+    console_usb.in_held = false;
 }
 
 /*
@@ -443,7 +473,7 @@ static inline void usb_poll(void)
             console_usb.ep1_busy = false;
         }
         if ((done & USB_BUFF_EP1_OUT) && console_usb.configured) {
-            usb_ep1_receive();
+            usb_ep1_take();
         }
     }
     if (status & USB_SIE_SETUP_REC) {
@@ -618,6 +648,31 @@ static inline void console_drain(void (*wait)(void))
         usb_send();
     }
     usb_wait_line(usb_taken, wait);
+}
+
+/* From here what the host sends is kept for console_get, rather than dropped. */
+static inline void console_listen(void)
+{
+    console_usb.listening = true;
+}
+
+/* The next byte the host sent, into c: whether one was there; the endpoint takes the next packet once one is read. */
+static inline bool console_get(char *c)
+{
+    if (!console_usb.in_held) {
+        return false;
+    }
+    if (console_usb.in_at == console_usb.in_len) {
+        console_usb.in_held = false;
+        usb_ep1_receive();
+        return false;
+    }
+    *c = (char)console_usb.in[console_usb.in_at++];
+    if (console_usb.in_at == console_usb.in_len) {
+        console_usb.in_held = false;
+        usb_ep1_receive();
+    }
+    return true;
 }
 
 #endif
