@@ -2,11 +2,13 @@
  * The ring: the dump engine writing round a ring of the bank's words, see dump.h, stopped on an event,
  * so that it holds what the receiver heard before it, where a capture holds only what came after its start.
  * The MAC and the PHY come up as the sampler's do, on a Wi-Fi channel, channel=, 1 by default, every frame passed on;
- * each second the ring starts and stops as the MAC ends a frame, its RX_LAST moving, mac_rx_last,
- * or, with after= in microseconds, that long after it started, and its newest words are told as dump.h's keys ask.
- * By default 4096 words of source 15 at 80 MHz.
- * Each stop tells how long the program polled, the most words the engine wrote between two polls,
- * and how often its thread ran out of its time meanwhile, OP_THREAD_OVERRUNS: a thread away from the core stops late.
+ * each second the ring starts from source 2, which the engine stops of itself as the AGC lets a packet go, see hw/dump.md,
+ * and is kept if the Wi-Fi MAC took a frame, its RX_LAST moving, mac_rx_last, and started over if not;
+ * or, with after= in microseconds, from source 15, which the program stops that long after it started.
+ * Its newest words are told as dump.h's keys ask, by default 4096 at 80 MHz.
+ * Each ring tells how long the program waited, how many packets it let go that the MAC did not take,
+ * how many polls before it saw the stop RX_LAST moved,
+ * and how often its thread ran out of its time meanwhile, OP_THREAD_OVERRUNS, a thread away from the core missing frames.
  * The ring sends nothing: no frame, no tone.
  *
  * Run it with make BOARD=esp32c6 radio PROG=ring RADIO_CONFIG=file, see build.mk,
@@ -45,32 +47,44 @@ static int heard(const struct mac_frame *m)
     return 0;
 }
 
-/* One ring, from its start to a frame's end or after_us; the words the engine writes between two polls time them. */
+/*
+ * One ring, from its start to a frame the MAC took, or after_us;
+ * RX_LAST is read at every poll, so that a kept ring tells how many polls before its stop was seen the MAC named the frame.
+ */
 static void ring(struct drv *d, const struct dump_conf *conf, uint32_t after_us)
 {
-    uint32_t rx_last = mac_rx_last(), overruns[2] = { 0, 0 }, longest = 0, gap = 0, stopped = 0;
+    uint32_t overruns[2] = { 0, 0 }, restarts = 0, kept = 0, moved = 0, restarted = 0, polls = 1;
     dump_ring_start(conf);
+    uint32_t rx_last = mac_rx_last();
     uint64_t start = osi_now_us(), now = start;
     (void)rv_thread_overruns(d->own_thread, &overruns[0]);
-    uint32_t index = dump_ring_index();
-    for (uint32_t polls = 1; now - start < RING_WAIT_US; polls++) { /* bounded by RING_WAIT_US */
-        uint32_t i = dump_ring_index();
-        gap = (i - index) % DUMP_RING; /* modulo a round, as bit 14 stays set */
-        longest = gap > longest ? gap : longest;
-        index = i;
+    for (; now - start < RING_WAIT_US; polls++) { /* bounded by RING_WAIT_US */
         if (polls % CLOCK_POLLS == 0 || after_us) {
             now = osi_now_us();
         }
-        if (after_us ? now - start >= after_us : mac_rx_last() != rx_last) {
-            stopped = 1;
+        uint32_t last = mac_rx_last();
+        if (last != rx_last) {
+            rx_last = last;
+            moved = polls;
+        }
+        if (after_us ? now - start < after_us : !dump_ring_stopped()) {
+            continue;
+        }
+        if (after_us || moved > restarted) {
+            kept = 1;
             break;
         }
+        restarts++;
+        dump_ring_restart(conf);
+        restarted = polls;
+        rx_last = mac_rx_last();
     }
     (void)rv_thread_overruns(d->own_thread, &overruns[1]);
     uint32_t took = (uint32_t)(osi_now_us() - start);
     dump_ring_stop(conf);
-    drv_say("ring: %s in %u us; between polls at most %u words, the last %u; the thread ran out of its time %u times\n",
-            stopped ? "stopped" : "gave up", took, longest, gap, overruns[1] - overruns[0]);
+    drv_say("ring: %s in %u us, %u polls, %u packets let go; RX_LAST moved %u polls before the stop was seen; "
+            "the thread ran out of its time %u times\n", kept ? "stopped" : "gave up", took, polls, restarts,
+            kept && !after_us ? polls - moved : 0, overruns[1] - overruns[0]);
 }
 
 void drv_run(struct drv *d, struct self *own)
@@ -83,6 +97,7 @@ void drv_run(struct drv *d, struct self *own)
     }
     uint32_t channel = config_number(d->conf, d->conf_len, "channel", 1);
     uint32_t after_us = config_number(d->conf, d->conf_len, "after", 0);
+    conf.source = config_number(d->conf, d->conf_len, "dumpsource", after_us ? 15 : 2) & 15u;
     drv_must("a channel of 1 to 13", channel >= 1 && channel <= 13 ? ESP_OK : ESP_FAIL);
     drv_must("no dumpbt=, the BLE side being i154listen's", conf.bt == 0 ? ESP_OK : ESP_FAIL);
     mac_up(d->mac);

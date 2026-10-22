@@ -21,8 +21,14 @@ and `tools/dump-spectrum.py` must find them in the captures of their seconds, at
 and in none before them.
 
 A change to the ring's functions in `dump.c` or to `prog/ring.c` runs the ring with `channel=1`, `dumprate=3` and `dumphex=8192`:
-each ring must stop on a frame, and the frames' ends must stand in its words, the AGC's gain going back to 78
-a few tens of microseconds before the stop, as `hw/dump.md`, "The ring", says.
+most rings must stop on a frame, `RX_LAST` moving at the poll the stop was seen,
+and `tools/dump-spectrum.py LOG 16e6 --tail 10` must show the frame's end in its words,
+the power falling six microseconds before the ring's newest word and the gain going to 60 half a microsecond before it,
+as `hw/dump.md`, "The ring", says.
+
+A change to `prog/etm.c`, or to `dump_arm` and `dump_disarm`, runs the survey with `channel=1` and `rounds=4`,
+which must find what `hw/dump.md`, "What stops the engine", says: task 21 starting source 8 alone, timer0's event alone
+stopping the ring, and sources 0, 1, 2 and 10 stopping it by themselves.
 
 ### The 802.15.4 programs
 

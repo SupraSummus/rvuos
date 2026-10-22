@@ -49,12 +49,23 @@ void dump_take(struct dump_conf *c);
 /*
  * The engine writing round a ring of DUMP_RING words from the bank's first, as ESP-SDR found it does,
  * from dumpsource= at dumprate=, from dump_ring_start until dump_ring_stop, the bank the engine's meanwhile.
- * dump_ring_index reads the word it writes next, and bit 14 once the ring has come round;
+ * dump_ring_index reads the word it writes next, and bit 14 once the ring has come round.
+ * A source a capture waits on to start stops the ring instead, on the same event, see hw/dump.md;
+ * dump_ring_stopped says whether it has, and dump_ring_restart starts the ring over, its words marked again.
  * dump_ring_stop tells the ring's newest dumphex= words, the oldest first, as dump_take tells a capture.
  */
 #define DUMP_RING 16384u
 void dump_ring_start(const struct dump_conf *c);
 uint32_t dump_ring_index(void);
+int dump_ring_stopped(void);
+void dump_ring_restart(const struct dump_conf *c);
 void dump_ring_stop(const struct dump_conf *c);
+
+/*
+ * A capture armed as dump_take's, triggered only if trigger, and stopped, the bank the CPU's again:
+ * how many words the engine wrote, of what started it.
+ */
+void dump_arm(const struct dump_conf *c, int trigger);
+uint32_t dump_disarm(const struct dump_conf *c);
 
 #endif

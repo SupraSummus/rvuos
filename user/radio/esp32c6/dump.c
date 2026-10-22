@@ -252,6 +252,18 @@ uint32_t dump_ring_index(void)
     return REG(DUMP_MODE) & MODE_INDEX;
 }
 
+int dump_ring_stopped(void)
+{
+    return (REG(DUMP_CTRL) & CTRL_DONE) != 0;
+}
+
+void dump_ring_restart(const struct dump_conf *c)
+{
+    REG(DUMP_CTRL) = 0;
+    bank_to_cpu(ring_usage);
+    dump_ring_start(c);
+}
+
 void dump_ring_stop(const struct dump_conf *c)
 {
     /* The index reads 0 once the engine stops, so it is read before. */
@@ -270,4 +282,27 @@ void dump_ring_stop(const struct dump_conf *c)
         bank[DUMP_RING + k] = bank[(last + DUMP_RING - told + k) % DUMP_RING];
     }
     tell(c, DUMP_RING, told);
+}
+
+static uint32_t armed_usage; /* SRAM_USAGE before dump_arm, which dump_disarm puts back */
+
+void dump_arm(const struct dump_conf *c, int trigger)
+{
+    setup(c, c->source, c->samples);
+    armed_usage = bank_to_engine();
+    uint32_t ctrl = c->samples | c->rate << CTRL_RATE_SHIFT;
+    REG(DUMP_CTRL) = ctrl | CTRL_DONE;
+    REG(DUMP_CTRL) = ctrl | CTRL_ENABLE | (trigger ? CTRL_TRIGGER : 0);
+    REG(DUMP_CTRL) = ctrl | CTRL_ENABLE;
+}
+
+uint32_t dump_disarm(const struct dump_conf *c)
+{
+    REG(DUMP_CTRL) = 0;
+    bank_to_cpu(armed_usage);
+    uint32_t written = 0;
+    for (uint32_t k = 0; k < c->samples; k++) {
+        written += bank[k] != MARK;
+    }
+    return written;
 }

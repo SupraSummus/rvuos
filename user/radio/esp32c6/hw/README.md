@@ -47,7 +47,7 @@ What it read, measured on one board in runs on channels 1 and 6 and on 8 and 13:
 | 0x600A7000 | agc, bbtx, nrx, of 1 KiB each | 0x73FC, 0x77FC, 0x7BFC: 0x02206241, 0x02206201, 0x02207080 | | `libphy` |
 | 0x600A7C00 | bb | none found | | `libphy` |
 | 0x600A8000 | brx | 0x8384, 0x02003181 | | `libphy` |
-| 0x600A8800 | the modem's ETM | 0x88A0, 0x20220524 | 0x100, to 0x600A9000 | ESP-IDF's `ieee802154_reg.h` |
+| 0x600A8800 | the modem's ETM | 0x88A0, 0x20220524 | 0x100, to 0x600A9000 | ESP-IDF's `ieee802154_reg.h`, `dump.md` |
 | 0x600A9000 | the dump engine | 0x9020, 0x02202221 | 0x40, to 0x600A9400 | `dump.md` |
 | 0x600A9400 | not known: one word, 0x000F83FC, at its start | 0x94CC, 0x02206100 | 0x100, to 0x600A9800 | |
 | 0x600A9800 | MODEM_SYSCON | 0x9824, 0x02206300 | 0x40, to 0x600A9C00 | ESP-IDF's `modem_syscon_reg.h` |

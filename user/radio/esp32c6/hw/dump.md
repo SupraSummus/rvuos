@@ -111,26 +111,59 @@ the last of its sixteen words, which repeat every 64 bytes from `0x600A9000` to 
 ## The ring
 
 `0x600A9004` with bit 17 set as well, and 16384 in the samples' field, has the engine write round and round
-the bank's first 16384 words, 64 KiB, until the word is cleared, as ESP-SDR found;
-`dump_ring_start` and `dump_ring_stop` in `dump.c` drive it, and `prog/ring.c` stops it as the Wi-Fi MAC ends a frame, its `RX_LAST` moving.
+the bank's first 16384 words, 64 KiB, as ESP-SDR found, until the word is cleared or the source's event comes;
+`dump_ring_start` and `dump_ring_stop` in `dump.c` drive it,
+and `prog/ring.c` keeps a ring that its source stopped on a frame the Wi-Fi MAC took.
 Measured with `prog/ring.c` on channel 1:
 
-- The engine wrote all 16384 words and none past them, the rest of the bank marked; it does not stop by itself.
+- From source 15 the engine wrote all 16384 words and none past them, the rest of the bank marked; it does not stop by itself.
 - `0x600A9008` read while it runs holds the word written next in bits 0 to 13: at 16 MS/s it moved 1603 in 100 us
   and read 1789 at a stop with 1790 written. Its bit 14 is set once the ring has come round, at every stop after that,
   and stays set. It reads 0 once the engine stops, so the ring's newest word is the one before the index read last;
   its bits 15 and 16 are the source's.
-- At 16 MS/s, a ring of 1 ms, stopped as the MAC ends a frame, the program polling every 0.4 us:
-  the AGC let the gain go, to 60 and then to 78, 36.1 to 36.5 us before the stop in 41 of 48 rings, and at most 42.4,
-  so the MAC names a frame about 36 us after the AGC lets go.
-- A thread that polls may lose the core. In two runs it ran out of its time about once every 0.8 ms of polling,
-  `OP_THREAD_OVERRUNS` read around it, and was away for up to 0.7 ms, as the ring's index read at every poll shows,
-  and stops came up to 213 us after the frame's end; in two runs an hour later, the same build in one of them,
-  it ran out once a ring and was away at most 29 us. What wanted the core in the first is not known.
+- From source 2 the engine stops by itself as the AGC lets a packet go, see "What stops the engine" below,
+  and the Wi-Fi MAC's `RX_LAST` moves with it: in 24 rings that stopped on a frame the MAC took,
+  the program, reading both at every poll, saw `RX_LAST` move at the very poll it saw the stop.
+  In 23 of them the power fell between the seventh and the sixth microsecond before the ring's newest word,
+  by 20 dB and more, or by 6 to 9 dB in three that lay in a stronger signal,
+  and the gain went from about 40 to 60 half a microsecond before it;
+  in the other, a frame of 33 us, the power fell 4 us before.
+  So the ring holds the frame up to its end, whatever the program's thread did meanwhile.
+  Six microseconds are 802.11's signal extension after an OFDM frame on 2.4 GHz; whether that is why is not known.
+  The 36 us an earlier program measured between the AGC letting go and its own stop, as it saw `RX_LAST` move,
+  were then its own, between seeing the move and clearing the word.
+- Between the frames, source 2 stops the ring on packets the MAC does not take, which the program lets go,
+  starting the ring over, `dump_ring_restart`; with no frame within 100 ms it gives up, as in 5 of 29 seconds on channel 1.
+
+## What stops the engine
+
+A source a capture waits on to start stops the ring instead, on the same event.
+`prog/etm.c`, `survey=3` and `rounds=4`, on channel 1: the ring from sources 0, 1, 2 and 10 stopped by itself within 100 ms
+in each of four tries, from 5 in three, and from 3, 4, 6, 7, 9 and 11 to 15 in none.
+
+Source 8 waits for the modem's ETM, at `0x600A8800`, which ESP-IDF's `ieee802154_reg.h` names
+for the 802.15.4 MAC's timed sending and receiving.
+A channel takes an event's id in its first word, from `0x600A8818`, and a task's in its second, eight bytes a channel;
+`0x600A8804`'s bit n enables channel n and `0x600A8808`'s disables it, and an id keeps 7 bits of what is written.
+ESP-IDF names events 58 and 59, the 802.15.4 MAC's timer1 and timer0 reaching their thresholds,
+and tasks 64, 65 and 68, its sending on energy detection, its receiving and its sending.
+Measured with `prog/etm.c`, the 802.15.4 MAC's clocks on beside Wi-Fi's receiver on channel 1:
+
+- `survey=1`, `rounds=4`, timer0's event routed to each task in turn: task 21 started a capture armed from source 8 in each round,
+  and no other task of 1 to 127 started any source that never finished by itself, 64 and 68 left out;
+  source 15, triggered by bit 19, the control, wrote in every probe.
+- `survey=2`: task 21 stops the ring from source 8 as its event comes, and of the events 0 to 127 only timer0's did,
+  50 ms in, as timer0 fired, with 427 frames going by in the 128 events' windows.
+- `i154=1`, `first=0` and `first=64`, the 802.15.4 listener on channel 12 with the nRF52840 sending there through half the run:
+  only event 63 stopped the ring, in both seconds it was routed, with the nRF52840's frames and without,
+  of which the listener heard about 2700 a run; what event 63 is is not known.
+
+So no frame of either MAC reaches the ETM as an event:
+the ETM can start or stop the engine at a microsecond the 802.15.4 MAC's timer0 sets, and at a packet only the AGC's own sources can.
 
 Open questions of the sampler, beside `TODO.md`'s:
 
-- What source 5 waits for, and whether 1, 2 and 10 start on the AGC's steps as their few captures suggest.
+- What sources 1, 5 and 10 wait for, and source 0 beyond the AGC's first step; what the ETM's event 63 is.
 - The BLE side's rate: its captures take as long as Wi-Fi's at the full clock, yet hold a band of 5 MHz;
   whether its words are the BLE receiver's own samples held or made again at 80 MHz is not known,
   nor whether `0x600A210C`'s fields other than bit 7 matter.

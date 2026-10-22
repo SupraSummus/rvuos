@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """What the ESP32-C6's sampler captured, from a run's log: user/radio/esp32c6/prog/sampler.c and dump.h, dumphex=.
 
-Usage: tools/dump-spectrum.py LOG RATE_HZ [NFFT] [--scan [MHZ]]
+Usage: tools/dump-spectrum.py LOG RATE_HZ [NFFT] [--scan [MHZ]] [--tail [US]]
 
 For each capture the log holds whole, its lines following on from word 0, its time in the run, its spread and its offset,
 the gain codes and the AGC's bits it holds, its spectrum from -RATE/2 to +RATE/2 in sixteen bands,
 each band's strongest bin in dB over the median, the three strongest bins,
 and its power in sixteen stretches of time, in dB.
+With --tail, also its last US microseconds, 10 by default, a microsecond at a time, and the gain's and the AGC's steps there:
+the end of a ring of user/radio/esp32c6/prog/ring.c, which its source's event stopped.
 The in-phase sample is bits 10 to 19 and the quadrature bits 0 to 9, as a signal of known frequency told;
 see user/radio/esp32c6/hw/dump.md. RATE_HZ is the engine's clock divided: 80e6, 40e6, 26.67e6 or 16e6;
 below 80e6 a capture holds what lies past half the rate folded in, as dump.md says.
@@ -113,7 +115,19 @@ def captures_of(log, nfft):
             yield c, words, times[c], steps.get(c)
 
 
-def one_by_one(log, rate, nfft):
+def tail_of(words, z, rate, us):
+    per = int(rate / 1e6)
+    n = len(z)
+    if n < us * per:
+        return
+    power = " ".join(f"{db(sum(abs(v) ** 2 for v in z[i:i + per]) / per):3.0f}" for i in range(n - us * per, n, per))
+    steps = " ".join(f"{(i - n) / per:.1f} us {(words[i] >> 20) & 0xFF}/{words[i] >> 28:x}"
+                     for i in range(n - us * per, n) if words[i] >> 20 != words[i - 1] >> 20)
+    print(f"   its last {us} us, dB a microsecond: {power}")
+    print(f"   gain/AGC bits there: {steps or 'no step'}")
+
+
+def one_by_one(log, rate, nfft, tail):
     for c, words, t, _ in captures_of(log, nfft):
         z, mi, mq = samples(words)
         level = spectrum(z, nfft)
@@ -134,6 +148,8 @@ def one_by_one(log, rate, nfft):
         print(f"   spectrum, -fs/2 to +fs/2, dB over the median: {bands}")
         print(f"   strongest: {peaks_text}")
         print(f"   power in time, dB: {in_time}")
+        if tail:
+            tail_of(words, z, rate, tail)
 
 
 def scan(log, rate, nfft, at_mhz):
@@ -197,7 +213,12 @@ def scan(log, rate, nfft, at_mhz):
 
 
 def main():
-    args = [a for a in sys.argv[1:] if a != "--scan"]
+    argv, tail = sys.argv[1:], None
+    if "--tail" in argv:
+        at = argv.index("--tail")
+        tail = int(argv.pop(at + 1)) if at + 1 < len(argv) and argv[at + 1].isdigit() else 10
+        argv.pop(at)
+    args = [a for a in argv if a != "--scan"]
     if len(args) < 2:
         sys.exit(__doc__)
     log, rate = args[0], float(args[1])
@@ -207,7 +228,7 @@ def main():
     if "--scan" in sys.argv:
         scan(log, rate, nfft, float(args[3]) if len(args) > 3 else None)
     else:
-        one_by_one(log, rate, nfft)
+        one_by_one(log, rate, nfft, tail)
 
 
 if __name__ == "__main__":
