@@ -65,7 +65,16 @@ SELFCHECK_VARIANT := $(if $(filter-out $(SELFCHECK_DEFAULT),$(SELFCHECK)),$(if $
 # Asked for with WIFI_BT=1, and built in a directory of its own, as a budget does, since no object depends on the flag.
 WIFI_BT ?=
 WIFI_BT_VARIANT := $(if $(filter-out 0,$(WIFI_BT)),-bt)
-VARIANT := $(PMP_VARIANT)$(if $(filter-out 1,$(CORES)),-smp$(CORES))$(SELFCHECK_VARIANT)$(WIFI_BT_VARIANT)
+# The Wi-Fi system's bridge to the chip's backplane, mode=bridge, with the console it reads the host's lines from;
+# see user/wifi/bridge.h. Asked for with WIFI_BRIDGE=1, a directory of its own too, and never with WIFI_BT.
+WIFI_BRIDGE ?=
+WIFI_BRIDGE_VARIANT := $(if $(filter-out 0,$(WIFI_BRIDGE)),-bridge)
+ifneq ($(WIFI_BT_VARIANT),)
+ifneq ($(WIFI_BRIDGE_VARIANT),)
+$(error WIFI_BT=1 and WIFI_BRIDGE=1 together: the image has room for one of the two)
+endif
+endif
+VARIANT := $(PMP_VARIANT)$(if $(filter-out 1,$(CORES)),-smp$(CORES))$(SELFCHECK_VARIANT)$(WIFI_BT_VARIANT)$(WIFI_BRIDGE_VARIANT)
 
 # The board's architecture, which only RP2350 lets the command line change;
 # the other one builds in a directory of its own, as a budget does.
@@ -74,6 +83,11 @@ ARCH := $(BOARD_ARCH_DEFAULT)
 ifneq ($(ARCH),$(BOARD_ARCH_DEFAULT))
 ifneq ($(BOARD)$(ARCH),rp2350arm)
 $(error BOARD=$(BOARD) has no ARCH=$(ARCH); only rp2350 takes ARCH=arm)
+endif
+endif
+ifneq ($(WIFI_BRIDGE_VARIANT),)
+ifeq ($(ARCH),arm)
+$(error WIFI_BRIDGE=1 with ARCH=arm: the bridge's image, with the console's USB code, does not fit the code region in Thumb; build it for the Hazard3)
 endif
 endif
 BUILD := build/$(BOARD)$(if $(filter-out $(BOARD_ARCH_DEFAULT),$(ARCH)),-$(ARCH))$(VARIANT)
@@ -90,7 +104,7 @@ CFLAGS    := $(ARCHFLAGS) -std=c11 -ffreestanding -fno-builtin -fno-pic -fno-com
              -nostdlib -O2 -g -Wall -Wextra -Werror -Wundef -Wshadow \
              -Wstrict-prototypes -Wmissing-prototypes -Iinclude \
              -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -DCORES=$(CORES) -DSELFCHECK=$(SELFCHECK) \
-             $(if $(filter-out 0,$(WIFI_BT)),-DWIFI_BT=1)
+             $(if $(filter-out 0,$(WIFI_BT)),-DWIFI_BT=1) $(if $(filter-out 0,$(WIFI_BRIDGE)),-DWIFI_BRIDGE=1)
 ASFLAGS   := $(ARCHFLAGS) -g -Iinclude -DCORES=$(CORES) $(if $(filter-out 0,$(WIFI_BT)),-DWIFI_BT=1)
 LDFLAGS   := $(ARCHFLAGS) -nostdlib -static -fuse-ld=lld -Wl,--gc-sections -Wl,--no-dynamic-linker
 

@@ -369,8 +369,12 @@ which the root task carves from the frames it is granted over PIO0 and IO_BANK0,
 and it installs the frames that hold the chip's firmware one at a time in a region the root task left it,
 since there are more of them than regions.
 What the system does, scan, join a network or run an access point, comes from a file the loader places in the root task's input region,
-`make BOARD=rp2350 wifi WIFI_CONFIG=file`, with lines `mode=scan|sta|ap`, `ssid=`, `pass=`, `bssid=`, `channel=` and `run=`;
+`make BOARD=rp2350 wifi WIFI_CONFIG=file`, with lines `mode=scan|sta|ap`, `ssid=`, `pass=`, `bssid=`, `channel=` and `run=`,
 so a passphrase lies in no image and in no file git tracks; `local/`, which git ignores, is the place for one.
+A build of its own, `make BOARD=rp2350 WIFI_BRIDGE=1`, on the Hazard3 alone,
+is a bridge instead, whatever the mode:
+the host reads and writes the chip's backplane through the console, a line at a time,
+which `user/wifi/bridge.h` describes and `tools/cyw43bridge.py` speaks.
 A station joins by WPA3's SAE where the access point offers it and by WPA2's passphrase otherwise,
 and leaves the network once its run is over;
 an access point offers both, and `sae=0` has either keep to WPA2.

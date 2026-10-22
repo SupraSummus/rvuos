@@ -279,6 +279,32 @@ static __attribute__((noreturn)) void fail(struct drv *d, uint32_t step, uint32_
     stop(d, CHILD_FAILED);
 }
 
+#ifdef WIFI_BRIDGE
+/*
+ * For as long as the system runs, with MODE_BRIDGE: the host's asks, as the root task puts them in the page,
+ * each answered in the log; the firmware's events are read and dropped meanwhile, every millisecond.
+ */
+static __attribute__((noreturn)) void bridge(struct drv *d)
+{
+    struct drv_page *p = d->page;
+    struct bridge_state st = { 0, 0 };
+    say(&d->out, "drv: the bridge is open\n");
+    for (;;) {
+        child_answer(&p->c);
+        if (p->asked != p->done) {
+            bridge_serve(&d->chip, &p->ask, &st, &d->out);
+            p->done = p->asked;
+            continue;
+        }
+        if (wlan_poll(&d->wlan) == 0) {
+            uint32_t bits = 0;
+            rv_timer_set(CHILD_TIMER, CHILD_BIT_TIMER, 1000);
+            rv_wait(CHILD_INBOX, &bits);
+        }
+    }
+}
+#endif
+
 /* Reads what the firmware sends until *done is set, or ms milliseconds have passed. */
 static void wait_for(struct drv *d, const int *done, uint32_t ms)
 {
@@ -403,6 +429,10 @@ __attribute__((noreturn)) void driver_main(struct child_page *page)
         }
         report(d, DRV_AP);
         serve(d);
+#ifdef WIFI_BRIDGE
+    case MODE_BRIDGE:
+        bridge(d);
+#endif
     case MODE_STA:
         join(d);
         report(d, DRV_JOINED);

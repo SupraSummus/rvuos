@@ -29,6 +29,7 @@
 
 #include <stdint.h>
 
+#include "bridge.h"
 #include "lib/bulk.h"
 #include "lib/child.h"
 #include "lib/seqlock.h"
@@ -75,6 +76,7 @@ enum drv_mode {
     MODE_SCAN, /* scan, and stop */
     MODE_STA,  /* join ssid with pass, or open if pass is empty */
     MODE_AP,   /* run an access point named ssid with pass */
+    MODE_BRIDGE, /* serve the host's reads and writes of the chip's backplane, a line at a time, see bridge.h */
 };
 
 /* An access point a scan heard, by its address, as strong as it was heard at best. */
@@ -113,6 +115,9 @@ struct drv_page {
     /* Later, with CHILD_BIT_PARENT: the link, which the driver lends, once the root task connected it, and that the run is over. */
     struct bulk_end link;
     volatile uint32_t leave; /* leave the network, and report DRV_LEFT */
+    /* With MODE_BRIDGE, later: the host's last ask, which the driver answers in the log once asked moves past done. */
+    struct bridge_ask ask;
+    volatile uint32_t asked, done;
 
     /* From the driver. */
     uint8_t mac[6];

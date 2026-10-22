@@ -14,11 +14,16 @@
  * or a scan alone was asked for.
  * Then it halts, which writes out what of the kernel's log no host had;
  * a station that lasted the run leaves the network first.
+ * Built with WIFI_BRIDGE it is the bridge alone, mode=bridge: it builds no network process, but opens the console itself,
+ * carries the kernel's log there, and hands the driver each line the host types, see bridge.h.
  *
  * user/lib/ keeps what it hands out: its slots, regions, bits, units of time, free memory and room for children's data.
  */
 
 #include "conf.h"
+#ifdef WIFI_BRIDGE
+#include "console.h"
+#endif
 #include "gspi.h"
 #include "lib/libc.h"
 #include "lib/log.h"
@@ -72,6 +77,29 @@ static struct system sys = {
 static uint32_t tick_bit, seconds, run_s = RUN_S;
 static int leaving;
 
+#ifdef WIFI_BRIDGE
+/*
+ * With mode=bridge: the console, the kernel's log the root task carries there, and the line the host is typing,
+ * with whether it ran past the line's room.
+ */
+enum { bridging = 1 }; /* the build is the bridge alone */
+static struct kernel_log klog;
+static uint32_t log_bit, console_bit, console_irq;
+static char line[2u * BRIDGE_BYTES + 32u];
+static uint32_t line_len;
+static int line_over;
+
+/*
+ * The watchdog while the console waits for the host to open it, USB_WAIT_FRAMES of a millisecond at most:
+ * the watchdog's longest, so a host that never opens the port may meet the watchdog's halt before the console gives up;
+ * the run ends either way.
+ */
+#define CONSOLE_WAIT_US WATCHDOG_US_MAX
+_Static_assert(USB_WAIT_FRAMES * 1000u <= CONSOLE_WAIT_US, "the console's wait outlasts the watchdog");
+#else
+enum { bridging = 0 }; /* the bridge is built with WIFI_BRIDGE alone */
+#endif
+
 /* The blob's blocks, largest first from its start, and the frames made of them, which taking the blocks back revokes. */
 static struct block blob[BLOB_FRAMES];
 static uint32_t blob_frames;
@@ -111,7 +139,7 @@ static void pads_set(void)
 
 /*
  * What the driver is to do, from the text the loader may have left in the input region:
- * lines of mode=scan|sta|ap, ssid=, pass= and channel=. With none, it scans.
+ * lines of mode=scan|sta|ap|bridge, ssid=, pass= and channel=. With none, it scans.
  * bssid= names which of the network's access points a station joins,
  * sae=0 has a station join by WPA2 where WPA3 is offered, and an access point offer WPA2 alone,
  * and debug=dhcp turns power save off and has the driver tell each DHCP message it hears, whoever it is for.
@@ -132,7 +160,15 @@ static void configure(struct drv_page *s)
         s->mode = MODE_STA;
     } else if (memcmp(value, "ap", 3) == 0) {
         s->mode = MODE_AP;
+    } else if (memcmp(value, "bridge", 7) == 0) {
+#ifndef WIFI_BRIDGE
+        say(&kout, "root: no bridge in a build without WIFI_BRIDGE; it scans\n");
+#endif
     }
+#ifdef WIFI_BRIDGE
+    /* A build with WIFI_BRIDGE is the bridge alone, whatever mode= says, and builds no network process. */
+    s->mode = MODE_BRIDGE;
+#endif
     config_value(conf, size, "ssid", s->ssid, sizeof(s->ssid));
     config_value(conf, size, "pass", s->pass, sizeof(s->pass));
     s->channel = config_number(conf, size, "channel", 1);
@@ -148,7 +184,7 @@ static void configure(struct drv_page *s)
     s->no_sae = config_number(conf, size, "sae", 1) == 0;
     run_s = config_number(conf, size, "run", RUN_S);
     must("uninstall the input", region_free(&self, region));
-    if (s->mode != MODE_SCAN && s->ssid[0] == '\0') {
+    if ((s->mode == MODE_STA || s->mode == MODE_AP) && s->ssid[0] == '\0') {
         say(&kout, "root: the configuration names no ssid; scanning only\n");
         s->mode = MODE_SCAN;
     }
@@ -174,7 +210,7 @@ static void driver_build(uint32_t free_base)
     p->blob_base = free_base;
     p->blob_frames = blob_frames;
     configure(p);
-    static const char *const modes[] = { "scan", "station", "access point" };
+    static const char *const modes[] = { "scan", "station", "access point", "bridge" };
     if (p->mode == MODE_SCAN) {
         say(&kout, "root: mode scan\n");
     } else {
@@ -183,6 +219,7 @@ static void driver_build(uint32_t free_base)
     must("start the driver", child_start(&self, c, driver_main, 0, DRV_UNITS));
 }
 
+#ifndef WIFI_BRIDGE
 /*
  * Once the chip runs: the blob's memory back, which uninstalls it from the driver's window,
  * and the network process, with the link between it and the driver, which the driver hears of as it runs.
@@ -197,6 +234,7 @@ static void net_build(void)
     system_net_build(&sys, &dp->link, dp->mac);
     system_net_start(&sys);
 }
+#endif
 
 static void summary(void)
 {
@@ -212,6 +250,39 @@ static __attribute__((noreturn)) void halt(uint32_t code)
     system_halt(code);
 }
 
+#ifdef WIFI_BRIDGE
+/*
+ * With mode=bridge: the console, which waits for the host to open it, and the kernel's log through it;
+ * the watchdog given the wait's time, which the root task's next check takes back.
+ */
+static void console_open(void)
+{
+    uint32_t base, size, region;
+    must("the console", rv_frame_info(BOOT_CAP_UART, &base, &size));
+    must("install the console", region_install(&self, BOOT_CAP_UART, RIGHT_R | RIGHT_W, &region));
+    must("the console's wait", rv_clock_watchdog(BOOT_CAP_CLOCK, CONSOLE_WAIT_US));
+    console_init(base);
+    console_listen();
+    must("the kernel's log", kernel_log_open(&self, &klog));
+    must("a bit for the log", bit_new(&self, &log_bit));
+    must("arm the log", kernel_log_arm(&klog, log_bit));
+    must("a bit for the console", bit_new(&self, &console_bit));
+    must("a slot", slot_new(&self, &console_irq));
+    must("the console's line", rv_irq_carve(BOOT_CAP_IRQ_LINES, CONSOLE_IRQ, 1, console_irq));
+    must("bind the console's line", rv_irq_bind(console_irq, self.pool, self.inbox, console_irq));
+    console_start();
+    must("arm the console", rv_irq_set(console_irq, console_bit));
+}
+
+/* What the kernel's log holds that the console has not had, out at once. */
+static void log_to_console(void)
+{
+    kernel_log_take(&klog, console_put_polled);
+    console_flush();
+    must("arm the log", kernel_log_arm(&klog, log_bit));
+}
+#endif
+
 /* What the driver's new state says, in the log; 1 if the run is to end. */
 static int driver_state(uint32_t state)
 {
@@ -221,9 +292,17 @@ static int driver_state(uint32_t state)
         halt(SYSTEM_FAILED);
     }
     /* The driver may be past DRV_UP before the root task looks, so any state of a running driver will do. */
+#ifndef WIFI_BRIDGE
     if (state >= DRV_UP && sys.network.page == 0) {
         net_build();
     }
+#else
+    if (state == DRV_UP && console_bit == 0) {
+        /* Once the chip runs, as the console's wait for the host polls, which the firmware's upload need not share. */
+        console_open();
+        log_to_console();
+    }
+#endif
     if (state == DRV_SCANNED) {
         system_scanned(&sys, p->nets, p->net_count);
         return p->mode == MODE_SCAN;
@@ -270,7 +349,7 @@ static void second(void)
     }
     seconds++;
     uint32_t state = sys.driver.page->state;
-    int up = state == DRV_JOINED || state == DRV_AP;
+    int up = state == DRV_JOINED || state == DRV_AP || (bridging && state == DRV_UP);
     if (seconds == UP_S && !up) {
         say(&kout, "root: the link is not up after %u s\n", UP_S);
         halt(SYSTEM_LATE);
@@ -281,6 +360,54 @@ static void second(void)
         run_over(up);
     }
 }
+
+#ifdef WIFI_BRIDGE
+/*
+ * A line the host typed, to the driver, unless it ends the run;
+ * refused while the driver still serves the one before, whose ask the page holds, or if it ran past the line's room.
+ */
+static void obey(void)
+{
+    struct drv_page *p = (struct drv_page *)sys.driver.page;
+    if (p->asked != p->done) {
+        say(&kout, "bridge: busy\n");
+        return;
+    }
+    if (line_over) {
+        say(&kout, "bridge: what?\n");
+        return;
+    }
+    bridge_parse(line, line_len, &p->ask);
+    if (p->ask.op == 'e') {
+        say(&kout, "root: the run is over, as the host asked\n");
+        run_over(1);
+        return;
+    }
+    p->asked++;
+    must("tell the driver", child_tell(&sys.driver));
+}
+
+/* The console's line: the controller served, and the bytes the host sent, an ask at the end of each line. */
+static void heard(void)
+{
+    char c;
+    console_serve();
+    while (console_get(&c)) { /* bounded: a packet's bytes, after which the host waits for the next to be taken */
+        if (c == '\n' || c == '\r') {
+            if (line_len != 0 || line_over) {
+                obey();
+            }
+            line_len = 0;
+            line_over = 0;
+        } else if (line_len < sizeof(line)) {
+            line[line_len++] = c;
+        } else {
+            line_over = 1;
+        }
+    }
+    must("arm the console", rv_irq_set(console_irq, console_bit));
+}
+#endif
 
 int main(void)
 {
@@ -329,5 +456,13 @@ int main(void)
             must("count the seconds", rv_timer_period(tick, tick_bit, CHECK_US, &skipped));
             second();
         }
+#ifdef WIFI_BRIDGE
+        if (bits & console_bit) {
+            heard();
+        }
+        if (bits & log_bit) {
+            log_to_console();
+        }
+#endif
     }
 }

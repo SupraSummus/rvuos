@@ -8,7 +8,7 @@ board_hex      = $(shell sed -n 's/^\#define $(1)[ \t].*\(0x[0-9a-fA-F]\{1,\}\).
 WIFI_BT_BLOB   := $(if $(filter-out 0,$(WIFI_BT)),1)
 WIFI_BLOB      := build/cyw43/blob$(if $(WIFI_BT_BLOB),-bt).bin
 WIFI_BLOB_AT   := $(call board_hex,FREE_RAM_BASE,kernel/board/rp2350/board.h)
-# What the root task is to do, lines of mode=scan|sta|ap, ssid=, pass=, bssid=, channel= and run=, seconds or 0 for good,
+# What the root task is to do, lines of mode=scan|sta|ap|bridge, ssid=, pass=, bssid=, channel= and run=, seconds or 0 for good,
 # from a file git does not track, such as local/wifi.conf,
 # placed in its input region, INPUT_BASE in board.h; with none it scans,
 # for which the input region gets an empty configuration, since the board's RAM keeps the last run's.
