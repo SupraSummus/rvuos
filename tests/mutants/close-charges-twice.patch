@@ -3,7 +3,7 @@ so the next charge takes the same counts again, and a thread that is charged oft
 a turn costs the counts it ran, once.
 
 Caught-by: fuzz fuzz-pmp8 fuzz-rp2350 fuzz-smp2 fuzz-work qemu-replay
-Report: a step of the clock did not charge the thread whose turn it was its units' part
+Report: a place counted overruns otherwise than as a charge reached a request's end
 Report: a traced call that moved no time charged the thread whose turn it was
 Witness: fuzz bind-turn-later
 

@@ -3,7 +3,7 @@ so what the borrower ran on the lender's request is charged past that request's 
 a turn is charged at what it ran on, as it stood.
 
 Caught-by: fuzz-smp2
-Report: a traced call that moved no time charged the thread whose turn it was
+Report: a place counted overruns otherwise than as a charge reached a request's end
 Witness: fuzz-smp2 cores-turn-back-charges
 
 diff --git a/kernel/sched.c b/kernel/sched.c
