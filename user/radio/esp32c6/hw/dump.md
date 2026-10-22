@@ -36,7 +36,7 @@ The words, as `adctrig` writes them and the board answered:
 | `0x600A9014` | 0 to 23 | four lanes of six bits, which signal each part of the word is | `adctrig`: 0 to 3 for Wi-Fi's receiver, 14 to 17 for BLE's; bit 24 cleared |
 | `0x600A20B4` | 0 | set, the BLE baseband's side; cleared, Wi-Fi's | `adctrig`'s eighth mode sets it, the others clear it |
 | `0x600A210C` | 7, 8 to 11, 14, 15, 28 to 31 | the BLE side's set-up, and in bit 7 its start; see below | `adctrig`'s eighth mode |
-| `0x600A4E30` | 8, 0 to 7 | set, and a byte, for source 5 | `adctrig`'s seventh mode; a word of the Wi-Fi MAC's |
+| `0x600A4E30` | 8, 0 to 7 | set, and a byte, for source 5: a reception's end in that state, see "What stops the engine" | `adctrig`'s seventh mode; a word of the Wi-Fi MAC's |
 | MODEM_SYSCON `CLK_CONF` `0x600A9804` | 31 | `CLK_DATA_DUMP_EN`, the engine's clock | ESP-IDF's `modem_syscon_reg.h`; `libphy.a`'s `phy_get_adc_rand` sets it too |
 | HP_SYSTEM `SRAM_USAGE` `0x60095004` | 8 to 11 | a bit a 128 KiB bank of SRAM, set the engine's | ESP-IDF's `hp_system_reg.h`; `adctrig` sets bit 10, the bank at `0x40840000` |
 | | 16 | `MAC_DUMP_ALLOC`, the bank's upper 64 KiB | ESP-IDF's `hp_system_reg.h` |
@@ -130,8 +130,6 @@ Measured with `prog/ring.c` on channel 1:
   in the other, a frame of 33 us, the power fell 4 us before.
   So the ring holds the frame up to its end, whatever the program's thread did meanwhile.
   Six microseconds are 802.11's signal extension after an OFDM frame on 2.4 GHz; whether that is why is not known.
-  The 36 us an earlier program measured between the AGC letting go and its own stop, as it saw `RX_LAST` move,
-  were then its own, between seeing the move and clearing the word.
 - Between the frames, source 2 stops the ring on packets the MAC does not take, which the program lets go,
   starting the ring over, `dump_ring_restart`; with no frame within 100 ms it gives up, as in 5 of 29 seconds on channel 1.
 
@@ -139,7 +137,28 @@ Measured with `prog/ring.c` on channel 1:
 
 A source a capture waits on to start stops the ring instead, on the same event.
 `prog/etm.c`, `survey=3` and `rounds=4`, on channel 1: the ring from sources 0, 1, 2 and 10 stopped by itself within 100 ms
-in each of four tries, from 5 in three, and from 3, 4, 6, 7, 9 and 11 to 15 in none.
+in each of four tries, from 5 in three in one run and in four in another, and from 3, 4, 6, 7, 9 and 11 to 15 in none.
+`prog/ring.c` with `any=1`, which keeps every stop, `dumphex=8192` and each of them as `dumpsource=`, 17 to 19 rings each,
+told what each stops on, by the AGC's bits 28 to 31 at the ring's end:
+
+- 0: the bits turned 8, in three rings 7, a tenth of a microsecond before the newest word, in all 17:
+  the AGC starting on a packet, so the ring holds what came before it.
+- 1 and 10: they turned b 1.8 or 1.9 us before it, in 16 of 19 and in 14 of 19; whether the two ever differ is not known.
+- 2: the gain going to 60, 0.4 us before it, at a packet's end; see "The ring" above.
+- 5, `0x600A4E30` clear: they turned 5 and then 2, 0.4 to 0.7 us before it, in 18 of 19, at a packet's end as 2 does,
+  but not at a frame the MAC took: with `altsource=2`, all 19 rings from 5 kept had `RX_LAST` move 1070 to 50472 polls
+  before the stop, a frame going by without stopping it, where 15 from 2 stopped at their frames.
+
+Source 5 takes the Wi-Fi MAC's word `0x600A4E30`, `dumpmac=` of `dump.h`, which `adctrig`'s seventh mode writes:
+bit 8 set, the byte below it picks a reception's end by its state, the MAC's descriptor's `RX_CTRL_STATE` of `esp.h`.
+`prog/etm.c`, `survey=4` and `rounds=3`: the ring from 5 stopped within 100 ms only with bytes 0x00 in 3 of 3 tries,
+0x41 in 3, 0x51 in 2, 0x52 in 2, 0x53 in 3 and 0x54 in 1, and with the word clear in 43 of 48.
+`prog/ring.c`, `dumpsource=5`, `dumpmac=321` and `altmac=256`, `broken=1` having the MAC list the frames it did not receive whole:
+with 0x100, 26 of 29 stops came at the poll `RX_LAST` named a frame in state 0, the others at a packet the MAC listed nothing of,
+perhaps an acknowledgement, which the sniffer does not pass; with 0x141, 9 of the 21 stops that named a frame named one in state 0x41,
+the state `mac.c` names broken frames by, and the other twelve's two bytes no state of the MAC's,
+read, though, as the MAC's thread may be handing the descriptor back.
+What states 0x51 to 0x54 are is not known; the MAC listed no frame in them.
 
 Source 8 waits for the modem's ETM, at `0x600A8800`, which ESP-IDF's `ieee802154_reg.h` names
 for the 802.15.4 MAC's timed sending and receiving.
@@ -163,7 +182,8 @@ the ETM can start or stop the engine at a microsecond the 802.15.4 MAC's timer0 
 
 Open questions of the sampler, beside `TODO.md`'s:
 
-- What sources 1, 5 and 10 wait for, and source 0 beyond the AGC's first step; what the ETM's event 63 is.
+- What the AGC's bits 28 to 31 are, on whose steps sources 0, 1, 2 and 10 stop; whether 1 and 10 differ;
+  the reception's states 0x51 to 0x54; what the ETM's event 63 is.
 - The BLE side's rate: its captures take as long as Wi-Fi's at the full clock, yet hold a band of 5 MHz;
   whether its words are the BLE receiver's own samples held or made again at 80 MHz is not known,
   nor whether `0x600A210C`'s fields other than bit 7 matter.

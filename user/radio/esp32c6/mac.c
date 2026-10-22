@@ -228,6 +228,7 @@ void mac_default_policy(const uint8_t mac[6])
 #define SNIFF_MISC            (MAC_BASE + 0x0f4u)
 #define SNIFF_MISC_MASK       0x0007fe00u
 #define SNIFF_MISC_NONE       0x00078600u
+#define SNIFF_MISC_BROKEN     0x00060000u /* bits 17 and 18 */
 
 void mac_sniffer(int on)
 {
@@ -236,6 +237,11 @@ void mac_sniffer(int on)
     wr(SNIFF_CTRL_TYPES, rd(SNIFF_CTRL_TYPES) & ~SNIFF_CTRL_TYPES_MASK);
     wr(SNIFF_CTRL0, rd(SNIFF_CTRL0) | SNIFF_CTRL_NONE);
     wr(SNIFF_CTRL1, rd(SNIFF_CTRL1) | SNIFF_CTRL_NONE);
+}
+
+void mac_sniffer_broken(int on)
+{
+    wr(SNIFF_MISC, on ? rd(SNIFF_MISC) & ~SNIFF_MISC_BROKEN : rd(SNIFF_MISC) | SNIFF_MISC_BROKEN);
 }
 
 static int ours(const struct desc *d)
@@ -419,6 +425,15 @@ static void collect(void)
 uint32_t mac_rx_last(void)
 {
     return rd(RX_LAST);
+}
+
+uint32_t mac_rx_last_state(void)
+{
+    const struct desc *l = last_filled();
+    if (!ours(l)) {
+        return 0xffffffffu;
+    }
+    return (uint32_t)l->buf[RX_CTRL_STATE] | (uint32_t)l->buf[RX_CTRL_RXEND] << 8;
 }
 
 /* The MAC's interrupt, in place of the libraries' wDev_ProcessFiq: its causes read and cleared, as that does. */

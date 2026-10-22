@@ -7,7 +7,9 @@
  * survey=2: each event from 0 to 127 made task 21's, which survey=1 found, while the ring from source 8 runs,
  * timer0 firing midway, the control; which events stopped it, when, and how many frames the Wi-Fi MAC took meanwhile.
  * survey=3: the ring from each source but 8, waited on: which sources stop it of themselves, and when.
- * rounds= repeats surveys 1 and 3; left out, the run makes the three surveys in turn, once.
+ * survey=4: the ring from source 5 with the Wi-Fi MAC's word 0x600A4E30, dump.h's dumpmac=, set to bit 8 and each byte in turn,
+ * and to 0 every sixteenth, the control: whether it stopped, when, and how many polls before RX_LAST moved, if it did.
+ * rounds= repeats surveys 1, 3 and 4; left out, the run makes the first three surveys in turn, once.
  * i154=1: the 802.15.4 listener's, i154.c's, on channel=, 12 by default, and each second one of the 64 events from first=,
  * 0 or 64, made task 21's while the ring from source 8 runs, and the next second whether it stopped;
  * the events twice over, so that the nRF52840 can send through half of the run, each event once with its frames.
@@ -205,6 +207,33 @@ static void by_source(struct dump_conf *ring_conf, uint32_t source)
     dump_ring_stop(ring_conf);
 }
 
+/* survey=4: the ring from source 5, its MAC word mac; RX_LAST read at every poll. */
+static void by_mac(struct dump_conf *ring_conf, uint32_t mac)
+{
+    ring_conf->source = 5;
+    ring_conf->mac = mac;
+    dump_ring_start(ring_conf);
+    uint32_t polls = 1, moved = 0, rx_last = mac_rx_last();
+    uint64_t start = osi_now_us(), now = start;
+    for (; now - start < WAIT_US && !dump_ring_stopped(); polls++) { /* bounded by WAIT_US */
+        if (polls % CLOCK_POLLS == 0) {
+            now = osi_now_us();
+        }
+        uint32_t last = mac_rx_last();
+        if (last != rx_last) {
+            rx_last = last;
+            moved = polls;
+        }
+    }
+    if (dump_ring_stopped()) {
+        drv_say("etm: source 5, its MAC word %x, stopped the ring at about %u us; RX_LAST moved %d polls before\n", mac,
+                (uint32_t)(now - start), moved ? (int)(polls - moved) : -1);
+    } else {
+        drv_say("etm: source 5, its MAC word %x, left the ring running\n", mac);
+    }
+    dump_ring_stop(ring_conf);
+}
+
 /* i154=1: called once a second by the listener. */
 static struct dump_conf listen_ring;
 static uint32_t listen_probe, listen_first;
@@ -244,7 +273,7 @@ void drv_run(struct drv *d, struct self *own)
     uint32_t survey = config_number(d->conf, d->conf_len, "survey", 0);
     uint32_t rounds = config_number(d->conf, d->conf_len, "rounds", 1);
     drv_must("a channel of 1 to 13", channel >= 1 && channel <= 13 ? ESP_OK : ESP_FAIL);
-    drv_must("survey= of 1, 2 or 3", survey <= 3 ? ESP_OK : ESP_FAIL);
+    drv_must("survey= of 1 to 4", survey <= 4 ? ESP_OK : ESP_FAIL);
     mac_up(d->mac);
     up = 1;
     mac_sniffer(1);
@@ -264,8 +293,9 @@ void drv_run(struct drv *d, struct self *own)
     struct dump_conf armed = conf;
     armed.samples = 1024;
     uint32_t ones = sizeof waiting, twos = ETM_IDS, threes = rounds * sizeof ring_sources;
-    uint32_t probe = survey <= 1 ? 0 : survey == 2 ? ones : ones + twos;
-    uint32_t probes = survey == 1 ? ones : survey == 2 ? ones + twos : ones + twos + threes;
+    uint32_t fours = rounds * (256u + 16u);
+    uint32_t probe = survey <= 1 ? 0 : survey == 2 ? ones : survey == 3 ? ones + twos : ones + twos + threes;
+    uint32_t probes = survey == 1 ? ones : survey == 2 ? ones + twos : survey == 4 ? probe + fours : ones + twos + threes;
     for (;;) {
         uint32_t bits;
         child_answer(&d->c);
@@ -277,8 +307,11 @@ void drv_run(struct drv *d, struct self *own)
                 by_task(&armed, waiting[probe], rounds);
             } else if (probe < ones + twos) {
                 by_event(&conf, probe - ones);
-            } else {
+            } else if (probe < ones + twos + threes) {
                 by_source(&conf, ring_sources[(probe - ones - twos) % sizeof ring_sources]);
+            } else {
+                uint32_t k = (probe - ones - twos - threes) % (256u + 16u);
+                by_mac(&conf, k % 17u == 0 ? 0 : 0x100u | (k - k / 17u - 1u));
             }
             if (++probe == probes) {
                 drv_say("etm: the survey is done\n");

@@ -27,10 +27,12 @@
  * dumpbt=1, the BLE baseband's side, as adctrig's mode 8 sets it;
  * dumprate=, the engine's clock divided, 0 to 3, by 1, 2, 3 or 5 of 80 MHz;
  * dumpsweep=1, the source one more each capture, round the sixteen;
- * dumphex=, words of each capture told whole, at most DUMP_HEX_MAX, which tools/dump-spectrum.py reads.
+ * dumphex=, words of each capture told whole, at most DUMP_HEX_MAX, which tools/dump-spectrum.py reads;
+ * dumpmac=, in decimal, the Wi-Fi MAC's word 0x600A4E30 while source 5 is the engine's, as adctrig's seventh mode sets it,
+ * 0 again after.
  */
 struct dump_conf {
-    uint32_t samples, source, lane, bt, rate, sweep, hex;
+    uint32_t samples, source, lane, bt, rate, sweep, hex, mac;
 };
 
 #define DUMP_SAMPLES_MAX (DUMP_BANK_SIZE / 4u - 4u) /* four words past a capture tell whether it overran */
@@ -62,8 +64,8 @@ void dump_ring_restart(const struct dump_conf *c);
 void dump_ring_stop(const struct dump_conf *c);
 
 /*
- * A capture armed as dump_take's, triggered only if trigger, and stopped, the bank the CPU's again:
- * how many words the engine wrote, of what started it.
+ * dump_arm arms a capture as dump_take does, but triggers it only if trigger, leaving its start to its source;
+ * dump_disarm stops it, gives the bank back to the CPU, and says how many words the engine wrote.
  */
 void dump_arm(const struct dump_conf *c, int trigger);
 uint32_t dump_disarm(const struct dump_conf *c);

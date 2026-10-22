@@ -81,6 +81,8 @@ extern struct mac_rx_counts mac_rx_counts;
  * libraries' default did.
  */
 void mac_sniffer(int on);
+/* With on, the sniffer lists frames that were not received whole too, which the reader counts as broken and drops. */
+void mac_sniffer_broken(int on);
 
 /*
  * The MAC's receive list, made at the start, before mac_config, which points the MAC at it by *base,
@@ -98,6 +100,11 @@ const char *mac_rx_take(mac_heard_fn *heard);
 void mac_rx_give_back(void);
 /* The last descriptor the MAC filled, which changes as a frame ends in one: a program that waits for a frame polls it. */
 uint32_t mac_rx_last(void);
+/*
+ * Its frame's state at its end, esp.h's RX_CTRL_STATE, and RX_CTRL_RXEND's above it; all ones if it is not the list's.
+ * Read as it stands, while the MAC's thread may be handing the descriptor back: for a program that looks, not one that keeps.
+ */
+uint32_t mac_rx_last_state(void);
 
 /*
  * The MAC's receive off for the bring-up, in place of the libraries' hal_mac_rx_disable: RX_CTRL's enable and its

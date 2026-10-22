@@ -39,6 +39,7 @@
 #define BT_CONF_START   (1u << 7)
 #define BT_CONF_CLEAR   ((3u << 14) | (15u << 8) | (15u << 28) | BT_CONF_START)
 #define BT_CONF_SET     (4u << 28)
+#define DUMP_MAC        (MODEM_BASE + 0x4e30u) /* the Wi-Fi MAC's word adctrig's seventh mode sets for source 5 */
 #define CLK_CONF        (MODEM_SYSCON_BASE + 0x4u)
 #define CLK_DATA_DUMP   (1u << 31)    /* MODEM_SYSCON_CLK_DATA_DUMP_EN */
 #define SRAM_USAGE      (HP_SYSTEM_BASE + 0x4u)
@@ -75,6 +76,7 @@ void dump_configure(const char *conf, uint32_t size, struct dump_conf *c)
     c->bt = config_number(conf, size, "dumpbt", 0) != 0;
     c->rate = config_number(conf, size, "dumprate", 0) & 3u;
     c->sweep = config_number(conf, size, "dumpsweep", 0) != 0;
+    c->mac = config_number(conf, size, "dumpmac", 0);
     c->hex = config_number(conf, size, "dumphex", 0);
     if (c->hex > DUMP_HEX_MAX) {
         c->hex = DUMP_HEX_MAX;
@@ -110,6 +112,9 @@ static void setup(const struct dump_conf *c, uint32_t source, uint32_t n)
     REG(DUMP_CTRL) = 0;
     REG(DUMP_LANES) = (REG(DUMP_LANES) & ~LANES_MASK) | l | (l + 1u) << 6 | (l + 2u) << 12 | (l + 3u) << 18;
     REG(DUMP_MODE) = (REG(DUMP_MODE) & ~MODE_SOURCE) | source << MODE_SOURCE_SHIFT;
+    if (source == 5u) {
+        REG(DUMP_MAC) = c->mac;
+    }
     REG(BT_DUMP) = c->bt ? REG(BT_DUMP) | BT_DUMP_SIDE : REG(BT_DUMP) & ~BT_DUMP_SIDE;
     for (uint32_t i = 0; i < n; i++) {
         bank[i] = MARK;
@@ -161,6 +166,9 @@ static uint32_t capture(const struct dump_conf *c, uint32_t source)
         polls++;
     }
     REG(DUMP_CTRL) = 0;
+    if (source == 5u) {
+        REG(DUMP_MAC) = 0;
+    }
     if (c->bt) {
         REG(BT_DUMP_CONF) = bt_conf;
     }
@@ -269,6 +277,9 @@ void dump_ring_stop(const struct dump_conf *c)
     /* The index reads 0 once the engine stops, so it is read before. */
     uint32_t last = dump_ring_index();
     REG(DUMP_CTRL) = 0;
+    if (c->source == 5u) {
+        REG(DUMP_MAC) = 0;
+    }
     bank_to_cpu(ring_usage);
     uint32_t written = 0;
     for (uint32_t k = 0; k < DUMP_RING; k++) {
@@ -299,6 +310,9 @@ void dump_arm(const struct dump_conf *c, int trigger)
 uint32_t dump_disarm(const struct dump_conf *c)
 {
     REG(DUMP_CTRL) = 0;
+    if (c->source == 5u) {
+        REG(DUMP_MAC) = 0;
+    }
     bank_to_cpu(armed_usage);
     uint32_t written = 0;
     for (uint32_t k = 0; k < c->samples; k++) {
