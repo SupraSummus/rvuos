@@ -34,6 +34,15 @@ build/cyw43/bt-measure.bin: $(BT_STUB_ELF)
 	$(OBJCOPY) -O binary --only-section=.measure $< $@
 build/cyw43/bt-takeover.bin: $(BT_STUB_ELF)
 	$(OBJCOPY) -O binary --only-section=.takeover $< $@
+# The executor of tools/cyw43-exec.py, for the core parked; btcore/bt-exec.c, btcore/bt-exec.ld.
+build/cyw43/bt-exec.ld: user/wifi/btcore/bt-exec.ld user/wifi/btcore/bt-map.h
+	@mkdir -p $(dir $@)
+	clang -E -P -Iuser/wifi/btcore -x c $< -o $@
+build/cyw43/bt-exec.elf: user/wifi/btcore/bt-exec.c build/cyw43/bt-exec.ld
+	$(ARM_CC) -Os -ffreestanding -fno-unwind-tables -fno-asynchronous-unwind-tables -nostdlib -fuse-ld=lld \
+		-Wall -Wextra -Werror -Wl,-T,build/cyw43/bt-exec.ld -Wl,--entry=exec_start $< -o $@
+build/cyw43/bt-exec.bin: build/cyw43/bt-exec.elf
+	$(OBJCOPY) -O binary --only-section=.text $< $@
 ifneq ($(WIFI_BT_BLOB),)
 $(BUILD)/user/wifi/bt-stub-embed.o: build/cyw43/bt-stub.bin build/cyw43/bt-measure.bin build/cyw43/bt-takeover.bin
 endif

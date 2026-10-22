@@ -1,0 +1,10 @@
+# The transmitter test's setup, as user/wifi/BT.md's "The transmitter from the host" lists it, and the word that keeps hops clean: w ADDR SIZE VALUE.
+w 410494 4 26c
+w 318028 4 202
+w 318bc0 4 2b08289
+w 318b70 4 71764129
+w 318ba4 4 555555
+w 3186a4 4 a6
+w 318204 4 84
+w 318b6c 4 1006340
+w 318394 4 9a0100ff
