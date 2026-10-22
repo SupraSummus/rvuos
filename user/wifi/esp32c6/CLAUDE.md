@@ -21,6 +21,13 @@ runs `make BOARD=esp32c6 wifi-esp32c6-share` with `SHARE_BEFORE` naming the driv
 the Pico must keep as much beside the new C6 as beside the old, within its rounds' spread,
 or the new takes more of the medium.
 
+### The sampler
+
+A change to `dump.c`, `dump.h` or the layout `C6_SDR=1` gives runs the sampler with `C6_SDR=1` and `listen=`,
+with the nRF52840's frames as the signal of known frequency, as the driver's `NOTES.md`, "The dump engine", says,
+and `tools/dump-spectrum.py` must find them in the captures of their seconds, at the offset of their channel, and in none before them;
+a change to its BLE side runs it with `C6_LISTEN=1` and `i154listen=` too.
+
 ### The trace
 
 A change to `user/tracer/` or to the trace in `user/wifi/esp32c6/` runs it with `trace=1` in `WIFI_CONFIG`,

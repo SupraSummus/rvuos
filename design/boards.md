@@ -134,7 +134,8 @@ QEMU lists none, since its devices are the kernel's or the console, and the host
 nor do the MPS2 boards yet.
 So on QEMU `BOOT_CAP_COUNT` is 21, the number the seeds and the corpus are written for.
 A device that is a bus master reaches whatever its driver points it at, so its frame is the machine's:
-the ESP32-C6's modem and the nRF52840's radio are those a board lists, each for a driver the root task trusts with all RAM; open decision 13.
+the ESP32-C6's modem and the nRF52840's radio are those a board lists, each for a driver the root task trusts with all RAM,
+and the ESP32-C6's HP_SYSTEM, which gives the modem's dump engine a bank of SRAM; open decision 13.
 Nor does it list the devices the kernel drives itself, the timer and the watchdog:
 a program reaches those through the clock's operations, which every board can answer; see "The watchdog".
 

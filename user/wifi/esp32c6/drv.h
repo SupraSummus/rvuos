@@ -22,8 +22,22 @@
  */
 
 #define DRV_RAM_BASE     0x40860000
-#define DRV_RAM_SIZE     0x00020000
 #define DRV_ROM_RAM_BASE 0x4087c000 /* the ROM's data, to the block's end */
+#ifndef C6_SDR
+#define DRV_RAM_SIZE     0x00020000
+#define DRV_HEAP_END     DRV_ROM_RAM_BASE
+#else
+/*
+ * With the sampler, see dump.h, the free RAM's lower half is the dump engine's bank, and nothing else may lie there,
+ * so the children's memory moves into the upper half: the driver's block is its lower quarter, 64 KiB,
+ * the ROM's data a block of its own at the top, in the region the link to the network process has otherwise,
+ * since such a run builds no network process, and the root task makes the children's memory of what lies between.
+ * The heap is what the image's data leaves of the 64 KiB; the driver's own code takes none, see build.mk.
+ */
+#define DRV_RAM_SIZE     0x00010000
+#define DRV_HEAP_END     (DRV_RAM_BASE + DRV_RAM_SIZE)
+#define DRV_ROM_RAM_SIZE 0x00004000
+#endif
 
 #define DRV_MAGIC 0x49464957u /* "WIFI" */
 

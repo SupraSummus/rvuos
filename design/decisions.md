@@ -243,6 +243,11 @@ until the maintainer decides otherwise.
     The ESP32-C6 lists its modem whole, its two MACs among them,
     so whoever holds the modem's frame reaches any RAM, the kernel's too,
     and the root task gives it only to a driver it trusts as it trusts itself.
+    The modem's dump engine is a master of the same kind:
+    HP_SYSTEM's `SRAM_USAGE` hands it a 128 KiB bank of SRAM, which it fills with what the receiver hears,
+    so the board lists HP_SYSTEM too, and whoever holds it with the modem reaches the same RAM by another way.
+    While the engine holds a bank, the CPU loses it, reads and writes alike, as measured on the board,
+    so a bank given to it holds nothing a trap or another process may touch meanwhile.
 
     The APM units could confine the MACs, and were measured to on the board:
     with the CPU's user mode in REE0, given everything by a region of each unit, since PMP confines it,

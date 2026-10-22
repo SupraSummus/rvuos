@@ -96,12 +96,14 @@
  * the random number generator's data register, read only, in the smallest block that holds it,
  * eight bytes of LPPERI's: the rest of LPPERI reaches the LP domain's clocks and resets,
  * and the IO MUX and the GPIO matrix, the pins, for a program to set as its board wires them,
- * the flash's among them, so that whoever holds the IO MUX can cut the window onto flash off.
+ * the flash's among them, so that whoever holds the IO MUX can cut the window onto flash off,
+ * and HP_SYSTEM, whose SRAM_USAGE hands a bank of SRAM to the modem's dump engine, which then writes it.
  * PCR, PMU and the LP domain stay the kernel's: they reach the whole chip's clocks, power and resets.
  * The modem's two MACs, Wi-Fi's and 802.15.4's, are bus masters, which nothing confines,
  * so whoever holds the modem reaches all RAM; see DESIGN.md, open decision 13.
+ * The dump engine is the modem's too, and whoever holds HP_SYSTEM as well can give it any bank, the kernel's too.
  */
-#define BOOT_DEVICES 8
+#define BOOT_DEVICES 9
 #define DEVICE_RANGE_LIST                                       \
     { U32(0x6000E000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
     { U32(0x600A0000), U32(0x00010000), RIGHT_R | RIGHT_W },    \
@@ -110,7 +112,8 @@
     { U32(0x40000000), U32(0x00080000), RIGHT_R | RIGHT_X },    \
     { U32(0x600B2808), U32(0x00000008), RIGHT_R },             \
     { U32(0x60090000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
-    { U32(0x60091000), U32(0x00001000), RIGHT_R | RIGHT_W },
+    { U32(0x60091000), U32(0x00001000), RIGHT_R | RIGHT_W },    \
+    { U32(0x60095000), U32(0x00001000), RIGHT_R | RIGHT_W },
 
 /*
  * Interrupt line identifiers lie below IRQ_LINES; see irq.h.

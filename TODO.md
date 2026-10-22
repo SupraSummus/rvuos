@@ -292,6 +292,11 @@ what is left:
   Something has to put each input where `BOOT_CAP_INPUT` points,
   below the ROM's buffers or over USB once the kernel runs,
   and the replay driver's second stack has to follow the board's data region.
+- The sampler, `C6_SDR=1`, see the driver's `NOTES.md`, "The dump engine", and its open questions there:
+  what wakes the engine's sources 3, 4, 6 to 9 and 11 to 14, which never finished on a listening channel;
+  what lanes other than 0 to 3 and 14 to 17 carry;
+  and a capture that does not stop, which ESP-SDR runs as a ring over two banks the engine and the CPU take turns at,
+  where the sampler's build has one bank free; the diagnostic bus would need no bank, but its selector is not found.
 
 ## RP2350
 

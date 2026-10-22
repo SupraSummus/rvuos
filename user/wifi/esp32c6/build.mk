@@ -8,7 +8,7 @@
 # tools/esp-fetch.py --wifi fetches the libraries, again never into the tree.
 WIFI_ESP      := user/wifi/esp32c6
 WIFI_ESP_INIT := $(BUILD)/$(WIFI_ESP)/phy_init_data.c
-WIFI_ESP_OBJ  := $(patsubst %.c,$(BUILD)/%.o,$(filter-out $(WIFI_ESP)/root.c,$(wildcard $(WIFI_ESP)/*.c))) \
+WIFI_ESP_OBJ  := $(patsubst %.c,$(BUILD)/%.o,$(filter-out $(WIFI_ESP)/root.c $(WIFI_ESP)/dump.c,$(wildcard $(WIFI_ESP)/*.c))) \
                  $(BUILD)/$(WIFI_ESP)/phy_init_data.o $(BUILD)/$(WIFI_ESP)/esp_wifi_regulatory.o
 # The closed libraries the driver links: none. The PHY's was the last: its functions are the driver's own and its
 # two objects, phy_param and g_phyFuns, are in phy.c, so libphy.a is out of the link. The BT baseband, libbtbb.a, was
@@ -267,10 +267,12 @@ $(BUILD)/wifi-drv.bin: $(BUILD)/wifi-drv.elf
 # What it shares with the Pico 2 W's: the network process, its clients, and the root task's half of both, system.c;
 # the logger is linked, though this root task never builds it.
 WIFI_ESP_NET := $(addprefix $(BUILD)/user/wifi/,netproc.o net.o sock.o system.o client.o echo.o clock.o sntp.o logger.o)
-$(BUILD)/user-wifi-esp32c6.elf: $(BUILD)/$(WIFI_ESP)/root.o $(WIFI_ESP_NET) $(LIB_OBJ) $(USER_COMMON) \
+# The root task's own: root.c, and with C6_SDR=1 the sampler of dump.h, which only that build links.
+WIFI_ESP_ROOT := $(BUILD)/$(WIFI_ESP)/root.o $(if $(filter-out 0,$(C6_SDR)),$(BUILD)/$(WIFI_ESP)/dump.o)
+$(BUILD)/user-wifi-esp32c6.elf: $(WIFI_ESP_ROOT) $(WIFI_ESP_NET) $(LIB_OBJ) $(USER_COMMON) \
                                 $(BUILD)/user/tracer/trace.o $(BUILD)/user/user.ld tools/no-globals.py
 	tools/no-globals.py $(WIFI_ESP_NET) $(LIB_OBJ) $(BUILD)/user/tracer/trace.o
-	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/user/user.ld $(BUILD)/$(WIFI_ESP)/root.o $(WIFI_ESP_NET) $(LIB_OBJ) \
+	$(CC) $(LDFLAGS) -Wl,-T,$(BUILD)/user/user.ld $(WIFI_ESP_ROOT) $(WIFI_ESP_NET) $(LIB_OBJ) \
 		$(BUILD)/user/tracer/trace.o $(USER_COMMON) -o $@
 
 .PHONY: wifi-esp32c6

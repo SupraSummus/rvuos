@@ -31,6 +31,9 @@
 
 #include "console.h"
 #include "drv.h"
+#ifdef C6_SDR
+#include "dump.h"
+#endif
 #include "lib/libc.h"
 #include "lib/log.h"
 #include "lib/say.h"
@@ -94,6 +97,11 @@ static struct system sys = {
     .clients_wanted = CLIENT_BIT(CLIENT_ECHO) | CLIENT_BIT(CLIENT_CLOCK),
 };
 static struct block drv_ram;
+#ifdef C6_SDR
+/* The dump engine's bank, and the ROM's data, a block of the driver's own in this build; see drv.h and dump.h. */
+static struct block dump_bank, drv_rom_ram;
+static struct dump_conf dump_conf;
+#endif
 static int leaving;
 static uint8_t mac[6];
 static uint32_t tick_bit, seconds, run_s = RUN_S;
@@ -413,6 +421,14 @@ static void configure(struct drv *p)
               : config_has(conf, size, "antenna", "none") ? ANTENNA_NONE
                                                            : ANTENNA_BOARD;
     snap_parse(conf, size);
+#ifdef C6_SDR
+    dump_configure(conf, size, &dump_conf);
+    if (p->ssid[0]) {
+        /* The children's memory lies in what the bank leaves, which has no room for the network process. */
+        say(&kout, "root: the sampler's build joins no network; %s is not joined\n", p->ssid);
+        p->ssid[0] = 0;
+    }
+#endif
     must("uninstall the input", region_free(&self, region));
 }
 
@@ -601,6 +617,10 @@ static void driver_build(void)
     must("a frame of the driver's RAM", mem_make(&self, &drv_ram, CAP_FRAME));
     must("give the driver its RAM", child_map(&self, c, drv_ram.made, RIGHT_R | RIGHT_W, &region));
     must("give the driver the ROM", child_map(&self, c, BOOT_CAP_ROM, RIGHT_R | RIGHT_X, &region));
+#ifdef C6_SDR
+    must("a frame of the ROM's data", mem_make(&self, &drv_rom_ram, CAP_FRAME));
+    must("give the driver the ROM's data", child_map(&self, c, drv_rom_ram.made, RIGHT_R | RIGHT_W, &region));
+#endif
     if (p->trace == 1) {
         trace_give(c);
     } else {
@@ -665,7 +685,12 @@ static void driver_state(uint32_t state)
             p->joined.channel, (uint32_t)p->authmode);
         system_net_start(&sys);
     } else if (state == DRV_LISTENING) {
-        say(&kout, "root: the driver listens on channel %u\n", (uint32_t)(p->i154 ? p->i154 : p->listen));
+#ifdef I154_LISTEN
+        uint32_t heard = p->i154 ? p->i154 : p->i154_listen ? p->i154_listen : p->listen;
+#else
+        uint32_t heard = p->i154 ? p->i154 : p->listen;
+#endif
+        say(&kout, "root: the driver listens on channel %u\n", heard);
     } else if (state == DRV_LEFT) {
         say(&kout, "root: the driver left the network\n");
         system_halt(0);
@@ -734,6 +759,11 @@ static void second(void)
         say(&kout, "root: the driver has not joined after %u s\n", UP_S);
         halt(SYSTEM_LATE);
     }
+#ifdef C6_SDR
+    if (sys.driver.told == DRV_LISTENING) {
+        dump_take(&dump_conf);
+    }
+#endif
     if (seconds == run_s) {
         say(&kout, "root: the run is over after %u s\n", run_s);
         run_over();
@@ -809,8 +839,15 @@ int main(void)
     console_open();
     must("a bit for the seconds", bit_new(&self, &tick_bit));
     must("a timer", timer_new(&self, &tick));
+#ifdef C6_SDR
+    /* The dump's bank before all, the whole of the free RAM's lower half, so that nothing else lies there. */
+    must("the dump's bank", mem_take_at(&self, DUMP_BANK_BASE, DUMP_BANK_SIZE, &dump_bank));
+#endif
     /* The driver's block first, before anything else is taken from free RAM, which might take part of it. */
     must("the driver's RAM", mem_take_at(&self, DRV_RAM_BASE, DRV_RAM_SIZE, &drv_ram));
+#ifdef C6_SDR
+    must("the ROM's data", mem_take_at(&self, DRV_ROM_RAM_BASE, DRV_ROM_RAM_SIZE, &drv_rom_ram));
+#endif
     read_mac();
     say(&kout, "root: wifi system, MAC address %M\n", mac);
     void (*entry)(struct child_page *) = drv_entry();
@@ -823,10 +860,15 @@ int main(void)
          * with trace=2 the root serves nothing, but reads the frames back there for the snapshot. */
         trace_map();
     }
+#ifdef C6_SDR
+    /* After rf_switch too; the sampler's build builds no network process, so it makes no room either. */
+    dump_open(&self, &kout, &cout, &dump_bank, log_to_console, must);
+#else
     if (!trace_wanted) {
         /* A trace builds no network process nor clients, so it needs no room for their data. */
         must("room for the children's data", self_room(&self, ROOM_SIZE));
     }
+#endif
     struct drv *dp = (struct drv *)sys.driver.page;
     if (dp->trace) {
         say(&kout, run_s != 0 ? "root: tracing the libraries' bring-up, for %u s\n"

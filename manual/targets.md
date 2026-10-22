@@ -117,11 +117,11 @@ Interrupt lines:
 | 1 to 77 | the interrupt matrix's sources, numbered as in Espressif's `soc/interrupts.h`, plus one: the Wi-Fi MAC's source 0 is line 1, and the USB Serial/JTAG controller's is line 49 |
 
 The root task is granted a frame over each of these devices, from `BOOT_CAP_DEVICES` up,
-so `BOOT_CAP_COUNT` is 29 here and the root task's table has 75 slots; it has no router, so `BOOT_CAP_ROUTES` is empty.
+so `BOOT_CAP_COUNT` is 30 here and the root task's table has 76 slots; it has no router, so `BOOT_CAP_ROUTES` is empty.
 They are the SAR ADC and the whole modem,
 where `make BOARD=esp32c6 phymap` and `make BOARD=esp32c6 wifi-esp32c6-map` find what ESP-IDF's PHY and Wi-Fi libraries reach,
 the eFuse's registers, the window onto flash, the ROM, the random number generator's data register,
-and the IO MUX and the GPIO matrix:
+the IO MUX and the GPIO matrix, and HP_SYSTEM:
 
 | Slot | Constant | Range | Size | What | Rights |
 |---|---|---|---|---|---|
@@ -133,10 +133,13 @@ and the IO MUX and the GPIO matrix:
 | 26 | `BOOT_CAP_RNG` | `0x600B2808` | 8 bytes | LPPERI's RNG_DATA, the random number generator, whose entropy comes from the radio while it runs | read |
 | 27 | `BOOT_CAP_IO_MUX` | `0x60090000` | 4 KiB | the IO MUX, the pins' functions and pads | read, write |
 | 28 | `BOOT_CAP_GPIO` | `0x60091000` | 4 KiB | the GPIO matrix, the pins' routes, levels and interrupts | read, write |
+| 29 | `BOOT_CAP_HP_SYSTEM` | `0x60095000` | 4 KiB | HP_SYSTEM, whose `SRAM_USAGE` gives a 128 KiB bank of SRAM to the modem's dump engine | read, write |
 
 The modem's two MACs, Wi-Fi's from `0x600A4000` and 802.15.4's at `0x600A3000`, are bus masters, and nothing confines them:
 a program that holds the modem's frame reaches all RAM, the kernel's too,
 so the root task gives it only to a driver it trusts as it trusts itself; see `DESIGN.md`, open decision 13.
+The modem's dump engine, from `0x600A9000`, writes what the receiver hears into whichever bank `HP_SYSTEM` gives it,
+the kernel's too, so whoever holds both reaches all RAM as well.
 PCR, PMU and the LP domain are not listed.
 The kernel takes the SAR ADC out of the reset the ROM leaves it in and turns its clocks on.
 It also powers the radio's analog I2C buses and sets the power detector's capacitance, in the PMU and LP_AON,

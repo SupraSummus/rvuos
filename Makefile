@@ -69,7 +69,12 @@ WIFI_BT_VARIANT := $(if $(filter-out 0,$(WIFI_BT)),-bt)
 # A directory of its own, so that without it the C6's images are exactly as they would be without the listener.
 C6_LISTEN ?=
 C6_LISTEN_VARIANT := $(if $(filter-out 0,$(C6_LISTEN)),-c6listen)
-VARIANT := $(PMP_VARIANT)$(if $(filter-out 1,$(CORES)),-smp$(CORES))$(SELFCHECK_VARIANT)$(WIFI_BT_VARIANT)$(C6_LISTEN_VARIANT)
+# The ESP32-C6's sampler, the modem's dump engine filling a bank of SRAM with what the receiver hears, behind C6_SDR=1;
+# see user/wifi/esp32c6/dump.h. The bank is the free RAM's lower half, so the driver's block and the children's memory
+# move into the upper half, which only a run without the network process has room for: a directory of its own.
+C6_SDR ?=
+C6_SDR_VARIANT := $(if $(filter-out 0,$(C6_SDR)),-c6sdr)
+VARIANT := $(PMP_VARIANT)$(if $(filter-out 1,$(CORES)),-smp$(CORES))$(SELFCHECK_VARIANT)$(WIFI_BT_VARIANT)$(C6_LISTEN_VARIANT)$(C6_SDR_VARIANT)
 
 # The board's architecture, which only RP2350 lets the command line change;
 # the other one builds in a directory of its own, as a budget does.
@@ -94,7 +99,8 @@ CFLAGS    := $(ARCHFLAGS) -std=c11 -ffreestanding -fno-builtin -fno-pic -fno-com
              -nostdlib -O2 -g -Wall -Wextra -Werror -Wundef -Wshadow \
              -Wstrict-prototypes -Wmissing-prototypes -Iinclude \
              -DPMP_MAX_ENTRIES=$(PMP_MAX_ENTRIES) -DCORES=$(CORES) -DSELFCHECK=$(SELFCHECK) \
-             $(if $(filter-out 0,$(WIFI_BT)),-DWIFI_BT=1) $(if $(filter-out 0,$(C6_LISTEN)),-DI154_LISTEN=1)
+             $(if $(filter-out 0,$(WIFI_BT)),-DWIFI_BT=1) $(if $(filter-out 0,$(C6_LISTEN)),-DI154_LISTEN=1) \
+             $(if $(filter-out 0,$(C6_SDR)),-DC6_SDR=1)
 ASFLAGS   := $(ARCHFLAGS) -g -Iinclude -DCORES=$(CORES) $(if $(filter-out 0,$(WIFI_BT)),-DWIFI_BT=1)
 LDFLAGS   := $(ARCHFLAGS) -nostdlib -static -fuse-ld=lld -Wl,--gc-sections -Wl,--no-dynamic-linker
 
@@ -222,7 +228,7 @@ $(BUILD)/%.o: %.S
 $(BUILD)/%.ld: %.ld.S
 	@mkdir -p $(dir $@)
 	$(CC) $(ARCHFLAGS) -E -P -x assembler-with-cpp $(KERNEL_INC) -Iinclude -DCORES=$(CORES) \
-		-MMD -MP -MT $@ $< -o $@
+		$(if $(filter-out 0,$(C6_SDR)),-DC6_SDR=1) -MMD -MP -MT $@ $< -o $@
 
 # The parts of the build; each may use what this file and the parts before it define:
 #   kernel/build.mk             the kernel, checked at its link, and the images, each the kernel with a root task

@@ -9,7 +9,7 @@
 MEMORY
 {
     flash (rx) : ORIGIN = 0x42000000, LENGTH = 0x00100000
-    ram (rw)   : ORIGIN = DRV_RAM_BASE, LENGTH = DRV_ROM_RAM_BASE - DRV_RAM_BASE
+    ram (rw)   : ORIGIN = DRV_RAM_BASE, LENGTH = DRV_HEAP_END - DRV_RAM_BASE
 }
 
 ENTRY(drv_main)
@@ -41,6 +41,6 @@ SECTIONS
         drv_bss_end = .;
     } > ram
     drv_heap_start = .;
-    drv_heap_end = DRV_ROM_RAM_BASE;
+    drv_heap_end = DRV_HEAP_END;
     /DISCARD/ : { *(.comment .note .note.* .riscv.attributes .eh_frame*) }
 }
