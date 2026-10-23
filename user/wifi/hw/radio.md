@@ -76,7 +76,7 @@ Those of the transmitter, and the spur's, make the transmitter play; the receive
 | `0x01f` | bits 0 and 3 the receiver's baseband powers, on in every calibration that receives; bit 2 the filter codes' strobe |
 | `0x020` to `0x02a` | the receiver's baseband filter, codes from the RC calibration and fixed biases, see below; `0x026` bit 12 a power |
 | `0x027` bits 8 to 11 | the receiver's powers off, `0xf`, in the transmitter's calibrations, a hypothesis |
-| `0x02b` bit 0, `0x02d` bits 9 to 11 | powers of the receiver's front, a hypothesis; `0x02b` bits 1 and 2 read set with a carrier in the channel, the AGC free, and clear without, **measured**, see `phy.md` |
+| `0x02b` bit 0, `0x02d` bits 9 to 11 | powers of the receiver's front, a hypothesis; `0x02b` bits 1 and 2 set as the AGC takes the gain down for a strong carrier, **measured**, see "The receiver's strength" in `phy.md` |
 | `0x030`, `0x031`, `0x032` bits 1 to 6, `0x039` | set with the channel, beside the PHY's offset loop; `0x032` bits 8 to 11 and `0x034` differ from power-up to power-up and no code writes them: the offset's DACs, the PHY's to set, a hypothesis |
 | `0x035`, `0x036`, `0x038`, `0x03a`, `0x03d` bits 13 and 14, `0x03e` bits 4 and 5 | biases and powers of the receiver's front, a hypothesis |
 | `0x037` bits 8 and 11 | clips, read only, **known** |

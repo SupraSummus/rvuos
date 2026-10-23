@@ -492,6 +492,32 @@ a channel's offset, which differs from power-up to power-up, holds it against a 
 is a hypothesis; at 4 and 5 the noise may lie under a step.
 `--gain` takes 60 estimates once the gain is held and stops if a channel reads 0 in all.
 
+### The receiver's strength
+
+`0x944`'s low byte is the strength the receiver hears, signed, about a dB a step, **measured**:
+an nRF52840's carrier on 2440 MHz, the radio tuned over the bridge to 2437 MHz and the AGC free,
+the carrier's power stepped 12 s a step while the bridge read the registers 27 times a second;
+the steps' most common readings, with the median of I^2 + Q^2 over 30 estimates:
+
+| Carrier, dBm | none | 8 | 4 | 0 | -4 | -8 | -12 | -16 | -20 | -40 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `0x944` | `0x9d` | `0xbe` | `0xbc` | `0xb7` | `0xb4` | `0xb2` | `0xae` | `0xaa` | `0xa6` | `0x9d` |
+| As signed | -99 | -66 | -68 | -73 | -76 | -78 | -82 | -86 | -90 | -99 |
+| I^2 + Q^2 | 4 | 404 | 444 | 489 | 472 | 491 | 212 | 89 | 36 | 4 |
+
+The reading less the carrier's power is 70 to 74 throughout, the path's loss and the reading's offset together;
+the nRF's steps are nominal, so the slope is a dB a step to within their accuracy.
+With nothing in the channel it reads -99, about the noise of 20 MHz: a strength in dBm, a hypothesis whose offset no measurement here fixes.
+It follows the channel without a frame, as the steps show, and is read live.
+
+The estimator's power rises 3.6 to 3.9 dB for each 4 dB up to -8 dBm and stays near 480 above it:
+the AGC keeps the gain at its most until the signal reaches about -78 by `0x944`, and then holds the signal at its level.
+As it takes the gain down, **measured** in the same run:
+`0x5b0` goes from `0x3110` to `0x2510`, `0x5b2` from `0x0110` through `0x0510` to `0x1510`,
+and the radio's `0x02b` from `0x740` to `0x742`, then `0x746` at 4 and 8 dBm, its bits 1 and 2 an attenuation of its front, a hypothesis.
+`0xb1f` rises with a weak carrier as the estimator's power does, 1, 11, 27 and 65 from -40 to -12, and past the gain's change reads values that do not follow it.
+`0x5b5` reads `0x80` or `0x60` at every level.
+
 ### The receiver's passband
 
 Across its channel, **measured**, an nRF52840's carrier on 2440 MHz at 8 dBm, the radio retuned over the bridge
