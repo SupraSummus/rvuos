@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""The CYW43439's receiver sampled: its I/Q estimator, one sample at a time, at about 310 thousand samples a second.
+"""The CYW43439's receiver sampled: its I/Q estimator, one sample at a time, at 311 thousand to 1.32 million samples a second.
 
-Usage: user/wifi/tools/cyw43-iq.py OUT --conf FILE [--count N] [--wait W] [--mode fast[,check][,no-q]]
+Usage: user/wifi/tools/cyw43-iq.py OUT --conf FILE [--count N] [--wait W] [--mode fast[,check][,no-q] | psm[,no-q]]
                                   [--gain P6,P7,P8 | --tones MHZ,...]
 
 --conf names a configuration of the Wi-Fi system, such as an access point's, whose mode's work comes first,
@@ -22,6 +22,9 @@ The samples are I and Q of 8 bits, -128 to 127, so a strong signal clips.
 and reads only the low halfwords, which hold an 8-bit sample's squares and product: 683 kS/s;
 check reads the estimator's busy bit once before the results, as LATE, 527 kS/s;
 no-q leaves Q squared unread, the host taking Q as the product over I, 0 where I is: 902 kS/s.
+--mode psm has D11's own processor, the PSM, take the samples, by our microcode, see psm_loop,
+into D11's shared memory, at most 1280 a run: 1074 kS/s, and with no-q 1920 a run at 1316 kS/s;
+the vendor's microcode is then stopped, and the 802.11 core's MAC with it.
 
 --tones is the control: the firmware's own receive IQ calibration's loopback set up, by its ROM's functions,
 and one run of --count samples before any tone and one during each tone of the list, in MHz, played by the ROM
@@ -53,6 +56,7 @@ TOOLS = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(TOOLS, "../../.."))
 sys.path.insert(0, TOOLS)
 from cyw43bridge import Bridge  # noqa: E402
+import cyw43psm as psm  # noqa: E402
 
 PROGRAM = os.path.join(ROOT, "build/cyw43/iq-cap.bin")
 D11, CM3_WRAPPER, D11_WRAPPER = 0x18001000, 0x18103000, 0x18101000
@@ -66,8 +70,11 @@ PI_KNOWN = 0x63788  # where the firmware of 43439A0.bin keeps it, an access poin
 CODE, BASE, OUT_AT = 0x20000, 0x1F000, 0x21000
 MAGIC, COUNT, WAIT, GO, FAULT, CYCLES, STEP, PI, TONES = (BASE + 4 * i for i in range(9))
 FREQ, FIRST, MODE = BASE + 0x40, BASE + 0x80, BASE + 0x24
-MODES = {"fast": 1, "check": 2, "no-q": 4}  # iq-cap.c's MODE_*
-MODE_SETS = ("", "fast", "fast,check", "fast,no-q", "fast,check,no-q")
+MODES = {"fast": 1, "check": 2, "no-q": 4, "psm": 8}  # iq-cap.c's MODE_*
+MODE_SETS = ("", "fast", "fast,check", "fast,no-q", "fast,check,no-q", "psm", "psm,no-q")
+IQ_CONTROL, IQ_PRODUCT, IQ_I_POWER, IQ_Q_POWER = 0x481, 0x484, 0x486, 0x488
+SHARED_FROM, SHARED_END = 0x100, 0x1000  # the shared memory's halfwords the microcode's samples go to, iq-cap.c's SHARED_FROM
+PSM_DELAY = 14  # instructions between an estimate's start and its first read, see phy.md
 CLEARED = range(0x1E000, 0x2D000)  # RAM the firmware had cleared, an access point up: the code's, and the samples' with tones
 OUT_END, OUT_END_TONES, MOST_TONES = 0x7E000, 0x2D000, 16
 MAGIC_VALUE, GO_VALUE, ENDED, LATE, TSF_SPAN = 0x49514341, 2, 3, 1, 100000
@@ -113,6 +120,24 @@ def strongest(square, times, rate, bins=1024):
         power = abs(sum(v * x for v, x in zip(z, w))) ** 2
         best = max(best, (power, f))
     return best[1], best[0] / total
+
+
+def psm_loop(control, reads, end):
+    """The microcode: estimates one after another, each started, PSM_DELAY instructions waited, and reads into the shared memory,
+    a halfword each from SHARED_FROM, psm_base_0 stepping past each sample, until it reaches end; then it stays.
+    Each PHY access through the external IHR waits for its busy bit, 14, to clear."""
+    p = [psm.mov16(SHARED_FROM, psm.BASE_0), psm.mov16(control | 1, psm.r(2)), psm.mov16(0x4000 | IQ_CONTROL, psm.r(3)),
+         psm.mov16(end, psm.r(7))]
+    p += [psm.mov16(0x6000 | reg, psm.r(10 + k)) for k, reg in enumerate(reads)]
+    loop = len(p)
+    p += [psm.mov(psm.r(2), psm.EXT_DATA), psm.mov(psm.r(3), psm.EXT_ADDR)]
+    p += [psm.jnzx(14, 1, psm.EXT_ADDR, len(p))]
+    p += [psm.add(psm.r(20), psm.imm(0), psm.r(20)) for _ in range(PSM_DELAY)]
+    for k in range(len(reads)):
+        p += [psm.mov(psm.r(10 + k), psm.EXT_ADDR)]
+        p += [psm.jnzx(14, 1, psm.EXT_ADDR, len(p)), psm.mov(psm.EXT_DATA, psm.indirect(0, k))]
+    p += [psm.add(psm.BASE_0, psm.imm(len(reads)), psm.BASE_0), psm.jne(psm.BASE_0, psm.r(7), loop)]
+    return p + [psm.jmp(len(p))]
 
 
 def phy_modify(board, reg, mask, value):
@@ -161,6 +186,9 @@ def main():
     if len(set(names)) != len(names) or set(names) not in [set(m.split(",")) - {""} for m in MODE_SETS]:
         sys.exit(f"cyw43-iq: --mode one of {', '.join(m for m in MODE_SETS if m)}")
     args.mode = sum(MODES[m] for m in names)
+    reads = [IQ_PRODUCT, IQ_I_POWER] + ([] if args.mode & MODES["no-q"] else [IQ_Q_POWER])
+    if args.mode & MODES["psm"]:
+        most = min(most, (SHARED_END - SHARED_FROM) // len(reads))
     if not 0 < args.count <= most or not 2 <= args.wait <= 0xFF or len(args.tones) > MOST_TONES:
         sys.exit(f"cyw43-iq: --count 1 to {most} here, --wait 2 to 255, at most {MOST_TONES} tones")
     subprocess.run(["make", "-s", "-C", ROOT, "build/cyw43/iq-cap.bin"], check=True)
@@ -186,6 +214,11 @@ def main():
         pi = find_pi(board) if args.tones else 0
         if args.gain is not None:
             hold_gain(board, args.gain)
+        if args.mode & MODES["psm"]:
+            board.write16(PHYREGADDR, IQ_CONTROL)
+            loop = psm_loop(board.read16(PHYREGDATA) & ~3, reads, SHARED_FROM + args.count * len(reads))
+            if not psm.load(board, D11, loop):
+                sys.exit("cyw43-iq: the microcode did not read back")
         board.write_block(CODE, code)
         if any(board.read(CODE + a) != int.from_bytes(code[a:a + 4], "little") for a in range(0, len(code), 4)):
             sys.exit("cyw43-iq: the program did not read back")
@@ -213,6 +246,10 @@ def main():
             if time.time() - start > 10:
                 sys.exit(f"cyw43-iq: no end; step {board.read(STEP):#x}, fault word {board.read(FAULT):#x}")
             time.sleep(0.05)
+        if board.read(FAULT):
+            sys.exit(f"cyw43-iq: fault word {board.read(FAULT):#x}")
+        if board.read(COUNT) != args.count:
+            sys.exit(f"cyw43-iq: the program took {board.read(COUNT)} a run, not {args.count}")
         hz = board.read(CYCLES) / TSF_SPAN * 1e6
         firsts = [board.read(FIRST + 4 * r) for r in range(runs)]
         words = [board.read(OUT_AT + 4 * k) for k in range(4 * args.count * runs)]
@@ -229,7 +266,7 @@ def main():
         w = words[4 * args.count * r:4 * args.count * (r + 1)]
         rows = [(w[4 * k] & ~LATE, signed(w[4 * k + 1]), w[4 * k + 2], w[4 * k + 3], w[4 * k] & LATE)
                 for k in range(args.count)]
-        if args.mode & MODES["fast"]:
+        if args.mode & (MODES["fast"] | MODES["psm"]):
             rows = [(t, signed(pr & 0xFFFF, 16), ip & 0xFFFF, qp & 0xFFFF, lt) for t, pr, ip, qp, lt in rows]
         if args.mode & MODES["no-q"]:
             rows = [(t, pr, ip, pr * pr // ip if ip else 0, lt) for t, pr, ip, qp, lt in rows]

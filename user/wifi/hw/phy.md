@@ -255,12 +255,47 @@ the square's strongest within the transform's step of where the 40 Msps play put
 and so for -2, +1 and -0.625 MHz; a stale estimate read for a new one would have spread them.
 `fast,no-q` loses Q wherever I is 0, a few in a hundred at a noise of a few steps.
 On this processor five accesses are the least a sample can take, a start and two reads, about 80 cycles and 1 MS/s;
-faster needs the PHY reached otherwise, by D11's own processor through its own registers, see below.
+faster needs the PHY reached otherwise, by D11's own processor through its own registers, see "On D11's processor".
 
 What the samples show, **measured**, the access point up on channel 6:
 I^2 + Q^2 has a median of 2 to 5, a few of the converter's steps;
 one run of 2000 held a burst of 77 samples, 1.2 ms, up to 19865, a magnitude of about 140, the length of a frame, a hypothesis.
 At 311 kS/s the channel's 20 MHz folds onto itself, so only a signal narrower than the rate, tuned near the carrier, is seen whole.
+
+### On D11's processor
+
+With `--mode psm` D11's processor, the PSM, takes the samples, by microcode the tool writes, `psm_loop`, see `d11.md`;
+the code on the WLAN's processor starts it for each run, times it, and copies its samples out of D11's shared memory,
+which holds 1280 of three halfwords, 1920 of two.
+Each sample starts an estimate, waits 14 instructions, and reads the results through the external IHR, `0x18` and `0x19`,
+each access waiting on its busy bit; a read of the PHY takes about 14 cycles of the processor's, a hypothesis from the difference below.
+
+The estimate has ended by a read 10 instructions after the start's access, **measured**, 896 samples each,
+by `0x481` read once at once after a delay of instructions, with the WLAN's processor reading D11 at the same time:
+
+| Delay | 1 | 2 | 3 | 4 | 6 | 8 | 10 | 12 | 14 | 16 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Found set | 614 | 416 | 225 | 53 | 37 | 21 | 0 | 0 | 0 | 0 |
+
+Without that read, the first result read where it would have been,
+an estimate read before it ends shows as a product that does not fit the squares, **measured**, 2000 samples of two tones each:
+111 at a delay of 4, 34 at 8, none at 11 and none at 14.
+None of the runs of 14 below held a sample that does not fit.
+
+| `--mode` | What a sample reads | Cycles | Rate |
+|---|---|---|---|
+| `psm` | three low halfwords | 76.0 | 1073.6 kS/s |
+| `psm,no-q` | the product and I squared | 62.0 | 1316.4 kS/s |
+
+Each with the calibration's tones, **measured**, 1000 samples a run:
+the square's strongest within the transform's step of where the play puts it,
+-294.6 kHz for +2 MHz and +221.2 for -1.5 MHz at 1073.6 kS/s, against -294.25 and +220.69,
++51.4 and -367.7 at 1316.4 kS/s, against +50.88 and -367.26;
+and so for -2, +1 and -0.625 MHz in earlier runs.
+A sample's cycle count is a line through two moments the WLAN's processor sees `psm_base_0` pass, an eighth of the way and the end,
+since its reads of D11 slow the PSM, see `d11.md`; the rate so measured varies by up to 1% from run to run, with how the processor reads.
+So D11's processor takes a sample in about two thirds of the time the WLAN's does, and is held by the PHY's accesses and the estimate's own time;
+no register gives a sample in one read, see "The I/Q estimator", so two reads and a start, about 62 cycles, are the least, 1.3 MS/s.
 
 ### The receiver's gain
 

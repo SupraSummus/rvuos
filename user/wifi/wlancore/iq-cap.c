@@ -7,6 +7,8 @@
  * Each sample is an estimate of the PHY's I/Q estimator, rx_iq_est, over one sample:
  * I times Q, I squared and Q squared, which give I and Q but for one sign common to both.
  * Time is the Cortex-M3's cycle counter, DWT's, at the 81.6 MHz the firmware leaves the processor at, measured here against D11's TSF.
+ * With MODE_PSM D11's own processor takes the samples instead, by microcode the host has loaded, into D11's shared memory,
+ * and this code starts it, times it and copies what it took.
  *
  * With tones, the control: the firmware's own receive IQ calibration is set up and its tones played,
  * by the ROM's functions on the firmware's PHY state, which the host finds, and a run of samples taken during each,
@@ -35,6 +37,18 @@
 #define IQ_I_POWER   0x486u          /* I squared, two halfwords */
 #define IQ_Q_POWER   0x488u          /* Q squared, its low halfword; its high one at IQ_Q_POWER_HI */
 #define IQ_Q_POWER_HI 0xa9au
+/* D11's processor, the PSM, see hw/d11.md and tools/cyw43psm.py */
+#define MACCONTROL   (D11 + 0x120u)
+#define OBJADDR      (D11 + 0x160u)
+#define OBJDATA      (D11 + 0x164u)
+#define OBJ_SHARED_AUTO_INC 0x03010000u /* the shared memory, in words of 32 bits, an address that steps */
+#define PSM_BASE_0   (D11 + 0x4c0u)  /* the microcode's next sample's halfword in the shared memory */
+#define PSM_HALTED   0x04000404u     /* the internal registers on, wake, the PSM held at 0 */
+#define PSM_RUNNING  0x04000402u     /* the internal registers on, wake, the PSM run */
+#define SHARED_FROM  0x100u          /* the halfword the microcode's first sample goes to, the host's too */
+#define SHARED_END   0x1000u         /* the shared memory's end, in halfwords */
+#define PSM_LEAST    40u             /* cycles: less than any sample of the microcode's takes */
+#define PSM_NEAR     4u              /* samples: how near psm_wait reads psm_base_0 on end */
 
 /* The ROM's functions the calibration runs, 0x872770's, each taking the PHY's state, pi, first; Thumb addresses. */
 typedef void (*phy_fn)(uint32_t pi, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
@@ -52,20 +66,22 @@ typedef void (*phy_fn)(uint32_t pi, uint32_t, uint32_t, uint32_t, uint32_t, uint
 #define BASE   0x1f000u
 #define STACK  BASE
 #define MAGIC  (BASE + 0x00) /* MAGIC_VALUE once this code runs */
-#define COUNT  (BASE + 0x04) /* the host's: samples in each run */
+#define COUNT  (BASE + 0x04) /* the host's: samples in each run; at the end what each run took */
 #define WAIT   (BASE + 0x08) /* the host's: IQ_WAIT's value */
 #define GO     (BASE + 0x0c) /* GO_VALUE from the host starts; ENDED once all is done */
-#define FAULT  (BASE + 0x10) /* 0xfa000000 and the exception's number, if one came */
+#define FAULT  (BASE + 0x10) /* 0xfa000000 and the exception's number, if one came; 0xfb000000 and psm_base_0 if the microcode stopped short
+                              or did not start */
 #define CYCLES (BASE + 0x14) /* the cycles of TSF_SPAN microseconds of D11's TSF */
 #define STEP   (BASE + 0x18) /* where the code is: 1 the calibration's setup, 2 + k the tone k, 0x70 its restore */
 #define PI     (BASE + 0x1c) /* the host's, with tones: the PHY's state */
 #define TONES  (BASE + 0x20) /* the host's: how many tones, at most MOST_TONES */
-#define FREQ   (BASE + 0x40) /* the host's: each tone's frequency in Hz, signed */
-#define FIRST  (BASE + 0x80) /* the cycle count at each run's start, the run before the tones first */
 #define MODE   (BASE + 0x24) /* the host's: how a sample is taken, MODE_* */
 #define MODE_FAST  1u        /* no poll, and the low halfwords alone: an 8-bit sample's squares and product fit them */
 #define MODE_CHECK 2u        /* with MODE_FAST: IQ_CONTROL read once before the results, its bit 0 kept as LATE */
-#define MODE_NO_Q  4u        /* with MODE_FAST: Q squared not read, the host taking Q as the product over I */
+#define MODE_NO_Q  4u        /* with MODE_FAST or MODE_PSM: Q squared not read, the host taking Q as the product over I */
+#define MODE_PSM   8u        /* the host's microcode takes the samples, low halfwords, into SHARED from SHARED_FROM */
+#define FREQ   (BASE + 0x40) /* the host's: each tone's frequency in Hz, signed */
+#define FIRST  (BASE + 0x80) /* the cycle count at each run's start, the run before the tones first */
 #define OUT     0x21000u     /* the samples, four words each: cycle count, product, I squared, Q squared */
 #define OUT_END 0x7e000u
 #define OUT_END_TONES 0x2d000u /* with tones, where the cleared RAM ends; the ROM's functions use the RAM above */
@@ -74,11 +90,13 @@ typedef void (*phy_fn)(uint32_t pi, uint32_t, uint32_t, uint32_t, uint32_t, uint
 #define ENDED       3u
 #define MOST_TONES  16u
 #define TSF_SPAN    100000u
+#define TIMEOUT     80000000u /* cycles, about a second: the most the microcode's run is waited for */
 #define POLLS       4096u   /* the most reads of IQ_CONTROL a sample waits for, more than 256 waits' worth */
 #define LATE        1u      /* in a sample's cycle count: its estimate had not ended after POLLS reads */
 /*
- * So a run ends: TSF_SPAN microseconds, then (1 + TONES) runs of COUNT samples, at most what fits before the end,
- * each of at most POLLS reads, and with tones the ROM's functions, which wait on the PHY for bounded times of their own.
+ * So a run ends: TSF_SPAN microseconds, then (1 + TONES) runs of COUNT samples, at most what most_of allows,
+ * each of at most POLLS reads, or with MODE_PSM waits of at most TIMEOUT cycles in all and copies of COUNT samples,
+ * and with tones the ROM's functions, which wait on the PHY for bounded times of their own.
  */
 
 static uint32_t phy_read(uint32_t reg)
@@ -129,6 +147,74 @@ static volatile uint32_t *take_fast(volatile uint32_t *out, uint32_t n, uint32_t
     return out;
 }
 
+/* The next halfword of the shared memory, which OBJDATA gives two at a time. */
+static uint32_t shared_next(uint32_t *word, uint32_t *half)
+{
+    if (!*half) {
+        *word = REG(OBJDATA);
+    }
+    *half ^= 1u;
+    return *half ? *word & 0xffffu : *word >> 16;
+}
+
+/*
+ * psm_base_0 once it is at least target, or the time is up; the read is D11's, as the microcode's own accesses are,
+ * so while the target is more than a few samples off, it waits on its own cycle counter instead, for less than they take.
+ */
+static uint32_t psm_wait(uint32_t target, uint32_t per, uint32_t t0)
+{
+    uint32_t v;
+    while ((v = REG16(PSM_BASE_0)) < target && REG(DWT_CYCCNT) - t0 < TIMEOUT) {
+        uint32_t ahead = (target - v) / per;
+        if (ahead > PSM_NEAR) {
+            uint32_t from = REG(DWT_CYCCNT);
+            while (REG(DWT_CYCCNT) - from < (ahead - PSM_NEAR) * PSM_LEAST) {
+            }
+        }
+    }
+    return v;
+}
+
+/*
+ * The microcode runs from 0, takes n samples of per halfwords and stays, psm_base_0 at its end.
+ * Its time is where psm_base_0 is first seen past an eighth of the way and at the end,
+ * so that how long it takes to start and stop is left out, and each sample's cycle count is the line through the two.
+ */
+static volatile uint32_t *take_psm(volatile uint32_t *out, uint32_t n, uint32_t per, uint32_t run)
+{
+    uint32_t stop = SHARED_FROM + n * per, mark = SHARED_FROM + (n / 8u + 1u) * per, t0, ta, tb, a, v;
+    REG(MACCONTROL) = PSM_HALTED;
+    t0 = REG(DWT_CYCCNT);
+    REG(MACCONTROL) = PSM_RUNNING;
+    /* psm_base_0 holds what ran before until the microcode's first instruction sets it to SHARED_FROM */
+    while (REG16(PSM_BASE_0) >= mark) {
+        if (REG(DWT_CYCCNT) - t0 >= TIMEOUT) {
+            REG(FAULT) = 0xfb000000u | REG16(PSM_BASE_0);
+            break;
+        }
+    }
+    a = psm_wait(mark, per, t0);
+    ta = REG(DWT_CYCCNT);
+    v = psm_wait(stop, per, t0);
+    tb = REG(DWT_CYCCNT);
+    REG(MACCONTROL) = PSM_HALTED;
+    if (v != stop) {
+        REG(FAULT) = 0xfb000000u | v;
+    }
+    int32_t ka = (int32_t)((a - SHARED_FROM) / per), kb = (int32_t)((v - SHARED_FROM) / per);
+    int32_t step = kb > ka ? (int32_t)(((tb - ta) << 8) / (uint32_t)(kb - ka)) : 0; /* cycles a sample, in 256ths */
+    REG(FIRST + 4u * run) = ta - (uint32_t)((ka * step) >> 8);
+    REG(OBJADDR) = OBJ_SHARED_AUTO_INC | SHARED_FROM / 2u;
+    uint32_t word = 0, half = 0;
+    for (uint32_t i = 0; i < n; i++, out += 4) {
+        out[0] = (ta + (uint32_t)((((int32_t)i - ka) * step) >> 8)) & ~LATE;
+        out[1] = shared_next(&word, &half);
+        out[2] = shared_next(&word, &half);
+        out[3] = per > 2u ? shared_next(&word, &half) : 0;
+    }
+    return out;
+}
+
 static volatile uint32_t *take(volatile uint32_t *out, uint32_t n, uint32_t run)
 {
     uint32_t control = phy_read(IQ_CONTROL) & ~3u, mode = REG(MODE);
@@ -136,6 +222,9 @@ static volatile uint32_t *take(volatile uint32_t *out, uint32_t n, uint32_t run)
     phy_write(IQ_WAIT, (phy_read(IQ_WAIT) & ~0xffu) | (REG(WAIT) & 0xffu));
     phy_write(CLOCKS, phy_read(CLOCKS) | ESTIMATE_CLOCKS);
     REG(FIRST + 4u * run) = REG(DWT_CYCCNT);
+    if (mode & MODE_PSM) {
+        return take_psm(out, n, mode & MODE_NO_Q ? 2u : 3u, run);
+    }
     if (mode & MODE_FAST) {
         return take_fast(out, n, control, mode);
     }
@@ -153,6 +242,17 @@ static volatile uint32_t *take(volatile uint32_t *out, uint32_t n, uint32_t run)
     return out;
 }
 
+/* The most a run takes: samples in OUT, or in the shared memory. */
+static uint32_t most_of(uint32_t mode, uint32_t tones)
+{
+    uint32_t most = ((tones ? OUT_END_TONES : OUT_END) - OUT) / 16u / (1u + tones);
+    if (mode & MODE_PSM) {
+        uint32_t shared = (SHARED_END - SHARED_FROM) / (mode & MODE_NO_Q ? 2u : 3u);
+        return most < shared ? most : shared;
+    }
+    return most;
+}
+
 void iq_start(void)
 {
     __asm__ volatile("cpsid i");
@@ -168,7 +268,7 @@ void iq_start(void)
     REG(CYCLES) = REG(DWT_CYCCNT) - c0;
 
     uint32_t tones = REG(TONES) < MOST_TONES ? REG(TONES) : MOST_TONES, pi = REG(PI);
-    uint32_t most = ((tones ? OUT_END_TONES : OUT_END) - OUT) / 16u / (1u + tones), n = REG(COUNT) < most ? REG(COUNT) : most;
+    uint32_t most = most_of(REG(MODE), tones), n = REG(COUNT) < most ? REG(COUNT) : most;
     uint32_t clocks = phy_read(CLOCKS);
     volatile uint32_t *out = (volatile uint32_t *)OUT;
     if (tones) {
