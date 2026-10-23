@@ -23,6 +23,7 @@
  * survey=0 leaves the survey of the channels out;
  * watch=, seconds up to WATCH_S_MAX, replaces the exchange with a watch of the power on channel=, see watch_power,
  * and watchmax=1 keeps each block's strongest sample rather than its mean;
+ * listen=, seconds up to WATCH_S_MAX, replaces it with every frame heard on channel=, see listen_frames;
  * sweep=, seconds up to WATCH_S_MAX, replaces it with a sweep of the power from from= to to=, in MHz within the band,
  * 2400 to 2483, off the channels' grid, see sweep_power;
  * load=, units of the processor's 64 up to 32, has a thread beside the link's earn them and compute without end,
@@ -158,7 +159,7 @@ static uint32_t wait_for(uint32_t want)
 
 /* What the configuration asks for. */
 struct config {
-    uint32_t channel, run_s, stream, load, watch_s, sweep_s, from_mhz, to_mhz;
+    uint32_t channel, run_s, stream, load, watch_s, sweep_s, from_mhz, to_mhz, listen_s;
     int32_t power;
     bool survey, watch_max;
 };
@@ -201,6 +202,8 @@ static void configure(struct config *c)
     c->watch_s = config_number(conf, size, "watch", 0);
     c->watch_s = c->watch_s > WATCH_S_MAX ? WATCH_S_MAX : c->watch_s;
     c->watch_max = config_number(conf, size, "watchmax", 0) != 0;
+    c->listen_s = config_number(conf, size, "listen", 0);
+    c->listen_s = c->listen_s > WATCH_S_MAX ? WATCH_S_MAX : c->listen_s;
     c->sweep_s = config_number(conf, size, "sweep", 0);
     c->sweep_s = c->sweep_s > WATCH_S_MAX ? WATCH_S_MAX : c->sweep_s;
     c->from_mhz = config_number(conf, size, "from", RADIO_MHZ_FIRST);
@@ -625,6 +628,80 @@ static void sweep_power(const struct config *c)
     }
 }
 
+#define LISTEN_KEEP  16u /* frames told whole */
+#define LISTEN_BYTES 12u /* of each, from its frame control field */
+#define LISTEN_SETTINGS 16u
+
+struct heard_frame {
+    uint32_t at_us, length, lqi;
+    bool fcs_ok;
+    uint8_t bytes[LISTEN_BYTES];
+};
+
+static struct heard_frame kept[LISTEN_KEEP];
+static uint32_t setting_frames[LISTEN_SETTINGS], setting_byte[LISTEN_SETTINGS];
+
+/*
+ * The listen: the radio receiving on the channel for listen_s seconds, whatever frame it hears, of any node and any kind,
+ * its FCS right or not, counted, and the first LISTEN_KEEP told with their first bytes,
+ * so that a frame another sender made up shows whether the radio took it as 802.15.4;
+ * data frames are counted by their sequence number, a setting's, with their last byte,
+ * as user/radio/esp32c6/prog/synth154.c sends them.
+ */
+static void listen_frames(const struct config *c)
+{
+    struct alarm *a = &link.alarm;
+    uint32_t good = 0, bad = 0, n = 0;
+    for (uint32_t k = 0; k < LISTEN_SETTINGS; k++) {
+        setting_frames[k] = setting_byte[k] = 0;
+    }
+    radio_channel(&link.radio, c->channel);
+    radio_receive_start(&link.radio);
+    uint32_t start = alarm_now(a);
+    while (alarm_now(a) - start < c->listen_s * US_PER_S) {
+        struct radio_frame f;
+        if (!radio_received(&link.radio, &f)) {
+            continue;
+        }
+        if (f.fcs_ok) {
+            good++;
+            if (f.length >= 4u && (f.bytes[0] & MAC154_TYPE_MASK) == MAC154_TYPE_DATA && f.bytes[2] < LISTEN_SETTINGS) {
+                setting_frames[f.bytes[2]]++;
+                setting_byte[f.bytes[2]] = f.bytes[f.length - 1u];
+            }
+        } else {
+            bad++;
+        }
+        if (n < LISTEN_KEEP) {
+            struct heard_frame *h = &kept[n++];
+            h->at_us = alarm_now(a) - start;
+            h->length = f.length;
+            h->lqi = f.lqi;
+            h->fcs_ok = f.fcs_ok;
+            for (uint32_t k = 0; k < LISTEN_BYTES; k++) {
+                h->bytes[k] = k < f.length ? f.bytes[k] : 0;
+            }
+        }
+    }
+    radio_off(&link.radio);
+    say(&cout, "listen: channel %u, %u MHz, %u s: %u frames with a right FCS, %u with a wrong one\n", c->channel,
+        RADIO_CHANNEL_MHZ(c->channel), c->listen_s, good, bad);
+    for (uint32_t k = 0; k < LISTEN_SETTINGS; k++) {
+        if (setting_frames[k] != 0) {
+            say(&cout, "listen: setting %u, byte %u: %u frames\n", k, setting_byte[k], setting_frames[k]);
+        }
+    }
+    for (uint32_t k = 0; k < n; k++) {
+        const struct heard_frame *h = &kept[k];
+        say(&cout, "listened: %u us, %u bytes, FCS %s, LQI %u:", h->at_us, h->length, h->fcs_ok ? "right" : "wrong", h->lqi);
+        for (uint32_t b = 0; b < LISTEN_BYTES && b < h->length; b++) {
+            say(&cout, " %x", h->bytes[b]);
+        }
+        say(&cout, "\n");
+        sleep_us(WATCH_PAUSE_US);
+    }
+}
+
 int main(void);
 int main(void)
 {
@@ -663,6 +740,11 @@ int main(void)
     say(&cout, "thread: the radio is on, set for IEEE 802.15.4\n");
     if (c.survey) {
         link_stir(&link, survey_energy());
+    }
+    if (c.listen_s != 0) {
+        listen_frames(&c);
+        say(&cout, "thread: listened\n");
+        rv_halt(BOOT_CAP_HALT, 0);
     }
     if (c.sweep_s != 0) {
         sweep_power(&c);

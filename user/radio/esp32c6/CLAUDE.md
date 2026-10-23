@@ -70,6 +70,14 @@ A change to the nRF52840's `sweep=` in `user/thread/root.c` runs the player with
 and again with `swap=1`, while the nRF52840 sweeps from 2417 to 2457 MHz with `sweep=10`, and once with `amp=0`, its control:
 the means at 2427 and 2428 MHz must stand a few dB over the control's in the first, and at 2447 and 2448 in the second.
 
+A change to `prog/synth154.c`, or to the nRF52840's `listen=` in `user/thread/root.c`, runs synth154 with `amps=0,511` and `send=40`
+while the nRF52840 listens on channel 24 with `listen=15`: setting 1 must come whole most of the times it was played meanwhile,
+setting 0, nothing played, never, as `hw/dump.md`, "A frame made up", says.
+A change to `kind=1`, `gaps=`, `hear=` or `user/radio/esp32c6/tools/demod154.py` runs synth154 with `kind=1`, `amps=511`,
+`dsts=21124,21124,4660` and `hear=4` while the nRF52840 exchanges on channel 24 with `run=20` and `survey=0`,
+and `demod154.py LOG 16e6 -2e6` must read acknowledgements with sequence numbers 0 and 1 after the first two settings' pings,
+their FCS right, and none after the third's, as `hw/dump.md`, "Frames longer than a play, and the answer heard", says.
+
 ### The register map
 
 A change to `prog/regmap.c` or `user/radio/esp32c6/tools/regmap.py` runs the map with `channel=1`, and `user/radio/esp32c6/tools/regmap.py` must put its four passes together.

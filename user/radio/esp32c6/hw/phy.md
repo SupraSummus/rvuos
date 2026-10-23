@@ -174,6 +174,13 @@ and `prog/loopback.c` captures what the receiver hears, with the dump engine.
   the radio's 0 dBm, as every bring-up's calibration sends it for its own while.
   The nRF52840's survey of the energy, two windows of 100 ms a channel, did not tell it from the floor:
   a rhythm and a watch through many of its periods did.
+- After the loopback, `drv_phy_loopback(0, 0)`, the receiver stays deaf (measured, `prog/synth154.c` with `hear=`,
+  captures of source 15 at 16 MS/s, channel 13): their words' rms 0.4 to 2, the quiet loopback's,
+  where the receiver alone hears its noise at 25 to 35, in every capture taken up to 18 ms after,
+  13 at each of 3, 5, 8, 12, 16 and 18 ms, and back in 1 of 12 after 20 ms, 1 of 12 after 40 ms and 7 of 12 after 80 ms:
+  deaf until something moves it, it seems, at random.
+  `set_rxclk_en(1)`, `ram_pbus_xpd_rx_on(0)`, the MAC's receive off and on, and a pulse on `FECTRL_TXRX_OFF`'s bit 14 or 15
+  did not bring it back; tuning the channel again, `mac_channel`, did, every time of 16, and takes some 170 us.
 
 ### BBPLL
 

@@ -266,3 +266,48 @@ Written with 4096 and bit 31 (measured, `write=1`): `0x0C` sets its bit 18 a whi
   to the count's end and nothing from the bank's first, its words twice each, and the play ends sooner, 142 to 151 us for 16383 words,
   and what it writes the player may then play, so it is no clean witness of what was sent.
   Through it, looped back, a tone of 32 words' period, one of a quarter the amplitude, and a constant word each came back as such.
+
+### A frame made up
+
+`prog/synth154.c` makes an IEEE 802.15.4 frame of its samples alone and has the player send it, looped back,
+the loopback all that lets it out, and the nRF52840 hears it whole (measured, channel 13 of Wi-Fi's, 2 MHz below it,
+802.15.4's channel 24, the nRF52840's `listen=15` of `user/thread/root.c`):
+four bytes of preamble, the SFD, the length and six bytes, a data frame with no addresses and its FCS,
+each symbol 32 chips of 802.15.4's table, O-QPSK with half sines at 20 samples a chip, 15380 samples at 40 MS/s,
+and turned 2 MHz down in the samples themselves.
+At the greatest amplitude, 511, the nRF52840 heard 1440 frames in its 15 s, every one played meanwhile, and none with a wrong FCS;
+with nothing played, none.
+Played in turn, each frame telling its amplitude in its bytes, `amps=0,150,200,250,300,350,400,511`, in one run:
+of some 89 frames each in the 15 s, 0, 0, 0, 0, 1, 14, 48 and 86 came whole, none with a wrong FCS:
+the frames fall away within some 4 dB below the greatest, as a receiver's do near its least level.
+Runs one setting at a time differ by more than that: 300 alone came through 88 % of the time in one, 1 % in the run above,
+which is why the settings go in turn within one run.
+
+### Frames longer than a play, and the answer heard
+
+A play takes 16383 words at most; bit 14 of the word is no part of the count (measured: 16383 words with it took 414 us, as without).
+A frame of 22 bytes, 28180 samples, a ping to the nRF52840 as `i154.c`'s are, goes as two plays (`prog/synth154.c`, `kind=1`):
+the first 16383 samples from the bank's lower half, and once its bit 18 is seen, `MAC_DUMP_ALLOC` set and the rest from the upper half's first word,
+some samples of it left out for the while the second play takes to start.
+Leaving out 0 to 8 samples, every frame played came whole to the nRF52840's `listen=`, 71 of 71 each,
+and fewer the further from that: 66 at -12, 27 at -16, 0 at -24; 68 at +16, 6 at +24 (`gaps=-24,...,24` in one run).
+So the second play starts some 2 samples, 50 ns, after the first ends.
+Between, 51 at -8 and 33 at +12 came whole: 10 samples from the best, half the 2 MHz turn's period,
+where the carrier's phase jumps by half a turn at the seam.
+The nRF52840's exchange of `user/thread/root.c` acknowledged them as its own: in one run it sent 166 acknowledgements,
+and printed "pinga" and the rest as the C6's pings.
+
+The receiver hears the acknowledgement: once the frame's play ends, the loopback off and the channel tuned again, see `phy.md`,
+"The loopback", the receiver is back some 194 us after the play's end was seen, and a capture of 8192 words at 16 MS/s at once
+holds a burst 17 dB over the floor, 2 MHz wide at -2 MHz, from some 95 to 110 us into it, some 370 us long.
+`user/radio/esp32c6/tools/demod154.py` reads it: an acknowledgement, `02 00 00 b8 b5`, its FCS right,
+the nRF52840's frequency 65 kHz below the C6's, in every capture taken while the nRF52840 ran, 13 of 13.
+With the settings in turn in one run, pings with sequence numbers 0 and 1 to the nRF52840 and a third to 0x1234 (`dsts=21124,21124,4660`):
+acknowledgements with sequence number 0 after the first, 6, and 1 after the second, 2, their FCS right, and none after the third,
+whose pings the nRF52840 counted among its "others".
+
+The frequency and the mirror, each in one run of `prog/synth154.c`'s short frames at amplitude 511, the nRF52840's `listen=20`:
+frames 400 kHz below or above the channel came whole as at it, 222 or 223 of some 223 each, and the mirror, `conjs=1`, never;
+then of some 198 each, 0 at -600 kHz, 198 at -500, -450 and 0, 197 at -400, 195 at +400, 2 at +450, 0 at +500 and +600.
+So the nRF52840 takes a frame some 450 kHz either way of where it is tuned,
+and its middle lies some 50 kHz below what the C6 calls the channel's, as the acknowledgements read 65 kHz below the C6's.
