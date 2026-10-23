@@ -1,5 +1,5 @@
 /*
- * The receiver's samples, one at a time, on the CYW43439's WLAN processor: see user/wifi/tools/cyw43-iq.py and hw/phy.md.
+ * The receiver's samples, one at a time, on the CYW43439's WLAN processor: see user/radio/cyw43439/tools/cyw43-iq.py and hw/phy.md.
  *
  * The vendor's firmware sets the radio up and is then stopped for good;
  * the processor, held in reset, starts again here, at vectors the host writes over the firmware's, its interrupts masked.

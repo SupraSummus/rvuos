@@ -1,4 +1,4 @@
-"""D11's processor, the PSM, from the host: the few of its instructions our microcode uses, and loading them; see user/wifi/hw/d11.md.
+"""D11's processor, the PSM, from the host: the few of its instructions our microcode uses, and loading them; see user/radio/cyw43439/hw/d11.md.
 
 An instruction is an opcode, from bit 39, and three operands of 13 bits, the first two read and the last written;
 the microcode memory holds each as two words, its low 32 bits first.

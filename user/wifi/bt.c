@@ -7,7 +7,7 @@
  * the WLAN firmware keeps in that RAM. Polled, no interrupts.
  *
  * The core's own code lies in RAM (the ROM is read only), and the ROM branches into it at a few points.
- * One of them is taken over: our code in btcore/ runs the point's own first instruction, writes the poke,
+ * One of them is taken over: our code in user/radio/cyw43439/btcore/ runs the point's own first instruction, writes the poke,
  * serves the mailbox the host fills, and goes back into the patch, so our code runs on the core.
  */
 
@@ -15,7 +15,7 @@
 
 #include <stddef.h>
 
-#include "btcore/bt-map.h" /* BT_POINT, BT_STUB, BT_MBOX, and the mailbox's words; see the code in btcore/ */
+#include "radio/cyw43439/btcore/bt-map.h" /* BT_POINT, BT_STUB, BT_MBOX, and the mailbox's words; see the code in user/radio/cyw43439/btcore/ */
 #include "cyw43.h"
 #include "lib/libc.h"
 #include "lib/say.h"
@@ -213,7 +213,7 @@ static void bt_events(struct bt_io *io, struct bt *b, uint32_t ms)
 }
 
 /*
- * Our own code on the core, built from btcore/bt-stub.S and linked where the core sees it; see BT.md.
+ * Our own code on the core, built from user/radio/cyw43439/btcore/bt-stub.S and linked where the core sees it; see user/wifi/BT.md.
  * bt_takeover branches from BT_POINT to bt_code at BT_STUB, which runs that point's own first instruction,
  * writes the poke, serves the mailbox, and goes back into the patch; bt_measure is its timed run, at BT_MEASURE.
  */

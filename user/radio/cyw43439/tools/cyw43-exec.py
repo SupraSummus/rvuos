@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Our executor on the CYW43439's Bluetooth core, parked: user/wifi/btcore/bt-exec.c, over the bridge.
+"""Our executor on the CYW43439's Bluetooth core, parked: user/radio/cyw43439/btcore/bt-exec.c, over the bridge.
 
-Usage: user/wifi/tools/cyw43-exec.py [--setup RECORD] [--times N] PROGRAM
+Usage: user/radio/cyw43439/tools/cyw43-exec.py [--setup RECORD] [--times N] PROGRAM
 
-The core is parked as user/wifi/tools/cyw43park.py parks it, but its slide leads to the executor, which runs no vendor code
+The core is parked as user/radio/cyw43439/tools/cyw43park.py parks it, but its slide leads to the executor, which runs no vendor code
 and waits for a list of operations in its RAM; see user/wifi/BT.md.
---setup writes a record's writes over the bridge first, a list of lines "w ADDR 4 VALUE" as user/wifi/tools/cyw43-replay.py takes,
-the transmitter's nine words of user/wifi/btcore/bt-tx.rec for one, or the receiver's of bt-rx.rec.
+--setup writes a record's writes over the bridge first, a list of lines "w ADDR 4 VALUE" as user/radio/cyw43439/tools/cyw43-replay.py takes,
+the transmitter's nine words of user/radio/cyw43439/btcore/bt-tx.rec for one, or the receiver's of bt-rx.rec.
 PROGRAM is the list, an operation a line, numbers in hex but for microseconds and counts:
   write ADDR VALUE    a word written
   wait US             microseconds from now
@@ -31,13 +31,14 @@ import sys
 import time
 
 TOOLS = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.abspath(os.path.join(TOOLS, "../../.."))
+ROOT = os.path.abspath(os.path.join(TOOLS, "../../../.."))
 sys.path.insert(0, TOOLS)
+sys.path.insert(1, os.path.join(ROOT, "user/wifi/tools"))  # cyw43bridge, beside the bridge it is the host side of
 from cyw43bridge import Bridge  # noqa: E402
 from cyw43park import BOARD_WINDOW, PATCH_CODE, SNIFFER_AT, park as park_core, read  # noqa: E402
 
 EXEC_BIN = os.path.join(ROOT, "build/cyw43/bt-exec.bin")
-EXEC_AT = 0xD0D00  # BT_STUB of user/wifi/btcore/bt-map.h
+EXEC_AT = 0xD0D00  # BT_STUB of user/radio/cyw43439/btcore/bt-map.h
 EXEC_ROOM = 0x200  # the bytes bt-exec.ld keeps it within
 BRANCH = bytes.fromhex("40f60150c0f20d000047")  # movw r0, #0x0d01; movt r0, #0x0d; bx r0: to EXEC_AT, in Thumb
 BASE = 0x21C000  # bt-exec.c's words

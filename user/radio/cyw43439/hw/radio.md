@@ -2,7 +2,7 @@
 
 The radio's registers, `0x000` to `0x1ff`, reached through D11's `radioregaddr` and `radioregdata`, see `phy.md`,
 by what the WLAN ROM's code does to them, **known**, from every caller of the radio's access functions,
-`0x86c064`, `0x86e2f8`, `0x86bedc`, `0x86bec0` and `0x86bf00`, read in `user/wifi/tools/cyw43-code.py decompile`:
+`0x86c064`, `0x86e2f8`, `0x86bedc`, `0x86bec0` and `0x86bf00`, read in `user/radio/cyw43439/tools/cyw43-code.py decompile`:
 27 functions; no list `0x86bfa8` plays reaches the radio, and only the radio's id, `0x86c578`, sets `radioregaddr` otherwise.
 What a block is, where the code does not name it, is a hypothesis, and said as one.
 

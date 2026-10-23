@@ -14,15 +14,15 @@ this map is where each register's facts are kept, the experiments' among them.
 
 A fact says where it comes from and how sure it is:
 **known**, a source names it: Linux's `bcma` and `brcmfmac`, which are open, or the chip's own enumeration ROM;
-**traced**, the vendor firmware's own accesses, recorded by `user/wifi/tools/cyw43-rehost.py --record` as it ran over the chip;
-**read**, `user/wifi/tools/cyw43-regmap.py` read it off the chip in a state named;
+**traced**, the vendor firmware's own accesses, recorded by `user/radio/cyw43439/tools/cyw43-rehost.py --record` as it ran over the chip;
+**read**, `user/radio/cyw43439/tools/cyw43-regmap.py` read it off the chip in a state named;
 **measured**, a run on the board answered a question, the experiment named;
 and **unknown**, or a hypothesis, said as one.
 
 ## The backplane
 
 The chip is its cores on one backplane, which the host reaches through gSPI.
-The enumeration ROM lists them, **known**: `user/wifi/tools/cyw43-regmap.py erom` reads it, at `0x18108000`,
+The enumeration ROM lists them, **known**: `user/radio/cyw43439/tools/cyw43-regmap.py erom` reads it, at `0x18108000`,
 as ChipCommon's word `0xfc` says, and parses it as `bcma` does, `drivers/bcma/scan.c`.
 ChipCommon's first word, `0x1545a9af`, says chip `0xa9af`, 43439, revision 5, package 4.
 
@@ -46,7 +46,7 @@ No PMU or GCI is a core of its own: ChipCommon holds the PMU,
 and the Bluetooth core's window holds a GCI block, `0x650000` in it, see `bt.md`.
 The rest of the space is ARM's default slave, which answers what no core takes.
 
-With the WLAN firmware up and nothing parked, `user/wifi/tools/cyw43-regmap.py wlan` read, **read**,
+With the WLAN firmware up and nothing parked, `user/radio/cyw43439/tools/cyw43-regmap.py wlan` read, **read**,
 the words that read nonzero in each core's page and those that moved between two reads in a row:
 
 | Page | Nonzero | Moving |
@@ -64,7 +64,8 @@ both are read with the WLAN's processor held in reset, see `phy.md`.
 
 ## The tools
 
-They are in `user/wifi/tools/`, beside the code they serve, the observer's beside it in `user/observer/`:
+They are in `user/radio/cyw43439/tools/`, beside the code they serve, the bridge's host side in `user/wifi/tools/` beside the bridge,
+and the observer's in `user/observer/`:
 
     cyw43-regmap.py erom                         # the cores
     cyw43-regmap.py wlan OUT                     # the cores' pages, the WLAN firmware up

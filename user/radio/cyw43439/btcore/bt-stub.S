@@ -1,7 +1,7 @@
 /*
- * Our own code for the CYW43439's Bluetooth core; see bt.c, bt-map.h and BT.md.
+ * Our own code for the CYW43439's Bluetooth core; see user/wifi/bt.c, bt-map.h and user/wifi/BT.md.
  *
- * The core is a Cortex-M3. Its ROM branches into the vendor patch's code in the core's RAM, and bt.c takes one
+ * The core is a Cortex-M3. Its ROM branches into the vendor patch's code in the core's RAM, and user/wifi/bt.c takes one
  * such point over: it uploads .takeover to that point, a branch to the stub, and .text to free RAM beside it.
  * The stub runs on the point's own first instruction and goes back into the patch.
  *

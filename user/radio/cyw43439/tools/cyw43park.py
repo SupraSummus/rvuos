@@ -1,6 +1,6 @@
 """The CYW43439's Bluetooth core parked over the bridge, its processor stopped in the vendor patch; see user/wifi/BT.md.
 
-user/wifi/tools/cyw43-rehost.py, user/wifi/tools/cyw43-replay.py and user/wifi/tools/cyw43-exec.py park the core so, each with its own tail:
+user/radio/cyw43439/tools/cyw43-rehost.py, user/radio/cyw43439/tools/cyw43-replay.py and user/radio/cyw43439/tools/cyw43-exec.py park the core so, each with its own tail:
 the vendor patch goes in as the host writes it, see user/wifi/bt.c, but its code a slide of `cpsid i` into the tail,
 so the ROM checks the patch's signature, installs it and, at its first call into the patch, runs the tail for good,
 its interrupts masked.

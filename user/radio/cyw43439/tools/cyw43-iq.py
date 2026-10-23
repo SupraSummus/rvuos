@@ -2,16 +2,16 @@
 """The CYW43439's receiver sampled: its I/Q estimator, one sample at a time, at 311 thousand to 1.46 million samples a second;
 or a converter's bits, at 4.47 million, which see the calibration's loopback and not the air.
 
-Usage: user/wifi/tools/cyw43-iq.py OUT --conf FILE [--count N] [--wait W]
+Usage: user/radio/cyw43439/tools/cyw43-iq.py OUT --conf FILE [--count N] [--wait W]
                                   [--mode fast[,check][,no-q] | psm[,no-q] | stream[,no-q] | bits]
                                   [--gain P6,P7,P8 | --tones MHZ,...] [--tune MHZ]
 
 --conf names a configuration of the Wi-Fi system, such as an access point's, whose mode's work comes first,
 so that the vendor's firmware sets the radio up and tunes it to the mode's channel; its run= is the bridge's.
 Then the WLAN's processor is held in reset, the 802.11 core's receive DMA stopped, so that no frame lands in the RAM,
-and the processor started again in our own code, user/wifi/wlancore/iq-cap.c, built by make as build/cyw43/iq-cap.bin,
+and the processor started again in our own code, user/radio/cyw43439/wlancore/iq-cap.c, built by make as build/cyw43/iq-cap.bin,
 which lies in RAM the firmware had cleared; the host checks it still reads 0 first.
-It takes --count estimates of the PHY's estimator, each over one sample, after --wait samples at 20 MHz, see user/wifi/hw/phy.md;
+It takes --count estimates of the PHY's estimator, each over one sample, after --wait samples at 20 MHz, see user/radio/cyw43439/hw/phy.md;
 a wait of 2 takes a sample every 260 to 262 cycles of the processor's 81.6 MHz, which it measures against D11's TSF.
 
 --gain holds the receiver's gain where the three numbers put it, out of its AGC's hands, see phy.md:
@@ -71,8 +71,9 @@ import sys
 import time
 
 TOOLS = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.abspath(os.path.join(TOOLS, "../../.."))
+ROOT = os.path.abspath(os.path.join(TOOLS, "../../../.."))
 sys.path.insert(0, TOOLS)
+sys.path.insert(1, os.path.join(ROOT, "user/wifi/tools"))  # cyw43bridge, beside the bridge it is the host side of
 from cyw43bridge import Bridge  # noqa: E402
 import cyw43psm as psm  # noqa: E402
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Boot the CYW43439's Bluetooth core from its reset off the board, and list every register access it makes.
 
-Usage: user/wifi/tools/cyw43-rehost.py [--log FILE] [--max N] [--reg ADDR=VALUE]... [--auto] [--until ADDR] [--seconds S]
+Usage: user/radio/cyw43439/tools/cyw43-rehost.py [--log FILE] [--max N] [--reg ADDR=VALUE]... [--auto] [--until ADDR] [--seconds S]
                              [--board [--read-rom] [--clear ADDR=BITS]... [--local ADDR]... [--w1c ADDR]...
                               [--kick ADDR=VALUE]... [--poke ADDR=VALUE]... [--hci OPCODE[:PARAMETERS]]...
                               [--record FILE] [--idle S]]
@@ -31,11 +31,11 @@ With --board the registers are the chip's own, on a Pico 2 W in its BOOTSEL mode
 user/wifi/bridge.h and user/wifi/tools/cyw43bridge.py: each access below BOARD_TOP is the same access to the backplane's window
 onto the core, a word at a time, so a poll waits on what the chip says and nothing is guessed.
 A read comes after one of SPARE, a word the run knows, so that a slow register's answer of the read before is known
-and the read made again; see read() in user/wifi/tools/cyw43park.py.
+and the read made again; see read() in user/radio/cyw43439/tools/cyw43park.py.
 The core's own processor must not run meanwhile, so it is parked first:
 the vendor patch goes in as the host writes it, but its code a slide of `cpsid i` into SNIFFER,
 so the ROM checks the patch's signature, installs it and, at its first call into the patch, sleeps there for good,
-its interrupts masked; see park() in user/wifi/tools/cyw43park.py.
+its interrupts masked; see park() in user/radio/cyw43439/tools/cyw43park.py.
 Parked so, the processor looks about every millisecond, on its own SysTick,
 and SNIFFER writes the lines it sees pending into a mailbox in the core's RAM, SNIFFED;
 between two looks it sleeps in `wfi` while the emulated core waits in one, ASLEEP, and spins otherwise,
@@ -90,6 +90,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(1, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../../wifi/tools"))  # cyw43bridge, beside the bridge it is the host side of
 from cyw43bridge import Bridge, BridgeError  # noqa: E402, the tools' own directory first
 from cyw43park import (ASLEEP, BOARD_WINDOW, BT_CTRL, BT_FW_RDY, PATCH, SILENT, REREAD, SNIFFED, SPARE,  # noqa: E402
                        host_read, park, patch_records, read)

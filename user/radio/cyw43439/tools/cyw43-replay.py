@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""A record of user/wifi/tools/cyw43-rehost.py's, --record, played back on the chip over the bridge, with no firmware running.
+"""A record of user/radio/cyw43439/tools/cyw43-rehost.py's, --record, played back on the chip over the bridge, with no firmware running.
 
-Usage: user/wifi/tools/cyw43-replay.py RECORD [--stop-at TEXT] [--clear ADDR=BITS] [--again ADDR=VALUE --again-for S [--every S]]
+Usage: user/radio/cyw43439/tools/cyw43-replay.py RECORD [--stop-at TEXT] [--clear ADDR=BITS] [--again ADDR=VALUE --again-for S [--every S]]
 
-The CYW43439's Bluetooth core is parked as user/wifi/tools/cyw43park.py parks it, its processor stopped in the vendor patch,
+The CYW43439's Bluetooth core is parked as user/radio/cyw43439/tools/cyw43park.py parks it, its processor stopped in the vendor patch,
 and every access of the record is made again in its order, reads as well as writes, the reads' answers dropped:
 what the emulated firmware did to the chip, without the firmware.
 A record's line is read as far as its fourth field, so a list of lines "w ADDR SIZE VALUE" is one too.
@@ -20,7 +20,9 @@ import sys
 import time
 
 TOOLS = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.abspath(os.path.join(TOOLS, "../../../.."))
 sys.path.insert(0, TOOLS)
+sys.path.insert(1, os.path.join(ROOT, "user/wifi/tools"))  # cyw43bridge, beside the bridge it is the host side of
 from cyw43bridge import Bridge  # noqa: E402
 import cyw43park  # noqa: E402
 

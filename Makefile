@@ -237,6 +237,7 @@ $(BUILD)/%.ld: %.ld.S
 #   kernel/build.mk             the kernel, checked at its link, and the images, each the kernel with a root task
 #   user/build.mk               the demo, the escape suite and the programs of several processes, and their runs
 #   user/wifi/build.mk          the Wi-Fi system on a Pico 2 W, and the tests of its network process on the host
+#   user/radio/cyw43439/build.mk the CYW43439's radio: our code for its Bluetooth core and its WLAN's processor
 #   user/phyblob/build.mk       the PHY harness on an ESP32-C6
 #   user/radio/esp32c6/build.mk the ESP32-C6's radio: the root task, the PHY, the basebands and the MACs every program links
 #   user/wifi/esp32c6/build.mk  the Wi-Fi system on an ESP32-C6, its station with hostap and Mbed TLS
@@ -244,7 +245,7 @@ $(BUILD)/%.ld: %.ld.S
 #   user/thread/build.mk        Thread on IEEE 802.15.4, on an nRF52840
 #   user/observer/build.mk      the observer, BLE's packets counted on an nRF52840
 #   host/build.mk               the kernel on the host: the fuzzer's harnesses, the mutants and the replay under QEMU
-include kernel/build.mk user/build.mk user/wifi/build.mk user/phyblob/build.mk user/radio/esp32c6/build.mk user/wifi/esp32c6/build.mk user/tracer/build.mk user/thread/build.mk \
+include kernel/build.mk user/build.mk user/wifi/build.mk user/radio/cyw43439/build.mk user/phyblob/build.mk user/radio/esp32c6/build.mk user/wifi/esp32c6/build.mk user/tracer/build.mk user/thread/build.mk \
         user/observer/build.mk host/build.mk
 
 # The headers each object and linker script was made from, as the compiler listed them.

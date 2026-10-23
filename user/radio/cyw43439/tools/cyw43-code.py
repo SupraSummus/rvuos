@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """The CYW43439's WLAN code in Ghidra: its RAM firmware and its ROM as one program, and what that code does to the PHY and the radio.
 
-Usage: user/wifi/tools/cyw43-code.py import [--rom FILE]
-       user/wifi/tools/cyw43-code.py regs OUT
-       user/wifi/tools/cyw43-code.py decompile ADDR...
-       user/wifi/tools/cyw43-code.py refs ADDR...
+Usage: user/radio/cyw43439/tools/cyw43-code.py import [--rom FILE]
+       user/radio/cyw43439/tools/cyw43-code.py regs OUT
+       user/radio/cyw43439/tools/cyw43-code.py decompile ADDR...
+       user/radio/cyw43439/tools/cyw43-code.py refs ADDR...
 
 import builds a Ghidra project in build/cyw43/ghidra: the RAM firmware, build/cyw43/43439A0.bin, at 0,
 where its vector table says it runs, and the ROM, --rom, at 0x800000, where the code's pointers to its own strings point;
-the ROM is read off the chip with user/wifi/tools/cyw43-regmap.py dump 0x1e000000 0xa0000 FILE.
+the ROM is read off the chip with user/radio/cyw43439/tools/cyw43-regmap.py dump 0x1e000000 0xa0000 FILE.
 Ghidra analyses both, then names each function after the one identifier string only it refers to, its __func__ as a rule.
 It takes some minutes.
 regs lists every call of the PHY's and the radio's access functions whose register is a constant, with its arguments
 as Ghidra's decompiler gives them, and decodes the register lists the code plays through 0x86bfa8, into OUT as JSON;
-see user/wifi/hw/phy.md.
+see user/radio/cyw43439/hw/phy.md.
 decompile prints the C of the function holding each ADDR, refs every reference to each ADDR.
 
 GHIDRA names Ghidra's analyzeHeadless, /opt/ghidra/support/analyzeHeadless by default.
@@ -31,7 +31,7 @@ import sys
 import tempfile
 
 TOOLS = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.abspath(os.path.join(TOOLS, "../../.."))
+ROOT = os.path.abspath(os.path.join(TOOLS, "../../../.."))
 SCRIPTS = os.path.join(TOOLS, "ghidra")
 PROJECT = os.path.join(ROOT, "build/cyw43/ghidra")
 NAME = "wlan"
@@ -39,7 +39,7 @@ RAM_IMAGE = os.path.join(ROOT, "build/cyw43/43439A0.bin")
 ROM_IMAGE = os.path.join(ROOT, "build/cyw43/regmap/wlan-1e000000.bin")
 ROM_BASE = 0x800000
 
-# The access functions of the ROM's PHY code, see user/wifi/hw/phy.md.
+# The access functions of the ROM's PHY code, see user/radio/cyw43439/hw/phy.md.
 HELPERS = {0x86BF20: "phy and", 0x86BF38: "phy mod", 0x86BF5C: "phy or", 0x86BF78: "phy read", 0x86BF9C: "phy write",
            0x86BFA8: "list", 0x86BEC0: "radio and", 0x86BEDC: "radio mod", 0x86BF00: "radio or",
            0x86C064: "radio read", 0x86E2F8: "radio write"}

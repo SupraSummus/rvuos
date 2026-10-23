@@ -11,7 +11,7 @@ analog version 13, PHY type 12, revision 0, as brcmsmac's `PV_*` masks split it;
 brcmsmac names the types 4, 6, 8 and 9, N, SSN, LCN and LCNXN, and not 12;
 the WLAN's ROM names its PHY code `wlc_lcn20phy_*` and its radio 20692, `wlc_lcn20phy_radio20692_lpf_tx_set`, **known**: an LCN20 PHY.
 
-`user/wifi/tools/cyw43-regmap.py phy` reads the PHY's registers through `phyregaddr` and `phyregdata`, each a halfword,
+`user/radio/cyw43439/tools/cyw43-regmap.py phy` reads the PHY's registers through `phyregaddr` and `phyregdata`, each a halfword,
 with the bridge's `h`, once the WLAN's processor is held in reset as the driver disables a core,
 `0x18103000`'s IOCTRL cleared and RESETCTRL set, so that no access of the firmware's comes between an address and its data:
 the PHY then stays as the firmware left it, up and idle, and answers, **read**.
@@ -118,7 +118,7 @@ which a receiver that corrects both needs, a hypothesis.
 
 What the code does to each of them, block by block, is in `radio.md`.
 
-`user/wifi/tools/cyw43-regmap.py radio` reads the radio's registers through `radioregaddr` and `radioregdata`, each a halfword,
+`user/radio/cyw43439/tools/cyw43-regmap.py radio` reads the radio's registers through `radioregaddr` and `radioregdata`, each a halfword,
 the WLAN's processor held in reset as for the PHY's, **read**.
 brcmsmac or's a flag into the address for a read, which depends on the radio, 2055, 2057 or 2064, and this one is none of them;
 read with no flag, `0x100`, `0x200` and `0x4000`, the radio needs none:
@@ -154,7 +154,7 @@ a write gives the high half first, a read takes the low half first.
 A PHY register is written as one word at `phyregaddr`, the data in its upper half, the address in its lower.
 brcmsmac's LCN PHY puts its address at `0x455` instead, which this PHY does not take.
 
-`user/wifi/tools/cyw43-regmap.py phytbl` reads them so, the WLAN's processor held in reset, each entry at its own offset, **read**.
+`user/radio/cyw43439/tools/cyw43-regmap.py phytbl` reads them so, the WLAN's processor held in reset, each entry at its own offset, **read**.
 Ids `0x1f`, `0x20` and `0x21` hang the PHY's access, each over a power-up of its own:
 every read of D11 gives the halfword read last from then on, until the chip's next power-up.
 Of the others, 18 read anything but zeros; a table's size is where its offset wraps, where it does within 2048 entries:
@@ -289,9 +289,9 @@ Nor does any register show the sample as it comes:
 
 ### Our code on the WLAN's processor
 
-`user/wifi/tools/cyw43-iq.py` has the vendor's firmware bring a mode up, an access point for one,
+`user/radio/cyw43439/tools/cyw43-iq.py` has the vendor's firmware bring a mode up, an access point for one,
 then holds the WLAN's processor in reset, stops D11's receive DMA, so that no frame lands in the RAM,
-and starts the processor again in `user/wifi/wlancore/iq-cap.c`, at vectors written over the firmware's;
+and starts the processor again in `user/radio/cyw43439/wlancore/iq-cap.c`, at vectors written over the firmware's;
 the PHY and the radio stay as the firmware left them, receiving on the mode's channel.
 The code takes one estimate of one sample after another, polls `0x481`, and keeps each with its cycle count.
 The processor runs at 81.600 MHz, its cycle counter against D11's TSF over 100 ms, **measured**.
@@ -677,7 +677,7 @@ The 6 MHz tone, the weakest in the loopback, is smeared over several peaks: doub
 
 ## What the firmware's code does to the PHY and the radio
 
-`user/wifi/tools/cyw43-code.py` puts the WLAN's ROM, at `0x800000`, and its RAM firmware, at 0, in Ghidra as one program, **known**:
+`user/radio/cyw43439/tools/cyw43-code.py` puts the WLAN's ROM, at `0x800000`, and its RAM firmware, at 0, in Ghidra as one program, **known**:
 415 of their functions are named after the one identifier string only each refers to, its `__func__`,
 such as `wlc_lcn20phy_start_tx_tone` at `0x86ea6c`,
 and every call to the PHY's and the radio's access functions is listed with its arguments as the decompiler gives them.

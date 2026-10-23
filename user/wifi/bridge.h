@@ -4,7 +4,7 @@
 /*
  * The bridge, a build with WIFI_BRIDGE=1: the host reads and writes the chip's backplane through the console,
  * at once with mode=bridge or none, or once mode=scan's scan, mode=sta's join or mode=ap's access point is up,
- * a line at a time, so that a program on the host, such as user/wifi/tools/cyw43-rehost.py,
+ * a line at a time, so that a program on the host, such as user/radio/cyw43439/tools/cyw43-rehost.py,
  * can stand where the chip's own cores stand.
  * The root task reads the host's lines and puts each ask in the driver's page,
  * and the driver answers it in the log, which the root task carries to the console:

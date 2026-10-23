@@ -1,7 +1,7 @@
 /*
- * Where our code for the Bluetooth core goes, and the mailbox it serves; one source for bt-stub.S, bt-stub.ld and bt.c.
- * The linker script is run through the preprocessor with this, the assembly includes it, and bt.c includes it, so the
- * addresses live here alone. See BT.md.
+ * Where our code for the Bluetooth core goes, and the mailbox it serves; one source for bt-stub.S, bt-stub.ld and user/wifi/bt.c.
+ * The linker script is run through the preprocessor with this, the assembly includes it, and user/wifi/bt.c includes it, so the
+ * addresses live here alone. See user/wifi/BT.md.
  */
 #define BT_CALLEE     0x001b1e6   /* the address the point's own first instruction calls */
 #define BT_POINT_NEXT 0x000d0204  /* the point's second instruction */

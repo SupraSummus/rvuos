@@ -1,5 +1,5 @@
 /*
- * The bytes of our code for the Bluetooth core, built from btcore/bt-stub.S and linked where the core sees it;
+ * The bytes of our code for the Bluetooth core, built from user/radio/cyw43439/btcore/bt-stub.S and linked where the core sees it;
  * bt.c uploads them. Guarded, so an image without WIFI_BT carries nothing of the experiment.
  */
 #ifdef WIFI_BT

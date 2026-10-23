@@ -9,10 +9,10 @@ the Cortex-M's own registers at `0xe000e000` it does not.
 
 Every 4 KiB page the vendor firmware touched, from the core's reset through the LE transmitter test,
 with what the firmware did there, **traced**, and what the pages read, **read**.
-The trace is one run of `user/wifi/tools/cyw43-rehost.py --board` with the departures BT.md names
+The trace is one run of `user/radio/cyw43439/tools/cyw43-rehost.py --board` with the departures user/wifi/BT.md names
 and the commands `HCI_Reset`, `Read Local Version`, `LE Read Local Supported Features`, the transmitter test and its end;
-`user/wifi/tools/cyw43-regmap.py trace` counts it.
-The reads are `user/wifi/tools/cyw43-regmap.py read` and `vendor`, every word of the page twice in a row:
+`user/radio/cyw43439/tools/cyw43-regmap.py trace` counts it.
+The reads are `user/radio/cyw43439/tools/cyw43-regmap.py read` and `vendor`, every word of the page twice in a row:
 parked, as the park leaves the core; set, once `btcore/bt-tx.rec` is in; sending, while the executor sends a packet a turn;
 and vendor, once the record of the trace has been played back up to the transmitter test's answer.
 Parked, set and sending are one power-up of the chip, vendor another.
@@ -98,13 +98,13 @@ A read from `0x600800` up stalls the core: the executor's list never ends.
 
 Cleared by writing ones.
 After a trigger its bits 3 to 6 latch 290 to 590 µs on, bit 2 about 408 µs later, and bit 0 127 to 129 µs after that,
-**measured** with the eight words of `BT.md`'s table alone; what each stands for is unknown.
+**measured** with the eight words of `user/wifi/BT.md`'s table alone; what each stands for is unknown.
 The span from bit 2 to bit 0 is about 259.5 µs, plus `0x318394`'s low byte in µs, less `0x318bc0`'s bits 15:0 in 1/256 µs,
 **measured** for each word with the other at the vendor's value, `0xff` and `0x8289`, and a hypothesis for the two together.
 
 ## The radio, `0x410000`
 
-`0x410494` is one of the transmitter's eight words, `0x26c`, **measured**: without bit 9 nothing is sent, without bit 5 the packets are 8 dB weaker, and bits 2, 3 and 6 change nothing seen; see `BT.md`.
+`0x410494` is one of the transmitter's eight words, `0x26c`, **measured**: without bit 9 nothing is sent, without bit 5 the packets are 8 dB weaker, and bits 2, 3 and 6 change nothing seen; see `user/wifi/BT.md`.
 `0x410434`'s low byte is a received packet's strength, signed, a dB a step, **measured**, see "The receiver from the host";
 it reads 0 when no packet came, and its bits 8 to 12 `0xc` with packets and `0x14` without.
 The firmware adds a byte of its RAM, `0x202666`, to it for every report, `0xe7f4`, **read**.
@@ -139,7 +139,7 @@ the strobe of a measurement the calibration takes thousands of times, whose resu
 ## The receiver from the host
 
 The parked core receives with no firmware running, **measured**:
-`btcore/bt-rx.rec` as `user/wifi/tools/cyw43-exec.py`'s setup, the transmitter's nine words with `0x318204 = 0x04`,
+`btcore/bt-rx.rec` as `user/radio/cyw43439/tools/cyw43-exec.py`'s setup, the transmitter's nine words with `0x318204 = 0x04`,
 and a list that writes `0x318b10 = 0xffffffff`, then `0x318014 = 0x80000005` and `0x80000085`,
 waits for bit 0 of `0x314004` and reads what the packet left, clearing `0x314004` and arming again for the next.
 The sender is an nRF52840 sending the LE test's packets on 2440 MHz, 37 bytes of PRBS9, one each 625 µs, at 0 dBm:
@@ -154,7 +154,7 @@ The sender is an nRF52840 sending the LE test's packets on 2440 MHz, 37 bytes of
 In 39 packets of 39 the payload was the one sent; each is read 0.98 µs after the end's bit latches, the core's 48 MHz.
 
 The vendor's own setup, every word of the modem, the power manager and the radio as its receiver test last wrote them before its first arming,
-265 words, out of a record of `user/wifi/tools/cyw43-rehost.py`'s run of the receiver test, `--hci 201d:13`,
+265 words, out of a record of `user/radio/cyw43439/tools/cyw43-rehost.py`'s run of the receiver test, `--hci 201d:13`,
 reads the same packets 18 dB weaker, `0xcb4`, -76, and catches every packet,
 where the nine catch one in four, 2500 µs apart, and at times one in three;
 so the vendor's sets a gain or an offset of the strength that the nine leave, and a turnaround they leave long.

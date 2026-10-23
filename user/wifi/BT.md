@@ -4,7 +4,7 @@ An experiment behind `WIFI_BT=1` in `user/wifi/`:
 the chip's Bluetooth core, brought up beside the running WLAN firmware
 and taken over with a little code of our own in the core's RAM.
 Without `WIFI_BT` the Wi-Fi system is as it would be without this file, and nothing of it is built.
-The registers' facts gather in the chip's map, `user/wifi/hw/`; this file tells how they were found.
+The registers' facts gather in the chip's map, `user/radio/cyw43439/hw/`; this file tells how they were found.
 
 ## Building and running
 
@@ -80,9 +80,9 @@ One word differs, the access address the firmware itself programs into the modem
   written before the rest, the core never gets ready.
 - Its ROM is read only; the vendor patch's code lies in writable RAM above it, from `0xd0000` up.
 - The ROM branches into that RAM at eighteen points, and taking one over runs our own code on the core.
-  Our code is `btcore/bt-stub.S`, built for the core, a Cortex-M3, and linked where it sees it by `btcore/bt-stub.ld`:
+  Our code is `user/radio/cyw43439/btcore/bt-stub.S`, built for the core, a Cortex-M3, and linked where it sees it by `user/radio/cyw43439/btcore/bt-stub.ld`:
   `.takeover` over the point at `0xd0200`, `.text`, the path every call runs, at `0xd0d00`,
-  the mailbox at `0xd0e00`, and `.measure`, the timed run, at `0xd0e24`; `btcore/bt-map.h` holds the addresses alone.
+  the mailbox at `0xd0e00`, and `.measure`, the timed run, at `0xd0e24`; `user/radio/cyw43439/btcore/bt-map.h` holds the addresses alone.
   `bt.c` writes each piece as one block, the way the patch itself is written; word by word, a longer stub did not take.
   The call target in it, `0x1b1e6`, is a label in a section pinned at that address,
   so the assembler encodes the call as an address, where a bare number would become a branch by that offset.
@@ -146,7 +146,7 @@ Dug out of the ROM and a dump of the core's memory off the board, with a disasse
 
 ## The core off the board
 
-`user/wifi/tools/cyw43-rehost.py` boots the core from its reset in an emulator,
+`user/radio/cyw43439/tools/cyw43-rehost.py` boots the core from its reset in an emulator,
 the ROM out of the dump and the vendor patch written over it as the host writes it,
 and lists every register access the firmware makes, with the instruction that made it.
 It takes the Cortex-M's exceptions itself, which the emulator leaves to its user,
@@ -228,7 +228,7 @@ apart from an interrupt's handler that may come between them.
 `--record FILE` writes every access the emulated firmware makes of the chip, a line each, with the instruction that made it,
 and each HCI command and event where it falls among them.
 
-`user/wifi/tools/cyw43-replay.py` plays such a record back on the chip, the core parked as for the rehost and nothing emulated:
+`user/radio/cyw43439/tools/cyw43-replay.py` plays such a record back on the chip, the core parked as for the rehost and nothing emulated:
 every access in its order, reads as well, their answers dropped, up to a line of HCI it is told,
 and then writes words of its own again and again, `--again`.
 Played up to the transmitter test's answer, the record leaves the chip silent,
@@ -263,7 +263,7 @@ each of which, left out alone, silenced the chip;
 then the 10803 writes of `0x4106e8`, the strobe of a measurement the calibration takes 5400 times, whose results the record writes elsewhere;
 then all but the last write of each register, which left 264 in the order of their last writes.
 Of those, delta debugging kept eight, with each of the eight needed: any seven of them send nothing.
-`user/wifi/tools/cyw43-replay.py` takes such a list as a record, its lines `w ADDR SIZE VALUE`.
+`user/radio/cyw43439/tools/cyw43-replay.py` takes such a list as a record, its lines `w ADDR SIZE VALUE`.
 The eight then send 1419, 1416 and 1422 packets heard in three runs of three seconds' writes,
 about 470 a second at the bridge's pace,
 none without `0x318b6c` and none with the trigger's writes made to a word of RAM instead;
@@ -275,7 +275,7 @@ the packets carry no payload, and the adapter counts them all the same, checking
 
 ## Our executor on the parked core
 
-`user/wifi/tools/cyw43-exec.py` parks the core as the rehost does, but its slide leads to our executor, `btcore/bt-exec.c`,
+`user/radio/cyw43439/tools/cyw43-exec.py` parks the core as the rehost does, but its slide leads to our executor, `user/radio/cyw43439/btcore/bt-exec.c`,
 which runs nothing of the vendor's: a list of operations the host leaves in the core's RAM,
 writes, reads with the time, waits and loops, timed by the Cortex-M3's cycle counter at the parked core's 48 MHz.
 An experiment is a list, and the code on the core stays the same.
@@ -339,7 +339,7 @@ Either of two parts of it is enough on its own; with alternate packets on 18 and
 Its low byte is a time in microseconds: it lengthens the time from bit 2 of `0x314004` to bit 0 by one a unit,
 129 µs at 0, 133 at 4, 194 at `0x40` and 384 at `0xff`, where bit 27 leaves it at 129;
 a few microseconds more cannot settle a drift of 0.45 MHz, so what either part turns on is not known.
-`btcore/bt-tx.rec` carries the vendor's value after the eight words, nine in all.
+`user/radio/cyw43439/btcore/bt-tx.rec` carries the vendor's value after the eight words, nine in all.
 
 Their bits, **measured** with an nRF52840 receiving on 2440 MHz, counting each burst of 320 packets by a tag in its payload, see below,
 each set bit of the three words not known cleared in turn, the vendor's value back after each:
@@ -365,11 +365,11 @@ The transmitter sends as many of the payload's bytes as the length's low 7 bits 
 with 150, 200, 230 and 255 the nRF hears the first 22, 72, 102 and 127 bytes right and noise after, every CRC bad,
 so a payload is 127 bytes at most this way.
 
-The receiver came the same way, **measured**, see `hw/bt.md`'s "The receiver from the host":
+The receiver came the same way, **measured**, see `user/radio/cyw43439/hw/bt.md`'s "The receiver from the host":
 a record of the rehost's receiver test, `--hci 201d:13`, while an nRF52840 sent the LE test's packets,
 counted one packet in the half second the emulated firmware's slowness let it arm a few times,
 and the record's last writes, as the executor's setup, then received every packet the nRF sent, its payload at `0x370a00`.
-The transmitter's nine words with `0x318204 = 0x04`, `btcore/bt-rx.rec`, receive too, though not as the vendor's do,
+The transmitter's nine words with `0x318204 = 0x04`, `user/radio/cyw43439/btcore/bt-rx.rec`, receive too, though not as the vendor's do,
 once the list writes the receiver's window `0x318b10`, which the record leaves at `0x68`, `0xffffffff`.
 
 ## Setting the carrier
@@ -398,7 +398,7 @@ once the list writes the receiver's window `0x318b10`, which the record leaves a
   Writing `0xa6` back returns the carrier to channel 19.
   Our own code cannot make such a write while the settled test sends, since its point is then reached only as the modem is set up.
 - The word is whole megahertz, and every writer of it writes whole megahertz;
-  no finer word for the carrier was found in the image, nor in the synthesizer's page, see `hw/bt.md`.
+  no finer word for the carrier was found in the image, nor in the synthesizer's page, see `user/radio/cyw43439/hw/bt.md`.
 - The test's setup also writes `0x318b6c`, `0x01002340`, a configuration of the modem's path and mode
   that other writers set to `0x01002140`, `0x0d020100` and `0x0d000140`, and whose single bits several functions set and clear.
   The hardware reads it live: clearing it while the test sends stops the transmission rather than moving it
@@ -421,7 +421,7 @@ once the list writes the receiver's window `0x318b10`, which the record leaves a
   and the newest such patch found, `CYW4343A2_001.003.016.0065`, also a Raspberry Pi build, against `001.003.016.0031` here,
   loads and reports the same LE feature mask, its 2M bit clear.
   That is a hint, not a proof about the silicon: a 2 Msym/s mode would be a clock, not a table, and our own code runs on the core.
-  The ROM's switch between modes knows two, BR and LE, see `hw/bt.md`'s "What the code says of the receiver", and no third.
+  The ROM's switch between modes knows two, BR and LE, see `user/radio/cyw43439/hw/bt.md`'s "What the code says of the receiver", and no third.
 - Whether the carrier can be set finer than a megahertz, and how fast a write of it settles
   beyond the first packet after a change, which drifts without `0x318394`.
 - What `0x318394`'s low byte and its bit 27 turn on, either of which keeps the first packet after a change of the carrier,

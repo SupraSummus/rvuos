@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
 """The CYW43439's registers read off the chip over the bridge, every word of a page twice in a row, in states.
 
-Usage: user/wifi/tools/cyw43-regmap.py read OUT [--states parked,set,sending] [--setup RECORD]
-       user/wifi/tools/cyw43-regmap.py vendor RECORD OUT [--stop-at TEXT]
-       user/wifi/tools/cyw43-regmap.py show FILE... [--page ADDR]
-       user/wifi/tools/cyw43-regmap.py erom [OUT]
-       user/wifi/tools/cyw43-regmap.py wlan OUT
-       user/wifi/tools/cyw43-regmap.py trace RECORD [--page ADDR] [--json OUT]
-       user/wifi/tools/cyw43-regmap.py phy OUT [--count N] [--conf FILE]
-       user/wifi/tools/cyw43-regmap.py radio OUT [--count N] [--flags F,...] [--conf FILE]
-       user/wifi/tools/cyw43-regmap.py d11mem OUT [--shm N] [--ucm N] [--scr N] [--tpl N] [--conf FILE]
-       user/wifi/tools/cyw43-regmap.py dump ADDR BYTES OUT
-       user/wifi/tools/cyw43-regmap.py phytbl OUT [--ids A-B,C,...] [--entries N] [--conf FILE]
+Usage: user/radio/cyw43439/tools/cyw43-regmap.py read OUT [--states parked,set,sending] [--setup RECORD]
+       user/radio/cyw43439/tools/cyw43-regmap.py vendor RECORD OUT [--stop-at TEXT]
+       user/radio/cyw43439/tools/cyw43-regmap.py show FILE... [--page ADDR]
+       user/radio/cyw43439/tools/cyw43-regmap.py erom [OUT]
+       user/radio/cyw43439/tools/cyw43-regmap.py wlan OUT
+       user/radio/cyw43439/tools/cyw43-regmap.py trace RECORD [--page ADDR] [--json OUT]
+       user/radio/cyw43439/tools/cyw43-regmap.py phy OUT [--count N] [--conf FILE]
+       user/radio/cyw43439/tools/cyw43-regmap.py radio OUT [--count N] [--flags F,...] [--conf FILE]
+       user/radio/cyw43439/tools/cyw43-regmap.py d11mem OUT [--shm N] [--ucm N] [--scr N] [--tpl N] [--conf FILE]
+       user/radio/cyw43439/tools/cyw43-regmap.py dump ADDR BYTES OUT
+       user/radio/cyw43439/tools/cyw43-regmap.py phytbl OUT [--ids A-B,C,...] [--entries N] [--conf FILE]
 
-read parks the Bluetooth core with the executor's tail, as user/wifi/tools/cyw43-exec.py does, and reads every page in each state:
+read parks the Bluetooth core with the executor's tail, as user/radio/cyw43439/tools/cyw43-exec.py does, and reads every page in each state:
   parked   as the park leaves the core
-  set      once the setup's writes are in, user/wifi/btcore/bt-tx.rec by default
+  set      once the setup's writes are in, user/radio/cyw43439/btcore/bt-tx.rec by default
   sending  while the executor sends a packet each turn of a loop, as BT.md's "Our executor" does
-vendor parks the core as user/wifi/tools/cyw43-replay.py does, plays the record up to the line of HCI holding TEXT,
+vendor parks the core as user/radio/cyw43439/tools/cyw43-replay.py does, plays the record up to the line of HCI holding TEXT,
 the transmitter test's answer by default, and reads every page then, in the state vendor: the vendor's own setup.
 Each state's words go into OUT, JSON, by the backplane's address: the two reads and how many asks each took.
 show puts the files' states side by side: for each page, how many words read nonzero, moved between the two reads,
@@ -27,7 +27,7 @@ wlan reads the backplane's own pages with the WLAN firmware up and nothing parke
 ChipCommon, the 802.11 core (D11), the SDIO device, the WLAN's Cortex-M3, the memory's controller, their wrappers,
 and the first page of ARM's component 0x301; the PHY's and the radio's registers, reached through D11's address and
 data words, which the firmware uses as well, are not read.
-trace lists what a record of user/wifi/tools/cyw43-rehost.py's, --record, did to each register of the core's from 0x300000:
+trace lists what a record of user/radio/cyw43439/tools/cyw43-rehost.py's, --record, did to each register of the core's from 0x300000:
 its reads and writes, the instructions that made them, and the values written, first and last,
 a page at a time, or with --page every register of that page; --json keeps it for the map.
 phy reads the 802.11 core's PHY registers, 0 to --count less one, through D11's phyregaddr and phyregdata,
@@ -36,7 +36,7 @@ so that no access of the firmware's comes between an address and its data; the f
 and the chip's power goes off at the next start of the Wi-Fi system. The state is phy.
 radio does the same through radioregaddr and radioregdata, the radio's registers 0 to --count less one,
 once with each of --flags or'ed into the address, as brcmsmac marks a read for the radios it knows, which this one is not;
-it needs none, see user/wifi/hw/phy.md, and the flags show the address's bits.
+it needs none, see user/radio/cyw43439/hw/phy.md, and the flags show the address's bits.
 Only the address word is written, never the data word, so no register of the radio's is.
 It first reads the radio's id as brcmsmac does on a core of revision 24 or more: registers 0, 1 and 2, unflagged.
 d11mem reads D11's memories, the WLAN's processor held in reset as for phy:
@@ -60,7 +60,7 @@ the format is bcma's, drivers/bcma/scan.c, and the names its include/linux/bcma/
 A read is the bridge's R, after a word of the core's RAM, so a slow register's answer of the read before is read again;
 a register no read answers is marked so.
 The pages are the Bluetooth core's that the vendor firmware's boot and transmitter test touched,
-user/wifi/tools/cyw43-rehost.py's list of register windows; a read only, though a register a read changes is changed.
+user/radio/cyw43439/tools/cyw43-rehost.py's list of register windows; a read only, though a register a read changes is changed.
 """
 
 import argparse
@@ -71,8 +71,9 @@ import sys
 import time
 
 TOOLS = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.abspath(os.path.join(TOOLS, "../../.."))
+ROOT = os.path.abspath(os.path.join(TOOLS, "../../../.."))
 sys.path.insert(0, TOOLS)
+sys.path.insert(1, os.path.join(ROOT, "user/wifi/tools"))  # cyw43bridge, beside the bridge it is the host side of
 from cyw43bridge import Bridge  # noqa: E402
 import cyw43park  # noqa: E402
 
@@ -540,7 +541,7 @@ def main():
     r = sub.add_parser("read")
     r.add_argument("out")
     r.add_argument("--states", default=",".join(STATES))
-    r.add_argument("--setup", default=os.path.join(ROOT, "user/wifi/btcore/bt-tx.rec"))
+    r.add_argument("--setup", default=os.path.join(ROOT, "user/radio/cyw43439/btcore/bt-tx.rec"))
     r.add_argument("--turns", type=int, default=40000, help="the sending loop's packets, about 1.25 ms each")
     v = sub.add_parser("vendor")
     v.add_argument("record")
