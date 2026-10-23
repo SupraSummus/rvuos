@@ -236,8 +236,26 @@ A unit of the wait is about four cycles, a sample at 20 MHz, and 0 and 1 wait as
 At a wait of 2 a sample came every 258 cycles there, 316 kS/s;
 at `0x20000`, where the code now lies, every 262, 311.4 kS/s, all of 430 steps alike,
 and with the tool's check of each estimate's end 260 to 264 cycles apart, 20000 samples at 312.2 kS/s.
-The rest of a sample's time is the code's accesses:
-without its poll it takes 153 cycles, though its estimates then had not ended, so an access of the PHY costs about 20 cycles.
+The rest of a sample's time is the code's accesses, each of the PHY's about 16 cycles,
+two for a read, the address and then the data, and one for a write, address and data in one word.
+The estimate ends before the first read after its start comes back, **measured**:
+with `--mode fast,check`, `0x481` read once between the start and the results, none of 3000 samples found it set.
+So the code need not poll, and of an 8-bit sample the low halfwords hold all, the squares to 16384 and the product signed:
+
+| `--mode` | What a sample reads | Cycles | Rate |
+|---|---|---|---|
+| none | polls `0x481`, then six halfwords | 262 | 311.4 kS/s |
+| `fast,check` | `0x481` once, then three low halfwords | 154 to 158 | 526.5 kS/s |
+| `fast` | three low halfwords | 118 to 122 | 682.9 kS/s |
+| `fast,no-q` | the product and I squared, Q taken as the product over I, and as 0 where I is | 90 to 92 | 901.7 kS/s |
+
+Each with the calibration's tones, **measured**, 600 samples a run:
+the square's strongest within the transform's step of where the 40 Msps play puts it,
+-211.8 kHz for +2 MHz at 526.5 kS/s, -97.4 at 682.9, +393.6 at 901.7, against -211.73, -97.10 and +393.30,
+and so for -2, +1 and -0.625 MHz; a stale estimate read for a new one would have spread them.
+`fast,no-q` loses Q wherever I is 0, a few in a hundred at a noise of a few steps.
+On this processor five accesses are the least a sample can take, a start and two reads, about 80 cycles and 1 MS/s;
+faster needs the PHY reached otherwise, by D11's own processor through its own registers, see below.
 
 What the samples show, **measured**, the access point up on channel 6:
 I^2 + Q^2 has a median of 2 to 5, a few of the converter's steps;

@@ -62,6 +62,10 @@ typedef void (*phy_fn)(uint32_t pi, uint32_t, uint32_t, uint32_t, uint32_t, uint
 #define TONES  (BASE + 0x20) /* the host's: how many tones, at most MOST_TONES */
 #define FREQ   (BASE + 0x40) /* the host's: each tone's frequency in Hz, signed */
 #define FIRST  (BASE + 0x80) /* the cycle count at each run's start, the run before the tones first */
+#define MODE   (BASE + 0x24) /* the host's: how a sample is taken, MODE_* */
+#define MODE_FAST  1u        /* no poll, and the low halfwords alone: an 8-bit sample's squares and product fit them */
+#define MODE_CHECK 2u        /* with MODE_FAST: IQ_CONTROL read once before the results, its bit 0 kept as LATE */
+#define MODE_NO_Q  4u        /* with MODE_FAST: Q squared not read, the host taking Q as the product over I */
 #define OUT     0x21000u     /* the samples, four words each: cycle count, product, I squared, Q squared */
 #define OUT_END 0x7e000u
 #define OUT_END_TONES 0x2d000u /* with tones, where the cleared RAM ends; the ROM's functions use the RAM above */
@@ -109,13 +113,32 @@ void iq_fault(void)
     }
 }
 
+static volatile uint32_t *take_fast(volatile uint32_t *out, uint32_t n, uint32_t control, uint32_t mode)
+{
+    for (uint32_t i = 0; i < n; i++, out += 4) {
+        uint32_t t = REG(DWT_CYCCNT) & ~LATE, late = 0;
+        phy_write(IQ_CONTROL, control | 1u);
+        if (mode & MODE_CHECK) {
+            late = phy_read(IQ_CONTROL) & 1u;
+        }
+        out[0] = t | late;
+        out[1] = phy_read(IQ_PRODUCT);
+        out[2] = phy_read(IQ_I_POWER);
+        out[3] = mode & MODE_NO_Q ? 0 : phy_read(IQ_Q_POWER);
+    }
+    return out;
+}
+
 static volatile uint32_t *take(volatile uint32_t *out, uint32_t n, uint32_t run)
 {
-    uint32_t control = phy_read(IQ_CONTROL) & ~3u;
+    uint32_t control = phy_read(IQ_CONTROL) & ~3u, mode = REG(MODE);
     phy_write(IQ_SAMPLES, 1);
     phy_write(IQ_WAIT, (phy_read(IQ_WAIT) & ~0xffu) | (REG(WAIT) & 0xffu));
     phy_write(CLOCKS, phy_read(CLOCKS) | ESTIMATE_CLOCKS);
     REG(FIRST + 4u * run) = REG(DWT_CYCCNT);
+    if (mode & MODE_FAST) {
+        return take_fast(out, n, control, mode);
+    }
     for (uint32_t i = 0; i < n; i++, out += 4) {
         uint32_t t = REG(DWT_CYCCNT) & ~LATE;
         phy_write(IQ_CONTROL, control | 1u);

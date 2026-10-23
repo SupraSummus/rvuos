@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """The CYW43439's receiver sampled: its I/Q estimator, one sample at a time, at about 310 thousand samples a second.
 
-Usage: user/wifi/tools/cyw43-iq.py OUT --conf FILE [--count N] [--wait W] [--gain P6,P7,P8 | --tones MHZ,...]
+Usage: user/wifi/tools/cyw43-iq.py OUT --conf FILE [--count N] [--wait W] [--mode fast[,check][,no-q]]
+                                  [--gain P6,P7,P8 | --tones MHZ,...]
 
 --conf names a configuration of the Wi-Fi system, such as an access point's, whose mode's work comes first,
 so that the vendor's firmware sets the radio up and tunes it to the mode's channel; its run= is the bridge's.
@@ -16,6 +17,11 @@ the overrides the firmware's calibration sets, 0x872534's, with 0x53c bits 9 to 
 0x9ac bits 6 to 9 at P7, 0 to 12, about 3 dB a step, and 0x979 bits 1 to 8 at P8, in 3 dB steps at 4, 7, 10 and 13;
 10,9,0 gives about the noise the AGC idles at. Without it the AGC sets the gain, and raises it for a weak frame.
 The samples are I and Q of 8 bits, -128 to 127, so a strong signal clips.
+
+--mode fast takes a sample without polling the estimator, whose estimate ends before the first read comes back,
+and reads only the low halfwords, which hold an 8-bit sample's squares and product: 683 kS/s;
+check reads the estimator's busy bit once before the results, as LATE, 527 kS/s;
+no-q leaves Q squared unread, the host taking Q as the product over I, 0 where I is: 902 kS/s.
 
 --tones is the control: the firmware's own receive IQ calibration's loopback set up, by its ROM's functions,
 and one run of --count samples before any tone and one during each tone of the list, in MHz, played by the ROM
@@ -59,7 +65,9 @@ PI_KNOWN = 0x63788  # where the firmware of 43439A0.bin keeps it, an access poin
 # iq-cap.c's words and RAM
 CODE, BASE, OUT_AT = 0x20000, 0x1F000, 0x21000
 MAGIC, COUNT, WAIT, GO, FAULT, CYCLES, STEP, PI, TONES = (BASE + 4 * i for i in range(9))
-FREQ, FIRST = BASE + 0x40, BASE + 0x80
+FREQ, FIRST, MODE = BASE + 0x40, BASE + 0x80, BASE + 0x24
+MODES = {"fast": 1, "check": 2, "no-q": 4}  # iq-cap.c's MODE_*
+MODE_SETS = ("", "fast", "fast,check", "fast,no-q", "fast,check,no-q")
 CLEARED = range(0x1E000, 0x2D000)  # RAM the firmware had cleared, an access point up: the code's, and the samples' with tones
 OUT_END, OUT_END_TONES, MOST_TONES = 0x7E000, 0x2D000, 16
 MAGIC_VALUE, GO_VALUE, ENDED, LATE, TSF_SPAN = 0x49514341, 2, 3, 1, 100000
@@ -142,12 +150,17 @@ def main():
     p.add_argument("--wait", type=lambda x: int(x, 0), default=2)
     p.add_argument("--tones", type=lambda x: [round(float(f) * 1e6) for f in x.split(",")], default=[])
     p.add_argument("--gain", type=lambda x: [int(v, 0) for v in x.split(",")])
+    p.add_argument("--mode", default="")
     args = p.parse_args()
     if args.gain is not None and (args.tones or len(args.gain) != 3
                                   or any(not 0 <= v <= most for v, (_, _, _, most) in zip(args.gain, GAIN_FIELDS))):
         sys.exit("cyw43-iq: --gain P6,P7,P8, each within its stage's codes, and without --tones")
     runs = 1 + len(args.tones)
     most = ((OUT_END_TONES if args.tones else OUT_END) - OUT_AT) // 16 // runs
+    names = [m for m in args.mode.split(",") if m]
+    if len(set(names)) != len(names) or set(names) not in [set(m.split(",")) - {""} for m in MODE_SETS]:
+        sys.exit(f"cyw43-iq: --mode one of {', '.join(m for m in MODE_SETS if m)}")
+    args.mode = sum(MODES[m] for m in names)
     if not 0 < args.count <= most or not 2 <= args.wait <= 0xFF or len(args.tones) > MOST_TONES:
         sys.exit(f"cyw43-iq: --count 1 to {most} here, --wait 2 to 255, at most {MOST_TONES} tones")
     subprocess.run(["make", "-s", "-C", ROOT, "build/cyw43/iq-cap.bin"], check=True)
@@ -182,6 +195,7 @@ def main():
         board.write(WAIT, args.wait)
         board.write(PI, pi)
         board.write(TONES, len(args.tones))
+        board.write(MODE, args.mode)
         for k, f in enumerate(args.tones):
             board.write(FREQ + 4 * k, f & 0xFFFFFFFF)
         # As the driver resets a core: clock and forced gated clocks, out of reset, then the clock alone.
@@ -215,6 +229,10 @@ def main():
         w = words[4 * args.count * r:4 * args.count * (r + 1)]
         rows = [(w[4 * k] & ~LATE, signed(w[4 * k + 1]), w[4 * k + 2], w[4 * k + 3], w[4 * k] & LATE)
                 for k in range(args.count)]
+        if args.mode & MODES["fast"]:
+            rows = [(t, signed(pr & 0xFFFF, 16), ip & 0xFFFF, qp & 0xFFFF, lt) for t, pr, ip, qp, lt in rows]
+        if args.mode & MODES["no-q"]:
+            rows = [(t, pr, ip, pr * pr // ip if ip else 0, lt) for t, pr, ip, qp, lt in rows]
         late = sum(row[4] for row in rows)
         odd = sum(1 for _, pr, ip, qp, _ in rows if pr * pr != ip * qp)
         steps = [(rows[k + 1][0] - rows[k][0]) & 0xFFFFFFFF for k in range(args.count - 1)] or [0]
