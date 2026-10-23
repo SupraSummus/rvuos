@@ -116,6 +116,8 @@ which a receiver that corrects both needs, a hypothesis.
 
 ## The radio's registers
 
+What the code does to each of them, block by block, is in `radio.md`.
+
 `user/wifi/tools/cyw43-regmap.py radio` reads the radio's registers through `radioregaddr` and `radioregdata`, each a halfword,
 the WLAN's processor held in reset as for the PHY's, **read**.
 brcmsmac or's a flag into the address for a read, which depends on the radio, 2055, 2057 or 2064, and this one is none of them;

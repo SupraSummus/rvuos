@@ -7,6 +7,7 @@ What is known of the CYW43439's hardware, a file a part:
 | `bt.md` | the Bluetooth core's registers, as its own processor sees them, through the backplane's window at `0x19000000` |
 | `d11.md` | the 802.11 core, D11, at `0x18001000`: its registers, its memories, its microcode |
 | `phy.md` | the 802.11 PHY and its radio, behind D11's words: their registers, the PHY's tables, the receiver's samples, what the firmware's code does to them |
+| `radio.md` | the WLAN's radio, the 20692, by what the ROM's code does to each of its registers: its overrides, its blocks, the receiver's baseband filter |
 
 `user/wifi/BT.md` tells how the Bluetooth core was taken over and what experiments showed;
 this map is where each register's facts are kept, the experiments' among them.
