@@ -51,6 +51,15 @@ static void parse_one(const char *line, uint32_t len, struct bridge_ask *ask)
         ask->op = (uint32_t)line[0];
     } else if (line[0] == 'w' && hex_word(line, len, &at, &ask->value) && at == len) {
         ask->op = 'w';
+    } else if (line[0] == 'h' && (ask->addr & 1u) == 0) {
+        /* A halfword: read, or written with a value of 16 bits. */
+        ask->len = 0;
+        if (at == len) {
+            ask->op = 'h';
+        } else if (hex_word(line, len, &at, &ask->value) && at == len && ask->value <= 0xffffu) {
+            ask->len = 2;
+            ask->op = 'h';
+        }
     } else if (line[0] == 'W' && at < len && line[at] == ' ') {
         at++;
         uint32_t n = 0;
@@ -137,7 +146,7 @@ static int sniffed(struct cyw43 *chip, const struct bridge_state *st, uint32_t *
 
 void bridge_serve(struct cyw43 *chip, const struct bridge_ask *ask, struct bridge_state *st, const struct out *out)
 {
-    if (ask->op != 'r' && ask->op != 'R' && ask->op != 'S' && ask->op != 'w' && ask->op != 'W') {
+    if (ask->op != 'r' && ask->op != 'R' && ask->op != 'S' && ask->op != 'w' && ask->op != 'W' && ask->op != 'h') {
         say(out, "bridge: what?\n");
         return;
     }
@@ -147,7 +156,8 @@ void bridge_serve(struct cyw43 *chip, const struct bridge_ask *ask, struct bridg
      */
     int allowed = ask->op == 'w' ? bridge_allowed(ask->addr, 4u, ask->value)
                   : ask->op == 'W' ? bridge_allowed(ask->addr, ask->len, ~0u)
-                  : ask->op == 'S' ? bridge_allowed(ask->addr, 8u, ~0u) : 1;
+                  : ask->op == 'S' ? bridge_allowed(ask->addr, 8u, ~0u)
+                  : ask->op == 'h' && ask->len != 0 ? bridge_allowed(ask->addr, 2u, ask->value) : 1;
     for (uint32_t i = 0; i < ask->writes; i++) { /* bounded: BRIDGE_WRITES */
         allowed = allowed && bridge_allowed(ask->write_at[i], 4u, ask->write_value[i]);
     }
@@ -176,21 +186,29 @@ void bridge_serve(struct cyw43 *chip, const struct bridge_ask *ask, struct bridg
     case 'W':
         cyw43_load(chip, ask->addr, ask->data, ask->len);
         break;
+    case 'h':
+        if (ask->len != 0) {
+            cyw43_bp_write16(chip, ask->addr, (uint16_t)ask->value);
+        } else {
+            v = cyw43_bp_read16(chip, ask->addr);
+        }
+        break;
     default:
         break;
     }
     /* One say a line, so that no other line of the log lands inside it. */
-    const char *name = ask->op == 'S' ? "S" : ask->op == 'w' ? "w" : "W";
+    const char *name = ask->op == 'S' ? "S" : ask->op == 'w' ? "w" : ask->op == 'h' ? "h" : "W";
+    int read = ask->op == 'r' || (ask->op == 'h' && ask->len == 0);
     if (!sniffed(chip, st, &lo, &hi)) {
-        if (ask->op == 'r') {
-            say(out, "bridge: r %x = %x\n", ask->addr, v);
+        if (read) {
+            say(out, "bridge: %s %x = %x\n", name, ask->addr, v);
         } else if (ask->op == 'R') {
             say(out, "bridge: R %x = %x %u\n", ask->addr, v, n);
         } else {
             say(out, "bridge: %s %x ok\n", name, ask->addr);
         }
-    } else if (ask->op == 'r') {
-        say(out, "bridge: r %x = %x ! %x %x\n", ask->addr, v, lo, hi);
+    } else if (read) {
+        say(out, "bridge: %s %x = %x ! %x %x\n", name, ask->addr, v, lo, hi);
     } else if (ask->op == 'R') {
         say(out, "bridge: R %x = %x %u ! %x %x\n", ask->addr, v, n, lo, hi);
     } else {

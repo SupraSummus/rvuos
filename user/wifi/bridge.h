@@ -2,7 +2,8 @@
 #define RVUOS_WIFI_BRIDGE_H
 
 /*
- * The bridge, mode=bridge in a build with WIFI_BRIDGE=1: the host reads and writes the chip's backplane through the console,
+ * The bridge, a build with WIFI_BRIDGE=1: the host reads and writes the chip's backplane through the console,
+ * at once with mode=bridge or none, or once mode=scan's scan, mode=sta's join or mode=ap's access point is up,
  * a line at a time, so that a program on the host, such as user/wifi/tools/cyw43-rehost.py,
  * can stand where the chip's own cores stand.
  * The root task reads the host's lines and puts each ask in the driver's page,
@@ -16,6 +17,9 @@
  *   w ADDR VALUE    VALUE written there; "bridge: w ADDR ok"
  *   W ADDR BYTES    up to BRIDGE_BYTES bytes, in hex, written there as one block; "bridge: W ADDR ok";
  *                   ADDR and the count of bytes multiples of four
+ *   h ADDR          the halfword at ADDR, an even address; "bridge: h ADDR = VALUE"
+ *   h ADDR VALUE    VALUE, of 16 bits, written there as a halfword; "bridge: h ADDR ok"; for a register of two halves,
+ *                   as the 802.11 core's PHY's address and data are, which a word's write would both set
  *   end             the run is over
  *
  * Up to BRIDGE_WRITES writes, "w ADDR VALUE;", may come before an ask on its line, queued:
@@ -35,7 +39,7 @@
  * a read that gives the spare's word gave the read before, and is made again.
  * The core's carrier word is written only within the band, as the vendor's code writes it:
  * its low seven bits 0 to 78 MHz above 2402, bit 7 set or not, nothing above, 0 among its values.
- * A block over the word is refused whatever it holds, and so is an S whose words cover it, since the bridge clears them;
+ * A halfword over it is refused too, being no whole word, and a block over it whatever it holds, and so is an S whose words cover it, since the bridge clears them;
  * so no ask of the host's takes the carrier out of the band.
  */
 
@@ -52,8 +56,9 @@
 #define BRIDGE_BT_CARRIER (BRIDGE_BT_WINDOW + 0x003186a4u)
 
 struct bridge_ask {
-    uint32_t op; /* 'r', 'R', 'S', 'w', 'W', 'e' for end, or 0 for a line it could not read */
-    uint32_t addr, value, len; /* value: what 'w' writes, or where 'R' and 'S' read their spare */
+    uint32_t op; /* 'r', 'R', 'S', 'w', 'W', 'h', 'e' for end, or 0 for a line it could not read */
+    uint32_t addr, value, len; /* value: what 'w' or 'h' writes, or where 'R' and 'S' read their spare; len: 'W''s bytes,
+                                  or 2 for 'h' writing and 0 reading */
     uint8_t data[BRIDGE_BYTES];
     uint32_t writes; /* the queued writes before it, of write_value at write_at */
     uint32_t write_at[BRIDGE_WRITES], write_value[BRIDGE_WRITES];

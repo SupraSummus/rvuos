@@ -281,8 +281,9 @@ static __attribute__((noreturn)) void fail(struct drv *d, uint32_t step, uint32_
 
 #ifdef WIFI_BRIDGE
 /*
- * For as long as the system runs, with MODE_BRIDGE: the host's asks, as the root task puts them in the page,
- * each answered in the log; the firmware's events are read and dropped meanwhile, every millisecond.
+ * For as long as the system runs, in a build with WIFI_BRIDGE, at once with MODE_BRIDGE,
+ * or once the scan, the join or the access point is up: the host's asks, as the root task puts them in the page,
+ * each answered in the log; the firmware's events and frames are read and dropped meanwhile, every millisecond.
  */
 static __attribute__((noreturn)) void bridge(struct drv *d)
 {
@@ -428,6 +429,9 @@ __attribute__((noreturn)) void driver_main(struct child_page *page)
             fail(d, STEP_AP, (uint32_t)err);
         }
         report(d, DRV_AP);
+#ifdef WIFI_BRIDGE
+        bridge(d);
+#endif
         serve(d);
 #ifdef WIFI_BRIDGE
     case MODE_BRIDGE:
@@ -436,6 +440,9 @@ __attribute__((noreturn)) void driver_main(struct child_page *page)
     case MODE_STA:
         join(d);
         report(d, DRV_JOINED);
+#ifdef WIFI_BRIDGE
+        bridge(d);
+#endif
         serve(d);
     default:
         if ((err = wlan_scan(&d->wlan)) != 0) {
@@ -443,6 +450,10 @@ __attribute__((noreturn)) void driver_main(struct child_page *page)
         }
         wait_for(d, &d->scan_done, 8000);
         say(&d->out, "drv: scan %s, %u results\n", d->scan_done ? "done" : "timed out", d->results);
+#ifdef WIFI_BRIDGE
+        report(d, DRV_SCANNED);
+        bridge(d);
+#endif
         stop(d, DRV_SCANNED);
     }
 }

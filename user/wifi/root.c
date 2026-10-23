@@ -166,8 +166,13 @@ static void configure(struct drv_page *s)
 #endif
     }
 #ifdef WIFI_BRIDGE
-    /* A build with WIFI_BRIDGE is the bridge alone, whatever mode= says, and builds no network process. */
-    s->mode = MODE_BRIDGE;
+    /*
+     * A build with WIFI_BRIDGE builds no network process and ends as a bridge:
+     * at once with mode=bridge or none, once the scan, the join or the access point is up with the others.
+     */
+    if (value[0] == '\0' || memcmp(value, "bridge", 7) == 0) {
+        s->mode = MODE_BRIDGE;
+    }
 #endif
     config_value(conf, size, "ssid", s->ssid, sizeof(s->ssid));
     config_value(conf, size, "pass", s->pass, sizeof(s->pass));
@@ -297,7 +302,7 @@ static int driver_state(uint32_t state)
         net_build();
     }
 #else
-    if (state == DRV_UP && console_bit == 0) {
+    if (state >= DRV_UP && console_bit == 0) {
         /* Once the chip runs, as the console's wait for the host polls, which the firmware's upload need not share. */
         console_open();
         log_to_console();
@@ -305,7 +310,7 @@ static int driver_state(uint32_t state)
 #endif
     if (state == DRV_SCANNED) {
         system_scanned(&sys, p->nets, p->net_count);
-        return p->mode == MODE_SCAN;
+        return p->mode == MODE_SCAN && !bridging; /* a bridge follows the scan */
     }
     if (state == DRV_JOINED) {
         say(&kout, "root: joined %s\n", p->ssid);

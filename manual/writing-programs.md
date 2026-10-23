@@ -371,8 +371,8 @@ since there are more of them than regions.
 What the system does, scan, join a network or run an access point, comes from a file the loader places in the root task's input region,
 `make BOARD=rp2350 wifi WIFI_CONFIG=file`, with lines `mode=scan|sta|ap`, `ssid=`, `pass=`, `bssid=`, `channel=` and `run=`,
 so a passphrase lies in no image and in no file git tracks; `local/`, which git ignores, is the place for one.
-A build of its own, `make BOARD=rp2350 WIFI_BRIDGE=1`, on the Hazard3 alone,
-is a bridge instead, whatever the mode:
+A build of its own, `make BOARD=rp2350 WIFI_BRIDGE=1`, on the Hazard3 alone, builds no network process and ends as a bridge,
+at once with `mode=bridge` or none, or once the scan, the join or the access point the mode asks for is up:
 the host reads and writes the chip's backplane through the console, a line at a time,
 which `user/wifi/bridge.h` describes and `user/wifi/tools/cyw43bridge.py` speaks.
 A station joins by WPA3's SAE where the access point offers it and by WPA2's passphrase otherwise,

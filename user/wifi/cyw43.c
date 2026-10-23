@@ -406,6 +406,12 @@ void cyw43_wlan_write(struct cyw43 *c, uint32_t *words, uint32_t len)
     c->status = gspi_write(&c->bus, words, 1u + (len + 3u) / 4u);
 }
 
+/* A halfword to the backplane, for the bridge's registers of two halves. */
+void cyw43_bp_write16(struct cyw43 *c, uint32_t addr, uint16_t val)
+{
+    bp_writen(c, addr, val, 2);
+}
+
 /* A word to the backplane, for user/wifi/bt.c's bring-up of the Bluetooth core and for the bridge. */
 void cyw43_bp_write32(struct cyw43 *c, uint32_t addr, uint32_t val)
 {

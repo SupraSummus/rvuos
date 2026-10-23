@@ -6,7 +6,8 @@
 
 Bridge() builds the Wi-Fi system's bridge, make BOARD=rp2350 WIFI_BRIDGE=1, or brings it up to date,
 boots it on a Pico 2 W in its BOOTSEL mode, through tools/rp2350-run.py --stdin,
-with the firmware blob and a configuration of mode=bridge, and waits for the driver to open the bridge;
+with the firmware blob and a configuration of mode=bridge, or conf's lines, whose mode's scan, join or access point
+comes first, and waits for the driver to open the bridge;
 each read and write is then a line to the board and its answer, about half a millisecond;
 post() queues a write instead, which goes on the line of the next ask, so that it costs no wait of its own.
 Once sniff() has named two words of the chip's, every answer brings what they collected, see user/wifi/bridge.h,
@@ -38,12 +39,13 @@ class BridgeError(Exception):
 
 
 class Bridge:
-    def __init__(self, image=IMAGE, blob=BLOB, run_s=RUN_S, log=None, timeout=30.0):
+    def __init__(self, image=IMAGE, blob=BLOB, run_s=RUN_S, log=None, timeout=30.0, conf=""):
         self.log = log or (lambda line: None)
         if image == IMAGE:
             subprocess.run(["make", "-s", "BOARD=rp2350", "WIFI_BRIDGE=1", IMAGE], check=True)
         self.conf = tempfile.NamedTemporaryFile("w", suffix=".conf", delete=False)
-        self.conf.write(f"mode=bridge\nrun={run_s}\n")
+        # conf, lines of the Wi-Fi system's configuration, has the bridge open once their mode's work is up.
+        self.conf.write((conf.rstrip("\n") + "\n" if conf else "mode=bridge\n") + f"run={run_s}\n")
         self.conf.close()
         self.proc = subprocess.Popen(
             [sys.executable, "tools/rp2350-run.py", "--stdin", "--ram", f"{BLOB_AT:#x}:{blob}",
@@ -133,6 +135,15 @@ class Bridge:
     def take_sniffed(self):
         bits, self.sniffed = self.sniffed, 0
         return bits
+
+    def read16(self, addr):
+        """The halfword at addr, an even address."""
+        line = self.ask(f"h {addr:x}")
+        return int(line.split("=")[1].split()[0], 16)
+
+    def write16(self, addr, value):
+        """A halfword written at addr, alone: for a register of two halves, which a word's write would both set."""
+        self.ask(f"h {addr:x} {value & 0xFFFF:x}")
 
     def write_block(self, addr, data):
         """Bytes at addr, a multiple of four of them at a multiple of four, in blocks of the bridge's most."""
