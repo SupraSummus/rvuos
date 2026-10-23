@@ -562,6 +562,69 @@ and the radio's `0x02b` from `0x740` to `0x742`, then `0x746` at 4 and 8 dBm, it
 `0xb1f` rises with a weak carrier as the estimator's power does, 1, 11, 27 and 65 from -40 to -12, and past the gain's change reads values that do not follow it.
 `0x5b5` reads `0x80` or `0x60` at every level.
 
+### The transmitter's gain
+
+The gain's stages, **read** in the ROM:
+`0x873514` sets gm and pga into `0x4b5` (gm bits 0 to 4, pga 8 to 15), pad into `0x4fb` bits 0 to 7 beside the PA's byte in bits 8 to 15, `0x8733c4`'s,
+and the DAC's gain into `0x439` bits 7 to 10, then the override on;
+`0x87309c` writes the baseband multiplier, bbmult, into table `0x00` at 99 and 115, the IQ and LO corrections beside it at 96 to 98 and 112 to 114;
+`0x8705e4` reads gm, pga, pad and the DAC's gain back and `0x870594` bbmult.
+The override, `0x873564`, is `0x4b0` bit 7 with `0x43a` bit 6; with it clear the power control drives the stages.
+The power control's mode is `0x4a4` bits 13 to 15, `0xe000` the hardware's loop, which `0x87358c` sets, its start index in `0x4a4` bits 0 to 8 as twice the index;
+the loop's index reads in `0x473` as twice it, `0x86e970`.
+Table `0x07`, 32 bits wide, holds for each index 0 to 127 the gains at `0xc0` and up, gm, pga, pad and the PA in bytes from bit 0, 5, 13 and 21,
+and at `0x240` and up `0x807`'s bits, bbmult in bits 9 to 16 and the DAC's gain in 17 to 20,
+copied from the firmware's RAM, one of two tables of 8 bytes an index, `0x2cb85` on this board;
+`0x86ea54` holds the gains at an index, the loop off and the override on, out of that table.
+A higher index sends less: the loop raises it when its estimate passes its target.
+On this board gm is 6, pga 15, the PA's byte 255 and the DAC's gain 0 at every index; pad and bbmult fall with it, 63 and 98 at 0, 20 and 25 at 66, 8 and 15 at 100, 1 and 16 at 127.
+The firmware starts the loop at 66, `0x4a4` `0xe484`; after 30 s of the access point's beacons it stood at 58.
+
+What they do on the air, **measured** with the turn of 16 samples at amplitude 64 three seconds each, D11 halted,
+as the tone's three strongest bins about +2.47 MHz of 1024-point transforms of the ESP32-C6's captures at 2437 MHz, gain 14, all in one run:
+
+| Gains | pad, bbmult | The tone |
+|---|---|---|
+| the loop, from index 66 just after the access point came up | 20, 25 | 0 dB |
+| held at index 66 | 20, 25 | -5.7 dB |
+| held at 100 | 8, 15 | -14.6 dB |
+| held at 127 | 1, 16 | -19.2 dB |
+| held at 127, bbmult then 8 | 1, 8 | -25.5 dB |
+
+bbmult halved took 6.3 dB, the amplitude's own factor; the loop at 58 sent 7.7 dB more than 66 held, in another run, by the captures' RMS.
+The loop sends 5 to 6 dB more than its own index held, in three runs, 5.7, 5.1 and 5.9 dB, the last with the loop's tone again after the held ones, 0.4 dB from the first:
+the loop adds a gain the held stages do not.
+Holding the index changes `0x807` from 9 to `0xd`, and clearing its bit 2 again while held changed the tone by 0.1 dB; `0x4b5`, `0x4fb` and bbmult read the same either way.
+Two things of the loop's own the hold undoes, **read** in `0x87358c`:
+entering the loop it writes `0x46e` 1, and `0x87467c` puts the rates' offsets, the CLM's limits negated, into table `0x07` at `0x340`, 22 entries;
+leaving it writes `0x46e` 0 and `0x86fc1c` zeroes the table at `0x340` and at `0x80`, 64 entries.
+On this board the entries at `0x340` read `0xf2`, -14, in the loop and 0 held, and those at `0x80` 0 either way, **read**.
+What each does, **measured** as above, in two runs, the loop's tone 0 dB in each:
+
+| Gains | The tone |
+|---|---|
+| held at 66 | -5.2 dB |
+| held at 52, 66 less 14 | -2.0 dB |
+| held at 66, `0x46e` 1 | -3.0 dB |
+| held at 66, the entries at `0x340` `0xf2` | -5.3 dB |
+| held at 66, both | -3.0 dB |
+| held at 52, `0x46e` 1 | -1.0 dB |
+| the loop, the entries at `0x340` 0 | -0.2 dB |
+| the loop, `0x46e` 0 | -1.4 dB |
+| the loop, both | the noise's floor, -36.8 dB |
+
+So an index step is about 0.23 dB, and `0x46e` adds about 2 dB to held gains, which the entries at `0x340` do not reach.
+The loop is within 1 dB of the index less the offset with `0x46e` on, a hypothesis:
+in the loop, either alone taken away costs less than its share, and both together stop the transmitter,
+so the loop does not simply add the two.
+`0x88e`, which differs between the loop and the hold and which no constant call of the ROM names, kept its `0x0002` when written through D11's window,
+and a write of it from the WLAN's processor never returned, as one of `0x404` does, see "From the WLAN's processor".
+The loop's estimate of the power sent, `0x4ab`, `0x804d` in one run and `0x804a` in another, and its target `0x4a7`, `0x34`, did not move while a tone played,
+at amplitudes 32, 64 and 128, whose tones read 0, +4.7 and +10.5 dB: the estimate is the frames', taken as they are sent, a hypothesis.
+Setting the index, `0x86ea54`, sent something for about 0.1 s itself, seen between two tones.
+The level a run reads depends on the run: the beacons read an RMS of 250 to 277 in one and about 39 in another, the tone the same 16.5 dB apart,
+so only levels of one run compare, as here.
+
 ### The receiver's passband
 
 Across its channel, **measured**, an nRF52840's carrier on 2440 MHz at 8 dBm, the radio retuned over the bridge
