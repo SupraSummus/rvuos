@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The CYW43439's receiver sampled: its I/Q estimator, one sample at a time, at about 310 thousand samples a second.
 
-Usage: user/wifi/tools/cyw43-iq.py OUT --conf FILE [--count N] [--wait W] [--tones MHZ,...]
+Usage: user/wifi/tools/cyw43-iq.py OUT --conf FILE [--count N] [--wait W] [--gain P6,P7,P8 | --tones MHZ,...]
 
 --conf names a configuration of the Wi-Fi system, such as an access point's, whose mode's work comes first,
 so that the vendor's firmware sets the radio up and tunes it to the mode's channel; its run= is the bridge's.
@@ -10,6 +10,12 @@ and the processor started again in our own code, user/wifi/wlancore/iq-cap.c, bu
 which lies in RAM the firmware had cleared; the host checks it still reads 0 first.
 It takes --count estimates of the PHY's estimator, each over one sample, after --wait samples at 20 MHz, see user/wifi/hw/phy.md;
 a wait of 2 takes a sample every 262 cycles of the processor's 81.6 MHz, which it measures against D11's TSF.
+
+--gain holds the receiver's gain where the three numbers put it, out of its AGC's hands, see phy.md:
+the overrides the firmware's calibration sets, 0x872534's, with 0x53c bits 9 to 12 at P6, 0 to 10, about 3 dB a step,
+0x9ac bits 6 to 9 at P7, 0 to 12, about 3 dB a step, and 0x979 bits 1 to 8 at P8, in 3 dB steps at 4, 7, 10 and 13;
+10,9,0 gives about the noise the AGC idles at. Without it the AGC sets the gain, and raises it for a weak frame.
+The samples are I and Q of 8 bits, -128 to 127, so a strong signal clips.
 
 --tones is the control: the firmware's own receive IQ calibration's loopback set up, by its ROM's functions,
 and one run of --count samples before any tone and one during each tone of the list, in MHz, played by the ROM
@@ -45,6 +51,7 @@ from cyw43bridge import Bridge  # noqa: E402
 PROGRAM = os.path.join(ROOT, "build/cyw43/iq-cap.bin")
 D11, CM3_WRAPPER, D11_WRAPPER = 0x18001000, 0x18103000, 0x18101000
 AI_IOCTRL, AI_RESETCTRL = 0x408, 0x800
+PHYREGADDR, PHYREGDATA = D11 + 0x3FC, D11 + 0x3FE  # a halfword of address, then the data; or a word of both
 RCV_CONTROL, FIFOS = D11 + 0x220, 6  # brcmsmac's fifo64regs: each 0x40, its receive control at 0x20, bit 0 enables
 PI_TYPE, LCN20 = 0, 0xC  # the PHY's state begins with its type, and holds D11's address at 0x44
 PI_SEARCH = range(0x60000, 0x70000, 4)
@@ -56,6 +63,10 @@ FREQ, FIRST = BASE + 0x40, BASE + 0x80
 CLEARED = range(0x1E000, 0x2D000)  # RAM the firmware had cleared, an access point up: the code's, and the samples' with tones
 OUT_END, OUT_END_TONES, MOST_TONES = 0x7E000, 0x2D000, 16
 MAGIC_VALUE, GO_VALUE, ENDED, LATE, TSF_SPAN = 0x49514341, 2, 3, 1, 100000
+# The receiver's gain held, see phy.md: 0x872534's override enables, and 0x872484's fields of the three stages that act.
+GAIN_ENABLES = ((0x4B0, 0x1000), (0x4F9, 0x80), (0x4B0, 0x400), (0x53D, 1), (0x53D, 8), (0x9AC, 1), (0x979, 1))
+GAIN_FIELDS = ((0x53C, 9, 4, 10), (0x9AC, 6, 4, 12), (0x979, 1, 8, 0xFF))  # register, first bit, bits, most
+CLIP = 128  # the estimator's samples are 8 bits; |I| or |Q| of 128 is a clipped one
 
 
 def say(text):
@@ -96,6 +107,25 @@ def strongest(square, times, rate, bins=1024):
     return best[1], best[0] / total
 
 
+def phy_modify(board, reg, mask, value):
+    board.write16(PHYREGADDR, reg)
+    old = board.read16(PHYREGDATA)
+    board.write(PHYREGADDR, ((old & ~mask) | (value & mask)) << 16 | reg)
+
+
+def hold_gain(board, codes):
+    for (reg, shift, bits, _), code in zip(GAIN_FIELDS, codes):
+        phy_modify(board, reg, ((1 << bits) - 1) << shift, code << shift)
+    for reg, bit in GAIN_ENABLES:
+        phy_modify(board, reg, bit, bit)
+    held = []
+    for reg, shift, bits, _ in GAIN_FIELDS:
+        board.write16(PHYREGADDR, reg)
+        held.append(board.read16(PHYREGDATA) >> shift & ((1 << bits) - 1))
+    if held != codes:
+        sys.exit(f"cyw43-iq: the gain reads {held}, not {codes}")
+
+
 def find_pi(board):
     """The firmware's PHY state: its type first, and D11's address at 0x44."""
     for at in [PI_KNOWN, *PI_SEARCH]:
@@ -111,7 +141,11 @@ def main():
     p.add_argument("--count", type=int, default=4000)
     p.add_argument("--wait", type=lambda x: int(x, 0), default=2)
     p.add_argument("--tones", type=lambda x: [round(float(f) * 1e6) for f in x.split(",")], default=[])
+    p.add_argument("--gain", type=lambda x: [int(v, 0) for v in x.split(",")])
     args = p.parse_args()
+    if args.gain is not None and (args.tones or len(args.gain) != 3
+                                  or any(not 0 <= v <= most for v, (_, _, _, most) in zip(args.gain, GAIN_FIELDS))):
+        sys.exit("cyw43-iq: --gain P6,P7,P8, each within its stage's codes, and without --tones")
     runs = 1 + len(args.tones)
     most = ((OUT_END_TONES if args.tones else OUT_END) - OUT_AT) // 16 // runs
     if not 0 < args.count <= most or not 2 <= args.wait <= 0xFF or len(args.tones) > MOST_TONES:
@@ -137,6 +171,8 @@ def main():
         if used:
             sys.exit(f"cyw43-iq: RAM taken to be cleared is not, at {used[0]:#x}")
         pi = find_pi(board) if args.tones else 0
+        if args.gain is not None:
+            hold_gain(board, args.gain)
         board.write_block(CODE, code)
         if any(board.read(CODE + a) != int.from_bytes(code[a:a + 4], "little") for a in range(0, len(code), 4)):
             sys.exit("cyw43-iq: the program did not read back")
@@ -173,8 +209,8 @@ def main():
         board.close()
 
     say(f"receive DMA stopped on fifos {stopped}; the processor at {hz / 1e6:.4f} MHz by D11's TSF"
-        + (f"; the PHY's state at {pi:#x}" if pi else ""))
-    out, failed = {"hz": hz, "wait": args.wait, "runs": []}, False
+        + (f"; the PHY's state at {pi:#x}" if pi else "") + (f"; gain held at {args.gain}" if args.gain else "; gain the AGC's"))
+    out, failed = {"hz": hz, "wait": args.wait, "gain": args.gain, "runs": []}, False
     for r in range(runs):
         w = words[4 * args.count * r:4 * args.count * (r + 1)]
         rows = [(w[4 * k] & ~LATE, signed(w[4 * k + 1]), w[4 * k + 2], w[4 * k + 3], w[4 * k] & LATE)
@@ -190,7 +226,8 @@ def main():
             if tone is not None else (0.0, 0.0)
         line = (f"{'no tone' if tone is None else f'tone {tone / 1e6:+g} MHz'}: {args.count} samples at {rate / 1e3:.1f} kS/s,"
                 f" steps {min(steps)} to {max(steps)} cycles; {odd} not of one sample, {late} late;"
-                f" I^2 + Q^2 median {statistics.median(power)}, most {max(power)}")
+                f" I^2 + Q^2 median {statistics.median(power)}, most {max(power)};"
+                f" {sum(1 for _, _, ip, qp, _ in rows if max(ip, qp) >= CLIP * CLIP)} clipped")
         if share:
             line += f"; the square's strongest at {peak / 1e3:+.1f} kHz, {share:.0%} of its power"
         if tone is not None:

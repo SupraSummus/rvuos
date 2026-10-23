@@ -244,6 +244,42 @@ I^2 + Q^2 has a median of 2 to 5, a few of the converter's steps;
 one run of 2000 held a burst of 77 samples, 1.2 ms, up to 19865, a magnitude of about 140, the length of a frame, a hypothesis.
 At 311 kS/s the channel's 20 MHz folds onto itself, so only a signal narrower than the rate, tuned near the carrier, is seen whole.
 
+### The receiver's gain
+
+The AGC sets the receiver's gain unless the overrides hold it, as the firmware's calibration holds it, **known**:
+`0x872534` sets their enables, bits 10 and 12 of `0x4b0`, 7 of `0x4f9`, 0 and 3 of `0x53d`, 0 of `0x9ac` and of `0x979`,
+and `0x872484` their values, bit 15 of `0x4b1`, bits 8 to 11 of `0x4fa`, 11 to 13 of `0x4b1`, 0 to 3 and 9 to 12 of `0x53c`,
+6 to 9 of `0x9ac` and 1 to 8 of `0x979`; the calibration's gains are rows of tables at `0x88fdce` and `0x88fe0e`.
+The firmware's measurement of noise, `0x871060`, holds only `0x979` at 0 and `0x9ac`'s four bits at an index p,
+and reckons the gain 3 dB a step of p.
+With an access point up, none is enabled, **read**.
+
+What each does, **measured**, as the mean of I^2 + Q^2 over estimates of 1024 samples, the median of five, all enabled:
+all at 0 leaves no noise at all; with `0x9ac`'s bits at 11, each field alone from 0:
+
+| Field | Codes | What the noise does |
+|---|---|---|
+| `0x53c` bits 9 to 12 | 0 to 10 | from 2.5 to 26, the noise above the floor doubling a step, 3 dB, over the whole range: the first stage, a hypothesis |
+| | 11 to 15 | 400, or with `0x4b1` bit 15 set from 19 to 175: no gain to use |
+| `0x9ac` bits 6 to 9 | 0 to 12 | about 3 dB a step, as the firmware reckons; 13 to 15 leave no noise |
+| `0x979` bits 1 to 8 | 0 to 15 | 2.5, then doubling at 4, 7, 10 and 13: 3 dB steps of a gain counted in dB; it doubles the floor too, so it lies late |
+| `0x4fa` bits 8 to 11, `0x4b1` bits 11 to 13 and 15, `0x53c` bits 0 to 3 | all | nothing seen: stages this board does not use, such as an external LNA, a hypothesis |
+
+Together not every pair adds: with `0x979`'s at 0, `0x53c`'s at 10 and `0x9ac`'s from 5 to 12 give
+0.55, 0.99, 1.8, 3.63, 6.76, 6.46, 12.77 and 0, and at 9, 0.27 to 7.64, then 7.08 and 14.9.
+The AGC idles at a noise of 6.8 to 7.4, about where 10, 9 and 0 hold it, 6.76: below its most, so that it can raise the gain.
+
+It does raise it for a weak frame, **measured**, 20000 samples each, one after another in one power-up:
+with the AGC free, 1830 samples of frames, louder than 20 times the median, had a power of 101 to 1469 between their quartiles,
+and 56 clipped; held at 10, 8 and 0, 3 dB below the idle gain, 345 such samples had 41 to 85, and one clipped;
+free again, 1338 had 101 to 541, and 4 clipped.
+Held, a frame comes out as strong as it is; free, the AGC lifts a weak one toward its own level, past it at times.
+
+The samples are 8 bits, **measured**: I and Q of a clipped sample read 128, the most and more often than 127,
+and of all samples none is larger; at the idle gain the noise is about one step of them,
+so that a signal has about 40 dB above it before it clips.
+`cyw43-iq.py --gain P6,P7,P8` holds the three fields that act at the codes given, with every enable set.
+
 ### The control: the calibration's tones
 
 The firmware's receive IQ calibration, `0x872770`, **known**,
