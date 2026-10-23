@@ -25,9 +25,11 @@
 #define TASKS_RXEN     0x004u
 #define TASKS_START    0x008u
 #define TASKS_DISABLE  0x010u
+#define TASKS_RSSISTART 0x014u
 #define EVENTS_READY   0x100u
 #define EVENTS_END     0x10cu
 #define EVENTS_DISABLED 0x110u
+#define EVENTS_RSSIEND 0x11cu
 #define EVENTS_CRCOK   0x130u
 #define EVENTS_CRCERROR 0x134u
 #define EVENTS_FRAMESTART 0x138u
@@ -48,6 +50,7 @@
 #define CRCCNF         0x534u
 #define CRCPOLY        0x538u
 #define CRCINIT        0x53cu
+#define RSSISAMPLE     0x548u
 #define STATE          0x550u
 #define MODECNF0       0x650u
 #define EDCNT          0x664u
@@ -82,6 +85,7 @@
 #define CRCPOLY_ITU_T     0x11021u
 #define STATE_DISABLED    0u
 #define EDSAMPLE_LEVEL    0x7fu
+#define RSSISAMPLE_DBM    0x7fu
 #define PHR_LENGTH        0x7fu
 /* A ramp up of 40 us rather than 130, leaving a driver woken by a frame more of the 192 us before its acknowledgement. */
 #define MODECNF0_RU_FAST 1u
@@ -100,6 +104,8 @@
 /* A disable, or a ramp up, 40 us, takes some microseconds; this bounds the wait well past them. */
 #define DISABLE_POLLS 100000u
 #define RAMP_POLLS    100000u
+/* A sample of the received power takes a quarter of a microsecond; this bounds the wait well past it. */
+#define RSSI_POLLS    1000u
 
 /* Receiving: a START once ready, and again as each frame ends. */
 #define SHORTS_RX (SHORT_READY_START | SHORT_END_START)
@@ -275,6 +281,15 @@ bool radio_received(struct radio *r, struct radio_frame *f)
         f->lqi = lqi > LQI_MAX ? LQI_MAX : lqi;
     }
     return true;
+}
+
+uint32_t radio_rssi(struct radio *r)
+{
+    REG(r, EVENTS_RSSIEND) = 0;
+    REG(r, TASKS_RSSISTART) = 1;
+    for (uint32_t i = 0; i < RSSI_POLLS && REG(r, EVENTS_RSSIEND) == 0; i++) {
+    }
+    return REG(r, EVENTS_RSSIEND) != 0 ? REG(r, RSSISAMPLE) & RSSISAMPLE_DBM : RADIO_RSSI_NONE;
 }
 
 bool radio_receiving(struct radio *r)

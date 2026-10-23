@@ -138,6 +138,17 @@ static void bank_to_cpu(uint32_t usage)
     (void)REG(SRAM_USAGE);
 }
 
+uint32_t dump_bank_give(void)
+{
+    REG(CLK_CONF) |= CLK_DATA_DUMP;
+    return bank_to_engine();
+}
+
+void dump_bank_take(uint32_t usage)
+{
+    bank_to_cpu(usage);
+}
+
 /* The engine's run: the bank its, the capture started, waited for, and the bank the CPU's again; the reads it took. */
 static uint32_t capture(const struct dump_conf *c, uint32_t source)
 {
@@ -224,13 +235,23 @@ static void tell(const struct dump_conf *c, uint32_t base, uint32_t n)
     captures++;
 }
 
-void dump_take(struct dump_conf *c)
+static uint32_t taken_source, taken_polls; /* the last capture's, for dump_tell */
+
+void dump_capture(struct dump_conf *c)
 {
     if (c->samples == 0) {
         return;
     }
-    uint32_t source = c->sweep ? captures & 15u : c->source;
-    uint32_t polls = capture(c, source);
+    taken_source = c->sweep ? captures & 15u : c->source;
+    taken_polls = capture(c, taken_source);
+}
+
+void dump_tell(struct dump_conf *c)
+{
+    if (c->samples == 0) {
+        return;
+    }
+    uint32_t source = taken_source, polls = taken_polls;
     uint32_t n = c->samples, written = 0, guards = 0;
     for (uint32_t k = 0; k < n; k++) {
         written += bank[k] != MARK;
@@ -241,6 +262,12 @@ void dump_take(struct dump_conf *c)
     drv_say("dump: capture %u source %u lane %u%s rate %u: %u of %u written, guards %u of 4, %u polls\n", captures,
         source, c->lane, c->bt ? " bt" : "", c->rate, written, n, guards, polls);
     tell(c, 0, n);
+}
+
+void dump_take(struct dump_conf *c)
+{
+    dump_capture(c);
+    dump_tell(c);
 }
 
 static uint32_t ring_usage; /* SRAM_USAGE before dump_ring_start, which dump_ring_stop puts back */

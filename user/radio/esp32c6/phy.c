@@ -6018,3 +6018,57 @@ uint32_t drv_phy_rx_filter(uint32_t code)
     rom_i2c_write_masked(I2C_BBTOP, I2C_HOST_MST, 5, 5, 0, (uint8_t)code);
     return was;
 }
+
+/*
+ * The transmitter looped back into the receiver, as the receive IQ calibration, rxiq_cal_init, sets it up at every
+ * bring-up: the front end's FECTRL_TXRX_OFF bits 14 and 15 raised, the pbus's debug mode, the receiver powered,
+ * the loopback on -- block 0x67's register 0 bit 6 and the transmit and receive clocks, the ROM's
+ * rom_loopback_mode_en -- FEDATA_REG_SET3's bits 29 and 13 raised and 30 and 14 lowered, the loopback's gain
+ * and the loopback transmit IQ pair, as set_rx_gain_cal_iq_new starts its search. Off, the two words are put back
+ * as they were, the loopback's clocks lowered, the transmitter powered down and the pbus's work mode back, as the
+ * calibration's end does. A second on, or an off with none before, does nothing, so that the words put back are
+ * always those found. The sequence is rxiq_cal_init's, which stays as it is, held to the library's by phy-ab.py.
+ * The loopback does not keep the tone off the air: at the calibration's level it goes out about 22 dB below
+ * the radio's 0 dBm; see hw/phy.md, "The loopback".
+ */
+static uint32_t loop_txrx_off, loop_set3;
+static int looping;
+
+void drv_phy_loopback(uint32_t on, uint32_t lb)
+{
+    if ((on != 0) == (looping != 0)) {
+        return;
+    }
+    looping = on != 0;
+    if (on) {
+        loop_txrx_off = REG(FECTRL_TXRX_OFF);
+        loop_set3 = REG(FEDATA_REG_SET3);
+        REG(FECTRL_TXRX_OFF) |= 0xc000u;
+        pbus_debugmode();
+        ((void (*)(uint32_t))phy_get_romfuncs()[ROMFUNC_PBUS_XPD_RX_ON])(0u);
+        rom_loopback_mode_en(1u);
+        REG(FEDATA_REG_SET3) = (REG(FEDATA_REG_SET3) | 0x20002000u) & ~0x40004000u;
+        ram_set_loopback_gain(0u, 0x43u, lb);
+        set_lb_txiq_new(phy_param16(0xd0u));
+    } else {
+        REG(FEDATA_REG_SET3) = loop_set3;
+        REG(FECTRL_TXRX_OFF) = loop_txrx_off;
+        rom_loopback_mode_en(0u);
+        rom_pbus_xpd_tx_off();
+        pbus_workmode();
+    }
+}
+
+/*
+ * The transmit tone generator, the ROM's rom_start_tx_tone_step and rom_stop_tx_tone: FEDATA_TX_TONE0's bit 18
+ * the tone on, bits 0 to 9 its frequency, in steps hw/phy.md measures, and bits 10 to 17 its level, the negation of
+ * atten: a larger atten is a weaker tone, as the receive IQ calibration raises it when the tone comes too strong.
+ */
+void drv_phy_tone(uint32_t on, uint32_t step, uint32_t atten)
+{
+    if (on) {
+        rom_start_tx_tone_step(1u, step & 0x3ffu, atten & 0xffu, 0u, 0u, 0u);
+    } else {
+        ((void (*)(uint32_t))phy_get_romfuncs()[ROMFUNC_STOP_TX_TONE])(1u);
+    }
+}

@@ -199,3 +199,22 @@ Its tuning, its gain and its filter are `phy.md`'s, "Off the channels' grid" and
   so that the CPU reads one bank while the engine fills the other: a stream that does not stop wants two banks,
   where the radio's programs have one.
 - The clocks it forces on: `0x600A9804` written all ones, `0x600A9814` 0x7FFFF and `0x600A980C` all ones.
+
+## A player
+
+Espressif's RF test library, `librftest.a` of `esp-phy-lib`, holds `dactrig` beside `adctrig`:
+on the ESP32-C3 (known, its disassembly) it fills the dump bank, `0x3FCB0000`, and drives a word of its own,
+`0x60033D64`, eight bytes past the C3's capture control `0x60033D5C`:
+bits 0 to 13 a count, bits 15 and 19 set or cleared by two of its arguments, bits 20 to 27 the count's low byte again,
+bit 31 set, then a wait for bit 18, as a capture waits for its own; after 10 ms it clears the capture control.
+An engine that sends what the bank holds, as a hypothesis from that.
+On the ESP32-C6, and the C5, C61, H2, S31 and C2, `dactrig` only fills the bank, `0x40840000` on the C6, and writes no register,
+and `fedump_wr_txmem` returns at once: if the C6 has a player, its library no longer says where.
+The C3's capture block is laid out apart from the C6's, its lanes 0x34 past the control where the C6's are 0x10,
+so eight bytes past the control, the C6's source word `0x600A9008`, says nothing.
+
+`prog/dacprobe.c` reads the block's words and, with `write=1`, writes each of the unexplained ones with a count and bit 31,
+the transmitter powered down, and tells what moves.
+Read on channel 6 (measured, `prog/dacprobe.c`, no keys): `0x00` 0, `0x04` 0, `0x08` 0x78000 (source 15), `0x0C` 0, `0x10` 0,
+`0x14` 0xC2040 (lanes 0 to 3), `0x18` 0, `0x1C` 0, `0x20` the date word 0x02202221, and `0x24` to `0x3C` 0.
+The writes are not yet run.

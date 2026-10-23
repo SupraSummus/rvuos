@@ -21,6 +21,8 @@
  * power=, the dBm it sends at, 0 by default, down to -40, the chip's least;
  * run=, the exchange's seconds, 30 by default; stream=, frames a second, none by default;
  * survey=0 leaves the survey of the channels out;
+ * watch=, seconds up to WATCH_S_MAX, replaces the exchange with a watch of the power on channel=, see watch_power,
+ * and watchmax=1 keeps each block's strongest sample rather than its mean;
  * load=, units of the processor's 64 up to 32, has a thread beside the link's earn them and compute without end,
  * as a node does that has more to do than its link, so that the link's thread waits for its turn when it wakes,
  * up to a request of its; it runs no more than its units earn, with no spare time, and there is none by default.
@@ -58,6 +60,20 @@
 #define RUN_S_DEFAULT   30u
 #define RUN_S_MAX       3600u
 #define STREAM_MAX      200u
+
+/*
+ * The watch: the power the radio hears on one channel, sampled as fast as the processor asks for it,
+ * a block's samples averaged every WATCH_BLOCK_US, and the blocks told once it ends, a line at a time,
+ * slowly enough that the console's ring, which the runner follows from outside, loses none;
+ * a sender switched on and off in a rhythm stands out as a line at its rate in the blocks' spectrum.
+ */
+#define WATCH_S_MAX     20u
+#define WATCH_BLOCK_US  5000u
+#define WATCH_BLOCKS    (WATCH_S_MAX * US_PER_S / WATCH_BLOCK_US)
+#define WATCH_SCALE     16u /* a block's mean in sixteenths of a dB */
+#define WATCH_NONE      0xffffu /* a block no sample ended in */
+#define WATCH_LINE      16u /* blocks a line */
+#define WATCH_PAUSE_US  20000u
 #define PONG_DELAY_US   20000u
 #define PAYLOAD_MAX     32u
 #define US_PER_S        1000000u
@@ -140,9 +156,9 @@ static uint32_t wait_for(uint32_t want)
 
 /* What the configuration asks for. */
 struct config {
-    uint32_t channel, run_s, stream, load;
+    uint32_t channel, run_s, stream, load, watch_s;
     int32_t power;
-    bool survey;
+    bool survey, watch_max;
 };
 
 /* A number of the configuration that may be negative, of a few digits, or dflt. */
@@ -180,6 +196,9 @@ static void configure(struct config *c)
     c->survey = config_number(conf, size, "survey", 1) != 0;
     c->load = config_number(conf, size, "load", 0);
     c->load = c->load > LOAD_UNITS_MAX ? LOAD_UNITS_MAX : c->load;
+    c->watch_s = config_number(conf, size, "watch", 0);
+    c->watch_s = c->watch_s > WATCH_S_MAX ? WATCH_S_MAX : c->watch_s;
+    c->watch_max = config_number(conf, size, "watchmax", 0) != 0;
     must("uninstall the input", region_free(&self, region));
 }
 
@@ -495,6 +514,50 @@ static void route_check(void)
     }
 }
 
+static uint16_t watched[WATCH_BLOCKS];
+
+/*
+ * The watch: the radio receiving on the channel, the power sampled without a pause for watch_s seconds,
+ * each block's mean kept, or with watch_max its strongest sample, then told: the channel, the blocks' length and count,
+ * the samples they took, and the blocks' values in hexadecimal, WATCH_LINE a line, each line naming its first block.
+ */
+static void watch_power(const struct config *c)
+{
+    struct alarm *a = &link.alarm;
+    uint32_t blocks = c->watch_s * (US_PER_S / WATCH_BLOCK_US), samples = 0, missed = 0;
+    radio_channel(&link.radio, c->channel);
+    radio_receive_start(&link.radio);
+    uint32_t start = alarm_now(a);
+    for (uint32_t b = 0; b < blocks; b++) {
+        uint32_t end = start + (b + 1u) * WATCH_BLOCK_US, sum = 0, n = 0, least = RADIO_RSSI_MAX;
+        while ((int32_t)(alarm_now(a) - end) < 0) {
+            uint32_t rssi = radio_rssi(&link.radio);
+            if (rssi == RADIO_RSSI_NONE) {
+                missed++;
+                continue;
+            }
+            sum += rssi;
+            least = rssi < least ? rssi : least;
+            n++;
+        }
+        watched[b] = n == 0 ? WATCH_NONE : c->watch_max ? (uint16_t)(least * WATCH_SCALE) : (uint16_t)(sum * WATCH_SCALE / n);
+        samples += n;
+    }
+    uint32_t took = alarm_now(a) - start;
+    radio_off(&link.radio);
+    say(&cout, "watch: channel %u, %u MHz, %u blocks of %u us in %u us, %u samples, %u missed, %s in 1/%u dB below a mW\n",
+        c->channel, RADIO_CHANNEL_MHZ(c->channel), blocks, WATCH_BLOCK_US, took, samples, missed,
+        c->watch_max ? "the strongest" : "means", WATCH_SCALE);
+    for (uint32_t b = 0; b < blocks; b += WATCH_LINE) {
+        say(&cout, "watchhex: %u", b);
+        for (uint32_t k = b; k < b + WATCH_LINE && k < blocks; k++) {
+            say(&cout, " %x", watched[k]);
+        }
+        say(&cout, "\n");
+        sleep_us(WATCH_PAUSE_US);
+    }
+}
+
 int main(void);
 int main(void)
 {
@@ -533,6 +596,11 @@ int main(void)
     say(&cout, "thread: the radio is on, set for IEEE 802.15.4\n");
     if (c.survey) {
         link_stir(&link, survey_energy());
+    }
+    if (c.watch_s != 0) {
+        watch_power(&c);
+        say(&cout, "thread: watched\n");
+        rv_halt(BOOT_CAP_HALT, 0);
     }
     if (c.load != 0) {
         load_start(c.load);

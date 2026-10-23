@@ -98,6 +98,15 @@ void radio_receive_start(struct radio *r);
  */
 bool radio_received(struct radio *r, struct radio_frame *f);
 /*
+ * While receiving: the power the radio hears on the channel now, as a sample of a quarter of a microsecond,
+ * in dB below a milliwatt, 0 to 127, as the product specification has RSSISAMPLE say it;
+ * RADIO_RSSI_NONE if the sample never ended, the radio not receiving.
+ */
+#define RADIO_RSSI_MAX  127u
+#define RADIO_RSSI_NONE 0xffu
+uint32_t radio_rssi(struct radio *r);
+
+/*
  * Whether a frame is arriving: its length heard, its end not yet, which a send would cut off.
  * A frame whose length came before the call that returned the frame before it goes untold.
  */

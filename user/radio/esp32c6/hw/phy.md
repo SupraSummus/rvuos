@@ -142,6 +142,39 @@ Measured with `prog/scan.c`:
   flat to 8 MHz from the middle, 10 dB down at 12, 25 at 16 and 38 at 20, either side;
   at the middle itself the frames stood 15 dB lower, the receiver taking out what lies about zero.
 
+### The loopback
+
+The receive IQ calibration, `rxiq_cal_init`, loops the transmitter back into the receiver at every bring-up
+and measures the transmit tone generator's tone there; `drv_phy_loopback` and `drv_phy_tone` in `phy.c` set up the same,
+and `prog/loopback.c` captures what the receiver hears, with the dump engine.
+
+- The ROM's `rom_loopback_mode_en` (known, its disassembly) writes block 0x67's register 0 bit 6 through the analog I2C
+  and raises or lowers the transmit and receive clocks, `set_txclk_en` and `set_rxclk_en`; nothing else.
+  The loopback's gain is the pbus's force words, `ram_set_loopback_gain`: `rftx` (4,1) 0x83, (4,2) 1 and (5,1) 0x1C0 plus a gain,
+  `rfrx` (0,1) and (0,2), `bb` (1,1) 0x1F9 and (1,2) the gain the calibration searches.
+- The ROM's `rom_start_tx_tone_step(on, step, atten, ...)` (known, its disassembly) writes `FEDATA_TX_TONE0`:
+  bit 18 the tone on, bits 0 to 9 the step, bits 10 to 17 the level, atten negated; its last three arguments the same of `FEDATA_TX_TONE1`.
+  A larger atten is a weaker tone (inferred): `set_rx_gain_cal_iq_new` raises it when the tone comes too strong.
+  `rom_stop_tx_tone` clears bit 18 alone.
+- Measured with `prog/loopback.c`, `channel=6`, `dump=2048` at 80 MHz, five seconds:
+  looped back with nothing sent, the receiver's words stay within four counts of a fixed offset, rms 1.4 to 1.6,
+  where the receiver alone hears its noise and the band, rms 26 to 52, so the loopback leaves the antenna's path out.
+  With the calibration's tone, step 0x80 and atten 0x30, a line stands at +5.00 MHz, 72 to 73 dB over the median,
+  its mirror about 50 dB below it, rms 132 to 135, in every one of the five:
+  a step is 80 MHz / 2048, 39.0625 kHz, as a hypothesis from the one step,
+  and the tone lies above the carrier, as the dump engine's I is bits 10 to 19.
+  The quiet loopback holds a line of its own at +3.01 MHz, 25 dB over its median.
+- The loopback does not keep the tone off the air. Measured with `channel=13`, `step=77` (+3.008 MHz, 2475 MHz),
+  `rhythm=35` and `half=50`, the tone switched on and off at 10 Hz, while the nRF52840 watched 802.15.4's channel 25,
+  `watch=10` of `user/thread/root.c`, its blocks of 5 ms read by `user/thread/tools/watch-spectrum.py`:
+  a line at 10 Hz, 62 dB over the rates beside it in the blocks' means and 42 dB in their strongest samples,
+  with its odd harmonics and nothing at 20 or 7 Hz; folded at 100 ms, -85 dBm with the tone and -96 to -99 without.
+  The C6's own 802.15.4 frames there, `prog/i154.c` with `stream=7` at 0 dBm, in the same watch: a line at 7 Hz,
+  their strongest samples -62 dBm. So the looped tone at the calibration's level goes out about 22 dB below
+  the radio's 0 dBm, as every bring-up's calibration sends it for its own while.
+  The nRF52840's survey of the energy, two windows of 100 ms a channel, did not tell it from the floor:
+  a rhythm and a watch through many of its periods did.
+
 ### BBPLL
 
 - Analog I2C: `i2c_bbpll` 0x66, host 0 -- `phy_i2c_check`'s name; IDF's `regi2c_bbpll.h` `I2C_BBPLL`

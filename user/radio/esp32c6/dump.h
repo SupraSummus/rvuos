@@ -47,6 +47,9 @@ void dump_configure(const char *conf, uint32_t size, struct dump_conf *c);
  * word's index, and user/radio/esp32c6/tools/dump-spectrum.py refuses a capture whose lines do not follow on.
  */
 void dump_take(struct dump_conf *c);
+/* The same in two: the capture alone, and then what it holds, so that what a capture was taken for may end between. */
+void dump_capture(struct dump_conf *c);
+void dump_tell(struct dump_conf *c);
 
 /*
  * The engine writing round a ring of DUMP_RING words from the bank's first, as ESP-SDR found it does,
@@ -69,5 +72,12 @@ void dump_ring_stop(const struct dump_conf *c);
  */
 void dump_arm(const struct dump_conf *c, int trigger);
 uint32_t dump_disarm(const struct dump_conf *c);
+
+/*
+ * The bank handed to the modem's engines, which the CPU then loses, their clock on, and SRAM_USAGE as it was;
+ * dump_bank_take hands it back with that word. For an engine of the block's other than the capture's.
+ */
+uint32_t dump_bank_give(void);
+void dump_bank_take(uint32_t usage);
 
 #endif

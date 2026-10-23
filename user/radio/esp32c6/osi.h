@@ -152,6 +152,14 @@ void drv_phy_rx_gain(uint32_t force, uint32_t index);
 uint32_t drv_phy_rx_gain_last(void);
 /* The receive's analog filter's code, 0 to 63, 0 the widest; the code it replaced, the RC calibration's at first. */
 uint32_t drv_phy_rx_filter(uint32_t code);
+/*
+ * The transmitter looped back into the receiver, as the receive IQ calibration loops it, lb its loopback gain,
+ * 0x20 the calibration's first; and the transmit tone generator, step its frequency and atten its attenuation,
+ * the generator's level being 256 less it, the calibration's 0x80 and 0x30. Neither is meant for a frame:
+ * the radio is off again before the MAC sends.
+ */
+void drv_phy_loopback(uint32_t on, uint32_t lb);
+void drv_phy_tone(uint32_t on, uint32_t step, uint32_t atten);
 
 /* hostap.c: hostap's lines at its debug level too, from here on. */
 void drv_wpa_debug(void);

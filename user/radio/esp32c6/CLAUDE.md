@@ -48,6 +48,18 @@ A change to `drv_phy_rx_gain` or `drv_phy_rx_filter` runs it with `gain=` and `g
 as `hw/phy.md`, "The receiver's gain and filter", says: every word's gain must be the one held,
 and the noise's band must narrow as the filter's code rises.
 
+### The loopback
+
+A change to `drv_phy_loopback` or `drv_phy_tone` in `phy.c`, or to `prog/loopback.c`, runs the loopback with `channel=6`,
+`dump=2048` and `dumphex=2048`, and `user/radio/esp32c6/tools/dump-spectrum.py LOG 80e6 2048` must find,
+as `hw/phy.md`, "The loopback", says, every quiet loopback's words within a few counts,
+and every tone's line at +5.00 MHz, 70 dB or more over the median.
+A change to `rhythm=` or `half=`, or to the nRF52840's `watch=` in `user/thread/root.c` or `user/thread/tools/watch-spectrum.py`,
+runs the loopback with `channel=13`, `step=77`, `rhythm=35` and `half=50` while the nRF52840 watches channel 25 with `watch=10`,
+and `prog/i154.c` on channel 25 with `stream=7` under the same watch, its positive control:
+`user/thread/tools/watch-spectrum.py` must find the tone's line at 10 Hz and the frames' at 7 Hz, each far over the rates beside it,
+and neither at the other's rate.
+
 ### The register map
 
 A change to `prog/regmap.c` or `user/radio/esp32c6/tools/regmap.py` runs the map with `channel=1`, and `user/radio/esp32c6/tools/regmap.py` must put its four passes together.
