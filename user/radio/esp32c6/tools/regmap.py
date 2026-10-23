@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The ESP32-C6's modem frame as the register map told it, from a run's log: user/radio/esp32c6/prog/regmap.c.
 
-Usage: tools/regmap.py LOG [blocks | words KIND | i2c | dump FROM TO]
+Usage: user/radio/esp32c6/tools/regmap.py LOG [blocks | words KIND | i2c | dump FROM TO]
 
 The program reads every word of 0x600A0000 to 0x600B0000 in four passes, cold, up, again and tuned,
 and each word twice in a row; this puts the passes back together, refusing a log whose lines do not follow on, and tells:

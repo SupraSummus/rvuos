@@ -114,7 +114,7 @@ Measured with `prog/scan.c`:
   the PLL at 2892 MHz for 2410 divided, for 50 s, and the nRF52840 sending IEEE 802.15.4 frames
   on 2410 MHz for twenty of those seconds, `make BOARD=nrf52840 thread` with `channel=12`, `stream=100` and `run=20`,
   which fails at its end, as the C6 acknowledges none.
-  `tools/dump-spectrum.py LOG 80e6 256 --scan 2410` found the level there 13 to 31 dB over the floor
+  `user/radio/esp32c6/tools/dump-spectrum.py LOG 80e6 256 --scan 2410` found the level there 13 to 31 dB over the floor
   in 9 of the direct way's 26 captures of 13 us in those seconds and 12 of the divided way's 27,
   and in none before or after them; 2410 MHz is BLE's channel 3, where another sender stood once in an earlier run.
   At 16 MS/s, in bins of 62.5 kHz, the two ways put the frames' middle within 50 kHz of each other, their band the same,

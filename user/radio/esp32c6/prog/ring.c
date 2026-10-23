@@ -17,7 +17,7 @@
  * The ring sends nothing: no frame, no tone.
  *
  * Run it with make BOARD=esp32c6 radio PROG=ring RADIO_CONFIG=file, see build.mk,
- * and read the words with tools/dump-spectrum.py.
+ * and read the words with user/radio/esp32c6/tools/dump-spectrum.py.
  */
 
 #include <stdint.h>

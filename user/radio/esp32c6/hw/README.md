@@ -23,12 +23,12 @@ The kernel gives a program the modem as one frame, 0x600A0000 to 0x600B0000.
 `prog/regmap.c` reads every word of it, twice in a row, in four passes,
 cold, as the program finds the modem, up, once the Wi-Fi MAC and the PHY are up on a channel,
 again, a moment later, and tuned, five channels above, and the analog I2C's blocks in the last three;
-`tools/regmap.py` puts the passes together:
+`user/radio/esp32c6/tools/regmap.py` puts the passes together:
 
     printf 'channel=1\nrun=20\n' > local/regmap.conf
     make BOARD=esp32c6 radio PROG=regmap RADIO_CONFIG=local/regmap.conf PORT=/dev/serial/by-id/usb-Espressif_...
-    tools/regmap.py build/esp32c6/radio-run.log            # the blocks, and each page's time
-    tools/regmap.py build/esp32c6/radio-run.log words tuned  # or up, drift, moving; and i2c, dump FROM TO
+    user/radio/esp32c6/tools/regmap.py build/esp32c6/radio-run.log            # the blocks, and each page's time
+    user/radio/esp32c6/tools/regmap.py build/esp32c6/radio-run.log words tuned  # or up, drift, moving; and i2c, dump FROM TO
 
 What it read, measured on one board in runs on channels 1 and 6 and on 8 and 13:
 
@@ -78,5 +78,5 @@ What it read, measured on one board in runs on channels 1 and 6 and on 8 and 13:
 
 The ROM's `rom_i2c_readReg` reads a block's registers, a byte each, once the PHY's bring-up has powered the bus;
 `libphy`'s `phy_i2c_check` names the blocks, and `phy.md`, "The analog I2C's blocks", lists them with their hosts.
-`tools/regmap.py LOG i2c` tells their first 32 registers in the passes after the bring-up;
+`user/radio/esp32c6/tools/regmap.py LOG i2c` tells their first 32 registers in the passes after the bring-up;
 those of 0x62, 0x63 and 0x6B that the channel moves are in `phy.md`.

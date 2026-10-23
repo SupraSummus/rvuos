@@ -17,12 +17,12 @@ and its run ends when the root task asks it to leave.
 
 A change to `dump.c`, `dump.h` or `prog/sampler.c` runs the sampler with `channel=1`,
 with the nRF52840's frames as the signal of known frequency, as `hw/dump.md` says,
-and `tools/dump-spectrum.py` must find them in the captures of their seconds, at the offset of their channel,
+and `user/radio/esp32c6/tools/dump-spectrum.py` must find them in the captures of their seconds, at the offset of their channel,
 and in none before them.
 
 A change to the ring's functions in `dump.c` or to `prog/ring.c` runs the ring with `channel=1`, `dumprate=3` and `dumphex=8192`:
 most rings must stop on a frame, `RX_LAST` moving at the poll the stop was seen,
-and `tools/dump-spectrum.py LOG 16e6 --tail 10` must show the frame's end in its words,
+and `user/radio/esp32c6/tools/dump-spectrum.py LOG 16e6 --tail 10` must show the frame's end in its words,
 the power falling six microseconds before the ring's newest word and the gain going to 60 half a microsecond before it,
 as `hw/dump.md`, "The ring", says.
 
@@ -39,10 +39,10 @@ take a capture every second of the run and still answer the root task.
 
 ### The scan
 
-A change to `drv_phy_tune` in `phy.c`, to `prog/scan.c` or to `tools/dump-spectrum.py`'s `--scan` runs the scan
+A change to `drv_phy_tune` in `phy.c`, to `prog/scan.c` or to `user/radio/esp32c6/tools/dump-spectrum.py`'s `--scan` runs the scan
 from 2405 to 2415 MHz with `divided=2` for 50 s and the nRF52840 sending on channel 12 for 20 s in the middle of the run,
 as `hw/phy.md`, "Off the channels' grid", says,
-and `tools/dump-spectrum.py LOG 80e6 256 --scan 2410` must find the frames, each way, in several captures of its seconds
+and `user/radio/esp32c6/tools/dump-spectrum.py LOG 80e6 256 --scan 2410` must find the frames, each way, in several captures of its seconds
 and in at most one before them, as 2410 MHz is BLE's channel 3 and within Wi-Fi's channel 1, whose senders the scan hears too.
 A change to `drv_phy_rx_gain` or `drv_phy_rx_filter` runs it with `gain=` and `gainstep=`, and with `filter=` and `filterstep=`,
 as `hw/phy.md`, "The receiver's gain and filter", says: every word's gain must be the one held,
@@ -50,7 +50,7 @@ and the noise's band must narrow as the filter's code rises.
 
 ### The register map
 
-A change to `prog/regmap.c` or `tools/regmap.py` runs the map with `channel=1`, and `tools/regmap.py` must put its four passes together.
+A change to `prog/regmap.c` or `user/radio/esp32c6/tools/regmap.py` runs the map with `channel=1`, and `user/radio/esp32c6/tools/regmap.py` must put its four passes together.
 
 ## The hardware's files
 

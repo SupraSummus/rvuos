@@ -21,10 +21,10 @@ The other programs are the files of `prog/`, each an image of its own, and each 
 | `sampler` | what the receiver hears on a Wi-Fi channel, a capture a second through the modem's dump engine |
 | `i154` | IEEE 802.15.4's frames exchanged with the nRF52840's `user/thread/`, which `tools/thread-pair.sh` runs |
 | `i154listen` | everything heard on an 802.15.4 channel, and the BLE baseband's side of the dump engine beside it |
-| `scan` | the receiver swept off the channels' grid, a capture at each step, which `tools/dump-spectrum.py --scan` puts side by side |
+| `scan` | the receiver swept off the channels' grid, a capture at each step, which `user/radio/esp32c6/tools/dump-spectrum.py --scan` puts side by side |
 | `ring` | the dump engine writing round a ring, which stops itself as a frame the Wi-Fi MAC takes ends, so that it holds what came before |
 | `etm` | the modem's ETM and the engine's sources, surveyed for what stops the engine |
-| `regmap` | every word of the modem's frame and the analog I2C's registers, cold, up, a moment later and on another channel, which `tools/regmap.py` reads |
+| `regmap` | every word of the modem's frame and the analog I2C's registers, cold, up, a moment later and on another channel, which `user/radio/esp32c6/tools/regmap.py` reads |
 
 The root task reads what a program needs from its image's header, `DRV_PROGRAM` in `drv.h`,
 and gives it that and nothing more; `CLAUDE.md` here says what a change to a program runs.

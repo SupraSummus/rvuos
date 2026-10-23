@@ -11,7 +11,7 @@
  * so what it tells of the passes after one such is what the reads left; it sends nothing.
  *
  * Run it with make BOARD=esp32c6 radio PROG=regmap RADIO_CONFIG=file, see build.mk,
- * and read the passes with tools/regmap.py.
+ * and read the passes with user/radio/esp32c6/tools/regmap.py.
  */
 
 #include <stdarg.h>
@@ -66,7 +66,7 @@ static void tell(const char *fmt, ...)
 
 /*
  * One pass over the frame. A run of lines equal to the one before, their masks clear, is told as one line, "same n",
- * so that the log holds every line in order and tools/regmap.py can tell a line lost from a run left out.
+ * so that the log holds every line in order and user/radio/esp32c6/tools/regmap.py can tell a line lost from a run left out.
  */
 static void pass(const char *name)
 {

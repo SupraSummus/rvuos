@@ -6,7 +6,7 @@
  * The sampler sends nothing: no frame, no tone.
  *
  * Run it with make BOARD=esp32c6 radio PROG=sampler RADIO_CONFIG=file, see build.mk,
- * and read the captures with tools/dump-spectrum.py.
+ * and read the captures with user/radio/esp32c6/tools/dump-spectrum.py.
  */
 
 #include <stdint.h>

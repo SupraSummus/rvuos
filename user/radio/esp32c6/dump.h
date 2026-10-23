@@ -27,7 +27,7 @@
  * dumpbt=1, the BLE baseband's side, as adctrig's mode 8 sets it;
  * dumprate=, the engine's clock divided, 0 to 3, by 1, 2, 3 or 5 of 80 MHz;
  * dumpsweep=1, the source one more each capture, round the sixteen;
- * dumphex=, words of each capture told whole, at most DUMP_HEX_MAX, which tools/dump-spectrum.py reads;
+ * dumphex=, words of each capture told whole, at most DUMP_HEX_MAX, which user/radio/esp32c6/tools/dump-spectrum.py reads;
  * dumpmac=, in decimal, the Wi-Fi MAC's word 0x600A4E30 while source 5 is the engine's, as adctrig's seventh mode sets it,
  * 0 again after.
  */
@@ -44,7 +44,7 @@ void dump_configure(const char *conf, uint32_t size, struct dump_conf *c);
  * One capture and what it holds, in the log; the next one's source moves on if the configuration sweeps.
  * The kernel's log is a ring of 4 KiB that never waits for its reader, the root task, so dumphex='s words go out a few
  * lines at a time, with a pause between for the root task to carry them to the console; each line names its first
- * word's index, and tools/dump-spectrum.py refuses a capture whose lines do not follow on.
+ * word's index, and user/radio/esp32c6/tools/dump-spectrum.py refuses a capture whose lines do not follow on.
  */
 void dump_take(struct dump_conf *c);
 

@@ -15,7 +15,7 @@ with `run=` and the keys `dump.h` lists:
 
     printf 'channel=1\nrun=30\ndump=4096\ndumpsource=15\ndumprate=3\ndumphex=4096\n' > local/sampler.conf
     make BOARD=esp32c6 radio PROG=sampler RADIO_CONFIG=local/sampler.conf PORT=/dev/serial/by-id/usb-Espressif_...
-    tools/dump-spectrum.py build/esp32c6/radio-run.log 16e6
+    user/radio/esp32c6/tools/dump-spectrum.py build/esp32c6/radio-run.log 16e6
 
 A signal of known frequency comes from the nRF52840, once the C6's log says its driver listens:
 `make BOARD=nrf52840 thread THREAD_CONFIG=` a file of `channel=12`, `stream=100` and `run=10`

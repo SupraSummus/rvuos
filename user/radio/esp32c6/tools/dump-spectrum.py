@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """What the ESP32-C6's sampler captured, from a run's log: user/radio/esp32c6/prog/sampler.c and dump.h, dumphex=.
 
-Usage: tools/dump-spectrum.py LOG RATE_HZ [NFFT] [--scan [MHZ]] [--tail [US]]
+Usage: user/radio/esp32c6/tools/dump-spectrum.py LOG RATE_HZ [NFFT] [--scan [MHZ]] [--tail [US]]
 
 For each capture the log holds whole, its lines following on from word 0, its time in the run, its spread and its offset,
 the gain codes and the AGC's bits it holds, its spectrum from -RATE/2 to +RATE/2 in sixteen bands,

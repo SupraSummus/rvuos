@@ -3,7 +3,7 @@
  * The MAC and the PHY come up as the station's do, mac_up, calibrated on channel=, 1 by default;
  * then the RF PLL is tuned from from= to to=, in kHz, a step of step= kHz at a time, drv_phy_tune in phy.c,
  * and each step tells its frequency, the PLL's state and capacitance, and takes a capture as dump.h's keys ask,
- * pass after pass until the run ends; tools/dump-spectrum.py, given --scan, puts the steps' spectra side by side.
+ * pass after pass until the run ends; user/radio/esp32c6/tools/dump-spectrum.py, given --scan, puts the steps' spectra side by side.
  * gain= holds the receiver's gain index, 0 to the gain table's last, where the AGC chooses it otherwise,
  * and gainstep= raises it by that much each pass, round the table, so that one run compares the gains;
  * filter= sets the receive's analog filter's code, 0 to 63, 0 the widest, where the RC calibration's stays otherwise,
