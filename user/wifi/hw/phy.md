@@ -21,6 +21,33 @@ none from `0xc00` up, and no block repeats another, so the space is not a smalle
 Nine moved between two reads in a row, the first value and the second:
 `0x305` (0x2c7b, 0x2cfc), `0x306` (0x2de3, 0x0011), `0x45c` (0x2af8, 0x4462), `0x944` (0x009c, 0x009b), `0xb1b` (0x0000, 0x0001), `0xb23` (0x0052, 0x004e), `0xb25` (0x1790, 0x2240), `0xb28` (0x001c, 0x001d), `0xb2a` (0x0184, 0x0186).
 
+### From the WLAN's processor
+
+Read by our code on the WLAN's processor, an access point up, the PHY answers at 1044 of the addresses 1 to `0xbff`, **measured**,
+and at the other 2025 the read ends in a precise bus fault, where the bridge's read through the backplane gives a value:
+
+    001 003-005 007 009-00a 00d-00e 010-013 018-019 027 030-031 033-035 038-039 03f-04d 04f 052-053 05d-05f 068-06d 070-072
+    304-308 310-31a 321-327 401 404-405 407-40e 410-411 41a-41b 41e-427 429 42c 42e-430 432 436-43e 440-445 447-44f 451-453
+    458-467 469-46a 46c-48a 490-496 498-4ac 4ae 4b0-4b2 4b5-4bc 4d0-4d3 4d7-4e9 4eb-4ed 4ef-4f0 4f2 4f9-4fe 501-50a 50c-50e
+    512-513 524-527 531 534-53d 542-543 547 54b 54d-554 564-565 570-575 578-579 594-59e 5b0-5b9 5bb-5c9 5ce 5d1-5d7 5e0-5ed
+    5f0-60c 62a-62f 631 634-638 63a-681 687-689 68b-68c 695-69a 69d 6a1-6ad 6b8 6c2-6c5 6c8-6ce 6d0-6de 6e0 775 785 787-788
+    7c3 7d0-7de 7e0-7ee 7f6 7f9-7fa 800-801 803-809 810-817 821-829 830-831 833-839 840-849 850-859 860-86d 880-899 900-912
+    91e-929 930-932 938-94b 950-959 960-961 965-97a 97f-989 990-999 9a0-9aa 9ac-9b4 9cd-9e0 9f4 9f7-9fa a00 a04-a10 a13-a26
+    a28-a2a a31-a34 a37 a39-a47 a49-a70 a7f-a81 a85-a9a aa2 aaf-ab0 ab7 aba-ae3 aed-af5 b00-b2d
+
+A read by the scan's function, its address written and its data read, takes 40 to 55 of the processor's cycles, one that faults about 104, **measured**.
+A write to some of them restarts the processor, at its reset vector, the PHY left as it was, **measured**:
+to `0x404` and `0x405`, and to the registers the PHY itself keeps moving, of its gain and its counters,
+`0x45a`, `0x45b`, `0x45d`, `0x47b` to `0x47d`, `0x48a`, `0x50d`, `0x553`, `0x5b0` to `0x5c2`, `0x665` to `0x66f`, `0x991` to `0x993` and `0xb1b` to `0xb2d`.
+
+Every bit of the 636 registers from `0x100` up that no code names and that read nonzero or hold what is written,
+flipped alone with the MAC suspended, while all 1044 were read twice, showed, **measured**:
+`0x7e0` choosing what `0x7e7` shows, see "A converter's bits";
+`0x321` bit 3 and `0x324` bit 2 setting `0x307` and `0x308` counting, as `0x305` and `0x306` count;
+`0x896` bits 0 to 6 shown in `0x88f`;
+bits of `0x459`, `0x4e3`, `0x4e6`, `0x62e`, `0x6a4`, `0x7e2` and `0x854` raising D11's busy medium, `ifsmedbusyctl`, and its receive status: thresholds of the PHY's detection, a hypothesis;
+and a bit of `0x539` or `0x53a`, held about 40 ms, leaving the estimator without an end until the next power-up.
+
 ### As the WLAN firmware leaves them
 
 The same reading, the bridge opened only once the configuration's mode was up, `--conf`, each a power-up of its own, **read**:
@@ -180,7 +207,10 @@ At that rate 256 samples last 6.4 µs, and the turn in the buffer is a tone of 2
 
 ## The receiver's samples
 
-D11's sample collection takes nothing from this PHY, see `d11.md`; the PHY's I/Q estimator does, one sample at a time.
+D11's sample collection takes nothing from this PHY, see `d11.md`;
+the PHY's I/Q estimator gives its samples one at a time, eight bits each,
+and its register `0x7e7` the bits of a converter, three times as fast, but of one the calibration's loopback reaches and the air does not,
+see "A converter's bits".
 
 ### The I/Q estimator
 
@@ -235,6 +265,7 @@ How long a sample takes depends on the wait, **measured**, in the processor's cy
 A unit of the wait is about four cycles, a sample at 20 MHz, and 0 and 1 wait as long as 256 would.
 At a wait of 2 a sample came every 258 cycles there, 316 kS/s;
 at `0x20000`, where the code now lies, every 262, 311.4 kS/s, all of 430 steps alike,
+and every 260, 313.8 kS/s, all of 1000 alike, once the code grew and its loop fell elsewhere;
 and with the tool's check of each estimate's end 260 to 264 cycles apart, 20000 samples at 312.2 kS/s.
 The rest of a sample's time is the code's accesses, each of the PHY's about 16 cycles,
 two for a read, the address and then the data, and one for a write, address and data in one word.
@@ -244,7 +275,7 @@ So the code need not poll, and of an 8-bit sample the low halfwords hold all, th
 
 | `--mode` | What a sample reads | Cycles | Rate |
 |---|---|---|---|
-| none | polls `0x481`, then six halfwords | 262 | 311.4 kS/s |
+| none | polls `0x481`, then six halfwords | 260 to 262 | 311.4 to 313.8 kS/s |
 | `fast,check` | `0x481` once, then three low halfwords | 154 to 158 | 526.5 kS/s |
 | `fast` | three low halfwords | 118 to 122 | 682.9 kS/s |
 | `fast,no-q` | the product and I squared, Q taken as the product over I, and as 0 where I is | 90 to 92 | 901.7 kS/s |
@@ -298,6 +329,11 @@ since its reads of D11 slow the PSM, see `d11.md`; the rate so measured varies b
 So D11's processor takes a sample in about two thirds of the time the WLAN's does, and is held by the PHY's accesses and the estimate's own time;
 no register gives a sample in one read, see "The I/Q estimator", so two reads and a start are the least a sample takes:
 62 cycles with the loop's own instructions, 1.3 MS/s, and 56 without them, 1.46 MS/s, see below.
+That is the route's floor, a hypothesis from its parts: three accesses of about 14 cycles each, the start and two reads, one after another,
+as the external IHR takes one at a time, and the estimate's own time between the start and the first read,
+the least wait `0x482` takes, two samples at 20 MHz, and the sample, about 12 cycles: 54 of the 56.
+A read of the last sample's results while the next estimate runs would come back after that estimate ends, torn, as the delays above show;
+so a faster receiver needs samples that come otherwise than an estimate each; `0x7e7`'s do, but not of the air, see "A converter's bits".
 
 ### Streamed through D11's receive DMA
 
@@ -325,6 +361,85 @@ and a slot the loop's end jumps over, once counted as a cycle, left the first sa
 the runs then took 1164.5 and 1455.8 kS/s, and with it counted as none 1164.0 and 1455.4, as the model has it, **measured**.
 The tool's transform takes twice as many frequencies as samples, as a tone's peak is a rate over the samples wide;
 at 1024 for 2070 samples it fell between two, and the +2 MHz tone seemed gone.
+
+### A converter's bits
+
+`0x7e0`'s bits 9 to 11 choose what `0x7e7` shows, **measured**, with the MAC suspended:
+1 a word that differs at nearly every read; 2 `0x0ffe`, 3 `0x000a` and 4 `0xf531`, steady; 0, 5, 6 and 7 zero.
+With 1, bit 8 chooses between two such streams, `0x0200` and `0x0300`, alike in all measured here,
+and read in turns, one of each 48 cycles apart, a tone in each as strong and as far in phase as a read of `0x0300` 48 cycles after another;
+bits 12 to 15 change nothing, and none of 16 values of the low byte changed where a tone falls nor how strongly.
+No code of the firmware's names either register.
+
+Each bit of the word is one about half the time, in runs of two more often than chance would make them and of four and more less often,
+0.39 and 0.02 of runs within a word, where random words give 0.25 and 0.05, **measured**;
+two words read 207 ns apart share no bits at any shift of up to 7, so the bits run faster than one in 26 ns:
+the output of a converter, a sigma-delta modulator whose bits the word samples, a hypothesis.
+Within a byte two bits are as alike as they are near, whichever two they are, **measured**, 4800 words without a tone:
+-0.06 apart by one, -0.37 by two, -0.28 by three, +0.1 to +0.17 by four and five;
+the bytes of I and of Q alike, and nothing shared between them.
+So a byte is eight bits one after another, a hypothesis that the tones bear out:
+a bit's phase in a tone grows from bit 0 to bit 7 by 0.65 degrees a bit for each MHz, ±0.09, over 22 projections of ±2, ±4 and ±6 MHz,
+bit 0 the first, as a phase that grows with time has it, and one at 430 to 760 MHz, at twice the error either way, eight in 10.5 to 18.6 ns.
+The bits' likeness also weighs them, as the noise's least for one sum:
+0.64, 0.84, 1.15, 1.37, 1.37, 1.15, 0.84 and 0.64 from bit 0, which raised the tone's share from 18 to 29% at ±2 MHz
+and from 6 to 10% at ±6, **measured**, 2400 words a run; the tool counts the ones alone.
+
+Bits 0 to 7 belong to one channel and bits 8 to 15 to the other, **measured**, with the calibration's tones, 500 words a run:
+each bit follows the tone, bits 0 to 7 in one phase and 8 to 15 about 100 degrees from it, before it for +2 MHz and after it for -2;
+and the sample I + jQ, I the ones of bits 0 to 7 and Q those of bits 8 to 15, each less its mean,
+puts +2, -2 and +1 MHz where the play puts them, sign and all, -862, +862 and +999 kHz at 2860 kS/s, against -860, +860 and +1000,
+and with the tool's `--mode bits` +2, -2 and +6 MHz at +1999.4, -1999.4 and +1529.0 kHz at 4470.3 kS/s, against +2000.0, -2000.0 and +1529.7.
+So one read gives a whole sample, I and Q, with its sign, where the estimator gives its square;
+but of nine levels each, and the tone holds 15 to 23% of the power, where the estimator's samples hold 60 to 75%.
+
+They are not the receiver's samples of the air, **measured**:
+an nRF52840 sending IEEE 802.15.4 frames on 2435 MHz at 8 dBm, the access point on channel 6,
+the WLAN's processor took 30 blocks of 4096 reads of `0x7e7`, 0.9 ms each, between 30 blocks of 512 estimates, 0.5 ms each,
+the gain held at 10, 9 and 0, and again at 10, 9 and 13.
+The estimates held frames, `|I|` up to 34 over a noise of 1 or 2, and up to 90 over a noise of 12, the third stage's 17 dB;
+the bits' power, their weighted ones less their mean, was 0.44 to 0.47 in every block,
+and no 256 reads of any block rose past 0.58, at either gain.
+Without a held gain, 42 ms of bits held five bursts of two to four times the power across the whole fold, centred near 0 Hz,
+as the AGC's steps would make them and no frame on 2435 MHz would, a hypothesis.
+So `0x7e7` shows a converter the calibration's loopback reaches and the antenna does not,
+the calibration's own receiver, a hypothesis; the receiver's decimated samples, which the estimator takes, show in no selection.
+Once in some 20 runs its stream read one value throughout, and the run after did not.
+
+Read so, a sample takes, **measured**:
+
+| By | Cycles | Rate |
+|---|---|---|
+| the WLAN's processor, the address written once and the data read again and again, nothing kept | 18.0 | 4526 kS/s |
+| the same, two reads to a word stored between them and the next, `--mode bits` | 18.25 | 4470 kS/s |
+| the same, each read with its cycle count | 28.5 | 2860 kS/s |
+| the PSM, through the external IHR, its busy bit awaited | 16.9 | 4822 kS/s |
+
+With `--mode bits` the reads are as evenly apart as the store between each two lets them be,
+four pairs to the loop's test, and a run fills the RAM up to `0x7e000`: 190464 samples, 42 ms, **measured**,
+which held one burst of about 114 µs over twice the median's power, with the access point up on channel 6.
+Eight reads before their four stores took 18.5 cycles each, and each read stored alone 24.8.
+
+The PSM's rate is D11's TSF over two runs of 1075200 and 4300800 reads into its shared memory, the second less the first,
+which leaves out the start and the host's poll; the tones put it at 4800 kS/s, their frequencies scaled by 0.854 against the tool's 4100,
+whose timing through `psm_base_0` holds for the estimator's loop and not for this one, a hypothesis.
+
+The two processors reach the PHY by paths of their own, **measured**:
+with the WLAN's processor reading `0x7e0` while the PSM read `0x7e7`, all 16000 of its reads gave `0x0200`,
+and none of the PSM's 3584 did, which held the tone;
+reading for seconds at once, the WLAN's processor kept its 18.0 cycles and the PSM went from 4778 to 4461 kS/s, by D11's TSF.
+So the two together read about 9 MS/s, two streams of samples at instants of their own,
+which make one only once each sample's instant is known on one clock; that is open.
+
+The registers beside them hold what is written and choose nothing that shows, **measured**:
+`0x7d0` to `0x7de`, `0x7e1` to `0x7ee` but `0x7e7`, `0x7c3`, `0x7f6`, `0x7f9` and `0x7fa`, 32 registers and 396 bits that hold,
+read 0 as the firmware leaves them, and no code names any; `0x7df` faults.
+Each bit flipped alone, and 64 settings of all of them at once, at random but for all 0 and all that hold set,
+left `0x7e7` as it was under each of the eight selections, 0 to 7:
+the steady ones at their values, and the stream as it was, by the likeness of a byte's bits two apart, the high bits' agreement and the distinct reads;
+so did each bit of `0x6da`, the clocks.
+Selections 2, 3 and 4 held one value over three million reads each, and their values differ from run to run, `0x0fff` or `0x0ffd`, `0x000a` to `0x000c`:
+values latched, not samples.
 
 ### The receiver's gain
 
@@ -361,6 +476,19 @@ The samples are 8 bits, **measured**: I and Q of a clipped sample read 128, the 
 and of all samples none is larger; at the idle gain the noise is about one step of them,
 so that a signal has about 40 dB above it before it clips.
 `cyw43-iq.py --gain P6,P7,P8` holds the three fields that act at the codes given, with every enable set.
+
+Held at 10, 9 and 0, one of I and Q read 0 throughout in 15 of 35 runs, I in 11 and Q in 4, **measured**;
+the run's other channel and its frames were as in the rest.
+It is the power-up's, and the held gain's, **measured**, estimates over the bridge:
+with the AGC free both channels read, in each of 18 power-ups; held, the same channel read 0 at every one of seven holds, each after a release,
+in 5 of 6 power-ups, and in none of them free between the holds.
+Over 36 held gains, 4, 7 and 10 of the first stage by 5, 7, 9 and 11 of the second and 0, 4 and 7 of the third, in four power-ups,
+a channel read 0 only near the ends, at 4 and 5 with the third at 0 or 4, and at 10 with 9 or 11, or 7 with 11, whatever the third;
+7 with 7 or 9, and 10 with 5 or 7, kept both in all four.
+The correction of each channel's offset following the AGC's own gain and not the held one, so that at an end
+a channel's offset, which differs from power-up to power-up, holds it against a rail that the PHY's removal of the offset then makes 0,
+is a hypothesis; at 4 and 5 the noise may lie under a step.
+`--gain` takes 60 estimates once the gain is held and stops if a channel reads 0 in all.
 
 ### The control: the calibration's tones
 
@@ -434,6 +562,14 @@ Of the 31, six differ between channels:
 | `0x086` | `703f` | `603f` | bit 12 cleared from channel 9 |
 
 `0x066`, which reads 22360 - 8f, no code writes: the synthesizer's calibration leaves it, a hypothesis.
+
+`cyw43-iq.py --tune MHZ` tunes the radio off the channels by the same function, **measured** as far as the radio:
+its code on the WLAN's processor copies the nearest channel's entry, writes the frequency into its MHz and `0x055`'s,
+and the word, f·3·2^18/37.4 rounded down, into `0x04e` and `0x04f`'s, points the LCN20's state's word at `0x620`, the table's, at that entry,
+calls `0x8714e4` with channel 1, and points it back; the PHY's words of the frequency stay the channel's.
+At 2415, 2435, 2437 and 2455 MHz the radio read the word back as written and `0x065` bit 0 set, the synthesizer locked.
+Where the signals then fall is not yet measured: frames of 802.15.4 on 2435 MHz showed in the estimates tuned there and 20 MHz away alike,
+among the access points' own around channel 6, whose bursts at about 1 MS/s fold over one another.
 
 The PHY's words of the frequency, which the readouts fitted, are the code's:
 `0x657` is `((f << 2) / 5 + 1) >> 1`, `0x658` is `(0x500000 / f + 1) >> 1`,

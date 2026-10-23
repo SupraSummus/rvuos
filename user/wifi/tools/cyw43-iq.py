@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""The CYW43439's receiver sampled: its I/Q estimator, one sample at a time, at 311 thousand to 1.46 million samples a second.
+"""The CYW43439's receiver sampled: its I/Q estimator, one sample at a time, at 311 thousand to 1.46 million samples a second;
+or a converter's bits, at 4.47 million, which see the calibration's loopback and not the air.
 
-Usage: user/wifi/tools/cyw43-iq.py OUT --conf FILE [--count N] [--wait W] [--mode fast[,check][,no-q] | psm[,no-q] | stream[,no-q]]
-                                  [--gain P6,P7,P8 | --tones MHZ,...]
+Usage: user/wifi/tools/cyw43-iq.py OUT --conf FILE [--count N] [--wait W]
+                                  [--mode fast[,check][,no-q] | psm[,no-q] | stream[,no-q] | bits]
+                                  [--gain P6,P7,P8 | --tones MHZ,...] [--tune MHZ]
 
 --conf names a configuration of the Wi-Fi system, such as an access point's, whose mode's work comes first,
 so that the vendor's firmware sets the radio up and tunes it to the mode's channel; its run= is the bridge's.
@@ -10,12 +12,14 @@ Then the WLAN's processor is held in reset, the 802.11 core's receive DMA stoppe
 and the processor started again in our own code, user/wifi/wlancore/iq-cap.c, built by make as build/cyw43/iq-cap.bin,
 which lies in RAM the firmware had cleared; the host checks it still reads 0 first.
 It takes --count estimates of the PHY's estimator, each over one sample, after --wait samples at 20 MHz, see user/wifi/hw/phy.md;
-a wait of 2 takes a sample every 262 cycles of the processor's 81.6 MHz, which it measures against D11's TSF.
+a wait of 2 takes a sample every 260 to 262 cycles of the processor's 81.6 MHz, which it measures against D11's TSF.
 
 --gain holds the receiver's gain where the three numbers put it, out of its AGC's hands, see phy.md:
 the overrides the firmware's calibration sets, 0x872534's, with 0x53c bits 9 to 12 at P6, 0 to 10, about 3 dB a step,
 0x9ac bits 6 to 9 at P7, 0 to 12, about 3 dB a step, and 0x979 bits 1 to 8 at P8, in 3 dB steps at 4, 7, 10 and 13;
-10,9,0 gives about the noise the AGC idles at. Without it the AGC sets the gain, and raises it for a weak frame.
+10,9,0 gives about the noise the AGC idles at, but some power-ups leave one of I and Q reading 0 there,
+as at other gains near the ends, and the tool then stops; 7,9,0 and 10,7,0 have kept both. See phy.md.
+Without it the AGC sets the gain, and raises it for a weak frame.
 The samples are I and Q of 8 bits, -128 to 127, so a strong signal clips.
 
 --mode fast takes a sample without polling the estimator, whose estimate ends before the first read comes back,
@@ -29,6 +33,14 @@ the vendor's microcode is then stopped, and the 802.11 core's MAC with it.
 whose DMA lays them in the WLAN's RAM, so that a run is not held to the shared memory: up to 10180 samples a run, 1164 kS/s,
 and with no-q 15270, 1455 kS/s; with tones, the RAM the ROM's functions leave holds 287 frames for all runs; see stream_loop and phy.md.
 For psm and stream the vendor's microcode first suspends the MAC, so that it leaves the receive engine idle, see cyw43psm.suspend.
+--mode bits takes no estimate: the processor reads the PHY's 0x7e7, with 0x7e0 at 0x0200, back to back,
+each read eight of a converter's bits of I below eight of Q, at 4.47 MS/s, --count rounded up to a multiple of 8, up to 190464 a run;
+a sample is each eight's count of ones less 4, -4 to 4, its sign its own. The converter is one the calibration's tones reach
+and frames on the air do not, see phy.md: bits for the calibration's path, not a receiver.
+
+--tune tunes the radio to MHZ first, 2400 to 2500, by the ROM's own tuning of a channel, 0x8714e4,
+fed the nearest channel's entry of the firmware's table with its frequency and synthesizer's word replaced, see phy.md;
+the PHY's own words of the frequency stay the channel's. The summary says whether the synthesizer locked.
 
 --tones is the control: the firmware's own receive IQ calibration's loopback set up, by its ROM's functions,
 and one run of --count samples before any tone and one during each tone of the list, in MHz, played by the ROM
@@ -45,6 +57,8 @@ OUT, JSON, holds the processor's clock in Hz, the wait, and each run's tone, sta
 per sample its cycle count and the three, I and Q with I's sign taken as positive,
 and the square of the sample, (I + jQ)^2, which is the sample's own, sign and all, at twice its phase.
 The summary checks that each estimate is of one sample, I^2 Q^2 = (IQ)^2, and that none was late.
+With bits, each run holds its start's and its end's cycle counts instead, the samples evenly between them,
+and per sample the halfword read and I and Q; its summary looks for a tone among the first BITS_LOOK samples, not their square.
 """
 
 import argparse
@@ -74,9 +88,15 @@ PI_KNOWN = 0x63788  # where the firmware of 43439A0.bin keeps it, an access poin
 CODE, BASE, OUT_AT = 0x20000, 0x1F000, 0x21000
 MAGIC, COUNT, WAIT, GO, FAULT, CYCLES, STEP, PI, TONES = (BASE + 4 * i for i in range(9))
 FREQ, FIRST, MODE = BASE + 0x40, BASE + 0x80, BASE + 0x24
-MODES = {"fast": 1, "check": 2, "no-q": 4, "psm": 8, "stream": 8 | 16}  # iq-cap.c's MODE_*, stream with psm's
-MODE_SETS = ("", "fast", "fast,check", "fast,no-q", "fast,check,no-q", "psm", "psm,no-q", "stream", "stream,no-q")
+TUNE_MHZ, TUNE_WORD, TUNED = BASE + 0x28, BASE + 0x2C, BASE + 0x30
+SYNTH_REF, TUNE_BAND = 37.4, (2400, 2500)  # MHz: the synthesizer's reference, see phy.md; where --tune may go
+MODES = {"fast": 1, "check": 2, "no-q": 4, "psm": 8, "stream": 8 | 16, "bits": 32}  # iq-cap.c's MODE_*, stream with psm's
+MODE_SETS = ("", "fast", "fast,check", "fast,no-q", "fast,check,no-q", "psm", "psm,no-q", "stream", "stream,no-q", "bits")
+LAST = BASE + 0x100  # iq-cap.c's: with bits, each run's cycle count after its last read
+BITS_LOOK = 2048  # the samples of a run the summary looks for a tone among
 IQ_CONTROL, IQ_PRODUCT, IQ_I_POWER, IQ_Q_POWER = 0x481, 0x484, 0x486, 0x488
+IQ_WAIT, IQ_SAMPLES, CLOCKS, ESTIMATE_CLOCKS = 0x482, 0x483, 0x6DA, 0x120  # see iq-cap.c
+ALIVE_ESTIMATES = 60  # a held gain's check: a channel reading 0 in all of them is one the power-up left dead at that gain
 SHARED_FROM, SHARED_END = 0x100, 0x1000  # the shared memory's halfwords the microcode's samples go to, iq-cap.c's SHARED_FROM
 PSM_DELAY = 14  # instructions between an estimate's start and its first read, see phy.md
 # --mode stream: iq-cap.c's FRAMES, FRAME_SIZE and STREAM_TIMES, the chunks of the shared memory, the receive engine's IHR
@@ -114,6 +134,11 @@ def sample(product, i_power, q_power):
 
 def fold(f, rate):
     return ((f / rate + 0.5) % 1 - 0.5) * rate
+
+
+def bits_sample(word):
+    """I and Q from a read of 0x7e7: the ones of each byte, about 4 with nothing received."""
+    return bin(word & 0xFF).count("1") - 4, bin(word >> 8).count("1") - 4
 
 
 def strongest(square, times, rate):
@@ -228,6 +253,26 @@ def stream_rows(words, n, spc, per, times):
     return rows, skipped
 
 
+def bits_run(out, args, r, words, first, last, hz):
+    """A run of --mode bits: its summary said and its samples added to out; true if it looks wrong."""
+    span = (last - first) & 0xFFFFFFFF
+    rate = hz * args.count / span
+    iq = [bits_sample(w) for w in words]
+    tone = args.tones[r - 1] if r else None
+    line = (f"{'no tone' if tone is None else f'tone {tone / 1e6:+g} MHz'}: {args.count} samples at {rate / 1e3:.1f} kS/s,"
+            f" {span / args.count:.2f} cycles each; {len(set(words))} distinct reads;"
+            f" I mean {statistics.fmean(v[0] for v in iq):+.2f} sd {statistics.pstdev(v[0] for v in iq):.2f},"
+            f" Q mean {statistics.fmean(v[1] for v in iq):+.2f} sd {statistics.pstdev(v[1] for v in iq):.2f}")
+    if tone is not None:
+        look = iq[:BITS_LOOK]
+        mean = [statistics.fmean(v[k] for v in look) for k in (0, 1)]
+        peak, share = strongest([(i - mean[0], q - mean[1]) for i, q in look], [k / rate for k in range(len(look))], rate)
+        line += f"; strongest at {peak / 1e3:+.1f} kHz, {share:.0%} of the power, the play's {fold(tone, rate) / 1e3:+.1f} kHz"
+    say(line)
+    out["runs"].append({"tone": tone, "first": first, "last": last, "words": words, "iq": iq})
+    return len(set(words)) < 2
+
+
 def phy_modify(board, reg, mask, value):
     board.write16(PHYREGADDR, reg)
     old = board.read16(PHYREGDATA)
@@ -245,6 +290,28 @@ def hold_gain(board, codes):
         held.append(board.read16(PHYREGDATA) >> shift & ((1 << bits) - 1))
     if held != codes:
         sys.exit(f"cyw43-iq: the gain reads {held}, not {codes}")
+    for name, zeros in zip("IQ", dead_channels(board)):
+        if zeros:
+            sys.exit(f"cyw43-iq: held at {codes}, {name} reads 0 in all of {ALIVE_ESTIMATES} estimates;"
+                     " this power-up leaves it so at this gain, see phy.md: another gain, such as 7,9,0")
+
+
+def dead_channels(board):
+    """Whether I and Q each read 0 in all of ALIVE_ESTIMATES estimates, taken over the bridge."""
+    def read(reg):
+        board.write16(PHYREGADDR, reg)
+        return board.read16(PHYREGDATA)
+    clocks, wait = read(CLOCKS), read(IQ_WAIT)
+    board.write(PHYREGADDR, (clocks | ESTIMATE_CLOCKS) << 16 | CLOCKS)
+    board.write(PHYREGADDR, 1 << 16 | IQ_SAMPLES)
+    board.write(PHYREGADDR, ((wait & ~0xFF) | 2) << 16 | IQ_WAIT)
+    control, zeros = read(IQ_CONTROL) & ~3, [True, True]
+    for _ in range(ALIVE_ESTIMATES):
+        board.write(PHYREGADDR, (control | 1) << 16 | IQ_CONTROL)
+        zeros = [zeros[0] and not read(IQ_I_POWER), zeros[1] and not read(IQ_Q_POWER)]
+    board.write(PHYREGADDR, wait << 16 | IQ_WAIT)
+    board.write(PHYREGADDR, clocks << 16 | CLOCKS)
+    return zeros
 
 
 def find_pi(board):
@@ -264,10 +331,13 @@ def main():
     p.add_argument("--tones", type=lambda x: [round(float(f) * 1e6) for f in x.split(",")], default=[])
     p.add_argument("--gain", type=lambda x: [int(v, 0) for v in x.split(",")])
     p.add_argument("--mode", default="")
+    p.add_argument("--tune", type=float)
     args = p.parse_args()
     if args.gain is not None and (args.tones or len(args.gain) != 3
                                   or any(not 0 <= v <= most for v, (_, _, _, most) in zip(args.gain, GAIN_FIELDS))):
         sys.exit("cyw43-iq: --gain P6,P7,P8, each within its stage's codes, and without --tones")
+    if args.tune is not None and not TUNE_BAND[0] <= args.tune <= TUNE_BAND[1]:
+        sys.exit(f"cyw43-iq: --tune {TUNE_BAND[0]} to {TUNE_BAND[1]} MHz")
     runs = 1 + len(args.tones)
     most = ((OUT_END_TONES if args.tones else OUT_END) - OUT_AT) // 16 // runs
     names = [m for m in args.mode.split(",") if m]
@@ -275,7 +345,10 @@ def main():
         sys.exit(f"cyw43-iq: --mode one of {', '.join(m for m in MODE_SETS if m)}")
     args.mode = sum(MODES[m] for m in names)
     reads = [IQ_PRODUCT, IQ_I_POWER] + ([] if args.mode & MODES["no-q"] else [IQ_Q_POWER])
-    stream = "stream" in names
+    stream, bits = "stream" in names, "bits" in names
+    if bits:
+        most = ((OUT_END_TONES if args.tones else OUT_END) - OUT_AT) // 2 // runs & ~7
+        args.count += -args.count % 8
     if args.mode & MODES["psm"]:
         most = min(most, (SHARED_END - SHARED_FROM) // len(reads))
     if stream:
@@ -310,7 +383,7 @@ def main():
         used = [a for a in range(CLEARED.start, CLEARED.stop, 0x40) if board.read(a)]
         if used:
             sys.exit(f"cyw43-iq: RAM taken to be cleared is not, at {used[0]:#x}")
-        pi = find_pi(board) if args.tones else 0
+        pi = find_pi(board) if args.tones or args.tune is not None else 0
         if args.gain is not None:
             hold_gain(board, args.gain)
         if args.mode & MODES["psm"]:
@@ -330,6 +403,9 @@ def main():
         board.write(PI, pi)
         board.write(TONES, len(args.tones))
         board.write(MODE, args.mode)
+        if args.tune is not None:
+            board.write(TUNE_MHZ, round(args.tune))
+            board.write(TUNE_WORD, math.floor(args.tune * 3 * 2 ** 18 / SYNTH_REF))
         for k, f in enumerate(args.tones):
             board.write(FREQ + 4 * k, f & 0xFFFFFFFF)
         # As the driver resets a core: clock and forced gated clocks, out of reset, then the clock alone.
@@ -352,10 +428,14 @@ def main():
         if board.read(COUNT) != (frames if stream else args.count):
             sys.exit(f"cyw43-iq: the program took {board.read(COUNT)} a run, not {frames if stream else args.count}")
         hz = board.read(CYCLES) / TSF_SPAN * 1e6
+        tuned = [board.read(TUNED), board.read(TUNED + 4)]
         firsts = [board.read(FIRST + 4 * r) for r in range(runs)]
         if stream:
             times = [[board.read(STREAM_TIMES + 16 * r + 4 * i) for i in range(4)] for r in range(runs)]
             words = [board.read(FRAMES_AT + 4 * k) for k in range(frames * FRAME_SIZE // 4 * runs)]
+        elif bits:
+            lasts = [board.read(LAST + 4 * r) for r in range(runs)]
+            words = [h for k in range(args.count // 2 * runs) for v in [board.read(OUT_AT + 4 * k)] for h in (v & 0xFFFF, v >> 16)]
         else:
             words = [board.read(OUT_AT + 4 * k) for k in range(4 * args.count * runs)]
     finally:
@@ -364,10 +444,20 @@ def main():
         board.write(D11_WRAPPER + AI_RESETCTRL, 1)
         board.close()
 
+    if args.tune is not None:
+        want = math.floor(args.tune * 3 * 2 ** 18 / SYNTH_REF)
+        say(f"tuned to {args.tune} MHz: the synthesizer's word {tuned[1]:#010x}, {'as' if tuned[1] == want else 'not'} written,"
+            f" {'locked' if tuned[0] & 1 else 'NOT locked'}")
+        failed_tune = tuned[1] != want or not tuned[0] & 1
+    else:
+        failed_tune = False
     say(f"receive DMA stopped on fifos {stopped}; the processor at {hz / 1e6:.4f} MHz by D11's TSF"
         + (f"; the PHY's state at {pi:#x}" if pi else "") + (f"; gain held at {args.gain}" if args.gain else "; gain the AGC's"))
-    out, failed = {"hz": hz, "wait": args.wait, "gain": args.gain, "runs": []}, False
+    out, failed = {"hz": hz, "wait": args.wait, "gain": args.gain, "tune": args.tune, "runs": []}, failed_tune
     for r in range(runs):
+        if bits:
+            failed |= bits_run(out, args, r, words[args.count * r:args.count * (r + 1)], firsts[r], lasts[r], hz)
+            continue
         if stream:
             per_run = frames * FRAME_SIZE // 4
             rows, skipped = stream_rows(words[per_run * r:per_run * (r + 1)], frames, spc, len(reads), times[r])

@@ -11,6 +11,11 @@
  * and this code starts it, times it and copies what it took.
  * With MODE_STREAM as well, the microcode pushes each chunk of its samples from the shared memory into D11's receive FIFO,
  * whose DMA lays them in RAM, a frame to a descriptor, and this code sets the ring up and times the frames.
+ * With MODE_BITS no estimate is taken: the PHY's 0x7e7, 0x7e0 selecting a converter's bits, is read back to back instead,
+ * a halfword each, eight bits of I below eight of Q, of a converter the calibration's loopback reaches and the air does not, see hw/phy.md.
+ *
+ * With TUNE_MHZ the radio is tuned first, to a frequency of the host's, by the ROM's own tuning of a channel,
+ * fed an entry of the channel table that is the nearest channel's but for the frequency and the synthesizer's word.
  *
  * With tones, the control: the firmware's own receive IQ calibration is set up and its tones played,
  * by the ROM's functions on the firmware's PHY state, which the host finds, and a run of samples taken during each,
@@ -39,6 +44,9 @@
 #define IQ_I_POWER   0x486u          /* I squared, two halfwords */
 #define IQ_Q_POWER   0x488u          /* Q squared, its low halfword; its high one at IQ_Q_POWER_HI */
 #define IQ_Q_POWER_HI 0xa9au
+#define BITS_SELECT  0x7e0u          /* what 0x7e7 shows: BITS_ON a converter's bits */
+#define BITS_ON      0x0200u
+#define BITS         0x7e7u
 /* D11's processor, the PSM, see hw/d11.md and tools/cyw43psm.py */
 #define MACCONTROL   (D11 + 0x120u)
 #define OBJADDR      (D11 + 0x160u)
@@ -72,6 +80,17 @@ typedef void (*phy_fn)(uint32_t pi, uint32_t, uint32_t, uint32_t, uint32_t, uint
 #define TONE_STOP    ((phy_fn)0x86eb6du)
 #define CAL_RESTORE  ((phy_fn)0x872819u)
 #define CAL_AMPLITUDE 0xb5u
+typedef uint32_t (*radio_read_fn)(uint32_t pi, uint32_t reg);
+typedef void (*tune_fn)(uint32_t pi, uint32_t channel);
+#define RADIO_READ   ((radio_read_fn)0x86c065u)
+#define RADIO_TUNE   ((tune_fn)0x8714e5u)    /* a channel's entry, 1 the first, into the radio, then the synthesizer calibrated */
+#define LCN_CHANNELS 0x620u                   /* the LCN20's state's pointer to the channel table, CHANNELS entries */
+#define CHANNELS     14u
+#define ENTRY_SIZE   66u                      /* a channel, its MHz, then 31 radio registers' values, halfwords */
+#define ENTRY_MHZ    1u                       /* halfwords of an entry: its MHz, */
+#define ENTRY_0X55   0x11u                    /* radio 0x055's, the MHz again, */
+#define ENTRY_0X4E   0x14u                    /* and the synthesizer's word, 0x04e its high half and 0x04f its low */
+#define SYNTH_LOCKED 0x065u                   /* radio: bit 0 set once the synthesizer's calibration has ended */
 #define LCN_CAL_TYPE 0x566u              /* bytes of the LCN20's own state, pi's word at 0x40, as 0x872770 sets them */
 #define LCN_CAL_FLAG 0x565u
 
@@ -87,7 +106,7 @@ typedef void (*phy_fn)(uint32_t pi, uint32_t, uint32_t, uint32_t, uint32_t, uint
                               or did not start,
                               0xfc000000 and the frames if the stream did */
 #define CYCLES (BASE + 0x14) /* the cycles of TSF_SPAN microseconds of D11's TSF */
-#define STEP   (BASE + 0x18) /* where the code is: 1 the calibration's setup, 2 + k the tone k, 0x70 its restore */
+#define STEP   (BASE + 0x18) /* where the code is: 0x60 the tuning, 1 the calibration's setup, 2 + k the tone k, 0x70 its restore */
 #define PI     (BASE + 0x1c) /* the host's, with tones: the PHY's state */
 #define TONES  (BASE + 0x20) /* the host's: how many tones, at most MOST_TONES */
 #define MODE   (BASE + 0x24) /* the host's: how a sample is taken, MODE_* */
@@ -96,11 +115,17 @@ typedef void (*phy_fn)(uint32_t pi, uint32_t, uint32_t, uint32_t, uint32_t, uint
 #define MODE_NO_Q  4u        /* with MODE_FAST or MODE_PSM: Q squared not read, the host taking Q as the product over I */
 #define MODE_PSM   8u        /* the host's microcode takes the samples, low halfwords, into SHARED from SHARED_FROM */
 #define MODE_STREAM 16u      /* with MODE_PSM: the microcode streams them through D11's receive DMA into FRAMES, COUNT frames a run */
+#define MODE_BITS  32u       /* alone: a converter's bits, a halfword a sample, two to a word of OUT, COUNT a multiple of 8 */
 #define STREAMING(mode) (((mode) & (MODE_PSM | MODE_STREAM)) == (MODE_PSM | MODE_STREAM))
+#define TUNE_MHZ  (BASE + 0x28) /* the host's: 0, or the MHz to tune to, rounded */
+#define TUNE_WORD (BASE + 0x2c) /* the host's: the synthesizer's word for it, f 3 2^18 / 37.4 MHz */
+#define TUNED  (BASE + 0x30) /* radio 0x065, and 0x04e and 0x04f once tuned, two words */
 #define FREQ   (BASE + 0x40) /* the host's: each tone's frequency in Hz, signed */
 #define FIRST  (BASE + 0x80) /* the cycle count at each run's start, the run before the tones first */
 #define STREAM_TIMES (BASE + 0x100) /* with MODE_STREAM, four words a run: cycles and frames seen at an eighth, and at the end */
-#define OUT     0x21000u     /* the samples, four words each: cycle count, product, I squared, Q squared */
+#define LAST   (BASE + 0x100) /* with MODE_BITS, the cycle count after each run's last read */
+#define ENTRY   (BASE + 0x300u) /* the entry TUNE_MHZ is tuned by */
+#define OUT     0x21000u     /* the samples, four words each: cycle count, product, I squared, Q squared; with MODE_BITS a halfword */
 #define OUT_END 0x7e000u
 #define OUT_END_TONES 0x2d000u /* with tones, where the cleared RAM ends; the ROM's functions use the RAM above */
 #define MAGIC_VALUE 0x49514341u
@@ -114,7 +139,8 @@ typedef void (*phy_fn)(uint32_t pi, uint32_t, uint32_t, uint32_t, uint32_t, uint
 /*
  * So a run ends: TSF_SPAN microseconds, then (1 + TONES) runs of COUNT samples, or frames, at most what most_of allows,
  * each of at most POLLS reads, or with MODE_PSM waits of at most TIMEOUT cycles in all and copies of COUNT samples,
- * and with tones the ROM's functions, which wait on the PHY for bounded times of their own.
+ * or with MODE_BITS COUNT reads,
+ * and with tones or TUNE_MHZ the ROM's functions, which wait on the PHY and the radio for bounded times of their own.
  */
 
 static uint32_t phy_read(uint32_t reg)
@@ -193,6 +219,21 @@ static uint32_t psm_wait(uint32_t target, uint32_t per, uint32_t t0)
     return v;
 }
 
+/* The microcode's samples out of the shared memory once it has stopped, each with its cycle count on the line; small, as untimed. */
+__attribute__((noinline, minsize)) static volatile uint32_t *psm_copy(volatile uint32_t *out, uint32_t n, uint32_t per,
+                                                                       uint32_t ta, int32_t ka, int32_t step)
+{
+    REG(OBJADDR) = OBJ_SHARED_AUTO_INC | SHARED_FROM / 2u;
+    uint32_t word = 0, half = 0;
+    for (uint32_t i = 0; i < n; i++, out += 4) {
+        out[0] = (ta + (uint32_t)((((int32_t)i - ka) * step) >> 8)) & ~LATE;
+        out[1] = shared_next(&word, &half);
+        out[2] = shared_next(&word, &half);
+        out[3] = per > 2u ? shared_next(&word, &half) : 0;
+    }
+    return out;
+}
+
 /*
  * The microcode runs from 0, takes n samples of per halfwords and stays, psm_base_0 at its end.
  * Its time is where psm_base_0 is first seen past an eighth of the way and at the end,
@@ -222,15 +263,7 @@ static volatile uint32_t *take_psm(volatile uint32_t *out, uint32_t n, uint32_t 
     int32_t ka = (int32_t)((a - SHARED_FROM) / per), kb = (int32_t)((v - SHARED_FROM) / per);
     int32_t step = kb > ka ? (int32_t)(((tb - ta) << 8) / (uint32_t)(kb - ka)) : 0; /* cycles a sample, in 256ths */
     REG(FIRST + 4u * run) = ta - (uint32_t)((ka * step) >> 8);
-    REG(OBJADDR) = OBJ_SHARED_AUTO_INC | SHARED_FROM / 2u;
-    uint32_t word = 0, half = 0;
-    for (uint32_t i = 0; i < n; i++, out += 4) {
-        out[0] = (ta + (uint32_t)((((int32_t)i - ka) * step) >> 8)) & ~LATE;
-        out[1] = shared_next(&word, &half);
-        out[2] = shared_next(&word, &half);
-        out[3] = per > 2u ? shared_next(&word, &half) : 0;
-    }
-    return out;
+    return psm_copy(out, n, per, ta, ka, step);
 }
 
 /* The frames receive DMA has filled this run, by its status. */
@@ -253,13 +286,9 @@ static uint32_t frames_wait(uint32_t target, uint32_t t0)
     return v;
 }
 
-/*
- * A ring of n frames in FRAMES, after the earlier runs', and one descriptor more, never filled, for the ring's end;
- * the microcode pushes n frames, the first of them its second chunk before it was filled, and stays.
- */
-static void take_stream(uint32_t n, uint32_t run)
+/* The ring's descriptors, before the microcode starts; small, as untimed. */
+__attribute__((noinline, minsize)) static void ring_setup(uint32_t at, uint32_t n)
 {
-    uint32_t at = FRAMES + run * n * FRAME_SIZE, t0, ta, tb, a, v;
     REG(RCV_DMA) &= ~DMA_ENABLE;
     for (uint32_t i = 0; i < 1000u && (REG(RCV_DMA + 0x10u) & DMA_STATE); i++) {
     }
@@ -270,6 +299,16 @@ static void take_stream(uint32_t n, uint32_t run)
         d[2] = at + i * FRAME_SIZE;
         d[3] = 0;
     }
+}
+
+/*
+ * A ring of n frames in FRAMES, after the earlier runs', and one descriptor more, never filled, for the ring's end;
+ * the microcode pushes n frames, the first of them its second chunk before it was filled, and stays.
+ */
+static void take_stream(uint32_t n, uint32_t run)
+{
+    uint32_t t0, ta, tb, a, v;
+    ring_setup(FRAMES + run * n * FRAME_SIZE, n);
     REG(RCV_DMA + 0x08u) = RING;
     REG(RCV_DMA + 0x0cu) = 0;
     REG(RCV_DMA) = (REG(RCV_DMA) & ~DMA_OFFSET) | DMA_ENABLE;
@@ -291,8 +330,30 @@ static void take_stream(uint32_t n, uint32_t run)
     REG(STREAM_TIMES + 16u * run + 12u) = v;
 }
 
+/*
+ * Reads of 0x7e7 in pairs, each pair's word stored between them and the next,
+ * so that a read follows the one before by the same cycles but for the store's one or two; four pairs to the loop's test.
+ */
+static volatile uint32_t *take_bits(volatile uint32_t *out, uint32_t n, uint32_t run)
+{
+    phy_write(BITS_SELECT, BITS_ON);
+    REG16(PHYREGADDR) = BITS;
+    REG(FIRST + 4u * run) = REG(DWT_CYCCNT);
+    for (uint32_t i = 0; i < n; i += 8u, out += 4) {
+        for (uint32_t k = 0; k < 4u; k++) {
+            uint32_t a = REG16(PHYREGDATA);
+            out[k] = a | (uint32_t)REG16(PHYREGDATA) << 16;
+        }
+    }
+    REG(LAST + 4u * run) = REG(DWT_CYCCNT);
+    return out;
+}
+
 static volatile uint32_t *take(volatile uint32_t *out, uint32_t n, uint32_t run)
 {
+    if (REG(MODE) & MODE_BITS) {
+        return take_bits(out, n, run);
+    }
     uint32_t control = phy_read(IQ_CONTROL) & ~3u, mode = REG(MODE);
     phy_write(IQ_SAMPLES, 1);
     phy_write(IQ_WAIT, (phy_read(IQ_WAIT) & ~0xffu) | (REG(WAIT) & 0xffu));
@@ -326,6 +387,9 @@ static volatile uint32_t *take(volatile uint32_t *out, uint32_t n, uint32_t run)
 static uint32_t most_of(uint32_t mode, uint32_t tones)
 {
     uint32_t end = tones ? OUT_END_TONES : OUT_END, most = (end - OUT) / 16u / (1u + tones);
+    if (mode & MODE_BITS) {
+        return (end - OUT) / 2u / (1u + tones) & ~7u;
+    }
     if (STREAMING(mode)) {
         most = ((end - FRAMES) / FRAME_SIZE - 1u) / (1u + tones);
         return (most < MOST_FRAMES ? most : MOST_FRAMES) & ~1u;
@@ -335,6 +399,32 @@ static uint32_t most_of(uint32_t mode, uint32_t tones)
         return most < shared ? most : shared;
     }
     return most;
+}
+
+/* As the firmware tunes a channel, but to mhz: the nearest channel's entry, its frequency and word replaced; small, as its time is the ROM's. */
+__attribute__((noinline, minsize)) static void tune(uint32_t pi, uint32_t mhz, uint32_t word)
+{
+    uint32_t lcn = REG(pi + 0x40u), table = REG(lcn + LCN_CHANNELS), best = 0, nearest = ~0u;
+    for (uint32_t k = 0; k < CHANNELS; k++) {
+        uint32_t f = REG16(table + ENTRY_SIZE * k + 2u * ENTRY_MHZ), d = f > mhz ? f - mhz : mhz - f;
+        if (d < nearest) {
+            nearest = d;
+            best = k;
+        }
+    }
+    volatile uint16_t *e = (volatile uint16_t *)ENTRY;
+    for (uint32_t i = 0; i < ENTRY_SIZE / 2u; i++) {
+        e[i] = REG16(table + ENTRY_SIZE * best + 2u * i);
+    }
+    e[ENTRY_MHZ] = (uint16_t)mhz;
+    e[ENTRY_0X55] = (uint16_t)mhz;
+    e[ENTRY_0X4E] = (uint16_t)(word >> 16);
+    e[ENTRY_0X4E + 1u] = (uint16_t)word;
+    REG(lcn + LCN_CHANNELS) = ENTRY;
+    RADIO_TUNE(pi, 1);
+    REG(lcn + LCN_CHANNELS) = table;
+    REG(TUNED) = RADIO_READ(pi, SYNTH_LOCKED);
+    REG(TUNED + 4u) = RADIO_READ(pi, 0x4eu) << 16 | RADIO_READ(pi, 0x4fu);
 }
 
 void iq_start(void)
@@ -352,9 +442,13 @@ void iq_start(void)
     REG(CYCLES) = REG(DWT_CYCCNT) - c0;
 
     uint32_t tones = REG(TONES) < MOST_TONES ? REG(TONES) : MOST_TONES, pi = REG(PI);
-    uint32_t most = most_of(REG(MODE), tones), n = REG(COUNT) < most ? REG(COUNT) : most;
-    uint32_t clocks = phy_read(CLOCKS);
+    uint32_t most = most_of(REG(MODE), tones), n = (REG(COUNT) < most ? REG(COUNT) : most) & ~(REG(MODE) & MODE_BITS ? 7u : 0u);
+    uint32_t clocks = phy_read(CLOCKS), select = phy_read(BITS_SELECT);
     volatile uint32_t *out = (volatile uint32_t *)OUT;
+    if (REG(TUNE_MHZ)) {
+        REG(STEP) = 0x60;
+        tune(pi, REG(TUNE_MHZ), REG(TUNE_WORD));
+    }
     if (tones) {
         uint32_t lcn = REG(pi + 0x40u), scratch[2];
         REG8(lcn + LCN_CAL_TYPE) = 2;
@@ -375,6 +469,7 @@ void iq_start(void)
         CAL_RESTORE(pi, 0, 0, 0, 0, 0);
     }
     phy_write(CLOCKS, clocks);
+    phy_write(BITS_SELECT, select);
     REG(COUNT) = n;
     REG(GO) = ENDED;
     for (;;) {
