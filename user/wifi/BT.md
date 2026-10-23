@@ -247,9 +247,9 @@ at most one each 1.25 ms and with no payload, see below:
 
 | Word | Value | What it is, as far as known |
 |---|---|---|
-| `0x410494` | `0x26c` | a word of the radio's block, `0x410000`; not known |
-| `0x318028` | `0x202` | a word of the modem's; not known |
-| `0x318bc0` | `0x2b08289` | a word of the modem's; not known |
+| `0x410494` | `0x26c` | a word of the radio's block, `0x410000`: bit 9 needed, bit 5 the power's 8 dB, see below |
+| `0x318028` | `0x202` | a word of the modem's: bit 1 needed, see below |
+| `0x318bc0` | `0x2b08289` | a word of the modem's: bit 25 needed, bits 15:0 a time in 1/256 µs, see below |
 | `0x318b70` | `0x71764129` | the access address |
 | `0x318ba4` | `0x555555` | the CRC's start |
 | `0x3186a4` | `0xa6` | the carrier, `0x80 \| (f - 2402 MHz)` |
@@ -341,6 +341,30 @@ Its low byte is a time in microseconds: it lengthens the time from bit 2 of `0x3
 a few microseconds more cannot settle a drift of 0.45 MHz, so what either part turns on is not known.
 `btcore/bt-tx.rec` carries the vendor's value after the eight words, nine in all.
 
+Their bits, **measured** with an nRF52840 receiving on 2440 MHz, counting each burst of 320 packets by a tag in its payload, see below,
+each set bit of the three words not known cleared in turn, the vendor's value back after each:
+without bit 1 of `0x318028`, bit 25 of `0x318bc0` or bit 9 of `0x410494` nothing is heard, and the next burst with the bit back is heard whole;
+without bit 5 of `0x410494` every packet is heard 8 dB weaker; no other bit alone changes the count or the strength by more than 1 dB.
+`0x318028 = 0x2` and `0x410494 = 0x220`, each cut to the bits that mattered, send as the vendor's values do.
+`0x318bc0` cut so, `0x2000000`, sends one packet and then nothing, and nothing either once the vendor's value is back,
+for the rest of the run; the next run, from the board's boot, sends again: bits 15:0 must not be too small.
+They are a time in 1/256 µs: from bit 2 of `0x314004` to bit 0 takes 514 µs less their value over 256,
+513, 512, 510, 450, 386, 384 and 259 µs at `0x100`, `0x200`, `0x400`, `0x4000`, `0x8000`, the vendor's `0x8289` and `0xffff`,
+with `0x318394`'s low byte `0xff`, which lengthens the same span;
+at `0x1` the transmitter stops for good, at `0x100` it does not.
+Bits 16 to 23 and the rest of the low ones matter to nothing measured.
+
+After the setup the transmitter sends weakly or not at all for up to about a second, **measured**:
+where heard, 25 to 28 dB below its strength after, with a few bad CRCs, in ten runs, and nothing heard of its first burst in six others.
+
+The header `0x318b68`, bits 7:0 its first byte and 15:8 its length, sends a payload from `0x370800`, **measured**:
+with a length of 4 and a tag written to `0x370800` before each burst, the nRF hears each burst's tag with good CRCs.
+A packet with a payload of 4 bytes goes at every trigger, 397 and 400 of 400 at 1.25 ms;
+one of 37 at most once in two, 201 of 400 at 1.25 ms and 200 of 267 at 1.875 ms, and one of 37 or 100 bytes at every trigger 2.5 ms apart.
+The transmitter sends as many of the payload's bytes as the length's low 7 bits say, though the header carries all 8:
+with 150, 200, 230 and 255 the nRF hears the first 22, 72, 102 and 127 bytes right and noise after, every CRC bad,
+so a payload is 127 bytes at most this way.
+
 The receiver came the same way, **measured**, see `hw/bt.md`'s "The receiver from the host":
 a record of the rehost's receiver test, `--hci 201d:13`, while an nRF52840 sent the LE test's packets,
 counted one packet in the half second the emulated firmware's slowness let it arm a few times,
@@ -374,7 +398,7 @@ once the list writes the receiver's window `0x318b10`, which the record leaves a
   Writing `0xa6` back returns the carrier to channel 19.
   Our own code cannot make such a write while the settled test sends, since its point is then reached only as the modem is set up.
 - The word is whole megahertz, and every writer of it writes whole megahertz;
-  no finer word for the carrier was found in the image.
+  no finer word for the carrier was found in the image, nor in the synthesizer's page, see `hw/bt.md`.
 - The test's setup also writes `0x318b6c`, `0x01002340`, a configuration of the modem's path and mode
   that other writers set to `0x01002140`, `0x0d020100` and `0x0d000140`, and whose single bits several functions set and clear.
   The hardware reads it live: clearing it while the test sends stops the transmission rather than moving it
@@ -403,8 +427,13 @@ once the list writes the receiver's window `0x318b10`, which the record leaves a
 - What `0x318394`'s low byte and its bit 27 turn on, either of which keeps the first packet after a change of the carrier,
   and what the rest of the word is.
 - Why the firmware, for its first second or so, passes the point for every packet, and then settles.
-- What `0x410494`, `0x318028` and `0x318bc0` of the transmitter's words are,
+- What `0x410494`'s bits 5 and 9, `0x318028`'s bit 1 and `0x318bc0`'s bit 25 turn on, and what moment `0x318bc0`'s time in its bits 15:0 sets,
   and why the power manager's words silence the chip when left out with the rest of the record, and not with what the eight leave out.
+- Why the transmitter sends weakly for its first second after the setup.
+- Where the length's eighth bit, which the header carries and the transmitter does not count, is counted, if anywhere:
+  LE's payloads of up to 251 bytes need it.
+- Whether `0x318b6c`'s bit 20 whitens what is sent: in one run, with it set and `0x318bf4 = 18`,
+  an nRF52840 dewhitening with channel 18's seed heard 316 good packets of a burst of 320, and bits 19 and 21 to 24 none; not yet repeated.
 - What the bits of `0x314004` that latch for a packet mean, beyond when each latches.
 - What the firmware keeps in the RAM beside the patch, and so where more of our code could go;
   asking the firmware's own allocator for a block would avoid the question.

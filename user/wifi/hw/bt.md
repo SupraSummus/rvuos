@@ -62,7 +62,7 @@ or not readable through the window.
 | Word | What it is | How sure |
 |---|---|---|
 | `0x318014` | the trigger: `0x80000005` sends one packet, at most one each 1.25 ms; with `0x318204`'s bit 7 clear, `0x80000005` and then `0x80000085` arm the receiver once: bit 7 receives, bit 31 LE, bits 3:0 the event's kind, the last two read in the code | measured, read |
-| `0x318028` | one of the transmitter's eight words, `0x202`; its role is unknown | measured |
+| `0x318028` | one of the transmitter's eight words, `0x202`: without bit 1 nothing is sent, bit 9 changes nothing seen | measured |
 | `0x318038` | bits 31:24 written beside the carrier by the hopping function `0x6b4a8`; writing them changes nothing measured | traced, measured |
 | `0x318088` | the Bluetooth clock, stepping every 312.1 µs; `0x318084`, read after it, counts up | measured |
 | `0x3180a0` | written in the test's setup | traced |
@@ -71,7 +71,7 @@ or not readable through the window.
 | `0x318220` | written beside the carrier by the hopping function; changes nothing measured | traced, measured |
 | `0x318394` | 0 parked, `0x9a0100ff` the vendor's: its low byte from 4 or its bit 27 keeps the first packet after a change of the carrier; the low byte adds microseconds between `0x314004`'s bits 2 and 0 | measured |
 | `0x3186a4` | the carrier, `0x80 \| (f - 2402 MHz)`, read live | measured |
-| `0x318b68` | the packet's header, left at its reset value by the eight words, so the packets carry no payload | measured |
+| `0x318b68` | the packet's header, bits 7:0 its first byte, 15:8 its length, 0 at reset; the payload from `0x370800`, as many bytes as the length's low 7 bits | measured |
 | `0x318b10` | the receiver's window, in half microseconds and about 100 µs more, a short one ending at the next half slot; `0xffffffff` listens for good | measured |
 | `0x318b6c` | the path and mode, `0x1006340` in either test; cleared while sending, the transmission stops; bit 14 the LE mode, set by `0x5b988` with `0x410430`'s bits 14:8, and not the sending; bit 21 the receiver's whitening, bit 20 nothing seen | measured, read |
 | `0x318b70` | the access address | measured |
@@ -79,18 +79,32 @@ or not readable through the window.
 | `0x318b98` | the received header: bits 7:0 its first byte, 15:8 its length, the same again in the high half | measured |
 | `0x318ba4` | the CRC's start, `0x555555` | measured |
 | `0x318bac` | the receiver's status: bit 1 the access address found, 2 the CRC good, 6 the CRC bad; `0x130036` for a good packet, `0x100072` for a bad one, `0x100041` for a window that ended empty, `0x104000` while it listens | measured |
-| `0x318bc0` | one of the eight words, `0x2b08289`; its role is unknown | measured |
+| `0x318bc0` | one of the eight words, `0x2b08289`: bit 25 needed; bits 15:0 a time in 1/256 µs, bit 2 of `0x314004` that much nearer bit 0, `0x1` stopping the transmitter for the rest of the run; bits 16 to 23 change nothing seen; the ROM's LE receiver test sets bits 15:8 to `0xa1` | measured, read |
 | `0x318bf4` | the whitening's seed, the channel's index: 37 dewhitens channel 37's packets, 0 and 38 do not | measured |
+
+## The synthesizer, `0x600000`
+
+`0x600104` holds the frequency as `0x80 | (f - 2400 MHz)`, **measured**: with the receiver armed at 2440, 2441 and 2450 MHz
+through the carrier word it read `0xa8`, `0xa9` and `0xb2`; the channels' assessment writes it itself, **read**.
+Of the page's 512 words from `0x600000` to `0x6007fc`, read in each of those states, 197 nonzero,
+`0x600300`, `0x600310`, `0x60067c` and `0x60076c` follow the frequency, a code or so a MHz, `0x8d`, `0x8e` and `0x95` for the first,
+the oscillator's band as its calibration finds it, a hypothesis,
+and `0x60024c`, `0x60025c` and `0x60026c` differ from run to run at one frequency; no other word moved,
+and none as a fraction of the reference would between two whole MHz:
+the synthesizer works its fraction out of the whole MHz itself, and no word of the page sets the carrier finer.
+A read from `0x600800` up stalls the core: the executor's list never ends.
 
 ## The link controller's status, `0x314004`
 
 Cleared by writing ones.
 After a trigger its bits 3 to 6 latch 290 to 590 µs on, bit 2 about 408 µs later, and bit 0 127 to 129 µs after that,
-**measured**; what each stands for is unknown.
+**measured** with the eight words of `BT.md`'s table alone; what each stands for is unknown.
+The span from bit 2 to bit 0 is about 259.5 µs, plus `0x318394`'s low byte in µs, less `0x318bc0`'s bits 15:0 in 1/256 µs,
+**measured** for each word with the other at the vendor's value, `0xff` and `0x8289`, and a hypothesis for the two together.
 
 ## The radio, `0x410000`
 
-`0x410494` is one of the transmitter's eight words, `0x26c`, **measured**, its role unknown.
+`0x410494` is one of the transmitter's eight words, `0x26c`, **measured**: without bit 9 nothing is sent, without bit 5 the packets are 8 dB weaker, and bits 2, 3 and 6 change nothing seen; see `BT.md`.
 `0x410434`'s low byte is a received packet's strength, signed, a dB a step, **measured**, see "The receiver from the host";
 it reads 0 when no packet came, and its bits 8 to 12 `0xc` with packets and `0x14` without.
 The firmware adds a byte of its RAM, `0x202666`, to it for every report, `0xe7f4`, **read**.
@@ -107,6 +121,18 @@ with the carrier on 2440 MHz the receiver read 32 to 35 and a gain of 9 tuned to
 and with the carrier off 5 to 7 and 20 at the same tunings, where a packet is heard only on its own channel, see "The receiver from the host":
 both see the band ahead of the channel's filter.
 A sweep of the 79 channels with the carrier off read the same at every one, within the reads' spread.
+`0x60029c` to `0x6002ac`, five words, are one each for the transmitter's sub-bands, **measured**:
+with `bt-tx.rec`'s packets on 2440 MHz only `0x6002a4` set to 0 changes what the nRF observer hears, 1600 of 1600 at -69.4 dBm becoming 410 at -92.4,
+and on 2410 MHz only `0x60029c`, 1577 at -67.5 becoming 115 at -93.1;
+the code places the five at 2410, 2426, 2442, 2458 and 2474 MHz, **read**.
+The parked core reads them `0x5c` or `0x5e`, then `0x52` or `0x54` for the other four, a little apart from one power-up to the next,
+and the vendor's firmware searches `0x6002a0` through 14, `ff`, 89, `4e`, 31, `3f` and 46 as it starts, `0x5bc50`, and leaves them `4d`, 46, `3e`, `3b`, 39:
+a calibration's results, of what is not known.
+`0x6002a4` stepped down from `0x54` read -69.2, -70.5, -71.1, -72.3, -69.9, -65.5, -70.9, -76.6 and -92.5 at the observer
+for `0x54`, `0x48`, `0x3c`, `0x30`, `0x24`, `0x18`, `0xc`, 6 and 0, the packets heard falling to about 950 of 1600 from `0x18` down:
+not a power, which would fall with it.
+At `0x24` against `0x54`, with the observer and the ESP32-C6's sampler at 2438 MHz on the same packets, two runs each alternately,
+the observer read 3.5 dB less and lost 5 in 100, and the sampler saw the frequency's excursions unchanged, ±170 to 220 kHz either way.
 `0x4106e8` is the busiest register of the trace, 16262 reads and 10843 writes from 7 places,
 the strobe of a measurement the calibration takes thousands of times, whose results the firmware writes elsewhere, **traced**.
 
