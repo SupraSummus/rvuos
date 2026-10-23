@@ -4,6 +4,7 @@ An experiment behind `WIFI_BT=1` in `user/wifi/`:
 the chip's Bluetooth core, brought up beside the running WLAN firmware
 and taken over with a little code of our own in the core's RAM.
 Without `WIFI_BT` the Wi-Fi system is as it would be without this file, and nothing of it is built.
+The registers' facts gather in the chip's map, `user/wifi/hw/`; this file tells how they were found.
 
 ## Building and running
 
