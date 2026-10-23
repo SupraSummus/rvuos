@@ -190,7 +190,7 @@ Table `0x15` has 256 entries, **read**, each a sample of 10-bit I and Q, Q in bi
 as the firmware leaves it idle, its first 16 a turn of a tone of amplitude 100, a sixteenth of a turn each sample,
 `0x19000`, I 100 and Q 0, then I 92 and Q 38, from a calibration of the firmware's, a hypothesis,
 and the other 240 no tone, of amplitudes from 36 to 693.
-The PHY can therefore send any 256 samples in a loop; nothing here has played them.
+The PHY can therefore send any 256 samples in a loop; on the air, see below.
 
 How the ROM plays and stops them, **known**, the registers brcmsmac's LCN PHY uses for the same where it has them:
 
@@ -205,7 +205,51 @@ How the ROM plays and stops them, **known**, the registers brcmsmac's LCN PHY us
 Its rate is 40 million samples a second as the ROM reckons it, **known**:
 `0x87121c` counts a tone's samples as 40·10^6·k over the tone's frequency in Hz, k the least that makes it whole,
 as brcmsmac's LCN PHY does with its `phy_bw` of 40.
-At that rate 256 samples last 6.4 µs, and the turn in the buffer is a tone of 2.5 MHz; measured on the air, neither is yet.
+At that rate 256 samples last 6.4 µs, and the turn in the buffer is a tone of 2.5 MHz.
+
+On the air, **measured**: our code on the WLAN's processor called `0x86ea6c` as the calibration does, `pi`, the tone in Hz, amplitude 64, 0, 1, 1,
+and `0x86eb6c` three seconds later, without the calibration's loopback, on channel 6, the access point brought up first;
+an ESP32-C6's scan held at 2437 MHz, its gain fixed at 24, 4096 samples at 16 MS/s about twice a second, took the air,
+and in a first run of its own an nRF52840's carrier on 2441 MHz lay in the same captures.
+With D11's microcode running, a tone lasted under half a second, and one asked for after it did not show:
+the microcode undoes the forcing, as it takes the front end back for its frames or gives it to Bluetooth, a hypothesis.
+With the MAC suspended and D11's processor halted first, as `cyw43psm.suspend` and `HALTED` leave them, each tone held its three seconds,
+in seven captures each:
+
+| Asked | The tone less the carrier's leak, MHz | The leak, below the tone | The mirror, below the tone |
+|---|---|---|---|
+| +2 MHz | +2.0000 in all seven | 29 to 30 dB | none within 40 dB; at three times the tone's frequency, mirrored, -6 MHz, 39 dB |
+| -3 MHz | -3.0000 in all seven | 28 dB | 43 dB, at +3 MHz |
+
+So the play is 40 MS/s of the radio's own clock, to within 5 parts in 10^5, and the tone lies where the samples put it.
+Against the nRF's carrier the leak lay 4.0002 MHz below it and the tone 2.0001 below:
+the two crystals within 0.1 ppm of each other in that run,
+where in the runs of `--tune` they lay 20 to 40 ppm apart, the nRF warming, see "A channel";
+so the nRF fixes no frequency here to better than tens of ppm.
+The leak moved by about 1 kHz a second against the C6 through each tone, the radio warming or the C6, which one is not known.
+Our own samples play as well, **measured** the same way, D11 halted:
+written into a buffer of RAM and through `0x874960` into table `0x15`, its descriptor the buffer, the count, `0x15`, 0 and 32,
+after `0x49c` bit 0 set, `0x86e95c` with 1, `0x6d6` bits 0 and 1 cleared and `0x6da` bit 3 set, as `0x86ea6c` does,
+and played by `0x872334` with the count, `0xffff`, 0, 0 and 1, then stopped by `0x86eb6c`, three seconds each:
+
+| Samples | Seen, MHz from the C6's tuning |
+|---|---|
+| 16, a turn of amplitude 64, I `64 cos`, Q `64 sin` | +2.469 to +2.484 in seven captures |
+| the same, I and Q swapped | -2.531 in seven |
+| 32, two turns of amplitude 32 summed, one turn up and three down | +1.219 to +1.234 and -3.766 to -3.781 in seven |
+
+So I is bits 10 to 19 and Q bits 0 to 9 as the table reads, and a sample turning as `exp(+j ω t)` sends above the carrier,
+the C6's own offset, about -0.02 MHz, aside.
+Each line had lines 62.5 kHz either side of it, 40 dB below for one tone; with two, those were 10 to 20 dB below,
+and the two tones' peaks over the transform's median bin moved from capture to capture by up to 20 dB, a measure the next run showed unsound.
+The level follows the amplitude, **measured** as the captures' RMS, the C6's gain fixed: a turn of 16 samples at amplitudes 16, 32, 64 and 128,
+three seconds each, read 52, 108, 200 and 385, against 2 to 3 with nothing sent, 6.4, 5.3 and 5.7 dB for each doubling:
+within 0.7 dB of a doubling's 6 dB to 128, the C6's samples reaching 511; and each fell by 0.6 to 0.7 dB over its three seconds.
+The amplitude, 64 of the samples' 511, is below the calibration's own `0xb5`, which the firmware plays with the same forcing;
+against the firmware's own frames, **measured** in one run, the C6's gain fixed at 14 and 1024 samples a capture:
+the access point's frames, caught wholly inside four captures in its first 20 s, read an RMS over 2 µs of 250 to 277,
+and then the tone, D11 halted, 50 to 53 at amplitude 32 and 92 to 97 at 64:
+the tone at 64 about 9 dB below the frames, at 32 about 14, the frames' band wider than the C6's 16 MHz making them, if anything, stronger still.
 
 ## The receiver's samples
 
