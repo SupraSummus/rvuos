@@ -6,7 +6,7 @@ Usage: user/wifi/tools/cyw43-exec.py [--setup RECORD] [--times N] PROGRAM
 The core is parked as user/wifi/tools/cyw43park.py parks it, but its slide leads to the executor, which runs no vendor code
 and waits for a list of operations in its RAM; see user/wifi/BT.md.
 --setup writes a record's writes over the bridge first, a list of lines "w ADDR 4 VALUE" as user/wifi/tools/cyw43-replay.py takes,
-the transmitter's nine words of user/wifi/btcore/bt-tx.rec for one.
+the transmitter's nine words of user/wifi/btcore/bt-tx.rec for one, or the receiver's of bt-rx.rec.
 PROGRAM is the list, an operation a line, numbers in hex but for microseconds and counts:
   write ADDR VALUE    a word written
   wait US             microseconds from now

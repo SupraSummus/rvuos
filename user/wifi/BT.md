@@ -341,6 +341,13 @@ Its low byte is a time in microseconds: it lengthens the time from bit 2 of `0x3
 a few microseconds more cannot settle a drift of 0.45 MHz, so what either part turns on is not known.
 `btcore/bt-tx.rec` carries the vendor's value after the eight words, nine in all.
 
+The receiver came the same way, **measured**, see `hw/bt.md`'s "The receiver from the host":
+a record of the rehost's receiver test, `--hci 201d:13`, while an nRF52840 sent the LE test's packets,
+counted one packet in the half second the emulated firmware's slowness let it arm a few times,
+and the record's last writes, as the executor's setup, then received every packet the nRF sent, its payload at `0x370a00`.
+The transmitter's nine words with `0x318204 = 0x04`, `btcore/bt-rx.rec`, receive too, though not as the vendor's do,
+once the list writes the receiver's window `0x318b10`, which the record leaves at `0x68`, `0xffffffff`.
+
 ## Setting the carrier
 
 - The word that sets the carrier is `0x3186a4`, a byte: `0x80 | (f - 2402 MHz)`.
@@ -390,6 +397,7 @@ a few microseconds more cannot settle a drift of 0.45 MHz, so what either part t
   and the newest such patch found, `CYW4343A2_001.003.016.0065`, also a Raspberry Pi build, against `001.003.016.0031` here,
   loads and reports the same LE feature mask, its 2M bit clear.
   That is a hint, not a proof about the silicon: a 2 Msym/s mode would be a clock, not a table, and our own code runs on the core.
+  The ROM's switch between modes knows two, BR and LE, see `hw/bt.md`'s "What the code says of the receiver", and no third.
 - Whether the carrier can be set finer than a megahertz, and how fast a write of it settles
   beyond the first packet after a change, which drifts without `0x318394`.
 - What `0x318394`'s low byte and its bit 27 turn on, either of which keeps the first packet after a change of the carrier,

@@ -1,0 +1,10 @@
+# The receiver's setup: the transmitter's nine words of bt-tx.rec with 0x318204 = 0x04, see user/wifi/hw/bt.md: w ADDR SIZE VALUE.
+w 410494 4 26c
+w 318028 4 202
+w 318bc0 4 2b08289
+w 318b70 4 71764129
+w 318ba4 4 555555
+w 3186a4 4 a6
+w 318204 4 4
+w 318b6c 4 1006340
+w 318394 4 9a0100ff
