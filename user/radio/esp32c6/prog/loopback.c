@@ -121,8 +121,14 @@ void drv_run(struct drv *d, struct self *own)
     drv_must("a hold of at most HOLD_MAX_MS", hold <= HOLD_MAX_MS ? ESP_OK : ESP_FAIL);
     drv_must("a rhythm of at most RHYTHM_MAX_S", rhythm <= RHYTHM_MAX_S ? ESP_OK : ESP_FAIL);
     drv_must("a half of HALF_MIN_MS to HALF_MAX_MS", half >= HALF_MIN_MS && half <= HALF_MAX_MS ? ESP_OK : ESP_FAIL);
+    /* Each step stepstep= may reach, round its ten bits, within the band, as the loopback lets the tone out. */
+    for (uint32_t k = 0; k < (stepstep != 0 ? 1024u : 1u); k++) { /* bounded by the ten bits' steps */
+        drv_must("every step= and stepstep= reaches within the band",
+                 drv_phy_tone_fits(channel, (step + k * stepstep) & 0x3ffu) ? ESP_OK : ESP_FAIL);
+    }
     mac_up(d->mac);
     up = 1;
+    dump_known();
     drv_must_mac("the channel", mac_channel(channel));
     if (gain != NONE) {
         drv_must("a gain within the table", gain <= drv_phy_rx_gain_last() ? ESP_OK : ESP_FAIL);
@@ -151,12 +157,23 @@ void drv_run(struct drv *d, struct self *own)
                 drv_say("loopback: second %u: the dump clock's mux %u, dumprate %u\n", second,
                         (REG(CLK_CONF) & CLK_DUMP_MUX) != 0, conf.rate);
             }
+            /*
+             * Each capture is told only once the loopback is off, and the root task answered between,
+             * as a tell takes up to some 0.64 s, and a program that misses an answer halts the machine as it stands.
+             */
             drv_say("loopback: second %u: alone\n", second);
             dump_take(&conf);
+            child_answer(&d->c);
             drv_phy_loopback(1, lb);
             looped = 1;
+            dump_capture(&conf);
+            drv_phy_loopback(0, 0);
+            looped = 0;
             drv_say("loopback: second %u: looped, quiet\n", second);
-            dump_take(&conf);
+            dump_tell(&conf);
+            child_answer(&d->c);
+            drv_phy_loopback(1, lb);
+            looped = 1;
             drv_phy_tone(1, s, atten);
             toned = 1;
             dump_capture(&conf);

@@ -70,7 +70,7 @@ and its log must show what `hw/dump.md`, "A player", says: with the block's 0x10
 the words it plays all 0, and with 0x10000000 the word 0 none, 40 and 10000 a quarter turn apart,
 and 200 some eight times 40's the other way.
 A change to the nRF52840's `sweep=` in `user/thread/root.c` runs the player with `rhythm=40`, `half=0`, `loop=1`, `period=4` and `amp=200`,
-and again with `swap=1`, while the nRF52840 sweeps from 2417 to 2457 MHz with `sweep=10`, and once with `amp=0`, its control:
+and again with `swap=1`, while the nRF52840 sweeps from 2417 to 2457 MHz with `sweep=10`, `from=2417` and `to=2457`, and once with `amp=0`, its control:
 the means at 2427 and 2428 MHz must stand a few dB over the control's in the first, and at 2447 and 2448 in the second.
 
 A change to `prog/synth154.c`, or to the nRF52840's `listen=` in `user/thread/root.c`, runs synth154 with `amps=0,511` and `send=40`
@@ -84,6 +84,13 @@ A change to `muxes=` of `prog/player.c` runs it with `count=16383` and `muxes=1`
 the others 414, as `hw/dump.md`, "A player", says.
 A change to `slows=` of `prog/synth154.c` runs synth154 with `slows=0,1,1` and `amps=511,511,0` and `send=40`
 while the nRF52840 listens on channel 24 with `listen=15`: settings 0 and 1 must come about as often, setting 2 never.
+
+### The BBPLL
+
+A change to `prog/bbpll.c` runs it on `channel=1` while the nRF52840 sends its carrier on channel 11 with `carrier=20` and `power=-20`,
+first with no `tonemoved=1`, as a set that moved the local oscillator would take the looped tone out of the band:
+each set's carrier line, scaled by its PLL's frequency, must stand where its control's does, as `hw/dump.md`, "The clocks' source", says;
+a tone with a set is looped back only once that has been seen for the set.
 
 ### The register map
 

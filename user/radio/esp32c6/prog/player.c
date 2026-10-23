@@ -64,6 +64,9 @@ DRV_PROGRAM("the player", DRV_NEED_DUMP);
 #define UPPER_WORD   16384u
 #define POLLS_MAX    2000000u
 #define RHYTHM_MAX_S 60u
+#define ANSWER_US    100000u /* the rhythm answers the root task this often, well within its second */
+#define BAND_LOW_KHZ  2400500u /* the 2.4 GHz band's edges, half a MHz in */
+#define BAND_HIGH_KHZ 2483000u
 #define HALF_MIN_MS  5u
 #define HALF_MAX_MS  500u
 #define TONE_ATTEN   0x30u /* the calibration's, prog/loopback.c's least */
@@ -169,17 +172,18 @@ static uint32_t capture_us(uint32_t n)
 /* One play, the bank the engine's, and a capture beside it if grab; the microseconds it took, NO_WORD if it never ended. */
 static uint32_t play(const struct play *p)
 {
-    uint32_t polls = 0;
+    uint32_t polls = 0, grabbed = 0;
     REG(PLAY) = 0;
     uint64_t start = osi_now_us();
     REG(PLAY) = p->count | p->bits | PLAY_ENABLE;
     for (; (REG(PLAY) & PLAY_DONE) == 0 && polls < POLLS_MAX; polls++) { /* bounded by POLLS_MAX */
         if (p->grab != 0 && polls == p->grabat) {
             capture_start(p->grab);
+            grabbed = 1;
         }
     }
     uint32_t us = polls < POLLS_MAX ? (uint32_t)(osi_now_us() - start) : NO_WORD;
-    for (uint32_t k = 0; p->grab != 0 && (REG(DUMP_CTRL) & CTRL_DONE) == 0 && k < POLLS_MAX; k++) { /* bounded */
+    for (uint32_t k = 0; grabbed && (REG(DUMP_CTRL) & CTRL_DONE) == 0 && k < POLLS_MAX; k++) { /* bounded */
     }
     REG(DUMP_CTRL) = 0;
     REG(PLAY) = 0;
@@ -378,13 +382,17 @@ static void play_rhythm(struct drv *d, const struct play *p, uint32_t seconds, u
 {
     uint64_t start = osi_now_us(), end = start + (uint64_t)seconds * 1000000u;
     uint32_t plays = 0, unended = 0;
+    uint64_t answered = start;
     struct play quiet = *p;
     quiet.grab = 0;
     uint32_t usage = dump_bank_give();
     for (uint64_t now = start; now < end && !d->leave; now = osi_now_us()) { /* bounded by seconds */
         if (half == 0 || ((now - start) / (half * 1000u)) % 2u == 0) {
             unended += play(&quiet) == NO_WORD;
-            if (++plays % 1024u == 0) {
+            plays++;
+            /* Answered by the clock, as a program that misses an answer halts the machine, the loopback on. */
+            if (now - answered >= ANSWER_US) {
+                answered = now;
                 child_answer(&d->c);
             }
         } else {
@@ -403,7 +411,8 @@ static uint32_t hex_list(struct drv *d, const char *key, uint32_t *out)
     char list[96];
     list[0] = '\0';
     config_value(d->conf, d->conf_len, key, list, sizeof(list));
-    for (const char *c = list; *c != '\0' && n < LIST_MAX;) {
+    const char *c = list;
+    for (; *c != '\0' && n < LIST_MAX;) {
         uint32_t v = 0, digits = 0;
         for (; (*c >= '0' && *c <= '9') || (*c >= 'a' && *c <= 'f'); c++, digits++) {
             v = v << 4 | (uint32_t)(*c <= '9' ? *c - '0' : *c - 'a' + 10);
@@ -418,6 +427,7 @@ static uint32_t hex_list(struct drv *d, const char *key, uint32_t *out)
             break;
         }
     }
+    drv_must("a list of at most LIST_MAX words", *c == '\0' ? ESP_OK : ESP_FAIL);
     return n;
 }
 
@@ -461,16 +471,24 @@ void drv_run(struct drv *d, struct self *own)
              (p.bits & (PLAY_COUNT | PLAY_LOOP | PLAY_ENABLE)) == 0 ? ESP_OK : ESP_FAIL);
     drv_must("an amp of at most 511", s.amp <= 511 ? ESP_OK : ESP_FAIL);
     drv_must("a grab within the count", p.grab <= p.count ? ESP_OK : ESP_FAIL);
-    drv_must("an at= and count= within the bank", e.at + p.count <= DUMP_SAMPLES_MAX ? ESP_OK : ESP_FAIL);
+    drv_must("an at= and count= within the bank", e.at <= DUMP_SAMPLES_MAX - p.count ? ESP_OK : ESP_FAIL);
     drv_must("upper=1 with a count= within the bank's upper half", !e.upper || p.count <= UPPER_WORD ? ESP_OK : ESP_FAIL);
     drv_must("a rhythm of at most RHYTHM_MAX_S", rhythm <= RHYTHM_MAX_S ? ESP_OK : ESP_FAIL);
     drv_must("a half of 0, or HALF_MIN_MS to HALF_MAX_MS",
              (half == 0 || half >= HALF_MIN_MS) && half <= HALF_MAX_MS ? ESP_OK : ESP_FAIL);
+    if (loop || rhythm != 0) {
+        /* The pattern's tone, the sample rate over period= words, above or below the carrier, within the band. */
+        uint32_t carrier = 2407000u + 5000u * channel, off = s.period ? (p.bits & PLAY_FAST ? 80000u : 40000u) / s.period : 0;
+        drv_must("a looped pattern's tone, period= at its rate, within the band",
+                 carrier + off <= BAND_HIGH_KHZ && carrier - off >= BAND_LOW_KHZ ? ESP_OK : ESP_FAIL);
+    }
+    drv_must("a tone= within the band", tone == NO_WORD || drv_phy_tone_fits(channel, tone) ? ESP_OK : ESP_FAIL);
     /* A player left round and round, bit 19, before the last reset plays on through it, as the modem keeps its state. */
     drv_say("player: the word was %x\n", REG(PLAY));
     REG(PLAY) = 0;
     mac_up(d->mac);
     up = 1;
+    dump_known();
     drv_must_mac("the channel", mac_channel(channel));
     d->channel = channel;
     child_report(&d->c, DRV_LISTENING);

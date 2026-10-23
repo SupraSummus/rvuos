@@ -157,20 +157,23 @@ and `prog/loopback.c` captures what the receiver hears, with the dump engine.
   A larger atten is a weaker tone (inferred): `set_rx_gain_cal_iq_new` raises it when the tone comes too strong.
   `rom_stop_tx_tone` clears bit 18 alone.
 - Measured with `prog/loopback.c`, `channel=6`, `dump=2048` at 80 MHz, five seconds:
-  looped back with nothing sent, the receiver's words stay within four counts of a fixed offset, rms 1.4 to 1.6,
+  looped back with nothing sent, the receiver's words stay within four counts of a fixed offset, rms 1.4 to 1.7,
   where the receiver alone hears its noise and the band, rms 26 to 52, so the loopback leaves the antenna's path out.
   With the calibration's tone, step 0x80 and atten 0x30, a line stands at +5.00 MHz, 72 to 73 dB over the median,
-  its mirror about 50 dB below it, rms 132 to 135, in every one of the five:
+  its mirror about 50 dB below it, rms 132 to 142, in every one of the five:
   a step is 80 MHz / 2048, 39.0625 kHz, as a hypothesis from the one step,
   and the tone lies above the carrier, as the dump engine's I is bits 10 to 19.
   The quiet loopback holds a line of its own at +3.01 MHz, 25 dB over its median.
-- The loopback does not keep the tone off the air. Measured with `channel=13`, `step=77` (+3.008 MHz, 2475 MHz),
+- The loopback does not keep the tone off the air.
+  Measured with `prog/loopback.c`, `channel=13`, `step=77` (+3.008 MHz, 2475 MHz),
   `rhythm=35` and `half=50`, the tone switched on and off at 10 Hz, while the nRF52840 watched 802.15.4's channel 25,
   `watch=10` of `user/thread/root.c`, its blocks of 5 ms read by `user/thread/tools/watch-spectrum.py`:
   a line at 10 Hz, 62 dB over the rates beside it in the blocks' means and 42 dB in their strongest samples,
-  with its odd harmonics and nothing at 20 or 7 Hz; folded at 100 ms, -85 dBm with the tone and -96 to -99 without.
+  with its odd harmonics and nothing at 20 or 7 Hz; folded at 100 ms, the means -86.2 dBm with the tone and -98.7 without,
+  the strongest samples -85 and -96.
   The C6's own 802.15.4 frames there, `prog/i154.c` with `stream=7` at 0 dBm, in the same watch: a line at 7 Hz,
-  their strongest samples -62 dBm. So the looped tone at the calibration's level goes out about 22 dB below
+  their strongest samples -62 dBm.
+  So the looped tone at the calibration's level goes out about 22 dB below
   the radio's 0 dBm, as every bring-up's calibration sends it for its own while.
   The nRF52840's survey of the energy, two windows of 100 ms a channel, did not tell it from the floor:
   a rhythm and a watch through many of its periods did.

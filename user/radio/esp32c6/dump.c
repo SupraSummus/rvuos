@@ -45,6 +45,10 @@
 #define SRAM_USAGE      (HP_SYSTEM_BASE + 0x4u)
 #define SRAM_USAGE_BANKS (15u << 8)   /* HP_SYSTEM_SRAM_USAGE, a bit a bank: the dump engine's */
 #define SRAM_USAGE_HALF (1u << 16)    /* HP_SYSTEM_MAC_DUMP_ALLOC, the bank's upper 64 KiB */
+#define PLAY            (MODEM_BASE + 0x900cu) /* the player, hw/dump.md "A player" */
+#define PLAY_PAGE       (MODEM_BASE + 0x9010u)
+#define PLAY_PAGES      (3u << 28)    /* the first word played, in pages of 4096 */
+#define CLK_DUMP_MUX    (1u << 21)    /* MODEM_SYSCON_CLK_DATA_DUMP_MUX: set, the block's clock 80 MHz, else 32 */
 
 /* A word no capture writes, and the four past a capture's, which no capture of its length may touch. */
 #define MARK  0xa5a0055au
@@ -119,6 +123,16 @@ static void setup(const struct dump_conf *c, uint32_t source, uint32_t n)
     for (uint32_t i = 0; i < n; i++) {
         bank[i] = MARK;
     }
+}
+
+void dump_known(void)
+{
+    static const struct dump_conf receiver = { 0 };
+    REG(PLAY) = 0;
+    REG(PLAY_PAGE) &= ~PLAY_PAGES;
+    REG(CLK_CONF) |= CLK_DUMP_MUX;
+    REG(SRAM_USAGE) &= ~SRAM_USAGE_HALF;
+    setup(&receiver, 15u, 0);
 }
 
 /* The bank the engine's, and SRAM_USAGE as it was, for bank_to_cpu. */

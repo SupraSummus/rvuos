@@ -13,6 +13,10 @@ which knows it within a symbol's rate, 62.5 kHz, and of those the one symbol 0 c
 then the SFD's two symbols after it,
 and each symbol after the strongest of the sixteen chip sequences, without its carrier's phase:
 the frame's length, its bytes and whether its FCS is right.
+A capture's lines name their first word, so one the log's ring dropped or cut leaves a gap, and such a capture is refused;
+a capture number seen again from word 0, a later boot's, starts a capture of its own.
+The frequency is found only within the chip rate's multiples, 2 MHz, of where the frame lies,
+so a right FCS does not prove SHIFT_HZ right, and a frame 2 MHz off it reads as well.
 Plain Python: a capture is a few thousand words.
 """
 
@@ -36,7 +40,8 @@ def s10(v):
 
 
 def captures(path):
-    caps, labels = {}, {}
+    """Each capture's words by (number, boot), whole or None if a line is missing, and its label."""
+    caps, labels, boot, gaps = {}, {}, {}, set()
     label = None
     for line in open(path, errors="replace"):
         m = re.search(r"synth154: (frame \d+, setting \d+)", line)
@@ -44,12 +49,19 @@ def captures(path):
             label = m[1]
         m = re.search(r"dump: capture (\d+)", line)
         if m:
-            labels[int(m[1])] = label
+            c = int(m[1])
+            if (c, boot.get(c, 0)) in caps:
+                boot[c] = boot.get(c, 0) + 1
+            labels[(c, boot.get(c, 0))] = label
             label = None
-        m = re.search(r"dumphex: (\d+) (\d+) ((?:[0-9a-f]+ ?){8})", line)
+        m = re.search(r"dumphex: (\d+) (\d+)((?: [0-9a-f]+){8})\s*$", line)
         if m:
-            caps.setdefault(int(m[1]), []).extend(int(v, 16) for v in m[3].split())
-    return caps, labels
+            key, at = (int(m[1]), boot.get(int(m[1]), 0)), int(m[2])
+            words = caps.setdefault(key, [])
+            if at != len(words):
+                gaps.add(key)
+            words.extend(int(v, 16) for v in m[3].split())
+    return {k: (None if k in gaps else w) for k, w in caps.items()}, labels
 
 
 def symbol_wave(s, spc):
@@ -79,6 +91,8 @@ def fcs(data):
 
 
 def burst(z):
+    if len(z) < 2 * BLOCK:
+        return None
     power = [sum(abs(v) ** 2 for v in z[k:k + BLOCK]) / BLOCK for k in range(0, len(z) - BLOCK + 1, BLOCK)]
     floor = sorted(power)[len(power) // 10] or 1e-9
     hot = [k for k, p in enumerate(power) if 10 * math.log10(p / floor + 1e-12) > FLOOR_DB]
@@ -149,12 +163,17 @@ def main():
     rate = float(sys.argv[2])
     shift = float(sys.argv[3]) if len(sys.argv) > 3 else 0.0
     caps, labels = captures(sys.argv[1])
+    if not caps:
+        sys.exit("demod154: no capture in the log")
     for c, words in sorted(caps.items()):
+        name = f"capture {c[0]}" + (f" of boot {c[1]}" if c[1] else "") + (f" ({labels[c]})" if labels.get(c) else "")
+        if words is None:
+            print(f"{name}: lines missing, left out")
+            continue
         z = [complex(s10((w >> 10) & 1023), s10(w & 1023)) for w in words]
         mean = sum(z) / len(z)
         z = turn([v - mean for v in z], shift, rate)
         r = read(z, rate)
-        name = f"capture {c}" + (f" ({labels[c]})" if labels.get(c) else "")
         if r is None:
             print(f"{name}: nothing over the floor")
         elif r["sfd"] is None:

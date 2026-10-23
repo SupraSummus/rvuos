@@ -1,11 +1,12 @@
 /*
  * The BBPLL moved: which of the radio's clocks come from it, see hw/dump.md, "The clocks' source".
- * The 40 MHz crystal drives the BBPLL at 480 MHz, 40 MHz times its feedback divider and 4, OC_DIV_7_0 of 8,
+ * The 40 MHz crystal drives the BBPLL at 480 MHz, 40 MHz times its feedback divider OC_DIV_7_0 plus 4, 8 + 4,
  * and the processor, the modem's clocks and the dump engine's are fixed divisions of it.
  * The BBPLL's registers, block 0x66 of the analog I2C, are told once at the start.
  * Each second, with nothing told from its start to its end, as the console's USB is clocked from the PLL too:
  * a capture as the PLL stands, the control; then one of sets=, in turn, a register of the block written,
  * hexadecimal reg:value, the byte, or reg^mask, the bits of the mask turned over from what the register held,
+ * register 3, the feedback divider, only written, 4 to a, 320 to 560 MHz, what was seen to lock,
  * commas between, 3:7 by default, 440 MHz;
  * the PLL calibrated again as ESP-IDF's rtc_clk_bbpll_configure calibrates it, and its register 8 read,
  * the calibration's capacitor, its underflow and overflow, its end and the lock;
@@ -47,6 +48,9 @@ DRV_PROGRAM("the BBPLL moved", DRV_NEED_DUMP);
 #define I2C_BBPLL_HOST  0u
 #define BBPLL_REGS      11u /* 0 to 10, as ESP-IDF's regi2c_bbpll.h names them */
 #define BBPLL_STATUS    8u  /* OR_LOCK 7, OR_CAL_END 6, OR_CAL_OVF 5, OR_CAL_UDF 4, OR_CAL_CAP 3 to 0 */
+#define BBPLL_DIV_7_0   3u  /* OC_DIV_7_0: the PLL at 40 MHz times it and 4 */
+#define DIV_LEAST       4u  /* 320 MHz */
+#define DIV_MOST        10u /* 560 MHz */
 #define POLLS_MAX       1000000u
 #define HEX_WORDS       1024u
 #define SETS_MAX        16u
@@ -173,7 +177,8 @@ static uint32_t sets_of(struct drv *d, struct set *s)
         s[0] = (struct set){ 3, 7, 0 };
         return 1;
     }
-    for (const char *c = list; *c != '\0' && n < SETS_MAX;) {
+    const char *c = list;
+    for (; *c != '\0' && n < SETS_MAX;) {
         uint32_t reg = 0, value = 0, digits = 0;
         for (; hex_digit(*c) < 16u && digits < 2u; c++, digits++) {
             reg = reg << 4 | hex_digit(*c);
@@ -186,6 +191,10 @@ static uint32_t sets_of(struct drv *d, struct set *s)
         }
         drv_must("a set's value of one or two hex digits", digits != 0 ? ESP_OK : ESP_FAIL);
         drv_must("no set of the status register 8", reg != BBPLL_STATUS ? ESP_OK : ESP_FAIL);
+        /* The processor runs from the PLL: its feedback divider only within what was seen to lock, 320 to 560 MHz. */
+        drv_must("a feedback divider, register 3, of DIV_LEAST to DIV_MOST",
+                 reg != BBPLL_DIV_7_0 || flip || (value >= DIV_LEAST && value <= DIV_MOST) ? ESP_OK : ESP_FAIL);
+        drv_must("no flip of register 3", reg != BBPLL_DIV_7_0 || !flip ? ESP_OK : ESP_FAIL);
         s[n++] = (struct set){ (uint8_t)reg, (uint8_t)value, flip };
         if (*c != ',') {
             drv_must("sets= separated by commas alone", *c == '\0' ? ESP_OK : ESP_FAIL);
@@ -193,6 +202,7 @@ static uint32_t sets_of(struct drv *d, struct set *s)
         }
         c++;
     }
+    drv_must("sets= of at most SETS_MAX", *c == '\0' ? ESP_OK : ESP_FAIL);
     return n;
 }
 
@@ -208,6 +218,7 @@ void drv_run(struct drv *d, struct self *own)
     drv_must("capwords= of 2 HEX_WORDS to 16383", capwords >= 2u * HEX_WORDS && capwords <= 16383u ? ESP_OK : ESP_FAIL);
     mac_up(d->mac);
     up = 1;
+    dump_known();
     drv_must_mac("the channel", mac_channel(channel));
     d->channel = channel;
     child_report(&d->c, DRV_LISTENING);

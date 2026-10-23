@@ -57,8 +57,9 @@ static void tell_block(const char *when)
 }
 
 /*
- * The pattern: a tone a sixteenth of the sample rate above the carrier, an amplitude of 64,
- * packed as the capture's words are, I in bits 10 to 19 and Q in 0 to 9, from a table of one period.
+ * The pattern: a tone a sixteenth of the sample rate from the carrier, an amplitude of 64, from a table of one period,
+ * its cosine in bits 10 to 19 and its sine in 0 to 9, as the capture's words hold I and Q;
+ * the player takes I from bits 0 to 9, hw/dump.md "A player", so played it lies below the carrier.
  */
 static const int16_t cosine16[16] = { 64, 59, 45, 24, 0, -24, -45, -59, -64, -59, -45, -24, 0, 24, 45, 59 };
 
@@ -155,6 +156,7 @@ void drv_run(struct drv *d, struct self *own)
         }
     }
     mac_up(d->mac);
+    dump_known();
     up = 1;
     drv_must_mac("the channel", mac_channel(channel));
     d->channel = channel;

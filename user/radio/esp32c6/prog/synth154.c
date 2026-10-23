@@ -67,10 +67,10 @@ DRV_PROGRAM("802.15.4 frames from the player", DRV_NEED_DUMP);
 #define FECTRL_TXRX_OFF (MODEM_BASE + 0x910u)
 #define POLLS_MAX    1000000u
 #define SEND_MAX_S   60u
-#define GAP_MS_MAX   1000u
+#define GAP_MS_MAX   500u /* within the root task's second, a frame's telling beside it */
 #define AMP_MAX      511
 #define OFF_MAX_KHZ  4000
-#define GAP_MAX      4000
+#define GAP_MAX      1000 /* gaps= of 0 to 8 came whole, and +-24 none; at most this keeps the upper half's words in the bank */
 #define GAP_DEFAULT  4 /* the second play starts some 2 samples late, hw/dump.md "A frame made up" */
 #define SETTINGS_MAX 16u
 #define SAMPLE_HZ    40000000
@@ -284,7 +284,8 @@ static uint32_t list_of(struct drv *d, const char *key, int32_t *out)
     char list[128];
     list[0] = '\0';
     config_value(d->conf, d->conf_len, key, list, sizeof(list));
-    for (const char *c = list; *c != '\0' && n < SETTINGS_MAX;) {
+    const char *c = list;
+    for (; *c != '\0' && n < SETTINGS_MAX;) {
         int32_t sign = *c == '-' ? -1 : 1, v = 0;
         uint32_t digits = 0;
         c += *c == '-';
@@ -299,6 +300,7 @@ static uint32_t list_of(struct drv *d, const char *key, int32_t *out)
         }
         c++;
     }
+    drv_must("a list of at most SETTINGS_MAX numbers", *c == '\0' ? ESP_OK : ESP_FAIL);
     return n;
 }
 
@@ -404,10 +406,13 @@ void drv_run(struct drv *d, struct self *own)
     drv_must("a send of 1 to SEND_MAX_S", send >= 1 && send <= SEND_MAX_S ? ESP_OK : ESP_FAIL);
     drv_must("a gap_ms of 1 to GAP_MS_MAX", gap_ms >= 1 && gap_ms <= GAP_MS_MAX ? ESP_OK : ESP_FAIL);
     _Static_assert(FRAME_MAX * 64u * SAMPLES_A_CHIP + SAMPLES_A_CHIP <= 2u * PLAY_COUNT, "a frame within two plays");
+    _Static_assert(UPPER_WORD + FRAME_MAX * 64u * SAMPLES_A_CHIP + SAMPLES_A_CHIP - PLAY_COUNT + GAP_MAX <= DUMP_BANK_SIZE / 4u,
+                   "the upper half's words within the bank, gaps= at its least");
     /* A player left round and round before the last reset plays on through it, see hw/dump.md. */
     REG(PLAY) = 0;
     mac_up(d->mac);
     up = 1;
+    dump_known();
     drv_must_mac("the channel", mac_channel(channel));
     d->channel = channel;
     child_report(&d->c, DRV_LISTENING);
@@ -449,9 +454,11 @@ void drv_run(struct drv *d, struct self *own)
             drv_say("synth154: frame %u, setting %u: the receiver back %u us after its end, a capture of %u words in %u us\n",
                     plays - 1u, k, back, hear_words, took);
             tell(hear_words, hear_hex);
+            child_answer(&d->c);
         }
         child_answer(&d->c);
         osi_delay_ms(gap_ms);
+        child_answer(&d->c);
     }
     if (looped) {
         drv_phy_loopback(0, 0);

@@ -579,6 +579,15 @@ static uint32_t swept_sum[SWEEP_MHZ_MAX], swept_n[SWEEP_MHZ_MAX], swept_least[SW
 static uint32_t swept_rounds[SWEEP_MHZ_MAX], swept_peaks[SWEEP_MHZ_MAX];
 
 /*
+ * A sum's mean in 1/WATCH_SCALE dB, divided first, as a MHz of a narrow sweep takes millions of samples:
+ * at most 20 million of 127 each fit the sum, but not the sum times WATCH_SCALE, and the chip divides no 64 bits.
+ */
+static uint32_t scaled_mean(uint32_t sum, uint32_t n)
+{
+    return sum / n * WATCH_SCALE + sum % n * WATCH_SCALE / n;
+}
+
+/*
  * The sweep: the radio receiving on each MHz from from_mhz to to_mhz in turn, SWEEP_DWELL_US a step, round and round
  * for sweep_s seconds; each MHz's mean of every sample, its strongest sample, and the mean of each round's strongest,
  * told once it ends, in sixteenths of a dB below a milliwatt as the watch's,
@@ -623,7 +632,8 @@ static void sweep_power(const struct config *c)
         c->to_mhz, rounds, SWEEP_DWELL_US, alarm_now(a) - start, missed, WATCH_SCALE);
     for (uint32_t k = 0; k < width; k++) {
         say(&cout, "swept: %u MHz mean %u strongest %u peaks %u\n", c->from_mhz + k,
-            swept_n[k] ? swept_sum[k] * WATCH_SCALE / swept_n[k] : WATCH_NONE, swept_least[k] * WATCH_SCALE,
+            swept_n[k] ? scaled_mean(swept_sum[k], swept_n[k]) : WATCH_NONE,
+            swept_n[k] ? swept_least[k] * WATCH_SCALE : WATCH_NONE,
             swept_rounds[k] ? swept_peaks[k] * WATCH_SCALE / swept_rounds[k] : WATCH_NONE);
         if (k % WATCH_LINE == WATCH_LINE - 1u) {
             sleep_us(WATCH_PAUSE_US);

@@ -157,9 +157,18 @@ uint32_t drv_phy_rx_filter(uint32_t code);
  * 0x20 the calibration's first; and the transmit tone generator, step its frequency and atten its attenuation,
  * the generator's level being 256 less it, the calibration's 0x80 and 0x30. Neither is meant for a frame:
  * the radio is off again before the MAC sends.
+ * The tone is the caller's to stop before the loopback goes off, which leaves it on the air otherwise;
+ * and once the loopback is off the receiver stays deaf, tens of milliseconds at random,
+ * until the channel is tuned again, mac_channel, as prog/synth154.c does, see hw/phy.md, "The loopback".
  */
 void drv_phy_loopback(uint32_t on, uint32_t lb);
 void drv_phy_tone(uint32_t on, uint32_t step, uint32_t atten);
+/*
+ * Whether the tone of a step lies within the 2.4 GHz band on a Wi-Fi channel, half a MHz in from its edges,
+ * a step being 39.0625 kHz above the carrier, or below it if the ten bits are two's complement, which is not known:
+ * the loopback lets the tone out, so a program checks each step it may send.
+ */
+int drv_phy_tone_fits(uint32_t channel, uint32_t step);
 
 /* hostap.c: hostap's lines at its debug level too, from here on. */
 void drv_wpa_debug(void);

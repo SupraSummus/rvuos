@@ -201,48 +201,61 @@ Open questions of the sampler, beside `TODO.md`'s:
   nor whether `0x600A210C`'s fields other than bit 7 matter.
 - The line 1 MHz from the middle on the BLE side.
 
+Open questions of the player and the clocks:
+
+- Why `DIV_CPU` cleared leaves the carrier 40 dB weaker while the processor runs on.
+- What `DIV_DAC` set does: the player's own samples, I alone and then Q alone, would tell a skew of the two from a slower clock.
+- Whether `DIV_ADC` 0 with the engine at a matching rate, the mux cleared and its divider, gives each ADC sample once.
+- What the analog filter leaves of the player's copies at 16 MS/s, 14 and 18 MHz from its line, which the nRF52840's sweep could measure at -18 MHz.
+- What the BLE side captures with the mux cleared, its clock then 32 MHz.
+- Why three runs of `prog/synth154.c` once heard nothing until a run of the 802.15.4 MAC, what state outlived the resets.
+
 ## The clocks' source
 
 ESP-IDF's headers say (`clk_tree_defs.h`, `clk_tree_ll.h`): the 40 MHz crystal drives the BBPLL, which ESP-IDF calls the SPLL,
-at 480 MHz, 40 MHz times its feedback divider `OC_DIV_7_0`, 8, and 4, written over the analog I2C, block 0x66;
+at 480 MHz, 40 MHz times its feedback divider `OC_DIV_7_0` plus 4, 8 + 4, written over the analog I2C, block 0x66;
 80, 160 and 240 MHz are fixed divisions of it, the processor's 160 among them, and ESP-IDF asserts no other frequency on the C6.
 MODEM_SYSCON's `CLK_CONF1` has enables of the modem's clocks of 22 to 480 MHz, and no field that divides one.
 
-`prog/bbpll.c` writes the divider 7, 440 MHz, in every other second, as ESP-IDF's `rtc_clk_bbpll_configure` writes it,
+`prog/bbpll.c` writes the divider 7, 440 MHz, as ESP-IDF's `rtc_clk_bbpll_configure` writes it,
 the calibration held and its `CAL_DONE` awaited, the processor still on the PLL, as a program reaches no PCR,
 and 480 MHz again within half a millisecond, before anything is told, as the console's USB runs on the PLL too:
 38 times in a run, the chip and the console went on as before.
 Meanwhile it captured the nRF52840's unmodulated carrier on 2405 MHz, `carrier=` of `user/thread/root.c` at -20 dBm,
-the C6 on Wi-Fi's channel 1, 2412 MHz (measured, `div=7`, the even seconds at 480 the run's control):
+the C6 on Wi-Fi's channel 1, 2412 MHz (measured with the program of then, `div=7`, every other second, the even ones at 480 the control;
+today `sets=3:7`, its default, each second with its own control):
 
 - The carrier's line stood at -0.088294 of the capture's rate at 480 MHz, over 9 seconds within 0.000008,
   and at -0.096317 at 440, over 8 within 0.000007: 1.09087 times as far, where 480 / 440 is 1.09091.
   So the dump engine's clock, and the ADC's samples it takes, come from the BBPLL:
   at 440 MHz they come at 73.33 MS/s, and the line lies at -7.0633 MHz, against -7.0635 at 480.
-  So the receiver's local oscillator did not move: the RFPLL takes the crystal, not the BBPLL.
+  So the receiver's local oscillator did not move: the RFPLL takes the crystal, not the BBPLL (inferred from that).
 - A capture of 16383 words took 209 to 210 us in both, timed by the kernel's clock,
   which counts the processor's cycles, `kernel/board/esp32c6/timer.c`, and so moved with the PLL as the engine did.
-- The transmit tone generator's tone, looped back, stood at 0.0625 of the rate in both (`tonemoved=1`):
+- The transmit tone generator's tone, looped back, stood at 0.0625 of the rate in both (`tonemoved=1` of the program of then):
   the generator, the DAC and the engine share the BBPLL's clock, and at 440 MHz the tone lay at 4.58 MHz, not 5.00.
 - The carrier's line in the capture's first 1024 words and in its last, 16383 words on, stood within 0.00006 of the rate
   at 440 MHz as at 480: the PLL had settled once `CAL_DONE` was seen and the 10 us after.
 
-So the radio's baseband, ADC, DAC, modems and dump engine, runs at a fraction of the BBPLL, and its RF at the crystal's.
+So the radio's baseband, its ADC, DAC, tone generator and dump engine, runs at a fraction of the BBPLL, and its RF at the crystal's;
+the modems' clocks were not measured, and that they follow is inferred from ESP-IDF's tree.
 
 The BBPLL's registers read 18 25 50 08 6b 80 73 00 c2 96 03 from 0 to 10 at 480 MHz, as `prog/bbpll.c` tells them:
 register 4, 0x6b, is `DIV_ADC` 2, `DIV_DAC` 0, `DIV_CPU` 1, `MODE_HF` 1, `ENB_VCON` 1, `RSTB_DIV_ADC` 1;
 register 8, 0xc2, the lock, the calibration's end and its capacitor 2.
 `prog/bbpll.c`'s `sets=` writes one in turn, each second against its own control at 480 MHz, the nRF52840's carrier in both
-(measured; the captures attributed by their number, three a second, as the kernel's log may drop a second's line):
+(measured; the captures attributed by their number, three a second, four with `tonemoved=1`,
+as the kernel's log may drop a second's line):
 
 - The feedback divider from 4 to 10 put the PLL at 320.0, 360.0, 400.0, 440.1, 520.1 and 559.9 MHz,
   the carrier's line moving by 480 over each within 0.0003, the local oscillator unmoved, the chip running on;
   the calibration chose the VCO's capacitor 6, 5, 3, 2, 1 and 0 for 320 to 560, and at 480 2 or 1 by where it came from,
-  and flagged no underflow or overflow: the bands overlap, and 320 to 560 MHz is all within its reach.
+  and flagged no underflow or overflow: 320 to 560 MHz is all within its reach, and the bands overlap (inferred).
 - `DIV_ADC` 3 changed nothing seen; 0 and 1 left the carrier where it was and added copies of it a quarter and a half
-  of the rate away, some 15 to 20 dB below it: the ADC's samples held four of the engine's 80 MHz words each, the ADC at 20 MHz,
-  though no two words were equal, so something filters between. `MODE_HF` cleared did the same.
-  So the ADC's clock is the BBPLL's own output, `DIV_ADC` its divider, apart from the digital clocks and the processor's.
+  of the rate away, some 15 to 20 dB below it, as if the ADC sampled at 20 MHz and each sample stood for four words (inferred);
+  no two words were equal, so something filters between.
+  `MODE_HF` cleared did the same.
+  So the ADC's clock is the BBPLL's own output, `DIV_ADC` its divider, apart from the digital clocks and the processor's (inferred).
 - `RSTB_DIV_ADC` cleared, the ADC's divider held in reset, left no line at all; `DIV_CPU` cleared left the carrier 40 dB weaker.
 - `TSCHGP` turned over cleared the lock bit, and the carrier's line stood where it was at the capture's start
   and 0.019 of the rate away at its end, 16383 words on: the VCO drifting free.
@@ -250,7 +263,9 @@ register 8, 0xc2, the lock, the calibration's end and its capacitor 2.
 - `DIV_DAC` set, the tone looped back on channel 7 (`tonemoved=1`, `sets=4^10,3:8`, the second a control):
   the tone at +5 MHz 3 dB weaker, its second harmonic at +10 MHz 53 dB over the median against 21 in the control,
   its mirror at -5 MHz 44 against 20, -10 MHz 43, and lines at +1.41, +8.59 and -6.41 MHz, 1.41 MHz from those:
-  not a DAC at half the rate alone, whose copies 35 MHz away the receiver's filter would hide, but one whose I and Q are skewed.
+  not what a DAC at half the rate alone would show, as the receiver's filter would hide its copies 35 MHz away;
+  one whose I and Q are skewed is a hypothesis.
+  Channel 7 was taken so that such copies, which the loopback lets out, would stay within the band.
 
 Moving the BBPLL scales every rate of the baseband at once and leaves the carrier where it is;
 the tone is let out only once a run without it has shown that, as a carrier that moved with it would leave the band.
@@ -282,15 +297,15 @@ Eight bytes past the C6's capture control, `0x600A9004`, is `0x600A900C`, and it
 the transmitter powered down, and tells what moves.
 Read on channel 6 (measured, `prog/dacprobe.c`, no keys): `0x00` 0, `0x04` 0, `0x08` 0x78000 (source 15), `0x0C` 0, `0x10` 0,
 `0x14` 0xC2040 (lanes 0 to 3), `0x18` 0, `0x1C` 0, `0x20` the date word 0x02202221, and `0x24` to `0x3C` 0.
-Written with 4096 and bit 31 (measured, `write=1`): `0x0C` sets its bit 18 a while later, as `dactrig` waits for;
-`0x10` keeps what is written and nothing moves; `0x00`, `0x18` and `0x1C` read 0 again.
+`write=1`, which writes each of them with 4096 and bit 31, has not been run;
+`prog/player.c` found what `0x0C` and `0x10` do, below.
 
 `prog/player.c` drives it (measured on channel 6):
 
 | Word | Bits | What |
 |---|---|---|
 | `0x600A900C` | 0 to 13 | the words the player plays, from the bank's first |
-| | 15 | set, a word every 12.5 ns, 80 MS/s; clear, every 25 ns, 40 MS/s |
+| | 15 | set, a word each clock of the block's, 80 or, the mux cleared, 32 MS/s; clear, every other, 40 or 16 MS/s |
 | | 16 | nothing seen |
 | | 18 | set once the words are played |
 | | 19 | set, the player plays round and round and never sets bit 18 |
@@ -307,10 +322,13 @@ Written with 4096 and bit 31 (measured, `write=1`): `0x0C` sets its bit 18 a whi
   the same 16383 words took 1028 us with bit 15 clear and 516 us with it set, and a capture of as many 517 us
   (`prog/player.c` with `muxes=1`, the mux cleared every other second, 414 and 209 us in the seconds between):
   the block's 80 MHz becomes 32 MHz, and the player plays at 80, 40, 32 or 16 MS/s, the poll's few microseconds aside.
-  The capture's rate bits, 15 and 16 of `0x600A9004`, written while the player plays, change nothing of its 414 us.
-  No other bit slows it, so 16 MS/s is its least (measured, `timebits=1`, 4096 words, 107 to 110 us):
+  The capture's rate bits, 15 and 16 of `0x600A9004`, written while the player plays, changed nothing of its 414 us
+  (measured with a key since removed, b838fc85's run).
+  None of the bits tried slows it, so with the BBPLL at 480 MHz 16 MS/s is its least (measured, `timebits=1`, 4096 words, 107 to 110 us);
+  the BBPLL itself, "The clocks' source", scales it, to some 10.7 MS/s at 320 MHz (inferred):
   none of `CLK_CONF`'s bits 0 to 20, which ESP-IDF leaves unnamed, of the page word's 0 to 27,
   or of the player's word's 16, 17, 20 to 27 and 30, each set alone, moved the play's time by a twentieth,
+  those already set, as `CLK_CONF`'s 31 is, not tried cleared,
   while the mux cleared in the same run, the control, made it 260 us.
 - What the player sends is read best through the modem's IQ estimate, `dc_iq_est_new` in `phy.c`,
   which the receive DC calibration takes: the receiver's mean I and Q over a count, from no word of the bank's.
@@ -331,7 +349,7 @@ Written with 4096 and bit 31 (measured, `write=1`): `0x0C` sets its bit 18 a whi
   the other way round from a capture's, as the nRF52840's sweep of the power a MHz at a time showed,
   `sweep=` of `user/thread/root.c`, the C6 on channel 6 looped back, `loop=1`, playing throughout, `rhythm=40 half=0`:
   a tone of four words' period with the cosine in bits 10 to 19 stood at 2427 and 2428 MHz, 10 MHz below the middle,
-  3.5 and 4.4 dB over a run with nothing played; with the cosine in bits 0 to 9, `swap=1`, at 2447 and 2448 MHz, 10 MHz above;
+  3.2 and 4.2 dB over a run with nothing played; with the cosine in bits 0 to 9, `swap=1`, at 2447 and 2448 MHz, 10 MHz above;
   with bit 15, at 2417 and 2418, 20 MHz below; and a constant word at 2437 and 2438, the carrier.
   That the samples are ten bits each is a hypothesis.
 - The transmit tone generator, `drv_phy_tone`, takes the DAC from the player while it is on: nothing of the player's is heard then.
@@ -362,7 +380,7 @@ which is why the settings go in turn within one run.
 At 16 MS/s, the mux cleared, 8 samples a chip, the frame is 6152 samples, and it comes as often as at 40 MS/s
 (measured, `slows=0,1,1,0,1` with `amps=511,511,0,300,300` in one run, some 168 frames of each played in the 15 s):
 168 and 168 at 511, 12 and 3 at 300, in a second run 16 and 13, and none of the frame of nothing.
-So a ping of 22 bytes, 14344 samples, goes as one play, and a play of the whole bank's 16383 samples lasts a millisecond.
+So a ping of 22 bytes, 11272 samples, goes as one play, and a play of the whole bank's 16383 samples lasts a millisecond.
 
 ### Frames longer than a play, and the answer heard
 
@@ -372,7 +390,7 @@ the first 16383 samples from the bank's lower half, and once its bit 18 is seen,
 some samples of it left out for the while the second play takes to start.
 Leaving out 0 to 8 samples, every frame played came whole to the nRF52840's `listen=`, 71 of 71 each,
 and fewer the further from that: 66 at -12, 27 at -16, 0 at -24; 68 at +16, 6 at +24 (`gaps=-24,...,24` in one run).
-So the second play starts some 2 samples, 50 ns, after the first ends.
+So the second play starts some 2 samples, 50 ns, after the first ends (inferred from the two dips below; `GAP_DEFAULT`, 4, is the plateau's middle).
 Between, 51 at -8 and 33 at +12 came whole: 10 samples from the best, half the 2 MHz turn's period,
 where the carrier's phase jumps by half a turn at the seam.
 The nRF52840's exchange of `user/thread/root.c` acknowledged them as its own: in one run it sent 166 acknowledgements,
@@ -384,7 +402,7 @@ holds a burst 17 dB over the floor, 2 MHz wide at -2 MHz, from some 95 to 110 us
 `user/radio/esp32c6/tools/demod154.py` reads it: an acknowledgement, `02 00 00 b8 b5`, its FCS right,
 the nRF52840's frequency 65 kHz below the C6's, in every capture taken while the nRF52840 ran, 13 of 13.
 With the settings in turn in one run, pings with sequence numbers 0 and 1 to the nRF52840 and a third to 0x1234 (`dsts=21124,21124,4660`):
-acknowledgements with sequence number 0 after the first, 6, and 1 after the second, 2, their FCS right, and none after the third,
+acknowledgements with sequence number 0 after the first, 7, and 1 after the second, 4, their FCS right, and none after the third,
 whose pings the nRF52840 counted among its "others".
 
 The frequency and the mirror, each in one run of `prog/synth154.c`'s short frames at amplitude 511, the nRF52840's `listen=20`:

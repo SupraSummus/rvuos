@@ -74,6 +74,13 @@ void dump_arm(const struct dump_conf *c, int trigger);
 uint32_t dump_disarm(const struct dump_conf *c);
 
 /*
+ * The block as a program that drives its words itself may take it: the player stopped, to play from the bank's first word,
+ * the block's clock 80 MHz, MAC_DUMP_ALLOC cleared, and the capture's source the receiver's own, 15, lanes 0 to 3,
+ * the Wi-Fi side; the modem keeps each through a reset, so whatever an earlier run left, a halted one's too.
+ */
+void dump_known(void);
+
+/*
  * The bank handed to the modem's engines, which the CPU then loses, their clock on, and SRAM_USAGE as it was;
  * dump_bank_take hands it back with that word. For an engine of the block's other than the capture's.
  */

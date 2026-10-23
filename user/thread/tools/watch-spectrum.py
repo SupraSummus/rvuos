@@ -33,7 +33,8 @@ def read(path):
             head = dict(channel=int(m[1]), mhz=int(m[2]), blocks=int(m[3]), block_us=int(m[4]), took_us=int(m[5]),
                         kind=m[6], scale=int(m[7]))
             continue
-        m = re.search(r"watchhex: (\d+)((?: 0x[0-9a-f]+)+)", line)
+        # A line the log's ring cut short is left out whole, as a value cut short would read as another.
+        m = re.search(r"watchhex: (\d+)((?: 0x[0-9a-f]{8})+)\s*$", line)
         if m:
             first = int(m[1])
             for k, v in enumerate(m[2].split()):
