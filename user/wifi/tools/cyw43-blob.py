@@ -10,7 +10,7 @@ With --bt the Bluetooth core's patch follows the NVRAM, for user/wifi/bt.c (WIFI
 without it those two words are zero.
 tools/rp2350-run.py --ram places the blob at the start of free RAM, where the root task looks for it.
 
-Usage: tools/cyw43-blob.py --cache DIR --out FILE [--bt]
+Usage: user/wifi/tools/cyw43-blob.py --cache DIR --out FILE [--bt]
 """
 
 import argparse

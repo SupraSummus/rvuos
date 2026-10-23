@@ -273,7 +273,7 @@ int bt_run(struct bt_io *io)
     memcpy(&off, io->blob(io->blob_context, offsetof(struct blob_header, bt_offset), &left), 4);
     memcpy(&size, io->blob(io->blob_context, offsetof(struct blob_header, bt_size), &left), 4);
     if (size == 0u) {
-        say(io->out, "bt: the blob carries no Bluetooth patch; tools/cyw43-blob.py --bt packs one\n");
+        say(io->out, "bt: the blob carries no Bluetooth patch; user/wifi/tools/cyw43-blob.py --bt packs one\n");
         return -1;
     }
     if (io->channel > 39u) {

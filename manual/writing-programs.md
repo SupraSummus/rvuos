@@ -374,7 +374,7 @@ so a passphrase lies in no image and in no file git tracks; `local/`, which git 
 A build of its own, `make BOARD=rp2350 WIFI_BRIDGE=1`, on the Hazard3 alone,
 is a bridge instead, whatever the mode:
 the host reads and writes the chip's backplane through the console, a line at a time,
-which `user/wifi/bridge.h` describes and `tools/cyw43bridge.py` speaks.
+which `user/wifi/bridge.h` describes and `user/wifi/tools/cyw43bridge.py` speaks.
 A station joins by WPA3's SAE where the access point offers it and by WPA2's passphrase otherwise,
 and leaves the network once its run is over;
 an access point offers both, and `sae=0` has either keep to WPA2.

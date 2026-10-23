@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Boot the CYW43439's Bluetooth core from its reset off the board, and list every register access it makes.
 
-Usage: tools/cyw43-rehost.py [--log FILE] [--max N] [--reg ADDR=VALUE]... [--auto] [--until ADDR] [--seconds S]
+Usage: user/wifi/tools/cyw43-rehost.py [--log FILE] [--max N] [--reg ADDR=VALUE]... [--auto] [--until ADDR] [--seconds S]
                              [--board [--read-rom] [--clear ADDR=BITS]... [--local ADDR]... [--w1c ADDR]...
                               [--kick ADDR=VALUE]... [--poke ADDR=VALUE]... [--hci OPCODE[:PARAMETERS]]...
                               [--record FILE] [--idle S]]
@@ -15,7 +15,7 @@ The vendor patch's records, out of build/cyw43/43439A0_btfw.bin, go in as the ho
 when the ROM first reaches its idle loop, IDLE_HOOK, as on the chip, where the ROM is up before the host writes them;
 the ROM's own start clears the RAM.
 The patch then has the remapper put its words over the ROM's, REMAP, and the run swaps them in as it does.
-tools/cyw43-blob.py --bt fetches the patch; the dump was read off the board through the backplane's window.
+user/wifi/tools/cyw43-blob.py --bt fetches the patch; the dump was read off the board through the backplane's window.
 The files stay in build/, out of the tree.
 
 Everything from 0x220000 up is the register space, the modem's windows and the Cortex-M's own:
@@ -28,14 +28,14 @@ with --auto it is answered with each of TRIES in turn, every POLL reads, and the
 so a loop waiting for a bit goes on, though an answer it takes is a guess, not the chip's.
 
 With --board the registers are the chip's own, on a Pico 2 W in its BOOTSEL mode, through the Wi-Fi system's bridge,
-user/wifi/bridge.h and tools/cyw43bridge.py: each access below BOARD_TOP is the same access to the backplane's window
+user/wifi/bridge.h and user/wifi/tools/cyw43bridge.py: each access below BOARD_TOP is the same access to the backplane's window
 onto the core, a word at a time, so a poll waits on what the chip says and nothing is guessed.
 A read comes after one of SPARE, a word the run knows, so that a slow register's answer of the read before is known
-and the read made again; see read() in tools/cyw43park.py.
+and the read made again; see read() in user/wifi/tools/cyw43park.py.
 The core's own processor must not run meanwhile, so it is parked first:
 the vendor patch goes in as the host writes it, but its code a slide of `cpsid i` into SNIFFER,
 so the ROM checks the patch's signature, installs it and, at its first call into the patch, sleeps there for good,
-its interrupts masked; see park() in tools/cyw43park.py.
+its interrupts masked; see park() in user/wifi/tools/cyw43park.py.
 Parked so, the processor looks about every millisecond, on its own SysTick,
 and SNIFFER writes the lines it sees pending into a mailbox in the core's RAM, SNIFFED;
 between two looks it sleeps in `wfi` while the emulated core waits in one, ASLEEP, and spins otherwise,
@@ -47,7 +47,7 @@ so lines pend in rounds IRQ_GAP accesses apart, as a slow processor misses ticks
 and a line taken waits out its round until every other raised has been taken once,
 so that one the chip raises faster than the emulation can answer keeps none of the others out.
 What it would have answered meanwhile waits in the device's status, and the threads get their turn.
-Writes go on the line of the next read, queued, and cost no wait of their own; see tools/cyw43bridge.py.
+Writes go on the line of the next read, queued, and cost no wait of their own; see user/wifi/tools/cyw43bridge.py.
 The run then boots the core from its reset in the emulator, again, over the chip the ROM has set up once.
 Only the Cortex-M's own registers, at 0xe000e000, stay the emulator's.
 

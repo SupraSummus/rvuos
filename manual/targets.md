@@ -456,7 +456,7 @@ make BOARD=rp2350 wifi                         # the Wi-Fi system of user/wifi/,
 ```
 
 `make BOARD=rp2350 wifi` also builds `build/cyw43/blob.bin`:
-`tools/cyw43-blob.py` fetches the CYW43439's firmware, CLM and NVRAM from one commit of embassy,
+`user/wifi/tools/cyw43-blob.py` fetches the CYW43439's firmware, CLM and NVRAM from one commit of embassy,
 under Infineon's Permissive Binary License, checks each against its SHA-256 and packs them,
 and `tools/rp2350-run.py --ram` places the blob at the start of free RAM beside the image; nothing is written to flash.
 `tools/wifi-run.py` runs the loader, prints the system's log as it comes over the network,

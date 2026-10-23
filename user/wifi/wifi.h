@@ -36,7 +36,7 @@
 #include "sock.h"
 
 /*
- * The firmware blob, as tools/cyw43-blob.py lays it out, which the loader places at the start of free RAM:
+ * The firmware blob, as user/wifi/tools/cyw43-blob.py lays it out, which the loader places at the start of free RAM:
  * the header, then the firmware, the CLM and the NVRAM, each at a multiple of four,
  * and with --bt the Bluetooth core's patch after them, which only WIFI_BT's bt.c reads.
  */

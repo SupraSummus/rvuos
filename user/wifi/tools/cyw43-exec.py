@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Our executor on the CYW43439's Bluetooth core, parked: user/wifi/btcore/bt-exec.c, over the bridge.
 
-Usage: tools/cyw43-exec.py [--setup RECORD] [--times N] PROGRAM
+Usage: user/wifi/tools/cyw43-exec.py [--setup RECORD] [--times N] PROGRAM
 
-The core is parked as tools/cyw43park.py parks it, but its slide leads to the executor, which runs no vendor code
+The core is parked as user/wifi/tools/cyw43park.py parks it, but its slide leads to the executor, which runs no vendor code
 and waits for a list of operations in its RAM; see user/wifi/BT.md.
---setup writes a record's writes over the bridge first, a list of lines "w ADDR 4 VALUE" as tools/cyw43-replay.py takes,
+--setup writes a record's writes over the bridge first, a list of lines "w ADDR 4 VALUE" as user/wifi/tools/cyw43-replay.py takes,
 the transmitter's nine words of user/wifi/btcore/bt-tx.rec for one.
 PROGRAM is the list, an operation a line, numbers in hex but for microseconds and counts:
   write ADDR VALUE    a word written
@@ -31,7 +31,7 @@ import sys
 import time
 
 TOOLS = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(TOOLS)
+ROOT = os.path.abspath(os.path.join(TOOLS, "../../.."))
 sys.path.insert(0, TOOLS)
 from cyw43bridge import Bridge  # noqa: E402
 from cyw43park import BOARD_WINDOW, PATCH_CODE, SNIFFER_AT, park as park_core, read  # noqa: E402

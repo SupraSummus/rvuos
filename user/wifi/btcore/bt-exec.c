@@ -1,7 +1,7 @@
 /*
- * A fixed executor for the CYW43439's Bluetooth core, parked: see tools/cyw43-exec.py and BT.md.
+ * A fixed executor for the CYW43439's Bluetooth core, parked: see user/wifi/tools/cyw43-exec.py and BT.md.
  *
- * The core's processor, parked as tools/cyw43-rehost.py parks it, slides into this code instead of the sniffer,
+ * The core's processor, parked as user/wifi/tools/cyw43-rehost.py parks it, slides into this code instead of the sniffer,
  * its interrupts masked, and runs nothing of the vendor's.
  * It runs a list of operations the host leaves in the core's RAM, each time the host writes a new number to GO,
  * and writes that number to DONE once the list ends; an experiment is data, and this code stays the same.

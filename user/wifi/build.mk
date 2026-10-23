@@ -1,5 +1,5 @@
 # The Wi-Fi system on a Pico 2 W, see user/wifi/wifi.h,
-# and the CYW43439's firmware beside it, which tools/cyw43-blob.py fetches and packs, never into the tree.
+# and the CYW43439's firmware beside it, which user/wifi/tools/cyw43-blob.py fetches and packs, never into the tree.
 # The loader places the blob at the start of free RAM, FREE_RAM_BASE in kernel/board/rp2350/board.h.
 # tools/wifi-run.py follows the system's log over the network while it runs, and checks it from the host.
 # board_hex reads an address a board's header defines, so that what a loader writes goes where the board has it.
@@ -15,8 +15,8 @@ WIFI_BLOB_AT   := $(call board_hex,FREE_RAM_BASE,kernel/board/rp2350/board.h)
 WIFI_CONFIG    ?=
 WIFI_INPUT_AT  := $(call board_hex,INPUT_BASE,kernel/board/rp2350/board.h)
 
-$(WIFI_BLOB): tools/cyw43-blob.py
-	tools/cyw43-blob.py --cache build/cyw43 --out $@$(if $(WIFI_BT_BLOB), --bt)
+$(WIFI_BLOB): user/wifi/tools/cyw43-blob.py
+	user/wifi/tools/cyw43-blob.py --cache build/cyw43 --out $@$(if $(WIFI_BT_BLOB), --bt)
 
 # Our own code for the Bluetooth core, built for it (a Cortex-M3) at the addresses it sees, which btcore/bt-map.h names;
 # btcore/bt-stub.S, btcore/bt-stub.ld. The bytes go into the image through bt-stub-embed.S, which bt.c uploads.
@@ -34,7 +34,7 @@ build/cyw43/bt-measure.bin: $(BT_STUB_ELF)
 	$(OBJCOPY) -O binary --only-section=.measure $< $@
 build/cyw43/bt-takeover.bin: $(BT_STUB_ELF)
 	$(OBJCOPY) -O binary --only-section=.takeover $< $@
-# The executor of tools/cyw43-exec.py, for the core parked; btcore/bt-exec.c, btcore/bt-exec.ld.
+# The executor of user/wifi/tools/cyw43-exec.py, for the core parked; btcore/bt-exec.c, btcore/bt-exec.ld.
 build/cyw43/bt-exec.ld: user/wifi/btcore/bt-exec.ld user/wifi/btcore/bt-map.h
 	@mkdir -p $(dir $@)
 	clang -E -P -Iuser/wifi/btcore -x c $< -o $@

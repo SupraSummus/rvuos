@@ -11,7 +11,7 @@ Without `WIFI_BT` the Wi-Fi system is as it would be without this file, and noth
 
 `WIFI_BT=1` builds in a directory of its own and defines `WIFI_BT` for the sources,
 and its blob, `build/cyw43/blob-bt.bin`, carries the core's patch after the NVRAM:
-`tools/cyw43-blob.py --bt` fetches it beside the firmware, from the same commit of embassy, and the header says where it lies.
+`user/wifi/tools/cyw43-blob.py --bt` fetches it beside the firmware, from the same commit of embassy, and the header says where it lies.
 `bt.c` brings the core up with our code on it, checks that the code answers and what the core's timer and a write into the modem cost,
 and runs the LE transmitter test, 37 bytes of PRBS9, on one channel, twice:
 a fifth of a second for the self-check, which needs our code's point to come round,
@@ -25,7 +25,7 @@ once the scheduler without a tick gave the host its millisecond, it began inside
 A poke made once, at the settled test's one pass, moves the carrier as one made on every pass did.
 
 The tools that take the core off the board, below, speak to the chip through the Wi-Fi system's bridge,
-a build of its own on the Hazard3, which `tools/cyw43bridge.py` makes and boots:
+a build of its own on the Hazard3, which `user/wifi/tools/cyw43bridge.py` makes and boots:
 
     make BOARD=rp2350 WIFI_BRIDGE=1
 
@@ -145,7 +145,7 @@ Dug out of the ROM and a dump of the core's memory off the board, with a disasse
 
 ## The core off the board
 
-`tools/cyw43-rehost.py` boots the core from its reset in an emulator,
+`user/wifi/tools/cyw43-rehost.py` boots the core from its reset in an emulator,
 the ROM out of the dump and the vendor patch written over it as the host writes it,
 and lists every register access the firmware makes, with the instruction that made it.
 It takes the Cortex-M's exceptions itself, which the emulator leaves to its user,
@@ -227,7 +227,7 @@ apart from an interrupt's handler that may come between them.
 `--record FILE` writes every access the emulated firmware makes of the chip, a line each, with the instruction that made it,
 and each HCI command and event where it falls among them.
 
-`tools/cyw43-replay.py` plays such a record back on the chip, the core parked as for the rehost and nothing emulated:
+`user/wifi/tools/cyw43-replay.py` plays such a record back on the chip, the core parked as for the rehost and nothing emulated:
 every access in its order, reads as well, their answers dropped, up to a line of HCI it is told,
 and then writes words of its own again and again, `--again`.
 Played up to the transmitter test's answer, the record leaves the chip silent,
@@ -262,7 +262,7 @@ each of which, left out alone, silenced the chip;
 then the 10803 writes of `0x4106e8`, the strobe of a measurement the calibration takes 5400 times, whose results the record writes elsewhere;
 then all but the last write of each register, which left 264 in the order of their last writes.
 Of those, delta debugging kept eight, with each of the eight needed: any seven of them send nothing.
-`tools/cyw43-replay.py` takes such a list as a record, its lines `w ADDR SIZE VALUE`.
+`user/wifi/tools/cyw43-replay.py` takes such a list as a record, its lines `w ADDR SIZE VALUE`.
 The eight then send 1419, 1416 and 1422 packets heard in three runs of three seconds' writes,
 about 470 a second at the bridge's pace,
 none without `0x318b6c` and none with the trigger's writes made to a word of RAM instead;
@@ -274,7 +274,7 @@ the packets carry no payload, and the adapter counts them all the same, checking
 
 ## Our executor on the parked core
 
-`tools/cyw43-exec.py` parks the core as the rehost does, but its slide leads to our executor, `btcore/bt-exec.c`,
+`user/wifi/tools/cyw43-exec.py` parks the core as the rehost does, but its slide leads to our executor, `btcore/bt-exec.c`,
 which runs nothing of the vendor's: a list of operations the host leaves in the core's RAM,
 writes, reads with the time, waits and loops, timed by the Cortex-M3's cycle counter at the parked core's 48 MHz.
 An experiment is a list, and the code on the core stays the same.
