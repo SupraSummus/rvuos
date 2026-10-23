@@ -264,7 +264,8 @@ At 311 kS/s the channel's 20 MHz folds onto itself, so only a signal narrower th
 
 ### On D11's processor
 
-With `--mode psm` D11's processor, the PSM, takes the samples, by microcode the tool writes, `psm_loop`, see `d11.md`;
+With `--mode psm` D11's processor, the PSM, takes the samples, by microcode the tool writes, `psm_loop`, see `d11.md`,
+once the vendor's microcode has suspended the MAC and the front end has been taken back from Bluetooth, see "Its receive engine" there;
 the code on the WLAN's processor starts it for each run, times it, and copies its samples out of D11's shared memory,
 which holds 1280 of three halfwords, 1920 of two.
 Each sample starts an estimate, waits 14 instructions, and reads the results through the external IHR, `0x18` and `0x19`,
@@ -295,7 +296,35 @@ and so for -2, +1 and -0.625 MHz in earlier runs.
 A sample's cycle count is a line through two moments the WLAN's processor sees `psm_base_0` pass, an eighth of the way and the end,
 since its reads of D11 slow the PSM, see `d11.md`; the rate so measured varies by up to 1% from run to run, with how the processor reads.
 So D11's processor takes a sample in about two thirds of the time the WLAN's does, and is held by the PHY's accesses and the estimate's own time;
-no register gives a sample in one read, see "The I/Q estimator", so two reads and a start, about 62 cycles, are the least, 1.3 MS/s.
+no register gives a sample in one read, see "The I/Q estimator", so two reads and a start are the least a sample takes:
+62 cycles with the loop's own instructions, 1.3 MS/s, and 56 without them, 1.46 MS/s, see below.
+
+### Streamed through D11's receive DMA
+
+With `--mode stream` the microcode, `stream_loop`, pushes its samples into D11's receive FIFO, whose DMA lays them in the WLAN's RAM,
+a frame of 62 halfwords to a descriptor, see `d11.md`, so that a run is held by the ring, 510 frames, not by the shared memory.
+The loop is unrolled over two chunks of the shared memory, a frame each:
+a chunk's first sample, in its wait for the estimate, points `psm_base_0` at its chunk, counts it and pushes the other,
+and the loop's jump and its end lie in waits too, so that every sample takes the same instructions, and none is spent on the loop.
+A frame holds its count in halfword 0, nothing in halfword 1, whose bits 8 to 11 the receive engine clears, and the samples after.
+The code on the WLAN's processor sets each run's ring up and times the frames as they land, by the DMA's status, read sparsely.
+
+| `--mode` | Samples a frame | Cycles | Rate | Most a run |
+|---|---|---|---|---|
+| `stream` | 20 | 70 | 1164.0 kS/s | 10180 |
+| `stream,no-q` | 30 | 56 | 1455.4 kS/s | 15270 |
+
+**Measured**: runs of 10180 and 15270 samples without tones, every frame there by its count and no sample that does not fit;
+and with the calibration's tones, 1860 and 2790 samples a run, the square's strongest within the transform's step of the play,
++507.8 kHz for +2 MHz and +492.2 for -1.5 at 1164.0 kS/s, against +508.03 and +491.97,
+-366.2 and -89.2 at 1455.4 kS/s, against -366.15 and -89.23, with 60 to 75% of its power;
+and so for +1 MHz in earlier runs.
+Before halfword 1 was left empty, the first sample of each frame had its I squared there, and about 70 a run did not fit.
+The waits are counted in the tool's model, an instruction a cycle and a taken jump two; by it every sample takes the same,
+and a slot the loop's end jumps over, once counted as a cycle, left the first sample of every other frame one short:
+the runs then took 1164.5 and 1455.8 kS/s, and with it counted as none 1164.0 and 1455.4, as the model has it, **measured**.
+The tool's transform takes twice as many frequencies as samples, as a tone's peak is a rate over the samples wide;
+at 1024 for 2070 samples it fell between two, and the +2 MHz tone seemed gone.
 
 ### The receiver's gain
 

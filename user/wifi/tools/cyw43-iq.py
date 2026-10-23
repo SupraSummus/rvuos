@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""The CYW43439's receiver sampled: its I/Q estimator, one sample at a time, at 311 thousand to 1.32 million samples a second.
+"""The CYW43439's receiver sampled: its I/Q estimator, one sample at a time, at 311 thousand to 1.46 million samples a second.
 
-Usage: user/wifi/tools/cyw43-iq.py OUT --conf FILE [--count N] [--wait W] [--mode fast[,check][,no-q] | psm[,no-q]]
+Usage: user/wifi/tools/cyw43-iq.py OUT --conf FILE [--count N] [--wait W] [--mode fast[,check][,no-q] | psm[,no-q] | stream[,no-q]]
                                   [--gain P6,P7,P8 | --tones MHZ,...]
 
 --conf names a configuration of the Wi-Fi system, such as an access point's, whose mode's work comes first,
@@ -25,6 +25,10 @@ no-q leaves Q squared unread, the host taking Q as the product over I, 0 where I
 --mode psm has D11's own processor, the PSM, take the samples, by our microcode, see psm_loop,
 into D11's shared memory, at most 1280 a run: 1074 kS/s, and with no-q 1920 a run at 1316 kS/s;
 the vendor's microcode is then stopped, and the 802.11 core's MAC with it.
+--mode stream has that microcode push each 62 halfwords of samples from the shared memory into D11's receive FIFO,
+whose DMA lays them in the WLAN's RAM, so that a run is not held to the shared memory: up to 10180 samples a run, 1164 kS/s,
+and with no-q 15270, 1455 kS/s; with tones, the RAM the ROM's functions leave holds 287 frames for all runs; see stream_loop and phy.md.
+For psm and stream the vendor's microcode first suspends the MAC, so that it leaves the receive engine idle, see cyw43psm.suspend.
 
 --tones is the control: the firmware's own receive IQ calibration's loopback set up, by its ROM's functions,
 and one run of --count samples before any tone and one during each tone of the list, in MHz, played by the ROM
@@ -70,11 +74,16 @@ PI_KNOWN = 0x63788  # where the firmware of 43439A0.bin keeps it, an access poin
 CODE, BASE, OUT_AT = 0x20000, 0x1F000, 0x21000
 MAGIC, COUNT, WAIT, GO, FAULT, CYCLES, STEP, PI, TONES = (BASE + 4 * i for i in range(9))
 FREQ, FIRST, MODE = BASE + 0x40, BASE + 0x80, BASE + 0x24
-MODES = {"fast": 1, "check": 2, "no-q": 4, "psm": 8}  # iq-cap.c's MODE_*
-MODE_SETS = ("", "fast", "fast,check", "fast,no-q", "fast,check,no-q", "psm", "psm,no-q")
+MODES = {"fast": 1, "check": 2, "no-q": 4, "psm": 8, "stream": 8 | 16}  # iq-cap.c's MODE_*, stream with psm's
+MODE_SETS = ("", "fast", "fast,check", "fast,no-q", "fast,check,no-q", "psm", "psm,no-q", "stream", "stream,no-q")
 IQ_CONTROL, IQ_PRODUCT, IQ_I_POWER, IQ_Q_POWER = 0x481, 0x484, 0x486, 0x488
 SHARED_FROM, SHARED_END = 0x100, 0x1000  # the shared memory's halfwords the microcode's samples go to, iq-cap.c's SHARED_FROM
 PSM_DELAY = 14  # instructions between an estimate's start and its first read, see phy.md
+# --mode stream: iq-cap.c's FRAMES, FRAME_SIZE and STREAM_TIMES, the chunks of the shared memory, the receive engine's IHR
+FRAMES_AT, FRAME_SIZE, STREAM_TIMES, MOST_FRAMES = 0x24000, 0x80, BASE + 0x100, 510
+CHUNKS, CHUNK_MOST = (0x400, 0x440), 63  # halfwords; a frame of the receive engine's holds at most 126 bytes
+FRAME_COUNT, FRAME_SAMPLES = 0, 2  # a frame's halfword 0 counts the frames; halfword 1 is the engine's, bits 8 to 11 cleared
+RCV_CTL, RCV_STATUS_LEN, RCV_SHM_STADDR, RCV_SHM_STCNT = psm.ihr(4), psm.ihr(6), psm.ihr(7), psm.ihr(8)
 CLEARED = range(0x1E000, 0x2D000)  # RAM the firmware had cleared, an access point up: the code's, and the samples' with tones
 OUT_END, OUT_END_TONES, MOST_TONES = 0x7E000, 0x2D000, 16
 MAGIC_VALUE, GO_VALUE, ENDED, LATE, TSF_SPAN = 0x49514341, 2, 3, 1, 100000
@@ -107,9 +116,11 @@ def fold(f, rate):
     return ((f / rate + 0.5) % 1 - 0.5) * rate
 
 
-def strongest(square, times, rate, bins=1024):
-    """The frequency the samples' square is strongest at, over a fold of the rate, and its share of the square's power."""
+def strongest(square, times, rate):
+    """The frequency the samples' square is strongest at, over a fold of the rate, and its share of the square's power;
+    at twice as many frequencies as samples, so that no tone's peak, a rate over the samples wide, falls between two."""
     z = [complex(*v) for v in square]
+    bins = max(1024, 2 * len(z))
     total = sum(abs(v) ** 2 for v in z) * len(z)
     if not total:
         return 0.0, 0.0
@@ -138,6 +149,83 @@ def psm_loop(control, reads, end):
         p += [psm.jnzx(14, 1, psm.EXT_ADDR, len(p)), psm.mov(psm.EXT_DATA, psm.indirect(0, k))]
     p += [psm.add(psm.BASE_0, psm.imm(len(reads)), psm.BASE_0), psm.jne(psm.BASE_0, psm.r(7), loop)]
     return p + [psm.jmp(len(p))]
+
+
+def stream_loop(control, reads, frames):
+    """The microcode of --mode stream: the estimates of psm_loop, unrolled over two chunks of the shared memory, CHUNKS,
+    each a frame's worth of samples. A chunk's first sample, in its wait, points psm_base_0 at its chunk
+    and pushes the other into the receive FIFO, RCV_SHM_STADDR and RCV_SHM_STCNT, and RCV_CTL's bit 0;
+    the loop's jump and its count lie in waits too, so that every sample takes the same instructions.
+    A chunk holds its count, FRAME_COUNT, and its samples from FRAME_SAMPLES; the receive engine clears bits 8 to 11 of a frame's
+    halfword 1, so that it holds nothing. Each frame is RCV_STATUS_LEN bytes;
+    frames, even, are pushed, the first the second chunk before it is filled; then it stays.
+    Its run is counted in instructions, a jump as two, a hypothesis that the samples' tones bear out, see phy.md."""
+    per = len(reads)
+    spc = (CHUNK_MOST - FRAME_SAMPLES) // per
+    size = FRAME_SAMPLES + spc * per
+    p = []
+
+    def start():
+        p.extend([psm.mov(psm.r(2), psm.EXT_DATA), psm.mov(psm.r(3), psm.EXT_ADDR)])
+        p.append(psm.jnzx(14, 1, psm.EXT_ADDR, len(p)))
+
+    def wait(ops, used=0):
+        """ops: (cycles, instruction or a function of its own address)."""
+        assert sum(c for c, _ in ops) + used <= PSM_DELAY
+        for _, op in ops:
+            p.append(op(len(p)) if callable(op) else op)
+        p.extend(psm.add(psm.r(20), psm.imm(0), psm.r(20)) for _ in range(PSM_DELAY - used - sum(c for c, _ in ops)))
+
+    def results(s):
+        for k in range(per):
+            p.append(psm.mov(psm.r(10 + k), psm.EXT_ADDR))
+            p.extend([psm.jnzx(14, 1, psm.EXT_ADDR, len(p)), psm.mov(psm.EXT_DATA, psm.indirect(0, FRAME_SAMPLES + s * per + k))])
+
+    p += [psm.mov16(control | 1, psm.r(2)), psm.mov16(0x4000 | IQ_CONTROL, psm.r(3)), psm.mov16(frames // 2, psm.r(9)),
+          psm.mov16(0, psm.r(21)),
+          psm.mov16(2 * size, RCV_STATUS_LEN)]
+    p += [psm.mov16(0x6000 | reg, psm.r(10 + k)) for k, reg in enumerate(reads)]
+    start()
+    p += [psm.add(psm.r(20), psm.imm(0), psm.r(20))] * 2  # where the loop's jump is, after the first time
+    top = len(p)
+    for half in (0, 1):
+        for s in range(spc):
+            if s:
+                wait([])
+            else:
+                ops = [(1, psm.mov16(CHUNKS[half], psm.BASE_0)), (1, psm.add(psm.r(21), psm.imm(1), psm.r(21))),
+                       (1, psm.mov(psm.r(21), psm.indirect(0, FRAME_COUNT))), (1, psm.mov16(CHUNKS[1 - half], RCV_SHM_STADDR)),
+                       (1, psm.mov16(size, RCV_SHM_STCNT)), (1, psm.orx(2, 0, psm.imm(1), RCV_CTL, RCV_CTL))]
+                if half == 0:
+                    wait(ops + [(1, psm.add(psm.r(9), psm.imm(-1), psm.r(9)))], used=2)
+                else:
+                    wait(ops + [(2, lambda at: psm.jne(psm.r(9), psm.imm(0), at + 2)), (0, "halt")])  # jumped over
+            results(s)
+            if half == 0 or s < spc - 1:
+                start()
+    start()
+    p.append(psm.jmp(top))
+    halt = len(p)
+    p.append(psm.jmp(halt))
+    return [psm.jmp(halt) if op == "halt" else op for op in p], spc
+
+
+def stream_rows(words, n, spc, per, times):
+    """A run's samples from its n frames, the first not samples, each sample's cycle count on the line through two of
+    the frames' arrivals: iq-cap.c's STREAM_TIMES, a cycle count and the frames by then, at an eighth and at the end;
+    and the frames whose count is not the one before's and one."""
+    ta, fa, tb, fb = times
+    step = ((tb - ta) & 0xFFFFFFFF) / max(1, (fb - fa) * spc)
+    rows, skipped = [], 0
+    for f in range(1, n):
+        hw = [h for v in words[f * FRAME_SIZE // 4:(f + 1) * FRAME_SIZE // 4] for h in (v & 0xFFFF, v >> 16)]
+        skipped += hw[FRAME_COUNT] != f
+        for s in range(spc):
+            k = (f - 1) * spc + s
+            t = round(ta + (k - (fa - 1) * spc) * step) & 0xFFFFFFFF & ~LATE  # by fa frames, sample (fa - 1) spc is taken
+            pr, ip = hw[FRAME_SAMPLES + s * per:FRAME_SAMPLES + s * per + 2]
+            rows.append((t, signed(pr, 16), ip, hw[FRAME_SAMPLES + s * per + 2] if per > 2 else 0, 0))
+    return rows, skipped
 
 
 def phy_modify(board, reg, mask, value):
@@ -187,10 +275,18 @@ def main():
         sys.exit(f"cyw43-iq: --mode one of {', '.join(m for m in MODE_SETS if m)}")
     args.mode = sum(MODES[m] for m in names)
     reads = [IQ_PRODUCT, IQ_I_POWER] + ([] if args.mode & MODES["no-q"] else [IQ_Q_POWER])
+    stream = "stream" in names
     if args.mode & MODES["psm"]:
         most = min(most, (SHARED_END - SHARED_FROM) // len(reads))
+    if stream:
+        spc = (CHUNK_MOST - FRAME_SAMPLES) // len(reads)
+        frames = min(MOST_FRAMES, ((OUT_END_TONES if args.tones else OUT_END) - FRAMES_AT - FRAME_SIZE) // FRAME_SIZE // runs) & ~1
+        most = (frames - 1) * spc
     if not 0 < args.count <= most or not 2 <= args.wait <= 0xFF or len(args.tones) > MOST_TONES:
         sys.exit(f"cyw43-iq: --count 1 to {most} here, --wait 2 to 255, at most {MOST_TONES} tones")
+    if stream:  # whole frames, an even number of them, the first not samples
+        frames = 2 * -(-(-(-args.count // spc) + 1) // 2)
+        args.count = (frames - 1) * spc
     subprocess.run(["make", "-s", "-C", ROOT, "build/cyw43/iq-cap.bin"], check=True)
     with open(PROGRAM, "rb") as f:
         code = f.read()
@@ -202,6 +298,9 @@ def main():
         time.sleep(0.01)
         board.write(CM3_WRAPPER + AI_RESETCTRL, 1)
         time.sleep(0.01)
+        # Our microcode takes over a receive engine left idle: the vendor's suspends the MAC while its DMA still empties the FIFO.
+        if args.mode & MODES["psm"] and not psm.suspend(board, D11):
+            sys.exit("cyw43-iq: the MAC did not suspend")
         stopped = []
         for k in range(FIFOS):
             control = board.read(RCV_CONTROL + 0x40 * k)
@@ -216,15 +315,17 @@ def main():
             hold_gain(board, args.gain)
         if args.mode & MODES["psm"]:
             board.write16(PHYREGADDR, IQ_CONTROL)
-            loop = psm_loop(board.read16(PHYREGDATA) & ~3, reads, SHARED_FROM + args.count * len(reads))
+            control = board.read16(PHYREGDATA) & ~3
+            loop = stream_loop(control, reads, frames)[0] if stream else \
+                psm_loop(control, reads, SHARED_FROM + args.count * len(reads))
             if not psm.load(board, D11, loop):
-                sys.exit("cyw43-iq: the microcode did not read back")
+                sys.exit("cyw43-iq: the MAC did not suspend, or the microcode did not read back")
         board.write_block(CODE, code)
         if any(board.read(CODE + a) != int.from_bytes(code[a:a + 4], "little") for a in range(0, len(code), 4)):
             sys.exit("cyw43-iq: the program did not read back")
         board.write_block(0, code[:64])
-        board.write_block(BASE, bytes(0x100))
-        board.write(COUNT, args.count)
+        board.write_block(BASE, bytes(0x200))
+        board.write(COUNT, frames if stream else args.count)
         board.write(WAIT, args.wait)
         board.write(PI, pi)
         board.write(TONES, len(args.tones))
@@ -248,11 +349,15 @@ def main():
             time.sleep(0.05)
         if board.read(FAULT):
             sys.exit(f"cyw43-iq: fault word {board.read(FAULT):#x}")
-        if board.read(COUNT) != args.count:
-            sys.exit(f"cyw43-iq: the program took {board.read(COUNT)} a run, not {args.count}")
+        if board.read(COUNT) != (frames if stream else args.count):
+            sys.exit(f"cyw43-iq: the program took {board.read(COUNT)} a run, not {frames if stream else args.count}")
         hz = board.read(CYCLES) / TSF_SPAN * 1e6
         firsts = [board.read(FIRST + 4 * r) for r in range(runs)]
-        words = [board.read(OUT_AT + 4 * k) for k in range(4 * args.count * runs)]
+        if stream:
+            times = [[board.read(STREAM_TIMES + 16 * r + 4 * i) for i in range(4)] for r in range(runs)]
+            words = [board.read(FRAMES_AT + 4 * k) for k in range(frames * FRAME_SIZE // 4 * runs)]
+        else:
+            words = [board.read(OUT_AT + 4 * k) for k in range(4 * args.count * runs)]
     finally:
         board.write(D11_WRAPPER + AI_IOCTRL, 0)
         time.sleep(0.01)
@@ -263,10 +368,18 @@ def main():
         + (f"; the PHY's state at {pi:#x}" if pi else "") + (f"; gain held at {args.gain}" if args.gain else "; gain the AGC's"))
     out, failed = {"hz": hz, "wait": args.wait, "gain": args.gain, "runs": []}, False
     for r in range(runs):
-        w = words[4 * args.count * r:4 * args.count * (r + 1)]
-        rows = [(w[4 * k] & ~LATE, signed(w[4 * k + 1]), w[4 * k + 2], w[4 * k + 3], w[4 * k] & LATE)
-                for k in range(args.count)]
-        if args.mode & (MODES["fast"] | MODES["psm"]):
+        if stream:
+            per_run = frames * FRAME_SIZE // 4
+            rows, skipped = stream_rows(words[per_run * r:per_run * (r + 1)], frames, spc, len(reads), times[r])
+            firsts[r] = rows[0][0]
+            if skipped:
+                say(f"run {r}: {skipped} frames out of their count")
+                failed = True
+        else:
+            w = words[4 * args.count * r:4 * args.count * (r + 1)]
+            rows = [(w[4 * k] & ~LATE, signed(w[4 * k + 1]), w[4 * k + 2], w[4 * k + 3], w[4 * k] & LATE)
+                    for k in range(args.count)]
+        if args.mode & (MODES["fast"] | MODES["psm"]) and not stream:
             rows = [(t, signed(pr & 0xFFFF, 16), ip & 0xFFFF, qp & 0xFFFF, lt) for t, pr, ip, qp, lt in rows]
         if args.mode & MODES["no-q"]:
             rows = [(t, pr, ip, pr * pr // ip if ip else 0, lt) for t, pr, ip, qp, lt in rows]

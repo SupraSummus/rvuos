@@ -81,6 +81,7 @@ They are in `user/wifi/tools/`, beside the code they serve, the observer's besid
     cyw43-code.py decompile ADDR...              # a function's C
     cyw43-iq.py OUT --conf FILE [--gain P6,P7,P8 | --tones MHZ,...]  # the receiver's samples, our code on the WLAN's processor
     cyw43-iq.py OUT --conf FILE --mode psm[,no-q] [...]  # the same, by our microcode on D11's processor, to 1.3 MS/s
+    cyw43-iq.py OUT --conf FILE --mode stream[,no-q] [...]  # and through D11's receive DMA, to 1.46 MS/s and 15270 a run
     le-observer.py --channel 19 --seconds 10     # the packets heard on a channel, and how strong, on an nRF52840
 
 The observer, `user/observer/` on an nRF52840, stands where BLE's adapter stood in BLE's receiver test:

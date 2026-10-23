@@ -9,6 +9,8 @@
  * Time is the Cortex-M3's cycle counter, DWT's, at the 81.6 MHz the firmware leaves the processor at, measured here against D11's TSF.
  * With MODE_PSM D11's own processor takes the samples instead, by microcode the host has loaded, into D11's shared memory,
  * and this code starts it, times it and copies what it took.
+ * With MODE_STREAM as well, the microcode pushes each chunk of its samples from the shared memory into D11's receive FIFO,
+ * whose DMA lays them in RAM, a frame to a descriptor, and this code sets the ring up and times the frames.
  *
  * With tones, the control: the firmware's own receive IQ calibration is set up and its tones played,
  * by the ROM's functions on the firmware's PHY state, which the host finds, and a run of samples taken during each,
@@ -49,6 +51,18 @@
 #define SHARED_END   0x1000u         /* the shared memory's end, in halfwords */
 #define PSM_LEAST    40u             /* cycles: less than any sample of the microcode's takes */
 #define PSM_NEAR     4u              /* samples: how near psm_wait reads psm_base_0 on end */
+#define RCV_DMA      (D11 + 0x220u)  /* fifo 0's receive DMA: control, ptr, ring address low and high, status 0 and 1 */
+#define DMA_ENABLE   1u
+#define DMA_OFFSET   0xfeu           /* control's receive offset, bytes before a frame in its buffer */
+#define DMA_STATE    0xf0000000u     /* status 0's state, 0 disabled */
+#define DMA_CURRENT  0x1fffu         /* status 0's descriptor next filled, as an address's low bits */
+#define DESC_SOF     0x80000000u     /* a descriptor's first word, as the firmware posts its own */
+#define DESC_EOT     0x10000000u     /* the ring's last */
+#define RING         0x22000u        /* MODE_STREAM's descriptors, 16 bytes each, within an 8 KiB of their own */
+#define FRAMES       0x24000u        /* MODE_STREAM's frames, a FRAME_SIZE each, run after run */
+#define FRAME_SIZE   0x80u
+#define MOST_FRAMES  510u            /* a run's, even, so that its n + 1 descriptors lie within RING's 8 KiB */
+#define FRAME_LEAST  1000u           /* cycles: less than any frame of samples takes */
 
 /* The ROM's functions the calibration runs, 0x872770's, each taking the PHY's state, pi, first; Thumb addresses. */
 typedef void (*phy_fn)(uint32_t pi, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
@@ -66,11 +80,12 @@ typedef void (*phy_fn)(uint32_t pi, uint32_t, uint32_t, uint32_t, uint32_t, uint
 #define BASE   0x1f000u
 #define STACK  BASE
 #define MAGIC  (BASE + 0x00) /* MAGIC_VALUE once this code runs */
-#define COUNT  (BASE + 0x04) /* the host's: samples in each run; at the end what each run took */
+#define COUNT  (BASE + 0x04) /* the host's: samples in each run, or with MODE_STREAM frames; at the end what each run took */
 #define WAIT   (BASE + 0x08) /* the host's: IQ_WAIT's value */
 #define GO     (BASE + 0x0c) /* GO_VALUE from the host starts; ENDED once all is done */
 #define FAULT  (BASE + 0x10) /* 0xfa000000 and the exception's number, if one came; 0xfb000000 and psm_base_0 if the microcode stopped short
-                              or did not start */
+                              or did not start,
+                              0xfc000000 and the frames if the stream did */
 #define CYCLES (BASE + 0x14) /* the cycles of TSF_SPAN microseconds of D11's TSF */
 #define STEP   (BASE + 0x18) /* where the code is: 1 the calibration's setup, 2 + k the tone k, 0x70 its restore */
 #define PI     (BASE + 0x1c) /* the host's, with tones: the PHY's state */
@@ -80,8 +95,11 @@ typedef void (*phy_fn)(uint32_t pi, uint32_t, uint32_t, uint32_t, uint32_t, uint
 #define MODE_CHECK 2u        /* with MODE_FAST: IQ_CONTROL read once before the results, its bit 0 kept as LATE */
 #define MODE_NO_Q  4u        /* with MODE_FAST or MODE_PSM: Q squared not read, the host taking Q as the product over I */
 #define MODE_PSM   8u        /* the host's microcode takes the samples, low halfwords, into SHARED from SHARED_FROM */
+#define MODE_STREAM 16u      /* with MODE_PSM: the microcode streams them through D11's receive DMA into FRAMES, COUNT frames a run */
+#define STREAMING(mode) (((mode) & (MODE_PSM | MODE_STREAM)) == (MODE_PSM | MODE_STREAM))
 #define FREQ   (BASE + 0x40) /* the host's: each tone's frequency in Hz, signed */
 #define FIRST  (BASE + 0x80) /* the cycle count at each run's start, the run before the tones first */
+#define STREAM_TIMES (BASE + 0x100) /* with MODE_STREAM, four words a run: cycles and frames seen at an eighth, and at the end */
 #define OUT     0x21000u     /* the samples, four words each: cycle count, product, I squared, Q squared */
 #define OUT_END 0x7e000u
 #define OUT_END_TONES 0x2d000u /* with tones, where the cleared RAM ends; the ROM's functions use the RAM above */
@@ -94,7 +112,7 @@ typedef void (*phy_fn)(uint32_t pi, uint32_t, uint32_t, uint32_t, uint32_t, uint
 #define POLLS       4096u   /* the most reads of IQ_CONTROL a sample waits for, more than 256 waits' worth */
 #define LATE        1u      /* in a sample's cycle count: its estimate had not ended after POLLS reads */
 /*
- * So a run ends: TSF_SPAN microseconds, then (1 + TONES) runs of COUNT samples, at most what most_of allows,
+ * So a run ends: TSF_SPAN microseconds, then (1 + TONES) runs of COUNT samples, or frames, at most what most_of allows,
  * each of at most POLLS reads, or with MODE_PSM waits of at most TIMEOUT cycles in all and copies of COUNT samples,
  * and with tones the ROM's functions, which wait on the PHY for bounded times of their own.
  */
@@ -215,6 +233,64 @@ static volatile uint32_t *take_psm(volatile uint32_t *out, uint32_t n, uint32_t 
     return out;
 }
 
+/* The frames receive DMA has filled this run, by its status. */
+static uint32_t frames_in(void)
+{
+    return ((REG(RCV_DMA + 0x10u) & DMA_CURRENT) - (RING & DMA_CURRENT)) / 16u;
+}
+
+/* As psm_wait, on the frames: status 0 is D11's too. */
+static uint32_t frames_wait(uint32_t target, uint32_t t0)
+{
+    uint32_t v;
+    while ((v = frames_in()) < target && REG(DWT_CYCCNT) - t0 < TIMEOUT) {
+        if (target - v > 1u) {
+            uint32_t from = REG(DWT_CYCCNT);
+            while (REG(DWT_CYCCNT) - from < (target - v - 1u) * FRAME_LEAST) {
+            }
+        }
+    }
+    return v;
+}
+
+/*
+ * A ring of n frames in FRAMES, after the earlier runs', and one descriptor more, never filled, for the ring's end;
+ * the microcode pushes n frames, the first of them its second chunk before it was filled, and stays.
+ */
+static void take_stream(uint32_t n, uint32_t run)
+{
+    uint32_t at = FRAMES + run * n * FRAME_SIZE, t0, ta, tb, a, v;
+    REG(RCV_DMA) &= ~DMA_ENABLE;
+    for (uint32_t i = 0; i < 1000u && (REG(RCV_DMA + 0x10u) & DMA_STATE); i++) {
+    }
+    for (uint32_t i = 0; i <= n; i++) {
+        volatile uint32_t *d = (volatile uint32_t *)(RING + 16u * i);
+        d[0] = DESC_SOF | (i == n ? DESC_EOT : 0);
+        d[1] = FRAME_SIZE;
+        d[2] = at + i * FRAME_SIZE;
+        d[3] = 0;
+    }
+    REG(RCV_DMA + 0x08u) = RING;
+    REG(RCV_DMA + 0x0cu) = 0;
+    REG(RCV_DMA) = (REG(RCV_DMA) & ~DMA_OFFSET) | DMA_ENABLE;
+    REG(RCV_DMA + 0x04u) = (RING + 16u * n) & DMA_CURRENT;
+    REG(MACCONTROL) = PSM_HALTED;
+    t0 = REG(DWT_CYCCNT);
+    REG(MACCONTROL) = PSM_RUNNING;
+    a = frames_wait(n / 8u + 1u, t0);
+    ta = REG(DWT_CYCCNT);
+    v = frames_wait(n, t0);
+    tb = REG(DWT_CYCCNT);
+    REG(MACCONTROL) = PSM_HALTED;
+    if (v != n) {
+        REG(FAULT) = 0xfc000000u | v;
+    }
+    REG(STREAM_TIMES + 16u * run) = ta;
+    REG(STREAM_TIMES + 16u * run + 4u) = a;
+    REG(STREAM_TIMES + 16u * run + 8u) = tb;
+    REG(STREAM_TIMES + 16u * run + 12u) = v;
+}
+
 static volatile uint32_t *take(volatile uint32_t *out, uint32_t n, uint32_t run)
 {
     uint32_t control = phy_read(IQ_CONTROL) & ~3u, mode = REG(MODE);
@@ -222,6 +298,10 @@ static volatile uint32_t *take(volatile uint32_t *out, uint32_t n, uint32_t run)
     phy_write(IQ_WAIT, (phy_read(IQ_WAIT) & ~0xffu) | (REG(WAIT) & 0xffu));
     phy_write(CLOCKS, phy_read(CLOCKS) | ESTIMATE_CLOCKS);
     REG(FIRST + 4u * run) = REG(DWT_CYCCNT);
+    if (STREAMING(mode)) {
+        take_stream(n, run);
+        return out;
+    }
     if (mode & MODE_PSM) {
         return take_psm(out, n, mode & MODE_NO_Q ? 2u : 3u, run);
     }
@@ -242,10 +322,14 @@ static volatile uint32_t *take(volatile uint32_t *out, uint32_t n, uint32_t run)
     return out;
 }
 
-/* The most a run takes: samples in OUT, or in the shared memory. */
+/* The most a run takes: samples in OUT, or in the shared memory, or with MODE_STREAM frames in FRAMES, an even number. */
 static uint32_t most_of(uint32_t mode, uint32_t tones)
 {
-    uint32_t most = ((tones ? OUT_END_TONES : OUT_END) - OUT) / 16u / (1u + tones);
+    uint32_t end = tones ? OUT_END_TONES : OUT_END, most = (end - OUT) / 16u / (1u + tones);
+    if (STREAMING(mode)) {
+        most = ((end - FRAMES) / FRAME_SIZE - 1u) / (1u + tones);
+        return (most < MOST_FRAMES ? most : MOST_FRAMES) & ~1u;
+    }
     if (mode & MODE_PSM) {
         uint32_t shared = (SHARED_END - SHARED_FROM) / (mode & MODE_NO_Q ? 2u : 3u);
         return most < shared ? most : shared;
