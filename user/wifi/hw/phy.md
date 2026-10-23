@@ -178,6 +178,106 @@ Its rate is 40 million samples a second as the ROM reckons it, **known**:
 as brcmsmac's LCN PHY does with its `phy_bw` of 40.
 At that rate 256 samples last 6.4 µs, and the turn in the buffer is a tone of 2.5 MHz; measured on the air, neither is yet.
 
+## The receiver's samples
+
+D11's sample collection takes nothing from this PHY, see `d11.md`; the PHY's I/Q estimator does, one sample at a time.
+
+### The I/Q estimator
+
+The ROM's `wlc_lcn20phy_rx_iq_est`, at `0x872e5c`, **known**, runs it as brcmsmac's LCN PHY runs its own, one register higher:
+
+| Register | What |
+|---|---|
+| `0x481` | bit 0 starts an estimate and reads set until it ends; bit 1 a mode the caller passes |
+| `0x482` | bits 0 to 7, the samples it waits before it takes its own |
+| `0x483` | the samples it takes |
+| `0x484`, `0x485` | the sum of I times Q, the low halfword first, two's complement |
+| `0x486`, `0x487` | the sum of I squared, I's as brcmsmac's order has it, a hypothesis |
+| `0x488`, `0xa9a` | the sum of Q squared |
+
+It ends only with `0x6da`'s bits 5 and 8 set, **measured**: without them bit 0 of `0x481` stayed set, and with them it ended within the bridge's next read;
+the firmware sets them around its estimates, in `0x871060`, and brcmsmac's LCN PHY sets bit 5 of the same register for its own.
+`0x6da` reads 0 as the firmware leaves it, and its bits are the clocks of the PHY's parts, a hypothesis:
+the play sets bits 7 and 15, `0x8080`, the estimate bits 5 and 8, and brcmsmac's sample collection bits 3 and 13.
+
+An estimate of one sample, `0x483` at 1, gives that sample, **measured**:
+in more than 400 estimates over the bridge and more than 30000 by our code on the WLAN's processor, with an access point up on channel 6,
+the product squared equalled the two squares' product every time, as for one sample alone, and with either mode.
+So it gives I and Q but for one sign common to both, I's taken as positive,
+and the sample's square, (I + jQ)^2, I^2 - Q^2 and 2IQ, whole: the sample at twice its phase.
+No register beside it gives the sign: of `0x470` to `0x49f` and `0xa90` to `0xaa7`, read after each of 40 estimates,
+none held I or Q, **measured**.
+Nor does any register show the sample as it comes:
+53 moved over three readings of all 4096, a third of a second apart, with the access point up, and of 23 of them, read 400 times in a row each,
+`0x305`, `0x306`, `0x45c` and `0xb29` count up and the rest keep a value over many reads, **measured**.
+
+### Our code on the WLAN's processor
+
+`user/wifi/tools/cyw43-iq.py` has the vendor's firmware bring a mode up, an access point for one,
+then holds the WLAN's processor in reset, stops D11's receive DMA, so that no frame lands in the RAM,
+and starts the processor again in `user/wifi/wlancore/iq-cap.c`, at vectors written over the firmware's;
+the PHY and the radio stay as the firmware left them, receiving on the mode's channel.
+The code takes one estimate of one sample after another, polls `0x481`, and keeps each with its cycle count.
+The processor runs at 81.600 MHz, its cycle counter against D11's TSF over 100 ms, **measured**.
+
+The code lies in RAM the firmware had cleared, `0x1e000` to `0x2d000`, **read**:
+with an access point up, the RAM reads 0 from `0x180b0` to `0x2d11c` and from `0x2d124` to `0x38568`,
+inside what the image loaded, the microcode's copy among it, and nowhere else for more than 13 KiB;
+the PHY's state, `pi`, lies at `0x63788`, its type `0xc` first and D11's address at `0x44`,
+and the LCN20's own state, its word at `0x40`, at `0x62a3c`.
+
+How long a sample takes depends on the wait, **measured**, in the processor's cycles, the code then at `0x70000`:
+
+| Wait | 2 | 4 | 8 | `0x10` | `0x20` | `0xff`, 0 or 1 |
+|---|---|---|---|---|---|---|
+| Cycles | 258 | 264 | 295 | 325 | 394 | 1310 |
+
+A unit of the wait is about four cycles, a sample at 20 MHz, and 0 and 1 wait as long as 256 would.
+At a wait of 2 a sample came every 258 cycles there, 316 kS/s;
+at `0x20000`, where the code now lies, every 262, 311.4 kS/s, all of 430 steps alike,
+and with the tool's check of each estimate's end 260 to 264 cycles apart, 20000 samples at 312.2 kS/s.
+The rest of a sample's time is the code's accesses:
+without its poll it takes 153 cycles, though its estimates then had not ended, so an access of the PHY costs about 20 cycles.
+
+What the samples show, **measured**, the access point up on channel 6:
+I^2 + Q^2 has a median of 2 to 5, a few of the converter's steps;
+one run of 2000 held a burst of 77 samples, 1.2 ms, up to 19865, a magnitude of about 140, the length of a frame, a hypothesis.
+At 311 kS/s the channel's 20 MHz folds onto itself, so only a signal narrower than the rate, tuned near the carrier, is seen whole.
+
+### The control: the calibration's tones
+
+The firmware's receive IQ calibration, `0x872770`, **known**,
+sets up a loopback and its gains, `0x872848`, clears `0x9de` and `0x9df`, `0x872e00`,
+and plays tones of 2, -2, 6 and -6 MHz at amplitude `0xb5`, `wlc_lcn20phy_start_tx_tone` with the transmitter forced, `0x874478`,
+estimating each with `0x400` samples and stopping it, `0x86eb6c`, before it puts all back, `0x872818`;
+the firmware runs it as part of its calibration of a channel, `0x111b4` and `0x86fa64`.
+`cyw43-iq.py --tones` has our code call those same functions on the firmware's `pi`,
+and take a run of samples before any tone and one during each tone instead of the estimate.
+The ROM's buffer for a tone's samples is a fixed one, `0x86f1f4`, and its delay counts a timer through RAM code at `0x1420`,
+so the functions need nothing of the firmware's that no longer runs, **known**.
+
+With 430 samples a run, at 311.4 kS/s, **measured**, twice alike:
+before any tone, I^2 + Q^2 is 0 throughout, the loopback's gains leaving no noise;
+during a tone it is steady, 3530 and 3370 for +2 and -2 MHz, 3088 and 2960 for ±1 MHz, 2157 for -0.625 MHz, 1025 for 6 MHz.
+The samples' square is strongest where a tone of the ROM's 40 Msps play, doubled and folded by the rate, falls:
+
+| Tone | Where 40 Msps puts it | Strongest | Its share of the power |
+|---|---|---|---|
+| +2 MHz | -48.85 kHz | -49.0 kHz | 61 % |
+| -2 MHz | +48.85 kHz | +49.0 kHz | 60 % |
+| +1 MHz | +131.30 kHz | +131.4 kHz | 85 % |
+| -1 MHz | -131.30 kHz | -131.4 kHz | 86 % |
+| -0.625 MHz | -4.20 kHz | -4.3 kHz | 94 % |
+| +6 MHz | -146.54 kHz | +97.6 kHz | 13 % |
+
+So the samples are the receiver's at the times the cycle counter gives, with I and Q in the order and sign the PHY's own tones have,
+and the play's rate is 40 Msps, **measured**: the five tones to 2 MHz fall within the transform's step, 0.3 kHz,
+and +2 and -2 MHz, and +1 and -1 MHz, mirror each other.
+The rest of the power lies 12 to 27 dB below, and grows with the tone's frequency;
+that the estimator takes its sample on the PHY's own grid of 20 MHz, so that each sample's instant is late by up to 50 ns, is a hypothesis,
+which a fit of the phases favours over 40 and 80 MHz and none, but by little.
+The 6 MHz tone, the weakest in the loopback, is smeared over several peaks: doubled, 12 MHz turns 0.6 of a turn in 50 ns, where 4 MHz turns a fifth.
+
 ## What the firmware's code does to the PHY and the radio
 
 `user/wifi/tools/cyw43-code.py` puts the WLAN's ROM, at `0x800000`, and its RAM firmware, at 0, in Ghidra as one program, **known**:

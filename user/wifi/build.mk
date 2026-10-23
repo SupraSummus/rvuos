@@ -43,6 +43,13 @@ build/cyw43/bt-exec.elf: user/wifi/btcore/bt-exec.c build/cyw43/bt-exec.ld
 		-Wall -Wextra -Werror -Wl,-T,build/cyw43/bt-exec.ld -Wl,--entry=exec_start $< -o $@
 build/cyw43/bt-exec.bin: build/cyw43/bt-exec.elf
 	$(OBJCOPY) -O binary --only-section=.text $< $@
+# The receiver's samples of user/wifi/tools/cyw43-iq.py, for the WLAN's processor; wlancore/iq-cap.c, wlancore/iq-cap.ld.
+build/cyw43/iq-cap.elf: user/wifi/wlancore/iq-cap.c user/wifi/wlancore/iq-cap.ld
+	@mkdir -p $(dir $@)
+	$(ARM_CC) -O2 -ffreestanding -fno-unwind-tables -fno-asynchronous-unwind-tables -nostdlib -fuse-ld=lld \
+		-Wall -Wextra -Werror -Wl,-T,user/wifi/wlancore/iq-cap.ld -Wl,--entry=iq_start $< -o $@
+build/cyw43/iq-cap.bin: build/cyw43/iq-cap.elf
+	$(OBJCOPY) -O binary --only-section=.text $< $@
 ifneq ($(WIFI_BT_BLOB),)
 $(BUILD)/user/wifi/bt-stub-embed.o: build/cyw43/bt-stub.bin build/cyw43/bt-measure.bin build/cyw43/bt-takeover.bin
 endif

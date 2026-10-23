@@ -6,7 +6,7 @@ What is known of the CYW43439's hardware, a file a part:
 |---|---|
 | `bt.md` | the Bluetooth core's registers, as its own processor sees them, through the backplane's window at `0x19000000` |
 | `d11.md` | the 802.11 core, D11, at `0x18001000`: its registers, its memories, its microcode |
-| `phy.md` | the 802.11 PHY and its radio, behind D11's words: their registers, the PHY's tables, what the firmware's code does to them |
+| `phy.md` | the 802.11 PHY and its radio, behind D11's words: their registers, the PHY's tables, the receiver's samples, what the firmware's code does to them |
 
 `user/wifi/BT.md` tells how the Bluetooth core was taken over and what experiments showed;
 this map is where each register's facts are kept, the experiments' among them.
@@ -79,6 +79,7 @@ They are in `user/wifi/tools/`, beside the code they serve, the observer's besid
     cyw43-code.py import                         # the WLAN's RAM firmware and ROM in Ghidra, as one program
     cyw43-code.py regs OUT                       # what that code does to the PHY and the radio
     cyw43-code.py decompile ADDR...              # a function's C
+    cyw43-iq.py OUT --conf FILE [--tones MHZ,...]  # the receiver's samples, our code on the WLAN's processor
     le-observer.py --channel 19 --seconds 10     # the packets heard on a channel, and how strong, on an nRF52840
 
 The observer, `user/observer/` on an nRF52840, stands where BLE's adapter stood in BLE's receiver test:
